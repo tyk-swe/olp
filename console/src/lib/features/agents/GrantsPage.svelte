@@ -18,10 +18,12 @@
     type MCPGrantAuthorization,
     getServer,
     listMCPGrants,
+    listPublications,
     listServers,
     revokeMCPGrant,
     saveServer,
     startMCPGrant,
+    startAgentGrant,
     type MCPServer
   } from './api';
 
@@ -41,6 +43,8 @@
   };
   type PageState = {
     selection: { readonly id: string };
+    agentID: string;
+    agentKeyID: string;
     server: MCPServer | null;
     fields: Fields;
     enrollmentID: string;
@@ -55,6 +59,8 @@
   };
   const initialState = (): PageState => ({
     selection: { id: '' },
+    agentID: '',
+    agentKeyID: '',
     server: null,
     fields: {
       delegatedIssuer: '',
@@ -93,8 +99,16 @@
     queryFn: listServers,
     enabled: access.allows('GET /api/v1/mcp-servers')
   }));
+  const agents = createQuery(() => ({
+    queryKey: ['agent-publications', 'agents'],
+    queryFn: () => listPublications('agents'),
+    enabled: access.allows('GET /api/v1/agents')
+  }));
   const canManage = $derived(
     access.allows('POST /api/v1/mcp-servers/{server_id}/grant-enrollments')
+  );
+  const canManageAgents = $derived(
+    access.allows('POST /api/v1/agents/{agent_id}/grant-enrollments')
   );
   const captureOwner = usePrincipalLifetime(() => state.set(initialState()));
   const patch = (values: Partial<PageState>) =>
@@ -313,6 +327,30 @@
     }
   }
 
+  async function startAgentEnrollment() {
+    const observed = $state;
+    if (!observed.agentID || !observed.agentKeyID.trim() || observed.busy)
+      return;
+    const owner = captureOwner();
+    const active = () =>
+      owner() &&
+      $state.agentID === observed.agentID &&
+      $state.agentKeyID === observed.agentKeyID &&
+      $state.enrollmentID === observed.enrollmentID;
+    patch({ busy: true, error: '', enrollmentURL: '' });
+    try {
+      const result = await startAgentGrant(
+        observed.agentID,
+        observed.agentKeyID.trim()
+      );
+      if (active()) patch({ enrollmentURL: result.enrollment_url });
+    } catch (cause) {
+      if (active()) patch({ error: errorMessage(cause) });
+    } finally {
+      if (active()) patch({ busy: false });
+    }
+  }
+
   async function authorize(flow: 'authorization_code' | 'device_code') {
     const observed = $state;
     if (observed.busy) return;
@@ -388,12 +426,12 @@
   onhashchange={() => consumeEnrollment(window.location.hash.slice(1))}
 />
 
-<svelte:head><title>Personal tool grants · OpenLLMProxy</title></svelte:head>
+<svelte:head><title>Personal grants · OpenLLMProxy</title></svelte:head>
 <header>
   <p class="eyebrow">Tools</p>
-  <h1>Personal tool grants</h1>
+  <h1>Personal grants</h1>
   <p>
-    Grant standing is bound to one individual and the server's authorization
+    Grant standing is bound to one individual and the resource's authorization
     settings
   </p>
 </header>
@@ -600,18 +638,55 @@
             Boolean($state.server.oauth.entra_obo)}>Start key enrollment</button
         >
       </form>
-      {#if $state.enrollmentURL}<p>
-          <a
-            href={$state.enrollmentURL}
-            onclick={(event) => {
-              event.preventDefault();
-              consumeEnrollment($state.enrollmentURL.split('#')[1] ?? '');
-            }}>Continue personal enrollment</a
-          >
-        </p>{/if}
     {/if}
   </section>
 {/if}
+{#if canManageAgents}
+  <section>
+    <h2>Agent authorization</h2>
+    <form
+      onsubmit={(event) => {
+        event.preventDefault();
+        void startAgentEnrollment();
+      }}
+    >
+      <label
+        >Published agent <select
+          value={$state.agentID}
+          disabled={$state.busy}
+          onchange={(event) =>
+            patch({ agentID: event.currentTarget.value, enrollmentURL: '' })}
+          required
+        >
+          <option value="">Select an agent</option>
+          {#each (agents.data ?? []).filter((item) => item.revision_id && !item.retired) as item (item.id)}
+            <option value={item.id}>{item.name}</option>
+          {/each}
+        </select></label
+      >
+      <label
+        >Agent API key UUID <input
+          value={$state.agentKeyID}
+          disabled={$state.busy}
+          oninput={(event) => patch({ agentKeyID: event.currentTarget.value })}
+          required
+        /></label
+      >
+      <button disabled={$state.busy || !$state.agentID}
+        >Start agent key enrollment</button
+      >
+    </form>
+  </section>
+{/if}
+{#if $state.enrollmentURL}<p>
+    <a
+      href={$state.enrollmentURL}
+      onclick={(event) => {
+        event.preventDefault();
+        consumeEnrollment($state.enrollmentURL.split('#')[1] ?? '');
+      }}>Continue personal enrollment</a
+    >
+  </p>{/if}
 <section>
   <h2>Grant standing</h2>
   {#if grants.error}<p role="alert">{errorMessage(grants.error)}</p>
@@ -621,7 +696,7 @@
     <table>
       <thead
         ><tr
-          ><th>Server</th><th>Individual</th><th>Audience and scopes</th><th
+          ><th>Resource</th><th>Individual</th><th>Audience and scopes</th><th
             >Standing</th
           ><th>Expires</th><th>Action</th></tr
         ></thead
@@ -629,7 +704,10 @@
       <tbody
         >{#each grants.data ?? [] as grant (grant.id)}
           <tr>
-            <td><code>{grant.binding.server_id}</code></td>
+            <td
+              ><code>{grant.binding.agent_id ?? grant.binding.server_id}</code
+              ></td
+            >
             <td
               >{grant.binding.identity.kind}<br /><code
                 >{grant.binding.identity.id}</code

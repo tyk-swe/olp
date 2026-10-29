@@ -44,6 +44,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/a2a/{agent}/grant-enrollments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Start a personal OAuth grant for an A2A agent
+         * @description Requires an authorized workload identity with a verified end user. The one-use handoff URL lets that user claim and complete enrollment in the console. The grant is bound to this agent, its approved endpoint and OAuth configuration, and the verified individual.
+         */
+        post: operations["startA2AAgentGrantEnrollment"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/a2a/{agent}/.well-known/agent-card.json": {
         parameters: {
             query?: never;
@@ -75,7 +95,7 @@ export interface paths {
         put?: never;
         /**
          * Send a message to or read, cancel, and subscribe to a task from a published A2A agent
-         * @description Supports A2A 0.3 and 1.0 JSON-RPC send, streaming send, task read, cancellation, and subscription methods. The published protocol determines the accepted methods and response format. Requires the agents scope and an explicit allowlist entry. OLP task IDs are bound to the initiating key and project. Streaming methods return events as they arrive, with a one MiB maximum per event. Disconnecting does not immediately cancel the upstream task. Disconnected tasks remain subject to deadline and authorization checks; OLP requests cancellation when those checks fail but cannot guarantee that a remote agent stops.
+         * @description Supports A2A 0.3 and 1.0 JSON-RPC send, streaming send, task read, cancellation, and subscription methods. The published protocol determines the accepted methods and response format. Requires the agents scope and an explicit allowlist entry. OLP task IDs are bound to the initiating key and project, and OAuth tasks also to the caller's grant identity. Streaming methods return events as they arrive, with a one MiB maximum per event. For each outbound agent send, OLP supplies an olpt_ capability in the X-OLP-Task-Capability request header to the remote agent. The agent can present it as a bearer token on supported model and MCP callbacks. Callback attempts count toward the task limit and are accounted separately from the remote agent fee. Disconnecting does not immediately cancel the upstream task. Disconnected tasks remain subject to deadline and authorization checks; OLP requests cancellation when those checks fail but cannot guarantee that a remote agent stops.
          */
         post: operations["callA2AAgent"];
         delete?: never;
@@ -675,7 +695,7 @@ export interface operations {
                     "application/json": components["schemas"]["InferenceError"];
                 };
             };
-            /** @description The credential, delegation, or agent assertion is invalid, expired, revoked, or already used */
+            /** @description The credential, delegation, task capability, or agent assertion is invalid, expired, revoked, or already used */
             401: {
                 headers: {
                     [name: string]: unknown;
@@ -711,7 +731,7 @@ export interface operations {
                     "application/json": components["schemas"]["InferenceError"];
                 };
             };
-            /** @description The caller or agent has reached an admission limit */
+            /** @description The caller or agent has reached an admission limit. Task capabilities return task_limit_exceeded when the task attempt limit is reached. */
             429: {
                 headers: {
                     [name: string]: unknown;
@@ -728,6 +748,77 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["InferenceError"];
                 };
+            };
+        };
+    };
+    startA2AAgentGrantEnrollment: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Published agent identifier */
+                agent: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description One-use enrollment handoff */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** Format: uuid */
+                        enrollment_id: string;
+                        enrollment_url: string;
+                        /** Format: date-time */
+                        expires_at: string;
+                    };
+                };
+            };
+            /** @description The agent has no OAuth configuration */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The bearer credential is invalid */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description A verified end user is required */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The agent is unavailable to this principal */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The agent binding changed */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The authority or grant store is unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };
@@ -945,7 +1036,7 @@ export interface operations {
                     "application/json": components["schemas"]["InferenceError"];
                 };
             };
-            /** @description The credential, delegation, or agent assertion is invalid, expired, revoked, or already used */
+            /** @description The credential, delegation, task capability, or agent assertion is invalid, expired, revoked, or already used */
             401: {
                 headers: {
                     [name: string]: unknown;
@@ -981,7 +1072,7 @@ export interface operations {
                     "application/json": components["schemas"]["InferenceError"];
                 };
             };
-            /** @description The caller or agent has reached an admission limit */
+            /** @description The caller or agent has reached an admission limit. Task capabilities return task_limit_exceeded when the task attempt limit is reached. */
             429: {
                 headers: {
                     [name: string]: unknown;
@@ -1038,7 +1129,7 @@ export interface operations {
                     "application/json": components["schemas"]["AnthropicInferenceError"];
                 };
             };
-            /** @description The credential, delegation, or agent assertion is invalid, expired, revoked, or already used */
+            /** @description The credential, delegation, task capability, or agent assertion is invalid, expired, revoked, or already used */
             401: {
                 headers: {
                     [name: string]: unknown;
@@ -1074,7 +1165,7 @@ export interface operations {
                     "application/json": components["schemas"]["AnthropicInferenceError"];
                 };
             };
-            /** @description The caller or agent has reached an admission limit */
+            /** @description The caller or agent has reached an admission limit. Task capabilities return task_limit_exceeded when the task attempt limit is reached. */
             429: {
                 headers: {
                     [name: string]: unknown;
@@ -1134,7 +1225,7 @@ export interface operations {
                     "application/json": components["schemas"]["GeminiInferenceError"];
                 };
             };
-            /** @description The credential, delegation, or agent assertion is invalid, expired, revoked, or already used */
+            /** @description The credential, delegation, task capability, or agent assertion is invalid, expired, revoked, or already used */
             401: {
                 headers: {
                     [name: string]: unknown;
@@ -1170,7 +1261,7 @@ export interface operations {
                     "application/json": components["schemas"]["GeminiInferenceError"];
                 };
             };
-            /** @description The caller or agent has reached an admission limit */
+            /** @description The caller or agent has reached an admission limit. Task capabilities return task_limit_exceeded when the task attempt limit is reached. */
             429: {
                 headers: {
                     [name: string]: unknown;
@@ -1230,7 +1321,7 @@ export interface operations {
                     "application/json": components["schemas"]["GeminiInferenceError"];
                 };
             };
-            /** @description The credential, delegation, or agent assertion is invalid, expired, revoked, or already used */
+            /** @description The credential, delegation, task capability, or agent assertion is invalid, expired, revoked, or already used */
             401: {
                 headers: {
                     [name: string]: unknown;
@@ -1266,7 +1357,7 @@ export interface operations {
                     "application/json": components["schemas"]["GeminiInferenceError"];
                 };
             };
-            /** @description The caller or agent has reached an admission limit */
+            /** @description The caller or agent has reached an admission limit. Task capabilities return task_limit_exceeded when the task attempt limit is reached. */
             429: {
                 headers: {
                     [name: string]: unknown;

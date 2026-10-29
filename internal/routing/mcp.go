@@ -7,9 +7,9 @@ import (
 	"fmt"
 	"regexp"
 	"slices"
-	"strings"
 
 	"github.com/santhosh-tekuri/jsonschema/v6"
+	grantconfig "github.com/tyk-swe/olp/internal/grants/config"
 	"github.com/tyk-swe/olp/internal/oif"
 )
 
@@ -46,33 +46,8 @@ const (
 	MaxToolConcurrency        = int64(1024)
 )
 
-type MCPEntraOBO struct {
-	Issuer string `json:"issuer"`
-}
-
-func (o *MCPEntraOBO) Clone() *MCPEntraOBO {
-	if o == nil {
-		return nil
-	}
-	return &MCPEntraOBO{Issuer: o.Issuer}
-}
-
-type MCPOAuth struct {
-	EntraOBO                    *MCPEntraOBO `json:"entra_obo,omitempty"`
-	ClientID                    string       `json:"client_id"`
-	Audience                    string       `json:"audience"`
-	Scopes                      []string     `json:"scopes"`
-	AuthorizationEndpoint       string       `json:"authorization_endpoint"`
-	TokenEndpoint               string       `json:"token_endpoint"`
-	DeviceAuthorizationEndpoint string       `json:"device_authorization_endpoint,omitempty"`
-}
-
-func (o *MCPOAuth) Clone() *MCPOAuth {
-	if o == nil {
-		return nil
-	}
-	return &MCPOAuth{EntraOBO: o.EntraOBO.Clone(), ClientID: o.ClientID, Audience: o.Audience, Scopes: slices.Clone(o.Scopes), AuthorizationEndpoint: o.AuthorizationEndpoint, TokenEndpoint: o.TokenEndpoint, DeviceAuthorizationEndpoint: o.DeviceAuthorizationEndpoint}
-}
+type MCPEntraOBO = grantconfig.EntraOBO
+type MCPOAuth = grantconfig.OAuth
 
 type MCPStdioBinding struct {
 	Executable string `json:"executable"`
@@ -390,30 +365,4 @@ func (s *Snapshot) MCPToolset(revisionID string) (MCPToolsetResolution, bool) {
 		Invalid: slices.Clone(resolution.Invalid),
 		Missing: slices.Clone(resolution.Missing),
 	}, true
-}
-
-func (o *MCPOAuth) Valid() bool {
-	if o == nil || o.ClientID == "" || len(o.ClientID) > 256 || o.Audience == "" || len(o.Audience) > 2048 || o.TokenEndpoint == "" || len(o.Scopes) == 0 || len(o.Scopes) > 32 {
-		return false
-	}
-	if o.EntraOBO == nil && o.AuthorizationEndpoint == "" {
-		return false
-	}
-	if o.EntraOBO != nil && (o.EntraOBO.Issuer == "" || len(o.EntraOBO.Issuer) > 2048 || o.AuthorizationEndpoint != "" || o.DeviceAuthorizationEndpoint != "") {
-		return false
-	}
-	for _, scope := range o.Scopes {
-		if o.EntraOBO != nil && !strings.HasPrefix(scope, strings.TrimSuffix(o.Audience, "/")+"/") {
-			return false
-		}
-		if scope == "" || len(scope) > 256 {
-			return false
-		}
-		for _, character := range scope {
-			if character < 0x21 || character > 0x7e || character == '"' || character == '\\' {
-				return false
-			}
-		}
-	}
-	return true
 }

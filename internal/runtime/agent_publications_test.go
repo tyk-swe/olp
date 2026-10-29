@@ -1,12 +1,16 @@
 package runtime
 
 import (
+	"context"
 	"errors"
+	"reflect"
 	"slices"
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/agentcontract"
 	"github.com/tyk-swe/olp/internal/secrets"
 	"github.com/tyk-swe/olp/internal/workload"
 )
@@ -55,6 +59,147 @@ func TestConsumerKeyAuthenticationRequiresCurrentExactCredential(t *testing.T) {
 			}
 			if got == nil || got.ID != principal.ID || !slices.Contains(got.Policy.Scopes, "tools") {
 				t.Fatalf("authentication lost the consumer authority: %+v", got)
+			}
+		})
+	}
+}
+
+type taskRow struct {
+	values []any
+	err    error
+}
+
+func (r taskRow) Scan(dest ...any) error {
+	if r.err != nil {
+		return r.err
+	}
+	for i := range dest {
+		reflect.ValueOf(dest[i]).Elem().Set(reflect.ValueOf(r.values[i]))
+	}
+	return nil
+}
+
+type taskStoreFixture struct {
+	row      taskRow
+	beginErr error
+	tx       *taskTxFixture
+}
+
+func (f *taskStoreFixture) QueryRow(context.Context, string, ...any) pgx.Row { return f.row }
+func (f *taskStoreFixture) Begin(context.Context) (pgx.Tx, error)            { return f.tx, f.beginErr }
+
+type taskTxFixture struct {
+	pgx.Tx
+	rows      []taskRow
+	commitErr error
+}
+
+func (f *taskTxFixture) QueryRow(context.Context, string, ...any) pgx.Row {
+	row := f.rows[0]
+	f.rows = f.rows[1:]
+	return row
+}
+func (f *taskTxFixture) Commit(context.Context) error   { return f.commitErr }
+func (f *taskTxFixture) Rollback(context.Context) error { return nil }
+
+func TestTaskCapabilityAuthenticatesAndCountsOwnerCallbacks(t *testing.T) {
+	project, publication, revision := "project", "agent", "agent-revision"
+	now := time.Now()
+	expires := now.Add(time.Minute)
+	maximum := 2
+	definition := agentcontract.Draft{Agent: &agentcontract.Definition{RouteRevisions: []string{"route-revision"}, ToolsetRevisions: []string{"toolset-revision"}, MaxTaskContinuations: &maximum}}
+	owner := access.Authority{ID: "owner", ProjectID: &project, Policy: access.KeyPolicy{Scopes: []string{"agents", "inference", "tools"}, AllowedAgents: []string{publication}, AllowedRoutes: []string{"route"}, AllowedToolsets: []string{"toolset"}}}
+	newFixture := func() (*Manager, *taskStoreFixture) {
+		store := &taskStoreFixture{row: taskRow{values: []any{owner.ID, project, publication, revision, "", (*time.Time)(nil), expires, "", []byte(nil), definition}}, tx: &taskTxFixture{rows: []taskRow{{values: []any{"dispatch", "task", definition}}, {values: []any{1}}}}}
+		manager := &Manager{auth: secrets.NewAuthKey(make([]byte, 32), "installation"), taskStore: store, authority: authorityState{loaded: true, readAt: now, agentPrincipals: map[string]access.Authority{owner.ID: owner}, agentResources: map[string]agentResourceAuthority{publication: {ProjectID: project, Kind: "agent", Revisions: map[string]bool{revision: true}}}}}
+		return manager, store
+	}
+	t.Run("owner and pinned resources", func(t *testing.T) {
+		manager, _ := newFixture()
+		a, err := manager.AuthenticateTaskCapability(t.Context(), "olpt_valid")
+		if err != nil || a.ID != owner.ID || !slices.Equal(a.TaskCapability.RouteRevisions, []string{"route-revision"}) || !slices.Equal(a.TaskCapability.ToolsetRevisions, []string{"toolset-revision"}) {
+			t.Fatalf("callback authority = %+v, error = %v", a, err)
+		}
+		if err := manager.AdmitTaskCapabilityAttempt(t.Context(), *a, "inference", "route", "route-revision", &project); err != nil {
+			t.Fatalf("owner's pinned model callback refused: %v", err)
+		}
+	})
+	t.Run("workload owner current mapping and expiry", func(t *testing.T) {
+		manager, store := newFixture()
+		issuerID := "workload-issuer"
+		callerExpires := now.Add(30 * time.Second)
+		principal := access.Authority{ID: owner.ID, ProjectID: &project, WorkloadIssuerID: &issuerID, WorkloadDigest: "workload-digest", WorkloadMapping: "worker"}
+		store.row.values[4], store.row.values[5], store.row.values[7] = "workload-revision", &callerExpires, "bound-user"
+		delete(manager.authority.agentPrincipals, owner.ID)
+		manager.authority.workloadPrincipals = map[string]access.Authority{principal.WorkloadDigest: principal}
+		manager.authority.workloadIssuers = map[string]workloadIssuer{issuerID: {ID: issuerID, Revision: "workload-revision", Config: workload.Config{Enabled: true}, bindings: map[string]access.Authority{"worker": owner}}}
+		got, err := manager.AuthenticateTaskCapability(t.Context(), "olpt_valid")
+		if err != nil || got.WorkloadDigest != principal.WorkloadDigest || got.EndUserDigest != "bound-user" || got.ExpiresAt == nil || got.ExpiresAt.After(callerExpires) || !got.Allows("inference", "route", &project, now) {
+			t.Fatalf("workload callback authority = %+v, error = %v", got, err)
+		}
+		issuer := manager.authority.workloadIssuers[issuerID]
+		issuer.Revision = "new-revision"
+		manager.authority.workloadIssuers[issuerID] = issuer
+		if _, err := manager.AuthenticateTaskCapability(t.Context(), "olpt_valid"); err == nil {
+			t.Fatal("callback survived a workload issuer revision")
+		}
+	})
+	for _, test := range []struct {
+		name   string
+		change func(*Manager, *taskStoreFixture)
+		want   error
+	}{
+		{name: "unknown or expired capability", change: func(_ *Manager, f *taskStoreFixture) { f.row.err = pgx.ErrNoRows }, want: ErrInvalidKey},
+		{name: "store unavailable", change: func(_ *Manager, f *taskStoreFixture) { f.row.err = errors.New("unavailable") }, want: ErrStaleAuthority},
+		{name: "delegated caller unavailable", change: func(_ *Manager, f *taskStoreFixture) { f.row.values[8] = []byte("delegation") }, want: ErrInvalidKey},
+		{name: "agent definition missing", change: func(_ *Manager, f *taskStoreFixture) { f.row.values[9] = agentcontract.Draft{} }, want: ErrInvalidKey},
+		{name: "owner revoked", change: func(m *Manager, _ *taskStoreFixture) {
+			revoked := owner
+			revoked.RevokedAt = &now
+			m.authority.agentPrincipals[owner.ID] = revoked
+		}, want: access.Forbidden()},
+		{name: "agent retired", change: func(m *Manager, _ *taskStoreFixture) { delete(m.authority.agentResources, publication) }, want: access.Forbidden()},
+		{name: "authority stale", change: func(m *Manager, _ *taskStoreFixture) {
+			m.authority.readAt = now.Add(-AuthorityStaleAfter - time.Second)
+		}, want: ErrStaleAuthority},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			manager, store := newFixture()
+			test.change(manager, store)
+			if _, err := manager.AuthenticateTaskCapability(t.Context(), "olpt_valid"); !errors.Is(err, test.want) && (test.want == ErrInvalidKey || test.want == ErrStaleAuthority || err == nil) {
+				t.Fatalf("authentication error = %v, want %v", err, test.want)
+			}
+		})
+	}
+	for _, test := range []struct {
+		name     string
+		scope    string
+		resource string
+		revision string
+		change   func(*taskStoreFixture)
+		want     error
+	}{
+		{name: "pinned tool", scope: "tools", resource: "toolset", revision: "toolset-revision"},
+		{name: "foreign tool revision", scope: "tools", resource: "toolset", revision: "other", want: access.Forbidden()},
+		{name: "foreign route revision", scope: "inference", resource: "route", revision: "other", want: access.Forbidden()},
+		{name: "unsupported scope", scope: "agents", resource: publication, revision: revision, want: access.Forbidden()},
+		{name: "limit exhausted", scope: "tools", resource: "toolset", revision: "toolset-revision", change: func(f *taskStoreFixture) { f.tx.rows[1].err = pgx.ErrNoRows }, want: ErrTaskAttemptLimit},
+		{name: "store unavailable", scope: "tools", resource: "toolset", revision: "toolset-revision", change: func(f *taskStoreFixture) { f.beginErr = errors.New("unavailable") }, want: ErrStaleAuthority},
+		{name: "task ended", scope: "tools", resource: "toolset", revision: "toolset-revision", change: func(f *taskStoreFixture) { f.tx.rows[0].err = pgx.ErrNoRows }, want: ErrInvalidKey},
+		{name: "commit failed", scope: "tools", resource: "toolset", revision: "toolset-revision", change: func(f *taskStoreFixture) { f.tx.commitErr = errors.New("unavailable") }, want: ErrStaleAuthority},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			manager, store := newFixture()
+			a, err := manager.AuthenticateTaskCapability(t.Context(), "olpt_valid")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if test.change != nil {
+				test.change(store)
+			}
+			err = manager.AdmitTaskCapabilityAttempt(t.Context(), *a, test.scope, test.resource, test.revision, &project)
+			if test.want == nil && err != nil || test.want != nil && err == nil || (test.want == ErrTaskAttemptLimit || test.want == ErrStaleAuthority || test.want == ErrInvalidKey) && !errors.Is(err, test.want) {
+				t.Fatalf("admission error = %v, want %v", err, test.want)
 			}
 		})
 	}

@@ -22,6 +22,10 @@ type DelegationAuthenticator interface {
 	AuthenticateDelegation(context.Context, string, string) (*access.Authority, error)
 }
 
+type TaskCapabilityAuthenticator interface {
+	AuthenticateTaskCapability(context.Context, string) (*access.Authority, error)
+}
+
 type Failure struct {
 	Status  int
 	Code    string
@@ -29,6 +33,18 @@ type Failure struct {
 }
 
 func (f *Failure) Error() string { return f.Code + ": " + f.Message }
+
+func HeaderEndUserDigest(auth any, r *http.Request, authority access.Authority) (string, *Failure) {
+	values := r.Header.Values("X-OLP-End-User")
+	if authority.Policy.EndUserSource == nil || *authority.Policy.EndUserSource != "header" || len(values) != 1 || !access.ValidEndUserIdentifier(values[0]) {
+		return "", &Failure{Status: http.StatusBadRequest, Code: "invalid_end_user", Message: "Provide an end-user machine token of 1-128 characters in the key's configured source."}
+	}
+	digester, ok := auth.(interface{ EndUserDigest(*string, string) string })
+	if !ok {
+		return "", &Failure{Status: http.StatusServiceUnavailable, Code: "authority_unavailable", Message: "End-user identity is unavailable."}
+	}
+	return digester.EndUserDigest(authority.ProjectID, values[0]), nil
+}
 
 func Bearer(header string) (string, bool) {
 	if len(header) < 7 || !strings.EqualFold(header[:7], "Bearer ") {
@@ -97,6 +113,13 @@ func Authenticate(auth Authenticator, r *http.Request, token, scope string, trus
 }
 
 func authenticate(auth Authenticator, r *http.Request, token, scope string) (*access.Authority, error) {
+	if strings.HasPrefix(token, "olpt_") {
+		capability, ok := auth.(TaskCapabilityAuthenticator)
+		if !ok || (scope != "inference" && scope != "tools") {
+			return nil, runtime.ErrInvalidKey
+		}
+		return capability.AuthenticateTaskCapability(r.Context(), token)
+	}
 	if !strings.HasPrefix(token, "olpd_") {
 		return auth.Authenticate(token)
 	}

@@ -143,11 +143,22 @@ func (s *Server) pinnedRevision(authority access.Authority, publication agentcon
 		return agentcontract.Revision{}, false
 	}
 	for _, revision := range release.Snapshot.AgentPublications {
-		if revision.ID == task.RevisionID && revision.PublicationID == publication.PublicationID && revision.ProjectID == publication.ProjectID && revision.Definition.Agent != nil && revision.Definition.Agent.Protocol == version && s.Runtime.AuthorizeAgentResource(authority, "agents", revision.PublicationID, revision.ID, revision.ProjectID) == nil {
+		if revision.ID == task.RevisionID && revision.PublicationID == publication.PublicationID && revision.ProjectID == publication.ProjectID && revision.Definition.Agent != nil && revision.Definition.Agent.Protocol == version && s.taskBindingMatches(authority, revision, task.Binding) && s.Runtime.AuthorizeAgentResource(authority, "agents", revision.PublicationID, revision.ID, revision.ProjectID) == nil {
 			return revision, true
 		}
 	}
 	return agentcontract.Revision{}, false
+}
+
+func (s *Server) taskBindingMatches(authority access.Authority, revision agentcontract.Revision, binding string) bool {
+	if revision.Definition.Agent.OAuth == nil {
+		return binding == ""
+	}
+	if s.Grants == nil {
+		return false
+	}
+	expected, err := s.Grants.AgentBinding(authority, revision.PublicationID, *revision.Definition.Agent)
+	return err == nil && expected == binding
 }
 
 type preparedSend struct {
@@ -155,6 +166,15 @@ type preparedSend struct {
 	Revision           agentcontract.Revision
 	ExpectedUpstreamID string
 	PublicTaskID       string
+	Binding            string
+}
+
+func (s *Server) preparedCredential(ctx context.Context, authority access.Authority, prepared preparedSend) ([]byte, string, error) {
+	if prepared.PublicTaskID == "" {
+		return s.agentCredential(ctx, authority, prepared.Revision)
+	}
+	credential, err := s.agentTaskCredential(ctx, authority, prepared.Revision, prepared.Binding)
+	return credential, prepared.Binding, err
 }
 
 func (s *Server) prepareSend(ctx context.Context, authority access.Authority, revision agentcontract.Revision, release *runtime.Release, version string, raw json.RawMessage) (preparedSend, *rpcError) {
@@ -183,7 +203,7 @@ func (s *Server) prepareSend(ctx context.Context, authority access.Authority, re
 		return preparedSend{}, &rpcError{-32002, "A finite budget requires a declared remote work bound"}
 	}
 	translatedMessage := protocol.Message{ID: params.Message.ID, ContextID: owned.ContextID, Extensions: params.Message.Extensions, Metadata: params.Message.Metadata, Parts: params.Message.Parts, Role: params.Message.Role, TaskID: protocol.TaskID(owned.UpstreamID)}
-	return preparedSend{Params: protocol.SendMessageRequest{Config: params.Config, Message: &translatedMessage, Metadata: params.Metadata}, Revision: pinned, ExpectedUpstreamID: owned.UpstreamID, PublicTaskID: owned.ID}, nil
+	return preparedSend{Params: protocol.SendMessageRequest{Config: params.Config, Message: &translatedMessage, Metadata: params.Metadata}, Revision: pinned, ExpectedUpstreamID: owned.UpstreamID, PublicTaskID: owned.ID, Binding: owned.Binding}, nil
 }
 
 func remoteWorkBounded(authority access.Authority, revision agentcontract.Revision) bool {
@@ -197,11 +217,17 @@ func (s *Server) send(w http.ResponseWriter, r *http.Request, authority access.A
 		reply(w, request.ID, nil, failure)
 		return
 	}
-	if _, err := s.loadCard(r.Context(), *prepared.Revision.Definition.Agent); err != nil {
+	credential, binding, err := s.preparedCredential(r.Context(), authority, prepared)
+	if err != nil {
+		fail(w, request.ID, -32603, "Agent credential unavailable")
+		return
+	}
+	defer clear(credential)
+	if _, err := s.loadCardWithCredential(r.Context(), *prepared.Revision.Definition.Agent, credential); err != nil {
 		fail(w, request.ID, -32603, "Internal error")
 		return
 	}
-	transport, headers, cleanup, err := s.transport(r.Context(), *prepared.Revision.Definition.Agent)
+	transport, headers, cleanup, err := s.transportWithCredential(r.Context(), *prepared.Revision.Definition.Agent, credential)
 	if err != nil {
 		fail(w, request.ID, -32603, "Internal error")
 		return
@@ -212,7 +238,8 @@ func (s *Server) send(w http.ResponseWriter, r *http.Request, authority access.A
 		fail(w, request.ID, -32603, "Internal error")
 		return
 	}
-	if err := s.Ledger.admitTask(r.Context(), res, authority, prepared.PublicTaskID, prepared.Revision.Definition.Agent); err != nil {
+	capability, err := s.Ledger.admitTask(r.Context(), res, authority, prepared.PublicTaskID, prepared.Revision)
+	if err != nil {
 		s.Ledger.release(r.Context(), res)
 		fail(w, request.ID, -32002, "Agent task limit reached")
 		return
@@ -232,6 +259,7 @@ func (s *Server) send(w http.ResponseWriter, r *http.Request, authority access.A
 		fail(w, request.ID, -32603, "Internal error")
 		return
 	}
+	headers["X-OLP-Task-Capability"] = []string{capability}
 	upstream, err := transport.SendMessage(r.Context(), headers, &prepared.Params)
 	if err != nil {
 		s.Ledger.unknown(r.Context(), res)
@@ -246,7 +274,7 @@ func (s *Server) send(w http.ResponseWriter, r *http.Request, authority access.A
 	}
 	settleCtx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 5*time.Second)
 	defer cancel()
-	publicID, err := s.Ledger.settle(settleCtx, res, authority, prepared.Revision, upstreamID, upstreamContext, taskEventState(upstream))
+	publicID, err := s.Ledger.settle(settleCtx, res, authority, prepared.Revision, upstreamID, upstreamContext, taskEventState(upstream), binding)
 	if err != nil {
 		s.Ledger.unknown(r.Context(), res)
 		fail(w, request.ID, -32603, "Internal error")
@@ -297,7 +325,13 @@ func (s *Server) getTask(w http.ResponseWriter, r *http.Request, authority acces
 		fail(w, request.ID, -32001, "Task not found")
 		return
 	}
-	if _, err := s.loadCard(r.Context(), *pinned.Definition.Agent); err != nil {
+	credential, err := s.agentTaskCredential(r.Context(), authority, pinned, owned.Binding)
+	if err != nil {
+		fail(w, request.ID, -32603, "Agent credential unavailable")
+		return
+	}
+	defer clear(credential)
+	if _, err := s.loadCardWithCredential(r.Context(), *pinned.Definition.Agent, credential); err != nil {
 		fail(w, request.ID, -32603, "Internal error")
 		return
 	}
@@ -305,7 +339,7 @@ func (s *Server) getTask(w http.ResponseWriter, r *http.Request, authority acces
 		fail(w, request.ID, -32001, "Task not found")
 		return
 	}
-	transport, headers, cleanup, err := s.transport(r.Context(), *pinned.Definition.Agent)
+	transport, headers, cleanup, err := s.transportWithCredential(r.Context(), *pinned.Definition.Agent, credential)
 	if err != nil {
 		fail(w, request.ID, -32603, "Internal error")
 		return
@@ -398,7 +432,7 @@ func limitedResponse(response *http.Response, body io.ReadCloser, length int64) 
 	return &http.Response{Status: response.Status, StatusCode: response.StatusCode, Proto: response.Proto, ProtoMajor: response.ProtoMajor, ProtoMinor: response.ProtoMinor, Header: response.Header, Body: body, ContentLength: length, TransferEncoding: response.TransferEncoding, Close: response.Close, Uncompressed: response.Uncompressed, Trailer: response.Trailer, Request: response.Request, TLS: response.TLS}
 }
 
-func (s *Server) transport(ctx context.Context, definition agentcontract.Definition) (a2aclient.Transport, a2aclient.ServiceParams, func(), error) {
+func (s *Server) transportWithCredential(ctx context.Context, definition agentcontract.Definition, oauthCredential []byte) (a2aclient.Transport, a2aclient.ServiceParams, func(), error) {
 	if s.Egress == nil {
 		return nil, nil, nil, errors.New("egress unavailable")
 	}
@@ -408,6 +442,13 @@ func (s *Server) transport(ctx context.Context, definition agentcontract.Definit
 	base := s.Egress.Client(30 * time.Second)
 	client := &http.Client{Transport: limitedTransport{Base: base.Transport}, CheckRedirect: base.CheckRedirect, Jar: base.Jar, Timeout: base.Timeout}
 	transport := upstreamTransport(definition.Protocol, definition.Endpoint, client)
+	if len(oauthCredential) > 0 {
+		return transport, a2aclient.ServiceParams{"Authorization": []string{"Bearer " + string(oauthCredential)}, "A2A-Version": []string{string(cardVersion(definition.Protocol))}}, func() { _ = transport.Destroy() }, nil
+	}
+	if definition.OAuth != nil {
+		_ = transport.Destroy()
+		return nil, nil, nil, errors.New("agent grant unavailable")
+	}
 	if definition.CredentialID == nil {
 		return transport, a2aclient.ServiceParams{"A2A-Version": []string{string(cardVersion(definition.Protocol))}}, func() { _ = transport.Destroy() }, nil
 	}

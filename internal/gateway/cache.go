@@ -78,7 +78,7 @@ func (s *Server) initializeCache(x *call) *Error {
 		return invalidRequest("invalid_cache_control", err.Error(), nil)
 	}
 	x.cache = &responseCacheCall{controls: c, result: "bypass"}
-	if x.route.Cache == nil || s.Cache == nil || x.origin != "" || x.authority.Policy.ForbidResponseCache || x.request.callerCredential != nil || x.providerState || x.generation.resources != nil || x.generation.continuation != nil {
+	if x.route.Cache == nil || s.Cache == nil || x.origin != "" || x.authority.Policy.ForbidResponseCache || x.authority.TaskCapability != nil || x.request.callerCredential != nil || x.providerState || x.generation.resources != nil || x.generation.continuation != nil {
 		return nil
 	}
 	p := x.route.Cache.Effective()

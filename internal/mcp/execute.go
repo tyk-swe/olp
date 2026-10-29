@@ -230,6 +230,20 @@ func (s *Server) dispatchToolCall(ctx context.Context, in executeInput, credenti
 			return dispatchResult{failure: s.refuseToolIdentity(ctx, in, reservation, fail(http.StatusForbidden, "user_grant_required", "permission_error", "Enroll a usable personal grant before calling this tool."))}
 		}
 	}
+	if in.authority.TaskCapability != nil {
+		admitter, ok := s.Runtime.(interface {
+			AdmitTaskCapabilityAttempt(context.Context, access.Authority, string, string, string, *string) error
+		})
+		if !ok {
+			return dispatchResult{failure: s.refuseToolIdentity(ctx, in, reservation, errLedger)}
+		}
+		if err := admitter.AdmitTaskCapabilityAttempt(ctx, in.authority, "tools", in.resolved.id, in.resolved.revisionID, in.authority.ProjectID); err != nil {
+			if errors.Is(err, runtime.ErrTaskAttemptLimit) {
+				return dispatchResult{failure: s.refuseToolIdentity(ctx, in, reservation, fail(http.StatusTooManyRequests, "task_limit_exceeded", "rate_limit_error", "The task attempt limit was exceeded."))}
+			}
+			return dispatchResult{failure: s.refuseToolIdentity(ctx, in, reservation, errPermissionDenied)}
+		}
+	}
 	started := time.Now()
 	dispatchedEvidence := AttemptEvidence{
 		ServerID: tool.ServerID, ServerRevisionID: tool.ServerRevisionID,

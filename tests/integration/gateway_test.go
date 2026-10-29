@@ -10,10 +10,12 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -752,6 +754,9 @@ func TestGatewayToolWorkflowSettlesOneRun(t *testing.T) {
 	var toolCalls atomic.Int64
 	var responsesWorkflow atomic.Bool
 	var approvalWorkflow atomic.Bool
+	var recoveryWorkflow atomic.Bool
+	var recoveryApprovalWorkflow atomic.Bool
+	var pruningWorkflow atomic.Bool
 	var blockTool atomic.Bool
 	var deadlineTool atomic.Bool
 	deadlineStarted := make(chan struct{}, 2)
@@ -880,6 +885,32 @@ func TestGatewayToolWorkflowSettlesOneRun(t *testing.T) {
 		var input map[string]json.RawMessage
 		if json.NewDecoder(r.Body).Decode(&input) != nil {
 			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		if pruningWorkflow.Load() {
+			if !strings.Contains(string(input["messages"]), "pruning-current") {
+				writeJSON(w, map[string]any{"id": "pruning-call", "object": "chat.completion", "created": 1, "model": vendorModel, "choices": []any{map[string]any{"index": 0, "message": map[string]any{"role": "assistant", "content": nil, "tool_calls": []any{map[string]any{"id": "pruning-current", "type": "function", "function": map[string]any{"name": tool.Alias, "arguments": `{"query":"pruning-current"}`}}}}, "finish_reason": "tool_calls"}}, "usage": map[string]any{"prompt_tokens": 4, "completion_tokens": 6, "total_tokens": 10}})
+				return
+			}
+			if strings.Contains(string(input["messages"]), "pruning-old-result") || !strings.Contains(string(input["messages"]), answer) {
+				t.Error("relevance pruning did not preserve only the current exchange")
+			}
+			writeJSON(w, map[string]any{"id": "pruning-final", "object": "chat.completion", "created": 1, "model": vendorModel, "choices": []any{map[string]any{"index": 0, "message": map[string]any{"role": "assistant", "content": "pruning finished"}, "finish_reason": "stop"}}, "usage": map[string]any{"prompt_tokens": 4, "completion_tokens": 6, "total_tokens": 10}})
+			return
+		}
+		if recoveryWorkflow.Load() {
+			if strings.Contains(string(input["messages"]), `"role":"tool"`) {
+				if !strings.Contains(string(input["messages"]), "workflow-recovery-private-original") {
+					t.Error("recovered content did not reach the model")
+				}
+				writeJSON(w, map[string]any{"id": "recovery-final", "object": "chat.completion", "created": 1, "model": vendorModel, "choices": []any{map[string]any{"index": 0, "message": map[string]any{"role": "assistant", "content": "recovered"}, "finish_reason": "stop"}}, "usage": map[string]any{"prompt_tokens": 4, "completion_tokens": 6, "total_tokens": 10}})
+				return
+			}
+			calls := []any{map[string]any{"id": "recovery-one", "type": "function", "function": map[string]any{"name": "olp_recover_context", "arguments": `{"id":0}`}}}
+			if recoveryApprovalWorkflow.Load() {
+				calls = append(calls, map[string]any{"id": "call-one", "type": "function", "function": map[string]any{"name": approvalTool.Alias, "arguments": `{"query":"` + argument + `"}`}})
+			}
+			writeJSON(w, map[string]any{"id": "recovery-call", "object": "chat.completion", "created": 1, "model": vendorModel, "choices": []any{map[string]any{"index": 0, "message": map[string]any{"role": "assistant", "content": nil, "tool_calls": calls}, "finish_reason": "tool_calls"}}, "usage": map[string]any{"prompt_tokens": 4, "completion_tokens": 6, "total_tokens": 10}})
 			return
 		}
 		if blockRun.Load() && len(input["tool_choice"]) == 0 {
@@ -1831,6 +1862,208 @@ func TestGatewayToolWorkflowSettlesOneRun(t *testing.T) {
 	routeResumeStatus, _, _ := h.gateway("POST", "/v1/chat/completions", secret, routeResume)
 	if routeResumeStatus != http.StatusForbidden || toolCalls.Load() != routeTools {
 		t.Fatalf("revised route approval dispatched an earlier tool: status=%d tools=%d", routeResumeStatus, toolCalls.Load()-routeTools)
+	}
+	const relevanceInputTokens, relevanceOutputTokens, relevanceRate = 1, 1, 1000000
+	var relevanceCalls atomic.Int64
+	relevanceServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			writeJSON(w, map[string]any{"data": []any{map[string]any{"id": vendorModel}}})
+			return
+		}
+		var request struct {
+			Questions map[string]json.RawMessage `json:"questions"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil || len(request.Questions) == 0 {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		relevanceCalls.Add(1)
+		answers := maps.Collect(func(yield func(string, map[string]any) bool) {
+			for name := range request.Questions {
+				if !yield(name, map[string]any{"type": "noul", "noul": 0.0}) {
+					return
+				}
+			}
+		})
+		writeJSON(w, map[string]any{"model": vendorModel, "answers": answers, "usage": map[string]int{"input_tokens": relevanceInputTokens, "output_tokens": relevanceOutputTokens, "total_tokens": relevanceInputTokens + relevanceOutputTokens}})
+	}))
+	defer relevanceServer.Close()
+	relevanceProvider := activeAzureProviderInProject(t, h, owner, "Relevance provider", relevanceServer.URL+"/v1", &project, []any{map[string]any{"operation": "decision", "surface": "openai", "mode": "unary"}}, map[string]any{"kind": "openai_compatible", "options": map[string]any{"vendor_id": "typesafe-jev", "models": map[string]any{vendorModel: map[string]any{"context_length": 1090, "max_output_tokens": 10}}}, "profile_id": "systemone", "profile_revision": "1", "deployment": nil, "api_version": nil})
+	const relevanceSlug = "workflow-relevance"
+	relevanceDraft := h.want(owner, http.MethodPost, "/api/v1/route-drafts", map[string]any{"project_id": project, "slug": relevanceSlug, "operations": []string{"decision"}, "overall_timeout_ms": 10000, "max_attempts": 1, "fidelity": map[string]any{"mode": "transformed"}, "targets": []any{map[string]any{"provider_id": relevanceProvider["id"], "provider_model": vendorModel, "priority": 0, "weight": 1, "timeout_ms": 5000}}}, idem("workflow-relevance-route"), http.StatusCreated)
+	h.want(owner, http.MethodPost, "/api/v1/route-drafts/"+mcpExecString(t, relevanceDraft, "id")+"/activate", nil, withMatch(relevanceDraft, idem("workflow-relevance-route-activate")), http.StatusOK)
+	h.want(owner, http.MethodPost, "/api/v1/pricing/revisions", map[string]any{"effective_at": time.Now().Add(-time.Hour).UTC().Format(time.RFC3339Nano), "prices": []any{map[string]any{"provider_kind": "openai_compatible", "provider_id": relevanceProvider["id"], "model": vendorModel, "operation": "decision", "currency": "USD", "input_per_million": fmt.Sprint(relevanceRate), "output_per_million": fmt.Sprint(relevanceRate)}, map[string]any{"provider_kind": "azure_openai", "provider_id": provider["id"], "model": vendorModel, "operation": "generation", "currency": "USD", "input_per_million": "1000000", "output_per_million": "1000000"}}}, idem("workflow-relevance-price"), http.StatusCreated)
+	eventually(t, "relevance price in routing inputs", 30*time.Second, func() bool {
+		h.refresh()
+		inputs := h.Runtime.RoutingInputs()
+		return inputs != nil && inputs.Price("openai_compatible", relevanceProvider["id"].(string), "typesafe-jev", vendorModel, "decision", time.Now()) != nil
+	})
+	typeSafe := h.want(owner, http.MethodPost, "/api/v1/guardrails", map[string]any{"name": "Relevance pruning", "project_id": project, "type": "typesafe", "configuration": map[string]any{"route": relevanceSlug}, "timeout_ms": 5000, "on_error": "fail_closed"}, idem("workflow-relevance-guardrail"), http.StatusCreated)
+	h.want(owner, http.MethodPost, "/api/v1/guardrails/"+mcpExecString(t, typeSafe, "id")+"/activate", map[string]any{"revision_id": typeSafe["revision_id"]}, withMatch(typeSafe, idem("workflow-relevance-guardrail-activate")), http.StatusNoContent)
+	relevancePolicy := h.want(owner, http.MethodPost, "/api/v1/guardrail-policies", map[string]any{"name": "Relevance policy", "project_id": project, "entries": []any{map[string]any{"guardrail_id": typeSafe["id"], "revision_id": typeSafe["revision_id"], "phase": "input", "action": "block"}}}, idem("workflow-relevance-policy"), http.StatusCreated)
+	h.want(owner, http.MethodPost, "/api/v1/guardrail-policies/"+mcpExecString(t, relevancePolicy, "id")+"/activate", map[string]any{"revision_id": relevancePolicy["revision_id"]}, withMatch(relevancePolicy, idem("workflow-relevance-policy-activate")), http.StatusNoContent)
+	relevanceAttachment := h.want(owner, http.MethodPost, "/api/v1/guardrail-attachments", map[string]any{"scope": "route", "scope_id": route.ID, "policy_revision_id": relevancePolicy["revision_id"], "order": 0}, idem("workflow-relevance-attachment"), http.StatusCreated)
+	relevanceKey := h.want(owner, http.MethodPost, "/api/v1/api-keys", map[string]any{"name": "Relevance caller", "project_id": project, "scopes": []string{"inference", "tools"}, "allowed_routes": []string{slug, relevanceSlug}, "allowed_toolsets": []string{toolsetID}}, idem("workflow-relevance-key"), http.StatusCreated)
+	h.refresh()
+	pruningWorkflow.Store(true)
+	relevanceBefore := relevanceCalls.Load()
+	relevanceStatus, relevanceResponse, _ := h.gateway(http.MethodPost, "/v1/chat/completions", mcpExecString(t, relevanceKey, "secret"), map[string]any{"model": slug, "messages": []any{map[string]any{"role": "assistant", "content": "keep context", "tool_calls": []any{map[string]any{"id": "pruning-old", "type": "function", "function": map[string]any{"name": "old", "arguments": "{}"}}}}, map[string]any{"role": "tool", "tool_call_id": "pruning-old", "content": "pruning-old-result"}, map[string]any{"role": "user", "content": "current task"}}, "max_tokens": 100})
+	if relevanceStatus != http.StatusOK || !strings.Contains(fmt.Sprint(relevanceResponse), "pruning finished") || relevanceCalls.Load()-relevanceBefore != 1 {
+		t.Fatalf("relevance workflow failed: status=%d response=%v decisions=%d", relevanceStatus, relevanceResponse, relevanceCalls.Load()-relevanceBefore)
+	}
+	pruningWorkflow.Store(false)
+	relevanceDebits := mcpExecItems(t, h.want(owner, http.MethodGet, "/api/v1/execution-debits?api_key_id="+mcpExecString(t, relevanceKey, "id"), nil, nil, http.StatusOK), "items")
+	if len(relevanceDebits) != 4 {
+		t.Fatalf("relevance did not create a separate run debit: %v", relevanceDebits)
+	}
+	relevanceRun := relevanceDebits[0].(map[string]any)["run_id"]
+	if relevanceRun == nil || slices.ContainsFunc(relevanceDebits, func(item any) bool {
+		debit := item.(map[string]any)
+		return debit["run_id"] != relevanceRun || debit["state"] != "settled"
+	}) {
+		t.Fatalf("relevance debits were not settled under one run: %v", relevanceDebits)
+	}
+	if !slices.ContainsFunc(relevanceDebits, func(item any) bool {
+		debit := item.(map[string]any)
+		cost, err := strconv.ParseFloat(debit["observed_cost"].(string), 64)
+		return debit["kind"] == "model" && err == nil && cost == float64((relevanceInputTokens+relevanceOutputTokens)*relevanceRate)/1000000
+	}) {
+		t.Fatalf("priced relevance debit did not settle: %v", relevanceDebits)
+	}
+	for _, scenario := range []struct {
+		name      string
+		limit     string
+		status    int
+		debits    int
+		decisions int64
+	}{
+		{name: "bounded success", limit: "1200", status: http.StatusOK, debits: 4, decisions: 1},
+		{name: "prior spend exceeds remaining allowance", limit: "1105", status: http.StatusBadRequest, debits: 2, decisions: 0},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
+			key := h.want(owner, http.MethodPost, "/api/v1/api-keys", map[string]any{"name": scenario.name, "project_id": project, "scopes": []string{"inference", "tools"}, "allowed_routes": []string{slug, relevanceSlug}, "allowed_toolsets": []string{toolsetID}}, idem("workflow-relevance-"+scenario.limit), http.StatusCreated)
+			h.refresh()
+			pruningWorkflow.Store(true)
+			defer pruningWorkflow.Store(false)
+			before := relevanceCalls.Load()
+			status, response, _ := h.gateway(http.MethodPost, "/v1/chat/completions", mcpExecString(t, key, "secret"), map[string]any{"model": slug, "messages": []any{map[string]any{"role": "assistant", "content": "keep context", "tool_calls": []any{map[string]any{"id": "pruning-old", "type": "function", "function": map[string]any{"name": "old", "arguments": "{}"}}}}, map[string]any{"role": "tool", "tool_call_id": "pruning-old", "content": "pruning-old-result"}, map[string]any{"role": "user", "content": "current task"}}, "max_tokens": 100, "olp_run_limits": map[string]any{"max_run_cost": scenario.limit}})
+			if status != scenario.status || relevanceCalls.Load()-before != scenario.decisions || status != http.StatusOK && !strings.Contains(fmt.Sprint(response), "run_cost_limit") {
+				t.Fatalf("bounded relevance: status=%d response=%v decisions=%d", status, response, relevanceCalls.Load()-before)
+			}
+			debits := mcpExecItems(t, h.want(owner, http.MethodGet, "/api/v1/execution-debits?api_key_id="+mcpExecString(t, key, "id"), nil, nil, http.StatusOK), "items")
+			if len(debits) != scenario.debits || slices.ContainsFunc(debits, func(item any) bool {
+				debit := item.(map[string]any)
+				return debit["state"] != "settled" || debit["run_id"] != debits[0].(map[string]any)["run_id"]
+			}) {
+				t.Fatalf("bounded relevance debits: %v", debits)
+			}
+			if !slices.ContainsFunc(debits, func(item any) bool {
+				debit := item.(map[string]any)
+				cost, err := strconv.ParseFloat(debit["observed_cost"].(string), 64)
+				return debit["kind"] == "tool" && err == nil && cost == 0.25
+			}) {
+				t.Fatalf("prior tool cost was not settled: %v", debits)
+			}
+		})
+	}
+	relevanceAttachments := h.want(owner, http.MethodGet, "/api/v1/guardrail-attachments", nil, nil, http.StatusOK)
+	relevanceAttachmentItems := mcpExecItems(t, relevanceAttachments, "items")
+	relevanceAttachmentIndex := slices.IndexFunc(relevanceAttachmentItems, func(item any) bool { return item.(map[string]any)["id"] == relevanceAttachment["id"] })
+	if relevanceAttachmentIndex < 0 {
+		t.Fatal("relevance attachment was not listed")
+	}
+	h.want(owner, http.MethodDelete, "/api/v1/guardrail-attachments/"+mcpExecString(t, relevanceAttachment, "id"), nil, withMatch(mcpExecItem(t, relevanceAttachmentItems, relevanceAttachmentIndex, relevanceAttachments), idem("workflow-relevance-detach")), http.StatusNoContent)
+	credential := h.want(owner, http.MethodPost, "/api/v1/guardrail-credentials", map[string]any{"name": "Recovery fixture", "project_id": project, "credential": map[string]any{"api_key": "fixture"}}, idem("workflow-recovery-credential"), http.StatusCreated)
+	compressor := h.want(owner, http.MethodPost, "/api/v1/guardrails", map[string]any{"name": "Recovery compression", "project_id": project, "type": "headroom", "configuration": map[string]any{"endpoint": "https://example.com", "credential_ref": credential["id"], "content_egress": true, "parameters": map[string]any{"model": "fixture"}}, "timeout_ms": 1000, "on_error": "fail_closed"}, idem("workflow-recovery-compressor"), http.StatusCreated)
+	h.want(owner, http.MethodPost, "/api/v1/guardrails/"+mcpExecString(t, compressor, "id")+"/activate", map[string]any{"revision_id": compressor["revision_id"]}, withMatch(compressor, idem("workflow-recovery-compressor-activate")), http.StatusNoContent)
+	compressionPolicy := h.want(owner, http.MethodPost, "/api/v1/guardrail-policies", map[string]any{"name": "Recovery policy", "project_id": project, "entries": []any{map[string]any{"guardrail_id": compressor["id"], "revision_id": compressor["revision_id"], "phase": "input", "action": "redact"}}}, idem("workflow-recovery-policy"), http.StatusCreated)
+	h.want(owner, http.MethodPost, "/api/v1/guardrail-policies/"+mcpExecString(t, compressionPolicy, "id")+"/activate", map[string]any{"revision_id": compressionPolicy["revision_id"]}, withMatch(compressionPolicy, idem("workflow-recovery-policy-activate")), http.StatusNoContent)
+	recoveryRoutes := h.want(owner, http.MethodGet, "/api/v1/routes", nil, nil, http.StatusOK)
+	recoveryRouteItems := mcpExecItems(t, recoveryRoutes, "items")
+	recoveryRouteIndex := slices.IndexFunc(recoveryRouteItems, func(item any) bool { return item.(map[string]any)["slug"] == slug })
+	if recoveryRouteIndex < 0 {
+		t.Fatal("recovery route was not listed")
+	}
+	recoveryRoute := mcpExecItem(t, recoveryRouteItems, recoveryRouteIndex, recoveryRoutes)
+	h.want(owner, http.MethodPost, "/api/v1/guardrail-attachments", map[string]any{"scope": "route", "scope_id": recoveryRoute["id"], "policy_revision_id": compressionPolicy["revision_id"], "order": 0}, idem("workflow-recovery-attachment"), http.StatusCreated)
+	recoveryKey := h.want(owner, http.MethodPost, "/api/v1/api-keys", map[string]any{"name": "Recovery caller", "project_id": project, "scopes": []string{"inference", "tools"}, "allowed_routes": []string{slug}, "allowed_toolsets": []string{toolsetID}}, idem("workflow-recovery-key"), http.StatusCreated)
+	h.Gateway.GuardrailEvaluator = guardrails.EvaluatorFunc(func(_ context.Context, _ guardrails.Revision, evaluation guardrails.Evaluation) (guardrails.Verdict, error) {
+		segment := evaluation.Segments[0]
+		return guardrails.Verdict{Action: guardrails.Redact, Redactions: []guardrails.Redaction{{Segment: segment.ID, Start: 0, End: len(segment.Text), Replacement: "compressed summary"}}}, nil
+	})
+	h.refresh()
+	recoveryWorkflow.Store(true)
+	const recoveryOriginal = "workflow-recovery-private-original"
+	recoveryStatus, recoveryBody, _ := h.gateway(http.MethodPost, "/v1/chat/completions", mcpExecString(t, recoveryKey, "secret"), map[string]any{"model": slug, "messages": []any{map[string]any{"role": "user", "content": recoveryOriginal}}, "max_tokens": 100})
+	if recoveryStatus != http.StatusOK || !strings.Contains(fmt.Sprint(recoveryBody), "recovered") {
+		t.Fatalf("recovery workflow failed: status=%d response=%v", recoveryStatus, recoveryBody)
+	}
+	recoveryDebits := h.want(owner, http.MethodGet, "/api/v1/execution-debits?api_key_id="+mcpExecString(t, recoveryKey, "id"), nil, nil, http.StatusOK)
+	items := mcpExecItems(t, recoveryDebits, "items")
+	if len(items) != 3 {
+		t.Fatalf("recovery workflow did not settle three steps: %v", items)
+	}
+	for _, raw := range items {
+		debit := raw.(map[string]any)
+		if debit["state"] != "settled" || debit["run_id"] != items[0].(map[string]any)["run_id"] {
+			t.Fatalf("recovery step was not settled in the workflow: %v", debit)
+		}
+		if debit["kind"] == "tool" && (!mcpAmountIsZero(t, debit, "observed_cost") || !mcpAmountIsZero(t, debit, "observed_charge")) {
+			t.Fatalf("recovery step had a nonzero cost: %v", debit)
+		}
+	}
+	recoveryApprovalWorkflow.Store(true)
+	approvalWorkflow.Store(true)
+	recoveryMessages := []any{map[string]any{"role": "user", "content": recoveryOriginal}}
+	pausedStatus, paused, _ := h.gateway(http.MethodPost, "/v1/chat/completions", mcpExecString(t, recoveryKey, "secret"), map[string]any{"model": slug, "messages": recoveryMessages, "max_tokens": 100})
+	recoveryToken, ok := paused["continuation_token"].(string)
+	if pausedStatus != http.StatusOK || !ok || recoveryToken == "" {
+		t.Fatalf("recovery approval did not pause: status=%d response=%v", pausedStatus, paused)
+	}
+	recoveryResume := map[string]any{"model": slug, "messages": recoveryMessages, "max_tokens": 100, "olp_approval": map[string]any{"continuation_token": recoveryToken, "approved": true, "arguments": map[string]any{"call-one": map[string]any{"query": argument}}}}
+	recoveryAttachment := h.want(owner, http.MethodPost, "/api/v1/guardrail-attachments", map[string]any{"scope": "toolset", "scope_id": toolsetID, "policy_revision_id": policy["revision_id"], "order": 0}, idem("workflow-recovery-approval-block"), http.StatusCreated)
+	h.refresh()
+	recoveryToolsBefore := toolCalls.Load()
+	blockedRecoveryStatus, blockedRecovery, _ := h.gateway(http.MethodPost, "/v1/chat/completions", mcpExecString(t, recoveryKey, "secret"), recoveryResume)
+	if blockedRecoveryStatus != http.StatusBadRequest || h.gatewayCode(blockedRecoveryStatus, blockedRecovery) != "guardrail_blocked" {
+		t.Fatalf("recovery approval did not stop at the guardrail: status=%d body=%v tools=%d", blockedRecoveryStatus, blockedRecovery, toolCalls.Load()-recoveryToolsBefore)
+	}
+	blockedDebits := mcpExecItems(t, h.want(owner, http.MethodGet, "/api/v1/execution-debits?api_key_id="+mcpExecString(t, recoveryKey, "id"), nil, nil, http.StatusOK), "items")
+	recoveryCount := func(debits []any) int {
+		return len(slices.Collect(func(yield func(any) bool) {
+			for _, item := range debits {
+				debit := item.(map[string]any)
+				if debit["kind"] == "tool" && mcpAmountIsZero(t, debit, "cost_bound") && !yield(item) {
+					return
+				}
+			}
+		}))
+	}
+	if recoveryCount(blockedDebits) != recoveryCount(items)+1 {
+		t.Fatalf("recovery was not settled before the blocked approval: %v", blockedDebits)
+	}
+	listedAttachments := h.want(owner, http.MethodGet, "/api/v1/guardrail-attachments", nil, nil, http.StatusOK)
+	listedItems := mcpExecItems(t, listedAttachments, "items")
+	attachmentIndex := slices.IndexFunc(listedItems, func(item any) bool { return item.(map[string]any)["id"] == recoveryAttachment["id"] })
+	if attachmentIndex < 0 {
+		t.Fatal("recovery guardrail attachment was not listed")
+	}
+	currentAttachment := mcpExecItem(t, listedItems, attachmentIndex, listedAttachments)
+	h.want(owner, http.MethodDelete, "/api/v1/guardrail-attachments/"+recoveryAttachment["id"].(string), nil, withMatch(currentAttachment, idem("workflow-recovery-approval-unblock")), http.StatusNoContent)
+	h.refresh()
+	resumedRecoveryStatus, resumedRecovery, _ := h.gateway(http.MethodPost, "/v1/chat/completions", mcpExecString(t, recoveryKey, "secret"), recoveryResume)
+	if resumedRecoveryStatus != http.StatusOK || !strings.Contains(fmt.Sprint(resumedRecovery), "recovered") {
+		t.Fatalf("recovery approval did not resume: status=%d response=%v", resumedRecoveryStatus, resumedRecovery)
+	}
+	resumedDebits := mcpExecItems(t, h.want(owner, http.MethodGet, "/api/v1/execution-debits?api_key_id="+mcpExecString(t, recoveryKey, "id"), nil, nil, http.StatusOK), "items")
+	if recoveryCount(resumedDebits) != recoveryCount(blockedDebits) {
+		t.Fatalf("recovery was settled again after approval retry: before=%v after=%v", blockedDebits, resumedDebits)
+	}
+	for _, table := range []string{"agent_runs", "agent_steps", "execution_debits", "mcp_tool_calls", "attempt_usage_facts", "requests", "attempts", "export_records"} {
+		var leaks int
+		if err := h.Pool.QueryRow(t.Context(), "SELECT count(*) FROM olp."+table+" AS row WHERE row_to_json(row)::text LIKE '%' || $1 || '%'", recoveryOriginal).Scan(&leaks); err != nil || leaks != 0 {
+			t.Fatalf("recovery content reached %s: count=%d error=%v", table, leaks, err)
+		}
 	}
 	serverToolset := h.want(owner, http.MethodPost, "/api/v1/toolsets", map[string]any{"project_id": project, "name": "Server retirement toolset", "toolset": agentcontract.Toolset{Tools: []agentcontract.Tool{tool}}}, idem("workflow-server-retirement-toolset"), http.StatusCreated)
 	serverToolsetID := mcpExecString(t, serverToolset, "id")

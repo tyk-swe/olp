@@ -22,7 +22,9 @@ import (
 	"github.com/tyk-swe/olp/internal/agentcontract"
 	"github.com/tyk-swe/olp/internal/consumerauth"
 	"github.com/tyk-swe/olp/internal/egress"
+	"github.com/tyk-swe/olp/internal/mcpgrants"
 	"github.com/tyk-swe/olp/internal/runtime"
+	"github.com/tyk-swe/olp/internal/workload"
 )
 
 const maxCardBytes = 1 << 20
@@ -33,7 +35,16 @@ type Runtime interface {
 	AuthorizeAgentResource(access.Authority, string, string, string, string) error
 }
 
+type AgentGrants interface {
+	AgentBinding(access.Authority, string, agentcontract.Definition) (string, error)
+	StartAgent(context.Context, access.Authority, string, agentcontract.Definition) (mcpgrants.Handoff, error)
+	ResolveAgent(context.Context, access.Authority, string, agentcontract.Definition) ([]byte, string, error)
+	ResolveAgentEntra(context.Context, access.Authority, string, agentcontract.Definition, workload.UserAssertion) ([]byte, string, error)
+	ResolveAgentTask(context.Context, string, string, string, string, agentcontract.Definition) ([]byte, error)
+}
+
 type Server struct {
+	Grants         AgentGrants
 	Ledger         *Ledger
 	Runtime        Runtime
 	Egress         *egress.Policy
@@ -44,7 +55,48 @@ type Server struct {
 
 func (s *Server) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /a2a/{agent}/.well-known/agent-card.json", s.getCard)
-	mux.HandleFunc("POST /a2a/{agent}", s.rpc)
+	mux.HandleFunc("POST /a2a/{agent}/grant-enrollments", s.startGrantEnrollment)
+	mux.HandleFunc("POST /a2a/{agent}", s.withAssertion(s.rpc))
+}
+
+func (s *Server) withAssertion(handler http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := consumerauth.Bearer(r.Header.Get("Authorization"))
+		handler(w, r.WithContext(workload.WithAssertion(r.Context(), raw)))
+	}
+}
+
+func (s *Server) startGrantEnrollment(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
+	authority, revision, _, status := s.resolve(r)
+	if status != 0 {
+		http.Error(w, http.StatusText(status), status)
+		return
+	}
+	if authority.WorkloadIssuerID == nil || authority.EndUserDigest == "" {
+		http.Error(w, "A verified workload identity with an end user is required", http.StatusForbidden)
+		return
+	}
+	if s.Grants == nil {
+		http.Error(w, "Grant enrollment unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	if revision.Definition.Agent.OAuth == nil {
+		http.Error(w, "Agent OAuth is not configured", http.StatusBadRequest)
+		return
+	}
+	if revision.Definition.Agent.OAuth.EntraOBO != nil {
+		http.Error(w, "Entra authorization uses a verified workload assertion", http.StatusBadRequest)
+		return
+	}
+	handoff, err := s.Grants.StartAgent(r.Context(), authority, revision.PublicationID, *revision.Definition.Agent)
+	if err != nil {
+		http.Error(w, "Agent changed; start enrollment again", http.StatusConflict)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	_ = json.NewEncoder(w).Encode(handoff)
 }
 
 func (s *Server) resolve(r *http.Request) (access.Authority, agentcontract.Revision, *runtime.Release, int) {
@@ -55,6 +107,22 @@ func (s *Server) resolve(r *http.Request) (access.Authority, agentcontract.Revis
 	authority, failure := consumerauth.Authenticate(s.Runtime, r, token, "agents", s.TrustedProxies, time.Now())
 	if failure != nil {
 		return access.Authority{}, agentcontract.Revision{}, nil, failure.Status
+	}
+	if authority.EndUserDigest == "" {
+		if authority.Policy.EndUserSource == nil {
+			if authority.ProjectEndUserPolicy != nil || authority.Policy.EndUserPolicy != nil {
+				return access.Authority{}, agentcontract.Revision{}, nil, http.StatusBadRequest
+			}
+		} else {
+			digest, failure := consumerauth.HeaderEndUserDigest(s.Runtime, r, authority)
+			if failure != nil {
+				return access.Authority{}, agentcontract.Revision{}, nil, failure.Status
+			}
+			authority.EndUserDigest = digest
+		}
+	}
+	if !authority.AllowsEndUser(authority.EndUserDigest) {
+		return access.Authority{}, agentcontract.Revision{}, nil, http.StatusForbidden
 	}
 	if authority.ProjectID == nil {
 		return access.Authority{}, agentcontract.Revision{}, nil, http.StatusNotFound
@@ -84,7 +152,7 @@ func (s *Server) getCard(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, http.StatusText(status), status)
 		return
 	}
-	original, err := s.loadCard(r.Context(), *revision.Definition.Agent)
+	original, err := s.loadCard(r.Context(), *revision.Definition.Agent, nil, false)
 	if err != nil {
 		http.Error(w, "Agent card unavailable", http.StatusBadGateway)
 		return
@@ -129,7 +197,68 @@ func publicSkills(skills []protocol.AgentSkill) []protocol.AgentSkill {
 	})
 }
 
-func (s *Server) loadCard(ctx context.Context, definition agentcontract.Definition) (protocol.AgentCard, error) {
+func (s *Server) agentCredential(ctx context.Context, authority access.Authority, revision agentcontract.Revision) ([]byte, string, error) {
+	if revision.Definition.Agent == nil || revision.Definition.Agent.OAuth == nil {
+		return nil, "", nil
+	}
+	if s.Grants == nil {
+		return nil, "", errors.New("agent grant unavailable")
+	}
+	if revision.Definition.Agent.OAuth.EntraOBO != nil {
+		assertion, err := s.verifyAgentEntra(ctx, authority, *revision.Definition.Agent)
+		if err != nil {
+			return nil, "", errors.New("agent grant unavailable")
+		}
+		credential, binding, err := s.Grants.ResolveAgentEntra(ctx, authority, revision.PublicationID, *revision.Definition.Agent, assertion)
+		if err != nil || len(credential) == 0 || binding == "" {
+			return nil, "", errors.New("agent grant unavailable")
+		}
+		return credential, binding, nil
+	}
+	credential, binding, err := s.Grants.ResolveAgent(ctx, authority, revision.PublicationID, *revision.Definition.Agent)
+	if err != nil || len(credential) == 0 || binding == "" {
+		return nil, "", errors.New("agent grant unavailable")
+	}
+	return credential, binding, nil
+}
+
+func (s *Server) verifyAgentEntra(ctx context.Context, authority access.Authority, agent agentcontract.Definition) (workload.UserAssertion, error) {
+	verifier, ok := s.Runtime.(interface {
+		VerifyEntraUser(context.Context, string, access.Authority, string, string) (workload.UserAssertion, error)
+	})
+	if !ok {
+		return workload.UserAssertion{}, errors.New("agent grant unavailable")
+	}
+	return verifier.VerifyEntraUser(ctx, workload.RequestAssertion(ctx), authority, agent.OAuth.EntraOBO.Issuer, agent.OAuth.ClientID)
+}
+
+func (s *Server) agentTaskCredential(ctx context.Context, authority access.Authority, revision agentcontract.Revision, binding string) ([]byte, error) {
+	if revision.Definition.Agent == nil {
+		return nil, errors.New("agent grant unavailable")
+	}
+	agent := *revision.Definition.Agent
+	if agent.OAuth == nil && binding == "" {
+		return nil, nil
+	}
+	if agent.OAuth == nil || binding == "" || s.Grants == nil {
+		return nil, errors.New("agent grant unavailable")
+	}
+	if agent.OAuth.EntraOBO != nil {
+		if _, err := s.verifyAgentEntra(ctx, authority, agent); err != nil {
+			return nil, errors.New("agent grant unavailable")
+		}
+	}
+	return s.Grants.ResolveAgentTask(ctx, binding, revision.PublicationID, revision.ProjectID, revision.ID, agent)
+}
+
+func (s *Server) loadCardWithCredential(ctx context.Context, definition agentcontract.Definition, oauthCredential []byte) (protocol.AgentCard, error) {
+	return s.loadCard(ctx, definition, oauthCredential, true)
+}
+
+func (s *Server) loadCard(ctx context.Context, definition agentcontract.Definition, oauthCredential []byte, requireGrant bool) (protocol.AgentCard, error) {
+	if requireGrant && definition.OAuth != nil && len(oauthCredential) == 0 {
+		return protocol.AgentCard{}, errors.New("agent grant unavailable")
+	}
 	if s.Egress == nil {
 		return protocol.AgentCard{}, errors.New("egress unavailable")
 	}
@@ -142,7 +271,9 @@ func (s *Server) loadCard(ctx context.Context, definition agentcontract.Definiti
 	if err != nil {
 		return protocol.AgentCard{}, err
 	}
-	if definition.CredentialID != nil {
+	if len(oauthCredential) > 0 {
+		req.Header.Set("Authorization", "Bearer "+string(oauthCredential))
+	} else if definition.OAuth == nil && definition.CredentialID != nil {
 		if s.Credentials == nil {
 			return protocol.AgentCard{}, errors.New("credential unavailable")
 		}
@@ -189,7 +320,7 @@ func cardBindingMatches(version string, binding *protocol.AgentInterface) bool {
 }
 
 func (s *Server) ValidateCard(ctx context.Context, definition agentcontract.Definition) error {
-	_, err := s.loadCard(ctx, definition)
+	_, err := s.loadCard(ctx, definition, nil, false)
 	return err
 }
 

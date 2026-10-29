@@ -1,6 +1,7 @@
 import { flushSync, mount, unmount } from 'svelte';
 import { QueryClient } from '@tanstack/svelte-query';
 import { expect, it, onTestFinished, vi } from 'vitest';
+import { ApiProblem } from '$lib/api/http';
 import * as routes from './api';
 import * as agents from '$lib/features/agents/api';
 import * as models from '$lib/features/providers/api/models';
@@ -244,4 +245,71 @@ it('opens a route with no saved toolsets and saves a newly selected toolset', as
     tool_execution: 'gateway',
     toolsets: [selected]
   });
+});
+
+it('keeps unsaved route edits after a conflict until the user reloads', async () => {
+  vi.clearAllMocks();
+  const original = buildRoute([]);
+  const updated = {
+    ...original,
+    slug: 'updated-by-another-user',
+    etag: 'new-etag'
+  };
+  vi.mocked(routes.getRouteDraft)
+    .mockResolvedValueOnce(original)
+    .mockResolvedValue(updated);
+  vi.mocked(routes.replaceRouteDraft).mockRejectedValueOnce(
+    new ApiProblem({
+      type: 'https://openllmproxy.dev/problems/etag_mismatch',
+      title: 'Changed elsewhere',
+      status: 412
+    })
+  );
+  vi.mocked(routes.getRoutingPolicy).mockRejectedValue(
+    new Error('No route policy')
+  );
+  vi.mocked(models.listProviderModelInventory).mockResolvedValue([]);
+  vi.mocked(agents.listPublications).mockResolvedValue([]);
+  const host = document.createElement('div');
+  document.body.append(host);
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false } }
+  });
+  const component = mount(RouteDraftEditorProbe, {
+    target: host,
+    props: { client }
+  });
+  onTestFinished(async () => {
+    await unmount(component);
+    client.clear();
+    host.remove();
+  });
+  await vi.waitFor(() =>
+    expect(host.querySelector<HTMLInputElement>('#route-slug')?.value).toBe(
+      'workflow'
+    )
+  );
+  const slug = host.querySelector<HTMLInputElement>('#route-slug')!;
+  slug.value = 'my-unsaved-change';
+  slug.dispatchEvent(new Event('input', { bubbles: true }));
+  flushSync();
+  const button = (name: string) =>
+    [...host.querySelectorAll<HTMLButtonElement>('button')].find(
+      (candidate) => candidate.textContent?.trim() === name
+    );
+  expect(button('Simulate order')?.disabled).toBe(true);
+  expect(button('Activate route')?.disabled).toBe(true);
+  host
+    .querySelector('form')!
+    .dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+  await vi.waitFor(() =>
+    expect(host.textContent).toContain('This item changed elsewhere')
+  );
+  expect(slug.value).toBe('my-unsaved-change');
+  button('Reload')!.click();
+  await vi.waitFor(() =>
+    expect(host.querySelector<HTMLInputElement>('#route-slug')?.value).toBe(
+      'updated-by-another-user'
+    )
+  );
 });

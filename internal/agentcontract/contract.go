@@ -10,11 +10,13 @@ import (
 	"fmt"
 	"io"
 	"math/big"
+	"net/url"
 	"regexp"
 	"slices"
 	"strings"
 
 	"github.com/google/uuid"
+	grantconfig "github.com/tyk-swe/olp/internal/grants/config"
 	"github.com/tyk-swe/olp/internal/prompts"
 )
 
@@ -30,18 +32,19 @@ type Toolset struct {
 	Tools []Tool `json:"tools"`
 }
 type Definition struct {
-	Protocol               string   `json:"protocol"`
-	Endpoint               string   `json:"endpoint"`
-	CardDigest             string   `json:"card_digest"`
-	CredentialID           *string  `json:"credential_id,omitempty"`
-	ToolsetRevisions       []string `json:"toolset_revisions"`
-	RouteRevisions         []string `json:"route_revisions"`
-	PricingRevisionID      string   `json:"pricing_revision_id"`
-	MaxCost                string   `json:"max_cost"`
-	MessagePrice           string   `json:"message_price,omitempty"`
-	RemoteWorkBoundSeconds *int     `json:"remote_work_bound_seconds,omitempty"`
-	MaxTaskContinuations   *int     `json:"max_task_continuations,omitempty"`
-	TaskDeadlineSeconds    *int     `json:"task_deadline_seconds,omitempty"`
+	Protocol               string             `json:"protocol"`
+	Endpoint               string             `json:"endpoint"`
+	CardDigest             string             `json:"card_digest"`
+	OAuth                  *grantconfig.OAuth `json:"oauth,omitempty"`
+	CredentialID           *string            `json:"credential_id,omitempty"`
+	ToolsetRevisions       []string           `json:"toolset_revisions"`
+	RouteRevisions         []string           `json:"route_revisions"`
+	PricingRevisionID      string             `json:"pricing_revision_id"`
+	MaxCost                string             `json:"max_cost"`
+	MessagePrice           string             `json:"message_price,omitempty"`
+	RemoteWorkBoundSeconds *int               `json:"remote_work_bound_seconds,omitempty"`
+	MaxTaskContinuations   *int               `json:"max_task_continuations,omitempty"`
+	TaskDeadlineSeconds    *int               `json:"task_deadline_seconds,omitempty"`
 }
 type Draft struct {
 	ProjectID string              `json:"project_id,omitempty"`
@@ -126,6 +129,15 @@ func (d Draft) Validate(kind string) error {
 		}
 		if a.CredentialID != nil && !validID(*a.CredentialID) {
 			return invalid("credential_id", "Use an agent credential reference.")
+		}
+		if a.OAuth != nil && (!a.OAuth.Valid() || (a.OAuth.EntraOBO == nil && a.CredentialID != nil)) {
+			return invalid("oauth", "Use browser or device OAuth without a static credential, or supply an Entra client secret.")
+		}
+		if a.OAuth != nil && a.OAuth.EntraOBO != nil {
+			issuer, err := url.Parse(a.OAuth.EntraOBO.Issuer)
+			if err != nil || issuer.Host == "" || (issuer.Scheme != "https" && issuer.Scheme != "http") || issuer.User != nil || issuer.RawQuery != "" || issuer.Fragment != "" {
+				return invalid("oauth", "Supply the exact registered workload issuer URL.")
+			}
 		}
 		for _, ids := range [][]string{a.ToolsetRevisions, a.RouteRevisions} {
 			if len(ids) > 100 {

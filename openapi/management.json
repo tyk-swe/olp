@@ -22322,7 +22322,8 @@
               "xecguard",
               "zscaler_ai_guard",
               "semantic_guard",
-              "decision_model"
+              "decision_model",
+              "typesafe"
             ]
           },
           "project_id": {
@@ -22469,7 +22470,8 @@
               "xecguard",
               "zscaler_ai_guard",
               "semantic_guard",
-              "decision_model"
+              "decision_model",
+              "typesafe"
             ]
           },
           "etag": {
@@ -22678,7 +22680,8 @@
               "xecguard",
               "zscaler_ai_guard",
               "semantic_guard",
-              "decision_model"
+              "decision_model",
+              "typesafe"
             ]
           },
           "policy": {
@@ -26924,11 +26927,15 @@
           },
           "card_digest": {
             "type": "string",
-            "pattern": "^[a-f0-9]{64}$"
+            "pattern": "^[a-f0-9]{64}$",
+            "description": "SHA-256 digest of the reviewed agent card. An OAuth agent's card must be publicly readable for publication and discovery. Task requests use the caller's grant."
           },
           "credential_id": {
             "type": "string",
             "format": "uuid"
+          },
+          "oauth": {
+            "$ref": "#/components/schemas/AgentOAuthConfiguration"
           },
           "toolset_revisions": {
             "type": "array",
@@ -27081,6 +27088,13 @@
             "maxLength": 8192,
             "writeOnly": true,
             "description": "Bearer credential; absent preserves, null removes. Never returned."
+          },
+          "entra_client_secret": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 16384,
+            "writeOnly": true,
+            "description": "Replacement Entra OBO middle-tier client secret. Required when enabling Entra or changing the issuer, client ID, or token endpoint. Never returned."
           }
         },
         "required": [
@@ -28241,10 +28255,18 @@
           },
           "identity": {
             "$ref": "#/components/schemas/MCPGrantIdentity"
+          },
+          "agent_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "entra_credential_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Non-secret identifier for the agent's bound Entra client credential."
           }
         },
         "required": [
-          "server_id",
           "project_id",
           "endpoint",
           "oauth",
@@ -28926,6 +28948,61 @@
             "pattern": "^[0-9]{1,12}(\\.[0-9]{1,12})?$"
           }
         }
+      },
+      "AgentOAuthConfiguration": {
+        "type": [
+          "object",
+          "null"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "client_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "audience": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2048
+          },
+          "scopes": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 32,
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            }
+          },
+          "authorization_endpoint": {
+            "type": "string",
+            "format": "uri",
+            "maxLength": 2048,
+            "description": "Required for browser and device OAuth."
+          },
+          "token_endpoint": {
+            "type": "string",
+            "format": "uri",
+            "maxLength": 2048
+          },
+          "device_authorization_endpoint": {
+            "type": "string",
+            "format": "uri",
+            "maxLength": 2048
+          },
+          "entra_obo": {
+            "$ref": "#/components/schemas/MCPEntraOBO"
+          }
+        },
+        "required": [
+          "client_id",
+          "audience",
+          "scopes",
+          "token_endpoint"
+        ],
+        "description": "OAuth grants are bound to the approved agent endpoint and caller identity. Browser and device flows use personal enrollment. Entra OBO uses verified workload assertions and a sealed middle-tier client secret."
       }
     },
     "securitySchemes": {
@@ -66836,6 +66913,74 @@
           }
         ],
         "summary": "List eligible agents and routes for member consent"
+      }
+    },
+    "/api/v1/agents/{agent_id}/grant-enrollments": {
+      "post": {
+        "operationId": "start_agent_grant_enrollment",
+        "tags": [
+          "agents"
+        ],
+        "summary": "start agent grant enrollment",
+        "security": [
+          {
+            "sessionCookie": [
+              "keys"
+            ],
+            "csrfToken": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Enrollment or grant updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MCPGrantHandoff"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Outside caller authority"
+          },
+          "404": {
+            "description": "Not visible"
+          },
+          "409": {
+            "description": "Enrollment already used or binding changed"
+          },
+          "410": {
+            "description": "Enrollment expired"
+          },
+          "422": {
+            "description": "Invalid enrollment"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StartMCPGrantEnrollmentRequest"
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ]
       }
     }
   },

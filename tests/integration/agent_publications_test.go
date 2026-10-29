@@ -6,15 +6,19 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/ed25519"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
 	"iter"
+	"log/slog"
 	"math/big"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"reflect"
 	"slices"
 	"strconv"
@@ -30,15 +34,23 @@ import (
 	"github.com/a2aproject/a2a-go/v2/a2aclient"
 	"github.com/a2aproject/a2a-go/v2/a2acompat/a2av0"
 	"github.com/a2aproject/a2a-go/v2/a2asrv"
+	jose "github.com/go-jose/go-jose/v4"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/tyk-swe/olp/internal/a2a"
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/agentcontract"
 	"github.com/tyk-swe/olp/internal/agents"
+	"github.com/tyk-swe/olp/internal/gateway"
 	"github.com/tyk-swe/olp/internal/limits"
+	"github.com/tyk-swe/olp/internal/mcp"
+	"github.com/tyk-swe/olp/internal/mcpgrants"
+	"github.com/tyk-swe/olp/internal/mcpservers"
 	"github.com/tyk-swe/olp/internal/prompts"
+	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/secrets"
+	"github.com/tyk-swe/olp/internal/testutil"
 	inferencesdk "github.com/tyk-swe/olp/sdk/inference"
 )
 
@@ -646,6 +658,352 @@ func (w a2aContentTypeWriter) WriteHeader(status int) {
 }
 
 func (w a2aContentTypeWriter) Flush() { w.ResponseWriter.(http.Flusher).Flush() }
+
+func TestA2ATaskCapabilityAuthorizesOwnerCallback(t *testing.T) {
+	h := newAccessHarness(t)
+	owner := h.owner()
+	project := createProject(h, owner, "A2A callbacks")
+	provider := newOpenAIFixture(t, "")
+	model := activeAzureProviderInProject(t, h, owner, "Callback provider", provider.URL, &project, []any{
+		map[string]any{"operation": "generation", "surface": "openai", "mode": "unary"},
+		map[string]any{"operation": "generation", "surface": "anthropic", "mode": "unary"},
+		map[string]any{"operation": "generation", "surface": "gemini", "mode": "unary"},
+		map[string]any{"operation": "generation", "surface": "gemini", "mode": "streaming"},
+	})
+	draft := h.want(owner, http.MethodPost, "/api/v1/route-drafts", map[string]any{"project_id": project, "slug": "callback-chat", "overall_timeout_ms": 10000, "max_attempts": 2, "retry": map[string]any{"upstream_server": map[string]any{"max_retries": 1, "base_backoff_ms": 1, "max_backoff_ms": 1}}, "fidelity": map[string]any{"mode": "transformed"}, "targets": []any{map[string]any{"provider_id": model["id"], "provider_model": vendorModel, "priority": 0, "weight": 1, "timeout_ms": 5000}}}, idem("callback-route"), http.StatusCreated)
+	path := "/api/v1/route-drafts/" + draft["id"].(string)
+	validated := h.want(owner, http.MethodPost, path+"/validate", nil, etagHeader(draft), http.StatusOK)
+	h.want(owner, http.MethodPost, path+"/activate", nil, withMatch(validated, idem("callback-activate")), http.StatusOK)
+	unpinned := h.want(owner, http.MethodPost, "/api/v1/route-drafts", map[string]any{"project_id": project, "slug": "callback-unpinned", "overall_timeout_ms": 10000, "max_attempts": 1, "fidelity": map[string]any{"mode": "transformed"}, "targets": []any{map[string]any{"provider_id": model["id"], "provider_model": vendorModel, "priority": 0, "weight": 1, "timeout_ms": 5000}}}, idem("callback-unpinned-route"), http.StatusCreated)
+	unpinnedPath := "/api/v1/route-drafts/" + unpinned["id"].(string)
+	unpinnedValidated := h.want(owner, http.MethodPost, unpinnedPath+"/validate", nil, etagHeader(unpinned), http.StatusOK)
+	h.want(owner, http.MethodPost, unpinnedPath+"/activate", nil, withMatch(unpinnedValidated, idem("callback-unpinned-activate")), http.StatusOK)
+	type toolArguments struct {
+		Query string `json:"query"`
+	}
+	var toolCalls atomic.Int64
+	sdkProtocols := mcpsdk.SupportedProtocolVersions()
+	protocols := slices.Collect(func(yield func(string) bool) {
+		for _, version := range mcpservers.SupportedProtocols() {
+			if slices.Contains(sdkProtocols, version) && !yield(version) {
+				return
+			}
+		}
+	})
+	if len(protocols) == 0 {
+		t.Fatal("MCP fixture and gateway have no common protocol version")
+	}
+	reference := mcpsdk.NewServer(&mcpsdk.Implementation{Name: "callback-tools", Version: "1"}, &mcpsdk.ServerOptions{SupportedProtocolVersions: protocols})
+	mcpsdk.AddTool(reference, &mcpsdk.Tool{Name: "echo", Description: "Return the supplied text"}, func(_ context.Context, _ *mcpsdk.CallToolRequest, input toolArguments) (*mcpsdk.CallToolResult, any, error) {
+		toolCalls.Add(1)
+		return &mcpsdk.CallToolResult{Content: []mcpsdk.Content{&mcpsdk.TextContent{Text: input.Query}}}, nil, nil
+	})
+	toolUpstream := httptest.NewServer(referenceServerHandler(routing.MCPStreamableHTTP, reference))
+	defer toolUpstream.Close()
+	registered := h.want(owner, http.MethodPost, "/api/v1/mcp-servers", map[string]any{"name": "Callback tools", "project_id": project, "transport": "streamable_http", "endpoint": toolUpstream.URL, "enabled": true, "unit_price": "0.10"}, idem("callback-tools-server"), http.StatusCreated)
+	serverID := registered["id"].(string)
+	tool := agentcontract.Tool{ServerID: serverID, RevisionID: registered["revision_id"].(string), CatalogDigest: mcpExecObject(t, registered, "catalog")["digest"].(string), Name: "echo", Alias: agentcontract.ToolAlias(serverID, "echo")}
+	createToolset := func(name string) (string, string) {
+		t.Helper()
+		created := h.want(owner, http.MethodPost, "/api/v1/toolsets", map[string]any{"project_id": project, "name": name, "toolset": map[string]any{"tools": []agentcontract.Tool{tool}}}, idem(name+"-create"), http.StatusCreated)
+		id := created["id"].(string)
+		published := h.want(owner, http.MethodPost, "/api/v1/toolsets/"+id+"/publish", nil, withMatch(created, idem(name+"-publish")), http.StatusOK)
+		return id, published["revision_id"].(string)
+	}
+	toolsetID, toolsetRevision := createToolset("callback-pinned")
+	foreignToolsetID, _ := createToolset("callback-unpinned")
+	h.refresh()
+	routeRevision := h.Runtime.Release().Snapshot.Routes["callback-chat"].RevisionID
+	callbackStatus := make(chan int, 1)
+	callbackBody := make(chan string, 1)
+	seenCapability := make(chan string, 1)
+	cardFor := func(endpoint string) []byte {
+		card, err := json.Marshal(protocol.AgentCard{Name: "Callback agent", Description: "Callback fixture", Version: "1", SupportedInterfaces: []*protocol.AgentInterface{{URL: endpoint, ProtocolBinding: protocol.TransportProtocolJSONRPC, ProtocolVersion: protocol.Version}}, Capabilities: protocol.AgentCapabilities{}, DefaultInputModes: []string{"text"}, DefaultOutputModes: []string{"text"}, Skills: []protocol.AgentSkill{}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return card
+	}
+	agentHandler := a2asrv.NewJSONRPCHandler(a2asrv.NewHandler(a2asrv.AgentExecutorFunc(func(_ context.Context, execution *a2asrv.ExecutorContext) iter.Seq2[protocol.Event, error] {
+		return func(yield func(protocol.Event, error) bool) {
+			yield(protocol.NewSubmittedTask(execution, execution.Message), nil)
+		}
+	})))
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/.well-known/agent-card.json" {
+			_, _ = w.Write(cardFor("http://" + r.Host + "/rpc"))
+			return
+		}
+		capability := r.Header.Get("X-OLP-Task-Capability")
+		seenCapability <- capability
+		request, err := http.NewRequestWithContext(r.Context(), http.MethodPost, h.HTTP.URL+"/v1/chat/completions", strings.NewReader(`{"model":"callback-chat","messages":[{"role":"user","content":"hello"}]}`))
+		if err != nil {
+			callbackStatus <- 0
+			callbackBody <- err.Error()
+			return
+		}
+		request.Header.Set("Content-Type", "application/json")
+		request.Header.Set("Authorization", "Bearer "+capability)
+		request.Header.Set("X-OLP-End-User", "forged-callback-user")
+		response, err := http.DefaultClient.Do(request)
+		if err != nil {
+			callbackStatus <- 0
+			callbackBody <- err.Error()
+			return
+		}
+		body, _ := io.ReadAll(response.Body)
+		response.Body.Close()
+		callbackBody <- string(body)
+		callbackStatus <- response.StatusCode
+		agentHandler.ServeHTTP(w, r)
+	}))
+	t.Cleanup(upstream.Close)
+	var user string
+	if err := h.Pool.QueryRow(t.Context(), `SELECT id::text FROM olp.users WHERE email='owner@example.com'`).Scan(&user); err != nil {
+		t.Fatal(err)
+	}
+	pricing := acctID(t)
+	acctExec(t, h.Pool, `INSERT INTO olp.pricing_revisions(id,revision,effective_at,created_by) VALUES($1,1,now(),$2)`, pricing, user)
+	digest := sha256.Sum256(cardFor(upstream.URL + "/rpc"))
+	created := h.want(owner, http.MethodPost, "/api/v1/agents", map[string]any{"project_id": project, "name": "callback agent", "agent": map[string]any{"protocol": "a2a-1.0.0", "endpoint": upstream.URL + "/rpc", "card_digest": hex.EncodeToString(digest[:]), "toolset_revisions": []string{toolsetRevision}, "route_revisions": []string{routeRevision}, "pricing_revision_id": pricing, "max_cost": "1", "message_price": "0.25", "max_task_continuations": 8}}, idem("callback-agent"), http.StatusCreated)
+	agent := created["id"].(string)
+	h.want(owner, http.MethodPost, "/api/v1/agents/"+agent+"/publish", nil, withMatch(created, idem("callback-publish")), http.StatusOK)
+	keyRecord := h.want(owner, http.MethodPost, "/api/v1/api-keys", map[string]any{"name": "callback owner", "project_id": project, "scopes": []string{"agents", "inference", "tools"}, "allowed_agents": []string{agent}, "allowed_routes": []string{"callback-chat", "callback-unpinned"}, "allowed_toolsets": []string{toolsetID, foreignToolsetID}, "requests_per_minute": 10, "end_user_source": "header", "end_user_policy": map[string]any{"defaults": map[string]any{"requests_per_minute": 10}}}, idem("callback-owner"), http.StatusCreated)
+	key := keyRecord["secret"].(string)
+	client, prefix, _ := acctKeyspace(t)
+	limiter, err := limits.New(client, strings.TrimSuffix(prefix, ":"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.A2A.Ledger = &a2a.Ledger{Pool: h.Pool, Store: &limits.DebitStore{Pool: h.Pool, Limiter: limiter}, Auth: h.AuthKey}
+	toolServer := &mcp.Server{Runtime: h.Runtime, Egress: &h.Policy, Auth: h.AuthKey, Limiter: limiter, Ledger: &mcp.DurableLedger{Pool: h.Pool, Store: &limits.DebitStore{Pool: h.Pool, Limiter: limiter}, Auth: h.AuthKey}}
+	h.Gateway.Admission = gateway.NewAdmission(limiter, nil, slog.New(slog.DiscardHandler))
+	toolMux := http.NewServeMux()
+	toolServer.Register(toolMux)
+	toolGateway := httptest.NewServer(toolMux)
+	defer toolGateway.Close()
+	sink := &captureSink{}
+	h.Gateway.Sink = sink
+	h.refresh()
+	initialCalls := provider.chatCalls.Load()
+	initialResponses := provider.responseCalls.Load()
+	request, err := http.NewRequestWithContext(t.Context(), http.MethodPost, h.HTTP.URL+"/a2a/"+agent, strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"SendMessage","params":{"message":{"messageId":"callback","role":"ROLE_USER","parts":[{"text":"hello"}]},"configuration":{"returnImmediately":true}}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Authorization", "Bearer "+key)
+	request.Header.Set("A2A-Version", "1.0")
+	request.Header.Set("X-OLP-End-User", "original-user")
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sendResult struct {
+		Result json.RawMessage `json:"result"`
+		Error  json.RawMessage `json:"error"`
+	}
+	decodeErr := json.NewDecoder(response.Body).Decode(&sendResult)
+	response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("agent send returned %d", response.StatusCode)
+	}
+	if decodeErr != nil || len(sendResult.Error) != 0 || len(sendResult.Result) == 0 {
+		t.Fatalf("agent send did not settle: result=%s error=%s decode=%v", sendResult.Result, sendResult.Error, decodeErr)
+	}
+	capability := <-seenCapability
+	if capability == "" || capability == key {
+		t.Fatal("agent did not receive a distinct task capability")
+	}
+	if status := <-callbackStatus; status != http.StatusOK {
+		t.Fatalf("task owner callback returned %d: %s", status, <-callbackBody)
+	}
+	<-callbackBody
+	callback := func(token, model string) int {
+		t.Helper()
+		body := fmt.Sprintf(`{"model":%q,"messages":[{"role":"user","content":"hello"}]}`, model)
+		request, err := http.NewRequestWithContext(t.Context(), http.MethodPost, h.HTTP.URL+"/v1/chat/completions", strings.NewReader(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		request.Header.Set("Content-Type", "application/json")
+		request.Header.Set("X-OLP-End-User", "forged-callback-user")
+		if token != "" {
+			request.Header.Set("Authorization", "Bearer "+token)
+		}
+		response, err := http.DefaultClient.Do(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		response.Body.Close()
+		return response.StatusCode
+	}
+	keyPath := "/api/v1/api-keys/" + keyRecord["id"].(string)
+	currentKey := h.want(owner, http.MethodGet, keyPath, nil, nil, http.StatusOK)
+	currentKey = h.want(owner, http.MethodPatch, keyPath, map[string]any{"requests_per_minute": 1}, withMatch(currentKey, idem("callback-limit")), http.StatusOK)
+	h.refresh()
+	if status := callback(capability, "callback-chat"); status != http.StatusTooManyRequests {
+		t.Fatalf("owner budget did not refuse callback: %d", status)
+	}
+	h.want(owner, http.MethodPatch, keyPath, map[string]any{"requests_per_minute": 10}, withMatch(currentKey, idem("callback-limit-restore")), http.StatusOK)
+	h.refresh()
+	for _, token := range []string{"", "olpt_foreign"} {
+		if status := callback(token, "callback-chat"); status != http.StatusUnauthorized {
+			t.Fatalf("missing or foreign capability returned %d", status)
+		}
+	}
+	if status := callback(capability, "callback-unpinned"); status != http.StatusForbidden {
+		t.Fatalf("unpinned route returned %d", status)
+	}
+	callTool := func(token, toolset, callID string) int {
+		t.Helper()
+		body, _ := json.Marshal(map[string]any{"toolset_id": toolset, "name": tool.Alias, "call_id": callID, "arguments": toolArguments{Query: "hello"}})
+		request, err := http.NewRequestWithContext(t.Context(), http.MethodPost, toolGateway.URL+"/v1/mcp/tools/call", bytes.NewReader(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		request.Header.Set("Content-Type", "application/json")
+		request.Header.Set("X-OLP-End-User", "forged-callback-user")
+		if token != "" {
+			request.Header.Set("Authorization", "Bearer "+token)
+		}
+		response, err := http.DefaultClient.Do(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		response.Body.Close()
+		return response.StatusCode
+	}
+	for _, token := range []string{"", "olpt_foreign"} {
+		if status := callTool(token, toolsetID, "missing"); status != http.StatusUnauthorized {
+			t.Fatalf("tool callback without a valid capability returned %d", status)
+		}
+	}
+	if status := callTool(capability, foreignToolsetID, "foreign"); status != http.StatusForbidden && status != http.StatusNotFound {
+		t.Fatalf("unpinned toolset returned %d", status)
+	}
+	if status := callTool(capability, toolsetID, "permitted"); status != http.StatusOK {
+		t.Fatalf("tool callback returned %d", status)
+	}
+	if status := callTool(capability, toolsetID, "permitted"); status != http.StatusOK {
+		t.Fatalf("repeated tool callback returned %d", status)
+	}
+	responseBody := strings.NewReader(`{"model":"callback-chat","input":"hello"}`)
+	responseRequest, err := http.NewRequestWithContext(t.Context(), http.MethodPost, h.HTTP.URL+"/v1/responses", responseBody)
+	if err != nil {
+		t.Fatal(err)
+	}
+	responseRequest.Header.Set("Authorization", "Bearer "+capability)
+	responseRequest.Header.Set("Content-Type", "application/json")
+	responseRequest.Header.Set("X-OLP-End-User", "forged-callback-user")
+	response, err = http.DefaultClient.Do(responseRequest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	responseBytes, err := io.ReadAll(response.Body)
+	response.Body.Close()
+	if err != nil || response.StatusCode != http.StatusOK {
+		t.Fatalf("Responses callback returned %d: %s (%v)", response.StatusCode, responseBytes, err)
+	}
+	nativeCalls := []struct{ path, body string }{
+		{"/anthropic/v1/messages", `{"model":"callback-chat","max_tokens":20,"messages":[{"role":"user","content":"hello"}]}`},
+		{"/gemini/v1beta/models/callback-chat:generateContent", `{"contents":[{"role":"user","parts":[{"text":"hello"}]}]}`},
+		{"/gemini/v1beta/models/callback-chat:streamGenerateContent?alt=sse", `{"contents":[{"role":"user","parts":[{"text":"hello"}]}]}`},
+	}
+	nativeCallback := func(path, body string) (int, []byte) {
+		t.Helper()
+		request, err := http.NewRequestWithContext(t.Context(), http.MethodPost, h.HTTP.URL+path, strings.NewReader(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		request.Header.Set("Authorization", "Bearer "+capability)
+		request.Header.Set("Content-Type", "application/json")
+		request.Header.Set("X-OLP-End-User", "forged-callback-user")
+		response, err := http.DefaultClient.Do(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		responseBody, readErr := io.ReadAll(response.Body)
+		response.Body.Close()
+		if readErr != nil {
+			t.Fatal(readErr)
+		}
+		return response.StatusCode, responseBody
+	}
+	for _, native := range nativeCalls {
+		if status, body := nativeCallback(native.path, native.body); status != http.StatusOK {
+			t.Fatalf("%s callback returned %d: %s", native.path, status, body)
+		}
+	}
+	provider.failNextChat.Store(true)
+	if status := callback(capability, "callback-chat"); status != http.StatusOK {
+		t.Fatalf("active task callback returned %d", status)
+	}
+	if status := callback(capability, "callback-chat"); status != http.StatusTooManyRequests {
+		t.Fatalf("callback beyond task limit returned %d", status)
+	}
+	if status := callTool(capability, toolsetID, "over-limit"); status != http.StatusTooManyRequests {
+		t.Fatalf("tool callback beyond task limit returned %d", status)
+	}
+	for _, native := range nativeCalls {
+		status, body := nativeCallback(native.path, native.body)
+		if status != http.StatusTooManyRequests || !bytes.Contains(body, []byte("task_limit_exceeded")) {
+			t.Fatalf("%s callback beyond task limit returned %d: %s", native.path, status, body)
+		}
+	}
+	if got := toolCalls.Load(); got != 1 {
+		t.Fatalf("tool received %d callbacks, want 1", got)
+	}
+	if got := provider.chatCalls.Load() - initialCalls + provider.responseCalls.Load() - initialResponses; got != 7 {
+		t.Fatalf("provider received %d attempts, want 7", got)
+	}
+	var successful, attempts int
+	surfaces := make(map[string]int)
+	for _, event := range sink.all() {
+		if event.Status == http.StatusOK && event.Route == "callback-chat" {
+			if event.KeyID != keyRecord["id"] || event.EndUserDigest != h.Runtime.EndUserDigest(&project, "original-user") || event.Usage == nil {
+				t.Fatalf("callback accounting lost owner or usage: %+v", event)
+			}
+			successful++
+			attempts += len(event.Attempts)
+			surfaces[event.Surface]++
+		}
+	}
+	if successful != 6 || attempts != 7 {
+		t.Fatalf("got %d successful callback records with %d attempts, want 6 and 7", successful, attempts)
+	}
+	if surfaces["anthropic"] != 1 || surfaces["gemini"] != 2 {
+		t.Fatalf("native callback accounting records = %v", surfaces)
+	}
+	var settled, results int
+	if err := h.Pool.QueryRow(t.Context(), `SELECT count(*),(SELECT count(*) FROM olp.execution_debit_results r JOIN olp.execution_debits d ON d.id=r.dispatch_id WHERE d.kind='agent') FROM olp.execution_debits WHERE kind='agent' AND state='settled' AND api_key_id=$1`, keyRecord["id"]).Scan(&settled, &results); err != nil || settled != 1 || results != 1 {
+		t.Fatalf("remote fee accounting: settled=%d results=%d error=%v", settled, results, err)
+	}
+	if err := h.Pool.QueryRow(t.Context(), `SELECT count(*),(SELECT count(*) FROM olp.execution_debit_results r JOIN olp.execution_debits d ON d.id=r.dispatch_id WHERE d.kind='tool') FROM olp.execution_debits WHERE kind='tool' AND state='settled' AND api_key_id=$1`, keyRecord["id"]).Scan(&settled, &results); err != nil || settled != 1 || results != 1 {
+		t.Fatalf("tool accounting: settled=%d results=%d error=%v", settled, results, err)
+	}
+	for _, state := range []string{"completed", "outcome_unknown"} {
+		acctExec(t, h.Pool, `UPDATE olp.a2a_tasks SET state=$1`, state)
+		if status := callback(capability, "callback-chat"); status != http.StatusUnauthorized {
+			t.Fatalf("%s task callback returned %d", state, status)
+		}
+	}
+	acctExec(t, h.Pool, `UPDATE olp.a2a_tasks SET state='active'`)
+	acctExec(t, h.Pool, `UPDATE olp.a2a_task_capabilities SET expires_at=now()-interval '1 second'`)
+	if status := callback(capability, "callback-chat"); status != http.StatusUnauthorized {
+		t.Fatalf("expired capability returned %d", status)
+	}
+	acctExec(t, h.Pool, `UPDATE olp.a2a_task_capabilities SET expires_at=now()+interval '1 minute'`)
+	currentKey = h.want(owner, http.MethodGet, keyPath, nil, nil, http.StatusOK)
+	h.want(owner, http.MethodPost, keyPath+"/revoke", nil, withMatch(currentKey, idem("callback-owner-revoke")), http.StatusOK)
+	h.refresh()
+	if status := callback(capability, "callback-chat"); status != http.StatusUnauthorized && status != http.StatusForbidden {
+		t.Fatalf("revoked owner callback returned %d", status)
+	}
+	if got := provider.chatCalls.Load() - initialCalls + provider.responseCalls.Load() - initialResponses; got != 7 {
+		t.Fatalf("refused callbacks reached provider, total %d", got)
+	}
+}
 
 func TestA2AAgentCardUsesGatewayAuthenticationAndEndpoint(t *testing.T) {
 	h := newAccessHarness(t)
@@ -1932,5 +2290,422 @@ func TestStructuredPromptPublicationValidatesAndExports(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			h.want(owner, http.MethodPost, "/api/v1/prompts", map[string]any{"project_id": project, "name": "invalid", "prompt": json.RawMessage(tc.definition)}, idem("structured-invalid-"+tc.name), http.StatusUnprocessableEntity)
 		})
+	}
+}
+
+func TestA2AOAuthGrantLifecycle(t *testing.T) {
+	h := newAccessHarness(t)
+	owner := h.owner()
+	project := createProject(h, owner, "OAuth agent")
+	authority := testutil.NewOAuthServer(t)
+	const cardTemplate = `{"name":"OAuth fixture","version":"1.0","supportedInterfaces":[{"url":"%s","protocolBinding":"JSONRPC","protocolVersion":"1.0"}],"capabilities":{},"defaultInputModes":["text"],"defaultOutputModes":["text"],"skills":[]}`
+	var upstreamCalls, originalCallerCalls, replacementOldGrantCalls atomic.Int32
+	upstreamAgent := a2asrv.NewJSONRPCHandler(a2asrv.NewHandler(a2asrv.AgentExecutorFunc(func(ctx context.Context, execution *a2asrv.ExecutorContext) iter.Seq2[protocol.Event, error] {
+		return func(yield func(protocol.Event, error) bool) {
+			if yield(protocol.NewSubmittedTask(execution, execution.Message), nil) {
+				yield(protocol.NewStatusUpdateEvent(execution, protocol.TaskStateInputRequired, nil), nil)
+			}
+		}
+	})))
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/.well-known/agent-card.json" {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = fmt.Fprintf(w, cardTemplate, "http://"+r.Host+"/rpc")
+			return
+		}
+		upstreamCalls.Add(1)
+		identity, ok := authority.Authorized(r)
+		if !ok {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		if identity.Account == "original-account" {
+			originalCallerCalls.Add(1)
+		}
+		upstreamAgent.ServeHTTP(w, r)
+	}))
+	t.Cleanup(upstream.Close)
+	var user string
+	if err := h.Pool.QueryRow(t.Context(), `SELECT id::text FROM olp.users WHERE email='owner@example.com'`).Scan(&user); err != nil {
+		t.Fatal(err)
+	}
+	pricing := acctID(t)
+	acctExec(t, h.Pool, `INSERT INTO olp.pricing_revisions(id,revision,effective_at,created_by) VALUES($1,1,now(),$2)`, pricing, user)
+	digest := sha256.Sum256([]byte(fmt.Sprintf(cardTemplate, upstream.URL+"/rpc")))
+	oauth := struct {
+		ClientID              string   `json:"client_id"`
+		Audience              string   `json:"audience"`
+		Scopes                []string `json:"scopes"`
+		AuthorizationEndpoint string   `json:"authorization_endpoint"`
+		TokenEndpoint         string   `json:"token_endpoint"`
+	}{"agent-client", "agent-audience", []string{"agent.send"}, authority.URL + "/authorize", authority.URL + "/token"}
+	created := h.want(owner, http.MethodPost, "/api/v1/agents", map[string]any{
+		"project_id": project, "name": "OAuth agent",
+		"agent": map[string]any{"protocol": "a2a-1.0.0", "endpoint": upstream.URL + "/rpc", "card_digest": hex.EncodeToString(digest[:]), "toolset_revisions": []string{}, "route_revisions": []string{}, "pricing_revision_id": pricing, "max_cost": "1", "message_price": "0.01", "oauth": oauth},
+	}, idem("agent-oauth-create"), http.StatusCreated)
+	definition, ok := created["draft"].(map[string]any)
+	if !ok {
+		t.Fatalf("created agent has no draft: %v", created)
+	}
+	agent, ok := definition["agent"].(map[string]any)
+	if !ok || agent["oauth"] == nil {
+		t.Fatalf("created agent did not preserve OAuth configuration: %v", created)
+	}
+	agentID := created["id"].(string)
+	published := h.want(owner, http.MethodPost, "/api/v1/agents/"+agentID+"/publish", nil, withMatch(created, idem("agent-oauth-publish")), http.StatusOK)
+	changed := map[string]any{
+		"project_id": project, "name": "OAuth agent",
+		"agent": map[string]any{"protocol": "a2a-1.0.0", "endpoint": upstream.URL + "/changed", "card_digest": hex.EncodeToString(digest[:]), "toolset_revisions": []string{}, "route_revisions": []string{}, "pricing_revision_id": pricing, "max_cost": "1", "message_price": "0.01", "oauth": oauth},
+	}
+	h.want(owner, http.MethodPut, "/api/v1/agents/"+agentID, changed, withMatch(published, idem("agent-oauth-endpoint-unchanged-credential")), http.StatusUnprocessableEntity)
+	key := h.want(owner, http.MethodPost, "/api/v1/api-keys", map[string]any{"name": "OAuth agent caller", "project_id": project, "scopes": []string{"agents"}, "allowed_agents": []string{agentID}}, idem("agent-oauth-key"), http.StatusCreated)
+	client, prefix, _ := acctKeyspace(t)
+	limiter, err := limits.New(client, strings.TrimSuffix(prefix, ":"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.A2A.Ledger = &a2a.Ledger{Pool: h.Pool, Store: &limits.DebitStore{Pool: h.Pool, Limiter: limiter}, Auth: h.AuthKey}
+	if err := h.Runtime.Refresh(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	rpc := func(secret, method, message string, params a2aTestParams) map[string]any {
+		t.Helper()
+		payload := func() a2aTestParams {
+			if params.ID != "" || params.Message != nil {
+				return params
+			}
+			return a2aTestParams{Message: &protocol.Message{ID: message, Role: protocol.MessageRoleUser, Parts: protocol.ContentParts{protocol.NewTextPart("hello")}}}
+		}()
+		body := mustJSON(struct {
+			JSONRPC string        `json:"jsonrpc"`
+			ID      int           `json:"id"`
+			Method  string        `json:"method"`
+			Params  a2aTestParams `json:"params"`
+		}{"2.0", 1, method, payload})
+		request, err := http.NewRequestWithContext(t.Context(), http.MethodPost, h.HTTP.URL+"/a2a/"+agentID, bytes.NewReader(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		request.Header.Set("Authorization", "Bearer "+secret)
+		request.Header.Set("Content-Type", "application/json")
+		request.Header.Set("A2A-Version", "1.0")
+		response, err := http.DefaultClient.Do(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer response.Body.Close()
+		var result map[string]any
+		if err := json.NewDecoder(response.Body).Decode(&result); err != nil {
+			t.Fatal(err)
+		}
+		return result
+	}
+	taskID := func(result map[string]any) string {
+		t.Helper()
+		var payload struct {
+			Task *protocol.Task `json:"task"`
+		}
+		if err := json.Unmarshal(mustJSON(result["result"]), &payload); err != nil || payload.Task == nil || payload.Task.ID == "" || payload.Task.Status.State != protocol.TaskStateInputRequired {
+			t.Fatalf("agent task did not start: %v, %v", result, err)
+		}
+		return string(payload.Task.ID)
+	}
+	completeEnrollment := func(handoff mcpgrants.Handoff) {
+		t.Helper()
+		_, fragment, _ := strings.Cut(handoff.EnrollmentURL, "#")
+		enrollmentID, token, _ := strings.Cut(fragment, ".")
+		h.want(owner, http.MethodPost, "/api/v1/mcp-grant-enrollments/claim", mcpPersonalClaimInput{EnrollmentID: enrollmentID, HandoffToken: token}, nil, http.StatusOK)
+		authorizationResponse := h.want(owner, http.MethodPost, "/api/v1/mcp-grant-enrollments/"+enrollmentID+"/authorize", personalOAuthAuthorizeInput{Flow: mcpgrants.AuthorizationCode}, nil, http.StatusOK)
+		var authorization mcpgrants.Authorization
+		if err := json.Unmarshal(mustJSON(authorizationResponse), &authorization); err != nil {
+			t.Fatal(err)
+		}
+		redirectClient := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+		redirectResponse, err := redirectClient.Get(authorization.AuthorizationURL)
+		if err != nil {
+			t.Fatal(err)
+		}
+		redirectResponse.Body.Close()
+		callback, err := url.Parse(redirectResponse.Header.Get("Location"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		h.want(owner, http.MethodPost, "/api/v1/mcp-grant-enrollments/"+enrollmentID+"/complete", personalOAuthCompletionInput{Code: callback.Query().Get("code"), State: callback.Query().Get("state")}, nil, http.StatusOK)
+	}
+	enroll := func(keyID string) {
+		t.Helper()
+		handoffResponse := h.want(owner, http.MethodPost, "/api/v1/agents/"+agentID+"/grant-enrollments", struct {
+			APIKeyID string `json:"api_key_id"`
+		}{keyID}, nil, http.StatusOK)
+		var handoff mcpgrants.Handoff
+		if err := json.Unmarshal(mustJSON(handoffResponse), &handoff); err != nil {
+			t.Fatal(err)
+		}
+		completeEnrollment(handoff)
+	}
+	secret := key["secret"].(string)
+	cardRequest, err := http.NewRequestWithContext(t.Context(), http.MethodGet, h.HTTP.URL+"/a2a/"+agentID+"/.well-known/agent-card.json", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cardRequest.Header.Set("Authorization", "Bearer "+secret)
+	cardResponse, err := http.DefaultClient.Do(cardRequest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cardResponse.Body.Close()
+	var advertised protocol.AgentCard
+	if err := json.NewDecoder(cardResponse.Body).Decode(&advertised); err != nil || cardResponse.StatusCode != http.StatusOK || len(advertised.SupportedInterfaces) != 1 || advertised.SupportedInterfaces[0].URL != h.HTTP.URL+"/a2a/"+agentID {
+		t.Fatalf("authorized caller could not discover the gateway card before enrollment: status %d, error %v", cardResponse.StatusCode, err)
+	}
+	if result := rpc(secret, "SendMessage", "missing", a2aTestParams{}); result["error"] == nil || upstreamCalls.Load() != 0 {
+		t.Fatalf("missing grant did not refuse the request: %v", result)
+	}
+	enroll(key["id"].(string))
+	firstTask := taskID(rpc(secret, "SendMessage", "first", a2aTestParams{}))
+	if upstreamCalls.Load() != 1 {
+		t.Fatal("bound grant did not reach the agent")
+	}
+	otherKey := h.want(owner, http.MethodPost, "/api/v1/api-keys", map[string]any{"name": "Other caller", "project_id": project, "scopes": []string{"agents"}, "allowed_agents": []string{agentID}}, idem("agent-oauth-other-key"), http.StatusCreated)
+	if err := h.Runtime.Refresh(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if result := rpc(otherKey["secret"].(string), "SendMessage", "other", a2aTestParams{}); result["error"] == nil || upstreamCalls.Load() != 1 {
+		t.Fatalf("another key used the first caller's grant: %v", result)
+	}
+	if result := rpc(otherKey["secret"].(string), "GetTask", "", a2aTestParams{ID: protocol.TaskID(firstTask)}); result["error"] == nil || upstreamCalls.Load() != 1 {
+		t.Fatalf("another key accessed the first caller's task: %v", result)
+	}
+	standing := h.want(owner, http.MethodGet, "/api/v1/mcp-user-grants", nil, nil, http.StatusOK)
+	items := mcpExecItems(t, standing, "items")
+	if len(items) != 1 {
+		t.Fatalf("expected one agent grant: %v", standing)
+	}
+	item := mcpExecItem(t, items, 0, standing)
+	bound := mcpExecObject(t, item, "binding")
+	if bound["agent_id"] != agentID || item["state"] != "active" {
+		t.Fatalf("agent grant does not match publication: %v", item)
+	}
+	grantID, ok := item["grant_id"].(string)
+	if !ok || grantID == "" {
+		t.Fatalf("agent grant has no revocable identifier: %v", item)
+	}
+	exported := h.want(owner, http.MethodGet, "/api/v1/configuration/export", nil, nil, http.StatusOK)
+	for _, issued := range authority.Issued() {
+		if strings.Contains(string(mustJSON(exported)), issued) || strings.Contains(string(mustJSON(standing)), issued) {
+			t.Fatal("OAuth grant token escaped through management output")
+		}
+	}
+	if _, err := h.Pool.Exec(t.Context(), `UPDATE olp.mcp_user_grants SET expires_at=now()-interval '1 second' WHERE id=$1`, grantID); err != nil {
+		t.Fatal(err)
+	}
+	secondTask := taskID(rpc(secret, "SendMessage", "refreshed", a2aTestParams{}))
+	if upstreamCalls.Load() != 2 || len(authority.Issued()) < 2 {
+		t.Fatal("expired agent grant did not refresh successfully")
+	}
+	runMonitor := func(id, expected string) {
+		t.Helper()
+		if _, err := h.Pool.Exec(t.Context(), `UPDATE olp.a2a_tasks SET deadline_at=now()-interval '1 second' WHERE id=$1`, id); err != nil {
+			t.Fatal(err)
+		}
+		monitorCtx, cancelMonitor := context.WithCancel(t.Context())
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			(&a2a.TaskMonitor{Server: h.A2A}).Run(monitorCtx)
+		}()
+		defer func() { cancelMonitor(); <-done }()
+		deadline := time.Now().Add(10 * time.Second)
+		for {
+			var state string
+			if err := h.Pool.QueryRow(t.Context(), `SELECT state FROM olp.a2a_tasks WHERE id=$1`, id).Scan(&state); err != nil {
+				t.Fatal(err)
+			}
+			if state == expected {
+				return
+			}
+			if time.Now().After(deadline) {
+				t.Fatalf("task after monitor restart: got %s, want %s", state, expected)
+			}
+			time.Sleep(50 * time.Millisecond)
+		}
+	}
+	runMonitor(firstTask, "canceled")
+	if upstreamCalls.Load() != 3 {
+		t.Fatal("restarted monitor did not cancel using the bound grant")
+	}
+	authority.RevokeRefreshTokens()
+	if _, err := h.Pool.Exec(t.Context(), `UPDATE olp.mcp_user_grants SET expires_at=now()-interval '1 second' WHERE id=$1`, grantID); err != nil {
+		t.Fatal(err)
+	}
+	if result := rpc(secret, "SendMessage", "unrefreshable", a2aTestParams{}); result["error"] == nil || upstreamCalls.Load() != 3 {
+		t.Fatalf("unrefreshable grant did not refuse the request: %v", result)
+	}
+	h.want(owner, http.MethodDelete, "/api/v1/mcp-user-grants/"+grantID, nil, nil, http.StatusNoContent)
+	if result := rpc(secret, "SendMessage", "revoked", a2aTestParams{}); result["error"] == nil || upstreamCalls.Load() != 3 {
+		t.Fatalf("revoked grant did not refuse the request: %v", result)
+	}
+	runMonitor(secondTask, "outcome_unknown")
+	if upstreamCalls.Load() != 3 {
+		t.Fatal("monitor dispatched cancellation using a revoked grant")
+	}
+	preservedKey := h.want(owner, http.MethodPost, "/api/v1/api-keys", map[string]any{"name": "Original task caller", "project_id": project, "scopes": []string{"agents"}, "allowed_agents": []string{agentID}}, idem("agent-oauth-preserved-key"), http.StatusCreated)
+	if err := h.Runtime.Refresh(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	authority.SignInAs(testutil.OAuthIdentity{Subject: "original-user", Account: "original-account"})
+	enroll(preservedKey["id"].(string))
+	preservedSecret := preservedKey["secret"].(string)
+	oldTask := taskID(rpc(preservedSecret, "SendMessage", "old-task", a2aTestParams{}))
+	oldMonitorTask := taskID(rpc(preservedSecret, "SendMessage", "old-monitor-task", a2aTestParams{}))
+	var preservedGrant string
+	if err := h.Pool.QueryRow(t.Context(), `SELECT id::text FROM olp.mcp_user_grants WHERE agent_id=$1 AND binding->'identity'->>'id'=$2`, agentID, preservedKey["id"]).Scan(&preservedGrant); err != nil {
+		t.Fatal(err)
+	}
+	replacement := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		identity, ok := authority.Authorized(r)
+		if ok && identity.Account == "original-account" {
+			replacementOldGrantCalls.Add(1)
+		}
+		if r.URL.Path == "/.well-known/agent-card.json" {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = fmt.Fprintf(w, cardTemplate, "http://"+r.Host+"/rpc")
+			return
+		}
+		upstreamCalls.Add(1)
+		if !ok {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		upstreamAgent.ServeHTTP(w, r)
+	}))
+	t.Cleanup(replacement.Close)
+	replacementDigest := sha256.Sum256([]byte(fmt.Sprintf(cardTemplate, replacement.URL+"/rpc")))
+	replaced := h.want(owner, http.MethodPut, "/api/v1/agents/"+agentID, map[string]any{
+		"project_id": project, "name": "OAuth agent", "credential": nil,
+		"agent": map[string]any{"protocol": "a2a-1.0.0", "endpoint": replacement.URL + "/rpc", "card_digest": hex.EncodeToString(digest[:]), "toolset_revisions": []string{}, "route_revisions": []string{}, "pricing_revision_id": pricing, "max_cost": "1", "message_price": "0.01"},
+	}, withMatch(published, idem("agent-oauth-endpoint-remove-credential")), http.StatusOK)
+	h.want(owner, http.MethodPost, "/api/v1/agents/"+agentID+"/publish", nil, withMatch(replaced, idem("agent-oauth-endpoint-bad-card")), http.StatusUnprocessableEntity)
+	recertified := h.want(owner, http.MethodPut, "/api/v1/agents/"+agentID, map[string]any{
+		"project_id": project, "name": "OAuth agent", "credential": nil,
+		"agent": map[string]any{"protocol": "a2a-1.0.0", "endpoint": replacement.URL + "/rpc", "card_digest": hex.EncodeToString(replacementDigest[:]), "toolset_revisions": []string{}, "route_revisions": []string{}, "pricing_revision_id": pricing, "max_cost": "1", "message_price": "0.01"},
+	}, withMatch(replaced, idem("agent-oauth-endpoint-reviewed-card")), http.StatusOK)
+	changedEndpoint := h.want(owner, http.MethodPost, "/api/v1/agents/"+agentID+"/publish", nil, withMatch(recertified, idem("agent-oauth-endpoint-recertify")), http.StatusOK)
+	newCredential := h.want(owner, http.MethodPut, "/api/v1/agents/"+agentID, map[string]any{
+		"project_id": project, "name": "OAuth agent", "credential": nil,
+		"agent": map[string]any{"protocol": "a2a-1.0.0", "endpoint": replacement.URL + "/rpc", "card_digest": hex.EncodeToString(replacementDigest[:]), "toolset_revisions": []string{}, "route_revisions": []string{}, "pricing_revision_id": pricing, "max_cost": "1", "message_price": "0.01", "oauth": oauth},
+	}, withMatch(changedEndpoint, idem("agent-oauth-endpoint-new-credential")), http.StatusOK)
+	republished := h.want(owner, http.MethodPost, "/api/v1/agents/"+agentID+"/publish", nil, withMatch(newCredential, idem("agent-oauth-endpoint-publish-new-credential")), http.StatusOK)
+	if err := h.Runtime.Refresh(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.Pool.Exec(t.Context(), `UPDATE olp.mcp_user_grants SET expires_at=now()-interval '1 second' WHERE id=$1`, preservedGrant); err != nil {
+		t.Fatal(err)
+	}
+	if result := rpc(preservedSecret, "GetTask", "", a2aTestParams{ID: protocol.TaskID(oldTask)}); result["error"] != nil || result["result"] == nil {
+		t.Fatalf("original task could not be read after replacement: %v", result)
+	}
+	if result := rpc(preservedSecret, "CancelTask", "", a2aTestParams{ID: protocol.TaskID(oldTask)}); result["error"] != nil || result["result"] == nil {
+		t.Fatalf("original task could not be canceled after replacement: %v", result)
+	}
+	runMonitor(oldMonitorTask, "canceled")
+	if originalCallerCalls.Load() != 5 || replacementOldGrantCalls.Load() != 0 {
+		t.Fatal("original task operations did not use their original grant and endpoint")
+	}
+	if result := rpc(secret, "SendMessage", "replacement-missing", a2aTestParams{}); result["error"] == nil || upstreamCalls.Load() != 8 {
+		t.Fatalf("replacement endpoint reused an old grant: %v", result)
+	}
+	authority.SignInAs(testutil.OAuthIdentity{Subject: "replacement-user", Account: "replacement-account"})
+	enroll(key["id"].(string))
+	replacementTask := taskID(rpc(secret, "SendMessage", "replacement-enrolled", a2aTestParams{}))
+	if upstreamCalls.Load() != 9 || replacementOldGrantCalls.Load() != 0 {
+		t.Fatal("replacement endpoint did not use its new grant")
+	}
+	expectedAfterRetirement := func() int32 {
+		if !access.OIDCTestBuild() {
+			return 10
+		}
+		base := "/api/v1/projects/" + project
+		templates := h.want(owner, http.MethodGet, base+"/limit-templates", nil, nil, http.StatusOK)
+		h.want(owner, http.MethodPut, base+"/limit-templates", map[string]any{"templates": map[string]any{"worker": map[string]any{"requests_per_minute": 100}}}, etagHeader(templates), http.StatusOK)
+		publicKey, privateKey, err := ed25519.GenerateKey(rand.Reader)
+		if err != nil {
+			t.Fatal(err)
+		}
+		jwks := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			_ = json.NewEncoder(w).Encode(jose.JSONWebKeySet{Keys: []jose.JSONWebKey{{Key: publicKey, KeyID: "current", Algorithm: "EdDSA", Use: "sig"}}})
+		}))
+		t.Cleanup(jwks.Close)
+		issuerConfig := map[string]any{
+			"name": "Portable CI", "issuer": jwks.URL, "jwks_url": jwks.URL,
+			"enabled": true, "audiences": []string{"olp"}, "algorithms": []string{"EdDSA"},
+			"max_lifetime_seconds": 600, "disabled_key_ids": []string{},
+			"mappings": []any{map[string]any{
+				"name": "worker", "match": map[string]string{}, "project_id": project, "limit_template": "worker",
+				"route_groups": []string{}, "scopes": []string{"agents"}, "allowed_agents": []string{agentID}, "end_user_claim": "/oid",
+			}},
+		}
+		h.want(owner, http.MethodPost, "/api/v1/workload-issuers", issuerConfig, idem("agent-oauth-workload-create"), http.StatusCreated)
+		if err := h.Runtime.Refresh(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+		signer, err := jose.NewSigner(jose.SigningKey{Algorithm: jose.EdDSA, Key: privateKey}, (&jose.SignerOptions{}).WithHeader("kid", "current"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		userToken := func(id string) string {
+			t.Helper()
+			return signEntraAssertion(t, signer, entraTestClaims{Issuer: jwks.URL, Audience: "olp", Subject: "shared-workload", ObjectID: id, IssuedAt: time.Now().Unix(), Expires: time.Now().Add(5 * time.Minute).Unix()})
+		}
+		userA, userB := userToken("alice"), userToken("bob")
+		authorityA, err := h.Runtime.Authenticate(userA)
+		if err != nil {
+			t.Fatal(err)
+		}
+		authorityB, err := h.Runtime.Authenticate(userB)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if authorityA.ID != authorityB.ID || authorityA.EndUserDigest == authorityB.EndUserDigest {
+			t.Fatal("test requires one workload principal with distinct verified end users")
+		}
+		startPersonal := func(token string, expected int) mcpgrants.Handoff {
+			t.Helper()
+			response, raw := h.do(nil, http.MethodPost, "/a2a/"+agentID+"/grant-enrollments", nil, map[string]string{"Authorization": "Bearer " + token})
+			if response.StatusCode != expected {
+				t.Fatalf("personal enrollment returned %d, want %d: %s", response.StatusCode, expected, raw)
+			}
+			if expected != http.StatusCreated {
+				return mcpgrants.Handoff{}
+			}
+			if response.Header.Get("Cache-Control") != "no-store" {
+				t.Fatal("personal enrollment handoff can be cached")
+			}
+			var handoff mcpgrants.Handoff
+			if err := json.Unmarshal(raw, &handoff); err != nil {
+				t.Fatal(err)
+			}
+			return handoff
+		}
+		startPersonal(secret, http.StatusForbidden)
+		completeEnrollment(startPersonal(userA, http.StatusCreated))
+		userTask := taskID(rpc(userA, "SendMessage", "alice", a2aTestParams{}))
+		if result := rpc(userB, "SendMessage", "bob-before-enrollment", a2aTestParams{}); result["error"] == nil || upstreamCalls.Load() != 10 {
+			t.Fatalf("another end user used Alice's grant: %v", result)
+		}
+		if result := rpc(userB, "GetTask", "", a2aTestParams{ID: protocol.TaskID(userTask)}); result["error"] == nil || upstreamCalls.Load() != 10 {
+			t.Fatalf("another end user accessed Alice's task: %v", result)
+		}
+		completeEnrollment(startPersonal(userB, http.StatusCreated))
+		taskID(rpc(userB, "SendMessage", "bob", a2aTestParams{}))
+		if result := rpc(userB, "GetTask", "", a2aTestParams{ID: protocol.TaskID(userTask)}); result["error"] == nil || upstreamCalls.Load() != 11 {
+			t.Fatalf("another enrolled end user accessed Alice's task: %v", result)
+		}
+		return 12
+	}()
+	h.want(owner, http.MethodDelete, "/api/v1/agents/"+agentID, nil, withMatch(republished, idem("agent-oauth-retire")), http.StatusNoContent)
+	runMonitor(replacementTask, "canceled")
+	if upstreamCalls.Load() != expectedAfterRetirement {
+		t.Fatal("monitor did not cancel the task after retirement")
 	}
 }

@@ -40,6 +40,62 @@ type legacyConsumer struct {
 	scanner  *bufio.Scanner
 }
 
+type taskIdentityRuntime struct{ *fakeRuntime }
+
+func (r taskIdentityRuntime) AuthenticateTaskCapability(_ context.Context, token string) (*access.Authority, error) {
+	if token != "olpt_one" && token != "olpt_two" {
+		return nil, runtime.ErrInvalidKey
+	}
+	a := *r.authority
+	a.TaskCapability = &access.TaskCapability{Digest: token}
+	a.EndUserDigest = "original-user"
+	return &a, nil
+}
+
+type taskCallRuntime struct {
+	taskIdentityRuntime
+	err error
+}
+
+func (r *taskCallRuntime) AdmitTaskCapabilityAttempt(_ context.Context, a access.Authority, scope, resource, revision string, project *string) error {
+	if a.EndUserDigest != "original-user" || scope != "tools" || resource != testToolset || revision != testRevision || project == nil || *project != testProject {
+		return access.Forbidden()
+	}
+	return r.err
+}
+
+func TestTaskCapabilitySessionsAndToolAttempts(t *testing.T) {
+	server, fixture, _, _, base := newTestServer(t, testAuthority([]string{"tools"}, []string{testToolset}), "")
+	capRuntime := &taskCallRuntime{taskIdentityRuntime: taskIdentityRuntime{fakeRuntime: base}}
+	server.Runtime = capRuntime
+	session := openSession(t, server, "olpt_one", latestProtocol())
+	other := rpcRequest(t, server, "olpt_two", session, latestProtocol(), "/mcp", sessionCallBody(2, "foreign-task", "hello"))
+	if other.status == http.StatusOK || fixture.calls.Load() != 0 {
+		t.Fatalf("different task used the session: status %d, calls %d", other.status, fixture.calls.Load())
+	}
+	called := rpcRequest(t, server, "olpt_one", session, latestProtocol(), "/mcp", sessionCallBody(3, "task-call", "hello"))
+	rpcResult(t, called)
+	if fixture.calls.Load() != 1 {
+		t.Fatalf("task call dispatched %d times", fixture.calls.Load())
+	}
+	capRuntime.err = runtime.ErrTaskAttemptLimit
+	limited := rpcRequest(t, server, "olpt_one", session, latestProtocol(), "/mcp", sessionCallBody(4, "task-limited", "hello"))
+	if fixture.calls.Load() != 1 {
+		t.Fatalf("exhausted task dispatched: response %v, calls %d", limited.body, fixture.calls.Load())
+	}
+	if data, _ := rpcError(t, limited)["data"].(map[string]any); data["code"] != "task_limit_exceeded" {
+		t.Fatalf("unexpected task limit error: %v", limited.body)
+	}
+	server.Runtime = taskIdentityRuntime{fakeRuntime: base}
+	unsupported := rpcRequest(t, server, "olpt_one", session, latestProtocol(), "/mcp", sessionCallBody(5, "task-no-admitter", "hello"))
+	if fixture.calls.Load() != 1 {
+		t.Fatalf("task call without admission support dispatched: response %v, calls %d", unsupported.body, fixture.calls.Load())
+	}
+	if data, _ := rpcError(t, unsupported)["data"].(map[string]any); data["code"] != "debit_ledger_unavailable" {
+		t.Fatalf("unexpected task admission error: %v", unsupported.body)
+	}
+}
+
 func legacyData(t *testing.T, scanner *bufio.Scanner) string {
 	t.Helper()
 	for scanner.Scan() {

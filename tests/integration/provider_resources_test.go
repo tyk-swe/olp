@@ -61,6 +61,8 @@ type openaiFixture struct {
 	mu              sync.Mutex
 	lastReq         atomic.Value
 	chatCalls       atomic.Int64
+	responseCalls   atomic.Int64
+	failNextChat    atomic.Bool
 	lastBatchRaw    atomic.Value
 	batchCreates    atomic.Int64
 	fileCreates     atomic.Int64
@@ -104,6 +106,10 @@ func newOpenAIFixture(t *testing.T, fileContent string) *openaiFixture {
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /openai/deployments/{dep}/chat/completions", func(w http.ResponseWriter, r *http.Request) {
 		f.chatCalls.Add(1)
+		if f.failNextChat.Swap(false) {
+			http.Error(w, `{"error":{"message":"temporary failure","type":"server_error"}}`, http.StatusInternalServerError)
+			return
+		}
 		body := decodeBody(t, r)
 		f.lastReq.Store(body)
 		if stream, _ := body["stream"].(bool); stream {
@@ -283,6 +289,7 @@ func newOpenAIFixture(t *testing.T, fileContent string) *openaiFixture {
 		writeJSON(w, out)
 	})
 	mux.HandleFunc("POST /openai/deployments/{dep}/responses", func(w http.ResponseWriter, r *http.Request) {
+		f.responseCalls.Add(1)
 		f.dials.Add(1)
 		body := decodeBody(t, r)
 		f.mu.Lock()
@@ -308,6 +315,7 @@ func newOpenAIFixture(t *testing.T, fileContent string) *openaiFixture {
 	// Azure's reviewed legacy Responses profile uses the resource-level path;
 	// the deployment path above serves Automatic Azure providers.
 	mux.HandleFunc("POST /openai/responses", func(w http.ResponseWriter, r *http.Request) {
+		f.responseCalls.Add(1)
 		f.dials.Add(1)
 		f.respCreates.Add(1)
 		body := decodeBody(t, r)
@@ -564,6 +572,10 @@ func activeAzureProviderInProject(t *testing.T, h *accessHarness, owner *browser
 	configuration := map[string]any{"kind": "azure_openai", "auth_mode": "api_key", "endpoint": endpoint, "deployment": vendorModel, "api_version": "2024-10-21"}
 	if len(providerFields) > 0 {
 		for field, value := range providerFields[0] {
+			if value == nil {
+				delete(configuration, field)
+				continue
+			}
 			configuration[field] = value
 		}
 	}
