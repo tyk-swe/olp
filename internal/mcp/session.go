@@ -17,17 +17,20 @@ const (
 )
 
 type principalIdentity struct {
-	id             string
-	issuer         string
-	lookupID       string
-	workloadDigest string
-	endUserDigest  string
+	id              string
+	issuer          string
+	lookupID        string
+	workloadDigest  string
+	endUserDigest   string
+	delegationAgent string
+	delegationToken string
 }
 
 func principalOf(authority access.Authority) principalIdentity {
 	return principalIdentity{
 		id: authority.ID, issuer: authority.Issuer,
 		lookupID: authority.LookupID, workloadDigest: authority.WorkloadDigest, endUserDigest: verifiedEndUser(authority),
+		delegationAgent: authority.DelegationAgentID, delegationToken: authority.DelegationTokenDigest,
 	}
 }
 
@@ -41,10 +44,13 @@ func (p principalIdentity) capacityScope() string {
 	return principalScope(p.id, p.issuer, p.lookupID, p.workloadDigest)
 }
 func (p principalIdentity) scope() string {
-	if p.endUserDigest == "" {
+	if p.endUserDigest == "" && p.delegationToken == "" {
 		return p.capacityScope()
 	}
-	return principalScope(p.id, p.issuer, p.lookupID, p.workloadDigest, p.endUserDigest)
+	if p.delegationToken == "" {
+		return principalScope(p.id, p.issuer, p.lookupID, p.workloadDigest, p.endUserDigest)
+	}
+	return principalScope(p.id, p.issuer, p.lookupID, p.workloadDigest, p.endUserDigest, p.delegationAgent, p.delegationToken)
 }
 func principalScope(parts ...string) string {
 	digest := sha256.New()
@@ -73,7 +79,7 @@ func bindingOf(authority access.Authority) sessionBinding {
 
 func (b sessionBinding) scope() string { return b.principal.scope() }
 func (b sessionBinding) member(id string) string {
-	if b.principal.endUserDigest == "" {
+	if b.principal.endUserDigest == "" && b.principal.delegationToken == "" {
 		return id
 	}
 	return b.scope() + ":" + id

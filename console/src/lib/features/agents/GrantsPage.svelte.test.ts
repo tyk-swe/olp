@@ -151,7 +151,7 @@ it('shows the exact consent and delivers its one-use code after password verific
     if (
       input.agent_id !== 'agent' ||
       input.api_key_id !== 'consumer' ||
-      input.allowed_routes.join(',') !== 'chat'
+      input.allowed_routes?.join(',') !== 'chat'
     )
       throw new Error('incorrect consent');
     return {
@@ -204,6 +204,51 @@ it('shows the exact consent and delivers its one-use code after password verific
   });
 });
 
+it('allows consent to an eligible toolset without granting inference', async () => {
+  const { key, agent } = consentFixtures();
+  vi.mocked(keys.listApiKeys).mockResolvedValue([key, agent]);
+  vi.mocked(api.getDelegationOptions).mockResolvedValue({
+    agents: [{ id: 'agent', allowed_routes: [], allowed_toolsets: ['toolset'] }]
+  });
+  vi.mocked(api.createDelegationConsent).mockResolvedValue({
+    consent: 'olpc_one_use',
+    expires_at: '2030-01-01T00:00:00Z',
+    delegation_pair_digest: 'pair-budget-id'
+  });
+  const { host } = page();
+  await vi.waitFor(() => {
+    flushSync();
+    expect(host.querySelector('option[value="consumer"]')).not.toBeNull();
+  });
+  const keySelect = host.querySelector<HTMLSelectElement>('#delegation-key');
+  if (!keySelect) expect.fail('Missing key selection');
+  keySelect.value = 'consumer';
+  keySelect.dispatchEvent(new Event('change', { bubbles: true }));
+  await vi.waitFor(() => {
+    flushSync();
+    expect(host.querySelector('option[value="agent"]')).not.toBeNull();
+  });
+  const agentSelect =
+    host.querySelector<HTMLSelectElement>('#delegation-agent');
+  if (!agentSelect) expect.fail('Missing agent selection');
+  agentSelect.value = 'agent';
+  agentSelect.dispatchEvent(new Event('change', { bubbles: true }));
+  fill(host, 'Allowed toolsets', 'other');
+  expect(button(host, 'Confirm agent access').disabled).toBe(true);
+  fill(host, 'Allowed toolsets', 'toolset');
+  fill(host, 'Current password', 'password');
+  button(host, 'Confirm agent access').click();
+  await vi.waitFor(() => {
+    flushSync();
+    expect(api.createDelegationConsent).toHaveBeenCalledWith({
+      api_key_id: 'consumer',
+      agent_id: 'agent',
+      scopes: ['tools'],
+      allowed_toolsets: ['toolset']
+    });
+  });
+});
+
 it('starts linked identity verification for the selected key', async () => {
   const { key } = consentFixtures();
   vi.mocked(keys.listApiKeys).mockResolvedValue([key]);
@@ -244,7 +289,7 @@ it.each(['OIDC', 'SAML'])(
       if (
         input.agent_id !== 'agent' ||
         input.api_key_id !== 'consumer' ||
-        input.allowed_routes.join(',') !== 'chat'
+        input.allowed_routes?.join(',') !== 'chat'
       )
         throw new Error('incorrect consent');
       return {

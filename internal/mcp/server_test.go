@@ -527,6 +527,18 @@ func (f *fakeRateLimiter) Reserve(_ context.Context, request limits.Request) (*l
 	return nil, nil
 }
 
+type countingRateLimiter struct {
+	counts map[string]int64
+}
+
+func (f *countingRateLimiter) Reserve(_ context.Context, request limits.Request) (*limits.Lease, error) {
+	if request.RequestsPerMinute != nil && f.counts[request.LookupID] >= *request.RequestsPerMinute {
+		return nil, &limits.ExceededError{Dimension: limits.DimensionRequests, RetryAfter: time.Minute}
+	}
+	f.counts[request.LookupID]++
+	return nil, nil
+}
+
 func priceTestSnapshot(t *testing.T, rt *fakeRuntime, serverPrice *string, toolPrices map[string]string) {
 	t.Helper()
 	snapshot := rt.release.Snapshot
@@ -593,6 +605,36 @@ func TestCallToolRateLimitRefusalReservesAndDispatchesNothing(t *testing.T) {
 		`{"toolset_id":"`+testToolset+`","name":"`+alias()+`","call_id":"limited-json-2","arguments":{"query":"x"}}`)
 	if status != http.StatusTooManyRequests || fx.calls.Load() != 0 || len(ledger.reserved) != 0 {
 		t.Fatalf("concurrency limited call dispatched: status=%d calls=%d reserved=%d", status, fx.calls.Load(), len(ledger.reserved))
+	}
+}
+
+func TestDelegatedToolCallsShareAgentRateLimitAcrossKeys(t *testing.T) {
+	agentRate := int64(1)
+	agent := &access.DelegationAgentLimits{ID: testOtherRv, LookupID: "agent-lookup", Limits: access.AdmissionLimits{RequestsPerMinute: &agentRate}}
+	first := testAuthority([]string{"tools"}, []string{testToolset})
+	first.DelegationAgentID, first.DelegationAgentLimits = agent.ID, agent
+	second := testAuthority([]string{"tools"}, []string{testToolset})
+	second.ID = testOtherTS
+	second.DelegationAgentID, second.DelegationAgentLimits = agent.ID, agent
+	server, upstream, ledger, _, runtime := newTestServer(t, first, "")
+	runtime.otherAuthority = second
+	server.Limiter = &countingRateLimiter{counts: map[string]int64{}}
+	mux := http.NewServeMux()
+	server.Register(mux)
+	call := func(token, callID string) int {
+		t.Helper()
+		body := `{"toolset_id":"` + testToolset + `","name":"` + alias() + `","call_id":"` + callID + `","arguments":{"query":"x"}}`
+		request := httptest.NewRequest(http.MethodPost, "/v1/mcp/tools/call", strings.NewReader(body))
+		request.Header.Set("Authorization", "Bearer "+token)
+		response := httptest.NewRecorder()
+		mux.ServeHTTP(response, request)
+		return response.Code
+	}
+	if status := call("test-key", "first"); status != http.StatusOK {
+		t.Fatalf("first delegated tool call: %d", status)
+	}
+	if status := call("other-key", "second"); status != http.StatusTooManyRequests || upstream.calls.Load() != 1 || len(ledger.reserved) != 1 {
+		t.Fatalf("agent rate limit did not stop second key: status=%d upstream=%d reservations=%d", status, upstream.calls.Load(), len(ledger.reserved))
 	}
 }
 
@@ -1844,6 +1886,14 @@ func TestWorkflowResolvesAndRunsOnlyAuthorizedReadOnlyTools(t *testing.T) {
 	}
 	if upstream.calls.Load() != 1 {
 		t.Fatalf("read-only call count: %d", upstream.calls.Load())
+	}
+	agentRate := int64(1)
+	delegated := *authority
+	delegated.DelegationAgentID = testOtherRv
+	delegated.DelegationAgentLimits = &access.DelegationAgentLimits{ID: testOtherRv, LookupID: "agent-lookup", Limits: access.AdmissionLimits{RequestsPerMinute: &agentRate}}
+	server.Limiter = &countingRateLimiter{counts: map[string]int64{"agent-lookup": 1}}
+	if _, err := server.Call(t.Context(), delegated, readOnly, tools[0], testGenID, 2, "delegated-workflow", json.RawMessage(`{"query":"q"}`)); err != nil || upstream.calls.Load() != 2 {
+		t.Fatalf("delegated workflow could not use its parent admission: %v", err)
 	}
 	if _, err := server.Resolve(t.Context(), *testAuthority([]string{"tools"}, nil), readOnly, []string{testToolset}); err == nil {
 		t.Fatal("unauthorized toolset resolved")

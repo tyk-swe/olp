@@ -2395,6 +2395,24 @@ func (e CredentialRequirement) Valid() bool {
 	}
 }
 
+// Defines values for DelegationConsentRequestScopes.
+const (
+	DelegationConsentRequestScopesInference DelegationConsentRequestScopes = "inference"
+	DelegationConsentRequestScopesTools     DelegationConsentRequestScopes = "tools"
+)
+
+// Valid indicates whether the value is a known member of the DelegationConsentRequestScopes enum.
+func (e DelegationConsentRequestScopes) Valid() bool {
+	switch e {
+	case DelegationConsentRequestScopesInference:
+		return true
+	case DelegationConsentRequestScopesTools:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for EndUserLimitsCostBasis.
 const (
 	EndUserLimitsCostBasisCharge EndUserLimitsCostBasis = "charge"
@@ -9167,17 +9185,25 @@ type DelegationConsent struct {
 
 // DelegationConsentRequest defines model for DelegationConsentRequest.
 type DelegationConsentRequest struct {
-	AgentId       openapi_types.UUID `json:"agent_id"`
-	AllowedRoutes []string           `json:"allowed_routes"`
-	ApiKeyId      openapi_types.UUID `json:"api_key_id"`
-	TtlSeconds    *int               `json:"ttl_seconds,omitempty"`
+	AgentId         openapi_types.UUID                `json:"agent_id"`
+	AllowedRoutes   *[]string                         `json:"allowed_routes,omitempty"`
+	AllowedToolsets *[]openapi_types.UUID             `json:"allowed_toolsets,omitempty"`
+	ApiKeyId        openapi_types.UUID                `json:"api_key_id"`
+	Scopes          *[]DelegationConsentRequestScopes `json:"scopes,omitempty"`
+	TtlSeconds      *int                              `json:"ttl_seconds,omitempty"`
 }
+
+// DelegationConsentRequestScopes defines model for DelegationConsentRequest.Scopes.
+type DelegationConsentRequestScopes string
 
 // DelegationOption defines model for DelegationOption.
 type DelegationOption struct {
 	// AllowedRoutes Active inference routes currently allowed by both the key and the agent.
-	AllowedRoutes []string           `json:"allowed_routes"`
-	Id            openapi_types.UUID `json:"id"`
+	AllowedRoutes []string `json:"allowed_routes"`
+
+	// AllowedToolsets Published toolsets currently allowed by both the key and the agent.
+	AllowedToolsets *[]openapi_types.UUID `json:"allowed_toolsets,omitempty"`
+	Id              openapi_types.UUID    `json:"id"`
 }
 
 // DelegationOptions defines model for DelegationOptions.

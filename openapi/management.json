@@ -28710,13 +28710,34 @@
               "type": "string"
             },
             "maxItems": 100,
-            "minItems": 1,
+            "type": "array",
+            "uniqueItems": true
+          },
+          "allowed_toolsets": {
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "maxItems": 100,
             "type": "array",
             "uniqueItems": true
           },
           "api_key_id": {
             "format": "uuid",
             "type": "string"
+          },
+          "scopes": {
+            "items": {
+              "enum": [
+                "inference",
+                "tools"
+              ],
+              "type": "string"
+            },
+            "maxItems": 2,
+            "minItems": 1,
+            "type": "array",
+            "uniqueItems": true
           },
           "ttl_seconds": {
             "maximum": 900,
@@ -28726,8 +28747,7 @@
         },
         "required": [
           "agent_id",
-          "api_key_id",
-          "allowed_routes"
+          "api_key_id"
         ],
         "type": "object"
       },
@@ -28762,6 +28782,14 @@
               "type": "string"
             },
             "description": "Active inference routes currently allowed by both the key and the agent."
+          },
+          "allowed_toolsets": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Published toolsets currently allowed by both the key and the agent."
           }
         }
       }

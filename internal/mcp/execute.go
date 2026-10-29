@@ -60,6 +60,15 @@ func (s *Server) reserveToolRate(ctx context.Context, in executeInput) ([]*limit
 			LeaseTTL:          toolRateLeaseTTL,
 		},
 	}
+	if agent := in.authority.DelegationAgentLimits; agent != nil && in.runID == "" {
+		requests = append(requests, limits.Request{
+			CostOwnerID:       agent.ID,
+			LookupID:          agent.LookupID,
+			RequestsPerMinute: agent.Limits.RequestsPerMinute,
+			MaxConcurrency:    agent.Limits.MaxConcurrency,
+			LeaseTTL:          toolRateLeaseTTL,
+		})
+	}
 	leases := make([]*limits.Lease, 0, len(requests))
 	for _, request := range requests {
 		lease, err := limiter.Reserve(ctx, request)

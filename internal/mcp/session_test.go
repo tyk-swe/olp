@@ -21,6 +21,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/agentcontract"
 	"github.com/tyk-swe/olp/internal/coordination"
 	"go.opentelemetry.io/otel/trace/noop"
@@ -523,6 +524,62 @@ func openSession(t *testing.T, server *Server, token, protocol string) string {
 		t.Fatalf("initialized notification status %d: %v", accepted.status, accepted.body)
 	}
 	return sessionID
+}
+
+type delegatedSessionRuntime struct {
+	*fakeRuntime
+	consumed bool
+}
+
+func (r *delegatedSessionRuntime) AuthenticateDelegation(_ context.Context, token, assertion string) (*access.Authority, error) {
+	if r.consumed || token != "olpd_test" || assertion != "agent-assertion" {
+		return nil, runtime.ErrInvalidKey
+	}
+	r.consumed = true
+	return r.authority, nil
+}
+
+func (r *delegatedSessionRuntime) ReauthenticateDelegation(_ context.Context, token, assertion string) (*access.Authority, error) {
+	if !r.consumed || token != "olpd_test" || assertion != "agent-assertion" {
+		return nil, runtime.ErrInvalidKey
+	}
+	return r.authority, nil
+}
+
+func TestDelegatedStreamableGETPreservesGrantAndAuthenticatesSession(t *testing.T) {
+	authority := testAuthority([]string{"tools"}, []string{testToolset})
+	authority.DelegationAgentID = testOtherRv
+	authority.DelegationTokenDigest = strings.Repeat("a", 64)
+	server, _, _, _, underlying := newTestServer(t, authority, "")
+	server.Runtime = &delegatedSessionRuntime{fakeRuntime: underlying}
+	mux := http.NewServeMux()
+	server.Register(mux)
+	send := func(method, session, body string) *httptest.ResponseRecorder {
+		t.Helper()
+		request := httptest.NewRequest(method, "/mcp?toolset_id="+testToolset, strings.NewReader(body))
+		request.Header.Set("Authorization", "Bearer olpd_test")
+		request.Header.Set("X-OLP-Agent-Identity", "agent-assertion")
+		request.Header.Set("Content-Type", "application/json")
+		request.Header.Set("Accept", "application/json, text/event-stream")
+		if session != "" {
+			request.Header.Set("Mcp-Session-Id", session)
+		}
+		response := httptest.NewRecorder()
+		mux.ServeHTTP(response, request)
+		return response
+	}
+	if response := send(http.MethodGet, "", ""); response.Code != http.StatusUnauthorized {
+		t.Fatalf("GET accepted an unused delegation: %d", response.Code)
+	}
+	initialize := fmt.Sprintf(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":%q,"capabilities":{},"clientInfo":{"name":"fixture","version":"1"}}}`, latestProtocol())
+	opened := send(http.MethodPost, "", initialize)
+	session := opened.Header().Get("Mcp-Session-Id")
+	if opened.Code != http.StatusOK || session == "" {
+		t.Fatalf("GET consumed the delegation before initialization: %d %s", opened.Code, opened.Body.String())
+	}
+	if response := send(http.MethodGet, session, ""); response.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("GET could not authenticate the delegated session: %d %s", response.Code, response.Body.String())
+	}
 }
 
 func TestStreamableHTTPSessionLifecycleAtCertifiedVersions(t *testing.T) {

@@ -655,9 +655,13 @@ func checkKeyRoutes(r *http.Request, q Queryer, routes []string, projectID *stri
 }
 
 type DelegationAgentLimits struct {
-	ID       string
-	LookupID string
-	Limits   AdmissionLimits
+	ID               string
+	LookupID         string
+	WorkloadIssuerID *string
+	WorkloadDigest   string
+	WorkloadRevision string
+	WorkloadMapping  string
+	Limits           AdmissionLimits
 }
 
 // Authority is durable input for the independent runtime authority refresh. Lookup never
@@ -671,6 +675,7 @@ type Authority struct {
 	DelegationAgentID         string
 	DelegationMemberID        string
 	DelegationPairDigest      string
+	DelegationTokenDigest     string
 	WorkloadIssuerID          *string
 	WorkloadDigest            string
 	WorkloadRevision          string
@@ -718,14 +723,15 @@ func (a Authority) BudgetAttribution() map[string]string {
 	})
 }
 
-func (a Authority) DelegatedInference(routes []string, agent Authority, memberID, pairDigest string, expiresAt time.Time) *Authority {
+func (a Authority) Delegated(scopes, routes, toolsets []string, agent Authority, memberID, pairDigest, tokenDigest string, expiresAt time.Time) *Authority {
 	return &Authority{
-		SnapshotID:           a.SnapshotID,
-		AgentPrincipal:       a.AgentPrincipal,
-		DelegationAgentID:    agent.ID,
-		DelegationMemberID:   memberID,
-		DelegationPairDigest: pairDigest,
-		DelegationAgentLimits: &DelegationAgentLimits{ID: agent.ID, LookupID: agent.LimitsLookup(), Limits: AdmissionLimits{
+		SnapshotID:            a.SnapshotID,
+		AgentPrincipal:        a.AgentPrincipal,
+		DelegationAgentID:     agent.ID,
+		DelegationMemberID:    memberID,
+		DelegationPairDigest:  pairDigest,
+		DelegationTokenDigest: tokenDigest,
+		DelegationAgentLimits: &DelegationAgentLimits{ID: agent.ID, LookupID: agent.LimitsLookup(), WorkloadIssuerID: agent.WorkloadIssuerID, WorkloadDigest: agent.WorkloadDigest, WorkloadRevision: agent.WorkloadRevision, WorkloadMapping: agent.WorkloadMapping, Limits: AdmissionLimits{
 			RequestsPerMinute: agent.Policy.RequestsPerMinute,
 			TokensPerMinute:   agent.Policy.TokensPerMinute,
 			MaxConcurrency:    agent.Policy.MaxConcurrency,
@@ -761,7 +767,7 @@ func (a Authority) DelegatedInference(routes []string, agent Authority, memberID
 		BudgetGroupMonthlyCostLimit: a.BudgetGroupMonthlyCostLimit,
 		BudgetGroupWeeklyCostLimit:  a.BudgetGroupWeeklyCostLimit,
 		Policy: KeyPolicy{
-			Scopes: []string{"inference"}, AllowedRoutes: slices.Clone(routes),
+			Scopes: slices.Clone(scopes), AllowedRoutes: slices.Clone(routes), AllowedToolsets: slices.Clone(toolsets),
 			ForbidResponseCache:     a.Policy.ForbidResponseCache || agent.Policy.ForbidResponseCache,
 			LimitTemplate:           a.Policy.LimitTemplate,
 			RouteLimits:             a.Policy.RouteLimits,

@@ -43,7 +43,17 @@ func (s *Store) Delegate(ctx context.Context, authority access.Authority, tool r
 	defer clear(key)
 	fingerprint := sha256.Sum256(key.Public().(ed25519.PublicKey))
 	now := time.Now()
-	claims := delegatedClaims{RegisteredClaims: jwt.RegisteredClaims{Issuer: current.Issuer, Subject: string(bound.Identity.Kind) + ":" + bound.Identity.ID, Audience: jwt.ClaimStrings{current.Audience}, IssuedAt: jwt.NewNumericDate(now), NotBefore: jwt.NewNumericDate(now.Add(-5 * time.Second)), ExpiresAt: jwt.NewNumericDate(now.Add(2 * time.Minute))}, ServerID: bound.ServerID, ProjectID: bound.ProjectID}
+	expires := now.Add(2 * time.Minute)
+	if authority.DelegationAgentID != "" && authority.ExpiresAt != nil && authority.ExpiresAt.Before(expires) {
+		expires = *authority.ExpiresAt
+	}
+	subject := func() string {
+		if authority.DelegationAgentID != "" {
+			return "agent:" + authority.DelegationAgentID
+		}
+		return string(bound.Identity.Kind) + ":" + bound.Identity.ID
+	}()
+	claims := delegatedClaims{RegisteredClaims: jwt.RegisteredClaims{Issuer: current.Issuer, Subject: subject, Audience: jwt.ClaimStrings{current.Audience}, IssuedAt: jwt.NewNumericDate(now), NotBefore: jwt.NewNumericDate(now.Add(-5 * time.Second)), ExpiresAt: jwt.NewNumericDate(expires)}, ServerID: bound.ServerID, ProjectID: bound.ProjectID}
 	token := jwt.Token{Method: jwt.SigningMethodEdDSA, Claims: claims, Header: map[string]any{"typ": "JWT", "alg": jwt.SigningMethodEdDSA.Alg(), "kid": hex.EncodeToString(fingerprint[:])}}
 	encoded, signErr := token.SignedString(key)
 	if signErr != nil {

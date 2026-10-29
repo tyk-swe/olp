@@ -155,6 +155,11 @@ var aggregateSnapshotsSQL = reconcileCostWindowsSQL(costOwnerAggregate, true, `a
  LEFT JOIN olp.routes r ON r.slug=h.route_slug
  WHERE `+aggregateOwnershipSQL("a", "COALESCE(k.project_id,p.project_id,r.project_id)", "h.api_key_id", "h.route_slug", aggregateFactLabelsSQL("h"))+`
    AND h.budget_bucket >= LEAST((SELECT daily_start FROM budget_calendar),(SELECT monthly_start FROM budget_calendar),(SELECT weekly_start FROM budget_calendar)) AND h.budget_bucket < GREATEST((SELECT daily_end FROM budget_calendar),(SELECT monthly_end FROM budget_calendar),(SELECT weekly_end FROM budget_calendar))
+ UNION ALL
+ SELECT a.id,d.closed_at,d.observed_cost,d.observed_charge,0::bigint,0::bigint
+ FROM olp.execution_debits d JOIN accounts a ON EXISTS(SELECT 1 FROM olp.execution_debit_owners o WHERE o.dispatch_id=d.id AND o.owner_kind='aggregate' AND o.owner_id=a.id)
+ WHERE d.kind='tool' AND d.state='settled'
+   AND d.closed_at >= LEAST((SELECT daily_start FROM budget_calendar),(SELECT monthly_start FROM budget_calendar),(SELECT weekly_start FROM budget_calendar)) AND d.closed_at < GREATEST((SELECT daily_end FROM budget_calendar),(SELECT monthly_end FROM budget_calendar),(SELECT weekly_end FROM budget_calendar))
 )`)
 
 // ReconcileAggregateBudget recomputes one aggregate account's current spend
@@ -176,9 +181,9 @@ func aggregateSnapshots(ctx context.Context, conn *pgx.Conn, now time.Time) ([]C
 // AggregateBudgetSQL reports authoritative live and retained spend. The project
 // expression expects the surrounding project row to be named p.
 func AggregateBudgetSQL(project bool) string {
-	owner := budgetOwnership{"true", "true"}
+	owner := budgetOwnership{"true", "true", "true"}
 	if project {
-		owner = budgetOwnership{usageProjectSQL("f") + "=p.id", usageProjectSQL("h") + "=p.id"}
+		owner = budgetOwnership{usageProjectSQL("f") + "=p.id", usageProjectSQL("h") + "=p.id", "d.project_id=p.id"}
 	}
 	return budgetReportSQL(owner, "COALESCE(p.budget_policy->>'cost_basis','cost')")
 }
@@ -205,6 +210,7 @@ var AttributionBudgetsSQL = `(SELECT COALESCE(jsonb_object_agg(label,pair_usage)
  SELECT b.key AS label,jsonb_object_agg(v.key,` + budgetReportSQL(budgetOwnership{
 	usageProjectSQL("f") + "=p.id AND " + aggregateFactLabelsSQL("f") + "->>b.key=v.key",
 	usageProjectSQL("h") + "=p.id AND " + aggregateFactLabelsSQL("h") + "->>b.key=v.key",
+	"EXISTS(SELECT 1 FROM olp.execution_debit_owners o JOIN olp.aggregate_budget_accounts a ON a.id=o.owner_id WHERE o.dispatch_id=d.id AND o.owner_kind='aggregate' AND a.project_id=p.id AND a.attribution_key=b.key AND a.attribution_value=v.key)",
 }, "COALESCE(v.value->>'cost_basis','cost')") + `) AS pair_usage
  FROM jsonb_each(p.attribution_budgets) b CROSS JOIN LATERAL jsonb_each(b.value) v GROUP BY b.key
 ) grouped)`
@@ -214,4 +220,5 @@ var AttributionBudgetsSQL = `(SELECT COALESCE(jsonb_object_agg(label,pair_usage)
 var OrganizationBudgetSQL = budgetReportSQL(budgetOwnership{
 	"(SELECT organization_id FROM olp.projects WHERE id=" + usageProjectSQL("f") + ")=p.id",
 	"(SELECT organization_id FROM olp.projects WHERE id=" + usageProjectSQL("h") + ")=p.id",
+	"(SELECT organization_id FROM olp.projects WHERE id=d.project_id)=p.id",
 }, "COALESCE(p.budget_policy->>'cost_basis','cost')")

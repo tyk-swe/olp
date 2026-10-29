@@ -1,6 +1,7 @@
 package consumerauth
 
 import (
+	"context"
 	"errors"
 	"net"
 	"net/http"
@@ -15,6 +16,10 @@ import (
 
 type Authenticator interface {
 	Authenticate(secret string) (*access.Authority, error)
+}
+
+type DelegationAuthenticator interface {
+	AuthenticateDelegation(context.Context, string, string) (*access.Authority, error)
 }
 
 type Failure struct {
@@ -72,7 +77,7 @@ func Authenticate(auth Authenticator, r *http.Request, token, scope string, trus
 	if auth == nil || token == "" {
 		return access.Authority{}, &Failure{Status: http.StatusUnauthorized, Code: "invalid_api_key", Message: "Provide an API key as a Bearer [REDACTED] in the Authorization header."}
 	}
-	authority, err := auth.Authenticate(token)
+	authority, err := authenticate(auth, r, token, scope)
 	switch {
 	case errors.Is(err, runtime.ErrStaleAuthority):
 		return access.Authority{}, &Failure{Status: http.StatusServiceUnavailable, Code: "authority_unavailable", Message: "Key authority is unavailable; retry shortly."}
@@ -89,4 +94,15 @@ func Authenticate(auth Authenticator, r *http.Request, token, scope string, trus
 		return access.Authority{}, failure
 	}
 	return *authority, nil
+}
+
+func authenticate(auth Authenticator, r *http.Request, token, scope string) (*access.Authority, error) {
+	if !strings.HasPrefix(token, "olpd_") {
+		return auth.Authenticate(token)
+	}
+	delegation, ok := auth.(DelegationAuthenticator)
+	if !ok || (scope != "inference" && scope != "tools") {
+		return nil, runtime.ErrInvalidKey
+	}
+	return delegation.AuthenticateDelegation(r.Context(), token, strings.TrimSpace(r.Header.Get("X-OLP-Agent-Identity")))
 }

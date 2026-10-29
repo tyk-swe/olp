@@ -249,9 +249,10 @@ also use their selected RM5 backend.
   revisions, labels and bounded string substitution across API, playground
   and import, with fixed in-flight revisions, variable handling, input guards
   and content-free persistence.
-- [ ] **RM8.3 — Delegated identities:** extend workload issuers and implement
-  consent, scoped tokens, intersected rights, user/agent/pair budgets, expiry,
-  renewal and either-principal revocation.
+- [x] **RM8.3 — Delegated identities:** workload agents use consent and scoped,
+  single-use credentials with intersected inference and tool rights, budgets,
+  renewal and either-principal revocation. Signed tool calls and accounting are
+  fixture-qualified; live Entra agent identity qualification remains separate.
 - [ ] **RM8.4 — A2A workflows:** implement the declared protocol adapters,
   owner-bound tasks, authenticated callbacks, send/stream/read/cancel/
   resubscribe operations, callback accounting and kill-switch behavior.

@@ -374,11 +374,11 @@ for their selected backend, not completion of every retrieval adapter.
   Verify equivalent API/playground/import rendering, fixed in-flight revisions,
   unknown-variable and strict-route refusals, input guards and no persisted
   variable values or rendered content.
-- [ ] **RM8.3 — Add delegated identities** (access): extend workload issuers,
-  implement explicit consent and scoped tokens, and enforce intersected rights
-  and user/agent/pair budgets. Test wrong audience/project/subject, replay,
-  expiry, renewal and either-principal revocation; retain separate live Entra
-  evidence without treating generic issuer fixtures as that qualification.
+- [x] **RM8.3 — Add delegated identities** (access): workload agents use
+  explicit consent and scoped tokens with intersected rights and
+  user/agent/pair budgets. Fixtures cover signed tool calls, audience refusal,
+  replay, renewal and revocation. Live Entra agent identity qualification
+  remains separate from generic workload issuer fixtures.
 - [ ] **RM8.4 — Serve A2A workflows** (agent/resource): implement both pinned
   protocol adapters, retained owner-bound tasks and authenticated callbacks.
   Verify send/stream/read/cancel/resubscribe, callback accounting, cross-project

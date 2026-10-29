@@ -3,10 +3,13 @@
 package integration_test
 
 import (
+	"bytes"
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
+	"crypto/x509"
 	"encoding/json"
+	"encoding/pem"
 	"fmt"
 	"io"
 	"log/slog"
@@ -14,21 +17,28 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/agentcontract"
 	agentworkflows "github.com/tyk-swe/olp/internal/agents"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/mcp"
+	"github.com/tyk-swe/olp/internal/mcpservers"
+	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/runtime"
+	"github.com/tyk-swe/olp/internal/testutil"
 	"github.com/tyk-swe/olp/internal/usage"
 
 	"github.com/coder/websocket"
 	jose "github.com/go-jose/go-jose/v4"
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
+	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/tyk-swe/olp/internal/gateway"
 )
 
@@ -1287,4 +1297,340 @@ func TestWorkloadDelegationRealtimeRevalidatesAndRevokes(t *testing.T) {
 	if websocket.CloseStatus(closeErr) != websocket.StatusPolicyViolation {
 		t.Fatalf("revoked realtime session remained open: %v", closeErr)
 	}
+}
+
+func TestWorkloadAgentDelegatesKeyForTools(t *testing.T) {
+	upstreamCalls := make(chan struct{}, 8)
+	signedExpiries := make(chan time.Time, 8)
+	public, private, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded, err := x509.MarshalPKCS8PrivateKey(private)
+	if err != nil {
+		t.Fatal(err)
+	}
+	material := string(pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: encoded}))
+	const signerIssuer = "https://gateway.example.test"
+	const signerAudience = "https://tools.example.test/first"
+	f := newPersonalOAuthFixtureWithCall(t, nil, personalOAuthCallbacks{Call: func(r *http.Request) mcpsdk.CallToolResult {
+		upstreamCalls <- struct{}{}
+		token := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+		claims := &personalDelegatedClaims{}
+		if _, parseErr := jwt.ParseWithClaims(token, claims, func(*jwt.Token) (any, error) { return public, nil }, jwt.WithIssuer(signerIssuer), jwt.WithAudience(signerAudience), jwt.WithValidMethods([]string{"EdDSA"}), jwt.WithExpirationRequired()); parseErr != nil {
+			t.Errorf("delegated signature rejected: %v", parseErr)
+			return mcpsdk.CallToolResult{IsError: true}
+		}
+		if _, parseErr := jwt.Parse(token, func(*jwt.Token) (any, error) { return public, nil }, jwt.WithAudience("https://tools.example.test/second"), jwt.WithValidMethods([]string{"EdDSA"})); parseErr == nil {
+			t.Error("delegated signature accepted by another audience")
+		}
+		signedExpiries <- claims.ExpiresAt.Time
+		return mcpsdk.CallToolResult{Content: []mcpsdk.Content{&mcpsdk.TextContent{Text: claims.Subject}}}
+	}})
+	currentServer := f.h.want(f.owner, http.MethodGet, "/api/v1/mcp-servers/"+f.serverID, nil, nil, http.StatusOK)
+	var server mcpservers.Definition
+	if err := json.Unmarshal(mustJSON(currentServer), &server); err != nil {
+		t.Fatal(err)
+	}
+	enabled := true
+	price := "1"
+	updatedServer := f.h.want(f.owner, http.MethodPut, "/api/v1/mcp-servers/"+f.serverID, mcpservers.Input{Name: server.Name, Endpoint: server.Endpoint, Enabled: &enabled, OAuth: server.OAuth, UnitPrice: &price, Delegation: &routing.MCPDelegation{Issuer: signerIssuer, Audience: signerAudience}, DelegationPrivateKey: &material}, withMatch(currentServer, idem("agent-signer")), http.StatusOK)
+	currentToolset := f.h.want(f.owner, http.MethodGet, "/api/v1/toolsets/"+f.toolsetID, nil, nil, http.StatusOK)
+	tool := agentcontract.Tool{ServerID: f.serverID, RevisionID: mcpExecString(t, updatedServer, "revision_id"), CatalogDigest: server.Catalog.Digest, Name: "identity", Alias: f.alias}
+	updatedToolset := f.h.want(f.owner, http.MethodPut, "/api/v1/toolsets/"+f.toolsetID, personalOAuthToolsetInput{ProjectID: server.ProjectID, Name: "OAuth tools", Toolset: agentcontract.Toolset{Tools: []agentcontract.Tool{tool}}}, withMatch(currentToolset, idem("agent-signer-toolset")), http.StatusOK)
+	f.h.want(f.owner, http.MethodPost, "/api/v1/toolsets/"+f.toolsetID+"/publish", nil, withMatch(updatedToolset, idem("agent-signer-publish")), http.StatusOK)
+	project := f.h.want(f.owner, http.MethodGet, "/api/v1/toolsets/"+f.toolsetID, nil, nil, http.StatusOK)["project_id"].(string)
+	workloadProject(t, f.h, f.owner, project, map[string]any{"bootstrap": []string{"placeholder"}})
+	issuer := newWorkloadFixture(t, f.h, f.owner, project, []string{"bootstrap"})
+	issuerPath := "/api/v1/workload-issuers/" + issuer.issuer["id"].(string)
+	current := f.h.want(f.owner, http.MethodGet, issuerPath, nil, nil, http.StatusOK)
+	f.h.want(f.owner, http.MethodPut, issuerPath, map[string]any{
+		"name": "Portable CI", "issuer": issuer.endpoint.URL, "jwks_url": issuer.endpoint.URL,
+		"enabled": true, "audiences": []string{"olp"}, "algorithms": []string{"EdDSA"},
+		"max_lifetime_seconds": 600, "disabled_key_ids": []string{},
+		"mappings": []any{map[string]any{"name": "agent", "match": map[string]string{"/sub": "approved-agent", "/client_id": "approved-client"}, "project_id": project, "limit_template": "worker", "route_groups": []string{}, "allowed_toolsets": []string{f.toolsetID}, "scopes": []string{"tools"}, "agent_principal": true}},
+	}, etagHeader(current), http.StatusOK)
+	delegating := f.h.want(f.owner, http.MethodPost, "/api/v1/api-keys", map[string]any{"name": "delegating tools", "project_id": project, "scopes": []string{"tools", "delegate"}, "allowed_toolsets": []string{f.toolsetID}}, idem("delegating-tools-key"), http.StatusCreated)
+	f.h.refresh()
+	signer, err := jose.NewSigner(jose.SigningKey{Algorithm: jose.EdDSA, Key: issuer.private}, (&jose.SignerOptions{}).WithHeader("kid", issuer.kid))
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	claims, err := json.Marshal(map[string]any{"iss": issuer.endpoint.URL, "aud": "olp", "sub": "approved-agent", "client_id": "approved-client", "iat": now.Unix(), "exp": now.Add(5 * time.Minute).Unix()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	signed, err := signer.Sign(claims)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertion, err := signed.CompactSerialize()
+	if err != nil {
+		t.Fatal(err)
+	}
+	bounds := struct {
+		Scopes          []string `json:"scopes"`
+		AllowedToolsets []string `json:"allowed_toolsets"`
+		TTLSeconds      int      `json:"ttl_seconds"`
+	}{Scopes: []string{"tools"}, AllowedToolsets: []string{f.toolsetID}, TTLSeconds: 90}
+	response, body := f.h.do(nil, http.MethodPost, "/v1/delegations", bounds, map[string]string{"Authorization": "Bearer " + assertion, "X-OLP-Delegating-Key": delegating["secret"].(string)})
+	if response.StatusCode != http.StatusCreated {
+		t.Fatalf("tool delegation exchange: %d %s", response.StatusCode, body)
+	}
+	var grant struct {
+		Token      string    `json:"token"`
+		PairDigest string    `json:"delegation_pair_digest"`
+		ExpiresAt  time.Time `json:"expires_at"`
+	}
+	if err := json.Unmarshal(body, &grant); err != nil || grant.Token == "" || grant.PairDigest == "" || grant.ExpiresAt.IsZero() {
+		t.Fatalf("tool delegation missing token: %v", err)
+	}
+	pairPath := "/api/v1/projects/" + project + "/attribution-budgets"
+	pairBudget := f.h.want(f.owner, http.MethodGet, pairPath, nil, nil, http.StatusOK)
+	f.h.want(f.owner, http.MethodPut, pairPath, map[string]any{"budgets": map[string]any{"delegation_pair": map[string]any{grant.PairDigest: map[string]any{"daily_cost_limit": "1000"}}}}, etagHeader(pairBudget), http.StatusOK)
+	f.h.refresh()
+	principals := f.h.want(f.owner, http.MethodGet, "/api/v1/api-keys", nil, nil, http.StatusOK)["items"].([]any)
+	agentID := func() string {
+		for _, item := range principals {
+			principal := item.(map[string]any)
+			if principal["workload_issuer_id"] == issuer.issuer["id"] && principal["workload_mapping"] == "agent" {
+				return principal["id"].(string)
+			}
+		}
+		t.Fatal("authenticated agent principal is absent")
+		return ""
+	}()
+	f.completePKCE(t, f.claimKey(t, mcpPersonalKey{ID: delegating["id"].(string), Secret: delegating["secret"].(string)}), testutil.OAuthIdentity{Subject: "first", Account: "agent-account"})
+	handler := f.consumer(t)
+	request := httptest.NewRequest(http.MethodPost, "/v1/mcp/tools/call", strings.NewReader(string(mustJSON(struct {
+		ToolsetID string   `json:"toolset_id"`
+		Name      string   `json:"name"`
+		Arguments struct{} `json:"arguments"`
+		CallID    string   `json:"call_id"`
+	}{ToolsetID: f.toolsetID, Name: f.alias, CallID: "delegated-tool"}))))
+	request.Header.Set("Authorization", "Bearer "+grant.Token)
+	request.Header.Set("X-OLP-Agent-Identity", assertion)
+	request.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusOK || !strings.Contains(recorder.Body.String(), "agent:"+agentID) {
+		t.Fatalf("delegated tool call failed: %d %s", recorder.Code, recorder.Body.String())
+	}
+	select {
+	case <-upstreamCalls:
+	default:
+		t.Fatal("delegated call did not reach the upstream")
+	}
+	if signedExpiry := <-signedExpiries; signedExpiry.After(grant.ExpiresAt) {
+		t.Fatalf("downstream signature outlived the delegation: %s > %s", signedExpiry, grant.ExpiresAt)
+	}
+	replay := httptest.NewRequest(http.MethodPost, "/v1/mcp/tools/call", strings.NewReader(string(mustJSON(struct {
+		ToolsetID string   `json:"toolset_id"`
+		Name      string   `json:"name"`
+		Arguments struct{} `json:"arguments"`
+		CallID    string   `json:"call_id"`
+	}{ToolsetID: f.toolsetID, Name: f.alias, CallID: "delegated-replay"}))))
+	replay.Header.Set("Authorization", "Bearer "+grant.Token)
+	replay.Header.Set("X-OLP-Agent-Identity", assertion)
+	replay.Header.Set("Content-Type", "application/json")
+	replayed := httptest.NewRecorder()
+	handler.ServeHTTP(replayed, replay)
+	if replayed.Code != http.StatusUnauthorized {
+		t.Fatalf("delegated grant was replayed: %d %s", replayed.Code, replayed.Body.String())
+	}
+	select {
+	case <-upstreamCalls:
+		t.Fatal("replayed grant reached the upstream")
+	default:
+	}
+	pairReport := f.h.want(f.owner, http.MethodGet, pairPath, nil, nil, http.StatusOK)
+	pairAccrued := pairReport["usage"].(map[string]any)["delegation_pair"].(map[string]any)[grant.PairDigest].(map[string]any)["daily"].(map[string]any)["accrued"].(string)
+	callerReport := f.h.want(f.owner, http.MethodGet, "/api/v1/api-keys/"+delegating["id"].(string), nil, nil, http.StatusOK)
+	agentReport := f.h.want(f.owner, http.MethodGet, "/api/v1/api-keys/"+agentID, nil, nil, http.StatusOK)
+	callerAccrued := callerReport["budget"].(map[string]any)["daily"].(map[string]any)["accrued"].(string)
+	agentAccrued := agentReport["budget"].(map[string]any)["daily"].(map[string]any)["accrued"].(string)
+	pairCost, pairOK := new(big.Rat).SetString(pairAccrued)
+	callerCost, callerOK := new(big.Rat).SetString(callerAccrued)
+	agentCost, agentOK := new(big.Rat).SetString(agentAccrued)
+	if !pairOK || !callerOK || !agentOK || pairCost.Sign() <= 0 || pairCost.Cmp(callerCost) != 0 || pairCost.Cmp(agentCost) != 0 {
+		t.Fatalf("delegated tool spend differs across principals: pair=%s caller=%s agent=%s", pairAccrued, callerAccrued, agentAccrued)
+	}
+	connection, err := f.h.Pool.Acquire(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshots, err := limits.ReconciliationSnapshots(t.Context(), connection.Conn(), time.Now())
+	connection.Release()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, owner := range []string{delegating["id"].(string), agentID, limits.AttributionBudgetID(project, "delegation_pair", grant.PairDigest)} {
+		if !slices.ContainsFunc(snapshots, func(snapshot limits.CostSnapshot) bool {
+			amount, ok := new(big.Rat).SetString(snapshot.DailyAccrued)
+			return snapshot.CostOwnerID == owner && snapshot.Basis == limits.BasisCost && ok && amount.Cmp(pairCost) == 0
+		}) {
+			t.Fatalf("reconciliation lost settled tool spend for %s", owner)
+		}
+	}
+	options := f.h.want(f.owner, http.MethodGet, "/api/v1/delegation-options?api_key_id="+delegating["id"].(string), nil, nil, http.StatusOK)
+	if !slices.ContainsFunc(options["agents"].([]any), func(item any) bool {
+		option := item.(map[string]any)
+		return option["id"] == agentID && slices.Contains(option["allowed_toolsets"].([]any), any(f.toolsetID))
+	}) {
+		t.Fatalf("member consent omitted an eligible toolset: %v", options)
+	}
+	f.h.want(f.owner, http.MethodPost, "/api/v1/profile/reauthenticate", map[string]any{"current_password": accessPassword, "purpose": "agent_delegation", "resource_id": delegating["id"]}, nil, http.StatusNoContent)
+	consent := f.h.want(f.owner, http.MethodPost, "/api/v1/delegation-consents", map[string]any{"agent_id": agentID, "api_key_id": delegating["id"], "scopes": []string{"tools"}, "allowed_toolsets": []string{f.toolsetID}}, nil, http.StatusCreated)
+	memberResponse, memberBody := f.h.do(nil, http.MethodPost, "/v1/delegations", bounds, map[string]string{"Authorization": "Bearer " + assertion, "X-OLP-Delegation-Consent": consent["consent"].(string)})
+	if memberResponse.StatusCode != http.StatusCreated {
+		t.Fatalf("member tool delegation exchange: %d %s", memberResponse.StatusCode, memberBody)
+	}
+	var memberGrant struct {
+		Token string `json:"token"`
+	}
+	if err := json.Unmarshal(memberBody, &memberGrant); err != nil || memberGrant.Token == "" {
+		t.Fatalf("member tool delegation missing token: %v", err)
+	}
+	memberCall := httptest.NewRequest(http.MethodPost, "/v1/mcp/tools/call", strings.NewReader(string(mustJSON(struct {
+		ToolsetID string   `json:"toolset_id"`
+		Name      string   `json:"name"`
+		Arguments struct{} `json:"arguments"`
+		CallID    string   `json:"call_id"`
+	}{ToolsetID: f.toolsetID, Name: f.alias, CallID: "member-tool"}))))
+	memberCall.Header.Set("Authorization", "Bearer "+memberGrant.Token)
+	memberCall.Header.Set("X-OLP-Agent-Identity", assertion)
+	memberCall.Header.Set("Content-Type", "application/json")
+	memberResult := httptest.NewRecorder()
+	handler.ServeHTTP(memberResult, memberCall)
+	if memberResult.Code != http.StatusOK {
+		t.Fatalf("member tool delegation failed: %d %s", memberResult.Code, memberResult.Body.String())
+	}
+	<-upstreamCalls
+	sessionResponse, sessionBody := f.h.do(nil, http.MethodPost, "/v1/delegations", bounds, map[string]string{"Authorization": "Bearer " + assertion, "X-OLP-Delegating-Key": delegating["secret"].(string)})
+	if sessionResponse.StatusCode != http.StatusCreated {
+		t.Fatalf("session delegation exchange: %d %s", sessionResponse.StatusCode, sessionBody)
+	}
+	var sessionGrant struct {
+		Token string `json:"token"`
+	}
+	if err := json.Unmarshal(sessionBody, &sessionGrant); err != nil || sessionGrant.Token == "" {
+		t.Fatalf("session delegation missing token: %v", err)
+	}
+	sessionRPC := func(token, session, method string, id *int, params json.RawMessage) *httptest.ResponseRecorder {
+		rpc := httptest.NewRequest(http.MethodPost, "/mcp?toolset_id="+f.toolsetID, bytes.NewReader(mustJSON(struct {
+			JSONRPC string          `json:"jsonrpc"`
+			ID      *int            `json:"id,omitempty"`
+			Method  string          `json:"method"`
+			Params  json.RawMessage `json:"params,omitempty"`
+		}{JSONRPC: "2.0", ID: id, Method: method, Params: params})))
+		rpc.Header.Set("Authorization", "Bearer "+token)
+		rpc.Header.Set("X-OLP-Agent-Identity", assertion)
+		rpc.Header.Set("Content-Type", "application/json")
+		rpc.Header.Set("Accept", "application/json, text/event-stream")
+		if session != "" {
+			rpc.Header.Set("Mcp-Session-Id", session)
+		}
+		out := httptest.NewRecorder()
+		handler.ServeHTTP(out, rpc)
+		return out
+	}
+	rpcID := 1
+	initialize := mustJSON(mcpsdk.InitializeParams{Capabilities: &mcpsdk.ClientCapabilities{}, ClientInfo: &mcpsdk.Implementation{Name: "agent-fixture", Version: "1"}, ProtocolVersion: server.Catalog.Protocol})
+	opened := sessionRPC(sessionGrant.Token, "", "initialize", &rpcID, initialize)
+	sessionID := opened.Header().Get("Mcp-Session-Id")
+	if opened.Code != http.StatusOK || sessionID == "" {
+		t.Fatalf("delegated MCP session did not initialize: %d %s", opened.Code, opened.Body.String())
+	}
+	initialized := sessionRPC(sessionGrant.Token, sessionID, "notifications/initialized", nil, nil)
+	if initialized.Code != http.StatusAccepted {
+		t.Fatalf("delegated MCP session could not continue: %d %s", initialized.Code, initialized.Body.String())
+	}
+	listed := sessionRPC(sessionGrant.Token, sessionID, "tools/list", &rpcID, nil)
+	if listed.Code != http.StatusOK || !strings.Contains(listed.Body.String(), f.alias) {
+		t.Fatalf("delegated MCP session lost its tools: %d %s", listed.Code, listed.Body.String())
+	}
+	createdAgain := sessionRPC(sessionGrant.Token, sessionID, "initialize", &rpcID, initialize)
+	if createdAgain.Code != http.StatusUnauthorized {
+		t.Fatalf("consumed grant created another session: %d %s", createdAgain.Code, createdAgain.Body.String())
+	}
+	otherResponse, otherBody := f.h.do(nil, http.MethodPost, "/v1/delegations", bounds, map[string]string{"Authorization": "Bearer " + assertion, "X-OLP-Delegating-Key": delegating["secret"].(string)})
+	if otherResponse.StatusCode != http.StatusCreated {
+		t.Fatalf("second session delegation: %d %s", otherResponse.StatusCode, otherBody)
+	}
+	var otherGrant struct {
+		Token string `json:"token"`
+	}
+	if err := json.Unmarshal(otherBody, &otherGrant); err != nil || otherGrant.Token == "" {
+		t.Fatalf("second session delegation missing token: %v", err)
+	}
+	otherOpened := sessionRPC(otherGrant.Token, "", "initialize", &rpcID, initialize)
+	otherSessionID := otherOpened.Header().Get("Mcp-Session-Id")
+	if otherOpened.Code != http.StatusOK || otherSessionID == "" {
+		t.Fatalf("second delegated MCP session did not initialize: %d %s", otherOpened.Code, otherOpened.Body.String())
+	}
+	otherInitialized := sessionRPC(otherGrant.Token, otherSessionID, "notifications/initialized", nil, nil)
+	if otherInitialized.Code != http.StatusAccepted {
+		t.Fatalf("second delegated MCP session could not continue: %d %s", otherInitialized.Code, otherInitialized.Body.String())
+	}
+	wrongSession := sessionRPC(otherGrant.Token, sessionID, "tools/list", &rpcID, nil)
+	if wrongSession.Code == http.StatusOK {
+		t.Fatalf("different delegation accessed existing session: %s", wrongSession.Body.String())
+	}
+	originalWrongSession := sessionRPC(sessionGrant.Token, otherSessionID, "tools/list", &rpcID, nil)
+	if originalWrongSession.Code == http.StatusOK {
+		t.Fatalf("original delegation accessed a different session: %s", originalWrongSession.Body.String())
+	}
+	assertBudgetRefusal := func(reason string) {
+		t.Helper()
+		exchangeResponse, exchangeBody := f.h.do(nil, http.MethodPost, "/v1/delegations", bounds, map[string]string{"Authorization": "Bearer " + assertion, "X-OLP-Delegating-Key": delegating["secret"].(string)})
+		if exchangeResponse.StatusCode != http.StatusCreated {
+			t.Fatalf("renew %s delegation: %d %s", reason, exchangeResponse.StatusCode, exchangeBody)
+		}
+		var renewed struct {
+			Token      string `json:"token"`
+			PairDigest string `json:"delegation_pair_digest"`
+		}
+		if err := json.Unmarshal(exchangeBody, &renewed); err != nil || renewed.Token == "" || renewed.PairDigest != grant.PairDigest {
+			t.Fatalf("renew %s delegation lost its pair: %v", reason, err)
+		}
+		call := httptest.NewRequest(http.MethodPost, "/v1/mcp/tools/call", strings.NewReader(string(mustJSON(struct {
+			ToolsetID string   `json:"toolset_id"`
+			Name      string   `json:"name"`
+			Arguments struct{} `json:"arguments"`
+			CallID    string   `json:"call_id"`
+		}{ToolsetID: f.toolsetID, Name: f.alias, CallID: "budget-" + reason}))))
+		call.Header.Set("Authorization", "Bearer "+renewed.Token)
+		call.Header.Set("X-OLP-Agent-Identity", assertion)
+		call.Header.Set("Content-Type", "application/json")
+		result := httptest.NewRecorder()
+		handler.ServeHTTP(result, call)
+		if result.Code != http.StatusTooManyRequests {
+			t.Fatalf("%s budget did not refuse the delegated tool: %d %s", reason, result.Code, result.Body.String())
+		}
+		select {
+		case <-upstreamCalls:
+			t.Fatalf("%s budget refusal dispatched to the upstream", reason)
+		default:
+		}
+	}
+	limit := pairCost.FloatString(12)
+	templatesPath := "/api/v1/projects/" + project + "/limit-templates"
+	templates := f.h.want(f.owner, http.MethodGet, templatesPath, nil, nil, http.StatusOK)
+	f.h.want(f.owner, http.MethodPut, templatesPath, map[string]any{"templates": map[string]any{"worker": map[string]any{"requests_per_minute": 100, "daily_cost_limit": limit}}}, etagHeader(templates), http.StatusOK)
+	f.h.refresh()
+	assertBudgetRefusal("agent")
+	updatedTemplates := f.h.want(f.owner, http.MethodGet, templatesPath, nil, nil, http.StatusOK)
+	f.h.want(f.owner, http.MethodPut, templatesPath, map[string]any{"templates": map[string]any{"worker": map[string]any{"requests_per_minute": 100}}}, etagHeader(updatedTemplates), http.StatusOK)
+	updatedPair := f.h.want(f.owner, http.MethodGet, pairPath, nil, nil, http.StatusOK)
+	f.h.want(f.owner, http.MethodPut, pairPath, map[string]any{"budgets": map[string]any{"delegation_pair": map[string]any{grant.PairDigest: map[string]any{"daily_cost_limit": limit}}}}, etagHeader(updatedPair), http.StatusOK)
+	f.h.refresh()
+	assertBudgetRefusal("pair")
+	limitedPair := f.h.want(f.owner, http.MethodGet, pairPath, nil, nil, http.StatusOK)
+	f.h.want(f.owner, http.MethodPut, pairPath, map[string]any{"budgets": map[string]any{"delegation_pair": map[string]any{grant.PairDigest: map[string]any{"daily_cost_limit": "1000"}}}}, etagHeader(limitedPair), http.StatusOK)
+	keyPath := "/api/v1/api-keys/" + delegating["id"].(string)
+	keyPolicy := f.h.want(f.owner, http.MethodGet, keyPath, nil, nil, http.StatusOK)
+	f.h.want(f.owner, http.MethodPatch, keyPath, map[string]any{"daily_cost_limit": limit}, etagHeader(keyPolicy), http.StatusOK)
+	f.h.refresh()
+	assertBudgetRefusal("key")
 }

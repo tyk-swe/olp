@@ -306,8 +306,9 @@ export interface components {
             }[];
         };
         DelegationRequest: {
-            scopes: "inference"[];
-            allowed_routes: string[];
+            scopes: ("inference" | "tools")[];
+            allowed_routes?: string[];
+            allowed_toolsets?: string[];
             /**
              * Format: int64
              * @description Grant lifetime in seconds. Omit or use 0 for the 300-second default. Principal expiry can shorten the lifetime.
