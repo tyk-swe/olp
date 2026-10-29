@@ -259,9 +259,9 @@ also use their selected RM5 backend.
   accounting and revocation are covered by local reference fixtures. Unresolved
   remote effects remain visible. Live external interoperability remains part of
   RM8.6 qualification.
-- [ ] **RM8.5 — Traces and operator views:** implement bounded OTLP ingestion,
-  scoped trace links, origin-labelled exports and accessible operator views,
-  with content stripping, project isolation and retention controls.
+- [x] **RM8.5 — Traces and operator views:** bounded OTLP ingestion, scoped
+  trace links, origin-labelled exports and accessible operator views have local
+  fixture coverage for content stripping, project isolation and retention.
   - [x] Save project-scoped investigations with typed filters, up to 100
     evidence references and an operator-authored summary. The
     [HTTP regressions](../tests/integration/investigations_test.go) and

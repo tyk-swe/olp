@@ -399,10 +399,10 @@ for their selected backend, not completion of every retrieval adapter.
   callbacks, accounting, cross-project denial and revocation. Unconfirmed remote
   effects remain uncertain. Live external interoperability remains unverified and
   is part of RM8.6 qualification. See [A2A qualification](../../use/compatibility.md#a2a-qualification).
-- [ ] **RM8.5 — Add traces and operator views** (observability/console): after
-  RM8.1–RM8.4, implement bounded OTLP ingestion, scoped evidence links and
-  origin-labelled exports. Test content stripping, project isolation, retention
-  and inability to forge financial facts; exercise accessible operator journeys.
+- [x] **RM8.5 — Add traces and operator views** (observability/console): local
+  fixtures cover bounded OTLP ingestion, scoped evidence links and
+  origin-labelled exports, with content stripping, project isolation, retention
+  and financial isolation. Packaged console journeys cover accessibility.
   Saved investigations are implemented with typed filters, bounded references,
   an operator-authored summary and current project checks on reads. Referenced
   evidence remains subject to its own access and retention policies.

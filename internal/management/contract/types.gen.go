@@ -1918,6 +1918,8 @@ const (
 	ConfigurationSinkStreamsAudit              ConfigurationSinkStreams = "audit"
 	ConfigurationSinkStreamsGuardrailDecisions ConfigurationSinkStreams = "guardrail_decisions"
 	ConfigurationSinkStreamsRequests           ConfigurationSinkStreams = "requests"
+	ConfigurationSinkStreamsRuns               ConfigurationSinkStreams = "runs"
+	ConfigurationSinkStreamsTraceSpans         ConfigurationSinkStreams = "trace_spans"
 )
 
 // Valid indicates whether the value is a known member of the ConfigurationSinkStreams enum.
@@ -1930,6 +1932,10 @@ func (e ConfigurationSinkStreams) Valid() bool {
 	case ConfigurationSinkStreamsGuardrailDecisions:
 		return true
 	case ConfigurationSinkStreamsRequests:
+		return true
+	case ConfigurationSinkStreamsRuns:
+		return true
+	case ConfigurationSinkStreamsTraceSpans:
 		return true
 	default:
 		return false
@@ -2199,6 +2205,8 @@ const (
 	CreateExportSinkRequestStreamsGuardrailDecisions CreateExportSinkRequestStreams = "guardrail_decisions"
 	CreateExportSinkRequestStreamsMetering           CreateExportSinkRequestStreams = "metering"
 	CreateExportSinkRequestStreamsRequests           CreateExportSinkRequestStreams = "requests"
+	CreateExportSinkRequestStreamsRuns               CreateExportSinkRequestStreams = "runs"
+	CreateExportSinkRequestStreamsTraceSpans         CreateExportSinkRequestStreams = "trace_spans"
 	CreateExportSinkRequestStreamsUsageRollups       CreateExportSinkRequestStreams = "usage_rollups"
 )
 
@@ -2216,6 +2224,10 @@ func (e CreateExportSinkRequestStreams) Valid() bool {
 	case CreateExportSinkRequestStreamsMetering:
 		return true
 	case CreateExportSinkRequestStreamsRequests:
+		return true
+	case CreateExportSinkRequestStreamsRuns:
+		return true
+	case CreateExportSinkRequestStreamsTraceSpans:
 		return true
 	case CreateExportSinkRequestStreamsUsageRollups:
 		return true
@@ -2542,6 +2554,8 @@ const (
 	CreateSinkRequestStreamsAudit              CreateSinkRequestStreams = "audit"
 	CreateSinkRequestStreamsGuardrailDecisions CreateSinkRequestStreams = "guardrail_decisions"
 	CreateSinkRequestStreamsRequests           CreateSinkRequestStreams = "requests"
+	CreateSinkRequestStreamsRuns               CreateSinkRequestStreams = "runs"
+	CreateSinkRequestStreamsTraceSpans         CreateSinkRequestStreams = "trace_spans"
 )
 
 // Valid indicates whether the value is a known member of the CreateSinkRequestStreams enum.
@@ -2554,6 +2568,10 @@ func (e CreateSinkRequestStreams) Valid() bool {
 	case CreateSinkRequestStreamsGuardrailDecisions:
 		return true
 	case CreateSinkRequestStreamsRequests:
+		return true
+	case CreateSinkRequestStreamsRuns:
+		return true
+	case CreateSinkRequestStreamsTraceSpans:
 		return true
 	default:
 		return false
@@ -2754,6 +2772,8 @@ const (
 	ExportSinkStreamsGuardrailDecisions ExportSinkStreams = "guardrail_decisions"
 	ExportSinkStreamsMetering           ExportSinkStreams = "metering"
 	ExportSinkStreamsRequests           ExportSinkStreams = "requests"
+	ExportSinkStreamsRuns               ExportSinkStreams = "runs"
+	ExportSinkStreamsTraceSpans         ExportSinkStreams = "trace_spans"
 	ExportSinkStreamsUsageRollups       ExportSinkStreams = "usage_rollups"
 )
 
@@ -2771,6 +2791,10 @@ func (e ExportSinkStreams) Valid() bool {
 	case ExportSinkStreamsMetering:
 		return true
 	case ExportSinkStreamsRequests:
+		return true
+	case ExportSinkStreamsRuns:
+		return true
+	case ExportSinkStreamsTraceSpans:
 		return true
 	case ExportSinkStreamsUsageRollups:
 		return true
@@ -4054,6 +4078,129 @@ func (e MFAVerificationRequestMethod) Valid() bool {
 	}
 }
 
+// Defines values for ManagedRunEvidenceEvidenceOrigin.
+const (
+	ManagedRunEvidenceEvidenceOriginGatewayObserved ManagedRunEvidenceEvidenceOrigin = "gateway_observed"
+)
+
+// Valid indicates whether the value is a known member of the ManagedRunEvidenceEvidenceOrigin enum.
+func (e ManagedRunEvidenceEvidenceOrigin) Valid() bool {
+	switch e {
+	case ManagedRunEvidenceEvidenceOriginGatewayObserved:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ManagedRunEvidenceEventStream.
+const (
+	ManagedRunEvidenceEventStreamRuns ManagedRunEvidenceEventStream = "runs"
+)
+
+// Valid indicates whether the value is a known member of the ManagedRunEvidenceEventStream enum.
+func (e ManagedRunEvidenceEventStream) Valid() bool {
+	switch e {
+	case ManagedRunEvidenceEventStreamRuns:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ManagedRunEvidenceEventVersion.
+const (
+	ManagedRunEvidenceEventVersionN1 ManagedRunEvidenceEventVersion = 1
+)
+
+// Valid indicates whether the value is a known member of the ManagedRunEvidenceEventVersion enum.
+func (e ManagedRunEvidenceEventVersion) Valid() bool {
+	switch e {
+	case ManagedRunEvidenceEventVersionN1:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ManagedTraceSpanEvidenceCategory.
+const (
+	ManagedTraceSpanEvidenceCategoryChat           ManagedTraceSpanEvidenceCategory = "chat"
+	ManagedTraceSpanEvidenceCategoryCreateAgent    ManagedTraceSpanEvidenceCategory = "create_agent"
+	ManagedTraceSpanEvidenceCategoryEmbeddings     ManagedTraceSpanEvidenceCategory = "embeddings"
+	ManagedTraceSpanEvidenceCategoryExecuteTool    ManagedTraceSpanEvidenceCategory = "execute_tool"
+	ManagedTraceSpanEvidenceCategoryInvokeAgent    ManagedTraceSpanEvidenceCategory = "invoke_agent"
+	ManagedTraceSpanEvidenceCategoryOther          ManagedTraceSpanEvidenceCategory = "other"
+	ManagedTraceSpanEvidenceCategoryTextCompletion ManagedTraceSpanEvidenceCategory = "text_completion"
+)
+
+// Valid indicates whether the value is a known member of the ManagedTraceSpanEvidenceCategory enum.
+func (e ManagedTraceSpanEvidenceCategory) Valid() bool {
+	switch e {
+	case ManagedTraceSpanEvidenceCategoryChat:
+		return true
+	case ManagedTraceSpanEvidenceCategoryCreateAgent:
+		return true
+	case ManagedTraceSpanEvidenceCategoryEmbeddings:
+		return true
+	case ManagedTraceSpanEvidenceCategoryExecuteTool:
+		return true
+	case ManagedTraceSpanEvidenceCategoryInvokeAgent:
+		return true
+	case ManagedTraceSpanEvidenceCategoryOther:
+		return true
+	case ManagedTraceSpanEvidenceCategoryTextCompletion:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ManagedTraceSpanEvidenceEvidenceOrigin.
+const (
+	ManagedTraceSpanEvidenceEvidenceOriginClientAsserted ManagedTraceSpanEvidenceEvidenceOrigin = "client_asserted"
+)
+
+// Valid indicates whether the value is a known member of the ManagedTraceSpanEvidenceEvidenceOrigin enum.
+func (e ManagedTraceSpanEvidenceEvidenceOrigin) Valid() bool {
+	switch e {
+	case ManagedTraceSpanEvidenceEvidenceOriginClientAsserted:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ManagedTraceSpanEvidenceEventStream.
+const (
+	ManagedTraceSpanEvidenceEventStreamTraceSpans ManagedTraceSpanEvidenceEventStream = "trace_spans"
+)
+
+// Valid indicates whether the value is a known member of the ManagedTraceSpanEvidenceEventStream enum.
+func (e ManagedTraceSpanEvidenceEventStream) Valid() bool {
+	switch e {
+	case ManagedTraceSpanEvidenceEventStreamTraceSpans:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ManagedTraceSpanEvidenceEventVersion.
+const (
+	ManagedTraceSpanEvidenceEventVersionN1 ManagedTraceSpanEvidenceEventVersion = 1
+)
+
+// Valid indicates whether the value is a known member of the ManagedTraceSpanEvidenceEventVersion enum.
+func (e ManagedTraceSpanEvidenceEventVersion) Valid() bool {
+	switch e {
+	case ManagedTraceSpanEvidenceEventVersionN1:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for ManagementOperation.
 const (
 	ManagementOperationAccess             ManagementOperation = "access"
@@ -4273,6 +4420,129 @@ func (e NotificationEvent) Valid() bool {
 	case NotificationEventRuntimeInstallFailed:
 		return true
 	case NotificationEventWorkerStale:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ObservabilityRunEvidenceEvidenceOrigin.
+const (
+	ObservabilityRunEvidenceEvidenceOriginGatewayObserved ObservabilityRunEvidenceEvidenceOrigin = "gateway_observed"
+)
+
+// Valid indicates whether the value is a known member of the ObservabilityRunEvidenceEvidenceOrigin enum.
+func (e ObservabilityRunEvidenceEvidenceOrigin) Valid() bool {
+	switch e {
+	case ObservabilityRunEvidenceEvidenceOriginGatewayObserved:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ObservabilityRunEvidenceEventStream.
+const (
+	ObservabilityRunEvidenceEventStreamRuns ObservabilityRunEvidenceEventStream = "runs"
+)
+
+// Valid indicates whether the value is a known member of the ObservabilityRunEvidenceEventStream enum.
+func (e ObservabilityRunEvidenceEventStream) Valid() bool {
+	switch e {
+	case ObservabilityRunEvidenceEventStreamRuns:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ObservabilityRunEvidenceEventVersion.
+const (
+	ObservabilityRunEvidenceEventVersionN1 ObservabilityRunEvidenceEventVersion = 1
+)
+
+// Valid indicates whether the value is a known member of the ObservabilityRunEvidenceEventVersion enum.
+func (e ObservabilityRunEvidenceEventVersion) Valid() bool {
+	switch e {
+	case ObservabilityRunEvidenceEventVersionN1:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ObservabilityTraceSpanEvidenceCategory.
+const (
+	ObservabilityTraceSpanEvidenceCategoryChat           ObservabilityTraceSpanEvidenceCategory = "chat"
+	ObservabilityTraceSpanEvidenceCategoryCreateAgent    ObservabilityTraceSpanEvidenceCategory = "create_agent"
+	ObservabilityTraceSpanEvidenceCategoryEmbeddings     ObservabilityTraceSpanEvidenceCategory = "embeddings"
+	ObservabilityTraceSpanEvidenceCategoryExecuteTool    ObservabilityTraceSpanEvidenceCategory = "execute_tool"
+	ObservabilityTraceSpanEvidenceCategoryInvokeAgent    ObservabilityTraceSpanEvidenceCategory = "invoke_agent"
+	ObservabilityTraceSpanEvidenceCategoryOther          ObservabilityTraceSpanEvidenceCategory = "other"
+	ObservabilityTraceSpanEvidenceCategoryTextCompletion ObservabilityTraceSpanEvidenceCategory = "text_completion"
+)
+
+// Valid indicates whether the value is a known member of the ObservabilityTraceSpanEvidenceCategory enum.
+func (e ObservabilityTraceSpanEvidenceCategory) Valid() bool {
+	switch e {
+	case ObservabilityTraceSpanEvidenceCategoryChat:
+		return true
+	case ObservabilityTraceSpanEvidenceCategoryCreateAgent:
+		return true
+	case ObservabilityTraceSpanEvidenceCategoryEmbeddings:
+		return true
+	case ObservabilityTraceSpanEvidenceCategoryExecuteTool:
+		return true
+	case ObservabilityTraceSpanEvidenceCategoryInvokeAgent:
+		return true
+	case ObservabilityTraceSpanEvidenceCategoryOther:
+		return true
+	case ObservabilityTraceSpanEvidenceCategoryTextCompletion:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ObservabilityTraceSpanEvidenceEvidenceOrigin.
+const (
+	ObservabilityTraceSpanEvidenceEvidenceOriginClientAsserted ObservabilityTraceSpanEvidenceEvidenceOrigin = "client_asserted"
+)
+
+// Valid indicates whether the value is a known member of the ObservabilityTraceSpanEvidenceEvidenceOrigin enum.
+func (e ObservabilityTraceSpanEvidenceEvidenceOrigin) Valid() bool {
+	switch e {
+	case ObservabilityTraceSpanEvidenceEvidenceOriginClientAsserted:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ObservabilityTraceSpanEvidenceEventStream.
+const (
+	ObservabilityTraceSpanEvidenceEventStreamTraceSpans ObservabilityTraceSpanEvidenceEventStream = "trace_spans"
+)
+
+// Valid indicates whether the value is a known member of the ObservabilityTraceSpanEvidenceEventStream enum.
+func (e ObservabilityTraceSpanEvidenceEventStream) Valid() bool {
+	switch e {
+	case ObservabilityTraceSpanEvidenceEventStreamTraceSpans:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ObservabilityTraceSpanEvidenceEventVersion.
+const (
+	ObservabilityTraceSpanEvidenceEventVersionN1 ObservabilityTraceSpanEvidenceEventVersion = 1
+)
+
+// Valid indicates whether the value is a known member of the ObservabilityTraceSpanEvidenceEventVersion enum.
+func (e ObservabilityTraceSpanEvidenceEventVersion) Valid() bool {
+	switch e {
+	case ObservabilityTraceSpanEvidenceEventVersionN1:
 		return true
 	default:
 		return false
@@ -6070,6 +6340,8 @@ const (
 	SinkResponseStreamsAudit              SinkResponseStreams = "audit"
 	SinkResponseStreamsGuardrailDecisions SinkResponseStreams = "guardrail_decisions"
 	SinkResponseStreamsRequests           SinkResponseStreams = "requests"
+	SinkResponseStreamsRuns               SinkResponseStreams = "runs"
+	SinkResponseStreamsTraceSpans         SinkResponseStreams = "trace_spans"
 )
 
 // Valid indicates whether the value is a known member of the SinkResponseStreams enum.
@@ -6082,6 +6354,10 @@ func (e SinkResponseStreams) Valid() bool {
 	case SinkResponseStreamsGuardrailDecisions:
 		return true
 	case SinkResponseStreamsRequests:
+		return true
+	case SinkResponseStreamsRuns:
+		return true
+	case SinkResponseStreamsTraceSpans:
 		return true
 	default:
 		return false
@@ -6328,6 +6604,8 @@ const (
 	UpdateSinkRequestStreamsAudit              UpdateSinkRequestStreams = "audit"
 	UpdateSinkRequestStreamsGuardrailDecisions UpdateSinkRequestStreams = "guardrail_decisions"
 	UpdateSinkRequestStreamsRequests           UpdateSinkRequestStreams = "requests"
+	UpdateSinkRequestStreamsRuns               UpdateSinkRequestStreams = "runs"
+	UpdateSinkRequestStreamsTraceSpans         UpdateSinkRequestStreams = "trace_spans"
 )
 
 // Valid indicates whether the value is a known member of the UpdateSinkRequestStreams enum.
@@ -6340,6 +6618,10 @@ func (e UpdateSinkRequestStreams) Valid() bool {
 	case UpdateSinkRequestStreamsGuardrailDecisions:
 		return true
 	case UpdateSinkRequestStreamsRequests:
+		return true
+	case UpdateSinkRequestStreamsRuns:
+		return true
+	case UpdateSinkRequestStreamsTraceSpans:
 		return true
 	default:
 		return false
@@ -11005,6 +11287,79 @@ type MFAVerificationRequest struct {
 // MFAVerificationRequestMethod defines model for MFAVerificationRequest.Method.
 type MFAVerificationRequestMethod string
 
+// ManagedRunEvidence Gateway-observed run metadata exported by a managed sink.
+type ManagedRunEvidence struct {
+	ApiKeyId       openapi_types.UUID               `json:"api_key_id"`
+	CreatedAt      time.Time                        `json:"created_at"`
+	EvidenceOrigin ManagedRunEvidenceEvidenceOrigin `json:"evidence_origin"`
+	Id             openapi_types.UUID               `json:"id"`
+	ProjectId      openapi_types.UUID               `json:"project_id"`
+}
+
+// ManagedRunEvidenceEvidenceOrigin defines model for ManagedRunEvidence.EvidenceOrigin.
+type ManagedRunEvidenceEvidenceOrigin string
+
+// ManagedRunEvidenceEvent Managed sink evidence envelope.
+type ManagedRunEvidenceEvent struct {
+	// Data Gateway-observed run metadata exported by a managed sink.
+	Data       ManagedRunEvidence             `json:"data"`
+	Id         openapi_types.UUID             `json:"id"`
+	OccurredAt time.Time                      `json:"occurred_at"`
+	Stream     ManagedRunEvidenceEventStream  `json:"stream"`
+	Version    ManagedRunEvidenceEventVersion `json:"version"`
+}
+
+// ManagedRunEvidenceEventStream defines model for ManagedRunEvidenceEvent.Stream.
+type ManagedRunEvidenceEventStream string
+
+// ManagedRunEvidenceEventVersion defines model for ManagedRunEvidenceEvent.Version.
+type ManagedRunEvidenceEventVersion int
+
+// ManagedTraceSpanEvidence Client-asserted trace span metadata exported by a managed sink. Nanosecond timestamps are decimal strings.
+type ManagedTraceSpanEvidence struct {
+	ApiKeyId   openapi_types.UUID                    `json:"api_key_id"`
+	AttemptId  nullable.Nullable[openapi_types.UUID] `json:"attempt_id"`
+	Attributes struct {
+		GenAiUsageInputTokens  *int `json:"gen_ai.usage.input_tokens,omitempty"`
+		GenAiUsageOutputTokens *int `json:"gen_ai.usage.output_tokens,omitempty"`
+		HttpResponseStatusCode *int `json:"http.response.status_code,omitempty"`
+	} `json:"attributes"`
+	Category       ManagedTraceSpanEvidenceCategory       `json:"category"`
+	EndedNanos     string                                 `json:"ended_nanos"`
+	EvidenceOrigin ManagedTraceSpanEvidenceEvidenceOrigin `json:"evidence_origin"`
+	Id             openapi_types.UUID                     `json:"id"`
+	ParentSpanId   nullable.Nullable[string]              `json:"parent_span_id"`
+	ProjectId      openapi_types.UUID                     `json:"project_id"`
+	ReceivedAt     time.Time                              `json:"received_at"`
+	RunId          nullable.Nullable[openapi_types.UUID]  `json:"run_id"`
+	SpanId         string                                 `json:"span_id"`
+	StartedNanos   string                                 `json:"started_nanos"`
+	Status         int                                    `json:"status"`
+	TraceId        string                                 `json:"trace_id"`
+}
+
+// ManagedTraceSpanEvidenceCategory defines model for ManagedTraceSpanEvidence.Category.
+type ManagedTraceSpanEvidenceCategory string
+
+// ManagedTraceSpanEvidenceEvidenceOrigin defines model for ManagedTraceSpanEvidence.EvidenceOrigin.
+type ManagedTraceSpanEvidenceEvidenceOrigin string
+
+// ManagedTraceSpanEvidenceEvent Managed sink evidence envelope.
+type ManagedTraceSpanEvidenceEvent struct {
+	// Data Client-asserted trace span metadata exported by a managed sink. Nanosecond timestamps are decimal strings.
+	Data       ManagedTraceSpanEvidence             `json:"data"`
+	Id         openapi_types.UUID                   `json:"id"`
+	OccurredAt time.Time                            `json:"occurred_at"`
+	Stream     ManagedTraceSpanEvidenceEventStream  `json:"stream"`
+	Version    ManagedTraceSpanEvidenceEventVersion `json:"version"`
+}
+
+// ManagedTraceSpanEvidenceEventStream defines model for ManagedTraceSpanEvidenceEvent.Stream.
+type ManagedTraceSpanEvidenceEventStream string
+
+// ManagedTraceSpanEvidenceEventVersion defines model for ManagedTraceSpanEvidenceEvent.Version.
+type ManagedTraceSpanEvidenceEventVersion int
+
 // ManagementOperation A management operation the authorization policy decides. Security requirement scopes name these, and a session lists the ones its member may perform.
 type ManagementOperation string
 
@@ -11274,6 +11629,86 @@ type NotificationRuleListResponse struct {
 	Items      []NotificationRule        `json:"items"`
 	NextCursor nullable.Nullable[string] `json:"next_cursor,omitempty"`
 }
+
+// ObservabilityRunEvidence Gateway-observed run metadata exported by an observability sink.
+type ObservabilityRunEvidence struct {
+	AgentRevisionId nullable.Nullable[openapi_types.UUID]  `json:"agent_revision_id"`
+	CreatedAt       time.Time                              `json:"created_at"`
+	EvidenceOrigin  ObservabilityRunEvidenceEvidenceOrigin `json:"evidence_origin"`
+	ProjectId       openapi_types.UUID                     `json:"project_id"`
+	RouteRevisionId nullable.Nullable[openapi_types.UUID]  `json:"route_revision_id"`
+	RunId           openapi_types.UUID                     `json:"run_id"`
+}
+
+// ObservabilityRunEvidenceEvidenceOrigin defines model for ObservabilityRunEvidence.EvidenceOrigin.
+type ObservabilityRunEvidenceEvidenceOrigin string
+
+// ObservabilityRunEvidenceEvent Observability sink evidence envelope. The same object appears as a JSONL line or an OTLP log body.
+type ObservabilityRunEvidenceEvent struct {
+	// Data Gateway-observed run metadata exported by an observability sink.
+	Data       ObservabilityRunEvidence             `json:"data"`
+	EventId    openapi_types.UUID                   `json:"event_id"`
+	OccurredAt time.Time                            `json:"occurred_at"`
+	Outcome    string                               `json:"outcome"`
+	ProjectId  openapi_types.UUID                   `json:"project_id"`
+	Route      string                               `json:"route"`
+	SourceId   openapi_types.UUID                   `json:"source_id"`
+	Stream     ObservabilityRunEvidenceEventStream  `json:"stream"`
+	Version    ObservabilityRunEvidenceEventVersion `json:"version"`
+}
+
+// ObservabilityRunEvidenceEventStream defines model for ObservabilityRunEvidenceEvent.Stream.
+type ObservabilityRunEvidenceEventStream string
+
+// ObservabilityRunEvidenceEventVersion defines model for ObservabilityRunEvidenceEvent.Version.
+type ObservabilityRunEvidenceEventVersion int
+
+// ObservabilityTraceSpanEvidence Client-asserted trace span metadata exported by an observability sink.
+type ObservabilityTraceSpanEvidence struct {
+	AttemptId  nullable.Nullable[openapi_types.UUID] `json:"attempt_id"`
+	Attributes struct {
+		GenAiUsageInputTokens  *int `json:"gen_ai.usage.input_tokens,omitempty"`
+		GenAiUsageOutputTokens *int `json:"gen_ai.usage.output_tokens,omitempty"`
+		HttpResponseStatusCode *int `json:"http.response.status_code,omitempty"`
+	} `json:"attributes"`
+	Category       ObservabilityTraceSpanEvidenceCategory       `json:"category"`
+	EndedNanos     int                                          `json:"ended_nanos"`
+	EvidenceOrigin ObservabilityTraceSpanEvidenceEvidenceOrigin `json:"evidence_origin"`
+	Id             openapi_types.UUID                           `json:"id"`
+	ParentSpanId   nullable.Nullable[string]                    `json:"parent_span_id"`
+	ProjectId      openapi_types.UUID                           `json:"project_id"`
+	RunId          nullable.Nullable[openapi_types.UUID]        `json:"run_id"`
+	SpanId         string                                       `json:"span_id"`
+	StartedNanos   int                                          `json:"started_nanos"`
+	Status         int                                          `json:"status"`
+	TraceId        string                                       `json:"trace_id"`
+}
+
+// ObservabilityTraceSpanEvidenceCategory defines model for ObservabilityTraceSpanEvidence.Category.
+type ObservabilityTraceSpanEvidenceCategory string
+
+// ObservabilityTraceSpanEvidenceEvidenceOrigin defines model for ObservabilityTraceSpanEvidence.EvidenceOrigin.
+type ObservabilityTraceSpanEvidenceEvidenceOrigin string
+
+// ObservabilityTraceSpanEvidenceEvent Observability sink evidence envelope. The same object appears as a JSONL line or an OTLP log body.
+type ObservabilityTraceSpanEvidenceEvent struct {
+	// Data Client-asserted trace span metadata exported by an observability sink.
+	Data       ObservabilityTraceSpanEvidence             `json:"data"`
+	EventId    openapi_types.UUID                         `json:"event_id"`
+	OccurredAt time.Time                                  `json:"occurred_at"`
+	Outcome    string                                     `json:"outcome"`
+	ProjectId  openapi_types.UUID                         `json:"project_id"`
+	Route      string                                     `json:"route"`
+	SourceId   openapi_types.UUID                         `json:"source_id"`
+	Stream     ObservabilityTraceSpanEvidenceEventStream  `json:"stream"`
+	Version    ObservabilityTraceSpanEvidenceEventVersion `json:"version"`
+}
+
+// ObservabilityTraceSpanEvidenceEventStream defines model for ObservabilityTraceSpanEvidenceEvent.Stream.
+type ObservabilityTraceSpanEvidenceEventStream string
+
+// ObservabilityTraceSpanEvidenceEventVersion defines model for ObservabilityTraceSpanEvidenceEvent.Version.
+type ObservabilityTraceSpanEvidenceEventVersion int
 
 // OidcAuthorizationResponse defines model for OidcAuthorizationResponse.
 type OidcAuthorizationResponse struct {
@@ -18489,6 +18924,18 @@ type BudgetThresholdWebhookJSONRequestBody = BudgetThresholdEvent
 
 // KeyExpiringWebhookJSONRequestBody defines body for KeyExpiringWebhook for application/json ContentType.
 type KeyExpiringWebhookJSONRequestBody = KeyExpiringEvent
+
+// ManagedRunEvidenceWebhookJSONRequestBody defines body for ManagedRunEvidenceWebhook for application/json ContentType.
+type ManagedRunEvidenceWebhookJSONRequestBody = ManagedRunEvidenceEvent
+
+// ManagedTraceSpanEvidenceWebhookJSONRequestBody defines body for ManagedTraceSpanEvidenceWebhook for application/json ContentType.
+type ManagedTraceSpanEvidenceWebhookJSONRequestBody = ManagedTraceSpanEvidenceEvent
+
+// ObservabilityRunEvidenceWebhookJSONRequestBody defines body for ObservabilityRunEvidenceWebhook for application/json ContentType.
+type ObservabilityRunEvidenceWebhookJSONRequestBody = ObservabilityRunEvidenceEvent
+
+// ObservabilityTraceSpanEvidenceWebhookJSONRequestBody defines body for ObservabilityTraceSpanEvidenceWebhook for application/json ContentType.
+type ObservabilityTraceSpanEvidenceWebhookJSONRequestBody = ObservabilityTraceSpanEvidenceEvent
 
 // ProviderGrantLapsedWebhookJSONRequestBody defines body for ProviderGrantLapsedWebhook for application/json ContentType.
 type ProviderGrantLapsedWebhookJSONRequestBody = ProviderGrantLapsedEvent
