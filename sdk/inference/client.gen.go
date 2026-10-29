@@ -1645,6 +1645,15 @@ type ClientInterface interface {
 	//
 	// Corresponds with POST /v1/responses (the `CreateResponseWithPrompt` operationId).
 	CreateResponseWithPrompt(ctx context.Context, params *CreateResponseWithPromptParams, body CreateResponseWithPromptJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ExportTracesWithBody Export OTLP traces
+	//
+	// Accept an OTLP/HTTP protobuf trace batch for the authenticated project. The key requires traces_write scope. Batches are limited to one MiB and 256 spans, with at most 32 allowlisted attributes per span and 60 batches per minute per key. Content, events, links and unknown fields are discarded. Run and attempt correlations are retained only when owned by the authenticated principal.
+	//
+	// Takes any type of body and a specified content type.
+	//
+	// Corresponds with POST /v1/traces (the `ExportTraces` operationId).
+	ExportTracesWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
 }
 
 // CallA2AAgentWithBody Send a message to or read and subscribe to a task from a published A2A agent
@@ -1920,6 +1929,25 @@ func (c *Client) CreateResponseWithPromptWithBody(ctx context.Context, params *C
 // Corresponds with POST /v1/responses (the `CreateResponseWithPrompt` operationId).
 func (c *Client) CreateResponseWithPrompt(ctx context.Context, params *CreateResponseWithPromptParams, body CreateResponseWithPromptJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewCreateResponseWithPromptRequest(c.Server, params, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// ExportTracesWithBody Export OTLP traces
+//
+// Accept an OTLP/HTTP protobuf trace batch for the authenticated project. The key requires traces_write scope. Batches are limited to one MiB and 256 spans, with at most 32 allowlisted attributes per span and 60 batches per minute per key. Content, events, links and unknown fields are discarded. Run and attempt correlations are retained only when owned by the authenticated principal.
+//
+// Takes any type of body and a specified content type.
+//
+// Corresponds with POST /v1/traces (the `ExportTraces` operationId).
+func (c *Client) ExportTracesWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewExportTracesRequestWithBody(c.Server, contentType, body)
 	if err != nil {
 		return nil, err
 	}
@@ -2366,6 +2394,35 @@ func NewCreateResponseWithPromptRequestWithBody(server string, params *CreateRes
 	return req, nil
 }
 
+// NewExportTracesRequestWithBody constructs an http.Request for the ExportTraces method, with any body, and a specified content type
+func NewExportTracesRequestWithBody(server string, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v1/traces")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
 func (c *Client) applyEditors(ctx context.Context, req *http.Request, additionalEditors []RequestEditorFn) error {
 	for _, r := range c.RequestEditors {
 		if err := r(ctx, req); err != nil {
@@ -2544,6 +2601,15 @@ type ClientWithResponsesInterface interface {
 	//
 	// Corresponds with POST /v1/responses (the `CreateResponseWithPrompt` operationId).
 	CreateResponseWithPromptWithResponse(ctx context.Context, params *CreateResponseWithPromptParams, body CreateResponseWithPromptJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateResponseWithPromptResponse, error)
+
+	// ExportTracesWithBodyWithResponse Export OTLP traces
+	//
+	// Accept an OTLP/HTTP protobuf trace batch for the authenticated project. The key requires traces_write scope. Batches are limited to one MiB and 256 spans, with at most 32 allowlisted attributes per span and 60 batches per minute per key. Content, events, links and unknown fields are discarded. Run and attempt correlations are retained only when owned by the authenticated principal.
+	//
+	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /v1/traces (the `ExportTraces` operationId).
+	ExportTracesWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*ExportTracesResponse, error)
 }
 
 type CallA2AAgentResponse struct {
@@ -3147,6 +3213,89 @@ func (r CreateResponseWithPromptResponse) ContentType() string {
 	return ""
 }
 
+type ExportTracesResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON400 the response for an HTTP 400 `application/json` response
+	JSON400 *InferenceError
+	// JSON401 the response for an HTTP 401 `application/json` response
+	JSON401 *InferenceError
+	// JSON403 the response for an HTTP 403 `application/json` response
+	JSON403 *InferenceError
+	// JSON413 the response for an HTTP 413 `application/json` response
+	JSON413 *InferenceError
+	// JSON415 the response for an HTTP 415 `application/json` response
+	JSON415 *InferenceError
+	// JSON429 the response for an HTTP 429 `application/json` response
+	JSON429 *InferenceError
+	// JSON503 the response for an HTTP 503 `application/json` response
+	JSON503 *InferenceError
+}
+
+// GetJSON400 returns the response for an HTTP 400 `application/json` response
+func (r ExportTracesResponse) GetJSON400() *InferenceError {
+	return r.JSON400
+}
+
+// GetJSON401 returns the response for an HTTP 401 `application/json` response
+func (r ExportTracesResponse) GetJSON401() *InferenceError {
+	return r.JSON401
+}
+
+// GetJSON403 returns the response for an HTTP 403 `application/json` response
+func (r ExportTracesResponse) GetJSON403() *InferenceError {
+	return r.JSON403
+}
+
+// GetJSON413 returns the response for an HTTP 413 `application/json` response
+func (r ExportTracesResponse) GetJSON413() *InferenceError {
+	return r.JSON413
+}
+
+// GetJSON415 returns the response for an HTTP 415 `application/json` response
+func (r ExportTracesResponse) GetJSON415() *InferenceError {
+	return r.JSON415
+}
+
+// GetJSON429 returns the response for an HTTP 429 `application/json` response
+func (r ExportTracesResponse) GetJSON429() *InferenceError {
+	return r.JSON429
+}
+
+// GetJSON503 returns the response for an HTTP 503 `application/json` response
+func (r ExportTracesResponse) GetJSON503() *InferenceError {
+	return r.JSON503
+}
+
+// GetBody returns the raw response body bytes
+func (r ExportTracesResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r ExportTracesResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ExportTracesResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r ExportTracesResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
 // CallA2AAgentWithBodyWithResponse Send a message to or read and subscribe to a task from a published A2A agent
 //
 // Supports A2A 1.0 JSON-RPC SendMessage, SendStreamingMessage, GetTask, and SubscribeToTask. Requires the agents scope and an explicit allowlist entry. OLP task IDs are bound to the initiating key and project. Streaming methods return events as they arrive, with a one MiB maximum per event. Disconnecting does not cancel the upstream task.
@@ -3370,6 +3519,21 @@ func (c *ClientWithResponses) CreateResponseWithPromptWithResponse(ctx context.C
 		return nil, err
 	}
 	return ParseCreateResponseWithPromptResponse(rsp)
+}
+
+// ExportTracesWithBodyWithResponse Export OTLP traces
+//
+// Accept an OTLP/HTTP protobuf trace batch for the authenticated project. The key requires traces_write scope. Batches are limited to one MiB and 256 spans, with at most 32 allowlisted attributes per span and 60 batches per minute per key. Content, events, links and unknown fields are discarded. Run and attempt correlations are retained only when owned by the authenticated principal.
+//
+// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /v1/traces (the `ExportTraces` operationId).
+func (c *ClientWithResponses) ExportTracesWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*ExportTracesResponse, error) {
+	rsp, err := c.ExportTracesWithBody(ctx, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseExportTracesResponse(rsp)
 }
 
 // ParseCallA2AAgentResponse parses an HTTP response from a CallA2AAgentWithResponse call
@@ -3886,6 +4050,74 @@ func ParseCreateResponseWithPromptResponse(rsp *http.Response) (*CreateResponseW
 
 	case rsp.StatusCode == 200:
 		// Content-type (text/event-stream) unsupported
+
+	}
+
+	return response, nil
+}
+
+// ParseExportTracesResponse parses an HTTP response from a ExportTracesWithResponse call
+func ParseExportTracesResponse(rsp *http.Response) (*ExportTracesResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ExportTracesResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest InferenceError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest InferenceError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest InferenceError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 413:
+		var dest InferenceError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON413 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 415:
+		var dest InferenceError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON415 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 429:
+		var dest InferenceError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON429 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
+		var dest InferenceError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON503 = &dest
 
 	}
 

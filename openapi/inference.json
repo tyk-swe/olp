@@ -6,6 +6,37 @@
     "description": "OLP-specific extensions to the consumer inference API. Provider-native fields retain their provider contracts."
   },
   "paths": {
+    "/v1/traces": {
+      "post": {
+        "operationId": "exportTraces",
+        "summary": "Export OTLP traces",
+        "description": "Accept an OTLP/HTTP protobuf trace batch for the authenticated project. The key requires traces_write scope. Batches are limited to one MiB and 256 spans, with at most 32 allowlisted attributes per span and 60 batches per minute per key. Content, events, links and unknown fields are discarded. Run and attempt correlations are retained only when owned by the authenticated principal.",
+        "security": [
+          { "BearerAuth": [] }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/x-protobuf": {
+              "schema": { "type": "string", "format": "binary" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Trace batch accepted",
+            "content": { "application/x-protobuf": { "schema": { "type": "string", "format": "binary" } } }
+          },
+          "400": { "description": "Invalid protobuf, span or batch size", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/InferenceError" } } } },
+          "401": { "description": "The credential is invalid, expired or revoked", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/InferenceError" } } } },
+          "403": { "description": "The caller lacks trace scope or project access", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/InferenceError" } } } },
+          "413": { "description": "The trace batch exceeds one MiB", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/InferenceError" } } } },
+          "415": { "description": "The content type or encoding is unsupported", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/InferenceError" } } } },
+          "429": { "description": "The trace or caller rate limit is exceeded", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/InferenceError" } } } },
+          "503": { "description": "Trace storage or limits are unavailable", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/InferenceError" } } } }
+        }
+      }
+    },
     "/v1/chat/completions": {
       "post": {
         "operationId": "createChatCompletionWithPrompt",
