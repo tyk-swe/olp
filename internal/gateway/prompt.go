@@ -14,6 +14,7 @@ import (
 	"github.com/tyk-swe/olp/internal/prompts"
 	"github.com/tyk-swe/olp/internal/protocols"
 	"github.com/tyk-swe/olp/internal/protocols/wire"
+	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/usage"
 )
 
@@ -24,12 +25,12 @@ type promptSelection struct {
 	Variables  map[string]string `json:"variables"`
 }
 
-func (s *Server) parsePrompt(x *call, family wire.Format, body []byte, pathModel string) (*wire.Request, *Error) {
+func (s *Server) parsePrompt(x *call, family wire.Format, body []byte, pathModel string, authorize func(*routing.Route) *Error) (*wire.Request, *Error) {
 	doc, err := protocols.ParseSource(family, body)
 	if err != nil {
 		return nil, requestError(err)
 	}
-	expanded, prompt, promptErr := s.expandPrompt(x, family, doc, pathModel)
+	expanded, prompt, promptErr := s.expandPrompt(x, family, doc, pathModel, authorize)
 	if promptErr != nil {
 		return nil, promptErr
 	}
@@ -313,7 +314,7 @@ func promptInputLimit(routeLimit *int64, installationLimit int64) int64 {
 	return min(*routeLimit, installationLimit)
 }
 
-func (s *Server) expandPrompt(x *call, family wire.Format, doc oif.Document, pathModel string) (oif.Document, *usage.PromptReference, *Error) {
+func (s *Server) expandPrompt(x *call, family wire.Format, doc oif.Document, pathModel string, authorize func(*routing.Route) *Error) (oif.Document, *usage.PromptReference, *Error) {
 	ref, param, input, ok := promptReference(doc, family)
 	if !ok {
 		return doc, nil, nil
@@ -352,7 +353,7 @@ func (s *Server) expandPrompt(x *call, family wire.Format, doc oif.Document, pat
 	if !ok {
 		return oif.Document{}, nil, modelNotFound(slug)
 	}
-	if e := s.keyAuthorizer(x.authority)(&route); e != nil {
+	if e := authorize(&route); e != nil {
 		return oif.Document{}, nil, e
 	}
 	if route.Fidelity.Strict() {

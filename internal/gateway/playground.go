@@ -186,7 +186,35 @@ func (in *playgroundRequest) validate(streaming bool) error {
 	return nil
 }
 
-func (in *playgroundRequest) parse(operation, mode string) (*wire.Request, wire.Format, error) {
+func (in *playgroundRequest) promptFamily(fields map[string]json.RawMessage, data []byte, operation, mode string) (wire.Format, bool) {
+	if operation != "generation" {
+		return "", false
+	}
+	if _, ok := fields["olp_prompt"]; ok {
+		switch in.surface() {
+		case "anthropic":
+			return wire.Anthropic, true
+		case "gemini":
+			if mode == "streaming" {
+				return wire.GeminiStream, true
+			}
+			return wire.Gemini, true
+		default:
+			return wire.Chat, true
+		}
+	}
+	if in.surface() != "openai" || fields["prompt"] == nil {
+		return "", false
+	}
+	doc, err := protocols.ParseSource(wire.Responses, data)
+	if err != nil {
+		return "", false
+	}
+	_, _, _, found := promptReference(doc, wire.Responses)
+	return wire.Responses, found
+}
+
+func (in *playgroundRequest) parse(operation, mode string, p *Playground, x *call, principal access.Principal) (*wire.Request, wire.Format, error) {
 	if in.Request != nil {
 		fields := map[string]json.RawMessage{}
 		if err := json.Unmarshal(in.Request, &fields); err != nil || fields == nil {
@@ -200,6 +228,14 @@ func (in *playgroundRequest) parse(operation, mode string) (*wire.Request, wire.
 			fields["stream"], _ = json.Marshal(mode == "streaming")
 		}
 		data, _ := json.Marshal(fields)
+		if family, ok := in.promptFamily(fields, data, operation, mode); ok {
+			x.request.body = &measuredBody{decoded: int64(len(data))}
+			parsed, e := p.Gateway.parsePrompt(x, family, data, in.Model, p.authorize(principal))
+			if e != nil {
+				return nil, "", access.Fail(e.Status, e.Code, e.Message)
+			}
+			return parsed, family, nil
+		}
 		parsed, err := protocols.SimulationRequest(data, operation, in.surface(), mode, in.Model)
 		if err != nil {
 			return nil, "", access.Fail(http.StatusUnprocessableEntity, "validation_failed", err.Error())
@@ -270,12 +306,13 @@ func (p *Playground) handle(r *http.Request, principal access.Principal) (access
 	if err := in.validate(false); err != nil {
 		return access.Reply{}, err
 	}
-	parsed, family, err := in.parse(in.operation(), "unary")
+	s := p.Gateway
+	x := p.call(r, principal, nil, "", in.Routing)
+	parsed, family, err := in.parse(in.operation(), "unary", p, x, principal)
 	if err != nil {
 		return access.Reply{}, err
 	}
-	s := p.Gateway
-	x := p.call(r, principal, parsed, family, in.Routing)
+	x.generation.parsed, x.family = parsed, family
 	if e := s.prepare(r.Context(), x, p.authorize(principal)); e != nil {
 		x.failure = e
 		s.finish(x, nil, e.Status)
@@ -412,12 +449,13 @@ func (p *Playground) stream(w http.ResponseWriter, r *http.Request, principal ac
 	if err := in.validate(true); err != nil {
 		return err
 	}
-	parsed, family, err := in.parse("generation", "streaming")
+	s := p.Gateway
+	x := p.call(r, principal, nil, "", in.Routing)
+	parsed, family, err := in.parse("generation", "streaming", p, x, principal)
 	if err != nil {
 		return err
 	}
-	s := p.Gateway
-	x := p.call(r, principal, parsed, family, in.Routing)
+	x.generation.parsed, x.family = parsed, family
 	if e := s.prepare(r.Context(), x, p.authorize(principal)); e != nil {
 		x.failure = e
 		s.finish(x, nil, e.Status)
