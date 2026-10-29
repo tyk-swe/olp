@@ -761,11 +761,11 @@ func (s *Server) inferenceOperation(family wire.Format, dialect string) http.Han
 				}
 				return err
 			}
-			out = s.execute(ctx, x)
+			out = s.executeModelStep(ctx, x, x.generation.parsed)
 			status = sw.finish(out)
 			return
 		}
-		out = s.execute(ctx, x)
+		out = s.executeModelStep(ctx, x, x.generation.parsed)
 		if out.err != nil {
 			status = out.err.Status
 			if out.err.Status > 0 {
@@ -995,7 +995,7 @@ func (s *Server) planCanonical(ctx context.Context, x *call) *Error {
 		return selectionError(&routing.SelectionError{Code: routing.NoEligibleTargets}, route.Slug)
 	}
 	if x.pin != nil {
-		x.budget, x.allowance = 1, 1
+		x.budget, x.allowance = x.spent+1, x.spent+1
 	}
 	return s.enforceContentPolicy(x)
 }

@@ -141,6 +141,7 @@ route:
 				// reservation. Local failures remain refundable.
 				dispatched := failure == nil || failure.dispatched
 				x.dispatched = x.dispatched || dispatched
+				x.stepDispatched = x.stepDispatched || dispatched
 				gate.hold.settle(ctx, dispatched, settledAttemptTokens(&fact, estimate))
 				if dispatched {
 					x.spendCaps(gate.hold.budgets, attempt)

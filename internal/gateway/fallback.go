@@ -86,10 +86,14 @@ func (s *Server) replan(ctx context.Context, x *call) *Error {
 // adoptPlan takes the plan of the route the request is on. The primary
 // route's attempt budget bounds the request, so a later route receives what
 // remains of it.
-func (x *call) adoptPlan(plan routing.Plan) {
+func (x *call) initAllowance(budget int) {
 	if x.allowance == 0 {
-		x.allowance = plan.Budget
+		x.allowance = x.spent + budget
 	}
+}
+
+func (x *call) adoptPlan(plan routing.Plan) {
+	x.initAllowance(plan.Budget)
 	x.decisions, x.policy, x.attempts, x.shadows = plan.Decisions, plan.Policy, plan.Attempts, plan.Shadows
 	x.finishPreparationPlanning()
 	x.budget = x.spent + min(plan.Budget, x.allowance-x.spent)
@@ -105,9 +109,7 @@ func (x *call) adoptPlan(plan routing.Plan) {
 // delegate moves the request to the route its matched selector names. The
 // planner has already checked that the route exists and the key may use it.
 func (s *Server) delegate(ctx context.Context, x *call, plan routing.Plan) *Error {
-	if x.allowance == 0 {
-		x.allowance = plan.Budget
-	}
+	x.initAllowance(plan.Budget)
 	selector := plan.Selected()
 	outcome, e := s.adopt(ctx, x, plan.Delegate, usage.ViaSelector)
 	if e != nil {

@@ -125,6 +125,7 @@ type call struct {
 	firstByte         *time.Duration // request start to the first payload byte the client received
 	lease             *limits.Lease  // the API key reservation, settled once the request ends
 	dispatched        bool           // at least one attempt was handed to a provider
+	stepDispatched    bool
 	guardrailMetadata bool
 	responseMetadata  bool
 	attemptCount      int
@@ -165,6 +166,7 @@ type routeLeg struct {
 type generationCall struct {
 	parsed    *wire.Request
 	resources *generationResources
+	firstStep *modelStepAccounting
 
 	emit wire.Emit
 
@@ -173,4 +175,9 @@ type generationCall struct {
 
 	responseBinding *responseStreamBinding
 	generationHTTP  *generationHTTPFinalizer
+}
+
+type modelStepAccounting struct {
+	factEnd  int
+	estimate int64
 }
