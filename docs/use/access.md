@@ -557,6 +557,28 @@ keys remain local. Realtime checks expiry/authority every five seconds;
 renewed same-subject tokens may finish retained work. Code mode also requires
 pool assignment and refuses concurrent issuer edits with `code_workload_changed`.
 
+### Delegating an API key to a workload agent
+
+To approve an agent, set `agent_principal` on its workload mapping and provide an
+exact `/sub` match together with an exact `/client_id`, `/azp` or `/appid` match.
+The principal is bound to the issuer, subject and approved client claims.
+
+An agent and an API key in the same project can request a delegated inference
+credential with `POST /v1/delegations`. The `Authorization` header contains the
+agent's workload JWT and `X-OLP-Delegating-Key` contains the API key. The key must
+have the `delegate` and `inference` scopes. The JSON body supplies `scopes` as
+`["inference"]`, `allowed_routes` as a nonempty list, and optionally
+`ttl_seconds`. The default lifetime is five minutes and the maximum is fifteen
+minutes, shortened if either principal expires sooner.
+
+The response contains a token and `expires_at`. For one inference request, send
+the token as the bearer credential and the current agent workload JWT in
+`X-OLP-Agent-Identity`. Each credential works once and cannot be used to delegate
+again. The requested routes must remain authorized by both principals, and
+revoking either principal stops use. The delegating key remains the accounting
+owner while each attempt records the agent and a stable key-agent digest. Grant
+records contain credential digests and bounds, not the JWT, key or raw claims.
+
 ## Organizations
 
 Organizations contain projects at one level. Manager/viewer memberships add

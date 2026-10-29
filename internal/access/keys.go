@@ -659,6 +659,10 @@ func checkKeyRoutes(r *http.Request, q Queryer, routes []string, projectID *stri
 // LookupID is the public lookup segment of the secret, which identifies the key
 // in shared state that must never carry the key's internal identifier.
 type Authority struct {
+	SnapshotID                string
+	AgentPrincipal            bool
+	DelegationAgentID         string
+	DelegationPairDigest      string
 	WorkloadIssuerID          *string
 	WorkloadDigest            string
 	WorkloadRevision          string
@@ -690,6 +694,21 @@ type Authority struct {
 	BudgetGroupWeeklyCostLimit                             *string
 	Policy                                                 KeyPolicy
 	ExpiresAt, RevokedAt                                   *time.Time
+}
+
+func (a Authority) DelegatedInference(routes []string, agentID, pairDigest string, expiresAt time.Time, allowProviderState bool) *Authority {
+	delegated := a
+	delegated.Policy.Scopes = []string{"inference"}
+	delegated.Policy.AllowedRoutes = slices.Clone(routes)
+	delegated.Policy.AllowedRouteGroups = nil
+	delegated.Policy.AllowedToolsets = nil
+	delegated.Policy.AllowedAgents = nil
+	delegated.Policy.AllowProviderState = a.Policy.AllowProviderState && allowProviderState
+	delegated.allowedGroupRoutes = nil
+	delegated.DelegationAgentID = agentID
+	delegated.DelegationPairDigest = pairDigest
+	delegated.ExpiresAt = &expiresAt
+	return &delegated
 }
 
 func (a Authority) Allows(scope, route string, projectID *string, now time.Time) bool {

@@ -18,6 +18,7 @@ var (
 	MFAChallengeDigest       = DigestPurpose{"mfa_challenge"}
 	MFARecoveryDigest        = DigestPurpose{"mfa_recovery"}
 	WorkloadDigest           = DigestPurpose{"workload_identity"}
+	WorkloadAgentDigest      = DigestPurpose{"workload_agent_identity"}
 	CacheKeyDigest           = DigestPurpose{"cache_key"}
 	APIKeyDigest             = DigestPurpose{"api_key"}
 	EndUserDigest            = DigestPurpose{"end_user"}
@@ -35,6 +36,8 @@ var (
 	RetainedSubmissionDigest = DigestPurpose{"retained_submission"}
 	ApprovalDigest           = DigestPurpose{"agent_approval"}
 	AgentPrincipalDigest     = DigestPurpose{"agent_principal"}
+	DelegationTokenDigest    = DigestPurpose{"delegation_token"}
+	DelegationPairDigest     = DigestPurpose{"delegation_pair"}
 	BatchLineDigest          = DigestPurpose{"batch_line"}
 	ToolInputDigest          = DigestPurpose{"tool_input"}
 	ToolCallDigest           = DigestPurpose{"tool_call"}
@@ -43,8 +46,8 @@ var (
 
 // DigestPurposes lists every digest purpose.
 func DigestPurposes() []DigestPurpose {
-	return []DigestPurpose{CacheKeyDigest, SAMLStateDigest, SAMLCookieDigest, SAMLAssertionDigest, MFAChallengeDigest, MFARecoveryDigest, APIKeyDigest, WorkloadDigest, EndUserDigest, ManagementTokenDigest, SessionDigest, RecentAuthDigest, CSRFDigest,
-		OIDCStateDigest, OIDCCookieDigest, InvitationDigest, AdmissionDigest, MutationDigest, InstallationDigest, BatchSubmissionDigest, BatchLineDigest, ApprovalDigest, AgentPrincipalDigest, RetainedSubmissionDigest, ToolInputDigest, ToolCallDigest, MCPEnrollmentDigest}
+	return []DigestPurpose{CacheKeyDigest, SAMLStateDigest, SAMLCookieDigest, SAMLAssertionDigest, MFAChallengeDigest, MFARecoveryDigest, APIKeyDigest, WorkloadDigest, WorkloadAgentDigest, EndUserDigest, ManagementTokenDigest, SessionDigest, RecentAuthDigest, CSRFDigest,
+		OIDCStateDigest, OIDCCookieDigest, InvitationDigest, AdmissionDigest, MutationDigest, InstallationDigest, BatchSubmissionDigest, BatchLineDigest, ApprovalDigest, AgentPrincipalDigest, DelegationTokenDigest, DelegationPairDigest, RetainedSubmissionDigest, ToolInputDigest, ToolCallDigest, MCPEnrollmentDigest}
 }
 
 // SealPurpose binds an encrypted secret to what it is for: a ciphertext sealed

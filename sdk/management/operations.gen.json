@@ -3713,6 +3713,10 @@
                 "format": "uuid"
               },
               "maxItems": 100
+            },
+            "agent_principal": {
+              "type": "boolean",
+              "description": "Allow this mapping to authenticate an agent principal. Exact subject and client claims are required."
             }
           },
           "description": "Owner-declared permissions, never project or template names chosen freely by the token. A registered subject stays bound to its first matching name/project."
@@ -26335,6 +26339,10 @@
                 "format": "uuid"
               },
               "maxItems": 100
+            },
+            "agent_principal": {
+              "type": "boolean",
+              "description": "Allow this mapping to authenticate an agent principal. Exact subject and client claims are required."
             }
           },
           "description": "Owner-declared permissions, never project or template names chosen freely by the token. A registered subject stays bound to its first matching name/project."
@@ -27582,6 +27590,10 @@
                 "format": "uuid"
               },
               "maxItems": 100
+            },
+            "agent_principal": {
+              "type": "boolean",
+              "description": "Allow this mapping to authenticate an agent principal. Exact subject and client claims are required."
             }
           },
           "description": "Owner-declared permissions, never project or template names chosen freely by the token. A registered subject stays bound to its first matching name/project."
@@ -31431,6 +31443,10 @@
                 "format": "uuid"
               },
               "maxItems": 100
+            },
+            "agent_principal": {
+              "type": "boolean",
+              "description": "Allow this mapping to authenticate an agent principal. Exact subject and client claims are required."
             }
           },
           "description": "Owner-declared permissions, never project or template names chosen freely by the token. A registered subject stays bound to its first matching name/project."

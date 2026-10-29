@@ -401,6 +401,7 @@ func (m *Manager) refreshAuthority(ctx context.Context) error {
 			rows.Close()
 			return fmt.Errorf("authority: key %s policy: %w", record.authority.ID, err)
 		}
+		record.authority.SnapshotID = state.id
 		record.authority.Policy = record.authority.Policy.InRegion(m.Region)
 		record.authority.BudgetIncreases = state.budgetIncreases
 		record.authority.InstallationID = m.installation

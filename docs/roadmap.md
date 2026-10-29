@@ -233,8 +233,9 @@ and identity-tenant qualification remains separate from the fixture evidence.
 
 **Status: Planned.** **Owners:** agent and access maintainers, with protocol,
 prompt, observability and console owners. **Dependencies:** RM7.1 for tool loops
-and prompts; the relevant MCP transport/auth implementation for delegation and
-A2A. Retrieval-backed tools also use their selected RM5 backend.
+and prompts. Inference delegation has no MCP dependency; delegated tool use and
+A2A use their relevant MCP transport and authentication implementations.
+Retrieval-backed tools also use their selected RM5 backend.
 
 - [ ] **RM8.1 — Bounded tool loops:** implement OpenAI, Anthropic and Gemini
   dialects plus Responses projections, iteration/time/concurrency/cost bounds,

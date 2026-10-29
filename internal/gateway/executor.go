@@ -1140,6 +1140,8 @@ func (s *Server) finish(x *call, out *outcome, status int) {
 			ClientIP:             x.request.clientIP,
 			Actor:                x.actor,
 			KeyID:                x.keyID,
+			AgentPrincipalID:     x.authority.DelegationAgentID,
+			DelegationPairDigest: x.authority.DelegationPairDigest,
 			EndUserDigest:        x.endUserDigest,
 			BudgetGroupID:        x.budgetGroupID,
 			Attribution:          x.attribution,
@@ -1172,6 +1174,8 @@ func (s *Server) finish(x *call, out *outcome, status int) {
 			if usage.Keyless(x.origin) {
 				env.KeyID = ""
 				env.EndUserDigest = ""
+				env.AgentPrincipalID = ""
+				env.DelegationPairDigest = ""
 			}
 		}
 		if x.cache != nil {

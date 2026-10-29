@@ -8222,6 +8222,8 @@ type ConfigurationWorkloadIssuerAlgorithms string
 
 // ConfigurationWorkloadMapping Owner-declared permissions, never project or template names chosen freely by the token. A registered subject stays bound to its first matching name/project.
 type ConfigurationWorkloadMapping struct {
+	// AgentPrincipal Allow this mapping to authenticate an agent principal. Exact subject and client claims are required.
+	AgentPrincipal     *bool                     `json:"agent_principal,omitempty"`
 	AllowProviderState *bool                     `json:"allow_provider_state,omitempty"`
 	AllowedAgents      *[]openapi_types.UUID     `json:"allowed_agents,omitempty"`
 	AllowedToolsets    *[]openapi_types.UUID     `json:"allowed_toolsets,omitempty"`
@@ -14893,6 +14895,8 @@ type WorkloadIssuerWriteAlgorithms string
 
 // WorkloadMapping Owner-declared permissions, never project or template names chosen freely by the token. A registered subject stays bound to its first matching name/project.
 type WorkloadMapping struct {
+	// AgentPrincipal Allow this mapping to authenticate an agent principal. Exact subject and client claims are required.
+	AgentPrincipal     *bool                     `json:"agent_principal,omitempty"`
 	AllowProviderState *bool                     `json:"allow_provider_state,omitempty"`
 	AllowedAgents      *[]openapi_types.UUID     `json:"allowed_agents,omitempty"`
 	AllowedToolsets    *[]openapi_types.UUID     `json:"allowed_toolsets,omitempty"`

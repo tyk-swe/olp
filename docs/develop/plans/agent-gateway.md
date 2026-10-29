@@ -354,8 +354,10 @@ and applicable candidate gates. A working HTTP-only slice does not close RM7.
 
 **State:** Planned. **Accountable:** agent maintainers; specialist owners are
 named below. **Entry:** RM7.1 and guardrail input/output execution for RM8.1–RM8.2;
-completed RM7 interoperability for RM8.3–RM8.4. RM8.5 follows those workflow
-contracts and existing observability exports; RM8.6 qualifies the combined result.
+inference delegation has no MCP dependency. Delegated tool use and A2A require
+their relevant completed MCP transport and authentication implementations. RM8.5
+follows those workflow contracts and existing observability exports; RM8.6
+qualifies the combined result.
 Retrieval-backed tools additionally require certified [RM5.2 or RM5.3 retrieval](api-surface.md#rm5-retained-apis-and-retrieval)
 for their selected backend, not completion of every retrieval adapter.
 
