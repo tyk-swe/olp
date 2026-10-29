@@ -106,3 +106,20 @@ func TestDebitResultReplayMatchesOnlyIdenticalEvidence(t *testing.T) {
 		}
 	}
 }
+
+func TestSettleAgentDebitRejectsIncompleteOrMalformedEvidence(t *testing.T) {
+	cases := map[string]DebitResult{
+		"not final":               {Cost: "0", Charge: "0", Complete: true},
+		"incomplete":              {Cost: "0", Charge: "0", Final: true},
+		"negative cost":           {Cost: "-1", Charge: "0", Final: true, Complete: true},
+		"invalid charge":          {Cost: "0", Charge: "1e3", Final: true, Complete: true},
+		"resolves model evidence": {Cost: "0", Charge: "0", Final: true, Complete: true, ResolvesResultDigests: [][]byte{bytes.Repeat([]byte{3}, 32)}},
+	}
+	for name, result := range cases {
+		t.Run(name, func(t *testing.T) {
+			if err := SettleAgentDebitTx(t.Context(), nil, result); !errors.Is(err, ErrDebitConflict) {
+				t.Fatalf("agent debit with %s evidence settled: %v", name, err)
+			}
+		})
+	}
+}

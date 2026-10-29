@@ -2,7 +2,13 @@ package usage
 
 import (
 	"bytes"
+	"errors"
+	"strings"
 	"testing"
+
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/tyk-swe/olp/internal/limits"
 )
 
 const debitEventDispatchID = "0192cf87-d4ab-7f2e-a8b1-c2d3e4f50607"
@@ -41,5 +47,58 @@ func TestSessionDebitResultIdentityIsStablePerEvent(t *testing.T) {
 	other := sessionDebitResult(debitEventDispatchID, &Event{EventID: "0192cf87-d4ab-7f2e-a8b1-c2d3e4f50610"}, []byte(`{"event":1}`), "0.5", "0.5", true)
 	if bytes.Equal(one.ResultDigest, other.ResultDigest) {
 		t.Fatal("two events share one settlement identity")
+	}
+}
+
+func TestPersistWorkflowAttemptRejectsUnboundOrOutOfOrderEvidence(t *testing.T) {
+	event := metadataEvent()
+	if _, err := PersistWorkflowAttempt(t.Context(), nil, event, -1); !errors.Is(err, limits.ErrDebitConflict) {
+		t.Fatalf("negative attempt accepted: %v", err)
+	}
+	if _, err := PersistWorkflowAttempt(t.Context(), nil, event, 0); !errors.Is(err, limits.ErrDebitConflict) {
+		t.Fatalf("nonterminal attempt accepted: %v", err)
+	}
+	if _, err := PersistWorkflowAttempt(t.Context(), nil, event, len(event.Attempts)); !errors.Is(err, limits.ErrDebitConflict) {
+		t.Fatalf("out-of-range attempt accepted: %v", err)
+	}
+	if _, err := PersistWorkflowAttempt(t.Context(), nil, event, len(event.Attempts)-1); !errors.Is(err, limits.ErrDebitConflict) {
+		t.Fatalf("attempt without dispatch accepted: %v", err)
+	}
+	if _, err := PersistWorkflowAttempt(t.Context(), nil, &Event{}, 0); err == nil {
+		t.Fatal("invalid usage event accepted")
+	}
+	raw, encodeErr := Encode(event)
+	if encodeErr != nil {
+		t.Fatal(encodeErr)
+	}
+	attemptID := event.Attempts[len(event.Attempts)-1].ID
+	withExecution := func(runID, dispatchID string) *Event {
+		t.Helper()
+		needle := `"id":"` + attemptID + `",`
+		ref := `"execution":{"dispatch_id":"` + dispatchID + `","run_id":"` + runID + `","step_id":"` + uuid.NewString() + `"},` + needle
+		decoded, decodeErr := Decode([]byte(strings.Replace(string(raw), needle, ref, 1)))
+		if decodeErr != nil {
+			t.Fatal(decodeErr)
+		}
+		return decoded
+	}
+	pool, poolErr := pgxpool.New(t.Context(), "postgres://localhost:1/no_database?connect_timeout=1")
+	if poolErr != nil {
+		t.Fatal(poolErr)
+	}
+	pool.Close()
+	valid := withExecution(event.EventID, attemptID)
+	if _, err := PersistWorkflowAttempt(t.Context(), pool, valid, len(valid.Attempts)-1); err == nil {
+		t.Fatal("workflow settlement succeeded with a closed database pool")
+	}
+	for name, bound := range map[string]*Event{
+		"another run":      withExecution(uuid.NewString(), attemptID),
+		"another dispatch": withExecution(event.EventID, uuid.NewString()),
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := PersistWorkflowAttempt(t.Context(), nil, bound, len(bound.Attempts)-1); !errors.Is(err, limits.ErrDebitConflict) {
+				t.Fatalf("mismatched workflow attempt accepted: %v", err)
+			}
+		})
 	}
 }
