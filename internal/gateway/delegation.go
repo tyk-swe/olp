@@ -24,6 +24,13 @@ type memberConsentRuntime interface {
 }
 
 func (s *Server) reauthenticateSession(ctx context.Context, x *call, token string) (*access.Authority, error) {
+	if x.authority.TaskCapability != nil {
+		auth, ok := s.Runtime.(consumerauth.TaskCapabilityAuthenticator)
+		if !ok {
+			return nil, runtime.ErrInvalidKey
+		}
+		return auth.AuthenticateTaskCapability(ctx, token)
+	}
 	if x.authority.DelegationAgentID == "" {
 		return s.Runtime.Authenticate(token)
 	}

@@ -109,6 +109,9 @@ func (s *Server) authenticateRequest(r *http.Request, token, scope string) (acce
 	if failure != nil {
 		return access.Authority{}, consumerFailure(failure)
 	}
+	if authority.TaskCapability != nil && (r.Method != http.MethodPost || (r.URL.Path != "/v1/chat/completions" && r.URL.Path != "/v1/responses")) {
+		return access.Authority{}, permissionError("permission_denied", "This task capability cannot use this endpoint.")
+	}
 	if scope != "inference" {
 		return authority, nil
 	}

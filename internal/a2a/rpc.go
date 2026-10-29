@@ -238,7 +238,8 @@ func (s *Server) send(w http.ResponseWriter, r *http.Request, authority access.A
 		fail(w, request.ID, -32603, "Internal error")
 		return
 	}
-	if err := s.Ledger.admitTask(r.Context(), res, authority, prepared.PublicTaskID, prepared.Revision.Definition.Agent); err != nil {
+	capability, err := s.Ledger.admitTask(r.Context(), res, authority, prepared.PublicTaskID, prepared.Revision)
+	if err != nil {
 		s.Ledger.release(r.Context(), res)
 		fail(w, request.ID, -32002, "Agent task limit reached")
 		return
@@ -258,6 +259,7 @@ func (s *Server) send(w http.ResponseWriter, r *http.Request, authority access.A
 		fail(w, request.ID, -32603, "Internal error")
 		return
 	}
+	headers["X-OLP-Task-Capability"] = []string{capability}
 	upstream, err := transport.SendMessage(r.Context(), headers, &prepared.Params)
 	if err != nil {
 		s.Ledger.unknown(r.Context(), res)

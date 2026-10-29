@@ -350,6 +350,14 @@ func canonicalUUID(raw string) bool {
 
 type delegatedSessionAuthenticator struct{ Runtime }
 
+func (a delegatedSessionAuthenticator) AuthenticateTaskCapability(ctx context.Context, token string) (*access.Authority, error) {
+	auth, ok := a.Runtime.(consumerauth.TaskCapabilityAuthenticator)
+	if !ok {
+		return nil, runtime.ErrInvalidKey
+	}
+	return auth.AuthenticateTaskCapability(ctx, token)
+}
+
 func (a delegatedSessionAuthenticator) AuthenticateDelegation(ctx context.Context, token, assertion string) (*access.Authority, error) {
 	auth, ok := a.Runtime.(interface {
 		ReauthenticateDelegation(context.Context, string, string) (*access.Authority, error)
@@ -398,7 +406,7 @@ func (s *Server) authenticateWith(r *http.Request, auth consumerauth.Authenticat
 }
 
 func (s *Server) identifyEndUser(r *http.Request, authority access.Authority) (access.Authority, *apiError) {
-	if authority.WorkloadIssuerID != nil && authority.EndUserDigest != "" {
+	if authority.TaskCapability != nil || authority.WorkloadIssuerID != nil && authority.EndUserDigest != "" {
 		return authority, nil
 	}
 	if authority.Policy.EndUserSource == nil {

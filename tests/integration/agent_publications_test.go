@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"io"
 	"iter"
+	"log/slog"
 	"math/big"
 	"net/http"
 	"net/http/httptest"
@@ -36,13 +37,17 @@ import (
 	jose "github.com/go-jose/go-jose/v4"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/tyk-swe/olp/internal/a2a"
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/agentcontract"
 	"github.com/tyk-swe/olp/internal/agents"
+	"github.com/tyk-swe/olp/internal/gateway"
 	"github.com/tyk-swe/olp/internal/limits"
+	"github.com/tyk-swe/olp/internal/mcp"
 	"github.com/tyk-swe/olp/internal/mcpgrants"
 	"github.com/tyk-swe/olp/internal/prompts"
+	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/secrets"
 	"github.com/tyk-swe/olp/internal/testutil"
 	inferencesdk "github.com/tyk-swe/olp/sdk/inference"
@@ -652,6 +657,295 @@ func (w a2aContentTypeWriter) WriteHeader(status int) {
 }
 
 func (w a2aContentTypeWriter) Flush() { w.ResponseWriter.(http.Flusher).Flush() }
+
+func TestA2ATaskCapabilityAuthorizesOwnerCallback(t *testing.T) {
+	h := newAccessHarness(t)
+	owner := h.owner()
+	project := createProject(h, owner, "A2A callbacks")
+	provider := newOpenAIFixture(t, "")
+	model := activeAzureProviderInProject(t, h, owner, "Callback provider", provider.URL, &project, []any{map[string]any{"operation": "generation", "surface": "openai", "mode": "unary"}})
+	draft := h.want(owner, http.MethodPost, "/api/v1/route-drafts", map[string]any{"project_id": project, "slug": "callback-chat", "overall_timeout_ms": 10000, "max_attempts": 2, "retry": map[string]any{"upstream_server": map[string]any{"max_retries": 1, "base_backoff_ms": 1, "max_backoff_ms": 1}}, "fidelity": map[string]any{"mode": "transformed"}, "targets": []any{map[string]any{"provider_id": model["id"], "provider_model": vendorModel, "priority": 0, "weight": 1, "timeout_ms": 5000}}}, idem("callback-route"), http.StatusCreated)
+	path := "/api/v1/route-drafts/" + draft["id"].(string)
+	validated := h.want(owner, http.MethodPost, path+"/validate", nil, etagHeader(draft), http.StatusOK)
+	h.want(owner, http.MethodPost, path+"/activate", nil, withMatch(validated, idem("callback-activate")), http.StatusOK)
+	unpinned := h.want(owner, http.MethodPost, "/api/v1/route-drafts", map[string]any{"project_id": project, "slug": "callback-unpinned", "overall_timeout_ms": 10000, "max_attempts": 1, "fidelity": map[string]any{"mode": "transformed"}, "targets": []any{map[string]any{"provider_id": model["id"], "provider_model": vendorModel, "priority": 0, "weight": 1, "timeout_ms": 5000}}}, idem("callback-unpinned-route"), http.StatusCreated)
+	unpinnedPath := "/api/v1/route-drafts/" + unpinned["id"].(string)
+	unpinnedValidated := h.want(owner, http.MethodPost, unpinnedPath+"/validate", nil, etagHeader(unpinned), http.StatusOK)
+	h.want(owner, http.MethodPost, unpinnedPath+"/activate", nil, withMatch(unpinnedValidated, idem("callback-unpinned-activate")), http.StatusOK)
+	type toolArguments struct {
+		Query string `json:"query"`
+	}
+	var toolCalls atomic.Int64
+	reference := mcpsdk.NewServer(&mcpsdk.Implementation{Name: "callback-tools", Version: "1"}, &mcpsdk.ServerOptions{SupportedProtocolVersions: []string{"2025-11-25"}})
+	mcpsdk.AddTool(reference, &mcpsdk.Tool{Name: "echo", Description: "Return the supplied text"}, func(_ context.Context, _ *mcpsdk.CallToolRequest, input toolArguments) (*mcpsdk.CallToolResult, any, error) {
+		toolCalls.Add(1)
+		return &mcpsdk.CallToolResult{Content: []mcpsdk.Content{&mcpsdk.TextContent{Text: input.Query}}}, nil, nil
+	})
+	toolUpstream := httptest.NewServer(referenceServerHandler(routing.MCPStreamableHTTP, reference))
+	defer toolUpstream.Close()
+	registered := h.want(owner, http.MethodPost, "/api/v1/mcp-servers", map[string]any{"name": "Callback tools", "project_id": project, "transport": "streamable_http", "endpoint": toolUpstream.URL, "enabled": true, "unit_price": "0.10"}, idem("callback-tools-server"), http.StatusCreated)
+	serverID := registered["id"].(string)
+	tool := agentcontract.Tool{ServerID: serverID, RevisionID: registered["revision_id"].(string), CatalogDigest: mcpExecObject(t, registered, "catalog")["digest"].(string), Name: "echo", Alias: agentcontract.ToolAlias(serverID, "echo")}
+	createToolset := func(name string) (string, string) {
+		t.Helper()
+		created := h.want(owner, http.MethodPost, "/api/v1/toolsets", map[string]any{"project_id": project, "name": name, "toolset": map[string]any{"tools": []agentcontract.Tool{tool}}}, idem(name+"-create"), http.StatusCreated)
+		id := created["id"].(string)
+		published := h.want(owner, http.MethodPost, "/api/v1/toolsets/"+id+"/publish", nil, withMatch(created, idem(name+"-publish")), http.StatusOK)
+		return id, published["revision_id"].(string)
+	}
+	toolsetID, toolsetRevision := createToolset("callback-pinned")
+	foreignToolsetID, _ := createToolset("callback-unpinned")
+	h.refresh()
+	routeRevision := h.Runtime.Release().Snapshot.Routes["callback-chat"].RevisionID
+	callbackStatus := make(chan int, 1)
+	callbackBody := make(chan string, 1)
+	seenCapability := make(chan string, 1)
+	cardFor := func(endpoint string) []byte {
+		card, err := json.Marshal(protocol.AgentCard{Name: "Callback agent", Description: "Callback fixture", Version: "1", SupportedInterfaces: []*protocol.AgentInterface{{URL: endpoint, ProtocolBinding: protocol.TransportProtocolJSONRPC, ProtocolVersion: protocol.Version}}, Capabilities: protocol.AgentCapabilities{}, DefaultInputModes: []string{"text"}, DefaultOutputModes: []string{"text"}, Skills: []protocol.AgentSkill{}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return card
+	}
+	agentHandler := a2asrv.NewJSONRPCHandler(a2asrv.NewHandler(a2asrv.AgentExecutorFunc(func(_ context.Context, execution *a2asrv.ExecutorContext) iter.Seq2[protocol.Event, error] {
+		return func(yield func(protocol.Event, error) bool) {
+			yield(protocol.NewSubmittedTask(execution, execution.Message), nil)
+		}
+	})))
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/.well-known/agent-card.json" {
+			_, _ = w.Write(cardFor("http://" + r.Host + "/rpc"))
+			return
+		}
+		capability := r.Header.Get("X-OLP-Task-Capability")
+		seenCapability <- capability
+		request, err := http.NewRequestWithContext(r.Context(), http.MethodPost, h.HTTP.URL+"/v1/chat/completions", strings.NewReader(`{"model":"callback-chat","messages":[{"role":"user","content":"hello"}]}`))
+		if err != nil {
+			callbackStatus <- 0
+			callbackBody <- err.Error()
+			return
+		}
+		request.Header.Set("Content-Type", "application/json")
+		request.Header.Set("Authorization", "Bearer "+capability)
+		request.Header.Set("X-OLP-End-User", "forged-callback-user")
+		response, err := http.DefaultClient.Do(request)
+		if err != nil {
+			callbackStatus <- 0
+			callbackBody <- err.Error()
+			return
+		}
+		body, _ := io.ReadAll(response.Body)
+		response.Body.Close()
+		callbackBody <- string(body)
+		callbackStatus <- response.StatusCode
+		agentHandler.ServeHTTP(w, r)
+	}))
+	t.Cleanup(upstream.Close)
+	var user string
+	if err := h.Pool.QueryRow(t.Context(), `SELECT id::text FROM olp.users WHERE email='owner@example.com'`).Scan(&user); err != nil {
+		t.Fatal(err)
+	}
+	pricing := acctID(t)
+	acctExec(t, h.Pool, `INSERT INTO olp.pricing_revisions(id,revision,effective_at,created_by) VALUES($1,1,now(),$2)`, pricing, user)
+	digest := sha256.Sum256(cardFor(upstream.URL + "/rpc"))
+	created := h.want(owner, http.MethodPost, "/api/v1/agents", map[string]any{"project_id": project, "name": "callback agent", "agent": map[string]any{"protocol": "a2a-1.0.0", "endpoint": upstream.URL + "/rpc", "card_digest": hex.EncodeToString(digest[:]), "toolset_revisions": []string{toolsetRevision}, "route_revisions": []string{routeRevision}, "pricing_revision_id": pricing, "max_cost": "1", "message_price": "0.25", "max_task_continuations": 5}}, idem("callback-agent"), http.StatusCreated)
+	agent := created["id"].(string)
+	h.want(owner, http.MethodPost, "/api/v1/agents/"+agent+"/publish", nil, withMatch(created, idem("callback-publish")), http.StatusOK)
+	keyRecord := h.want(owner, http.MethodPost, "/api/v1/api-keys", map[string]any{"name": "callback owner", "project_id": project, "scopes": []string{"agents", "inference", "tools"}, "allowed_agents": []string{agent}, "allowed_routes": []string{"callback-chat", "callback-unpinned"}, "allowed_toolsets": []string{toolsetID, foreignToolsetID}, "requests_per_minute": 10, "end_user_source": "header", "end_user_policy": map[string]any{"defaults": map[string]any{"requests_per_minute": 10}}}, idem("callback-owner"), http.StatusCreated)
+	key := keyRecord["secret"].(string)
+	client, prefix, _ := acctKeyspace(t)
+	limiter, err := limits.New(client, strings.TrimSuffix(prefix, ":"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.A2A.Ledger = &a2a.Ledger{Pool: h.Pool, Store: &limits.DebitStore{Pool: h.Pool, Limiter: limiter}, Auth: h.AuthKey}
+	toolServer := &mcp.Server{Runtime: h.Runtime, Egress: &h.Policy, Auth: h.AuthKey, Limiter: limiter, Ledger: &mcp.DurableLedger{Pool: h.Pool, Store: &limits.DebitStore{Pool: h.Pool, Limiter: limiter}, Auth: h.AuthKey}}
+	h.Gateway.Admission = gateway.NewAdmission(limiter, nil, slog.New(slog.DiscardHandler))
+	toolMux := http.NewServeMux()
+	toolServer.Register(toolMux)
+	toolGateway := httptest.NewServer(toolMux)
+	defer toolGateway.Close()
+	sink := &captureSink{}
+	h.Gateway.Sink = sink
+	h.refresh()
+	initialCalls := provider.chatCalls.Load()
+	initialResponses := provider.responseCalls.Load()
+	request, err := http.NewRequestWithContext(t.Context(), http.MethodPost, h.HTTP.URL+"/a2a/"+agent, strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"SendMessage","params":{"message":{"messageId":"callback","role":"ROLE_USER","parts":[{"text":"hello"}]},"configuration":{"returnImmediately":true}}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Authorization", "Bearer "+key)
+	request.Header.Set("A2A-Version", "1.0")
+	request.Header.Set("X-OLP-End-User", "original-user")
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sendResult struct {
+		Result json.RawMessage `json:"result"`
+		Error  json.RawMessage `json:"error"`
+	}
+	decodeErr := json.NewDecoder(response.Body).Decode(&sendResult)
+	response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("agent send returned %d", response.StatusCode)
+	}
+	if decodeErr != nil || len(sendResult.Error) != 0 || len(sendResult.Result) == 0 {
+		t.Fatalf("agent send did not settle: result=%s error=%s decode=%v", sendResult.Result, sendResult.Error, decodeErr)
+	}
+	capability := <-seenCapability
+	if capability == "" || capability == key {
+		t.Fatal("agent did not receive a distinct task capability")
+	}
+	if status := <-callbackStatus; status != http.StatusOK {
+		t.Fatalf("task owner callback returned %d: %s", status, <-callbackBody)
+	}
+	<-callbackBody
+	callback := func(token, model string) int {
+		t.Helper()
+		body := fmt.Sprintf(`{"model":%q,"messages":[{"role":"user","content":"hello"}]}`, model)
+		request, err := http.NewRequestWithContext(t.Context(), http.MethodPost, h.HTTP.URL+"/v1/chat/completions", strings.NewReader(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		request.Header.Set("Content-Type", "application/json")
+		request.Header.Set("X-OLP-End-User", "forged-callback-user")
+		if token != "" {
+			request.Header.Set("Authorization", "Bearer "+token)
+		}
+		response, err := http.DefaultClient.Do(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		response.Body.Close()
+		return response.StatusCode
+	}
+	keyPath := "/api/v1/api-keys/" + keyRecord["id"].(string)
+	currentKey := h.want(owner, http.MethodGet, keyPath, nil, nil, http.StatusOK)
+	currentKey = h.want(owner, http.MethodPatch, keyPath, map[string]any{"requests_per_minute": 1}, withMatch(currentKey, idem("callback-limit")), http.StatusOK)
+	h.refresh()
+	if status := callback(capability, "callback-chat"); status != http.StatusTooManyRequests {
+		t.Fatalf("owner budget did not refuse callback: %d", status)
+	}
+	h.want(owner, http.MethodPatch, keyPath, map[string]any{"requests_per_minute": 10}, withMatch(currentKey, idem("callback-limit-restore")), http.StatusOK)
+	h.refresh()
+	for _, token := range []string{"", "olpt_foreign"} {
+		if status := callback(token, "callback-chat"); status != http.StatusUnauthorized {
+			t.Fatalf("missing or foreign capability returned %d", status)
+		}
+	}
+	if status := callback(capability, "callback-unpinned"); status != http.StatusForbidden {
+		t.Fatalf("unpinned route returned %d", status)
+	}
+	callTool := func(token, toolset, callID string) int {
+		t.Helper()
+		body, _ := json.Marshal(map[string]any{"toolset_id": toolset, "name": tool.Alias, "call_id": callID, "arguments": toolArguments{Query: "hello"}})
+		request, err := http.NewRequestWithContext(t.Context(), http.MethodPost, toolGateway.URL+"/v1/mcp/tools/call", bytes.NewReader(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		request.Header.Set("Content-Type", "application/json")
+		request.Header.Set("X-OLP-End-User", "forged-callback-user")
+		if token != "" {
+			request.Header.Set("Authorization", "Bearer "+token)
+		}
+		response, err := http.DefaultClient.Do(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		response.Body.Close()
+		return response.StatusCode
+	}
+	for _, token := range []string{"", "olpt_foreign"} {
+		if status := callTool(token, toolsetID, "missing"); status != http.StatusUnauthorized {
+			t.Fatalf("tool callback without a valid capability returned %d", status)
+		}
+	}
+	if status := callTool(capability, foreignToolsetID, "foreign"); status != http.StatusForbidden && status != http.StatusNotFound {
+		t.Fatalf("unpinned toolset returned %d", status)
+	}
+	if status := callTool(capability, toolsetID, "permitted"); status != http.StatusOK {
+		t.Fatalf("tool callback returned %d", status)
+	}
+	if status := callTool(capability, toolsetID, "permitted"); status != http.StatusOK {
+		t.Fatalf("repeated tool callback returned %d", status)
+	}
+	responseBody := strings.NewReader(`{"model":"callback-chat","input":"hello"}`)
+	responseRequest, err := http.NewRequestWithContext(t.Context(), http.MethodPost, h.HTTP.URL+"/v1/responses", responseBody)
+	if err != nil {
+		t.Fatal(err)
+	}
+	responseRequest.Header.Set("Authorization", "Bearer "+capability)
+	responseRequest.Header.Set("Content-Type", "application/json")
+	responseRequest.Header.Set("X-OLP-End-User", "forged-callback-user")
+	response, err = http.DefaultClient.Do(responseRequest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	responseBytes, err := io.ReadAll(response.Body)
+	response.Body.Close()
+	if err != nil || response.StatusCode != http.StatusOK {
+		t.Fatalf("Responses callback returned %d: %s (%v)", response.StatusCode, responseBytes, err)
+	}
+	provider.failNextChat.Store(true)
+	if status := callback(capability, "callback-chat"); status != http.StatusOK {
+		t.Fatalf("active task callback returned %d", status)
+	}
+	if status := callback(capability, "callback-chat"); status != http.StatusTooManyRequests {
+		t.Fatalf("callback beyond task limit returned %d", status)
+	}
+	if status := callTool(capability, toolsetID, "over-limit"); status != http.StatusTooManyRequests {
+		t.Fatalf("tool callback beyond task limit returned %d", status)
+	}
+	if got := toolCalls.Load(); got != 1 {
+		t.Fatalf("tool received %d callbacks, want 1", got)
+	}
+	if got := provider.chatCalls.Load() - initialCalls + provider.responseCalls.Load() - initialResponses; got != 4 {
+		t.Fatalf("provider received %d attempts, want 4", got)
+	}
+	var successful, attempts int
+	for _, event := range sink.all() {
+		if event.Status == http.StatusOK && event.Route == "callback-chat" {
+			if event.KeyID != keyRecord["id"] || event.EndUserDigest != h.Runtime.EndUserDigest(&project, "original-user") || event.Usage == nil {
+				t.Fatalf("callback accounting lost owner or usage: %+v", event)
+			}
+			successful++
+			attempts += len(event.Attempts)
+		}
+	}
+	if successful != 3 || attempts != 4 {
+		t.Fatalf("got %d successful callback records with %d attempts, want 3 and 4", successful, attempts)
+	}
+	var settled, results int
+	if err := h.Pool.QueryRow(t.Context(), `SELECT count(*),(SELECT count(*) FROM olp.execution_debit_results r JOIN olp.execution_debits d ON d.id=r.dispatch_id WHERE d.kind='agent') FROM olp.execution_debits WHERE kind='agent' AND state='settled' AND api_key_id=$1`, keyRecord["id"]).Scan(&settled, &results); err != nil || settled != 1 || results != 1 {
+		t.Fatalf("remote fee accounting: settled=%d results=%d error=%v", settled, results, err)
+	}
+	if err := h.Pool.QueryRow(t.Context(), `SELECT count(*),(SELECT count(*) FROM olp.execution_debit_results r JOIN olp.execution_debits d ON d.id=r.dispatch_id WHERE d.kind='tool') FROM olp.execution_debits WHERE kind='tool' AND state='settled' AND api_key_id=$1`, keyRecord["id"]).Scan(&settled, &results); err != nil || settled != 1 || results != 1 {
+		t.Fatalf("tool accounting: settled=%d results=%d error=%v", settled, results, err)
+	}
+	for _, state := range []string{"completed", "outcome_unknown"} {
+		acctExec(t, h.Pool, `UPDATE olp.a2a_tasks SET state=$1`, state)
+		if status := callback(capability, "callback-chat"); status != http.StatusUnauthorized {
+			t.Fatalf("%s task callback returned %d", state, status)
+		}
+	}
+	acctExec(t, h.Pool, `UPDATE olp.a2a_tasks SET state='active'`)
+	acctExec(t, h.Pool, `UPDATE olp.a2a_task_capabilities SET expires_at=now()-interval '1 second'`)
+	if status := callback(capability, "callback-chat"); status != http.StatusUnauthorized {
+		t.Fatalf("expired capability returned %d", status)
+	}
+	acctExec(t, h.Pool, `UPDATE olp.a2a_task_capabilities SET expires_at=now()+interval '1 minute'`)
+	currentKey = h.want(owner, http.MethodGet, keyPath, nil, nil, http.StatusOK)
+	h.want(owner, http.MethodPost, keyPath+"/revoke", nil, withMatch(currentKey, idem("callback-owner-revoke")), http.StatusOK)
+	h.refresh()
+	if status := callback(capability, "callback-chat"); status != http.StatusUnauthorized && status != http.StatusForbidden {
+		t.Fatalf("revoked owner callback returned %d", status)
+	}
+	if got := provider.chatCalls.Load() - initialCalls + provider.responseCalls.Load() - initialResponses; got != 4 {
+		t.Fatalf("refused callbacks reached provider, total %d", got)
+	}
+}
 
 func TestA2AAgentCardUsesGatewayAuthenticationAndEndpoint(t *testing.T) {
 	h := newAccessHarness(t)

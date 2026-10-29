@@ -105,7 +105,8 @@ func (s *Server) sendStream(w http.ResponseWriter, r *http.Request, authority ac
 		fail(w, request.ID, -32603, "Internal error")
 		return
 	}
-	if err := s.Ledger.admitTask(r.Context(), res, authority, prepared.PublicTaskID, prepared.Revision.Definition.Agent); err != nil {
+	capability, err := s.Ledger.admitTask(r.Context(), res, authority, prepared.PublicTaskID, prepared.Revision)
+	if err != nil {
 		s.Ledger.release(r.Context(), res)
 		fail(w, request.ID, -32002, "Agent task limit reached")
 		return
@@ -125,6 +126,7 @@ func (s *Server) sendStream(w http.ResponseWriter, r *http.Request, authority ac
 		fail(w, request.ID, -32603, "Internal error")
 		return
 	}
+	headers["X-OLP-Task-Capability"] = []string{capability}
 	ctx, cancel := s.streamContext(r, authority, prepared.Revision)
 	defer cancel()
 	next, stop := iter.Pull2(transport.SendStreamingMessage(ctx, headers, &prepared.Params))

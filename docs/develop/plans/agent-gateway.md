@@ -198,6 +198,11 @@ installation pricing currency.
 Authenticated callbacks carry a gateway-issued task capability, not a trusted
 caller-chosen attribution header; callback attempts are charged once to the
 original owner. Remote fees and callback model costs are separate components.
+OLP sends the capability to the remote agent in the `X-OLP-Task-Capability`
+header. The agent presents it as a bearer token when calling
+`POST /v1/chat/completions`, `POST /v1/responses` or the MCP tool endpoints.
+The capability is limited to the agent revision's pinned routes and toolsets,
+the original caller's current permissions and budgets, and the task's lifetime.
 
 Disablement or revocation denies new sends/continuations and requests upstream
 cancellation within the authority freshness bound. Confirmed cancellation,

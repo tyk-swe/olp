@@ -673,6 +673,7 @@ type DelegationAgentLimits struct {
 // LookupID is the public lookup segment of the secret, which identifies the key
 // in shared state that must never carry the key's internal identifier.
 type Authority struct {
+	TaskCapability            *TaskCapability
 	DelegationAgentLimits     *DelegationAgentLimits
 	SnapshotID                string
 	AgentPrincipal            bool
@@ -711,6 +712,12 @@ type Authority struct {
 	BudgetGroupWeeklyCostLimit                             *string
 	Policy                                                 KeyPolicy
 	ExpiresAt, RevokedAt                                   *time.Time
+}
+
+type TaskCapability struct {
+	Digest           string
+	RouteRevisions   []string
+	ToolsetRevisions []string
 }
 
 func (a Authority) BudgetAttribution() map[string]string {

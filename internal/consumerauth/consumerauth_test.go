@@ -23,6 +23,53 @@ type delegationAuthenticator struct {
 	err       error
 }
 
+type taskAuthenticator struct {
+	authority *access.Authority
+	err       error
+}
+
+func (a taskAuthenticator) Authenticate(string) (*access.Authority, error) {
+	return nil, runtime.ErrInvalidKey
+}
+
+func (a taskAuthenticator) AuthenticateTaskCapability(_ context.Context, token string) (*access.Authority, error) {
+	if token != "olpt_valid" {
+		return nil, runtime.ErrInvalidKey
+	}
+	return a.authority, a.err
+}
+
+func TestAuthenticateTaskCapabilityUsesOwnerAuthority(t *testing.T) {
+	now := time.Now()
+	owner := &access.Authority{ID: "owner", Policy: access.KeyPolicy{Scopes: []string{"inference", "tools"}, AllowedCIDRs: []string{"10.0.0.0/8"}}}
+	auth := taskAuthenticator{authority: owner}
+	request := &http.Request{Header: http.Header{}, RemoteAddr: "10.1.2.3:1234"}
+	for _, scope := range []string{"inference", "tools"} {
+		got, failure := Authenticate(auth, request, "olpt_valid", scope, nil, now)
+		if failure != nil || got.ID != owner.ID {
+			t.Fatalf("%s callback did not use owner authority: %+v, %v", scope, got, failure)
+		}
+	}
+	for _, test := range []struct {
+		name, token, scope string
+		auth               Authenticator
+		request            *http.Request
+		status             int
+	}{
+		{name: "invalid", token: "olpt_foreign", scope: "inference", auth: auth, request: request, status: http.StatusUnauthorized},
+		{name: "agent scope", token: "olpt_valid", scope: "agents", auth: auth, request: request, status: http.StatusUnauthorized},
+		{name: "missing capability authenticator", token: "olpt_valid", scope: "inference", auth: fakeAuthenticator{authority: owner}, request: request, status: http.StatusUnauthorized},
+		{name: "stale", token: "olpt_valid", scope: "tools", auth: taskAuthenticator{err: runtime.ErrStaleAuthority}, request: request, status: http.StatusServiceUnavailable},
+		{name: "address", token: "olpt_valid", scope: "inference", auth: auth, request: &http.Request{RemoteAddr: "192.0.2.1:1234"}, status: http.StatusForbidden},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if _, failure := Authenticate(test.auth, test.request, test.token, test.scope, nil, now); failure == nil || failure.Status != test.status {
+				t.Fatalf("callback authority result = %v, want status %d", failure, test.status)
+			}
+		})
+	}
+}
+
 func (a delegationAuthenticator) Authenticate(string) (*access.Authority, error) {
 	return nil, runtime.ErrInvalidKey
 }

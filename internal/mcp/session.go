@@ -24,18 +24,24 @@ type principalIdentity struct {
 	endUserDigest   string
 	delegationAgent string
 	delegationToken string
+	taskCapability  string
 }
 
 func principalOf(authority access.Authority) principalIdentity {
+	capability := ""
+	if authority.TaskCapability != nil {
+		capability = authority.TaskCapability.Digest
+	}
 	return principalIdentity{
 		id: authority.ID, issuer: authority.Issuer,
 		lookupID: authority.LookupID, workloadDigest: authority.WorkloadDigest, endUserDigest: verifiedEndUser(authority),
 		delegationAgent: authority.DelegationAgentID, delegationToken: authority.DelegationTokenDigest,
+		taskCapability: capability,
 	}
 }
 
 func verifiedEndUser(a access.Authority) string {
-	if a.WorkloadIssuerID == nil {
+	if a.WorkloadIssuerID == nil && a.TaskCapability == nil {
 		return ""
 	}
 	return a.EndUserDigest
@@ -44,6 +50,9 @@ func (p principalIdentity) capacityScope() string {
 	return principalScope(p.id, p.issuer, p.lookupID, p.workloadDigest)
 }
 func (p principalIdentity) scope() string {
+	if p.taskCapability != "" {
+		return principalScope(p.id, p.issuer, p.lookupID, p.workloadDigest, p.endUserDigest, p.delegationAgent, p.delegationToken, p.taskCapability)
+	}
 	if p.endUserDigest == "" && p.delegationToken == "" {
 		return p.capacityScope()
 	}
@@ -79,7 +88,7 @@ func bindingOf(authority access.Authority) sessionBinding {
 
 func (b sessionBinding) scope() string { return b.principal.scope() }
 func (b sessionBinding) member(id string) string {
-	if b.principal.endUserDigest == "" && b.principal.delegationToken == "" {
+	if b.principal.endUserDigest == "" && b.principal.delegationToken == "" && b.principal.taskCapability == "" {
 		return id
 	}
 	return b.scope() + ":" + id

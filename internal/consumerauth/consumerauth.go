@@ -22,6 +22,10 @@ type DelegationAuthenticator interface {
 	AuthenticateDelegation(context.Context, string, string) (*access.Authority, error)
 }
 
+type TaskCapabilityAuthenticator interface {
+	AuthenticateTaskCapability(context.Context, string) (*access.Authority, error)
+}
+
 type Failure struct {
 	Status  int
 	Code    string
@@ -97,6 +101,13 @@ func Authenticate(auth Authenticator, r *http.Request, token, scope string, trus
 }
 
 func authenticate(auth Authenticator, r *http.Request, token, scope string) (*access.Authority, error) {
+	if strings.HasPrefix(token, "olpt_") {
+		capability, ok := auth.(TaskCapabilityAuthenticator)
+		if !ok || (scope != "inference" && scope != "tools") {
+			return nil, runtime.ErrInvalidKey
+		}
+		return capability.AuthenticateTaskCapability(r.Context(), token)
+	}
 	if !strings.HasPrefix(token, "olpd_") {
 		return auth.Authenticate(token)
 	}

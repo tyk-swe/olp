@@ -167,6 +167,7 @@ type Manager struct {
 	GrantRefreshed func(providerID, credentialID string)
 
 	mu        sync.RWMutex
+	taskStore taskCapabilityStore
 	authority authorityState
 	release   *Release
 	failed    int64

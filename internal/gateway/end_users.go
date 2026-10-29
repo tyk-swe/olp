@@ -21,7 +21,7 @@ type endUserIdentity struct{ key, project, digest string }
 // authenticateRequest binds an authenticated caller to its declared end-user
 // source. The cached authority is copied; only the digest escapes the request.
 func (s *Server) identifyEndUser(r *http.Request, authority access.Authority) (access.Authority, *Error) {
-	if authority.WorkloadIssuerID != nil && authority.EndUserDigest != "" {
+	if authority.TaskCapability != nil || authority.WorkloadIssuerID != nil && authority.EndUserDigest != "" {
 		return authority, nil
 	}
 	if authority.Policy.EndUserSource == nil {
