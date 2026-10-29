@@ -7,6 +7,7 @@ import (
 	"io"
 	"maps"
 	"net/http"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -166,6 +167,63 @@ func TestChatPublishedPromptRendersBeforeDispatch(t *testing.T) {
 	}
 	if len(metadata.Attempts) != 1 || metadata.Attempts[0].Routing.Prompt.ID != publicationID || metadata.Attempts[0].Routing.Prompt.RevisionID != revisionID {
 		t.Fatalf("attempt prompt attribution = %s", roundtrip)
+	}
+}
+
+func TestPublishedPromptRendersStructuredMessagesAndDefaults(t *testing.T) {
+	h, publicationID, _ := publishedPromptHarness(t)
+	definition := []byte(`{"messages":[{"role":"system","content":"You help {{name}}"},{"role":"user","content":"Hello {{name}}"}],"variable_schema":{"type":"object","properties":{"name":{"type":"string"}},"required":["name"],"additionalProperties":false},"default_parameters":{"temperature":0.25,"max_output_tokens":32}}`)
+	var prompt prompts.Definition
+	if err := json.Unmarshal(definition, &prompt); err != nil {
+		t.Fatal(err)
+	}
+	h.rt.release.Snapshot.AgentPublications[0].Definition.Prompt = &prompt
+	upstream := make(chan []byte, 1)
+	h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		if err == nil {
+			upstream <- body
+		}
+		completion(modelA, answerText)(w, r)
+	})
+	request := fmt.Sprintf(`{"model":%q,"olp_prompt":{"id":%q,"label":"production","variables":{"name":"Ada"}}}`, routeSlug, publicationID)
+	response := h.do(t.Context(), http.MethodPost, "/v1/chat/completions", fullKey, []byte(request), nil)
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(response.Body)
+		t.Fatalf("status = %d, body = %s", response.StatusCode, body)
+	}
+	var sent struct {
+		Messages []struct {
+			Role    string `json:"role"`
+			Content string `json:"content"`
+		} `json:"messages"`
+		Temperature float64 `json:"temperature"`
+		MaxTokens   int     `json:"max_tokens"`
+	}
+	if err := json.Unmarshal(<-upstream, &sent); err != nil {
+		t.Fatal(err)
+	}
+	if len(sent.Messages) != 2 || sent.Messages[0].Role != "system" || sent.Messages[0].Content != "You help Ada" || sent.Messages[1].Role != "user" || sent.Messages[1].Content != "Hello Ada" || sent.Temperature != 0.25 || sent.MaxTokens != 32 {
+		t.Fatalf("upstream request = %#v", sent)
+	}
+	override := fmt.Sprintf(`{"model":%q,"temperature":0.75,"max_completion_tokens":7,"olp_prompt":{"id":%q,"label":"production","variables":{"name":"Ada"}}}`, routeSlug, publicationID)
+	overrideResponse := h.do(t.Context(), http.MethodPost, "/v1/chat/completions", fullKey, []byte(override), nil)
+	defer overrideResponse.Body.Close()
+	if overrideResponse.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(overrideResponse.Body)
+		t.Fatalf("override status = %d, body = %s", overrideResponse.StatusCode, body)
+	}
+	var overridden struct {
+		Temperature         float64 `json:"temperature"`
+		MaxCompletionTokens int     `json:"max_completion_tokens"`
+		MaxTokens           *int    `json:"max_tokens"`
+	}
+	if err := json.Unmarshal(<-upstream, &overridden); err != nil {
+		t.Fatal(err)
+	}
+	if overridden.Temperature != 0.75 || overridden.MaxCompletionTokens != 7 || overridden.MaxTokens != nil {
+		t.Fatalf("request parameters were replaced by defaults: %#v", overridden)
 	}
 }
 
@@ -844,5 +902,157 @@ func TestPublishedPromptStreamsAcrossSurfaces(t *testing.T) {
 				t.Fatalf("attempt prompt = %#v", fact)
 			}
 		})
+	}
+}
+
+func TestPublishedPromptStructuredMessagesAcrossNativeSurfaces(t *testing.T) {
+	for _, tc := range []struct {
+		name, profile, path, request, reply string
+	}{
+		{name: "responses", path: "/v1/responses", request: `{"model":"` + routeSlug + `","prompt":{"id":"olpp_%s","label":"production","variables":{"name":"Ada"}}}`, reply: `{"id":"resp_1","object":"response","model":"model-a","status":"completed","output":[{"type":"message","id":"m","role":"assistant","status":"completed","content":[{"type":"output_text","text":"ok","annotations":[]}]}],"usage":{"input_tokens":2,"output_tokens":3,"total_tokens":5}}`},
+		{name: "anthropic", profile: "anthropic-messages", path: "/anthropic/v1/messages", request: `{"model":"` + routeSlug + `","olp_prompt":{"id":"%s","label":"production","variables":{"name":"Ada"}}}`, reply: `{"id":"msg_1","type":"message","role":"assistant","model":"model-a","content":[{"type":"text","text":"ok"}],"stop_reason":"end_turn","usage":{"input_tokens":2,"output_tokens":3}}`},
+		{name: "gemini", profile: "gemini-generation", path: "/gemini/v1beta/models/" + routeSlug + ":generateContent", request: `{"olp_prompt":{"id":"%s","label":"production","variables":{"name":"Ada"}}}`, reply: `{"candidates":[{"index":0,"content":{"role":"model","parts":[{"text":"ok"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":2,"candidatesTokenCount":3,"totalTokenCount":5}}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h, publicationID, _ := publishedPromptHarness(t)
+			definition := []byte(`{"messages":[{"role":"system","content":"Help {{name}}"},{"role":"user","content":"First"},{"role":"assistant","content":"Second"},{"role":"user","content":"Hello {{name}}"}],"variable_schema":{"type":"object","properties":{"name":{"type":"string"}},"required":["name"],"additionalProperties":false},"default_parameters":{"temperature":0.25,"max_output_tokens":32}}`)
+			var prompt prompts.Definition
+			if err := json.Unmarshal(definition, &prompt); err != nil {
+				t.Fatal(err)
+			}
+			h.rt.release.Snapshot.AgentPublications[0].Definition.Prompt = &prompt
+			if tc.name != "responses" {
+				h.rt.release.Snapshot.Providers = promptTestProviders(h.rt.release.Snapshot.Providers, tc.name, tc.profile, connectors.ProfileRevision)
+			}
+			upstream := make(chan []byte, 1)
+			h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
+				body, _ := io.ReadAll(r.Body)
+				upstream <- body
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = io.WriteString(w, tc.reply)
+			})
+			response := h.do(t.Context(), http.MethodPost, tc.path, fullKey, []byte(fmt.Sprintf(tc.request, publicationID)), nil)
+			defer response.Body.Close()
+			if response.StatusCode != http.StatusOK {
+				body, _ := io.ReadAll(response.Body)
+				t.Fatalf("status = %d, body = %s", response.StatusCode, body)
+			}
+			var sent struct {
+				Input             []prompts.Message `json:"input"`
+				Messages          []prompts.Message `json:"messages"`
+				System            string            `json:"system"`
+				SystemInstruction struct {
+					Parts []struct {
+						Text string `json:"text"`
+					} `json:"parts"`
+				} `json:"systemInstruction"`
+				Contents []struct {
+					Role  string `json:"role"`
+					Parts []struct {
+						Text string `json:"text"`
+					} `json:"parts"`
+				} `json:"contents"`
+				Temperature      *float64 `json:"temperature"`
+				MaxTokens        *int     `json:"max_tokens"`
+				MaxOutputTokens  *int     `json:"max_output_tokens"`
+				GenerationConfig struct {
+					Temperature     float64 `json:"temperature"`
+					MaxOutputTokens int     `json:"maxOutputTokens"`
+				} `json:"generationConfig"`
+			}
+			if err := json.Unmarshal(<-upstream, &sent); err != nil {
+				t.Fatal(err)
+			}
+			expected := []prompts.Message{{Role: "user", Content: "First"}, {Role: "assistant", Content: "Second"}, {Role: "user", Content: "Hello Ada"}}
+			switch tc.name {
+			case "responses":
+				if len(sent.Input) != 4 || sent.Input[0] != (prompts.Message{Role: "system", Content: "Help Ada"}) || !slices.Equal(sent.Input[1:], expected) || sent.Temperature == nil || *sent.Temperature != .25 || sent.MaxOutputTokens == nil || *sent.MaxOutputTokens != 32 {
+					t.Fatalf("responses upstream = %#v", sent)
+				}
+			case "anthropic":
+				if sent.System != "Help Ada" || !slices.Equal(sent.Messages, expected) || sent.Temperature == nil || *sent.Temperature != .25 || sent.MaxTokens == nil || *sent.MaxTokens != 32 {
+					t.Fatalf("anthropic upstream = %#v", sent)
+				}
+			case "gemini":
+				if len(sent.SystemInstruction.Parts) != 1 || sent.SystemInstruction.Parts[0].Text != "Help Ada" || len(sent.Contents) != 3 || sent.Contents[0].Role != "user" || sent.Contents[0].Parts[0].Text != "First" || sent.Contents[1].Role != "model" || sent.Contents[1].Parts[0].Text != "Second" || sent.Contents[2].Role != "user" || sent.Contents[2].Parts[0].Text != "Hello Ada" || sent.GenerationConfig.Temperature != .25 || sent.GenerationConfig.MaxOutputTokens != 32 {
+					t.Fatalf("gemini upstream = %#v", sent)
+				}
+			}
+		})
+	}
+}
+
+func TestPublishedPromptDefaultsCannotExceedRouteModelLimit(t *testing.T) {
+	h, publicationID, _ := publishedPromptHarness(t)
+	defaultTokens := int64(32)
+	h.rt.release.Snapshot.AgentPublications[0].Definition.Prompt = &prompts.Definition{Template: "Hello {{name}}", Variables: []string{"name"}, DefaultParameters: &prompts.Parameters{MaxOutputTokens: &defaultTokens}}
+	h.rt.release.Snapshot.Providers = maps.Collect(func(yield func(string, routing.Provider) bool) {
+		for id, provider := range h.rt.release.Snapshot.Providers {
+			if !yield(id, routing.Provider{ID: provider.ID, Name: provider.Name, Kind: provider.Kind, Enabled: provider.Enabled,
+				ActiveCredential: provider.ActiveCredential, RevisionID: provider.RevisionID, Endpoint: provider.Endpoint, AuthMode: provider.AuthMode,
+				Slots: provider.Slots, Capabilities: provider.Capabilities, Models: map[string]json.RawMessage{provider.Capabilities[0].Model: json.RawMessage(`{"max_output_tokens":16}`)}}) {
+				return
+			}
+		}
+	})
+	upstream, dispatched := promptRefusalObserver()
+	h.mock.set("a", upstream)
+	h.mock.set("b", upstream)
+	request := fmt.Sprintf(`{"model":%q,"olp_prompt":{"id":%q,"label":"production","variables":{"name":"Ada"}}}`, routeSlug, publicationID)
+	response := h.do(t.Context(), http.MethodPost, "/v1/chat/completions", fullKey, []byte(request), nil)
+	defer response.Body.Close()
+	if response.StatusCode < 400 {
+		body, _ := io.ReadAll(response.Body)
+		t.Fatalf("a default exceeding the route's model limit dispatched: %d %s", response.StatusCode, body)
+	}
+	assertPromptNotDispatched(t, dispatched)
+	h.mock.set("a", completion(modelA, "ok"))
+	allowed := fmt.Sprintf(`{"model":%q,"max_completion_tokens":8,"olp_prompt":{"id":%q,"label":"production","variables":{"name":"Ada"}}}`, routeSlug, publicationID)
+	allowedResponse := h.do(t.Context(), http.MethodPost, "/v1/chat/completions", fullKey, []byte(allowed), nil)
+	defer allowedResponse.Body.Close()
+	if allowedResponse.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(allowedResponse.Body)
+		t.Fatalf("narrower explicit limit rejected: %d %s", allowedResponse.StatusCode, body)
+	}
+}
+
+func TestStructuredPromptGuardrailsInspectEveryMessage(t *testing.T) {
+	for _, surface := range []struct{ name, path, body string }{
+		{"chat", "/v1/chat/completions", `{"model":"` + routeSlug + `","olp_prompt":{"id":"%s","label":"production","variables":{"name":"forbidden"}}}`},
+		{"responses", "/v1/responses", `{"model":"` + routeSlug + `","prompt":{"id":"olpp_%s","label":"production","variables":{"name":"forbidden"}}}`},
+		{"anthropic", "/anthropic/v1/messages", `{"model":"` + routeSlug + `","max_tokens":20,"olp_prompt":{"id":"%s","label":"production","variables":{"name":"forbidden"}}}`},
+		{"gemini", "/gemini/v1beta/models/" + routeSlug + ":generateContent", `{"olp_prompt":{"id":"%s","label":"production","variables":{"name":"forbidden"}}}`},
+	} {
+		for _, role := range []string{"system", "user", "assistant"} {
+			t.Run(surface.name+"/"+role, func(t *testing.T) {
+				h, publicationID, _ := publishedPromptHarness(t)
+				upstream, dispatched := promptRefusalObserver()
+				h.mock.set("a", upstream)
+				h.mock.set("b", upstream)
+				snapshot := h.rt.release.Snapshot
+				route := snapshot.Routes[routeSlug]
+				projectID := *route.ProjectID
+				definition := prompts.Definition{Messages: []prompts.Message{{Role: role, Content: "{{name}}"}, {Role: "user", Content: "hello"}}, VariableSchema: &prompts.VariableSchema{Type: "object", Properties: map[string]prompts.VariableProperty{"name": {Type: "string"}}, Required: []string{"name"}}}
+				publication := snapshot.AgentPublications[0]
+				draft := agentcontract.Draft{ProjectID: publication.ProjectID, Name: publication.Definition.Name, Prompt: &definition}
+				snapshot.AgentPublications = []agentcontract.Revision{{ID: publication.ID, PublicationID: publication.PublicationID, ProjectID: publication.ProjectID, Kind: publication.Kind, Labels: publication.Labels, Definition: draft, Digest: agentcontract.DraftDigest(draft)}}
+				snapshot.Guardrails = &guardrails.Registry{
+					Definitions: map[string]guardrails.Revision{"revision": {ID: "revision", GuardrailID: "guard", ProjectID: projectID, Name: "Guard", Type: "builtin.keywords", Configuration: json.RawMessage(`{"words":["forbidden"]}`), TimeoutMS: 1000, OnError: guardrails.FailClosed}},
+					Policies:    map[string]guardrails.PolicyRevision{"policy-revision": {ID: "policy-revision", PolicyID: "policy", ProjectID: projectID, Entries: []guardrails.Entry{{GuardrailID: "guard", RevisionID: "revision", Phase: guardrails.Input, Action: guardrails.Block}}}},
+					Attachments: []guardrails.Attachment{{ID: "attachment", Scope: "route", ScopeID: route.ID, PolicyRevisionID: "policy-revision"}},
+				}
+				if err := snapshot.Compile(); err != nil {
+					t.Fatal(err)
+				}
+				snapshot.Providers = promptTestProviders(snapshot.Providers, "openai", "", "")
+				response := h.do(t.Context(), http.MethodPost, surface.path, fullKey, []byte(fmt.Sprintf(surface.body, publicationID)), nil)
+				defer response.Body.Close()
+				body, _ := io.ReadAll(response.Body)
+				if response.StatusCode < 400 || !strings.Contains(string(body), "guardrail_blocked") {
+					t.Fatalf("status = %d, body = %s", response.StatusCode, body)
+				}
+				assertPromptNotDispatched(t, dispatched)
+			})
+		}
 	}
 }

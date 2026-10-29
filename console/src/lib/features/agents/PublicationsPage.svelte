@@ -473,18 +473,86 @@
           {/if}
         {:else if kind === 'prompts'}
           <label
-            >Template <textarea
-              bind:value={form.template}
-              maxlength="65536"
-              rows="10"></textarea></label
-          ><label
+            >Prompt format <select bind:value={form.promptMode}>
+              <option value="template">Single template</option>
+              <option value="messages">Role-structured messages</option>
+            </select></label
+          >
+          {#if form.promptMode === 'template'}
+            <label
+              >Template <textarea
+                bind:value={form.template}
+                maxlength="65536"
+                rows="10"></textarea></label
+            >
+          {:else}
+            {#each form.messages as message, index (index)}
+              <fieldset>
+                <legend>Message {index + 1}</legend>
+                <label
+                  >Role <select bind:value={message.role}>
+                    <option value="system">System</option>
+                    <option value="user">User</option>
+                    <option value="assistant">Assistant</option>
+                  </select></label
+                >
+                <label
+                  >Content <textarea
+                    bind:value={message.content}
+                    maxlength="65536"
+                    rows="4"></textarea></label
+                >
+                <button
+                  type="button"
+                  disabled={form.messages.length <= 1}
+                  onclick={() =>
+                    (form.messages = form.messages.filter(
+                      (_, i) => i !== index
+                    ))}>Remove message</button
+                >
+              </fieldset>
+            {/each}
+            <button
+              type="button"
+              disabled={form.messages.length >= 256}
+              onclick={() =>
+                (form.messages = [
+                  ...form.messages,
+                  { role: 'user', content: '' }
+                ])}>Add message</button
+            >
+          {/if}
+          <label
             >String variables (comma separated) <input
               bind:value={form.variables}
             /></label
           >
+          <fieldset>
+            <legend>Default generation parameters</legend>
+            <label
+              >Temperature <input
+                inputmode="decimal"
+                pattern="([01](\.[0-9]+)?|2(\.0+)?)"
+                bind:value={form.temperature}
+              /></label
+            ><label
+              >Top P <input
+                inputmode="decimal"
+                pattern="(0(\.[0-9]+)?|1(\.0+)?)"
+                bind:value={form.topP}
+              /></label
+            ><label
+              >Maximum output tokens <input
+                inputmode="numeric"
+                pattern="[1-9][0-9]*"
+                bind:value={form.maxOutputTokens}
+              /></label
+            >
+          </fieldset>
           <p>
             Use simple {'{{name}}'} variables only. Rendered prompts and variable
-            values are not stored here.
+            values are not stored here. Defaults apply only when the request does
+            not set a value.
           </p>
         {:else}
           <label

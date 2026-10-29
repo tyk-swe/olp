@@ -1,10 +1,10 @@
-// Package prompts owns the bounded, non-executable prompt template language.
-// Template bodies are operator configuration; variables and rendered messages
-// must stay transient and are never part of a published revision or approval.
 package prompts
 
 import (
+	"encoding/json"
 	"errors"
+	"maps"
+	"math"
 	"regexp"
 	"slices"
 	"strings"
@@ -16,56 +16,151 @@ const MaxTemplateBytes = 64 << 10
 var namePattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]{0,63}$`)
 var ErrTemplate = errors.New("invalid prompt template or variables")
 
+type Message struct {
+	Role    string `json:"role"`
+	Content string `json:"content"`
+}
+
+type VariableProperty struct {
+	Type string `json:"type"`
+}
+
+type VariableSchema struct {
+	Type                 string                      `json:"type"`
+	Properties           map[string]VariableProperty `json:"properties"`
+	Required             []string                    `json:"required"`
+	AdditionalProperties bool                        `json:"additionalProperties"`
+}
+
+type Parameters struct {
+	Temperature     *float64 `json:"temperature,omitempty"`
+	TopP            *float64 `json:"top_p,omitempty"`
+	MaxOutputTokens *int64   `json:"max_output_tokens,omitempty"`
+}
+
 type Definition struct {
-	Template  string   `json:"template"`
-	Variables []string `json:"variables"`
+	Template          string          `json:"template"`
+	Variables         []string        `json:"variables"`
+	Messages          []Message       `json:"messages,omitempty"`
+	VariableSchema    *VariableSchema `json:"variable_schema,omitempty"`
+	DefaultParameters *Parameters     `json:"default_parameters,omitempty"`
+}
+
+func clonePointer[T any](value *T) *T {
+	if value == nil {
+		return nil
+	}
+	cloned := *value
+	return &cloned
+}
+
+func (d Definition) Clone() Definition {
+	return Definition{
+		Template:          d.Template,
+		Variables:         slices.Clone(d.Variables),
+		Messages:          slices.Clone(d.Messages),
+		VariableSchema:    cloneSchema(d.VariableSchema),
+		DefaultParameters: cloneParameters(d.DefaultParameters),
+	}
+}
+
+func cloneSchema(schema *VariableSchema) *VariableSchema {
+	if schema == nil {
+		return nil
+	}
+	return &VariableSchema{Type: schema.Type, Properties: maps.Clone(schema.Properties), Required: slices.Clone(schema.Required), AdditionalProperties: schema.AdditionalProperties}
+}
+
+func cloneParameters(parameters *Parameters) *Parameters {
+	if parameters == nil {
+		return nil
+	}
+	return &Parameters{Temperature: clonePointer(parameters.Temperature), TopP: clonePointer(parameters.TopP), MaxOutputTokens: clonePointer(parameters.MaxOutputTokens)}
+}
+
+func (d Definition) variableNames() ([]string, error) {
+	if d.VariableSchema == nil {
+		return d.Variables, nil
+	}
+	schema := d.VariableSchema
+	encoded, err := json.Marshal(schema)
+	if err != nil || len(encoded) > MaxTemplateBytes || schema.Type != "object" || schema.AdditionalProperties || len(schema.Properties) > 256 || len(schema.Required) != len(schema.Properties) || len(d.Variables) != 0 {
+		return nil, ErrTemplate
+	}
+	for i, name := range schema.Required {
+		property, ok := schema.Properties[name]
+		if !ok || property.Type != "string" || slices.Contains(schema.Required[:i], name) {
+			return nil, ErrTemplate
+		}
+	}
+	return schema.Required, nil
+}
+
+func validParameters(p *Parameters) bool {
+	if p == nil {
+		return true
+	}
+	return (p.Temperature == nil || !math.IsNaN(*p.Temperature) && *p.Temperature >= 0 && *p.Temperature <= 2) &&
+		(p.TopP == nil || !math.IsNaN(*p.TopP) && *p.TopP >= 0 && *p.TopP <= 1) &&
+		(p.MaxOutputTokens == nil || *p.MaxOutputTokens > 0 && *p.MaxOutputTokens <= 2147483647)
+}
+
+func (d Definition) promptMessages() []Message {
+	if len(d.Messages) == 0 {
+		return []Message{{Role: "user", Content: d.Template}}
+	}
+	return d.Messages
+}
+
+func validMessages(messages []Message, names []string, remaining int, first bool) bool {
+	if len(messages) == 0 {
+		return true
+	}
+	message := messages[0]
+	if !slices.Contains([]string{"system", "user", "assistant"}, message.Role) || message.Role == "system" && !first || !utf8.ValidString(message.Content) || len(message.Content) > remaining {
+		return false
+	}
+	parts := strings.Split(message.Content, "{{")
+	if strings.Contains(parts[0], "}}") {
+		return false
+	}
+	for _, part := range parts[1:] {
+		name, rest, ok := strings.Cut(part, "}}")
+		if !ok || !slices.Contains(names, name) || strings.Contains(rest, "}}") || !namePattern.MatchString(name) {
+			return false
+		}
+	}
+	return validMessages(messages[1:], names, remaining-len(message.Content), false)
 }
 
 func (d Definition) Validate() error {
-	if len(d.Template) > MaxTemplateBytes || !utf8.ValidString(d.Template) || len(d.Variables) > 256 {
+	names, err := d.variableNames()
+	if err != nil || len(names) > 256 || !validParameters(d.DefaultParameters) {
 		return ErrTemplate
 	}
-	seen := map[string]bool{}
-	for _, name := range d.Variables {
-		if !namePattern.MatchString(name) || seen[name] {
+	for i, name := range names {
+		if !namePattern.MatchString(name) || slices.Contains(names[:i], name) {
 			return ErrTemplate
 		}
-		seen[name] = true
 	}
-	parts := strings.Split(d.Template, "{{")
-	if strings.Contains(parts[0], "}}") {
+	if len(d.Messages) > 0 && (d.Template != "" || d.VariableSchema == nil || len(d.Messages) > 256) {
 		return ErrTemplate
 	}
-	used := map[string]bool{}
-	for _, part := range parts[1:] {
-		name, rest, ok := strings.Cut(part, "}}")
-		if !ok || !seen[name] || strings.Contains(rest, "}}") || !namePattern.MatchString(name) {
+	messages := d.promptMessages()
+	if !validMessages(messages, names, MaxTemplateBytes, true) {
+		return ErrTemplate
+	}
+	for _, name := range names {
+		if !slices.ContainsFunc(messages, func(message Message) bool { return strings.Contains(message.Content, "{{"+name+"}}") }) {
 			return ErrTemplate
 		}
-		used[name] = true
-	}
-	if len(used) != len(seen) {
-		return ErrTemplate
 	}
 	return nil
 }
 
-// Render never persists inputs and does not interpret substituted delimiters.
-// It is separate from native codecs; strict native requests cannot render it.
-func (d Definition) Render(vars map[string]string) (string, error) {
-	if err := d.Validate(); err != nil {
-		return "", err
-	}
-	if len(vars) != len(d.Variables) {
-		return "", ErrTemplate
-	}
-	for name, v := range vars {
-		if !slices.Contains(d.Variables, name) || !utf8.ValidString(v) || len(v) > MaxTemplateBytes {
-			return "", ErrTemplate
-		}
-	}
+func render(template string, vars map[string]string) (string, error) {
 	var out strings.Builder
-	parts := strings.Split(d.Template, "{{")
+	parts := strings.Split(template, "{{")
 	out.WriteString(parts[0])
 	for _, part := range parts[1:] {
 		name, rest, _ := strings.Cut(part, "}}")
@@ -76,4 +171,44 @@ func (d Definition) Render(vars map[string]string) (string, error) {
 		out.WriteString(rest)
 	}
 	return out.String(), nil
+}
+
+func renderMessages(messages []Message, vars map[string]string, remaining int) ([]Message, error) {
+	if len(messages) == 0 {
+		return []Message{}, nil
+	}
+	message := messages[0]
+	content, err := render(message.Content, vars)
+	if err != nil || len(content) > remaining {
+		return nil, ErrTemplate
+	}
+	rest, err := renderMessages(messages[1:], vars, remaining-len(content))
+	if err != nil {
+		return nil, err
+	}
+	return slices.Concat([]Message{{Role: message.Role, Content: content}}, rest), nil
+}
+
+func (d Definition) RenderMessages(vars map[string]string) ([]Message, error) {
+	if err := d.Validate(); err != nil {
+		return nil, err
+	}
+	names, err := d.variableNames()
+	if err != nil || len(vars) != len(names) {
+		return nil, ErrTemplate
+	}
+	for name, value := range vars {
+		if !slices.Contains(names, name) || !utf8.ValidString(value) || len(value) > MaxTemplateBytes {
+			return nil, ErrTemplate
+		}
+	}
+	return renderMessages(d.promptMessages(), vars, MaxTemplateBytes)
+}
+
+func (d Definition) Render(vars map[string]string) (string, error) {
+	messages, err := d.RenderMessages(vars)
+	if err != nil || len(messages) != 1 {
+		return "", ErrTemplate
+	}
+	return messages[0].Content, nil
 }

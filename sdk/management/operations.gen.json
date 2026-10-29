@@ -4534,12 +4534,122 @@
                 "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
               },
               "maxItems": 256
+            },
+            "messages": {
+              "type": "array",
+              "maxItems": 256,
+              "items": {
+                "$ref": "#/$defs/PromptMessage"
+              }
+            },
+            "variable_schema": {
+              "$ref": "#/$defs/PromptVariableSchema"
+            },
+            "default_parameters": {
+              "$ref": "#/$defs/PromptDefaultParameters"
             }
           },
           "required": [
             "template",
             "variables"
           ]
+        },
+        "PromptMessage": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "role": {
+              "type": "string",
+              "enum": [
+                "system",
+                "user",
+                "assistant"
+              ]
+            },
+            "content": {
+              "type": "string",
+              "maxLength": 65536
+            }
+          },
+          "required": [
+            "role",
+            "content"
+          ]
+        },
+        "PromptVariableSchema": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "object"
+              ]
+            },
+            "properties": {
+              "type": "object",
+              "additionalProperties": {
+                "$ref": "#/$defs/PromptVariableProperty"
+              }
+            },
+            "required": {
+              "type": "array",
+              "maxItems": 256,
+              "items": {
+                "type": "string",
+                "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
+              },
+              "uniqueItems": true
+            },
+            "additionalProperties": {
+              "type": "boolean",
+              "enum": [
+                false
+              ]
+            }
+          },
+          "required": [
+            "type",
+            "properties",
+            "required",
+            "additionalProperties"
+          ]
+        },
+        "PromptVariableProperty": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "string"
+              ]
+            }
+          },
+          "required": [
+            "type"
+          ]
+        },
+        "PromptDefaultParameters": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "temperature": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 2
+            },
+            "top_p": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "max_output_tokens": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2147483647
+            }
+          }
         },
         "ConfigurationRetrievalBinding": {
           "type": "object",
@@ -5157,12 +5267,122 @@
                 "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
               },
               "maxItems": 256
+            },
+            "messages": {
+              "type": "array",
+              "maxItems": 256,
+              "items": {
+                "$ref": "#/$defs/PromptMessage"
+              }
+            },
+            "variable_schema": {
+              "$ref": "#/$defs/PromptVariableSchema"
+            },
+            "default_parameters": {
+              "$ref": "#/$defs/PromptDefaultParameters"
             }
           },
           "required": [
             "template",
             "variables"
           ]
+        },
+        "PromptMessage": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "role": {
+              "type": "string",
+              "enum": [
+                "system",
+                "user",
+                "assistant"
+              ]
+            },
+            "content": {
+              "type": "string",
+              "maxLength": 65536
+            }
+          },
+          "required": [
+            "role",
+            "content"
+          ]
+        },
+        "PromptVariableSchema": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "object"
+              ]
+            },
+            "properties": {
+              "type": "object",
+              "additionalProperties": {
+                "$ref": "#/$defs/PromptVariableProperty"
+              }
+            },
+            "required": {
+              "type": "array",
+              "maxItems": 256,
+              "items": {
+                "type": "string",
+                "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
+              },
+              "uniqueItems": true
+            },
+            "additionalProperties": {
+              "type": "boolean",
+              "enum": [
+                false
+              ]
+            }
+          },
+          "required": [
+            "type",
+            "properties",
+            "required",
+            "additionalProperties"
+          ]
+        },
+        "PromptVariableProperty": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "string"
+              ]
+            }
+          },
+          "required": [
+            "type"
+          ]
+        },
+        "PromptDefaultParameters": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "temperature": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 2
+            },
+            "top_p": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "max_output_tokens": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2147483647
+            }
+          }
         }
       }
     }
@@ -8637,12 +8857,122 @@
                 "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
               },
               "maxItems": 256
+            },
+            "messages": {
+              "type": "array",
+              "maxItems": 256,
+              "items": {
+                "$ref": "#/$defs/PromptMessage"
+              }
+            },
+            "variable_schema": {
+              "$ref": "#/$defs/PromptVariableSchema"
+            },
+            "default_parameters": {
+              "$ref": "#/$defs/PromptDefaultParameters"
             }
           },
           "required": [
             "template",
             "variables"
           ]
+        },
+        "PromptMessage": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "role": {
+              "type": "string",
+              "enum": [
+                "system",
+                "user",
+                "assistant"
+              ]
+            },
+            "content": {
+              "type": "string",
+              "maxLength": 65536
+            }
+          },
+          "required": [
+            "role",
+            "content"
+          ]
+        },
+        "PromptVariableSchema": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "object"
+              ]
+            },
+            "properties": {
+              "type": "object",
+              "additionalProperties": {
+                "$ref": "#/$defs/PromptVariableProperty"
+              }
+            },
+            "required": {
+              "type": "array",
+              "maxItems": 256,
+              "items": {
+                "type": "string",
+                "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
+              },
+              "uniqueItems": true
+            },
+            "additionalProperties": {
+              "type": "boolean",
+              "enum": [
+                false
+              ]
+            }
+          },
+          "required": [
+            "type",
+            "properties",
+            "required",
+            "additionalProperties"
+          ]
+        },
+        "PromptVariableProperty": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "string"
+              ]
+            }
+          },
+          "required": [
+            "type"
+          ]
+        },
+        "PromptDefaultParameters": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "temperature": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 2
+            },
+            "top_p": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "max_output_tokens": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2147483647
+            }
+          }
         }
       }
     }
@@ -12713,12 +13043,122 @@
                 "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
               },
               "maxItems": 256
+            },
+            "messages": {
+              "type": "array",
+              "maxItems": 256,
+              "items": {
+                "$ref": "#/$defs/PromptMessage"
+              }
+            },
+            "variable_schema": {
+              "$ref": "#/$defs/PromptVariableSchema"
+            },
+            "default_parameters": {
+              "$ref": "#/$defs/PromptDefaultParameters"
             }
           },
           "required": [
             "template",
             "variables"
           ]
+        },
+        "PromptMessage": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "role": {
+              "type": "string",
+              "enum": [
+                "system",
+                "user",
+                "assistant"
+              ]
+            },
+            "content": {
+              "type": "string",
+              "maxLength": 65536
+            }
+          },
+          "required": [
+            "role",
+            "content"
+          ]
+        },
+        "PromptVariableSchema": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "object"
+              ]
+            },
+            "properties": {
+              "type": "object",
+              "additionalProperties": {
+                "$ref": "#/$defs/PromptVariableProperty"
+              }
+            },
+            "required": {
+              "type": "array",
+              "maxItems": 256,
+              "items": {
+                "type": "string",
+                "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
+              },
+              "uniqueItems": true
+            },
+            "additionalProperties": {
+              "type": "boolean",
+              "enum": [
+                false
+              ]
+            }
+          },
+          "required": [
+            "type",
+            "properties",
+            "required",
+            "additionalProperties"
+          ]
+        },
+        "PromptVariableProperty": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "string"
+              ]
+            }
+          },
+          "required": [
+            "type"
+          ]
+        },
+        "PromptDefaultParameters": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "temperature": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 2
+            },
+            "top_p": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "max_output_tokens": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2147483647
+            }
+          }
         }
       }
     }
@@ -27176,12 +27616,122 @@
                 "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
               },
               "maxItems": 256
+            },
+            "messages": {
+              "type": "array",
+              "maxItems": 256,
+              "items": {
+                "$ref": "#/$defs/PromptMessage"
+              }
+            },
+            "variable_schema": {
+              "$ref": "#/$defs/PromptVariableSchema"
+            },
+            "default_parameters": {
+              "$ref": "#/$defs/PromptDefaultParameters"
             }
           },
           "required": [
             "template",
             "variables"
           ]
+        },
+        "PromptMessage": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "role": {
+              "type": "string",
+              "enum": [
+                "system",
+                "user",
+                "assistant"
+              ]
+            },
+            "content": {
+              "type": "string",
+              "maxLength": 65536
+            }
+          },
+          "required": [
+            "role",
+            "content"
+          ]
+        },
+        "PromptVariableSchema": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "object"
+              ]
+            },
+            "properties": {
+              "type": "object",
+              "additionalProperties": {
+                "$ref": "#/$defs/PromptVariableProperty"
+              }
+            },
+            "required": {
+              "type": "array",
+              "maxItems": 256,
+              "items": {
+                "type": "string",
+                "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
+              },
+              "uniqueItems": true
+            },
+            "additionalProperties": {
+              "type": "boolean",
+              "enum": [
+                false
+              ]
+            }
+          },
+          "required": [
+            "type",
+            "properties",
+            "required",
+            "additionalProperties"
+          ]
+        },
+        "PromptVariableProperty": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "string"
+              ]
+            }
+          },
+          "required": [
+            "type"
+          ]
+        },
+        "PromptDefaultParameters": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "temperature": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 2
+            },
+            "top_p": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "max_output_tokens": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2147483647
+            }
+          }
         },
         "ConfigurationRetrievalBinding": {
           "type": "object",
@@ -38187,12 +38737,122 @@
                 "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
               },
               "maxItems": 256
+            },
+            "messages": {
+              "type": "array",
+              "maxItems": 256,
+              "items": {
+                "$ref": "#/$defs/PromptMessage"
+              }
+            },
+            "variable_schema": {
+              "$ref": "#/$defs/PromptVariableSchema"
+            },
+            "default_parameters": {
+              "$ref": "#/$defs/PromptDefaultParameters"
             }
           },
           "required": [
             "template",
             "variables"
           ]
+        },
+        "PromptMessage": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "role": {
+              "type": "string",
+              "enum": [
+                "system",
+                "user",
+                "assistant"
+              ]
+            },
+            "content": {
+              "type": "string",
+              "maxLength": 65536
+            }
+          },
+          "required": [
+            "role",
+            "content"
+          ]
+        },
+        "PromptVariableSchema": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "object"
+              ]
+            },
+            "properties": {
+              "type": "object",
+              "additionalProperties": {
+                "$ref": "#/$defs/PromptVariableProperty"
+              }
+            },
+            "required": {
+              "type": "array",
+              "maxItems": 256,
+              "items": {
+                "type": "string",
+                "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
+              },
+              "uniqueItems": true
+            },
+            "additionalProperties": {
+              "type": "boolean",
+              "enum": [
+                false
+              ]
+            }
+          },
+          "required": [
+            "type",
+            "properties",
+            "required",
+            "additionalProperties"
+          ]
+        },
+        "PromptVariableProperty": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "string"
+              ]
+            }
+          },
+          "required": [
+            "type"
+          ]
+        },
+        "PromptDefaultParameters": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "temperature": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 2
+            },
+            "top_p": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "max_output_tokens": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2147483647
+            }
+          }
         }
       }
     }
@@ -40477,12 +41137,122 @@
                 "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
               },
               "maxItems": 256
+            },
+            "messages": {
+              "type": "array",
+              "maxItems": 256,
+              "items": {
+                "$ref": "#/$defs/PromptMessage"
+              }
+            },
+            "variable_schema": {
+              "$ref": "#/$defs/PromptVariableSchema"
+            },
+            "default_parameters": {
+              "$ref": "#/$defs/PromptDefaultParameters"
             }
           },
           "required": [
             "template",
             "variables"
           ]
+        },
+        "PromptMessage": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "role": {
+              "type": "string",
+              "enum": [
+                "system",
+                "user",
+                "assistant"
+              ]
+            },
+            "content": {
+              "type": "string",
+              "maxLength": 65536
+            }
+          },
+          "required": [
+            "role",
+            "content"
+          ]
+        },
+        "PromptVariableSchema": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "object"
+              ]
+            },
+            "properties": {
+              "type": "object",
+              "additionalProperties": {
+                "$ref": "#/$defs/PromptVariableProperty"
+              }
+            },
+            "required": {
+              "type": "array",
+              "maxItems": 256,
+              "items": {
+                "type": "string",
+                "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
+              },
+              "uniqueItems": true
+            },
+            "additionalProperties": {
+              "type": "boolean",
+              "enum": [
+                false
+              ]
+            }
+          },
+          "required": [
+            "type",
+            "properties",
+            "required",
+            "additionalProperties"
+          ]
+        },
+        "PromptVariableProperty": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "string"
+              ]
+            }
+          },
+          "required": [
+            "type"
+          ]
+        },
+        "PromptDefaultParameters": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "temperature": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 2
+            },
+            "top_p": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "max_output_tokens": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2147483647
+            }
+          }
         }
       }
     }
@@ -42818,12 +43588,122 @@
                 "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
               },
               "maxItems": 256
+            },
+            "messages": {
+              "type": "array",
+              "maxItems": 256,
+              "items": {
+                "$ref": "#/$defs/PromptMessage"
+              }
+            },
+            "variable_schema": {
+              "$ref": "#/$defs/PromptVariableSchema"
+            },
+            "default_parameters": {
+              "$ref": "#/$defs/PromptDefaultParameters"
             }
           },
           "required": [
             "template",
             "variables"
           ]
+        },
+        "PromptMessage": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "role": {
+              "type": "string",
+              "enum": [
+                "system",
+                "user",
+                "assistant"
+              ]
+            },
+            "content": {
+              "type": "string",
+              "maxLength": 65536
+            }
+          },
+          "required": [
+            "role",
+            "content"
+          ]
+        },
+        "PromptVariableSchema": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "object"
+              ]
+            },
+            "properties": {
+              "type": "object",
+              "additionalProperties": {
+                "$ref": "#/$defs/PromptVariableProperty"
+              }
+            },
+            "required": {
+              "type": "array",
+              "maxItems": 256,
+              "items": {
+                "type": "string",
+                "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
+              },
+              "uniqueItems": true
+            },
+            "additionalProperties": {
+              "type": "boolean",
+              "enum": [
+                false
+              ]
+            }
+          },
+          "required": [
+            "type",
+            "properties",
+            "required",
+            "additionalProperties"
+          ]
+        },
+        "PromptVariableProperty": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "string"
+              ]
+            }
+          },
+          "required": [
+            "type"
+          ]
+        },
+        "PromptDefaultParameters": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "temperature": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 2
+            },
+            "top_p": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "max_output_tokens": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2147483647
+            }
+          }
         }
       }
     }
