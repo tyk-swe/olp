@@ -29,50 +29,53 @@ vi.mock('$lib/features/access/session/useRole.svelte', () => ({
   })
 }));
 
+const buildRoute = (toolsets: string[] | undefined): routes.RouteDraft => ({
+  id: 'route',
+  etag: 'etag',
+  slug: 'workflow',
+  state: 'draft',
+  created_at: '2026-01-01T00:00:00Z',
+  updated_at: '2026-01-01T00:00:00Z',
+  project_id: 'project',
+  project_name: 'Project',
+  operations: ['generation'],
+  overall_timeout_ms: 120000,
+  max_attempts: 2,
+  fidelity: { mode: 'transformed' },
+  content_policy: null,
+  fallbacks: [],
+  selectors: [],
+  retry: {},
+  affinity: null,
+  budget: null,
+  passthrough: null,
+  certification: 'certified',
+  tool_execution: 'gateway',
+  toolsets,
+  targets: [
+    {
+      id: 'target',
+      position: 0,
+      provider_id: 'provider',
+      provider_model_id: 'model',
+      provider_name: 'Provider',
+      provider_model: 'model',
+      priority: 1,
+      weight: 1,
+      timeout_ms: 60000,
+      available: true,
+      lifecycle: null,
+      tags: [],
+      shadow: null
+    }
+  ]
+});
+
 it('preserves workflow settings when editing an existing route', async () => {
   const selected = '0192cf87-d4ab-7f2e-a8b1-c2d3e4f50607';
   const added = '0192cf87-d4ab-7f2e-a8b1-c2d3e4f50608';
-  const route: routes.RouteDraft = {
-    id: 'route',
-    etag: 'etag',
-    slug: 'workflow',
-    state: 'draft',
-    created_at: '2026-01-01T00:00:00Z',
-    updated_at: '2026-01-01T00:00:00Z',
-    project_id: 'project',
-    project_name: 'Project',
-    operations: ['generation'],
-    overall_timeout_ms: 120000,
-    max_attempts: 2,
-    fidelity: { mode: 'transformed' },
-    content_policy: null,
-    fallbacks: [],
-    selectors: [],
-    retry: {},
-    affinity: null,
-    budget: null,
-    passthrough: null,
-    certification: 'certified',
-    tool_execution: 'gateway',
-    toolsets: [selected],
-    targets: [
-      {
-        id: 'target',
-        position: 0,
-        provider_id: 'provider',
-        provider_model_id: 'model',
-        provider_name: 'Provider',
-        provider_model: 'model',
-        priority: 1,
-        weight: 1,
-        timeout_ms: 60000,
-        available: true,
-        lifecycle: null,
-        tags: [],
-        shadow: null
-      }
-    ]
-  };
+  const route = buildRoute([selected]);
+
   vi.mocked(routes.getRouteDraft).mockResolvedValue(route);
   vi.mocked(routes.replaceRouteDraft).mockImplementation(
     async (_id, _etag, input) => ({
@@ -156,5 +159,62 @@ it('preserves workflow settings when editing an existing route', async () => {
   expect(vi.mocked(routes.replaceRouteDraft).mock.calls[0][2]).toMatchObject({
     tool_execution: 'gateway',
     toolsets: [selected, added]
+  });
+});
+
+it('opens a route with no saved toolsets and saves a newly selected toolset', async () => {
+  vi.clearAllMocks();
+  const selected = '0192cf87-d4ab-7f2e-a8b1-c2d3e4f50607';
+  const route = buildRoute(undefined);
+  vi.mocked(routes.getRouteDraft).mockResolvedValue(route);
+  vi.mocked(routes.replaceRouteDraft).mockImplementation(
+    async (_id, _etag, input) => ({ ...route, toolsets: input.toolsets })
+  );
+  vi.mocked(routes.getRoutingPolicy).mockRejectedValue(
+    new Error('No route policy')
+  );
+  vi.mocked(models.listProviderModelInventory).mockResolvedValue([]);
+  vi.mocked(agents.listPublications).mockResolvedValue([
+    {
+      id: selected,
+      project_id: 'project',
+      name: 'Lookup tools',
+      etag: 'etag',
+      kind: 'toolset',
+      revision_id: 'revision',
+      retired: false
+    }
+  ]);
+  const host = document.createElement('div');
+  document.body.append(host);
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false } }
+  });
+  const component = mount(RouteDraftEditorProbe, {
+    target: host,
+    props: { client }
+  });
+  onTestFinished(async () => {
+    await unmount(component);
+    client.clear();
+    host.remove();
+  });
+
+  await vi.waitFor(() => expect(host.textContent).toContain('Lookup tools'));
+  const checkbox = [
+    ...host.querySelectorAll<HTMLInputElement>(
+      'fieldset input[type="checkbox"]'
+    )
+  ].find((item) => item.parentElement?.textContent?.includes('Lookup tools'));
+  expect(checkbox?.checked).toBe(false);
+  checkbox!.click();
+  flushSync();
+  host
+    .querySelector('form')!
+    .dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+  await vi.waitFor(() => expect(routes.replaceRouteDraft).toHaveBeenCalled());
+  expect(vi.mocked(routes.replaceRouteDraft).mock.calls[0][2]).toMatchObject({
+    tool_execution: 'gateway',
+    toolsets: [selected]
   });
 });
