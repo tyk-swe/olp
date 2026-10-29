@@ -2,6 +2,8 @@ import { flushSync, mount, unmount } from 'svelte';
 import { QueryClient } from '@tanstack/svelte-query';
 import { beforeEach, expect, it, onTestFinished, vi } from 'vitest';
 import * as api from './api';
+import * as keys from '$lib/features/access/api-keys/api';
+import * as profile from '$lib/features/access/profile/api';
 import GrantsProbe from './test/GrantsProbe.svelte';
 
 vi.mock('./api', async (original) => ({
@@ -13,7 +15,14 @@ vi.mock('./api', async (original) => ({
   startMCPGrant: vi.fn(),
   claimMCPGrant: vi.fn(),
   authorizeMCPGrant: vi.fn(),
-  pollMCPGrant: vi.fn()
+  pollMCPGrant: vi.fn(),
+  createDelegationConsent: vi.fn()
+}));
+vi.mock('$lib/features/access/api-keys/api', () => ({ listApiKeys: vi.fn() }));
+vi.mock('$lib/features/access/profile/api', () => ({
+  getProfile: vi.fn(),
+  reauthenticateWithPassword: vi.fn(),
+  beginIdentityReauthentication: vi.fn()
 }));
 vi.mock('$lib/features/access/session/useRole.svelte', () => ({
   useRole: () => ({ allows: () => true })
@@ -60,9 +69,107 @@ beforeEach(() => {
   window.history.replaceState(null, '', '/agents/grants');
   vi.mocked(api.listServers).mockResolvedValue([a, b]);
   vi.mocked(api.listMCPGrants).mockResolvedValue([]);
+  vi.mocked(keys.listApiKeys).mockResolvedValue([]);
+  vi.mocked(profile.getProfile).mockResolvedValue({
+    id: 'member',
+    email: 'member@example.test',
+    display_name: 'Member',
+    role: 'developer',
+    access_scope: 'assigned',
+    active: true,
+    etag: 'etag',
+    created_at: '2026-01-01',
+    updated_at: '2026-01-01',
+    projects: [{ id: 'project', name: 'Project', role: 'manager' }]
+  });
   vi.mocked(api.getServer).mockImplementation(async (id) =>
     id === a.id ? a : b
   );
+});
+
+it('shows the exact consent and delivers its one-use code after password verification', async () => {
+  const budgetWindow = {
+    accrued: '0',
+    limit: null,
+    window_ends_at: '2030-01-01'
+  };
+  const budget = {
+    daily: budgetWindow,
+    monthly: budgetWindow,
+    unpriced_attempts: 0
+  };
+  const key: keys.ApiKey = {
+    id: 'consumer',
+    lookup_id: 'consumer',
+    name: 'Member key',
+    project_id: 'project',
+    project_name: 'Project',
+    budget_group_id: null,
+    created_by: 'member',
+    created_by_email: 'member@example.test',
+    scopes: ['inference', 'delegate'],
+    allowed_routes: ['chat'],
+    allow_provider_state: false,
+    budget,
+    etag: 'key-etag',
+    created_at: '2026-01-01',
+    allowed_attribution_keys: [],
+    response_metadata: false,
+    regional_limits: {}
+  };
+  const agent: keys.ApiKey = {
+    ...key,
+    id: 'agent',
+    name: 'Workload agent',
+    scopes: ['inference'],
+    workload_issuer_id: 'issuer',
+    workload_mapping: 'agent'
+  };
+  const foreign: keys.ApiKey = { ...agent, id: 'foreign', project_id: 'other' };
+  vi.mocked(keys.listApiKeys).mockResolvedValue([key, agent, foreign]);
+  vi.mocked(api.createDelegationConsent).mockImplementation(async (input) => {
+    if (
+      input.agent_id !== 'agent' ||
+      input.api_key_id !== 'consumer' ||
+      input.allowed_routes.join(',') !== 'chat'
+    )
+      throw new Error('incorrect consent');
+    return { consent: 'olpc_one_use', expires_at: '2030-01-01T00:00:00Z' };
+  });
+  const { host } = page();
+  await vi.waitFor(() => {
+    flushSync();
+    expect(host.querySelector('option[value="consumer"]')).not.toBeNull();
+  });
+  const keySelect = host.querySelector<HTMLSelectElement>('#delegation-key');
+  if (!keySelect) expect.fail('Missing key selection');
+  keySelect.value = 'consumer';
+  keySelect.dispatchEvent(new Event('change', { bubbles: true }));
+  flushSync();
+  expect(host.querySelector('option[value="foreign"]')).toBeNull();
+  const agentSelect =
+    host.querySelector<HTMLSelectElement>('#delegation-agent');
+  if (!agentSelect) expect.fail('Missing agent selection');
+  agentSelect.value = 'agent';
+  agentSelect.dispatchEvent(new Event('change', { bubbles: true }));
+  fill(host, 'Allowed inference routes', 'chat');
+  fill(host, 'Current password', 'password');
+  expect(host.textContent).toContain('Member key');
+  expect(host.textContent).toContain('chat');
+  vi.mocked(profile.reauthenticateWithPassword).mockRejectedValueOnce(
+    new Error('Verification failed')
+  );
+  button(host, 'Confirm agent access').click();
+  await vi.waitFor(() => {
+    flushSync();
+    expect(host.textContent).toContain('Verification failed');
+  });
+  expect(host.textContent).not.toContain('Copy this one-use consent code');
+  button(host, 'Confirm agent access').click();
+  await vi.waitFor(() => {
+    flushSync();
+    expect(textInput(host, 'Consent code').value).toBe('olpc_one_use');
+  });
 });
 
 function page() {
@@ -105,12 +212,12 @@ async function choose(host: HTMLElement, selected: api.MCPServer) {
     flushSync();
     expect(host.querySelector(`option[value="${selected.id}"]`)).not.toBeNull();
   });
-  host
-    .querySelector(`option[value="${selected.id}"]`)
-    ?.setAttribute('selected', '');
-  host
-    .querySelector('select')
-    ?.dispatchEvent(new Event('change', { bubbles: true }));
+  const option = host.querySelector(`option[value="${selected.id}"]`);
+  const selector = option?.parentElement;
+  if (!(selector instanceof HTMLSelectElement))
+    expect.fail('Missing server selection');
+  selector.value = selected.id;
+  selector.dispatchEvent(new Event('change', { bubbles: true }));
   await vi.waitFor(() => {
     flushSync();
     expect(textInput(host, 'Client ID').value).toBe(selected.oauth?.client_id);

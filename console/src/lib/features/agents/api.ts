@@ -12,6 +12,17 @@ export type MCPServerUpdate = components['schemas']['UpdateMCPServerRequest'];
 export type Revision = components['schemas']['AgentPublicationRevision'];
 export type Exposure = components['schemas']['ExecutionDebit'];
 export type ToolCall = components['schemas']['MCPToolCallResponse'];
+export type DelegationConsentRequest =
+  components['schemas']['DelegationConsentRequest'];
+export type DelegationConsent = components['schemas']['DelegationConsent'];
+
+export async function createDelegationConsent(
+  input: DelegationConsentRequest
+): Promise<DelegationConsent> {
+  return unwrap(
+    await apiClient.POST('/api/v1/delegation-consents', { body: input })
+  );
+}
 
 const collections = {
   toolsets: '/api/v1/toolsets',

@@ -938,5 +938,8 @@ func reauthenticatedAt(purpose string) string {
 	if purpose == "plugin_permit" {
 		return "/plugins"
 	}
+	if purpose == "agent_delegation" {
+		return "/agents/grants"
+	}
 	return "/settings/profile"
 }
