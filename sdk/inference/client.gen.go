@@ -101,12 +101,14 @@ func (e A2ARequestJsonrpc) Valid() bool {
 
 // Defines values for A2ARequestMethod.
 const (
+	CancelTask           A2ARequestMethod = "CancelTask"
 	GetTask              A2ARequestMethod = "GetTask"
 	Messagesend          A2ARequestMethod = "message/send"
 	Messagestream        A2ARequestMethod = "message/stream"
 	SendMessage          A2ARequestMethod = "SendMessage"
 	SendStreamingMessage A2ARequestMethod = "SendStreamingMessage"
 	SubscribeToTask      A2ARequestMethod = "SubscribeToTask"
+	Taskscancel          A2ARequestMethod = "tasks/cancel"
 	Tasksget             A2ARequestMethod = "tasks/get"
 	Tasksresubscribe     A2ARequestMethod = "tasks/resubscribe"
 )
@@ -114,6 +116,8 @@ const (
 // Valid indicates whether the value is a known member of the A2ARequestMethod enum.
 func (e A2ARequestMethod) Valid() bool {
 	switch e {
+	case CancelTask:
+		return true
 	case GetTask:
 		return true
 	case Messagesend:
@@ -125,6 +129,8 @@ func (e A2ARequestMethod) Valid() bool {
 	case SendStreamingMessage:
 		return true
 	case SubscribeToTask:
+		return true
+	case Taskscancel:
 		return true
 	case Tasksget:
 		return true
@@ -2056,18 +2062,18 @@ func WithRequestEditorFn(fn RequestEditorFn) ClientOption {
 // The interface specification for the client above.
 type ClientInterface interface {
 
-	// CallA2AAgentWithBody Send a message to or read and subscribe to a task from a published A2A agent
+	// CallA2AAgentWithBody Send a message to or read, cancel, and subscribe to a task from a published A2A agent
 	//
-	// Supports A2A 0.3 and 1.0 JSON-RPC send, streaming send, task read, and subscription methods. The published protocol determines the accepted methods and response format. Requires the agents scope and an explicit allowlist entry. OLP task IDs are bound to the initiating key and project. Streaming methods return events as they arrive, with a one MiB maximum per event. Disconnecting does not cancel the upstream task.
+	// Supports A2A 0.3 and 1.0 JSON-RPC send, streaming send, task read, cancellation, and subscription methods. The published protocol determines the accepted methods and response format. Requires the agents scope and an explicit allowlist entry. OLP task IDs are bound to the initiating key and project. Streaming methods return events as they arrive, with a one MiB maximum per event. Disconnecting does not immediately cancel the upstream task. Disconnected tasks remain subject to deadline and authorization checks; OLP requests cancellation when those checks fail but cannot guarantee that a remote agent stops.
 	//
 	// Takes any type of body and a specified content type.
 	//
 	// Corresponds with POST /a2a/{agent} (the `CallA2AAgent` operationId).
 	CallA2AAgentWithBody(ctx context.Context, agent openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
 
-	// CallA2AAgent Send a message to or read and subscribe to a task from a published A2A agent
+	// CallA2AAgent Send a message to or read, cancel, and subscribe to a task from a published A2A agent
 	//
-	// Supports A2A 0.3 and 1.0 JSON-RPC send, streaming send, task read, and subscription methods. The published protocol determines the accepted methods and response format. Requires the agents scope and an explicit allowlist entry. OLP task IDs are bound to the initiating key and project. Streaming methods return events as they arrive, with a one MiB maximum per event. Disconnecting does not cancel the upstream task.
+	// Supports A2A 0.3 and 1.0 JSON-RPC send, streaming send, task read, cancellation, and subscription methods. The published protocol determines the accepted methods and response format. Requires the agents scope and an explicit allowlist entry. OLP task IDs are bound to the initiating key and project. Streaming methods return events as they arrive, with a one MiB maximum per event. Disconnecting does not immediately cancel the upstream task. Disconnected tasks remain subject to deadline and authorization checks; OLP requests cancellation when those checks fail but cannot guarantee that a remote agent stops.
 	//
 	// Takes a body of the `application/json` content type.
 	//
@@ -2199,9 +2205,9 @@ type ClientInterface interface {
 	ExportTracesWithBody(ctx context.Context, params *ExportTracesParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
 }
 
-// CallA2AAgentWithBody Send a message to or read and subscribe to a task from a published A2A agent
+// CallA2AAgentWithBody Send a message to or read, cancel, and subscribe to a task from a published A2A agent
 //
-// Supports A2A 0.3 and 1.0 JSON-RPC send, streaming send, task read, and subscription methods. The published protocol determines the accepted methods and response format. Requires the agents scope and an explicit allowlist entry. OLP task IDs are bound to the initiating key and project. Streaming methods return events as they arrive, with a one MiB maximum per event. Disconnecting does not cancel the upstream task.
+// Supports A2A 0.3 and 1.0 JSON-RPC send, streaming send, task read, cancellation, and subscription methods. The published protocol determines the accepted methods and response format. Requires the agents scope and an explicit allowlist entry. OLP task IDs are bound to the initiating key and project. Streaming methods return events as they arrive, with a one MiB maximum per event. Disconnecting does not immediately cancel the upstream task. Disconnected tasks remain subject to deadline and authorization checks; OLP requests cancellation when those checks fail but cannot guarantee that a remote agent stops.
 //
 // Takes any type of body and a specified content type.
 //
@@ -2218,9 +2224,9 @@ func (c *Client) CallA2AAgentWithBody(ctx context.Context, agent openapi_types.U
 	return c.Client.Do(req)
 }
 
-// CallA2AAgent Send a message to or read and subscribe to a task from a published A2A agent
+// CallA2AAgent Send a message to or read, cancel, and subscribe to a task from a published A2A agent
 //
-// Supports A2A 0.3 and 1.0 JSON-RPC send, streaming send, task read, and subscription methods. The published protocol determines the accepted methods and response format. Requires the agents scope and an explicit allowlist entry. OLP task IDs are bound to the initiating key and project. Streaming methods return events as they arrive, with a one MiB maximum per event. Disconnecting does not cancel the upstream task.
+// Supports A2A 0.3 and 1.0 JSON-RPC send, streaming send, task read, cancellation, and subscription methods. The published protocol determines the accepted methods and response format. Requires the agents scope and an explicit allowlist entry. OLP task IDs are bound to the initiating key and project. Streaming methods return events as they arrive, with a one MiB maximum per event. Disconnecting does not immediately cancel the upstream task. Disconnected tasks remain subject to deadline and authorization checks; OLP requests cancellation when those checks fail but cannot guarantee that a remote agent stops.
 //
 // Takes a body of the `application/json` content type.
 //
@@ -3025,18 +3031,18 @@ func WithBaseURL(baseURL string) ClientOption {
 // ClientWithResponsesInterface is the interface specification for the client with responses above.
 type ClientWithResponsesInterface interface {
 
-	// CallA2AAgentWithBodyWithResponse Send a message to or read and subscribe to a task from a published A2A agent
+	// CallA2AAgentWithBodyWithResponse Send a message to or read, cancel, and subscribe to a task from a published A2A agent
 	//
-	// Supports A2A 0.3 and 1.0 JSON-RPC send, streaming send, task read, and subscription methods. The published protocol determines the accepted methods and response format. Requires the agents scope and an explicit allowlist entry. OLP task IDs are bound to the initiating key and project. Streaming methods return events as they arrive, with a one MiB maximum per event. Disconnecting does not cancel the upstream task.
+	// Supports A2A 0.3 and 1.0 JSON-RPC send, streaming send, task read, cancellation, and subscription methods. The published protocol determines the accepted methods and response format. Requires the agents scope and an explicit allowlist entry. OLP task IDs are bound to the initiating key and project. Streaming methods return events as they arrive, with a one MiB maximum per event. Disconnecting does not immediately cancel the upstream task. Disconnected tasks remain subject to deadline and authorization checks; OLP requests cancellation when those checks fail but cannot guarantee that a remote agent stops.
 	//
 	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
 	//
 	// Corresponds with POST /a2a/{agent} (the `CallA2AAgent` operationId).
 	CallA2AAgentWithBodyWithResponse(ctx context.Context, agent openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CallA2AAgentResponse, error)
 
-	// CallA2AAgentWithResponse Send a message to or read and subscribe to a task from a published A2A agent
+	// CallA2AAgentWithResponse Send a message to or read, cancel, and subscribe to a task from a published A2A agent
 	//
-	// Supports A2A 0.3 and 1.0 JSON-RPC send, streaming send, task read, and subscription methods. The published protocol determines the accepted methods and response format. Requires the agents scope and an explicit allowlist entry. OLP task IDs are bound to the initiating key and project. Streaming methods return events as they arrive, with a one MiB maximum per event. Disconnecting does not cancel the upstream task.
+	// Supports A2A 0.3 and 1.0 JSON-RPC send, streaming send, task read, cancellation, and subscription methods. The published protocol determines the accepted methods and response format. Requires the agents scope and an explicit allowlist entry. OLP task IDs are bound to the initiating key and project. Streaming methods return events as they arrive, with a one MiB maximum per event. Disconnecting does not immediately cancel the upstream task. Disconnected tasks remain subject to deadline and authorization checks; OLP requests cancellation when those checks fail but cannot guarantee that a remote agent stops.
 	//
 	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
 	//
@@ -3805,9 +3811,9 @@ func (r ExportTracesResponse) ContentType() string {
 	return ""
 }
 
-// CallA2AAgentWithBodyWithResponse Send a message to or read and subscribe to a task from a published A2A agent
+// CallA2AAgentWithBodyWithResponse Send a message to or read, cancel, and subscribe to a task from a published A2A agent
 //
-// Supports A2A 0.3 and 1.0 JSON-RPC send, streaming send, task read, and subscription methods. The published protocol determines the accepted methods and response format. Requires the agents scope and an explicit allowlist entry. OLP task IDs are bound to the initiating key and project. Streaming methods return events as they arrive, with a one MiB maximum per event. Disconnecting does not cancel the upstream task.
+// Supports A2A 0.3 and 1.0 JSON-RPC send, streaming send, task read, cancellation, and subscription methods. The published protocol determines the accepted methods and response format. Requires the agents scope and an explicit allowlist entry. OLP task IDs are bound to the initiating key and project. Streaming methods return events as they arrive, with a one MiB maximum per event. Disconnecting does not immediately cancel the upstream task. Disconnected tasks remain subject to deadline and authorization checks; OLP requests cancellation when those checks fail but cannot guarantee that a remote agent stops.
 //
 // Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
 //
@@ -3820,9 +3826,9 @@ func (c *ClientWithResponses) CallA2AAgentWithBodyWithResponse(ctx context.Conte
 	return ParseCallA2AAgentResponse(rsp)
 }
 
-// CallA2AAgentWithResponse Send a message to or read and subscribe to a task from a published A2A agent
+// CallA2AAgentWithResponse Send a message to or read, cancel, and subscribe to a task from a published A2A agent
 //
-// Supports A2A 0.3 and 1.0 JSON-RPC send, streaming send, task read, and subscription methods. The published protocol determines the accepted methods and response format. Requires the agents scope and an explicit allowlist entry. OLP task IDs are bound to the initiating key and project. Streaming methods return events as they arrive, with a one MiB maximum per event. Disconnecting does not cancel the upstream task.
+// Supports A2A 0.3 and 1.0 JSON-RPC send, streaming send, task read, cancellation, and subscription methods. The published protocol determines the accepted methods and response format. Requires the agents scope and an explicit allowlist entry. OLP task IDs are bound to the initiating key and project. Streaming methods return events as they arrive, with a one MiB maximum per event. Disconnecting does not immediately cancel the upstream task. Disconnected tasks remain subject to deadline and authorization checks; OLP requests cancellation when those checks fail but cannot guarantee that a remote agent stops.
 //
 // Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
 //

@@ -131,7 +131,7 @@ func (l *Ledger) findTask(ctx context.Context, authority access.Authority, publi
 	return found, nil
 }
 
-func (l *Ledger) settle(ctx context.Context, res reservation, authority access.Authority, revision agentcontract.Revision, upstreamID, contextID string) (string, error) {
+func (l *Ledger) settle(ctx context.Context, res reservation, authority access.Authority, revision agentcontract.Revision, upstreamID, contextID, state string) (string, error) {
 	if authority.ProjectID == nil || len(upstreamID) > 1024 || len(contextID) > 1024 || strings.ContainsRune(upstreamID, 0) || strings.ContainsRune(contextID, 0) {
 		return "", limits.ErrDebitConflict
 	}
@@ -140,7 +140,7 @@ func (l *Ledger) settle(ctx context.Context, res reservation, authority access.A
 		return "", err
 	}
 	defer tx.Rollback(ctx)
-	taskID, err := settleTask(ctx, tx, res, authority, revision, upstreamID, contextID)
+	taskID, err := settleTask(ctx, tx, res, authority, revision, upstreamID, contextID, state)
 	if err != nil {
 		return "", err
 	}
@@ -150,13 +150,21 @@ func (l *Ledger) settle(ctx context.Context, res reservation, authority access.A
 	if err := limits.SettleAgentDebitTx(ctx, tx, result); err != nil {
 		return "", err
 	}
+	if taskID != "" {
+		if _, err := tx.Exec(ctx, `UPDATE olp.a2a_tasks SET state=CASE WHEN state='outcome_unknown' AND $2='active' THEN state ELSE $2 END WHERE id=$1 AND (state IN ('active','outcome_unknown') OR state=$2)`, taskID, state); err != nil {
+			return "", err
+		}
+	}
+	if _, err := tx.Exec(ctx, `DELETE FROM olp.a2a_task_admissions WHERE dispatch_id=$1`, res.DispatchID); err != nil {
+		return "", err
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return "", err
 	}
 	return taskID, nil
 }
 
-func settleTask(ctx context.Context, tx pgx.Tx, res reservation, authority access.Authority, revision agentcontract.Revision, upstreamID, contextID string) (string, error) {
+func settleTask(ctx context.Context, tx pgx.Tx, res reservation, authority access.Authority, revision agentcontract.Revision, upstreamID, contextID, state string) (string, error) {
 	if upstreamID == "" {
 		return "", nil
 	}
@@ -164,7 +172,7 @@ func settleTask(ctx context.Context, tx pgx.Tx, res reservation, authority acces
 	if err != nil {
 		return "", err
 	}
-	if _, err := tx.Exec(ctx, `INSERT INTO olp.a2a_tasks(id,api_key_id,project_id,publication_id,revision_id,dispatch_id,upstream_id,upstream_context_id) VALUES($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT(api_key_id,project_id,publication_id,upstream_id) DO NOTHING`, id, authority.ID, *authority.ProjectID, revision.PublicationID, revision.ID, res.DispatchID, upstreamID, contextID); err != nil {
+	if _, err := tx.Exec(ctx, `INSERT INTO olp.a2a_tasks(id,api_key_id,project_id,publication_id,revision_id,dispatch_id,upstream_id,upstream_context_id,deadline_at,caller_workload_revision_id,caller_expires_at,state) VALUES($1,$2,$3,$4,$5,$6,$7,$8,(SELECT created_at FROM olp.a2a_task_admissions WHERE dispatch_id=$6)+$9*interval '1 second',NULLIF($10,'')::uuid,$11,$12) ON CONFLICT(api_key_id,project_id,publication_id,upstream_id) DO NOTHING`, id, authority.ID, *authority.ProjectID, revision.PublicationID, revision.ID, res.DispatchID, upstreamID, contextID, taskDeadlineSeconds(revision.Definition.Agent), authority.WorkloadRevision, authority.ExpiresAt, state); err != nil {
 		return "", err
 	}
 	var publicID, pinned string
@@ -180,7 +188,10 @@ func settleTask(ctx context.Context, tx pgx.Tx, res reservation, authority acces
 func (l *Ledger) release(ctx context.Context, res reservation) {
 	releaseCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 	defer cancel()
-	_ = l.Store.ReleaseUndispatched(releaseCtx, res.DispatchID, res.ClaimID)
+	if err := l.Store.ReleaseUndispatched(releaseCtx, res.DispatchID, res.ClaimID); err != nil {
+		return
+	}
+	_, _ = l.Pool.Exec(releaseCtx, `WITH removed AS (DELETE FROM olp.a2a_task_admissions WHERE dispatch_id=$1 RETURNING task_id) UPDATE olp.a2a_tasks SET continuations=GREATEST(continuations-1,0) WHERE id=(SELECT task_id FROM removed)`, res.DispatchID)
 }
 
 func (l *Ledger) unknown(ctx context.Context, res reservation) {
@@ -189,4 +200,5 @@ func (l *Ledger) unknown(ctx context.Context, res reservation) {
 	if err := l.Store.MarkUnknown(unknownCtx, res.DispatchID, res.ClaimID); err != nil && !errors.Is(err, limits.ErrDebitState) {
 		return
 	}
+	_, _ = l.Pool.Exec(unknownCtx, `UPDATE olp.a2a_tasks SET state='outcome_unknown' WHERE id=(SELECT task_id FROM olp.a2a_task_admissions WHERE dispatch_id=$1) AND state='active'`, res.DispatchID)
 }

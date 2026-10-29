@@ -127,7 +127,7 @@ func (s *Server) rpc(w http.ResponseWriter, r *http.Request) {
 	switch decoded.Method {
 	case "SendMessage":
 		s.send(w, r, authority, revision, release, version, decoded)
-	case "GetTask":
+	case "GetTask", "CancelTask":
 		s.getTask(w, r, authority, revision, release, version, decoded)
 	case "SendStreamingMessage":
 		s.sendStream(w, r, authority, revision, release, version, decoded)
@@ -154,6 +154,7 @@ type preparedSend struct {
 	Params             protocol.SendMessageRequest
 	Revision           agentcontract.Revision
 	ExpectedUpstreamID string
+	PublicTaskID       string
 }
 
 func (s *Server) prepareSend(ctx context.Context, authority access.Authority, revision agentcontract.Revision, release *runtime.Release, version string, raw json.RawMessage) (preparedSend, *rpcError) {
@@ -165,6 +166,9 @@ func (s *Server) prepareSend(ctx context.Context, authority access.Authority, re
 		if params.Message.ContextID != "" {
 			return preparedSend{}, &rpcError{-32602, "Invalid parameters"}
 		}
+		if !remoteWorkBounded(authority, revision) {
+			return preparedSend{}, &rpcError{-32002, "A finite budget requires a declared remote work bound"}
+		}
 		return preparedSend{Params: params, Revision: revision}, nil
 	}
 	owned, err := s.Ledger.findTask(ctx, authority, revision.PublicationID, string(params.Message.TaskID))
@@ -175,8 +179,16 @@ func (s *Server) prepareSend(ctx context.Context, authority access.Authority, re
 	if !ok || params.Message.ContextID != "" && params.Message.ContextID != owned.ID {
 		return preparedSend{}, &rpcError{-32001, "Task not found"}
 	}
+	if !remoteWorkBounded(authority, pinned) {
+		return preparedSend{}, &rpcError{-32002, "A finite budget requires a declared remote work bound"}
+	}
 	translatedMessage := protocol.Message{ID: params.Message.ID, ContextID: owned.ContextID, Extensions: params.Message.Extensions, Metadata: params.Message.Metadata, Parts: params.Message.Parts, Role: params.Message.Role, TaskID: protocol.TaskID(owned.UpstreamID)}
-	return preparedSend{Params: protocol.SendMessageRequest{Config: params.Config, Message: &translatedMessage, Metadata: params.Metadata}, Revision: pinned, ExpectedUpstreamID: owned.UpstreamID}, nil
+	return preparedSend{Params: protocol.SendMessageRequest{Config: params.Config, Message: &translatedMessage, Metadata: params.Metadata}, Revision: pinned, ExpectedUpstreamID: owned.UpstreamID, PublicTaskID: owned.ID}, nil
+}
+
+func remoteWorkBounded(authority access.Authority, revision agentcontract.Revision) bool {
+	boundaries := authority.ToolDebitBoundaries(time.Hour)
+	return boundaries.Resolved && revision.Definition.Agent != nil && (!boundaries.CostBudgeted || revision.Definition.Agent.RemoteWorkBoundSeconds != nil)
 }
 
 func (s *Server) send(w http.ResponseWriter, r *http.Request, authority access.Authority, revision agentcontract.Revision, release *runtime.Release, version string, request rpcRequest) {
@@ -198,6 +210,16 @@ func (s *Server) send(w http.ResponseWriter, r *http.Request, authority access.A
 	res, err := s.Ledger.reserve(r.Context(), authority, prepared.Revision, release)
 	if err != nil {
 		fail(w, request.ID, -32603, "Internal error")
+		return
+	}
+	if err := s.Ledger.admitTask(r.Context(), res, authority, prepared.PublicTaskID, prepared.Revision.Definition.Agent); err != nil {
+		s.Ledger.release(r.Context(), res)
+		fail(w, request.ID, -32002, "Agent task limit reached")
+		return
+	}
+	if err := s.Ledger.admitRate(r.Context(), authority); err != nil {
+		s.Ledger.release(r.Context(), res)
+		fail(w, request.ID, -32002, "Agent send rate exceeded")
 		return
 	}
 	if err := s.Runtime.AuthorizeAgentResource(authority, "agents", prepared.Revision.PublicationID, prepared.Revision.ID, prepared.Revision.ProjectID); err != nil {
@@ -224,7 +246,7 @@ func (s *Server) send(w http.ResponseWriter, r *http.Request, authority access.A
 	}
 	settleCtx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 5*time.Second)
 	defer cancel()
-	publicID, err := s.Ledger.settle(settleCtx, res, authority, prepared.Revision, upstreamID, upstreamContext)
+	publicID, err := s.Ledger.settle(settleCtx, res, authority, prepared.Revision, upstreamID, upstreamContext, taskEventState(upstream))
 	if err != nil {
 		s.Ledger.unknown(r.Context(), res)
 		fail(w, request.ID, -32603, "Internal error")
@@ -289,8 +311,23 @@ func (s *Server) getTask(w http.ResponseWriter, r *http.Request, authority acces
 		return
 	}
 	defer cleanup()
-	upstream, err := transport.GetTask(r.Context(), headers, &protocol.GetTaskRequest{ID: protocol.TaskID(owned.UpstreamID), HistoryLength: params.HistoryLength})
+	if request.Method == "CancelTask" {
+		if err := s.Ledger.recordTaskState(r.Context(), owned.ID, "outcome_unknown"); err != nil {
+			fail(w, request.ID, -32603, "Internal error")
+			return
+		}
+	}
+	upstream, err := func() (*protocol.Task, error) {
+		if request.Method == "CancelTask" {
+			return transport.CancelTask(r.Context(), headers, &protocol.CancelTaskRequest{ID: protocol.TaskID(owned.UpstreamID)})
+		}
+		return transport.GetTask(r.Context(), headers, &protocol.GetTaskRequest{ID: protocol.TaskID(owned.UpstreamID), HistoryLength: params.HistoryLength})
+	}()
 	if err != nil || upstream == nil || string(upstream.ID) != owned.UpstreamID {
+		fail(w, request.ID, -32603, "Internal error")
+		return
+	}
+	if err := s.Ledger.recordTaskState(r.Context(), owned.ID, taskState(upstream.Status.State)); err != nil {
 		fail(w, request.ID, -32603, "Internal error")
 		return
 	}

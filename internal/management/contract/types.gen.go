@@ -6503,15 +6503,24 @@ type AdmissionPriority string
 
 // AgentDefinition defines model for AgentDefinition.
 type AgentDefinition struct {
-	CardDigest        string                  `json:"card_digest"`
-	CredentialId      *openapi_types.UUID     `json:"credential_id,omitempty"`
-	Endpoint          string                  `json:"endpoint"`
-	MaxCost           string                  `json:"max_cost"`
-	MessagePrice      *string                 `json:"message_price,omitempty"`
-	PricingRevisionId openapi_types.UUID      `json:"pricing_revision_id"`
-	Protocol          AgentDefinitionProtocol `json:"protocol"`
-	RouteRevisions    []openapi_types.UUID    `json:"route_revisions"`
-	ToolsetRevisions  []openapi_types.UUID    `json:"toolset_revisions"`
+	CardDigest   string              `json:"card_digest"`
+	CredentialId *openapi_types.UUID `json:"credential_id,omitempty"`
+	Endpoint     string              `json:"endpoint"`
+	MaxCost      string              `json:"max_cost"`
+
+	// MaxTaskContinuations Maximum observed continuations per task. Defaults to 32.
+	MaxTaskContinuations *int                    `json:"max_task_continuations,omitempty"`
+	MessagePrice         *string                 `json:"message_price,omitempty"`
+	PricingRevisionId    openapi_types.UUID      `json:"pricing_revision_id"`
+	Protocol             AgentDefinitionProtocol `json:"protocol"`
+
+	// RemoteWorkBoundSeconds The agent's declared maximum duration for remote work on one task, in seconds. Required for budgeted calls and enforced by the agent.
+	RemoteWorkBoundSeconds *int                 `json:"remote_work_bound_seconds,omitempty"`
+	RouteRevisions         []openapi_types.UUID `json:"route_revisions"`
+
+	// TaskDeadlineSeconds Maximum gateway task duration in seconds. Defaults to 600.
+	TaskDeadlineSeconds *int                 `json:"task_deadline_seconds,omitempty"`
+	ToolsetRevisions    []openapi_types.UUID `json:"toolset_revisions"`
 }
 
 // AgentDefinitionProtocol defines model for AgentDefinition.Protocol.

@@ -48,7 +48,7 @@ func protocolVersion(version string) string {
 func decodeRequest(version string, request rpcRequest) (rpcRequest, error) {
 	if version == currentProtocol {
 		switch request.Method {
-		case "SendMessage", "GetTask", "SendStreamingMessage", "SubscribeToTask":
+		case "SendMessage", "GetTask", "CancelTask", "SendStreamingMessage", "SubscribeToTask":
 			return request, nil
 		default:
 			return rpcRequest{}, errMethodNotDeclared
@@ -83,6 +83,13 @@ func decodeRequest(version string, request rpcRequest) (rpcRequest, error) {
 		}
 		data, err := json.Marshal(a2av0.ToV1SubscribeToTaskRequest(&value))
 		return rpcRequest{JSONRPC: request.JSONRPC, ID: request.ID, Method: "SubscribeToTask", Params: data}, err
+	case "tasks/cancel":
+		var value legacy.TaskIDParams
+		if json.Unmarshal(request.Params, &value) != nil {
+			return rpcRequest{}, errors.New("invalid parameters")
+		}
+		data, err := json.Marshal(a2av0.ToV1CancelTaskRequest(&value))
+		return rpcRequest{JSONRPC: request.JSONRPC, ID: request.ID, Method: "CancelTask", Params: data}, err
 	default:
 		return rpcRequest{}, errMethodNotDeclared
 	}
