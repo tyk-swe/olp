@@ -18,9 +18,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/agentcontract"
 	"github.com/tyk-swe/olp/internal/agents"
+	"github.com/tyk-swe/olp/internal/export"
 	"github.com/tyk-swe/olp/internal/gateway"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/mcp"
@@ -745,6 +747,7 @@ func TestGatewayToolWorkflowSettlesOneRun(t *testing.T) {
 	const answer = "workflow-private-result"
 	const prompt = "workflow-private-prompt"
 	var toolCalls atomic.Int64
+	var responsesWorkflow atomic.Bool
 	var blockTool atomic.Bool
 	toolStarted := make(chan struct{})
 	toolServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -777,9 +780,11 @@ func TestGatewayToolWorkflowSettlesOneRun(t *testing.T) {
 				<-r.Context().Done()
 				return
 			}
-			var settledModels int
-			if err := h.Pool.QueryRow(r.Context(), `SELECT count(*) FROM olp.execution_debits WHERE kind='model' AND state='settled'`).Scan(&settledModels); err != nil || settledModels != 1 {
-				t.Errorf("tool dispatched before model settlement: settled=%d error=%v", settledModels, err)
+			if !responsesWorkflow.Load() {
+				var settledModels int
+				if err := h.Pool.QueryRow(r.Context(), `SELECT count(*) FROM olp.execution_debits WHERE kind='model' AND state='settled'`).Scan(&settledModels); err != nil || settledModels != 1 {
+					t.Errorf("tool dispatched before model settlement: settled=%d error=%v", settledModels, err)
+				}
 			}
 			toolCalls.Add(1)
 			result = map[string]any{"content": []any{map[string]any{"type": "text", "text": answer}}, "isError": false}
@@ -804,7 +809,29 @@ func TestGatewayToolWorkflowSettlesOneRun(t *testing.T) {
 	var blockModel atomic.Bool
 	modelStarted := make(chan struct{})
 	vendor := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/models") {
+			writeJSON(w, map[string]any{"object": "list", "data": []any{map[string]any{"id": vendorModel}}})
+			return
+		}
 		if strings.HasSuffix(r.URL.Path, "/responses") {
+			var request struct {
+				Input json.RawMessage `json:"input"`
+				Tools json.RawMessage `json:"tools"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+				w.WriteHeader(http.StatusBadRequest)
+				return
+			}
+			if strings.Contains(string(request.Tools), "olp_certification_probe") {
+				writeJSON(w, map[string]any{"id": "response-probe", "object": "response", "model": vendorModel, "status": "completed", "output": []any{map[string]any{"id": "function-probe", "type": "function_call", "call_id": "call-probe", "name": "olp_certification_probe", "arguments": `{}`}}, "usage": map[string]int{"input_tokens": 4, "output_tokens": 6, "total_tokens": 10}})
+				return
+			}
+			if responsesWorkflow.Load() {
+				if !strings.Contains(string(request.Input), `"function_call_output"`) {
+					writeJSON(w, map[string]any{"id": "response-tool", "object": "response", "model": vendorModel, "status": "completed", "output": []any{map[string]any{"id": "function-call", "type": "function_call", "call_id": "call-one", "name": tool.Alias, "arguments": `{"query":"` + argument + `"}`}}, "usage": map[string]int{"input_tokens": 4, "output_tokens": 6, "total_tokens": 10}})
+					return
+				}
+			}
 			writeResponsesFixture(w, vendorModel, "done", false)
 			return
 		}
@@ -851,7 +878,7 @@ func TestGatewayToolWorkflowSettlesOneRun(t *testing.T) {
 	defer vendor.Close()
 	_, provider, slug, _ := provisionOpenAIInProject(t, h, owner, &project, vendor.URL,
 		[]any{map[string]any{"operation": "generation", "surface": "openai", "mode": "unary"}}, []string{"generation"},
-		map[string]any{"tool_execution": "gateway", "toolsets": []string{toolsetID}, "budget": map[string]any{"daily_cost_limit": "10000000"}})
+		map[string]any{"tool_execution": "gateway", "toolsets": []string{toolsetID}, "responses_mcp_items": true, "budget": map[string]any{"daily_cost_limit": "10000000"}})
 	addBatchPrice(t, h, owner, provider["id"].(string), "", time.Now().Add(-time.Hour))
 	key := h.want(owner, "POST", "/api/v1/api-keys", map[string]any{"name": "Workflow caller", "project_id": project, "scopes": []string{"inference", "tools", "traces_write"}, "allowed_routes": []string{slug}, "allowed_toolsets": []string{toolsetID}}, idem("workflow-key"), 201)
 	keyID, secret := mcpExecString(t, key, "id"), mcpExecString(t, key, "secret")
@@ -1047,6 +1074,114 @@ func TestGatewayToolWorkflowSettlesOneRun(t *testing.T) {
 		}
 		if unknown != 1 || !retained {
 			t.Fatalf("revoked %s call did not retain unknown exposure: count=%d retained=%t", scenario.name, unknown, retained)
+		}
+	}
+	controlSlug := "workflow-capture-control"
+	_, projectedProvider, projectedSlug, _ := provisionOpenAIInProject(t, h, owner, &project, vendor.URL,
+		[]any{map[string]any{"operation": "generation", "surface": "openai", "mode": "unary"}}, []string{"generation"},
+		map[string]any{"tool_execution": "gateway", "toolsets": []string{toolsetID}, "responses_mcp_items": true},
+		map[string]any{"kind": "openai", "profile_id": "openai-responses", "profile_revision": "1", "deployment": nil, "api_version": nil})
+	h.want(owner, http.MethodPost, "/api/v1/pricing/revisions", map[string]any{
+		"effective_at": time.Now().Add(-time.Hour).UTC().Format(time.RFC3339Nano),
+		"prices": []any{map[string]any{"provider_kind": "openai", "provider_id": projectedProvider["id"], "model": vendorModel,
+			"operation": "generation", "currency": "USD", "input_per_million": "1000000", "output_per_million": "1000000"}},
+	}, idem("workflow-projected-price"), http.StatusCreated)
+	eventually(t, "projected workflow price in routing inputs", 30*time.Second, func() bool {
+		h.refresh()
+		inputs := h.Runtime.RoutingInputs()
+		return inputs != nil && inputs.Price("openai", projectedProvider["id"].(string), "", vendorModel, "generation", time.Now()) != nil
+	})
+	projectedKey := h.want(owner, http.MethodPost, "/api/v1/api-keys", map[string]any{"name": "Workflow capture projected", "project_id": project, "scopes": []string{"inference", "tools"}, "allowed_routes": []string{projectedSlug}, "allowed_toolsets": []string{toolsetID}}, idem("workflow-capture-projected-key"), http.StatusCreated)
+	controlDraft := h.want(owner, http.MethodPost, "/api/v1/route-drafts", map[string]any{
+		"project_id": project, "slug": controlSlug, "operations": []string{"generation"}, "overall_timeout_ms": 10000, "max_attempts": 1,
+		"fidelity": map[string]any{"mode": "transformed"},
+		"targets":  []any{map[string]any{"provider_id": provider["id"], "provider_model": vendorModel, "priority": 0, "weight": 1, "timeout_ms": 5000}},
+	}, idem("workflow-capture-draft"), http.StatusCreated)
+	h.want(owner, http.MethodPost, "/api/v1/route-drafts/"+controlDraft["id"].(string)+"/activate", nil, withMatch(controlDraft, idem("workflow-capture-activate")), http.StatusOK)
+	controlKey := h.want(owner, http.MethodPost, "/api/v1/api-keys", map[string]any{"name": "Workflow capture control", "project_id": project, "scopes": []string{"inference"}, "allowed_routes": []string{controlSlug}}, idem("workflow-capture-key"), http.StatusCreated)
+	finalOnlySlug := "workflow-capture-final-only"
+	finalOnlyDraft := h.want(owner, http.MethodPost, "/api/v1/route-drafts", map[string]any{
+		"project_id": project, "slug": finalOnlySlug, "operations": []string{"generation"}, "overall_timeout_ms": 10000, "max_attempts": 1,
+		"fidelity": map[string]any{"mode": "transformed"}, "tool_execution": "gateway", "toolsets": []string{toolsetID},
+		"targets": []any{map[string]any{"provider_id": provider["id"], "provider_model": vendorModel, "priority": 0, "weight": 1, "timeout_ms": 5000}},
+	}, idem("workflow-capture-final-only"), http.StatusCreated)
+	h.want(owner, http.MethodPost, "/api/v1/route-drafts/"+finalOnlyDraft["id"].(string)+"/activate", nil, withMatch(finalOnlyDraft, idem("workflow-capture-final-only-activate")), http.StatusOK)
+	finalOnlyKey := h.want(owner, http.MethodPost, "/api/v1/api-keys", map[string]any{"name": "Workflow final-only capture", "project_id": project, "scopes": []string{"inference", "tools"}, "allowed_routes": []string{finalOnlySlug}, "allowed_toolsets": []string{toolsetID}}, idem("workflow-capture-final-only-key"), http.StatusCreated)
+	h.want(owner, http.MethodPatch, "/api/v1/observability/capture", map[string]any{"enabled": true}, etagHeader(h.want(owner, http.MethodGet, "/api/v1/observability/capture", nil, nil, http.StatusOK)), http.StatusOK)
+	receiver, exportServer := newExportReceiver(t, "", http.StatusNoContent)
+	captureSink := h.want(owner, http.MethodPost, "/api/v1/observability/sinks", map[string]any{"name": "workflow-capture", "type": "https", "destination": exportServer.URL, "streams": []string{"requests"}, "format": "json"}, idem(uuid.NewString()), http.StatusCreated)
+	for _, captureRoute := range []string{controlSlug, projectedSlug, finalOnlySlug} {
+		h.want(owner, http.MethodPost, "/api/v1/observability/capture-policies", map[string]any{"route_slug": captureRoute, "sink": captureSink["export_sink_id"], "sample_ratio": "1", "include": []string{"input", "output", "tool_calls"}, "max_bytes": 65536}, idem(uuid.NewString()), http.StatusCreated)
+	}
+	manager := &export.Manager{Pool: h.Pool, Keys: h.Ring2(), Installation: h.Server.Installation, Sender: export.NewSender(loopbackPolicy()), Log: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	h.Gateway.Capture = manager
+	h.Gateway.Sink = &gateway.PersistingSink{Persist: func(ctx context.Context, event *usage.Event, payload []byte) error {
+		_, err := usage.PersistEvent(ctx, h.Pool, event, payload)
+		return err
+	}}
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan struct{})
+	go func() { manager.Run(ctx); close(done) }()
+	t.Cleanup(func() { cancel(); <-done })
+	deadline := time.Now().Add(3 * time.Second)
+	for _, captureRoute := range []string{controlSlug, projectedSlug, finalOnlySlug} {
+		for {
+			collector := manager.Resolve(project, captureRoute, "", "", uuid.NewString())
+			if collector != nil {
+				collector.Close()
+				break
+			}
+			if time.Now().After(deadline) {
+				t.Fatalf("capture policy for %s did not compile", captureRoute)
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+	h.refresh()
+	controlStatus, controlResponse, _ := h.gateway(http.MethodPost, "/v1/chat/completions", mcpExecString(t, controlKey, "secret"), map[string]any{"model": controlSlug, "messages": []any{map[string]any{"role": "user", "content": "capture-control"}}})
+	if controlStatus != http.StatusOK {
+		t.Fatalf("capture control: status=%d response=%v", controlStatus, controlResponse)
+	}
+	controlExports := awaitEnvelope(t, receiver, 1)
+	controlData, err := json.Marshal(controlExports[0]["data"])
+	if err != nil || !strings.Contains(string(controlData), "capture-control") {
+		t.Fatalf("capture control not exported: %s %v", controlData, err)
+	}
+	responsesWorkflow.Store(true)
+	responsesStatus, responsesBody, headers := h.gateway(http.MethodPost, "/v1/responses", mcpExecString(t, projectedKey, "secret"), map[string]any{"model": projectedSlug, "input": prompt, "max_output_tokens": 100})
+	if responsesStatus != http.StatusOK || !strings.Contains(fmt.Sprint(responsesBody), argument) || !strings.Contains(fmt.Sprint(responsesBody), answer) {
+		actualProvider := h.Runtime.Release().Snapshot.Providers[projectedProvider["id"].(string)]
+		t.Fatalf("projected Responses workflow: status=%d response=%v profile=%s capabilities=%v", responsesStatus, responsesBody, actualProvider.ProfileID, actualProvider.Capabilities)
+	}
+	var captured bool
+	if err := h.Pool.QueryRow(t.Context(), `SELECT payload_captured FROM olp.requests WHERE id=$1`, headers.Get("X-Request-Id")).Scan(&captured); err != nil {
+		t.Fatal(err)
+	}
+	if captured {
+		t.Fatal("Responses workflow unexpectedly captured")
+	}
+	finalOnlyStatus, finalOnlyBody, finalOnlyHeaders := h.gateway(http.MethodPost, "/v1/responses", mcpExecString(t, finalOnlyKey, "secret"), map[string]any{"model": finalOnlySlug, "input": prompt, "max_output_tokens": 100})
+	if finalOnlyStatus != http.StatusOK || strings.Contains(fmt.Sprint(finalOnlyBody), argument) || strings.Contains(fmt.Sprint(finalOnlyBody), answer) {
+		t.Fatalf("final-only Responses workflow: status=%d response=%v", finalOnlyStatus, finalOnlyBody)
+	}
+	var finalOnlyCaptured bool
+	if err := h.Pool.QueryRow(t.Context(), `SELECT payload_captured FROM olp.requests WHERE id=$1`, finalOnlyHeaders.Get("X-Request-Id")).Scan(&finalOnlyCaptured); err != nil {
+		t.Fatal(err)
+	}
+	if finalOnlyCaptured {
+		t.Fatal("final-only Responses workflow unexpectedly captured")
+	}
+	for _, envelope := range receiver.received() {
+		data, err := json.Marshal(envelope["data"])
+		if err != nil || strings.Contains(string(data), prompt) || strings.Contains(string(data), argument) || strings.Contains(string(data), answer) {
+			t.Fatalf("Responses workflow content reached capture export: %s %v", data, err)
+		}
+	}
+	for _, table := range []string{"agent_runs", "agent_steps", "execution_debits", "mcp_tool_calls", "attempt_usage_facts", "requests", "attempts", "export_records"} {
+		var leaks int
+		query := "SELECT count(*) FROM olp." + table + " AS row WHERE row_to_json(row)::text LIKE '%' || $1 || '%' OR row_to_json(row)::text LIKE '%' || $2 || '%' OR row_to_json(row)::text LIKE '%' || $3 || '%'"
+		if err := h.Pool.QueryRow(t.Context(), query, prompt, argument, answer).Scan(&leaks); err != nil || leaks != 0 {
+			t.Fatalf("Responses workflow content reached %s: count=%d error=%v", table, leaks, err)
 		}
 	}
 }
@@ -1321,6 +1456,8 @@ func TestNativeStreamingToolCallsCertification(t *testing.T) {
 		{"anthropic", "anthropic-messages", "/v1", false},
 		{"gemini", "gemini-generation", "/v1beta", true},
 		{"gemini", "gemini-generation", "/v1beta", false},
+		{"openai", "openai-responses", "/v1", true},
+		{"openai", "openai-responses", "/v1", false},
 	} {
 		t.Run(fmt.Sprintf("%s/tools=%t", tc.surface, tc.supportsTools), func(t *testing.T) {
 			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1341,6 +1478,19 @@ func TestNativeStreamingToolCallsCertification(t *testing.T) {
 					return
 				}
 				stream := request.Stream || strings.HasSuffix(r.URL.Path, ":streamGenerateContent")
+				if tc.surface == "openai" {
+					item := func() map[string]any {
+						if len(request.Tools) > 0 && tc.supportsTools {
+							return map[string]any{"id": "function-probe", "type": "function_call", "status": "completed", "call_id": "call-probe", "name": "olp_certification_probe", "arguments": "{}"}
+						}
+						return map[string]any{"id": "message", "type": "message", "status": "completed", "role": "assistant", "content": []any{map[string]any{"type": "output_text", "text": "ready", "annotations": []any{}}}}
+					}()
+					encodedItem, _ := json.Marshal(item)
+					response, _ := json.Marshal(map[string]any{"id": "response", "object": "response", "status": "completed", "model": vendorModel, "output": []any{item}, "usage": map[string]int{"input_tokens": 3, "output_tokens": 2, "total_tokens": 5}})
+					w.Header().Set("Content-Type", "text/event-stream")
+					fmt.Fprintf(w, "event: response.output_item.done\ndata: {\"type\":\"response.output_item.done\",\"sequence_number\":0,\"output_index\":0,\"item\":%s}\n\nevent: response.completed\ndata: {\"type\":\"response.completed\",\"sequence_number\":1,\"response\":%s}\n\n", encodedItem, response)
+					return
+				}
 				if len(request.Tools) == 0 || !tc.supportsTools {
 					kindGeneration(w, tc.surface, stream)
 					return

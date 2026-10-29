@@ -2874,6 +2874,10 @@
               },
               "uniqueItems": true,
               "description": "Published toolset IDs that gateway execution may use. Callers can select a subset."
+            },
+            "responses_mcp_items": {
+              "type": "boolean",
+              "description": "Operator declaration that Responses clients support gateway-generated MCP output items. Requires gateway tool execution on a transformed route."
             }
           },
           "required": [
@@ -10846,6 +10850,10 @@
               },
               "uniqueItems": true,
               "description": "Published toolset IDs that gateway execution may use. Callers can select a subset."
+            },
+            "responses_mcp_items": {
+              "type": "boolean",
+              "description": "Operator declaration that Responses clients support gateway-generated MCP output items. Requires gateway tool execution on a transformed route."
             }
           },
           "required": [
@@ -11717,6 +11725,10 @@
               },
               "uniqueItems": true,
               "description": "Published toolset IDs that gateway execution may use. Callers can select a subset."
+            },
+            "responses_mcp_items": {
+              "type": "boolean",
+              "description": "Operator declaration that Responses clients support gateway-generated MCP output items. Requires gateway tool execution on a transformed route."
             }
           },
           "required": [
@@ -26111,6 +26123,10 @@
               },
               "uniqueItems": true,
               "description": "Published toolset IDs that gateway execution may use. Callers can select a subset."
+            },
+            "responses_mcp_items": {
+              "type": "boolean",
+              "description": "Operator declaration that Responses clients support gateway-generated MCP output items. Requires gateway tool execution on a transformed route."
             }
           },
           "required": [
@@ -33088,6 +33104,10 @@
               },
               "uniqueItems": true,
               "description": "Published toolset IDs that gateway execution may use. Callers can select a subset."
+            },
+            "responses_mcp_items": {
+              "type": "boolean",
+              "description": "Operator declaration that Responses clients support gateway-generated MCP output items. Requires gateway tool execution on a transformed route."
             }
           },
           "required": [
@@ -42640,6 +42660,10 @@
               },
               "uniqueItems": true,
               "description": "Published toolset IDs that gateway execution may use. Callers can select a subset."
+            },
+            "responses_mcp_items": {
+              "type": "boolean",
+              "description": "Operator declaration that Responses clients support gateway-generated MCP output items. Requires gateway tool execution on a transformed route."
             }
           },
           "required": [

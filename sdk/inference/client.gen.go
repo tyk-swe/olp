@@ -204,6 +204,51 @@ func (e PromptLabelReferenceLabel) Valid() bool {
 	}
 }
 
+// Defines values for ResponsesMCPCallErrorType.
+const (
+	McpToolExecutionError ResponsesMCPCallErrorType = "mcp_tool_execution_error"
+)
+
+// Valid indicates whether the value is a known member of the ResponsesMCPCallErrorType enum.
+func (e ResponsesMCPCallErrorType) Valid() bool {
+	switch e {
+	case McpToolExecutionError:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ResponsesMCPCallType.
+const (
+	McpCall ResponsesMCPCallType = "mcp_call"
+)
+
+// Valid indicates whether the value is a known member of the ResponsesMCPCallType enum.
+func (e ResponsesMCPCallType) Valid() bool {
+	switch e {
+	case McpCall:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ResponsesMCPListToolsType.
+const (
+	McpListTools ResponsesMCPListToolsType = "mcp_list_tools"
+)
+
+// Valid indicates whether the value is a known member of the ResponsesMCPListToolsType enum.
+func (e ResponsesMCPListToolsType) Valid() bool {
+	switch e {
+	case McpListTools:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for ResponsesPromptLabelReferenceLabel.
 const (
 	ResponsesPromptLabelReferenceLabelProduction ResponsesPromptLabelReferenceLabel = "production"
@@ -517,6 +562,45 @@ type PublishedPromptReference struct {
 	union json.RawMessage
 }
 
+// ResponsesMCPCall defines model for ResponsesMCPCall.
+type ResponsesMCPCall struct {
+	Arguments string `json:"arguments"`
+	Error     *struct {
+		Content interface{}               `json:"content"`
+		Type    ResponsesMCPCallErrorType `json:"type"`
+	} `json:"error,omitempty"`
+	Id          string               `json:"id"`
+	Name        string               `json:"name"`
+	Output      *string              `json:"output,omitempty"`
+	ServerLabel string               `json:"server_label"`
+	Status      *string              `json:"status,omitempty"`
+	Type        ResponsesMCPCallType `json:"type"`
+}
+
+// ResponsesMCPCallErrorType defines model for ResponsesMCPCall.Error.Type.
+type ResponsesMCPCallErrorType string
+
+// ResponsesMCPCallType defines model for ResponsesMCPCall.Type.
+type ResponsesMCPCallType string
+
+// ResponsesMCPListTools defines model for ResponsesMCPListTools.
+type ResponsesMCPListTools struct {
+	Id          string                    `json:"id"`
+	ServerLabel string                    `json:"server_label"`
+	Tools       []ResponsesMCPTool        `json:"tools"`
+	Type        ResponsesMCPListToolsType `json:"type"`
+}
+
+// ResponsesMCPListToolsType defines model for ResponsesMCPListTools.Type.
+type ResponsesMCPListToolsType string
+
+// ResponsesMCPTool defines model for ResponsesMCPTool.
+type ResponsesMCPTool struct {
+	Description *string                `json:"description,omitempty"`
+	InputSchema map[string]interface{} `json:"input_schema"`
+	Name        string                 `json:"name"`
+}
+
 // ResponsesPromptLabelReference defines model for ResponsesPromptLabelReference.
 type ResponsesPromptLabelReference struct {
 	// Id Project-owned prompt publication ID prefixed with olpp_
@@ -545,6 +629,41 @@ type ResponsesPromptRevisionReference struct {
 
 // ResponsesPublishedPromptReference A registry prompt has an olpp_ ID and exactly one label or revision ID. Other prompt IDs retain the provider contract.
 type ResponsesPublishedPromptReference struct {
+	union json.RawMessage
+}
+
+// ResponsesToolWorkflowRequest defines model for ResponsesToolWorkflowRequest.
+type ResponsesToolWorkflowRequest struct {
+	Input ResponsesToolWorkflowRequest_Input `json:"input"`
+	Model string                             `json:"model"`
+
+	// OlpToolsets Select a subset of the published toolsets allowed by the route. An empty array selects no toolsets.
+	OlpToolsets          *ChatToolsetSelection  `json:"olp_toolsets,omitempty"`
+	AdditionalProperties map[string]interface{} `json:"-"`
+}
+
+// ResponsesToolWorkflowRequestInput0 defines model for ResponsesToolWorkflowRequest.Input.0.
+type ResponsesToolWorkflowRequestInput0 = string
+
+// ResponsesToolWorkflowRequestInput1 defines model for ResponsesToolWorkflowRequest.Input.1.
+type ResponsesToolWorkflowRequestInput1 = []map[string]interface{}
+
+// ResponsesToolWorkflowRequest_Input defines model for ResponsesToolWorkflowRequest.Input.
+type ResponsesToolWorkflowRequest_Input struct {
+	union json.RawMessage
+}
+
+// ResponsesWorkflowResponse defines model for ResponsesWorkflowResponse.
+type ResponsesWorkflowResponse struct {
+	Output               *[]ResponsesWorkflowResponse_Output_Item `json:"output,omitempty"`
+	AdditionalProperties map[string]interface{}                   `json:"-"`
+}
+
+// ResponsesWorkflowResponseOutput2 defines model for ResponsesWorkflowResponse.Output.2.
+type ResponsesWorkflowResponseOutput2 map[string]interface{}
+
+// ResponsesWorkflowResponse_Output_Item defines model for ResponsesWorkflowResponse.output.Item.
+type ResponsesWorkflowResponse_Output_Item struct {
 	union json.RawMessage
 }
 
@@ -601,6 +720,11 @@ type CreateDelegationParams struct {
 	XOLPDelegationConsent *string `json:"X-OLP-Delegation-Consent,omitempty"`
 }
 
+// CreateResponseWithPromptJSONBody defines parameters for CreateResponseWithPrompt.
+type CreateResponseWithPromptJSONBody struct {
+	union json.RawMessage
+}
+
 // CreateResponseWithPromptParams defines parameters for CreateResponseWithPrompt.
 type CreateResponseWithPromptParams struct {
 	// XOLPAgentIdentity The current workload assertion is required when Authorization contains a one-use delegation token.
@@ -634,7 +758,7 @@ type CreateChatCompletionWithPromptJSONRequestBody CreateChatCompletionWithPromp
 type CreateDelegationJSONRequestBody = DelegationRequest
 
 // CreateResponseWithPromptJSONRequestBody defines body for CreateResponseWithPrompt for application/json ContentType.
-type CreateResponseWithPromptJSONRequestBody = ResponsesPromptRequest
+type CreateResponseWithPromptJSONRequestBody CreateResponseWithPromptJSONBody
 
 // Getter for additional properties for AnthropicPromptRequest. Returns the specified
 // element and whether it was found
@@ -1430,6 +1554,168 @@ func (a OLPResponsesPromptRequest) MarshalJSON() ([]byte, error) {
 	return json.Marshal(object)
 }
 
+// Getter for additional properties for ResponsesToolWorkflowRequest. Returns the specified
+// element and whether it was found
+func (a ResponsesToolWorkflowRequest) Get(fieldName string) (value interface{}, found bool) {
+	if a.AdditionalProperties != nil {
+		value, found = a.AdditionalProperties[fieldName]
+	}
+	return
+}
+
+// Setter for additional properties for ResponsesToolWorkflowRequest
+func (a *ResponsesToolWorkflowRequest) Set(fieldName string, value interface{}) {
+	if a.AdditionalProperties == nil {
+		a.AdditionalProperties = make(map[string]interface{})
+	}
+	a.AdditionalProperties[fieldName] = value
+}
+
+// Override default JSON handling for ResponsesToolWorkflowRequest to handle AdditionalProperties
+func (a *ResponsesToolWorkflowRequest) UnmarshalJSON(b []byte) error {
+	object := make(map[string]json.RawMessage)
+	err := json.Unmarshal(b, &object)
+	if err != nil {
+		return err
+	}
+
+	if raw, found := object["input"]; found {
+		err = json.Unmarshal(raw, &a.Input)
+		if err != nil {
+			return fmt.Errorf("error reading 'input': %w", err)
+		}
+		delete(object, "input")
+	}
+
+	if raw, found := object["model"]; found {
+		err = json.Unmarshal(raw, &a.Model)
+		if err != nil {
+			return fmt.Errorf("error reading 'model': %w", err)
+		}
+		delete(object, "model")
+	}
+
+	if raw, found := object["olp_toolsets"]; found {
+		err = json.Unmarshal(raw, &a.OlpToolsets)
+		if err != nil {
+			return fmt.Errorf("error reading 'olp_toolsets': %w", err)
+		}
+		delete(object, "olp_toolsets")
+	}
+
+	if len(object) != 0 {
+		a.AdditionalProperties = make(map[string]interface{})
+		for fieldName, fieldBuf := range object {
+			var fieldVal interface{}
+			err := json.Unmarshal(fieldBuf, &fieldVal)
+			if err != nil {
+				return fmt.Errorf("error unmarshaling field %s: %w", fieldName, err)
+			}
+			a.AdditionalProperties[fieldName] = fieldVal
+		}
+	}
+	return nil
+}
+
+// Override default JSON handling for ResponsesToolWorkflowRequest to handle AdditionalProperties
+func (a ResponsesToolWorkflowRequest) MarshalJSON() ([]byte, error) {
+	var err error
+	object := make(map[string]json.RawMessage)
+
+	object["input"], err = json.Marshal(a.Input)
+	if err != nil {
+		return nil, fmt.Errorf("error marshaling 'input': %w", err)
+	}
+
+	object["model"], err = json.Marshal(a.Model)
+	if err != nil {
+		return nil, fmt.Errorf("error marshaling 'model': %w", err)
+	}
+
+	if a.OlpToolsets != nil {
+		object["olp_toolsets"], err = json.Marshal(a.OlpToolsets)
+		if err != nil {
+			return nil, fmt.Errorf("error marshaling 'olp_toolsets': %w", err)
+		}
+	}
+
+	for fieldName, field := range a.AdditionalProperties {
+		object[fieldName], err = json.Marshal(field)
+		if err != nil {
+			return nil, fmt.Errorf("error marshaling '%s': %w", fieldName, err)
+		}
+	}
+	return json.Marshal(object)
+}
+
+// Getter for additional properties for ResponsesWorkflowResponse. Returns the specified
+// element and whether it was found
+func (a ResponsesWorkflowResponse) Get(fieldName string) (value interface{}, found bool) {
+	if a.AdditionalProperties != nil {
+		value, found = a.AdditionalProperties[fieldName]
+	}
+	return
+}
+
+// Setter for additional properties for ResponsesWorkflowResponse
+func (a *ResponsesWorkflowResponse) Set(fieldName string, value interface{}) {
+	if a.AdditionalProperties == nil {
+		a.AdditionalProperties = make(map[string]interface{})
+	}
+	a.AdditionalProperties[fieldName] = value
+}
+
+// Override default JSON handling for ResponsesWorkflowResponse to handle AdditionalProperties
+func (a *ResponsesWorkflowResponse) UnmarshalJSON(b []byte) error {
+	object := make(map[string]json.RawMessage)
+	err := json.Unmarshal(b, &object)
+	if err != nil {
+		return err
+	}
+
+	if raw, found := object["output"]; found {
+		err = json.Unmarshal(raw, &a.Output)
+		if err != nil {
+			return fmt.Errorf("error reading 'output': %w", err)
+		}
+		delete(object, "output")
+	}
+
+	if len(object) != 0 {
+		a.AdditionalProperties = make(map[string]interface{})
+		for fieldName, fieldBuf := range object {
+			var fieldVal interface{}
+			err := json.Unmarshal(fieldBuf, &fieldVal)
+			if err != nil {
+				return fmt.Errorf("error unmarshaling field %s: %w", fieldName, err)
+			}
+			a.AdditionalProperties[fieldName] = fieldVal
+		}
+	}
+	return nil
+}
+
+// Override default JSON handling for ResponsesWorkflowResponse to handle AdditionalProperties
+func (a ResponsesWorkflowResponse) MarshalJSON() ([]byte, error) {
+	var err error
+	object := make(map[string]json.RawMessage)
+
+	if a.Output != nil {
+		object["output"], err = json.Marshal(a.Output)
+		if err != nil {
+			return nil, fmt.Errorf("error marshaling 'output': %w", err)
+		}
+	}
+
+	for fieldName, field := range a.AdditionalProperties {
+		object[fieldName], err = json.Marshal(field)
+		if err != nil {
+			return nil, fmt.Errorf("error marshaling '%s': %w", fieldName, err)
+		}
+	}
+	return json.Marshal(object)
+}
+
 // AsA2ARequestId0 returns the union data inside the A2ARequest_Id as a A2ARequestId0
 func (t A2ARequest_Id) AsA2ARequestId0() (A2ARequestId0, error) {
 	var body A2ARequestId0
@@ -1740,6 +2026,156 @@ func (t *ResponsesPublishedPromptReference) UnmarshalJSON(b []byte) error {
 	return err
 }
 
+// AsResponsesToolWorkflowRequestInput0 returns the union data inside the ResponsesToolWorkflowRequest_Input as a ResponsesToolWorkflowRequestInput0
+func (t ResponsesToolWorkflowRequest_Input) AsResponsesToolWorkflowRequestInput0() (ResponsesToolWorkflowRequestInput0, error) {
+	var body ResponsesToolWorkflowRequestInput0
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromResponsesToolWorkflowRequestInput0 overwrites any union data inside the ResponsesToolWorkflowRequest_Input as the provided ResponsesToolWorkflowRequestInput0
+func (t *ResponsesToolWorkflowRequest_Input) FromResponsesToolWorkflowRequestInput0(v ResponsesToolWorkflowRequestInput0) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeResponsesToolWorkflowRequestInput0 performs a merge with any union data inside the ResponsesToolWorkflowRequest_Input, using the provided ResponsesToolWorkflowRequestInput0
+func (t *ResponsesToolWorkflowRequest_Input) MergeResponsesToolWorkflowRequestInput0(v ResponsesToolWorkflowRequestInput0) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsResponsesToolWorkflowRequestInput1 returns the union data inside the ResponsesToolWorkflowRequest_Input as a ResponsesToolWorkflowRequestInput1
+func (t ResponsesToolWorkflowRequest_Input) AsResponsesToolWorkflowRequestInput1() (ResponsesToolWorkflowRequestInput1, error) {
+	var body ResponsesToolWorkflowRequestInput1
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromResponsesToolWorkflowRequestInput1 overwrites any union data inside the ResponsesToolWorkflowRequest_Input as the provided ResponsesToolWorkflowRequestInput1
+func (t *ResponsesToolWorkflowRequest_Input) FromResponsesToolWorkflowRequestInput1(v ResponsesToolWorkflowRequestInput1) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeResponsesToolWorkflowRequestInput1 performs a merge with any union data inside the ResponsesToolWorkflowRequest_Input, using the provided ResponsesToolWorkflowRequestInput1
+func (t *ResponsesToolWorkflowRequest_Input) MergeResponsesToolWorkflowRequestInput1(v ResponsesToolWorkflowRequestInput1) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+func (t ResponsesToolWorkflowRequest_Input) MarshalJSON() ([]byte, error) {
+	b, err := t.union.MarshalJSON()
+	return b, err
+}
+
+func (t *ResponsesToolWorkflowRequest_Input) UnmarshalJSON(b []byte) error {
+	err := t.union.UnmarshalJSON(b)
+	return err
+}
+
+// AsResponsesMCPListTools returns the union data inside the ResponsesWorkflowResponse_Output_Item as a ResponsesMCPListTools
+func (t ResponsesWorkflowResponse_Output_Item) AsResponsesMCPListTools() (ResponsesMCPListTools, error) {
+	var body ResponsesMCPListTools
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromResponsesMCPListTools overwrites any union data inside the ResponsesWorkflowResponse_Output_Item as the provided ResponsesMCPListTools
+func (t *ResponsesWorkflowResponse_Output_Item) FromResponsesMCPListTools(v ResponsesMCPListTools) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeResponsesMCPListTools performs a merge with any union data inside the ResponsesWorkflowResponse_Output_Item, using the provided ResponsesMCPListTools
+func (t *ResponsesWorkflowResponse_Output_Item) MergeResponsesMCPListTools(v ResponsesMCPListTools) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsResponsesMCPCall returns the union data inside the ResponsesWorkflowResponse_Output_Item as a ResponsesMCPCall
+func (t ResponsesWorkflowResponse_Output_Item) AsResponsesMCPCall() (ResponsesMCPCall, error) {
+	var body ResponsesMCPCall
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromResponsesMCPCall overwrites any union data inside the ResponsesWorkflowResponse_Output_Item as the provided ResponsesMCPCall
+func (t *ResponsesWorkflowResponse_Output_Item) FromResponsesMCPCall(v ResponsesMCPCall) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeResponsesMCPCall performs a merge with any union data inside the ResponsesWorkflowResponse_Output_Item, using the provided ResponsesMCPCall
+func (t *ResponsesWorkflowResponse_Output_Item) MergeResponsesMCPCall(v ResponsesMCPCall) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsResponsesWorkflowResponseOutput2 returns the union data inside the ResponsesWorkflowResponse_Output_Item as a ResponsesWorkflowResponseOutput2
+func (t ResponsesWorkflowResponse_Output_Item) AsResponsesWorkflowResponseOutput2() (ResponsesWorkflowResponseOutput2, error) {
+	var body ResponsesWorkflowResponseOutput2
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromResponsesWorkflowResponseOutput2 overwrites any union data inside the ResponsesWorkflowResponse_Output_Item as the provided ResponsesWorkflowResponseOutput2
+func (t *ResponsesWorkflowResponse_Output_Item) FromResponsesWorkflowResponseOutput2(v ResponsesWorkflowResponseOutput2) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeResponsesWorkflowResponseOutput2 performs a merge with any union data inside the ResponsesWorkflowResponse_Output_Item, using the provided ResponsesWorkflowResponseOutput2
+func (t *ResponsesWorkflowResponse_Output_Item) MergeResponsesWorkflowResponseOutput2(v ResponsesWorkflowResponseOutput2) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+func (t ResponsesWorkflowResponse_Output_Item) MarshalJSON() ([]byte, error) {
+	b, err := t.union.MarshalJSON()
+	return b, err
+}
+
+func (t *ResponsesWorkflowResponse_Output_Item) UnmarshalJSON(b []byte) error {
+	err := t.union.UnmarshalJSON(b)
+	return err
+}
+
 // AsAnthropicPromptRequest returns the union data inside the CreateAnthropicMessageWithPromptJSONBody as a AnthropicPromptRequest
 func (t CreateAnthropicMessageWithPromptJSONBody) AsAnthropicPromptRequest() (AnthropicPromptRequest, error) {
 	var body AnthropicPromptRequest
@@ -1984,6 +2420,68 @@ func (t CreateChatCompletionWithPromptJSONBody) MarshalJSON() ([]byte, error) {
 }
 
 func (t *CreateChatCompletionWithPromptJSONBody) UnmarshalJSON(b []byte) error {
+	err := t.union.UnmarshalJSON(b)
+	return err
+}
+
+// AsResponsesPromptRequest returns the union data inside the CreateResponseWithPromptJSONBody as a ResponsesPromptRequest
+func (t CreateResponseWithPromptJSONBody) AsResponsesPromptRequest() (ResponsesPromptRequest, error) {
+	var body ResponsesPromptRequest
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromResponsesPromptRequest overwrites any union data inside the CreateResponseWithPromptJSONBody as the provided ResponsesPromptRequest
+func (t *CreateResponseWithPromptJSONBody) FromResponsesPromptRequest(v ResponsesPromptRequest) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeResponsesPromptRequest performs a merge with any union data inside the CreateResponseWithPromptJSONBody, using the provided ResponsesPromptRequest
+func (t *CreateResponseWithPromptJSONBody) MergeResponsesPromptRequest(v ResponsesPromptRequest) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsResponsesToolWorkflowRequest returns the union data inside the CreateResponseWithPromptJSONBody as a ResponsesToolWorkflowRequest
+func (t CreateResponseWithPromptJSONBody) AsResponsesToolWorkflowRequest() (ResponsesToolWorkflowRequest, error) {
+	var body ResponsesToolWorkflowRequest
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromResponsesToolWorkflowRequest overwrites any union data inside the CreateResponseWithPromptJSONBody as the provided ResponsesToolWorkflowRequest
+func (t *CreateResponseWithPromptJSONBody) FromResponsesToolWorkflowRequest(v ResponsesToolWorkflowRequest) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeResponsesToolWorkflowRequest performs a merge with any union data inside the CreateResponseWithPromptJSONBody, using the provided ResponsesToolWorkflowRequest
+func (t *CreateResponseWithPromptJSONBody) MergeResponsesToolWorkflowRequest(v ResponsesToolWorkflowRequest) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+func (t CreateResponseWithPromptJSONBody) MarshalJSON() ([]byte, error) {
+	b, err := t.union.MarshalJSON()
+	return b, err
+}
+
+func (t *CreateResponseWithPromptJSONBody) UnmarshalJSON(b []byte) error {
 	err := t.union.UnmarshalJSON(b)
 	return err
 }
@@ -3691,7 +4189,7 @@ type CreateResponseWithPromptResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
 	// JSON200 the response for an HTTP 200 `application/json` response
-	JSON200 *map[string]interface{}
+	JSON200 *ResponsesWorkflowResponse
 	// JSON400 the response for an HTTP 400 `application/json` response
 	JSON400 *InferenceError
 	// JSON401 the response for an HTTP 401 `application/json` response
@@ -3709,7 +4207,7 @@ type CreateResponseWithPromptResponse struct {
 }
 
 // GetJSON200 returns the response for an HTTP 200 `application/json` response
-func (r CreateResponseWithPromptResponse) GetJSON200() *map[string]interface{} {
+func (r CreateResponseWithPromptResponse) GetJSON200() *ResponsesWorkflowResponse {
 	return r.JSON200
 }
 
@@ -4511,7 +5009,7 @@ func ParseCreateResponseWithPromptResponse(rsp *http.Response) (*CreateResponseW
 
 	switch {
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
-		var dest map[string]interface{}
+		var dest ResponsesWorkflowResponse
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}

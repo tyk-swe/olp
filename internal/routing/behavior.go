@@ -80,6 +80,7 @@ var (
 type Behavior struct {
 	ToolExecution            string              `json:"tool_execution,omitempty"`
 	Toolsets                 []string            `json:"toolsets,omitempty"`
+	ResponsesMCPItems        bool                `json:"responses_mcp_items,omitempty"`
 	Cache                    *cache.Policy       `json:"cache,omitempty"`
 	PromptCache              *cache.PromptPolicy `json:"prompt_cache,omitempty"`
 	CallerCostExempt         bool                `json:"caller_cost_exempt,omitempty"`
@@ -282,7 +283,7 @@ func DecodeBehavior(raw []byte) (Behavior, error) {
 
 // IsZero reports whether the behavior declares nothing.
 func (b Behavior) IsZero() bool {
-	return b.ToolExecution == "" && len(b.Toolsets) == 0 && b.Cache == nil && b.PromptCache == nil && !b.CallerCostExempt && !b.ProviderFetchedDocuments && len(b.Fallbacks) == 0 && len(b.Selectors) == 0 && len(b.Retry) == 0 && b.Affinity == nil && b.Budget == nil && b.MaxBodyBytes == nil && b.Passthrough == nil
+	return b.ToolExecution == "" && len(b.Toolsets) == 0 && !b.ResponsesMCPItems && b.Cache == nil && b.PromptCache == nil && !b.CallerCostExempt && !b.ProviderFetchedDocuments && len(b.Fallbacks) == 0 && len(b.Selectors) == 0 && len(b.Retry) == 0 && b.Affinity == nil && b.Budget == nil && b.MaxBodyBytes == nil && b.Passthrough == nil
 }
 
 // Validate checks the behavior's own shape. tagged reports whether a primary
@@ -293,6 +294,9 @@ func (b Behavior) Validate(slug string, tagged func(string) bool) error {
 	}
 	if len(b.Toolsets) > 0 && b.ToolExecution != "gateway" {
 		return invalidValue("toolsets", "Toolsets require gateway tool execution.")
+	}
+	if b.ResponsesMCPItems && b.ToolExecution != "gateway" {
+		return invalidValue("responses_mcp_items", "Responses MCP items require gateway tool execution.")
 	}
 	for index, id := range b.Toolsets {
 		parsed, err := uuid.Parse(id)
