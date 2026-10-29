@@ -9158,8 +9158,11 @@ type CredentialSlotDetail struct {
 // DelegationConsent defines model for DelegationConsent.
 type DelegationConsent struct {
 	// Consent One-use consent code, shown only once and bound to the selected agent.
-	Consent   string    `json:"consent"`
-	ExpiresAt time.Time `json:"expires_at"`
+	Consent string `json:"consent"`
+
+	// DelegationPairDigest Stable pair budget ID for this delegation.
+	DelegationPairDigest string    `json:"delegation_pair_digest"`
+	ExpiresAt            time.Time `json:"expires_at"`
 }
 
 // DelegationConsentRequest defines model for DelegationConsentRequest.

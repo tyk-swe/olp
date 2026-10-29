@@ -254,6 +254,12 @@
           approved channel. It expires at {consent.expires_at}.
         </p>
         <label>Consent code <input readonly value={consent.consent} /></label>
+        <div class="form-field">
+          <label>
+            Pair budget ID
+            <input readonly size="64" value={consent.delegation_pair_digest} />
+          </label>
+        </div>
       {/if}
     {/if}
   </section>

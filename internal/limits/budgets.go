@@ -50,7 +50,7 @@ func budgetReportSQL(owner budgetOwnership, basis string) string {
 
 // BudgetSQL reports one API key's raw and retained current-window spend as
 // exact decimal strings. The enclosing query supplies the key row as k.
-var BudgetSQL = budgetReportSQL(budgetOwnership{"f.api_key_id=k.id", "h.api_key_id=k.id"}, `COALESCE(olp.effective_limits(k.policy,(SELECT p.limit_templates->(k.policy->>'limit_template') FROM olp.projects p WHERE p.id=k.project_id))->>'cost_basis','cost')`)
+var BudgetSQL = budgetReportSQL(budgetOwnership{"(f.api_key_id=k.id OR f.agent_principal_id=k.id)", "(h.api_key_id=k.id OR h.agent_principal_id=k.id)"}, `COALESCE(olp.effective_limits(k.policy,(SELECT p.limit_templates->(k.policy->>'limit_template') FROM olp.projects p WHERE p.id=k.project_id))->>'cost_basis','cost')`)
 
 // GroupBudgetSQL shares the same charge and calendar rules, adding the
 // effective limits of the enclosing budget-group row g.
@@ -443,7 +443,7 @@ var reconciliationSnapshotsSQL = reconcileCostWindowsSQL(costOwnerKey, false, `a
   SELECT id FROM olp.api_keys
   WHERE revoked_at IS NULL AND (expires_at IS NULL OR expires_at > $1::timestamptz)
 ), usage AS (
-  SELECT fact.api_key_id AS id, fact.observed_at,
+  SELECT a.id, fact.observed_at,
          (COALESCE(fact.estimated_cost, 0)+fact.cache_budget_cost)::numeric AS cost,
          (COALESCE(fact.charge, 0)+fact.cache_budget_charge)::numeric AS charge,
          CASE WHEN fact.charge_status <> 'not_billable' AND fact.unpriced
@@ -451,15 +451,15 @@ var reconciliationSnapshotsSQL = reconcileCostWindowsSQL(costOwnerKey, false, `a
          CASE WHEN fact.charge_status <> 'not_billable' AND fact.charge IS NULL
               THEN 1 ELSE 0 END::bigint AS uncharged_attempts
   FROM (SELECT * FROM olp.attempt_usage_facts WHERE NOT budget_exempt) fact
-  JOIN accounts a ON a.id = fact.api_key_id
+  JOIN accounts a ON a.id = fact.api_key_id OR a.id = fact.agent_principal_id
   WHERE fact.observed_at >= LEAST((SELECT daily_start FROM budget_calendar),(SELECT monthly_start FROM budget_calendar),(SELECT weekly_start FROM budget_calendar)) AND fact.observed_at < GREATEST((SELECT daily_end FROM budget_calendar),(SELECT monthly_end FROM budget_calendar),(SELECT weekly_end FROM budget_calendar))
   UNION ALL
-  SELECT hourly.api_key_id AS id, hourly.budget_bucket,
+  SELECT a.id, hourly.budget_bucket,
          (COALESCE(hourly.estimated_cost, 0)+hourly.cache_budget_cost)::numeric,
          (COALESCE(hourly.charge, 0)+hourly.cache_budget_charge)::numeric,
          hourly.unpriced_attempt_count, hourly.uncharged_attempt_count
   FROM (SELECT * FROM olp.attempt_usage_hourly WHERE NOT budget_exempt) hourly
-  JOIN accounts a ON a.id = hourly.api_key_id
+  JOIN accounts a ON a.id = hourly.api_key_id OR a.id = hourly.agent_principal_id
   WHERE hourly.budget_bucket >= LEAST((SELECT daily_start FROM budget_calendar),(SELECT monthly_start FROM budget_calendar),(SELECT weekly_start FROM budget_calendar)) AND hourly.budget_bucket < GREATEST((SELECT daily_end FROM budget_calendar),(SELECT monthly_end FROM budget_calendar),(SELECT weekly_end FROM budget_calendar))
 )`)
 

@@ -157,7 +157,8 @@ func (s *DelegationManagement) create(r *http.Request, _ access.Principal) (acce
 	if err := access.Audit(r.Context(), tx, r, principal.Actor(), "agent_delegation.consent", "api_key", keyID, "success"); err != nil {
 		return access.Reply{}, err
 	}
-	return access.Commit(r, tx, access.Reply{Status: http.StatusCreated, Body: map[string]any{"consent": code, "expires_at": expires}})
+	pair, _ := s.Manager.delegationPair(*target.key.ProjectID, keyID, agentID, &principal.ID)
+	return access.Commit(r, tx, access.Reply{Status: http.StatusCreated, Body: map[string]any{"consent": code, "expires_at": expires, "delegation_pair_digest": pair}})
 }
 
 type memberConsentTarget struct {

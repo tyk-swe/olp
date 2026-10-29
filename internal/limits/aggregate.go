@@ -46,6 +46,11 @@ func budgetProjectSQL(key, provider, route string) string {
 func usageProjectSQL(alias string) string {
 	return budgetProjectSQL(alias+".api_key_id", alias+".provider_id", alias+".route_slug")
 }
+
+func aggregateFactLabelsSQL(alias string) string {
+	return fmt.Sprintf(`((COALESCE(%[1]s.attribution,'{}'::jsonb) - '%[2]s') || CASE WHEN NULLIF(%[1]s.delegation_pair_digest,'') IS NULL THEN '{}'::jsonb ELSE jsonb_build_object('%[2]s',%[1]s.delegation_pair_digest) END)`, alias, attribution.DelegationPairKey)
+}
+
 func aggregateOwnershipSQL(account, project, key, route, labels string) string {
 	return fmt.Sprintf(`(%[1]s.installation_id IS NOT NULL OR
  %[1]s.organization_id=(SELECT organization_id FROM olp.projects WHERE id=%[2]s) OR
@@ -56,7 +61,7 @@ func aggregateOwnershipSQL(account, project, key, route, labels string) string {
 var aggregateEventDeltasSQL = `WITH event_facts AS MATERIALIZED (
  SELECT * FROM olp.attempt_usage_facts WHERE event_id=$5::uuid AND ($6::uuid IS NULL OR attempt_id=$6::uuid) AND NOT budget_exempt
 ), subjects AS MATERIALIZED (
- SELECT ` + usageProjectSQL("f") + ` AS project_id,f.api_key_id,f.route_slug,f.attribution FROM event_facts f
+ SELECT ` + usageProjectSQL("f") + ` AS project_id,f.api_key_id,f.route_slug,` + aggregateFactLabelsSQL("f") + ` AS attribution FROM event_facts f
  UNION SELECT ` + budgetProjectSQL("NULLIF($1,'')::uuid", "$2::uuid", "$3") + `,NULLIF($1,'')::uuid,$3,$4::jsonb
 ), owners AS (
  SELECT id FROM olp.aggregate_budget_accounts WHERE installation_id IS NOT NULL
@@ -70,7 +75,7 @@ var aggregateEventDeltasSQL = `WITH event_facts AS MATERIALIZED (
  COALESCE(SUM(COALESCE(f.charge,0)+f.cache_budget_charge),0)::text,
  count(f.attempt_id) FILTER(WHERE f.charge_status<>'not_billable' AND f.charge IS NULL)
  FROM owners o JOIN olp.aggregate_budget_accounts a ON a.id=o.id LEFT JOIN event_facts f ON ` +
-	aggregateOwnershipSQL("a", usageProjectSQL("f"), "f.api_key_id", "f.route_slug", "f.attribution") + `
+	aggregateOwnershipSQL("a", usageProjectSQL("f"), "f.api_key_id", "f.route_slug", aggregateFactLabelsSQL("f")) + `
  GROUP BY a.id ORDER BY a.id`
 
 // AddAggregateCostDelta accounts each attempt to its own aggregate subjects.
@@ -140,7 +145,7 @@ var aggregateSnapshotsSQL = reconcileCostWindowsSQL(costOwnerAggregate, true, `a
  LEFT JOIN olp.api_keys k ON k.id=f.api_key_id
  LEFT JOIN olp.providers p ON p.id=f.provider_id
  LEFT JOIN olp.routes r ON r.slug=f.route_slug
- WHERE `+aggregateOwnershipSQL("a", "COALESCE(k.project_id,p.project_id,r.project_id)", "f.api_key_id", "f.route_slug", "f.attribution")+`
+ WHERE `+aggregateOwnershipSQL("a", "COALESCE(k.project_id,p.project_id,r.project_id)", "f.api_key_id", "f.route_slug", aggregateFactLabelsSQL("f"))+`
    AND f.observed_at >= LEAST((SELECT daily_start FROM budget_calendar),(SELECT monthly_start FROM budget_calendar),(SELECT weekly_start FROM budget_calendar)) AND f.observed_at < GREATEST((SELECT daily_end FROM budget_calendar),(SELECT monthly_end FROM budget_calendar),(SELECT weekly_end FROM budget_calendar))
  UNION ALL
  SELECT a.id,h.budget_bucket,(COALESCE(h.estimated_cost,0)+h.cache_budget_cost)::numeric,(COALESCE(h.charge,0)+h.cache_budget_charge)::numeric,h.unpriced_attempt_count,h.uncharged_attempt_count
@@ -148,7 +153,7 @@ var aggregateSnapshotsSQL = reconcileCostWindowsSQL(costOwnerAggregate, true, `a
  LEFT JOIN olp.api_keys k ON k.id=h.api_key_id
  LEFT JOIN olp.providers p ON p.id=h.provider_id
  LEFT JOIN olp.routes r ON r.slug=h.route_slug
- WHERE `+aggregateOwnershipSQL("a", "COALESCE(k.project_id,p.project_id,r.project_id)", "h.api_key_id", "h.route_slug", "h.attribution")+`
+ WHERE `+aggregateOwnershipSQL("a", "COALESCE(k.project_id,p.project_id,r.project_id)", "h.api_key_id", "h.route_slug", aggregateFactLabelsSQL("h"))+`
    AND h.budget_bucket >= LEAST((SELECT daily_start FROM budget_calendar),(SELECT monthly_start FROM budget_calendar),(SELECT weekly_start FROM budget_calendar)) AND h.budget_bucket < GREATEST((SELECT daily_end FROM budget_calendar),(SELECT monthly_end FROM budget_calendar),(SELECT weekly_end FROM budget_calendar))
 )`)
 
@@ -198,8 +203,8 @@ func EnsureAttributionBudget(ctx context.Context, tx pgx.Tx, project, key, value
 // one control-plane query. The surrounding project row must be named p.
 var AttributionBudgetsSQL = `(SELECT COALESCE(jsonb_object_agg(label,pair_usage),'{}'::jsonb) FROM (
  SELECT b.key AS label,jsonb_object_agg(v.key,` + budgetReportSQL(budgetOwnership{
-	usageProjectSQL("f") + "=p.id AND f.attribution->>b.key=v.key",
-	usageProjectSQL("h") + "=p.id AND h.attribution->>b.key=v.key",
+	usageProjectSQL("f") + "=p.id AND " + aggregateFactLabelsSQL("f") + "->>b.key=v.key",
+	usageProjectSQL("h") + "=p.id AND " + aggregateFactLabelsSQL("h") + "->>b.key=v.key",
 }, "COALESCE(v.value->>'cost_basis','cost')") + `) AS pair_usage
  FROM jsonb_each(p.attribution_budgets) b CROSS JOIN LATERAL jsonb_each(b.value) v GROUP BY b.key
 ) grouped)`

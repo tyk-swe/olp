@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"slices"
 
+	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/agents"
 	"github.com/tyk-swe/olp/internal/mcp"
 	"github.com/tyk-swe/olp/internal/oif"
@@ -71,17 +72,17 @@ func (s *Server) prepareWorkflowResume(ctx context.Context, x *call) *Error {
 	return nil
 }
 
-func (s *Server) callWorkflowTool(ctx context.Context, x *call, tool WorkflowTool, call wire.ToolCall) (json.RawMessage, error) {
+func (s *Server) callWorkflowTool(ctx context.Context, x *call, authority access.Authority, tool WorkflowTool, call wire.ToolCall) (json.RawMessage, error) {
 	callID := fmt.Sprintf("%s:%d:%s", x.workflow.runID, x.workflow.ordinal, call.ID)
 	index := slices.IndexFunc(x.workflow.approvals, func(approval agents.WorkflowApproval) bool { return approval.CallID == call.ID })
 	if index < 0 {
-		return s.WorkflowTools.Call(ctx, x.authority, x.request.release, tool, x.workflow.runID, x.workflow.ordinal, callID, json.RawMessage(call.Arguments))
+		return s.WorkflowTools.Call(ctx, authority, x.request.release, tool, x.workflow.runID, x.workflow.ordinal, callID, json.RawMessage(call.Arguments))
 	}
 	runner, ok := s.WorkflowTools.(WorkflowApprovedToolRunner)
 	if !ok {
 		return nil, &mcp.WorkflowError{Status: 503, Code: "tool_approval_unavailable", Message: "The approval service is unavailable."}
 	}
-	return runner.CallApproved(ctx, x.authority, x.request.release, tool, x.workflow.runID, x.workflow.ordinal, callID, json.RawMessage(call.Arguments), x.workflow.approvals[index])
+	return runner.CallApproved(ctx, authority, x.request.release, tool, x.workflow.runID, x.workflow.ordinal, callID, json.RawMessage(call.Arguments), x.workflow.approvals[index])
 }
 
 func (s *Server) pauseWorkflow(ctx context.Context, x *call, completion *wire.Completion, iteration int) (*workflowPause, *Error) {

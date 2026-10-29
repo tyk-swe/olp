@@ -1299,7 +1299,8 @@
         "additionalProperties": false,
         "required": [
           "token",
-          "expires_at"
+          "expires_at",
+          "delegation_pair_digest"
         ],
         "properties": {
           "token": {
@@ -1309,6 +1310,10 @@
           "expires_at": {
             "type": "string",
             "format": "date-time"
+          },
+          "delegation_pair_digest": {
+            "type": "string",
+            "description": "Stable pair budget ID for this delegation."
           }
         }
       },

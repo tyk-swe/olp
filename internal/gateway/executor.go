@@ -13,6 +13,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/protocols/wire"
 	"github.com/tyk-swe/olp/internal/routing"
 
@@ -303,7 +304,7 @@ func forwardable(status int) bool {
 }
 
 // A call owns mutexes, pinned authority, and request-wide accounting, so model steps update it in place.
-func (s *Server) executeModelStep(ctx context.Context, x *call, source *wire.Request) *outcome {
+func (s *Server) executeModelStep(ctx context.Context, x *call, source *wire.Request, current access.Authority) *outcome {
 	if x.generation.firstStep == nil {
 		x.generation.parsed = source
 		out := s.execute(ctx, x)
@@ -332,7 +333,7 @@ func (s *Server) executeModelStep(ctx context.Context, x *call, source *wire.Req
 		return &outcome{err: e}
 	}
 	x.estimate = requestEstimate(x)
-	authority := cacheAuthority(x.admissionAuthority(x.authority), false, true, false)
+	authority := cacheAuthority(x.admissionAuthority(current), false, true, false)
 	reservation := keyReservationEstimate(x.estimate, s.dispatchableAttempts(x))
 	lease, e := s.Admission.reserveKeyCosted(stepCtx, &authority, x.clientSurface(), reservation, time.Duration(x.named().OverallTimeout)*time.Millisecond, costReservation{}, x.limitRoute())
 	if e != nil {

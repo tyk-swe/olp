@@ -10,6 +10,8 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"math/big"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -48,6 +50,13 @@ func TestWorkloadAgentConsentRequiresSessionCSRFAndFreshAuthentication(t *testin
 
 func TestWorkloadAgentMemberConsentIssuesAgentBoundGrant(t *testing.T) {
 	h := newAccessHarness(t)
+	h.Server.ClientIP = func(request *http.Request) string {
+		if source := request.Header.Get("X-Test-Client-IP"); source != "" {
+			return source
+		}
+		host, _, _ := net.SplitHostPort(request.RemoteAddr)
+		return host
+	}
 	_, _, limiter := limSetup(t, "agent-member-consent")
 	h.Gateway.Admission = gateway.NewAdmission(limiter, nil, nil)
 	type savedEvent struct {
@@ -67,6 +76,18 @@ func TestWorkloadAgentMemberConsentIssuesAgentBoundGrant(t *testing.T) {
 	workloadProject(t, h, owner, project, map[string]any{"generation": []string{"member-chat"}})
 	vendor := newOpenAIFixture(t, "")
 	provider := activeAzureProviderInProject(t, h, owner, "Member provider", vendor.URL, &project, []any{map[string]any{"operation": "generation", "surface": "openai", "mode": "unary"}})
+	h.want(owner, "POST", "/api/v1/pricing/revisions", map[string]any{
+		"effective_at": time.Now().Add(-time.Second).UTC().Format(time.RFC3339Nano),
+		"prices": []any{map[string]any{
+			"provider_kind": "azure_openai", "provider_id": provider["id"], "model": vendorModel,
+			"operation": "generation", "currency": "USD", "input_per_million": "1000000", "output_per_million": "1000000",
+		}},
+	}, idem("member-pair-budget-price"), http.StatusCreated)
+	eventually(t, "member delegated provider price", 30*time.Second, func() bool {
+		h.refresh()
+		inputs := h.Runtime.RoutingInputs()
+		return inputs != nil && inputs.Price("azure_openai", provider["id"].(string), "", vendorModel, "generation", time.Now()) != nil
+	})
 	draft := h.want(owner, "POST", "/api/v1/route-drafts", map[string]any{"project_id": project, "slug": "member-chat", "overall_timeout_ms": 10000, "max_attempts": 1, "fidelity": map[string]any{"mode": "transformed"}, "targets": []any{map[string]any{"provider_id": provider["id"], "provider_model": vendorModel, "priority": 0, "weight": 1, "timeout_ms": 5000}}}, idem("member-route"), http.StatusCreated)
 	routePath := "/api/v1/route-drafts/" + draft["id"].(string)
 	validated := h.want(owner, "POST", routePath+"/validate", nil, etagHeader(draft), http.StatusOK)
@@ -177,7 +198,13 @@ func TestWorkloadAgentMemberConsentIssuesAgentBoundGrant(t *testing.T) {
 	}
 	var grant runtime.DelegationGrant
 	if err := json.Unmarshal(body, &grant); err != nil || grant.Token == "" {
-		t.Fatalf("delegation grant missing: %s %v", body, err)
+		t.Fatalf("delegation grant missing: %v", err)
+	}
+	var grantMetadata struct {
+		Pair string `json:"delegation_pair_digest"`
+	}
+	if err := json.Unmarshal(body, &grantMetadata); err != nil || grantMetadata.Pair == "" || grantMetadata.Pair != consent["delegation_pair_digest"] {
+		t.Fatalf("consent and grant did not expose the same pair identity: %v", err)
 	}
 	inference, inferenceBody := h.do(nil, "POST", "/v1/chat/completions", map[string]any{"model": "member-chat", "messages": []any{map[string]string{"role": "user", "content": "hello"}}}, map[string]string{"Authorization": "Bearer " + grant.Token, "X-OLP-Agent-Identity": assertion})
 	if inference.StatusCode != http.StatusOK {
@@ -191,6 +218,9 @@ func TestWorkloadAgentMemberConsentIssuesAgentBoundGrant(t *testing.T) {
 		t.Helper()
 		h.want(consenter, "POST", "/api/v1/profile/reauthenticate", map[string]any{"current_password": accessPassword, "purpose": "agent_delegation", "resource_id": keyID}, nil, http.StatusNoContent)
 		nextConsent := h.want(consenter, "POST", "/api/v1/delegation-consents", map[string]any{"agent_id": agentID, "api_key_id": keyID, "allowed_routes": []string{"member-chat"}}, nil, http.StatusCreated)
+		if consenter == member && nextConsent["delegation_pair_digest"] != consent["delegation_pair_digest"] {
+			t.Fatal("member pair identity changed across keys")
+		}
 		next, nextBody := h.do(nil, "POST", "/v1/delegations", runtime.DelegationBounds{Scopes: []string{"inference"}, AllowedRoutes: []string{"member-chat"}}, map[string]string{"Authorization": "Bearer " + assertion, "X-OLP-Delegation-Consent": nextConsent["consent"].(string)})
 		if next.StatusCode != http.StatusCreated {
 			t.Fatalf("renew consent: %d %s", next.StatusCode, nextBody)
@@ -217,6 +247,51 @@ func TestWorkloadAgentMemberConsentIssuesAgentBoundGrant(t *testing.T) {
 	accountingErr := h.Pool.QueryRow(context.Background(), `SELECT count(*) FILTER (WHERE member_principal_id=$2),count(DISTINCT delegation_pair_digest) FILTER (WHERE member_principal_id=$2),count(*) FILTER (WHERE member_principal_id=$3),count(DISTINCT delegation_pair_digest) FILTER (WHERE member_principal_id=$3),count(DISTINCT delegation_pair_digest) FROM olp.attempt_usage_facts WHERE api_key_id IN ($1,$5) AND agent_principal_id=$4`, key["id"], memberID, ownerID, agentID, secondKey["id"]).Scan(&memberAttempts, &memberPairs, &ownerAttempts, &ownerPairs, &distinctPairs)
 	if accountingErr != nil || memberAttempts != 2 || memberPairs != 1 || ownerAttempts != 1 || ownerPairs != 1 || distinctPairs != 2 {
 		t.Fatalf("member attribution or stable pair: %d %d %d %d %d %v", memberAttempts, memberPairs, ownerAttempts, ownerPairs, distinctPairs, accountingErr)
+	}
+	memberPair := consent["delegation_pair_digest"].(string)
+	budgetPath := "/api/v1/projects/" + project + "/attribution-budgets"
+	budget := h.want(owner, "GET", budgetPath, nil, nil, http.StatusOK)
+	h.want(owner, "PUT", budgetPath, map[string]any{"budgets": map[string]any{"delegation_pair": map[string]any{memberPair: map[string]any{"daily_cost_limit": "0.000001"}}}}, etagHeader(budget), http.StatusOK)
+	h.refresh()
+	budgetConnection, err := h.Pool.Acquire(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	budgetSnapshots, err := limits.ReconciliationSnapshots(t.Context(), budgetConnection.Conn(), time.Now())
+	budgetConnection.Release()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, snapshot := range budgetSnapshots {
+		if _, _, err := limiter.ApplyCostSnapshot(t.Context(), snapshot); err != nil {
+			t.Fatal(err)
+		}
+	}
+	memberBudget := h.want(owner, "GET", budgetPath, nil, nil, http.StatusOK)
+	memberUsage := memberBudget["usage"].(map[string]any)["delegation_pair"].(map[string]any)[memberPair].(map[string]any)
+	memberAccrued := memberUsage["daily"].(map[string]any)["accrued"].(string)
+	memberAmount, validAmount := new(big.Rat).SetString(memberAccrued)
+	if !validAmount || memberAmount.Sign() <= 0 {
+		t.Fatalf("member pair did not retain previously settled spend: %s", memberAccrued)
+	}
+	for _, keyID := range []string{key["id"].(string), secondKey["id"].(string)} {
+		h.want(member, "POST", "/api/v1/profile/reauthenticate", map[string]any{"current_password": accessPassword, "purpose": "agent_delegation", "resource_id": keyID}, map[string]string{"X-Test-Client-IP": "192.0.2.8"}, http.StatusNoContent)
+		renewedConsent := h.want(member, "POST", "/api/v1/delegation-consents", map[string]any{"agent_id": agentID, "api_key_id": keyID, "allowed_routes": []string{"member-chat"}}, nil, http.StatusCreated)
+		renewed, renewedBody := h.do(nil, "POST", "/v1/delegations", runtime.DelegationBounds{Scopes: []string{"inference"}, AllowedRoutes: []string{"member-chat"}}, map[string]string{"Authorization": "Bearer " + assertion, "X-OLP-Delegation-Consent": renewedConsent["consent"].(string)})
+		if renewed.StatusCode != http.StatusCreated {
+			t.Fatalf("renew member consent across keys: %d %s", renewed.StatusCode, renewedBody)
+		}
+		var renewedGrant runtime.DelegationGrant
+		if err := json.Unmarshal(renewedBody, &renewedGrant); err != nil || renewedGrant.Token == "" {
+			t.Fatalf("renewed member grant missing: %v", err)
+		}
+		limited, limitedBody := h.do(nil, "POST", "/v1/chat/completions", map[string]any{"model": "member-chat", "messages": []any{map[string]string{"role": "user", "content": "hello"}}}, map[string]string{"Authorization": "Bearer " + renewedGrant.Token, "X-OLP-Agent-Identity": assertion})
+		if limited.StatusCode != http.StatusTooManyRequests {
+			t.Fatalf("member pair budget bypassed after key rotation: %d %s", limited.StatusCode, limitedBody)
+		}
+		if saved := <-persisted; saved.err != nil {
+			t.Fatal(saved.err)
+		}
 	}
 	workloadProject(t, h, owner, project, map[string]any{"generation": []string{"member-chat", "member-workflow"}})
 	workflowVendor := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -250,7 +325,38 @@ func TestWorkloadAgentMemberConsentIssuesAgentBoundGrant(t *testing.T) {
 	h.Gateway.Debits = gateway.DurableSessionDebits(store)
 	h.Gateway.WorkflowRuns = &agentworkflows.WorkflowStore{Pool: h.Pool, Auth: h.AuthKey, Debits: store}
 	h.Gateway.WorkflowTools = &mcp.Server{Runtime: h.Runtime}
+	var ownerPair string
+	if err := h.Pool.QueryRow(t.Context(), `SELECT delegation_pair_digest FROM olp.attempt_usage_facts WHERE agent_principal_id=$1 AND member_principal_id=$2 LIMIT 1`, agentID, ownerID).Scan(&ownerPair); err != nil {
+		t.Fatal(err)
+	}
+	workflowBudget := h.want(owner, "GET", budgetPath, nil, nil, http.StatusOK)
+	h.want(owner, "PUT", budgetPath, map[string]any{"budgets": map[string]any{"delegation_pair": map[string]any{
+		memberPair: map[string]any{"daily_cost_limit": "0.000001"}, ownerPair: map[string]any{"daily_cost_limit": "1000000"},
+	}}}, etagHeader(workflowBudget), http.StatusOK)
+	workflowTemplatesPath := "/api/v1/projects/" + project + "/limit-templates"
+	workflowTemplates := h.want(owner, "GET", workflowTemplatesPath, nil, nil, http.StatusOK)
+	h.want(owner, "PUT", workflowTemplatesPath, map[string]any{"templates": map[string]any{"worker": map[string]any{"requests_per_minute": 100, "daily_cost_limit": "1000000"}}}, etagHeader(workflowTemplates), http.StatusOK)
+	workflowKeyPath := "/api/v1/api-keys/" + workflowKey["id"].(string)
+	workflowKeyPolicy := h.want(owner, "GET", workflowKeyPath, nil, nil, http.StatusOK)
+	h.want(owner, "PATCH", workflowKeyPath, map[string]any{"daily_cost_limit": "1000000"}, etagHeader(workflowKeyPolicy), http.StatusOK)
 	h.refresh()
+	workflowConnection, err := h.Pool.Acquire(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	workflowSnapshots, err := limits.ReconciliationSnapshots(t.Context(), workflowConnection.Conn(), time.Now())
+	workflowConnection.Release()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, snapshot := range workflowSnapshots {
+		if _, _, err := limiter.ApplyCostSnapshot(t.Context(), snapshot); err != nil {
+			t.Fatal(err)
+		}
+	}
+	pairBefore := h.want(owner, "GET", budgetPath, nil, nil, http.StatusOK)["usage"].(map[string]any)["delegation_pair"].(map[string]any)[ownerPair].(map[string]any)["daily"].(map[string]any)["accrued"].(string)
+	agentBefore := h.want(owner, "GET", "/api/v1/api-keys/"+agentID, nil, nil, http.StatusOK)["budget"].(map[string]any)["daily"].(map[string]any)["accrued"].(string)
+	keyBefore := h.want(owner, "GET", workflowKeyPath, nil, nil, http.StatusOK)["budget"].(map[string]any)["daily"].(map[string]any)["accrued"].(string)
 	h.want(owner, "POST", "/api/v1/profile/reauthenticate", map[string]any{"current_password": accessPassword, "purpose": "agent_delegation", "resource_id": workflowKey["id"]}, nil, http.StatusNoContent)
 	workflowConsent := h.want(owner, "POST", "/api/v1/delegation-consents", map[string]any{"agent_id": agentID, "api_key_id": workflowKey["id"], "allowed_routes": []string{"member-workflow"}}, nil, http.StatusCreated)
 	workflowIssued, workflowBody := h.do(nil, "POST", "/v1/delegations", runtime.DelegationBounds{Scopes: []string{"inference"}, AllowedRoutes: []string{"member-workflow"}}, map[string]string{"Authorization": "Bearer " + assertion, "X-OLP-Delegation-Consent": workflowConsent["consent"].(string)})
@@ -285,6 +391,22 @@ func TestWorkloadAgentMemberConsentIssuesAgentBoundGrant(t *testing.T) {
 	}
 	if err := <-workflowPersisted; err != nil {
 		t.Fatal(err)
+	}
+	pairAfter := h.want(owner, "GET", budgetPath, nil, nil, http.StatusOK)["usage"].(map[string]any)["delegation_pair"].(map[string]any)[ownerPair].(map[string]any)["daily"].(map[string]any)["accrued"].(string)
+	agentAfter := h.want(owner, "GET", "/api/v1/api-keys/"+agentID, nil, nil, http.StatusOK)["budget"].(map[string]any)["daily"].(map[string]any)["accrued"].(string)
+	keyAfter := h.want(owner, "GET", workflowKeyPath, nil, nil, http.StatusOK)["budget"].(map[string]any)["daily"].(map[string]any)["accrued"].(string)
+	delta := func(before, after string) *big.Rat {
+		t.Helper()
+		start, startOK := new(big.Rat).SetString(before)
+		end, endOK := new(big.Rat).SetString(after)
+		if !startOK || !endOK {
+			t.Fatalf("invalid workflow budget amounts: %s %s", before, after)
+		}
+		return new(big.Rat).Sub(end, start)
+	}
+	pairDelta := delta(pairBefore, pairAfter)
+	if pairDelta.Sign() <= 0 || pairDelta.Cmp(delta(agentBefore, agentAfter)) != 0 || pairDelta.Cmp(delta(keyBefore, keyAfter)) != 0 {
+		t.Fatalf("workflow spend differs across pair, agent and key: %s to %s, %s to %s, %s to %s", pairBefore, pairAfter, agentBefore, agentAfter, keyBefore, keyAfter)
 	}
 	var workflowPairs int
 	if err := h.Pool.QueryRow(context.Background(), `SELECT count(DISTINCT delegation_pair_digest) FROM olp.attempt_usage_facts WHERE api_key_id IN ($1,$2) AND agent_principal_id=$3 AND member_principal_id=$4`, key["id"], workflowKey["id"], agentID, ownerID).Scan(&workflowPairs); err != nil || workflowPairs != 1 {
@@ -747,9 +869,10 @@ func TestWorkloadAgentDelegatesKeyForOneInference(t *testing.T) {
 		var grant struct {
 			Token     string    `json:"token"`
 			ExpiresAt time.Time `json:"expires_at"`
+			Pair      string    `json:"delegation_pair_digest"`
 		}
-		if err := json.Unmarshal(raw, &grant); err != nil || grant.Token == "" {
-			t.Fatalf("delegation token: %s %v", raw, err)
+		if err := json.Unmarshal(raw, &grant); err != nil || grant.Token == "" || grant.Pair == "" {
+			t.Fatalf("delegation grant missing token or pair identity: %v", err)
 		}
 		ttl := func() int64 {
 			if body.TTLSeconds > 0 {
@@ -871,6 +994,185 @@ func TestWorkloadAgentDelegatesKeyForOneInference(t *testing.T) {
 	}
 	if err := <-persisted; err != nil {
 		t.Fatal(err)
+	}
+	priceEffective := time.Now().Add(-time.Second)
+	h.want(owner, "POST", "/api/v1/pricing/revisions", map[string]any{
+		"effective_at": priceEffective.UTC().Format(time.RFC3339Nano),
+		"prices": []any{map[string]any{
+			"provider_kind": "azure_openai", "provider_id": provider["id"], "model": vendorModel,
+			"operation": "generation", "currency": "USD", "input_per_million": "1000000", "output_per_million": "1000000",
+		}},
+	}, idem("delegated-budget-price"), http.StatusCreated)
+	eventually(t, "delegated provider price", 30*time.Second, func() bool {
+		h.refresh()
+		inputs := h.Runtime.RoutingInputs()
+		return inputs != nil && inputs.Price("azure_openai", provider["id"].(string), "", vendorModel, "generation", time.Now()) != nil
+	})
+	budgetTemplates := h.want(owner, "GET", templatesPath, nil, nil, http.StatusOK)
+	h.want(owner, "PUT", templatesPath, map[string]any{"templates": map[string]any{"worker": map[string]any{"daily_cost_limit": "0.000001"}}}, etagHeader(budgetTemplates), http.StatusOK)
+	h.refresh()
+	connection, err := h.Pool.Acquire(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshots, err := limits.ReconciliationSnapshots(t.Context(), connection.Conn(), time.Now())
+	connection.Release()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, snapshot := range snapshots {
+		if _, _, err := limiter.ApplyCostSnapshot(t.Context(), snapshot); err != nil {
+			t.Fatal(err)
+		}
+	}
+	budgetGrant := exchange(replacement, secondKey["secret"].(string), http.StatusCreated)
+	beforeAgentRefusal := vendor.chatCalls.Load()
+	infer(budgetGrant, replacement, http.StatusTooManyRequests)
+	if vendor.chatCalls.Load() != beforeAgentRefusal {
+		t.Fatal("agent budget refusal dispatched to the provider")
+	}
+	if err := <-persisted; err != nil {
+		t.Fatal(err)
+	}
+	increase := h.want(owner, "POST", "/api/v1/budget-increases", map[string]any{"target": map[string]any{"kind": "api_key", "id": replacementID}, "window": "day", "amount": "1000000", "reason": "delegated agent test"}, idem("delegated-agent-increase"), http.StatusCreated)
+	h.refresh()
+	increasedGrant := exchange(replacement, secondKey["secret"].(string), http.StatusCreated)
+	infer(increasedGrant, replacement, http.StatusOK)
+	if err := <-persisted; err != nil {
+		t.Fatal(err)
+	}
+	h.want(owner, "DELETE", "/api/v1/budget-increases/"+increase["id"].(string), nil, etagHeader(increase), http.StatusNoContent)
+	for _, scenario := range []struct {
+		name  string
+		limit string
+		basis string
+	}{
+		{name: "weekly agent cost", limit: "weekly_cost_limit", basis: "cost"},
+		{name: "monthly agent cost", limit: "monthly_cost_limit", basis: "cost"},
+		{name: "weekly agent charge", limit: "weekly_cost_limit", basis: "charge"},
+		{name: "monthly agent charge", limit: "monthly_cost_limit", basis: "charge"},
+	} {
+		currentTemplates := h.want(owner, "GET", templatesPath, nil, nil, http.StatusOK)
+		h.want(owner, "PUT", templatesPath, map[string]any{"templates": map[string]any{"worker": map[string]any{scenario.limit: "0.000001", "cost_basis": scenario.basis}}}, etagHeader(currentTemplates), http.StatusOK)
+		h.refresh()
+		grant := exchange(replacement, secondKey["secret"].(string), http.StatusCreated)
+		before := vendor.chatCalls.Load()
+		infer(grant, replacement, http.StatusTooManyRequests)
+		if vendor.chatCalls.Load() != before {
+			t.Fatalf("%s budget refusal dispatched to the provider", scenario.name)
+		}
+		if err := <-persisted; err != nil {
+			t.Fatal(err)
+		}
+	}
+	clearedTemplates := h.want(owner, "GET", templatesPath, nil, nil, http.StatusOK)
+	h.want(owner, "PUT", templatesPath, map[string]any{"templates": map[string]any{"worker": map[string]any{}}}, etagHeader(clearedTemplates), http.StatusOK)
+	h.refresh()
+	pairResponse, pairResponseBody := h.do(nil, "POST", "/v1/delegations", bounds, map[string]string{"Authorization": "Bearer " + replacement, "X-OLP-Delegating-Key": secondKey["secret"].(string)})
+	var pairMetadata struct {
+		Digest string `json:"delegation_pair_digest"`
+	}
+	if pairResponse.StatusCode != http.StatusCreated || json.Unmarshal(pairResponseBody, &pairMetadata) != nil || pairMetadata.Digest == "" {
+		t.Fatalf("delegation did not expose a pair identity: %d", pairResponse.StatusCode)
+	}
+	pairDigest := pairMetadata.Digest
+	pairPath := "/api/v1/projects/" + project + "/attribution-budgets"
+	pairBudget := h.want(owner, "GET", pairPath, nil, nil, http.StatusOK)
+	h.want(owner, "PUT", pairPath, map[string]any{"budgets": map[string]any{"delegation_pair": map[string]any{pairDigest: map[string]any{"daily_cost_limit": "1000000"}}}}, etagHeader(pairBudget), http.StatusOK)
+	h.refresh()
+	pairConnection, err := h.Pool.Acquire(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	pairSnapshots, err := limits.ReconciliationSnapshots(t.Context(), pairConnection.Conn(), time.Now())
+	pairConnection.Release()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, snapshot := range pairSnapshots {
+		if _, _, err := limiter.ApplyCostSnapshot(t.Context(), snapshot); err != nil {
+			t.Fatal(err)
+		}
+	}
+	pairGrant := exchange(replacement, secondKey["secret"].(string), http.StatusCreated)
+	infer(pairGrant, replacement, http.StatusOK)
+	if err := <-persisted; err != nil {
+		t.Fatal(err)
+	}
+	pairReport := h.want(owner, "GET", pairPath, nil, nil, http.StatusOK)
+	pairUsage := pairReport["usage"].(map[string]any)["delegation_pair"].(map[string]any)[pairDigest].(map[string]any)
+	pairAccrued := pairUsage["daily"].(map[string]any)["accrued"].(string)
+	callerReport := h.want(owner, "GET", "/api/v1/api-keys/"+secondKey["id"].(string), nil, nil, http.StatusOK)
+	agentReport := h.want(owner, "GET", "/api/v1/api-keys/"+replacementID, nil, nil, http.StatusOK)
+	callerAccrued := callerReport["budget"].(map[string]any)["daily"].(map[string]any)["accrued"].(string)
+	agentAccrued := agentReport["budget"].(map[string]any)["daily"].(map[string]any)["accrued"].(string)
+	pairAmount, pairOK := new(big.Rat).SetString(pairAccrued)
+	callerAmount, callerOK := new(big.Rat).SetString(callerAccrued)
+	agentAmount, agentOK := new(big.Rat).SetString(agentAccrued)
+	if !pairOK || !callerOK || !agentOK || pairAmount.Sign() <= 0 || pairAmount.Cmp(callerAmount) != 0 || pairAmount.Cmp(agentAmount) != 0 {
+		t.Fatalf("delegated spend differs across pair, caller and agent: %s %s %s", pairAccrued, callerAccrued, agentAccrued)
+	}
+	keyPolicy := h.want(owner, "GET", "/api/v1/api-keys/"+secondKey["id"].(string), nil, nil, http.StatusOK)
+	h.want(owner, "PATCH", "/api/v1/api-keys/"+secondKey["id"].(string), map[string]any{"allowed_attribution_keys": []string{"team", "delegation_pair"}}, etagHeader(keyPolicy), http.StatusOK)
+	h.want(owner, "PUT", pairPath, map[string]any{"budgets": map[string]any{"delegation_pair": map[string]any{pairDigest: map[string]any{"daily_cost_limit": "1000000"}}, "team": map[string]any{"core": map[string]any{"daily_cost_limit": "0.000001"}}}}, etagHeader(pairReport), http.StatusOK)
+	h.refresh()
+	teamConnection, err := h.Pool.Acquire(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	teamSnapshots, err := limits.ReconciliationSnapshots(t.Context(), teamConnection.Conn(), time.Now())
+	teamConnection.Release()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, snapshot := range teamSnapshots {
+		if _, _, err := limiter.ApplyCostSnapshot(t.Context(), snapshot); err != nil {
+			t.Fatal(err)
+		}
+	}
+	teamGrant := exchange(replacement, secondKey["secret"].(string), http.StatusCreated)
+	beforeTeamRefusal := vendor.chatCalls.Load()
+	teamResponse, teamBody := h.do(nil, "POST", "/v1/chat/completions", map[string]any{"model": "delegated-chat", "messages": []any{map[string]string{"role": "user", "content": "hello"}}}, map[string]string{"Authorization": "Bearer " + teamGrant, "X-OLP-Agent-Identity": replacement, usage.AttributionHeader: `{"team":"core"}`})
+	if teamResponse.StatusCode != http.StatusTooManyRequests || vendor.chatCalls.Load() != beforeTeamRefusal {
+		t.Fatalf("ordinary attribution budget was not enforced with a delegated pair: %d %s", teamResponse.StatusCode, teamBody)
+	}
+	if err := <-persisted; err != nil {
+		t.Fatal(err)
+	}
+	updatedBudget := h.want(owner, "GET", pairPath, nil, nil, http.StatusOK)
+	h.want(owner, "PUT", pairPath, map[string]any{"budgets": map[string]any{"delegation_pair": map[string]any{pairDigest: map[string]any{"daily_cost_limit": "0.000001"}}, "team": map[string]any{"core": map[string]any{"daily_cost_limit": "1000000"}}}}, etagHeader(updatedBudget), http.StatusOK)
+	h.refresh()
+	renewedGrant := exchange(replacement, secondKey["secret"].(string), http.StatusCreated)
+	beforePairRefusal := vendor.chatCalls.Load()
+	infer(renewedGrant, replacement, http.StatusTooManyRequests)
+	if vendor.chatCalls.Load() != beforePairRefusal {
+		t.Fatal("pair budget refusal dispatched to the provider")
+	}
+	if err := <-persisted; err != nil {
+		t.Fatal(err)
+	}
+	spoofGrant := exchange(replacement, secondKey["secret"].(string), http.StatusCreated)
+	spoofResponse, spoofBody := h.do(nil, "POST", "/v1/chat/completions", map[string]any{"model": "delegated-chat", "messages": []any{map[string]string{"role": "user", "content": "hello"}}}, map[string]string{"Authorization": "Bearer " + spoofGrant, "X-OLP-Agent-Identity": replacement, usage.AttributionHeader: `{"delegation_pair":"other"}`})
+	if spoofResponse.StatusCode != http.StatusBadRequest {
+		t.Fatalf("caller could supply the reserved delegation pair: %d %s", spoofResponse.StatusCode, spoofBody)
+	}
+	if _, err := h.Pool.Exec(t.Context(), `INSERT INTO olp.settings(key,value,etag,updated_by) SELECT 'retention.usage_days','1',gen_random_uuid(),created_by FROM olp.api_keys WHERE id=$1 ON CONFLICT(key) DO UPDATE SET value=excluded.value`, secondKey["id"]); err != nil {
+		t.Fatal(err)
+	}
+	maintenance, err := usage.RunMaintenance(t.Context(), h.Pool, time.Now().Add(48*time.Hour))
+	if err != nil || maintenance.UsageRows == 0 {
+		t.Fatalf("delegated spend rollup: %+v %v", maintenance, err)
+	}
+	retainedOwner := &browser{}
+	h.want(retainedOwner, "POST", "/api/v1/sessions", map[string]any{"email": "owner@example.com", "password": accessPassword}, nil, http.StatusCreated)
+	retainedPair := h.want(retainedOwner, "GET", pairPath, nil, nil, http.StatusOK)["usage"].(map[string]any)["delegation_pair"].(map[string]any)[pairDigest].(map[string]any)["daily"].(map[string]any)["accrued"].(string)
+	retainedCaller := h.want(retainedOwner, "GET", "/api/v1/api-keys/"+secondKey["id"].(string), nil, nil, http.StatusOK)["budget"].(map[string]any)["daily"].(map[string]any)["accrued"].(string)
+	retainedAgent := h.want(retainedOwner, "GET", "/api/v1/api-keys/"+replacementID, nil, nil, http.StatusOK)["budget"].(map[string]any)["daily"].(map[string]any)["accrued"].(string)
+	for _, retained := range []string{retainedPair, retainedCaller, retainedAgent} {
+		amount, ok := new(big.Rat).SetString(retained)
+		if !ok || amount.Cmp(pairAmount) != 0 {
+			t.Fatalf("delegated spend changed after retention: %s, want %s", retained, pairAccrued)
+		}
 	}
 }
 

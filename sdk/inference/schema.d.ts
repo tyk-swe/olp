@@ -320,6 +320,8 @@ export interface components {
             token: string;
             /** Format: date-time */
             expires_at: string;
+            /** @description Stable pair budget ID for this delegation. */
+            delegation_pair_digest: string;
         };
         InferenceError: {
             error: {

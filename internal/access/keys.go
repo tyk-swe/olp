@@ -704,6 +704,20 @@ type Authority struct {
 	ExpiresAt, RevokedAt                                   *time.Time
 }
 
+func (a Authority) BudgetAttribution() map[string]string {
+	if a.DelegationPairDigest == "" {
+		return a.Attribution
+	}
+	return maps.Collect(func(yield func(string, string) bool) {
+		for key, value := range a.Attribution {
+			if key != attribution.DelegationPairKey && !yield(key, value) {
+				return
+			}
+		}
+		yield(attribution.DelegationPairKey, a.DelegationPairDigest)
+	})
+}
+
 func (a Authority) DelegatedInference(routes []string, agent Authority, memberID, pairDigest string, expiresAt time.Time) *Authority {
 	return &Authority{
 		SnapshotID:           a.SnapshotID,
@@ -715,6 +729,10 @@ func (a Authority) DelegatedInference(routes []string, agent Authority, memberID
 			RequestsPerMinute: agent.Policy.RequestsPerMinute,
 			TokensPerMinute:   agent.Policy.TokensPerMinute,
 			MaxConcurrency:    agent.Policy.MaxConcurrency,
+			DailyCostLimit:    agent.Policy.DailyCostLimit,
+			WeeklyCostLimit:   agent.Policy.WeeklyCostLimit,
+			MonthlyCostLimit:  agent.Policy.MonthlyCostLimit,
+			CostBasis:         agent.Policy.CostBasis,
 		}},
 		WorkloadIssuerID:          a.WorkloadIssuerID,
 		WorkloadDigest:            a.WorkloadDigest,
@@ -817,6 +835,20 @@ type ToolDebitBoundary struct {
 	AggregateValue string
 }
 
+func (a *DelegationAgentLimits) CostDebitBoundary(leaseTTL time.Duration, increases map[string]string) *ToolDebitBoundary {
+	if a == nil {
+		return nil
+	}
+	return &ToolDebitBoundary{
+		Owner: limits.DebitOwner{ID: a.ID, Kind: "key", Basis: limits.Basis(a.Limits.CostBasis)},
+		Request: limits.Request{
+			CostOwnerID: a.ID, LookupID: a.LookupID, CostBasis: limits.Basis(a.Limits.CostBasis), CostIncreases: increases[a.ID],
+			DailyCostLimit: a.Limits.DailyCostLimit, WeeklyCostLimit: a.Limits.WeeklyCostLimit,
+			MonthlyCostLimit: a.Limits.MonthlyCostLimit, LeaseTTL: leaseTTL,
+		},
+	}
+}
+
 type ToolDebitBoundariesResult struct {
 	Boundaries   []ToolDebitBoundary
 	CostBudgeted bool
@@ -846,6 +878,9 @@ func (a Authority) ToolDebitBoundaries(leaseTTL time.Duration) ToolDebitBoundari
 	}
 	addAggregate := func(owner limits.DebitOwner, request limits.Request, level, key, value string) {
 		boundaries = append(boundaries, ToolDebitBoundary{Owner: owner, Request: request, AggregateLevel: level, AggregateKey: key, AggregateValue: value})
+	}
+	if agent := a.DelegationAgentLimits.CostDebitBoundary(leaseTTL, a.BudgetIncreases); agent != nil {
+		add(agent.Owner, agent.Request)
 	}
 	if a.BudgetGroupID != nil && a.GroupLimits().CostBudgeted() {
 		add(limits.DebitOwner{ID: *a.BudgetGroupID, Kind: "group", Basis: limits.Basis(a.BudgetGroupCostBasis)}, limits.Request{
@@ -883,21 +918,32 @@ func (a Authority) ToolDebitBoundaries(leaseTTL time.Duration) ToolDebitBoundari
 			MonthlyCostLimit: boundary.policy.MonthlyCostLimit, LeaseTTL: leaseTTL,
 		}, boundary.level, boundary.subject, "")
 	}
-	for _, key := range slices.Sorted(maps.Keys(a.Attribution)) {
-		policy, found := a.ProjectAttributionBudgets[key][a.Attribution[key]]
+	labels := a.BudgetAttribution()
+	for _, key := range slices.Sorted(maps.Keys(labels)) {
+		policy, found := a.ProjectAttributionBudgets[key][labels[key]]
 		if !found || !policy.Limited() {
 			continue
 		}
 		if a.ProjectID == nil {
 			return ToolDebitBoundariesResult{}
 		}
-		owner := limits.AttributionBudgetID(*a.ProjectID, key, a.Attribution[key])
+		owner := limits.AttributionBudgetID(*a.ProjectID, key, labels[key])
 		addAggregate(limits.DebitOwner{ID: owner, Kind: "aggregate", Basis: policy.Basis()}, limits.Request{
 			CostOwnerID: owner, CostBasis: policy.Basis(), LookupID: limits.AggregateBudgetLookup(owner),
 			CostIncreases:  a.BudgetIncreases[owner],
 			DailyCostLimit: policy.DailyCostLimit, WeeklyCostLimit: policy.WeeklyCostLimit,
 			MonthlyCostLimit: policy.MonthlyCostLimit, LeaseTTL: leaseTTL,
-		}, "attribution", key, a.Attribution[key])
+		}, "attribution", key, labels[key])
+	}
+	pairPolicy, hasPairPolicy := a.ProjectAttributionBudgets[attribution.DelegationPairKey][a.DelegationPairDigest]
+	if a.DelegationPairDigest != "" && (!hasPairPolicy || !pairPolicy.Limited()) {
+		if a.ProjectID == nil {
+			return ToolDebitBoundariesResult{}
+		}
+		owner := limits.AttributionBudgetID(*a.ProjectID, attribution.DelegationPairKey, a.DelegationPairDigest)
+		addAggregate(limits.DebitOwner{ID: owner, Kind: "aggregate", Basis: limits.BasisCost}, limits.Request{
+			CostOwnerID: owner, CostBasis: limits.BasisCost, LookupID: limits.AggregateBudgetLookup(owner), LeaseTTL: leaseTTL,
+		}, "attribution", attribution.DelegationPairKey, a.DelegationPairDigest)
 	}
 	if a.EndUserDigest != "" {
 		for _, boundary := range [...]struct {

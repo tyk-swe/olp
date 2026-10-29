@@ -10,6 +10,8 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/attribution"
+	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/secrets"
 )
 
@@ -22,8 +24,9 @@ type DelegationBounds struct {
 }
 
 type DelegationGrant struct {
-	Token     string    `json:"token"`
-	ExpiresAt time.Time `json:"expires_at"`
+	Token                string    `json:"token"`
+	ExpiresAt            time.Time `json:"expires_at"`
+	DelegationPairDigest string    `json:"delegation_pair_digest"`
 }
 
 func (m *Manager) CreateDelegation(ctx context.Context, agent, key access.Authority, bounds DelegationBounds) (DelegationGrant, error) {
@@ -53,7 +56,8 @@ func (m *Manager) CreateDelegation(ctx context.Context, agent, key access.Author
 	if err := tx.Commit(ctx); err != nil {
 		return DelegationGrant{}, ErrStaleAuthority
 	}
-	return DelegationGrant{Token: token, ExpiresAt: expiry}, nil
+	pair, _ := m.delegationPair(*key.ProjectID, key.ID, agent.ID, nil)
+	return DelegationGrant{Token: token, ExpiresAt: expiry, DelegationPairDigest: pair}, nil
 }
 
 func validDelegationBounds(bounds DelegationBounds) bool {
@@ -120,7 +124,8 @@ func (m *Manager) ExchangeMemberConsent(ctx context.Context, agent access.Author
 	if err := tx.Commit(ctx); err != nil {
 		return DelegationGrant{}, ErrStaleAuthority
 	}
-	return DelegationGrant{Token: token, ExpiresAt: expires}, nil
+	pair, _ := m.delegationPair(project, keyID, agentID, memberID)
+	return DelegationGrant{Token: token, ExpiresAt: expires, DelegationPairDigest: pair}, nil
 }
 
 func (m *Manager) ReauthenticateDelegation(ctx context.Context, token, assertion string) (*access.Authority, error) {
@@ -172,15 +177,23 @@ func (m *Manager) authenticateDelegation(ctx context.Context, token, assertion s
 			return nil, ErrStaleAuthority
 		}
 	}
+	pairDigest, member := m.delegationPair(project, key.ID, agent.ID, memberID)
+	if err := limits.EnsureAttributionBudget(ctx, tx, project, attribution.DelegationPairKey, pairDigest); err != nil {
+		return nil, ErrStaleAuthority
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return nil, ErrStaleAuthority
 	}
-	if memberID == nil {
-		pair, _ := json.Marshal([3]string{project, key.ID, agent.ID})
-		return key.DelegatedInference(routes, *agent, "", hex.EncodeToString(m.auth.Digest(secrets.DelegationPairDigest, string(pair))), boundDelegationExpiry(expires, agent.ExpiresAt)), nil
+	return key.DelegatedInference(routes, *agent, member, pairDigest, boundDelegationExpiry(expires, agent.ExpiresAt)), nil
+}
+
+func (m *Manager) delegationPair(project, key, agent string, member *string) (string, string) {
+	if member == nil {
+		pair, _ := json.Marshal([3]string{project, key, agent})
+		return hex.EncodeToString(m.auth.Digest(secrets.DelegationPairDigest, string(pair))), ""
 	}
-	pair, _ := json.Marshal([4]string{project, "member", *memberID, agent.ID})
-	return key.DelegatedInference(routes, *agent, *memberID, hex.EncodeToString(m.auth.Digest(secrets.DelegationPairDigest, string(pair))), boundDelegationExpiry(expires, agent.ExpiresAt)), nil
+	pair, _ := json.Marshal([4]string{project, "member", *member, agent})
+	return hex.EncodeToString(m.auth.Digest(secrets.DelegationPairDigest, string(pair))), *member
 }
 
 func memberDelegationAllowed(ctx context.Context, tx pgx.Tx, memberID *string, project string) error {

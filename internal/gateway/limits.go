@@ -230,13 +230,17 @@ func (a *Admission) reserveKeyWithLimits(ctx context.Context, authority *access.
 		return a.reserveCallerLimits(ctx, authority, surface, estimate, ttl, hold, route...)
 	}
 	agent := authority.DelegationAgentLimits
-	principal := access.Authority{ID: agent.ID, LookupID: agent.LookupID, Policy: access.KeyPolicy{
+	principal := access.Authority{ID: agent.ID, LookupID: agent.LookupID, BudgetIncreases: authority.BudgetIncreases, Policy: access.KeyPolicy{
 		RequestsPerMinute: agent.Limits.RequestsPerMinute,
 		TokensPerMinute:   agent.Limits.TokensPerMinute,
 		MaxConcurrency:    agent.Limits.MaxConcurrency,
+		DailyCostLimit:    agent.Limits.DailyCostLimit,
+		WeeklyCostLimit:   agent.Limits.WeeklyCostLimit,
+		MonthlyCostLimit:  agent.Limits.MonthlyCostLimit,
+		CostBasis:         agent.Limits.CostBasis,
 	}}
 	checked := false
-	agentLease, failure := a.reserveKeyAndGroup(ctx, &principal, "", estimate, ttl, costReservation{}, &checked)
+	agentLease, failure := a.reserveKeyAndGroup(ctx, &principal, "", estimate, ttl, hold, &checked)
 	if failure != nil {
 		return nil, failure
 	}

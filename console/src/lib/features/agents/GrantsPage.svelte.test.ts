@@ -154,7 +154,11 @@ it('shows the exact consent and delivers its one-use code after password verific
       input.allowed_routes.join(',') !== 'chat'
     )
       throw new Error('incorrect consent');
-    return { consent: 'olpc_one_use', expires_at: '2030-01-01T00:00:00Z' };
+    return {
+      consent: 'olpc_one_use',
+      expires_at: '2030-01-01T00:00:00Z',
+      delegation_pair_digest: 'pair-budget-id'
+    };
   });
   const { host } = page();
   await vi.waitFor(() => {
@@ -196,6 +200,7 @@ it('shows the exact consent and delivers its one-use code after password verific
   await vi.waitFor(() => {
     flushSync();
     expect(textInput(host, 'Consent code').value).toBe('olpc_one_use');
+    expect(textInput(host, 'Pair budget ID').value).toBe('pair-budget-id');
   });
 });
 
@@ -242,7 +247,11 @@ it.each(['OIDC', 'SAML'])(
         input.allowed_routes.join(',') !== 'chat'
       )
         throw new Error('incorrect consent');
-      return { consent: 'olpc_one_use', expires_at: '2030-01-01T00:00:00Z' };
+      return {
+        consent: 'olpc_one_use',
+        expires_at: '2030-01-01T00:00:00Z',
+        delegation_pair_digest: 'pair-budget-id'
+      };
     });
     const { host } = page();
     await vi.waitFor(() => {

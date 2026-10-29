@@ -60,6 +60,7 @@ type openaiFixture struct {
 	resps           map[string]map[string]any
 	mu              sync.Mutex
 	lastReq         atomic.Value
+	chatCalls       atomic.Int64
 	lastBatchRaw    atomic.Value
 	batchCreates    atomic.Int64
 	fileCreates     atomic.Int64
@@ -102,6 +103,7 @@ func newOpenAIFixture(t *testing.T, fileContent string) *openaiFixture {
 	f.respID.Store("resp-up-1")
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /openai/deployments/{dep}/chat/completions", func(w http.ResponseWriter, r *http.Request) {
+		f.chatCalls.Add(1)
 		body := decodeBody(t, r)
 		f.lastReq.Store(body)
 		if stream, _ := body["stream"].(bool); stream {
