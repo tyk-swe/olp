@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"slices"
+	"strings"
 	"time"
 
 	protocol "github.com/a2aproject/a2a-go/v2/a2a"
@@ -97,6 +98,10 @@ func (s *Server) rpc(w http.ResponseWriter, r *http.Request) {
 		s.send(w, r, authority, revision, release, request)
 	case "GetTask":
 		s.getTask(w, r, authority, revision, release, request)
+	case "SendStreamingMessage":
+		s.sendStream(w, r, authority, revision, release, request)
+	case "SubscribeToTask":
+		s.subscribe(w, r, authority, revision, release, request)
 	default:
 		fail(w, request.ID, -32601, "Method not found")
 	}
@@ -308,6 +313,10 @@ func (t limitedTransport) RoundTrip(request *http.Request) (*http.Response, erro
 	response, err := t.Base.RoundTrip(request)
 	if err != nil {
 		return nil, err
+	}
+	if strings.HasPrefix(response.Header.Get("Content-Type"), "text/event-stream") {
+		response.Body = &boundedEventBody{ReadCloser: response.Body}
+		return response, nil
 	}
 	defer response.Body.Close()
 	data, err := io.ReadAll(io.LimitReader(response.Body, maxRPCBytes+1))

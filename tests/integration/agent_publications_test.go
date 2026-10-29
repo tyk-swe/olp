@@ -3,6 +3,7 @@
 package integration_test
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"crypto/sha256"
@@ -283,6 +284,9 @@ func TestA2AAgentCardUsesGatewayAuthenticationAndEndpoint(t *testing.T) {
 		return bytes.ReplaceAll([]byte(cardTemplate), []byte("PINNED_ENDPOINT"), []byte(endpoint))
 	}
 	upstreamIDs := make(chan string, 1)
+	resumeStream := make(chan struct{})
+	resumePinnedStream := make(chan struct{})
+	resumeRevokedStream := make(chan struct{})
 	var redirectCard, redirectRPC atomic.Bool
 	var redirectHits atomic.Int32
 	redirectTarget := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -298,6 +302,40 @@ func TestA2AAgentCardUsesGatewayAuthenticationAndEndpoint(t *testing.T) {
 			}
 			upstreamIDs <- string(execution.TaskID)
 			if !yield(protocol.NewSubmittedTask(execution, execution.Message), nil) {
+				return
+			}
+			pause := map[string]<-chan struct{}{"stream-resume": resumeStream, "stream-pinned": resumePinnedStream}[execution.Message.ID]
+			if pause != nil {
+				for {
+					select {
+					case <-pause:
+						goto resumed
+					case <-time.After(20 * time.Millisecond):
+						if !yield(protocol.NewStatusUpdateEvent(execution, protocol.TaskStateWorking, nil), nil) {
+							return
+						}
+					case <-ctx.Done():
+						return
+					}
+				}
+			}
+		resumed:
+			if execution.Message.ID == "stream-revoke" {
+				select {
+				case <-resumeRevokedStream:
+				case <-ctx.Done():
+					return
+				}
+			}
+			if execution.Message.ID == "stream-oversized" {
+				yield(protocol.NewArtifactEvent(execution, protocol.NewTextPart(strings.Repeat("x", 1<<20))), nil)
+				return
+			}
+			if execution.Message.ID == "stream-bounded" {
+				if !yield(protocol.NewArtifactEvent(execution, protocol.NewTextPart(strings.Repeat("x", (1<<20)-4096))), nil) {
+					return
+				}
+				yield(protocol.NewStatusUpdateEvent(execution, protocol.TaskStateCompleted, nil), nil)
 				return
 			}
 			if !yield(protocol.NewArtifactEvent(execution, protocol.NewTextPart("PRIVATE ARTIFACT")), nil) {
@@ -426,7 +464,7 @@ func TestA2AAgentCardUsesGatewayAuthenticationAndEndpoint(t *testing.T) {
 	if err := json.NewDecoder(response.Body).Decode(&result); err != nil {
 		t.Fatal(err)
 	}
-	if len(result.SupportedInterfaces) != 1 || result.SupportedInterfaces[0].URL != h.HTTP.URL+"/a2a/"+agent || result.SupportedInterfaces[0].ProtocolBinding != "JSONRPC" || result.Capabilities.Streaming || result.Capabilities.PushNotifications {
+	if len(result.SupportedInterfaces) != 1 || result.SupportedInterfaces[0].URL != h.HTTP.URL+"/a2a/"+agent || result.SupportedInterfaces[0].ProtocolBinding != "JSONRPC" || !result.Capabilities.Streaming || result.Capabilities.PushNotifications {
 		t.Fatalf("card advertises an unimplemented or foreign interface: %+v", result)
 	}
 	if len(result.SecuritySchemes) != 1 {
@@ -522,6 +560,7 @@ func TestA2AAgentCardUsesGatewayAuthenticationAndEndpoint(t *testing.T) {
 	}
 	<-upstreamIDs
 	foreign := h.want(owner, http.MethodPost, "/api/v1/api-keys", map[string]any{"name": "other caller", "project_id": project, "scopes": []string{"agents"}, "allowed_agents": []string{agent}}, idem("a2a-foreign-key"), http.StatusCreated)["secret"].(string)
+	revocableKey := h.want(owner, http.MethodPost, "/api/v1/api-keys", map[string]any{"name": "revocable streaming caller", "project_id": project, "scopes": []string{"agents"}, "allowed_agents": []string{agent}}, idem("a2a-revocable-key"), http.StatusCreated)
 	if err := h.Runtime.Refresh(t.Context()); err != nil {
 		t.Fatal(err)
 	}
@@ -561,6 +600,157 @@ func TestA2AAgentCardUsesGatewayAuthenticationAndEndpoint(t *testing.T) {
 	if settled != 2 || !limits.AmountEqual(cost, "0.50") || results != settled {
 		t.Fatalf("incorrect settlements: %d, %s, %d", settled, cost, results)
 	}
+	streamRequest := func(secret, method string, params a2aTestParams) *http.Response {
+		t.Helper()
+		body, err := json.Marshal(struct {
+			JSONRPC string        `json:"jsonrpc"`
+			ID      int           `json:"id"`
+			Method  string        `json:"method"`
+			Params  a2aTestParams `json:"params"`
+		}{JSONRPC: "2.0", ID: 1, Method: method, Params: params})
+		if err != nil {
+			t.Fatal(err)
+		}
+		ctx, cancel := context.WithTimeout(t.Context(), 12*time.Second)
+		t.Cleanup(cancel)
+		request, err := http.NewRequestWithContext(ctx, http.MethodPost, h.HTTP.URL+"/a2a/"+agent, bytes.NewReader(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		request.Header.Set("Authorization", "Bearer "+secret)
+		request.Header.Set("Content-Type", "application/json")
+		request.Header.Set("Accept", "text/event-stream")
+		response, err := http.DefaultClient.Do(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return response
+	}
+	type streamFrame struct {
+		Result protocol.StreamResponse `json:"result"`
+		Error  *struct {
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	nextFrame := func(reader *bufio.Reader) streamFrame {
+		t.Helper()
+		for {
+			line, err := reader.ReadString('\n')
+			if err != nil {
+				t.Fatalf("stream ended before event: %v", err)
+			}
+			if !strings.HasPrefix(line, "data: ") {
+				continue
+			}
+			var frame streamFrame
+			if err := json.Unmarshal([]byte(strings.TrimSpace(strings.TrimPrefix(line, "data: "))), &frame); err != nil {
+				t.Fatalf("invalid stream event: %+v, %v", frame, err)
+			}
+			return frame
+		}
+	}
+	nextEvent := func(reader *bufio.Reader) protocol.Event {
+		t.Helper()
+		frame := nextFrame(reader)
+		if frame.Error != nil || frame.Result.Event == nil {
+			t.Fatalf("stream did not return an event: %+v", frame)
+		}
+		return frame.Result.Event
+	}
+	stream := streamRequest(key, "SendStreamingMessage", a2aTestParams{Message: message("stream-resume", "PRIVATE STREAM REQUEST")})
+	if stream.StatusCode != http.StatusOK || !strings.HasPrefix(stream.Header.Get("Content-Type"), "text/event-stream") {
+		t.Fatalf("stream was not established: %s, %s", stream.Status, stream.Header.Get("Content-Type"))
+	}
+	initial := nextEvent(bufio.NewReader(stream.Body))
+	firstTask, ok := initial.(*protocol.Task)
+	if !ok || firstTask.ID == "" || firstTask.Status.State != protocol.TaskStateSubmitted {
+		t.Fatalf("unexpected first stream event: %+v", initial)
+	}
+	streamUpstreamID := <-upstreamIDs
+	if string(firstTask.ID) == streamUpstreamID || firstTask.ContextID != string(firstTask.ID) {
+		t.Fatalf("stream did not mask task identity: %+v", firstTask)
+	}
+	foreignSubscription := rpc(foreign, "SubscribeToTask", a2aTestParams{ID: firstTask.ID})
+	missingSubscription := rpc(foreign, "SubscribeToTask", a2aTestParams{ID: protocol.TaskID(uuid.NewString())})
+	if !reflect.DeepEqual(foreignSubscription, missingSubscription) {
+		t.Fatalf("foreign stream differs from missing task: %+v, %+v", foreignSubscription, missingSubscription)
+	}
+	stream.Body.Close()
+	current := rpc(key, "GetTask", a2aTestParams{ID: firstTask.ID})
+	currentTask, ok := current["result"].(map[string]any)
+	if !ok || currentTask["status"].(map[string]any)["state"] == "TASK_STATE_COMPLETED" || currentTask["status"].(map[string]any)["state"] == "TASK_STATE_CANCELED" {
+		t.Fatalf("disconnect changed the upstream task state: %+v", current)
+	}
+	resubscribed := streamRequest(key, "SubscribeToTask", a2aTestParams{ID: firstTask.ID})
+	defer resubscribed.Body.Close()
+	if resubscribed.StatusCode != http.StatusOK || !strings.HasPrefix(resubscribed.Header.Get("Content-Type"), "text/event-stream") {
+		t.Fatalf("resubscription failed: %s, %s", resubscribed.Status, resubscribed.Header.Get("Content-Type"))
+	}
+	reader := bufio.NewReader(resubscribed.Body)
+	progress := nextEvent(reader)
+	if progress.TaskInfo().TaskID != firstTask.ID {
+		t.Fatalf("resubscription changed the task identity: %+v", progress)
+	}
+	close(resumeStream)
+	for {
+		event := nextEvent(reader)
+		if event.TaskInfo().TaskID != firstTask.ID || event.TaskInfo().ContextID != string(firstTask.ID) {
+			t.Fatalf("resubscription exposed a foreign task identity: %+v", event)
+		}
+		if artifact, ok := event.(*protocol.TaskArtifactUpdateEvent); ok {
+			if artifact.Artifact == nil || len(artifact.Artifact.Parts) != 1 || artifact.Artifact.Parts[0].Text() != "PRIVATE ARTIFACT" {
+				t.Fatalf("resubscription lost its artifact: %+v", artifact)
+			}
+			break
+		}
+	}
+	completed := nextEvent(reader)
+	status, ok := completed.(*protocol.TaskStatusUpdateEvent)
+	if !ok || status.Status.State != protocol.TaskStateCompleted || status.TaskID != firstTask.ID || status.ContextID != string(firstTask.ID) {
+		t.Fatalf("completion did not follow the artifact: %+v", completed)
+	}
+	oversized := streamRequest(key, "SendStreamingMessage", a2aTestParams{Message: message("stream-oversized", "PRIVATE OVERSIZED REQUEST")})
+	defer oversized.Body.Close()
+	oversizedReader := bufio.NewReader(oversized.Body)
+	if _, ok := nextEvent(oversizedReader).(*protocol.Task); !ok {
+		t.Fatal("oversized stream did not begin with a task")
+	}
+	<-upstreamIDs
+	oversizedResult := nextFrame(oversizedReader)
+	if oversizedResult.Error == nil || !strings.Contains(oversizedResult.Error.Message, "one MiB") {
+		t.Fatalf("oversized stream did not fail explicitly: %+v", oversizedResult)
+	}
+	bounded := streamRequest(key, "SendStreamingMessage", a2aTestParams{Message: message("stream-bounded", "bounded")})
+	defer bounded.Body.Close()
+	boundedReader := bufio.NewReader(bounded.Body)
+	if _, ok := nextEvent(boundedReader).(*protocol.Task); !ok {
+		t.Fatal("bounded stream did not begin with a task")
+	}
+	<-upstreamIDs
+	boundedArtifact, ok := nextEvent(boundedReader).(*protocol.TaskArtifactUpdateEvent)
+	if !ok || boundedArtifact.Artifact == nil || len(boundedArtifact.Artifact.Parts) != 1 || len(boundedArtifact.Artifact.Parts[0].Text()) != (1<<20)-4096 {
+		t.Fatal("under-limit event was not delivered intact")
+	}
+	if complete, ok := nextEvent(boundedReader).(*protocol.TaskStatusUpdateEvent); !ok || complete.Status.State != protocol.TaskStateCompleted {
+		t.Fatal("under-limit stream did not complete")
+	}
+	revoked := streamRequest(revocableKey["secret"].(string), "SendStreamingMessage", a2aTestParams{Message: message("stream-revoke", "revocation")})
+	defer revoked.Body.Close()
+	revokedReader := bufio.NewReader(revoked.Body)
+	if _, ok := nextEvent(revokedReader).(*protocol.Task); !ok {
+		t.Fatal("revocable stream did not begin with a task")
+	}
+	<-upstreamIDs
+	currentKey := h.want(owner, http.MethodGet, "/api/v1/api-keys/"+revocableKey["id"].(string), nil, nil, http.StatusOK)
+	h.want(owner, http.MethodPost, "/api/v1/api-keys/"+revocableKey["id"].(string)+"/revoke", nil, withMatch(currentKey, idem("a2a-revoke-stream")), http.StatusOK)
+	if err := h.Runtime.Refresh(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	revocationResult := nextFrame(revokedReader)
+	if revocationResult.Error == nil || revocationResult.Error.Message != "Authorization revoked" {
+		t.Fatalf("revoked stream was not stopped: %+v", revocationResult)
+	}
+	close(resumeRevokedStream)
 	redirectRPC.Store(true)
 	if got := rpc(key, "SendMessage", a2aTestParams{Message: message("redirect-message", "redirect")}); got["error"] == nil {
 		t.Fatalf("redirected send succeeded: %+v", got)
@@ -577,11 +767,18 @@ func TestA2AAgentCardUsesGatewayAuthenticationAndEndpoint(t *testing.T) {
 	if err := h.Pool.QueryRow(t.Context(), `SELECT concat(coalesce((SELECT json_agg(t)::text FROM olp.a2a_tasks t),''),coalesce((SELECT json_agg(d)::text FROM olp.execution_debits d),''),coalesce((SELECT json_agg(r)::text FROM olp.execution_debit_results r),''),coalesce((SELECT json_agg(r)::text FROM olp.agent_runs r),''),coalesce((SELECT json_agg(s)::text FROM olp.agent_steps s),''))`).Scan(&stored); err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(stored, "PRIVATE REQUEST") || strings.Contains(stored, "PRIVATE ARTIFACT") {
+	if strings.Contains(stored, "PRIVATE REQUEST") || strings.Contains(stored, "PRIVATE ARTIFACT") || strings.Contains(stored, "PRIVATE STREAM REQUEST") || strings.Contains(stored, "PRIVATE OVERSIZED REQUEST") {
 		t.Fatal("message content persisted")
 	}
 	redirectRPC.Store(false)
 	redirectCard.Store(false)
+	pinnedStream := streamRequest(key, "SendStreamingMessage", a2aTestParams{Message: message("stream-pinned", "pinned")})
+	pinnedTask, ok := nextEvent(bufio.NewReader(pinnedStream.Body)).(*protocol.Task)
+	if !ok || pinnedTask.ID == "" {
+		t.Fatal("pinned stream did not begin with a task")
+	}
+	<-upstreamIDs
+	pinnedStream.Body.Close()
 	updated := h.want(owner, http.MethodPut, "/api/v1/agents/"+agent, map[string]any{
 		"project_id": project, "name": "fixture",
 		"agent": map[string]any{"protocol": "a2a-1.0.0", "endpoint": upstream.URL + "/rpc", "card_digest": strings.Repeat("a", 64), "toolset_revisions": []string{}, "route_revisions": []string{}, "pricing_revision_id": pricing, "max_cost": "1", "message_price": "0.50"},
@@ -592,6 +789,25 @@ func TestA2AAgentCardUsesGatewayAuthenticationAndEndpoint(t *testing.T) {
 	}
 	if getCard(key, agent) != http.StatusBadGateway {
 		t.Fatal("new revision did not enforce its card digest")
+	}
+	pinnedSubscription := streamRequest(key, "SubscribeToTask", a2aTestParams{ID: pinnedTask.ID})
+	defer pinnedSubscription.Body.Close()
+	pinnedReader := bufio.NewReader(pinnedSubscription.Body)
+	if first := nextEvent(pinnedReader); first.TaskInfo().TaskID != pinnedTask.ID {
+		t.Fatalf("resubscription did not retain the task's published revision: %+v", first)
+	}
+	close(resumePinnedStream)
+	for {
+		event := nextEvent(pinnedReader)
+		if event.TaskInfo().TaskID != pinnedTask.ID {
+			t.Fatal("pinned resubscription changed the task identity")
+		}
+		if _, ok := event.(*protocol.TaskArtifactUpdateEvent); ok {
+			break
+		}
+	}
+	if status, ok := nextEvent(pinnedReader).(*protocol.TaskStatusUpdateEvent); !ok || status.TaskID != pinnedTask.ID || status.Status.State != protocol.TaskStateCompleted {
+		t.Fatal("pinned resubscription did not complete")
 	}
 	pinned := rpc(key, "GetTask", a2aTestParams{ID: protocol.TaskID(id)})
 	if task, ok := pinned["result"].(map[string]any); !ok || task["id"] != id || !strings.Contains(fmt.Sprint(task), "PRIVATE ARTIFACT") {
