@@ -232,6 +232,7 @@ func accountingAttempt(e Envelope, index int) (usage.Attempt, error) {
 		FirstByteMS:   optionalMilliseconds(fact.FirstByte),
 		Usage:         &evidence,
 		Routing: &usage.Routing{
+			Prompt:           fact.Prompt,
 			Cache:            fact.Cache,
 			Interaction:      fact.Interaction,
 			Mode:             optionalText(fact.Mode),

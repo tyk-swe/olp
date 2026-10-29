@@ -6701,6 +6701,7 @@ type AttemptRoutingMetadata struct {
 	Mode               nullable.Nullable[TransportMode]        `json:"mode,omitempty"`
 	Policy             nullable.Nullable[AppliedRoutingPolicy] `json:"policy,omitempty"`
 	PricingRevisionId  nullable.Nullable[openapi_types.UUID]   `json:"pricing_revision_id,omitempty"`
+	Prompt             *PromptAttemptReference                 `json:"prompt,omitempty"`
 	ProviderRevisionId openapi_types.UUID                      `json:"provider_revision_id"`
 
 	// Retry Same-target retry number of this attempt.
@@ -11442,6 +11443,12 @@ type ProjectRouteGroups struct {
 
 	// Groups Project-local named sets of ordinary or subscription route slugs. Empty groups grant no routes. Unknown slugs may be declared ahead of route creation; project isolation still applies.
 	Groups RouteGroups `json:"groups"`
+}
+
+// PromptAttemptReference defines model for PromptAttemptReference.
+type PromptAttemptReference struct {
+	Id         openapi_types.UUID `json:"id"`
+	RevisionId openapi_types.UUID `json:"revision_id"`
 }
 
 // PromptCachePolicy defines model for PromptCachePolicy.

@@ -250,11 +250,30 @@ type AttemptUsage struct {
 	Batch     bool             `json:"batch,omitempty"`
 }
 
+type PromptReference struct {
+	ID         string `json:"id"`
+	RevisionID string `json:"revision_id"`
+}
+
+func (p *PromptReference) validate() error {
+	if p == nil {
+		return nil
+	}
+	if _, err := uuid.Parse(p.ID); err != nil {
+		return errors.New("routing.prompt.id is invalid")
+	}
+	if _, err := uuid.Parse(p.RevisionID); err != nil {
+		return errors.New("routing.prompt.revision_id is invalid")
+	}
+	return nil
+}
+
 // Routing is the provenance of one attempt: which policy chose it, which
 // credential served it, and which revisions were in force. It is stored beside
 // the attempt so a request can be explained months later, when the revisions
 // that produced it have long been superseded.
 type Routing struct {
+	Prompt               *PromptReference     `json:"prompt,omitempty"`
 	Cache                *CacheEvidence       `json:"cache,omitempty"`
 	BudgetExempt         bool                 `json:"budget_exempt,omitempty"`
 	CredentialSource     string               `json:"credential_source,omitempty"`
@@ -471,6 +490,7 @@ type wireDecision struct {
 }
 
 type wireRouting struct {
+	Prompt               *PromptReference     `json:"prompt,omitempty"`
 	Cache                *CacheEvidence       `json:"cache,omitempty"`
 	BudgetExempt         bool                 `json:"budget_exempt,omitempty"`
 	CredentialSource     string               `json:"credential_source,omitempty"`
@@ -782,7 +802,10 @@ func (r *Routing) validateCredentialSource() error {
 }
 
 func (w wireRouting) decode() (*Routing, error) {
-	routing := &Routing{Policy: w.Policy, Mode: w.Mode, Interaction: w.Interaction}
+	routing := &Routing{Policy: w.Policy, Mode: w.Mode, Interaction: w.Interaction, Prompt: w.Prompt}
+	if err := routing.Prompt.validate(); err != nil {
+		return nil, err
+	}
 	if err := routing.Interaction.validate(); err != nil {
 		return nil, err
 	}
@@ -1115,6 +1138,9 @@ func validateAttempt(attempt *Attempt, index int) (*ValidatedAttempt, error) {
 		return nil, fmt.Errorf("%w: %w", ErrInvalidEvent, err)
 	}
 	if attempt.Routing != nil {
+		if err := attempt.Routing.Prompt.validate(); err != nil {
+			return nil, fmt.Errorf("%w: attempt %d %w", ErrInvalidEvent, index, err)
+		}
 		if err := attempt.Routing.validateCredentialSource(); err != nil {
 			return nil, fmt.Errorf("%w: attempt %d %w", ErrInvalidEvent, index, err)
 		}

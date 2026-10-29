@@ -1,0 +1,151 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "OLP inference extensions",
+    "version": "1.0.0",
+    "description": "OLP-specific extensions to the consumer inference API. Provider-native fields retain their provider contracts."
+  },
+  "paths": {
+    "/v1/chat/completions": {
+      "post": {
+        "operationId": "createChatCompletionWithPrompt",
+        "summary": "Create a chat completion using a published OLP prompt",
+        "description": "For transformed routes, the published prompt replaces explicit messages. Other chat fields use the provider contract.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChatPromptRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Provider completion response or stream",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              },
+              "text/event-stream": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The prompt reference or variables are invalid"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "BearerAuth": {
+        "type": "http",
+        "scheme": "bearer"
+      }
+    },
+    "schemas": {
+      "ChatPromptRequest": {
+        "type": "object",
+        "required": [
+          "model",
+          "olp_prompt"
+        ],
+        "properties": {
+          "model": {
+            "type": "string"
+          },
+          "olp_prompt": {
+            "$ref": "#/components/schemas/PublishedPromptReference"
+          }
+        },
+        "additionalProperties": true,
+        "not": {
+          "required": [
+            "messages"
+          ]
+        }
+      },
+      "PublishedPromptReference": {
+        "description": "Specify exactly one published label or immutable revision ID.",
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/PromptLabelReference"
+          },
+          {
+            "$ref": "#/components/schemas/PromptRevisionReference"
+          }
+        ]
+      },
+      "PromptLabelReference": {
+        "type": "object",
+        "required": [
+          "id",
+          "label",
+          "variables"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Project-owned prompt publication ID"
+          },
+          "variables": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "label": {
+            "type": "string",
+            "enum": [
+              "production",
+              "staging"
+            ]
+          }
+        },
+        "additionalProperties": false
+      },
+      "PromptRevisionReference": {
+        "type": "object",
+        "required": [
+          "id",
+          "revision_id",
+          "variables"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Project-owned prompt publication ID"
+          },
+          "variables": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "revision_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Exact immutable prompt revision ID"
+          }
+        },
+        "additionalProperties": false
+      }
+    }
+  }
+}

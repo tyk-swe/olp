@@ -358,6 +358,10 @@ func TestWorkloadAgentDelegatesKeyForOneInference(t *testing.T) {
 	ordinary := h.want(owner, "POST", "/api/v1/api-keys", map[string]any{"name": "ordinary", "project_id": project, "scopes": []string{"inference"}, "allowed_routes": []string{"delegated-chat"}}, idem("ordinary-key"), 201)
 	otherProject := createProject(h, owner, "Other delegation project")
 	otherKey := h.want(owner, "POST", "/api/v1/api-keys", map[string]any{"name": "other-project", "project_id": otherProject, "scopes": []string{"inference", "delegate"}, "allowed_routes": []string{}}, idem("other-project-key"), 201)
+	prompt := h.want(owner, "POST", "/api/v1/prompts", map[string]any{"project_id": project, "name": "delegated prompt", "prompt": map[string]any{"template": "Hello {{name}}", "variables": []string{"name"}}}, idem("delegated-prompt"), 201)
+	promptPath := "/api/v1/prompts/" + prompt["id"].(string)
+	published := h.want(owner, "POST", promptPath+"/publish", nil, withMatch(prompt, idem("publish-delegated-prompt")), 200)
+	h.want(owner, "PUT", promptPath+"/labels/production", map[string]any{"revision_id": published["revision_id"]}, withMatch(published, idem("label-delegated-prompt")), 200)
 	h.refresh()
 	sign := func(subject, client, audience string) string {
 		t.Helper()
@@ -441,7 +445,10 @@ func TestWorkloadAgentDelegatesKeyForOneInference(t *testing.T) {
 	}
 	infer(grant, agent, http.StatusUnauthorized)
 	renewed := exchangeBounds(agent, delegating["secret"].(string), map[string]any{"scopes": []string{"inference"}, "allowed_routes": []string{"delegated-chat"}, "ttl_seconds": 900}, http.StatusCreated)
-	infer(renewed, agent, http.StatusOK)
+	promptResponse, promptBody := h.do(nil, "POST", "/v1/chat/completions", map[string]any{"model": "delegated-chat", "olp_prompt": map[string]any{"id": prompt["id"], "label": "production", "variables": map[string]string{"name": "agent"}}}, map[string]string{"Authorization": "Bearer " + renewed, "X-OLP-Agent-Identity": agent})
+	if promptResponse.StatusCode != http.StatusOK {
+		t.Fatalf("delegated prompt inference: %d %s", promptResponse.StatusCode, promptBody)
+	}
 	if err := <-persisted; err != nil {
 		t.Fatal(err)
 	}
@@ -450,6 +457,11 @@ func TestWorkloadAgentDelegatesKeyForOneInference(t *testing.T) {
 	err = h.Pool.QueryRow(context.Background(), `SELECT min(agent_principal_id::text),min(api_key_id::text),count(*),count(DISTINCT delegation_pair_digest) FROM olp.attempt_usage_facts WHERE api_key_id=$1`, delegating["id"]).Scan(&agentID, &ownerID, &attempts, &pairCount)
 	if err != nil || agentID == "" || ownerID != delegating["id"] || attempts != 2 || pairCount != 1 {
 		t.Fatalf("delegated accounting owners and stable pair: %s %s %d %d %v", agentID, ownerID, attempts, pairCount, err)
+	}
+	var promptAttempts int
+	err = h.Pool.QueryRow(context.Background(), `SELECT count(*) FROM olp.attempts a JOIN olp.attempt_usage_facts f ON f.attempt_id=a.id WHERE f.agent_principal_id=$1 AND f.api_key_id=$2 AND a.routing->'prompt'->>'id'=$3 AND a.routing->'prompt'->>'revision_id'=$4`, agentID, ownerID, prompt["id"], published["revision_id"]).Scan(&promptAttempts)
+	if err != nil || promptAttempts != 1 {
+		t.Fatalf("delegated prompt attempt attribution: %d %v", promptAttempts, err)
 	}
 	keyPath := "/api/v1/api-keys/" + delegating["id"].(string)
 	key := h.want(owner, "GET", keyPath, nil, nil, 200)

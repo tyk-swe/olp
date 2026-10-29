@@ -77,6 +77,7 @@ type Envelope struct {
 
 // AttemptFact records one credential attempt against one target.
 type AttemptFact struct {
+	Prompt             *usage.PromptReference
 	Commitment         *routing.Commitment
 	CommitmentPinned   bool
 	Cache              *usage.CacheEvidence
@@ -199,6 +200,7 @@ func (l LogSink) Terminal(e Envelope) {
 	for _, a := range e.Attempts {
 		attempts = append(attempts, map[string]any{
 			"ordinal":              a.Ordinal,
+			"prompt":               a.Prompt,
 			"provider_id":          a.ProviderID,
 			"provider_revision_id": a.ProviderRevisionID,
 			"upstream_model":       a.UpstreamModel,

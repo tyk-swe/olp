@@ -481,6 +481,7 @@ func endpointPath(family wire.Format) string {
 // newFact opens the record of one attempt against one credential slot.
 func (s *Server) newFact(x *call, a routing.Attempt, slot routing.Slot, ordinal int, pinned ...*routing.Provider) AttemptFact {
 	fact := AttemptFact{
+		Prompt:   x.prompt,
 		Strategy: a.Strategy, PolicyDigest: a.PolicyDigest, VendorID: a.VendorID, Price: a.Price,
 		Discount: a.Discount, CardPinned: x.cardPinned, CardRevisionID: x.cardRevisionID,
 		Ordinal:            ordinal,
