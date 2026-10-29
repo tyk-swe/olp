@@ -33,4 +33,3 @@ BEGIN
 END $$;
 CREATE TRIGGER export_client_trace_span AFTER INSERT ON olp.trace_spans
  FOR EACH ROW EXECUTE FUNCTION olp.export_client_trace_span();
-
