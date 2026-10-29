@@ -95,7 +95,7 @@ export interface paths {
         put?: never;
         /**
          * Send a message to or read, cancel, and subscribe to a task from a published A2A agent
-         * @description Supports A2A 0.3 and 1.0 JSON-RPC send, streaming send, task read, cancellation, and subscription methods. The published protocol determines the accepted methods and response format. Requires the agents scope and an explicit allowlist entry. OLP task IDs are bound to the initiating key and project, and OAuth tasks also to the caller's grant identity. Streaming methods return events as they arrive, with a one MiB maximum per event. Disconnecting does not immediately cancel the upstream task. Disconnected tasks remain subject to deadline and authorization checks; OLP requests cancellation when those checks fail but cannot guarantee that a remote agent stops.
+         * @description Supports A2A 0.3 and 1.0 JSON-RPC send, streaming send, task read, cancellation, and subscription methods. The published protocol determines the accepted methods and response format. Requires the agents scope and an explicit allowlist entry. OLP task IDs are bound to the initiating key and project, and OAuth tasks also to the caller's grant identity. Streaming methods return events as they arrive, with a one MiB maximum per event. For each outbound agent send, OLP supplies an olpt_ capability in the X-OLP-Task-Capability request header to the remote agent. The agent can present it as a bearer token on supported model and MCP callbacks. Callback attempts count toward the task limit and are accounted separately from the remote agent fee. Disconnecting does not immediately cancel the upstream task. Disconnected tasks remain subject to deadline and authorization checks; OLP requests cancellation when those checks fail but cannot guarantee that a remote agent stops.
          */
         post: operations["callA2AAgent"];
         delete?: never;
@@ -695,7 +695,7 @@ export interface operations {
                     "application/json": components["schemas"]["InferenceError"];
                 };
             };
-            /** @description The credential, delegation, or agent assertion is invalid, expired, revoked, or already used */
+            /** @description The credential, delegation, task capability, or agent assertion is invalid, expired, revoked, or already used */
             401: {
                 headers: {
                     [name: string]: unknown;
@@ -731,7 +731,7 @@ export interface operations {
                     "application/json": components["schemas"]["InferenceError"];
                 };
             };
-            /** @description The caller or agent has reached an admission limit */
+            /** @description The caller or agent has reached an admission limit. Task capabilities return task_limit_exceeded when the task attempt limit is reached. */
             429: {
                 headers: {
                     [name: string]: unknown;
@@ -1036,7 +1036,7 @@ export interface operations {
                     "application/json": components["schemas"]["InferenceError"];
                 };
             };
-            /** @description The credential, delegation, or agent assertion is invalid, expired, revoked, or already used */
+            /** @description The credential, delegation, task capability, or agent assertion is invalid, expired, revoked, or already used */
             401: {
                 headers: {
                     [name: string]: unknown;
@@ -1072,7 +1072,7 @@ export interface operations {
                     "application/json": components["schemas"]["InferenceError"];
                 };
             };
-            /** @description The caller or agent has reached an admission limit */
+            /** @description The caller or agent has reached an admission limit. Task capabilities return task_limit_exceeded when the task attempt limit is reached. */
             429: {
                 headers: {
                     [name: string]: unknown;
@@ -1129,7 +1129,7 @@ export interface operations {
                     "application/json": components["schemas"]["AnthropicInferenceError"];
                 };
             };
-            /** @description The credential, delegation, or agent assertion is invalid, expired, revoked, or already used */
+            /** @description The credential, delegation, task capability, or agent assertion is invalid, expired, revoked, or already used */
             401: {
                 headers: {
                     [name: string]: unknown;
@@ -1165,7 +1165,7 @@ export interface operations {
                     "application/json": components["schemas"]["AnthropicInferenceError"];
                 };
             };
-            /** @description The caller or agent has reached an admission limit */
+            /** @description The caller or agent has reached an admission limit. Task capabilities return task_limit_exceeded when the task attempt limit is reached. */
             429: {
                 headers: {
                     [name: string]: unknown;
@@ -1225,7 +1225,7 @@ export interface operations {
                     "application/json": components["schemas"]["GeminiInferenceError"];
                 };
             };
-            /** @description The credential, delegation, or agent assertion is invalid, expired, revoked, or already used */
+            /** @description The credential, delegation, task capability, or agent assertion is invalid, expired, revoked, or already used */
             401: {
                 headers: {
                     [name: string]: unknown;
@@ -1261,7 +1261,7 @@ export interface operations {
                     "application/json": components["schemas"]["GeminiInferenceError"];
                 };
             };
-            /** @description The caller or agent has reached an admission limit */
+            /** @description The caller or agent has reached an admission limit. Task capabilities return task_limit_exceeded when the task attempt limit is reached. */
             429: {
                 headers: {
                     [name: string]: unknown;
@@ -1321,7 +1321,7 @@ export interface operations {
                     "application/json": components["schemas"]["GeminiInferenceError"];
                 };
             };
-            /** @description The credential, delegation, or agent assertion is invalid, expired, revoked, or already used */
+            /** @description The credential, delegation, task capability, or agent assertion is invalid, expired, revoked, or already used */
             401: {
                 headers: {
                     [name: string]: unknown;
@@ -1357,7 +1357,7 @@ export interface operations {
                     "application/json": components["schemas"]["GeminiInferenceError"];
                 };
             };
-            /** @description The caller or agent has reached an admission limit */
+            /** @description The caller or agent has reached an admission limit. Task capabilities return task_limit_exceeded when the task attempt limit is reached. */
             429: {
                 headers: {
                     [name: string]: unknown;

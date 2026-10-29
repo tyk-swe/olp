@@ -141,6 +141,9 @@ func (l *Ledger) settle(ctx context.Context, res reservation, authority access.A
 		return "", err
 	}
 	defer tx.Rollback(ctx)
+	if _, err := tx.Exec(ctx, `SELECT 1 FROM olp.a2a_task_capabilities WHERE dispatch_id=$1 FOR UPDATE`, res.DispatchID); err != nil {
+		return "", err
+	}
 	taskID, err := settleTask(ctx, tx, res, authority, revision, upstreamID, contextID, state, binding)
 	if err != nil {
 		return "", err
@@ -152,7 +155,17 @@ func (l *Ledger) settle(ctx context.Context, res reservation, authority access.A
 		return "", err
 	}
 	if taskID != "" {
+		if _, err := tx.Exec(ctx, `UPDATE olp.a2a_tasks SET continuations=continuations+(SELECT callback_attempts FROM olp.a2a_task_admissions WHERE dispatch_id=$1 AND task_id IS NULL) WHERE id=$2 AND EXISTS(SELECT 1 FROM olp.a2a_task_admissions WHERE dispatch_id=$1 AND task_id IS NULL)`, res.DispatchID, taskID); err != nil {
+			return "", err
+		}
+		if _, err := tx.Exec(ctx, `UPDATE olp.a2a_task_capabilities SET task_id=$2 WHERE dispatch_id=$1`, res.DispatchID, taskID); err != nil {
+			return "", err
+		}
 		if _, err := tx.Exec(ctx, `UPDATE olp.a2a_tasks SET state=CASE WHEN state='outcome_unknown' AND $2='active' THEN state ELSE $2 END WHERE id=$1 AND (state IN ('active','outcome_unknown') OR state=$2)`, taskID, state); err != nil {
+			return "", err
+		}
+	} else {
+		if _, err := tx.Exec(ctx, `DELETE FROM olp.a2a_task_capabilities WHERE dispatch_id=$1`, res.DispatchID); err != nil {
 			return "", err
 		}
 	}
@@ -176,11 +189,11 @@ func settleTask(ctx context.Context, tx pgx.Tx, res reservation, authority acces
 	if _, err := tx.Exec(ctx, `INSERT INTO olp.a2a_tasks(id,api_key_id,project_id,publication_id,revision_id,dispatch_id,upstream_id,upstream_context_id,deadline_at,caller_workload_revision_id,caller_expires_at,state,oauth_binding_digest) VALUES($1,$2,$3,$4,$5,$6,$7,$8,(SELECT created_at FROM olp.a2a_task_admissions WHERE dispatch_id=$6)+$9*interval '1 second',NULLIF($10,'')::uuid,$11,$12,NULLIF($13,'')) ON CONFLICT(api_key_id,project_id,publication_id,upstream_id) DO NOTHING`, id, authority.ID, *authority.ProjectID, revision.PublicationID, revision.ID, res.DispatchID, upstreamID, contextID, taskDeadlineSeconds(revision.Definition.Agent), authority.WorkloadRevision, authority.ExpiresAt, state, binding); err != nil {
 		return "", err
 	}
-	var publicID, pinned, storedBinding string
-	if err := tx.QueryRow(ctx, `SELECT id::text,revision_id::text,COALESCE(oauth_binding_digest,'') FROM olp.a2a_tasks WHERE api_key_id=$1 AND project_id=$2 AND publication_id=$3 AND upstream_id=$4`, authority.ID, *authority.ProjectID, revision.PublicationID, upstreamID).Scan(&publicID, &pinned, &storedBinding); err != nil {
+	var publicID, pinned, taskDispatch, expected, storedBinding string
+	if err := tx.QueryRow(ctx, `SELECT t.id::text,t.revision_id::text,t.dispatch_id::text,COALESCE(a.task_id::text,''),COALESCE(t.oauth_binding_digest,'') FROM olp.a2a_tasks t JOIN olp.a2a_task_admissions a ON a.dispatch_id=$5 WHERE t.api_key_id=$1 AND t.project_id=$2 AND t.publication_id=$3 AND t.upstream_id=$4`, authority.ID, *authority.ProjectID, revision.PublicationID, upstreamID, res.DispatchID).Scan(&publicID, &pinned, &taskDispatch, &expected, &storedBinding); err != nil {
 		return "", err
 	}
-	if pinned != revision.ID || storedBinding != binding {
+	if pinned != revision.ID || storedBinding != binding || expected == "" && taskDispatch != res.DispatchID || expected != "" && expected != publicID {
 		return "", limits.ErrDebitConflict
 	}
 	return publicID, nil
@@ -192,6 +205,7 @@ func (l *Ledger) release(ctx context.Context, res reservation) {
 	if err := l.Store.ReleaseUndispatched(releaseCtx, res.DispatchID, res.ClaimID); err != nil {
 		return
 	}
+	_, _ = l.Pool.Exec(releaseCtx, `DELETE FROM olp.a2a_task_capabilities WHERE dispatch_id=$1`, res.DispatchID)
 	_, _ = l.Pool.Exec(releaseCtx, `WITH removed AS (DELETE FROM olp.a2a_task_admissions WHERE dispatch_id=$1 RETURNING task_id) UPDATE olp.a2a_tasks SET continuations=GREATEST(continuations-1,0) WHERE id=(SELECT task_id FROM removed)`, res.DispatchID)
 }
 

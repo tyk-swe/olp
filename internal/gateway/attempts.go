@@ -8,7 +8,9 @@ import (
 	"slices"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/routing"
+	"github.com/tyk-swe/olp/internal/runtime"
 )
 
 // attemptAdapter supplies the operation-specific estimate of an attempt and one
@@ -21,6 +23,23 @@ type attemptAdapter[Result any] struct {
 }
 
 func (a attemptAdapter[Result]) dispatchWithAuthority(ctx context.Context, s *Server, x *call, attempt routing.Attempt, provider *routing.Provider, slot routing.Slot, fact AttemptFact) (AttemptFact, Result, *attemptFailure, *Error) {
+	if x.authority.TaskCapability != nil {
+		admitter, ok := s.Runtime.(interface {
+			AdmitTaskCapabilityAttempt(context.Context, access.Authority, string, string, string, *string) error
+		})
+		var err error
+		if ok {
+			err = admitter.AdmitTaskCapabilityAttempt(ctx, x.authority, "inference", x.route.Slug, x.route.RevisionID, x.route.ProjectID)
+		}
+		if !ok || err != nil {
+			var result Result
+			failure := &attemptFailure{class: classLimitsUnavailable, noRetry: true}
+			if errors.Is(err, runtime.ErrTaskAttemptLimit) {
+				return fact, result, failure, &Error{Status: http.StatusTooManyRequests, Type: "rate_limit_error", Code: "task_limit_exceeded", Message: "The task attempt limit was exceeded."}
+			}
+			return fact, result, failure, permissionError("permission_denied", "The task capability is no longer authorized.")
+		}
+	}
 	if x.workflow == nil {
 		completed, result, failure := a.dispatch(ctx, attempt, provider, slot, fact)
 		return completed, result, failure, nil

@@ -108,6 +108,22 @@ func (s *Server) resolve(r *http.Request) (access.Authority, agentcontract.Revis
 	if failure != nil {
 		return access.Authority{}, agentcontract.Revision{}, nil, failure.Status
 	}
+	if authority.EndUserDigest == "" {
+		if authority.Policy.EndUserSource == nil {
+			if authority.ProjectEndUserPolicy != nil || authority.Policy.EndUserPolicy != nil {
+				return access.Authority{}, agentcontract.Revision{}, nil, http.StatusBadRequest
+			}
+		} else {
+			digest, failure := consumerauth.HeaderEndUserDigest(s.Runtime, r, authority)
+			if failure != nil {
+				return access.Authority{}, agentcontract.Revision{}, nil, failure.Status
+			}
+			authority.EndUserDigest = digest
+		}
+	}
+	if !authority.AllowsEndUser(authority.EndUserDigest) {
+		return access.Authority{}, agentcontract.Revision{}, nil, http.StatusForbidden
+	}
 	if authority.ProjectID == nil {
 		return access.Authority{}, agentcontract.Revision{}, nil, http.StatusNotFound
 	}

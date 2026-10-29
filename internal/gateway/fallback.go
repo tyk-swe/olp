@@ -248,6 +248,9 @@ func (x *call) mayLeaveRoute() bool {
 // keyAuthorizer allows the routes an API key may use for inference.
 func (s *Server) keyAuthorizer(authority access.Authority) func(*routing.Route) *Error {
 	return func(route *routing.Route) *Error {
+		if authority.TaskCapability != nil && !slices.Contains(authority.TaskCapability.RouteRevisions, route.RevisionID) {
+			return permissionError("route_forbidden", "This task is not allowed to use the model `"+route.Slug+"`.")
+		}
 		if !authority.Allows("inference", route.Slug, route.ProjectID, s.now()) {
 			return permissionError("route_forbidden", "This API key is not allowed to use the model `"+route.Slug+"`.")
 		}
