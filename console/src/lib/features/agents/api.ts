@@ -238,6 +238,13 @@ export const startMCPGrant = async (serverID: string, keyID: string) =>
       body: { api_key_id: keyID }
     })
   );
+export const startAgentGrant = async (agentID: string, keyID: string) =>
+  unwrap(
+    await apiClient.POST('/api/v1/agents/{agent_id}/grant-enrollments', {
+      params: { path: { agent_id: agentID } },
+      body: { api_key_id: keyID }
+    })
+  );
 export const claimMCPGrant = async (
   enrollmentID: string,
   handoffToken: string

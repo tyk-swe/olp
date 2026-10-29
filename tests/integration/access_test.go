@@ -32,6 +32,7 @@ import (
 	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/gateway"
+	"github.com/tyk-swe/olp/internal/mcpgrants"
 	"github.com/tyk-swe/olp/internal/media"
 	"github.com/tyk-swe/olp/internal/observability"
 	"github.com/tyk-swe/olp/internal/pluginindex"
@@ -205,7 +206,7 @@ func newAccessHarnessAtInstallation(t *testing.T, pool *pgxpool.Pool, dbURL, ins
 	}
 	process.Management{Access: server, Egress: &policy, Runtime: rt, Gateway: gw, Media: mediaJobs, Health: observability.NewCache(), Log: log, PluginRuntime: pluginRuntime, PluginHost: pluginHost, Unconfined: unconfined, Catalog: referenceCatalog, PluginIndex: pluginIndex}.Register(mux)
 	gw.Register(mux)
-	agentServer := &a2a.Server{Runtime: rt, Egress: &policy, Credentials: func(ctx context.Context, id string) ([]byte, error) {
+	agentServer := &a2a.Server{Grants: &mcpgrants.Store{Egress: &policy, Pool: pool, Keys: ring, Auth: digestKey, Installation: installation}, Runtime: rt, Egress: &policy, Credentials: func(ctx context.Context, id string) ([]byte, error) {
 		return ring.Read(ctx, pool, installation, id, secrets.AgentCredential)
 	}}
 	agentServer.Register(mux)

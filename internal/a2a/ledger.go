@@ -38,6 +38,7 @@ type task struct {
 	UpstreamID string
 	ContextID  string
 	RevisionID string
+	Binding    string
 }
 
 func newID() (string, error) {
@@ -125,13 +126,13 @@ func (l *Ledger) findTask(ctx context.Context, authority access.Authority, publi
 		return task{}, pgx.ErrNoRows
 	}
 	var found task
-	if err := l.Pool.QueryRow(ctx, `SELECT id::text,upstream_id,upstream_context_id,revision_id::text FROM olp.a2a_tasks WHERE id=$1 AND api_key_id=$2 AND project_id=$3 AND publication_id=$4`, rawID, authority.ID, *authority.ProjectID, publicationID).Scan(&found.ID, &found.UpstreamID, &found.ContextID, &found.RevisionID); err != nil {
+	if err := l.Pool.QueryRow(ctx, `SELECT id::text,upstream_id,upstream_context_id,revision_id::text,COALESCE(oauth_binding_digest,'') FROM olp.a2a_tasks WHERE id=$1 AND api_key_id=$2 AND project_id=$3 AND publication_id=$4`, rawID, authority.ID, *authority.ProjectID, publicationID).Scan(&found.ID, &found.UpstreamID, &found.ContextID, &found.RevisionID, &found.Binding); err != nil {
 		return task{}, err
 	}
 	return found, nil
 }
 
-func (l *Ledger) settle(ctx context.Context, res reservation, authority access.Authority, revision agentcontract.Revision, upstreamID, contextID, state string) (string, error) {
+func (l *Ledger) settle(ctx context.Context, res reservation, authority access.Authority, revision agentcontract.Revision, upstreamID, contextID, state, binding string) (string, error) {
 	if authority.ProjectID == nil || len(upstreamID) > 1024 || len(contextID) > 1024 || strings.ContainsRune(upstreamID, 0) || strings.ContainsRune(contextID, 0) {
 		return "", limits.ErrDebitConflict
 	}
@@ -140,7 +141,7 @@ func (l *Ledger) settle(ctx context.Context, res reservation, authority access.A
 		return "", err
 	}
 	defer tx.Rollback(ctx)
-	taskID, err := settleTask(ctx, tx, res, authority, revision, upstreamID, contextID, state)
+	taskID, err := settleTask(ctx, tx, res, authority, revision, upstreamID, contextID, state, binding)
 	if err != nil {
 		return "", err
 	}
@@ -164,7 +165,7 @@ func (l *Ledger) settle(ctx context.Context, res reservation, authority access.A
 	return taskID, nil
 }
 
-func settleTask(ctx context.Context, tx pgx.Tx, res reservation, authority access.Authority, revision agentcontract.Revision, upstreamID, contextID, state string) (string, error) {
+func settleTask(ctx context.Context, tx pgx.Tx, res reservation, authority access.Authority, revision agentcontract.Revision, upstreamID, contextID, state, binding string) (string, error) {
 	if upstreamID == "" {
 		return "", nil
 	}
@@ -172,14 +173,14 @@ func settleTask(ctx context.Context, tx pgx.Tx, res reservation, authority acces
 	if err != nil {
 		return "", err
 	}
-	if _, err := tx.Exec(ctx, `INSERT INTO olp.a2a_tasks(id,api_key_id,project_id,publication_id,revision_id,dispatch_id,upstream_id,upstream_context_id,deadline_at,caller_workload_revision_id,caller_expires_at,state) VALUES($1,$2,$3,$4,$5,$6,$7,$8,(SELECT created_at FROM olp.a2a_task_admissions WHERE dispatch_id=$6)+$9*interval '1 second',NULLIF($10,'')::uuid,$11,$12) ON CONFLICT(api_key_id,project_id,publication_id,upstream_id) DO NOTHING`, id, authority.ID, *authority.ProjectID, revision.PublicationID, revision.ID, res.DispatchID, upstreamID, contextID, taskDeadlineSeconds(revision.Definition.Agent), authority.WorkloadRevision, authority.ExpiresAt, state); err != nil {
+	if _, err := tx.Exec(ctx, `INSERT INTO olp.a2a_tasks(id,api_key_id,project_id,publication_id,revision_id,dispatch_id,upstream_id,upstream_context_id,deadline_at,caller_workload_revision_id,caller_expires_at,state,oauth_binding_digest) VALUES($1,$2,$3,$4,$5,$6,$7,$8,(SELECT created_at FROM olp.a2a_task_admissions WHERE dispatch_id=$6)+$9*interval '1 second',NULLIF($10,'')::uuid,$11,$12,NULLIF($13,'')) ON CONFLICT(api_key_id,project_id,publication_id,upstream_id) DO NOTHING`, id, authority.ID, *authority.ProjectID, revision.PublicationID, revision.ID, res.DispatchID, upstreamID, contextID, taskDeadlineSeconds(revision.Definition.Agent), authority.WorkloadRevision, authority.ExpiresAt, state, binding); err != nil {
 		return "", err
 	}
-	var publicID, pinned string
-	if err := tx.QueryRow(ctx, `SELECT id::text,revision_id::text FROM olp.a2a_tasks WHERE api_key_id=$1 AND project_id=$2 AND publication_id=$3 AND upstream_id=$4`, authority.ID, *authority.ProjectID, revision.PublicationID, upstreamID).Scan(&publicID, &pinned); err != nil {
+	var publicID, pinned, storedBinding string
+	if err := tx.QueryRow(ctx, `SELECT id::text,revision_id::text,COALESCE(oauth_binding_digest,'') FROM olp.a2a_tasks WHERE api_key_id=$1 AND project_id=$2 AND publication_id=$3 AND upstream_id=$4`, authority.ID, *authority.ProjectID, revision.PublicationID, upstreamID).Scan(&publicID, &pinned, &storedBinding); err != nil {
 		return "", err
 	}
-	if pinned != revision.ID {
+	if pinned != revision.ID || storedBinding != binding {
 		return "", limits.ErrDebitConflict
 	}
 	return publicID, nil

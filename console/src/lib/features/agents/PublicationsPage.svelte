@@ -44,6 +44,7 @@
   let error = $state('');
   let notice = $state('');
   let credential = $state('');
+  let entraClientSecret = $state('');
   let removeCredential = $state(false);
   let serverID = $state('');
   let server = $state<MCPServer | null>(null);
@@ -55,6 +56,7 @@
   const captureOwner = usePrincipalLifetime(() => {
     epoch += 1;
     credential = '';
+    entraClientSecret = '';
     removeCredential = false;
     current = null;
     form = publicationForm();
@@ -96,6 +98,7 @@
     epoch += 1;
     intent.reset();
     credential = '';
+    entraClientSecret = '';
     removeCredential = false;
     editor = false;
     current = null;
@@ -238,8 +241,10 @@
     const selectedKind = kind;
     const input: Draft = publicationInput(kind, form);
     if (kind === 'agents') {
-      if (removeCredential) input.credential = null;
+      if (form.oauthEnabled || removeCredential) input.credential = null;
       else if (credential) input.credential = credential;
+      if (form.oauthEnabled && form.oauthEntra && entraClientSecret)
+        input.entra_client_secret = entraClientSecret;
     }
     busy = true;
     error = '';
@@ -272,6 +277,7 @@
       );
       if (!isCurrent() || version !== epoch) return;
       credential = '';
+      entraClientSecret = '';
       removeCredential = false;
       current = result;
       inspected = null;
@@ -655,15 +661,92 @@
               type="password"
               autocomplete="new-password"
               bind:value={credential}
-              disabled={!canTrust}
+              disabled={!canTrust || form.oauthEnabled}
             /></label
           ><label
             ><input
               type="checkbox"
               bind:checked={removeCredential}
-              disabled={!canTrust}
+              disabled={!canTrust || form.oauthEnabled}
             /> Remove credential</label
           >
+          <fieldset disabled={!canTrust}>
+            <legend>Personal OAuth authorization</legend>
+            <label
+              ><input type="checkbox" bind:checked={form.oauthEnabled} /> Use OAuth
+              grants</label
+            >
+            {#if form.oauthEnabled}
+              <p>
+                OAuth replaces any saved bearer credential. Publishing requires
+                a publicly readable agent card for publication and discovery.
+                Task requests use the caller's grant.
+              </p>
+              <label
+                ><input type="checkbox" bind:checked={form.oauthEntra} /> Use Entra
+                on-behalf-of</label
+              >
+              {#if form.oauthEntra}
+                <label
+                  >Workload issuer <input
+                    type="url"
+                    bind:value={form.oauthEntraIssuer}
+                    required
+                  /></label
+                >
+                <label
+                  >Replacement Entra client secret <input
+                    type="password"
+                    autocomplete="new-password"
+                    bind:value={entraClientSecret}
+                  /></label
+                >
+                <p>
+                  Supply the client secret when enabling Entra or changing its
+                  issuer, client ID, or token endpoint.
+                </p>
+              {/if}
+              <label
+                >Client ID <input
+                  bind:value={form.oauthClientID}
+                  required
+                /></label
+              >
+              <label
+                >Audience <input
+                  bind:value={form.oauthAudience}
+                  required
+                /></label
+              >
+              <label
+                >Scopes <input bind:value={form.oauthScopes} required /></label
+              >
+              {#if !form.oauthEntra}<label
+                  >Authorization endpoint <input
+                    type="url"
+                    bind:value={form.oauthAuthorizationEndpoint}
+                    required
+                  /></label
+                >{/if}
+              <label
+                >Token endpoint <input
+                  type="url"
+                  bind:value={form.oauthTokenEndpoint}
+                  required
+                /></label
+              >
+              {#if !form.oauthEntra}<label
+                  >Device authorization endpoint <input
+                    type="url"
+                    bind:value={form.oauthDeviceEndpoint}
+                  /></label
+                >{/if}
+              <p>
+                To change the agent endpoint, remove OAuth and publish the new
+                endpoint and card first. Then configure OAuth again.
+              </p>
+            {/if}
+          </fieldset>
           <p>
             Destination, card, and credential trust changes require installation
             access. Existing credentials are never displayed.
@@ -680,6 +763,7 @@
           !canManage ||
           unsaved ||
           !!credential ||
+          !!entraClientSecret ||
           removeCredential}
         onclick={() => write('publish')}>Publish saved draft</button
       >{#if unsaved}<p>Save edits before publishing.</p>{/if}

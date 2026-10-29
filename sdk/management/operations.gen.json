@@ -4548,11 +4548,15 @@
             },
             "card_digest": {
               "type": "string",
-              "pattern": "^[a-f0-9]{64}$"
+              "pattern": "^[a-f0-9]{64}$",
+              "description": "SHA-256 digest of the reviewed agent card. An OAuth agent's card must be publicly readable for publication and discovery. Task requests use the caller's grant."
             },
             "credential_id": {
               "type": "string",
               "format": "uuid"
+            },
+            "oauth": {
+              "$ref": "#/$defs/AgentOAuthConfiguration"
             },
             "toolset_revisions": {
               "type": "array",
@@ -4610,6 +4614,61 @@
             "pricing_revision_id",
             "max_cost"
           ]
+        },
+        "AgentOAuthConfiguration": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "client_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "audience": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2048
+            },
+            "scopes": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 32,
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              }
+            },
+            "authorization_endpoint": {
+              "type": "string",
+              "format": "uri",
+              "maxLength": 2048,
+              "description": "Required for browser and device OAuth."
+            },
+            "token_endpoint": {
+              "type": "string",
+              "format": "uri",
+              "maxLength": 2048
+            },
+            "device_authorization_endpoint": {
+              "type": "string",
+              "format": "uri",
+              "maxLength": 2048
+            },
+            "entra_obo": {
+              "$ref": "#/$defs/MCPEntraOBO"
+            }
+          },
+          "required": [
+            "client_id",
+            "audience",
+            "scopes",
+            "token_endpoint"
+          ],
+          "description": "OAuth grants are bound to the approved agent endpoint and caller identity. Browser and device flows use personal enrollment. Entra OBO uses verified workload assertions and a sealed middle-tier client secret."
         },
         "PromptDefinition": {
           "type": "object",
@@ -5227,6 +5286,13 @@
               "maxLength": 8192,
               "writeOnly": true,
               "description": "Bearer credential; absent preserves, null removes. Never returned."
+            },
+            "entra_client_secret": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 16384,
+              "writeOnly": true,
+              "description": "Replacement Entra OBO middle-tier client secret. Required when enabling Entra or changing the issuer, client ID, or token endpoint. Never returned."
             }
           },
           "required": [
@@ -5307,11 +5373,15 @@
             },
             "card_digest": {
               "type": "string",
-              "pattern": "^[a-f0-9]{64}$"
+              "pattern": "^[a-f0-9]{64}$",
+              "description": "SHA-256 digest of the reviewed agent card. An OAuth agent's card must be publicly readable for publication and discovery. Task requests use the caller's grant."
             },
             "credential_id": {
               "type": "string",
               "format": "uuid"
+            },
+            "oauth": {
+              "$ref": "#/$defs/AgentOAuthConfiguration"
             },
             "toolset_revisions": {
               "type": "array",
@@ -5369,6 +5439,75 @@
             "pricing_revision_id",
             "max_cost"
           ]
+        },
+        "AgentOAuthConfiguration": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "client_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "audience": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2048
+            },
+            "scopes": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 32,
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              }
+            },
+            "authorization_endpoint": {
+              "type": "string",
+              "format": "uri",
+              "maxLength": 2048,
+              "description": "Required for browser and device OAuth."
+            },
+            "token_endpoint": {
+              "type": "string",
+              "format": "uri",
+              "maxLength": 2048
+            },
+            "device_authorization_endpoint": {
+              "type": "string",
+              "format": "uri",
+              "maxLength": 2048
+            },
+            "entra_obo": {
+              "$ref": "#/$defs/MCPEntraOBO"
+            }
+          },
+          "required": [
+            "client_id",
+            "audience",
+            "scopes",
+            "token_endpoint"
+          ],
+          "description": "OAuth grants are bound to the approved agent endpoint and caller identity. Browser and device flows use personal enrollment. Entra OBO uses verified workload assertions and a sealed middle-tier client secret."
+        },
+        "MCPEntraOBO": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "issuer"
+          ],
+          "properties": {
+            "issuer": {
+              "type": "string",
+              "maxLength": 2048,
+              "description": "Exact registered workload issuer trusted for delegated user assertions."
+            }
+          }
         },
         "PromptDefinition": {
           "type": "object",
@@ -8888,6 +9027,13 @@
               "maxLength": 8192,
               "writeOnly": true,
               "description": "Bearer credential; absent preserves, null removes. Never returned."
+            },
+            "entra_client_secret": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 16384,
+              "writeOnly": true,
+              "description": "Replacement Entra OBO middle-tier client secret. Required when enabling Entra or changing the issuer, client ID, or token endpoint. Never returned."
             }
           },
           "required": [
@@ -8968,11 +9114,15 @@
             },
             "card_digest": {
               "type": "string",
-              "pattern": "^[a-f0-9]{64}$"
+              "pattern": "^[a-f0-9]{64}$",
+              "description": "SHA-256 digest of the reviewed agent card. An OAuth agent's card must be publicly readable for publication and discovery. Task requests use the caller's grant."
             },
             "credential_id": {
               "type": "string",
               "format": "uuid"
+            },
+            "oauth": {
+              "$ref": "#/$defs/AgentOAuthConfiguration"
             },
             "toolset_revisions": {
               "type": "array",
@@ -9030,6 +9180,75 @@
             "pricing_revision_id",
             "max_cost"
           ]
+        },
+        "AgentOAuthConfiguration": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "client_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "audience": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2048
+            },
+            "scopes": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 32,
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              }
+            },
+            "authorization_endpoint": {
+              "type": "string",
+              "format": "uri",
+              "maxLength": 2048,
+              "description": "Required for browser and device OAuth."
+            },
+            "token_endpoint": {
+              "type": "string",
+              "format": "uri",
+              "maxLength": 2048
+            },
+            "device_authorization_endpoint": {
+              "type": "string",
+              "format": "uri",
+              "maxLength": 2048
+            },
+            "entra_obo": {
+              "$ref": "#/$defs/MCPEntraOBO"
+            }
+          },
+          "required": [
+            "client_id",
+            "audience",
+            "scopes",
+            "token_endpoint"
+          ],
+          "description": "OAuth grants are bound to the approved agent endpoint and caller identity. Browser and device flows use personal enrollment. Entra OBO uses verified workload assertions and a sealed middle-tier client secret."
+        },
+        "MCPEntraOBO": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "issuer"
+          ],
+          "properties": {
+            "issuer": {
+              "type": "string",
+              "maxLength": 2048,
+              "description": "Exact registered workload issuer trusted for delegated user assertions."
+            }
+          }
         },
         "PromptDefinition": {
           "type": "object",
@@ -13230,6 +13449,13 @@
               "maxLength": 8192,
               "writeOnly": true,
               "description": "Bearer credential; absent preserves, null removes. Never returned."
+            },
+            "entra_client_secret": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 16384,
+              "writeOnly": true,
+              "description": "Replacement Entra OBO middle-tier client secret. Required when enabling Entra or changing the issuer, client ID, or token endpoint. Never returned."
             }
           },
           "required": [
@@ -13310,11 +13536,15 @@
             },
             "card_digest": {
               "type": "string",
-              "pattern": "^[a-f0-9]{64}$"
+              "pattern": "^[a-f0-9]{64}$",
+              "description": "SHA-256 digest of the reviewed agent card. An OAuth agent's card must be publicly readable for publication and discovery. Task requests use the caller's grant."
             },
             "credential_id": {
               "type": "string",
               "format": "uuid"
+            },
+            "oauth": {
+              "$ref": "#/$defs/AgentOAuthConfiguration"
             },
             "toolset_revisions": {
               "type": "array",
@@ -13372,6 +13602,75 @@
             "pricing_revision_id",
             "max_cost"
           ]
+        },
+        "AgentOAuthConfiguration": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "client_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "audience": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2048
+            },
+            "scopes": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 32,
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              }
+            },
+            "authorization_endpoint": {
+              "type": "string",
+              "format": "uri",
+              "maxLength": 2048,
+              "description": "Required for browser and device OAuth."
+            },
+            "token_endpoint": {
+              "type": "string",
+              "format": "uri",
+              "maxLength": 2048
+            },
+            "device_authorization_endpoint": {
+              "type": "string",
+              "format": "uri",
+              "maxLength": 2048
+            },
+            "entra_obo": {
+              "$ref": "#/$defs/MCPEntraOBO"
+            }
+          },
+          "required": [
+            "client_id",
+            "audience",
+            "scopes",
+            "token_endpoint"
+          ],
+          "description": "OAuth grants are bound to the approved agent endpoint and caller identity. Browser and device flows use personal enrollment. Entra OBO uses verified workload assertions and a sealed middle-tier client secret."
+        },
+        "MCPEntraOBO": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "issuer"
+          ],
+          "properties": {
+            "issuer": {
+              "type": "string",
+              "maxLength": 2048,
+              "description": "Exact registered workload issuer trusted for delegated user assertions."
+            }
+          }
         },
         "PromptDefinition": {
           "type": "object",
@@ -27975,11 +28274,15 @@
             },
             "card_digest": {
               "type": "string",
-              "pattern": "^[a-f0-9]{64}$"
+              "pattern": "^[a-f0-9]{64}$",
+              "description": "SHA-256 digest of the reviewed agent card. An OAuth agent's card must be publicly readable for publication and discovery. Task requests use the caller's grant."
             },
             "credential_id": {
               "type": "string",
               "format": "uuid"
+            },
+            "oauth": {
+              "$ref": "#/$defs/AgentOAuthConfiguration"
             },
             "toolset_revisions": {
               "type": "array",
@@ -28037,6 +28340,61 @@
             "pricing_revision_id",
             "max_cost"
           ]
+        },
+        "AgentOAuthConfiguration": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "client_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "audience": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2048
+            },
+            "scopes": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 32,
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              }
+            },
+            "authorization_endpoint": {
+              "type": "string",
+              "format": "uri",
+              "maxLength": 2048,
+              "description": "Required for browser and device OAuth."
+            },
+            "token_endpoint": {
+              "type": "string",
+              "format": "uri",
+              "maxLength": 2048
+            },
+            "device_authorization_endpoint": {
+              "type": "string",
+              "format": "uri",
+              "maxLength": 2048
+            },
+            "entra_obo": {
+              "$ref": "#/$defs/MCPEntraOBO"
+            }
+          },
+          "required": [
+            "client_id",
+            "audience",
+            "scopes",
+            "token_endpoint"
+          ],
+          "description": "OAuth grants are bound to the approved agent endpoint and caller identity. Browser and device flows use personal enrollment. Entra OBO uses verified workload assertions and a sealed middle-tier client secret."
         },
         "PromptDefinition": {
           "type": "object",
@@ -39107,6 +39465,13 @@
               "maxLength": 8192,
               "writeOnly": true,
               "description": "Bearer credential; absent preserves, null removes. Never returned."
+            },
+            "entra_client_secret": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 16384,
+              "writeOnly": true,
+              "description": "Replacement Entra OBO middle-tier client secret. Required when enabling Entra or changing the issuer, client ID, or token endpoint. Never returned."
             }
           },
           "required": [
@@ -39187,11 +39552,15 @@
             },
             "card_digest": {
               "type": "string",
-              "pattern": "^[a-f0-9]{64}$"
+              "pattern": "^[a-f0-9]{64}$",
+              "description": "SHA-256 digest of the reviewed agent card. An OAuth agent's card must be publicly readable for publication and discovery. Task requests use the caller's grant."
             },
             "credential_id": {
               "type": "string",
               "format": "uuid"
+            },
+            "oauth": {
+              "$ref": "#/$defs/AgentOAuthConfiguration"
             },
             "toolset_revisions": {
               "type": "array",
@@ -39249,6 +39618,75 @@
             "pricing_revision_id",
             "max_cost"
           ]
+        },
+        "AgentOAuthConfiguration": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "client_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "audience": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2048
+            },
+            "scopes": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 32,
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              }
+            },
+            "authorization_endpoint": {
+              "type": "string",
+              "format": "uri",
+              "maxLength": 2048,
+              "description": "Required for browser and device OAuth."
+            },
+            "token_endpoint": {
+              "type": "string",
+              "format": "uri",
+              "maxLength": 2048
+            },
+            "device_authorization_endpoint": {
+              "type": "string",
+              "format": "uri",
+              "maxLength": 2048
+            },
+            "entra_obo": {
+              "$ref": "#/$defs/MCPEntraOBO"
+            }
+          },
+          "required": [
+            "client_id",
+            "audience",
+            "scopes",
+            "token_endpoint"
+          ],
+          "description": "OAuth grants are bound to the approved agent endpoint and caller identity. Browser and device flows use personal enrollment. Entra OBO uses verified workload assertions and a sealed middle-tier client secret."
+        },
+        "MCPEntraOBO": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "issuer"
+          ],
+          "properties": {
+            "issuer": {
+              "type": "string",
+              "maxLength": 2048,
+              "description": "Exact registered workload issuer trusted for delegated user assertions."
+            }
+          }
         },
         "PromptDefinition": {
           "type": "object",
@@ -41577,6 +42015,13 @@
               "maxLength": 8192,
               "writeOnly": true,
               "description": "Bearer credential; absent preserves, null removes. Never returned."
+            },
+            "entra_client_secret": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 16384,
+              "writeOnly": true,
+              "description": "Replacement Entra OBO middle-tier client secret. Required when enabling Entra or changing the issuer, client ID, or token endpoint. Never returned."
             }
           },
           "required": [
@@ -41657,11 +42102,15 @@
             },
             "card_digest": {
               "type": "string",
-              "pattern": "^[a-f0-9]{64}$"
+              "pattern": "^[a-f0-9]{64}$",
+              "description": "SHA-256 digest of the reviewed agent card. An OAuth agent's card must be publicly readable for publication and discovery. Task requests use the caller's grant."
             },
             "credential_id": {
               "type": "string",
               "format": "uuid"
+            },
+            "oauth": {
+              "$ref": "#/$defs/AgentOAuthConfiguration"
             },
             "toolset_revisions": {
               "type": "array",
@@ -41719,6 +42168,75 @@
             "pricing_revision_id",
             "max_cost"
           ]
+        },
+        "AgentOAuthConfiguration": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "client_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "audience": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2048
+            },
+            "scopes": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 32,
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              }
+            },
+            "authorization_endpoint": {
+              "type": "string",
+              "format": "uri",
+              "maxLength": 2048,
+              "description": "Required for browser and device OAuth."
+            },
+            "token_endpoint": {
+              "type": "string",
+              "format": "uri",
+              "maxLength": 2048
+            },
+            "device_authorization_endpoint": {
+              "type": "string",
+              "format": "uri",
+              "maxLength": 2048
+            },
+            "entra_obo": {
+              "$ref": "#/$defs/MCPEntraOBO"
+            }
+          },
+          "required": [
+            "client_id",
+            "audience",
+            "scopes",
+            "token_endpoint"
+          ],
+          "description": "OAuth grants are bound to the approved agent endpoint and caller identity. Browser and device flows use personal enrollment. Entra OBO uses verified workload assertions and a sealed middle-tier client secret."
+        },
+        "MCPEntraOBO": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "issuer"
+          ],
+          "properties": {
+            "issuer": {
+              "type": "string",
+              "maxLength": 2048,
+              "description": "Exact registered workload issuer trusted for delegated user assertions."
+            }
+          }
         },
         "PromptDefinition": {
           "type": "object",
@@ -44119,6 +44637,13 @@
               "maxLength": 8192,
               "writeOnly": true,
               "description": "Bearer credential; absent preserves, null removes. Never returned."
+            },
+            "entra_client_secret": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 16384,
+              "writeOnly": true,
+              "description": "Replacement Entra OBO middle-tier client secret. Required when enabling Entra or changing the issuer, client ID, or token endpoint. Never returned."
             }
           },
           "required": [
@@ -44199,11 +44724,15 @@
             },
             "card_digest": {
               "type": "string",
-              "pattern": "^[a-f0-9]{64}$"
+              "pattern": "^[a-f0-9]{64}$",
+              "description": "SHA-256 digest of the reviewed agent card. An OAuth agent's card must be publicly readable for publication and discovery. Task requests use the caller's grant."
             },
             "credential_id": {
               "type": "string",
               "format": "uuid"
+            },
+            "oauth": {
+              "$ref": "#/$defs/AgentOAuthConfiguration"
             },
             "toolset_revisions": {
               "type": "array",
@@ -44261,6 +44790,75 @@
             "pricing_revision_id",
             "max_cost"
           ]
+        },
+        "AgentOAuthConfiguration": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "client_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "audience": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2048
+            },
+            "scopes": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 32,
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              }
+            },
+            "authorization_endpoint": {
+              "type": "string",
+              "format": "uri",
+              "maxLength": 2048,
+              "description": "Required for browser and device OAuth."
+            },
+            "token_endpoint": {
+              "type": "string",
+              "format": "uri",
+              "maxLength": 2048
+            },
+            "device_authorization_endpoint": {
+              "type": "string",
+              "format": "uri",
+              "maxLength": 2048
+            },
+            "entra_obo": {
+              "$ref": "#/$defs/MCPEntraOBO"
+            }
+          },
+          "required": [
+            "client_id",
+            "audience",
+            "scopes",
+            "token_endpoint"
+          ],
+          "description": "OAuth grants are bound to the approved agent endpoint and caller identity. Browser and device flows use personal enrollment. Entra OBO uses verified workload assertions and a sealed middle-tier client secret."
+        },
+        "MCPEntraOBO": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "issuer"
+          ],
+          "properties": {
+            "issuer": {
+              "type": "string",
+              "maxLength": 2048,
+              "description": "Exact registered workload issuer trusted for delegated user assertions."
+            }
+          }
         },
         "PromptDefinition": {
           "type": "object",

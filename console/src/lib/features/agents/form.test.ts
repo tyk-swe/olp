@@ -42,6 +42,68 @@ const server: MCPServer = {
 };
 
 describe('publication configuration', () => {
+  it('preserves Entra on-behalf-of settings without browser enrollment endpoints', () => {
+    const input = publicationInput('agents', {
+      ...publicationForm(),
+      project: id,
+      name: 'Agent',
+      endpoint: 'https://agent.example/rpc',
+      cardDigest: 'a'.repeat(64),
+      pricingRevision: id,
+      maxCost: '1',
+      oauthEnabled: true,
+      oauthEntra: true,
+      oauthEntraIssuer: 'https://identity.example/tenant',
+      oauthClientID: 'middle-tier',
+      oauthAudience: 'api://downstream',
+      oauthScopes: 'api://downstream/send',
+      oauthAuthorizationEndpoint: 'https://old.example/authorize',
+      oauthDeviceEndpoint: 'https://old.example/device',
+      oauthTokenEndpoint: 'https://identity.example/token'
+    });
+    expect(input.agent?.oauth).toEqual({
+      client_id: 'middle-tier',
+      audience: 'api://downstream',
+      scopes: ['api://downstream/send'],
+      token_endpoint: 'https://identity.example/token',
+      entra_obo: { issuer: 'https://identity.example/tenant' }
+    });
+    const current = { draft: input } as Parameters<typeof publicationForm>[0];
+    expect(publicationInput('agents', publicationForm(current))).toEqual(input);
+  });
+  it('retains OAuth settings when editing an agent and removes them only on request', () => {
+    const input = publicationInput('agents', {
+      ...publicationForm(),
+      project: id,
+      name: 'Agent',
+      endpoint: 'https://agent.example/rpc',
+      cardDigest: 'a'.repeat(64),
+      pricingRevision: id,
+      maxCost: '1',
+      oauthEnabled: true,
+      oauthClientID: 'client',
+      oauthAudience: 'audience',
+      oauthScopes: 'send read',
+      oauthAuthorizationEndpoint: 'https://auth.example/authorize',
+      oauthTokenEndpoint: 'https://auth.example/token',
+      oauthDeviceEndpoint: 'https://auth.example/device'
+    });
+    const current: Publication = {
+      id,
+      project_id: id,
+      kind: 'agent',
+      name: 'Agent',
+      etag: id,
+      revision_id: id,
+      retired: false,
+      draft: input
+    };
+    const form = publicationForm(current);
+    expect(publicationInput('agents', form)).toEqual(input);
+    expect(
+      publicationInput('agents', { ...form, oauthEnabled: false }).agent?.oauth
+    ).toBeUndefined();
+  });
   it('round trips structured prompt messages, declared string variables and defaults', () => {
     const input = publicationInput('prompts', {
       ...publicationForm(),

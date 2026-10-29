@@ -83,12 +83,18 @@ func (s *Server) sendStream(w http.ResponseWriter, r *http.Request, authority ac
 		reply(w, request.ID, nil, failure)
 		return
 	}
-	card, err := s.loadCard(r.Context(), *prepared.Revision.Definition.Agent)
+	credential, binding, err := s.preparedCredential(r.Context(), authority, prepared)
+	if err != nil {
+		fail(w, request.ID, -32603, "Agent credential unavailable")
+		return
+	}
+	defer clear(credential)
+	card, err := s.loadCardWithCredential(r.Context(), *prepared.Revision.Definition.Agent, credential)
 	if err != nil || !card.Capabilities.Streaming {
 		fail(w, request.ID, -32603, "Streaming unavailable")
 		return
 	}
-	transport, headers, cleanup, err := s.transport(r.Context(), *prepared.Revision.Definition.Agent)
+	transport, headers, cleanup, err := s.transportWithCredential(r.Context(), *prepared.Revision.Definition.Agent, credential)
 	if err != nil {
 		fail(w, request.ID, -32603, "Internal error")
 		return
@@ -136,7 +142,7 @@ func (s *Server) sendStream(w http.ResponseWriter, r *http.Request, authority ac
 		return
 	}
 	settleCtx, settleCancel := context.WithTimeout(context.WithoutCancel(r.Context()), 5*time.Second)
-	publicID, settleErr := s.Ledger.settle(settleCtx, res, authority, prepared.Revision, string(info.TaskID), info.ContextID, taskEventState(first))
+	publicID, settleErr := s.Ledger.settle(settleCtx, res, authority, prepared.Revision, string(info.TaskID), info.ContextID, taskEventState(first), binding)
 	settleCancel()
 	if settleErr != nil {
 		s.Ledger.unknown(r.Context(), res)
@@ -189,12 +195,18 @@ func (s *Server) subscribe(w http.ResponseWriter, r *http.Request, authority acc
 		fail(w, request.ID, -32001, "Task not found")
 		return
 	}
-	card, err := s.loadCard(r.Context(), *pinned.Definition.Agent)
+	credential, err := s.agentTaskCredential(r.Context(), authority, pinned, owned.Binding)
+	if err != nil {
+		fail(w, request.ID, -32603, "Agent credential unavailable")
+		return
+	}
+	defer clear(credential)
+	card, err := s.loadCardWithCredential(r.Context(), *pinned.Definition.Agent, credential)
 	if err != nil || !card.Capabilities.Streaming {
 		fail(w, request.ID, -32603, "Streaming unavailable")
 		return
 	}
-	transport, headers, cleanup, err := s.transport(r.Context(), *pinned.Definition.Agent)
+	transport, headers, cleanup, err := s.transportWithCredential(r.Context(), *pinned.Definition.Agent, credential)
 	if err != nil {
 		fail(w, request.ID, -32603, "Internal error")
 		return

@@ -34,6 +34,7 @@ type monitoredTask struct {
 	WorkloadRevision string
 	CallerExpiresAt  *time.Time
 	Definition       []byte
+	Binding          string
 }
 
 func (m *TaskMonitor) Run(ctx context.Context) {
@@ -60,7 +61,7 @@ func (m *TaskMonitor) Run(ctx context.Context) {
 }
 
 func (m *TaskMonitor) poll(ctx context.Context, authority taskAuthorizer, workers chan struct{}, outstanding *sync.WaitGroup) {
-	rows, err := m.Server.Ledger.Pool.Query(ctx, `SELECT t.id::text,t.api_key_id::text,t.project_id::text,t.publication_id::text,t.revision_id::text,t.upstream_id,t.deadline_at,COALESCE(t.caller_workload_revision_id::text,''),t.caller_expires_at,v.definition
+	rows, err := m.Server.Ledger.Pool.Query(ctx, `SELECT t.id::text,t.api_key_id::text,t.project_id::text,t.publication_id::text,t.revision_id::text,t.upstream_id,t.deadline_at,COALESCE(t.caller_workload_revision_id::text,''),t.caller_expires_at,v.definition,COALESCE(t.oauth_binding_digest,'')
  FROM olp.a2a_tasks t JOIN olp.agent_publication_revisions v ON v.id=t.revision_id
  WHERE t.state IN ('active','outcome_unknown') AND (t.cancel_claimed_until IS NULL OR t.cancel_claimed_until<=now())
  ORDER BY t.cancel_claimed_until NULLS FIRST,t.deadline_at,t.id`)
@@ -70,7 +71,7 @@ func (m *TaskMonitor) poll(ctx context.Context, authority taskAuthorizer, worker
 	}
 	tasks, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (monitoredTask, error) {
 		var task monitoredTask
-		err := row.Scan(&task.ID, &task.KeyID, &task.ProjectID, &task.PublicationID, &task.RevisionID, &task.UpstreamID, &task.Deadline, &task.WorkloadRevision, &task.CallerExpiresAt, &task.Definition)
+		err := row.Scan(&task.ID, &task.KeyID, &task.ProjectID, &task.PublicationID, &task.RevisionID, &task.UpstreamID, &task.Deadline, &task.WorkloadRevision, &task.CallerExpiresAt, &task.Definition, &task.Binding)
 		return task, err
 	})
 	if err != nil {
@@ -125,10 +126,15 @@ func (m *TaskMonitor) cancelState(ctx context.Context, task monitoredTask) strin
 	if json.Unmarshal(task.Definition, &definition) != nil || definition.Agent == nil || definition.ProjectID != task.ProjectID {
 		return "outcome_unknown"
 	}
-	if _, err := m.Server.loadCard(ctx, *definition.Agent); err != nil {
+	credential, err := m.taskCredential(ctx, task, *definition.Agent)
+	if err != nil {
 		return "outcome_unknown"
 	}
-	transport, headers, cleanup, err := m.Server.transport(ctx, *definition.Agent)
+	defer clear(credential)
+	if _, err := m.Server.loadCardWithCredential(ctx, *definition.Agent, credential); err != nil {
+		return "outcome_unknown"
+	}
+	transport, headers, cleanup, err := m.Server.transportWithCredential(ctx, *definition.Agent, credential)
 	if err != nil {
 		return "outcome_unknown"
 	}
@@ -143,6 +149,16 @@ func (m *TaskMonitor) cancelState(ctx context.Context, task monitoredTask) strin
 	default:
 		return "outcome_unknown"
 	}
+}
+
+func (m *TaskMonitor) taskCredential(ctx context.Context, task monitoredTask, definition agentcontract.Definition) ([]byte, error) {
+	if definition.OAuth == nil && task.Binding == "" {
+		return nil, nil
+	}
+	if definition.OAuth == nil || task.Binding == "" || m.Server.Grants == nil {
+		return nil, errors.New("agent grant unavailable")
+	}
+	return m.Server.Grants.ResolveAgentTask(ctx, task.Binding, task.PublicationID, task.ProjectID, task.RevisionID, definition)
 }
 
 func (m *TaskMonitor) warn(message string) {

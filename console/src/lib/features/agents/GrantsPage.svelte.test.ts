@@ -10,9 +10,11 @@ vi.mock('./api', async (original) => ({
   ...(await original<typeof import('./api')>()),
   listMCPGrants: vi.fn(),
   listServers: vi.fn(),
+  listPublications: vi.fn(),
   getServer: vi.fn(),
   saveServer: vi.fn(),
   startMCPGrant: vi.fn(),
+  startAgentGrant: vi.fn(),
   claimMCPGrant: vi.fn(),
   authorizeMCPGrant: vi.fn(),
   pollMCPGrant: vi.fn(),
@@ -69,6 +71,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   window.history.replaceState(null, '', '/agents/grants');
   vi.mocked(api.listServers).mockResolvedValue([a, b]);
+  vi.mocked(api.listPublications).mockResolvedValue([]);
   vi.mocked(api.listMCPGrants).mockResolvedValue([]);
   vi.mocked(keys.listApiKeys).mockResolvedValue([]);
   vi.mocked(api.getDelegationOptions).mockResolvedValue({ agents: [] });
@@ -86,6 +89,51 @@ beforeEach(() => {
   });
   vi.mocked(api.getServer).mockImplementation(async (id) =>
     id === a.id ? a : b
+  );
+});
+
+it('starts agent enrollment for the selected published agent and key', async () => {
+  vi.mocked(api.listPublications).mockResolvedValue([
+    {
+      id: 'agent',
+      project_id: 'project',
+      kind: 'agent',
+      name: 'Agent',
+      etag: 'etag',
+      revision_id: 'revision',
+      retired: false
+    },
+    {
+      id: 'draft',
+      project_id: 'project',
+      kind: 'agent',
+      name: 'Draft',
+      etag: 'etag',
+      revision_id: null,
+      retired: false
+    }
+  ]);
+  vi.mocked(api.startAgentGrant).mockResolvedValue({
+    enrollment_id: 'enrollment',
+    enrollment_url: '/agents/grants#enrollment.private',
+    expires_at: '2030-01-01T00:00:00Z'
+  });
+  const { host } = page();
+  await vi.waitFor(() =>
+    expect(host.querySelector('option[value="agent"]')).not.toBeNull()
+  );
+  expect(host.querySelector('option[value="draft"]')).toBeNull();
+  const select = host.querySelector<HTMLSelectElement>('option[value="agent"]')!
+    .parentElement as HTMLSelectElement;
+  select.value = 'agent';
+  select.dispatchEvent(new Event('change', { bubbles: true }));
+  fill(host, 'Agent API key UUID', 'agent-key');
+  button(host, 'Start agent key enrollment').click();
+  await vi.waitFor(() =>
+    expect(api.startAgentGrant).toHaveBeenCalledWith('agent', 'agent-key')
+  );
+  await vi.waitFor(() =>
+    expect(host.textContent).toContain('Continue personal enrollment')
   );
 });
 

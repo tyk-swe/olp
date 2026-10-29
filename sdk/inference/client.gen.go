@@ -2892,7 +2892,7 @@ type ClientInterface interface {
 
 	// CallA2AAgentWithBody Send a message to or read, cancel, and subscribe to a task from a published A2A agent
 	//
-	// Supports A2A 0.3 and 1.0 JSON-RPC send, streaming send, task read, cancellation, and subscription methods. The published protocol determines the accepted methods and response format. Requires the agents scope and an explicit allowlist entry. OLP task IDs are bound to the initiating key and project. Streaming methods return events as they arrive, with a one MiB maximum per event. Disconnecting does not immediately cancel the upstream task. Disconnected tasks remain subject to deadline and authorization checks; OLP requests cancellation when those checks fail but cannot guarantee that a remote agent stops.
+	// Supports A2A 0.3 and 1.0 JSON-RPC send, streaming send, task read, cancellation, and subscription methods. The published protocol determines the accepted methods and response format. Requires the agents scope and an explicit allowlist entry. OLP task IDs are bound to the initiating key and project, and OAuth tasks also to the caller's grant identity. Streaming methods return events as they arrive, with a one MiB maximum per event. Disconnecting does not immediately cancel the upstream task. Disconnected tasks remain subject to deadline and authorization checks; OLP requests cancellation when those checks fail but cannot guarantee that a remote agent stops.
 	//
 	// Takes any type of body and a specified content type.
 	//
@@ -2901,7 +2901,7 @@ type ClientInterface interface {
 
 	// CallA2AAgent Send a message to or read, cancel, and subscribe to a task from a published A2A agent
 	//
-	// Supports A2A 0.3 and 1.0 JSON-RPC send, streaming send, task read, cancellation, and subscription methods. The published protocol determines the accepted methods and response format. Requires the agents scope and an explicit allowlist entry. OLP task IDs are bound to the initiating key and project. Streaming methods return events as they arrive, with a one MiB maximum per event. Disconnecting does not immediately cancel the upstream task. Disconnected tasks remain subject to deadline and authorization checks; OLP requests cancellation when those checks fail but cannot guarantee that a remote agent stops.
+	// Supports A2A 0.3 and 1.0 JSON-RPC send, streaming send, task read, cancellation, and subscription methods. The published protocol determines the accepted methods and response format. Requires the agents scope and an explicit allowlist entry. OLP task IDs are bound to the initiating key and project, and OAuth tasks also to the caller's grant identity. Streaming methods return events as they arrive, with a one MiB maximum per event. Disconnecting does not immediately cancel the upstream task. Disconnected tasks remain subject to deadline and authorization checks; OLP requests cancellation when those checks fail but cannot guarantee that a remote agent stops.
 	//
 	// Takes a body of the `application/json` content type.
 	//
@@ -2914,6 +2914,13 @@ type ClientInterface interface {
 	//
 	// Corresponds with GET /a2a/{agent}/.well-known/agent-card.json (the `GetA2AAgentCard` operationId).
 	GetA2AAgentCard(ctx context.Context, agent openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// StartA2AAgentGrantEnrollment Start a personal OAuth grant for an A2A agent
+	//
+	// Requires an authorized workload identity with a verified end user. The one-use handoff URL lets that user claim and complete enrollment in the console. The grant is bound to this agent, its approved endpoint and OAuth configuration, and the verified individual.
+	//
+	// Corresponds with POST /a2a/{agent}/grant-enrollments (the `StartA2AAgentGrantEnrollment` operationId).
+	StartA2AAgentGrantEnrollment(ctx context.Context, agent openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// CreateAnthropicMessageWithPromptWithBody Create an Anthropic message using a published OLP prompt
 	//
@@ -3035,7 +3042,7 @@ type ClientInterface interface {
 
 // CallA2AAgentWithBody Send a message to or read, cancel, and subscribe to a task from a published A2A agent
 //
-// Supports A2A 0.3 and 1.0 JSON-RPC send, streaming send, task read, cancellation, and subscription methods. The published protocol determines the accepted methods and response format. Requires the agents scope and an explicit allowlist entry. OLP task IDs are bound to the initiating key and project. Streaming methods return events as they arrive, with a one MiB maximum per event. Disconnecting does not immediately cancel the upstream task. Disconnected tasks remain subject to deadline and authorization checks; OLP requests cancellation when those checks fail but cannot guarantee that a remote agent stops.
+// Supports A2A 0.3 and 1.0 JSON-RPC send, streaming send, task read, cancellation, and subscription methods. The published protocol determines the accepted methods and response format. Requires the agents scope and an explicit allowlist entry. OLP task IDs are bound to the initiating key and project, and OAuth tasks also to the caller's grant identity. Streaming methods return events as they arrive, with a one MiB maximum per event. Disconnecting does not immediately cancel the upstream task. Disconnected tasks remain subject to deadline and authorization checks; OLP requests cancellation when those checks fail but cannot guarantee that a remote agent stops.
 //
 // Takes any type of body and a specified content type.
 //
@@ -3054,7 +3061,7 @@ func (c *Client) CallA2AAgentWithBody(ctx context.Context, agent openapi_types.U
 
 // CallA2AAgent Send a message to or read, cancel, and subscribe to a task from a published A2A agent
 //
-// Supports A2A 0.3 and 1.0 JSON-RPC send, streaming send, task read, cancellation, and subscription methods. The published protocol determines the accepted methods and response format. Requires the agents scope and an explicit allowlist entry. OLP task IDs are bound to the initiating key and project. Streaming methods return events as they arrive, with a one MiB maximum per event. Disconnecting does not immediately cancel the upstream task. Disconnected tasks remain subject to deadline and authorization checks; OLP requests cancellation when those checks fail but cannot guarantee that a remote agent stops.
+// Supports A2A 0.3 and 1.0 JSON-RPC send, streaming send, task read, cancellation, and subscription methods. The published protocol determines the accepted methods and response format. Requires the agents scope and an explicit allowlist entry. OLP task IDs are bound to the initiating key and project, and OAuth tasks also to the caller's grant identity. Streaming methods return events as they arrive, with a one MiB maximum per event. Disconnecting does not immediately cancel the upstream task. Disconnected tasks remain subject to deadline and authorization checks; OLP requests cancellation when those checks fail but cannot guarantee that a remote agent stops.
 //
 // Takes a body of the `application/json` content type.
 //
@@ -3078,6 +3085,23 @@ func (c *Client) CallA2AAgent(ctx context.Context, agent openapi_types.UUID, bod
 // Corresponds with GET /a2a/{agent}/.well-known/agent-card.json (the `GetA2AAgentCard` operationId).
 func (c *Client) GetA2AAgentCard(ctx context.Context, agent openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewGetA2AAgentCardRequest(c.Server, agent)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// StartA2AAgentGrantEnrollment Start a personal OAuth grant for an A2A agent
+//
+// Requires an authorized workload identity with a verified end user. The one-use handoff URL lets that user claim and complete enrollment in the console. The grant is bound to this agent, its approved endpoint and OAuth configuration, and the verified individual.
+//
+// Corresponds with POST /a2a/{agent}/grant-enrollments (the `StartA2AAgentGrantEnrollment` operationId).
+func (c *Client) StartA2AAgentGrantEnrollment(ctx context.Context, agent openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewStartA2AAgentGrantEnrollmentRequest(c.Server, agent)
 	if err != nil {
 		return nil, err
 	}
@@ -3409,6 +3433,40 @@ func NewGetA2AAgentCardRequest(server string, agent openapi_types.UUID) (*http.R
 	}
 
 	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewStartA2AAgentGrantEnrollmentRequest constructs an http.Request for the StartA2AAgentGrantEnrollment method
+func NewStartA2AAgentGrantEnrollmentRequest(server string, agent openapi_types.UUID) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "agent", agent, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/a2a/%s/grant-enrollments", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -3861,7 +3919,7 @@ type ClientWithResponsesInterface interface {
 
 	// CallA2AAgentWithBodyWithResponse Send a message to or read, cancel, and subscribe to a task from a published A2A agent
 	//
-	// Supports A2A 0.3 and 1.0 JSON-RPC send, streaming send, task read, cancellation, and subscription methods. The published protocol determines the accepted methods and response format. Requires the agents scope and an explicit allowlist entry. OLP task IDs are bound to the initiating key and project. Streaming methods return events as they arrive, with a one MiB maximum per event. Disconnecting does not immediately cancel the upstream task. Disconnected tasks remain subject to deadline and authorization checks; OLP requests cancellation when those checks fail but cannot guarantee that a remote agent stops.
+	// Supports A2A 0.3 and 1.0 JSON-RPC send, streaming send, task read, cancellation, and subscription methods. The published protocol determines the accepted methods and response format. Requires the agents scope and an explicit allowlist entry. OLP task IDs are bound to the initiating key and project, and OAuth tasks also to the caller's grant identity. Streaming methods return events as they arrive, with a one MiB maximum per event. Disconnecting does not immediately cancel the upstream task. Disconnected tasks remain subject to deadline and authorization checks; OLP requests cancellation when those checks fail but cannot guarantee that a remote agent stops.
 	//
 	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
 	//
@@ -3870,7 +3928,7 @@ type ClientWithResponsesInterface interface {
 
 	// CallA2AAgentWithResponse Send a message to or read, cancel, and subscribe to a task from a published A2A agent
 	//
-	// Supports A2A 0.3 and 1.0 JSON-RPC send, streaming send, task read, cancellation, and subscription methods. The published protocol determines the accepted methods and response format. Requires the agents scope and an explicit allowlist entry. OLP task IDs are bound to the initiating key and project. Streaming methods return events as they arrive, with a one MiB maximum per event. Disconnecting does not immediately cancel the upstream task. Disconnected tasks remain subject to deadline and authorization checks; OLP requests cancellation when those checks fail but cannot guarantee that a remote agent stops.
+	// Supports A2A 0.3 and 1.0 JSON-RPC send, streaming send, task read, cancellation, and subscription methods. The published protocol determines the accepted methods and response format. Requires the agents scope and an explicit allowlist entry. OLP task IDs are bound to the initiating key and project, and OAuth tasks also to the caller's grant identity. Streaming methods return events as they arrive, with a one MiB maximum per event. Disconnecting does not immediately cancel the upstream task. Disconnected tasks remain subject to deadline and authorization checks; OLP requests cancellation when those checks fail but cannot guarantee that a remote agent stops.
 	//
 	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
 	//
@@ -3885,6 +3943,15 @@ type ClientWithResponsesInterface interface {
 	//
 	// Corresponds with GET /a2a/{agent}/.well-known/agent-card.json (the `GetA2AAgentCard` operationId).
 	GetA2AAgentCardWithResponse(ctx context.Context, agent openapi_types.UUID, reqEditors ...RequestEditorFn) (*GetA2AAgentCardResponse, error)
+
+	// StartA2AAgentGrantEnrollmentWithResponse Start a personal OAuth grant for an A2A agent
+	//
+	// Requires an authorized workload identity with a verified end user. The one-use handoff URL lets that user claim and complete enrollment in the console. The grant is bound to this agent, its approved endpoint and OAuth configuration, and the verified individual.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /a2a/{agent}/grant-enrollments (the `StartA2AAgentGrantEnrollment` operationId).
+	StartA2AAgentGrantEnrollmentWithResponse(ctx context.Context, agent openapi_types.UUID, reqEditors ...RequestEditorFn) (*StartA2AAgentGrantEnrollmentResponse, error)
 
 	// CreateAnthropicMessageWithPromptWithBodyWithResponse Create an Anthropic message using a published OLP prompt
 	//
@@ -4080,6 +4147,55 @@ func (r GetA2AAgentCardResponse) StatusCode() int {
 
 // ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
 func (r GetA2AAgentCardResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type StartA2AAgentGrantEnrollmentResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON201 the response for an HTTP 201 `application/json` response
+	JSON201 *struct {
+		EnrollmentId  openapi_types.UUID `json:"enrollment_id"`
+		EnrollmentUrl string             `json:"enrollment_url"`
+		ExpiresAt     time.Time          `json:"expires_at"`
+	}
+}
+
+// GetJSON201 returns the response for an HTTP 201 `application/json` response
+func (r StartA2AAgentGrantEnrollmentResponse) GetJSON201() *struct {
+	EnrollmentId  openapi_types.UUID `json:"enrollment_id"`
+	EnrollmentUrl string             `json:"enrollment_url"`
+	ExpiresAt     time.Time          `json:"expires_at"`
+} {
+	return r.JSON201
+}
+
+// GetBody returns the raw response body bytes
+func (r StartA2AAgentGrantEnrollmentResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r StartA2AAgentGrantEnrollmentResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r StartA2AAgentGrantEnrollmentResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r StartA2AAgentGrantEnrollmentResponse) ContentType() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Header.Get("Content-Type")
 	}
@@ -4641,7 +4757,7 @@ func (r ExportTracesResponse) ContentType() string {
 
 // CallA2AAgentWithBodyWithResponse Send a message to or read, cancel, and subscribe to a task from a published A2A agent
 //
-// Supports A2A 0.3 and 1.0 JSON-RPC send, streaming send, task read, cancellation, and subscription methods. The published protocol determines the accepted methods and response format. Requires the agents scope and an explicit allowlist entry. OLP task IDs are bound to the initiating key and project. Streaming methods return events as they arrive, with a one MiB maximum per event. Disconnecting does not immediately cancel the upstream task. Disconnected tasks remain subject to deadline and authorization checks; OLP requests cancellation when those checks fail but cannot guarantee that a remote agent stops.
+// Supports A2A 0.3 and 1.0 JSON-RPC send, streaming send, task read, cancellation, and subscription methods. The published protocol determines the accepted methods and response format. Requires the agents scope and an explicit allowlist entry. OLP task IDs are bound to the initiating key and project, and OAuth tasks also to the caller's grant identity. Streaming methods return events as they arrive, with a one MiB maximum per event. Disconnecting does not immediately cancel the upstream task. Disconnected tasks remain subject to deadline and authorization checks; OLP requests cancellation when those checks fail but cannot guarantee that a remote agent stops.
 //
 // Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
 //
@@ -4656,7 +4772,7 @@ func (c *ClientWithResponses) CallA2AAgentWithBodyWithResponse(ctx context.Conte
 
 // CallA2AAgentWithResponse Send a message to or read, cancel, and subscribe to a task from a published A2A agent
 //
-// Supports A2A 0.3 and 1.0 JSON-RPC send, streaming send, task read, cancellation, and subscription methods. The published protocol determines the accepted methods and response format. Requires the agents scope and an explicit allowlist entry. OLP task IDs are bound to the initiating key and project. Streaming methods return events as they arrive, with a one MiB maximum per event. Disconnecting does not immediately cancel the upstream task. Disconnected tasks remain subject to deadline and authorization checks; OLP requests cancellation when those checks fail but cannot guarantee that a remote agent stops.
+// Supports A2A 0.3 and 1.0 JSON-RPC send, streaming send, task read, cancellation, and subscription methods. The published protocol determines the accepted methods and response format. Requires the agents scope and an explicit allowlist entry. OLP task IDs are bound to the initiating key and project, and OAuth tasks also to the caller's grant identity. Streaming methods return events as they arrive, with a one MiB maximum per event. Disconnecting does not immediately cancel the upstream task. Disconnected tasks remain subject to deadline and authorization checks; OLP requests cancellation when those checks fail but cannot guarantee that a remote agent stops.
 //
 // Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
 //
@@ -4682,6 +4798,21 @@ func (c *ClientWithResponses) GetA2AAgentCardWithResponse(ctx context.Context, a
 		return nil, err
 	}
 	return ParseGetA2AAgentCardResponse(rsp)
+}
+
+// StartA2AAgentGrantEnrollmentWithResponse Start a personal OAuth grant for an A2A agent
+//
+// Requires an authorized workload identity with a verified end user. The one-use handoff URL lets that user claim and complete enrollment in the console. The grant is bound to this agent, its approved endpoint and OAuth configuration, and the verified individual.
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /a2a/{agent}/grant-enrollments (the `StartA2AAgentGrantEnrollment` operationId).
+func (c *ClientWithResponses) StartA2AAgentGrantEnrollmentWithResponse(ctx context.Context, agent openapi_types.UUID, reqEditors ...RequestEditorFn) (*StartA2AAgentGrantEnrollmentResponse, error) {
+	rsp, err := c.StartA2AAgentGrantEnrollment(ctx, agent, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseStartA2AAgentGrantEnrollmentResponse(rsp)
 }
 
 // CreateAnthropicMessageWithPromptWithBodyWithResponse Create an Anthropic message using a published OLP prompt
@@ -4951,6 +5082,54 @@ func ParseGetA2AAgentCardResponse(rsp *http.Response) (*GetA2AAgentCardResponse,
 		break // No content-type
 
 	case rsp.StatusCode == 502:
+		break // No content-type
+
+	}
+
+	return response, nil
+}
+
+// ParseStartA2AAgentGrantEnrollmentResponse parses an HTTP response from a StartA2AAgentGrantEnrollmentWithResponse call
+func ParseStartA2AAgentGrantEnrollmentResponse(rsp *http.Response) (*StartA2AAgentGrantEnrollmentResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &StartA2AAgentGrantEnrollmentResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 201:
+		var dest struct {
+			EnrollmentId  openapi_types.UUID `json:"enrollment_id"`
+			EnrollmentUrl string             `json:"enrollment_url"`
+			ExpiresAt     time.Time          `json:"expires_at"`
+		}
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON201 = &dest
+
+	case rsp.StatusCode == 400:
+		break // No content-type
+
+	case rsp.StatusCode == 401:
+		break // No content-type
+
+	case rsp.StatusCode == 403:
+		break // No content-type
+
+	case rsp.StatusCode == 404:
+		break // No content-type
+
+	case rsp.StatusCode == 409:
+		break // No content-type
+
+	case rsp.StatusCode == 503:
 		break // No content-type
 
 	}

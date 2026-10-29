@@ -385,7 +385,7 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 				gw.Resolver = resources.NewResolver(pool)
 			}
 			gw.Register(public)
-			agentServer := &a2a.Server{Runtime: rt, Egress: &policy, Ledger: &a2a.Ledger{Pool: pool, Store: &limits.DebitStore{Pool: pool, Limiter: limiter}, Auth: auth}, TrustedProxies: c.TrustedProxyCIDRs, PublicOrigin: c.PublicOrigin, Credentials: func(ctx context.Context, id string) ([]byte, error) {
+			agentServer := &a2a.Server{Grants: &mcpgrants.Store{Egress: &policy, Pool: pool, Keys: keys, Auth: auth, Installation: installation}, Runtime: rt, Egress: &policy, Ledger: &a2a.Ledger{Pool: pool, Store: &limits.DebitStore{Pool: pool, Limiter: limiter}, Auth: auth}, TrustedProxies: c.TrustedProxyCIDRs, PublicOrigin: c.PublicOrigin, Credentials: func(ctx context.Context, id string) ([]byte, error) {
 				return keys.Read(ctx, pool, installation, id, secrets.AgentCredential)
 			}}
 			agentServer.Register(public)
