@@ -133,6 +133,7 @@ func (o *bedrockObserver) clientFrame(frame []byte) error {
 }
 
 func (o *bedrockObserver) usageValue() *wire.Usage { return o.usage }
+func (o *bedrockObserver) pendingResponse() bool   { return o.pending > 0 }
 func (o *bedrockObserver) complete() bool {
 	return o.usage != nil && o.pending == 0 && !o.inputAfterUsage && !o.incomplete
 }
