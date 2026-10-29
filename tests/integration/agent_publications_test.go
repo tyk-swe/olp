@@ -268,11 +268,20 @@ func TestAgentPublicationImmutableRows(t *testing.T) {
 	}
 }
 
+type a2aTestParams struct {
+	ID      protocol.TaskID             `json:"id,omitempty"`
+	Message *protocol.Message           `json:"message,omitempty"`
+	Config  *protocol.SendMessageConfig `json:"configuration,omitempty"`
+}
+
 func TestA2AAgentCardUsesGatewayAuthenticationAndEndpoint(t *testing.T) {
 	h := newAccessHarness(t)
 	owner := h.owner()
 	project := createProject(h, owner, "A2A discovery")
-	card := []byte(`{"name":"Fixture agent","description":"A test agent","version":"1.0","supportedInterfaces":[{"url":"PINNED_ENDPOINT","protocolBinding":"JSONRPC","protocolVersion":"1.0"},{"url":"https://wrong.invalid/rpc","protocolBinding":"JSONRPC","protocolVersion":"1.0"}],"capabilities":{"streaming":true,"pushNotifications":true},"defaultInputModes":["text"],"defaultOutputModes":["text"],"skills":[]}`)
+	const cardTemplate = `{"name":"Fixture agent","description":"A test agent","version":"1.0","supportedInterfaces":[{"url":"PINNED_ENDPOINT","protocolBinding":"JSONRPC","protocolVersion":"1.0"},{"url":"https://wrong.invalid/rpc","protocolBinding":"JSONRPC","protocolVersion":"1.0"}],"capabilities":{"streaming":true,"pushNotifications":true},"defaultInputModes":["text"],"defaultOutputModes":["text"],"skills":[]}`
+	cardFor := func(endpoint string) []byte {
+		return bytes.ReplaceAll([]byte(cardTemplate), []byte("PINNED_ENDPOINT"), []byte(endpoint))
+	}
 	upstreamIDs := make(chan string, 1)
 	var redirectCard, redirectRPC atomic.Bool
 	var redirectHits atomic.Int32
@@ -321,10 +330,10 @@ func TestA2AAgentCardUsesGatewayAuthenticationAndEndpoint(t *testing.T) {
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write(card)
+		_, _ = w.Write(cardFor("http://" + r.Host + "/rpc"))
 	}))
 	t.Cleanup(upstream.Close)
-	card = bytes.ReplaceAll(card, []byte("PINNED_ENDPOINT"), []byte(upstream.URL+"/rpc"))
+	card := cardFor(upstream.URL + "/rpc")
 	var user string
 	if err := h.Pool.QueryRow(t.Context(), `SELECT id::text FROM olp.users WHERE email='owner@example.com'`).Scan(&user); err != nil {
 		t.Fatal(err)
@@ -332,6 +341,19 @@ func TestA2AAgentCardUsesGatewayAuthenticationAndEndpoint(t *testing.T) {
 	pricing := acctID(t)
 	acctExec(t, h.Pool, `INSERT INTO olp.pricing_revisions(id,revision,effective_at,created_by) VALUES($1,1,now(),$2)`, pricing, user)
 	digest := sha256.Sum256(card)
+	for _, price := range []struct{ name, value string }{
+		{name: "malformed", value: "not-a-number"},
+		{name: "negative", value: "-0.01"},
+		{name: "above-bound", value: "1.01"},
+	} {
+		problem := h.want(owner, http.MethodPost, "/api/v1/agents", map[string]any{
+			"project_id": project, "name": "invalid " + price.name,
+			"agent": map[string]any{"protocol": "a2a-1.0.0", "endpoint": upstream.URL + "/rpc", "card_digest": hex.EncodeToString(digest[:]), "toolset_revisions": []string{}, "route_revisions": []string{}, "pricing_revision_id": pricing, "max_cost": "1", "message_price": price.value},
+		}, idem("a2a-invalid-price-"+price.name), http.StatusUnprocessableEntity)
+		if !strings.Contains(fmt.Sprint(problem["detail"]), "message_price") {
+			t.Fatalf("invalid price rejected for the wrong reason: %+v", problem)
+		}
+	}
 	created := h.want(owner, http.MethodPost, "/api/v1/agents", map[string]any{
 		"project_id": project, "name": "fixture", "credential": "upstream-secret",
 		"agent": map[string]any{"protocol": "a2a-1.0.0", "endpoint": upstream.URL + "/rpc", "card_digest": hex.EncodeToString(digest[:]), "toolset_revisions": []string{}, "route_revisions": []string{}, "pricing_revision_id": pricing, "max_cost": "1", "message_price": "0.25"},
@@ -415,9 +437,17 @@ func TestA2AAgentCardUsesGatewayAuthenticationAndEndpoint(t *testing.T) {
 			t.Fatalf("unexpected security scheme: %+v", scheme)
 		}
 	}
-	rpc := func(secret, method string, params any) map[string]any {
+	message := func(id, text string) *protocol.Message {
+		return &protocol.Message{ID: id, Role: protocol.MessageRoleUser, Parts: protocol.ContentParts{protocol.NewTextPart(text)}}
+	}
+	rpc := func(secret, method string, params a2aTestParams) map[string]any {
 		t.Helper()
-		body, err := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": 1, "method": method, "params": params})
+		body, err := json.Marshal(struct {
+			JSONRPC string        `json:"jsonrpc"`
+			ID      int           `json:"id"`
+			Method  string        `json:"method"`
+			Params  a2aTestParams `json:"params"`
+		}{JSONRPC: "2.0", ID: 1, Method: method, Params: params})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -460,7 +490,7 @@ func TestA2AAgentCardUsesGatewayAuthenticationAndEndpoint(t *testing.T) {
 	if err := json.NewDecoder(invalidIDResponse.Body).Decode(&invalidIDResult); err != nil || invalidIDResult.Error.Code != -32600 || string(invalidIDResult.ID) != "null" {
 		t.Fatalf("invalid JSON-RPC ID was accepted: %+v, %v", invalidIDResult, err)
 	}
-	sent := rpc(key, "SendMessage", map[string]any{"message": map[string]any{"messageId": "fixture-message", "role": "ROLE_USER", "parts": []any{map[string]any{"text": "PRIVATE REQUEST"}}}})
+	sent := rpc(key, "SendMessage", a2aTestParams{Message: message("fixture-message", "PRIVATE REQUEST")})
 	sendResult, ok := sent["result"].(map[string]any)
 	if !ok {
 		t.Fatalf("send failed: %+v", sent)
@@ -474,18 +504,18 @@ func TestA2AAgentCardUsesGatewayAuthenticationAndEndpoint(t *testing.T) {
 	if !ok || id == "" || id == upstreamID {
 		t.Fatalf("send did not mask upstream ID: %+v", task)
 	}
-	read := rpc(key, "GetTask", map[string]any{"id": id})
+	read := rpc(key, "GetTask", a2aTestParams{ID: protocol.TaskID(id)})
 	readTask, ok := read["result"].(map[string]any)
 	if !ok || readTask["id"] != id || !strings.Contains(fmt.Sprint(readTask), "PRIVATE ARTIFACT") {
 		t.Fatalf("task read failed: %+v", read)
 	}
-	if got := rpc(key, "SendMessage", map[string]any{"message": map[string]any{"messageId": "upstream-reference", "role": "ROLE_USER", "parts": []any{map[string]any{"text": "reference"}}, "referenceTaskIds": []any{upstreamID}}}); got["error"] == nil {
+	if got := rpc(key, "SendMessage", a2aTestParams{Message: &protocol.Message{ID: "upstream-reference", Role: protocol.MessageRoleUser, Parts: protocol.ContentParts{protocol.NewTextPart("reference")}, ReferenceTasks: []protocol.TaskID{protocol.TaskID(upstreamID)}}}); got["error"] == nil {
 		t.Fatalf("accepted upstream task reference: %+v", got)
 	}
-	if got := rpc(key, "SendMessage", map[string]any{"message": map[string]any{"messageId": "push-attempt", "role": "ROLE_USER", "parts": []any{map[string]any{"text": "push"}}}, "configuration": map[string]any{"taskPushNotificationConfig": map[string]any{"pushNotificationConfig": map[string]any{"url": "https://wrong.invalid"}}}}); got["error"] == nil {
+	if got := rpc(key, "SendMessage", a2aTestParams{Message: message("push-attempt", "push"), Config: &protocol.SendMessageConfig{PushConfig: &protocol.PushConfig{URL: "https://wrong.invalid"}}}); got["error"] == nil {
 		t.Fatalf("accepted an unsupported push request: %+v", got)
 	}
-	second := rpc(key, "SendMessage", map[string]any{"message": map[string]any{"messageId": "second-fixture-message", "role": "ROLE_USER", "parts": []any{map[string]any{"text": "another message"}}}})
+	second := rpc(key, "SendMessage", a2aTestParams{Message: message("second-fixture-message", "another message")})
 	secondResult, ok := second["result"].(map[string]any)
 	if !ok || secondResult["task"] == nil {
 		t.Fatalf("second send failed: %+v", second)
@@ -495,11 +525,11 @@ func TestA2AAgentCardUsesGatewayAuthenticationAndEndpoint(t *testing.T) {
 	if err := h.Runtime.Refresh(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	missing := rpc(foreign, "GetTask", map[string]any{"id": uuid.NewString()})
-	if got := rpc(foreign, "GetTask", map[string]any{"id": id}); !reflect.DeepEqual(got, missing) {
+	missing := rpc(foreign, "GetTask", a2aTestParams{ID: protocol.TaskID(uuid.NewString())})
+	if got := rpc(foreign, "GetTask", a2aTestParams{ID: protocol.TaskID(id)}); !reflect.DeepEqual(got, missing) {
 		t.Fatalf("foreign task differs from missing: %+v, %+v", got, missing)
 	}
-	if got := rpc(key, "GetTask", map[string]any{"id": upstreamID}); got["error"] == nil {
+	if got := rpc(key, "GetTask", a2aTestParams{ID: protocol.TaskID(upstreamID)}); got["error"] == nil {
 		t.Fatalf("accepted upstream task ID: %+v", got)
 	}
 	projectReadStatus := func(agentID, taskID string) int {
@@ -532,7 +562,7 @@ func TestA2AAgentCardUsesGatewayAuthenticationAndEndpoint(t *testing.T) {
 		t.Fatalf("incorrect settlements: %d, %s, %d", settled, cost, results)
 	}
 	redirectRPC.Store(true)
-	if got := rpc(key, "SendMessage", map[string]any{"message": map[string]any{"messageId": "redirect-message", "role": "ROLE_USER", "parts": []any{map[string]any{"text": "redirect"}}}}); got["error"] == nil {
+	if got := rpc(key, "SendMessage", a2aTestParams{Message: message("redirect-message", "redirect")}); got["error"] == nil {
 		t.Fatalf("redirected send succeeded: %+v", got)
 	}
 	redirectCard.Store(true)
@@ -563,7 +593,7 @@ func TestA2AAgentCardUsesGatewayAuthenticationAndEndpoint(t *testing.T) {
 	if getCard(key, agent) != http.StatusBadGateway {
 		t.Fatal("new revision did not enforce its card digest")
 	}
-	pinned := rpc(key, "GetTask", map[string]any{"id": id})
+	pinned := rpc(key, "GetTask", a2aTestParams{ID: protocol.TaskID(id)})
 	if task, ok := pinned["result"].(map[string]any); !ok || task["id"] != id || !strings.Contains(fmt.Sprint(task), "PRIVATE ARTIFACT") {
 		t.Fatalf("task did not retain its published revision: %+v", pinned)
 	}

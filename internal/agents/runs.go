@@ -74,3 +74,24 @@ func PrepareStepTx(ctx context.Context, tx pgx.Tx, store *limits.DebitStore, a a
 	}
 	return state, nil
 }
+
+func EnsureBoundaryAccountsTx(ctx context.Context, tx pgx.Tx, authority access.Authority, boundaries access.ToolDebitBoundariesResult) error {
+	if authority.EndUserDigest != "" {
+		if err := limits.EnsureEndUserAccounts(ctx, tx, authority.ID, authority.ProjectID, authority.EndUserDigest); err != nil {
+			return err
+		}
+	}
+	for _, boundary := range boundaries.Boundaries {
+		switch {
+		case boundary.AggregateLevel == "attribution":
+			if err := limits.EnsureAttributionBudget(ctx, tx, *authority.ProjectID, boundary.AggregateKey, boundary.AggregateValue); err != nil {
+				return err
+			}
+		case boundary.AggregateLevel != "":
+			if err := limits.EnsureAggregateBudget(ctx, tx, boundary.AggregateLevel, boundary.AggregateKey); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}

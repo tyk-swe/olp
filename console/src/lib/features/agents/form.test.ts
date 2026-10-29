@@ -200,6 +200,7 @@ describe('publication editor boundaries', () => {
       cardDigest: '',
       pricingRevision: '',
       maxCost: '',
+      messagePrice: '',
       toolsetRevisions: '',
       routeRevisions: ''
     });
@@ -217,6 +218,7 @@ describe('publication editor boundaries', () => {
           card_digest: 'catalog',
           pricing_revision_id: 'price-revision',
           max_cost: '12.34',
+          message_price: '1.50',
           toolset_revisions: ['tool-a', 'tool-b'],
           route_revisions: ['route-a', 'route-b']
         }
@@ -240,6 +242,7 @@ describe('publication editor boundaries', () => {
         cardDigest: ' new-catalog ',
         pricingRevision: ' new-pricing ',
         maxCost: ' 0.25 ',
+        messagePrice: ' 0 ',
         toolsetRevisions: ' tool-c,\ntool-d ',
         routeRevisions: ' route-c\t route-d '
       };
@@ -252,12 +255,24 @@ describe('publication editor boundaries', () => {
           card_digest: 'new-catalog',
           pricing_revision_id: 'new-pricing',
           max_cost: '0.25',
+          message_price: '0',
           toolset_revisions: ['tool-c', 'tool-d'],
           route_revisions: ['route-c', 'route-d']
         }
       });
     }
   );
+
+  it('keeps an omitted agent message price absent and includes a declared price for new agents', () => {
+    const form = publicationForm();
+    expect(publicationInput('agents', form).agent).not.toHaveProperty(
+      'message_price'
+    );
+    expect(
+      publicationInput('agents', { ...form, messagePrice: ' 0.35 ' }).agent
+        ?.message_price
+    ).toBe('0.35');
+  });
 
   it('round trips prompt variables and removes empty separators from edited variables', () => {
     const draft: Publication['draft'] = {

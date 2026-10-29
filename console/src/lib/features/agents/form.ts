@@ -121,6 +121,7 @@ export type PublicationForm = {
   cardDigest: string;
   pricingRevision: string;
   maxCost: string;
+  messagePrice: string;
   toolsetRevisions: string;
   routeRevisions: string;
 };
@@ -140,6 +141,7 @@ export function publicationForm(
     cardDigest: d?.agent?.card_digest ?? '',
     pricingRevision: d?.agent?.pricing_revision_id ?? '',
     maxCost: d?.agent?.max_cost ?? '',
+    messagePrice: d?.agent?.message_price ?? '',
     toolsetRevisions: d?.agent?.toolset_revisions.join('\n') ?? '',
     routeRevisions: d?.agent?.route_revisions.join('\n') ?? ''
   };
@@ -160,6 +162,9 @@ export function publicationInput(kind: Kind, form: PublicationForm): Draft {
       card_digest: form.cardDigest.trim(),
       pricing_revision_id: form.pricingRevision.trim(),
       max_cost: form.maxCost.trim(),
+      ...(form.messagePrice.trim() !== ''
+        ? { message_price: form.messagePrice.trim() }
+        : {}),
       toolset_revisions: resourceIDs(form.toolsetRevisions),
       route_revisions: resourceIDs(form.routeRevisions)
     };

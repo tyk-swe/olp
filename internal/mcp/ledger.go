@@ -92,7 +92,7 @@ func (l *DurableLedger) Reserve(ctx context.Context, in ReserveInput) (ReserveRe
 	if err = agents.StartRunTx(ctx, tx, l.Auth, in.Authority, reservation.RunID, "tools", in.ToolsetID, in.ToolsetRevisionID); err != nil {
 		return ReserveResult{}, err
 	}
-	if err = ensureBoundaryAccountsTx(ctx, tx, in, boundaries); err != nil {
+	if err = agents.EnsureBoundaryAccountsTx(ctx, tx, in.Authority, boundaries); err != nil {
 		return ReserveResult{}, err
 	}
 	state, err := agents.PrepareStepTx(ctx, tx, l.Store, in.Authority, intent, 0, owners)
@@ -137,27 +137,6 @@ func reservationCurrency(reservation *Reservation) *string {
 	return &currency
 }
 
-func ensureBoundaryAccountsTx(ctx context.Context, tx pgx.Tx, in ReserveInput, boundaries access.ToolDebitBoundariesResult) error {
-	if in.Authority.EndUserDigest != "" {
-		if err := limits.EnsureEndUserAccounts(ctx, tx, in.Authority.ID, in.Authority.ProjectID, in.Authority.EndUserDigest); err != nil {
-			return err
-		}
-	}
-	for _, boundary := range boundaries.Boundaries {
-		switch {
-		case boundary.AggregateLevel == "attribution":
-			if err := limits.EnsureAttributionBudget(ctx, tx, *in.Authority.ProjectID, boundary.AggregateKey, boundary.AggregateValue); err != nil {
-				return err
-			}
-		case boundary.AggregateLevel != "":
-			if err := limits.EnsureAggregateBudget(ctx, tx, boundary.AggregateLevel, boundary.AggregateKey); err != nil {
-				return err
-			}
-		}
-	}
-	return nil
-}
-
 func (l *DurableLedger) recordRefusedUnpriced(ctx context.Context, in ReserveInput, reservation *Reservation, intent limits.DebitIntent, boundaries access.ToolDebitBoundariesResult) error {
 	tx, err := l.Pool.Begin(ctx)
 	if err != nil {
@@ -167,7 +146,7 @@ func (l *DurableLedger) recordRefusedUnpriced(ctx context.Context, in ReserveInp
 	if err = agents.StartRunTx(ctx, tx, l.Auth, in.Authority, reservation.RunID, "tools", in.ToolsetID, in.ToolsetRevisionID); err != nil {
 		return err
 	}
-	if err = ensureBoundaryAccountsTx(ctx, tx, in, boundaries); err != nil {
+	if err = agents.EnsureBoundaryAccountsTx(ctx, tx, in.Authority, boundaries); err != nil {
 		return err
 	}
 	state, err := agents.PrepareStepTx(ctx, tx, l.Store, in.Authority, intent, 0, boundaries.Owners())

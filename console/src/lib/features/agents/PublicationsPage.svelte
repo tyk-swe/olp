@@ -517,6 +517,13 @@
               required
             /></label
           ><label
+            >Price per message <input
+              inputmode="decimal"
+              bind:value={form.messagePrice}
+            /></label
+          >
+          <p>Leave blank to disable sending, or enter 0 for free messages.</p>
+          <label
             >Pinned toolset revision UUIDs <textarea
               bind:value={form.toolsetRevisions}></textarea></label
           ><label

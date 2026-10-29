@@ -94,7 +94,7 @@ func (l *Ledger) reserve(ctx context.Context, authority access.Authority, revisi
 	if err := agents.StartRunTx(ctx, tx, l.Auth, authority, res.RunID, "agents", revision.PublicationID, revision.ID); err != nil {
 		return reservation{}, err
 	}
-	if err := ensureBoundaryAccounts(ctx, tx, authority, boundaries); err != nil {
+	if err := agents.EnsureBoundaryAccountsTx(ctx, tx, authority, boundaries); err != nil {
 		return reservation{}, err
 	}
 	state, err := agents.PrepareStepTx(ctx, tx, l.Store, authority, intent, 0, boundaries.Owners())
@@ -114,27 +114,6 @@ func (l *Ledger) reserve(ctx context.Context, authority access.Authority, revisi
 		return reservation{}, err
 	}
 	return res, nil
-}
-
-func ensureBoundaryAccounts(ctx context.Context, tx pgx.Tx, authority access.Authority, boundaries access.ToolDebitBoundariesResult) error {
-	if authority.EndUserDigest != "" {
-		if err := limits.EnsureEndUserAccounts(ctx, tx, authority.ID, authority.ProjectID, authority.EndUserDigest); err != nil {
-			return err
-		}
-	}
-	for _, boundary := range boundaries.Boundaries {
-		switch {
-		case boundary.AggregateLevel == "attribution":
-			if err := limits.EnsureAttributionBudget(ctx, tx, *authority.ProjectID, boundary.AggregateKey, boundary.AggregateValue); err != nil {
-				return err
-			}
-		case boundary.AggregateLevel != "":
-			if err := limits.EnsureAggregateBudget(ctx, tx, boundary.AggregateLevel, boundary.AggregateKey); err != nil {
-				return err
-			}
-		}
-	}
-	return nil
 }
 
 func (l *Ledger) findTask(ctx context.Context, authority access.Authority, publicationID, rawID string) (task, error) {
