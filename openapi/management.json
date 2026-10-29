@@ -984,6 +984,9 @@
           },
           "cache": {
             "$ref": "#/components/schemas/ResponseCacheEvidence"
+          },
+          "prompt": {
+            "$ref": "#/components/schemas/PromptAttemptReference"
           }
         },
         "required": [
@@ -28351,6 +28354,23 @@
             "description": "Exact registered workload issuer trusted for delegated user assertions."
           }
         }
+      },
+      "PromptAttemptReference": {
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "revision_id": {
+            "format": "uuid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "revision_id"
+        ],
+        "type": "object"
       }
     },
     "securitySchemes": {
