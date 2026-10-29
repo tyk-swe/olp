@@ -29,13 +29,25 @@ func invalid(param, message string) error {
 
 // Parse validates the gateway envelope of one request document.
 func Parse(family wire.Format, data []byte) (*wire.Request, error) {
+	doc, err := ParseSource(data)
+	if err != nil {
+		return nil, err
+	}
+	return parseDocument(family, doc)
+}
+
+func ParseSource(data []byte) (oif.Document, error) {
 	if trimmed := bytes.TrimSpace(data); len(trimmed) == 0 || trimmed[0] != '{' {
-		return nil, &wire.RequestError{Code: "invalid_json", Message: "The request body must be one JSON object."}
+		return oif.Document{}, &wire.RequestError{Code: "invalid_json", Message: "The request body must be one JSON object."}
 	}
 	doc, err := oif.ParseJSON(data, oif.Limits{})
 	if err != nil {
-		return nil, &wire.RequestError{Code: "invalid_json", Message: "The request body must be one JSON object."}
+		return oif.Document{}, &wire.RequestError{Code: "invalid_json", Message: "The request body must be one JSON object."}
 	}
+	return doc, nil
+}
+
+func ParseDocument(family wire.Format, doc oif.Document) (*wire.Request, error) {
 	return parseDocument(family, doc)
 }
 
