@@ -333,7 +333,6 @@ func TestNativeDuplexBedrockCleanStreamEndSettlesObservedUsage(t *testing.T) {
 	} {
 		upstream.frames <- []byte(frame)
 	}
-	close(upstream.frames)
 	h.gateway.bedrockStream = func(context.Context, *call, *pin) (duplexPeer, error) {
 		return upstream, nil
 	}
@@ -349,6 +348,18 @@ func TestNativeDuplexBedrockCleanStreamEndSettlesObservedUsage(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+waitForSessionEnd:
+	for {
+		select {
+		case frame := <-upstream.writes:
+			if strings.Contains(string(frame), `"sessionEnd"`) {
+				break waitForSessionEnd
+			}
+		case <-ctx.Done():
+			t.Fatal("session end was not forwarded to the provider")
+		}
+	}
+	close(upstream.frames)
 	for {
 		if _, _, err := conn.Read(ctx); err != nil {
 			break
