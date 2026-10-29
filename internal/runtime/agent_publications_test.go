@@ -135,3 +135,52 @@ func TestAgentWorkloadLiveAuthority(t *testing.T) {
 		})
 	}
 }
+
+func TestMCPToolAuthorizationUsesCurrentPublicationAndServerRevision(t *testing.T) {
+	project, publication, revision, server, serverRevision := "project", "tools", "revision", "server", "server-revision"
+	now := time.Now()
+	caller := access.Authority{ID: "principal", ProjectID: &project, Policy: access.KeyPolicy{Scopes: []string{"tools"}, AllowedToolsets: []string{publication}}}
+	noScope := access.Authority{ID: caller.ID, ProjectID: &project, Policy: access.KeyPolicy{AllowedToolsets: []string{publication}}}
+	revoked := access.Authority{ID: caller.ID, ProjectID: &project, Policy: caller.Policy, RevokedAt: &now}
+	published := map[string]mcpToolAuthority{revision: {PublicationID: publication, ProjectID: project, Servers: map[string]string{server: serverRevision}}}
+	wrongPublication := map[string]mcpToolAuthority{revision: {PublicationID: "other", ProjectID: project, Servers: map[string]string{server: serverRevision}}}
+	wrongProject := map[string]mcpToolAuthority{revision: {PublicationID: publication, ProjectID: "other", Servers: map[string]string{server: serverRevision}}}
+	for _, test := range []struct {
+		name             string
+		caller           access.Authority
+		current          access.Authority
+		toolsets         map[string]mcpToolAuthority
+		readAt           time.Time
+		requestedID      string
+		requestedRev     string
+		requestedHost    string
+		requestedHostRev string
+		allowed          bool
+		stale            bool
+	}{
+		{name: "current server", caller: caller, current: caller, toolsets: published, readAt: now, requestedID: publication, requestedRev: revision, requestedHost: server, requestedHostRev: serverRevision, allowed: true},
+		{name: "published toolset discovery", caller: caller, current: caller, toolsets: published, readAt: now, requestedID: publication, requestedRev: revision, allowed: true},
+		{name: "caller lacks scope", caller: noScope, current: caller, toolsets: published, readAt: now, requestedID: publication, requestedRev: revision, requestedHost: server, requestedHostRev: serverRevision},
+		{name: "principal revoked", caller: caller, current: revoked, toolsets: published, readAt: now, requestedID: publication, requestedRev: revision, requestedHost: server, requestedHostRev: serverRevision},
+		{name: "publication retired", caller: caller, current: caller, readAt: now, requestedID: publication, requestedRev: revision, requestedHost: server, requestedHostRev: serverRevision},
+		{name: "different publication", caller: caller, current: caller, toolsets: wrongPublication, readAt: now, requestedID: publication, requestedRev: revision, requestedHost: server, requestedHostRev: serverRevision},
+		{name: "different project", caller: caller, current: caller, toolsets: wrongProject, readAt: now, requestedID: publication, requestedRev: revision, requestedHost: server, requestedHostRev: serverRevision},
+		{name: "server revision changed", caller: caller, current: caller, toolsets: published, readAt: now, requestedID: publication, requestedRev: revision, requestedHost: server, requestedHostRev: "old"},
+		{name: "server removed", caller: caller, current: caller, toolsets: published, readAt: now, requestedID: publication, requestedRev: revision, requestedHost: "other", requestedHostRev: serverRevision},
+		{name: "stale authority", caller: caller, current: caller, toolsets: published, readAt: now.Add(-AuthorityStaleAfter - time.Second), requestedID: publication, requestedRev: revision, requestedHost: server, requestedHostRev: serverRevision, stale: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			manager := Manager{authority: authorityState{loaded: true, readAt: test.readAt, agentPrincipals: map[string]access.Authority{caller.ID: test.current}, mcpTools: test.toolsets}}
+			err := manager.AuthorizeMCPTool(test.caller, test.requestedID, test.requestedRev, project, test.requestedHost, test.requestedHostRev)
+			if test.stale {
+				if !errors.Is(err, ErrStaleAuthority) {
+					t.Fatalf("stale authority error = %v", err)
+				}
+				return
+			}
+			if (err == nil) != test.allowed {
+				t.Fatalf("authorization allowed = %t, want %t: %v", err == nil, test.allowed, err)
+			}
+		})
+	}
+}
