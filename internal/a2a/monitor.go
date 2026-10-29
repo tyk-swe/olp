@@ -142,7 +142,7 @@ func (m *TaskMonitor) cancelState(ctx context.Context, task monitoredTask) strin
 	if json.Unmarshal(task.Definition, &definition) != nil || definition.Agent == nil || definition.ProjectID != task.ProjectID {
 		return "outcome_unknown"
 	}
-	credential, err := m.taskCredential(ctx, task, *definition.Agent)
+	credential, err := m.Server.taskCredential(ctx, task, *definition.Agent)
 	if err != nil {
 		return "outcome_unknown"
 	}
@@ -167,14 +167,14 @@ func (m *TaskMonitor) cancelState(ctx context.Context, task monitoredTask) strin
 	}
 }
 
-func (m *TaskMonitor) taskCredential(ctx context.Context, task monitoredTask, definition agentcontract.Definition) ([]byte, error) {
+func (s *Server) taskCredential(ctx context.Context, task monitoredTask, definition agentcontract.Definition) ([]byte, error) {
 	if definition.OAuth == nil && task.Binding == "" {
 		return nil, nil
 	}
-	if definition.OAuth == nil || task.Binding == "" || m.Server.Grants == nil {
+	if definition.OAuth == nil || task.Binding == "" || s.Grants == nil {
 		return nil, errors.New("agent grant unavailable")
 	}
-	return m.Server.Grants.ResolveAgentTask(ctx, task.Binding, task.PublicationID, task.ProjectID, task.RevisionID, definition)
+	return s.Grants.ResolveAgentTask(ctx, task.Binding, task.PublicationID, task.ProjectID, task.RevisionID, definition)
 }
 
 func (m *TaskMonitor) warn(message string) {

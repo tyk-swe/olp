@@ -28827,6 +28827,15 @@
             "format": "uuid",
             "type": "string"
           },
+          "allowed_agents": {
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "maxItems": 100,
+            "type": "array",
+            "uniqueItems": true
+          },
           "allowed_routes": {
             "items": {
               "type": "string"
@@ -28852,11 +28861,12 @@
             "items": {
               "enum": [
                 "inference",
-                "tools"
+                "tools",
+                "agents"
               ],
               "type": "string"
             },
-            "maxItems": 2,
+            "maxItems": 3,
             "minItems": 1,
             "type": "array",
             "uniqueItems": true
@@ -28912,6 +28922,14 @@
               "format": "uuid"
             },
             "description": "Published toolsets currently allowed by both the key and the agent."
+          },
+          "allowed_agents": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Published agents currently allowed by both the key and the workload."
           }
         }
       },
@@ -29003,6 +29021,63 @@
           "token_endpoint"
         ],
         "description": "OAuth grants are bound to the approved agent endpoint and caller identity. Browser and device flows use personal enrollment. Entra OBO uses verified workload assertions and a sealed middle-tier client secret."
+      },
+      "A2ARemoteTask": {
+        "type": "object",
+        "required": [
+          "id",
+          "contextId",
+          "status"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "OLP task ID"
+          },
+          "contextId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "OLP task context ID"
+          },
+          "status": {
+            "type": "object",
+            "required": [
+              "state"
+            ],
+            "properties": {
+              "state": {
+                "type": "string"
+              },
+              "message": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "timestamp": {
+                "type": "string",
+                "format": "date-time"
+              }
+            }
+          },
+          "artifacts": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          },
+          "history": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          },
+          "metadata": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        }
       }
     },
     "securitySchemes": {
@@ -66980,6 +67055,157 @@
               "format": "uuid"
             }
           }
+        ]
+      }
+    },
+    "/api/v1/a2a-tasks/{task_id}/remote": {
+      "get": {
+        "operationId": "get_a2a_task_remote",
+        "description": "Retrieve the task from its pinned remote agent. Requires project change permission and uses the task’s original credential binding.",
+        "parameters": [
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "description": "OLP task ID",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Remote task using OLP task and context IDs",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/A2ARemoteTask"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Project change permission required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Task not found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "The pinned remote agent or its original credential is unavailable",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": [
+              "configure"
+            ]
+          },
+          {
+            "managementToken": [
+              "configure"
+            ]
+          }
+        ],
+        "tags": [
+          "a2a-tasks"
+        ]
+      }
+    },
+    "/api/v1/a2a-tasks/{task_id}/cancel": {
+      "post": {
+        "operationId": "cancel_a2a_task_remote",
+        "description": "Cancel the task on its pinned remote agent. Requires project change permission and uses the task’s original credential binding.",
+        "parameters": [
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "description": "OLP task ID",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Remote task using OLP task and context IDs",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/A2ARemoteTask"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Project change permission required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Task not found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "The pinned remote agent or its original credential is unavailable",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "csrfToken": [],
+            "sessionCookie": [
+              "configure"
+            ]
+          },
+          {
+            "managementToken": [
+              "configure"
+            ]
+          }
+        ],
+        "tags": [
+          "a2a-tasks"
         ]
       }
     }

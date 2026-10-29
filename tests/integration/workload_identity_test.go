@@ -1925,6 +1925,30 @@ func TestWorkloadAgentDelegatesKeyForA2A(t *testing.T) {
 	h := newAccessHarness(t)
 	owner := h.owner()
 	project := createProject(h, owner, "Delegated A2A")
+	otherProject := createProject(h, owner, "Other delegated A2A")
+	for _, address := range []string{"a2a-manager@example.com", "a2a-viewer@example.com", "a2a-other@example.com"} {
+		h.invite(owner, address, "operator")
+	}
+	users := h.want(owner, http.MethodGet, "/api/v1/users", nil, nil, http.StatusOK)
+	for _, entry := range users["items"].([]any) {
+		user := entry.(map[string]any)
+		email := user["email"].(string)
+		if !slices.Contains([]string{"a2a-manager@example.com", "a2a-viewer@example.com", "a2a-other@example.com"}, email) {
+			continue
+		}
+		id := user["id"].(string)
+		h.want(owner, http.MethodPatch, "/api/v1/users/"+id, map[string]any{"access_scope": "assigned"}, etagHeader(user), http.StatusOK)
+		if email == "a2a-other@example.com" {
+			addMember(h, owner, otherProject, id, "manager")
+		} else if email == "a2a-viewer@example.com" {
+			addMember(h, owner, project, id, "viewer")
+		} else {
+			addMember(h, owner, project, id, "manager")
+		}
+	}
+	manager := login(h, "a2a-manager@example.com")
+	viewer := login(h, "a2a-viewer@example.com")
+	other := login(h, "a2a-other@example.com")
 	modelProvider := newOpenAIFixture(t, "")
 	model := activeAzureProviderInProject(t, h, owner, "Delegated callback provider", modelProvider.URL, &project, []any{map[string]any{"operation": "generation", "surface": "openai", "mode": "unary"}})
 	draft := h.want(owner, http.MethodPost, "/api/v1/route-drafts", map[string]any{"project_id": project, "slug": "delegated-callback", "overall_timeout_ms": 10000, "max_attempts": 1, "fidelity": map[string]any{"mode": "transformed"}, "targets": []any{map[string]any{"provider_id": model["id"], "provider_model": vendorModel, "priority": 0, "weight": 1, "timeout_ms": 5000}}}, idem("delegated-callback-route"), http.StatusCreated)
@@ -1937,6 +1961,9 @@ func TestWorkloadAgentDelegatesKeyForA2A(t *testing.T) {
 	h.refresh()
 	routeRevision := h.Runtime.Release().Snapshot.Routes["delegated-callback"].RevisionID
 	callbackStatus := make(chan int, 1)
+	callbackCapability := make(chan string, 1)
+	cancellation := make(chan string, 4)
+	var watchCancellation atomic.Bool
 	client, prefix, _ := acctKeyspace(t)
 	limiter, err := limits.New(client, strings.TrimSuffix(prefix, ":"))
 	if err != nil {
@@ -1967,7 +1994,21 @@ func TestWorkloadAgentDelegatesKeyForA2A(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/rpc":
+			if watchCancellation.Load() {
+				var request struct {
+					ID     json.RawMessage `json:"id"`
+					Method string          `json:"method"`
+				}
+				if decodeErr := json.NewDecoder(r.Body).Decode(&request); decodeErr != nil {
+					return
+				}
+				cancellation <- request.Method
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = fmt.Fprintf(w, `{"jsonrpc":"2.0","id":%s,"error":{"code":-32603,"message":"cancel unavailable"}}`, request.ID)
+				return
+			}
 			if capability := r.Header.Get("X-OLP-Task-Capability"); capability != "" {
+				callbackCapability <- capability
 				callback, callbackErr := http.NewRequestWithContext(r.Context(), http.MethodPost, h.HTTP.URL+"/v1/chat/completions", strings.NewReader(`{"model":"delegated-callback","messages":[{"role":"user","content":"hello"}]}`))
 				if callbackErr != nil {
 					callbackStatus <- 0
@@ -2040,6 +2081,24 @@ func TestWorkloadAgentDelegatesKeyForA2A(t *testing.T) {
 	}
 	assertion := assertionFor("approved-agent")
 	bounds := map[string]any{"scopes": []string{"agents", "inference"}, "allowed_agents": []string{target}, "allowed_routes": []string{"delegated-callback"}}
+	deniedResponse, deniedBody := h.do(nil, http.MethodPost, "/v1/delegations", map[string]any{"scopes": []string{"agents"}, "allowed_agents": []string{acctID(t)}}, map[string]string{"Authorization": "Bearer " + assertion, "X-OLP-Delegating-Key": key["secret"].(string)})
+	if deniedResponse.StatusCode != http.StatusForbidden {
+		t.Fatalf("agent delegation widened publication access: %d %s", deniedResponse.StatusCode, deniedBody)
+	}
+	cardGrantResponse, cardGrantBody := h.do(nil, http.MethodPost, "/v1/delegations", map[string]any{"scopes": []string{"agents"}, "allowed_agents": []string{target}}, map[string]string{"Authorization": "Bearer " + assertion, "X-OLP-Delegating-Key": key["secret"].(string)})
+	if cardGrantResponse.StatusCode != http.StatusCreated {
+		t.Fatalf("agents-only grant refused: %d %s", cardGrantResponse.StatusCode, cardGrantBody)
+	}
+	var cardGrant struct {
+		Token string `json:"token"`
+	}
+	if err := json.Unmarshal(cardGrantBody, &cardGrant); err != nil || cardGrant.Token == "" {
+		t.Fatalf("missing agents-only grant: %v", err)
+	}
+	cardResponse, cardBody := h.do(nil, http.MethodGet, "/a2a/"+target+"/.well-known/agent-card.json", nil, map[string]string{"Authorization": "Bearer " + cardGrant.Token, "X-OLP-Agent-Identity": assertion})
+	if cardResponse.StatusCode != http.StatusOK {
+		t.Fatalf("agents-only grant cannot discover its agent: %d %s", cardResponse.StatusCode, cardBody)
+	}
 	response, body := h.do(nil, http.MethodPost, "/v1/delegations", bounds, map[string]string{"Authorization": "Bearer " + assertion, "X-OLP-Delegating-Key": key["secret"].(string)})
 	if response.StatusCode != http.StatusCreated {
 		t.Fatalf("agent delegation exchange: %d %s", response.StatusCode, body)
@@ -2094,6 +2153,16 @@ func TestWorkloadAgentDelegatesKeyForA2A(t *testing.T) {
 	if status := <-callbackStatus; status != http.StatusOK {
 		t.Fatalf("delegated task callback refused: %d", status)
 	}
+	capability := <-callbackCapability
+	operatorTaskPath := "/api/v1/a2a-tasks/" + string(result.Result.Task.ID)
+	operatorState := h.want(manager, http.MethodGet, operatorTaskPath+"/remote", nil, nil, http.StatusOK)
+	if operatorState["id"] != string(result.Result.Task.ID) || operatorState["contextId"] != string(result.Result.Task.ID) || operatorState["status"].(map[string]any)["state"] != string(protocol.TaskStateInputRequired) {
+		t.Fatalf("project operator could not read delegated task state: %v", operatorState)
+	}
+	for _, action := range []struct{ method, suffix string }{{http.MethodGet, "/remote"}, {http.MethodPost, "/cancel"}} {
+		h.want(viewer, action.method, operatorTaskPath+action.suffix, nil, nil, http.StatusForbidden)
+		h.want(other, action.method, operatorTaskPath+action.suffix, nil, nil, http.StatusNotFound)
+	}
 	pairBudget := h.want(owner, http.MethodGet, budgetPath, nil, nil, http.StatusOK)["usage"].(map[string]any)["delegation_pair"].(map[string]any)[grant.Pair].(map[string]any)["daily"].(map[string]any)["accrued"].(string)
 	principals := h.want(owner, http.MethodGet, "/api/v1/api-keys", nil, nil, http.StatusOK)["items"].([]any)
 	agentID := func() string {
@@ -2147,5 +2216,85 @@ func TestWorkloadAgentDelegatesKeyForA2A(t *testing.T) {
 	otherStatus, otherBody := getTask(otherAssertion, getGrant(otherAssertion))
 	if otherStatus == http.StatusOK && bytes.Contains(otherBody, []byte(result.Result.Task.ID)) {
 		t.Fatalf("another agent read a task owned by the first: %s", otherBody)
+	}
+	options := h.want(owner, http.MethodGet, "/api/v1/delegation-options?api_key_id="+key["id"].(string), nil, nil, http.StatusOK)
+	if !slices.ContainsFunc(options["agents"].([]any), func(item any) bool {
+		option := item.(map[string]any)
+		return option["id"] == agentID && slices.Contains(option["allowed_agents"].([]any), any(target))
+	}) {
+		t.Fatalf("member consent omitted an eligible A2A agent: %v", options)
+	}
+	consentFor := func(keyID string) string {
+		t.Helper()
+		h.want(owner, http.MethodPost, "/api/v1/profile/reauthenticate", map[string]any{"current_password": accessPassword, "purpose": "agent_delegation", "resource_id": keyID}, nil, http.StatusNoContent)
+		consent := h.want(owner, http.MethodPost, "/api/v1/delegation-consents", map[string]any{"agent_id": agentID, "api_key_id": keyID, "scopes": []string{"agents", "inference"}, "allowed_agents": []string{target}, "allowed_routes": []string{"delegated-callback"}}, nil, http.StatusCreated)
+		memberResponse, memberBody := h.do(nil, http.MethodPost, "/v1/delegations", bounds, map[string]string{"Authorization": "Bearer " + assertion, "X-OLP-Delegation-Consent": consent["consent"].(string)})
+		if memberResponse.StatusCode != http.StatusCreated {
+			t.Fatalf("member agent delegation exchange: %d %s", memberResponse.StatusCode, memberBody)
+		}
+		var next struct {
+			Token string `json:"token"`
+		}
+		if decodeErr := json.Unmarshal(memberBody, &next); decodeErr != nil || next.Token == "" {
+			t.Fatalf("missing member delegation: %v", decodeErr)
+		}
+		return next.Token
+	}
+	memberResponse, memberBody := h.do(nil, http.MethodPost, "/a2a/"+target, request, map[string]string{"Authorization": "Bearer " + consentFor(key["id"].(string)), "X-OLP-Agent-Identity": assertion, "A2A-Version": "1.0"})
+	if memberResponse.StatusCode != http.StatusOK {
+		t.Fatalf("member delegated send: %d %s", memberResponse.StatusCode, memberBody)
+	}
+	var memberResult struct {
+		Result struct {
+			Task protocol.Task `json:"task"`
+		} `json:"result"`
+		Error json.RawMessage `json:"error"`
+	}
+	if err := json.Unmarshal(memberBody, &memberResult); err != nil || len(memberResult.Error) != 0 || memberResult.Result.Task.ID == "" {
+		t.Fatalf("member delegated task missing: %s %v", memberBody, err)
+	}
+	if memberResult.Result.Task.ID == result.Result.Task.ID {
+		t.Fatal("member and key delegations shared a task")
+	}
+	if status := <-callbackStatus; status != http.StatusOK {
+		t.Fatalf("member delegated task callback refused: %d", status)
+	}
+	<-callbackCapability
+	replacement := h.want(owner, http.MethodPost, "/api/v1/api-keys", map[string]any{"name": "replacement A2A key", "project_id": project, "scopes": []string{"agents", "inference", "delegate"}, "allowed_agents": []string{target}, "allowed_routes": []string{"delegated-callback"}}, idem("replacement-a2a-key"), http.StatusCreated)
+	h.refresh()
+	memberRead := struct {
+		JSONRPC string        `json:"jsonrpc"`
+		ID      int           `json:"id"`
+		Method  string        `json:"method"`
+		Params  a2aTestParams `json:"params"`
+	}{JSONRPC: "2.0", ID: 3, Method: "GetTask", Params: a2aTestParams{ID: memberResult.Result.Task.ID}}
+	memberReadResponse, memberReadBody := h.do(nil, http.MethodPost, "/a2a/"+target, memberRead, map[string]string{"Authorization": "Bearer " + consentFor(replacement["id"].(string)), "X-OLP-Agent-Identity": assertion, "A2A-Version": "1.0"})
+	if memberReadResponse.StatusCode != http.StatusOK || !bytes.Contains(memberReadBody, []byte(memberResult.Result.Task.ID)) {
+		t.Fatalf("member delegation cannot read its task after key replacement: %d %s", memberReadResponse.StatusCode, memberReadBody)
+	}
+	memberTaskPath := "/api/v1/a2a-tasks/" + string(memberResult.Result.Task.ID)
+	canceled := h.want(manager, http.MethodPost, memberTaskPath+"/cancel", nil, nil, http.StatusOK)
+	if canceled["id"] != string(memberResult.Result.Task.ID) || canceled["contextId"] != string(memberResult.Result.Task.ID) || canceled["status"].(map[string]any)["state"] != string(protocol.TaskStateCanceled) {
+		t.Fatalf("project operator could not cancel delegated task: %v", canceled)
+	}
+	agentPath := "/api/v1/api-keys/" + agentID
+	agentKey := h.want(owner, http.MethodGet, agentPath, nil, nil, http.StatusOK)
+	h.want(owner, http.MethodPost, agentPath+"/revoke", nil, withMatch(agentKey, idem("revoke-delegated-a2a-agent")), http.StatusOK)
+	h.refresh()
+	callbackResponse, callbackBody := h.do(nil, http.MethodPost, "/v1/chat/completions", map[string]any{"model": "delegated-callback", "messages": []any{map[string]string{"role": "user", "content": "hello"}}}, map[string]string{"Authorization": "Bearer " + capability})
+	if callbackResponse.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("revoked agent retained callback authority: %d %s", callbackResponse.StatusCode, callbackBody)
+	}
+	watchCancellation.Store(true)
+	monitorContext, stopMonitor := context.WithCancel(t.Context())
+	defer stopMonitor()
+	go (&a2a.TaskMonitor{Server: h.A2A}).Run(monitorContext)
+	select {
+	case method := <-cancellation:
+		if method != "CancelTask" {
+			t.Fatalf("revocation sent %q instead of cancellation", method)
+		}
+	case <-time.After(15 * time.Second):
+		t.Fatal("revoked agent task was not canceled")
 	}
 }

@@ -2403,6 +2403,7 @@ func (e CredentialRequirement) Valid() bool {
 
 // Defines values for DelegationConsentRequestScopes.
 const (
+	DelegationConsentRequestScopesAgents    DelegationConsentRequestScopes = "agents"
 	DelegationConsentRequestScopesInference DelegationConsentRequestScopes = "inference"
 	DelegationConsentRequestScopesTools     DelegationConsentRequestScopes = "tools"
 )
@@ -2410,6 +2411,8 @@ const (
 // Valid indicates whether the value is a known member of the DelegationConsentRequestScopes enum.
 func (e DelegationConsentRequestScopes) Valid() bool {
 	switch e {
+	case DelegationConsentRequestScopesAgents:
+		return true
 	case DelegationConsentRequestScopesInference:
 		return true
 	case DelegationConsentRequestScopesTools:
@@ -6511,6 +6514,24 @@ func (e ExportUsageCsvParamsDimension) Valid() bool {
 	}
 }
 
+// A2ARemoteTask defines model for A2ARemoteTask.
+type A2ARemoteTask struct {
+	Artifacts *[]map[string]interface{} `json:"artifacts,omitempty"`
+
+	// ContextId OLP task context ID
+	ContextId openapi_types.UUID        `json:"contextId"`
+	History   *[]map[string]interface{} `json:"history,omitempty"`
+
+	// Id OLP task ID
+	Id       openapi_types.UUID      `json:"id"`
+	Metadata *map[string]interface{} `json:"metadata,omitempty"`
+	Status   struct {
+		Message   *map[string]interface{} `json:"message,omitempty"`
+		State     string                  `json:"state"`
+		Timestamp *time.Time              `json:"timestamp,omitempty"`
+	} `json:"status"`
+}
+
 // AcceptCatalogSuggestionsRequest defines model for AcceptCatalogSuggestionsRequest.
 type AcceptCatalogSuggestionsRequest struct {
 	// CatalogSha256 Digest of the catalog the suggestions were reviewed against; a different catalog answers 409.
@@ -9219,6 +9240,7 @@ type DelegationConsent struct {
 // DelegationConsentRequest defines model for DelegationConsentRequest.
 type DelegationConsentRequest struct {
 	AgentId         openapi_types.UUID                `json:"agent_id"`
+	AllowedAgents   *[]openapi_types.UUID             `json:"allowed_agents,omitempty"`
 	AllowedRoutes   *[]string                         `json:"allowed_routes,omitempty"`
 	AllowedToolsets *[]openapi_types.UUID             `json:"allowed_toolsets,omitempty"`
 	ApiKeyId        openapi_types.UUID                `json:"api_key_id"`
@@ -9231,6 +9253,9 @@ type DelegationConsentRequestScopes string
 
 // DelegationOption defines model for DelegationOption.
 type DelegationOption struct {
+	// AllowedAgents Published agents currently allowed by both the key and the workload.
+	AllowedAgents *[]openapi_types.UUID `json:"allowed_agents,omitempty"`
+
 	// AllowedRoutes Active inference routes currently allowed by both the key and the agent.
 	AllowedRoutes []string `json:"allowed_routes"`
 

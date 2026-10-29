@@ -297,6 +297,58 @@ it('allows consent to an eligible toolset without granting inference', async () 
   });
 });
 
+it('allows consent only to eligible published agents and explains remote visibility', async () => {
+  const { key, agent } = consentFixtures();
+  const publication = '88a13706-6e96-4b19-9e07-3d1ad0a600ba';
+  vi.mocked(keys.listApiKeys).mockResolvedValue([key, agent]);
+  vi.mocked(api.getDelegationOptions).mockResolvedValue({
+    agents: [{ id: 'agent', allowed_routes: [], allowed_agents: [publication] }]
+  });
+  vi.mocked(api.createDelegationConsent).mockImplementation(async (input) => {
+    if (
+      input.scopes?.join(',') !== 'agents' ||
+      input.allowed_agents?.join(',') !== publication
+    ) {
+      throw new Error('incorrect consent');
+    }
+    return {
+      consent: 'olpc_one_use',
+      expires_at: '2030-01-01T00:00:00Z',
+      delegation_pair_digest: 'pair-budget-id'
+    };
+  });
+  const { host } = page();
+  await vi.waitFor(() => {
+    flushSync();
+    expect(host.querySelector('option[value="consumer"]')).not.toBeNull();
+  });
+  const keySelect = host.querySelector<HTMLSelectElement>('#delegation-key');
+  if (!keySelect) expect.fail('Missing key selection');
+  keySelect.value = 'consumer';
+  keySelect.dispatchEvent(new Event('change', { bubbles: true }));
+  await vi.waitFor(() => {
+    flushSync();
+    expect(host.querySelector('option[value="agent"]')).not.toBeNull();
+  });
+  const agentSelect =
+    host.querySelector<HTMLSelectElement>('#delegation-agent');
+  if (!agentSelect) expect.fail('Missing agent selection');
+  agentSelect.value = 'agent';
+  agentSelect.dispatchEvent(new Event('change', { bubbles: true }));
+  fill(host, 'Allowed A2A agents', 'other');
+  expect(button(host, 'Confirm agent access').disabled).toBe(true);
+  fill(host, 'Allowed A2A agents', publication);
+  fill(host, 'Current password', 'password');
+  expect(host.textContent).toContain(
+    'cannot count or stop hidden remote iterations'
+  );
+  button(host, 'Confirm agent access').click();
+  await vi.waitFor(() => {
+    flushSync();
+    expect(textInput(host, 'Consent code').value).toBe('olpc_one_use');
+  });
+});
+
 it('starts linked identity verification for the selected key', async () => {
   const { key } = consentFixtures();
   vi.mocked(keys.listApiKeys).mockResolvedValue([key]);

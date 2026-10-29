@@ -60,6 +60,18 @@ Standalone modern consumer event streams, sampling, elicitation, roots and
 arbitrary resource/prompt calls are not supported by this slice.
 See [MCP server use](mcp-servers.md) for supported calls and rollback behavior.
 
+## A2A qualification
+
+Local reference fixtures cover the pinned A2A 0.3 and 1.0 JSON-RPC adapters.
+`TestWorkloadAgentDelegatesKeyForA2A` in
+`tests/integration/workload_identity_test.go` exercises delegated sends,
+callbacks, caller/agent/pair accounting, consent, renewal, project operator
+access and revocation. `TestA2AOAuthGrantLifecycle` verifies that task actions
+use their original grant and endpoint after publication replacement and refuse
+revoked grants. These are fixture results, not live external interoperability
+or live Entra agent identity qualification. OLP cannot observe or stop hidden
+remote iterations.
+
 ## Guardrail compatibility
 
 [Guardrails](guardrails.md) inspect effective provider input and qualified unary

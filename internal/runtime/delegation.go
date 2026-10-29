@@ -226,6 +226,9 @@ func (m *Manager) authenticateDelegation(ctx context.Context, token, assertion s
 }
 
 func (m *Manager) authorizeDelegatedTask(ctx context.Context, digest []byte, expectedKey, expectedProject, publication string) (*access.Authority, error) {
+	if m == nil || m.pool == nil {
+		return nil, ErrInvalidKey
+	}
 	m.mu.RLock()
 	snapshot := m.authority.id
 	m.mu.RUnlock()
