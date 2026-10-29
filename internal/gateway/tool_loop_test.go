@@ -14,11 +14,253 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/runtime"
 	"github.com/tyk-swe/olp/internal/usage"
 )
+
+func TestGatewayToolExecutionAnthropicCompletesOneRun(t *testing.T) {
+	toolsetID, projectID := uuid.NewString(), uuid.NewString()
+	alias := "t_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+	h := strictHarness(t, func(snapshot *routing.Snapshot) {
+		route := snapshot.Routes[routeSlug]
+		route.Fidelity.Mode = routing.FidelityTransformed
+		route.ToolExecution, route.Toolsets, route.ProjectID = "gateway", []string{toolsetID}, &projectID
+		snapshot.Routes[routeSlug] = route
+		for id, provider := range snapshot.Providers {
+			provider.Kind, provider.ProfileID, provider.ProfileRevision = "anthropic", "anthropic-messages", connectors.ProfileRevision
+			provider.Capabilities = []routing.Capability{{Model: provider.Capabilities[0].Model, Operation: "generation", Surface: "anthropic", Mode: "unary", ToolCalls: true}}
+			snapshot.Providers[id] = provider
+		}
+	})
+	authority := h.rt.keys[fullKey]
+	authority.ProjectID = &projectID
+	h.rt.keys[fullKey] = authority
+	fixture := &workflowFixture{runID: uuid.NewString(), tool: WorkflowTool{ToolsetID: toolsetID, RevisionID: uuid.NewString(), Definition: routing.MCPToolsetTool{Alias: alias, Classification: "read_only", InputSchema: json.RawMessage(`{"type":"object"}`)}}}
+	h.gateway.WorkflowRuns, h.gateway.WorkflowTools, h.gateway.Debits = fixture, fixture, &workflowDebitFixture{fakeSessionDebits: &fakeSessionDebits{}}
+	upstream := make(chan []byte, 2)
+	h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		upstream <- body
+		w.Header().Set("Content-Type", "application/json")
+		if h.mock.count("a") == 1 {
+			fmt.Fprintf(w, `{"id":"first","type":"message","role":"assistant","model":"model-a","content":[{"type":"text","text":"intermediate"},{"type":"tool_use","id":"call-1","name":%q,"input":{"value":1}}],"stop_reason":"tool_use","usage":{"input_tokens":2,"output_tokens":3}}`, alias)
+			return
+		}
+		io.WriteString(w, `{"id":"last","type":"message","role":"assistant","model":"model-a","content":[{"type":"text","text":"final answer"}],"stop_reason":"end_turn","usage":{"input_tokens":3,"output_tokens":4}}`)
+	})
+	response := h.do(t.Context(), http.MethodPost, "/anthropic/v1/messages", fullKey, []byte(`{"model":"`+routeSlug+`","max_tokens":20,"messages":[{"role":"user","content":"hello"}]}`), nil)
+	defer response.Body.Close()
+	body, err := io.ReadAll(response.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response.StatusCode != http.StatusOK || !strings.Contains(string(body), "final answer") || strings.Contains(string(body), "intermediate") || strings.Contains(string(body), "call-1") || h.mock.count("a") != 2 {
+		t.Fatalf("anthropic workflow did not return the final answer: status=%d body=%s calls=%d", response.StatusCode, body, h.mock.count("a"))
+	}
+	first := <-upstream
+	second := <-upstream
+	var next struct {
+		Messages []struct {
+			Content json.RawMessage `json:"content"`
+		} `json:"messages"`
+	}
+	var result []struct {
+		Type      string `json:"type"`
+		ToolUseID string `json:"tool_use_id"`
+		Content   []struct {
+			Text string `json:"text"`
+		} `json:"content"`
+	}
+	if err := json.Unmarshal(second, &next); err != nil || len(next.Messages) != 3 || json.Unmarshal(next.Messages[2].Content, &result) != nil || len(result) != 1 || result[0].Type != "tool_result" || result[0].ToolUseID != "call-1" || len(result[0].Content) != 1 || !strings.Contains(result[0].Content[0].Text, "result") || !strings.Contains(string(first), alias) || !strings.Contains(string(first), `"input_schema"`) {
+		t.Fatalf("anthropic provider did not receive advertised tools and results: first=%s second=%s", first, second)
+	}
+}
+
+func TestGatewayToolExecutionGeminiCompletesOneRun(t *testing.T) {
+	toolsetID, projectID := uuid.NewString(), uuid.NewString()
+	alias := "t_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+	h := strictHarness(t, func(snapshot *routing.Snapshot) {
+		route := snapshot.Routes[routeSlug]
+		route.Fidelity.Mode = routing.FidelityTransformed
+		route.ToolExecution, route.Toolsets, route.ProjectID = "gateway", []string{toolsetID}, &projectID
+		snapshot.Routes[routeSlug] = route
+		for id, provider := range snapshot.Providers {
+			provider.Kind, provider.ProfileID, provider.ProfileRevision = "gemini", "gemini-generation", connectors.ProfileRevision
+			provider.Capabilities = []routing.Capability{{Model: provider.Capabilities[0].Model, Operation: "generation", Surface: "gemini", Mode: "unary", ToolCalls: true}}
+			snapshot.Providers[id] = provider
+		}
+	})
+	authority := h.rt.keys[fullKey]
+	authority.ProjectID = &projectID
+	h.rt.keys[fullKey] = authority
+	fixture := &workflowFixture{runID: uuid.NewString(), tool: WorkflowTool{ToolsetID: toolsetID, RevisionID: uuid.NewString(), Definition: routing.MCPToolsetTool{Alias: alias, Classification: "read_only", InputSchema: json.RawMessage(`{"type":"object"}`)}}}
+	h.gateway.WorkflowRuns, h.gateway.WorkflowTools, h.gateway.Debits = fixture, fixture, &workflowDebitFixture{fakeSessionDebits: &fakeSessionDebits{}}
+	upstream := make(chan []byte, 2)
+	h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		upstream <- body
+		w.Header().Set("Content-Type", "application/json")
+		if h.mock.count("a") == 1 {
+			fmt.Fprintf(w, `{"candidates":[{"index":0,"content":{"role":"model","parts":[{"text":"intermediate"},{"functionCall":{"name":%q,"args":{"value":1}},"thoughtSignature":"signed"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":2,"candidatesTokenCount":3,"totalTokenCount":5}}`, alias)
+			return
+		}
+		io.WriteString(w, `{"candidates":[{"index":0,"content":{"role":"model","parts":[{"text":"final answer"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":3,"candidatesTokenCount":4,"totalTokenCount":7}}`)
+	})
+	response := h.do(t.Context(), http.MethodPost, "/gemini/v1beta/models/"+routeSlug+":generateContent", fullKey, []byte(`{"contents":[{"role":"user","parts":[{"text":"hello"}]}]}`), nil)
+	defer response.Body.Close()
+	body, err := io.ReadAll(response.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response.StatusCode != http.StatusOK || !strings.Contains(string(body), "final answer") || strings.Contains(string(body), "intermediate") || strings.Contains(string(body), alias) || h.mock.count("a") != 2 {
+		t.Fatalf("gemini workflow did not return the final answer: status=%d body=%s calls=%d", response.StatusCode, body, h.mock.count("a"))
+	}
+	first := <-upstream
+	second := <-upstream
+	if !strings.Contains(string(first), alias) || !strings.Contains(string(first), `"functionDeclarations"`) || !strings.Contains(string(second), `"functionResponse"`) || !strings.Contains(string(second), `"thoughtSignature":"signed"`) || !strings.Contains(string(second), "result") {
+		t.Fatalf("gemini provider did not receive advertised tools and results: first=%s second=%s", first, second)
+	}
+}
+
+func TestGatewayToolExecutionGeminiStreamsOnlyFinalAnswer(t *testing.T) {
+	toolsetID, projectID := uuid.NewString(), uuid.NewString()
+	alias := "t_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+	h := strictHarness(t, func(snapshot *routing.Snapshot) {
+		route := snapshot.Routes[routeSlug]
+		route.Fidelity.Mode = routing.FidelityTransformed
+		route.ToolExecution, route.Toolsets, route.ProjectID = "gateway", []string{toolsetID}, &projectID
+		snapshot.Routes[routeSlug] = route
+		for id, provider := range snapshot.Providers {
+			provider.Kind, provider.ProfileID, provider.ProfileRevision = "gemini", "gemini-generation", connectors.ProfileRevision
+			provider.Capabilities = []routing.Capability{{Model: provider.Capabilities[0].Model, Operation: "generation", Surface: "gemini", Mode: "streaming", ToolCalls: true}}
+			snapshot.Providers[id] = provider
+		}
+	})
+	authority := h.rt.keys[fullKey]
+	authority.ProjectID = &projectID
+	h.rt.keys[fullKey] = authority
+	fixture := &workflowFixture{runID: uuid.NewString(), tool: WorkflowTool{ToolsetID: toolsetID, RevisionID: uuid.NewString(), Definition: routing.MCPToolsetTool{Alias: alias, Classification: "read_only", InputSchema: json.RawMessage(`{"type":"object"}`)}}}
+	h.gateway.WorkflowRuns, h.gateway.WorkflowTools, h.gateway.Debits = fixture, fixture, &workflowDebitFixture{fakeSessionDebits: &fakeSessionDebits{}}
+	upstream := make(chan []byte, 2)
+	h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		upstream <- body
+		w.Header().Set("Content-Type", "text/event-stream")
+		if h.mock.count("a") == 1 {
+			fmt.Fprintf(w, "data: {\"candidates\":[{\"index\":0,\"content\":{\"role\":\"model\",\"parts\":[{\"text\":\"intermediate\"},{\"functionCall\":{\"name\":%q,\"args\":{\"value\":1}},\"thoughtSignature\":\"signed\"}]},\"finishReason\":\"STOP\"}],\"usageMetadata\":{\"promptTokenCount\":2,\"candidatesTokenCount\":3,\"totalTokenCount\":5}}\n\n", alias)
+			return
+		}
+		io.WriteString(w, "data: {\"candidates\":[{\"index\":0,\"content\":{\"role\":\"model\",\"parts\":[{\"text\":\"final answer\"}]},\"finishReason\":\"STOP\"}],\"usageMetadata\":{\"promptTokenCount\":3,\"candidatesTokenCount\":4,\"totalTokenCount\":7}}\n\n")
+	})
+	response := h.do(t.Context(), http.MethodPost, "/gemini/v1beta/models/"+routeSlug+":streamGenerateContent?alt=sse", fullKey, []byte(`{"contents":[{"role":"user","parts":[{"text":"hello"}]}]}`), nil)
+	defer response.Body.Close()
+	body, err := io.ReadAll(response.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response.StatusCode != http.StatusOK || !strings.Contains(string(body), "final answer") || strings.Contains(string(body), "intermediate") || strings.Contains(string(body), alias) || h.mock.count("a") != 2 {
+		t.Fatalf("gemini stream exposed an intermediate step or missed the final answer: status=%d body=%s calls=%d", response.StatusCode, body, h.mock.count("a"))
+	}
+	<-upstream
+	second := <-upstream
+	if !strings.Contains(string(second), `"functionResponse"`) || !strings.Contains(string(second), `"thoughtSignature":"signed"`) {
+		t.Fatalf("gemini provider did not receive the signed tool call and result: %s", second)
+	}
+}
+
+func TestGatewayToolExecutionAnthropicStreamsOnlyFinalAnswer(t *testing.T) {
+	toolsetID, projectID := uuid.NewString(), uuid.NewString()
+	alias := "t_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+	h := strictHarness(t, func(snapshot *routing.Snapshot) {
+		route := snapshot.Routes[routeSlug]
+		route.Fidelity.Mode = routing.FidelityTransformed
+		route.ToolExecution, route.Toolsets, route.ProjectID = "gateway", []string{toolsetID}, &projectID
+		snapshot.Routes[routeSlug] = route
+		for id, provider := range snapshot.Providers {
+			provider.Kind, provider.ProfileID, provider.ProfileRevision = "anthropic", "anthropic-messages", connectors.ProfileRevision
+			provider.Capabilities = []routing.Capability{{Model: provider.Capabilities[0].Model, Operation: "generation", Surface: "anthropic", Mode: "streaming", ToolCalls: true}}
+			snapshot.Providers[id] = provider
+		}
+	})
+	authority := h.rt.keys[fullKey]
+	authority.ProjectID = &projectID
+	h.rt.keys[fullKey] = authority
+	fixture := &workflowFixture{runID: uuid.NewString(), tool: WorkflowTool{ToolsetID: toolsetID, RevisionID: uuid.NewString(), Definition: routing.MCPToolsetTool{Alias: alias, Classification: "read_only", InputSchema: json.RawMessage(`{"type":"object"}`)}}}
+	h.gateway.WorkflowRuns, h.gateway.WorkflowTools, h.gateway.Debits = fixture, fixture, &workflowDebitFixture{fakeSessionDebits: &fakeSessionDebits{}}
+	upstream := make(chan []byte, 2)
+	h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		upstream <- body
+		w.Header().Set("Content-Type", "text/event-stream")
+		io.WriteString(w, "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"model-a\",\"usage\":{\"input_tokens\":2}}}\n\n")
+		if h.mock.count("a") == 1 {
+			io.WriteString(w, "event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"thinking\",\"thinking\":\"\"}}\n\nevent: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"thinking_delta\",\"thinking\":\"private thought\"}}\n\nevent: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"signature_delta\",\"signature\":\"signed\"}}\n\nevent: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":0}\n\n")
+			fmt.Fprintf(w, "event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":1,\"content_block\":{\"type\":\"tool_use\",\"id\":\"call-1\",\"name\":%q,\"input\":{}}}\n\n", alias)
+			io.WriteString(w, "event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":1,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"{\\\"value\\\":1}\"}}\n\nevent: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":1}\n\nevent: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"tool_use\"},\"usage\":{\"output_tokens\":3}}\n\nevent: message_stop\ndata: {\"type\":\"message_stop\"}\n\n")
+			return
+		}
+		io.WriteString(w, "event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\nevent: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"final answer\"}}\n\nevent: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":0}\n\nevent: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":3}}\n\nevent: message_stop\ndata: {\"type\":\"message_stop\"}\n\n")
+	})
+	response := h.do(t.Context(), http.MethodPost, "/anthropic/v1/messages", fullKey, []byte(`{"model":"`+routeSlug+`","max_tokens":64,"stream":true,"messages":[{"role":"user","content":"hello"}]}`), nil)
+	defer response.Body.Close()
+	body, err := io.ReadAll(response.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response.StatusCode != http.StatusOK || !strings.Contains(string(body), "final answer") || strings.Contains(string(body), "call-1") || strings.Contains(string(body), alias) || h.mock.count("a") != 2 {
+		t.Fatalf("anthropic stream exposed an intermediate step or missed the final answer: status=%d body=%s calls=%d", response.StatusCode, body, h.mock.count("a"))
+	}
+	<-upstream
+	second := <-upstream
+	if !strings.Contains(string(second), `"tool_use_id":"call-1"`) || !strings.Contains(string(second), `"value":1`) || !strings.Contains(string(second), `"thinking":"private thought"`) || !strings.Contains(string(second), `"signature":"signed"`) {
+		t.Fatalf("anthropic provider did not receive paired tool call and result: %s", second)
+	}
+}
+
+func TestGatewayToolExecutionNativeRefusals(t *testing.T) {
+	for _, tc := range []struct {
+		name, profile, surface, path, body, fidelity, code string
+		certified                                          bool
+	}{
+		{"anthropic strict", "anthropic-messages", "anthropic", "/anthropic/v1/messages", `{"model":"` + routeSlug + `","max_tokens":20,"messages":[{"role":"user","content":"hello"}]}`, routing.FidelityStrict, "tool_execution_strict_route", true},
+		{"gemini strict", "gemini-generation", "gemini", "/gemini/v1beta/models/" + routeSlug + ":generateContent", `{"contents":[{"role":"user","parts":[{"text":"hello"}]}]}`, routing.FidelityStrict, "tool_execution_strict_route", true},
+		{"anthropic uncertified", "anthropic-messages", "anthropic", "/anthropic/v1/messages", `{"model":"` + routeSlug + `","max_tokens":20,"messages":[{"role":"user","content":"hello"}]}`, routing.FidelityTransformed, "upstream_unavailable", false},
+		{"gemini uncertified", "gemini-generation", "gemini", "/gemini/v1beta/models/" + routeSlug + ":generateContent", `{"contents":[{"role":"user","parts":[{"text":"hello"}]}]}`, routing.FidelityTransformed, "upstream_unavailable", false},
+		{"gemini candidates", "gemini-generation", "gemini", "/gemini/v1beta/models/" + routeSlug + ":generateContent", `{"contents":[{"role":"user","parts":[{"text":"hello"}]}],"generationConfig":{"candidateCount":2}}`, routing.FidelityTransformed, "tool_execution_choices_unsupported", true},
+		{"gemini candidate alias", "gemini-generation", "gemini", "/gemini/v1beta/models/" + routeSlug + ":generateContent", `{"contents":[{"role":"user","parts":[{"text":"hello"}]}],"generationConfig":{"candidate_count":2}}`, routing.FidelityTransformed, "tool_execution_choices_unsupported", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			projectID := uuid.NewString()
+			h := strictHarness(t, func(snapshot *routing.Snapshot) {
+				route := snapshot.Routes[routeSlug]
+				route.Fidelity.Mode, route.ToolExecution, route.ProjectID = tc.fidelity, "gateway", &projectID
+				snapshot.Routes[routeSlug] = route
+				for id, provider := range snapshot.Providers {
+					provider.Kind, provider.ProfileID, provider.ProfileRevision = tc.surface, tc.profile, connectors.ProfileRevision
+					provider.Capabilities = []routing.Capability{{Model: provider.Capabilities[0].Model, Operation: "generation", Surface: tc.surface, Mode: "unary", ToolCalls: tc.certified}}
+					snapshot.Providers[id] = provider
+				}
+			})
+			authority := h.rt.keys[fullKey]
+			authority.ProjectID = &projectID
+			h.rt.keys[fullKey] = authority
+			fixture := &workflowFixture{runID: uuid.NewString()}
+			h.gateway.WorkflowRuns, h.gateway.WorkflowTools, h.gateway.Debits = fixture, fixture, &workflowDebitFixture{fakeSessionDebits: &fakeSessionDebits{}}
+			response := h.do(t.Context(), http.MethodPost, tc.path, fullKey, []byte(tc.body), nil)
+			defer response.Body.Close()
+			body, err := io.ReadAll(response.Body)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if response.StatusCode == http.StatusOK || !strings.Contains(string(body), tc.code) || h.mock.count("a") != 0 || h.mock.count("b") != 0 {
+				t.Fatalf("native workflow refusal did not stop dispatch: status=%d body=%s", response.StatusCode, body)
+			}
+		})
+	}
+}
 
 func TestGatewayToolExecutionRejectsStrictRoutesBeforeDispatch(t *testing.T) {
 	h := strictHarness(t, func(snapshot *routing.Snapshot) {
