@@ -88,7 +88,7 @@ func (s *Server) replan(ctx context.Context, x *call) *Error {
 // remains of it.
 func (x *call) adoptPlan(plan routing.Plan) {
 	if x.allowance == 0 {
-		x.allowance = plan.Budget
+		x.allowance = x.spent + plan.Budget
 	}
 	x.decisions, x.policy, x.attempts, x.shadows = plan.Decisions, plan.Policy, plan.Attempts, plan.Shadows
 	x.finishPreparationPlanning()
@@ -106,7 +106,7 @@ func (x *call) adoptPlan(plan routing.Plan) {
 // planner has already checked that the route exists and the key may use it.
 func (s *Server) delegate(ctx context.Context, x *call, plan routing.Plan) *Error {
 	if x.allowance == 0 {
-		x.allowance = plan.Budget
+		x.allowance = x.spent + plan.Budget
 	}
 	selector := plan.Selected()
 	outcome, e := s.adopt(ctx, x, plan.Delegate, usage.ViaSelector)

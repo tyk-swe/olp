@@ -754,11 +754,11 @@ func (s *Server) inferenceOperation(family wire.Format, dialect string) http.Han
 				}
 				return err
 			}
-			out = s.execute(ctx, x)
+			out = s.executeModelStep(ctx, x, x.generation.parsed)
 			status = sw.finish(out)
 			return
 		}
-		out = s.execute(ctx, x)
+		out = s.executeModelStep(ctx, x, x.generation.parsed)
 		if out.err != nil {
 			status = out.err.Status
 			if out.err.Status > 0 {
