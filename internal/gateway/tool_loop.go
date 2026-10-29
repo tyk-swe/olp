@@ -5,12 +5,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"net/http"
 	"slices"
 	"time"
 
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/agents"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/mcp"
 	"github.com/tyk-swe/olp/internal/oif"
@@ -28,9 +28,18 @@ type WorkflowRunStore interface {
 
 type WorkflowTool = mcp.WorkflowTool
 
+type WorkflowApprovalStore interface {
+	Pause(context.Context, access.Authority, agents.WorkflowApprovalRequest, int) (string, error)
+	Continue(context.Context, access.Authority, string, json.RawMessage, map[string]json.RawMessage, int) (agents.WorkflowContinuation, error)
+}
+
 type WorkflowToolRunner interface {
 	Resolve(context.Context, access.Authority, *runtime.Release, []string) ([]WorkflowTool, error)
 	Call(context.Context, access.Authority, *runtime.Release, WorkflowTool, string, int, string, json.RawMessage) (json.RawMessage, error)
+}
+
+type WorkflowApprovedToolRunner interface {
+	CallApproved(context.Context, access.Authority, *runtime.Release, WorkflowTool, string, int, string, json.RawMessage, agents.WorkflowApproval) (json.RawMessage, error)
 }
 
 type workflowCall struct {
@@ -42,6 +51,10 @@ type workflowCall struct {
 	finalFrames   []byte
 	responseItems []responseMCPItem
 	responseMCP   bool
+	transcript    json.RawMessage
+	resume        *workflowResumeState
+	resumeStart   int
+	approvals     []agents.WorkflowApproval
 }
 
 func (s *Server) prepareWorkflow(ctx context.Context, x *call, token string) *Error {
@@ -84,7 +97,7 @@ func (s *Server) prepareWorkflow(ctx context.Context, x *call, token string) *Er
 			}
 			x.generation.parsed = parsed
 		}
-		x.workflow = &workflowCall{token: token, tools: tools}
+		x.workflow = &workflowCall{token: token, tools: tools, transcript: x.generation.parsed.Field(workflowTranscriptField(x.family))}
 		return nil
 	}
 	raw, err := workflowDefinitions(x.family, tools)
@@ -96,7 +109,7 @@ func (s *Server) prepareWorkflow(ctx context.Context, x *call, token string) *Er
 		return invalidRequest("invalid_request", "The route tools could not be added to the request.", nil)
 	}
 	x.generation.parsed = parsed
-	x.workflow = &workflowCall{token: token, tools: tools, responseMCP: x.family == wire.Responses && x.route.ResponsesMCPItems}
+	x.workflow = &workflowCall{token: token, tools: tools, transcript: x.generation.parsed.Field(workflowTranscriptField(x.family)), responseMCP: x.family == wire.Responses && x.route.ResponsesMCPItems}
 	if x.workflow.responseMCP {
 		x.workflow.responseItems = responseMCPListings(x.generation.toolsets, tools)
 	}
@@ -223,7 +236,28 @@ func (s *Server) abandonWorkflowDebit(ctx context.Context, x *call) *Error {
 }
 
 func (s *Server) executeToolLoop(ctx context.Context, x *call) *outcome {
-	for iteration := 0; iteration < 8; iteration++ {
+	firstIteration, resumeError := func() (int, *Error) {
+		if x.workflow.resume == nil {
+			return 0, nil
+		}
+		state := x.workflow.resume
+		x.workflow.calls = state.Calls
+		parsed, err := x.generation.parsed.WithField(workflowTranscriptField(x.family), state.Transcript)
+		if err != nil {
+			return 0, invalidRequest("tool_approval_invalid", "The approved workflow could not be resumed.", nil)
+		}
+		x.generation.parsed = parsed
+		continued, failure := s.continueToolLoop(ctx, x, state.Completion, x.workflow.resumeStart)
+		if failure != nil {
+			return 0, failure
+		}
+		x.generation.parsed = continued
+		return state.Iteration + 1, nil
+	}()
+	if resumeError != nil {
+		return &outcome{err: resumeError}
+	}
+	for iteration := firstIteration; iteration < 8; iteration++ {
 		authority, e := s.workflowAuthority(ctx, x, x.route, "")
 		if e != nil {
 			return &outcome{err: e}
@@ -289,13 +323,30 @@ func (s *Server) executeToolLoop(ctx context.Context, x *call) *outcome {
 		if len(out.completion.ToolCalls) > 32-x.workflow.calls {
 			return &outcome{err: invalidRequest("tool_call_limit", "The workflow reached its tool call limit.", nil)}
 		}
-		parsed, failure := s.continueToolLoop(ctx, x, out.completion)
+		pause, failure := s.pauseWorkflow(ctx, x, out.completion, iteration)
+		if failure != nil {
+			return &outcome{err: failure}
+		}
+		if pause != nil {
+			return &outcome{completion: out.completion, approval: pause}
+		}
+		parsed, failure := s.continueToolLoop(ctx, x, out.completion, x.workflow.ordinal)
 		if failure != nil {
 			return &outcome{err: failure}
 		}
 		x.generation.parsed = parsed
 	}
 	return &outcome{err: invalidRequest("tool_iteration_limit", "The workflow reached its model iteration limit.", nil)}
+}
+
+func workflowTranscriptField(family wire.Format) string {
+	if family.Surface() == "gemini" {
+		return "contents"
+	}
+	if family == wire.Responses {
+		return "input"
+	}
+	return "messages"
 }
 
 func workflowStreamCompletion(family wire.Format, frames *bytes.Reader, maxEvent, maxResponse int, route string) (*wire.Completion, error) {
@@ -324,7 +375,7 @@ func workflowStreamCompletion(family wire.Format, frames *bytes.Reader, maxEvent
 	return openai.Stream(wire.Chat, &translated, maxEvent, route, true, func([]byte) error { return nil })
 }
 
-func (s *Server) continueToolLoop(ctx context.Context, x *call, completion *wire.Completion) (*wire.Request, *Error) {
+func (s *Server) continueToolLoop(ctx context.Context, x *call, completion *wire.Completion, identityStart int) (*wire.Request, *Error) {
 	var response struct {
 		Choices []struct {
 			Message json.RawMessage `json:"message"`
@@ -369,7 +420,7 @@ func (s *Server) continueToolLoop(ctx context.Context, x *call, completion *wire
 		messages = append(messages, response.Choices[0].Message)
 	}
 	results := make([]protocols.WorkflowResult, 0, len(completion.ToolCalls))
-	for _, call := range completion.ToolCalls {
+	for callIndex, call := range completion.ToolCalls {
 		authority, e := s.workflowAuthority(ctx, x, x.route, "")
 		if e != nil {
 			return nil, e
@@ -382,7 +433,7 @@ func (s *Server) continueToolLoop(ctx context.Context, x *call, completion *wire
 		toolAuthority := *authority
 		toolAuthority.Attribution = x.attribution
 		callCtx, finish := s.monitorWorkflowAuthority(ctx, x, x.workflow.tools[index].ToolsetID)
-		result, err := s.WorkflowTools.Call(callCtx, toolAuthority, x.request.release, x.workflow.tools[index], x.workflow.runID, x.workflow.ordinal, fmt.Sprintf("%s:%d:%s", x.workflow.runID, x.workflow.ordinal, call.ID), json.RawMessage(call.Arguments))
+		result, err := s.callWorkflowTool(callCtx, x, toolAuthority, x.workflow.tools[index], call, identityStart+callIndex)
 		authorityErr := finish()
 		x.workflow.ordinal++
 		x.workflow.calls++

@@ -192,6 +192,7 @@ export interface components {
             model: string;
             olp_prompt: components["schemas"]["PublishedPromptReference"];
             olp_toolsets?: components["schemas"]["ChatToolsetSelection"];
+            olp_approval?: components["schemas"]["WorkflowApprovalSubmission"];
         } & {
             [key: string]: unknown;
         };
@@ -201,6 +202,36 @@ export interface components {
                 [key: string]: unknown;
             }[];
             olp_toolsets?: components["schemas"]["ChatToolsetSelection"];
+            olp_approval?: components["schemas"]["WorkflowApprovalSubmission"];
+        } & {
+            [key: string]: unknown;
+        };
+        /** @description After obtaining a human's approval, resubmit the original transcript and tool arguments. The token expires within five minutes and can be used only once. */
+        WorkflowApprovalSubmission: {
+            continuation_token: string;
+            /** @description The client must explicitly set this to true after obtaining human approval. */
+            approved: boolean;
+            /** @description The original JSON arguments indexed by the paused call ID. */
+            arguments: {
+                [key: string]: {
+                    [key: string]: unknown;
+                };
+            };
+        };
+        WorkflowApprovalCall: {
+            id: string;
+            name: string;
+            server_label?: string;
+            arguments: {
+                [key: string]: unknown;
+            };
+        };
+        /** @description The workflow paused before an approval-required tool. The client obtains human approval and resubmits the original transcript and arguments. */
+        WorkflowApprovalPause: {
+            /** @enum {string} */
+            type: "tool_approval_required";
+            continuation_token: string;
+            calls: components["schemas"]["WorkflowApprovalCall"][];
         } & {
             [key: string]: unknown;
         };
@@ -362,12 +393,14 @@ export interface components {
             max_tokens: number;
             olp_prompt: components["schemas"]["PublishedPromptReference"];
             olp_toolsets?: components["schemas"]["ChatToolsetSelection"];
+            olp_approval?: components["schemas"]["WorkflowApprovalSubmission"];
         } & {
             [key: string]: unknown;
         };
         GeminiPromptRequest: {
             olp_prompt: components["schemas"]["PublishedPromptReference"];
             olp_toolsets?: components["schemas"]["ChatToolsetSelection"];
+            olp_approval?: components["schemas"]["WorkflowApprovalSubmission"];
         } & {
             [key: string]: unknown;
         };
@@ -378,6 +411,7 @@ export interface components {
                 [key: string]: unknown;
             }[];
             olp_toolsets?: components["schemas"]["ChatToolsetSelection"];
+            olp_approval?: components["schemas"]["WorkflowApprovalSubmission"];
         } & {
             [key: string]: unknown;
         };
@@ -386,6 +420,7 @@ export interface components {
                 [key: string]: unknown;
             }[];
             olp_toolsets?: components["schemas"]["ChatToolsetSelection"];
+            olp_approval?: components["schemas"]["WorkflowApprovalSubmission"];
         } & {
             [key: string]: unknown;
         };
@@ -438,6 +473,7 @@ export interface components {
                 [key: string]: unknown;
             }[];
             olp_toolsets?: components["schemas"]["ChatToolsetSelection"];
+            olp_approval?: components["schemas"]["WorkflowApprovalSubmission"];
         } & {
             [key: string]: unknown;
         };
@@ -455,6 +491,14 @@ export interface components {
             server_label: string;
             tools: components["schemas"]["ResponsesMCPTool"][];
         };
+        ResponsesMCPApprovalRequest: {
+            /** @enum {string} */
+            type: "mcp_approval_request";
+            id: string;
+            server_label: string;
+            name: string;
+            arguments: string;
+        };
         ResponsesMCPCall: {
             /** @enum {string} */
             type: "mcp_call";
@@ -471,7 +515,7 @@ export interface components {
             };
         };
         ResponsesWorkflowResponse: {
-            output?: (components["schemas"]["ResponsesMCPListTools"] | components["schemas"]["ResponsesMCPCall"] | {
+            output?: (components["schemas"]["ResponsesMCPListTools"] | components["schemas"]["ResponsesMCPCall"] | components["schemas"]["ResponsesMCPApprovalRequest"] | {
                 [key: string]: unknown;
             })[];
         } & {
@@ -591,7 +635,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Provider completion response or stream */
+            /** @description Provider completion or WorkflowApprovalPause requiring explicit client approval. A streamed pause carries the pause object in the chat.completion.chunk olp_approval field before [DONE]. */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -863,7 +907,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Provider completion response or stream, including gateway MCP items when enabled by route policy */
+            /** @description Provider completion or WorkflowApprovalPause. Certified Responses contracts can include MCP approval-request items. Other streamed pauses carry the pause object in response.olp_approval on response.incomplete with an empty output array. */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -954,7 +998,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Provider completion response or stream */
+            /** @description Provider completion or WorkflowApprovalPause requiring explicit client approval. A streamed pause carries the pause object in the message_delta olp_approval field before message_stop. */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -1050,7 +1094,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Provider completion response or stream */
+            /** @description Provider completion or WorkflowApprovalPause requiring explicit client approval. */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -1146,7 +1190,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Provider completion response or stream */
+            /** @description Provider stream or WorkflowApprovalPause requiring explicit client approval. A streamed pause carries the pause object in the top-level olp_approval field. */
             200: {
                 headers: {
                     [name: string]: unknown;

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/agents"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/mcpservers"
 	"github.com/tyk-swe/olp/internal/routing"
@@ -89,6 +90,7 @@ func (s *Server) reserveToolRate(ctx context.Context, in executeInput) ([]*limit
 
 type executeInput struct {
 	authority access.Authority
+	approval  *agents.WorkflowApproval
 	runID     string
 	ordinal   int
 	resolved  resolvedToolset
@@ -152,7 +154,7 @@ func (s *Server) loadOriginalCredential(ctx context.Context, authority access.Au
 
 func (s *Server) reserveToolCall(ctx context.Context, in executeInput) (*Reservation, execution) {
 	reservedResult, err := s.Ledger.Reserve(ctx, ReserveInput{
-		Authority: in.authority, RunID: in.runID, Ordinal: in.ordinal, ToolsetID: in.resolved.id, ToolsetRevisionID: in.resolved.revisionID,
+		Authority: in.authority, Approval: in.approval, RunID: in.runID, Ordinal: in.ordinal, ToolsetID: in.resolved.id, ToolsetRevisionID: in.resolved.revisionID,
 		ReleaseID: in.releaseID, ToolAlias: in.tool.Alias, InputDigest: s.toolInputDigest(in.arguments),
 		CallDigest: s.callDigest(in.authority, in.callID), UnitPrice: cloneUnitPrice(in.tool.UnitPrice),
 		ServerID: in.tool.ServerID, ServerRevisionID: in.tool.ServerRevisionID,

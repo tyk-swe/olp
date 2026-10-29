@@ -739,6 +739,16 @@ func (s *Server) inferenceOperation(family wire.Format, dialect string) http.Han
 				writeError(w, e)
 				return
 			}
+			if e := s.prepareWorkflowResume(r.Context(), x); e != nil {
+				x.failure, status = e, e.Status
+				writeError(w, e)
+				return
+			}
+		} else if len(x.generation.parsed.Field("olp_approval")) > 0 {
+			e := permissionError("tool_approval_invalid", "The workflow approval is invalid or expired.")
+			x.failure, status = e, e.Status
+			writeError(w, e)
+			return
 		}
 		if s.Capture != nil && x.prompt == nil && x.workflow == nil && x.origin == "" && x.operationName() == "generation" {
 			x.captureContext = r.Context()
@@ -767,7 +777,7 @@ func (s *Server) inferenceOperation(family wire.Format, dialect string) http.Han
 			writeError(w, e)
 			return
 		}
-		if x.workflow != nil {
+		if x.workflow != nil && x.workflow.runID == "" {
 			runID, err := s.WorkflowRuns.Start(ctx, authority, x.named().ID, x.named().RevisionID)
 			if err != nil {
 				x.failure = serverError(http.StatusServiceUnavailable, "tool_execution_unavailable", "The workflow run could not be reserved.")
@@ -800,6 +810,29 @@ func (s *Server) inferenceOperation(family wire.Format, dialect string) http.Han
 			status = out.err.Status
 			if out.err.Status > 0 {
 				writeError(w, out.err)
+			}
+			return
+		}
+		if out.approval != nil {
+			if parsed.Stream {
+				frames, err := workflowPauseFrames(family, x.named().Slug, x.request.accountingID(), out.approval, int(s.cfg.MaxEventBytes), int(s.cfg.MaxResponseBytes))
+				if err != nil {
+					out.err = serverError(http.StatusBadGateway, "invalid_tool_response", "The approval response could not be prepared.")
+					status = out.err.Status
+					writeError(w, out.err)
+					return
+				}
+				w.Header().Set("Content-Type", "text/event-stream")
+				status = http.StatusOK
+				if _, err := w.Write(frames); err != nil {
+					out.cancelled = true
+				}
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			status = http.StatusOK
+			if err := json.NewEncoder(w).Encode(out.approval); err != nil {
+				out.cancelled = true
 			}
 			return
 		}

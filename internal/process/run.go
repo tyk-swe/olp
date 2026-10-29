@@ -408,7 +408,7 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 			}}
 			if limiter != nil {
 				toolServer.Limiter = limiter
-				gw.WorkflowRuns = &agents.WorkflowStore{Pool: pool, Auth: auth, Debits: &limits.DebitStore{Pool: pool, Limiter: limiter}}
+				gw.WorkflowRuns = &agents.WorkflowStore{Pool: pool, Auth: auth, Keys: keys, Installation: installation, Debits: &limits.DebitStore{Pool: pool, Limiter: limiter}}
 				gw.WorkflowTools = toolServer
 			}
 			toolServer.Register(public)
