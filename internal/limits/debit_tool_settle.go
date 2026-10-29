@@ -76,6 +76,14 @@ func persistToolSpendTx(ctx context.Context, tx pgx.Tx, r DebitResult, owners []
 }
 
 func SettleToolDebitTx(ctx context.Context, tx pgx.Tx, r DebitResult) error {
+	return settlePricedDebitTx(ctx, tx, r, "tool")
+}
+
+func SettleAgentDebitTx(ctx context.Context, tx pgx.Tx, r DebitResult) error {
+	return settlePricedDebitTx(ctx, tx, r, "agent")
+}
+
+func settlePricedDebitTx(ctx context.Context, tx pgx.Tx, r DebitResult, kind string) error {
 	if !validToolDebitResult(r) {
 		return ErrDebitConflict
 	}
@@ -86,7 +94,7 @@ func SettleToolDebitTx(ctx context.Context, tx pgx.Tx, r DebitResult) error {
 	if duplicate {
 		return nil
 	}
-	if head.kind != "tool" || head.state != DebitDispatched && head.state != DebitUnknown {
+	if head.kind != kind || head.state != DebitDispatched && head.state != DebitUnknown {
 		return ErrDebitState
 	}
 	if !toolSettleWithinBounds(head.costBound, head.chargeBound, head.observedCost, head.observedCharge, r) {

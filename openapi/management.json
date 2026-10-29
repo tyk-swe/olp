@@ -26679,6 +26679,10 @@
           "max_cost": {
             "type": "string",
             "pattern": "^[0-9]{1,12}(\\.[0-9]{1,12})?$"
+          },
+          "message_price": {
+            "type": "string",
+            "pattern": "^[0-9]{1,12}(\\.[0-9]{1,12})?$"
           }
         },
         "required": [

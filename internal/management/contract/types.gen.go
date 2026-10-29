@@ -6297,6 +6297,7 @@ type AgentDefinition struct {
 	CredentialId      *openapi_types.UUID     `json:"credential_id,omitempty"`
 	Endpoint          string                  `json:"endpoint"`
 	MaxCost           string                  `json:"max_cost"`
+	MessagePrice      *string                 `json:"message_price,omitempty"`
 	PricingRevisionId openapi_types.UUID      `json:"pricing_revision_id"`
 	Protocol          AgentDefinitionProtocol `json:"protocol"`
 	RouteRevisions    []openapi_types.UUID    `json:"route_revisions"`

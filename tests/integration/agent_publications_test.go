@@ -4,13 +4,24 @@ package integration_test
 
 import (
 	"bytes"
+	"context"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
+	"iter"
 	"net/http"
+	"net/http/httptest"
+	"reflect"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
+	protocol "github.com/a2aproject/a2a-go/v2/a2a"
+	"github.com/a2aproject/a2a-go/v2/a2asrv"
+	"github.com/google/uuid"
+	"github.com/tyk-swe/olp/internal/a2a"
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/agentcontract"
 	"github.com/tyk-swe/olp/internal/agents"
@@ -254,5 +265,270 @@ func TestAgentPublicationImmutableRows(t *testing.T) {
 	var text string
 	if err = f.Pool.QueryRow(t.Context(), `SELECT definition::text FROM olp.agent_publication_revisions WHERE id=$1`, revision).Scan(&text); err != nil || !strings.Contains(text, "operator template") {
 		t.Fatalf("immutable definition lost: %s %v", text, err)
+	}
+}
+
+func TestA2AAgentCardUsesGatewayAuthenticationAndEndpoint(t *testing.T) {
+	h := newAccessHarness(t)
+	owner := h.owner()
+	project := createProject(h, owner, "A2A discovery")
+	card := []byte(`{"name":"Fixture agent","description":"A test agent","version":"1.0","supportedInterfaces":[{"url":"PINNED_ENDPOINT","protocolBinding":"JSONRPC","protocolVersion":"1.0"},{"url":"https://wrong.invalid/rpc","protocolBinding":"JSONRPC","protocolVersion":"1.0"}],"capabilities":{"streaming":true,"pushNotifications":true},"defaultInputModes":["text"],"defaultOutputModes":["text"],"skills":[]}`)
+	upstreamIDs := make(chan string, 1)
+	var redirectCard, redirectRPC atomic.Bool
+	var redirectHits atomic.Int32
+	redirectTarget := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		redirectHits.Add(1)
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(redirectTarget.Close)
+	agentHandler := a2asrv.NewJSONRPCHandler(a2asrv.NewHandler(a2asrv.AgentExecutorFunc(func(ctx context.Context, execution *a2asrv.ExecutorContext) iter.Seq2[protocol.Event, error] {
+		return func(yield func(protocol.Event, error) bool) {
+			var dispatched int
+			if err := h.Pool.QueryRow(ctx, `SELECT count(*) FROM olp.execution_debits WHERE kind='agent' AND state='dispatched'`).Scan(&dispatched); err != nil || dispatched != 1 {
+				t.Errorf("send before durable debit: %d, %v", dispatched, err)
+			}
+			upstreamIDs <- string(execution.TaskID)
+			if !yield(protocol.NewSubmittedTask(execution, execution.Message), nil) {
+				return
+			}
+			if !yield(protocol.NewArtifactEvent(execution, protocol.NewTextPart("PRIVATE ARTIFACT")), nil) {
+				return
+			}
+			yield(protocol.NewStatusUpdateEvent(execution, protocol.TaskStateCompleted, nil), nil)
+		}
+	})))
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer upstream-secret" {
+			t.Error("upstream credential missing")
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		if r.URL.Path == "/rpc" {
+			if redirectRPC.Load() {
+				http.Redirect(w, r, redirectTarget.URL, http.StatusTemporaryRedirect)
+				return
+			}
+			agentHandler.ServeHTTP(w, r)
+			return
+		}
+		if r.URL.Path != "/.well-known/agent-card.json" {
+			t.Errorf("unexpected upstream request %s", r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		if redirectCard.Load() {
+			http.Redirect(w, r, redirectTarget.URL, http.StatusTemporaryRedirect)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write(card)
+	}))
+	t.Cleanup(upstream.Close)
+	card = bytes.ReplaceAll(card, []byte("PINNED_ENDPOINT"), []byte(upstream.URL+"/rpc"))
+	var user string
+	if err := h.Pool.QueryRow(t.Context(), `SELECT id::text FROM olp.users WHERE email='owner@example.com'`).Scan(&user); err != nil {
+		t.Fatal(err)
+	}
+	pricing := acctID(t)
+	acctExec(t, h.Pool, `INSERT INTO olp.pricing_revisions(id,revision,effective_at,created_by) VALUES($1,1,now(),$2)`, pricing, user)
+	digest := sha256.Sum256(card)
+	created := h.want(owner, http.MethodPost, "/api/v1/agents", map[string]any{
+		"project_id": project, "name": "fixture", "credential": "upstream-secret",
+		"agent": map[string]any{"protocol": "a2a-1.0.0", "endpoint": upstream.URL + "/rpc", "card_digest": hex.EncodeToString(digest[:]), "toolset_revisions": []string{}, "route_revisions": []string{}, "pricing_revision_id": pricing, "max_cost": "1", "message_price": "0.25"},
+	}, idem("a2a-card-agent"), http.StatusCreated)
+	agent := created["id"].(string)
+	h.want(owner, http.MethodPost, "/api/v1/agents/"+agent+"/publish", nil, withMatch(created, idem("a2a-card-publish")), http.StatusOK)
+	key := h.want(owner, http.MethodPost, "/api/v1/api-keys", map[string]any{"name": "A2A caller", "project_id": project, "scopes": []string{"agents"}, "allowed_agents": []string{agent}}, idem("a2a-card-key"), http.StatusCreated)["secret"].(string)
+	noScope := h.want(owner, http.MethodPost, "/api/v1/api-keys", map[string]any{"name": "missing scope", "project_id": project, "scopes": []string{"tools"}, "allowed_agents": []string{agent}}, idem("a2a-no-scope"), http.StatusCreated)["secret"].(string)
+	noAgent := h.want(owner, http.MethodPost, "/api/v1/api-keys", map[string]any{"name": "missing agent", "project_id": project, "scopes": []string{"agents"}}, idem("a2a-no-agent"), http.StatusCreated)["secret"].(string)
+	otherProject := createProject(h, owner, "A2A other project")
+	otherProjectKey := h.want(owner, http.MethodPost, "/api/v1/api-keys", map[string]any{"name": "other project", "project_id": otherProject, "scopes": []string{"agents"}}, idem("a2a-other-project"), http.StatusCreated)["secret"].(string)
+	client, prefix, _ := acctKeyspace(t)
+	limiter, err := limits.New(client, strings.TrimSuffix(prefix, ":"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.A2A.Ledger = &a2a.Ledger{Pool: h.Pool, Store: &limits.DebitStore{Pool: h.Pool, Limiter: limiter}, Auth: h.AuthKey}
+	if err := h.Runtime.Refresh(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	getCard := func(secret, agentID string) int {
+		t.Helper()
+		request, err := http.NewRequest(http.MethodGet, h.HTTP.URL+"/a2a/"+agentID+"/.well-known/agent-card.json", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		request.Header.Set("Authorization", "Bearer "+secret)
+		response, err := http.DefaultClient.Do(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer response.Body.Close()
+		return response.StatusCode
+	}
+	if getCard(noScope, agent) == http.StatusOK || getCard(noAgent, agent) == http.StatusOK {
+		t.Fatal("agent access succeeded without its scope and allowlist")
+	}
+	if got, missing := getCard(otherProjectKey, agent), getCard(otherProjectKey, uuid.NewString()); got != missing || got != http.StatusNotFound {
+		t.Fatalf("cross-project agent differs from missing: %d, %d", got, missing)
+	}
+	r, err := http.NewRequest(http.MethodGet, h.HTTP.URL+"/a2a/"+agent+"/.well-known/agent-card.json", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.Header.Set("Authorization", "Bearer "+key)
+	response, err := http.DefaultClient.Do(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("card request returned %d, want 200", response.StatusCode)
+	}
+	var result struct {
+		SupportedInterfaces []struct {
+			URL             string `json:"url"`
+			ProtocolBinding string `json:"protocolBinding"`
+			ProtocolVersion string `json:"protocolVersion"`
+		} `json:"supportedInterfaces"`
+		Capabilities struct {
+			Streaming         bool `json:"streaming"`
+			PushNotifications bool `json:"pushNotifications"`
+		} `json:"capabilities"`
+		SecuritySchemes map[string]struct {
+			HTTPAuth struct {
+				Scheme string `json:"scheme"`
+			} `json:"httpAuthSecurityScheme"`
+		} `json:"securitySchemes"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&result); err != nil {
+		t.Fatal(err)
+	}
+	if len(result.SupportedInterfaces) != 1 || result.SupportedInterfaces[0].URL != h.HTTP.URL+"/a2a/"+agent || result.SupportedInterfaces[0].ProtocolBinding != "JSONRPC" || result.Capabilities.Streaming || result.Capabilities.PushNotifications {
+		t.Fatalf("card advertises an unimplemented or foreign interface: %+v", result)
+	}
+	if len(result.SecuritySchemes) != 1 {
+		t.Fatalf("card must advertise gateway authentication: %+v", result.SecuritySchemes)
+	}
+	for _, scheme := range result.SecuritySchemes {
+		if scheme.HTTPAuth.Scheme != "Bearer" {
+			t.Fatalf("unexpected security scheme: %+v", scheme)
+		}
+	}
+	rpc := func(secret, method string, params any) map[string]any {
+		t.Helper()
+		body, err := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": 1, "method": method, "params": params})
+		if err != nil {
+			t.Fatal(err)
+		}
+		request, err := http.NewRequest(http.MethodPost, h.HTTP.URL+"/a2a/"+agent, bytes.NewReader(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		request.Header.Set("Authorization", "Bearer "+secret)
+		request.Header.Set("Content-Type", "application/json")
+		response, err := http.DefaultClient.Do(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer response.Body.Close()
+		if response.StatusCode != http.StatusOK {
+			t.Fatalf("%s returned %d", method, response.StatusCode)
+		}
+		var decoded map[string]any
+		if err := json.NewDecoder(response.Body).Decode(&decoded); err != nil {
+			t.Fatal(err)
+		}
+		return decoded
+	}
+	sent := rpc(key, "SendMessage", map[string]any{"message": map[string]any{"messageId": "fixture-message", "role": "ROLE_USER", "parts": []any{map[string]any{"text": "PRIVATE REQUEST"}}}})
+	sendResult, ok := sent["result"].(map[string]any)
+	if !ok {
+		t.Fatalf("send failed: %+v", sent)
+	}
+	task, ok := sendResult["task"].(map[string]any)
+	if !ok {
+		t.Fatalf("send did not return a task: %+v", sent)
+	}
+	upstreamID := <-upstreamIDs
+	id, ok := task["id"].(string)
+	if !ok || id == "" || id == upstreamID {
+		t.Fatalf("send did not mask upstream ID: %+v", task)
+	}
+	read := rpc(key, "GetTask", map[string]any{"id": id})
+	readTask, ok := read["result"].(map[string]any)
+	if !ok || readTask["id"] != id || !strings.Contains(fmt.Sprint(readTask), "PRIVATE ARTIFACT") {
+		t.Fatalf("task read failed: %+v", read)
+	}
+	if got := rpc(key, "SendMessage", map[string]any{"message": map[string]any{"messageId": "upstream-reference", "role": "ROLE_USER", "parts": []any{map[string]any{"text": "reference"}}, "referenceTaskIds": []any{upstreamID}}}); got["error"] == nil {
+		t.Fatalf("accepted upstream task reference: %+v", got)
+	}
+	if got := rpc(key, "SendMessage", map[string]any{"message": map[string]any{"messageId": "push-attempt", "role": "ROLE_USER", "parts": []any{map[string]any{"text": "push"}}}, "configuration": map[string]any{"taskPushNotificationConfig": map[string]any{"pushNotificationConfig": map[string]any{"url": "https://wrong.invalid"}}}}); got["error"] == nil {
+		t.Fatalf("accepted an unsupported push request: %+v", got)
+	}
+	second := rpc(key, "SendMessage", map[string]any{"message": map[string]any{"messageId": "second-fixture-message", "role": "ROLE_USER", "parts": []any{map[string]any{"text": "another message"}}}})
+	secondResult, ok := second["result"].(map[string]any)
+	if !ok || secondResult["task"] == nil {
+		t.Fatalf("second send failed: %+v", second)
+	}
+	<-upstreamIDs
+	foreign := h.want(owner, http.MethodPost, "/api/v1/api-keys", map[string]any{"name": "other caller", "project_id": project, "scopes": []string{"agents"}, "allowed_agents": []string{agent}}, idem("a2a-foreign-key"), http.StatusCreated)["secret"].(string)
+	if err := h.Runtime.Refresh(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	missing := rpc(foreign, "GetTask", map[string]any{"id": uuid.NewString()})
+	if got := rpc(foreign, "GetTask", map[string]any{"id": id}); !reflect.DeepEqual(got, missing) {
+		t.Fatalf("foreign task differs from missing: %+v, %+v", got, missing)
+	}
+	if got := rpc(key, "GetTask", map[string]any{"id": upstreamID}); got["error"] == nil {
+		t.Fatalf("accepted upstream task ID: %+v", got)
+	}
+	projectReadStatus := func(agentID, taskID string) int {
+		t.Helper()
+		body, err := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": 1, "method": "GetTask", "params": map[string]any{"id": taskID}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		request, err := http.NewRequest(http.MethodPost, h.HTTP.URL+"/a2a/"+agentID, bytes.NewReader(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		request.Header.Set("Authorization", "Bearer "+otherProjectKey)
+		response, err := http.DefaultClient.Do(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer response.Body.Close()
+		return response.StatusCode
+	}
+	if got, missing := projectReadStatus(agent, id), projectReadStatus(uuid.NewString(), uuid.NewString()); got != missing || got != http.StatusNotFound {
+		t.Fatalf("cross-project task differs from missing: %d, %d", got, missing)
+	}
+	var settled, results int
+	var cost string
+	if err := h.Pool.QueryRow(t.Context(), `SELECT count(*),sum(d.observed_cost)::text,(SELECT count(*) FROM olp.execution_debit_results r JOIN olp.execution_debits x ON x.id=r.dispatch_id WHERE x.kind='agent') FROM olp.execution_debits d WHERE d.kind='agent' AND d.state='settled'`).Scan(&settled, &cost, &results); err != nil {
+		t.Fatal(err)
+	}
+	if settled != 2 || !limits.AmountEqual(cost, "0.50") || results != settled {
+		t.Fatalf("incorrect settlements: %d, %s, %d", settled, cost, results)
+	}
+	redirectRPC.Store(true)
+	if got := rpc(key, "SendMessage", map[string]any{"message": map[string]any{"messageId": "redirect-message", "role": "ROLE_USER", "parts": []any{map[string]any{"text": "redirect"}}}}); got["error"] == nil {
+		t.Fatalf("redirected send succeeded: %+v", got)
+	}
+	redirectCard.Store(true)
+	if got := getCard(key, agent); got != http.StatusBadGateway || redirectHits.Load() != 0 {
+		t.Fatalf("redirected credential request: status %d, target calls %d", got, redirectHits.Load())
+	}
+	var unknown int
+	if err := h.Pool.QueryRow(t.Context(), `SELECT count(*) FROM olp.execution_debits WHERE kind='agent' AND state='outcome_unknown'`).Scan(&unknown); err != nil || unknown != 1 {
+		t.Fatalf("ambiguous send was not retained: %d, %v", unknown, err)
+	}
+	var stored string
+	if err := h.Pool.QueryRow(t.Context(), `SELECT concat(coalesce((SELECT json_agg(t)::text FROM olp.a2a_tasks t),''),coalesce((SELECT json_agg(d)::text FROM olp.execution_debits d),''))`).Scan(&stored); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(stored, "PRIVATE REQUEST") || strings.Contains(stored, "PRIVATE ARTIFACT") {
+		t.Fatal("message content persisted")
 	}
 }

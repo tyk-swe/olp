@@ -15,6 +15,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/tyk-swe/olp/internal/a2a"
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/batches"
 	"github.com/tyk-swe/olp/internal/billing"
@@ -381,6 +382,9 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 				gw.Resolver = resources.NewResolver(pool)
 			}
 			gw.Register(public)
+			(&a2a.Server{Runtime: rt, Egress: &policy, Ledger: &a2a.Ledger{Pool: pool, Store: &limits.DebitStore{Pool: pool, Limiter: limiter}, Auth: auth}, TrustedProxies: c.TrustedProxyCIDRs, PublicOrigin: c.PublicOrigin, Credentials: func(ctx context.Context, id string) ([]byte, error) {
+				return keys.Read(ctx, pool, installation, id, secrets.AgentCredential)
+			}}).Register(public)
 			var toolLedger mcp.Ledger
 			if limiter != nil {
 				toolLedger = &mcp.DurableLedger{Pool: pool, Store: &limits.DebitStore{Pool: pool, Limiter: limiter}, Auth: auth}

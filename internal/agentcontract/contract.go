@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math/big"
 	"regexp"
 	"slices"
 	"strings"
@@ -36,6 +37,7 @@ type Definition struct {
 	RouteRevisions    []string `json:"route_revisions"`
 	PricingRevisionID string   `json:"pricing_revision_id"`
 	MaxCost           string   `json:"max_cost"`
+	MessagePrice      string   `json:"message_price,omitempty"`
 }
 type Draft struct {
 	ProjectID string              `json:"project_id,omitempty"`
@@ -103,6 +105,9 @@ func (d Draft) Validate(kind string) error {
 		if !slices.Contains([]string{"a2a-0.3.0", "a2a-1.0.0"}, a.Protocol) || !hexDigest.MatchString(a.CardDigest) || !validID(a.PricingRevisionID) || !validCost(a.MaxCost) {
 			return invalid("agent", "Supply pinned protocol, card, pricing and a finite positive cost bound.")
 		}
+		if a.MessagePrice != "" && (!validAmount(a.MessagePrice) || !priceWithinBound(a.MessagePrice, a.MaxCost)) {
+			return invalid("message_price", "Supply a nonnegative price within the cost bound.")
+		}
 		if a.CredentialID != nil && !validID(*a.CredentialID) {
 			return invalid("credential_id", "Use an agent credential reference.")
 		}
@@ -152,7 +157,15 @@ func validName(v string) error {
 	return nil
 }
 func validCost(v string) bool {
-	return regexp.MustCompile(`^[0-9]{1,12}(\.[0-9]{1,12})?$`).MatchString(v) && strings.Trim(v, "0.") != ""
+	return validAmount(v) && strings.Trim(v, "0.") != ""
+}
+func validAmount(v string) bool {
+	return regexp.MustCompile(`^[0-9]{1,12}(\.[0-9]{1,12})?$`).MatchString(v)
+}
+func priceWithinBound(price, bound string) bool {
+	p, priceOK := new(big.Rat).SetString(price)
+	b, boundOK := new(big.Rat).SetString(bound)
+	return priceOK && boundOK && p.Cmp(b) <= 0
 }
 
 type Revision struct {
