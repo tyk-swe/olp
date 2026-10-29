@@ -208,10 +208,10 @@ func verifyWorkflowTraceCorrelation(t *testing.T, h *accessHarness, secret, keyI
 		t.Fatal(err)
 	}
 	traceID := bytes.Repeat([]byte{31}, 16)
-	owned := &tracepb.Span{TraceId: traceID, SpanId: bytes.Repeat([]byte{1}, 8), Attributes: []*commonpb.KeyValue{traceText("olp.run_id", runID), traceText("olp.attempt_id", attempt)}}
+	owned := &tracepb.Span{TraceId: traceID, SpanId: bytes.Repeat([]byte{1}, 8), StartTimeUnixNano: 200, EndTimeUnixNano: 200, Attributes: []*commonpb.KeyValue{traceText("olp.run_id", runID), traceText("olp.attempt_id", attempt), traceText("gen_ai.prompt", "workflow-private-span")}}
 	missing := &tracepb.Span{TraceId: traceID, SpanId: bytes.Repeat([]byte{2}, 8), Attributes: []*commonpb.KeyValue{traceText("olp.run_id", runID), traceText("olp.attempt_id", uuid.NewString())}}
-	runOnly := &tracepb.Span{TraceId: traceID, SpanId: bytes.Repeat([]byte{3}, 8), Attributes: []*commonpb.KeyValue{traceText("olp.run_id", runID)}}
-	attemptOnly := &tracepb.Span{TraceId: traceID, SpanId: bytes.Repeat([]byte{4}, 8), Attributes: []*commonpb.KeyValue{traceText("olp.attempt_id", attempt)}}
+	runOnly := &tracepb.Span{TraceId: traceID, SpanId: bytes.Repeat([]byte{3}, 8), StartTimeUnixNano: 100, EndTimeUnixNano: 100, Attributes: []*commonpb.KeyValue{traceText("olp.run_id", runID)}}
+	attemptOnly := &tracepb.Span{TraceId: traceID, SpanId: bytes.Repeat([]byte{4}, 8), StartTimeUnixNano: 200, EndTimeUnixNano: 200, Attributes: []*commonpb.KeyValue{traceText("olp.attempt_id", attempt)}}
 	malformed := &tracepb.Span{TraceId: traceID, SpanId: bytes.Repeat([]byte{5}, 8), Attributes: []*commonpb.KeyValue{traceText("olp.run_id", runID), traceText("olp.attempt_id", "invalid")}}
 	payload := tracePayload(t, traceBatch(owned, missing, runOnly, attemptOnly, malformed, owned))
 	before := traceFinancialSnapshot(t, h)
@@ -226,6 +226,13 @@ func verifyWorkflowTraceCorrelation(t *testing.T, h *accessHarness, secret, keyI
 	}
 	if total != 5 || validRun != 3 || validAttempt != 2 || uncorrelated != 2 {
 		t.Fatalf("workflow traces total=%d run=%d attempt=%d uncorrelated=%d", total, validRun, validAttempt, uncorrelated)
+	}
+	if _, err := h.Pool.Exec(t.Context(), `UPDATE olp.trace_spans SET id = CASE encode(span_id, 'hex')
+ WHEN '0101010101010101' THEN '00000000-0000-0000-0000-000000000001'::uuid
+ WHEN '0303030303030303' THEN '00000000-0000-0000-0000-000000000003'::uuid
+ WHEN '0404040404040404' THEN '00000000-0000-0000-0000-000000000002'::uuid END
+ WHERE run_id=$1`, runID); err != nil {
+		t.Fatal(err)
 	}
 	if after := traceFinancialSnapshot(t, h); after != before {
 		t.Fatalf("trace upload changed financial state: before=%s after=%s", before, after)

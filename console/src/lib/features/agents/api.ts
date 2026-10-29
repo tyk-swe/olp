@@ -117,6 +117,27 @@ export async function saveServer(
     })
   );
 }
+export const listRuns = async (project?: string, cursor?: string) =>
+  unwrapPage(
+    await apiClient.GET('/api/v1/agent-runs', {
+      params: { query: { project_id: project || undefined, cursor, limit: 50 } }
+    })
+  );
+
+export const getRun = async (runID: string) =>
+  unwrap(
+    await apiClient.GET('/api/v1/agent-runs/{run_id}', {
+      params: { path: { run_id: runID } }
+    })
+  );
+
+export const listRunSpans = async (runID: string, cursor?: string) =>
+  unwrapPage(
+    await apiClient.GET('/api/v1/agent-runs/{run_id}/spans', {
+      params: { path: { run_id: runID }, query: { cursor, limit: 50 } }
+    })
+  );
+
 export const listExposures = async (key?: string, cursor?: string) =>
   unwrapPage(
     await apiClient.GET('/api/v1/execution-debits', {

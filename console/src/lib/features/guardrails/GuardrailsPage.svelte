@@ -136,7 +136,13 @@
   let result = $state<Result | null>(null);
   const external = $derived(
     !type.startsWith('builtin.') &&
-      !['model', 'semantic_guard', 'decision_model', 'typesafe', 'plugin'].includes(type)
+      ![
+        'model',
+        'semantic_guard',
+        'decision_model',
+        'typesafe',
+        'plugin'
+      ].includes(type)
   );
   const canEdit = $derived(access.allows('POST /api/v1/guardrails'));
   async function run(action: () => Promise<void>) {

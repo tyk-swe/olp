@@ -1,13 +1,13 @@
 # Agent gateway plan
 
-Status: **Planned**. Consumer MCP execution, gateway tool loops, A2A, prompt
-rendering, trace ingestion and delegated agent identities remain unimplemented.
+Status: **Planned**. Individual checklists record implemented pieces and the
+remaining workflow and release work.
 Existing [upstream registration](../../use/mcp-servers.md) and
 [management MCP](../../operate/automation.md#management-mcp) have separate contracts.
 This plan depends on existing access, accounting, pricing, observability and
 guardrail owners; it extends them rather than creating parallel registries.
 It owns roadmap RM4.4, RM7 and RM8. The [delivery checklists](#ordered-delivery-and-verification)
-name the dependencies and evidence needed for each step; all remain planned.
+name the dependencies and evidence needed for each step.
 
 ## Shared implementation contract
 
@@ -314,7 +314,9 @@ Management, immutable-row, live-revocation and atomic approval/dispatch integrat
 scenarios compile but await the service-backed CI gate; the checklist remains
 open until that qualification passes.
 The packaged-console browser gate also includes a real prompt save/publish,
-draft-versus-label, retirement and exposure-view journey. It has not run locally.
+draft-versus-label, retirement and exposure-view journey. The complete gate has
+not run locally. A separate packaged-console prompt rendering journey passed
+locally with publication, label movement and Axe checks on both pages.
 
 - [ ] **RM4.4 — Establish agent authority and publication:** add forward
   migrations, declared scopes/allowlists, immutable toolset/agent/prompt
@@ -374,11 +376,19 @@ for their selected backend, not completion of every retrieval adapter.
   transformed-route policy. Verify iteration/time/concurrency/cost bounds,
   per-step attempts, approvals, digest-bound continuation and revocation.
   Test cancellation/restart/unknown effects and prevent cache replay of runs.
-- [ ] **RM8.2 — Add prompt publication and rendering** (prompt/console):
-  implement immutable revisions, labels and bounded string substitution.
-  Verify equivalent API/playground/import rendering, fixed in-flight revisions,
-  unknown-variable and strict-route refusals, input guards and no persisted
-  variable values or rendered content.
+- [x] **RM8.2 — Add prompt publication and rendering** (prompt/console):
+  immutable revisions, labels and bounded string substitution use the same
+  server rendering path for inference, playground and imported configuration.
+  Gateway fixtures cover fixed in-flight revisions, variable and strict-route
+  refusals, input guards and content-free persistence. The PostgreSQL-backed
+  `TestPlaygroundRendersPublishedPromptLikeInference` compares rendered input
+  across four request formats in unary and streaming mode, checks project
+  access, refuses ambiguous and oversized raw requests before dispatch, and
+  exercises import and label movement. With capture enabled, it also checks that
+  playground variables and rendered text stay out of durable records and
+  exports. The packaged-console journey covers save, publish, playground
+  rendering, label movement and Axe checks. These are local fixture results,
+  not live provider qualification.
 - [x] **RM8.3 — Add delegated identities** (access): workload agents use
   explicit consent and scoped tokens with intersected rights and
   user/agent/pair budgets. Fixtures cover signed tool calls, audience refusal,

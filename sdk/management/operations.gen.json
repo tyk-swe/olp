@@ -16312,6 +16312,53 @@
     }
   },
   {
+    "name": "get_agent_run",
+    "group": "agents",
+    "method": "GET",
+    "read_only": true,
+    "path": "/api/v1/agent-runs/{run_id}",
+    "description": "Get a gateway run",
+    "scopes": [
+      [
+        "read"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "run_id",
+        "in": "path",
+        "required": true,
+        "type": "string"
+      }
+    ],
+    "response_headers": {
+      "ETag": "etag"
+    },
+    "body_required": false,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "object",
+          "properties": {
+            "run_id": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "run_id"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "path"
+      ]
+    }
+  },
+  {
     "name": "get_api_key",
     "group": "api-keys",
     "method": "GET",
@@ -19207,6 +19254,142 @@
           ]
         }
       }
+    }
+  },
+  {
+    "name": "list_agent_run_spans",
+    "group": "agents",
+    "method": "GET",
+    "read_only": true,
+    "path": "/api/v1/agent-runs/{run_id}/spans",
+    "description": "List correlated run spans",
+    "scopes": [
+      [
+        "read"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "run_id",
+        "in": "path",
+        "required": true,
+        "type": "string"
+      },
+      {
+        "name": "cursor",
+        "in": "query",
+        "required": false,
+        "type": "string"
+      },
+      {
+        "name": "limit",
+        "in": "query",
+        "required": false,
+        "type": "integer"
+      }
+    ],
+    "response_headers": {
+      "ETag": "etag"
+    },
+    "body_required": false,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "object",
+          "properties": {
+            "run_id": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "run_id"
+          ]
+        },
+        "query": {
+          "type": "object",
+          "properties": {
+            "cursor": {
+              "type": "string"
+            },
+            "limit": {
+              "format": "int32",
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "path"
+      ]
+    }
+  },
+  {
+    "name": "list_agent_runs",
+    "group": "agents",
+    "method": "GET",
+    "read_only": true,
+    "path": "/api/v1/agent-runs",
+    "description": "List gateway runs",
+    "scopes": [
+      [
+        "read"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "cursor",
+        "in": "query",
+        "required": false,
+        "type": "string"
+      },
+      {
+        "name": "limit",
+        "in": "query",
+        "required": false,
+        "type": "integer"
+      },
+      {
+        "name": "project_id",
+        "in": "query",
+        "required": false,
+        "type": "string"
+      }
+    ],
+    "response_headers": {
+      "ETag": "etag"
+    },
+    "body_required": false,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "type": "object",
+          "properties": {
+            "cursor": {
+              "type": "string"
+            },
+            "limit": {
+              "format": "int32",
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
+            },
+            "project_id": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
     }
   },
   {
