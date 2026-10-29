@@ -55,6 +55,12 @@
           route: 'GET /api/v1/toolsets'
         },
         {
+          label: 'Runs',
+          href: resolve('/runs'),
+          icon: 'route',
+          route: 'GET /api/v1/agent-runs'
+        },
+        {
           label: 'Tool calls',
           href: resolve('/tool-calls'),
           icon: 'route',

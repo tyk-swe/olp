@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"math/big"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -742,6 +743,10 @@ func TestGatewayFromEmptyInstallationToSDKTraffic(t *testing.T) {
 }
 
 func TestGatewayToolWorkflowSettlesOneRun(t *testing.T) {
+	isZero := func(value any) bool {
+		number, ok := new(big.Rat).SetString(fmt.Sprint(value))
+		return ok && number.Sign() == 0
+	}
 	h := newAccessHarness(t)
 	owner := h.owner()
 	project := createProject(h, owner, "Gateway workflow")
@@ -1048,16 +1053,79 @@ func TestGatewayToolWorkflowSettlesOneRun(t *testing.T) {
 		t.Fatalf("workflow accounting lost or duplicated request data: facts=%d counted=%d receipts=%d", facts, counted, receipts)
 	}
 	verifyWorkflowTraceCorrelation(t, h, secret, keyID, runID, limiter)
+	listedRuns := h.want(owner, "GET", "/api/v1/agent-runs?project_id="+project, nil, nil, http.StatusOK)
+	if items := mcpExecItems(t, listedRuns, "items"); len(items) != 1 || mcpExecString(t, mcpExecItem(t, items, 0, listedRuns), "id") != runID {
+		t.Fatalf("run list did not expose the completed workflow: %v", listedRuns)
+	}
+	runDetail := h.want(owner, "GET", "/api/v1/agent-runs/"+runID, nil, nil, http.StatusOK)
+	if mcpExecString(t, runDetail, "id") != runID || len(mcpExecItems(t, runDetail, "steps")) != 3 {
+		t.Fatalf("run detail did not expose the ordered workflow steps: %v", runDetail)
+	}
+	stepItems := mcpExecItems(t, runDetail, "steps")
+	attempts := map[string]bool{}
+	for index, kind := range []string{"model", "tool", "model"} {
+		step := mcpExecItem(t, stepItems, index, runDetail)
+		if step["kind"] != kind || step["state"] != "settled" || step["ordinal"] != float64(index) || !isZero(step["remaining_cost"]) || !isZero(step["remaining_charge"]) {
+			t.Fatalf("run step did not report settled attempt metadata: %v", step)
+		}
+		attempts[mcpExecString(t, step, "dispatch_id")] = true
+	}
+	spanPage := h.want(owner, "GET", "/api/v1/agent-runs/"+runID+"/spans?limit=1", nil, nil, http.StatusOK)
+	allSpans := append([]any{}, mcpExecItems(t, spanPage, "items")...)
+	for spanPage["next_cursor"] != nil {
+		cursor := mcpExecString(t, spanPage, "next_cursor")
+		spanPage = h.want(owner, "GET", "/api/v1/agent-runs/"+runID+"/spans?limit=1&cursor="+cursor, nil, nil, http.StatusOK)
+		allSpans = append(allSpans, mcpExecItems(t, spanPage, "items")...)
+	}
+	linked := 0
+	for index := range allSpans {
+		span := mcpExecItem(t, allSpans, index, spanPage)
+		if attempt, ok := span["attempt_id"].(string); ok {
+			if !attempts[attempt] {
+				t.Fatalf("span linked to a different run's attempt: %v", span)
+			}
+			linked++
+		}
+	}
+	if len(allSpans) != 3 || linked != 2 {
+		t.Fatalf("run spans did not preserve validated correlations: spans=%d linked=%d", len(allSpans), linked)
+	}
+	for _, private := range []string{prompt, argument, answer, "workflow-private-span"} {
+		if strings.Contains(fmt.Sprint(listedRuns, runDetail, allSpans), private) {
+			t.Fatal("run management exposed private workflow content")
+		}
+	}
+	otherProject := createProject(h, owner, "Other run project")
+	viewer := h.invite(owner, "run-viewer@example.com", "viewer")
+	viewerSession := h.want(viewer, "GET", "/api/v1/sessions/current", nil, nil, http.StatusOK)
+	viewerID := mcpExecString(t, mcpExecObject(t, viewerSession, "user"), "id")
+	viewerRecord := h.want(owner, "GET", "/api/v1/users/"+viewerID, nil, nil, http.StatusOK)
+	h.want(owner, "PATCH", "/api/v1/users/"+viewerID, map[string]any{"access_scope": "assigned"}, etagHeader(viewerRecord), http.StatusOK)
+	addMember(h, owner, otherProject, viewerID, "viewer")
+	assignedViewer := login(h, "run-viewer@example.com")
+	h.want(assignedViewer, "GET", "/api/v1/agent-runs?project_id="+project, nil, nil, http.StatusNotFound)
+	h.want(assignedViewer, "GET", "/api/v1/agent-runs/"+runID, nil, nil, http.StatusNotFound)
+	h.want(assignedViewer, "GET", "/api/v1/agent-runs/"+runID+"/spans", nil, nil, http.StatusNotFound)
+	if filtered := h.want(assignedViewer, "GET", "/api/v1/agent-runs", nil, nil, http.StatusOK); len(mcpExecItems(t, filtered, "items")) != 0 {
+		t.Fatalf("project viewer could see another project's runs: %v", filtered)
+	}
+	addMember(h, owner, project, viewerID, "viewer")
+	h.want(assignedViewer, "GET", "/api/v1/agent-runs/"+runID, nil, nil, http.StatusOK)
+	h.want(assignedViewer, "GET", "/api/v1/agent-runs/"+runID+"/spans", nil, nil, http.StatusOK)
+	h.want(owner, "DELETE", "/api/v1/projects/"+project+"/members/"+viewerID, nil, projectEtag(h, owner, project), http.StatusNoContent)
+	h.want(assignedViewer, "GET", "/api/v1/agent-runs/"+runID, nil, nil, http.StatusNotFound)
+	h.want(assignedViewer, "GET", "/api/v1/agent-runs/"+runID+"/spans", nil, nil, http.StatusNotFound)
 	var stored string
 	if err := h.Pool.QueryRow(t.Context(), `SELECT
 		COALESCE((SELECT row_to_json(r)::text FROM olp.agent_runs r WHERE r.id=$1),'') ||
 		COALESCE((SELECT string_agg(row_to_json(s)::text,'') FROM olp.agent_steps s WHERE s.run_id=$1),'') ||
 		COALESCE((SELECT string_agg(row_to_json(d)::text,'') FROM olp.execution_debits d WHERE d.run_id=$1),'') ||
 		COALESCE((SELECT string_agg(row_to_json(c)::text,'') FROM olp.mcp_tool_calls c JOIN olp.execution_debits d ON d.id=c.dispatch_id WHERE d.run_id=$1),'') ||
-		COALESCE((SELECT string_agg(row_to_json(f)::text,'') FROM olp.attempt_usage_facts f JOIN olp.execution_debits d ON d.id=f.attempt_id WHERE d.run_id=$1),'')`, runID).Scan(&stored); err != nil {
+		COALESCE((SELECT string_agg(row_to_json(f)::text,'') FROM olp.attempt_usage_facts f JOIN olp.execution_debits d ON d.id=f.attempt_id WHERE d.run_id=$1),'') ||
+		COALESCE((SELECT string_agg(row_to_json(t)::text,'') FROM olp.trace_spans t WHERE t.run_id=$1),'')`, runID).Scan(&stored); err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(stored, prompt) || strings.Contains(stored, argument) || strings.Contains(stored, answer) {
+	if strings.Contains(stored, prompt) || strings.Contains(stored, argument) || strings.Contains(stored, answer) || strings.Contains(stored, "workflow-private-span") {
 		t.Fatal("workflow stored conversation or tool content in its run or attempt records")
 	}
 	noUsage.Store(true)
@@ -1074,12 +1142,30 @@ func TestGatewayToolWorkflowSettlesOneRun(t *testing.T) {
 	if unknown != 1 || !exposureRetained {
 		t.Fatalf("missing usage did not retain model exposure: unknown=%d retained=%t", unknown, exposureRetained)
 	}
+	var unknownRun string
+	if err := h.Pool.QueryRow(t.Context(), `SELECT run_id::text FROM olp.execution_debits WHERE api_key_id=$1 AND state='outcome_unknown'`, keyID).Scan(&unknownRun); err != nil {
+		t.Fatal(err)
+	}
+	unknownDetail := h.want(owner, "GET", "/api/v1/agent-runs/"+unknownRun, nil, nil, http.StatusOK)
+	unknownStep := mcpExecItem(t, mcpExecItems(t, unknownDetail, "steps"), 0, unknownDetail)
+	if unknownStep["state"] != "outcome_unknown" || unknownStep["remaining_charge"] != unknownStep["charge_bound"] || !isZero(unknownStep["observed_charge"]) {
+		t.Fatalf("unknown outcome did not separate exposure from observed charge: %v", unknownStep)
+	}
 	noUsage.Store(false)
 	h.Gateway.Sink = &gateway.AccountingSink{Emitter: usage.NewEmitter(8)}
 	status, response, _ = h.gateway("POST", "/v1/chat/completions", secret, map[string]any{"model": slug, "messages": []any{map[string]any{"role": "user", "content": "workflow-approval-test"}}, "max_tokens": 100})
 	continuation, present := response["continuation_token"].(string)
 	if status != http.StatusOK || response["type"] != "tool_approval_required" || !present || !strings.HasPrefix(continuation, "olpa_") || modelCalls.Load() != 4 || toolCalls.Load() != 1 {
 		t.Fatalf("unclassified tool did not pause before dispatch: status=%d type=%v token_present=%t model_calls=%d tool_calls=%d", status, response["type"], present, modelCalls.Load(), toolCalls.Load())
+	}
+	var approvalRun string
+	if err := h.Pool.QueryRow(t.Context(), `SELECT run_id::text FROM olp.agent_approvals WHERE api_key_id=$1`, keyID).Scan(&approvalRun); err != nil {
+		t.Fatal(err)
+	}
+	pendingDetail := h.want(owner, "GET", "/api/v1/agent-runs/"+approvalRun, nil, nil, http.StatusOK)
+	pendingApprovals := mcpExecItems(t, pendingDetail, "approvals")
+	if len(pendingApprovals) != 1 || mcpExecItem(t, pendingApprovals, 0, pendingDetail)["consumed_at"] != nil {
+		t.Fatalf("pending approval was not visible: %v", pendingDetail)
 	}
 	approvalWorkflow.Store(true)
 	wrongArguments := map[string]any{
@@ -1159,6 +1245,25 @@ func TestGatewayToolWorkflowSettlesOneRun(t *testing.T) {
 	resumeStatus, resumeResponse, _ := h.gateway("POST", "/v1/chat/completions", secret, resume)
 	if resumeStatus != http.StatusOK || !strings.Contains(fmt.Sprint(resumeResponse), "done") || modelCalls.Load() != 5 || toolCalls.Load() != 2 {
 		t.Fatalf("approved workflow did not resume: status=%d code=%s model_calls=%d tool_calls=%d", resumeStatus, h.gatewayCode(resumeStatus, resumeResponse), modelCalls.Load(), toolCalls.Load())
+	}
+	approvedDetail := h.want(owner, "GET", "/api/v1/agent-runs/"+approvalRun, nil, nil, http.StatusOK)
+	approved := mcpExecItem(t, mcpExecItems(t, approvedDetail, "approvals"), 0, approvedDetail)
+	if approved["consumed_at"] == nil || approved["dispatch_id"] == nil || strings.Contains(fmt.Sprint(approvedDetail), continuation) || strings.Contains(fmt.Sprint(approvedDetail), argument) {
+		t.Fatalf("consumed approval metadata was incomplete or exposed private content: %v", approvedDetail)
+	}
+	var approvalStored string
+	if err := h.Pool.QueryRow(t.Context(), `SELECT
+		COALESCE((SELECT row_to_json(r)::text FROM olp.agent_runs r WHERE r.id=$1),'') ||
+		COALESCE((SELECT string_agg(row_to_json(a)::text,'') FROM olp.agent_approvals a WHERE a.run_id=$1),'') ||
+		COALESCE((SELECT string_agg(row_to_json(s)::text,'') FROM olp.agent_steps s WHERE s.run_id=$1),'') ||
+		COALESCE((SELECT string_agg(row_to_json(d)::text,'') FROM olp.execution_debits d WHERE d.run_id=$1),'') ||
+		COALESCE((SELECT string_agg(row_to_json(c)::text,'') FROM olp.mcp_tool_calls c JOIN olp.execution_debits d ON d.id=c.dispatch_id WHERE d.run_id=$1),'')`, approvalRun).Scan(&approvalStored); err != nil {
+		t.Fatal(err)
+	}
+	for _, private := range []string{prompt, argument, answer, continuation} {
+		if strings.Contains(approvalStored, private) {
+			t.Fatal("approval workflow stored private content")
+		}
 	}
 	replayStatus, _, _ := h.gateway("POST", "/v1/chat/completions", secret, resume)
 	if replayStatus != http.StatusForbidden || modelCalls.Load() != 5 || toolCalls.Load() != 2 {

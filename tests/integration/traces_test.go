@@ -208,7 +208,7 @@ func verifyWorkflowTraceCorrelation(t *testing.T, h *accessHarness, secret, keyI
 		t.Fatal(err)
 	}
 	traceID := bytes.Repeat([]byte{31}, 16)
-	owned := &tracepb.Span{TraceId: traceID, SpanId: bytes.Repeat([]byte{1}, 8), Attributes: []*commonpb.KeyValue{traceText("olp.run_id", runID), traceText("olp.attempt_id", attempt)}}
+	owned := &tracepb.Span{TraceId: traceID, SpanId: bytes.Repeat([]byte{1}, 8), Attributes: []*commonpb.KeyValue{traceText("olp.run_id", runID), traceText("olp.attempt_id", attempt), traceText("gen_ai.prompt", "workflow-private-span")}}
 	missing := &tracepb.Span{TraceId: traceID, SpanId: bytes.Repeat([]byte{2}, 8), Attributes: []*commonpb.KeyValue{traceText("olp.run_id", runID), traceText("olp.attempt_id", uuid.NewString())}}
 	runOnly := &tracepb.Span{TraceId: traceID, SpanId: bytes.Repeat([]byte{3}, 8), Attributes: []*commonpb.KeyValue{traceText("olp.run_id", runID)}}
 	attemptOnly := &tracepb.Span{TraceId: traceID, SpanId: bytes.Repeat([]byte{4}, 8), Attributes: []*commonpb.KeyValue{traceText("olp.attempt_id", attempt)}}

@@ -136,6 +136,66 @@ func (e AgentPublicationSummaryKind) Valid() bool {
 	}
 }
 
+// Defines values for AgentRunStepKind.
+const (
+	AgentRunStepKindAgent AgentRunStepKind = "agent"
+	AgentRunStepKindApi   AgentRunStepKind = "api"
+	AgentRunStepKindModel AgentRunStepKind = "model"
+	AgentRunStepKindTool  AgentRunStepKind = "tool"
+)
+
+// Valid indicates whether the value is a known member of the AgentRunStepKind enum.
+func (e AgentRunStepKind) Valid() bool {
+	switch e {
+	case AgentRunStepKindAgent:
+		return true
+	case AgentRunStepKindApi:
+		return true
+	case AgentRunStepKindModel:
+		return true
+	case AgentRunStepKindTool:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AgentRunStepState.
+const (
+	AgentRunStepStateConflict       AgentRunStepState = "conflict"
+	AgentRunStepStateDispatched     AgentRunStepState = "dispatched"
+	AgentRunStepStateNotAccepted    AgentRunStepState = "not_accepted"
+	AgentRunStepStateOutcomeUnknown AgentRunStepState = "outcome_unknown"
+	AgentRunStepStatePrepared       AgentRunStepState = "prepared"
+	AgentRunStepStateReady          AgentRunStepState = "ready"
+	AgentRunStepStateReleased       AgentRunStepState = "released"
+	AgentRunStepStateSettled        AgentRunStepState = "settled"
+)
+
+// Valid indicates whether the value is a known member of the AgentRunStepState enum.
+func (e AgentRunStepState) Valid() bool {
+	switch e {
+	case AgentRunStepStateConflict:
+		return true
+	case AgentRunStepStateDispatched:
+		return true
+	case AgentRunStepStateNotAccepted:
+		return true
+	case AgentRunStepStateOutcomeUnknown:
+		return true
+	case AgentRunStepStatePrepared:
+		return true
+	case AgentRunStepStateReady:
+		return true
+	case AgentRunStepStateReleased:
+		return true
+	case AgentRunStepStateSettled:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for AgentToolPinClassification.
 const (
 	ApprovalRequired AgentToolPinClassification = "approval_required"
@@ -6643,6 +6703,86 @@ type AgentPublicationWrite struct {
 	Prompt  *PromptDefinition  `json:"prompt,omitempty"`
 	Toolset *ToolsetDefinition `json:"toolset,omitempty"`
 }
+
+// AgentRun Content-free gateway run metadata.
+type AgentRun struct {
+	ApiKeyId        openapi_types.UUID                    `json:"api_key_id"`
+	CreatedAt       time.Time                             `json:"created_at"`
+	Id              openapi_types.UUID                    `json:"id"`
+	ProjectId       openapi_types.UUID                    `json:"project_id"`
+	RevisionId      nullable.Nullable[openapi_types.UUID] `json:"revision_id"`
+	RouteRevisionId nullable.Nullable[openapi_types.UUID] `json:"route_revision_id"`
+}
+
+// AgentRunApproval Approval metadata without tokens or content.
+type AgentRunApproval struct {
+	ConsumedAt nullable.Nullable[time.Time]          `json:"consumed_at"`
+	DispatchId nullable.Nullable[openapi_types.UUID] `json:"dispatch_id"`
+	ExpiresAt  time.Time                             `json:"expires_at"`
+	Id         openapi_types.UUID                    `json:"id"`
+}
+
+// AgentRunDetail defines model for AgentRunDetail.
+type AgentRunDetail struct {
+	ApiKeyId        openapi_types.UUID                    `json:"api_key_id"`
+	Approvals       []AgentRunApproval                    `json:"approvals"`
+	CreatedAt       time.Time                             `json:"created_at"`
+	Id              openapi_types.UUID                    `json:"id"`
+	ProjectId       openapi_types.UUID                    `json:"project_id"`
+	RevisionId      nullable.Nullable[openapi_types.UUID] `json:"revision_id"`
+	RouteRevisionId nullable.Nullable[openapi_types.UUID] `json:"route_revision_id"`
+	Steps           []AgentRunStep                        `json:"steps"`
+}
+
+// AgentRunList defines model for AgentRunList.
+type AgentRunList struct {
+	Items      []AgentRun                `json:"items"`
+	NextCursor nullable.Nullable[string] `json:"next_cursor"`
+}
+
+// AgentRunSpan Correlated span metadata without messages, arguments, results or rendered prompts.
+type AgentRunSpan struct {
+	AttemptId    nullable.Nullable[openapi_types.UUID] `json:"attempt_id"`
+	Category     string                                `json:"category"`
+	EndedNanos   string                                `json:"ended_nanos"`
+	Id           openapi_types.UUID                    `json:"id"`
+	ParentSpanId nullable.Nullable[string]             `json:"parent_span_id"`
+	ReceivedAt   time.Time                             `json:"received_at"`
+	SpanId       string                                `json:"span_id"`
+	StartedNanos string                                `json:"started_nanos"`
+	Status       int                                   `json:"status"`
+	TraceId      string                                `json:"trace_id"`
+}
+
+// AgentRunSpanList defines model for AgentRunSpanList.
+type AgentRunSpanList struct {
+	Items      []AgentRunSpan            `json:"items"`
+	NextCursor nullable.Nullable[string] `json:"next_cursor"`
+}
+
+// AgentRunStep A step and its dispatch attempt. Remaining amounts are unresolved exposure, not charges.
+type AgentRunStep struct {
+	BoundViolation  bool               `json:"bound_violation"`
+	ChargeBound     string             `json:"charge_bound"`
+	CostBound       string             `json:"cost_bound"`
+	CreatedAt       time.Time          `json:"created_at"`
+	Currency        string             `json:"currency"`
+	DispatchId      openapi_types.UUID `json:"dispatch_id"`
+	Id              openapi_types.UUID `json:"id"`
+	Kind            AgentRunStepKind   `json:"kind"`
+	ObservedCharge  string             `json:"observed_charge"`
+	ObservedCost    string             `json:"observed_cost"`
+	Ordinal         int                `json:"ordinal"`
+	RemainingCharge string             `json:"remaining_charge"`
+	RemainingCost   string             `json:"remaining_cost"`
+	State           AgentRunStepState  `json:"state"`
+}
+
+// AgentRunStepKind defines model for AgentRunStep.Kind.
+type AgentRunStepKind string
+
+// AgentRunStepState defines model for AgentRunStep.State.
+type AgentRunStepState string
 
 // AgentToolPin defines model for AgentToolPin.
 type AgentToolPin struct {
@@ -15382,6 +15522,25 @@ type WorkloadMapping struct {
 
 // WorkloadMappingScopes defines model for WorkloadMapping.Scopes.
 type WorkloadMappingScopes string
+
+// ListAgentRunsParams defines parameters for ListAgentRuns.
+type ListAgentRunsParams struct {
+	// Cursor Opaque cursor returned by the previous page.
+	Cursor *string `form:"cursor,omitempty" json:"cursor,omitempty"`
+
+	// Limit Page size, from 1 to 200. Defaults to 50.
+	Limit     *int32              `form:"limit,omitempty" json:"limit,omitempty"`
+	ProjectId *openapi_types.UUID `form:"project_id,omitempty" json:"project_id,omitempty"`
+}
+
+// ListAgentRunSpansParams defines parameters for ListAgentRunSpans.
+type ListAgentRunSpansParams struct {
+	// Cursor Opaque cursor returned by the previous page.
+	Cursor *string `form:"cursor,omitempty" json:"cursor,omitempty"`
+
+	// Limit Page size, from 1 to 200. Defaults to 50.
+	Limit *int32 `form:"limit,omitempty" json:"limit,omitempty"`
+}
 
 // ListAgentsParams defines parameters for ListAgents.
 type ListAgentsParams struct {

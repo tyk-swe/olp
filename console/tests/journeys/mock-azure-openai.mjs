@@ -210,6 +210,47 @@ const server = createServer(async (request, response) => {
   };
   recorded.push(item);
 
+  if (method === 'POST' && url.pathname === '/mcp') {
+    if (!body?.id) {
+      response.writeHead(202);
+      response.end();
+      return;
+    }
+    let result;
+    switch (body.method) {
+      case 'initialize':
+        response.setHeader('mcp-session-id', 'journey-session');
+        result = {
+          protocolVersion: '2025-11-25',
+          capabilities: { tools: {} },
+          serverInfo: { name: 'journey-tools', version: '1' }
+        };
+        break;
+      case 'tools/list':
+        result = {
+          tools: [
+            {
+              name: 'change',
+              inputSchema: {
+                type: 'object',
+                properties: {},
+                additionalProperties: true
+              }
+            }
+          ]
+        };
+        break;
+      case 'tools/call':
+        result = {
+          content: [{ type: 'text', text: 'workflow-private-result' }]
+        };
+        break;
+      default:
+        return json(response, 400, { error: 'unexpected MCP method' });
+    }
+    return json(response, 200, { jsonrpc: '2.0', id: body.id, result });
+  }
+
   if (
     method !== 'POST' ||
     (url.pathname !== azureChat && url.pathname !== azureResponses)
@@ -234,6 +275,35 @@ const server = createServer(async (request, response) => {
       item,
       'payload omitted the configured deployment model'
     );
+  }
+  const toolName = body.tools?.[0]?.function?.name;
+  const certification =
+    body.messages?.[0]?.content === 'Call the supplied function.';
+  const prompt = body.messages?.[0]?.content;
+  const workflow =
+    typeof prompt === 'string' && prompt.startsWith('workflow-private-prompt');
+  if (url.pathname === azureChat && toolName && (certification || workflow)) {
+    if (body.messages.some((message) => message.role === 'tool')) {
+      return json(response, 200, chatResponse());
+    }
+    const completion = chatResponse();
+    completion.choices[0].message = {
+      role: 'assistant',
+      content: null,
+      tool_calls: [
+        {
+          id: 'journey-call',
+          type: 'function',
+          function: {
+            name: toolName,
+            arguments: '{"value":"workflow-private-argument"}'
+          }
+        }
+      ]
+    };
+    completion.choices[0].finish_reason = 'tool_calls';
+    if (prompt === 'workflow-private-prompt-unknown') delete completion.usage;
+    return json(response, 200, completion);
   }
   const payloadError =
     url.pathname === azureResponses
