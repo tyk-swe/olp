@@ -624,6 +624,71 @@ test('billing import preserves a cleared scope', async ({ page }, info) => {
     path: info.outputPath('billing-scope-saved.png'),
     fullPage: true
   });
+  const narrowed = await manage<BillingImport>(page, 'PUT', importPath, {
+    match: importPath,
+    idempotency: crypto.randomUUID(),
+    body: { enabled: true, scope: { project_ids: ['proj_other'] } }
+  });
+  expect(narrowed.status, narrowed.source).toBe(200);
+  await page.locator('#billing-admin-key').fill('unsaved-replacement-key');
+  const conflicted = page.waitForResponse(
+    (response) =>
+      response.request().method() === 'PUT' &&
+      new URL(response.url()).pathname === importPath
+  );
+  await save.click();
+  expect((await conflicted).status()).toBe(412);
+  const section = page.locator('.billing-import');
+  await expect(
+    section.getByText('This item changed elsewhere.', { exact: true })
+  ).toBeVisible();
+  const failureRoute = `**${importPath}`;
+  await page.route(failureRoute, async (route) => {
+    await route.fulfill({
+      status: 503,
+      json: { title: 'Reload unavailable', status: 503 },
+      headers: { 'Cache-Control': 'no-store' }
+    });
+  });
+  await section.getByRole('button', { name: 'Reload', exact: true }).click();
+  await expect(
+    section.getByText('Reload unavailable', { exact: true })
+  ).toBeVisible();
+  await expect(scope).toHaveValue('');
+  await expect(page.locator('#billing-admin-key')).toHaveValue(
+    'unsaved-replacement-key'
+  );
+  await expect(
+    section.getByRole('checkbox', { name: 'Enabled', exact: true })
+  ).not.toBeChecked();
+  await page.unroute(failureRoute);
+  await section.getByRole('button', { name: 'Reload', exact: true }).click();
+  await expect(scope).toHaveValue('proj_other');
+  await expect(
+    section.getByRole('checkbox', { name: 'Enabled', exact: true })
+  ).toBeChecked();
+  await expect(page.locator('#billing-admin-key')).toHaveValue('');
+  await expect(
+    section.getByText('This item changed elsewhere.', { exact: true })
+  ).toHaveCount(0);
+  const resaved = page.waitForResponse(
+    (response) =>
+      response.request().method() === 'PUT' &&
+      new URL(response.url()).pathname === importPath
+  );
+  await save.click();
+  const resavedResponse = await resaved;
+  expect(resavedResponse.status(), await resavedResponse.text()).toBe(200);
+  expect(resavedResponse.request().postDataJSON()).toEqual({
+    enabled: true,
+    scope: { project_ids: ['proj_other'] }
+  });
+  const reloadedDocument = await manage<BillingImport>(page, 'GET', importPath);
+  expect(reloadedDocument.body).toMatchObject({
+    enabled: true,
+    scope: { project_ids: ['proj_other'] },
+    credential_configured: true
+  });
 });
 
 test('cloud connections support bulk model review, credential pools and policy routing', async ({

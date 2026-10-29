@@ -168,6 +168,38 @@
     }
   }
 
+  async function reload() {
+    if (busy) return;
+    const isCurrent = captureOwner();
+    busy = true;
+    error = notice = '';
+    try {
+      const result = await billing.refetch();
+      if (!isCurrent()) return;
+      if (result.error) {
+        error = errorMessage(
+          result.error,
+          'The billing import could not be reloaded.'
+        );
+        return;
+      }
+      scopeText = result.data ? scopeLines(result.data) : '';
+      enabled = result.data?.enabled ?? true;
+      adminKey = '';
+      initialized = true;
+      conflicted = false;
+      intent.reset();
+    } catch (cause) {
+      if (isCurrent())
+        error = errorMessage(
+          cause,
+          'The billing import could not be reloaded.'
+        );
+    } finally {
+      if (isCurrent()) busy = false;
+    }
+  }
+
   async function runNow() {
     if (!canManage || busy) return;
     const isCurrent = captureOwner();
@@ -228,13 +260,7 @@
     {#if error}<div class="inline-problem" role="alert">{error}</div>{/if}
     {#if notice}<p class="section-help" role="status">{notice}</p>{/if}
     {#if conflicted}
-      <ConflictNotice
-        notice="conflict"
-        onReload={async () => {
-          await billing.refetch();
-        }}
-        disabled={busy}
-      />
+      <ConflictNotice notice="conflict" onReload={reload} disabled={busy} />
     {/if}
 
     {#if billing.isPending}
