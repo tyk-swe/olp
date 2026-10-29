@@ -429,6 +429,15 @@ export interface components {
         } & {
             [key: string]: unknown;
         };
+        ResponsesToolWorkflowRequest: {
+            model: string;
+            input: string | {
+                [key: string]: unknown;
+            }[];
+            olp_toolsets?: components["schemas"]["ChatToolsetSelection"];
+        } & {
+            [key: string]: unknown;
+        };
         ResponsesMCPTool: {
             name: string;
             description?: string;
@@ -842,7 +851,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["ResponsesPromptRequest"];
+                "application/json": components["schemas"]["ResponsesPromptRequest"] | components["schemas"]["ResponsesToolWorkflowRequest"];
             };
         };
         responses: {

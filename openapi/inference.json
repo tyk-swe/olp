@@ -415,7 +415,10 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/ResponsesPromptRequest"
+                "oneOf": [
+                  { "$ref": "#/components/schemas/ResponsesPromptRequest" },
+                  { "$ref": "#/components/schemas/ResponsesToolWorkflowRequest" }
+                ]
               }
             }
           }
@@ -1680,6 +1683,22 @@
           }
         },
         "additionalProperties": true
+      },
+      "ResponsesToolWorkflowRequest": {
+        "type": "object",
+        "required": ["model", "input"],
+        "properties": {
+          "model": { "type": "string" },
+          "input": {
+            "oneOf": [
+              { "type": "string" },
+              { "type": "array", "items": { "type": "object", "additionalProperties": true } }
+            ]
+          },
+          "olp_toolsets": { "$ref": "#/components/schemas/ChatToolsetSelection" }
+        },
+        "additionalProperties": true,
+        "not": { "required": ["prompt"] }
       },
       "ResponsesMCPTool": {
         "type": "object",
