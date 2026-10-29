@@ -29114,6 +29114,40 @@
           "created_at": {
             "type": "string",
             "format": "date-time"
+          },
+          "tool_alias": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Recorded tool alias, if a tool call exists."
+          },
+          "tool_status": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Recorded tool call execution status."
+          },
+          "tool_is_error": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Whether the tool returned an error result."
+          },
+          "pricing_state": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "priced",
+              "free",
+              "unpriced",
+              null
+            ],
+            "description": "Recorded tool pricing state; unpriced amounts are unknown."
           }
         },
         "required": [
@@ -29130,7 +29164,11 @@
           "remaining_cost",
           "remaining_charge",
           "bound_violation",
-          "created_at"
+          "created_at",
+          "tool_alias",
+          "tool_status",
+          "tool_is_error",
+          "pricing_state"
         ]
       },
       "AgentRunApproval": {
@@ -29328,7 +29366,8 @@
         "required": [
           "items",
           "next_cursor"
-        ]
+        ],
+        "description": "Correlated spans, ordered by start time and ID from newest to oldest."
       }
     },
     "securitySchemes": {

@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
+import { readFile } from 'node:fs/promises';
 import AxeBuilder from '@axe-core/playwright';
 import { expect, type Page, type TestInfo } from '@playwright/test';
 
@@ -12,42 +13,31 @@ type RunDetail = {
     observed_charge: string;
     remaining_cost: string;
     remaining_charge: string;
+    tool_alias: string | null;
+    tool_status: string | null;
+    tool_is_error: boolean | null;
+    pricing_state: string | null;
   }[];
   approvals: { id: string; consumed_at: string | null }[];
 };
 
-function message(field: number, value: Buffer | string): Buffer {
-  const payload = typeof value === 'string' ? Buffer.from(value) : value;
-  const length: number[] = [];
-  let remaining = payload.length;
-  do {
-    const next = remaining % 128;
-    remaining = Math.floor(remaining / 128);
-    length.push(next | (remaining ? 128 : 0));
-  } while (remaining);
-  return Buffer.concat([Buffer.from([(field << 3) | 2, ...length]), payload]);
-}
-
-function trace(runID: string, attemptID: string): Buffer {
-  const start = BigInt(Date.now()) * 1_000_000n;
-  const timestamp = (field: number, value: bigint) => {
-    const encoded = Buffer.alloc(9);
-    encoded[0] = (field << 3) | 1;
-    encoded.writeBigUInt64LE(value, 1);
-    return encoded;
-  };
-  const attribute = (key: string, value: string) =>
-    message(9, Buffer.concat([message(1, key), message(2, message(1, value))]));
-  const span = Buffer.concat([
-    message(1, Buffer.alloc(16, 1)),
-    message(2, Buffer.alloc(8, 2)),
-    timestamp(7, start),
-    timestamp(8, start + 1_000_000n),
-    attribute('olp.run_id', runID),
-    attribute('olp.attempt_id', attemptID),
-    attribute('gen_ai.prompt', 'workflow-private-span')
-  ]);
-  return message(1, message(2, message(2, span)));
+async function trace(runID: string, attemptID: string): Promise<Buffer> {
+  const fixture = Buffer.from(
+    (
+      await readFile(
+        new URL('./fixtures/run-trace.pb.base64', import.meta.url),
+        'utf8'
+      )
+    ).trim(),
+    'base64'
+  );
+  return Buffer.from(
+    fixture
+      .toString('latin1')
+      .replace('00000000-0000-0000-0000-000000000001', runID)
+      .replace('00000000-0000-0000-0000-000000000002', attemptID),
+    'latin1'
+  );
 }
 
 export async function verifyRunInspection(page: Page, info: TestInfo) {
@@ -135,7 +125,65 @@ export async function verifyRunInspection(page: Page, info: TestInfo) {
     undefined,
     toolset.etag
   );
-  let provider = await management<Identified>(
+  const variants = await Promise.all(
+    [{ name: 'Free', unit_price: '0' }, { name: 'Unpriced' }].map(
+      async (variant) => {
+        const variantServer = await management<
+          Identified & { revision_id: string; catalog: { digest: string } }
+        >(
+          '/api/v1/mcp-servers',
+          'POST',
+          {
+            name: `${variant.name} run tools`,
+            project_id: project.id,
+            transport: 'streamable_http',
+            endpoint: 'http://127.0.0.1:4178/mcp',
+            enabled: true,
+            ...('unit_price' in variant
+              ? { unit_price: variant.unit_price }
+              : {})
+          },
+          undefined,
+          201
+        );
+        const variantAlias = `t_${variantServer.id.replaceAll('-', '')}_${createHash('sha256').update('change').digest('hex').slice(0, 32)}`;
+        const variantToolset = await management<Identified>(
+          '/api/v1/toolsets',
+          'POST',
+          {
+            project_id: project.id,
+            name: `${variant.name} run toolset`,
+            toolset: {
+              tools: [
+                {
+                  server_id: variantServer.id,
+                  revision_id: variantServer.revision_id,
+                  catalog_digest: variantServer.catalog.digest,
+                  name: 'change',
+                  alias: variantAlias,
+                  classification: 'read_only'
+                }
+              ]
+            }
+          },
+          undefined,
+          201
+        );
+        await management(
+          `/api/v1/toolsets/${variantToolset.id}/publish`,
+          'POST',
+          undefined,
+          variantToolset.etag
+        );
+        return {
+          name: variant.name,
+          alias: variantAlias,
+          toolset: variantToolset
+        };
+      }
+    )
+  );
+  const createdProvider = await management<Identified>(
     '/api/v1/providers',
     'POST',
     {
@@ -157,18 +205,18 @@ export async function verifyRunInspection(page: Page, info: TestInfo) {
     undefined,
     201
   );
-  const providerPath = `/api/v1/providers/${provider.id}`;
+  const providerPath = `/api/v1/providers/${createdProvider.id}`;
   const probe = await management<{ succeeded: boolean }>(
     `${providerPath}/probe`,
     'POST',
     undefined,
-    provider.etag
+    createdProvider.etag
   );
   expect(probe.succeeded).toBe(true);
   const models = await management<{ items: { id: string }[] }>(
     `${providerPath}/models`
   );
-  provider = await management<Identified>(
+  const enabledProvider = await management<Identified>(
     `${providerPath}/models/${models.items[0].id}`,
     'PATCH',
     {
@@ -177,7 +225,7 @@ export async function verifyRunInspection(page: Page, info: TestInfo) {
         { operation: 'generation', surface: 'openai', mode: 'unary' }
       ]
     },
-    provider.etag
+    createdProvider.etag
   );
   const certification = await management<{
     status: string;
@@ -186,16 +234,16 @@ export async function verifyRunInspection(page: Page, info: TestInfo) {
     `${providerPath}/models/${models.items[0].id}/certify`,
     'POST',
     undefined,
-    provider.etag
+    enabledProvider.etag
   );
   expect(certification.status).toBe('certified');
   expect(certification.results[0].tool_calls).toBe(true);
-  provider = await management<Identified>(providerPath);
+  const certifiedProvider = await management<Identified>(providerPath);
   await management(
     `${providerPath}/activate`,
     'POST',
     undefined,
-    provider.etag
+    certifiedProvider.etag
   );
   const route = 'run-inspection';
   const draft = await management<Identified>(
@@ -210,7 +258,7 @@ export async function verifyRunInspection(page: Page, info: TestInfo) {
       fidelity: { mode: 'transformed' },
       targets: [
         {
-          provider_id: provider.id,
+          provider_id: createdProvider.id,
           provider_model: 'vertical-e2e-deployment',
           priority: 0,
           weight: 1,
@@ -218,7 +266,7 @@ export async function verifyRunInspection(page: Page, info: TestInfo) {
         }
       ],
       tool_execution: 'gateway',
-      toolsets: [toolset.id],
+      toolsets: [toolset.id, ...variants.map((variant) => variant.toolset.id)],
       run_limits: {
         max_tool_calls: 32,
         max_duration_seconds: 600,
@@ -242,7 +290,7 @@ export async function verifyRunInspection(page: Page, info: TestInfo) {
       prices: [
         {
           provider_kind: 'azure_openai',
-          provider_id: provider.id,
+          provider_id: createdProvider.id,
           model: 'vertical-e2e-deployment',
           operation: 'generation',
           currency: 'USD',
@@ -262,7 +310,10 @@ export async function verifyRunInspection(page: Page, info: TestInfo) {
       project_id: project.id,
       scopes: ['inference', 'tools', 'traces_write'],
       allowed_routes: [route],
-      allowed_toolsets: [toolset.id]
+      allowed_toolsets: [
+        toolset.id,
+        ...variants.map((variant) => variant.toolset.id)
+      ]
     },
     undefined,
     201
@@ -271,7 +322,8 @@ export async function verifyRunInspection(page: Page, info: TestInfo) {
   const inference = {
     model: route,
     messages: [{ role: 'user', content: 'workflow-private-prompt' }],
-    max_tokens: 100
+    max_tokens: 100,
+    olp_toolsets: [toolset.id]
   };
   await expect(async () => {
     const catalog = await management<{
@@ -319,7 +371,7 @@ export async function verifyRunInspection(page: Page, info: TestInfo) {
       Authorization: `Bearer ${key.secret}`,
       'Content-Type': 'application/x-protobuf'
     },
-    data: trace(run.id, detail.steps[0].dispatch_id)
+    data: await trace(run.id, detail.steps[0].dispatch_id)
   });
   expect(uploaded.status()).toBe(200);
 
@@ -344,6 +396,66 @@ export async function verifyRunInspection(page: Page, info: TestInfo) {
   expect(unknownStep.state).toBe('outcome_unknown');
   expect(Number(unknownStep.observed_charge)).toBe(0);
   expect(Number(unknownStep.remaining_charge)).toBeGreaterThan(0);
+
+  const variantRuns = await variants.reduce(
+    async (prior, variant) => {
+      const completed = await prior;
+      const before = await management<{ items: Run[] }>(
+        `/api/v1/agent-runs?project_id=${project.id}`
+      );
+      const response = await page.request.post('/v1/chat/completions', {
+        headers: { Authorization: `Bearer ${key.secret}` },
+        data: {
+          ...inference,
+          messages: [
+            {
+              role: 'user',
+              content:
+                variant.name === 'Unpriced'
+                  ? 'workflow-private-prompt-failed'
+                  : 'workflow-private-prompt-free'
+            }
+          ],
+          olp_toolsets: [variant.toolset.id]
+        }
+      });
+      expect(response.status(), await response.text()).toBe(200);
+      const after = await management<{ items: Run[] }>(
+        `/api/v1/agent-runs?project_id=${project.id}`
+      );
+      const created = after.items.find(
+        (item) => !before.items.some((old) => old.id === item.id)
+      );
+      expect(created).toBeDefined();
+      if (!created) throw new Error('Variant run not found');
+      const variantDetail = await management<RunDetail>(
+        `/api/v1/agent-runs/${created.id}`
+      );
+      const tool = variantDetail.steps.find(
+        (step) => step.tool_alias === variant.alias
+      );
+      expect(tool).toMatchObject({
+        tool_alias: variant.alias,
+        pricing_state: variant.name.toLowerCase(),
+        tool_is_error: variant.name === 'Unpriced'
+      });
+      expect(tool?.observed_cost).toMatch(/^0(?:\.0+)?$/);
+      expect(tool?.observed_charge).toMatch(/^0(?:\.0+)?$/);
+      expect(JSON.stringify(variantDetail)).not.toContain(
+        'workflow-private-failure'
+      );
+      return [...completed, { ...variant, run: created, tool }];
+    },
+    Promise.resolve(
+      [] as {
+        name: string;
+        alias: string;
+        toolset: Identified;
+        run: Run;
+        tool: RunDetail['steps'][number] | undefined;
+      }[]
+    )
+  );
 
   await page
     .getByRole('navigation', { name: 'Primary' })
@@ -413,4 +525,163 @@ export async function verifyRunInspection(page: Page, info: TestInfo) {
     path: info.outputPath('run-detail.png'),
     fullPage: true
   });
+  for (const variant of variantRuns) {
+    await page.goto(`/runs/${variant.run.id}`);
+    const toolRow = page.getByRole('row').filter({ hasText: variant.alias });
+    await expect(toolRow).toBeVisible();
+    await expect(toolRow).toContainText(
+      variant.name === 'Unpriced' ? 'tool error' : 'succeeded'
+    );
+    await expect(toolRow).toContainText(
+      variant.name === 'Unpriced' ? 'Unknown (unpriced)' : 'Free'
+    );
+    await expect(page.getByText('workflow-private-failure')).toHaveCount(0);
+    if (variant.name === 'Unpriced') {
+      expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
+      await page.screenshot({
+        path: info.outputPath('run-unpriced.png'),
+        fullPage: true
+      });
+    }
+  }
+
+  const invitation = await management<{ token: string }>(
+    '/api/v1/invitations',
+    'POST',
+    { email: 'run-viewer@example.com', role: 'viewer' },
+    undefined,
+    201
+  );
+  const browser = page.context().browser();
+  if (!browser) throw new Error('Browser is unavailable');
+  const accepting = await browser.newContext({
+    baseURL: 'http://localhost:4175'
+  });
+  const accepted = await accepting.request.post('/api/v1/invitations/accept', {
+    headers: { Origin: 'http://localhost:4175' },
+    data: {
+      token: invitation.token,
+      display_name: 'Run viewer',
+      password: 'RunViewerLongPass123!'
+    }
+  });
+  expect(accepted.status()).toBe(201);
+  const viewerSession = await accepting.request.get('/api/v1/sessions/current');
+  const { user } = (await viewerSession.json()) as { user: { id: string } };
+  await accepting.close();
+  const viewerRecord = await management<Identified>(`/api/v1/users/${user.id}`);
+  await management(
+    `/api/v1/users/${user.id}`,
+    'PATCH',
+    { access_scope: 'assigned' },
+    viewerRecord.etag
+  );
+  const projectBeforeGrant = await management<Identified>(
+    `/api/v1/projects/${project.id}`
+  );
+  await management(
+    `/api/v1/projects/${project.id}/members/${user.id}`,
+    'PUT',
+    { role: 'viewer' },
+    projectBeforeGrant.etag
+  );
+  const viewerContext = await browser.newContext({
+    baseURL: 'http://localhost:4175'
+  });
+  try {
+    const loggedIn = await viewerContext.request.post('/api/v1/sessions', {
+      headers: { Origin: 'http://localhost:4175' },
+      data: {
+        email: 'run-viewer@example.com',
+        password: 'RunViewerLongPass123!'
+      }
+    });
+    expect(loggedIn.status()).toBe(201);
+    const viewerPage = await viewerContext.newPage();
+    await viewerPage.goto('/runs');
+    await expect(
+      viewerPage.getByRole('option', { name: 'Run inspection project' })
+    ).toBeAttached();
+    await viewerPage.getByRole('link', { name: run.id }).click();
+    await expect(viewerPage.getByText(detail.approvals[0].id)).toBeVisible();
+    await expect(
+      viewerPage.getByText('01010101010101010101010101010101')
+    ).toBeVisible();
+    const listRoute = (url: URL) => url.pathname === '/api/v1/agent-runs';
+    await viewerPage.route(listRoute, (route) =>
+      route.fulfill({
+        status: 403,
+        contentType: 'application/problem+json',
+        body: JSON.stringify({ title: 'Forbidden', status: 403 })
+      })
+    );
+    await viewerPage.getByRole('link', { name: 'All runs' }).click();
+    await expect(
+      viewerPage.getByText('Forbidden', { exact: true })
+    ).toBeVisible();
+    await expect(viewerPage.getByRole('link', { name: run.id })).toHaveCount(0);
+    await viewerPage.unroute(listRoute);
+    await viewerPage.reload();
+    await expect(viewerPage.getByRole('link', { name: run.id })).toBeVisible();
+    const detailRoute = `**/api/v1/agent-runs/${run.id}`;
+    await viewerPage.route(detailRoute, (route) =>
+      route.fulfill({
+        status: 403,
+        contentType: 'application/problem+json',
+        body: JSON.stringify({ title: 'Forbidden', status: 403 })
+      })
+    );
+    await viewerPage.getByRole('link', { name: run.id }).click();
+    await expect(viewerPage.getByRole('alert')).toBeVisible();
+    await expect(viewerPage.getByText(detail.approvals[0].id)).toHaveCount(0);
+    await expect(
+      viewerPage.getByText('01010101010101010101010101010101')
+    ).toHaveCount(0);
+    await viewerPage.unroute(detailRoute);
+    await viewerPage.getByRole('link', { name: 'All runs' }).click();
+    const spansRoute = `**/api/v1/agent-runs/${run.id}/spans*`;
+    await viewerPage.route(spansRoute, (route) =>
+      route.fulfill({
+        status: 403,
+        contentType: 'application/problem+json',
+        body: JSON.stringify({ title: 'Forbidden', status: 403 })
+      })
+    );
+    await viewerPage.getByRole('link', { name: run.id }).click();
+    await expect(viewerPage.getByText(detail.approvals[0].id)).toBeVisible();
+    await expect(viewerPage.getByRole('alert')).toBeVisible();
+    await expect(
+      viewerPage.getByText('01010101010101010101010101010101')
+    ).toHaveCount(0);
+    await viewerPage.unroute(spansRoute);
+    await viewerPage.getByRole('link', { name: 'All runs' }).click();
+    await expect(viewerPage.getByRole('link', { name: run.id })).toBeVisible();
+    const projectBeforeRevoke = await management<Identified>(
+      `/api/v1/projects/${project.id}`
+    );
+    const removed = await page.request.delete(
+      `/api/v1/projects/${project.id}/members/${user.id}`,
+      {
+        headers: {
+          Origin: 'http://localhost:4175',
+          'X-CSRF-Token': csrf,
+          'If-Match': `"${projectBeforeRevoke.etag}"`
+        }
+      }
+    );
+    expect(removed.status()).toBe(204);
+    await viewerPage.getByRole('link', { name: run.id }).click();
+    await expect(viewerPage.getByRole('alert')).toBeVisible();
+    await expect(viewerPage.getByText(detail.approvals[0].id)).toHaveCount(0);
+    await expect(
+      viewerPage.getByText('01010101010101010101010101010101')
+    ).toHaveCount(0);
+    await viewerPage.getByRole('link', { name: 'All runs' }).click();
+    await expect(viewerPage.getByRole('link', { name: run.id })).toHaveCount(0);
+    await expect(
+      viewerPage.getByRole('option', { name: 'Run inspection project' })
+    ).toHaveCount(0);
+  } finally {
+    await viewerContext.close();
+  }
 }

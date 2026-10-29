@@ -216,18 +216,18 @@ const server = createServer(async (request, response) => {
       response.end();
       return;
     }
-    let result;
+    const replyToMcp = (result) =>
+      json(response, 200, { jsonrpc: '2.0', id: body.id, result });
     switch (body.method) {
       case 'initialize':
         response.setHeader('mcp-session-id', 'journey-session');
-        result = {
+        return replyToMcp({
           protocolVersion: '2025-11-25',
           capabilities: { tools: {} },
           serverInfo: { name: 'journey-tools', version: '1' }
-        };
-        break;
+        });
       case 'tools/list':
-        result = {
+        return replyToMcp({
           tools: [
             {
               name: 'change',
@@ -238,17 +238,15 @@ const server = createServer(async (request, response) => {
               }
             }
           ]
-        };
-        break;
+        });
       case 'tools/call':
-        result = {
-          content: [{ type: 'text', text: 'workflow-private-result' }]
-        };
-        break;
+        return replyToMcp({
+          content: [{ type: 'text', text: 'workflow-private-result' }],
+          isError: body.params?.arguments?.value === 'workflow-private-failure'
+        });
       default:
         return json(response, 400, { error: 'unexpected MCP method' });
     }
-    return json(response, 200, { jsonrpc: '2.0', id: body.id, result });
   }
 
   if (
@@ -287,23 +285,37 @@ const server = createServer(async (request, response) => {
       return json(response, 200, chatResponse());
     }
     const completion = chatResponse();
-    completion.choices[0].message = {
-      role: 'assistant',
-      content: null,
-      tool_calls: [
+    return json(response, 200, {
+      ...completion,
+      usage:
+        prompt === 'workflow-private-prompt-unknown'
+          ? undefined
+          : completion.usage,
+      choices: [
         {
-          id: 'journey-call',
-          type: 'function',
-          function: {
-            name: toolName,
-            arguments: '{"value":"workflow-private-argument"}'
+          ...completion.choices[0],
+          finish_reason: 'tool_calls',
+          message: {
+            role: 'assistant',
+            content: null,
+            tool_calls: [
+              {
+                id: 'journey-call',
+                type: 'function',
+                function: {
+                  name: toolName,
+                  arguments: JSON.stringify({
+                    value: prompt.endsWith('-failed')
+                      ? 'workflow-private-failure'
+                      : 'workflow-private-argument'
+                  })
+                }
+              }
+            ]
           }
         }
       ]
-    };
-    completion.choices[0].finish_reason = 'tool_calls';
-    if (prompt === 'workflow-private-prompt-unknown') delete completion.usage;
-    return json(response, 200, completion);
+    });
   }
   const payloadError =
     url.pathname === azureResponses

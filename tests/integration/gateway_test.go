@@ -746,8 +746,8 @@ func TestGatewayFromEmptyInstallationToSDKTraffic(t *testing.T) {
 }
 
 func TestGatewayToolWorkflowSettlesOneRun(t *testing.T) {
-	isZero := func(value any) bool {
-		number, ok := new(big.Rat).SetString(fmt.Sprint(value))
+	isZero := func(value string) bool {
+		number, ok := new(big.Rat).SetString(value)
 		return ok && number.Sign() == 0
 	}
 	h := newAccessHarness(t)
@@ -1097,10 +1097,14 @@ func TestGatewayToolWorkflowSettlesOneRun(t *testing.T) {
 	attempts := map[string]bool{}
 	for index, kind := range []string{"model", "tool", "model"} {
 		step := mcpExecItem(t, stepItems, index, runDetail)
-		if step["kind"] != kind || step["state"] != "settled" || step["ordinal"] != float64(index) || !isZero(step["remaining_cost"]) || !isZero(step["remaining_charge"]) {
+		if step["kind"] != kind || step["state"] != "settled" || step["ordinal"] != float64(index) || !isZero(mcpExecString(t, step, "remaining_cost")) || !isZero(mcpExecString(t, step, "remaining_charge")) {
 			t.Fatalf("run step did not report settled attempt metadata: %v", step)
 		}
 		attempts[mcpExecString(t, step, "dispatch_id")] = true
+	}
+	toolStep := mcpExecItem(t, stepItems, 1, runDetail)
+	if toolStep["tool_alias"] != tool.Alias || toolStep["tool_status"] != "succeeded" || toolStep["tool_is_error"] != false || toolStep["pricing_state"] != "priced" {
+		t.Fatalf("successful tool metadata is missing: %v", toolStep)
 	}
 	spanPage := h.want(owner, "GET", "/api/v1/agent-runs/"+runID+"/spans?limit=1", nil, nil, http.StatusOK)
 	allSpans := append([]any{}, mcpExecItems(t, spanPage, "items")...)
@@ -1122,6 +1126,12 @@ func TestGatewayToolWorkflowSettlesOneRun(t *testing.T) {
 	if len(allSpans) != 3 || linked != 2 {
 		t.Fatalf("run spans did not preserve validated correlations: spans=%d linked=%d", len(allSpans), linked)
 	}
+	for index, expected := range []string{"0404040404040404", "0101010101010101", "0303030303030303"} {
+		if span := mcpExecItem(t, allSpans, index, spanPage); span["span_id"] != expected {
+			t.Fatalf("run spans not ordered by start time and ID: %v", allSpans)
+		}
+	}
+	h.want(owner, "GET", "/api/v1/agent-runs/"+runID+"/spans?cursor=invalid", nil, nil, http.StatusUnprocessableEntity)
 	for _, private := range []string{prompt, argument, answer, "workflow-private-span"} {
 		if strings.Contains(fmt.Sprint(listedRuns, runDetail, allSpans), private) {
 			t.Fatal("run management exposed private workflow content")
@@ -1180,7 +1190,7 @@ func TestGatewayToolWorkflowSettlesOneRun(t *testing.T) {
 	}
 	unknownDetail := h.want(owner, "GET", "/api/v1/agent-runs/"+unknownRun, nil, nil, http.StatusOK)
 	unknownStep := mcpExecItem(t, mcpExecItems(t, unknownDetail, "steps"), 0, unknownDetail)
-	if unknownStep["state"] != "outcome_unknown" || unknownStep["remaining_charge"] != unknownStep["charge_bound"] || !isZero(unknownStep["observed_charge"]) {
+	if unknownStep["state"] != "outcome_unknown" || unknownStep["remaining_charge"] != unknownStep["charge_bound"] || !isZero(mcpExecString(t, unknownStep, "observed_charge")) {
 		t.Fatalf("unknown outcome did not separate exposure from observed charge: %v", unknownStep)
 	}
 	noUsage.Store(false)

@@ -160,6 +160,30 @@ func (e AgentRunStepKind) Valid() bool {
 	}
 }
 
+// Defines values for AgentRunStepPricingState.
+const (
+	AgentRunStepPricingStateFree        AgentRunStepPricingState = "free"
+	AgentRunStepPricingStateLessThannil AgentRunStepPricingState = "<nil>"
+	AgentRunStepPricingStatePriced      AgentRunStepPricingState = "priced"
+	AgentRunStepPricingStateUnpriced    AgentRunStepPricingState = "unpriced"
+)
+
+// Valid indicates whether the value is a known member of the AgentRunStepPricingState enum.
+func (e AgentRunStepPricingState) Valid() bool {
+	switch e {
+	case AgentRunStepPricingStateFree:
+		return true
+	case AgentRunStepPricingStateLessThannil:
+		return true
+	case AgentRunStepPricingStatePriced:
+		return true
+	case AgentRunStepPricingStateUnpriced:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for AgentRunStepState.
 const (
 	AgentRunStepStateConflict       AgentRunStepState = "conflict"
@@ -3675,19 +3699,19 @@ func (e MCPToolCallResponseDebitState) Valid() bool {
 
 // Defines values for MCPToolCallResponsePricingState.
 const (
-	Free     MCPToolCallResponsePricingState = "free"
-	Priced   MCPToolCallResponsePricingState = "priced"
-	Unpriced MCPToolCallResponsePricingState = "unpriced"
+	MCPToolCallResponsePricingStateFree     MCPToolCallResponsePricingState = "free"
+	MCPToolCallResponsePricingStatePriced   MCPToolCallResponsePricingState = "priced"
+	MCPToolCallResponsePricingStateUnpriced MCPToolCallResponsePricingState = "unpriced"
 )
 
 // Valid indicates whether the value is a known member of the MCPToolCallResponsePricingState enum.
 func (e MCPToolCallResponsePricingState) Valid() bool {
 	switch e {
-	case Free:
+	case MCPToolCallResponsePricingStateFree:
 		return true
-	case Priced:
+	case MCPToolCallResponsePricingStatePriced:
 		return true
-	case Unpriced:
+	case MCPToolCallResponsePricingStateUnpriced:
 		return true
 	default:
 		return false
@@ -6763,7 +6787,7 @@ type AgentRunSpan struct {
 	TraceId      string                                `json:"trace_id"`
 }
 
-// AgentRunSpanList defines model for AgentRunSpanList.
+// AgentRunSpanList Correlated spans, ordered by start time and ID from newest to oldest.
 type AgentRunSpanList struct {
 	Items      []AgentRunSpan            `json:"items"`
 	NextCursor nullable.Nullable[string] `json:"next_cursor"`
@@ -6771,24 +6795,39 @@ type AgentRunSpanList struct {
 
 // AgentRunStep A step and its dispatch attempt. Remaining amounts are unresolved exposure, not charges.
 type AgentRunStep struct {
-	BoundViolation  bool               `json:"bound_violation"`
-	ChargeBound     string             `json:"charge_bound"`
-	CostBound       string             `json:"cost_bound"`
-	CreatedAt       time.Time          `json:"created_at"`
-	Currency        string             `json:"currency"`
-	DispatchId      openapi_types.UUID `json:"dispatch_id"`
-	Id              openapi_types.UUID `json:"id"`
-	Kind            AgentRunStepKind   `json:"kind"`
-	ObservedCharge  string             `json:"observed_charge"`
-	ObservedCost    string             `json:"observed_cost"`
-	Ordinal         int                `json:"ordinal"`
-	RemainingCharge string             `json:"remaining_charge"`
-	RemainingCost   string             `json:"remaining_cost"`
-	State           AgentRunStepState  `json:"state"`
+	BoundViolation bool               `json:"bound_violation"`
+	ChargeBound    string             `json:"charge_bound"`
+	CostBound      string             `json:"cost_bound"`
+	CreatedAt      time.Time          `json:"created_at"`
+	Currency       string             `json:"currency"`
+	DispatchId     openapi_types.UUID `json:"dispatch_id"`
+	Id             openapi_types.UUID `json:"id"`
+	Kind           AgentRunStepKind   `json:"kind"`
+	ObservedCharge string             `json:"observed_charge"`
+	ObservedCost   string             `json:"observed_cost"`
+	Ordinal        int                `json:"ordinal"`
+
+	// PricingState Recorded tool pricing state; unpriced amounts are unknown.
+	PricingState    nullable.Nullable[AgentRunStepPricingState] `json:"pricing_state"`
+	RemainingCharge string                                      `json:"remaining_charge"`
+	RemainingCost   string                                      `json:"remaining_cost"`
+	State           AgentRunStepState                           `json:"state"`
+
+	// ToolAlias Recorded tool alias, if a tool call exists.
+	ToolAlias nullable.Nullable[string] `json:"tool_alias"`
+
+	// ToolIsError Whether the tool returned an error result.
+	ToolIsError nullable.Nullable[bool] `json:"tool_is_error"`
+
+	// ToolStatus Recorded tool call execution status.
+	ToolStatus nullable.Nullable[string] `json:"tool_status"`
 }
 
 // AgentRunStepKind defines model for AgentRunStep.Kind.
 type AgentRunStepKind string
+
+// AgentRunStepPricingState Recorded tool pricing state; unpriced amounts are unknown.
+type AgentRunStepPricingState string
 
 // AgentRunStepState defines model for AgentRunStep.State.
 type AgentRunStepState string

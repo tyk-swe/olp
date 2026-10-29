@@ -1,7 +1,10 @@
 package agents
 
 import (
+	"encoding/base64"
 	"net/http"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -32,6 +35,10 @@ type RunStepView struct {
 	RemainingCost   string    `db:"remaining_cost" json:"remaining_cost"`
 	RemainingCharge string    `db:"remaining_charge" json:"remaining_charge"`
 	BoundViolation  bool      `db:"bound_violation" json:"bound_violation"`
+	ToolAlias       *string   `db:"tool_alias" json:"tool_alias"`
+	ToolStatus      *string   `db:"tool_status" json:"tool_status"`
+	ToolIsError     *bool     `db:"tool_is_error" json:"tool_is_error"`
+	PricingState    *string   `db:"pricing_state" json:"pricing_state"`
 	CreatedAt       time.Time `db:"created_at" json:"created_at"`
 }
 
@@ -121,7 +128,9 @@ func (s *Server) getRun(r *http.Request, p access.Principal) (access.Reply, erro
  d.observed_cost::text AS observed_cost,d.observed_charge::text AS observed_charge,
  (CASE WHEN d.closed_at IS NOT NULL THEN 0 ELSE GREATEST(0,d.cost_bound-d.observed_cost) END)::text AS remaining_cost,
  (CASE WHEN d.closed_at IS NOT NULL THEN 0 ELSE GREATEST(0,d.charge_bound-d.observed_charge) END)::text AS remaining_charge,
- d.bound_violation,d.created_at FROM olp.agent_steps s JOIN olp.execution_debits d ON d.id=s.dispatch_id
+ d.bound_violation,c.tool_alias,c.status AS tool_status,c.is_error AS tool_is_error,c.pricing_state,d.created_at
+ FROM olp.agent_steps s JOIN olp.execution_debits d ON d.id=s.dispatch_id
+ LEFT JOIN olp.mcp_tool_calls c ON c.dispatch_id=s.dispatch_id
  WHERE s.run_id=$1 ORDER BY s.ordinal`, run.ID)
 	if err != nil {
 		return access.Reply{}, err
@@ -147,14 +156,29 @@ func (s *Server) listRunSpans(r *http.Request, p access.Principal) (access.Reply
 	if err != nil {
 		return access.Reply{}, err
 	}
-	page, err := access.Page(r)
-	if err != nil {
-		return access.Reply{}, err
+	limit := 50
+	if raw := r.URL.Query().Get("limit"); raw != "" {
+		limit, err = strconv.Atoi(raw)
+		if err != nil || limit < 1 || limit > 200 {
+			return access.Reply{}, access.Invalid("limit", "Use a page size from 1 to 200.")
+		}
+	}
+	var beforeTime, beforeID any
+	if raw := r.URL.Query().Get("cursor"); raw != "" {
+		decoded, decodeErr := base64.RawURLEncoding.DecodeString(raw)
+		timestamp, id, found := strings.Cut(string(decoded), "|")
+		_, timeErr := strconv.ParseUint(timestamp, 10, 64)
+		parsedID, idErr := uuid.Parse(id)
+		if decodeErr != nil || !found || timeErr != nil || idErr != nil {
+			return access.Reply{}, access.Invalid("cursor", "Invalid pagination cursor.")
+		}
+		beforeTime, beforeID = timestamp, parsedID.String()
 	}
 	rows, err := s.Access.Pool.Query(r.Context(), `SELECT id::text AS id,encode(trace_id,'hex') AS trace_id,
  encode(span_id,'hex') AS span_id,encode(parent_span_id,'hex') AS parent_span_id,attempt_id::text AS attempt_id,
  started_nanos::text AS started_nanos,ended_nanos::text AS ended_nanos,category,status,received_at
- FROM olp.trace_spans WHERE run_id=$1 AND id<$2 ORDER BY id DESC LIMIT $3`, run.ID, page.Before, page.Limit+1)
+ FROM olp.trace_spans WHERE run_id=$1 AND ($2::numeric IS NULL OR (started_nanos,id)<($2::numeric,$3::uuid))
+ ORDER BY started_nanos DESC,id DESC LIMIT $4`, run.ID, beforeTime, beforeID, limit+1)
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -162,5 +186,11 @@ func (s *Server) listRunSpans(r *http.Request, p access.Principal) (access.Reply
 	if err != nil {
 		return access.Reply{}, err
 	}
-	return access.ListReplyBy(spans, page, func(item RunSpanView) string { return item.ID }), nil
+	var next any
+	if len(spans) > limit {
+		spans = spans[:limit]
+		last := spans[len(spans)-1]
+		next = base64.RawURLEncoding.EncodeToString([]byte(last.StartedNanos + "|" + last.ID))
+	}
+	return access.OK(map[string]any{"items": append([]RunSpanView{}, spans...), "next_cursor": next}), nil
 }

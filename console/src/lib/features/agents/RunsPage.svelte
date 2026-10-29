@@ -3,20 +3,27 @@
   import { createQuery } from '@tanstack/svelte-query';
   import { writable } from 'svelte/store';
   import { errorMessage } from '$lib/api/http';
-  import { listProjects } from '$lib/features/access/projects/api';
+  import { listProjectMemberships } from '$lib/features/access/projects/api';
   import { projectKeys } from '$lib/features/access/projects/projectKeys';
   import { listRuns } from './api';
+  import { agentKeys } from './agentKeys';
 
   const filters = writable<{ project: string; cursor?: string }>({
     project: ''
   });
   const projects = createQuery(() => ({
-    queryKey: projectKeys.all,
-    queryFn: ({ signal }) => listProjects(signal)
+    queryKey: projectKeys.memberships,
+    queryFn: ({ signal }) => listProjectMemberships(signal),
+    staleTime: 0,
+    gcTime: 0,
+    retry: false
   }));
   const runs = createQuery(() => ({
-    queryKey: ['agent-runs', $filters.project, $filters.cursor ?? ''],
-    queryFn: () => listRuns($filters.project, $filters.cursor)
+    queryKey: agentKeys.runs($filters.project, $filters.cursor),
+    queryFn: () => listRuns($filters.project, $filters.cursor),
+    staleTime: 0,
+    gcTime: 0,
+    retry: false
   }));
 </script>
 
@@ -40,7 +47,7 @@
     Project
     <select name="project">
       <option value="">All authorized projects</option>
-      {#each projects.data ?? [] as value (value.id)}
+      {#each !projects.isFetching && !projects.error ? (projects.data ?? []) : [] as value (value.id)}
         <option value={value.id}>{value.name}</option>
       {/each}
     </select>
@@ -52,7 +59,7 @@
 {/if}
 {#if runs.error}
   <p role="alert">{errorMessage(runs.error)}</p>
-{:else if runs.isPending}
+{:else if runs.isFetching}
   <p>Loading runs…</p>
 {:else if !runs.data?.items.length}
   <p>No runs in this view.</p>
@@ -92,7 +99,7 @@
   >
   <button
     type="button"
-    disabled={!runs.data?.nextCursor || runs.isFetching}
+    disabled={!!runs.error || !runs.data?.nextCursor || runs.isFetching}
     onclick={() =>
       filters.update((current) => ({
         ...current,

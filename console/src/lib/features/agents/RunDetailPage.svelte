@@ -4,16 +4,23 @@
   import { writable } from 'svelte/store';
   import { errorMessage } from '$lib/api/http';
   import { getRun, listRunSpans } from './api';
+  import { agentKeys } from './agentKeys';
 
   let { runID }: { runID: string } = $props();
   const cursor = writable<string | undefined>(undefined);
   const run = createQuery(() => ({
-    queryKey: ['agent-run', runID],
-    queryFn: () => getRun(runID)
+    queryKey: agentKeys.run(runID),
+    queryFn: () => getRun(runID),
+    staleTime: 0,
+    gcTime: 0,
+    retry: false
   }));
   const spans = createQuery(() => ({
-    queryKey: ['agent-run-spans', runID, $cursor ?? ''],
-    queryFn: () => listRunSpans(runID, $cursor)
+    queryKey: agentKeys.runSpans(runID, $cursor),
+    queryFn: () => listRunSpans(runID, $cursor),
+    staleTime: 0,
+    gcTime: 0,
+    retry: false
   }));
   const spanStatus = ['Unset', 'OK', 'Error'];
   function spanTime(nanos: string): string {
@@ -30,7 +37,7 @@
 </header>
 {#if run.error}
   <p role="alert">{errorMessage(run.error)}</p>
-{:else if run.isPending}
+{:else if run.isFetching}
   <p>Loading run…</p>
 {:else if run.data}
   <dl>
@@ -58,7 +65,7 @@
         <table>
           <thead
             ><tr
-              ><th>Step</th><th>Attempt</th><th>State</th><th
+              ><th>Step / tool</th><th>Attempt</th><th>State / outcome</th><th
                 >Observed cost / charge</th
               ><th>Unresolved cost / charge</th><th>Started</th></tr
             ></thead
@@ -66,22 +73,37 @@
           <tbody>
             {#each run.data.steps as step (step.id)}
               <tr>
-                <td>{step.ordinal + 1}. {step.kind}</td>
+                <td
+                  >{step.ordinal + 1}. {step.kind}{#if step.tool_alias}<br
+                    /><code>{step.tool_alias}</code>{/if}</td
+                >
                 <td><code>{step.dispatch_id}</code></td>
                 <td
-                  >{step.state.replaceAll(
-                    '_',
-                    ' '
-                  )}{#if step.bound_violation}<br />Bound exceeded{/if}</td
+                  >{step.state.replaceAll('_', ' ')}{#if step.tool_status}<br
+                    />Tool: {step.tool_status.replaceAll(
+                      '_',
+                      ' '
+                    )}{step.tool_is_error
+                      ? ' (tool error)'
+                      : ''}{/if}{#if step.bound_violation}<br />Bound exceeded{/if}</td
                 >
-                <td
-                  >{step.observed_cost} / {step.observed_charge}
-                  {step.currency}</td
-                >
-                <td
-                  >{step.remaining_cost} / {step.remaining_charge}
-                  {step.currency}</td
-                >
+                <td>
+                  {#if step.pricing_state === 'unpriced'}
+                    Unknown (unpriced)
+                  {:else}
+                    {step.observed_cost} / {step.observed_charge}
+                    {step.currency}
+                    {#if step.pricing_state === 'free'}<br />Free{/if}
+                  {/if}
+                </td>
+                <td>
+                  {#if step.pricing_state === 'unpriced'}
+                    Unknown (unpriced)
+                  {:else}
+                    {step.remaining_cost} / {step.remaining_charge}
+                    {step.currency}
+                  {/if}
+                </td>
                 <td>{new Date(step.created_at).toLocaleString()}</td>
               </tr>
             {/each}
@@ -125,7 +147,7 @@
     <h2 id="spans">Linked spans</h2>
     {#if spans.error}
       <p role="alert">{errorMessage(spans.error)}</p>
-    {:else if spans.isPending}
+    {:else if spans.isFetching}
       <p>Loading spans…</p>
     {:else if !spans.data?.items.length}
       <p>No linked spans recorded.</p>
@@ -168,7 +190,7 @@
       >
       <button
         type="button"
-        disabled={!spans.data?.nextCursor || spans.isFetching}
+        disabled={!!spans.error || !spans.data?.nextCursor || spans.isFetching}
         onclick={() => cursor.set(spans.data?.nextCursor ?? undefined)}
         >Older</button
       >
