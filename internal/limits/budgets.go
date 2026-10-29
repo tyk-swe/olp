@@ -15,7 +15,7 @@ import (
 
 // budgetOwnership keeps raw and retained facts on the same subject boundary.
 // These predicates are built only from reviewed SQL expressions, never input.
-type budgetOwnership struct{ raw, hourly string }
+type budgetOwnership struct{ raw, hourly, tool string }
 
 func budgetTotalsSQL(owner budgetOwnership, basis string) string {
 	return fmt.Sprintf(` FROM olp.budget_windows(now()) w,
@@ -35,8 +35,11 @@ func budgetTotalsSQL(owner budgetOwnership, basis string) string {
  AND f.observed_at>=LEAST(w.daily_start,w.weekly_start,w.monthly_start) AND f.observed_at<GREATEST(w.daily_end,w.weekly_end,w.monthly_end)
  UNION ALL SELECT h.budget_bucket,(COALESCE(h.estimated_cost,0)+h.cache_budget_cost)::numeric,(COALESCE(h.charge,0)+h.cache_budget_charge)::numeric,h.unpriced_attempt_count,h.uncharged_attempt_count
  FROM olp.attempt_usage_hourly h WHERE NOT h.budget_exempt AND (%s)
- AND h.budget_bucket>=LEAST(w.daily_start,w.weekly_start,w.monthly_start) AND h.budget_bucket<GREATEST(w.daily_end,w.weekly_end,w.monthly_end)) u) t
- , LATERAL (SELECT %s='charge' AS charged) basis`, owner.raw, owner.hourly, basis)
+ AND h.budget_bucket>=LEAST(w.daily_start,w.weekly_start,w.monthly_start) AND h.budget_bucket<GREATEST(w.daily_end,w.weekly_end,w.monthly_end)
+ UNION ALL SELECT d.closed_at,d.observed_cost,d.observed_charge,0::bigint,0::bigint
+ FROM olp.execution_debits d WHERE d.kind='tool' AND d.state='settled' AND (%s)
+ AND d.closed_at>=LEAST(w.daily_start,w.weekly_start,w.monthly_start) AND d.closed_at<GREATEST(w.daily_end,w.weekly_end,w.monthly_end)) u) t
+ , LATERAL (SELECT %s='charge' AS charged) basis`, owner.raw, owner.hourly, owner.tool, basis)
 }
 
 func budgetReportSQL(owner budgetOwnership, basis string) string {
@@ -50,7 +53,7 @@ func budgetReportSQL(owner budgetOwnership, basis string) string {
 
 // BudgetSQL reports one API key's raw and retained current-window spend as
 // exact decimal strings. The enclosing query supplies the key row as k.
-var BudgetSQL = budgetReportSQL(budgetOwnership{"(f.api_key_id=k.id OR f.agent_principal_id=k.id)", "(h.api_key_id=k.id OR h.agent_principal_id=k.id)"}, `COALESCE(olp.effective_limits(k.policy,(SELECT p.limit_templates->(k.policy->>'limit_template') FROM olp.projects p WHERE p.id=k.project_id))->>'cost_basis','cost')`)
+var BudgetSQL = budgetReportSQL(budgetOwnership{"(f.api_key_id=k.id OR f.agent_principal_id=k.id)", "(h.api_key_id=k.id OR h.agent_principal_id=k.id)", "EXISTS(SELECT 1 FROM olp.execution_debit_owners o WHERE o.dispatch_id=d.id AND o.owner_kind='key' AND o.owner_id=k.id)"}, `COALESCE(olp.effective_limits(k.policy,(SELECT p.limit_templates->(k.policy->>'limit_template') FROM olp.projects p WHERE p.id=k.project_id))->>'cost_basis','cost')`)
 
 // GroupBudgetSQL shares the same charge and calendar rules, adding the
 // effective limits of the enclosing budget-group row g.
@@ -62,7 +65,7 @@ var GroupBudgetSQL = `(SELECT jsonb_build_object(
  'monthly',jsonb_build_object('accrued',CASE WHEN basis.charged THEN t.monthly_charged ELSE t.monthly_accrued END::text,'limit',(g.effective_limits->>'monthly_cost_limit')::numeric::text,
  'remaining',CASE WHEN g.effective_limits->>'monthly_cost_limit' IS NULL THEN NULL ELSE GREATEST((g.effective_limits->>'monthly_cost_limit')::numeric-(CASE WHEN basis.charged THEN t.monthly_charged ELSE t.monthly_accrued END),0)::text END,'reset_at',w.monthly_end),
  'cost_basis',COALESCE(g.effective_limits->>'cost_basis','cost'),
- 'unpriced_attempts',t.unpriced_attempts,'uncharged_attempts',t.uncharged_attempts)` + budgetTotalsSQL(budgetOwnership{"f.budget_group_id=g.id", "h.budget_group_id=g.id"}, "COALESCE(g.effective_limits->>'cost_basis','cost')") + `)`
+ 'unpriced_attempts',t.unpriced_attempts,'uncharged_attempts',t.uncharged_attempts)` + budgetTotalsSQL(budgetOwnership{"f.budget_group_id=g.id", "h.budget_group_id=g.id", "EXISTS(SELECT 1 FROM olp.execution_debit_owners o WHERE o.dispatch_id=d.id AND o.owner_kind='group' AND o.owner_id=g.id)"}, "COALESCE(g.effective_limits->>'cost_basis','cost')") + `)`
 
 // Windows are the fixed UTC day and month a cost budget is measured over.
 type Windows struct {
@@ -461,6 +464,11 @@ var reconciliationSnapshotsSQL = reconcileCostWindowsSQL(costOwnerKey, false, `a
   FROM (SELECT * FROM olp.attempt_usage_hourly WHERE NOT budget_exempt) hourly
   JOIN accounts a ON a.id = hourly.api_key_id OR a.id = hourly.agent_principal_id
   WHERE hourly.budget_bucket >= LEAST((SELECT daily_start FROM budget_calendar),(SELECT monthly_start FROM budget_calendar),(SELECT weekly_start FROM budget_calendar)) AND hourly.budget_bucket < GREATEST((SELECT daily_end FROM budget_calendar),(SELECT monthly_end FROM budget_calendar),(SELECT weekly_end FROM budget_calendar))
+  UNION ALL
+  SELECT a.id,d.closed_at,d.observed_cost,d.observed_charge,0::bigint,0::bigint
+  FROM olp.execution_debits d JOIN accounts a ON EXISTS(SELECT 1 FROM olp.execution_debit_owners o WHERE o.dispatch_id=d.id AND o.owner_kind='key' AND o.owner_id=a.id)
+  WHERE d.kind='tool' AND d.state='settled'
+    AND d.closed_at >= LEAST((SELECT daily_start FROM budget_calendar),(SELECT monthly_start FROM budget_calendar),(SELECT weekly_start FROM budget_calendar)) AND d.closed_at < GREATEST((SELECT daily_end FROM budget_calendar),(SELECT monthly_end FROM budget_calendar),(SELECT weekly_end FROM budget_calendar))
 )`)
 
 var reconciliationGroupSnapshotsSQL = reconcileCostWindowsSQL(costOwnerGroup, false, `accounts AS (
@@ -478,6 +486,11 @@ var reconciliationGroupSnapshotsSQL = reconcileCostWindowsSQL(costOwnerGroup, fa
  SELECT hourly.budget_group_id AS id,hourly.budget_bucket,(COALESCE(hourly.estimated_cost,0)+hourly.cache_budget_cost)::numeric,(COALESCE(hourly.charge,0)+hourly.cache_budget_charge)::numeric,hourly.unpriced_attempt_count,hourly.uncharged_attempt_count
  FROM (SELECT * FROM olp.attempt_usage_hourly WHERE NOT budget_exempt) hourly JOIN accounts a ON a.id = hourly.budget_group_id
  WHERE hourly.budget_bucket >= LEAST((SELECT daily_start FROM budget_calendar),(SELECT monthly_start FROM budget_calendar),(SELECT weekly_start FROM budget_calendar)) AND hourly.budget_bucket < GREATEST((SELECT daily_end FROM budget_calendar),(SELECT monthly_end FROM budget_calendar),(SELECT weekly_end FROM budget_calendar))
+ UNION ALL
+ SELECT a.id,d.closed_at,d.observed_cost,d.observed_charge,0::bigint,0::bigint
+ FROM olp.execution_debits d JOIN accounts a ON EXISTS(SELECT 1 FROM olp.execution_debit_owners o WHERE o.dispatch_id=d.id AND o.owner_kind='group' AND o.owner_id=a.id)
+ WHERE d.kind='tool' AND d.state='settled'
+   AND d.closed_at >= LEAST((SELECT daily_start FROM budget_calendar),(SELECT monthly_start FROM budget_calendar),(SELECT weekly_start FROM budget_calendar)) AND d.closed_at < GREATEST((SELECT daily_end FROM budget_calendar),(SELECT monthly_end FROM budget_calendar),(SELECT weekly_end FROM budget_calendar))
 )`)
 
 // ReconciliationSnapshots recomputes every active key's and budget group's

@@ -9,28 +9,67 @@ import (
 	"maps"
 	"slices"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/tyk-swe/olp/internal/contentpolicy"
 	"github.com/tyk-swe/olp/internal/limits"
 )
 
-func workflowEvent(event *Event) bool {
-	if event == nil {
+// WorkflowEventID gives each request in a workflow its own stable receipt identity.
+func WorkflowEventID(runID, requestID string) (uuid.UUID, error) {
+	run, err := uuid.Parse(runID)
+	if err != nil {
+		return uuid.Nil, err
+	}
+	request, err := uuid.Parse(requestID)
+	if err != nil {
+		return uuid.Nil, err
+	}
+	return uuid.NewSHA1(run, []byte("request:"+request.String())), nil
+}
+
+func workflowReferenceMatches(event *Event, ref *ExecutionReference, attemptID string) bool {
+	if ref == nil || ref.RunID == "" || ref.DispatchID != attemptID {
 		return false
 	}
+	if ref.RunID == event.EventID {
+		return true
+	}
+	id, err := WorkflowEventID(ref.RunID, event.RequestID)
+	return err == nil && id.String() == event.EventID
+}
+
+func workflowRunID(event *Event) string {
+	if event == nil {
+		return ""
+	}
 	for _, attempt := range event.Attempts {
-		if attempt.Execution != nil && attempt.Execution.RunID != "" && attempt.Execution.RunID == event.EventID {
-			return true
+		if attempt.Execution != nil && attempt.Execution.RunID != "" {
+			return attempt.Execution.RunID
 		}
 	}
-	return false
+	return ""
+}
+
+func workflowEvent(event *Event) bool {
+	return workflowRunID(event) != ""
 }
 
 func persistWorkflowTerminalTx(ctx context.Context, tx pgx.Tx, event *Event, payload []byte) (Persisted, error) {
 	validated, err := Validate(event)
 	if err != nil {
 		return Persisted{}, err
+	}
+	runID := workflowRunID(event)
+	for _, attempt := range validated.Attempts {
+		ref := attempt.Attempt.Execution
+		if ref == nil {
+			continue
+		}
+		if !workflowReferenceMatches(event, ref, attempt.Attempt.ID) || runID != ref.RunID {
+			return Persisted{}, limits.ErrDebitConflict
+		}
 	}
 	digest := sha256.Sum256(payload)
 	var claimed string
@@ -63,9 +102,6 @@ ON CONFLICT DO NOTHING RETURNING event_id::text`, event.EventID, event.RequestID
 		}
 		ref := attempt.Attempt.Execution
 		if ref != nil {
-			if ref.RunID != event.EventID || ref.DispatchID != attempt.Attempt.ID {
-				return Persisted{}, limits.ErrDebitConflict
-			}
 			var existing bool
 			if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM olp.execution_debits WHERE id=$1 AND run_id=$2 AND step_id=$3 AND api_key_id=$4 AND kind='model' AND state IN ('dispatched','outcome_unknown','settled'))`, ref.DispatchID, ref.RunID, ref.StepID, event.APIKeyID).Scan(&existing); err != nil {
 				return Persisted{}, err
@@ -101,7 +137,7 @@ func PersistWorkflowAttempt(ctx context.Context, pool *pgxpool.Pool, event *Even
 	}
 	attempt := validated.Attempts[index]
 	ref := attempt.Attempt.Execution
-	if ref == nil || ref.RunID != event.EventID || ref.DispatchID != attempt.Attempt.ID {
+	if !workflowReferenceMatches(event, ref, attempt.Attempt.ID) {
 		return nil, limits.ErrDebitConflict
 	}
 	payload, err := json.Marshal(attempt.Attempt)

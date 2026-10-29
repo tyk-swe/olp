@@ -101,22 +101,25 @@ type ReserveInput struct {
 }
 
 type Reservation struct {
-	Approval          *agents.WorkflowApproval
-	Authority         access.Authority
-	DispatchID        string
-	ClaimID           string
-	RunID             string
-	StepID            string
-	AttemptID         string
-	APIKeyID          string
-	ProjectID         string
-	ToolsetID         string
-	ToolsetRevisionID string
-	ToolAlias         string
-	InputDigest       string
-	CallDigest        string
-	UnitPrice         *string
-	Currency          string
+	Approval             *agents.WorkflowApproval
+	Authority            access.Authority
+	DispatchID           string
+	ClaimID              string
+	RunID                string
+	StepID               string
+	AttemptID            string
+	APIKeyID             string
+	ProjectID            string
+	ToolsetID            string
+	ToolsetRevisionID    string
+	ToolAlias            string
+	InputDigest          string
+	CallDigest           string
+	AgentPrincipalID     string
+	MemberPrincipalID    string
+	DelegationPairDigest string
+	UnitPrice            *string
+	Currency             string
 }
 
 func (r *Reservation) amount() string {
@@ -345,9 +348,39 @@ func canonicalUUID(raw string) bool {
 	return err == nil && id != uuid.Nil && id.String() == raw
 }
 
+type delegatedSessionAuthenticator struct{ Runtime }
+
+func (a delegatedSessionAuthenticator) AuthenticateDelegation(ctx context.Context, token, assertion string) (*access.Authority, error) {
+	auth, ok := a.Runtime.(interface {
+		ReauthenticateDelegation(context.Context, string, string) (*access.Authority, error)
+	})
+	if !ok {
+		return nil, runtime.ErrInvalidKey
+	}
+	return auth.ReauthenticateDelegation(ctx, token, assertion)
+}
+
 func (s *Server) authenticate(r *http.Request) (access.Authority, *apiError) {
+	return s.authenticateWith(r, s.Runtime)
+}
+
+func (s *Server) authenticateSession(r *http.Request) (access.Authority, *apiError) {
+	if s.Runtime == nil || (r.Header.Get("Mcp-Session-Id") == "" && r.URL.Query().Get("session_id") == "") {
+		return s.authenticate(r)
+	}
+	return s.reauthenticateSession(r)
+}
+
+func (s *Server) reauthenticateSession(r *http.Request) (access.Authority, *apiError) {
+	if s.Runtime == nil {
+		return s.authenticate(r)
+	}
+	return s.authenticateWith(r, delegatedSessionAuthenticator{s.Runtime})
+}
+
+func (s *Server) authenticateWith(r *http.Request, auth consumerauth.Authenticator) (access.Authority, *apiError) {
 	token, _ := consumerauth.Bearer(r.Header.Get("Authorization"))
-	authority, failure := consumerauth.Authenticate(s.Runtime, r, token, "tools", s.TrustedProxies, s.now())
+	authority, failure := consumerauth.Authenticate(auth, r, token, "tools", s.TrustedProxies, s.now())
 	if failure != nil {
 		kind := "api_error"
 		switch failure.Status {

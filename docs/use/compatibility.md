@@ -44,6 +44,13 @@ modern/legacy session isolation and refusal when a replica lacks the live stream
 Legacy deployments require connection affinity between the SSE GET and its
 POSTs. Modern sessions never fall back to the legacy transport.
 
+`TestWorkloadAgentDelegatesKeyForTools` in
+`tests/integration/workload_identity_test.go` exercises a delegated agent through
+the shared tool path using a local workload issuer and signing fixture. It checks
+the downstream audience-bound agent signature, refusal at another audience,
+one-use credentials, consent, session isolation and shared budget accounting.
+Live Entra agent identity qualification is separate from this fixture evidence.
+
 Per-user OAuth is qualified separately. Experimental stdio is covered by a
 locally built, owner-permitted executable fixture through the shared consumer
 path. It preserves the unconfined native execution contract and does not provide

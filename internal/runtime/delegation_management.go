@@ -18,15 +18,18 @@ type DelegationManagement struct {
 }
 
 type delegationOption struct {
-	ID            string   `json:"id"`
-	AllowedRoutes []string `json:"allowed_routes"`
+	ID              string   `json:"id"`
+	AllowedRoutes   []string `json:"allowed_routes"`
+	AllowedToolsets []string `json:"allowed_toolsets"`
 }
 
 type delegationConsentRequest struct {
-	AgentID       string   `json:"agent_id"`
-	APIKeyID      string   `json:"api_key_id"`
-	AllowedRoutes []string `json:"allowed_routes"`
-	TTLSeconds    int64    `json:"ttl_seconds,omitempty"`
+	AgentID         string   `json:"agent_id"`
+	APIKeyID        string   `json:"api_key_id"`
+	Scopes          []string `json:"scopes,omitempty"`
+	AllowedRoutes   []string `json:"allowed_routes"`
+	AllowedToolsets []string `json:"allowed_toolsets,omitempty"`
+	TTLSeconds      int64    `json:"ttl_seconds,omitempty"`
 }
 
 func (s *DelegationManagement) Register(mux *http.ServeMux) {
@@ -69,6 +72,14 @@ func (s *DelegationManagement) options(r *http.Request, _ access.Principal) (acc
 	if err != nil {
 		return access.Reply{}, err
 	}
+	toolsetRows, err := tx.Query(r.Context(), "SELECT id::text FROM olp.agent_publications WHERE project_id=$1 AND kind='toolset' AND NOT retired AND latest_revision_id IS NOT NULL ORDER BY id", *projectID)
+	if err != nil {
+		return access.Reply{}, err
+	}
+	toolsets, err := pgx.CollectRows(toolsetRows, pgx.RowTo[string])
+	if err != nil {
+		return access.Reply{}, err
+	}
 	var current string
 	if err := tx.QueryRow(r.Context(), "SELECT authority_id::text FROM olp.installation WHERE singleton").Scan(&current); err != nil {
 		return access.Reply{}, err
@@ -95,12 +106,19 @@ func (s *DelegationManagement) options(r *http.Request, _ access.Principal) (acc
 			}
 			allowed := slices.Collect(func(yieldRoute func(string) bool) {
 				for _, route := range routes {
-					if delegationRoutesAllowed(agent, key, []string{route}, now) && !yieldRoute(route) {
+					if delegationResourcesAllowed(agent, key, []string{route}, nil, now) && !yieldRoute(route) {
 						return
 					}
 				}
 			})
-			if len(allowed) != 0 && !yield(delegationOption{ID: registered.ID, AllowedRoutes: allowed}) {
+			allowedToolsets := slices.Collect(func(yieldToolset func(string) bool) {
+				for _, toolset := range toolsets {
+					if delegationResourcesAllowed(agent, key, nil, []string{toolset}, now) && !yieldToolset(toolset) {
+						return
+					}
+				}
+			})
+			if (len(allowed) != 0 || len(allowedToolsets) != 0) && !yield(delegationOption{ID: registered.ID, AllowedRoutes: append([]string{}, allowed...), AllowedToolsets: append([]string{}, allowedToolsets...)}) {
 				return
 			}
 		}
@@ -135,9 +153,9 @@ func (s *DelegationManagement) create(r *http.Request, _ access.Principal) (acce
 	if err := s.Access.ConsumeRecent(r, tx, principal, "agent_delegation", keyID); err != nil {
 		return access.Reply{}, err
 	}
-	bounds := DelegationBounds{Scopes: []string{"inference"}, AllowedRoutes: input.AllowedRoutes, TTLSeconds: input.TTLSeconds}
+	bounds := DelegationBounds{Scopes: consentScopes(input.Scopes), AllowedRoutes: input.AllowedRoutes, AllowedToolsets: input.AllowedToolsets, TTLSeconds: input.TTLSeconds}
 	if !validDelegationBounds(bounds) {
-		return access.Reply{}, access.Invalid("allowed_routes", "Choose valid routes and a duration of at most 15 minutes.")
+		return access.Reply{}, access.Invalid("scopes", "Choose valid scopes and resources and a duration of at most 15 minutes.")
 	}
 	target, err := s.Manager.memberConsentTarget(r.Context(), tx, agentID, keyID)
 	if err != nil {
@@ -146,12 +164,12 @@ func (s *DelegationManagement) create(r *http.Request, _ access.Principal) (acce
 	if err := principal.Project(target.key.ProjectID, access.Change); err != nil {
 		return access.Reply{}, err
 	}
-	if target.key.ProjectID == nil || target.agent.ProjectID == nil || *target.key.ProjectID != *target.agent.ProjectID || !slices.Contains(target.key.Policy.Scopes, "delegate") || !delegationRoutesAllowed(target.agent, target.key, bounds.AllowedRoutes, time.Now()) {
+	if target.key.ProjectID == nil || target.agent.ProjectID == nil || *target.key.ProjectID != *target.agent.ProjectID || !slices.Contains(target.key.Policy.Scopes, "delegate") || !delegationResourcesAllowed(target.agent, target.key, bounds.AllowedRoutes, bounds.AllowedToolsets, time.Now()) {
 		return access.Reply{}, access.Forbidden()
 	}
 	code := "olpc_" + secrets.Token()
 	expires := boundDelegationExpiry(time.Now().Add(delegationTTL(bounds.TTLSeconds)), target.key.ExpiresAt)
-	if _, err := tx.Exec(r.Context(), `INSERT INTO olp.agent_delegations(token_digest,consent_digest,consenting_user_id,project_id,api_key_id,agent_id,issuer_revision,allowed_routes,expires_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)`, s.Manager.auth.Digest(secrets.DelegationTokenDigest, "unissued:"+code), s.Manager.auth.Digest(secrets.DelegationConsentDigest, code), principal.ID, *target.key.ProjectID, keyID, agentID, target.revision, bounds.AllowedRoutes, expires); err != nil {
+	if _, err := tx.Exec(r.Context(), `INSERT INTO olp.agent_delegations(token_digest,consent_digest,consenting_user_id,project_id,api_key_id,agent_id,issuer_revision,scopes,allowed_routes,allowed_toolsets,expires_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,COALESCE($9,ARRAY[]::text[]),COALESCE($10,ARRAY[]::text[]),$11)`, s.Manager.auth.Digest(secrets.DelegationTokenDigest, "unissued:"+code), s.Manager.auth.Digest(secrets.DelegationConsentDigest, code), principal.ID, *target.key.ProjectID, keyID, agentID, target.revision, bounds.Scopes, bounds.AllowedRoutes, bounds.AllowedToolsets, expires); err != nil {
 		return access.Reply{}, err
 	}
 	if err := access.Audit(r.Context(), tx, r, principal.Actor(), "agent_delegation.consent", "api_key", keyID, "success"); err != nil {
@@ -159,6 +177,13 @@ func (s *DelegationManagement) create(r *http.Request, _ access.Principal) (acce
 	}
 	pair, _ := s.Manager.delegationPair(*target.key.ProjectID, keyID, agentID, &principal.ID)
 	return access.Commit(r, tx, access.Reply{Status: http.StatusCreated, Body: map[string]any{"consent": code, "expires_at": expires, "delegation_pair_digest": pair}})
+}
+
+func consentScopes(scopes []string) []string {
+	if len(scopes) == 0 {
+		return []string{"inference"}
+	}
+	return scopes
 }
 
 type memberConsentTarget struct {

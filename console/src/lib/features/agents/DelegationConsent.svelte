@@ -15,7 +15,8 @@
   import {
     createDelegationConsent,
     getDelegationOptions,
-    type DelegationConsent
+    type DelegationConsent,
+    type DelegationConsentRequest
   } from './api';
 
   const role = useRole();
@@ -32,6 +33,7 @@
   let keyID = $state('');
   let agentID = $state('');
   let routeInput = $state('');
+  let toolsetInput = $state('');
   let password = $state('');
   let verifiedKey = $state('');
   let busy = $state(false);
@@ -41,6 +43,7 @@
     keyID = '';
     agentID = '';
     routeInput = '';
+    toolsetInput = '';
     password = '';
     verifiedKey = '';
     consent = null;
@@ -71,7 +74,15 @@
   const agents = $derived(
     (options.data?.agents ?? []).flatMap((option) => {
       const agent = inventory.data?.find((key) => key.id === option.id);
-      return agent ? [{ ...agent, eligibleRoutes: option.allowed_routes }] : [];
+      return agent
+        ? [
+            {
+              ...agent,
+              eligibleRoutes: option.allowed_routes,
+              eligibleToolsets: option.allowed_toolsets ?? []
+            }
+          ]
+        : [];
     })
   );
   const selectedAgent = $derived(agents.find((agent) => agent.id === agentID));
@@ -81,15 +92,33 @@
       .map((route) => route.trim())
       .filter(Boolean)
   );
-  const allowed = $derived(
-    routes.length > 0 &&
-      routes.every(
-        (route, index) =>
-          selectedAgent?.eligibleRoutes.includes(route) &&
-          routes.indexOf(route) === index
-      )
+  const toolsets = $derived(
+    toolsetInput
+      .split(',')
+      .map((toolset) => toolset.trim())
+      .filter(Boolean)
   );
-  const ready = $derived(!!selectedKey && !!selectedAgent && allowed);
+  const routesAllowed = $derived(
+    routes.every(
+      (route, index) =>
+        selectedAgent?.eligibleRoutes.includes(route) &&
+        routes.indexOf(route) === index
+    )
+  );
+  const toolsetsAllowed = $derived(
+    toolsets.every(
+      (toolset, index) =>
+        selectedAgent?.eligibleToolsets.includes(toolset) &&
+        toolsets.indexOf(toolset) === index
+    )
+  );
+  const ready = $derived(
+    !!selectedKey &&
+      !!selectedAgent &&
+      (routes.length > 0 || toolsets.length > 0) &&
+      routesAllowed &&
+      toolsetsAllowed
+  );
 
   onMount(() => {
     const parameters = new URLSearchParams(window.location.search);
@@ -102,10 +131,16 @@
   async function confirm() {
     if (busy || !ready) return;
     const current = owner();
-    const selected = {
+    const selected: DelegationConsentRequest = {
       api_key_id: keyID,
       agent_id: agentID,
-      allowed_routes: routes
+      ...(routes.length ? { allowed_routes: routes } : {}),
+      ...(toolsets.length
+        ? {
+            scopes: routes.length ? ['inference', 'tools'] : ['tools'],
+            allowed_toolsets: toolsets
+          }
+        : {})
     };
     busy = true;
     error = '';
@@ -200,31 +235,48 @@
           />
         </label>
       </div>
+      <div class="form-field">
+        <label
+          >Allowed toolsets
+          <input
+            bind:value={toolsetInput}
+            disabled={busy}
+            placeholder="toolset UUIDs separated by commas"
+          />
+        </label>
+      </div>
       {#if selectedKey && options.isError}
-        <p role="alert">Eligible agents and routes could not be loaded.</p>
+        <p role="alert">Eligible agents and resources could not be loaded.</p>
       {:else if selectedKey && options.isSuccess && agents.length === 0}
-        <p>No eligible agents have access to an active route for this key.</p>
+        <p>
+          No eligible agents have access to a route or toolset for this key.
+        </p>
       {/if}
       {#if selectedAgent}
         <p>Available routes: {selectedAgent.eligibleRoutes.join(', ')}.</p>
-        <p>Enter unique route names separated by commas.</p>
-        {#if routes.length > 0 && !allowed}
+        <p>Available toolsets: {selectedAgent.eligibleToolsets.join(', ')}.</p>
+        <p>Enter unique route names and toolset UUIDs separated by commas.</p>
+        {#if routes.length > 0 && !routesAllowed}
           <p role="alert">Choose only routes listed above.</p>
+        {/if}
+        {#if toolsets.length > 0 && !toolsetsAllowed}
+          <p role="alert">Choose only toolsets listed above.</p>
         {/if}
       {/if}
       {#if ready}
         <p>
-          Allow {selectedAgent?.name} to make one inference request on {routes.join(
-            ', '
-          )} using {selectedKey?.name} in {selectedKey?.project_name ??
-            selectedKey?.project_id}. The key pays for the request. The consent
-          expires after five minutes and can be used once.
+          Allow {selectedAgent?.name} to use {selectedKey?.name} in {selectedKey?.project_name ??
+            selectedKey?.project_id}.
+          {#if routes.length}Inference routes: {routes.join(', ')}.{/if}
+          {#if toolsets.length}Toolsets: {toolsets.join(', ')}.{/if}
+          The key pays for the request. The consent expires after five minutes and
+          can be used once.
         </p>
       {/if}
       {#if verifiedKey === keyID && verifiedKey}
         <p role="status">
-          Identity verified. Select the workload and routes again, then confirm
-          within five minutes.
+          Identity verified. Select the workload and resources again, then
+          confirm within five minutes.
         </p>
       {:else}
         <div class="form-field">

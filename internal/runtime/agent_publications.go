@@ -108,8 +108,13 @@ func (state authorityState) currentAgentPrincipal(a access.Authority, scope, id,
 	if !ok || current.ID != a.ID || !current.AllowsResource(scope, id, project, now) {
 		return false
 	}
-
-	return true
+	if a.DelegationAgentID == "" {
+		return true
+	}
+	if a.DelegationAgentLimits == nil || a.DelegationAgentLimits.ID != a.DelegationAgentID || a.DelegationAgentLimits.WorkloadDigest == "" {
+		return false
+	}
+	return state.currentAgentPrincipal(access.Authority{ID: a.DelegationAgentID, WorkloadIssuerID: a.DelegationAgentLimits.WorkloadIssuerID, WorkloadDigest: a.DelegationAgentLimits.WorkloadDigest, WorkloadRevision: a.DelegationAgentLimits.WorkloadRevision, WorkloadMapping: a.DelegationAgentLimits.WorkloadMapping}, scope, id, project, now)
 }
 
 type mcpToolAuthority struct {

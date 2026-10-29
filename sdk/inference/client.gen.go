@@ -174,12 +174,15 @@ func (e AnthropicInferenceErrorType) Valid() bool {
 // Defines values for DelegationRequestScopes.
 const (
 	Inference DelegationRequestScopes = "inference"
+	Tools     DelegationRequestScopes = "tools"
 )
 
 // Valid indicates whether the value is a known member of the DelegationRequestScopes enum.
 func (e DelegationRequestScopes) Valid() bool {
 	switch e {
 	case Inference:
+		return true
+	case Tools:
 		return true
 	default:
 		return false
@@ -487,8 +490,9 @@ type DelegationGrant struct {
 
 // DelegationRequest defines model for DelegationRequest.
 type DelegationRequest struct {
-	AllowedRoutes []string                  `json:"allowed_routes"`
-	Scopes        []DelegationRequestScopes `json:"scopes"`
+	AllowedRoutes   *[]string                 `json:"allowed_routes,omitempty"`
+	AllowedToolsets *[]openapi_types.UUID     `json:"allowed_toolsets,omitempty"`
+	Scopes          []DelegationRequestScopes `json:"scopes"`
 
 	// TtlSeconds Grant lifetime in seconds. Omit or use 0 for the 300-second default. Principal expiry can shorten the lifetime.
 	TtlSeconds *int64 `json:"ttl_seconds,omitempty"`

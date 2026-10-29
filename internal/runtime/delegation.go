@@ -8,6 +8,7 @@ import (
 	"slices"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/attribution"
@@ -18,9 +19,10 @@ import (
 var ErrDelegationBounds = errors.New("invalid delegation bounds")
 
 type DelegationBounds struct {
-	Scopes        []string `json:"scopes"`
-	AllowedRoutes []string `json:"allowed_routes"`
-	TTLSeconds    int64    `json:"ttl_seconds,omitempty"`
+	Scopes          []string `json:"scopes"`
+	AllowedRoutes   []string `json:"allowed_routes"`
+	AllowedToolsets []string `json:"allowed_toolsets,omitempty"`
+	TTLSeconds      int64    `json:"ttl_seconds,omitempty"`
 }
 
 type DelegationGrant struct {
@@ -40,7 +42,7 @@ func (m *Manager) CreateDelegation(ctx context.Context, agent, key access.Author
 		return DelegationGrant{}, ErrDelegationBounds
 	}
 	now := time.Now()
-	if !delegationRoutesAllowed(agent, key, bounds.AllowedRoutes, now) {
+	if !delegationResourcesAllowed(agent, key, bounds.AllowedRoutes, bounds.AllowedToolsets, now) {
 		return DelegationGrant{}, access.Forbidden()
 	}
 	expiry := boundDelegationExpiry(boundDelegationExpiry(now.Add(delegationTTL(bounds.TTLSeconds)), agent.ExpiresAt), key.ExpiresAt)
@@ -50,7 +52,7 @@ func (m *Manager) CreateDelegation(ctx context.Context, agent, key access.Author
 		return DelegationGrant{}, err
 	}
 	defer tx.Rollback(ctx)
-	if _, err := tx.Exec(ctx, `INSERT INTO olp.agent_delegations(token_digest,project_id,api_key_id,agent_id,issuer_revision,allowed_routes,expires_at) VALUES($1,$2,$3,$4,$5,$6,$7)`, m.auth.Digest(secrets.DelegationTokenDigest, token), *key.ProjectID, key.ID, agent.ID, agent.WorkloadRevision, bounds.AllowedRoutes, expiry); err != nil {
+	if _, err := tx.Exec(ctx, `INSERT INTO olp.agent_delegations(token_digest,project_id,api_key_id,agent_id,issuer_revision,allowed_routes,expires_at,scopes,allowed_toolsets) VALUES($1,$2,$3,$4,$5,COALESCE($6,'{}'::text[]),$7,$8,COALESCE($9,'{}'::text[]))`, m.auth.Digest(secrets.DelegationTokenDigest, token), *key.ProjectID, key.ID, agent.ID, agent.WorkloadRevision, bounds.AllowedRoutes, expiry, bounds.Scopes, bounds.AllowedToolsets); err != nil {
 		return DelegationGrant{}, ErrStaleAuthority
 	}
 	if err := tx.Commit(ctx); err != nil {
@@ -61,11 +63,25 @@ func (m *Manager) CreateDelegation(ctx context.Context, agent, key access.Author
 }
 
 func validDelegationBounds(bounds DelegationBounds) bool {
-	if len(bounds.Scopes) != 1 || bounds.Scopes[0] != "inference" || len(bounds.AllowedRoutes) == 0 || len(bounds.AllowedRoutes) > 100 || bounds.TTLSeconds < 0 || bounds.TTLSeconds > 900 {
+	if len(bounds.Scopes) == 0 || len(bounds.Scopes) > 2 || len(bounds.AllowedRoutes) > 100 || len(bounds.AllowedToolsets) > 100 || bounds.TTLSeconds < 0 || bounds.TTLSeconds > 900 {
+		return false
+	}
+	for index, scope := range bounds.Scopes {
+		if !slices.Contains([]string{"inference", "tools"}, scope) || slices.Contains(bounds.Scopes[:index], scope) {
+			return false
+		}
+	}
+	if slices.Contains(bounds.Scopes, "inference") != (len(bounds.AllowedRoutes) > 0) || slices.Contains(bounds.Scopes, "tools") != (len(bounds.AllowedToolsets) > 0) {
 		return false
 	}
 	for index, route := range bounds.AllowedRoutes {
 		if !access.RouteSlug.MatchString(route) || slices.Contains(bounds.AllowedRoutes[:index], route) {
+			return false
+		}
+	}
+	for index, raw := range bounds.AllowedToolsets {
+		id, err := uuid.Parse(raw)
+		if err != nil || id == uuid.Nil || id.String() != raw || slices.Contains(bounds.AllowedToolsets[:index], raw) {
 			return false
 		}
 	}
@@ -90,9 +106,9 @@ func (m *Manager) ExchangeMemberConsent(ctx context.Context, agent access.Author
 	defer tx.Rollback(ctx)
 	var keyID, project, agentID, revision string
 	var memberID *string
-	var approved []string
+	var approved, approvedScopes, approvedToolsets []string
 	var expiry time.Time
-	queryErr := tx.QueryRow(ctx, `SELECT api_key_id::text,project_id::text,agent_id::text,issuer_revision::text,allowed_routes,expires_at,consenting_user_id::text FROM olp.agent_delegations WHERE consent_digest=$1 AND consumed_at IS NULL AND revoked_at IS NULL AND expires_at>now() FOR UPDATE`, m.auth.Digest(secrets.DelegationConsentDigest, consent)).Scan(&keyID, &project, &agentID, &revision, &approved, &expiry, &memberID)
+	queryErr := tx.QueryRow(ctx, `SELECT api_key_id::text,project_id::text,agent_id::text,issuer_revision::text,allowed_routes,expires_at,consenting_user_id::text,scopes,allowed_toolsets FROM olp.agent_delegations WHERE consent_digest=$1 AND consumed_at IS NULL AND revoked_at IS NULL AND expires_at>now() FOR UPDATE`, m.auth.Digest(secrets.DelegationConsentDigest, consent)).Scan(&keyID, &project, &agentID, &revision, &approved, &expiry, &memberID, &approvedScopes, &approvedToolsets)
 	if errors.Is(queryErr, pgx.ErrNoRows) {
 		return DelegationGrant{}, ErrInvalidKey
 	}
@@ -110,15 +126,25 @@ func (m *Manager) ExchangeMemberConsent(ctx context.Context, agent access.Author
 			return DelegationGrant{}, access.Forbidden()
 		}
 	}
+	for _, scope := range bounds.Scopes {
+		if !slices.Contains(approvedScopes, scope) {
+			return DelegationGrant{}, access.Forbidden()
+		}
+	}
+	for _, toolset := range bounds.AllowedToolsets {
+		if !slices.Contains(approvedToolsets, toolset) {
+			return DelegationGrant{}, access.Forbidden()
+		}
+	}
 	m.mu.RLock()
 	key, exists := m.authority.agentPrincipals[keyID]
 	m.mu.RUnlock()
-	if !exists || key.WorkloadIssuerID != nil || key.ProjectID == nil || *key.ProjectID != project || !slices.Contains(key.Policy.Scopes, "delegate") || !delegationRoutesAllowed(agent, key, bounds.AllowedRoutes, time.Now()) {
+	if !exists || key.WorkloadIssuerID != nil || key.ProjectID == nil || *key.ProjectID != project || !slices.Contains(key.Policy.Scopes, "delegate") || !delegationResourcesAllowed(agent, key, bounds.AllowedRoutes, bounds.AllowedToolsets, time.Now()) {
 		return DelegationGrant{}, ErrInvalidKey
 	}
 	token := "olpd_" + secrets.Token()
 	expires := boundDelegationExpiry(boundDelegationExpiry(time.Now().Add(delegationTTL(bounds.TTLSeconds)), &expiry), agent.ExpiresAt)
-	if _, err := tx.Exec(ctx, `UPDATE olp.agent_delegations SET token_digest=$1,consent_digest=NULL,allowed_routes=$2,expires_at=$3 WHERE consent_digest=$4`, m.auth.Digest(secrets.DelegationTokenDigest, token), bounds.AllowedRoutes, expires, m.auth.Digest(secrets.DelegationConsentDigest, consent)); err != nil {
+	if _, err := tx.Exec(ctx, `UPDATE olp.agent_delegations SET token_digest=$1,consent_digest=NULL,allowed_routes=COALESCE($2,'{}'::text[]),expires_at=$3,scopes=$5,allowed_toolsets=COALESCE($6,'{}'::text[]) WHERE consent_digest=$4`, m.auth.Digest(secrets.DelegationTokenDigest, token), bounds.AllowedRoutes, expires, m.auth.Digest(secrets.DelegationConsentDigest, consent), bounds.Scopes, bounds.AllowedToolsets); err != nil {
 		return DelegationGrant{}, ErrStaleAuthority
 	}
 	if err := tx.Commit(ctx); err != nil {
@@ -147,9 +173,9 @@ func (m *Manager) authenticateDelegation(ctx context.Context, token, assertion s
 	defer tx.Rollback(ctx)
 	var keyID, project, agentID, revision string
 	var memberID *string
-	var routes []string
+	var routes, scopes, toolsets []string
 	var expires time.Time
-	queryErr := tx.QueryRow(ctx, `SELECT api_key_id::text,project_id::text,agent_id::text,issuer_revision::text,allowed_routes,expires_at,consenting_user_id::text FROM olp.agent_delegations WHERE token_digest=$1 AND (consumed_at IS NOT NULL)=$2 AND revoked_at IS NULL AND expires_at>now() FOR UPDATE`, m.auth.Digest(secrets.DelegationTokenDigest, token), consumed).Scan(&keyID, &project, &agentID, &revision, &routes, &expires, &memberID)
+	queryErr := tx.QueryRow(ctx, `SELECT api_key_id::text,project_id::text,agent_id::text,issuer_revision::text,allowed_routes,expires_at,consenting_user_id::text,scopes,allowed_toolsets FROM olp.agent_delegations WHERE token_digest=$1 AND (consumed_at IS NOT NULL)=$2 AND revoked_at IS NULL AND expires_at>now() FOR UPDATE`, m.auth.Digest(secrets.DelegationTokenDigest, token), consumed).Scan(&keyID, &project, &agentID, &revision, &routes, &expires, &memberID, &scopes, &toolsets)
 	if errors.Is(queryErr, pgx.ErrNoRows) {
 		return nil, ErrInvalidKey
 	}
@@ -169,7 +195,7 @@ func (m *Manager) authenticateDelegation(ctx context.Context, token, assertion s
 		return nil, ErrInvalidKey
 	}
 	now := time.Now()
-	if !delegationRoutesAllowed(*agent, key, routes, now) {
+	if !delegationResourcesAllowed(*agent, key, routes, toolsets, now) {
 		return nil, ErrInvalidKey
 	}
 	if !consumed {
@@ -184,7 +210,7 @@ func (m *Manager) authenticateDelegation(ctx context.Context, token, assertion s
 	if err := tx.Commit(ctx); err != nil {
 		return nil, ErrStaleAuthority
 	}
-	return key.DelegatedInference(routes, *agent, member, pairDigest, boundDelegationExpiry(expires, agent.ExpiresAt)), nil
+	return key.Delegated(scopes, routes, toolsets, *agent, member, pairDigest, hex.EncodeToString(m.auth.Digest(secrets.DelegationTokenDigest, token)), boundDelegationExpiry(expires, agent.ExpiresAt)), nil
 }
 
 func (m *Manager) delegationPair(project, key, agent string, member *string) (string, string) {
@@ -234,9 +260,14 @@ func (m *Manager) delegationTransaction(ctx context.Context, expected string) (p
 	return tx, nil
 }
 
-func delegationRoutesAllowed(agent, key access.Authority, routes []string, now time.Time) bool {
+func delegationResourcesAllowed(agent, key access.Authority, routes, toolsets []string, now time.Time) bool {
 	for _, route := range routes {
 		if !agent.Allows("inference", route, agent.ProjectID, now) || !key.Allows("inference", route, key.ProjectID, now) {
+			return false
+		}
+	}
+	for _, toolset := range toolsets {
+		if !agent.AllowsResource("tools", toolset, *agent.ProjectID, now) || !key.AllowsResource("tools", toolset, *key.ProjectID, now) {
 			return false
 		}
 	}

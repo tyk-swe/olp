@@ -29,6 +29,7 @@ import (
 	"github.com/tyk-swe/olp/internal/agentcontract"
 	"github.com/tyk-swe/olp/internal/configuration"
 	"github.com/tyk-swe/olp/internal/database"
+	"github.com/tyk-swe/olp/internal/gateway"
 	"github.com/tyk-swe/olp/internal/guardrails"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/mcp"
@@ -2596,5 +2597,148 @@ func TestMCPToolCallRateLeasesHoldAndRefundEndToEnd(t *testing.T) {
 	status, retried := call(secretB, "lease-b-2")
 	if status != http.StatusOK || calls.Load() != 2 {
 		t.Fatalf("refused call consumed the per-key rate allowance instead of refunding it: status=%d calls=%d body=%v", status, calls.Load(), retried)
+	}
+}
+
+func TestMCPKeyAdmissionSharedAcrossSurfaces(t *testing.T) {
+	h := newAccessHarness(t)
+	owner := h.owner()
+	project := createProject(h, owner, "Shared key admission")
+	vendor := newOpenAIFixture(t, "")
+	provider := activeAzureProviderInProject(t, h, owner, "Shared admission provider", vendor.URL, &project, []any{map[string]any{"operation": "generation", "surface": "openai", "mode": "unary"}})
+	draft := h.want(owner, "POST", "/api/v1/route-drafts", map[string]any{"project_id": project, "slug": "shared-chat", "overall_timeout_ms": 10000, "max_attempts": 1, "fidelity": map[string]any{"mode": "transformed"}, "targets": []any{map[string]any{"provider_id": provider["id"], "provider_model": vendorModel, "priority": 0, "weight": 1, "timeout_ms": 5000}}}, idem("shared-admission-route"), http.StatusCreated)
+	routePath := "/api/v1/route-drafts/" + draft["id"].(string)
+	validated := h.want(owner, "POST", routePath+"/validate", nil, etagHeader(draft), http.StatusOK)
+	h.want(owner, "POST", routePath+"/activate", nil, withMatch(validated, idem("shared-admission-activate")), http.StatusOK)
+
+	entered := make(chan struct{}, 1)
+	holdNext := make(chan (<-chan struct{}), 1)
+	var calls atomic.Int64
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodDelete {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		var request struct {
+			ID     int    `json:"id"`
+			Method string `json:"method"`
+		}
+		if json.NewDecoder(r.Body).Decode(&request) != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		var result any
+		switch request.Method {
+		case "notifications/initialized":
+			w.WriteHeader(http.StatusAccepted)
+			return
+		case "initialize":
+			w.Header().Set("Mcp-Session-Id", "shared-admission")
+			result = map[string]any{"protocolVersion": "2025-11-25", "capabilities": map[string]any{"tools": map[string]any{}}}
+		case "tools/list":
+			result = map[string]any{"tools": []any{map[string]any{"name": "lookup", "inputSchema": map[string]any{"type": "object", "properties": map[string]any{}}}}}
+		case "tools/call":
+			calls.Add(1)
+			select {
+			case release := <-holdNext:
+				entered <- struct{}{}
+				select {
+				case <-release:
+				case <-r.Context().Done():
+					return
+				}
+			default:
+			}
+			result = map[string]any{"content": []any{map[string]any{"type": "text", "text": "answer"}}, "isError": false}
+		default:
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"jsonrpc": "2.0", "id": request.ID, "result": result})
+	}))
+	defer upstream.Close()
+	register := func(name string) agentcontract.Tool {
+		t.Helper()
+		created := h.want(owner, "POST", "/api/v1/mcp-servers", map[string]any{"name": name, "project_id": project, "transport": "streamable_http", "endpoint": upstream.URL, "enabled": true, "unit_price": "0"}, idem(name), http.StatusCreated)
+		serverID := mcpExecString(t, created, "id")
+		return agentcontract.Tool{ServerID: serverID, RevisionID: mcpExecString(t, created, "revision_id"), CatalogDigest: mcpExecString(t, mcpExecObject(t, created, "catalog"), "digest"), Name: "lookup", Alias: agentcontract.ToolAlias(serverID, "lookup")}
+	}
+	firstTool, secondTool := register("shared-server-a"), register("shared-server-b")
+	toolset := h.want(owner, "POST", "/api/v1/toolsets", map[string]any{"project_id": project, "name": "Shared admission tools", "toolset": map[string]any{"tools": []agentcontract.Tool{firstTool, secondTool}}}, idem("shared-admission-toolset"), http.StatusCreated)
+	toolsetID := mcpExecString(t, toolset, "id")
+	h.want(owner, "POST", "/api/v1/toolsets/"+toolsetID+"/publish", nil, withMatch(toolset, idem("shared-admission-publish")), http.StatusOK)
+	makeKey := func(name string, rpm, concurrency *int) string {
+		t.Helper()
+		key := h.want(owner, "POST", "/api/v1/api-keys", map[string]any{"name": name, "project_id": project, "scopes": []string{"tools", "inference"}, "allowed_toolsets": []string{toolsetID}, "allowed_routes": []string{"shared-chat"}, "requests_per_minute": rpm, "max_concurrency": concurrency}, idem(name), http.StatusCreated)
+		return mcpExecString(t, key, "secret")
+	}
+	one := 1
+	mcpFirstKey, inferenceFirstKey, concurrencyKey := makeKey("shared-mcp-first", &one, nil), makeKey("shared-inference-first", &one, nil), makeKey("shared-concurrency", nil, &one)
+	valkey, prefix, _ := acctKeyspace(t)
+	limiter, err := limits.New(valkey, strings.TrimSuffix(prefix, ":"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.Gateway.Admission = gateway.NewAdmission(limiter, nil, nil)
+	server := &mcp.Server{Runtime: h.Runtime, Egress: &h.Policy, Auth: h.AuthKey, Limiter: limiter, Ledger: &mcp.DurableLedger{Pool: h.Pool, Store: &limits.DebitStore{Pool: h.Pool, Limiter: limiter}, Auth: h.AuthKey}}
+	mux := http.NewServeMux()
+	server.Register(mux)
+	h.refresh()
+	callTool := func(secret, alias, callID string) int {
+		request := httptest.NewRequest(http.MethodPost, "/v1/mcp/tools/call", bytes.NewReader(mustJSON(map[string]any{"toolset_id": toolsetID, "name": alias, "arguments": map[string]any{}, "call_id": callID})))
+		request.Header.Set("Authorization", "Bearer "+secret)
+		request.Header.Set("Content-Type", "application/json")
+		response := httptest.NewRecorder()
+		mux.ServeHTTP(response, request)
+		return response.Code
+	}
+	callInference := func(secret string) int {
+		response, _ := h.do(nil, http.MethodPost, "/v1/chat/completions", map[string]any{"model": "shared-chat", "messages": []any{map[string]string{"role": "user", "content": "hello"}}}, map[string]string{"Authorization": "Bearer " + secret})
+		return response.StatusCode
+	}
+	vendorCalls := vendor.chatCalls.Load()
+	if status := callTool(mcpFirstKey, firstTool.Alias, "shared-mcp-first"); status != http.StatusOK {
+		t.Fatalf("first MCP call: %d", status)
+	}
+	if status := callTool(mcpFirstKey, secondTool.Alias, "shared-mcp-second"); status != http.StatusTooManyRequests || calls.Load() != 1 {
+		t.Fatalf("key RPM did not span MCP servers: status=%d dispatches=%d", status, calls.Load())
+	}
+	if status := callInference(mcpFirstKey); status != http.StatusTooManyRequests || vendor.chatCalls.Load() != vendorCalls {
+		t.Fatalf("MCP did not share key RPM with inference: status=%d dispatches=%d", status, vendor.chatCalls.Load())
+	}
+	if status := callInference(inferenceFirstKey); status != http.StatusOK {
+		t.Fatalf("first inference call: %d", status)
+	}
+	if status := callTool(inferenceFirstKey, secondTool.Alias, "shared-inference-first"); status != http.StatusTooManyRequests || calls.Load() != 1 {
+		t.Fatalf("inference did not share key RPM with MCP: status=%d dispatches=%d", status, calls.Load())
+	}
+	release := make(chan struct{})
+	var releaseOnce sync.Once
+	unblock := func() { releaseOnce.Do(func() { close(release) }) }
+	defer unblock()
+	holdNext <- release
+	done := make(chan int, 1)
+	go func() { done <- callTool(concurrencyKey, firstTool.Alias, "shared-concurrency-held") }()
+	select {
+	case <-entered:
+	case <-time.After(30 * time.Second):
+		t.Fatal("concurrent MCP call did not reach upstream")
+	}
+	if status := callTool(concurrencyKey, secondTool.Alias, "shared-concurrency-other-server"); status != http.StatusTooManyRequests || calls.Load() != 2 {
+		t.Fatalf("key concurrency did not span MCP servers: status=%d dispatches=%d", status, calls.Load())
+	}
+	if status := callInference(concurrencyKey); status != http.StatusTooManyRequests || vendor.chatCalls.Load() != vendorCalls+1 {
+		t.Fatalf("MCP did not share key concurrency with inference: status=%d dispatches=%d", status, vendor.chatCalls.Load())
+	}
+	unblock()
+	if status := <-done; status != http.StatusOK {
+		t.Fatalf("held MCP call failed: %d", status)
+	}
+	if status := callTool(concurrencyKey, secondTool.Alias, "shared-concurrency-released"); status != http.StatusOK {
+		t.Fatalf("released key concurrency was not available: %d", status)
+	}
+	if status := callInference(concurrencyKey); status != http.StatusOK {
+		t.Fatalf("released key concurrency was not available to inference: %d", status)
 	}
 }

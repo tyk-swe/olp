@@ -577,21 +577,34 @@ To approve an agent, set `agent_principal` on its workload mapping and provide a
 exact `/sub` match together with an exact `/client_id`, `/azp` or `/appid` match.
 The principal is bound to the issuer, subject and approved client claims.
 
-An agent and an API key in the same project can request a delegated inference
-credential with `POST /v1/delegations`. The `Authorization` header contains the
-agent's workload JWT and `X-OLP-Delegating-Key` contains the API key. The key must
-have the `delegate` and `inference` scopes. The JSON body supplies `scopes` as
-`["inference"]`, `allowed_routes` as a nonempty list, and optionally
-`ttl_seconds`. The default lifetime is five minutes and the maximum is fifteen
-minutes, shortened if either principal expires sooner.
+An agent and an API key in the same project can request a delegated credential
+with `POST /v1/delegations`. The `Authorization` header contains the agent's
+workload JWT and `X-OLP-Delegating-Key` contains the API key. The key needs the
+`delegate` scope and both principals need each requested `inference` or `tools`
+scope. The JSON body supplies `scopes` and a nonempty `allowed_routes` list for
+inference, a nonempty `allowed_toolsets` list for tools, or both lists when both
+scopes are requested. Toolsets use their published UUIDs. The optional
+`ttl_seconds` defaults to five minutes and cannot exceed fifteen minutes; the
+credential also expires when either principal expires.
 
-The response contains a token and `expires_at`. For one inference request, send
-the token as the bearer credential and the current agent workload JWT in
-`X-OLP-Agent-Identity`. Each credential works once and cannot be used to delegate
-again. The requested routes must remain authorized by both principals, and
-revoking either principal stops use. The delegating key remains the accounting
-owner while each attempt records the agent and a stable key-agent digest. Grant
-records contain credential digests and bounds, not the JWT, key or raw claims.
+A project member with change access can instead approve an agent and key in the
+console or through `POST /api/v1/delegation-consents` after recent identity
+verification. The returned one-use consent can be exchanged at
+`POST /v1/delegations` in `X-OLP-Delegation-Consent` for no more than its
+approved scopes, routes and toolsets. `GET /api/v1/delegation-options` lists
+eligible agents and their currently shared resources for a key.
+
+The delegation response contains a token and `expires_at`. Send the token as the
+bearer credential and the current agent workload JWT in `X-OLP-Agent-Identity`.
+One token authorizes one inference request, one JSON tool call, or one MCP
+session; a session reuses the same token and agent identity until expiry.
+Credentials cannot be used to delegate again. Both principals must continue to
+authorize the resources, and revoking either principal ends delegation. Caller,
+agent and applicable member and pair budgets apply together. Renewed credentials
+retain pair spend. The delegating key remains the accounting owner while each
+attempt records the agent and a stable pair digest, along with the member for
+member-consented calls. Grant records contain
+credential digests and bounds, not the JWT, key or raw claims.
 
 ## Organizations
 
