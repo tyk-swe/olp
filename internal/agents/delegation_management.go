@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/attribution"
@@ -99,6 +100,13 @@ func (s *Server) listDelegations(r *http.Request, p access.Principal) (access.Re
 	if projectErr != nil {
 		return access.Reply{}, projectErr
 	}
+	delegation := r.URL.Query().Get("delegation_id")
+	if delegation != "" {
+		id, err := uuid.Parse(delegation)
+		if err != nil || id == uuid.Nil || id.String() != delegation {
+			return access.Reply{}, access.Invalid("delegation_id", "Use a canonical delegation UUID.")
+		}
+	}
 	rows, queryErr := s.Access.Pool.Query(r.Context(), `SELECT d.id::text AS id,d.project_id::text AS project_id,d.api_key_id::text AS api_key_id,
  d.agent_id::text AS agent_id,d.consenting_user_id::text AS member_id,(d.consent_digest IS NOT NULL) AS consent_pending,
  d.expires_at,d.consumed_at,d.revoked_at,k.revoked_at AS api_key_revoked_at,a.revoked_at AS agent_revoked_at,
@@ -106,7 +114,8 @@ func (s *Server) listDelegations(r *http.Request, p access.Principal) (access.Re
  FROM olp.agent_delegations d JOIN olp.api_keys k ON k.id=d.api_key_id JOIN olp.api_keys a ON a.id=d.agent_id
  LEFT JOIN olp.users u ON u.id=d.consenting_user_id LEFT JOIN olp.effective_project_members m ON m.user_id=u.id AND m.project_id=d.project_id
  WHERE d.id<$1 AND ($2 OR d.project_id=ANY($3::uuid[])) AND ($4='' OR d.project_id=NULLIF($4,'')::uuid)
- ORDER BY d.id DESC LIMIT $5`, page.Before, p.AllProjects, p.ProjectIDs(), project, page.Limit+1)
+ AND ($6='' OR d.id=NULLIF($6,'')::uuid)
+ ORDER BY d.id DESC LIMIT $5`, page.Before, p.AllProjects, p.ProjectIDs(), project, page.Limit+1, delegation)
 	if queryErr != nil {
 		return access.Reply{}, queryErr
 	}

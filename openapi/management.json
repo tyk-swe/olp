@@ -68881,6 +68881,14 @@
               "type": "string",
               "format": "uuid"
             }
+          },
+          {
+            "name": "delegation_id",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
           }
         ],
         "responses": {

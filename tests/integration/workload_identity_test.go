@@ -1518,6 +1518,18 @@ func TestWorkloadAgentDelegatesKeyForTools(t *testing.T) {
 		t.Fatalf("expected the delegated pair: %v", delegations)
 	}
 	delegation := mcpExecItem(t, items, 0, delegations)
+	delegationID := mcpExecString(t, delegation, "id")
+	delegationPath := "/api/v1/agent-delegations?project_id=" + project + "&delegation_id=" + delegationID
+	filteredDelegations := f.h.want(f.owner, http.MethodGet, delegationPath, nil, nil, http.StatusOK)
+	filteredItems := mcpExecItems(t, filteredDelegations, "items")
+	if len(filteredItems) != 1 || mcpExecString(t, mcpExecItem(t, filteredItems, 0, filteredDelegations), "id") != delegationID {
+		t.Fatalf("delegation filter did not return the requested record: %v", filteredDelegations)
+	}
+	emptyDelegations := f.h.want(f.owner, http.MethodGet, "/api/v1/agent-delegations?project_id="+project+"&delegation_id="+acctID(t), nil, nil, http.StatusOK)
+	if len(mcpExecItems(t, emptyDelegations, "items")) != 0 {
+		t.Fatalf("delegation filter returned an unrelated record: %v", emptyDelegations)
+	}
+	f.h.want(f.owner, http.MethodGet, "/api/v1/agent-delegations?delegation_id=invalid", nil, nil, http.StatusUnprocessableEntity)
 	budget := mcpExecObject(t, delegation, "budget")
 	if delegation["api_key_id"] != delegating["id"] || delegation["agent_id"] != agentID || delegation["revoked_at"] != nil || mcpExecObject(t, budget, "daily")["accrued"] != pairAccrued || mcpExecObject(t, delegation, "budget_policy")["daily_cost_limit"] != "1000" {
 		t.Fatalf("delegation view did not report principals, spend and budget: %v", delegation)
@@ -1536,13 +1548,16 @@ func TestWorkloadAgentDelegatesKeyForTools(t *testing.T) {
 	addMember(f.h, f.owner, otherProject, viewerID, "viewer")
 	assignedViewer := login(f.h, "delegation-viewer@example.com")
 	f.h.want(assignedViewer, http.MethodGet, "/api/v1/agent-delegations?project_id="+project, nil, nil, http.StatusNotFound)
+	f.h.want(assignedViewer, http.MethodGet, delegationPath, nil, nil, http.StatusNotFound)
 	if filtered := f.h.want(assignedViewer, http.MethodGet, "/api/v1/agent-delegations", nil, nil, http.StatusOK); len(mcpExecItems(t, filtered, "items")) != 0 {
 		t.Fatalf("project viewer could see another project's delegations: %v", filtered)
 	}
 	addMember(f.h, f.owner, project, viewerID, "viewer")
 	f.h.want(assignedViewer, http.MethodGet, "/api/v1/agent-delegations?project_id="+project, nil, nil, http.StatusOK)
+	f.h.want(assignedViewer, http.MethodGet, delegationPath, nil, nil, http.StatusOK)
 	f.h.want(f.owner, http.MethodDelete, "/api/v1/projects/"+project+"/members/"+viewerID, nil, projectEtag(f.h, f.owner, project), http.StatusNoContent)
 	f.h.want(assignedViewer, http.MethodGet, "/api/v1/agent-delegations?project_id="+project, nil, nil, http.StatusNotFound)
+	f.h.want(assignedViewer, http.MethodGet, delegationPath, nil, nil, http.StatusNotFound)
 	f.h.refresh()
 	callerReport := f.h.want(f.owner, http.MethodGet, "/api/v1/api-keys/"+delegating["id"].(string), nil, nil, http.StatusOK)
 	agentReport := f.h.want(f.owner, http.MethodGet, "/api/v1/api-keys/"+agentID, nil, nil, http.StatusOK)

@@ -19583,6 +19583,12 @@
         "in": "query",
         "required": false,
         "type": "string"
+      },
+      {
+        "name": "delegation_id",
+        "in": "query",
+        "required": false,
+        "type": "string"
       }
     ],
     "response_headers": {
@@ -19605,6 +19611,10 @@
               "type": "integer"
             },
             "project_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "delegation_id": {
               "type": "string",
               "format": "uuid"
             }

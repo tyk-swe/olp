@@ -12,8 +12,8 @@ export const agentKeys = {
   tasks: (project: string, cursor?: string) =>
     ['a2a-tasks', project, cursor ?? ''] as const,
   task: (taskID: string) => ['a2a-task', taskID] as const,
-  delegations: (project: string, cursor?: string) =>
-    ['agent-delegations', project, cursor ?? ''] as const,
+  delegations: (project: string, cursor?: string, delegationID?: string) =>
+    ['agent-delegations', project, cursor ?? '', delegationID ?? ''] as const,
   toolCalls: (project: string, key: string, cursor?: string) =>
     ['mcp-tool-calls', project, key, cursor ?? ''] as const
 };

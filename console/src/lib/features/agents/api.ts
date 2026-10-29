@@ -145,10 +145,21 @@ export const getTask = async (taskID: string) =>
     })
   );
 
-export const listDelegations = async (project?: string, cursor?: string) =>
+export const listDelegations = async (
+  project?: string,
+  cursor?: string,
+  delegationID?: string
+) =>
   unwrapPage(
     await apiClient.GET('/api/v1/agent-delegations', {
-      params: { query: { project_id: project || undefined, cursor, limit: 50 } }
+      params: {
+        query: {
+          project_id: project || undefined,
+          delegation_id: delegationID || undefined,
+          cursor,
+          limit: 50
+        }
+      }
     })
   );
 

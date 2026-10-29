@@ -1,14 +1,24 @@
 <script lang="ts">
   import { createQuery } from '@tanstack/svelte-query';
   import { writable } from 'svelte/store';
+  import { page } from '$app/state';
   import { errorMessage } from '$lib/api/http';
   import { listProjectMemberships } from '$lib/features/access/projects/api';
   import { projectKeys } from '$lib/features/access/projects/projectKeys';
   import { listDelegations } from './api';
   import { agentKeys } from './agentKeys';
 
-  const filters = writable<{ project: string; cursor?: string }>({
-    project: ''
+  const initialProject = page.url?.searchParams.get('project_id') ?? '';
+  const initialDelegationID = page.url?.searchParams.get('delegation_id') ?? '';
+  let project = $state(initialProject);
+  let delegationID = $state(initialDelegationID);
+  const filters = writable<{
+    project: string;
+    delegationID: string;
+    cursor?: string;
+  }>({
+    project: initialProject,
+    delegationID: initialDelegationID
   });
   const projects = createQuery(() => ({
     queryKey: projectKeys.memberships,
@@ -18,8 +28,13 @@
     retry: false
   }));
   const delegations = createQuery(() => ({
-    queryKey: agentKeys.delegations($filters.project, $filters.cursor),
-    queryFn: () => listDelegations($filters.project, $filters.cursor),
+    queryKey: agentKeys.delegations(
+      $filters.project,
+      $filters.cursor,
+      $filters.delegationID
+    ),
+    queryFn: () =>
+      listDelegations($filters.project, $filters.cursor, $filters.delegationID),
     staleTime: 0,
     gcTime: 0,
     retry: false
@@ -35,19 +50,21 @@
 <form
   onsubmit={(event) => {
     event.preventDefault();
-    const project = new FormData(event.currentTarget).get('project');
-    filters.set({ project: typeof project === 'string' ? project : '' });
+    filters.set({ project, delegationID: delegationID.trim() });
   }}
 >
   <label
-    >Project <select name="project"
+    >Project <select name="project" class="form-field" bind:value={project}
       ><option value="">All authorized projects</option
       >{#each !projects.isFetching && !projects.error ? (projects.data ?? []) : [] as value (value.id)}<option
           value={value.id}>{value.name}</option
         >{/each}</select
     ></label
   >
-  <button type="submit">Filter</button>
+  <label
+    >Delegation ID <input class="form-field" bind:value={delegationID} /></label
+  >
+  <button class="button button-secondary" type="submit">Filter</button>
 </form>
 {#if projects.error}<p role="alert">{errorMessage(projects.error)}</p>{/if}
 {#if delegations.error}<p role="alert">{errorMessage(delegations.error)}</p>
@@ -58,13 +75,15 @@
     <table>
       <thead
         ><tr
-          ><th>Project</th><th>Delegating principal</th><th>Agent principal</th
+          ><th>Delegation</th><th>Project</th><th>Delegating principal</th><th
+            >Agent principal</th
           ><th>State</th><th>Pair spend / limit</th><th>Expires</th></tr
         ></thead
       >
       <tbody
         >{#each delegations.data.items as delegation (delegation.id)}
           <tr>
+            <td><code>{delegation.id}</code></td>
             <td
               >{projects.data?.find(
                 (project) => project.id === delegation.project_id

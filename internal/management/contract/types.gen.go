@@ -15968,8 +15968,9 @@ type ListAgentDelegationsParams struct {
 	Cursor *string `form:"cursor,omitempty" json:"cursor,omitempty"`
 
 	// Limit Page size, from 1 to 200. Defaults to 50.
-	Limit     *int32              `form:"limit,omitempty" json:"limit,omitempty"`
-	ProjectId *openapi_types.UUID `form:"project_id,omitempty" json:"project_id,omitempty"`
+	Limit        *int32              `form:"limit,omitempty" json:"limit,omitempty"`
+	ProjectId    *openapi_types.UUID `form:"project_id,omitempty" json:"project_id,omitempty"`
+	DelegationId *openapi_types.UUID `form:"delegation_id,omitempty" json:"delegation_id,omitempty"`
 }
 
 // ListAgentRunsParams defines parameters for ListAgentRuns.
