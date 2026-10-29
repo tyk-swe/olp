@@ -11,9 +11,11 @@ import (
 )
 
 type WorkflowStore struct {
-	Pool   *pgxpool.Pool
-	Auth   *secrets.AuthKey
-	Debits *limits.DebitStore
+	Pool         *pgxpool.Pool
+	Auth         *secrets.AuthKey
+	Debits       *limits.DebitStore
+	Keys         *secrets.KeyRing
+	Installation string
 }
 
 func (s *WorkflowStore) Start(ctx context.Context, authority access.Authority, routeID, revisionID string) (string, error) {

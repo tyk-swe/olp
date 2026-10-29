@@ -2,11 +2,14 @@ package usage
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"errors"
 	"strings"
 	"testing"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/tyk-swe/olp/internal/limits"
 )
@@ -31,6 +34,80 @@ func TestDebitDispatchIDRequiresConsistentReferences(t *testing.T) {
 	}}
 	if id, present := debitDispatchID(mixed); !present || id != "" {
 		t.Fatalf("mixed dispatch references accepted with id %q", id)
+	}
+}
+
+type workflowReceiptRow struct{ digest [sha256.Size]byte }
+
+func (r workflowReceiptRow) Scan(destinations ...any) error {
+	if len(destinations) != 1 {
+		return errors.New("unexpected receipt columns")
+	}
+	switch destinations[0].(type) {
+	case *string:
+		return pgx.ErrNoRows
+	case *[]byte:
+		return pgtype.NewMap().Scan(pgtype.ByteaOID, pgtype.BinaryFormatCode, r.digest[:], destinations[0])
+	default:
+		return errors.New("unexpected receipt column type")
+	}
+}
+
+type unsettledWorkflowRow struct{}
+
+func (unsettledWorkflowRow) Scan(destinations ...any) error {
+	if len(destinations) != 1 {
+		return errors.New("unexpected workflow columns")
+	}
+	switch destinations[0].(type) {
+	case *string:
+		return pgtype.NewMap().Scan(pgtype.TextOID, pgtype.TextFormatCode, []byte("claimed"), destinations[0])
+	case *bool:
+		return pgtype.NewMap().Scan(pgtype.BoolOID, pgtype.TextFormatCode, []byte("false"), destinations[0])
+	default:
+		return errors.New("unexpected workflow column type")
+	}
+}
+
+func workflowTerminalFixture(t *testing.T) (*Event, []byte) {
+	t.Helper()
+	initial := metadataEvent()
+	raw, encodeErr := Encode(initial)
+	if encodeErr != nil {
+		t.Fatal(encodeErr)
+	}
+	firstID := initial.Attempts[0].ID
+	finalID := initial.Attempts[1].ID
+	firstNeedle := `"id":"` + firstID + `",`
+	finalNeedle := `"id":"` + finalID + `",`
+	firstRef := `"execution":{"dispatch_id":"` + firstID + `","run_id":"` + initial.EventID + `","step_id":"` + uuid.NewString() + `"},` + firstNeedle
+	finalRef := `"execution":{"dispatch_id":"` + finalID + `","run_id":"` + initial.EventID + `","step_id":"` + uuid.NewString() + `"},` + finalNeedle
+	payload := []byte(strings.NewReplacer(firstNeedle, firstRef, finalNeedle, finalRef).Replace(string(raw)))
+	event, decodeErr := Decode(payload)
+	if decodeErr != nil {
+		t.Fatal(decodeErr)
+	}
+	return event, payload
+}
+
+func TestPersistWorkflowReceiptIsIdempotentAndRejectsConflicts(t *testing.T) {
+	event, payload := workflowTerminalFixture(t)
+	replayTx := cardRevisionTx{row: workflowReceiptRow{digest: sha256.Sum256(payload)}}
+	result, replayErr := PersistEventTx(t.Context(), replayTx, event, payload)
+	if replayErr != nil || result.Outcome != PersistOutcomeDuplicate {
+		t.Fatalf("workflow replay was not recognized: outcome %v, error %v", result.Outcome, replayErr)
+	}
+	conflictTx := cardRevisionTx{row: workflowReceiptRow{digest: sha256.Sum256([]byte("different receipt"))}}
+	if _, conflictErr := PersistEventTx(t.Context(), conflictTx, event, payload); !errors.Is(conflictErr, ErrInvalidEvent) {
+		t.Fatalf("conflicting workflow receipt accepted: %v", conflictErr)
+	}
+}
+
+func TestPersistWorkflowRejectsAttemptWithoutSettledDebit(t *testing.T) {
+	event, payload := workflowTerminalFixture(t)
+	ledger := cardRevisionTx{row: unsettledWorkflowRow{}}
+	if _, err := PersistEventTx(t.Context(), ledger, event, payload); !errors.Is(err, limits.ErrDebitConflict) {
+		t.Fatalf("workflow with an unsettled attempt was accepted: %v", err)
 	}
 }
 

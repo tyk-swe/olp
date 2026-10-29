@@ -204,6 +204,21 @@ func (e PromptLabelReferenceLabel) Valid() bool {
 	}
 }
 
+// Defines values for ResponsesMCPApprovalRequestType.
+const (
+	McpApprovalRequest ResponsesMCPApprovalRequestType = "mcp_approval_request"
+)
+
+// Valid indicates whether the value is a known member of the ResponsesMCPApprovalRequestType enum.
+func (e ResponsesMCPApprovalRequestType) Valid() bool {
+	switch e {
+	case McpApprovalRequest:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for ResponsesMCPCallErrorType.
 const (
 	McpToolExecutionError ResponsesMCPCallErrorType = "mcp_tool_execution_error"
@@ -400,6 +415,9 @@ type AnthropicPromptRequest struct {
 	MaxTokens int    `json:"max_tokens"`
 	Model     string `json:"model"`
 
+	// OlpApproval After obtaining a human's approval, resubmit the original transcript and tool arguments. The token expires within five minutes and can be used only once.
+	OlpApproval *WorkflowApprovalSubmission `json:"olp_approval,omitempty"`
+
 	// OlpPrompt Specify exactly one published label or immutable revision ID.
 	OlpPrompt    PublishedPromptReference `json:"olp_prompt"`
 	OlpRunLimits *WorkflowRunLimits       `json:"olp_run_limits,omitempty"`
@@ -411,10 +429,13 @@ type AnthropicPromptRequest struct {
 
 // AnthropicToolWorkflowRequest defines model for AnthropicToolWorkflowRequest.
 type AnthropicToolWorkflowRequest struct {
-	MaxTokens    int                      `json:"max_tokens"`
-	Messages     []map[string]interface{} `json:"messages"`
-	Model        string                   `json:"model"`
-	OlpRunLimits *WorkflowRunLimits       `json:"olp_run_limits,omitempty"`
+	MaxTokens int                      `json:"max_tokens"`
+	Messages  []map[string]interface{} `json:"messages"`
+	Model     string                   `json:"model"`
+
+	// OlpApproval After obtaining a human's approval, resubmit the original transcript and tool arguments. The token expires within five minutes and can be used only once.
+	OlpApproval  *WorkflowApprovalSubmission `json:"olp_approval,omitempty"`
+	OlpRunLimits *WorkflowRunLimits          `json:"olp_run_limits,omitempty"`
 
 	// OlpToolsets Select a subset of the published toolsets allowed by the route. An empty array selects no toolsets.
 	OlpToolsets          *ChatToolsetSelection  `json:"olp_toolsets,omitempty"`
@@ -424,6 +445,9 @@ type AnthropicToolWorkflowRequest struct {
 // ChatPromptRequest defines model for ChatPromptRequest.
 type ChatPromptRequest struct {
 	Model string `json:"model"`
+
+	// OlpApproval After obtaining a human's approval, resubmit the original transcript and tool arguments. The token expires within five minutes and can be used only once.
+	OlpApproval *WorkflowApprovalSubmission `json:"olp_approval,omitempty"`
 
 	// OlpPrompt Specify exactly one published label or immutable revision ID.
 	OlpPrompt    PublishedPromptReference `json:"olp_prompt"`
@@ -436,9 +460,12 @@ type ChatPromptRequest struct {
 
 // ChatToolWorkflowRequest defines model for ChatToolWorkflowRequest.
 type ChatToolWorkflowRequest struct {
-	Messages     []map[string]interface{} `json:"messages"`
-	Model        string                   `json:"model"`
-	OlpRunLimits *WorkflowRunLimits       `json:"olp_run_limits,omitempty"`
+	Messages []map[string]interface{} `json:"messages"`
+	Model    string                   `json:"model"`
+
+	// OlpApproval After obtaining a human's approval, resubmit the original transcript and tool arguments. The token expires within five minutes and can be used only once.
+	OlpApproval  *WorkflowApprovalSubmission `json:"olp_approval,omitempty"`
+	OlpRunLimits *WorkflowRunLimits          `json:"olp_run_limits,omitempty"`
 
 	// OlpToolsets Select a subset of the published toolsets allowed by the route. An empty array selects no toolsets.
 	OlpToolsets          *ChatToolsetSelection  `json:"olp_toolsets,omitempty"`
@@ -489,6 +516,9 @@ type GeminiInferenceError struct {
 
 // GeminiPromptRequest defines model for GeminiPromptRequest.
 type GeminiPromptRequest struct {
+	// OlpApproval After obtaining a human's approval, resubmit the original transcript and tool arguments. The token expires within five minutes and can be used only once.
+	OlpApproval *WorkflowApprovalSubmission `json:"olp_approval,omitempty"`
+
 	// OlpPrompt Specify exactly one published label or immutable revision ID.
 	OlpPrompt    PublishedPromptReference `json:"olp_prompt"`
 	OlpRunLimits *WorkflowRunLimits       `json:"olp_run_limits,omitempty"`
@@ -500,8 +530,11 @@ type GeminiPromptRequest struct {
 
 // GeminiToolWorkflowRequest defines model for GeminiToolWorkflowRequest.
 type GeminiToolWorkflowRequest struct {
-	Contents     []map[string]interface{} `json:"contents"`
-	OlpRunLimits *WorkflowRunLimits       `json:"olp_run_limits,omitempty"`
+	Contents []map[string]interface{} `json:"contents"`
+
+	// OlpApproval After obtaining a human's approval, resubmit the original transcript and tool arguments. The token expires within five minutes and can be used only once.
+	OlpApproval  *WorkflowApprovalSubmission `json:"olp_approval,omitempty"`
+	OlpRunLimits *WorkflowRunLimits          `json:"olp_run_limits,omitempty"`
 
 	// OlpToolsets Select a subset of the published toolsets allowed by the route. An empty array selects no toolsets.
 	OlpToolsets          *ChatToolsetSelection  `json:"olp_toolsets,omitempty"`
@@ -568,6 +601,18 @@ type PromptRevisionReference struct {
 type PublishedPromptReference struct {
 	union json.RawMessage
 }
+
+// ResponsesMCPApprovalRequest defines model for ResponsesMCPApprovalRequest.
+type ResponsesMCPApprovalRequest struct {
+	Arguments   string                          `json:"arguments"`
+	Id          string                          `json:"id"`
+	Name        string                          `json:"name"`
+	ServerLabel string                          `json:"server_label"`
+	Type        ResponsesMCPApprovalRequestType `json:"type"`
+}
+
+// ResponsesMCPApprovalRequestType defines model for ResponsesMCPApprovalRequest.Type.
+type ResponsesMCPApprovalRequestType string
 
 // ResponsesMCPCall defines model for ResponsesMCPCall.
 type ResponsesMCPCall struct {
@@ -641,9 +686,12 @@ type ResponsesPublishedPromptReference struct {
 
 // ResponsesToolWorkflowRequest defines model for ResponsesToolWorkflowRequest.
 type ResponsesToolWorkflowRequest struct {
-	Input        ResponsesToolWorkflowRequest_Input `json:"input"`
-	Model        string                             `json:"model"`
-	OlpRunLimits *WorkflowRunLimits                 `json:"olp_run_limits,omitempty"`
+	Input ResponsesToolWorkflowRequest_Input `json:"input"`
+	Model string                             `json:"model"`
+
+	// OlpApproval After obtaining a human's approval, resubmit the original transcript and tool arguments. The token expires within five minutes and can be used only once.
+	OlpApproval  *WorkflowApprovalSubmission `json:"olp_approval,omitempty"`
+	OlpRunLimits *WorkflowRunLimits          `json:"olp_run_limits,omitempty"`
 
 	// OlpToolsets Select a subset of the published toolsets allowed by the route. An empty array selects no toolsets.
 	OlpToolsets          *ChatToolsetSelection  `json:"olp_toolsets,omitempty"`
@@ -667,12 +715,22 @@ type ResponsesWorkflowResponse struct {
 	AdditionalProperties map[string]interface{}                   `json:"-"`
 }
 
-// ResponsesWorkflowResponseOutput2 defines model for ResponsesWorkflowResponse.Output.2.
-type ResponsesWorkflowResponseOutput2 map[string]interface{}
+// ResponsesWorkflowResponseOutput3 defines model for ResponsesWorkflowResponse.Output.3.
+type ResponsesWorkflowResponseOutput3 map[string]interface{}
 
 // ResponsesWorkflowResponse_Output_Item defines model for ResponsesWorkflowResponse.output.Item.
 type ResponsesWorkflowResponse_Output_Item struct {
 	union json.RawMessage
+}
+
+// WorkflowApprovalSubmission After obtaining a human's approval, resubmit the original transcript and tool arguments. The token expires within five minutes and can be used only once.
+type WorkflowApprovalSubmission struct {
+	// Approved The client must explicitly set this to true after obtaining human approval.
+	Approved bool `json:"approved"`
+
+	// Arguments The original JSON arguments indexed by the paused call ID.
+	Arguments         map[string]map[string]interface{} `json:"arguments"`
+	ContinuationToken string                            `json:"continuation_token"`
 }
 
 // WorkflowRunLimits defines model for WorkflowRunLimits.
@@ -818,6 +876,14 @@ func (a *AnthropicPromptRequest) UnmarshalJSON(b []byte) error {
 		delete(object, "model")
 	}
 
+	if raw, found := object["olp_approval"]; found {
+		err = json.Unmarshal(raw, &a.OlpApproval)
+		if err != nil {
+			return fmt.Errorf("error reading 'olp_approval': %w", err)
+		}
+		delete(object, "olp_approval")
+	}
+
 	if raw, found := object["olp_prompt"]; found {
 		err = json.Unmarshal(raw, &a.OlpPrompt)
 		if err != nil {
@@ -869,6 +935,13 @@ func (a AnthropicPromptRequest) MarshalJSON() ([]byte, error) {
 	object["model"], err = json.Marshal(a.Model)
 	if err != nil {
 		return nil, fmt.Errorf("error marshaling 'model': %w", err)
+	}
+
+	if a.OlpApproval != nil {
+		object["olp_approval"], err = json.Marshal(a.OlpApproval)
+		if err != nil {
+			return nil, fmt.Errorf("error marshaling 'olp_approval': %w", err)
+		}
 	}
 
 	object["olp_prompt"], err = json.Marshal(a.OlpPrompt)
@@ -948,6 +1021,14 @@ func (a *AnthropicToolWorkflowRequest) UnmarshalJSON(b []byte) error {
 		delete(object, "model")
 	}
 
+	if raw, found := object["olp_approval"]; found {
+		err = json.Unmarshal(raw, &a.OlpApproval)
+		if err != nil {
+			return fmt.Errorf("error reading 'olp_approval': %w", err)
+		}
+		delete(object, "olp_approval")
+	}
+
 	if raw, found := object["olp_run_limits"]; found {
 		err = json.Unmarshal(raw, &a.OlpRunLimits)
 		if err != nil {
@@ -998,6 +1079,13 @@ func (a AnthropicToolWorkflowRequest) MarshalJSON() ([]byte, error) {
 	object["model"], err = json.Marshal(a.Model)
 	if err != nil {
 		return nil, fmt.Errorf("error marshaling 'model': %w", err)
+	}
+
+	if a.OlpApproval != nil {
+		object["olp_approval"], err = json.Marshal(a.OlpApproval)
+		if err != nil {
+			return nil, fmt.Errorf("error marshaling 'olp_approval': %w", err)
+		}
 	}
 
 	if a.OlpRunLimits != nil {
@@ -1056,6 +1144,14 @@ func (a *ChatPromptRequest) UnmarshalJSON(b []byte) error {
 		delete(object, "model")
 	}
 
+	if raw, found := object["olp_approval"]; found {
+		err = json.Unmarshal(raw, &a.OlpApproval)
+		if err != nil {
+			return fmt.Errorf("error reading 'olp_approval': %w", err)
+		}
+		delete(object, "olp_approval")
+	}
+
 	if raw, found := object["olp_prompt"]; found {
 		err = json.Unmarshal(raw, &a.OlpPrompt)
 		if err != nil {
@@ -1102,6 +1198,13 @@ func (a ChatPromptRequest) MarshalJSON() ([]byte, error) {
 	object["model"], err = json.Marshal(a.Model)
 	if err != nil {
 		return nil, fmt.Errorf("error marshaling 'model': %w", err)
+	}
+
+	if a.OlpApproval != nil {
+		object["olp_approval"], err = json.Marshal(a.OlpApproval)
+		if err != nil {
+			return nil, fmt.Errorf("error marshaling 'olp_approval': %w", err)
+		}
 	}
 
 	object["olp_prompt"], err = json.Marshal(a.OlpPrompt)
@@ -1173,6 +1276,14 @@ func (a *ChatToolWorkflowRequest) UnmarshalJSON(b []byte) error {
 		delete(object, "model")
 	}
 
+	if raw, found := object["olp_approval"]; found {
+		err = json.Unmarshal(raw, &a.OlpApproval)
+		if err != nil {
+			return fmt.Errorf("error reading 'olp_approval': %w", err)
+		}
+		delete(object, "olp_approval")
+	}
+
 	if raw, found := object["olp_run_limits"]; found {
 		err = json.Unmarshal(raw, &a.OlpRunLimits)
 		if err != nil {
@@ -1218,6 +1329,13 @@ func (a ChatToolWorkflowRequest) MarshalJSON() ([]byte, error) {
 	object["model"], err = json.Marshal(a.Model)
 	if err != nil {
 		return nil, fmt.Errorf("error marshaling 'model': %w", err)
+	}
+
+	if a.OlpApproval != nil {
+		object["olp_approval"], err = json.Marshal(a.OlpApproval)
+		if err != nil {
+			return nil, fmt.Errorf("error marshaling 'olp_approval': %w", err)
+		}
 	}
 
 	if a.OlpRunLimits != nil {
@@ -1268,6 +1386,14 @@ func (a *GeminiPromptRequest) UnmarshalJSON(b []byte) error {
 		return err
 	}
 
+	if raw, found := object["olp_approval"]; found {
+		err = json.Unmarshal(raw, &a.OlpApproval)
+		if err != nil {
+			return fmt.Errorf("error reading 'olp_approval': %w", err)
+		}
+		delete(object, "olp_approval")
+	}
+
 	if raw, found := object["olp_prompt"]; found {
 		err = json.Unmarshal(raw, &a.OlpPrompt)
 		if err != nil {
@@ -1310,6 +1436,13 @@ func (a *GeminiPromptRequest) UnmarshalJSON(b []byte) error {
 func (a GeminiPromptRequest) MarshalJSON() ([]byte, error) {
 	var err error
 	object := make(map[string]json.RawMessage)
+
+	if a.OlpApproval != nil {
+		object["olp_approval"], err = json.Marshal(a.OlpApproval)
+		if err != nil {
+			return nil, fmt.Errorf("error marshaling 'olp_approval': %w", err)
+		}
+	}
 
 	object["olp_prompt"], err = json.Marshal(a.OlpPrompt)
 	if err != nil {
@@ -1372,6 +1505,14 @@ func (a *GeminiToolWorkflowRequest) UnmarshalJSON(b []byte) error {
 		delete(object, "contents")
 	}
 
+	if raw, found := object["olp_approval"]; found {
+		err = json.Unmarshal(raw, &a.OlpApproval)
+		if err != nil {
+			return fmt.Errorf("error reading 'olp_approval': %w", err)
+		}
+		delete(object, "olp_approval")
+	}
+
 	if raw, found := object["olp_run_limits"]; found {
 		err = json.Unmarshal(raw, &a.OlpRunLimits)
 		if err != nil {
@@ -1411,6 +1552,13 @@ func (a GeminiToolWorkflowRequest) MarshalJSON() ([]byte, error) {
 		object["contents"], err = json.Marshal(a.Contents)
 		if err != nil {
 			return nil, fmt.Errorf("error marshaling 'contents': %w", err)
+		}
+	}
+
+	if a.OlpApproval != nil {
+		object["olp_approval"], err = json.Marshal(a.OlpApproval)
+		if err != nil {
+			return nil, fmt.Errorf("error marshaling 'olp_approval': %w", err)
 		}
 	}
 
@@ -1717,6 +1865,14 @@ func (a *ResponsesToolWorkflowRequest) UnmarshalJSON(b []byte) error {
 		delete(object, "model")
 	}
 
+	if raw, found := object["olp_approval"]; found {
+		err = json.Unmarshal(raw, &a.OlpApproval)
+		if err != nil {
+			return fmt.Errorf("error reading 'olp_approval': %w", err)
+		}
+		delete(object, "olp_approval")
+	}
+
 	if raw, found := object["olp_run_limits"]; found {
 		err = json.Unmarshal(raw, &a.OlpRunLimits)
 		if err != nil {
@@ -1760,6 +1916,13 @@ func (a ResponsesToolWorkflowRequest) MarshalJSON() ([]byte, error) {
 	object["model"], err = json.Marshal(a.Model)
 	if err != nil {
 		return nil, fmt.Errorf("error marshaling 'model': %w", err)
+	}
+
+	if a.OlpApproval != nil {
+		object["olp_approval"], err = json.Marshal(a.OlpApproval)
+		if err != nil {
+			return nil, fmt.Errorf("error marshaling 'olp_approval': %w", err)
+		}
 	}
 
 	if a.OlpRunLimits != nil {
@@ -2277,22 +2440,48 @@ func (t *ResponsesWorkflowResponse_Output_Item) MergeResponsesMCPCall(v Response
 	return err
 }
 
-// AsResponsesWorkflowResponseOutput2 returns the union data inside the ResponsesWorkflowResponse_Output_Item as a ResponsesWorkflowResponseOutput2
-func (t ResponsesWorkflowResponse_Output_Item) AsResponsesWorkflowResponseOutput2() (ResponsesWorkflowResponseOutput2, error) {
-	var body ResponsesWorkflowResponseOutput2
+// AsResponsesMCPApprovalRequest returns the union data inside the ResponsesWorkflowResponse_Output_Item as a ResponsesMCPApprovalRequest
+func (t ResponsesWorkflowResponse_Output_Item) AsResponsesMCPApprovalRequest() (ResponsesMCPApprovalRequest, error) {
+	var body ResponsesMCPApprovalRequest
 	err := json.Unmarshal(t.union, &body)
 	return body, err
 }
 
-// FromResponsesWorkflowResponseOutput2 overwrites any union data inside the ResponsesWorkflowResponse_Output_Item as the provided ResponsesWorkflowResponseOutput2
-func (t *ResponsesWorkflowResponse_Output_Item) FromResponsesWorkflowResponseOutput2(v ResponsesWorkflowResponseOutput2) error {
+// FromResponsesMCPApprovalRequest overwrites any union data inside the ResponsesWorkflowResponse_Output_Item as the provided ResponsesMCPApprovalRequest
+func (t *ResponsesWorkflowResponse_Output_Item) FromResponsesMCPApprovalRequest(v ResponsesMCPApprovalRequest) error {
 	b, err := json.Marshal(v)
 	t.union = b
 	return err
 }
 
-// MergeResponsesWorkflowResponseOutput2 performs a merge with any union data inside the ResponsesWorkflowResponse_Output_Item, using the provided ResponsesWorkflowResponseOutput2
-func (t *ResponsesWorkflowResponse_Output_Item) MergeResponsesWorkflowResponseOutput2(v ResponsesWorkflowResponseOutput2) error {
+// MergeResponsesMCPApprovalRequest performs a merge with any union data inside the ResponsesWorkflowResponse_Output_Item, using the provided ResponsesMCPApprovalRequest
+func (t *ResponsesWorkflowResponse_Output_Item) MergeResponsesMCPApprovalRequest(v ResponsesMCPApprovalRequest) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsResponsesWorkflowResponseOutput3 returns the union data inside the ResponsesWorkflowResponse_Output_Item as a ResponsesWorkflowResponseOutput3
+func (t ResponsesWorkflowResponse_Output_Item) AsResponsesWorkflowResponseOutput3() (ResponsesWorkflowResponseOutput3, error) {
+	var body ResponsesWorkflowResponseOutput3
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromResponsesWorkflowResponseOutput3 overwrites any union data inside the ResponsesWorkflowResponse_Output_Item as the provided ResponsesWorkflowResponseOutput3
+func (t *ResponsesWorkflowResponse_Output_Item) FromResponsesWorkflowResponseOutput3(v ResponsesWorkflowResponseOutput3) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeResponsesWorkflowResponseOutput3 performs a merge with any union data inside the ResponsesWorkflowResponse_Output_Item, using the provided ResponsesWorkflowResponseOutput3
+func (t *ResponsesWorkflowResponse_Output_Item) MergeResponsesWorkflowResponseOutput3(v ResponsesWorkflowResponseOutput3) error {
 	b, err := json.Marshal(v)
 	if err != nil {
 		return err

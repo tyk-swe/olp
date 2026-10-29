@@ -69,26 +69,32 @@ func modelCostThroughTiers(price *usage.RoutingPrice, discount *usage.RoutingDis
 	return bound, true
 }
 
-func (x *call) workflowToolCost(tool WorkflowTool) (usage.Cost, *Error) {
-	if x.generation.runLimits.MaxRunCost == nil {
-		return usage.Cost{}, nil
-	}
+func (x *call) workflowToolCost(tool WorkflowTool) (usage.Cost, bool, *Error) {
 	if tool.Definition.UnitPrice == nil {
-		return usage.Cost{}, workflowUnboundedCost()
+		if x.generation.runLimits.MaxRunCost == nil {
+			return usage.Cost{}, false, nil
+		}
+		return usage.Cost{}, false, workflowUnboundedCost()
 	}
 	bound, ok := usage.ParseCost(*tool.Definition.UnitPrice)
 	if !ok {
-		return usage.Cost{}, workflowUnboundedCost()
+		if x.generation.runLimits.MaxRunCost == nil {
+			return usage.Cost{}, false, nil
+		}
+		return usage.Cost{}, false, workflowUnboundedCost()
 	}
-	return bound, x.workflowCheckCost(bound)
+	if x.generation.runLimits.MaxRunCost == nil {
+		return bound, true, nil
+	}
+	return bound, true, x.workflowCheckCost(bound)
 }
 
 func (x *call) workflowCheckCost(next usage.Cost) *Error {
 	limit, ok := usage.ParseCost(*x.generation.runLimits.MaxRunCost)
-	if !ok {
+	if !ok || x.workflow.unknownCost {
 		return workflowUnboundedCost()
 	}
-	if x.settledCost().Add(x.workflow.toolCost).Add(next).Cmp(limit) > 0 {
+	if x.workflow.priorCost.Add(x.settledCost()).Add(x.workflow.toolCost).Add(next).Cmp(limit) > 0 {
 		return invalidRequest("run_cost_limit", "The next workflow step exceeds the run cost limit.", nil)
 	}
 	return nil
