@@ -238,6 +238,178 @@ describe('route validation and serialization', () => {
     expect(validateRouteBehavior({ ...route, behavior: undefined })).toBeNull();
   });
 
+  it('enforces the restrictions for publishing a pass-through route', () => {
+    const binding: NonNullable<
+      NonNullable<RouteEditorValues['behavior']>['passthrough']
+    > = {
+      dialect: 'bound-native',
+      methods: ['GET', 'POST'],
+      paths: ['/v1/widgets/*'],
+      query: ['limit'],
+      headers: ['X-Widget-Mode'],
+      acknowledge_opaque_unmetered: true
+    };
+    const behavior = { ...emptyBehavior(), passthrough: binding };
+    const passThrough = {
+      ...route,
+      operations: ['passthrough'],
+      maxAttempts: 1,
+      fidelity: { mode: 'strict' as const },
+      behavior
+    };
+    expect(validateRouteEditor(passThrough)).toBeNull();
+    expect(
+      validateRouteEditor({ ...passThrough, operations: ['generation'] })
+    ).toMatch(/only the passthrough operation/i);
+    expect(
+      validateRouteEditor({ ...passThrough, targets: [target, target] })
+    ).toMatch(/exactly one serving connection/i);
+    expect(
+      validateRouteEditor({
+        ...passThrough,
+        targets: [{ ...target, shadowSampleRate: 0.5 }]
+      })
+    ).toMatch(/serves callers/i);
+    expect(validateRouteEditor({ ...passThrough, maxAttempts: 2 })).toMatch(
+      /exactly one attempt/i
+    );
+    expect(
+      validateRouteEditor({ ...passThrough, fidelity: { mode: 'transformed' } })
+    ).toMatch(/cannot declare translation/i);
+    expect(
+      validateRouteEditor({
+        ...passThrough,
+        contentPolicyRules: [
+          {
+            id: 'secret',
+            phase: 'input',
+            action: 'block',
+            pattern: 'secret',
+            replacement: ''
+          }
+        ]
+      })
+    ).toMatch(/cannot carry a content policy/i);
+    expect(
+      validateRouteEditor({
+        ...passThrough,
+        behavior: {
+          ...behavior,
+          fallbacks: [{ route: 'backup', on: ['exhausted'] }]
+        }
+      })
+    ).toMatch(/cannot use fallback/i);
+    expect(
+      validateRouteEditor({
+        ...passThrough,
+        behavior: {
+          ...behavior,
+          selectors: [{ id: 'large', when: {}, route: 'backup' }]
+        }
+      })
+    ).toMatch(/cannot use fallback/i);
+    expect(
+      validateRouteEditor({
+        ...passThrough,
+        behavior: { ...behavior, passthrough: null }
+      })
+    ).toMatch(/requires a pass-through binding/i);
+  });
+
+  it('accepts bounded route and target limits and rejects values beyond them', () => {
+    const boundary = {
+      ...route,
+      overallTimeoutMs: 3600000,
+      maxAttempts: 32767,
+      targets: [
+        { ...target, priority: 32767, weight: 1000000, timeoutMs: 3600000 }
+      ]
+    };
+    expect(validateRouteEditor(boundary)).toBeNull();
+    expect(validateRouteEditor({ ...boundary, overallTimeoutMs: 1.5 })).toMatch(
+      /overall deadline/i
+    );
+    expect(
+      validateRouteEditor({
+        ...boundary,
+        targets: [{ ...target, priority: 32768 }]
+      })
+    ).toMatch(/priority/i);
+    expect(
+      validateRouteEditor({
+        ...boundary,
+        targets: [{ ...target, weight: 1000001 }]
+      })
+    ).toMatch(/weight/i);
+    expect(
+      validateRouteEditor({
+        ...boundary,
+        targets: [{ ...target, timeoutMs: 0 }]
+      })
+    ).toMatch(/timeout/i);
+    expect(
+      validateRouteBehavior({
+        ...route,
+        behavior: { ...emptyBehavior(), max_body_bytes: 1073741824 }
+      })
+    ).toBeNull();
+    expect(
+      validateRouteBehavior({
+        ...route,
+        behavior: { ...emptyBehavior(), max_body_bytes: 1073741825 }
+      })
+    ).toMatch(/body limit/i);
+    expect(
+      validateRouteBehavior({
+        ...route,
+        behavior: { ...emptyBehavior(), max_body_bytes: 1.5 }
+      })
+    ).toMatch(/body limit/i);
+  });
+
+  it('requires explicit acknowledgement before saving semantic cache settings', () => {
+    const cache = {
+      mode: 'semantic' as const,
+      scope: 'key' as const,
+      ttl_seconds: 300,
+      max_entry_bytes: 1024,
+      streaming: 'replay' as const
+    };
+    const behavior = { ...emptyBehavior(), cache };
+    expect(
+      validateRouteBehavior({
+        ...route,
+        fidelity: { mode: 'strict' },
+        behavior
+      })
+    ).toMatch(/require a transformed route/i);
+    expect(validateRouteBehavior({ ...route, behavior })).toMatch(
+      /embedding route and the unencrypted-vector acknowledgement/i
+    );
+    expect(
+      validateRouteBehavior({
+        ...route,
+        behavior: {
+          ...behavior,
+          cache: { ...cache, embedding_route: 'embeddings' }
+        }
+      })
+    ).toMatch(/unencrypted-vector acknowledgement/i);
+    expect(
+      validateRouteBehavior({
+        ...route,
+        behavior: {
+          ...behavior,
+          cache: {
+            ...cache,
+            embedding_route: 'embeddings',
+            allow_unsealed_vectors: true
+          }
+        }
+      })
+    ).toBeNull();
+  });
+
   it('preserves route policy and target roles in create and edit requests', () => {
     const behavior = {
       ...emptyBehavior(),
