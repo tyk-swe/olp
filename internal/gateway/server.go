@@ -943,6 +943,9 @@ func (s *Server) prepare(ctx context.Context, x *call, authorize func(*routing.R
 	if e := authorize(&route); e != nil {
 		return e
 	}
+	if route.ToolExecution != "gateway" && len(x.generation.approval) > 0 {
+		return permissionError("tool_approval_invalid", "The workflow approval is invalid or expired.")
+	}
 	if route.ToolExecution == "gateway" && x.strict() {
 		return invalidRequest("tool_execution_strict_route", "Gateway tool execution requires a transformed route.", nil)
 	}
