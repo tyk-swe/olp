@@ -219,6 +219,13 @@ func (a *Admission) reserveKey(ctx context.Context, authority access.Authority, 
 // leases for one settlement. Every refusal refunds earlier reservations. The
 // optional route identifies the ingress route for per-key route policy.
 func (a *Admission) reserveKeyCosted(ctx context.Context, authority *access.Authority, surface string, estimate int64, ttl time.Duration, hold costReservation, route ...string) (*limits.Lease, *Error) {
+	if authority.DelegationAgentLimits == nil && keyBoundariesOnly(authority) && authority.BudgetGroupID == nil && !keyHasHardLimits(&authority.Policy) {
+		return nil, nil
+	}
+	return a.reserveKeyWithLimits(ctx, authority, surface, estimate, ttl, hold, route...)
+}
+
+func (a *Admission) reserveKeyWithLimits(ctx context.Context, authority *access.Authority, surface string, estimate int64, ttl time.Duration, hold costReservation, route ...string) (*limits.Lease, *Error) {
 	if authority.DelegationAgentLimits == nil {
 		return a.reserveCallerLimits(ctx, authority, surface, estimate, ttl, hold, route...)
 	}
@@ -250,9 +257,6 @@ func (a *Admission) reserveCallerLimits(ctx context.Context, authority *access.A
 	// spends against it, once per request, so keys without budgets stay free.
 	costChecked := false
 	if keyBoundariesOnly(authority) {
-		if authority.BudgetGroupID == nil && !keyHasHardLimits(&authority.Policy) {
-			return nil, nil
-		}
 		return a.reserveKeyAndGroup(ctx, authority, surface, estimate, ttl, hold, &costChecked)
 	}
 	aggregate, err := a.reserveAggregateBudgets(ctx, authority, ttl, hold, &costChecked)

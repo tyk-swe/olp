@@ -84,6 +84,86 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/responses": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create a response using a published OLP prompt
+         * @description An olpp_ prompt ID selects a project-owned registry publication. Other prompt IDs retain native provider behavior. Registry prompts cannot be combined with explicit input.
+         */
+        post: operations["createResponseWithPrompt"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/anthropic/v1/messages": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create an Anthropic message using a published OLP prompt
+         * @description For transformed routes, the published prompt replaces explicit messages. Other fields use the provider contract.
+         */
+        post: operations["createAnthropicMessageWithPrompt"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/gemini/v1beta/models/{model}:generateContent": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Generate Gemini content using a published OLP prompt
+         * @description For transformed routes, the published prompt replaces explicit contents. Other fields use the provider contract.
+         */
+        post: operations["createGeminiContentWithPrompt"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/gemini/v1beta/models/{model}:streamGenerateContent": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Stream Gemini content using a published OLP prompt
+         * @description For transformed routes, the published prompt replaces explicit contents. Other fields use the provider contract.
+         */
+        post: operations["streamGeminiContentWithPrompt"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -198,6 +278,86 @@ export interface components {
                 code: string;
             };
         };
+        ResponsesPromptLabelReference: {
+            /** @description Project-owned prompt publication ID prefixed with olpp_ */
+            id: string;
+            variables: {
+                [key: string]: string;
+            };
+            /** @enum {string} */
+            label: "production" | "staging";
+        };
+        ResponsesPromptRevisionReference: {
+            /** @description Project-owned prompt publication ID prefixed with olpp_ */
+            id: string;
+            variables: {
+                [key: string]: string;
+            };
+            /**
+             * Format: uuid
+             * @description Exact immutable prompt revision ID
+             */
+            revision_id: string;
+        };
+        /** @description A registry prompt has an olpp_ ID and exactly one label or revision ID. Other prompt IDs retain the provider contract. */
+        ResponsesPublishedPromptReference: components["schemas"]["ResponsesPromptLabelReference"] | components["schemas"]["ResponsesPromptRevisionReference"];
+        /** @description An OLP registry prompt excludes input. Provider-native prompt references retain the provider contract. */
+        ResponsesPromptRequest: components["schemas"]["OLPResponsesPromptRequest"] | components["schemas"]["NativeResponsesPromptRequest"];
+        AnthropicPromptRequest: {
+            model: string;
+            max_tokens: number;
+            olp_prompt: components["schemas"]["PublishedPromptReference"];
+        } & {
+            [key: string]: unknown;
+        };
+        GeminiPromptRequest: {
+            olp_prompt: components["schemas"]["PublishedPromptReference"];
+        } & {
+            [key: string]: unknown;
+        };
+        AnthropicInferenceError: {
+            /** @enum {string} */
+            type: "error";
+            error: {
+                message: string;
+                type: string;
+                param: string | null;
+                code: string;
+            };
+        };
+        GeminiInferenceError: {
+            error: {
+                code: number;
+                message: string;
+                status: string;
+                details: {
+                    "@type": string;
+                    reason: string;
+                    domain: string;
+                    metadata: {
+                        field: string | null;
+                    };
+                }[];
+            };
+        };
+        OLPResponsesPromptRequest: {
+            model: string;
+            prompt: components["schemas"]["ResponsesPublishedPromptReference"];
+        } & {
+            [key: string]: unknown;
+        };
+        /** @description A provider-owned prompt reference. Fields and variables follow the provider contract. */
+        NativeResponsesPromptReference: {
+            id: string;
+        } & {
+            [key: string]: unknown;
+        };
+        NativeResponsesPromptRequest: {
+            model: string;
+            prompt: components["schemas"]["NativeResponsesPromptReference"];
+        } & {
+            [key: string]: unknown;
+        };
     };
     responses: never;
     parameters: never;
@@ -264,6 +424,15 @@ export interface operations {
             };
             /** @description The route is unavailable to the caller */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InferenceError"];
+                };
+            };
+            /** @description The original or rendered request exceeds an input limit */
+            413: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -451,6 +620,384 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["InferenceError"];
+                };
+            };
+        };
+    };
+    createResponseWithPrompt: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description The current workload assertion is required when Authorization contains a one-use delegation token. */
+                "X-OLP-Agent-Identity"?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ResponsesPromptRequest"];
+            };
+        };
+        responses: {
+            /** @description Provider completion response or stream */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                    "text/event-stream": string;
+                };
+            };
+            /** @description The request or prompt reference is invalid */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InferenceError"];
+                };
+            };
+            /** @description The credential, delegation, or agent assertion is invalid, expired, revoked, or already used */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InferenceError"];
+                };
+            };
+            /** @description The caller is not permitted to use the requested resource */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InferenceError"];
+                };
+            };
+            /** @description The route is unavailable to the caller */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InferenceError"];
+                };
+            };
+            /** @description The original or rendered request exceeds an input limit */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InferenceError"];
+                };
+            };
+            /** @description The caller or agent has reached an admission limit */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InferenceError"];
+                };
+            };
+            /** @description The gateway or authority service is unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InferenceError"];
+                };
+            };
+        };
+    };
+    createAnthropicMessageWithPrompt: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description The current workload assertion is required when Authorization contains a one-use delegation token. */
+                "X-OLP-Agent-Identity"?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AnthropicPromptRequest"];
+            };
+        };
+        responses: {
+            /** @description Provider completion response or stream */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                    "text/event-stream": string;
+                };
+            };
+            /** @description The request or prompt reference is invalid */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnthropicInferenceError"];
+                };
+            };
+            /** @description The credential, delegation, or agent assertion is invalid, expired, revoked, or already used */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnthropicInferenceError"];
+                };
+            };
+            /** @description The caller is not permitted to use the requested resource */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnthropicInferenceError"];
+                };
+            };
+            /** @description The route is unavailable to the caller */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnthropicInferenceError"];
+                };
+            };
+            /** @description The original or rendered request exceeds an input limit */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnthropicInferenceError"];
+                };
+            };
+            /** @description The caller or agent has reached an admission limit */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnthropicInferenceError"];
+                };
+            };
+            /** @description The gateway or authority service is unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnthropicInferenceError"];
+                };
+            };
+        };
+    };
+    createGeminiContentWithPrompt: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description The current workload assertion is required when Authorization contains a one-use delegation token. */
+                "X-OLP-Agent-Identity"?: string;
+            };
+            path: {
+                /** @description Published route slug */
+                model: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GeminiPromptRequest"];
+            };
+        };
+        responses: {
+            /** @description Provider completion response or stream */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                    "text/event-stream": string;
+                };
+            };
+            /** @description The request or prompt reference is invalid */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GeminiInferenceError"];
+                };
+            };
+            /** @description The credential, delegation, or agent assertion is invalid, expired, revoked, or already used */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GeminiInferenceError"];
+                };
+            };
+            /** @description The caller is not permitted to use the requested resource */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GeminiInferenceError"];
+                };
+            };
+            /** @description The route is unavailable to the caller */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GeminiInferenceError"];
+                };
+            };
+            /** @description The original or rendered request exceeds an input limit */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GeminiInferenceError"];
+                };
+            };
+            /** @description The caller or agent has reached an admission limit */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GeminiInferenceError"];
+                };
+            };
+            /** @description The gateway or authority service is unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GeminiInferenceError"];
+                };
+            };
+        };
+    };
+    streamGeminiContentWithPrompt: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description The current workload assertion is required when Authorization contains a one-use delegation token. */
+                "X-OLP-Agent-Identity"?: string;
+            };
+            path: {
+                /** @description Published route slug */
+                model: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GeminiPromptRequest"];
+            };
+        };
+        responses: {
+            /** @description Provider completion response or stream */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                    "text/event-stream": string;
+                };
+            };
+            /** @description The request or prompt reference is invalid */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GeminiInferenceError"];
+                };
+            };
+            /** @description The credential, delegation, or agent assertion is invalid, expired, revoked, or already used */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GeminiInferenceError"];
+                };
+            };
+            /** @description The caller is not permitted to use the requested resource */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GeminiInferenceError"];
+                };
+            };
+            /** @description The route is unavailable to the caller */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GeminiInferenceError"];
+                };
+            };
+            /** @description The original or rendered request exceeds an input limit */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GeminiInferenceError"];
+                };
+            };
+            /** @description The caller or agent has reached an admission limit */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GeminiInferenceError"];
+                };
+            };
+            /** @description The gateway or authority service is unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GeminiInferenceError"];
                 };
             };
         };

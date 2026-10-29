@@ -83,6 +83,16 @@
               }
             }
           },
+          "413": {
+            "description": "The original or rendered request exceeds an input limit",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InferenceError"
+                }
+              }
+            }
+          },
           "429": {
             "description": "The caller or agent has reached an admission limit",
             "content": {
@@ -312,6 +322,508 @@
             }
           }
         }
+      }
+    },
+    "/v1/responses": {
+      "post": {
+        "operationId": "createResponseWithPrompt",
+        "summary": "Create a response using a published OLP prompt",
+        "description": "An olpp_ prompt ID selects a project-owned registry publication. Other prompt IDs retain native provider behavior. Registry prompts cannot be combined with explicit input.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResponsesPromptRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Provider completion response or stream",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              },
+              "text/event-stream": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request or prompt reference is invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InferenceError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The credential, delegation, or agent assertion is invalid, expired, revoked, or already used",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InferenceError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The caller is not permitted to use the requested resource",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InferenceError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The route is unavailable to the caller",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InferenceError"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "The original or rendered request exceeds an input limit",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InferenceError"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "The caller or agent has reached an admission limit",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InferenceError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The gateway or authority service is unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InferenceError"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "X-OLP-Agent-Identity",
+            "in": "header",
+            "required": false,
+            "description": "The current workload assertion is required when Authorization contains a one-use delegation token.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/anthropic/v1/messages": {
+      "post": {
+        "operationId": "createAnthropicMessageWithPrompt",
+        "summary": "Create an Anthropic message using a published OLP prompt",
+        "description": "For transformed routes, the published prompt replaces explicit messages. Other fields use the provider contract.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AnthropicPromptRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Provider completion response or stream",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              },
+              "text/event-stream": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request or prompt reference is invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AnthropicInferenceError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The credential, delegation, or agent assertion is invalid, expired, revoked, or already used",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AnthropicInferenceError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The caller is not permitted to use the requested resource",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AnthropicInferenceError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The route is unavailable to the caller",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AnthropicInferenceError"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "The original or rendered request exceeds an input limit",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AnthropicInferenceError"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "The caller or agent has reached an admission limit",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AnthropicInferenceError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The gateway or authority service is unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AnthropicInferenceError"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "X-OLP-Agent-Identity",
+            "in": "header",
+            "required": false,
+            "description": "The current workload assertion is required when Authorization contains a one-use delegation token.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/gemini/v1beta/models/{model}:generateContent": {
+      "post": {
+        "operationId": "createGeminiContentWithPrompt",
+        "summary": "Generate Gemini content using a published OLP prompt",
+        "description": "For transformed routes, the published prompt replaces explicit contents. Other fields use the provider contract.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GeminiPromptRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Provider completion response or stream",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              },
+              "text/event-stream": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request or prompt reference is invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GeminiInferenceError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The credential, delegation, or agent assertion is invalid, expired, revoked, or already used",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GeminiInferenceError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The caller is not permitted to use the requested resource",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GeminiInferenceError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The route is unavailable to the caller",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GeminiInferenceError"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "The original or rendered request exceeds an input limit",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GeminiInferenceError"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "The caller or agent has reached an admission limit",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GeminiInferenceError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The gateway or authority service is unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GeminiInferenceError"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "model",
+            "in": "path",
+            "required": true,
+            "description": "Published route slug",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-OLP-Agent-Identity",
+            "in": "header",
+            "required": false,
+            "description": "The current workload assertion is required when Authorization contains a one-use delegation token.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/gemini/v1beta/models/{model}:streamGenerateContent": {
+      "post": {
+        "operationId": "streamGeminiContentWithPrompt",
+        "summary": "Stream Gemini content using a published OLP prompt",
+        "description": "For transformed routes, the published prompt replaces explicit contents. Other fields use the provider contract.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GeminiPromptRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Provider completion response or stream",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              },
+              "text/event-stream": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request or prompt reference is invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GeminiInferenceError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The credential, delegation, or agent assertion is invalid, expired, revoked, or already used",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GeminiInferenceError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The caller is not permitted to use the requested resource",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GeminiInferenceError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The route is unavailable to the caller",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GeminiInferenceError"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "The original or rendered request exceeds an input limit",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GeminiInferenceError"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "The caller or agent has reached an admission limit",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GeminiInferenceError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The gateway or authority service is unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GeminiInferenceError"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "model",
+            "in": "path",
+            "required": true,
+            "description": "Published route slug",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-OLP-Agent-Identity",
+            "in": "header",
+            "required": false,
+            "description": "The current workload assertion is required when Authorization contains a one-use delegation token.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
       }
     }
   },
@@ -670,6 +1182,314 @@
             }
           }
         }
+      },
+      "ResponsesPromptLabelReference": {
+        "type": "object",
+        "required": [
+          "id",
+          "label",
+          "variables"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^olpp_[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$",
+            "description": "Project-owned prompt publication ID prefixed with olpp_"
+          },
+          "variables": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "label": {
+            "type": "string",
+            "enum": [
+              "production",
+              "staging"
+            ]
+          }
+        },
+        "additionalProperties": false
+      },
+      "ResponsesPromptRevisionReference": {
+        "type": "object",
+        "required": [
+          "id",
+          "revision_id",
+          "variables"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^olpp_[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$",
+            "description": "Project-owned prompt publication ID prefixed with olpp_"
+          },
+          "variables": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "revision_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Exact immutable prompt revision ID"
+          }
+        },
+        "additionalProperties": false
+      },
+      "ResponsesPublishedPromptReference": {
+        "description": "A registry prompt has an olpp_ ID and exactly one label or revision ID. Other prompt IDs retain the provider contract.",
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/ResponsesPromptLabelReference"
+          },
+          {
+            "$ref": "#/components/schemas/ResponsesPromptRevisionReference"
+          }
+        ]
+      },
+      "ResponsesPromptRequest": {
+        "description": "An OLP registry prompt excludes input. Provider-native prompt references retain the provider contract.",
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/OLPResponsesPromptRequest"
+          },
+          {
+            "$ref": "#/components/schemas/NativeResponsesPromptRequest"
+          }
+        ]
+      },
+      "AnthropicPromptRequest": {
+        "type": "object",
+        "required": [
+          "model",
+          "max_tokens",
+          "olp_prompt"
+        ],
+        "properties": {
+          "model": {
+            "type": "string"
+          },
+          "max_tokens": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "olp_prompt": {
+            "$ref": "#/components/schemas/PublishedPromptReference"
+          }
+        },
+        "additionalProperties": true,
+        "not": {
+          "anyOf": [
+            {
+              "required": [
+                "messages"
+              ]
+            },
+            {
+              "required": [
+                "system"
+              ]
+            }
+          ]
+        }
+      },
+      "GeminiPromptRequest": {
+        "type": "object",
+        "required": [
+          "olp_prompt"
+        ],
+        "properties": {
+          "olp_prompt": {
+            "$ref": "#/components/schemas/PublishedPromptReference"
+          }
+        },
+        "additionalProperties": true,
+        "not": {
+          "anyOf": [
+            {
+              "required": [
+                "contents"
+              ]
+            },
+            {
+              "required": [
+                "systemInstruction"
+              ]
+            },
+            {
+              "required": [
+                "system_instruction"
+              ]
+            }
+          ]
+        }
+      },
+      "AnthropicInferenceError": {
+        "type": "object",
+        "required": [
+          "type",
+          "error"
+        ],
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "error"
+            ]
+          },
+          "error": {
+            "type": "object",
+            "required": [
+              "message",
+              "type",
+              "param",
+              "code"
+            ],
+            "properties": {
+              "message": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string"
+              },
+              "param": {
+                "type": "string",
+                "nullable": true
+              },
+              "code": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      },
+      "GeminiInferenceError": {
+        "type": "object",
+        "required": [
+          "error"
+        ],
+        "properties": {
+          "error": {
+            "type": "object",
+            "required": [
+              "code",
+              "message",
+              "status",
+              "details"
+            ],
+            "properties": {
+              "code": {
+                "type": "integer"
+              },
+              "message": {
+                "type": "string"
+              },
+              "status": {
+                "type": "string"
+              },
+              "details": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "@type",
+                    "reason",
+                    "domain",
+                    "metadata"
+                  ],
+                  "properties": {
+                    "@type": {
+                      "type": "string"
+                    },
+                    "reason": {
+                      "type": "string"
+                    },
+                    "domain": {
+                      "type": "string"
+                    },
+                    "metadata": {
+                      "type": "object",
+                      "required": [
+                        "field"
+                      ],
+                      "properties": {
+                        "field": {
+                          "type": "string",
+                          "nullable": true
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "OLPResponsesPromptRequest": {
+        "type": "object",
+        "required": [
+          "model",
+          "prompt"
+        ],
+        "properties": {
+          "model": {
+            "type": "string"
+          },
+          "prompt": {
+            "$ref": "#/components/schemas/ResponsesPublishedPromptReference"
+          }
+        },
+        "additionalProperties": true,
+        "not": {
+          "anyOf": [
+            {
+              "required": [
+                "input"
+              ]
+            },
+            {
+              "required": [
+                "instructions"
+              ]
+            }
+          ]
+        }
+      },
+      "NativeResponsesPromptReference": {
+        "type": "object",
+        "required": [
+          "id"
+        ],
+        "description": "A provider-owned prompt reference. Fields and variables follow the provider contract.",
+        "properties": {
+          "id": {
+            "type": "string",
+            "not": {
+              "pattern": "^olpp_"
+            }
+          }
+        },
+        "additionalProperties": true
+      },
+      "NativeResponsesPromptRequest": {
+        "type": "object",
+        "required": [
+          "model",
+          "prompt"
+        ],
+        "properties": {
+          "model": {
+            "type": "string"
+          },
+          "prompt": {
+            "$ref": "#/components/schemas/NativeResponsesPromptReference"
+          }
+        },
+        "additionalProperties": true
       }
     }
   }
