@@ -547,9 +547,7 @@ func (r *delegatedSessionRuntime) ReauthenticateDelegation(_ context.Context, to
 }
 
 func TestDelegatedStreamableGETPreservesGrantAndAuthenticatesSession(t *testing.T) {
-	authority := testAuthority([]string{"tools"}, []string{testToolset})
-	authority.DelegationAgentID = testOtherRv
-	authority.DelegationTokenDigest = strings.Repeat("a", 64)
+	authority := testDelegatedAuthority(testKeyID, &access.DelegationAgentLimits{ID: testOtherRv}, strings.Repeat("a", 64))
 	server, _, _, _, underlying := newTestServer(t, authority, "")
 	server.Runtime = &delegatedSessionRuntime{fakeRuntime: underlying}
 	mux := http.NewServeMux()

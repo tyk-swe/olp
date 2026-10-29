@@ -206,9 +206,11 @@ It is not the attempt identifier. The `attempt_id` in responses and the
 gateway management record for one dispatched attempt, while the caller call
 identifier is the retry key the caller picks and reuses. The identifier
 stays bound to the calling key, the pinned toolset revision, the tool and a
-keyed digest of the exact argument bytes for 24 hours, and only that digest
-is stored. Argument binding is byte exact, so the same JSON value written
-with different key order or spacing counts as a different call. Repeating
+keyed digest of the exact argument bytes for 24 hours. Delegated calls also
+bind the agent and its delegation pair, so a renewed credential for the same
+pair can retry the call without sharing another agent's result. Only the
+argument digest is stored. Argument binding is byte exact, so the same JSON
+value written with different key order or spacing counts as a different call. Repeating
 the same call with the same identifier never runs the tool again. A repeat
 returns the retained result while it is still held in gateway memory, and
 after that it answers `result_not_retained` with the original attempt and
@@ -263,10 +265,10 @@ carry the pinned `unit_price`, a `pricing_state` of `priced`, `free` or
 and `per_key_calls_per_minute` and `per_key_max_concurrency` bound each key
 against the server. Both pairs default to 60 calls per minute and 8
 concurrent calls and stay inside installation limits of 60000 calls per
-minute and 1024 concurrent calls. The effective per-key limit is the tighter
-of the server per-key value and the key's own request or concurrency limit,
-so a key limit can only tighten the per-key pair and never loosen it. Calls
-past either limit refuse with `tool_rate_limited` before anything is reserved
+minute and 1024 concurrent calls. The key's own request and concurrency limits
+also apply across all tool servers and inference, together with any applicable
+budget-group and delegated-agent limits. Calls past a limit refuse with
+`tool_rate_limited` before anything is reserved
 or dispatched, a call that never dispatches gives its rate allowance back,
 and only a dispatched call consumes it. Pricing and limits round trip through
 the management API, the console pricing form on the agent publications

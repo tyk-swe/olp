@@ -372,6 +372,11 @@ func testAuthority(scopes []string, toolsets []string) *access.Authority {
 	return &access.Authority{ID: testKeyID, InstallationID: "test-installation", ProjectID: &project, Policy: access.KeyPolicy{Scopes: scopes, AllowedToolsets: toolsets}}
 }
 
+func testDelegatedAuthority(keyID string, agent *access.DelegationAgentLimits, tokenDigest string) *access.Authority {
+	project := testProject
+	return &access.Authority{ID: keyID, InstallationID: "test-installation", ProjectID: &project, Policy: access.KeyPolicy{Scopes: []string{"tools"}, AllowedToolsets: []string{testToolset}}, DelegationAgentID: agent.ID, DelegationAgentLimits: agent, DelegationTokenDigest: tokenDigest}
+}
+
 func testAuthKey() *secrets.AuthKey {
 	return secrets.NewAuthKey(bytes.Repeat([]byte{9}, 32), "test-installation")
 }
@@ -571,13 +576,13 @@ func TestCallToolReservesPinnedPriceAndRateLimits(t *testing.T) {
 	if len(ledger.reserved) != 1 || ledger.reserved[0].UnitPrice == nil || *ledger.reserved[0].UnitPrice != "0.25" {
 		t.Fatalf("reservation did not carry the pinned per-tool price: %+v", ledger.reserved)
 	}
-	if len(limiter.requests) != 2 {
-		t.Fatalf("call did not reserve per-key and per-server rate limits: %+v", limiter.requests)
+	if len(limiter.requests) != 3 {
+		t.Fatalf("call did not reserve server and caller rate limits: %+v", limiter.requests)
 	}
-	perKey, perServer := limiter.requests[0], limiter.requests[1]
-	if perKey.CostOwnerID != testKeyID || perKey.RequestsPerMinute == nil || *perKey.RequestsPerMinute != keyRate ||
+	perKey, perServer, caller := limiter.requests[0], limiter.requests[1], limiter.requests[2]
+	if perKey.CostOwnerID != testKeyID || perKey.RequestsPerMinute == nil || *perKey.RequestsPerMinute != 30 ||
 		perKey.MaxConcurrency == nil || *perKey.MaxConcurrency != 2 {
-		t.Fatalf("per-key reservation did not take the tighter of key and server limits: %+v", perKey)
+		t.Fatalf("per-server key limits missing: %+v", perKey)
 	}
 	if perServer.CostOwnerID != testServerID || perServer.RequestsPerMinute == nil || *perServer.RequestsPerMinute != 120 ||
 		perServer.MaxConcurrency == nil || *perServer.MaxConcurrency != 4 {
@@ -585,6 +590,9 @@ func TestCallToolReservesPinnedPriceAndRateLimits(t *testing.T) {
 	}
 	if perKey.LookupID == perServer.LookupID || perKey.LookupID == "" || perServer.LookupID == "" {
 		t.Fatalf("rate counters are not separated per scope: %q %q", perKey.LookupID, perServer.LookupID)
+	}
+	if caller.LookupID != authority.LimitsLookup() || caller.RequestsPerMinute == nil || *caller.RequestsPerMinute != keyRate || caller.MaxConcurrency == nil || *caller.MaxConcurrency != keyConcurrency {
+		t.Fatalf("global caller limits missing: %+v", caller)
 	}
 }
 
@@ -611,12 +619,9 @@ func TestCallToolRateLimitRefusalReservesAndDispatchesNothing(t *testing.T) {
 func TestDelegatedToolCallsShareAgentRateLimitAcrossKeys(t *testing.T) {
 	agentRate := int64(1)
 	agent := &access.DelegationAgentLimits{ID: testOtherRv, LookupID: "agent-lookup", Limits: access.AdmissionLimits{RequestsPerMinute: &agentRate}}
-	first := testAuthority([]string{"tools"}, []string{testToolset})
-	first.DelegationAgentID, first.DelegationAgentLimits = agent.ID, agent
-	second := testAuthority([]string{"tools"}, []string{testToolset})
-	second.ID = testOtherTS
-	second.DelegationAgentID, second.DelegationAgentLimits = agent.ID, agent
-	server, upstream, ledger, _, runtime := newTestServer(t, first, "")
+	first := testDelegatedAuthority(testKeyID, agent, "")
+	second := testDelegatedAuthority(testOtherTS, agent, "")
+	server, upstream, _, _, runtime := newTestServer(t, first, "")
 	runtime.otherAuthority = second
 	server.Limiter = &countingRateLimiter{counts: map[string]int64{}}
 	mux := http.NewServeMux()
@@ -633,8 +638,8 @@ func TestDelegatedToolCallsShareAgentRateLimitAcrossKeys(t *testing.T) {
 	if status := call("test-key", "first"); status != http.StatusOK {
 		t.Fatalf("first delegated tool call: %d", status)
 	}
-	if status := call("other-key", "second"); status != http.StatusTooManyRequests || upstream.calls.Load() != 1 || len(ledger.reserved) != 1 {
-		t.Fatalf("agent rate limit did not stop second key: status=%d upstream=%d reservations=%d", status, upstream.calls.Load(), len(ledger.reserved))
+	if status := call("other-key", "second"); status != http.StatusTooManyRequests || upstream.calls.Load() != 1 {
+		t.Fatalf("agent rate limit did not stop second key: status=%d upstream=%d", status, upstream.calls.Load())
 	}
 }
 
@@ -1888,11 +1893,9 @@ func TestWorkflowResolvesAndRunsOnlyAuthorizedReadOnlyTools(t *testing.T) {
 		t.Fatalf("read-only call count: %d", upstream.calls.Load())
 	}
 	agentRate := int64(1)
-	delegated := *authority
-	delegated.DelegationAgentID = testOtherRv
-	delegated.DelegationAgentLimits = &access.DelegationAgentLimits{ID: testOtherRv, LookupID: "agent-lookup", Limits: access.AdmissionLimits{RequestsPerMinute: &agentRate}}
+	delegated := testDelegatedAuthority(testKeyID, &access.DelegationAgentLimits{ID: testOtherRv, LookupID: "agent-lookup", Limits: access.AdmissionLimits{RequestsPerMinute: &agentRate}}, "")
 	server.Limiter = &countingRateLimiter{counts: map[string]int64{"agent-lookup": 1}}
-	if _, err := server.Call(t.Context(), delegated, readOnly, tools[0], testGenID, 2, "delegated-workflow", json.RawMessage(`{"query":"q"}`)); err != nil || upstream.calls.Load() != 2 {
+	if _, err := server.Call(t.Context(), *delegated, readOnly, tools[0], testGenID, 2, "delegated-workflow", json.RawMessage(`{"query":"q"}`)); err != nil || upstream.calls.Load() != 2 {
 		t.Fatalf("delegated workflow could not use its parent admission: %v", err)
 	}
 	if _, err := server.Resolve(t.Context(), *testAuthority([]string{"tools"}, nil), readOnly, []string{testToolset}); err == nil {

@@ -43,10 +43,7 @@ func (s *Store) Delegate(ctx context.Context, authority access.Authority, tool r
 	defer clear(key)
 	fingerprint := sha256.Sum256(key.Public().(ed25519.PublicKey))
 	now := time.Now()
-	expires := now.Add(2 * time.Minute)
-	if authority.DelegationAgentID != "" && authority.ExpiresAt != nil && authority.ExpiresAt.Before(expires) {
-		expires = *authority.ExpiresAt
-	}
+	expires := delegatedExpiry(authority, now)
 	subject := func() string {
 		if authority.DelegationAgentID != "" {
 			return "agent:" + authority.DelegationAgentID
@@ -60,6 +57,13 @@ func (s *Store) Delegate(ctx context.Context, authority access.Authority, tool r
 		return nil, ErrRequired
 	}
 	return []byte(encoded), nil
+}
+
+func delegatedExpiry(authority access.Authority, now time.Time) time.Time {
+	if authority.DelegationAgentID != "" && authority.ExpiresAt != nil && authority.ExpiresAt.Before(now.Add(2*time.Minute)) {
+		return *authority.ExpiresAt
+	}
+	return now.Add(2 * time.Minute)
 }
 
 func (s *Store) CheckGrant(ctx context.Context, authority access.Authority, tool routing.MCPToolsetTool) error {

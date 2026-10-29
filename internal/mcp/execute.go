@@ -29,28 +29,13 @@ func toolPerServerLookup(serverID string) string {
 	return "ts_" + strings.ReplaceAll(serverID, "-", "")
 }
 
-func tighterToolLimit(server int64, key *int64) *int64 {
-	value := server
-	if key != nil && *key < value {
-		value = *key
-	}
-	return &value
-}
-
-func (s *Server) reserveToolRate(ctx context.Context, in executeInput) ([]*limits.Lease, *apiError, time.Duration) {
-	limiter := s.Limiter
-	if concrete, ok := limiter.(*limits.Limiter); ok && concrete == nil {
-		limiter = nil
-	}
-	if limiter == nil {
-		return nil, fail(http.StatusServiceUnavailable, "limits_unavailable", "api_error", "Tool call limits are unavailable, so the call was not dispatched."), 0
-	}
+func toolRateRequests(in executeInput) []limits.Request {
 	effective := routing.EffectiveToolLimits(in.tool.CallsPerMinute, in.tool.MaxConcurrency, in.tool.PerKeyCallsPerMinute, in.tool.PerKeyMaxConcurrency)
 	requests := []limits.Request{
 		{
 			CostOwnerID: in.authority.ID, LookupID: toolPerKeyLookup(in.authority, in.tool.ServerID),
-			RequestsPerMinute: tighterToolLimit(effective.PerKeyCallsPerMinute, in.authority.Policy.RequestsPerMinute),
-			MaxConcurrency:    tighterToolLimit(effective.PerKeyMaxConcurrency, in.authority.Policy.MaxConcurrency),
+			RequestsPerMinute: &effective.PerKeyCallsPerMinute,
+			MaxConcurrency:    &effective.PerKeyMaxConcurrency,
 			LeaseTTL:          toolRateLeaseTTL,
 		},
 		{
@@ -61,17 +46,48 @@ func (s *Server) reserveToolRate(ctx context.Context, in executeInput) ([]*limit
 			LeaseTTL:          toolRateLeaseTTL,
 		},
 	}
-	if agent := in.authority.DelegationAgentLimits; agent != nil && in.runID == "" {
-		requests = append(requests, limits.Request{
-			CostOwnerID:       agent.ID,
-			LookupID:          agent.LookupID,
-			RequestsPerMinute: agent.Limits.RequestsPerMinute,
-			MaxConcurrency:    agent.Limits.MaxConcurrency,
-			LeaseTTL:          toolRateLeaseTTL,
-		})
+	if in.runID != "" {
+		return requests
 	}
+	return append(requests, toolCallerRate(in.authority), toolGroupRate(in.authority), toolAgentRate(in.authority))
+}
+
+func toolCallerRate(authority access.Authority) limits.Request {
+	if authority.Policy.RequestsPerMinute == nil && authority.Policy.MaxConcurrency == nil {
+		return limits.Request{}
+	}
+	return limits.Request{CostOwnerID: authority.ID, LookupID: authority.LimitsLookup(), RequestsPerMinute: authority.Policy.RequestsPerMinute, MaxConcurrency: authority.Policy.MaxConcurrency, LeaseTTL: toolRateLeaseTTL}
+}
+
+func toolGroupRate(authority access.Authority) limits.Request {
+	if authority.BudgetGroupID == nil || (authority.BudgetGroupRPM == nil && authority.BudgetGroupConcurrency == nil) {
+		return limits.Request{}
+	}
+	return limits.Request{CostOwnerID: *authority.BudgetGroupID, LookupID: limits.BudgetGroupLookup(*authority.BudgetGroupID), RequestsPerMinute: authority.BudgetGroupRPM, MaxConcurrency: authority.BudgetGroupConcurrency, LeaseTTL: toolRateLeaseTTL}
+}
+
+func toolAgentRate(authority access.Authority) limits.Request {
+	if authority.DelegationAgentLimits == nil || (authority.DelegationAgentLimits.Limits.RequestsPerMinute == nil && authority.DelegationAgentLimits.Limits.MaxConcurrency == nil) {
+		return limits.Request{}
+	}
+	agent := authority.DelegationAgentLimits
+	return limits.Request{CostOwnerID: agent.ID, LookupID: agent.LookupID, RequestsPerMinute: agent.Limits.RequestsPerMinute, MaxConcurrency: agent.Limits.MaxConcurrency, LeaseTTL: toolRateLeaseTTL}
+}
+
+func (s *Server) reserveToolRate(ctx context.Context, in executeInput) ([]*limits.Lease, *apiError, time.Duration) {
+	limiter := s.Limiter
+	if concrete, ok := limiter.(*limits.Limiter); ok && concrete == nil {
+		limiter = nil
+	}
+	if limiter == nil {
+		return nil, fail(http.StatusServiceUnavailable, "limits_unavailable", "api_error", "Tool call limits are unavailable, so the call was not dispatched."), 0
+	}
+	requests := toolRateRequests(in)
 	leases := make([]*limits.Lease, 0, len(requests))
 	for _, request := range requests {
+		if !request.HasRateLimits() {
+			continue
+		}
 		lease, err := limiter.Reserve(ctx, request)
 		if err != nil {
 			s.finishLeases(ctx, leases, false)

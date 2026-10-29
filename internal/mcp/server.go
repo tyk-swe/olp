@@ -101,22 +101,25 @@ type ReserveInput struct {
 }
 
 type Reservation struct {
-	Approval          *agents.WorkflowApproval
-	Authority         access.Authority
-	DispatchID        string
-	ClaimID           string
-	RunID             string
-	StepID            string
-	AttemptID         string
-	APIKeyID          string
-	ProjectID         string
-	ToolsetID         string
-	ToolsetRevisionID string
-	ToolAlias         string
-	InputDigest       string
-	CallDigest        string
-	UnitPrice         *string
-	Currency          string
+	Approval             *agents.WorkflowApproval
+	Authority            access.Authority
+	DispatchID           string
+	ClaimID              string
+	RunID                string
+	StepID               string
+	AttemptID            string
+	APIKeyID             string
+	ProjectID            string
+	ToolsetID            string
+	ToolsetRevisionID    string
+	ToolAlias            string
+	InputDigest          string
+	CallDigest           string
+	AgentPrincipalID     string
+	MemberPrincipalID    string
+	DelegationPairDigest string
+	UnitPrice            *string
+	Currency             string
 }
 
 func (r *Reservation) amount() string {

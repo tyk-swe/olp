@@ -602,7 +602,8 @@ Credentials cannot be used to delegate again. Both principals must continue to
 authorize the resources, and revoking either principal ends delegation. Caller,
 agent and applicable member and pair budgets apply together. Renewed credentials
 retain pair spend. The delegating key remains the accounting owner while each
-attempt records the agent and a stable pair digest. Grant records contain
+attempt records the agent and a stable pair digest, along with the member for
+member-consented calls. Grant records contain
 credential digests and bounds, not the JWT, key or raw claims.
 
 ## Organizations
