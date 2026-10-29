@@ -132,8 +132,13 @@ it('saves and reloads agent task bounds through the editor', async () => {
   );
   const host = document.createElement('div');
   document.body.append(host);
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  const component = mount(PublicationsProbe, { target: host, props: { client } });
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false } }
+  });
+  const component = mount(PublicationsProbe, {
+    target: host,
+    props: { client }
+  });
   onTestFinished(async () => {
     await unmount(component);
     client.clear();
@@ -146,7 +151,9 @@ it('saves and reloads agent task bounds through the editor', async () => {
   [...host.querySelectorAll('button')]
     .find((item) => item.textContent?.trim() === 'Open')!
     .click();
-  await vi.waitFor(() => expect(host.textContent).toContain('Maximum task continuations'));
+  await vi.waitFor(() =>
+    expect(host.textContent).toContain('Maximum task continuations')
+  );
   const input = (label: string) =>
     [...host.querySelectorAll('label')]
       .find((item) => item.textContent?.includes(label))!
@@ -160,7 +167,10 @@ it('saves and reloads agent task bounds through the editor', async () => {
     input(label).dispatchEvent(new Event('input', { bubbles: true }));
   }
   flushSync();
-  host.querySelector<HTMLFormElement>('section[aria-label="Publication editor"] form')!
+  host
+    .querySelector<HTMLFormElement>(
+      'section[aria-label="Publication editor"] form'
+    )!
     .dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
   await vi.waitFor(() => expect(api.savePublication).toHaveBeenCalled());
   expect(vi.mocked(api.savePublication).mock.calls[0][2].agent).toMatchObject({
@@ -168,7 +178,9 @@ it('saves and reloads agent task bounds through the editor', async () => {
     max_task_continuations: 64,
     task_deadline_seconds: 900
   });
-  await vi.waitFor(() => expect(input('Task deadline in seconds').value).toBe('900'));
+  await vi.waitFor(() =>
+    expect(input('Task deadline in seconds').value).toBe('900')
+  );
 });
 
 it('converts a legacy prompt, edits its messages and defaults, and saves them', async () => {
