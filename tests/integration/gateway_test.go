@@ -2065,6 +2065,8 @@ func TestGatewayToolWorkflowSettlesOneRun(t *testing.T) {
 			t.Fatalf("recovery content reached %s: count=%d error=%v", table, leaks, err)
 		}
 	}
+	recoveryWorkflow.Store(false)
+	recoveryApprovalWorkflow.Store(false)
 	serverToolset := h.want(owner, http.MethodPost, "/api/v1/toolsets", map[string]any{"project_id": project, "name": "Server retirement toolset", "toolset": agentcontract.Toolset{Tools: []agentcontract.Tool{tool}}}, idem("workflow-server-retirement-toolset"), http.StatusCreated)
 	serverToolsetID := mcpExecString(t, serverToolset, "id")
 	h.want(owner, http.MethodPost, "/api/v1/toolsets/"+serverToolsetID+"/publish", nil, withMatch(serverToolset, idem("workflow-server-retirement-publish")), http.StatusOK)

@@ -221,6 +221,9 @@ func (s *Server) workflowAuthority(ctx context.Context, x *call, route *routing.
 		return nil, permissionError("permission_denied", "This API key no longer permits the toolset.")
 	}
 	for _, tool := range x.workflow.tools {
+		if tool.ToolsetID == "" && tool.Definition.Alias == recoveryToolName {
+			continue
+		}
 		if err := s.WorkflowTools.AuthorizeWorkflowTool(*authority, tool); err != nil {
 			return nil, workflowError(err)
 		}
