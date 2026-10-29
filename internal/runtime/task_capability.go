@@ -7,6 +7,7 @@ import (
 	"slices"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/agentcontract"
@@ -103,8 +104,12 @@ func (state authorityState) taskCapabilityPrincipal(keyID, revision string, expi
 	return access.Authority{}, access.Authority{}, "", nil, false
 }
 
-func (m *Manager) AdmitTaskCapabilityAttempt(ctx context.Context, authority access.Authority, scope, resource, revision string, project *string) error {
+func (m *Manager) AdmitTaskCapabilityAttempt(ctx context.Context, authority access.Authority, scope, resource, revision string, project *string, accountingID string) error {
 	if authority.TaskCapability == nil {
+		return ErrInvalidKey
+	}
+	id, err := uuid.Parse(accountingID)
+	if err != nil || id == uuid.Nil || id.String() != accountingID {
 		return ErrInvalidKey
 	}
 	digest, err := hex.DecodeString(authority.TaskCapability.Digest)
@@ -152,12 +157,18 @@ func (m *Manager) AdmitTaskCapabilityAttempt(ctx context.Context, authority acce
 	if task == "" {
 		err = tx.QueryRow(ctx, `UPDATE olp.a2a_task_admissions SET callback_attempts=callback_attempts+1 WHERE dispatch_id=$1 AND callback_attempts<$2 RETURNING callback_attempts`, dispatch, limit).Scan(&count)
 	} else {
-		err = tx.QueryRow(ctx, `UPDATE olp.a2a_tasks SET continuations=continuations+1 WHERE id=$1 AND state='active' AND deadline_at>now() AND continuations<$2 RETURNING continuations`, task, limit).Scan(&count)
+		err = tx.QueryRow(ctx, `UPDATE olp.a2a_tasks SET continuations=continuations+1,callback_attempts=callback_attempts+1 WHERE id=$1 AND state='active' AND deadline_at>now() AND continuations<$2 RETURNING continuations`, task, limit).Scan(&count)
 	}
 	if errors.Is(err, pgx.ErrNoRows) {
 		return ErrTaskAttemptLimit
 	}
-	if err != nil || tx.Commit(ctx) != nil {
+	if err != nil {
+		return ErrStaleAuthority
+	}
+	if _, err = tx.Exec(ctx, `INSERT INTO olp.a2a_task_callback_accounting(dispatch_id,kind,accounting_id) VALUES($1,$2,$3) ON CONFLICT(dispatch_id,kind,accounting_id) DO NOTHING`, dispatch, scope, accountingID); err != nil {
+		return ErrStaleAuthority
+	}
+	if tx.Commit(ctx) != nil {
 		return ErrStaleAuthority
 	}
 	return nil

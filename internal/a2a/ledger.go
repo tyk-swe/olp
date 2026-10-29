@@ -155,7 +155,7 @@ func (l *Ledger) settle(ctx context.Context, res reservation, authority access.A
 		return "", err
 	}
 	if taskID != "" {
-		if _, err := tx.Exec(ctx, `UPDATE olp.a2a_tasks SET continuations=continuations+(SELECT callback_attempts FROM olp.a2a_task_admissions WHERE dispatch_id=$1 AND task_id IS NULL) WHERE id=$2 AND EXISTS(SELECT 1 FROM olp.a2a_task_admissions WHERE dispatch_id=$1 AND task_id IS NULL)`, res.DispatchID, taskID); err != nil {
+		if _, err := tx.Exec(ctx, `UPDATE olp.a2a_tasks t SET continuations=t.continuations+a.callback_attempts,callback_attempts=t.callback_attempts+a.callback_attempts FROM olp.a2a_task_admissions a WHERE a.dispatch_id=$1 AND a.task_id IS NULL AND t.id=$2`, res.DispatchID, taskID); err != nil {
 			return "", err
 		}
 		if _, err := tx.Exec(ctx, `UPDATE olp.a2a_task_capabilities SET task_id=$2 WHERE dispatch_id=$1`, res.DispatchID, taskID); err != nil {

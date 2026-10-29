@@ -25,6 +25,9 @@ func (s *Server) Register(mux *http.ServeMux) {
 	s.Access.Route(mux, "GET /api/v1/agent-runs", s.listRuns)
 	s.Access.Route(mux, "GET /api/v1/agent-runs/{run_id}", s.getRun)
 	s.Access.Route(mux, "GET /api/v1/agent-runs/{run_id}/spans", s.listRunSpans)
+	s.Access.Route(mux, "GET /api/v1/a2a-tasks", s.listTasks)
+	s.Access.Route(mux, "GET /api/v1/a2a-tasks/{task_id}", s.getTask)
+	s.Access.Route(mux, "GET /api/v1/agent-delegations", s.listDelegations)
 	for _, kind := range []string{"toolset", "agent", "prompt"} {
 		root := "/api/v1/" + kind + "s"
 		s.Access.Route(mux, "GET "+root, func(r *http.Request, p access.Principal) (access.Reply, error) { return s.list(r, p, kind) })

@@ -215,6 +215,12 @@ var AttributionBudgetsSQL = `(SELECT COALESCE(jsonb_object_agg(label,pair_usage)
  FROM jsonb_each(p.attribution_budgets) b CROSS JOIN LATERAL jsonb_each(b.value) v GROUP BY b.key
 ) grouped)`
 
+var DelegationPairBudgetSQL = budgetReportSQL(budgetOwnership{
+	usageProjectSQL("f") + "=p.id AND f.delegation_pair_digest=pair.digest",
+	usageProjectSQL("h") + "=p.id AND h.delegation_pair_digest=pair.digest",
+	"EXISTS(SELECT 1 FROM olp.execution_debit_owners o JOIN olp.aggregate_budget_accounts a ON a.id=o.owner_id WHERE o.dispatch_id=d.id AND o.owner_kind='aggregate' AND a.project_id=p.id AND a.attribution_key='delegation_pair' AND a.attribution_value=pair.digest)",
+}, "COALESCE(p.attribution_budgets->'delegation_pair'->pair.digest->>'cost_basis','cost')")
+
 // Organization ownership is immutable once assigned, so live and retained spend
 // retain the same boundary when aggregate policies change.
 var OrganizationBudgetSQL = budgetReportSQL(budgetOwnership{

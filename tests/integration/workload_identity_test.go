@@ -494,7 +494,27 @@ func TestWorkloadAgentMemberConsentIssuesAgentBoundGrant(t *testing.T) {
 	}
 	h.want(member, "POST", "/api/v1/profile/reauthenticate", map[string]any{"current_password": accessPassword, "purpose": "agent_delegation", "resource_id": key["id"]}, nil, http.StatusNoContent)
 	pending := h.want(member, "POST", "/api/v1/delegation-consents", map[string]any{"agent_id": agentID, "api_key_id": key["id"], "allowed_routes": []string{"member-chat"}}, nil, http.StatusCreated)
+	assertMemberAuthority := func(want bool) {
+		t.Helper()
+		views := h.want(owner, http.MethodGet, "/api/v1/agent-delegations?project_id="+project, nil, nil, http.StatusOK)
+		found := false
+		items := mcpExecItems(t, views, "items")
+		for i := range items {
+			view := mcpExecItem(t, items, i, views)
+			if view["member_id"] == memberID {
+				found = true
+				if view["member_authorized"] != want {
+					t.Fatalf("member authority mismatch: %v", view)
+				}
+			}
+		}
+		if !found {
+			t.Fatal("member delegations missing")
+		}
+	}
+	assertMemberAuthority(true)
 	h.want(owner, "DELETE", "/api/v1/projects/"+project+"/members/"+memberID, nil, projectEtag(h, owner, project), http.StatusNoContent)
+	assertMemberAuthority(false)
 	h.refresh()
 	denied, deniedBody := h.do(nil, "POST", "/v1/delegations", runtime.DelegationBounds{Scopes: []string{"inference"}, AllowedRoutes: []string{"member-chat"}}, map[string]string{"Authorization": "Bearer " + assertion, "X-OLP-Delegation-Consent": pending["consent"].(string)})
 	if denied.StatusCode != http.StatusUnauthorized {
@@ -1492,6 +1512,38 @@ func TestWorkloadAgentDelegatesKeyForTools(t *testing.T) {
 	}
 	pairReport := f.h.want(f.owner, http.MethodGet, pairPath, nil, nil, http.StatusOK)
 	pairAccrued := pairReport["usage"].(map[string]any)["delegation_pair"].(map[string]any)[grant.PairDigest].(map[string]any)["daily"].(map[string]any)["accrued"].(string)
+	delegations := f.h.want(f.owner, http.MethodGet, "/api/v1/agent-delegations?project_id="+project, nil, nil, http.StatusOK)
+	items := mcpExecItems(t, delegations, "items")
+	if len(items) != 1 {
+		t.Fatalf("expected the delegated pair: %v", delegations)
+	}
+	delegation := mcpExecItem(t, items, 0, delegations)
+	budget := mcpExecObject(t, delegation, "budget")
+	if delegation["api_key_id"] != delegating["id"] || delegation["agent_id"] != agentID || delegation["revoked_at"] != nil || mcpExecObject(t, budget, "daily")["accrued"] != pairAccrued || mcpExecObject(t, delegation, "budget_policy")["daily_cost_limit"] != "1000" {
+		t.Fatalf("delegation view did not report principals, spend and budget: %v", delegation)
+	}
+	for _, private := range []string{grant.Token, grant.PairDigest, assertion, "approved-agent", "approved-client"} {
+		if strings.Contains(fmt.Sprint(delegations), private) {
+			t.Fatal("delegation view exposed credentials or workload claims")
+		}
+	}
+	otherProject := createProject(f.h, f.owner, "Other delegation project")
+	viewer := f.h.invite(f.owner, "delegation-viewer@example.com", "viewer")
+	viewerSession := f.h.want(viewer, http.MethodGet, "/api/v1/sessions/current", nil, nil, http.StatusOK)
+	viewerID := mcpExecString(t, mcpExecObject(t, viewerSession, "user"), "id")
+	viewerRecord := f.h.want(f.owner, http.MethodGet, "/api/v1/users/"+viewerID, nil, nil, http.StatusOK)
+	f.h.want(f.owner, http.MethodPatch, "/api/v1/users/"+viewerID, map[string]any{"access_scope": "assigned"}, etagHeader(viewerRecord), http.StatusOK)
+	addMember(f.h, f.owner, otherProject, viewerID, "viewer")
+	assignedViewer := login(f.h, "delegation-viewer@example.com")
+	f.h.want(assignedViewer, http.MethodGet, "/api/v1/agent-delegations?project_id="+project, nil, nil, http.StatusNotFound)
+	if filtered := f.h.want(assignedViewer, http.MethodGet, "/api/v1/agent-delegations", nil, nil, http.StatusOK); len(mcpExecItems(t, filtered, "items")) != 0 {
+		t.Fatalf("project viewer could see another project's delegations: %v", filtered)
+	}
+	addMember(f.h, f.owner, project, viewerID, "viewer")
+	f.h.want(assignedViewer, http.MethodGet, "/api/v1/agent-delegations?project_id="+project, nil, nil, http.StatusOK)
+	f.h.want(f.owner, http.MethodDelete, "/api/v1/projects/"+project+"/members/"+viewerID, nil, projectEtag(f.h, f.owner, project), http.StatusNoContent)
+	f.h.want(assignedViewer, http.MethodGet, "/api/v1/agent-delegations?project_id="+project, nil, nil, http.StatusNotFound)
+	f.h.refresh()
 	callerReport := f.h.want(f.owner, http.MethodGet, "/api/v1/api-keys/"+delegating["id"].(string), nil, nil, http.StatusOK)
 	agentReport := f.h.want(f.owner, http.MethodGet, "/api/v1/api-keys/"+agentID, nil, nil, http.StatusOK)
 	callerAccrued := callerReport["budget"].(map[string]any)["daily"].(map[string]any)["accrued"].(string)
@@ -1587,6 +1639,48 @@ func TestWorkloadAgentDelegatesKeyForTools(t *testing.T) {
 		t.Fatal("member delegation shared the key delegation's retained result or pair")
 	}
 	profile := f.h.want(f.owner, http.MethodGet, "/api/v1/profile", nil, nil, http.StatusOK)
+	if _, err := f.h.Pool.Exec(t.Context(), `UPDATE olp.agent_delegations SET revoked_at=now() WHERE id=$1`, delegation["id"]); err != nil {
+		t.Fatal(err)
+	}
+	delegations = f.h.want(f.owner, http.MethodGet, "/api/v1/agent-delegations?project_id="+project, nil, nil, http.StatusOK)
+	items = mcpExecItems(t, delegations, "items")
+	if !slices.ContainsFunc(items, func(value any) bool {
+		item := value.(map[string]any)
+		return item["id"] == delegation["id"] && item["revoked_at"] != nil
+	}) || !slices.ContainsFunc(items, func(value any) bool {
+		item := value.(map[string]any)
+		amount, ok := new(big.Rat).SetString(mcpExecString(t, mcpExecObject(t, mcpExecObject(t, item, "budget"), "daily"), "accrued"))
+		return item["member_id"] == profile["id"] && item["agent_id"] == agentID && item["budget_policy"] == nil && ok && amount.Sign() > 0
+	}) {
+		t.Fatalf("delegation view lost revocation or the member pair's unconfigured spend: %v", delegations)
+	}
+	if len(items) != 3 {
+		t.Fatalf("expected the original, renewed and member delegations: %v", delegations)
+	}
+	for index := range items {
+		item := mcpExecItem(t, items, index, delegations)
+		if item["member_id"] == nil && (mcpExecObject(t, mcpExecObject(t, item, "budget"), "daily")["accrued"] != pairAccrued || mcpExecObject(t, item, "budget_policy")["daily_cost_limit"] != "1000") {
+			t.Fatalf("renewed delegations lost their shared pair budget: %v", item)
+		}
+	}
+	pagePath := "/api/v1/agent-delegations?project_id=" + project + "&limit=1"
+	firstPage := f.h.want(f.owner, http.MethodGet, pagePath, nil, nil, http.StatusOK)
+	secondPage := f.h.want(f.owner, http.MethodGet, pagePath+"&cursor="+mcpExecString(t, firstPage, "next_cursor"), nil, nil, http.StatusOK)
+	thirdPage := f.h.want(f.owner, http.MethodGet, pagePath+"&cursor="+mcpExecString(t, secondPage, "next_cursor"), nil, nil, http.StatusOK)
+	for index, page := range []map[string]any{firstPage, secondPage, thirdPage} {
+		pageItems := mcpExecItems(t, page, "items")
+		if len(pageItems) != 1 {
+			t.Fatalf("delegation page did not contain one item: %v", page)
+		}
+		item := mcpExecItem(t, pageItems, 0, page)
+		expected := mcpExecItem(t, items, index, delegations)
+		if item["id"] != expected["id"] || item["member_id"] != expected["member_id"] || mcpExecObject(t, mcpExecObject(t, item, "budget"), "daily")["accrued"] != mcpExecObject(t, mcpExecObject(t, expected, "budget"), "daily")["accrued"] {
+			t.Fatalf("delegation pagination changed order or pair spend: %v", page)
+		}
+	}
+	if thirdPage["next_cursor"] != nil {
+		t.Fatalf("last delegation page has a next cursor: %v", thirdPage)
+	}
 	var attemptAgent, attemptMember, attemptPair, stored string
 	if err := f.h.Pool.QueryRow(t.Context(), `SELECT agent_principal_id::text,member_principal_id::text,delegation_pair_digest FROM olp.mcp_tool_calls WHERE id=$1`, memberOutcome.AttemptID).Scan(&attemptAgent, &attemptMember, &attemptPair); err != nil {
 		t.Fatal(err)
@@ -1727,14 +1821,32 @@ func TestWorkloadAgentDelegatesKeyForTools(t *testing.T) {
 	currentGroup := f.h.want(f.owner, http.MethodGet, groupPath, nil, nil, http.StatusOK)
 	f.h.want(f.owner, http.MethodPatch, groupPath, map[string]any{"requests_per_minute": 1}, withMatch(currentGroup, idem("limit-delegated-tool-group")), http.StatusOK)
 	f.h.refresh()
-	groupRateToken, _ := issueToolGrant(secondGroupKey["secret"].(string), assertion)
-	if denied := callTool(groupRateToken, assertion, "group-rate"); denied.Code != http.StatusTooManyRequests {
-		t.Fatalf("group request limit did not refuse the call: %d %s", denied.Code, denied.Body.String())
+	groupRateDenied := false
+	for attempt := 0; attempt < 3 && !groupRateDenied; attempt++ {
+		minute := time.Now().UTC().Truncate(time.Minute)
+		groupRateSeed, _ := issueToolGrant(firstGroupKey["secret"].(string), assertion)
+		seeded := callTool(groupRateSeed, assertion, fmt.Sprintf("group-rate-seed-%d", attempt))
+		if seeded.Code == http.StatusOK {
+			<-upstreamCalls
+			<-signedTokens
+		} else if seeded.Code != http.StatusTooManyRequests {
+			t.Fatalf("could not fill the group request window: %d %s", seeded.Code, seeded.Body.String())
+		}
+		groupRateToken, _ := issueToolGrant(secondGroupKey["secret"].(string), assertion)
+		denied := callTool(groupRateToken, assertion, fmt.Sprintf("group-rate-%d", attempt))
+		select {
+		case <-upstreamCalls:
+			t.Fatal("group request limit refusal reached the upstream")
+		default:
+		}
+		if denied.Code == http.StatusTooManyRequests {
+			groupRateDenied = true
+		} else if denied.Code != http.StatusForbidden || minute.Equal(time.Now().UTC().Truncate(time.Minute)) {
+			t.Fatalf("group request limit did not refuse the call: %d %s", denied.Code, denied.Body.String())
+		}
 	}
-	select {
-	case <-upstreamCalls:
-		t.Fatal("group request limit refusal reached the upstream")
-	default:
+	if !groupRateDenied {
+		t.Fatal("group request limit did not refuse a call within three windows")
 	}
 	sessionResponse, sessionBody := f.h.do(nil, http.MethodPost, "/v1/delegations", bounds, map[string]string{"Authorization": "Bearer " + assertion, "X-OLP-Delegating-Key": delegating["secret"].(string)})
 	if sessionResponse.StatusCode != http.StatusCreated {
@@ -2060,12 +2172,8 @@ func TestWorkloadAgentDelegatesKeyForA2A(t *testing.T) {
 	}))
 	t.Cleanup(upstream.Close)
 	digest := sha256.Sum256(cardFor(upstream.URL + "/rpc"))
-	var user string
-	if err := h.Pool.QueryRow(t.Context(), `SELECT id::text FROM olp.users WHERE email='owner@example.com'`).Scan(&user); err != nil {
-		t.Fatal(err)
-	}
-	pricing := acctID(t)
-	acctExec(t, h.Pool, `INSERT INTO olp.pricing_revisions(id,revision,effective_at,created_by) VALUES($1,1,now(),$2)`, pricing, user)
+	pricingRevision := h.want(owner, http.MethodPost, "/api/v1/pricing/revisions", map[string]any{"effective_at": time.Now().Add(-time.Hour).UTC().Format(time.RFC3339Nano), "prices": []any{map[string]any{"provider_kind": "azure_openai", "provider_id": model["id"], "model": "unused-fixture-model", "operation": "generation", "currency": "USD", "input_per_million": "0", "output_per_million": "0"}}}, idem("delegated-a2a-pricing"), http.StatusCreated)
+	pricing := mcpExecString(t, pricingRevision, "id")
 	created := h.want(owner, http.MethodPost, "/api/v1/agents", map[string]any{
 		"project_id": project, "name": "delegated target",
 		"agent": map[string]any{"protocol": "a2a-1.0.0", "endpoint": upstream.URL + "/rpc", "card_digest": hex.EncodeToString(digest[:]), "toolset_revisions": []string{}, "route_revisions": []string{routeRevision}, "pricing_revision_id": pricing, "max_cost": "1", "message_price": "0.25", "remote_work_bound_seconds": 120},
@@ -2203,6 +2311,15 @@ func TestWorkloadAgentDelegatesKeyForA2A(t *testing.T) {
 		t.Fatal("authenticated workload principal is absent")
 		return ""
 	}()
+	operatorTask := h.want(owner, http.MethodGet, operatorTaskPath, nil, nil, http.StatusOK)
+	if operatorTask["agent_principal_id"] != agentID || operatorTask["member_principal_id"] != nil || operatorTask["delegation_pair_id"] != grant.Pair {
+		t.Fatalf("task lost initiating delegation identity: %v", operatorTask)
+	}
+	for _, private := range []string{grant.Token, assertion, capability, messageContent} {
+		if strings.Contains(fmt.Sprint(operatorTask), private) {
+			t.Fatal("task exposed private delegation or message content")
+		}
+	}
 	keyBudget := h.want(owner, http.MethodGet, "/api/v1/api-keys/"+key["id"].(string), nil, nil, http.StatusOK)["budget"].(map[string]any)["daily"].(map[string]any)["accrued"].(string)
 	agentBudget := h.want(owner, http.MethodGet, "/api/v1/api-keys/"+agentID, nil, nil, http.StatusOK)["budget"].(map[string]any)["daily"].(map[string]any)["accrued"].(string)
 	pairAmount, pairOK := new(big.Rat).SetString(pairBudget)
@@ -2479,6 +2596,33 @@ func TestWorkloadAgentDelegatesKeyForA2A(t *testing.T) {
 	if otherStatus == http.StatusOK && bytes.Contains(otherBody, []byte(result.Result.Task.ID)) {
 		t.Fatalf("another agent read a task owned by the first: %s", otherBody)
 	}
+	otherToken := getGrant(otherAssertion)
+	otherSend, otherSendBody := h.do(nil, http.MethodPost, "/a2a/"+target, request, map[string]string{"Authorization": "Bearer " + otherToken, "X-OLP-Agent-Identity": otherAssertion, "A2A-Version": "1.0"})
+	var otherResult struct {
+		Result struct {
+			Task protocol.Task `json:"task"`
+		} `json:"result"`
+		Error json.RawMessage `json:"error"`
+	}
+	if otherSend.StatusCode != http.StatusOK || json.Unmarshal(otherSendBody, &otherResult) != nil || len(otherResult.Error) != 0 || otherResult.Result.Task.ID == "" {
+		t.Fatalf("second agent task failed: %d %s", otherSend.StatusCode, otherSendBody)
+	}
+	if status := <-callbackStatus; status != http.StatusOK {
+		t.Fatalf("second agent callback refused: %d", status)
+	}
+	otherCapability := <-callbackCapability
+	otherView := h.want(owner, http.MethodGet, "/api/v1/a2a-tasks/"+string(otherResult.Result.Task.ID), nil, nil, http.StatusOK)
+	otherAgent := mcpExecString(t, otherView, "agent_principal_id")
+	otherPair := mcpExecString(t, otherView, "delegation_pair_id")
+	if otherView["api_key_id"] != key["id"] || otherAgent == agentID || otherPair == grant.Pair {
+		t.Fatalf("tasks for two agents sharing a key were conflated: %v", otherView)
+	}
+	for _, private := range []string{otherToken, otherAssertion, otherCapability, messageContent} {
+		if strings.Contains(fmt.Sprint(otherView), private) {
+			t.Fatal("second task exposed private delegation or message content")
+		}
+	}
+	h.want(owner, http.MethodPost, "/api/v1/a2a-tasks/"+string(otherResult.Result.Task.ID)+"/cancel", nil, nil, http.StatusOK)
 	for _, method := range []string{"GetTask", "CancelTask"} {
 		before := remoteRequests.Load()
 		call := func(taskID string) []byte {
@@ -2641,6 +2785,12 @@ func TestWorkloadAgentDelegatesKeyForA2A(t *testing.T) {
 	}
 	if memberResult.Result.Task.ID == result.Result.Task.ID {
 		t.Fatal("member and key delegations shared a task")
+	}
+	memberTaskView := h.want(owner, http.MethodGet, "/api/v1/a2a-tasks/"+string(memberResult.Result.Task.ID), nil, nil, http.StatusOK)
+	ownerProfile := h.want(owner, http.MethodGet, "/api/v1/profile", nil, nil, http.StatusOK)
+	memberPair := mcpExecString(t, memberTaskView, "delegation_pair_id")
+	if memberTaskView["agent_principal_id"] != agentID || memberTaskView["member_principal_id"] != ownerProfile["id"] || memberPair == grant.Pair {
+		t.Fatalf("member task lost its initiating pair: %v", memberTaskView)
 	}
 	if status := <-callbackStatus; status != http.StatusOK {
 		t.Fatalf("member delegated task callback refused: %d", status)

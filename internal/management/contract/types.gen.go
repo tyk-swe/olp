@@ -13,6 +13,117 @@ import (
 	openapi_types "github.com/oapi-codegen/runtime/types"
 )
 
+// Defines values for A2ATaskState.
+const (
+	A2ATaskStateActive         A2ATaskState = "active"
+	A2ATaskStateCanceled       A2ATaskState = "canceled"
+	A2ATaskStateCompleted      A2ATaskState = "completed"
+	A2ATaskStateFailed         A2ATaskState = "failed"
+	A2ATaskStateOutcomeUnknown A2ATaskState = "outcome_unknown"
+)
+
+// Valid indicates whether the value is a known member of the A2ATaskState enum.
+func (e A2ATaskState) Valid() bool {
+	switch e {
+	case A2ATaskStateActive:
+		return true
+	case A2ATaskStateCanceled:
+		return true
+	case A2ATaskStateCompleted:
+		return true
+	case A2ATaskStateFailed:
+		return true
+	case A2ATaskStateOutcomeUnknown:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for A2ATaskDetailState.
+const (
+	A2ATaskDetailStateActive         A2ATaskDetailState = "active"
+	A2ATaskDetailStateCanceled       A2ATaskDetailState = "canceled"
+	A2ATaskDetailStateCompleted      A2ATaskDetailState = "completed"
+	A2ATaskDetailStateFailed         A2ATaskDetailState = "failed"
+	A2ATaskDetailStateOutcomeUnknown A2ATaskDetailState = "outcome_unknown"
+)
+
+// Valid indicates whether the value is a known member of the A2ATaskDetailState enum.
+func (e A2ATaskDetailState) Valid() bool {
+	switch e {
+	case A2ATaskDetailStateActive:
+		return true
+	case A2ATaskDetailStateCanceled:
+		return true
+	case A2ATaskDetailStateCompleted:
+		return true
+	case A2ATaskDetailStateFailed:
+		return true
+	case A2ATaskDetailStateOutcomeUnknown:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for A2ATaskModelCallbackState.
+const (
+	A2ATaskModelCallbackStateFree           A2ATaskModelCallbackState = "free"
+	A2ATaskModelCallbackStateNotBillable    A2ATaskModelCallbackState = "not_billable"
+	A2ATaskModelCallbackStateOutcomeUnknown A2ATaskModelCallbackState = "outcome_unknown"
+	A2ATaskModelCallbackStatePending        A2ATaskModelCallbackState = "pending"
+	A2ATaskModelCallbackStatePriced         A2ATaskModelCallbackState = "priced"
+	A2ATaskModelCallbackStateUncharged      A2ATaskModelCallbackState = "uncharged"
+	A2ATaskModelCallbackStateUnpriced       A2ATaskModelCallbackState = "unpriced"
+)
+
+// Valid indicates whether the value is a known member of the A2ATaskModelCallbackState enum.
+func (e A2ATaskModelCallbackState) Valid() bool {
+	switch e {
+	case A2ATaskModelCallbackStateFree:
+		return true
+	case A2ATaskModelCallbackStateNotBillable:
+		return true
+	case A2ATaskModelCallbackStateOutcomeUnknown:
+		return true
+	case A2ATaskModelCallbackStatePending:
+		return true
+	case A2ATaskModelCallbackStatePriced:
+		return true
+	case A2ATaskModelCallbackStateUncharged:
+		return true
+	case A2ATaskModelCallbackStateUnpriced:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for A2ATaskToolCallbackPricingState.
+const (
+	A2ATaskToolCallbackPricingStateFree     A2ATaskToolCallbackPricingState = "free"
+	A2ATaskToolCallbackPricingStatePriced   A2ATaskToolCallbackPricingState = "priced"
+	A2ATaskToolCallbackPricingStateUnknown  A2ATaskToolCallbackPricingState = "unknown"
+	A2ATaskToolCallbackPricingStateUnpriced A2ATaskToolCallbackPricingState = "unpriced"
+)
+
+// Valid indicates whether the value is a known member of the A2ATaskToolCallbackPricingState enum.
+func (e A2ATaskToolCallbackPricingState) Valid() bool {
+	switch e {
+	case A2ATaskToolCallbackPricingStateFree:
+		return true
+	case A2ATaskToolCallbackPricingStatePriced:
+		return true
+	case A2ATaskToolCallbackPricingStateUnknown:
+		return true
+	case A2ATaskToolCallbackPricingStateUnpriced:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for AdmissionPriority.
 const (
 	Critical AdmissionPriority = "critical"
@@ -6676,6 +6787,105 @@ type A2ARemoteTask struct {
 	} `json:"status"`
 }
 
+// A2ATask Content-free remote task metadata.
+type A2ATask struct {
+	AgentPrincipalId nullable.Nullable[openapi_types.UUID] `json:"agent_principal_id"`
+	ApiKeyId         openapi_types.UUID                    `json:"api_key_id"`
+
+	// CallbackAttempts Admitted callbacks, or null for tasks created before callback counts were recorded.
+	CallbackAttempts nullable.Nullable[int] `json:"callback_attempts"`
+	CreatedAt        time.Time              `json:"created_at"`
+	DeadlineAt       time.Time              `json:"deadline_at"`
+
+	// DelegationPairId Stable, project-scoped pair identifier, or null for an undelegated task.
+	DelegationPairId  nullable.Nullable[string]             `json:"delegation_pair_id"`
+	Id                openapi_types.UUID                    `json:"id"`
+	MemberPrincipalId nullable.Nullable[openapi_types.UUID] `json:"member_principal_id"`
+	ProjectId         openapi_types.UUID                    `json:"project_id"`
+	PublicationId     openapi_types.UUID                    `json:"publication_id"`
+	RevisionId        openapi_types.UUID                    `json:"revision_id"`
+	State             A2ATaskState                          `json:"state"`
+}
+
+// A2ATaskState defines model for A2ATask.State.
+type A2ATaskState string
+
+// A2ATaskDetail Content-free task and associated remote message fees.
+type A2ATaskDetail struct {
+	AgentPrincipalId nullable.Nullable[openapi_types.UUID] `json:"agent_principal_id"`
+	ApiKeyId         openapi_types.UUID                    `json:"api_key_id"`
+
+	// CallbackAttempts Admitted callbacks, or null for tasks created before callback counts were recorded.
+	CallbackAttempts nullable.Nullable[int] `json:"callback_attempts"`
+	CallbackModels   []A2ATaskModelCallback `json:"callback_models"`
+	CallbackTools    []A2ATaskToolCallback  `json:"callback_tools"`
+	CreatedAt        time.Time              `json:"created_at"`
+	DeadlineAt       time.Time              `json:"deadline_at"`
+
+	// DelegationPairId Stable, project-scoped pair identifier, or null for an undelegated task.
+	DelegationPairId  nullable.Nullable[string]             `json:"delegation_pair_id"`
+	Id                openapi_types.UUID                    `json:"id"`
+	MemberPrincipalId nullable.Nullable[openapi_types.UUID] `json:"member_principal_id"`
+	ProjectId         openapi_types.UUID                    `json:"project_id"`
+	PublicationId     openapi_types.UUID                    `json:"publication_id"`
+	RemoteFees        []A2ATaskRemoteFee                    `json:"remote_fees"`
+	RevisionId        openapi_types.UUID                    `json:"revision_id"`
+	State             A2ATaskDetailState                    `json:"state"`
+}
+
+// A2ATaskDetailState defines model for A2ATaskDetail.State.
+type A2ATaskDetailState string
+
+// A2ATaskList defines model for A2ATaskList.
+type A2ATaskList struct {
+	Items      []A2ATask                 `json:"items"`
+	NextCursor nullable.Nullable[string] `json:"next_cursor"`
+}
+
+// A2ATaskModelCallback Content-free callback accounting; null amounts are unknown.
+type A2ATaskModelCallback struct {
+	AttemptId       nullable.Nullable[openapi_types.UUID] `json:"attempt_id"`
+	Currency        nullable.Nullable[string]             `json:"currency"`
+	ObservedCharge  nullable.Nullable[string]             `json:"observed_charge"`
+	ObservedCost    nullable.Nullable[string]             `json:"observed_cost"`
+	RemainingCharge nullable.Nullable[string]             `json:"remaining_charge"`
+	RemainingCost   nullable.Nullable[string]             `json:"remaining_cost"`
+	RequestId       openapi_types.UUID                    `json:"request_id"`
+	State           A2ATaskModelCallbackState             `json:"state"`
+}
+
+// A2ATaskModelCallbackState defines model for A2ATaskModelCallback.State.
+type A2ATaskModelCallbackState string
+
+// A2ATaskRemoteFee A remote message fee and its unresolved exposure.
+type A2ATaskRemoteFee struct {
+	CreatedAt       time.Time          `json:"created_at"`
+	Currency        string             `json:"currency"`
+	DispatchId      openapi_types.UUID `json:"dispatch_id"`
+	ObservedCharge  string             `json:"observed_charge"`
+	ObservedCost    string             `json:"observed_cost"`
+	RemainingCharge string             `json:"remaining_charge"`
+	RemainingCost   string             `json:"remaining_cost"`
+	RunId           openapi_types.UUID `json:"run_id"`
+	State           string             `json:"state"`
+}
+
+// A2ATaskToolCallback Content-free callback accounting; null amounts are unknown.
+type A2ATaskToolCallback struct {
+	Currency        string                          `json:"currency"`
+	DispatchId      openapi_types.UUID              `json:"dispatch_id"`
+	ObservedCharge  nullable.Nullable[string]       `json:"observed_charge"`
+	ObservedCost    nullable.Nullable[string]       `json:"observed_cost"`
+	PricingState    A2ATaskToolCallbackPricingState `json:"pricing_state"`
+	RemainingCharge nullable.Nullable[string]       `json:"remaining_charge"`
+	RemainingCost   nullable.Nullable[string]       `json:"remaining_cost"`
+	RunId           openapi_types.UUID              `json:"run_id"`
+	State           string                          `json:"state"`
+}
+
+// A2ATaskToolCallbackPricingState defines model for A2ATaskToolCallback.PricingState.
+type A2ATaskToolCallbackPricingState string
+
 // AcceptCatalogSuggestionsRequest defines model for AcceptCatalogSuggestionsRequest.
 type AcceptCatalogSuggestionsRequest struct {
 	// CatalogSha256 Digest of the catalog the suggestions were reviewed against; a different catalog answers 409.
@@ -6721,6 +6931,32 @@ type AgentDefinition struct {
 
 // AgentDefinitionProtocol defines model for AgentDefinition.Protocol.
 type AgentDefinitionProtocol string
+
+// AgentDelegation Content-free delegation principals, revocation and pair budget.
+type AgentDelegation struct {
+	AgentId         openapi_types.UUID              `json:"agent_id"`
+	AgentRevokedAt  nullable.Nullable[time.Time]    `json:"agent_revoked_at"`
+	ApiKeyId        openapi_types.UUID              `json:"api_key_id"`
+	ApiKeyRevokedAt nullable.Nullable[time.Time]    `json:"api_key_revoked_at"`
+	Budget          AggregateBudgetUsage            `json:"budget"`
+	BudgetPolicy    nullable.Nullable[BudgetPolicy] `json:"budget_policy"`
+	ConsentPending  bool                            `json:"consent_pending"`
+	ConsumedAt      nullable.Nullable[time.Time]    `json:"consumed_at"`
+	ExpiresAt       time.Time                       `json:"expires_at"`
+	Id              openapi_types.UUID              `json:"id"`
+
+	// MemberAuthorized Current authority of the consenting member, or null for key delegation.
+	MemberAuthorized nullable.Nullable[bool]               `json:"member_authorized"`
+	MemberId         nullable.Nullable[openapi_types.UUID] `json:"member_id"`
+	ProjectId        openapi_types.UUID                    `json:"project_id"`
+	RevokedAt        nullable.Nullable[time.Time]          `json:"revoked_at"`
+}
+
+// AgentDelegationList defines model for AgentDelegationList.
+type AgentDelegationList struct {
+	Items      []AgentDelegation         `json:"items"`
+	NextCursor nullable.Nullable[string] `json:"next_cursor"`
+}
 
 // AgentOAuthConfiguration OAuth grants are bound to the approved agent endpoint and caller identity. Browser and device flows use personal enrollment. Entra OBO uses verified workload assertions and a sealed middle-tier client secret.
 type AgentOAuthConfiguration struct {
@@ -15715,6 +15951,26 @@ type WorkloadMapping struct {
 
 // WorkloadMappingScopes defines model for WorkloadMapping.Scopes.
 type WorkloadMappingScopes string
+
+// ListA2aTasksParams defines parameters for ListA2aTasks.
+type ListA2aTasksParams struct {
+	// Cursor Opaque cursor returned by the previous page.
+	Cursor *string `form:"cursor,omitempty" json:"cursor,omitempty"`
+
+	// Limit Page size, from 1 to 200. Defaults to 50.
+	Limit     *int32              `form:"limit,omitempty" json:"limit,omitempty"`
+	ProjectId *openapi_types.UUID `form:"project_id,omitempty" json:"project_id,omitempty"`
+}
+
+// ListAgentDelegationsParams defines parameters for ListAgentDelegations.
+type ListAgentDelegationsParams struct {
+	// Cursor Opaque cursor returned by the previous page.
+	Cursor *string `form:"cursor,omitempty" json:"cursor,omitempty"`
+
+	// Limit Page size, from 1 to 200. Defaults to 50.
+	Limit     *int32              `form:"limit,omitempty" json:"limit,omitempty"`
+	ProjectId *openapi_types.UUID `form:"project_id,omitempty" json:"project_id,omitempty"`
+}
 
 // ListAgentRunsParams defines parameters for ListAgentRuns.
 type ListAgentRunsParams struct {

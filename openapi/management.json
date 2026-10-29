@@ -29634,6 +29634,533 @@
             "additionalProperties": true
           }
         }
+      },
+      "A2ATask": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "Content-free remote task metadata.",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "project_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "api_key_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "publication_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "revision_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "active",
+              "completed",
+              "failed",
+              "canceled",
+              "outcome_unknown"
+            ]
+          },
+          "callback_attempts": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0,
+            "description": "Admitted callbacks, or null for tasks created before callback counts were recorded."
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "deadline_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "agent_principal_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "member_principal_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "delegation_pair_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Stable, project-scoped pair identifier, or null for an undelegated task."
+          }
+        },
+        "required": [
+          "id",
+          "project_id",
+          "api_key_id",
+          "publication_id",
+          "revision_id",
+          "state",
+          "callback_attempts",
+          "created_at",
+          "deadline_at",
+          "agent_principal_id",
+          "member_principal_id",
+          "delegation_pair_id"
+        ]
+      },
+      "A2ATaskRemoteFee": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "A remote message fee and its unresolved exposure.",
+        "properties": {
+          "dispatch_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "run_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "state": {
+            "type": "string"
+          },
+          "currency": {
+            "type": "string"
+          },
+          "observed_cost": {
+            "type": "string"
+          },
+          "observed_charge": {
+            "type": "string"
+          },
+          "remaining_cost": {
+            "type": "string"
+          },
+          "remaining_charge": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "dispatch_id",
+          "run_id",
+          "state",
+          "currency",
+          "observed_cost",
+          "observed_charge",
+          "remaining_cost",
+          "remaining_charge",
+          "created_at"
+        ]
+      },
+      "A2ATaskDetail": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "Content-free task and associated remote message fees.",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "project_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "api_key_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "publication_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "revision_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "active",
+              "completed",
+              "failed",
+              "canceled",
+              "outcome_unknown"
+            ]
+          },
+          "callback_attempts": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0,
+            "description": "Admitted callbacks, or null for tasks created before callback counts were recorded."
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "deadline_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "remote_fees": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/A2ATaskRemoteFee"
+            }
+          },
+          "agent_principal_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "member_principal_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "delegation_pair_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Stable, project-scoped pair identifier, or null for an undelegated task."
+          },
+          "callback_models": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/A2ATaskModelCallback"
+            }
+          },
+          "callback_tools": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/A2ATaskToolCallback"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "project_id",
+          "api_key_id",
+          "publication_id",
+          "revision_id",
+          "state",
+          "callback_attempts",
+          "created_at",
+          "deadline_at",
+          "remote_fees",
+          "agent_principal_id",
+          "member_principal_id",
+          "delegation_pair_id",
+          "callback_models",
+          "callback_tools"
+        ]
+      },
+      "A2ATaskList": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/A2ATask"
+            },
+            "maxItems": 200
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "items",
+          "next_cursor"
+        ]
+      },
+      "AgentDelegation": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "Content-free delegation principals, revocation and pair budget.",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "project_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "api_key_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "agent_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "member_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "consent_pending": {
+            "type": "boolean"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "consumed_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "revoked_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "api_key_revoked_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "agent_revoked_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "budget_policy": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BudgetPolicy"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "budget": {
+            "$ref": "#/components/schemas/AggregateBudgetUsage"
+          },
+          "member_authorized": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Current authority of the consenting member, or null for key delegation."
+          }
+        },
+        "required": [
+          "id",
+          "project_id",
+          "api_key_id",
+          "agent_id",
+          "member_id",
+          "consent_pending",
+          "expires_at",
+          "consumed_at",
+          "revoked_at",
+          "api_key_revoked_at",
+          "agent_revoked_at",
+          "budget_policy",
+          "budget",
+          "member_authorized"
+        ]
+      },
+      "AgentDelegationList": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AgentDelegation"
+            },
+            "maxItems": 200
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "items",
+          "next_cursor"
+        ]
+      },
+      "A2ATaskModelCallback": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "Content-free callback accounting; null amounts are unknown.",
+        "properties": {
+          "request_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "attempt_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "not_billable",
+              "outcome_unknown",
+              "unpriced",
+              "uncharged",
+              "free",
+              "priced"
+            ]
+          },
+          "currency": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "observed_cost": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "observed_charge": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "remaining_cost": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "remaining_charge": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "request_id",
+          "attempt_id",
+          "state",
+          "currency",
+          "observed_cost",
+          "observed_charge",
+          "remaining_cost",
+          "remaining_charge"
+        ]
+      },
+      "A2ATaskToolCallback": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "Content-free callback accounting; null amounts are unknown.",
+        "properties": {
+          "dispatch_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "run_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "state": {
+            "type": "string"
+          },
+          "pricing_state": {
+            "type": "string",
+            "enum": [
+              "priced",
+              "free",
+              "unpriced",
+              "unknown"
+            ]
+          },
+          "currency": {
+            "type": "string"
+          },
+          "observed_cost": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "observed_charge": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "remaining_cost": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "remaining_charge": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "dispatch_id",
+          "run_id",
+          "state",
+          "pricing_state",
+          "currency",
+          "observed_cost",
+          "observed_charge",
+          "remaining_cost",
+          "remaining_charge"
+        ]
       }
     },
     "securitySchemes": {
@@ -68175,6 +68702,208 @@
         "tags": [
           "a2a-tasks"
         ]
+      }
+    },
+    "/api/v1/a2a-tasks": {
+      "get": {
+        "operationId": "list_a2a_tasks",
+        "tags": [
+          "agents"
+        ],
+        "summary": "List A2A tasks",
+        "description": "Content-free metadata visible only to callers with current access to the project.",
+        "security": [
+          {
+            "sessionCookie": [
+              "read"
+            ]
+          },
+          {
+            "managementToken": [
+              "read"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "description": "Opaque cursor returned by the previous page.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Page size, from 1 to 200. Defaults to 50.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "format": "int32",
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "name": "project_id",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List A2A tasks",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/A2ATaskList"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "404": {
+            "description": "Not visible"
+          },
+          "422": {
+            "description": "Invalid request"
+          }
+        }
+      }
+    },
+    "/api/v1/a2a-tasks/{task_id}": {
+      "get": {
+        "operationId": "get_a2a_task",
+        "tags": [
+          "agents"
+        ],
+        "summary": "Get an A2A task",
+        "description": "Content-free metadata visible only to callers with current access to the project.",
+        "security": [
+          {
+            "sessionCookie": [
+              "read"
+            ]
+          },
+          {
+            "managementToken": [
+              "read"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Get an A2A task",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/A2ATaskDetail"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "404": {
+            "description": "Not visible"
+          },
+          "422": {
+            "description": "Invalid request"
+          }
+        }
+      }
+    },
+    "/api/v1/agent-delegations": {
+      "get": {
+        "operationId": "list_agent_delegations",
+        "tags": [
+          "agents"
+        ],
+        "summary": "List delegations",
+        "description": "Content-free metadata visible only to callers with current access to the project.",
+        "security": [
+          {
+            "sessionCookie": [
+              "read"
+            ]
+          },
+          {
+            "managementToken": [
+              "read"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "description": "Opaque cursor returned by the previous page.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Page size, from 1 to 200. Defaults to 50.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "format": "int32",
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "name": "project_id",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List delegations",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentDelegationList"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "404": {
+            "description": "Not visible"
+          },
+          "422": {
+            "description": "Invalid request"
+          }
+        }
       }
     }
   },
