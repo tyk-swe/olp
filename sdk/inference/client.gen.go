@@ -395,7 +395,9 @@ type ChatToolsetSelection = []openapi_types.UUID
 
 // DelegationGrant defines model for DelegationGrant.
 type DelegationGrant struct {
-	ExpiresAt time.Time `json:"expires_at"`
+	// DelegationPairDigest Stable pair budget ID for this delegation.
+	DelegationPairDigest string    `json:"delegation_pair_digest"`
+	ExpiresAt            time.Time `json:"expires_at"`
 
 	// Token One-use OLP delegation bearer token.
 	Token string `json:"token"`

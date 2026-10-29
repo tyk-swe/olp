@@ -10,6 +10,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/attribution"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/usage"
@@ -225,6 +226,9 @@ func sessionDebitBoundaries(x *call, authority access.Authority) ([]limits.Debit
 		owners = append(owners, owner)
 		requests = append(requests, request)
 	}
+	if agent := admission.DelegationAgentLimits.CostDebitBoundary(time.Hour, admission.BudgetIncreases); agent != nil {
+		add(agent.Owner, agent.Request)
+	}
 	if admission.BudgetGroupID != nil && admission.GroupLimits().CostBudgeted() {
 		if group := groupRequest(&admission, time.Hour); group != nil {
 			group.CostIncreases = admission.BudgetIncreases[group.CostOwnerID]
@@ -264,8 +268,9 @@ func sessionDebitBoundaries(x *call, authority access.Authority) ([]limits.Debit
 			LeaseTTL: time.Hour, CostBasis: boundary.policy.Basis(),
 		})
 	}
-	for _, key := range slices.Sorted(maps.Keys(admission.Attribution)) {
-		value := admission.Attribution[key]
+	labels := admission.BudgetAttribution()
+	for _, key := range slices.Sorted(maps.Keys(labels)) {
+		value := labels[key]
 		policy, ok := admission.ProjectAttributionBudgets[key][value]
 		if !ok || !policy.Limited() {
 			continue
@@ -278,6 +283,16 @@ func sessionDebitBoundaries(x *call, authority access.Authority) ([]limits.Debit
 			CostOwnerID: owner, CostIncreases: admission.BudgetIncreases[owner], LookupID: limits.AggregateBudgetLookup(owner),
 			DailyCostLimit: policy.DailyCostLimit, WeeklyCostLimit: policy.WeeklyCostLimit, MonthlyCostLimit: policy.MonthlyCostLimit,
 			LeaseTTL: time.Hour, CostBasis: policy.Basis(),
+		})
+	}
+	pairPolicy, hasPairPolicy := admission.ProjectAttributionBudgets[attribution.DelegationPairKey][admission.DelegationPairDigest]
+	if admission.DelegationPairDigest != "" && (!hasPairPolicy || !pairPolicy.Limited()) {
+		if admission.ProjectID == nil {
+			return nil, nil, false
+		}
+		owner := limits.AttributionBudgetID(*admission.ProjectID, attribution.DelegationPairKey, admission.DelegationPairDigest)
+		add(limits.DebitOwner{ID: owner, Kind: "aggregate", Basis: limits.BasisCost}, limits.Request{
+			CostOwnerID: owner, CostBasis: limits.BasisCost, LookupID: limits.AggregateBudgetLookup(owner), LeaseTTL: time.Hour,
 		})
 	}
 	if admission.EndUserDigest != "" {

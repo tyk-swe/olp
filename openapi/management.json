@@ -28636,6 +28636,10 @@
             "description": "One-use consent code, shown only once and bound to the selected agent.",
             "type": "string"
           },
+          "delegation_pair_digest": {
+            "description": "Stable pair budget ID for this delegation.",
+            "type": "string"
+          },
           "expires_at": {
             "format": "date-time",
             "type": "string"
@@ -28643,7 +28647,8 @@
         },
         "required": [
           "consent",
-          "expires_at"
+          "expires_at",
+          "delegation_pair_digest"
         ],
         "type": "object"
       },

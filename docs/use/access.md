@@ -502,6 +502,20 @@ Stable pair owners/history survive cap removal. Portable
 `projects[].attribution_budgets` omission/null/empty clears; changes need `keys`
 plus `configure`.
 
+Use the reserved `delegation_pair` budget key to set a shared limit for an agent
+and its delegating principal. The value is the `delegation_pair_digest` returned
+when a member consents or an agent obtains a delegation grant. For example,
+replace the complete budget map with the pair ID and the desired limit:
+
+```json
+{"budgets":{"delegation_pair":{"PAIR_BUDGET_ID":{"daily_cost_limit":"50"}}}}
+```
+
+The gateway derives the pair ID from the authenticated principals and rejects it
+in caller attribution. Pair limits apply alongside key, agent and other
+attribution limits. A member and agent keep the same pair ID across consent
+renewals and replacement keys. Removing a limit does not erase recorded spend.
+
 ## Temporary budget increases
 
 `POST /api/v1/budget-increases` adds exact USD to an existing day/week/month cap

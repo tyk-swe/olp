@@ -563,14 +563,19 @@ func applyAttemptCostDelta(ctx context.Context, tx pgx.Tx, ev *Event, attemptID 
 	if err != nil {
 		return nil, fmt.Errorf("apply request metadata cost delta: %w", err)
 	}
+	agent, err := applyAgentCostDelta(ctx, tx, ev, cost, unpriced, charge, uncharged)
+	if err != nil {
+		return nil, err
+	}
 	// Each snapshot names the request it accounts for, so that installing it in
 	// the distributed counters also removes the cost the gateway reserved for the
 	// request when it was admitted. The reservation can sit under either basis,
 	// so both snapshots carry the identifier.
-	for i := range snapshot {
-		snapshot[i].RequestID = ev.RequestID
+	keySnapshots := slices.Concat(snapshot, agent)
+	for i := range keySnapshots {
+		keySnapshots[i].RequestID = ev.RequestID
 	}
-	snapshots := append(snapshot, endUsers...)
+	snapshots := append(keySnapshots, endUsers...)
 	if ev.BudgetGroupID != nil {
 		group, err := limits.AddGroupCostDelta(ctx, tx, *ev.BudgetGroupID, ev.ObservedAt, cost, unpriced, charge, uncharged)
 		if err != nil {
@@ -580,6 +585,17 @@ func applyAttemptCostDelta(ctx context.Context, tx pgx.Tx, ev *Event, attemptID 
 			group[i].RequestID = ev.RequestID
 		}
 		snapshots = append(snapshots, group...)
+	}
+	return snapshots, nil
+}
+
+func applyAgentCostDelta(ctx context.Context, tx pgx.Tx, ev *Event, cost string, unpriced int64, charge string, uncharged int64) ([]limits.CostSnapshot, error) {
+	if ev.AgentPrincipalID == "" {
+		return nil, nil
+	}
+	snapshots, err := limits.AddCostDelta(ctx, tx, ev.AgentPrincipalID, ev.ObservedAt, cost, unpriced, charge, uncharged)
+	if err != nil {
+		return nil, fmt.Errorf("apply agent cost delta: %w", err)
 	}
 	return snapshots, nil
 }

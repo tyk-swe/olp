@@ -234,9 +234,13 @@ func (a *Admission) reserveKeyWithLimits(ctx context.Context, authority *access.
 		RequestsPerMinute: agent.Limits.RequestsPerMinute,
 		TokensPerMinute:   agent.Limits.TokensPerMinute,
 		MaxConcurrency:    agent.Limits.MaxConcurrency,
+		DailyCostLimit:    agent.Limits.DailyCostLimit,
+		WeeklyCostLimit:   agent.Limits.WeeklyCostLimit,
+		MonthlyCostLimit:  agent.Limits.MonthlyCostLimit,
+		CostBasis:         agent.Limits.CostBasis,
 	}}
 	checked := false
-	agentLease, failure := a.reserveKeyAndGroup(ctx, &principal, "", estimate, ttl, costReservation{}, &checked)
+	agentLease, failure := a.reserveKeyAndGroup(ctx, &principal, "", estimate, ttl, hold, &checked)
 	if failure != nil {
 		return nil, failure
 	}
