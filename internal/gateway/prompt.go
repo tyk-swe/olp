@@ -25,21 +25,34 @@ type promptSelection struct {
 	Variables  map[string]string `json:"variables"`
 }
 
-func (s *Server) parsePrompt(x *call, family wire.Format, body []byte, pathModel string, authorize func(*routing.Route) *Error) (*wire.Request, *Error) {
+type parsedRequest struct {
+	request   *wire.Request
+	reference *usage.PromptReference
+	decoded   int64
+}
+
+func (s *Server) parsePrompt(x *call, family wire.Format, body []byte, pathModel string, authorize func(*routing.Route) *Error) (parsedRequest, *Error) {
 	doc, err := protocols.ParseSource(family, body)
 	if err != nil {
-		return nil, requestError(err)
+		return parsedRequest{}, requestError(err)
 	}
+	return s.parsePromptDocument(x, family, doc, pathModel, authorize, nil)
+}
+
+func (s *Server) parsePromptDocument(x *call, family wire.Format, doc oif.Document, pathModel string, authorize func(*routing.Route) *Error, bindings []oif.Change) (parsedRequest, *Error) {
 	expanded, prompt, promptErr := s.expandPrompt(x, family, doc, pathModel, authorize)
 	if promptErr != nil {
-		return nil, promptErr
+		return parsedRequest{}, promptErr
 	}
-	x.prompt = prompt
-	parsed, err := protocols.ParseDocument(family, expanded, pathModel)
+	bound, err := oif.Apply(expanded, bindings)
 	if err != nil {
-		return nil, requestError(err)
+		return parsedRequest{}, serverError(http.StatusInternalServerError, "internal_error", "The prompt could not be prepared.")
 	}
-	return parsed, nil
+	parsed, err := protocols.ParseDocument(family, bound, pathModel)
+	if err != nil {
+		return parsedRequest{}, requestError(err)
+	}
+	return parsedRequest{request: parsed, reference: prompt, decoded: int64(max(expanded.Len(), bound.Len()))}, nil
 }
 
 func geminiPromptFamily(family wire.Format) bool {
@@ -64,7 +77,7 @@ func promptReference(doc oif.Document, family wire.Format) (oif.Value, string, s
 }
 
 func promptRoute(doc oif.Document, family wire.Format, pathModel string) (string, *Error) {
-	if geminiPromptFamily(family) {
+	if pathModel != "" || geminiPromptFamily(family) {
 		return pathModel, nil
 	}
 	model, ok := doc.Root().Lookup("model")
@@ -356,6 +369,9 @@ func (s *Server) expandPrompt(x *call, family wire.Format, doc oif.Document, pat
 	if e := authorize(&route); e != nil {
 		return oif.Document{}, nil, e
 	}
+	if e := x.checkBody(&route); e != nil {
+		return oif.Document{}, nil, e
+	}
 	if route.Fidelity.Strict() {
 		return oif.Document{}, nil, invalidRequest("invalid_prompt", "Published prompts require a transformed route.", &param)
 	}
@@ -395,9 +411,6 @@ func (s *Server) expandPrompt(x *call, family wire.Format, doc oif.Document, pat
 		}
 		if int64(expanded.Len()) > s.cfg.MaxBodyBytes {
 			return oif.Document{}, nil, bodyTooLarge()
-		}
-		if x.request.body != nil {
-			x.request.body.decoded = max(x.request.body.decoded, int64(expanded.Len()))
 		}
 		return expanded, &usage.PromptReference{ID: revision.PublicationID, RevisionID: revision.ID}, nil
 	}

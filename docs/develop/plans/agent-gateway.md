@@ -383,9 +383,12 @@ for their selected backend, not completion of every retrieval adapter.
   refusals, input guards and content-free persistence. The PostgreSQL-backed
   `TestPlaygroundRendersPublishedPromptLikeInference` compares rendered input
   across four request formats in unary and streaming mode, checks project
-  access and exercises import and label movement. The packaged-console journey
-  covers save, publish, playground rendering, label movement and Axe checks.
-  These are local fixture results, not live provider qualification.
+  access, refuses ambiguous and oversized raw requests before dispatch, and
+  exercises import and label movement. With capture enabled, it also checks that
+  playground variables and rendered text stay out of durable records and
+  exports. The packaged-console journey covers save, publish, playground
+  rendering, label movement and Axe checks. These are local fixture results,
+  not live provider qualification.
 - [x] **RM8.3 — Add delegated identities** (access): workload agents use
   explicit consent and scoped tokens with intersected rights and
   user/agent/pair budgets. Fixtures cover signed tool calls, audience refusal,

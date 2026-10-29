@@ -677,7 +677,12 @@ func (s *Server) inferenceOperation(family wire.Format, dialect string) http.Han
 		var parsed *wire.Request
 		var err error
 		if family == wire.Chat || family == wire.Responses || family == wire.Anthropic || family == wire.Gemini || family == wire.GeminiStream {
-			parsed, e = s.parsePrompt(x, family, body, r.PathValue("model"), s.keyAuthorizer(x.authority))
+			var prompt parsedRequest
+			prompt, e = s.parsePrompt(x, family, body, r.PathValue("model"), s.keyAuthorizer(x.authority))
+			parsed, x.prompt = prompt.request, prompt.reference
+			if x.request.body != nil {
+				x.request.body.decoded = max(x.request.body.decoded, prompt.decoded)
+			}
 		} else if family == wire.Bedrock {
 			parsed, err = protocols.ParseBedrockRequest(body, r.PathValue("model"), strings.HasSuffix(r.URL.Path, "/converse-stream"))
 		} else {
