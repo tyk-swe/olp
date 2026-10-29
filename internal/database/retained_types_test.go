@@ -41,18 +41,26 @@ func TestRetainedResourceKindsCanBePersisted(t *testing.T) {
 	}
 	var document struct {
 		Components struct {
-			Schemas map[string]struct {
-				Properties map[string]struct {
-					Enum []string `json:"enum"`
-				} `json:"properties"`
-			} `json:"schemas"`
+			Schemas map[string]json.RawMessage `json:"schemas"`
 		} `json:"components"`
 	}
 	if err = json.Unmarshal(raw, &document); err != nil {
 		t.Fatal(err)
 	}
+	var schema struct {
+		Properties map[string]json.RawMessage `json:"properties"`
+	}
+	if err := json.Unmarshal(document.Components.Schemas["ProviderResourceItem"], &schema); err != nil {
+		t.Fatal(err)
+	}
+	var property struct {
+		Enum []string `json:"enum"`
+	}
+	if err := json.Unmarshal(schema.Properties["kind"], &property); err != nil {
+		t.Fatal(err)
+	}
 	exposed := map[string]bool{}
-	for _, kind := range document.Components.Schemas["ProviderResourceItem"].Properties["kind"].Enum {
+	for _, kind := range property.Enum {
 		exposed[kind] = true
 		if !persisted[kind] {
 			t.Errorf("management kind %q has no persistence contract", kind)
