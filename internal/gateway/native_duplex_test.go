@@ -334,22 +334,28 @@ func TestNativeDuplexBedrockCleanStreamEndSettlesObservedUsage(t *testing.T) {
 	} {
 		upstream.frames <- []byte(frame)
 	}
-	close(upstream.frames)
 	h.gateway.bedrockStream = func(context.Context, *call, *pin) (duplexPeer, error) {
 		return upstream, nil
 	}
 	conn, ctx := dialDuplex(t, h, fullKey, "/native/bedrock-realtime/sessions/"+routeSlug)
-	if err := conn.Write(ctx, websocket.MessageText, []byte(`{"event":{"sessionStart":{"inferenceConfig":{"maxTokens":1024}}}}`)); err != nil {
-		t.Fatal(err)
-	}
 	for _, frame := range []string{
+		`{"event":{"sessionStart":{"inferenceConfig":{"maxTokens":1024}}}}`,
 		`{"event":{"promptEnd":{"promptName":"p1"}}}`,
 		`{"event":{"sessionEnd":{}}}`,
 	} {
 		if err := conn.Write(ctx, websocket.MessageText, []byte(frame)); err != nil {
 			t.Fatal(err)
 		}
+		select {
+		case forwarded := <-upstream.writes:
+			if string(forwarded) != frame {
+				t.Fatalf("forwarded frame = %s, want %s", forwarded, frame)
+			}
+		case <-ctx.Done():
+			t.Fatalf("session frame did not reach the provider: %v", ctx.Err())
+		}
 	}
+	close(upstream.frames)
 	for {
 		if _, _, err := conn.Read(ctx); err != nil {
 			break
