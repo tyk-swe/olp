@@ -1,7 +1,11 @@
 package gateway
 
 import (
+	"io"
 	"net/http"
+
+	statuspb "google.golang.org/genproto/googleapis/rpc/status"
+	"google.golang.org/protobuf/proto"
 	"testing"
 )
 
@@ -20,6 +24,14 @@ func TestTraceIngestionRequiresAuthenticatedScope(t *testing.T) {
 			defer response.Body.Close()
 			if response.StatusCode != tc.want {
 				t.Fatalf("trace request returned %d, want %d", response.StatusCode, tc.want)
+			}
+			body, err := io.ReadAll(response.Body)
+			if err != nil {
+				t.Fatal(err)
+			}
+			status := &statuspb.Status{}
+			if response.Header.Get("Content-Type") != "application/x-protobuf" || proto.Unmarshal(body, status) != nil || status.GetCode() == 0 || status.GetMessage() == "" {
+				t.Fatalf("trace refusal was not an OTLP status: content-type=%q body=%q", response.Header.Get("Content-Type"), body)
 			}
 		})
 	}

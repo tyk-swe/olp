@@ -168,6 +168,24 @@ func (e ResponsesPromptLabelReferenceLabel) Valid() bool {
 	}
 }
 
+// Defines values for ExportTracesParamsContentEncoding.
+const (
+	Gzip     ExportTracesParamsContentEncoding = "gzip"
+	Identity ExportTracesParamsContentEncoding = "identity"
+)
+
+// Valid indicates whether the value is a known member of the ExportTracesParamsContentEncoding enum.
+func (e ExportTracesParamsContentEncoding) Valid() bool {
+	switch e {
+	case Gzip:
+		return true
+	case Identity:
+		return true
+	default:
+		return false
+	}
+}
+
 // A2AAgentCard defines model for A2AAgentCard.
 type A2AAgentCard struct {
 	Capabilities         map[string]interface{}    `json:"capabilities"`
@@ -473,6 +491,14 @@ type CreateResponseWithPromptParams struct {
 	// XOLPAgentIdentity The current workload assertion is required when Authorization contains a one-use delegation token.
 	XOLPAgentIdentity *string `json:"X-OLP-Agent-Identity,omitempty"`
 }
+
+// ExportTracesParams defines parameters for ExportTraces.
+type ExportTracesParams struct {
+	ContentEncoding *ExportTracesParamsContentEncoding `json:"Content-Encoding,omitempty"`
+}
+
+// ExportTracesParamsContentEncoding defines parameters for ExportTraces.
+type ExportTracesParamsContentEncoding string
 
 // CallA2AAgentJSONRequestBody defines body for CallA2AAgent for application/json ContentType.
 type CallA2AAgentJSONRequestBody = A2ARequest
@@ -1648,12 +1674,12 @@ type ClientInterface interface {
 
 	// ExportTracesWithBody Export OTLP traces
 	//
-	// Accept an OTLP/HTTP protobuf trace batch for the authenticated project. The key requires traces_write scope. Batches are limited to one MiB and 256 spans, with at most 32 allowlisted attributes per span and 60 batches per minute per key. Content, events, links and unknown fields are discarded. Run and attempt correlations are retained only when owned by the authenticated principal.
+	// Accept an OTLP/HTTP protobuf trace batch for the authenticated project. The key requires traces_write scope. Batches are limited to one MiB after decompression and 256 spans, with at most 32 allowlisted attributes per span and 60 batches per minute per key. Identity and gzip encodings are supported. Failures contain a protobuf google.rpc.Status. Content, events, links and unknown fields are discarded. Run and attempt correlations are retained only when owned by the authenticated principal.
 	//
 	// Takes any type of body and a specified content type.
 	//
 	// Corresponds with POST /v1/traces (the `ExportTraces` operationId).
-	ExportTracesWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+	ExportTracesWithBody(ctx context.Context, params *ExportTracesParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
 }
 
 // CallA2AAgentWithBody Send a message to or read and subscribe to a task from a published A2A agent
@@ -1941,13 +1967,13 @@ func (c *Client) CreateResponseWithPrompt(ctx context.Context, params *CreateRes
 
 // ExportTracesWithBody Export OTLP traces
 //
-// Accept an OTLP/HTTP protobuf trace batch for the authenticated project. The key requires traces_write scope. Batches are limited to one MiB and 256 spans, with at most 32 allowlisted attributes per span and 60 batches per minute per key. Content, events, links and unknown fields are discarded. Run and attempt correlations are retained only when owned by the authenticated principal.
+// Accept an OTLP/HTTP protobuf trace batch for the authenticated project. The key requires traces_write scope. Batches are limited to one MiB after decompression and 256 spans, with at most 32 allowlisted attributes per span and 60 batches per minute per key. Identity and gzip encodings are supported. Failures contain a protobuf google.rpc.Status. Content, events, links and unknown fields are discarded. Run and attempt correlations are retained only when owned by the authenticated principal.
 //
 // Takes any type of body and a specified content type.
 //
 // Corresponds with POST /v1/traces (the `ExportTraces` operationId).
-func (c *Client) ExportTracesWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewExportTracesRequestWithBody(c.Server, contentType, body)
+func (c *Client) ExportTracesWithBody(ctx context.Context, params *ExportTracesParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewExportTracesRequestWithBody(c.Server, params, contentType, body)
 	if err != nil {
 		return nil, err
 	}
@@ -2395,7 +2421,7 @@ func NewCreateResponseWithPromptRequestWithBody(server string, params *CreateRes
 }
 
 // NewExportTracesRequestWithBody constructs an http.Request for the ExportTraces method, with any body, and a specified content type
-func NewExportTracesRequestWithBody(server string, contentType string, body io.Reader) (*http.Request, error) {
+func NewExportTracesRequestWithBody(server string, params *ExportTracesParams, contentType string, body io.Reader) (*http.Request, error) {
 	var err error
 
 	serverURL, err := url.Parse(server)
@@ -2419,6 +2445,21 @@ func NewExportTracesRequestWithBody(server string, contentType string, body io.R
 	}
 
 	req.Header.Add("Content-Type", contentType)
+
+	if params != nil {
+
+		if params.ContentEncoding != nil {
+			var headerParam0 string
+
+			headerParam0, err = runtime.StyleParamWithOptions("simple", false, "Content-Encoding", *params.ContentEncoding, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationHeader, Type: "string", Format: ""})
+			if err != nil {
+				return nil, err
+			}
+
+			req.Header.Set("Content-Encoding", headerParam0)
+		}
+
+	}
 
 	return req, nil
 }
@@ -2604,12 +2645,12 @@ type ClientWithResponsesInterface interface {
 
 	// ExportTracesWithBodyWithResponse Export OTLP traces
 	//
-	// Accept an OTLP/HTTP protobuf trace batch for the authenticated project. The key requires traces_write scope. Batches are limited to one MiB and 256 spans, with at most 32 allowlisted attributes per span and 60 batches per minute per key. Content, events, links and unknown fields are discarded. Run and attempt correlations are retained only when owned by the authenticated principal.
+	// Accept an OTLP/HTTP protobuf trace batch for the authenticated project. The key requires traces_write scope. Batches are limited to one MiB after decompression and 256 spans, with at most 32 allowlisted attributes per span and 60 batches per minute per key. Identity and gzip encodings are supported. Failures contain a protobuf google.rpc.Status. Content, events, links and unknown fields are discarded. Run and attempt correlations are retained only when owned by the authenticated principal.
 	//
 	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
 	//
 	// Corresponds with POST /v1/traces (the `ExportTraces` operationId).
-	ExportTracesWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*ExportTracesResponse, error)
+	ExportTracesWithBodyWithResponse(ctx context.Context, params *ExportTracesParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*ExportTracesResponse, error)
 }
 
 type CallA2AAgentResponse struct {
@@ -3216,55 +3257,6 @@ func (r CreateResponseWithPromptResponse) ContentType() string {
 type ExportTracesResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
-	// JSON400 the response for an HTTP 400 `application/json` response
-	JSON400 *InferenceError
-	// JSON401 the response for an HTTP 401 `application/json` response
-	JSON401 *InferenceError
-	// JSON403 the response for an HTTP 403 `application/json` response
-	JSON403 *InferenceError
-	// JSON413 the response for an HTTP 413 `application/json` response
-	JSON413 *InferenceError
-	// JSON415 the response for an HTTP 415 `application/json` response
-	JSON415 *InferenceError
-	// JSON429 the response for an HTTP 429 `application/json` response
-	JSON429 *InferenceError
-	// JSON503 the response for an HTTP 503 `application/json` response
-	JSON503 *InferenceError
-}
-
-// GetJSON400 returns the response for an HTTP 400 `application/json` response
-func (r ExportTracesResponse) GetJSON400() *InferenceError {
-	return r.JSON400
-}
-
-// GetJSON401 returns the response for an HTTP 401 `application/json` response
-func (r ExportTracesResponse) GetJSON401() *InferenceError {
-	return r.JSON401
-}
-
-// GetJSON403 returns the response for an HTTP 403 `application/json` response
-func (r ExportTracesResponse) GetJSON403() *InferenceError {
-	return r.JSON403
-}
-
-// GetJSON413 returns the response for an HTTP 413 `application/json` response
-func (r ExportTracesResponse) GetJSON413() *InferenceError {
-	return r.JSON413
-}
-
-// GetJSON415 returns the response for an HTTP 415 `application/json` response
-func (r ExportTracesResponse) GetJSON415() *InferenceError {
-	return r.JSON415
-}
-
-// GetJSON429 returns the response for an HTTP 429 `application/json` response
-func (r ExportTracesResponse) GetJSON429() *InferenceError {
-	return r.JSON429
-}
-
-// GetJSON503 returns the response for an HTTP 503 `application/json` response
-func (r ExportTracesResponse) GetJSON503() *InferenceError {
-	return r.JSON503
 }
 
 // GetBody returns the raw response body bytes
@@ -3523,13 +3515,13 @@ func (c *ClientWithResponses) CreateResponseWithPromptWithResponse(ctx context.C
 
 // ExportTracesWithBodyWithResponse Export OTLP traces
 //
-// Accept an OTLP/HTTP protobuf trace batch for the authenticated project. The key requires traces_write scope. Batches are limited to one MiB and 256 spans, with at most 32 allowlisted attributes per span and 60 batches per minute per key. Content, events, links and unknown fields are discarded. Run and attempt correlations are retained only when owned by the authenticated principal.
+// Accept an OTLP/HTTP protobuf trace batch for the authenticated project. The key requires traces_write scope. Batches are limited to one MiB after decompression and 256 spans, with at most 32 allowlisted attributes per span and 60 batches per minute per key. Identity and gzip encodings are supported. Failures contain a protobuf google.rpc.Status. Content, events, links and unknown fields are discarded. Run and attempt correlations are retained only when owned by the authenticated principal.
 //
 // Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
 //
 // Corresponds with POST /v1/traces (the `ExportTraces` operationId).
-func (c *ClientWithResponses) ExportTracesWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*ExportTracesResponse, error) {
-	rsp, err := c.ExportTracesWithBody(ctx, contentType, body, reqEditors...)
+func (c *ClientWithResponses) ExportTracesWithBodyWithResponse(ctx context.Context, params *ExportTracesParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*ExportTracesResponse, error) {
+	rsp, err := c.ExportTracesWithBody(ctx, params, contentType, body, reqEditors...)
 	if err != nil {
 		return nil, err
 	}
@@ -4067,58 +4059,6 @@ func ParseExportTracesResponse(rsp *http.Response) (*ExportTracesResponse, error
 	response := &ExportTracesResponse{
 		Body:         bodyBytes,
 		HTTPResponse: rsp,
-	}
-
-	switch {
-	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
-		var dest InferenceError
-		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
-			return nil, err
-		}
-		response.JSON400 = &dest
-
-	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
-		var dest InferenceError
-		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
-			return nil, err
-		}
-		response.JSON401 = &dest
-
-	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
-		var dest InferenceError
-		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
-			return nil, err
-		}
-		response.JSON403 = &dest
-
-	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 413:
-		var dest InferenceError
-		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
-			return nil, err
-		}
-		response.JSON413 = &dest
-
-	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 415:
-		var dest InferenceError
-		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
-			return nil, err
-		}
-		response.JSON415 = &dest
-
-	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 429:
-		var dest InferenceError
-		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
-			return nil, err
-		}
-		response.JSON429 = &dest
-
-	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
-		var dest InferenceError
-		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
-			return nil, err
-		}
-		response.JSON503 = &dest
-
 	}
 
 	return response, nil

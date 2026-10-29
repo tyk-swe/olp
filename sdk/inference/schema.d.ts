@@ -15,7 +15,7 @@ export interface paths {
         put?: never;
         /**
          * Export OTLP traces
-         * @description Accept an OTLP/HTTP protobuf trace batch for the authenticated project. The key requires traces_write scope. Batches are limited to one MiB and 256 spans, with at most 32 allowlisted attributes per span and 60 batches per minute per key. Content, events, links and unknown fields are discarded. Run and attempt correlations are retained only when owned by the authenticated principal.
+         * @description Accept an OTLP/HTTP protobuf trace batch for the authenticated project. The key requires traces_write scope. Batches are limited to one MiB after decompression and 256 spans, with at most 32 allowlisted attributes per span and 60 batches per minute per key. Identity and gzip encodings are supported. Failures contain a protobuf google.rpc.Status. Content, events, links and unknown fields are discarded. Run and attempt correlations are retained only when owned by the authenticated principal.
          */
         post: operations["exportTraces"];
         delete?: never;
@@ -402,7 +402,9 @@ export interface operations {
     exportTraces: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "Content-Encoding"?: "identity" | "gzip";
+            };
             path?: never;
             cookie?: never;
         };
@@ -427,7 +429,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["InferenceError"];
+                    "application/x-protobuf": string;
                 };
             };
             /** @description The credential is invalid, expired or revoked */
@@ -436,7 +438,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["InferenceError"];
+                    "application/x-protobuf": string;
                 };
             };
             /** @description The caller lacks trace scope or project access */
@@ -445,7 +447,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["InferenceError"];
+                    "application/x-protobuf": string;
                 };
             };
             /** @description The trace batch exceeds one MiB */
@@ -454,7 +456,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["InferenceError"];
+                    "application/x-protobuf": string;
                 };
             };
             /** @description The content type or encoding is unsupported */
@@ -463,7 +465,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["InferenceError"];
+                    "application/x-protobuf": string;
                 };
             };
             /** @description The trace or caller rate limit is exceeded */
@@ -472,7 +474,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["InferenceError"];
+                    "application/x-protobuf": string;
                 };
             };
             /** @description Trace storage or limits are unavailable */
@@ -481,7 +483,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["InferenceError"];
+                    "application/x-protobuf": string;
                 };
             };
         };

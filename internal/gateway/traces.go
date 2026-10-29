@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"compress/gzip"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -10,6 +11,7 @@ import (
 	"mime"
 	"net/http"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -22,6 +24,8 @@ import (
 	collector "go.opentelemetry.io/proto/otlp/collector/trace/v1"
 	commonpb "go.opentelemetry.io/proto/otlp/common/v1"
 	tracepb "go.opentelemetry.io/proto/otlp/trace/v1"
+	statuspb "google.golang.org/genproto/googleapis/rpc/status"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -58,51 +62,51 @@ func (s *Server) ingestTraces(w http.ResponseWriter, r *http.Request) {
 	token, _ := consumerauth.Bearer(r.Header.Get("Authorization"))
 	authority, failure := consumerauth.Authenticate(s.Runtime, r, token, "traces_write", s.cfg.TrustedProxies, time.Now())
 	if failure != nil {
-		writeError(w, serverError(failure.Status, failure.Code, failure.Message))
+		writeTraceError(w, failure.Status, failure.Message)
 		return
 	}
 	if authority.ProjectID == nil || !authority.AllowsResource("traces_write", "", *authority.ProjectID, time.Now()) {
-		writeError(w, permissionError("permission_denied", "This API key cannot write traces for a project."))
+		writeTraceError(w, http.StatusForbidden, "This API key cannot write traces for a project.")
 		return
 	}
 	if s.Traces == nil || s.Traces.Pool == nil || s.Traces.Limiter == nil || s.Traces.Auth == nil {
-		writeError(w, serverError(http.StatusServiceUnavailable, "traces_unavailable", "Trace ingestion is unavailable."))
+		writeTraceError(w, http.StatusServiceUnavailable, "Trace ingestion is unavailable.")
 		return
 	}
 	leases, err := s.Traces.reserve(r.Context(), authority)
 	if err != nil {
 		var exceeded *limits.ExceededError
 		if errors.As(err, &exceeded) {
-			writeError(w, serverError(http.StatusTooManyRequests, "trace_rate_limited", "Trace ingestion rate limit exceeded."))
+			writeTraceError(w, http.StatusTooManyRequests, "Trace ingestion rate limit exceeded.")
 			return
 		}
-		writeError(w, serverError(http.StatusServiceUnavailable, "limits_unavailable", "Trace ingestion limits are unavailable."))
+		writeTraceError(w, http.StatusServiceUnavailable, "Trace ingestion limits are unavailable.")
 		return
 	}
 	defer releaseTraceLeases(r.Context(), leases)
 	contentType, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
-	if err != nil || contentType != "application/x-protobuf" || r.Header.Get("Content-Encoding") != "" {
-		writeError(w, serverError(http.StatusUnsupportedMediaType, "invalid_content_type", "Trace requests require uncompressed OTLP protobuf."))
+	if err != nil || contentType != "application/x-protobuf" {
+		writeTraceError(w, http.StatusUnsupportedMediaType, "Trace requests require OTLP protobuf.")
 		return
 	}
-	body, err := io.ReadAll(io.LimitReader(r.Body, traceBodyLimit+1))
-	if err != nil || len(body) > traceBodyLimit {
-		writeError(w, serverError(http.StatusRequestEntityTooLarge, "trace_batch_too_large", "Trace batches are limited to one MiB."))
+	body, failureStatus := readTraceBody(r.Body, r.Header.Get("Content-Encoding"))
+	if failureStatus != 0 {
+		writeTraceError(w, failureStatus, "Trace request encoding or size is invalid.")
 		return
 	}
 	request := &collector.ExportTraceServiceRequest{}
 	if err := (proto.UnmarshalOptions{DiscardUnknown: true}).Unmarshal(body, request); err != nil {
-		writeError(w, serverError(http.StatusBadRequest, "invalid_trace_batch", "The OTLP trace batch is invalid."))
+		writeTraceError(w, http.StatusBadRequest, "The OTLP trace batch is invalid.")
 		return
 	}
 	spans := traceSpans(request)
 	if len(spans) > traceSpanLimit {
-		writeError(w, serverError(http.StatusBadRequest, "trace_batch_too_large", "Trace batches are limited to 256 spans."))
+		writeTraceError(w, http.StatusBadRequest, "Trace batches are limited to 256 spans.")
 		return
 	}
 	for _, span := range spans {
 		if !validTraceSpan(span) {
-			writeError(w, serverError(http.StatusBadRequest, "invalid_trace_span", "A trace span has invalid identifiers or too many attributes."))
+			writeTraceError(w, http.StatusBadRequest, "A trace span has invalid identifiers or too many attributes.")
 			return
 		}
 	}
@@ -115,12 +119,61 @@ func (s *Server) ingestTraces(w http.ResponseWriter, r *http.Request) {
 	})
 	if len(records) > 0 {
 		if err := s.Traces.persist(r.Context(), authority, records); err != nil {
-			writeError(w, serverError(http.StatusServiceUnavailable, "traces_unavailable", "Trace ingestion is unavailable."))
+			writeTraceError(w, http.StatusServiceUnavailable, "Trace ingestion is unavailable.")
 			return
 		}
 	}
 	w.Header().Set("Content-Type", "application/x-protobuf")
 	w.WriteHeader(http.StatusOK)
+}
+
+func traceErrorCode(httpStatus int) codes.Code {
+	switch httpStatus {
+	case http.StatusUnauthorized:
+		return codes.Unauthenticated
+	case http.StatusForbidden:
+		return codes.PermissionDenied
+	case http.StatusRequestEntityTooLarge, http.StatusTooManyRequests:
+		return codes.ResourceExhausted
+	case http.StatusServiceUnavailable:
+		return codes.Unavailable
+	default:
+		return codes.InvalidArgument
+	}
+}
+
+func writeTraceError(w http.ResponseWriter, httpStatus int, message string) {
+	body, _ := proto.Marshal(&statuspb.Status{Code: int32(traceErrorCode(httpStatus)), Message: message})
+	w.Header().Set("Content-Type", "application/x-protobuf")
+	w.WriteHeader(httpStatus)
+	_, _ = w.Write(body)
+}
+
+func readTraceBody(body io.Reader, encoding string) ([]byte, int) {
+	switch strings.ToLower(strings.TrimSpace(encoding)) {
+	case "", "identity":
+		return readTraceBytes(body)
+	case "gzip":
+		reader, err := gzip.NewReader(body)
+		if err != nil {
+			return nil, http.StatusBadRequest
+		}
+		defer reader.Close()
+		return readTraceBytes(reader)
+	default:
+		return nil, http.StatusUnsupportedMediaType
+	}
+}
+
+func readTraceBytes(reader io.Reader) ([]byte, int) {
+	body, err := io.ReadAll(io.LimitReader(reader, traceBodyLimit+1))
+	if err != nil {
+		return nil, http.StatusBadRequest
+	}
+	if len(body) > traceBodyLimit {
+		return nil, http.StatusRequestEntityTooLarge
+	}
+	return body, 0
 }
 
 func (d *TraceDeps) reserve(ctx context.Context, authority access.Authority) ([]*limits.Lease, error) {
@@ -130,15 +183,32 @@ func (d *TraceDeps) reserve(ctx context.Context, authority access.Authority) ([]
 	if err != nil {
 		return nil, err
 	}
-	if authority.Policy.RequestsPerMinute == nil && authority.Policy.MaxConcurrency == nil {
-		return []*limits.Lease{traceLease}, nil
-	}
-	keyLease, err := d.Limiter.Reserve(ctx, limits.Request{CostOwnerID: authority.ID, LookupID: authority.LimitsLookup(), RequestsPerMinute: authority.Policy.RequestsPerMinute, MaxConcurrency: authority.Policy.MaxConcurrency, LeaseTTL: time.Minute})
+	keyLease, err := d.reserveTraceKey(ctx, authority)
 	if err != nil {
-		_ = traceLease.Release(ctx)
+		_ = traceLease.Refund(ctx)
 		return nil, err
 	}
-	return []*limits.Lease{traceLease, keyLease}, nil
+	groupLease, err := d.reserveTraceGroup(ctx, authority)
+	if err != nil {
+		_ = keyLease.Refund(ctx)
+		_ = traceLease.Refund(ctx)
+		return nil, err
+	}
+	return []*limits.Lease{traceLease, keyLease, groupLease}, nil
+}
+
+func (d *TraceDeps) reserveTraceKey(ctx context.Context, authority access.Authority) (*limits.Lease, error) {
+	if authority.Policy.RequestsPerMinute == nil && authority.Policy.MaxConcurrency == nil {
+		return nil, nil
+	}
+	return d.Limiter.Reserve(ctx, limits.Request{CostOwnerID: authority.ID, LookupID: authority.LimitsLookup(), RequestsPerMinute: authority.Policy.RequestsPerMinute, MaxConcurrency: authority.Policy.MaxConcurrency, LeaseTTL: time.Minute})
+}
+
+func (d *TraceDeps) reserveTraceGroup(ctx context.Context, authority access.Authority) (*limits.Lease, error) {
+	if authority.BudgetGroupID == nil || authority.BudgetGroupRPM == nil && authority.BudgetGroupConcurrency == nil {
+		return nil, nil
+	}
+	return d.Limiter.Reserve(ctx, limits.Request{CostOwnerID: *authority.BudgetGroupID, LookupID: limits.BudgetGroupLookup(*authority.BudgetGroupID), RequestsPerMinute: authority.BudgetGroupRPM, MaxConcurrency: authority.BudgetGroupConcurrency, LeaseTTL: time.Minute})
 }
 
 func releaseTraceLeases(ctx context.Context, leases []*limits.Lease) {
@@ -166,7 +236,7 @@ func traceAttributeAllowed(key string) bool {
 }
 
 func validTraceSpan(span *tracepb.Span) bool {
-	if span == nil || len(span.TraceId) != 16 || len(span.SpanId) != 8 || len(span.ParentSpanId) != 0 && len(span.ParentSpanId) != 8 || span.EndTimeUnixNano < span.StartTimeUnixNano {
+	if span == nil || len(span.TraceId) != 16 || len(span.SpanId) != 8 || !slices.ContainsFunc(span.TraceId, func(b byte) bool { return b != 0 }) || !slices.ContainsFunc(span.SpanId, func(b byte) bool { return b != 0 }) || len(span.ParentSpanId) != 0 && len(span.ParentSpanId) != 8 || span.EndTimeUnixNano < span.StartTimeUnixNano {
 		return false
 	}
 	allowed := slices.Collect(func(yield func(*commonpb.KeyValue) bool) {
@@ -197,9 +267,12 @@ func traceString(attributes []*commonpb.KeyValue, key string) string {
 }
 
 func traceID(attributes []*commonpb.KeyValue, key string) string {
+	if !slices.ContainsFunc(attributes, func(attribute *commonpb.KeyValue) bool { return attribute != nil && attribute.Key == key }) {
+		return ""
+	}
 	parsed, err := uuid.Parse(traceString(attributes, key))
 	if err != nil {
-		return ""
+		return uuid.Nil.String()
 	}
 	return parsed.String()
 }
@@ -246,7 +319,7 @@ func makeTraceRecord(span *tracepb.Span) traceRecord {
 
 const insertTraceSpansSQL = `INSERT INTO olp.trace_spans(project_id,api_key_id,principal_digest,trace_id,span_id,parent_span_id,run_id,attempt_id,started_nanos,ended_nanos,category,status,attributes)
 SELECT $1::uuid,$2::uuid,$3,decode(v.trace_id,'hex'),decode(v.span_id,'hex'),decode(NULLIF(v.parent_id,''),'hex'),
- CASE WHEN r.id IS NOT NULL AND (sr.id IS NULL OR sr.id=r.id) THEN r.id WHEN v.run_id='' AND sr.id IS NOT NULL THEN sr.id ELSE NULL END,
+ CASE WHEN r.id IS NOT NULL AND (v.attempt_id='' OR sr.id=r.id) THEN r.id WHEN v.run_id='' AND sr.id IS NOT NULL THEN sr.id ELSE NULL END,
  CASE WHEN sr.id IS NOT NULL AND (v.run_id='' OR r.id=sr.id) THEN s.dispatch_id ELSE NULL END,
  v.started_nanos,v.ended_nanos,v.category,v.status,v.attributes
 FROM jsonb_to_recordset($4::jsonb) AS v(trace_id text,span_id text,parent_id text,run_id text,attempt_id text,started_nanos numeric,ended_nanos numeric,category text,status smallint,attributes jsonb)
