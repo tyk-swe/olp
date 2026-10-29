@@ -76,7 +76,8 @@ func (s *Server) rpc(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, http.StatusText(status), status)
 		return
 	}
-	if !requestVersionMatches(revision.Definition.Agent.Protocol, r.Header.Get("A2A-Version")) {
+	version := requestProtocol(r)
+	if version == "" {
 		http.Error(w, "Unsupported A2A version", http.StatusBadRequest)
 		return
 	}
@@ -103,8 +104,12 @@ func (s *Server) rpc(w http.ResponseWriter, r *http.Request) {
 		fail(w, request.ID, -32600, "Request payload validation error")
 		return
 	}
-	decoded, err := decodeRequest(revision.Definition.Agent.Protocol, request)
+	decoded, err := decodeRequest(version, request)
 	if err != nil {
+		if version != revision.Definition.Agent.Protocol {
+			http.Error(w, "Unsupported A2A version", http.StatusBadRequest)
+			return
+		}
 		if errors.Is(err, errMethodNotDeclared) {
 			fail(w, request.ID, -32601, "Method not found")
 			return
@@ -112,26 +117,33 @@ func (s *Server) rpc(w http.ResponseWriter, r *http.Request) {
 		fail(w, request.ID, -32602, "Invalid parameters")
 		return
 	}
+	if version != revision.Definition.Agent.Protocol && (decoded.Method == "SendMessage" || decoded.Method == "SendStreamingMessage") {
+		var params protocol.SendMessageRequest
+		if json.Unmarshal(decoded.Params, &params) != nil || params.Message == nil || params.Message.TaskID == "" {
+			http.Error(w, "Unsupported A2A version", http.StatusBadRequest)
+			return
+		}
+	}
 	switch decoded.Method {
 	case "SendMessage":
-		s.send(w, r, authority, revision, release, decoded)
+		s.send(w, r, authority, revision, release, version, decoded)
 	case "GetTask":
-		s.getTask(w, r, authority, revision, release, decoded)
+		s.getTask(w, r, authority, revision, release, version, decoded)
 	case "SendStreamingMessage":
-		s.sendStream(w, r, authority, revision, release, decoded)
+		s.sendStream(w, r, authority, revision, release, version, decoded)
 	case "SubscribeToTask":
-		s.subscribe(w, r, authority, revision, release, decoded)
+		s.subscribe(w, r, authority, revision, release, version, decoded)
 	default:
 		fail(w, request.ID, -32601, "Method not found")
 	}
 }
 
-func (s *Server) pinnedRevision(authority access.Authority, publication agentcontract.Revision, task task, release *runtime.Release) (agentcontract.Revision, bool) {
+func (s *Server) pinnedRevision(authority access.Authority, publication agentcontract.Revision, task task, release *runtime.Release, version string) (agentcontract.Revision, bool) {
 	if release == nil || release.Snapshot == nil {
 		return agentcontract.Revision{}, false
 	}
 	for _, revision := range release.Snapshot.AgentPublications {
-		if revision.ID == task.RevisionID && revision.PublicationID == publication.PublicationID && revision.ProjectID == publication.ProjectID && revision.Definition.Agent != nil && revision.Definition.Agent.Protocol == publication.Definition.Agent.Protocol && s.Runtime.AuthorizeAgentResource(authority, "agents", revision.PublicationID, revision.ID, revision.ProjectID) == nil {
+		if revision.ID == task.RevisionID && revision.PublicationID == publication.PublicationID && revision.ProjectID == publication.ProjectID && revision.Definition.Agent != nil && revision.Definition.Agent.Protocol == version && s.Runtime.AuthorizeAgentResource(authority, "agents", revision.PublicationID, revision.ID, revision.ProjectID) == nil {
 			return revision, true
 		}
 	}
@@ -144,7 +156,7 @@ type preparedSend struct {
 	ExpectedUpstreamID string
 }
 
-func (s *Server) prepareSend(ctx context.Context, authority access.Authority, revision agentcontract.Revision, release *runtime.Release, raw json.RawMessage) (preparedSend, *rpcError) {
+func (s *Server) prepareSend(ctx context.Context, authority access.Authority, revision agentcontract.Revision, release *runtime.Release, version string, raw json.RawMessage) (preparedSend, *rpcError) {
 	var params protocol.SendMessageRequest
 	if json.Unmarshal(raw, &params) != nil || params.Message == nil || params.Message.ID == "" || params.Message.Role != protocol.MessageRoleUser || len(params.Message.Parts) == 0 || len(params.Message.ReferenceTasks) != 0 || params.Tenant != "" || params.Config != nil && params.Config.PushConfig != nil {
 		return preparedSend{}, &rpcError{-32602, "Invalid parameters"}
@@ -159,7 +171,7 @@ func (s *Server) prepareSend(ctx context.Context, authority access.Authority, re
 	if err != nil {
 		return preparedSend{}, &rpcError{-32001, "Task not found"}
 	}
-	pinned, ok := s.pinnedRevision(authority, revision, owned, release)
+	pinned, ok := s.pinnedRevision(authority, revision, owned, release, version)
 	if !ok || params.Message.ContextID != "" && params.Message.ContextID != owned.ID {
 		return preparedSend{}, &rpcError{-32001, "Task not found"}
 	}
@@ -167,8 +179,8 @@ func (s *Server) prepareSend(ctx context.Context, authority access.Authority, re
 	return preparedSend{Params: protocol.SendMessageRequest{Config: params.Config, Message: &translatedMessage, Metadata: params.Metadata}, Revision: pinned, ExpectedUpstreamID: owned.UpstreamID}, nil
 }
 
-func (s *Server) send(w http.ResponseWriter, r *http.Request, authority access.Authority, revision agentcontract.Revision, release *runtime.Release, request rpcRequest) {
-	prepared, failure := s.prepareSend(r.Context(), authority, revision, release, request.Params)
+func (s *Server) send(w http.ResponseWriter, r *http.Request, authority access.Authority, revision agentcontract.Revision, release *runtime.Release, version string, request rpcRequest) {
+	prepared, failure := s.prepareSend(r.Context(), authority, revision, release, version, request.Params)
 	if failure != nil {
 		reply(w, request.ID, nil, failure)
 		return
@@ -243,7 +255,7 @@ func resultIDs(result protocol.SendMessageResult) (string, string, bool) {
 	}
 }
 
-func (s *Server) getTask(w http.ResponseWriter, r *http.Request, authority access.Authority, revision agentcontract.Revision, release *runtime.Release, request rpcRequest) {
+func (s *Server) getTask(w http.ResponseWriter, r *http.Request, authority access.Authority, revision agentcontract.Revision, release *runtime.Release, version string, request rpcRequest) {
 	var params protocol.GetTaskRequest
 	if json.Unmarshal(request.Params, &params) != nil || params.ID == "" || params.Tenant != "" {
 		fail(w, request.ID, -32602, "Invalid parameters")
@@ -258,7 +270,7 @@ func (s *Server) getTask(w http.ResponseWriter, r *http.Request, authority acces
 		}
 		return
 	}
-	pinned, ok := s.pinnedRevision(authority, revision, owned, release)
+	pinned, ok := s.pinnedRevision(authority, revision, owned, release, version)
 	if !ok {
 		fail(w, request.ID, -32001, "Task not found")
 		return

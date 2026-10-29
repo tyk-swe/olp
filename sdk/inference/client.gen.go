@@ -20,13 +20,13 @@ import (
 
 // Defines values for A2AAgentCardPreferredTransport.
 const (
-	A2AAgentCardPreferredTransportJSONRPC A2AAgentCardPreferredTransport = "JSONRPC"
+	LegacyJSONRPC A2AAgentCardPreferredTransport = "JSONRPC"
 )
 
 // Valid indicates whether the value is a known member of the A2AAgentCardPreferredTransport enum.
 func (e A2AAgentCardPreferredTransport) Valid() bool {
 	switch e {
-	case A2AAgentCardPreferredTransportJSONRPC:
+	case LegacyJSONRPC:
 		return true
 	default:
 		return false
@@ -35,13 +35,16 @@ func (e A2AAgentCardPreferredTransport) Valid() bool {
 
 // Defines values for A2AAgentCardProtocolVersion.
 const (
-	A2AAgentCardProtocolVersionN03 A2AAgentCardProtocolVersion = "0.3"
+	Legacy03  A2AAgentCardProtocolVersion = "0.3"
+	Legacy030 A2AAgentCardProtocolVersion = "0.3.0"
 )
 
 // Valid indicates whether the value is a known member of the A2AAgentCardProtocolVersion enum.
 func (e A2AAgentCardProtocolVersion) Valid() bool {
 	switch e {
-	case A2AAgentCardProtocolVersionN03:
+	case Legacy03:
+		return true
+	case Legacy030:
 		return true
 	default:
 		return false
@@ -50,13 +53,13 @@ func (e A2AAgentCardProtocolVersion) Valid() bool {
 
 // Defines values for A2AAgentCardSupportedInterfacesProtocolBinding.
 const (
-	A2AAgentCardSupportedInterfacesProtocolBindingJSONRPC A2AAgentCardSupportedInterfacesProtocolBinding = "JSONRPC"
+	JSONRPC A2AAgentCardSupportedInterfacesProtocolBinding = "JSONRPC"
 )
 
 // Valid indicates whether the value is a known member of the A2AAgentCardSupportedInterfacesProtocolBinding enum.
 func (e A2AAgentCardSupportedInterfacesProtocolBinding) Valid() bool {
 	switch e {
-	case A2AAgentCardSupportedInterfacesProtocolBindingJSONRPC:
+	case JSONRPC:
 		return true
 	default:
 		return false
@@ -65,16 +68,16 @@ func (e A2AAgentCardSupportedInterfacesProtocolBinding) Valid() bool {
 
 // Defines values for A2AAgentCardSupportedInterfacesProtocolVersion.
 const (
-	A2AAgentCardSupportedInterfacesProtocolVersionN03 A2AAgentCardSupportedInterfacesProtocolVersion = "0.3"
-	A2AAgentCardSupportedInterfacesProtocolVersionN10 A2AAgentCardSupportedInterfacesProtocolVersion = "1.0"
+	N03 A2AAgentCardSupportedInterfacesProtocolVersion = "0.3"
+	N10 A2AAgentCardSupportedInterfacesProtocolVersion = "1.0"
 )
 
 // Valid indicates whether the value is a known member of the A2AAgentCardSupportedInterfacesProtocolVersion enum.
 func (e A2AAgentCardSupportedInterfacesProtocolVersion) Valid() bool {
 	switch e {
-	case A2AAgentCardSupportedInterfacesProtocolVersionN03:
+	case N03:
 		return true
-	case A2AAgentCardSupportedInterfacesProtocolVersionN10:
+	case N10:
 		return true
 	default:
 		return false
@@ -207,30 +210,6 @@ func (e ResponsesPromptLabelReferenceLabel) Valid() bool {
 	case ResponsesPromptLabelReferenceLabelProduction:
 		return true
 	case ResponsesPromptLabelReferenceLabelStaging:
-		return true
-	default:
-		return false
-	}
-}
-
-// Defines values for CallA2AAgentParamsA2AVersion.
-const (
-	CallA2AAgentParamsA2AVersionN03  CallA2AAgentParamsA2AVersion = "0.3"
-	CallA2AAgentParamsA2AVersionN030 CallA2AAgentParamsA2AVersion = "0.3.0"
-	CallA2AAgentParamsA2AVersionN10  CallA2AAgentParamsA2AVersion = "1.0"
-	CallA2AAgentParamsA2AVersionN100 CallA2AAgentParamsA2AVersion = "1.0.0"
-)
-
-// Valid indicates whether the value is a known member of the CallA2AAgentParamsA2AVersion enum.
-func (e CallA2AAgentParamsA2AVersion) Valid() bool {
-	switch e {
-	case CallA2AAgentParamsA2AVersionN03:
-		return true
-	case CallA2AAgentParamsA2AVersionN030:
-		return true
-	case CallA2AAgentParamsA2AVersionN10:
-		return true
-	case CallA2AAgentParamsA2AVersionN100:
 		return true
 	default:
 		return false
@@ -516,15 +495,6 @@ type ResponsesPromptRevisionReference struct {
 type ResponsesPublishedPromptReference struct {
 	union json.RawMessage
 }
-
-// CallA2AAgentParams defines parameters for CallA2AAgent.
-type CallA2AAgentParams struct {
-	// A2AVersion Must match the published agent protocol. Omission selects A2A 0.3 for legacy clients.
-	A2AVersion *CallA2AAgentParamsA2AVersion `json:"A2A-Version,omitempty"`
-}
-
-// CallA2AAgentParamsA2AVersion defines parameters for CallA2AAgent.
-type CallA2AAgentParamsA2AVersion string
 
 // CreateAnthropicMessageWithPromptParams defines parameters for CreateAnthropicMessageWithPrompt.
 type CreateAnthropicMessageWithPromptParams struct {
@@ -1616,7 +1586,7 @@ type ClientInterface interface {
 	// Takes any type of body and a specified content type.
 	//
 	// Corresponds with POST /a2a/{agent} (the `CallA2AAgent` operationId).
-	CallA2AAgentWithBody(ctx context.Context, agent openapi_types.UUID, params *CallA2AAgentParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+	CallA2AAgentWithBody(ctx context.Context, agent openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// CallA2AAgent Send a message to or read and subscribe to a task from a published A2A agent
 	//
@@ -1625,7 +1595,7 @@ type ClientInterface interface {
 	// Takes a body of the `application/json` content type.
 	//
 	// Corresponds with POST /a2a/{agent} (the `CallA2AAgent` operationId).
-	CallA2AAgent(ctx context.Context, agent openapi_types.UUID, params *CallA2AAgentParams, body CallA2AAgentJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+	CallA2AAgent(ctx context.Context, agent openapi_types.UUID, body CallA2AAgentJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// GetA2AAgentCard Discover a published A2A agent
 	//
@@ -1750,8 +1720,8 @@ type ClientInterface interface {
 // Takes any type of body and a specified content type.
 //
 // Corresponds with POST /a2a/{agent} (the `CallA2AAgent` operationId).
-func (c *Client) CallA2AAgentWithBody(ctx context.Context, agent openapi_types.UUID, params *CallA2AAgentParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewCallA2AAgentRequestWithBody(c.Server, agent, params, contentType, body)
+func (c *Client) CallA2AAgentWithBody(ctx context.Context, agent openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCallA2AAgentRequestWithBody(c.Server, agent, contentType, body)
 	if err != nil {
 		return nil, err
 	}
@@ -1769,8 +1739,8 @@ func (c *Client) CallA2AAgentWithBody(ctx context.Context, agent openapi_types.U
 // Takes a body of the `application/json` content type.
 //
 // Corresponds with POST /a2a/{agent} (the `CallA2AAgent` operationId).
-func (c *Client) CallA2AAgent(ctx context.Context, agent openapi_types.UUID, params *CallA2AAgentParams, body CallA2AAgentJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewCallA2AAgentRequest(c.Server, agent, params, body)
+func (c *Client) CallA2AAgent(ctx context.Context, agent openapi_types.UUID, body CallA2AAgentJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCallA2AAgentRequest(c.Server, agent, body)
 	if err != nil {
 		return nil, err
 	}
@@ -2027,18 +1997,18 @@ func (c *Client) CreateResponseWithPrompt(ctx context.Context, params *CreateRes
 }
 
 // NewCallA2AAgentRequest calls the generic CallA2AAgent builder with application/json body
-func NewCallA2AAgentRequest(server string, agent openapi_types.UUID, params *CallA2AAgentParams, body CallA2AAgentJSONRequestBody) (*http.Request, error) {
+func NewCallA2AAgentRequest(server string, agent openapi_types.UUID, body CallA2AAgentJSONRequestBody) (*http.Request, error) {
 	var bodyReader io.Reader
 	buf, err := json.Marshal(body)
 	if err != nil {
 		return nil, err
 	}
 	bodyReader = bytes.NewReader(buf)
-	return NewCallA2AAgentRequestWithBody(server, agent, params, "application/json", bodyReader)
+	return NewCallA2AAgentRequestWithBody(server, agent, "application/json", bodyReader)
 }
 
 // NewCallA2AAgentRequestWithBody constructs an http.Request for the CallA2AAgent method, with any body, and a specified content type
-func NewCallA2AAgentRequestWithBody(server string, agent openapi_types.UUID, params *CallA2AAgentParams, contentType string, body io.Reader) (*http.Request, error) {
+func NewCallA2AAgentRequestWithBody(server string, agent openapi_types.UUID, contentType string, body io.Reader) (*http.Request, error) {
 	var err error
 
 	var pathParam0 string
@@ -2069,21 +2039,6 @@ func NewCallA2AAgentRequestWithBody(server string, agent openapi_types.UUID, par
 	}
 
 	req.Header.Add("Content-Type", contentType)
-
-	if params != nil {
-
-		if params.A2AVersion != nil {
-			var headerParam0 string
-
-			headerParam0, err = runtime.StyleParamWithOptions("simple", false, "A2A-Version", *params.A2AVersion, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationHeader, Type: "string", Format: ""})
-			if err != nil {
-				return nil, err
-			}
-
-			req.Header.Set("A2A-Version", headerParam0)
-		}
-
-	}
 
 	return req, nil
 }
@@ -2528,7 +2483,7 @@ type ClientWithResponsesInterface interface {
 	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
 	//
 	// Corresponds with POST /a2a/{agent} (the `CallA2AAgent` operationId).
-	CallA2AAgentWithBodyWithResponse(ctx context.Context, agent openapi_types.UUID, params *CallA2AAgentParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CallA2AAgentResponse, error)
+	CallA2AAgentWithBodyWithResponse(ctx context.Context, agent openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CallA2AAgentResponse, error)
 
 	// CallA2AAgentWithResponse Send a message to or read and subscribe to a task from a published A2A agent
 	//
@@ -2537,7 +2492,7 @@ type ClientWithResponsesInterface interface {
 	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
 	//
 	// Corresponds with POST /a2a/{agent} (the `CallA2AAgent` operationId).
-	CallA2AAgentWithResponse(ctx context.Context, agent openapi_types.UUID, params *CallA2AAgentParams, body CallA2AAgentJSONRequestBody, reqEditors ...RequestEditorFn) (*CallA2AAgentResponse, error)
+	CallA2AAgentWithResponse(ctx context.Context, agent openapi_types.UUID, body CallA2AAgentJSONRequestBody, reqEditors ...RequestEditorFn) (*CallA2AAgentResponse, error)
 
 	// GetA2AAgentCardWithResponse Discover a published A2A agent
 	//
@@ -3265,8 +3220,8 @@ func (r CreateResponseWithPromptResponse) ContentType() string {
 // Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
 //
 // Corresponds with POST /a2a/{agent} (the `CallA2AAgent` operationId).
-func (c *ClientWithResponses) CallA2AAgentWithBodyWithResponse(ctx context.Context, agent openapi_types.UUID, params *CallA2AAgentParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CallA2AAgentResponse, error) {
-	rsp, err := c.CallA2AAgentWithBody(ctx, agent, params, contentType, body, reqEditors...)
+func (c *ClientWithResponses) CallA2AAgentWithBodyWithResponse(ctx context.Context, agent openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CallA2AAgentResponse, error) {
+	rsp, err := c.CallA2AAgentWithBody(ctx, agent, contentType, body, reqEditors...)
 	if err != nil {
 		return nil, err
 	}
@@ -3280,8 +3235,8 @@ func (c *ClientWithResponses) CallA2AAgentWithBodyWithResponse(ctx context.Conte
 // Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
 //
 // Corresponds with POST /a2a/{agent} (the `CallA2AAgent` operationId).
-func (c *ClientWithResponses) CallA2AAgentWithResponse(ctx context.Context, agent openapi_types.UUID, params *CallA2AAgentParams, body CallA2AAgentJSONRequestBody, reqEditors ...RequestEditorFn) (*CallA2AAgentResponse, error) {
-	rsp, err := c.CallA2AAgent(ctx, agent, params, body, reqEditors...)
+func (c *ClientWithResponses) CallA2AAgentWithResponse(ctx context.Context, agent openapi_types.UUID, body CallA2AAgentJSONRequestBody, reqEditors ...RequestEditorFn) (*CallA2AAgentResponse, error) {
+	rsp, err := c.CallA2AAgent(ctx, agent, body, reqEditors...)
 	if err != nil {
 		return nil, err
 	}

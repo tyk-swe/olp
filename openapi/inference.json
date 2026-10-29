@@ -204,7 +204,22 @@
                 "1.0.0"
               ]
             },
-            "description": "Must match the published agent protocol. Omission selects A2A 0.3 for legacy clients."
+            "description": "Selects the published agent or pinned task protocol. Header and query values must agree when both are present. Omission selects A2A 0.3 for legacy clients."
+          },
+          {
+            "name": "A2A-Version",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "0.3",
+                "0.3.0",
+                "1.0",
+                "1.0.0"
+              ]
+            },
+            "description": "Alternative to the A2A-Version header. If both are present they must select the same protocol."
           }
         ],
         "security": [
@@ -1103,6 +1118,9 @@
                   "type": "string",
                   "enum": [
                     "JSONRPC"
+                  ],
+                  "x-enum-varnames": [
+                    "JSONRPC"
                   ]
                 },
                 "protocolVersion": {
@@ -1110,6 +1128,10 @@
                   "enum": [
                     "1.0",
                     "0.3"
+                  ],
+                  "x-enum-varnames": [
+                    "N10",
+                    "N03"
                   ]
                 }
               }
@@ -1159,12 +1181,20 @@
             "enum": [
               "JSONRPC"
             ],
+            "x-enum-varnames": [
+              "LegacyJSONRPC"
+            ],
             "description": "Preferred binding for A2A 0.3 clients"
           },
           "protocolVersion": {
             "type": "string",
             "enum": [
-              "0.3"
+              "0.3",
+              "0.3.0"
+            ],
+            "x-enum-varnames": [
+              "Legacy03",
+              "Legacy030"
             ],
             "description": "Protocol version for A2A 0.3 clients"
           },

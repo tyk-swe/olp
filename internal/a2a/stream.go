@@ -73,12 +73,12 @@ func (s *Server) streamAuthorized(r *http.Request, authority access.Authority, r
 	return failure == nil && current.ID == authority.ID && s.Runtime.AuthorizeAgentResource(current, "agents", revision.PublicationID, revision.ID, revision.ProjectID) == nil
 }
 
-func (s *Server) sendStream(w http.ResponseWriter, r *http.Request, authority access.Authority, revision agentcontract.Revision, release *runtime.Release, request rpcRequest) {
+func (s *Server) sendStream(w http.ResponseWriter, r *http.Request, authority access.Authority, revision agentcontract.Revision, release *runtime.Release, version string, request rpcRequest) {
 	if _, ok := w.(http.Flusher); !ok {
 		fail(w, request.ID, -32603, "Streaming unavailable")
 		return
 	}
-	prepared, failure := s.prepareSend(r.Context(), authority, revision, release, request.Params)
+	prepared, failure := s.prepareSend(r.Context(), authority, revision, release, version, request.Params)
 	if failure != nil {
 		reply(w, request.ID, nil, failure)
 		return
@@ -120,7 +120,7 @@ func (s *Server) sendStream(w http.ResponseWriter, r *http.Request, authority ac
 		return
 	}
 	info := first.TaskInfo()
-	if !validInitialStreamEvent(first, prepared.ExpectedUpstreamID != "") || prepared.ExpectedUpstreamID != "" && !streamEventMatches(first, prepared.ExpectedUpstreamID, prepared.Params.Message.ContextID) {
+	if !validInitialStreamEvent(first, prepared.ExpectedUpstreamID != "" || prepared.Revision.Definition.Agent.Protocol == legacyProtocol) || prepared.ExpectedUpstreamID != "" && !streamEventMatches(first, prepared.ExpectedUpstreamID, prepared.Params.Message.ContextID) {
 		s.Ledger.unknown(r.Context(), res)
 		fail(w, request.ID, -32603, "Invalid upstream stream")
 		return
@@ -159,7 +159,7 @@ func validInitialStreamEvent(event protocol.Event, continuation bool) bool {
 	}
 }
 
-func (s *Server) subscribe(w http.ResponseWriter, r *http.Request, authority access.Authority, revision agentcontract.Revision, release *runtime.Release, request rpcRequest) {
+func (s *Server) subscribe(w http.ResponseWriter, r *http.Request, authority access.Authority, revision agentcontract.Revision, release *runtime.Release, version string, request rpcRequest) {
 	if _, ok := w.(http.Flusher); !ok {
 		fail(w, request.ID, -32603, "Streaming unavailable")
 		return
@@ -174,7 +174,7 @@ func (s *Server) subscribe(w http.ResponseWriter, r *http.Request, authority acc
 		fail(w, request.ID, -32001, "Task not found")
 		return
 	}
-	pinned, ok := s.pinnedRevision(authority, revision, owned, release)
+	pinned, ok := s.pinnedRevision(authority, revision, owned, release, version)
 	if !ok {
 		fail(w, request.ID, -32001, "Task not found")
 		return

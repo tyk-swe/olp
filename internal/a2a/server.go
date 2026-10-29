@@ -174,11 +174,18 @@ func (s *Server) loadCard(ctx context.Context, definition agentcontract.Definiti
 		return protocol.AgentCard{}, errors.New("invalid card")
 	}
 	for _, binding := range parsed.SupportedInterfaces {
-		if binding != nil && binding.URL == definition.Endpoint && binding.ProtocolBinding == protocol.TransportProtocolJSONRPC && binding.ProtocolVersion == cardVersion(definition.Protocol) {
+		if binding != nil && binding.URL == definition.Endpoint && cardBindingMatches(definition.Protocol, binding) {
 			return parsed, nil
 		}
 	}
 	return protocol.AgentCard{}, errors.New("interface not declared")
+}
+
+func cardBindingMatches(version string, binding *protocol.AgentInterface) bool {
+	if version == legacyProtocol {
+		return (binding.ProtocolBinding == "" || binding.ProtocolBinding == protocol.TransportProtocolJSONRPC) && (binding.ProtocolVersion == a2av0.Version || binding.ProtocolVersion == protocol.ProtocolVersion(legacy.Version))
+	}
+	return binding.ProtocolBinding == protocol.TransportProtocolJSONRPC && binding.ProtocolVersion == protocol.Version
 }
 
 func (s *Server) ValidateCard(ctx context.Context, definition agentcontract.Definition) error {
@@ -189,14 +196,10 @@ func (s *Server) ValidateCard(ctx context.Context, definition agentcontract.Defi
 func parseCard(version string, body []byte) (protocol.AgentCard, error) {
 	if version == legacyProtocol {
 		var declared legacy.AgentCard
-		if json.Unmarshal(body, &declared) != nil || declared.ProtocolVersion != string(a2av0.Version) {
+		if json.Unmarshal(body, &declared) != nil || declared.ProtocolVersion != string(a2av0.Version) && declared.ProtocolVersion != string(legacy.Version) {
 			return protocol.AgentCard{}, errors.New("invalid card version")
 		}
-		parsed, err := a2av0.NewAgentCardParser()(body)
-		if err != nil || parsed == nil {
-			return protocol.AgentCard{}, errors.New("invalid card")
-		}
-		return *parsed, nil
+		return *a2av0.ToV1AgentCard(&declared), nil
 	}
 	var parsed protocol.AgentCard
 	err := json.Unmarshal(body, &parsed)

@@ -23,6 +23,9 @@ import (
 	"testing"
 	"time"
 
+	legacy "github.com/a2aproject/a2a-go/a2a"
+	legacyserver "github.com/a2aproject/a2a-go/a2asrv"
+	legacyqueue "github.com/a2aproject/a2a-go/a2asrv/eventqueue"
 	protocol "github.com/a2aproject/a2a-go/v2/a2a"
 	"github.com/a2aproject/a2a-go/v2/a2aclient"
 	"github.com/a2aproject/a2a-go/v2/a2acompat/a2av0"
@@ -36,34 +39,55 @@ import (
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/prompts"
 	"github.com/tyk-swe/olp/internal/secrets"
+	inferencesdk "github.com/tyk-swe/olp/sdk/inference"
 )
+
+type legacyReferenceExecutor struct{}
+
+type legacyReferenceHandler struct{ legacyserver.RequestHandler }
+
+func (h legacyReferenceHandler) OnResubscribeToTask(ctx context.Context, params *legacy.TaskIDParams) iter.Seq2[legacy.Event, error] {
+	return func(yield func(legacy.Event, error) bool) {
+		task, err := h.OnGetTask(ctx, &legacy.TaskQueryParams{ID: params.ID})
+		if err != nil {
+			yield(nil, err)
+			return
+		}
+		yield(&legacy.TaskStatusUpdateEvent{TaskID: task.ID, ContextID: task.ContextID, Status: task.Status, Final: true}, nil)
+	}
+}
+
+func (legacyReferenceExecutor) Execute(ctx context.Context, request *legacyserver.RequestContext, queue legacyqueue.Queue) error {
+	message := legacy.NewMessageForTask(legacy.MessageRoleAgent, request, request.Message.Parts...)
+	task := request.TaskInfo()
+	return queue.Write(ctx, &legacy.TaskStatusUpdateEvent{TaskID: task.TaskID, ContextID: task.ContextID, Final: true, Status: legacy.TaskStatus{State: legacy.TaskStateCompleted, Message: message}})
+}
+
+func (legacyReferenceExecutor) Cancel(ctx context.Context, request *legacyserver.RequestContext, queue legacyqueue.Queue) error {
+	task := request.TaskInfo()
+	return queue.Write(ctx, &legacy.TaskStatusUpdateEvent{TaskID: task.TaskID, ContextID: task.ContextID, Final: true, Status: legacy.TaskStatus{State: legacy.TaskStateCanceled}})
+}
 
 func TestA2A03AgentSendAndGet(t *testing.T) {
 	h := newAccessHarness(t)
 	owner := h.owner()
 	project := createProject(h, owner, "A2A 0.3")
-	agent := a2av0.NewJSONRPCHandler(a2asrv.NewHandler(a2asrv.AgentExecutorFunc(func(ctx context.Context, execution *a2asrv.ExecutorContext) iter.Seq2[protocol.Event, error] {
-		return func(yield func(protocol.Event, error) bool) {
-			if yield(protocol.NewSubmittedTask(execution, execution.Message), nil) {
-				yield(protocol.NewStatusUpdateEvent(execution, protocol.TaskStateCompleted, nil), nil)
-			}
-		}
-	})))
+	agent := legacyserver.NewJSONRPCHandler(legacyReferenceHandler{legacyserver.NewHandler(legacyReferenceExecutor{})})
 	cardFor := func(endpoint string) []byte {
 		t.Helper()
-		producer := a2av0.NewStaticAgentCardProducer(&protocol.AgentCard{
+		card, err := json.Marshal(legacy.AgentCard{
 			Name: "Reference agent", Description: "Test agent", Version: "1",
-			Capabilities:        protocol.AgentCapabilities{Streaming: true},
-			SupportedInterfaces: []*protocol.AgentInterface{{URL: endpoint, ProtocolBinding: protocol.TransportProtocolJSONRPC, ProtocolVersion: a2av0.Version}},
-			DefaultInputModes:   []string{"text"}, DefaultOutputModes: []string{"text"}, Skills: []protocol.AgentSkill{},
+			ProtocolVersion: string(legacy.Version), URL: endpoint, PreferredTransport: legacy.TransportProtocolJSONRPC,
+			Capabilities:      legacy.AgentCapabilities{Streaming: true},
+			DefaultInputModes: []string{"text"}, DefaultOutputModes: []string{"text"}, Skills: []legacy.AgentSkill{},
 		})
-		card, err := producer.(a2asrv.AgentCardJSONProducer).CardJSON(t.Context())
 		if err != nil {
 			t.Fatal(err)
 		}
 		return card
 	}
 	var dispatched atomic.Int32
+	var changedCard atomic.Bool
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/rpc" {
 			dispatched.Add(1)
@@ -71,7 +95,12 @@ func TestA2A03AgentSendAndGet(t *testing.T) {
 			return
 		}
 		if r.URL.Path == "/.well-known/agent-card.json" {
-			_, _ = w.Write(cardFor("http://" + r.Host + "/rpc"))
+			card := cardFor("http://" + r.Host + "/rpc")
+			if changedCard.Load() {
+				_, _ = w.Write(bytes.Join([][]byte{card, []byte(" ")}, nil))
+				return
+			}
+			_, _ = w.Write(card)
 			return
 		}
 		http.NotFound(w, r)
@@ -90,17 +119,34 @@ func TestA2A03AgentSendAndGet(t *testing.T) {
 		"agent": map[string]any{"protocol": "a2a-1.0.0", "endpoint": upstream.URL + "/rpc", "card_digest": hex.EncodeToString(digest[:]), "toolset_revisions": []string{}, "route_revisions": []string{}, "pricing_revision_id": pricing, "max_cost": "1", "message_price": "0.25"},
 	}, idem("a2a-03-mismatch-create"), http.StatusCreated)
 	h.want(owner, http.MethodPost, "/api/v1/agents/"+mismatched["id"].(string)+"/publish", nil, withMatch(mismatched, idem("a2a-03-mismatch-publish")), http.StatusUnprocessableEntity)
-	for _, invalid := range []struct{ name, from, to string }{
-		{name: "binding", from: "JSONRPC", to: "GRPC"},
-		{name: "version", from: "0.3", to: "0.2"},
-		{name: "undeclared-version", from: `"protocolVersion": "0.3"`, to: `"protocolVersion": ""`},
+	for _, invalid := range []struct {
+		name, version string
+		binding       legacy.TransportProtocol
+		hybrid        bool
+	}{
+		{name: "binding", version: string(legacy.Version), binding: legacy.TransportProtocolGRPC},
+		{name: "version", version: "0.2.0", binding: legacy.TransportProtocolJSONRPC},
+		{name: "undeclared-version", binding: legacy.TransportProtocolJSONRPC},
+		{name: "hybrid-binding", version: string(legacy.Version), binding: legacy.TransportProtocolGRPC, hybrid: true},
 	} {
 		badCard := func(endpoint string) []byte {
-			original := cardFor(endpoint)
-			if !bytes.Contains(original, []byte(invalid.from)) {
-				t.Fatalf("invalid %s card did not change its declaration", invalid.name)
+			t.Helper()
+			interfaces := func() []*protocol.AgentInterface {
+				if !invalid.hybrid {
+					return nil
+				}
+				return []*protocol.AgentInterface{{URL: endpoint, ProtocolBinding: protocol.TransportProtocolJSONRPC, ProtocolVersion: a2av0.Version}}
+			}()
+			card, err := json.Marshal(struct {
+				legacy.AgentCard
+				SupportedInterfaces []*protocol.AgentInterface `json:"supportedInterfaces,omitempty"`
+			}{AgentCard: legacy.AgentCard{
+				Name: "Reference agent", Version: "1", URL: endpoint, ProtocolVersion: invalid.version, PreferredTransport: invalid.binding,
+			}, SupportedInterfaces: interfaces})
+			if err != nil {
+				t.Fatal(err)
 			}
-			return bytes.ReplaceAll(original, []byte(invalid.from), []byte(invalid.to))
+			return card
 		}
 		badUpstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			_, _ = w.Write(badCard("http://" + r.Host + "/rpc"))
@@ -118,7 +164,7 @@ func TestA2A03AgentSendAndGet(t *testing.T) {
 		"agent": map[string]any{"protocol": "a2a-0.3.0", "endpoint": upstream.URL + "/rpc", "card_digest": hex.EncodeToString(digest[:]), "toolset_revisions": []string{}, "route_revisions": []string{}, "pricing_revision_id": pricing, "max_cost": "1", "message_price": "0.25"},
 	}, idem("a2a-03-create"), http.StatusCreated)
 	agentID := created["id"].(string)
-	h.want(owner, http.MethodPost, "/api/v1/agents/"+agentID+"/publish", nil, withMatch(created, idem("a2a-03-publish")), http.StatusOK)
+	published := h.want(owner, http.MethodPost, "/api/v1/agents/"+agentID+"/publish", nil, withMatch(created, idem("a2a-03-publish")), http.StatusOK)
 	key := h.want(owner, http.MethodPost, "/api/v1/api-keys", map[string]any{"name": "A2A caller", "project_id": project, "scopes": []string{"agents"}, "allowed_agents": []string{agentID}}, idem("a2a-03-key"), http.StatusCreated)["secret"].(string)
 	valkey, prefix, _ := acctKeyspace(t)
 	limiter, err := limits.New(valkey, strings.TrimSuffix(prefix, ":"))
@@ -152,17 +198,22 @@ func TestA2A03AgentSendAndGet(t *testing.T) {
 		t.Fatalf("0.3 card authentication: %+v", publicCard.SecuritySchemes)
 	}
 	for _, invalid := range []struct {
-		version, contentType, method, params string
-		status, errorCode                    int
+		version, query, contentType, method, params string
+		status, errorCode                           int
 	}{
 		{version: "1.0", contentType: "application/json", method: "SendMessage", params: "{}", status: http.StatusBadRequest},
 		{version: "0.2", contentType: "application/json", method: "message/send", params: "{}", status: http.StatusBadRequest},
+		{query: "1.0", contentType: "application/json", method: "message/send", params: "{}", status: http.StatusBadRequest},
+		{version: "0.3", query: "1.0", contentType: "application/json", method: "message/send", params: "{}", status: http.StatusBadRequest},
 		{version: "0.3", contentType: "application/grpc", method: "message/send", params: "{}", status: http.StatusUnsupportedMediaType},
 		{version: "0.3", contentType: "application/json", method: "SendMessage", params: "{}", status: http.StatusOK, errorCode: -32601},
 		{version: "0.3", contentType: "application/json", method: "message/send", params: "[]", status: http.StatusOK, errorCode: -32602},
+		{version: "0.3", contentType: "application/json", method: "message/send", params: "{}", status: http.StatusOK, errorCode: -32602},
+		{version: "0.3", contentType: "application/json", method: "message/send", params: `{"configuration":{"pushNotificationConfig":{"url":"https://example.invalid"}}}`, status: http.StatusOK, errorCode: -32602},
+		{version: "0.3", contentType: "application/json", method: "message/send", params: `{"message":{"messageId":"msg","role":"user","parts":[{"kind":"text","text":"hi"}]},"configuration":{"pushNotificationConfig":{"url":"https://example.invalid"}}}`, status: http.StatusOK, errorCode: -32602},
 	} {
 		body := fmt.Sprintf(`{"jsonrpc":"2.0","id":1,"method":%q,"params":%s}`, invalid.method, invalid.params)
-		request, err := http.NewRequest(http.MethodPost, h.HTTP.URL+"/a2a/"+agentID, strings.NewReader(body))
+		request, err := http.NewRequest(http.MethodPost, h.HTTP.URL+"/a2a/"+agentID+"?A2A-Version="+invalid.query, strings.NewReader(body))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -206,6 +257,48 @@ func TestA2A03AgentSendAndGet(t *testing.T) {
 	if err != nil || read.ID != task.ID || read.Status.State != protocol.TaskStateCompleted {
 		t.Fatalf("0.3 get task: %+v, %v", read, err)
 	}
+	if read.Status.Message == nil || len(read.Status.Message.Parts) != 1 || read.Status.Message.Parts[0].Text() != "hello" {
+		t.Fatalf("0.3 message did not survive the round trip: %+v", read.Status.Message)
+	}
+	// Generated request editors set per-call headers on the supplied request.
+	sdkClient, err := inferencesdk.NewClient(h.HTTP.URL, inferencesdk.WithRequestEditorFn(func(_ context.Context, request *http.Request) error {
+		request.Header.Set("Authorization", "Bearer "+key)
+		request.Header.Set("A2A-Version", "0.3")
+		return nil
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var callID inferencesdk.A2ARequest_Id
+	if err := callID.FromA2ARequestId0("sdk-get"); err != nil {
+		t.Fatal(err)
+	}
+	sdkResponse, err := sdkClient.CallA2AAgent(t.Context(), uuid.MustParse(agentID), inferencesdk.A2ARequest{Id: callID, Jsonrpc: "2.0", Method: "tasks/get", Params: map[string]any{"id": task.ID}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sdkResult struct {
+		Result legacy.Task `json:"result"`
+	}
+	if err := json.NewDecoder(sdkResponse.Body).Decode(&sdkResult); err != nil {
+		t.Fatal(err)
+	}
+	sdkResponse.Body.Close()
+	if sdkResponse.StatusCode != http.StatusOK || string(sdkResult.Result.ID) != string(task.ID) {
+		t.Fatalf("Go inference SDK task read: status %d, result %+v", sdkResponse.StatusCode, sdkResult.Result)
+	}
+	queryTransport := a2av0.NewJSONRPCTransport(a2av0.JSONRPCTransportConfig{URL: h.HTTP.URL + "/a2a/" + agentID + "?A2A-Version=0.3.0", Client: http.DefaultClient})
+	defer queryTransport.Destroy()
+	queryTask, err := queryTransport.GetTask(t.Context(), params, &protocol.GetTaskRequest{ID: task.ID})
+	if err != nil || queryTask.ID != task.ID {
+		t.Fatalf("0.3 task read with version query: %+v, %v", queryTask, err)
+	}
+	changedCard.Store(true)
+	_, changedErr := transport.GetTask(t.Context(), params, &protocol.GetTaskRequest{ID: task.ID})
+	if changedErr == nil {
+		t.Fatal("changed pinned card was accepted")
+	}
+	changedCard.Store(false)
 	events := slices.Collect(func(yield func(protocol.Event) bool) {
 		for event, err := range transport.SendStreamingMessage(t.Context(), params, &protocol.SendMessageRequest{Message: protocol.NewMessage(protocol.MessageRoleUser, protocol.NewTextPart("streamed message"))}) {
 			if err != nil {
@@ -216,16 +309,86 @@ func TestA2A03AgentSendAndGet(t *testing.T) {
 			}
 		}
 	})
-	if len(events) < 2 {
+	if len(events) == 0 {
 		t.Fatalf("0.3 stream omitted task updates: %+v", events)
 	}
-	streamedTask, ok := events[0].(*protocol.Task)
-	if !ok || streamedTask.ID == "" {
+	streamedTask, ok := events[0].(*protocol.TaskStatusUpdateEvent)
+	if !ok || streamedTask.TaskID == "" || streamedTask.Status.Message == nil || len(streamedTask.Status.Message.Parts) != 1 || streamedTask.Status.Message.Parts[0].Text() != "streamed message" {
 		t.Fatalf("0.3 stream omitted public task: %+v", events[0])
 	}
-	streamedResult, err := transport.GetTask(t.Context(), params, &protocol.GetTaskRequest{ID: streamedTask.ID})
-	if err != nil || streamedResult.ID != streamedTask.ID || streamedResult.Status.State != protocol.TaskStateCompleted {
+	streamedResult, err := transport.GetTask(t.Context(), params, &protocol.GetTaskRequest{ID: streamedTask.TaskID})
+	if err != nil || streamedResult.ID != streamedTask.TaskID || streamedResult.Status.State != protocol.TaskStateCompleted {
 		t.Fatalf("0.3 stream task read: %+v, %v", streamedResult, err)
+	}
+	updates := slices.Collect(func(yield func(protocol.Event) bool) {
+		for event, err := range transport.SubscribeToTask(t.Context(), params, &protocol.SubscribeToTaskRequest{ID: streamedTask.TaskID}) {
+			if err != nil {
+				t.Fatalf("0.3 resubscribe: %v", err)
+			}
+			if !yield(event) {
+				return
+			}
+		}
+	})
+	if len(updates) != 1 || updates[0].TaskInfo().TaskID != streamedTask.TaskID {
+		t.Fatalf("0.3 resubscription lost the public task: %+v", updates)
+	}
+	newCard := func(endpoint string) []byte {
+		data, err := json.Marshal(protocol.AgentCard{Name: "New agent", Version: "1", SupportedInterfaces: []*protocol.AgentInterface{{URL: endpoint, ProtocolBinding: protocol.TransportProtocolJSONRPC, ProtocolVersion: protocol.Version}}, Skills: []protocol.AgentSkill{}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return data
+	}
+	replacement := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/.well-known/agent-card.json" {
+			_, _ = w.Write(newCard("http://" + r.Host + "/rpc"))
+			return
+		}
+		http.Error(w, "replacement unavailable", http.StatusServiceUnavailable)
+	}))
+	t.Cleanup(replacement.Close)
+	replacementDigest := sha256.Sum256(newCard(replacement.URL + "/rpc"))
+	updated := h.want(owner, http.MethodPut, "/api/v1/agents/"+agentID, map[string]any{
+		"project_id": project, "name": "0.3 reference",
+		"agent": map[string]any{"protocol": "a2a-1.0.0", "endpoint": replacement.URL + "/rpc", "card_digest": hex.EncodeToString(replacementDigest[:]), "toolset_revisions": []string{}, "route_revisions": []string{}, "pricing_revision_id": pricing, "max_cost": "1", "message_price": "0.25"},
+	}, withMatch(published, idem("a2a-03-republish-draft")), http.StatusOK)
+	h.want(owner, http.MethodPost, "/api/v1/agents/"+agentID+"/publish", nil, withMatch(updated, idem("a2a-03-republish")), http.StatusOK)
+	if err := h.Runtime.Refresh(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	sdkCardResponse, err := sdkClient.GetA2AAgentCard(t.Context(), uuid.MustParse(agentID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sdkCard inferencesdk.A2AAgentCard
+	if err := json.NewDecoder(sdkCardResponse.Body).Decode(&sdkCard); err != nil {
+		t.Fatal(err)
+	}
+	sdkCardResponse.Body.Close()
+	if sdkCardResponse.StatusCode != http.StatusOK || len(sdkCard.SupportedInterfaces) != 1 || sdkCard.SupportedInterfaces[0].ProtocolBinding != inferencesdk.JSONRPC || sdkCard.SupportedInterfaces[0].ProtocolVersion != inferencesdk.N10 {
+		t.Fatalf("Go inference SDK card after republication: %+v", sdkCard)
+	}
+	pinnedTask, err := transport.GetTask(t.Context(), params, &protocol.GetTaskRequest{ID: task.ID})
+	if err != nil || pinnedTask.ID != task.ID || pinnedTask.Status.Message == nil || pinnedTask.Status.Message.Parts[0].Text() != "hello" {
+		t.Fatalf("0.3 task no longer accessible after republishing: %+v, %v", pinnedTask, err)
+	}
+	_, wrongVersionErr := transport.SendMessage(t.Context(), params, &protocol.SendMessageRequest{Message: protocol.NewMessage(protocol.MessageRoleUser, protocol.NewTextPart("new task"))})
+	if wrongVersionErr == nil {
+		t.Fatal("new 0.3 task was accepted after 1.0 publication")
+	}
+	pinnedUpdates := slices.Collect(func(yield func(protocol.Event) bool) {
+		for event, err := range transport.SubscribeToTask(t.Context(), params, &protocol.SubscribeToTaskRequest{ID: streamedTask.TaskID}) {
+			if err != nil {
+				t.Fatalf("0.3 pinned resubscribe: %v", err)
+			}
+			if !yield(event) {
+				return
+			}
+		}
+	})
+	if len(pinnedUpdates) != 1 || pinnedUpdates[0].TaskInfo().TaskID != streamedTask.TaskID {
+		t.Fatalf("0.3 pinned resubscription lost the public task: %+v", pinnedUpdates)
 	}
 }
 

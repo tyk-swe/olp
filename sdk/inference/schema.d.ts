@@ -279,7 +279,7 @@ export interface components {
              * @description Protocol version for A2A 0.3 clients
              * @enum {string}
              */
-            protocolVersion?: "0.3";
+            protocolVersion?: "0.3" | "0.3.0";
             /** @description Bearer authentication requirements for A2A 0.3 clients */
             security?: {
                 [key: string]: unknown;
@@ -537,9 +537,12 @@ export interface operations {
     };
     callA2AAgent: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Alternative to the A2A-Version header. If both are present they must select the same protocol. */
+                "A2A-Version"?: "0.3" | "0.3.0" | "1.0" | "1.0.0";
+            };
             header?: {
-                /** @description Must match the published agent protocol. Omission selects A2A 0.3 for legacy clients. */
+                /** @description Selects the published agent or pinned task protocol. Header and query values must agree when both are present. Omission selects A2A 0.3 for legacy clients. */
                 "A2A-Version"?: "0.3" | "0.3.0" | "1.0" | "1.0.0";
             };
             path: {

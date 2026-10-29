@@ -3,6 +3,7 @@ package a2a
 import (
 	"encoding/json"
 	"errors"
+	"net/http"
 
 	legacy "github.com/a2aproject/a2a-go/a2a"
 	protocol "github.com/a2aproject/a2a-go/v2/a2a"
@@ -18,11 +19,30 @@ func supportedProtocol(version string) bool {
 	return version == legacyProtocol || version == currentProtocol
 }
 
-func requestVersionMatches(declared, requested string) bool {
-	if declared == legacyProtocol {
-		return requested == "" || requested == string(a2av0.Version) || requested == "0.3.0"
+func requestProtocol(r *http.Request) string {
+	header := r.Header.Get("A2A-Version")
+	query := r.URL.Query().Get("A2A-Version")
+	if header != "" && query != "" && protocolVersion(header) != protocolVersion(query) {
+		return ""
 	}
-	return declared == currentProtocol && (requested == string(protocol.Version) || requested == "1.0.0")
+	if header != "" {
+		return protocolVersion(header)
+	}
+	if query != "" {
+		return protocolVersion(query)
+	}
+	return legacyProtocol
+}
+
+func protocolVersion(version string) string {
+	switch version {
+	case string(a2av0.Version), "0.3.0":
+		return legacyProtocol
+	case string(protocol.Version), "1.0.0":
+		return currentProtocol
+	default:
+		return ""
+	}
 }
 
 func decodeRequest(version string, request rpcRequest) (rpcRequest, error) {
@@ -37,7 +57,7 @@ func decodeRequest(version string, request rpcRequest) (rpcRequest, error) {
 	switch request.Method {
 	case "message/send", "message/stream":
 		var value legacy.MessageSendParams
-		if json.Unmarshal(request.Params, &value) != nil {
+		if json.Unmarshal(request.Params, &value) != nil || value.Message == nil || value.Config != nil && value.Config.PushConfig != nil {
 			return rpcRequest{}, errors.New("invalid parameters")
 		}
 		converted, err := a2av0.ToV1SendMessageRequest(&value)
