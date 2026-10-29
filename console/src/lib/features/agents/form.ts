@@ -116,6 +116,11 @@ export type PublicationForm = {
   tools: ToolPin[];
   template: string;
   variables: string;
+  promptMode: 'template' | 'messages';
+  messages: { role: 'system' | 'user' | 'assistant'; content: string }[];
+  temperature: string;
+  topP: string;
+  maxOutputTokens: string;
   protocol: 'a2a-0.3.0' | 'a2a-1.0.0';
   endpoint: string;
   cardDigest: string;
@@ -135,7 +140,19 @@ export function publicationForm(
     name: d?.name ?? '',
     tools: (d?.toolset?.tools ?? []).map((tool) => ({ ...tool })),
     template: d?.prompt?.template ?? '',
-    variables: d?.prompt?.variables.join(', ') ?? '',
+    variables: (
+      d?.prompt?.variable_schema?.required ??
+      d?.prompt?.variables ??
+      []
+    ).join(', '),
+    promptMode: d?.prompt?.messages?.length ? 'messages' : 'template',
+    messages: d?.prompt?.messages?.length
+      ? d.prompt.messages.map((message) => ({ ...message }))
+      : [{ role: 'user', content: d?.prompt?.template ?? '' }],
+    temperature: d?.prompt?.default_parameters?.temperature?.toString() ?? '',
+    topP: d?.prompt?.default_parameters?.top_p?.toString() ?? '',
+    maxOutputTokens:
+      d?.prompt?.default_parameters?.max_output_tokens?.toString() ?? '',
     protocol: d?.agent?.protocol ?? 'a2a-1.0.0',
     endpoint: d?.agent?.endpoint ?? '',
     cardDigest: d?.agent?.card_digest ?? '',
@@ -150,11 +167,41 @@ export function publicationInput(kind: Kind, form: PublicationForm): Draft {
   const d: Draft = { project_id: form.project, name: form.name.trim() };
   if (kind === 'toolsets')
     d.toolset = { tools: form.tools.map((tool) => ({ ...tool })) };
-  if (kind === 'prompts')
-    d.prompt = {
-      template: form.template,
-      variables: resourceIDs(form.variables)
+  if (kind === 'prompts') {
+    const names = resourceIDs(form.variables);
+    const defaults = {
+      ...(form.temperature.trim() !== ''
+        ? { temperature: Number(form.temperature) }
+        : {}),
+      ...(form.topP.trim() !== '' ? { top_p: Number(form.topP) } : {}),
+      ...(form.maxOutputTokens.trim() !== ''
+        ? { max_output_tokens: Number(form.maxOutputTokens) }
+        : {})
     };
+    d.prompt =
+      form.promptMode === 'messages'
+        ? {
+            messages: form.messages.map((message) => ({ ...message })),
+            variable_schema: {
+              type: 'object',
+              properties: Object.fromEntries(
+                names.map((name) => [name, { type: 'string' as const }])
+              ),
+              required: names,
+              additionalProperties: false
+            },
+            ...(Object.keys(defaults).length
+              ? { default_parameters: defaults }
+              : {})
+          }
+        : {
+            template: form.template,
+            variables: names,
+            ...(Object.keys(defaults).length
+              ? { default_parameters: defaults }
+              : {})
+          };
+  }
   if (kind === 'agents')
     d.agent = {
       protocol: form.protocol,

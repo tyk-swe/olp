@@ -17,6 +17,7 @@ import (
 	"net/http/httptest"
 	"reflect"
 	"slices"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -1145,5 +1146,54 @@ func TestA2AAgentCardUsesGatewayAuthenticationAndEndpoint(t *testing.T) {
 	pinned := rpc(key, "GetTask", a2aTestParams{ID: protocol.TaskID(id)})
 	if task, ok := pinned["result"].(map[string]any); !ok || task["id"] != id || !strings.Contains(fmt.Sprint(task), "PRIVATE ARTIFACT") {
 		t.Fatalf("task did not retain its published revision: %+v", pinned)
+	}
+}
+
+func TestStructuredPromptPublicationValidatesAndExports(t *testing.T) {
+	h := newAccessHarness(t)
+	owner := h.owner()
+	project := h.want(owner, http.MethodPost, "/api/v1/projects", map[string]any{"name": "Structured prompts"}, idem("structured-project"), http.StatusCreated)["id"].(string)
+	definition := json.RawMessage(`{"messages":[{"role":"system","content":"Help {{name}}"},{"role":"user","content":"Hello {{name}}"}],"variable_schema":{"type":"object","properties":{"name":{"type":"string"}},"required":["name"],"additionalProperties":false},"default_parameters":{"temperature":0.25,"max_output_tokens":32}}`)
+	created := h.want(owner, http.MethodPost, "/api/v1/prompts", map[string]any{"project_id": project, "name": "structured", "prompt": definition}, idem("structured-create"), http.StatusCreated)
+	path := "/api/v1/prompts/" + created["id"].(string)
+	published := h.want(owner, http.MethodPost, path+"/publish", nil, withMatch(created, idem("structured-publish")), http.StatusOK)
+	if err := h.Runtime.Refresh(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	exported := h.want(owner, http.MethodGet, "/api/v1/configuration/export", nil, nil, http.StatusOK)
+	entries := exported["document"].(map[string]any)["agent_publications"].([]any)
+	if len(entries) != 1 {
+		t.Fatalf("exported publications = %v", entries)
+	}
+	publishedPrompt := entries[0].(map[string]any)["published"].(map[string]any)["prompt"]
+	encoded, err := json.Marshal(publishedPrompt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var original, roundTrip map[string]any
+	if err := json.Unmarshal(definition, &original); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(encoded, &roundTrip); err != nil {
+		t.Fatal(err)
+	}
+	for _, field := range []string{"messages", "variable_schema", "default_parameters"} {
+		if !reflect.DeepEqual(original[field], roundTrip[field]) {
+			t.Fatalf("export changed %s: original=%v exported=%v", field, original[field], roundTrip[field])
+		}
+	}
+	if published["revision_id"] == nil {
+		t.Fatal("publication did not create a revision")
+	}
+	for _, tc := range []struct{ name, definition string }{
+		{"role", `{"messages":[{"role":"tool","content":"{{name}}"}],"variable_schema":{"type":"object","properties":{"name":{"type":"string"}},"required":["name"]}}`},
+		{"schema-type", `{"messages":[{"role":"user","content":"{{name}}"}],"variable_schema":{"type":"object","properties":{"name":{"type":"integer"}},"required":["name"]}}`},
+		{"schema-extra", `{"messages":[{"role":"user","content":"{{name}}"}],"variable_schema":{"type":"object","properties":{"name":{"type":"string"}},"required":["name"],"additionalProperties":true}}`},
+		{"defaults", `{"messages":[{"role":"user","content":"{{name}}"}],"variable_schema":{"type":"object","properties":{"name":{"type":"string"}},"required":["name"]},"default_parameters":{"temperature":3}}`},
+		{"size", `{"messages":[{"role":"user","content":` + strconv.Quote(strings.Repeat("x", prompts.MaxTemplateBytes+1)) + `}],"variable_schema":{"type":"object","properties":{},"required":[]}}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h.want(owner, http.MethodPost, "/api/v1/prompts", map[string]any{"project_id": project, "name": "invalid", "prompt": json.RawMessage(tc.definition)}, idem("structured-invalid-"+tc.name), http.StatusUnprocessableEntity)
+		})
 	}
 }

@@ -4309,6 +4309,72 @@ func (e PromptCachePolicyTtl) Valid() bool {
 	}
 }
 
+// Defines values for PromptMessageRole.
+const (
+	PromptMessageRoleAssistant PromptMessageRole = "assistant"
+	PromptMessageRoleSystem    PromptMessageRole = "system"
+	PromptMessageRoleUser      PromptMessageRole = "user"
+)
+
+// Valid indicates whether the value is a known member of the PromptMessageRole enum.
+func (e PromptMessageRole) Valid() bool {
+	switch e {
+	case PromptMessageRoleAssistant:
+		return true
+	case PromptMessageRoleSystem:
+		return true
+	case PromptMessageRoleUser:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for PromptVariablePropertyType.
+const (
+	PromptVariablePropertyTypeString PromptVariablePropertyType = "string"
+)
+
+// Valid indicates whether the value is a known member of the PromptVariablePropertyType enum.
+func (e PromptVariablePropertyType) Valid() bool {
+	switch e {
+	case PromptVariablePropertyTypeString:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for PromptVariableSchemaAdditionalProperties.
+const (
+	False PromptVariableSchemaAdditionalProperties = false
+)
+
+// Valid indicates whether the value is a known member of the PromptVariableSchemaAdditionalProperties enum.
+func (e PromptVariableSchemaAdditionalProperties) Valid() bool {
+	switch e {
+	case False:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for PromptVariableSchemaType.
+const (
+	PromptVariableSchemaTypeObject PromptVariableSchemaType = "object"
+)
+
+// Valid indicates whether the value is a known member of the PromptVariableSchemaType enum.
+func (e PromptVariableSchemaType) Valid() bool {
+	switch e {
+	case PromptVariableSchemaTypeObject:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for ProviderAuthMode.
 const (
 	ProviderAuthModeAdc               ProviderAuthMode = "adc"
@@ -6473,8 +6539,10 @@ type AgentPublicationDraft struct {
 
 	// ProjectId Required owning UUID in management writes. Configuration promotion rebinds this field from its explicit project name.
 	ProjectId openapi_types.UUID `json:"project_id"`
-	Prompt    *PromptDefinition  `json:"prompt,omitempty"`
-	Toolset   *ToolsetDefinition `json:"toolset,omitempty"`
+
+	// Prompt Use template and variables for a single user message, or messages and variable_schema for a structured prompt.
+	Prompt  *PromptDefinition  `json:"prompt,omitempty"`
+	Toolset *ToolsetDefinition `json:"toolset,omitempty"`
 }
 
 // AgentPublicationList defines model for AgentPublicationList.
@@ -6523,8 +6591,10 @@ type AgentPublicationWrite struct {
 	Credential nullable.Nullable[string] `json:"credential,omitempty"`
 	Name       string                    `json:"name"`
 	ProjectId  openapi_types.UUID        `json:"project_id"`
-	Prompt     *PromptDefinition         `json:"prompt,omitempty"`
-	Toolset    *ToolsetDefinition        `json:"toolset,omitempty"`
+
+	// Prompt Use template and variables for a single user message, or messages and variable_schema for a structured prompt.
+	Prompt  *PromptDefinition  `json:"prompt,omitempty"`
+	Toolset *ToolsetDefinition `json:"toolset,omitempty"`
 }
 
 // AgentToolPin defines model for AgentToolPin.
@@ -7824,8 +7894,10 @@ type ConfigurationAgentDraft struct {
 
 	// ProjectId Optional source identity; promotion resolves the owning project by name.
 	ProjectId *openapi_types.UUID `json:"project_id,omitempty"`
-	Prompt    *PromptDefinition   `json:"prompt,omitempty"`
-	Toolset   *ToolsetDefinition  `json:"toolset,omitempty"`
+
+	// Prompt Use template and variables for a single user message, or messages and variable_schema for a structured prompt.
+	Prompt  *PromptDefinition  `json:"prompt,omitempty"`
+	Toolset *ToolsetDefinition `json:"toolset,omitempty"`
 }
 
 // ConfigurationAgentPublication defines model for ConfigurationAgentPublication.
@@ -11670,16 +11742,57 @@ type PromptCachePolicyPositions string
 // PromptCachePolicyTtl defines model for PromptCachePolicy.Ttl.
 type PromptCachePolicyTtl string
 
-// PromptDefinition defines model for PromptDefinition.
+// PromptDefaultParameters defines model for PromptDefaultParameters.
+type PromptDefaultParameters struct {
+	MaxOutputTokens *int     `json:"max_output_tokens,omitempty"`
+	Temperature     *float32 `json:"temperature,omitempty"`
+	TopP            *float32 `json:"top_p,omitempty"`
+}
+
+// PromptDefinition Use template and variables for a single user message, or messages and variable_schema for a structured prompt.
 type PromptDefinition struct {
-	Template  string   `json:"template"`
-	Variables []string `json:"variables"`
+	DefaultParameters *PromptDefaultParameters    `json:"default_parameters,omitempty"`
+	Messages          *[]PromptMessage            `json:"messages,omitempty"`
+	Template          *string                     `json:"template,omitempty"`
+	VariableSchema    *PromptVariableSchema       `json:"variable_schema,omitempty"`
+	Variables         nullable.Nullable[[]string] `json:"variables,omitempty"`
 }
 
 // PromptLabelWrite defines model for PromptLabelWrite.
 type PromptLabelWrite struct {
 	RevisionId openapi_types.UUID `json:"revision_id"`
 }
+
+// PromptMessage defines model for PromptMessage.
+type PromptMessage struct {
+	Content string            `json:"content"`
+	Role    PromptMessageRole `json:"role"`
+}
+
+// PromptMessageRole defines model for PromptMessage.Role.
+type PromptMessageRole string
+
+// PromptVariableProperty defines model for PromptVariableProperty.
+type PromptVariableProperty struct {
+	Type PromptVariablePropertyType `json:"type"`
+}
+
+// PromptVariablePropertyType defines model for PromptVariableProperty.Type.
+type PromptVariablePropertyType string
+
+// PromptVariableSchema defines model for PromptVariableSchema.
+type PromptVariableSchema struct {
+	AdditionalProperties PromptVariableSchemaAdditionalProperties `json:"additionalProperties"`
+	Properties           map[string]PromptVariableProperty        `json:"properties"`
+	Required             []string                                 `json:"required"`
+	Type                 PromptVariableSchemaType                 `json:"type"`
+}
+
+// PromptVariableSchemaAdditionalProperties defines model for PromptVariableSchema.AdditionalProperties.
+type PromptVariableSchemaAdditionalProperties bool
+
+// PromptVariableSchemaType defines model for PromptVariableSchema.Type.
+type PromptVariableSchemaType string
 
 // ProviderActivationResponse defines model for ProviderActivationResponse.
 type ProviderActivationResponse struct {

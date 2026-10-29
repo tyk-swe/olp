@@ -25,7 +25,7 @@ func PersistRetainedEventTx(ctx context.Context, tx pgx.Tx, event *Event, payloa
 	}
 	var facts, unpriced, uncharged int64
 	var cost, charge string
-	if err = tx.QueryRow(ctx, factTotalsSQL, event.EventID).Scan(&facts, &cost, &unpriced, &charge, &uncharged); err != nil {
+	if err = tx.QueryRow(ctx, factTotalsSQL, event.EventID, nil).Scan(&facts, &cost, &unpriced, &charge, &uncharged); err != nil {
 		return Persisted{}, err
 	}
 	if facts == 0 {
