@@ -1540,6 +1540,17 @@ func TestWorkloadAgentDelegatesKeyForTools(t *testing.T) {
 		}
 	}
 	otherProject := createProject(f.h, f.owner, "Other delegation project")
+	delegationInvestigation := f.h.want(f.owner, http.MethodPost, "/api/v1/investigations", map[string]any{
+		"project_id": project, "filters": map[string]any{}, "evidence": []any{map[string]any{"kind": "delegation", "id": delegationID}}, "summary": "Review the delegation",
+	}, idem("delegation-investigation"), http.StatusCreated)
+	delegationInvestigationID := mcpExecString(t, delegationInvestigation, "id")
+	delegationEvidence := mcpExecItems(t, delegationInvestigation, "evidence")
+	if len(delegationEvidence) != 1 || mcpExecString(t, mcpExecItem(t, delegationEvidence, 0, delegationInvestigation), "id") != delegationID {
+		t.Fatalf("investigation did not retain its delegation reference: %v", delegationInvestigation)
+	}
+	f.h.want(f.owner, http.MethodPost, "/api/v1/investigations", map[string]any{
+		"project_id": otherProject, "filters": map[string]any{}, "evidence": []any{map[string]any{"kind": "delegation", "id": delegationID}}, "summary": "Foreign delegation",
+	}, idem("foreign-delegation-investigation"), http.StatusUnprocessableEntity)
 	viewer := f.h.invite(f.owner, "delegation-viewer@example.com", "viewer")
 	viewerSession := f.h.want(viewer, http.MethodGet, "/api/v1/sessions/current", nil, nil, http.StatusOK)
 	viewerID := mcpExecString(t, mcpExecObject(t, viewerSession, "user"), "id")
@@ -1547,15 +1558,18 @@ func TestWorkloadAgentDelegatesKeyForTools(t *testing.T) {
 	f.h.want(f.owner, http.MethodPatch, "/api/v1/users/"+viewerID, map[string]any{"access_scope": "assigned"}, etagHeader(viewerRecord), http.StatusOK)
 	addMember(f.h, f.owner, otherProject, viewerID, "viewer")
 	assignedViewer := login(f.h, "delegation-viewer@example.com")
+	f.h.want(assignedViewer, http.MethodGet, "/api/v1/investigations/"+delegationInvestigationID, nil, nil, http.StatusNotFound)
 	f.h.want(assignedViewer, http.MethodGet, "/api/v1/agent-delegations?project_id="+project, nil, nil, http.StatusNotFound)
 	f.h.want(assignedViewer, http.MethodGet, delegationPath, nil, nil, http.StatusNotFound)
 	if filtered := f.h.want(assignedViewer, http.MethodGet, "/api/v1/agent-delegations", nil, nil, http.StatusOK); len(mcpExecItems(t, filtered, "items")) != 0 {
 		t.Fatalf("project viewer could see another project's delegations: %v", filtered)
 	}
 	addMember(f.h, f.owner, project, viewerID, "viewer")
+	f.h.want(assignedViewer, http.MethodGet, "/api/v1/investigations/"+delegationInvestigationID, nil, nil, http.StatusOK)
 	f.h.want(assignedViewer, http.MethodGet, "/api/v1/agent-delegations?project_id="+project, nil, nil, http.StatusOK)
 	f.h.want(assignedViewer, http.MethodGet, delegationPath, nil, nil, http.StatusOK)
 	f.h.want(f.owner, http.MethodDelete, "/api/v1/projects/"+project+"/members/"+viewerID, nil, projectEtag(f.h, f.owner, project), http.StatusNoContent)
+	f.h.want(assignedViewer, http.MethodGet, "/api/v1/investigations/"+delegationInvestigationID, nil, nil, http.StatusNotFound)
 	f.h.want(assignedViewer, http.MethodGet, "/api/v1/agent-delegations?project_id="+project, nil, nil, http.StatusNotFound)
 	f.h.want(assignedViewer, http.MethodGet, delegationPath, nil, nil, http.StatusNotFound)
 	f.h.refresh()

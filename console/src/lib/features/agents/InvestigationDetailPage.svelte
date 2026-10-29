@@ -104,7 +104,9 @@
                 ><code>{reference.id}</code></a
               >
             {:else if reference.kind === 'delegation'}
-              <a class="text-button" href={resolve('/delegations')}
+              <a
+                class="text-button"
+                href={`${resolve('/delegations')}?project_id=${encodeURIComponent(item.project_id)}&delegation_id=${encodeURIComponent(reference.id)}`}
                 ><code>{reference.id}</code></a
               >
             {:else if reference.run_id}

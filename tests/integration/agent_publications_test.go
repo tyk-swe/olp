@@ -866,6 +866,17 @@ func TestA2ATaskCapabilityAuthorizesOwnerCallback(t *testing.T) {
 		}
 	}
 	otherProject := createProject(h, owner, "Other task project")
+	taskInvestigation := h.want(owner, http.MethodPost, "/api/v1/investigations", map[string]any{
+		"project_id": project, "filters": map[string]any{}, "evidence": []any{map[string]any{"kind": "task", "id": taskID}}, "summary": "Review the submitted task",
+	}, idem("task-investigation"), http.StatusCreated)
+	taskInvestigationID := mcpExecString(t, taskInvestigation, "id")
+	taskEvidence := mcpExecItems(t, taskInvestigation, "evidence")
+	if len(taskEvidence) != 1 || mcpExecString(t, mcpExecItem(t, taskEvidence, 0, taskInvestigation), "id") != taskID {
+		t.Fatalf("investigation did not retain its task reference: %v", taskInvestigation)
+	}
+	h.want(owner, http.MethodPost, "/api/v1/investigations", map[string]any{
+		"project_id": otherProject, "filters": map[string]any{}, "evidence": []any{map[string]any{"kind": "task", "id": taskID}}, "summary": "Foreign task",
+	}, idem("foreign-task-investigation"), http.StatusUnprocessableEntity)
 	viewer := h.invite(owner, "task-viewer@example.com", "viewer")
 	viewerSession := h.want(viewer, http.MethodGet, "/api/v1/sessions/current", nil, nil, http.StatusOK)
 	viewerID := mcpExecString(t, mcpExecObject(t, viewerSession, "user"), "id")
@@ -873,14 +884,17 @@ func TestA2ATaskCapabilityAuthorizesOwnerCallback(t *testing.T) {
 	h.want(owner, http.MethodPatch, "/api/v1/users/"+viewerID, map[string]any{"access_scope": "assigned"}, etagHeader(viewerRecord), http.StatusOK)
 	addMember(h, owner, otherProject, viewerID, "viewer")
 	assignedViewer := login(h, "task-viewer@example.com")
+	h.want(assignedViewer, http.MethodGet, "/api/v1/investigations/"+taskInvestigationID, nil, nil, http.StatusNotFound)
 	h.want(assignedViewer, http.MethodGet, "/api/v1/a2a-tasks?project_id="+project, nil, nil, http.StatusNotFound)
 	h.want(assignedViewer, http.MethodGet, "/api/v1/a2a-tasks/"+taskID, nil, nil, http.StatusNotFound)
 	if filtered := h.want(assignedViewer, http.MethodGet, "/api/v1/a2a-tasks", nil, nil, http.StatusOK); len(mcpExecItems(t, filtered, "items")) != 0 {
 		t.Fatalf("project viewer could see another project's tasks: %v", filtered)
 	}
 	addMember(h, owner, project, viewerID, "viewer")
+	h.want(assignedViewer, http.MethodGet, "/api/v1/investigations/"+taskInvestigationID, nil, nil, http.StatusOK)
 	h.want(assignedViewer, http.MethodGet, "/api/v1/a2a-tasks/"+taskID, nil, nil, http.StatusOK)
 	h.want(owner, http.MethodDelete, "/api/v1/projects/"+project+"/members/"+viewerID, nil, projectEtag(h, owner, project), http.StatusNoContent)
+	h.want(assignedViewer, http.MethodGet, "/api/v1/investigations/"+taskInvestigationID, nil, nil, http.StatusNotFound)
 	h.want(assignedViewer, http.MethodGet, "/api/v1/a2a-tasks/"+taskID, nil, nil, http.StatusNotFound)
 	callback := func(token, model string) int {
 		t.Helper()
