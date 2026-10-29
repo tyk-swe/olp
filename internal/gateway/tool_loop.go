@@ -53,6 +53,7 @@ type workflowCall struct {
 	responseMCP   bool
 	transcript    json.RawMessage
 	resume        *workflowResumeState
+	resumeStart   int
 	approvals     []agents.WorkflowApproval
 }
 
@@ -235,21 +236,26 @@ func (s *Server) abandonWorkflowDebit(ctx context.Context, x *call) *Error {
 }
 
 func (s *Server) executeToolLoop(ctx context.Context, x *call) *outcome {
-	firstIteration := 0
-	if x.workflow.resume != nil {
+	firstIteration, resumeError := func() (int, *Error) {
+		if x.workflow.resume == nil {
+			return 0, nil
+		}
 		state := x.workflow.resume
-		x.workflow.ordinal, x.workflow.calls = state.Ordinal, state.Calls
+		x.workflow.calls = state.Calls
 		parsed, err := x.generation.parsed.WithField(workflowTranscriptField(x.family), state.Transcript)
 		if err != nil {
-			return &outcome{err: invalidRequest("tool_approval_invalid", "The approved workflow could not be resumed.", nil)}
+			return 0, invalidRequest("tool_approval_invalid", "The approved workflow could not be resumed.", nil)
 		}
 		x.generation.parsed = parsed
-		continued, failure := s.continueToolLoop(ctx, x, state.Completion)
+		continued, failure := s.continueToolLoop(ctx, x, state.Completion, x.workflow.resumeStart)
 		if failure != nil {
-			return &outcome{err: failure}
+			return 0, failure
 		}
 		x.generation.parsed = continued
-		firstIteration = state.Iteration + 1
+		return state.Iteration + 1, nil
+	}()
+	if resumeError != nil {
+		return &outcome{err: resumeError}
 	}
 	for iteration := firstIteration; iteration < 8; iteration++ {
 		authority, e := s.workflowAuthority(ctx, x, x.route, "")
@@ -324,7 +330,7 @@ func (s *Server) executeToolLoop(ctx context.Context, x *call) *outcome {
 		if pause != nil {
 			return &outcome{completion: out.completion, approval: pause}
 		}
-		parsed, failure := s.continueToolLoop(ctx, x, out.completion)
+		parsed, failure := s.continueToolLoop(ctx, x, out.completion, x.workflow.ordinal)
 		if failure != nil {
 			return &outcome{err: failure}
 		}
@@ -369,7 +375,7 @@ func workflowStreamCompletion(family wire.Format, frames *bytes.Reader, maxEvent
 	return openai.Stream(wire.Chat, &translated, maxEvent, route, true, func([]byte) error { return nil })
 }
 
-func (s *Server) continueToolLoop(ctx context.Context, x *call, completion *wire.Completion) (*wire.Request, *Error) {
+func (s *Server) continueToolLoop(ctx context.Context, x *call, completion *wire.Completion, identityStart int) (*wire.Request, *Error) {
 	var response struct {
 		Choices []struct {
 			Message json.RawMessage `json:"message"`
@@ -414,7 +420,7 @@ func (s *Server) continueToolLoop(ctx context.Context, x *call, completion *wire
 		messages = append(messages, response.Choices[0].Message)
 	}
 	results := make([]protocols.WorkflowResult, 0, len(completion.ToolCalls))
-	for _, call := range completion.ToolCalls {
+	for callIndex, call := range completion.ToolCalls {
 		authority, e := s.workflowAuthority(ctx, x, x.route, "")
 		if e != nil {
 			return nil, e
@@ -427,7 +433,7 @@ func (s *Server) continueToolLoop(ctx context.Context, x *call, completion *wire
 		toolAuthority := *authority
 		toolAuthority.Attribution = x.attribution
 		callCtx, finish := s.monitorWorkflowAuthority(ctx, x, x.workflow.tools[index].ToolsetID)
-		result, err := s.callWorkflowTool(callCtx, x, toolAuthority, x.workflow.tools[index], call)
+		result, err := s.callWorkflowTool(callCtx, x, toolAuthority, x.workflow.tools[index], call, identityStart+callIndex)
 		authorityErr := finish()
 		x.workflow.ordinal++
 		x.workflow.calls++

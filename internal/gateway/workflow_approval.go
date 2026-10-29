@@ -44,12 +44,13 @@ type workflowPause struct {
 }
 
 type workflowResumeState struct {
-	Family     wire.Format      `json:"family"`
-	Transcript json.RawMessage  `json:"transcript"`
-	Completion *wire.Completion `json:"completion"`
-	Iteration  int              `json:"iteration"`
-	Ordinal    int              `json:"ordinal"`
-	Calls      int              `json:"calls"`
+	Family        wire.Format       `json:"family"`
+	Transcript    json.RawMessage   `json:"transcript"`
+	Completion    *wire.Completion  `json:"completion"`
+	Iteration     int               `json:"iteration"`
+	Calls         int               `json:"calls"`
+	ResponseMCP   bool              `json:"response_mcp"`
+	ResponseItems []responseMCPItem `json:"response_items,omitempty"`
 }
 
 type workflowResumeRequest struct {
@@ -75,8 +76,15 @@ func (s *Server) prepareWorkflowResume(ctx context.Context, x *call) *Error {
 	if err != nil || continuation.RouteRevisionID != x.named().RevisionID {
 		return permissionError("tool_approval_invalid", "The workflow approval is invalid or expired.")
 	}
+	for _, approval := range continuation.Approvals {
+		if !slices.ContainsFunc(x.workflow.tools, func(tool WorkflowTool) bool {
+			return tool.ToolsetID == approval.Binding.ToolsetID && tool.RevisionID == approval.Binding.ToolsetRevisionID && tool.Definition.Alias == approval.Binding.ToolAlias
+		}) {
+			return permissionError("tool_approval_invalid", "The workflow approval is invalid or expired.")
+		}
+	}
 	var state workflowResumeState
-	if json.Unmarshal(continuation.State, &state) != nil || state.Family != x.family || state.Completion == nil || state.Iteration < 0 || state.Iteration >= 7 || state.Ordinal < 0 || state.Ordinal != continuation.StartOrdinal || continuation.NextOrdinal < state.Ordinal || state.Calls < 0 || state.Calls > 32 {
+	if json.Unmarshal(continuation.State, &state) != nil || state.Family != x.family || state.Completion == nil || state.Iteration < 0 || state.Iteration >= 7 || continuation.StartOrdinal < 0 || continuation.NextOrdinal < continuation.StartOrdinal || state.Calls < 0 || state.Calls > 32 {
 		return permissionError("tool_approval_invalid", "The workflow approval is invalid or expired.")
 	}
 	parsed, err := x.generation.parsed.WithResourceBindings(oif.Change{Pointer: oif.Pointer("", "olp_approval"), Remove: true, Reason: "workflow approval control"})
@@ -88,14 +96,21 @@ func (s *Server) prepareWorkflowResume(ctx context.Context, x *call) *Error {
 		x.deadline = continuation.ExpiresAt
 	}
 	x.workflow.runID = continuation.RunID
-	state.Ordinal = continuation.NextOrdinal
+	x.workflow.ordinal = continuation.NextOrdinal
+	x.workflow.resumeStart = continuation.StartOrdinal
 	x.workflow.resume = &state
 	x.workflow.approvals = continuation.Approvals
+	x.workflow.responseMCP = x.workflow.responseMCP && state.ResponseMCP
+	if x.workflow.responseMCP {
+		x.workflow.responseItems = state.ResponseItems
+	} else {
+		x.workflow.responseItems = nil
+	}
 	return nil
 }
 
-func (s *Server) callWorkflowTool(ctx context.Context, x *call, authority access.Authority, tool WorkflowTool, call wire.ToolCall) (json.RawMessage, error) {
-	callID := fmt.Sprintf("%s:%d:%s", x.workflow.runID, x.workflow.ordinal, call.ID)
+func (s *Server) callWorkflowTool(ctx context.Context, x *call, authority access.Authority, tool WorkflowTool, call wire.ToolCall, identityOrdinal int) (json.RawMessage, error) {
+	callID := fmt.Sprintf("%s:%d:%s", x.workflow.runID, identityOrdinal, call.ID)
 	index := slices.IndexFunc(x.workflow.approvals, func(approval agents.WorkflowApproval) bool { return approval.CallID == call.ID })
 	if index < 0 {
 		return s.WorkflowTools.Call(ctx, authority, x.request.release, tool, x.workflow.runID, x.workflow.ordinal, callID, json.RawMessage(call.Arguments))
@@ -113,10 +128,6 @@ func (s *Server) pauseWorkflow(ctx context.Context, x *call, completion *wire.Co
 		if index < 0 || call.ID == "" || !json.Valid([]byte(call.Arguments)) {
 			return nil, invalidRequest("invalid_tool_call", "The model requested an unavailable tool or invalid arguments.", nil)
 		}
-		tool := x.workflow.tools[index]
-		if tool.Definition.Classification != "read_only" && tool.Definition.UnitPrice == nil {
-			return nil, invalidRequest("tool_approval_unavailable", "The tool does not have a finite approval allowance.", nil)
-		}
 	}
 	type candidate struct {
 		request agents.WorkflowApprovalCall
@@ -129,8 +140,14 @@ func (s *Server) pauseWorkflow(ctx context.Context, x *call, completion *wire.Co
 			if tool.Definition.Classification == "read_only" {
 				continue
 			}
+			maxCost := func() string {
+				if tool.Definition.UnitPrice == nil {
+					return "0"
+				}
+				return *tool.Definition.UnitPrice
+			}()
 			if !yield(candidate{
-				request: agents.WorkflowApprovalCall{CallID: call.ID, ToolsetID: tool.ToolsetID, ToolsetRevisionID: tool.RevisionID, ToolAlias: call.Name, Arguments: json.RawMessage(call.Arguments), MaxCost: *tool.Definition.UnitPrice},
+				request: agents.WorkflowApprovalCall{CallID: call.ID, ToolsetID: tool.ToolsetID, ToolsetRevisionID: tool.RevisionID, ToolAlias: call.Name, Arguments: json.RawMessage(call.Arguments), MaxCost: maxCost},
 				call:    workflowPauseCall{ID: call.ID, Name: call.Name, Arguments: json.RawMessage(call.Arguments), ServerLabel: tool.ToolsetID},
 			}) {
 				return
@@ -158,7 +175,7 @@ func (s *Server) pauseWorkflow(ctx context.Context, x *call, completion *wire.Co
 	if !ok {
 		return nil, serverError(503, "tool_approval_unavailable", "The approval service is unavailable.")
 	}
-	state, err := json.Marshal(workflowResumeState{Family: x.family, Transcript: x.generation.parsed.Field(workflowTranscriptField(x.family)), Completion: completion, Iteration: iteration, Ordinal: x.workflow.ordinal, Calls: x.workflow.calls})
+	state, err := json.Marshal(workflowResumeState{Family: x.family, Transcript: x.generation.parsed.Field(workflowTranscriptField(x.family)), Completion: completion, Iteration: iteration, Calls: x.workflow.calls, ResponseMCP: x.workflow.responseMCP, ResponseItems: x.workflow.responseItems})
 	if err != nil {
 		return nil, serverError(503, "tool_approval_unavailable", "The approval could not be prepared.")
 	}
@@ -217,5 +234,133 @@ func workflowApprovalFrames(pause *workflowPause, maxEvent, maxResponse int) ([]
 		return nil, errResponseTooLarge
 	}
 	output.Write(frame)
+	return output.Bytes(), nil
+}
+
+func workflowPauseFrames(family wire.Format, model, id string, pause *workflowPause, maxEvent, maxResponse int) ([]byte, error) {
+	if len(pause.Output) > 0 {
+		return workflowApprovalFrames(pause, maxEvent, maxResponse)
+	}
+	type event struct {
+		name string
+		data json.RawMessage
+	}
+	type chatDelta struct {
+		Role string `json:"role"`
+	}
+	type chatChoice struct {
+		Index        int       `json:"index"`
+		Delta        chatDelta `json:"delta"`
+		FinishReason string    `json:"finish_reason"`
+	}
+	type chatEvent struct {
+		ID       string         `json:"id"`
+		Object   string         `json:"object"`
+		Created  int64          `json:"created"`
+		Model    string         `json:"model"`
+		Choices  []chatChoice   `json:"choices"`
+		Approval *workflowPause `json:"olp_approval"`
+	}
+	type messageUsage struct {
+		InputTokens  int `json:"input_tokens"`
+		OutputTokens int `json:"output_tokens"`
+	}
+	type message struct {
+		ID      string            `json:"id"`
+		Type    string            `json:"type"`
+		Role    string            `json:"role"`
+		Model   string            `json:"model"`
+		Content []json.RawMessage `json:"content"`
+		Usage   messageUsage      `json:"usage"`
+	}
+	type messageStart struct {
+		Type    string  `json:"type"`
+		Message message `json:"message"`
+	}
+	type messageDeltaFields struct {
+		StopReason   string  `json:"stop_reason"`
+		StopSequence *string `json:"stop_sequence"`
+	}
+	type messageDelta struct {
+		Type     string             `json:"type"`
+		Delta    messageDeltaFields `json:"delta"`
+		Usage    messageUsage       `json:"usage"`
+		Approval *workflowPause     `json:"olp_approval"`
+	}
+	type messageStop struct {
+		Type string `json:"type"`
+	}
+	type response struct {
+		ID        string            `json:"id"`
+		Object    string            `json:"object"`
+		CreatedAt int64             `json:"created_at"`
+		Model     string            `json:"model"`
+		Status    string            `json:"status"`
+		Output    []json.RawMessage `json:"output"`
+		Approval  *workflowPause    `json:"olp_approval"`
+	}
+	type responseEvent struct {
+		Type     string   `json:"type"`
+		Sequence int      `json:"sequence_number"`
+		Response response `json:"response"`
+	}
+	type geminiContent struct {
+		Role  string            `json:"role"`
+		Parts []json.RawMessage `json:"parts"`
+	}
+	type geminiCandidate struct {
+		Index        int           `json:"index"`
+		Content      geminiContent `json:"content"`
+		FinishReason string        `json:"finishReason"`
+	}
+	type geminiEvent struct {
+		Candidates []geminiCandidate `json:"candidates"`
+		Approval   *workflowPause    `json:"olp_approval"`
+	}
+
+	events, err := func() ([]event, error) {
+		switch {
+		case family == wire.Chat:
+			data, err := json.Marshal(chatEvent{ID: "chatcmpl_" + id, Object: "chat.completion.chunk", Created: time.Now().Unix(), Model: model, Choices: []chatChoice{{Delta: chatDelta{Role: "assistant"}, FinishReason: "stop"}}, Approval: pause})
+			return []event{{data: data}, {data: json.RawMessage("[DONE]")}}, err
+		case family == wire.Anthropic:
+			start, err := json.Marshal(messageStart{Type: "message_start", Message: message{ID: "msg_" + id, Type: "message", Role: "assistant", Model: model, Content: []json.RawMessage{}}})
+			if err != nil {
+				return nil, err
+			}
+			delta, err := json.Marshal(messageDelta{Type: "message_delta", Delta: messageDeltaFields{StopReason: "end_turn"}, Approval: pause})
+			if err != nil {
+				return nil, err
+			}
+			stop, err := json.Marshal(messageStop{Type: "message_stop"})
+			return []event{{name: "message_start", data: start}, {name: "message_delta", data: delta}, {name: "message_stop", data: stop}}, err
+		case family == wire.Responses:
+			data, err := json.Marshal(responseEvent{Type: "response.incomplete", Response: response{ID: "resp_" + id, Object: "response", CreatedAt: time.Now().Unix(), Model: model, Status: "incomplete", Output: []json.RawMessage{}, Approval: pause}})
+			return []event{{name: "response.incomplete", data: data}}, err
+		case family.Surface() == "gemini":
+			data, err := json.Marshal(geminiEvent{Candidates: []geminiCandidate{{Content: geminiContent{Role: "model", Parts: []json.RawMessage{}}, FinishReason: "STOP"}}, Approval: pause})
+			return []event{{data: data}}, err
+		default:
+			return nil, errResponseTooLarge
+		}
+	}()
+	if err != nil {
+		return nil, errResponseTooLarge
+	}
+	var output bytes.Buffer
+	for _, event := range events {
+		if len(event.data) > maxEvent {
+			return nil, errResponseTooLarge
+		}
+		frame := sse.Frame{Data: string(event.data)}
+		if event.name != "" {
+			frame.Event = &event.name
+		}
+		encoded := frame.Encode()
+		if output.Len()+len(encoded) > maxResponse {
+			return nil, errResponseTooLarge
+		}
+		output.Write(encoded)
+	}
 	return output.Bytes(), nil
 }

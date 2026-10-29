@@ -153,26 +153,30 @@ func (s *WorkflowStore) Continue(ctx context.Context, authority access.Authority
 	}
 	principal := PrincipalDigest(s.Auth, authority)
 	transcriptDigest := s.Auth.Digest(secrets.ApprovalDigest, "workflow-transcript:"+string(transcript))
+	pending := false
 	for _, approval := range continuation.Approvals {
 		argument, ok := arguments[approval.CallID]
 		if !ok || !json.Valid(argument) {
 			return WorkflowContinuation{}, ErrApproval
 		}
 		binding := approval.Binding
+		if !authority.AllowsResource("tools", binding.ToolsetID, *authority.ProjectID, time.Now()) {
+			return WorkflowContinuation{}, ErrApproval
+		}
 		principalDigest, e1 := hex.DecodeString(binding.PrincipalDigest)
 		transcript, e2 := hex.DecodeString(binding.TranscriptDigest)
 		argumentDigest, e3 := hex.DecodeString(binding.ArgumentDigest)
 		if e1 != nil || e2 != nil || e3 != nil || !hmac.Equal(principal, principalDigest) || !hmac.Equal(transcriptDigest, transcript) || !hmac.Equal(s.Auth.Digest(secrets.ToolInputDigest, string(argument)), argumentDigest) {
 			return WorkflowContinuation{}, ErrApproval
 		}
-		var active bool
-		if err := s.Pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM olp.agent_approvals WHERE id=$1 AND api_key_id=$2 AND project_id=$3 AND run_id=$4 AND consumed_at IS NULL AND expires_at>clock_timestamp())`, approval.ID, authority.ID, *authority.ProjectID, continuation.RunID).Scan(&active); err != nil || !active {
+		var unconsumed bool
+		if err := s.Pool.QueryRow(ctx, `SELECT x.consumed_at IS NULL FROM olp.agent_approvals x JOIN olp.api_keys k ON k.id=x.api_key_id JOIN olp.agent_publications p ON p.id=$5 JOIN olp.live_agent_publication_revisions v ON v.publication_id=p.id AND v.id=$6 JOIN olp.agent_runs r ON r.id=x.run_id JOIN olp.route_revisions rr ON rr.id=r.route_revision_id JOIN olp.routes route ON route.id=rr.route_id WHERE x.id=$1 AND x.api_key_id=$2 AND x.project_id=$3 AND x.run_id=$4 AND x.expires_at>clock_timestamp() AND k.revoked_at IS NULL AND (k.expires_at IS NULL OR k.expires_at>clock_timestamp()) AND NOT p.retired AND p.project_id=x.project_id AND p.latest_revision_id=v.id AND rr.id::text=$7 AND route.latest_revision_id=rr.id AND route.state='active'`, approval.ID, authority.ID, *authority.ProjectID, continuation.RunID, binding.ToolsetID, binding.ToolsetRevisionID, binding.RouteRevisionID).Scan(&unconsumed); err != nil {
 			return WorkflowContinuation{}, ErrApproval
 		}
+		pending = pending || unconsumed
 	}
 	var next int
-	var dispatched bool
-	if err := s.Pool.QueryRow(ctx, `SELECT GREATEST(COALESCE(max(step.ordinal)+1,0),$2),COALESCE(bool_or(debit.state NOT IN ('released','not_accepted')),false) FROM olp.agent_steps step JOIN olp.execution_debits debit ON debit.id=step.dispatch_id WHERE step.run_id=$1 AND step.ordinal>=$2`, continuation.RunID, continuation.StartOrdinal).Scan(&next, &dispatched); err != nil || dispatched {
+	if err := s.Pool.QueryRow(ctx, `SELECT GREATEST(COALESCE(max(ordinal)+1,0),$2) FROM olp.agent_steps WHERE run_id=$1 AND ordinal>=$2`, continuation.RunID, continuation.StartOrdinal).Scan(&next); err != nil || !pending {
 		return WorkflowContinuation{}, ErrApproval
 	}
 	return WorkflowContinuation{RunID: continuation.RunID, RouteRevisionID: continuation.RouteRevisionID, StartOrdinal: continuation.StartOrdinal, NextOrdinal: next, State: continuation.State, Approvals: continuation.Approvals, ExpiresAt: continuation.ExpiresAt}, nil

@@ -634,7 +634,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Provider completion, stream, or WorkflowApprovalPause requiring explicit client approval */
+            /** @description Provider completion or WorkflowApprovalPause requiring explicit client approval. A streamed pause carries the pause object in the chat.completion.chunk olp_approval field before [DONE]. */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -906,7 +906,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Provider completion, stream, or WorkflowApprovalPause. Certified Responses contracts can include MCP approval-request items. */
+            /** @description Provider completion or WorkflowApprovalPause. Certified Responses contracts can include MCP approval-request items. Other streamed pauses carry the pause object in response.olp_approval on response.incomplete with an empty output array. */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -997,7 +997,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Provider completion, stream, or WorkflowApprovalPause requiring explicit client approval */
+            /** @description Provider completion or WorkflowApprovalPause requiring explicit client approval. A streamed pause carries the pause object in the message_delta olp_approval field before message_stop. */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -1093,7 +1093,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Provider completion, stream, or WorkflowApprovalPause requiring explicit client approval */
+            /** @description Provider completion or WorkflowApprovalPause requiring explicit client approval. */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -1189,7 +1189,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Provider completion, stream, or WorkflowApprovalPause requiring explicit client approval */
+            /** @description Provider stream or WorkflowApprovalPause requiring explicit client approval. A streamed pause carries the pause object in the top-level olp_approval field. */
             200: {
                 headers: {
                     [name: string]: unknown;

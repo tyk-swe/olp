@@ -101,10 +101,6 @@ func TestGatewayToolExecutionResponsesMixedContractsReturnFinalOnly(t *testing.T
 			fixture := &workflowFixture{
 				runID: uuid.NewString(),
 				tool:  WorkflowTool{ToolsetID: toolsetID, RevisionID: uuid.NewString(), Definition: routing.MCPToolsetTool{Alias: alias, Classification: "read_only", InputSchema: json.RawMessage(`{"type":"object"}`)}},
-				beforeCall: func() error {
-					first.Close()
-					return nil
-				},
 			}
 			profileFor := func(name string) string {
 				if name == "a" {
@@ -125,6 +121,15 @@ func TestGatewayToolExecutionResponsesMixedContractsReturnFinalOnly(t *testing.T
 					ProfileID: profileFor(provider.Name), ProfileRevision: provider.ProfileRevision, Capabilities: provider.Capabilities,
 				}
 			}, true)
+			firstRoute := h.rt.Release().Snapshot.Routes[routeSlug]
+			firstProvider := h.rt.Release().Snapshot.Providers[firstRoute.Targets[0].ProviderID]
+			firstCredential := *firstProvider.Slots[0].CredentialID
+			fixture.beforeCall = func() error {
+				h.rt.mu.Lock()
+				defer h.rt.mu.Unlock()
+				h.rt.revoked[firstCredential] = true
+				return nil
+			}
 			h.mock.set("b", func(w http.ResponseWriter, _ *http.Request) {
 				fmt.Fprint(w, `{"id":"final","object":"response","status":"completed","output":[{"id":"msg-final","type":"message","role":"assistant","content":[{"type":"output_text","text":"fallback final"}]}],"usage":{"input_tokens":2,"output_tokens":3,"total_tokens":5}}`)
 			})
@@ -1526,7 +1531,7 @@ func (f *approvalWorkflowFixture) Continue(ctx context.Context, _ access.Authori
 	case request := <-f.paused:
 		approvals := slices.Collect(func(yield func(agents.WorkflowApproval) bool) {
 			for _, call := range request.Calls {
-				if !yield(agents.WorkflowApproval{CallID: call.CallID, ID: uuid.NewString()}) {
+				if !yield(agents.WorkflowApproval{CallID: call.CallID, ID: uuid.NewString(), Binding: agents.ApprovalBinding{ToolsetID: call.ToolsetID, ToolsetRevisionID: call.ToolsetRevisionID, ToolAlias: call.ToolAlias}}) {
 					return
 				}
 			}
@@ -1609,6 +1614,61 @@ func TestGatewayToolExecutionNativeApprovalPauseAndResume(t *testing.T) {
 	}
 }
 
+func TestGatewayToolExecutionStreamingApprovalPause(t *testing.T) {
+	for _, test := range []struct {
+		name, surface, profile, path, request, upstream, terminal string
+	}{
+		{name: "chat", surface: "openai", profile: "openai-chat", path: "/v1/chat/completions", request: `{"model":"` + routeSlug + `","messages":[{"role":"user","content":"hello"}],"stream":true}`, upstream: `data: {"id":"first","object":"chat.completion.chunk","created":1,"model":"model-a","choices":[{"index":0,"delta":{"role":"assistant","tool_calls":[{"index":0,"id":"call-1","type":"function","function":{"name":%q,"arguments":"{}"}}]},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":2,"completion_tokens":3,"total_tokens":5}}` + "\n\ndata: [DONE]\n\n", terminal: "[DONE]"},
+		{name: "anthropic", surface: "anthropic", profile: "anthropic-messages", path: "/anthropic/v1/messages", request: `{"model":"` + routeSlug + `","max_tokens":64,"stream":true,"messages":[{"role":"user","content":"hello"}]}`, upstream: `event: message_start` + "\n" + `data: {"type":"message_start","message":{"id":"msg","type":"message","role":"assistant","model":"model-a","usage":{"input_tokens":2}}}` + "\n\n" + `event: content_block_start` + "\n" + `data: {"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"call-1","name":%q,"input":{}}}` + "\n\n" + `event: content_block_stop` + "\n" + `data: {"type":"content_block_stop","index":0}` + "\n\n" + `event: message_delta` + "\n" + `data: {"type":"message_delta","delta":{"stop_reason":"tool_use"},"usage":{"output_tokens":3}}` + "\n\n" + `event: message_stop` + "\n" + `data: {"type":"message_stop"}` + "\n\n", terminal: "message_stop"},
+		{name: "gemini", surface: "gemini", profile: "gemini-generation", path: "/gemini/v1beta/models/" + routeSlug + ":streamGenerateContent?alt=sse", request: `{"contents":[{"role":"user","parts":[{"text":"hello"}]}]}`, upstream: `data: {"candidates":[{"index":0,"content":{"role":"model","parts":[{"functionCall":{"name":%q,"args":{}}}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":2,"candidatesTokenCount":3,"totalTokenCount":5}}` + "\n\n", terminal: "STOP"},
+		{name: "uncertified responses", surface: "openai", profile: "compatible-responses", path: "/v1/responses", request: `{"model":"` + routeSlug + `","input":"hello","stream":true}`, upstream: `data: {"type":"response.output_item.done","sequence_number":0,"output_index":0,"item":{"type":"function_call","id":"fc-1","call_id":"call-1","name":%q,"arguments":"{}","status":"completed"}}` + "\n\n" + `data: {"type":"response.completed","sequence_number":1,"response":{"id":"first","object":"response","status":"completed","model":"model-a","output":[],"usage":{"input_tokens":2,"output_tokens":3,"total_tokens":5}}}` + "\n\n", terminal: "response.incomplete"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			toolsetID, projectID := uuid.NewString(), uuid.NewString()
+			alias := "t_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+			fixture := &workflowFixture{runID: uuid.NewString(), tool: WorkflowTool{ToolsetID: toolsetID, RevisionID: uuid.NewString(), Definition: routing.MCPToolsetTool{Alias: alias, Classification: "approval_required", InputSchema: json.RawMessage(`{"type":"object"}`)}}}
+			h := nativeWorkflowHarness(t, projectID, test.surface, test.profile, "streaming", routing.FidelityTransformed, []string{toolsetID}, true, fixture, true)
+			h.gateway.WorkflowRuns = &approvalWorkflowFixture{workflowFixture: fixture}
+			h.mock.set("a", func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "text/event-stream")
+				fmt.Fprintf(w, test.upstream, alias)
+			})
+			response := h.do(t.Context(), http.MethodPost, test.path, fullKey, []byte(test.request), nil)
+			defer response.Body.Close()
+			body, err := io.ReadAll(response.Body)
+			if err != nil || response.StatusCode != http.StatusOK || !strings.HasPrefix(response.Header.Get("Content-Type"), "text/event-stream") {
+				t.Fatalf("pause is not an SSE response: status=%d body=%s error=%v", response.StatusCode, body, err)
+			}
+			var found bool
+			err = sse.Decode(strings.NewReader(string(body)), 65536, func(frame sse.Frame) error {
+				if frame.Data == "[DONE]" {
+					return nil
+				}
+				var data struct {
+					Approval *workflowPause `json:"olp_approval"`
+					Response struct {
+						Approval *workflowPause `json:"olp_approval"`
+					} `json:"response"`
+				}
+				if err := json.Unmarshal([]byte(frame.Data), &data); err != nil {
+					return err
+				}
+				pause := data.Approval
+				if pause == nil {
+					pause = data.Response.Approval
+				}
+				if pause != nil && pause.Type == "tool_approval_required" && pause.ContinuationToken == "olpa_fixture" && len(pause.Calls) == 1 && pause.Calls[0].Name == alias {
+					found = true
+				}
+				return nil
+			})
+			if err != nil || !found || !strings.Contains(string(body), test.terminal) || strings.Contains(string(body), "mcp_approval_request") || len(fixture.calls) != 0 {
+				t.Fatalf("invalid approval stream: body=%s error=%v", body, err)
+			}
+		})
+	}
+}
+
 func TestGatewayToolExecutionResponsesApprovalRequest(t *testing.T) {
 	toolsetID, projectID := uuid.NewString(), uuid.NewString()
 	alias := "t_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
@@ -1646,6 +1706,55 @@ func TestGatewayToolExecutionResponsesApprovalRequest(t *testing.T) {
 	}
 	if len(fixture.calls) != 0 {
 		t.Fatal("approval-required tool dispatched before confirmation")
+	}
+}
+
+func TestGatewayToolExecutionResponsesUncertifiedApprovalRemainsFinalOnly(t *testing.T) {
+	toolsetID, projectID := uuid.NewString(), uuid.NewString()
+	alias := "t_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+	price := "0.25"
+	fixture := &workflowFixture{runID: uuid.NewString(), tool: WorkflowTool{ToolsetID: toolsetID, RevisionID: uuid.NewString(), Definition: routing.MCPToolsetTool{Alias: alias, Classification: "approval_required", UnitPrice: &price, InputSchema: json.RawMessage(`{"type":"object"}`)}}}
+	first := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprintf(w, `{"id":"first","object":"response","status":"completed","model":"model-a","output":[{"type":"function_call","id":"fc-1","call_id":"call-1","name":%q,"arguments":"{}","status":"completed"}],"usage":{"input_tokens":2,"output_tokens":3,"total_tokens":5}}`, alias)
+	}))
+	t.Cleanup(first.Close)
+	h := nativeWorkflowHarnessWithProviders(t, projectID, "openai", "openai-responses", "unary", routing.FidelityTransformed, []string{toolsetID}, true, fixture, func(provider routing.Provider) routing.Provider {
+		if provider.Name != "a" {
+			return provider
+		}
+		return routing.Provider{ID: provider.ID, Name: provider.Name, Kind: "openai_compatible", Enabled: provider.Enabled, ActiveCredential: provider.ActiveCredential, RevisionID: provider.RevisionID, Endpoint: first.URL + "/v1", AuthMode: provider.AuthMode, Slots: provider.Slots, ProfileID: "compatible-responses", ProfileRevision: provider.ProfileRevision, Capabilities: provider.Capabilities}
+	}, true)
+	h.mock.set("b", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		io.WriteString(w, `{"id":"last","object":"response","status":"completed","model":"model-b","output":[{"type":"message","id":"msg-1","role":"assistant","status":"completed","content":[{"type":"output_text","text":"final answer","annotations":[]}]}],"usage":{"input_tokens":3,"output_tokens":4,"total_tokens":7}}`)
+	})
+	approval := &approvalWorkflowFixture{workflowFixture: fixture, paused: make(chan agents.WorkflowApprovalRequest, 1)}
+	h.gateway.WorkflowRuns, h.gateway.WorkflowTools = approval, approval
+	request := `{"model":"` + routeSlug + `","input":"hello"}`
+	initial := h.do(t.Context(), http.MethodPost, "/v1/responses", fullKey, []byte(request), nil)
+	body, err := io.ReadAll(initial.Body)
+	initial.Body.Close()
+	var pause workflowPause
+	if err != nil || initial.StatusCode != http.StatusOK || json.Unmarshal(body, &pause) != nil || pause.ContinuationToken == "" || len(pause.Calls) != 1 || strings.Contains(string(body), "mcp_") {
+		t.Fatalf("uncertified pause was not final-only: status=%d body=%s error=%v", initial.StatusCode, body, err)
+	}
+	firstRoute := h.rt.Release().Snapshot.Routes[routeSlug]
+	firstProvider := h.rt.Release().Snapshot.Providers[firstRoute.Targets[0].ProviderID]
+	firstCredential := *firstProvider.Slots[0].CredentialID
+	h.rt.mu.Lock()
+	h.rt.revoked[firstCredential] = true
+	h.rt.mu.Unlock()
+	submission, err := json.Marshal(workflowResumeRequest{ContinuationToken: pause.ContinuationToken, Approved: true, Arguments: map[string]json.RawMessage{pause.Calls[0].ID: json.RawMessage(`{}`)}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	resume := strings.TrimSuffix(request, "}") + `,"olp_approval":` + string(submission) + `}`
+	final := h.do(t.Context(), http.MethodPost, "/v1/responses", fullKey, []byte(resume), nil)
+	defer final.Body.Close()
+	body, err = io.ReadAll(final.Body)
+	if err != nil || final.StatusCode != http.StatusOK || !strings.Contains(string(body), "final answer") || strings.Contains(string(body), "mcp_") || strings.Contains(string(body), "private-tool-result") {
+		t.Fatalf("uncertified contract was upgraded after resume: status=%d body=%s error=%v", final.StatusCode, body, err)
 	}
 }
 

@@ -814,8 +814,8 @@ func (s *Server) inferenceOperation(family wire.Format, dialect string) http.Han
 			return
 		}
 		if out.approval != nil {
-			if parsed.Stream && len(out.approval.Output) > 0 {
-				frames, err := workflowApprovalFrames(out.approval, int(s.cfg.MaxEventBytes), int(s.cfg.MaxResponseBytes))
+			if parsed.Stream {
+				frames, err := workflowPauseFrames(family, x.named().Slug, x.request.accountingID(), out.approval, int(s.cfg.MaxEventBytes), int(s.cfg.MaxResponseBytes))
 				if err != nil {
 					out.err = serverError(http.StatusBadGateway, "invalid_tool_response", "The approval response could not be prepared.")
 					status = out.err.Status

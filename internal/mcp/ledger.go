@@ -215,7 +215,7 @@ WHERE i.api_key_id=$1 AND i.call_digest=$2 FOR UPDATE OF i`, reservation.APIKeyI
 	if err != nil {
 		return nil, err
 	}
-	if existing.expired || existing.state == limits.DebitReleased && existing.status == "" {
+	if existing.expired || existing.state == limits.DebitReleased && (existing.status == "" || in.RunID != "" && existing.status == StatusGuardrailBlocked) {
 		_, err = tx.Exec(ctx, `UPDATE olp.mcp_call_identities SET project_id=$3,dispatch_id=$4,attempt_id=$5,toolset_id=$6,toolset_revision_id=$7,tool_alias=$8,input_digest=$9,created_at=clock_timestamp(),expires_at=clock_timestamp()+make_interval(secs=>$10) WHERE api_key_id=$1 AND call_digest=$2`,
 			reservation.APIKeyID, in.CallDigest, reservation.ProjectID, reservation.DispatchID, reservation.AttemptID,
 			in.ToolsetID, in.ToolsetRevisionID, in.ToolAlias, in.InputDigest, callIdentityBinding.Seconds())
