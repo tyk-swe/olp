@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import AxeBuilder from '@axe-core/playwright';
-import { expect, type Page, type TestInfo } from '@playwright/test';
+import { expect, type Page, type TestInfo } from '../playwright';
 
 type Identified = { id: string; etag: string };
 type Run = { id: string };

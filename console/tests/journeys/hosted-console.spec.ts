@@ -1,4 +1,3 @@
-import { verifyRunInspection } from './run-inspection';
 import {
   owner,
   vertical,
@@ -659,14 +658,6 @@ test.describe('Hosted console integration', () => {
       .locator('article')
       .filter({ has: page.getByText('Requests', { exact: true }) });
     await expect(requestMetric.locator('strong')).toHaveText('4');
-  });
-
-  test('operators inspect gateway runs, approvals and linked spans', async ({
-    page
-  }) => {
-    test.setTimeout(180_000);
-    await signInAsOwner(page);
-    await verifyRunInspection(page, test.info());
   });
 
   test('API key secrets are shown once and the lifecycle converges against the real backend', async ({

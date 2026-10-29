@@ -45,7 +45,11 @@ export default defineConfig({
   outputDir: `test-results/${originMode}-${phase}`,
   reporter: process.env.CI ? [['github'], ['html', { open: 'never' }]] : 'list',
   testDir: './tests/journeys',
-  testMatch: ['**/hosted-console.spec.ts', '**/recovery.spec.ts'],
+  testMatch: [
+    '**/hosted-console.spec.ts',
+    '**/recovery.spec.ts',
+    ...(phase === 'fresh' ? ['**/run-inspection.spec.ts'] : [])
+  ],
   fullyParallel: false,
   // One explicit serial suite owns the disposable database and installation.
   // First-run setup is true exactly once, and retries against mutated state
