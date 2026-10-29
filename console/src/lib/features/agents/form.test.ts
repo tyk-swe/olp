@@ -321,6 +321,37 @@ describe('publication editor boundaries', () => {
     ).toBe('0.35');
   });
 
+  it('preserves an agent remote work duration when editing its publication', () => {
+    const form = publicationForm();
+    expect(publicationInput('agents', form).agent).not.toHaveProperty(
+      'remote_work_bound_seconds'
+    );
+    expect(
+      publicationInput('agents', { ...form, remoteWorkBoundSeconds: ' 120 ' })
+        .agent?.remote_work_bound_seconds
+    ).toBe(120);
+  });
+
+  it('preserves configurable task bounds when editing an agent publication', () => {
+    const form = publicationForm();
+    expect(publicationInput('agents', form).agent).not.toHaveProperty(
+      'max_task_continuations'
+    );
+    expect(publicationInput('agents', form).agent).not.toHaveProperty(
+      'task_deadline_seconds'
+    );
+    expect(
+      publicationInput('agents', {
+        ...form,
+        maxTaskContinuations: ' 64 ',
+        taskDeadlineSeconds: ' 900 '
+      }).agent
+    ).toMatchObject({
+      max_task_continuations: 64,
+      task_deadline_seconds: 900
+    });
+  });
+
   it('round trips prompt variables and removes empty separators from edited variables', () => {
     const draft: Publication['draft'] = {
       project_id: id,

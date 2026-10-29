@@ -127,6 +127,9 @@ export type PublicationForm = {
   pricingRevision: string;
   maxCost: string;
   messagePrice: string;
+  remoteWorkBoundSeconds: string;
+  maxTaskContinuations: string;
+  taskDeadlineSeconds: string;
   toolsetRevisions: string;
   routeRevisions: string;
 };
@@ -159,6 +162,18 @@ export function publicationForm(
     pricingRevision: d?.agent?.pricing_revision_id ?? '',
     maxCost: d?.agent?.max_cost ?? '',
     messagePrice: d?.agent?.message_price ?? '',
+    remoteWorkBoundSeconds:
+      d?.agent?.remote_work_bound_seconds === undefined
+        ? ''
+        : String(d.agent.remote_work_bound_seconds),
+    maxTaskContinuations:
+      d?.agent?.max_task_continuations === undefined
+        ? ''
+        : String(d.agent.max_task_continuations),
+    taskDeadlineSeconds:
+      d?.agent?.task_deadline_seconds === undefined
+        ? ''
+        : String(d.agent.task_deadline_seconds),
     toolsetRevisions: d?.agent?.toolset_revisions.join('\n') ?? '',
     routeRevisions: d?.agent?.route_revisions.join('\n') ?? ''
   };
@@ -211,6 +226,19 @@ export function publicationInput(kind: Kind, form: PublicationForm): Draft {
       max_cost: form.maxCost.trim(),
       ...(form.messagePrice.trim() !== ''
         ? { message_price: form.messagePrice.trim() }
+        : {}),
+      ...(form.remoteWorkBoundSeconds.trim() !== ''
+        ? {
+            remote_work_bound_seconds: Number(
+              form.remoteWorkBoundSeconds.trim()
+            )
+          }
+        : {}),
+      ...(form.maxTaskContinuations.trim() !== ''
+        ? { max_task_continuations: Number(form.maxTaskContinuations.trim()) }
+        : {}),
+      ...(form.taskDeadlineSeconds.trim() !== ''
+        ? { task_deadline_seconds: Number(form.taskDeadlineSeconds.trim()) }
         : {}),
       toolset_revisions: resourceIDs(form.toolsetRevisions),
       route_revisions: resourceIDs(form.routeRevisions)

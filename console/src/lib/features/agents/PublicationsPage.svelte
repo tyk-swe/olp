@@ -615,6 +615,36 @@
           >
           <p>Leave blank to disable sending, or enter 0 for free messages.</p>
           <label
+            >Declared maximum remote work duration in seconds <input
+              inputmode="numeric"
+              pattern="[0-9]+"
+              bind:value={form.remoteWorkBoundSeconds}
+            /></label
+          >
+          <p>
+            The agent must enforce this bound on its own work. Budgeted calls
+            require a bound.
+          </p>
+          <label
+            >Maximum task continuations <input
+              inputmode="numeric"
+              pattern="[0-9]+"
+              bind:value={form.maxTaskContinuations}
+              placeholder="32"
+            /></label
+          >
+          <label
+            >Task deadline in seconds <input
+              inputmode="numeric"
+              pattern="[0-9]+"
+              bind:value={form.taskDeadlineSeconds}
+              placeholder="600"
+            /></label
+          >
+          <p>
+            Continuations are limited to 128 and the deadline to 3600 seconds.
+          </p>
+          <label
             >Pinned toolset revision UUIDs <textarea
               bind:value={form.toolsetRevisions}></textarea></label
           ><label

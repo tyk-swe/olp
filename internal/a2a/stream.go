@@ -99,6 +99,16 @@ func (s *Server) sendStream(w http.ResponseWriter, r *http.Request, authority ac
 		fail(w, request.ID, -32603, "Internal error")
 		return
 	}
+	if err := s.Ledger.admitTask(r.Context(), res, authority, prepared.PublicTaskID, prepared.Revision.Definition.Agent); err != nil {
+		s.Ledger.release(r.Context(), res)
+		fail(w, request.ID, -32002, "Agent task limit reached")
+		return
+	}
+	if err := s.Ledger.admitRate(r.Context(), authority); err != nil {
+		s.Ledger.release(r.Context(), res)
+		fail(w, request.ID, -32002, "Agent send rate exceeded")
+		return
+	}
 	if !s.streamAuthorized(r, authority, prepared.Revision) {
 		s.Ledger.release(r.Context(), res)
 		fail(w, request.ID, -32603, "Authorization revoked")
@@ -126,7 +136,7 @@ func (s *Server) sendStream(w http.ResponseWriter, r *http.Request, authority ac
 		return
 	}
 	settleCtx, settleCancel := context.WithTimeout(context.WithoutCancel(r.Context()), 5*time.Second)
-	publicID, settleErr := s.Ledger.settle(settleCtx, res, authority, prepared.Revision, string(info.TaskID), info.ContextID)
+	publicID, settleErr := s.Ledger.settle(settleCtx, res, authority, prepared.Revision, string(info.TaskID), info.ContextID, taskEventState(first))
 	settleCancel()
 	if settleErr != nil {
 		s.Ledger.unknown(r.Context(), res)
@@ -207,6 +217,10 @@ func (s *Server) subscribe(w http.ResponseWriter, r *http.Request, authority acc
 		fail(w, request.ID, -32603, "Invalid upstream stream")
 		return
 	}
+	if err := s.recordStreamTaskState(r.Context(), owned.ID, first); err != nil {
+		fail(w, request.ID, -32603, "Internal error")
+		return
+	}
 	streamHeaders(w)
 	if !writeStreamEvent(w, request.ID, first, owned.ID, pinned.Definition.Agent.Protocol) {
 		return
@@ -242,9 +256,22 @@ func (s *Server) forwardStream(w http.ResponseWriter, r *http.Request, authority
 			writeStreamFailure(w, id, "Authorization revoked")
 			return
 		}
+		if err := s.recordStreamTaskState(r.Context(), publicID, event); err != nil {
+			writeStreamFailure(w, id, "Internal error")
+			return
+		}
 		if !writeStreamEvent(w, id, event, publicID, revision.Definition.Agent.Protocol) {
 			return
 		}
+	}
+}
+
+func (s *Server) recordStreamTaskState(ctx context.Context, publicID string, event protocol.Event) error {
+	switch event.(type) {
+	case *protocol.Task, *protocol.TaskStatusUpdateEvent:
+		return s.Ledger.recordTaskState(ctx, publicID, taskEventState(event))
+	default:
+		return nil
 	}
 }
 

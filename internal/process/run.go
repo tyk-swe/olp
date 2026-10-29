@@ -211,6 +211,7 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 	var gatewayInstance string
 	var rt *runtime.Manager
 	var gw *gateway.Server
+	var agentMonitor *a2a.TaskMonitor
 	var mediaService *media.Service
 	var mediaSpool *media.Spool
 	var pluginHost *plugins.Host
@@ -384,9 +385,11 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 				gw.Resolver = resources.NewResolver(pool)
 			}
 			gw.Register(public)
-			(&a2a.Server{Runtime: rt, Egress: &policy, Ledger: &a2a.Ledger{Pool: pool, Store: &limits.DebitStore{Pool: pool, Limiter: limiter}, Auth: auth}, TrustedProxies: c.TrustedProxyCIDRs, PublicOrigin: c.PublicOrigin, Credentials: func(ctx context.Context, id string) ([]byte, error) {
+			agentServer := &a2a.Server{Runtime: rt, Egress: &policy, Ledger: &a2a.Ledger{Pool: pool, Store: &limits.DebitStore{Pool: pool, Limiter: limiter}, Auth: auth}, TrustedProxies: c.TrustedProxyCIDRs, PublicOrigin: c.PublicOrigin, Credentials: func(ctx context.Context, id string) ([]byte, error) {
 				return keys.Read(ctx, pool, installation, id, secrets.AgentCredential)
-			}}).Register(public)
+			}}
+			agentServer.Register(public)
+			agentMonitor = &a2a.TaskMonitor{Server: agentServer, Log: log}
 			var toolLedger mcp.Ledger
 			if limiter != nil {
 				toolLedger = &mcp.DurableLedger{Pool: pool, Store: &limits.DebitStore{Pool: pool, Limiter: limiter}, Auth: auth}
@@ -539,6 +542,9 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 		// Authority must stay fresh while accepted requests drain, so
 		// polling outlives the listeners and stops once handlers finish.
 		rt.Start(context.WithoutCancel(ctx))
+	}
+	if agentMonitor != nil {
+		background.Go(func() { agentMonitor.Run(auxiliary) })
 	}
 	// The observability collectors probe only what this process composes: an
 	// unconfigured dependency is reported as absent, never as failed.

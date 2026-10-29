@@ -655,12 +655,14 @@ func TestA2AAgentCardUsesGatewayAuthenticationAndEndpoint(t *testing.T) {
 	cardFor := func(endpoint string) []byte {
 		return bytes.ReplaceAll([]byte(cardTemplate), []byte("PINNED_ENDPOINT"), []byte(endpoint))
 	}
-	upstreamIDs := make(chan string, 1)
+	upstreamIDs := make(chan string, 64)
+	cancelAttempts := make(chan string, 256)
+	var holdCancellation atomic.Bool
 	resumeStream := make(chan struct{})
 	resumePinnedStream := make(chan struct{})
 	resumeRevokedStream := make(chan struct{})
 	resumeLongStream := make(chan struct{})
-	var redirectCard, redirectRPC atomic.Bool
+	var redirectCard, redirectRPC, dropRPC atomic.Bool
 	var redirectHits atomic.Int32
 	redirectTarget := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		redirectHits.Add(1)
@@ -670,7 +672,7 @@ func TestA2AAgentCardUsesGatewayAuthenticationAndEndpoint(t *testing.T) {
 	agentHandler := a2asrv.NewJSONRPCHandler(a2asrv.NewHandler(a2asrv.AgentExecutorFunc(func(ctx context.Context, execution *a2asrv.ExecutorContext) iter.Seq2[protocol.Event, error] {
 		return func(yield func(protocol.Event, error) bool) {
 			var dispatched int
-			if err := h.Pool.QueryRow(ctx, `SELECT count(*) FROM olp.execution_debits WHERE kind='agent' AND state='dispatched'`).Scan(&dispatched); err != nil || dispatched != 1 {
+			if err := h.Pool.QueryRow(ctx, `SELECT count(*) FROM olp.execution_debits WHERE kind='agent' AND state='dispatched'`).Scan(&dispatched); err != nil || dispatched < 1 {
 				t.Errorf("send before durable debit: %d, %v", dispatched, err)
 			}
 			upstreamIDs <- string(execution.TaskID)
@@ -736,6 +738,31 @@ func TestA2AAgentCardUsesGatewayAuthenticationAndEndpoint(t *testing.T) {
 			return
 		}
 		if r.URL.Path == "/rpc" {
+			if holdCancellation.Load() {
+				var request struct {
+					Method string `json:"method"`
+					Params struct {
+						ID string `json:"id"`
+					} `json:"params"`
+				}
+				if err := json.NewDecoder(r.Body).Decode(&request); err != nil || request.Method != "CancelTask" {
+					t.Errorf("unexpected request during cancellation burst: %s, %v", request.Method, err)
+					w.WriteHeader(http.StatusBadRequest)
+					return
+				}
+				cancelAttempts <- request.Params.ID
+				<-r.Context().Done()
+				return
+			}
+			if dropRPC.Swap(false) {
+				connection, _, err := w.(http.Hijacker).Hijack()
+				if err != nil {
+					t.Errorf("close upstream connection: %v", err)
+					return
+				}
+				connection.Close()
+				return
+			}
 			if redirectRPC.Load() {
 				http.Redirect(w, r, redirectTarget.URL, http.StatusTemporaryRedirect)
 				return
@@ -785,6 +812,7 @@ func TestA2AAgentCardUsesGatewayAuthenticationAndEndpoint(t *testing.T) {
 	agent := created["id"].(string)
 	published := h.want(owner, http.MethodPost, "/api/v1/agents/"+agent+"/publish", nil, withMatch(created, idem("a2a-card-publish")), http.StatusOK)
 	key := h.want(owner, http.MethodPost, "/api/v1/api-keys", map[string]any{"name": "A2A caller", "project_id": project, "scopes": []string{"agents"}, "allowed_agents": []string{agent}}, idem("a2a-card-key"), http.StatusCreated)["secret"].(string)
+	budgetedKey := h.want(owner, http.MethodPost, "/api/v1/api-keys", map[string]any{"name": "Budgeted A2A caller", "project_id": project, "scopes": []string{"agents"}, "allowed_agents": []string{agent}, "daily_cost_limit": "5"}, idem("a2a-budgeted-key"), http.StatusCreated)["secret"].(string)
 	noScope := h.want(owner, http.MethodPost, "/api/v1/api-keys", map[string]any{"name": "missing scope", "project_id": project, "scopes": []string{"tools"}, "allowed_agents": []string{agent}}, idem("a2a-no-scope"), http.StatusCreated)["secret"].(string)
 	noAgent := h.want(owner, http.MethodPost, "/api/v1/api-keys", map[string]any{"name": "missing agent", "project_id": project, "scopes": []string{"agents"}}, idem("a2a-no-agent"), http.StatusCreated)["secret"].(string)
 	otherProject := createProject(h, owner, "A2A other project")
@@ -886,7 +914,7 @@ func TestA2AAgentCardUsesGatewayAuthenticationAndEndpoint(t *testing.T) {
 	message := func(id, text string) *protocol.Message {
 		return &protocol.Message{ID: id, Role: protocol.MessageRoleUser, Parts: protocol.ContentParts{protocol.NewTextPart(text)}}
 	}
-	rpc := func(secret, method string, params a2aTestParams) map[string]any {
+	rpcFor := func(agentID, secret, method string, params a2aTestParams) map[string]any {
 		t.Helper()
 		body, err := json.Marshal(struct {
 			JSONRPC string        `json:"jsonrpc"`
@@ -897,7 +925,7 @@ func TestA2AAgentCardUsesGatewayAuthenticationAndEndpoint(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		request, err := http.NewRequest(http.MethodPost, h.HTTP.URL+"/a2a/"+agent, bytes.NewReader(body))
+		request, err := http.NewRequest(http.MethodPost, h.HTTP.URL+"/a2a/"+agentID, bytes.NewReader(body))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -917,6 +945,18 @@ func TestA2AAgentCardUsesGatewayAuthenticationAndEndpoint(t *testing.T) {
 			t.Fatal(err)
 		}
 		return decoded
+	}
+	rpc := func(secret, method string, params a2aTestParams) map[string]any {
+		return rpcFor(agent, secret, method, params)
+	}
+	budgeted := rpc(budgetedKey, "SendMessage", a2aTestParams{Message: message("budgeted-without-bound", "question")})
+	if budgeted["error"] == nil {
+		t.Fatalf("budgeted send without a remote-work bound was accepted: %+v", budgeted)
+	}
+	select {
+	case <-upstreamIDs:
+		t.Fatal("budgeted send without a remote-work bound reached the upstream")
+	default:
 	}
 	invalidIDRequest, err := http.NewRequest(http.MethodPost, h.HTTP.URL+"/a2a/"+agent, bytes.NewBufferString(`{"jsonrpc":"2.0","id":{},"method":"GetTask","params":{"id":"missing"}}`))
 	if err != nil {
@@ -1200,6 +1240,411 @@ func TestA2AAgentCardUsesGatewayAuthenticationAndEndpoint(t *testing.T) {
 	if status, statusOK := nextEvent(continuationReader).(*protocol.TaskStatusUpdateEvent); !statusOK || status.TaskID != pendingTask.ID || status.Status.State != protocol.TaskStateCompleted {
 		t.Fatal("continued task did not complete")
 	}
+	cancelStream := streamRequest(key, "SendStreamingMessage", a2aTestParams{Message: message("request-input", "please cancel")})
+	defer cancelStream.Body.Close()
+	cancelReader := bufio.NewReader(cancelStream.Body)
+	cancelTask, cancelOK := nextEvent(cancelReader).(*protocol.Task)
+	if !cancelOK || cancelTask.ID == "" {
+		t.Fatal("task to cancel did not start")
+	}
+	<-upstreamIDs
+	if status, statusOK := nextEvent(cancelReader).(*protocol.TaskStatusUpdateEvent); !statusOK || status.Status.State != protocol.TaskStateInputRequired {
+		t.Fatal("task to cancel did not request input")
+	}
+	foreignCancel := rpc(foreign, "CancelTask", a2aTestParams{ID: cancelTask.ID})
+	missingCancel := rpc(foreign, "CancelTask", a2aTestParams{ID: protocol.TaskID(uuid.NewString())})
+	if !reflect.DeepEqual(foreignCancel, missingCancel) {
+		t.Fatalf("foreign cancellation differs from missing: %+v, %+v", foreignCancel, missingCancel)
+	}
+	cancelled := rpc(key, "CancelTask", a2aTestParams{ID: cancelTask.ID})
+	cancelledBody, err := json.Marshal(cancelled["result"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cancelledTask protocol.Task
+	if err := json.Unmarshal(cancelledBody, &cancelledTask); err != nil || cancelledTask.ID != cancelTask.ID || cancelledTask.Status.State != protocol.TaskStateCanceled {
+		t.Fatalf("task was not canceled: %+v, %v", cancelled, err)
+	}
+	readCancelled := rpc(key, "GetTask", a2aTestParams{ID: cancelTask.ID})
+	readBody, err := json.Marshal(readCancelled["result"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	var readTaskAfterCancel protocol.Task
+	if err := json.Unmarshal(readBody, &readTaskAfterCancel); err != nil || readTaskAfterCancel.ID != cancelTask.ID || readTaskAfterCancel.Status.State != protocol.TaskStateCanceled {
+		t.Fatalf("canceled task was not preserved: %+v, %v", readCancelled, err)
+	}
+	activeTaskFor := func(secret string) protocol.TaskID {
+		t.Helper()
+		result := rpc(secret, "SendMessage", a2aTestParams{Message: message("request-input", "question")})
+		payload, err := json.Marshal(result["result"])
+		if err != nil {
+			t.Fatal(err)
+		}
+		var response struct {
+			Task *protocol.Task `json:"task"`
+		}
+		if err := json.Unmarshal(payload, &response); err != nil || response.Task == nil || response.Task.ID == "" || response.Task.Status.State != protocol.TaskStateInputRequired {
+			t.Fatalf("input-required task failed: %+v, %v", result, err)
+		}
+		<-upstreamIDs
+		return response.Task.ID
+	}
+	activeTask := func() protocol.TaskID { return activeTaskFor(foreign) }
+	ambiguousTask := activeTask()
+	dropRPC.Store(true)
+	if result := rpc(foreign, "CancelTask", a2aTestParams{ID: ambiguousTask}); result["error"] == nil {
+		t.Fatalf("cancel with a lost response succeeded: %+v", result)
+	}
+	if result := rpc(foreign, "GetTask", a2aTestParams{ID: ambiguousTask}); result["error"] != nil {
+		t.Fatalf("read after ambiguous cancellation failed: %+v", result)
+	}
+	if result := rpc(foreign, "SendMessage", a2aTestParams{Message: &protocol.Message{ID: "ambiguous-continuation", Role: protocol.MessageRoleUser, Parts: protocol.ContentParts{protocol.NewTextPart("continue")}, TaskID: ambiguousTask}}); result["error"] == nil {
+		t.Fatalf("continued a task after an ambiguous cancellation: %+v", result)
+	}
+	select {
+	case <-upstreamIDs:
+		t.Fatal("continued a task after an ambiguous cancellation reached the upstream")
+	default:
+	}
+	if result := rpc(foreign, "CancelTask", a2aTestParams{ID: ambiguousTask}); result["error"] != nil {
+		t.Fatalf("reconciling cancellation failed: %+v", result)
+	}
+	firstActive, secondActive, thirdActive, fourthActive := activeTask(), activeTask(), activeTask(), activeTask()
+	if exceeded := rpc(foreign, "SendMessage", a2aTestParams{Message: message("too-many-tasks", "question")}); exceeded["error"] == nil {
+		t.Fatalf("fifth concurrent task was accepted: %+v", exceeded)
+	}
+	select {
+	case <-upstreamIDs:
+		t.Fatal("fifth concurrent task reached the upstream")
+	default:
+	}
+	for _, id := range []protocol.TaskID{firstActive, secondActive, thirdActive, fourthActive} {
+		if result := rpc(foreign, "CancelTask", a2aTestParams{ID: id}); result["error"] != nil {
+			t.Fatalf("cancel active task failed: %+v", result)
+		}
+	}
+	if result := rpc(foreign, "CancelTask", a2aTestParams{ID: activeTask()}); result["error"] != nil {
+		t.Fatalf("cancellation did not free task capacity: %+v", result)
+	}
+	for attempt := range 4 {
+		concurrentKey := h.want(owner, http.MethodPost, "/api/v1/api-keys", map[string]any{"name": "concurrent caller", "project_id": project, "scopes": []string{"agents"}, "allowed_agents": []string{agent}}, idem(fmt.Sprintf("a2a-concurrent-%d", attempt)), http.StatusCreated)["secret"].(string)
+		if err := h.Runtime.Refresh(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+		concurrentExisting := []protocol.TaskID{activeTaskFor(concurrentKey), activeTaskFor(concurrentKey), activeTaskFor(concurrentKey)}
+		concurrentStart := make(chan struct{})
+		concurrentResults := make(chan map[string]any, 32)
+		for range 32 {
+			go func() {
+				<-concurrentStart
+				concurrentResults <- rpc(concurrentKey, "SendMessage", a2aTestParams{Message: message("request-input", "concurrent")})
+			}()
+		}
+		close(concurrentStart)
+		concurrentResponses := slices.Collect(func(yield func(map[string]any) bool) {
+			for range 32 {
+				select {
+				case response := <-concurrentResults:
+					if !yield(response) {
+						return
+					}
+				case <-time.After(15 * time.Second):
+					t.Fatal("concurrent sends did not complete")
+				}
+			}
+		})
+		concurrentAccepted := slices.Collect(func(yield func(map[string]any) bool) {
+			for _, response := range concurrentResponses {
+				if response["error"] == nil && !yield(response) {
+					return
+				}
+			}
+		})
+		if len(concurrentAccepted) != 1 {
+			t.Fatalf("concurrent sends admitted %d tasks with one available slot: %+v", len(concurrentAccepted), concurrentResponses)
+		}
+		concurrentPayload, err := json.Marshal(concurrentAccepted[0]["result"])
+		if err != nil {
+			t.Fatal(err)
+		}
+		var concurrentTask struct {
+			Task *protocol.Task `json:"task"`
+		}
+		if err := json.Unmarshal(concurrentPayload, &concurrentTask); err != nil || concurrentTask.Task == nil || concurrentTask.Task.ID == "" {
+			t.Fatalf("concurrent send did not return a task: %+v, %v", concurrentAccepted[0], err)
+		}
+		<-upstreamIDs
+		for _, id := range append(concurrentExisting, concurrentTask.Task.ID) {
+			if result := rpc(concurrentKey, "CancelTask", a2aTestParams{ID: id}); result["error"] != nil {
+				t.Fatalf("cancel concurrent task failed: %+v", result)
+			}
+		}
+	}
+	continuationTask := activeTask()
+	for i := range 32 {
+		result := rpc(foreign, "SendMessage", a2aTestParams{Message: &protocol.Message{
+			ID: "request-input", Role: protocol.MessageRoleUser, TaskID: continuationTask,
+			Parts: protocol.ContentParts{protocol.NewTextPart("question")},
+		}})
+		if result["error"] != nil {
+			t.Fatalf("continuation %d was refused before the limit: %+v", i, result)
+		}
+		<-upstreamIDs
+	}
+	if result := rpc(foreign, "SendMessage", a2aTestParams{Message: &protocol.Message{
+		ID: "request-input", Role: protocol.MessageRoleUser, TaskID: continuationTask,
+		Parts: protocol.ContentParts{protocol.NewTextPart("question")},
+	}}); result["error"] == nil {
+		t.Fatalf("continuation above the task limit was accepted: %+v", result)
+	}
+	select {
+	case <-upstreamIDs:
+		t.Fatal("continuation above the task limit reached the upstream")
+	default:
+	}
+	if result := rpc(foreign, "CancelTask", a2aTestParams{ID: continuationTask}); result["error"] != nil {
+		t.Fatalf("cancel continued task failed: %+v", result)
+	}
+	valkeyMinute := func() int64 {
+		t.Helper()
+		reply, err := client.Do(t.Context(), "TIME")
+		if err != nil {
+			t.Fatal(err)
+		}
+		values, ok := reply.([]any)
+		if !ok || len(values) != 2 {
+			t.Fatalf("invalid Valkey time: %v", reply)
+		}
+		seconds, ok := values[0].(string)
+		if !ok {
+			t.Fatalf("invalid Valkey time: %v", reply)
+		}
+		unix, err := strconv.ParseInt(seconds, 10, 64)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return unix / 60
+	}
+	verifyRate := func(rateKey string) bool {
+		t.Helper()
+		window := valkeyMinute()
+		for i := range 60 {
+			result := rpc(rateKey, "SendMessage", a2aTestParams{Message: message(fmt.Sprintf("rate-%d", i), "question")})
+			if result["error"] == nil {
+				<-upstreamIDs
+			}
+			if valkeyMinute() != window {
+				return false
+			}
+			if result["error"] != nil {
+				t.Fatalf("send %d was refused before the rate limit: %+v", i, result)
+			}
+		}
+		result := rpc(rateKey, "SendMessage", a2aTestParams{Message: message("over-rate", "question")})
+		if result["error"] == nil {
+			<-upstreamIDs
+		}
+		if valkeyMinute() != window {
+			return false
+		}
+		if result["error"] == nil {
+			t.Fatalf("send above the per-key rate limit was accepted: %+v", result)
+		}
+		select {
+		case <-upstreamIDs:
+			t.Fatal("send above the per-key rate limit reached the upstream")
+		default:
+		}
+		return true
+	}
+	for attempt := 0; ; attempt++ {
+		rateKey := h.want(owner, http.MethodPost, "/api/v1/api-keys", map[string]any{"name": "rate-limited caller", "project_id": project, "scopes": []string{"agents"}, "allowed_agents": []string{agent}}, idem(fmt.Sprintf("a2a-rate-key-%d", attempt)), http.StatusCreated)["secret"].(string)
+		if err := h.Runtime.Refresh(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+		if verifyRate(rateKey) {
+			break
+		}
+	}
+	for _, invalid := range []struct {
+		name  string
+		field string
+		value int
+	}{
+		{name: "zero-remote-bound", field: "remote_work_bound_seconds", value: 0},
+		{name: "remote-bound-over-hour", field: "remote_work_bound_seconds", value: 3601},
+		{name: "zero-continuations", field: "max_task_continuations", value: 0},
+		{name: "continuations-over-ceiling", field: "max_task_continuations", value: 129},
+		{name: "zero-deadline", field: "task_deadline_seconds", value: 0},
+		{name: "deadline-over-hour", field: "task_deadline_seconds", value: 3601},
+	} {
+		h.want(owner, http.MethodPut, "/api/v1/agents/"+agent, map[string]any{
+			"project_id": project, "name": "fixture", "credential": "upstream-secret",
+			"agent": map[string]any{"protocol": "a2a-1.0.0", "endpoint": upstream.URL + "/rpc", "card_digest": hex.EncodeToString(digest[:]), "toolset_revisions": []string{}, "route_revisions": []string{}, "pricing_revision_id": pricing, "max_cost": "1", "message_price": messagePrice, invalid.field: invalid.value},
+		}, withMatch(published, idem("a2a-invalid-"+invalid.name)), http.StatusUnprocessableEntity)
+	}
+	boundedDraft := h.want(owner, http.MethodPut, "/api/v1/agents/"+agent, map[string]any{
+		"project_id": project, "name": "fixture", "credential": "upstream-secret",
+		"agent": map[string]any{"protocol": "a2a-1.0.0", "endpoint": upstream.URL + "/rpc", "card_digest": hex.EncodeToString(digest[:]), "toolset_revisions": []string{}, "route_revisions": []string{}, "pricing_revision_id": pricing, "max_cost": "1", "message_price": messagePrice, "remote_work_bound_seconds": 120, "max_task_continuations": 2, "task_deadline_seconds": 2},
+	}, withMatch(published, idem("a2a-add-work-bound")), http.StatusOK)
+	boundedPublished := h.want(owner, http.MethodPost, "/api/v1/agents/"+agent+"/publish", nil, withMatch(boundedDraft, idem("a2a-publish-work-bound")), http.StatusOK)
+	if err := h.Runtime.Refresh(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if result := rpc(budgetedKey, "SendMessage", a2aTestParams{Message: message("bounded-work", "question")}); result["error"] != nil {
+		t.Fatalf("budgeted agent with a declared work bound was refused: %+v", result)
+	}
+	<-upstreamIDs
+	boundedStart := rpc(budgetedKey, "SendMessage", a2aTestParams{Message: message("request-input", "question")})
+	boundedPayload, err := json.Marshal(boundedStart["result"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	var boundedResponse struct {
+		Task *protocol.Task `json:"task"`
+	}
+	if err := json.Unmarshal(boundedPayload, &boundedResponse); err != nil || boundedResponse.Task == nil {
+		t.Fatalf("bounded task did not start: %+v, %v", boundedStart, err)
+	}
+	<-upstreamIDs
+	for i := range 2 {
+		result := rpc(budgetedKey, "SendMessage", a2aTestParams{Message: &protocol.Message{
+			ID: "request-input", Role: protocol.MessageRoleUser, TaskID: boundedResponse.Task.ID,
+			Parts: protocol.ContentParts{protocol.NewTextPart("question")},
+		}})
+		if result["error"] != nil {
+			t.Fatalf("bounded continuation %d was refused: %+v", i, result)
+		}
+		<-upstreamIDs
+	}
+	if result := rpc(budgetedKey, "SendMessage", a2aTestParams{Message: &protocol.Message{
+		ID: "request-input", Role: protocol.MessageRoleUser, TaskID: boundedResponse.Task.ID,
+		Parts: protocol.ContentParts{protocol.NewTextPart("question")},
+	}}); result["error"] == nil {
+		t.Fatalf("continuation exceeded the published limit: %+v", result)
+	}
+	select {
+	case <-upstreamIDs:
+		t.Fatal("continuation above the published limit reached the upstream")
+	default:
+	}
+	if result := rpc(budgetedKey, "CancelTask", a2aTestParams{ID: boundedResponse.Task.ID}); result["error"] != nil {
+		t.Fatalf("cancel bounded task failed: %+v", result)
+	}
+	waitForCancellation := func(upstreamTaskID string) {
+		cancellationDeadline := time.Now().Add(10 * time.Second)
+		for {
+			body, err := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": 1, "method": "GetTask", "params": map[string]any{"id": upstreamTaskID}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			request, err := http.NewRequestWithContext(t.Context(), http.MethodPost, upstream.URL+"/rpc", bytes.NewReader(body))
+			if err != nil {
+				t.Fatal(err)
+			}
+			request.Header.Set("Authorization", "Bearer upstream-secret")
+			request.Header.Set("Content-Type", "application/json")
+			request.Header.Set("A2A-Version", "1.0")
+			response, err := http.DefaultClient.Do(request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var upstreamResult struct {
+				Result protocol.Task `json:"result"`
+			}
+			decodeErr := json.NewDecoder(response.Body).Decode(&upstreamResult)
+			response.Body.Close()
+			if decodeErr != nil {
+				t.Fatal(decodeErr)
+			}
+			if upstreamResult.Result.Status.State == protocol.TaskStateCanceled {
+				break
+			}
+			if time.Now().After(cancellationDeadline) {
+				t.Fatal("upstream task was not canceled within the expected interval")
+			}
+			time.Sleep(50 * time.Millisecond)
+		}
+	}
+	deadlineStart := rpc(budgetedKey, "SendMessage", a2aTestParams{Message: message("request-input", "question")})
+	deadlinePayload, err := json.Marshal(deadlineStart["result"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	var deadlineResponse struct {
+		Task *protocol.Task `json:"task"`
+	}
+	if err := json.Unmarshal(deadlinePayload, &deadlineResponse); err != nil || deadlineResponse.Task == nil {
+		t.Fatalf("deadline task did not start: %+v, %v", deadlineStart, err)
+	}
+	deadlineUpstreamID := <-upstreamIDs
+	time.Sleep(2200 * time.Millisecond)
+	if result := rpc(budgetedKey, "SendMessage", a2aTestParams{Message: &protocol.Message{
+		ID: "request-input", Role: protocol.MessageRoleUser, TaskID: deadlineResponse.Task.ID,
+		Parts: protocol.ContentParts{protocol.NewTextPart("question")},
+	}}); result["error"] == nil {
+		t.Fatalf("continuation after the published task deadline was accepted: %+v", result)
+	}
+	select {
+	case <-upstreamIDs:
+		t.Fatal("continuation after the published task deadline reached the upstream")
+	default:
+	}
+	deadlineMonitorContext, stopDeadlineMonitor := context.WithCancel(t.Context())
+	deadlineMonitorStopped := make(chan struct{})
+	go func() {
+		defer close(deadlineMonitorStopped)
+		(&a2a.TaskMonitor{Server: h.A2A}).Run(deadlineMonitorContext)
+	}()
+	waitForCancellation(deadlineUpstreamID)
+	stopDeadlineMonitor()
+	<-deadlineMonitorStopped
+	longDraft := h.want(owner, http.MethodPut, "/api/v1/agents/"+agent, map[string]any{
+		"project_id": project, "name": "fixture", "credential": "upstream-secret",
+		"agent": map[string]any{"protocol": "a2a-1.0.0", "endpoint": upstream.URL + "/rpc", "card_digest": hex.EncodeToString(digest[:]), "toolset_revisions": []string{}, "route_revisions": []string{}, "pricing_revision_id": pricing, "max_cost": "1", "message_price": messagePrice, "remote_work_bound_seconds": 120, "task_deadline_seconds": 600},
+	}, withMatch(boundedPublished, idem("a2a-long-deadline")), http.StatusOK)
+	longPublished := h.want(owner, http.MethodPost, "/api/v1/agents/"+agent+"/publish", nil, withMatch(longDraft, idem("a2a-publish-long-deadline")), http.StatusOK)
+	monitorKey := h.want(owner, http.MethodPost, "/api/v1/api-keys", map[string]any{"name": "monitor caller", "project_id": project, "scopes": []string{"agents"}, "allowed_agents": []string{agent}}, idem("a2a-monitor-key"), http.StatusCreated)
+	if err := h.Runtime.Refresh(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	monitor := &a2a.TaskMonitor{Server: h.A2A}
+	monitorContext, stopMonitor := context.WithCancel(t.Context())
+	monitorStopped := make(chan struct{})
+	go func() {
+		defer close(monitorStopped)
+		monitor.Run(monitorContext)
+	}()
+	monitorTask := rpc(monitorKey["secret"].(string), "SendMessage", a2aTestParams{Message: message("request-input", "question")})
+	if monitorTask["error"] != nil {
+		t.Fatalf("monitor task did not start: %+v", monitorTask)
+	}
+	upstreamTaskID := <-upstreamIDs
+	stopMonitor()
+	<-monitorStopped
+	currentMonitorKey := h.want(owner, http.MethodGet, "/api/v1/api-keys/"+monitorKey["id"].(string), nil, nil, http.StatusOK)
+	h.want(owner, http.MethodPost, "/api/v1/api-keys/"+monitorKey["id"].(string)+"/revoke", nil, withMatch(currentMonitorKey, idem("a2a-monitor-revoke")), http.StatusOK)
+	if err := h.Runtime.Refresh(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	restartedContext, stopRestartedMonitor := context.WithCancel(t.Context())
+	restartedMonitorStopped := make(chan struct{})
+	go func() {
+		defer close(restartedMonitorStopped)
+		monitor.Run(restartedContext)
+	}()
+	t.Cleanup(func() {
+		stopRestartedMonitor()
+		<-restartedMonitorStopped
+	})
+
+	waitForCancellation(upstreamTaskID)
+	select {
+	case <-upstreamIDs:
+		t.Fatal("monitor resent an accepted message")
+	default:
+	}
 	longStream := streamRequest(key, "SendStreamingMessage", a2aTestParams{Message: message("stream-long", "long-running")})
 	defer longStream.Body.Close()
 	longReader := bufio.NewReader(longStream.Body)
@@ -1279,7 +1724,7 @@ func TestA2AAgentCardUsesGatewayAuthenticationAndEndpoint(t *testing.T) {
 	updated := h.want(owner, http.MethodPut, "/api/v1/agents/"+agent, map[string]any{
 		"project_id": project, "name": "fixture", "credential": nil,
 		"agent": map[string]any{"protocol": "a2a-1.0.0", "endpoint": replacement.URL + "/rpc", "card_digest": hex.EncodeToString(replacementDigest[:]), "toolset_revisions": []string{}, "route_revisions": []string{}, "pricing_revision_id": pricing, "max_cost": "1", "message_price": "0.50"},
-	}, withMatch(published, idem("a2a-update")), http.StatusOK)
+	}, withMatch(longPublished, idem("a2a-update")), http.StatusOK)
 	h.want(owner, http.MethodPost, "/api/v1/agents/"+agent+"/publish", nil, withMatch(updated, idem("a2a-republish")), http.StatusOK)
 	if err := h.Runtime.Refresh(t.Context()); err != nil {
 		t.Fatal(err)
@@ -1310,6 +1755,135 @@ func TestA2AAgentCardUsesGatewayAuthenticationAndEndpoint(t *testing.T) {
 	if task, ok := pinned["result"].(map[string]any); !ok || task["id"] != id || !strings.Contains(fmt.Sprint(task), "PRIVATE ARTIFACT") {
 		t.Fatalf("task did not retain its published revision: %+v", pinned)
 	}
+	disableDraft := h.want(owner, http.MethodPost, "/api/v1/agents", map[string]any{
+		"project_id": project, "name": "disable fixture", "credential": "upstream-secret",
+		"agent": map[string]any{"protocol": "a2a-1.0.0", "endpoint": upstream.URL + "/rpc", "card_digest": hex.EncodeToString(digest[:]), "toolset_revisions": []string{}, "route_revisions": []string{}, "pricing_revision_id": pricing, "max_cost": "1", "message_price": messagePrice, "task_deadline_seconds": 600},
+	}, idem("a2a-disable-create"), http.StatusCreated)
+	disableID := disableDraft["id"].(string)
+	disablePublished := h.want(owner, http.MethodPost, "/api/v1/agents/"+disableID+"/publish", nil, withMatch(disableDraft, idem("a2a-disable-publish")), http.StatusOK)
+	disableKey := h.want(owner, http.MethodPost, "/api/v1/api-keys", map[string]any{"name": "disable caller", "project_id": project, "scopes": []string{"agents"}, "allowed_agents": []string{disableID}}, idem("a2a-disable-key"), http.StatusCreated)
+	if err := h.Runtime.Refresh(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	disabledTask := rpcFor(disableID, disableKey["secret"].(string), "SendMessage", a2aTestParams{Message: message("request-input", "question")})
+	if disabledTask["error"] != nil {
+		t.Fatalf("task for disabled-agent test did not start: %+v", disabledTask)
+	}
+	disabledUpstreamID := <-upstreamIDs
+	h.want(owner, http.MethodDelete, "/api/v1/agents/"+disableID, nil, withMatch(disablePublished, idem("a2a-disable-retire")), http.StatusNoContent)
+	if err := h.Runtime.Refresh(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	waitForCancellation(disabledUpstreamID)
+	select {
+	case <-upstreamIDs:
+		t.Fatal("monitor resent an accepted message after agent disablement")
+	default:
+	}
+	disabledBody, err := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": 1, "method": "SendMessage", "params": a2aTestParams{Message: message("disabled-send", "question")}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	disabledRequest, err := http.NewRequestWithContext(t.Context(), http.MethodPost, h.HTTP.URL+"/a2a/"+disableID, bytes.NewReader(disabledBody))
+	if err != nil {
+		t.Fatal(err)
+	}
+	disabledRequest.Header.Set("Authorization", "Bearer "+disableKey["secret"].(string))
+	disabledRequest.Header.Set("Content-Type", "application/json")
+	disabledRequest.Header.Set("A2A-Version", "1.0")
+	disabledResponse, err := http.DefaultClient.Do(disabledRequest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	disabledResponse.Body.Close()
+	if disabledResponse.StatusCode == http.StatusOK {
+		t.Fatal("disabled agent accepted another send")
+	}
+	select {
+	case <-upstreamIDs:
+		t.Fatal("send to a disabled agent reached the upstream")
+	default:
+	}
+	stopRestartedMonitor()
+	<-restartedMonitorStopped
+	burstDraft := h.want(owner, http.MethodPost, "/api/v1/agents", map[string]any{
+		"project_id": project, "name": "cancellation burst", "credential": "upstream-secret",
+		"agent": map[string]any{"protocol": "a2a-1.0.0", "endpoint": upstream.URL + "/rpc", "card_digest": hex.EncodeToString(digest[:]), "toolset_revisions": []string{}, "route_revisions": []string{}, "pricing_revision_id": pricing, "max_cost": "1", "message_price": messagePrice, "task_deadline_seconds": 600},
+	}, idem("a2a-burst-create"), http.StatusCreated)
+	burstAgent := burstDraft["id"].(string)
+	h.want(owner, http.MethodPost, "/api/v1/agents/"+burstAgent+"/publish", nil, withMatch(burstDraft, idem("a2a-burst-publish")), http.StatusOK)
+	burstKeys := slices.Collect(func(yield func(map[string]any) bool) {
+		for i := range 16 {
+			created := h.want(owner, http.MethodPost, "/api/v1/api-keys", map[string]any{"name": fmt.Sprintf("burst-%d", i), "project_id": project, "scopes": []string{"agents"}, "allowed_agents": []string{burstAgent}}, idem(fmt.Sprintf("a2a-burst-key-%d", i)), http.StatusCreated)
+			if !yield(created) {
+				return
+			}
+		}
+	})
+	if err := h.Runtime.Refresh(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	burstTasks := slices.Collect(func(yield func(string) bool) {
+		for _, burstKey := range burstKeys {
+			for range 4 {
+				result := rpcFor(burstAgent, burstKey["secret"].(string), "SendMessage", a2aTestParams{Message: message("request-input", "question")})
+				if result["error"] != nil {
+					t.Fatalf("burst task was refused: %+v", result)
+				}
+				if !yield(<-upstreamIDs) {
+					return
+				}
+			}
+		}
+	})
+	for i, burstKey := range burstKeys {
+		keyID := burstKey["id"].(string)
+		current := h.want(owner, http.MethodGet, "/api/v1/api-keys/"+keyID, nil, nil, http.StatusOK)
+		h.want(owner, http.MethodPost, "/api/v1/api-keys/"+keyID+"/revoke", nil, withMatch(current, idem(fmt.Sprintf("a2a-burst-revoke-%d", i))), http.StatusOK)
+	}
+	if err := h.Runtime.Refresh(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	holdCancellation.Store(true)
+	burstStart := time.Now()
+	burstContext, stopBurst := context.WithCancel(t.Context())
+	burstStopped := make(chan struct{})
+	go func() {
+		defer close(burstStopped)
+		monitor.Run(burstContext)
+	}()
+	t.Cleanup(func() {
+		stopBurst()
+		<-burstStopped
+	})
+	burstDeadline := time.NewTimer(60 * time.Second)
+	defer burstDeadline.Stop()
+	observed := slices.Collect(func(yield func(string) bool) {
+		for range len(burstTasks) {
+			for {
+				select {
+				case id := <-cancelAttempts:
+					if !slices.Contains(burstTasks, id) {
+						continue
+					}
+					if !yield(id) {
+						return
+					}
+				case <-burstDeadline.C:
+					t.Fatal("cancellation burst did not reach every task within 60 seconds")
+				}
+				break
+			}
+		}
+	})
+	for _, id := range burstTasks {
+		if !slices.Contains(observed, id) {
+			t.Fatalf("cancellation burst starved task %q", id)
+		}
+	}
+	t.Logf("requested cancellation for %d distinct tasks in %s", len(burstTasks), time.Since(burstStart))
+	stopBurst()
+	<-burstStopped
 }
 
 func TestStructuredPromptPublicationValidatesAndExports(t *testing.T) {
