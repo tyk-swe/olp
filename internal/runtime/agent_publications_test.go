@@ -217,3 +217,33 @@ func TestMCPToolAuthorizationUsesCurrentPublicationAndServerRevision(t *testing.
 		})
 	}
 }
+
+func TestDelegatedToolAuthorityRechecksAgent(t *testing.T) {
+	project := "0192cf87-d4ab-7f2e-a8b1-c2d3e4f50607"
+	toolset := "0192cf87-d4ab-7f2e-a8b1-c2d3e4f50608"
+	issuerID := "issuer"
+	digest := "workload"
+	agent := access.Authority{ID: "agent", AgentPrincipal: true, ProjectID: &project, WorkloadIssuerID: &issuerID, WorkloadDigest: digest, WorkloadRevision: "revision", WorkloadMapping: "mapping", Policy: access.KeyPolicy{Scopes: []string{"tools"}, AllowedToolsets: []string{toolset}}}
+	key := access.Authority{ID: "key", ProjectID: &project, Policy: access.KeyPolicy{Scopes: []string{"tools"}, AllowedToolsets: []string{toolset}}}
+	delegated := *key.Delegated([]string{"tools"}, nil, []string{toolset}, agent, "", "pair", "grant", time.Now().Add(time.Minute))
+	for _, test := range []struct {
+		name     string
+		agent    access.Authority
+		enabled  bool
+		revision string
+		allowed  bool
+	}{
+		{name: "allowed", agent: agent, enabled: true, revision: "revision", allowed: true},
+		{name: "issuer disabled", agent: agent, revision: "revision"},
+		{name: "issuer revised", agent: agent, enabled: true, revision: "other"},
+		{name: "agent loses toolset", agent: access.Authority{ID: agent.ID, ProjectID: &project, WorkloadIssuerID: &issuerID, WorkloadMapping: "mapping", Policy: access.KeyPolicy{Scopes: []string{"tools"}}}, enabled: true, revision: "revision"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			manager := Manager{authority: authorityState{loaded: true, readAt: time.Now(), agentPrincipals: map[string]access.Authority{key.ID: key}, workloadPrincipals: map[string]access.Authority{digest: agent}, workloadIssuers: map[string]workloadIssuer{"issuer": {ID: issuerID, Revision: test.revision, Config: workload.Config{Enabled: test.enabled}, bindings: map[string]access.Authority{"mapping": test.agent}}}, mcpTools: map[string]mcpToolAuthority{toolset: {PublicationID: toolset, ProjectID: project}}}}
+			err := manager.AuthorizeMCPTool(delegated, toolset, toolset, project, "", "")
+			if (err == nil) != test.allowed {
+				t.Fatalf("authorization allowed = %t, want %t: %v", err == nil, test.allowed, err)
+			}
+		})
+	}
+}

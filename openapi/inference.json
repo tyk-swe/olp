@@ -12,31 +12,124 @@
         "summary": "Export OTLP traces",
         "description": "Accept an OTLP/HTTP protobuf trace batch for the authenticated project. The key requires traces_write scope. Batches are limited to one MiB after decompression and 256 spans, with at most 32 allowlisted attributes per span and 60 batches per minute per key. Identity and gzip encodings are supported. Failures contain a protobuf google.rpc.Status. Content, events, links and unknown fields are discarded. Run and attempt correlations are retained only when owned by the authenticated principal.",
         "security": [
-          { "BearerAuth": [] }
+          {
+            "BearerAuth": []
+          }
         ],
         "parameters": [
-          { "name": "Content-Encoding", "in": "header", "required": false, "schema": { "type": "string", "enum": ["identity", "gzip"] } }
+          {
+            "name": "Content-Encoding",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "identity",
+                "gzip"
+              ]
+            }
+          }
         ],
         "requestBody": {
           "required": true,
           "content": {
             "application/x-protobuf": {
-              "schema": { "type": "string", "format": "binary" }
+              "schema": {
+                "type": "string",
+                "format": "binary"
+              }
             }
           }
         },
         "responses": {
           "200": {
             "description": "Trace batch accepted",
-            "content": { "application/x-protobuf": { "schema": { "type": "string", "format": "binary" } } }
+            "content": {
+              "application/x-protobuf": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
           },
-          "400": { "description": "Invalid protobuf, span or batch size", "content": { "application/x-protobuf": { "schema": { "type": "string", "format": "binary" } } } },
-          "401": { "description": "The credential is invalid, expired or revoked", "content": { "application/x-protobuf": { "schema": { "type": "string", "format": "binary" } } } },
-          "403": { "description": "The caller lacks trace scope or project access", "content": { "application/x-protobuf": { "schema": { "type": "string", "format": "binary" } } } },
-          "413": { "description": "The trace batch exceeds one MiB", "content": { "application/x-protobuf": { "schema": { "type": "string", "format": "binary" } } } },
-          "415": { "description": "The content type or encoding is unsupported", "content": { "application/x-protobuf": { "schema": { "type": "string", "format": "binary" } } } },
-          "429": { "description": "The trace or caller rate limit is exceeded", "content": { "application/x-protobuf": { "schema": { "type": "string", "format": "binary" } } } },
-          "503": { "description": "Trace storage or limits are unavailable", "content": { "application/x-protobuf": { "schema": { "type": "string", "format": "binary" } } } }
+          "400": {
+            "description": "Invalid protobuf, span or batch size",
+            "content": {
+              "application/x-protobuf": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The credential is invalid, expired or revoked",
+            "content": {
+              "application/x-protobuf": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The caller lacks trace scope or project access",
+            "content": {
+              "application/x-protobuf": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "The trace batch exceeds one MiB",
+            "content": {
+              "application/x-protobuf": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "The content type or encoding is unsupported",
+            "content": {
+              "application/x-protobuf": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "The trace or caller rate limit is exceeded",
+            "content": {
+              "application/x-protobuf": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Trace storage or limits are unavailable",
+            "content": {
+              "application/x-protobuf": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          }
         }
       }
     },
@@ -56,8 +149,12 @@
             "application/json": {
               "schema": {
                 "oneOf": [
-                  { "$ref": "#/components/schemas/ChatPromptRequest" },
-                  { "$ref": "#/components/schemas/ChatToolWorkflowRequest" }
+                  {
+                    "$ref": "#/components/schemas/ChatPromptRequest"
+                  },
+                  {
+                    "$ref": "#/components/schemas/ChatToolWorkflowRequest"
+                  }
                 ]
               }
             }
@@ -416,8 +513,12 @@
             "application/json": {
               "schema": {
                 "oneOf": [
-                  { "$ref": "#/components/schemas/ResponsesPromptRequest" },
-                  { "$ref": "#/components/schemas/ResponsesToolWorkflowRequest" }
+                  {
+                    "$ref": "#/components/schemas/ResponsesPromptRequest"
+                  },
+                  {
+                    "$ref": "#/components/schemas/ResponsesToolWorkflowRequest"
+                  }
                 ]
               }
             }
@@ -539,8 +640,12 @@
             "application/json": {
               "schema": {
                 "oneOf": [
-                  { "$ref": "#/components/schemas/AnthropicPromptRequest" },
-                  { "$ref": "#/components/schemas/AnthropicToolWorkflowRequest" }
+                  {
+                    "$ref": "#/components/schemas/AnthropicPromptRequest"
+                  },
+                  {
+                    "$ref": "#/components/schemas/AnthropicToolWorkflowRequest"
+                  }
                 ]
               }
             }
@@ -663,8 +768,12 @@
             "application/json": {
               "schema": {
                 "oneOf": [
-                  { "$ref": "#/components/schemas/GeminiPromptRequest" },
-                  { "$ref": "#/components/schemas/GeminiToolWorkflowRequest" }
+                  {
+                    "$ref": "#/components/schemas/GeminiPromptRequest"
+                  },
+                  {
+                    "$ref": "#/components/schemas/GeminiToolWorkflowRequest"
+                  }
                 ]
               }
             }
@@ -796,8 +905,12 @@
             "application/json": {
               "schema": {
                 "oneOf": [
-                  { "$ref": "#/components/schemas/GeminiPromptRequest" },
-                  { "$ref": "#/components/schemas/GeminiToolWorkflowRequest" }
+                  {
+                    "$ref": "#/components/schemas/GeminiPromptRequest"
+                  },
+                  {
+                    "$ref": "#/components/schemas/GeminiToolWorkflowRequest"
+                  }
                 ]
               }
             }
@@ -939,7 +1052,12 @@
           "olp_toolsets": {
             "$ref": "#/components/schemas/ChatToolsetSelection"
           },
-          "olp_approval": { "$ref": "#/components/schemas/WorkflowApprovalSubmission" }
+          "olp_approval": {
+            "$ref": "#/components/schemas/WorkflowApprovalSubmission"
+          },
+          "olp_run_limits": {
+            "$ref": "#/components/schemas/WorkflowRunLimits"
+          }
         },
         "additionalProperties": true,
         "not": {
@@ -950,55 +1068,124 @@
       },
       "ChatToolWorkflowRequest": {
         "type": "object",
-        "required": ["model", "messages"],
+        "required": [
+          "model",
+          "messages"
+        ],
         "properties": {
-          "model": { "type": "string" },
+          "model": {
+            "type": "string"
+          },
           "messages": {
             "type": "array",
-            "items": { "type": "object", "additionalProperties": true }
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
           },
-          "olp_toolsets": { "$ref": "#/components/schemas/ChatToolsetSelection" },
-          "olp_approval": { "$ref": "#/components/schemas/WorkflowApprovalSubmission" }
+          "olp_toolsets": {
+            "$ref": "#/components/schemas/ChatToolsetSelection"
+          },
+          "olp_approval": {
+            "$ref": "#/components/schemas/WorkflowApprovalSubmission"
+          },
+          "olp_run_limits": {
+            "$ref": "#/components/schemas/WorkflowRunLimits"
+          }
         },
         "additionalProperties": true,
-        "not": { "required": ["olp_prompt"] }
+        "not": {
+          "required": [
+            "olp_prompt"
+          ]
+        }
       },
       "WorkflowApprovalSubmission": {
         "type": "object",
-        "required": ["continuation_token", "approved", "arguments"],
+        "required": [
+          "continuation_token",
+          "approved",
+          "arguments"
+        ],
         "description": "After obtaining a human's approval, resubmit the original transcript and tool arguments. The token expires within five minutes and can be used only once.",
         "properties": {
-          "continuation_token": { "type": "string", "pattern": "^olpa_" },
-          "approved": { "type": "boolean", "description": "The client must explicitly set this to true after obtaining human approval." },
-          "arguments": { "type": "object", "additionalProperties": { "type": "object", "additionalProperties": true }, "description": "The original JSON arguments indexed by the paused call ID." }
+          "continuation_token": {
+            "type": "string",
+            "pattern": "^olpa_"
+          },
+          "approved": {
+            "type": "boolean",
+            "description": "The client must explicitly set this to true after obtaining human approval."
+          },
+          "arguments": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "object",
+              "additionalProperties": true
+            },
+            "description": "The original JSON arguments indexed by the paused call ID."
+          }
         },
         "additionalProperties": false
       },
       "WorkflowApprovalCall": {
         "type": "object",
-        "required": ["id", "name", "arguments"],
+        "required": [
+          "id",
+          "name",
+          "arguments"
+        ],
         "properties": {
-          "id": { "type": "string" },
-          "name": { "type": "string" },
-          "server_label": { "type": "string" },
-          "arguments": { "type": "object", "additionalProperties": true }
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "server_label": {
+            "type": "string"
+          },
+          "arguments": {
+            "type": "object",
+            "additionalProperties": true
+          }
         }
       },
       "WorkflowApprovalPause": {
         "type": "object",
-        "required": ["type", "continuation_token", "calls"],
+        "required": [
+          "type",
+          "continuation_token",
+          "calls"
+        ],
         "description": "The workflow paused before an approval-required tool. The client obtains human approval and resubmits the original transcript and arguments.",
         "properties": {
-          "type": { "type": "string", "enum": ["tool_approval_required"] },
-          "continuation_token": { "type": "string", "pattern": "^olpa_" },
-          "calls": { "type": "array", "items": { "$ref": "#/components/schemas/WorkflowApprovalCall" } }
+          "type": {
+            "type": "string",
+            "enum": [
+              "tool_approval_required"
+            ]
+          },
+          "continuation_token": {
+            "type": "string",
+            "pattern": "^olpa_"
+          },
+          "calls": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/WorkflowApprovalCall"
+            }
+          }
         },
         "additionalProperties": true
       },
       "ChatToolsetSelection": {
         "type": "array",
         "description": "Select a subset of the published toolsets allowed by the route. An empty array selects no toolsets.",
-        "items": { "type": "string", "format": "uuid" },
+        "items": {
+          "type": "string",
+          "format": "uuid"
+        },
         "uniqueItems": true
       },
       "PublishedPromptReference": {
@@ -1293,29 +1480,38 @@
         "type": "object",
         "additionalProperties": false,
         "required": [
-          "scopes",
-          "allowed_routes"
+          "scopes"
         ],
         "properties": {
           "scopes": {
             "type": "array",
             "minItems": 1,
-            "maxItems": 1,
+            "maxItems": 2,
+            "uniqueItems": true,
             "items": {
               "type": "string",
               "enum": [
-                "inference"
+                "inference",
+                "tools"
               ]
             }
           },
           "allowed_routes": {
             "type": "array",
-            "minItems": 1,
             "maxItems": 100,
             "uniqueItems": true,
             "items": {
               "type": "string",
               "pattern": "^[a-z0-9][a-z0-9._-]{0,99}$"
+            }
+          },
+          "allowed_toolsets": {
+            "type": "array",
+            "maxItems": 100,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "format": "uuid"
             }
           },
           "ttl_seconds": {
@@ -1482,7 +1678,12 @@
           "olp_toolsets": {
             "$ref": "#/components/schemas/ChatToolsetSelection"
           },
-          "olp_approval": { "$ref": "#/components/schemas/WorkflowApprovalSubmission" }
+          "olp_approval": {
+            "$ref": "#/components/schemas/WorkflowApprovalSubmission"
+          },
+          "olp_run_limits": {
+            "$ref": "#/components/schemas/WorkflowRunLimits"
+          }
         },
         "additionalProperties": true,
         "not": {
@@ -1512,7 +1713,12 @@
           "olp_toolsets": {
             "$ref": "#/components/schemas/ChatToolsetSelection"
           },
-          "olp_approval": { "$ref": "#/components/schemas/WorkflowApprovalSubmission" }
+          "olp_approval": {
+            "$ref": "#/components/schemas/WorkflowApprovalSubmission"
+          },
+          "olp_run_limits": {
+            "$ref": "#/components/schemas/WorkflowRunLimits"
+          }
         },
         "additionalProperties": true,
         "not": {
@@ -1537,33 +1743,72 @@
       },
       "AnthropicToolWorkflowRequest": {
         "type": "object",
-        "required": ["model", "max_tokens", "messages"],
+        "required": [
+          "model",
+          "max_tokens",
+          "messages"
+        ],
         "properties": {
-          "model": { "type": "string" },
-          "max_tokens": { "type": "integer", "minimum": 1 },
+          "model": {
+            "type": "string"
+          },
+          "max_tokens": {
+            "type": "integer",
+            "minimum": 1
+          },
           "messages": {
             "type": "array",
-            "items": { "type": "object", "additionalProperties": true }
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
           },
-          "olp_toolsets": { "$ref": "#/components/schemas/ChatToolsetSelection" },
-          "olp_approval": { "$ref": "#/components/schemas/WorkflowApprovalSubmission" }
+          "olp_toolsets": {
+            "$ref": "#/components/schemas/ChatToolsetSelection"
+          },
+          "olp_approval": {
+            "$ref": "#/components/schemas/WorkflowApprovalSubmission"
+          },
+          "olp_run_limits": {
+            "$ref": "#/components/schemas/WorkflowRunLimits"
+          }
         },
         "additionalProperties": true,
-        "not": { "required": ["olp_prompt"] }
+        "not": {
+          "required": [
+            "olp_prompt"
+          ]
+        }
       },
       "GeminiToolWorkflowRequest": {
         "type": "object",
-        "required": ["contents"],
+        "required": [
+          "contents"
+        ],
         "properties": {
           "contents": {
             "type": "array",
-            "items": { "type": "object", "additionalProperties": true }
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
           },
-          "olp_toolsets": { "$ref": "#/components/schemas/ChatToolsetSelection" },
-          "olp_approval": { "$ref": "#/components/schemas/WorkflowApprovalSubmission" }
+          "olp_toolsets": {
+            "$ref": "#/components/schemas/ChatToolsetSelection"
+          },
+          "olp_approval": {
+            "$ref": "#/components/schemas/WorkflowApprovalSubmission"
+          },
+          "olp_run_limits": {
+            "$ref": "#/components/schemas/WorkflowRunLimits"
+          }
         },
         "additionalProperties": true,
-        "not": { "required": ["olp_prompt"] }
+        "not": {
+          "required": [
+            "olp_prompt"
+          ]
+        }
       },
       "AnthropicInferenceError": {
         "type": "object",
@@ -1679,6 +1924,9 @@
           },
           "prompt": {
             "$ref": "#/components/schemas/ResponsesPublishedPromptReference"
+          },
+          "olp_run_limits": {
+            "$ref": "#/components/schemas/WorkflowRunLimits"
           }
         },
         "additionalProperties": true,
@@ -1731,20 +1979,44 @@
       },
       "ResponsesToolWorkflowRequest": {
         "type": "object",
-        "required": ["model", "input"],
+        "required": [
+          "model",
+          "input"
+        ],
         "properties": {
-          "model": { "type": "string" },
+          "model": {
+            "type": "string"
+          },
           "input": {
             "oneOf": [
-              { "type": "string" },
-              { "type": "array", "items": { "type": "object", "additionalProperties": true } }
+              {
+                "type": "string"
+              },
+              {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
             ]
           },
-          "olp_toolsets": { "$ref": "#/components/schemas/ChatToolsetSelection" },
-          "olp_approval": { "$ref": "#/components/schemas/WorkflowApprovalSubmission" }
+          "olp_toolsets": {
+            "$ref": "#/components/schemas/ChatToolsetSelection"
+          },
+          "olp_approval": {
+            "$ref": "#/components/schemas/WorkflowApprovalSubmission"
+          },
+          "olp_run_limits": {
+            "$ref": "#/components/schemas/WorkflowRunLimits"
+          }
         },
         "additionalProperties": true,
-        "not": { "required": ["prompt"] }
+        "not": {
+          "required": [
+            "prompt"
+          ]
+        }
       },
       "ResponsesMCPTool": {
         "type": "object",
@@ -1796,13 +2068,32 @@
       },
       "ResponsesMCPApprovalRequest": {
         "type": "object",
-        "required": ["type", "id", "server_label", "name", "arguments"],
+        "required": [
+          "type",
+          "id",
+          "server_label",
+          "name",
+          "arguments"
+        ],
         "properties": {
-          "type": { "type": "string", "enum": ["mcp_approval_request"] },
-          "id": { "type": "string" },
-          "server_label": { "type": "string" },
-          "name": { "type": "string" },
-          "arguments": { "type": "string" }
+          "type": {
+            "type": "string",
+            "enum": [
+              "mcp_approval_request"
+            ]
+          },
+          "id": {
+            "type": "string"
+          },
+          "server_label": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "arguments": {
+            "type": "string"
+          }
         }
       },
       "ResponsesMCPCall": {
@@ -1841,9 +2132,17 @@
           },
           "error": {
             "type": "object",
-            "required": ["type", "content"],
+            "required": [
+              "type",
+              "content"
+            ],
             "properties": {
-              "type": { "type": "string", "enum": ["mcp_tool_execution_error"] },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "mcp_tool_execution_error"
+                ]
+              },
               "content": {}
             }
           }
@@ -1874,6 +2173,40 @@
           }
         },
         "additionalProperties": true
+      },
+      "WorkflowRunLimits": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "max_iterations": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 1,
+            "maximum": 32
+          },
+          "max_tool_calls": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0,
+            "maximum": 128
+          },
+          "max_duration_seconds": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 1,
+            "maximum": 600
+          },
+          "max_concurrent_runs": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 1,
+            "maximum": 2147483647
+          },
+          "max_run_cost": {
+            "type": "string",
+            "pattern": "^[0-9]{1,12}(\\.[0-9]{1,12})?$"
+          }
+        }
       }
     }
   }

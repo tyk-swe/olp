@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -1283,12 +1284,41 @@ func TestGatewayToolExecutionBounds(t *testing.T) {
 	for _, test := range []struct {
 		name           string
 		callsPerStep   int
+		requestFields  string
+		headers        map[string]string
+		routeLimits    *limits.WorkflowBounds
+		keyLimits      *limits.WorkflowBounds
+		pricedModel    bool
+		inputRate      string
+		providerFees   map[string]string
+		priceTiers     []usage.PriceTier
+		windows        *usage.PriceWindows
+		toolPrice      *string
 		wantCode       string
+		wantStatus     int
 		wantModelCalls int
-		wantToolCalls  int
 	}{
-		{name: "iterations", callsPerStep: 1, wantCode: "tool_iteration_limit", wantModelCalls: 8, wantToolCalls: 7},
-		{name: "calls", callsPerStep: 33, wantCode: "tool_call_limit", wantModelCalls: 1, wantToolCalls: 0},
+		{name: "iterations", callsPerStep: 1, wantCode: "tool_iteration_limit", wantModelCalls: 8},
+		{name: "calls", callsPerStep: 33, wantCode: "tool_call_limit", wantModelCalls: 1},
+		{name: "caller iteration limit", callsPerStep: 1, requestFields: `,"olp_run_limits":{"max_iterations":1}`, wantCode: "tool_iteration_limit", wantModelCalls: 1},
+		{name: "key is smallest", callsPerStep: 1, routeLimits: &limits.WorkflowBounds{MaxIterations: new(int64(4))}, keyLimits: &limits.WorkflowBounds{MaxIterations: new(int64(2))}, requestFields: `,"olp_run_limits":{"max_iterations":3}`, wantCode: "tool_iteration_limit", wantModelCalls: 2},
+		{name: "route is smallest", callsPerStep: 1, routeLimits: &limits.WorkflowBounds{MaxIterations: new(int64(3))}, keyLimits: &limits.WorkflowBounds{MaxIterations: new(int64(4))}, requestFields: `,"olp_run_limits":{"max_iterations":6}`, wantCode: "tool_iteration_limit", wantModelCalls: 3},
+		{name: "caller lowers raised default", callsPerStep: 1, routeLimits: &limits.WorkflowBounds{MaxIterations: new(int64(16))}, keyLimits: &limits.WorkflowBounds{MaxIterations: new(int64(20))}, requestFields: `,"olp_run_limits":{"max_iterations":12}`, wantCode: "tool_iteration_limit", wantModelCalls: 12},
+		{name: "zero tool calls", callsPerStep: 1, requestFields: `,"olp_run_limits":{"max_tool_calls":0}`, wantCode: "tool_call_limit", wantModelCalls: 1},
+		{name: "key tool call limit is smallest", callsPerStep: 2, routeLimits: &limits.WorkflowBounds{MaxToolCalls: new(int64(3))}, keyLimits: &limits.WorkflowBounds{MaxToolCalls: new(int64(1))}, requestFields: `,"olp_run_limits":{"max_tool_calls":2}`, wantCode: "tool_call_limit", wantModelCalls: 1},
+		{name: "unbounded model cannot satisfy cost limit", callsPerStep: 1, pricedModel: true, requestFields: `,"olp_run_limits":{"max_run_cost":"1"}`, wantCode: "run_cost_unbounded"},
+		{name: "per-attempt cost remains independent", callsPerStep: 1, pricedModel: true, headers: map[string]string{"X-OLP-Routing": `{"max_cost":"0.05"}`}, requestFields: `,"max_tokens":8,"olp_run_limits":{"max_run_cost":"1"}`, wantCode: "cost_limit_exceeded"},
+		{name: "zero cost ceiling prevents charged model", callsPerStep: 1, pricedModel: true, requestFields: `,"max_tokens":8,"olp_run_limits":{"max_run_cost":"0"}`, wantCode: "run_cost_limit"},
+		{name: "key run cost is smallest", callsPerStep: 1, pricedModel: true, routeLimits: &limits.WorkflowBounds{MaxRunCost: new("0.5")}, keyLimits: &limits.WorkflowBounds{MaxRunCost: new("0.05")}, requestFields: `,"max_tokens":8,"olp_run_limits":{"max_run_cost":"0.2"}`, wantCode: "run_cost_limit"},
+		{name: "unpriced tool cannot satisfy cost limit", callsPerStep: 1, pricedModel: true, requestFields: `,"max_tokens":8,"olp_run_limits":{"max_run_cost":"1"}`, wantCode: "run_cost_unbounded", wantModelCalls: 1},
+		{name: "next tool exceeds cost limit", callsPerStep: 1, pricedModel: true, toolPrice: new("0.9"), requestFields: `,"max_tokens":8,"olp_run_limits":{"max_run_cost":"0.5"}`, wantCode: "run_cost_limit", wantModelCalls: 1},
+		{name: "next model exceeds remaining cost", callsPerStep: 1, pricedModel: true, toolPrice: new("0.1"), requestFields: `,"max_tokens":8,"olp_run_limits":{"max_run_cost":"0.25"}`, wantCode: "run_cost_limit", wantModelCalls: 1},
+		{name: "unbounded provider tool fees", callsPerStep: 1, pricedModel: true, providerFees: map[string]string{"search": "1"}, requestFields: `,"max_tokens":8,"olp_run_limits":{"max_run_cost":"1"}`, wantCode: "run_cost_unbounded"},
+		{name: "higher price window exceeds ceiling", callsPerStep: 1, pricedModel: true, windows: &usage.PriceWindows{TimeZone: "UTC", Periods: []usage.PriceWindowPeriod{{Days: []int{((int(time.Now().UTC().Weekday())+6)%7+1)%7 + 1}, Start: "00:00", End: "24:00", Multiplier: "3"}}}, requestFields: `,"max_tokens":8,"olp_run_limits":{"max_run_cost":"0.2"}`, wantCode: "run_cost_limit"},
+		{name: "expensive lower price tier exceeds ceiling", callsPerStep: 1, pricedModel: true, inputRate: "1000", priceTiers: []usage.PriceTier{{AboveInputTokens: 500, InputPerMillion: new("0"), OutputPerMillion: new("0")}}, requestFields: `,"max_tokens":8,"olp_run_limits":{"max_run_cost":"0.2"}`, wantCode: "run_cost_limit"},
+		{name: "model input worst case exceeds ceiling", callsPerStep: 1, pricedModel: true, inputRate: "1000", requestFields: `,"max_tokens":8,"olp_run_limits":{"max_run_cost":"0.2"}`, wantCode: "run_cost_limit"},
+		{name: "unpriced model cannot satisfy cost limit", callsPerStep: 1, requestFields: `,"max_tokens":8,"olp_run_limits":{"max_run_cost":"1"}`, wantCode: "run_cost_unbounded", wantModelCalls: 0},
+		{name: "concurrency fails closed without limiter", callsPerStep: 1, requestFields: `,"olp_run_limits":{"max_concurrent_runs":1}`, wantCode: "distributed_limits_unavailable", wantStatus: http.StatusServiceUnavailable},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			toolsetID, projectID := uuid.NewString(), uuid.NewString()
@@ -1297,18 +1327,28 @@ func TestGatewayToolExecutionBounds(t *testing.T) {
 				route := snapshot.Routes[routeSlug]
 				route.Fidelity.Mode, route.ToolExecution, route.ProjectID = routing.FidelityTransformed, "gateway", &projectID
 				route.Toolsets = []string{toolsetID}
+				route.RunLimits = test.routeLimits
 				snapshot.Routes[routeSlug] = route
 				for id, provider := range snapshot.Providers {
+					provider.Models = map[string]json.RawMessage{modelA: json.RawMessage(`{"context_length":1000}`)}
 					for i := range provider.Capabilities {
 						provider.Capabilities[i].ToolCalls = true
 					}
 					snapshot.Providers[id] = provider
 				}
 			})
+			if test.pricedModel {
+				h.rt.inputs = &usage.RoutingInputs{Prices: []usage.RoutingPrice{{Price: usage.Price{
+					ProviderKind: "openai_compatible", Model: modelA, Operation: "generation", Currency: "usd",
+					InputPerMillion: new(cmp.Or(test.inputRate, "0")), OutputPerMillion: new("0"), PerRequest: new("0.1"),
+					ToolCalls: test.providerFees, Windows: test.windows, Tiers: test.priceTiers,
+				}, EffectiveAt: time.Now().Add(-time.Minute)}}, RefreshedAt: time.Now()}
+			}
 			authority := h.rt.keys[fullKey]
 			authority.ProjectID = &projectID
+			authority.Policy.RunLimits = test.keyLimits
 			h.rt.keys[fullKey] = authority
-			fixture := &workflowFixture{runID: uuid.NewString(), tool: WorkflowTool{ToolsetID: toolsetID, RevisionID: uuid.NewString(), Definition: routing.MCPToolsetTool{Alias: alias, Classification: "read_only"}}}
+			fixture := &workflowFixture{runID: uuid.NewString(), tool: WorkflowTool{ToolsetID: toolsetID, RevisionID: uuid.NewString(), Definition: routing.MCPToolsetTool{Alias: alias, Classification: "read_only", UnitPrice: test.toolPrice}}}
 			h.gateway.WorkflowRuns, h.gateway.WorkflowTools, h.gateway.Debits = fixture, fixture, &workflowDebitFixture{fakeSessionDebits: &fakeSessionDebits{}}
 			h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
 				calls := make([]map[string]any, test.callsPerStep)
@@ -1317,8 +1357,9 @@ func TestGatewayToolExecutionBounds(t *testing.T) {
 				}
 				json.NewEncoder(w).Encode(map[string]any{"id": "bounded", "object": "chat.completion", "created": 1, "model": "model-a", "choices": []any{map[string]any{"index": 0, "message": map[string]any{"role": "assistant", "content": nil, "tool_calls": calls}, "finish_reason": "tool_calls"}}, "usage": map[string]int{"prompt_tokens": 2, "completion_tokens": 3, "total_tokens": 5}})
 			})
-			response, body := h.chat(fullKey, nil)
-			if response.StatusCode != http.StatusBadRequest || errorCode(t, body) != test.wantCode || h.mock.count("a") != test.wantModelCalls || len(fixture.calls) != test.wantToolCalls {
+
+			response, body := h.chat(fullKey, test.headers, test.requestFields)
+			if response.StatusCode != cmp.Or(test.wantStatus, http.StatusBadRequest) || errorCode(t, body) != test.wantCode || h.mock.count("a") != test.wantModelCalls {
 				t.Fatalf("workflow limit was not enforced: status=%d body=%v model_calls=%d", response.StatusCode, body, h.mock.count("a"))
 			}
 		})
@@ -1416,6 +1457,80 @@ func TestGatewayToolExecutionAppliesDelegatedAgentQuotasAcrossSteps(t *testing.T
 				t.Fatalf("agent request quota was reset between requests: status=%d body=%v model_calls=%d", response.StatusCode, body, h.mock.count("a"))
 			}
 		})
+	}
+}
+
+func TestGatewayToolExecutionTracksUnboundedRunsForConcurrency(t *testing.T) {
+	toolsetID, projectID := uuid.NewString(), uuid.NewString()
+	h := strictHarness(t, func(snapshot *routing.Snapshot) {
+		route := snapshot.Routes[routeSlug]
+		route.Fidelity.Mode = routing.FidelityTransformed
+		route.ToolExecution, route.Toolsets, route.ProjectID = "gateway", []string{toolsetID}, &projectID
+		route.OverallTimeout = 20_000
+		for i := range route.Targets {
+			route.Targets[i].Timeout = 15_000
+		}
+		snapshot.Routes[routeSlug] = route
+		for id, provider := range snapshot.Providers {
+			for i := range provider.Capabilities {
+				provider.Capabilities[i].ToolCalls = true
+			}
+			snapshot.Providers[id] = provider
+		}
+	})
+	authority := h.rt.keys[fullKey]
+	authority.ProjectID = &projectID
+	h.rt.keys[fullKey] = authority
+	fixture := &workflowFixture{runID: uuid.NewString(), tool: WorkflowTool{ToolsetID: toolsetID}}
+	h.gateway.WorkflowRuns, h.gateway.WorkflowTools, h.gateway.Debits = fixture, fixture, &workflowDebitFixture{fakeSessionDebits: &fakeSessionDebits{}}
+	admitThrough(t, h)
+	started, release, finished := make(chan struct{}, 2), make(chan struct{}, 2), make(chan int, 2)
+	defer close(release)
+	h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
+		if h.mock.count("a") <= 2 {
+			started <- struct{}{}
+			<-release
+		}
+		completion(modelA, "done")(w, r)
+	})
+	for range 2 {
+		go func() {
+			response, _ := h.chat(fullKey, nil, `,"olp_toolsets":[]`)
+			finished <- response.StatusCode
+		}()
+		select {
+		case <-started:
+		case <-time.After(10 * time.Second):
+			t.Fatal("unbounded workflow did not reach the model")
+		}
+	}
+	bounded := `,"olp_toolsets":[],"olp_run_limits":{"max_concurrent_runs":1}`
+	assertBounded := func() {
+		t.Helper()
+		response, body := h.chat(fullKey, nil, bounded)
+		if response.StatusCode != http.StatusTooManyRequests || h.mock.count("a") != 2 {
+			t.Fatalf("bounded workflow was not refused: status=%d body=%v model_calls=%d", response.StatusCode, body, h.mock.count("a"))
+		}
+	}
+	releaseOne := func() {
+		t.Helper()
+		release <- struct{}{}
+		select {
+		case status := <-finished:
+			if status != http.StatusOK {
+				t.Fatalf("unbounded workflow returned %d", status)
+			}
+		case <-time.After(10 * time.Second):
+			t.Fatal("unbounded workflow did not finish")
+		}
+	}
+	assertBounded()
+	releaseOne()
+	assertBounded()
+	releaseOne()
+	response, body := h.chat(fullKey, nil, bounded)
+	if response.StatusCode != http.StatusOK || h.mock.count("a") != 3 {
+		t.Fatalf("bounded workflow could not start after release: status=%d body=%v model_calls=%d", response.StatusCode, body, h.mock.count("a"))
 	}
 }
 

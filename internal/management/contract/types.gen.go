@@ -2395,6 +2395,24 @@ func (e CredentialRequirement) Valid() bool {
 	}
 }
 
+// Defines values for DelegationConsentRequestScopes.
+const (
+	DelegationConsentRequestScopesInference DelegationConsentRequestScopes = "inference"
+	DelegationConsentRequestScopesTools     DelegationConsentRequestScopes = "tools"
+)
+
+// Valid indicates whether the value is a known member of the DelegationConsentRequestScopes enum.
+func (e DelegationConsentRequestScopes) Valid() bool {
+	switch e {
+	case DelegationConsentRequestScopesInference:
+		return true
+	case DelegationConsentRequestScopesTools:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for EndUserLimitsCostBasis.
 const (
 	EndUserLimitsCostBasisCharge EndUserLimitsCostBasis = "charge"
@@ -6770,6 +6788,7 @@ type ApiKeyDetailResponse struct {
 	// RotationIntervalDays Declared rotation reminder interval from creation or the last explicit rotation. Does not expire or automatically rotate the secret. Null disables rotation reminders.
 	RotationIntervalDays nullable.Nullable[int]               `json:"rotation_interval_days,omitempty"`
 	RouteLimits          nullable.Nullable[ApiKeyRouteLimits] `json:"route_limits,omitempty"`
+	RunLimits            nullable.Nullable[WorkflowRunLimits] `json:"run_limits,omitempty"`
 	Scopes               []string                             `json:"scopes"`
 	TokensPerMinute      nullable.Nullable[int64]             `json:"tokens_per_minute,omitempty"`
 
@@ -8319,8 +8338,9 @@ type ConfigurationRouteEntry struct {
 	Retired           *bool `json:"retired,omitempty"`
 
 	// Retry Same-target retries per retryable failure class, with full-jitter exponential backoff. Retries consume the attempt budget and the overall deadline and never follow commitment or an ambiguous creation.
-	Retry         *RouteRetry                      `json:"retry,omitempty"`
-	RoutingPolicy nullable.Nullable[RoutingPolicy] `json:"routing_policy"`
+	Retry         *RouteRetry                          `json:"retry,omitempty"`
+	RoutingPolicy nullable.Nullable[RoutingPolicy]     `json:"routing_policy"`
+	RunLimits     nullable.Nullable[WorkflowRunLimits] `json:"run_limits,omitempty"`
 
 	// Selectors Ordered request selectors; the first match wins.
 	Selectors *[]RouteSelector           `json:"selectors,omitempty"`
@@ -8643,6 +8663,7 @@ type CreateApiKeyRequest struct {
 	// RotationIntervalDays Declared rotation reminder interval from creation or the last explicit rotation. Does not expire or automatically rotate the secret. Null disables rotation reminders.
 	RotationIntervalDays nullable.Nullable[int]               `json:"rotation_interval_days,omitempty"`
 	RouteLimits          nullable.Nullable[ApiKeyRouteLimits] `json:"route_limits,omitempty"`
+	RunLimits            nullable.Nullable[WorkflowRunLimits] `json:"run_limits,omitempty"`
 	Scopes               *[]string                            `json:"scopes,omitempty"`
 	TokensPerMinute      nullable.Nullable[int64]             `json:"tokens_per_minute,omitempty"`
 
@@ -9017,7 +9038,8 @@ type CreateRouteDraftRequest struct {
 	ResponsesMcpItems *bool `json:"responses_mcp_items,omitempty"`
 
 	// Retry Same-target retries per retryable failure class, with full-jitter exponential backoff. Retries consume the attempt budget and the overall deadline and never follow commitment or an ambiguous creation.
-	Retry *RouteRetry `json:"retry,omitempty"`
+	Retry     *RouteRetry                          `json:"retry,omitempty"`
+	RunLimits nullable.Nullable[WorkflowRunLimits] `json:"run_limits,omitempty"`
 
 	// Selectors Ordered request selectors; the first match wins.
 	Selectors *[]RouteSelector     `json:"selectors,omitempty"`
@@ -9167,17 +9189,25 @@ type DelegationConsent struct {
 
 // DelegationConsentRequest defines model for DelegationConsentRequest.
 type DelegationConsentRequest struct {
-	AgentId       openapi_types.UUID `json:"agent_id"`
-	AllowedRoutes []string           `json:"allowed_routes"`
-	ApiKeyId      openapi_types.UUID `json:"api_key_id"`
-	TtlSeconds    *int               `json:"ttl_seconds,omitempty"`
+	AgentId         openapi_types.UUID                `json:"agent_id"`
+	AllowedRoutes   *[]string                         `json:"allowed_routes,omitempty"`
+	AllowedToolsets *[]openapi_types.UUID             `json:"allowed_toolsets,omitempty"`
+	ApiKeyId        openapi_types.UUID                `json:"api_key_id"`
+	Scopes          *[]DelegationConsentRequestScopes `json:"scopes,omitempty"`
+	TtlSeconds      *int                              `json:"ttl_seconds,omitempty"`
 }
+
+// DelegationConsentRequestScopes defines model for DelegationConsentRequest.Scopes.
+type DelegationConsentRequestScopes string
 
 // DelegationOption defines model for DelegationOption.
 type DelegationOption struct {
 	// AllowedRoutes Active inference routes currently allowed by both the key and the agent.
-	AllowedRoutes []string           `json:"allowed_routes"`
-	Id            openapi_types.UUID `json:"id"`
+	AllowedRoutes []string `json:"allowed_routes"`
+
+	// AllowedToolsets Published toolsets currently allowed by both the key and the agent.
+	AllowedToolsets *[]openapi_types.UUID `json:"allowed_toolsets,omitempty"`
+	Id              openapi_types.UUID    `json:"id"`
 }
 
 // DelegationOptions defines model for DelegationOptions.
@@ -12763,7 +12793,8 @@ type ReplaceRouteDraftRequest struct {
 	ResponsesMcpItems *bool `json:"responses_mcp_items,omitempty"`
 
 	// Retry Same-target retries per retryable failure class, with full-jitter exponential backoff. Retries consume the attempt budget and the overall deadline and never follow commitment or an ambiguous creation.
-	Retry *RouteRetry `json:"retry,omitempty"`
+	Retry     *RouteRetry                          `json:"retry,omitempty"`
+	RunLimits nullable.Nullable[WorkflowRunLimits] `json:"run_limits,omitempty"`
 
 	// Selectors Ordered request selectors; the first match wins.
 	Selectors *[]RouteSelector            `json:"selectors,omitempty"`
@@ -13284,8 +13315,9 @@ type RouteBehavior struct {
 	ResponsesMcpItems *bool `json:"responses_mcp_items,omitempty"`
 
 	// Retry Same-target retries per retryable failure class, with full-jitter exponential backoff. Retries consume the attempt budget and the overall deadline and never follow commitment or an ambiguous creation.
-	Retry     RouteRetry      `json:"retry"`
-	Selectors []RouteSelector `json:"selectors"`
+	Retry     RouteRetry                           `json:"retry"`
+	RunLimits nullable.Nullable[WorkflowRunLimits] `json:"run_limits,omitempty"`
+	Selectors []RouteSelector                      `json:"selectors"`
 
 	// ToolExecution When gateway, the gateway executes authorized read-only tools on transformed Chat Completions routes.
 	ToolExecution *RouteBehaviorToolExecution `json:"tool_execution,omitempty"`
@@ -13383,11 +13415,12 @@ type RouteDraftDetailResponse struct {
 	ResponsesMcpItems *bool `json:"responses_mcp_items,omitempty"`
 
 	// Retry Same-target retries per retryable failure class, with full-jitter exponential backoff. Retries consume the attempt budget and the overall deadline and never follow commitment or an ambiguous creation.
-	Retry     RouteRetry            `json:"retry"`
-	Selectors []RouteSelector       `json:"selectors"`
-	Slug      string                `json:"slug"`
-	State     string                `json:"state"`
-	Targets   []RouteTargetResponse `json:"targets"`
+	Retry     RouteRetry                           `json:"retry"`
+	RunLimits nullable.Nullable[WorkflowRunLimits] `json:"run_limits,omitempty"`
+	Selectors []RouteSelector                      `json:"selectors"`
+	Slug      string                               `json:"slug"`
+	State     string                               `json:"state"`
+	Targets   []RouteTargetResponse                `json:"targets"`
 
 	// ToolExecution When gateway, the gateway executes authorized read-only tools on transformed Chat Completions routes.
 	ToolExecution *RouteDraftDetailResponseToolExecution `json:"tool_execution,omitempty"`
@@ -13545,14 +13578,15 @@ type RouteRevisionResponse struct {
 	ResponsesMcpItems *bool `json:"responses_mcp_items,omitempty"`
 
 	// Retry Same-target retries per retryable failure class, with full-jitter exponential backoff. Retries consume the attempt budget and the overall deadline and never follow commitment or an ambiguous creation.
-	Retry         RouteRetry            `json:"retry"`
-	Revision      int32                 `json:"revision"`
-	RouteId       openapi_types.UUID    `json:"route_id"`
-	RoutingPolicy RoutingPolicy         `json:"routing_policy"`
-	Selectors     []RouteSelector       `json:"selectors"`
-	Slug          string                `json:"slug"`
-	SourceDraftId openapi_types.UUID    `json:"source_draft_id"`
-	Targets       []RouteTargetResponse `json:"targets"`
+	Retry         RouteRetry                           `json:"retry"`
+	Revision      int32                                `json:"revision"`
+	RouteId       openapi_types.UUID                   `json:"route_id"`
+	RoutingPolicy RoutingPolicy                        `json:"routing_policy"`
+	RunLimits     nullable.Nullable[WorkflowRunLimits] `json:"run_limits,omitempty"`
+	Selectors     []RouteSelector                      `json:"selectors"`
+	Slug          string                               `json:"slug"`
+	SourceDraftId openapi_types.UUID                   `json:"source_draft_id"`
+	Targets       []RouteTargetResponse                `json:"targets"`
 
 	// ToolExecution When gateway, the gateway executes authorized read-only tools on transformed Chat Completions routes.
 	ToolExecution *RouteRevisionResponseToolExecution `json:"tool_execution,omitempty"`
@@ -14694,6 +14728,7 @@ type UpdateApiKeyRequest struct {
 	// RotationIntervalDays Declared rotation reminder interval from creation or the last explicit rotation. Does not expire or automatically rotate the secret. Null disables rotation reminders.
 	RotationIntervalDays nullable.Nullable[int]               `json:"rotation_interval_days,omitempty"`
 	RouteLimits          nullable.Nullable[ApiKeyRouteLimits] `json:"route_limits,omitempty"`
+	RunLimits            nullable.Nullable[WorkflowRunLimits] `json:"run_limits,omitempty"`
 	Scopes               *[]string                            `json:"scopes,omitempty"`
 	TokensPerMinute      nullable.Nullable[int64]             `json:"tokens_per_minute,omitempty"`
 
@@ -14941,7 +14976,8 @@ type UpdatePublishedRouteRequest struct {
 	ResponsesMcpItems *bool `json:"responses_mcp_items,omitempty"`
 
 	// Retry Same-target retries per retryable failure class, with full-jitter exponential backoff. Retries consume the attempt budget and the overall deadline and never follow commitment or an ambiguous creation.
-	Retry *RouteRetry `json:"retry,omitempty"`
+	Retry     *RouteRetry                          `json:"retry,omitempty"`
+	RunLimits nullable.Nullable[WorkflowRunLimits] `json:"run_limits,omitempty"`
 
 	// Selectors Ordered request selectors; the first match wins.
 	Selectors *[]RouteSelector `json:"selectors,omitempty"`
@@ -15248,6 +15284,15 @@ type Vendor struct {
 
 	// UnsupportedParameters Request fields refused for the vendor because its documented API cannot represent them.
 	UnsupportedParameters []string `json:"unsupported_parameters"`
+}
+
+// WorkflowRunLimits defines model for WorkflowRunLimits.
+type WorkflowRunLimits struct {
+	MaxConcurrentRuns  *int64  `json:"max_concurrent_runs,omitempty"`
+	MaxDurationSeconds *int64  `json:"max_duration_seconds,omitempty"`
+	MaxIterations      *int64  `json:"max_iterations,omitempty"`
+	MaxRunCost         *string `json:"max_run_cost,omitempty"`
+	MaxToolCalls       *int64  `json:"max_tool_calls,omitempty"`
 }
 
 // WorkloadIssuer defines model for WorkloadIssuer.

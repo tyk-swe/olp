@@ -193,6 +193,7 @@ export interface components {
             olp_prompt: components["schemas"]["PublishedPromptReference"];
             olp_toolsets?: components["schemas"]["ChatToolsetSelection"];
             olp_approval?: components["schemas"]["WorkflowApprovalSubmission"];
+            olp_run_limits?: components["schemas"]["WorkflowRunLimits"];
         } & {
             [key: string]: unknown;
         };
@@ -203,6 +204,7 @@ export interface components {
             }[];
             olp_toolsets?: components["schemas"]["ChatToolsetSelection"];
             olp_approval?: components["schemas"]["WorkflowApprovalSubmission"];
+            olp_run_limits?: components["schemas"]["WorkflowRunLimits"];
         } & {
             [key: string]: unknown;
         };
@@ -337,8 +339,9 @@ export interface components {
             }[];
         };
         DelegationRequest: {
-            scopes: "inference"[];
-            allowed_routes: string[];
+            scopes: ("inference" | "tools")[];
+            allowed_routes?: string[];
+            allowed_toolsets?: string[];
             /**
              * Format: int64
              * @description Grant lifetime in seconds. Omit or use 0 for the 300-second default. Principal expiry can shorten the lifetime.
@@ -393,6 +396,7 @@ export interface components {
             olp_prompt: components["schemas"]["PublishedPromptReference"];
             olp_toolsets?: components["schemas"]["ChatToolsetSelection"];
             olp_approval?: components["schemas"]["WorkflowApprovalSubmission"];
+            olp_run_limits?: components["schemas"]["WorkflowRunLimits"];
         } & {
             [key: string]: unknown;
         };
@@ -400,6 +404,7 @@ export interface components {
             olp_prompt: components["schemas"]["PublishedPromptReference"];
             olp_toolsets?: components["schemas"]["ChatToolsetSelection"];
             olp_approval?: components["schemas"]["WorkflowApprovalSubmission"];
+            olp_run_limits?: components["schemas"]["WorkflowRunLimits"];
         } & {
             [key: string]: unknown;
         };
@@ -411,6 +416,7 @@ export interface components {
             }[];
             olp_toolsets?: components["schemas"]["ChatToolsetSelection"];
             olp_approval?: components["schemas"]["WorkflowApprovalSubmission"];
+            olp_run_limits?: components["schemas"]["WorkflowRunLimits"];
         } & {
             [key: string]: unknown;
         };
@@ -420,6 +426,7 @@ export interface components {
             }[];
             olp_toolsets?: components["schemas"]["ChatToolsetSelection"];
             olp_approval?: components["schemas"]["WorkflowApprovalSubmission"];
+            olp_run_limits?: components["schemas"]["WorkflowRunLimits"];
         } & {
             [key: string]: unknown;
         };
@@ -451,6 +458,7 @@ export interface components {
         OLPResponsesPromptRequest: {
             model: string;
             prompt: components["schemas"]["ResponsesPublishedPromptReference"];
+            olp_run_limits?: components["schemas"]["WorkflowRunLimits"];
         } & {
             [key: string]: unknown;
         };
@@ -473,6 +481,7 @@ export interface components {
             }[];
             olp_toolsets?: components["schemas"]["ChatToolsetSelection"];
             olp_approval?: components["schemas"]["WorkflowApprovalSubmission"];
+            olp_run_limits?: components["schemas"]["WorkflowRunLimits"];
         } & {
             [key: string]: unknown;
         };
@@ -519,6 +528,17 @@ export interface components {
             })[];
         } & {
             [key: string]: unknown;
+        };
+        WorkflowRunLimits: {
+            /** Format: int64 */
+            max_iterations?: number;
+            /** Format: int64 */
+            max_tool_calls?: number;
+            /** Format: int64 */
+            max_duration_seconds?: number;
+            /** Format: int64 */
+            max_concurrent_runs?: number;
+            max_run_cost?: string;
         };
     };
     responses: never;

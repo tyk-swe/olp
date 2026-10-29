@@ -10,10 +10,12 @@ import (
 
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/agents"
+	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/mcp"
 	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/protocols/sse"
 	"github.com/tyk-swe/olp/internal/protocols/wire"
+	"github.com/tyk-swe/olp/internal/usage"
 )
 
 type workflowPauseCall struct {
@@ -44,14 +46,18 @@ type workflowPause struct {
 }
 
 type workflowResumeState struct {
-	Family        wire.Format       `json:"family"`
-	Transcript    json.RawMessage   `json:"transcript"`
-	Completion    *wire.Completion  `json:"completion"`
-	Iteration     int               `json:"iteration"`
-	Calls         int               `json:"calls"`
-	ResponseMCP   bool              `json:"response_mcp"`
-	ResponseItems []responseMCPItem `json:"response_items,omitempty"`
-	RecoveryCalls []string          `json:"recovery_calls,omitempty"`
+	RunLimits     limits.WorkflowBounds `json:"run_limits"`
+	PriorCost     string                `json:"prior_cost"`
+	CostKnown     bool                  `json:"cost_known"`
+	StartedAt     time.Time             `json:"started_at"`
+	Family        wire.Format           `json:"family"`
+	Transcript    json.RawMessage       `json:"transcript"`
+	Completion    *wire.Completion      `json:"completion"`
+	Iteration     int                   `json:"iteration"`
+	Calls         int                   `json:"calls"`
+	ResponseMCP   bool                  `json:"response_mcp"`
+	ResponseItems []responseMCPItem     `json:"response_items,omitempty"`
+	RecoveryCalls []string              `json:"recovery_calls,omitempty"`
 }
 
 type workflowResumeRequest struct {
@@ -94,8 +100,30 @@ func (s *Server) prepareWorkflowResume(ctx context.Context, x *call) *Error {
 		}
 	}
 	var state workflowResumeState
-	if json.Unmarshal(continuation.State, &state) != nil || state.Family != x.family || state.Completion == nil || state.Iteration < 0 || state.Iteration >= 7 || continuation.StartOrdinal < 0 || continuation.NextOrdinal < continuation.StartOrdinal || state.Calls < 0 || state.Calls > 32 {
+	if json.Unmarshal(continuation.State, &state) != nil || state.Family != x.family || state.Completion == nil || state.Iteration < 0 || state.Iteration >= 31 || continuation.StartOrdinal < 0 || continuation.NextOrdinal < continuation.StartOrdinal || state.Calls < 0 || state.Calls > 128 || !state.RunLimits.Valid() || state.RunLimits.MaxIterations == nil || state.RunLimits.MaxToolCalls == nil || state.RunLimits.MaxDurationSeconds == nil || state.StartedAt.IsZero() {
 		return permissionError("tool_approval_invalid", "The workflow approval is invalid or expired.")
+	}
+	priorCost, validCost := usage.ParseCost(state.PriorCost)
+	if !validCost {
+		return permissionError("tool_approval_invalid", "The workflow approval is invalid or expired.")
+	}
+	bounds := resolveWorkflowBounds(&state.RunLimits, x.named().RunLimits, x.authority.Policy.RunLimits, &x.generation.callerRunLimits)
+	if int64(state.Iteration)+1 >= *bounds.MaxIterations {
+		return invalidRequest("tool_iteration_limit", "The workflow reached its model iteration limit.", nil)
+	}
+	if int64(state.Calls+len(state.Completion.ToolCalls)) > *bounds.MaxToolCalls {
+		return invalidRequest("tool_call_limit", "The workflow reached its tool call limit.", nil)
+	}
+	if bounds.MaxRunCost != nil && !state.CostKnown {
+		return workflowUnboundedCost()
+	}
+	x.generation.runLimits = bounds
+	x.workflow.priorCost = priorCost
+	x.workflow.unknownCost = !state.CostKnown
+	x.workflow.startedAt = state.StartedAt
+	deadline := state.StartedAt.Add(time.Duration(*bounds.MaxDurationSeconds) * time.Second)
+	if x.deadline.IsZero() || deadline.Before(x.deadline) {
+		x.deadline = deadline
 	}
 	x.workflowRecoveryCalls = state.RecoveryCalls
 	if x.deadline.IsZero() || continuation.ExpiresAt.Before(x.deadline) {
@@ -184,7 +212,18 @@ func (s *Server) pauseWorkflow(ctx context.Context, x *call, completion *wire.Co
 	if !ok {
 		return nil, serverError(503, "tool_approval_unavailable", "The approval service is unavailable.")
 	}
-	state, err := json.Marshal(workflowResumeState{Family: x.family, Transcript: x.generation.parsed.Field(workflowTranscriptField(x.family)), Completion: completion, Iteration: iteration, Calls: x.workflow.calls, ResponseMCP: x.workflow.responseMCP, ResponseItems: x.workflow.responseItems, RecoveryCalls: x.workflowRecoveryCalls})
+	_, modelCostKnown := x.responseCost()
+	costKnown := modelCostKnown && !x.workflow.unknownCost && !slices.ContainsFunc(x.facts, func(fact AttemptFact) bool {
+		return fact.BillingUncertain && !fact.UsageObserved
+	})
+	startedAt := func() time.Time {
+		if x.workflow.startedAt.IsZero() {
+			return x.request.startedAt
+		}
+		return x.workflow.startedAt
+	}()
+	priorCost := x.workflow.priorCost.Add(x.settledCost()).Add(x.workflow.toolCost)
+	state, err := json.Marshal(workflowResumeState{RunLimits: x.generation.runLimits, PriorCost: priorCost.String(), CostKnown: costKnown, StartedAt: startedAt, Family: x.family, Transcript: x.generation.parsed.Field(workflowTranscriptField(x.family)), Completion: completion, Iteration: iteration, Calls: x.workflow.calls, ResponseMCP: x.workflow.responseMCP, ResponseItems: x.workflow.responseItems, RecoveryCalls: x.workflowRecoveryCalls})
 	if err != nil {
 		return nil, serverError(503, "tool_approval_unavailable", "The approval could not be prepared.")
 	}

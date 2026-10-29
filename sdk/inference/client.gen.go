@@ -174,12 +174,15 @@ func (e AnthropicInferenceErrorType) Valid() bool {
 // Defines values for DelegationRequestScopes.
 const (
 	Inference DelegationRequestScopes = "inference"
+	Tools     DelegationRequestScopes = "tools"
 )
 
 // Valid indicates whether the value is a known member of the DelegationRequestScopes enum.
 func (e DelegationRequestScopes) Valid() bool {
 	switch e {
 	case Inference:
+		return true
+	case Tools:
 		return true
 	default:
 		return false
@@ -419,7 +422,8 @@ type AnthropicPromptRequest struct {
 	OlpApproval *WorkflowApprovalSubmission `json:"olp_approval,omitempty"`
 
 	// OlpPrompt Specify exactly one published label or immutable revision ID.
-	OlpPrompt PublishedPromptReference `json:"olp_prompt"`
+	OlpPrompt    PublishedPromptReference `json:"olp_prompt"`
+	OlpRunLimits *WorkflowRunLimits       `json:"olp_run_limits,omitempty"`
 
 	// OlpToolsets Select a subset of the published toolsets allowed by the route. An empty array selects no toolsets.
 	OlpToolsets          *ChatToolsetSelection  `json:"olp_toolsets,omitempty"`
@@ -433,7 +437,8 @@ type AnthropicToolWorkflowRequest struct {
 	Model     string                   `json:"model"`
 
 	// OlpApproval After obtaining a human's approval, resubmit the original transcript and tool arguments. The token expires within five minutes and can be used only once.
-	OlpApproval *WorkflowApprovalSubmission `json:"olp_approval,omitempty"`
+	OlpApproval  *WorkflowApprovalSubmission `json:"olp_approval,omitempty"`
+	OlpRunLimits *WorkflowRunLimits          `json:"olp_run_limits,omitempty"`
 
 	// OlpToolsets Select a subset of the published toolsets allowed by the route. An empty array selects no toolsets.
 	OlpToolsets          *ChatToolsetSelection  `json:"olp_toolsets,omitempty"`
@@ -448,7 +453,8 @@ type ChatPromptRequest struct {
 	OlpApproval *WorkflowApprovalSubmission `json:"olp_approval,omitempty"`
 
 	// OlpPrompt Specify exactly one published label or immutable revision ID.
-	OlpPrompt PublishedPromptReference `json:"olp_prompt"`
+	OlpPrompt    PublishedPromptReference `json:"olp_prompt"`
+	OlpRunLimits *WorkflowRunLimits       `json:"olp_run_limits,omitempty"`
 
 	// OlpToolsets Select a subset of the published toolsets allowed by the route. An empty array selects no toolsets.
 	OlpToolsets          *ChatToolsetSelection  `json:"olp_toolsets,omitempty"`
@@ -461,7 +467,8 @@ type ChatToolWorkflowRequest struct {
 	Model    string                   `json:"model"`
 
 	// OlpApproval After obtaining a human's approval, resubmit the original transcript and tool arguments. The token expires within five minutes and can be used only once.
-	OlpApproval *WorkflowApprovalSubmission `json:"olp_approval,omitempty"`
+	OlpApproval  *WorkflowApprovalSubmission `json:"olp_approval,omitempty"`
+	OlpRunLimits *WorkflowRunLimits          `json:"olp_run_limits,omitempty"`
 
 	// OlpToolsets Select a subset of the published toolsets allowed by the route. An empty array selects no toolsets.
 	OlpToolsets          *ChatToolsetSelection  `json:"olp_toolsets,omitempty"`
@@ -483,8 +490,9 @@ type DelegationGrant struct {
 
 // DelegationRequest defines model for DelegationRequest.
 type DelegationRequest struct {
-	AllowedRoutes []string                  `json:"allowed_routes"`
-	Scopes        []DelegationRequestScopes `json:"scopes"`
+	AllowedRoutes   *[]string                 `json:"allowed_routes,omitempty"`
+	AllowedToolsets *[]openapi_types.UUID     `json:"allowed_toolsets,omitempty"`
+	Scopes          []DelegationRequestScopes `json:"scopes"`
 
 	// TtlSeconds Grant lifetime in seconds. Omit or use 0 for the 300-second default. Principal expiry can shorten the lifetime.
 	TtlSeconds *int64 `json:"ttl_seconds,omitempty"`
@@ -516,7 +524,8 @@ type GeminiPromptRequest struct {
 	OlpApproval *WorkflowApprovalSubmission `json:"olp_approval,omitempty"`
 
 	// OlpPrompt Specify exactly one published label or immutable revision ID.
-	OlpPrompt PublishedPromptReference `json:"olp_prompt"`
+	OlpPrompt    PublishedPromptReference `json:"olp_prompt"`
+	OlpRunLimits *WorkflowRunLimits       `json:"olp_run_limits,omitempty"`
 
 	// OlpToolsets Select a subset of the published toolsets allowed by the route. An empty array selects no toolsets.
 	OlpToolsets          *ChatToolsetSelection  `json:"olp_toolsets,omitempty"`
@@ -528,7 +537,8 @@ type GeminiToolWorkflowRequest struct {
 	Contents []map[string]interface{} `json:"contents"`
 
 	// OlpApproval After obtaining a human's approval, resubmit the original transcript and tool arguments. The token expires within five minutes and can be used only once.
-	OlpApproval *WorkflowApprovalSubmission `json:"olp_approval,omitempty"`
+	OlpApproval  *WorkflowApprovalSubmission `json:"olp_approval,omitempty"`
+	OlpRunLimits *WorkflowRunLimits          `json:"olp_run_limits,omitempty"`
 
 	// OlpToolsets Select a subset of the published toolsets allowed by the route. An empty array selects no toolsets.
 	OlpToolsets          *ChatToolsetSelection  `json:"olp_toolsets,omitempty"`
@@ -562,7 +572,8 @@ type NativeResponsesPromptRequest struct {
 
 // OLPResponsesPromptRequest defines model for OLPResponsesPromptRequest.
 type OLPResponsesPromptRequest struct {
-	Model string `json:"model"`
+	Model        string             `json:"model"`
+	OlpRunLimits *WorkflowRunLimits `json:"olp_run_limits,omitempty"`
 
 	// Prompt A registry prompt has an olpp_ ID and exactly one label or revision ID. Other prompt IDs retain the provider contract.
 	Prompt               ResponsesPublishedPromptReference `json:"prompt"`
@@ -683,7 +694,8 @@ type ResponsesToolWorkflowRequest struct {
 	Model string                             `json:"model"`
 
 	// OlpApproval After obtaining a human's approval, resubmit the original transcript and tool arguments. The token expires within five minutes and can be used only once.
-	OlpApproval *WorkflowApprovalSubmission `json:"olp_approval,omitempty"`
+	OlpApproval  *WorkflowApprovalSubmission `json:"olp_approval,omitempty"`
+	OlpRunLimits *WorkflowRunLimits          `json:"olp_run_limits,omitempty"`
 
 	// OlpToolsets Select a subset of the published toolsets allowed by the route. An empty array selects no toolsets.
 	OlpToolsets          *ChatToolsetSelection  `json:"olp_toolsets,omitempty"`
@@ -723,6 +735,15 @@ type WorkflowApprovalSubmission struct {
 	// Arguments The original JSON arguments indexed by the paused call ID.
 	Arguments         map[string]map[string]interface{} `json:"arguments"`
 	ContinuationToken string                            `json:"continuation_token"`
+}
+
+// WorkflowRunLimits defines model for WorkflowRunLimits.
+type WorkflowRunLimits struct {
+	MaxConcurrentRuns  *int64  `json:"max_concurrent_runs,omitempty"`
+	MaxDurationSeconds *int64  `json:"max_duration_seconds,omitempty"`
+	MaxIterations      *int64  `json:"max_iterations,omitempty"`
+	MaxRunCost         *string `json:"max_run_cost,omitempty"`
+	MaxToolCalls       *int64  `json:"max_tool_calls,omitempty"`
 }
 
 // CreateAnthropicMessageWithPromptJSONBody defines parameters for CreateAnthropicMessageWithPrompt.
@@ -875,6 +896,14 @@ func (a *AnthropicPromptRequest) UnmarshalJSON(b []byte) error {
 		delete(object, "olp_prompt")
 	}
 
+	if raw, found := object["olp_run_limits"]; found {
+		err = json.Unmarshal(raw, &a.OlpRunLimits)
+		if err != nil {
+			return fmt.Errorf("error reading 'olp_run_limits': %w", err)
+		}
+		delete(object, "olp_run_limits")
+	}
+
 	if raw, found := object["olp_toolsets"]; found {
 		err = json.Unmarshal(raw, &a.OlpToolsets)
 		if err != nil {
@@ -922,6 +951,13 @@ func (a AnthropicPromptRequest) MarshalJSON() ([]byte, error) {
 	object["olp_prompt"], err = json.Marshal(a.OlpPrompt)
 	if err != nil {
 		return nil, fmt.Errorf("error marshaling 'olp_prompt': %w", err)
+	}
+
+	if a.OlpRunLimits != nil {
+		object["olp_run_limits"], err = json.Marshal(a.OlpRunLimits)
+		if err != nil {
+			return nil, fmt.Errorf("error marshaling 'olp_run_limits': %w", err)
+		}
 	}
 
 	if a.OlpToolsets != nil {
@@ -997,6 +1033,14 @@ func (a *AnthropicToolWorkflowRequest) UnmarshalJSON(b []byte) error {
 		delete(object, "olp_approval")
 	}
 
+	if raw, found := object["olp_run_limits"]; found {
+		err = json.Unmarshal(raw, &a.OlpRunLimits)
+		if err != nil {
+			return fmt.Errorf("error reading 'olp_run_limits': %w", err)
+		}
+		delete(object, "olp_run_limits")
+	}
+
 	if raw, found := object["olp_toolsets"]; found {
 		err = json.Unmarshal(raw, &a.OlpToolsets)
 		if err != nil {
@@ -1045,6 +1089,13 @@ func (a AnthropicToolWorkflowRequest) MarshalJSON() ([]byte, error) {
 		object["olp_approval"], err = json.Marshal(a.OlpApproval)
 		if err != nil {
 			return nil, fmt.Errorf("error marshaling 'olp_approval': %w", err)
+		}
+	}
+
+	if a.OlpRunLimits != nil {
+		object["olp_run_limits"], err = json.Marshal(a.OlpRunLimits)
+		if err != nil {
+			return nil, fmt.Errorf("error marshaling 'olp_run_limits': %w", err)
 		}
 	}
 
@@ -1113,6 +1164,14 @@ func (a *ChatPromptRequest) UnmarshalJSON(b []byte) error {
 		delete(object, "olp_prompt")
 	}
 
+	if raw, found := object["olp_run_limits"]; found {
+		err = json.Unmarshal(raw, &a.OlpRunLimits)
+		if err != nil {
+			return fmt.Errorf("error reading 'olp_run_limits': %w", err)
+		}
+		delete(object, "olp_run_limits")
+	}
+
 	if raw, found := object["olp_toolsets"]; found {
 		err = json.Unmarshal(raw, &a.OlpToolsets)
 		if err != nil {
@@ -1155,6 +1214,13 @@ func (a ChatPromptRequest) MarshalJSON() ([]byte, error) {
 	object["olp_prompt"], err = json.Marshal(a.OlpPrompt)
 	if err != nil {
 		return nil, fmt.Errorf("error marshaling 'olp_prompt': %w", err)
+	}
+
+	if a.OlpRunLimits != nil {
+		object["olp_run_limits"], err = json.Marshal(a.OlpRunLimits)
+		if err != nil {
+			return nil, fmt.Errorf("error marshaling 'olp_run_limits': %w", err)
+		}
 	}
 
 	if a.OlpToolsets != nil {
@@ -1222,6 +1288,14 @@ func (a *ChatToolWorkflowRequest) UnmarshalJSON(b []byte) error {
 		delete(object, "olp_approval")
 	}
 
+	if raw, found := object["olp_run_limits"]; found {
+		err = json.Unmarshal(raw, &a.OlpRunLimits)
+		if err != nil {
+			return fmt.Errorf("error reading 'olp_run_limits': %w", err)
+		}
+		delete(object, "olp_run_limits")
+	}
+
 	if raw, found := object["olp_toolsets"]; found {
 		err = json.Unmarshal(raw, &a.OlpToolsets)
 		if err != nil {
@@ -1265,6 +1339,13 @@ func (a ChatToolWorkflowRequest) MarshalJSON() ([]byte, error) {
 		object["olp_approval"], err = json.Marshal(a.OlpApproval)
 		if err != nil {
 			return nil, fmt.Errorf("error marshaling 'olp_approval': %w", err)
+		}
+	}
+
+	if a.OlpRunLimits != nil {
+		object["olp_run_limits"], err = json.Marshal(a.OlpRunLimits)
+		if err != nil {
+			return nil, fmt.Errorf("error marshaling 'olp_run_limits': %w", err)
 		}
 	}
 
@@ -1325,6 +1406,14 @@ func (a *GeminiPromptRequest) UnmarshalJSON(b []byte) error {
 		delete(object, "olp_prompt")
 	}
 
+	if raw, found := object["olp_run_limits"]; found {
+		err = json.Unmarshal(raw, &a.OlpRunLimits)
+		if err != nil {
+			return fmt.Errorf("error reading 'olp_run_limits': %w", err)
+		}
+		delete(object, "olp_run_limits")
+	}
+
 	if raw, found := object["olp_toolsets"]; found {
 		err = json.Unmarshal(raw, &a.OlpToolsets)
 		if err != nil {
@@ -1362,6 +1451,13 @@ func (a GeminiPromptRequest) MarshalJSON() ([]byte, error) {
 	object["olp_prompt"], err = json.Marshal(a.OlpPrompt)
 	if err != nil {
 		return nil, fmt.Errorf("error marshaling 'olp_prompt': %w", err)
+	}
+
+	if a.OlpRunLimits != nil {
+		object["olp_run_limits"], err = json.Marshal(a.OlpRunLimits)
+		if err != nil {
+			return nil, fmt.Errorf("error marshaling 'olp_run_limits': %w", err)
+		}
 	}
 
 	if a.OlpToolsets != nil {
@@ -1421,6 +1517,14 @@ func (a *GeminiToolWorkflowRequest) UnmarshalJSON(b []byte) error {
 		delete(object, "olp_approval")
 	}
 
+	if raw, found := object["olp_run_limits"]; found {
+		err = json.Unmarshal(raw, &a.OlpRunLimits)
+		if err != nil {
+			return fmt.Errorf("error reading 'olp_run_limits': %w", err)
+		}
+		delete(object, "olp_run_limits")
+	}
+
 	if raw, found := object["olp_toolsets"]; found {
 		err = json.Unmarshal(raw, &a.OlpToolsets)
 		if err != nil {
@@ -1459,6 +1563,13 @@ func (a GeminiToolWorkflowRequest) MarshalJSON() ([]byte, error) {
 		object["olp_approval"], err = json.Marshal(a.OlpApproval)
 		if err != nil {
 			return nil, fmt.Errorf("error marshaling 'olp_approval': %w", err)
+		}
+	}
+
+	if a.OlpRunLimits != nil {
+		object["olp_run_limits"], err = json.Marshal(a.OlpRunLimits)
+		if err != nil {
+			return nil, fmt.Errorf("error marshaling 'olp_run_limits': %w", err)
 		}
 	}
 
@@ -1656,6 +1767,14 @@ func (a *OLPResponsesPromptRequest) UnmarshalJSON(b []byte) error {
 		delete(object, "model")
 	}
 
+	if raw, found := object["olp_run_limits"]; found {
+		err = json.Unmarshal(raw, &a.OlpRunLimits)
+		if err != nil {
+			return fmt.Errorf("error reading 'olp_run_limits': %w", err)
+		}
+		delete(object, "olp_run_limits")
+	}
+
 	if raw, found := object["prompt"]; found {
 		err = json.Unmarshal(raw, &a.Prompt)
 		if err != nil {
@@ -1686,6 +1805,13 @@ func (a OLPResponsesPromptRequest) MarshalJSON() ([]byte, error) {
 	object["model"], err = json.Marshal(a.Model)
 	if err != nil {
 		return nil, fmt.Errorf("error marshaling 'model': %w", err)
+	}
+
+	if a.OlpRunLimits != nil {
+		object["olp_run_limits"], err = json.Marshal(a.OlpRunLimits)
+		if err != nil {
+			return nil, fmt.Errorf("error marshaling 'olp_run_limits': %w", err)
+		}
 	}
 
 	object["prompt"], err = json.Marshal(a.Prompt)
@@ -1751,6 +1877,14 @@ func (a *ResponsesToolWorkflowRequest) UnmarshalJSON(b []byte) error {
 		delete(object, "olp_approval")
 	}
 
+	if raw, found := object["olp_run_limits"]; found {
+		err = json.Unmarshal(raw, &a.OlpRunLimits)
+		if err != nil {
+			return fmt.Errorf("error reading 'olp_run_limits': %w", err)
+		}
+		delete(object, "olp_run_limits")
+	}
+
 	if raw, found := object["olp_toolsets"]; found {
 		err = json.Unmarshal(raw, &a.OlpToolsets)
 		if err != nil {
@@ -1792,6 +1926,13 @@ func (a ResponsesToolWorkflowRequest) MarshalJSON() ([]byte, error) {
 		object["olp_approval"], err = json.Marshal(a.OlpApproval)
 		if err != nil {
 			return nil, fmt.Errorf("error marshaling 'olp_approval': %w", err)
+		}
+	}
+
+	if a.OlpRunLimits != nil {
+		object["olp_run_limits"], err = json.Marshal(a.OlpRunLimits)
+		if err != nil {
+			return nil, fmt.Errorf("error marshaling 'olp_run_limits': %w", err)
 		}
 	}
 

@@ -14,6 +14,7 @@ import (
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/attribution"
 	"github.com/tyk-swe/olp/internal/contentpolicy"
+	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/providers"
 	"github.com/tyk-swe/olp/internal/routes"
 	"github.com/tyk-swe/olp/internal/usage"
@@ -111,6 +112,8 @@ func targetEntry(t routing.PublishedTarget) TargetEntry {
 }
 
 type RouteEntry struct {
+	RunLimits                *limits.WorkflowBounds     `json:"run_limits,omitempty"`
+	ResponsesMCPItems        bool                       `json:"responses_mcp_items,omitempty"`
 	ToolExecution            string                     `json:"tool_execution,omitempty"`
 	Toolsets                 []string                   `json:"toolsets,omitempty"`
 	Cache                    *cache.Policy              `json:"cache,omitempty"`
@@ -172,7 +175,7 @@ func (t *TemplateEntry) normalize() error {
 }
 
 func (r *RouteEntry) behavior() routing.Behavior {
-	return routing.Behavior{ToolExecution: r.ToolExecution, Toolsets: r.Toolsets, Cache: r.Cache, PromptCache: r.PromptCache, CallerCostExempt: r.CallerCostExempt, ProviderFetchedDocuments: r.ProviderFetchedDocuments, MaxBodyBytes: r.MaxBodyBytes, Fallbacks: r.Fallbacks, Selectors: r.Selectors, Retry: r.Retry, Affinity: r.Affinity, Budget: r.Budget, Passthrough: r.Passthrough}
+	return routing.Behavior{RunLimits: r.RunLimits, ResponsesMCPItems: r.ResponsesMCPItems, ToolExecution: r.ToolExecution, Toolsets: r.Toolsets, Cache: r.Cache, PromptCache: r.PromptCache, CallerCostExempt: r.CallerCostExempt, ProviderFetchedDocuments: r.ProviderFetchedDocuments, MaxBodyBytes: r.MaxBodyBytes, Fallbacks: r.Fallbacks, Selectors: r.Selectors, Retry: r.Retry, Affinity: r.Affinity, Budget: r.Budget, Passthrough: r.Passthrough}
 }
 
 func (r *RouteEntry) setBehavior(raw []byte) error {
@@ -187,6 +190,7 @@ func (r *RouteEntry) setBehavior(raw []byte) error {
 	r.Fallbacks, r.Selectors, r.Retry, r.Affinity, r.Budget = behavior.Fallbacks, behavior.Selectors, behavior.Retry, behavior.Affinity, behavior.Budget
 	r.Passthrough = behavior.Passthrough
 	r.ToolExecution, r.Toolsets = behavior.ToolExecution, behavior.Toolsets
+	r.RunLimits, r.ResponsesMCPItems = behavior.RunLimits, behavior.ResponsesMCPItems
 	return nil
 }
 

@@ -6,6 +6,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -754,6 +755,9 @@ func TestGatewayToolWorkflowSettlesOneRun(t *testing.T) {
 	var recoveryWorkflow atomic.Bool
 	var recoveryApprovalWorkflow atomic.Bool
 	var blockTool atomic.Bool
+	var deadlineTool atomic.Bool
+	deadlineStarted := make(chan struct{}, 2)
+	deadlineCanceled := make(chan struct{}, 2)
 	var holdApprovedTool atomic.Bool
 	toolStarted := make(chan struct{})
 	approvedToolStarted := make(chan struct{}, 2)
@@ -787,6 +791,12 @@ func TestGatewayToolWorkflowSettlesOneRun(t *testing.T) {
 			schema := map[string]any{"type": "object", "properties": map[string]any{"query": map[string]any{"type": "string"}}, "required": []string{"query"}}
 			result = map[string]any{"tools": []any{map[string]any{"name": "lookup", "inputSchema": schema}, map[string]any{"name": "change", "inputSchema": schema, "annotations": map[string]any{"readOnlyHint": true}}}}
 		case "tools/call":
+			if deadlineTool.Load() {
+				deadlineStarted <- struct{}{}
+				<-r.Context().Done()
+				deadlineCanceled <- struct{}{}
+				return
+			}
 			if blockTool.Load() {
 				close(toolStarted)
 				<-r.Context().Done()
@@ -828,6 +838,11 @@ func TestGatewayToolWorkflowSettlesOneRun(t *testing.T) {
 	var modelCalls atomic.Int64
 	var noUsage atomic.Bool
 	var blockModel atomic.Bool
+	var deadlineModel atomic.Bool
+	var blockRun atomic.Bool
+	runStarted := make(chan struct{}, 2)
+	runRelease := make(chan struct{})
+	defer close(runRelease)
 	var iterationScenario atomic.Bool
 	var iterationSteps atomic.Int64
 	modelStarted := make(chan struct{})
@@ -882,6 +897,20 @@ func TestGatewayToolWorkflowSettlesOneRun(t *testing.T) {
 				calls = append(calls, map[string]any{"id": "call-one", "type": "function", "function": map[string]any{"name": approvalTool.Alias, "arguments": `{"query":"` + argument + `"}`}})
 			}
 			writeJSON(w, map[string]any{"id": "recovery-call", "object": "chat.completion", "created": 1, "model": vendorModel, "choices": []any{map[string]any{"index": 0, "message": map[string]any{"role": "assistant", "content": nil, "tool_calls": calls}, "finish_reason": "tool_calls"}}, "usage": map[string]any{"prompt_tokens": 4, "completion_tokens": 6, "total_tokens": 10}})
+			return
+		}
+		if blockRun.Load() && len(input["tool_choice"]) == 0 {
+			runStarted <- struct{}{}
+			select {
+			case <-runRelease:
+			case <-r.Context().Done():
+				return
+			}
+		}
+		if deadlineModel.Load() && len(input["tool_choice"]) == 0 {
+			deadlineStarted <- struct{}{}
+			<-r.Context().Done()
+			deadlineCanceled <- struct{}{}
 			return
 		}
 		if blockModel.Load() && len(input["tool_choice"]) == 0 {
@@ -947,7 +976,8 @@ func TestGatewayToolWorkflowSettlesOneRun(t *testing.T) {
 	defer vendor.Close()
 	_, provider, slug, _ := provisionOpenAIInProject(t, h, owner, &project, vendor.URL,
 		[]any{map[string]any{"operation": "generation", "surface": "openai", "mode": "unary"}}, []string{"generation"},
-		map[string]any{"tool_execution": "gateway", "toolsets": []string{toolsetID}, "responses_mcp_items": true, "budget": map[string]any{"daily_cost_limit": "10000000"}})
+		map[string]any{"tool_execution": "gateway", "toolsets": []string{toolsetID}, "responses_mcp_items": true, "budget": map[string]any{"daily_cost_limit": "10000000"}, "run_limits": map[string]any{"max_tool_calls": 32, "max_duration_seconds": 600, "max_concurrent_runs": 3}},
+		map[string]any{"options": map[string]any{"models": map[string]any{vendorModel: map[string]any{"context_length": 1000}}}})
 	addBatchPrice(t, h, owner, provider["id"].(string), "", time.Now().Add(-time.Hour))
 	key := h.want(owner, "POST", "/api/v1/api-keys", map[string]any{"name": "Workflow caller", "project_id": project, "scopes": []string{"inference", "tools", "traces_write"}, "allowed_routes": []string{slug}, "allowed_toolsets": []string{toolsetID}, "max_concurrency": 1}, idem("workflow-key"), 201)
 	keyID, secret := mcpExecString(t, key, "id"), mcpExecString(t, key, "secret")
@@ -1026,10 +1056,10 @@ func TestGatewayToolWorkflowSettlesOneRun(t *testing.T) {
 		t.Fatalf("supply settlement differs from model costs: matches=%t debit owners=%d", supplyMatches, supplyOwners)
 	}
 	var facts, counted, receipts int
-	if err := h.Pool.QueryRow(t.Context(), `SELECT count(*),count(*) FILTER(WHERE request_counted) FROM olp.attempt_usage_facts WHERE event_id=$1`, runID).Scan(&facts, &counted); err != nil {
+	if err := h.Pool.QueryRow(t.Context(), `SELECT count(*),count(*) FILTER(WHERE f.request_counted) FROM olp.attempt_usage_facts f JOIN olp.execution_debits d ON d.id=f.attempt_id WHERE d.run_id=$1`, runID).Scan(&facts, &counted); err != nil {
 		t.Fatal(err)
 	}
-	if err := h.Pool.QueryRow(t.Context(), `SELECT count(*) FROM olp.request_metadata_event_receipts WHERE event_id=$1`, runID).Scan(&receipts); err != nil {
+	if err := h.Pool.QueryRow(t.Context(), `SELECT count(DISTINCT r.event_id) FROM olp.request_metadata_event_receipts r JOIN olp.attempt_usage_facts f ON f.event_id=r.event_id JOIN olp.execution_debits d ON d.id=f.attempt_id WHERE d.run_id=$1`, runID).Scan(&receipts); err != nil {
 		t.Fatal(err)
 	}
 	if facts != 2 || counted != 1 || receipts != 1 {
@@ -1042,7 +1072,7 @@ func TestGatewayToolWorkflowSettlesOneRun(t *testing.T) {
 		COALESCE((SELECT string_agg(row_to_json(s)::text,'') FROM olp.agent_steps s WHERE s.run_id=$1),'') ||
 		COALESCE((SELECT string_agg(row_to_json(d)::text,'') FROM olp.execution_debits d WHERE d.run_id=$1),'') ||
 		COALESCE((SELECT string_agg(row_to_json(c)::text,'') FROM olp.mcp_tool_calls c JOIN olp.execution_debits d ON d.id=c.dispatch_id WHERE d.run_id=$1),'') ||
-		COALESCE((SELECT string_agg(row_to_json(f)::text,'') FROM olp.attempt_usage_facts f WHERE f.event_id=$1),'')`, runID).Scan(&stored); err != nil {
+		COALESCE((SELECT string_agg(row_to_json(f)::text,'') FROM olp.attempt_usage_facts f JOIN olp.execution_debits d ON d.id=f.attempt_id WHERE d.run_id=$1),'')`, runID).Scan(&stored); err != nil {
 		t.Fatal(err)
 	}
 	if strings.Contains(stored, prompt) || strings.Contains(stored, argument) || strings.Contains(stored, answer) {
@@ -1399,8 +1429,10 @@ func TestGatewayToolWorkflowSettlesOneRun(t *testing.T) {
 	}
 	manager := &export.Manager{Pool: h.Pool, Keys: h.Ring2(), Installation: h.Server.Installation, Sender: export.NewSender(loopbackPolicy()), Log: slog.New(slog.NewTextHandler(io.Discard, nil))}
 	h.Gateway.Capture = manager
+	var workflowReceipts sync.Map
 	h.Gateway.Sink = &gateway.PersistingSink{Persist: func(ctx context.Context, event *usage.Event, payload []byte) error {
 		_, err := usage.PersistEvent(ctx, h.Pool, event, payload)
+		workflowReceipts.Store(event.RequestID, recordedWorkflowReceipt{event: event, payload: payload, err: err})
 		return err
 	}}
 	ctx, cancel := context.WithCancel(t.Context())
@@ -1446,7 +1478,9 @@ func TestGatewayToolWorkflowSettlesOneRun(t *testing.T) {
 	}
 	responsesApprovalInput := "workflow-approval-test responses"
 	responsesApprovalTools := toolCalls.Load()
-	responsesApprovalStatus, responsesApproval, _ := h.gateway(http.MethodPost, "/v1/responses", mcpExecString(t, projectedKey, "secret"), map[string]any{"model": projectedSlug, "input": responsesApprovalInput, "max_output_tokens": 100})
+	responsesKeyID := mcpExecString(t, projectedKey, "id")
+	responsesSpendBefore := workflowKeySpend(t, h, responsesKeyID)
+	responsesApprovalStatus, responsesApproval, responsesApprovalHeaders := h.gateway(http.MethodPost, "/v1/responses", mcpExecString(t, projectedKey, "secret"), map[string]any{"model": projectedSlug, "input": responsesApprovalInput, "max_output_tokens": 100})
 	responsesToken, ok := responsesApproval["continuation_token"].(string)
 	if responsesApprovalStatus != http.StatusOK || !ok || responsesToken == "" || toolCalls.Load() != responsesApprovalTools || !strings.Contains(fmt.Sprint(responsesApproval["output"]), "mcp_approval_request") {
 		t.Fatalf("Responses did not pause for approval: status=%d body=%v tools=%d", responsesApprovalStatus, responsesApproval, toolCalls.Load()-responsesApprovalTools)
@@ -1460,10 +1494,11 @@ func TestGatewayToolWorkflowSettlesOneRun(t *testing.T) {
 			t.Fatalf("Responses accepted changed approval binding: status=%d tools=%d", status, toolCalls.Load()-responsesApprovalTools)
 		}
 	}
-	responsesResumeStatus, responsesResumeBody, _ := h.gateway(http.MethodPost, "/v1/responses", mcpExecString(t, projectedKey, "secret"), responsesResume(responsesApprovalInput, argument))
+	responsesResumeStatus, responsesResumeBody, responsesResumeHeaders := h.gateway(http.MethodPost, "/v1/responses", mcpExecString(t, projectedKey, "secret"), responsesResume(responsesApprovalInput, argument))
 	if responsesResumeStatus != http.StatusOK || !strings.Contains(fmt.Sprint(responsesResumeBody), "done") || toolCalls.Load() != responsesApprovalTools+1 {
 		t.Fatalf("Responses approval did not resume: status=%d body=%v tools=%d", responsesResumeStatus, responsesResumeBody, toolCalls.Load()-responsesApprovalTools)
 	}
+	assertApprovalWorkflowReceipts(t, h, &workflowReceipts, responsesKeyID, responsesApprovalHeaders.Get("X-Request-Id"), responsesResumeHeaders.Get("X-Request-Id"), responsesSpendBefore)
 	finalOnlyStatus, finalOnlyBody, finalOnlyHeaders := h.gateway(http.MethodPost, "/v1/responses", mcpExecString(t, finalOnlyKey, "secret"), map[string]any{"model": finalOnlySlug, "input": prompt, "max_output_tokens": 100})
 	if finalOnlyStatus != http.StatusOK || strings.Contains(fmt.Sprint(finalOnlyBody), argument) || strings.Contains(fmt.Sprint(finalOnlyBody), answer) {
 		t.Fatalf("final-only Responses workflow: status=%d response=%v", finalOnlyStatus, finalOnlyBody)
@@ -1477,6 +1512,7 @@ func TestGatewayToolWorkflowSettlesOneRun(t *testing.T) {
 	}
 	approvalPrompt := "workflow-approval-test private approval transcript"
 	beforeTool := toolCalls.Load()
+	approvalSpendBefore := workflowKeySpend(t, h, keyID)
 	approvalStatus, approvalBody, approvalHeaders := h.gateway(http.MethodPost, "/v1/chat/completions", secret, map[string]any{"model": slug, "messages": []any{map[string]any{"role": "user", "content": approvalPrompt}}, "max_tokens": 100})
 	approvalToken, ok := approvalBody["continuation_token"].(string)
 	if approvalStatus != http.StatusOK || !ok || approvalToken == "" || toolCalls.Load() != beforeTool {
@@ -1487,6 +1523,7 @@ func TestGatewayToolWorkflowSettlesOneRun(t *testing.T) {
 	if approvalResumeStatus != http.StatusOK || toolCalls.Load() != beforeTool+1 {
 		t.Fatalf("captured approval resume: status=%d tool_calls=%d", approvalResumeStatus, toolCalls.Load())
 	}
+	assertApprovalWorkflowReceipts(t, h, &workflowReceipts, keyID, approvalHeaders.Get("X-Request-Id"), approvalResumeHeaders.Get("X-Request-Id"), approvalSpendBefore)
 	for _, requestID := range []string{approvalHeaders.Get("X-Request-Id"), approvalResumeHeaders.Get("X-Request-Id")} {
 		var captured bool
 		if err := h.Pool.QueryRow(t.Context(), `SELECT payload_captured FROM olp.requests WHERE id=$1`, requestID).Scan(&captured); err != nil || captured {
@@ -1511,6 +1548,199 @@ func TestGatewayToolWorkflowSettlesOneRun(t *testing.T) {
 		query := "SELECT count(*) FROM olp." + table + " AS row WHERE row_to_json(row)::text LIKE '%' || $1 || '%' OR row_to_json(row)::text LIKE '%' || $2 || '%' OR row_to_json(row)::text LIKE '%' || $3 || '%'"
 		if err := h.Pool.QueryRow(t.Context(), query, prompt, argument, answer).Scan(&leaks); err != nil || leaks != 0 {
 			t.Fatalf("Responses workflow content reached %s: count=%d error=%v", table, leaks, err)
+		}
+	}
+	concurrentKey := h.want(owner, http.MethodPost, "/api/v1/api-keys", map[string]any{"name": "Workflow concurrency", "project_id": project, "scopes": []string{"inference", "tools"}, "allowed_routes": []string{slug}, "allowed_toolsets": []string{toolsetID}, "run_limits": map[string]any{"max_concurrent_runs": 1}}, idem("workflow-concurrency-key"), http.StatusCreated)
+	h.refresh()
+	workflowConcurrencySecret := mcpExecString(t, concurrentKey, "secret")
+	request := map[string]any{"model": slug, "messages": []any{map[string]any{"role": "user", "content": "concurrency"}}, "max_tokens": 100, "olp_toolsets": []any{}}
+	blockRun.Store(true)
+	first := make(chan int, 1)
+	go func() {
+		status, _, _ := h.gateway(http.MethodPost, "/v1/chat/completions", workflowConcurrencySecret, request)
+		first <- status
+	}()
+	select {
+	case <-runStarted:
+	case <-time.After(10 * time.Second):
+		t.Fatal("first workflow did not reach the provider")
+	}
+	second := make(chan int, 1)
+	go func() {
+		status, _, _ := h.gateway(http.MethodPost, "/v1/chat/completions", workflowConcurrencySecret, request)
+		second <- status
+	}()
+	select {
+	case status := <-second:
+		if status != http.StatusTooManyRequests {
+			t.Fatalf("concurrent workflow returned %d, want 429", status)
+		}
+	case <-runStarted:
+		t.Fatal("concurrent workflow reached the provider")
+	case <-time.After(10 * time.Second):
+		t.Fatal("concurrent workflow did not refuse promptly")
+	}
+	blockRun.Store(false)
+	runRelease <- struct{}{}
+	select {
+	case status := <-first:
+		if status != http.StatusOK {
+			t.Fatalf("first workflow returned %d", status)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("first workflow did not finish")
+	}
+	status, result, _ := h.gateway(http.MethodPost, "/v1/chat/completions", workflowConcurrencySecret, request)
+	if status != http.StatusOK {
+		t.Fatalf("completed workflow did not release its slot: status=%d result=%v", status, result)
+	}
+	blockRun.Store(true)
+	unlimitedRun := make(chan int, 1)
+	go func() {
+		status, _, _ := h.gateway(http.MethodPost, "/v1/chat/completions", secret, request)
+		unlimitedRun <- status
+	}()
+	select {
+	case <-runStarted:
+	case <-time.After(10 * time.Second):
+		t.Fatal("unlimited workflow did not reach the provider")
+	}
+	limitedRequest := map[string]any{"model": slug, "messages": []any{map[string]any{"role": "user", "content": "limited concurrency"}}, "max_tokens": 100, "olp_toolsets": []any{}, "olp_run_limits": map[string]any{"max_concurrent_runs": 1}}
+	limitedRun := make(chan int, 1)
+	go func() {
+		status, _, _ := h.gateway(http.MethodPost, "/v1/chat/completions", secret, limitedRequest)
+		limitedRun <- status
+	}()
+	select {
+	case limitedStatus := <-limitedRun:
+		if limitedStatus != http.StatusTooManyRequests {
+			t.Fatalf("limited workflow returned %d while an unlimited workflow was active", limitedStatus)
+		}
+	case <-runStarted:
+		t.Fatal("limited workflow reached provider while an unlimited workflow was active")
+	case <-time.After(10 * time.Second):
+		t.Fatal("limited workflow did not refuse promptly")
+	}
+	blockRun.Store(false)
+	runRelease <- struct{}{}
+	select {
+	case unlimitedStatus := <-unlimitedRun:
+		if unlimitedStatus != http.StatusOK {
+			t.Fatalf("unlimited workflow returned %d", unlimitedStatus)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("unlimited workflow did not finish")
+	}
+	responsesWorkflow.Store(true)
+	beforeModels, beforeTools := modelCalls.Load(), toolCalls.Load()
+	costStatus, costResult, _ := h.gateway(http.MethodPost, "/v1/chat/completions", secret, map[string]any{"model": slug, "messages": []any{map[string]any{"role": "user", "content": "cost bounded"}}, "max_tokens": 100, "olp_run_limits": map[string]any{"max_run_cost": "1105"}})
+	if costStatus != http.StatusBadRequest || !strings.Contains(fmt.Sprint(costResult), "run_cost_limit") || modelCalls.Load()-beforeModels != 1 || toolCalls.Load()-beforeTools != 1 {
+		t.Fatalf("workflow cost bound: status=%d response=%v model calls=%d tool calls=%d", costStatus, costResult, modelCalls.Load()-beforeModels, toolCalls.Load()-beforeTools)
+	}
+	boundedKey := h.want(owner, http.MethodPost, "/api/v1/api-keys", map[string]any{"name": "Scoped workflow limits", "project_id": project, "scopes": []string{"inference", "tools"}, "allowed_routes": []string{slug}, "allowed_toolsets": []string{toolsetID}, "run_limits": map[string]any{"max_tool_calls": 2, "max_duration_seconds": 4, "max_concurrent_runs": 2}}, idem("scoped-workflow-key"), http.StatusCreated)
+	h.refresh()
+	boundedSecret := mcpExecString(t, boundedKey, "secret")
+	beforeScopedTools := toolCalls.Load()
+	limitedStatus, limitedResult, _ := h.gateway(http.MethodPost, "/v1/chat/completions", boundedSecret, map[string]any{"model": slug, "messages": []any{map[string]any{"role": "user", "content": "scoped tool limit"}}, "max_tokens": 100, "olp_run_limits": map[string]any{"max_tool_calls": 0}})
+	if limitedStatus != http.StatusBadRequest || !strings.Contains(fmt.Sprint(limitedResult), "tool_call_limit") || toolCalls.Load() != beforeScopedTools {
+		t.Fatalf("scoped tool limit: status=%d response=%v tool calls=%d", limitedStatus, limitedResult, toolCalls.Load()-beforeScopedTools)
+	}
+	deadlineModel.Store(true)
+	defer deadlineModel.Store(false)
+	firstScoped := make(chan int, 1)
+	go func() {
+		status, _, _ := h.gateway(http.MethodPost, "/v1/chat/completions", boundedSecret, map[string]any{"model": slug, "messages": []any{map[string]any{"role": "user", "content": "scoped concurrency"}}, "max_tokens": 100})
+		firstScoped <- status
+	}()
+	select {
+	case <-deadlineStarted:
+	case <-time.After(10 * time.Second):
+		t.Fatal("first scoped workflow did not reach the blocked model")
+	}
+	beforeScopedModels := modelCalls.Load()
+	scopedStatus, scopedResult, _ := h.gateway(http.MethodPost, "/v1/chat/completions", boundedSecret, map[string]any{"model": slug, "messages": []any{map[string]any{"role": "user", "content": "scoped concurrency"}}, "max_tokens": 100, "olp_run_limits": map[string]any{"max_concurrent_runs": 1}})
+	if scopedStatus != http.StatusTooManyRequests || modelCalls.Load() != beforeScopedModels {
+		t.Fatalf("scoped concurrency limit: status=%d response=%v model calls=%d", scopedStatus, scopedResult, modelCalls.Load()-beforeScopedModels)
+	}
+	select {
+	case <-deadlineCanceled:
+	case <-time.After(6 * time.Second):
+		t.Fatal("key deadline did not cancel the blocked workflow")
+	}
+	select {
+	case status := <-firstScoped:
+		if status == http.StatusOK {
+			t.Fatal("key deadline returned success")
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("first scoped workflow did not finish")
+	}
+	deadlineModel.Store(false)
+	for _, test := range []struct {
+		name  string
+		block *atomic.Bool
+	}{
+		{name: "model", block: &deadlineModel},
+		{name: "tool", block: &deadlineTool},
+	} {
+		t.Run(test.name+" deadline", func(t *testing.T) {
+			test.block.Store(true)
+			defer test.block.Store(false)
+			result := make(chan int, 1)
+			go func() {
+				status, _, _ := h.gateway(http.MethodPost, "/v1/chat/completions", boundedSecret, map[string]any{"model": slug, "messages": []any{map[string]any{"role": "user", "content": "deadline"}}, "max_tokens": 100, "olp_run_limits": map[string]any{"max_duration_seconds": 1}})
+				result <- status
+			}()
+			select {
+			case <-deadlineStarted:
+			case <-time.After(10 * time.Second):
+				t.Fatal("workflow did not reach the blocked upstream")
+			}
+			select {
+			case <-deadlineCanceled:
+			case <-time.After(2500 * time.Millisecond):
+				t.Fatal("caller deadline did not cancel the blocked upstream")
+			}
+			select {
+			case status := <-result:
+				if status == http.StatusOK {
+					t.Fatal("deadline returned success")
+				}
+			case <-time.After(10 * time.Second):
+				t.Fatal("workflow did not finish after deadline cancellation")
+			}
+		})
+	}
+	approvalBoundMessages := []any{map[string]any{"role": "user", "content": "workflow-approval-test cost limit"}}
+	approvalModels, approvalTools := modelCalls.Load(), toolCalls.Load()
+	approvalBoundStatus, approvalBoundPause, _ := h.gateway(http.MethodPost, "/v1/chat/completions", secret, map[string]any{"model": slug, "messages": approvalBoundMessages, "max_tokens": 100, "olp_run_limits": map[string]any{"max_run_cost": "1100.1"}})
+	approvalBoundToken, ok := approvalBoundPause["continuation_token"].(string)
+	if approvalBoundStatus != http.StatusOK || !ok || approvalBoundToken == "" || modelCalls.Load() != approvalModels+1 || toolCalls.Load() != approvalTools {
+		t.Fatalf("cost-bounded workflow did not pause: status=%d response=%v", approvalBoundStatus, approvalBoundPause)
+	}
+	approvalBoundResumeStatus, approvalBoundResult, _ := h.gateway(http.MethodPost, "/v1/chat/completions", secret, map[string]any{"model": slug, "messages": approvalBoundMessages, "max_tokens": 100, "olp_approval": map[string]any{"continuation_token": approvalBoundToken, "approved": true, "arguments": map[string]any{"call-one": map[string]any{"query": argument}}}})
+	if approvalBoundResumeStatus != http.StatusBadRequest || !strings.Contains(fmt.Sprint(approvalBoundResult), "run_cost_limit") || modelCalls.Load() != approvalModels+1 || toolCalls.Load() != approvalTools+1 {
+		t.Fatalf("approval reset workflow cost limit: status=%d response=%v models=%d tools=%d", approvalBoundResumeStatus, approvalBoundResult, modelCalls.Load()-approvalModels, toolCalls.Load()-approvalTools)
+	}
+	for _, bounded := range []struct {
+		name   string
+		limits map[string]any
+		code   string
+	}{
+		{name: "iterations", limits: map[string]any{"max_iterations": 1}, code: "tool_iteration_limit"},
+		{name: "tools", limits: map[string]any{"max_tool_calls": 0}, code: "tool_call_limit"},
+	} {
+		messages := []any{map[string]any{"role": "user", "content": "workflow-approval-test narrow " + bounded.name}}
+		beforeModels, beforeTools := modelCalls.Load(), toolCalls.Load()
+		pauseStatus, pauseBody, _ := h.gateway(http.MethodPost, "/v1/chat/completions", secret, map[string]any{"model": slug, "messages": messages, "max_tokens": 100, "olp_run_limits": map[string]any{"max_iterations": 16, "max_tool_calls": 10}})
+		pauseToken, tokenOK := pauseBody["continuation_token"].(string)
+		if pauseStatus != http.StatusOK || !tokenOK || pauseToken == "" {
+			t.Fatalf("narrow %s workflow did not pause: status=%d", bounded.name, pauseStatus)
+		}
+		resume := map[string]any{"model": slug, "messages": messages, "max_tokens": 100, "olp_run_limits": bounded.limits, "olp_approval": map[string]any{"continuation_token": pauseToken, "approved": true, "arguments": map[string]any{"call-one": map[string]any{"query": argument}}}}
+		resumeStatus, resumeBody, _ := h.gateway(http.MethodPost, "/v1/chat/completions", secret, resume)
+		if resumeStatus != http.StatusBadRequest || !strings.Contains(fmt.Sprint(resumeBody), bounded.code) || modelCalls.Load() != beforeModels+1 || toolCalls.Load() != beforeTools {
+			t.Fatalf("narrow %s workflow resumed beyond its limit: status=%d response=%v models=%d tools=%d", bounded.name, resumeStatus, resumeBody, modelCalls.Load()-beforeModels, toolCalls.Load()-beforeTools)
 		}
 	}
 	revisionMessages := []any{map[string]any{"role": "user", "content": "workflow-approval-test revised"}}
@@ -1636,6 +1866,76 @@ func TestGatewayToolWorkflowSettlesOneRun(t *testing.T) {
 		if err := h.Pool.QueryRow(t.Context(), "SELECT count(*) FROM olp."+table+" AS row WHERE row_to_json(row)::text LIKE '%' || $1 || '%'", recoveryOriginal).Scan(&leaks); err != nil || leaks != 0 {
 			t.Fatalf("recovery content reached %s: count=%d error=%v", table, leaks, err)
 		}
+	}
+}
+
+type recordedWorkflowReceipt struct {
+	event   *usage.Event
+	payload []byte
+	err     error
+}
+
+func workflowKeySpend(t *testing.T, h *accessHarness, keyID string) string {
+	t.Helper()
+	var spend string
+	if err := h.Pool.QueryRow(t.Context(), `SELECT COALESCE(sum(accrued),0)::text FROM olp.api_key_cost_windows WHERE api_key_id=$1 AND window_kind='day'`, keyID).Scan(&spend); err != nil {
+		t.Fatal(err)
+	}
+	return spend
+}
+
+func assertApprovalWorkflowReceipts(t *testing.T, h *accessHarness, recorded *sync.Map, keyID, pauseID, resumeID, spendBefore string) {
+	t.Helper()
+	if pauseID == "" || resumeID == "" || pauseID == resumeID {
+		t.Fatalf("approval requests need separate identities: pause=%q resume=%q", pauseID, resumeID)
+	}
+	for _, requestID := range []string{pauseID, resumeID} {
+		value, ok := recorded.Load(requestID)
+		if !ok {
+			t.Fatalf("approval request %s did not emit a receipt", requestID)
+		}
+		receipt := value.(recordedWorkflowReceipt)
+		if receipt.err != nil {
+			t.Fatalf("approval request %s receipt failed: %v", requestID, receipt.err)
+		}
+	}
+	var runID string
+	var facts, requests, events, counted, matchingDebits, runs, receipts int
+	err := h.Pool.QueryRow(t.Context(), `SELECT min(d.run_id::text), count(*), count(DISTINCT f.request_id), count(DISTINCT f.event_id),
+count(*) FILTER (WHERE f.request_counted), count(*) FILTER (WHERE d.kind='model' AND d.state='settled' AND d.observed_cost=f.estimated_cost AND d.observed_charge=f.charge
+AND EXISTS (SELECT 1 FROM olp.execution_debit_results r WHERE r.dispatch_id=d.id AND r.final AND r.complete)), count(DISTINCT d.run_id)
+FROM olp.attempt_usage_facts f JOIN olp.execution_debits d ON d.id=f.attempt_id
+WHERE f.request_id IN ($1::uuid,$2::uuid)`, pauseID, resumeID).Scan(&runID, &facts, &requests, &events, &counted, &matchingDebits, &runs)
+	if err != nil || facts != 2 || requests != 2 || events != 2 || counted != 2 || matchingDebits != 2 || runs != 1 {
+		t.Fatalf("approval facts do not match settled requests: facts=%d requests=%d events=%d counted=%d settled=%d runs=%d error=%v", facts, requests, events, counted, matchingDebits, runs, err)
+	}
+	if err := h.Pool.QueryRow(t.Context(), `SELECT count(*) FROM olp.request_metadata_event_receipts WHERE request_id IN ($1::uuid,$2::uuid) AND status='fact_persisted'`, pauseID, resumeID).Scan(&receipts); err != nil || receipts != 2 {
+		t.Fatalf("approval receipt count: got=%d error=%v", receipts, err)
+	}
+	var debits, settled, results int
+	var spendMatches, positiveSpend bool
+	err = h.Pool.QueryRow(t.Context(), `SELECT count(*), count(*) FILTER (WHERE d.state='settled'),
+count(*) FILTER (WHERE EXISTS (SELECT 1 FROM olp.execution_debit_results r WHERE r.dispatch_id=d.id AND r.final AND r.complete)),
+COALESCE(sum(d.observed_charge),0) = (SELECT COALESCE(sum(accrued),0) FROM olp.api_key_cost_windows WHERE api_key_id=$2 AND window_kind='day') - $3::numeric,
+COALESCE(sum(d.observed_charge),0)>0 FROM olp.execution_debits d WHERE d.run_id=$1`, runID, keyID, spendBefore).Scan(&debits, &settled, &results, &spendMatches, &positiveSpend)
+	if err != nil || debits != 3 || settled != 3 || results != 3 || !spendMatches || !positiveSpend {
+		t.Fatalf("approval spend does not match settled debits: debits=%d settled=%d results=%d matches=%t positive=%t error=%v", debits, settled, results, spendMatches, positiveSpend, err)
+	}
+	spend := workflowKeySpend(t, h, keyID)
+	for _, requestID := range []string{pauseID, resumeID} {
+		value, _ := recorded.Load(requestID)
+		receipt := value.(recordedWorkflowReceipt)
+		result, err := usage.PersistEvent(t.Context(), h.Pool, receipt.event, receipt.payload)
+		if err != nil || result.Outcome != usage.PersistOutcomeDuplicate {
+			t.Fatalf("approval receipt replay was not idempotent: outcome=%v error=%v", result.Outcome, err)
+		}
+		changedPayload := append(append([]byte{}, receipt.payload...), ' ')
+		if _, err := usage.PersistEvent(t.Context(), h.Pool, receipt.event, changedPayload); !errors.Is(err, usage.ErrInvalidEvent) {
+			t.Fatalf("approval receipt accepted different evidence: %v", err)
+		}
+	}
+	if after := workflowKeySpend(t, h, keyID); after != spend {
+		t.Fatalf("approval receipt replay changed spend: before=%s after=%s", spend, after)
 	}
 }
 

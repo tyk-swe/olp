@@ -19,6 +19,7 @@ import (
 	"github.com/tyk-swe/olp/internal/protocols/wire"
 	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/runtime"
+	"github.com/tyk-swe/olp/internal/usage"
 )
 
 type WorkflowRunStore interface {
@@ -45,6 +46,10 @@ type WorkflowApprovedToolRunner interface {
 }
 
 type workflowCall struct {
+	toolCost      usage.Cost
+	priorCost     usage.Cost
+	unknownCost   bool
+	startedAt     time.Time
 	runID         string
 	token         string
 	tools         []WorkflowTool
@@ -57,6 +62,50 @@ type workflowCall struct {
 	resume        *workflowResumeState
 	resumeStart   int
 	approvals     []agents.WorkflowApproval
+}
+
+func workflowBounds(route, key *limits.WorkflowBounds, request *wire.Request) (limits.WorkflowBounds, limits.WorkflowBounds, *wire.Request, *Error) {
+	var caller limits.WorkflowBounds
+	raw := request.Field("olp_run_limits")
+	if len(raw) != 0 {
+		decoder := json.NewDecoder(bytes.NewReader(raw))
+		decoder.DisallowUnknownFields()
+		if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) || decoder.Decode(&caller) != nil || !caller.Valid() {
+			return limits.WorkflowBounds{}, limits.WorkflowBounds{}, nil, invalidRequest("invalid_run_limits", "Use valid workflow run limits.", nil)
+		}
+	}
+	resolved := resolveWorkflowBounds(nil, route, key, &caller)
+	if len(raw) == 0 {
+		return resolved, caller, request, nil
+	}
+	stripped, err := request.WithResourceBindings(oif.Change{Pointer: oif.Pointer("", "olp_run_limits"), Remove: true, Reason: "gateway workflow bounds"})
+	if err != nil {
+		return limits.WorkflowBounds{}, limits.WorkflowBounds{}, nil, invalidRequest("invalid_run_limits", "The workflow limits could not be processed.", nil)
+	}
+	return resolved, caller, stripped, nil
+}
+
+func resolveWorkflowBounds(prior, route, key, caller *limits.WorkflowBounds) limits.WorkflowBounds {
+	previous, operator, principal, requested := workflowBoundsOrZero(prior), workflowBoundsOrZero(route), workflowBoundsOrZero(key), workflowBoundsOrZero(caller)
+	iterations := limits.MinWorkflowInteger(8, previous.MaxIterations, operator.MaxIterations, principal.MaxIterations, requested.MaxIterations)
+	tools := limits.MinWorkflowInteger(32, previous.MaxToolCalls, operator.MaxToolCalls, principal.MaxToolCalls, requested.MaxToolCalls)
+	duration := limits.MinWorkflowInteger(120, previous.MaxDurationSeconds, operator.MaxDurationSeconds, principal.MaxDurationSeconds, requested.MaxDurationSeconds)
+	concurrency := limits.MinWorkflowInteger(0, previous.MaxConcurrentRuns, operator.MaxConcurrentRuns, principal.MaxConcurrentRuns, requested.MaxConcurrentRuns)
+	return limits.WorkflowBounds{MaxIterations: &iterations, MaxToolCalls: &tools, MaxDurationSeconds: &duration, MaxConcurrentRuns: workflowConcurrency(concurrency), MaxRunCost: limits.MinWorkflowCost(previous.MaxRunCost, operator.MaxRunCost, principal.MaxRunCost, requested.MaxRunCost)}
+}
+
+func workflowBoundsOrZero(bounds *limits.WorkflowBounds) limits.WorkflowBounds {
+	if bounds == nil {
+		return limits.WorkflowBounds{}
+	}
+	return *bounds
+}
+
+func workflowConcurrency(value int64) *int64 {
+	if value == 0 {
+		return nil
+	}
+	return &value
 }
 
 func (s *Server) prepareWorkflow(ctx context.Context, x *call, token string) *Error {
@@ -273,7 +322,7 @@ func (s *Server) executeToolLoop(ctx context.Context, x *call) *outcome {
 	if resumeError != nil {
 		return &outcome{err: resumeError}
 	}
-	for iteration := firstIteration; iteration < 8; iteration++ {
+	for iteration := firstIteration; int64(iteration) < *x.generation.runLimits.MaxIterations; iteration++ {
 		authority, e := s.workflowAuthority(ctx, x, x.route, "")
 		if e != nil {
 			return &outcome{err: e}
@@ -333,10 +382,10 @@ func (s *Server) executeToolLoop(ctx context.Context, x *call) *outcome {
 			}
 			return out
 		}
-		if iteration == 7 {
+		if int64(iteration)+1 == *x.generation.runLimits.MaxIterations {
 			return &outcome{err: invalidRequest("tool_iteration_limit", "The workflow reached its model iteration limit.", nil)}
 		}
-		if len(out.completion.ToolCalls) > 32-x.workflow.calls {
+		if int64(len(out.completion.ToolCalls)+x.workflow.calls) > *x.generation.runLimits.MaxToolCalls {
 			return &outcome{err: invalidRequest("tool_call_limit", "The workflow reached its tool call limit.", nil)}
 		}
 		pause, failure := s.pauseWorkflow(ctx, x, out.completion, iteration)
@@ -448,6 +497,10 @@ func (s *Server) continueToolLoop(ctx context.Context, x *call, completion *wire
 		// A shallow copy retains fresh limits while binding request-local attribution.
 		toolAuthority := *authority
 		toolAuthority.Attribution = x.attribution
+		toolCost, costKnown, costErr := x.workflowToolCost(x.workflow.tools[index])
+		if costErr != nil {
+			return nil, costErr
+		}
 		callCtx, finish := s.monitorWorkflowAuthority(ctx, x, x.workflow.tools[index].ToolsetID)
 		result, err := s.callWorkflowTool(callCtx, x, toolAuthority, x.workflow.tools[index], call, identityStart+callIndex)
 		authorityErr := finish()
@@ -466,6 +519,8 @@ func (s *Server) continueToolLoop(ctx context.Context, x *call, completion *wire
 			}
 			x.workflow.responseItems = append(x.workflow.responseItems, item)
 		}
+		x.workflow.toolCost = x.workflow.toolCost.Add(toolCost)
+		x.workflow.unknownCost = x.workflow.unknownCost || !costKnown
 		if x.family != wire.Chat {
 			results = append(results, protocols.WorkflowResult{CallID: call.ID, Content: string(result)})
 			continue

@@ -20,6 +20,7 @@ import (
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/catalog"
 	"github.com/tyk-swe/olp/internal/contentpolicy"
+	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/operationregistry"
 	"github.com/tyk-swe/olp/internal/retainedapi"
 	"github.com/tyk-swe/olp/internal/usage"
@@ -222,6 +223,7 @@ func behaviorJSON(out map[string]any, raw []byte) map[string]any {
 	out["passthrough"] = behavior.Passthrough
 	out["tool_execution"], out["toolsets"] = behavior.ToolExecution, orEmpty(behavior.Toolsets)
 	out["responses_mcp_items"] = behavior.ResponsesMCPItems
+	out["run_limits"] = behavior.RunLimits
 	certification := "certified"
 	if behavior.Passthrough != nil {
 		certification = "uncertified"
@@ -273,6 +275,7 @@ type TargetInput struct {
 }
 
 type DraftInput struct {
+	RunLimits                *limits.WorkflowBounds     `json:"run_limits,omitempty"`
 	ToolExecution            string                     `json:"tool_execution,omitempty"`
 	Toolsets                 []string                   `json:"toolsets,omitempty"`
 	ResponsesMCPItems        bool                       `json:"responses_mcp_items,omitempty"`
@@ -300,7 +303,7 @@ type DraftInput struct {
 }
 
 func (in *DraftInput) behavior() routing.Behavior {
-	return routing.Behavior{ToolExecution: in.ToolExecution, Toolsets: in.Toolsets, ResponsesMCPItems: in.ResponsesMCPItems, Cache: in.Cache, PromptCache: in.PromptCache, CallerCostExempt: in.CallerCostExempt, ProviderFetchedDocuments: in.ProviderFetchedDocuments, MaxBodyBytes: in.MaxBodyBytes, Fallbacks: in.Fallbacks, Selectors: in.Selectors, Retry: in.Retry, Affinity: in.Affinity, Budget: in.Budget, Passthrough: in.Passthrough}
+	return routing.Behavior{RunLimits: in.RunLimits, ToolExecution: in.ToolExecution, Toolsets: in.Toolsets, ResponsesMCPItems: in.ResponsesMCPItems, Cache: in.Cache, PromptCache: in.PromptCache, CallerCostExempt: in.CallerCostExempt, ProviderFetchedDocuments: in.ProviderFetchedDocuments, MaxBodyBytes: in.MaxBodyBytes, Fallbacks: in.Fallbacks, Selectors: in.Selectors, Retry: in.Retry, Affinity: in.Affinity, Budget: in.Budget, Passthrough: in.Passthrough}
 }
 
 func sameProject(a, b *string) bool {

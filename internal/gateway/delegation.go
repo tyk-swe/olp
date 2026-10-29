@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"slices"
 	"strings"
 
 	"github.com/tyk-swe/olp/internal/access"
@@ -20,16 +21,6 @@ type delegationRuntime interface {
 
 type memberConsentRuntime interface {
 	ExchangeMemberConsent(context.Context, access.Authority, string, runtime.DelegationBounds) (runtime.DelegationGrant, error)
-}
-
-type delegationAuthenticator struct {
-	runtime   delegationRuntime
-	context   context.Context
-	assertion string
-}
-
-func (a delegationAuthenticator) Authenticate(token string) (*access.Authority, error) {
-	return a.runtime.AuthenticateDelegation(a.context, token, a.assertion)
 }
 
 func (s *Server) reauthenticateSession(ctx context.Context, x *call, token string) (*access.Authority, error) {
@@ -60,14 +51,14 @@ func (s *Server) createDelegation(w http.ResponseWriter, r *http.Request) {
 		writeError(w, authenticationError("invalid_api_key", "Provide a workload identity."))
 		return
 	}
-	agent, failure := consumerauth.Authenticate(s.Runtime, r, assertion, "inference", s.cfg.TrustedProxies, s.now())
-	if failure != nil {
-		writeError(w, consumerFailure(failure))
-		return
-	}
 	var bounds runtime.DelegationBounds
 	if err := access.DecodeUnique(r, &bounds, 16<<10); err != nil {
-		writeError(w, invalidRequest("invalid_request", "Provide bounded delegation scopes and routes.", nil))
+		writeError(w, invalidRequest("invalid_request", "Provide bounded delegation scopes and resources.", nil))
+		return
+	}
+	agent, failure := consumerauth.Authenticate(s.Runtime, r, assertion, delegationScope(bounds), s.cfg.TrustedProxies, s.now())
+	if failure != nil {
+		writeError(w, consumerFailure(failure))
 		return
 	}
 	if consent := strings.TrimSpace(r.Header.Get("X-OLP-Delegation-Consent")); consent != "" {
@@ -93,9 +84,16 @@ func (s *Server) createDelegation(w http.ResponseWriter, r *http.Request) {
 	writeDelegationGrant(w, grant, err)
 }
 
+func delegationScope(bounds runtime.DelegationBounds) string {
+	if slices.Contains(bounds.Scopes, "tools") {
+		return "tools"
+	}
+	return "inference"
+}
+
 func writeDelegationGrant(w http.ResponseWriter, grant runtime.DelegationGrant, err error) {
 	if errors.Is(err, runtime.ErrDelegationBounds) {
-		writeError(w, invalidRequest("invalid_request", "Provide bounded delegation scopes and routes.", nil))
+		writeError(w, invalidRequest("invalid_request", "Provide bounded delegation scopes and resources.", nil))
 		return
 	}
 	if errors.Is(err, runtime.ErrInvalidKey) {
