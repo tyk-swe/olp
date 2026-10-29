@@ -72,6 +72,12 @@ func (l *DurableLedger) Reserve(ctx context.Context, in ReserveInput) (ReserveRe
 		ToolAlias: in.ToolAlias, InputDigest: in.InputDigest, CallDigest: in.CallDigest,
 		UnitPrice: cloneUnitPrice(in.UnitPrice), Currency: currency,
 	}
+	if in.RunID != "" {
+		if !canonicalUUID(in.RunID) || in.Ordinal < 0 {
+			return ReserveResult{}, limits.ErrDebitAuthority
+		}
+		reservation.RunID = in.RunID
+	}
 	intent := limits.DebitIntent{
 		ID: reservation.DispatchID, APIKeyID: in.Authority.ID, ProjectID: reservation.ProjectID,
 		RunID: reservation.RunID, StepID: reservation.StepID, Kind: "tool", ClaimID: reservation.ClaimID,
@@ -89,13 +95,15 @@ func (l *DurableLedger) Reserve(ctx context.Context, in ReserveInput) (ReserveRe
 		return ReserveResult{}, err
 	}
 	defer tx.Rollback(ctx)
-	if err = agents.StartRunTx(ctx, tx, l.Auth, in.Authority, reservation.RunID, "tools", in.ToolsetID, in.ToolsetRevisionID); err != nil {
-		return ReserveResult{}, err
+	if in.RunID == "" {
+		if err = agents.StartRunTx(ctx, tx, l.Auth, in.Authority, reservation.RunID, "tools", in.ToolsetID, in.ToolsetRevisionID); err != nil {
+			return ReserveResult{}, err
+		}
 	}
 	if err = agents.EnsureBoundaryAccountsTx(ctx, tx, in.Authority, boundaries); err != nil {
 		return ReserveResult{}, err
 	}
-	state, err := agents.PrepareStepTx(ctx, tx, l.Store, in.Authority, intent, 0, owners)
+	state, err := agents.PrepareStepTx(ctx, tx, l.Store, in.Authority, intent, in.Ordinal, owners)
 	if err != nil {
 		return ReserveResult{}, err
 	}
@@ -143,13 +151,15 @@ func (l *DurableLedger) recordRefusedUnpriced(ctx context.Context, in ReserveInp
 		return err
 	}
 	defer tx.Rollback(ctx)
-	if err = agents.StartRunTx(ctx, tx, l.Auth, in.Authority, reservation.RunID, "tools", in.ToolsetID, in.ToolsetRevisionID); err != nil {
-		return err
+	if in.RunID == "" {
+		if err = agents.StartRunTx(ctx, tx, l.Auth, in.Authority, reservation.RunID, "tools", in.ToolsetID, in.ToolsetRevisionID); err != nil {
+			return err
+		}
 	}
 	if err = agents.EnsureBoundaryAccountsTx(ctx, tx, in.Authority, boundaries); err != nil {
 		return err
 	}
-	state, err := agents.PrepareStepTx(ctx, tx, l.Store, in.Authority, intent, 0, boundaries.Owners())
+	state, err := agents.PrepareStepTx(ctx, tx, l.Store, in.Authority, intent, in.Ordinal, boundaries.Owners())
 	if err != nil {
 		return err
 	}

@@ -250,7 +250,7 @@ func (s *DebitStore) HasUnknownDebit(ctx context.Context, apiKeyID string, maxDi
 		maxDispatch = time.Hour
 	}
 	var held bool
-	err := s.Pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM olp.execution_debits d WHERE d.api_key_id=$1 AND (d.state='outcome_unknown' OR (d.state='dispatched' AND d.dispatched_at<clock_timestamp()-make_interval(secs=>$2))) AND d.closed_at IS NULL AND NOT EXISTS(SELECT 1 FROM olp.execution_debit_results r WHERE r.dispatch_id=d.id AND r.final AND EXISTS(SELECT 1 FROM olp.attempt_usage_facts f WHERE f.event_id=r.event_id) AND NOT EXISTS(SELECT 1 FROM olp.attempt_usage_facts f WHERE f.event_id=r.event_id AND NOT f.usage_complete)))`, apiKeyID, maxDispatch.Seconds()).Scan(&held)
+	err := s.Pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM olp.execution_debits d WHERE d.api_key_id=$1 AND (d.state='outcome_unknown' OR (d.state='dispatched' AND d.dispatched_at<clock_timestamp()-make_interval(secs=>$2))) AND d.closed_at IS NULL AND NOT EXISTS(SELECT 1 FROM olp.execution_debit_results r WHERE r.dispatch_id=d.id AND r.final AND (d.kind<>'model' OR r.complete) AND EXISTS(SELECT 1 FROM olp.attempt_usage_facts f WHERE f.event_id=r.event_id AND (d.kind<>'model' OR f.attempt_id=d.id)) AND NOT EXISTS(SELECT 1 FROM olp.attempt_usage_facts f WHERE f.event_id=r.event_id AND (d.kind<>'model' OR f.attempt_id=d.id) AND NOT f.usage_complete)))`, apiKeyID, maxDispatch.Seconds()).Scan(&held)
 	return held, err
 }
 
@@ -291,6 +291,38 @@ func (s *DebitStore) ReleaseUndispatched(ctx context.Context, id, claim string) 
 		return err
 	}
 	if err = bumpDebitOwners(ctx, tx, owners); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+func (s *DebitStore) MarkNotSent(ctx context.Context, id, claim string) error {
+	tx, err := s.Pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	var state DebitState
+	if err := tx.QueryRow(ctx, `SELECT state FROM olp.execution_debits WHERE id=$1 AND claim_id=$2 FOR UPDATE`, id, claim).Scan(&state); err != nil {
+		return ErrDebitState
+	}
+	if state == DebitNotAccepted {
+		return tx.Commit(ctx)
+	}
+	if state != DebitDispatched {
+		return ErrDebitState
+	}
+	owners, ownersErr := debitOwnersTx(ctx, tx, id)
+	if ownersErr != nil {
+		return ownersErr
+	}
+	if err := lockDebitOwners(ctx, tx, owners); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, `UPDATE olp.execution_debits SET state='not_accepted',closed_at=clock_timestamp() WHERE id=$1`, id); err != nil {
+		return err
+	}
+	if err := bumpDebitOwners(ctx, tx, owners); err != nil {
 		return err
 	}
 	return tx.Commit(ctx)
@@ -383,7 +415,7 @@ func SettleDebitTx(ctx context.Context, tx pgx.Tx, r DebitResult, accounting []C
 		return ErrDebitState
 	}
 	var persisted bool
-	if err := tx.QueryRow(ctx, `SELECT COALESCE((SELECT count(*)>0 AND sum(COALESCE(f.estimated_cost,0))=$3::numeric AND sum(COALESCE(f.charge,0))=$4::numeric AND bool_and(f.charge_status='not_billable' OR f.currency=d.currency OR (f.estimated_cost=0 AND f.charge=0) OR (NOT $5 AND f.currency IS NULL)) AND bool_and((d.affinity->>'pricing_revision_id' IS NULL OR f.pricing_revision_id::text=d.affinity->>'pricing_revision_id') AND (d.affinity->>'rate_card_revision_id' IS NULL OR f.rate_card_revision_id::text=d.affinity->>'rate_card_revision_id')) AND (NOT $5 OR bool_and(f.charge_status='not_billable' OR (f.usage_complete AND NOT f.unpriced AND f.estimated_cost IS NOT NULL AND f.charge IS NOT NULL))) FROM olp.attempt_usage_facts f JOIN olp.execution_debits d ON d.id=$2 WHERE f.event_id=$1 AND f.api_key_id=d.api_key_id),false)`, r.EventID, r.DispatchID, r.Cost, r.Charge, r.Complete).Scan(&persisted); err != nil {
+	if err := tx.QueryRow(ctx, `SELECT COALESCE((SELECT count(*)>0 AND sum(COALESCE(f.estimated_cost,0))=$3::numeric AND sum(COALESCE(f.charge,0))=$4::numeric AND bool_and(f.charge_status='not_billable' OR f.currency=d.currency OR (f.estimated_cost=0 AND f.charge=0) OR (NOT $5 AND f.currency IS NULL)) AND bool_and((d.affinity->>'pricing_revision_id' IS NULL OR f.pricing_revision_id::text=d.affinity->>'pricing_revision_id') AND (d.affinity->>'rate_card_revision_id' IS NULL OR f.rate_card_revision_id::text=d.affinity->>'rate_card_revision_id')) AND (NOT $5 OR bool_and(f.charge_status='not_billable' OR (f.usage_complete AND NOT f.unpriced AND f.estimated_cost IS NOT NULL AND f.charge IS NOT NULL))) FROM olp.attempt_usage_facts f JOIN olp.execution_debits d ON d.id=$2 WHERE f.event_id=$1 AND f.api_key_id=d.api_key_id AND (d.kind<>'model' OR f.attempt_id=d.id)),false)`, r.EventID, r.DispatchID, r.Cost, r.Charge, r.Complete).Scan(&persisted); err != nil {
 		return err
 	}
 	if !persisted {

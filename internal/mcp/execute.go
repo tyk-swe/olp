@@ -80,6 +80,8 @@ func (s *Server) reserveToolRate(ctx context.Context, in executeInput) ([]*limit
 
 type executeInput struct {
 	authority access.Authority
+	runID     string
+	ordinal   int
 	resolved  resolvedToolset
 	tool      routing.MCPToolsetTool
 	arguments json.RawMessage
@@ -141,7 +143,7 @@ func (s *Server) loadOriginalCredential(ctx context.Context, authority access.Au
 
 func (s *Server) reserveToolCall(ctx context.Context, in executeInput) (*Reservation, execution) {
 	reservedResult, err := s.Ledger.Reserve(ctx, ReserveInput{
-		Authority: in.authority, ToolsetID: in.resolved.id, ToolsetRevisionID: in.resolved.revisionID,
+		Authority: in.authority, RunID: in.runID, Ordinal: in.ordinal, ToolsetID: in.resolved.id, ToolsetRevisionID: in.resolved.revisionID,
 		ReleaseID: in.releaseID, ToolAlias: in.tool.Alias, InputDigest: s.toolInputDigest(in.arguments),
 		CallDigest: s.callDigest(in.authority, in.callID), UnitPrice: cloneUnitPrice(in.tool.UnitPrice),
 		ServerID: in.tool.ServerID, ServerRevisionID: in.tool.ServerRevisionID,

@@ -1,5 +1,6 @@
 <script lang="ts">
   import RouteFidelityEditor from './RouteFidelityEditor.svelte';
+  import RouteToolExecutionEditor from './RouteToolExecutionEditor.svelte';
   import RoutePassthroughEditor from './RoutePassthroughEditor.svelte';
   import ContentPolicyEditor from './ContentPolicyEditor.svelte';
   import RoutingPolicyEditor from './RoutingPolicyEditor.svelte';
@@ -176,6 +177,7 @@
         </div>
       </section>
       <RouteFidelityEditor {editor} />
+      <RouteToolExecutionEditor {editor} />
       <RoutePassthroughEditor {editor} />
       <RouteTargets {editor} />
       <ContentPolicyEditor {editor} />

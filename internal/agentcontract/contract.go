@@ -19,11 +19,12 @@ import (
 )
 
 type Tool struct {
-	ServerID      string `json:"server_id"`
-	RevisionID    string `json:"revision_id"`
-	CatalogDigest string `json:"catalog_digest"`
-	Name          string `json:"name"`
-	Alias         string `json:"alias"`
+	Classification string `json:"classification,omitempty"`
+	ServerID       string `json:"server_id"`
+	RevisionID     string `json:"revision_id"`
+	CatalogDigest  string `json:"catalog_digest"`
+	Name           string `json:"name"`
+	Alias          string `json:"alias"`
 }
 type Toolset struct {
 	Tools []Tool `json:"tools"`
@@ -92,6 +93,9 @@ func (d Draft) Validate(kind string) error {
 		}
 		seen := map[string]bool{}
 		for _, t := range d.Toolset.Tools {
+			if t.Classification != "" && t.Classification != "read_only" && t.Classification != "approval_required" {
+				return invalid("toolset", "Use a supported operator classification for each tool.")
+			}
 			if !validID(t.ServerID) || !validID(t.RevisionID) || !hexDigest.MatchString(t.CatalogDigest) || len(t.Name) == 0 || len(t.Name) > 256 || t.Alias != ToolAlias(t.ServerID, t.Name) || seen[t.Alias] {
 				return invalid("toolset", "Use unique aliases and exact certified server revisions.")
 			}

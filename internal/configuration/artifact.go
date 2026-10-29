@@ -111,6 +111,8 @@ func targetEntry(t routing.PublishedTarget) TargetEntry {
 }
 
 type RouteEntry struct {
+	ToolExecution            string                     `json:"tool_execution,omitempty"`
+	Toolsets                 []string                   `json:"toolsets,omitempty"`
 	Cache                    *cache.Policy              `json:"cache,omitempty"`
 	PromptCache              *cache.PromptPolicy        `json:"prompt_cache,omitempty"`
 	ExposeUpstreamModels     bool                       `json:"expose_upstream_models,omitempty"`
@@ -170,7 +172,7 @@ func (t *TemplateEntry) normalize() error {
 }
 
 func (r *RouteEntry) behavior() routing.Behavior {
-	return routing.Behavior{Cache: r.Cache, PromptCache: r.PromptCache, CallerCostExempt: r.CallerCostExempt, ProviderFetchedDocuments: r.ProviderFetchedDocuments, MaxBodyBytes: r.MaxBodyBytes, Fallbacks: r.Fallbacks, Selectors: r.Selectors, Retry: r.Retry, Affinity: r.Affinity, Budget: r.Budget, Passthrough: r.Passthrough}
+	return routing.Behavior{ToolExecution: r.ToolExecution, Toolsets: r.Toolsets, Cache: r.Cache, PromptCache: r.PromptCache, CallerCostExempt: r.CallerCostExempt, ProviderFetchedDocuments: r.ProviderFetchedDocuments, MaxBodyBytes: r.MaxBodyBytes, Fallbacks: r.Fallbacks, Selectors: r.Selectors, Retry: r.Retry, Affinity: r.Affinity, Budget: r.Budget, Passthrough: r.Passthrough}
 }
 
 func (r *RouteEntry) setBehavior(raw []byte) error {
@@ -184,6 +186,7 @@ func (r *RouteEntry) setBehavior(raw []byte) error {
 	r.Cache, r.PromptCache = behavior.Cache, behavior.PromptCache
 	r.Fallbacks, r.Selectors, r.Retry, r.Affinity, r.Budget = behavior.Fallbacks, behavior.Selectors, behavior.Retry, behavior.Affinity, behavior.Budget
 	r.Passthrough = behavior.Passthrough
+	r.ToolExecution, r.Toolsets = behavior.ToolExecution, behavior.Toolsets
 	return nil
 }
 

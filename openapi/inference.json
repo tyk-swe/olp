@@ -9,8 +9,8 @@
     "/v1/chat/completions": {
       "post": {
         "operationId": "createChatCompletionWithPrompt",
-        "summary": "Create a chat completion using a published OLP prompt",
-        "description": "For transformed routes, the published prompt replaces explicit messages. Other chat fields use the provider contract.",
+        "summary": "Create a chat completion with OLP extensions",
+        "description": "For transformed routes, a published prompt replaces explicit messages and gateway tool execution may be narrowed to selected published toolsets. Other chat fields use the provider contract.",
         "security": [
           {
             "BearerAuth": []
@@ -21,7 +21,10 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/ChatPromptRequest"
+                "oneOf": [
+                  { "$ref": "#/components/schemas/ChatPromptRequest" },
+                  { "$ref": "#/components/schemas/ChatToolWorkflowRequest" }
+                ]
               }
             }
           }
@@ -848,6 +851,9 @@
           },
           "olp_prompt": {
             "$ref": "#/components/schemas/PublishedPromptReference"
+          },
+          "olp_toolsets": {
+            "$ref": "#/components/schemas/ChatToolsetSelection"
           }
         },
         "additionalProperties": true,
@@ -856,6 +862,26 @@
             "messages"
           ]
         }
+      },
+      "ChatToolWorkflowRequest": {
+        "type": "object",
+        "required": ["model", "messages"],
+        "properties": {
+          "model": { "type": "string" },
+          "messages": {
+            "type": "array",
+            "items": { "type": "object", "additionalProperties": true }
+          },
+          "olp_toolsets": { "$ref": "#/components/schemas/ChatToolsetSelection" }
+        },
+        "additionalProperties": true,
+        "not": { "required": ["olp_prompt"] }
+      },
+      "ChatToolsetSelection": {
+        "type": "array",
+        "description": "Select a subset of the published toolsets allowed by the route. An empty array selects no toolsets.",
+        "items": { "type": "string", "format": "uuid" },
+        "uniqueItems": true
       },
       "PublishedPromptReference": {
         "description": "Specify exactly one published label or immutable revision ID.",

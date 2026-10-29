@@ -52,7 +52,7 @@ func PrepareStepTx(ctx context.Context, tx pgx.Tx, store *limits.DebitStore, a a
 		return "", limits.ErrDebitAuthority
 	}
 	var allowed bool
-	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM olp.agent_runs r JOIN olp.agent_publication_revisions v ON v.id=r.revision_id JOIN olp.agent_publications p ON p.id=v.publication_id WHERE r.id=$1 AND r.api_key_id=$2 AND r.project_id=$3 AND NOT p.retired)`, intent.RunID, a.ID, *a.ProjectID).Scan(&allowed); err != nil {
+	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM olp.agent_runs r WHERE r.id=$1 AND r.api_key_id=$2 AND r.project_id=$3 AND (EXISTS(SELECT 1 FROM olp.agent_publication_revisions v JOIN olp.agent_publications p ON p.id=v.publication_id WHERE v.id=r.revision_id AND NOT p.retired) OR EXISTS(SELECT 1 FROM olp.route_revisions v JOIN olp.routes route ON route.id=v.route_id WHERE v.id=r.route_revision_id AND route.retired_at IS NULL AND (route.project_id IS NULL OR route.project_id=r.project_id))))`, intent.RunID, a.ID, *a.ProjectID).Scan(&allowed); err != nil {
 		return "", err
 	}
 	if !allowed {

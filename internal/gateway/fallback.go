@@ -63,7 +63,11 @@ func (s *Server) planNamed(ctx context.Context, x *call) *Error {
 // other dynamic planning. Admission, dispatch and fallback share what remains.
 func (x *call) routeContext(ctx context.Context) (context.Context, context.CancelFunc) {
 	if x.deadline.IsZero() {
-		x.deadline = time.Now().Add(time.Duration(x.named().OverallTimeout) * time.Millisecond)
+		timeout := time.Duration(x.named().OverallTimeout) * time.Millisecond
+		if x.named().ToolExecution == "gateway" {
+			timeout = min(timeout, 120*time.Second)
+		}
+		x.deadline = time.Now().Add(timeout)
 	}
 	return context.WithDeadline(ctx, x.deadline)
 }

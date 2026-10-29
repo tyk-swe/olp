@@ -136,6 +136,24 @@ func (e AgentPublicationSummaryKind) Valid() bool {
 	}
 }
 
+// Defines values for AgentToolPinClassification.
+const (
+	ApprovalRequired AgentToolPinClassification = "approval_required"
+	ReadOnly         AgentToolPinClassification = "read_only"
+)
+
+// Valid indicates whether the value is a known member of the AgentToolPinClassification enum.
+func (e AgentToolPinClassification) Valid() bool {
+	switch e {
+	case ApprovalRequired:
+		return true
+	case ReadOnly:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for AggregateBudgetUsageCostBasis.
 const (
 	AggregateBudgetUsageCostBasisCharge AggregateBudgetUsageCostBasis = "charge"
@@ -1615,6 +1633,24 @@ func (e ConfigurationRetrievalBindingBackend) Valid() bool {
 	}
 }
 
+// Defines values for ConfigurationRouteEntryToolExecution.
+const (
+	ConfigurationRouteEntryToolExecutionEmpty   ConfigurationRouteEntryToolExecution = ""
+	ConfigurationRouteEntryToolExecutionGateway ConfigurationRouteEntryToolExecution = "gateway"
+)
+
+// Valid indicates whether the value is a known member of the ConfigurationRouteEntryToolExecution enum.
+func (e ConfigurationRouteEntryToolExecution) Valid() bool {
+	switch e {
+	case ConfigurationRouteEntryToolExecutionEmpty:
+		return true
+	case ConfigurationRouteEntryToolExecutionGateway:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for ConfigurationSCIMGroupMappingAccessScope.
 const (
 	ConfigurationSCIMGroupMappingAccessScopeAssigned ConfigurationSCIMGroupMappingAccessScope = "assigned"
@@ -2275,6 +2311,24 @@ func (e CreateNotificationDestinationRequestType) Valid() bool {
 	case CreateNotificationDestinationRequestTypeSlack:
 		return true
 	case CreateNotificationDestinationRequestTypeWebhook:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for CreateRouteDraftRequestToolExecution.
+const (
+	CreateRouteDraftRequestToolExecutionEmpty   CreateRouteDraftRequestToolExecution = ""
+	CreateRouteDraftRequestToolExecutionGateway CreateRouteDraftRequestToolExecution = "gateway"
+)
+
+// Valid indicates whether the value is a known member of the CreateRouteDraftRequestToolExecution enum.
+func (e CreateRouteDraftRequestToolExecution) Valid() bool {
+	switch e {
+	case CreateRouteDraftRequestToolExecutionEmpty:
+		return true
+	case CreateRouteDraftRequestToolExecutionGateway:
 		return true
 	default:
 		return false
@@ -4774,6 +4828,24 @@ func (e ReconciliationReportItemsCaptureRateUnavailableReason) Valid() bool {
 	}
 }
 
+// Defines values for ReplaceRouteDraftRequestToolExecution.
+const (
+	ReplaceRouteDraftRequestToolExecutionEmpty   ReplaceRouteDraftRequestToolExecution = ""
+	ReplaceRouteDraftRequestToolExecutionGateway ReplaceRouteDraftRequestToolExecution = "gateway"
+)
+
+// Valid indicates whether the value is a known member of the ReplaceRouteDraftRequestToolExecution enum.
+func (e ReplaceRouteDraftRequestToolExecution) Valid() bool {
+	switch e {
+	case ReplaceRouteDraftRequestToolExecutionEmpty:
+		return true
+	case ReplaceRouteDraftRequestToolExecutionGateway:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for RequestDetailResponseBudgetBoundary.
 const (
 	RequestDetailResponseBudgetBoundaryApiKey         RequestDetailResponseBudgetBoundary = "api_key"
@@ -5179,6 +5251,24 @@ func (e RouteBehaviorCertification) Valid() bool {
 	}
 }
 
+// Defines values for RouteBehaviorToolExecution.
+const (
+	RouteBehaviorToolExecutionEmpty   RouteBehaviorToolExecution = ""
+	RouteBehaviorToolExecutionGateway RouteBehaviorToolExecution = "gateway"
+)
+
+// Valid indicates whether the value is a known member of the RouteBehaviorToolExecution enum.
+func (e RouteBehaviorToolExecution) Valid() bool {
+	switch e {
+	case RouteBehaviorToolExecutionEmpty:
+		return true
+	case RouteBehaviorToolExecutionGateway:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for RouteDetailResponseState.
 const (
 	RouteDetailResponseStateActive  RouteDetailResponseState = "active"
@@ -5209,6 +5299,24 @@ func (e RouteDraftDetailResponseCertification) Valid() bool {
 	case RouteDraftDetailResponseCertificationCertified:
 		return true
 	case RouteDraftDetailResponseCertificationUncertified:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for RouteDraftDetailResponseToolExecution.
+const (
+	RouteDraftDetailResponseToolExecutionEmpty   RouteDraftDetailResponseToolExecution = ""
+	RouteDraftDetailResponseToolExecutionGateway RouteDraftDetailResponseToolExecution = "gateway"
+)
+
+// Valid indicates whether the value is a known member of the RouteDraftDetailResponseToolExecution enum.
+func (e RouteDraftDetailResponseToolExecution) Valid() bool {
+	switch e {
+	case RouteDraftDetailResponseToolExecutionEmpty:
+		return true
+	case RouteDraftDetailResponseToolExecutionGateway:
 		return true
 	default:
 		return false
@@ -5263,6 +5371,24 @@ func (e RouteRevisionResponseCertification) Valid() bool {
 	case RouteRevisionResponseCertificationCertified:
 		return true
 	case RouteRevisionResponseCertificationUncertified:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for RouteRevisionResponseToolExecution.
+const (
+	RouteRevisionResponseToolExecutionEmpty   RouteRevisionResponseToolExecution = ""
+	RouteRevisionResponseToolExecutionGateway RouteRevisionResponseToolExecution = "gateway"
+)
+
+// Valid indicates whether the value is a known member of the RouteRevisionResponseToolExecution enum.
+func (e RouteRevisionResponseToolExecution) Valid() bool {
+	switch e {
+	case RouteRevisionResponseToolExecutionEmpty:
+		return true
+	case RouteRevisionResponseToolExecutionGateway:
 		return true
 	default:
 		return false
@@ -5893,6 +6019,24 @@ func (e UpdateNotificationDestinationRequestType) Valid() bool {
 	}
 }
 
+// Defines values for UpdatePublishedRouteRequestToolExecution.
+const (
+	UpdatePublishedRouteRequestToolExecutionEmpty   UpdatePublishedRouteRequestToolExecution = ""
+	UpdatePublishedRouteRequestToolExecutionGateway UpdatePublishedRouteRequestToolExecution = "gateway"
+)
+
+// Valid indicates whether the value is a known member of the UpdatePublishedRouteRequestToolExecution enum.
+func (e UpdatePublishedRouteRequestToolExecution) Valid() bool {
+	switch e {
+	case UpdatePublishedRouteRequestToolExecutionEmpty:
+		return true
+	case UpdatePublishedRouteRequestToolExecutionGateway:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for UpdateSinkRequestStreams.
 const (
 	UpdateSinkRequestStreamsAttempts           UpdateSinkRequestStreams = "attempts"
@@ -6451,12 +6595,18 @@ type AgentPublicationWrite struct {
 
 // AgentToolPin defines model for AgentToolPin.
 type AgentToolPin struct {
-	Alias         string             `json:"alias"`
-	CatalogDigest string             `json:"catalog_digest"`
-	Name          string             `json:"name"`
-	RevisionId    openapi_types.UUID `json:"revision_id"`
-	ServerId      openapi_types.UUID `json:"server_id"`
+	Alias         string `json:"alias"`
+	CatalogDigest string `json:"catalog_digest"`
+
+	// Classification Operator classification of a published tool. Unclassified tools require approval.
+	Classification *AgentToolPinClassification `json:"classification,omitempty"`
+	Name           string                      `json:"name"`
+	RevisionId     openapi_types.UUID          `json:"revision_id"`
+	ServerId       openapi_types.UUID          `json:"server_id"`
 }
+
+// AgentToolPinClassification Operator classification of a published tool. Unclassified tools require approval.
+type AgentToolPinClassification string
 
 // AggregateBudget defines model for AggregateBudget.
 type AggregateBudget struct {
@@ -7079,6 +7229,9 @@ type CapabilityCertificationItemResponse struct {
 	Operation string                    `json:"operation"`
 	Succeeded bool                      `json:"succeeded"`
 	Surface   string                    `json:"surface"`
+
+	// ToolCalls Whether a separate emitted tool-call probe succeeded.
+	ToolCalls *bool `json:"tool_calls,omitempty"`
 }
 
 // CapabilityCertificationResponse defines model for CapabilityCertificationResponse.
@@ -7106,6 +7259,9 @@ type CapabilityResponse struct {
 	Operation   string                       `json:"operation"`
 	Source      string                       `json:"source"`
 	Surface     string                       `json:"surface"`
+
+	// ToolCalls Whether an emitted tool call was certified for this model capability.
+	ToolCalls *bool `json:"tool_calls,omitempty"`
 }
 
 // CaptureConfiguration defines model for CaptureConfiguration.
@@ -8152,7 +8308,16 @@ type ConfigurationRouteEntry struct {
 	Selectors *[]RouteSelector           `json:"selectors,omitempty"`
 	Slug      string                     `json:"slug"`
 	Targets   []ConfigurationRouteTarget `json:"targets"`
+
+	// ToolExecution When gateway, the gateway executes authorized read-only tools on transformed Chat Completions routes.
+	ToolExecution *ConfigurationRouteEntryToolExecution `json:"tool_execution,omitempty"`
+
+	// Toolsets Published toolset IDs that gateway execution may use. Callers can select a subset.
+	Toolsets *[]openapi_types.UUID `json:"toolsets,omitempty"`
 }
+
+// ConfigurationRouteEntryToolExecution When gateway, the gateway executes authorized read-only tools on transformed Chat Completions routes.
+type ConfigurationRouteEntryToolExecution string
 
 // ConfigurationRouteTarget defines model for ConfigurationRouteTarget.
 type ConfigurationRouteTarget struct {
@@ -8837,7 +9002,16 @@ type CreateRouteDraftRequest struct {
 	Selectors *[]RouteSelector     `json:"selectors,omitempty"`
 	Slug      string               `json:"slug"`
 	Targets   []RouteTargetRequest `json:"targets"`
+
+	// ToolExecution When gateway, the gateway executes authorized read-only tools on transformed Chat Completions routes.
+	ToolExecution *CreateRouteDraftRequestToolExecution `json:"tool_execution,omitempty"`
+
+	// Toolsets Published toolset IDs that gateway execution may use. Callers can select a subset.
+	Toolsets *[]openapi_types.UUID `json:"toolsets,omitempty"`
 }
+
+// CreateRouteDraftRequestToolExecution When gateway, the gateway executes authorized read-only tools on transformed Chat Completions routes.
+type CreateRouteDraftRequestToolExecution string
 
 // CreateSinkRequest defines model for CreateSinkRequest.
 type CreateSinkRequest struct {
@@ -12568,7 +12742,16 @@ type ReplaceRouteDraftRequest struct {
 	Selectors *[]RouteSelector            `json:"selectors,omitempty"`
 	Slug      string                      `json:"slug"`
 	Targets   []ReplaceRouteTargetRequest `json:"targets"`
+
+	// ToolExecution When gateway, the gateway executes authorized read-only tools on transformed Chat Completions routes.
+	ToolExecution *ReplaceRouteDraftRequestToolExecution `json:"tool_execution,omitempty"`
+
+	// Toolsets Published toolset IDs that gateway execution may use. Callers can select a subset.
+	Toolsets *[]openapi_types.UUID `json:"toolsets,omitempty"`
 }
+
+// ReplaceRouteDraftRequestToolExecution When gateway, the gateway executes authorized read-only tools on transformed Chat Completions routes.
+type ReplaceRouteDraftRequestToolExecution string
 
 // ReplaceRouteTargetRequest defines model for ReplaceRouteTargetRequest.
 type ReplaceRouteTargetRequest struct {
@@ -13073,10 +13256,19 @@ type RouteBehavior struct {
 	// Retry Same-target retries per retryable failure class, with full-jitter exponential backoff. Retries consume the attempt budget and the overall deadline and never follow commitment or an ambiguous creation.
 	Retry     RouteRetry      `json:"retry"`
 	Selectors []RouteSelector `json:"selectors"`
+
+	// ToolExecution When gateway, the gateway executes authorized read-only tools on transformed Chat Completions routes.
+	ToolExecution *RouteBehaviorToolExecution `json:"tool_execution,omitempty"`
+
+	// Toolsets Published toolset IDs that gateway execution may use. Callers can select a subset.
+	Toolsets *[]openapi_types.UUID `json:"toolsets,omitempty"`
 }
 
 // RouteBehaviorCertification Whether the route's serving tuples are certified. Pass-through routes always read uncertified.
 type RouteBehaviorCertification string
+
+// RouteBehaviorToolExecution When gateway, the gateway executes authorized read-only tools on transformed Chat Completions routes.
+type RouteBehaviorToolExecution string
 
 // RouteCatalogExposureResponse defines model for RouteCatalogExposureResponse.
 type RouteCatalogExposureResponse struct {
@@ -13163,11 +13355,20 @@ type RouteDraftDetailResponse struct {
 	Slug      string                `json:"slug"`
 	State     string                `json:"state"`
 	Targets   []RouteTargetResponse `json:"targets"`
+
+	// ToolExecution When gateway, the gateway executes authorized read-only tools on transformed Chat Completions routes.
+	ToolExecution *RouteDraftDetailResponseToolExecution `json:"tool_execution,omitempty"`
+
+	// Toolsets Published toolset IDs that gateway execution may use. Callers can select a subset.
+	Toolsets  *[]openapi_types.UUID `json:"toolsets,omitempty"`
 	UpdatedAt time.Time             `json:"updated_at"`
 }
 
 // RouteDraftDetailResponseCertification Whether the route's serving tuples are certified. Pass-through routes always read uncertified.
 type RouteDraftDetailResponseCertification string
+
+// RouteDraftDetailResponseToolExecution When gateway, the gateway executes authorized read-only tools on transformed Chat Completions routes.
+type RouteDraftDetailResponseToolExecution string
 
 // RouteDraftListResponse defines model for RouteDraftListResponse.
 type RouteDraftListResponse struct {
@@ -13316,10 +13517,19 @@ type RouteRevisionResponse struct {
 	Slug          string                `json:"slug"`
 	SourceDraftId openapi_types.UUID    `json:"source_draft_id"`
 	Targets       []RouteTargetResponse `json:"targets"`
+
+	// ToolExecution When gateway, the gateway executes authorized read-only tools on transformed Chat Completions routes.
+	ToolExecution *RouteRevisionResponseToolExecution `json:"tool_execution,omitempty"`
+
+	// Toolsets Published toolset IDs that gateway execution may use. Callers can select a subset.
+	Toolsets *[]openapi_types.UUID `json:"toolsets,omitempty"`
 }
 
 // RouteRevisionResponseCertification Whether the route's serving tuples are certified. Pass-through routes always read uncertified.
 type RouteRevisionResponseCertification string
+
+// RouteRevisionResponseToolExecution When gateway, the gateway executes authorized read-only tools on transformed Chat Completions routes.
+type RouteRevisionResponseToolExecution string
 
 // RouteSelector The first selector whose predicate matches chooses the targets carrying any of its tags, or delegates the request to another route.
 type RouteSelector struct {
@@ -14700,7 +14910,16 @@ type UpdatePublishedRouteRequest struct {
 	// Slug The published slug is immutable.
 	Slug    string                      `json:"slug"`
 	Targets []ReplaceRouteTargetRequest `json:"targets"`
+
+	// ToolExecution When gateway, the gateway executes authorized read-only tools on transformed Chat Completions routes.
+	ToolExecution *UpdatePublishedRouteRequestToolExecution `json:"tool_execution,omitempty"`
+
+	// Toolsets Published toolset IDs that gateway execution may use. Callers can select a subset.
+	Toolsets *[]openapi_types.UUID `json:"toolsets,omitempty"`
 }
+
+// UpdatePublishedRouteRequestToolExecution When gateway, the gateway executes authorized read-only tools on transformed Chat Completions routes.
+type UpdatePublishedRouteRequestToolExecution string
 
 // UpdateRouteCatalogExposureRequest defines model for UpdateRouteCatalogExposureRequest.
 type UpdateRouteCatalogExposureRequest struct {
