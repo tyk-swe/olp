@@ -220,6 +220,7 @@ func behaviorJSON(out map[string]any, raw []byte) map[string]any {
 	out["provider_fetched_documents"] = behavior.ProviderFetchedDocuments
 	out["cache"], out["prompt_cache"] = behavior.Cache, behavior.PromptCache
 	out["passthrough"] = behavior.Passthrough
+	out["tool_execution"], out["toolsets"] = behavior.ToolExecution, orEmpty(behavior.Toolsets)
 	certification := "certified"
 	if behavior.Passthrough != nil {
 		certification = "uncertified"
@@ -271,6 +272,8 @@ type TargetInput struct {
 }
 
 type DraftInput struct {
+	ToolExecution            string                     `json:"tool_execution,omitempty"`
+	Toolsets                 []string                   `json:"toolsets,omitempty"`
 	Cache                    *cache.Policy              `json:"cache,omitempty"`
 	PromptCache              *cache.PromptPolicy        `json:"prompt_cache,omitempty"`
 	CallerCostExempt         bool                       `json:"caller_cost_exempt,omitempty"`
@@ -295,7 +298,7 @@ type DraftInput struct {
 }
 
 func (in *DraftInput) behavior() routing.Behavior {
-	return routing.Behavior{Cache: in.Cache, PromptCache: in.PromptCache, CallerCostExempt: in.CallerCostExempt, ProviderFetchedDocuments: in.ProviderFetchedDocuments, MaxBodyBytes: in.MaxBodyBytes, Fallbacks: in.Fallbacks, Selectors: in.Selectors, Retry: in.Retry, Affinity: in.Affinity, Budget: in.Budget, Passthrough: in.Passthrough}
+	return routing.Behavior{ToolExecution: in.ToolExecution, Toolsets: in.Toolsets, Cache: in.Cache, PromptCache: in.PromptCache, CallerCostExempt: in.CallerCostExempt, ProviderFetchedDocuments: in.ProviderFetchedDocuments, MaxBodyBytes: in.MaxBodyBytes, Fallbacks: in.Fallbacks, Selectors: in.Selectors, Retry: in.Retry, Affinity: in.Affinity, Budget: in.Budget, Passthrough: in.Passthrough}
 }
 
 func sameProject(a, b *string) bool {

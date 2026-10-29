@@ -30,6 +30,7 @@ type call struct {
 	cache                *responseCacheCall
 	cacheRateLease       *limits.Lease
 	sessionDebit         *sessionDebit
+	workflow             *workflowCall
 	evaluatorGuardrailID string
 	unary                *unaryCall
 	semanticHeaders      http.Header
@@ -164,9 +165,11 @@ type routeLeg struct {
 
 // generationCall owns the source, delivery and continuation of a generation.
 type generationCall struct {
-	parsed    *wire.Request
-	resources *generationResources
-	firstStep *modelStepAccounting
+	parsed           *wire.Request
+	resources        *generationResources
+	firstStep        *modelStepAccounting
+	toolsets         []string
+	toolsetsSelected bool
 
 	emit wire.Emit
 

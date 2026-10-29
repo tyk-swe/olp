@@ -357,6 +357,7 @@ type storedCapability struct {
 	Source                string     `json:"source"`
 	CertifiedAt           *time.Time `json:"certified_at"`
 	CredentialFingerprint string     `json:"credential_fingerprint,omitempty"`
+	ToolCalls             bool       `json:"tool_calls,omitempty"`
 }
 
 type storedModel struct {
@@ -567,7 +568,7 @@ func (s *Server) activateProvider(r *http.Request, _ access.Principal) (access.R
 				if c.Source != "certified" {
 					return access.Reply{}, access.Fail(422, "certification_required", "Model "+m.UpstreamModel+" has an uncertified "+c.Operation+"/"+c.Surface+"/"+c.Mode+" capability.")
 				}
-				rm.Capabilities = append(rm.Capabilities, routing.RevisionCapability{Operation: c.Operation, Surface: c.Surface, Mode: c.Mode, Source: c.Source, CertifiedAt: c.CertifiedAt})
+				rm.Capabilities = append(rm.Capabilities, routing.RevisionCapability{Operation: c.Operation, Surface: c.Surface, Mode: c.Mode, Source: c.Source, CertifiedAt: c.CertifiedAt, ToolCalls: c.ToolCalls})
 			}
 			published = append(published, rm)
 		}
@@ -782,7 +783,7 @@ func (s *Server) revisionModels(r *http.Request, p access.Principal) (access.Rep
 		}
 		capabilities := []map[string]any{}
 		for _, c := range m.Capabilities {
-			capabilities = append(capabilities, map[string]any{"operation": c.Operation, "surface": c.Surface, "mode": c.Mode, "source": c.Source, "certified_at": c.CertifiedAt})
+			capabilities = append(capabilities, map[string]any{"operation": c.Operation, "surface": c.Surface, "mode": c.Mode, "source": c.Source, "certified_at": c.CertifiedAt, "tool_calls": c.ToolCalls})
 		}
 		items = append(items, map[string]any{"id": m.ID, "upstream_model": m.UpstreamModel, "display_name": m.DisplayName, "enabled": true, "capabilities": capabilities, "discovered_at": nil})
 	}
@@ -920,7 +921,7 @@ func (s *Server) restoreDraft(ctx context.Context, tx pgx.Tx, current *record, v
 	for _, m := range v.Models {
 		capabilities := make([]storedCapability, 0, len(m.Capabilities))
 		for _, c := range m.Capabilities {
-			capabilities = append(capabilities, storedCapability{Operation: c.Operation, Surface: c.Surface, Mode: c.Mode, Source: c.Source, CertifiedAt: c.CertifiedAt})
+			capabilities = append(capabilities, storedCapability{Operation: c.Operation, Surface: c.Surface, Mode: c.Mode, Source: c.Source, CertifiedAt: c.CertifiedAt, ToolCalls: c.ToolCalls})
 		}
 		encoded, _ := json.Marshal(capabilities)
 		if _, err := tx.Exec(ctx, `INSERT INTO olp.provider_models(id,provider_id,upstream_model,display_name,enabled,capabilities) VALUES($1,$2,$3,$4,true,$5)

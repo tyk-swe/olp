@@ -1522,6 +1522,10 @@
           },
           "surface": {
             "type": "string"
+          },
+          "tool_calls": {
+            "type": "boolean",
+            "description": "Whether a separate emitted tool-call probe succeeded."
           }
         },
         "required": [
@@ -1615,6 +1619,10 @@
           },
           "surface": {
             "type": "string"
+          },
+          "tool_calls": {
+            "type": "boolean",
+            "description": "Whether an emitted tool call was certified for this model capability."
           }
         },
         "required": [
@@ -2551,6 +2559,23 @@
                 "type": "null"
               }
             ]
+          },
+          "tool_execution": {
+            "type": "string",
+            "enum": [
+              "",
+              "gateway"
+            ],
+            "description": "When gateway, the gateway executes authorized read-only tools on transformed Chat Completions routes."
+          },
+          "toolsets": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "uniqueItems": true,
+            "description": "Published toolset IDs that gateway execution may use. Callers can select a subset."
           }
         },
         "required": [
@@ -3946,6 +3971,23 @@
                 "type": "null"
               }
             ]
+          },
+          "tool_execution": {
+            "type": "string",
+            "enum": [
+              "",
+              "gateway"
+            ],
+            "description": "When gateway, the gateway executes authorized read-only tools on transformed Chat Completions routes."
+          },
+          "toolsets": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "uniqueItems": true,
+            "description": "Published toolset IDs that gateway execution may use. Callers can select a subset."
           }
         },
         "required": [
@@ -10233,6 +10275,23 @@
                 "type": "null"
               }
             ]
+          },
+          "tool_execution": {
+            "type": "string",
+            "enum": [
+              "",
+              "gateway"
+            ],
+            "description": "When gateway, the gateway executes authorized read-only tools on transformed Chat Completions routes."
+          },
+          "toolsets": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "uniqueItems": true,
+            "description": "Published toolset IDs that gateway execution may use. Callers can select a subset."
           }
         },
         "required": [
@@ -11284,6 +11343,23 @@
               "uncertified"
             ],
             "type": "string"
+          },
+          "tool_execution": {
+            "type": "string",
+            "enum": [
+              "",
+              "gateway"
+            ],
+            "description": "When gateway, the gateway executes authorized read-only tools on transformed Chat Completions routes."
+          },
+          "toolsets": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "uniqueItems": true,
+            "description": "Published toolset IDs that gateway execution may use. Callers can select a subset."
           }
         },
         "required": [
@@ -11694,6 +11770,23 @@
               "uncertified"
             ],
             "type": "string"
+          },
+          "tool_execution": {
+            "type": "string",
+            "enum": [
+              "",
+              "gateway"
+            ],
+            "description": "When gateway, the gateway executes authorized read-only tools on transformed Chat Completions routes."
+          },
+          "toolsets": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "uniqueItems": true,
+            "description": "Published toolset IDs that gateway execution may use. Callers can select a subset."
           }
         },
         "required": [
@@ -17766,6 +17859,23 @@
               "uncertified"
             ],
             "type": "string"
+          },
+          "tool_execution": {
+            "type": "string",
+            "enum": [
+              "",
+              "gateway"
+            ],
+            "description": "When gateway, the gateway executes authorized read-only tools on transformed Chat Completions routes."
+          },
+          "toolsets": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "uniqueItems": true,
+            "description": "Published toolset IDs that gateway execution may use. Callers can select a subset."
           }
         },
         "required": [
@@ -21985,6 +22095,23 @@
                 "type": "null"
               }
             ]
+          },
+          "tool_execution": {
+            "type": "string",
+            "enum": [
+              "",
+              "gateway"
+            ],
+            "description": "When gateway, the gateway executes authorized read-only tools on transformed Chat Completions routes."
+          },
+          "toolsets": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "uniqueItems": true,
+            "description": "Published toolset IDs that gateway execution may use. Callers can select a subset."
           }
         },
         "required": [
@@ -26618,6 +26745,14 @@
           "alias": {
             "type": "string",
             "pattern": "^t_[a-f0-9]{32}_[a-f0-9]{32}$"
+          },
+          "classification": {
+            "type": "string",
+            "enum": [
+              "read_only",
+              "approval_required"
+            ],
+            "description": "Operator classification of a published tool. Unclassified tools require approval."
           }
         },
         "required": [

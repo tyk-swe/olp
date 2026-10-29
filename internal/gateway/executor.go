@@ -754,6 +754,11 @@ func (s *Server) attempt(ctx context.Context, x *call, a routing.Attempt, provid
 	if parallel != nil {
 		defer parallel.cancel()
 	}
+	if x.workflow != nil {
+		if e := s.markSessionDispatched(actx, x); e != nil {
+			return fail(classConnect, &attemptFailure{contractCode: e.Code, noRetry: true})
+		}
+	}
 	resp, err := client.Do(req)
 	if cfg.CarriedByPlugin() {
 		// The plugin reports whether it sent a request it failed; any other

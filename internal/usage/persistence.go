@@ -149,7 +149,7 @@ const factTotalsSQL = `SELECT count(*), COALESCE(sum(COALESCE(estimated_cost,0)+
         count(*) FILTER (WHERE NOT budget_exempt AND charge_status <> 'not_billable' AND unpriced),
         COALESCE(sum(COALESCE(charge,0)+cache_budget_charge) FILTER (WHERE NOT budget_exempt), 0)::text,
         count(*) FILTER (WHERE NOT budget_exempt AND charge_status <> 'not_billable' AND charge IS NULL)
-    FROM olp.attempt_usage_facts WHERE event_id = $1::uuid`
+    FROM olp.attempt_usage_facts WHERE event_id = $1::uuid AND ($2::uuid IS NULL OR attempt_id = $2::uuid)`
 
 // recomputeMarkersSQL decides, for each count scope, which attempt of a request
 // carries the request. Reports count the first attempt of a scope once, and
@@ -235,6 +235,9 @@ func PersistEvent(ctx context.Context, pool *pgxpool.Pool, ev *Event, payload []
 // PersistEventTx records accounting in the caller's transaction, allowing a
 // resource's reconciliation marker and its usage to commit atomically.
 func PersistEventTx(ctx context.Context, tx pgx.Tx, ev *Event, payload []byte) (Persisted, error) {
+	if workflowEvent(ev) {
+		return persistWorkflowTerminalTx(ctx, tx, ev, payload)
+	}
 	if _, present := debitDispatchID(ev); present {
 		return PersistDebitEventTx(ctx, tx, ev, payload)
 	}
@@ -537,14 +540,18 @@ func chargeSupply(ctx context.Context, tx pgx.Tx, ev *Event, attempt ValidatedAt
 // billable attempts accrue no money but are counted, so an operator can see
 // that a budget is being consumed by spend nobody can price.
 func applyCostDelta(ctx context.Context, tx pgx.Tx, ev *Event) ([]limits.CostSnapshot, error) {
+	return applyAttemptCostDelta(ctx, tx, ev, nil)
+}
+
+func applyAttemptCostDelta(ctx context.Context, tx pgx.Tx, ev *Event, attemptID *string) ([]limits.CostSnapshot, error) {
 	var facts, unpriced, uncharged int64
 	var cost, charge string
-	if err := tx.QueryRow(ctx, factTotalsSQL, ev.EventID).Scan(&facts, &cost, &unpriced, &charge, &uncharged); err != nil {
+	if err := tx.QueryRow(ctx, factTotalsSQL, ev.EventID, attemptID).Scan(&facts, &cost, &unpriced, &charge, &uncharged); err != nil {
 		return nil, fmt.Errorf("total attempt usage facts: %w", err)
 	}
 	// Keyless requests are the installation's own: they spend from no key's
 	// or group's budget.
-	endUsers, err := applyIdentityCostDelta(ctx, tx, ev, cost, unpriced, charge, uncharged)
+	endUsers, err := applyAttemptIdentityCostDelta(ctx, tx, ev, cost, unpriced, charge, uncharged, attemptID)
 	if err != nil {
 		return nil, err
 	}
@@ -594,11 +601,15 @@ func applyEndUserCostDelta(ctx context.Context, tx pgx.Tx, ev *Event, cost strin
 }
 
 func applyIdentityCostDelta(ctx context.Context, tx pgx.Tx, ev *Event, cost string, unpriced int64, charge string, uncharged int64) ([]limits.CostSnapshot, error) {
+	return applyAttemptIdentityCostDelta(ctx, tx, ev, cost, unpriced, charge, uncharged, nil)
+}
+
+func applyAttemptIdentityCostDelta(ctx context.Context, tx pgx.Tx, ev *Event, cost string, unpriced int64, charge string, uncharged int64, attemptID *string) ([]limits.CostSnapshot, error) {
 	snapshots, err := applyEndUserCostDelta(ctx, tx, ev, cost, unpriced, charge, uncharged)
 	if err != nil {
 		return nil, err
 	}
-	aggregates, err := limits.AddAggregateCostDelta(ctx, tx, ev.EventID, ev.APIKeyID, ev.ProviderID, ev.RouteSlug, ev.Attribution, ev.ObservedAt)
+	aggregates, err := aggregateCostDelta(ctx, tx, ev, attemptID)
 	if err != nil {
 		return nil, fmt.Errorf("apply aggregate cost delta: %w", err)
 	}
@@ -606,6 +617,13 @@ func applyIdentityCostDelta(ctx context.Context, tx pgx.Tx, ev *Event, cost stri
 		aggregates[i].RequestID = ev.RequestID
 	}
 	return append(snapshots, aggregates...), nil
+}
+
+func aggregateCostDelta(ctx context.Context, tx pgx.Tx, ev *Event, attemptID *string) ([]limits.CostSnapshot, error) {
+	if attemptID != nil {
+		return limits.AddAggregateAttemptCostDelta(ctx, tx, ev.EventID, ev.APIKeyID, ev.ProviderID, ev.RouteSlug, ev.Attribution, ev.ObservedAt, *attemptID)
+	}
+	return limits.AddAggregateCostDelta(ctx, tx, ev.EventID, ev.APIKeyID, ev.ProviderID, ev.RouteSlug, ev.Attribution, ev.ObservedAt)
 }
 
 func guardrailJSON(v any) string {

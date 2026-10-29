@@ -124,6 +124,17 @@ route:
 					s.releaseHold(ctx, gate.hold)
 					continue
 				}
+				if x.workflow != nil {
+					x.sessionDebit = nil
+					caps := attemptCaps(x.route, &provider, &slot)
+					if x.callerCostExempt() && provider.CredentialSource == "caller" {
+						caps = [3]cappedOwner{}
+					}
+					if e := s.reserveSessionDebit(ctx, x, x.authority, attempt, caps[:]); e != nil {
+						s.releaseHold(ctx, gate.hold)
+						return attemptOutcome[Result]{err: e}, nil
+					}
+				}
 				x.spent++
 				x.activatePreparation(&provider, attempt.TargetID, attempt.UpstreamModel)
 				x.grantGeneration = 0
@@ -147,6 +158,19 @@ route:
 					x.spendCaps(gate.hold.budgets, attempt)
 				}
 				x.facts = append(x.facts, fact)
+				if x.workflow != nil && failure == nil {
+					if e := s.settleWorkflowModelAttempt(ctx, x, fact); e != nil {
+						return attemptOutcome[Result]{err: e}, nil
+					}
+				}
+				if x.workflow != nil && failure != nil {
+					if x.sessionDebit.dispatched {
+						s.markSessionUnknown(ctx, x)
+					} else {
+						s.abandonWorkflowDebit(ctx, x)
+					}
+					return attemptOutcome[Result]{err: failure.toError(), cancelled: failure.class == classCancelled}, nil
+				}
 				// Recording the attempt also releases its half-open probe.
 				s.health.record(provider.ID, fact)
 				if failure == nil {

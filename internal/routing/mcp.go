@@ -114,6 +114,7 @@ type MCPServer struct {
 }
 
 type MCPToolsetTool struct {
+	Classification       string
 	Delegation           *MCPDelegation
 	Stdio                *MCPStdioBinding
 	Transport            MCPTransport
@@ -342,7 +343,8 @@ func (s *Snapshot) compileMCP() {
 				price = &toolPrice
 			}
 			resolution.Tools = append(resolution.Tools, MCPToolsetTool{
-				Alias: pin.Alias, Name: pin.Name, Description: catalog.Description,
+				Classification: pin.Classification,
+				Alias:          pin.Alias, Name: pin.Name, Description: catalog.Description,
 				InputSchema: slices.Clone(catalog.InputSchema), ServerID: pin.ServerID,
 				ServerRevisionID: pin.RevisionID, CatalogDigest: pin.CatalogDigest, Endpoint: server.Endpoint, Transport: server.Transport.OrDefault(),
 				Delegation: server.Delegation.Clone(), CredentialID: copyPointer(server.CredentialID), UnitPrice: price, OAuth: server.OAuth.Clone(), Stdio: server.Stdio.Clone(),
@@ -368,7 +370,8 @@ func (s *Snapshot) MCPToolset(revisionID string) (MCPToolsetResolution, bool) {
 	tools := slices.Collect(func(yield func(MCPToolsetTool) bool) {
 		for _, tool := range resolution.Tools {
 			if !yield(MCPToolsetTool{
-				Alias: tool.Alias, Name: tool.Name, Description: tool.Description,
+				Classification: tool.Classification,
+				Alias:          tool.Alias, Name: tool.Name, Description: tool.Description,
 				InputSchema: tool.InputSchema, ServerID: tool.ServerID, ServerRevisionID: tool.ServerRevisionID,
 				CatalogDigest: tool.CatalogDigest, Endpoint: tool.Endpoint, Transport: tool.Transport,
 				UnitPrice: copyPointer(tool.UnitPrice), CredentialID: copyPointer(tool.CredentialID),

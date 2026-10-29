@@ -269,9 +269,25 @@ type ChatPromptRequest struct {
 	Model string `json:"model"`
 
 	// OlpPrompt Specify exactly one published label or immutable revision ID.
-	OlpPrompt            PublishedPromptReference `json:"olp_prompt"`
-	AdditionalProperties map[string]interface{}   `json:"-"`
+	OlpPrompt PublishedPromptReference `json:"olp_prompt"`
+
+	// OlpToolsets Select a subset of the published toolsets allowed by the route. An empty array selects no toolsets.
+	OlpToolsets          *ChatToolsetSelection  `json:"olp_toolsets,omitempty"`
+	AdditionalProperties map[string]interface{} `json:"-"`
 }
+
+// ChatToolWorkflowRequest defines model for ChatToolWorkflowRequest.
+type ChatToolWorkflowRequest struct {
+	Messages []map[string]interface{} `json:"messages"`
+	Model    string                   `json:"model"`
+
+	// OlpToolsets Select a subset of the published toolsets allowed by the route. An empty array selects no toolsets.
+	OlpToolsets          *ChatToolsetSelection  `json:"olp_toolsets,omitempty"`
+	AdditionalProperties map[string]interface{} `json:"-"`
+}
+
+// ChatToolsetSelection Select a subset of the published toolsets allowed by the route. An empty array selects no toolsets.
+type ChatToolsetSelection = []openapi_types.UUID
 
 // DelegationGrant defines model for DelegationGrant.
 type DelegationGrant struct {
@@ -426,6 +442,11 @@ type StreamGeminiContentWithPromptParams struct {
 	XOLPAgentIdentity *string `json:"X-OLP-Agent-Identity,omitempty"`
 }
 
+// CreateChatCompletionWithPromptJSONBody defines parameters for CreateChatCompletionWithPrompt.
+type CreateChatCompletionWithPromptJSONBody struct {
+	union json.RawMessage
+}
+
 // CreateChatCompletionWithPromptParams defines parameters for CreateChatCompletionWithPrompt.
 type CreateChatCompletionWithPromptParams struct {
 	// XOLPAgentIdentity The current workload assertion is required when Authorization contains a one-use delegation token.
@@ -457,7 +478,7 @@ type CreateGeminiContentWithPromptJSONRequestBody = GeminiPromptRequest
 type StreamGeminiContentWithPromptJSONRequestBody = GeminiPromptRequest
 
 // CreateChatCompletionWithPromptJSONRequestBody defines body for CreateChatCompletionWithPrompt for application/json ContentType.
-type CreateChatCompletionWithPromptJSONRequestBody = ChatPromptRequest
+type CreateChatCompletionWithPromptJSONRequestBody CreateChatCompletionWithPromptJSONBody
 
 // CreateDelegationJSONRequestBody defines body for CreateDelegation for application/json ContentType.
 type CreateDelegationJSONRequestBody = DelegationRequest
@@ -598,6 +619,14 @@ func (a *ChatPromptRequest) UnmarshalJSON(b []byte) error {
 		delete(object, "olp_prompt")
 	}
 
+	if raw, found := object["olp_toolsets"]; found {
+		err = json.Unmarshal(raw, &a.OlpToolsets)
+		if err != nil {
+			return fmt.Errorf("error reading 'olp_toolsets': %w", err)
+		}
+		delete(object, "olp_toolsets")
+	}
+
 	if len(object) != 0 {
 		a.AdditionalProperties = make(map[string]interface{})
 		for fieldName, fieldBuf := range object {
@@ -625,6 +654,109 @@ func (a ChatPromptRequest) MarshalJSON() ([]byte, error) {
 	object["olp_prompt"], err = json.Marshal(a.OlpPrompt)
 	if err != nil {
 		return nil, fmt.Errorf("error marshaling 'olp_prompt': %w", err)
+	}
+
+	if a.OlpToolsets != nil {
+		object["olp_toolsets"], err = json.Marshal(a.OlpToolsets)
+		if err != nil {
+			return nil, fmt.Errorf("error marshaling 'olp_toolsets': %w", err)
+		}
+	}
+
+	for fieldName, field := range a.AdditionalProperties {
+		object[fieldName], err = json.Marshal(field)
+		if err != nil {
+			return nil, fmt.Errorf("error marshaling '%s': %w", fieldName, err)
+		}
+	}
+	return json.Marshal(object)
+}
+
+// Getter for additional properties for ChatToolWorkflowRequest. Returns the specified
+// element and whether it was found
+func (a ChatToolWorkflowRequest) Get(fieldName string) (value interface{}, found bool) {
+	if a.AdditionalProperties != nil {
+		value, found = a.AdditionalProperties[fieldName]
+	}
+	return
+}
+
+// Setter for additional properties for ChatToolWorkflowRequest
+func (a *ChatToolWorkflowRequest) Set(fieldName string, value interface{}) {
+	if a.AdditionalProperties == nil {
+		a.AdditionalProperties = make(map[string]interface{})
+	}
+	a.AdditionalProperties[fieldName] = value
+}
+
+// Override default JSON handling for ChatToolWorkflowRequest to handle AdditionalProperties
+func (a *ChatToolWorkflowRequest) UnmarshalJSON(b []byte) error {
+	object := make(map[string]json.RawMessage)
+	err := json.Unmarshal(b, &object)
+	if err != nil {
+		return err
+	}
+
+	if raw, found := object["messages"]; found {
+		err = json.Unmarshal(raw, &a.Messages)
+		if err != nil {
+			return fmt.Errorf("error reading 'messages': %w", err)
+		}
+		delete(object, "messages")
+	}
+
+	if raw, found := object["model"]; found {
+		err = json.Unmarshal(raw, &a.Model)
+		if err != nil {
+			return fmt.Errorf("error reading 'model': %w", err)
+		}
+		delete(object, "model")
+	}
+
+	if raw, found := object["olp_toolsets"]; found {
+		err = json.Unmarshal(raw, &a.OlpToolsets)
+		if err != nil {
+			return fmt.Errorf("error reading 'olp_toolsets': %w", err)
+		}
+		delete(object, "olp_toolsets")
+	}
+
+	if len(object) != 0 {
+		a.AdditionalProperties = make(map[string]interface{})
+		for fieldName, fieldBuf := range object {
+			var fieldVal interface{}
+			err := json.Unmarshal(fieldBuf, &fieldVal)
+			if err != nil {
+				return fmt.Errorf("error unmarshaling field %s: %w", fieldName, err)
+			}
+			a.AdditionalProperties[fieldName] = fieldVal
+		}
+	}
+	return nil
+}
+
+// Override default JSON handling for ChatToolWorkflowRequest to handle AdditionalProperties
+func (a ChatToolWorkflowRequest) MarshalJSON() ([]byte, error) {
+	var err error
+	object := make(map[string]json.RawMessage)
+
+	if a.Messages != nil {
+		object["messages"], err = json.Marshal(a.Messages)
+		if err != nil {
+			return nil, fmt.Errorf("error marshaling 'messages': %w", err)
+		}
+	}
+
+	object["model"], err = json.Marshal(a.Model)
+	if err != nil {
+		return nil, fmt.Errorf("error marshaling 'model': %w", err)
+	}
+
+	if a.OlpToolsets != nil {
+		object["olp_toolsets"], err = json.Marshal(a.OlpToolsets)
+		if err != nil {
+			return nil, fmt.Errorf("error marshaling 'olp_toolsets': %w", err)
+		}
 	}
 
 	for fieldName, field := range a.AdditionalProperties {
@@ -1236,6 +1368,68 @@ func (t *ResponsesPublishedPromptReference) UnmarshalJSON(b []byte) error {
 	return err
 }
 
+// AsChatPromptRequest returns the union data inside the CreateChatCompletionWithPromptJSONBody as a ChatPromptRequest
+func (t CreateChatCompletionWithPromptJSONBody) AsChatPromptRequest() (ChatPromptRequest, error) {
+	var body ChatPromptRequest
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromChatPromptRequest overwrites any union data inside the CreateChatCompletionWithPromptJSONBody as the provided ChatPromptRequest
+func (t *CreateChatCompletionWithPromptJSONBody) FromChatPromptRequest(v ChatPromptRequest) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeChatPromptRequest performs a merge with any union data inside the CreateChatCompletionWithPromptJSONBody, using the provided ChatPromptRequest
+func (t *CreateChatCompletionWithPromptJSONBody) MergeChatPromptRequest(v ChatPromptRequest) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsChatToolWorkflowRequest returns the union data inside the CreateChatCompletionWithPromptJSONBody as a ChatToolWorkflowRequest
+func (t CreateChatCompletionWithPromptJSONBody) AsChatToolWorkflowRequest() (ChatToolWorkflowRequest, error) {
+	var body ChatToolWorkflowRequest
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromChatToolWorkflowRequest overwrites any union data inside the CreateChatCompletionWithPromptJSONBody as the provided ChatToolWorkflowRequest
+func (t *CreateChatCompletionWithPromptJSONBody) FromChatToolWorkflowRequest(v ChatToolWorkflowRequest) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeChatToolWorkflowRequest performs a merge with any union data inside the CreateChatCompletionWithPromptJSONBody, using the provided ChatToolWorkflowRequest
+func (t *CreateChatCompletionWithPromptJSONBody) MergeChatToolWorkflowRequest(v ChatToolWorkflowRequest) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+func (t CreateChatCompletionWithPromptJSONBody) MarshalJSON() ([]byte, error) {
+	b, err := t.union.MarshalJSON()
+	return b, err
+}
+
+func (t *CreateChatCompletionWithPromptJSONBody) UnmarshalJSON(b []byte) error {
+	err := t.union.UnmarshalJSON(b)
+	return err
+}
+
 // RequestEditorFn is the function signature for the RequestEditor callback function
 type RequestEditorFn func(ctx context.Context, req *http.Request) error
 
@@ -1389,18 +1583,18 @@ type ClientInterface interface {
 	// Corresponds with POST /gemini/v1beta/models/{model}:streamGenerateContent (the `StreamGeminiContentWithPrompt` operationId).
 	StreamGeminiContentWithPrompt(ctx context.Context, model string, params *StreamGeminiContentWithPromptParams, body StreamGeminiContentWithPromptJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
-	// CreateChatCompletionWithPromptWithBody Create a chat completion using a published OLP prompt
+	// CreateChatCompletionWithPromptWithBody Create a chat completion with OLP extensions
 	//
-	// For transformed routes, the published prompt replaces explicit messages. Other chat fields use the provider contract.
+	// For transformed routes, a published prompt replaces explicit messages and gateway tool execution may be narrowed to selected published toolsets. Other chat fields use the provider contract.
 	//
 	// Takes any type of body and a specified content type.
 	//
 	// Corresponds with POST /v1/chat/completions (the `CreateChatCompletionWithPrompt` operationId).
 	CreateChatCompletionWithPromptWithBody(ctx context.Context, params *CreateChatCompletionWithPromptParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
 
-	// CreateChatCompletionWithPrompt Create a chat completion using a published OLP prompt
+	// CreateChatCompletionWithPrompt Create a chat completion with OLP extensions
 	//
-	// For transformed routes, the published prompt replaces explicit messages. Other chat fields use the provider contract.
+	// For transformed routes, a published prompt replaces explicit messages and gateway tool execution may be narrowed to selected published toolsets. Other chat fields use the provider contract.
 	//
 	// Takes a body of the `application/json` content type.
 	//
@@ -1613,9 +1807,9 @@ func (c *Client) StreamGeminiContentWithPrompt(ctx context.Context, model string
 	return c.Client.Do(req)
 }
 
-// CreateChatCompletionWithPromptWithBody Create a chat completion using a published OLP prompt
+// CreateChatCompletionWithPromptWithBody Create a chat completion with OLP extensions
 //
-// For transformed routes, the published prompt replaces explicit messages. Other chat fields use the provider contract.
+// For transformed routes, a published prompt replaces explicit messages and gateway tool execution may be narrowed to selected published toolsets. Other chat fields use the provider contract.
 //
 // Takes any type of body and a specified content type.
 //
@@ -1632,9 +1826,9 @@ func (c *Client) CreateChatCompletionWithPromptWithBody(ctx context.Context, par
 	return c.Client.Do(req)
 }
 
-// CreateChatCompletionWithPrompt Create a chat completion using a published OLP prompt
+// CreateChatCompletionWithPrompt Create a chat completion with OLP extensions
 //
-// For transformed routes, the published prompt replaces explicit messages. Other chat fields use the provider contract.
+// For transformed routes, a published prompt replaces explicit messages and gateway tool execution may be narrowed to selected published toolsets. Other chat fields use the provider contract.
 //
 // Takes a body of the `application/json` content type.
 //
@@ -2275,18 +2469,18 @@ type ClientWithResponsesInterface interface {
 	// Corresponds with POST /gemini/v1beta/models/{model}:streamGenerateContent (the `StreamGeminiContentWithPrompt` operationId).
 	StreamGeminiContentWithPromptWithResponse(ctx context.Context, model string, params *StreamGeminiContentWithPromptParams, body StreamGeminiContentWithPromptJSONRequestBody, reqEditors ...RequestEditorFn) (*StreamGeminiContentWithPromptResponse, error)
 
-	// CreateChatCompletionWithPromptWithBodyWithResponse Create a chat completion using a published OLP prompt
+	// CreateChatCompletionWithPromptWithBodyWithResponse Create a chat completion with OLP extensions
 	//
-	// For transformed routes, the published prompt replaces explicit messages. Other chat fields use the provider contract.
+	// For transformed routes, a published prompt replaces explicit messages and gateway tool execution may be narrowed to selected published toolsets. Other chat fields use the provider contract.
 	//
 	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
 	//
 	// Corresponds with POST /v1/chat/completions (the `CreateChatCompletionWithPrompt` operationId).
 	CreateChatCompletionWithPromptWithBodyWithResponse(ctx context.Context, params *CreateChatCompletionWithPromptParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreateChatCompletionWithPromptResponse, error)
 
-	// CreateChatCompletionWithPromptWithResponse Create a chat completion using a published OLP prompt
+	// CreateChatCompletionWithPromptWithResponse Create a chat completion with OLP extensions
 	//
-	// For transformed routes, the published prompt replaces explicit messages. Other chat fields use the provider contract.
+	// For transformed routes, a published prompt replaces explicit messages and gateway tool execution may be narrowed to selected published toolsets. Other chat fields use the provider contract.
 	//
 	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
 	//
@@ -3066,9 +3260,9 @@ func (c *ClientWithResponses) StreamGeminiContentWithPromptWithResponse(ctx cont
 	return ParseStreamGeminiContentWithPromptResponse(rsp)
 }
 
-// CreateChatCompletionWithPromptWithBodyWithResponse Create a chat completion using a published OLP prompt
+// CreateChatCompletionWithPromptWithBodyWithResponse Create a chat completion with OLP extensions
 //
-// For transformed routes, the published prompt replaces explicit messages. Other chat fields use the provider contract.
+// For transformed routes, a published prompt replaces explicit messages and gateway tool execution may be narrowed to selected published toolsets. Other chat fields use the provider contract.
 //
 // Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
 //
@@ -3081,9 +3275,9 @@ func (c *ClientWithResponses) CreateChatCompletionWithPromptWithBodyWithResponse
 	return ParseCreateChatCompletionWithPromptResponse(rsp)
 }
 
-// CreateChatCompletionWithPromptWithResponse Create a chat completion using a published OLP prompt
+// CreateChatCompletionWithPromptWithResponse Create a chat completion with OLP extensions
 //
-// For transformed routes, the published prompt replaces explicit messages. Other chat fields use the provider contract.
+// For transformed routes, a published prompt replaces explicit messages and gateway tool execution may be narrowed to selected published toolsets. Other chat fields use the provider contract.
 //
 // Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
 //

@@ -116,8 +116,10 @@ type Server struct {
 	// Admission enforces the budgets shared by every replica. A nil Admission
 	// means none were configured: keys and targets that bound nothing are
 	// served, and anything that must be metered fails closed.
-	Admission *Admission
-	Debits    SessionDebitLedger
+	Admission     *Admission
+	Debits        SessionDebitLedger
+	WorkflowRuns  WorkflowRunStore
+	WorkflowTools WorkflowToolRunner
 	// Media wires the bounded media substrate into the public surface. A nil
 	// Media leaves the media routes unregistered.
 	Media    *MediaDeps
@@ -632,7 +634,13 @@ func (s *Server) inferenceOperation(family wire.Format, dialect string) http.Han
 			return
 		}
 		defer s.release(r.Context())
-		authority, e := s.authenticate(r, "inference")
+		token, e := presentedKey(r)
+		if e != nil {
+			x.failure, status = e, e.Status
+			writeError(w, e)
+			return
+		}
+		authority, e := s.authenticateRequest(r, token, "inference")
 		if e != nil {
 			x.failure, status = e, e.Status
 			writeError(w, e)
@@ -723,7 +731,14 @@ func (s *Server) inferenceOperation(family wire.Format, dialect string) http.Han
 			writeError(w, e)
 			return
 		}
-		if s.Capture != nil && x.prompt == nil && x.origin == "" && x.operationName() == "generation" {
+		if x.route.ToolExecution == "gateway" {
+			if e := s.prepareWorkflow(r.Context(), x, token); e != nil {
+				x.failure, status = e, e.Status
+				writeError(w, e)
+				return
+			}
+		}
+		if s.Capture != nil && x.prompt == nil && x.workflow == nil && x.origin == "" && x.operationName() == "generation" {
 			x.captureContext = r.Context()
 			x.capture = s.Capture.Resolve(x.captureProject(), x.named().Slug, x.keyID, x.endUserDigest, x.request.accountingID())
 		}
@@ -750,7 +765,17 @@ func (s *Server) inferenceOperation(family wire.Format, dialect string) http.Han
 			writeError(w, e)
 			return
 		}
-		if parsed.Stream {
+		if x.workflow != nil {
+			runID, err := s.WorkflowRuns.Start(ctx, authority, x.named().ID, x.named().RevisionID)
+			if err != nil {
+				x.failure = serverError(http.StatusServiceUnavailable, "tool_execution_unavailable", "The workflow run could not be reserved.")
+				status = x.failure.Status
+				writeError(w, x.failure)
+				return
+			}
+			x.workflow.runID = runID
+		}
+		if parsed.Stream && x.workflow == nil {
 			sw := &streamWriter{w: w, family: family, x: x}
 			x.generation.emit = func(frame []byte) error {
 				err := sw.emit(frame)
@@ -764,12 +789,29 @@ func (s *Server) inferenceOperation(family wire.Format, dialect string) http.Han
 			status = sw.finish(out)
 			return
 		}
-		out = s.executeModelStep(ctx, x, x.generation.parsed)
+		if x.workflow != nil {
+			out = s.executeToolLoop(ctx, x)
+		} else {
+			out = s.executeModelStep(ctx, x, x.generation.parsed)
+		}
 		if out.err != nil {
 			status = out.err.Status
 			if out.err.Status > 0 {
 				writeError(w, out.err)
 			}
+			return
+		}
+		if parsed.Stream && x.workflow != nil {
+			sw := &streamWriter{w: w, family: family, x: x}
+			if err := sw.emit(x.workflow.finalFrames); err != nil {
+				out.err = (&attemptFailure{class: classCancelled}).toError()
+				out.cancelled = true
+			} else {
+				out.committed = true
+				x.facts[len(x.facts)-1].Committed = true
+				x.delivered(s.now())
+			}
+			status = sw.finish(out)
 			return
 		}
 		if err := rc.SetWriteDeadline(time.Now().Add(responseWriteTimeout)); err != nil {
@@ -849,6 +891,22 @@ func (s *Server) prepare(ctx context.Context, x *call, authorize func(*routing.R
 	if e := authorize(&route); e != nil {
 		return e
 	}
+	if route.ToolExecution == "gateway" && x.strict() {
+		return invalidRequest("tool_execution_strict_route", "Gateway tool execution requires a transformed route.", nil)
+	}
+	if route.ToolExecution == "gateway" && !x.generation.toolsetsSelected {
+		x.mirrors = false
+		selected, parsed, e := selectToolsets(route.Toolsets, x.generation.parsed)
+		if e != nil {
+			return e
+		}
+		x.generation.toolsets = selected
+		x.generation.parsed = parsed
+		x.generation.toolsetsSelected = true
+	}
+	if route.ToolExecution == "gateway" && (s.WorkflowRuns == nil || s.WorkflowTools == nil || s.Debits == nil) {
+		return serverError(http.StatusServiceUnavailable, "tool_execution_unavailable", "Gateway tool execution requires durable accounting and tool services.")
+	}
 	if x.pin != nil {
 		if e := s.pinAttempts(ctx, x); e != nil {
 			return e
@@ -917,6 +975,9 @@ func (s *Server) planCanonical(ctx context.Context, x *call) *Error {
 	}
 	options.Accept = func(p routing.Provider, t routing.Target) error {
 		cfg := p.Connector()
+		if x.named().ToolExecution == "gateway" && !p.SupportsToolCalls(t.ProviderModel, x.family.Surface(), x.mode) {
+			return errors.New("model tool-call capability unavailable")
+		}
 		if p.Network != nil && p.Network.CredentialID != "" && s.Runtime.Eligibility(p.Network.CredentialID) != routing.Eligible {
 			return errors.New("provider network credential unavailable")
 		}

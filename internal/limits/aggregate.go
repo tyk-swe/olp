@@ -54,7 +54,7 @@ func aggregateOwnershipSQL(account, project, key, route, labels string) string {
 }
 
 var aggregateEventDeltasSQL = `WITH event_facts AS MATERIALIZED (
- SELECT * FROM olp.attempt_usage_facts WHERE event_id=$5::uuid AND NOT budget_exempt
+ SELECT * FROM olp.attempt_usage_facts WHERE event_id=$5::uuid AND ($6::uuid IS NULL OR attempt_id=$6::uuid) AND NOT budget_exempt
 ), subjects AS MATERIALIZED (
  SELECT ` + usageProjectSQL("f") + ` AS project_id,f.api_key_id,f.route_slug,f.attribution FROM event_facts f
  UNION SELECT ` + budgetProjectSQL("NULLIF($1,'')::uuid", "$2::uuid", "$3") + `,NULLIF($1,'')::uuid,$3,$4::jsonb
@@ -79,7 +79,15 @@ var aggregateEventDeltasSQL = `WITH event_facts AS MATERIALIZED (
 // an existing account adds only this event's eligible facts. A refusal still
 // initializes the subjects whose current balance admission needs to observe.
 func AddAggregateCostDelta(ctx context.Context, tx pgx.Tx, eventID, keyID string, providerID *string, route string, labels map[string]string, at time.Time) ([]CostSnapshot, error) {
-	rows, err := tx.Query(ctx, aggregateEventDeltasSQL, keyID, providerID, route, attribution.JSON(labels), eventID)
+	return addAggregateCostDelta(ctx, tx, eventID, keyID, providerID, route, labels, at, nil)
+}
+
+func AddAggregateAttemptCostDelta(ctx context.Context, tx pgx.Tx, eventID, keyID string, providerID *string, route string, labels map[string]string, at time.Time, attemptID string) ([]CostSnapshot, error) {
+	return addAggregateCostDelta(ctx, tx, eventID, keyID, providerID, route, labels, at, &attemptID)
+}
+
+func addAggregateCostDelta(ctx context.Context, tx pgx.Tx, eventID, keyID string, providerID *string, route string, labels map[string]string, at time.Time, attemptID *string) ([]CostSnapshot, error) {
+	rows, err := tx.Query(ctx, aggregateEventDeltasSQL, keyID, providerID, route, attribution.JSON(labels), eventID, attemptID)
 	if err != nil {
 		return nil, err
 	}

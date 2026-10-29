@@ -67,6 +67,8 @@ func (d durableSessionDebits) Currency(ctx context.Context) (string, error) {
 type sessionDebit struct {
 	id              string
 	claim           string
+	runID           string
+	stepID          string
 	targetID        string
 	routeRevisionID string
 	dispatched      bool
@@ -76,7 +78,7 @@ func (d *sessionDebit) reference() *usage.ExecutionReference {
 	if d == nil {
 		return nil
 	}
-	return &usage.ExecutionReference{DispatchID: d.id, TargetID: d.targetID, RouteRevisionID: d.routeRevisionID}
+	return &usage.ExecutionReference{DispatchID: d.id, RunID: d.runID, StepID: d.stepID, TargetID: d.targetID, RouteRevisionID: d.routeRevisionID}
 }
 
 func canonicalSessionID(id string) string {
@@ -109,8 +111,8 @@ func (s *Server) sessionExposureHeld(ctx context.Context, keyID string) (bool, *
 	return held, nil
 }
 
-func (s *Server) reserveSessionDebit(ctx context.Context, x *call, authority access.Authority, attempt routing.Attempt) *Error {
-	if s.Debits == nil || x.callerCostExempt() {
+func (s *Server) reserveSessionDebit(ctx context.Context, x *call, authority access.Authority, attempt routing.Attempt, supply []cappedOwner) *Error {
+	if s.Debits == nil || x.callerCostExempt() && x.workflow == nil {
 		return nil
 	}
 	snapshot := x.snapshot()
@@ -162,13 +164,36 @@ func (s *Server) reserveSessionDebit(ctx context.Context, x *call, authority acc
 			TargetID: debit.targetID,
 		},
 	}
+	if x.workflow != nil {
+		stepID, err := newSessionDebitID()
+		if err != nil {
+			return limitsUnavailable()
+		}
+		debit.runID, debit.stepID = x.workflow.runID, stepID
+		intent.Kind, intent.RunID, intent.StepID = "model", debit.runID, debit.stepID
+	}
 	owners, requests, ok := sessionDebitBoundaries(x, authority)
 	if !ok {
 		return limitsUnavailable()
 	}
-	state, err := s.Debits.Prepare(ctx, intent, owners)
+	for _, owner := range supply {
+		if owner.limits == nil {
+			continue
+		}
+		owners = append(owners, limits.DebitOwner{ID: owner.id, Kind: "supply", Basis: limits.BasisCost})
+		requests = append(requests, limits.Request{LookupID: owner.lookup, CostOwnerID: owner.id, CostBasis: limits.BasisCost, DailyCostLimit: owner.limits.DailyCostLimit, MonthlyCostLimit: owner.limits.MonthlyCostLimit, LeaseTTL: time.Hour})
+	}
+	var state limits.DebitState
+	if x.workflow != nil {
+		state, err = s.WorkflowRuns.Prepare(ctx, authority, intent, x.workflow.ordinal, owners)
+	} else {
+		state, err = s.Debits.Prepare(ctx, intent, owners)
+	}
 	if err != nil || state != limits.DebitPrepared {
 		return limitsUnavailable()
+	}
+	if x.workflow != nil {
+		x.workflow.ordinal++
 	}
 	if err := s.Debits.Admit(ctx, dispatchID, claimID, requests); err != nil {
 		releaseCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), webrtcCloseTimeout)
