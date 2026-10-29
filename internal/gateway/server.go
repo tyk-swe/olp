@@ -984,7 +984,7 @@ func (s *Server) planCanonical(ctx context.Context, x *call) *Error {
 		return selectionError(&routing.SelectionError{Code: routing.NoEligibleTargets}, route.Slug)
 	}
 	if x.pin != nil {
-		x.budget, x.allowance = 1, 1
+		x.budget, x.allowance = x.spent+1, x.spent+1
 	}
 	return s.enforceContentPolicy(x)
 }

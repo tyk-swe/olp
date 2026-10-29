@@ -177,6 +177,6 @@ type generationCall struct {
 }
 
 type modelStepAccounting struct {
-	facts    int
+	factEnd  int
 	estimate int64
 }

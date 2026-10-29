@@ -301,11 +301,12 @@ func forwardable(status int) bool {
 	return false
 }
 
+// A call owns mutexes, pinned authority, and request-wide accounting, so model steps update it in place.
 func (s *Server) executeModelStep(ctx context.Context, x *call, source *wire.Request) *outcome {
 	if x.generation.firstStep == nil {
 		x.generation.parsed = source
 		out := s.execute(ctx, x)
-		x.generation.firstStep = &modelStepAccounting{facts: len(x.facts), estimate: x.estimate}
+		x.generation.firstStep = &modelStepAccounting{factEnd: len(x.facts), estimate: x.estimate}
 		return out
 	}
 	if source.Route != x.named().Slug || source.Family != x.generation.parsed.Family || x.cache != nil && x.cache.result != "bypass" {
@@ -313,6 +314,13 @@ func (s *Server) executeModelStep(ctx context.Context, x *call, source *wire.Req
 	}
 	stepCtx, cancel := x.routeContext(ctx)
 	defer cancel()
+	first := x.generation.firstStep
+	actual := x.settledTokensFor(x.facts[:first.factEnd], first.estimate)
+	if err := x.lease.Reconcile(stepCtx, *actual); err != nil {
+		if e := s.Admission.outage(x.authority.ID, false, err); e != nil {
+			return &outcome{err: e}
+		}
+	}
 	x.generation.parsed = source
 	x.routeLeg = routeLeg{affinity: x.seed}
 	x.allowance = 0
