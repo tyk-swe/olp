@@ -29,6 +29,7 @@ type Envelope struct {
 	// gateway's keyless requests, whose Origin says why they were made.
 	KeyID                string
 	AgentPrincipalID     string
+	MemberPrincipalID    string
 	DelegationPairDigest string
 	EndUserDigest        string
 	// Origin is empty for a caller request. ParentRequestID is the accounting

@@ -237,7 +237,7 @@
       "post": {
         "operationId": "createDelegation",
         "summary": "Delegate a key to an authenticated workload agent",
-        "description": "Exchange an agent workload assertion and a delegating API key for a one-use inference token. Both principals must belong to the same project and authorize every requested route.",
+        "description": "Exchange an authenticated agent assertion and exactly one delegating API key or member consent code for a one-use inference token. Both principals, the consent and every requested route must authorize the request.",
         "security": [
           {
             "BearerAuth": []
@@ -247,8 +247,17 @@
           {
             "name": "X-OLP-Delegating-Key",
             "in": "header",
-            "required": true,
+            "required": false,
             "description": "The API key that owns the delegated inference and has the delegate scope.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-OLP-Delegation-Consent",
+            "in": "header",
+            "required": false,
+            "description": "A one-use member consent code bound to the authenticated agent, key, project, routes and expiry. Provide either this header or X-OLP-Delegating-Key.",
             "schema": {
               "type": "string"
             }

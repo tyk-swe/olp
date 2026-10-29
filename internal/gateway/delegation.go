@@ -18,6 +18,10 @@ type delegationRuntime interface {
 	ReauthenticateDelegation(context.Context, string, string) (*access.Authority, error)
 }
 
+type memberConsentRuntime interface {
+	ExchangeMemberConsent(context.Context, access.Authority, string, runtime.DelegationBounds) (runtime.DelegationGrant, error)
+}
+
 type delegationAuthenticator struct {
 	runtime   delegationRuntime
 	context   context.Context
@@ -61,19 +65,41 @@ func (s *Server) createDelegation(w http.ResponseWriter, r *http.Request) {
 		writeError(w, consumerFailure(failure))
 		return
 	}
-	key, failure := consumerauth.Authenticate(s.Runtime, r, strings.TrimSpace(r.Header.Get("X-OLP-Delegating-Key")), "delegate", s.cfg.TrustedProxies, s.now())
-	if failure != nil {
-		writeError(w, consumerFailure(failure))
-		return
-	}
 	var bounds runtime.DelegationBounds
 	if err := access.DecodeUnique(r, &bounds, 16<<10); err != nil {
 		writeError(w, invalidRequest("invalid_request", "Provide bounded delegation scopes and routes.", nil))
 		return
 	}
+	if consent := strings.TrimSpace(r.Header.Get("X-OLP-Delegation-Consent")); consent != "" {
+		if strings.TrimSpace(r.Header.Get("X-OLP-Delegating-Key")) != "" {
+			writeError(w, invalidRequest("invalid_request", "Provide either a delegating key or member consent.", nil))
+			return
+		}
+		member, ok := s.Runtime.(memberConsentRuntime)
+		if !ok {
+			writeError(w, serverError(http.StatusServiceUnavailable, "authority_unavailable", "Delegation is unavailable."))
+			return
+		}
+		grant, err := member.ExchangeMemberConsent(r.Context(), agent, consent, bounds)
+		writeDelegationGrant(w, grant, err)
+		return
+	}
+	key, failure := consumerauth.Authenticate(s.Runtime, r, strings.TrimSpace(r.Header.Get("X-OLP-Delegating-Key")), "delegate", s.cfg.TrustedProxies, s.now())
+	if failure != nil {
+		writeError(w, consumerFailure(failure))
+		return
+	}
 	grant, err := delegate.CreateDelegation(r.Context(), agent, key, bounds)
+	writeDelegationGrant(w, grant, err)
+}
+
+func writeDelegationGrant(w http.ResponseWriter, grant runtime.DelegationGrant, err error) {
 	if errors.Is(err, runtime.ErrDelegationBounds) {
 		writeError(w, invalidRequest("invalid_request", "Provide bounded delegation scopes and routes.", nil))
+		return
+	}
+	if errors.Is(err, runtime.ErrInvalidKey) {
+		writeError(w, authenticationError("invalid_api_key", "The member consent is invalid or expired."))
 		return
 	}
 	var problem *access.Problem

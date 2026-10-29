@@ -9068,6 +9068,33 @@ type CredentialSlotDetail struct {
 	Weight            *int32                   `json:"weight,omitempty"`
 }
 
+// DelegationConsent defines model for DelegationConsent.
+type DelegationConsent struct {
+	// Consent One-use consent code, shown only once and bound to the selected agent.
+	Consent   string    `json:"consent"`
+	ExpiresAt time.Time `json:"expires_at"`
+}
+
+// DelegationConsentRequest defines model for DelegationConsentRequest.
+type DelegationConsentRequest struct {
+	AgentId       openapi_types.UUID `json:"agent_id"`
+	AllowedRoutes []string           `json:"allowed_routes"`
+	ApiKeyId      openapi_types.UUID `json:"api_key_id"`
+	TtlSeconds    *int               `json:"ttl_seconds,omitempty"`
+}
+
+// DelegationOption defines model for DelegationOption.
+type DelegationOption struct {
+	// AllowedRoutes Active inference routes currently allowed by both the key and the agent.
+	AllowedRoutes []string           `json:"allowed_routes"`
+	Id            openapi_types.UUID `json:"id"`
+}
+
+// DelegationOptions defines model for DelegationOptions.
+type DelegationOptions struct {
+	Agents []DelegationOption `json:"agents"`
+}
+
 // Discount defines model for Discount.
 type Discount struct {
 	CreatedAt   time.Time          `json:"created_at"`
@@ -12495,7 +12522,7 @@ type RateCardsResponse struct {
 type RecentAuthenticationRequest struct {
 	CurrentPassword *string `json:"current_password,omitempty"`
 
-	// Purpose Exact security operation authorized by this one-time grant: password_enrollment, oidc_link, oidc_unlink or plugin_permit.
+	// Purpose Exact security operation authorized by this one-time grant, including agent_delegation for a consumer key.
 	Purpose    string                                `json:"purpose"`
 	ResourceId nullable.Nullable[openapi_types.UUID] `json:"resource_id,omitempty"`
 }
@@ -15468,6 +15495,11 @@ type ApplyConfigurationParams struct {
 	IdempotencyKey string `json:"Idempotency-Key"`
 }
 
+// GetDelegationOptionsParams defines parameters for GetDelegationOptions.
+type GetDelegationOptionsParams struct {
+	ApiKeyId openapi_types.UUID `form:"api_key_id" json:"api_key_id"`
+}
+
 // ListExecutionDebitsParams defines parameters for ListExecutionDebits.
 type ListExecutionDebitsParams struct {
 	// Cursor Opaque cursor returned by the previous page.
@@ -17216,6 +17248,9 @@ type ApplyConfigurationJSONRequestBody = ConfigurationPromotionRequest
 
 // PlanConfigurationJSONRequestBody defines body for PlanConfiguration for application/json ContentType.
 type PlanConfigurationJSONRequestBody = ConfigurationPromotionRequest
+
+// CreateDelegationConsentJSONRequestBody defines body for CreateDelegationConsent for application/json ContentType.
+type CreateDelegationConsentJSONRequestBody = DelegationConsentRequest
 
 // CreateGuardrailAttachmentJSONRequestBody defines body for CreateGuardrailAttachment for application/json ContentType.
 type CreateGuardrailAttachmentJSONRequestBody = GuardrailAttachment

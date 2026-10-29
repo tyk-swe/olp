@@ -456,7 +456,10 @@ type CreateChatCompletionWithPromptParams struct {
 // CreateDelegationParams defines parameters for CreateDelegation.
 type CreateDelegationParams struct {
 	// XOLPDelegatingKey The API key that owns the delegated inference and has the delegate scope.
-	XOLPDelegatingKey string `json:"X-OLP-Delegating-Key"`
+	XOLPDelegatingKey *string `json:"X-OLP-Delegating-Key,omitempty"`
+
+	// XOLPDelegationConsent A one-use member consent code bound to the authenticated agent, key, project, routes and expiry. Provide either this header or X-OLP-Delegating-Key.
+	XOLPDelegationConsent *string `json:"X-OLP-Delegation-Consent,omitempty"`
 }
 
 // CreateResponseWithPromptParams defines parameters for CreateResponseWithPrompt.
@@ -1603,7 +1606,7 @@ type ClientInterface interface {
 
 	// CreateDelegationWithBody Delegate a key to an authenticated workload agent
 	//
-	// Exchange an agent workload assertion and a delegating API key for a one-use inference token. Both principals must belong to the same project and authorize every requested route.
+	// Exchange an authenticated agent assertion and exactly one delegating API key or member consent code for a one-use inference token. Both principals, the consent and every requested route must authorize the request.
 	//
 	// Takes any type of body and a specified content type.
 	//
@@ -1612,7 +1615,7 @@ type ClientInterface interface {
 
 	// CreateDelegation Delegate a key to an authenticated workload agent
 	//
-	// Exchange an agent workload assertion and a delegating API key for a one-use inference token. Both principals must belong to the same project and authorize every requested route.
+	// Exchange an authenticated agent assertion and exactly one delegating API key or member consent code for a one-use inference token. Both principals, the consent and every requested route must authorize the request.
 	//
 	// Takes a body of the `application/json` content type.
 	//
@@ -1847,7 +1850,7 @@ func (c *Client) CreateChatCompletionWithPrompt(ctx context.Context, params *Cre
 
 // CreateDelegationWithBody Delegate a key to an authenticated workload agent
 //
-// Exchange an agent workload assertion and a delegating API key for a one-use inference token. Both principals must belong to the same project and authorize every requested route.
+// Exchange an authenticated agent assertion and exactly one delegating API key or member consent code for a one-use inference token. Both principals, the consent and every requested route must authorize the request.
 //
 // Takes any type of body and a specified content type.
 //
@@ -1866,7 +1869,7 @@ func (c *Client) CreateDelegationWithBody(ctx context.Context, params *CreateDel
 
 // CreateDelegation Delegate a key to an authenticated workload agent
 //
-// Exchange an agent workload assertion and a delegating API key for a one-use inference token. Both principals must belong to the same project and authorize every requested route.
+// Exchange an authenticated agent assertion and exactly one delegating API key or member consent code for a one-use inference token. Both principals, the consent and every requested route must authorize the request.
 //
 // Takes a body of the `application/json` content type.
 //
@@ -2275,14 +2278,27 @@ func NewCreateDelegationRequestWithBody(server string, params *CreateDelegationP
 
 	if params != nil {
 
-		var headerParam0 string
+		if params.XOLPDelegatingKey != nil {
+			var headerParam0 string
 
-		headerParam0, err = runtime.StyleParamWithOptions("simple", false, "X-OLP-Delegating-Key", params.XOLPDelegatingKey, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationHeader, Type: "string", Format: ""})
-		if err != nil {
-			return nil, err
+			headerParam0, err = runtime.StyleParamWithOptions("simple", false, "X-OLP-Delegating-Key", *params.XOLPDelegatingKey, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationHeader, Type: "string", Format: ""})
+			if err != nil {
+				return nil, err
+			}
+
+			req.Header.Set("X-OLP-Delegating-Key", headerParam0)
 		}
 
-		req.Header.Set("X-OLP-Delegating-Key", headerParam0)
+		if params.XOLPDelegationConsent != nil {
+			var headerParam1 string
+
+			headerParam1, err = runtime.StyleParamWithOptions("simple", false, "X-OLP-Delegation-Consent", *params.XOLPDelegationConsent, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationHeader, Type: "string", Format: ""})
+			if err != nil {
+				return nil, err
+			}
+
+			req.Header.Set("X-OLP-Delegation-Consent", headerParam1)
+		}
 
 	}
 
@@ -2489,7 +2505,7 @@ type ClientWithResponsesInterface interface {
 
 	// CreateDelegationWithBodyWithResponse Delegate a key to an authenticated workload agent
 	//
-	// Exchange an agent workload assertion and a delegating API key for a one-use inference token. Both principals must belong to the same project and authorize every requested route.
+	// Exchange an authenticated agent assertion and exactly one delegating API key or member consent code for a one-use inference token. Both principals, the consent and every requested route must authorize the request.
 	//
 	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
 	//
@@ -2498,7 +2514,7 @@ type ClientWithResponsesInterface interface {
 
 	// CreateDelegationWithResponse Delegate a key to an authenticated workload agent
 	//
-	// Exchange an agent workload assertion and a delegating API key for a one-use inference token. Both principals must belong to the same project and authorize every requested route.
+	// Exchange an authenticated agent assertion and exactly one delegating API key or member consent code for a one-use inference token. Both principals, the consent and every requested route must authorize the request.
 	//
 	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
 	//
@@ -3292,7 +3308,7 @@ func (c *ClientWithResponses) CreateChatCompletionWithPromptWithResponse(ctx con
 
 // CreateDelegationWithBodyWithResponse Delegate a key to an authenticated workload agent
 //
-// Exchange an agent workload assertion and a delegating API key for a one-use inference token. Both principals must belong to the same project and authorize every requested route.
+// Exchange an authenticated agent assertion and exactly one delegating API key or member consent code for a one-use inference token. Both principals, the consent and every requested route must authorize the request.
 //
 // Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
 //
@@ -3307,7 +3323,7 @@ func (c *ClientWithResponses) CreateDelegationWithBodyWithResponse(ctx context.C
 
 // CreateDelegationWithResponse Delegate a key to an authenticated workload agent
 //
-// Exchange an agent workload assertion and a delegating API key for a one-use inference token. Both principals must belong to the same project and authorize every requested route.
+// Exchange an authenticated agent assertion and exactly one delegating API key or member consent code for a one-use inference token. Both principals, the consent and every requested route must authorize the request.
 //
 // Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
 //
