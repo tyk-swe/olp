@@ -158,7 +158,7 @@ var aggregateSnapshotsSQL = reconcileCostWindowsSQL(costOwnerAggregate, true, `a
  UNION ALL
  SELECT a.id,d.closed_at,d.observed_cost,d.observed_charge,0::bigint,0::bigint
  FROM olp.execution_debits d JOIN accounts a ON EXISTS(SELECT 1 FROM olp.execution_debit_owners o WHERE o.dispatch_id=d.id AND o.owner_kind='aggregate' AND o.owner_id=a.id)
- WHERE d.kind='tool' AND d.state='settled'
+ WHERE d.kind IN ('tool','agent') AND d.state='settled'
    AND d.closed_at >= LEAST((SELECT daily_start FROM budget_calendar),(SELECT monthly_start FROM budget_calendar),(SELECT weekly_start FROM budget_calendar)) AND d.closed_at < GREATEST((SELECT daily_end FROM budget_calendar),(SELECT monthly_end FROM budget_calendar),(SELECT weekly_end FROM budget_calendar))
 )`)
 

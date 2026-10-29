@@ -124,7 +124,7 @@ func authenticate(auth Authenticator, r *http.Request, token, scope string) (*ac
 		return auth.Authenticate(token)
 	}
 	delegation, ok := auth.(DelegationAuthenticator)
-	if !ok || (scope != "inference" && scope != "tools") {
+	if !ok || (scope != "inference" && scope != "tools" && scope != "agents") {
 		return nil, runtime.ErrInvalidKey
 	}
 	return delegation.AuthenticateDelegation(r.Context(), token, strings.TrimSpace(r.Header.Get("X-OLP-Agent-Identity")))

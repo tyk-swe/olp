@@ -44,7 +44,7 @@ func (m *Manager) authenticateTaskCapability(ctx context.Context, digest []byte)
 	if err != nil {
 		return nil, ErrStaleAuthority
 	}
-	if len(delegation) != 0 || definition.Agent == nil {
+	if definition.Agent == nil {
 		return nil, ErrInvalidKey
 	}
 	if err := m.AuthorizeAgentTask(keyID, project, publication, revision, workloadRevision, callerExpires); err != nil {
@@ -56,16 +56,27 @@ func (m *Manager) authenticateTaskCapability(ctx context.Context, digest []byte)
 	if !ok {
 		return nil, ErrInvalidKey
 	}
-	if endUser == "" && (policy.Policy.EndUserSource != nil || policy.Policy.EndUserPolicy != nil || policy.ProjectEndUserPolicy != nil) {
+	currentPolicy, err := m.taskCapabilityPolicy(ctx, policy, delegation, keyID, project, publication)
+	if err != nil {
+		return nil, err
+	}
+	if endUser == "" && (currentPolicy.Policy.EndUserSource != nil || currentPolicy.Policy.EndUserPolicy != nil || currentPolicy.ProjectEndUserPolicy != nil) {
 		return nil, ErrInvalidKey
 	}
-	if !policy.AllowsEndUser(endUser) {
+	if !currentPolicy.AllowsEndUser(endUser) {
 		return nil, ErrInvalidKey
 	}
 	boundedExpiry := boundDelegationExpiry(expires, principalExpires)
 	capability := &access.TaskCapability{Digest: hex.EncodeToString(digest), RouteRevisions: slices.Clone(definition.Agent.RouteRevisions), ToolsetRevisions: slices.Clone(definition.Agent.ToolsetRevisions)}
-	callback := policy.TaskAuthority(principal, snapshot, workloadRevision, &boundedExpiry, endUser, capability)
+	callback := currentPolicy.TaskAuthority(principal, snapshot, workloadRevision, &boundedExpiry, endUser, capability)
 	return &callback, nil
+}
+
+func (m *Manager) taskCapabilityPolicy(ctx context.Context, policy access.Authority, delegation []byte, keyID, project, publication string) (*access.Authority, error) {
+	if len(delegation) == 0 {
+		return &policy, nil
+	}
+	return m.authorizeDelegatedTask(ctx, delegation, keyID, project, publication)
 }
 
 func (state authorityState) taskCapabilityPrincipal(keyID, revision string, expiry *time.Time) (access.Authority, access.Authority, string, *time.Time, bool) {

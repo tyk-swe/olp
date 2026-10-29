@@ -173,6 +173,7 @@ func (e AnthropicInferenceErrorType) Valid() bool {
 
 // Defines values for DelegationRequestScopes.
 const (
+	Agents    DelegationRequestScopes = "agents"
 	Inference DelegationRequestScopes = "inference"
 	Tools     DelegationRequestScopes = "tools"
 )
@@ -180,6 +181,8 @@ const (
 // Valid indicates whether the value is a known member of the DelegationRequestScopes enum.
 func (e DelegationRequestScopes) Valid() bool {
 	switch e {
+	case Agents:
+		return true
 	case Inference:
 		return true
 	case Tools:
@@ -490,6 +493,7 @@ type DelegationGrant struct {
 
 // DelegationRequest defines model for DelegationRequest.
 type DelegationRequest struct {
+	AllowedAgents   *[]openapi_types.UUID     `json:"allowed_agents,omitempty"`
 	AllowedRoutes   *[]string                 `json:"allowed_routes,omitempty"`
 	AllowedToolsets *[]openapi_types.UUID     `json:"allowed_toolsets,omitempty"`
 	Scopes          []DelegationRequestScopes `json:"scopes"`

@@ -394,11 +394,11 @@ for their selected backend, not completion of every retrieval adapter.
   user/agent/pair budgets. Fixtures cover signed tool calls, audience refusal,
   replay, renewal and revocation. Live Entra agent identity qualification
   remains separate from generic workload issuer fixtures.
-- [ ] **RM8.4 — Serve A2A workflows** (agent/resource): implement both pinned
-  protocol adapters, retained owner-bound tasks and authenticated callbacks.
-  Verify send/stream/read/cancel/resubscribe, callback accounting, cross-project
-  denial and kill-switch behavior under lost connections. Preserve uncertainty
-  when remote termination cannot be proved. Delegated cases use RM8.3.
+- [x] **RM8.4 — Serve A2A workflows** (agent/resource): local reference fixtures
+  cover the pinned protocol adapters, retained owner-bound and delegated tasks,
+  callbacks, accounting, cross-project denial and revocation. Unconfirmed remote
+  effects remain uncertain. Live external interoperability remains unverified and
+  is part of RM8.6 qualification. See [A2A qualification](../../use/compatibility.md#a2a-qualification).
 - [ ] **RM8.5 — Add traces and operator views** (observability/console): after
   RM8.1–RM8.4, implement bounded OTLP ingestion, scoped evidence links and
   origin-labelled exports. Test content stripping, project isolation, retention

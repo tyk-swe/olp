@@ -1527,13 +1527,14 @@
           "scopes": {
             "type": "array",
             "minItems": 1,
-            "maxItems": 2,
+            "maxItems": 3,
             "uniqueItems": true,
             "items": {
               "type": "string",
               "enum": [
                 "inference",
-                "tools"
+                "tools",
+                "agents"
               ]
             }
           },
@@ -1547,6 +1548,15 @@
             }
           },
           "allowed_toolsets": {
+            "type": "array",
+            "maxItems": 100,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "allowed_agents": {
             "type": "array",
             "maxItems": 100,
             "uniqueItems": true,

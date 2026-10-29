@@ -254,10 +254,11 @@ also use their selected RM5 backend.
   single-use credentials with intersected inference and tool rights, budgets,
   renewal and either-principal revocation. Signed tool calls and accounting are
   fixture-qualified; live Entra agent identity qualification remains separate.
-- [ ] **RM8.4 — A2A workflows:** implement the declared protocol adapters,
-  owner-bound tasks, authenticated callbacks, send/stream/read/cancel/
-  resubscribe operations, callback accounting and kill-switch behavior.
-  Preserve unresolved remote effects; delegated cases use RM8.3.
+- [x] **RM8.4 — A2A workflows:** pinned protocol adapters, owner-bound and
+  delegated tasks, authenticated callbacks, send/stream/read/cancel/resubscribe,
+  accounting and revocation are covered by local reference fixtures. Unresolved
+  remote effects remain visible. Live external interoperability remains part of
+  RM8.6 qualification.
 - [ ] **RM8.5 — Traces and operator views:** implement bounded OTLP ingestion,
   scoped trace links, origin-labelled exports and accessible operator views,
   with content stripping, project isolation and retention controls.

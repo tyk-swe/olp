@@ -370,7 +370,7 @@ func TestDelegatedToolAuthorityRechecksAgent(t *testing.T) {
 	digest := "workload"
 	agent := access.Authority{ID: "agent", AgentPrincipal: true, ProjectID: &project, WorkloadIssuerID: &issuerID, WorkloadDigest: digest, WorkloadRevision: "revision", WorkloadMapping: "mapping", Policy: access.KeyPolicy{Scopes: []string{"tools"}, AllowedToolsets: []string{toolset}}}
 	key := access.Authority{ID: "key", ProjectID: &project, Policy: access.KeyPolicy{Scopes: []string{"tools"}, AllowedToolsets: []string{toolset}}}
-	delegated := *key.Delegated([]string{"tools"}, nil, []string{toolset}, agent, "", "pair", "grant", time.Now().Add(time.Minute))
+	delegated := *key.Delegated([]string{"tools"}, nil, []string{toolset}, nil, agent, "", "pair", "grant", time.Now().Add(time.Minute))
 	for _, test := range []struct {
 		name     string
 		agent    access.Authority

@@ -192,7 +192,7 @@ measure() { # base|head, output, -bench pattern, packages...
   [[ -z ${BENCH_TIME:-} ]] || flags+=(-test.benchtime "$BENCH_TIME")
   [[ -z $skip ]] || flags+=(-test.skip "$skip")
   for package; do
-    if ! (cd -- "${test_dir[$side/$package]}" && "$scratch/bin/$side/${package//\//_}.test" "${flags[@]}") >"$scratch/stdout" 2>"$scratch/stderr"; then
+    if ! (cd -- "${test_dir[$side/$package]}" && GOFLAGS="${GOFLAGS:+$GOFLAGS }-trimpath -buildvcs=false" "$scratch/bin/$side/${package//\//_}.test" "${flags[@]}") >"$scratch/stdout" 2>"$scratch/stderr"; then
       cat "$scratch/stdout" "$scratch/stderr" >&2
       echo "bench-gate: benchmarks of $package failed at the $side" >&2
       exit 1

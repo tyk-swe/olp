@@ -154,8 +154,11 @@ func (s *Server) taskBindingMatches(authority access.Authority, revision agentco
 	if revision.Definition.Agent.OAuth == nil {
 		return binding == ""
 	}
-	if s.Grants == nil {
+	if binding == "" || s.Grants == nil {
 		return false
+	}
+	if authority.DelegationPairDigest != "" {
+		return true
 	}
 	expected, err := s.Grants.AgentBinding(authority, revision.PublicationID, *revision.Definition.Agent)
 	return err == nil && expected == binding
@@ -244,11 +247,14 @@ func (s *Server) send(w http.ResponseWriter, r *http.Request, authority access.A
 		fail(w, request.ID, -32002, "Agent task limit reached")
 		return
 	}
-	if err := s.Ledger.admitRate(r.Context(), authority); err != nil {
+	leases, err := s.Ledger.admitRate(r.Context(), authority)
+	if err != nil {
 		s.Ledger.release(r.Context(), res)
 		fail(w, request.ID, -32002, "Agent send rate exceeded")
 		return
 	}
+	dispatched := false
+	defer func() { finishRate(r.Context(), leases, dispatched) }()
 	if err := s.Runtime.AuthorizeAgentResource(authority, "agents", prepared.Revision.PublicationID, prepared.Revision.ID, prepared.Revision.ProjectID); err != nil {
 		s.Ledger.release(r.Context(), res)
 		fail(w, request.ID, -32603, "Internal error")
@@ -259,6 +265,7 @@ func (s *Server) send(w http.ResponseWriter, r *http.Request, authority access.A
 		fail(w, request.ID, -32603, "Internal error")
 		return
 	}
+	dispatched = true
 	headers["X-OLP-Task-Capability"] = []string{capability}
 	upstream, err := transport.SendMessage(r.Context(), headers, &prepared.Params)
 	if err != nil {

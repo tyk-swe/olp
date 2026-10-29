@@ -5008,6 +5008,53 @@
     }
   },
   {
+    "name": "cancel_a2a_task_remote",
+    "group": "a2a-tasks",
+    "method": "POST",
+    "read_only": false,
+    "path": "/api/v1/a2a-tasks/{task_id}/cancel",
+    "description": "Cancel the task on its pinned remote agent. Requires project change permission and uses the task’s original credential binding.",
+    "scopes": [
+      [
+        "configure"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "task_id",
+        "in": "path",
+        "required": true,
+        "type": "string"
+      }
+    ],
+    "response_headers": {
+      "ETag": "etag"
+    },
+    "body_required": false,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "object",
+          "properties": {
+            "task_id": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "task_id"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "path"
+      ]
+    }
+  },
+  {
     "name": "cancel_grant_enrollment",
     "group": "providers",
     "method": "DELETE",
@@ -16251,6 +16298,53 @@
       "type": "object",
       "properties": {},
       "additionalProperties": false
+    }
+  },
+  {
+    "name": "get_a2a_task_remote",
+    "group": "a2a-tasks",
+    "method": "GET",
+    "read_only": true,
+    "path": "/api/v1/a2a-tasks/{task_id}/remote",
+    "description": "Retrieve the task from its pinned remote agent. Requires project change permission and uses the task’s original credential binding.",
+    "scopes": [
+      [
+        "configure"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "task_id",
+        "in": "path",
+        "required": true,
+        "type": "string"
+      }
+    ],
+    "response_headers": {
+      "ETag": "etag"
+    },
+    "body_required": false,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "object",
+          "properties": {
+            "task_id": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "task_id"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "path"
+      ]
     }
   },
   {

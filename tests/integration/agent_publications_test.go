@@ -2545,6 +2545,11 @@ func TestA2AOAuthGrantLifecycle(t *testing.T) {
 	if result := rpc(secret, "SendMessage", "revoked", a2aTestParams{}); result["error"] == nil || upstreamCalls.Load() != 3 {
 		t.Fatalf("revoked grant did not refuse the request: %v", result)
 	}
+	h.want(owner, http.MethodGet, "/api/v1/a2a-tasks/"+secondTask+"/remote", nil, nil, http.StatusBadGateway)
+	h.want(owner, http.MethodPost, "/api/v1/a2a-tasks/"+secondTask+"/cancel", nil, nil, http.StatusBadGateway)
+	if upstreamCalls.Load() != 3 {
+		t.Fatal("operator task access sent a revoked grant")
+	}
 	runMonitor(secondTask, "outcome_unknown")
 	if upstreamCalls.Load() != 3 {
 		t.Fatal("monitor dispatched cancellation using a revoked grant")
@@ -2558,6 +2563,7 @@ func TestA2AOAuthGrantLifecycle(t *testing.T) {
 	preservedSecret := preservedKey["secret"].(string)
 	oldTask := taskID(rpc(preservedSecret, "SendMessage", "old-task", a2aTestParams{}))
 	oldMonitorTask := taskID(rpc(preservedSecret, "SendMessage", "old-monitor-task", a2aTestParams{}))
+	oldOperatorTask := taskID(rpc(preservedSecret, "SendMessage", "old-operator-task", a2aTestParams{}))
 	var preservedGrant string
 	if err := h.Pool.QueryRow(t.Context(), `SELECT id::text FROM olp.mcp_user_grants WHERE agent_id=$1 AND binding->'identity'->>'id'=$2`, agentID, preservedKey["id"]).Scan(&preservedGrant); err != nil {
 		t.Fatal(err)
@@ -2608,22 +2614,31 @@ func TestA2AOAuthGrantLifecycle(t *testing.T) {
 	if result := rpc(preservedSecret, "CancelTask", "", a2aTestParams{ID: protocol.TaskID(oldTask)}); result["error"] != nil || result["result"] == nil {
 		t.Fatalf("original task could not be canceled after replacement: %v", result)
 	}
+	operatorTaskPath := "/api/v1/a2a-tasks/" + oldOperatorTask
+	read := h.want(owner, http.MethodGet, operatorTaskPath+"/remote", nil, nil, http.StatusOK)
+	if read["id"] != oldOperatorTask || read["status"].(map[string]any)["state"] != string(protocol.TaskStateInputRequired) {
+		t.Fatalf("operator could not read the original task after replacement: %v", read)
+	}
+	canceled := h.want(owner, http.MethodPost, operatorTaskPath+"/cancel", nil, nil, http.StatusOK)
+	if canceled["id"] != oldOperatorTask || canceled["status"].(map[string]any)["state"] != string(protocol.TaskStateCanceled) {
+		t.Fatalf("operator could not cancel the original task after replacement: %v", canceled)
+	}
 	runMonitor(oldMonitorTask, "canceled")
-	if originalCallerCalls.Load() != 5 || replacementOldGrantCalls.Load() != 0 {
+	if originalCallerCalls.Load() != 8 || replacementOldGrantCalls.Load() != 0 {
 		t.Fatal("original task operations did not use their original grant and endpoint")
 	}
-	if result := rpc(secret, "SendMessage", "replacement-missing", a2aTestParams{}); result["error"] == nil || upstreamCalls.Load() != 8 {
+	if result := rpc(secret, "SendMessage", "replacement-missing", a2aTestParams{}); result["error"] == nil || upstreamCalls.Load() != 11 {
 		t.Fatalf("replacement endpoint reused an old grant: %v", result)
 	}
 	authority.SignInAs(testutil.OAuthIdentity{Subject: "replacement-user", Account: "replacement-account"})
 	enroll(key["id"].(string))
 	replacementTask := taskID(rpc(secret, "SendMessage", "replacement-enrolled", a2aTestParams{}))
-	if upstreamCalls.Load() != 9 || replacementOldGrantCalls.Load() != 0 {
+	if upstreamCalls.Load() != 12 || replacementOldGrantCalls.Load() != 0 {
 		t.Fatal("replacement endpoint did not use its new grant")
 	}
 	expectedAfterRetirement := func() int32 {
 		if !access.OIDCTestBuild() {
-			return 10
+			return 13
 		}
 		base := "/api/v1/projects/" + project
 		templates := h.want(owner, http.MethodGet, base+"/limit-templates", nil, nil, http.StatusOK)
@@ -2690,18 +2705,18 @@ func TestA2AOAuthGrantLifecycle(t *testing.T) {
 		startPersonal(secret, http.StatusForbidden)
 		completeEnrollment(startPersonal(userA, http.StatusCreated))
 		userTask := taskID(rpc(userA, "SendMessage", "alice", a2aTestParams{}))
-		if result := rpc(userB, "SendMessage", "bob-before-enrollment", a2aTestParams{}); result["error"] == nil || upstreamCalls.Load() != 10 {
+		if result := rpc(userB, "SendMessage", "bob-before-enrollment", a2aTestParams{}); result["error"] == nil || upstreamCalls.Load() != 13 {
 			t.Fatalf("another end user used Alice's grant: %v", result)
 		}
-		if result := rpc(userB, "GetTask", "", a2aTestParams{ID: protocol.TaskID(userTask)}); result["error"] == nil || upstreamCalls.Load() != 10 {
+		if result := rpc(userB, "GetTask", "", a2aTestParams{ID: protocol.TaskID(userTask)}); result["error"] == nil || upstreamCalls.Load() != 13 {
 			t.Fatalf("another end user accessed Alice's task: %v", result)
 		}
 		completeEnrollment(startPersonal(userB, http.StatusCreated))
 		taskID(rpc(userB, "SendMessage", "bob", a2aTestParams{}))
-		if result := rpc(userB, "GetTask", "", a2aTestParams{ID: protocol.TaskID(userTask)}); result["error"] == nil || upstreamCalls.Load() != 11 {
+		if result := rpc(userB, "GetTask", "", a2aTestParams{ID: protocol.TaskID(userTask)}); result["error"] == nil || upstreamCalls.Load() != 14 {
 			t.Fatalf("another enrolled end user accessed Alice's task: %v", result)
 		}
-		return 12
+		return 15
 	}()
 	h.want(owner, http.MethodDelete, "/api/v1/agents/"+agentID, nil, withMatch(republished, idem("agent-oauth-retire")), http.StatusNoContent)
 	runMonitor(replacementTask, "canceled")
