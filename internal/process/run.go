@@ -17,6 +17,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/a2a"
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/agents"
 	"github.com/tyk-swe/olp/internal/batches"
 	"github.com/tyk-swe/olp/internal/billing"
 	"github.com/tyk-swe/olp/internal/cache"
@@ -403,6 +404,8 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 			}}
 			if limiter != nil {
 				toolServer.Limiter = limiter
+				gw.WorkflowRuns = &agents.WorkflowStore{Pool: pool, Auth: auth, Debits: &limits.DebitStore{Pool: pool, Limiter: limiter}}
+				gw.WorkflowTools = toolServer
 			}
 			toolServer.Register(public)
 		}

@@ -63,6 +63,9 @@ func (x *call) cacheHeaders(h http.Header) {
 }
 
 func (s *Server) initializeCache(x *call) *Error {
+	if x.workflow != nil {
+		return nil
+	}
 	// New endpoint contracts require explicit cache qualification.
 	if x.prompt != nil || x.family == wire.Completions || operationregistry.TransformedServing(x.operationName()) {
 		return nil

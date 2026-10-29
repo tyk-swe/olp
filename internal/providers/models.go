@@ -15,7 +15,7 @@ import (
 func modelJSON(m storedModel) map[string]any {
 	capabilities := make([]map[string]any, 0, len(m.Capabilities))
 	for _, c := range m.Capabilities {
-		capabilities = append(capabilities, map[string]any{"operation": c.Operation, "surface": c.Surface, "mode": c.Mode, "source": c.Source, "certified_at": c.CertifiedAt})
+		capabilities = append(capabilities, map[string]any{"operation": c.Operation, "surface": c.Surface, "mode": c.Mode, "source": c.Source, "certified_at": c.CertifiedAt, "tool_calls": c.ToolCalls})
 	}
 	return map[string]any{"id": m.ID, "upstream_model": m.UpstreamModel, "display_name": m.DisplayName, "enabled": m.Enabled, "capabilities": capabilities, "discovered_at": m.DiscoveredAt}
 }
@@ -464,11 +464,14 @@ func (s *Server) certify(r *http.Request, p access.Principal) (access.Reply, err
 			certified++
 			c.Source, c.CertifiedAt = "certified", &at
 			c.CredentialFingerprint = defaultSlot.credentialFingerprint(&current.Configuration)
+			c.ToolCalls = c.Operation == "generation" && c.Surface == "openai" && (c.Mode == ModeUnary || c.Mode == ModeStreaming) && s.certifyToolCalls(probeCtx, &current.Configuration, credential, m.UpstreamModel, c.Mode == ModeStreaming) == nil
+			item["tool_calls"] = c.ToolCalls
 		} else {
 			pe := classify(err)
 			item["detail"], item["error_code"] = pe.Detail, pe.Code
 			c.Source, c.CertifiedAt = "declared", nil
 			c.CredentialFingerprint = ""
+			c.ToolCalls = false
 		}
 		results = append(results, item)
 	}

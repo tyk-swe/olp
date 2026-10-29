@@ -14,8 +14,8 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Create a chat completion using a published OLP prompt
-         * @description For transformed routes, the published prompt replaces explicit messages. Other chat fields use the provider contract.
+         * Create a chat completion with OLP extensions
+         * @description For transformed routes, a published prompt replaces explicit messages and gateway tool execution may be narrowed to selected published toolsets. Other chat fields use the provider contract.
          */
         post: operations["createChatCompletionWithPrompt"];
         delete?: never;
@@ -171,9 +171,21 @@ export interface components {
         ChatPromptRequest: {
             model: string;
             olp_prompt: components["schemas"]["PublishedPromptReference"];
+            olp_toolsets?: components["schemas"]["ChatToolsetSelection"];
         } & {
             [key: string]: unknown;
         };
+        ChatToolWorkflowRequest: {
+            model: string;
+            messages: {
+                [key: string]: unknown;
+            }[];
+            olp_toolsets?: components["schemas"]["ChatToolsetSelection"];
+        } & {
+            [key: string]: unknown;
+        };
+        /** @description Select a subset of the published toolsets allowed by the route. An empty array selects no toolsets. */
+        ChatToolsetSelection: string[];
         /** @description Specify exactly one published label or immutable revision ID. */
         PublishedPromptReference: components["schemas"]["PromptLabelReference"] | components["schemas"]["PromptRevisionReference"];
         PromptLabelReference: {
@@ -379,7 +391,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["ChatPromptRequest"];
+                "application/json": components["schemas"]["ChatPromptRequest"] | components["schemas"]["ChatToolWorkflowRequest"];
             };
         };
         responses: {

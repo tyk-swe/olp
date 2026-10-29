@@ -18,6 +18,9 @@ import (
 	"time"
 
 	"github.com/tyk-swe/olp/internal/access"
+	agentworkflows "github.com/tyk-swe/olp/internal/agents"
+	"github.com/tyk-swe/olp/internal/limits"
+	"github.com/tyk-swe/olp/internal/mcp"
 	"github.com/tyk-swe/olp/internal/runtime"
 	"github.com/tyk-swe/olp/internal/usage"
 
@@ -205,7 +208,7 @@ func TestWorkloadAgentMemberConsentIssuesAgentBoundGrant(t *testing.T) {
 			t.Fatalf("consent or grant appeared in exported usage: %v", saved.err)
 		}
 	}
-	secondKey := h.want(owner, "POST", "/api/v1/api-keys", map[string]any{"name": "replacement member key", "project_id": project, "scopes": []string{"inference", "delegate"}, "allowed_routes": []string{"member-chat"}}, idem("replacement-member-key"), http.StatusCreated)
+	secondKey := h.want(owner, "POST", "/api/v1/api-keys", map[string]any{"name": "replacement member key", "project_id": project, "scopes": []string{"inference", "delegate"}, "allowed_routes": []string{"member-chat", "member-workflow"}}, idem("replacement-member-key"), http.StatusCreated)
 	h.refresh()
 	issueAndInfer(member, secondKey["id"].(string))
 	issueAndInfer(owner, key["id"].(string))
@@ -214,6 +217,78 @@ func TestWorkloadAgentMemberConsentIssuesAgentBoundGrant(t *testing.T) {
 	accountingErr := h.Pool.QueryRow(context.Background(), `SELECT count(*) FILTER (WHERE member_principal_id=$2),count(DISTINCT delegation_pair_digest) FILTER (WHERE member_principal_id=$2),count(*) FILTER (WHERE member_principal_id=$3),count(DISTINCT delegation_pair_digest) FILTER (WHERE member_principal_id=$3),count(DISTINCT delegation_pair_digest) FROM olp.attempt_usage_facts WHERE api_key_id IN ($1,$5) AND agent_principal_id=$4`, key["id"], memberID, ownerID, agentID, secondKey["id"]).Scan(&memberAttempts, &memberPairs, &ownerAttempts, &ownerPairs, &distinctPairs)
 	if accountingErr != nil || memberAttempts != 2 || memberPairs != 1 || ownerAttempts != 1 || ownerPairs != 1 || distinctPairs != 2 {
 		t.Fatalf("member attribution or stable pair: %d %d %d %d %d %v", memberAttempts, memberPairs, ownerAttempts, ownerPairs, distinctPairs, accountingErr)
+	}
+	workloadProject(t, h, owner, project, map[string]any{"generation": []string{"member-chat", "member-workflow"}})
+	workflowVendor := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/responses") {
+			writeResponsesFixture(w, vendorModel, "probe", false)
+			return
+		}
+		var input map[string]json.RawMessage
+		if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+			t.Errorf("decode model request: %v", err)
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		message := map[string]any{"role": "assistant", "content": "done"}
+		finish := "stop"
+		if len(input["tool_choice"]) > 0 {
+			message = map[string]any{"role": "assistant", "content": nil, "tool_calls": []any{map[string]any{"id": "probe", "type": "function", "function": map[string]any{"name": "olp_certification_probe", "arguments": "{}"}}}}
+			finish = "tool_calls"
+		}
+		writeJSON(w, map[string]any{"id": "member-workflow", "object": "chat.completion", "created": 1, "model": vendorModel, "choices": []any{map[string]any{"index": 0, "message": message, "finish_reason": finish}}, "usage": map[string]any{"prompt_tokens": 2, "completion_tokens": 1, "total_tokens": 3}})
+	}))
+	defer workflowVendor.Close()
+	workflowProvider := activeAzureProviderInProject(t, h, owner, "Member workflow provider", workflowVendor.URL, &project, []any{map[string]any{"operation": "generation", "surface": "openai", "mode": "unary"}})
+	addBatchPrice(t, h, owner, workflowProvider["id"].(string), "", time.Now().Add(-time.Hour))
+	workflowDraft := h.want(owner, "POST", "/api/v1/route-drafts", map[string]any{"project_id": project, "slug": "member-workflow", "overall_timeout_ms": 10000, "max_attempts": 1, "fidelity": map[string]any{"mode": "transformed"}, "tool_execution": "gateway", "targets": []any{map[string]any{"provider_id": workflowProvider["id"], "provider_model": vendorModel, "priority": 0, "weight": 1, "timeout_ms": 5000}}}, idem("member-workflow-route"), http.StatusCreated)
+	workflowPath := "/api/v1/route-drafts/" + workflowDraft["id"].(string)
+	workflowValidated := h.want(owner, "POST", workflowPath+"/validate", nil, etagHeader(workflowDraft), http.StatusOK)
+	h.want(owner, "POST", workflowPath+"/activate", nil, withMatch(workflowValidated, idem("activate-member-workflow")), http.StatusOK)
+	workflowKey := secondKey
+	store := &limits.DebitStore{Pool: h.Pool, Limiter: limiter}
+	h.Gateway.Debits = gateway.DurableSessionDebits(store)
+	h.Gateway.WorkflowRuns = &agentworkflows.WorkflowStore{Pool: h.Pool, Auth: h.AuthKey, Debits: store}
+	h.Gateway.WorkflowTools = &mcp.Server{Runtime: h.Runtime}
+	h.refresh()
+	h.want(owner, "POST", "/api/v1/profile/reauthenticate", map[string]any{"current_password": accessPassword, "purpose": "agent_delegation", "resource_id": workflowKey["id"]}, nil, http.StatusNoContent)
+	workflowConsent := h.want(owner, "POST", "/api/v1/delegation-consents", map[string]any{"agent_id": agentID, "api_key_id": workflowKey["id"], "allowed_routes": []string{"member-workflow"}}, nil, http.StatusCreated)
+	workflowIssued, workflowBody := h.do(nil, "POST", "/v1/delegations", runtime.DelegationBounds{Scopes: []string{"inference"}, AllowedRoutes: []string{"member-workflow"}}, map[string]string{"Authorization": "Bearer " + assertion, "X-OLP-Delegation-Consent": workflowConsent["consent"].(string)})
+	if workflowIssued.StatusCode != http.StatusCreated {
+		t.Fatalf("workflow consent exchange: %d %s", workflowIssued.StatusCode, workflowBody)
+	}
+	var workflowGrant runtime.DelegationGrant
+	if err := json.Unmarshal(workflowBody, &workflowGrant); err != nil || workflowGrant.Token == "" {
+		t.Fatalf("workflow grant missing: %v", err)
+	}
+	previousSink := h.Gateway.Sink
+	workflowPersisted := make(chan error, 1)
+	h.Gateway.Sink = &gateway.PersistingSink{Persist: func(ctx context.Context, event *usage.Event, payload []byte) error {
+		var storedAgent, storedMember, storedPair string
+		if err := h.Pool.QueryRow(ctx, `SELECT COALESCE(agent_principal_id::text,''),COALESCE(member_principal_id::text,''),COALESCE(delegation_pair_digest,'') FROM olp.attempt_usage_facts WHERE request_id=$1`, event.RequestID).Scan(&storedAgent, &storedMember, &storedPair); err != nil {
+			workflowPersisted <- err
+			return err
+		}
+		if storedAgent != agentID || storedMember != ownerID || storedPair != event.DelegationPairDigest || event.MemberPrincipalID != ownerID {
+			err := fmt.Errorf("workflow model attribution missing before terminal persistence: agent=%s member=%s pair_matches=%t", storedAgent, storedMember, storedPair == event.DelegationPairDigest)
+			workflowPersisted <- err
+			return err
+		}
+		_, err := usage.PersistEvent(ctx, h.Pool, event, payload)
+		workflowPersisted <- err
+		return err
+	}}
+	workflowResponse, workflowResponseBody := h.do(nil, "POST", "/v1/chat/completions", map[string]any{"model": "member-workflow", "messages": []any{map[string]string{"role": "user", "content": "hello"}}}, map[string]string{"Authorization": "Bearer " + workflowGrant.Token, "X-OLP-Agent-Identity": assertion})
+	h.Gateway.Sink = previousSink
+	if workflowResponse.StatusCode != http.StatusOK {
+		t.Fatalf("consented workflow inference: %d %s", workflowResponse.StatusCode, workflowResponseBody)
+	}
+	if err := <-workflowPersisted; err != nil {
+		t.Fatal(err)
+	}
+	var workflowPairs int
+	if err := h.Pool.QueryRow(context.Background(), `SELECT count(DISTINCT delegation_pair_digest) FROM olp.attempt_usage_facts WHERE api_key_id IN ($1,$2) AND agent_principal_id=$3 AND member_principal_id=$4`, key["id"], workflowKey["id"], agentID, ownerID).Scan(&workflowPairs); err != nil || workflowPairs != 1 {
+		t.Fatalf("workflow member pair changed across keys: %d %v", workflowPairs, err)
 	}
 	var leaked bool
 	privacyErr := h.Pool.QueryRow(context.Background(), `SELECT EXISTS(SELECT 1 FROM olp.agent_delegations d WHERE position($1 in to_jsonb(d)::text)>0 OR position($2 in to_jsonb(d)::text)>0) OR EXISTS(SELECT 1 FROM olp.audit a WHERE position($1 in to_jsonb(a)::text)>0 OR position($2 in to_jsonb(a)::text)>0) OR EXISTS(SELECT 1 FROM olp.attempt_usage_facts f WHERE position($1 in to_jsonb(f)::text)>0 OR position($2 in to_jsonb(f)::text)>0)`, code, grant.Token).Scan(&leaked)

@@ -19,7 +19,11 @@ import (
 	"time"
 
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/agentcontract"
+	"github.com/tyk-swe/olp/internal/agents"
 	"github.com/tyk-swe/olp/internal/gateway"
+	"github.com/tyk-swe/olp/internal/limits"
+	"github.com/tyk-swe/olp/internal/mcp"
 	"github.com/tyk-swe/olp/internal/usage"
 )
 
@@ -728,5 +732,318 @@ func TestGatewayFromEmptyInstallationToSDKTraffic(t *testing.T) {
 	}
 	if up.cancels.Load() != 0 {
 		t.Fatalf("vendor observed %d cancellations", up.cancels.Load())
+	}
+}
+
+func TestGatewayToolWorkflowSettlesOneRun(t *testing.T) {
+	h := newAccessHarness(t)
+	owner := h.owner()
+	project := createProject(h, owner, "Gateway workflow")
+	const argument = "workflow-private-argument"
+	const answer = "workflow-private-result"
+	const prompt = "workflow-private-prompt"
+	var toolCalls atomic.Int64
+	var blockTool atomic.Bool
+	toolStarted := make(chan struct{})
+	toolServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodDelete {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		var request struct {
+			ID     any    `json:"id"`
+			Method string `json:"method"`
+		}
+		if json.NewDecoder(r.Body).Decode(&request) != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		var result any
+		switch request.Method {
+		case "notifications/initialized":
+			w.WriteHeader(http.StatusAccepted)
+			return
+		case "initialize":
+			w.Header().Set("Mcp-Session-Id", "workflow-session")
+			result = map[string]any{"protocolVersion": "2025-11-25", "capabilities": map[string]any{"tools": map[string]any{}}}
+		case "tools/list":
+			schema := map[string]any{"type": "object", "properties": map[string]any{"query": map[string]any{"type": "string"}}, "required": []string{"query"}}
+			result = map[string]any{"tools": []any{map[string]any{"name": "lookup", "inputSchema": schema}, map[string]any{"name": "change", "inputSchema": schema}}}
+		case "tools/call":
+			if blockTool.Load() {
+				close(toolStarted)
+				<-r.Context().Done()
+				return
+			}
+			var settledModels int
+			if err := h.Pool.QueryRow(r.Context(), `SELECT count(*) FROM olp.execution_debits WHERE kind='model' AND state='settled'`).Scan(&settledModels); err != nil || settledModels != 1 {
+				t.Errorf("tool dispatched before model settlement: settled=%d error=%v", settledModels, err)
+			}
+			toolCalls.Add(1)
+			result = map[string]any{"content": []any{map[string]any{"type": "text", "text": answer}}, "isError": false}
+		default:
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"jsonrpc": "2.0", "id": request.ID, "result": result})
+	}))
+	defer toolServer.Close()
+	registered := h.want(owner, "POST", "/api/v1/mcp-servers", map[string]any{"name": "Workflow tools", "project_id": project, "transport": "streamable_http", "endpoint": toolServer.URL, "enabled": true, "unit_price": "0.25"}, idem("workflow-server"), 201)
+	serverID := mcpExecString(t, registered, "id")
+	tool := agentcontract.Tool{ServerID: serverID, RevisionID: mcpExecString(t, registered, "revision_id"), CatalogDigest: mcpExecString(t, mcpExecObject(t, registered, "catalog"), "digest"), Name: "lookup", Alias: agentcontract.ToolAlias(serverID, "lookup"), Classification: "read_only"}
+	approvalTool := agentcontract.Tool{ServerID: serverID, RevisionID: tool.RevisionID, CatalogDigest: tool.CatalogDigest, Name: "change", Alias: agentcontract.ToolAlias(serverID, "change")}
+	toolset := h.want(owner, "POST", "/api/v1/toolsets", map[string]any{"project_id": project, "name": "Workflow toolset", "toolset": agentcontract.Toolset{Tools: []agentcontract.Tool{tool, approvalTool}}}, idem("workflow-toolset"), 201)
+	toolsetID := mcpExecString(t, toolset, "id")
+	h.want(owner, "POST", "/api/v1/toolsets/"+toolsetID+"/publish", nil, withMatch(toolset, idem("workflow-publish")), 200)
+
+	var modelCalls atomic.Int64
+	var noUsage atomic.Bool
+	var blockModel atomic.Bool
+	modelStarted := make(chan struct{})
+	vendor := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/responses") {
+			writeResponsesFixture(w, vendorModel, "done", false)
+			return
+		}
+		var input map[string]json.RawMessage
+		if json.NewDecoder(r.Body).Decode(&input) != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		if blockModel.Load() && len(input["tool_choice"]) == 0 {
+			close(modelStarted)
+			<-r.Context().Done()
+			return
+		}
+		name := ""
+		if len(input["tool_choice"]) > 0 {
+			name = "olp_certification_probe"
+		} else if len(input["tools"]) > 0 {
+			modelCalls.Add(1)
+			if !strings.Contains(string(input["messages"]), `"role":"tool"`) {
+				name = tool.Alias
+				if strings.Contains(string(input["messages"]), "workflow-approval-test") {
+					name = approvalTool.Alias
+				}
+			} else {
+				var settledModels, settledTools int
+				if err := h.Pool.QueryRow(r.Context(), `SELECT count(*) FILTER (WHERE kind='model' AND state='settled'),count(*) FILTER (WHERE kind='tool' AND state='settled') FROM olp.execution_debits`).Scan(&settledModels, &settledTools); err != nil || settledModels != 1 || settledTools != 1 {
+					t.Errorf("next model dispatched before previous steps settled: models=%d tools=%d error=%v", settledModels, settledTools, err)
+				}
+			}
+		}
+		message := map[string]any{"role": "assistant", "content": "done"}
+		finish := "stop"
+		if name != "" {
+			finish = "tool_calls"
+			message = map[string]any{"role": "assistant", "content": nil, "tool_calls": []any{map[string]any{"id": "call-one", "type": "function", "function": map[string]any{"name": name, "arguments": `{"query":"` + argument + `"}`}}}}
+		}
+		body := map[string]any{"id": "chatcmpl-workflow", "object": "chat.completion", "created": 1, "model": vendorModel, "choices": []any{map[string]any{"index": 0, "message": message, "finish_reason": finish}}}
+		if !noUsage.Load() || len(input["tools"]) == 0 || len(input["tool_choice"]) > 0 {
+			body["usage"] = map[string]any{"prompt_tokens": 4, "completion_tokens": 6, "total_tokens": 10}
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(body)
+	}))
+	defer vendor.Close()
+	_, provider, slug, _ := provisionOpenAIInProject(t, h, owner, &project, vendor.URL,
+		[]any{map[string]any{"operation": "generation", "surface": "openai", "mode": "unary"}}, []string{"generation"},
+		map[string]any{"tool_execution": "gateway", "toolsets": []string{toolsetID}, "budget": map[string]any{"daily_cost_limit": "10000000"}})
+	addBatchPrice(t, h, owner, provider["id"].(string), "", time.Now().Add(-time.Hour))
+	key := h.want(owner, "POST", "/api/v1/api-keys", map[string]any{"name": "Workflow caller", "project_id": project, "scopes": []string{"inference", "tools"}, "allowed_routes": []string{slug}, "allowed_toolsets": []string{toolsetID}}, idem("workflow-key"), 201)
+	keyID, secret := mcpExecString(t, key, "id"), mcpExecString(t, key, "secret")
+	valkey, prefix, _ := acctKeyspace(t)
+	limiter, err := limits.New(valkey, strings.TrimSuffix(prefix, ":"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	limiter.UseDurableDebits(h.Pool)
+	store := &limits.DebitStore{Pool: h.Pool, Limiter: limiter}
+	h.Gateway.Admission = gateway.NewAdmission(limiter, func() limits.OutagePolicy { return limits.FailClosed }, slog.New(slog.DiscardHandler))
+	h.Gateway.Debits = gateway.DurableSessionDebits(store)
+	h.Gateway.WorkflowRuns = &agents.WorkflowStore{Pool: h.Pool, Auth: h.AuthKey, Debits: store}
+	h.Gateway.WorkflowTools = &mcp.Server{Runtime: h.Runtime, Egress: &h.Policy, Auth: h.AuthKey, Limiter: limiter, Ledger: &mcp.DurableLedger{Pool: h.Pool, Store: store, Auth: h.AuthKey}}
+	emitter := usage.NewEmitter(8)
+	h.Gateway.Sink = &gateway.AccountingSink{Emitter: emitter}
+	h.refresh()
+	leader, err := limits.TryAcquireLeader(t.Context(), h.Pool)
+	if err != nil || leader == nil {
+		t.Fatalf("acquire cost reconciliation leader: %v", err)
+	}
+	if _, err := leader.Reconcile(t.Context(), limiter, time.Now()); err != nil {
+		leader.Close(t.Context())
+		t.Fatalf("reconcile workflow cost caps: %v", err)
+	}
+	leader.Close(t.Context())
+	status, response, _ := h.gateway("POST", "/v1/chat/completions", secret, map[string]any{"model": slug, "messages": []any{map[string]any{"role": "user", "content": prompt}}, "max_tokens": 100})
+	if status != http.StatusOK || modelCalls.Load() != 2 || toolCalls.Load() != 1 || !strings.Contains(fmt.Sprint(response), "done") {
+		t.Fatalf("workflow did not finish: status=%d response=%v model_calls=%d tool_calls=%d", status, response, modelCalls.Load(), toolCalls.Load())
+	}
+	var runID string
+	var steps, models, tools, settled, distinctRuns int
+	if err := h.Pool.QueryRow(t.Context(), `SELECT min(run_id::text),count(*),count(*) FILTER(WHERE kind='model'),count(*) FILTER(WHERE kind='tool'),count(*) FILTER(WHERE state='settled'),count(DISTINCT run_id) FROM olp.execution_debits WHERE api_key_id=$1`, keyID).Scan(&runID, &steps, &models, &tools, &settled, &distinctRuns); err != nil {
+		t.Fatal(err)
+	}
+	if steps != 3 || models != 2 || tools != 1 || settled != 3 || distinctRuns != 1 {
+		t.Fatalf("workflow did not settle distinct steps under one run: steps=%d models=%d tools=%d settled=%d runs=%d", steps, models, tools, settled, distinctRuns)
+	}
+	var order string
+	if err := h.Pool.QueryRow(t.Context(), `SELECT string_agg(s.ordinal::text || ':' || d.kind, ',' ORDER BY s.ordinal) FROM olp.agent_steps s JOIN olp.execution_debits d ON d.id=s.dispatch_id WHERE s.run_id=$1`, runID).Scan(&order); err != nil {
+		t.Fatal(err)
+	}
+	if order != "0:model,1:tool,2:model" {
+		t.Fatalf("workflow did not persist each dispatch in order: %s", order)
+	}
+	var before, after string
+	if err := h.Pool.QueryRow(t.Context(), `SELECT COALESCE(sum(accrued),0)::text FROM olp.api_key_cost_windows WHERE api_key_id=$1 AND window_kind='day'`, keyID).Scan(&before); err != nil {
+		t.Fatal(err)
+	}
+	emitter.Close()
+	emitter.RunWriter(t.Context(), persistedUsageStream{h.Pool}, "workflow", slog.Default())
+	if err := h.Pool.QueryRow(t.Context(), `SELECT COALESCE(sum(accrued),0)::text FROM olp.api_key_cost_windows WHERE api_key_id=$1 AND window_kind='day'`, keyID).Scan(&after); err != nil {
+		t.Fatal(err)
+	}
+	if before != after {
+		t.Fatalf("terminal receipt changed settled spend: before=%s after=%s", before, after)
+	}
+	var keyMatches, positiveCharge bool
+	if err := h.Pool.QueryRow(t.Context(), `SELECT COALESCE(sum(observed_charge),0)=$2::numeric, COALESCE(sum(observed_charge),0)>0 FROM olp.execution_debits WHERE run_id=$1`, runID, after).Scan(&keyMatches, &positiveCharge); err != nil {
+		t.Fatal(err)
+	}
+	if !keyMatches || !positiveCharge {
+		t.Fatalf("key spend did not equal the settled workflow charges: spend=%s matches=%t positive=%t", after, keyMatches, positiveCharge)
+	}
+	var supplyMatches bool
+	var supplyOwners int
+	if err := h.Pool.QueryRow(t.Context(), `SELECT
+		(SELECT COALESCE(sum(w.accrued),0) FROM olp.supply_cost_windows w JOIN olp.route_revisions rr ON rr.route_id=w.owner_id JOIN olp.agent_runs r ON r.route_revision_id=rr.id WHERE r.id=$1 AND w.window_kind='day') =
+		(SELECT COALESCE(sum(d.observed_cost),0) FROM olp.execution_debits d WHERE d.run_id=$1 AND d.kind='model'),
+		(SELECT count(*) FROM olp.execution_debit_owners o JOIN olp.execution_debits d ON d.id=o.dispatch_id JOIN olp.agent_runs r ON r.id=d.run_id JOIN olp.route_revisions rr ON rr.id=r.route_revision_id WHERE d.run_id=$1 AND d.kind='model' AND o.owner_kind='supply' AND o.basis='cost' AND o.owner_id=rr.route_id)`, runID).Scan(&supplyMatches, &supplyOwners); err != nil {
+		t.Fatal(err)
+	}
+	if !supplyMatches || supplyOwners != 2 {
+		t.Fatalf("supply settlement differs from model costs: matches=%t debit owners=%d", supplyMatches, supplyOwners)
+	}
+	var facts, counted, receipts int
+	if err := h.Pool.QueryRow(t.Context(), `SELECT count(*),count(*) FILTER(WHERE request_counted) FROM olp.attempt_usage_facts WHERE event_id=$1`, runID).Scan(&facts, &counted); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.Pool.QueryRow(t.Context(), `SELECT count(*) FROM olp.request_metadata_event_receipts WHERE event_id=$1`, runID).Scan(&receipts); err != nil {
+		t.Fatal(err)
+	}
+	if facts != 2 || counted != 1 || receipts != 1 {
+		t.Fatalf("workflow accounting lost or duplicated request data: facts=%d counted=%d receipts=%d", facts, counted, receipts)
+	}
+	var stored string
+	if err := h.Pool.QueryRow(t.Context(), `SELECT
+		COALESCE((SELECT row_to_json(r)::text FROM olp.agent_runs r WHERE r.id=$1),'') ||
+		COALESCE((SELECT string_agg(row_to_json(s)::text,'') FROM olp.agent_steps s WHERE s.run_id=$1),'') ||
+		COALESCE((SELECT string_agg(row_to_json(d)::text,'') FROM olp.execution_debits d WHERE d.run_id=$1),'') ||
+		COALESCE((SELECT string_agg(row_to_json(c)::text,'') FROM olp.mcp_tool_calls c JOIN olp.execution_debits d ON d.id=c.dispatch_id WHERE d.run_id=$1),'') ||
+		COALESCE((SELECT string_agg(row_to_json(f)::text,'') FROM olp.attempt_usage_facts f WHERE f.event_id=$1),'')`, runID).Scan(&stored); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(stored, prompt) || strings.Contains(stored, argument) || strings.Contains(stored, answer) {
+		t.Fatal("workflow stored conversation or tool content in its run or attempt records")
+	}
+	noUsage.Store(true)
+	h.Gateway.Sink = &gateway.AccountingSink{Emitter: usage.NewEmitter(8)}
+	status, response, _ = h.gateway("POST", "/v1/chat/completions", secret, map[string]any{"model": slug, "messages": []any{map[string]any{"role": "user", "content": prompt}}, "max_tokens": 100})
+	if status != http.StatusServiceUnavailable || modelCalls.Load() != 3 || toolCalls.Load() != 1 {
+		t.Fatalf("workflow continued after missing model usage: status=%d response=%v model_calls=%d tool_calls=%d", status, response, modelCalls.Load(), toolCalls.Load())
+	}
+	var unknown int
+	var exposureRetained bool
+	if err := h.Pool.QueryRow(t.Context(), `SELECT count(*),COALESCE(bool_and(closed_at IS NULL AND charge_bound>0),false) FROM olp.execution_debits WHERE api_key_id=$1 AND state='outcome_unknown'`, keyID).Scan(&unknown, &exposureRetained); err != nil {
+		t.Fatal(err)
+	}
+	if unknown != 1 || !exposureRetained {
+		t.Fatalf("missing usage did not retain model exposure: unknown=%d retained=%t", unknown, exposureRetained)
+	}
+	noUsage.Store(false)
+	h.Gateway.Sink = &gateway.AccountingSink{Emitter: usage.NewEmitter(8)}
+	status, response, _ = h.gateway("POST", "/v1/chat/completions", secret, map[string]any{"model": slug, "messages": []any{map[string]any{"role": "user", "content": "workflow-approval-test"}}, "max_tokens": 100})
+	if status != http.StatusForbidden || !strings.Contains(fmt.Sprint(response), "tool_approval_required") || modelCalls.Load() != 4 || toolCalls.Load() != 1 {
+		t.Fatalf("unclassified tool was not refused before dispatch: status=%d response=%v model_calls=%d tool_calls=%d", status, response, modelCalls.Load(), toolCalls.Load())
+	}
+
+	unavailable := httptest.NewServer(vendor.Config.Handler)
+	unavailableProvider := activeAzureProviderInProject(t, h, owner, "Unavailable workflow provider", unavailable.URL, &project, []any{map[string]any{"operation": "generation", "surface": "openai", "mode": "unary"}})
+	const fallbackSlug = "workflow-fallback"
+	draft := h.want(owner, "POST", "/api/v1/route-drafts", map[string]any{
+		"project_id": project, "slug": fallbackSlug, "operations": []string{"generation"}, "overall_timeout_ms": 10000, "max_attempts": 2,
+		"fidelity": map[string]any{"mode": "transformed"}, "tool_execution": "gateway",
+		"targets": []any{
+			map[string]any{"provider_id": unavailableProvider["id"], "provider_model": vendorModel, "priority": 0, "weight": 1, "timeout_ms": 5000},
+			map[string]any{"provider_id": provider["id"], "provider_model": vendorModel, "priority": 1, "weight": 1, "timeout_ms": 5000},
+		},
+	}, idem("workflow-fallback-draft"), http.StatusCreated)
+	h.want(owner, "POST", "/api/v1/route-drafts/"+draft["id"].(string)+"/activate", nil, withMatch(draft, idem("workflow-fallback-activate")), http.StatusOK)
+	fallbackKey := h.want(owner, "POST", "/api/v1/api-keys", map[string]any{"name": "Workflow fallback", "project_id": project, "scopes": []string{"inference"}, "allowed_routes": []string{fallbackSlug}}, idem("workflow-fallback-key"), http.StatusCreated)
+	unavailable.Close()
+	h.refresh()
+	h.Gateway.Sink = &gateway.AccountingSink{Emitter: usage.NewEmitter(8)}
+	status, response, _ = h.gateway("POST", "/v1/chat/completions", mcpExecString(t, fallbackKey, "secret"), map[string]any{"model": fallbackSlug, "messages": []any{map[string]any{"role": "user", "content": prompt}}, "max_tokens": 100})
+	if status != http.StatusOK || !strings.Contains(fmt.Sprint(response), "done") {
+		t.Fatalf("workflow did not fall back after an unsent attempt: status=%d response=%v", status, response)
+	}
+	var notSent, fallbackSettled int
+	if err := h.Pool.QueryRow(t.Context(), `SELECT count(*) FILTER (WHERE state='not_accepted' AND closed_at IS NOT NULL),count(*) FILTER (WHERE state='settled') FROM olp.execution_debits WHERE api_key_id=$1`, fallbackKey["id"]).Scan(&notSent, &fallbackSettled); err != nil {
+		t.Fatal(err)
+	}
+	if notSent != 1 || fallbackSettled != 1 {
+		t.Fatalf("unsent debit remained open: not_accepted=%d settled=%d", notSent, fallbackSettled)
+	}
+
+	const revocationSlug = "workflow-revocation"
+	revocationDraft := h.want(owner, "POST", "/api/v1/route-drafts", map[string]any{
+		"project_id": project, "slug": revocationSlug, "operations": []string{"generation"}, "overall_timeout_ms": 20000, "max_attempts": 1,
+		"fidelity": map[string]any{"mode": "transformed"}, "tool_execution": "gateway", "toolsets": []string{toolsetID},
+		"targets": []any{map[string]any{"provider_id": provider["id"], "provider_model": vendorModel, "priority": 0, "weight": 1, "timeout_ms": 15000}},
+	}, idem("workflow-revocation-draft"), http.StatusCreated)
+	h.want(owner, "POST", "/api/v1/route-drafts/"+revocationDraft["id"].(string)+"/activate", nil, withMatch(revocationDraft, idem("workflow-revocation-activate")), http.StatusOK)
+	for _, scenario := range []struct {
+		name    string
+		block   *atomic.Bool
+		started <-chan struct{}
+	}{
+		{name: "model", block: &blockModel, started: modelStarted},
+		{name: "tool", block: &blockTool, started: toolStarted},
+	} {
+		revocationKey := h.want(owner, "POST", "/api/v1/api-keys", map[string]any{"name": "Workflow revocation " + scenario.name, "project_id": project, "scopes": []string{"inference", "tools"}, "allowed_routes": []string{revocationSlug}, "allowed_toolsets": []string{toolsetID}}, idem("workflow-revocation-key-"+scenario.name), http.StatusCreated)
+		h.refresh()
+		h.Gateway.Sink = &gateway.AccountingSink{Emitter: usage.NewEmitter(8)}
+		scenario.block.Store(true)
+		result := make(chan int, 1)
+		go func() {
+			status, _, _ := h.gateway("POST", "/v1/chat/completions", mcpExecString(t, revocationKey, "secret"), map[string]any{"model": revocationSlug, "messages": []any{map[string]any{"role": "user", "content": prompt}}, "max_tokens": 100})
+			result <- status
+		}()
+		select {
+		case <-scenario.started:
+		case <-time.After(10 * time.Second):
+			t.Fatalf("%s dispatch did not start", scenario.name)
+		}
+		current := h.want(owner, "GET", "/api/v1/api-keys/"+revocationKey["id"].(string), nil, nil, http.StatusOK)
+		h.want(owner, "POST", "/api/v1/api-keys/"+revocationKey["id"].(string)+"/revoke", nil, withMatch(current, idem("workflow-revoke-"+scenario.name)), http.StatusOK)
+		h.refresh()
+		select {
+		case status := <-result:
+			if status != http.StatusForbidden {
+				t.Fatalf("revoked %s call returned status %d", scenario.name, status)
+			}
+		case <-time.After(10 * time.Second):
+			t.Fatalf("revoked %s call was not cancelled", scenario.name)
+		}
+		scenario.block.Store(false)
+		var unknown int
+		var retained bool
+		if err := h.Pool.QueryRow(t.Context(), `SELECT count(*),COALESCE(bool_and(closed_at IS NULL),false) FROM olp.execution_debits WHERE api_key_id=$1 AND kind=$2 AND state='outcome_unknown'`, revocationKey["id"], scenario.name).Scan(&unknown, &retained); err != nil {
+			t.Fatal(err)
+		}
+		if unknown != 1 || !retained {
+			t.Fatalf("revoked %s call did not retain unknown exposure: count=%d retained=%t", scenario.name, unknown, retained)
+		}
 	}
 }

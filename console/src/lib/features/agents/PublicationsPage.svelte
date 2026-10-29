@@ -206,6 +206,15 @@
       if (isCurrent() && version === epoch) error = errorMessage(cause);
     }
   }
+  function classifyTool(alias: string, value: string) {
+    const classification =
+      value === 'read_only' || value === 'approval_required'
+        ? value
+        : undefined;
+    form.tools = form.tools.map((tool) =>
+      tool.alias === alias ? { ...tool, classification } : tool
+    );
+  }
   async function inspect() {
     if (!current) return;
     const version = epoch;
@@ -407,7 +416,20 @@
               >{/each}{/if}
           <ul>
             {#each form.tools as tool (tool.alias)}<li>
-                {tool.name} <code>{tool.revision_id}</code><button
+                {tool.name} <code>{tool.revision_id}</code>
+                <label>
+                  Execution classification
+                  <select
+                    aria-label={`Execution classification for ${tool.name}`}
+                    value={tool.classification ?? ''}
+                    onchange={(event) =>
+                      classifyTool(tool.alias, event.currentTarget.value)}
+                  >
+                    <option value="">Unclassified</option>
+                    <option value="read_only">Read-only</option>
+                    <option value="approval_required">Approval required</option>
+                  </select>
+                </label><button
                   type="button"
                   onclick={() =>
                     (form.tools = form.tools.filter(
@@ -418,7 +440,8 @@
           </ul>
           <p>
             Each selected tool pins its certified server revision; catalog drift
-            revokes its live authority.
+            revokes its live authority. Only tools explicitly marked read-only
+            can run automatically in a gateway workflow.
           </p>
           {#if server && pricing}
             <fieldset>

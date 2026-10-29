@@ -85,6 +85,8 @@ type Runtime interface {
 
 type ReserveInput struct {
 	Authority         access.Authority
+	RunID             string
+	Ordinal           int
 	ToolsetID         string
 	ToolsetRevisionID string
 	ReleaseID         string

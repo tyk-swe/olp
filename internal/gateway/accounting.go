@@ -127,7 +127,7 @@ func accountingEvent(e Envelope) (*usage.Event, error) {
 	if len(e.Attempts) > 0 && e.Attempts[len(e.Attempts)-1].GenerationUsageDeferred {
 		return nil, nil
 	}
-	eventID, err := uuidNewV7()
+	eventID, err := accountingEventID(e)
 	if err != nil {
 		return nil, fmt.Errorf("generate usage event ID: %w", err)
 	}
@@ -213,7 +213,7 @@ type attemptPolicy struct {
 func accountingAttempt(e Envelope, index int) (usage.Attempt, error) {
 	fact := &e.Attempts[index]
 	evidence := attemptUsage(fact, e.Operation)
-	attemptID, err := uuidNewV7()
+	attemptID, err := accountingAttemptID(e, index)
 	if err != nil {
 		return usage.Attempt{}, fmt.Errorf("generate usage attempt ID: %w", err)
 	}
