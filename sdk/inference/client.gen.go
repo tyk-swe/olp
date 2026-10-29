@@ -18,6 +18,39 @@ import (
 	openapi_types "github.com/oapi-codegen/runtime/types"
 )
 
+// Defines values for A2AAgentCardPreferredTransport.
+const (
+	LegacyJSONRPC A2AAgentCardPreferredTransport = "JSONRPC"
+)
+
+// Valid indicates whether the value is a known member of the A2AAgentCardPreferredTransport enum.
+func (e A2AAgentCardPreferredTransport) Valid() bool {
+	switch e {
+	case LegacyJSONRPC:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for A2AAgentCardProtocolVersion.
+const (
+	Legacy03  A2AAgentCardProtocolVersion = "0.3"
+	Legacy030 A2AAgentCardProtocolVersion = "0.3.0"
+)
+
+// Valid indicates whether the value is a known member of the A2AAgentCardProtocolVersion enum.
+func (e A2AAgentCardProtocolVersion) Valid() bool {
+	switch e {
+	case Legacy03:
+		return true
+	case Legacy030:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for A2AAgentCardSupportedInterfacesProtocolBinding.
 const (
 	JSONRPC A2AAgentCardSupportedInterfacesProtocolBinding = "JSONRPC"
@@ -35,12 +68,15 @@ func (e A2AAgentCardSupportedInterfacesProtocolBinding) Valid() bool {
 
 // Defines values for A2AAgentCardSupportedInterfacesProtocolVersion.
 const (
+	N03 A2AAgentCardSupportedInterfacesProtocolVersion = "0.3"
 	N10 A2AAgentCardSupportedInterfacesProtocolVersion = "1.0"
 )
 
 // Valid indicates whether the value is a known member of the A2AAgentCardSupportedInterfacesProtocolVersion enum.
 func (e A2AAgentCardSupportedInterfacesProtocolVersion) Valid() bool {
 	switch e {
+	case N03:
+		return true
 	case N10:
 		return true
 	default:
@@ -66,9 +102,13 @@ func (e A2ARequestJsonrpc) Valid() bool {
 // Defines values for A2ARequestMethod.
 const (
 	GetTask              A2ARequestMethod = "GetTask"
+	Messagesend          A2ARequestMethod = "message/send"
+	Messagestream        A2ARequestMethod = "message/stream"
 	SendMessage          A2ARequestMethod = "SendMessage"
 	SendStreamingMessage A2ARequestMethod = "SendStreamingMessage"
 	SubscribeToTask      A2ARequestMethod = "SubscribeToTask"
+	Tasksget             A2ARequestMethod = "tasks/get"
+	Tasksresubscribe     A2ARequestMethod = "tasks/resubscribe"
 )
 
 // Valid indicates whether the value is a known member of the A2ARequestMethod enum.
@@ -76,11 +116,19 @@ func (e A2ARequestMethod) Valid() bool {
 	switch e {
 	case GetTask:
 		return true
+	case Messagesend:
+		return true
+	case Messagestream:
+		return true
 	case SendMessage:
 		return true
 	case SendStreamingMessage:
 		return true
 	case SubscribeToTask:
+		return true
+	case Tasksget:
+		return true
+	case Tasksresubscribe:
 		return true
 	default:
 		return false
@@ -188,11 +236,20 @@ func (e ExportTracesParamsContentEncoding) Valid() bool {
 
 // A2AAgentCard defines model for A2AAgentCard.
 type A2AAgentCard struct {
-	Capabilities         map[string]interface{}    `json:"capabilities"`
-	DefaultInputModes    *[]string                 `json:"defaultInputModes,omitempty"`
-	DefaultOutputModes   *[]string                 `json:"defaultOutputModes,omitempty"`
-	Description          *string                   `json:"description,omitempty"`
-	Name                 string                    `json:"name"`
+	Capabilities       map[string]interface{} `json:"capabilities"`
+	DefaultInputModes  *[]string              `json:"defaultInputModes,omitempty"`
+	DefaultOutputModes *[]string              `json:"defaultOutputModes,omitempty"`
+	Description        *string                `json:"description,omitempty"`
+	Name               string                 `json:"name"`
+
+	// PreferredTransport Preferred binding for A2A 0.3 clients
+	PreferredTransport *A2AAgentCardPreferredTransport `json:"preferredTransport,omitempty"`
+
+	// ProtocolVersion Protocol version for A2A 0.3 clients
+	ProtocolVersion *A2AAgentCardProtocolVersion `json:"protocolVersion,omitempty"`
+
+	// Security Bearer authentication requirements for A2A 0.3 clients
+	Security             *[]map[string]interface{} `json:"security,omitempty"`
 	SecurityRequirements []map[string]interface{}  `json:"securityRequirements"`
 	SecuritySchemes      map[string]interface{}    `json:"securitySchemes"`
 	Skills               *[]map[string]interface{} `json:"skills,omitempty"`
@@ -201,8 +258,17 @@ type A2AAgentCard struct {
 		ProtocolVersion A2AAgentCardSupportedInterfacesProtocolVersion `json:"protocolVersion"`
 		Url             string                                         `json:"url"`
 	} `json:"supportedInterfaces"`
-	Version string `json:"version"`
+
+	// Url Preferred JSON-RPC endpoint for A2A 0.3 clients
+	Url     *string `json:"url,omitempty"`
+	Version string  `json:"version"`
 }
+
+// A2AAgentCardPreferredTransport Preferred binding for A2A 0.3 clients
+type A2AAgentCardPreferredTransport string
+
+// A2AAgentCardProtocolVersion Protocol version for A2A 0.3 clients
+type A2AAgentCardProtocolVersion string
 
 // A2AAgentCardSupportedInterfacesProtocolBinding defines model for A2AAgentCard.SupportedInterfaces.ProtocolBinding.
 type A2AAgentCardSupportedInterfacesProtocolBinding string
@@ -216,7 +282,7 @@ type A2ARequest struct {
 	Jsonrpc A2ARequestJsonrpc `json:"jsonrpc"`
 	Method  A2ARequestMethod  `json:"method"`
 
-	// Params A2A 1.0 method parameters. Task references must use an OLP task ID; push notifications and tenant selection are not supported.
+	// Params Parameters for the selected A2A version and method. Task references must use an OLP task ID; push notifications and tenant selection are not supported.
 	Params map[string]interface{} `json:"params"`
 }
 
@@ -246,7 +312,7 @@ type A2AResponse struct {
 	Id      *A2AResponse_Id    `json:"id"`
 	Jsonrpc A2AResponseJsonrpc `json:"jsonrpc"`
 
-	// Result A2A 1.0 task or message result with OLP task IDs.
+	// Result A task or message result in the published A2A version with OLP task IDs.
 	Result *map[string]interface{} `json:"result,omitempty"`
 }
 
@@ -1990,7 +2056,7 @@ type ClientInterface interface {
 
 	// CallA2AAgentWithBody Send a message to or read and subscribe to a task from a published A2A agent
 	//
-	// Supports A2A 1.0 JSON-RPC SendMessage, SendStreamingMessage, GetTask, and SubscribeToTask. Requires the agents scope and an explicit allowlist entry. OLP task IDs are bound to the initiating key and project. Streaming methods return events as they arrive, with a one MiB maximum per event. Disconnecting does not cancel the upstream task.
+	// Supports A2A 0.3 and 1.0 JSON-RPC send, streaming send, task read, and subscription methods. The published protocol determines the accepted methods and response format. Requires the agents scope and an explicit allowlist entry. OLP task IDs are bound to the initiating key and project. Streaming methods return events as they arrive, with a one MiB maximum per event. Disconnecting does not cancel the upstream task.
 	//
 	// Takes any type of body and a specified content type.
 	//
@@ -1999,7 +2065,7 @@ type ClientInterface interface {
 
 	// CallA2AAgent Send a message to or read and subscribe to a task from a published A2A agent
 	//
-	// Supports A2A 1.0 JSON-RPC SendMessage, SendStreamingMessage, GetTask, and SubscribeToTask. Requires the agents scope and an explicit allowlist entry. OLP task IDs are bound to the initiating key and project. Streaming methods return events as they arrive, with a one MiB maximum per event. Disconnecting does not cancel the upstream task.
+	// Supports A2A 0.3 and 1.0 JSON-RPC send, streaming send, task read, and subscription methods. The published protocol determines the accepted methods and response format. Requires the agents scope and an explicit allowlist entry. OLP task IDs are bound to the initiating key and project. Streaming methods return events as they arrive, with a one MiB maximum per event. Disconnecting does not cancel the upstream task.
 	//
 	// Takes a body of the `application/json` content type.
 	//
@@ -2133,7 +2199,7 @@ type ClientInterface interface {
 
 // CallA2AAgentWithBody Send a message to or read and subscribe to a task from a published A2A agent
 //
-// Supports A2A 1.0 JSON-RPC SendMessage, SendStreamingMessage, GetTask, and SubscribeToTask. Requires the agents scope and an explicit allowlist entry. OLP task IDs are bound to the initiating key and project. Streaming methods return events as they arrive, with a one MiB maximum per event. Disconnecting does not cancel the upstream task.
+// Supports A2A 0.3 and 1.0 JSON-RPC send, streaming send, task read, and subscription methods. The published protocol determines the accepted methods and response format. Requires the agents scope and an explicit allowlist entry. OLP task IDs are bound to the initiating key and project. Streaming methods return events as they arrive, with a one MiB maximum per event. Disconnecting does not cancel the upstream task.
 //
 // Takes any type of body and a specified content type.
 //
@@ -2152,7 +2218,7 @@ func (c *Client) CallA2AAgentWithBody(ctx context.Context, agent openapi_types.U
 
 // CallA2AAgent Send a message to or read and subscribe to a task from a published A2A agent
 //
-// Supports A2A 1.0 JSON-RPC SendMessage, SendStreamingMessage, GetTask, and SubscribeToTask. Requires the agents scope and an explicit allowlist entry. OLP task IDs are bound to the initiating key and project. Streaming methods return events as they arrive, with a one MiB maximum per event. Disconnecting does not cancel the upstream task.
+// Supports A2A 0.3 and 1.0 JSON-RPC send, streaming send, task read, and subscription methods. The published protocol determines the accepted methods and response format. Requires the agents scope and an explicit allowlist entry. OLP task IDs are bound to the initiating key and project. Streaming methods return events as they arrive, with a one MiB maximum per event. Disconnecting does not cancel the upstream task.
 //
 // Takes a body of the `application/json` content type.
 //
@@ -2959,7 +3025,7 @@ type ClientWithResponsesInterface interface {
 
 	// CallA2AAgentWithBodyWithResponse Send a message to or read and subscribe to a task from a published A2A agent
 	//
-	// Supports A2A 1.0 JSON-RPC SendMessage, SendStreamingMessage, GetTask, and SubscribeToTask. Requires the agents scope and an explicit allowlist entry. OLP task IDs are bound to the initiating key and project. Streaming methods return events as they arrive, with a one MiB maximum per event. Disconnecting does not cancel the upstream task.
+	// Supports A2A 0.3 and 1.0 JSON-RPC send, streaming send, task read, and subscription methods. The published protocol determines the accepted methods and response format. Requires the agents scope and an explicit allowlist entry. OLP task IDs are bound to the initiating key and project. Streaming methods return events as they arrive, with a one MiB maximum per event. Disconnecting does not cancel the upstream task.
 	//
 	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
 	//
@@ -2968,7 +3034,7 @@ type ClientWithResponsesInterface interface {
 
 	// CallA2AAgentWithResponse Send a message to or read and subscribe to a task from a published A2A agent
 	//
-	// Supports A2A 1.0 JSON-RPC SendMessage, SendStreamingMessage, GetTask, and SubscribeToTask. Requires the agents scope and an explicit allowlist entry. OLP task IDs are bound to the initiating key and project. Streaming methods return events as they arrive, with a one MiB maximum per event. Disconnecting does not cancel the upstream task.
+	// Supports A2A 0.3 and 1.0 JSON-RPC send, streaming send, task read, and subscription methods. The published protocol determines the accepted methods and response format. Requires the agents scope and an explicit allowlist entry. OLP task IDs are bound to the initiating key and project. Streaming methods return events as they arrive, with a one MiB maximum per event. Disconnecting does not cancel the upstream task.
 	//
 	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
 	//
@@ -3739,7 +3805,7 @@ func (r ExportTracesResponse) ContentType() string {
 
 // CallA2AAgentWithBodyWithResponse Send a message to or read and subscribe to a task from a published A2A agent
 //
-// Supports A2A 1.0 JSON-RPC SendMessage, SendStreamingMessage, GetTask, and SubscribeToTask. Requires the agents scope and an explicit allowlist entry. OLP task IDs are bound to the initiating key and project. Streaming methods return events as they arrive, with a one MiB maximum per event. Disconnecting does not cancel the upstream task.
+// Supports A2A 0.3 and 1.0 JSON-RPC send, streaming send, task read, and subscription methods. The published protocol determines the accepted methods and response format. Requires the agents scope and an explicit allowlist entry. OLP task IDs are bound to the initiating key and project. Streaming methods return events as they arrive, with a one MiB maximum per event. Disconnecting does not cancel the upstream task.
 //
 // Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
 //
@@ -3754,7 +3820,7 @@ func (c *ClientWithResponses) CallA2AAgentWithBodyWithResponse(ctx context.Conte
 
 // CallA2AAgentWithResponse Send a message to or read and subscribe to a task from a published A2A agent
 //
-// Supports A2A 1.0 JSON-RPC SendMessage, SendStreamingMessage, GetTask, and SubscribeToTask. Requires the agents scope and an explicit allowlist entry. OLP task IDs are bound to the initiating key and project. Streaming methods return events as they arrive, with a one MiB maximum per event. Disconnecting does not cancel the upstream task.
+// Supports A2A 0.3 and 1.0 JSON-RPC send, streaming send, task read, and subscription methods. The published protocol determines the accepted methods and response format. Requires the agents scope and an explicit allowlist entry. OLP task IDs are bound to the initiating key and project. Streaming methods return events as they arrive, with a one MiB maximum per event. Disconnecting does not cancel the upstream task.
 //
 // Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
 //
@@ -4005,6 +4071,9 @@ func ParseCallA2AAgentResponse(rsp *http.Response) (*CallA2AAgentResponse, error
 		break // No content-type
 
 	case rsp.StatusCode == 404:
+		break // No content-type
+
+	case rsp.StatusCode == 415:
 		break // No content-type
 
 	case rsp.StatusCode == 502:

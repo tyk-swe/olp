@@ -13,6 +13,7 @@ import (
 
 	protocol "github.com/a2aproject/a2a-go/v2/a2a"
 	"github.com/a2aproject/a2a-go/v2/a2aclient"
+	"github.com/a2aproject/a2a-go/v2/a2acompat/a2av0"
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/agentcontract"
@@ -75,6 +76,16 @@ func (s *Server) rpc(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, http.StatusText(status), status)
 		return
 	}
+	version := requestProtocol(r)
+	if version == "" {
+		http.Error(w, "Unsupported A2A version", http.StatusBadRequest)
+		return
+	}
+	mediaType, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
+	if err != nil || mediaType != "application/json" {
+		http.Error(w, "Unsupported binding", http.StatusUnsupportedMediaType)
+		return
+	}
 	body, err := io.ReadAll(io.LimitReader(r.Body, maxRPCBytes+1))
 	if err != nil || len(body) > maxRPCBytes {
 		fail(w, nil, -32600, "Request payload validation error")
@@ -93,26 +104,46 @@ func (s *Server) rpc(w http.ResponseWriter, r *http.Request) {
 		fail(w, request.ID, -32600, "Request payload validation error")
 		return
 	}
-	switch request.Method {
+	decoded, err := decodeRequest(version, request)
+	if err != nil {
+		if version != revision.Definition.Agent.Protocol {
+			http.Error(w, "Unsupported A2A version", http.StatusBadRequest)
+			return
+		}
+		if errors.Is(err, errMethodNotDeclared) {
+			fail(w, request.ID, -32601, "Method not found")
+			return
+		}
+		fail(w, request.ID, -32602, "Invalid parameters")
+		return
+	}
+	if version != revision.Definition.Agent.Protocol && (decoded.Method == "SendMessage" || decoded.Method == "SendStreamingMessage") {
+		var params protocol.SendMessageRequest
+		if json.Unmarshal(decoded.Params, &params) != nil || params.Message == nil || params.Message.TaskID == "" {
+			http.Error(w, "Unsupported A2A version", http.StatusBadRequest)
+			return
+		}
+	}
+	switch decoded.Method {
 	case "SendMessage":
-		s.send(w, r, authority, revision, release, request)
+		s.send(w, r, authority, revision, release, version, decoded)
 	case "GetTask":
-		s.getTask(w, r, authority, revision, release, request)
+		s.getTask(w, r, authority, revision, release, version, decoded)
 	case "SendStreamingMessage":
-		s.sendStream(w, r, authority, revision, release, request)
+		s.sendStream(w, r, authority, revision, release, version, decoded)
 	case "SubscribeToTask":
-		s.subscribe(w, r, authority, revision, release, request)
+		s.subscribe(w, r, authority, revision, release, version, decoded)
 	default:
 		fail(w, request.ID, -32601, "Method not found")
 	}
 }
 
-func (s *Server) pinnedRevision(authority access.Authority, publication agentcontract.Revision, task task, release *runtime.Release) (agentcontract.Revision, bool) {
+func (s *Server) pinnedRevision(authority access.Authority, publication agentcontract.Revision, task task, release *runtime.Release, version string) (agentcontract.Revision, bool) {
 	if release == nil || release.Snapshot == nil {
 		return agentcontract.Revision{}, false
 	}
 	for _, revision := range release.Snapshot.AgentPublications {
-		if revision.ID == task.RevisionID && revision.PublicationID == publication.PublicationID && revision.ProjectID == publication.ProjectID && revision.Definition.Agent != nil && revision.Definition.Agent.Protocol == "a2a-1.0.0" && s.Runtime.AuthorizeAgentResource(authority, "agents", revision.PublicationID, revision.ID, revision.ProjectID) == nil {
+		if revision.ID == task.RevisionID && revision.PublicationID == publication.PublicationID && revision.ProjectID == publication.ProjectID && revision.Definition.Agent != nil && revision.Definition.Agent.Protocol == version && s.Runtime.AuthorizeAgentResource(authority, "agents", revision.PublicationID, revision.ID, revision.ProjectID) == nil {
 			return revision, true
 		}
 	}
@@ -125,7 +156,7 @@ type preparedSend struct {
 	ExpectedUpstreamID string
 }
 
-func (s *Server) prepareSend(ctx context.Context, authority access.Authority, revision agentcontract.Revision, release *runtime.Release, raw json.RawMessage) (preparedSend, *rpcError) {
+func (s *Server) prepareSend(ctx context.Context, authority access.Authority, revision agentcontract.Revision, release *runtime.Release, version string, raw json.RawMessage) (preparedSend, *rpcError) {
 	var params protocol.SendMessageRequest
 	if json.Unmarshal(raw, &params) != nil || params.Message == nil || params.Message.ID == "" || params.Message.Role != protocol.MessageRoleUser || len(params.Message.Parts) == 0 || len(params.Message.ReferenceTasks) != 0 || params.Tenant != "" || params.Config != nil && params.Config.PushConfig != nil {
 		return preparedSend{}, &rpcError{-32602, "Invalid parameters"}
@@ -140,7 +171,7 @@ func (s *Server) prepareSend(ctx context.Context, authority access.Authority, re
 	if err != nil {
 		return preparedSend{}, &rpcError{-32001, "Task not found"}
 	}
-	pinned, ok := s.pinnedRevision(authority, revision, owned, release)
+	pinned, ok := s.pinnedRevision(authority, revision, owned, release, version)
 	if !ok || params.Message.ContextID != "" && params.Message.ContextID != owned.ID {
 		return preparedSend{}, &rpcError{-32001, "Task not found"}
 	}
@@ -148,8 +179,8 @@ func (s *Server) prepareSend(ctx context.Context, authority access.Authority, re
 	return preparedSend{Params: protocol.SendMessageRequest{Config: params.Config, Message: &translatedMessage, Metadata: params.Metadata}, Revision: pinned, ExpectedUpstreamID: owned.UpstreamID}, nil
 }
 
-func (s *Server) send(w http.ResponseWriter, r *http.Request, authority access.Authority, revision agentcontract.Revision, release *runtime.Release, request rpcRequest) {
-	prepared, failure := s.prepareSend(r.Context(), authority, revision, release, request.Params)
+func (s *Server) send(w http.ResponseWriter, r *http.Request, authority access.Authority, revision agentcontract.Revision, release *runtime.Release, version string, request rpcRequest) {
+	prepared, failure := s.prepareSend(r.Context(), authority, revision, release, version, request.Params)
 	if failure != nil {
 		reply(w, request.ID, nil, failure)
 		return
@@ -199,7 +230,7 @@ func (s *Server) send(w http.ResponseWriter, r *http.Request, authority access.A
 		fail(w, request.ID, -32603, "Internal error")
 		return
 	}
-	result, err := json.Marshal(protocol.StreamResponse{Event: publicResult(upstream, publicID)})
+	result, err := marshalEvent(prepared.Revision.Definition.Agent.Protocol, publicResult(upstream, publicID))
 	if err != nil {
 		fail(w, request.ID, -32603, "Internal error")
 		return
@@ -224,7 +255,7 @@ func resultIDs(result protocol.SendMessageResult) (string, string, bool) {
 	}
 }
 
-func (s *Server) getTask(w http.ResponseWriter, r *http.Request, authority access.Authority, revision agentcontract.Revision, release *runtime.Release, request rpcRequest) {
+func (s *Server) getTask(w http.ResponseWriter, r *http.Request, authority access.Authority, revision agentcontract.Revision, release *runtime.Release, version string, request rpcRequest) {
 	var params protocol.GetTaskRequest
 	if json.Unmarshal(request.Params, &params) != nil || params.ID == "" || params.Tenant != "" {
 		fail(w, request.ID, -32602, "Invalid parameters")
@@ -239,7 +270,7 @@ func (s *Server) getTask(w http.ResponseWriter, r *http.Request, authority acces
 		}
 		return
 	}
-	pinned, ok := s.pinnedRevision(authority, revision, owned, release)
+	pinned, ok := s.pinnedRevision(authority, revision, owned, release, version)
 	if !ok {
 		fail(w, request.ID, -32001, "Task not found")
 		return
@@ -263,7 +294,7 @@ func (s *Server) getTask(w http.ResponseWriter, r *http.Request, authority acces
 		fail(w, request.ID, -32603, "Internal error")
 		return
 	}
-	result, err := json.Marshal(publicTask(upstream, owned.ID))
+	result, err := marshalTask(pinned.Definition.Agent.Protocol, publicTask(upstream, owned.ID))
 	if err != nil {
 		fail(w, request.ID, -32603, "Internal error")
 		return
@@ -339,9 +370,9 @@ func (s *Server) transport(ctx context.Context, definition agentcontract.Definit
 	}
 	base := s.Egress.Client(30 * time.Second)
 	client := &http.Client{Transport: limitedTransport{Base: base.Transport}, CheckRedirect: base.CheckRedirect, Jar: base.Jar, Timeout: base.Timeout}
-	transport := a2aclient.NewJSONRPCTransport(definition.Endpoint, client)
+	transport := upstreamTransport(definition.Protocol, definition.Endpoint, client)
 	if definition.CredentialID == nil {
-		return transport, a2aclient.ServiceParams{"A2A-Version": []string{string(protocol.Version)}}, func() { _ = transport.Destroy() }, nil
+		return transport, a2aclient.ServiceParams{"A2A-Version": []string{string(cardVersion(definition.Protocol))}}, func() { _ = transport.Destroy() }, nil
 	}
 	if s.Credentials == nil {
 		return nil, nil, nil, errors.New("credential unavailable")
@@ -350,5 +381,12 @@ func (s *Server) transport(ctx context.Context, definition agentcontract.Definit
 	if err != nil || len(credential) == 0 {
 		return nil, nil, nil, errors.New("credential unavailable")
 	}
-	return transport, a2aclient.ServiceParams{"Authorization": []string{"Bearer " + string(credential)}, "A2A-Version": []string{string(protocol.Version)}}, func() { clear(credential); _ = transport.Destroy() }, nil
+	return transport, a2aclient.ServiceParams{"Authorization": []string{"Bearer " + string(credential)}, "A2A-Version": []string{string(cardVersion(definition.Protocol))}}, func() { clear(credential); _ = transport.Destroy() }, nil
+}
+
+func upstreamTransport(version, endpoint string, client *http.Client) a2aclient.Transport {
+	if version == legacyProtocol {
+		return a2av0.NewJSONRPCTransport(a2av0.JSONRPCTransportConfig{URL: endpoint, Client: client})
+	}
+	return a2aclient.NewJSONRPCTransport(endpoint, client)
 }

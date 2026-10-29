@@ -73,12 +73,12 @@ func (s *Server) streamAuthorized(r *http.Request, authority access.Authority, r
 	return failure == nil && current.ID == authority.ID && s.Runtime.AuthorizeAgentResource(current, "agents", revision.PublicationID, revision.ID, revision.ProjectID) == nil
 }
 
-func (s *Server) sendStream(w http.ResponseWriter, r *http.Request, authority access.Authority, revision agentcontract.Revision, release *runtime.Release, request rpcRequest) {
+func (s *Server) sendStream(w http.ResponseWriter, r *http.Request, authority access.Authority, revision agentcontract.Revision, release *runtime.Release, version string, request rpcRequest) {
 	if _, ok := w.(http.Flusher); !ok {
 		fail(w, request.ID, -32603, "Streaming unavailable")
 		return
 	}
-	prepared, failure := s.prepareSend(r.Context(), authority, revision, release, request.Params)
+	prepared, failure := s.prepareSend(r.Context(), authority, revision, release, version, request.Params)
 	if failure != nil {
 		reply(w, request.ID, nil, failure)
 		return
@@ -120,7 +120,7 @@ func (s *Server) sendStream(w http.ResponseWriter, r *http.Request, authority ac
 		return
 	}
 	info := first.TaskInfo()
-	if !validInitialStreamEvent(first, prepared.ExpectedUpstreamID != "") || prepared.ExpectedUpstreamID != "" && !streamEventMatches(first, prepared.ExpectedUpstreamID, prepared.Params.Message.ContextID) {
+	if !validInitialStreamEvent(first, prepared.ExpectedUpstreamID != "" || prepared.Revision.Definition.Agent.Protocol == legacyProtocol) || prepared.ExpectedUpstreamID != "" && !streamEventMatches(first, prepared.ExpectedUpstreamID, prepared.Params.Message.ContextID) {
 		s.Ledger.unknown(r.Context(), res)
 		fail(w, request.ID, -32603, "Invalid upstream stream")
 		return
@@ -138,7 +138,7 @@ func (s *Server) sendStream(w http.ResponseWriter, r *http.Request, authority ac
 		return
 	}
 	streamHeaders(w)
-	if !writeStreamEvent(w, request.ID, first, publicID) {
+	if !writeStreamEvent(w, request.ID, first, publicID, prepared.Revision.Definition.Agent.Protocol) {
 		return
 	}
 	s.forwardStream(w, r, authority, prepared.Revision, request.ID, string(info.TaskID), info.ContextID, publicID, next)
@@ -159,7 +159,7 @@ func validInitialStreamEvent(event protocol.Event, continuation bool) bool {
 	}
 }
 
-func (s *Server) subscribe(w http.ResponseWriter, r *http.Request, authority access.Authority, revision agentcontract.Revision, release *runtime.Release, request rpcRequest) {
+func (s *Server) subscribe(w http.ResponseWriter, r *http.Request, authority access.Authority, revision agentcontract.Revision, release *runtime.Release, version string, request rpcRequest) {
 	if _, ok := w.(http.Flusher); !ok {
 		fail(w, request.ID, -32603, "Streaming unavailable")
 		return
@@ -174,7 +174,7 @@ func (s *Server) subscribe(w http.ResponseWriter, r *http.Request, authority acc
 		fail(w, request.ID, -32001, "Task not found")
 		return
 	}
-	pinned, ok := s.pinnedRevision(authority, revision, owned, release)
+	pinned, ok := s.pinnedRevision(authority, revision, owned, release, version)
 	if !ok {
 		fail(w, request.ID, -32001, "Task not found")
 		return
@@ -208,7 +208,7 @@ func (s *Server) subscribe(w http.ResponseWriter, r *http.Request, authority acc
 		return
 	}
 	streamHeaders(w)
-	if !writeStreamEvent(w, request.ID, first, owned.ID) {
+	if !writeStreamEvent(w, request.ID, first, owned.ID, pinned.Definition.Agent.Protocol) {
 		return
 	}
 	s.forwardStream(w, r, authority, pinned, request.ID, owned.UpstreamID, owned.ContextID, owned.ID, next)
@@ -242,7 +242,7 @@ func (s *Server) forwardStream(w http.ResponseWriter, r *http.Request, authority
 			writeStreamFailure(w, id, "Authorization revoked")
 			return
 		}
-		if !writeStreamEvent(w, id, event, publicID) {
+		if !writeStreamEvent(w, id, event, publicID, revision.Definition.Agent.Protocol) {
 			return
 		}
 	}
@@ -260,9 +260,9 @@ func streamError(err error) string {
 	return "Internal error"
 }
 
-func writeStreamEvent(w http.ResponseWriter, id json.RawMessage, event protocol.Event, publicID string) bool {
+func writeStreamEvent(w http.ResponseWriter, id json.RawMessage, event protocol.Event, publicID, version string) bool {
 	public := publicStreamEvent(event, publicID)
-	result, err := json.Marshal(protocol.StreamResponse{Event: public})
+	result, err := marshalEvent(version, public)
 	if err != nil || public == nil {
 		writeStreamFailure(w, id, "Invalid upstream stream")
 		return false

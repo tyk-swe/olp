@@ -14,7 +14,10 @@ import (
 	"strings"
 	"time"
 
+	legacy "github.com/a2aproject/a2a-go/a2a"
 	protocol "github.com/a2aproject/a2a-go/v2/a2a"
+	"github.com/a2aproject/a2a-go/v2/a2acompat/a2av0"
+	"github.com/a2aproject/a2a-go/v2/a2asrv"
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/agentcontract"
 	"github.com/tyk-swe/olp/internal/consumerauth"
@@ -61,7 +64,7 @@ func (s *Server) resolve(r *http.Request) (access.Authority, agentcontract.Revis
 		return access.Authority{}, agentcontract.Revision{}, nil, http.StatusServiceUnavailable
 	}
 	for _, revision := range release.Snapshot.AgentPublications {
-		if revision.PublicationID != r.PathValue("agent") || revision.Kind != "agent" || revision.ProjectID != *authority.ProjectID || !revision.Current || revision.Definition.Agent == nil || revision.Definition.Agent.Protocol != "a2a-1.0.0" {
+		if revision.PublicationID != r.PathValue("agent") || revision.Kind != "agent" || revision.ProjectID != *authority.ProjectID || !revision.Current || revision.Definition.Agent == nil || !supportedProtocol(revision.Definition.Agent.Protocol) {
 			continue
 		}
 		if err := s.Runtime.AuthorizeAgentResource(authority, "agents", revision.PublicationID, revision.ID, revision.ProjectID); err != nil {
@@ -88,7 +91,7 @@ func (s *Server) getCard(w http.ResponseWriter, r *http.Request) {
 	}
 	response := protocol.AgentCard{
 		Name: original.Name, Description: original.Description, Version: original.Version,
-		SupportedInterfaces: []*protocol.AgentInterface{protocol.NewAgentInterface(strings.TrimRight(s.PublicOrigin, "/")+"/a2a/"+revision.PublicationID, protocol.TransportProtocolJSONRPC)},
+		SupportedInterfaces: []*protocol.AgentInterface{{URL: strings.TrimRight(s.PublicOrigin, "/") + "/a2a/" + revision.PublicationID, ProtocolBinding: protocol.TransportProtocolJSONRPC, ProtocolVersion: cardVersion(revision.Definition.Agent.Protocol)}},
 		Capabilities:        protocol.AgentCapabilities{Streaming: original.Capabilities.Streaming}, DefaultInputModes: original.DefaultInputModes, DefaultOutputModes: original.DefaultOutputModes,
 		Skills:               publicSkills(original.Skills),
 		SecuritySchemes:      protocol.NamedSecuritySchemes{"olp": protocol.HTTPAuthSecurityScheme{Scheme: "Bearer"}},
@@ -96,7 +99,24 @@ func (s *Server) getCard(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/a2a+json")
 	w.Header().Set("Cache-Control", "no-store")
+	if revision.Definition.Agent.Protocol == legacyProtocol {
+		producer := a2av0.NewStaticAgentCardProducer(&response)
+		data, err := producer.(a2asrv.AgentCardJSONProducer).CardJSON(r.Context())
+		if err != nil {
+			http.Error(w, "Agent card unavailable", http.StatusBadGateway)
+			return
+		}
+		_, _ = w.Write(data)
+		return
+	}
 	_ = json.NewEncoder(w).Encode(response)
+}
+
+func cardVersion(version string) protocol.ProtocolVersion {
+	if version == legacyProtocol {
+		return a2av0.Version
+	}
+	return protocol.Version
 }
 
 func publicSkills(skills []protocol.AgentSkill) []protocol.AgentSkill {
@@ -149,14 +169,39 @@ func (s *Server) loadCard(ctx context.Context, definition agentcontract.Definiti
 	if hex.EncodeToString(digest[:]) != definition.CardDigest {
 		return protocol.AgentCard{}, errors.New("card changed")
 	}
-	var parsed protocol.AgentCard
-	if json.Unmarshal(body, &parsed) != nil {
+	parsed, err := parseCard(definition.Protocol, body)
+	if err != nil {
 		return protocol.AgentCard{}, errors.New("invalid card")
 	}
 	for _, binding := range parsed.SupportedInterfaces {
-		if binding != nil && binding.URL == definition.Endpoint && binding.ProtocolBinding == protocol.TransportProtocolJSONRPC && binding.ProtocolVersion == protocol.Version {
+		if binding != nil && binding.URL == definition.Endpoint && cardBindingMatches(definition.Protocol, binding) {
 			return parsed, nil
 		}
 	}
 	return protocol.AgentCard{}, errors.New("interface not declared")
+}
+
+func cardBindingMatches(version string, binding *protocol.AgentInterface) bool {
+	if version == legacyProtocol {
+		return (binding.ProtocolBinding == "" || binding.ProtocolBinding == protocol.TransportProtocolJSONRPC) && (binding.ProtocolVersion == a2av0.Version || binding.ProtocolVersion == protocol.ProtocolVersion(legacy.Version))
+	}
+	return binding.ProtocolBinding == protocol.TransportProtocolJSONRPC && binding.ProtocolVersion == protocol.Version
+}
+
+func (s *Server) ValidateCard(ctx context.Context, definition agentcontract.Definition) error {
+	_, err := s.loadCard(ctx, definition)
+	return err
+}
+
+func parseCard(version string, body []byte) (protocol.AgentCard, error) {
+	if version == legacyProtocol {
+		var declared legacy.AgentCard
+		if json.Unmarshal(body, &declared) != nil || declared.ProtocolVersion != string(a2av0.Version) && declared.ProtocolVersion != string(legacy.Version) {
+			return protocol.AgentCard{}, errors.New("invalid card version")
+		}
+		return *a2av0.ToV1AgentCard(&declared), nil
+	}
+	var parsed protocol.AgentCard
+	err := json.Unmarshal(body, &parsed)
+	return parsed, err
 }

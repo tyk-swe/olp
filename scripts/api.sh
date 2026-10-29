@@ -8,5 +8,5 @@ pnpm --dir console api:generate
 go tool oapi-codegen -generate types,client -package guardrails -o sdk/guardrails/client.gen.go openapi/guardrails.json
 pnpm --dir console exec openapi-typescript ../openapi/guardrails.json -o ../sdk/guardrails/schema.d.ts
 
-go tool oapi-codegen -generate types,client -package inference -o sdk/inference/client.gen.go openapi/inference.json
+node scripts/generate-inference-contract.mjs
 pnpm --dir console exec openapi-typescript ../openapi/inference.json -o ../sdk/inference/schema.d.ts
