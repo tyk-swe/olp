@@ -57,7 +57,7 @@ type taskCallRuntime struct {
 	err error
 }
 
-func (r *taskCallRuntime) AdmitTaskCapabilityAttempt(_ context.Context, a access.Authority, scope, resource, revision string, project *string) error {
+func (r *taskCallRuntime) AdmitTaskCapabilityAttempt(_ context.Context, a access.Authority, scope, resource, revision string, project *string, _ string) error {
 	if a.EndUserDigest != "original-user" || scope != "tools" || resource != testToolset || revision != testRevision || project == nil || *project != testProject {
 		return access.Forbidden()
 	}

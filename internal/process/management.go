@@ -82,9 +82,10 @@ func (m Management) Register(mux *http.ServeMux) {
 	}, Evaluate: func(r *http.Request, p access.Principal, in guardrails.ApplyInput) (guardrails.Result, error) {
 		return m.Gateway.EvaluateGuardrails(r, p, in)
 	}}).Register(mux)
-	validator := &a2a.Server{Egress: m.Egress, Credentials: func(ctx context.Context, id string) ([]byte, error) {
+	validator := &a2a.Server{Egress: m.Egress, Ledger: &a2a.Ledger{Pool: m.Access.Pool}, Grants: &mcpgrants.Store{Egress: m.Egress, Pool: m.Access.Pool, Keys: m.Access.Keys, Auth: m.Access.Auth, Installation: m.Access.Installation}, Credentials: func(ctx context.Context, id string) ([]byte, error) {
 		return m.Access.Keys.Read(ctx, m.Access.Pool, m.Access.Installation, id, secrets.AgentCredential)
 	}}
+	(&a2a.Management{Access: m.Access, Server: validator}).Register(mux)
 	(&agents.Server{Access: m.Access, Egress: m.Egress, ValidateAgent: validator.ValidateCard}).Register(mux)
 	(&mcpservers.Server{Access: m.Access, Egress: m.Egress, Executables: &mcpservers.Executables{Tier: m.Unconfined, Query: m.Access.Pool}}).Register(mux)
 	(&mcp.Management{Access: m.Access}).Register(mux)

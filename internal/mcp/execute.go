@@ -232,12 +232,12 @@ func (s *Server) dispatchToolCall(ctx context.Context, in executeInput, credenti
 	}
 	if in.authority.TaskCapability != nil {
 		admitter, ok := s.Runtime.(interface {
-			AdmitTaskCapabilityAttempt(context.Context, access.Authority, string, string, string, *string) error
+			AdmitTaskCapabilityAttempt(context.Context, access.Authority, string, string, string, *string, string) error
 		})
 		if !ok {
 			return dispatchResult{failure: s.refuseToolIdentity(ctx, in, reservation, errLedger)}
 		}
-		if err := admitter.AdmitTaskCapabilityAttempt(ctx, in.authority, "tools", in.resolved.id, in.resolved.revisionID, in.authority.ProjectID); err != nil {
+		if err := admitter.AdmitTaskCapabilityAttempt(ctx, in.authority, "tools", in.resolved.id, in.resolved.revisionID, in.authority.ProjectID, reservation.DispatchID); err != nil {
 			if errors.Is(err, runtime.ErrTaskAttemptLimit) {
 				return dispatchResult{failure: s.refuseToolIdentity(ctx, in, reservation, fail(http.StatusTooManyRequests, "task_limit_exceeded", "rate_limit_error", "The task attempt limit was exceeded."))}
 			}

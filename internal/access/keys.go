@@ -780,7 +780,7 @@ func (a Authority) BudgetAttribution() map[string]string {
 	})
 }
 
-func (a Authority) Delegated(scopes, routes, toolsets []string, agent Authority, memberID, pairDigest, tokenDigest string, expiresAt time.Time) *Authority {
+func (a Authority) Delegated(scopes, routes, toolsets, agents []string, agent Authority, memberID, pairDigest, tokenDigest string, expiresAt time.Time) *Authority {
 	return &Authority{
 		SnapshotID:            a.SnapshotID,
 		AgentPrincipal:        a.AgentPrincipal,
@@ -825,7 +825,7 @@ func (a Authority) Delegated(scopes, routes, toolsets []string, agent Authority,
 		BudgetGroupWeeklyCostLimit:  a.BudgetGroupWeeklyCostLimit,
 		Policy: KeyPolicy{
 			RunLimits: a.Policy.RunLimits,
-			Scopes:    slices.Clone(scopes), AllowedRoutes: slices.Clone(routes), AllowedToolsets: slices.Clone(toolsets),
+			Scopes:    slices.Clone(scopes), AllowedRoutes: slices.Clone(routes), AllowedToolsets: slices.Clone(toolsets), AllowedAgents: slices.Clone(agents),
 			ForbidResponseCache:     a.Policy.ForbidResponseCache || agent.Policy.ForbidResponseCache,
 			LimitTemplate:           a.Policy.LimitTemplate,
 			RouteLimits:             a.Policy.RouteLimits,

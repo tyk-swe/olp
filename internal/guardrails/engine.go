@@ -280,10 +280,14 @@ func (m *Masking) Restore(text string) string {
 }
 
 func (e *Engine) Evaluate(ctx context.Context, request Evaluation, masks *Masking) (Result, error) {
-	result := Result{Segments: request.Segments}
 	if e == nil {
-		return result, nil
+		return Result{Segments: request.Segments}, nil
 	}
+	return e.evaluate(ctx, request, masks)
+}
+
+func (e *Engine) evaluate(ctx context.Context, request Evaluation, masks *Masking) (Result, error) {
+	result := Result{Segments: request.Segments}
 	if !validPhase(request.Phase) {
 		return result, ErrSurface
 	}

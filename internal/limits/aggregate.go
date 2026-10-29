@@ -158,7 +158,7 @@ var aggregateSnapshotsSQL = reconcileCostWindowsSQL(costOwnerAggregate, true, `a
  UNION ALL
  SELECT a.id,d.closed_at,d.observed_cost,d.observed_charge,0::bigint,0::bigint
  FROM olp.execution_debits d JOIN accounts a ON EXISTS(SELECT 1 FROM olp.execution_debit_owners o WHERE o.dispatch_id=d.id AND o.owner_kind='aggregate' AND o.owner_id=a.id)
- WHERE d.kind='tool' AND d.state='settled'
+ WHERE d.kind IN ('tool','agent') AND d.state='settled'
    AND d.closed_at >= LEAST((SELECT daily_start FROM budget_calendar),(SELECT monthly_start FROM budget_calendar),(SELECT weekly_start FROM budget_calendar)) AND d.closed_at < GREATEST((SELECT daily_end FROM budget_calendar),(SELECT monthly_end FROM budget_calendar),(SELECT weekly_end FROM budget_calendar))
 )`)
 
@@ -214,6 +214,12 @@ var AttributionBudgetsSQL = `(SELECT COALESCE(jsonb_object_agg(label,pair_usage)
 }, "COALESCE(v.value->>'cost_basis','cost')") + `) AS pair_usage
  FROM jsonb_each(p.attribution_budgets) b CROSS JOIN LATERAL jsonb_each(b.value) v GROUP BY b.key
 ) grouped)`
+
+var DelegationPairBudgetSQL = budgetReportSQL(budgetOwnership{
+	usageProjectSQL("f") + "=p.id AND f.delegation_pair_digest=pair.digest",
+	usageProjectSQL("h") + "=p.id AND h.delegation_pair_digest=pair.digest",
+	"EXISTS(SELECT 1 FROM olp.execution_debit_owners o JOIN olp.aggregate_budget_accounts a ON a.id=o.owner_id WHERE o.dispatch_id=d.id AND o.owner_kind='aggregate' AND a.project_id=p.id AND a.attribution_key='delegation_pair' AND a.attribution_value=pair.digest)",
+}, "COALESCE(p.attribution_budgets->'delegation_pair'->pair.digest->>'cost_basis','cost')")
 
 // Organization ownership is immutable once assigned, so live and retained spend
 // retain the same boundary when aggregate policies change.

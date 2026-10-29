@@ -13,6 +13,117 @@ import (
 	openapi_types "github.com/oapi-codegen/runtime/types"
 )
 
+// Defines values for A2ATaskState.
+const (
+	A2ATaskStateActive         A2ATaskState = "active"
+	A2ATaskStateCanceled       A2ATaskState = "canceled"
+	A2ATaskStateCompleted      A2ATaskState = "completed"
+	A2ATaskStateFailed         A2ATaskState = "failed"
+	A2ATaskStateOutcomeUnknown A2ATaskState = "outcome_unknown"
+)
+
+// Valid indicates whether the value is a known member of the A2ATaskState enum.
+func (e A2ATaskState) Valid() bool {
+	switch e {
+	case A2ATaskStateActive:
+		return true
+	case A2ATaskStateCanceled:
+		return true
+	case A2ATaskStateCompleted:
+		return true
+	case A2ATaskStateFailed:
+		return true
+	case A2ATaskStateOutcomeUnknown:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for A2ATaskDetailState.
+const (
+	A2ATaskDetailStateActive         A2ATaskDetailState = "active"
+	A2ATaskDetailStateCanceled       A2ATaskDetailState = "canceled"
+	A2ATaskDetailStateCompleted      A2ATaskDetailState = "completed"
+	A2ATaskDetailStateFailed         A2ATaskDetailState = "failed"
+	A2ATaskDetailStateOutcomeUnknown A2ATaskDetailState = "outcome_unknown"
+)
+
+// Valid indicates whether the value is a known member of the A2ATaskDetailState enum.
+func (e A2ATaskDetailState) Valid() bool {
+	switch e {
+	case A2ATaskDetailStateActive:
+		return true
+	case A2ATaskDetailStateCanceled:
+		return true
+	case A2ATaskDetailStateCompleted:
+		return true
+	case A2ATaskDetailStateFailed:
+		return true
+	case A2ATaskDetailStateOutcomeUnknown:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for A2ATaskModelCallbackState.
+const (
+	A2ATaskModelCallbackStateFree           A2ATaskModelCallbackState = "free"
+	A2ATaskModelCallbackStateNotBillable    A2ATaskModelCallbackState = "not_billable"
+	A2ATaskModelCallbackStateOutcomeUnknown A2ATaskModelCallbackState = "outcome_unknown"
+	A2ATaskModelCallbackStatePending        A2ATaskModelCallbackState = "pending"
+	A2ATaskModelCallbackStatePriced         A2ATaskModelCallbackState = "priced"
+	A2ATaskModelCallbackStateUncharged      A2ATaskModelCallbackState = "uncharged"
+	A2ATaskModelCallbackStateUnpriced       A2ATaskModelCallbackState = "unpriced"
+)
+
+// Valid indicates whether the value is a known member of the A2ATaskModelCallbackState enum.
+func (e A2ATaskModelCallbackState) Valid() bool {
+	switch e {
+	case A2ATaskModelCallbackStateFree:
+		return true
+	case A2ATaskModelCallbackStateNotBillable:
+		return true
+	case A2ATaskModelCallbackStateOutcomeUnknown:
+		return true
+	case A2ATaskModelCallbackStatePending:
+		return true
+	case A2ATaskModelCallbackStatePriced:
+		return true
+	case A2ATaskModelCallbackStateUncharged:
+		return true
+	case A2ATaskModelCallbackStateUnpriced:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for A2ATaskToolCallbackPricingState.
+const (
+	A2ATaskToolCallbackPricingStateFree     A2ATaskToolCallbackPricingState = "free"
+	A2ATaskToolCallbackPricingStatePriced   A2ATaskToolCallbackPricingState = "priced"
+	A2ATaskToolCallbackPricingStateUnknown  A2ATaskToolCallbackPricingState = "unknown"
+	A2ATaskToolCallbackPricingStateUnpriced A2ATaskToolCallbackPricingState = "unpriced"
+)
+
+// Valid indicates whether the value is a known member of the A2ATaskToolCallbackPricingState enum.
+func (e A2ATaskToolCallbackPricingState) Valid() bool {
+	switch e {
+	case A2ATaskToolCallbackPricingStateFree:
+		return true
+	case A2ATaskToolCallbackPricingStatePriced:
+		return true
+	case A2ATaskToolCallbackPricingStateUnknown:
+		return true
+	case A2ATaskToolCallbackPricingStateUnpriced:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for AdmissionPriority.
 const (
 	Critical AdmissionPriority = "critical"
@@ -130,6 +241,90 @@ func (e AgentPublicationSummaryKind) Valid() bool {
 	case AgentPublicationSummaryKindPrompt:
 		return true
 	case AgentPublicationSummaryKindToolset:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AgentRunStepKind.
+const (
+	AgentRunStepKindAgent AgentRunStepKind = "agent"
+	AgentRunStepKindApi   AgentRunStepKind = "api"
+	AgentRunStepKindModel AgentRunStepKind = "model"
+	AgentRunStepKindTool  AgentRunStepKind = "tool"
+)
+
+// Valid indicates whether the value is a known member of the AgentRunStepKind enum.
+func (e AgentRunStepKind) Valid() bool {
+	switch e {
+	case AgentRunStepKindAgent:
+		return true
+	case AgentRunStepKindApi:
+		return true
+	case AgentRunStepKindModel:
+		return true
+	case AgentRunStepKindTool:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AgentRunStepPricingState.
+const (
+	AgentRunStepPricingStateFree        AgentRunStepPricingState = "free"
+	AgentRunStepPricingStateLessThannil AgentRunStepPricingState = "<nil>"
+	AgentRunStepPricingStatePriced      AgentRunStepPricingState = "priced"
+	AgentRunStepPricingStateUnpriced    AgentRunStepPricingState = "unpriced"
+)
+
+// Valid indicates whether the value is a known member of the AgentRunStepPricingState enum.
+func (e AgentRunStepPricingState) Valid() bool {
+	switch e {
+	case AgentRunStepPricingStateFree:
+		return true
+	case AgentRunStepPricingStateLessThannil:
+		return true
+	case AgentRunStepPricingStatePriced:
+		return true
+	case AgentRunStepPricingStateUnpriced:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AgentRunStepState.
+const (
+	AgentRunStepStateConflict       AgentRunStepState = "conflict"
+	AgentRunStepStateDispatched     AgentRunStepState = "dispatched"
+	AgentRunStepStateNotAccepted    AgentRunStepState = "not_accepted"
+	AgentRunStepStateOutcomeUnknown AgentRunStepState = "outcome_unknown"
+	AgentRunStepStatePrepared       AgentRunStepState = "prepared"
+	AgentRunStepStateReady          AgentRunStepState = "ready"
+	AgentRunStepStateReleased       AgentRunStepState = "released"
+	AgentRunStepStateSettled        AgentRunStepState = "settled"
+)
+
+// Valid indicates whether the value is a known member of the AgentRunStepState enum.
+func (e AgentRunStepState) Valid() bool {
+	switch e {
+	case AgentRunStepStateConflict:
+		return true
+	case AgentRunStepStateDispatched:
+		return true
+	case AgentRunStepStateNotAccepted:
+		return true
+	case AgentRunStepStateOutcomeUnknown:
+		return true
+	case AgentRunStepStatePrepared:
+		return true
+	case AgentRunStepStateReady:
+		return true
+	case AgentRunStepStateReleased:
+		return true
+	case AgentRunStepStateSettled:
 		return true
 	default:
 		return false
@@ -1723,6 +1918,8 @@ const (
 	ConfigurationSinkStreamsAudit              ConfigurationSinkStreams = "audit"
 	ConfigurationSinkStreamsGuardrailDecisions ConfigurationSinkStreams = "guardrail_decisions"
 	ConfigurationSinkStreamsRequests           ConfigurationSinkStreams = "requests"
+	ConfigurationSinkStreamsRuns               ConfigurationSinkStreams = "runs"
+	ConfigurationSinkStreamsTraceSpans         ConfigurationSinkStreams = "trace_spans"
 )
 
 // Valid indicates whether the value is a known member of the ConfigurationSinkStreams enum.
@@ -1735,6 +1932,10 @@ func (e ConfigurationSinkStreams) Valid() bool {
 	case ConfigurationSinkStreamsGuardrailDecisions:
 		return true
 	case ConfigurationSinkStreamsRequests:
+		return true
+	case ConfigurationSinkStreamsRuns:
+		return true
+	case ConfigurationSinkStreamsTraceSpans:
 		return true
 	default:
 		return false
@@ -2004,6 +2205,8 @@ const (
 	CreateExportSinkRequestStreamsGuardrailDecisions CreateExportSinkRequestStreams = "guardrail_decisions"
 	CreateExportSinkRequestStreamsMetering           CreateExportSinkRequestStreams = "metering"
 	CreateExportSinkRequestStreamsRequests           CreateExportSinkRequestStreams = "requests"
+	CreateExportSinkRequestStreamsRuns               CreateExportSinkRequestStreams = "runs"
+	CreateExportSinkRequestStreamsTraceSpans         CreateExportSinkRequestStreams = "trace_spans"
 	CreateExportSinkRequestStreamsUsageRollups       CreateExportSinkRequestStreams = "usage_rollups"
 )
 
@@ -2021,6 +2224,10 @@ func (e CreateExportSinkRequestStreams) Valid() bool {
 	case CreateExportSinkRequestStreamsMetering:
 		return true
 	case CreateExportSinkRequestStreamsRequests:
+		return true
+	case CreateExportSinkRequestStreamsRuns:
+		return true
+	case CreateExportSinkRequestStreamsTraceSpans:
 		return true
 	case CreateExportSinkRequestStreamsUsageRollups:
 		return true
@@ -2347,6 +2554,8 @@ const (
 	CreateSinkRequestStreamsAudit              CreateSinkRequestStreams = "audit"
 	CreateSinkRequestStreamsGuardrailDecisions CreateSinkRequestStreams = "guardrail_decisions"
 	CreateSinkRequestStreamsRequests           CreateSinkRequestStreams = "requests"
+	CreateSinkRequestStreamsRuns               CreateSinkRequestStreams = "runs"
+	CreateSinkRequestStreamsTraceSpans         CreateSinkRequestStreams = "trace_spans"
 )
 
 // Valid indicates whether the value is a known member of the CreateSinkRequestStreams enum.
@@ -2359,6 +2568,10 @@ func (e CreateSinkRequestStreams) Valid() bool {
 	case CreateSinkRequestStreamsGuardrailDecisions:
 		return true
 	case CreateSinkRequestStreamsRequests:
+		return true
+	case CreateSinkRequestStreamsRuns:
+		return true
+	case CreateSinkRequestStreamsTraceSpans:
 		return true
 	default:
 		return false
@@ -2403,6 +2616,7 @@ func (e CredentialRequirement) Valid() bool {
 
 // Defines values for DelegationConsentRequestScopes.
 const (
+	DelegationConsentRequestScopesAgents    DelegationConsentRequestScopes = "agents"
 	DelegationConsentRequestScopesInference DelegationConsentRequestScopes = "inference"
 	DelegationConsentRequestScopesTools     DelegationConsentRequestScopes = "tools"
 )
@@ -2410,6 +2624,8 @@ const (
 // Valid indicates whether the value is a known member of the DelegationConsentRequestScopes enum.
 func (e DelegationConsentRequestScopes) Valid() bool {
 	switch e {
+	case DelegationConsentRequestScopesAgents:
+		return true
 	case DelegationConsentRequestScopesInference:
 		return true
 	case DelegationConsentRequestScopesTools:
@@ -2556,6 +2772,8 @@ const (
 	ExportSinkStreamsGuardrailDecisions ExportSinkStreams = "guardrail_decisions"
 	ExportSinkStreamsMetering           ExportSinkStreams = "metering"
 	ExportSinkStreamsRequests           ExportSinkStreams = "requests"
+	ExportSinkStreamsRuns               ExportSinkStreams = "runs"
+	ExportSinkStreamsTraceSpans         ExportSinkStreams = "trace_spans"
 	ExportSinkStreamsUsageRollups       ExportSinkStreams = "usage_rollups"
 )
 
@@ -2573,6 +2791,10 @@ func (e ExportSinkStreams) Valid() bool {
 	case ExportSinkStreamsMetering:
 		return true
 	case ExportSinkStreamsRequests:
+		return true
+	case ExportSinkStreamsRuns:
+		return true
+	case ExportSinkStreamsTraceSpans:
 		return true
 	case ExportSinkStreamsUsageRollups:
 		return true
@@ -3337,6 +3559,66 @@ func (e InteractionInspectionStatus) Valid() bool {
 	}
 }
 
+// Defines values for InvestigationEvidenceKind.
+const (
+	InvestigationEvidenceKindApproval   InvestigationEvidenceKind = "approval"
+	InvestigationEvidenceKindDelegation InvestigationEvidenceKind = "delegation"
+	InvestigationEvidenceKindRun        InvestigationEvidenceKind = "run"
+	InvestigationEvidenceKindSpan       InvestigationEvidenceKind = "span"
+	InvestigationEvidenceKindStep       InvestigationEvidenceKind = "step"
+	InvestigationEvidenceKindTask       InvestigationEvidenceKind = "task"
+)
+
+// Valid indicates whether the value is a known member of the InvestigationEvidenceKind enum.
+func (e InvestigationEvidenceKind) Valid() bool {
+	switch e {
+	case InvestigationEvidenceKindApproval:
+		return true
+	case InvestigationEvidenceKindDelegation:
+		return true
+	case InvestigationEvidenceKindRun:
+		return true
+	case InvestigationEvidenceKindSpan:
+		return true
+	case InvestigationEvidenceKindStep:
+		return true
+	case InvestigationEvidenceKindTask:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for InvestigationEvidenceViewKind.
+const (
+	InvestigationEvidenceViewKindApproval   InvestigationEvidenceViewKind = "approval"
+	InvestigationEvidenceViewKindDelegation InvestigationEvidenceViewKind = "delegation"
+	InvestigationEvidenceViewKindRun        InvestigationEvidenceViewKind = "run"
+	InvestigationEvidenceViewKindSpan       InvestigationEvidenceViewKind = "span"
+	InvestigationEvidenceViewKindStep       InvestigationEvidenceViewKind = "step"
+	InvestigationEvidenceViewKindTask       InvestigationEvidenceViewKind = "task"
+)
+
+// Valid indicates whether the value is a known member of the InvestigationEvidenceViewKind enum.
+func (e InvestigationEvidenceViewKind) Valid() bool {
+	switch e {
+	case InvestigationEvidenceViewKindApproval:
+		return true
+	case InvestigationEvidenceViewKindDelegation:
+		return true
+	case InvestigationEvidenceViewKindRun:
+		return true
+	case InvestigationEvidenceViewKindSpan:
+		return true
+	case InvestigationEvidenceViewKindStep:
+		return true
+	case InvestigationEvidenceViewKindTask:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for KeyExpiringEventEvent.
 const (
 	KeyExpiringEventEventKeyExpiring KeyExpiringEventEvent = "key.expiring"
@@ -3615,19 +3897,19 @@ func (e MCPToolCallResponseDebitState) Valid() bool {
 
 // Defines values for MCPToolCallResponsePricingState.
 const (
-	Free     MCPToolCallResponsePricingState = "free"
-	Priced   MCPToolCallResponsePricingState = "priced"
-	Unpriced MCPToolCallResponsePricingState = "unpriced"
+	MCPToolCallResponsePricingStateFree     MCPToolCallResponsePricingState = "free"
+	MCPToolCallResponsePricingStatePriced   MCPToolCallResponsePricingState = "priced"
+	MCPToolCallResponsePricingStateUnpriced MCPToolCallResponsePricingState = "unpriced"
 )
 
 // Valid indicates whether the value is a known member of the MCPToolCallResponsePricingState enum.
 func (e MCPToolCallResponsePricingState) Valid() bool {
 	switch e {
-	case Free:
+	case MCPToolCallResponsePricingStateFree:
 		return true
-	case Priced:
+	case MCPToolCallResponsePricingStatePriced:
 		return true
-	case Unpriced:
+	case MCPToolCallResponsePricingStateUnpriced:
 		return true
 	default:
 		return false
@@ -3790,6 +4072,129 @@ func (e MFAVerificationRequestMethod) Valid() bool {
 	case MFAVerificationRequestMethodTotp:
 		return true
 	case MFAVerificationRequestMethodWebauthn:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ManagedRunEvidenceEvidenceOrigin.
+const (
+	ManagedRunEvidenceEvidenceOriginGatewayObserved ManagedRunEvidenceEvidenceOrigin = "gateway_observed"
+)
+
+// Valid indicates whether the value is a known member of the ManagedRunEvidenceEvidenceOrigin enum.
+func (e ManagedRunEvidenceEvidenceOrigin) Valid() bool {
+	switch e {
+	case ManagedRunEvidenceEvidenceOriginGatewayObserved:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ManagedRunEvidenceEventStream.
+const (
+	ManagedRunEvidenceEventStreamRuns ManagedRunEvidenceEventStream = "runs"
+)
+
+// Valid indicates whether the value is a known member of the ManagedRunEvidenceEventStream enum.
+func (e ManagedRunEvidenceEventStream) Valid() bool {
+	switch e {
+	case ManagedRunEvidenceEventStreamRuns:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ManagedRunEvidenceEventVersion.
+const (
+	ManagedRunEvidenceEventVersionN1 ManagedRunEvidenceEventVersion = 1
+)
+
+// Valid indicates whether the value is a known member of the ManagedRunEvidenceEventVersion enum.
+func (e ManagedRunEvidenceEventVersion) Valid() bool {
+	switch e {
+	case ManagedRunEvidenceEventVersionN1:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ManagedTraceSpanEvidenceCategory.
+const (
+	ManagedTraceSpanEvidenceCategoryChat           ManagedTraceSpanEvidenceCategory = "chat"
+	ManagedTraceSpanEvidenceCategoryCreateAgent    ManagedTraceSpanEvidenceCategory = "create_agent"
+	ManagedTraceSpanEvidenceCategoryEmbeddings     ManagedTraceSpanEvidenceCategory = "embeddings"
+	ManagedTraceSpanEvidenceCategoryExecuteTool    ManagedTraceSpanEvidenceCategory = "execute_tool"
+	ManagedTraceSpanEvidenceCategoryInvokeAgent    ManagedTraceSpanEvidenceCategory = "invoke_agent"
+	ManagedTraceSpanEvidenceCategoryOther          ManagedTraceSpanEvidenceCategory = "other"
+	ManagedTraceSpanEvidenceCategoryTextCompletion ManagedTraceSpanEvidenceCategory = "text_completion"
+)
+
+// Valid indicates whether the value is a known member of the ManagedTraceSpanEvidenceCategory enum.
+func (e ManagedTraceSpanEvidenceCategory) Valid() bool {
+	switch e {
+	case ManagedTraceSpanEvidenceCategoryChat:
+		return true
+	case ManagedTraceSpanEvidenceCategoryCreateAgent:
+		return true
+	case ManagedTraceSpanEvidenceCategoryEmbeddings:
+		return true
+	case ManagedTraceSpanEvidenceCategoryExecuteTool:
+		return true
+	case ManagedTraceSpanEvidenceCategoryInvokeAgent:
+		return true
+	case ManagedTraceSpanEvidenceCategoryOther:
+		return true
+	case ManagedTraceSpanEvidenceCategoryTextCompletion:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ManagedTraceSpanEvidenceEvidenceOrigin.
+const (
+	ManagedTraceSpanEvidenceEvidenceOriginClientAsserted ManagedTraceSpanEvidenceEvidenceOrigin = "client_asserted"
+)
+
+// Valid indicates whether the value is a known member of the ManagedTraceSpanEvidenceEvidenceOrigin enum.
+func (e ManagedTraceSpanEvidenceEvidenceOrigin) Valid() bool {
+	switch e {
+	case ManagedTraceSpanEvidenceEvidenceOriginClientAsserted:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ManagedTraceSpanEvidenceEventStream.
+const (
+	ManagedTraceSpanEvidenceEventStreamTraceSpans ManagedTraceSpanEvidenceEventStream = "trace_spans"
+)
+
+// Valid indicates whether the value is a known member of the ManagedTraceSpanEvidenceEventStream enum.
+func (e ManagedTraceSpanEvidenceEventStream) Valid() bool {
+	switch e {
+	case ManagedTraceSpanEvidenceEventStreamTraceSpans:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ManagedTraceSpanEvidenceEventVersion.
+const (
+	ManagedTraceSpanEvidenceEventVersionN1 ManagedTraceSpanEvidenceEventVersion = 1
+)
+
+// Valid indicates whether the value is a known member of the ManagedTraceSpanEvidenceEventVersion enum.
+func (e ManagedTraceSpanEvidenceEventVersion) Valid() bool {
+	switch e {
+	case ManagedTraceSpanEvidenceEventVersionN1:
 		return true
 	default:
 		return false
@@ -4015,6 +4420,129 @@ func (e NotificationEvent) Valid() bool {
 	case NotificationEventRuntimeInstallFailed:
 		return true
 	case NotificationEventWorkerStale:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ObservabilityRunEvidenceEvidenceOrigin.
+const (
+	ObservabilityRunEvidenceEvidenceOriginGatewayObserved ObservabilityRunEvidenceEvidenceOrigin = "gateway_observed"
+)
+
+// Valid indicates whether the value is a known member of the ObservabilityRunEvidenceEvidenceOrigin enum.
+func (e ObservabilityRunEvidenceEvidenceOrigin) Valid() bool {
+	switch e {
+	case ObservabilityRunEvidenceEvidenceOriginGatewayObserved:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ObservabilityRunEvidenceEventStream.
+const (
+	ObservabilityRunEvidenceEventStreamRuns ObservabilityRunEvidenceEventStream = "runs"
+)
+
+// Valid indicates whether the value is a known member of the ObservabilityRunEvidenceEventStream enum.
+func (e ObservabilityRunEvidenceEventStream) Valid() bool {
+	switch e {
+	case ObservabilityRunEvidenceEventStreamRuns:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ObservabilityRunEvidenceEventVersion.
+const (
+	ObservabilityRunEvidenceEventVersionN1 ObservabilityRunEvidenceEventVersion = 1
+)
+
+// Valid indicates whether the value is a known member of the ObservabilityRunEvidenceEventVersion enum.
+func (e ObservabilityRunEvidenceEventVersion) Valid() bool {
+	switch e {
+	case ObservabilityRunEvidenceEventVersionN1:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ObservabilityTraceSpanEvidenceCategory.
+const (
+	ObservabilityTraceSpanEvidenceCategoryChat           ObservabilityTraceSpanEvidenceCategory = "chat"
+	ObservabilityTraceSpanEvidenceCategoryCreateAgent    ObservabilityTraceSpanEvidenceCategory = "create_agent"
+	ObservabilityTraceSpanEvidenceCategoryEmbeddings     ObservabilityTraceSpanEvidenceCategory = "embeddings"
+	ObservabilityTraceSpanEvidenceCategoryExecuteTool    ObservabilityTraceSpanEvidenceCategory = "execute_tool"
+	ObservabilityTraceSpanEvidenceCategoryInvokeAgent    ObservabilityTraceSpanEvidenceCategory = "invoke_agent"
+	ObservabilityTraceSpanEvidenceCategoryOther          ObservabilityTraceSpanEvidenceCategory = "other"
+	ObservabilityTraceSpanEvidenceCategoryTextCompletion ObservabilityTraceSpanEvidenceCategory = "text_completion"
+)
+
+// Valid indicates whether the value is a known member of the ObservabilityTraceSpanEvidenceCategory enum.
+func (e ObservabilityTraceSpanEvidenceCategory) Valid() bool {
+	switch e {
+	case ObservabilityTraceSpanEvidenceCategoryChat:
+		return true
+	case ObservabilityTraceSpanEvidenceCategoryCreateAgent:
+		return true
+	case ObservabilityTraceSpanEvidenceCategoryEmbeddings:
+		return true
+	case ObservabilityTraceSpanEvidenceCategoryExecuteTool:
+		return true
+	case ObservabilityTraceSpanEvidenceCategoryInvokeAgent:
+		return true
+	case ObservabilityTraceSpanEvidenceCategoryOther:
+		return true
+	case ObservabilityTraceSpanEvidenceCategoryTextCompletion:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ObservabilityTraceSpanEvidenceEvidenceOrigin.
+const (
+	ObservabilityTraceSpanEvidenceEvidenceOriginClientAsserted ObservabilityTraceSpanEvidenceEvidenceOrigin = "client_asserted"
+)
+
+// Valid indicates whether the value is a known member of the ObservabilityTraceSpanEvidenceEvidenceOrigin enum.
+func (e ObservabilityTraceSpanEvidenceEvidenceOrigin) Valid() bool {
+	switch e {
+	case ObservabilityTraceSpanEvidenceEvidenceOriginClientAsserted:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ObservabilityTraceSpanEvidenceEventStream.
+const (
+	ObservabilityTraceSpanEvidenceEventStreamTraceSpans ObservabilityTraceSpanEvidenceEventStream = "trace_spans"
+)
+
+// Valid indicates whether the value is a known member of the ObservabilityTraceSpanEvidenceEventStream enum.
+func (e ObservabilityTraceSpanEvidenceEventStream) Valid() bool {
+	switch e {
+	case ObservabilityTraceSpanEvidenceEventStreamTraceSpans:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ObservabilityTraceSpanEvidenceEventVersion.
+const (
+	ObservabilityTraceSpanEvidenceEventVersionN1 ObservabilityTraceSpanEvidenceEventVersion = 1
+)
+
+// Valid indicates whether the value is a known member of the ObservabilityTraceSpanEvidenceEventVersion enum.
+func (e ObservabilityTraceSpanEvidenceEventVersion) Valid() bool {
+	switch e {
+	case ObservabilityTraceSpanEvidenceEventVersionN1:
 		return true
 	default:
 		return false
@@ -5812,6 +6340,8 @@ const (
 	SinkResponseStreamsAudit              SinkResponseStreams = "audit"
 	SinkResponseStreamsGuardrailDecisions SinkResponseStreams = "guardrail_decisions"
 	SinkResponseStreamsRequests           SinkResponseStreams = "requests"
+	SinkResponseStreamsRuns               SinkResponseStreams = "runs"
+	SinkResponseStreamsTraceSpans         SinkResponseStreams = "trace_spans"
 )
 
 // Valid indicates whether the value is a known member of the SinkResponseStreams enum.
@@ -5824,6 +6354,10 @@ func (e SinkResponseStreams) Valid() bool {
 	case SinkResponseStreamsGuardrailDecisions:
 		return true
 	case SinkResponseStreamsRequests:
+		return true
+	case SinkResponseStreamsRuns:
+		return true
+	case SinkResponseStreamsTraceSpans:
 		return true
 	default:
 		return false
@@ -6070,6 +6604,8 @@ const (
 	UpdateSinkRequestStreamsAudit              UpdateSinkRequestStreams = "audit"
 	UpdateSinkRequestStreamsGuardrailDecisions UpdateSinkRequestStreams = "guardrail_decisions"
 	UpdateSinkRequestStreamsRequests           UpdateSinkRequestStreams = "requests"
+	UpdateSinkRequestStreamsRuns               UpdateSinkRequestStreams = "runs"
+	UpdateSinkRequestStreamsTraceSpans         UpdateSinkRequestStreams = "trace_spans"
 )
 
 // Valid indicates whether the value is a known member of the UpdateSinkRequestStreams enum.
@@ -6082,6 +6618,10 @@ func (e UpdateSinkRequestStreams) Valid() bool {
 	case UpdateSinkRequestStreamsGuardrailDecisions:
 		return true
 	case UpdateSinkRequestStreamsRequests:
+		return true
+	case UpdateSinkRequestStreamsRuns:
+		return true
+	case UpdateSinkRequestStreamsTraceSpans:
 		return true
 	default:
 		return false
@@ -6511,6 +7051,123 @@ func (e ExportUsageCsvParamsDimension) Valid() bool {
 	}
 }
 
+// A2ARemoteTask defines model for A2ARemoteTask.
+type A2ARemoteTask struct {
+	Artifacts *[]map[string]interface{} `json:"artifacts,omitempty"`
+
+	// ContextId OLP task context ID
+	ContextId openapi_types.UUID        `json:"contextId"`
+	History   *[]map[string]interface{} `json:"history,omitempty"`
+
+	// Id OLP task ID
+	Id       openapi_types.UUID      `json:"id"`
+	Metadata *map[string]interface{} `json:"metadata,omitempty"`
+	Status   struct {
+		Message   *map[string]interface{} `json:"message,omitempty"`
+		State     string                  `json:"state"`
+		Timestamp *time.Time              `json:"timestamp,omitempty"`
+	} `json:"status"`
+}
+
+// A2ATask Content-free remote task metadata.
+type A2ATask struct {
+	AgentPrincipalId nullable.Nullable[openapi_types.UUID] `json:"agent_principal_id"`
+	ApiKeyId         openapi_types.UUID                    `json:"api_key_id"`
+
+	// CallbackAttempts Admitted callbacks, or null for tasks created before callback counts were recorded.
+	CallbackAttempts nullable.Nullable[int] `json:"callback_attempts"`
+	CreatedAt        time.Time              `json:"created_at"`
+	DeadlineAt       time.Time              `json:"deadline_at"`
+
+	// DelegationPairId Stable, project-scoped pair identifier, or null for an undelegated task.
+	DelegationPairId  nullable.Nullable[string]             `json:"delegation_pair_id"`
+	Id                openapi_types.UUID                    `json:"id"`
+	MemberPrincipalId nullable.Nullable[openapi_types.UUID] `json:"member_principal_id"`
+	ProjectId         openapi_types.UUID                    `json:"project_id"`
+	PublicationId     openapi_types.UUID                    `json:"publication_id"`
+	RevisionId        openapi_types.UUID                    `json:"revision_id"`
+	State             A2ATaskState                          `json:"state"`
+}
+
+// A2ATaskState defines model for A2ATask.State.
+type A2ATaskState string
+
+// A2ATaskDetail Content-free task and associated remote message fees.
+type A2ATaskDetail struct {
+	AgentPrincipalId nullable.Nullable[openapi_types.UUID] `json:"agent_principal_id"`
+	ApiKeyId         openapi_types.UUID                    `json:"api_key_id"`
+
+	// CallbackAttempts Admitted callbacks, or null for tasks created before callback counts were recorded.
+	CallbackAttempts nullable.Nullable[int] `json:"callback_attempts"`
+	CallbackModels   []A2ATaskModelCallback `json:"callback_models"`
+	CallbackTools    []A2ATaskToolCallback  `json:"callback_tools"`
+	CreatedAt        time.Time              `json:"created_at"`
+	DeadlineAt       time.Time              `json:"deadline_at"`
+
+	// DelegationPairId Stable, project-scoped pair identifier, or null for an undelegated task.
+	DelegationPairId  nullable.Nullable[string]             `json:"delegation_pair_id"`
+	Id                openapi_types.UUID                    `json:"id"`
+	MemberPrincipalId nullable.Nullable[openapi_types.UUID] `json:"member_principal_id"`
+	ProjectId         openapi_types.UUID                    `json:"project_id"`
+	PublicationId     openapi_types.UUID                    `json:"publication_id"`
+	RemoteFees        []A2ATaskRemoteFee                    `json:"remote_fees"`
+	RevisionId        openapi_types.UUID                    `json:"revision_id"`
+	State             A2ATaskDetailState                    `json:"state"`
+}
+
+// A2ATaskDetailState defines model for A2ATaskDetail.State.
+type A2ATaskDetailState string
+
+// A2ATaskList defines model for A2ATaskList.
+type A2ATaskList struct {
+	Items      []A2ATask                 `json:"items"`
+	NextCursor nullable.Nullable[string] `json:"next_cursor"`
+}
+
+// A2ATaskModelCallback Content-free callback accounting; null amounts are unknown.
+type A2ATaskModelCallback struct {
+	AttemptId       nullable.Nullable[openapi_types.UUID] `json:"attempt_id"`
+	Currency        nullable.Nullable[string]             `json:"currency"`
+	ObservedCharge  nullable.Nullable[string]             `json:"observed_charge"`
+	ObservedCost    nullable.Nullable[string]             `json:"observed_cost"`
+	RemainingCharge nullable.Nullable[string]             `json:"remaining_charge"`
+	RemainingCost   nullable.Nullable[string]             `json:"remaining_cost"`
+	RequestId       openapi_types.UUID                    `json:"request_id"`
+	State           A2ATaskModelCallbackState             `json:"state"`
+}
+
+// A2ATaskModelCallbackState defines model for A2ATaskModelCallback.State.
+type A2ATaskModelCallbackState string
+
+// A2ATaskRemoteFee A remote message fee and its unresolved exposure.
+type A2ATaskRemoteFee struct {
+	CreatedAt       time.Time          `json:"created_at"`
+	Currency        string             `json:"currency"`
+	DispatchId      openapi_types.UUID `json:"dispatch_id"`
+	ObservedCharge  string             `json:"observed_charge"`
+	ObservedCost    string             `json:"observed_cost"`
+	RemainingCharge string             `json:"remaining_charge"`
+	RemainingCost   string             `json:"remaining_cost"`
+	RunId           openapi_types.UUID `json:"run_id"`
+	State           string             `json:"state"`
+}
+
+// A2ATaskToolCallback Content-free callback accounting; null amounts are unknown.
+type A2ATaskToolCallback struct {
+	Currency        string                          `json:"currency"`
+	DispatchId      openapi_types.UUID              `json:"dispatch_id"`
+	ObservedCharge  nullable.Nullable[string]       `json:"observed_charge"`
+	ObservedCost    nullable.Nullable[string]       `json:"observed_cost"`
+	PricingState    A2ATaskToolCallbackPricingState `json:"pricing_state"`
+	RemainingCharge nullable.Nullable[string]       `json:"remaining_charge"`
+	RemainingCost   nullable.Nullable[string]       `json:"remaining_cost"`
+	RunId           openapi_types.UUID              `json:"run_id"`
+	State           string                          `json:"state"`
+}
+
+// A2ATaskToolCallbackPricingState defines model for A2ATaskToolCallback.PricingState.
+type A2ATaskToolCallbackPricingState string
+
 // AcceptCatalogSuggestionsRequest defines model for AcceptCatalogSuggestionsRequest.
 type AcceptCatalogSuggestionsRequest struct {
 	// CatalogSha256 Digest of the catalog the suggestions were reviewed against; a different catalog answers 409.
@@ -6556,6 +7213,32 @@ type AgentDefinition struct {
 
 // AgentDefinitionProtocol defines model for AgentDefinition.Protocol.
 type AgentDefinitionProtocol string
+
+// AgentDelegation Content-free delegation principals, revocation and pair budget.
+type AgentDelegation struct {
+	AgentId         openapi_types.UUID              `json:"agent_id"`
+	AgentRevokedAt  nullable.Nullable[time.Time]    `json:"agent_revoked_at"`
+	ApiKeyId        openapi_types.UUID              `json:"api_key_id"`
+	ApiKeyRevokedAt nullable.Nullable[time.Time]    `json:"api_key_revoked_at"`
+	Budget          AggregateBudgetUsage            `json:"budget"`
+	BudgetPolicy    nullable.Nullable[BudgetPolicy] `json:"budget_policy"`
+	ConsentPending  bool                            `json:"consent_pending"`
+	ConsumedAt      nullable.Nullable[time.Time]    `json:"consumed_at"`
+	ExpiresAt       time.Time                       `json:"expires_at"`
+	Id              openapi_types.UUID              `json:"id"`
+
+	// MemberAuthorized Current authority of the consenting member, or null for key delegation.
+	MemberAuthorized nullable.Nullable[bool]               `json:"member_authorized"`
+	MemberId         nullable.Nullable[openapi_types.UUID] `json:"member_id"`
+	ProjectId        openapi_types.UUID                    `json:"project_id"`
+	RevokedAt        nullable.Nullable[time.Time]          `json:"revoked_at"`
+}
+
+// AgentDelegationList defines model for AgentDelegationList.
+type AgentDelegationList struct {
+	Items      []AgentDelegation         `json:"items"`
+	NextCursor nullable.Nullable[string] `json:"next_cursor"`
+}
 
 // AgentOAuthConfiguration OAuth grants are bound to the approved agent endpoint and caller identity. Browser and device flows use personal enrollment. Entra OBO uses verified workload assertions and a sealed middle-tier client secret.
 type AgentOAuthConfiguration struct {
@@ -6652,6 +7335,101 @@ type AgentPublicationWrite struct {
 	Prompt  *PromptDefinition  `json:"prompt,omitempty"`
 	Toolset *ToolsetDefinition `json:"toolset,omitempty"`
 }
+
+// AgentRun Content-free gateway run metadata.
+type AgentRun struct {
+	ApiKeyId        openapi_types.UUID                    `json:"api_key_id"`
+	CreatedAt       time.Time                             `json:"created_at"`
+	Id              openapi_types.UUID                    `json:"id"`
+	ProjectId       openapi_types.UUID                    `json:"project_id"`
+	RevisionId      nullable.Nullable[openapi_types.UUID] `json:"revision_id"`
+	RouteRevisionId nullable.Nullable[openapi_types.UUID] `json:"route_revision_id"`
+}
+
+// AgentRunApproval Approval metadata without tokens or content.
+type AgentRunApproval struct {
+	ConsumedAt nullable.Nullable[time.Time]          `json:"consumed_at"`
+	DispatchId nullable.Nullable[openapi_types.UUID] `json:"dispatch_id"`
+	ExpiresAt  time.Time                             `json:"expires_at"`
+	Id         openapi_types.UUID                    `json:"id"`
+}
+
+// AgentRunDetail defines model for AgentRunDetail.
+type AgentRunDetail struct {
+	ApiKeyId        openapi_types.UUID                    `json:"api_key_id"`
+	Approvals       []AgentRunApproval                    `json:"approvals"`
+	CreatedAt       time.Time                             `json:"created_at"`
+	Id              openapi_types.UUID                    `json:"id"`
+	ProjectId       openapi_types.UUID                    `json:"project_id"`
+	RevisionId      nullable.Nullable[openapi_types.UUID] `json:"revision_id"`
+	RouteRevisionId nullable.Nullable[openapi_types.UUID] `json:"route_revision_id"`
+	Steps           []AgentRunStep                        `json:"steps"`
+}
+
+// AgentRunList defines model for AgentRunList.
+type AgentRunList struct {
+	Items      []AgentRun                `json:"items"`
+	NextCursor nullable.Nullable[string] `json:"next_cursor"`
+}
+
+// AgentRunSpan Correlated span metadata without messages, arguments, results or rendered prompts.
+type AgentRunSpan struct {
+	AttemptId    nullable.Nullable[openapi_types.UUID] `json:"attempt_id"`
+	Category     string                                `json:"category"`
+	EndedNanos   string                                `json:"ended_nanos"`
+	Id           openapi_types.UUID                    `json:"id"`
+	ParentSpanId nullable.Nullable[string]             `json:"parent_span_id"`
+	ReceivedAt   time.Time                             `json:"received_at"`
+	SpanId       string                                `json:"span_id"`
+	StartedNanos string                                `json:"started_nanos"`
+	Status       int                                   `json:"status"`
+	TraceId      string                                `json:"trace_id"`
+}
+
+// AgentRunSpanList Correlated spans, ordered by start time and ID from newest to oldest.
+type AgentRunSpanList struct {
+	Items      []AgentRunSpan            `json:"items"`
+	NextCursor nullable.Nullable[string] `json:"next_cursor"`
+}
+
+// AgentRunStep A step and its dispatch attempt. Remaining amounts are unresolved exposure, not charges.
+type AgentRunStep struct {
+	BoundViolation bool               `json:"bound_violation"`
+	ChargeBound    string             `json:"charge_bound"`
+	CostBound      string             `json:"cost_bound"`
+	CreatedAt      time.Time          `json:"created_at"`
+	Currency       string             `json:"currency"`
+	DispatchId     openapi_types.UUID `json:"dispatch_id"`
+	Id             openapi_types.UUID `json:"id"`
+	Kind           AgentRunStepKind   `json:"kind"`
+	ObservedCharge string             `json:"observed_charge"`
+	ObservedCost   string             `json:"observed_cost"`
+	Ordinal        int                `json:"ordinal"`
+
+	// PricingState Recorded tool pricing state; unpriced amounts are unknown.
+	PricingState    nullable.Nullable[AgentRunStepPricingState] `json:"pricing_state"`
+	RemainingCharge string                                      `json:"remaining_charge"`
+	RemainingCost   string                                      `json:"remaining_cost"`
+	State           AgentRunStepState                           `json:"state"`
+
+	// ToolAlias Recorded tool alias, if a tool call exists.
+	ToolAlias nullable.Nullable[string] `json:"tool_alias"`
+
+	// ToolIsError Whether the tool returned an error result.
+	ToolIsError nullable.Nullable[bool] `json:"tool_is_error"`
+
+	// ToolStatus Recorded tool call execution status.
+	ToolStatus nullable.Nullable[string] `json:"tool_status"`
+}
+
+// AgentRunStepKind defines model for AgentRunStep.Kind.
+type AgentRunStepKind string
+
+// AgentRunStepPricingState Recorded tool pricing state; unpriced amounts are unknown.
+type AgentRunStepPricingState string
+
+// AgentRunStepState defines model for AgentRunStep.State.
+type AgentRunStepState string
 
 // AgentToolPin defines model for AgentToolPin.
 type AgentToolPin struct {
@@ -9219,6 +9997,7 @@ type DelegationConsent struct {
 // DelegationConsentRequest defines model for DelegationConsentRequest.
 type DelegationConsentRequest struct {
 	AgentId         openapi_types.UUID                `json:"agent_id"`
+	AllowedAgents   *[]openapi_types.UUID             `json:"allowed_agents,omitempty"`
 	AllowedRoutes   *[]string                         `json:"allowed_routes,omitempty"`
 	AllowedToolsets *[]openapi_types.UUID             `json:"allowed_toolsets,omitempty"`
 	ApiKeyId        openapi_types.UUID                `json:"api_key_id"`
@@ -9231,6 +10010,9 @@ type DelegationConsentRequestScopes string
 
 // DelegationOption defines model for DelegationOption.
 type DelegationOption struct {
+	// AllowedAgents Published agents currently allowed by both the key and the workload.
+	AllowedAgents *[]openapi_types.UUID `json:"allowed_agents,omitempty"`
+
 	// AllowedRoutes Active inference routes currently allowed by both the key and the agent.
 	AllowedRoutes []string `json:"allowed_routes"`
 
@@ -9920,6 +10702,66 @@ type InteractionObligations struct {
 	Submission              string `json:"submission"`
 }
 
+// Investigation defines model for Investigation.
+type Investigation struct {
+	CreatedAt time.Time                   `json:"created_at"`
+	Evidence  []InvestigationEvidenceView `json:"evidence"`
+
+	// Filters Typed filters used to investigate agent evidence.
+	Filters   InvestigationFilters `json:"filters"`
+	Id        openapi_types.UUID   `json:"id"`
+	ProjectId openapi_types.UUID   `json:"project_id"`
+	Summary   string               `json:"summary"`
+}
+
+// InvestigationEvidence Reference to evidence in the investigation project. A retained reference can outlive its source evidence.
+type InvestigationEvidence struct {
+	Id   openapi_types.UUID        `json:"id"`
+	Kind InvestigationEvidenceKind `json:"kind"`
+}
+
+// InvestigationEvidenceKind defines model for InvestigationEvidence.Kind.
+type InvestigationEvidenceKind string
+
+// InvestigationEvidenceView Reference to evidence in the investigation project. A retained reference can outlive its source evidence; the associated run is resolved on detail reads.
+type InvestigationEvidenceView struct {
+	Id   openapi_types.UUID            `json:"id"`
+	Kind InvestigationEvidenceViewKind `json:"kind"`
+
+	// RunId The associated run, when this step, approval or span is still retained.
+	RunId *openapi_types.UUID `json:"run_id,omitempty"`
+}
+
+// InvestigationEvidenceViewKind defines model for InvestigationEvidenceView.Kind.
+type InvestigationEvidenceViewKind string
+
+// InvestigationFilters Typed filters used to investigate agent evidence.
+type InvestigationFilters struct {
+	Error         *bool               `json:"error,omitempty"`
+	From          *time.Time          `json:"from,omitempty"`
+	MaxDurationMs *int64              `json:"max_duration_ms,omitempty"`
+	MinDurationMs *int64              `json:"min_duration_ms,omitempty"`
+	RunId         *openapi_types.UUID `json:"run_id,omitempty"`
+	To            *time.Time          `json:"to,omitempty"`
+	Tool          *string             `json:"tool,omitempty"`
+}
+
+// InvestigationList defines model for InvestigationList.
+type InvestigationList struct {
+	Items      []Investigation           `json:"items"`
+	NextCursor nullable.Nullable[string] `json:"next_cursor"`
+}
+
+// InvestigationWrite Operator-authored filters, evidence references and summary. Do not submit source payloads.
+type InvestigationWrite struct {
+	Evidence []InvestigationEvidence `json:"evidence"`
+
+	// Filters Typed filters used to investigate agent evidence.
+	Filters   InvestigationFilters `json:"filters"`
+	ProjectId openapi_types.UUID   `json:"project_id"`
+	Summary   string               `json:"summary"`
+}
+
 // InvitationListResponse defines model for InvitationListResponse.
 type InvitationListResponse struct {
 	Items      []InvitationResponse      `json:"items"`
@@ -10445,6 +11287,79 @@ type MFAVerificationRequest struct {
 // MFAVerificationRequestMethod defines model for MFAVerificationRequest.Method.
 type MFAVerificationRequestMethod string
 
+// ManagedRunEvidence Gateway-observed run metadata exported by a managed sink.
+type ManagedRunEvidence struct {
+	ApiKeyId       openapi_types.UUID               `json:"api_key_id"`
+	CreatedAt      time.Time                        `json:"created_at"`
+	EvidenceOrigin ManagedRunEvidenceEvidenceOrigin `json:"evidence_origin"`
+	Id             openapi_types.UUID               `json:"id"`
+	ProjectId      openapi_types.UUID               `json:"project_id"`
+}
+
+// ManagedRunEvidenceEvidenceOrigin defines model for ManagedRunEvidence.EvidenceOrigin.
+type ManagedRunEvidenceEvidenceOrigin string
+
+// ManagedRunEvidenceEvent Managed sink evidence envelope.
+type ManagedRunEvidenceEvent struct {
+	// Data Gateway-observed run metadata exported by a managed sink.
+	Data       ManagedRunEvidence             `json:"data"`
+	Id         openapi_types.UUID             `json:"id"`
+	OccurredAt time.Time                      `json:"occurred_at"`
+	Stream     ManagedRunEvidenceEventStream  `json:"stream"`
+	Version    ManagedRunEvidenceEventVersion `json:"version"`
+}
+
+// ManagedRunEvidenceEventStream defines model for ManagedRunEvidenceEvent.Stream.
+type ManagedRunEvidenceEventStream string
+
+// ManagedRunEvidenceEventVersion defines model for ManagedRunEvidenceEvent.Version.
+type ManagedRunEvidenceEventVersion int
+
+// ManagedTraceSpanEvidence Client-asserted trace span metadata exported by a managed sink. Nanosecond timestamps are decimal strings.
+type ManagedTraceSpanEvidence struct {
+	ApiKeyId   openapi_types.UUID                    `json:"api_key_id"`
+	AttemptId  nullable.Nullable[openapi_types.UUID] `json:"attempt_id"`
+	Attributes struct {
+		GenAiUsageInputTokens  *int `json:"gen_ai.usage.input_tokens,omitempty"`
+		GenAiUsageOutputTokens *int `json:"gen_ai.usage.output_tokens,omitempty"`
+		HttpResponseStatusCode *int `json:"http.response.status_code,omitempty"`
+	} `json:"attributes"`
+	Category       ManagedTraceSpanEvidenceCategory       `json:"category"`
+	EndedNanos     string                                 `json:"ended_nanos"`
+	EvidenceOrigin ManagedTraceSpanEvidenceEvidenceOrigin `json:"evidence_origin"`
+	Id             openapi_types.UUID                     `json:"id"`
+	ParentSpanId   nullable.Nullable[string]              `json:"parent_span_id"`
+	ProjectId      openapi_types.UUID                     `json:"project_id"`
+	ReceivedAt     time.Time                              `json:"received_at"`
+	RunId          nullable.Nullable[openapi_types.UUID]  `json:"run_id"`
+	SpanId         string                                 `json:"span_id"`
+	StartedNanos   string                                 `json:"started_nanos"`
+	Status         int                                    `json:"status"`
+	TraceId        string                                 `json:"trace_id"`
+}
+
+// ManagedTraceSpanEvidenceCategory defines model for ManagedTraceSpanEvidence.Category.
+type ManagedTraceSpanEvidenceCategory string
+
+// ManagedTraceSpanEvidenceEvidenceOrigin defines model for ManagedTraceSpanEvidence.EvidenceOrigin.
+type ManagedTraceSpanEvidenceEvidenceOrigin string
+
+// ManagedTraceSpanEvidenceEvent Managed sink evidence envelope.
+type ManagedTraceSpanEvidenceEvent struct {
+	// Data Client-asserted trace span metadata exported by a managed sink. Nanosecond timestamps are decimal strings.
+	Data       ManagedTraceSpanEvidence             `json:"data"`
+	Id         openapi_types.UUID                   `json:"id"`
+	OccurredAt time.Time                            `json:"occurred_at"`
+	Stream     ManagedTraceSpanEvidenceEventStream  `json:"stream"`
+	Version    ManagedTraceSpanEvidenceEventVersion `json:"version"`
+}
+
+// ManagedTraceSpanEvidenceEventStream defines model for ManagedTraceSpanEvidenceEvent.Stream.
+type ManagedTraceSpanEvidenceEventStream string
+
+// ManagedTraceSpanEvidenceEventVersion defines model for ManagedTraceSpanEvidenceEvent.Version.
+type ManagedTraceSpanEvidenceEventVersion int
+
 // ManagementOperation A management operation the authorization policy decides. Security requirement scopes name these, and a session lists the ones its member may perform.
 type ManagementOperation string
 
@@ -10714,6 +11629,86 @@ type NotificationRuleListResponse struct {
 	Items      []NotificationRule        `json:"items"`
 	NextCursor nullable.Nullable[string] `json:"next_cursor,omitempty"`
 }
+
+// ObservabilityRunEvidence Gateway-observed run metadata exported by an observability sink.
+type ObservabilityRunEvidence struct {
+	AgentRevisionId nullable.Nullable[openapi_types.UUID]  `json:"agent_revision_id"`
+	CreatedAt       time.Time                              `json:"created_at"`
+	EvidenceOrigin  ObservabilityRunEvidenceEvidenceOrigin `json:"evidence_origin"`
+	ProjectId       openapi_types.UUID                     `json:"project_id"`
+	RouteRevisionId nullable.Nullable[openapi_types.UUID]  `json:"route_revision_id"`
+	RunId           openapi_types.UUID                     `json:"run_id"`
+}
+
+// ObservabilityRunEvidenceEvidenceOrigin defines model for ObservabilityRunEvidence.EvidenceOrigin.
+type ObservabilityRunEvidenceEvidenceOrigin string
+
+// ObservabilityRunEvidenceEvent Observability sink evidence envelope. The same object appears as a JSONL line or an OTLP log body.
+type ObservabilityRunEvidenceEvent struct {
+	// Data Gateway-observed run metadata exported by an observability sink.
+	Data       ObservabilityRunEvidence             `json:"data"`
+	EventId    openapi_types.UUID                   `json:"event_id"`
+	OccurredAt time.Time                            `json:"occurred_at"`
+	Outcome    string                               `json:"outcome"`
+	ProjectId  openapi_types.UUID                   `json:"project_id"`
+	Route      string                               `json:"route"`
+	SourceId   openapi_types.UUID                   `json:"source_id"`
+	Stream     ObservabilityRunEvidenceEventStream  `json:"stream"`
+	Version    ObservabilityRunEvidenceEventVersion `json:"version"`
+}
+
+// ObservabilityRunEvidenceEventStream defines model for ObservabilityRunEvidenceEvent.Stream.
+type ObservabilityRunEvidenceEventStream string
+
+// ObservabilityRunEvidenceEventVersion defines model for ObservabilityRunEvidenceEvent.Version.
+type ObservabilityRunEvidenceEventVersion int
+
+// ObservabilityTraceSpanEvidence Client-asserted trace span metadata exported by an observability sink.
+type ObservabilityTraceSpanEvidence struct {
+	AttemptId  nullable.Nullable[openapi_types.UUID] `json:"attempt_id"`
+	Attributes struct {
+		GenAiUsageInputTokens  *int `json:"gen_ai.usage.input_tokens,omitempty"`
+		GenAiUsageOutputTokens *int `json:"gen_ai.usage.output_tokens,omitempty"`
+		HttpResponseStatusCode *int `json:"http.response.status_code,omitempty"`
+	} `json:"attributes"`
+	Category       ObservabilityTraceSpanEvidenceCategory       `json:"category"`
+	EndedNanos     int                                          `json:"ended_nanos"`
+	EvidenceOrigin ObservabilityTraceSpanEvidenceEvidenceOrigin `json:"evidence_origin"`
+	Id             openapi_types.UUID                           `json:"id"`
+	ParentSpanId   nullable.Nullable[string]                    `json:"parent_span_id"`
+	ProjectId      openapi_types.UUID                           `json:"project_id"`
+	RunId          nullable.Nullable[openapi_types.UUID]        `json:"run_id"`
+	SpanId         string                                       `json:"span_id"`
+	StartedNanos   int                                          `json:"started_nanos"`
+	Status         int                                          `json:"status"`
+	TraceId        string                                       `json:"trace_id"`
+}
+
+// ObservabilityTraceSpanEvidenceCategory defines model for ObservabilityTraceSpanEvidence.Category.
+type ObservabilityTraceSpanEvidenceCategory string
+
+// ObservabilityTraceSpanEvidenceEvidenceOrigin defines model for ObservabilityTraceSpanEvidence.EvidenceOrigin.
+type ObservabilityTraceSpanEvidenceEvidenceOrigin string
+
+// ObservabilityTraceSpanEvidenceEvent Observability sink evidence envelope. The same object appears as a JSONL line or an OTLP log body.
+type ObservabilityTraceSpanEvidenceEvent struct {
+	// Data Client-asserted trace span metadata exported by an observability sink.
+	Data       ObservabilityTraceSpanEvidence             `json:"data"`
+	EventId    openapi_types.UUID                         `json:"event_id"`
+	OccurredAt time.Time                                  `json:"occurred_at"`
+	Outcome    string                                     `json:"outcome"`
+	ProjectId  openapi_types.UUID                         `json:"project_id"`
+	Route      string                                     `json:"route"`
+	SourceId   openapi_types.UUID                         `json:"source_id"`
+	Stream     ObservabilityTraceSpanEvidenceEventStream  `json:"stream"`
+	Version    ObservabilityTraceSpanEvidenceEventVersion `json:"version"`
+}
+
+// ObservabilityTraceSpanEvidenceEventStream defines model for ObservabilityTraceSpanEvidenceEvent.Stream.
+type ObservabilityTraceSpanEvidenceEventStream string
+
+// ObservabilityTraceSpanEvidenceEventVersion defines model for ObservabilityTraceSpanEvidenceEvent.Version.
+type ObservabilityTraceSpanEvidenceEventVersion int
 
 // OidcAuthorizationResponse defines model for OidcAuthorizationResponse.
 type OidcAuthorizationResponse struct {
@@ -15392,6 +16387,49 @@ type WorkloadMapping struct {
 // WorkloadMappingScopes defines model for WorkloadMapping.Scopes.
 type WorkloadMappingScopes string
 
+// ListA2aTasksParams defines parameters for ListA2aTasks.
+type ListA2aTasksParams struct {
+	// Cursor Opaque cursor returned by the previous page.
+	Cursor *string `form:"cursor,omitempty" json:"cursor,omitempty"`
+
+	// Limit Page size, from 1 to 200. Defaults to 50.
+	Limit     *int32              `form:"limit,omitempty" json:"limit,omitempty"`
+	ProjectId *openapi_types.UUID `form:"project_id,omitempty" json:"project_id,omitempty"`
+}
+
+// ListAgentDelegationsParams defines parameters for ListAgentDelegations.
+type ListAgentDelegationsParams struct {
+	// Cursor Opaque cursor returned by the previous page.
+	Cursor *string `form:"cursor,omitempty" json:"cursor,omitempty"`
+
+	// Limit Page size, from 1 to 200. Defaults to 50.
+	Limit        *int32              `form:"limit,omitempty" json:"limit,omitempty"`
+	ProjectId    *openapi_types.UUID `form:"project_id,omitempty" json:"project_id,omitempty"`
+	DelegationId *openapi_types.UUID `form:"delegation_id,omitempty" json:"delegation_id,omitempty"`
+}
+
+// ListAgentRunsParams defines parameters for ListAgentRuns.
+type ListAgentRunsParams struct {
+	// Cursor Opaque cursor returned by the previous page.
+	Cursor *string `form:"cursor,omitempty" json:"cursor,omitempty"`
+
+	// Limit Page size, from 1 to 200. Defaults to 50.
+	Limit     *int32              `form:"limit,omitempty" json:"limit,omitempty"`
+	ProjectId *openapi_types.UUID `form:"project_id,omitempty" json:"project_id,omitempty"`
+}
+
+// ListAgentRunSpansParams defines parameters for ListAgentRunSpans.
+type ListAgentRunSpansParams struct {
+	// SpanId Return only the referenced internal span UUID within this run.
+	SpanId *openapi_types.UUID `form:"span_id,omitempty" json:"span_id,omitempty"`
+
+	// Cursor Opaque cursor returned by the previous page.
+	Cursor *string `form:"cursor,omitempty" json:"cursor,omitempty"`
+
+	// Limit Page size, from 1 to 200. Defaults to 50.
+	Limit *int32 `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
 // ListAgentsParams defines parameters for ListAgents.
 type ListAgentsParams struct {
 	// Cursor Opaque cursor returned by the previous page.
@@ -15801,6 +16839,21 @@ type UpdateGuardrailParams struct {
 type ActivateGuardrailParams struct {
 	IdempotencyKey string `json:"Idempotency-Key"`
 	IfMatch        string `json:"If-Match"`
+}
+
+// ListInvestigationsParams defines parameters for ListInvestigations.
+type ListInvestigationsParams struct {
+	// Cursor Opaque cursor returned by the previous page.
+	Cursor *string `form:"cursor,omitempty" json:"cursor,omitempty"`
+
+	// Limit Page size, from 1 to 200. Defaults to 50.
+	Limit     *int32              `form:"limit,omitempty" json:"limit,omitempty"`
+	ProjectId *openapi_types.UUID `form:"project_id,omitempty" json:"project_id,omitempty"`
+}
+
+// CreateInvestigationParams defines parameters for CreateInvestigation.
+type CreateInvestigationParams struct {
+	IdempotencyKey string `json:"Idempotency-Key"`
 }
 
 // ListInvitationsParams defines parameters for ListInvitations.
@@ -17506,6 +18559,9 @@ type UpdateGuardrailJSONRequestBody = UpdateGuardrailRequest
 // ActivateGuardrailJSONRequestBody defines body for ActivateGuardrail for application/json ContentType.
 type ActivateGuardrailJSONRequestBody = GuardrailActivation
 
+// CreateInvestigationJSONRequestBody defines body for CreateInvestigation for application/json ContentType.
+type CreateInvestigationJSONRequestBody = InvestigationWrite
+
 // CreateInvitationJSONRequestBody defines body for CreateInvitation for application/json ContentType.
 type CreateInvitationJSONRequestBody = CreateInvitationRequest
 
@@ -17868,6 +18924,18 @@ type BudgetThresholdWebhookJSONRequestBody = BudgetThresholdEvent
 
 // KeyExpiringWebhookJSONRequestBody defines body for KeyExpiringWebhook for application/json ContentType.
 type KeyExpiringWebhookJSONRequestBody = KeyExpiringEvent
+
+// ManagedRunEvidenceWebhookJSONRequestBody defines body for ManagedRunEvidenceWebhook for application/json ContentType.
+type ManagedRunEvidenceWebhookJSONRequestBody = ManagedRunEvidenceEvent
+
+// ManagedTraceSpanEvidenceWebhookJSONRequestBody defines body for ManagedTraceSpanEvidenceWebhook for application/json ContentType.
+type ManagedTraceSpanEvidenceWebhookJSONRequestBody = ManagedTraceSpanEvidenceEvent
+
+// ObservabilityRunEvidenceWebhookJSONRequestBody defines body for ObservabilityRunEvidenceWebhook for application/json ContentType.
+type ObservabilityRunEvidenceWebhookJSONRequestBody = ObservabilityRunEvidenceEvent
+
+// ObservabilityTraceSpanEvidenceWebhookJSONRequestBody defines body for ObservabilityTraceSpanEvidenceWebhook for application/json ContentType.
+type ObservabilityTraceSpanEvidenceWebhookJSONRequestBody = ObservabilityTraceSpanEvidenceEvent
 
 // ProviderGrantLapsedWebhookJSONRequestBody defines body for ProviderGrantLapsedWebhook for application/json ContentType.
 type ProviderGrantLapsedWebhookJSONRequestBody = ProviderGrantLapsedEvent

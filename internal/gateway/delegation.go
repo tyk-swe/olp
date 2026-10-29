@@ -95,6 +95,9 @@ func delegationScope(bounds runtime.DelegationBounds) string {
 	if slices.Contains(bounds.Scopes, "tools") {
 		return "tools"
 	}
+	if slices.Contains(bounds.Scopes, "agents") {
+		return "agents"
+	}
 	return "inference"
 }
 

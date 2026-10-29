@@ -7,6 +7,7 @@ import (
 	"slices"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/agentcontract"
@@ -44,7 +45,7 @@ func (m *Manager) authenticateTaskCapability(ctx context.Context, digest []byte)
 	if err != nil {
 		return nil, ErrStaleAuthority
 	}
-	if len(delegation) != 0 || definition.Agent == nil {
+	if definition.Agent == nil {
 		return nil, ErrInvalidKey
 	}
 	if err := m.AuthorizeAgentTask(keyID, project, publication, revision, workloadRevision, callerExpires); err != nil {
@@ -56,16 +57,27 @@ func (m *Manager) authenticateTaskCapability(ctx context.Context, digest []byte)
 	if !ok {
 		return nil, ErrInvalidKey
 	}
-	if endUser == "" && (policy.Policy.EndUserSource != nil || policy.Policy.EndUserPolicy != nil || policy.ProjectEndUserPolicy != nil) {
+	currentPolicy, err := m.taskCapabilityPolicy(ctx, policy, delegation, keyID, project, publication)
+	if err != nil {
+		return nil, err
+	}
+	if endUser == "" && (currentPolicy.Policy.EndUserSource != nil || currentPolicy.Policy.EndUserPolicy != nil || currentPolicy.ProjectEndUserPolicy != nil) {
 		return nil, ErrInvalidKey
 	}
-	if !policy.AllowsEndUser(endUser) {
+	if !currentPolicy.AllowsEndUser(endUser) {
 		return nil, ErrInvalidKey
 	}
 	boundedExpiry := boundDelegationExpiry(expires, principalExpires)
 	capability := &access.TaskCapability{Digest: hex.EncodeToString(digest), RouteRevisions: slices.Clone(definition.Agent.RouteRevisions), ToolsetRevisions: slices.Clone(definition.Agent.ToolsetRevisions)}
-	callback := policy.TaskAuthority(principal, snapshot, workloadRevision, &boundedExpiry, endUser, capability)
+	callback := currentPolicy.TaskAuthority(principal, snapshot, workloadRevision, &boundedExpiry, endUser, capability)
 	return &callback, nil
+}
+
+func (m *Manager) taskCapabilityPolicy(ctx context.Context, policy access.Authority, delegation []byte, keyID, project, publication string) (*access.Authority, error) {
+	if len(delegation) == 0 {
+		return &policy, nil
+	}
+	return m.authorizeDelegatedTask(ctx, delegation, keyID, project, publication)
 }
 
 func (state authorityState) taskCapabilityPrincipal(keyID, revision string, expiry *time.Time) (access.Authority, access.Authority, string, *time.Time, bool) {
@@ -92,8 +104,12 @@ func (state authorityState) taskCapabilityPrincipal(keyID, revision string, expi
 	return access.Authority{}, access.Authority{}, "", nil, false
 }
 
-func (m *Manager) AdmitTaskCapabilityAttempt(ctx context.Context, authority access.Authority, scope, resource, revision string, project *string) error {
+func (m *Manager) AdmitTaskCapabilityAttempt(ctx context.Context, authority access.Authority, scope, resource, revision string, project *string, accountingID string) error {
 	if authority.TaskCapability == nil {
+		return ErrInvalidKey
+	}
+	id, err := uuid.Parse(accountingID)
+	if err != nil || id == uuid.Nil || id.String() != accountingID {
 		return ErrInvalidKey
 	}
 	digest, err := hex.DecodeString(authority.TaskCapability.Digest)
@@ -141,12 +157,18 @@ func (m *Manager) AdmitTaskCapabilityAttempt(ctx context.Context, authority acce
 	if task == "" {
 		err = tx.QueryRow(ctx, `UPDATE olp.a2a_task_admissions SET callback_attempts=callback_attempts+1 WHERE dispatch_id=$1 AND callback_attempts<$2 RETURNING callback_attempts`, dispatch, limit).Scan(&count)
 	} else {
-		err = tx.QueryRow(ctx, `UPDATE olp.a2a_tasks SET continuations=continuations+1 WHERE id=$1 AND state='active' AND deadline_at>now() AND continuations<$2 RETURNING continuations`, task, limit).Scan(&count)
+		err = tx.QueryRow(ctx, `UPDATE olp.a2a_tasks SET continuations=continuations+1,callback_attempts=callback_attempts+1 WHERE id=$1 AND state='active' AND deadline_at>now() AND continuations<$2 RETURNING continuations`, task, limit).Scan(&count)
 	}
 	if errors.Is(err, pgx.ErrNoRows) {
 		return ErrTaskAttemptLimit
 	}
-	if err != nil || tx.Commit(ctx) != nil {
+	if err != nil {
+		return ErrStaleAuthority
+	}
+	if _, err = tx.Exec(ctx, `INSERT INTO olp.a2a_task_callback_accounting(dispatch_id,kind,accounting_id) VALUES($1,$2,$3) ON CONFLICT(dispatch_id,kind,accounting_id) DO NOTHING`, dispatch, scope, accountingID); err != nil {
+		return ErrStaleAuthority
+	}
+	if tx.Commit(ctx) != nil {
 		return ErrStaleAuthority
 	}
 	return nil

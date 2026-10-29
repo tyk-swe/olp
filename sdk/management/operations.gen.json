@@ -4055,7 +4055,9 @@
                   "requests",
                   "attempts",
                   "guardrail_decisions",
-                  "audit"
+                  "audit",
+                  "runs",
+                  "trace_spans"
                 ]
               }
             },
@@ -5004,6 +5006,53 @@
       "required": [
         "path",
         "idempotency_key"
+      ]
+    }
+  },
+  {
+    "name": "cancel_a2a_task_remote",
+    "group": "a2a-tasks",
+    "method": "POST",
+    "read_only": false,
+    "path": "/api/v1/a2a-tasks/{task_id}/cancel",
+    "description": "Cancel the task on its pinned remote agent. Requires project change permission and uses the task’s original credential binding.",
+    "scopes": [
+      [
+        "configure"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "task_id",
+        "in": "path",
+        "required": true,
+        "type": "string"
+      }
+    ],
+    "response_headers": {
+      "ETag": "etag"
+    },
+    "body_required": false,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "object",
+          "properties": {
+            "task_id": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "task_id"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "path"
       ]
     }
   },
@@ -6967,7 +7016,7 @@
     "method": "POST",
     "read_only": false,
     "path": "/api/v1/observability/sinks",
-    "description": "create export sink",
+    "description": "Create an observability sink. The observability.runs and observability.trace_spans webhooks describe the corresponding evidence envelopes.",
     "scopes": [
       [
         "keys"
@@ -7043,7 +7092,9 @@
                   "guardrail_decisions",
                   "audit",
                   "metering",
-                  "focus"
+                  "focus",
+                  "runs",
+                  "trace_spans"
                 ],
                 "type": "string"
               },
@@ -7598,6 +7649,147 @@
             "phase",
             "action"
           ]
+        }
+      }
+    }
+  },
+  {
+    "name": "create_investigation",
+    "group": "agents",
+    "method": "POST",
+    "read_only": false,
+    "path": "/api/v1/investigations",
+    "description": "Save an investigation",
+    "scopes": [
+      [
+        "configure"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "Idempotency-Key",
+        "in": "header",
+        "required": true,
+        "type": "string"
+      }
+    ],
+    "response_headers": {
+      "ETag": "etag"
+    },
+    "body_required": true,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "idempotency_key": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Idempotency-Key"
+        },
+        "body": {
+          "$ref": "#/$defs/InvestigationWrite"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "idempotency_key",
+        "body"
+      ],
+      "$defs": {
+        "InvestigationWrite": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "project_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "filters": {
+              "$ref": "#/$defs/InvestigationFilters"
+            },
+            "evidence": {
+              "type": "array",
+              "maxItems": 100,
+              "items": {
+                "$ref": "#/$defs/InvestigationEvidence"
+              }
+            },
+            "summary": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096
+            }
+          },
+          "required": [
+            "project_id",
+            "filters",
+            "evidence",
+            "summary"
+          ],
+          "description": "Operator-authored filters, evidence references and summary. Do not submit source payloads."
+        },
+        "InvestigationFilters": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "from": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "to": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "run_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "min_duration_ms": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            },
+            "max_duration_ms": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            },
+            "error": {
+              "type": "boolean"
+            },
+            "tool": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            }
+          },
+          "required": [],
+          "description": "Typed filters used to investigate agent evidence."
+        },
+        "InvestigationEvidence": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "run",
+                "step",
+                "approval",
+                "span",
+                "task",
+                "delegation"
+              ]
+            },
+            "id": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "required": [
+            "kind",
+            "id"
+          ],
+          "description": "Reference to evidence in the investigation project. A retained reference can outlive its source evidence."
         }
       }
     }
@@ -13334,7 +13526,9 @@
                   "requests",
                   "attempts",
                   "guardrail_decisions",
-                  "audit"
+                  "audit",
+                  "runs",
+                  "trace_spans"
                 ]
               }
             },
@@ -16113,6 +16307,100 @@
     }
   },
   {
+    "name": "get_a2a_task",
+    "group": "agents",
+    "method": "GET",
+    "read_only": true,
+    "path": "/api/v1/a2a-tasks/{task_id}",
+    "description": "Get an A2A task",
+    "scopes": [
+      [
+        "read"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "task_id",
+        "in": "path",
+        "required": true,
+        "type": "string"
+      }
+    ],
+    "response_headers": {
+      "ETag": "etag"
+    },
+    "body_required": false,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "object",
+          "properties": {
+            "task_id": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "task_id"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "path"
+      ]
+    }
+  },
+  {
+    "name": "get_a2a_task_remote",
+    "group": "a2a-tasks",
+    "method": "GET",
+    "read_only": true,
+    "path": "/api/v1/a2a-tasks/{task_id}/remote",
+    "description": "Retrieve the task from its pinned remote agent. Requires project change permission and uses the task’s original credential binding.",
+    "scopes": [
+      [
+        "configure"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "task_id",
+        "in": "path",
+        "required": true,
+        "type": "string"
+      }
+    ],
+    "response_headers": {
+      "ETag": "etag"
+    },
+    "body_required": false,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "object",
+          "properties": {
+            "task_id": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "task_id"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "path"
+      ]
+    }
+  },
+  {
     "name": "get_agent",
     "group": "agents",
     "method": "GET",
@@ -16208,6 +16496,53 @@
           "required": [
             "publication_id",
             "revision_id"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "path"
+      ]
+    }
+  },
+  {
+    "name": "get_agent_run",
+    "group": "agents",
+    "method": "GET",
+    "read_only": true,
+    "path": "/api/v1/agent-runs/{run_id}",
+    "description": "Get a gateway run",
+    "scopes": [
+      [
+        "read"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "run_id",
+        "in": "path",
+        "required": true,
+        "type": "string"
+      }
+    ],
+    "response_headers": {
+      "ETag": "etag"
+    },
+    "body_required": false,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "object",
+          "properties": {
+            "run_id": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "run_id"
           ]
         }
       },
@@ -16967,6 +17302,53 @@
       "type": "object",
       "properties": {},
       "additionalProperties": false
+    }
+  },
+  {
+    "name": "get_investigation",
+    "group": "agents",
+    "method": "GET",
+    "read_only": true,
+    "path": "/api/v1/investigations/{investigation_id}",
+    "description": "Get an investigation",
+    "scopes": [
+      [
+        "read"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "investigation_id",
+        "in": "path",
+        "required": true,
+        "type": "string"
+      }
+    ],
+    "response_headers": {
+      "ETag": "etag"
+    },
+    "body_required": false,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "object",
+          "properties": {
+            "investigation_id": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "investigation_id"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "path"
+      ]
     }
   },
   {
@@ -19116,6 +19498,286 @@
     }
   },
   {
+    "name": "list_a2a_tasks",
+    "group": "agents",
+    "method": "GET",
+    "read_only": true,
+    "path": "/api/v1/a2a-tasks",
+    "description": "List A2A tasks",
+    "scopes": [
+      [
+        "read"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "cursor",
+        "in": "query",
+        "required": false,
+        "type": "string"
+      },
+      {
+        "name": "limit",
+        "in": "query",
+        "required": false,
+        "type": "integer"
+      },
+      {
+        "name": "project_id",
+        "in": "query",
+        "required": false,
+        "type": "string"
+      }
+    ],
+    "response_headers": {
+      "ETag": "etag"
+    },
+    "body_required": false,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "type": "object",
+          "properties": {
+            "cursor": {
+              "type": "string"
+            },
+            "limit": {
+              "format": "int32",
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
+            },
+            "project_id": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "list_agent_delegations",
+    "group": "agents",
+    "method": "GET",
+    "read_only": true,
+    "path": "/api/v1/agent-delegations",
+    "description": "List delegations",
+    "scopes": [
+      [
+        "read"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "cursor",
+        "in": "query",
+        "required": false,
+        "type": "string"
+      },
+      {
+        "name": "limit",
+        "in": "query",
+        "required": false,
+        "type": "integer"
+      },
+      {
+        "name": "project_id",
+        "in": "query",
+        "required": false,
+        "type": "string"
+      },
+      {
+        "name": "delegation_id",
+        "in": "query",
+        "required": false,
+        "type": "string"
+      }
+    ],
+    "response_headers": {
+      "ETag": "etag"
+    },
+    "body_required": false,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "type": "object",
+          "properties": {
+            "cursor": {
+              "type": "string"
+            },
+            "limit": {
+              "format": "int32",
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
+            },
+            "project_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "delegation_id": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "list_agent_run_spans",
+    "group": "agents",
+    "method": "GET",
+    "read_only": true,
+    "path": "/api/v1/agent-runs/{run_id}/spans",
+    "description": "List correlated run spans",
+    "scopes": [
+      [
+        "read"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "run_id",
+        "in": "path",
+        "required": true,
+        "type": "string"
+      },
+      {
+        "name": "span_id",
+        "in": "query",
+        "required": false,
+        "type": "string"
+      },
+      {
+        "name": "cursor",
+        "in": "query",
+        "required": false,
+        "type": "string"
+      },
+      {
+        "name": "limit",
+        "in": "query",
+        "required": false,
+        "type": "integer"
+      }
+    ],
+    "response_headers": {
+      "ETag": "etag"
+    },
+    "body_required": false,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "object",
+          "properties": {
+            "run_id": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "run_id"
+          ]
+        },
+        "query": {
+          "type": "object",
+          "properties": {
+            "span_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "cursor": {
+              "type": "string"
+            },
+            "limit": {
+              "format": "int32",
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "path"
+      ]
+    }
+  },
+  {
+    "name": "list_agent_runs",
+    "group": "agents",
+    "method": "GET",
+    "read_only": true,
+    "path": "/api/v1/agent-runs",
+    "description": "List gateway runs",
+    "scopes": [
+      [
+        "read"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "cursor",
+        "in": "query",
+        "required": false,
+        "type": "string"
+      },
+      {
+        "name": "limit",
+        "in": "query",
+        "required": false,
+        "type": "integer"
+      },
+      {
+        "name": "project_id",
+        "in": "query",
+        "required": false,
+        "type": "string"
+      }
+    ],
+    "response_headers": {
+      "ETag": "etag"
+    },
+    "body_required": false,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "type": "object",
+          "properties": {
+            "cursor": {
+              "type": "string"
+            },
+            "limit": {
+              "format": "int32",
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
+            },
+            "project_id": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  {
     "name": "list_agents",
     "group": "agents",
     "method": "GET",
@@ -20546,6 +21208,68 @@
             "search": {
               "type": "string",
               "maxLength": 200
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "list_investigations",
+    "group": "agents",
+    "method": "GET",
+    "read_only": true,
+    "path": "/api/v1/investigations",
+    "description": "List investigations",
+    "scopes": [
+      [
+        "read"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "cursor",
+        "in": "query",
+        "required": false,
+        "type": "string"
+      },
+      {
+        "name": "limit",
+        "in": "query",
+        "required": false,
+        "type": "integer"
+      },
+      {
+        "name": "project_id",
+        "in": "query",
+        "required": false,
+        "type": "string"
+      }
+    ],
+    "response_headers": {
+      "ETag": "etag"
+    },
+    "body_required": false,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "type": "object",
+          "properties": {
+            "cursor": {
+              "type": "string"
+            },
+            "limit": {
+              "format": "int32",
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
+            },
+            "project_id": {
+              "type": "string",
+              "format": "uuid"
             }
           },
           "additionalProperties": false
@@ -27781,7 +28505,9 @@
                   "requests",
                   "attempts",
                   "guardrail_decisions",
-                  "audit"
+                  "audit",
+                  "runs",
+                  "trace_spans"
                 ]
               }
             },
@@ -44507,7 +45233,9 @@
                   "requests",
                   "attempts",
                   "guardrail_decisions",
-                  "audit"
+                  "audit",
+                  "runs",
+                  "trace_spans"
                 ]
               }
             },

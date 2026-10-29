@@ -23,6 +23,10 @@ type taskAuthorizer interface {
 	AuthorizeAgentTask(string, string, string, string, string, *time.Time) error
 }
 
+type delegatedTaskAuthorizer interface {
+	AuthorizeDelegatedAgentTask(context.Context, string, string, string, string) error
+}
+
 type monitoredTask struct {
 	ID               string
 	KeyID            string
@@ -35,6 +39,7 @@ type monitoredTask struct {
 	CallerExpiresAt  *time.Time
 	Definition       []byte
 	Binding          string
+	Delegation       string
 }
 
 func (m *TaskMonitor) Run(ctx context.Context) {
@@ -61,7 +66,7 @@ func (m *TaskMonitor) Run(ctx context.Context) {
 }
 
 func (m *TaskMonitor) poll(ctx context.Context, authority taskAuthorizer, workers chan struct{}, outstanding *sync.WaitGroup) {
-	rows, err := m.Server.Ledger.Pool.Query(ctx, `SELECT t.id::text,t.api_key_id::text,t.project_id::text,t.publication_id::text,t.revision_id::text,t.upstream_id,t.deadline_at,COALESCE(t.caller_workload_revision_id::text,''),t.caller_expires_at,v.definition,COALESCE(t.oauth_binding_digest,'')
+	rows, err := m.Server.Ledger.Pool.Query(ctx, `SELECT t.id::text,t.api_key_id::text,t.project_id::text,t.publication_id::text,t.revision_id::text,t.upstream_id,t.deadline_at,COALESCE(t.caller_workload_revision_id::text,''),t.caller_expires_at,v.definition,COALESCE(t.oauth_binding_digest,''),t.delegation_token_digest
  FROM olp.a2a_tasks t JOIN olp.agent_publication_revisions v ON v.id=t.revision_id
  WHERE t.state IN ('active','outcome_unknown') AND (t.cancel_claimed_until IS NULL OR t.cancel_claimed_until<=now())
  ORDER BY t.cancel_claimed_until NULLS FIRST,t.deadline_at,t.id`)
@@ -71,7 +76,7 @@ func (m *TaskMonitor) poll(ctx context.Context, authority taskAuthorizer, worker
 	}
 	tasks, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (monitoredTask, error) {
 		var task monitoredTask
-		err := row.Scan(&task.ID, &task.KeyID, &task.ProjectID, &task.PublicationID, &task.RevisionID, &task.UpstreamID, &task.Deadline, &task.WorkloadRevision, &task.CallerExpiresAt, &task.Definition, &task.Binding)
+		err := row.Scan(&task.ID, &task.KeyID, &task.ProjectID, &task.PublicationID, &task.RevisionID, &task.UpstreamID, &task.Deadline, &task.WorkloadRevision, &task.CallerExpiresAt, &task.Definition, &task.Binding, &task.Delegation)
 		return task, err
 	})
 	if err != nil {
@@ -79,7 +84,7 @@ func (m *TaskMonitor) poll(ctx context.Context, authority taskAuthorizer, worker
 		return
 	}
 	for _, task := range tasks {
-		if time.Now().Before(task.Deadline) && authority.AuthorizeAgentTask(task.KeyID, task.ProjectID, task.PublicationID, task.RevisionID, task.WorkloadRevision, task.CallerExpiresAt) == nil {
+		if time.Now().Before(task.Deadline) && m.authorized(ctx, authority, task) {
 			continue
 		}
 		select {
@@ -104,6 +109,17 @@ func (m *TaskMonitor) poll(ctx context.Context, authority taskAuthorizer, worker
 	}
 }
 
+func (m *TaskMonitor) authorized(ctx context.Context, authority taskAuthorizer, task monitoredTask) bool {
+	if authority.AuthorizeAgentTask(task.KeyID, task.ProjectID, task.PublicationID, task.RevisionID, task.WorkloadRevision, task.CallerExpiresAt) != nil {
+		return false
+	}
+	if task.Delegation == "" {
+		return true
+	}
+	delegated, ok := m.Server.Runtime.(delegatedTaskAuthorizer)
+	return ok && delegated.AuthorizeDelegatedAgentTask(ctx, task.Delegation, task.KeyID, task.ProjectID, task.PublicationID) == nil
+}
+
 func (m *TaskMonitor) claim(ctx context.Context, taskID string) (bool, error) {
 	tag, err := m.Server.Ledger.Pool.Exec(ctx, `UPDATE olp.a2a_tasks SET cancel_claimed_until=now()+interval '30 seconds'
  WHERE id=$1 AND state IN ('active','outcome_unknown') AND (cancel_claimed_until IS NULL OR cancel_claimed_until<=now())`, taskID)
@@ -126,7 +142,7 @@ func (m *TaskMonitor) cancelState(ctx context.Context, task monitoredTask) strin
 	if json.Unmarshal(task.Definition, &definition) != nil || definition.Agent == nil || definition.ProjectID != task.ProjectID {
 		return "outcome_unknown"
 	}
-	credential, err := m.taskCredential(ctx, task, *definition.Agent)
+	credential, err := m.Server.taskCredential(ctx, task, *definition.Agent)
 	if err != nil {
 		return "outcome_unknown"
 	}
@@ -151,14 +167,14 @@ func (m *TaskMonitor) cancelState(ctx context.Context, task monitoredTask) strin
 	}
 }
 
-func (m *TaskMonitor) taskCredential(ctx context.Context, task monitoredTask, definition agentcontract.Definition) ([]byte, error) {
+func (s *Server) taskCredential(ctx context.Context, task monitoredTask, definition agentcontract.Definition) ([]byte, error) {
 	if definition.OAuth == nil && task.Binding == "" {
 		return nil, nil
 	}
-	if definition.OAuth == nil || task.Binding == "" || m.Server.Grants == nil {
+	if definition.OAuth == nil || task.Binding == "" || s.Grants == nil {
 		return nil, errors.New("agent grant unavailable")
 	}
-	return m.Server.Grants.ResolveAgentTask(ctx, task.Binding, task.PublicationID, task.ProjectID, task.RevisionID, definition)
+	return s.Grants.ResolveAgentTask(ctx, task.Binding, task.PublicationID, task.ProjectID, task.RevisionID, definition)
 }
 
 func (m *TaskMonitor) warn(message string) {

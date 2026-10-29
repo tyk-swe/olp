@@ -34,6 +34,7 @@
   let agentID = $state('');
   let routeInput = $state('');
   let toolsetInput = $state('');
+  let remoteAgentInput = $state('');
   let password = $state('');
   let verifiedKey = $state('');
   let busy = $state(false);
@@ -44,6 +45,7 @@
     agentID = '';
     routeInput = '';
     toolsetInput = '';
+    remoteAgentInput = '';
     password = '';
     verifiedKey = '';
     consent = null;
@@ -79,7 +81,8 @@
             {
               ...agent,
               eligibleRoutes: option.allowed_routes,
-              eligibleToolsets: option.allowed_toolsets ?? []
+              eligibleToolsets: option.allowed_toolsets ?? [],
+              eligibleAgents: option.allowed_agents ?? []
             }
           ]
         : [];
@@ -98,6 +101,12 @@
       .map((toolset) => toolset.trim())
       .filter(Boolean)
   );
+  const remoteAgents = $derived(
+    remoteAgentInput
+      .split(',')
+      .map((agent) => agent.trim())
+      .filter(Boolean)
+  );
   const routesAllowed = $derived(
     routes.every(
       (route, index) =>
@@ -112,12 +121,20 @@
         toolsets.indexOf(toolset) === index
     )
   );
+  const remoteAgentsAllowed = $derived(
+    remoteAgents.every(
+      (agent, index) =>
+        selectedAgent?.eligibleAgents.includes(agent) &&
+        remoteAgents.indexOf(agent) === index
+    )
+  );
   const ready = $derived(
     !!selectedKey &&
       !!selectedAgent &&
-      (routes.length > 0 || toolsets.length > 0) &&
+      (routes.length > 0 || toolsets.length > 0 || remoteAgents.length > 0) &&
       routesAllowed &&
-      toolsetsAllowed
+      toolsetsAllowed &&
+      remoteAgentsAllowed
   );
 
   onMount(() => {
@@ -134,13 +151,14 @@
     const selected: DelegationConsentRequest = {
       api_key_id: keyID,
       agent_id: agentID,
+      scopes: [
+        ...(routes.length ? (['inference'] as const) : []),
+        ...(toolsets.length ? (['tools'] as const) : []),
+        ...(remoteAgents.length ? (['agents'] as const) : [])
+      ],
       ...(routes.length ? { allowed_routes: routes } : {}),
-      ...(toolsets.length
-        ? {
-            scopes: routes.length ? ['inference', 'tools'] : ['tools'],
-            allowed_toolsets: toolsets
-          }
-        : {})
+      ...(toolsets.length ? { allowed_toolsets: toolsets } : {}),
+      ...(remoteAgents.length ? { allowed_agents: remoteAgents } : {})
     };
     busy = true;
     error = '';
@@ -245,32 +263,64 @@
           />
         </label>
       </div>
+      <div class="form-field">
+        <label
+          >Allowed A2A agents
+          <input
+            bind:value={remoteAgentInput}
+            disabled={busy}
+            placeholder="agent UUIDs separated by commas"
+          />
+        </label>
+      </div>
       {#if selectedKey && options.isError}
         <p role="alert">Eligible agents and resources could not be loaded.</p>
       {:else if selectedKey && options.isSuccess && agents.length === 0}
         <p>
-          No eligible agents have access to a route or toolset for this key.
+          No eligible agents have access to a route, toolset or agent for this
+          key
         </p>
       {/if}
       {#if selectedAgent}
-        <p>Available routes: {selectedAgent.eligibleRoutes.join(', ')}.</p>
-        <p>Available toolsets: {selectedAgent.eligibleToolsets.join(', ')}.</p>
-        <p>Enter unique route names and toolset UUIDs separated by commas.</p>
+        <p>
+          Available routes {selectedAgent.eligibleRoutes.join(', ') || 'None'}
+        </p>
+        <p>
+          Available toolsets {selectedAgent.eligibleToolsets.join(', ') ||
+            'None'}
+        </p>
+        <p>
+          Available A2A agents {selectedAgent.eligibleAgents.join(', ') ||
+            'None'}
+        </p>
+        <p>
+          Enter unique route names, toolset UUIDs and agent UUIDs separated by
+          commas
+        </p>
         {#if routes.length > 0 && !routesAllowed}
           <p role="alert">Choose only routes listed above.</p>
         {/if}
         {#if toolsets.length > 0 && !toolsetsAllowed}
           <p role="alert">Choose only toolsets listed above.</p>
         {/if}
+        {#if remoteAgents.length > 0 && !remoteAgentsAllowed}
+          <p role="alert">Choose only A2A agents listed above</p>
+        {/if}
       {/if}
       {#if ready}
         <p>
           Allow {selectedAgent?.name} to use {selectedKey?.name} in {selectedKey?.project_name ??
-            selectedKey?.project_id}.
-          {#if routes.length}Inference routes: {routes.join(', ')}.{/if}
-          {#if toolsets.length}Toolsets: {toolsets.join(', ')}.{/if}
-          The key pays for the request. The consent expires after five minutes and
-          can be used once.
+            selectedKey?.project_id}
+        </p>
+        {#if routes.length}<p>Inference routes {routes.join(', ')}</p>{/if}
+        {#if toolsets.length}<p>Toolsets {toolsets.join(', ')}</p>{/if}
+        {#if remoteAgents.length}
+          <p>A2A agents {remoteAgents.join(', ')}</p>
+          <p>OLP cannot count or stop hidden remote iterations</p>
+        {/if}
+        <p>
+          The key pays for the request. The consent expires after five minutes
+          and can be used once
         </p>
       {/if}
       {#if verifiedKey === keyID && verifiedKey}

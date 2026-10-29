@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/agentcontract"
 	"github.com/tyk-swe/olp/internal/secrets"
@@ -101,6 +102,9 @@ func (f *taskTxFixture) QueryRow(context.Context, string, ...any) pgx.Row {
 }
 func (f *taskTxFixture) Commit(context.Context) error   { return f.commitErr }
 func (f *taskTxFixture) Rollback(context.Context) error { return nil }
+func (f *taskTxFixture) Exec(context.Context, string, ...any) (pgconn.CommandTag, error) {
+	return pgconn.NewCommandTag("INSERT 0 1"), nil
+}
 
 func TestTaskCapabilityAuthenticatesAndCountsOwnerCallbacks(t *testing.T) {
 	project, publication, revision := "project", "agent", "agent-revision"
@@ -120,7 +124,7 @@ func TestTaskCapabilityAuthenticatesAndCountsOwnerCallbacks(t *testing.T) {
 		if err != nil || a.ID != owner.ID || !slices.Equal(a.TaskCapability.RouteRevisions, []string{"route-revision"}) || !slices.Equal(a.TaskCapability.ToolsetRevisions, []string{"toolset-revision"}) {
 			t.Fatalf("callback authority = %+v, error = %v", a, err)
 		}
-		if err := manager.AdmitTaskCapabilityAttempt(t.Context(), *a, "inference", "route", "route-revision", &project); err != nil {
+		if err := manager.AdmitTaskCapabilityAttempt(t.Context(), *a, "inference", "route", "route-revision", &project, "0192cf87-d4ab-7f2e-a8b1-c2d3e4f50607"); err != nil {
 			t.Fatalf("owner's pinned model callback refused: %v", err)
 		}
 	})
@@ -197,7 +201,7 @@ func TestTaskCapabilityAuthenticatesAndCountsOwnerCallbacks(t *testing.T) {
 			if test.change != nil {
 				test.change(store)
 			}
-			err = manager.AdmitTaskCapabilityAttempt(t.Context(), *a, test.scope, test.resource, test.revision, &project)
+			err = manager.AdmitTaskCapabilityAttempt(t.Context(), *a, test.scope, test.resource, test.revision, &project, "0192cf87-d4ab-7f2e-a8b1-c2d3e4f50607")
 			if test.want == nil && err != nil || test.want != nil && err == nil || (test.want == ErrTaskAttemptLimit || test.want == ErrStaleAuthority || test.want == ErrInvalidKey) && !errors.Is(err, test.want) {
 				t.Fatalf("admission error = %v, want %v", err, test.want)
 			}
@@ -370,7 +374,7 @@ func TestDelegatedToolAuthorityRechecksAgent(t *testing.T) {
 	digest := "workload"
 	agent := access.Authority{ID: "agent", AgentPrincipal: true, ProjectID: &project, WorkloadIssuerID: &issuerID, WorkloadDigest: digest, WorkloadRevision: "revision", WorkloadMapping: "mapping", Policy: access.KeyPolicy{Scopes: []string{"tools"}, AllowedToolsets: []string{toolset}}}
 	key := access.Authority{ID: "key", ProjectID: &project, Policy: access.KeyPolicy{Scopes: []string{"tools"}, AllowedToolsets: []string{toolset}}}
-	delegated := *key.Delegated([]string{"tools"}, nil, []string{toolset}, agent, "", "pair", "grant", time.Now().Add(time.Minute))
+	delegated := *key.Delegated([]string{"tools"}, nil, []string{toolset}, nil, agent, "", "pair", "grant", time.Now().Add(time.Minute))
 	for _, test := range []struct {
 		name     string
 		agent    access.Authority

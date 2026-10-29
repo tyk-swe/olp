@@ -16,6 +16,70 @@ The [gateway](../develop/architecture.md) applies shared admission and response 
 surfaces. Current protocol, connector, SDK, and media tests are described in
 [tests/README.md](../../tests/README.md).
 
+## Published prompt compatibility
+
+Prompts have project-scoped drafts, immutable published revisions and
+`production` and `staging` labels. A request selects one label or exact
+revision for a prompt in the route's project. The gateway resolves the label
+once, substitutes declared string variables in `{{name}}` placeholders and
+applies the route's input limit and input guardrails to the rendered messages.
+Unknown or missing required variables are refused before dispatch. Strict routes
+do not support registry prompt rendering.
+
+Chat Completions, Anthropic Messages and Gemini generation accept an
+`olp_prompt` object in place of explicit messages:
+
+```json
+{"olp_prompt":{"id":"PROMPT_ID","label":"production","variables":{"name":"Ada"}}}
+```
+
+Responses uses the same selection inside `prompt`, with `id` prefixed by
+`olpp_`. Other Responses prompt IDs retain their provider behavior. An exact
+`revision_id` can be used instead of `label` on either form. The console
+playground and inference render on the server using the same published
+revision, including after configuration export and import. Variable values and
+rendered messages are transient rather than configuration data.
+
+Local gateway fixtures cover all four request formats in unary and streaming
+mode, and the packaged-console journey covers publication, label movement and
+accessible playground rendering. This fixture evidence does not qualify a live
+provider deployment.
+
+## Saved investigations
+
+The management API and console save project-scoped investigations with time,
+run, duration, error and tool filters, an operator-authored summary and up to
+100 references to run, step, approval, span, task or delegation evidence. The
+record contains no source payloads. Reading an investigation requires current
+project access; opening referenced evidence requires its own current access
+check. Retained step and span links identify the referenced record, including
+spans beyond the first page. Evidence follows its own retention policy and can
+expire before the investigation. The local HTTP regression and packaged-console
+journey exercise these boundaries; they do not qualify a live provider
+integration.
+
+## Agent workflow evidence exports
+
+Observability and managed sinks can export `runs` and `trace_spans` for
+project-scoped or installation-wide configurations. Gateway-created runs carry
+`evidence_origin` set to `gateway_observed`. Ingested spans carry
+`evidence_origin` set to `client_asserted`, even if a client supplies a
+different value. Gateway request and attempt spans set the
+`olp.evidence_origin` attribute to `gateway_observed`. The existing request
+`origin` continues to describe the invocation source.
+
+Span exports retain the nullable `parent_span_id` as a hexadecimal identifier.
+The management [OpenAPI contract](../../openapi/management.json) describes
+the observability and managed `runs` and `trace_spans` webhook envelopes.
+
+Run and span exports contain metadata only. They do not include prompt, tool,
+message or artifact contents, and they do not change billing. Before delivery,
+the sink creator must still have access to the source project and the source
+must remain within request-history retention. These checks apply independently
+to each record sent through an installation-wide sink. Local gateway and export
+fixtures exercise origin, privacy, project isolation and retention. They do not
+qualify a live external deployment.
+
 ## Consumer MCP qualification
 
 Published tools support the JSON call endpoint and Streamable HTTP at MCP
@@ -59,6 +123,18 @@ deployment, permission and lifecycle requirements.
 Standalone modern consumer event streams, sampling, elicitation, roots and
 arbitrary resource/prompt calls are not supported by this slice.
 See [MCP server use](mcp-servers.md) for supported calls and rollback behavior.
+
+## A2A qualification
+
+Local reference fixtures cover the pinned A2A 0.3 and 1.0 JSON-RPC adapters.
+`TestWorkloadAgentDelegatesKeyForA2A` in
+`tests/integration/workload_identity_test.go` exercises delegated sends,
+callbacks, caller/agent/pair accounting, consent, renewal, project operator
+access and revocation. `TestA2AOAuthGrantLifecycle` verifies that task actions
+use their original grant and endpoint after publication replacement and refuse
+revoked grants. These are fixture results, not live external interoperability
+or live Entra agent identity qualification. OLP cannot observe or stop hidden
+remote iterations.
 
 ## Guardrail compatibility
 

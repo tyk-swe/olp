@@ -11,6 +11,7 @@ import (
 	"io"
 	"log/slog"
 	"maps"
+	"math/big"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -33,6 +34,7 @@ import (
 	"github.com/tyk-swe/olp/internal/mcp"
 	"github.com/tyk-swe/olp/internal/resources"
 	"github.com/tyk-swe/olp/internal/retainedapi"
+	"github.com/tyk-swe/olp/internal/sinks"
 	"github.com/tyk-swe/olp/internal/usage"
 )
 
@@ -745,9 +747,17 @@ func TestGatewayFromEmptyInstallationToSDKTraffic(t *testing.T) {
 }
 
 func TestGatewayToolWorkflowSettlesOneRun(t *testing.T) {
+	isZero := func(value string) bool {
+		number, ok := new(big.Rat).SetString(value)
+		return ok && number.Sign() == 0
+	}
 	h := newAccessHarness(t)
 	owner := h.owner()
 	project := createProject(h, owner, "Gateway workflow")
+	runReceiver, runEndpoint := newExportReceiver(t, "", http.StatusNoContent)
+	h.want(owner, http.MethodPost, "/api/v1/observability/sinks", map[string]any{"name": "Workflow run evidence", "type": "https", "project_id": project, "destination": runEndpoint.URL, "enabled": true, "streams": []string{"runs"}, "format": "json"}, idem("workflow-run-evidence"), http.StatusCreated)
+	managedRunReceiver, managedRunEndpoint := newExportReceiver(t, "", http.StatusNoContent)
+	h.want(owner, http.MethodPost, "/api/v1/sinks", map[string]any{"name": "Managed workflow evidence", "type": "https", "project_id": project, "destination": managedRunEndpoint.URL, "enabled": true, "streams": []string{"runs"}}, idem("managed-workflow-evidence"), http.StatusCreated)
 	const argument = "workflow-private-argument"
 	const answer = "workflow-private-result"
 	const prompt = "workflow-private-prompt"
@@ -992,6 +1002,8 @@ func TestGatewayToolWorkflowSettlesOneRun(t *testing.T) {
 		[]any{map[string]any{"operation": "generation", "surface": "openai", "mode": "unary"}}, []string{"generation"},
 		map[string]any{"tool_execution": "gateway", "toolsets": []string{toolsetID}, "responses_mcp_items": true, "budget": map[string]any{"daily_cost_limit": "10000000"}, "run_limits": map[string]any{"max_tool_calls": 32, "max_duration_seconds": 600, "max_concurrent_runs": 3}},
 		map[string]any{"options": map[string]any{"models": map[string]any{vendorModel: map[string]any{"context_length": 1000}}}})
+	filteredRunReceiver, filteredRunEndpoint := newExportReceiver(t, "", http.StatusNoContent)
+	h.want(owner, http.MethodPost, "/api/v1/observability/sinks", map[string]any{"name": "Filtered workflow evidence", "type": "https", "project_id": project, "destination": filteredRunEndpoint.URL, "enabled": true, "streams": []string{"runs"}, "format": "json", "filter": map[string]any{"route": slug}}, idem("filtered-workflow-evidence"), http.StatusCreated)
 	addBatchPrice(t, h, owner, provider["id"].(string), "", time.Now().Add(-time.Hour))
 	key := h.want(owner, "POST", "/api/v1/api-keys", map[string]any{"name": "Workflow caller", "project_id": project, "scopes": []string{"inference", "tools", "traces_write"}, "allowed_routes": []string{slug}, "allowed_toolsets": []string{toolsetID}, "max_concurrency": 1}, idem("workflow-key"), 201)
 	keyID, secret := mcpExecString(t, key, "id"), mcpExecString(t, key, "secret")
@@ -1031,6 +1043,38 @@ func TestGatewayToolWorkflowSettlesOneRun(t *testing.T) {
 	}
 	if steps != 3 || models != 2 || tools != 1 || settled != 3 || distinctRuns != 1 {
 		t.Fatalf("workflow did not settle distinct steps under one run: steps=%d models=%d tools=%d settled=%d runs=%d", steps, models, tools, settled, distinctRuns)
+	}
+	runExport := &export.Worker{Pool: h.Pool, Keys: h.Ring2(), Installation: h.Server.Installation, Sender: export.NewSender(loopbackPolicy()), Log: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	if err := runExport.Pass(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	runEnvelopes := runReceiver.received()
+	if len(runEnvelopes) != 1 {
+		t.Fatalf("expected one workflow run export, got %d", len(runEnvelopes))
+	}
+	runData, runDataOK := runEnvelopes[0]["data"].(map[string]any)
+	if !runDataOK || runData["run_id"] != runID || runData["project_id"] != project || runData["evidence_origin"] != "gateway_observed" || strings.Contains(fmt.Sprint(runEnvelopes), prompt) || strings.Contains(fmt.Sprint(runEnvelopes), argument) || strings.Contains(fmt.Sprint(runEnvelopes), answer) {
+		t.Fatalf("workflow run evidence has incorrect provenance or content: %v", runEnvelopes)
+	}
+	filteredRunEnvelopes := filteredRunReceiver.received()
+	if len(filteredRunEnvelopes) != 1 {
+		t.Fatalf("expected one route-filtered workflow run export, got %d", len(filteredRunEnvelopes))
+	}
+	filteredRunData, filteredRunDataOK := filteredRunEnvelopes[0]["data"].(map[string]any)
+	if !filteredRunDataOK || filteredRunData["run_id"] != runID {
+		t.Fatalf("route-filtered workflow evidence does not identify the run: %v", filteredRunEnvelopes)
+	}
+	managedWorker := &sinks.Worker{Pool: h.Pool, Egress: loopbackPolicy()}
+	if _, err := managedWorker.Deliver(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	managedRuns := managedRunReceiver.received()
+	if len(managedRuns) != 1 {
+		t.Fatalf("expected one managed workflow run, got %d", len(managedRuns))
+	}
+	managedData, managedDataOK := managedRuns[0]["data"].(map[string]any)
+	if !managedDataOK || managedData["id"] != runID || managedData["project_id"] != project || managedData["evidence_origin"] != "gateway_observed" || strings.Contains(fmt.Sprint(managedRuns), prompt) || strings.Contains(fmt.Sprint(managedRuns), argument) || strings.Contains(fmt.Sprint(managedRuns), answer) {
+		t.Fatalf("managed run evidence has incorrect provenance or content: %v", managedRuns)
 	}
 	var order string
 	if err := h.Pool.QueryRow(t.Context(), `SELECT string_agg(s.ordinal::text || ':' || d.kind, ',' ORDER BY s.ordinal) FROM olp.agent_steps s JOIN olp.execution_debits d ON d.id=s.dispatch_id WHERE s.run_id=$1`, runID).Scan(&order); err != nil {
@@ -1080,16 +1124,146 @@ func TestGatewayToolWorkflowSettlesOneRun(t *testing.T) {
 		t.Fatalf("workflow accounting lost or duplicated request data: facts=%d counted=%d receipts=%d", facts, counted, receipts)
 	}
 	verifyWorkflowTraceCorrelation(t, h, secret, keyID, runID, limiter)
+	listedRuns := h.want(owner, "GET", "/api/v1/agent-runs?project_id="+project, nil, nil, http.StatusOK)
+	if items := mcpExecItems(t, listedRuns, "items"); len(items) != 1 || mcpExecString(t, mcpExecItem(t, items, 0, listedRuns), "id") != runID {
+		t.Fatalf("run list did not expose the completed workflow: %v", listedRuns)
+	}
+	runDetail := h.want(owner, "GET", "/api/v1/agent-runs/"+runID, nil, nil, http.StatusOK)
+	if mcpExecString(t, runDetail, "id") != runID || len(mcpExecItems(t, runDetail, "steps")) != 3 {
+		t.Fatalf("run detail did not expose the ordered workflow steps: %v", runDetail)
+	}
+	stepItems := mcpExecItems(t, runDetail, "steps")
+	attempts := map[string]bool{}
+	for index, kind := range []string{"model", "tool", "model"} {
+		step := mcpExecItem(t, stepItems, index, runDetail)
+		if step["kind"] != kind || step["state"] != "settled" || step["ordinal"] != float64(index) || !isZero(mcpExecString(t, step, "remaining_cost")) || !isZero(mcpExecString(t, step, "remaining_charge")) {
+			t.Fatalf("run step did not report settled attempt metadata: %v", step)
+		}
+		attempts[mcpExecString(t, step, "dispatch_id")] = true
+	}
+	toolStep := mcpExecItem(t, stepItems, 1, runDetail)
+	if toolStep["tool_alias"] != tool.Alias || toolStep["tool_status"] != "succeeded" || toolStep["tool_is_error"] != false || toolStep["pricing_state"] != "priced" {
+		t.Fatalf("successful tool metadata is missing: %v", toolStep)
+	}
+	spanPage := h.want(owner, "GET", "/api/v1/agent-runs/"+runID+"/spans?limit=1", nil, nil, http.StatusOK)
+	allSpans := append([]any{}, mcpExecItems(t, spanPage, "items")...)
+	for spanPage["next_cursor"] != nil {
+		cursor := mcpExecString(t, spanPage, "next_cursor")
+		spanPage = h.want(owner, "GET", "/api/v1/agent-runs/"+runID+"/spans?limit=1&cursor="+cursor, nil, nil, http.StatusOK)
+		allSpans = append(allSpans, mcpExecItems(t, spanPage, "items")...)
+	}
+	linked := 0
+	for index := range allSpans {
+		span := mcpExecItem(t, allSpans, index, spanPage)
+		if attempt, ok := span["attempt_id"].(string); ok {
+			if !attempts[attempt] {
+				t.Fatalf("span linked to a different run's attempt: %v", span)
+			}
+			linked++
+		}
+	}
+	if len(allSpans) != 3 || linked != 2 {
+		t.Fatalf("run spans did not preserve validated correlations: spans=%d linked=%d", len(allSpans), linked)
+	}
+	for index, expected := range []string{"0404040404040404", "0101010101010101", "0303030303030303"} {
+		if span := mcpExecItem(t, allSpans, index, spanPage); span["span_id"] != expected {
+			t.Fatalf("run spans not ordered by start time and ID: %v", allSpans)
+		}
+	}
+	spanID := mcpExecString(t, mcpExecItem(t, allSpans, 2, spanPage), "id")
+	selectedSpanPath := "/api/v1/agent-runs/" + runID + "/spans?span_id=" + spanID
+	selectedSpan := h.want(owner, "GET", selectedSpanPath, nil, nil, http.StatusOK)
+	selectedItems := mcpExecItems(t, selectedSpan, "items")
+	if len(selectedItems) != 1 || mcpExecString(t, mcpExecItem(t, selectedItems, 0, selectedSpan), "id") != spanID {
+		t.Fatalf("the selected span did not identify the referenced evidence: %v", selectedSpan)
+	}
+	missingSpan := h.want(owner, "GET", "/api/v1/agent-runs/"+runID+"/spans?span_id="+uuid.NewString(), nil, nil, http.StatusOK)
+	if len(mcpExecItems(t, missingSpan, "items")) != 0 {
+		t.Fatalf("a different span was returned for a missing reference: %v", missingSpan)
+	}
+	h.want(owner, "GET", "/api/v1/agent-runs/"+runID+"/spans?span_id=invalid", nil, nil, http.StatusUnprocessableEntity)
+	h.want(owner, "GET", "/api/v1/agent-runs/"+runID+"/spans?cursor=invalid", nil, nil, http.StatusUnprocessableEntity)
+	for _, private := range []string{prompt, argument, answer, "workflow-private-span"} {
+		if strings.Contains(fmt.Sprint(listedRuns, runDetail, allSpans, selectedSpan), private) {
+			t.Fatal("run management exposed private workflow content")
+		}
+	}
+	otherProject := createProject(h, owner, "Other run project")
+	stepID := mcpExecString(t, toolStep, "id")
+	evidenceSpanID := mcpExecString(t, mcpExecItem(t, allSpans, 0, spanPage), "id")
+	evidence := []agents.InvestigationEvidence{
+		{Kind: "run", ID: runID},
+		{Kind: "step", ID: stepID},
+		{Kind: "span", ID: evidenceSpanID},
+	}
+	investigationInput := map[string]any{"project_id": project, "filters": map[string]any{"run_id": runID}, "evidence": evidence, "summary": "Review the tool and trace"}
+	investigation := h.want(owner, "POST", "/api/v1/investigations", investigationInput, idem("run-investigation"), http.StatusCreated)
+	investigationID := mcpExecString(t, investigation, "id")
+	if len(mcpExecItems(t, investigation, "evidence")) != 3 || strings.Contains(fmt.Sprint(investigation), prompt) || strings.Contains(fmt.Sprint(investigation), argument) || strings.Contains(fmt.Sprint(investigation), answer) {
+		t.Fatalf("investigation did not preserve content-free evidence references: %v", investigation)
+	}
+	investigationDetail := h.want(owner, "GET", "/api/v1/investigations/"+investigationID, nil, nil, http.StatusOK)
+	for _, index := range []int{1, 2} {
+		if reference := mcpExecItem(t, mcpExecItems(t, investigationDetail, "evidence"), index, investigationDetail); reference["run_id"] != runID {
+			t.Fatalf("evidence did not link to its run: %v", reference)
+		}
+	}
+	for i, reference := range evidence {
+		h.want(owner, "POST", "/api/v1/investigations", map[string]any{"project_id": otherProject, "filters": map[string]any{}, "evidence": []any{reference}, "summary": "Wrong project"}, idem(fmt.Sprintf("foreign-investigation-%d", i)), http.StatusUnprocessableEntity)
+	}
+	h.want(owner, "POST", "/api/v1/investigations", map[string]any{"project_id": otherProject, "filters": map[string]any{"run_id": runID}, "evidence": []any{}, "summary": "Wrong run"}, idem("foreign-investigation-run"), http.StatusUnprocessableEntity)
+	tooMany := slices.Repeat([]agents.InvestigationEvidence{{Kind: "run", ID: runID}}, 101)
+	h.want(owner, "POST", "/api/v1/investigations", map[string]any{"project_id": project, "filters": map[string]any{}, "evidence": tooMany[:100], "summary": "Maximum evidence"}, idem("maximum-investigation"), http.StatusCreated)
+	h.want(owner, "POST", "/api/v1/investigations", map[string]any{"project_id": project, "filters": map[string]any{}, "evidence": tooMany, "summary": "Too many"}, idem("oversized-investigation"), http.StatusUnprocessableEntity)
+	h.want(owner, "POST", "/api/v1/investigations", map[string]any{"project_id": project, "filters": map[string]any{}, "evidence": []any{map[string]any{"kind": "run", "id": runID, "payload": prompt}}, "summary": "Unexpected source"}, idem("payload-investigation"), http.StatusBadRequest)
+	viewer := h.invite(owner, "run-viewer@example.com", "viewer")
+	viewerSession := h.want(viewer, "GET", "/api/v1/sessions/current", nil, nil, http.StatusOK)
+	viewerID := mcpExecString(t, mcpExecObject(t, viewerSession, "user"), "id")
+	viewerRecord := h.want(owner, "GET", "/api/v1/users/"+viewerID, nil, nil, http.StatusOK)
+	h.want(owner, "PATCH", "/api/v1/users/"+viewerID, map[string]any{"access_scope": "assigned"}, etagHeader(viewerRecord), http.StatusOK)
+	addMember(h, owner, otherProject, viewerID, "viewer")
+	assignedViewer := login(h, "run-viewer@example.com")
+	h.want(assignedViewer, "GET", "/api/v1/agent-runs?project_id="+project, nil, nil, http.StatusNotFound)
+	h.want(assignedViewer, "GET", "/api/v1/agent-runs/"+runID, nil, nil, http.StatusNotFound)
+	h.want(assignedViewer, "GET", "/api/v1/agent-runs/"+runID+"/spans", nil, nil, http.StatusNotFound)
+	h.want(assignedViewer, "GET", selectedSpanPath, nil, nil, http.StatusNotFound)
+	h.want(assignedViewer, "GET", "/api/v1/investigations/"+investigationID, nil, nil, http.StatusNotFound)
+	if filtered := h.want(assignedViewer, "GET", "/api/v1/investigations", nil, nil, http.StatusOK); len(mcpExecItems(t, filtered, "items")) != 0 {
+		t.Fatalf("project viewer could see another project's investigations: %v", filtered)
+	}
+	if filtered := h.want(assignedViewer, "GET", "/api/v1/agent-runs", nil, nil, http.StatusOK); len(mcpExecItems(t, filtered, "items")) != 0 {
+		t.Fatalf("project viewer could see another project's runs: %v", filtered)
+	}
+	addMember(h, owner, project, viewerID, "viewer")
+	h.want(assignedViewer, "GET", "/api/v1/agent-runs/"+runID, nil, nil, http.StatusOK)
+	h.want(assignedViewer, "GET", "/api/v1/agent-runs/"+runID+"/spans", nil, nil, http.StatusOK)
+	h.want(assignedViewer, "GET", selectedSpanPath, nil, nil, http.StatusOK)
+	h.want(assignedViewer, "GET", "/api/v1/investigations/"+investigationID, nil, nil, http.StatusOK)
+	h.want(owner, "DELETE", "/api/v1/projects/"+project+"/members/"+viewerID, nil, projectEtag(h, owner, project), http.StatusNoContent)
+	h.want(assignedViewer, "GET", "/api/v1/agent-runs/"+runID, nil, nil, http.StatusNotFound)
+	h.want(assignedViewer, "GET", "/api/v1/agent-runs/"+runID+"/spans", nil, nil, http.StatusNotFound)
+	h.want(assignedViewer, "GET", selectedSpanPath, nil, nil, http.StatusNotFound)
+	h.want(assignedViewer, "GET", "/api/v1/investigations/"+investigationID, nil, nil, http.StatusNotFound)
+	if filtered := h.want(assignedViewer, "GET", "/api/v1/investigations", nil, nil, http.StatusOK); len(mcpExecItems(t, filtered, "items")) != 0 {
+		t.Fatalf("viewer retained access to investigations after project revocation: %v", filtered)
+	}
+	acctExec(t, h.Pool, `DELETE FROM olp.trace_spans WHERE id=$1`, evidenceSpanID)
+	investigationAfterRetention := h.want(owner, "GET", "/api/v1/investigations/"+investigationID, nil, nil, http.StatusOK)
+	if reference := mcpExecItem(t, mcpExecItems(t, investigationAfterRetention, "evidence"), 2, investigationAfterRetention); reference["id"] != evidenceSpanID || reference["run_id"] != nil {
+		t.Fatalf("expired span reference was not retained: %v", reference)
+	}
 	var stored string
 	if err := h.Pool.QueryRow(t.Context(), `SELECT
 		COALESCE((SELECT row_to_json(r)::text FROM olp.agent_runs r WHERE r.id=$1),'') ||
 		COALESCE((SELECT string_agg(row_to_json(s)::text,'') FROM olp.agent_steps s WHERE s.run_id=$1),'') ||
 		COALESCE((SELECT string_agg(row_to_json(d)::text,'') FROM olp.execution_debits d WHERE d.run_id=$1),'') ||
 		COALESCE((SELECT string_agg(row_to_json(c)::text,'') FROM olp.mcp_tool_calls c JOIN olp.execution_debits d ON d.id=c.dispatch_id WHERE d.run_id=$1),'') ||
-		COALESCE((SELECT string_agg(row_to_json(f)::text,'') FROM olp.attempt_usage_facts f JOIN olp.execution_debits d ON d.id=f.attempt_id WHERE d.run_id=$1),'')`, runID).Scan(&stored); err != nil {
+		COALESCE((SELECT string_agg(row_to_json(f)::text,'') FROM olp.attempt_usage_facts f JOIN olp.execution_debits d ON d.id=f.attempt_id WHERE d.run_id=$1),'') ||
+		COALESCE((SELECT string_agg(row_to_json(t)::text,'') FROM olp.trace_spans t WHERE t.run_id=$1),'') ||
+		COALESCE((SELECT row_to_json(i)::text FROM olp.investigations i WHERE i.id=$2),'')`, runID, investigationID).Scan(&stored); err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(stored, prompt) || strings.Contains(stored, argument) || strings.Contains(stored, answer) {
+	if strings.Contains(stored, prompt) || strings.Contains(stored, argument) || strings.Contains(stored, answer) || strings.Contains(stored, "workflow-private-span") {
 		t.Fatal("workflow stored conversation or tool content in its run or attempt records")
 	}
 	noUsage.Store(true)
@@ -1106,12 +1280,30 @@ func TestGatewayToolWorkflowSettlesOneRun(t *testing.T) {
 	if unknown != 1 || !exposureRetained {
 		t.Fatalf("missing usage did not retain model exposure: unknown=%d retained=%t", unknown, exposureRetained)
 	}
+	var unknownRun string
+	if err := h.Pool.QueryRow(t.Context(), `SELECT run_id::text FROM olp.execution_debits WHERE api_key_id=$1 AND state='outcome_unknown'`, keyID).Scan(&unknownRun); err != nil {
+		t.Fatal(err)
+	}
+	unknownDetail := h.want(owner, "GET", "/api/v1/agent-runs/"+unknownRun, nil, nil, http.StatusOK)
+	unknownStep := mcpExecItem(t, mcpExecItems(t, unknownDetail, "steps"), 0, unknownDetail)
+	if unknownStep["state"] != "outcome_unknown" || unknownStep["remaining_charge"] != unknownStep["charge_bound"] || !isZero(mcpExecString(t, unknownStep, "observed_charge")) {
+		t.Fatalf("unknown outcome did not separate exposure from observed charge: %v", unknownStep)
+	}
 	noUsage.Store(false)
 	h.Gateway.Sink = &gateway.AccountingSink{Emitter: usage.NewEmitter(8)}
 	status, response, _ = h.gateway("POST", "/v1/chat/completions", secret, map[string]any{"model": slug, "messages": []any{map[string]any{"role": "user", "content": "workflow-approval-test"}}, "max_tokens": 100})
 	continuation, present := response["continuation_token"].(string)
 	if status != http.StatusOK || response["type"] != "tool_approval_required" || !present || !strings.HasPrefix(continuation, "olpa_") || modelCalls.Load() != 4 || toolCalls.Load() != 1 {
 		t.Fatalf("unclassified tool did not pause before dispatch: status=%d type=%v token_present=%t model_calls=%d tool_calls=%d", status, response["type"], present, modelCalls.Load(), toolCalls.Load())
+	}
+	var approvalRun string
+	if err := h.Pool.QueryRow(t.Context(), `SELECT run_id::text FROM olp.agent_approvals WHERE api_key_id=$1`, keyID).Scan(&approvalRun); err != nil {
+		t.Fatal(err)
+	}
+	pendingDetail := h.want(owner, "GET", "/api/v1/agent-runs/"+approvalRun, nil, nil, http.StatusOK)
+	pendingApprovals := mcpExecItems(t, pendingDetail, "approvals")
+	if len(pendingApprovals) != 1 || mcpExecItem(t, pendingApprovals, 0, pendingDetail)["consumed_at"] != nil {
+		t.Fatalf("pending approval was not visible: %v", pendingDetail)
 	}
 	approvalWorkflow.Store(true)
 	wrongArguments := map[string]any{
@@ -1191,6 +1383,25 @@ func TestGatewayToolWorkflowSettlesOneRun(t *testing.T) {
 	resumeStatus, resumeResponse, _ := h.gateway("POST", "/v1/chat/completions", secret, resume)
 	if resumeStatus != http.StatusOK || !strings.Contains(fmt.Sprint(resumeResponse), "done") || modelCalls.Load() != 5 || toolCalls.Load() != 2 {
 		t.Fatalf("approved workflow did not resume: status=%d code=%s model_calls=%d tool_calls=%d", resumeStatus, h.gatewayCode(resumeStatus, resumeResponse), modelCalls.Load(), toolCalls.Load())
+	}
+	approvedDetail := h.want(owner, "GET", "/api/v1/agent-runs/"+approvalRun, nil, nil, http.StatusOK)
+	approved := mcpExecItem(t, mcpExecItems(t, approvedDetail, "approvals"), 0, approvedDetail)
+	if approved["consumed_at"] == nil || approved["dispatch_id"] == nil || strings.Contains(fmt.Sprint(approvedDetail), continuation) || strings.Contains(fmt.Sprint(approvedDetail), argument) {
+		t.Fatalf("consumed approval metadata was incomplete or exposed private content: %v", approvedDetail)
+	}
+	var approvalStored string
+	if err := h.Pool.QueryRow(t.Context(), `SELECT
+		COALESCE((SELECT row_to_json(r)::text FROM olp.agent_runs r WHERE r.id=$1),'') ||
+		COALESCE((SELECT string_agg(row_to_json(a)::text,'') FROM olp.agent_approvals a WHERE a.run_id=$1),'') ||
+		COALESCE((SELECT string_agg(row_to_json(s)::text,'') FROM olp.agent_steps s WHERE s.run_id=$1),'') ||
+		COALESCE((SELECT string_agg(row_to_json(d)::text,'') FROM olp.execution_debits d WHERE d.run_id=$1),'') ||
+		COALESCE((SELECT string_agg(row_to_json(c)::text,'') FROM olp.mcp_tool_calls c JOIN olp.execution_debits d ON d.id=c.dispatch_id WHERE d.run_id=$1),'')`, approvalRun).Scan(&approvalStored); err != nil {
+		t.Fatal(err)
+	}
+	for _, private := range []string{prompt, argument, answer, continuation} {
+		if strings.Contains(approvalStored, private) {
+			t.Fatal("approval workflow stored private content")
+		}
 	}
 	replayStatus, _, _ := h.gateway("POST", "/v1/chat/completions", secret, resume)
 	if replayStatus != http.StatusForbidden || modelCalls.Load() != 5 || toolCalls.Load() != 2 {
@@ -2733,6 +2944,585 @@ func TestNativeStreamingToolCallsCertification(t *testing.T) {
 			result, resultOK := results[0].(map[string]any)
 			if !resultOK || result["succeeded"] != true || result["tool_calls"] != tc.supportsTools {
 				t.Fatalf("streaming tool capability was not certified correctly: %v", certification)
+			}
+		})
+	}
+}
+
+func TestPlaygroundRendersPublishedPromptLikeInference(t *testing.T) {
+	h := newAccessHarness(t)
+	owner := h.owner()
+	project := h.want(owner, http.MethodPost, "/api/v1/projects", map[string]any{"name": "Prompt rendering"}, idem("prompt-playground-project"), http.StatusCreated)["id"].(string)
+	upstream := newOpenAIFixture(t, "")
+	_, _, route, secret := provisionOpenAIInProject(t, h, owner, &project, upstream.URL,
+		[]any{
+			map[string]any{"operation": "generation", "surface": "openai", "mode": "unary"},
+			map[string]any{"operation": "generation", "surface": "openai", "mode": "streaming"},
+			map[string]any{"operation": "generation", "surface": "anthropic", "mode": "unary"},
+			map[string]any{"operation": "generation", "surface": "anthropic", "mode": "streaming"},
+			map[string]any{"operation": "generation", "surface": "gemini", "mode": "unary"},
+			map[string]any{"operation": "generation", "surface": "gemini", "mode": "streaming"},
+		},
+		[]string{"generation"}, map[string]any{"max_body_bytes": 1024})
+	publication := h.want(owner, http.MethodPost, "/api/v1/prompts", map[string]any{
+		"project_id": project, "name": "greeting",
+		"prompt": map[string]any{"template": "Hello {{name}}", "variables": []any{"name"}},
+	}, idem("prompt-playground-create"), http.StatusCreated)
+	promptPath := "/api/v1/prompts/" + publication["id"].(string)
+	published := h.want(owner, http.MethodPost, promptPath+"/publish", nil,
+		withMatch(publication, idem("prompt-playground-publish")), http.StatusOK)
+	h.want(owner, http.MethodPut, promptPath+"/labels/production", map[string]any{"revision_id": published["revision_id"]},
+		withMatch(published, idem("prompt-playground-label")), http.StatusOK)
+	h.refresh()
+	prompt := map[string]any{"id": publication["id"], "label": "production", "variables": map[string]string{"name": "world"}}
+	for _, tc := range []struct {
+		name, path, fields, padding string
+		status                      int
+	}{
+		{"duplicate chat selector", "/v1/chat/completions", fmt.Sprintf(`"olp_prompt":{"id":%q,"label":"production","variables":{"name":"world"}},"olp\u005fprompt":{"id":%q,"label":"production","variables":{"name":"world"}}`, publication["id"], publication["id"]), "", http.StatusBadRequest},
+		{"duplicate responses selector", "/v1/responses", fmt.Sprintf(`"prompt":{"id":"olpp_%s","label":"production","variables":{"name":"world"}},"prompt":{"id":"olpp_%s","label":"production","variables":{"name":"world"}}`, publication["id"], publication["id"]), "", http.StatusBadRequest},
+		{"oversized chat request", "/v1/chat/completions", fmt.Sprintf(`"olp_prompt":{"id":%q,"label":"production","variables":{"name":"world"}}`, publication["id"]), strings.Repeat(" ", 2048), http.StatusRequestEntityTooLarge},
+		{"oversized responses request", "/v1/responses", fmt.Sprintf(`"prompt":{"id":"olpp_%s","label":"production","variables":{"name":"world"}}`, publication["id"]), strings.Repeat(" ", 2048), http.StatusRequestEntityTooLarge},
+	} {
+		for _, streaming := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/streaming=%t", tc.name, streaming), func(t *testing.T) {
+				raw := fmt.Sprintf(`{"model":%q,"stream":%t,%s%s}`, route, streaming, tc.fields, tc.padding)
+				before := upstream.chatCalls.Load() + upstream.responseCalls.Load()
+				status, body, _ := h.gatewayRaw(http.MethodPost, tc.path, secret, strings.NewReader(raw), map[string]string{"Content-Type": "application/json"})
+				if status != tc.status {
+					t.Fatalf("inference status %d, want %d: %s", status, tc.status, body)
+				}
+				path := map[bool]string{false: "/api/v1/playground", true: "/api/v1/playground/stream"}[streaming]
+				request := fmt.Sprintf(`{"model":%q,"stream":%t,"request":%s}`, route, streaming, raw)
+				response, body := h.do(owner, http.MethodPost, path, []byte(request), nil)
+				if response.StatusCode != tc.status || upstream.chatCalls.Load()+upstream.responseCalls.Load() != before {
+					t.Fatalf("playground status %d, want %d without dispatch: %s", response.StatusCode, tc.status, body)
+				}
+			})
+		}
+	}
+	status, body, _ := h.gateway(http.MethodPost, "/v1/chat/completions", secret, map[string]any{"model": route, "olp_prompt": prompt})
+	if status != http.StatusOK {
+		t.Fatalf("inference status %d: %v", status, body)
+	}
+	inference := upstream.lastReq.Load().(map[string]any)["messages"]
+	h.want(owner, http.MethodPost, "/api/v1/playground", map[string]any{"model": route, "request": map[string]any{"olp_prompt": prompt}}, nil, http.StatusOK)
+	playground := upstream.lastReq.Load().(map[string]any)["messages"]
+	if !reflect.DeepEqual(playground, inference) {
+		t.Fatalf("playground messages %v differ from inference %v", playground, inference)
+	}
+	responsesPrompt := map[string]any{"id": "olpp_" + publication["id"].(string), "label": "production", "variables": map[string]string{"name": "world"}}
+	for _, tc := range []struct {
+		name, surface, path, streamPath, field string
+		request                                map[string]any
+		inferenceRequest                       func(bool) map[string]any
+	}{
+		{"chat", "openai", "/v1/chat/completions", "/v1/chat/completions", "messages", map[string]any{"olp_prompt": prompt}, func(stream bool) map[string]any {
+			return map[string]any{"model": route, "stream": stream, "olp_prompt": prompt}
+		}},
+		{"responses", "openai", "/v1/responses", "/v1/responses", "input", map[string]any{"prompt": responsesPrompt}, func(stream bool) map[string]any {
+			return map[string]any{"model": route, "stream": stream, "prompt": responsesPrompt}
+		}},
+		{"anthropic", "anthropic", "/anthropic/v1/messages", "/anthropic/v1/messages", "messages", map[string]any{"olp_prompt": prompt, "max_tokens": 20}, func(stream bool) map[string]any {
+			return map[string]any{"model": route, "stream": stream, "olp_prompt": prompt, "max_tokens": 20}
+		}},
+		{"gemini", "gemini", "/gemini/v1beta/models/" + route + ":generateContent", "/gemini/v1beta/models/" + route + ":streamGenerateContent?alt=sse", "messages", map[string]any{"olp_prompt": prompt}, func(bool) map[string]any {
+			return map[string]any{"olp_prompt": prompt}
+		}},
+	} {
+		for _, streaming := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/streaming=%t", tc.name, streaming), func(t *testing.T) {
+				data, err := json.Marshal(tc.inferenceRequest(streaming))
+				if err != nil {
+					t.Fatal(err)
+				}
+				path := map[bool]string{false: tc.path, true: tc.streamPath}[streaming]
+				playgroundPath := map[bool]string{false: "/api/v1/playground", true: "/api/v1/playground/stream"}[streaming]
+				status, body, _ := h.gatewayRaw(http.MethodPost, path, secret, strings.NewReader(string(data)), map[string]string{"Content-Type": "application/json"})
+				if status != http.StatusOK || streaming && !strings.Contains(string(body), "OK") {
+					t.Fatalf("inference status %d: %s", status, body)
+				}
+				inference := upstream.lastReq.Load().(map[string]any)[tc.field]
+				if !strings.Contains(fmt.Sprint(inference), "Hello world") {
+					t.Fatalf("inference did not render the prompt: %v", inference)
+				}
+				beforePlayground := upstream.chatCalls.Load() + upstream.responseCalls.Load()
+				response, body := h.do(owner, http.MethodPost, playgroundPath, map[string]any{"model": route, "surface": tc.surface, "stream": streaming, "request": tc.request}, nil)
+				if response.StatusCode != http.StatusOK || streaming && (!strings.Contains(string(body), "event: frame") || !strings.Contains(string(body), "event: done")) {
+					t.Fatalf("playground status %d: %s", response.StatusCode, body)
+				}
+				if upstream.chatCalls.Load()+upstream.responseCalls.Load() != beforePlayground+1 {
+					t.Fatal("playground did not dispatch the request")
+				}
+				if got := upstream.lastReq.Load().(map[string]any)[tc.field]; !reflect.DeepEqual(got, inference) {
+					t.Fatalf("playground input %v differs from inference %v", got, inference)
+				}
+			})
+		}
+	}
+	developer := h.invite(owner, "prompt-developer@example.com", "developer")
+	profile := h.want(developer, http.MethodGet, "/api/v1/profile", nil, nil, http.StatusOK)
+	developerID := profile["id"].(string)
+	record := h.want(owner, http.MethodGet, "/api/v1/users/"+developerID, nil, nil, http.StatusOK)
+	h.want(owner, http.MethodPatch, "/api/v1/users/"+developerID, map[string]any{"access_scope": "assigned"}, etagHeader(record), http.StatusOK)
+	assignedDeveloper := login(h, "prompt-developer@example.com")
+	assertProjectAccess := func(allowed bool) {
+		t.Helper()
+		for _, streaming := range []bool{false, true} {
+			path := map[bool]string{false: "/api/v1/playground", true: "/api/v1/playground/stream"}[streaming]
+			request := map[string]any{"model": route, "stream": streaming, "request": map[string]any{"olp_prompt": prompt}}
+			before := upstream.chatCalls.Load()
+			if allowed {
+				response, body := h.do(assignedDeveloper, http.MethodPost, path, request, nil)
+				if response.StatusCode != http.StatusOK || streaming && !strings.Contains(string(body), "event: done") || upstream.chatCalls.Load() != before+1 {
+					t.Fatalf("assigned developer could not render: %d %s", response.StatusCode, body)
+				}
+				continue
+			}
+			denied := h.want(assignedDeveloper, http.MethodPost, path, request, nil, http.StatusNotFound)
+			if problemCode(t, denied) != "route_not_found" || upstream.chatCalls.Load() != before {
+				t.Fatalf("unassigned developer reached a project route: %v", denied)
+			}
+		}
+	}
+	assertProjectAccess(false)
+	addMember(h, owner, project, developerID, "viewer")
+	assertProjectAccess(true)
+	h.want(owner, http.MethodDelete, "/api/v1/projects/"+project+"/members/"+developerID, nil, projectEtag(h, owner, project), http.StatusNoContent)
+	assertProjectAccess(false)
+	exported := h.want(owner, http.MethodGet, "/api/v1/configuration/export", nil, nil, http.StatusOK)
+	h.want(owner, http.MethodPost, "/api/v1/configuration/apply", map[string]any{"document": exported["document"]}, idem("prompt-playground-import"), http.StatusOK)
+	h.refresh()
+	statusAfterImport, bodyAfterImport, _ := h.gateway(http.MethodPost, "/v1/chat/completions", secret, map[string]any{"model": route, "olp_prompt": prompt})
+	if statusAfterImport != http.StatusOK {
+		t.Fatalf("inference after import status %d: %v", statusAfterImport, bodyAfterImport)
+	}
+	imported := upstream.lastReq.Load().(map[string]any)["messages"]
+	if !reflect.DeepEqual(imported, inference) {
+		t.Fatalf("imported messages %v differ from inference %v", imported, inference)
+	}
+	beforeImportedPlayground := upstream.chatCalls.Load()
+	h.want(owner, http.MethodPost, "/api/v1/playground", map[string]any{"model": route, "request": map[string]any{"olp_prompt": prompt}}, nil, http.StatusOK)
+	if got := upstream.lastReq.Load().(map[string]any)["messages"]; upstream.chatCalls.Load() != beforeImportedPlayground+1 || !reflect.DeepEqual(got, imported) {
+		t.Fatalf("playground messages %v differ after import %v", got, imported)
+	}
+	current := h.want(owner, http.MethodGet, promptPath, nil, nil, http.StatusOK)
+	updated := h.want(owner, http.MethodPut, promptPath, map[string]any{"project_id": project, "name": "greeting", "prompt": map[string]any{"template": "Welcome {{name}}", "variables": []any{"name"}}}, withMatch(current, idem("prompt-playground-update")), http.StatusOK)
+	newRevision := h.want(owner, http.MethodPost, promptPath+"/publish", nil, withMatch(updated, idem("prompt-playground-republish")), http.StatusOK)
+	h.want(owner, http.MethodPut, promptPath+"/labels/production", map[string]any{"revision_id": newRevision["revision_id"]}, withMatch(newRevision, idem("prompt-playground-relabel")), http.StatusOK)
+	h.refresh()
+	statusAfterMove, bodyAfterMove, _ := h.gateway(http.MethodPost, "/v1/chat/completions", secret, map[string]any{"model": route, "olp_prompt": prompt})
+	if statusAfterMove != http.StatusOK {
+		t.Fatalf("inference after label move status %d: %v", statusAfterMove, bodyAfterMove)
+	}
+	moved := upstream.lastReq.Load().(map[string]any)["messages"]
+	if !strings.Contains(fmt.Sprint(moved), "Welcome world") {
+		t.Fatalf("moving the prompt label rendered %v", moved)
+	}
+	beforeMovedPlayground := upstream.chatCalls.Load()
+	h.want(owner, http.MethodPost, "/api/v1/playground", map[string]any{"model": route, "request": map[string]any{"olp_prompt": prompt}}, nil, http.StatusOK)
+	if got := upstream.lastReq.Load().(map[string]any)["messages"]; upstream.chatCalls.Load() != beforeMovedPlayground+1 || !reflect.DeepEqual(got, moved) {
+		t.Fatalf("playground messages %v differ after label move %v", got, moved)
+	}
+	beforeInvalid := upstream.chatCalls.Load()
+	h.want(owner, http.MethodPost, "/api/v1/playground", map[string]any{"model": route, "request": map[string]any{"olp_prompt": map[string]any{"id": publication["id"], "label": "production", "variables": map[string]string{"extra": "value"}}}}, nil, http.StatusBadRequest)
+	if upstream.chatCalls.Load() != beforeInvalid {
+		t.Fatal("invalid prompt variables reached the provider")
+	}
+	t.Run("capture and durable privacy", func(t *testing.T) {
+		h.want(owner, http.MethodPatch, "/api/v1/observability/capture", map[string]any{"enabled": true}, etagHeader(h.want(owner, http.MethodGet, "/api/v1/observability/capture", nil, nil, http.StatusOK)), http.StatusOK)
+		receiver, exportServer := newExportReceiver(t, "", http.StatusNoContent)
+		sink := h.want(owner, http.MethodPost, "/api/v1/observability/sinks", map[string]any{"name": "prompt-privacy", "type": "https", "destination": exportServer.URL, "streams": []string{"requests"}, "format": "json"}, idem(uuid.NewString()), http.StatusCreated)
+		h.want(owner, http.MethodPost, "/api/v1/observability/capture-policies", map[string]any{"route_slug": route, "sink": sink["export_sink_id"], "sample_ratio": "1", "include": []string{"input", "output"}, "max_bytes": 65536}, idem(uuid.NewString()), http.StatusCreated)
+		manager := &export.Manager{Pool: h.Pool, Keys: h.Ring2(), Installation: h.Server.Installation, Sender: export.NewSender(loopbackPolicy()), Log: slog.New(slog.NewTextHandler(io.Discard, nil))}
+		h.Gateway.Capture = manager
+		var receipts sync.Map
+		h.Gateway.Sink = &gateway.PersistingSink{Persist: func(ctx context.Context, event *usage.Event, payload []byte) error {
+			_, err := usage.PersistEvent(ctx, h.Pool, event, payload)
+			receipts.Store(event.RequestID, recordedWorkflowReceipt{event: event, payload: payload, err: err})
+			return err
+		}}
+		ctx, cancel := context.WithCancel(t.Context())
+		done := make(chan struct{})
+		go func() { manager.Run(ctx); close(done) }()
+		t.Cleanup(func() { cancel(); <-done })
+		eventually(t, "prompt route capture policy", 3*time.Second, func() bool {
+			collector := manager.Resolve(project, route, "", "", uuid.NewString())
+			if collector == nil {
+				return false
+			}
+			collector.Close()
+			return true
+		})
+		h.refresh()
+		controlStatus, controlBody, controlHeaders := h.gateway(http.MethodPost, "/v1/chat/completions", secret, map[string]any{"model": route, "messages": []any{map[string]any{"role": "user", "content": "prompt capture control"}}})
+		if controlStatus != http.StatusOK {
+			t.Fatalf("capture control status %d: %v", controlStatus, controlBody)
+		}
+		control := awaitEnvelope(t, receiver, 1)
+		controlData, _ := json.Marshal(control[0]["data"])
+		if !strings.Contains(string(controlData), "prompt capture control") {
+			t.Fatalf("capture control not exported: %s", controlData)
+		}
+		var controlCaptured bool
+		if err := h.Pool.QueryRow(t.Context(), `SELECT payload_captured FROM olp.requests WHERE id=$1`, controlHeaders.Get("X-Request-Id")).Scan(&controlCaptured); err != nil || !controlCaptured {
+			t.Fatalf("capture control not recorded: captured=%t error=%v", controlCaptured, err)
+		}
+		const privateValue = "playground-private-variable-459"
+		for _, streaming := range []bool{false, true} {
+			path := map[bool]string{false: "/api/v1/playground", true: "/api/v1/playground/stream"}[streaming]
+			privatePrompt := map[string]any{"id": publication["id"], "label": "production", "variables": map[string]string{"name": privateValue}}
+			before := upstream.chatCalls.Load()
+			response, body := h.do(owner, http.MethodPost, path, map[string]any{"model": route, "stream": streaming, "request": map[string]any{"olp_prompt": privatePrompt}}, nil)
+			if response.StatusCode != http.StatusOK || streaming && !strings.Contains(string(body), "event: done") || upstream.chatCalls.Load() != before+1 || !strings.Contains(fmt.Sprint(upstream.lastReq.Load()), "Welcome "+privateValue) {
+				t.Fatalf("private playground render failed: status=%d body=%s", response.StatusCode, body)
+			}
+		}
+		cancel()
+		<-done
+		privateIDs := []string{}
+		receipts.Range(func(key, value any) bool {
+			receipt := value.(recordedWorkflowReceipt)
+			if receipt.event.Origin != usage.OriginPlayground {
+				return true
+			}
+			if receipt.err != nil || receipt.event.PayloadCaptured || len(receipt.event.Attempts) != 1 || receipt.event.Attempts[0].Routing == nil || receipt.event.Attempts[0].Routing.Prompt == nil || receipt.event.Attempts[0].Routing.Prompt.ID != publication["id"] || receipt.event.Attempts[0].Routing.Prompt.RevisionID != newRevision["revision_id"] || strings.Contains(string(receipt.payload), privateValue) {
+				t.Fatalf("private playground receipt was not content-free: %+v error=%v", receipt.event, receipt.err)
+			}
+			privateIDs = append(privateIDs, key.(string))
+			return true
+		})
+		if len(privateIDs) != 2 {
+			t.Fatalf("expected unary and streaming playground receipts, got %d", len(privateIDs))
+		}
+		for _, id := range privateIDs {
+			var captured bool
+			var record string
+			if err := h.Pool.QueryRow(t.Context(), `SELECT r.payload_captured, e.payload::text FROM olp.requests r JOIN olp.export_records e ON e.source_id=r.id AND e.stream='requests' WHERE r.id=$1`, id).Scan(&captured, &record); err != nil || captured || strings.Contains(record, privateValue) {
+				t.Fatalf("playground request or export record was not content-free: captured=%t error=%v", captured, err)
+			}
+		}
+		for _, table := range []string{"requests", "attempts", "attempt_usage_facts", "request_metadata_event_receipts", "export_records"} {
+			var leaks int
+			query := "SELECT count(*) FROM olp." + table + " AS row WHERE row_to_json(row)::text LIKE '%' || $1 || '%'"
+			if err := h.Pool.QueryRow(t.Context(), query, privateValue).Scan(&leaks); err != nil || leaks != 0 {
+				t.Fatalf("private prompt content reached %s: count=%d error=%v", table, leaks, err)
+			}
+		}
+		worker := &export.Worker{Pool: h.Pool, Keys: h.Ring2(), Installation: h.Server.Installation, Sender: export.NewSender(loopbackPolicy()), Log: slog.New(slog.NewTextHandler(io.Discard, nil))}
+		if err := worker.Pass(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+		envelopes := awaitEnvelope(t, receiver, 4)
+		for _, envelope := range envelopes {
+			data, err := json.Marshal(envelope)
+			if err != nil || strings.Contains(string(data), privateValue) {
+				t.Fatalf("private prompt content reached export: %s %v", data, err)
+			}
+		}
+		for _, id := range privateIDs {
+			if !strings.Contains(fmt.Sprint(envelopes), id) {
+				t.Fatalf("playground request %s was not exported", id)
+			}
+		}
+	})
+}
+
+func TestRunEvidenceDeliveryRechecksCreatorAndSource(t *testing.T) {
+	h := newAccessHarness(t)
+	owner := h.owner()
+	project := createProject(h, owner, "Run evidence")
+	creator := h.invite(owner, "run-evidence@example.test", "developer")
+	creatorID := mcpExecString(t, h.want(creator, http.MethodGet, "/api/v1/profile", nil, nil, http.StatusOK), "id")
+	creatorRecord := h.want(owner, http.MethodGet, "/api/v1/users/"+creatorID, nil, nil, http.StatusOK)
+	h.want(owner, http.MethodPatch, "/api/v1/users/"+creatorID, map[string]any{"access_scope": "assigned"}, etagHeader(creatorRecord), http.StatusOK)
+	addMember(h, owner, project, creatorID, "manager")
+	h.want(creator, http.MethodPost, "/api/v1/sessions", map[string]any{"email": "run-evidence@example.test", "password": accessPassword}, nil, http.StatusCreated)
+
+	observabilityReceiver, observabilityEndpoint := newExportReceiver(t, "", http.StatusNoContent)
+	managedReceiver, managedEndpoint := newExportReceiver(t, "", http.StatusNoContent)
+	h.want(creator, http.MethodPost, "/api/v1/observability/sinks", map[string]any{"name": "Run evidence", "type": "https", "project_id": project, "destination": observabilityEndpoint.URL, "enabled": true, "streams": []string{"runs"}, "format": "json"}, idem(uuid.NewString()), http.StatusCreated)
+	h.want(creator, http.MethodPost, "/api/v1/sinks", map[string]any{"name": "Managed run evidence", "type": "https", "project_id": project, "destination": managedEndpoint.URL, "enabled": true, "streams": []string{"runs"}}, idem(uuid.NewString()), http.StatusCreated)
+	var toolCalls atomic.Int64
+	toolServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodDelete {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		var request struct {
+			ID     any    `json:"id"`
+			Method string `json:"method"`
+			Params struct {
+				ProtocolVersion string `json:"protocolVersion"`
+			} `json:"params"`
+		}
+		if json.NewDecoder(r.Body).Decode(&request) != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		var result any
+		switch request.Method {
+		case "notifications/initialized":
+			w.WriteHeader(http.StatusAccepted)
+			return
+		case "initialize":
+			w.Header().Set("Mcp-Session-Id", "evidence-session")
+			result = map[string]any{"protocolVersion": request.Params.ProtocolVersion, "capabilities": map[string]any{"tools": map[string]any{}}}
+		case "tools/list":
+			schema := map[string]any{"type": "object", "properties": map[string]any{"query": map[string]any{"type": "string"}}, "required": []string{"query"}}
+			result = map[string]any{"tools": []any{map[string]any{"name": "lookup", "inputSchema": schema}}}
+		case "tools/call":
+			toolCalls.Add(1)
+			result = map[string]any{"content": []any{map[string]any{"type": "text", "text": "private tool result"}}, "isError": false}
+		default:
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		writeJSON(w, map[string]any{"jsonrpc": "2.0", "id": request.ID, "result": result})
+	}))
+	defer toolServer.Close()
+	registered := h.want(owner, http.MethodPost, "/api/v1/mcp-servers", map[string]any{"name": "Evidence tools", "project_id": project, "transport": "streamable_http", "endpoint": toolServer.URL, "enabled": true, "unit_price": "0.25"}, idem("evidence-tools"), http.StatusCreated)
+	serverID := mcpExecString(t, registered, "id")
+	tool := agentcontract.Tool{ServerID: serverID, RevisionID: mcpExecString(t, registered, "revision_id"), CatalogDigest: mcpExecString(t, mcpExecObject(t, registered, "catalog"), "digest"), Name: "lookup", Alias: agentcontract.ToolAlias(serverID, "lookup"), Classification: "read_only"}
+	toolset := h.want(owner, http.MethodPost, "/api/v1/toolsets", map[string]any{"project_id": project, "name": "Evidence toolset", "toolset": agentcontract.Toolset{Tools: []agentcontract.Tool{tool}}}, idem("evidence-toolset"), http.StatusCreated)
+	toolsetID := mcpExecString(t, toolset, "id")
+	h.want(owner, http.MethodPost, "/api/v1/toolsets/"+toolsetID+"/publish", nil, withMatch(toolset, idem("evidence-publish")), http.StatusOK)
+	var modelCalls atomic.Int64
+	var callIDs atomic.Int64
+	vendor := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/models") {
+			writeJSON(w, map[string]any{"object": "list", "data": []any{map[string]any{"id": vendorModel}}})
+			return
+		}
+		if strings.HasSuffix(r.URL.Path, "/responses") {
+			writeResponsesFixture(w, vendorModel, "done", false)
+			return
+		}
+		var input map[string]json.RawMessage
+		if json.NewDecoder(r.Body).Decode(&input) != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		name := ""
+		if len(input["tool_choice"]) > 0 {
+			name = "olp_certification_probe"
+		} else if len(input["tools"]) > 0 {
+			modelCalls.Add(1)
+			if !strings.Contains(string(input["messages"]), `"role":"tool"`) {
+				name = tool.Alias
+			}
+		}
+		message := map[string]any{"role": "assistant", "content": "done"}
+		finish := "stop"
+		if name != "" {
+			finish = "tool_calls"
+			message = map[string]any{"role": "assistant", "content": nil, "tool_calls": []any{map[string]any{"id": fmt.Sprintf("evidence-call-%d", callIDs.Add(1)), "type": "function", "function": map[string]any{"name": name, "arguments": `{"query":"private argument"}`}}}}
+		}
+		writeJSON(w, map[string]any{"id": "chatcmpl-evidence", "object": "chat.completion", "created": 1, "model": vendorModel, "choices": []any{map[string]any{"index": 0, "message": message, "finish_reason": finish}}, "usage": map[string]any{"prompt_tokens": 4, "completion_tokens": 6, "total_tokens": 10}})
+	}))
+	defer vendor.Close()
+	_, provider, slug, _ := provisionOpenAIInProject(t, h, owner, &project, vendor.URL,
+		[]any{map[string]any{"operation": "generation", "surface": "openai", "mode": "unary"}}, []string{"generation"},
+		map[string]any{"tool_execution": "gateway", "toolsets": []string{toolsetID}, "budget": map[string]any{"daily_cost_limit": "10000000"}},
+		map[string]any{"options": map[string]any{"models": map[string]any{vendorModel: map[string]any{"context_length": 1000}}}})
+	addBatchPrice(t, h, owner, provider["id"].(string), "", time.Now().Add(-time.Hour))
+	key := h.want(owner, http.MethodPost, "/api/v1/api-keys", map[string]any{"name": "Run evidence caller", "project_id": project, "scopes": []string{"inference", "tools"}, "allowed_routes": []string{slug}, "allowed_toolsets": []string{toolsetID}, "max_concurrency": 1}, idem("run-evidence-key"), http.StatusCreated)
+	secret := mcpExecString(t, key, "secret")
+	valkey, prefix, _ := acctKeyspace(t)
+	limiter, err := limits.New(valkey, strings.TrimSuffix(prefix, ":"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	limiter.UseDurableDebits(h.Pool)
+	debits := &limits.DebitStore{Pool: h.Pool, Limiter: limiter}
+	h.Gateway.Admission = gateway.NewAdmission(limiter, func() limits.OutagePolicy { return limits.FailClosed }, slog.New(slog.DiscardHandler))
+	h.Gateway.Debits = gateway.DurableSessionDebits(debits)
+	h.Gateway.WorkflowRuns = &agents.WorkflowStore{Pool: h.Pool, Auth: h.AuthKey, Keys: h.Server.Keys, Installation: h.Server.Installation, Debits: debits}
+	h.Gateway.WorkflowTools = &mcp.Server{Runtime: h.Runtime, Egress: &h.Policy, Auth: h.AuthKey, Limiter: limiter, Ledger: &mcp.DurableLedger{Pool: h.Pool, Store: debits, Auth: h.AuthKey}, Guardrails: func(ctx context.Context, evaluation mcp.GuardrailEvaluation) (guardrails.Result, error) {
+		return h.Gateway.EvaluateToolGuardrails(ctx, evaluation.Authority, evaluation.Release, evaluation.Engine, evaluation.RequestID, evaluation.Phase, evaluation.Segments, evaluation.Masks)
+	}}
+	emitter := usage.NewEmitter(32)
+	defer emitter.Close()
+	h.Gateway.Sink = &gateway.AccountingSink{Emitter: emitter}
+	h.refresh()
+	leader, err := limits.TryAcquireLeader(t.Context(), h.Pool)
+	if err != nil || leader == nil {
+		t.Fatalf("acquire cost reconciliation leader: %v", err)
+	}
+	if _, err := leader.Reconcile(t.Context(), limiter, time.Now()); err != nil {
+		leader.Close(t.Context())
+		t.Fatalf("reconcile workflow cost caps: %v", err)
+	}
+	leader.Close(t.Context())
+	seen := map[string]bool{}
+	start := func(t *testing.T) string {
+		t.Helper()
+		beforeModels, beforeTools := modelCalls.Load(), toolCalls.Load()
+		status, response, _ := h.gateway(http.MethodPost, "/v1/chat/completions", secret, map[string]any{"model": slug, "messages": []any{map[string]any{"role": "user", "content": "private prompt"}}, "max_tokens": 100})
+		if status != http.StatusOK || !strings.Contains(fmt.Sprint(response), "done") || modelCalls.Load()-beforeModels != 2 || toolCalls.Load()-beforeTools != 1 {
+			t.Fatalf("gateway workflow: status=%d response=%v models=%d tools=%d", status, response, modelCalls.Load()-beforeModels, toolCalls.Load()-beforeTools)
+		}
+		runs := h.want(owner, http.MethodGet, "/api/v1/agent-runs?project_id="+project, nil, nil, http.StatusOK)
+		var id string
+		for _, item := range mcpExecItems(t, runs, "items") {
+			candidate := mcpExecString(t, item.(map[string]any), "id")
+			if !seen[candidate] {
+				if id != "" {
+					t.Fatalf("gateway produced multiple unseen runs: %v", runs)
+				}
+				id = candidate
+			}
+		}
+		if id == "" {
+			t.Fatalf("gateway run missing from public run list: %v", runs)
+		}
+		seen[id] = true
+		detail := h.want(owner, http.MethodGet, "/api/v1/agent-runs/"+id, nil, nil, http.StatusOK)
+		steps := mcpExecItems(t, detail, "steps")
+		if len(steps) != 3 {
+			t.Fatalf("gateway workflow did not persist three steps: %v", detail)
+		}
+		for i, kind := range []string{"model", "tool", "model"} {
+			step := steps[i].(map[string]any)
+			if step["kind"] != kind || step["state"] != "settled" {
+				t.Fatalf("gateway workflow step %d: %v", i, step)
+			}
+		}
+		return id
+	}
+	observabilityWorker := &export.Worker{Pool: h.Pool, Keys: h.Ring2(), Installation: h.Server.Installation, Sender: export.NewSender(loopbackPolicy()), Log: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	managedWorker := &sinks.Worker{Pool: h.Pool, Egress: loopbackPolicy()}
+	deliver := func(t *testing.T) {
+		t.Helper()
+		if err := observabilityWorker.Pass(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := managedWorker.Deliver(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	assertCreator := func(t *testing.T, active, authorized, member bool) {
+		t.Helper()
+		var gotActive, gotAuthorized, gotMember bool
+		if err := h.Pool.QueryRow(t.Context(), `SELECT u.active,u.oidc_authorized,EXISTS(SELECT 1 FROM olp.effective_project_members m WHERE m.user_id=u.id AND m.project_id=$2) FROM olp.users u WHERE u.id=$1`, creatorID, project).Scan(&gotActive, &gotAuthorized, &gotMember); err != nil {
+			t.Fatal(err)
+		}
+		if gotActive != active || gotAuthorized != authorized || gotMember != member {
+			t.Fatalf("creator state active=%t authorized=%t member=%t", gotActive, gotAuthorized, gotMember)
+		}
+	}
+	for _, scenario := range []string{"project membership", "disabled creator", "withdrawn OIDC authorization", "expired retention", "deleted source"} {
+		t.Run(scenario, func(t *testing.T) {
+			beforeObservability := len(observabilityReceiver.received())
+			beforeManaged := len(managedReceiver.received())
+			assertCreator(t, true, true, true)
+			allowed := start(t)
+			deliver(t)
+			for _, sink := range []struct {
+				name     string
+				receiver *exportReceiver
+				count    int
+				idField  string
+			}{
+				{"observability", observabilityReceiver, beforeObservability, "run_id"},
+				{"managed", managedReceiver, beforeManaged, "id"},
+			} {
+				got := sink.receiver.received()
+				if len(got) != sink.count+1 {
+					t.Fatalf("%s positive control delivered %d records, expected %d", sink.name, len(got), sink.count+1)
+				}
+				data, ok := got[sink.count]["data"].(map[string]any)
+				if !ok || data[sink.idField] != allowed || data["project_id"] != project || data["evidence_origin"] != "gateway_observed" {
+					t.Fatalf("%s positive control has incorrect metadata: %v", sink.name, got[sink.count])
+				}
+				payload, err := json.Marshal(got[sink.count])
+				if err != nil {
+					t.Fatal(err)
+				}
+				validateWebhookBody(t, sink.name+".runs", payload)
+			}
+			denied := start(t)
+			switch scenario {
+			case "project membership":
+				h.want(owner, http.MethodDelete, "/api/v1/projects/"+project+"/members/"+creatorID, nil, projectEtag(h, owner, project), http.StatusNoContent)
+				assertCreator(t, true, true, false)
+			case "disabled creator":
+				current := h.want(owner, http.MethodGet, "/api/v1/users/"+creatorID, nil, nil, http.StatusOK)
+				h.want(owner, http.MethodPatch, "/api/v1/users/"+creatorID, map[string]any{"active": false}, etagHeader(current), http.StatusOK)
+				assertCreator(t, false, true, true)
+			case "withdrawn OIDC authorization":
+				if _, err := h.Pool.Exec(t.Context(), `UPDATE olp.users SET oidc_authorized=false WHERE id=$1`, creatorID); err != nil {
+					t.Fatal(err)
+				}
+				assertCreator(t, true, false, true)
+			case "expired retention":
+				if _, err := h.Pool.Exec(t.Context(), `INSERT INTO olp.settings(key,value,etag,updated_by) VALUES('retention.requests_days','1',gen_random_uuid(),$1) ON CONFLICT(key) DO UPDATE SET value=excluded.value`, creatorID); err != nil {
+					t.Fatal(err)
+				}
+				tx, err := h.Pool.Begin(t.Context())
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer tx.Rollback(t.Context())
+				if _, err := tx.Exec(t.Context(), `ALTER TABLE olp.agent_runs DISABLE TRIGGER agent_runs_immutable`); err != nil {
+					t.Fatal(err)
+				}
+				if _, err := tx.Exec(t.Context(), `UPDATE olp.agent_runs SET created_at=now()-interval '2 days' WHERE id=$1`, denied); err != nil {
+					t.Fatal(err)
+				}
+				if _, err := tx.Exec(t.Context(), `ALTER TABLE olp.agent_runs ENABLE TRIGGER agent_runs_immutable`); err != nil {
+					t.Fatal(err)
+				}
+				if err := tx.Commit(t.Context()); err != nil {
+					t.Fatal(err)
+				}
+				assertCreator(t, true, true, true)
+			case "deleted source":
+				tx, err := h.Pool.Begin(t.Context())
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer tx.Rollback(t.Context())
+				immutable := []string{"mcp_tool_calls", "execution_debit_owners", "execution_debit_results", "execution_debit_result_resolutions"}
+				for _, table := range immutable {
+					if _, err := tx.Exec(t.Context(), `ALTER TABLE olp.`+table+` DISABLE TRIGGER USER`); err != nil {
+						t.Fatal(err)
+					}
+				}
+				for _, table := range []string{"mcp_call_identities", "mcp_tool_calls", "execution_debit_result_resolutions", "execution_debit_results", "execution_debit_owners"} {
+					if _, err := tx.Exec(t.Context(), `DELETE FROM olp.`+table+` WHERE dispatch_id IN (SELECT id FROM olp.execution_debits WHERE run_id=$1)`, denied); err != nil {
+						t.Fatal(err)
+					}
+				}
+				for _, query := range []string{`DELETE FROM olp.agent_steps WHERE run_id=$1`, `DELETE FROM olp.execution_debits WHERE run_id=$1`, `DELETE FROM olp.agent_runs WHERE id=$1`} {
+					if _, err := tx.Exec(t.Context(), query, denied); err != nil {
+						t.Fatal(err)
+					}
+				}
+				for _, table := range immutable {
+					if _, err := tx.Exec(t.Context(), `ALTER TABLE olp.`+table+` ENABLE TRIGGER USER`); err != nil {
+						t.Fatal(err)
+					}
+				}
+				if err := tx.Commit(t.Context()); err != nil {
+					t.Fatal(err)
+				}
+				assertCreator(t, true, true, true)
+			}
+			deliver(t)
+			if observed, managed := len(observabilityReceiver.received()), len(managedReceiver.received()); observed != beforeObservability+1 || managed != beforeManaged+1 {
+				t.Fatalf("evidence delivered after %s: observability=%d managed=%d", scenario, observed-beforeObservability-1, managed-beforeManaged-1)
+			}
+			switch scenario {
+			case "project membership":
+				addMember(h, owner, project, creatorID, "manager")
+			case "disabled creator":
+				current := h.want(owner, http.MethodGet, "/api/v1/users/"+creatorID, nil, nil, http.StatusOK)
+				h.want(owner, http.MethodPatch, "/api/v1/users/"+creatorID, map[string]any{"active": true}, etagHeader(current), http.StatusOK)
+			case "withdrawn OIDC authorization":
+				if _, err := h.Pool.Exec(t.Context(), `UPDATE olp.users SET oidc_authorized=true WHERE id=$1`, creatorID); err != nil {
+					t.Fatal(err)
+				}
 			}
 		})
 	}

@@ -21,6 +21,7 @@ type delegationOption struct {
 	ID              string   `json:"id"`
 	AllowedRoutes   []string `json:"allowed_routes"`
 	AllowedToolsets []string `json:"allowed_toolsets"`
+	AllowedAgents   []string `json:"allowed_agents"`
 }
 
 type delegationConsentRequest struct {
@@ -29,6 +30,7 @@ type delegationConsentRequest struct {
 	Scopes          []string `json:"scopes,omitempty"`
 	AllowedRoutes   []string `json:"allowed_routes"`
 	AllowedToolsets []string `json:"allowed_toolsets,omitempty"`
+	AllowedAgents   []string `json:"allowed_agents,omitempty"`
 	TTLSeconds      int64    `json:"ttl_seconds,omitempty"`
 }
 
@@ -80,6 +82,14 @@ func (s *DelegationManagement) options(r *http.Request, _ access.Principal) (acc
 	if err != nil {
 		return access.Reply{}, err
 	}
+	agentRows, err := tx.Query(r.Context(), "SELECT id::text FROM olp.agent_publications WHERE project_id=$1 AND kind='agent' AND NOT retired AND latest_revision_id IS NOT NULL ORDER BY id", *projectID)
+	if err != nil {
+		return access.Reply{}, err
+	}
+	agents, err := pgx.CollectRows(agentRows, pgx.RowTo[string])
+	if err != nil {
+		return access.Reply{}, err
+	}
 	var current string
 	if err := tx.QueryRow(r.Context(), "SELECT authority_id::text FROM olp.installation WHERE singleton").Scan(&current); err != nil {
 		return access.Reply{}, err
@@ -106,19 +116,26 @@ func (s *DelegationManagement) options(r *http.Request, _ access.Principal) (acc
 			}
 			allowed := slices.Collect(func(yieldRoute func(string) bool) {
 				for _, route := range routes {
-					if delegationResourcesAllowed(agent, key, []string{route}, nil, now) && !yieldRoute(route) {
+					if delegationResourcesAllowed(agent, key, []string{route}, nil, nil, now) && !yieldRoute(route) {
 						return
 					}
 				}
 			})
 			allowedToolsets := slices.Collect(func(yieldToolset func(string) bool) {
 				for _, toolset := range toolsets {
-					if delegationResourcesAllowed(agent, key, nil, []string{toolset}, now) && !yieldToolset(toolset) {
+					if delegationResourcesAllowed(agent, key, nil, []string{toolset}, nil, now) && !yieldToolset(toolset) {
 						return
 					}
 				}
 			})
-			if (len(allowed) != 0 || len(allowedToolsets) != 0) && !yield(delegationOption{ID: registered.ID, AllowedRoutes: append([]string{}, allowed...), AllowedToolsets: append([]string{}, allowedToolsets...)}) {
+			allowedAgents := slices.Collect(func(yieldAgent func(string) bool) {
+				for _, target := range agents {
+					if delegationResourcesAllowed(agent, key, nil, nil, []string{target}, now) && !yieldAgent(target) {
+						return
+					}
+				}
+			})
+			if (len(allowed) != 0 || len(allowedToolsets) != 0 || len(allowedAgents) != 0) && !yield(delegationOption{ID: registered.ID, AllowedRoutes: append([]string{}, allowed...), AllowedToolsets: append([]string{}, allowedToolsets...), AllowedAgents: append([]string{}, allowedAgents...)}) {
 				return
 			}
 		}
@@ -153,7 +170,7 @@ func (s *DelegationManagement) create(r *http.Request, _ access.Principal) (acce
 	if err := s.Access.ConsumeRecent(r, tx, principal, "agent_delegation", keyID); err != nil {
 		return access.Reply{}, err
 	}
-	bounds := DelegationBounds{Scopes: consentScopes(input.Scopes), AllowedRoutes: input.AllowedRoutes, AllowedToolsets: input.AllowedToolsets, TTLSeconds: input.TTLSeconds}
+	bounds := DelegationBounds{Scopes: consentScopes(input.Scopes), AllowedRoutes: input.AllowedRoutes, AllowedToolsets: input.AllowedToolsets, AllowedAgents: input.AllowedAgents, TTLSeconds: input.TTLSeconds}
 	if !validDelegationBounds(bounds) {
 		return access.Reply{}, access.Invalid("scopes", "Choose valid scopes and resources and a duration of at most 15 minutes.")
 	}
@@ -164,12 +181,12 @@ func (s *DelegationManagement) create(r *http.Request, _ access.Principal) (acce
 	if err := principal.Project(target.key.ProjectID, access.Change); err != nil {
 		return access.Reply{}, err
 	}
-	if target.key.ProjectID == nil || target.agent.ProjectID == nil || *target.key.ProjectID != *target.agent.ProjectID || !slices.Contains(target.key.Policy.Scopes, "delegate") || !delegationResourcesAllowed(target.agent, target.key, bounds.AllowedRoutes, bounds.AllowedToolsets, time.Now()) {
+	if target.key.ProjectID == nil || target.agent.ProjectID == nil || *target.key.ProjectID != *target.agent.ProjectID || !slices.Contains(target.key.Policy.Scopes, "delegate") || !delegationResourcesAllowed(target.agent, target.key, bounds.AllowedRoutes, bounds.AllowedToolsets, bounds.AllowedAgents, time.Now()) {
 		return access.Reply{}, access.Forbidden()
 	}
 	code := "olpc_" + secrets.Token()
 	expires := boundDelegationExpiry(time.Now().Add(delegationTTL(bounds.TTLSeconds)), target.key.ExpiresAt)
-	if _, err := tx.Exec(r.Context(), `INSERT INTO olp.agent_delegations(token_digest,consent_digest,consenting_user_id,project_id,api_key_id,agent_id,issuer_revision,scopes,allowed_routes,allowed_toolsets,expires_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,COALESCE($9,ARRAY[]::text[]),COALESCE($10,ARRAY[]::text[]),$11)`, s.Manager.auth.Digest(secrets.DelegationTokenDigest, "unissued:"+code), s.Manager.auth.Digest(secrets.DelegationConsentDigest, code), principal.ID, *target.key.ProjectID, keyID, agentID, target.revision, bounds.Scopes, bounds.AllowedRoutes, bounds.AllowedToolsets, expires); err != nil {
+	if _, err := tx.Exec(r.Context(), `INSERT INTO olp.agent_delegations(token_digest,consent_digest,consenting_user_id,project_id,api_key_id,agent_id,issuer_revision,scopes,allowed_routes,allowed_toolsets,expires_at,allowed_agents) VALUES($1,$2,$3,$4,$5,$6,$7,$8,COALESCE($9,ARRAY[]::text[]),COALESCE($10,ARRAY[]::text[]),$11,COALESCE($12,ARRAY[]::text[]))`, s.Manager.auth.Digest(secrets.DelegationTokenDigest, "unissued:"+code), s.Manager.auth.Digest(secrets.DelegationConsentDigest, code), principal.ID, *target.key.ProjectID, keyID, agentID, target.revision, bounds.Scopes, bounds.AllowedRoutes, bounds.AllowedToolsets, expires, bounds.AllowedAgents); err != nil {
 		return access.Reply{}, err
 	}
 	if err := access.Audit(r.Context(), tx, r, principal.Actor(), "agent_delegation.consent", "api_key", keyID, "success"); err != nil {

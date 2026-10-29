@@ -22742,7 +22742,9 @@
                 "requests",
                 "attempts",
                 "guardrail_decisions",
-                "audit"
+                "audit",
+                "runs",
+                "trace_spans"
               ]
             }
           },
@@ -22812,7 +22814,9 @@
                 "requests",
                 "attempts",
                 "guardrail_decisions",
-                "audit"
+                "audit",
+                "runs",
+                "trace_spans"
               ]
             }
           },
@@ -22872,7 +22876,9 @@
                 "requests",
                 "attempts",
                 "guardrail_decisions",
-                "audit"
+                "audit",
+                "runs",
+                "trace_spans"
               ]
             }
           },
@@ -23011,7 +23017,9 @@
                 "requests",
                 "attempts",
                 "guardrail_decisions",
-                "audit"
+                "audit",
+                "runs",
+                "trace_spans"
               ]
             }
           },
@@ -24383,7 +24391,9 @@
                 "guardrail_decisions",
                 "audit",
                 "metering",
-                "focus"
+                "focus",
+                "runs",
+                "trace_spans"
               ],
               "type": "string"
             },
@@ -24509,7 +24519,9 @@
                 "guardrail_decisions",
                 "audit",
                 "metering",
-                "focus"
+                "focus",
+                "runs",
+                "trace_spans"
               ],
               "type": "string"
             },
@@ -28827,6 +28839,15 @@
             "format": "uuid",
             "type": "string"
           },
+          "allowed_agents": {
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "maxItems": 100,
+            "type": "array",
+            "uniqueItems": true
+          },
           "allowed_routes": {
             "items": {
               "type": "string"
@@ -28852,11 +28873,12 @@
             "items": {
               "enum": [
                 "inference",
-                "tools"
+                "tools",
+                "agents"
               ],
               "type": "string"
             },
-            "maxItems": 2,
+            "maxItems": 3,
             "minItems": 1,
             "type": "array",
             "uniqueItems": true
@@ -28912,6 +28934,14 @@
               "format": "uuid"
             },
             "description": "Published toolsets currently allowed by both the key and the agent."
+          },
+          "allowed_agents": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Published agents currently allowed by both the key and the workload."
           }
         }
       },
@@ -29003,6 +29033,1641 @@
           "token_endpoint"
         ],
         "description": "OAuth grants are bound to the approved agent endpoint and caller identity. Browser and device flows use personal enrollment. Entra OBO uses verified workload assertions and a sealed middle-tier client secret."
+      },
+      "AgentRun": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "Content-free gateway run metadata.",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "api_key_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "project_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "revision_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "route_revision_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "api_key_id",
+          "project_id",
+          "revision_id",
+          "route_revision_id",
+          "created_at"
+        ]
+      },
+      "AgentRunStep": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "A step and its dispatch attempt. Remaining amounts are unresolved exposure, not charges.",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "dispatch_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "ordinal": {
+            "type": "integer"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "api",
+              "model",
+              "tool",
+              "agent"
+            ]
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "prepared",
+              "ready",
+              "dispatched",
+              "outcome_unknown",
+              "settled",
+              "released",
+              "conflict",
+              "not_accepted"
+            ]
+          },
+          "currency": {
+            "type": "string"
+          },
+          "cost_bound": {
+            "type": "string"
+          },
+          "charge_bound": {
+            "type": "string"
+          },
+          "observed_cost": {
+            "type": "string"
+          },
+          "observed_charge": {
+            "type": "string"
+          },
+          "remaining_cost": {
+            "type": "string"
+          },
+          "remaining_charge": {
+            "type": "string"
+          },
+          "bound_violation": {
+            "type": "boolean"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "tool_alias": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Recorded tool alias, if a tool call exists."
+          },
+          "tool_status": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Recorded tool call execution status."
+          },
+          "tool_is_error": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Whether the tool returned an error result."
+          },
+          "pricing_state": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "priced",
+              "free",
+              "unpriced",
+              null
+            ],
+            "description": "Recorded tool pricing state; unpriced amounts are unknown."
+          }
+        },
+        "required": [
+          "id",
+          "dispatch_id",
+          "ordinal",
+          "kind",
+          "state",
+          "currency",
+          "cost_bound",
+          "charge_bound",
+          "observed_cost",
+          "observed_charge",
+          "remaining_cost",
+          "remaining_charge",
+          "bound_violation",
+          "created_at",
+          "tool_alias",
+          "tool_status",
+          "tool_is_error",
+          "pricing_state"
+        ]
+      },
+      "AgentRunApproval": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "Approval metadata without tokens or content.",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "consumed_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "dispatch_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "id",
+          "expires_at",
+          "consumed_at",
+          "dispatch_id"
+        ]
+      },
+      "AgentRunSpan": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "Correlated span metadata without messages, arguments, results or rendered prompts.",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "trace_id": {
+            "type": "string"
+          },
+          "span_id": {
+            "type": "string"
+          },
+          "parent_span_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "attempt_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "started_nanos": {
+            "type": "string"
+          },
+          "ended_nanos": {
+            "type": "string"
+          },
+          "category": {
+            "type": "string"
+          },
+          "status": {
+            "type": "integer"
+          },
+          "received_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "trace_id",
+          "span_id",
+          "parent_span_id",
+          "attempt_id",
+          "started_nanos",
+          "ended_nanos",
+          "category",
+          "status",
+          "received_at"
+        ]
+      },
+      "AgentRunDetail": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "api_key_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "project_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "revision_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "route_revision_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "steps": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AgentRunStep"
+            }
+          },
+          "approvals": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AgentRunApproval"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "api_key_id",
+          "project_id",
+          "revision_id",
+          "route_revision_id",
+          "created_at",
+          "steps",
+          "approvals"
+        ]
+      },
+      "AgentRunList": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AgentRun"
+            },
+            "maxItems": 200
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "items",
+          "next_cursor"
+        ]
+      },
+      "AgentRunSpanList": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AgentRunSpan"
+            },
+            "maxItems": 200
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "description": "Correlated spans, ordered by start time and ID from newest to oldest."
+      },
+      "InvestigationFilters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "from": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "to": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "run_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "min_duration_ms": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "max_duration_ms": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "error": {
+            "type": "boolean"
+          },
+          "tool": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          }
+        },
+        "required": [],
+        "description": "Typed filters used to investigate agent evidence."
+      },
+      "InvestigationEvidence": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "run",
+              "step",
+              "approval",
+              "span",
+              "task",
+              "delegation"
+            ]
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "kind",
+          "id"
+        ],
+        "description": "Reference to evidence in the investigation project. A retained reference can outlive its source evidence."
+      },
+      "InvestigationWrite": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "project_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "filters": {
+            "$ref": "#/components/schemas/InvestigationFilters"
+          },
+          "evidence": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/InvestigationEvidence"
+            }
+          },
+          "summary": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096
+          }
+        },
+        "required": [
+          "project_id",
+          "filters",
+          "evidence",
+          "summary"
+        ],
+        "description": "Operator-authored filters, evidence references and summary. Do not submit source payloads."
+      },
+      "Investigation": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "project_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "filters": {
+            "$ref": "#/components/schemas/InvestigationFilters"
+          },
+          "evidence": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/InvestigationEvidenceView"
+            }
+          },
+          "summary": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "project_id",
+          "filters",
+          "evidence",
+          "summary",
+          "created_at"
+        ]
+      },
+      "InvestigationList": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Investigation"
+            },
+            "maxItems": 200
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "items",
+          "next_cursor"
+        ]
+      },
+      "InvestigationEvidenceView": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "run",
+              "step",
+              "approval",
+              "span",
+              "task",
+              "delegation"
+            ]
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "run_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The associated run, when this step, approval or span is still retained."
+          }
+        },
+        "required": [
+          "kind",
+          "id"
+        ],
+        "description": "Reference to evidence in the investigation project. A retained reference can outlive its source evidence; the associated run is resolved on detail reads."
+      },
+      "A2ARemoteTask": {
+        "type": "object",
+        "required": [
+          "id",
+          "contextId",
+          "status"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "OLP task ID"
+          },
+          "contextId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "OLP task context ID"
+          },
+          "status": {
+            "type": "object",
+            "required": [
+              "state"
+            ],
+            "properties": {
+              "state": {
+                "type": "string"
+              },
+              "message": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "timestamp": {
+                "type": "string",
+                "format": "date-time"
+              }
+            }
+          },
+          "artifacts": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          },
+          "history": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          },
+          "metadata": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        }
+      },
+      "A2ATask": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "Content-free remote task metadata.",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "project_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "api_key_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "publication_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "revision_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "active",
+              "completed",
+              "failed",
+              "canceled",
+              "outcome_unknown"
+            ]
+          },
+          "callback_attempts": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0,
+            "description": "Admitted callbacks, or null for tasks created before callback counts were recorded."
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "deadline_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "agent_principal_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "member_principal_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "delegation_pair_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Stable, project-scoped pair identifier, or null for an undelegated task."
+          }
+        },
+        "required": [
+          "id",
+          "project_id",
+          "api_key_id",
+          "publication_id",
+          "revision_id",
+          "state",
+          "callback_attempts",
+          "created_at",
+          "deadline_at",
+          "agent_principal_id",
+          "member_principal_id",
+          "delegation_pair_id"
+        ]
+      },
+      "A2ATaskRemoteFee": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "A remote message fee and its unresolved exposure.",
+        "properties": {
+          "dispatch_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "run_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "state": {
+            "type": "string"
+          },
+          "currency": {
+            "type": "string"
+          },
+          "observed_cost": {
+            "type": "string"
+          },
+          "observed_charge": {
+            "type": "string"
+          },
+          "remaining_cost": {
+            "type": "string"
+          },
+          "remaining_charge": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "dispatch_id",
+          "run_id",
+          "state",
+          "currency",
+          "observed_cost",
+          "observed_charge",
+          "remaining_cost",
+          "remaining_charge",
+          "created_at"
+        ]
+      },
+      "A2ATaskDetail": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "Content-free task and associated remote message fees.",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "project_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "api_key_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "publication_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "revision_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "active",
+              "completed",
+              "failed",
+              "canceled",
+              "outcome_unknown"
+            ]
+          },
+          "callback_attempts": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0,
+            "description": "Admitted callbacks, or null for tasks created before callback counts were recorded."
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "deadline_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "remote_fees": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/A2ATaskRemoteFee"
+            }
+          },
+          "agent_principal_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "member_principal_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "delegation_pair_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Stable, project-scoped pair identifier, or null for an undelegated task."
+          },
+          "callback_models": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/A2ATaskModelCallback"
+            }
+          },
+          "callback_tools": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/A2ATaskToolCallback"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "project_id",
+          "api_key_id",
+          "publication_id",
+          "revision_id",
+          "state",
+          "callback_attempts",
+          "created_at",
+          "deadline_at",
+          "remote_fees",
+          "agent_principal_id",
+          "member_principal_id",
+          "delegation_pair_id",
+          "callback_models",
+          "callback_tools"
+        ]
+      },
+      "A2ATaskList": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/A2ATask"
+            },
+            "maxItems": 200
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "items",
+          "next_cursor"
+        ]
+      },
+      "AgentDelegation": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "Content-free delegation principals, revocation and pair budget.",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "project_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "api_key_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "agent_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "member_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "consent_pending": {
+            "type": "boolean"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "consumed_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "revoked_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "api_key_revoked_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "agent_revoked_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "budget_policy": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BudgetPolicy"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "budget": {
+            "$ref": "#/components/schemas/AggregateBudgetUsage"
+          },
+          "member_authorized": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Current authority of the consenting member, or null for key delegation."
+          }
+        },
+        "required": [
+          "id",
+          "project_id",
+          "api_key_id",
+          "agent_id",
+          "member_id",
+          "consent_pending",
+          "expires_at",
+          "consumed_at",
+          "revoked_at",
+          "api_key_revoked_at",
+          "agent_revoked_at",
+          "budget_policy",
+          "budget",
+          "member_authorized"
+        ]
+      },
+      "AgentDelegationList": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AgentDelegation"
+            },
+            "maxItems": 200
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "items",
+          "next_cursor"
+        ]
+      },
+      "A2ATaskModelCallback": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "Content-free callback accounting; null amounts are unknown.",
+        "properties": {
+          "request_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "attempt_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "not_billable",
+              "outcome_unknown",
+              "unpriced",
+              "uncharged",
+              "free",
+              "priced"
+            ]
+          },
+          "currency": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "observed_cost": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "observed_charge": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "remaining_cost": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "remaining_charge": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "request_id",
+          "attempt_id",
+          "state",
+          "currency",
+          "observed_cost",
+          "observed_charge",
+          "remaining_cost",
+          "remaining_charge"
+        ]
+      },
+      "A2ATaskToolCallback": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "Content-free callback accounting; null amounts are unknown.",
+        "properties": {
+          "dispatch_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "run_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "state": {
+            "type": "string"
+          },
+          "pricing_state": {
+            "type": "string",
+            "enum": [
+              "priced",
+              "free",
+              "unpriced",
+              "unknown"
+            ]
+          },
+          "currency": {
+            "type": "string"
+          },
+          "observed_cost": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "observed_charge": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "remaining_cost": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "remaining_charge": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "dispatch_id",
+          "run_id",
+          "state",
+          "pricing_state",
+          "currency",
+          "observed_cost",
+          "observed_charge",
+          "remaining_cost",
+          "remaining_charge"
+        ]
+      },
+      "ObservabilityRunEvidence": {
+        "type": "object",
+        "description": "Gateway-observed run metadata exported by an observability sink.",
+        "additionalProperties": false,
+        "properties": {
+          "run_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "project_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "route_revision_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "agent_revision_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "evidence_origin": {
+            "type": "string",
+            "enum": [
+              "gateway_observed"
+            ]
+          }
+        },
+        "required": [
+          "run_id",
+          "project_id",
+          "route_revision_id",
+          "agent_revision_id",
+          "created_at",
+          "evidence_origin"
+        ]
+      },
+      "ObservabilityTraceSpanEvidence": {
+        "type": "object",
+        "description": "Client-asserted trace span metadata exported by an observability sink.",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "project_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "trace_id": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{32}$"
+          },
+          "span_id": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{16}$"
+          },
+          "parent_span_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[0-9a-f]{16}$"
+          },
+          "run_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "attempt_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "started_nanos": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "ended_nanos": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "category": {
+            "type": "string",
+            "enum": [
+              "chat",
+              "embeddings",
+              "text_completion",
+              "execute_tool",
+              "invoke_agent",
+              "create_agent",
+              "other"
+            ]
+          },
+          "status": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 2
+          },
+          "attributes": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "gen_ai.usage.input_tokens": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "gen_ai.usage.output_tokens": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "http.response.status_code": {
+                "type": "integer",
+                "minimum": 100,
+                "maximum": 599
+              }
+            }
+          },
+          "evidence_origin": {
+            "type": "string",
+            "enum": [
+              "client_asserted"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "project_id",
+          "trace_id",
+          "span_id",
+          "parent_span_id",
+          "run_id",
+          "attempt_id",
+          "started_nanos",
+          "ended_nanos",
+          "category",
+          "status",
+          "attributes",
+          "evidence_origin"
+        ]
+      },
+      "ManagedRunEvidence": {
+        "type": "object",
+        "description": "Gateway-observed run metadata exported by a managed sink.",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "project_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "api_key_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "evidence_origin": {
+            "type": "string",
+            "enum": [
+              "gateway_observed"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "project_id",
+          "api_key_id",
+          "created_at",
+          "evidence_origin"
+        ]
+      },
+      "ManagedTraceSpanEvidence": {
+        "type": "object",
+        "description": "Client-asserted trace span metadata exported by a managed sink. Nanosecond timestamps are decimal strings.",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "project_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "trace_id": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{32}$"
+          },
+          "span_id": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{16}$"
+          },
+          "parent_span_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[0-9a-f]{16}$"
+          },
+          "run_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "attempt_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "started_nanos": {
+            "type": "string",
+            "pattern": "^[0-9]+$"
+          },
+          "ended_nanos": {
+            "type": "string",
+            "pattern": "^[0-9]+$"
+          },
+          "category": {
+            "type": "string",
+            "enum": [
+              "chat",
+              "embeddings",
+              "text_completion",
+              "execute_tool",
+              "invoke_agent",
+              "create_agent",
+              "other"
+            ]
+          },
+          "status": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 2
+          },
+          "attributes": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "gen_ai.usage.input_tokens": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "gen_ai.usage.output_tokens": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "http.response.status_code": {
+                "type": "integer",
+                "minimum": 100,
+                "maximum": 599
+              }
+            }
+          },
+          "evidence_origin": {
+            "type": "string",
+            "enum": [
+              "client_asserted"
+            ]
+          },
+          "api_key_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "received_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "project_id",
+          "trace_id",
+          "span_id",
+          "parent_span_id",
+          "run_id",
+          "attempt_id",
+          "started_nanos",
+          "ended_nanos",
+          "category",
+          "status",
+          "attributes",
+          "evidence_origin",
+          "api_key_id",
+          "received_at"
+        ]
+      },
+      "ObservabilityRunEvidenceEvent": {
+        "type": "object",
+        "description": "Observability sink evidence envelope. The same object appears as a JSONL line or an OTLP log body.",
+        "additionalProperties": false,
+        "properties": {
+          "version": {
+            "type": "integer",
+            "enum": [
+              1
+            ]
+          },
+          "event_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "stream": {
+            "type": "string",
+            "enum": [
+              "runs"
+            ]
+          },
+          "source_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "project_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "route": {
+            "type": "string"
+          },
+          "outcome": {
+            "type": "string"
+          },
+          "occurred_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "data": {
+            "$ref": "#/components/schemas/ObservabilityRunEvidence"
+          }
+        },
+        "required": [
+          "version",
+          "event_id",
+          "stream",
+          "source_id",
+          "project_id",
+          "route",
+          "outcome",
+          "occurred_at",
+          "data"
+        ]
+      },
+      "ObservabilityTraceSpanEvidenceEvent": {
+        "type": "object",
+        "description": "Observability sink evidence envelope. The same object appears as a JSONL line or an OTLP log body.",
+        "additionalProperties": false,
+        "properties": {
+          "version": {
+            "type": "integer",
+            "enum": [
+              1
+            ]
+          },
+          "event_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "stream": {
+            "type": "string",
+            "enum": [
+              "trace_spans"
+            ]
+          },
+          "source_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "project_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "route": {
+            "type": "string"
+          },
+          "outcome": {
+            "type": "string"
+          },
+          "occurred_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "data": {
+            "$ref": "#/components/schemas/ObservabilityTraceSpanEvidence"
+          }
+        },
+        "required": [
+          "version",
+          "event_id",
+          "stream",
+          "source_id",
+          "project_id",
+          "route",
+          "outcome",
+          "occurred_at",
+          "data"
+        ]
+      },
+      "ManagedRunEvidenceEvent": {
+        "type": "object",
+        "description": "Managed sink evidence envelope.",
+        "additionalProperties": false,
+        "properties": {
+          "version": {
+            "type": "integer",
+            "enum": [
+              1
+            ]
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "stream": {
+            "type": "string",
+            "enum": [
+              "runs"
+            ]
+          },
+          "occurred_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "data": {
+            "$ref": "#/components/schemas/ManagedRunEvidence"
+          }
+        },
+        "required": [
+          "version",
+          "id",
+          "stream",
+          "occurred_at",
+          "data"
+        ]
+      },
+      "ManagedTraceSpanEvidenceEvent": {
+        "type": "object",
+        "description": "Managed sink evidence envelope.",
+        "additionalProperties": false,
+        "properties": {
+          "version": {
+            "type": "integer",
+            "enum": [
+              1
+            ]
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "stream": {
+            "type": "string",
+            "enum": [
+              "trace_spans"
+            ]
+          },
+          "occurred_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "data": {
+            "$ref": "#/components/schemas/ManagedTraceSpanEvidence"
+          }
+        },
+        "required": [
+          "version",
+          "id",
+          "stream",
+          "occurred_at",
+          "data"
+        ]
       }
     },
     "securitySchemes": {
@@ -58169,7 +59834,7 @@
           "export-sinks"
         ],
         "summary": "create sink",
-        "description": "Manage a content-free export sink through ordinary scope authority, ETags, idempotency and audit.",
+        "description": "Manage a content-free export sink through ordinary scope authority, ETags, idempotency and audit. The managed.runs and managed.trace_spans webhooks describe the corresponding evidence envelopes.",
         "security": [
           {
             "csrfToken": [],
@@ -60008,7 +61673,8 @@
         ],
         "tags": [
           "observability"
-        ]
+        ],
+        "description": "Create an observability sink. The observability.runs and observability.trace_spans webhooks describe the corresponding evidence envelopes."
       }
     },
     "/api/v1/observability/sinks/{export_sink_id}": {
@@ -66982,6 +68648,789 @@
           }
         ]
       }
+    },
+    "/api/v1/agent-runs": {
+      "get": {
+        "operationId": "list_agent_runs",
+        "tags": [
+          "agents"
+        ],
+        "summary": "List gateway runs",
+        "description": "Content-free metadata visible only to callers with current access to the run project.",
+        "security": [
+          {
+            "sessionCookie": [
+              "read"
+            ]
+          },
+          {
+            "managementToken": [
+              "read"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "description": "Opaque cursor returned by the previous page.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Page size, from 1 to 200. Defaults to 50.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "format": "int32",
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "name": "project_id",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List gateway runs",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentRunList"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "404": {
+            "description": "Not visible"
+          },
+          "422": {
+            "description": "Invalid request"
+          }
+        }
+      }
+    },
+    "/api/v1/agent-runs/{run_id}": {
+      "get": {
+        "operationId": "get_agent_run",
+        "tags": [
+          "agents"
+        ],
+        "summary": "Get a gateway run",
+        "description": "Content-free metadata visible only to callers with current access to the run project.",
+        "security": [
+          {
+            "sessionCookie": [
+              "read"
+            ]
+          },
+          {
+            "managementToken": [
+              "read"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Get a gateway run",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentRunDetail"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "404": {
+            "description": "Not visible"
+          },
+          "422": {
+            "description": "Invalid request"
+          }
+        }
+      }
+    },
+    "/api/v1/agent-runs/{run_id}/spans": {
+      "get": {
+        "operationId": "list_agent_run_spans",
+        "tags": [
+          "agents"
+        ],
+        "summary": "List correlated run spans",
+        "description": "Content-free metadata visible only to callers with current access to the run project.",
+        "security": [
+          {
+            "sessionCookie": [
+              "read"
+            ]
+          },
+          {
+            "managementToken": [
+              "read"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "span_id",
+            "in": "query",
+            "required": false,
+            "description": "Return only the referenced internal span UUID within this run.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "description": "Opaque cursor returned by the previous page.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Page size, from 1 to 200. Defaults to 50.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "format": "int32",
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List correlated run spans",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentRunSpanList"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "404": {
+            "description": "Not visible"
+          },
+          "422": {
+            "description": "Invalid request"
+          }
+        }
+      }
+    },
+    "/api/v1/investigations": {
+      "get": {
+        "operationId": "list_investigations",
+        "tags": [
+          "agents"
+        ],
+        "summary": "List investigations",
+        "description": "Investigations visible to callers with current access to the project.",
+        "security": [
+          {
+            "sessionCookie": [
+              "read"
+            ]
+          },
+          {
+            "managementToken": [
+              "read"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "description": "Opaque cursor returned by the previous page.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Page size, from 1 to 200. Defaults to 50.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "format": "int32",
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "name": "project_id",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Investigations",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InvestigationList"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "404": {
+            "description": "Not visible"
+          },
+          "422": {
+            "description": "Invalid request"
+          }
+        }
+      },
+      "post": {
+        "operationId": "create_investigation",
+        "tags": [
+          "agents"
+        ],
+        "summary": "Save an investigation",
+        "description": "Store typed filters, bounded evidence references and an operator-authored summary. Source payloads are not accepted.",
+        "security": [
+          {
+            "sessionCookie": [
+              "configure"
+            ],
+            "csrfToken": []
+          },
+          {
+            "managementToken": [
+              "configure"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Investigation saved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Investigation"
+                }
+              }
+            },
+            "headers": {
+              "Location": {
+                "description": "Path of the investigation",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid JSON or unsupported fields"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Outside caller authority"
+          },
+          "404": {
+            "description": "Not visible"
+          },
+          "409": {
+            "description": "Idempotency key conflict"
+          },
+          "422": {
+            "description": "Invalid investigation, filters or evidence references"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InvestigationWrite"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/investigations/{investigation_id}": {
+      "get": {
+        "operationId": "get_investigation",
+        "tags": [
+          "agents"
+        ],
+        "summary": "Get an investigation",
+        "description": "Requires current project access; referenced evidence is accessed separately under its own current authority check.",
+        "security": [
+          {
+            "sessionCookie": [
+              "read"
+            ]
+          },
+          {
+            "managementToken": [
+              "read"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "investigation_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Investigation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Investigation"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "404": {
+            "description": "Not visible"
+          },
+          "422": {
+            "description": "Invalid request"
+          }
+        }
+      }
+    },
+    "/api/v1/a2a-tasks/{task_id}/remote": {
+      "get": {
+        "operationId": "get_a2a_task_remote",
+        "description": "Retrieve the task from its pinned remote agent. Requires project change permission and uses the task’s original credential binding.",
+        "parameters": [
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "description": "OLP task ID",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Remote task using OLP task and context IDs",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/A2ARemoteTask"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Project change permission required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Task not found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "The pinned remote agent or its original credential is unavailable",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": [
+              "configure"
+            ]
+          },
+          {
+            "managementToken": [
+              "configure"
+            ]
+          }
+        ],
+        "tags": [
+          "a2a-tasks"
+        ]
+      }
+    },
+    "/api/v1/a2a-tasks/{task_id}/cancel": {
+      "post": {
+        "operationId": "cancel_a2a_task_remote",
+        "description": "Cancel the task on its pinned remote agent. Requires project change permission and uses the task’s original credential binding.",
+        "parameters": [
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "description": "OLP task ID",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Remote task using OLP task and context IDs",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/A2ARemoteTask"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Project change permission required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Task not found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "The pinned remote agent or its original credential is unavailable",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "csrfToken": [],
+            "sessionCookie": [
+              "configure"
+            ]
+          },
+          {
+            "managementToken": [
+              "configure"
+            ]
+          }
+        ],
+        "tags": [
+          "a2a-tasks"
+        ]
+      }
+    },
+    "/api/v1/a2a-tasks": {
+      "get": {
+        "operationId": "list_a2a_tasks",
+        "tags": [
+          "agents"
+        ],
+        "summary": "List A2A tasks",
+        "description": "Content-free metadata visible only to callers with current access to the project.",
+        "security": [
+          {
+            "sessionCookie": [
+              "read"
+            ]
+          },
+          {
+            "managementToken": [
+              "read"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "description": "Opaque cursor returned by the previous page.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Page size, from 1 to 200. Defaults to 50.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "format": "int32",
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "name": "project_id",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List A2A tasks",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/A2ATaskList"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "404": {
+            "description": "Not visible"
+          },
+          "422": {
+            "description": "Invalid request"
+          }
+        }
+      }
+    },
+    "/api/v1/a2a-tasks/{task_id}": {
+      "get": {
+        "operationId": "get_a2a_task",
+        "tags": [
+          "agents"
+        ],
+        "summary": "Get an A2A task",
+        "description": "Content-free metadata visible only to callers with current access to the project.",
+        "security": [
+          {
+            "sessionCookie": [
+              "read"
+            ]
+          },
+          {
+            "managementToken": [
+              "read"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Get an A2A task",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/A2ATaskDetail"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "404": {
+            "description": "Not visible"
+          },
+          "422": {
+            "description": "Invalid request"
+          }
+        }
+      }
+    },
+    "/api/v1/agent-delegations": {
+      "get": {
+        "operationId": "list_agent_delegations",
+        "tags": [
+          "agents"
+        ],
+        "summary": "List delegations",
+        "description": "Content-free metadata visible only to callers with current access to the project.",
+        "security": [
+          {
+            "sessionCookie": [
+              "read"
+            ]
+          },
+          {
+            "managementToken": [
+              "read"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "description": "Opaque cursor returned by the previous page.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Page size, from 1 to 200. Defaults to 50.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "format": "int32",
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "name": "project_id",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "delegation_id",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List delegations",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentDelegationList"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "404": {
+            "description": "Not visible"
+          },
+          "422": {
+            "description": "Invalid request"
+          }
+        }
+      }
     }
   },
   "webhooks": {
@@ -67091,6 +69540,102 @@
         "tags": [
           "notifications"
         ]
+      }
+    },
+    "observability.runs": {
+      "post": {
+        "summary": "Observability run evidence",
+        "operationId": "observability_run_evidence_webhook",
+        "tags": [
+          "observability"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ObservabilityRunEvidenceEvent"
+              }
+            }
+          }
+        },
+        "responses": {
+          "2XX": {
+            "description": "The destination accepted the delivery."
+          }
+        }
+      }
+    },
+    "observability.trace_spans": {
+      "post": {
+        "summary": "Observability trace span evidence",
+        "operationId": "observability_trace_span_evidence_webhook",
+        "tags": [
+          "observability"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ObservabilityTraceSpanEvidenceEvent"
+              }
+            }
+          }
+        },
+        "responses": {
+          "2XX": {
+            "description": "The destination accepted the delivery."
+          }
+        }
+      }
+    },
+    "managed.runs": {
+      "post": {
+        "summary": "Managed sink run evidence",
+        "operationId": "managed_run_evidence_webhook",
+        "tags": [
+          "export-sinks"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ManagedRunEvidenceEvent"
+              }
+            }
+          }
+        },
+        "responses": {
+          "2XX": {
+            "description": "The destination accepted the delivery."
+          }
+        }
+      }
+    },
+    "managed.trace_spans": {
+      "post": {
+        "summary": "Managed sink trace span evidence",
+        "operationId": "managed_trace_span_evidence_webhook",
+        "tags": [
+          "export-sinks"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ManagedTraceSpanEvidenceEvent"
+              }
+            }
+          }
+        },
+        "responses": {
+          "2XX": {
+            "description": "The destination accepted the delivery."
+          }
+        }
       }
     }
   }

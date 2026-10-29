@@ -126,7 +126,7 @@ func (l *Ledger) findTask(ctx context.Context, authority access.Authority, publi
 		return task{}, pgx.ErrNoRows
 	}
 	var found task
-	if err := l.Pool.QueryRow(ctx, `SELECT id::text,upstream_id,upstream_context_id,revision_id::text,COALESCE(oauth_binding_digest,'') FROM olp.a2a_tasks WHERE id=$1 AND api_key_id=$2 AND project_id=$3 AND publication_id=$4`, rawID, authority.ID, *authority.ProjectID, publicationID).Scan(&found.ID, &found.UpstreamID, &found.ContextID, &found.RevisionID, &found.Binding); err != nil {
+	if err := l.Pool.QueryRow(ctx, `SELECT id::text,upstream_id,upstream_context_id,revision_id::text,COALESCE(oauth_binding_digest,'') FROM olp.a2a_tasks WHERE id=$1 AND project_id=$3 AND publication_id=$4 AND (($5='' AND api_key_id=$2 AND delegation_pair_digest='') OR ($5<>'' AND delegation_pair_digest=$5))`, rawID, authority.ID, *authority.ProjectID, publicationID, authority.DelegationPairDigest).Scan(&found.ID, &found.UpstreamID, &found.ContextID, &found.RevisionID, &found.Binding); err != nil {
 		return task{}, err
 	}
 	return found, nil
@@ -155,7 +155,7 @@ func (l *Ledger) settle(ctx context.Context, res reservation, authority access.A
 		return "", err
 	}
 	if taskID != "" {
-		if _, err := tx.Exec(ctx, `UPDATE olp.a2a_tasks SET continuations=continuations+(SELECT callback_attempts FROM olp.a2a_task_admissions WHERE dispatch_id=$1 AND task_id IS NULL) WHERE id=$2 AND EXISTS(SELECT 1 FROM olp.a2a_task_admissions WHERE dispatch_id=$1 AND task_id IS NULL)`, res.DispatchID, taskID); err != nil {
+		if _, err := tx.Exec(ctx, `UPDATE olp.a2a_tasks t SET continuations=t.continuations+a.callback_attempts,callback_attempts=t.callback_attempts+a.callback_attempts FROM olp.a2a_task_admissions a WHERE a.dispatch_id=$1 AND a.task_id IS NULL AND t.id=$2`, res.DispatchID, taskID); err != nil {
 			return "", err
 		}
 		if _, err := tx.Exec(ctx, `UPDATE olp.a2a_task_capabilities SET task_id=$2 WHERE dispatch_id=$1`, res.DispatchID, taskID); err != nil {
@@ -186,11 +186,11 @@ func settleTask(ctx context.Context, tx pgx.Tx, res reservation, authority acces
 	if err != nil {
 		return "", err
 	}
-	if _, err := tx.Exec(ctx, `INSERT INTO olp.a2a_tasks(id,api_key_id,project_id,publication_id,revision_id,dispatch_id,upstream_id,upstream_context_id,deadline_at,caller_workload_revision_id,caller_expires_at,state,oauth_binding_digest) VALUES($1,$2,$3,$4,$5,$6,$7,$8,(SELECT created_at FROM olp.a2a_task_admissions WHERE dispatch_id=$6)+$9*interval '1 second',NULLIF($10,'')::uuid,$11,$12,NULLIF($13,'')) ON CONFLICT(api_key_id,project_id,publication_id,upstream_id) DO NOTHING`, id, authority.ID, *authority.ProjectID, revision.PublicationID, revision.ID, res.DispatchID, upstreamID, contextID, taskDeadlineSeconds(revision.Definition.Agent), authority.WorkloadRevision, authority.ExpiresAt, state, binding); err != nil {
+	if _, err := tx.Exec(ctx, `INSERT INTO olp.a2a_tasks(id,api_key_id,project_id,publication_id,revision_id,dispatch_id,upstream_id,upstream_context_id,deadline_at,caller_workload_revision_id,caller_expires_at,state,oauth_binding_digest,delegation_pair_digest,delegation_agent_id,delegation_member_id,delegation_token_digest) VALUES($1,$2,$3,$4,$5,$6,$7,$8,(SELECT created_at FROM olp.a2a_task_admissions WHERE dispatch_id=$6)+$9*interval '1 second',NULLIF($10,'')::uuid,$11,$12,NULLIF($13,''),$14,NULLIF($15,'')::uuid,NULLIF($16,'')::uuid,$17) ON CONFLICT DO NOTHING`, id, authority.ID, *authority.ProjectID, revision.PublicationID, revision.ID, res.DispatchID, upstreamID, contextID, taskDeadlineSeconds(revision.Definition.Agent), authority.WorkloadRevision, authority.ExpiresAt, state, binding, authority.DelegationPairDigest, authority.DelegationAgentID, authority.DelegationMemberID, authority.DelegationTokenDigest); err != nil {
 		return "", err
 	}
 	var publicID, pinned, taskDispatch, expected, storedBinding string
-	if err := tx.QueryRow(ctx, `SELECT t.id::text,t.revision_id::text,t.dispatch_id::text,COALESCE(a.task_id::text,''),COALESCE(t.oauth_binding_digest,'') FROM olp.a2a_tasks t JOIN olp.a2a_task_admissions a ON a.dispatch_id=$5 WHERE t.api_key_id=$1 AND t.project_id=$2 AND t.publication_id=$3 AND t.upstream_id=$4`, authority.ID, *authority.ProjectID, revision.PublicationID, upstreamID, res.DispatchID).Scan(&publicID, &pinned, &taskDispatch, &expected, &storedBinding); err != nil {
+	if err := tx.QueryRow(ctx, `SELECT t.id::text,t.revision_id::text,t.dispatch_id::text,COALESCE(a.task_id::text,''),COALESCE(t.oauth_binding_digest,'') FROM olp.a2a_tasks t JOIN olp.a2a_task_admissions a ON a.dispatch_id=$5 WHERE t.project_id=$2 AND t.publication_id=$3 AND t.upstream_id=$4 AND (($6='' AND t.api_key_id=$1 AND t.delegation_pair_digest='') OR ($6<>'' AND t.delegation_pair_digest=$6))`, authority.ID, *authority.ProjectID, revision.PublicationID, upstreamID, res.DispatchID, authority.DelegationPairDigest).Scan(&publicID, &pinned, &taskDispatch, &expected, &storedBinding); err != nil {
 		return "", err
 	}
 	if pinned != revision.ID || storedBinding != binding || expected == "" && taskDispatch != res.DispatchID || expected != "" && expected != publicID {

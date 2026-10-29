@@ -17,21 +17,69 @@ import (
 
 var errTaskLimit = errors.New("agent task limit reached")
 
-func (l *Ledger) admitRate(ctx context.Context, authority access.Authority) error {
+func (l *Ledger) admitRate(ctx context.Context, authority access.Authority) ([]*limits.Lease, error) {
 	if l == nil || l.Store == nil || l.Store.Limiter == nil {
-		return limits.ErrDebitAuthority
+		return nil, limits.ErrDebitAuthority
 	}
 	rate := int64(60)
-	lease, err := l.Store.Limiter.Reserve(ctx, limits.Request{
-		LookupID:          "a2a_" + strings.ReplaceAll(authority.ID, "-", ""),
-		CostOwnerID:       authority.ID,
-		RequestsPerMinute: &rate,
-		LeaseTTL:          time.Minute,
-	})
-	if err != nil {
-		return err
+	ttl := time.Hour + time.Minute
+	requests := []limits.Request{
+		{LookupID: "a2a_" + strings.ReplaceAll(authority.ID, "-", ""), CostOwnerID: authority.ID, RequestsPerMinute: &rate, LeaseTTL: ttl},
+		{LookupID: authority.LimitsLookup(), CostOwnerID: authority.ID, RequestsPerMinute: authority.Policy.RequestsPerMinute, MaxConcurrency: authority.Policy.MaxConcurrency, LeaseTTL: ttl},
 	}
-	return lease.Release(ctx)
+	if agent := authority.DelegationAgentLimits; agent != nil {
+		requests = append(requests, limits.Request{LookupID: agent.LookupID, CostOwnerID: agent.ID, RequestsPerMinute: agent.Limits.RequestsPerMinute, MaxConcurrency: agent.Limits.MaxConcurrency, LeaseTTL: ttl})
+	}
+	if authority.BudgetGroupID != nil {
+		requests = append(requests, limits.Request{LookupID: limits.BudgetGroupLookup(*authority.BudgetGroupID), CostOwnerID: *authority.BudgetGroupID, RequestsPerMinute: authority.BudgetGroupRPM, MaxConcurrency: authority.BudgetGroupConcurrency, LeaseTTL: ttl})
+	}
+	merged := make([]limits.Request, 0, len(requests))
+	for _, request := range requests {
+		if !request.HasRateLimits() {
+			continue
+		}
+		found := false
+		for i := range merged {
+			if merged[i].LookupID == request.LookupID {
+				merged[i].RequestsPerMinute = lowerLimit(merged[i].RequestsPerMinute, request.RequestsPerMinute)
+				merged[i].MaxConcurrency = lowerLimit(merged[i].MaxConcurrency, request.MaxConcurrency)
+				found = true
+				break
+			}
+		}
+		if !found {
+			merged = append(merged, request)
+		}
+	}
+	leases := make([]*limits.Lease, 0, len(merged))
+	for _, request := range merged {
+		lease, err := l.Store.Limiter.Reserve(ctx, request)
+		if err != nil {
+			finishRate(ctx, leases, false)
+			return nil, err
+		}
+		if lease != nil {
+			leases = append(leases, lease)
+		}
+	}
+	return leases, nil
+}
+
+func lowerLimit(a, b *int64) *int64 {
+	if a == nil || b != nil && *b < *a {
+		return b
+	}
+	return a
+}
+
+func finishRate(ctx context.Context, leases []*limits.Lease, dispatched bool) {
+	for _, lease := range leases {
+		if dispatched {
+			_ = lease.Release(context.WithoutCancel(ctx))
+		} else {
+			_ = lease.Refund(context.WithoutCancel(ctx))
+		}
+	}
 }
 
 func maxTaskContinuations(definition *agentcontract.Definition) int {
@@ -72,7 +120,7 @@ func (l *Ledger) admitTask(ctx context.Context, res reservation, authority acces
 			return "", errTaskLimit
 		}
 	} else {
-		tag, err := tx.Exec(ctx, `UPDATE olp.a2a_tasks SET continuations=continuations+1 WHERE id=$1 AND api_key_id=$2 AND state='active' AND deadline_at>now() AND continuations<$3`, taskID, authority.ID, maxTaskContinuations(definition))
+		tag, err := tx.Exec(ctx, `UPDATE olp.a2a_tasks SET continuations=continuations+1 WHERE id=$1 AND (($4='' AND api_key_id=$2 AND delegation_pair_digest='') OR ($4<>'' AND delegation_pair_digest=$4)) AND state='active' AND deadline_at>now() AND continuations<$3`, taskID, authority.ID, maxTaskContinuations(definition), authority.DelegationPairDigest)
 		if err != nil {
 			return "", err
 		}

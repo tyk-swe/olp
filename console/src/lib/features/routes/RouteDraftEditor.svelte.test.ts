@@ -2,6 +2,7 @@ import { flushSync, mount, unmount } from 'svelte';
 import { QueryClient } from '@tanstack/svelte-query';
 import { expect, it, onTestFinished, vi } from 'vitest';
 import { ApiProblem } from '$lib/api/http';
+import { goto } from '$app/navigation';
 import * as routes from './api';
 import * as agents from '$lib/features/agents/api';
 import * as models from '$lib/features/providers/api/models';
@@ -10,7 +11,11 @@ import RouteDraftEditorProbe from './test/RouteDraftEditorProbe.svelte';
 vi.mock('./api', async (original) => ({
   ...(await original<typeof import('./api')>()),
   getRouteDraft: vi.fn(),
+  deleteRouteDraft: vi.fn(),
   replaceRouteDraft: vi.fn(),
+  simulateRoute: vi.fn(),
+  validateRoute: vi.fn(),
+  activateRoute: vi.fn(),
   getRoutingPolicy: vi.fn()
 }));
 vi.mock('$lib/features/agents/api', async (original) => ({
@@ -20,6 +25,10 @@ vi.mock('$lib/features/agents/api', async (original) => ({
 vi.mock('$lib/features/providers/api/models', async (original) => ({
   ...(await original<typeof import('$lib/features/providers/api/models')>()),
   listProviderModelInventory: vi.fn()
+}));
+vi.mock('$app/navigation', async (original) => ({
+  ...(await original<typeof import('$app/navigation')>()),
+  goto: vi.fn()
 }));
 vi.mock('$lib/features/access/session/useRole.svelte', () => ({
   useRole: () => ({
@@ -312,4 +321,322 @@ it('keeps unsaved route edits after a conflict until the user reloads', async ()
       'updated-by-another-user'
     )
   );
+});
+
+it('discards a route simulation after the user edits the draft', async () => {
+  vi.clearAllMocks();
+  const route = { ...buildRoute([]), tool_execution: '' as const };
+  vi.mocked(routes.getRouteDraft).mockResolvedValue(route);
+  vi.mocked(routes.getRoutingPolicy).mockRejectedValue(
+    new Error('No route policy')
+  );
+  vi.mocked(models.listProviderModelInventory).mockResolvedValue([]);
+  vi.mocked(agents.listPublications).mockResolvedValue([]);
+  const pending = Promise.withResolvers<routes.RouteSimulation>();
+  vi.mocked(routes.simulateRoute).mockImplementation(async (id) => {
+    expect(id).toBe(route.id);
+    return pending.promise;
+  });
+  const host = document.createElement('div');
+  document.body.append(host);
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false } }
+  });
+  const component = mount(RouteDraftEditorProbe, {
+    target: host,
+    props: { client }
+  });
+  onTestFinished(async () => {
+    await unmount(component);
+    client.clear();
+    host.remove();
+  });
+  const button = (name: string) =>
+    [...host.querySelectorAll<HTMLButtonElement>('button')].find(
+      (item) => item.textContent?.trim() === name
+    );
+  await vi.waitFor(() =>
+    expect(button('Simulate order')?.disabled).toBe(false)
+  );
+  button('Simulate order')!.click();
+  await vi.waitFor(() => expect(host.textContent).toContain('Simulating…'));
+  const slug = host.querySelector<HTMLInputElement>('#route-slug')!;
+  slug.value = 'changed-route';
+  slug.dispatchEvent(new Event('input', { bubbles: true }));
+  pending.resolve({
+    deterministic_seed: 'old-plan',
+    mode: 'weighted',
+    operation: 'generation',
+    surface: 'openai',
+    targets: [],
+    selectors: [],
+    affinity: null,
+    legs: [],
+    fallbacks: []
+  });
+  await vi.waitFor(() => expect(host.textContent).not.toContain('Simulating…'));
+  expect(host.textContent).not.toContain('old-plan');
+  expect(button('Simulate order')?.disabled).toBe(true);
+  expect(button('Activate route')?.disabled).toBe(true);
+});
+
+it('validates and activates the saved route with the current revision', async () => {
+  vi.clearAllMocks();
+  const route = { ...buildRoute([]), tool_execution: '' as const };
+  const validated = { ...route, state: 'validated', etag: 'validated-etag' };
+  vi.mocked(routes.getRouteDraft).mockResolvedValue(route);
+  vi.mocked(routes.getRoutingPolicy).mockRejectedValue(
+    new Error('No route policy')
+  );
+  vi.mocked(models.listProviderModelInventory).mockResolvedValue([]);
+  vi.mocked(agents.listPublications).mockResolvedValue([]);
+  vi.mocked(routes.validateRoute).mockImplementation(async (current) => {
+    expect(current.id).toBe(route.id);
+    expect(current.etag).toBe(route.etag);
+    return validated;
+  });
+  vi.mocked(routes.activateRoute).mockImplementation(async (current) => {
+    expect(current.id).toBe(route.id);
+    expect(current.etag).toBe(validated.etag);
+    return {
+      route_id: route.id,
+      revision_id: 'revision',
+      revision: 7,
+      draft_etag: 'new-etag',
+      runtime_generation: { id: 'generation', sequence: 12 }
+    };
+  });
+  const host = document.createElement('div');
+  document.body.append(host);
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false } }
+  });
+  const component = mount(RouteDraftEditorProbe, {
+    target: host,
+    props: { client }
+  });
+  onTestFinished(async () => {
+    await unmount(component);
+    client.clear();
+    host.remove();
+  });
+  const button = (name: string) =>
+    [...host.querySelectorAll<HTMLButtonElement>('button')].find(
+      (item) => item.textContent?.trim() === name
+    );
+  await vi.waitFor(() =>
+    expect(button('Validate draft')?.disabled).toBe(false)
+  );
+  button('Validate draft')!.click();
+  await vi.waitFor(() =>
+    expect(host.textContent).toContain('Validation passed')
+  );
+  vi.mocked(routes.getRouteDraft).mockResolvedValue({
+    ...route,
+    etag: 'new-etag'
+  });
+  button('Activate route')!.click();
+  await vi.waitFor(() =>
+    expect(host.textContent).toContain('Revision 7 active')
+  );
+  expect(host.textContent).toContain('Runtime generation 12');
+  expect(
+    host.querySelector<HTMLAnchorElement>('.activation a')?.getAttribute('href')
+  ).toContain('/routes/route/revisions');
+});
+
+it('validates a native simulation request and displays a successful preview', async () => {
+  vi.clearAllMocks();
+  const route = { ...buildRoute([]), tool_execution: '' as const };
+  vi.mocked(routes.getRouteDraft).mockResolvedValue(route);
+  vi.mocked(routes.getRoutingPolicy).mockRejectedValue(
+    new Error('No route policy')
+  );
+  vi.mocked(models.listProviderModelInventory).mockResolvedValue([]);
+  vi.mocked(agents.listPublications).mockResolvedValue([]);
+  vi.mocked(routes.simulateRoute).mockImplementation(async (id, input) => {
+    expect(id).toBe(route.id);
+    expect(input).toMatchObject({
+      operation: 'generation',
+      surface: 'openai',
+      mode: 'unary',
+      seed: 'preview',
+      request: {
+        model: 'workflow',
+        messages: [{ role: 'user', content: 'hello' }]
+      }
+    });
+    return {
+      deterministic_seed: input.seed ?? '',
+      mode: input.mode,
+      operation: input.operation,
+      surface: input.surface,
+      targets: [],
+      selectors: [],
+      affinity: null,
+      legs: [],
+      fallbacks: []
+    };
+  });
+  const host = document.createElement('div');
+  document.body.append(host);
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false } }
+  });
+  const component = mount(RouteDraftEditorProbe, {
+    target: host,
+    props: { client }
+  });
+  onTestFinished(async () => {
+    await unmount(component);
+    client.clear();
+    host.remove();
+  });
+  const button = (name: string) =>
+    [...host.querySelectorAll<HTMLButtonElement>('button')].find(
+      (item) => item.textContent?.trim() === name
+    );
+  await vi.waitFor(() =>
+    expect(button('Simulate order')?.disabled).toBe(false)
+  );
+  const request = host.querySelector<HTMLTextAreaElement>(
+    '#simulation-request'
+  )!;
+  request.value = '[]';
+  request.dispatchEvent(new Event('input', { bubbles: true }));
+  flushSync();
+  button('Simulate order')!.click();
+  await vi.waitFor(() =>
+    expect(host.textContent).toContain(
+      'The native request must be a JSON object.'
+    )
+  );
+  request.value =
+    '  {"model":"workflow","messages":[{"role":"user","content":"hello"}]}  ';
+  request.dispatchEvent(new Event('input', { bubbles: true }));
+  const mode = host.querySelector<HTMLSelectElement>('#simulation-mode')!;
+  mode.value = 'unary';
+  mode.dispatchEvent(new Event('change', { bubbles: true }));
+  const seed = host.querySelector<HTMLInputElement>('#simulation-seed')!;
+  seed.value = '';
+  seed.dispatchEvent(new Event('input', { bubbles: true }));
+  flushSync();
+  button('Simulate order')!.click();
+  await vi.waitFor(() =>
+    expect(host.textContent).toContain('Attempt explanation')
+  );
+  expect(host.textContent).toContain('seed: preview');
+  expect(host.textContent).not.toContain(
+    'The native request must be a JSON object.'
+  );
+});
+
+it('allows validation to be retried after a temporary failure', async () => {
+  vi.clearAllMocks();
+  const route = { ...buildRoute([]), tool_execution: '' as const };
+  vi.mocked(routes.getRouteDraft).mockResolvedValue(route);
+  vi.mocked(routes.getRoutingPolicy).mockRejectedValue(
+    new Error('No route policy')
+  );
+  vi.mocked(models.listProviderModelInventory).mockResolvedValue([]);
+  vi.mocked(agents.listPublications).mockResolvedValue([]);
+  vi.mocked(routes.validateRoute)
+    .mockRejectedValueOnce(new Error('Validation service unavailable'))
+    .mockResolvedValueOnce({
+      ...route,
+      state: 'validated',
+      etag: 'validated-etag'
+    });
+  const host = document.createElement('div');
+  document.body.append(host);
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false } }
+  });
+  const component = mount(RouteDraftEditorProbe, {
+    target: host,
+    props: { client }
+  });
+  onTestFinished(async () => {
+    await unmount(component);
+    client.clear();
+    host.remove();
+  });
+  const button = (name: string) =>
+    [...host.querySelectorAll<HTMLButtonElement>('button')].find(
+      (item) => item.textContent?.trim() === name
+    );
+  await vi.waitFor(() =>
+    expect(button('Validate draft')?.disabled).toBe(false)
+  );
+  button('Validate draft')!.click();
+  await vi.waitFor(() =>
+    expect(host.textContent).toContain('Validation service unavailable')
+  );
+  expect(button('Validate draft')?.disabled).toBe(false);
+  button('Validate draft')!.click();
+  await vi.waitFor(() =>
+    expect(host.textContent).toContain('Validation passed')
+  );
+  expect(host.textContent).not.toContain('Validation service unavailable');
+});
+
+it('deletes a draft only after confirmation and returns to routes', async () => {
+  vi.clearAllMocks();
+  const route = { ...buildRoute([]), tool_execution: '' as const };
+  vi.mocked(routes.getRouteDraft).mockResolvedValue(route);
+  vi.mocked(routes.getRoutingPolicy).mockRejectedValue(
+    new Error('No route policy')
+  );
+  vi.mocked(models.listProviderModelInventory).mockResolvedValue([]);
+  vi.mocked(agents.listPublications).mockResolvedValue([]);
+  const dispatched = Promise.withResolvers<void>();
+  const deletion = Promise.withResolvers<void>();
+  vi.mocked(routes.deleteRouteDraft).mockImplementation(async (id, etag) => {
+    expect(id).toBe(route.id);
+    expect(etag).toBe(route.etag);
+    dispatched.resolve();
+    await deletion.promise;
+  });
+  const confirm = vi
+    .fn()
+    .mockImplementationOnce((message: string) => {
+      expect(message).toContain(route.slug);
+      return false;
+    })
+    .mockImplementationOnce((message: string) => {
+      expect(message).toContain(route.slug);
+      return true;
+    });
+  vi.stubGlobal('confirm', confirm);
+  const host = document.createElement('div');
+  document.body.append(host);
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false } }
+  });
+  const component = mount(RouteDraftEditorProbe, {
+    target: host,
+    props: { client }
+  });
+  onTestFinished(async () => {
+    await unmount(component);
+    client.clear();
+    host.remove();
+    vi.unstubAllGlobals();
+  });
+  const button = (name: string) =>
+    [...host.querySelectorAll<HTMLButtonElement>('button')].find(
+      (item) => item.textContent?.trim() === name
+    );
+  await vi.waitFor(() => expect(button('Delete draft')?.disabled).toBe(false));
+  button('Delete draft')!.click();
+  expect(host.querySelector<HTMLInputElement>('#route-slug')?.value).toBe(
+    route.slug
+  );
+  expect(goto).not.toHaveBeenCalled();
+  expect(routes.deleteRouteDraft).not.toHaveBeenCalled();
+  button('Delete draft')!.click();
+  await dispatched.promise;
+  await vi.waitFor(() => expect(button('Delete draft')?.disabled).toBe(true));
+  deletion.resolve();
+  await vi.waitFor(() => expect(goto).toHaveBeenCalledWith('/routes'));
 });
