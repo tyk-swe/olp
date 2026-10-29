@@ -1274,9 +1274,9 @@ func TestA2AAgentCardUsesGatewayAuthenticationAndEndpoint(t *testing.T) {
 	if err := json.Unmarshal(readBody, &readTaskAfterCancel); err != nil || readTaskAfterCancel.ID != cancelTask.ID || readTaskAfterCancel.Status.State != protocol.TaskStateCanceled {
 		t.Fatalf("canceled task was not preserved: %+v, %v", readCancelled, err)
 	}
-	activeTask := func() protocol.TaskID {
+	activeTaskFor := func(secret string) protocol.TaskID {
 		t.Helper()
-		result := rpc(foreign, "SendMessage", a2aTestParams{Message: message("request-input", "question")})
+		result := rpc(secret, "SendMessage", a2aTestParams{Message: message("request-input", "question")})
 		payload, err := json.Marshal(result["result"])
 		if err != nil {
 			t.Fatal(err)
@@ -1290,6 +1290,7 @@ func TestA2AAgentCardUsesGatewayAuthenticationAndEndpoint(t *testing.T) {
 		<-upstreamIDs
 		return response.Task.ID
 	}
+	activeTask := func() protocol.TaskID { return activeTaskFor(foreign) }
 	ambiguousTask := activeTask()
 	dropRPC.Store(true)
 	if result := rpc(foreign, "CancelTask", a2aTestParams{ID: ambiguousTask}); result["error"] == nil {
@@ -1326,52 +1327,58 @@ func TestA2AAgentCardUsesGatewayAuthenticationAndEndpoint(t *testing.T) {
 	if result := rpc(foreign, "CancelTask", a2aTestParams{ID: activeTask()}); result["error"] != nil {
 		t.Fatalf("cancellation did not free task capacity: %+v", result)
 	}
-	concurrentExisting := []protocol.TaskID{activeTask(), activeTask(), activeTask()}
-	concurrentStart := make(chan struct{})
-	concurrentResults := make(chan map[string]any, 32)
-	for range 32 {
-		go func() {
-			<-concurrentStart
-			concurrentResults <- rpc(foreign, "SendMessage", a2aTestParams{Message: message("request-input", "concurrent")})
-		}()
-	}
-	close(concurrentStart)
-	concurrentResponses := slices.Collect(func(yield func(map[string]any) bool) {
+	for attempt := range 4 {
+		concurrentKey := h.want(owner, http.MethodPost, "/api/v1/api-keys", map[string]any{"name": "concurrent caller", "project_id": project, "scopes": []string{"agents"}, "allowed_agents": []string{agent}}, idem(fmt.Sprintf("a2a-concurrent-%d", attempt)), http.StatusCreated)["secret"].(string)
+		if err := h.Runtime.Refresh(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+		concurrentExisting := []protocol.TaskID{activeTaskFor(concurrentKey), activeTaskFor(concurrentKey), activeTaskFor(concurrentKey)}
+		concurrentStart := make(chan struct{})
+		concurrentResults := make(chan map[string]any, 32)
 		for range 32 {
-			select {
-			case response := <-concurrentResults:
-				if !yield(response) {
+			go func() {
+				<-concurrentStart
+				concurrentResults <- rpc(concurrentKey, "SendMessage", a2aTestParams{Message: message("request-input", "concurrent")})
+			}()
+		}
+		close(concurrentStart)
+		concurrentResponses := slices.Collect(func(yield func(map[string]any) bool) {
+			for range 32 {
+				select {
+				case response := <-concurrentResults:
+					if !yield(response) {
+						return
+					}
+				case <-time.After(15 * time.Second):
+					t.Fatal("concurrent sends did not complete")
+				}
+			}
+		})
+		concurrentAccepted := slices.Collect(func(yield func(map[string]any) bool) {
+			for _, response := range concurrentResponses {
+				if response["error"] == nil && !yield(response) {
 					return
 				}
-			case <-time.After(15 * time.Second):
-				t.Fatal("concurrent sends did not complete")
 			}
+		})
+		if len(concurrentAccepted) != 1 {
+			t.Fatalf("concurrent sends admitted %d tasks with one available slot: %+v", len(concurrentAccepted), concurrentResponses)
 		}
-	})
-	concurrentAccepted := slices.Collect(func(yield func(map[string]any) bool) {
-		for _, response := range concurrentResponses {
-			if response["error"] == nil && !yield(response) {
-				return
+		concurrentPayload, err := json.Marshal(concurrentAccepted[0]["result"])
+		if err != nil {
+			t.Fatal(err)
+		}
+		var concurrentTask struct {
+			Task *protocol.Task `json:"task"`
+		}
+		if err := json.Unmarshal(concurrentPayload, &concurrentTask); err != nil || concurrentTask.Task == nil || concurrentTask.Task.ID == "" {
+			t.Fatalf("concurrent send did not return a task: %+v, %v", concurrentAccepted[0], err)
+		}
+		<-upstreamIDs
+		for _, id := range append(concurrentExisting, concurrentTask.Task.ID) {
+			if result := rpc(concurrentKey, "CancelTask", a2aTestParams{ID: id}); result["error"] != nil {
+				t.Fatalf("cancel concurrent task failed: %+v", result)
 			}
-		}
-	})
-	if len(concurrentAccepted) != 1 {
-		t.Fatalf("concurrent sends admitted %d tasks with one available slot: %+v", len(concurrentAccepted), concurrentResponses)
-	}
-	concurrentPayload, err := json.Marshal(concurrentAccepted[0]["result"])
-	if err != nil {
-		t.Fatal(err)
-	}
-	var concurrentTask struct {
-		Task *protocol.Task `json:"task"`
-	}
-	if err := json.Unmarshal(concurrentPayload, &concurrentTask); err != nil || concurrentTask.Task == nil || concurrentTask.Task.ID == "" {
-		t.Fatalf("concurrent send did not return a task: %+v, %v", concurrentAccepted[0], err)
-	}
-	<-upstreamIDs
-	for _, id := range append(concurrentExisting, concurrentTask.Task.ID) {
-		if result := rpc(foreign, "CancelTask", a2aTestParams{ID: id}); result["error"] != nil {
-			t.Fatalf("cancel concurrent task failed: %+v", result)
 		}
 	}
 	continuationTask := activeTask()
