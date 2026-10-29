@@ -14,6 +14,7 @@ import (
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/mcp"
 	"github.com/tyk-swe/olp/internal/oif"
+	"github.com/tyk-swe/olp/internal/protocols"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
 	"github.com/tyk-swe/olp/internal/protocols/wire"
 	"github.com/tyk-swe/olp/internal/routing"
@@ -53,13 +54,28 @@ type advertisedFunction struct {
 }
 
 func (s *Server) prepareWorkflow(ctx context.Context, x *call, token string) *Error {
-	if x.family != wire.Chat {
-		return invalidRequest("tool_execution_unsupported", "Gateway tool execution is available on Chat Completions.", nil)
+	if x.family != wire.Chat && x.family != wire.Anthropic && x.family.Surface() != "gemini" {
+		return invalidRequest("tool_execution_unsupported", "Gateway tool execution is unavailable on this surface.", nil)
 	}
-	if raw := x.generation.parsed.Field("n"); len(raw) != 0 {
+	if raw := x.generation.parsed.Field("n"); x.family == wire.Chat && len(raw) != 0 {
 		var choices int
 		if json.Unmarshal(raw, &choices) != nil || choices != 1 {
 			return invalidRequest("tool_execution_choices_unsupported", "Gateway tool execution requires a single choice.", nil)
+		}
+	}
+	if x.family.Surface() == "gemini" {
+		for _, field := range []string{"generationConfig", "generation_config"} {
+			raw := x.generation.parsed.Field(field)
+			if len(raw) == 0 {
+				continue
+			}
+			var config struct {
+				CandidateCount      *int `json:"candidateCount"`
+				CandidateCountSnake *int `json:"candidate_count"`
+			}
+			if json.Unmarshal(raw, &config) != nil || config.CandidateCount != nil && *config.CandidateCount != 1 || config.CandidateCountSnake != nil && *config.CandidateCountSnake != 1 {
+				return invalidRequest("tool_execution_choices_unsupported", "Gateway tool execution requires a single choice.", nil)
+			}
 		}
 	}
 	tools, err := s.WorkflowTools.Resolve(ctx, x.authority, x.request.release, x.generation.toolsets)
@@ -67,7 +83,7 @@ func (s *Server) prepareWorkflow(ctx context.Context, x *call, token string) *Er
 		return workflowError(err)
 	}
 	if len(tools) == 0 {
-		for _, field := range []string{"tools", "tool_choice", "parallel_tool_calls"} {
+		for _, field := range []string{"tools", "tool_choice", "parallel_tool_calls", "toolConfig"} {
 			if len(x.generation.parsed.Field(field)) == 0 {
 				continue
 			}
@@ -80,11 +96,7 @@ func (s *Server) prepareWorkflow(ctx context.Context, x *call, token string) *Er
 		x.workflow = &workflowCall{token: token, tools: tools}
 		return nil
 	}
-	advertised := make([]advertisedTool, len(tools))
-	for i, tool := range tools {
-		advertised[i] = advertisedTool{Type: "function", Function: advertisedFunction{Name: tool.Definition.Alias, Description: tool.Definition.Description, Parameters: tool.Definition.InputSchema}}
-	}
-	raw, err := json.Marshal(advertised)
+	raw, err := workflowDefinitions(x.family, tools)
 	if err != nil {
 		return serverError(http.StatusServiceUnavailable, "tool_execution_unavailable", "The route tools could not be prepared.")
 	}
@@ -95,6 +107,21 @@ func (s *Server) prepareWorkflow(ctx context.Context, x *call, token string) *Er
 	x.generation.parsed = parsed
 	x.workflow = &workflowCall{token: token, tools: tools}
 	return nil
+}
+
+func workflowDefinitions(family wire.Format, tools []WorkflowTool) (json.RawMessage, error) {
+	if family == wire.Chat {
+		advertised := make([]advertisedTool, len(tools))
+		for i, tool := range tools {
+			advertised[i] = advertisedTool{Type: "function", Function: advertisedFunction{Name: tool.Definition.Alias, Description: tool.Definition.Description, Parameters: tool.Definition.InputSchema}}
+		}
+		return json.Marshal(advertised)
+	}
+	definitions := make([]protocols.Tool, len(tools))
+	for i, tool := range tools {
+		definitions[i] = protocols.Tool{Name: tool.Definition.Alias, Description: tool.Definition.Description, Schema: tool.Definition.InputSchema}
+	}
+	return protocols.WorkflowDefinitions(family, definitions)
 }
 
 func (s *Server) checkWorkflowAuthority(ctx context.Context, x *call, route *routing.Route, toolsetID string) *Error {
@@ -209,11 +236,21 @@ func (s *Server) executeToolLoop(ctx context.Context, x *call) *outcome {
 		}
 		out := s.executeModelStep(ctx, x, x.generation.parsed)
 		if out.err == nil && out.completion != nil && x.generation.parsed.Stream {
-			completion, err := openai.Stream(wire.Chat, bytes.NewReader(frames.Bytes()), int(s.cfg.MaxEventBytes), x.named().Slug, true, func([]byte) error { return nil })
+			completion, err := workflowStreamCompletion(x.family, bytes.NewReader(frames.Bytes()), int(s.cfg.MaxEventBytes), x.named().Slug)
 			if err != nil {
 				return &outcome{err: serverError(http.StatusBadGateway, "invalid_tool_response", "The model returned an invalid streaming response.")}
 			}
 			out.completion.ToolCalls, out.completion.OutputText, out.completion.Refusal = completion.ToolCalls, completion.OutputText, completion.Refusal
+			if len(completion.ToolCalls) != 0 && x.family != wire.Chat {
+				body, err := protocols.WorkflowStreamBody(x.family, bytes.NewReader(frames.Bytes()), int(s.cfg.MaxEventBytes))
+				if err != nil {
+					return &outcome{err: serverError(http.StatusBadGateway, "invalid_tool_response", "The model returned an invalid streaming response.")}
+				}
+				out.completion.Body = body
+			}
+		}
+		if out.err == nil && out.completion != nil && !x.generation.parsed.Stream && x.family.Surface() == "gemini" && !protocols.WorkflowSingleCandidate(out.completion.Body) {
+			return &outcome{err: serverError(http.StatusBadGateway, "invalid_tool_response", "The model returned multiple candidates.")}
 		}
 		if out.err != nil || out.completion == nil || len(out.completion.ToolCalls) == 0 {
 			if out.err == nil && x.generation.parsed.Stream {
@@ -236,6 +273,25 @@ func (s *Server) executeToolLoop(ctx context.Context, x *call) *outcome {
 	return &outcome{err: invalidRequest("tool_iteration_limit", "The workflow reached its model iteration limit.", nil)}
 }
 
+func workflowStreamCompletion(family wire.Format, frames *bytes.Reader, maxEvent int, route string) (*wire.Completion, error) {
+	if family == wire.Chat {
+		return openai.Stream(wire.Chat, frames, maxEvent, route, true, func([]byte) error { return nil })
+	}
+	source := family
+	if family.Surface() == "gemini" {
+		source = wire.Gemini
+	}
+	var translated bytes.Buffer
+	_, err := protocols.StreamWithEvents(source, wire.Chat, frames, maxEvent, route, true, func(frame []byte) error {
+		_, err := translated.Write(frame)
+		return err
+	}, nil, 1)
+	if err != nil {
+		return nil, err
+	}
+	return openai.Stream(wire.Chat, &translated, maxEvent, route, true, func([]byte) error { return nil })
+}
+
 func (s *Server) continueToolLoop(ctx context.Context, x *call, completion *wire.Completion) (*wire.Request, *Error) {
 	var response struct {
 		Choices []struct {
@@ -243,7 +299,7 @@ func (s *Server) continueToolLoop(ctx context.Context, x *call, completion *wire
 		} `json:"choices"`
 	}
 	var messages []json.RawMessage
-	if x.generation.parsed.Stream {
+	if x.family == wire.Chat && x.generation.parsed.Stream {
 		calls := make([]map[string]any, len(completion.ToolCalls))
 		for i, call := range completion.ToolCalls {
 			calls[i] = map[string]any{"id": call.ID, "type": "function", "function": map[string]string{"name": call.Name, "arguments": call.Arguments}}
@@ -255,13 +311,20 @@ func (s *Server) continueToolLoop(ctx context.Context, x *call, completion *wire
 		response.Choices = append(response.Choices, struct {
 			Message json.RawMessage `json:"message"`
 		}{Message: assistant})
-	} else if err := json.Unmarshal(completion.Body, &response); err != nil || len(response.Choices) != 1 || len(response.Choices[0].Message) == 0 {
+	} else if x.family == wire.Chat && (json.Unmarshal(completion.Body, &response) != nil || len(response.Choices) != 1 || len(response.Choices[0].Message) == 0) {
 		return nil, serverError(http.StatusBadGateway, "invalid_tool_response", "The model returned an invalid tool response.")
 	}
-	if err := json.Unmarshal(x.generation.parsed.Field("messages"), &messages); err != nil {
+	field := "messages"
+	if x.family.Surface() == "gemini" {
+		field = "contents"
+	}
+	if err := json.Unmarshal(x.generation.parsed.Field(field), &messages); err != nil {
 		return nil, invalidRequest("invalid_request", "The request messages could not be continued.", nil)
 	}
-	messages = append(messages, response.Choices[0].Message)
+	if x.family == wire.Chat {
+		messages = append(messages, response.Choices[0].Message)
+	}
+	results := make([]protocols.WorkflowResult, 0, len(completion.ToolCalls))
 	for _, call := range completion.ToolCalls {
 		if e := s.checkWorkflowAuthority(ctx, x, x.route, ""); e != nil {
 			return nil, e
@@ -281,6 +344,10 @@ func (s *Server) continueToolLoop(ctx context.Context, x *call, completion *wire
 		if err != nil {
 			return nil, workflowError(err)
 		}
+		if x.family != wire.Chat {
+			results = append(results, protocols.WorkflowResult{CallID: call.ID, Content: string(result)})
+			continue
+		}
 		message, err := json.Marshal(struct {
 			Role       string `json:"role"`
 			ToolCallID string `json:"tool_call_id"`
@@ -291,11 +358,18 @@ func (s *Server) continueToolLoop(ctx context.Context, x *call, completion *wire
 		}
 		messages = append(messages, message)
 	}
+	if x.family != wire.Chat {
+		turns, err := protocols.WorkflowTurns(x.family, completion, results)
+		if err != nil {
+			return nil, serverError(http.StatusBadGateway, "invalid_tool_response", "The model returned an invalid tool response.")
+		}
+		messages = append(messages, turns...)
+	}
 	raw, err := json.Marshal(messages)
 	if err != nil {
 		return nil, serverError(http.StatusServiceUnavailable, "tool_execution_unavailable", "The workflow could not be continued.")
 	}
-	parsed, err := x.generation.parsed.WithField("messages", raw)
+	parsed, err := x.generation.parsed.WithField(field, raw)
 	if err != nil {
 		return nil, invalidRequest("invalid_request", "The request messages could not be continued.", nil)
 	}

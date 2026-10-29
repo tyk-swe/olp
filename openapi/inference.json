@@ -492,7 +492,7 @@
       "post": {
         "operationId": "createAnthropicMessageWithPrompt",
         "summary": "Create an Anthropic message using a published OLP prompt",
-        "description": "For transformed routes, the published prompt replaces explicit messages. Other fields use the provider contract.",
+        "description": "For transformed routes, a published prompt replaces explicit messages. Gateway tool execution can select a subset of the route's published toolsets.",
         "security": [
           {
             "BearerAuth": []
@@ -503,7 +503,10 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/AnthropicPromptRequest"
+                "oneOf": [
+                  { "$ref": "#/components/schemas/AnthropicPromptRequest" },
+                  { "$ref": "#/components/schemas/AnthropicToolWorkflowRequest" }
+                ]
               }
             }
           }
@@ -613,7 +616,7 @@
       "post": {
         "operationId": "createGeminiContentWithPrompt",
         "summary": "Generate Gemini content using a published OLP prompt",
-        "description": "For transformed routes, the published prompt replaces explicit contents. Other fields use the provider contract.",
+        "description": "For transformed routes, a published prompt replaces explicit contents. Gateway tool execution can select a subset of the route's published toolsets.",
         "security": [
           {
             "BearerAuth": []
@@ -624,7 +627,10 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/GeminiPromptRequest"
+                "oneOf": [
+                  { "$ref": "#/components/schemas/GeminiPromptRequest" },
+                  { "$ref": "#/components/schemas/GeminiToolWorkflowRequest" }
+                ]
               }
             }
           }
@@ -743,7 +749,7 @@
       "post": {
         "operationId": "streamGeminiContentWithPrompt",
         "summary": "Stream Gemini content using a published OLP prompt",
-        "description": "For transformed routes, the published prompt replaces explicit contents. Other fields use the provider contract.",
+        "description": "For transformed routes, a published prompt replaces explicit contents. Gateway tool execution can select a subset of the route's published toolsets.",
         "security": [
           {
             "BearerAuth": []
@@ -754,7 +760,10 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/GeminiPromptRequest"
+                "oneOf": [
+                  { "$ref": "#/components/schemas/GeminiPromptRequest" },
+                  { "$ref": "#/components/schemas/GeminiToolWorkflowRequest" }
+                ]
               }
             }
           }
@@ -1346,6 +1355,9 @@
           },
           "olp_prompt": {
             "$ref": "#/components/schemas/PublishedPromptReference"
+          },
+          "olp_toolsets": {
+            "$ref": "#/components/schemas/ChatToolsetSelection"
           }
         },
         "additionalProperties": true,
@@ -1372,6 +1384,9 @@
         "properties": {
           "olp_prompt": {
             "$ref": "#/components/schemas/PublishedPromptReference"
+          },
+          "olp_toolsets": {
+            "$ref": "#/components/schemas/ChatToolsetSelection"
           }
         },
         "additionalProperties": true,
@@ -1394,6 +1409,34 @@
             }
           ]
         }
+      },
+      "AnthropicToolWorkflowRequest": {
+        "type": "object",
+        "required": ["model", "max_tokens", "messages"],
+        "properties": {
+          "model": { "type": "string" },
+          "max_tokens": { "type": "integer", "minimum": 1 },
+          "messages": {
+            "type": "array",
+            "items": { "type": "object", "additionalProperties": true }
+          },
+          "olp_toolsets": { "$ref": "#/components/schemas/ChatToolsetSelection" }
+        },
+        "additionalProperties": true,
+        "not": { "required": ["olp_prompt"] }
+      },
+      "GeminiToolWorkflowRequest": {
+        "type": "object",
+        "required": ["contents"],
+        "properties": {
+          "contents": {
+            "type": "array",
+            "items": { "type": "object", "additionalProperties": true }
+          },
+          "olp_toolsets": { "$ref": "#/components/schemas/ChatToolsetSelection" }
+        },
+        "additionalProperties": true,
+        "not": { "required": ["olp_prompt"] }
       },
       "AnthropicInferenceError": {
         "type": "object",
