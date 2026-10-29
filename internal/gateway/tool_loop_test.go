@@ -1173,6 +1173,80 @@ func TestGatewayToolExecutionAppliesDelegatedAgentQuotasAcrossSteps(t *testing.T
 	}
 }
 
+func TestGatewayToolExecutionTracksUnboundedRunsForConcurrency(t *testing.T) {
+	toolsetID, projectID := uuid.NewString(), uuid.NewString()
+	h := strictHarness(t, func(snapshot *routing.Snapshot) {
+		route := snapshot.Routes[routeSlug]
+		route.Fidelity.Mode = routing.FidelityTransformed
+		route.ToolExecution, route.Toolsets, route.ProjectID = "gateway", []string{toolsetID}, &projectID
+		route.OverallTimeout = 20_000
+		for i := range route.Targets {
+			route.Targets[i].Timeout = 15_000
+		}
+		snapshot.Routes[routeSlug] = route
+		for id, provider := range snapshot.Providers {
+			for i := range provider.Capabilities {
+				provider.Capabilities[i].ToolCalls = true
+			}
+			snapshot.Providers[id] = provider
+		}
+	})
+	authority := h.rt.keys[fullKey]
+	authority.ProjectID = &projectID
+	h.rt.keys[fullKey] = authority
+	fixture := &workflowFixture{runID: uuid.NewString(), tool: WorkflowTool{ToolsetID: toolsetID}}
+	h.gateway.WorkflowRuns, h.gateway.WorkflowTools, h.gateway.Debits = fixture, fixture, &workflowDebitFixture{fakeSessionDebits: &fakeSessionDebits{}}
+	admitThrough(t, h)
+	started, release, finished := make(chan struct{}, 2), make(chan struct{}, 2), make(chan int, 2)
+	defer close(release)
+	h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
+		if h.mock.count("a") <= 2 {
+			started <- struct{}{}
+			<-release
+		}
+		completion(modelA, "done")(w, r)
+	})
+	for range 2 {
+		go func() {
+			response, _ := h.chat(fullKey, nil, `,"olp_toolsets":[]`)
+			finished <- response.StatusCode
+		}()
+		select {
+		case <-started:
+		case <-time.After(10 * time.Second):
+			t.Fatal("unbounded workflow did not reach the model")
+		}
+	}
+	bounded := `,"olp_toolsets":[],"olp_run_limits":{"max_concurrent_runs":1}`
+	assertBounded := func() {
+		t.Helper()
+		response, body := h.chat(fullKey, nil, bounded)
+		if response.StatusCode != http.StatusTooManyRequests || h.mock.count("a") != 2 {
+			t.Fatalf("bounded workflow was not refused: status=%d body=%v model_calls=%d", response.StatusCode, body, h.mock.count("a"))
+		}
+	}
+	releaseOne := func() {
+		t.Helper()
+		release <- struct{}{}
+		select {
+		case status := <-finished:
+			if status != http.StatusOK {
+				t.Fatalf("unbounded workflow returned %d", status)
+			}
+		case <-time.After(10 * time.Second):
+			t.Fatal("unbounded workflow did not finish")
+		}
+	}
+	assertBounded()
+	releaseOne()
+	assertBounded()
+	releaseOne()
+	response, body := h.chat(fullKey, nil, bounded)
+	if response.StatusCode != http.StatusOK || h.mock.count("a") != 3 {
+		t.Fatalf("bounded workflow could not start after release: status=%d body=%v model_calls=%d", response.StatusCode, body, h.mock.count("a"))
+	}
+}
+
 func TestGatewayToolExecutionBypassesResponseCache(t *testing.T) {
 	toolsetID, projectID := uuid.NewString(), uuid.NewString()
 	h := strictHarness(t, func(snapshot *routing.Snapshot) {
