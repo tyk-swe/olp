@@ -4,6 +4,26 @@
  */
 
 export interface paths {
+    "/v1/traces": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Export OTLP traces
+         * @description Accept an OTLP/HTTP protobuf trace batch for the authenticated project. The key requires traces_write scope. Batches are limited to one MiB after decompression and 256 spans, with at most 32 allowlisted attributes per span and 60 batches per minute per key. Identity and gzip encodings are supported. Failures contain a protobuf google.rpc.Status. Content, events, links and unknown fields are discarded. Run and attempt correlations are retained only when owned by the authenticated principal.
+         */
+        post: operations["exportTraces"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/chat/completions": {
         parameters: {
             query?: never;
@@ -55,7 +75,7 @@ export interface paths {
         put?: never;
         /**
          * Send a message to or read and subscribe to a task from a published A2A agent
-         * @description Supports A2A 1.0 JSON-RPC SendMessage, SendStreamingMessage, GetTask, and SubscribeToTask. Requires the agents scope and an explicit allowlist entry. OLP task IDs are bound to the initiating key and project. Streaming methods return events as they arrive, with a one MiB maximum per event. Disconnecting does not cancel the upstream task.
+         * @description Supports A2A 0.3 and 1.0 JSON-RPC send, streaming send, task read, and subscription methods. The published protocol determines the accepted methods and response format. Requires the agents scope and an explicit allowlist entry. OLP task IDs are bound to the initiating key and project. Streaming methods return events as they arrive, with a one MiB maximum per event. Disconnecting does not cancel the upstream task.
          */
         post: operations["callA2AAgent"];
         delete?: never;
@@ -220,8 +240,8 @@ export interface components {
             jsonrpc: "2.0";
             id: string | number;
             /** @enum {string} */
-            method: "SendMessage" | "SendStreamingMessage" | "GetTask" | "SubscribeToTask";
-            /** @description A2A 1.0 method parameters. Task references must use an OLP task ID; push notifications and tenant selection are not supported. */
+            method: "SendMessage" | "SendStreamingMessage" | "GetTask" | "SubscribeToTask" | "message/send" | "message/stream" | "tasks/get" | "tasks/resubscribe";
+            /** @description Parameters for the selected A2A version and method. Task references must use an OLP task ID; push notifications and tenant selection are not supported. */
             params: {
                 [key: string]: unknown;
             };
@@ -230,7 +250,7 @@ export interface components {
             /** @enum {string} */
             jsonrpc: "2.0";
             id: (string | number) | null;
-            /** @description A2A 1.0 task or message result with OLP task IDs. */
+            /** @description A task or message result in the published A2A version with OLP task IDs. */
             result?: {
                 [key: string]: unknown;
             };
@@ -249,7 +269,7 @@ export interface components {
                 /** @enum {string} */
                 protocolBinding: "JSONRPC";
                 /** @enum {string} */
-                protocolVersion: "1.0";
+                protocolVersion: "1.0" | "0.3";
             }[];
             capabilities: {
                 [key: string]: unknown;
@@ -263,6 +283,25 @@ export interface components {
             defaultInputModes?: string[];
             defaultOutputModes?: string[];
             skills?: {
+                [key: string]: unknown;
+            }[];
+            /**
+             * Format: uri
+             * @description Preferred JSON-RPC endpoint for A2A 0.3 clients
+             */
+            url?: string;
+            /**
+             * @description Preferred binding for A2A 0.3 clients
+             * @enum {string}
+             */
+            preferredTransport?: "JSONRPC";
+            /**
+             * @description Protocol version for A2A 0.3 clients
+             * @enum {string}
+             */
+            protocolVersion?: "0.3" | "0.3.0";
+            /** @description Bearer authentication requirements for A2A 0.3 clients */
+            security?: {
                 [key: string]: unknown;
             }[];
         };
@@ -430,6 +469,95 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    exportTraces: {
+        parameters: {
+            query?: never;
+            header?: {
+                "Content-Encoding"?: "identity" | "gzip";
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/x-protobuf": string;
+            };
+        };
+        responses: {
+            /** @description Trace batch accepted */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/x-protobuf": string;
+                };
+            };
+            /** @description Invalid protobuf, span or batch size */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/x-protobuf": string;
+                };
+            };
+            /** @description The credential is invalid, expired or revoked */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/x-protobuf": string;
+                };
+            };
+            /** @description The caller lacks trace scope or project access */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/x-protobuf": string;
+                };
+            };
+            /** @description The trace batch exceeds one MiB */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/x-protobuf": string;
+                };
+            };
+            /** @description The content type or encoding is unsupported */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/x-protobuf": string;
+                };
+            };
+            /** @description The trace or caller rate limit is exceeded */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/x-protobuf": string;
+                };
+            };
+            /** @description Trace storage or limits are unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/x-protobuf": string;
+                };
+            };
+        };
+    };
     createChatCompletionWithPrompt: {
         parameters: {
             query?: never;
@@ -569,8 +697,14 @@ export interface operations {
     };
     callA2AAgent: {
         parameters: {
-            query?: never;
-            header?: never;
+            query?: {
+                /** @description Alternative to the A2A-Version header. If both are present they must select the same protocol. */
+                "A2A-Version"?: "0.3" | "0.3.0" | "1.0" | "1.0.0";
+            };
+            header?: {
+                /** @description Selects the published agent or pinned task protocol. Header and query values must agree when both are present. Omission selects A2A 0.3 for legacy clients. */
+                "A2A-Version"?: "0.3" | "0.3.0" | "1.0" | "1.0.0";
+            };
             path: {
                 /** @description Published agent identifier */
                 agent: string;
@@ -594,7 +728,7 @@ export interface operations {
                     "text/event-stream": string;
                 };
             };
-            /** @description The JSON-RPC request is invalid */
+            /** @description The A2A version does not match the published protocol or the request is invalid */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -610,6 +744,13 @@ export interface operations {
             };
             /** @description The agent is unavailable to this principal */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The requested binding is not JSON-RPC over HTTP */
+            415: {
                 headers: {
                     [name: string]: unknown;
                 };

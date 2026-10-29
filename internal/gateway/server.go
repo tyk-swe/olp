@@ -120,6 +120,7 @@ type Server struct {
 	Debits        SessionDebitLedger
 	WorkflowRuns  WorkflowRunStore
 	WorkflowTools WorkflowToolRunner
+	Traces        *TraceDeps
 	// Media wires the bounded media substrate into the public surface. A nil
 	// Media leaves the media routes unregistered.
 	Media    *MediaDeps
@@ -224,6 +225,7 @@ func (s *Server) Register(mux *http.ServeMux) {
 	}
 	mux.HandleFunc("POST /v1/guardrails/apply", s.applyGuardrails)
 	mux.HandleFunc("POST /v1/delegations", s.createDelegation)
+	mux.HandleFunc("POST /v1/traces", s.ingestTraces)
 	s.registerNative(mux)
 	s.registerGeminiLifecycle(mux)
 	s.registerMedia(mux)

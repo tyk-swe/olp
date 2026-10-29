@@ -853,7 +853,7 @@ func TestGatewayToolWorkflowSettlesOneRun(t *testing.T) {
 		[]any{map[string]any{"operation": "generation", "surface": "openai", "mode": "unary"}}, []string{"generation"},
 		map[string]any{"tool_execution": "gateway", "toolsets": []string{toolsetID}, "budget": map[string]any{"daily_cost_limit": "10000000"}})
 	addBatchPrice(t, h, owner, provider["id"].(string), "", time.Now().Add(-time.Hour))
-	key := h.want(owner, "POST", "/api/v1/api-keys", map[string]any{"name": "Workflow caller", "project_id": project, "scopes": []string{"inference", "tools"}, "allowed_routes": []string{slug}, "allowed_toolsets": []string{toolsetID}}, idem("workflow-key"), 201)
+	key := h.want(owner, "POST", "/api/v1/api-keys", map[string]any{"name": "Workflow caller", "project_id": project, "scopes": []string{"inference", "tools", "traces_write"}, "allowed_routes": []string{slug}, "allowed_toolsets": []string{toolsetID}}, idem("workflow-key"), 201)
 	keyID, secret := mcpExecString(t, key, "id"), mcpExecString(t, key, "secret")
 	valkey, prefix, _ := acctKeyspace(t)
 	limiter, err := limits.New(valkey, strings.TrimSuffix(prefix, ":"))
@@ -937,6 +937,7 @@ func TestGatewayToolWorkflowSettlesOneRun(t *testing.T) {
 	if facts != 2 || counted != 1 || receipts != 1 {
 		t.Fatalf("workflow accounting lost or duplicated request data: facts=%d counted=%d receipts=%d", facts, counted, receipts)
 	}
+	verifyWorkflowTraceCorrelation(t, h, secret, keyID, runID, limiter)
 	var stored string
 	if err := h.Pool.QueryRow(t.Context(), `SELECT
 		COALESCE((SELECT row_to_json(r)::text FROM olp.agent_runs r WHERE r.id=$1),'') ||

@@ -1,18 +1,21 @@
 package agents
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
 
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/agentcontract"
 	"github.com/tyk-swe/olp/internal/egress"
 )
 
 type Server struct {
-	Access *access.Server
-	Egress *egress.Policy
+	Access        *access.Server
+	Egress        *egress.Policy
+	ValidateAgent func(context.Context, agentcontract.Definition) error
 }
 
 func (s *Server) Register(mux *http.ServeMux) {
@@ -169,6 +172,9 @@ func (s *Server) write(r *http.Request, kind, action string) (access.Reply, erro
 		err = SaveDraft(r.Context(), tx, p.UserID(), current, next, s.Egress)
 	case "publish":
 		err = Publish(r.Context(), tx, p.UserID(), current)
+		if err == nil && current.Kind == "agent" && (s.ValidateAgent == nil || s.ValidateAgent(r.Context(), *current.Draft.Agent) != nil) {
+			return access.Reply{}, access.Invalid("agent", "The pinned agent card must declare the configured protocol and JSON-RPC endpoint.")
+		}
 	case "retire":
 		next.ETag = access.NewID()
 		next.Retired = true

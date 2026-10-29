@@ -85,6 +85,9 @@ func RunMaintenance(ctx context.Context, pool *pgxpool.Pool, now time.Time) (Mai
 	if report.RequestRows, err = purgeExpiredRequests(ctx, conn, windows.request); err != nil {
 		return MaintenanceReport{}, err
 	}
+	if _, err = drainInBatches(ctx, conn, purgeTraceSpansSQL, windows.request, int64(retentionBatch)); err != nil {
+		return MaintenanceReport{}, err
+	}
 	if report.RollupRows, report.UsageRows, err = rollUpAttemptUsage(ctx, conn, windows.usage); err != nil {
 		return MaintenanceReport{}, err
 	}
@@ -179,6 +182,10 @@ const purgeRequestsSQL = `WITH expired AS (
     )
     DELETE FROM olp.requests request USING expired
      WHERE request.id = expired.id AND request.started_at = expired.started_at`
+
+const purgeTraceSpansSQL = `WITH expired AS (
+ SELECT id FROM olp.trace_spans WHERE received_at < $1 ORDER BY received_at LIMIT $2 FOR UPDATE SKIP LOCKED
+) DELETE FROM olp.trace_spans span USING expired WHERE span.id = expired.id`
 
 func purgeExpiredRequests(ctx context.Context, conn *pgx.Conn, cutoff time.Time) (int64, error) {
 	return drainInBatches(ctx, conn, purgeRequestsSQL, cutoff, int64(retentionBatch))
