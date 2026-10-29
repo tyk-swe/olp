@@ -111,7 +111,7 @@ func (l *Ledger) recordTaskState(ctx context.Context, taskID string, state strin
 	if taskID == "" {
 		return nil
 	}
-	tag, err := l.Pool.Exec(ctx, `UPDATE olp.a2a_tasks SET state=$2 WHERE id=$1 AND (state IN ('active','outcome_unknown') OR state=$2)`, taskID, state)
+	tag, err := l.Pool.Exec(ctx, `UPDATE olp.a2a_tasks SET state=CASE WHEN state='outcome_unknown' AND $2='active' THEN state ELSE $2 END WHERE id=$1 AND (state IN ('active','outcome_unknown') OR state=$2)`, taskID, state)
 	if err != nil {
 		return err
 	}

@@ -655,12 +655,14 @@ func TestA2AAgentCardUsesGatewayAuthenticationAndEndpoint(t *testing.T) {
 	cardFor := func(endpoint string) []byte {
 		return bytes.ReplaceAll([]byte(cardTemplate), []byte("PINNED_ENDPOINT"), []byte(endpoint))
 	}
-	upstreamIDs := make(chan string, 1)
+	upstreamIDs := make(chan string, 64)
+	cancelAttempts := make(chan string, 256)
+	var holdCancellation atomic.Bool
 	resumeStream := make(chan struct{})
 	resumePinnedStream := make(chan struct{})
 	resumeRevokedStream := make(chan struct{})
 	resumeLongStream := make(chan struct{})
-	var redirectCard, redirectRPC atomic.Bool
+	var redirectCard, redirectRPC, dropRPC atomic.Bool
 	var redirectHits atomic.Int32
 	redirectTarget := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		redirectHits.Add(1)
@@ -670,7 +672,7 @@ func TestA2AAgentCardUsesGatewayAuthenticationAndEndpoint(t *testing.T) {
 	agentHandler := a2asrv.NewJSONRPCHandler(a2asrv.NewHandler(a2asrv.AgentExecutorFunc(func(ctx context.Context, execution *a2asrv.ExecutorContext) iter.Seq2[protocol.Event, error] {
 		return func(yield func(protocol.Event, error) bool) {
 			var dispatched int
-			if err := h.Pool.QueryRow(ctx, `SELECT count(*) FROM olp.execution_debits WHERE kind='agent' AND state='dispatched'`).Scan(&dispatched); err != nil || dispatched != 1 {
+			if err := h.Pool.QueryRow(ctx, `SELECT count(*) FROM olp.execution_debits WHERE kind='agent' AND state='dispatched'`).Scan(&dispatched); err != nil || dispatched < 1 {
 				t.Errorf("send before durable debit: %d, %v", dispatched, err)
 			}
 			upstreamIDs <- string(execution.TaskID)
@@ -736,6 +738,31 @@ func TestA2AAgentCardUsesGatewayAuthenticationAndEndpoint(t *testing.T) {
 			return
 		}
 		if r.URL.Path == "/rpc" {
+			if holdCancellation.Load() {
+				var request struct {
+					Method string `json:"method"`
+					Params struct {
+						ID string `json:"id"`
+					} `json:"params"`
+				}
+				if err := json.NewDecoder(r.Body).Decode(&request); err != nil || request.Method != "CancelTask" {
+					t.Errorf("unexpected request during cancellation burst: %s, %v", request.Method, err)
+					w.WriteHeader(http.StatusBadRequest)
+					return
+				}
+				cancelAttempts <- request.Params.ID
+				<-r.Context().Done()
+				return
+			}
+			if dropRPC.Swap(false) {
+				connection, _, err := w.(http.Hijacker).Hijack()
+				if err != nil {
+					t.Errorf("close upstream connection: %v", err)
+					return
+				}
+				connection.Close()
+				return
+			}
 			if redirectRPC.Load() {
 				http.Redirect(w, r, redirectTarget.URL, http.StatusTemporaryRedirect)
 				return
@@ -984,7 +1011,6 @@ func TestA2AAgentCardUsesGatewayAuthenticationAndEndpoint(t *testing.T) {
 	}
 	<-upstreamIDs
 	foreign := h.want(owner, http.MethodPost, "/api/v1/api-keys", map[string]any{"name": "other caller", "project_id": project, "scopes": []string{"agents"}, "allowed_agents": []string{agent}}, idem("a2a-foreign-key"), http.StatusCreated)["secret"].(string)
-	rateKey := h.want(owner, http.MethodPost, "/api/v1/api-keys", map[string]any{"name": "rate-limited caller", "project_id": project, "scopes": []string{"agents"}, "allowed_agents": []string{agent}}, idem("a2a-rate-key"), http.StatusCreated)["secret"].(string)
 	revocableKey := h.want(owner, http.MethodPost, "/api/v1/api-keys", map[string]any{"name": "revocable streaming caller", "project_id": project, "scopes": []string{"agents"}, "allowed_agents": []string{agent}}, idem("a2a-revocable-key"), http.StatusCreated)
 	if err := h.Runtime.Refresh(t.Context()); err != nil {
 		t.Fatal(err)
@@ -1264,6 +1290,25 @@ func TestA2AAgentCardUsesGatewayAuthenticationAndEndpoint(t *testing.T) {
 		<-upstreamIDs
 		return response.Task.ID
 	}
+	ambiguousTask := activeTask()
+	dropRPC.Store(true)
+	if result := rpc(foreign, "CancelTask", a2aTestParams{ID: ambiguousTask}); result["error"] == nil {
+		t.Fatalf("cancel with a lost response succeeded: %+v", result)
+	}
+	if result := rpc(foreign, "GetTask", a2aTestParams{ID: ambiguousTask}); result["error"] != nil {
+		t.Fatalf("read after ambiguous cancellation failed: %+v", result)
+	}
+	if result := rpc(foreign, "SendMessage", a2aTestParams{Message: &protocol.Message{ID: "ambiguous-continuation", Role: protocol.MessageRoleUser, Parts: protocol.ContentParts{protocol.NewTextPart("continue")}, TaskID: ambiguousTask}}); result["error"] == nil {
+		t.Fatalf("continued a task after an ambiguous cancellation: %+v", result)
+	}
+	select {
+	case <-upstreamIDs:
+		t.Fatal("continued a task after an ambiguous cancellation reached the upstream")
+	default:
+	}
+	if result := rpc(foreign, "CancelTask", a2aTestParams{ID: ambiguousTask}); result["error"] != nil {
+		t.Fatalf("reconciling cancellation failed: %+v", result)
+	}
 	firstActive, secondActive, thirdActive, fourthActive := activeTask(), activeTask(), activeTask(), activeTask()
 	if exceeded := rpc(foreign, "SendMessage", a2aTestParams{Message: message("too-many-tasks", "question")}); exceeded["error"] == nil {
 		t.Fatalf("fifth concurrent task was accepted: %+v", exceeded)
@@ -1280,6 +1325,54 @@ func TestA2AAgentCardUsesGatewayAuthenticationAndEndpoint(t *testing.T) {
 	}
 	if result := rpc(foreign, "CancelTask", a2aTestParams{ID: activeTask()}); result["error"] != nil {
 		t.Fatalf("cancellation did not free task capacity: %+v", result)
+	}
+	concurrentExisting := []protocol.TaskID{activeTask(), activeTask(), activeTask()}
+	concurrentStart := make(chan struct{})
+	concurrentResults := make(chan map[string]any, 32)
+	for range 32 {
+		go func() {
+			<-concurrentStart
+			concurrentResults <- rpc(foreign, "SendMessage", a2aTestParams{Message: message("request-input", "concurrent")})
+		}()
+	}
+	close(concurrentStart)
+	concurrentResponses := slices.Collect(func(yield func(map[string]any) bool) {
+		for range 32 {
+			select {
+			case response := <-concurrentResults:
+				if !yield(response) {
+					return
+				}
+			case <-time.After(15 * time.Second):
+				t.Fatal("concurrent sends did not complete")
+			}
+		}
+	})
+	concurrentAccepted := slices.Collect(func(yield func(map[string]any) bool) {
+		for _, response := range concurrentResponses {
+			if response["error"] == nil && !yield(response) {
+				return
+			}
+		}
+	})
+	if len(concurrentAccepted) != 1 {
+		t.Fatalf("concurrent sends admitted %d tasks with one available slot: %+v", len(concurrentAccepted), concurrentResponses)
+	}
+	concurrentPayload, err := json.Marshal(concurrentAccepted[0]["result"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	var concurrentTask struct {
+		Task *protocol.Task `json:"task"`
+	}
+	if err := json.Unmarshal(concurrentPayload, &concurrentTask); err != nil || concurrentTask.Task == nil || concurrentTask.Task.ID == "" {
+		t.Fatalf("concurrent send did not return a task: %+v, %v", concurrentAccepted[0], err)
+	}
+	<-upstreamIDs
+	for _, id := range append(concurrentExisting, concurrentTask.Task.ID) {
+		if result := rpc(foreign, "CancelTask", a2aTestParams{ID: id}); result["error"] != nil {
+			t.Fatalf("cancel concurrent task failed: %+v", result)
+		}
 	}
 	continuationTask := activeTask()
 	for i := range 32 {
@@ -1306,20 +1399,66 @@ func TestA2AAgentCardUsesGatewayAuthenticationAndEndpoint(t *testing.T) {
 	if result := rpc(foreign, "CancelTask", a2aTestParams{ID: continuationTask}); result["error"] != nil {
 		t.Fatalf("cancel continued task failed: %+v", result)
 	}
-	for i := range 60 {
-		result := rpc(rateKey, "SendMessage", a2aTestParams{Message: message(fmt.Sprintf("rate-%d", i), "question")})
-		if result["error"] != nil {
-			t.Fatalf("send %d was refused before the rate limit: %+v", i, result)
+	valkeyMinute := func() int64 {
+		t.Helper()
+		reply, err := client.Do(t.Context(), "TIME")
+		if err != nil {
+			t.Fatal(err)
 		}
-		<-upstreamIDs
+		values, ok := reply.([]any)
+		if !ok || len(values) != 2 {
+			t.Fatalf("invalid Valkey time: %v", reply)
+		}
+		seconds, ok := values[0].(string)
+		if !ok {
+			t.Fatalf("invalid Valkey time: %v", reply)
+		}
+		unix, err := strconv.ParseInt(seconds, 10, 64)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return unix / 60
 	}
-	if result := rpc(rateKey, "SendMessage", a2aTestParams{Message: message("over-rate", "question")}); result["error"] == nil {
-		t.Fatalf("send above the per-key rate limit was accepted: %+v", result)
+	verifyRate := func(rateKey string) bool {
+		t.Helper()
+		window := valkeyMinute()
+		for i := range 60 {
+			result := rpc(rateKey, "SendMessage", a2aTestParams{Message: message(fmt.Sprintf("rate-%d", i), "question")})
+			if result["error"] == nil {
+				<-upstreamIDs
+			}
+			if valkeyMinute() != window {
+				return false
+			}
+			if result["error"] != nil {
+				t.Fatalf("send %d was refused before the rate limit: %+v", i, result)
+			}
+		}
+		result := rpc(rateKey, "SendMessage", a2aTestParams{Message: message("over-rate", "question")})
+		if result["error"] == nil {
+			<-upstreamIDs
+		}
+		if valkeyMinute() != window {
+			return false
+		}
+		if result["error"] == nil {
+			t.Fatalf("send above the per-key rate limit was accepted: %+v", result)
+		}
+		select {
+		case <-upstreamIDs:
+			t.Fatal("send above the per-key rate limit reached the upstream")
+		default:
+		}
+		return true
 	}
-	select {
-	case <-upstreamIDs:
-		t.Fatal("send above the per-key rate limit reached the upstream")
-	default:
+	for attempt := 0; ; attempt++ {
+		rateKey := h.want(owner, http.MethodPost, "/api/v1/api-keys", map[string]any{"name": "rate-limited caller", "project_id": project, "scopes": []string{"agents"}, "allowed_agents": []string{agent}}, idem(fmt.Sprintf("a2a-rate-key-%d", attempt)), http.StatusCreated)["secret"].(string)
+		if err := h.Runtime.Refresh(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+		if verifyRate(rateKey) {
+			break
+		}
 	}
 	for _, invalid := range []struct {
 		name  string
@@ -1407,10 +1546,10 @@ func TestA2AAgentCardUsesGatewayAuthenticationAndEndpoint(t *testing.T) {
 			var upstreamResult struct {
 				Result protocol.Task `json:"result"`
 			}
-			err = json.NewDecoder(response.Body).Decode(&upstreamResult)
+			decodeErr := json.NewDecoder(response.Body).Decode(&upstreamResult)
 			response.Body.Close()
-			if err != nil {
-				t.Fatal(err)
+			if decodeErr != nil {
+				t.Fatal(decodeErr)
 			}
 			if upstreamResult.Result.Status.State == protocol.TaskStateCanceled {
 				break
@@ -1658,6 +1797,86 @@ func TestA2AAgentCardUsesGatewayAuthenticationAndEndpoint(t *testing.T) {
 		t.Fatal("send to a disabled agent reached the upstream")
 	default:
 	}
+	stopRestartedMonitor()
+	<-restartedMonitorStopped
+	burstDraft := h.want(owner, http.MethodPost, "/api/v1/agents", map[string]any{
+		"project_id": project, "name": "cancellation burst", "credential": "upstream-secret",
+		"agent": map[string]any{"protocol": "a2a-1.0.0", "endpoint": upstream.URL + "/rpc", "card_digest": hex.EncodeToString(digest[:]), "toolset_revisions": []string{}, "route_revisions": []string{}, "pricing_revision_id": pricing, "max_cost": "1", "message_price": messagePrice, "task_deadline_seconds": 600},
+	}, idem("a2a-burst-create"), http.StatusCreated)
+	burstAgent := burstDraft["id"].(string)
+	h.want(owner, http.MethodPost, "/api/v1/agents/"+burstAgent+"/publish", nil, withMatch(burstDraft, idem("a2a-burst-publish")), http.StatusOK)
+	burstKeys := slices.Collect(func(yield func(map[string]any) bool) {
+		for i := range 16 {
+			created := h.want(owner, http.MethodPost, "/api/v1/api-keys", map[string]any{"name": fmt.Sprintf("burst-%d", i), "project_id": project, "scopes": []string{"agents"}, "allowed_agents": []string{burstAgent}}, idem(fmt.Sprintf("a2a-burst-key-%d", i)), http.StatusCreated)
+			if !yield(created) {
+				return
+			}
+		}
+	})
+	if err := h.Runtime.Refresh(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	burstTasks := slices.Collect(func(yield func(string) bool) {
+		for _, burstKey := range burstKeys {
+			for range 4 {
+				result := rpcFor(burstAgent, burstKey["secret"].(string), "SendMessage", a2aTestParams{Message: message("request-input", "question")})
+				if result["error"] != nil {
+					t.Fatalf("burst task was refused: %+v", result)
+				}
+				if !yield(<-upstreamIDs) {
+					return
+				}
+			}
+		}
+	})
+	for i, burstKey := range burstKeys {
+		keyID := burstKey["id"].(string)
+		current := h.want(owner, http.MethodGet, "/api/v1/api-keys/"+keyID, nil, nil, http.StatusOK)
+		h.want(owner, http.MethodPost, "/api/v1/api-keys/"+keyID+"/revoke", nil, withMatch(current, idem(fmt.Sprintf("a2a-burst-revoke-%d", i))), http.StatusOK)
+	}
+	if err := h.Runtime.Refresh(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	holdCancellation.Store(true)
+	burstStart := time.Now()
+	burstContext, stopBurst := context.WithCancel(t.Context())
+	burstStopped := make(chan struct{})
+	go func() {
+		defer close(burstStopped)
+		monitor.Run(burstContext)
+	}()
+	t.Cleanup(func() {
+		stopBurst()
+		<-burstStopped
+	})
+	burstDeadline := time.NewTimer(60 * time.Second)
+	defer burstDeadline.Stop()
+	observed := slices.Collect(func(yield func(string) bool) {
+		for range len(burstTasks) {
+			for {
+				select {
+				case id := <-cancelAttempts:
+					if !slices.Contains(burstTasks, id) {
+						continue
+					}
+					if !yield(id) {
+						return
+					}
+				case <-burstDeadline.C:
+					t.Fatal("cancellation burst did not reach every task within 60 seconds")
+				}
+				break
+			}
+		}
+	})
+	for _, id := range burstTasks {
+		if !slices.Contains(observed, id) {
+			t.Fatalf("cancellation burst starved task %q", id)
+		}
+	}
+	t.Logf("requested cancellation for %d distinct tasks in %s", len(burstTasks), time.Since(burstStart))
+	stopBurst()
+	<-burstStopped
 }
 
 func TestStructuredPromptPublicationValidatesAndExports(t *testing.T) {

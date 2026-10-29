@@ -13,34 +13,36 @@ func (m *Manager) AuthorizeAgentTask(keyID, projectID, publicationID, revisionID
 	if !m.authority.loaded || now.Sub(m.authority.readAt) > AuthorityStaleAfter {
 		return ErrStaleAuthority
 	}
-	principal, ok := m.authority.agentPrincipals[keyID]
+	principal, ok := m.authority.taskPrincipal(keyID)
 	if !ok || principal.ID != keyID || principal.ProjectID == nil || *principal.ProjectID != projectID || principal.RevokedAt != nil || principal.ExpiresAt != nil && !principal.ExpiresAt.After(now) || callerExpiresAt != nil && !callerExpiresAt.After(now) {
 		return access.Forbidden()
 	}
-	if principal.WorkloadIssuerID != nil {
-		if callerExpiresAt == nil || workloadRevision == "" {
-			return access.Forbidden()
-		}
-		return m.authority.authorizeWorkloadAgentTask(principal, projectID, publicationID, revisionID, workloadRevision, now)
+	if principal.WorkloadIssuerID != nil && (principal.WorkloadDigest == "" || callerExpiresAt == nil || workloadRevision == "") {
+		return access.Forbidden()
 	}
-	if !principal.AllowsResource("agents", publicationID, projectID, now) {
+	identity := access.Authority{
+		ID:               principal.ID,
+		WorkloadDigest:   principal.WorkloadDigest,
+		WorkloadIssuerID: principal.WorkloadIssuerID,
+		WorkloadMapping:  principal.WorkloadMapping,
+		WorkloadRevision: workloadRevision,
+	}
+	if !m.authority.currentAgentPrincipal(identity, "agents", publicationID, projectID, now) {
 		return access.Forbidden()
 	}
 	return m.authority.authorizeTaskPublication(projectID, publicationID, revisionID)
 }
 
-func (state authorityState) authorizeWorkloadAgentTask(principal access.Authority, projectID, publicationID, revisionID, workloadRevision string, now time.Time) error {
-	for _, issuer := range state.workloadIssuers {
-		if issuer.ID != *principal.WorkloadIssuerID {
-			continue
-		}
-		binding, ok := issuer.bindings[principal.WorkloadMapping]
-		if !issuer.Config.Enabled || issuer.Revision != workloadRevision || !ok || !binding.AllowsResource("agents", publicationID, projectID, now) {
-			return access.Forbidden()
-		}
-		return state.authorizeTaskPublication(projectID, publicationID, revisionID)
+func (state authorityState) taskPrincipal(keyID string) (access.Authority, bool) {
+	if principal, ok := state.agentPrincipals[keyID]; ok {
+		return principal, true
 	}
-	return access.Forbidden()
+	for _, principal := range state.workloadPrincipals {
+		if principal.ID == keyID {
+			return principal, true
+		}
+	}
+	return access.Authority{}, false
 }
 
 func (state authorityState) authorizeTaskPublication(projectID, publicationID, revisionID string) error {

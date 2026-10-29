@@ -311,6 +311,12 @@ func (s *Server) getTask(w http.ResponseWriter, r *http.Request, authority acces
 		return
 	}
 	defer cleanup()
+	if request.Method == "CancelTask" {
+		if err := s.Ledger.recordTaskState(r.Context(), owned.ID, "outcome_unknown"); err != nil {
+			fail(w, request.ID, -32603, "Internal error")
+			return
+		}
+	}
 	upstream, err := func() (*protocol.Task, error) {
 		if request.Method == "CancelTask" {
 			return transport.CancelTask(r.Context(), headers, &protocol.CancelTaskRequest{ID: protocol.TaskID(owned.UpstreamID)})

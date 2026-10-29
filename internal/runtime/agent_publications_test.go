@@ -143,11 +143,11 @@ func TestAgentTaskRechecksWorkloadRevisionAndExpiry(t *testing.T) {
 	principal := access.Authority{ID: "principal", ProjectID: &project, WorkloadIssuerID: &issuerID, WorkloadDigest: "digest", WorkloadMapping: "worker"}
 	binding := access.Authority{ID: principal.ID, ProjectID: &project, Policy: access.KeyPolicy{Scopes: []string{"agents"}, AllowedAgents: []string{resource}}}
 	manager := Manager{authority: authorityState{
-		loaded:          true,
-		readAt:          now,
-		agentPrincipals: map[string]access.Authority{principal.ID: principal},
-		workloadIssuers: map[string]workloadIssuer{issuerID: {ID: issuerID, Revision: "revision", Config: workload.Config{Enabled: true}, bindings: map[string]access.Authority{principal.WorkloadMapping: binding}}},
-		agentResources:  map[string]agentResourceAuthority{resource: {ProjectID: project, Kind: "agent", Revisions: map[string]bool{resource: true}}},
+		loaded:             true,
+		readAt:             now,
+		workloadPrincipals: map[string]access.Authority{principal.WorkloadDigest: principal},
+		workloadIssuers:    map[string]workloadIssuer{issuerID: {ID: issuerID, Revision: "revision", Config: workload.Config{Enabled: true}, bindings: map[string]access.Authority{principal.WorkloadMapping: binding}}},
+		agentResources:     map[string]agentResourceAuthority{resource: {ProjectID: project, Kind: "agent", Revisions: map[string]bool{resource: true}}},
 	}}
 	for _, test := range []struct {
 		name     string

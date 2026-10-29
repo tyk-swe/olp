@@ -140,7 +140,7 @@ func (l *Ledger) settle(ctx context.Context, res reservation, authority access.A
 		return "", err
 	}
 	defer tx.Rollback(ctx)
-	taskID, err := settleTask(ctx, tx, res, authority, revision, upstreamID, contextID)
+	taskID, err := settleTask(ctx, tx, res, authority, revision, upstreamID, contextID, state)
 	if err != nil {
 		return "", err
 	}
@@ -151,7 +151,7 @@ func (l *Ledger) settle(ctx context.Context, res reservation, authority access.A
 		return "", err
 	}
 	if taskID != "" {
-		if _, err := tx.Exec(ctx, `UPDATE olp.a2a_tasks SET state=$2 WHERE id=$1 AND (state IN ('active','outcome_unknown') OR state=$2)`, taskID, state); err != nil {
+		if _, err := tx.Exec(ctx, `UPDATE olp.a2a_tasks SET state=CASE WHEN state='outcome_unknown' AND $2='active' THEN state ELSE $2 END WHERE id=$1 AND (state IN ('active','outcome_unknown') OR state=$2)`, taskID, state); err != nil {
 			return "", err
 		}
 	}
@@ -164,7 +164,7 @@ func (l *Ledger) settle(ctx context.Context, res reservation, authority access.A
 	return taskID, nil
 }
 
-func settleTask(ctx context.Context, tx pgx.Tx, res reservation, authority access.Authority, revision agentcontract.Revision, upstreamID, contextID string) (string, error) {
+func settleTask(ctx context.Context, tx pgx.Tx, res reservation, authority access.Authority, revision agentcontract.Revision, upstreamID, contextID, state string) (string, error) {
 	if upstreamID == "" {
 		return "", nil
 	}
@@ -172,7 +172,7 @@ func settleTask(ctx context.Context, tx pgx.Tx, res reservation, authority acces
 	if err != nil {
 		return "", err
 	}
-	if _, err := tx.Exec(ctx, `INSERT INTO olp.a2a_tasks(id,api_key_id,project_id,publication_id,revision_id,dispatch_id,upstream_id,upstream_context_id,deadline_at,caller_workload_revision_id,caller_expires_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,(SELECT created_at FROM olp.a2a_task_admissions WHERE dispatch_id=$6)+$9*interval '1 second',NULLIF($10,'')::uuid,$11) ON CONFLICT(api_key_id,project_id,publication_id,upstream_id) DO NOTHING`, id, authority.ID, *authority.ProjectID, revision.PublicationID, revision.ID, res.DispatchID, upstreamID, contextID, taskDeadlineSeconds(revision.Definition.Agent), authority.WorkloadRevision, authority.ExpiresAt); err != nil {
+	if _, err := tx.Exec(ctx, `INSERT INTO olp.a2a_tasks(id,api_key_id,project_id,publication_id,revision_id,dispatch_id,upstream_id,upstream_context_id,deadline_at,caller_workload_revision_id,caller_expires_at,state) VALUES($1,$2,$3,$4,$5,$6,$7,$8,(SELECT created_at FROM olp.a2a_task_admissions WHERE dispatch_id=$6)+$9*interval '1 second',NULLIF($10,'')::uuid,$11,$12) ON CONFLICT(api_key_id,project_id,publication_id,upstream_id) DO NOTHING`, id, authority.ID, *authority.ProjectID, revision.PublicationID, revision.ID, res.DispatchID, upstreamID, contextID, taskDeadlineSeconds(revision.Definition.Agent), authority.WorkloadRevision, authority.ExpiresAt, state); err != nil {
 		return "", err
 	}
 	var publicID, pinned string
