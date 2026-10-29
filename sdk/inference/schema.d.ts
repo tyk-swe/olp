@@ -429,6 +429,51 @@ export interface components {
         } & {
             [key: string]: unknown;
         };
+        ResponsesToolWorkflowRequest: {
+            model: string;
+            input: string | {
+                [key: string]: unknown;
+            }[];
+            olp_toolsets?: components["schemas"]["ChatToolsetSelection"];
+        } & {
+            [key: string]: unknown;
+        };
+        ResponsesMCPTool: {
+            name: string;
+            description?: string;
+            input_schema: {
+                [key: string]: unknown;
+            };
+        };
+        ResponsesMCPListTools: {
+            /** @enum {string} */
+            type: "mcp_list_tools";
+            id: string;
+            server_label: string;
+            tools: components["schemas"]["ResponsesMCPTool"][];
+        };
+        ResponsesMCPCall: {
+            /** @enum {string} */
+            type: "mcp_call";
+            id: string;
+            server_label: string;
+            name: string;
+            arguments: string;
+            output?: string;
+            status?: string;
+            error?: {
+                /** @enum {string} */
+                type: "mcp_tool_execution_error";
+                content: unknown;
+            };
+        };
+        ResponsesWorkflowResponse: {
+            output?: (components["schemas"]["ResponsesMCPListTools"] | components["schemas"]["ResponsesMCPCall"] | {
+                [key: string]: unknown;
+            })[];
+        } & {
+            [key: string]: unknown;
+        };
     };
     responses: never;
     parameters: never;
@@ -811,19 +856,17 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["ResponsesPromptRequest"];
+                "application/json": components["schemas"]["ResponsesPromptRequest"] | components["schemas"]["ResponsesToolWorkflowRequest"];
             };
         };
         responses: {
-            /** @description Provider completion response or stream */
+            /** @description Provider completion response or stream, including gateway MCP items when enabled by route policy */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["ResponsesWorkflowResponse"];
                     "text/event-stream": string;
                 };
             };

@@ -156,6 +156,20 @@ func WorkflowDefinitions(family wire.Format, tools []Tool) (json.RawMessage, err
 }
 
 func WorkflowTurns(family wire.Format, completion *wire.Completion, results []WorkflowResult) ([]json.RawMessage, error) {
+	if family == wire.Responses {
+		fields, err := object(completion.Body)
+		if err != nil || len(arr(fields["output"])) == 0 {
+			return nil, unsupported("workflow turns")
+		}
+		turns := slices.Collect(func(yield func(json.RawMessage) bool) {
+			for _, result := range results {
+				if !yield(raw(Object{"type": raw("function_call_output"), "call_id": raw(result.CallID), "output": raw(result.Content)})) {
+					return
+				}
+			}
+		})
+		return slices.Concat(arr(fields["output"]), turns), nil
+	}
 	messages := slices.Collect(func(yield func(Message) bool) {
 		if !yield(Message{Role: "assistant", Parts: []Part{{Text: completion.OutputText}}, Calls: completion.ToolCalls}) {
 			return

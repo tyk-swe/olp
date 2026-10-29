@@ -415,19 +415,21 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/ResponsesPromptRequest"
+                "oneOf": [
+                  { "$ref": "#/components/schemas/ResponsesPromptRequest" },
+                  { "$ref": "#/components/schemas/ResponsesToolWorkflowRequest" }
+                ]
               }
             }
           }
         },
         "responses": {
           "200": {
-            "description": "Provider completion response or stream",
+            "description": "Provider completion response or stream, including gateway MCP items when enabled by route policy",
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "additionalProperties": true
+                  "$ref": "#/components/schemas/ResponsesWorkflowResponse"
                 }
               },
               "text/event-stream": {
@@ -1680,6 +1682,137 @@
           },
           "prompt": {
             "$ref": "#/components/schemas/NativeResponsesPromptReference"
+          }
+        },
+        "additionalProperties": true
+      },
+      "ResponsesToolWorkflowRequest": {
+        "type": "object",
+        "required": ["model", "input"],
+        "properties": {
+          "model": { "type": "string" },
+          "input": {
+            "oneOf": [
+              { "type": "string" },
+              { "type": "array", "items": { "type": "object", "additionalProperties": true } }
+            ]
+          },
+          "olp_toolsets": { "$ref": "#/components/schemas/ChatToolsetSelection" }
+        },
+        "additionalProperties": true,
+        "not": { "required": ["prompt"] }
+      },
+      "ResponsesMCPTool": {
+        "type": "object",
+        "required": [
+          "name",
+          "input_schema"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "input_schema": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        }
+      },
+      "ResponsesMCPListTools": {
+        "type": "object",
+        "required": [
+          "type",
+          "id",
+          "server_label",
+          "tools"
+        ],
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "mcp_list_tools"
+            ]
+          },
+          "id": {
+            "type": "string"
+          },
+          "server_label": {
+            "type": "string"
+          },
+          "tools": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ResponsesMCPTool"
+            }
+          }
+        }
+      },
+      "ResponsesMCPCall": {
+        "type": "object",
+        "required": [
+          "type",
+          "id",
+          "server_label",
+          "name",
+          "arguments"
+        ],
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "mcp_call"
+            ]
+          },
+          "id": {
+            "type": "string"
+          },
+          "server_label": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "arguments": {
+            "type": "string"
+          },
+          "output": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "error": {
+            "type": "object",
+            "required": ["type", "content"],
+            "properties": {
+              "type": { "type": "string", "enum": ["mcp_tool_execution_error"] },
+              "content": {}
+            }
+          }
+        }
+      },
+      "ResponsesWorkflowResponse": {
+        "type": "object",
+        "properties": {
+          "output": {
+            "type": "array",
+            "items": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/ResponsesMCPListTools"
+                },
+                {
+                  "$ref": "#/components/schemas/ResponsesMCPCall"
+                },
+                {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              ]
+            }
           }
         },
         "additionalProperties": true

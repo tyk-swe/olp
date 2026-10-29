@@ -102,7 +102,8 @@ export function emptyBehavior(): RouteBehavior {
     passthrough: null,
     certification: 'certified',
     tool_execution: '',
-    toolsets: []
+    toolsets: [],
+    responses_mcp_items: false
   };
 }
 
@@ -620,6 +621,7 @@ function behaviorFields(behavior: RouteBehavior | undefined) {
     prompt_cache: value.prompt_cache,
     tool_execution: value.tool_execution,
     toolsets: value.toolsets,
+    responses_mcp_items: value.responses_mcp_items,
     passthrough: value.passthrough ?? null,
     ...(value.caller_cost_exempt !== undefined
       ? { caller_cost_exempt: value.caller_cost_exempt }

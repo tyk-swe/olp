@@ -8313,7 +8313,10 @@ type ConfigurationRouteEntry struct {
 
 	// ProviderFetchedDocuments Allow the bound provider to fetch https document URLs named by callers on this route (default false). The gateway never fetches document bytes itself.
 	ProviderFetchedDocuments *bool `json:"provider_fetched_documents,omitempty"`
-	Retired                  *bool `json:"retired,omitempty"`
+
+	// ResponsesMcpItems Operator declaration that Responses clients support gateway-generated MCP output items. Requires gateway tool execution on a transformed route.
+	ResponsesMcpItems *bool `json:"responses_mcp_items,omitempty"`
+	Retired           *bool `json:"retired,omitempty"`
 
 	// Retry Same-target retries per retryable failure class, with full-jitter exponential backoff. Retries consume the attempt budget and the overall deadline and never follow commitment or an ambiguous creation.
 	Retry         *RouteRetry                      `json:"retry,omitempty"`
@@ -9009,6 +9012,9 @@ type CreateRouteDraftRequest struct {
 
 	// ProviderFetchedDocuments Allow the bound provider to fetch https document URLs named by callers on this route (default false). The gateway never fetches document bytes itself.
 	ProviderFetchedDocuments *bool `json:"provider_fetched_documents,omitempty"`
+
+	// ResponsesMcpItems Operator declaration that Responses clients support gateway-generated MCP output items. Requires gateway tool execution on a transformed route.
+	ResponsesMcpItems *bool `json:"responses_mcp_items,omitempty"`
 
 	// Retry Same-target retries per retryable failure class, with full-jitter exponential backoff. Retries consume the attempt budget and the overall deadline and never follow commitment or an ambiguous creation.
 	Retry *RouteRetry `json:"retry,omitempty"`
@@ -12750,6 +12756,9 @@ type ReplaceRouteDraftRequest struct {
 	// ProviderFetchedDocuments Allow the bound provider to fetch https document URLs named by callers on this route (default false). The gateway never fetches document bytes itself.
 	ProviderFetchedDocuments *bool `json:"provider_fetched_documents,omitempty"`
 
+	// ResponsesMcpItems Operator declaration that Responses clients support gateway-generated MCP output items. Requires gateway tool execution on a transformed route.
+	ResponsesMcpItems *bool `json:"responses_mcp_items,omitempty"`
+
 	// Retry Same-target retries per retryable failure class, with full-jitter exponential backoff. Retries consume the attempt budget and the overall deadline and never follow commitment or an ambiguous creation.
 	Retry *RouteRetry `json:"retry,omitempty"`
 
@@ -13268,6 +13277,9 @@ type RouteBehavior struct {
 	// ProviderFetchedDocuments Allow the bound provider to fetch https document URLs named by callers on this route (default false). The gateway never fetches document bytes itself.
 	ProviderFetchedDocuments *bool `json:"provider_fetched_documents,omitempty"`
 
+	// ResponsesMcpItems Operator declaration that Responses clients support gateway-generated MCP output items. Requires gateway tool execution on a transformed route.
+	ResponsesMcpItems *bool `json:"responses_mcp_items,omitempty"`
+
 	// Retry Same-target retries per retryable failure class, with full-jitter exponential backoff. Retries consume the attempt budget and the overall deadline and never follow commitment or an ambiguous creation.
 	Retry     RouteRetry      `json:"retry"`
 	Selectors []RouteSelector `json:"selectors"`
@@ -13363,6 +13375,9 @@ type RouteDraftDetailResponse struct {
 
 	// ProviderFetchedDocuments Allow the bound provider to fetch https document URLs named by callers on this route (default false). The gateway never fetches document bytes itself.
 	ProviderFetchedDocuments *bool `json:"provider_fetched_documents,omitempty"`
+
+	// ResponsesMcpItems Operator declaration that Responses clients support gateway-generated MCP output items. Requires gateway tool execution on a transformed route.
+	ResponsesMcpItems *bool `json:"responses_mcp_items,omitempty"`
 
 	// Retry Same-target retries per retryable failure class, with full-jitter exponential backoff. Retries consume the attempt budget and the overall deadline and never follow commitment or an ambiguous creation.
 	Retry     RouteRetry            `json:"retry"`
@@ -13522,6 +13537,9 @@ type RouteRevisionResponse struct {
 
 	// ProviderFetchedDocuments Allow the bound provider to fetch https document URLs named by callers on this route (default false). The gateway never fetches document bytes itself.
 	ProviderFetchedDocuments *bool `json:"provider_fetched_documents,omitempty"`
+
+	// ResponsesMcpItems Operator declaration that Responses clients support gateway-generated MCP output items. Requires gateway tool execution on a transformed route.
+	ResponsesMcpItems *bool `json:"responses_mcp_items,omitempty"`
 
 	// Retry Same-target retries per retryable failure class, with full-jitter exponential backoff. Retries consume the attempt budget and the overall deadline and never follow commitment or an ambiguous creation.
 	Retry         RouteRetry            `json:"retry"`
@@ -14915,6 +14933,9 @@ type UpdatePublishedRouteRequest struct {
 
 	// ProviderFetchedDocuments Allow the bound provider to fetch https document URLs named by callers on this route (default false). The gateway never fetches document bytes itself.
 	ProviderFetchedDocuments *bool `json:"provider_fetched_documents,omitempty"`
+
+	// ResponsesMcpItems Operator declaration that Responses clients support gateway-generated MCP output items. Requires gateway tool execution on a transformed route.
+	ResponsesMcpItems *bool `json:"responses_mcp_items,omitempty"`
 
 	// Retry Same-target retries per retryable failure class, with full-jitter exponential backoff. Retries consume the attempt budget and the overall deadline and never follow commitment or an ambiguous creation.
 	Retry *RouteRetry `json:"retry,omitempty"`

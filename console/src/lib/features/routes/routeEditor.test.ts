@@ -387,6 +387,7 @@ describe('gateway tool execution', () => {
     behavior: {
       ...emptyBehavior(),
       tool_execution: 'gateway',
+      responses_mcp_items: true,
       toolsets: [toolset]
     }
   };
@@ -405,10 +406,12 @@ describe('gateway tool execution', () => {
   it('keeps gateway execution and toolsets when creating or saving a route', () => {
     expect(buildCreateRouteDraftInput(values, models)).toMatchObject({
       tool_execution: 'gateway',
+      responses_mcp_items: true,
       toolsets: [toolset]
     });
     expect(buildReplaceRouteDraftInput(values)).toMatchObject({
       tool_execution: 'gateway',
+      responses_mcp_items: true,
       toolsets: [toolset]
     });
   });
