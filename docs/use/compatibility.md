@@ -45,6 +45,17 @@ mode, and the packaged-console journey covers publication, label movement and
 accessible playground rendering. This fixture evidence does not qualify a live
 provider deployment.
 
+## Saved investigations
+
+The management API and console save project-scoped investigations with time,
+run, duration, error and tool filters, an operator-authored summary and up to
+100 references to run, step, approval, span, task or delegation evidence. The
+record contains no source payloads. Reading an investigation requires current
+project access; opening referenced evidence requires its own current access
+check. Evidence follows its own retention policy and can expire before the
+investigation. The local HTTP regression and packaged-console journey exercise
+these boundaries; they do not qualify a live provider integration.
+
 ## Consumer MCP qualification
 
 Published tools support the JSON call endpoint and Streamable HTTP at MCP

@@ -525,6 +525,57 @@ export async function verifyRunInspection(page: Page, info: TestInfo) {
     path: info.outputPath('run-detail.png'),
     fullPage: true
   });
+  await page.getByRole('link', { name: 'Save investigation' }).click();
+  await expect(page.getByLabel('Run ID')).toHaveValue(run.id);
+  await page.getByLabel('Minimum duration (ms)').fill('100');
+  await page.getByLabel('Error').selectOption('true');
+  await page.getByLabel('Tool').fill('change');
+  await page.getByLabel('Summary').fill('Investigate the tool outcome');
+  await page.getByLabel('Evidence kind').selectOption('approval');
+  await page.getByLabel('Evidence ID').fill(detail.approvals[0].id);
+  await page.getByRole('button', { name: 'Add evidence' }).click();
+  expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
+  await page.evaluate(() => {
+    (document.activeElement as HTMLElement | null)?.blur();
+    window.scrollTo(0, 0);
+  });
+  await page.screenshot({
+    path: info.outputPath('investigation-form.png'),
+    fullPage: true
+  });
+  await page.getByRole('button', { name: 'Save investigation' }).click();
+  await expect(
+    page.getByRole('heading', { name: 'Investigation', exact: true })
+  ).toBeVisible();
+  await expect(page.getByText('Investigate the tool outcome')).toBeVisible();
+  await expect(page.getByText(detail.approvals[0].id)).toBeVisible();
+  await expect(page.getByText('100 ms')).toBeVisible();
+  expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
+  await page.screenshot({
+    path: info.outputPath('investigation-detail.png'),
+    fullPage: true
+  });
+  const investigationID = page.url().split('/').at(-1);
+  expect(investigationID).toBeTruthy();
+  await page.getByRole('link', { name: 'All investigations' }).click();
+  await expect(
+    page.getByRole('heading', { name: 'Investigations' })
+  ).toBeVisible();
+  await expect(
+    page.getByRole('link', { name: 'Investigate the tool outcome' })
+  ).toBeVisible();
+  expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
+  await page.screenshot({
+    path: info.outputPath('investigations-list.png'),
+    fullPage: true
+  });
+  await page
+    .getByRole('link', { name: 'Investigate the tool outcome' })
+    .click();
+  await page.getByRole('link', { name: detail.approvals[0].id }).click();
+  await expect(
+    page.getByRole('heading', { name: 'Run', exact: true })
+  ).toBeVisible();
   for (const variant of variantRuns) {
     await page.goto(`/runs/${variant.run.id}`);
     const toolRow = page.getByRole('row').filter({ hasText: variant.alias });
@@ -607,6 +658,12 @@ export async function verifyRunInspection(page: Page, info: TestInfo) {
     await expect(
       viewerPage.getByText('01010101010101010101010101010101')
     ).toBeVisible();
+    await viewerPage.goto(`/investigations/${investigationID}`);
+    await expect(
+      viewerPage.getByText('Investigate the tool outcome')
+    ).toBeVisible();
+    await viewerPage.goto('/runs');
+    await viewerPage.getByRole('link', { name: run.id }).click();
     const listRoute = (url: URL) => url.pathname === '/api/v1/agent-runs';
     await viewerPage.route(listRoute, (route) =>
       route.fulfill({
@@ -670,13 +727,18 @@ export async function verifyRunInspection(page: Page, info: TestInfo) {
       }
     );
     expect(removed.status()).toBe(204);
-    await viewerPage.getByRole('link', { name: run.id }).click();
+    await viewerPage.goto(`/investigations/${investigationID}`);
+    await expect(viewerPage.getByRole('alert')).toBeVisible();
+    await expect(
+      viewerPage.getByText('Investigate the tool outcome')
+    ).toHaveCount(0);
+    await viewerPage.goto(`/runs/${run.id}`);
     await expect(viewerPage.getByRole('alert')).toBeVisible();
     await expect(viewerPage.getByText(detail.approvals[0].id)).toHaveCount(0);
     await expect(
       viewerPage.getByText('01010101010101010101010101010101')
     ).toHaveCount(0);
-    await viewerPage.getByRole('link', { name: 'All runs' }).click();
+    await viewerPage.goto('/runs');
     await expect(viewerPage.getByRole('link', { name: run.id })).toHaveCount(0);
     await expect(
       viewerPage.getByRole('option', { name: 'Run inspection project' })

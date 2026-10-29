@@ -3,11 +3,13 @@
   import { createQuery } from '@tanstack/svelte-query';
   import { writable } from 'svelte/store';
   import { errorMessage } from '$lib/api/http';
+  import { useRole } from '$lib/features/access/session/useRole.svelte';
   import { getRun, listRunSpans } from './api';
   import { agentKeys } from './agentKeys';
 
   let { runID }: { runID: string } = $props();
   const cursor = writable<string | undefined>(undefined);
+  const access = useRole();
   const run = createQuery(() => ({
     queryKey: agentKeys.run(runID),
     queryFn: () => getRun(runID),
@@ -40,6 +42,15 @@
 {:else if run.isFetching}
   <p>Loading run…</p>
 {:else if run.data}
+  {#if access.allows('POST /api/v1/investigations')}
+    <p>
+      <a
+        class="button button-secondary"
+        href={`${resolve('/investigations/new')}?project=${encodeURIComponent(run.data.project_id)}&run=${encodeURIComponent(runID)}`}
+        >Save investigation</a
+      >
+    </p>
+  {/if}
   <dl>
     <dt>Project</dt>
     <dd><code>{run.data.project_id}</code></dd>

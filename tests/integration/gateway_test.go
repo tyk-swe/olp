@@ -1138,6 +1138,34 @@ func TestGatewayToolWorkflowSettlesOneRun(t *testing.T) {
 		}
 	}
 	otherProject := createProject(h, owner, "Other run project")
+	evidence := []any{
+		map[string]any{"kind": "run", "id": runID},
+		map[string]any{"kind": "step", "id": mcpExecString(t, toolStep, "id")},
+		map[string]any{"kind": "span", "id": mcpExecString(t, mcpExecItem(t, allSpans, 0, spanPage), "id")},
+	}
+	investigationInput := map[string]any{"project_id": project, "filters": map[string]any{"run_id": runID}, "evidence": evidence, "summary": "Review the tool and trace"}
+	investigation := h.want(owner, "POST", "/api/v1/investigations", investigationInput, idem("run-investigation"), http.StatusCreated)
+	investigationID := mcpExecString(t, investigation, "id")
+	if len(mcpExecItems(t, investigation, "evidence")) != 3 || strings.Contains(fmt.Sprint(investigation), prompt) || strings.Contains(fmt.Sprint(investigation), argument) || strings.Contains(fmt.Sprint(investigation), answer) {
+		t.Fatalf("investigation did not preserve content-free evidence references: %v", investigation)
+	}
+	investigationDetail := h.want(owner, "GET", "/api/v1/investigations/"+investigationID, nil, nil, http.StatusOK)
+	for _, index := range []int{1, 2} {
+		if reference := mcpExecItem(t, mcpExecItems(t, investigationDetail, "evidence"), index, investigationDetail); reference["run_id"] != runID {
+			t.Fatalf("evidence did not link to its run: %v", reference)
+		}
+	}
+	for i, reference := range evidence {
+		h.want(owner, "POST", "/api/v1/investigations", map[string]any{"project_id": otherProject, "filters": map[string]any{}, "evidence": []any{reference}, "summary": "Wrong project"}, idem(fmt.Sprintf("foreign-investigation-%d", i)), http.StatusUnprocessableEntity)
+	}
+	h.want(owner, "POST", "/api/v1/investigations", map[string]any{"project_id": otherProject, "filters": map[string]any{"run_id": runID}, "evidence": []any{}, "summary": "Wrong run"}, idem("foreign-investigation-run"), http.StatusUnprocessableEntity)
+	tooMany := make([]any, 101)
+	for i := range tooMany {
+		tooMany[i] = map[string]any{"kind": "run", "id": runID}
+	}
+	h.want(owner, "POST", "/api/v1/investigations", map[string]any{"project_id": project, "filters": map[string]any{}, "evidence": tooMany[:100], "summary": "Maximum evidence"}, idem("maximum-investigation"), http.StatusCreated)
+	h.want(owner, "POST", "/api/v1/investigations", map[string]any{"project_id": project, "filters": map[string]any{}, "evidence": tooMany, "summary": "Too many"}, idem("oversized-investigation"), http.StatusUnprocessableEntity)
+	h.want(owner, "POST", "/api/v1/investigations", map[string]any{"project_id": project, "filters": map[string]any{}, "evidence": []any{map[string]any{"kind": "run", "id": runID, "payload": prompt}}, "summary": "Unexpected source"}, idem("payload-investigation"), http.StatusBadRequest)
 	viewer := h.invite(owner, "run-viewer@example.com", "viewer")
 	viewerSession := h.want(viewer, "GET", "/api/v1/sessions/current", nil, nil, http.StatusOK)
 	viewerID := mcpExecString(t, mcpExecObject(t, viewerSession, "user"), "id")
@@ -1148,15 +1176,29 @@ func TestGatewayToolWorkflowSettlesOneRun(t *testing.T) {
 	h.want(assignedViewer, "GET", "/api/v1/agent-runs?project_id="+project, nil, nil, http.StatusNotFound)
 	h.want(assignedViewer, "GET", "/api/v1/agent-runs/"+runID, nil, nil, http.StatusNotFound)
 	h.want(assignedViewer, "GET", "/api/v1/agent-runs/"+runID+"/spans", nil, nil, http.StatusNotFound)
+	h.want(assignedViewer, "GET", "/api/v1/investigations/"+investigationID, nil, nil, http.StatusNotFound)
+	if filtered := h.want(assignedViewer, "GET", "/api/v1/investigations", nil, nil, http.StatusOK); len(mcpExecItems(t, filtered, "items")) != 0 {
+		t.Fatalf("project viewer could see another project's investigations: %v", filtered)
+	}
 	if filtered := h.want(assignedViewer, "GET", "/api/v1/agent-runs", nil, nil, http.StatusOK); len(mcpExecItems(t, filtered, "items")) != 0 {
 		t.Fatalf("project viewer could see another project's runs: %v", filtered)
 	}
 	addMember(h, owner, project, viewerID, "viewer")
 	h.want(assignedViewer, "GET", "/api/v1/agent-runs/"+runID, nil, nil, http.StatusOK)
 	h.want(assignedViewer, "GET", "/api/v1/agent-runs/"+runID+"/spans", nil, nil, http.StatusOK)
+	h.want(assignedViewer, "GET", "/api/v1/investigations/"+investigationID, nil, nil, http.StatusOK)
 	h.want(owner, "DELETE", "/api/v1/projects/"+project+"/members/"+viewerID, nil, projectEtag(h, owner, project), http.StatusNoContent)
 	h.want(assignedViewer, "GET", "/api/v1/agent-runs/"+runID, nil, nil, http.StatusNotFound)
 	h.want(assignedViewer, "GET", "/api/v1/agent-runs/"+runID+"/spans", nil, nil, http.StatusNotFound)
+	h.want(assignedViewer, "GET", "/api/v1/investigations/"+investigationID, nil, nil, http.StatusNotFound)
+	if filtered := h.want(assignedViewer, "GET", "/api/v1/investigations", nil, nil, http.StatusOK); len(mcpExecItems(t, filtered, "items")) != 0 {
+		t.Fatalf("viewer retained access to investigations after project revocation: %v", filtered)
+	}
+	acctExec(t, h.Pool, `DELETE FROM olp.trace_spans WHERE id=$1`, evidence[2].(map[string]any)["id"])
+	investigationAfterRetention := h.want(owner, "GET", "/api/v1/investigations/"+investigationID, nil, nil, http.StatusOK)
+	if reference := mcpExecItem(t, mcpExecItems(t, investigationAfterRetention, "evidence"), 2, investigationAfterRetention); reference["id"] != evidence[2].(map[string]any)["id"] || reference["run_id"] != nil {
+		t.Fatalf("expired span reference was not retained: %v", reference)
+	}
 	var stored string
 	if err := h.Pool.QueryRow(t.Context(), `SELECT
 		COALESCE((SELECT row_to_json(r)::text FROM olp.agent_runs r WHERE r.id=$1),'') ||
@@ -1164,7 +1206,8 @@ func TestGatewayToolWorkflowSettlesOneRun(t *testing.T) {
 		COALESCE((SELECT string_agg(row_to_json(d)::text,'') FROM olp.execution_debits d WHERE d.run_id=$1),'') ||
 		COALESCE((SELECT string_agg(row_to_json(c)::text,'') FROM olp.mcp_tool_calls c JOIN olp.execution_debits d ON d.id=c.dispatch_id WHERE d.run_id=$1),'') ||
 		COALESCE((SELECT string_agg(row_to_json(f)::text,'') FROM olp.attempt_usage_facts f JOIN olp.execution_debits d ON d.id=f.attempt_id WHERE d.run_id=$1),'') ||
-		COALESCE((SELECT string_agg(row_to_json(t)::text,'') FROM olp.trace_spans t WHERE t.run_id=$1),'')`, runID).Scan(&stored); err != nil {
+		COALESCE((SELECT string_agg(row_to_json(t)::text,'') FROM olp.trace_spans t WHERE t.run_id=$1),'') ||
+		COALESCE((SELECT row_to_json(i)::text FROM olp.investigations i WHERE i.id=$2),'')`, runID, investigationID).Scan(&stored); err != nil {
 		t.Fatal(err)
 	}
 	if strings.Contains(stored, prompt) || strings.Contains(stored, argument) || strings.Contains(stored, answer) || strings.Contains(stored, "workflow-private-span") {

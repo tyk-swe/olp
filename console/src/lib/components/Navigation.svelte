@@ -61,6 +61,12 @@
           route: 'GET /api/v1/agent-runs'
         },
         {
+          label: 'Investigations',
+          href: resolve('/investigations'),
+          icon: 'route',
+          route: 'GET /api/v1/investigations'
+        },
+        {
           label: 'Tool calls',
           href: resolve('/tool-calls'),
           icon: 'route',

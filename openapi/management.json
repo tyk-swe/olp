@@ -29368,6 +29368,197 @@
           "next_cursor"
         ],
         "description": "Correlated spans, ordered by start time and ID from newest to oldest."
+      },
+      "InvestigationFilters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "from": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "to": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "run_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "min_duration_ms": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "max_duration_ms": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "error": {
+            "type": "boolean"
+          },
+          "tool": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          }
+        },
+        "required": [],
+        "description": "Typed filters used to investigate agent evidence."
+      },
+      "InvestigationEvidence": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "run",
+              "step",
+              "approval",
+              "span",
+              "task",
+              "delegation"
+            ]
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "kind",
+          "id"
+        ],
+        "description": "Reference to evidence in the investigation project. A retained reference can outlive its source evidence."
+      },
+      "InvestigationWrite": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "project_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "filters": {
+            "$ref": "#/components/schemas/InvestigationFilters"
+          },
+          "evidence": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/InvestigationEvidence"
+            }
+          },
+          "summary": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096
+          }
+        },
+        "required": [
+          "project_id",
+          "filters",
+          "evidence",
+          "summary"
+        ],
+        "description": "Operator-authored filters, evidence references and summary. Do not submit source payloads."
+      },
+      "Investigation": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "project_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "filters": {
+            "$ref": "#/components/schemas/InvestigationFilters"
+          },
+          "evidence": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/InvestigationEvidenceView"
+            }
+          },
+          "summary": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "project_id",
+          "filters",
+          "evidence",
+          "summary",
+          "created_at"
+        ]
+      },
+      "InvestigationList": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Investigation"
+            },
+            "maxItems": 200
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "items",
+          "next_cursor"
+        ]
+      },
+      "InvestigationEvidenceView": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "run",
+              "step",
+              "approval",
+              "span",
+              "task",
+              "delegation"
+            ]
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "run_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The associated run, when this step, approval or span is still retained."
+          }
+        },
+        "required": [
+          "kind",
+          "id"
+        ],
+        "description": "Reference to evidence in the investigation project. A retained reference can outlive its source evidence; the associated run is resolved on detail reads."
       }
     },
     "securitySchemes": {
@@ -67535,6 +67726,215 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/AgentRunSpanList"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "404": {
+            "description": "Not visible"
+          },
+          "422": {
+            "description": "Invalid request"
+          }
+        }
+      }
+    },
+    "/api/v1/investigations": {
+      "get": {
+        "operationId": "list_investigations",
+        "tags": [
+          "agents"
+        ],
+        "summary": "List investigations",
+        "description": "Investigations visible to callers with current access to the project.",
+        "security": [
+          {
+            "sessionCookie": [
+              "read"
+            ]
+          },
+          {
+            "managementToken": [
+              "read"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "description": "Opaque cursor returned by the previous page.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Page size, from 1 to 200. Defaults to 50.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "format": "int32",
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "name": "project_id",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Investigations",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InvestigationList"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "404": {
+            "description": "Not visible"
+          },
+          "422": {
+            "description": "Invalid request"
+          }
+        }
+      },
+      "post": {
+        "operationId": "create_investigation",
+        "tags": [
+          "agents"
+        ],
+        "summary": "Save an investigation",
+        "description": "Store typed filters, bounded evidence references and an operator-authored summary. Source payloads are not accepted.",
+        "security": [
+          {
+            "sessionCookie": [
+              "configure"
+            ],
+            "csrfToken": []
+          },
+          {
+            "managementToken": [
+              "configure"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Investigation saved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Investigation"
+                }
+              }
+            },
+            "headers": {
+              "Location": {
+                "description": "Path of the investigation",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Outside caller authority"
+          },
+          "404": {
+            "description": "Not visible"
+          },
+          "409": {
+            "description": "Idempotency key conflict"
+          },
+          "422": {
+            "description": "Invalid investigation, filters or evidence references"
+          },
+          "400": {
+            "description": "Invalid JSON or unsupported fields"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InvestigationWrite"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/investigations/{investigation_id}": {
+      "get": {
+        "operationId": "get_investigation",
+        "tags": [
+          "agents"
+        ],
+        "summary": "Get an investigation",
+        "description": "Requires current project access; referenced evidence is accessed separately under its own current authority check.",
+        "security": [
+          {
+            "sessionCookie": [
+              "read"
+            ]
+          },
+          {
+            "managementToken": [
+              "read"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "investigation_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Investigation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Investigation"
                 }
               }
             }

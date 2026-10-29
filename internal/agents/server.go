@@ -19,6 +19,9 @@ type Server struct {
 }
 
 func (s *Server) Register(mux *http.ServeMux) {
+	s.Access.Route(mux, "GET /api/v1/investigations", s.listInvestigations)
+	s.Access.Route(mux, "POST /api/v1/investigations", s.createInvestigation, access.MaxBody(32<<10))
+	s.Access.Route(mux, "GET /api/v1/investigations/{investigation_id}", s.getInvestigation)
 	s.Access.Route(mux, "GET /api/v1/agent-runs", s.listRuns)
 	s.Access.Route(mux, "GET /api/v1/agent-runs/{run_id}", s.getRun)
 	s.Access.Route(mux, "GET /api/v1/agent-runs/{run_id}/spans", s.listRunSpans)

@@ -138,6 +138,35 @@ export const listRunSpans = async (runID: string, cursor?: string) =>
     })
   );
 
+export type InvestigationWrite = components['schemas']['InvestigationWrite'];
+export type InvestigationEvidence =
+  components['schemas']['InvestigationEvidence'];
+
+export const listInvestigations = async (project?: string, cursor?: string) =>
+  unwrapPage(
+    await apiClient.GET('/api/v1/investigations', {
+      params: { query: { project_id: project || undefined, cursor, limit: 50 } }
+    })
+  );
+
+export const getInvestigation = async (id: string) =>
+  unwrap(
+    await apiClient.GET('/api/v1/investigations/{investigation_id}', {
+      params: { path: { investigation_id: id } }
+    })
+  );
+
+export const createInvestigation = async (
+  input: InvestigationWrite,
+  requestId: string
+) =>
+  unwrap(
+    await apiClient.POST('/api/v1/investigations', {
+      params: { header: { 'Idempotency-Key': requestId } },
+      body: input
+    })
+  );
+
 export const listExposures = async (key?: string, cursor?: string) =>
   unwrapPage(
     await apiClient.GET('/api/v1/execution-debits', {

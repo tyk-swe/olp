@@ -403,6 +403,9 @@ for their selected backend, not completion of every retrieval adapter.
   RM8.1–RM8.4, implement bounded OTLP ingestion, scoped evidence links and
   origin-labelled exports. Test content stripping, project isolation, retention
   and inability to forge financial facts; exercise accessible operator journeys.
+  Saved investigations are implemented with typed filters, bounded references,
+  an operator-authored summary and current project checks on reads. Referenced
+  evidence remains subject to its own access and retention policies.
 - [ ] **RM8.6 — Qualify the complete agent surface** (release): run service
   faults/restarts, authorization/isolation, pinned SDK/reference implementations,
   Chromium and applicable check/race/build/Helm/performance gates on one candidate.

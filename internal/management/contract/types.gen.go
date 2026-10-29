@@ -3421,6 +3421,66 @@ func (e InteractionInspectionStatus) Valid() bool {
 	}
 }
 
+// Defines values for InvestigationEvidenceKind.
+const (
+	InvestigationEvidenceKindApproval   InvestigationEvidenceKind = "approval"
+	InvestigationEvidenceKindDelegation InvestigationEvidenceKind = "delegation"
+	InvestigationEvidenceKindRun        InvestigationEvidenceKind = "run"
+	InvestigationEvidenceKindSpan       InvestigationEvidenceKind = "span"
+	InvestigationEvidenceKindStep       InvestigationEvidenceKind = "step"
+	InvestigationEvidenceKindTask       InvestigationEvidenceKind = "task"
+)
+
+// Valid indicates whether the value is a known member of the InvestigationEvidenceKind enum.
+func (e InvestigationEvidenceKind) Valid() bool {
+	switch e {
+	case InvestigationEvidenceKindApproval:
+		return true
+	case InvestigationEvidenceKindDelegation:
+		return true
+	case InvestigationEvidenceKindRun:
+		return true
+	case InvestigationEvidenceKindSpan:
+		return true
+	case InvestigationEvidenceKindStep:
+		return true
+	case InvestigationEvidenceKindTask:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for InvestigationEvidenceViewKind.
+const (
+	InvestigationEvidenceViewKindApproval   InvestigationEvidenceViewKind = "approval"
+	InvestigationEvidenceViewKindDelegation InvestigationEvidenceViewKind = "delegation"
+	InvestigationEvidenceViewKindRun        InvestigationEvidenceViewKind = "run"
+	InvestigationEvidenceViewKindSpan       InvestigationEvidenceViewKind = "span"
+	InvestigationEvidenceViewKindStep       InvestigationEvidenceViewKind = "step"
+	InvestigationEvidenceViewKindTask       InvestigationEvidenceViewKind = "task"
+)
+
+// Valid indicates whether the value is a known member of the InvestigationEvidenceViewKind enum.
+func (e InvestigationEvidenceViewKind) Valid() bool {
+	switch e {
+	case InvestigationEvidenceViewKindApproval:
+		return true
+	case InvestigationEvidenceViewKindDelegation:
+		return true
+	case InvestigationEvidenceViewKindRun:
+		return true
+	case InvestigationEvidenceViewKindSpan:
+		return true
+	case InvestigationEvidenceViewKindStep:
+		return true
+	case InvestigationEvidenceViewKindTask:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for KeyExpiringEventEvent.
 const (
 	KeyExpiringEventEventKeyExpiring KeyExpiringEventEvent = "key.expiring"
@@ -10099,6 +10159,66 @@ type InteractionObligations struct {
 	Submission              string `json:"submission"`
 }
 
+// Investigation defines model for Investigation.
+type Investigation struct {
+	CreatedAt time.Time                   `json:"created_at"`
+	Evidence  []InvestigationEvidenceView `json:"evidence"`
+
+	// Filters Typed filters used to investigate agent evidence.
+	Filters   InvestigationFilters `json:"filters"`
+	Id        openapi_types.UUID   `json:"id"`
+	ProjectId openapi_types.UUID   `json:"project_id"`
+	Summary   string               `json:"summary"`
+}
+
+// InvestigationEvidence Reference to evidence in the investigation project. A retained reference can outlive its source evidence.
+type InvestigationEvidence struct {
+	Id   openapi_types.UUID        `json:"id"`
+	Kind InvestigationEvidenceKind `json:"kind"`
+}
+
+// InvestigationEvidenceKind defines model for InvestigationEvidence.Kind.
+type InvestigationEvidenceKind string
+
+// InvestigationEvidenceView Reference to evidence in the investigation project. A retained reference can outlive its source evidence; the associated run is resolved on detail reads.
+type InvestigationEvidenceView struct {
+	Id   openapi_types.UUID            `json:"id"`
+	Kind InvestigationEvidenceViewKind `json:"kind"`
+
+	// RunId The associated run, when this step, approval or span is still retained.
+	RunId *openapi_types.UUID `json:"run_id,omitempty"`
+}
+
+// InvestigationEvidenceViewKind defines model for InvestigationEvidenceView.Kind.
+type InvestigationEvidenceViewKind string
+
+// InvestigationFilters Typed filters used to investigate agent evidence.
+type InvestigationFilters struct {
+	Error         *bool               `json:"error,omitempty"`
+	From          *time.Time          `json:"from,omitempty"`
+	MaxDurationMs *int64              `json:"max_duration_ms,omitempty"`
+	MinDurationMs *int64              `json:"min_duration_ms,omitempty"`
+	RunId         *openapi_types.UUID `json:"run_id,omitempty"`
+	To            *time.Time          `json:"to,omitempty"`
+	Tool          *string             `json:"tool,omitempty"`
+}
+
+// InvestigationList defines model for InvestigationList.
+type InvestigationList struct {
+	Items      []Investigation           `json:"items"`
+	NextCursor nullable.Nullable[string] `json:"next_cursor"`
+}
+
+// InvestigationWrite Operator-authored filters, evidence references and summary. Do not submit source payloads.
+type InvestigationWrite struct {
+	Evidence []InvestigationEvidence `json:"evidence"`
+
+	// Filters Typed filters used to investigate agent evidence.
+	Filters   InvestigationFilters `json:"filters"`
+	ProjectId openapi_types.UUID   `json:"project_id"`
+	Summary   string               `json:"summary"`
+}
+
 // InvitationListResponse defines model for InvitationListResponse.
 type InvitationListResponse struct {
 	Items      []InvitationResponse      `json:"items"`
@@ -16001,6 +16121,21 @@ type ActivateGuardrailParams struct {
 	IfMatch        string `json:"If-Match"`
 }
 
+// ListInvestigationsParams defines parameters for ListInvestigations.
+type ListInvestigationsParams struct {
+	// Cursor Opaque cursor returned by the previous page.
+	Cursor *string `form:"cursor,omitempty" json:"cursor,omitempty"`
+
+	// Limit Page size, from 1 to 200. Defaults to 50.
+	Limit     *int32              `form:"limit,omitempty" json:"limit,omitempty"`
+	ProjectId *openapi_types.UUID `form:"project_id,omitempty" json:"project_id,omitempty"`
+}
+
+// CreateInvestigationParams defines parameters for CreateInvestigation.
+type CreateInvestigationParams struct {
+	IdempotencyKey string `json:"Idempotency-Key"`
+}
+
 // ListInvitationsParams defines parameters for ListInvitations.
 type ListInvitationsParams struct {
 	// Cursor Opaque cursor returned by the previous page.
@@ -17703,6 +17838,9 @@ type UpdateGuardrailJSONRequestBody = UpdateGuardrailRequest
 
 // ActivateGuardrailJSONRequestBody defines body for ActivateGuardrail for application/json ContentType.
 type ActivateGuardrailJSONRequestBody = GuardrailActivation
+
+// CreateInvestigationJSONRequestBody defines body for CreateInvestigation for application/json ContentType.
+type CreateInvestigationJSONRequestBody = InvestigationWrite
 
 // CreateInvitationJSONRequestBody defines body for CreateInvitation for application/json ContentType.
 type CreateInvitationJSONRequestBody = CreateInvitationRequest

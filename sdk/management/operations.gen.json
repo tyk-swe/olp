@@ -7603,6 +7603,147 @@
     }
   },
   {
+    "name": "create_investigation",
+    "group": "agents",
+    "method": "POST",
+    "read_only": false,
+    "path": "/api/v1/investigations",
+    "description": "Save an investigation",
+    "scopes": [
+      [
+        "configure"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "Idempotency-Key",
+        "in": "header",
+        "required": true,
+        "type": "string"
+      }
+    ],
+    "response_headers": {
+      "ETag": "etag"
+    },
+    "body_required": true,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "idempotency_key": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Idempotency-Key"
+        },
+        "body": {
+          "$ref": "#/$defs/InvestigationWrite"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "idempotency_key",
+        "body"
+      ],
+      "$defs": {
+        "InvestigationWrite": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "project_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "filters": {
+              "$ref": "#/$defs/InvestigationFilters"
+            },
+            "evidence": {
+              "type": "array",
+              "maxItems": 100,
+              "items": {
+                "$ref": "#/$defs/InvestigationEvidence"
+              }
+            },
+            "summary": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096
+            }
+          },
+          "required": [
+            "project_id",
+            "filters",
+            "evidence",
+            "summary"
+          ],
+          "description": "Operator-authored filters, evidence references and summary. Do not submit source payloads."
+        },
+        "InvestigationFilters": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "from": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "to": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "run_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "min_duration_ms": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            },
+            "max_duration_ms": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            },
+            "error": {
+              "type": "boolean"
+            },
+            "tool": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            }
+          },
+          "required": [],
+          "description": "Typed filters used to investigate agent evidence."
+        },
+        "InvestigationEvidence": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "run",
+                "step",
+                "approval",
+                "span",
+                "task",
+                "delegation"
+              ]
+            },
+            "id": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "required": [
+            "kind",
+            "id"
+          ],
+          "description": "Reference to evidence in the investigation project. A retained reference can outlive its source evidence."
+        }
+      }
+    }
+  },
+  {
     "name": "create_invitation",
     "group": "invitations",
     "method": "POST",
@@ -17017,6 +17158,53 @@
     }
   },
   {
+    "name": "get_investigation",
+    "group": "agents",
+    "method": "GET",
+    "read_only": true,
+    "path": "/api/v1/investigations/{investigation_id}",
+    "description": "Get an investigation",
+    "scopes": [
+      [
+        "read"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "investigation_id",
+        "in": "path",
+        "required": true,
+        "type": "string"
+      }
+    ],
+    "response_headers": {
+      "ETag": "etag"
+    },
+    "body_required": false,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "object",
+          "properties": {
+            "investigation_id": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "investigation_id"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "path"
+      ]
+    }
+  },
+  {
     "name": "get_mcp_server",
     "group": "mcp-servers",
     "method": "GET",
@@ -20729,6 +20917,68 @@
             "search": {
               "type": "string",
               "maxLength": 200
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "list_investigations",
+    "group": "agents",
+    "method": "GET",
+    "read_only": true,
+    "path": "/api/v1/investigations",
+    "description": "List investigations",
+    "scopes": [
+      [
+        "read"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "cursor",
+        "in": "query",
+        "required": false,
+        "type": "string"
+      },
+      {
+        "name": "limit",
+        "in": "query",
+        "required": false,
+        "type": "integer"
+      },
+      {
+        "name": "project_id",
+        "in": "query",
+        "required": false,
+        "type": "string"
+      }
+    ],
+    "response_headers": {
+      "ETag": "etag"
+    },
+    "body_required": false,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "type": "object",
+          "properties": {
+            "cursor": {
+              "type": "string"
+            },
+            "limit": {
+              "format": "int32",
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
+            },
+            "project_id": {
+              "type": "string",
+              "format": "uuid"
             }
           },
           "additionalProperties": false
