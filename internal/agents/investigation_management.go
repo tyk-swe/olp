@@ -145,9 +145,12 @@ func (s *Server) getInvestigation(r *http.Request, p access.Principal) (access.R
 	if err != nil {
 		return access.Reply{}, err
 	}
-	var item Investigation
-	if err := s.Access.Pool.QueryRow(r.Context(), `SELECT id::text,project_id::text,filters,evidence,summary,created_at FROM olp.investigations WHERE id=$1`, id).
-		Scan(&item.ID, &item.ProjectID, &item.Filters, &item.Evidence, &item.Summary, &item.CreatedAt); err != nil {
+	itemRows, err := s.Access.Pool.Query(r.Context(), `SELECT id::text AS id,project_id::text AS project_id,filters,evidence,summary,created_at FROM olp.investigations WHERE id=$1`, id)
+	if err != nil {
+		return access.Reply{}, err
+	}
+	item, err := pgx.CollectOneRow(itemRows, pgx.RowToStructByName[Investigation])
+	if err != nil {
 		return access.Reply{}, err
 	}
 	if err := p.Project(&item.ProjectID, access.View); err != nil {
@@ -211,8 +214,13 @@ func (s *Server) createInvestigation(r *http.Request, _ access.Principal) (acces
 			return access.Reply{}, err
 		}
 	}
-	item := Investigation{ID: access.NewID(), InvestigationInput: input}
-	if err := tx.QueryRow(r.Context(), `INSERT INTO olp.investigations(id,project_id,filters,evidence,summary) VALUES($1,$2,$3,$4,$5) RETURNING created_at`, item.ID, item.ProjectID, item.Filters, item.Evidence, item.Summary).Scan(&item.CreatedAt); err != nil {
+	itemRows, err := tx.Query(r.Context(), `INSERT INTO olp.investigations(id,project_id,filters,evidence,summary) VALUES($1,$2,$3,$4,$5)
+ RETURNING id::text AS id,project_id::text AS project_id,filters,evidence,summary,created_at`, access.NewID(), input.ProjectID, input.Filters, input.Evidence, input.Summary)
+	if err != nil {
+		return access.Reply{}, err
+	}
+	item, err := pgx.CollectOneRow(itemRows, pgx.RowToStructByName[Investigation])
+	if err != nil {
 		return access.Reply{}, err
 	}
 	if err := access.AuditForProject(r.Context(), tx, r, p.Actor(), "investigation.create", "investigation", item.ID, "success", &item.ProjectID); err != nil {

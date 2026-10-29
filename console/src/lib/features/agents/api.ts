@@ -163,10 +163,17 @@ export const listDelegations = async (
     })
   );
 
-export const listRunSpans = async (runID: string, cursor?: string) =>
+export const listRunSpans = async (
+  runID: string,
+  cursor?: string,
+  spanID?: string
+) =>
   unwrapPage(
     await apiClient.GET('/api/v1/agent-runs/{run_id}/spans', {
-      params: { path: { run_id: runID }, query: { cursor, limit: 50 } }
+      params: {
+        path: { run_id: runID },
+        query: { cursor, limit: 50, span_id: spanID }
+      }
     })
   );
 

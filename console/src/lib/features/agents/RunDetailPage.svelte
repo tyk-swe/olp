@@ -1,5 +1,6 @@
 <script lang="ts">
   import { resolve } from '$app/paths';
+  import { page } from '$app/state';
   import { createQuery } from '@tanstack/svelte-query';
   import { writable } from 'svelte/store';
   import { errorMessage } from '$lib/api/http';
@@ -8,6 +9,8 @@
   import { agentKeys } from './agentKeys';
 
   let { runID }: { runID: string } = $props();
+  const selectedStepID = $derived(page.url.searchParams.get('step_id'));
+  const selectedSpanID = $derived(page.url.searchParams.get('span_id'));
   const cursor = writable<string | undefined>(undefined);
   const access = useRole();
   const run = createQuery(() => ({
@@ -20,6 +23,14 @@
   const spans = createQuery(() => ({
     queryKey: agentKeys.runSpans(runID, $cursor),
     queryFn: () => listRunSpans(runID, $cursor),
+    staleTime: 0,
+    gcTime: 0,
+    retry: false
+  }));
+  const selectedSpan = createQuery(() => ({
+    queryKey: agentKeys.runSpans(runID, undefined, selectedSpanID ?? undefined),
+    queryFn: () => listRunSpans(runID, undefined, selectedSpanID ?? undefined),
+    enabled: !!selectedSpanID && !!run.data && !run.error,
     staleTime: 0,
     gcTime: 0,
     retry: false
@@ -63,6 +74,49 @@
     <dt>Started</dt>
     <dd>{new Date(run.data.created_at).toLocaleString()}</dd>
   </dl>
+  {#if selectedSpanID}
+    <section aria-labelledby="selected-span">
+      <h2 id="selected-span">Selected span</h2>
+      {#if selectedSpan.error}
+        <p role="alert">{errorMessage(selectedSpan.error)}</p>
+      {:else if selectedSpan.isFetching}
+        <p>Loading selected span…</p>
+      {:else if selectedSpan.data?.items.length}
+        {@const span = selectedSpan.data.items[0]}
+        <dl>
+          <dt>Evidence ID</dt>
+          <dd><code>{span.id}</code></dd>
+          <dt>Trace ID</dt>
+          <dd><code>{span.trace_id}</code></dd>
+          <dt>Span ID</dt>
+          <dd><code>{span.span_id}</code></dd>
+          <dt>Attempt</dt>
+          <dd><code>{span.attempt_id ?? 'Run only'}</code></dd>
+          <dt>Category / status</dt>
+          <dd>
+            {span.category.replaceAll('_', ' ')} / {spanStatus[span.status]}
+          </dd>
+          <dt>Started</dt>
+          <dd>{spanTime(span.started_nanos)}</dd>
+          <dt>Ended</dt>
+          <dd>{spanTime(span.ended_nanos)}</dd>
+        </dl>
+      {:else}
+        <p>The referenced span is no longer available in this run.</p>
+      {/if}
+    </section>
+  {/if}
+  {#if selectedStepID}
+    {#if run.data.steps.some((step) => step.id === selectedStepID)}
+      <p>
+        Referenced step <a href={`#step-${selectedStepID}`}
+          ><code>{selectedStepID}</code></a
+        >
+      </p>
+    {:else}
+      <p>The referenced step is no longer available in this run.</p>
+    {/if}
+  {/if}
   <section aria-labelledby="steps">
     <h2 id="steps">Steps and attempts</h2>
     <p>
@@ -83,9 +137,14 @@
           >
           <tbody>
             {#each run.data.steps as step (step.id)}
-              <tr>
+              <tr
+                id={`step-${step.id}`}
+                class:selected-evidence={step.id === selectedStepID}
+              >
                 <td
-                  >{step.ordinal + 1}. {step.kind}{#if step.tool_alias}<br
+                  >{#if step.id === selectedStepID}<strong
+                      >Selected evidence</strong
+                    ><br /><code>{step.id}</code><br />{/if}{step.ordinal + 1}. {step.kind}{#if step.tool_alias}<br
                     /><code>{step.tool_alias}</code>{/if}</td
                 >
                 <td><code>{step.dispatch_id}</code></td>
@@ -233,6 +292,9 @@
   table {
     width: 100%;
     text-align: left;
+  }
+  .selected-evidence {
+    background: var(--accent-soft);
   }
   td,
   th {

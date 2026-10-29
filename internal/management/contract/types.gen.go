@@ -15985,6 +15985,9 @@ type ListAgentRunsParams struct {
 
 // ListAgentRunSpansParams defines parameters for ListAgentRunSpans.
 type ListAgentRunSpansParams struct {
+	// SpanId Return only the referenced internal span UUID within this run.
+	SpanId *openapi_types.UUID `form:"span_id,omitempty" json:"span_id,omitempty"`
+
 	// Cursor Opaque cursor returned by the previous page.
 	Cursor *string `form:"cursor,omitempty" json:"cursor,omitempty"`
 

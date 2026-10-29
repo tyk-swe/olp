@@ -68300,6 +68300,16 @@
             }
           },
           {
+            "name": "span_id",
+            "in": "query",
+            "required": false,
+            "description": "Return only the referenced internal span UUID within this run.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
             "description": "Opaque cursor returned by the previous page.",
             "in": "query",
             "name": "cursor",

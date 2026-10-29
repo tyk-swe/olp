@@ -7,6 +7,7 @@ type Identified = { id: string; etag: string };
 type Run = { id: string };
 type RunDetail = {
   steps: {
+    id: string;
     dispatch_id: string;
     state: string;
     observed_cost: string;
@@ -366,14 +367,45 @@ export async function verifyRunInspection(page: Page, info: TestInfo) {
   const detail = await management<RunDetail>(`/api/v1/agent-runs/${run.id}`);
   expect(detail.steps).toHaveLength(3);
   expect(detail.approvals[0].consumed_at).toBeTruthy();
+  const traceFixture = await trace(run.id, detail.steps[0].dispatch_id);
+  const traceBatch = Buffer.concat(
+    Array.from({ length: 52 }, (_, index) =>
+      Buffer.from(
+        traceFixture
+          .toString('latin1')
+          .replace(
+            '\x02'.repeat(8),
+            Buffer.from(
+              (index + 1).toString(16).padStart(16, '0'),
+              'hex'
+            ).toString('latin1')
+          ),
+        'latin1'
+      )
+    )
+  );
   const uploaded = await page.request.post('/v1/traces', {
     headers: {
       Authorization: `Bearer ${key.secret}`,
       'Content-Type': 'application/x-protobuf'
     },
-    data: await trace(run.id, detail.steps[0].dispatch_id)
+    data: traceBatch
   });
   expect(uploaded.status()).toBe(200);
+  const newestSpans = await management<{
+    items: { id: string; span_id: string }[];
+    next_cursor: string | null;
+  }>(`/api/v1/agent-runs/${run.id}/spans?limit=50`);
+  expect(newestSpans.items).toHaveLength(50);
+  expect(newestSpans.next_cursor).toBeTruthy();
+  const olderSpans = await management<{
+    items: { id: string; span_id: string }[];
+  }>(
+    `/api/v1/agent-runs/${run.id}/spans?limit=50&cursor=${newestSpans.next_cursor}`
+  );
+  const oldSpan = olderSpans.items[0];
+  expect(oldSpan).toBeDefined();
+  expect(newestSpans.items.some((span) => span.id === oldSpan.id)).toBe(false);
 
   const uncertain = await page.request.post('/v1/chat/completions', {
     headers: { Authorization: `Bearer ${key.secret}` },
@@ -507,7 +539,7 @@ export async function verifyRunInspection(page: Page, info: TestInfo) {
   ).toBeVisible();
   await expect(page.getByText(detail.approvals[0].id)).toBeVisible();
   await expect(
-    page.getByText('01010101010101010101010101010101')
+    page.getByText('01010101010101010101010101010101').first()
   ).toBeVisible();
   await expect(
     page.getByText(detail.steps[0].dispatch_id).first()
@@ -527,12 +559,21 @@ export async function verifyRunInspection(page: Page, info: TestInfo) {
   });
   await page.getByRole('link', { name: 'Save investigation' }).click();
   await expect(page.getByLabel('Run ID')).toHaveValue(run.id);
+  await page.getByLabel('From', { exact: true }).fill('2026-01-02T10:30');
+  await page.getByLabel('To', { exact: true }).fill('2026-02-03T11:45');
   await page.getByLabel('Minimum duration (ms)').fill('100');
+  await page.getByLabel('Maximum duration (ms)').fill('300');
   await page.getByLabel('Error').selectOption('true');
   await page.getByLabel('Tool').fill('change');
   await page.getByLabel('Summary').fill('Investigate the tool outcome');
   await page.getByLabel('Evidence kind').selectOption('approval');
   await page.getByLabel('Evidence ID').fill(detail.approvals[0].id);
+  await page.getByRole('button', { name: 'Add evidence' }).click();
+  await page.getByLabel('Evidence kind').selectOption('step');
+  await page.getByLabel('Evidence ID').fill(detail.steps[1].id);
+  await page.getByRole('button', { name: 'Add evidence' }).click();
+  await page.getByLabel('Evidence kind').selectOption('span');
+  await page.getByLabel('Evidence ID').fill(oldSpan.id);
   await page.getByRole('button', { name: 'Add evidence' }).click();
   expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
   await page.evaluate(() => {
@@ -550,6 +591,16 @@ export async function verifyRunInspection(page: Page, info: TestInfo) {
   await expect(page.getByText('Investigate the tool outcome')).toBeVisible();
   await expect(page.getByText(detail.approvals[0].id)).toBeVisible();
   await expect(page.getByText('100 ms')).toBeVisible();
+  await page.reload();
+  const savedFrom = await page.evaluate(() =>
+    new Date('2026-01-02T10:30').toLocaleString()
+  );
+  const savedTo = await page.evaluate(() =>
+    new Date('2026-02-03T11:45').toLocaleString()
+  );
+  await expect(page.getByText(savedFrom, { exact: true })).toBeVisible();
+  await expect(page.getByText(savedTo, { exact: true })).toBeVisible();
+  await expect(page.getByText('300 ms')).toBeVisible();
   expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
   await page.screenshot({
     path: info.outputPath('investigation-detail.png'),
@@ -572,6 +623,35 @@ export async function verifyRunInspection(page: Page, info: TestInfo) {
   await page
     .getByRole('link', { name: 'Investigate the tool outcome' })
     .click();
+  await page.getByRole('link', { name: detail.steps[1].id }).click();
+  const selectedStep = page
+    .getByRole('row')
+    .filter({ hasText: 'Selected evidence' });
+  await expect(selectedStep).toContainText(detail.steps[1].id);
+  await expect(selectedStep).toContainText(detail.steps[1].dispatch_id);
+  await selectedStep.screenshot({
+    path: info.outputPath('investigation-selected-step.png')
+  });
+  await page.goto(`/investigations/${investigationID}`);
+  await page.getByRole('link', { name: oldSpan.id }).click();
+  const selectedSpan = page.getByRole('region', { name: 'Selected span' });
+  await expect(selectedSpan.getByText(oldSpan.id)).toBeVisible();
+  await expect(selectedSpan.getByText(oldSpan.span_id)).toBeVisible();
+  await selectedSpan.screenshot({
+    path: info.outputPath('investigation-selected-span-detail.png')
+  });
+  const normalSpans = page.getByRole('region', { name: 'Linked spans' });
+  await expect(normalSpans.getByText(oldSpan.span_id)).toHaveCount(0);
+  await normalSpans.getByRole('button', { name: 'Older' }).click();
+  await expect(normalSpans.getByText(oldSpan.span_id)).toBeVisible();
+  await normalSpans.getByRole('button', { name: 'Newest' }).click();
+  await expect(normalSpans.getByText(oldSpan.span_id)).toHaveCount(0);
+  expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
+  await page.screenshot({
+    path: info.outputPath('investigation-selected-span.png'),
+    fullPage: true
+  });
+  await page.goto(`/investigations/${investigationID}`);
   await page.getByRole('link', { name: detail.approvals[0].id }).click();
   await expect(
     page.getByRole('heading', { name: 'Run', exact: true })
@@ -656,7 +736,7 @@ export async function verifyRunInspection(page: Page, info: TestInfo) {
     await viewerPage.getByRole('link', { name: run.id }).click();
     await expect(viewerPage.getByText(detail.approvals[0].id)).toBeVisible();
     await expect(
-      viewerPage.getByText('01010101010101010101010101010101')
+      viewerPage.getByText('01010101010101010101010101010101').first()
     ).toBeVisible();
     await viewerPage.goto(`/investigations/${investigationID}`);
     await expect(
@@ -732,8 +812,9 @@ export async function verifyRunInspection(page: Page, info: TestInfo) {
     await expect(
       viewerPage.getByText('Investigate the tool outcome')
     ).toHaveCount(0);
-    await viewerPage.goto(`/runs/${run.id}`);
+    await viewerPage.goto(`/runs/${run.id}?span_id=${oldSpan.id}`);
     await expect(viewerPage.getByRole('alert')).toBeVisible();
+    await expect(viewerPage.getByText(oldSpan.span_id)).toHaveCount(0);
     await expect(viewerPage.getByText(detail.approvals[0].id)).toHaveCount(0);
     await expect(
       viewerPage.getByText('01010101010101010101010101010101')

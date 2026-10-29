@@ -4,8 +4,8 @@ export const agentKeys = {
   runs: (project: string, cursor?: string) =>
     ['agent-runs', project, cursor ?? ''] as const,
   run: (runID: string) => ['agent-run', runID] as const,
-  runSpans: (runID: string, cursor?: string) =>
-    ['agent-run-spans', runID, cursor ?? ''] as const,
+  runSpans: (runID: string, cursor?: string, spanID?: string) =>
+    ['agent-run-spans', runID, cursor ?? '', spanID ?? ''] as const,
   investigations: (project: string, cursor?: string) =>
     ['investigations', project, cursor ?? ''] as const,
   investigation: (id: string) => ['investigation', id] as const,

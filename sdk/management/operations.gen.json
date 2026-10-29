@@ -19645,6 +19645,12 @@
         "type": "string"
       },
       {
+        "name": "span_id",
+        "in": "query",
+        "required": false,
+        "type": "string"
+      },
+      {
         "name": "cursor",
         "in": "query",
         "required": false,
@@ -19680,6 +19686,10 @@
         "query": {
           "type": "object",
           "properties": {
+            "span_id": {
+              "type": "string",
+              "format": "uuid"
+            },
             "cursor": {
               "type": "string"
             },

@@ -21,6 +21,8 @@ it('links each retained evidence reference to its authorized source', async () =
       { kind: 'task', id: 'task' },
       { kind: 'delegation', id: 'delegation' },
       { kind: 'approval', id: 'approval', run_id: 'associated-run' },
+      { kind: 'step', id: 'step', run_id: 'associated-run' },
+      { kind: 'span', id: 'span', run_id: 'associated-run' },
       { kind: 'span', id: 'expired-span' }
     ]
   });
@@ -51,6 +53,8 @@ it('links each retained evidence reference to its authorized source', async () =
       '/delegations?project_id=project&delegation_id=delegation'
     );
     expect(href('approval')).toBe('/runs/associated-run');
+    expect(href('step')).toBe('/runs/associated-run?step_id=step');
+    expect(href('span')).toBe('/runs/associated-run?span_id=span');
     expect(href('expired-span')).toBeUndefined();
     expect(host.textContent).toContain('expired-span');
   });

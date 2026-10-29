@@ -1131,17 +1131,31 @@ func TestGatewayToolWorkflowSettlesOneRun(t *testing.T) {
 			t.Fatalf("run spans not ordered by start time and ID: %v", allSpans)
 		}
 	}
+	spanID := mcpExecString(t, mcpExecItem(t, allSpans, 2, spanPage), "id")
+	selectedSpanPath := "/api/v1/agent-runs/" + runID + "/spans?span_id=" + spanID
+	selectedSpan := h.want(owner, "GET", selectedSpanPath, nil, nil, http.StatusOK)
+	selectedItems := mcpExecItems(t, selectedSpan, "items")
+	if len(selectedItems) != 1 || mcpExecString(t, mcpExecItem(t, selectedItems, 0, selectedSpan), "id") != spanID {
+		t.Fatalf("the selected span did not identify the referenced evidence: %v", selectedSpan)
+	}
+	missingSpan := h.want(owner, "GET", "/api/v1/agent-runs/"+runID+"/spans?span_id="+uuid.NewString(), nil, nil, http.StatusOK)
+	if len(mcpExecItems(t, missingSpan, "items")) != 0 {
+		t.Fatalf("a different span was returned for a missing reference: %v", missingSpan)
+	}
+	h.want(owner, "GET", "/api/v1/agent-runs/"+runID+"/spans?span_id=invalid", nil, nil, http.StatusUnprocessableEntity)
 	h.want(owner, "GET", "/api/v1/agent-runs/"+runID+"/spans?cursor=invalid", nil, nil, http.StatusUnprocessableEntity)
 	for _, private := range []string{prompt, argument, answer, "workflow-private-span"} {
-		if strings.Contains(fmt.Sprint(listedRuns, runDetail, allSpans), private) {
+		if strings.Contains(fmt.Sprint(listedRuns, runDetail, allSpans, selectedSpan), private) {
 			t.Fatal("run management exposed private workflow content")
 		}
 	}
 	otherProject := createProject(h, owner, "Other run project")
-	evidence := []any{
-		map[string]any{"kind": "run", "id": runID},
-		map[string]any{"kind": "step", "id": mcpExecString(t, toolStep, "id")},
-		map[string]any{"kind": "span", "id": mcpExecString(t, mcpExecItem(t, allSpans, 0, spanPage), "id")},
+	stepID := mcpExecString(t, toolStep, "id")
+	evidenceSpanID := mcpExecString(t, mcpExecItem(t, allSpans, 0, spanPage), "id")
+	evidence := []agents.InvestigationEvidence{
+		{Kind: "run", ID: runID},
+		{Kind: "step", ID: stepID},
+		{Kind: "span", ID: evidenceSpanID},
 	}
 	investigationInput := map[string]any{"project_id": project, "filters": map[string]any{"run_id": runID}, "evidence": evidence, "summary": "Review the tool and trace"}
 	investigation := h.want(owner, "POST", "/api/v1/investigations", investigationInput, idem("run-investigation"), http.StatusCreated)
@@ -1159,10 +1173,7 @@ func TestGatewayToolWorkflowSettlesOneRun(t *testing.T) {
 		h.want(owner, "POST", "/api/v1/investigations", map[string]any{"project_id": otherProject, "filters": map[string]any{}, "evidence": []any{reference}, "summary": "Wrong project"}, idem(fmt.Sprintf("foreign-investigation-%d", i)), http.StatusUnprocessableEntity)
 	}
 	h.want(owner, "POST", "/api/v1/investigations", map[string]any{"project_id": otherProject, "filters": map[string]any{"run_id": runID}, "evidence": []any{}, "summary": "Wrong run"}, idem("foreign-investigation-run"), http.StatusUnprocessableEntity)
-	tooMany := make([]any, 101)
-	for i := range tooMany {
-		tooMany[i] = map[string]any{"kind": "run", "id": runID}
-	}
+	tooMany := slices.Repeat([]agents.InvestigationEvidence{{Kind: "run", ID: runID}}, 101)
 	h.want(owner, "POST", "/api/v1/investigations", map[string]any{"project_id": project, "filters": map[string]any{}, "evidence": tooMany[:100], "summary": "Maximum evidence"}, idem("maximum-investigation"), http.StatusCreated)
 	h.want(owner, "POST", "/api/v1/investigations", map[string]any{"project_id": project, "filters": map[string]any{}, "evidence": tooMany, "summary": "Too many"}, idem("oversized-investigation"), http.StatusUnprocessableEntity)
 	h.want(owner, "POST", "/api/v1/investigations", map[string]any{"project_id": project, "filters": map[string]any{}, "evidence": []any{map[string]any{"kind": "run", "id": runID, "payload": prompt}}, "summary": "Unexpected source"}, idem("payload-investigation"), http.StatusBadRequest)
@@ -1176,6 +1187,7 @@ func TestGatewayToolWorkflowSettlesOneRun(t *testing.T) {
 	h.want(assignedViewer, "GET", "/api/v1/agent-runs?project_id="+project, nil, nil, http.StatusNotFound)
 	h.want(assignedViewer, "GET", "/api/v1/agent-runs/"+runID, nil, nil, http.StatusNotFound)
 	h.want(assignedViewer, "GET", "/api/v1/agent-runs/"+runID+"/spans", nil, nil, http.StatusNotFound)
+	h.want(assignedViewer, "GET", selectedSpanPath, nil, nil, http.StatusNotFound)
 	h.want(assignedViewer, "GET", "/api/v1/investigations/"+investigationID, nil, nil, http.StatusNotFound)
 	if filtered := h.want(assignedViewer, "GET", "/api/v1/investigations", nil, nil, http.StatusOK); len(mcpExecItems(t, filtered, "items")) != 0 {
 		t.Fatalf("project viewer could see another project's investigations: %v", filtered)
@@ -1186,17 +1198,19 @@ func TestGatewayToolWorkflowSettlesOneRun(t *testing.T) {
 	addMember(h, owner, project, viewerID, "viewer")
 	h.want(assignedViewer, "GET", "/api/v1/agent-runs/"+runID, nil, nil, http.StatusOK)
 	h.want(assignedViewer, "GET", "/api/v1/agent-runs/"+runID+"/spans", nil, nil, http.StatusOK)
+	h.want(assignedViewer, "GET", selectedSpanPath, nil, nil, http.StatusOK)
 	h.want(assignedViewer, "GET", "/api/v1/investigations/"+investigationID, nil, nil, http.StatusOK)
 	h.want(owner, "DELETE", "/api/v1/projects/"+project+"/members/"+viewerID, nil, projectEtag(h, owner, project), http.StatusNoContent)
 	h.want(assignedViewer, "GET", "/api/v1/agent-runs/"+runID, nil, nil, http.StatusNotFound)
 	h.want(assignedViewer, "GET", "/api/v1/agent-runs/"+runID+"/spans", nil, nil, http.StatusNotFound)
+	h.want(assignedViewer, "GET", selectedSpanPath, nil, nil, http.StatusNotFound)
 	h.want(assignedViewer, "GET", "/api/v1/investigations/"+investigationID, nil, nil, http.StatusNotFound)
 	if filtered := h.want(assignedViewer, "GET", "/api/v1/investigations", nil, nil, http.StatusOK); len(mcpExecItems(t, filtered, "items")) != 0 {
 		t.Fatalf("viewer retained access to investigations after project revocation: %v", filtered)
 	}
-	acctExec(t, h.Pool, `DELETE FROM olp.trace_spans WHERE id=$1`, evidence[2].(map[string]any)["id"])
+	acctExec(t, h.Pool, `DELETE FROM olp.trace_spans WHERE id=$1`, evidenceSpanID)
 	investigationAfterRetention := h.want(owner, "GET", "/api/v1/investigations/"+investigationID, nil, nil, http.StatusOK)
-	if reference := mcpExecItem(t, mcpExecItems(t, investigationAfterRetention, "evidence"), 2, investigationAfterRetention); reference["id"] != evidence[2].(map[string]any)["id"] || reference["run_id"] != nil {
+	if reference := mcpExecItem(t, mcpExecItems(t, investigationAfterRetention, "evidence"), 2, investigationAfterRetention); reference["id"] != evidenceSpanID || reference["run_id"] != nil {
 		t.Fatalf("expired span reference was not retained: %v", reference)
 	}
 	var stored string

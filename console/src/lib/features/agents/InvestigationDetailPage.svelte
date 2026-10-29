@@ -110,7 +110,11 @@
                 ><code>{reference.id}</code></a
               >
             {:else if reference.run_id}
-              <a class="text-button" href={resolve(`/runs/${reference.run_id}`)}
+              <a
+                class="text-button"
+                href={reference.kind === 'step' || reference.kind === 'span'
+                  ? `${resolve(`/runs/${reference.run_id}`)}?${reference.kind}_id=${encodeURIComponent(reference.id)}`
+                  : resolve(`/runs/${reference.run_id}`)}
                 ><code>{reference.id}</code></a
               >
             {:else}

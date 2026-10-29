@@ -156,6 +156,13 @@ func (s *Server) listRunSpans(r *http.Request, p access.Principal) (access.Reply
 	if err != nil {
 		return access.Reply{}, err
 	}
+	spanID := r.URL.Query().Get("span_id")
+	if spanID != "" {
+		id, err := uuid.Parse(spanID)
+		if err != nil || id == uuid.Nil || id.String() != spanID {
+			return access.Reply{}, access.Invalid("span_id", "Use a canonical span UUID.")
+		}
+	}
 	limit := 50
 	if raw := r.URL.Query().Get("limit"); raw != "" {
 		limit, err = strconv.Atoi(raw)
@@ -178,7 +185,8 @@ func (s *Server) listRunSpans(r *http.Request, p access.Principal) (access.Reply
  encode(span_id,'hex') AS span_id,encode(parent_span_id,'hex') AS parent_span_id,attempt_id::text AS attempt_id,
  started_nanos::text AS started_nanos,ended_nanos::text AS ended_nanos,category,status,received_at
  FROM olp.trace_spans WHERE run_id=$1 AND ($2::numeric IS NULL OR (started_nanos,id)<($2::numeric,$3::uuid))
- ORDER BY started_nanos DESC,id DESC LIMIT $4`, run.ID, beforeTime, beforeID, limit+1)
+ AND ($5='' OR id=NULLIF($5,'')::uuid)
+ ORDER BY started_nanos DESC,id DESC LIMIT $4`, run.ID, beforeTime, beforeID, limit+1, spanID)
 	if err != nil {
 		return access.Reply{}, err
 	}
