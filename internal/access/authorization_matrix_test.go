@@ -48,14 +48,12 @@ func TestManagementAuthorizationGoldenMatrix(t *testing.T) {
 				t.Errorf("%s: invalid admission marker %q", pattern, expected[i])
 				continue
 			}
-			p := Principal{Kind: archetype.Kind, AllProjects: archetype.Global, creatorRole: archetype.CreatorRole}
-			p.Role = archetype.Role
-			for _, name := range archetype.Scopes {
-				op, ok := ParseOperation(name)
-				if !ok {
-					t.Fatalf("%s has unknown scope %q", archetype.Name, name)
-				}
-				p.scopes |= 1 << op
+			p := Principal{
+				User:        User{Role: archetype.Role},
+				Kind:        archetype.Kind,
+				AllProjects: archetype.Global,
+				creatorRole: archetype.CreatorRole,
+				scopes:      goldenScopes(t, archetype.Name, archetype.Scopes),
 			}
 			admitted := req.Public || req.Admits(p) == nil
 			if admitted != (expected[i] == 'Y') {
@@ -81,4 +79,16 @@ func TestRunManagementRequiresReadScope(t *testing.T) {
 			t.Errorf("%s admitted a token without read scope", pattern)
 		}
 	}
+}
+
+func goldenScopes(t *testing.T, archetype string, scopes []string) operationSet {
+	t.Helper()
+	if len(scopes) == 0 {
+		return 0
+	}
+	op, ok := ParseOperation(scopes[0])
+	if !ok {
+		t.Fatalf("%s has unknown scope %q", archetype, scopes[0])
+	}
+	return 1<<op | goldenScopes(t, archetype, scopes[1:])
 }
