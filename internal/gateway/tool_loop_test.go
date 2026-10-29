@@ -171,6 +171,40 @@ func TestGatewayToolExecutionGeminiStreamsOnlyFinalAnswer(t *testing.T) {
 	}
 }
 
+func TestGatewayToolExecutionGeminiRejectsMultipleStreamCandidates(t *testing.T) {
+	toolsetID, projectID := uuid.NewString(), uuid.NewString()
+	alias := "t_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+	h := strictHarness(t, func(snapshot *routing.Snapshot) {
+		route := snapshot.Routes[routeSlug]
+		route.Fidelity.Mode, route.ToolExecution, route.ProjectID = routing.FidelityTransformed, "gateway", &projectID
+		route.Toolsets = []string{toolsetID}
+		snapshot.Routes[routeSlug] = route
+		for id, provider := range snapshot.Providers {
+			provider.Kind, provider.ProfileID, provider.ProfileRevision = "gemini", "gemini-generation", connectors.ProfileRevision
+			provider.Capabilities = []routing.Capability{{Model: provider.Capabilities[0].Model, Operation: "generation", Surface: "gemini", Mode: "streaming", ToolCalls: true}}
+			snapshot.Providers[id] = provider
+		}
+	})
+	authority := h.rt.keys[fullKey]
+	authority.ProjectID = &projectID
+	h.rt.keys[fullKey] = authority
+	fixture := &workflowFixture{runID: uuid.NewString(), tool: WorkflowTool{ToolsetID: toolsetID, RevisionID: uuid.NewString(), Definition: routing.MCPToolsetTool{Alias: alias, Classification: "read_only"}}}
+	h.gateway.WorkflowRuns, h.gateway.WorkflowTools, h.gateway.Debits = fixture, fixture, &workflowDebitFixture{fakeSessionDebits: &fakeSessionDebits{}}
+	h.mock.set("a", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprintf(w, `data: {"candidates":[{"index":0,"content":{"role":"model","parts":[{"text":"first answer"}]},"finishReason":"STOP"},{"index":1,"content":{"role":"model","parts":[{"functionCall":{"name":%q,"args":{}}}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":2,"candidatesTokenCount":3,"totalTokenCount":5}}`+"\n\n", alias)
+	})
+	response := h.do(t.Context(), http.MethodPost, "/gemini/v1beta/models/"+routeSlug+":streamGenerateContent?alt=sse", fullKey, []byte(`{"contents":[{"role":"user","parts":[{"text":"hello"}]}]}`), nil)
+	defer response.Body.Close()
+	body, err := io.ReadAll(response.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response.StatusCode == http.StatusOK || strings.Contains(string(body), alias) {
+		t.Fatalf("multiple stream candidates exposed an unexecuted tool call: status=%d body=%s", response.StatusCode, body)
+	}
+}
+
 func TestGatewayToolExecutionAnthropicStreamsOnlyFinalAnswer(t *testing.T) {
 	toolsetID, projectID := uuid.NewString(), uuid.NewString()
 	alias := "t_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
