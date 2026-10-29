@@ -748,6 +748,7 @@ func TestGatewayToolWorkflowSettlesOneRun(t *testing.T) {
 	const prompt = "workflow-private-prompt"
 	var toolCalls atomic.Int64
 	var responsesWorkflow atomic.Bool
+	var approvalWorkflow atomic.Bool
 	var blockTool atomic.Bool
 	toolStarted := make(chan struct{})
 	toolServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -780,7 +781,7 @@ func TestGatewayToolWorkflowSettlesOneRun(t *testing.T) {
 				<-r.Context().Done()
 				return
 			}
-			if !responsesWorkflow.Load() {
+			if !responsesWorkflow.Load() && !approvalWorkflow.Load() {
 				var settledModels int
 				if err := h.Pool.QueryRow(r.Context(), `SELECT count(*) FROM olp.execution_debits WHERE kind='model' AND state='settled'`).Scan(&settledModels); err != nil || settledModels != 1 {
 					t.Errorf("tool dispatched before model settlement: settled=%d error=%v", settledModels, err)
@@ -855,7 +856,7 @@ func TestGatewayToolWorkflowSettlesOneRun(t *testing.T) {
 				if strings.Contains(string(input["messages"]), "workflow-approval-test") {
 					name = approvalTool.Alias
 				}
-			} else {
+			} else if !approvalWorkflow.Load() {
 				var settledModels, settledTools int
 				if err := h.Pool.QueryRow(r.Context(), `SELECT count(*) FILTER (WHERE kind='model' AND state='settled'),count(*) FILTER (WHERE kind='tool' AND state='settled') FROM olp.execution_debits`).Scan(&settledModels, &settledTools); err != nil || settledModels != 1 || settledTools != 1 {
 					t.Errorf("next model dispatched before previous steps settled: models=%d tools=%d error=%v", settledModels, settledTools, err)
@@ -891,7 +892,7 @@ func TestGatewayToolWorkflowSettlesOneRun(t *testing.T) {
 	store := &limits.DebitStore{Pool: h.Pool, Limiter: limiter}
 	h.Gateway.Admission = gateway.NewAdmission(limiter, func() limits.OutagePolicy { return limits.FailClosed }, slog.New(slog.DiscardHandler))
 	h.Gateway.Debits = gateway.DurableSessionDebits(store)
-	h.Gateway.WorkflowRuns = &agents.WorkflowStore{Pool: h.Pool, Auth: h.AuthKey, Debits: store}
+	h.Gateway.WorkflowRuns = &agents.WorkflowStore{Pool: h.Pool, Auth: h.AuthKey, Keys: h.Server.Keys, Installation: h.Server.Installation, Debits: store}
 	h.Gateway.WorkflowTools = &mcp.Server{Runtime: h.Runtime, Egress: &h.Policy, Auth: h.AuthKey, Limiter: limiter, Ledger: &mcp.DurableLedger{Pool: h.Pool, Store: store, Auth: h.AuthKey}}
 	emitter := usage.NewEmitter(8)
 	h.Gateway.Sink = &gateway.AccountingSink{Emitter: emitter}
@@ -994,8 +995,60 @@ func TestGatewayToolWorkflowSettlesOneRun(t *testing.T) {
 	noUsage.Store(false)
 	h.Gateway.Sink = &gateway.AccountingSink{Emitter: usage.NewEmitter(8)}
 	status, response, _ = h.gateway("POST", "/v1/chat/completions", secret, map[string]any{"model": slug, "messages": []any{map[string]any{"role": "user", "content": "workflow-approval-test"}}, "max_tokens": 100})
-	if status != http.StatusForbidden || !strings.Contains(fmt.Sprint(response), "tool_approval_required") || modelCalls.Load() != 4 || toolCalls.Load() != 1 {
-		t.Fatalf("unclassified tool was not refused before dispatch: status=%d response=%v model_calls=%d tool_calls=%d", status, response, modelCalls.Load(), toolCalls.Load())
+	continuation, present := response["continuation_token"].(string)
+	if status != http.StatusOK || response["type"] != "tool_approval_required" || !present || !strings.HasPrefix(continuation, "olpa_") || modelCalls.Load() != 4 || toolCalls.Load() != 1 {
+		t.Fatalf("unclassified tool did not pause before dispatch: status=%d type=%v token_present=%t model_calls=%d tool_calls=%d", status, response["type"], present, modelCalls.Load(), toolCalls.Load())
+	}
+	approvalWorkflow.Store(true)
+	wrongArguments := map[string]any{
+		"model":        slug,
+		"messages":     []any{map[string]any{"role": "user", "content": "workflow-approval-test"}},
+		"max_tokens":   100,
+		"olp_approval": map[string]any{"continuation_token": continuation, "approved": true, "arguments": map[string]any{"call-one": map[string]any{"query": "changed"}}},
+	}
+	wrongStatus, _, _ := h.gateway("POST", "/v1/chat/completions", secret, wrongArguments)
+	if wrongStatus != http.StatusForbidden || modelCalls.Load() != 4 || toolCalls.Load() != 1 {
+		t.Fatalf("changed arguments were not refused before dispatch: status=%d model_calls=%d tool_calls=%d", wrongStatus, modelCalls.Load(), toolCalls.Load())
+	}
+	wrongTranscript := map[string]any{
+		"model":        slug,
+		"messages":     []any{map[string]any{"role": "user", "content": "changed transcript"}},
+		"max_tokens":   100,
+		"olp_approval": map[string]any{"continuation_token": continuation, "approved": true, "arguments": map[string]any{"call-one": map[string]any{"query": argument}}},
+	}
+	transcriptStatus, _, _ := h.gateway("POST", "/v1/chat/completions", secret, wrongTranscript)
+	if transcriptStatus != http.StatusForbidden || modelCalls.Load() != 4 || toolCalls.Load() != 1 {
+		t.Fatalf("changed transcript was not refused before dispatch: status=%d model_calls=%d tool_calls=%d", transcriptStatus, modelCalls.Load(), toolCalls.Load())
+	}
+	resume := map[string]any{
+		"model":        slug,
+		"messages":     []any{map[string]any{"role": "user", "content": "workflow-approval-test"}},
+		"max_tokens":   100,
+		"olp_approval": map[string]any{"continuation_token": continuation, "approved": true, "arguments": map[string]any{"call-one": map[string]any{"query": argument}}},
+	}
+	denied := map[string]any{
+		"model":        slug,
+		"messages":     []any{map[string]any{"role": "user", "content": "workflow-approval-test"}},
+		"max_tokens":   100,
+		"olp_approval": map[string]any{"continuation_token": continuation, "approved": false, "arguments": map[string]any{"call-one": map[string]any{"query": argument}}},
+	}
+	deniedStatus, _, _ := h.gateway("POST", "/v1/chat/completions", secret, denied)
+	if deniedStatus != http.StatusForbidden || modelCalls.Load() != 4 || toolCalls.Load() != 1 {
+		t.Fatalf("unapproved workflow was not refused: status=%d model_calls=%d tool_calls=%d", deniedStatus, modelCalls.Load(), toolCalls.Load())
+	}
+	otherKey := h.want(owner, "POST", "/api/v1/api-keys", map[string]any{"name": "Other workflow caller", "project_id": project, "scopes": []string{"inference", "tools"}, "allowed_routes": []string{slug}, "allowed_toolsets": []string{toolsetID}}, idem("other-workflow-key"), http.StatusCreated)
+	h.refresh()
+	otherStatus, _, _ := h.gateway("POST", "/v1/chat/completions", mcpExecString(t, otherKey, "secret"), resume)
+	if otherStatus != http.StatusForbidden || modelCalls.Load() != 4 || toolCalls.Load() != 1 {
+		t.Fatalf("approval from another caller was not refused: status=%d model_calls=%d tool_calls=%d", otherStatus, modelCalls.Load(), toolCalls.Load())
+	}
+	resumeStatus, resumeResponse, _ := h.gateway("POST", "/v1/chat/completions", secret, resume)
+	if resumeStatus != http.StatusOK || !strings.Contains(fmt.Sprint(resumeResponse), "done") || modelCalls.Load() != 5 || toolCalls.Load() != 2 {
+		t.Fatalf("approved workflow did not resume: status=%d model_calls=%d tool_calls=%d", resumeStatus, modelCalls.Load(), toolCalls.Load())
+	}
+	replayStatus, _, _ := h.gateway("POST", "/v1/chat/completions", secret, resume)
+	if replayStatus != http.StatusForbidden || modelCalls.Load() != 5 || toolCalls.Load() != 2 {
+		t.Fatalf("approval replay was not refused: status=%d model_calls=%d tool_calls=%d", replayStatus, modelCalls.Load(), toolCalls.Load())
 	}
 
 	unavailable := httptest.NewServer(vendor.Config.Handler)
@@ -1356,7 +1409,7 @@ func TestGatewayToolWorkflowWithPinnedGeminiCache(t *testing.T) {
 	store := &limits.DebitStore{Pool: h.Pool, Limiter: limiter}
 	h.Gateway.Admission = gateway.NewAdmission(limiter, func() limits.OutagePolicy { return limits.FailClosed }, slog.New(slog.DiscardHandler))
 	h.Gateway.Debits = gateway.DurableSessionDebits(store)
-	h.Gateway.WorkflowRuns = &agents.WorkflowStore{Pool: h.Pool, Auth: h.AuthKey, Debits: store}
+	h.Gateway.WorkflowRuns = &agents.WorkflowStore{Pool: h.Pool, Auth: h.AuthKey, Keys: h.Server.Keys, Installation: h.Server.Installation, Debits: store}
 	h.Gateway.WorkflowTools = &mcp.Server{Runtime: h.Runtime, Egress: &h.Policy, Auth: h.AuthKey, Limiter: limiter, Ledger: &mcp.DurableLedger{Pool: h.Pool, Store: store, Auth: h.AuthKey}}
 	h.Gateway.Sink = &gateway.AccountingSink{Emitter: usage.NewEmitter(8)}
 	response, raw := geminiPublic(t, h, http.MethodPost, "/gemini/v1beta/models/"+slug+":generateContent", secret, []byte(fmt.Sprintf(`{"cachedContent":%q,"olp_prompt":{"id":%q,"revision_id":%q,"variables":{"name":"world"}}}`, cache.ID, promptID, promptRevision)))

@@ -8,6 +8,7 @@ import (
 	"slices"
 
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/agents"
 	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/runtime"
 )
@@ -54,6 +55,14 @@ func (s *Server) Resolve(_ context.Context, authority access.Authority, release 
 }
 
 func (s *Server) Call(ctx context.Context, authority access.Authority, release *runtime.Release, selected WorkflowTool, runID string, ordinal int, callID string, arguments json.RawMessage) (json.RawMessage, error) {
+	return s.callWorkflow(ctx, authority, release, selected, runID, ordinal, callID, arguments, nil)
+}
+
+func (s *Server) CallApproved(ctx context.Context, authority access.Authority, release *runtime.Release, selected WorkflowTool, runID string, ordinal int, callID string, arguments json.RawMessage, approval agents.WorkflowApproval) (json.RawMessage, error) {
+	return s.callWorkflow(ctx, authority, release, selected, runID, ordinal, callID, arguments, &approval)
+}
+
+func (s *Server) callWorkflow(ctx context.Context, authority access.Authority, release *runtime.Release, selected WorkflowTool, runID string, ordinal int, callID string, arguments json.RawMessage, approval *agents.WorkflowApproval) (json.RawMessage, error) {
 	if s == nil || s.Runtime == nil || s.Ledger == nil || authority.ProjectID == nil || release == nil || release.Snapshot == nil {
 		return nil, workflowFailure(errLedger)
 	}
@@ -66,14 +75,14 @@ func (s *Server) Call(ctx context.Context, authority access.Authority, release *
 		return nil, workflowFailure(errToolDefinitionChanged)
 	}
 	tool := resolved.tools[index]
-	if tool.Classification != "read_only" {
+	if tool.Classification != "read_only" && approval == nil {
 		return nil, &WorkflowError{Status: http.StatusForbidden, Code: "tool_approval_required", Message: "This tool requires approval before it can be called."}
 	}
 	if len(arguments) > maxCallBodyBytes || tool.ValidateArguments(arguments) != nil {
 		return nil, &WorkflowError{Status: http.StatusBadRequest, Code: "invalid_tool_arguments", Message: "The model supplied arguments that do not match the tool schema."}
 	}
 	result := s.execute(ctx, executeInput{
-		authority: authority, resolved: resolved, tool: tool, arguments: arguments,
+		authority: authority, approval: approval, resolved: resolved, tool: tool, arguments: arguments,
 		releaseID: releaseIDFor(release, release.Snapshot), release: release, snapshot: release.Snapshot,
 		runID: runID, ordinal: ordinal, callID: callID,
 	})

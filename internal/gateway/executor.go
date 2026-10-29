@@ -100,6 +100,7 @@ func (x *call) delivered(at time.Time) {
 // outcome is the terminal result of the attempt loop.
 type outcome struct {
 	completion *wire.Completion
+	approval   *workflowPause
 	err        *Error
 	committed  bool
 	cancelled  bool

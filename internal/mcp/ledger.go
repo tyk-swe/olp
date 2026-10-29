@@ -66,6 +66,7 @@ func (l *DurableLedger) Reserve(ctx context.Context, in ReserveInput) (ReserveRe
 		return ReserveResult{}, limits.ErrDebitAuthority
 	}
 	reservation := &Reservation{
+		Approval: in.Approval, Authority: in.Authority,
 		DispatchID: ids[0], ClaimID: ids[1], RunID: ids[2], StepID: ids[3], AttemptID: ids[4],
 		APIKeyID: in.Authority.ID, ProjectID: *in.Authority.ProjectID,
 		ToolsetID: in.ToolsetID, ToolsetRevisionID: in.ToolsetRevisionID,
@@ -83,6 +84,10 @@ func (l *DurableLedger) Reserve(ctx context.Context, in ReserveInput) (ReserveRe
 		RunID: reservation.RunID, StepID: reservation.StepID, Kind: "tool", ClaimID: reservation.ClaimID,
 		Currency: currency, CostBound: bound, ChargeBound: bound, PreparedUntil: time.Now().Add(90 * time.Second),
 		Affinity: limits.ExecutionAffinity{ReleaseID: in.ReleaseID, RevisionID: in.ToolsetRevisionID, ToolAlias: in.ToolAlias, InputDigest: in.InputDigest},
+	}
+	if in.Approval != nil {
+		intent.Affinity.RouteRevisionID = in.Approval.Binding.RouteRevisionID
+		intent.Affinity.TranscriptDigest = in.Approval.Binding.TranscriptDigest
 	}
 	if in.UnitPrice == nil && boundaries.CostBudgeted {
 		if err = l.recordRefusedUnpriced(ctx, in, reservation, intent, boundaries); err != nil {
@@ -242,6 +247,11 @@ func (l *DurableLedger) MarkDispatched(ctx context.Context, reservation *Reserva
 		return err
 	}
 	defer tx.Rollback(ctx)
+	if reservation.Approval != nil {
+		if err := agents.ConsumeApprovalTx(ctx, tx, l.Auth, reservation.Authority, reservation.Approval.ID, reservation.DispatchID, reservation.Approval.Binding); err != nil {
+			return err
+		}
+	}
 	if err = limits.MarkDispatchedTx(ctx, tx, reservation.DispatchID, reservation.ClaimID); err != nil {
 		return err
 	}
