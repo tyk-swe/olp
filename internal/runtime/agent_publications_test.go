@@ -136,6 +136,39 @@ func TestAgentWorkloadLiveAuthority(t *testing.T) {
 	}
 }
 
+func TestAgentTaskRechecksWorkloadRevisionAndExpiry(t *testing.T) {
+	project, resource, issuerID := "project", "resource", "issuer"
+	now := time.Now()
+	active, expired := now.Add(time.Minute), now.Add(-time.Minute)
+	principal := access.Authority{ID: "principal", ProjectID: &project, WorkloadIssuerID: &issuerID, WorkloadDigest: "digest", WorkloadMapping: "worker"}
+	binding := access.Authority{ID: principal.ID, ProjectID: &project, Policy: access.KeyPolicy{Scopes: []string{"agents"}, AllowedAgents: []string{resource}}}
+	manager := Manager{authority: authorityState{
+		loaded:          true,
+		readAt:          now,
+		agentPrincipals: map[string]access.Authority{principal.ID: principal},
+		workloadIssuers: map[string]workloadIssuer{issuerID: {ID: issuerID, Revision: "revision", Config: workload.Config{Enabled: true}, bindings: map[string]access.Authority{principal.WorkloadMapping: binding}}},
+		agentResources:  map[string]agentResourceAuthority{resource: {ProjectID: project, Kind: "agent", Revisions: map[string]bool{resource: true}}},
+	}}
+	for _, test := range []struct {
+		name     string
+		revision string
+		expiry   *time.Time
+		allowed  bool
+	}{
+		{name: "current assertion", revision: "revision", expiry: &active, allowed: true},
+		{name: "replaced issuer revision", revision: "old", expiry: &active},
+		{name: "expired assertion", revision: "revision", expiry: &expired},
+		{name: "unknown expiry", revision: "revision"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			err := manager.AuthorizeAgentTask(principal.ID, project, resource, resource, test.revision, test.expiry)
+			if (err == nil) != test.allowed {
+				t.Fatalf("task authorization error = %v, allowed = %t", err, test.allowed)
+			}
+		})
+	}
+}
+
 func TestMCPToolAuthorizationUsesCurrentPublicationAndServerRevision(t *testing.T) {
 	project, publication, revision, server, serverRevision := "project", "tools", "revision", "server", "server-revision"
 	now := time.Now()

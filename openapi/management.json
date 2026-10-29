@@ -26829,6 +26829,24 @@
           "message_price": {
             "type": "string",
             "pattern": "^[0-9]{1,12}(\\.[0-9]{1,12})?$"
+          },
+          "remote_work_bound_seconds": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 3600,
+            "description": "The agent's declared maximum duration for remote work on one task, in seconds. Required for budgeted calls and enforced by the agent."
+          },
+          "max_task_continuations": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 128,
+            "description": "Maximum observed continuations per task. Defaults to 32."
+          },
+          "task_deadline_seconds": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 3600,
+            "description": "Maximum gateway task duration in seconds. Defaults to 600."
           }
         },
         "required": [

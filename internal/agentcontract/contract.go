@@ -30,15 +30,18 @@ type Toolset struct {
 	Tools []Tool `json:"tools"`
 }
 type Definition struct {
-	Protocol          string   `json:"protocol"`
-	Endpoint          string   `json:"endpoint"`
-	CardDigest        string   `json:"card_digest"`
-	CredentialID      *string  `json:"credential_id,omitempty"`
-	ToolsetRevisions  []string `json:"toolset_revisions"`
-	RouteRevisions    []string `json:"route_revisions"`
-	PricingRevisionID string   `json:"pricing_revision_id"`
-	MaxCost           string   `json:"max_cost"`
-	MessagePrice      string   `json:"message_price,omitempty"`
+	Protocol               string   `json:"protocol"`
+	Endpoint               string   `json:"endpoint"`
+	CardDigest             string   `json:"card_digest"`
+	CredentialID           *string  `json:"credential_id,omitempty"`
+	ToolsetRevisions       []string `json:"toolset_revisions"`
+	RouteRevisions         []string `json:"route_revisions"`
+	PricingRevisionID      string   `json:"pricing_revision_id"`
+	MaxCost                string   `json:"max_cost"`
+	MessagePrice           string   `json:"message_price,omitempty"`
+	RemoteWorkBoundSeconds *int     `json:"remote_work_bound_seconds,omitempty"`
+	MaxTaskContinuations   *int     `json:"max_task_continuations,omitempty"`
+	TaskDeadlineSeconds    *int     `json:"task_deadline_seconds,omitempty"`
 }
 type Draft struct {
 	ProjectID string              `json:"project_id,omitempty"`
@@ -111,6 +114,15 @@ func (d Draft) Validate(kind string) error {
 		}
 		if a.MessagePrice != "" && (!validAmount(a.MessagePrice) || !priceWithinBound(a.MessagePrice, a.MaxCost)) {
 			return invalid("message_price", "Supply a nonnegative price within the cost bound.")
+		}
+		if a.RemoteWorkBoundSeconds != nil && (*a.RemoteWorkBoundSeconds < 1 || *a.RemoteWorkBoundSeconds > 3600) {
+			return invalid("remote_work_bound_seconds", "Use a remote-work duration between one second and one hour.")
+		}
+		if a.MaxTaskContinuations != nil && (*a.MaxTaskContinuations < 1 || *a.MaxTaskContinuations > 128) {
+			return invalid("max_task_continuations", "Use between 1 and 128 task continuations.")
+		}
+		if a.TaskDeadlineSeconds != nil && (*a.TaskDeadlineSeconds < 1 || *a.TaskDeadlineSeconds > 3600) {
+			return invalid("task_deadline_seconds", "Use a task deadline between one second and one hour.")
 		}
 		if a.CredentialID != nil && !validID(*a.CredentialID) {
 			return invalid("credential_id", "Use an agent credential reference.")
