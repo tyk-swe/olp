@@ -120,7 +120,7 @@ func (s *Server) sendStream(w http.ResponseWriter, r *http.Request, authority ac
 		return
 	}
 	info := first.TaskInfo()
-	if !validInitialStreamEvent(first) || prepared.ExpectedUpstreamID != "" && string(info.TaskID) != prepared.ExpectedUpstreamID {
+	if !validInitialStreamEvent(first, prepared.ExpectedUpstreamID != "") || prepared.ExpectedUpstreamID != "" && !streamEventMatches(first, prepared.ExpectedUpstreamID, prepared.Params.Message.ContextID) {
 		s.Ledger.unknown(r.Context(), res)
 		fail(w, request.ID, -32603, "Invalid upstream stream")
 		return
@@ -144,12 +144,16 @@ func (s *Server) sendStream(w http.ResponseWriter, r *http.Request, authority ac
 	s.forwardStream(w, r, authority, prepared.Revision, request.ID, string(info.TaskID), info.ContextID, publicID, next)
 }
 
-func validInitialStreamEvent(event protocol.Event) bool {
+func validInitialStreamEvent(event protocol.Event, continuation bool) bool {
 	switch value := event.(type) {
 	case *protocol.Task:
 		return value != nil && value.ID != "" && value.ContextID != ""
 	case *protocol.Message:
 		return value != nil && value.ID != "" && (value.TaskID == "") == (value.ContextID == "")
+	case *protocol.TaskStatusUpdateEvent:
+		return continuation && value != nil && value.TaskID != "" && value.ContextID != ""
+	case *protocol.TaskArtifactUpdateEvent:
+		return continuation && value != nil && value.TaskID != "" && value.ContextID != ""
 	default:
 		return false
 	}

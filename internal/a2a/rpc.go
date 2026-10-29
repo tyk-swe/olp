@@ -6,9 +6,9 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"mime"
 	"net/http"
 	"slices"
-	"strings"
 	"time"
 
 	protocol "github.com/a2aproject/a2a-go/v2/a2a"
@@ -314,16 +314,20 @@ func (t limitedTransport) RoundTrip(request *http.Request) (*http.Response, erro
 	if err != nil {
 		return nil, err
 	}
-	if strings.HasPrefix(response.Header.Get("Content-Type"), "text/event-stream") {
-		response.Body = &boundedEventBody{ReadCloser: response.Body}
-		return response, nil
+	mediaType, _, _ := mime.ParseMediaType(response.Header.Get("Content-Type"))
+	if mediaType == "text/event-stream" {
+		return limitedResponse(response, &boundedEventBody{ReadCloser: response.Body}, response.ContentLength), nil
 	}
 	defer response.Body.Close()
 	data, err := io.ReadAll(io.LimitReader(response.Body, maxRPCBytes+1))
 	if err != nil || len(data) > maxRPCBytes {
 		return nil, errors.New("upstream response size")
 	}
-	return &http.Response{Status: response.Status, StatusCode: response.StatusCode, Proto: response.Proto, ProtoMajor: response.ProtoMajor, ProtoMinor: response.ProtoMinor, Header: response.Header, Body: io.NopCloser(bytes.NewReader(data)), ContentLength: int64(len(data)), Request: response.Request}, nil
+	return limitedResponse(response, io.NopCloser(bytes.NewReader(data)), int64(len(data))), nil
+}
+
+func limitedResponse(response *http.Response, body io.ReadCloser, length int64) *http.Response {
+	return &http.Response{Status: response.Status, StatusCode: response.StatusCode, Proto: response.Proto, ProtoMajor: response.ProtoMajor, ProtoMinor: response.ProtoMinor, Header: response.Header, Body: body, ContentLength: length, TransferEncoding: response.TransferEncoding, Close: response.Close, Uncompressed: response.Uncompressed, Trailer: response.Trailer, Request: response.Request, TLS: response.TLS}
 }
 
 func (s *Server) transport(ctx context.Context, definition agentcontract.Definition) (a2aclient.Transport, a2aclient.ServiceParams, func(), error) {

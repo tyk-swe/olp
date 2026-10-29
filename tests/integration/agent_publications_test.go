@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"iter"
+	"math/big"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -22,6 +23,7 @@ import (
 	protocol "github.com/a2aproject/a2a-go/v2/a2a"
 	"github.com/a2aproject/a2a-go/v2/a2asrv"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/a2a"
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/agentcontract"
@@ -275,6 +277,17 @@ type a2aTestParams struct {
 	Config  *protocol.SendMessageConfig `json:"configuration,omitempty"`
 }
 
+type a2aContentTypeWriter struct{ http.ResponseWriter }
+
+func (w a2aContentTypeWriter) WriteHeader(status int) {
+	if w.Header().Get("Content-Type") == "text/event-stream" {
+		w.Header().Set("Content-Type", "Text/Event-Stream; charset=utf-8")
+	}
+	w.ResponseWriter.WriteHeader(status)
+}
+
+func (w a2aContentTypeWriter) Flush() { w.ResponseWriter.(http.Flusher).Flush() }
+
 func TestA2AAgentCardUsesGatewayAuthenticationAndEndpoint(t *testing.T) {
 	h := newAccessHarness(t)
 	owner := h.owner()
@@ -287,6 +300,7 @@ func TestA2AAgentCardUsesGatewayAuthenticationAndEndpoint(t *testing.T) {
 	resumeStream := make(chan struct{})
 	resumePinnedStream := make(chan struct{})
 	resumeRevokedStream := make(chan struct{})
+	resumeLongStream := make(chan struct{})
 	var redirectCard, redirectRPC atomic.Bool
 	var redirectHits atomic.Int32
 	redirectTarget := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -301,16 +315,26 @@ func TestA2AAgentCardUsesGatewayAuthenticationAndEndpoint(t *testing.T) {
 				t.Errorf("send before durable debit: %d, %v", dispatched, err)
 			}
 			upstreamIDs <- string(execution.TaskID)
+			if execution.Message.ID == "continue-task" {
+				if yield(protocol.NewStatusUpdateEvent(execution, protocol.TaskStateWorking, nil), nil) {
+					yield(protocol.NewStatusUpdateEvent(execution, protocol.TaskStateCompleted, nil), nil)
+				}
+				return
+			}
 			if !yield(protocol.NewSubmittedTask(execution, execution.Message), nil) {
 				return
 			}
-			pause := map[string]<-chan struct{}{"stream-resume": resumeStream, "stream-pinned": resumePinnedStream}[execution.Message.ID]
+			if execution.Message.ID == "request-input" {
+				yield(protocol.NewStatusUpdateEvent(execution, protocol.TaskStateInputRequired, nil), nil)
+				return
+			}
+			pause := map[string]<-chan struct{}{"stream-resume": resumeStream, "stream-pinned": resumePinnedStream, "stream-long": resumeLongStream}[execution.Message.ID]
 			if pause != nil {
 				for {
 					select {
 					case <-pause:
 						goto resumed
-					case <-time.After(20 * time.Millisecond):
+					case <-time.After(250 * time.Millisecond):
 						if !yield(protocol.NewStatusUpdateEvent(execution, protocol.TaskStateWorking, nil), nil) {
 							return
 						}
@@ -332,8 +356,10 @@ func TestA2AAgentCardUsesGatewayAuthenticationAndEndpoint(t *testing.T) {
 				return
 			}
 			if execution.Message.ID == "stream-bounded" {
-				if !yield(protocol.NewArtifactEvent(execution, protocol.NewTextPart(strings.Repeat("x", (1<<20)-4096))), nil) {
-					return
+				for range 2 {
+					if !yield(protocol.NewArtifactEvent(execution, protocol.NewTextPart(strings.Repeat("x", (1<<20)*3/5))), nil) {
+						return
+					}
 				}
 				yield(protocol.NewStatusUpdateEvent(execution, protocol.TaskStateCompleted, nil), nil)
 				return
@@ -355,7 +381,7 @@ func TestA2AAgentCardUsesGatewayAuthenticationAndEndpoint(t *testing.T) {
 				http.Redirect(w, r, redirectTarget.URL, http.StatusTemporaryRedirect)
 				return
 			}
-			agentHandler.ServeHTTP(w, r)
+			agentHandler.ServeHTTP(a2aContentTypeWriter{w}, r)
 			return
 		}
 		if r.URL.Path != "/.well-known/agent-card.json" {
@@ -392,9 +418,10 @@ func TestA2AAgentCardUsesGatewayAuthenticationAndEndpoint(t *testing.T) {
 			t.Fatalf("invalid price rejected for the wrong reason: %+v", problem)
 		}
 	}
+	const messagePrice = "0.25"
 	created := h.want(owner, http.MethodPost, "/api/v1/agents", map[string]any{
 		"project_id": project, "name": "fixture", "credential": "upstream-secret",
-		"agent": map[string]any{"protocol": "a2a-1.0.0", "endpoint": upstream.URL + "/rpc", "card_digest": hex.EncodeToString(digest[:]), "toolset_revisions": []string{}, "route_revisions": []string{}, "pricing_revision_id": pricing, "max_cost": "1", "message_price": "0.25"},
+		"agent": map[string]any{"protocol": "a2a-1.0.0", "endpoint": upstream.URL + "/rpc", "card_digest": hex.EncodeToString(digest[:]), "toolset_revisions": []string{}, "route_revisions": []string{}, "pricing_revision_id": pricing, "max_cost": "1", "message_price": messagePrice},
 	}, idem("a2a-card-agent"), http.StatusCreated)
 	agent := created["id"].(string)
 	published := h.want(owner, http.MethodPost, "/api/v1/agents/"+agent+"/publish", nil, withMatch(created, idem("a2a-card-publish")), http.StatusOK)
@@ -592,13 +619,34 @@ func TestA2AAgentCardUsesGatewayAuthenticationAndEndpoint(t *testing.T) {
 	if got, missing := projectReadStatus(agent, id), projectReadStatus(uuid.NewString(), uuid.NewString()); got != missing || got != http.StatusNotFound {
 		t.Fatalf("cross-project task differs from missing: %d, %d", got, missing)
 	}
-	var settled, results int
-	var cost string
-	if err := h.Pool.QueryRow(t.Context(), `SELECT count(*),sum(d.observed_cost)::text,(SELECT count(*) FROM olp.execution_debit_results r JOIN olp.execution_debits x ON x.id=r.dispatch_id WHERE x.kind='agent') FROM olp.execution_debits d WHERE d.kind='agent' AND d.state='settled'`).Scan(&settled, &cost, &results); err != nil {
-		t.Fatal(err)
+	type debitSummary struct {
+		Settled int64
+		Cost    string
+		Results int64
 	}
-	if settled != 2 || !limits.AmountEqual(cost, "0.50") || results != settled {
-		t.Fatalf("incorrect settlements: %d, %s, %d", settled, cost, results)
+	accounting := func() debitSummary {
+		t.Helper()
+		rows, err := h.Pool.Query(t.Context(), `SELECT count(*) AS settled,sum(d.observed_cost)::text AS cost,(SELECT count(*) FROM olp.execution_debit_results r JOIN olp.execution_debits x ON x.id=r.dispatch_id WHERE x.kind='agent') AS results FROM olp.execution_debits d WHERE d.kind='agent' AND d.state='settled'`)
+		if err != nil {
+			t.Fatal(err)
+		}
+		summary, collectErr := pgx.CollectExactlyOneRow(rows, pgx.RowToStructByName[debitSummary])
+		if collectErr != nil {
+			t.Fatal(collectErr)
+		}
+		return summary
+	}
+	amount := func(value string) *big.Rat {
+		t.Helper()
+		parsed, ok := new(big.Rat).SetString(value)
+		if !ok {
+			t.Fatalf("invalid accounting amount %q", value)
+		}
+		return parsed
+	}
+	beforeStream := accounting()
+	if beforeStream.Settled != 2 || beforeStream.Results != beforeStream.Settled || amount(beforeStream.Cost).Cmp(new(big.Rat).Mul(big.NewRat(beforeStream.Settled, 1), amount(messagePrice))) != 0 {
+		t.Fatalf("incorrect settlements: %+v", beforeStream)
 	}
 	streamRequest := func(secret, method string, params a2aTestParams) *http.Response {
 		t.Helper()
@@ -611,7 +659,7 @@ func TestA2AAgentCardUsesGatewayAuthenticationAndEndpoint(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		ctx, cancel := context.WithTimeout(t.Context(), 12*time.Second)
+		ctx, cancel := context.WithTimeout(t.Context(), 45*time.Second)
 		t.Cleanup(cancel)
 		request, err := http.NewRequestWithContext(ctx, http.MethodPost, h.HTTP.URL+"/a2a/"+agent, bytes.NewReader(body))
 		if err != nil {
@@ -662,9 +710,13 @@ func TestA2AAgentCardUsesGatewayAuthenticationAndEndpoint(t *testing.T) {
 		t.Fatalf("stream was not established: %s, %s", stream.Status, stream.Header.Get("Content-Type"))
 	}
 	initial := nextEvent(bufio.NewReader(stream.Body))
-	firstTask, ok := initial.(*protocol.Task)
-	if !ok || firstTask.ID == "" || firstTask.Status.State != protocol.TaskStateSubmitted {
+	firstTask, firstTaskOK := initial.(*protocol.Task)
+	if !firstTaskOK || firstTask.ID == "" || firstTask.Status.State != protocol.TaskStateSubmitted {
 		t.Fatalf("unexpected first stream event: %+v", initial)
+	}
+	afterSend := accounting()
+	if afterSend.Settled != beforeStream.Settled+1 || afterSend.Results != beforeStream.Results+1 || amount(afterSend.Cost).Cmp(new(big.Rat).Add(amount(beforeStream.Cost), amount(messagePrice))) != 0 {
+		t.Fatalf("streaming send did not settle exactly once: before %+v, after %+v", beforeStream, afterSend)
 	}
 	streamUpstreamID := <-upstreamIDs
 	if string(firstTask.ID) == streamUpstreamID || firstTask.ContextID != string(firstTask.ID) {
@@ -677,8 +729,8 @@ func TestA2AAgentCardUsesGatewayAuthenticationAndEndpoint(t *testing.T) {
 	}
 	stream.Body.Close()
 	current := rpc(key, "GetTask", a2aTestParams{ID: firstTask.ID})
-	currentTask, ok := current["result"].(map[string]any)
-	if !ok || currentTask["status"].(map[string]any)["state"] == "TASK_STATE_COMPLETED" || currentTask["status"].(map[string]any)["state"] == "TASK_STATE_CANCELED" {
+	currentTask, currentTaskOK := current["result"].(map[string]any)
+	if !currentTaskOK || currentTask["status"].(map[string]any)["state"] == "TASK_STATE_COMPLETED" || currentTask["status"].(map[string]any)["state"] == "TASK_STATE_CANCELED" {
 		t.Fatalf("disconnect changed the upstream task state: %+v", current)
 	}
 	resubscribed := streamRequest(key, "SubscribeToTask", a2aTestParams{ID: firstTask.ID})
@@ -705,9 +757,13 @@ func TestA2AAgentCardUsesGatewayAuthenticationAndEndpoint(t *testing.T) {
 		}
 	}
 	completed := nextEvent(reader)
-	status, ok := completed.(*protocol.TaskStatusUpdateEvent)
-	if !ok || status.Status.State != protocol.TaskStateCompleted || status.TaskID != firstTask.ID || status.ContextID != string(firstTask.ID) {
+	status, completedOK := completed.(*protocol.TaskStatusUpdateEvent)
+	if !completedOK || status.Status.State != protocol.TaskStateCompleted || status.TaskID != firstTask.ID || status.ContextID != string(firstTask.ID) {
 		t.Fatalf("completion did not follow the artifact: %+v", completed)
+	}
+	afterResubscribe := accounting()
+	if afterResubscribe != afterSend {
+		t.Fatalf("resubscription changed the charge: before %+v, after %+v", afterSend, afterResubscribe)
 	}
 	oversized := streamRequest(key, "SendStreamingMessage", a2aTestParams{Message: message("stream-oversized", "PRIVATE OVERSIZED REQUEST")})
 	defer oversized.Body.Close()
@@ -727,12 +783,59 @@ func TestA2AAgentCardUsesGatewayAuthenticationAndEndpoint(t *testing.T) {
 		t.Fatal("bounded stream did not begin with a task")
 	}
 	<-upstreamIDs
-	boundedArtifact, ok := nextEvent(boundedReader).(*protocol.TaskArtifactUpdateEvent)
-	if !ok || boundedArtifact.Artifact == nil || len(boundedArtifact.Artifact.Parts) != 1 || len(boundedArtifact.Artifact.Parts[0].Text()) != (1<<20)-4096 {
-		t.Fatal("under-limit event was not delivered intact")
+	for range 2 {
+		boundedArtifact, boundedOK := nextEvent(boundedReader).(*protocol.TaskArtifactUpdateEvent)
+		if !boundedOK || boundedArtifact.Artifact == nil || len(boundedArtifact.Artifact.Parts) != 1 || len(boundedArtifact.Artifact.Parts[0].Text()) != (1<<20)*3/5 {
+			t.Fatal("under-limit event was not delivered intact")
+		}
 	}
 	if complete, ok := nextEvent(boundedReader).(*protocol.TaskStatusUpdateEvent); !ok || complete.Status.State != protocol.TaskStateCompleted {
 		t.Fatal("under-limit stream did not complete")
+	}
+	pending := streamRequest(key, "SendStreamingMessage", a2aTestParams{Message: message("request-input", "question")})
+	defer pending.Body.Close()
+	pendingReader := bufio.NewReader(pending.Body)
+	pendingTask, pendingOK := nextEvent(pendingReader).(*protocol.Task)
+	if !pendingOK || pendingTask.ID == "" {
+		t.Fatal("input-required stream did not begin with a task")
+	}
+	<-upstreamIDs
+	if status, statusOK := nextEvent(pendingReader).(*protocol.TaskStatusUpdateEvent); !statusOK || status.Status.State != protocol.TaskStateInputRequired {
+		t.Fatal("task did not request input")
+	}
+	continuationMessage := &protocol.Message{ID: "continue-task", Role: protocol.MessageRoleUser, TaskID: pendingTask.ID, Parts: protocol.ContentParts{protocol.NewTextPart("answer")}}
+	continuation := streamRequest(key, "SendStreamingMessage", a2aTestParams{Message: continuationMessage})
+	defer continuation.Body.Close()
+	continuationReader := bufio.NewReader(continuation.Body)
+	continuedStatus, continuedOK := nextEvent(continuationReader).(*protocol.TaskStatusUpdateEvent)
+	if !continuedOK || continuedStatus.TaskID != pendingTask.ID || continuedStatus.ContextID != string(pendingTask.ID) || continuedStatus.Status.State != protocol.TaskStateWorking {
+		t.Fatalf("continuation did not begin with the same task's status: %+v", continuedStatus)
+	}
+	<-upstreamIDs
+	if status, statusOK := nextEvent(continuationReader).(*protocol.TaskStatusUpdateEvent); !statusOK || status.TaskID != pendingTask.ID || status.Status.State != protocol.TaskStateCompleted {
+		t.Fatal("continued task did not complete")
+	}
+	longStream := streamRequest(key, "SendStreamingMessage", a2aTestParams{Message: message("stream-long", "long-running")})
+	defer longStream.Body.Close()
+	longReader := bufio.NewReader(longStream.Body)
+	longTask, longTaskOK := nextEvent(longReader).(*protocol.Task)
+	if !longTaskOK || longTask.ID == "" {
+		t.Fatal("long stream did not begin with a task")
+	}
+	<-upstreamIDs
+	started := time.Now()
+	for time.Since(started) < 31*time.Second {
+		working, workingOK := nextEvent(longReader).(*protocol.TaskStatusUpdateEvent)
+		if !workingOK || working.TaskID != longTask.ID || working.Status.State != protocol.TaskStateWorking {
+			t.Fatalf("long stream did not remain active: %+v", working)
+		}
+	}
+	close(resumeLongStream)
+	for {
+		event := nextEvent(longReader)
+		if completed, completedOK := event.(*protocol.TaskStatusUpdateEvent); completedOK && completed.Status.State == protocol.TaskStateCompleted {
+			break
+		}
 	}
 	revoked := streamRequest(revocableKey["secret"].(string), "SendStreamingMessage", a2aTestParams{Message: message("stream-revoke", "revocation")})
 	defer revoked.Body.Close()
@@ -773,8 +876,8 @@ func TestA2AAgentCardUsesGatewayAuthenticationAndEndpoint(t *testing.T) {
 	redirectRPC.Store(false)
 	redirectCard.Store(false)
 	pinnedStream := streamRequest(key, "SendStreamingMessage", a2aTestParams{Message: message("stream-pinned", "pinned")})
-	pinnedTask, ok := nextEvent(bufio.NewReader(pinnedStream.Body)).(*protocol.Task)
-	if !ok || pinnedTask.ID == "" {
+	pinnedTask, pinnedTaskOK := nextEvent(bufio.NewReader(pinnedStream.Body)).(*protocol.Task)
+	if !pinnedTaskOK || pinnedTask.ID == "" {
 		t.Fatal("pinned stream did not begin with a task")
 	}
 	<-upstreamIDs
