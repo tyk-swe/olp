@@ -115,7 +115,7 @@ export interface paths {
         put?: never;
         /**
          * Create an Anthropic message using a published OLP prompt
-         * @description For transformed routes, the published prompt replaces explicit messages. Other fields use the provider contract.
+         * @description For transformed routes, a published prompt replaces explicit messages. Gateway tool execution can select a subset of the route's published toolsets.
          */
         post: operations["createAnthropicMessageWithPrompt"];
         delete?: never;
@@ -135,7 +135,7 @@ export interface paths {
         put?: never;
         /**
          * Generate Gemini content using a published OLP prompt
-         * @description For transformed routes, the published prompt replaces explicit contents. Other fields use the provider contract.
+         * @description For transformed routes, a published prompt replaces explicit contents. Gateway tool execution can select a subset of the route's published toolsets.
          */
         post: operations["createGeminiContentWithPrompt"];
         delete?: never;
@@ -155,7 +155,7 @@ export interface paths {
         put?: never;
         /**
          * Stream Gemini content using a published OLP prompt
-         * @description For transformed routes, the published prompt replaces explicit contents. Other fields use the provider contract.
+         * @description For transformed routes, a published prompt replaces explicit contents. Gateway tool execution can select a subset of the route's published toolsets.
          */
         post: operations["streamGeminiContentWithPrompt"];
         delete?: never;
@@ -338,11 +338,31 @@ export interface components {
             model: string;
             max_tokens: number;
             olp_prompt: components["schemas"]["PublishedPromptReference"];
+            olp_toolsets?: components["schemas"]["ChatToolsetSelection"];
         } & {
             [key: string]: unknown;
         };
         GeminiPromptRequest: {
             olp_prompt: components["schemas"]["PublishedPromptReference"];
+            olp_toolsets?: components["schemas"]["ChatToolsetSelection"];
+        } & {
+            [key: string]: unknown;
+        };
+        AnthropicToolWorkflowRequest: {
+            model: string;
+            max_tokens: number;
+            messages: {
+                [key: string]: unknown;
+            }[];
+            olp_toolsets?: components["schemas"]["ChatToolsetSelection"];
+        } & {
+            [key: string]: unknown;
+        };
+        GeminiToolWorkflowRequest: {
+            contents: {
+                [key: string]: unknown;
+            }[];
+            olp_toolsets?: components["schemas"]["ChatToolsetSelection"];
         } & {
             [key: string]: unknown;
         };
@@ -775,7 +795,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["AnthropicPromptRequest"];
+                "application/json": components["schemas"]["AnthropicPromptRequest"] | components["schemas"]["AnthropicToolWorkflowRequest"];
             };
         };
         responses: {
@@ -871,7 +891,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["GeminiPromptRequest"];
+                "application/json": components["schemas"]["GeminiPromptRequest"] | components["schemas"]["GeminiToolWorkflowRequest"];
             };
         };
         responses: {
@@ -967,7 +987,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["GeminiPromptRequest"];
+                "application/json": components["schemas"]["GeminiPromptRequest"] | components["schemas"]["GeminiToolWorkflowRequest"];
             };
         };
         responses: {

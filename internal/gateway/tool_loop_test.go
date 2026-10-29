@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"maps"
 	"net"
 	"net/http"
 	"slices"
@@ -14,11 +15,400 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/runtime"
 	"github.com/tyk-swe/olp/internal/usage"
 )
+
+const nativeToolResult = "private-tool-result"
+
+func nativeWorkflowHarness(t *testing.T, projectID, surface, profile, mode, fidelity string, toolsets []string, certified bool, fixture *workflowFixture) *harness {
+	t.Helper()
+	h := strictHarness(t, func(snapshot *routing.Snapshot) {
+		route := snapshot.Routes[routeSlug]
+		// The existing harness configures its shared snapshot through this callback.
+		snapshot.Routes = map[string]routing.Route{routeSlug: {
+			ID: route.ID, Slug: route.Slug, Operations: route.Operations, OverallTimeout: route.OverallTimeout,
+			MaxAttempts: route.MaxAttempts, Targets: route.Targets, RoutingID: route.RoutingID,
+			RevisionID: route.RevisionID, Revision: route.Revision, PublishedAt: route.PublishedAt,
+			Policy: route.Policy, ProjectID: &projectID, ContentPolicy: route.ContentPolicy,
+			Fidelity: routing.RouteFidelity{Mode: fidelity},
+			Behavior: routing.Behavior{ToolExecution: "gateway", Toolsets: toolsets},
+		}}
+		snapshot.Providers = maps.Collect(func(yield func(string, routing.Provider) bool) {
+			for id, provider := range snapshot.Providers {
+				if !yield(id, routing.Provider{
+					ID: provider.ID, Name: provider.Name, Kind: surface, Enabled: provider.Enabled,
+					ActiveCredential: provider.ActiveCredential, RevisionID: provider.RevisionID,
+					Endpoint: provider.Endpoint, AuthMode: provider.AuthMode, Slots: provider.Slots,
+					ProfileID: profile, ProfileRevision: connectors.ProfileRevision,
+					Capabilities: []routing.Capability{{Model: provider.Capabilities[0].Model, Operation: "generation", Surface: surface, Mode: mode, ToolCalls: certified}},
+				}) {
+					return
+				}
+			}
+		})
+	})
+	h.rt.keys[fullKey] = access.Authority{ID: h.rt.keys[fullKey].ID, ProjectID: &projectID, Policy: h.rt.keys[fullKey].Policy}
+	h.gateway.WorkflowRuns, h.gateway.WorkflowTools, h.gateway.Debits = fixture, fixture, &workflowDebitFixture{fakeSessionDebits: &fakeSessionDebits{}}
+	return h
+}
+
+type anthropicWorkflowRequest struct {
+	Tools []struct {
+		Name        string                     `json:"name"`
+		InputSchema map[string]json.RawMessage `json:"input_schema"`
+	} `json:"tools"`
+	Messages []struct {
+		Role    string          `json:"role"`
+		Content json.RawMessage `json:"content"`
+	} `json:"messages"`
+}
+
+type geminiWorkflowRequest struct {
+	Tools []struct {
+		Functions []struct {
+			Name string `json:"name"`
+		} `json:"functionDeclarations"`
+	} `json:"tools"`
+	Contents []struct {
+		Parts []struct {
+			ThoughtSignature string `json:"thoughtSignature"`
+			FunctionCall     *struct {
+				Name string `json:"name"`
+			} `json:"functionCall"`
+			FunctionResponse *struct {
+				Name     string `json:"name"`
+				Response struct {
+					Output string `json:"output"`
+				} `json:"response"`
+			} `json:"functionResponse"`
+		} `json:"parts"`
+	} `json:"contents"`
+}
+
+func assertNativeToolOutput(t *testing.T, output string) {
+	t.Helper()
+	var result struct {
+		Content []struct {
+			Text string `json:"text"`
+		} `json:"content"`
+	}
+	if err := json.Unmarshal([]byte(output), &result); err != nil || len(result.Content) != 1 || result.Content[0].Text != nativeToolResult {
+		t.Fatalf("provider received the wrong tool output: %q", output)
+	}
+}
+
+func assertAnthropicWorkflowRequests(t *testing.T, first, second []byte, alias string, thinking bool) {
+	t.Helper()
+	var initial, continued anthropicWorkflowRequest
+	if err := json.Unmarshal(first, &initial); err != nil || len(initial.Tools) != 1 || initial.Tools[0].Name != alias || string(initial.Tools[0].InputSchema["type"]) != `"object"` {
+		t.Fatalf("provider did not receive the native tool definition: %s", first)
+	}
+	if err := json.Unmarshal(second, &continued); err != nil || len(continued.Messages) != 3 || continued.Messages[1].Role != "assistant" || continued.Messages[2].Role != "user" {
+		t.Fatalf("provider did not receive native continuation messages: %s", second)
+	}
+	var assistant []struct {
+		Type, ID, Name, Thinking, Signature string
+		Input                               struct{ Value int }
+	}
+	if err := json.Unmarshal(continued.Messages[1].Content, &assistant); err != nil {
+		t.Fatalf("invalid assistant content: %s", second)
+	}
+	if thinking {
+		if len(assistant) != 2 || assistant[0].Type != "thinking" || assistant[0].Thinking != "private thought" || assistant[0].Signature != "signed" {
+			t.Fatalf("provider lost the signed thinking block: %s", second)
+		}
+	}
+	if len(assistant) < 1 || assistant[len(assistant)-1].Type != "tool_use" || assistant[len(assistant)-1].ID != "call-1" || assistant[len(assistant)-1].Name != alias || assistant[len(assistant)-1].Input.Value != 1 {
+		t.Fatalf("provider lost the native tool call: %s", second)
+	}
+	var results []struct {
+		Type      string `json:"type"`
+		ToolUseID string `json:"tool_use_id"`
+		Content   []struct {
+			Text string `json:"text"`
+		} `json:"content"`
+	}
+	if err := json.Unmarshal(continued.Messages[2].Content, &results); err != nil || len(results) != 1 || results[0].Type != "tool_result" || results[0].ToolUseID != "call-1" || len(results[0].Content) != 1 {
+		t.Fatalf("provider did not receive the paired tool result: %s", second)
+	}
+	assertNativeToolOutput(t, results[0].Content[0].Text)
+}
+
+func assertGeminiWorkflowRequests(t *testing.T, first, second []byte, alias string) {
+	t.Helper()
+	var initial, continued geminiWorkflowRequest
+	if err := json.Unmarshal(first, &initial); err != nil || len(initial.Tools) != 1 || len(initial.Tools[0].Functions) != 1 || initial.Tools[0].Functions[0].Name != alias {
+		t.Fatalf("provider did not receive the native tool definition: %s", first)
+	}
+	if err := json.Unmarshal(second, &continued); err != nil || len(continued.Contents) != 3 {
+		t.Fatalf("provider did not receive native continuation contents: %s", second)
+	}
+	parts := continued.Contents[1].Parts
+	if len(parts) == 0 || parts[len(parts)-1].FunctionCall == nil || parts[len(parts)-1].FunctionCall.Name != alias || parts[len(parts)-1].ThoughtSignature != "signed" {
+		t.Fatalf("provider did not receive the signed tool call: %s", second)
+	}
+	results := continued.Contents[2].Parts
+	if len(results) != 1 || results[0].FunctionResponse == nil || results[0].FunctionResponse.Name != alias {
+		t.Fatalf("provider did not receive the paired tool result: %s", second)
+	}
+	assertNativeToolOutput(t, results[0].FunctionResponse.Response.Output)
+}
+
+func TestGatewayToolExecutionAnthropicCompletesOneRun(t *testing.T) {
+	toolsetID, projectID := uuid.NewString(), uuid.NewString()
+	alias := "t_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+	fixture := &workflowFixture{runID: uuid.NewString(), result: json.RawMessage(`{"content":[{"type":"text","text":"private-tool-result"}]}`), tool: WorkflowTool{ToolsetID: toolsetID, RevisionID: uuid.NewString(), Definition: routing.MCPToolsetTool{Alias: alias, Classification: "read_only", InputSchema: json.RawMessage(`{"type":"object"}`)}}}
+	h := nativeWorkflowHarness(t, projectID, "anthropic", "anthropic-messages", "unary", routing.FidelityTransformed, []string{toolsetID}, true, fixture)
+	upstream := make(chan []byte, 2)
+	h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		upstream <- body
+		w.Header().Set("Content-Type", "application/json")
+		if h.mock.count("a") == 1 {
+			fmt.Fprintf(w, `{"id":"first","type":"message","role":"assistant","model":"model-a","content":[{"type":"text","text":"intermediate"},{"type":"tool_use","id":"call-1","name":%q,"input":{"value":1}}],"stop_reason":"tool_use","usage":{"input_tokens":2,"output_tokens":3}}`, alias)
+			return
+		}
+		io.WriteString(w, `{"id":"last","type":"message","role":"assistant","model":"model-a","content":[{"type":"text","text":"final answer"}],"stop_reason":"end_turn","usage":{"input_tokens":3,"output_tokens":4}}`)
+	})
+	response := h.do(t.Context(), http.MethodPost, "/anthropic/v1/messages", fullKey, []byte(`{"model":"`+routeSlug+`","max_tokens":20,"messages":[{"role":"user","content":"hello"}]}`), nil)
+	defer response.Body.Close()
+	body, err := io.ReadAll(response.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response.StatusCode != http.StatusOK || !strings.Contains(string(body), "final answer") || strings.Contains(string(body), "intermediate") || strings.Contains(string(body), "call-1") || strings.Contains(string(body), nativeToolResult) || h.mock.count("a") != 2 {
+		t.Fatalf("anthropic workflow did not return the final answer: status=%d body=%s calls=%d", response.StatusCode, body, h.mock.count("a"))
+	}
+	first := <-upstream
+	second := <-upstream
+	assertAnthropicWorkflowRequests(t, first, second, alias, false)
+}
+
+func TestGatewayToolExecutionGeminiCompletesOneRun(t *testing.T) {
+	toolsetID, projectID := uuid.NewString(), uuid.NewString()
+	alias := "t_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+	fixture := &workflowFixture{runID: uuid.NewString(), result: json.RawMessage(`{"content":[{"type":"text","text":"private-tool-result"}]}`), tool: WorkflowTool{ToolsetID: toolsetID, RevisionID: uuid.NewString(), Definition: routing.MCPToolsetTool{Alias: alias, Classification: "read_only", InputSchema: json.RawMessage(`{"type":"object"}`)}}}
+	h := nativeWorkflowHarness(t, projectID, "gemini", "gemini-generation", "unary", routing.FidelityTransformed, []string{toolsetID}, true, fixture)
+	upstream := make(chan []byte, 2)
+	h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		upstream <- body
+		w.Header().Set("Content-Type", "application/json")
+		if h.mock.count("a") == 1 {
+			fmt.Fprintf(w, `{"candidates":[{"index":0,"content":{"role":"model","parts":[{"text":"intermediate"},{"functionCall":{"name":%q,"args":{"value":1}},"thoughtSignature":"signed"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":2,"candidatesTokenCount":3,"totalTokenCount":5}}`, alias)
+			return
+		}
+		io.WriteString(w, `{"candidates":[{"index":0,"content":{"role":"model","parts":[{"text":"final answer"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":3,"candidatesTokenCount":4,"totalTokenCount":7}}`)
+	})
+	response := h.do(t.Context(), http.MethodPost, "/gemini/v1beta/models/"+routeSlug+":generateContent", fullKey, []byte(`{"contents":[{"role":"user","parts":[{"text":"hello"}]}]}`), nil)
+	defer response.Body.Close()
+	body, err := io.ReadAll(response.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response.StatusCode != http.StatusOK || !strings.Contains(string(body), "final answer") || strings.Contains(string(body), "intermediate") || strings.Contains(string(body), alias) || strings.Contains(string(body), nativeToolResult) || h.mock.count("a") != 2 {
+		t.Fatalf("gemini workflow did not return the final answer: status=%d body=%s calls=%d", response.StatusCode, body, h.mock.count("a"))
+	}
+	first := <-upstream
+	second := <-upstream
+	assertGeminiWorkflowRequests(t, first, second, alias)
+}
+
+func TestGatewayToolExecutionGeminiStreamsOnlyFinalAnswer(t *testing.T) {
+	toolsetID, projectID := uuid.NewString(), uuid.NewString()
+	alias := "t_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+	fixture := &workflowFixture{runID: uuid.NewString(), result: json.RawMessage(`{"content":[{"type":"text","text":"private-tool-result"}]}`), tool: WorkflowTool{ToolsetID: toolsetID, RevisionID: uuid.NewString(), Definition: routing.MCPToolsetTool{Alias: alias, Classification: "read_only", InputSchema: json.RawMessage(`{"type":"object"}`)}}}
+	h := nativeWorkflowHarness(t, projectID, "gemini", "gemini-generation", "streaming", routing.FidelityTransformed, []string{toolsetID}, true, fixture)
+	upstream := make(chan []byte, 2)
+	h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		upstream <- body
+		w.Header().Set("Content-Type", "text/event-stream")
+		if h.mock.count("a") == 1 {
+			fmt.Fprintf(w, "data: {\"candidates\":[{\"index\":0,\"content\":{\"role\":\"model\",\"parts\":[{\"text\":\"intermediate\"},{\"functionCall\":{\"name\":%q,\"args\":{\"value\":1}},\"thoughtSignature\":\"signed\"}]},\"finishReason\":\"STOP\"}],\"usageMetadata\":{\"promptTokenCount\":2,\"candidatesTokenCount\":3,\"totalTokenCount\":5}}\n\n", alias)
+			return
+		}
+		io.WriteString(w, "data: {\"candidates\":[{\"index\":0,\"content\":{\"role\":\"model\",\"parts\":[{\"text\":\"final answer\"}]},\"finishReason\":\"STOP\"}],\"usageMetadata\":{\"promptTokenCount\":3,\"candidatesTokenCount\":4,\"totalTokenCount\":7}}\n\n")
+	})
+	response := h.do(t.Context(), http.MethodPost, "/gemini/v1beta/models/"+routeSlug+":streamGenerateContent?alt=sse", fullKey, []byte(`{"contents":[{"role":"user","parts":[{"text":"hello"}]}]}`), nil)
+	defer response.Body.Close()
+	body, err := io.ReadAll(response.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response.StatusCode != http.StatusOK || !strings.Contains(string(body), "final answer") || strings.Contains(string(body), "intermediate") || strings.Contains(string(body), alias) || strings.Contains(string(body), nativeToolResult) || h.mock.count("a") != 2 {
+		t.Fatalf("gemini stream exposed an intermediate step or missed the final answer: status=%d body=%s calls=%d", response.StatusCode, body, h.mock.count("a"))
+	}
+	first := <-upstream
+	second := <-upstream
+	assertGeminiWorkflowRequests(t, first, second, alias)
+}
+
+func TestGatewayToolExecutionGeminiRejectsMultipleStreamCandidates(t *testing.T) {
+	toolsetID, projectID := uuid.NewString(), uuid.NewString()
+	alias := "t_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+	fixture := &workflowFixture{runID: uuid.NewString(), tool: WorkflowTool{ToolsetID: toolsetID, RevisionID: uuid.NewString(), Definition: routing.MCPToolsetTool{Alias: alias, Classification: "read_only"}}}
+	h := nativeWorkflowHarness(t, projectID, "gemini", "gemini-generation", "streaming", routing.FidelityTransformed, []string{toolsetID}, true, fixture)
+	h.mock.set("a", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprintf(w, `data: {"candidates":[{"index":0,"content":{"role":"model","parts":[{"text":"first answer"}]},"finishReason":"STOP"},{"index":1,"content":{"role":"model","parts":[{"functionCall":{"name":%q,"args":{}}}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":2,"candidatesTokenCount":3,"totalTokenCount":5}}`+"\n\n", alias)
+	})
+	response := h.do(t.Context(), http.MethodPost, "/gemini/v1beta/models/"+routeSlug+":streamGenerateContent?alt=sse", fullKey, []byte(`{"contents":[{"role":"user","parts":[{"text":"hello"}]}]}`), nil)
+	defer response.Body.Close()
+	body, err := io.ReadAll(response.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response.StatusCode == http.StatusOK || strings.Contains(string(body), alias) {
+		t.Fatalf("multiple stream candidates exposed an unexecuted tool call: status=%d body=%s", response.StatusCode, body)
+	}
+}
+
+func TestGatewayToolExecutionAnthropicStreamsOnlyFinalAnswer(t *testing.T) {
+	toolsetID, projectID := uuid.NewString(), uuid.NewString()
+	alias := "t_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+	fixture := &workflowFixture{runID: uuid.NewString(), result: json.RawMessage(`{"content":[{"type":"text","text":"private-tool-result"}]}`), tool: WorkflowTool{ToolsetID: toolsetID, RevisionID: uuid.NewString(), Definition: routing.MCPToolsetTool{Alias: alias, Classification: "read_only", InputSchema: json.RawMessage(`{"type":"object"}`)}}}
+	h := nativeWorkflowHarness(t, projectID, "anthropic", "anthropic-messages", "streaming", routing.FidelityTransformed, []string{toolsetID}, true, fixture)
+	upstream := make(chan []byte, 2)
+	h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		upstream <- body
+		w.Header().Set("Content-Type", "text/event-stream")
+		io.WriteString(w, "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"model-a\",\"usage\":{\"input_tokens\":2}}}\n\n")
+		if h.mock.count("a") == 1 {
+			io.WriteString(w, "event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"thinking\",\"thinking\":\"\"}}\n\nevent: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"thinking_delta\",\"thinking\":\"private thought\"}}\n\nevent: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"signature_delta\",\"signature\":\"signed\"}}\n\nevent: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":0}\n\n")
+			fmt.Fprintf(w, "event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":1,\"content_block\":{\"type\":\"tool_use\",\"id\":\"call-1\",\"name\":%q,\"input\":{}}}\n\n", alias)
+			io.WriteString(w, "event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":1,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"{\\\"value\\\":1}\"}}\n\nevent: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":1}\n\nevent: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"tool_use\"},\"usage\":{\"output_tokens\":3}}\n\nevent: message_stop\ndata: {\"type\":\"message_stop\"}\n\n")
+			return
+		}
+		io.WriteString(w, "event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\nevent: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"final answer\"}}\n\nevent: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":0}\n\nevent: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":3}}\n\nevent: message_stop\ndata: {\"type\":\"message_stop\"}\n\n")
+	})
+	response := h.do(t.Context(), http.MethodPost, "/anthropic/v1/messages", fullKey, []byte(`{"model":"`+routeSlug+`","max_tokens":64,"stream":true,"messages":[{"role":"user","content":"hello"}]}`), nil)
+	defer response.Body.Close()
+	body, err := io.ReadAll(response.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response.StatusCode != http.StatusOK || !strings.Contains(string(body), "final answer") || strings.Contains(string(body), "call-1") || strings.Contains(string(body), alias) || strings.Contains(string(body), nativeToolResult) || strings.Contains(string(body), "private thought") || h.mock.count("a") != 2 {
+		t.Fatalf("anthropic stream exposed an intermediate step or missed the final answer: status=%d body=%s calls=%d", response.StatusCode, body, h.mock.count("a"))
+	}
+	first := <-upstream
+	second := <-upstream
+	assertAnthropicWorkflowRequests(t, first, second, alias, true)
+}
+
+func TestGatewayToolExecutionNativeRefusals(t *testing.T) {
+	for _, tc := range []struct {
+		name, profile, surface, path, body, fidelity, code string
+		certified                                          bool
+	}{
+		{"anthropic strict", "anthropic-messages", "anthropic", "/anthropic/v1/messages", `{"model":"` + routeSlug + `","max_tokens":20,"messages":[{"role":"user","content":"hello"}]}`, routing.FidelityStrict, "tool_execution_strict_route", true},
+		{"gemini strict", "gemini-generation", "gemini", "/gemini/v1beta/models/" + routeSlug + ":generateContent", `{"contents":[{"role":"user","parts":[{"text":"hello"}]}]}`, routing.FidelityStrict, "tool_execution_strict_route", true},
+		{"anthropic uncertified", "anthropic-messages", "anthropic", "/anthropic/v1/messages", `{"model":"` + routeSlug + `","max_tokens":20,"messages":[{"role":"user","content":"hello"}]}`, routing.FidelityTransformed, "upstream_unavailable", false},
+		{"gemini uncertified", "gemini-generation", "gemini", "/gemini/v1beta/models/" + routeSlug + ":generateContent", `{"contents":[{"role":"user","parts":[{"text":"hello"}]}]}`, routing.FidelityTransformed, "upstream_unavailable", false},
+		{"gemini candidates", "gemini-generation", "gemini", "/gemini/v1beta/models/" + routeSlug + ":generateContent", `{"contents":[{"role":"user","parts":[{"text":"hello"}]}],"generationConfig":{"candidateCount":2}}`, routing.FidelityTransformed, "tool_execution_choices_unsupported", true},
+		{"gemini candidate alias", "gemini-generation", "gemini", "/gemini/v1beta/models/" + routeSlug + ":generateContent", `{"contents":[{"role":"user","parts":[{"text":"hello"}]}],"generationConfig":{"candidate_count":2}}`, routing.FidelityTransformed, "tool_execution_choices_unsupported", true},
+		{"gemini snake case config", "gemini-generation", "gemini", "/gemini/v1beta/models/" + routeSlug + ":generateContent", `{"contents":[{"role":"user","parts":[{"text":"hello"}]}],"generation_config":{"candidate_count":2}}`, routing.FidelityTransformed, "tool_execution_choices_unsupported", true},
+		{"gemini snake case config with camel candidate", "gemini-generation", "gemini", "/gemini/v1beta/models/" + routeSlug + ":generateContent", `{"contents":[{"role":"user","parts":[{"text":"hello"}]}],"generation_config":{"candidateCount":2}}`, routing.FidelityTransformed, "tool_execution_choices_unsupported", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			projectID := uuid.NewString()
+			fixture := &workflowFixture{runID: uuid.NewString()}
+			h := nativeWorkflowHarness(t, projectID, tc.surface, tc.profile, "unary", tc.fidelity, nil, tc.certified, fixture)
+			response := h.do(t.Context(), http.MethodPost, tc.path, fullKey, []byte(tc.body), nil)
+			defer response.Body.Close()
+			body, err := io.ReadAll(response.Body)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if response.StatusCode == http.StatusOK || !strings.Contains(string(body), tc.code) || h.mock.count("a") != 0 || h.mock.count("b") != 0 {
+				t.Fatalf("native workflow refusal did not stop dispatch: status=%d body=%s", response.StatusCode, body)
+			}
+		})
+	}
+}
+
+func TestGatewayToolExecutionNativeBounds(t *testing.T) {
+	for _, dialect := range []struct {
+		name, profile, path, body, tool, response string
+	}{
+		{"anthropic", "anthropic-messages", "/anthropic/v1/messages", `{"model":"` + routeSlug + `","max_tokens":20,"messages":[{"role":"user","content":"hello"}]}`, `{"type":"tool_use","id":"call-1","name":%q,"input":{}}`, `{"id":"bounded","type":"message","role":"assistant","model":"model-a","content":[%s],"stop_reason":"tool_use","usage":{"input_tokens":2,"output_tokens":3}}`},
+		{"gemini", "gemini-generation", "/gemini/v1beta/models/" + routeSlug + ":generateContent", `{"contents":[{"role":"user","parts":[{"text":"hello"}]}]}`, `{"functionCall":{"name":%q,"args":{}}}`, `{"candidates":[{"content":{"role":"model","parts":[%s]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":2,"candidatesTokenCount":3,"totalTokenCount":5}}`},
+	} {
+		for _, bound := range []struct {
+			name, code    string
+			calls, models int
+		}{
+			{"iterations", "tool_iteration_limit", 1, 8},
+			{"calls", "tool_call_limit", 33, 1},
+		} {
+			t.Run(dialect.name+"/"+bound.name, func(t *testing.T) {
+				toolsetID, projectID := uuid.NewString(), uuid.NewString()
+				alias := "t_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+				fixture := &workflowFixture{runID: uuid.NewString(), tool: WorkflowTool{ToolsetID: toolsetID, RevisionID: uuid.NewString(), Definition: routing.MCPToolsetTool{Alias: alias, Classification: "read_only"}}, result: json.RawMessage(`{"content":[{"type":"text","text":"private-tool-result"}]}`), beforeCall: func() error {
+					if bound.calls > 1 {
+						return fmt.Errorf("tool was dispatched before the call limit refusal")
+					}
+					return nil
+				}}
+				h := nativeWorkflowHarness(t, projectID, dialect.name, dialect.profile, "unary", routing.FidelityTransformed, []string{toolsetID}, true, fixture)
+				upstream := make(chan []byte, bound.models)
+				h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
+					request, _ := io.ReadAll(r.Body)
+					upstream <- request
+					parts := strings.TrimSuffix(strings.Repeat(fmt.Sprintf(dialect.tool, alias)+",", bound.calls), ",")
+					fmt.Fprintf(w, dialect.response, parts)
+				})
+				response := h.do(t.Context(), http.MethodPost, dialect.path, fullKey, []byte(dialect.body), nil)
+				defer response.Body.Close()
+				body, err := io.ReadAll(response.Body)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if response.StatusCode != http.StatusBadRequest || !strings.Contains(string(body), bound.code) || h.mock.count("a") != bound.models {
+					t.Fatalf("native workflow did not enforce its %s bound: status=%d body=%s model_calls=%d", bound.name, response.StatusCode, body, h.mock.count("a"))
+				}
+				for step := 0; step < bound.models; step++ {
+					request := <-upstream
+					if dialect.name == "anthropic" {
+						var observed anthropicWorkflowRequest
+						if err := json.Unmarshal(request, &observed); err != nil || len(observed.Messages) != 1+2*step {
+							t.Fatalf("anthropic model request omitted tool results at step %d: %s", step, request)
+						}
+						if step > 0 {
+							var blocks []struct {
+								Type    string `json:"type"`
+								Content []struct {
+									Text string `json:"text"`
+								} `json:"content"`
+							}
+							if err := json.Unmarshal(observed.Messages[len(observed.Messages)-1].Content, &blocks); err != nil || len(blocks) != 1 || blocks[0].Type != "tool_result" || len(blocks[0].Content) != 1 {
+								t.Fatalf("anthropic model request lacks a tool result at step %d: %s", step, request)
+							}
+							assertNativeToolOutput(t, blocks[0].Content[0].Text)
+						}
+					} else {
+						var observed geminiWorkflowRequest
+						if err := json.Unmarshal(request, &observed); err != nil || len(observed.Contents) != 1+2*step {
+							t.Fatalf("gemini model request omitted tool results at step %d: %s", step, request)
+						}
+						if step > 0 {
+							parts := observed.Contents[len(observed.Contents)-1].Parts
+							if len(parts) != 1 || parts[0].FunctionResponse == nil {
+								t.Fatalf("gemini model request lacks a tool result at step %d: %s", step, request)
+							}
+							assertNativeToolOutput(t, parts[0].FunctionResponse.Response.Output)
+						}
+					}
+				}
+			})
+		}
+	}
+}
 
 func TestGatewayToolExecutionRejectsStrictRoutesBeforeDispatch(t *testing.T) {
 	h := strictHarness(t, func(snapshot *routing.Snapshot) {
@@ -228,6 +618,7 @@ func (f *workflowDebitFixture) SettleWorkflow(context.Context, *usage.Event, int
 type workflowFixture struct {
 	runID      string
 	tool       WorkflowTool
+	result     json.RawMessage
 	calls      []json.RawMessage
 	beforeCall func() error
 }
@@ -268,6 +659,9 @@ func (f *workflowFixture) Call(_ context.Context, _ access.Authority, _ *runtime
 		}
 	}
 	f.calls = append(f.calls, arguments)
+	if len(f.result) != 0 {
+		return f.result, nil
+	}
 	return json.RawMessage(`{"content":[{"type":"text","text":"result"}]}`), nil
 }
 

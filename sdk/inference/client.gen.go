@@ -332,8 +332,22 @@ type AnthropicPromptRequest struct {
 	Model     string `json:"model"`
 
 	// OlpPrompt Specify exactly one published label or immutable revision ID.
-	OlpPrompt            PublishedPromptReference `json:"olp_prompt"`
-	AdditionalProperties map[string]interface{}   `json:"-"`
+	OlpPrompt PublishedPromptReference `json:"olp_prompt"`
+
+	// OlpToolsets Select a subset of the published toolsets allowed by the route. An empty array selects no toolsets.
+	OlpToolsets          *ChatToolsetSelection  `json:"olp_toolsets,omitempty"`
+	AdditionalProperties map[string]interface{} `json:"-"`
+}
+
+// AnthropicToolWorkflowRequest defines model for AnthropicToolWorkflowRequest.
+type AnthropicToolWorkflowRequest struct {
+	MaxTokens int                      `json:"max_tokens"`
+	Messages  []map[string]interface{} `json:"messages"`
+	Model     string                   `json:"model"`
+
+	// OlpToolsets Select a subset of the published toolsets allowed by the route. An empty array selects no toolsets.
+	OlpToolsets          *ChatToolsetSelection  `json:"olp_toolsets,omitempty"`
+	AdditionalProperties map[string]interface{} `json:"-"`
 }
 
 // ChatPromptRequest defines model for ChatPromptRequest.
@@ -401,8 +415,20 @@ type GeminiInferenceError struct {
 // GeminiPromptRequest defines model for GeminiPromptRequest.
 type GeminiPromptRequest struct {
 	// OlpPrompt Specify exactly one published label or immutable revision ID.
-	OlpPrompt            PublishedPromptReference `json:"olp_prompt"`
-	AdditionalProperties map[string]interface{}   `json:"-"`
+	OlpPrompt PublishedPromptReference `json:"olp_prompt"`
+
+	// OlpToolsets Select a subset of the published toolsets allowed by the route. An empty array selects no toolsets.
+	OlpToolsets          *ChatToolsetSelection  `json:"olp_toolsets,omitempty"`
+	AdditionalProperties map[string]interface{} `json:"-"`
+}
+
+// GeminiToolWorkflowRequest defines model for GeminiToolWorkflowRequest.
+type GeminiToolWorkflowRequest struct {
+	Contents []map[string]interface{} `json:"contents"`
+
+	// OlpToolsets Select a subset of the published toolsets allowed by the route. An empty array selects no toolsets.
+	OlpToolsets          *ChatToolsetSelection  `json:"olp_toolsets,omitempty"`
+	AdditionalProperties map[string]interface{} `json:"-"`
 }
 
 // InferenceError defines model for InferenceError.
@@ -496,16 +522,31 @@ type ResponsesPublishedPromptReference struct {
 	union json.RawMessage
 }
 
+// CreateAnthropicMessageWithPromptJSONBody defines parameters for CreateAnthropicMessageWithPrompt.
+type CreateAnthropicMessageWithPromptJSONBody struct {
+	union json.RawMessage
+}
+
 // CreateAnthropicMessageWithPromptParams defines parameters for CreateAnthropicMessageWithPrompt.
 type CreateAnthropicMessageWithPromptParams struct {
 	// XOLPAgentIdentity The current workload assertion is required when Authorization contains a one-use delegation token.
 	XOLPAgentIdentity *string `json:"X-OLP-Agent-Identity,omitempty"`
 }
 
+// CreateGeminiContentWithPromptJSONBody defines parameters for CreateGeminiContentWithPrompt.
+type CreateGeminiContentWithPromptJSONBody struct {
+	union json.RawMessage
+}
+
 // CreateGeminiContentWithPromptParams defines parameters for CreateGeminiContentWithPrompt.
 type CreateGeminiContentWithPromptParams struct {
 	// XOLPAgentIdentity The current workload assertion is required when Authorization contains a one-use delegation token.
 	XOLPAgentIdentity *string `json:"X-OLP-Agent-Identity,omitempty"`
+}
+
+// StreamGeminiContentWithPromptJSONBody defines parameters for StreamGeminiContentWithPrompt.
+type StreamGeminiContentWithPromptJSONBody struct {
+	union json.RawMessage
 }
 
 // StreamGeminiContentWithPromptParams defines parameters for StreamGeminiContentWithPrompt.
@@ -544,13 +585,13 @@ type CreateResponseWithPromptParams struct {
 type CallA2AAgentJSONRequestBody = A2ARequest
 
 // CreateAnthropicMessageWithPromptJSONRequestBody defines body for CreateAnthropicMessageWithPrompt for application/json ContentType.
-type CreateAnthropicMessageWithPromptJSONRequestBody = AnthropicPromptRequest
+type CreateAnthropicMessageWithPromptJSONRequestBody CreateAnthropicMessageWithPromptJSONBody
 
 // CreateGeminiContentWithPromptJSONRequestBody defines body for CreateGeminiContentWithPrompt for application/json ContentType.
-type CreateGeminiContentWithPromptJSONRequestBody = GeminiPromptRequest
+type CreateGeminiContentWithPromptJSONRequestBody CreateGeminiContentWithPromptJSONBody
 
 // StreamGeminiContentWithPromptJSONRequestBody defines body for StreamGeminiContentWithPrompt for application/json ContentType.
-type StreamGeminiContentWithPromptJSONRequestBody = GeminiPromptRequest
+type StreamGeminiContentWithPromptJSONRequestBody StreamGeminiContentWithPromptJSONBody
 
 // CreateChatCompletionWithPromptJSONRequestBody defines body for CreateChatCompletionWithPrompt for application/json ContentType.
 type CreateChatCompletionWithPromptJSONRequestBody CreateChatCompletionWithPromptJSONBody
@@ -610,6 +651,14 @@ func (a *AnthropicPromptRequest) UnmarshalJSON(b []byte) error {
 		delete(object, "olp_prompt")
 	}
 
+	if raw, found := object["olp_toolsets"]; found {
+		err = json.Unmarshal(raw, &a.OlpToolsets)
+		if err != nil {
+			return fmt.Errorf("error reading 'olp_toolsets': %w", err)
+		}
+		delete(object, "olp_toolsets")
+	}
+
 	if len(object) != 0 {
 		a.AdditionalProperties = make(map[string]interface{})
 		for fieldName, fieldBuf := range object {
@@ -642,6 +691,122 @@ func (a AnthropicPromptRequest) MarshalJSON() ([]byte, error) {
 	object["olp_prompt"], err = json.Marshal(a.OlpPrompt)
 	if err != nil {
 		return nil, fmt.Errorf("error marshaling 'olp_prompt': %w", err)
+	}
+
+	if a.OlpToolsets != nil {
+		object["olp_toolsets"], err = json.Marshal(a.OlpToolsets)
+		if err != nil {
+			return nil, fmt.Errorf("error marshaling 'olp_toolsets': %w", err)
+		}
+	}
+
+	for fieldName, field := range a.AdditionalProperties {
+		object[fieldName], err = json.Marshal(field)
+		if err != nil {
+			return nil, fmt.Errorf("error marshaling '%s': %w", fieldName, err)
+		}
+	}
+	return json.Marshal(object)
+}
+
+// Getter for additional properties for AnthropicToolWorkflowRequest. Returns the specified
+// element and whether it was found
+func (a AnthropicToolWorkflowRequest) Get(fieldName string) (value interface{}, found bool) {
+	if a.AdditionalProperties != nil {
+		value, found = a.AdditionalProperties[fieldName]
+	}
+	return
+}
+
+// Setter for additional properties for AnthropicToolWorkflowRequest
+func (a *AnthropicToolWorkflowRequest) Set(fieldName string, value interface{}) {
+	if a.AdditionalProperties == nil {
+		a.AdditionalProperties = make(map[string]interface{})
+	}
+	a.AdditionalProperties[fieldName] = value
+}
+
+// Override default JSON handling for AnthropicToolWorkflowRequest to handle AdditionalProperties
+func (a *AnthropicToolWorkflowRequest) UnmarshalJSON(b []byte) error {
+	object := make(map[string]json.RawMessage)
+	err := json.Unmarshal(b, &object)
+	if err != nil {
+		return err
+	}
+
+	if raw, found := object["max_tokens"]; found {
+		err = json.Unmarshal(raw, &a.MaxTokens)
+		if err != nil {
+			return fmt.Errorf("error reading 'max_tokens': %w", err)
+		}
+		delete(object, "max_tokens")
+	}
+
+	if raw, found := object["messages"]; found {
+		err = json.Unmarshal(raw, &a.Messages)
+		if err != nil {
+			return fmt.Errorf("error reading 'messages': %w", err)
+		}
+		delete(object, "messages")
+	}
+
+	if raw, found := object["model"]; found {
+		err = json.Unmarshal(raw, &a.Model)
+		if err != nil {
+			return fmt.Errorf("error reading 'model': %w", err)
+		}
+		delete(object, "model")
+	}
+
+	if raw, found := object["olp_toolsets"]; found {
+		err = json.Unmarshal(raw, &a.OlpToolsets)
+		if err != nil {
+			return fmt.Errorf("error reading 'olp_toolsets': %w", err)
+		}
+		delete(object, "olp_toolsets")
+	}
+
+	if len(object) != 0 {
+		a.AdditionalProperties = make(map[string]interface{})
+		for fieldName, fieldBuf := range object {
+			var fieldVal interface{}
+			err := json.Unmarshal(fieldBuf, &fieldVal)
+			if err != nil {
+				return fmt.Errorf("error unmarshaling field %s: %w", fieldName, err)
+			}
+			a.AdditionalProperties[fieldName] = fieldVal
+		}
+	}
+	return nil
+}
+
+// Override default JSON handling for AnthropicToolWorkflowRequest to handle AdditionalProperties
+func (a AnthropicToolWorkflowRequest) MarshalJSON() ([]byte, error) {
+	var err error
+	object := make(map[string]json.RawMessage)
+
+	object["max_tokens"], err = json.Marshal(a.MaxTokens)
+	if err != nil {
+		return nil, fmt.Errorf("error marshaling 'max_tokens': %w", err)
+	}
+
+	if a.Messages != nil {
+		object["messages"], err = json.Marshal(a.Messages)
+		if err != nil {
+			return nil, fmt.Errorf("error marshaling 'messages': %w", err)
+		}
+	}
+
+	object["model"], err = json.Marshal(a.Model)
+	if err != nil {
+		return nil, fmt.Errorf("error marshaling 'model': %w", err)
+	}
+
+	if a.OlpToolsets != nil {
+		object["olp_toolsets"], err = json.Marshal(a.OlpToolsets)
+		if err != nil {
+			return nil, fmt.Errorf("error marshaling 'olp_toolsets': %w", err)
+		}
 	}
 
 	for fieldName, field := range a.AdditionalProperties {
@@ -876,6 +1041,14 @@ func (a *GeminiPromptRequest) UnmarshalJSON(b []byte) error {
 		delete(object, "olp_prompt")
 	}
 
+	if raw, found := object["olp_toolsets"]; found {
+		err = json.Unmarshal(raw, &a.OlpToolsets)
+		if err != nil {
+			return fmt.Errorf("error reading 'olp_toolsets': %w", err)
+		}
+		delete(object, "olp_toolsets")
+	}
+
 	if len(object) != 0 {
 		a.AdditionalProperties = make(map[string]interface{})
 		for fieldName, fieldBuf := range object {
@@ -898,6 +1071,96 @@ func (a GeminiPromptRequest) MarshalJSON() ([]byte, error) {
 	object["olp_prompt"], err = json.Marshal(a.OlpPrompt)
 	if err != nil {
 		return nil, fmt.Errorf("error marshaling 'olp_prompt': %w", err)
+	}
+
+	if a.OlpToolsets != nil {
+		object["olp_toolsets"], err = json.Marshal(a.OlpToolsets)
+		if err != nil {
+			return nil, fmt.Errorf("error marshaling 'olp_toolsets': %w", err)
+		}
+	}
+
+	for fieldName, field := range a.AdditionalProperties {
+		object[fieldName], err = json.Marshal(field)
+		if err != nil {
+			return nil, fmt.Errorf("error marshaling '%s': %w", fieldName, err)
+		}
+	}
+	return json.Marshal(object)
+}
+
+// Getter for additional properties for GeminiToolWorkflowRequest. Returns the specified
+// element and whether it was found
+func (a GeminiToolWorkflowRequest) Get(fieldName string) (value interface{}, found bool) {
+	if a.AdditionalProperties != nil {
+		value, found = a.AdditionalProperties[fieldName]
+	}
+	return
+}
+
+// Setter for additional properties for GeminiToolWorkflowRequest
+func (a *GeminiToolWorkflowRequest) Set(fieldName string, value interface{}) {
+	if a.AdditionalProperties == nil {
+		a.AdditionalProperties = make(map[string]interface{})
+	}
+	a.AdditionalProperties[fieldName] = value
+}
+
+// Override default JSON handling for GeminiToolWorkflowRequest to handle AdditionalProperties
+func (a *GeminiToolWorkflowRequest) UnmarshalJSON(b []byte) error {
+	object := make(map[string]json.RawMessage)
+	err := json.Unmarshal(b, &object)
+	if err != nil {
+		return err
+	}
+
+	if raw, found := object["contents"]; found {
+		err = json.Unmarshal(raw, &a.Contents)
+		if err != nil {
+			return fmt.Errorf("error reading 'contents': %w", err)
+		}
+		delete(object, "contents")
+	}
+
+	if raw, found := object["olp_toolsets"]; found {
+		err = json.Unmarshal(raw, &a.OlpToolsets)
+		if err != nil {
+			return fmt.Errorf("error reading 'olp_toolsets': %w", err)
+		}
+		delete(object, "olp_toolsets")
+	}
+
+	if len(object) != 0 {
+		a.AdditionalProperties = make(map[string]interface{})
+		for fieldName, fieldBuf := range object {
+			var fieldVal interface{}
+			err := json.Unmarshal(fieldBuf, &fieldVal)
+			if err != nil {
+				return fmt.Errorf("error unmarshaling field %s: %w", fieldName, err)
+			}
+			a.AdditionalProperties[fieldName] = fieldVal
+		}
+	}
+	return nil
+}
+
+// Override default JSON handling for GeminiToolWorkflowRequest to handle AdditionalProperties
+func (a GeminiToolWorkflowRequest) MarshalJSON() ([]byte, error) {
+	var err error
+	object := make(map[string]json.RawMessage)
+
+	if a.Contents != nil {
+		object["contents"], err = json.Marshal(a.Contents)
+		if err != nil {
+			return nil, fmt.Errorf("error marshaling 'contents': %w", err)
+		}
+	}
+
+	if a.OlpToolsets != nil {
+		object["olp_toolsets"], err = json.Marshal(a.OlpToolsets)
+		if err != nil {
+			return nil, fmt.Errorf("error marshaling 'olp_toolsets': %w", err)
+		}
 	}
 
 	for fieldName, field := range a.AdditionalProperties {
@@ -1443,6 +1706,192 @@ func (t *ResponsesPublishedPromptReference) UnmarshalJSON(b []byte) error {
 	return err
 }
 
+// AsAnthropicPromptRequest returns the union data inside the CreateAnthropicMessageWithPromptJSONBody as a AnthropicPromptRequest
+func (t CreateAnthropicMessageWithPromptJSONBody) AsAnthropicPromptRequest() (AnthropicPromptRequest, error) {
+	var body AnthropicPromptRequest
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromAnthropicPromptRequest overwrites any union data inside the CreateAnthropicMessageWithPromptJSONBody as the provided AnthropicPromptRequest
+func (t *CreateAnthropicMessageWithPromptJSONBody) FromAnthropicPromptRequest(v AnthropicPromptRequest) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeAnthropicPromptRequest performs a merge with any union data inside the CreateAnthropicMessageWithPromptJSONBody, using the provided AnthropicPromptRequest
+func (t *CreateAnthropicMessageWithPromptJSONBody) MergeAnthropicPromptRequest(v AnthropicPromptRequest) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsAnthropicToolWorkflowRequest returns the union data inside the CreateAnthropicMessageWithPromptJSONBody as a AnthropicToolWorkflowRequest
+func (t CreateAnthropicMessageWithPromptJSONBody) AsAnthropicToolWorkflowRequest() (AnthropicToolWorkflowRequest, error) {
+	var body AnthropicToolWorkflowRequest
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromAnthropicToolWorkflowRequest overwrites any union data inside the CreateAnthropicMessageWithPromptJSONBody as the provided AnthropicToolWorkflowRequest
+func (t *CreateAnthropicMessageWithPromptJSONBody) FromAnthropicToolWorkflowRequest(v AnthropicToolWorkflowRequest) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeAnthropicToolWorkflowRequest performs a merge with any union data inside the CreateAnthropicMessageWithPromptJSONBody, using the provided AnthropicToolWorkflowRequest
+func (t *CreateAnthropicMessageWithPromptJSONBody) MergeAnthropicToolWorkflowRequest(v AnthropicToolWorkflowRequest) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+func (t CreateAnthropicMessageWithPromptJSONBody) MarshalJSON() ([]byte, error) {
+	b, err := t.union.MarshalJSON()
+	return b, err
+}
+
+func (t *CreateAnthropicMessageWithPromptJSONBody) UnmarshalJSON(b []byte) error {
+	err := t.union.UnmarshalJSON(b)
+	return err
+}
+
+// AsGeminiPromptRequest returns the union data inside the CreateGeminiContentWithPromptJSONBody as a GeminiPromptRequest
+func (t CreateGeminiContentWithPromptJSONBody) AsGeminiPromptRequest() (GeminiPromptRequest, error) {
+	var body GeminiPromptRequest
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromGeminiPromptRequest overwrites any union data inside the CreateGeminiContentWithPromptJSONBody as the provided GeminiPromptRequest
+func (t *CreateGeminiContentWithPromptJSONBody) FromGeminiPromptRequest(v GeminiPromptRequest) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeGeminiPromptRequest performs a merge with any union data inside the CreateGeminiContentWithPromptJSONBody, using the provided GeminiPromptRequest
+func (t *CreateGeminiContentWithPromptJSONBody) MergeGeminiPromptRequest(v GeminiPromptRequest) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsGeminiToolWorkflowRequest returns the union data inside the CreateGeminiContentWithPromptJSONBody as a GeminiToolWorkflowRequest
+func (t CreateGeminiContentWithPromptJSONBody) AsGeminiToolWorkflowRequest() (GeminiToolWorkflowRequest, error) {
+	var body GeminiToolWorkflowRequest
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromGeminiToolWorkflowRequest overwrites any union data inside the CreateGeminiContentWithPromptJSONBody as the provided GeminiToolWorkflowRequest
+func (t *CreateGeminiContentWithPromptJSONBody) FromGeminiToolWorkflowRequest(v GeminiToolWorkflowRequest) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeGeminiToolWorkflowRequest performs a merge with any union data inside the CreateGeminiContentWithPromptJSONBody, using the provided GeminiToolWorkflowRequest
+func (t *CreateGeminiContentWithPromptJSONBody) MergeGeminiToolWorkflowRequest(v GeminiToolWorkflowRequest) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+func (t CreateGeminiContentWithPromptJSONBody) MarshalJSON() ([]byte, error) {
+	b, err := t.union.MarshalJSON()
+	return b, err
+}
+
+func (t *CreateGeminiContentWithPromptJSONBody) UnmarshalJSON(b []byte) error {
+	err := t.union.UnmarshalJSON(b)
+	return err
+}
+
+// AsGeminiPromptRequest returns the union data inside the StreamGeminiContentWithPromptJSONBody as a GeminiPromptRequest
+func (t StreamGeminiContentWithPromptJSONBody) AsGeminiPromptRequest() (GeminiPromptRequest, error) {
+	var body GeminiPromptRequest
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromGeminiPromptRequest overwrites any union data inside the StreamGeminiContentWithPromptJSONBody as the provided GeminiPromptRequest
+func (t *StreamGeminiContentWithPromptJSONBody) FromGeminiPromptRequest(v GeminiPromptRequest) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeGeminiPromptRequest performs a merge with any union data inside the StreamGeminiContentWithPromptJSONBody, using the provided GeminiPromptRequest
+func (t *StreamGeminiContentWithPromptJSONBody) MergeGeminiPromptRequest(v GeminiPromptRequest) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsGeminiToolWorkflowRequest returns the union data inside the StreamGeminiContentWithPromptJSONBody as a GeminiToolWorkflowRequest
+func (t StreamGeminiContentWithPromptJSONBody) AsGeminiToolWorkflowRequest() (GeminiToolWorkflowRequest, error) {
+	var body GeminiToolWorkflowRequest
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromGeminiToolWorkflowRequest overwrites any union data inside the StreamGeminiContentWithPromptJSONBody as the provided GeminiToolWorkflowRequest
+func (t *StreamGeminiContentWithPromptJSONBody) FromGeminiToolWorkflowRequest(v GeminiToolWorkflowRequest) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeGeminiToolWorkflowRequest performs a merge with any union data inside the StreamGeminiContentWithPromptJSONBody, using the provided GeminiToolWorkflowRequest
+func (t *StreamGeminiContentWithPromptJSONBody) MergeGeminiToolWorkflowRequest(v GeminiToolWorkflowRequest) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+func (t StreamGeminiContentWithPromptJSONBody) MarshalJSON() ([]byte, error) {
+	b, err := t.union.MarshalJSON()
+	return b, err
+}
+
+func (t *StreamGeminiContentWithPromptJSONBody) UnmarshalJSON(b []byte) error {
+	err := t.union.UnmarshalJSON(b)
+	return err
+}
+
 // AsChatPromptRequest returns the union data inside the CreateChatCompletionWithPromptJSONBody as a ChatPromptRequest
 func (t CreateChatCompletionWithPromptJSONBody) AsChatPromptRequest() (ChatPromptRequest, error) {
 	var body ChatPromptRequest
@@ -1606,7 +2055,7 @@ type ClientInterface interface {
 
 	// CreateAnthropicMessageWithPromptWithBody Create an Anthropic message using a published OLP prompt
 	//
-	// For transformed routes, the published prompt replaces explicit messages. Other fields use the provider contract.
+	// For transformed routes, a published prompt replaces explicit messages. Gateway tool execution can select a subset of the route's published toolsets.
 	//
 	// Takes any type of body and a specified content type.
 	//
@@ -1615,7 +2064,7 @@ type ClientInterface interface {
 
 	// CreateAnthropicMessageWithPrompt Create an Anthropic message using a published OLP prompt
 	//
-	// For transformed routes, the published prompt replaces explicit messages. Other fields use the provider contract.
+	// For transformed routes, a published prompt replaces explicit messages. Gateway tool execution can select a subset of the route's published toolsets.
 	//
 	// Takes a body of the `application/json` content type.
 	//
@@ -1624,7 +2073,7 @@ type ClientInterface interface {
 
 	// CreateGeminiContentWithPromptWithBody Generate Gemini content using a published OLP prompt
 	//
-	// For transformed routes, the published prompt replaces explicit contents. Other fields use the provider contract.
+	// For transformed routes, a published prompt replaces explicit contents. Gateway tool execution can select a subset of the route's published toolsets.
 	//
 	// Takes any type of body and a specified content type.
 	//
@@ -1633,7 +2082,7 @@ type ClientInterface interface {
 
 	// CreateGeminiContentWithPrompt Generate Gemini content using a published OLP prompt
 	//
-	// For transformed routes, the published prompt replaces explicit contents. Other fields use the provider contract.
+	// For transformed routes, a published prompt replaces explicit contents. Gateway tool execution can select a subset of the route's published toolsets.
 	//
 	// Takes a body of the `application/json` content type.
 	//
@@ -1642,7 +2091,7 @@ type ClientInterface interface {
 
 	// StreamGeminiContentWithPromptWithBody Stream Gemini content using a published OLP prompt
 	//
-	// For transformed routes, the published prompt replaces explicit contents. Other fields use the provider contract.
+	// For transformed routes, a published prompt replaces explicit contents. Gateway tool execution can select a subset of the route's published toolsets.
 	//
 	// Takes any type of body and a specified content type.
 	//
@@ -1651,7 +2100,7 @@ type ClientInterface interface {
 
 	// StreamGeminiContentWithPrompt Stream Gemini content using a published OLP prompt
 	//
-	// For transformed routes, the published prompt replaces explicit contents. Other fields use the provider contract.
+	// For transformed routes, a published prompt replaces explicit contents. Gateway tool execution can select a subset of the route's published toolsets.
 	//
 	// Takes a body of the `application/json` content type.
 	//
@@ -1770,7 +2219,7 @@ func (c *Client) GetA2AAgentCard(ctx context.Context, agent openapi_types.UUID, 
 
 // CreateAnthropicMessageWithPromptWithBody Create an Anthropic message using a published OLP prompt
 //
-// For transformed routes, the published prompt replaces explicit messages. Other fields use the provider contract.
+// For transformed routes, a published prompt replaces explicit messages. Gateway tool execution can select a subset of the route's published toolsets.
 //
 // Takes any type of body and a specified content type.
 //
@@ -1789,7 +2238,7 @@ func (c *Client) CreateAnthropicMessageWithPromptWithBody(ctx context.Context, p
 
 // CreateAnthropicMessageWithPrompt Create an Anthropic message using a published OLP prompt
 //
-// For transformed routes, the published prompt replaces explicit messages. Other fields use the provider contract.
+// For transformed routes, a published prompt replaces explicit messages. Gateway tool execution can select a subset of the route's published toolsets.
 //
 // Takes a body of the `application/json` content type.
 //
@@ -1808,7 +2257,7 @@ func (c *Client) CreateAnthropicMessageWithPrompt(ctx context.Context, params *C
 
 // CreateGeminiContentWithPromptWithBody Generate Gemini content using a published OLP prompt
 //
-// For transformed routes, the published prompt replaces explicit contents. Other fields use the provider contract.
+// For transformed routes, a published prompt replaces explicit contents. Gateway tool execution can select a subset of the route's published toolsets.
 //
 // Takes any type of body and a specified content type.
 //
@@ -1827,7 +2276,7 @@ func (c *Client) CreateGeminiContentWithPromptWithBody(ctx context.Context, mode
 
 // CreateGeminiContentWithPrompt Generate Gemini content using a published OLP prompt
 //
-// For transformed routes, the published prompt replaces explicit contents. Other fields use the provider contract.
+// For transformed routes, a published prompt replaces explicit contents. Gateway tool execution can select a subset of the route's published toolsets.
 //
 // Takes a body of the `application/json` content type.
 //
@@ -1846,7 +2295,7 @@ func (c *Client) CreateGeminiContentWithPrompt(ctx context.Context, model string
 
 // StreamGeminiContentWithPromptWithBody Stream Gemini content using a published OLP prompt
 //
-// For transformed routes, the published prompt replaces explicit contents. Other fields use the provider contract.
+// For transformed routes, a published prompt replaces explicit contents. Gateway tool execution can select a subset of the route's published toolsets.
 //
 // Takes any type of body and a specified content type.
 //
@@ -1865,7 +2314,7 @@ func (c *Client) StreamGeminiContentWithPromptWithBody(ctx context.Context, mode
 
 // StreamGeminiContentWithPrompt Stream Gemini content using a published OLP prompt
 //
-// For transformed routes, the published prompt replaces explicit contents. Other fields use the provider contract.
+// For transformed routes, a published prompt replaces explicit contents. Gateway tool execution can select a subset of the route's published toolsets.
 //
 // Takes a body of the `application/json` content type.
 //
@@ -2505,7 +2954,7 @@ type ClientWithResponsesInterface interface {
 
 	// CreateAnthropicMessageWithPromptWithBodyWithResponse Create an Anthropic message using a published OLP prompt
 	//
-	// For transformed routes, the published prompt replaces explicit messages. Other fields use the provider contract.
+	// For transformed routes, a published prompt replaces explicit messages. Gateway tool execution can select a subset of the route's published toolsets.
 	//
 	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
 	//
@@ -2514,7 +2963,7 @@ type ClientWithResponsesInterface interface {
 
 	// CreateAnthropicMessageWithPromptWithResponse Create an Anthropic message using a published OLP prompt
 	//
-	// For transformed routes, the published prompt replaces explicit messages. Other fields use the provider contract.
+	// For transformed routes, a published prompt replaces explicit messages. Gateway tool execution can select a subset of the route's published toolsets.
 	//
 	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
 	//
@@ -2523,7 +2972,7 @@ type ClientWithResponsesInterface interface {
 
 	// CreateGeminiContentWithPromptWithBodyWithResponse Generate Gemini content using a published OLP prompt
 	//
-	// For transformed routes, the published prompt replaces explicit contents. Other fields use the provider contract.
+	// For transformed routes, a published prompt replaces explicit contents. Gateway tool execution can select a subset of the route's published toolsets.
 	//
 	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
 	//
@@ -2532,7 +2981,7 @@ type ClientWithResponsesInterface interface {
 
 	// CreateGeminiContentWithPromptWithResponse Generate Gemini content using a published OLP prompt
 	//
-	// For transformed routes, the published prompt replaces explicit contents. Other fields use the provider contract.
+	// For transformed routes, a published prompt replaces explicit contents. Gateway tool execution can select a subset of the route's published toolsets.
 	//
 	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
 	//
@@ -2541,7 +2990,7 @@ type ClientWithResponsesInterface interface {
 
 	// StreamGeminiContentWithPromptWithBodyWithResponse Stream Gemini content using a published OLP prompt
 	//
-	// For transformed routes, the published prompt replaces explicit contents. Other fields use the provider contract.
+	// For transformed routes, a published prompt replaces explicit contents. Gateway tool execution can select a subset of the route's published toolsets.
 	//
 	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
 	//
@@ -2550,7 +2999,7 @@ type ClientWithResponsesInterface interface {
 
 	// StreamGeminiContentWithPromptWithResponse Stream Gemini content using a published OLP prompt
 	//
-	// For transformed routes, the published prompt replaces explicit contents. Other fields use the provider contract.
+	// For transformed routes, a published prompt replaces explicit contents. Gateway tool execution can select a subset of the route's published toolsets.
 	//
 	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
 	//
@@ -3260,7 +3709,7 @@ func (c *ClientWithResponses) GetA2AAgentCardWithResponse(ctx context.Context, a
 
 // CreateAnthropicMessageWithPromptWithBodyWithResponse Create an Anthropic message using a published OLP prompt
 //
-// For transformed routes, the published prompt replaces explicit messages. Other fields use the provider contract.
+// For transformed routes, a published prompt replaces explicit messages. Gateway tool execution can select a subset of the route's published toolsets.
 //
 // Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
 //
@@ -3275,7 +3724,7 @@ func (c *ClientWithResponses) CreateAnthropicMessageWithPromptWithBodyWithRespon
 
 // CreateAnthropicMessageWithPromptWithResponse Create an Anthropic message using a published OLP prompt
 //
-// For transformed routes, the published prompt replaces explicit messages. Other fields use the provider contract.
+// For transformed routes, a published prompt replaces explicit messages. Gateway tool execution can select a subset of the route's published toolsets.
 //
 // Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
 //
@@ -3290,7 +3739,7 @@ func (c *ClientWithResponses) CreateAnthropicMessageWithPromptWithResponse(ctx c
 
 // CreateGeminiContentWithPromptWithBodyWithResponse Generate Gemini content using a published OLP prompt
 //
-// For transformed routes, the published prompt replaces explicit contents. Other fields use the provider contract.
+// For transformed routes, a published prompt replaces explicit contents. Gateway tool execution can select a subset of the route's published toolsets.
 //
 // Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
 //
@@ -3305,7 +3754,7 @@ func (c *ClientWithResponses) CreateGeminiContentWithPromptWithBodyWithResponse(
 
 // CreateGeminiContentWithPromptWithResponse Generate Gemini content using a published OLP prompt
 //
-// For transformed routes, the published prompt replaces explicit contents. Other fields use the provider contract.
+// For transformed routes, a published prompt replaces explicit contents. Gateway tool execution can select a subset of the route's published toolsets.
 //
 // Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
 //
@@ -3320,7 +3769,7 @@ func (c *ClientWithResponses) CreateGeminiContentWithPromptWithResponse(ctx cont
 
 // StreamGeminiContentWithPromptWithBodyWithResponse Stream Gemini content using a published OLP prompt
 //
-// For transformed routes, the published prompt replaces explicit contents. Other fields use the provider contract.
+// For transformed routes, a published prompt replaces explicit contents. Gateway tool execution can select a subset of the route's published toolsets.
 //
 // Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
 //
@@ -3335,7 +3784,7 @@ func (c *ClientWithResponses) StreamGeminiContentWithPromptWithBodyWithResponse(
 
 // StreamGeminiContentWithPromptWithResponse Stream Gemini content using a published OLP prompt
 //
-// For transformed routes, the published prompt replaces explicit contents. Other fields use the provider contract.
+// For transformed routes, a published prompt replaces explicit contents. Gateway tool execution can select a subset of the route's published toolsets.
 //
 // Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
 //
