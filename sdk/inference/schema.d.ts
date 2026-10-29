@@ -75,7 +75,7 @@ export interface paths {
         put?: never;
         /**
          * Delegate a key to an authenticated workload agent
-         * @description Exchange an agent workload assertion and a delegating API key for a one-use inference token. Both principals must belong to the same project and authorize every requested route.
+         * @description Exchange an authenticated agent assertion and exactly one delegating API key or member consent code for a one-use inference token. Both principals, the consent and every requested route must authorize the request.
          */
         post: operations["createDelegation"];
         delete?: never;
@@ -564,9 +564,11 @@ export interface operations {
     createDelegation: {
         parameters: {
             query?: never;
-            header: {
+            header?: {
                 /** @description The API key that owns the delegated inference and has the delegate scope. */
-                "X-OLP-Delegating-Key": string;
+                "X-OLP-Delegating-Key"?: string;
+                /** @description A one-use member consent code bound to the authenticated agent, key, project, routes and expiry. Provide either this header or X-OLP-Delegating-Key. */
+                "X-OLP-Delegation-Consent"?: string;
             };
             path?: never;
             cookie?: never;

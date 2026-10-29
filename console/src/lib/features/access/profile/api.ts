@@ -16,6 +16,7 @@ export type RecentAuthenticationPurpose =
   | 'oidc_unlink'
   | 'plugin_permit'
   | 'mfa_manage'
+  | 'agent_delegation'
   | 'saml_link'
   | 'saml_unlink';
 

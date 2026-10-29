@@ -10083,7 +10083,7 @@
             "writeOnly": true
           },
           "purpose": {
-            "description": "Exact security operation authorized by this one-time grant: password_enrollment, oidc_link, oidc_unlink or plugin_permit.",
+            "description": "Exact security operation authorized by this one-time grant, including agent_delegation for a consumer key.",
             "type": "string"
           },
           "resource_id": {
@@ -28383,6 +28383,91 @@
           "revision_id"
         ],
         "type": "object"
+      },
+      "DelegationConsent": {
+        "additionalProperties": false,
+        "properties": {
+          "consent": {
+            "description": "One-use consent code, shown only once and bound to the selected agent.",
+            "type": "string"
+          },
+          "expires_at": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "consent",
+          "expires_at"
+        ],
+        "type": "object"
+      },
+      "DelegationConsentRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "agent_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "allowed_routes": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 100,
+            "minItems": 1,
+            "type": "array",
+            "uniqueItems": true
+          },
+          "api_key_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "ttl_seconds": {
+            "maximum": 900,
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "agent_id",
+          "api_key_id",
+          "allowed_routes"
+        ],
+        "type": "object"
+      },
+      "DelegationOptions": {
+        "type": "object",
+        "required": [
+          "agents"
+        ],
+        "properties": {
+          "agents": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DelegationOption"
+            }
+          }
+        }
+      },
+      "DelegationOption": {
+        "type": "object",
+        "required": [
+          "id",
+          "allowed_routes"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "allowed_routes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Active inference routes currently allowed by both the key and the agent."
+          }
+        }
       }
     },
     "securitySchemes": {
@@ -66099,6 +66184,200 @@
             }
           }
         ]
+      }
+    },
+    "/api/v1/delegation-consents": {
+      "post": {
+        "operationId": "create_delegation_consent",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DelegationConsentRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DelegationConsent"
+                }
+              }
+            },
+            "description": "One-time member consent created"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The request could not be authorized or completed"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The request could not be authorized or completed"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The request could not be authorized or completed"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The request could not be authorized or completed"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The request could not be authorized or completed"
+          },
+          "428": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The request could not be authorized or completed"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The request could not be authorized or completed"
+          }
+        },
+        "security": [
+          {
+            "csrfToken": [],
+            "sessionCookie": [
+              "keys"
+            ]
+          }
+        ],
+        "tags": [
+          "agents"
+        ]
+      }
+    },
+    "/api/v1/delegation-options": {
+      "get": {
+        "operationId": "get_delegation_options",
+        "parameters": [
+          {
+            "name": "api_key_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Eligible agents and currently authorized inference routes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DelegationOptions"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Project management permission required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Key not found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Authority is unavailable",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": [
+              "keys"
+            ]
+          }
+        ],
+        "summary": "List eligible agents and routes for member consent"
       }
     }
   },
