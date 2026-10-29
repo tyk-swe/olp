@@ -419,6 +419,10 @@ func (s *Server) settleAdmission(ctx context.Context, x *call) {
 		settleKey(ctx, x.lease, x.dispatched, &actual, s.log)
 		return
 	}
+	if first := x.generation.firstStep; first != nil {
+		settleKey(ctx, x.lease, x.dispatched || x.cacheHit(), x.settledTokensFor(x.facts[:first.factEnd], first.estimate), s.log)
+		return
+	}
 	settleKey(ctx, x.lease, x.dispatched || x.cacheHit(), x.settledTokens(), s.log)
 }
 

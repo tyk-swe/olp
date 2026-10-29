@@ -662,18 +662,22 @@ func keyReservationEstimate(perAttempt int64, attempts int) int64 {
 // settledTokens accounts for every attempted provider, not just the last one.
 // Uncertain attempts retain an estimate rather than refunding unknown work.
 func (x *call) settledTokens() *int64 {
+	return x.settledTokensFor(x.facts, x.estimate)
+}
+
+func (x *call) settledTokensFor(facts []AttemptFact, estimate int64) *int64 {
 	var total int64
-	for index := range x.facts {
-		fact := &x.facts[index]
+	for index := range facts {
+		fact := &facts[index]
 		if fact.Cache != nil && x.cache != nil && !slices.Contains(x.cache.policy.CountHitsAgainst, "tokens") {
 			continue
 		}
-		actual := settledAttemptTokens(fact, x.estimate)
+		actual := settledAttemptTokens(fact, estimate)
 		switch {
 		case actual != nil:
 			total = addBounded(total, *actual)
 		case fact.BillingUncertain || fact.UsageObserved:
-			total = addBounded(total, x.estimate)
+			total = addBounded(total, estimate)
 		}
 	}
 	return &total
