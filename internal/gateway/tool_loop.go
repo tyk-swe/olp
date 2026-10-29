@@ -36,6 +36,7 @@ type WorkflowApprovalStore interface {
 
 type WorkflowToolRunner interface {
 	Resolve(context.Context, access.Authority, *runtime.Release, []string) ([]WorkflowTool, error)
+	AuthorizeWorkflowTool(access.Authority, WorkflowTool) error
 	Call(context.Context, access.Authority, *runtime.Release, WorkflowTool, string, int, string, json.RawMessage) (json.RawMessage, error)
 }
 
@@ -208,6 +209,11 @@ func (s *Server) workflowAuthority(ctx context.Context, x *call, route *routing.
 	}
 	if toolsetID != "" && (authority.ProjectID == nil || !authority.AllowsResource("tools", toolsetID, *authority.ProjectID, s.now())) {
 		return nil, permissionError("permission_denied", "This API key no longer permits the toolset.")
+	}
+	for _, tool := range x.workflow.tools {
+		if err := s.WorkflowTools.AuthorizeWorkflowTool(*authority, tool); err != nil {
+			return nil, workflowError(err)
+		}
 	}
 	return authority, nil
 }

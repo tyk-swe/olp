@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -1372,6 +1373,80 @@ func TestGatewayToolWorkflowSettlesOneRun(t *testing.T) {
 			t.Fatalf("revoked %s call did not retain unknown exposure: count=%d retained=%t", scenario.name, unknown, retained)
 		}
 	}
+	for _, scenario := range []struct {
+		name           string
+		block          *atomic.Bool
+		wantDebitCount int
+	}{
+		{name: "model", block: &deadlineModel, wantDebitCount: 1},
+		{name: "tool", block: &deadlineTool, wantDebitCount: 2},
+	} {
+		caller := h.want(owner, http.MethodPost, "/api/v1/api-keys", map[string]any{"name": "Workflow client cancellation " + scenario.name, "project_id": project, "scopes": []string{"inference", "tools"}, "allowed_routes": []string{revocationSlug}, "allowed_toolsets": []string{toolsetID}}, idem("workflow-client-cancel-"+scenario.name), http.StatusCreated)
+		h.refresh()
+		scenario.block.Store(true)
+		requestBody, err := json.Marshal(map[string]any{"model": revocationSlug, "messages": []any{map[string]any{"role": "user", "content": prompt}}, "max_tokens": 100})
+		if err != nil {
+			t.Fatal(err)
+		}
+		requestCtx, cancelRequest := context.WithCancel(t.Context())
+		request, err := http.NewRequestWithContext(requestCtx, http.MethodPost, h.HTTP.URL+"/v1/chat/completions", strings.NewReader(string(requestBody)))
+		if err != nil {
+			cancelRequest()
+			t.Fatal(err)
+		}
+		request.Header.Set("Authorization", "Bearer "+mcpExecString(t, caller, "secret"))
+		request.Header.Set("Content-Type", "application/json")
+		requestDone := make(chan error, 1)
+		go func() {
+			response, requestErr := http.DefaultClient.Do(request)
+			if response != nil {
+				response.Body.Close()
+			}
+			requestDone <- requestErr
+		}()
+		select {
+		case <-deadlineStarted:
+		case <-time.After(10 * time.Second):
+			cancelRequest()
+			t.Fatalf("%s dispatch did not start", scenario.name)
+		}
+		cancelRequest()
+		select {
+		case requestErr := <-requestDone:
+			if !errors.Is(requestErr, context.Canceled) {
+				t.Fatalf("%s caller was not canceled: %v", scenario.name, requestErr)
+			}
+		case <-time.After(10 * time.Second):
+			t.Fatalf("%s caller did not return after cancellation", scenario.name)
+		}
+		select {
+		case <-deadlineCanceled:
+		case <-time.After(10 * time.Second):
+			t.Fatalf("%s upstream did not stop after caller cancellation", scenario.name)
+		}
+		eventually(t, "canceled workflow debit exposure", 10*time.Second, func() bool {
+			debits := h.want(owner, http.MethodGet, "/api/v1/execution-debits?api_key_id="+mcpExecString(t, caller, "id"), nil, nil, http.StatusOK)
+			items := mcpExecItems(t, debits, "items")
+			if len(items) != scenario.wantDebitCount {
+				return false
+			}
+			unknown := slices.ContainsFunc(items, func(item any) bool {
+				debit, ok := item.(map[string]any)
+				return ok && debit["kind"] == scenario.name && debit["state"] == "outcome_unknown" &&
+					mcpAmountIsZero(t, debit, "observed_cost") && !mcpAmountIsZero(t, debit, "remaining_cost") &&
+					mcpAmountsEqual(t, debit, "remaining_cost", "cost_bound") && mcpAmountsEqual(t, debit, "remaining_charge", "charge_bound")
+			})
+			if scenario.name == "model" {
+				return unknown
+			}
+			return unknown && slices.ContainsFunc(items, func(item any) bool {
+				debit, ok := item.(map[string]any)
+				return ok && debit["kind"] == "model" && debit["state"] == "settled" &&
+					!mcpAmountIsZero(t, debit, "observed_cost") && mcpAmountIsZero(t, debit, "remaining_cost")
+			})
+		})
+		scenario.block.Store(false)
+	}
 	controlSlug := "workflow-capture-control"
 	_, projectedProvider, projectedSlug, _ := provisionOpenAIInProject(t, h, owner, &project, vendor.URL,
 		[]any{map[string]any{"operation": "generation", "surface": "openai", "mode": "unary"}}, []string{"generation"},
@@ -1756,6 +1831,105 @@ func TestGatewayToolWorkflowSettlesOneRun(t *testing.T) {
 	routeResumeStatus, _, _ := h.gateway("POST", "/v1/chat/completions", secret, routeResume)
 	if routeResumeStatus != http.StatusForbidden || toolCalls.Load() != routeTools {
 		t.Fatalf("revised route approval dispatched an earlier tool: status=%d tools=%d", routeResumeStatus, toolCalls.Load()-routeTools)
+	}
+	serverToolset := h.want(owner, http.MethodPost, "/api/v1/toolsets", map[string]any{"project_id": project, "name": "Server retirement toolset", "toolset": agentcontract.Toolset{Tools: []agentcontract.Tool{tool}}}, idem("workflow-server-retirement-toolset"), http.StatusCreated)
+	serverToolsetID := mcpExecString(t, serverToolset, "id")
+	h.want(owner, http.MethodPost, "/api/v1/toolsets/"+serverToolsetID+"/publish", nil, withMatch(serverToolset, idem("workflow-server-retirement-publish")), http.StatusOK)
+	const serverRetirementSlug = "workflow-server-retirement"
+	serverRetirementDraft := h.want(owner, http.MethodPost, "/api/v1/route-drafts", map[string]any{
+		"project_id": project, "slug": serverRetirementSlug, "operations": []string{"generation"}, "overall_timeout_ms": 20000, "max_attempts": 1,
+		"fidelity": map[string]any{"mode": "transformed"}, "tool_execution": "gateway", "toolsets": []string{serverToolsetID},
+		"targets": []any{map[string]any{"provider_id": provider["id"], "provider_model": vendorModel, "priority": 0, "weight": 1, "timeout_ms": 15000}},
+	}, idem("workflow-server-retirement-draft"), http.StatusCreated)
+	h.want(owner, http.MethodPost, "/api/v1/route-drafts/"+mcpExecString(t, serverRetirementDraft, "id")+"/activate", nil, withMatch(serverRetirementDraft, idem("workflow-server-retirement-activate")), http.StatusOK)
+	modelToolset := h.want(owner, http.MethodPost, "/api/v1/toolsets", map[string]any{"project_id": project, "name": "Model retirement toolset", "toolset": agentcontract.Toolset{Tools: []agentcontract.Tool{tool}}}, idem("workflow-model-retirement-toolset"), http.StatusCreated)
+	modelToolsetID := mcpExecString(t, modelToolset, "id")
+	h.want(owner, http.MethodPost, "/api/v1/toolsets/"+modelToolsetID+"/publish", nil, withMatch(modelToolset, idem("workflow-model-retirement-publish")), http.StatusOK)
+	const modelRetirementSlug = "workflow-model-retirement"
+	modelRetirementDraft := h.want(owner, http.MethodPost, "/api/v1/route-drafts", map[string]any{
+		"project_id": project, "slug": modelRetirementSlug, "operations": []string{"generation"}, "overall_timeout_ms": 20000, "max_attempts": 1,
+		"fidelity": map[string]any{"mode": "transformed"}, "tool_execution": "gateway", "toolsets": []string{modelToolsetID},
+		"targets": []any{map[string]any{"provider_id": provider["id"], "provider_model": vendorModel, "priority": 0, "weight": 1, "timeout_ms": 15000}},
+	}, idem("workflow-model-retirement-draft"), http.StatusCreated)
+	h.want(owner, http.MethodPost, "/api/v1/route-drafts/"+mcpExecString(t, modelRetirementDraft, "id")+"/activate", nil, withMatch(modelRetirementDraft, idem("workflow-model-retirement-activate")), http.StatusOK)
+	for _, scenario := range []struct {
+		name       string
+		toolsetID  string
+		slug       string
+		retire     string
+		blockModel bool
+	}{
+		{name: "model", toolsetID: modelToolsetID, slug: modelRetirementSlug, retire: "/api/v1/toolsets/" + modelToolsetID, blockModel: true},
+		{name: "toolset", toolsetID: toolsetID, slug: revocationSlug, retire: "/api/v1/toolsets/" + toolsetID},
+		{name: "server", toolsetID: serverToolsetID, slug: serverRetirementSlug, retire: "/api/v1/mcp-servers/" + serverID},
+	} {
+		caller := h.want(owner, http.MethodPost, "/api/v1/api-keys", map[string]any{"name": "Workflow retirement " + scenario.name, "project_id": project, "scopes": []string{"inference", "tools"}, "allowed_routes": []string{scenario.slug}, "allowed_toolsets": []string{scenario.toolsetID}}, idem("workflow-retirement-key-"+scenario.name), http.StatusCreated)
+		h.refresh()
+		blocked := &deadlineTool
+		unknownKind, expectedDebits, expectedModels := "tool", 2, int64(1)
+		if scenario.blockModel {
+			blocked = &deadlineModel
+			unknownKind, expectedDebits, expectedModels = "model", 1, 0
+		}
+		blocked.Store(true)
+		beforeModels := modelCalls.Load()
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		secret := mcpExecString(t, caller, "secret")
+		payload, err := json.Marshal(map[string]any{"model": scenario.slug, "messages": []any{map[string]any{"role": "user", "content": prompt}}, "max_tokens": 100})
+		if err != nil {
+			t.Fatal(err)
+		}
+		request, err := http.NewRequestWithContext(ctx, http.MethodPost, h.HTTP.URL+"/v1/chat/completions", strings.NewReader(string(payload)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		request.Header.Set("Authorization", "Bearer "+secret)
+		request.Header.Set("Content-Type", "application/json")
+		result := make(chan int, 1)
+		go func() {
+			response, err := http.DefaultClient.Do(request)
+			if err != nil {
+				result <- 0
+				return
+			}
+			response.Body.Close()
+			result <- response.StatusCode
+		}()
+		select {
+		case <-deadlineStarted:
+		case <-time.After(10 * time.Second):
+			t.Fatalf("%s retirement workflow did not dispatch", scenario.name)
+		}
+		current := h.want(owner, http.MethodGet, scenario.retire, nil, nil, http.StatusOK)
+		h.want(owner, http.MethodDelete, scenario.retire, nil, withMatch(current, idem("workflow-retire-active-"+scenario.name)), http.StatusNoContent)
+		h.refresh()
+		select {
+		case <-deadlineCanceled:
+		case <-time.After(8 * time.Second):
+			t.Fatalf("retired %s did not cancel the active step", scenario.name)
+		}
+		select {
+		case status := <-result:
+			if status != http.StatusForbidden {
+				t.Fatalf("retired %s workflow returned %d", scenario.name, status)
+			}
+		case <-time.After(10 * time.Second):
+			t.Fatalf("retired %s workflow did not finish", scenario.name)
+		}
+		cancel()
+		blocked.Store(false)
+		debits := h.want(owner, http.MethodGet, "/api/v1/execution-debits?api_key_id="+mcpExecString(t, caller, "id"), nil, nil, http.StatusOK)
+		items := mcpExecItems(t, debits, "items")
+		if len(items) != expectedDebits || modelCalls.Load() != beforeModels+expectedModels || !slices.ContainsFunc(items, func(item any) bool {
+			debit, ok := item.(map[string]any)
+			return ok && debit["kind"] == unknownKind && debit["state"] == "outcome_unknown" && !mcpAmountIsZero(t, debit, "remaining_cost") && mcpAmountsEqual(t, debit, "remaining_cost", "cost_bound") && mcpAmountsEqual(t, debit, "remaining_charge", "charge_bound")
+		}) || (!scenario.blockModel && !slices.ContainsFunc(items, func(item any) bool {
+			debit, ok := item.(map[string]any)
+			return ok && debit["kind"] == "model" && debit["state"] == "settled"
+		})) {
+			t.Fatalf("retired %s workflow continued or lost its exposure: debits=%v model calls=%d", scenario.name, items, modelCalls.Load()-beforeModels)
+		}
 	}
 }
 

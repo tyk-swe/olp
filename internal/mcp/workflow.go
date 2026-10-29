@@ -54,6 +54,20 @@ func (s *Server) Resolve(_ context.Context, authority access.Authority, release 
 	return tools, nil
 }
 
+func (s *Server) AuthorizeWorkflowTool(authority access.Authority, tool WorkflowTool) error {
+	if s == nil || s.Runtime == nil {
+		return workflowFailure(fail(http.StatusServiceUnavailable, "authority_unavailable", "api_error", "Key authority is unavailable; retry shortly."))
+	}
+	if authority.ProjectID == nil {
+		return workflowFailure(errPermissionDenied)
+	}
+	failure := s.currentToolAuthority(executeInput{authority: authority, resolved: resolvedToolset{id: tool.ToolsetID, revisionID: tool.RevisionID}, tool: tool.Definition})
+	if failure != nil {
+		return workflowFailure(failure)
+	}
+	return nil
+}
+
 func (s *Server) Call(ctx context.Context, authority access.Authority, release *runtime.Release, selected WorkflowTool, runID string, ordinal int, callID string, arguments json.RawMessage) (json.RawMessage, error) {
 	return s.callWorkflow(ctx, authority, release, selected, runID, ordinal, callID, arguments, nil)
 }

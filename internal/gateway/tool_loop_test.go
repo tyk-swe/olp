@@ -868,6 +868,10 @@ func (f *workflowFixture) Resolve(_ context.Context, _ access.Authority, _ *runt
 	return []WorkflowTool{f.tool}, nil
 }
 
+func (f *workflowFixture) AuthorizeWorkflowTool(access.Authority, WorkflowTool) error {
+	return nil
+}
+
 func (f *workflowFixture) Call(_ context.Context, _ access.Authority, _ *runtime.Release, _ WorkflowTool, runID string, _ int, _ string, arguments json.RawMessage) (json.RawMessage, error) {
 	if runID != f.runID {
 		return nil, fmt.Errorf("wrong run")
@@ -2023,6 +2027,10 @@ func (f *multipleWorkflowTools) Resolve(_ context.Context, _ access.Authority, _
 			}
 		}
 	}), nil
+}
+
+func (f *multipleWorkflowTools) AuthorizeWorkflowTool(access.Authority, WorkflowTool) error {
+	return nil
 }
 
 func (f *multipleWorkflowTools) Call(_ context.Context, _ access.Authority, _ *runtime.Release, tool WorkflowTool, _ string, _ int, _ string, _ json.RawMessage) (json.RawMessage, error) {
