@@ -3993,7 +3993,8 @@
                 "xecguard",
                 "zscaler_ai_guard",
                 "semantic_guard",
-                "decision_model"
+                "decision_model",
+                "typesafe"
               ]
             },
             "policy": {
@@ -7235,7 +7236,8 @@
                 "xecguard",
                 "zscaler_ai_guard",
                 "semantic_guard",
-                "decision_model"
+                "decision_model",
+                "typesafe"
               ]
             },
             "project_id": {
@@ -27900,7 +27902,8 @@
                 "xecguard",
                 "zscaler_ai_guard",
                 "semantic_guard",
-                "decision_model"
+                "decision_model",
+                "typesafe"
               ]
             },
             "policy": {

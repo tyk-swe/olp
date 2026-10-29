@@ -34,11 +34,16 @@ func (x *call) workflowModelCost(attempt routing.Attempt) *Error {
 	if err := json.Unmarshal(provider.Models[attempt.UpstreamModel], &metadata); err != nil || metadata.ContextLength == nil || *metadata.ContextLength < 1 {
 		return workflowUnboundedCost()
 	}
-	output, _ := estimate.OutputBounds(x.generation.parsed, provider.ParameterDefaults)
-	if record := x.targetPreparation(&provider, attempt.TargetID, attempt.UpstreamModel); record.hasOutput {
-		output = record.output.output
+	var output *int64
+	if x.unary != nil {
+		output = metadata.MaxOutputTokens
+	} else {
+		output, _ = estimate.OutputBounds(x.generation.parsed, provider.ParameterDefaults)
+		if record := x.targetPreparation(&provider, attempt.TargetID, attempt.UpstreamModel); record.hasOutput {
+			output = record.output.output
+		}
 	}
-	if output == nil {
+	if output == nil || *output < 1 {
 		return workflowUnboundedCost()
 	}
 	bound, priced := modelCostThroughTiers(attempt.Price, attempt.Discount, *metadata.ContextLength, *output, attempt.Price.Tiers)

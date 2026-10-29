@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"bytes"
 	"cmp"
 	"context"
 	"encoding/json"
@@ -13,6 +14,7 @@ import (
 	"reflect"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -23,6 +25,8 @@ import (
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/agents"
 	"github.com/tyk-swe/olp/internal/connectors"
+	"github.com/tyk-swe/olp/internal/contentpolicy"
+	"github.com/tyk-swe/olp/internal/guardrails"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/mcp"
 	"github.com/tyk-swe/olp/internal/protocols/sse"
@@ -32,6 +36,283 @@ import (
 )
 
 const nativeToolResult = "private-tool-result"
+
+func TestGatewayToolExecutionRecoversCompressedInputAfterApproval(t *testing.T) {
+	for _, previousRecovery := range []bool{false, true} {
+		t.Run(fmt.Sprintf("previous_recovery_%t", previousRecovery), func(t *testing.T) {
+			projectID, toolsetID := uuid.NewString(), uuid.NewString()
+			alias := "t_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+			fixture := &workflowFixture{runID: uuid.NewString(), tool: WorkflowTool{ToolsetID: toolsetID, RevisionID: uuid.NewString(), Definition: routing.MCPToolsetTool{Alias: alias, Classification: "approval_required", InputSchema: json.RawMessage(`{"type":"object"}`)}}}
+			h := nativeWorkflowHarness(t, projectID, "openai", "openai-chat", "unary", routing.FidelityTransformed, []string{toolsetID}, true, fixture)
+			approval := &approvalWorkflowFixture{workflowFixture: fixture, paused: make(chan agents.WorkflowApprovalRequest, 1)}
+			h.gateway.WorkflowRuns = approval
+			h.gateway.WorkflowTools = approval
+			snapshot := h.rt.release.Snapshot
+			snapshot.Guardrails = &guardrails.Registry{
+				Definitions: map[string]guardrails.Revision{"revision": {ID: "revision", GuardrailID: "guard", ProjectID: projectID, Name: "Guard", Type: "headroom", Configuration: json.RawMessage(`{"endpoint":"https://example.com","credential_ref":"credential","content_egress":true,"parameters":{"model":"model"}}`), TimeoutMS: 1000, OnError: guardrails.FailClosed}},
+				Policies:    map[string]guardrails.PolicyRevision{"policy-revision": {ID: "policy-revision", PolicyID: "policy", ProjectID: projectID, Entries: []guardrails.Entry{{GuardrailID: "guard", RevisionID: "revision", Phase: guardrails.Input, Action: guardrails.Redact}}}},
+				Attachments: []guardrails.Attachment{{ID: "attachment", Scope: "route", ScopeID: snapshot.Routes[routeSlug].ID, PolicyRevisionID: "policy-revision"}},
+			}
+			if err := snapshot.Compile(); err != nil {
+				t.Fatal(err)
+			}
+			h.gateway.GuardrailEvaluator = guardrails.EvaluatorFunc(func(_ context.Context, _ guardrails.Revision, evaluation guardrails.Evaluation) (guardrails.Verdict, error) {
+				redactions := slices.Collect(func(yield func(guardrails.Redaction) bool) {
+					for _, segment := range evaluation.Segments {
+						if (segment.Role == "user" || segment.Role == "tool") && !yield(guardrails.Redaction{Segment: segment.ID, Start: 0, End: len(segment.Text), Replacement: "compressed summary"}) {
+							return
+						}
+					}
+				})
+				return guardrails.Verdict{Action: guardrails.Redact, Redactions: redactions}, nil
+			})
+			const original = "approval-bound compressed context"
+			h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
+				var request struct {
+					Messages []struct {
+						Role       string `json:"role"`
+						Content    string `json:"content"`
+						ToolCallID string `json:"tool_call_id"`
+					} `json:"messages"`
+				}
+				if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+					t.Error(err)
+					return
+				}
+				if slices.ContainsFunc(request.Messages, func(message struct {
+					Role       string `json:"role"`
+					Content    string `json:"content"`
+					ToolCallID string `json:"tool_call_id"`
+				}) bool {
+					return message.Role == "tool" && message.ToolCallID == "approve-call"
+				}) {
+					if !slices.ContainsFunc(request.Messages, func(message struct {
+						Role       string `json:"role"`
+						Content    string `json:"content"`
+						ToolCallID string `json:"tool_call_id"`
+					}) bool {
+						return message.Role == "tool" && message.ToolCallID == "recover-call" && strings.Contains(message.Content, original)
+					}) {
+						t.Error("the recovered content was not retained through approval")
+					}
+					completion(modelA, "approved recovery")(w, r)
+					return
+				}
+				if previousRecovery {
+					if slices.ContainsFunc(request.Messages, func(message struct {
+						Role       string `json:"role"`
+						Content    string `json:"content"`
+						ToolCallID string `json:"tool_call_id"`
+					}) bool {
+						return message.Role == "tool" && message.ToolCallID == "recover-call"
+					}) {
+						fmt.Fprintf(w, `{"id":"second","object":"chat.completion","model":"model-a","choices":[{"index":0,"message":{"role":"assistant","content":null,"tool_calls":[{"id":"approve-call","type":"function","function":{"name":%q,"arguments":"{}"}}]},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":2,"completion_tokens":3,"total_tokens":5}}`, alias)
+						return
+					}
+					fmt.Fprint(w, `{"id":"first","object":"chat.completion","model":"model-a","choices":[{"index":0,"message":{"role":"assistant","content":null,"tool_calls":[{"id":"recover-call","type":"function","function":{"name":"olp_recover_context","arguments":"{\"id\":0}"}}]},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":2,"completion_tokens":3,"total_tokens":5}}`)
+					return
+				}
+				fmt.Fprintf(w, `{"id":"first","object":"chat.completion","model":"model-a","choices":[{"index":0,"message":{"role":"assistant","content":null,"tool_calls":[{"id":"recover-call","type":"function","function":{"name":"olp_recover_context","arguments":"{\"id\":0}"}},{"id":"approve-call","type":"function","function":{"name":%q,"arguments":"{}"}}]},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":2,"completion_tokens":3,"total_tokens":5}}`, alias)
+			})
+			request := `{"model":"` + routeSlug + `","messages":[{"role":"user","content":"` + original + `"}]}`
+			response := h.do(t.Context(), http.MethodPost, "/v1/chat/completions", fullKey, []byte(request), nil)
+			defer response.Body.Close()
+			var pause workflowPause
+			if err := json.NewDecoder(response.Body).Decode(&pause); err != nil || response.StatusCode != http.StatusOK || pause.ContinuationToken == "" {
+				t.Fatalf("approval pause failed: status=%d error=%v", response.StatusCode, err)
+			}
+			submission, err := json.Marshal(workflowResumeRequest{ContinuationToken: pause.ContinuationToken, Approved: true, Arguments: map[string]json.RawMessage{"approve-call": json.RawMessage(`{}`)}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			resumed := h.do(t.Context(), http.MethodPost, "/v1/chat/completions", fullKey, []byte(strings.TrimSuffix(request, "}")+`,"olp_approval":`+string(submission)+`}`), nil)
+			defer resumed.Body.Close()
+			body, err := io.ReadAll(resumed.Body)
+			if err != nil || resumed.StatusCode != http.StatusOK || !strings.Contains(string(body), "approved recovery") {
+				t.Fatalf("approval recovery failed: status=%d body=%s error=%v", resumed.StatusCode, body, err)
+			}
+		})
+	}
+}
+
+func TestGatewayToolExecutionRecoversCompressedInput(t *testing.T) {
+	projectID, toolsetID := uuid.NewString(), uuid.NewString()
+	fixture := &workflowFixture{
+		runID: uuid.NewString(),
+		tool: WorkflowTool{ToolsetID: toolsetID, RevisionID: uuid.NewString(), Definition: routing.MCPToolsetTool{
+			Alias: "published_tool", Classification: "read_only", InputSchema: json.RawMessage(`{"type":"object"}`),
+		}},
+	}
+	h := nativeWorkflowHarness(t, projectID, "openai", "openai-chat", "unary", routing.FidelityTransformed, []string{toolsetID}, true, fixture)
+	snapshot := h.rt.release.Snapshot
+	snapshot.Guardrails = &guardrails.Registry{
+		Definitions: map[string]guardrails.Revision{"revision": {ID: "revision", GuardrailID: "guard", ProjectID: projectID, Name: "Guard", Type: "headroom", Configuration: json.RawMessage(`{"endpoint":"https://example.com","credential_ref":"credential","content_egress":true,"parameters":{"model":"model"}}`), TimeoutMS: 1000, OnError: guardrails.FailClosed}},
+		Policies:    map[string]guardrails.PolicyRevision{"policy-revision": {ID: "policy-revision", PolicyID: "policy", ProjectID: projectID, Entries: []guardrails.Entry{{GuardrailID: "guard", RevisionID: "revision", Phase: guardrails.Input, Action: guardrails.Redact}}}},
+		Attachments: []guardrails.Attachment{{ID: "attachment", Scope: "route", ScopeID: snapshot.Routes[routeSlug].ID, PolicyRevisionID: "policy-revision"}},
+	}
+	if err := snapshot.Compile(); err != nil {
+		t.Fatal(err)
+	}
+	h.gateway.GuardrailEvaluator = guardrails.EvaluatorFunc(func(_ context.Context, _ guardrails.Revision, evaluation guardrails.Evaluation) (guardrails.Verdict, error) {
+		redactions := slices.Collect(func(yield func(guardrails.Redaction) bool) {
+			for _, segment := range evaluation.Segments {
+				if segment.Role == "user" && !yield(guardrails.Redaction{Segment: segment.ID, Start: 0, End: len(segment.Text), Replacement: "compressed summary"}) {
+					return
+				}
+			}
+		})
+		return guardrails.Verdict{Action: guardrails.Redact, Redactions: redactions}, nil
+	})
+	const original = "original context retained during this request"
+	const later = "later context selected for recovery"
+	h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
+		var request struct {
+			Messages []struct {
+				Role    string `json:"role"`
+				Content string `json:"content"`
+			} `json:"messages"`
+			Tools []struct {
+				Function struct {
+					Name string `json:"name"`
+				} `json:"function"`
+			} `json:"tools"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Error(err)
+			return
+		}
+		for _, message := range request.Messages {
+			if message.Role == "user" && !strings.HasPrefix(message.Content, "compressed summary") {
+				t.Errorf("user context was not compressed: %s", message.Content)
+			}
+			if message.Role == "tool" {
+				if !strings.Contains(message.Content, later) || strings.Contains(message.Content, original) {
+					t.Errorf("recovered tool output did not select the requested context: %s", message.Content)
+				}
+				completion(modelA, "recovered")(w, r)
+				return
+			}
+		}
+		if len(request.Messages) < 2 || !strings.Contains(request.Messages[0].Content, "recovery id: 0") || !strings.Contains(request.Messages[1].Content, "recovery id: 1") {
+			t.Errorf("provider did not receive the compressed message: %+v", request.Messages)
+		}
+		if !slices.ContainsFunc(request.Tools, func(tool struct {
+			Function struct {
+				Name string `json:"name"`
+			} `json:"function"`
+		}) bool {
+			return tool.Function.Name == "olp_recover_context"
+		}) {
+			t.Error("provider did not receive the compression recovery tool")
+		}
+		fmt.Fprint(w, `{"id":"first","object":"chat.completion","model":"model-a","choices":[{"index":0,"message":{"role":"assistant","content":null,"tool_calls":[{"id":"recover-call","type":"function","function":{"name":"olp_recover_context","arguments":"{\"id\":1}"}}]},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":2,"completion_tokens":3,"total_tokens":5}}`)
+	})
+	response := h.do(t.Context(), http.MethodPost, "/v1/chat/completions", fullKey, []byte(`{"model":"`+routeSlug+`","messages":[{"role":"user","content":"`+original+`"},{"role":"user","content":"`+later+`"}]}`), nil)
+	defer response.Body.Close()
+	body, err := io.ReadAll(response.Body)
+	if err != nil || response.StatusCode != http.StatusOK || !strings.Contains(string(body), "recovered") {
+		t.Fatalf("recovery request failed: status=%d body=%s error=%v", response.StatusCode, body, err)
+	}
+}
+
+func TestGatewayToolExecutionGuardsRecoveredInput(t *testing.T) {
+	projectID, toolsetID := uuid.NewString(), uuid.NewString()
+	fixture := &workflowFixture{
+		runID: uuid.NewString(),
+		tool: WorkflowTool{ToolsetID: toolsetID, RevisionID: uuid.NewString(), Definition: routing.MCPToolsetTool{
+			Alias: "published_tool", Classification: "read_only", InputSchema: json.RawMessage(`{"type":"object"}`),
+		}},
+	}
+	h := nativeWorkflowHarness(t, projectID, "openai", "openai-chat", "unary", routing.FidelityTransformed, []string{toolsetID}, true, fixture)
+	snapshot := h.rt.release.Snapshot
+	snapshot.Guardrails = &guardrails.Registry{
+		Definitions: map[string]guardrails.Revision{
+			"compression": {ID: "compression", GuardrailID: "compress", ProjectID: projectID, Name: "Compressor", Type: "headroom", Configuration: json.RawMessage(`{"endpoint":"https://example.com","credential_ref":"credential","content_egress":true,"parameters":{"model":"model"}}`), TimeoutMS: 1000, OnError: guardrails.FailClosed},
+			"block":       {ID: "block", GuardrailID: "blocked", ProjectID: projectID, Name: "Block", Type: "builtin.keywords", Configuration: json.RawMessage(`{"words":["private-original"]}`), TimeoutMS: 1000, OnError: guardrails.FailClosed},
+		},
+		Policies: map[string]guardrails.PolicyRevision{"policy": {ID: "policy", PolicyID: "policy-id", ProjectID: projectID, Entries: []guardrails.Entry{
+			{GuardrailID: "compress", RevisionID: "compression", Phase: guardrails.Input, Action: guardrails.Redact},
+			{GuardrailID: "blocked", RevisionID: "block", Phase: guardrails.Input, Action: guardrails.Block},
+		}}},
+		Attachments: []guardrails.Attachment{{ID: "attachment", Scope: "route", ScopeID: snapshot.Routes[routeSlug].ID, PolicyRevisionID: "policy"}},
+	}
+	if err := snapshot.Compile(); err != nil {
+		t.Fatal(err)
+	}
+	h.gateway.GuardrailEvaluator = guardrails.EvaluatorFunc(func(_ context.Context, _ guardrails.Revision, evaluation guardrails.Evaluation) (guardrails.Verdict, error) {
+		segment := evaluation.Segments[0]
+		return guardrails.Verdict{Action: guardrails.Redact, Redactions: []guardrails.Redaction{{Segment: segment.ID, Start: 0, End: len(segment.Text), Replacement: "compressed summary"}}}, nil
+	})
+	dispatched := make(chan struct{}, 2)
+	h.mock.set("a", func(w http.ResponseWriter, _ *http.Request) {
+		dispatched <- struct{}{}
+		fmt.Fprint(w, `{"id":"first","object":"chat.completion","model":"model-a","choices":[{"index":0,"message":{"role":"assistant","content":null,"tool_calls":[{"id":"recover-call","type":"function","function":{"name":"olp_recover_context","arguments":"{\"id\":0}"}}]},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":2,"completion_tokens":3,"total_tokens":5}}`)
+	})
+	response := h.do(t.Context(), http.MethodPost, "/v1/chat/completions", fullKey, []byte(`{"model":"`+routeSlug+`","messages":[{"role":"user","content":"private-original"}]}`), nil)
+	defer response.Body.Close()
+	body, err := io.ReadAll(response.Body)
+	if err != nil || response.StatusCode == http.StatusOK || !strings.Contains(string(body), "guardrail_blocked") || strings.Contains(string(body), "private-original") {
+		t.Fatalf("recovered content escaped input guardrails: status=%d body=%s error=%v", response.StatusCode, body, err)
+	}
+	select {
+	case <-dispatched:
+	default:
+		t.Fatal("model did not request recovery")
+	}
+	select {
+	case <-dispatched:
+		t.Fatal("recovered content reached the model after the guardrail blocked it")
+	default:
+	}
+}
+
+func TestGatewayToolExecutionResponsesDoesNotExposeRecoveredContent(t *testing.T) {
+	projectID, toolsetID := uuid.NewString(), uuid.NewString()
+	fixture := &workflowFixture{
+		runID: uuid.NewString(),
+		tool: WorkflowTool{ToolsetID: toolsetID, RevisionID: uuid.NewString(), Definition: routing.MCPToolsetTool{
+			Alias: "published_tool", Classification: "read_only", InputSchema: json.RawMessage(`{"type":"object"}`),
+		}},
+	}
+	h := nativeWorkflowHarness(t, projectID, "openai", "openai-responses", "unary", routing.FidelityTransformed, []string{toolsetID}, true, fixture, true)
+	snapshot := h.rt.release.Snapshot
+	snapshot.Guardrails = &guardrails.Registry{
+		Definitions: map[string]guardrails.Revision{"revision": {ID: "revision", GuardrailID: "guard", ProjectID: projectID, Name: "Guard", Type: "headroom", Configuration: json.RawMessage(`{"endpoint":"https://example.com","credential_ref":"credential","content_egress":true,"parameters":{"model":"model"}}`), TimeoutMS: 1000, OnError: guardrails.FailClosed}},
+		Policies:    map[string]guardrails.PolicyRevision{"policy-revision": {ID: "policy-revision", PolicyID: "policy", ProjectID: projectID, Entries: []guardrails.Entry{{GuardrailID: "guard", RevisionID: "revision", Phase: guardrails.Input, Action: guardrails.Redact}}}},
+		Attachments: []guardrails.Attachment{{ID: "attachment", Scope: "route", ScopeID: snapshot.Routes[routeSlug].ID, PolicyRevisionID: "policy-revision"}},
+	}
+	if err := snapshot.Compile(); err != nil {
+		t.Fatal(err)
+	}
+	h.gateway.GuardrailEvaluator = guardrails.EvaluatorFunc(func(_ context.Context, _ guardrails.Revision, evaluation guardrails.Evaluation) (guardrails.Verdict, error) {
+		segment := evaluation.Segments[0]
+		return guardrails.Verdict{Action: guardrails.Redact, Redactions: []guardrails.Redaction{{Segment: segment.ID, Start: 0, End: len(segment.Text), Replacement: "compressed summary"}}}, nil
+	})
+	const original = "private original for this workflow"
+	h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
+		var request struct {
+			Input json.RawMessage `json:"input"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Error(err)
+			return
+		}
+		if bytes.Contains(request.Input, []byte(`"function_call_output"`)) {
+			if !bytes.Contains(request.Input, []byte(original)) {
+				t.Errorf("provider did not receive the recovered content: %s", request.Input)
+			}
+			fmt.Fprint(w, `{"id":"last","object":"response","status":"completed","model":"model-a","output":[{"type":"message","id":"msg","role":"assistant","status":"completed","content":[{"type":"output_text","text":"safe answer","annotations":[]}]}],"usage":{"input_tokens":3,"output_tokens":4,"total_tokens":7}}`)
+			return
+		}
+		fmt.Fprint(w, `{"id":"first","object":"response","status":"completed","model":"model-a","output":[{"type":"function_call","id":"fc","call_id":"recover-call","name":"olp_recover_context","arguments":"{\"id\":0}","status":"completed"}],"usage":{"input_tokens":2,"output_tokens":3,"total_tokens":5}}`)
+	})
+	response := h.do(t.Context(), http.MethodPost, "/v1/responses", fullKey, []byte(`{"model":"`+routeSlug+`","input":"`+original+`"}`), nil)
+	defer response.Body.Close()
+	body, err := io.ReadAll(response.Body)
+	if err != nil || response.StatusCode != http.StatusOK || !strings.Contains(string(body), "safe answer") || strings.Contains(string(body), original) || strings.Contains(string(body), "olp_recover_context") {
+		t.Fatalf("response exposed recovered content: status=%d body=%s error=%v", response.StatusCode, body, err)
+	}
+}
 
 func nativeWorkflowHarness(t *testing.T, projectID, surface, profile, mode, fidelity string, toolsets []string, certified bool, fixture *workflowFixture, responsesMCP ...bool) *harness {
 	return nativeWorkflowHarnessWithProviders(t, projectID, surface, profile, mode, fidelity, toolsets, certified, fixture, nil, responsesMCP...)
@@ -701,6 +982,14 @@ func TestGatewayToolExecutionRecordsProviderHealth(t *testing.T) {
 
 type workflowDebitFixture struct {
 	*fakeSessionDebits
+}
+
+func (f *workflowDebitFixture) SettleRecovery(context.Context, limits.DebitResult) error {
+	return nil
+}
+
+func (f *workflowDebitFixture) PreviousRecovery(context.Context, string, string, []string) (bool, bool, error) {
+	return false, false, nil
 }
 
 type delegatedWorkflowRuntime struct {
@@ -2171,5 +2460,470 @@ func TestGatewayRejectsApprovalOnNonWorkflowRouteBeforeDispatch(t *testing.T) {
 	body, err := io.ReadAll(response.Body)
 	if err != nil || response.StatusCode != http.StatusForbidden || !strings.Contains(string(body), "tool_approval_invalid") || h.mock.count("a") != 0 || h.mock.count("b") != 0 {
 		t.Fatalf("approval control on ordinary route was not refused before dispatch: status=%d body=%s error=%v", response.StatusCode, body, err)
+	}
+}
+
+func TestGatewayToolExecutionTypeSafePreservesRequestsWithoutExchanges(t *testing.T) {
+	toolsetID, projectID := uuid.NewString(), uuid.NewString()
+	fixture := &workflowFixture{runID: uuid.NewString(), tool: WorkflowTool{ToolsetID: toolsetID, RevisionID: uuid.NewString(), Definition: routing.MCPToolsetTool{Alias: "t_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", Classification: "read_only", InputSchema: json.RawMessage(`{"type":"object"}`)}}}
+	h := nativeWorkflowHarness(t, projectID, "openai", "openai-chat", "unary", routing.FidelityTransformed, []string{toolsetID}, true, fixture)
+	snapshot := h.rt.release.Snapshot
+	route := snapshot.Routes[routeSlug]
+	snapshot.Guardrails = &guardrails.Registry{Definitions: map[string]guardrails.Revision{"revision": {ID: "revision", GuardrailID: "guard", ProjectID: projectID, Type: "typesafe", Configuration: json.RawMessage(`{"route":"relevance"}`), TimeoutMS: 1000, OnError: guardrails.FailClosed}}, Policies: map[string]guardrails.PolicyRevision{"policy-revision": {ID: "policy-revision", PolicyID: "policy", ProjectID: projectID, Entries: []guardrails.Entry{{GuardrailID: "guard", RevisionID: "revision", Phase: guardrails.Input, Action: guardrails.Block}}}}, Attachments: []guardrails.Attachment{{ID: "attachment", Scope: "route", ScopeID: route.ID, PolicyRevisionID: "policy-revision"}}}
+	if err := snapshot.Compile(); err != nil {
+		t.Fatal(err)
+	}
+	h.mock.set("a", completion("model-a", "finished"))
+	response, body := h.chat(fullKey, nil, `,"messages":[{"role":"user","content":"hello"}]`)
+	if response.StatusCode != http.StatusOK || !strings.Contains(fmt.Sprint(body), "finished") {
+		t.Fatalf("ordinary workflow failed: status=%d body=%v", response.StatusCode, body)
+	}
+}
+
+func TestGatewayToolExecutionTypeSafePrunesCompletePriorExchange(t *testing.T) {
+	toolsetID, projectID := uuid.NewString(), uuid.NewString()
+	alias := "t_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+	fixture := &workflowFixture{runID: uuid.NewString(), tool: WorkflowTool{ToolsetID: toolsetID, RevisionID: uuid.NewString(), Definition: routing.MCPToolsetTool{Alias: alias, Classification: "read_only", InputSchema: json.RawMessage(`{"type":"object"}`)}}}
+	h := nativeWorkflowHarness(t, projectID, "openai", "openai-chat", "unary", routing.FidelityTransformed, []string{toolsetID}, true, fixture)
+	configureTypeSafeWorkflow(t, h, projectID, guardrails.FailClosed)
+	h.mock.set("b", func(w http.ResponseWriter, r *http.Request) {
+		var request struct {
+			State     string `json:"state"`
+			Questions map[string]struct {
+				Instructions string `json:"instructions"`
+			} `json:"questions"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil || len(request.Questions) != 2 {
+			t.Errorf("invalid relevance request: %+v (%v)", request, err)
+		}
+		var state struct {
+			Task      string `json:"task"`
+			Exchanges map[string]struct {
+				Results []json.RawMessage `json:"results"`
+			} `json:"exchanges"`
+		}
+		if err := json.Unmarshal([]byte(request.State), &state); err != nil || state.Task != "current task" {
+			t.Errorf("invalid relevance task: %+v (%v)", state, err)
+		}
+		answers := map[string]any{}
+		for name, question := range request.Questions {
+			exchange, found := state.Exchanges[name]
+			if !found || !strings.Contains(question.Instructions, name) {
+				t.Errorf("question %s does not identify its exchange", name)
+			}
+			score := 1.0
+			if len(exchange.Results) > 0 && strings.Contains(string(exchange.Results[0]), "old-result") {
+				score = 0
+			}
+			answers[name] = map[string]any{"type": "noul", "noul": score}
+		}
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(map[string]any{"model": "model-b", "answers": answers, "usage": map[string]int{"input_tokens": 1, "output_tokens": 1, "total_tokens": 2}}); err != nil {
+			t.Error(err)
+		}
+	})
+	h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
+		type message struct {
+			Role       string          `json:"role"`
+			Content    json.RawMessage `json:"content"`
+			ToolCallID string          `json:"tool_call_id"`
+			ToolCalls  []struct {
+				ID string `json:"id"`
+			} `json:"tool_calls"`
+		}
+		var request struct {
+			Messages []message `json:"messages"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Error(err)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		if !slices.ContainsFunc(request.Messages, func(value message) bool { return value.ToolCallID == "current" }) {
+			fmt.Fprintf(w, `{"id":"first","object":"chat.completion","created":1,"model":"model-a","choices":[{"index":0,"message":{"role":"assistant","content":null,"tool_calls":[{"id":"current","type":"function","function":{"name":%q,"arguments":"{}"}}]},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":2,"completion_tokens":3,"total_tokens":5}}`, alias)
+			return
+		}
+		if slices.ContainsFunc(request.Messages, func(value message) bool {
+			return value.ToolCallID == "old" || slices.ContainsFunc(value.ToolCalls, func(call struct {
+				ID string `json:"id"`
+			}) bool {
+				return call.ID == "old"
+			})
+		}) || !slices.ContainsFunc(request.Messages, func(value message) bool { return value.ToolCallID == "relevant" }) || !slices.ContainsFunc(request.Messages, func(value message) bool { return strings.Contains(string(value.Content), "keep this context") }) {
+			io.WriteString(w, `{"id":"final","object":"chat.completion","created":1,"model":"model-a","choices":[{"index":0,"message":{"role":"assistant","content":"old exchange remained"},"finish_reason":"stop"}],"usage":{"prompt_tokens":2,"completion_tokens":3,"total_tokens":5}}`)
+			return
+		}
+		io.WriteString(w, `{"id":"final","object":"chat.completion","created":1,"model":"model-a","choices":[{"index":0,"message":{"role":"assistant","content":"old exchange pruned"},"finish_reason":"stop"}],"usage":{"prompt_tokens":2,"completion_tokens":3,"total_tokens":5}}`)
+	})
+	response, body := h.chat(fullKey, nil, `,"messages":[{"role":"assistant","content":"keep this context","tool_calls":[{"id":"old","type":"function","function":{"name":"previous","arguments":"{}"}}]},{"role":"tool","tool_call_id":"old","content":"old-result"},{"role":"assistant","tool_calls":[{"id":"relevant","type":"function","function":{"name":"previous","arguments":"{}"}}]},{"role":"tool","tool_call_id":"relevant","content":"relevant-result"},{"role":"user","content":"current task"}]`)
+	if response.StatusCode != http.StatusOK || !strings.Contains(fmt.Sprint(body), "old exchange pruned") {
+		t.Fatalf("prior exchange was not pruned: status=%d body=%v", response.StatusCode, body)
+	}
+}
+
+func TestGatewayToolExecutionTypeSafeRespectsInputRedaction(t *testing.T) {
+	for _, kind := range []string{"route policy", "guardrail"} {
+		t.Run(kind, func(t *testing.T) {
+			toolsetID, projectID := uuid.NewString(), uuid.NewString()
+			alias := "t_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+			fixture := &workflowFixture{runID: uuid.NewString(), tool: WorkflowTool{ToolsetID: toolsetID, RevisionID: uuid.NewString(), Definition: routing.MCPToolsetTool{Alias: alias, Classification: "read_only", InputSchema: json.RawMessage(`{"type":"object"}`)}}}
+			h := nativeWorkflowHarness(t, projectID, "openai", "openai-chat", "unary", routing.FidelityTransformed, []string{toolsetID}, true, fixture)
+			configureTypeSafeWorkflow(t, h, projectID, guardrails.FailClosed)
+			snapshot := h.rt.release.Snapshot
+			if kind == "route policy" {
+				route := snapshot.Routes[routeSlug]
+				route.ContentPolicy = &contentpolicy.Policy{Rules: []contentpolicy.Rule{{ID: "private", Phase: contentpolicy.PhaseInput, Action: contentpolicy.ActionRedact, Pattern: "private-sentinel", Replacement: "[masked]"}}}
+				snapshot.Routes[routeSlug] = route
+			} else {
+				registry := snapshot.Guardrails
+				registry.Definitions["redaction"] = guardrails.Revision{ID: "redaction", GuardrailID: "redaction", ProjectID: projectID, Type: "builtin.regex", Configuration: json.RawMessage(`{"rules":[{"id":"private","pattern":"private-sentinel"}]}`), TimeoutMS: 1000, OnError: guardrails.FailClosed}
+				policy := registry.Policies["policy-revision"]
+				policy.Entries = append(policy.Entries, guardrails.Entry{GuardrailID: "redaction", RevisionID: "redaction", Phase: guardrails.Input, Action: guardrails.Redact})
+				registry.Policies["policy-revision"] = policy
+			}
+			if err := snapshot.Compile(); err != nil {
+				t.Fatal(err)
+			}
+			requests := make(chan string, 3)
+			h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
+				body, _ := io.ReadAll(r.Body)
+				requests <- string(body)
+				w.Header().Set("Content-Type", "application/json")
+				if h.mock.count("a") == 1 {
+					fmt.Fprintf(w, `{"id":"first","object":"chat.completion","model":"model-a","choices":[{"index":0,"message":{"role":"assistant","content":null,"tool_calls":[{"id":"current","type":"function","function":{"name":%q,"arguments":"{}"}}]},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":2,"completion_tokens":3,"total_tokens":5}}`, alias)
+					return
+				}
+				completion(modelA, "finished")(w, r)
+			})
+			h.mock.set("b", func(w http.ResponseWriter, r *http.Request) {
+				body, _ := io.ReadAll(r.Body)
+				requests <- string(body)
+				w.Header().Set("Content-Type", "application/json")
+				io.WriteString(w, `{"model":"model-b","answers":{"e0":{"type":"noul","noul":1}},"usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}`)
+			})
+			response, body := h.chat(fullKey, nil, `,"messages":[{"role":"assistant","tool_calls":[{"id":"old","type":"function","function":{"name":"previous","arguments":"{\"query\":\"private-sentinel\"}"}}]},{"role":"tool","tool_call_id":"old","content":"private-sentinel"},{"role":"user","content":"task private-sentinel"}]`)
+			if response.StatusCode != http.StatusOK || h.mock.count("a") != 2 || h.mock.count("b") != 1 {
+				t.Fatalf("redacted workflow failed: status=%d body=%v model=%d relevance=%d", response.StatusCode, body, h.mock.count("a"), h.mock.count("b"))
+			}
+			for range 3 {
+				if request := <-requests; strings.Contains(request, "private-sentinel") {
+					t.Errorf("provider received unredacted input: %s", request)
+				}
+			}
+		})
+	}
+}
+
+func TestGatewayToolExecutionTypeSafeKeepsRecoveredContentPrivate(t *testing.T) {
+	projectID, toolsetID := uuid.NewString(), uuid.NewString()
+	fixture := &workflowFixture{runID: uuid.NewString(), tool: WorkflowTool{ToolsetID: toolsetID, RevisionID: uuid.NewString(), Definition: routing.MCPToolsetTool{Alias: "published_tool", Classification: "read_only", InputSchema: json.RawMessage(`{"type":"object"}`)}}}
+	h := nativeWorkflowHarness(t, projectID, "openai", "openai-chat", "unary", routing.FidelityTransformed, []string{toolsetID}, true, fixture)
+	configureTypeSafeWorkflow(t, h, projectID, guardrails.FailClosed)
+	snapshot := h.rt.release.Snapshot
+	registry := snapshot.Guardrails
+	registry.Definitions["compression"] = guardrails.Revision{ID: "compression", GuardrailID: "compression", ProjectID: projectID, Type: "headroom", Configuration: json.RawMessage(`{"endpoint":"https://example.com","credential_ref":"credential","content_egress":true,"parameters":{"model":"model"}}`), TimeoutMS: 1000, OnError: guardrails.FailClosed}
+	policy := registry.Policies["policy-revision"]
+	policy.Entries = append(policy.Entries, guardrails.Entry{GuardrailID: "compression", RevisionID: "compression", Phase: guardrails.Input, Action: guardrails.Redact})
+	registry.Policies["policy-revision"] = policy
+	if err := snapshot.Compile(); err != nil {
+		t.Fatal(err)
+	}
+	const original = "private recovered context"
+	h.gateway.GuardrailEvaluator = guardrails.EvaluatorFunc(func(_ context.Context, _ guardrails.Revision, evaluation guardrails.Evaluation) (guardrails.Verdict, error) {
+		for _, segment := range evaluation.Segments {
+			if segment.Role == "user" && strings.Contains(segment.Text, original) {
+				return guardrails.Verdict{Action: guardrails.Redact, Redactions: []guardrails.Redaction{{Segment: segment.ID, Start: 0, End: len(segment.Text), Replacement: "compressed summary"}}}, nil
+			}
+		}
+		return guardrails.Verdict{Action: "pass"}, nil
+	})
+	h.mock.set("b", func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		if strings.Contains(string(body), original) || strings.Contains(string(body), "recover-call") {
+			t.Errorf("relevance provider received recovered content: %s", body)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		io.WriteString(w, `{"model":"model-b","answers":{"e0":{"type":"noul","noul":0}},"usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}`)
+	})
+	h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		w.Header().Set("Content-Type", "application/json")
+		if strings.Contains(string(body), `"tool_call_id":"regular-call"`) {
+			if !strings.Contains(string(body), original) {
+				t.Errorf("the primary provider lost recovered context: %s", body)
+			}
+			completion(modelA, "finished")(w, r)
+			return
+		}
+		if strings.Contains(string(body), `"tool_call_id":"recover-call"`) {
+			fmt.Fprint(w, `{"id":"second","object":"chat.completion","model":"model-a","choices":[{"index":0,"message":{"role":"assistant","content":null,"tool_calls":[{"id":"regular-call","type":"function","function":{"name":"published_tool","arguments":"{}"}}]},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":2,"completion_tokens":3,"total_tokens":5}}`)
+			return
+		}
+		fmt.Fprint(w, `{"id":"first","object":"chat.completion","model":"model-a","choices":[{"index":0,"message":{"role":"assistant","content":null,"tool_calls":[{"id":"recover-call","type":"function","function":{"name":"olp_recover_context","arguments":"{\"id\":0}"}}]},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":2,"completion_tokens":3,"total_tokens":5}}`)
+	})
+	response, body := h.chat(fullKey, nil, `,"messages":[{"role":"assistant","tool_calls":[{"id":"old","type":"function","function":{"name":"previous","arguments":"{}"}}]},{"role":"tool","tool_call_id":"old","content":"old result"},{"role":"user","content":"`+original+`"}]`)
+	if response.StatusCode != http.StatusOK || h.mock.count("a") != 3 || h.mock.count("b") != 1 {
+		t.Fatalf("recovery and relevance workflow: status=%d body=%v primary=%d relevance=%d", response.StatusCode, body, h.mock.count("a"), h.mock.count("b"))
+	}
+}
+
+func TestGatewayToolExecutionTypeSafePrunesLargeHistories(t *testing.T) {
+	toolsetID, projectID := uuid.NewString(), uuid.NewString()
+	alias := "t_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+	fixture := &workflowFixture{runID: uuid.NewString(), tool: WorkflowTool{ToolsetID: toolsetID, RevisionID: uuid.NewString(), Definition: routing.MCPToolsetTool{Alias: alias, Classification: "read_only", InputSchema: json.RawMessage(`{"type":"object"}`)}}}
+	h := nativeWorkflowHarness(t, projectID, "openai", "openai-chat", "unary", routing.FidelityTransformed, []string{toolsetID}, true, fixture)
+	configureTypeSafeWorkflow(t, h, projectID, guardrails.FailClosed)
+	var scored atomic.Int64
+	h.mock.set("b", func(w http.ResponseWriter, r *http.Request) {
+		var request struct {
+			Questions map[string]json.RawMessage `json:"questions"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil || len(request.Questions) == 0 || len(request.Questions) > 256 {
+			t.Errorf("invalid relevance request: %+v (%v)", request, err)
+		}
+		scored.Add(int64(len(request.Questions)))
+		answers := map[string]any{}
+		for name := range request.Questions {
+			answers[name] = map[string]any{"type": "noul", "noul": 0}
+		}
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(map[string]any{"model": "model-b", "answers": answers, "usage": map[string]int{"input_tokens": 1, "output_tokens": 1, "total_tokens": 2}}); err != nil {
+			t.Error(err)
+		}
+	})
+	h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
+		var request struct {
+			Messages []struct {
+				ToolCallID string `json:"tool_call_id"`
+			} `json:"messages"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Error(err)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		if !slices.ContainsFunc(request.Messages, func(message struct {
+			ToolCallID string `json:"tool_call_id"`
+		}) bool {
+			return message.ToolCallID == "current"
+		}) {
+			fmt.Fprintf(w, `{"id":"first","object":"chat.completion","created":1,"model":"model-a","choices":[{"index":0,"message":{"role":"assistant","content":null,"tool_calls":[{"id":"current","type":"function","function":{"name":%q,"arguments":"{}"}}]},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":2,"completion_tokens":3,"total_tokens":5}}`, alias)
+			return
+		}
+		if len(request.Messages) != 3 {
+			t.Errorf("prior exchanges remain in the continuation: %d messages", len(request.Messages))
+		}
+		io.WriteString(w, `{"id":"final","object":"chat.completion","created":1,"model":"model-a","choices":[{"index":0,"message":{"role":"assistant","content":"done"},"finish_reason":"stop"}],"usage":{"prompt_tokens":2,"completion_tokens":3,"total_tokens":5}}`)
+	})
+	messages := make([]any, 0, 515)
+	for i := range 257 {
+		id := fmt.Sprintf("old-%d", i)
+		messages = append(messages,
+			map[string]any{"role": "assistant", "tool_calls": []any{map[string]any{"id": id, "type": "function", "function": map[string]any{"name": "previous", "arguments": "{}"}}}},
+			map[string]any{"role": "tool", "tool_call_id": id, "content": "old result"})
+	}
+	messages = append(messages, map[string]any{"role": "user", "content": "current task"})
+	body, err := json.Marshal(messages)
+	if err != nil {
+		t.Fatal(err)
+	}
+	response, result := h.chat(fullKey, nil, `,"messages":`+string(body))
+	if response.StatusCode != http.StatusOK || scored.Load() != 257 || h.mock.count("b") < 2 {
+		t.Fatalf("large history was not pruned: status=%d body=%v scored=%d calls=%d", response.StatusCode, result, scored.Load(), h.mock.count("b"))
+	}
+}
+
+func TestGatewayToolExecutionTypeSafePreservesNativeContent(t *testing.T) {
+	for _, test := range []struct {
+		name, surface, profile, path, request, first, final string
+		keep                                                []string
+	}{
+		{
+			name: "responses", surface: "openai", profile: "openai-responses", path: "/v1/responses",
+			request: `{"model":"` + routeSlug + `","input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"keep prior text"}]},{"type":"function_call","call_id":"old-call","name":"previous","arguments":"{}"},{"type":"function_call_output","call_id":"old-call","output":"old-result"},{"type":"message","role":"user","content":[{"type":"input_text","text":"current task"}]}]}`,
+			first:   `{"id":"first","object":"response","status":"completed","output":[{"type":"function_call","id":"fc-1","call_id":"current-call","name":%q,"arguments":"{}"}],"usage":{"input_tokens":2,"output_tokens":3,"total_tokens":5}}`,
+			final:   `{"id":"final","object":"response","status":"completed","output":[{"id":"message-final","type":"message","role":"assistant","content":[{"type":"output_text","text":"finished"}]}],"usage":{"input_tokens":2,"output_tokens":3,"total_tokens":5}}`,
+			keep:    []string{"keep prior text", "current task", "current-call", nativeToolResult},
+		},
+		{
+			name: "anthropic", surface: "anthropic", profile: "anthropic-messages", path: "/anthropic/v1/messages",
+			request: `{"model":"` + routeSlug + `","max_tokens":64,"messages":[{"role":"assistant","content":[{"type":"thinking","thinking":"keep thought","signature":"prior-signature"},{"type":"tool_use","id":"old-call","name":"previous","input":{}}]},{"role":"user","content":[{"type":"tool_result","tool_use_id":"old-call","content":"old-result"},{"type":"text","text":"keep prior text"}]},{"role":"user","content":"current task"}]}`,
+			first:   `{"id":"first","type":"message","role":"assistant","model":"model-a","content":[{"type":"thinking","thinking":"current thought","signature":"current-signature"},{"type":"tool_use","id":"current-call","name":%q,"input":{}}],"stop_reason":"tool_use","usage":{"input_tokens":2,"output_tokens":3}}`,
+			final:   `{"id":"final","type":"message","role":"assistant","model":"model-a","content":[{"type":"text","text":"finished"}],"stop_reason":"end_turn","usage":{"input_tokens":2,"output_tokens":3}}`,
+			keep:    []string{"keep prior text", "prior-signature", "current-signature", "current-call", nativeToolResult},
+		},
+		{
+			name: "gemini", surface: "gemini", profile: "gemini-generation", path: "/gemini/v1beta/models/" + routeSlug + ":generateContent",
+			request: `{"contents":[{"role":"model","parts":[{"text":"keep prior text","thoughtSignature":"prior-signature"},{"functionCall":{"name":"old-call","args":{}},"thoughtSignature":"old-signature"}]},{"role":"user","parts":[{"functionResponse":{"name":"old-call","response":{"output":"old-result"}}}]},{"role":"user","parts":[{"text":"current task"}]}]}`,
+			first:   `{"candidates":[{"index":0,"content":{"role":"model","parts":[{"functionCall":{"name":%q,"args":{}},"thoughtSignature":"current-signature"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":2,"candidatesTokenCount":3,"totalTokenCount":5}}`,
+			final:   `{"candidates":[{"index":0,"content":{"role":"model","parts":[{"text":"finished"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":2,"candidatesTokenCount":3,"totalTokenCount":5}}`,
+			keep:    []string{"keep prior text", "prior-signature", "current-signature", nativeToolResult},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			toolsetID, projectID := uuid.NewString(), uuid.NewString()
+			alias := "t_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+			fixture := &workflowFixture{runID: uuid.NewString(), result: json.RawMessage(`{"content":[{"type":"text","text":"` + nativeToolResult + `"}]}`), tool: WorkflowTool{ToolsetID: toolsetID, RevisionID: uuid.NewString(), Definition: routing.MCPToolsetTool{Alias: alias, Classification: "read_only", InputSchema: json.RawMessage(`{"type":"object"}`)}}}
+			h := nativeWorkflowHarness(t, projectID, test.surface, test.profile, "unary", routing.FidelityTransformed, []string{toolsetID}, true, fixture)
+			configureTypeSafeWorkflow(t, h, projectID, guardrails.FailClosed)
+			h.mock.set("b", func(w http.ResponseWriter, r *http.Request) {
+				body, _ := io.ReadAll(r.Body)
+				if strings.Contains(string(body), "signature") {
+					t.Errorf("relevance provider received a native signature: %s", body)
+				}
+				w.Header().Set("Content-Type", "application/json")
+				io.WriteString(w, `{"model":"model-b","answers":{"e0":{"type":"noul","noul":0.0}},"usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}`)
+			})
+			continued := make(chan string, 1)
+			h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
+				body, _ := io.ReadAll(r.Body)
+				w.Header().Set("Content-Type", "application/json")
+				if h.mock.count("a") == 1 {
+					fmt.Fprintf(w, test.first, alias)
+					return
+				}
+				continued <- string(body)
+				io.WriteString(w, test.final)
+			})
+			response := h.do(t.Context(), http.MethodPost, test.path, fullKey, []byte(test.request), nil)
+			defer response.Body.Close()
+			body, err := io.ReadAll(response.Body)
+			if err != nil || response.StatusCode != http.StatusOK || !strings.Contains(string(body), "finished") || h.mock.count("b") != 1 || h.mock.count("a") != 2 {
+				t.Fatalf("workflow failed: status=%d body=%s relevance_calls=%d model_calls=%d err=%v continuation=%s", response.StatusCode, body, h.mock.count("b"), h.mock.count("a"), err, func() string {
+					select {
+					case next := <-continued:
+						return next
+					default:
+						return ""
+					}
+				}())
+			}
+			next := <-continued
+			if strings.Contains(next, "old-call") || strings.Contains(next, "old-result") {
+				t.Fatalf("old exchange remained in continuation: %s", next)
+			}
+			for _, value := range test.keep {
+				if !strings.Contains(next, value) {
+					t.Errorf("continuation lost %q: %s", value, next)
+				}
+			}
+		})
+	}
+}
+
+func configureTypeSafeWorkflow(t *testing.T, h *harness, projectID, onError string) {
+	t.Helper()
+	snapshot := h.rt.release.Snapshot
+	route := snapshot.Routes[routeSlug]
+	decisionTarget := route.Targets[1]
+	decisionProvider := snapshot.Providers[decisionTarget.ProviderID]
+	snapshot.Providers[decisionTarget.ProviderID] = routing.Provider{
+		ID: decisionProvider.ID, Name: decisionProvider.Name, Kind: "openai_compatible", VendorID: "typesafe-jev", Enabled: decisionProvider.Enabled,
+		ActiveCredential: decisionProvider.ActiveCredential, RevisionID: decisionProvider.RevisionID,
+		Endpoint: decisionProvider.Endpoint, AuthMode: decisionProvider.AuthMode, Slots: decisionProvider.Slots,
+		ProfileID: "systemone", ProfileRevision: connectors.ProfileRevision,
+		Capabilities: []routing.Capability{{Model: decisionTarget.ProviderModel, Operation: "decision", Surface: "openai", Mode: "unary"}},
+	}
+	snapshot.Routes[routeSlug] = routing.Route{
+		ID: route.ID, Slug: route.Slug, Operations: route.Operations, OverallTimeout: route.OverallTimeout,
+		MaxAttempts: route.MaxAttempts, Targets: slices.Clone(route.Targets[:1]), RoutingID: route.RoutingID,
+		RevisionID: route.RevisionID, Revision: route.Revision, PublishedAt: route.PublishedAt,
+		Policy: route.Policy, ProjectID: route.ProjectID, ContentPolicy: route.ContentPolicy,
+		Fidelity: route.Fidelity, Behavior: route.Behavior,
+	}
+	decisionID := uuid.NewString()
+	snapshot.Routes["relevance"] = routing.Route{ID: decisionID, Slug: "relevance", Operations: []string{"decision"}, OverallTimeout: 5000, MaxAttempts: 1, RoutingID: decisionID, RevisionID: uuid.NewString(), ProjectID: &projectID, Fidelity: routing.RouteFidelity{Mode: routing.FidelityTransformed}, Targets: []routing.Target{decisionTarget}}
+	snapshot.Guardrails = &guardrails.Registry{Definitions: map[string]guardrails.Revision{"revision": {ID: "revision", GuardrailID: "guard", ProjectID: projectID, Type: "typesafe", Configuration: json.RawMessage(`{"route":"relevance"}`), TimeoutMS: 2000, OnError: onError}}, Policies: map[string]guardrails.PolicyRevision{"policy-revision": {ID: "policy-revision", PolicyID: "policy", ProjectID: projectID, Entries: []guardrails.Entry{{GuardrailID: "guard", RevisionID: "revision", Phase: guardrails.Input, Action: guardrails.Block}}}}, Attachments: []guardrails.Attachment{{ID: "attachment", Scope: "route", ScopeID: route.ID, PolicyRevisionID: "policy-revision"}}}
+	if err := snapshot.Compile(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestGatewayToolExecutionTypeSafeFailurePolicy(t *testing.T) {
+	for _, test := range []struct {
+		name, onError, failure, wantCode string
+		wantStatus, relevanceCalls       int
+	}{
+		{name: "missing route fails open", onError: guardrails.FailOpen, failure: "missing", wantStatus: http.StatusOK},
+		{name: "missing route fails closed", onError: guardrails.FailClosed, failure: "missing", wantStatus: http.StatusUnprocessableEntity, wantCode: "guardrail_surface_unavailable"},
+		{name: "unknown dispatched work fails open policy", onError: guardrails.FailOpen, failure: "upstream", wantStatus: http.StatusBadGateway, wantCode: "ambiguous_upstream_result", relevanceCalls: 1},
+		{name: "unknown dispatched work fails closed policy", onError: guardrails.FailClosed, failure: "upstream", wantStatus: http.StatusBadGateway, wantCode: "ambiguous_upstream_result", relevanceCalls: 1},
+		{name: "relevance route requires authority", onError: guardrails.FailOpen, failure: "authority", wantStatus: http.StatusForbidden, wantCode: "route_forbidden"},
+		{name: "finite run ceiling fails open policy", onError: guardrails.FailOpen, failure: "ceiling", wantStatus: http.StatusBadRequest, wantCode: "run_cost_unbounded"},
+		{name: "finite run ceiling fails closed policy", onError: guardrails.FailClosed, failure: "ceiling", wantStatus: http.StatusBadRequest, wantCode: "run_cost_unbounded"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			toolsetID, projectID := uuid.NewString(), uuid.NewString()
+			alias := "t_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+			fixture := &workflowFixture{runID: uuid.NewString(), tool: WorkflowTool{ToolsetID: toolsetID, RevisionID: uuid.NewString(), Definition: routing.MCPToolsetTool{Alias: alias, Classification: "read_only", UnitPrice: new("0"), InputSchema: json.RawMessage(`{"type":"object"}`)}}}
+			h := nativeWorkflowHarness(t, projectID, "openai", "openai-chat", "unary", routing.FidelityTransformed, []string{toolsetID}, true, fixture)
+			configureTypeSafeWorkflow(t, h, projectID, test.onError)
+			if test.failure == "missing" {
+				delete(h.rt.release.Snapshot.Routes, "relevance")
+			}
+			if test.failure == "authority" {
+				authority := h.rt.keys[fullKey]
+				authority.Policy.AllowedRoutes = []string{routeSlug}
+				h.rt.keys[fullKey] = authority
+			}
+			if test.failure == "ceiling" {
+				for id, provider := range h.rt.release.Snapshot.Providers {
+					provider.Models = map[string]json.RawMessage{modelA: json.RawMessage(`{"context_length":1000}`)}
+					h.rt.release.Snapshot.Providers[id] = provider
+				}
+				h.rt.inputs = &usage.RoutingInputs{Prices: []usage.RoutingPrice{{Price: usage.Price{ProviderKind: "openai", Model: modelA, Operation: "generation", Currency: "usd", InputPerMillion: new("0"), OutputPerMillion: new("0"), PerRequest: new("0.1")}, EffectiveAt: time.Now().Add(-time.Minute)}}, RefreshedAt: time.Now()}
+			}
+			h.mock.set("b", func(w http.ResponseWriter, _ *http.Request) {
+				http.Error(w, "unavailable", http.StatusServiceUnavailable)
+			})
+			h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
+				body, _ := io.ReadAll(r.Body)
+				w.Header().Set("Content-Type", "application/json")
+				if h.mock.count("a") == 1 {
+					fmt.Fprintf(w, `{"id":"first","object":"chat.completion","created":1,"model":"model-a","choices":[{"index":0,"message":{"role":"assistant","content":null,"tool_calls":[{"id":"current","type":"function","function":{"name":%q,"arguments":"{}"}}]},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":2,"completion_tokens":3,"total_tokens":5}}`, alias)
+					return
+				}
+				if !strings.Contains(string(body), "old-result") {
+					t.Error("fail-open removed the unscored exchange")
+				}
+				io.WriteString(w, `{"id":"final","object":"chat.completion","created":1,"model":"model-a","choices":[{"index":0,"message":{"role":"assistant","content":"finished"},"finish_reason":"stop"}],"usage":{"prompt_tokens":2,"completion_tokens":3,"total_tokens":5}}`)
+			})
+			fields := `,"messages":[{"role":"assistant","content":null,"tool_calls":[{"id":"old","type":"function","function":{"name":"previous","arguments":"{}"}}]},{"role":"tool","tool_call_id":"old","content":"old-result"},{"role":"user","content":"current task"}]`
+			if test.failure == "ceiling" {
+				fields += `,"max_tokens":8,"olp_run_limits":{"max_run_cost":"1"}`
+			}
+			response, body := h.chat(fullKey, nil, fields)
+			if response.StatusCode != test.wantStatus || h.mock.count("b") != test.relevanceCalls || test.wantCode != "" && errorCode(t, body) != test.wantCode || test.wantStatus == http.StatusOK && (!strings.Contains(fmt.Sprint(body), "finished") || h.mock.count("a") != 2) {
+				t.Fatalf("unexpected policy result: status=%d body=%v model_calls=%d relevance_calls=%d", response.StatusCode, body, h.mock.count("a"), h.mock.count("b"))
+			}
+		})
+	}
+}
+
+func TestGatewayToolExecutionTypeSafeKeepsAmbiguousGeminiExchanges(t *testing.T) {
+	toolsetID, projectID := uuid.NewString(), uuid.NewString()
+	alias := "t_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+	fixture := &workflowFixture{runID: uuid.NewString(), tool: WorkflowTool{ToolsetID: toolsetID, RevisionID: uuid.NewString(), Definition: routing.MCPToolsetTool{Alias: alias, Classification: "read_only", InputSchema: json.RawMessage(`{"type":"object"}`)}}}
+	h := nativeWorkflowHarness(t, projectID, "gemini", "gemini-generation", "unary", routing.FidelityTransformed, []string{toolsetID}, true, fixture)
+	configureTypeSafeWorkflow(t, h, projectID, guardrails.FailClosed)
+	h.mock.set("b", func(w http.ResponseWriter, _ *http.Request) { t.Error("ambiguous exchange was sent for pruning") })
+	h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		w.Header().Set("Content-Type", "application/json")
+		if h.mock.count("a") == 1 {
+			fmt.Fprintf(w, `{"candidates":[{"content":{"role":"model","parts":[{"functionCall":{"name":%q,"args":{}}}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":2,"candidatesTokenCount":3,"totalTokenCount":5}}`, alias)
+			return
+		}
+		if !strings.Contains(string(body), "old-result-one") || !strings.Contains(string(body), "old-result-two") || strings.Count(string(body), `"name":"duplicate"`) != 4 {
+			t.Errorf("ambiguous prior exchange was changed: %s", body)
+		}
+		io.WriteString(w, `{"candidates":[{"content":{"role":"model","parts":[{"text":"finished"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":2,"candidatesTokenCount":3,"totalTokenCount":5}}`)
+	})
+	body := []byte(`{"contents":[{"role":"model","parts":[{"functionCall":{"name":"duplicate","args":{}}},{"functionCall":{"name":"duplicate","args":{}}}]},{"role":"user","parts":[{"functionResponse":{"id":"one","name":"duplicate","response":{"output":"old-result-one"}}},{"functionResponse":{"id":"two","name":"duplicate","response":{"output":"old-result-two"}}}]},{"role":"user","parts":[{"text":"current task"}]}]}`)
+	response := h.do(t.Context(), http.MethodPost, "/gemini/v1beta/models/"+routeSlug+":generateContent", fullKey, body, nil)
+	defer response.Body.Close()
+	payload, _ := io.ReadAll(response.Body)
+	if response.StatusCode != http.StatusOK || !strings.Contains(string(payload), "finished") || h.mock.count("a") != 2 || h.mock.count("b") != 0 {
+		t.Fatalf("ambiguous exchange workflow failed: status=%d response=%s model_calls=%d relevance_calls=%d", response.StatusCode, payload, h.mock.count("a"), h.mock.count("b"))
 	}
 }

@@ -1319,6 +1319,7 @@ const (
 	ConfigurationGuardrailTypeSemanticGuard         ConfigurationGuardrailType = "semantic_guard"
 	ConfigurationGuardrailTypeSingulr               ConfigurationGuardrailType = "singulr"
 	ConfigurationGuardrailTypeStraiker              ConfigurationGuardrailType = "straiker"
+	ConfigurationGuardrailTypeTypesafe              ConfigurationGuardrailType = "typesafe"
 	ConfigurationGuardrailTypeVigilGuard            ConfigurationGuardrailType = "vigil_guard"
 	ConfigurationGuardrailTypeWebhook               ConfigurationGuardrailType = "webhook"
 	ConfigurationGuardrailTypeXecguard              ConfigurationGuardrailType = "xecguard"
@@ -1439,6 +1440,8 @@ func (e ConfigurationGuardrailType) Valid() bool {
 	case ConfigurationGuardrailTypeSingulr:
 		return true
 	case ConfigurationGuardrailTypeStraiker:
+		return true
+	case ConfigurationGuardrailTypeTypesafe:
 		return true
 	case ConfigurationGuardrailTypeVigilGuard:
 		return true
@@ -2192,6 +2195,7 @@ const (
 	CreateGuardrailRequestTypeSemanticGuard         CreateGuardrailRequestType = "semantic_guard"
 	CreateGuardrailRequestTypeSingulr               CreateGuardrailRequestType = "singulr"
 	CreateGuardrailRequestTypeStraiker              CreateGuardrailRequestType = "straiker"
+	CreateGuardrailRequestTypeTypesafe              CreateGuardrailRequestType = "typesafe"
 	CreateGuardrailRequestTypeVigilGuard            CreateGuardrailRequestType = "vigil_guard"
 	CreateGuardrailRequestTypeWebhook               CreateGuardrailRequestType = "webhook"
 	CreateGuardrailRequestTypeXecguard              CreateGuardrailRequestType = "xecguard"
@@ -2312,6 +2316,8 @@ func (e CreateGuardrailRequestType) Valid() bool {
 	case CreateGuardrailRequestTypeSingulr:
 		return true
 	case CreateGuardrailRequestTypeStraiker:
+		return true
+	case CreateGuardrailRequestTypeTypesafe:
 		return true
 	case CreateGuardrailRequestTypeVigilGuard:
 		return true
@@ -3020,6 +3026,7 @@ const (
 	GuardrailResponseTypeSemanticGuard         GuardrailResponseType = "semantic_guard"
 	GuardrailResponseTypeSingulr               GuardrailResponseType = "singulr"
 	GuardrailResponseTypeStraiker              GuardrailResponseType = "straiker"
+	GuardrailResponseTypeTypesafe              GuardrailResponseType = "typesafe"
 	GuardrailResponseTypeVigilGuard            GuardrailResponseType = "vigil_guard"
 	GuardrailResponseTypeWebhook               GuardrailResponseType = "webhook"
 	GuardrailResponseTypeXecguard              GuardrailResponseType = "xecguard"
@@ -3140,6 +3147,8 @@ func (e GuardrailResponseType) Valid() bool {
 	case GuardrailResponseTypeSingulr:
 		return true
 	case GuardrailResponseTypeStraiker:
+		return true
+	case GuardrailResponseTypeTypesafe:
 		return true
 	case GuardrailResponseTypeVigilGuard:
 		return true
