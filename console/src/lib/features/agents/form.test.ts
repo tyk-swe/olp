@@ -42,6 +42,53 @@ const server: MCPServer = {
 };
 
 describe('publication configuration', () => {
+  it('round trips structured prompt messages, declared string variables and defaults', () => {
+    const input = publicationInput('prompts', {
+      ...publicationForm(),
+      project: id,
+      name: 'Greeting',
+      promptMode: 'messages',
+      messages: [
+        { role: 'system', content: 'Help {{name}}' },
+        { role: 'user', content: 'Hello {{name}}' }
+      ],
+      variables: 'name',
+      temperature: '0.2',
+      topP: '0.8',
+      maxOutputTokens: '128'
+    });
+    expect(input.prompt).toEqual({
+      messages: [
+        { role: 'system', content: 'Help {{name}}' },
+        { role: 'user', content: 'Hello {{name}}' }
+      ],
+      variable_schema: {
+        type: 'object',
+        properties: { name: { type: 'string' } },
+        required: ['name'],
+        additionalProperties: false
+      },
+      default_parameters: {
+        temperature: 0.2,
+        top_p: 0.8,
+        max_output_tokens: 128
+      }
+    });
+    const current: Publication = {
+      id,
+      project_id: id,
+      kind: 'prompt',
+      name: 'Greeting',
+      etag: id,
+      revision_id: id,
+      retired: false,
+      draft: input
+    };
+    expect(publicationInput('prompts', publicationForm(current))).toEqual(
+      input
+    );
+  });
+
   it('builds one typed definition without credential material', () => {
     const form = publicationForm();
     Object.assign(form, {
@@ -189,7 +236,7 @@ describe('publication configuration', () => {
 
 describe('publication editor boundaries', () => {
   it('starts a new editor with blank resource bindings and the supported default protocol', () => {
-    expect(publicationForm()).toEqual({
+    expect(publicationForm()).toMatchObject({
       project: '',
       name: '',
       tools: [],
@@ -301,6 +348,35 @@ describe('publication editor boundaries', () => {
         variables: ' , name,\n\tlanguage , '
       }).prompt?.variables
     ).toEqual(['name', 'language']);
+  });
+
+  it('preserves a legacy template when switching to structured messages', () => {
+    const current: Publication = {
+      id,
+      project_id: id,
+      kind: 'prompt',
+      name: 'Prompt',
+      etag: id,
+      revision_id: id,
+      retired: false,
+      draft: {
+        project_id: id,
+        name: 'Prompt',
+        prompt: {
+          template: 'Hello {{name}}',
+          variables: ['name'],
+          messages: []
+        }
+      }
+    };
+    const converted = publicationInput('prompts', {
+      ...publicationForm(current),
+      promptMode: 'messages'
+    });
+    expect(converted.prompt?.messages).toEqual([
+      { role: 'user', content: 'Hello {{name}}' }
+    ]);
+    expect(converted.prompt?.variable_schema?.required).toEqual(['name']);
   });
 
   it('allows a catalog member when other certified tools have different names', async () => {

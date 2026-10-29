@@ -96,3 +96,111 @@ it("saves and reloads a tool's execution classification", async () => {
     ).toBe('read_only')
   );
 });
+
+it('converts a legacy prompt, edits its messages and defaults, and saves them', async () => {
+  const publication: api.Publication = {
+    id: 'prompt',
+    project_id: 'project',
+    kind: 'prompt',
+    name: 'Greeting',
+    etag: 'etag',
+    revision_id: 'revision',
+    retired: false,
+    draft: {
+      project_id: 'project',
+      name: 'Greeting',
+      prompt: { template: 'Hello {{name}}', variables: ['name'] }
+    }
+  };
+  vi.mocked(api.listPublications).mockImplementation(async (kind) =>
+    kind === 'prompts' ? [publication] : []
+  );
+  vi.mocked(api.listProjects).mockResolvedValue([]);
+  vi.mocked(api.listServers).mockResolvedValue([]);
+  vi.mocked(api.getPublication).mockResolvedValue(publication);
+  vi.mocked(api.savePublication).mockClear();
+  vi.mocked(api.savePublication).mockImplementation(
+    async (_kind, current, input) => ({ ...current!, draft: input })
+  );
+  const host = document.createElement('div');
+  document.body.append(host);
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false } }
+  });
+  const component = mount(PublicationsProbe, {
+    target: host,
+    props: { client }
+  });
+  onTestFinished(async () => {
+    await unmount(component);
+    client.clear();
+    host.remove();
+  });
+  const prompts = [
+    ...host.querySelectorAll<HTMLButtonElement>('nav button')
+  ].find((item) => item.textContent?.trim() === 'prompts');
+  expect(prompts).toBeDefined();
+  prompts!.click();
+  await vi.waitFor(() => expect(host.textContent).toContain('Greeting'));
+  [...host.querySelectorAll('button')]
+    .find((item) => item.textContent?.trim() === 'Open')!
+    .click();
+  await vi.waitFor(() => expect(host.textContent).toContain('Prompt format'));
+  const format = [...host.querySelectorAll('label')]
+    .find((item) => item.textContent?.includes('Prompt format'))!
+    .querySelector('select')!;
+  format.value = 'messages';
+  format.dispatchEvent(new Event('change', { bubbles: true }));
+  flushSync();
+  const first = [...host.querySelectorAll('fieldset')].find(
+    (item) => item.querySelector(':scope > legend')?.textContent === 'Message 1'
+  )!;
+  expect(first.querySelector('textarea')?.value).toBe('Hello {{name}}');
+  first.querySelector('select')!.value = 'system';
+  first
+    .querySelector('select')!
+    .dispatchEvent(new Event('change', { bubbles: true }));
+  flushSync();
+  expect(first.querySelector('select')!.value).toBe('system');
+  first.querySelector('textarea')!.value = 'Help {{name}}';
+  first
+    .querySelector('textarea')!
+    .dispatchEvent(new Event('input', { bubbles: true }));
+  [...host.querySelectorAll('button')]
+    .find((item) => item.textContent?.trim() === 'Add message')!
+    .click();
+  flushSync();
+  expect(first.querySelector('select')!.value).toBe('system');
+  const second = [...host.querySelectorAll('fieldset')].find(
+    (item) => item.querySelector(':scope > legend')?.textContent === 'Message 2'
+  )!;
+  second.querySelector('textarea')!.value = 'Hello {{name}}';
+  second
+    .querySelector('textarea')!
+    .dispatchEvent(new Event('input', { bubbles: true }));
+  const topP = [...host.querySelectorAll('label')]
+    .find((item) => item.textContent?.includes('Top P'))!
+    .querySelector('input')!;
+  topP.value = '0.5';
+  topP.dispatchEvent(new Event('input', { bubbles: true }));
+  flushSync();
+  host
+    .querySelector<HTMLFormElement>(
+      'section[aria-label="Publication editor"] form'
+    )!
+    .dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+  await vi.waitFor(() => expect(api.savePublication).toHaveBeenCalled());
+  expect(vi.mocked(api.savePublication).mock.calls[0][2].prompt).toEqual({
+    messages: [
+      { role: 'system', content: 'Help {{name}}' },
+      { role: 'user', content: 'Hello {{name}}' }
+    ],
+    variable_schema: {
+      type: 'object',
+      properties: { name: { type: 'string' } },
+      required: ['name'],
+      additionalProperties: false
+    },
+    default_parameters: { top_p: 0.5 }
+  });
+});

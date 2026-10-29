@@ -89,7 +89,7 @@ func (s *Server) getCard(w http.ResponseWriter, r *http.Request) {
 	response := protocol.AgentCard{
 		Name: original.Name, Description: original.Description, Version: original.Version,
 		SupportedInterfaces: []*protocol.AgentInterface{protocol.NewAgentInterface(strings.TrimRight(s.PublicOrigin, "/")+"/a2a/"+revision.PublicationID, protocol.TransportProtocolJSONRPC)},
-		Capabilities:        protocol.AgentCapabilities{}, DefaultInputModes: original.DefaultInputModes, DefaultOutputModes: original.DefaultOutputModes,
+		Capabilities:        protocol.AgentCapabilities{Streaming: original.Capabilities.Streaming}, DefaultInputModes: original.DefaultInputModes, DefaultOutputModes: original.DefaultOutputModes,
 		Skills:               publicSkills(original.Skills),
 		SecuritySchemes:      protocol.NamedSecuritySchemes{"olp": protocol.HTTPAuthSecurityScheme{Scheme: "Bearer"}},
 		SecurityRequirements: protocol.SecurityRequirementsOptions{{"olp": {}}},
