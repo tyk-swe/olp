@@ -54,6 +54,10 @@ func (d durableSessionDebits) ReleaseUndispatched(ctx context.Context, id, claim
 	return d.store.ReleaseUndispatched(ctx, id, claim)
 }
 
+func (d durableSessionDebits) MarkNotSent(ctx context.Context, id, claim string) error {
+	return d.store.MarkNotSent(ctx, id, claim)
+}
+
 func (d durableSessionDebits) HasUnknownExposure(ctx context.Context, keyID string, maxDispatch time.Duration) (bool, error) {
 	return d.store.HasUnknownDebit(ctx, keyID, maxDispatch)
 }

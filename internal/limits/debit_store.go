@@ -296,6 +296,38 @@ func (s *DebitStore) ReleaseUndispatched(ctx context.Context, id, claim string) 
 	return tx.Commit(ctx)
 }
 
+func (s *DebitStore) MarkNotSent(ctx context.Context, id, claim string) error {
+	tx, err := s.Pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	var state DebitState
+	if err := tx.QueryRow(ctx, `SELECT state FROM olp.execution_debits WHERE id=$1 AND claim_id=$2 FOR UPDATE`, id, claim).Scan(&state); err != nil {
+		return ErrDebitState
+	}
+	if state == DebitNotAccepted {
+		return tx.Commit(ctx)
+	}
+	if state != DebitDispatched {
+		return ErrDebitState
+	}
+	owners, ownersErr := debitOwnersTx(ctx, tx, id)
+	if ownersErr != nil {
+		return ownersErr
+	}
+	if err := lockDebitOwners(ctx, tx, owners); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, `UPDATE olp.execution_debits SET state='not_accepted',closed_at=clock_timestamp() WHERE id=$1`, id); err != nil {
+		return err
+	}
+	if err := bumpDebitOwners(ctx, tx, owners); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
 // DebitResult is content-free evidence already checked by the lifecycle owner.
 // ResultDigest identifies one result independently of the evidence digest.
 type DebitResult struct {

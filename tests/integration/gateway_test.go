@@ -743,6 +743,8 @@ func TestGatewayToolWorkflowSettlesOneRun(t *testing.T) {
 	const answer = "workflow-private-result"
 	const prompt = "workflow-private-prompt"
 	var toolCalls atomic.Int64
+	var blockTool atomic.Bool
+	toolStarted := make(chan struct{})
 	toolServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodDelete {
 			w.WriteHeader(http.StatusNoContent)
@@ -768,6 +770,15 @@ func TestGatewayToolWorkflowSettlesOneRun(t *testing.T) {
 			schema := map[string]any{"type": "object", "properties": map[string]any{"query": map[string]any{"type": "string"}}, "required": []string{"query"}}
 			result = map[string]any{"tools": []any{map[string]any{"name": "lookup", "inputSchema": schema}, map[string]any{"name": "change", "inputSchema": schema}}}
 		case "tools/call":
+			if blockTool.Load() {
+				close(toolStarted)
+				<-r.Context().Done()
+				return
+			}
+			var settledModels int
+			if err := h.Pool.QueryRow(r.Context(), `SELECT count(*) FROM olp.execution_debits WHERE kind='model' AND state='settled'`).Scan(&settledModels); err != nil || settledModels != 1 {
+				t.Errorf("tool dispatched before model settlement: settled=%d error=%v", settledModels, err)
+			}
 			toolCalls.Add(1)
 			result = map[string]any{"content": []any{map[string]any{"type": "text", "text": answer}}, "isError": false}
 		default:
@@ -788,6 +799,8 @@ func TestGatewayToolWorkflowSettlesOneRun(t *testing.T) {
 
 	var modelCalls atomic.Int64
 	var noUsage atomic.Bool
+	var blockModel atomic.Bool
+	modelStarted := make(chan struct{})
 	vendor := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasSuffix(r.URL.Path, "/responses") {
 			writeResponsesFixture(w, vendorModel, "done", false)
@@ -796,6 +809,11 @@ func TestGatewayToolWorkflowSettlesOneRun(t *testing.T) {
 		var input map[string]json.RawMessage
 		if json.NewDecoder(r.Body).Decode(&input) != nil {
 			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		if blockModel.Load() && len(input["tool_choice"]) == 0 {
+			close(modelStarted)
+			<-r.Context().Done()
 			return
 		}
 		name := ""
@@ -807,6 +825,11 @@ func TestGatewayToolWorkflowSettlesOneRun(t *testing.T) {
 				name = tool.Alias
 				if strings.Contains(string(input["messages"]), "workflow-approval-test") {
 					name = approvalTool.Alias
+				}
+			} else {
+				var settledModels, settledTools int
+				if err := h.Pool.QueryRow(r.Context(), `SELECT count(*) FILTER (WHERE kind='model' AND state='settled'),count(*) FILTER (WHERE kind='tool' AND state='settled') FROM olp.execution_debits`).Scan(&settledModels, &settledTools); err != nil || settledModels != 1 || settledTools != 1 {
+					t.Errorf("next model dispatched before previous steps settled: models=%d tools=%d error=%v", settledModels, settledTools, err)
 				}
 			}
 		}
@@ -943,5 +966,84 @@ func TestGatewayToolWorkflowSettlesOneRun(t *testing.T) {
 	status, response, _ = h.gateway("POST", "/v1/chat/completions", secret, map[string]any{"model": slug, "messages": []any{map[string]any{"role": "user", "content": "workflow-approval-test"}}, "max_tokens": 100})
 	if status != http.StatusForbidden || !strings.Contains(fmt.Sprint(response), "tool_approval_required") || modelCalls.Load() != 4 || toolCalls.Load() != 1 {
 		t.Fatalf("unclassified tool was not refused before dispatch: status=%d response=%v model_calls=%d tool_calls=%d", status, response, modelCalls.Load(), toolCalls.Load())
+	}
+
+	unavailable := httptest.NewServer(vendor.Config.Handler)
+	unavailableProvider := activeAzureProviderInProject(t, h, owner, "Unavailable workflow provider", unavailable.URL, &project, []any{map[string]any{"operation": "generation", "surface": "openai", "mode": "unary"}})
+	const fallbackSlug = "workflow-fallback"
+	draft := h.want(owner, "POST", "/api/v1/route-drafts", map[string]any{
+		"project_id": project, "slug": fallbackSlug, "operations": []string{"generation"}, "overall_timeout_ms": 10000, "max_attempts": 2,
+		"fidelity": map[string]any{"mode": "transformed"}, "tool_execution": "gateway",
+		"targets": []any{
+			map[string]any{"provider_id": unavailableProvider["id"], "provider_model": vendorModel, "priority": 0, "weight": 1, "timeout_ms": 5000},
+			map[string]any{"provider_id": provider["id"], "provider_model": vendorModel, "priority": 1, "weight": 1, "timeout_ms": 5000},
+		},
+	}, idem("workflow-fallback-draft"), http.StatusCreated)
+	h.want(owner, "POST", "/api/v1/route-drafts/"+draft["id"].(string)+"/activate", nil, withMatch(draft, idem("workflow-fallback-activate")), http.StatusOK)
+	fallbackKey := h.want(owner, "POST", "/api/v1/api-keys", map[string]any{"name": "Workflow fallback", "project_id": project, "scopes": []string{"inference"}, "allowed_routes": []string{fallbackSlug}}, idem("workflow-fallback-key"), http.StatusCreated)
+	unavailable.Close()
+	h.refresh()
+	h.Gateway.Sink = &gateway.AccountingSink{Emitter: usage.NewEmitter(8)}
+	status, response, _ = h.gateway("POST", "/v1/chat/completions", mcpExecString(t, fallbackKey, "secret"), map[string]any{"model": fallbackSlug, "messages": []any{map[string]any{"role": "user", "content": prompt}}, "max_tokens": 100})
+	if status != http.StatusOK || !strings.Contains(fmt.Sprint(response), "done") {
+		t.Fatalf("workflow did not fall back after an unsent attempt: status=%d response=%v", status, response)
+	}
+	var notSent, fallbackSettled int
+	if err := h.Pool.QueryRow(t.Context(), `SELECT count(*) FILTER (WHERE state='not_accepted' AND closed_at IS NOT NULL),count(*) FILTER (WHERE state='settled') FROM olp.execution_debits WHERE api_key_id=$1`, fallbackKey["id"]).Scan(&notSent, &fallbackSettled); err != nil {
+		t.Fatal(err)
+	}
+	if notSent != 1 || fallbackSettled != 1 {
+		t.Fatalf("unsent debit remained open: not_accepted=%d settled=%d", notSent, fallbackSettled)
+	}
+
+	const revocationSlug = "workflow-revocation"
+	revocationDraft := h.want(owner, "POST", "/api/v1/route-drafts", map[string]any{
+		"project_id": project, "slug": revocationSlug, "operations": []string{"generation"}, "overall_timeout_ms": 20000, "max_attempts": 1,
+		"fidelity": map[string]any{"mode": "transformed"}, "tool_execution": "gateway", "toolsets": []string{toolsetID},
+		"targets": []any{map[string]any{"provider_id": provider["id"], "provider_model": vendorModel, "priority": 0, "weight": 1, "timeout_ms": 15000}},
+	}, idem("workflow-revocation-draft"), http.StatusCreated)
+	h.want(owner, "POST", "/api/v1/route-drafts/"+revocationDraft["id"].(string)+"/activate", nil, withMatch(revocationDraft, idem("workflow-revocation-activate")), http.StatusOK)
+	for _, scenario := range []struct {
+		name    string
+		block   *atomic.Bool
+		started <-chan struct{}
+	}{
+		{name: "model", block: &blockModel, started: modelStarted},
+		{name: "tool", block: &blockTool, started: toolStarted},
+	} {
+		revocationKey := h.want(owner, "POST", "/api/v1/api-keys", map[string]any{"name": "Workflow revocation " + scenario.name, "project_id": project, "scopes": []string{"inference", "tools"}, "allowed_routes": []string{revocationSlug}, "allowed_toolsets": []string{toolsetID}}, idem("workflow-revocation-key-"+scenario.name), http.StatusCreated)
+		h.refresh()
+		h.Gateway.Sink = &gateway.AccountingSink{Emitter: usage.NewEmitter(8)}
+		scenario.block.Store(true)
+		result := make(chan int, 1)
+		go func() {
+			status, _, _ := h.gateway("POST", "/v1/chat/completions", mcpExecString(t, revocationKey, "secret"), map[string]any{"model": revocationSlug, "messages": []any{map[string]any{"role": "user", "content": prompt}}, "max_tokens": 100})
+			result <- status
+		}()
+		select {
+		case <-scenario.started:
+		case <-time.After(10 * time.Second):
+			t.Fatalf("%s dispatch did not start", scenario.name)
+		}
+		current := h.want(owner, "GET", "/api/v1/api-keys/"+revocationKey["id"].(string), nil, nil, http.StatusOK)
+		h.want(owner, "POST", "/api/v1/api-keys/"+revocationKey["id"].(string)+"/revoke", nil, withMatch(current, idem("workflow-revoke-"+scenario.name)), http.StatusOK)
+		h.refresh()
+		select {
+		case status := <-result:
+			if status != http.StatusForbidden {
+				t.Fatalf("revoked %s call returned status %d", scenario.name, status)
+			}
+		case <-time.After(10 * time.Second):
+			t.Fatalf("revoked %s call was not cancelled", scenario.name)
+		}
+		scenario.block.Store(false)
+		var unknown int
+		var retained bool
+		if err := h.Pool.QueryRow(t.Context(), `SELECT count(*),COALESCE(bool_and(closed_at IS NULL),false) FROM olp.execution_debits WHERE api_key_id=$1 AND kind=$2 AND state='outcome_unknown'`, revocationKey["id"], scenario.name).Scan(&unknown, &retained); err != nil {
+			t.Fatal(err)
+		}
+		if unknown != 1 || !retained {
+			t.Fatalf("revoked %s call did not retain unknown exposure: count=%d retained=%t", scenario.name, unknown, retained)
+		}
 	}
 }

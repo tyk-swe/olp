@@ -33,6 +33,7 @@ import {
   type RouteSimulation
 } from '$lib/features/routes/api';
 import { listProviderModelInventory } from '$lib/features/providers/api/models';
+import { listPublications } from '$lib/features/agents/api';
 import { inspectionDialects } from '$lib/features/routes/inspectionDialects';
 import { useRole } from '$lib/features/access/session/useRole.svelte';
 import { authLifecycle } from '$lib/features/access/session/lifecycle';
@@ -75,6 +76,7 @@ export class RouteDraftEditorState {
   canManage = $derived(this.access.can('routes.manage'));
   draft;
   providerModels;
+  toolsets;
   modelOptions = $derived.by(() =>
     toRouteModelOptions(this.providerModels.data ?? [])
   );
@@ -496,6 +498,11 @@ export class RouteDraftEditorState {
       queryKey: providerKeys.enabledModels(),
       queryFn: ({ signal }) => listProviderModelInventory(true, signal)
     }));
+    this.toolsets = createQuery(() => ({
+      queryKey: ['agent-publications', 'toolsets'],
+      queryFn: () => listPublications('toolsets'),
+      enabled: this.behavior.tool_execution === 'gateway'
+    }));
     onDestroy(() => {
       this.disposed = true;
       this.ownerEpoch += 1;
@@ -534,7 +541,9 @@ export class RouteDraftEditorState {
         cache: current.cache,
         prompt_cache: current.prompt_cache,
         passthrough: current.passthrough,
-        certification: current.certification
+        certification: current.certification,
+        tool_execution: current.tool_execution,
+        toolsets: current.toolsets ?? []
       };
       this.selectorsText = JSON.stringify(current.selectors, null, 2);
       this.policyRules = policyRulesFrom(current.content_policy);

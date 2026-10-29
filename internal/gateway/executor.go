@@ -414,15 +414,19 @@ type attemptState struct {
 	classifier        upstream.Classifier
 	reason            atomic.Int32 // 1 first-byte deadline, 2 idle deadline, 3 stream cap
 	dispatched        atomic.Bool  // request bytes may have reached the upstream
-	status            int          // the unsuccessful status the upstream answered with
-	accepted          bool         // the upstream answered with success
-	settled           bool         // the upstream's complete result arrived
-	credentialRefused bool         // classification before unresolved work becomes ambiguous
+	connected         atomic.Bool
+	notSent           atomic.Bool
+	status            int  // the unsuccessful status the upstream answered with
+	accepted          bool // the upstream answered with success
+	settled           bool // the upstream's complete result arrived
+	credentialRefused bool // classification before unresolved work becomes ambiguous
 }
 
 // trace supplies the dispatch evidence of a net/http request.
 func (st *attemptState) trace() *httptrace.ClientTrace {
-	return upstream.Trace(&st.dispatched)
+	trace := upstream.Trace(&st.dispatched)
+	trace.GotConn = func(httptrace.GotConnInfo) { st.connected.Store(true) }
+	return trace
 }
 
 // evidence is what the attempt has established about its upstream exchange.
@@ -622,7 +626,7 @@ func (s *Server) attempt(ctx context.Context, x *call, a routing.Attempt, provid
 				f.overall = true
 			}
 		}
-		f.dispatched = st.dispatched.Load()
+		f.dispatched = st.dispatched.Load() || (x.workflow != nil && st.connected.Load() && !st.notSent.Load())
 		f.credentialRefused = st.credentialRefused
 		f.acceptance = st.evidence().Acceptance()
 		f.accepted = st.accepted
@@ -764,6 +768,7 @@ func (s *Server) attempt(ctx context.Context, x *call, a routing.Attempt, provid
 		// The plugin reports whether it sent a request it failed; any other
 		// failure may have reached the upstream.
 		st.dispatched.Store(!errors.Is(err, connectors.ErrNotSent))
+		st.notSent.Store(errors.Is(err, connectors.ErrNotSent))
 	}
 	if err != nil {
 		return fail(st.classify(err, false), nil)

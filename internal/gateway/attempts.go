@@ -20,6 +20,16 @@ type attemptAdapter[Result any] struct {
 	dispatch func(context.Context, routing.Attempt, *routing.Provider, routing.Slot, AttemptFact) (AttemptFact, Result, *attemptFailure)
 }
 
+func (a attemptAdapter[Result]) dispatchWithAuthority(ctx context.Context, s *Server, x *call, attempt routing.Attempt, provider *routing.Provider, slot routing.Slot, fact AttemptFact) (AttemptFact, Result, *attemptFailure, *Error) {
+	if x.workflow == nil {
+		completed, result, failure := a.dispatch(ctx, attempt, provider, slot, fact)
+		return completed, result, failure, nil
+	}
+	dispatchCtx, finish := s.monitorWorkflowAuthority(ctx, x, "")
+	completed, result, failure := a.dispatch(dispatchCtx, attempt, provider, slot, fact)
+	return completed, result, failure, finish()
+}
+
 // attemptOutcome keeps the successful payload typed without coupling shared
 // execution to the canonical or media response representation.
 type attemptOutcome[Result any] struct {
@@ -144,7 +154,7 @@ route:
 				if x.guardrailEngine != nil {
 					x.startGuardrailAttempt(fact.GuardrailDecisions)
 				}
-				fact, result, failure := adapter.dispatch(ctx, attempt, &provider, slot, fact)
+				fact, result, failure, authorityErr := adapter.dispatchWithAuthority(ctx, s, x, attempt, &provider, slot, fact)
 				if x.guardrailEngine != nil {
 					fact.GuardrailDecisions = x.finishGuardrailAttempt()
 				}
@@ -158,21 +168,30 @@ route:
 					x.spendCaps(gate.hold.budgets, attempt)
 				}
 				x.facts = append(x.facts, fact)
+				s.health.record(provider.ID, fact)
 				if x.workflow != nil && failure == nil {
 					if e := s.settleWorkflowModelAttempt(ctx, x, fact); e != nil {
 						return attemptOutcome[Result]{err: e}, nil
 					}
 				}
 				if x.workflow != nil && failure != nil {
-					if x.sessionDebit.dispatched {
+					if failure.dispatched {
 						s.markSessionUnknown(ctx, x)
 					} else {
-						s.abandonWorkflowDebit(ctx, x)
+						if e := s.abandonWorkflowDebit(ctx, x); e != nil {
+							return attemptOutcome[Result]{err: e}, nil
+						}
 					}
-					return attemptOutcome[Result]{err: failure.toError(), cancelled: failure.class == classCancelled}, nil
+					if authorityErr != nil {
+						return attemptOutcome[Result]{err: authorityErr}, nil
+					}
+					if failure.dispatched {
+						return attemptOutcome[Result]{err: failure.toError(), cancelled: failure.class == classCancelled}, nil
+					}
 				}
-				// Recording the attempt also releases its half-open probe.
-				s.health.record(provider.ID, fact)
+				if authorityErr != nil {
+					return attemptOutcome[Result]{err: authorityErr}, nil
+				}
 				if failure == nil {
 					return attemptOutcome[Result]{result: result, committed: fact.Committed}, nil
 				}

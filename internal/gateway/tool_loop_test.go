@@ -5,9 +5,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
+	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/tyk-swe/olp/internal/access"
@@ -91,48 +94,171 @@ func TestGatewayToolExecutionRejectsUncertifiedModel(t *testing.T) {
 	}
 }
 
-type workflowDebitFixture struct {
-	*fakeSessionDebits
-	settled []string
+func TestGatewayToolExecutionRejectsMultipleChoicesBeforeDispatch(t *testing.T) {
+	projectID := uuid.NewString()
+	h := strictHarness(t, func(snapshot *routing.Snapshot) {
+		route := snapshot.Routes[routeSlug]
+		route.Fidelity.Mode, route.ToolExecution, route.ProjectID = routing.FidelityTransformed, "gateway", &projectID
+		snapshot.Routes[routeSlug] = route
+		for id, provider := range snapshot.Providers {
+			for i := range provider.Capabilities {
+				provider.Capabilities[i].ToolCalls = true
+			}
+			snapshot.Providers[id] = provider
+		}
+	})
+	authority := h.rt.keys[fullKey]
+	authority.ProjectID = &projectID
+	h.rt.keys[fullKey] = authority
+	fixture := &workflowFixture{runID: uuid.NewString()}
+	h.gateway.WorkflowRuns, h.gateway.WorkflowTools, h.gateway.Debits = fixture, fixture, &workflowDebitFixture{fakeSessionDebits: &fakeSessionDebits{}}
+	response, body := h.chat(fullKey, nil, `,"n":2`)
+	if response.StatusCode != http.StatusBadRequest || errorCode(t, body) != "tool_execution_choices_unsupported" || h.mock.count("a") != 0 || h.mock.count("b") != 0 {
+		t.Fatalf("multiple choices were not refused before dispatch: status=%d body=%v model_calls=%d", response.StatusCode, body, h.mock.count("a")+h.mock.count("b"))
+	}
 }
 
-func (f *workflowDebitFixture) SettleWorkflow(_ context.Context, event *usage.Event, attempt int) ([]limits.CostSnapshot, error) {
-	if attempt < 0 || attempt >= len(event.Attempts) || event.Attempts[attempt].Execution == nil {
-		return nil, fmt.Errorf("missing debit-backed attempt")
+func TestGatewayToolExecutionDistinguishesUnsentAndSentFailures(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		sent bool
+	}{
+		{name: "connection refused"},
+		{name: "request sent", sent: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			listener, err := net.Listen("tcp", "127.0.0.1:0")
+			if err != nil {
+				t.Fatal(err)
+			}
+			endpoint := "http://" + listener.Addr().String() + "/v1"
+			if err := listener.Close(); err != nil {
+				t.Fatal(err)
+			}
+			projectID := uuid.NewString()
+			h := strictHarness(t, func(snapshot *routing.Snapshot) {
+				route := snapshot.Routes[routeSlug]
+				route.Fidelity.Mode, route.ToolExecution, route.ProjectID = routing.FidelityTransformed, "gateway", &projectID
+				snapshot.Routes[routeSlug] = route
+				for id, provider := range snapshot.Providers {
+					for i := range provider.Capabilities {
+						provider.Capabilities[i].ToolCalls = true
+					}
+					if !test.sent && provider.Name == "a" {
+						provider.Endpoint = endpoint
+					}
+					snapshot.Providers[id] = provider
+				}
+			})
+			authority := h.rt.keys[fullKey]
+			authority.ProjectID = &projectID
+			h.rt.keys[fullKey] = authority
+			fixture := &workflowFixture{runID: uuid.NewString()}
+			h.gateway.WorkflowRuns, h.gateway.WorkflowTools, h.gateway.Debits = fixture, fixture, &workflowDebitFixture{fakeSessionDebits: &fakeSessionDebits{}}
+			if test.sent {
+				h.mock.set("a", status(http.StatusInternalServerError, `{"error":{"message":"failed"}}`))
+			}
+			response, body := h.chat(fullKey, nil)
+			if test.sent {
+				if response.StatusCode == http.StatusOK || h.mock.count("a") != 1 || h.mock.count("b") != 0 {
+					t.Fatalf("sent request was retried: status=%d body=%v a=%d b=%d", response.StatusCode, body, h.mock.count("a"), h.mock.count("b"))
+				}
+			} else if response.StatusCode != http.StatusOK || h.mock.count("b") != 1 {
+				t.Fatalf("unsent request did not fail over: status=%d body=%v b=%d", response.StatusCode, body, h.mock.count("b"))
+			}
+		})
 	}
-	f.settled = append(f.settled, event.Attempts[attempt].Execution.DispatchID)
+}
+
+func TestGatewayToolExecutionRecordsProviderHealth(t *testing.T) {
+	projectID := uuid.NewString()
+	h := strictHarness(t, func(snapshot *routing.Snapshot) {
+		route := snapshot.Routes[routeSlug]
+		route.Fidelity.Mode, route.ToolExecution, route.ProjectID = routing.FidelityTransformed, "gateway", &projectID
+		snapshot.Routes[routeSlug] = route
+		for id, provider := range snapshot.Providers {
+			for i := range provider.Capabilities {
+				provider.Capabilities[i].ToolCalls = true
+			}
+			snapshot.Providers[id] = provider
+		}
+	})
+	authority := h.rt.keys[fullKey]
+	authority.ProjectID = &projectID
+	h.rt.keys[fullKey] = authority
+	fixture := &workflowFixture{runID: uuid.NewString()}
+	h.gateway.WorkflowRuns, h.gateway.WorkflowTools, h.gateway.Debits = fixture, fixture, &workflowDebitFixture{fakeSessionDebits: &fakeSessionDebits{}}
+	now := time.Now()
+	h.gateway.health.now = func() time.Time { return now }
+	h.mock.set("a", status(http.StatusInternalServerError, `{"error":{"message":"failed"}}`))
+	for range 5 {
+		if response, _ := h.chat(fullKey, nil); response.StatusCode == http.StatusOK {
+			t.Fatal("failing provider returned success")
+		}
+	}
+	if response, body := h.chat(fullKey, nil); response.StatusCode != http.StatusOK || h.mock.count("b") != 1 {
+		t.Fatalf("unhealthy provider was not bypassed: status=%d body=%v b=%d", response.StatusCode, body, h.mock.count("b"))
+	}
+	now = now.Add(31 * time.Second)
+	if response, _ := h.chat(fullKey, nil); response.StatusCode == http.StatusOK {
+		t.Fatal("failing half-open provider returned success")
+	}
+	if response, body := h.chat(fullKey, nil); response.StatusCode != http.StatusOK || h.mock.count("b") != 2 {
+		t.Fatalf("failed probe was not released: status=%d body=%v b=%d", response.StatusCode, body, h.mock.count("b"))
+	}
+	now = now.Add(31 * time.Second)
+	h.mock.set("a", completion(modelA, answerText))
+	if response, body := h.chat(fullKey, nil); response.StatusCode != http.StatusOK || h.mock.count("a") != 7 {
+		t.Fatalf("recovered provider could not serve: status=%d body=%v a=%d", response.StatusCode, body, h.mock.count("a"))
+	}
+}
+
+type workflowDebitFixture struct {
+	*fakeSessionDebits
+}
+
+func (f *workflowDebitFixture) MarkNotSent(ctx context.Context, id, claim string) error {
+	return f.ReleaseUndispatched(ctx, id, claim)
+}
+
+func (f *workflowDebitFixture) SettleWorkflow(context.Context, *usage.Event, int) ([]limits.CostSnapshot, error) {
 	return nil, nil
 }
 
 type workflowFixture struct {
 	runID      string
 	tool       WorkflowTool
-	intents    []limits.DebitIntent
-	ordinals   []int
 	calls      []json.RawMessage
-	selections [][]string
 	beforeCall func() error
+}
+
+type blockingWorkflowFixture struct {
+	*workflowFixture
+	revoke func()
+}
+
+func (f *blockingWorkflowFixture) Call(ctx context.Context, _ access.Authority, _ *runtime.Release, _ WorkflowTool, _ string, _ int, _ string, _ json.RawMessage) (json.RawMessage, error) {
+	f.revoke()
+	<-ctx.Done()
+	return nil, ctx.Err()
 }
 
 func (f *workflowFixture) Start(context.Context, access.Authority, string, string) (string, error) {
 	return f.runID, nil
 }
 
-func (f *workflowFixture) Prepare(_ context.Context, _ access.Authority, intent limits.DebitIntent, ordinal int, _ []limits.DebitOwner) (limits.DebitState, error) {
-	f.intents = append(f.intents, intent)
-	f.ordinals = append(f.ordinals, ordinal)
+func (f *workflowFixture) Prepare(context.Context, access.Authority, limits.DebitIntent, int, []limits.DebitOwner) (limits.DebitState, error) {
 	return limits.DebitPrepared, nil
 }
 
 func (f *workflowFixture) Resolve(_ context.Context, _ access.Authority, _ *runtime.Release, toolsets []string) ([]WorkflowTool, error) {
-	f.selections = append(f.selections, append([]string(nil), toolsets...))
-	if len(toolsets) == 0 {
+	if !slices.Contains(toolsets, f.tool.ToolsetID) {
 		return nil, nil
 	}
 	return []WorkflowTool{f.tool}, nil
 }
 
-func (f *workflowFixture) Call(_ context.Context, _ access.Authority, _ *runtime.Release, _ WorkflowTool, runID string, ordinal int, _ string, arguments json.RawMessage) (json.RawMessage, error) {
+func (f *workflowFixture) Call(_ context.Context, _ access.Authority, _ *runtime.Release, _ WorkflowTool, runID string, _ int, _ string, arguments json.RawMessage) (json.RawMessage, error) {
 	if runID != f.runID {
 		return nil, fmt.Errorf("wrong run")
 	}
@@ -141,7 +267,6 @@ func (f *workflowFixture) Call(_ context.Context, _ access.Authority, _ *runtime
 			return nil, err
 		}
 	}
-	f.ordinals = append(f.ordinals, ordinal)
 	f.calls = append(f.calls, arguments)
 	return json.RawMessage(`{"content":[{"type":"text","text":"result"}]}`), nil
 }
@@ -168,12 +293,6 @@ func TestGatewayToolExecutionCompletesOneRun(t *testing.T) {
 	h.rt.keys[fullKey] = authority
 	fixture := &workflowFixture{runID: uuid.NewString(), tool: WorkflowTool{ToolsetID: toolsetID, RevisionID: uuid.NewString(), Definition: routing.MCPToolsetTool{Alias: alias, Classification: "read_only"}}}
 	debits := &workflowDebitFixture{fakeSessionDebits: &fakeSessionDebits{}}
-	fixture.beforeCall = func() error {
-		if len(debits.settled) != 1 {
-			return fmt.Errorf("first model attempt was not settled before tool dispatch")
-		}
-		return nil
-	}
 	h.gateway.WorkflowRuns, h.gateway.WorkflowTools, h.gateway.Debits = fixture, fixture, debits
 	h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
 		body, err := io.ReadAll(r.Body)
@@ -188,11 +307,16 @@ func TestGatewayToolExecutionCompletesOneRun(t *testing.T) {
 			if _, found := request["olp_toolsets"]; found {
 				t.Error("gateway toolset selection reached the provider")
 			}
+			var tools []struct {
+				Function struct {
+					Name string `json:"name"`
+				} `json:"function"`
+			}
+			if err := json.Unmarshal(request["tools"], &tools); err != nil || len(tools) != 1 || tools[0].Function.Name != alias {
+				t.Errorf("selected tools were not advertised: %s", request["tools"])
+			}
 			fmt.Fprintf(w, `{"id":"one","object":"chat.completion","created":1,"model":"model-a","choices":[{"index":0,"message":{"role":"assistant","content":null,"tool_calls":[{"id":"call-1","type":"function","function":{"name":%q,"arguments":"{\"value\":1}"}}]},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":2,"completion_tokens":3,"total_tokens":5}}`, alias)
 			return
-		}
-		if len(debits.settled) != 1 {
-			t.Error("first model attempt was not settled before the next model dispatch")
 		}
 		var request struct {
 			Messages []struct {
@@ -214,15 +338,6 @@ func TestGatewayToolExecutionCompletesOneRun(t *testing.T) {
 	response, body := h.chat(fullKey, nil, `,"olp_toolsets":["`+toolsetID+`"]`)
 	if response.StatusCode != http.StatusOK || h.mock.count("a") != 2 || len(fixture.calls) != 1 || string(fixture.calls[0]) != `{"value":1}` {
 		t.Fatalf("workflow did not complete: status=%d body=%v model_calls=%d tool_calls=%v", response.StatusCode, body, h.mock.count("a"), fixture.calls)
-	}
-	if len(debits.settled) != 2 || debits.settled[0] == debits.settled[1] {
-		t.Fatalf("model debits were not settled exactly once: %v", debits.settled)
-	}
-	if len(fixture.selections) != 1 || len(fixture.selections[0]) != 1 || fixture.selections[0][0] != toolsetID {
-		t.Fatalf("request did not narrow the route toolsets: %v", fixture.selections)
-	}
-	if len(fixture.intents) != 2 || len(fixture.ordinals) != 3 || fixture.ordinals[0] != 0 || fixture.ordinals[1] != 1 || fixture.ordinals[2] != 2 || fixture.intents[0].RunID != fixture.runID || fixture.intents[1].RunID != fixture.runID || fixture.intents[0].ID == fixture.intents[1].ID {
-		t.Fatalf("workflow attempts did not share one run: intents=%v ordinals=%v", fixture.intents, fixture.ordinals)
 	}
 }
 
@@ -565,6 +680,78 @@ func TestGatewayToolExecutionStopsAfterAuthorityChanges(t *testing.T) {
 			response, body := h.chat(fullKey, nil)
 			if response.StatusCode != test.wantStatus || h.mock.count("a") != 1 || len(fixture.calls) != test.wantToolCalls {
 				t.Fatalf("workflow continued after authority changed: status=%d body=%v model_calls=%d tool_calls=%d", response.StatusCode, body, h.mock.count("a"), len(fixture.calls))
+			}
+		})
+	}
+}
+
+func TestGatewayToolExecutionCancelsLongCallsAfterRevocation(t *testing.T) {
+	for _, test := range []struct {
+		name       string
+		model      bool
+		removeTool bool
+	}{
+		{name: "model", model: true},
+		{name: "tool"},
+		{name: "tool permission", removeTool: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			toolsetID, projectID := uuid.NewString(), uuid.NewString()
+			alias := "t_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+			h := strictHarness(t, func(snapshot *routing.Snapshot) {
+				route := snapshot.Routes[routeSlug]
+				route.Fidelity.Mode, route.ToolExecution, route.Toolsets, route.ProjectID = routing.FidelityTransformed, "gateway", []string{toolsetID}, &projectID
+				route.OverallTimeout = 12000
+				for i := range route.Targets {
+					route.Targets[i].Timeout = 10000
+				}
+				snapshot.Routes[routeSlug] = route
+				for id, provider := range snapshot.Providers {
+					for i := range provider.Capabilities {
+						provider.Capabilities[i].ToolCalls = true
+					}
+					snapshot.Providers[id] = provider
+				}
+			})
+			authority := h.rt.keys[fullKey]
+			authority.ProjectID = &projectID
+			authority.Policy.Scopes = append(authority.Policy.Scopes, "tools")
+			authority.Policy.AllowedToolsets = []string{toolsetID}
+			h.rt.keys[fullKey] = authority
+			revoke := func() {
+				h.rt.mu.Lock()
+				if test.removeTool {
+					authority := h.rt.keys[fullKey]
+					authority.Policy.AllowedToolsets = nil
+					h.rt.keys[fullKey] = authority
+				} else {
+					delete(h.rt.keys, fullKey)
+				}
+				h.rt.mu.Unlock()
+			}
+			fixture := &workflowFixture{runID: uuid.NewString(), tool: WorkflowTool{ToolsetID: toolsetID, RevisionID: uuid.NewString(), Definition: routing.MCPToolsetTool{Alias: alias, Classification: "read_only"}}}
+			h.gateway.WorkflowRuns, h.gateway.Debits = fixture, &workflowDebitFixture{fakeSessionDebits: &fakeSessionDebits{}}
+			if test.model {
+				h.gateway.WorkflowTools = fixture
+				h.mock.set("a", func(_ http.ResponseWriter, r *http.Request) {
+					_, _ = io.Copy(io.Discard, r.Body)
+					revoke()
+					<-r.Context().Done()
+				})
+			} else {
+				h.gateway.WorkflowTools = &blockingWorkflowFixture{workflowFixture: fixture, revoke: revoke}
+				h.mock.set("a", func(w http.ResponseWriter, _ *http.Request) {
+					fmt.Fprintf(w, `{"id":"step","object":"chat.completion","created":1,"model":"model-a","choices":[{"index":0,"message":{"role":"assistant","content":null,"tool_calls":[{"id":"call-1","type":"function","function":{"name":%q,"arguments":"{}"}}]},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":2,"completion_tokens":1,"total_tokens":3}}`, alias)
+				})
+			}
+			response, body := h.chat(fullKey, nil)
+			wantStatus := http.StatusUnauthorized
+			if test.removeTool {
+				wantStatus = http.StatusForbidden
+			}
+			if response.StatusCode != wantStatus || h.mock.count("a") != 1 {
+				t.Fatalf("revoked long call continued: status=%d body=%v model_calls=%d", response.StatusCode, body, h.mock.count("a"))
 			}
 		})
 	}

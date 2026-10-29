@@ -57,7 +57,7 @@ func (s *Server) settleWorkflowModelAttempt(ctx context.Context, x *call, fact A
 	envelope := Envelope{
 		RequestID: x.request.id, AccountingID: x.request.accountingID(), ClientIP: x.request.clientIP,
 		Actor: x.actor, KeyID: x.keyID, EndUserDigest: x.endUserDigest, BudgetGroupID: x.budgetGroupID,
-		AgentPrincipalID: x.authority.DelegationAgentID, DelegationPairDigest: x.authority.DelegationPairDigest,
+		AgentPrincipalID: x.authority.DelegationAgentID, MemberPrincipalID: x.authority.DelegationMemberID, DelegationPairDigest: x.authority.DelegationPairDigest,
 		Attribution: x.attribution, UserID: x.userID, Family: string(x.family), Mode: x.mode,
 		Operation: x.operationName(), Surface: x.surfaceName(), Route: x.named().Slug,
 		RouteRevisionID: x.named().RevisionID, Status: fact.Status, StartedAt: x.request.startedAt,

@@ -16,6 +16,7 @@ import (
 	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
 	"github.com/tyk-swe/olp/internal/protocols/wire"
+	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/runtime"
 )
 
@@ -55,6 +56,12 @@ func (s *Server) prepareWorkflow(ctx context.Context, x *call, token string) *Er
 	if x.family != wire.Chat {
 		return invalidRequest("tool_execution_unsupported", "Gateway tool execution is available on Chat Completions.", nil)
 	}
+	if raw := x.generation.parsed.Field("n"); len(raw) != 0 {
+		var choices int
+		if json.Unmarshal(raw, &choices) != nil || choices != 1 {
+			return invalidRequest("tool_execution_choices_unsupported", "Gateway tool execution requires a single choice.", nil)
+		}
+	}
 	tools, err := s.WorkflowTools.Resolve(ctx, x.authority, x.request.release, x.generation.toolsets)
 	if err != nil {
 		return workflowError(err)
@@ -90,24 +97,64 @@ func (s *Server) prepareWorkflow(ctx context.Context, x *call, token string) *Er
 	return nil
 }
 
-func (s *Server) checkWorkflowAuthority(ctx context.Context, x *call) *Error {
+func (s *Server) checkWorkflowAuthority(ctx context.Context, x *call, route *routing.Route, toolsetID string) *Error {
 	authority, err := s.reauthenticateSession(ctx, x, x.workflow.token)
 	if errors.Is(err, runtime.ErrStaleAuthority) {
 		return serverError(http.StatusServiceUnavailable, "authority_unavailable", "Key authority is unavailable; retry shortly.")
 	}
-	if err != nil || authority == nil || authority.ID != x.authority.ID || authority.DelegationAgentID != x.authority.DelegationAgentID || authority.DelegationPairDigest != x.authority.DelegationPairDigest {
+	if err != nil || authority == nil || authority.ID != x.authority.ID || authority.DelegationAgentID != x.authority.DelegationAgentID || authority.DelegationMemberID != x.authority.DelegationMemberID || authority.DelegationPairDigest != x.authority.DelegationPairDigest {
 		return authenticationError("invalid_api_key", "This API key is no longer authorized.")
 	}
 	if e := s.keyAuthorizer(*authority)(x.named()); e != nil {
 		return e
 	}
-	if e := s.keyAuthorizer(*authority)(x.route); e != nil {
+	if e := s.keyAuthorizer(*authority)(route); e != nil {
 		return e
 	}
 	if !authority.AllowsEndUser(x.endUserDigest) || (authority.WorkloadIssuerID != nil && authority.EndUserDigest != x.endUserDigest) || !authority.AllowsAttribution(x.attribution) || !authority.AllowsClientIP(x.request.clientIP) {
 		return permissionError("permission_denied", "This API key no longer permits the request.")
 	}
+	if toolsetID != "" && (authority.ProjectID == nil || !authority.AllowsResource("tools", toolsetID, *authority.ProjectID, s.now())) {
+		return permissionError("permission_denied", "This API key no longer permits the toolset.")
+	}
 	return nil
+}
+
+func (s *Server) monitorWorkflowAuthority(ctx context.Context, x *call, toolsetID string) (context.Context, func() *Error) {
+	callCtx, cancel := context.WithCancel(ctx)
+	result := make(chan *Error, 1)
+	done := make(chan struct{})
+	route := x.route
+	go func() {
+		defer close(done)
+		ticker := time.NewTicker(4 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-callCtx.Done():
+				return
+			case <-ticker.C:
+				checkCtx, stopCheck := context.WithTimeout(callCtx, time.Second)
+				e := s.checkWorkflowAuthority(checkCtx, x, route, toolsetID)
+				stopCheck()
+				if e != nil {
+					result <- e
+					cancel()
+					return
+				}
+			}
+		}
+	}()
+	return callCtx, func() *Error {
+		cancel()
+		<-done
+		select {
+		case e := <-result:
+			return e
+		default:
+			return nil
+		}
+	}
 }
 
 func workflowError(err error) *Error {
@@ -118,19 +165,36 @@ func workflowError(err error) *Error {
 	return serverError(http.StatusServiceUnavailable, "tool_execution_unavailable", "The workflow tool service is unavailable.")
 }
 
-func (s *Server) abandonWorkflowDebit(ctx context.Context, x *call) {
+func (s *Server) abandonWorkflowDebit(ctx context.Context, x *call) *Error {
 	releaseCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 	defer cancel()
-	if err := s.Debits.ReleaseUndispatched(releaseCtx, x.sessionDebit.id, x.sessionDebit.claim); err != nil && s.log != nil {
-		s.log.Warn("workflow debit release failed", "error", err.Error())
+	err := func() error {
+		if !x.sessionDebit.dispatched {
+			return s.Debits.ReleaseUndispatched(releaseCtx, x.sessionDebit.id, x.sessionDebit.claim)
+		}
+		ledger, ok := s.Debits.(interface {
+			MarkNotSent(context.Context, string, string) error
+		})
+		if !ok {
+			return errors.New("workflow ledger cannot release a proven unsent dispatch")
+		}
+		return ledger.MarkNotSent(releaseCtx, x.sessionDebit.id, x.sessionDebit.claim)
+	}()
+	if err != nil {
+		if s.log != nil {
+			s.log.Warn("workflow debit release failed", "error", err.Error())
+		}
+		s.markSessionUnknown(ctx, x)
+		return limitsUnavailable()
 	}
 	x.facts[len(x.facts)-1].Execution = nil
 	x.sessionDebit = nil
+	return nil
 }
 
 func (s *Server) executeToolLoop(ctx context.Context, x *call) *outcome {
 	for iteration := 0; iteration < 8; iteration++ {
-		if e := s.checkWorkflowAuthority(ctx, x); e != nil {
+		if e := s.checkWorkflowAuthority(ctx, x, x.route, ""); e != nil {
 			return &outcome{err: e}
 		}
 		var frames bytes.Buffer
@@ -199,16 +263,21 @@ func (s *Server) continueToolLoop(ctx context.Context, x *call, completion *wire
 	}
 	messages = append(messages, response.Choices[0].Message)
 	for _, call := range completion.ToolCalls {
-		if e := s.checkWorkflowAuthority(ctx, x); e != nil {
+		if e := s.checkWorkflowAuthority(ctx, x, x.route, ""); e != nil {
 			return nil, e
 		}
 		index := slices.IndexFunc(x.workflow.tools, func(tool WorkflowTool) bool { return tool.Definition.Alias == call.Name })
 		if index < 0 || call.ID == "" || !json.Valid([]byte(call.Arguments)) {
 			return nil, invalidRequest("invalid_tool_call", "The model requested an unavailable tool or invalid arguments.", nil)
 		}
-		result, err := s.WorkflowTools.Call(ctx, x.authority, x.request.release, x.workflow.tools[index], x.workflow.runID, x.workflow.ordinal, fmt.Sprintf("%s:%d:%s", x.workflow.runID, x.workflow.ordinal, call.ID), json.RawMessage(call.Arguments))
+		callCtx, finish := s.monitorWorkflowAuthority(ctx, x, x.workflow.tools[index].ToolsetID)
+		result, err := s.WorkflowTools.Call(callCtx, x.authority, x.request.release, x.workflow.tools[index], x.workflow.runID, x.workflow.ordinal, fmt.Sprintf("%s:%d:%s", x.workflow.runID, x.workflow.ordinal, call.ID), json.RawMessage(call.Arguments))
+		authorityErr := finish()
 		x.workflow.ordinal++
 		x.workflow.calls++
+		if authorityErr != nil {
+			return nil, authorityErr
+		}
 		if err != nil {
 			return nil, workflowError(err)
 		}
