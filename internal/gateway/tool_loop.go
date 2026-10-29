@@ -378,8 +378,11 @@ func (s *Server) continueToolLoop(ctx context.Context, x *call, completion *wire
 		if index < 0 || call.ID == "" || !json.Valid([]byte(call.Arguments)) {
 			return nil, invalidRequest("invalid_tool_call", "The model requested an unavailable tool or invalid arguments.", nil)
 		}
+		// A shallow copy retains fresh limits while binding request-local attribution.
+		toolAuthority := *authority
+		toolAuthority.Attribution = x.attribution
 		callCtx, finish := s.monitorWorkflowAuthority(ctx, x, x.workflow.tools[index].ToolsetID)
-		result, err := s.WorkflowTools.Call(callCtx, *authority, x.request.release, x.workflow.tools[index], x.workflow.runID, x.workflow.ordinal, fmt.Sprintf("%s:%d:%s", x.workflow.runID, x.workflow.ordinal, call.ID), json.RawMessage(call.Arguments))
+		result, err := s.WorkflowTools.Call(callCtx, toolAuthority, x.request.release, x.workflow.tools[index], x.workflow.runID, x.workflow.ordinal, fmt.Sprintf("%s:%d:%s", x.workflow.runID, x.workflow.ordinal, call.ID), json.RawMessage(call.Arguments))
 		authorityErr := finish()
 		x.workflow.ordinal++
 		x.workflow.calls++

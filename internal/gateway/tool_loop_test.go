@@ -723,7 +723,7 @@ type pairBudgetWorkflowTools struct {
 }
 
 func (f *pairBudgetWorkflowTools) Call(ctx context.Context, authority access.Authority, release *runtime.Release, tool WorkflowTool, run string, ordinal int, callID string, arguments json.RawMessage) (json.RawMessage, error) {
-	if policy, ok := authority.ProjectAttributionBudgets["delegation_pair"][f.pair]; ok && policy.DailyCostLimit != nil {
+	if policy, ok := authority.ProjectAttributionBudgets["delegation_pair"][f.pair]; ok && policy.DailyCostLimit != nil && authority.Attribution["team"] == "core" {
 		return nil, &mcp.WorkflowError{Status: http.StatusTooManyRequests, Code: "budget_exhausted", Message: "The pair budget is exhausted."}
 	}
 	return f.workflowFixture.Call(ctx, authority, release, tool, run, ordinal, callID, arguments)
@@ -797,6 +797,7 @@ func TestGatewayToolExecutionRechecksDelegatedPairBudgetBeforeTool(t *testing.T)
 	authority.ProjectID = &projectID
 	authority.DelegationAgentID = agentID
 	authority.DelegationPairDigest = pair
+	authority.Policy.AllowedAttributionKeys = []string{"team"}
 	authority.DelegationAgentLimits = &access.DelegationAgentLimits{ID: agentID, LookupID: agentID}
 	h.rt.keys[fullKey] = authority
 	h.gateway.Runtime = delegatedWorkflowRuntime{fakeRuntime: h.rt}
@@ -812,7 +813,7 @@ func TestGatewayToolExecutionRechecksDelegatedPairBudgetBeforeTool(t *testing.T)
 		h.rt.mu.Unlock()
 		fmt.Fprintf(w, `{"id":"step","object":"chat.completion","created":1,"model":"model-a","choices":[{"index":0,"message":{"role":"assistant","content":null,"tool_calls":[{"id":"call-1","type":"function","function":{"name":%q,"arguments":"{}"}}]},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":2,"completion_tokens":1,"total_tokens":3}}`, alias)
 	})
-	response, body := h.chat(fullKey, nil)
+	response, body := h.chat(fullKey, map[string]string{usage.AttributionHeader: `{"team":"core"}`})
 	if response.StatusCode != http.StatusTooManyRequests || h.mock.count("a") != 1 {
 		t.Fatalf("workflow continued after pair budget changed: status=%d body=%v model_calls=%d", response.StatusCode, body, h.mock.count("a"))
 	}
