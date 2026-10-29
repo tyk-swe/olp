@@ -28,6 +28,8 @@ type WorkflowRunStore interface {
 
 type WorkflowTool = mcp.WorkflowTool
 
+const recoveryToolName = "olp_recover_context"
+
 type WorkflowApprovalStore interface {
 	Pause(context.Context, access.Authority, agents.WorkflowApprovalRequest, int) (string, error)
 	Continue(context.Context, access.Authority, string, json.RawMessage, map[string]json.RawMessage, int) (agents.WorkflowContinuation, error)
@@ -85,6 +87,14 @@ func (s *Server) prepareWorkflow(ctx context.Context, x *call, token string) *Er
 	tools, err := s.WorkflowTools.Resolve(ctx, x.authority, x.request.release, x.generation.toolsets)
 	if err != nil {
 		return workflowError(err)
+	}
+	if x.guardrailEngine.HasCompression() {
+		zero := "0"
+		tools = append(tools, WorkflowTool{Definition: routing.MCPToolsetTool{
+			Alias: recoveryToolName, Name: recoveryToolName, Classification: "read_only", UnitPrice: &zero,
+			Description: "Recover the original content of a compressed input using the recovery id shown beside it.",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"id":{"type":"integer","minimum":0}},"required":["id"],"additionalProperties":false}`),
+		}})
 	}
 	if len(tools) == 0 {
 		for _, field := range []string{"tools", "tool_choice", "parallel_tool_calls", "toolConfig"} {
@@ -247,6 +257,12 @@ func (s *Server) executeToolLoop(ctx context.Context, x *call) *outcome {
 			return 0, invalidRequest("tool_approval_invalid", "The approved workflow could not be resumed.", nil)
 		}
 		x.generation.parsed = parsed
+		if x.guardrailEngine != nil && x.guardrailEngine.HasCompression() {
+			x.guardrailCtx = context.WithValue(ctx, guardrailCallerKey{}, x)
+			if _, _, err := x.inspectGuardrailInput(parsed.OIF().Document()); err != nil {
+				return 0, guardrailError(err)
+			}
+		}
 		continued, failure := s.continueToolLoop(ctx, x, state.Completion, x.workflow.resumeStart)
 		if failure != nil {
 			return 0, failure
@@ -426,7 +442,7 @@ func (s *Server) continueToolLoop(ctx context.Context, x *call, completion *wire
 			return nil, e
 		}
 		index := slices.IndexFunc(x.workflow.tools, func(tool WorkflowTool) bool { return tool.Definition.Alias == call.Name })
-		if index < 0 || call.ID == "" || !json.Valid([]byte(call.Arguments)) {
+		if index < 0 || call.ID == "" || slices.Contains(x.workflowRecoveryCalls, call.ID) || !json.Valid([]byte(call.Arguments)) {
 			return nil, invalidRequest("invalid_tool_call", "The model requested an unavailable tool or invalid arguments.", nil)
 		}
 		// A shallow copy retains fresh limits while binding request-local attribution.
@@ -443,7 +459,7 @@ func (s *Server) continueToolLoop(ctx context.Context, x *call, completion *wire
 		if err != nil {
 			return nil, workflowError(err)
 		}
-		if x.workflow.responseMCP {
+		if x.workflow.responseMCP && call.Name != recoveryToolName {
 			item, err := responseMCPCall(x.workflow.tools[index], call, result)
 			if err != nil {
 				return nil, serverError(http.StatusBadGateway, "invalid_tool_response", "The tool returned an invalid response.")

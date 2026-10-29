@@ -51,6 +51,7 @@ type workflowResumeState struct {
 	Calls         int               `json:"calls"`
 	ResponseMCP   bool              `json:"response_mcp"`
 	ResponseItems []responseMCPItem `json:"response_items,omitempty"`
+	RecoveryCalls []string          `json:"recovery_calls,omitempty"`
 }
 
 type workflowResumeRequest struct {
@@ -59,8 +60,17 @@ type workflowResumeRequest struct {
 	Approved          bool                       `json:"approved"`
 }
 
+func stripWorkflowApproval(parsed *wire.Request) (*wire.Request, json.RawMessage, error) {
+	raw := parsed.Field("olp_approval")
+	if len(raw) == 0 {
+		return parsed, nil, nil
+	}
+	clean, err := parsed.WithResourceBindings(oif.Change{Pointer: oif.Pointer("", "olp_approval"), Remove: true, Reason: "workflow approval control"})
+	return clean, raw, err
+}
+
 func (s *Server) prepareWorkflowResume(ctx context.Context, x *call) *Error {
-	raw := x.generation.parsed.Field("olp_approval")
+	raw := x.generation.approval
 	if len(raw) == 0 {
 		return nil
 	}
@@ -87,11 +97,7 @@ func (s *Server) prepareWorkflowResume(ctx context.Context, x *call) *Error {
 	if json.Unmarshal(continuation.State, &state) != nil || state.Family != x.family || state.Completion == nil || state.Iteration < 0 || state.Iteration >= 7 || continuation.StartOrdinal < 0 || continuation.NextOrdinal < continuation.StartOrdinal || state.Calls < 0 || state.Calls > 32 {
 		return permissionError("tool_approval_invalid", "The workflow approval is invalid or expired.")
 	}
-	parsed, err := x.generation.parsed.WithResourceBindings(oif.Change{Pointer: oif.Pointer("", "olp_approval"), Remove: true, Reason: "workflow approval control"})
-	if err != nil {
-		return invalidRequest("invalid_request", "The workflow approval could not be removed from the request.", nil)
-	}
-	x.generation.parsed = parsed
+	x.workflowRecoveryCalls = state.RecoveryCalls
 	if x.deadline.IsZero() || continuation.ExpiresAt.Before(x.deadline) {
 		x.deadline = continuation.ExpiresAt
 	}
@@ -110,6 +116,9 @@ func (s *Server) prepareWorkflowResume(ctx context.Context, x *call) *Error {
 }
 
 func (s *Server) callWorkflowTool(ctx context.Context, x *call, authority access.Authority, tool WorkflowTool, call wire.ToolCall, identityOrdinal int) (json.RawMessage, error) {
+	if tool.Definition.Alias == recoveryToolName {
+		return s.recoverWorkflowContent(ctx, x, authority, call.ID, json.RawMessage(call.Arguments))
+	}
 	callID := fmt.Sprintf("%s:%d:%s", x.workflow.runID, identityOrdinal, call.ID)
 	index := slices.IndexFunc(x.workflow.approvals, func(approval agents.WorkflowApproval) bool { return approval.CallID == call.ID })
 	if index < 0 {
@@ -175,7 +184,7 @@ func (s *Server) pauseWorkflow(ctx context.Context, x *call, completion *wire.Co
 	if !ok {
 		return nil, serverError(503, "tool_approval_unavailable", "The approval service is unavailable.")
 	}
-	state, err := json.Marshal(workflowResumeState{Family: x.family, Transcript: x.generation.parsed.Field(workflowTranscriptField(x.family)), Completion: completion, Iteration: iteration, Calls: x.workflow.calls, ResponseMCP: x.workflow.responseMCP, ResponseItems: x.workflow.responseItems})
+	state, err := json.Marshal(workflowResumeState{Family: x.family, Transcript: x.generation.parsed.Field(workflowTranscriptField(x.family)), Completion: completion, Iteration: iteration, Calls: x.workflow.calls, ResponseMCP: x.workflow.responseMCP, ResponseItems: x.workflow.responseItems, RecoveryCalls: x.workflowRecoveryCalls})
 	if err != nil {
 		return nil, serverError(503, "tool_approval_unavailable", "The approval could not be prepared.")
 	}

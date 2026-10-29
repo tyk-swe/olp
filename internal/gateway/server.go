@@ -697,7 +697,13 @@ func (s *Server) inferenceOperation(family wire.Format, dialect string) http.Han
 			writeError(w, e)
 			return
 		}
-		x.generation.parsed = parsed
+		x.generation.parsed, x.generation.approval, err = stripWorkflowApproval(parsed)
+		if err != nil {
+			e = invalidRequest("invalid_request", "The workflow approval could not be removed from the request.", nil)
+			x.failure, status = e, e.Status
+			writeError(w, e)
+			return
+		}
 		if e := s.prepareContinuation(r.Context(), x); e != nil {
 			x.failure, status = e, e.Status
 			writeError(w, e)
@@ -744,7 +750,7 @@ func (s *Server) inferenceOperation(family wire.Format, dialect string) http.Han
 				writeError(w, e)
 				return
 			}
-		} else if len(x.generation.parsed.Field("olp_approval")) > 0 {
+		} else if len(x.generation.approval) > 0 {
 			e := permissionError("tool_approval_invalid", "The workflow approval is invalid or expired.")
 			x.failure, status = e, e.Status
 			writeError(w, e)

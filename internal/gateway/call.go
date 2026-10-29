@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/url"
 	"sync"
@@ -98,6 +99,8 @@ type call struct {
 	guardrailCtx              context.Context
 	guardrailMasks            *guardrails.Masking
 	guardrailInput            []guardrails.Segment
+	workflowRecovery          []guardrails.Segment
+	workflowRecoveryCalls     []string
 	guardrailMu               sync.Mutex
 	guardrailDecisions        []guardrails.Evidence
 	guardrailPreparation      *targetPreparation
@@ -166,6 +169,7 @@ type routeLeg struct {
 // generationCall owns the source, delivery and continuation of a generation.
 type generationCall struct {
 	parsed           *wire.Request
+	approval         json.RawMessage
 	resources        *generationResources
 	firstStep        *modelStepAccounting
 	toolsets         []string

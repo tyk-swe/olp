@@ -59,6 +59,25 @@ func (d durableSessionDebits) MarkNotSent(ctx context.Context, id, claim string)
 	return d.store.MarkNotSent(ctx, id, claim)
 }
 
+func (d durableSessionDebits) SettleRecovery(ctx context.Context, result limits.DebitResult) error {
+	tx, err := d.store.Pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(context.WithoutCancel(ctx))
+	if err := limits.SettleToolDebitTx(ctx, tx, result); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+func (d durableSessionDebits) PreviousRecovery(ctx context.Context, runID, keyID string, ids []string) (bool, bool, error) {
+	var settled, pending bool
+	err := d.store.Pool.QueryRow(ctx, `SELECT COALESCE(bool_or(state='settled'),false), COALESCE(bool_or(state IN ('prepared','ready','dispatched','outcome_unknown')),false)
+		FROM olp.execution_debits WHERE run_id=$1 AND api_key_id=$2 AND kind='tool' AND id=ANY($3::uuid[])`, runID, keyID, ids).Scan(&settled, &pending)
+	return settled, pending, err
+}
+
 func (d durableSessionDebits) HasUnknownExposure(ctx context.Context, keyID string, maxDispatch time.Duration) (bool, error) {
 	return d.store.HasUnknownDebit(ctx, keyID, maxDispatch)
 }

@@ -225,7 +225,14 @@ func (x *call) inspectGuardrailInput(document oif.Document) (oif.Document, []gua
 		x.recordGuardrails(result.Decisions)
 		return document, nil, e
 	}
-	evaluation := guardrails.Evaluation{RequestID: x.request.accountingID(), Route: x.route.Slug, Phase: guardrails.Input, Segments: surface.Segments, InternalModel: x.internalGuardrail}
+	evaluation := guardrails.Evaluation{RequestID: x.request.accountingID(), Route: x.route.Slug, Phase: guardrails.Input, Segments: surface.Segments, InternalModel: x.internalGuardrail, WorkflowRecovery: x.workflow != nil}
+	evaluation.CompressionExemptIDs = slices.Collect(func(yield func(string) bool) {
+		for _, segment := range surface.Segments {
+			if segment.Kind == "tool_result" && slices.Contains(x.workflowRecoveryCalls, segment.ToolCallID) && !yield(segment.ID) {
+				return
+			}
+		}
+	})
 	if x.strict() && x.guardrailEngine.HasLegacyInput() {
 		texts := contentpolicy.InputTexts(document)
 		evaluation.LegacyInput = make([]guardrails.Segment, len(texts))
@@ -234,6 +241,9 @@ func (x *call) inspectGuardrailInput(document oif.Document) (oif.Document, []gua
 		}
 	}
 	result, err := x.guardrailEngine.Evaluate(x.guardrailCtx, evaluation, x.guardrailMasks)
+	if x.workflow != nil && len(result.Recovery) > 0 {
+		x.workflowRecovery = result.Recovery
+	}
 	x.recordGuardrails(result.Decisions)
 	err = x.legacyGuardrailError(result, err)
 	if err != nil {

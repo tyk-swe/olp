@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -22,6 +23,7 @@ import (
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/agents"
 	"github.com/tyk-swe/olp/internal/connectors"
+	"github.com/tyk-swe/olp/internal/guardrails"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/mcp"
 	"github.com/tyk-swe/olp/internal/protocols/sse"
@@ -31,6 +33,283 @@ import (
 )
 
 const nativeToolResult = "private-tool-result"
+
+func TestGatewayToolExecutionRecoversCompressedInputAfterApproval(t *testing.T) {
+	for _, previousRecovery := range []bool{false, true} {
+		t.Run(fmt.Sprintf("previous_recovery_%t", previousRecovery), func(t *testing.T) {
+			projectID, toolsetID := uuid.NewString(), uuid.NewString()
+			alias := "t_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+			fixture := &workflowFixture{runID: uuid.NewString(), tool: WorkflowTool{ToolsetID: toolsetID, RevisionID: uuid.NewString(), Definition: routing.MCPToolsetTool{Alias: alias, Classification: "approval_required", InputSchema: json.RawMessage(`{"type":"object"}`)}}}
+			h := nativeWorkflowHarness(t, projectID, "openai", "openai-chat", "unary", routing.FidelityTransformed, []string{toolsetID}, true, fixture)
+			approval := &approvalWorkflowFixture{workflowFixture: fixture, paused: make(chan agents.WorkflowApprovalRequest, 1)}
+			h.gateway.WorkflowRuns = approval
+			h.gateway.WorkflowTools = approval
+			snapshot := h.rt.release.Snapshot
+			snapshot.Guardrails = &guardrails.Registry{
+				Definitions: map[string]guardrails.Revision{"revision": {ID: "revision", GuardrailID: "guard", ProjectID: projectID, Name: "Guard", Type: "headroom", Configuration: json.RawMessage(`{"endpoint":"https://example.com","credential_ref":"credential","content_egress":true,"parameters":{"model":"model"}}`), TimeoutMS: 1000, OnError: guardrails.FailClosed}},
+				Policies:    map[string]guardrails.PolicyRevision{"policy-revision": {ID: "policy-revision", PolicyID: "policy", ProjectID: projectID, Entries: []guardrails.Entry{{GuardrailID: "guard", RevisionID: "revision", Phase: guardrails.Input, Action: guardrails.Redact}}}},
+				Attachments: []guardrails.Attachment{{ID: "attachment", Scope: "route", ScopeID: snapshot.Routes[routeSlug].ID, PolicyRevisionID: "policy-revision"}},
+			}
+			if err := snapshot.Compile(); err != nil {
+				t.Fatal(err)
+			}
+			h.gateway.GuardrailEvaluator = guardrails.EvaluatorFunc(func(_ context.Context, _ guardrails.Revision, evaluation guardrails.Evaluation) (guardrails.Verdict, error) {
+				redactions := slices.Collect(func(yield func(guardrails.Redaction) bool) {
+					for _, segment := range evaluation.Segments {
+						if (segment.Role == "user" || segment.Role == "tool") && !yield(guardrails.Redaction{Segment: segment.ID, Start: 0, End: len(segment.Text), Replacement: "compressed summary"}) {
+							return
+						}
+					}
+				})
+				return guardrails.Verdict{Action: guardrails.Redact, Redactions: redactions}, nil
+			})
+			const original = "approval-bound compressed context"
+			h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
+				var request struct {
+					Messages []struct {
+						Role       string `json:"role"`
+						Content    string `json:"content"`
+						ToolCallID string `json:"tool_call_id"`
+					} `json:"messages"`
+				}
+				if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+					t.Error(err)
+					return
+				}
+				if slices.ContainsFunc(request.Messages, func(message struct {
+					Role       string `json:"role"`
+					Content    string `json:"content"`
+					ToolCallID string `json:"tool_call_id"`
+				}) bool {
+					return message.Role == "tool" && message.ToolCallID == "approve-call"
+				}) {
+					if !slices.ContainsFunc(request.Messages, func(message struct {
+						Role       string `json:"role"`
+						Content    string `json:"content"`
+						ToolCallID string `json:"tool_call_id"`
+					}) bool {
+						return message.Role == "tool" && message.ToolCallID == "recover-call" && strings.Contains(message.Content, original)
+					}) {
+						t.Error("the recovered content was not retained through approval")
+					}
+					completion(modelA, "approved recovery")(w, r)
+					return
+				}
+				if previousRecovery {
+					if slices.ContainsFunc(request.Messages, func(message struct {
+						Role       string `json:"role"`
+						Content    string `json:"content"`
+						ToolCallID string `json:"tool_call_id"`
+					}) bool {
+						return message.Role == "tool" && message.ToolCallID == "recover-call"
+					}) {
+						fmt.Fprintf(w, `{"id":"second","object":"chat.completion","model":"model-a","choices":[{"index":0,"message":{"role":"assistant","content":null,"tool_calls":[{"id":"approve-call","type":"function","function":{"name":%q,"arguments":"{}"}}]},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":2,"completion_tokens":3,"total_tokens":5}}`, alias)
+						return
+					}
+					fmt.Fprint(w, `{"id":"first","object":"chat.completion","model":"model-a","choices":[{"index":0,"message":{"role":"assistant","content":null,"tool_calls":[{"id":"recover-call","type":"function","function":{"name":"olp_recover_context","arguments":"{\"id\":0}"}}]},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":2,"completion_tokens":3,"total_tokens":5}}`)
+					return
+				}
+				fmt.Fprintf(w, `{"id":"first","object":"chat.completion","model":"model-a","choices":[{"index":0,"message":{"role":"assistant","content":null,"tool_calls":[{"id":"recover-call","type":"function","function":{"name":"olp_recover_context","arguments":"{\"id\":0}"}},{"id":"approve-call","type":"function","function":{"name":%q,"arguments":"{}"}}]},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":2,"completion_tokens":3,"total_tokens":5}}`, alias)
+			})
+			request := `{"model":"` + routeSlug + `","messages":[{"role":"user","content":"` + original + `"}]}`
+			response := h.do(t.Context(), http.MethodPost, "/v1/chat/completions", fullKey, []byte(request), nil)
+			defer response.Body.Close()
+			var pause workflowPause
+			if err := json.NewDecoder(response.Body).Decode(&pause); err != nil || response.StatusCode != http.StatusOK || pause.ContinuationToken == "" {
+				t.Fatalf("approval pause failed: status=%d error=%v", response.StatusCode, err)
+			}
+			submission, err := json.Marshal(workflowResumeRequest{ContinuationToken: pause.ContinuationToken, Approved: true, Arguments: map[string]json.RawMessage{"approve-call": json.RawMessage(`{}`)}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			resumed := h.do(t.Context(), http.MethodPost, "/v1/chat/completions", fullKey, []byte(strings.TrimSuffix(request, "}")+`,"olp_approval":`+string(submission)+`}`), nil)
+			defer resumed.Body.Close()
+			body, err := io.ReadAll(resumed.Body)
+			if err != nil || resumed.StatusCode != http.StatusOK || !strings.Contains(string(body), "approved recovery") {
+				t.Fatalf("approval recovery failed: status=%d body=%s error=%v", resumed.StatusCode, body, err)
+			}
+		})
+	}
+}
+
+func TestGatewayToolExecutionRecoversCompressedInput(t *testing.T) {
+	projectID, toolsetID := uuid.NewString(), uuid.NewString()
+	fixture := &workflowFixture{
+		runID: uuid.NewString(),
+		tool: WorkflowTool{ToolsetID: toolsetID, RevisionID: uuid.NewString(), Definition: routing.MCPToolsetTool{
+			Alias: "published_tool", Classification: "read_only", InputSchema: json.RawMessage(`{"type":"object"}`),
+		}},
+	}
+	h := nativeWorkflowHarness(t, projectID, "openai", "openai-chat", "unary", routing.FidelityTransformed, []string{toolsetID}, true, fixture)
+	snapshot := h.rt.release.Snapshot
+	snapshot.Guardrails = &guardrails.Registry{
+		Definitions: map[string]guardrails.Revision{"revision": {ID: "revision", GuardrailID: "guard", ProjectID: projectID, Name: "Guard", Type: "headroom", Configuration: json.RawMessage(`{"endpoint":"https://example.com","credential_ref":"credential","content_egress":true,"parameters":{"model":"model"}}`), TimeoutMS: 1000, OnError: guardrails.FailClosed}},
+		Policies:    map[string]guardrails.PolicyRevision{"policy-revision": {ID: "policy-revision", PolicyID: "policy", ProjectID: projectID, Entries: []guardrails.Entry{{GuardrailID: "guard", RevisionID: "revision", Phase: guardrails.Input, Action: guardrails.Redact}}}},
+		Attachments: []guardrails.Attachment{{ID: "attachment", Scope: "route", ScopeID: snapshot.Routes[routeSlug].ID, PolicyRevisionID: "policy-revision"}},
+	}
+	if err := snapshot.Compile(); err != nil {
+		t.Fatal(err)
+	}
+	h.gateway.GuardrailEvaluator = guardrails.EvaluatorFunc(func(_ context.Context, _ guardrails.Revision, evaluation guardrails.Evaluation) (guardrails.Verdict, error) {
+		redactions := slices.Collect(func(yield func(guardrails.Redaction) bool) {
+			for _, segment := range evaluation.Segments {
+				if segment.Role == "user" && !yield(guardrails.Redaction{Segment: segment.ID, Start: 0, End: len(segment.Text), Replacement: "compressed summary"}) {
+					return
+				}
+			}
+		})
+		return guardrails.Verdict{Action: guardrails.Redact, Redactions: redactions}, nil
+	})
+	const original = "original context retained during this request"
+	const later = "later context selected for recovery"
+	h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
+		var request struct {
+			Messages []struct {
+				Role    string `json:"role"`
+				Content string `json:"content"`
+			} `json:"messages"`
+			Tools []struct {
+				Function struct {
+					Name string `json:"name"`
+				} `json:"function"`
+			} `json:"tools"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Error(err)
+			return
+		}
+		for _, message := range request.Messages {
+			if message.Role == "user" && !strings.HasPrefix(message.Content, "compressed summary") {
+				t.Errorf("user context was not compressed: %s", message.Content)
+			}
+			if message.Role == "tool" {
+				if !strings.Contains(message.Content, later) || strings.Contains(message.Content, original) {
+					t.Errorf("recovered tool output did not select the requested context: %s", message.Content)
+				}
+				completion(modelA, "recovered")(w, r)
+				return
+			}
+		}
+		if len(request.Messages) < 2 || !strings.Contains(request.Messages[0].Content, "recovery id: 0") || !strings.Contains(request.Messages[1].Content, "recovery id: 1") {
+			t.Errorf("provider did not receive the compressed message: %+v", request.Messages)
+		}
+		if !slices.ContainsFunc(request.Tools, func(tool struct {
+			Function struct {
+				Name string `json:"name"`
+			} `json:"function"`
+		}) bool {
+			return tool.Function.Name == "olp_recover_context"
+		}) {
+			t.Error("provider did not receive the compression recovery tool")
+		}
+		fmt.Fprint(w, `{"id":"first","object":"chat.completion","model":"model-a","choices":[{"index":0,"message":{"role":"assistant","content":null,"tool_calls":[{"id":"recover-call","type":"function","function":{"name":"olp_recover_context","arguments":"{\"id\":1}"}}]},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":2,"completion_tokens":3,"total_tokens":5}}`)
+	})
+	response := h.do(t.Context(), http.MethodPost, "/v1/chat/completions", fullKey, []byte(`{"model":"`+routeSlug+`","messages":[{"role":"user","content":"`+original+`"},{"role":"user","content":"`+later+`"}]}`), nil)
+	defer response.Body.Close()
+	body, err := io.ReadAll(response.Body)
+	if err != nil || response.StatusCode != http.StatusOK || !strings.Contains(string(body), "recovered") {
+		t.Fatalf("recovery request failed: status=%d body=%s error=%v", response.StatusCode, body, err)
+	}
+}
+
+func TestGatewayToolExecutionGuardsRecoveredInput(t *testing.T) {
+	projectID, toolsetID := uuid.NewString(), uuid.NewString()
+	fixture := &workflowFixture{
+		runID: uuid.NewString(),
+		tool: WorkflowTool{ToolsetID: toolsetID, RevisionID: uuid.NewString(), Definition: routing.MCPToolsetTool{
+			Alias: "published_tool", Classification: "read_only", InputSchema: json.RawMessage(`{"type":"object"}`),
+		}},
+	}
+	h := nativeWorkflowHarness(t, projectID, "openai", "openai-chat", "unary", routing.FidelityTransformed, []string{toolsetID}, true, fixture)
+	snapshot := h.rt.release.Snapshot
+	snapshot.Guardrails = &guardrails.Registry{
+		Definitions: map[string]guardrails.Revision{
+			"compression": {ID: "compression", GuardrailID: "compress", ProjectID: projectID, Name: "Compressor", Type: "headroom", Configuration: json.RawMessage(`{"endpoint":"https://example.com","credential_ref":"credential","content_egress":true,"parameters":{"model":"model"}}`), TimeoutMS: 1000, OnError: guardrails.FailClosed},
+			"block":       {ID: "block", GuardrailID: "blocked", ProjectID: projectID, Name: "Block", Type: "builtin.keywords", Configuration: json.RawMessage(`{"words":["private-original"]}`), TimeoutMS: 1000, OnError: guardrails.FailClosed},
+		},
+		Policies: map[string]guardrails.PolicyRevision{"policy": {ID: "policy", PolicyID: "policy-id", ProjectID: projectID, Entries: []guardrails.Entry{
+			{GuardrailID: "compress", RevisionID: "compression", Phase: guardrails.Input, Action: guardrails.Redact},
+			{GuardrailID: "blocked", RevisionID: "block", Phase: guardrails.Input, Action: guardrails.Block},
+		}}},
+		Attachments: []guardrails.Attachment{{ID: "attachment", Scope: "route", ScopeID: snapshot.Routes[routeSlug].ID, PolicyRevisionID: "policy"}},
+	}
+	if err := snapshot.Compile(); err != nil {
+		t.Fatal(err)
+	}
+	h.gateway.GuardrailEvaluator = guardrails.EvaluatorFunc(func(_ context.Context, _ guardrails.Revision, evaluation guardrails.Evaluation) (guardrails.Verdict, error) {
+		segment := evaluation.Segments[0]
+		return guardrails.Verdict{Action: guardrails.Redact, Redactions: []guardrails.Redaction{{Segment: segment.ID, Start: 0, End: len(segment.Text), Replacement: "compressed summary"}}}, nil
+	})
+	dispatched := make(chan struct{}, 2)
+	h.mock.set("a", func(w http.ResponseWriter, _ *http.Request) {
+		dispatched <- struct{}{}
+		fmt.Fprint(w, `{"id":"first","object":"chat.completion","model":"model-a","choices":[{"index":0,"message":{"role":"assistant","content":null,"tool_calls":[{"id":"recover-call","type":"function","function":{"name":"olp_recover_context","arguments":"{\"id\":0}"}}]},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":2,"completion_tokens":3,"total_tokens":5}}`)
+	})
+	response := h.do(t.Context(), http.MethodPost, "/v1/chat/completions", fullKey, []byte(`{"model":"`+routeSlug+`","messages":[{"role":"user","content":"private-original"}]}`), nil)
+	defer response.Body.Close()
+	body, err := io.ReadAll(response.Body)
+	if err != nil || response.StatusCode == http.StatusOK || !strings.Contains(string(body), "guardrail_blocked") || strings.Contains(string(body), "private-original") {
+		t.Fatalf("recovered content escaped input guardrails: status=%d body=%s error=%v", response.StatusCode, body, err)
+	}
+	select {
+	case <-dispatched:
+	default:
+		t.Fatal("model did not request recovery")
+	}
+	select {
+	case <-dispatched:
+		t.Fatal("recovered content reached the model after the guardrail blocked it")
+	default:
+	}
+}
+
+func TestGatewayToolExecutionResponsesDoesNotExposeRecoveredContent(t *testing.T) {
+	projectID, toolsetID := uuid.NewString(), uuid.NewString()
+	fixture := &workflowFixture{
+		runID: uuid.NewString(),
+		tool: WorkflowTool{ToolsetID: toolsetID, RevisionID: uuid.NewString(), Definition: routing.MCPToolsetTool{
+			Alias: "published_tool", Classification: "read_only", InputSchema: json.RawMessage(`{"type":"object"}`),
+		}},
+	}
+	h := nativeWorkflowHarness(t, projectID, "openai", "openai-responses", "unary", routing.FidelityTransformed, []string{toolsetID}, true, fixture, true)
+	snapshot := h.rt.release.Snapshot
+	snapshot.Guardrails = &guardrails.Registry{
+		Definitions: map[string]guardrails.Revision{"revision": {ID: "revision", GuardrailID: "guard", ProjectID: projectID, Name: "Guard", Type: "headroom", Configuration: json.RawMessage(`{"endpoint":"https://example.com","credential_ref":"credential","content_egress":true,"parameters":{"model":"model"}}`), TimeoutMS: 1000, OnError: guardrails.FailClosed}},
+		Policies:    map[string]guardrails.PolicyRevision{"policy-revision": {ID: "policy-revision", PolicyID: "policy", ProjectID: projectID, Entries: []guardrails.Entry{{GuardrailID: "guard", RevisionID: "revision", Phase: guardrails.Input, Action: guardrails.Redact}}}},
+		Attachments: []guardrails.Attachment{{ID: "attachment", Scope: "route", ScopeID: snapshot.Routes[routeSlug].ID, PolicyRevisionID: "policy-revision"}},
+	}
+	if err := snapshot.Compile(); err != nil {
+		t.Fatal(err)
+	}
+	h.gateway.GuardrailEvaluator = guardrails.EvaluatorFunc(func(_ context.Context, _ guardrails.Revision, evaluation guardrails.Evaluation) (guardrails.Verdict, error) {
+		segment := evaluation.Segments[0]
+		return guardrails.Verdict{Action: guardrails.Redact, Redactions: []guardrails.Redaction{{Segment: segment.ID, Start: 0, End: len(segment.Text), Replacement: "compressed summary"}}}, nil
+	})
+	const original = "private original for this workflow"
+	h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
+		var request struct {
+			Input json.RawMessage `json:"input"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Error(err)
+			return
+		}
+		if bytes.Contains(request.Input, []byte(`"function_call_output"`)) {
+			if !bytes.Contains(request.Input, []byte(original)) {
+				t.Errorf("provider did not receive the recovered content: %s", request.Input)
+			}
+			fmt.Fprint(w, `{"id":"last","object":"response","status":"completed","model":"model-a","output":[{"type":"message","id":"msg","role":"assistant","status":"completed","content":[{"type":"output_text","text":"safe answer","annotations":[]}]}],"usage":{"input_tokens":3,"output_tokens":4,"total_tokens":7}}`)
+			return
+		}
+		fmt.Fprint(w, `{"id":"first","object":"response","status":"completed","model":"model-a","output":[{"type":"function_call","id":"fc","call_id":"recover-call","name":"olp_recover_context","arguments":"{\"id\":0}","status":"completed"}],"usage":{"input_tokens":2,"output_tokens":3,"total_tokens":5}}`)
+	})
+	response := h.do(t.Context(), http.MethodPost, "/v1/responses", fullKey, []byte(`{"model":"`+routeSlug+`","input":"`+original+`"}`), nil)
+	defer response.Body.Close()
+	body, err := io.ReadAll(response.Body)
+	if err != nil || response.StatusCode != http.StatusOK || !strings.Contains(string(body), "safe answer") || strings.Contains(string(body), original) || strings.Contains(string(body), "olp_recover_context") {
+		t.Fatalf("response exposed recovered content: status=%d body=%s error=%v", response.StatusCode, body, err)
+	}
+}
 
 func nativeWorkflowHarness(t *testing.T, projectID, surface, profile, mode, fidelity string, toolsets []string, certified bool, fixture *workflowFixture, responsesMCP ...bool) *harness {
 	return nativeWorkflowHarnessWithProviders(t, projectID, surface, profile, mode, fidelity, toolsets, certified, fixture, nil, responsesMCP...)
@@ -700,6 +979,14 @@ func TestGatewayToolExecutionRecordsProviderHealth(t *testing.T) {
 
 type workflowDebitFixture struct {
 	*fakeSessionDebits
+}
+
+func (f *workflowDebitFixture) SettleRecovery(context.Context, limits.DebitResult) error {
+	return nil
+}
+
+func (f *workflowDebitFixture) PreviousRecovery(context.Context, string, string, []string) (bool, bool, error) {
+	return false, false, nil
 }
 
 type delegatedWorkflowRuntime struct {
