@@ -22,7 +22,7 @@ func (d durableSessionDebits) SettleWorkflow(ctx context.Context, event *usage.E
 func accountingEventID(e Envelope) (uuid.UUID, error) {
 	for _, attempt := range e.Attempts {
 		if attempt.Execution != nil && attempt.Execution.RunID != "" {
-			return uuid.Parse(attempt.Execution.RunID)
+			return usage.WorkflowEventID(attempt.Execution.RunID, e.AccountingID)
 		}
 	}
 	return uuidNewV7()
@@ -35,11 +35,11 @@ func accountingAttemptID(e Envelope, index int) (uuid.UUID, error) {
 	}
 	for _, attempt := range e.Attempts {
 		if attempt.Execution != nil && attempt.Execution.RunID != "" {
-			runID, err := uuid.Parse(attempt.Execution.RunID)
+			eventID, err := usage.WorkflowEventID(attempt.Execution.RunID, e.AccountingID)
 			if err != nil {
 				return uuid.Nil, err
 			}
-			return uuid.NewSHA1(runID, []byte(strconv.Itoa(index+1))), nil
+			return uuid.NewSHA1(eventID, []byte(strconv.Itoa(index+1))), nil
 		}
 	}
 	return uuidNewV7()

@@ -6,6 +6,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -1008,10 +1009,10 @@ func TestGatewayToolWorkflowSettlesOneRun(t *testing.T) {
 		t.Fatalf("supply settlement differs from model costs: matches=%t debit owners=%d", supplyMatches, supplyOwners)
 	}
 	var facts, counted, receipts int
-	if err := h.Pool.QueryRow(t.Context(), `SELECT count(*),count(*) FILTER(WHERE request_counted) FROM olp.attempt_usage_facts WHERE event_id=$1`, runID).Scan(&facts, &counted); err != nil {
+	if err := h.Pool.QueryRow(t.Context(), `SELECT count(*),count(*) FILTER(WHERE f.request_counted) FROM olp.attempt_usage_facts f JOIN olp.execution_debits d ON d.id=f.attempt_id WHERE d.run_id=$1`, runID).Scan(&facts, &counted); err != nil {
 		t.Fatal(err)
 	}
-	if err := h.Pool.QueryRow(t.Context(), `SELECT count(*) FROM olp.request_metadata_event_receipts WHERE event_id=$1`, runID).Scan(&receipts); err != nil {
+	if err := h.Pool.QueryRow(t.Context(), `SELECT count(DISTINCT r.event_id) FROM olp.request_metadata_event_receipts r JOIN olp.attempt_usage_facts f ON f.event_id=r.event_id JOIN olp.execution_debits d ON d.id=f.attempt_id WHERE d.run_id=$1`, runID).Scan(&receipts); err != nil {
 		t.Fatal(err)
 	}
 	if facts != 2 || counted != 1 || receipts != 1 {
@@ -1024,7 +1025,7 @@ func TestGatewayToolWorkflowSettlesOneRun(t *testing.T) {
 		COALESCE((SELECT string_agg(row_to_json(s)::text,'') FROM olp.agent_steps s WHERE s.run_id=$1),'') ||
 		COALESCE((SELECT string_agg(row_to_json(d)::text,'') FROM olp.execution_debits d WHERE d.run_id=$1),'') ||
 		COALESCE((SELECT string_agg(row_to_json(c)::text,'') FROM olp.mcp_tool_calls c JOIN olp.execution_debits d ON d.id=c.dispatch_id WHERE d.run_id=$1),'') ||
-		COALESCE((SELECT string_agg(row_to_json(f)::text,'') FROM olp.attempt_usage_facts f WHERE f.event_id=$1),'')`, runID).Scan(&stored); err != nil {
+		COALESCE((SELECT string_agg(row_to_json(f)::text,'') FROM olp.attempt_usage_facts f JOIN olp.execution_debits d ON d.id=f.attempt_id WHERE d.run_id=$1),'')`, runID).Scan(&stored); err != nil {
 		t.Fatal(err)
 	}
 	if strings.Contains(stored, prompt) || strings.Contains(stored, argument) || strings.Contains(stored, answer) {
@@ -1381,8 +1382,10 @@ func TestGatewayToolWorkflowSettlesOneRun(t *testing.T) {
 	}
 	manager := &export.Manager{Pool: h.Pool, Keys: h.Ring2(), Installation: h.Server.Installation, Sender: export.NewSender(loopbackPolicy()), Log: slog.New(slog.NewTextHandler(io.Discard, nil))}
 	h.Gateway.Capture = manager
+	var workflowReceipts sync.Map
 	h.Gateway.Sink = &gateway.PersistingSink{Persist: func(ctx context.Context, event *usage.Event, payload []byte) error {
 		_, err := usage.PersistEvent(ctx, h.Pool, event, payload)
+		workflowReceipts.Store(event.RequestID, recordedWorkflowReceipt{event: event, payload: payload, err: err})
 		return err
 	}}
 	ctx, cancel := context.WithCancel(t.Context())
@@ -1428,7 +1431,9 @@ func TestGatewayToolWorkflowSettlesOneRun(t *testing.T) {
 	}
 	responsesApprovalInput := "workflow-approval-test responses"
 	responsesApprovalTools := toolCalls.Load()
-	responsesApprovalStatus, responsesApproval, _ := h.gateway(http.MethodPost, "/v1/responses", mcpExecString(t, projectedKey, "secret"), map[string]any{"model": projectedSlug, "input": responsesApprovalInput, "max_output_tokens": 100})
+	responsesKeyID := mcpExecString(t, projectedKey, "id")
+	responsesSpendBefore := workflowKeySpend(t, h, responsesKeyID)
+	responsesApprovalStatus, responsesApproval, responsesApprovalHeaders := h.gateway(http.MethodPost, "/v1/responses", mcpExecString(t, projectedKey, "secret"), map[string]any{"model": projectedSlug, "input": responsesApprovalInput, "max_output_tokens": 100})
 	responsesToken, ok := responsesApproval["continuation_token"].(string)
 	if responsesApprovalStatus != http.StatusOK || !ok || responsesToken == "" || toolCalls.Load() != responsesApprovalTools || !strings.Contains(fmt.Sprint(responsesApproval["output"]), "mcp_approval_request") {
 		t.Fatalf("Responses did not pause for approval: status=%d body=%v tools=%d", responsesApprovalStatus, responsesApproval, toolCalls.Load()-responsesApprovalTools)
@@ -1442,10 +1447,11 @@ func TestGatewayToolWorkflowSettlesOneRun(t *testing.T) {
 			t.Fatalf("Responses accepted changed approval binding: status=%d tools=%d", status, toolCalls.Load()-responsesApprovalTools)
 		}
 	}
-	responsesResumeStatus, responsesResumeBody, _ := h.gateway(http.MethodPost, "/v1/responses", mcpExecString(t, projectedKey, "secret"), responsesResume(responsesApprovalInput, argument))
+	responsesResumeStatus, responsesResumeBody, responsesResumeHeaders := h.gateway(http.MethodPost, "/v1/responses", mcpExecString(t, projectedKey, "secret"), responsesResume(responsesApprovalInput, argument))
 	if responsesResumeStatus != http.StatusOK || !strings.Contains(fmt.Sprint(responsesResumeBody), "done") || toolCalls.Load() != responsesApprovalTools+1 {
 		t.Fatalf("Responses approval did not resume: status=%d body=%v tools=%d", responsesResumeStatus, responsesResumeBody, toolCalls.Load()-responsesApprovalTools)
 	}
+	assertApprovalWorkflowReceipts(t, h, &workflowReceipts, responsesKeyID, responsesApprovalHeaders.Get("X-Request-Id"), responsesResumeHeaders.Get("X-Request-Id"), responsesSpendBefore)
 	finalOnlyStatus, finalOnlyBody, finalOnlyHeaders := h.gateway(http.MethodPost, "/v1/responses", mcpExecString(t, finalOnlyKey, "secret"), map[string]any{"model": finalOnlySlug, "input": prompt, "max_output_tokens": 100})
 	if finalOnlyStatus != http.StatusOK || strings.Contains(fmt.Sprint(finalOnlyBody), argument) || strings.Contains(fmt.Sprint(finalOnlyBody), answer) {
 		t.Fatalf("final-only Responses workflow: status=%d response=%v", finalOnlyStatus, finalOnlyBody)
@@ -1459,6 +1465,7 @@ func TestGatewayToolWorkflowSettlesOneRun(t *testing.T) {
 	}
 	approvalPrompt := "workflow-approval-test private approval transcript"
 	beforeTool := toolCalls.Load()
+	approvalSpendBefore := workflowKeySpend(t, h, keyID)
 	approvalStatus, approvalBody, approvalHeaders := h.gateway(http.MethodPost, "/v1/chat/completions", secret, map[string]any{"model": slug, "messages": []any{map[string]any{"role": "user", "content": approvalPrompt}}, "max_tokens": 100})
 	approvalToken, ok := approvalBody["continuation_token"].(string)
 	if approvalStatus != http.StatusOK || !ok || approvalToken == "" || toolCalls.Load() != beforeTool {
@@ -1469,6 +1476,7 @@ func TestGatewayToolWorkflowSettlesOneRun(t *testing.T) {
 	if approvalResumeStatus != http.StatusOK || toolCalls.Load() != beforeTool+1 {
 		t.Fatalf("captured approval resume: status=%d tool_calls=%d", approvalResumeStatus, toolCalls.Load())
 	}
+	assertApprovalWorkflowReceipts(t, h, &workflowReceipts, keyID, approvalHeaders.Get("X-Request-Id"), approvalResumeHeaders.Get("X-Request-Id"), approvalSpendBefore)
 	for _, requestID := range []string{approvalHeaders.Get("X-Request-Id"), approvalResumeHeaders.Get("X-Request-Id")} {
 		var captured bool
 		if err := h.Pool.QueryRow(t.Context(), `SELECT payload_captured FROM olp.requests WHERE id=$1`, requestID).Scan(&captured); err != nil || captured {
@@ -1526,6 +1534,76 @@ func TestGatewayToolWorkflowSettlesOneRun(t *testing.T) {
 	routeResumeStatus, _, _ := h.gateway("POST", "/v1/chat/completions", secret, routeResume)
 	if routeResumeStatus != http.StatusForbidden || toolCalls.Load() != routeTools {
 		t.Fatalf("revised route approval dispatched an earlier tool: status=%d tools=%d", routeResumeStatus, toolCalls.Load()-routeTools)
+	}
+}
+
+type recordedWorkflowReceipt struct {
+	event   *usage.Event
+	payload []byte
+	err     error
+}
+
+func workflowKeySpend(t *testing.T, h *accessHarness, keyID string) string {
+	t.Helper()
+	var spend string
+	if err := h.Pool.QueryRow(t.Context(), `SELECT COALESCE(sum(accrued),0)::text FROM olp.api_key_cost_windows WHERE api_key_id=$1 AND window_kind='day'`, keyID).Scan(&spend); err != nil {
+		t.Fatal(err)
+	}
+	return spend
+}
+
+func assertApprovalWorkflowReceipts(t *testing.T, h *accessHarness, recorded *sync.Map, keyID, pauseID, resumeID, spendBefore string) {
+	t.Helper()
+	if pauseID == "" || resumeID == "" || pauseID == resumeID {
+		t.Fatalf("approval requests need separate identities: pause=%q resume=%q", pauseID, resumeID)
+	}
+	for _, requestID := range []string{pauseID, resumeID} {
+		value, ok := recorded.Load(requestID)
+		if !ok {
+			t.Fatalf("approval request %s did not emit a receipt", requestID)
+		}
+		receipt := value.(recordedWorkflowReceipt)
+		if receipt.err != nil {
+			t.Fatalf("approval request %s receipt failed: %v", requestID, receipt.err)
+		}
+	}
+	var runID string
+	var facts, requests, events, counted, matchingDebits, runs, receipts int
+	err := h.Pool.QueryRow(t.Context(), `SELECT min(d.run_id::text), count(*), count(DISTINCT f.request_id), count(DISTINCT f.event_id),
+count(*) FILTER (WHERE f.request_counted), count(*) FILTER (WHERE d.kind='model' AND d.state='settled' AND d.observed_cost=f.estimated_cost AND d.observed_charge=f.charge
+AND EXISTS (SELECT 1 FROM olp.execution_debit_results r WHERE r.dispatch_id=d.id AND r.final AND r.complete)), count(DISTINCT d.run_id)
+FROM olp.attempt_usage_facts f JOIN olp.execution_debits d ON d.id=f.attempt_id
+WHERE f.request_id IN ($1::uuid,$2::uuid)`, pauseID, resumeID).Scan(&runID, &facts, &requests, &events, &counted, &matchingDebits, &runs)
+	if err != nil || facts != 2 || requests != 2 || events != 2 || counted != 2 || matchingDebits != 2 || runs != 1 {
+		t.Fatalf("approval facts do not match settled requests: facts=%d requests=%d events=%d counted=%d settled=%d runs=%d error=%v", facts, requests, events, counted, matchingDebits, runs, err)
+	}
+	if err := h.Pool.QueryRow(t.Context(), `SELECT count(*) FROM olp.request_metadata_event_receipts WHERE request_id IN ($1::uuid,$2::uuid) AND status='fact_persisted'`, pauseID, resumeID).Scan(&receipts); err != nil || receipts != 2 {
+		t.Fatalf("approval receipt count: got=%d error=%v", receipts, err)
+	}
+	var debits, settled, results int
+	var spendMatches, positiveSpend bool
+	err = h.Pool.QueryRow(t.Context(), `SELECT count(*), count(*) FILTER (WHERE d.state='settled'),
+count(*) FILTER (WHERE EXISTS (SELECT 1 FROM olp.execution_debit_results r WHERE r.dispatch_id=d.id AND r.final AND r.complete)),
+COALESCE(sum(d.observed_charge),0) = (SELECT COALESCE(sum(accrued),0) FROM olp.api_key_cost_windows WHERE api_key_id=$2 AND window_kind='day') - $3::numeric,
+COALESCE(sum(d.observed_charge),0)>0 FROM olp.execution_debits d WHERE d.run_id=$1`, runID, keyID, spendBefore).Scan(&debits, &settled, &results, &spendMatches, &positiveSpend)
+	if err != nil || debits != 3 || settled != 3 || results != 3 || !spendMatches || !positiveSpend {
+		t.Fatalf("approval spend does not match settled debits: debits=%d settled=%d results=%d matches=%t positive=%t error=%v", debits, settled, results, spendMatches, positiveSpend, err)
+	}
+	spend := workflowKeySpend(t, h, keyID)
+	for _, requestID := range []string{pauseID, resumeID} {
+		value, _ := recorded.Load(requestID)
+		receipt := value.(recordedWorkflowReceipt)
+		result, err := usage.PersistEvent(t.Context(), h.Pool, receipt.event, receipt.payload)
+		if err != nil || result.Outcome != usage.PersistOutcomeDuplicate {
+			t.Fatalf("approval receipt replay was not idempotent: outcome=%v error=%v", result.Outcome, err)
+		}
+		changedPayload := append(append([]byte{}, receipt.payload...), ' ')
+		if _, err := usage.PersistEvent(t.Context(), h.Pool, receipt.event, changedPayload); !errors.Is(err, usage.ErrInvalidEvent) {
+			t.Fatalf("approval receipt accepted different evidence: %v", err)
+		}
+	}
+	if after := workflowKeySpend(t, h, keyID); after != spend {
+		t.Fatalf("approval receipt replay changed spend: before=%s after=%s", spend, after)
 	}
 }
 

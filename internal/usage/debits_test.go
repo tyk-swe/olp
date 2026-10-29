@@ -111,6 +111,14 @@ func TestPersistWorkflowRejectsAttemptWithoutSettledDebit(t *testing.T) {
 	}
 }
 
+func TestPersistWorkflowRejectsUnboundReceiptIdentity(t *testing.T) {
+	event, payload := workflowTerminalFixture(t)
+	event.EventID = uuid.NewString()
+	if _, err := PersistEventTx(t.Context(), cardRevisionTx{}, event, payload); !errors.Is(err, limits.ErrDebitConflict) {
+		t.Fatalf("workflow accepted a receipt unrelated to its run and request: %v", err)
+	}
+}
+
 func TestSessionDebitResultIdentityIsStablePerEvent(t *testing.T) {
 	event := &Event{EventID: "0192cf87-d4ab-7f2e-a8b1-c2d3e4f50609"}
 	one := sessionDebitResult(debitEventDispatchID, event, []byte(`{"event":1}`), "0.5", "0.5", true)
