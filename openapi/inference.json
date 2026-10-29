@@ -44,7 +44,160 @@
             }
           },
           "400": {
-            "description": "The prompt reference or variables are invalid"
+            "description": "The request or prompt reference is invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InferenceError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The credential, delegation, or agent assertion is invalid, expired, revoked, or already used",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InferenceError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The caller is not permitted to use the requested resource",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InferenceError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The route is unavailable to the caller",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InferenceError"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "The caller or agent has reached an admission limit",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InferenceError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The gateway or authority service is unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InferenceError"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "X-OLP-Agent-Identity",
+            "in": "header",
+            "required": false,
+            "description": "The current workload assertion is required when Authorization contains a one-use delegation token.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/v1/delegations": {
+      "post": {
+        "operationId": "createDelegation",
+        "summary": "Delegate a key to an authenticated workload agent",
+        "description": "Exchange an agent workload assertion and a delegating API key for a one-use inference token. Both principals must belong to the same project and authorize every requested route.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "X-OLP-Delegating-Key",
+            "in": "header",
+            "required": true,
+            "description": "The API key that owns the delegated inference and has the delegate scope.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DelegationRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "A short-lived, one-use delegation token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DelegationGrant"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The scope, route, or lifetime bounds are invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InferenceError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The workload assertion or delegating key is invalid, expired, or revoked",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InferenceError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The principal, project, delegate scope, or requested route is not authorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InferenceError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The gateway or authority service is unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InferenceError"
+                }
+              }
+            }
           }
         }
       }
@@ -54,7 +207,8 @@
     "securitySchemes": {
       "BearerAuth": {
         "type": "http",
-        "scheme": "bearer"
+        "scheme": "bearer",
+        "description": "Use an API key or a one-use delegation token. Delegated inference also requires the current workload assertion in X-OLP-Agent-Identity."
       }
     },
     "schemas": {
@@ -145,6 +299,95 @@
           }
         },
         "additionalProperties": false
+      },
+      "DelegationRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "scopes",
+          "allowed_routes"
+        ],
+        "properties": {
+          "scopes": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 1,
+            "items": {
+              "type": "string",
+              "enum": [
+                "inference"
+              ]
+            }
+          },
+          "allowed_routes": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 100,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "pattern": "^[a-z0-9][a-z0-9._-]{0,99}$"
+            }
+          },
+          "ttl_seconds": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0,
+            "maximum": 900,
+            "default": 300,
+            "description": "Grant lifetime in seconds. Omit or use 0 for the 300-second default. Principal expiry can shorten the lifetime."
+          }
+        }
+      },
+      "DelegationGrant": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "token",
+          "expires_at"
+        ],
+        "properties": {
+          "token": {
+            "type": "string",
+            "description": "One-use OLP delegation bearer token."
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "InferenceError": {
+        "type": "object",
+        "required": [
+          "error"
+        ],
+        "properties": {
+          "error": {
+            "type": "object",
+            "required": [
+              "message",
+              "type",
+              "param",
+              "code"
+            ],
+            "properties": {
+              "message": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string"
+              },
+              "param": {
+                "type": "string",
+                "nullable": true
+              },
+              "code": {
+                "type": "string"
+              }
+            }
+          }
+        }
       }
     }
   }

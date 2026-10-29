@@ -654,11 +654,18 @@ func checkKeyRoutes(r *http.Request, q Queryer, routes []string, projectID *stri
 	return nil
 }
 
+type DelegationAgentLimits struct {
+	ID       string
+	LookupID string
+	Limits   AdmissionLimits
+}
+
 // Authority is durable input for the independent runtime authority refresh. Lookup never
 // grants one positive scope through the other or applies unenforced limits.
 // LookupID is the public lookup segment of the secret, which identifies the key
 // in shared state that must never carry the key's internal identifier.
 type Authority struct {
+	DelegationAgentLimits     *DelegationAgentLimits
 	SnapshotID                string
 	AgentPrincipal            bool
 	DelegationAgentID         string
@@ -696,19 +703,70 @@ type Authority struct {
 	ExpiresAt, RevokedAt                                   *time.Time
 }
 
-func (a Authority) DelegatedInference(routes []string, agentID, pairDigest string, expiresAt time.Time, allowProviderState bool) *Authority {
-	delegated := a
-	delegated.Policy.Scopes = []string{"inference"}
-	delegated.Policy.AllowedRoutes = slices.Clone(routes)
-	delegated.Policy.AllowedRouteGroups = nil
-	delegated.Policy.AllowedToolsets = nil
-	delegated.Policy.AllowedAgents = nil
-	delegated.Policy.AllowProviderState = a.Policy.AllowProviderState && allowProviderState
-	delegated.allowedGroupRoutes = nil
-	delegated.DelegationAgentID = agentID
-	delegated.DelegationPairDigest = pairDigest
-	delegated.ExpiresAt = &expiresAt
-	return &delegated
+func (a Authority) DelegatedInference(routes []string, agent Authority, pairDigest string, expiresAt time.Time) *Authority {
+	return &Authority{
+		SnapshotID:           a.SnapshotID,
+		AgentPrincipal:       a.AgentPrincipal,
+		DelegationAgentID:    agent.ID,
+		DelegationPairDigest: pairDigest,
+		DelegationAgentLimits: &DelegationAgentLimits{ID: agent.ID, LookupID: agent.LimitsLookup(), Limits: AdmissionLimits{
+			RequestsPerMinute: agent.Policy.RequestsPerMinute,
+			TokensPerMinute:   agent.Policy.TokensPerMinute,
+			MaxConcurrency:    agent.Policy.MaxConcurrency,
+		}},
+		WorkloadIssuerID:          a.WorkloadIssuerID,
+		WorkloadDigest:            a.WorkloadDigest,
+		WorkloadRevision:          a.WorkloadRevision,
+		WorkloadMapping:           a.WorkloadMapping,
+		BudgetIncreases:           a.BudgetIncreases,
+		OrganizationID:            a.OrganizationID,
+		OrganizationBudget:        a.OrganizationBudget,
+		InstallationID:            a.InstallationID,
+		InstallationBudget:        a.InstallationBudget,
+		ProjectBudget:             a.ProjectBudget,
+		ProjectAttributionBudgets: a.ProjectAttributionBudgets,
+		Attribution:               a.Attribution,
+		ProjectAttributionPolicy:  a.ProjectAttributionPolicy,
+		EndUserDigest:             a.EndUserDigest,
+		ProjectEndUserPolicy:      a.ProjectEndUserPolicy,
+		ID:                        a.ID, Issuer: a.Issuer, LookupID: a.LookupID, LimitLookupID: a.LimitLookupID,
+		ProjectID:                   a.ProjectID,
+		BudgetGroupTemplate:         a.BudgetGroupTemplate,
+		BudgetGroupRPM:              a.BudgetGroupRPM,
+		BudgetGroupTPM:              a.BudgetGroupTPM,
+		BudgetGroupConcurrency:      a.BudgetGroupConcurrency,
+		BudgetGroupID:               a.BudgetGroupID,
+		BudgetGroupCostBasis:        a.BudgetGroupCostBasis,
+		BudgetGroupDailyCostLimit:   a.BudgetGroupDailyCostLimit,
+		BudgetGroupMonthlyCostLimit: a.BudgetGroupMonthlyCostLimit,
+		BudgetGroupWeeklyCostLimit:  a.BudgetGroupWeeklyCostLimit,
+		Policy: KeyPolicy{
+			Scopes: []string{"inference"}, AllowedRoutes: slices.Clone(routes),
+			ForbidResponseCache:     a.Policy.ForbidResponseCache || agent.Policy.ForbidResponseCache,
+			LimitTemplate:           a.Policy.LimitTemplate,
+			RouteLimits:             a.Policy.RouteLimits,
+			RegionalLimits:          a.Policy.RegionalLimits,
+			RotationIntervalDays:    a.Policy.RotationIntervalDays,
+			RequiredAttributionKeys: a.Policy.RequiredAttributionKeys,
+			AttributionDefaults:     a.Policy.AttributionDefaults,
+			AllowedCIDRs:            a.Policy.AllowedCIDRs,
+			AllowedAttributionKeys:  a.Policy.AllowedAttributionKeys,
+			RequestsPerMinute:       a.Policy.RequestsPerMinute,
+			TokensPerMinute:         a.Policy.TokensPerMinute,
+			MaxConcurrency:          a.Policy.MaxConcurrency,
+			DailyCostLimit:          a.Policy.DailyCostLimit,
+			MonthlyCostLimit:        a.Policy.MonthlyCostLimit,
+			WeeklyCostLimit:         a.Policy.WeeklyCostLimit,
+			ExpiresAt:               a.Policy.ExpiresAt,
+			CostBasis:               a.Policy.CostBasis,
+			AllowProviderState:      a.Policy.AllowProviderState && agent.Policy.AllowProviderState,
+			ResponseMetadata:        a.Policy.ResponseMetadata,
+			EndUserSource:           a.Policy.EndUserSource,
+			EndUserPolicy:           a.Policy.EndUserPolicy,
+			Priority:                a.Policy.Priority, MaxPriority: a.Policy.MaxPriority,
+		},
+		ExpiresAt: &expiresAt, RevokedAt: a.RevokedAt,
+	}
 }
 
 func (a Authority) Allows(scope, route string, projectID *string, now time.Time) bool {

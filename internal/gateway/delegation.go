@@ -15,6 +15,7 @@ import (
 type delegationRuntime interface {
 	CreateDelegation(context.Context, access.Authority, access.Authority, runtime.DelegationBounds) (runtime.DelegationGrant, error)
 	AuthenticateDelegation(context.Context, string, string) (*access.Authority, error)
+	ReauthenticateDelegation(context.Context, string, string) (*access.Authority, error)
 }
 
 type delegationAuthenticator struct {
@@ -25,6 +26,17 @@ type delegationAuthenticator struct {
 
 func (a delegationAuthenticator) Authenticate(token string) (*access.Authority, error) {
 	return a.runtime.AuthenticateDelegation(a.context, token, a.assertion)
+}
+
+func (s *Server) reauthenticateSession(ctx context.Context, x *call, token string) (*access.Authority, error) {
+	if x.authority.DelegationAgentID == "" {
+		return s.Runtime.Authenticate(token)
+	}
+	delegate, ok := s.Runtime.(delegationRuntime)
+	if !ok {
+		return nil, runtime.ErrInvalidKey
+	}
+	return delegate.ReauthenticateDelegation(ctx, token, x.request.delegationAssertion)
 }
 
 func (s *Server) createDelegation(w http.ResponseWriter, r *http.Request) {

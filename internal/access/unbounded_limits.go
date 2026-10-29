@@ -14,6 +14,7 @@ func (a *Authority) CostBudgetedForRoute(route string) bool {
 // TokenBudgeted reports token caps on the boundaries this request spends against.
 func (a *Authority) TokenBudgeted(route string) bool {
 	return a.Policy.TokensPerMinute != nil ||
+		a.DelegationAgentLimits != nil && a.DelegationAgentLimits.Limits.TokensPerMinute != nil ||
 		a.BudgetGroupID != nil && a.BudgetGroupTPM != nil ||
 		a.Policy.RouteLimits[route].TokensPerMinute != nil ||
 		a.Policy.EndUserPolicy.Limits(a.EndUserDigest).TokensPerMinute != nil ||

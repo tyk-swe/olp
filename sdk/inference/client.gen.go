@@ -12,10 +12,26 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/oapi-codegen/runtime"
 	openapi_types "github.com/oapi-codegen/runtime/types"
 )
+
+// Defines values for DelegationRequestScopes.
+const (
+	Inference DelegationRequestScopes = "inference"
+)
+
+// Valid indicates whether the value is a known member of the DelegationRequestScopes enum.
+func (e DelegationRequestScopes) Valid() bool {
+	switch e {
+	case Inference:
+		return true
+	default:
+		return false
+	}
+}
 
 // Defines values for PromptLabelReferenceLabel.
 const (
@@ -44,6 +60,36 @@ type ChatPromptRequest struct {
 	AdditionalProperties map[string]interface{}   `json:"-"`
 }
 
+// DelegationGrant defines model for DelegationGrant.
+type DelegationGrant struct {
+	ExpiresAt time.Time `json:"expires_at"`
+
+	// Token One-use OLP delegation bearer token.
+	Token string `json:"token"`
+}
+
+// DelegationRequest defines model for DelegationRequest.
+type DelegationRequest struct {
+	AllowedRoutes []string                  `json:"allowed_routes"`
+	Scopes        []DelegationRequestScopes `json:"scopes"`
+
+	// TtlSeconds Grant lifetime in seconds. Omit or use 0 for the 300-second default. Principal expiry can shorten the lifetime.
+	TtlSeconds *int64 `json:"ttl_seconds,omitempty"`
+}
+
+// DelegationRequestScopes defines model for DelegationRequest.Scopes.
+type DelegationRequestScopes string
+
+// InferenceError defines model for InferenceError.
+type InferenceError struct {
+	Error struct {
+		Code    string  `json:"code"`
+		Message string  `json:"message"`
+		Param   *string `json:"param"`
+		Type    string  `json:"type"`
+	} `json:"error"`
+}
+
 // PromptLabelReference defines model for PromptLabelReference.
 type PromptLabelReference struct {
 	// Id Project-owned prompt publication ID
@@ -70,8 +116,23 @@ type PublishedPromptReference struct {
 	union json.RawMessage
 }
 
+// CreateChatCompletionWithPromptParams defines parameters for CreateChatCompletionWithPrompt.
+type CreateChatCompletionWithPromptParams struct {
+	// XOLPAgentIdentity The current workload assertion is required when Authorization contains a one-use delegation token.
+	XOLPAgentIdentity *string `json:"X-OLP-Agent-Identity,omitempty"`
+}
+
+// CreateDelegationParams defines parameters for CreateDelegation.
+type CreateDelegationParams struct {
+	// XOLPDelegatingKey The API key that owns the delegated inference and has the delegate scope.
+	XOLPDelegatingKey string `json:"X-OLP-Delegating-Key"`
+}
+
 // CreateChatCompletionWithPromptJSONRequestBody defines body for CreateChatCompletionWithPrompt for application/json ContentType.
 type CreateChatCompletionWithPromptJSONRequestBody = ChatPromptRequest
+
+// CreateDelegationJSONRequestBody defines body for CreateDelegation for application/json ContentType.
+type CreateDelegationJSONRequestBody = DelegationRequest
 
 // Getter for additional properties for ChatPromptRequest. Returns the specified
 // element and whether it was found
@@ -295,7 +356,7 @@ type ClientInterface interface {
 	// Takes any type of body and a specified content type.
 	//
 	// Corresponds with POST /v1/chat/completions (the `CreateChatCompletionWithPrompt` operationId).
-	CreateChatCompletionWithPromptWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+	CreateChatCompletionWithPromptWithBody(ctx context.Context, params *CreateChatCompletionWithPromptParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// CreateChatCompletionWithPrompt Create a chat completion using a published OLP prompt
 	//
@@ -304,7 +365,25 @@ type ClientInterface interface {
 	// Takes a body of the `application/json` content type.
 	//
 	// Corresponds with POST /v1/chat/completions (the `CreateChatCompletionWithPrompt` operationId).
-	CreateChatCompletionWithPrompt(ctx context.Context, body CreateChatCompletionWithPromptJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+	CreateChatCompletionWithPrompt(ctx context.Context, params *CreateChatCompletionWithPromptParams, body CreateChatCompletionWithPromptJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// CreateDelegationWithBody Delegate a key to an authenticated workload agent
+	//
+	// Exchange an agent workload assertion and a delegating API key for a one-use inference token. Both principals must belong to the same project and authorize every requested route.
+	//
+	// Takes any type of body and a specified content type.
+	//
+	// Corresponds with POST /v1/delegations (the `CreateDelegation` operationId).
+	CreateDelegationWithBody(ctx context.Context, params *CreateDelegationParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// CreateDelegation Delegate a key to an authenticated workload agent
+	//
+	// Exchange an agent workload assertion and a delegating API key for a one-use inference token. Both principals must belong to the same project and authorize every requested route.
+	//
+	// Takes a body of the `application/json` content type.
+	//
+	// Corresponds with POST /v1/delegations (the `CreateDelegation` operationId).
+	CreateDelegation(ctx context.Context, params *CreateDelegationParams, body CreateDelegationJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 }
 
 // CreateChatCompletionWithPromptWithBody Create a chat completion using a published OLP prompt
@@ -314,8 +393,8 @@ type ClientInterface interface {
 // Takes any type of body and a specified content type.
 //
 // Corresponds with POST /v1/chat/completions (the `CreateChatCompletionWithPrompt` operationId).
-func (c *Client) CreateChatCompletionWithPromptWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewCreateChatCompletionWithPromptRequestWithBody(c.Server, contentType, body)
+func (c *Client) CreateChatCompletionWithPromptWithBody(ctx context.Context, params *CreateChatCompletionWithPromptParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCreateChatCompletionWithPromptRequestWithBody(c.Server, params, contentType, body)
 	if err != nil {
 		return nil, err
 	}
@@ -333,8 +412,46 @@ func (c *Client) CreateChatCompletionWithPromptWithBody(ctx context.Context, con
 // Takes a body of the `application/json` content type.
 //
 // Corresponds with POST /v1/chat/completions (the `CreateChatCompletionWithPrompt` operationId).
-func (c *Client) CreateChatCompletionWithPrompt(ctx context.Context, body CreateChatCompletionWithPromptJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewCreateChatCompletionWithPromptRequest(c.Server, body)
+func (c *Client) CreateChatCompletionWithPrompt(ctx context.Context, params *CreateChatCompletionWithPromptParams, body CreateChatCompletionWithPromptJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCreateChatCompletionWithPromptRequest(c.Server, params, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// CreateDelegationWithBody Delegate a key to an authenticated workload agent
+//
+// Exchange an agent workload assertion and a delegating API key for a one-use inference token. Both principals must belong to the same project and authorize every requested route.
+//
+// Takes any type of body and a specified content type.
+//
+// Corresponds with POST /v1/delegations (the `CreateDelegation` operationId).
+func (c *Client) CreateDelegationWithBody(ctx context.Context, params *CreateDelegationParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCreateDelegationRequestWithBody(c.Server, params, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// CreateDelegation Delegate a key to an authenticated workload agent
+//
+// Exchange an agent workload assertion and a delegating API key for a one-use inference token. Both principals must belong to the same project and authorize every requested route.
+//
+// Takes a body of the `application/json` content type.
+//
+// Corresponds with POST /v1/delegations (the `CreateDelegation` operationId).
+func (c *Client) CreateDelegation(ctx context.Context, params *CreateDelegationParams, body CreateDelegationJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCreateDelegationRequest(c.Server, params, body)
 	if err != nil {
 		return nil, err
 	}
@@ -346,18 +463,18 @@ func (c *Client) CreateChatCompletionWithPrompt(ctx context.Context, body Create
 }
 
 // NewCreateChatCompletionWithPromptRequest calls the generic CreateChatCompletionWithPrompt builder with application/json body
-func NewCreateChatCompletionWithPromptRequest(server string, body CreateChatCompletionWithPromptJSONRequestBody) (*http.Request, error) {
+func NewCreateChatCompletionWithPromptRequest(server string, params *CreateChatCompletionWithPromptParams, body CreateChatCompletionWithPromptJSONRequestBody) (*http.Request, error) {
 	var bodyReader io.Reader
 	buf, err := json.Marshal(body)
 	if err != nil {
 		return nil, err
 	}
 	bodyReader = bytes.NewReader(buf)
-	return NewCreateChatCompletionWithPromptRequestWithBody(server, "application/json", bodyReader)
+	return NewCreateChatCompletionWithPromptRequestWithBody(server, params, "application/json", bodyReader)
 }
 
 // NewCreateChatCompletionWithPromptRequestWithBody constructs an http.Request for the CreateChatCompletionWithPrompt method, with any body, and a specified content type
-func NewCreateChatCompletionWithPromptRequestWithBody(server string, contentType string, body io.Reader) (*http.Request, error) {
+func NewCreateChatCompletionWithPromptRequestWithBody(server string, params *CreateChatCompletionWithPromptParams, contentType string, body io.Reader) (*http.Request, error) {
 	var err error
 
 	serverURL, err := url.Parse(server)
@@ -381,6 +498,74 @@ func NewCreateChatCompletionWithPromptRequestWithBody(server string, contentType
 	}
 
 	req.Header.Add("Content-Type", contentType)
+
+	if params != nil {
+
+		if params.XOLPAgentIdentity != nil {
+			var headerParam0 string
+
+			headerParam0, err = runtime.StyleParamWithOptions("simple", false, "X-OLP-Agent-Identity", *params.XOLPAgentIdentity, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationHeader, Type: "string", Format: ""})
+			if err != nil {
+				return nil, err
+			}
+
+			req.Header.Set("X-OLP-Agent-Identity", headerParam0)
+		}
+
+	}
+
+	return req, nil
+}
+
+// NewCreateDelegationRequest calls the generic CreateDelegation builder with application/json body
+func NewCreateDelegationRequest(server string, params *CreateDelegationParams, body CreateDelegationJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewCreateDelegationRequestWithBody(server, params, "application/json", bodyReader)
+}
+
+// NewCreateDelegationRequestWithBody constructs an http.Request for the CreateDelegation method, with any body, and a specified content type
+func NewCreateDelegationRequestWithBody(server string, params *CreateDelegationParams, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v1/delegations")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	if params != nil {
+
+		var headerParam0 string
+
+		headerParam0, err = runtime.StyleParamWithOptions("simple", false, "X-OLP-Delegating-Key", params.XOLPDelegatingKey, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationHeader, Type: "string", Format: ""})
+		if err != nil {
+			return nil, err
+		}
+
+		req.Header.Set("X-OLP-Delegating-Key", headerParam0)
+
+	}
 
 	return req, nil
 }
@@ -436,7 +621,7 @@ type ClientWithResponsesInterface interface {
 	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
 	//
 	// Corresponds with POST /v1/chat/completions (the `CreateChatCompletionWithPrompt` operationId).
-	CreateChatCompletionWithPromptWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreateChatCompletionWithPromptResponse, error)
+	CreateChatCompletionWithPromptWithBodyWithResponse(ctx context.Context, params *CreateChatCompletionWithPromptParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreateChatCompletionWithPromptResponse, error)
 
 	// CreateChatCompletionWithPromptWithResponse Create a chat completion using a published OLP prompt
 	//
@@ -445,7 +630,25 @@ type ClientWithResponsesInterface interface {
 	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
 	//
 	// Corresponds with POST /v1/chat/completions (the `CreateChatCompletionWithPrompt` operationId).
-	CreateChatCompletionWithPromptWithResponse(ctx context.Context, body CreateChatCompletionWithPromptJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateChatCompletionWithPromptResponse, error)
+	CreateChatCompletionWithPromptWithResponse(ctx context.Context, params *CreateChatCompletionWithPromptParams, body CreateChatCompletionWithPromptJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateChatCompletionWithPromptResponse, error)
+
+	// CreateDelegationWithBodyWithResponse Delegate a key to an authenticated workload agent
+	//
+	// Exchange an agent workload assertion and a delegating API key for a one-use inference token. Both principals must belong to the same project and authorize every requested route.
+	//
+	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /v1/delegations (the `CreateDelegation` operationId).
+	CreateDelegationWithBodyWithResponse(ctx context.Context, params *CreateDelegationParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreateDelegationResponse, error)
+
+	// CreateDelegationWithResponse Delegate a key to an authenticated workload agent
+	//
+	// Exchange an agent workload assertion and a delegating API key for a one-use inference token. Both principals must belong to the same project and authorize every requested route.
+	//
+	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /v1/delegations (the `CreateDelegation` operationId).
+	CreateDelegationWithResponse(ctx context.Context, params *CreateDelegationParams, body CreateDelegationJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateDelegationResponse, error)
 }
 
 type CreateChatCompletionWithPromptResponse struct {
@@ -453,11 +656,53 @@ type CreateChatCompletionWithPromptResponse struct {
 	HTTPResponse *http.Response
 	// JSON200 the response for an HTTP 200 `application/json` response
 	JSON200 *map[string]interface{}
+	// JSON400 the response for an HTTP 400 `application/json` response
+	JSON400 *InferenceError
+	// JSON401 the response for an HTTP 401 `application/json` response
+	JSON401 *InferenceError
+	// JSON403 the response for an HTTP 403 `application/json` response
+	JSON403 *InferenceError
+	// JSON404 the response for an HTTP 404 `application/json` response
+	JSON404 *InferenceError
+	// JSON429 the response for an HTTP 429 `application/json` response
+	JSON429 *InferenceError
+	// JSON503 the response for an HTTP 503 `application/json` response
+	JSON503 *InferenceError
 }
 
 // GetJSON200 returns the response for an HTTP 200 `application/json` response
 func (r CreateChatCompletionWithPromptResponse) GetJSON200() *map[string]interface{} {
 	return r.JSON200
+}
+
+// GetJSON400 returns the response for an HTTP 400 `application/json` response
+func (r CreateChatCompletionWithPromptResponse) GetJSON400() *InferenceError {
+	return r.JSON400
+}
+
+// GetJSON401 returns the response for an HTTP 401 `application/json` response
+func (r CreateChatCompletionWithPromptResponse) GetJSON401() *InferenceError {
+	return r.JSON401
+}
+
+// GetJSON403 returns the response for an HTTP 403 `application/json` response
+func (r CreateChatCompletionWithPromptResponse) GetJSON403() *InferenceError {
+	return r.JSON403
+}
+
+// GetJSON404 returns the response for an HTTP 404 `application/json` response
+func (r CreateChatCompletionWithPromptResponse) GetJSON404() *InferenceError {
+	return r.JSON404
+}
+
+// GetJSON429 returns the response for an HTTP 429 `application/json` response
+func (r CreateChatCompletionWithPromptResponse) GetJSON429() *InferenceError {
+	return r.JSON429
+}
+
+// GetJSON503 returns the response for an HTTP 503 `application/json` response
+func (r CreateChatCompletionWithPromptResponse) GetJSON503() *InferenceError {
+	return r.JSON503
 }
 
 // GetBody returns the raw response body bytes
@@ -489,6 +734,75 @@ func (r CreateChatCompletionWithPromptResponse) ContentType() string {
 	return ""
 }
 
+type CreateDelegationResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON201 the response for an HTTP 201 `application/json` response
+	JSON201 *DelegationGrant
+	// JSON400 the response for an HTTP 400 `application/json` response
+	JSON400 *InferenceError
+	// JSON401 the response for an HTTP 401 `application/json` response
+	JSON401 *InferenceError
+	// JSON403 the response for an HTTP 403 `application/json` response
+	JSON403 *InferenceError
+	// JSON503 the response for an HTTP 503 `application/json` response
+	JSON503 *InferenceError
+}
+
+// GetJSON201 returns the response for an HTTP 201 `application/json` response
+func (r CreateDelegationResponse) GetJSON201() *DelegationGrant {
+	return r.JSON201
+}
+
+// GetJSON400 returns the response for an HTTP 400 `application/json` response
+func (r CreateDelegationResponse) GetJSON400() *InferenceError {
+	return r.JSON400
+}
+
+// GetJSON401 returns the response for an HTTP 401 `application/json` response
+func (r CreateDelegationResponse) GetJSON401() *InferenceError {
+	return r.JSON401
+}
+
+// GetJSON403 returns the response for an HTTP 403 `application/json` response
+func (r CreateDelegationResponse) GetJSON403() *InferenceError {
+	return r.JSON403
+}
+
+// GetJSON503 returns the response for an HTTP 503 `application/json` response
+func (r CreateDelegationResponse) GetJSON503() *InferenceError {
+	return r.JSON503
+}
+
+// GetBody returns the raw response body bytes
+func (r CreateDelegationResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r CreateDelegationResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r CreateDelegationResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r CreateDelegationResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
 // CreateChatCompletionWithPromptWithBodyWithResponse Create a chat completion using a published OLP prompt
 //
 // For transformed routes, the published prompt replaces explicit messages. Other chat fields use the provider contract.
@@ -496,8 +810,8 @@ func (r CreateChatCompletionWithPromptResponse) ContentType() string {
 // Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
 //
 // Corresponds with POST /v1/chat/completions (the `CreateChatCompletionWithPrompt` operationId).
-func (c *ClientWithResponses) CreateChatCompletionWithPromptWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreateChatCompletionWithPromptResponse, error) {
-	rsp, err := c.CreateChatCompletionWithPromptWithBody(ctx, contentType, body, reqEditors...)
+func (c *ClientWithResponses) CreateChatCompletionWithPromptWithBodyWithResponse(ctx context.Context, params *CreateChatCompletionWithPromptParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreateChatCompletionWithPromptResponse, error) {
+	rsp, err := c.CreateChatCompletionWithPromptWithBody(ctx, params, contentType, body, reqEditors...)
 	if err != nil {
 		return nil, err
 	}
@@ -511,12 +825,42 @@ func (c *ClientWithResponses) CreateChatCompletionWithPromptWithBodyWithResponse
 // Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
 //
 // Corresponds with POST /v1/chat/completions (the `CreateChatCompletionWithPrompt` operationId).
-func (c *ClientWithResponses) CreateChatCompletionWithPromptWithResponse(ctx context.Context, body CreateChatCompletionWithPromptJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateChatCompletionWithPromptResponse, error) {
-	rsp, err := c.CreateChatCompletionWithPrompt(ctx, body, reqEditors...)
+func (c *ClientWithResponses) CreateChatCompletionWithPromptWithResponse(ctx context.Context, params *CreateChatCompletionWithPromptParams, body CreateChatCompletionWithPromptJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateChatCompletionWithPromptResponse, error) {
+	rsp, err := c.CreateChatCompletionWithPrompt(ctx, params, body, reqEditors...)
 	if err != nil {
 		return nil, err
 	}
 	return ParseCreateChatCompletionWithPromptResponse(rsp)
+}
+
+// CreateDelegationWithBodyWithResponse Delegate a key to an authenticated workload agent
+//
+// Exchange an agent workload assertion and a delegating API key for a one-use inference token. Both principals must belong to the same project and authorize every requested route.
+//
+// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /v1/delegations (the `CreateDelegation` operationId).
+func (c *ClientWithResponses) CreateDelegationWithBodyWithResponse(ctx context.Context, params *CreateDelegationParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreateDelegationResponse, error) {
+	rsp, err := c.CreateDelegationWithBody(ctx, params, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseCreateDelegationResponse(rsp)
+}
+
+// CreateDelegationWithResponse Delegate a key to an authenticated workload agent
+//
+// Exchange an agent workload assertion and a delegating API key for a one-use inference token. Both principals must belong to the same project and authorize every requested route.
+//
+// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /v1/delegations (the `CreateDelegation` operationId).
+func (c *ClientWithResponses) CreateDelegationWithResponse(ctx context.Context, params *CreateDelegationParams, body CreateDelegationJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateDelegationResponse, error) {
+	rsp, err := c.CreateDelegation(ctx, params, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseCreateDelegationResponse(rsp)
 }
 
 // ParseCreateChatCompletionWithPromptResponse parses an HTTP response from a CreateChatCompletionWithPromptWithResponse call
@@ -540,11 +884,104 @@ func ParseCreateChatCompletionWithPromptResponse(rsp *http.Response) (*CreateCha
 		}
 		response.JSON200 = &dest
 
-	case rsp.StatusCode == 400:
-		break // No content-type
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest InferenceError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest InferenceError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest InferenceError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest InferenceError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 429:
+		var dest InferenceError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON429 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
+		var dest InferenceError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON503 = &dest
 
 	case rsp.StatusCode == 200:
 		// Content-type (text/event-stream) unsupported
+
+	}
+
+	return response, nil
+}
+
+// ParseCreateDelegationResponse parses an HTTP response from a CreateDelegationWithResponse call
+func ParseCreateDelegationResponse(rsp *http.Response) (*CreateDelegationResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &CreateDelegationResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 201:
+		var dest DelegationGrant
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON201 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest InferenceError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest InferenceError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest InferenceError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
+		var dest InferenceError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON503 = &dest
 
 	}
 

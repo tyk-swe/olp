@@ -241,12 +241,13 @@ var requestIDPattern = regexp.MustCompile(`^[A-Za-z0-9._-]{1,128}$`)
 
 // request carries per-request identity shared by handlers.
 type request struct {
-	guardrailMetadata bool
-	cacheDirectives   string
-	callerCredential  *callerCredential
-	body              *measuredBody
-	id                string
-	durableID         string
+	delegationAssertion string
+	guardrailMetadata   bool
+	cacheDirectives     string
+	callerCredential    *callerCredential
+	body                *measuredBody
+	id                  string
+	durableID           string
 	// minted records that this gateway chose the request id. A caller may name
 	// its own, and nothing stops two callers from naming the same one.
 	minted    bool
@@ -294,7 +295,7 @@ func (s *Server) begin(w http.ResponseWriter, r *http.Request) request {
 		measured = &measuredBody{ReadCloser: r.Body, declared: r.ContentLength}
 		r.Body = measured
 	}
-	return request{cacheDirectives: strings.Join(r.Header.Values("X-OLP-Cache"), ","), guardrailMetadata: r.Header.Get("X-OLP-Guardrails") == "true", callerCredential: readCallerCredential(r.Header), body: measured, id: id, minted: minted, clientIP: ClientIP(r, s.cfg.TrustedProxies), startedAt: s.now(), release: release, trace: telemetry.RequestFromContext(r.Context()), counted: s.counted}
+	return request{delegationAssertion: strings.TrimSpace(r.Header.Get("X-OLP-Agent-Identity")), cacheDirectives: strings.Join(r.Header.Values("X-OLP-Cache"), ","), guardrailMetadata: r.Header.Get("X-OLP-Guardrails") == "true", callerCredential: readCallerCredential(r.Header), body: measured, id: id, minted: minted, clientIP: ClientIP(r, s.cfg.TrustedProxies), startedAt: s.now(), release: release, trace: telemetry.RequestFromContext(r.Context()), counted: s.counted}
 }
 
 func sameOrigin(r *http.Request, origin string) bool {

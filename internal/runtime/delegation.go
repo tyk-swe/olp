@@ -41,9 +41,9 @@ func (m *Manager) CreateDelegation(ctx context.Context, agent, key access.Author
 		if !access.RouteSlug.MatchString(route) || slices.Contains(bounds.AllowedRoutes[:index], route) {
 			return DelegationGrant{}, ErrDelegationBounds
 		}
-		if !agent.Allows("inference", route, agent.ProjectID, now) || !key.Allows("inference", route, key.ProjectID, now) {
-			return DelegationGrant{}, access.Forbidden()
-		}
+	}
+	if !delegationRoutesAllowed(agent, key, bounds.AllowedRoutes, now) {
+		return DelegationGrant{}, access.Forbidden()
 	}
 	expiry := boundDelegationExpiry(boundDelegationExpiry(now.Add(delegationTTL(bounds.TTLSeconds)), agent.ExpiresAt), key.ExpiresAt)
 	token := "olpd_" + secrets.Token()
@@ -62,6 +62,14 @@ func (m *Manager) CreateDelegation(ctx context.Context, agent, key access.Author
 }
 
 func (m *Manager) AuthenticateDelegation(ctx context.Context, token, assertion string) (*access.Authority, error) {
+	return m.authenticateDelegation(ctx, token, assertion, false)
+}
+
+func (m *Manager) ReauthenticateDelegation(ctx context.Context, token, assertion string) (*access.Authority, error) {
+	return m.authenticateDelegation(ctx, token, assertion, true)
+}
+
+func (m *Manager) authenticateDelegation(ctx context.Context, token, assertion string, consumed bool) (*access.Authority, error) {
 	agent, err := m.Authenticate(assertion)
 	if err != nil {
 		return nil, err
@@ -77,7 +85,7 @@ func (m *Manager) AuthenticateDelegation(ctx context.Context, token, assertion s
 	var keyID, project, agentID, revision string
 	var routes []string
 	var expires time.Time
-	queryErr := tx.QueryRow(ctx, `SELECT api_key_id::text,project_id::text,agent_id::text,issuer_revision::text,allowed_routes,expires_at FROM olp.agent_delegations WHERE token_digest=$1 AND consumed_at IS NULL AND revoked_at IS NULL AND expires_at>now() FOR UPDATE`, m.auth.Digest(secrets.DelegationTokenDigest, token)).Scan(&keyID, &project, &agentID, &revision, &routes, &expires)
+	queryErr := tx.QueryRow(ctx, `SELECT api_key_id::text,project_id::text,agent_id::text,issuer_revision::text,allowed_routes,expires_at FROM olp.agent_delegations WHERE token_digest=$1 AND (consumed_at IS NOT NULL)=$2 AND revoked_at IS NULL AND expires_at>now() FOR UPDATE`, m.auth.Digest(secrets.DelegationTokenDigest, token), consumed).Scan(&keyID, &project, &agentID, &revision, &routes, &expires)
 	if errors.Is(queryErr, pgx.ErrNoRows) {
 		return nil, ErrInvalidKey
 	}
@@ -94,19 +102,19 @@ func (m *Manager) AuthenticateDelegation(ctx context.Context, token, assertion s
 		return nil, ErrInvalidKey
 	}
 	now := time.Now()
-	for _, route := range routes {
-		if !agent.Allows("inference", route, agent.ProjectID, now) || !key.Allows("inference", route, key.ProjectID, now) {
-			return nil, ErrInvalidKey
-		}
+	if !delegationRoutesAllowed(*agent, key, routes, now) {
+		return nil, ErrInvalidKey
 	}
-	if _, err := tx.Exec(ctx, `UPDATE olp.agent_delegations SET consumed_at=now() WHERE token_digest=$1`, m.auth.Digest(secrets.DelegationTokenDigest, token)); err != nil {
-		return nil, ErrStaleAuthority
+	if !consumed {
+		if _, err := tx.Exec(ctx, `UPDATE olp.agent_delegations SET consumed_at=now() WHERE token_digest=$1`, m.auth.Digest(secrets.DelegationTokenDigest, token)); err != nil {
+			return nil, ErrStaleAuthority
+		}
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return nil, ErrStaleAuthority
 	}
 	pair, _ := json.Marshal([3]string{project, key.ID, agent.ID})
-	return key.DelegatedInference(routes, agent.ID, hex.EncodeToString(m.auth.Digest(secrets.DelegationPairDigest, string(pair))), boundDelegationExpiry(expires, agent.ExpiresAt), agent.Policy.AllowProviderState), nil
+	return key.DelegatedInference(routes, *agent, hex.EncodeToString(m.auth.Digest(secrets.DelegationPairDigest, string(pair))), boundDelegationExpiry(expires, agent.ExpiresAt)), nil
 }
 
 func (m *Manager) delegationTransaction(ctx context.Context, expected string) (pgx.Tx, error) {
@@ -126,6 +134,15 @@ func (m *Manager) delegationTransaction(ctx context.Context, expected string) (p
 		return nil, ErrStaleAuthority
 	}
 	return tx, nil
+}
+
+func delegationRoutesAllowed(agent, key access.Authority, routes []string, now time.Time) bool {
+	for _, route := range routes {
+		if !agent.Allows("inference", route, agent.ProjectID, now) || !key.Allows("inference", route, key.ProjectID, now) {
+			return false
+		}
+	}
+	return true
 }
 
 func delegationTTL(seconds int64) time.Duration {
