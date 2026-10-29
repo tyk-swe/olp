@@ -54,8 +54,8 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Send a message to or read a task from a published A2A agent
-         * @description Supports A2A 1.0 JSON-RPC SendMessage and GetTask. Requires the agents scope and an explicit allowlist entry. OLP task IDs are bound to the initiating key and project.
+         * Send a message to or read and subscribe to a task from a published A2A agent
+         * @description Supports A2A 1.0 JSON-RPC SendMessage, SendStreamingMessage, GetTask, and SubscribeToTask. Requires the agents scope and an explicit allowlist entry. OLP task IDs are bound to the initiating key and project. Streaming methods return events as they arrive, with a one MiB maximum per event. Disconnecting does not cancel the upstream task.
          */
         post: operations["callA2AAgent"];
         delete?: never;
@@ -220,7 +220,7 @@ export interface components {
             jsonrpc: "2.0";
             id: string | number;
             /** @enum {string} */
-            method: "SendMessage" | "GetTask";
+            method: "SendMessage" | "SendStreamingMessage" | "GetTask" | "SubscribeToTask";
             /** @description A2A 1.0 method parameters. Task references must use an OLP task ID; push notifications and tenant selection are not supported. */
             params: {
                 [key: string]: unknown;
@@ -532,13 +532,15 @@ export interface operations {
             };
         };
         responses: {
-            /** @description A2A result or JSON-RPC error */
+            /** @description A2A result, JSON-RPC error, or stream of JSON-RPC event frames */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
                     "application/json": components["schemas"]["A2AResponse"];
+                    /** @description Server-sent A2A JSON-RPC events, in upstream order. Oversized events and revoked authorization produce an error frame. */
+                    "text/event-stream": string;
                 };
             };
             /** @description The JSON-RPC request is invalid */

@@ -178,8 +178,8 @@
     "/a2a/{agent}": {
       "post": {
         "operationId": "callA2AAgent",
-        "summary": "Send a message to or read a task from a published A2A agent",
-        "description": "Supports A2A 1.0 JSON-RPC SendMessage and GetTask. Requires the agents scope and an explicit allowlist entry. OLP task IDs are bound to the initiating key and project.",
+        "summary": "Send a message to or read and subscribe to a task from a published A2A agent",
+        "description": "Supports A2A 1.0 JSON-RPC SendMessage, SendStreamingMessage, GetTask, and SubscribeToTask. Requires the agents scope and an explicit allowlist entry. OLP task IDs are bound to the initiating key and project. Streaming methods return events as they arrive, with a one MiB maximum per event. Disconnecting does not cancel the upstream task.",
         "parameters": [
           {
             "name": "agent",
@@ -209,12 +209,18 @@
         },
         "responses": {
           "200": {
-            "description": "A2A result or JSON-RPC error",
+            "description": "A2A result, JSON-RPC error, or stream of JSON-RPC event frames",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/A2AResponse"
                 }
+              },
+              "text/event-stream": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Server-sent A2A JSON-RPC events, in upstream order. Oversized events and revoked authorization produce an error frame."
               }
             }
           },
@@ -979,7 +985,9 @@
             "type": "string",
             "enum": [
               "SendMessage",
-              "GetTask"
+              "SendStreamingMessage",
+              "GetTask",
+              "SubscribeToTask"
             ]
           },
           "params": {

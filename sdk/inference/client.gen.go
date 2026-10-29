@@ -65,8 +65,10 @@ func (e A2ARequestJsonrpc) Valid() bool {
 
 // Defines values for A2ARequestMethod.
 const (
-	GetTask     A2ARequestMethod = "GetTask"
-	SendMessage A2ARequestMethod = "SendMessage"
+	GetTask              A2ARequestMethod = "GetTask"
+	SendMessage          A2ARequestMethod = "SendMessage"
+	SendStreamingMessage A2ARequestMethod = "SendStreamingMessage"
+	SubscribeToTask      A2ARequestMethod = "SubscribeToTask"
 )
 
 // Valid indicates whether the value is a known member of the A2ARequestMethod enum.
@@ -75,6 +77,10 @@ func (e A2ARequestMethod) Valid() bool {
 	case GetTask:
 		return true
 	case SendMessage:
+		return true
+	case SendStreamingMessage:
+		return true
+	case SubscribeToTask:
 		return true
 	default:
 		return false
@@ -1507,18 +1513,18 @@ func WithRequestEditorFn(fn RequestEditorFn) ClientOption {
 // The interface specification for the client above.
 type ClientInterface interface {
 
-	// CallA2AAgentWithBody Send a message to or read a task from a published A2A agent
+	// CallA2AAgentWithBody Send a message to or read and subscribe to a task from a published A2A agent
 	//
-	// Supports A2A 1.0 JSON-RPC SendMessage and GetTask. Requires the agents scope and an explicit allowlist entry. OLP task IDs are bound to the initiating key and project.
+	// Supports A2A 1.0 JSON-RPC SendMessage, SendStreamingMessage, GetTask, and SubscribeToTask. Requires the agents scope and an explicit allowlist entry. OLP task IDs are bound to the initiating key and project. Streaming methods return events as they arrive, with a one MiB maximum per event. Disconnecting does not cancel the upstream task.
 	//
 	// Takes any type of body and a specified content type.
 	//
 	// Corresponds with POST /a2a/{agent} (the `CallA2AAgent` operationId).
 	CallA2AAgentWithBody(ctx context.Context, agent openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
 
-	// CallA2AAgent Send a message to or read a task from a published A2A agent
+	// CallA2AAgent Send a message to or read and subscribe to a task from a published A2A agent
 	//
-	// Supports A2A 1.0 JSON-RPC SendMessage and GetTask. Requires the agents scope and an explicit allowlist entry. OLP task IDs are bound to the initiating key and project.
+	// Supports A2A 1.0 JSON-RPC SendMessage, SendStreamingMessage, GetTask, and SubscribeToTask. Requires the agents scope and an explicit allowlist entry. OLP task IDs are bound to the initiating key and project. Streaming methods return events as they arrive, with a one MiB maximum per event. Disconnecting does not cancel the upstream task.
 	//
 	// Takes a body of the `application/json` content type.
 	//
@@ -1641,9 +1647,9 @@ type ClientInterface interface {
 	CreateResponseWithPrompt(ctx context.Context, params *CreateResponseWithPromptParams, body CreateResponseWithPromptJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 }
 
-// CallA2AAgentWithBody Send a message to or read a task from a published A2A agent
+// CallA2AAgentWithBody Send a message to or read and subscribe to a task from a published A2A agent
 //
-// Supports A2A 1.0 JSON-RPC SendMessage and GetTask. Requires the agents scope and an explicit allowlist entry. OLP task IDs are bound to the initiating key and project.
+// Supports A2A 1.0 JSON-RPC SendMessage, SendStreamingMessage, GetTask, and SubscribeToTask. Requires the agents scope and an explicit allowlist entry. OLP task IDs are bound to the initiating key and project. Streaming methods return events as they arrive, with a one MiB maximum per event. Disconnecting does not cancel the upstream task.
 //
 // Takes any type of body and a specified content type.
 //
@@ -1660,9 +1666,9 @@ func (c *Client) CallA2AAgentWithBody(ctx context.Context, agent openapi_types.U
 	return c.Client.Do(req)
 }
 
-// CallA2AAgent Send a message to or read a task from a published A2A agent
+// CallA2AAgent Send a message to or read and subscribe to a task from a published A2A agent
 //
-// Supports A2A 1.0 JSON-RPC SendMessage and GetTask. Requires the agents scope and an explicit allowlist entry. OLP task IDs are bound to the initiating key and project.
+// Supports A2A 1.0 JSON-RPC SendMessage, SendStreamingMessage, GetTask, and SubscribeToTask. Requires the agents scope and an explicit allowlist entry. OLP task IDs are bound to the initiating key and project. Streaming methods return events as they arrive, with a one MiB maximum per event. Disconnecting does not cancel the upstream task.
 //
 // Takes a body of the `application/json` content type.
 //
@@ -2404,18 +2410,18 @@ func WithBaseURL(baseURL string) ClientOption {
 // ClientWithResponsesInterface is the interface specification for the client with responses above.
 type ClientWithResponsesInterface interface {
 
-	// CallA2AAgentWithBodyWithResponse Send a message to or read a task from a published A2A agent
+	// CallA2AAgentWithBodyWithResponse Send a message to or read and subscribe to a task from a published A2A agent
 	//
-	// Supports A2A 1.0 JSON-RPC SendMessage and GetTask. Requires the agents scope and an explicit allowlist entry. OLP task IDs are bound to the initiating key and project.
+	// Supports A2A 1.0 JSON-RPC SendMessage, SendStreamingMessage, GetTask, and SubscribeToTask. Requires the agents scope and an explicit allowlist entry. OLP task IDs are bound to the initiating key and project. Streaming methods return events as they arrive, with a one MiB maximum per event. Disconnecting does not cancel the upstream task.
 	//
 	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
 	//
 	// Corresponds with POST /a2a/{agent} (the `CallA2AAgent` operationId).
 	CallA2AAgentWithBodyWithResponse(ctx context.Context, agent openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CallA2AAgentResponse, error)
 
-	// CallA2AAgentWithResponse Send a message to or read a task from a published A2A agent
+	// CallA2AAgentWithResponse Send a message to or read and subscribe to a task from a published A2A agent
 	//
-	// Supports A2A 1.0 JSON-RPC SendMessage and GetTask. Requires the agents scope and an explicit allowlist entry. OLP task IDs are bound to the initiating key and project.
+	// Supports A2A 1.0 JSON-RPC SendMessage, SendStreamingMessage, GetTask, and SubscribeToTask. Requires the agents scope and an explicit allowlist entry. OLP task IDs are bound to the initiating key and project. Streaming methods return events as they arrive, with a one MiB maximum per event. Disconnecting does not cancel the upstream task.
 	//
 	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
 	//
@@ -3141,9 +3147,9 @@ func (r CreateResponseWithPromptResponse) ContentType() string {
 	return ""
 }
 
-// CallA2AAgentWithBodyWithResponse Send a message to or read a task from a published A2A agent
+// CallA2AAgentWithBodyWithResponse Send a message to or read and subscribe to a task from a published A2A agent
 //
-// Supports A2A 1.0 JSON-RPC SendMessage and GetTask. Requires the agents scope and an explicit allowlist entry. OLP task IDs are bound to the initiating key and project.
+// Supports A2A 1.0 JSON-RPC SendMessage, SendStreamingMessage, GetTask, and SubscribeToTask. Requires the agents scope and an explicit allowlist entry. OLP task IDs are bound to the initiating key and project. Streaming methods return events as they arrive, with a one MiB maximum per event. Disconnecting does not cancel the upstream task.
 //
 // Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
 //
@@ -3156,9 +3162,9 @@ func (c *ClientWithResponses) CallA2AAgentWithBodyWithResponse(ctx context.Conte
 	return ParseCallA2AAgentResponse(rsp)
 }
 
-// CallA2AAgentWithResponse Send a message to or read a task from a published A2A agent
+// CallA2AAgentWithResponse Send a message to or read and subscribe to a task from a published A2A agent
 //
-// Supports A2A 1.0 JSON-RPC SendMessage and GetTask. Requires the agents scope and an explicit allowlist entry. OLP task IDs are bound to the initiating key and project.
+// Supports A2A 1.0 JSON-RPC SendMessage, SendStreamingMessage, GetTask, and SubscribeToTask. Requires the agents scope and an explicit allowlist entry. OLP task IDs are bound to the initiating key and project. Streaming methods return events as they arrive, with a one MiB maximum per event. Disconnecting does not cancel the upstream task.
 //
 // Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
 //
@@ -3398,6 +3404,9 @@ func ParseCallA2AAgentResponse(rsp *http.Response) (*CallA2AAgentResponse, error
 
 	case rsp.StatusCode == 502:
 		break // No content-type
+
+	case rsp.StatusCode == 200:
+		// Content-type (text/event-stream) unsupported
 
 	}
 
