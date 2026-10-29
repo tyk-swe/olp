@@ -1792,3 +1792,67 @@ func TestToolCallIdentifiersPreserveSupportedBytesAndRejectControls(t *testing.T
 		})
 	}
 }
+
+func TestWorkflowResolvesAndRunsOnlyAuthorizedReadOnlyTools(t *testing.T) {
+	authority := testAuthority([]string{"tools"}, []string{testToolset})
+	server, upstream, _, _, installed := newTestServer(t, authority, "")
+	source := installed.release.Snapshot
+	published := source.AgentPublications[0]
+	original := published.Definition.Toolset.Tools[0]
+	releaseFor := func(classification string) *runtime.Release {
+		t.Helper()
+		tool := agentcontract.Tool{
+			ServerID: original.ServerID, RevisionID: original.RevisionID, CatalogDigest: original.CatalogDigest,
+			Name: original.Name, Alias: original.Alias, Classification: classification,
+		}
+		definition := agentcontract.Draft{ProjectID: testProject, Name: "tools", Toolset: &agentcontract.Toolset{Tools: []agentcontract.Tool{tool}}}
+		snapshot := &routing.Snapshot{
+			Generation: source.Generation, Providers: source.Providers, Routes: source.Routes, MCPServers: source.MCPServers,
+			AgentPublications: []agentcontract.Revision{{ID: testRevision, PublicationID: testToolset, ProjectID: testProject, Kind: "toolset", Digest: agentcontract.DraftDigest(definition), Definition: definition, Current: true}},
+		}
+		if err := snapshot.Compile(); err != nil {
+			t.Fatal(err)
+		}
+		return &runtime.Release{ID: testGenID, Snapshot: snapshot}
+	}
+	unclassified := releaseFor("")
+	unclassifiedTools, resolveErr := server.Resolve(t.Context(), *authority, unclassified, []string{testToolset})
+	if resolveErr != nil || len(unclassifiedTools) != 1 {
+		t.Fatalf("resolve published tool: %v %v", unclassifiedTools, resolveErr)
+	}
+	_, approvalErr := server.Call(t.Context(), *authority, unclassified, unclassifiedTools[0], testGenID, 0, "unclassified", json.RawMessage(`{"query":"q"}`))
+	approval, isApproval := errors.AsType[*WorkflowError](approvalErr)
+	if !isApproval || approval.Code != "tool_approval_required" {
+		t.Fatalf("unclassified tool was not refused: %v", approvalErr)
+	}
+	if upstream.calls.Load() != 0 {
+		t.Fatal("unclassified tool reached upstream")
+	}
+	readOnly := releaseFor("read_only")
+	tools, toolsErr := server.Resolve(t.Context(), *authority, readOnly, []string{testToolset})
+	if toolsErr != nil || len(tools) != 1 {
+		t.Fatalf("resolve read-only tool: %v %v", tools, toolsErr)
+	}
+	_, argumentsErr := server.Call(t.Context(), *authority, readOnly, tools[0], testGenID, 0, "bad-arguments", json.RawMessage(`{"query":42}`))
+	invalid, isInvalid := errors.AsType[*WorkflowError](argumentsErr)
+	if !isInvalid || invalid.Code != "invalid_tool_arguments" || upstream.calls.Load() != 0 {
+		t.Fatalf("invalid arguments reached upstream: %v", argumentsErr)
+	}
+	result, callErr := server.Call(t.Context(), *authority, readOnly, tools[0], testGenID, 1, "valid-call", json.RawMessage(`{"query":"q"}`))
+	if callErr != nil || !bytes.Contains(result, []byte("answer for lookup")) {
+		t.Fatalf("read-only call failed: %s %v", result, callErr)
+	}
+	if upstream.calls.Load() != 1 {
+		t.Fatalf("read-only call count: %d", upstream.calls.Load())
+	}
+	if _, err := server.Resolve(t.Context(), *testAuthority([]string{"tools"}, nil), readOnly, []string{testToolset}); err == nil {
+		t.Fatal("unauthorized toolset resolved")
+	}
+	if _, err := server.Resolve(t.Context(), *authority, readOnly, []string{testToolset, testToolset}); err == nil {
+		t.Fatal("duplicate tool aliases resolved")
+	}
+	stale := WorkflowTool{ToolsetID: tools[0].ToolsetID, RevisionID: testOtherRv, Definition: tools[0].Definition}
+	if _, err := server.Call(t.Context(), *authority, readOnly, stale, testGenID, 2, "stale", json.RawMessage(`{"query":"q"}`)); err == nil {
+		t.Fatal("stale tool revision executed")
+	}
+}
