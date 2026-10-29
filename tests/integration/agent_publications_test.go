@@ -1386,6 +1386,41 @@ func TestA2AAgentCardUsesGatewayAuthenticationAndEndpoint(t *testing.T) {
 	if result := rpc(budgetedKey, "CancelTask", a2aTestParams{ID: boundedResponse.Task.ID}); result["error"] != nil {
 		t.Fatalf("cancel bounded task failed: %+v", result)
 	}
+	waitForCancellation := func(upstreamTaskID string) {
+		cancellationDeadline := time.Now().Add(10 * time.Second)
+		for {
+			body, err := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": 1, "method": "GetTask", "params": map[string]any{"id": upstreamTaskID}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			request, err := http.NewRequestWithContext(t.Context(), http.MethodPost, upstream.URL+"/rpc", bytes.NewReader(body))
+			if err != nil {
+				t.Fatal(err)
+			}
+			request.Header.Set("Authorization", "Bearer upstream-secret")
+			request.Header.Set("Content-Type", "application/json")
+			request.Header.Set("A2A-Version", "1.0")
+			response, err := http.DefaultClient.Do(request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var upstreamResult struct {
+				Result protocol.Task `json:"result"`
+			}
+			err = json.NewDecoder(response.Body).Decode(&upstreamResult)
+			response.Body.Close()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if upstreamResult.Result.Status.State == protocol.TaskStateCanceled {
+				break
+			}
+			if time.Now().After(cancellationDeadline) {
+				t.Fatal("upstream task was not canceled within the expected interval")
+			}
+			time.Sleep(50 * time.Millisecond)
+		}
+	}
 	deadlineStart := rpc(budgetedKey, "SendMessage", a2aTestParams{Message: message("request-input", "question")})
 	deadlinePayload, err := json.Marshal(deadlineStart["result"])
 	if err != nil {
@@ -1397,7 +1432,7 @@ func TestA2AAgentCardUsesGatewayAuthenticationAndEndpoint(t *testing.T) {
 	if err := json.Unmarshal(deadlinePayload, &deadlineResponse); err != nil || deadlineResponse.Task == nil {
 		t.Fatalf("deadline task did not start: %+v, %v", deadlineStart, err)
 	}
-	<-upstreamIDs
+	deadlineUpstreamID := <-upstreamIDs
 	time.Sleep(2200 * time.Millisecond)
 	if result := rpc(budgetedKey, "SendMessage", a2aTestParams{Message: &protocol.Message{
 		ID: "request-input", Role: protocol.MessageRoleUser, TaskID: deadlineResponse.Task.ID,
@@ -1410,9 +1445,15 @@ func TestA2AAgentCardUsesGatewayAuthenticationAndEndpoint(t *testing.T) {
 		t.Fatal("continuation after the published task deadline reached the upstream")
 	default:
 	}
-	if result := rpc(budgetedKey, "CancelTask", a2aTestParams{ID: deadlineResponse.Task.ID}); result["error"] != nil {
-		t.Fatalf("cancel expired task failed: %+v", result)
-	}
+	deadlineMonitorContext, stopDeadlineMonitor := context.WithCancel(t.Context())
+	deadlineMonitorStopped := make(chan struct{})
+	go func() {
+		defer close(deadlineMonitorStopped)
+		(&a2a.TaskMonitor{Server: h.A2A}).Run(deadlineMonitorContext)
+	}()
+	waitForCancellation(deadlineUpstreamID)
+	stopDeadlineMonitor()
+	<-deadlineMonitorStopped
 	longDraft := h.want(owner, http.MethodPut, "/api/v1/agents/"+agent, map[string]any{
 		"project_id": project, "name": "fixture", "credential": "upstream-secret",
 		"agent": map[string]any{"protocol": "a2a-1.0.0", "endpoint": upstream.URL + "/rpc", "card_digest": hex.EncodeToString(digest[:]), "toolset_revisions": []string{}, "route_revisions": []string{}, "pricing_revision_id": pricing, "max_cost": "1", "message_price": messagePrice, "remote_work_bound_seconds": 120, "task_deadline_seconds": 600},
@@ -1451,41 +1492,7 @@ func TestA2AAgentCardUsesGatewayAuthenticationAndEndpoint(t *testing.T) {
 		stopRestartedMonitor()
 		<-restartedMonitorStopped
 	})
-	waitForCancellation := func(upstreamTaskID string) {
-		cancellationDeadline := time.Now().Add(10 * time.Second)
-		for {
-			body, err := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": 1, "method": "GetTask", "params": map[string]any{"id": upstreamTaskID}})
-			if err != nil {
-				t.Fatal(err)
-			}
-			request, err := http.NewRequestWithContext(t.Context(), http.MethodPost, upstream.URL+"/rpc", bytes.NewReader(body))
-			if err != nil {
-				t.Fatal(err)
-			}
-			request.Header.Set("Authorization", "Bearer upstream-secret")
-			request.Header.Set("Content-Type", "application/json")
-			request.Header.Set("A2A-Version", "1.0")
-			response, err := http.DefaultClient.Do(request)
-			if err != nil {
-				t.Fatal(err)
-			}
-			var upstreamResult struct {
-				Result protocol.Task `json:"result"`
-			}
-			err = json.NewDecoder(response.Body).Decode(&upstreamResult)
-			response.Body.Close()
-			if err != nil {
-				t.Fatal(err)
-			}
-			if upstreamResult.Result.Status.State == protocol.TaskStateCanceled {
-				break
-			}
-			if time.Now().After(cancellationDeadline) {
-				t.Fatal("revoked disconnected task was not canceled after monitor restart")
-			}
-			time.Sleep(50 * time.Millisecond)
-		}
-	}
+
 	waitForCancellation(upstreamTaskID)
 	select {
 	case <-upstreamIDs:
