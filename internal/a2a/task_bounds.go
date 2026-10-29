@@ -72,7 +72,7 @@ func (l *Ledger) admitTask(ctx context.Context, res reservation, authority acces
 			return "", errTaskLimit
 		}
 	} else {
-		tag, err := tx.Exec(ctx, `UPDATE olp.a2a_tasks SET continuations=continuations+1 WHERE id=$1 AND api_key_id=$2 AND state='active' AND deadline_at>now() AND continuations<$3`, taskID, authority.ID, maxTaskContinuations(definition))
+		tag, err := tx.Exec(ctx, `UPDATE olp.a2a_tasks SET continuations=continuations+1 WHERE id=$1 AND (($4='' AND api_key_id=$2 AND delegation_pair_digest='') OR ($4<>'' AND delegation_pair_digest=$4)) AND state='active' AND deadline_at>now() AND continuations<$3`, taskID, authority.ID, maxTaskContinuations(definition), authority.DelegationPairDigest)
 		if err != nil {
 			return "", err
 		}

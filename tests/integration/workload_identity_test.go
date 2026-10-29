@@ -7,11 +7,14 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
+	"crypto/sha256"
 	"crypto/x509"
+	"encoding/hex"
 	"encoding/json"
 	"encoding/pem"
 	"fmt"
 	"io"
+	"iter"
 	"log/slog"
 	"math/big"
 	"net"
@@ -24,6 +27,9 @@ import (
 	"testing"
 	"time"
 
+	protocol "github.com/a2aproject/a2a-go/v2/a2a"
+	"github.com/a2aproject/a2a-go/v2/a2asrv"
+	"github.com/tyk-swe/olp/internal/a2a"
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/agentcontract"
 	agentworkflows "github.com/tyk-swe/olp/internal/agents"
@@ -1913,4 +1919,233 @@ func TestWorkloadAgentDelegatesKeyForTools(t *testing.T) {
 	f.h.want(f.owner, http.MethodPatch, keyPath, map[string]any{"allowed_toolsets": []string{}}, withMatch(currentKey, idem("remove-delegated-toolset")), http.StatusOK)
 	f.h.refresh()
 	assertSessionRefused("toolset", sessionGrant.Token, assertion, sessionID)
+}
+
+func TestWorkloadAgentDelegatesKeyForA2A(t *testing.T) {
+	h := newAccessHarness(t)
+	owner := h.owner()
+	project := createProject(h, owner, "Delegated A2A")
+	modelProvider := newOpenAIFixture(t, "")
+	model := activeAzureProviderInProject(t, h, owner, "Delegated callback provider", modelProvider.URL, &project, []any{map[string]any{"operation": "generation", "surface": "openai", "mode": "unary"}})
+	draft := h.want(owner, http.MethodPost, "/api/v1/route-drafts", map[string]any{"project_id": project, "slug": "delegated-callback", "overall_timeout_ms": 10000, "max_attempts": 1, "fidelity": map[string]any{"mode": "transformed"}, "targets": []any{map[string]any{"provider_id": model["id"], "provider_model": vendorModel, "priority": 0, "weight": 1, "timeout_ms": 5000}}}, idem("delegated-callback-route"), http.StatusCreated)
+	path := "/api/v1/route-drafts/" + draft["id"].(string)
+	validated := h.want(owner, http.MethodPost, path+"/validate", nil, etagHeader(draft), http.StatusOK)
+	h.want(owner, http.MethodPost, path+"/activate", nil, withMatch(validated, idem("delegated-callback-activate")), http.StatusOK)
+	workloadProject(t, h, owner, project, map[string]any{"bootstrap": []string{"delegated-callback"}})
+	templates := h.want(owner, http.MethodGet, "/api/v1/projects/"+project+"/limit-templates", nil, nil, http.StatusOK)
+	h.want(owner, http.MethodPut, "/api/v1/projects/"+project+"/limit-templates", map[string]any{"templates": map[string]any{"worker": map[string]any{"requests_per_minute": 100, "daily_cost_limit": "10"}}}, etagHeader(templates), http.StatusOK)
+	h.refresh()
+	routeRevision := h.Runtime.Release().Snapshot.Routes["delegated-callback"].RevisionID
+	callbackStatus := make(chan int, 1)
+	client, prefix, _ := acctKeyspace(t)
+	limiter, err := limits.New(client, strings.TrimSuffix(prefix, ":"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.Gateway.Admission = gateway.NewAdmission(limiter, nil, nil)
+	h.A2A.Ledger = &a2a.Ledger{Pool: h.Pool, Store: &limits.DebitStore{Pool: h.Pool, Limiter: limiter}, Auth: h.AuthKey}
+	var upstreamCalls atomic.Int32
+	handler := a2asrv.NewJSONRPCHandler(a2asrv.NewHandler(a2asrv.AgentExecutorFunc(func(ctx context.Context, execution *a2asrv.ExecutorContext) iter.Seq2[protocol.Event, error] {
+		return func(yield func(protocol.Event, error) bool) {
+			upstreamCalls.Add(1)
+			if yield(protocol.NewSubmittedTask(execution, execution.Message), nil) {
+				yield(protocol.NewStatusUpdateEvent(execution, protocol.TaskStateInputRequired, nil), nil)
+			}
+		}
+	})))
+	cardFor := func(endpoint string) []byte {
+		card, marshalErr := json.Marshal(protocol.AgentCard{
+			Name: "Fixture agent", Description: "Delegated task", Version: "1",
+			SupportedInterfaces: []*protocol.AgentInterface{{URL: endpoint, ProtocolBinding: protocol.TransportProtocolJSONRPC, ProtocolVersion: protocol.Version}},
+			Capabilities:        protocol.AgentCapabilities{}, DefaultInputModes: []string{"text"}, DefaultOutputModes: []string{"text"}, Skills: []protocol.AgentSkill{},
+		})
+		if marshalErr != nil {
+			t.Fatal(marshalErr)
+		}
+		return card
+	}
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/rpc":
+			if capability := r.Header.Get("X-OLP-Task-Capability"); capability != "" {
+				callback, callbackErr := http.NewRequestWithContext(r.Context(), http.MethodPost, h.HTTP.URL+"/v1/chat/completions", strings.NewReader(`{"model":"delegated-callback","messages":[{"role":"user","content":"hello"}]}`))
+				if callbackErr != nil {
+					callbackStatus <- 0
+					return
+				}
+				callback.Header.Set("Content-Type", "application/json")
+				callback.Header.Set("Authorization", "Bearer "+capability)
+				callbackResponse, callbackErr := http.DefaultClient.Do(callback)
+				if callbackErr != nil {
+					callbackStatus <- 0
+					return
+				}
+				callbackResponse.Body.Close()
+				callbackStatus <- callbackResponse.StatusCode
+			}
+			handler.ServeHTTP(a2aContentTypeWriter{w}, r)
+		case "/.well-known/agent-card.json":
+			_, _ = w.Write(cardFor("http://" + r.Host + "/rpc"))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(upstream.Close)
+	digest := sha256.Sum256(cardFor(upstream.URL + "/rpc"))
+	var user string
+	if err := h.Pool.QueryRow(t.Context(), `SELECT id::text FROM olp.users WHERE email='owner@example.com'`).Scan(&user); err != nil {
+		t.Fatal(err)
+	}
+	pricing := acctID(t)
+	acctExec(t, h.Pool, `INSERT INTO olp.pricing_revisions(id,revision,effective_at,created_by) VALUES($1,1,now(),$2)`, pricing, user)
+	created := h.want(owner, http.MethodPost, "/api/v1/agents", map[string]any{
+		"project_id": project, "name": "delegated target",
+		"agent": map[string]any{"protocol": "a2a-1.0.0", "endpoint": upstream.URL + "/rpc", "card_digest": hex.EncodeToString(digest[:]), "toolset_revisions": []string{}, "route_revisions": []string{routeRevision}, "pricing_revision_id": pricing, "max_cost": "1", "message_price": "0.25", "remote_work_bound_seconds": 120},
+	}, idem("delegated-a2a-create"), http.StatusCreated)
+	target := created["id"].(string)
+	h.want(owner, http.MethodPost, "/api/v1/agents/"+target+"/publish", nil, withMatch(created, idem("delegated-a2a-publish")), http.StatusOK)
+	issuer := newWorkloadFixture(t, h, owner, project, []string{"bootstrap"})
+	issuerPath := "/api/v1/workload-issuers/" + issuer.issuer["id"].(string)
+	currentIssuer := h.want(owner, http.MethodGet, issuerPath, nil, nil, http.StatusOK)
+	h.want(owner, http.MethodPut, issuerPath, map[string]any{
+		"name": "Delegated agent", "issuer": issuer.endpoint.URL, "jwks_url": issuer.endpoint.URL,
+		"enabled": true, "audiences": []string{"olp"}, "algorithms": []string{"EdDSA"}, "max_lifetime_seconds": 600, "disabled_key_ids": []string{},
+		"mappings": []any{
+			map[string]any{"name": "agent", "match": map[string]string{"/sub": "approved-agent", "/client_id": "approved-client"}, "project_id": project, "limit_template": "worker", "route_groups": []string{"bootstrap"}, "allowed_agents": []string{target}, "scopes": []string{"agents", "inference"}, "agent_principal": true},
+			map[string]any{"name": "other", "match": map[string]string{"/sub": "other-agent", "/client_id": "approved-client"}, "project_id": project, "limit_template": "worker", "route_groups": []string{"bootstrap"}, "allowed_agents": []string{target}, "scopes": []string{"agents", "inference"}, "agent_principal": true},
+		},
+	}, etagHeader(currentIssuer), http.StatusOK)
+	key := h.want(owner, http.MethodPost, "/api/v1/api-keys", map[string]any{"name": "delegating A2A key", "project_id": project, "scopes": []string{"agents", "inference", "delegate"}, "allowed_agents": []string{target}, "allowed_routes": []string{"delegated-callback"}, "daily_cost_limit": "10"}, idem("delegated-a2a-key"), http.StatusCreated)
+	h.refresh()
+	signer, err := jose.NewSigner(jose.SigningKey{Algorithm: jose.EdDSA, Key: issuer.private}, (&jose.SignerOptions{}).WithHeader("kid", issuer.kid))
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertionFor := func(subject string) string {
+		t.Helper()
+		now := time.Now()
+		claims, marshalErr := json.Marshal(map[string]any{"iss": issuer.endpoint.URL, "aud": "olp", "sub": subject, "client_id": "approved-client", "iat": now.Unix(), "exp": now.Add(5 * time.Minute).Unix()})
+		if marshalErr != nil {
+			t.Fatal(marshalErr)
+		}
+		signed, signErr := signer.Sign(claims)
+		if signErr != nil {
+			t.Fatal(signErr)
+		}
+		value, compactErr := signed.CompactSerialize()
+		if compactErr != nil {
+			t.Fatal(compactErr)
+		}
+		return value
+	}
+	assertion := assertionFor("approved-agent")
+	bounds := map[string]any{"scopes": []string{"agents", "inference"}, "allowed_agents": []string{target}, "allowed_routes": []string{"delegated-callback"}}
+	response, body := h.do(nil, http.MethodPost, "/v1/delegations", bounds, map[string]string{"Authorization": "Bearer " + assertion, "X-OLP-Delegating-Key": key["secret"].(string)})
+	if response.StatusCode != http.StatusCreated {
+		t.Fatalf("agent delegation exchange: %d %s", response.StatusCode, body)
+	}
+	var grant struct {
+		Token string `json:"token"`
+		Pair  string `json:"delegation_pair_digest"`
+	}
+	if err := json.Unmarshal(body, &grant); err != nil || grant.Token == "" || grant.Pair == "" {
+		t.Fatalf("missing agent delegation token: %v", err)
+	}
+	budgetPath := "/api/v1/projects/" + project + "/attribution-budgets"
+	budget := h.want(owner, http.MethodGet, budgetPath, nil, nil, http.StatusOK)
+	h.want(owner, http.MethodPut, budgetPath, map[string]any{"budgets": map[string]any{"delegation_pair": map[string]any{grant.Pair: map[string]any{"daily_cost_limit": "10"}}}}, etagHeader(budget), http.StatusOK)
+	h.refresh()
+	connection, err := h.Pool.Acquire(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshots, err := limits.ReconciliationSnapshots(t.Context(), connection.Conn(), time.Now())
+	connection.Release()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, snapshot := range snapshots {
+		if _, _, applyErr := limiter.ApplyCostSnapshot(t.Context(), snapshot); applyErr != nil {
+			t.Fatal(applyErr)
+		}
+	}
+	request := struct {
+		JSONRPC string        `json:"jsonrpc"`
+		ID      int           `json:"id"`
+		Method  string        `json:"method"`
+		Params  a2aTestParams `json:"params"`
+	}{JSONRPC: "2.0", ID: 1, Method: "SendMessage", Params: a2aTestParams{Message: &protocol.Message{ID: "delegated", Role: protocol.MessageRoleUser, Parts: protocol.ContentParts{protocol.NewTextPart("hello")}}}}
+	response, body = h.do(nil, http.MethodPost, "/a2a/"+target, request, map[string]string{"Authorization": "Bearer " + grant.Token, "X-OLP-Agent-Identity": assertion, "A2A-Version": "1.0"})
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("delegated send: %d %s", response.StatusCode, body)
+	}
+	var result struct {
+		Result struct {
+			Task protocol.Task `json:"task"`
+		} `json:"result"`
+		Error json.RawMessage `json:"error"`
+	}
+	if err := json.Unmarshal(body, &result); err != nil || len(result.Error) != 0 || result.Result.Task.ID == "" {
+		t.Fatalf("delegated task missing: %s %v", body, err)
+	}
+	if upstreamCalls.Load() != 1 {
+		t.Fatalf("expected one remote send, got %d", upstreamCalls.Load())
+	}
+	if status := <-callbackStatus; status != http.StatusOK {
+		t.Fatalf("delegated task callback refused: %d", status)
+	}
+	pairBudget := h.want(owner, http.MethodGet, budgetPath, nil, nil, http.StatusOK)["usage"].(map[string]any)["delegation_pair"].(map[string]any)[grant.Pair].(map[string]any)["daily"].(map[string]any)["accrued"].(string)
+	principals := h.want(owner, http.MethodGet, "/api/v1/api-keys", nil, nil, http.StatusOK)["items"].([]any)
+	agentID := func() string {
+		for _, item := range principals {
+			principal := item.(map[string]any)
+			if principal["workload_issuer_id"] == issuer.issuer["id"] && principal["workload_mapping"] == "agent" {
+				return principal["id"].(string)
+			}
+		}
+		t.Fatal("authenticated workload principal is absent")
+		return ""
+	}()
+	keyBudget := h.want(owner, http.MethodGet, "/api/v1/api-keys/"+key["id"].(string), nil, nil, http.StatusOK)["budget"].(map[string]any)["daily"].(map[string]any)["accrued"].(string)
+	agentBudget := h.want(owner, http.MethodGet, "/api/v1/api-keys/"+agentID, nil, nil, http.StatusOK)["budget"].(map[string]any)["daily"].(map[string]any)["accrued"].(string)
+	pairAmount, pairOK := new(big.Rat).SetString(pairBudget)
+	keyAmount, keyOK := new(big.Rat).SetString(keyBudget)
+	agentAmount, agentOK := new(big.Rat).SetString(agentBudget)
+	if !pairOK || !keyOK || !agentOK || pairAmount.Sign() <= 0 || pairAmount.Cmp(keyAmount) != 0 || pairAmount.Cmp(agentAmount) != 0 {
+		t.Fatalf("agent message fee differs across caller, agent and pair: %s %s %s", keyBudget, agentBudget, pairBudget)
+	}
+	getGrant := func(identity string) string {
+		t.Helper()
+		exchangeResponse, exchangeBody := h.do(nil, http.MethodPost, "/v1/delegations", bounds, map[string]string{"Authorization": "Bearer " + identity, "X-OLP-Delegating-Key": key["secret"].(string)})
+		if exchangeResponse.StatusCode != http.StatusCreated {
+			t.Fatalf("renew agent delegation: %d %s", exchangeResponse.StatusCode, exchangeBody)
+		}
+		var next struct {
+			Token string `json:"token"`
+		}
+		if decodeErr := json.Unmarshal(exchangeBody, &next); decodeErr != nil || next.Token == "" {
+			t.Fatalf("missing renewed delegation: %v", decodeErr)
+		}
+		return next.Token
+	}
+	getTask := func(identity, token string) (int, []byte) {
+		t.Helper()
+		read := struct {
+			JSONRPC string        `json:"jsonrpc"`
+			ID      int           `json:"id"`
+			Method  string        `json:"method"`
+			Params  a2aTestParams `json:"params"`
+		}{JSONRPC: "2.0", ID: 2, Method: "GetTask", Params: a2aTestParams{ID: result.Result.Task.ID}}
+		readResponse, readBody := h.do(nil, http.MethodPost, "/a2a/"+target, read, map[string]string{"Authorization": "Bearer " + token, "X-OLP-Agent-Identity": identity, "A2A-Version": "1.0"})
+		return readResponse.StatusCode, readBody
+	}
+	status, readBody := getTask(assertion, getGrant(assertion))
+	if status != http.StatusOK || !bytes.Contains(readBody, []byte(result.Result.Task.ID)) {
+		t.Fatalf("renewed delegation cannot read its task: %d %s", status, readBody)
+	}
+	otherAssertion := assertionFor("other-agent")
+	otherStatus, otherBody := getTask(otherAssertion, getGrant(otherAssertion))
+	if otherStatus == http.StatusOK && bytes.Contains(otherBody, []byte(result.Result.Task.ID)) {
+		t.Fatalf("another agent read a task owned by the first: %s", otherBody)
+	}
 }

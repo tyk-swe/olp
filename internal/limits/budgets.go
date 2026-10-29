@@ -37,7 +37,7 @@ func budgetTotalsSQL(owner budgetOwnership, basis string) string {
  FROM olp.attempt_usage_hourly h WHERE NOT h.budget_exempt AND (%s)
  AND h.budget_bucket>=LEAST(w.daily_start,w.weekly_start,w.monthly_start) AND h.budget_bucket<GREATEST(w.daily_end,w.weekly_end,w.monthly_end)
  UNION ALL SELECT d.closed_at,d.observed_cost,d.observed_charge,0::bigint,0::bigint
- FROM olp.execution_debits d WHERE d.kind='tool' AND d.state='settled' AND (%s)
+ FROM olp.execution_debits d WHERE d.kind IN ('tool','agent') AND d.state='settled' AND (%s)
  AND d.closed_at>=LEAST(w.daily_start,w.weekly_start,w.monthly_start) AND d.closed_at<GREATEST(w.daily_end,w.weekly_end,w.monthly_end)) u) t
  , LATERAL (SELECT %s='charge' AS charged) basis`, owner.raw, owner.hourly, owner.tool, basis)
 }
@@ -467,7 +467,7 @@ var reconciliationSnapshotsSQL = reconcileCostWindowsSQL(costOwnerKey, false, `a
   UNION ALL
   SELECT a.id,d.closed_at,d.observed_cost,d.observed_charge,0::bigint,0::bigint
   FROM olp.execution_debits d JOIN accounts a ON EXISTS(SELECT 1 FROM olp.execution_debit_owners o WHERE o.dispatch_id=d.id AND o.owner_kind='key' AND o.owner_id=a.id)
-  WHERE d.kind='tool' AND d.state='settled'
+  WHERE d.kind IN ('tool','agent') AND d.state='settled'
     AND d.closed_at >= LEAST((SELECT daily_start FROM budget_calendar),(SELECT monthly_start FROM budget_calendar),(SELECT weekly_start FROM budget_calendar)) AND d.closed_at < GREATEST((SELECT daily_end FROM budget_calendar),(SELECT monthly_end FROM budget_calendar),(SELECT weekly_end FROM budget_calendar))
 )`)
 
@@ -489,7 +489,7 @@ var reconciliationGroupSnapshotsSQL = reconcileCostWindowsSQL(costOwnerGroup, fa
  UNION ALL
  SELECT a.id,d.closed_at,d.observed_cost,d.observed_charge,0::bigint,0::bigint
  FROM olp.execution_debits d JOIN accounts a ON EXISTS(SELECT 1 FROM olp.execution_debit_owners o WHERE o.dispatch_id=d.id AND o.owner_kind='group' AND o.owner_id=a.id)
- WHERE d.kind='tool' AND d.state='settled'
+ WHERE d.kind IN ('tool','agent') AND d.state='settled'
    AND d.closed_at >= LEAST((SELECT daily_start FROM budget_calendar),(SELECT monthly_start FROM budget_calendar),(SELECT weekly_start FROM budget_calendar)) AND d.closed_at < GREATEST((SELECT daily_end FROM budget_calendar),(SELECT monthly_end FROM budget_calendar),(SELECT weekly_end FROM budget_calendar))
 )`)
 
