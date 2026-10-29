@@ -4055,7 +4055,9 @@
                   "requests",
                   "attempts",
                   "guardrail_decisions",
-                  "audit"
+                  "audit",
+                  "runs",
+                  "trace_spans"
                 ]
               }
             },
@@ -7090,7 +7092,9 @@
                   "guardrail_decisions",
                   "audit",
                   "metering",
-                  "focus"
+                  "focus",
+                  "runs",
+                  "trace_spans"
                 ],
                 "type": "string"
               },
@@ -13522,7 +13526,9 @@
                   "requests",
                   "attempts",
                   "guardrail_decisions",
-                  "audit"
+                  "audit",
+                  "runs",
+                  "trace_spans"
                 ]
               }
             },
@@ -28499,7 +28505,9 @@
                   "requests",
                   "attempts",
                   "guardrail_decisions",
-                  "audit"
+                  "audit",
+                  "runs",
+                  "trace_spans"
                 ]
               }
             },
@@ -45225,7 +45233,9 @@
                   "requests",
                   "attempts",
                   "guardrail_decisions",
-                  "audit"
+                  "audit",
+                  "runs",
+                  "trace_spans"
                 ]
               }
             },

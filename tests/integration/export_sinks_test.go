@@ -62,7 +62,7 @@ func TestManagedEvidenceDeliveryRechecksAuthorityAndRetention(t *testing.T) {
 	defer foreignReceiver.Close()
 	foreignProject := createProject(h, owner, "Other evidence")
 	h.want(owner, http.MethodPost, "/api/v1/sinks", map[string]any{"name": "Other project evidence", "type": "https", "project_id": foreignProject, "destination": foreignReceiver.URL, "streams": []string{"trace_spans"}, "enabled": true}, idem(uuid.NewString()), http.StatusCreated)
-	h.want(owner, http.MethodPost, "/api/v1/sinks", map[string]any{"name": "Unscoped evidence", "type": "https", "destination": receiver.URL, "streams": []string{"runs"}, "enabled": true}, idem(uuid.NewString()), http.StatusUnprocessableEntity)
+	h.want(owner, http.MethodPost, "/api/v1/sinks", map[string]any{"name": "Unscoped evidence", "type": "https", "destination": receiver.URL, "streams": []string{"runs"}, "enabled": false}, idem(uuid.NewString()), http.StatusCreated)
 	h.want(member, http.MethodPost, "/api/v1/sinks", map[string]any{"name": "Project evidence", "type": "https", "project_id": project, "destination": receiver.URL, "streams": []string{"runs", "trace_spans"}, "enabled": true}, idem(uuid.NewString()), http.StatusCreated)
 	key := h.want(owner, http.MethodPost, "/api/v1/api-keys", map[string]any{"name": "Evidence writer", "project_id": project, "scopes": []string{"traces_write"}}, idem(uuid.NewString()), http.StatusCreated)
 	if err := h.Runtime.Refresh(t.Context()); err != nil {

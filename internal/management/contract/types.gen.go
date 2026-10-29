@@ -1918,6 +1918,8 @@ const (
 	ConfigurationSinkStreamsAudit              ConfigurationSinkStreams = "audit"
 	ConfigurationSinkStreamsGuardrailDecisions ConfigurationSinkStreams = "guardrail_decisions"
 	ConfigurationSinkStreamsRequests           ConfigurationSinkStreams = "requests"
+	ConfigurationSinkStreamsRuns               ConfigurationSinkStreams = "runs"
+	ConfigurationSinkStreamsTraceSpans         ConfigurationSinkStreams = "trace_spans"
 )
 
 // Valid indicates whether the value is a known member of the ConfigurationSinkStreams enum.
@@ -1930,6 +1932,10 @@ func (e ConfigurationSinkStreams) Valid() bool {
 	case ConfigurationSinkStreamsGuardrailDecisions:
 		return true
 	case ConfigurationSinkStreamsRequests:
+		return true
+	case ConfigurationSinkStreamsRuns:
+		return true
+	case ConfigurationSinkStreamsTraceSpans:
 		return true
 	default:
 		return false
@@ -2199,6 +2205,8 @@ const (
 	CreateExportSinkRequestStreamsGuardrailDecisions CreateExportSinkRequestStreams = "guardrail_decisions"
 	CreateExportSinkRequestStreamsMetering           CreateExportSinkRequestStreams = "metering"
 	CreateExportSinkRequestStreamsRequests           CreateExportSinkRequestStreams = "requests"
+	CreateExportSinkRequestStreamsRuns               CreateExportSinkRequestStreams = "runs"
+	CreateExportSinkRequestStreamsTraceSpans         CreateExportSinkRequestStreams = "trace_spans"
 	CreateExportSinkRequestStreamsUsageRollups       CreateExportSinkRequestStreams = "usage_rollups"
 )
 
@@ -2216,6 +2224,10 @@ func (e CreateExportSinkRequestStreams) Valid() bool {
 	case CreateExportSinkRequestStreamsMetering:
 		return true
 	case CreateExportSinkRequestStreamsRequests:
+		return true
+	case CreateExportSinkRequestStreamsRuns:
+		return true
+	case CreateExportSinkRequestStreamsTraceSpans:
 		return true
 	case CreateExportSinkRequestStreamsUsageRollups:
 		return true
@@ -2542,6 +2554,8 @@ const (
 	CreateSinkRequestStreamsAudit              CreateSinkRequestStreams = "audit"
 	CreateSinkRequestStreamsGuardrailDecisions CreateSinkRequestStreams = "guardrail_decisions"
 	CreateSinkRequestStreamsRequests           CreateSinkRequestStreams = "requests"
+	CreateSinkRequestStreamsRuns               CreateSinkRequestStreams = "runs"
+	CreateSinkRequestStreamsTraceSpans         CreateSinkRequestStreams = "trace_spans"
 )
 
 // Valid indicates whether the value is a known member of the CreateSinkRequestStreams enum.
@@ -2554,6 +2568,10 @@ func (e CreateSinkRequestStreams) Valid() bool {
 	case CreateSinkRequestStreamsGuardrailDecisions:
 		return true
 	case CreateSinkRequestStreamsRequests:
+		return true
+	case CreateSinkRequestStreamsRuns:
+		return true
+	case CreateSinkRequestStreamsTraceSpans:
 		return true
 	default:
 		return false
@@ -2754,6 +2772,8 @@ const (
 	ExportSinkStreamsGuardrailDecisions ExportSinkStreams = "guardrail_decisions"
 	ExportSinkStreamsMetering           ExportSinkStreams = "metering"
 	ExportSinkStreamsRequests           ExportSinkStreams = "requests"
+	ExportSinkStreamsRuns               ExportSinkStreams = "runs"
+	ExportSinkStreamsTraceSpans         ExportSinkStreams = "trace_spans"
 	ExportSinkStreamsUsageRollups       ExportSinkStreams = "usage_rollups"
 )
 
@@ -2771,6 +2791,10 @@ func (e ExportSinkStreams) Valid() bool {
 	case ExportSinkStreamsMetering:
 		return true
 	case ExportSinkStreamsRequests:
+		return true
+	case ExportSinkStreamsRuns:
+		return true
+	case ExportSinkStreamsTraceSpans:
 		return true
 	case ExportSinkStreamsUsageRollups:
 		return true
@@ -6070,6 +6094,8 @@ const (
 	SinkResponseStreamsAudit              SinkResponseStreams = "audit"
 	SinkResponseStreamsGuardrailDecisions SinkResponseStreams = "guardrail_decisions"
 	SinkResponseStreamsRequests           SinkResponseStreams = "requests"
+	SinkResponseStreamsRuns               SinkResponseStreams = "runs"
+	SinkResponseStreamsTraceSpans         SinkResponseStreams = "trace_spans"
 )
 
 // Valid indicates whether the value is a known member of the SinkResponseStreams enum.
@@ -6082,6 +6108,10 @@ func (e SinkResponseStreams) Valid() bool {
 	case SinkResponseStreamsGuardrailDecisions:
 		return true
 	case SinkResponseStreamsRequests:
+		return true
+	case SinkResponseStreamsRuns:
+		return true
+	case SinkResponseStreamsTraceSpans:
 		return true
 	default:
 		return false
@@ -6328,6 +6358,8 @@ const (
 	UpdateSinkRequestStreamsAudit              UpdateSinkRequestStreams = "audit"
 	UpdateSinkRequestStreamsGuardrailDecisions UpdateSinkRequestStreams = "guardrail_decisions"
 	UpdateSinkRequestStreamsRequests           UpdateSinkRequestStreams = "requests"
+	UpdateSinkRequestStreamsRuns               UpdateSinkRequestStreams = "runs"
+	UpdateSinkRequestStreamsTraceSpans         UpdateSinkRequestStreams = "trace_spans"
 )
 
 // Valid indicates whether the value is a known member of the UpdateSinkRequestStreams enum.
@@ -6340,6 +6372,10 @@ func (e UpdateSinkRequestStreams) Valid() bool {
 	case UpdateSinkRequestStreamsGuardrailDecisions:
 		return true
 	case UpdateSinkRequestStreamsRequests:
+		return true
+	case UpdateSinkRequestStreamsRuns:
+		return true
+	case UpdateSinkRequestStreamsTraceSpans:
 		return true
 	default:
 		return false

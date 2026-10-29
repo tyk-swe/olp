@@ -58,6 +58,24 @@ expire before the investigation. The local HTTP regression and packaged-console
 journey exercise these boundaries; they do not qualify a live provider
 integration.
 
+## Agent workflow evidence exports
+
+Observability and managed sinks can export `runs` and `trace_spans` for
+project-scoped or installation-wide configurations. Gateway-created runs carry
+`evidence_origin` set to `gateway_observed`. Ingested spans carry
+`evidence_origin` set to `client_asserted`, even if a client supplies a
+different value. Gateway request and attempt spans set the
+`olp.evidence_origin` attribute to `gateway_observed`. The existing request
+`origin` continues to describe the invocation source.
+
+Run and span exports contain metadata only. They do not include prompt, tool,
+message or artifact contents, and they do not change billing. Before delivery,
+the sink creator must still have access to the source project and the source
+must remain within request-history retention. These checks apply independently
+to each record sent through an installation-wide sink. Local gateway and export
+fixtures exercise origin, privacy, project isolation and retention. They do not
+qualify a live external deployment.
+
 ## Consumer MCP qualification
 
 Published tools support the JSON call endpoint and Streamable HTTP at MCP

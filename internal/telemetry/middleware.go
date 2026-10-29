@@ -82,6 +82,7 @@ func AdmittedRequest(cfg RequestConfig, tracer trace.Tracer, surface string, nex
 		}
 		started := time.Now()
 		attrs := []attribute.KeyValue{
+			attribute.String(EvidenceOriginKey, GatewayObserved),
 			attribute.String("olp.installation_id", cfg.InstallationID),
 			attribute.String("olp.surface", surface),
 		}

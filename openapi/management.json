@@ -22742,7 +22742,9 @@
                 "requests",
                 "attempts",
                 "guardrail_decisions",
-                "audit"
+                "audit",
+                "runs",
+                "trace_spans"
               ]
             }
           },
@@ -22812,7 +22814,9 @@
                 "requests",
                 "attempts",
                 "guardrail_decisions",
-                "audit"
+                "audit",
+                "runs",
+                "trace_spans"
               ]
             }
           },
@@ -22872,7 +22876,9 @@
                 "requests",
                 "attempts",
                 "guardrail_decisions",
-                "audit"
+                "audit",
+                "runs",
+                "trace_spans"
               ]
             }
           },
@@ -23011,7 +23017,9 @@
                 "requests",
                 "attempts",
                 "guardrail_decisions",
-                "audit"
+                "audit",
+                "runs",
+                "trace_spans"
               ]
             }
           },
@@ -24383,7 +24391,9 @@
                 "guardrail_decisions",
                 "audit",
                 "metering",
-                "focus"
+                "focus",
+                "runs",
+                "trace_spans"
               ],
               "type": "string"
             },
@@ -24509,7 +24519,9 @@
                 "guardrail_decisions",
                 "audit",
                 "metering",
-                "focus"
+                "focus",
+                "runs",
+                "trace_spans"
               ],
               "type": "string"
             },
@@ -68478,6 +68490,9 @@
               }
             }
           },
+          "400": {
+            "description": "Invalid JSON or unsupported fields"
+          },
           "401": {
             "description": "Authentication required"
           },
@@ -68492,9 +68507,6 @@
           },
           "422": {
             "description": "Invalid investigation, filters or evidence references"
-          },
-          "400": {
-            "description": "Invalid JSON or unsupported fields"
           }
         },
         "requestBody": {

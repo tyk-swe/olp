@@ -34,6 +34,7 @@ import (
 	"github.com/tyk-swe/olp/internal/mcp"
 	"github.com/tyk-swe/olp/internal/resources"
 	"github.com/tyk-swe/olp/internal/retainedapi"
+	"github.com/tyk-swe/olp/internal/sinks"
 	"github.com/tyk-swe/olp/internal/usage"
 )
 
@@ -753,6 +754,10 @@ func TestGatewayToolWorkflowSettlesOneRun(t *testing.T) {
 	h := newAccessHarness(t)
 	owner := h.owner()
 	project := createProject(h, owner, "Gateway workflow")
+	runReceiver, runEndpoint := newExportReceiver(t, "", http.StatusNoContent)
+	h.want(owner, http.MethodPost, "/api/v1/observability/sinks", map[string]any{"name": "Workflow run evidence", "type": "https", "project_id": project, "destination": runEndpoint.URL, "enabled": true, "streams": []string{"runs"}, "format": "json"}, idem("workflow-run-evidence"), http.StatusCreated)
+	managedRunReceiver, managedRunEndpoint := newExportReceiver(t, "", http.StatusNoContent)
+	h.want(owner, http.MethodPost, "/api/v1/sinks", map[string]any{"name": "Managed workflow evidence", "type": "https", "project_id": project, "destination": managedRunEndpoint.URL, "enabled": true, "streams": []string{"runs"}}, idem("managed-workflow-evidence"), http.StatusCreated)
 	const argument = "workflow-private-argument"
 	const answer = "workflow-private-result"
 	const prompt = "workflow-private-prompt"
@@ -997,6 +1002,8 @@ func TestGatewayToolWorkflowSettlesOneRun(t *testing.T) {
 		[]any{map[string]any{"operation": "generation", "surface": "openai", "mode": "unary"}}, []string{"generation"},
 		map[string]any{"tool_execution": "gateway", "toolsets": []string{toolsetID}, "responses_mcp_items": true, "budget": map[string]any{"daily_cost_limit": "10000000"}, "run_limits": map[string]any{"max_tool_calls": 32, "max_duration_seconds": 600, "max_concurrent_runs": 3}},
 		map[string]any{"options": map[string]any{"models": map[string]any{vendorModel: map[string]any{"context_length": 1000}}}})
+	filteredRunReceiver, filteredRunEndpoint := newExportReceiver(t, "", http.StatusNoContent)
+	h.want(owner, http.MethodPost, "/api/v1/observability/sinks", map[string]any{"name": "Filtered workflow evidence", "type": "https", "project_id": project, "destination": filteredRunEndpoint.URL, "enabled": true, "streams": []string{"runs"}, "format": "json", "filter": map[string]any{"route": slug}}, idem("filtered-workflow-evidence"), http.StatusCreated)
 	addBatchPrice(t, h, owner, provider["id"].(string), "", time.Now().Add(-time.Hour))
 	key := h.want(owner, "POST", "/api/v1/api-keys", map[string]any{"name": "Workflow caller", "project_id": project, "scopes": []string{"inference", "tools", "traces_write"}, "allowed_routes": []string{slug}, "allowed_toolsets": []string{toolsetID}, "max_concurrency": 1}, idem("workflow-key"), 201)
 	keyID, secret := mcpExecString(t, key, "id"), mcpExecString(t, key, "secret")
@@ -1036,6 +1043,38 @@ func TestGatewayToolWorkflowSettlesOneRun(t *testing.T) {
 	}
 	if steps != 3 || models != 2 || tools != 1 || settled != 3 || distinctRuns != 1 {
 		t.Fatalf("workflow did not settle distinct steps under one run: steps=%d models=%d tools=%d settled=%d runs=%d", steps, models, tools, settled, distinctRuns)
+	}
+	runExport := &export.Worker{Pool: h.Pool, Keys: h.Ring2(), Installation: h.Server.Installation, Sender: export.NewSender(loopbackPolicy()), Log: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	if err := runExport.Pass(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	runEnvelopes := runReceiver.received()
+	if len(runEnvelopes) != 1 {
+		t.Fatalf("expected one workflow run export, got %d", len(runEnvelopes))
+	}
+	runData, runDataOK := runEnvelopes[0]["data"].(map[string]any)
+	if !runDataOK || runData["run_id"] != runID || runData["project_id"] != project || runData["evidence_origin"] != "gateway_observed" || strings.Contains(fmt.Sprint(runEnvelopes), prompt) || strings.Contains(fmt.Sprint(runEnvelopes), argument) || strings.Contains(fmt.Sprint(runEnvelopes), answer) {
+		t.Fatalf("workflow run evidence has incorrect provenance or content: %v", runEnvelopes)
+	}
+	filteredRunEnvelopes := filteredRunReceiver.received()
+	if len(filteredRunEnvelopes) != 1 {
+		t.Fatalf("expected one route-filtered workflow run export, got %d", len(filteredRunEnvelopes))
+	}
+	filteredRunData, filteredRunDataOK := filteredRunEnvelopes[0]["data"].(map[string]any)
+	if !filteredRunDataOK || filteredRunData["run_id"] != runID {
+		t.Fatalf("route-filtered workflow evidence does not identify the run: %v", filteredRunEnvelopes)
+	}
+	managedWorker := &sinks.Worker{Pool: h.Pool, Egress: loopbackPolicy()}
+	if _, err := managedWorker.Deliver(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	managedRuns := managedRunReceiver.received()
+	if len(managedRuns) != 1 {
+		t.Fatalf("expected one managed workflow run, got %d", len(managedRuns))
+	}
+	managedData, managedDataOK := managedRuns[0]["data"].(map[string]any)
+	if !managedDataOK || managedData["id"] != runID || managedData["project_id"] != project || managedData["evidence_origin"] != "gateway_observed" || strings.Contains(fmt.Sprint(managedRuns), prompt) || strings.Contains(fmt.Sprint(managedRuns), argument) || strings.Contains(fmt.Sprint(managedRuns), answer) {
+		t.Fatalf("managed run evidence has incorrect provenance or content: %v", managedRuns)
 	}
 	var order string
 	if err := h.Pool.QueryRow(t.Context(), `SELECT string_agg(s.ordinal::text || ':' || d.kind, ',' ORDER BY s.ordinal) FROM olp.agent_steps s JOIN olp.execution_debits d ON d.id=s.dispatch_id WHERE s.run_id=$1`, runID).Scan(&order); err != nil {

@@ -71,7 +71,7 @@ var sinkFormats = map[string][]string{
 }
 
 var sinkStreams = map[string]bool{"requests": true, "attempts": true, "usage_rollups": true,
-	"guardrail_decisions": true, "audit": true, "metering": true, "focus": true}
+	"guardrail_decisions": true, "audit": true, "metering": true, "focus": true, "runs": true, "trace_spans": true}
 
 // captureFormats are the encodings payload capture can write; the metering
 // formats never carry request payloads.
@@ -595,7 +595,7 @@ func (m *Management) validateSink(sink *Sink) error {
 	seen := map[string]bool{}
 	for _, stream := range sink.Streams {
 		if !sinkStreams[stream] || seen[stream] {
-			return access.Invalid("streams", "streams must contain distinct requests, attempts, usage_rollups, guardrail_decisions, audit, metering or focus entries")
+			return access.Invalid("streams", "streams must contain distinct supported entries")
 		}
 		seen[stream] = true
 	}

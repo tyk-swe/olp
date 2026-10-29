@@ -2,7 +2,6 @@ ALTER TABLE olp.managed_export_sinks DROP CONSTRAINT managed_export_sinks_stream
  ADD CONSTRAINT managed_export_sinks_streams_check CHECK (
   cardinality(streams) BETWEEN 1 AND 4
   AND streams <@ ARRAY['requests','attempts','guardrail_decisions','audit','runs','trace_spans']::text[]
-  AND (project_id IS NOT NULL OR NOT (streams && ARRAY['runs','trace_spans']::text[]))
  );
 
 ALTER TABLE olp.managed_export_deliveries
@@ -30,7 +29,7 @@ BEGIN
  END IF;
  INSERT INTO olp.managed_export_deliveries(sink_id,event_id,stream,payload,evidence_source_id,evidence_project_id)
  SELECT id,event,stream_name,body,NEW.id,NEW.project_id FROM olp.managed_export_sinks
- WHERE enabled AND retired_at IS NULL AND project_id=NEW.project_id AND stream_name=ANY(streams);
+ WHERE enabled AND retired_at IS NULL AND (project_id IS NULL OR project_id=NEW.project_id) AND stream_name=ANY(streams);
  RETURN NEW;
 END $$;
 
