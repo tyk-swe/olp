@@ -2460,3 +2460,106 @@ func TestGatewayRejectsApprovalOnNonWorkflowRouteBeforeDispatch(t *testing.T) {
 		t.Fatalf("approval control on ordinary route was not refused before dispatch: status=%d body=%s error=%v", response.StatusCode, body, err)
 	}
 }
+
+func TestGatewayToolExecutionTypeSafePreservesRequestsWithoutExchanges(t *testing.T) {
+	toolsetID, projectID := uuid.NewString(), uuid.NewString()
+	fixture := &workflowFixture{runID: uuid.NewString(), tool: WorkflowTool{ToolsetID: toolsetID, RevisionID: uuid.NewString(), Definition: routing.MCPToolsetTool{Alias: "t_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", Classification: "read_only", InputSchema: json.RawMessage(`{"type":"object"}`)}}}
+	h := nativeWorkflowHarness(t, projectID, "openai", "openai-chat", "unary", routing.FidelityTransformed, []string{toolsetID}, true, fixture)
+	snapshot := h.rt.release.Snapshot
+	route := snapshot.Routes[routeSlug]
+	snapshot.Guardrails = &guardrails.Registry{Definitions: map[string]guardrails.Revision{"revision": {ID: "revision", GuardrailID: "guard", ProjectID: projectID, Type: "typesafe", Configuration: json.RawMessage(`{"route":"relevance"}`), TimeoutMS: 1000, OnError: guardrails.FailClosed}}, Policies: map[string]guardrails.PolicyRevision{"policy-revision": {ID: "policy-revision", PolicyID: "policy", ProjectID: projectID, Entries: []guardrails.Entry{{GuardrailID: "guard", RevisionID: "revision", Phase: guardrails.Input, Action: guardrails.Block}}}}, Attachments: []guardrails.Attachment{{ID: "attachment", Scope: "route", ScopeID: route.ID, PolicyRevisionID: "policy-revision"}}}
+	if err := snapshot.Compile(); err != nil {
+		t.Fatal(err)
+	}
+	h.mock.set("a", completion("model-a", "finished"))
+	response, body := h.chat(fullKey, nil, `,"messages":[{"role":"user","content":"hello"}]`)
+	if response.StatusCode != http.StatusOK || !strings.Contains(fmt.Sprint(body), "finished") {
+		t.Fatalf("ordinary workflow failed: status=%d body=%v", response.StatusCode, body)
+	}
+}
+
+func TestGatewayToolExecutionTypeSafePrunesCompletePriorExchange(t *testing.T) {
+	toolsetID, projectID := uuid.NewString(), uuid.NewString()
+	alias := "t_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+	fixture := &workflowFixture{runID: uuid.NewString(), tool: WorkflowTool{ToolsetID: toolsetID, RevisionID: uuid.NewString(), Definition: routing.MCPToolsetTool{Alias: alias, Classification: "read_only", InputSchema: json.RawMessage(`{"type":"object"}`)}}}
+	h := nativeWorkflowHarness(t, projectID, "openai", "openai-chat", "unary", routing.FidelityTransformed, []string{toolsetID}, true, fixture)
+	snapshot := h.rt.release.Snapshot
+	route := snapshot.Routes[routeSlug]
+	decisionTarget := route.Targets[1]
+	decisionProvider := snapshot.Providers[decisionTarget.ProviderID]
+	// The existing gateway harness exposes its shared snapshot for fixture setup.
+	snapshot.Providers[decisionTarget.ProviderID] = routing.Provider{
+		ID: decisionProvider.ID, Name: decisionProvider.Name, Kind: "openai_compatible", VendorID: "typesafe-jev", Enabled: decisionProvider.Enabled,
+		ActiveCredential: decisionProvider.ActiveCredential, RevisionID: decisionProvider.RevisionID,
+		Endpoint: decisionProvider.Endpoint, AuthMode: decisionProvider.AuthMode, Slots: decisionProvider.Slots,
+		ProfileID: "systemone", ProfileRevision: connectors.ProfileRevision,
+		Capabilities: []routing.Capability{{Model: decisionTarget.ProviderModel, Operation: "decision", Surface: "openai", Mode: "unary"}},
+	}
+	snapshot.Routes[routeSlug] = routing.Route{
+		ID: route.ID, Slug: route.Slug, Operations: route.Operations, OverallTimeout: route.OverallTimeout,
+		MaxAttempts: route.MaxAttempts, Targets: slices.Clone(route.Targets[:1]), RoutingID: route.RoutingID,
+		RevisionID: route.RevisionID, Revision: route.Revision, PublishedAt: route.PublishedAt,
+		Policy: route.Policy, ProjectID: route.ProjectID, ContentPolicy: route.ContentPolicy,
+		Fidelity: route.Fidelity, Behavior: route.Behavior,
+	}
+	decisionID := uuid.NewString()
+	snapshot.Routes["relevance"] = routing.Route{ID: decisionID, Slug: "relevance", Operations: []string{"decision"}, OverallTimeout: 5000, MaxAttempts: 1, RoutingID: decisionID, RevisionID: uuid.NewString(), ProjectID: &projectID, Fidelity: routing.RouteFidelity{Mode: routing.FidelityTransformed}, Targets: []routing.Target{decisionTarget}}
+	snapshot.Guardrails = &guardrails.Registry{Definitions: map[string]guardrails.Revision{"revision": {ID: "revision", GuardrailID: "guard", ProjectID: projectID, Type: "typesafe", Configuration: json.RawMessage(`{"route":"relevance"}`), TimeoutMS: 2000, OnError: guardrails.FailClosed}}, Policies: map[string]guardrails.PolicyRevision{"policy-revision": {ID: "policy-revision", PolicyID: "policy", ProjectID: projectID, Entries: []guardrails.Entry{{GuardrailID: "guard", RevisionID: "revision", Phase: guardrails.Input, Action: guardrails.Block}}}}, Attachments: []guardrails.Attachment{{ID: "attachment", Scope: "route", ScopeID: route.ID, PolicyRevisionID: "policy-revision"}}}
+	if err := snapshot.Compile(); err != nil {
+		t.Fatal(err)
+	}
+	h.mock.set("b", func(w http.ResponseWriter, r *http.Request) {
+		var request struct {
+			State     string                     `json:"state"`
+			Questions map[string]json.RawMessage `json:"questions"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil || len(request.Questions) != 1 {
+			t.Errorf("invalid relevance request: %+v (%v)", request, err)
+		}
+		var state struct {
+			Task string `json:"task"`
+		}
+		if err := json.Unmarshal([]byte(request.State), &state); err != nil || state.Task != "current task" {
+			t.Errorf("invalid relevance task: %+v (%v)", state, err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		io.WriteString(w, `{"model":"model-b","answers":{"e0":{"type":"noul","noul":0.0}},"usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}`)
+	})
+	h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
+		type message struct {
+			Role       string          `json:"role"`
+			Content    json.RawMessage `json:"content"`
+			ToolCallID string          `json:"tool_call_id"`
+			ToolCalls  []struct {
+				ID string `json:"id"`
+			} `json:"tool_calls"`
+		}
+		var request struct {
+			Messages []message `json:"messages"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Error(err)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		if !slices.ContainsFunc(request.Messages, func(value message) bool { return value.ToolCallID == "current" }) {
+			fmt.Fprintf(w, `{"id":"first","object":"chat.completion","created":1,"model":"model-a","choices":[{"index":0,"message":{"role":"assistant","content":null,"tool_calls":[{"id":"current","type":"function","function":{"name":%q,"arguments":"{}"}}]},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":2,"completion_tokens":3,"total_tokens":5}}`, alias)
+			return
+		}
+		if slices.ContainsFunc(request.Messages, func(value message) bool {
+			return value.ToolCallID == "old" || slices.ContainsFunc(value.ToolCalls, func(call struct {
+				ID string `json:"id"`
+			}) bool {
+				return call.ID == "old"
+			})
+		}) || !slices.ContainsFunc(request.Messages, func(value message) bool { return strings.Contains(string(value.Content), "keep this context") }) {
+			io.WriteString(w, `{"id":"final","object":"chat.completion","created":1,"model":"model-a","choices":[{"index":0,"message":{"role":"assistant","content":"old exchange remained"},"finish_reason":"stop"}],"usage":{"prompt_tokens":2,"completion_tokens":3,"total_tokens":5}}`)
+			return
+		}
+		io.WriteString(w, `{"id":"final","object":"chat.completion","created":1,"model":"model-a","choices":[{"index":0,"message":{"role":"assistant","content":"old exchange pruned"},"finish_reason":"stop"}],"usage":{"prompt_tokens":2,"completion_tokens":3,"total_tokens":5}}`)
+	})
+	response, body := h.chat(fullKey, nil, `,"messages":[{"role":"assistant","content":"keep this context","tool_calls":[{"id":"old","type":"function","function":{"name":"previous","arguments":"{}"}}]},{"role":"tool","tool_call_id":"old","content":"old-result"},{"role":"user","content":"current task"}]`)
+	if response.StatusCode != http.StatusOK || !strings.Contains(fmt.Sprint(body), "old exchange pruned") {
+		t.Fatalf("prior exchange was not pruned: status=%d body=%v", response.StatusCode, body)
+	}
+}
