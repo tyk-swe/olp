@@ -48,6 +48,109 @@
           }
         }
       }
+    },
+    "/a2a/{agent}/.well-known/agent-card.json": {
+      "get": {
+        "operationId": "getA2AAgentCard",
+        "summary": "Discover a published A2A agent",
+        "description": "Requires the agents scope and an explicit allowlist entry for the published agent. The returned card advertises the gateway endpoint and OLP bearer authentication.",
+        "parameters": [
+          {
+            "name": "agent",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Published agent identifier"
+          }
+        ],
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Gateway agent card",
+            "content": {
+              "application/a2a+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/A2AAgentCard"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The bearer credential is invalid"
+          },
+          "404": {
+            "description": "The agent is unavailable to this principal"
+          },
+          "502": {
+            "description": "The agent card or upstream request failed"
+          }
+        }
+      }
+    },
+    "/a2a/{agent}": {
+      "post": {
+        "operationId": "callA2AAgent",
+        "summary": "Send a message to or read a task from a published A2A agent",
+        "description": "Supports A2A 1.0 JSON-RPC SendMessage and GetTask. Requires the agents scope and an explicit allowlist entry. OLP task IDs are bound to the initiating key and project.",
+        "parameters": [
+          {
+            "name": "agent",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Published agent identifier"
+          }
+        ],
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/A2ARequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "A2A result or JSON-RPC error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/A2AResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The JSON-RPC request is invalid"
+          },
+          "401": {
+            "description": "The bearer credential is invalid"
+          },
+          "404": {
+            "description": "The agent is unavailable to this principal"
+          },
+          "502": {
+            "description": "The agent card or upstream request failed"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -145,6 +248,176 @@
           }
         },
         "additionalProperties": false
+      },
+      "A2ARequest": {
+        "type": "object",
+        "required": [
+          "jsonrpc",
+          "id",
+          "method",
+          "params"
+        ],
+        "properties": {
+          "jsonrpc": {
+            "type": "string",
+            "enum": [
+              "2.0"
+            ]
+          },
+          "id": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "number"
+              }
+            ]
+          },
+          "method": {
+            "type": "string",
+            "enum": [
+              "SendMessage",
+              "GetTask"
+            ]
+          },
+          "params": {
+            "type": "object",
+            "additionalProperties": true,
+            "description": "A2A 1.0 method parameters. Task references must use an OLP task ID; push notifications and tenant selection are not supported."
+          }
+        }
+      },
+      "A2AResponse": {
+        "type": "object",
+        "required": [
+          "jsonrpc",
+          "id"
+        ],
+        "properties": {
+          "jsonrpc": {
+            "type": "string",
+            "enum": [
+              "2.0"
+            ]
+          },
+          "id": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "number"
+              }
+            ],
+            "nullable": true
+          },
+          "result": {
+            "type": "object",
+            "additionalProperties": true,
+            "description": "A2A 1.0 task or message result with OLP task IDs."
+          },
+          "error": {
+            "type": "object",
+            "required": [
+              "code",
+              "message"
+            ],
+            "properties": {
+              "code": {
+                "type": "integer"
+              },
+              "message": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      },
+      "A2AAgentCard": {
+        "type": "object",
+        "required": [
+          "name",
+          "version",
+          "supportedInterfaces",
+          "capabilities",
+          "securitySchemes",
+          "securityRequirements"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "version": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "supportedInterfaces": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "url",
+                "protocolBinding",
+                "protocolVersion"
+              ],
+              "properties": {
+                "url": {
+                  "type": "string",
+                  "format": "uri"
+                },
+                "protocolBinding": {
+                  "type": "string",
+                  "enum": [
+                    "JSONRPC"
+                  ]
+                },
+                "protocolVersion": {
+                  "type": "string",
+                  "enum": [
+                    "1.0"
+                  ]
+                }
+              }
+            }
+          },
+          "capabilities": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "securitySchemes": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "securityRequirements": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          },
+          "defaultInputModes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "defaultOutputModes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "skills": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          }
+        }
       }
     }
   }

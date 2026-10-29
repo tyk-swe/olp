@@ -337,7 +337,7 @@ func TestA2AAgentCardUsesGatewayAuthenticationAndEndpoint(t *testing.T) {
 		"agent": map[string]any{"protocol": "a2a-1.0.0", "endpoint": upstream.URL + "/rpc", "card_digest": hex.EncodeToString(digest[:]), "toolset_revisions": []string{}, "route_revisions": []string{}, "pricing_revision_id": pricing, "max_cost": "1", "message_price": "0.25"},
 	}, idem("a2a-card-agent"), http.StatusCreated)
 	agent := created["id"].(string)
-	h.want(owner, http.MethodPost, "/api/v1/agents/"+agent+"/publish", nil, withMatch(created, idem("a2a-card-publish")), http.StatusOK)
+	published := h.want(owner, http.MethodPost, "/api/v1/agents/"+agent+"/publish", nil, withMatch(created, idem("a2a-card-publish")), http.StatusOK)
 	key := h.want(owner, http.MethodPost, "/api/v1/api-keys", map[string]any{"name": "A2A caller", "project_id": project, "scopes": []string{"agents"}, "allowed_agents": []string{agent}}, idem("a2a-card-key"), http.StatusCreated)["secret"].(string)
 	noScope := h.want(owner, http.MethodPost, "/api/v1/api-keys", map[string]any{"name": "missing scope", "project_id": project, "scopes": []string{"tools"}, "allowed_agents": []string{agent}}, idem("a2a-no-scope"), http.StatusCreated)["secret"].(string)
 	noAgent := h.want(owner, http.MethodPost, "/api/v1/api-keys", map[string]any{"name": "missing agent", "project_id": project, "scopes": []string{"agents"}}, idem("a2a-no-agent"), http.StatusCreated)["secret"].(string)
@@ -441,6 +441,25 @@ func TestA2AAgentCardUsesGatewayAuthenticationAndEndpoint(t *testing.T) {
 		}
 		return decoded
 	}
+	invalidIDRequest, err := http.NewRequest(http.MethodPost, h.HTTP.URL+"/a2a/"+agent, bytes.NewBufferString(`{"jsonrpc":"2.0","id":{},"method":"GetTask","params":{"id":"missing"}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	invalidIDRequest.Header.Set("Authorization", "Bearer "+key)
+	invalidIDResponse, err := http.DefaultClient.Do(invalidIDRequest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer invalidIDResponse.Body.Close()
+	var invalidIDResult struct {
+		ID    json.RawMessage `json:"id"`
+		Error struct {
+			Code int `json:"code"`
+		} `json:"error"`
+	}
+	if err := json.NewDecoder(invalidIDResponse.Body).Decode(&invalidIDResult); err != nil || invalidIDResult.Error.Code != -32600 || string(invalidIDResult.ID) != "null" {
+		t.Fatalf("invalid JSON-RPC ID was accepted: %+v, %v", invalidIDResult, err)
+	}
 	sent := rpc(key, "SendMessage", map[string]any{"message": map[string]any{"messageId": "fixture-message", "role": "ROLE_USER", "parts": []any{map[string]any{"text": "PRIVATE REQUEST"}}}})
 	sendResult, ok := sent["result"].(map[string]any)
 	if !ok {
@@ -525,10 +544,27 @@ func TestA2AAgentCardUsesGatewayAuthenticationAndEndpoint(t *testing.T) {
 		t.Fatalf("ambiguous send was not retained: %d, %v", unknown, err)
 	}
 	var stored string
-	if err := h.Pool.QueryRow(t.Context(), `SELECT concat(coalesce((SELECT json_agg(t)::text FROM olp.a2a_tasks t),''),coalesce((SELECT json_agg(d)::text FROM olp.execution_debits d),''))`).Scan(&stored); err != nil {
+	if err := h.Pool.QueryRow(t.Context(), `SELECT concat(coalesce((SELECT json_agg(t)::text FROM olp.a2a_tasks t),''),coalesce((SELECT json_agg(d)::text FROM olp.execution_debits d),''),coalesce((SELECT json_agg(r)::text FROM olp.execution_debit_results r),''),coalesce((SELECT json_agg(r)::text FROM olp.agent_runs r),''),coalesce((SELECT json_agg(s)::text FROM olp.agent_steps s),''))`).Scan(&stored); err != nil {
 		t.Fatal(err)
 	}
 	if strings.Contains(stored, "PRIVATE REQUEST") || strings.Contains(stored, "PRIVATE ARTIFACT") {
 		t.Fatal("message content persisted")
+	}
+	redirectRPC.Store(false)
+	redirectCard.Store(false)
+	updated := h.want(owner, http.MethodPut, "/api/v1/agents/"+agent, map[string]any{
+		"project_id": project, "name": "fixture",
+		"agent": map[string]any{"protocol": "a2a-1.0.0", "endpoint": upstream.URL + "/rpc", "card_digest": strings.Repeat("a", 64), "toolset_revisions": []string{}, "route_revisions": []string{}, "pricing_revision_id": pricing, "max_cost": "1", "message_price": "0.50"},
+	}, withMatch(published, idem("a2a-update")), http.StatusOK)
+	h.want(owner, http.MethodPost, "/api/v1/agents/"+agent+"/publish", nil, withMatch(updated, idem("a2a-republish")), http.StatusOK)
+	if err := h.Runtime.Refresh(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if getCard(key, agent) != http.StatusBadGateway {
+		t.Fatal("new revision did not enforce its card digest")
+	}
+	pinned := rpc(key, "GetTask", map[string]any{"id": id})
+	if task, ok := pinned["result"].(map[string]any); !ok || task["id"] != id || !strings.Contains(fmt.Sprint(task), "PRIVATE ARTIFACT") {
+		t.Fatalf("task did not retain its published revision: %+v", pinned)
 	}
 }

@@ -356,10 +356,11 @@ and applicable candidate gates. A working HTTP-only slice does not close RM7.
 
 **State:** Planned. **Accountable:** agent maintainers; specialist owners are
 named below. **Entry:** RM7.1 and guardrail input/output execution for RM8.1;
-existing prompt publications and input/output guardrails for RM8.2; the relevant
-completed RM7 transport and authentication work for RM8.3–RM8.4. RM8.5 follows
-those workflow contracts and existing observability exports; RM8.6 qualifies
-the combined result.
+existing prompt publications and input/output guardrails for RM8.2; and the
+relevant workload identity work for RM8.3. Static-credential A2A in RM8.4 can
+begin independently. A2A OAuth uses RM7.2, tool callbacks use RM7.1, and
+delegated tasks use RM8.3. RM8.5 follows those workflow contracts and existing
+observability exports; RM8.6 qualifies the combined result.
 Retrieval-backed tools additionally require certified [RM5.2 or RM5.3 retrieval](api-surface.md#rm5-retained-apis-and-retrieval)
 for their selected backend, not completion of every retrieval adapter.
 

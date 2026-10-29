@@ -233,9 +233,10 @@ and identity-tenant qualification remains separate from the fixture evidence.
 
 **Status: Planned.** **Owners:** agent and access maintainers, with protocol,
 prompt, observability and console owners. **Dependencies:** RM7.1 for tool loops,
-existing prompt publications for prompt rendering, and the relevant MCP
-transport/auth implementation for delegation and A2A. Retrieval-backed tools also
-use their selected RM5 backend.
+existing prompt publications for prompt rendering, and workload identity for
+delegation. Static-credential A2A can begin independently. A2A OAuth uses RM7.2,
+tool callbacks use RM7.1, and delegated tasks use RM8.3. Retrieval-backed tools
+also use their selected RM5 backend.
 
 - [ ] **RM8.1 — Bounded tool loops:** implement OpenAI, Anthropic and Gemini
   dialects plus Responses projections, iteration/time/concurrency/cost bounds,

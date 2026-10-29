@@ -52,6 +52,18 @@ func responseID(id json.RawMessage) json.RawMessage {
 	return id
 }
 
+func validRequestID(id json.RawMessage) bool {
+	if len(id) == 0 || bytes.Equal(id, []byte("null")) {
+		return false
+	}
+	var stringID string
+	if json.Unmarshal(id, &stringID) == nil {
+		return true
+	}
+	var numberID json.Number
+	return json.Unmarshal(id, &numberID) == nil && numberID != ""
+}
+
 func fail(w http.ResponseWriter, id json.RawMessage, code int, message string) {
 	reply(w, id, nil, &rpcError{Code: code, Message: message})
 }
@@ -72,7 +84,11 @@ func (s *Server) rpc(w http.ResponseWriter, r *http.Request) {
 		fail(w, nil, -32700, "Invalid JSON payload")
 		return
 	}
-	if request.JSONRPC != "2.0" || len(request.ID) == 0 || bytes.Equal(request.ID, []byte("null")) || request.Method == "" || len(request.Params) == 0 {
+	if !validRequestID(request.ID) {
+		fail(w, nil, -32600, "Request payload validation error")
+		return
+	}
+	if request.JSONRPC != "2.0" || request.Method == "" || len(request.Params) == 0 {
 		fail(w, request.ID, -32600, "Request payload validation error")
 		return
 	}
@@ -308,8 +324,8 @@ func (s *Server) transport(ctx context.Context, definition agentcontract.Definit
 	if _, err := s.Egress.ValidateEndpoint(definition.Endpoint); err != nil {
 		return nil, nil, nil, err
 	}
-	client := s.Egress.Client(30 * time.Second)
-	client.Transport = limitedTransport{Base: client.Transport}
+	base := s.Egress.Client(30 * time.Second)
+	client := &http.Client{Transport: limitedTransport{Base: base.Transport}, CheckRedirect: base.CheckRedirect, Jar: base.Jar, Timeout: base.Timeout}
 	transport := a2aclient.NewJSONRPCTransport(definition.Endpoint, client)
 	if definition.CredentialID == nil {
 		return transport, a2aclient.ServiceParams{"A2A-Version": []string{string(protocol.Version)}}, func() { _ = transport.Destroy() }, nil

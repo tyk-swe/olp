@@ -17,6 +17,84 @@ import (
 	openapi_types "github.com/oapi-codegen/runtime/types"
 )
 
+// Defines values for A2AAgentCardSupportedInterfacesProtocolBinding.
+const (
+	JSONRPC A2AAgentCardSupportedInterfacesProtocolBinding = "JSONRPC"
+)
+
+// Valid indicates whether the value is a known member of the A2AAgentCardSupportedInterfacesProtocolBinding enum.
+func (e A2AAgentCardSupportedInterfacesProtocolBinding) Valid() bool {
+	switch e {
+	case JSONRPC:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for A2AAgentCardSupportedInterfacesProtocolVersion.
+const (
+	N10 A2AAgentCardSupportedInterfacesProtocolVersion = "1.0"
+)
+
+// Valid indicates whether the value is a known member of the A2AAgentCardSupportedInterfacesProtocolVersion enum.
+func (e A2AAgentCardSupportedInterfacesProtocolVersion) Valid() bool {
+	switch e {
+	case N10:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for A2ARequestJsonrpc.
+const (
+	A2ARequestJsonrpcN20 A2ARequestJsonrpc = "2.0"
+)
+
+// Valid indicates whether the value is a known member of the A2ARequestJsonrpc enum.
+func (e A2ARequestJsonrpc) Valid() bool {
+	switch e {
+	case A2ARequestJsonrpcN20:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for A2ARequestMethod.
+const (
+	GetTask     A2ARequestMethod = "GetTask"
+	SendMessage A2ARequestMethod = "SendMessage"
+)
+
+// Valid indicates whether the value is a known member of the A2ARequestMethod enum.
+func (e A2ARequestMethod) Valid() bool {
+	switch e {
+	case GetTask:
+		return true
+	case SendMessage:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for A2AResponseJsonrpc.
+const (
+	A2AResponseJsonrpcN20 A2AResponseJsonrpc = "2.0"
+)
+
+// Valid indicates whether the value is a known member of the A2AResponseJsonrpc enum.
+func (e A2AResponseJsonrpc) Valid() bool {
+	switch e {
+	case A2AResponseJsonrpcN20:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for PromptLabelReferenceLabel.
 const (
 	Production PromptLabelReferenceLabel = "production"
@@ -34,6 +112,84 @@ func (e PromptLabelReferenceLabel) Valid() bool {
 		return false
 	}
 }
+
+// A2AAgentCard defines model for A2AAgentCard.
+type A2AAgentCard struct {
+	Capabilities         map[string]interface{}    `json:"capabilities"`
+	DefaultInputModes    *[]string                 `json:"defaultInputModes,omitempty"`
+	DefaultOutputModes   *[]string                 `json:"defaultOutputModes,omitempty"`
+	Description          *string                   `json:"description,omitempty"`
+	Name                 string                    `json:"name"`
+	SecurityRequirements []map[string]interface{}  `json:"securityRequirements"`
+	SecuritySchemes      map[string]interface{}    `json:"securitySchemes"`
+	Skills               *[]map[string]interface{} `json:"skills,omitempty"`
+	SupportedInterfaces  []struct {
+		ProtocolBinding A2AAgentCardSupportedInterfacesProtocolBinding `json:"protocolBinding"`
+		ProtocolVersion A2AAgentCardSupportedInterfacesProtocolVersion `json:"protocolVersion"`
+		Url             string                                         `json:"url"`
+	} `json:"supportedInterfaces"`
+	Version string `json:"version"`
+}
+
+// A2AAgentCardSupportedInterfacesProtocolBinding defines model for A2AAgentCard.SupportedInterfaces.ProtocolBinding.
+type A2AAgentCardSupportedInterfacesProtocolBinding string
+
+// A2AAgentCardSupportedInterfacesProtocolVersion defines model for A2AAgentCard.SupportedInterfaces.ProtocolVersion.
+type A2AAgentCardSupportedInterfacesProtocolVersion string
+
+// A2ARequest defines model for A2ARequest.
+type A2ARequest struct {
+	Id      A2ARequest_Id     `json:"id"`
+	Jsonrpc A2ARequestJsonrpc `json:"jsonrpc"`
+	Method  A2ARequestMethod  `json:"method"`
+
+	// Params A2A 1.0 method parameters. Task references must use an OLP task ID; push notifications and tenant selection are not supported.
+	Params map[string]interface{} `json:"params"`
+}
+
+// A2ARequestId0 defines model for A2ARequest.Id.0.
+type A2ARequestId0 = string
+
+// A2ARequestId1 defines model for A2ARequest.Id.1.
+type A2ARequestId1 = float32
+
+// A2ARequest_Id defines model for A2ARequest.Id.
+type A2ARequest_Id struct {
+	union json.RawMessage
+}
+
+// A2ARequestJsonrpc defines model for A2ARequest.Jsonrpc.
+type A2ARequestJsonrpc string
+
+// A2ARequestMethod defines model for A2ARequest.Method.
+type A2ARequestMethod string
+
+// A2AResponse defines model for A2AResponse.
+type A2AResponse struct {
+	Error *struct {
+		Code    int    `json:"code"`
+		Message string `json:"message"`
+	} `json:"error,omitempty"`
+	Id      *A2AResponse_Id    `json:"id"`
+	Jsonrpc A2AResponseJsonrpc `json:"jsonrpc"`
+
+	// Result A2A 1.0 task or message result with OLP task IDs.
+	Result *map[string]interface{} `json:"result,omitempty"`
+}
+
+// A2AResponseId0 defines model for A2AResponse.Id.0.
+type A2AResponseId0 = string
+
+// A2AResponseId1 defines model for A2AResponse.Id.1.
+type A2AResponseId1 = float32
+
+// A2AResponse_Id defines model for A2AResponse.Id.
+type A2AResponse_Id struct {
+	union json.RawMessage
+}
+
+// A2AResponseJsonrpc defines model for A2AResponse.Jsonrpc.
+type A2AResponseJsonrpc string
 
 // ChatPromptRequest defines model for ChatPromptRequest.
 type ChatPromptRequest struct {
@@ -69,6 +225,9 @@ type PromptRevisionReference struct {
 type PublishedPromptReference struct {
 	union json.RawMessage
 }
+
+// CallA2AAgentJSONRequestBody defines body for CallA2AAgent for application/json ContentType.
+type CallA2AAgentJSONRequestBody = A2ARequest
 
 // CreateChatCompletionWithPromptJSONRequestBody defines body for CreateChatCompletionWithPrompt for application/json ContentType.
 type CreateChatCompletionWithPromptJSONRequestBody = ChatPromptRequest
@@ -150,6 +309,130 @@ func (a ChatPromptRequest) MarshalJSON() ([]byte, error) {
 		}
 	}
 	return json.Marshal(object)
+}
+
+// AsA2ARequestId0 returns the union data inside the A2ARequest_Id as a A2ARequestId0
+func (t A2ARequest_Id) AsA2ARequestId0() (A2ARequestId0, error) {
+	var body A2ARequestId0
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromA2ARequestId0 overwrites any union data inside the A2ARequest_Id as the provided A2ARequestId0
+func (t *A2ARequest_Id) FromA2ARequestId0(v A2ARequestId0) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeA2ARequestId0 performs a merge with any union data inside the A2ARequest_Id, using the provided A2ARequestId0
+func (t *A2ARequest_Id) MergeA2ARequestId0(v A2ARequestId0) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsA2ARequestId1 returns the union data inside the A2ARequest_Id as a A2ARequestId1
+func (t A2ARequest_Id) AsA2ARequestId1() (A2ARequestId1, error) {
+	var body A2ARequestId1
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromA2ARequestId1 overwrites any union data inside the A2ARequest_Id as the provided A2ARequestId1
+func (t *A2ARequest_Id) FromA2ARequestId1(v A2ARequestId1) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeA2ARequestId1 performs a merge with any union data inside the A2ARequest_Id, using the provided A2ARequestId1
+func (t *A2ARequest_Id) MergeA2ARequestId1(v A2ARequestId1) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+func (t A2ARequest_Id) MarshalJSON() ([]byte, error) {
+	b, err := t.union.MarshalJSON()
+	return b, err
+}
+
+func (t *A2ARequest_Id) UnmarshalJSON(b []byte) error {
+	err := t.union.UnmarshalJSON(b)
+	return err
+}
+
+// AsA2AResponseId0 returns the union data inside the A2AResponse_Id as a A2AResponseId0
+func (t A2AResponse_Id) AsA2AResponseId0() (A2AResponseId0, error) {
+	var body A2AResponseId0
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromA2AResponseId0 overwrites any union data inside the A2AResponse_Id as the provided A2AResponseId0
+func (t *A2AResponse_Id) FromA2AResponseId0(v A2AResponseId0) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeA2AResponseId0 performs a merge with any union data inside the A2AResponse_Id, using the provided A2AResponseId0
+func (t *A2AResponse_Id) MergeA2AResponseId0(v A2AResponseId0) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsA2AResponseId1 returns the union data inside the A2AResponse_Id as a A2AResponseId1
+func (t A2AResponse_Id) AsA2AResponseId1() (A2AResponseId1, error) {
+	var body A2AResponseId1
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromA2AResponseId1 overwrites any union data inside the A2AResponse_Id as the provided A2AResponseId1
+func (t *A2AResponse_Id) FromA2AResponseId1(v A2AResponseId1) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeA2AResponseId1 performs a merge with any union data inside the A2AResponse_Id, using the provided A2AResponseId1
+func (t *A2AResponse_Id) MergeA2AResponseId1(v A2AResponseId1) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+func (t A2AResponse_Id) MarshalJSON() ([]byte, error) {
+	b, err := t.union.MarshalJSON()
+	return b, err
+}
+
+func (t *A2AResponse_Id) UnmarshalJSON(b []byte) error {
+	err := t.union.UnmarshalJSON(b)
+	return err
 }
 
 // AsPromptLabelReference returns the union data inside the PublishedPromptReference as a PromptLabelReference
@@ -288,6 +571,31 @@ func WithRequestEditorFn(fn RequestEditorFn) ClientOption {
 // The interface specification for the client above.
 type ClientInterface interface {
 
+	// CallA2AAgentWithBody Send a message to or read a task from a published A2A agent
+	//
+	// Supports A2A 1.0 JSON-RPC SendMessage and GetTask. Requires the agents scope and an explicit allowlist entry. OLP task IDs are bound to the initiating key and project.
+	//
+	// Takes any type of body and a specified content type.
+	//
+	// Corresponds with POST /a2a/{agent} (the `CallA2AAgent` operationId).
+	CallA2AAgentWithBody(ctx context.Context, agent openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// CallA2AAgent Send a message to or read a task from a published A2A agent
+	//
+	// Supports A2A 1.0 JSON-RPC SendMessage and GetTask. Requires the agents scope and an explicit allowlist entry. OLP task IDs are bound to the initiating key and project.
+	//
+	// Takes a body of the `application/json` content type.
+	//
+	// Corresponds with POST /a2a/{agent} (the `CallA2AAgent` operationId).
+	CallA2AAgent(ctx context.Context, agent openapi_types.UUID, body CallA2AAgentJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// GetA2AAgentCard Discover a published A2A agent
+	//
+	// Requires the agents scope and an explicit allowlist entry for the published agent. The returned card advertises the gateway endpoint and OLP bearer authentication.
+	//
+	// Corresponds with GET /a2a/{agent}/.well-known/agent-card.json (the `GetA2AAgentCard` operationId).
+	GetA2AAgentCard(ctx context.Context, agent openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// CreateChatCompletionWithPromptWithBody Create a chat completion using a published OLP prompt
 	//
 	// For transformed routes, the published prompt replaces explicit messages. Other chat fields use the provider contract.
@@ -305,6 +613,61 @@ type ClientInterface interface {
 	//
 	// Corresponds with POST /v1/chat/completions (the `CreateChatCompletionWithPrompt` operationId).
 	CreateChatCompletionWithPrompt(ctx context.Context, body CreateChatCompletionWithPromptJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+}
+
+// CallA2AAgentWithBody Send a message to or read a task from a published A2A agent
+//
+// Supports A2A 1.0 JSON-RPC SendMessage and GetTask. Requires the agents scope and an explicit allowlist entry. OLP task IDs are bound to the initiating key and project.
+//
+// Takes any type of body and a specified content type.
+//
+// Corresponds with POST /a2a/{agent} (the `CallA2AAgent` operationId).
+func (c *Client) CallA2AAgentWithBody(ctx context.Context, agent openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCallA2AAgentRequestWithBody(c.Server, agent, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// CallA2AAgent Send a message to or read a task from a published A2A agent
+//
+// Supports A2A 1.0 JSON-RPC SendMessage and GetTask. Requires the agents scope and an explicit allowlist entry. OLP task IDs are bound to the initiating key and project.
+//
+// Takes a body of the `application/json` content type.
+//
+// Corresponds with POST /a2a/{agent} (the `CallA2AAgent` operationId).
+func (c *Client) CallA2AAgent(ctx context.Context, agent openapi_types.UUID, body CallA2AAgentJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCallA2AAgentRequest(c.Server, agent, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// GetA2AAgentCard Discover a published A2A agent
+//
+// Requires the agents scope and an explicit allowlist entry for the published agent. The returned card advertises the gateway endpoint and OLP bearer authentication.
+//
+// Corresponds with GET /a2a/{agent}/.well-known/agent-card.json (the `GetA2AAgentCard` operationId).
+func (c *Client) GetA2AAgentCard(ctx context.Context, agent openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetA2AAgentCardRequest(c.Server, agent)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
 }
 
 // CreateChatCompletionWithPromptWithBody Create a chat completion using a published OLP prompt
@@ -343,6 +706,87 @@ func (c *Client) CreateChatCompletionWithPrompt(ctx context.Context, body Create
 		return nil, err
 	}
 	return c.Client.Do(req)
+}
+
+// NewCallA2AAgentRequest calls the generic CallA2AAgent builder with application/json body
+func NewCallA2AAgentRequest(server string, agent openapi_types.UUID, body CallA2AAgentJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewCallA2AAgentRequestWithBody(server, agent, "application/json", bodyReader)
+}
+
+// NewCallA2AAgentRequestWithBody constructs an http.Request for the CallA2AAgent method, with any body, and a specified content type
+func NewCallA2AAgentRequestWithBody(server string, agent openapi_types.UUID, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "agent", agent, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/a2a/%s", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
+// NewGetA2AAgentCardRequest constructs an http.Request for the GetA2AAgentCard method
+func NewGetA2AAgentCardRequest(server string, agent openapi_types.UUID) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "agent", agent, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/a2a/%s/.well-known/agent-card.json", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
 }
 
 // NewCreateChatCompletionWithPromptRequest calls the generic CreateChatCompletionWithPrompt builder with application/json body
@@ -429,6 +873,33 @@ func WithBaseURL(baseURL string) ClientOption {
 // ClientWithResponsesInterface is the interface specification for the client with responses above.
 type ClientWithResponsesInterface interface {
 
+	// CallA2AAgentWithBodyWithResponse Send a message to or read a task from a published A2A agent
+	//
+	// Supports A2A 1.0 JSON-RPC SendMessage and GetTask. Requires the agents scope and an explicit allowlist entry. OLP task IDs are bound to the initiating key and project.
+	//
+	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /a2a/{agent} (the `CallA2AAgent` operationId).
+	CallA2AAgentWithBodyWithResponse(ctx context.Context, agent openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CallA2AAgentResponse, error)
+
+	// CallA2AAgentWithResponse Send a message to or read a task from a published A2A agent
+	//
+	// Supports A2A 1.0 JSON-RPC SendMessage and GetTask. Requires the agents scope and an explicit allowlist entry. OLP task IDs are bound to the initiating key and project.
+	//
+	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /a2a/{agent} (the `CallA2AAgent` operationId).
+	CallA2AAgentWithResponse(ctx context.Context, agent openapi_types.UUID, body CallA2AAgentJSONRequestBody, reqEditors ...RequestEditorFn) (*CallA2AAgentResponse, error)
+
+	// GetA2AAgentCardWithResponse Discover a published A2A agent
+	//
+	// Requires the agents scope and an explicit allowlist entry for the published agent. The returned card advertises the gateway endpoint and OLP bearer authentication.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with GET /a2a/{agent}/.well-known/agent-card.json (the `GetA2AAgentCard` operationId).
+	GetA2AAgentCardWithResponse(ctx context.Context, agent openapi_types.UUID, reqEditors ...RequestEditorFn) (*GetA2AAgentCardResponse, error)
+
 	// CreateChatCompletionWithPromptWithBodyWithResponse Create a chat completion using a published OLP prompt
 	//
 	// For transformed routes, the published prompt replaces explicit messages. Other chat fields use the provider contract.
@@ -446,6 +917,88 @@ type ClientWithResponsesInterface interface {
 	//
 	// Corresponds with POST /v1/chat/completions (the `CreateChatCompletionWithPrompt` operationId).
 	CreateChatCompletionWithPromptWithResponse(ctx context.Context, body CreateChatCompletionWithPromptJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateChatCompletionWithPromptResponse, error)
+}
+
+type CallA2AAgentResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *A2AResponse
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r CallA2AAgentResponse) GetJSON200() *A2AResponse {
+	return r.JSON200
+}
+
+// GetBody returns the raw response body bytes
+func (r CallA2AAgentResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r CallA2AAgentResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r CallA2AAgentResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r CallA2AAgentResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type GetA2AAgentCardResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// Applicationa2aJSON200 the response for an HTTP 200 `application/a2a+json` response
+	Applicationa2aJSON200 *A2AAgentCard
+}
+
+// GetApplicationa2aJSON200 returns the response for an HTTP 200 `application/a2a+json` response
+func (r GetA2AAgentCardResponse) GetApplicationa2aJSON200() *A2AAgentCard {
+	return r.Applicationa2aJSON200
+}
+
+// GetBody returns the raw response body bytes
+func (r GetA2AAgentCardResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r GetA2AAgentCardResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetA2AAgentCardResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r GetA2AAgentCardResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
 }
 
 type CreateChatCompletionWithPromptResponse struct {
@@ -489,6 +1042,51 @@ func (r CreateChatCompletionWithPromptResponse) ContentType() string {
 	return ""
 }
 
+// CallA2AAgentWithBodyWithResponse Send a message to or read a task from a published A2A agent
+//
+// Supports A2A 1.0 JSON-RPC SendMessage and GetTask. Requires the agents scope and an explicit allowlist entry. OLP task IDs are bound to the initiating key and project.
+//
+// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /a2a/{agent} (the `CallA2AAgent` operationId).
+func (c *ClientWithResponses) CallA2AAgentWithBodyWithResponse(ctx context.Context, agent openapi_types.UUID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CallA2AAgentResponse, error) {
+	rsp, err := c.CallA2AAgentWithBody(ctx, agent, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseCallA2AAgentResponse(rsp)
+}
+
+// CallA2AAgentWithResponse Send a message to or read a task from a published A2A agent
+//
+// Supports A2A 1.0 JSON-RPC SendMessage and GetTask. Requires the agents scope and an explicit allowlist entry. OLP task IDs are bound to the initiating key and project.
+//
+// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /a2a/{agent} (the `CallA2AAgent` operationId).
+func (c *ClientWithResponses) CallA2AAgentWithResponse(ctx context.Context, agent openapi_types.UUID, body CallA2AAgentJSONRequestBody, reqEditors ...RequestEditorFn) (*CallA2AAgentResponse, error) {
+	rsp, err := c.CallA2AAgent(ctx, agent, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseCallA2AAgentResponse(rsp)
+}
+
+// GetA2AAgentCardWithResponse Discover a published A2A agent
+//
+// Requires the agents scope and an explicit allowlist entry for the published agent. The returned card advertises the gateway endpoint and OLP bearer authentication.
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with GET /a2a/{agent}/.well-known/agent-card.json (the `GetA2AAgentCard` operationId).
+func (c *ClientWithResponses) GetA2AAgentCardWithResponse(ctx context.Context, agent openapi_types.UUID, reqEditors ...RequestEditorFn) (*GetA2AAgentCardResponse, error) {
+	rsp, err := c.GetA2AAgentCard(ctx, agent, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetA2AAgentCardResponse(rsp)
+}
+
 // CreateChatCompletionWithPromptWithBodyWithResponse Create a chat completion using a published OLP prompt
 //
 // For transformed routes, the published prompt replaces explicit messages. Other chat fields use the provider contract.
@@ -517,6 +1115,79 @@ func (c *ClientWithResponses) CreateChatCompletionWithPromptWithResponse(ctx con
 		return nil, err
 	}
 	return ParseCreateChatCompletionWithPromptResponse(rsp)
+}
+
+// ParseCallA2AAgentResponse parses an HTTP response from a CallA2AAgentWithResponse call
+func ParseCallA2AAgentResponse(rsp *http.Response) (*CallA2AAgentResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &CallA2AAgentResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest A2AResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case rsp.StatusCode == 400:
+		break // No content-type
+
+	case rsp.StatusCode == 401:
+		break // No content-type
+
+	case rsp.StatusCode == 404:
+		break // No content-type
+
+	case rsp.StatusCode == 502:
+		break // No content-type
+
+	}
+
+	return response, nil
+}
+
+// ParseGetA2AAgentCardResponse parses an HTTP response from a GetA2AAgentCardWithResponse call
+func ParseGetA2AAgentCardResponse(rsp *http.Response) (*GetA2AAgentCardResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetA2AAgentCardResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest A2AAgentCard
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.Applicationa2aJSON200 = &dest
+
+	case rsp.StatusCode == 401:
+		break // No content-type
+
+	case rsp.StatusCode == 404:
+		break // No content-type
+
+	case rsp.StatusCode == 502:
+		break // No content-type
+
+	}
+
+	return response, nil
 }
 
 // ParseCreateChatCompletionWithPromptResponse parses an HTTP response from a CreateChatCompletionWithPromptWithResponse call

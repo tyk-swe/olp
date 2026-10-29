@@ -146,8 +146,10 @@ func (l *Ledger) findTask(ctx context.Context, authority access.Authority, publi
 		return task{}, pgx.ErrNoRows
 	}
 	var found task
-	err = l.Pool.QueryRow(ctx, `SELECT id::text,upstream_id,upstream_context_id,revision_id::text FROM olp.a2a_tasks WHERE id=$1 AND api_key_id=$2 AND project_id=$3 AND publication_id=$4`, rawID, authority.ID, *authority.ProjectID, publicationID).Scan(&found.ID, &found.UpstreamID, &found.ContextID, &found.RevisionID)
-	return found, err
+	if err := l.Pool.QueryRow(ctx, `SELECT id::text,upstream_id,upstream_context_id,revision_id::text FROM olp.a2a_tasks WHERE id=$1 AND api_key_id=$2 AND project_id=$3 AND publication_id=$4`, rawID, authority.ID, *authority.ProjectID, publicationID).Scan(&found.ID, &found.UpstreamID, &found.ContextID, &found.RevisionID); err != nil {
+		return task{}, err
+	}
+	return found, nil
 }
 
 func (l *Ledger) settle(ctx context.Context, res reservation, authority access.Authority, revision agentcontract.Revision, upstreamID, contextID string) (string, error) {

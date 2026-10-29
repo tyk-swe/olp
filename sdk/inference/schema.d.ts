@@ -24,6 +24,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/a2a/{agent}/.well-known/agent-card.json": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Discover a published A2A agent
+         * @description Requires the agents scope and an explicit allowlist entry for the published agent. The returned card advertises the gateway endpoint and OLP bearer authentication.
+         */
+        get: operations["getA2AAgentCard"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/a2a/{agent}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Send a message to or read a task from a published A2A agent
+         * @description Supports A2A 1.0 JSON-RPC SendMessage and GetTask. Requires the agents scope and an explicit allowlist entry. OLP task IDs are bound to the initiating key and project.
+         */
+        post: operations["callA2AAgent"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -63,6 +103,57 @@ export interface components {
              */
             revision_id: string;
         };
+        A2ARequest: {
+            /** @enum {string} */
+            jsonrpc: "2.0";
+            id: string | number;
+            /** @enum {string} */
+            method: "SendMessage" | "GetTask";
+            /** @description A2A 1.0 method parameters. Task references must use an OLP task ID; push notifications and tenant selection are not supported. */
+            params: {
+                [key: string]: unknown;
+            };
+        };
+        A2AResponse: {
+            /** @enum {string} */
+            jsonrpc: "2.0";
+            id: (string | number) | null;
+            /** @description A2A 1.0 task or message result with OLP task IDs. */
+            result?: {
+                [key: string]: unknown;
+            };
+            error?: {
+                code: number;
+                message: string;
+            };
+        };
+        A2AAgentCard: {
+            name: string;
+            version: string;
+            description?: string;
+            supportedInterfaces: {
+                /** Format: uri */
+                url: string;
+                /** @enum {string} */
+                protocolBinding: "JSONRPC";
+                /** @enum {string} */
+                protocolVersion: "1.0";
+            }[];
+            capabilities: {
+                [key: string]: unknown;
+            };
+            securitySchemes: {
+                [key: string]: unknown;
+            };
+            securityRequirements: {
+                [key: string]: unknown;
+            }[];
+            defaultInputModes?: string[];
+            defaultOutputModes?: string[];
+            skills?: {
+                [key: string]: unknown;
+            }[];
+        };
     };
     responses: never;
     parameters: never;
@@ -99,6 +190,105 @@ export interface operations {
             };
             /** @description The prompt reference or variables are invalid */
             400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    getA2AAgentCard: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Published agent identifier */
+                agent: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Gateway agent card */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/a2a+json": components["schemas"]["A2AAgentCard"];
+                };
+            };
+            /** @description The bearer credential is invalid */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The agent is unavailable to this principal */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The agent card or upstream request failed */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    callA2AAgent: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Published agent identifier */
+                agent: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["A2ARequest"];
+            };
+        };
+        responses: {
+            /** @description A2A result or JSON-RPC error */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["A2AResponse"];
+                };
+            };
+            /** @description The JSON-RPC request is invalid */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The bearer credential is invalid */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The agent is unavailable to this principal */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The agent card or upstream request failed */
+            502: {
                 headers: {
                     [name: string]: unknown;
                 };

@@ -4499,6 +4499,10 @@
             "max_cost": {
               "type": "string",
               "pattern": "^[0-9]{1,12}(\\.[0-9]{1,12})?$"
+            },
+            "message_price": {
+              "type": "string",
+              "pattern": "^[0-9]{1,12}(\\.[0-9]{1,12})?$"
             }
           },
           "required": [
@@ -5116,6 +5120,10 @@
               "format": "uuid"
             },
             "max_cost": {
+              "type": "string",
+              "pattern": "^[0-9]{1,12}(\\.[0-9]{1,12})?$"
+            },
+            "message_price": {
               "type": "string",
               "pattern": "^[0-9]{1,12}(\\.[0-9]{1,12})?$"
             }
@@ -8592,6 +8600,10 @@
               "format": "uuid"
             },
             "max_cost": {
+              "type": "string",
+              "pattern": "^[0-9]{1,12}(\\.[0-9]{1,12})?$"
+            },
+            "message_price": {
               "type": "string",
               "pattern": "^[0-9]{1,12}(\\.[0-9]{1,12})?$"
             }
@@ -12664,6 +12676,10 @@
               "format": "uuid"
             },
             "max_cost": {
+              "type": "string",
+              "pattern": "^[0-9]{1,12}(\\.[0-9]{1,12})?$"
+            },
+            "message_price": {
               "type": "string",
               "pattern": "^[0-9]{1,12}(\\.[0-9]{1,12})?$"
             }
@@ -27121,6 +27137,10 @@
             "max_cost": {
               "type": "string",
               "pattern": "^[0-9]{1,12}(\\.[0-9]{1,12})?$"
+            },
+            "message_price": {
+              "type": "string",
+              "pattern": "^[0-9]{1,12}(\\.[0-9]{1,12})?$"
             }
           },
           "required": [
@@ -38120,6 +38140,10 @@
             "max_cost": {
               "type": "string",
               "pattern": "^[0-9]{1,12}(\\.[0-9]{1,12})?$"
+            },
+            "message_price": {
+              "type": "string",
+              "pattern": "^[0-9]{1,12}(\\.[0-9]{1,12})?$"
             }
           },
           "required": [
@@ -40404,6 +40428,10 @@
               "format": "uuid"
             },
             "max_cost": {
+              "type": "string",
+              "pattern": "^[0-9]{1,12}(\\.[0-9]{1,12})?$"
+            },
+            "message_price": {
               "type": "string",
               "pattern": "^[0-9]{1,12}(\\.[0-9]{1,12})?$"
             }
@@ -42741,6 +42769,10 @@
               "format": "uuid"
             },
             "max_cost": {
+              "type": "string",
+              "pattern": "^[0-9]{1,12}(\\.[0-9]{1,12})?$"
+            },
+            "message_price": {
               "type": "string",
               "pattern": "^[0-9]{1,12}(\\.[0-9]{1,12})?$"
             }
