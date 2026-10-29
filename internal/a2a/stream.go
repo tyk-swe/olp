@@ -69,8 +69,20 @@ func (s *Server) streamContext(r *http.Request, authority access.Authority, revi
 
 func (s *Server) streamAuthorized(r *http.Request, authority access.Authority, revision agentcontract.Revision) bool {
 	token, _ := consumerauth.Bearer(r.Header.Get("Authorization"))
-	current, failure := consumerauth.Authenticate(s.Runtime, r, token, "agents", s.TrustedProxies, time.Now())
-	return failure == nil && current.ID == authority.ID && s.Runtime.AuthorizeAgentResource(current, "agents", revision.PublicationID, revision.ID, revision.ProjectID) == nil
+	current, failure := consumerauth.Authenticate(streamAuthenticator{s.Runtime}, r, token, "agents", s.TrustedProxies, time.Now())
+	return failure == nil && current.ID == authority.ID && current.DelegationAgentID == authority.DelegationAgentID && current.DelegationPairDigest == authority.DelegationPairDigest && current.DelegationTokenDigest == authority.DelegationTokenDigest && s.Runtime.AuthorizeAgentResource(current, "agents", revision.PublicationID, revision.ID, revision.ProjectID) == nil
+}
+
+type streamAuthenticator struct{ Runtime }
+
+func (a streamAuthenticator) AuthenticateDelegation(ctx context.Context, token, assertion string) (*access.Authority, error) {
+	auth, ok := a.Runtime.(interface {
+		ReauthenticateDelegation(context.Context, string, string) (*access.Authority, error)
+	})
+	if !ok {
+		return nil, runtime.ErrInvalidKey
+	}
+	return auth.ReauthenticateDelegation(ctx, token, assertion)
 }
 
 func (s *Server) sendStream(w http.ResponseWriter, r *http.Request, authority access.Authority, revision agentcontract.Revision, release *runtime.Release, version string, request rpcRequest) {
@@ -111,11 +123,14 @@ func (s *Server) sendStream(w http.ResponseWriter, r *http.Request, authority ac
 		fail(w, request.ID, -32002, "Agent task limit reached")
 		return
 	}
-	if err := s.Ledger.admitRate(r.Context(), authority); err != nil {
+	leases, err := s.Ledger.admitRate(r.Context(), authority)
+	if err != nil {
 		s.Ledger.release(r.Context(), res)
 		fail(w, request.ID, -32002, "Agent send rate exceeded")
 		return
 	}
+	dispatched := false
+	defer func() { finishRate(r.Context(), leases, dispatched) }()
 	if !s.streamAuthorized(r, authority, prepared.Revision) {
 		s.Ledger.release(r.Context(), res)
 		fail(w, request.ID, -32603, "Authorization revoked")
@@ -126,6 +141,7 @@ func (s *Server) sendStream(w http.ResponseWriter, r *http.Request, authority ac
 		fail(w, request.ID, -32603, "Internal error")
 		return
 	}
+	dispatched = true
 	headers["X-OLP-Task-Capability"] = []string{capability}
 	ctx, cancel := s.streamContext(r, authority, prepared.Revision)
 	defer cancel()

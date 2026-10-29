@@ -25,12 +25,11 @@ func (m *Management) Register(mux *http.ServeMux) {
 
 func (m *Management) remote(r *http.Request, principal access.Principal) (access.Reply, error) {
 	id := r.PathValue("task_id")
-	parsed, err := uuid.Parse(id)
-	if err != nil || parsed == uuid.Nil || parsed.String() != id {
+	if parsed, err := uuid.Parse(id); err != nil || parsed == uuid.Nil || parsed.String() != id {
 		return access.Reply{}, access.Fail(http.StatusNotFound, "not_found", "The resource was not found.")
 	}
 	var task monitoredTask
-	err = m.Access.Pool.QueryRow(r.Context(), `SELECT t.id::text,t.project_id::text,t.publication_id::text,t.revision_id::text,t.upstream_id,COALESCE(t.oauth_binding_digest,''),v.definition
+	err := m.Access.Pool.QueryRow(r.Context(), `SELECT t.id::text,t.project_id::text,t.publication_id::text,t.revision_id::text,t.upstream_id,COALESCE(t.oauth_binding_digest,''),v.definition
  FROM olp.a2a_tasks t JOIN olp.agent_publication_revisions v ON v.id=t.revision_id AND v.publication_id=t.publication_id
  WHERE t.id=$1`, id).Scan(&task.ID, &task.ProjectID, &task.PublicationID, &task.RevisionID, &task.UpstreamID, &task.Binding, &task.Definition)
 	if errors.Is(err, pgx.ErrNoRows) {
