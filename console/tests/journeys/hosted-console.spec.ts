@@ -682,6 +682,11 @@ test.describe('Hosted console integration', () => {
     await page.getByLabel('Key name').fill(keyName);
     await page.getByLabel('Requests per minute').fill('120');
     await page.getByLabel('Concurrent requests').fill('8');
+    await page.getByLabel('Maximum model iterations').fill('4');
+    await page.getByLabel('Maximum tool calls').fill('8');
+    await page.getByLabel('Maximum run duration in seconds').fill('60');
+    await page.getByLabel('Maximum concurrent runs per key').fill('1');
+    await page.getByLabel('Maximum run cost').fill('0.75');
     await page.screenshot({
       path: test.info().outputPath('budget-thresholds.png'),
       fullPage: true
@@ -713,6 +718,21 @@ test.describe('Hosted console integration', () => {
 
     const row = page.getByRole('row').filter({ hasText: keyName });
     await expect(row).toHaveCount(1);
+    await row.getByRole('button', { name: 'Edit' }).click();
+    await expect(page.getByLabel('Maximum model iterations')).toHaveValue('4');
+    await expect(page.getByLabel('Maximum tool calls')).toHaveValue('8');
+    await expect(
+      page.getByLabel('Maximum run duration in seconds')
+    ).toHaveValue('60');
+    await expect(
+      page.getByLabel('Maximum concurrent runs per key')
+    ).toHaveValue('1');
+    await expect(page.getByLabel('Maximum run cost')).toHaveValue('0.75');
+    await page
+      .getByLabel('Maximum model iterations')
+      .locator('xpath=ancestor::form')
+      .getByRole('button', { name: 'Cancel', exact: true })
+      .click();
     await row.getByRole('button', { name: 'Rotate' }).click();
     await page
       .getByRole('dialog', { name: `Rotate ${keyName}` })

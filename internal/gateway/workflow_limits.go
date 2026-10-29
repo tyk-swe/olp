@@ -99,19 +99,23 @@ func workflowUnboundedCost() *Error {
 }
 
 func (s *Server) reserveWorkflowRun(ctx context.Context, x *call) (*limits.Lease, *Error) {
-	if x.workflow == nil || x.generation.runLimits.MaxConcurrentRuns == nil {
+	if x.workflow == nil {
 		return nil, nil
 	}
 	if !s.Admission.ready() {
+		if x.generation.runLimits.MaxConcurrentRuns == nil {
+			return nil, nil
+		}
 		return nil, limitsUnavailable()
 	}
 	reserveCtx, cancel := context.WithTimeout(ctx, reserveTimeout)
 	defer cancel()
 	lease, err := s.Admission.limiter.Reserve(reserveCtx, limits.Request{
-		LookupID:       "run_" + strings.ReplaceAll(x.keyID, "-", ""),
-		CostOwnerID:    x.keyID,
-		MaxConcurrency: x.generation.runLimits.MaxConcurrentRuns,
-		LeaseTTL:       time.Duration(*x.generation.runLimits.MaxDurationSeconds)*time.Second + time.Minute,
+		LookupID:         "run_" + strings.ReplaceAll(x.keyID, "-", ""),
+		CostOwnerID:      x.keyID,
+		MaxConcurrency:   x.generation.runLimits.MaxConcurrentRuns,
+		TrackConcurrency: true,
+		LeaseTTL:         time.Duration(*x.generation.runLimits.MaxDurationSeconds)*time.Second + time.Minute,
 	})
 	if err == nil {
 		return lease, nil

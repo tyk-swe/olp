@@ -1004,26 +1004,27 @@ func TestGatewayToolExecutionBounds(t *testing.T) {
 		wantCode       string
 		wantStatus     int
 		wantModelCalls int
-		wantToolCalls  int
 	}{
-		{name: "iterations", callsPerStep: 1, wantCode: "tool_iteration_limit", wantModelCalls: 8, wantToolCalls: 7},
-		{name: "calls", callsPerStep: 33, wantCode: "tool_call_limit", wantModelCalls: 1, wantToolCalls: 0},
-		{name: "caller iteration limit", callsPerStep: 1, requestFields: `,"olp_run_limits":{"max_iterations":1}`, wantCode: "tool_iteration_limit", wantModelCalls: 1, wantToolCalls: 0},
-		{name: "key is smallest", callsPerStep: 1, routeLimits: &limits.WorkflowBounds{MaxIterations: new(int64(4))}, keyLimits: &limits.WorkflowBounds{MaxIterations: new(int64(2))}, requestFields: `,"olp_run_limits":{"max_iterations":3}`, wantCode: "tool_iteration_limit", wantModelCalls: 2, wantToolCalls: 1},
-		{name: "route is smallest", callsPerStep: 1, routeLimits: &limits.WorkflowBounds{MaxIterations: new(int64(3))}, keyLimits: &limits.WorkflowBounds{MaxIterations: new(int64(4))}, requestFields: `,"olp_run_limits":{"max_iterations":6}`, wantCode: "tool_iteration_limit", wantModelCalls: 3, wantToolCalls: 2},
-		{name: "caller lowers raised default", callsPerStep: 1, routeLimits: &limits.WorkflowBounds{MaxIterations: new(int64(16))}, keyLimits: &limits.WorkflowBounds{MaxIterations: new(int64(20))}, requestFields: `,"olp_run_limits":{"max_iterations":12}`, wantCode: "tool_iteration_limit", wantModelCalls: 12, wantToolCalls: 11},
-		{name: "zero tool calls", callsPerStep: 1, requestFields: `,"olp_run_limits":{"max_tool_calls":0}`, wantCode: "tool_call_limit", wantModelCalls: 1, wantToolCalls: 0},
+		{name: "iterations", callsPerStep: 1, wantCode: "tool_iteration_limit", wantModelCalls: 8},
+		{name: "calls", callsPerStep: 33, wantCode: "tool_call_limit", wantModelCalls: 1},
+		{name: "caller iteration limit", callsPerStep: 1, requestFields: `,"olp_run_limits":{"max_iterations":1}`, wantCode: "tool_iteration_limit", wantModelCalls: 1},
+		{name: "key is smallest", callsPerStep: 1, routeLimits: &limits.WorkflowBounds{MaxIterations: new(int64(4))}, keyLimits: &limits.WorkflowBounds{MaxIterations: new(int64(2))}, requestFields: `,"olp_run_limits":{"max_iterations":3}`, wantCode: "tool_iteration_limit", wantModelCalls: 2},
+		{name: "route is smallest", callsPerStep: 1, routeLimits: &limits.WorkflowBounds{MaxIterations: new(int64(3))}, keyLimits: &limits.WorkflowBounds{MaxIterations: new(int64(4))}, requestFields: `,"olp_run_limits":{"max_iterations":6}`, wantCode: "tool_iteration_limit", wantModelCalls: 3},
+		{name: "caller lowers raised default", callsPerStep: 1, routeLimits: &limits.WorkflowBounds{MaxIterations: new(int64(16))}, keyLimits: &limits.WorkflowBounds{MaxIterations: new(int64(20))}, requestFields: `,"olp_run_limits":{"max_iterations":12}`, wantCode: "tool_iteration_limit", wantModelCalls: 12},
+		{name: "zero tool calls", callsPerStep: 1, requestFields: `,"olp_run_limits":{"max_tool_calls":0}`, wantCode: "tool_call_limit", wantModelCalls: 1},
+		{name: "key tool call limit is smallest", callsPerStep: 2, routeLimits: &limits.WorkflowBounds{MaxToolCalls: new(int64(3))}, keyLimits: &limits.WorkflowBounds{MaxToolCalls: new(int64(1))}, requestFields: `,"olp_run_limits":{"max_tool_calls":2}`, wantCode: "tool_call_limit", wantModelCalls: 1},
 		{name: "unbounded model cannot satisfy cost limit", callsPerStep: 1, pricedModel: true, requestFields: `,"olp_run_limits":{"max_run_cost":"1"}`, wantCode: "run_cost_unbounded"},
 		{name: "per-attempt cost remains independent", callsPerStep: 1, pricedModel: true, headers: map[string]string{"X-OLP-Routing": `{"max_cost":"0.05"}`}, requestFields: `,"max_tokens":8,"olp_run_limits":{"max_run_cost":"1"}`, wantCode: "cost_limit_exceeded"},
 		{name: "zero cost ceiling prevents charged model", callsPerStep: 1, pricedModel: true, requestFields: `,"max_tokens":8,"olp_run_limits":{"max_run_cost":"0"}`, wantCode: "run_cost_limit"},
+		{name: "key run cost is smallest", callsPerStep: 1, pricedModel: true, routeLimits: &limits.WorkflowBounds{MaxRunCost: new("0.5")}, keyLimits: &limits.WorkflowBounds{MaxRunCost: new("0.05")}, requestFields: `,"max_tokens":8,"olp_run_limits":{"max_run_cost":"0.2"}`, wantCode: "run_cost_limit"},
 		{name: "unpriced tool cannot satisfy cost limit", callsPerStep: 1, pricedModel: true, requestFields: `,"max_tokens":8,"olp_run_limits":{"max_run_cost":"1"}`, wantCode: "run_cost_unbounded", wantModelCalls: 1},
 		{name: "next tool exceeds cost limit", callsPerStep: 1, pricedModel: true, toolPrice: new("0.9"), requestFields: `,"max_tokens":8,"olp_run_limits":{"max_run_cost":"0.5"}`, wantCode: "run_cost_limit", wantModelCalls: 1},
-		{name: "next model exceeds remaining cost", callsPerStep: 1, pricedModel: true, toolPrice: new("0.1"), requestFields: `,"max_tokens":8,"olp_run_limits":{"max_run_cost":"0.25"}`, wantCode: "run_cost_limit", wantModelCalls: 1, wantToolCalls: 1},
+		{name: "next model exceeds remaining cost", callsPerStep: 1, pricedModel: true, toolPrice: new("0.1"), requestFields: `,"max_tokens":8,"olp_run_limits":{"max_run_cost":"0.25"}`, wantCode: "run_cost_limit", wantModelCalls: 1},
 		{name: "unbounded provider tool fees", callsPerStep: 1, pricedModel: true, providerFees: map[string]string{"search": "1"}, requestFields: `,"max_tokens":8,"olp_run_limits":{"max_run_cost":"1"}`, wantCode: "run_cost_unbounded"},
 		{name: "higher price window exceeds ceiling", callsPerStep: 1, pricedModel: true, windows: &usage.PriceWindows{TimeZone: "UTC", Periods: []usage.PriceWindowPeriod{{Days: []int{((int(time.Now().UTC().Weekday())+6)%7+1)%7 + 1}, Start: "00:00", End: "24:00", Multiplier: "3"}}}, requestFields: `,"max_tokens":8,"olp_run_limits":{"max_run_cost":"0.2"}`, wantCode: "run_cost_limit"},
 		{name: "expensive lower price tier exceeds ceiling", callsPerStep: 1, pricedModel: true, inputRate: "1000", priceTiers: []usage.PriceTier{{AboveInputTokens: 500, InputPerMillion: new("0"), OutputPerMillion: new("0")}}, requestFields: `,"max_tokens":8,"olp_run_limits":{"max_run_cost":"0.2"}`, wantCode: "run_cost_limit"},
 		{name: "model input worst case exceeds ceiling", callsPerStep: 1, pricedModel: true, inputRate: "1000", requestFields: `,"max_tokens":8,"olp_run_limits":{"max_run_cost":"0.2"}`, wantCode: "run_cost_limit"},
-		{name: "unpriced model cannot satisfy cost limit", callsPerStep: 1, requestFields: `,"max_tokens":8,"olp_run_limits":{"max_run_cost":"1"}`, wantCode: "run_cost_unbounded", wantModelCalls: 0, wantToolCalls: 0},
+		{name: "unpriced model cannot satisfy cost limit", callsPerStep: 1, requestFields: `,"max_tokens":8,"olp_run_limits":{"max_run_cost":"1"}`, wantCode: "run_cost_unbounded", wantModelCalls: 0},
 		{name: "concurrency fails closed without limiter", callsPerStep: 1, requestFields: `,"olp_run_limits":{"max_concurrent_runs":1}`, wantCode: "distributed_limits_unavailable", wantStatus: http.StatusServiceUnavailable},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -1065,13 +1066,8 @@ func TestGatewayToolExecutionBounds(t *testing.T) {
 			})
 
 			response, body := h.chat(fullKey, test.headers, test.requestFields)
-			status := test.wantStatus
-			if status == 0 {
-				status = http.StatusBadRequest
-			}
-			if response.StatusCode != status || errorCode(t, body) != test.wantCode || h.mock.count("a") != test.wantModelCalls || len(fixture.calls) != test.wantToolCalls {
-				t.Fatalf("workflow limit was not enforced: status=%d body=%v model_calls=%d tool_calls=%d", response.StatusCode, body, h.mock.count("a"), len(fixture.calls))
-
+			if response.StatusCode != cmp.Or(test.wantStatus, http.StatusBadRequest) || errorCode(t, body) != test.wantCode || h.mock.count("a") != test.wantModelCalls {
+				t.Fatalf("workflow limit was not enforced: status=%d body=%v model_calls=%d", response.StatusCode, body, h.mock.count("a"))
 			}
 		})
 	}

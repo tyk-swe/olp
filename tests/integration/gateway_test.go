@@ -749,6 +749,9 @@ func TestGatewayToolWorkflowSettlesOneRun(t *testing.T) {
 	var toolCalls atomic.Int64
 	var responsesWorkflow atomic.Bool
 	var blockTool atomic.Bool
+	var deadlineTool atomic.Bool
+	deadlineStarted := make(chan struct{}, 2)
+	deadlineCanceled := make(chan struct{}, 2)
 	toolStarted := make(chan struct{})
 	toolServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodDelete {
@@ -775,6 +778,12 @@ func TestGatewayToolWorkflowSettlesOneRun(t *testing.T) {
 			schema := map[string]any{"type": "object", "properties": map[string]any{"query": map[string]any{"type": "string"}}, "required": []string{"query"}}
 			result = map[string]any{"tools": []any{map[string]any{"name": "lookup", "inputSchema": schema}, map[string]any{"name": "change", "inputSchema": schema}}}
 		case "tools/call":
+			if deadlineTool.Load() {
+				deadlineStarted <- struct{}{}
+				<-r.Context().Done()
+				deadlineCanceled <- struct{}{}
+				return
+			}
 			if blockTool.Load() {
 				close(toolStarted)
 				<-r.Context().Done()
@@ -807,6 +816,7 @@ func TestGatewayToolWorkflowSettlesOneRun(t *testing.T) {
 	var modelCalls atomic.Int64
 	var noUsage atomic.Bool
 	var blockModel atomic.Bool
+	var deadlineModel atomic.Bool
 	var blockRun atomic.Bool
 	runStarted := make(chan struct{}, 2)
 	runRelease := make(chan struct{})
@@ -852,6 +862,12 @@ func TestGatewayToolWorkflowSettlesOneRun(t *testing.T) {
 				return
 			}
 		}
+		if deadlineModel.Load() && len(input["tool_choice"]) == 0 {
+			deadlineStarted <- struct{}{}
+			<-r.Context().Done()
+			deadlineCanceled <- struct{}{}
+			return
+		}
 		if blockModel.Load() && len(input["tool_choice"]) == 0 {
 			close(modelStarted)
 			<-r.Context().Done()
@@ -890,7 +906,7 @@ func TestGatewayToolWorkflowSettlesOneRun(t *testing.T) {
 	defer vendor.Close()
 	_, provider, slug, _ := provisionOpenAIInProject(t, h, owner, &project, vendor.URL,
 		[]any{map[string]any{"operation": "generation", "surface": "openai", "mode": "unary"}}, []string{"generation"},
-		map[string]any{"tool_execution": "gateway", "toolsets": []string{toolsetID}, "responses_mcp_items": true, "budget": map[string]any{"daily_cost_limit": "10000000"}},
+		map[string]any{"tool_execution": "gateway", "toolsets": []string{toolsetID}, "responses_mcp_items": true, "budget": map[string]any{"daily_cost_limit": "10000000"}, "run_limits": map[string]any{"max_tool_calls": 3, "max_duration_seconds": 600, "max_concurrent_runs": 3}},
 		map[string]any{"options": map[string]any{"models": map[string]any{vendorModel: map[string]any{"context_length": 1000}}}})
 	addBatchPrice(t, h, owner, provider["id"].(string), "", time.Now().Add(-time.Hour))
 	key := h.want(owner, "POST", "/api/v1/api-keys", map[string]any{"name": "Workflow caller", "project_id": project, "scopes": []string{"inference", "tools", "traces_write"}, "allowed_routes": []string{slug}, "allowed_toolsets": []string{toolsetID}}, idem("workflow-key"), 201)
@@ -1241,11 +1257,122 @@ func TestGatewayToolWorkflowSettlesOneRun(t *testing.T) {
 	if status != http.StatusOK {
 		t.Fatalf("completed workflow did not release its slot: status=%d result=%v", status, result)
 	}
+	blockRun.Store(true)
+	unlimitedRun := make(chan int, 1)
+	go func() {
+		status, _, _ := h.gateway(http.MethodPost, "/v1/chat/completions", secret, request)
+		unlimitedRun <- status
+	}()
+	select {
+	case <-runStarted:
+	case <-time.After(10 * time.Second):
+		t.Fatal("unlimited workflow did not reach the provider")
+	}
+	limitedRequest := map[string]any{"model": slug, "messages": []any{map[string]any{"role": "user", "content": "limited concurrency"}}, "max_tokens": 100, "olp_toolsets": []any{}, "olp_run_limits": map[string]any{"max_concurrent_runs": 1}}
+	limitedRun := make(chan int, 1)
+	go func() {
+		status, _, _ := h.gateway(http.MethodPost, "/v1/chat/completions", secret, limitedRequest)
+		limitedRun <- status
+	}()
+	select {
+	case limitedStatus := <-limitedRun:
+		if limitedStatus != http.StatusTooManyRequests {
+			t.Fatalf("limited workflow returned %d while an unlimited workflow was active", limitedStatus)
+		}
+	case <-runStarted:
+		t.Fatal("limited workflow reached provider while an unlimited workflow was active")
+	case <-time.After(10 * time.Second):
+		t.Fatal("limited workflow did not refuse promptly")
+	}
+	blockRun.Store(false)
+	runRelease <- struct{}{}
+	select {
+	case unlimitedStatus := <-unlimitedRun:
+		if unlimitedStatus != http.StatusOK {
+			t.Fatalf("unlimited workflow returned %d", unlimitedStatus)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("unlimited workflow did not finish")
+	}
 	responsesWorkflow.Store(true)
 	beforeModels, beforeTools := modelCalls.Load(), toolCalls.Load()
 	costStatus, costResult, _ := h.gateway(http.MethodPost, "/v1/chat/completions", secret, map[string]any{"model": slug, "messages": []any{map[string]any{"role": "user", "content": "cost bounded"}}, "max_tokens": 100, "olp_run_limits": map[string]any{"max_run_cost": "1105"}})
 	if costStatus != http.StatusBadRequest || !strings.Contains(fmt.Sprint(costResult), "run_cost_limit") || modelCalls.Load()-beforeModels != 1 || toolCalls.Load()-beforeTools != 1 {
 		t.Fatalf("workflow cost bound: status=%d response=%v model calls=%d tool calls=%d", costStatus, costResult, modelCalls.Load()-beforeModels, toolCalls.Load()-beforeTools)
+	}
+	boundedKey := h.want(owner, http.MethodPost, "/api/v1/api-keys", map[string]any{"name": "Scoped workflow limits", "project_id": project, "scopes": []string{"inference", "tools"}, "allowed_routes": []string{slug}, "allowed_toolsets": []string{toolsetID}, "run_limits": map[string]any{"max_tool_calls": 2, "max_duration_seconds": 4, "max_concurrent_runs": 2}}, idem("scoped-workflow-key"), http.StatusCreated)
+	h.refresh()
+	boundedSecret := mcpExecString(t, boundedKey, "secret")
+	beforeScopedTools := toolCalls.Load()
+	limitedStatus, limitedResult, _ := h.gateway(http.MethodPost, "/v1/chat/completions", boundedSecret, map[string]any{"model": slug, "messages": []any{map[string]any{"role": "user", "content": "scoped tool limit"}}, "max_tokens": 100, "olp_run_limits": map[string]any{"max_tool_calls": 0}})
+	if limitedStatus != http.StatusBadRequest || !strings.Contains(fmt.Sprint(limitedResult), "tool_call_limit") || toolCalls.Load() != beforeScopedTools {
+		t.Fatalf("scoped tool limit: status=%d response=%v tool calls=%d", limitedStatus, limitedResult, toolCalls.Load()-beforeScopedTools)
+	}
+	deadlineModel.Store(true)
+	defer deadlineModel.Store(false)
+	firstScoped := make(chan int, 1)
+	go func() {
+		status, _, _ := h.gateway(http.MethodPost, "/v1/chat/completions", boundedSecret, map[string]any{"model": slug, "messages": []any{map[string]any{"role": "user", "content": "scoped concurrency"}}, "max_tokens": 100})
+		firstScoped <- status
+	}()
+	select {
+	case <-deadlineStarted:
+	case <-time.After(10 * time.Second):
+		t.Fatal("first scoped workflow did not reach the blocked model")
+	}
+	beforeScopedModels := modelCalls.Load()
+	scopedStatus, scopedResult, _ := h.gateway(http.MethodPost, "/v1/chat/completions", boundedSecret, map[string]any{"model": slug, "messages": []any{map[string]any{"role": "user", "content": "scoped concurrency"}}, "max_tokens": 100, "olp_run_limits": map[string]any{"max_concurrent_runs": 1}})
+	if scopedStatus != http.StatusTooManyRequests || modelCalls.Load() != beforeScopedModels {
+		t.Fatalf("scoped concurrency limit: status=%d response=%v model calls=%d", scopedStatus, scopedResult, modelCalls.Load()-beforeScopedModels)
+	}
+	select {
+	case <-deadlineCanceled:
+	case <-time.After(6 * time.Second):
+		t.Fatal("key deadline did not cancel the blocked workflow")
+	}
+	select {
+	case status := <-firstScoped:
+		if status == http.StatusOK {
+			t.Fatal("key deadline returned success")
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("first scoped workflow did not finish")
+	}
+	deadlineModel.Store(false)
+	for _, test := range []struct {
+		name  string
+		block *atomic.Bool
+	}{
+		{name: "model", block: &deadlineModel},
+		{name: "tool", block: &deadlineTool},
+	} {
+		t.Run(test.name+" deadline", func(t *testing.T) {
+			test.block.Store(true)
+			defer test.block.Store(false)
+			result := make(chan int, 1)
+			go func() {
+				status, _, _ := h.gateway(http.MethodPost, "/v1/chat/completions", boundedSecret, map[string]any{"model": slug, "messages": []any{map[string]any{"role": "user", "content": "deadline"}}, "max_tokens": 100, "olp_run_limits": map[string]any{"max_duration_seconds": 1}})
+				result <- status
+			}()
+			select {
+			case <-deadlineStarted:
+			case <-time.After(10 * time.Second):
+				t.Fatal("workflow did not reach the blocked upstream")
+			}
+			select {
+			case <-deadlineCanceled:
+			case <-time.After(2500 * time.Millisecond):
+				t.Fatal("caller deadline did not cancel the blocked upstream")
+			}
+			select {
+			case status := <-result:
+				if status == http.StatusOK {
+					t.Fatal("deadline returned success")
+				}
+			case <-time.After(10 * time.Second):
+				t.Fatal("workflow did not finish after deadline cancellation")
+			}
+		})
 	}
 }
 

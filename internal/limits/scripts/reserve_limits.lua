@@ -19,10 +19,6 @@
 --
 -- KEYS: stable rate hash, concurrency zset. Both keys must carry the same
 --       Valkey Cluster hash tag.
--- ARGV: rpm_limit, tpm_limit, requested_tokens, concurrency_limit, lease_id,
---       lease_ttl_ms, report_allowance (0 or 1), and optionally share_class,
---       share_percent, saturation_percent. A zero limit means that dimension is
---       unlimited.
 --
 -- Capacity shares divide each limit between admission classes. While a
 -- dimension's use, this request included, stays within saturation_percent of
@@ -64,7 +60,7 @@ local function parse_safe_unsigned_integer(raw)
   return tonumber(raw)
 end
 
-if #KEYS ~= 2 or (#ARGV ~= 7 and #ARGV ~= 10) then
+if #KEYS ~= 2 or (#ARGV ~= 7 and #ARGV ~= 8 and #ARGV ~= 10 and #ARGV ~= 11) then
   return failure("invalid_arguments")
 end
 
@@ -78,7 +74,7 @@ local report_allowance = ARGV[7]
 local share_class = nil
 local share_percent = 0
 local saturation_percent = 100
-if #ARGV == 10 then
+if #ARGV >= 10 then
   share_class = ARGV[8]
   share_percent = parse_safe_unsigned_integer(ARGV[9])
   saturation_percent = parse_safe_unsigned_integer(ARGV[10])
@@ -90,7 +86,11 @@ if #ARGV == 10 then
   end
 end
 
-if rpm_limit == nil or tpm_limit == nil or requested_tokens == nil
+local track_only = (#ARGV == 8 and ARGV[8] == "1") or (#ARGV == 11 and ARGV[11] == "1")
+local track_concurrency = concurrency_limit ~= nil and (concurrency_limit > 0 or track_only)
+
+if (#ARGV == 8 and ARGV[8] ~= "1") or (#ARGV == 11 and ARGV[11] ~= "1")
+    or rpm_limit == nil or tpm_limit == nil or requested_tokens == nil
     or concurrency_limit == nil or lease_ttl == nil
     or (rpm_limit > 0 and rpm_limit < 1)
     or (tpm_limit > 0 and tpm_limit < 1)
@@ -126,7 +126,7 @@ if window_remaining_ms < 1 or window_remaining_ms > MINUTE_MS then
 end
 
 local lease_expires_at_ms = 0
-if concurrency_limit > 0 then
+if track_concurrency then
   if lease_ttl > 9007199254740991 - now_ms then
     return failure("invalid_arguments")
   end
@@ -260,7 +260,7 @@ local newest_concurrency_expiry = 0
 -- A class refused its share of an idle dimension waits for the next lease to
 -- end, or a second when none is held.
 local concurrency_retry_ms = 1000
-if concurrency_limit > 0 then
+if track_concurrency then
   local kind = redis.call("TYPE", KEYS[2]).ok
   if kind ~= "none" and kind ~= "zset" then
     return failure("malformed_concurrency_state", window_id)
@@ -286,16 +286,16 @@ if concurrency_limit > 0 then
     if newest_concurrency_expiry < oldest_expiry then
       return failure("malformed_concurrency_state", window_id)
     end
-    if concurrency >= concurrency_limit then
+    if concurrency_limit > 0 and concurrency >= concurrency_limit then
       return decision(0, "concurrency", oldest_expiry - now_ms, 0, rpm, tpm)
     end
     concurrency_retry_ms = oldest_expiry - now_ms
-  elseif concurrency >= concurrency_limit then
+  elseif concurrency_limit > 0 and concurrency >= concurrency_limit then
     -- This is unreachable for a positive configured limit, but fail safely if
     -- the representation or command behavior ever changes.
     return failure("malformed_concurrency_state", window_id)
   end
-  if share_class ~= nil then
+  if share_class ~= nil and concurrency_limit > 0 then
     local prefix = share_class .. "."
     local class_concurrency = 0
     if concurrency > 0 then
@@ -351,7 +351,7 @@ if rate_enabled then
   end
 end
 
-if concurrency_limit > 0 then
+if track_concurrency then
   redis.call("ZADD", KEYS[2], lease_expires_at_ms, lease_id)
   if lease_expires_at_ms > newest_concurrency_expiry then
     newest_concurrency_expiry = lease_expires_at_ms
