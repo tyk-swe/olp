@@ -371,3 +371,32 @@ func TestChatPublishedPromptRespectsRenderedInputLimit(t *testing.T) {
 		})
 	}
 }
+
+func TestChatPublishedPromptLeavesOrdinaryEscapedContentUnchanged(t *testing.T) {
+	h := newHarness(t, Config{})
+	upstreamBody := make(chan []byte, 1)
+	h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		upstreamBody <- body
+		completion(modelA, "ok")(w, r)
+	})
+	request := `{"model":"` + routeSlug + `","messages":[{"role":"user","content":"Text with \"olp_prompt\" and \u0041"}],"extra":"\u0042"}`
+	response := h.do(t.Context(), http.MethodPost, "/v1/chat/completions", fullKey, []byte(request), nil)
+	defer response.Body.Close()
+	body, _ := io.ReadAll(response.Body)
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", response.StatusCode, body)
+	}
+	var sent struct {
+		Messages []struct {
+			Content string `json:"content"`
+		} `json:"messages"`
+		Extra string `json:"extra"`
+	}
+	if err := json.Unmarshal(<-upstreamBody, &sent); err != nil {
+		t.Fatal(err)
+	}
+	if len(sent.Messages) != 1 || sent.Messages[0].Content != `Text with "olp_prompt" and A` || sent.Extra != "B" {
+		t.Fatalf("upstream request = %#v", sent)
+	}
+}

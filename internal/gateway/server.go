@@ -664,22 +664,19 @@ func (s *Server) inferenceOperation(family wire.Format, dialect string) http.Han
 			out, status = s.serveUnary(w, r, x, body)
 			return
 		}
-		expandedBody, prompt, promptErr := s.expandPrompt(x, body)
-		if promptErr != nil {
-			x.failure, status = promptErr, promptErr.Status
-			writeError(w, promptErr)
-			return
-		}
-		x.prompt = prompt
 		var parsed *wire.Request
 		var err error
-		if family == wire.Bedrock {
+		if family == wire.Chat {
+			parsed, e = s.parseChat(x, body)
+		} else if family == wire.Bedrock {
 			parsed, err = protocols.ParseBedrockRequest(body, r.PathValue("model"), strings.HasSuffix(r.URL.Path, "/converse-stream"))
 		} else {
-			parsed, err = protocols.Parse(family, expandedBody, r.PathValue("model"))
+			parsed, err = protocols.Parse(family, body, r.PathValue("model"))
 		}
 		if err != nil {
 			e = requestError(err)
+		}
+		if e != nil {
 			x.failure, status = e, e.Status
 			writeError(w, e)
 			return
