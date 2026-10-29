@@ -96,6 +96,21 @@ func (e A2AResponseJsonrpc) Valid() bool {
 	}
 }
 
+// Defines values for AnthropicInferenceErrorType.
+const (
+	Error AnthropicInferenceErrorType = "error"
+)
+
+// Valid indicates whether the value is a known member of the AnthropicInferenceErrorType enum.
+func (e AnthropicInferenceErrorType) Valid() bool {
+	switch e {
+	case Error:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for DelegationRequestScopes.
 const (
 	Inference DelegationRequestScopes = "inference"
@@ -113,16 +128,34 @@ func (e DelegationRequestScopes) Valid() bool {
 
 // Defines values for PromptLabelReferenceLabel.
 const (
-	Production PromptLabelReferenceLabel = "production"
-	Staging    PromptLabelReferenceLabel = "staging"
+	PromptLabelReferenceLabelProduction PromptLabelReferenceLabel = "production"
+	PromptLabelReferenceLabelStaging    PromptLabelReferenceLabel = "staging"
 )
 
 // Valid indicates whether the value is a known member of the PromptLabelReferenceLabel enum.
 func (e PromptLabelReferenceLabel) Valid() bool {
 	switch e {
-	case Production:
+	case PromptLabelReferenceLabelProduction:
 		return true
-	case Staging:
+	case PromptLabelReferenceLabelStaging:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ResponsesPromptLabelReferenceLabel.
+const (
+	ResponsesPromptLabelReferenceLabelProduction ResponsesPromptLabelReferenceLabel = "production"
+	ResponsesPromptLabelReferenceLabelStaging    ResponsesPromptLabelReferenceLabel = "staging"
+)
+
+// Valid indicates whether the value is a known member of the ResponsesPromptLabelReferenceLabel enum.
+func (e ResponsesPromptLabelReferenceLabel) Valid() bool {
+	switch e {
+	case ResponsesPromptLabelReferenceLabelProduction:
+		return true
+	case ResponsesPromptLabelReferenceLabelStaging:
 		return true
 	default:
 		return false
@@ -207,6 +240,30 @@ type A2AResponse_Id struct {
 // A2AResponseJsonrpc defines model for A2AResponse.Jsonrpc.
 type A2AResponseJsonrpc string
 
+// AnthropicInferenceError defines model for AnthropicInferenceError.
+type AnthropicInferenceError struct {
+	Error struct {
+		Code    string  `json:"code"`
+		Message string  `json:"message"`
+		Param   *string `json:"param"`
+		Type    string  `json:"type"`
+	} `json:"error"`
+	Type AnthropicInferenceErrorType `json:"type"`
+}
+
+// AnthropicInferenceErrorType defines model for AnthropicInferenceError.Type.
+type AnthropicInferenceErrorType string
+
+// AnthropicPromptRequest defines model for AnthropicPromptRequest.
+type AnthropicPromptRequest struct {
+	MaxTokens int    `json:"max_tokens"`
+	Model     string `json:"model"`
+
+	// OlpPrompt Specify exactly one published label or immutable revision ID.
+	OlpPrompt            PublishedPromptReference `json:"olp_prompt"`
+	AdditionalProperties map[string]interface{}   `json:"-"`
+}
+
 // ChatPromptRequest defines model for ChatPromptRequest.
 type ChatPromptRequest struct {
 	Model string `json:"model"`
@@ -236,6 +293,30 @@ type DelegationRequest struct {
 // DelegationRequestScopes defines model for DelegationRequest.Scopes.
 type DelegationRequestScopes string
 
+// GeminiInferenceError defines model for GeminiInferenceError.
+type GeminiInferenceError struct {
+	Error struct {
+		Code    int `json:"code"`
+		Details []struct {
+			Type     string `json:"@type"`
+			Domain   string `json:"domain"`
+			Metadata struct {
+				Field *string `json:"field"`
+			} `json:"metadata"`
+			Reason string `json:"reason"`
+		} `json:"details"`
+		Message string `json:"message"`
+		Status  string `json:"status"`
+	} `json:"error"`
+}
+
+// GeminiPromptRequest defines model for GeminiPromptRequest.
+type GeminiPromptRequest struct {
+	// OlpPrompt Specify exactly one published label or immutable revision ID.
+	OlpPrompt            PublishedPromptReference `json:"olp_prompt"`
+	AdditionalProperties map[string]interface{}   `json:"-"`
+}
+
 // InferenceError defines model for InferenceError.
 type InferenceError struct {
 	Error struct {
@@ -244,6 +325,30 @@ type InferenceError struct {
 		Param   *string `json:"param"`
 		Type    string  `json:"type"`
 	} `json:"error"`
+}
+
+// NativeResponsesPromptReference A provider-owned prompt reference. Fields and variables follow the provider contract.
+type NativeResponsesPromptReference struct {
+	Id                   string                 `json:"id"`
+	AdditionalProperties map[string]interface{} `json:"-"`
+}
+
+// NativeResponsesPromptRequest defines model for NativeResponsesPromptRequest.
+type NativeResponsesPromptRequest struct {
+	Model string `json:"model"`
+
+	// Prompt A provider-owned prompt reference. Fields and variables follow the provider contract.
+	Prompt               NativeResponsesPromptReference `json:"prompt"`
+	AdditionalProperties map[string]interface{}         `json:"-"`
+}
+
+// OLPResponsesPromptRequest defines model for OLPResponsesPromptRequest.
+type OLPResponsesPromptRequest struct {
+	Model string `json:"model"`
+
+	// Prompt A registry prompt has an olpp_ ID and exactly one label or revision ID. Other prompt IDs retain the provider contract.
+	Prompt               ResponsesPublishedPromptReference `json:"prompt"`
+	AdditionalProperties map[string]interface{}            `json:"-"`
 }
 
 // PromptLabelReference defines model for PromptLabelReference.
@@ -272,6 +377,55 @@ type PublishedPromptReference struct {
 	union json.RawMessage
 }
 
+// ResponsesPromptLabelReference defines model for ResponsesPromptLabelReference.
+type ResponsesPromptLabelReference struct {
+	// Id Project-owned prompt publication ID prefixed with olpp_
+	Id        string                             `json:"id"`
+	Label     ResponsesPromptLabelReferenceLabel `json:"label"`
+	Variables map[string]string                  `json:"variables"`
+}
+
+// ResponsesPromptLabelReferenceLabel defines model for ResponsesPromptLabelReference.Label.
+type ResponsesPromptLabelReferenceLabel string
+
+// ResponsesPromptRequest An OLP registry prompt excludes input. Provider-native prompt references retain the provider contract.
+type ResponsesPromptRequest struct {
+	union json.RawMessage
+}
+
+// ResponsesPromptRevisionReference defines model for ResponsesPromptRevisionReference.
+type ResponsesPromptRevisionReference struct {
+	// Id Project-owned prompt publication ID prefixed with olpp_
+	Id string `json:"id"`
+
+	// RevisionId Exact immutable prompt revision ID
+	RevisionId openapi_types.UUID `json:"revision_id"`
+	Variables  map[string]string  `json:"variables"`
+}
+
+// ResponsesPublishedPromptReference A registry prompt has an olpp_ ID and exactly one label or revision ID. Other prompt IDs retain the provider contract.
+type ResponsesPublishedPromptReference struct {
+	union json.RawMessage
+}
+
+// CreateAnthropicMessageWithPromptParams defines parameters for CreateAnthropicMessageWithPrompt.
+type CreateAnthropicMessageWithPromptParams struct {
+	// XOLPAgentIdentity The current workload assertion is required when Authorization contains a one-use delegation token.
+	XOLPAgentIdentity *string `json:"X-OLP-Agent-Identity,omitempty"`
+}
+
+// CreateGeminiContentWithPromptParams defines parameters for CreateGeminiContentWithPrompt.
+type CreateGeminiContentWithPromptParams struct {
+	// XOLPAgentIdentity The current workload assertion is required when Authorization contains a one-use delegation token.
+	XOLPAgentIdentity *string `json:"X-OLP-Agent-Identity,omitempty"`
+}
+
+// StreamGeminiContentWithPromptParams defines parameters for StreamGeminiContentWithPrompt.
+type StreamGeminiContentWithPromptParams struct {
+	// XOLPAgentIdentity The current workload assertion is required when Authorization contains a one-use delegation token.
+	XOLPAgentIdentity *string `json:"X-OLP-Agent-Identity,omitempty"`
+}
+
 // CreateChatCompletionWithPromptParams defines parameters for CreateChatCompletionWithPrompt.
 type CreateChatCompletionWithPromptParams struct {
 	// XOLPAgentIdentity The current workload assertion is required when Authorization contains a one-use delegation token.
@@ -284,14 +438,124 @@ type CreateDelegationParams struct {
 	XOLPDelegatingKey string `json:"X-OLP-Delegating-Key"`
 }
 
+// CreateResponseWithPromptParams defines parameters for CreateResponseWithPrompt.
+type CreateResponseWithPromptParams struct {
+	// XOLPAgentIdentity The current workload assertion is required when Authorization contains a one-use delegation token.
+	XOLPAgentIdentity *string `json:"X-OLP-Agent-Identity,omitempty"`
+}
+
 // CallA2AAgentJSONRequestBody defines body for CallA2AAgent for application/json ContentType.
 type CallA2AAgentJSONRequestBody = A2ARequest
+
+// CreateAnthropicMessageWithPromptJSONRequestBody defines body for CreateAnthropicMessageWithPrompt for application/json ContentType.
+type CreateAnthropicMessageWithPromptJSONRequestBody = AnthropicPromptRequest
+
+// CreateGeminiContentWithPromptJSONRequestBody defines body for CreateGeminiContentWithPrompt for application/json ContentType.
+type CreateGeminiContentWithPromptJSONRequestBody = GeminiPromptRequest
+
+// StreamGeminiContentWithPromptJSONRequestBody defines body for StreamGeminiContentWithPrompt for application/json ContentType.
+type StreamGeminiContentWithPromptJSONRequestBody = GeminiPromptRequest
 
 // CreateChatCompletionWithPromptJSONRequestBody defines body for CreateChatCompletionWithPrompt for application/json ContentType.
 type CreateChatCompletionWithPromptJSONRequestBody = ChatPromptRequest
 
 // CreateDelegationJSONRequestBody defines body for CreateDelegation for application/json ContentType.
 type CreateDelegationJSONRequestBody = DelegationRequest
+
+// CreateResponseWithPromptJSONRequestBody defines body for CreateResponseWithPrompt for application/json ContentType.
+type CreateResponseWithPromptJSONRequestBody = ResponsesPromptRequest
+
+// Getter for additional properties for AnthropicPromptRequest. Returns the specified
+// element and whether it was found
+func (a AnthropicPromptRequest) Get(fieldName string) (value interface{}, found bool) {
+	if a.AdditionalProperties != nil {
+		value, found = a.AdditionalProperties[fieldName]
+	}
+	return
+}
+
+// Setter for additional properties for AnthropicPromptRequest
+func (a *AnthropicPromptRequest) Set(fieldName string, value interface{}) {
+	if a.AdditionalProperties == nil {
+		a.AdditionalProperties = make(map[string]interface{})
+	}
+	a.AdditionalProperties[fieldName] = value
+}
+
+// Override default JSON handling for AnthropicPromptRequest to handle AdditionalProperties
+func (a *AnthropicPromptRequest) UnmarshalJSON(b []byte) error {
+	object := make(map[string]json.RawMessage)
+	err := json.Unmarshal(b, &object)
+	if err != nil {
+		return err
+	}
+
+	if raw, found := object["max_tokens"]; found {
+		err = json.Unmarshal(raw, &a.MaxTokens)
+		if err != nil {
+			return fmt.Errorf("error reading 'max_tokens': %w", err)
+		}
+		delete(object, "max_tokens")
+	}
+
+	if raw, found := object["model"]; found {
+		err = json.Unmarshal(raw, &a.Model)
+		if err != nil {
+			return fmt.Errorf("error reading 'model': %w", err)
+		}
+		delete(object, "model")
+	}
+
+	if raw, found := object["olp_prompt"]; found {
+		err = json.Unmarshal(raw, &a.OlpPrompt)
+		if err != nil {
+			return fmt.Errorf("error reading 'olp_prompt': %w", err)
+		}
+		delete(object, "olp_prompt")
+	}
+
+	if len(object) != 0 {
+		a.AdditionalProperties = make(map[string]interface{})
+		for fieldName, fieldBuf := range object {
+			var fieldVal interface{}
+			err := json.Unmarshal(fieldBuf, &fieldVal)
+			if err != nil {
+				return fmt.Errorf("error unmarshaling field %s: %w", fieldName, err)
+			}
+			a.AdditionalProperties[fieldName] = fieldVal
+		}
+	}
+	return nil
+}
+
+// Override default JSON handling for AnthropicPromptRequest to handle AdditionalProperties
+func (a AnthropicPromptRequest) MarshalJSON() ([]byte, error) {
+	var err error
+	object := make(map[string]json.RawMessage)
+
+	object["max_tokens"], err = json.Marshal(a.MaxTokens)
+	if err != nil {
+		return nil, fmt.Errorf("error marshaling 'max_tokens': %w", err)
+	}
+
+	object["model"], err = json.Marshal(a.Model)
+	if err != nil {
+		return nil, fmt.Errorf("error marshaling 'model': %w", err)
+	}
+
+	object["olp_prompt"], err = json.Marshal(a.OlpPrompt)
+	if err != nil {
+		return nil, fmt.Errorf("error marshaling 'olp_prompt': %w", err)
+	}
+
+	for fieldName, field := range a.AdditionalProperties {
+		object[fieldName], err = json.Marshal(field)
+		if err != nil {
+			return nil, fmt.Errorf("error marshaling '%s': %w", fieldName, err)
+		}
+	}
+	return json.Marshal(object)
+}
 
 // Getter for additional properties for ChatPromptRequest. Returns the specified
 // element and whether it was found
@@ -361,6 +625,296 @@ func (a ChatPromptRequest) MarshalJSON() ([]byte, error) {
 	object["olp_prompt"], err = json.Marshal(a.OlpPrompt)
 	if err != nil {
 		return nil, fmt.Errorf("error marshaling 'olp_prompt': %w", err)
+	}
+
+	for fieldName, field := range a.AdditionalProperties {
+		object[fieldName], err = json.Marshal(field)
+		if err != nil {
+			return nil, fmt.Errorf("error marshaling '%s': %w", fieldName, err)
+		}
+	}
+	return json.Marshal(object)
+}
+
+// Getter for additional properties for GeminiPromptRequest. Returns the specified
+// element and whether it was found
+func (a GeminiPromptRequest) Get(fieldName string) (value interface{}, found bool) {
+	if a.AdditionalProperties != nil {
+		value, found = a.AdditionalProperties[fieldName]
+	}
+	return
+}
+
+// Setter for additional properties for GeminiPromptRequest
+func (a *GeminiPromptRequest) Set(fieldName string, value interface{}) {
+	if a.AdditionalProperties == nil {
+		a.AdditionalProperties = make(map[string]interface{})
+	}
+	a.AdditionalProperties[fieldName] = value
+}
+
+// Override default JSON handling for GeminiPromptRequest to handle AdditionalProperties
+func (a *GeminiPromptRequest) UnmarshalJSON(b []byte) error {
+	object := make(map[string]json.RawMessage)
+	err := json.Unmarshal(b, &object)
+	if err != nil {
+		return err
+	}
+
+	if raw, found := object["olp_prompt"]; found {
+		err = json.Unmarshal(raw, &a.OlpPrompt)
+		if err != nil {
+			return fmt.Errorf("error reading 'olp_prompt': %w", err)
+		}
+		delete(object, "olp_prompt")
+	}
+
+	if len(object) != 0 {
+		a.AdditionalProperties = make(map[string]interface{})
+		for fieldName, fieldBuf := range object {
+			var fieldVal interface{}
+			err := json.Unmarshal(fieldBuf, &fieldVal)
+			if err != nil {
+				return fmt.Errorf("error unmarshaling field %s: %w", fieldName, err)
+			}
+			a.AdditionalProperties[fieldName] = fieldVal
+		}
+	}
+	return nil
+}
+
+// Override default JSON handling for GeminiPromptRequest to handle AdditionalProperties
+func (a GeminiPromptRequest) MarshalJSON() ([]byte, error) {
+	var err error
+	object := make(map[string]json.RawMessage)
+
+	object["olp_prompt"], err = json.Marshal(a.OlpPrompt)
+	if err != nil {
+		return nil, fmt.Errorf("error marshaling 'olp_prompt': %w", err)
+	}
+
+	for fieldName, field := range a.AdditionalProperties {
+		object[fieldName], err = json.Marshal(field)
+		if err != nil {
+			return nil, fmt.Errorf("error marshaling '%s': %w", fieldName, err)
+		}
+	}
+	return json.Marshal(object)
+}
+
+// Getter for additional properties for NativeResponsesPromptReference. Returns the specified
+// element and whether it was found
+func (a NativeResponsesPromptReference) Get(fieldName string) (value interface{}, found bool) {
+	if a.AdditionalProperties != nil {
+		value, found = a.AdditionalProperties[fieldName]
+	}
+	return
+}
+
+// Setter for additional properties for NativeResponsesPromptReference
+func (a *NativeResponsesPromptReference) Set(fieldName string, value interface{}) {
+	if a.AdditionalProperties == nil {
+		a.AdditionalProperties = make(map[string]interface{})
+	}
+	a.AdditionalProperties[fieldName] = value
+}
+
+// Override default JSON handling for NativeResponsesPromptReference to handle AdditionalProperties
+func (a *NativeResponsesPromptReference) UnmarshalJSON(b []byte) error {
+	object := make(map[string]json.RawMessage)
+	err := json.Unmarshal(b, &object)
+	if err != nil {
+		return err
+	}
+
+	if raw, found := object["id"]; found {
+		err = json.Unmarshal(raw, &a.Id)
+		if err != nil {
+			return fmt.Errorf("error reading 'id': %w", err)
+		}
+		delete(object, "id")
+	}
+
+	if len(object) != 0 {
+		a.AdditionalProperties = make(map[string]interface{})
+		for fieldName, fieldBuf := range object {
+			var fieldVal interface{}
+			err := json.Unmarshal(fieldBuf, &fieldVal)
+			if err != nil {
+				return fmt.Errorf("error unmarshaling field %s: %w", fieldName, err)
+			}
+			a.AdditionalProperties[fieldName] = fieldVal
+		}
+	}
+	return nil
+}
+
+// Override default JSON handling for NativeResponsesPromptReference to handle AdditionalProperties
+func (a NativeResponsesPromptReference) MarshalJSON() ([]byte, error) {
+	var err error
+	object := make(map[string]json.RawMessage)
+
+	object["id"], err = json.Marshal(a.Id)
+	if err != nil {
+		return nil, fmt.Errorf("error marshaling 'id': %w", err)
+	}
+
+	for fieldName, field := range a.AdditionalProperties {
+		object[fieldName], err = json.Marshal(field)
+		if err != nil {
+			return nil, fmt.Errorf("error marshaling '%s': %w", fieldName, err)
+		}
+	}
+	return json.Marshal(object)
+}
+
+// Getter for additional properties for NativeResponsesPromptRequest. Returns the specified
+// element and whether it was found
+func (a NativeResponsesPromptRequest) Get(fieldName string) (value interface{}, found bool) {
+	if a.AdditionalProperties != nil {
+		value, found = a.AdditionalProperties[fieldName]
+	}
+	return
+}
+
+// Setter for additional properties for NativeResponsesPromptRequest
+func (a *NativeResponsesPromptRequest) Set(fieldName string, value interface{}) {
+	if a.AdditionalProperties == nil {
+		a.AdditionalProperties = make(map[string]interface{})
+	}
+	a.AdditionalProperties[fieldName] = value
+}
+
+// Override default JSON handling for NativeResponsesPromptRequest to handle AdditionalProperties
+func (a *NativeResponsesPromptRequest) UnmarshalJSON(b []byte) error {
+	object := make(map[string]json.RawMessage)
+	err := json.Unmarshal(b, &object)
+	if err != nil {
+		return err
+	}
+
+	if raw, found := object["model"]; found {
+		err = json.Unmarshal(raw, &a.Model)
+		if err != nil {
+			return fmt.Errorf("error reading 'model': %w", err)
+		}
+		delete(object, "model")
+	}
+
+	if raw, found := object["prompt"]; found {
+		err = json.Unmarshal(raw, &a.Prompt)
+		if err != nil {
+			return fmt.Errorf("error reading 'prompt': %w", err)
+		}
+		delete(object, "prompt")
+	}
+
+	if len(object) != 0 {
+		a.AdditionalProperties = make(map[string]interface{})
+		for fieldName, fieldBuf := range object {
+			var fieldVal interface{}
+			err := json.Unmarshal(fieldBuf, &fieldVal)
+			if err != nil {
+				return fmt.Errorf("error unmarshaling field %s: %w", fieldName, err)
+			}
+			a.AdditionalProperties[fieldName] = fieldVal
+		}
+	}
+	return nil
+}
+
+// Override default JSON handling for NativeResponsesPromptRequest to handle AdditionalProperties
+func (a NativeResponsesPromptRequest) MarshalJSON() ([]byte, error) {
+	var err error
+	object := make(map[string]json.RawMessage)
+
+	object["model"], err = json.Marshal(a.Model)
+	if err != nil {
+		return nil, fmt.Errorf("error marshaling 'model': %w", err)
+	}
+
+	object["prompt"], err = json.Marshal(a.Prompt)
+	if err != nil {
+		return nil, fmt.Errorf("error marshaling 'prompt': %w", err)
+	}
+
+	for fieldName, field := range a.AdditionalProperties {
+		object[fieldName], err = json.Marshal(field)
+		if err != nil {
+			return nil, fmt.Errorf("error marshaling '%s': %w", fieldName, err)
+		}
+	}
+	return json.Marshal(object)
+}
+
+// Getter for additional properties for OLPResponsesPromptRequest. Returns the specified
+// element and whether it was found
+func (a OLPResponsesPromptRequest) Get(fieldName string) (value interface{}, found bool) {
+	if a.AdditionalProperties != nil {
+		value, found = a.AdditionalProperties[fieldName]
+	}
+	return
+}
+
+// Setter for additional properties for OLPResponsesPromptRequest
+func (a *OLPResponsesPromptRequest) Set(fieldName string, value interface{}) {
+	if a.AdditionalProperties == nil {
+		a.AdditionalProperties = make(map[string]interface{})
+	}
+	a.AdditionalProperties[fieldName] = value
+}
+
+// Override default JSON handling for OLPResponsesPromptRequest to handle AdditionalProperties
+func (a *OLPResponsesPromptRequest) UnmarshalJSON(b []byte) error {
+	object := make(map[string]json.RawMessage)
+	err := json.Unmarshal(b, &object)
+	if err != nil {
+		return err
+	}
+
+	if raw, found := object["model"]; found {
+		err = json.Unmarshal(raw, &a.Model)
+		if err != nil {
+			return fmt.Errorf("error reading 'model': %w", err)
+		}
+		delete(object, "model")
+	}
+
+	if raw, found := object["prompt"]; found {
+		err = json.Unmarshal(raw, &a.Prompt)
+		if err != nil {
+			return fmt.Errorf("error reading 'prompt': %w", err)
+		}
+		delete(object, "prompt")
+	}
+
+	if len(object) != 0 {
+		a.AdditionalProperties = make(map[string]interface{})
+		for fieldName, fieldBuf := range object {
+			var fieldVal interface{}
+			err := json.Unmarshal(fieldBuf, &fieldVal)
+			if err != nil {
+				return fmt.Errorf("error unmarshaling field %s: %w", fieldName, err)
+			}
+			a.AdditionalProperties[fieldName] = fieldVal
+		}
+	}
+	return nil
+}
+
+// Override default JSON handling for OLPResponsesPromptRequest to handle AdditionalProperties
+func (a OLPResponsesPromptRequest) MarshalJSON() ([]byte, error) {
+	var err error
+	object := make(map[string]json.RawMessage)
+
+	object["model"], err = json.Marshal(a.Model)
+	if err != nil {
+		return nil, fmt.Errorf("error marshaling 'model': %w", err)
+	}
+
+	object["prompt"], err = json.Marshal(a.Prompt)
+	if err != nil {
+		return nil, fmt.Errorf("error marshaling 'prompt': %w", err)
 	}
 
 	for fieldName, field := range a.AdditionalProperties {
@@ -558,6 +1112,130 @@ func (t *PublishedPromptReference) UnmarshalJSON(b []byte) error {
 	return err
 }
 
+// AsOLPResponsesPromptRequest returns the union data inside the ResponsesPromptRequest as a OLPResponsesPromptRequest
+func (t ResponsesPromptRequest) AsOLPResponsesPromptRequest() (OLPResponsesPromptRequest, error) {
+	var body OLPResponsesPromptRequest
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromOLPResponsesPromptRequest overwrites any union data inside the ResponsesPromptRequest as the provided OLPResponsesPromptRequest
+func (t *ResponsesPromptRequest) FromOLPResponsesPromptRequest(v OLPResponsesPromptRequest) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeOLPResponsesPromptRequest performs a merge with any union data inside the ResponsesPromptRequest, using the provided OLPResponsesPromptRequest
+func (t *ResponsesPromptRequest) MergeOLPResponsesPromptRequest(v OLPResponsesPromptRequest) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsNativeResponsesPromptRequest returns the union data inside the ResponsesPromptRequest as a NativeResponsesPromptRequest
+func (t ResponsesPromptRequest) AsNativeResponsesPromptRequest() (NativeResponsesPromptRequest, error) {
+	var body NativeResponsesPromptRequest
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromNativeResponsesPromptRequest overwrites any union data inside the ResponsesPromptRequest as the provided NativeResponsesPromptRequest
+func (t *ResponsesPromptRequest) FromNativeResponsesPromptRequest(v NativeResponsesPromptRequest) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeNativeResponsesPromptRequest performs a merge with any union data inside the ResponsesPromptRequest, using the provided NativeResponsesPromptRequest
+func (t *ResponsesPromptRequest) MergeNativeResponsesPromptRequest(v NativeResponsesPromptRequest) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+func (t ResponsesPromptRequest) MarshalJSON() ([]byte, error) {
+	b, err := t.union.MarshalJSON()
+	return b, err
+}
+
+func (t *ResponsesPromptRequest) UnmarshalJSON(b []byte) error {
+	err := t.union.UnmarshalJSON(b)
+	return err
+}
+
+// AsResponsesPromptLabelReference returns the union data inside the ResponsesPublishedPromptReference as a ResponsesPromptLabelReference
+func (t ResponsesPublishedPromptReference) AsResponsesPromptLabelReference() (ResponsesPromptLabelReference, error) {
+	var body ResponsesPromptLabelReference
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromResponsesPromptLabelReference overwrites any union data inside the ResponsesPublishedPromptReference as the provided ResponsesPromptLabelReference
+func (t *ResponsesPublishedPromptReference) FromResponsesPromptLabelReference(v ResponsesPromptLabelReference) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeResponsesPromptLabelReference performs a merge with any union data inside the ResponsesPublishedPromptReference, using the provided ResponsesPromptLabelReference
+func (t *ResponsesPublishedPromptReference) MergeResponsesPromptLabelReference(v ResponsesPromptLabelReference) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsResponsesPromptRevisionReference returns the union data inside the ResponsesPublishedPromptReference as a ResponsesPromptRevisionReference
+func (t ResponsesPublishedPromptReference) AsResponsesPromptRevisionReference() (ResponsesPromptRevisionReference, error) {
+	var body ResponsesPromptRevisionReference
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromResponsesPromptRevisionReference overwrites any union data inside the ResponsesPublishedPromptReference as the provided ResponsesPromptRevisionReference
+func (t *ResponsesPublishedPromptReference) FromResponsesPromptRevisionReference(v ResponsesPromptRevisionReference) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeResponsesPromptRevisionReference performs a merge with any union data inside the ResponsesPublishedPromptReference, using the provided ResponsesPromptRevisionReference
+func (t *ResponsesPublishedPromptReference) MergeResponsesPromptRevisionReference(v ResponsesPromptRevisionReference) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+func (t ResponsesPublishedPromptReference) MarshalJSON() ([]byte, error) {
+	b, err := t.union.MarshalJSON()
+	return b, err
+}
+
+func (t *ResponsesPublishedPromptReference) UnmarshalJSON(b []byte) error {
+	err := t.union.UnmarshalJSON(b)
+	return err
+}
+
 // RequestEditorFn is the function signature for the RequestEditor callback function
 type RequestEditorFn func(ctx context.Context, req *http.Request) error
 
@@ -657,6 +1335,60 @@ type ClientInterface interface {
 	// Corresponds with GET /a2a/{agent}/.well-known/agent-card.json (the `GetA2AAgentCard` operationId).
 	GetA2AAgentCard(ctx context.Context, agent openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error)
 
+	// CreateAnthropicMessageWithPromptWithBody Create an Anthropic message using a published OLP prompt
+	//
+	// For transformed routes, the published prompt replaces explicit messages. Other fields use the provider contract.
+	//
+	// Takes any type of body and a specified content type.
+	//
+	// Corresponds with POST /anthropic/v1/messages (the `CreateAnthropicMessageWithPrompt` operationId).
+	CreateAnthropicMessageWithPromptWithBody(ctx context.Context, params *CreateAnthropicMessageWithPromptParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// CreateAnthropicMessageWithPrompt Create an Anthropic message using a published OLP prompt
+	//
+	// For transformed routes, the published prompt replaces explicit messages. Other fields use the provider contract.
+	//
+	// Takes a body of the `application/json` content type.
+	//
+	// Corresponds with POST /anthropic/v1/messages (the `CreateAnthropicMessageWithPrompt` operationId).
+	CreateAnthropicMessageWithPrompt(ctx context.Context, params *CreateAnthropicMessageWithPromptParams, body CreateAnthropicMessageWithPromptJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// CreateGeminiContentWithPromptWithBody Generate Gemini content using a published OLP prompt
+	//
+	// For transformed routes, the published prompt replaces explicit contents. Other fields use the provider contract.
+	//
+	// Takes any type of body and a specified content type.
+	//
+	// Corresponds with POST /gemini/v1beta/models/{model}:generateContent (the `CreateGeminiContentWithPrompt` operationId).
+	CreateGeminiContentWithPromptWithBody(ctx context.Context, model string, params *CreateGeminiContentWithPromptParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// CreateGeminiContentWithPrompt Generate Gemini content using a published OLP prompt
+	//
+	// For transformed routes, the published prompt replaces explicit contents. Other fields use the provider contract.
+	//
+	// Takes a body of the `application/json` content type.
+	//
+	// Corresponds with POST /gemini/v1beta/models/{model}:generateContent (the `CreateGeminiContentWithPrompt` operationId).
+	CreateGeminiContentWithPrompt(ctx context.Context, model string, params *CreateGeminiContentWithPromptParams, body CreateGeminiContentWithPromptJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// StreamGeminiContentWithPromptWithBody Stream Gemini content using a published OLP prompt
+	//
+	// For transformed routes, the published prompt replaces explicit contents. Other fields use the provider contract.
+	//
+	// Takes any type of body and a specified content type.
+	//
+	// Corresponds with POST /gemini/v1beta/models/{model}:streamGenerateContent (the `StreamGeminiContentWithPrompt` operationId).
+	StreamGeminiContentWithPromptWithBody(ctx context.Context, model string, params *StreamGeminiContentWithPromptParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// StreamGeminiContentWithPrompt Stream Gemini content using a published OLP prompt
+	//
+	// For transformed routes, the published prompt replaces explicit contents. Other fields use the provider contract.
+	//
+	// Takes a body of the `application/json` content type.
+	//
+	// Corresponds with POST /gemini/v1beta/models/{model}:streamGenerateContent (the `StreamGeminiContentWithPrompt` operationId).
+	StreamGeminiContentWithPrompt(ctx context.Context, model string, params *StreamGeminiContentWithPromptParams, body StreamGeminiContentWithPromptJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// CreateChatCompletionWithPromptWithBody Create a chat completion using a published OLP prompt
 	//
 	// For transformed routes, the published prompt replaces explicit messages. Other chat fields use the provider contract.
@@ -692,6 +1424,24 @@ type ClientInterface interface {
 	//
 	// Corresponds with POST /v1/delegations (the `CreateDelegation` operationId).
 	CreateDelegation(ctx context.Context, params *CreateDelegationParams, body CreateDelegationJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// CreateResponseWithPromptWithBody Create a response using a published OLP prompt
+	//
+	// An olpp_ prompt ID selects a project-owned registry publication. Other prompt IDs retain native provider behavior. Registry prompts cannot be combined with explicit input.
+	//
+	// Takes any type of body and a specified content type.
+	//
+	// Corresponds with POST /v1/responses (the `CreateResponseWithPrompt` operationId).
+	CreateResponseWithPromptWithBody(ctx context.Context, params *CreateResponseWithPromptParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// CreateResponseWithPrompt Create a response using a published OLP prompt
+	//
+	// An olpp_ prompt ID selects a project-owned registry publication. Other prompt IDs retain native provider behavior. Registry prompts cannot be combined with explicit input.
+	//
+	// Takes a body of the `application/json` content type.
+	//
+	// Corresponds with POST /v1/responses (the `CreateResponseWithPrompt` operationId).
+	CreateResponseWithPrompt(ctx context.Context, params *CreateResponseWithPromptParams, body CreateResponseWithPromptJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 }
 
 // CallA2AAgentWithBody Send a message to or read a task from a published A2A agent
@@ -739,6 +1489,120 @@ func (c *Client) CallA2AAgent(ctx context.Context, agent openapi_types.UUID, bod
 // Corresponds with GET /a2a/{agent}/.well-known/agent-card.json (the `GetA2AAgentCard` operationId).
 func (c *Client) GetA2AAgentCard(ctx context.Context, agent openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewGetA2AAgentCardRequest(c.Server, agent)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// CreateAnthropicMessageWithPromptWithBody Create an Anthropic message using a published OLP prompt
+//
+// For transformed routes, the published prompt replaces explicit messages. Other fields use the provider contract.
+//
+// Takes any type of body and a specified content type.
+//
+// Corresponds with POST /anthropic/v1/messages (the `CreateAnthropicMessageWithPrompt` operationId).
+func (c *Client) CreateAnthropicMessageWithPromptWithBody(ctx context.Context, params *CreateAnthropicMessageWithPromptParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCreateAnthropicMessageWithPromptRequestWithBody(c.Server, params, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// CreateAnthropicMessageWithPrompt Create an Anthropic message using a published OLP prompt
+//
+// For transformed routes, the published prompt replaces explicit messages. Other fields use the provider contract.
+//
+// Takes a body of the `application/json` content type.
+//
+// Corresponds with POST /anthropic/v1/messages (the `CreateAnthropicMessageWithPrompt` operationId).
+func (c *Client) CreateAnthropicMessageWithPrompt(ctx context.Context, params *CreateAnthropicMessageWithPromptParams, body CreateAnthropicMessageWithPromptJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCreateAnthropicMessageWithPromptRequest(c.Server, params, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// CreateGeminiContentWithPromptWithBody Generate Gemini content using a published OLP prompt
+//
+// For transformed routes, the published prompt replaces explicit contents. Other fields use the provider contract.
+//
+// Takes any type of body and a specified content type.
+//
+// Corresponds with POST /gemini/v1beta/models/{model}:generateContent (the `CreateGeminiContentWithPrompt` operationId).
+func (c *Client) CreateGeminiContentWithPromptWithBody(ctx context.Context, model string, params *CreateGeminiContentWithPromptParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCreateGeminiContentWithPromptRequestWithBody(c.Server, model, params, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// CreateGeminiContentWithPrompt Generate Gemini content using a published OLP prompt
+//
+// For transformed routes, the published prompt replaces explicit contents. Other fields use the provider contract.
+//
+// Takes a body of the `application/json` content type.
+//
+// Corresponds with POST /gemini/v1beta/models/{model}:generateContent (the `CreateGeminiContentWithPrompt` operationId).
+func (c *Client) CreateGeminiContentWithPrompt(ctx context.Context, model string, params *CreateGeminiContentWithPromptParams, body CreateGeminiContentWithPromptJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCreateGeminiContentWithPromptRequest(c.Server, model, params, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// StreamGeminiContentWithPromptWithBody Stream Gemini content using a published OLP prompt
+//
+// For transformed routes, the published prompt replaces explicit contents. Other fields use the provider contract.
+//
+// Takes any type of body and a specified content type.
+//
+// Corresponds with POST /gemini/v1beta/models/{model}:streamGenerateContent (the `StreamGeminiContentWithPrompt` operationId).
+func (c *Client) StreamGeminiContentWithPromptWithBody(ctx context.Context, model string, params *StreamGeminiContentWithPromptParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewStreamGeminiContentWithPromptRequestWithBody(c.Server, model, params, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// StreamGeminiContentWithPrompt Stream Gemini content using a published OLP prompt
+//
+// For transformed routes, the published prompt replaces explicit contents. Other fields use the provider contract.
+//
+// Takes a body of the `application/json` content type.
+//
+// Corresponds with POST /gemini/v1beta/models/{model}:streamGenerateContent (the `StreamGeminiContentWithPrompt` operationId).
+func (c *Client) StreamGeminiContentWithPrompt(ctx context.Context, model string, params *StreamGeminiContentWithPromptParams, body StreamGeminiContentWithPromptJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewStreamGeminiContentWithPromptRequest(c.Server, model, params, body)
 	if err != nil {
 		return nil, err
 	}
@@ -825,6 +1689,44 @@ func (c *Client) CreateDelegation(ctx context.Context, params *CreateDelegationP
 	return c.Client.Do(req)
 }
 
+// CreateResponseWithPromptWithBody Create a response using a published OLP prompt
+//
+// An olpp_ prompt ID selects a project-owned registry publication. Other prompt IDs retain native provider behavior. Registry prompts cannot be combined with explicit input.
+//
+// Takes any type of body and a specified content type.
+//
+// Corresponds with POST /v1/responses (the `CreateResponseWithPrompt` operationId).
+func (c *Client) CreateResponseWithPromptWithBody(ctx context.Context, params *CreateResponseWithPromptParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCreateResponseWithPromptRequestWithBody(c.Server, params, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// CreateResponseWithPrompt Create a response using a published OLP prompt
+//
+// An olpp_ prompt ID selects a project-owned registry publication. Other prompt IDs retain native provider behavior. Registry prompts cannot be combined with explicit input.
+//
+// Takes a body of the `application/json` content type.
+//
+// Corresponds with POST /v1/responses (the `CreateResponseWithPrompt` operationId).
+func (c *Client) CreateResponseWithPrompt(ctx context.Context, params *CreateResponseWithPromptParams, body CreateResponseWithPromptJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCreateResponseWithPromptRequest(c.Server, params, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
 // NewCallA2AAgentRequest calls the generic CallA2AAgent builder with application/json body
 func NewCallA2AAgentRequest(server string, agent openapi_types.UUID, body CallA2AAgentJSONRequestBody) (*http.Request, error) {
 	var bodyReader io.Reader
@@ -901,6 +1803,185 @@ func NewGetA2AAgentCardRequest(server string, agent openapi_types.UUID) (*http.R
 	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
 	if err != nil {
 		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewCreateAnthropicMessageWithPromptRequest calls the generic CreateAnthropicMessageWithPrompt builder with application/json body
+func NewCreateAnthropicMessageWithPromptRequest(server string, params *CreateAnthropicMessageWithPromptParams, body CreateAnthropicMessageWithPromptJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewCreateAnthropicMessageWithPromptRequestWithBody(server, params, "application/json", bodyReader)
+}
+
+// NewCreateAnthropicMessageWithPromptRequestWithBody constructs an http.Request for the CreateAnthropicMessageWithPrompt method, with any body, and a specified content type
+func NewCreateAnthropicMessageWithPromptRequestWithBody(server string, params *CreateAnthropicMessageWithPromptParams, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/anthropic/v1/messages")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	if params != nil {
+
+		if params.XOLPAgentIdentity != nil {
+			var headerParam0 string
+
+			headerParam0, err = runtime.StyleParamWithOptions("simple", false, "X-OLP-Agent-Identity", *params.XOLPAgentIdentity, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationHeader, Type: "string", Format: ""})
+			if err != nil {
+				return nil, err
+			}
+
+			req.Header.Set("X-OLP-Agent-Identity", headerParam0)
+		}
+
+	}
+
+	return req, nil
+}
+
+// NewCreateGeminiContentWithPromptRequest calls the generic CreateGeminiContentWithPrompt builder with application/json body
+func NewCreateGeminiContentWithPromptRequest(server string, model string, params *CreateGeminiContentWithPromptParams, body CreateGeminiContentWithPromptJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewCreateGeminiContentWithPromptRequestWithBody(server, model, params, "application/json", bodyReader)
+}
+
+// NewCreateGeminiContentWithPromptRequestWithBody constructs an http.Request for the CreateGeminiContentWithPrompt method, with any body, and a specified content type
+func NewCreateGeminiContentWithPromptRequestWithBody(server string, model string, params *CreateGeminiContentWithPromptParams, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "model", model, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/gemini/v1beta/models/%s:generateContent", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	if params != nil {
+
+		if params.XOLPAgentIdentity != nil {
+			var headerParam0 string
+
+			headerParam0, err = runtime.StyleParamWithOptions("simple", false, "X-OLP-Agent-Identity", *params.XOLPAgentIdentity, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationHeader, Type: "string", Format: ""})
+			if err != nil {
+				return nil, err
+			}
+
+			req.Header.Set("X-OLP-Agent-Identity", headerParam0)
+		}
+
+	}
+
+	return req, nil
+}
+
+// NewStreamGeminiContentWithPromptRequest calls the generic StreamGeminiContentWithPrompt builder with application/json body
+func NewStreamGeminiContentWithPromptRequest(server string, model string, params *StreamGeminiContentWithPromptParams, body StreamGeminiContentWithPromptJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewStreamGeminiContentWithPromptRequestWithBody(server, model, params, "application/json", bodyReader)
+}
+
+// NewStreamGeminiContentWithPromptRequestWithBody constructs an http.Request for the StreamGeminiContentWithPrompt method, with any body, and a specified content type
+func NewStreamGeminiContentWithPromptRequestWithBody(server string, model string, params *StreamGeminiContentWithPromptParams, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "model", model, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/gemini/v1beta/models/%s:streamGenerateContent", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	if params != nil {
+
+		if params.XOLPAgentIdentity != nil {
+			var headerParam0 string
+
+			headerParam0, err = runtime.StyleParamWithOptions("simple", false, "X-OLP-Agent-Identity", *params.XOLPAgentIdentity, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationHeader, Type: "string", Format: ""})
+			if err != nil {
+				return nil, err
+			}
+
+			req.Header.Set("X-OLP-Agent-Identity", headerParam0)
+		}
+
 	}
 
 	return req, nil
@@ -1014,6 +2095,61 @@ func NewCreateDelegationRequestWithBody(server string, params *CreateDelegationP
 	return req, nil
 }
 
+// NewCreateResponseWithPromptRequest calls the generic CreateResponseWithPrompt builder with application/json body
+func NewCreateResponseWithPromptRequest(server string, params *CreateResponseWithPromptParams, body CreateResponseWithPromptJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewCreateResponseWithPromptRequestWithBody(server, params, "application/json", bodyReader)
+}
+
+// NewCreateResponseWithPromptRequestWithBody constructs an http.Request for the CreateResponseWithPrompt method, with any body, and a specified content type
+func NewCreateResponseWithPromptRequestWithBody(server string, params *CreateResponseWithPromptParams, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v1/responses")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	if params != nil {
+
+		if params.XOLPAgentIdentity != nil {
+			var headerParam0 string
+
+			headerParam0, err = runtime.StyleParamWithOptions("simple", false, "X-OLP-Agent-Identity", *params.XOLPAgentIdentity, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationHeader, Type: "string", Format: ""})
+			if err != nil {
+				return nil, err
+			}
+
+			req.Header.Set("X-OLP-Agent-Identity", headerParam0)
+		}
+
+	}
+
+	return req, nil
+}
+
 func (c *Client) applyEditors(ctx context.Context, req *http.Request, additionalEditors []RequestEditorFn) error {
 	for _, r := range c.RequestEditors {
 		if err := r(ctx, req); err != nil {
@@ -1085,6 +2221,60 @@ type ClientWithResponsesInterface interface {
 	// Corresponds with GET /a2a/{agent}/.well-known/agent-card.json (the `GetA2AAgentCard` operationId).
 	GetA2AAgentCardWithResponse(ctx context.Context, agent openapi_types.UUID, reqEditors ...RequestEditorFn) (*GetA2AAgentCardResponse, error)
 
+	// CreateAnthropicMessageWithPromptWithBodyWithResponse Create an Anthropic message using a published OLP prompt
+	//
+	// For transformed routes, the published prompt replaces explicit messages. Other fields use the provider contract.
+	//
+	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /anthropic/v1/messages (the `CreateAnthropicMessageWithPrompt` operationId).
+	CreateAnthropicMessageWithPromptWithBodyWithResponse(ctx context.Context, params *CreateAnthropicMessageWithPromptParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreateAnthropicMessageWithPromptResponse, error)
+
+	// CreateAnthropicMessageWithPromptWithResponse Create an Anthropic message using a published OLP prompt
+	//
+	// For transformed routes, the published prompt replaces explicit messages. Other fields use the provider contract.
+	//
+	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /anthropic/v1/messages (the `CreateAnthropicMessageWithPrompt` operationId).
+	CreateAnthropicMessageWithPromptWithResponse(ctx context.Context, params *CreateAnthropicMessageWithPromptParams, body CreateAnthropicMessageWithPromptJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateAnthropicMessageWithPromptResponse, error)
+
+	// CreateGeminiContentWithPromptWithBodyWithResponse Generate Gemini content using a published OLP prompt
+	//
+	// For transformed routes, the published prompt replaces explicit contents. Other fields use the provider contract.
+	//
+	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /gemini/v1beta/models/{model}:generateContent (the `CreateGeminiContentWithPrompt` operationId).
+	CreateGeminiContentWithPromptWithBodyWithResponse(ctx context.Context, model string, params *CreateGeminiContentWithPromptParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreateGeminiContentWithPromptResponse, error)
+
+	// CreateGeminiContentWithPromptWithResponse Generate Gemini content using a published OLP prompt
+	//
+	// For transformed routes, the published prompt replaces explicit contents. Other fields use the provider contract.
+	//
+	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /gemini/v1beta/models/{model}:generateContent (the `CreateGeminiContentWithPrompt` operationId).
+	CreateGeminiContentWithPromptWithResponse(ctx context.Context, model string, params *CreateGeminiContentWithPromptParams, body CreateGeminiContentWithPromptJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateGeminiContentWithPromptResponse, error)
+
+	// StreamGeminiContentWithPromptWithBodyWithResponse Stream Gemini content using a published OLP prompt
+	//
+	// For transformed routes, the published prompt replaces explicit contents. Other fields use the provider contract.
+	//
+	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /gemini/v1beta/models/{model}:streamGenerateContent (the `StreamGeminiContentWithPrompt` operationId).
+	StreamGeminiContentWithPromptWithBodyWithResponse(ctx context.Context, model string, params *StreamGeminiContentWithPromptParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*StreamGeminiContentWithPromptResponse, error)
+
+	// StreamGeminiContentWithPromptWithResponse Stream Gemini content using a published OLP prompt
+	//
+	// For transformed routes, the published prompt replaces explicit contents. Other fields use the provider contract.
+	//
+	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /gemini/v1beta/models/{model}:streamGenerateContent (the `StreamGeminiContentWithPrompt` operationId).
+	StreamGeminiContentWithPromptWithResponse(ctx context.Context, model string, params *StreamGeminiContentWithPromptParams, body StreamGeminiContentWithPromptJSONRequestBody, reqEditors ...RequestEditorFn) (*StreamGeminiContentWithPromptResponse, error)
+
 	// CreateChatCompletionWithPromptWithBodyWithResponse Create a chat completion using a published OLP prompt
 	//
 	// For transformed routes, the published prompt replaces explicit messages. Other chat fields use the provider contract.
@@ -1120,6 +2310,24 @@ type ClientWithResponsesInterface interface {
 	//
 	// Corresponds with POST /v1/delegations (the `CreateDelegation` operationId).
 	CreateDelegationWithResponse(ctx context.Context, params *CreateDelegationParams, body CreateDelegationJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateDelegationResponse, error)
+
+	// CreateResponseWithPromptWithBodyWithResponse Create a response using a published OLP prompt
+	//
+	// An olpp_ prompt ID selects a project-owned registry publication. Other prompt IDs retain native provider behavior. Registry prompts cannot be combined with explicit input.
+	//
+	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /v1/responses (the `CreateResponseWithPrompt` operationId).
+	CreateResponseWithPromptWithBodyWithResponse(ctx context.Context, params *CreateResponseWithPromptParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreateResponseWithPromptResponse, error)
+
+	// CreateResponseWithPromptWithResponse Create a response using a published OLP prompt
+	//
+	// An olpp_ prompt ID selects a project-owned registry publication. Other prompt IDs retain native provider behavior. Registry prompts cannot be combined with explicit input.
+	//
+	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /v1/responses (the `CreateResponseWithPrompt` operationId).
+	CreateResponseWithPromptWithResponse(ctx context.Context, params *CreateResponseWithPromptParams, body CreateResponseWithPromptJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateResponseWithPromptResponse, error)
 }
 
 type CallA2AAgentResponse struct {
@@ -1204,6 +2412,276 @@ func (r GetA2AAgentCardResponse) ContentType() string {
 	return ""
 }
 
+type CreateAnthropicMessageWithPromptResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *map[string]interface{}
+	// JSON400 the response for an HTTP 400 `application/json` response
+	JSON400 *AnthropicInferenceError
+	// JSON401 the response for an HTTP 401 `application/json` response
+	JSON401 *AnthropicInferenceError
+	// JSON403 the response for an HTTP 403 `application/json` response
+	JSON403 *AnthropicInferenceError
+	// JSON404 the response for an HTTP 404 `application/json` response
+	JSON404 *AnthropicInferenceError
+	// JSON413 the response for an HTTP 413 `application/json` response
+	JSON413 *AnthropicInferenceError
+	// JSON429 the response for an HTTP 429 `application/json` response
+	JSON429 *AnthropicInferenceError
+	// JSON503 the response for an HTTP 503 `application/json` response
+	JSON503 *AnthropicInferenceError
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r CreateAnthropicMessageWithPromptResponse) GetJSON200() *map[string]interface{} {
+	return r.JSON200
+}
+
+// GetJSON400 returns the response for an HTTP 400 `application/json` response
+func (r CreateAnthropicMessageWithPromptResponse) GetJSON400() *AnthropicInferenceError {
+	return r.JSON400
+}
+
+// GetJSON401 returns the response for an HTTP 401 `application/json` response
+func (r CreateAnthropicMessageWithPromptResponse) GetJSON401() *AnthropicInferenceError {
+	return r.JSON401
+}
+
+// GetJSON403 returns the response for an HTTP 403 `application/json` response
+func (r CreateAnthropicMessageWithPromptResponse) GetJSON403() *AnthropicInferenceError {
+	return r.JSON403
+}
+
+// GetJSON404 returns the response for an HTTP 404 `application/json` response
+func (r CreateAnthropicMessageWithPromptResponse) GetJSON404() *AnthropicInferenceError {
+	return r.JSON404
+}
+
+// GetJSON413 returns the response for an HTTP 413 `application/json` response
+func (r CreateAnthropicMessageWithPromptResponse) GetJSON413() *AnthropicInferenceError {
+	return r.JSON413
+}
+
+// GetJSON429 returns the response for an HTTP 429 `application/json` response
+func (r CreateAnthropicMessageWithPromptResponse) GetJSON429() *AnthropicInferenceError {
+	return r.JSON429
+}
+
+// GetJSON503 returns the response for an HTTP 503 `application/json` response
+func (r CreateAnthropicMessageWithPromptResponse) GetJSON503() *AnthropicInferenceError {
+	return r.JSON503
+}
+
+// GetBody returns the raw response body bytes
+func (r CreateAnthropicMessageWithPromptResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r CreateAnthropicMessageWithPromptResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r CreateAnthropicMessageWithPromptResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r CreateAnthropicMessageWithPromptResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type CreateGeminiContentWithPromptResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *map[string]interface{}
+	// JSON400 the response for an HTTP 400 `application/json` response
+	JSON400 *GeminiInferenceError
+	// JSON401 the response for an HTTP 401 `application/json` response
+	JSON401 *GeminiInferenceError
+	// JSON403 the response for an HTTP 403 `application/json` response
+	JSON403 *GeminiInferenceError
+	// JSON404 the response for an HTTP 404 `application/json` response
+	JSON404 *GeminiInferenceError
+	// JSON413 the response for an HTTP 413 `application/json` response
+	JSON413 *GeminiInferenceError
+	// JSON429 the response for an HTTP 429 `application/json` response
+	JSON429 *GeminiInferenceError
+	// JSON503 the response for an HTTP 503 `application/json` response
+	JSON503 *GeminiInferenceError
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r CreateGeminiContentWithPromptResponse) GetJSON200() *map[string]interface{} {
+	return r.JSON200
+}
+
+// GetJSON400 returns the response for an HTTP 400 `application/json` response
+func (r CreateGeminiContentWithPromptResponse) GetJSON400() *GeminiInferenceError {
+	return r.JSON400
+}
+
+// GetJSON401 returns the response for an HTTP 401 `application/json` response
+func (r CreateGeminiContentWithPromptResponse) GetJSON401() *GeminiInferenceError {
+	return r.JSON401
+}
+
+// GetJSON403 returns the response for an HTTP 403 `application/json` response
+func (r CreateGeminiContentWithPromptResponse) GetJSON403() *GeminiInferenceError {
+	return r.JSON403
+}
+
+// GetJSON404 returns the response for an HTTP 404 `application/json` response
+func (r CreateGeminiContentWithPromptResponse) GetJSON404() *GeminiInferenceError {
+	return r.JSON404
+}
+
+// GetJSON413 returns the response for an HTTP 413 `application/json` response
+func (r CreateGeminiContentWithPromptResponse) GetJSON413() *GeminiInferenceError {
+	return r.JSON413
+}
+
+// GetJSON429 returns the response for an HTTP 429 `application/json` response
+func (r CreateGeminiContentWithPromptResponse) GetJSON429() *GeminiInferenceError {
+	return r.JSON429
+}
+
+// GetJSON503 returns the response for an HTTP 503 `application/json` response
+func (r CreateGeminiContentWithPromptResponse) GetJSON503() *GeminiInferenceError {
+	return r.JSON503
+}
+
+// GetBody returns the raw response body bytes
+func (r CreateGeminiContentWithPromptResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r CreateGeminiContentWithPromptResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r CreateGeminiContentWithPromptResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r CreateGeminiContentWithPromptResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type StreamGeminiContentWithPromptResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *map[string]interface{}
+	// JSON400 the response for an HTTP 400 `application/json` response
+	JSON400 *GeminiInferenceError
+	// JSON401 the response for an HTTP 401 `application/json` response
+	JSON401 *GeminiInferenceError
+	// JSON403 the response for an HTTP 403 `application/json` response
+	JSON403 *GeminiInferenceError
+	// JSON404 the response for an HTTP 404 `application/json` response
+	JSON404 *GeminiInferenceError
+	// JSON413 the response for an HTTP 413 `application/json` response
+	JSON413 *GeminiInferenceError
+	// JSON429 the response for an HTTP 429 `application/json` response
+	JSON429 *GeminiInferenceError
+	// JSON503 the response for an HTTP 503 `application/json` response
+	JSON503 *GeminiInferenceError
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r StreamGeminiContentWithPromptResponse) GetJSON200() *map[string]interface{} {
+	return r.JSON200
+}
+
+// GetJSON400 returns the response for an HTTP 400 `application/json` response
+func (r StreamGeminiContentWithPromptResponse) GetJSON400() *GeminiInferenceError {
+	return r.JSON400
+}
+
+// GetJSON401 returns the response for an HTTP 401 `application/json` response
+func (r StreamGeminiContentWithPromptResponse) GetJSON401() *GeminiInferenceError {
+	return r.JSON401
+}
+
+// GetJSON403 returns the response for an HTTP 403 `application/json` response
+func (r StreamGeminiContentWithPromptResponse) GetJSON403() *GeminiInferenceError {
+	return r.JSON403
+}
+
+// GetJSON404 returns the response for an HTTP 404 `application/json` response
+func (r StreamGeminiContentWithPromptResponse) GetJSON404() *GeminiInferenceError {
+	return r.JSON404
+}
+
+// GetJSON413 returns the response for an HTTP 413 `application/json` response
+func (r StreamGeminiContentWithPromptResponse) GetJSON413() *GeminiInferenceError {
+	return r.JSON413
+}
+
+// GetJSON429 returns the response for an HTTP 429 `application/json` response
+func (r StreamGeminiContentWithPromptResponse) GetJSON429() *GeminiInferenceError {
+	return r.JSON429
+}
+
+// GetJSON503 returns the response for an HTTP 503 `application/json` response
+func (r StreamGeminiContentWithPromptResponse) GetJSON503() *GeminiInferenceError {
+	return r.JSON503
+}
+
+// GetBody returns the raw response body bytes
+func (r StreamGeminiContentWithPromptResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r StreamGeminiContentWithPromptResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r StreamGeminiContentWithPromptResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r StreamGeminiContentWithPromptResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
 type CreateChatCompletionWithPromptResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
@@ -1217,6 +2695,8 @@ type CreateChatCompletionWithPromptResponse struct {
 	JSON403 *InferenceError
 	// JSON404 the response for an HTTP 404 `application/json` response
 	JSON404 *InferenceError
+	// JSON413 the response for an HTTP 413 `application/json` response
+	JSON413 *InferenceError
 	// JSON429 the response for an HTTP 429 `application/json` response
 	JSON429 *InferenceError
 	// JSON503 the response for an HTTP 503 `application/json` response
@@ -1246,6 +2726,11 @@ func (r CreateChatCompletionWithPromptResponse) GetJSON403() *InferenceError {
 // GetJSON404 returns the response for an HTTP 404 `application/json` response
 func (r CreateChatCompletionWithPromptResponse) GetJSON404() *InferenceError {
 	return r.JSON404
+}
+
+// GetJSON413 returns the response for an HTTP 413 `application/json` response
+func (r CreateChatCompletionWithPromptResponse) GetJSON413() *InferenceError {
+	return r.JSON413
 }
 
 // GetJSON429 returns the response for an HTTP 429 `application/json` response
@@ -1356,6 +2841,96 @@ func (r CreateDelegationResponse) ContentType() string {
 	return ""
 }
 
+type CreateResponseWithPromptResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *map[string]interface{}
+	// JSON400 the response for an HTTP 400 `application/json` response
+	JSON400 *InferenceError
+	// JSON401 the response for an HTTP 401 `application/json` response
+	JSON401 *InferenceError
+	// JSON403 the response for an HTTP 403 `application/json` response
+	JSON403 *InferenceError
+	// JSON404 the response for an HTTP 404 `application/json` response
+	JSON404 *InferenceError
+	// JSON413 the response for an HTTP 413 `application/json` response
+	JSON413 *InferenceError
+	// JSON429 the response for an HTTP 429 `application/json` response
+	JSON429 *InferenceError
+	// JSON503 the response for an HTTP 503 `application/json` response
+	JSON503 *InferenceError
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r CreateResponseWithPromptResponse) GetJSON200() *map[string]interface{} {
+	return r.JSON200
+}
+
+// GetJSON400 returns the response for an HTTP 400 `application/json` response
+func (r CreateResponseWithPromptResponse) GetJSON400() *InferenceError {
+	return r.JSON400
+}
+
+// GetJSON401 returns the response for an HTTP 401 `application/json` response
+func (r CreateResponseWithPromptResponse) GetJSON401() *InferenceError {
+	return r.JSON401
+}
+
+// GetJSON403 returns the response for an HTTP 403 `application/json` response
+func (r CreateResponseWithPromptResponse) GetJSON403() *InferenceError {
+	return r.JSON403
+}
+
+// GetJSON404 returns the response for an HTTP 404 `application/json` response
+func (r CreateResponseWithPromptResponse) GetJSON404() *InferenceError {
+	return r.JSON404
+}
+
+// GetJSON413 returns the response for an HTTP 413 `application/json` response
+func (r CreateResponseWithPromptResponse) GetJSON413() *InferenceError {
+	return r.JSON413
+}
+
+// GetJSON429 returns the response for an HTTP 429 `application/json` response
+func (r CreateResponseWithPromptResponse) GetJSON429() *InferenceError {
+	return r.JSON429
+}
+
+// GetJSON503 returns the response for an HTTP 503 `application/json` response
+func (r CreateResponseWithPromptResponse) GetJSON503() *InferenceError {
+	return r.JSON503
+}
+
+// GetBody returns the raw response body bytes
+func (r CreateResponseWithPromptResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r CreateResponseWithPromptResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r CreateResponseWithPromptResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r CreateResponseWithPromptResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
 // CallA2AAgentWithBodyWithResponse Send a message to or read a task from a published A2A agent
 //
 // Supports A2A 1.0 JSON-RPC SendMessage and GetTask. Requires the agents scope and an explicit allowlist entry. OLP task IDs are bound to the initiating key and project.
@@ -1399,6 +2974,96 @@ func (c *ClientWithResponses) GetA2AAgentCardWithResponse(ctx context.Context, a
 		return nil, err
 	}
 	return ParseGetA2AAgentCardResponse(rsp)
+}
+
+// CreateAnthropicMessageWithPromptWithBodyWithResponse Create an Anthropic message using a published OLP prompt
+//
+// For transformed routes, the published prompt replaces explicit messages. Other fields use the provider contract.
+//
+// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /anthropic/v1/messages (the `CreateAnthropicMessageWithPrompt` operationId).
+func (c *ClientWithResponses) CreateAnthropicMessageWithPromptWithBodyWithResponse(ctx context.Context, params *CreateAnthropicMessageWithPromptParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreateAnthropicMessageWithPromptResponse, error) {
+	rsp, err := c.CreateAnthropicMessageWithPromptWithBody(ctx, params, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseCreateAnthropicMessageWithPromptResponse(rsp)
+}
+
+// CreateAnthropicMessageWithPromptWithResponse Create an Anthropic message using a published OLP prompt
+//
+// For transformed routes, the published prompt replaces explicit messages. Other fields use the provider contract.
+//
+// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /anthropic/v1/messages (the `CreateAnthropicMessageWithPrompt` operationId).
+func (c *ClientWithResponses) CreateAnthropicMessageWithPromptWithResponse(ctx context.Context, params *CreateAnthropicMessageWithPromptParams, body CreateAnthropicMessageWithPromptJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateAnthropicMessageWithPromptResponse, error) {
+	rsp, err := c.CreateAnthropicMessageWithPrompt(ctx, params, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseCreateAnthropicMessageWithPromptResponse(rsp)
+}
+
+// CreateGeminiContentWithPromptWithBodyWithResponse Generate Gemini content using a published OLP prompt
+//
+// For transformed routes, the published prompt replaces explicit contents. Other fields use the provider contract.
+//
+// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /gemini/v1beta/models/{model}:generateContent (the `CreateGeminiContentWithPrompt` operationId).
+func (c *ClientWithResponses) CreateGeminiContentWithPromptWithBodyWithResponse(ctx context.Context, model string, params *CreateGeminiContentWithPromptParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreateGeminiContentWithPromptResponse, error) {
+	rsp, err := c.CreateGeminiContentWithPromptWithBody(ctx, model, params, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseCreateGeminiContentWithPromptResponse(rsp)
+}
+
+// CreateGeminiContentWithPromptWithResponse Generate Gemini content using a published OLP prompt
+//
+// For transformed routes, the published prompt replaces explicit contents. Other fields use the provider contract.
+//
+// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /gemini/v1beta/models/{model}:generateContent (the `CreateGeminiContentWithPrompt` operationId).
+func (c *ClientWithResponses) CreateGeminiContentWithPromptWithResponse(ctx context.Context, model string, params *CreateGeminiContentWithPromptParams, body CreateGeminiContentWithPromptJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateGeminiContentWithPromptResponse, error) {
+	rsp, err := c.CreateGeminiContentWithPrompt(ctx, model, params, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseCreateGeminiContentWithPromptResponse(rsp)
+}
+
+// StreamGeminiContentWithPromptWithBodyWithResponse Stream Gemini content using a published OLP prompt
+//
+// For transformed routes, the published prompt replaces explicit contents. Other fields use the provider contract.
+//
+// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /gemini/v1beta/models/{model}:streamGenerateContent (the `StreamGeminiContentWithPrompt` operationId).
+func (c *ClientWithResponses) StreamGeminiContentWithPromptWithBodyWithResponse(ctx context.Context, model string, params *StreamGeminiContentWithPromptParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*StreamGeminiContentWithPromptResponse, error) {
+	rsp, err := c.StreamGeminiContentWithPromptWithBody(ctx, model, params, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseStreamGeminiContentWithPromptResponse(rsp)
+}
+
+// StreamGeminiContentWithPromptWithResponse Stream Gemini content using a published OLP prompt
+//
+// For transformed routes, the published prompt replaces explicit contents. Other fields use the provider contract.
+//
+// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /gemini/v1beta/models/{model}:streamGenerateContent (the `StreamGeminiContentWithPrompt` operationId).
+func (c *ClientWithResponses) StreamGeminiContentWithPromptWithResponse(ctx context.Context, model string, params *StreamGeminiContentWithPromptParams, body StreamGeminiContentWithPromptJSONRequestBody, reqEditors ...RequestEditorFn) (*StreamGeminiContentWithPromptResponse, error) {
+	rsp, err := c.StreamGeminiContentWithPrompt(ctx, model, params, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseStreamGeminiContentWithPromptResponse(rsp)
 }
 
 // CreateChatCompletionWithPromptWithBodyWithResponse Create a chat completion using a published OLP prompt
@@ -1459,6 +3124,36 @@ func (c *ClientWithResponses) CreateDelegationWithResponse(ctx context.Context, 
 		return nil, err
 	}
 	return ParseCreateDelegationResponse(rsp)
+}
+
+// CreateResponseWithPromptWithBodyWithResponse Create a response using a published OLP prompt
+//
+// An olpp_ prompt ID selects a project-owned registry publication. Other prompt IDs retain native provider behavior. Registry prompts cannot be combined with explicit input.
+//
+// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /v1/responses (the `CreateResponseWithPrompt` operationId).
+func (c *ClientWithResponses) CreateResponseWithPromptWithBodyWithResponse(ctx context.Context, params *CreateResponseWithPromptParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreateResponseWithPromptResponse, error) {
+	rsp, err := c.CreateResponseWithPromptWithBody(ctx, params, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseCreateResponseWithPromptResponse(rsp)
+}
+
+// CreateResponseWithPromptWithResponse Create a response using a published OLP prompt
+//
+// An olpp_ prompt ID selects a project-owned registry publication. Other prompt IDs retain native provider behavior. Registry prompts cannot be combined with explicit input.
+//
+// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /v1/responses (the `CreateResponseWithPrompt` operationId).
+func (c *ClientWithResponses) CreateResponseWithPromptWithResponse(ctx context.Context, params *CreateResponseWithPromptParams, body CreateResponseWithPromptJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateResponseWithPromptResponse, error) {
+	rsp, err := c.CreateResponseWithPrompt(ctx, params, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseCreateResponseWithPromptResponse(rsp)
 }
 
 // ParseCallA2AAgentResponse parses an HTTP response from a CallA2AAgentWithResponse call
@@ -1534,6 +3229,240 @@ func ParseGetA2AAgentCardResponse(rsp *http.Response) (*GetA2AAgentCardResponse,
 	return response, nil
 }
 
+// ParseCreateAnthropicMessageWithPromptResponse parses an HTTP response from a CreateAnthropicMessageWithPromptWithResponse call
+func ParseCreateAnthropicMessageWithPromptResponse(rsp *http.Response) (*CreateAnthropicMessageWithPromptResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &CreateAnthropicMessageWithPromptResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest map[string]interface{}
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest AnthropicInferenceError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest AnthropicInferenceError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest AnthropicInferenceError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest AnthropicInferenceError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 413:
+		var dest AnthropicInferenceError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON413 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 429:
+		var dest AnthropicInferenceError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON429 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
+		var dest AnthropicInferenceError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON503 = &dest
+
+	case rsp.StatusCode == 200:
+		// Content-type (text/event-stream) unsupported
+
+	}
+
+	return response, nil
+}
+
+// ParseCreateGeminiContentWithPromptResponse parses an HTTP response from a CreateGeminiContentWithPromptWithResponse call
+func ParseCreateGeminiContentWithPromptResponse(rsp *http.Response) (*CreateGeminiContentWithPromptResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &CreateGeminiContentWithPromptResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest map[string]interface{}
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest GeminiInferenceError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest GeminiInferenceError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest GeminiInferenceError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest GeminiInferenceError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 413:
+		var dest GeminiInferenceError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON413 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 429:
+		var dest GeminiInferenceError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON429 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
+		var dest GeminiInferenceError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON503 = &dest
+
+	case rsp.StatusCode == 200:
+		// Content-type (text/event-stream) unsupported
+
+	}
+
+	return response, nil
+}
+
+// ParseStreamGeminiContentWithPromptResponse parses an HTTP response from a StreamGeminiContentWithPromptWithResponse call
+func ParseStreamGeminiContentWithPromptResponse(rsp *http.Response) (*StreamGeminiContentWithPromptResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &StreamGeminiContentWithPromptResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest map[string]interface{}
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest GeminiInferenceError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest GeminiInferenceError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest GeminiInferenceError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest GeminiInferenceError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 413:
+		var dest GeminiInferenceError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON413 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 429:
+		var dest GeminiInferenceError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON429 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
+		var dest GeminiInferenceError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON503 = &dest
+
+	case rsp.StatusCode == 200:
+		// Content-type (text/event-stream) unsupported
+
+	}
+
+	return response, nil
+}
+
 // ParseCreateChatCompletionWithPromptResponse parses an HTTP response from a CreateChatCompletionWithPromptWithResponse call
 func ParseCreateChatCompletionWithPromptResponse(rsp *http.Response) (*CreateChatCompletionWithPromptResponse, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
@@ -1582,6 +3511,13 @@ func ParseCreateChatCompletionWithPromptResponse(rsp *http.Response) (*CreateCha
 			return nil, err
 		}
 		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 413:
+		var dest InferenceError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON413 = &dest
 
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 429:
 		var dest InferenceError
@@ -1653,6 +3589,84 @@ func ParseCreateDelegationResponse(rsp *http.Response) (*CreateDelegationRespons
 			return nil, err
 		}
 		response.JSON503 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseCreateResponseWithPromptResponse parses an HTTP response from a CreateResponseWithPromptWithResponse call
+func ParseCreateResponseWithPromptResponse(rsp *http.Response) (*CreateResponseWithPromptResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &CreateResponseWithPromptResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest map[string]interface{}
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest InferenceError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest InferenceError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest InferenceError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest InferenceError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 413:
+		var dest InferenceError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON413 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 429:
+		var dest InferenceError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON429 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
+		var dest InferenceError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON503 = &dest
+
+	case rsp.StatusCode == 200:
+		// Content-type (text/event-stream) unsupported
 
 	}
 

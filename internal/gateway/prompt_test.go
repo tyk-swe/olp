@@ -13,6 +13,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/tyk-swe/olp/internal/agentcontract"
+	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/guardrails"
 	"github.com/tyk-swe/olp/internal/prompts"
 	"github.com/tyk-swe/olp/internal/routing"
@@ -398,5 +399,389 @@ func TestChatPublishedPromptLeavesOrdinaryEscapedContentUnchanged(t *testing.T) 
 	}
 	if len(sent.Messages) != 1 || sent.Messages[0].Content != `Text with "olp_prompt" and A` || sent.Extra != "B" {
 		t.Fatalf("upstream request = %#v", sent)
+	}
+}
+
+func TestResponsesPublishedPromptRendersBeforeDispatch(t *testing.T) {
+	h, publicationID, revisionID := publishedPromptHarness(t)
+	upstreamBody := make(chan []byte, 1)
+	h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		upstreamBody <- body
+		w.Header().Set("Content-Type", "application/json")
+		io.WriteString(w, `{"id":"resp_1","object":"response","model":"model-a","status":"completed","output":[{"type":"message","id":"m","role":"assistant","status":"completed","content":[{"type":"output_text","text":"ok","annotations":[]}]}],"usage":{"input_tokens":2,"output_tokens":3,"total_tokens":5}}`)
+	})
+	request := fmt.Sprintf(`{"model":%q,"prompt":{"id":%q,"label":"production","variables":{"name":"Ada"}}}`, routeSlug, "olpp_"+publicationID)
+	response := h.do(t.Context(), http.MethodPost, "/v1/responses", fullKey, []byte(request), nil)
+	defer response.Body.Close()
+	body, _ := io.ReadAll(response.Body)
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", response.StatusCode, body)
+	}
+	var sent struct {
+		Input []struct {
+			Role    string `json:"role"`
+			Content string `json:"content"`
+		} `json:"input"`
+		Prompt json.RawMessage `json:"prompt"`
+	}
+	if err := json.Unmarshal(<-upstreamBody, &sent); err != nil {
+		t.Fatal(err)
+	}
+	if len(sent.Input) != 1 || sent.Input[0].Role != "user" || sent.Input[0].Content != "Hello Ada" || len(sent.Prompt) != 0 {
+		t.Fatalf("upstream request = %#v", sent)
+	}
+	if fact := h.sink.last(t).Attempts[0].Prompt; fact == nil || fact.ID != publicationID || fact.RevisionID != revisionID {
+		t.Fatalf("attempt prompt = %#v", fact)
+	}
+}
+
+func TestNativePublishedPromptRendersBeforeDispatch(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		path string
+		body string
+	}{
+		{name: "anthropic", path: "/anthropic/v1/messages", body: `{"model":"` + routeSlug + `","max_tokens":20,"olp_prompt":{"id":%q,"label":"production","variables":{"name":"Ada"}}}`},
+		{name: "gemini", path: "/gemini/v1beta/models/" + routeSlug + ":generateContent", body: `{"olp_prompt":{"id":%q,"label":"production","variables":{"name":"Ada"}}}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h, publicationID, revisionID := publishedPromptHarness(t)
+			for id, provider := range h.rt.release.Snapshot.Providers {
+				provider.Kind = "openai"
+				provider.Capabilities = append(provider.Capabilities, routing.Capability{Model: provider.Capabilities[0].Model, Operation: "generation", Surface: tc.name, Mode: "unary"})
+				h.rt.release.Snapshot.Providers[id] = provider
+			}
+			upstreamBody := make(chan []byte, 1)
+			h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
+				body, _ := io.ReadAll(r.Body)
+				upstreamBody <- body
+				completion(modelA, "ok")(w, r)
+			})
+			request := fmt.Sprintf(tc.body, publicationID)
+			response := h.do(t.Context(), http.MethodPost, tc.path, fullKey, []byte(request), nil)
+			defer response.Body.Close()
+			body, _ := io.ReadAll(response.Body)
+			if response.StatusCode != http.StatusOK {
+				t.Fatalf("status = %d, body = %s", response.StatusCode, body)
+			}
+			var sent struct {
+				Messages []struct {
+					Role    string `json:"role"`
+					Content string `json:"content"`
+				} `json:"messages"`
+				Prompt json.RawMessage `json:"olp_prompt"`
+			}
+			if err := json.Unmarshal(<-upstreamBody, &sent); err != nil {
+				t.Fatal(err)
+			}
+			if len(sent.Messages) != 1 || sent.Messages[0].Role != "user" || sent.Messages[0].Content != "Hello Ada" || len(sent.Prompt) != 0 {
+				t.Fatalf("upstream request = %#v", sent)
+			}
+			if fact := h.sink.last(t).Attempts[0].Prompt; fact == nil || fact.ID != publicationID || fact.RevisionID != revisionID {
+				t.Fatalf("attempt prompt = %#v", fact)
+			}
+		})
+	}
+}
+
+func TestPublishedPromptUsesNativeProviderMessages(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		profile string
+		path    string
+		body    string
+		reply   string
+	}{
+		{name: "anthropic", profile: "anthropic-messages", path: "/anthropic/v1/messages", body: `{"model":"` + routeSlug + `","max_tokens":20,"olp_prompt":{"id":%q,"label":"production","variables":{"name":"Ada"}}}`, reply: `{"id":"msg_1","type":"message","role":"assistant","model":"model-a","content":[{"type":"text","text":"hello"}],"stop_reason":"end_turn","usage":{"input_tokens":2,"output_tokens":3}}`},
+		{name: "gemini", profile: "gemini-generation", path: "/gemini/v1beta/models/" + routeSlug + ":generateContent", body: `{"olp_prompt":{"id":%q,"label":"production","variables":{"name":"Ada"}}}`, reply: `{"candidates":[{"index":0,"content":{"role":"model","parts":[{"text":"hello"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":2,"candidatesTokenCount":3,"totalTokenCount":5}}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h, publicationID, revisionID := publishedPromptHarness(t)
+			for id, provider := range h.rt.release.Snapshot.Providers {
+				provider.Kind, provider.ProfileID = tc.name, tc.profile
+				provider.ProfileRevision = connectors.ProfileRevision
+				provider.Capabilities = []routing.Capability{{Model: provider.Capabilities[0].Model, Operation: "generation", Surface: tc.name, Mode: "unary"}}
+				h.rt.release.Snapshot.Providers[id] = provider
+			}
+			upstreamBody := make(chan []byte, 1)
+			h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
+				body, _ := io.ReadAll(r.Body)
+				upstreamBody <- body
+				w.Header().Set("Content-Type", "application/json")
+				io.WriteString(w, tc.reply)
+			})
+			request := fmt.Sprintf(tc.body, publicationID)
+			response := h.do(t.Context(), http.MethodPost, tc.path, fullKey, []byte(request), nil)
+			defer response.Body.Close()
+			body, _ := io.ReadAll(response.Body)
+			if response.StatusCode != http.StatusOK {
+				t.Fatalf("status = %d, body = %s", response.StatusCode, body)
+			}
+			var sent struct {
+				Messages []struct {
+					Role    string `json:"role"`
+					Content string `json:"content"`
+				} `json:"messages"`
+				Contents []struct {
+					Role  string `json:"role"`
+					Parts []struct {
+						Text string `json:"text"`
+					} `json:"parts"`
+				} `json:"contents"`
+				Prompt json.RawMessage `json:"olp_prompt"`
+			}
+			if err := json.Unmarshal(<-upstreamBody, &sent); err != nil {
+				t.Fatal(err)
+			}
+			if len(sent.Prompt) != 0 {
+				t.Fatalf("prompt reference leaked upstream: %s", sent.Prompt)
+			}
+			if tc.name == "anthropic" && (len(sent.Messages) != 1 || sent.Messages[0].Role != "user" || sent.Messages[0].Content != "Hello Ada") {
+				t.Fatalf("anthropic messages = %#v", sent.Messages)
+			}
+			if tc.name == "gemini" && (len(sent.Contents) != 1 || sent.Contents[0].Role != "user" || len(sent.Contents[0].Parts) != 1 || sent.Contents[0].Parts[0].Text != "Hello Ada") {
+				t.Fatalf("gemini contents = %#v", sent.Contents)
+			}
+			if fact := h.sink.last(t).Attempts[0].Prompt; fact == nil || fact.ID != publicationID || fact.RevisionID != revisionID {
+				t.Fatalf("attempt prompt = %#v", fact)
+			}
+		})
+	}
+}
+
+func TestResponsesNativePromptPassesThrough(t *testing.T) {
+	h, _, _ := publishedPromptHarness(t)
+	upstreamBody := make(chan []byte, 1)
+	h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		upstreamBody <- body
+		w.Header().Set("Content-Type", "application/json")
+		io.WriteString(w, `{"id":"resp_1","object":"response","model":"model-a","status":"completed","output":[{"type":"message","id":"m","role":"assistant","status":"completed","content":[{"type":"output_text","text":"ok","annotations":[]}]}],"usage":{"input_tokens":2,"output_tokens":3,"total_tokens":5}}`)
+	})
+	request := `{"model":"` + routeSlug + `","input":"hello","prompt":{"id":"provider-prompt","version":"7","variables":{"name":"Ada"}}}`
+	response := h.do(t.Context(), http.MethodPost, "/v1/responses", fullKey, []byte(request), nil)
+	defer response.Body.Close()
+	body, _ := io.ReadAll(response.Body)
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", response.StatusCode, body)
+	}
+	var sent struct {
+		Prompt struct {
+			ID        string            `json:"id"`
+			Version   string            `json:"version"`
+			Variables map[string]string `json:"variables"`
+		} `json:"prompt"`
+	}
+	if err := json.Unmarshal(<-upstreamBody, &sent); err != nil {
+		t.Fatal(err)
+	}
+	if sent.Prompt.ID != "provider-prompt" || sent.Prompt.Version != "7" || sent.Prompt.Variables["name"] != "Ada" {
+		t.Fatalf("native prompt = %#v", sent.Prompt)
+	}
+	if fact := h.sink.last(t).Attempts[0].Prompt; fact != nil {
+		t.Fatalf("native prompt was attributed to the registry: %#v", fact)
+	}
+}
+
+func TestPublishedPromptRefusesConflictsAcrossSurfaces(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		path  string
+		body  string
+		extra string
+	}{
+		{name: "responses", path: "/v1/responses", body: `{"model":"` + routeSlug + `","prompt":{"id":"olpp_%s","label":"production","variables":{"name":"Ada"}}`, extra: `,"input":"other"}`},
+		{name: "responses instructions", path: "/v1/responses", body: `{"model":"` + routeSlug + `","prompt":{"id":"olpp_%s","label":"production","variables":{"name":"Ada"}}`, extra: `,"instructions":"other"}`},
+		{name: "anthropic", path: "/anthropic/v1/messages", body: `{"model":"` + routeSlug + `","max_tokens":20,"olp_prompt":{"id":"%s","label":"production","variables":{"name":"Ada"}}`, extra: `,"messages":[{"role":"user","content":"other"}]}`},
+		{name: "anthropic system", path: "/anthropic/v1/messages", body: `{"model":"` + routeSlug + `","max_tokens":20,"olp_prompt":{"id":"%s","label":"production","variables":{"name":"Ada"}}`, extra: `,"system":"other"}`},
+		{name: "gemini", path: "/gemini/v1beta/models/" + routeSlug + ":generateContent", body: `{"olp_prompt":{"id":"%s","label":"production","variables":{"name":"Ada"}}`, extra: `,"contents":[{"role":"user","parts":[{"text":"other"}]}]}`},
+		{name: "gemini system", path: "/gemini/v1beta/models/" + routeSlug + ":generateContent", body: `{"olp_prompt":{"id":"%s","label":"production","variables":{"name":"Ada"}}`, extra: `,"systemInstruction":{"parts":[{"text":"other"}]}}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h, publicationID, _ := publishedPromptHarness(t)
+			request := fmt.Sprintf(tc.body+tc.extra, publicationID)
+			response := h.do(t.Context(), http.MethodPost, tc.path, fullKey, []byte(request), nil)
+			defer response.Body.Close()
+			body, _ := io.ReadAll(response.Body)
+			if response.StatusCode != http.StatusBadRequest || !strings.Contains(string(body), "invalid_prompt") {
+				t.Fatalf("status = %d, body = %s", response.StatusCode, body)
+			}
+			if len(h.sink.last(t).Attempts) != 0 {
+				t.Fatal("conflicting input dispatched an attempt")
+			}
+		})
+	}
+}
+
+func TestPublishedPromptEnforcesVariablesAndRoutePolicyAcrossSurfaces(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		path string
+		body string
+	}{
+		{name: "responses", path: "/v1/responses", body: `{"model":"` + routeSlug + `","prompt":{"id":"olpp_%s","label":"production","variables":%s}}`},
+		{name: "anthropic", path: "/anthropic/v1/messages", body: `{"model":"` + routeSlug + `","max_tokens":20,"olp_prompt":{"id":"%s","label":"production","variables":%s}}`},
+		{name: "gemini", path: "/gemini/v1beta/models/" + routeSlug + ":generateContent", body: `{"olp_prompt":{"id":"%s","label":"production","variables":%s}}`},
+	} {
+		for _, scenario := range []struct {
+			name      string
+			variables string
+			strict    bool
+		}{
+			{name: "missing variable", variables: `{}`},
+			{name: "unknown variable", variables: `{"name":"Ada","unexpected":"value"}`},
+			{name: "strict route", variables: `{"name":"Ada"}`, strict: true},
+		} {
+			t.Run(tc.name+"/"+scenario.name, func(t *testing.T) {
+				h, publicationID, _ := publishedPromptHarness(t)
+				if scenario.strict {
+					route := h.rt.release.Snapshot.Routes[routeSlug]
+					route.Fidelity.Mode = routing.FidelityStrict
+					h.rt.release.Snapshot.Routes[routeSlug] = route
+				}
+				request := fmt.Sprintf(tc.body, publicationID, scenario.variables)
+				response := h.do(t.Context(), http.MethodPost, tc.path, fullKey, []byte(request), nil)
+				defer response.Body.Close()
+				body, _ := io.ReadAll(response.Body)
+				if response.StatusCode != http.StatusBadRequest || !strings.Contains(string(body), "invalid_prompt") {
+					t.Fatalf("status = %d, body = %s", response.StatusCode, body)
+				}
+				if len(h.sink.last(t).Attempts) != 0 {
+					t.Fatal("invalid prompt dispatched an attempt")
+				}
+			})
+		}
+	}
+}
+
+func TestPublishedPromptAppliesInputGuardrailsAcrossSurfaces(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		path string
+		body string
+	}{
+		{name: "responses", path: "/v1/responses", body: `{"model":"` + routeSlug + `","prompt":{"id":"olpp_%s","label":"production","variables":{"name":"forbidden"}}}`},
+		{name: "anthropic", path: "/anthropic/v1/messages", body: `{"model":"` + routeSlug + `","max_tokens":20,"olp_prompt":{"id":"%s","label":"production","variables":{"name":"forbidden"}}}`},
+		{name: "gemini", path: "/gemini/v1beta/models/" + routeSlug + ":generateContent", body: `{"olp_prompt":{"id":"%s","label":"production","variables":{"name":"forbidden"}}}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h, publicationID, _ := publishedPromptHarness(t)
+			snapshot := h.rt.release.Snapshot
+			route := snapshot.Routes[routeSlug]
+			projectID := *route.ProjectID
+			snapshot.Guardrails = &guardrails.Registry{
+				Definitions: map[string]guardrails.Revision{"revision": {ID: "revision", GuardrailID: "guard", ProjectID: projectID, Name: "Guard", Type: "builtin.keywords", Configuration: json.RawMessage(`{"words":["forbidden"]}`), TimeoutMS: 1000, OnError: guardrails.FailClosed}},
+				Policies:    map[string]guardrails.PolicyRevision{"policy-revision": {ID: "policy-revision", PolicyID: "policy", ProjectID: projectID, Entries: []guardrails.Entry{{GuardrailID: "guard", RevisionID: "revision", Phase: guardrails.Input, Action: guardrails.Block}}}},
+				Attachments: []guardrails.Attachment{{ID: "attachment", Scope: "route", ScopeID: route.ID, PolicyRevisionID: "policy-revision"}},
+			}
+			if err := snapshot.Compile(); err != nil {
+				t.Fatal(err)
+			}
+			for id, provider := range snapshot.Providers {
+				provider.Kind = "openai"
+				provider.Capabilities = append(provider.Capabilities, routing.Capability{Model: provider.Capabilities[0].Model, Operation: "generation", Surface: tc.name, Mode: "unary"})
+				snapshot.Providers[id] = provider
+			}
+			request := fmt.Sprintf(tc.body, publicationID)
+			response := h.do(t.Context(), http.MethodPost, tc.path, fullKey, []byte(request), nil)
+			defer response.Body.Close()
+			body, _ := io.ReadAll(response.Body)
+			if response.StatusCode < 400 || !strings.Contains(string(body), "guardrail_blocked") {
+				t.Fatalf("status = %d, body = %s", response.StatusCode, body)
+			}
+			if len(h.sink.last(t).Attempts) != 0 {
+				t.Fatal("guardrail-blocked prompt dispatched an attempt")
+			}
+		})
+	}
+}
+
+func TestPublishedPromptRespectsRenderedInputLimitAcrossSurfaces(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		path string
+		body string
+	}{
+		{name: "responses", path: "/v1/responses", body: `{"model":"` + routeSlug + `","prompt":{"id":"olpp_%s","label":"production","variables":{"name":"Ada"}}}`},
+		{name: "anthropic", path: "/anthropic/v1/messages", body: `{"model":"` + routeSlug + `","max_tokens":20,"olp_prompt":{"id":"%s","label":"production","variables":{"name":"Ada"}}}`},
+		{name: "gemini", path: "/gemini/v1beta/models/" + routeSlug + ":generateContent", body: `{"olp_prompt":{"id":"%s","label":"production","variables":{"name":"Ada"}}}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h, publicationID, _ := publishedPromptHarness(t)
+			draft := h.rt.release.Snapshot.AgentPublications[0].Definition
+			draft.Prompt.Template = strings.Repeat("long text ", 200) + "{{name}}"
+			h.rt.release.Snapshot.AgentPublications[0].Definition = draft
+			h.rt.release.Snapshot.AgentPublications[0].Digest = agentcontract.DraftDigest(draft)
+			for id, provider := range h.rt.release.Snapshot.Providers {
+				provider.Kind = "openai"
+				provider.Capabilities = append(provider.Capabilities, routing.Capability{Model: provider.Capabilities[0].Model, Operation: "generation", Surface: tc.name, Mode: "unary"})
+				h.rt.release.Snapshot.Providers[id] = provider
+			}
+			for name, route := range h.rt.release.Snapshot.Routes {
+				limit := int64(1024)
+				route.MaxBodyBytes = &limit
+				h.rt.release.Snapshot.Routes[name] = route
+			}
+			if err := h.rt.release.Snapshot.Compile(); err != nil {
+				t.Fatal(err)
+			}
+			request := fmt.Sprintf(tc.body, publicationID)
+			response := h.do(t.Context(), http.MethodPost, tc.path, fullKey, []byte(request), nil)
+			defer response.Body.Close()
+			if body, _ := io.ReadAll(response.Body); response.StatusCode != http.StatusRequestEntityTooLarge {
+				t.Fatalf("status = %d, body = %s", response.StatusCode, body)
+			}
+			if attempts := h.sink.last(t).Attempts; len(attempts) != 0 {
+				t.Fatalf("refusal dispatched an attempt: %#v", attempts)
+			}
+		})
+	}
+}
+
+func TestPublishedPromptStreamsAcrossSurfaces(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		path string
+		body string
+	}{
+		{name: "responses", path: "/v1/responses", body: `{"model":"` + routeSlug + `","stream":true,"prompt":{"id":"olpp_%s","label":"production","variables":{"name":"Ada"}}}`},
+		{name: "anthropic", path: "/anthropic/v1/messages", body: `{"model":"` + routeSlug + `","max_tokens":20,"stream":true,"olp_prompt":{"id":"%s","label":"production","variables":{"name":"Ada"}}}`},
+		{name: "gemini", path: "/gemini/v1beta/models/" + routeSlug + ":streamGenerateContent?alt=sse", body: `{"olp_prompt":{"id":"%s","label":"production","variables":{"name":"Ada"}}}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h, publicationID, revisionID := publishedPromptHarness(t)
+			for id, provider := range h.rt.release.Snapshot.Providers {
+				provider.Kind = "openai"
+				provider.Capabilities = append(provider.Capabilities, routing.Capability{Model: provider.Capabilities[0].Model, Operation: "generation", Surface: tc.name, Mode: "streaming"})
+				h.rt.release.Snapshot.Providers[id] = provider
+			}
+			upstreamBody := make(chan []byte, 1)
+			h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
+				body, _ := io.ReadAll(r.Body)
+				upstreamBody <- body
+				w.Header().Set("Content-Type", "text/event-stream")
+				if tc.name == "responses" {
+					for _, event := range streamedEvents("streamed answer") {
+						fmt.Fprintf(w, "data: %s\n\n", event)
+					}
+					return
+				}
+				_, _ = w.Write(benchChatStream())
+			})
+			request := fmt.Sprintf(tc.body, publicationID)
+			response := h.do(t.Context(), http.MethodPost, tc.path, fullKey, []byte(request), nil)
+			defer response.Body.Close()
+			body, _ := io.ReadAll(response.Body)
+			if response.StatusCode != http.StatusOK || !strings.Contains(string(body), "data:") {
+				t.Fatalf("status = %d, body = %s", response.StatusCode, body)
+			}
+			if upstream := string(<-upstreamBody); !strings.Contains(upstream, "Hello Ada") || strings.Contains(upstream, "olp_prompt") || strings.Contains(upstream, `"prompt":`) {
+				t.Fatalf("upstream request = %s", upstream)
+			}
+			if fact := h.sink.last(t).Attempts[0].Prompt; fact == nil || fact.ID != publicationID || fact.RevisionID != revisionID {
+				t.Fatalf("attempt prompt = %#v", fact)
+			}
+		})
 	}
 }

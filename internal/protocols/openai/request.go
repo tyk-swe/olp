@@ -33,7 +33,7 @@ func Parse(family wire.Format, data []byte) (*wire.Request, error) {
 	if err != nil {
 		return nil, err
 	}
-	return parseDocument(family, doc)
+	return ParseDocument(family, doc)
 }
 
 func ParseSource(data []byte) (oif.Document, error) {
