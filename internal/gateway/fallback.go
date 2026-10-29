@@ -8,6 +8,7 @@ import (
 	"github.com/tyk-swe/olp/internal/routing"
 
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/usage"
 )
 
@@ -65,7 +66,8 @@ func (x *call) routeContext(ctx context.Context) (context.Context, context.Cance
 	if x.deadline.IsZero() {
 		timeout := time.Duration(x.named().OverallTimeout) * time.Millisecond
 		if x.named().ToolExecution == "gateway" {
-			timeout = min(timeout, 120*time.Second)
+			seconds := limits.MinWorkflowInteger(120, x.generation.runLimits.MaxDurationSeconds)
+			timeout = min(timeout, time.Duration(seconds)*time.Second)
 		}
 		x.deadline = time.Now().Add(timeout)
 	}

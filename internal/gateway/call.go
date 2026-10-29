@@ -165,6 +165,7 @@ type routeLeg struct {
 
 // generationCall owns the source, delivery and continuation of a generation.
 type generationCall struct {
+	runLimits        limits.WorkflowBounds
 	parsed           *wire.Request
 	resources        *generationResources
 	firstStep        *modelStepAccounting

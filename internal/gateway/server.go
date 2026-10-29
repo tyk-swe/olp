@@ -767,6 +767,17 @@ func (s *Server) inferenceOperation(family wire.Format, dialect string) http.Han
 			writeError(w, e)
 			return
 		}
+		workflowLease, e := s.reserveWorkflowRun(ctx, x)
+		if e != nil {
+			x.failure, status = e, e.Status
+			writeError(w, e)
+			return
+		}
+		defer func() {
+			if err := workflowLease.Release(ctx); err != nil {
+				s.Admission.logger().Error("release workflow concurrency", "error", err)
+			}
+		}()
 		if x.workflow != nil {
 			runID, err := s.WorkflowRuns.Start(ctx, authority, x.named().ID, x.named().RevisionID)
 			if err != nil {
@@ -898,6 +909,12 @@ func (s *Server) prepare(ctx context.Context, x *call, authorize func(*routing.R
 	}
 	if route.ToolExecution == "gateway" && !x.generation.toolsetsSelected {
 		x.mirrors = false
+		bounds, bounded, boundErr := workflowBounds(route.RunLimits, x.authority.Policy.RunLimits, x.generation.parsed)
+		if boundErr != nil {
+			return boundErr
+		}
+		x.generation.runLimits = bounds
+		x.generation.parsed = bounded
 		selected, parsed, e := selectToolsets(route.Toolsets, x.generation.parsed)
 		if e != nil {
 			return e

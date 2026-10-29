@@ -807,6 +807,10 @@ func TestGatewayToolWorkflowSettlesOneRun(t *testing.T) {
 	var modelCalls atomic.Int64
 	var noUsage atomic.Bool
 	var blockModel atomic.Bool
+	var blockRun atomic.Bool
+	runStarted := make(chan struct{}, 2)
+	runRelease := make(chan struct{})
+	defer close(runRelease)
 	modelStarted := make(chan struct{})
 	vendor := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/models") {
@@ -839,6 +843,14 @@ func TestGatewayToolWorkflowSettlesOneRun(t *testing.T) {
 		if json.NewDecoder(r.Body).Decode(&input) != nil {
 			w.WriteHeader(http.StatusBadRequest)
 			return
+		}
+		if blockRun.Load() && len(input["tool_choice"]) == 0 {
+			runStarted <- struct{}{}
+			select {
+			case <-runRelease:
+			case <-r.Context().Done():
+				return
+			}
 		}
 		if blockModel.Load() && len(input["tool_choice"]) == 0 {
 			close(modelStarted)
@@ -878,7 +890,8 @@ func TestGatewayToolWorkflowSettlesOneRun(t *testing.T) {
 	defer vendor.Close()
 	_, provider, slug, _ := provisionOpenAIInProject(t, h, owner, &project, vendor.URL,
 		[]any{map[string]any{"operation": "generation", "surface": "openai", "mode": "unary"}}, []string{"generation"},
-		map[string]any{"tool_execution": "gateway", "toolsets": []string{toolsetID}, "responses_mcp_items": true, "budget": map[string]any{"daily_cost_limit": "10000000"}})
+		map[string]any{"tool_execution": "gateway", "toolsets": []string{toolsetID}, "responses_mcp_items": true, "budget": map[string]any{"daily_cost_limit": "10000000"}},
+		map[string]any{"options": map[string]any{"models": map[string]any{vendorModel: map[string]any{"context_length": 1000}}}})
 	addBatchPrice(t, h, owner, provider["id"].(string), "", time.Now().Add(-time.Hour))
 	key := h.want(owner, "POST", "/api/v1/api-keys", map[string]any{"name": "Workflow caller", "project_id": project, "scopes": []string{"inference", "tools", "traces_write"}, "allowed_routes": []string{slug}, "allowed_toolsets": []string{toolsetID}}, idem("workflow-key"), 201)
 	keyID, secret := mcpExecString(t, key, "id"), mcpExecString(t, key, "secret")
@@ -1183,6 +1196,56 @@ func TestGatewayToolWorkflowSettlesOneRun(t *testing.T) {
 		if err := h.Pool.QueryRow(t.Context(), query, prompt, argument, answer).Scan(&leaks); err != nil || leaks != 0 {
 			t.Fatalf("Responses workflow content reached %s: count=%d error=%v", table, leaks, err)
 		}
+	}
+	concurrentKey := h.want(owner, http.MethodPost, "/api/v1/api-keys", map[string]any{"name": "Workflow concurrency", "project_id": project, "scopes": []string{"inference", "tools"}, "allowed_routes": []string{slug}, "allowed_toolsets": []string{toolsetID}, "run_limits": map[string]any{"max_concurrent_runs": 1}}, idem("workflow-concurrency-key"), http.StatusCreated)
+	h.refresh()
+	concurrentSecret := mcpExecString(t, concurrentKey, "secret")
+	request := map[string]any{"model": slug, "messages": []any{map[string]any{"role": "user", "content": "concurrency"}}, "max_tokens": 100, "olp_toolsets": []any{}}
+	blockRun.Store(true)
+	first := make(chan int, 1)
+	go func() {
+		status, _, _ := h.gateway(http.MethodPost, "/v1/chat/completions", concurrentSecret, request)
+		first <- status
+	}()
+	select {
+	case <-runStarted:
+	case <-time.After(10 * time.Second):
+		t.Fatal("first workflow did not reach the provider")
+	}
+	second := make(chan int, 1)
+	go func() {
+		status, _, _ := h.gateway(http.MethodPost, "/v1/chat/completions", concurrentSecret, request)
+		second <- status
+	}()
+	select {
+	case status := <-second:
+		if status != http.StatusTooManyRequests {
+			t.Fatalf("concurrent workflow returned %d, want 429", status)
+		}
+	case <-runStarted:
+		t.Fatal("concurrent workflow reached the provider")
+	case <-time.After(10 * time.Second):
+		t.Fatal("concurrent workflow did not refuse promptly")
+	}
+	blockRun.Store(false)
+	runRelease <- struct{}{}
+	select {
+	case status := <-first:
+		if status != http.StatusOK {
+			t.Fatalf("first workflow returned %d", status)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("first workflow did not finish")
+	}
+	status, result, _ := h.gateway(http.MethodPost, "/v1/chat/completions", concurrentSecret, request)
+	if status != http.StatusOK {
+		t.Fatalf("completed workflow did not release its slot: status=%d result=%v", status, result)
+	}
+	responsesWorkflow.Store(true)
+	beforeModels, beforeTools := modelCalls.Load(), toolCalls.Load()
+	costStatus, costResult, _ := h.gateway(http.MethodPost, "/v1/chat/completions", secret, map[string]any{"model": slug, "messages": []any{map[string]any{"role": "user", "content": "cost bounded"}}, "max_tokens": 100, "olp_run_limits": map[string]any{"max_run_cost": "1105"}})
+	if costStatus != http.StatusBadRequest || !strings.Contains(fmt.Sprint(costResult), "run_cost_limit") || modelCalls.Load()-beforeModels != 1 || toolCalls.Load()-beforeTools != 1 {
+		t.Fatalf("workflow cost bound: status=%d response=%v model calls=%d tool calls=%d", costStatus, costResult, modelCalls.Load()-beforeModels, toolCalls.Load()-beforeTools)
 	}
 }
 

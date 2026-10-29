@@ -544,7 +544,8 @@ export class RouteDraftEditorState {
         certification: current.certification,
         tool_execution: current.tool_execution,
         toolsets: current.toolsets ?? [],
-        responses_mcp_items: current.responses_mcp_items ?? false
+        responses_mcp_items: current.responses_mcp_items ?? false,
+        run_limits: current.run_limits ?? null
       };
       this.selectorsText = JSON.stringify(current.selectors, null, 2);
       this.policyRules = policyRulesFrom(current.content_policy);

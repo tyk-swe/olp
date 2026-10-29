@@ -1,5 +1,6 @@
 <script lang="ts">
   import { errorMessage } from '$lib/api/http';
+  import RunLimits from '$lib/features/workflows/RunLimits.svelte';
   import type { RouteDraftEditorState } from './routeDraftEditor.svelte';
 
   let { editor }: { editor: RouteDraftEditorState } = $props();
@@ -25,6 +26,7 @@
       ...editor.behavior,
       tool_execution: value === 'gateway' ? 'gateway' : '',
       toolsets: value === 'gateway' ? selected : [],
+      run_limits: value === 'gateway' ? editor.behavior.run_limits : null,
       responses_mcp_items:
         value === 'gateway' && editor.behavior.responses_mcp_items
     };
@@ -62,6 +64,15 @@
     </small>
   </div>
   {#if editor.behavior.tool_execution === 'gateway'}
+    <RunLimits
+      prefix="route-run"
+      value={editor.behavior.run_limits}
+      disabled={!editor.canManage || Boolean(editor.busy)}
+      onChange={(run_limits) => {
+        editor.behavior = { ...editor.behavior, run_limits };
+        editor.touch();
+      }}
+    />
     <label>
       <input
         type="checkbox"

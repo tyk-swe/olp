@@ -192,6 +192,7 @@ export interface components {
             model: string;
             olp_prompt: components["schemas"]["PublishedPromptReference"];
             olp_toolsets?: components["schemas"]["ChatToolsetSelection"];
+            olp_run_limits?: components["schemas"]["WorkflowRunLimits"];
         } & {
             [key: string]: unknown;
         };
@@ -201,6 +202,7 @@ export interface components {
                 [key: string]: unknown;
             }[];
             olp_toolsets?: components["schemas"]["ChatToolsetSelection"];
+            olp_run_limits?: components["schemas"]["WorkflowRunLimits"];
         } & {
             [key: string]: unknown;
         };
@@ -361,12 +363,14 @@ export interface components {
             max_tokens: number;
             olp_prompt: components["schemas"]["PublishedPromptReference"];
             olp_toolsets?: components["schemas"]["ChatToolsetSelection"];
+            olp_run_limits?: components["schemas"]["WorkflowRunLimits"];
         } & {
             [key: string]: unknown;
         };
         GeminiPromptRequest: {
             olp_prompt: components["schemas"]["PublishedPromptReference"];
             olp_toolsets?: components["schemas"]["ChatToolsetSelection"];
+            olp_run_limits?: components["schemas"]["WorkflowRunLimits"];
         } & {
             [key: string]: unknown;
         };
@@ -377,6 +381,7 @@ export interface components {
                 [key: string]: unknown;
             }[];
             olp_toolsets?: components["schemas"]["ChatToolsetSelection"];
+            olp_run_limits?: components["schemas"]["WorkflowRunLimits"];
         } & {
             [key: string]: unknown;
         };
@@ -385,6 +390,7 @@ export interface components {
                 [key: string]: unknown;
             }[];
             olp_toolsets?: components["schemas"]["ChatToolsetSelection"];
+            olp_run_limits?: components["schemas"]["WorkflowRunLimits"];
         } & {
             [key: string]: unknown;
         };
@@ -416,6 +422,7 @@ export interface components {
         OLPResponsesPromptRequest: {
             model: string;
             prompt: components["schemas"]["ResponsesPublishedPromptReference"];
+            olp_run_limits?: components["schemas"]["WorkflowRunLimits"];
         } & {
             [key: string]: unknown;
         };
@@ -437,6 +444,7 @@ export interface components {
                 [key: string]: unknown;
             }[];
             olp_toolsets?: components["schemas"]["ChatToolsetSelection"];
+            olp_run_limits?: components["schemas"]["WorkflowRunLimits"];
         } & {
             [key: string]: unknown;
         };
@@ -475,6 +483,17 @@ export interface components {
             })[];
         } & {
             [key: string]: unknown;
+        };
+        WorkflowRunLimits: {
+            /** Format: int64 */
+            max_iterations?: number;
+            /** Format: int64 */
+            max_tool_calls?: number;
+            /** Format: int64 */
+            max_duration_seconds?: number;
+            /** Format: int64 */
+            max_concurrent_runs?: number;
+            max_run_cost?: string;
         };
     };
     responses: never;

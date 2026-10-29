@@ -13,6 +13,57 @@ import (
 	"github.com/tyk-swe/olp/internal/secrets"
 )
 
+func TestConfigurationWorkflowLimitsRoundTrip(t *testing.T) {
+	source := newAccessHarness(t)
+	sourceOwner := source.owner()
+	project := createProject(source, sourceOwner, "Workflow export")
+	vendor := newVendor(t)
+	provider := createScopedProvider(source, sourceOwner, "Workflow export provider", vendor.URL+"/v1", project, 201)
+	activateScopedProvider(source, sourceOwner, provider)
+	draft := source.want(sourceOwner, "POST", "/api/v1/route-drafts", map[string]any{
+		"slug": "workflow-export", "project_id": project, "fidelity": map[string]any{"mode": "transformed"},
+		"operations": []any{"generation"}, "overall_timeout_ms": 30000, "max_attempts": 1,
+		"tool_execution": "gateway", "responses_mcp_items": true,
+		"run_limits": map[string]any{"max_iterations": 4, "max_tool_calls": 2, "max_duration_seconds": 30, "max_run_cost": "0.5"},
+		"targets":    []any{map[string]any{"provider_id": provider["id"], "provider_model": vendorModel, "priority": 0, "weight": 1, "timeout_ms": 2000}},
+	}, idem("workflow-export-draft"), 201)
+	source.want(sourceOwner, "POST", "/api/v1/route-drafts/"+draft["id"].(string)+"/activate", nil, withMatch(draft, idem("workflow-export-activate")), 200)
+	document := source.want(sourceOwner, "GET", "/api/v1/configuration/export", nil, nil, 200)["document"].(map[string]any)
+	routes := document["routes"].([]any)
+	if len(routes) != 1 {
+		t.Fatalf("exported routes = %v", routes)
+	}
+	exported := routes[0].(map[string]any)
+	assertWorkflowConfiguration(t, exported)
+
+	destination := newAccessHarness(t)
+	destinationOwner := destination.owner()
+	plan := destination.want(destinationOwner, "POST", "/api/v1/configuration/plan", map[string]any{"document": document}, nil, 200)
+	blockers := plan["blockers"].([]any)
+	bindingIndex := slices.IndexFunc(blockers, func(item any) bool {
+		return item.(map[string]any)["detail"] == "secret_binding_required"
+	})
+	if bindingIndex < 0 {
+		t.Fatalf("secret binding missing: %v", blockers)
+	}
+	bindings := map[string]any{blockers[bindingIndex].(map[string]any)["key"].(string): vendorSecret}
+	destination.want(destinationOwner, "POST", "/api/v1/configuration/apply", map[string]any{"document": document, "secret_bindings": bindings}, idem("workflow-import"), 200)
+	drafts := destination.want(destinationOwner, "GET", "/api/v1/route-drafts", nil, nil, 200)["items"].([]any)
+	if len(drafts) != 1 {
+		t.Fatalf("imported drafts = %v", drafts)
+	}
+	imported := destination.want(destinationOwner, "GET", "/api/v1/route-drafts/"+drafts[0].(map[string]any)["id"].(string), nil, nil, 200)
+	assertWorkflowConfiguration(t, imported)
+}
+
+func assertWorkflowConfiguration(t *testing.T, route map[string]any) {
+	t.Helper()
+	limits, ok := route["run_limits"].(map[string]any)
+	if !ok || route["tool_execution"] != "gateway" || route["responses_mcp_items"] != true || limits["max_iterations"] != float64(4) || limits["max_tool_calls"] != float64(2) || limits["max_duration_seconds"] != float64(30) || limits["max_run_cost"] != "0.5" {
+		t.Fatalf("workflow settings not preserved: %v", route)
+	}
+}
+
 func TestConfigurationPromotion(t *testing.T) {
 	source := newAccessHarness(t)
 	sourceOwner := source.owner()

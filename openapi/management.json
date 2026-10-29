@@ -445,6 +445,16 @@
               "format": "uuid"
             },
             "maxItems": 100
+          },
+          "run_limits": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/WorkflowRunLimits"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -2580,6 +2590,16 @@
           "responses_mcp_items": {
             "type": "boolean",
             "description": "Operator declaration that Responses clients support gateway-generated MCP output items. Requires gateway tool execution on a transformed route."
+          },
+          "run_limits": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/WorkflowRunLimits"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -3340,6 +3360,16 @@
               "format": "uuid"
             },
             "maxItems": 100
+          },
+          "run_limits": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/WorkflowRunLimits"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -3996,6 +4026,16 @@
           "responses_mcp_items": {
             "type": "boolean",
             "description": "Operator declaration that Responses clients support gateway-generated MCP output items. Requires gateway tool execution on a transformed route."
+          },
+          "run_limits": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/WorkflowRunLimits"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -10304,6 +10344,16 @@
           "responses_mcp_items": {
             "type": "boolean",
             "description": "Operator declaration that Responses clients support gateway-generated MCP output items. Requires gateway tool execution on a transformed route."
+          },
+          "run_limits": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/WorkflowRunLimits"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -11376,6 +11426,16 @@
           "responses_mcp_items": {
             "type": "boolean",
             "description": "Operator declaration that Responses clients support gateway-generated MCP output items. Requires gateway tool execution on a transformed route."
+          },
+          "run_limits": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/WorkflowRunLimits"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -11807,6 +11867,16 @@
           "responses_mcp_items": {
             "type": "boolean",
             "description": "Operator declaration that Responses clients support gateway-generated MCP output items. Requires gateway tool execution on a transformed route."
+          },
+          "run_limits": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/WorkflowRunLimits"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -13787,6 +13857,16 @@
               "format": "uuid"
             },
             "maxItems": 100
+          },
+          "run_limits": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/WorkflowRunLimits"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "type": "object"
@@ -17900,6 +17980,16 @@
           "responses_mcp_items": {
             "type": "boolean",
             "description": "Operator declaration that Responses clients support gateway-generated MCP output items. Requires gateway tool execution on a transformed route."
+          },
+          "run_limits": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/WorkflowRunLimits"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -22140,6 +22230,16 @@
           "responses_mcp_items": {
             "type": "boolean",
             "description": "Operator declaration that Responses clients support gateway-generated MCP output items. Requires gateway tool execution on a transformed route."
+          },
+          "run_limits": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/WorkflowRunLimits"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -28762,6 +28862,40 @@
               "type": "string"
             },
             "description": "Active inference routes currently allowed by both the key and the agent."
+          }
+        }
+      },
+      "WorkflowRunLimits": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "max_iterations": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 1,
+            "maximum": 32
+          },
+          "max_tool_calls": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0,
+            "maximum": 128
+          },
+          "max_duration_seconds": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 1,
+            "maximum": 600
+          },
+          "max_concurrent_runs": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 1,
+            "maximum": 2147483647
+          },
+          "max_run_cost": {
+            "type": "string",
+            "pattern": "^[0-9]{1,12}(\\.[0-9]{1,12})?$"
           }
         }
       }

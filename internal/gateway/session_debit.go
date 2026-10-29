@@ -117,6 +117,9 @@ func (s *Server) sessionExposureHeld(ctx context.Context, keyID string) (bool, *
 }
 
 func (s *Server) reserveSessionDebit(ctx context.Context, x *call, authority access.Authority, attempt routing.Attempt, supply []cappedOwner) *Error {
+	if e := x.workflowModelCost(attempt); e != nil {
+		return e
+	}
 	if s.Debits == nil || x.callerCostExempt() && x.workflow == nil {
 		return nil
 	}

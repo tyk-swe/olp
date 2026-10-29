@@ -2878,6 +2878,16 @@
             "responses_mcp_items": {
               "type": "boolean",
               "description": "Operator declaration that Responses clients support gateway-generated MCP output items. Requires gateway tool execution on a transformed route."
+            },
+            "run_limits": {
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/WorkflowRunLimits"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             }
           },
           "required": [
@@ -3527,6 +3537,40 @@
             "acknowledge_opaque_unmetered"
           ],
           "type": "object"
+        },
+        "WorkflowRunLimits": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "max_iterations": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 1,
+              "maximum": 32
+            },
+            "max_tool_calls": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0,
+              "maximum": 128
+            },
+            "max_duration_seconds": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 1,
+              "maximum": 600
+            },
+            "max_concurrent_runs": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 1,
+              "maximum": 2147483647
+            },
+            "max_run_cost": {
+              "type": "string",
+              "pattern": "^[0-9]{1,12}(\\.[0-9]{1,12})?$"
+            }
+          }
         },
         "ConfigurationOrganizationEntry": {
           "type": "object",
@@ -5769,6 +5813,16 @@
                 "format": "uuid"
               },
               "maxItems": 100
+            },
+            "run_limits": {
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/WorkflowRunLimits"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             }
           },
           "required": [
@@ -5923,6 +5977,40 @@
               "format": "int64",
               "minimum": 1,
               "maximum": 2147483647
+            }
+          }
+        },
+        "WorkflowRunLimits": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "max_iterations": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 1,
+              "maximum": 32
+            },
+            "max_tool_calls": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0,
+              "maximum": 128
+            },
+            "max_duration_seconds": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 1,
+              "maximum": 600
+            },
+            "max_concurrent_runs": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 1,
+              "maximum": 2147483647
+            },
+            "max_run_cost": {
+              "type": "string",
+              "pattern": "^[0-9]{1,12}(\\.[0-9]{1,12})?$"
             }
           }
         }
@@ -10854,6 +10942,16 @@
             "responses_mcp_items": {
               "type": "boolean",
               "description": "Operator declaration that Responses clients support gateway-generated MCP output items. Requires gateway tool execution on a transformed route."
+            },
+            "run_limits": {
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/WorkflowRunLimits"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             }
           },
           "required": [
@@ -11519,6 +11617,40 @@
             "acknowledge_opaque_unmetered"
           ],
           "type": "object"
+        },
+        "WorkflowRunLimits": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "max_iterations": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 1,
+              "maximum": 32
+            },
+            "max_tool_calls": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0,
+              "maximum": 128
+            },
+            "max_duration_seconds": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 1,
+              "maximum": 600
+            },
+            "max_concurrent_runs": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 1,
+              "maximum": 2147483647
+            },
+            "max_run_cost": {
+              "type": "string",
+              "pattern": "^[0-9]{1,12}(\\.[0-9]{1,12})?$"
+            }
+          }
         }
       }
     }
@@ -11729,6 +11861,16 @@
             "responses_mcp_items": {
               "type": "boolean",
               "description": "Operator declaration that Responses clients support gateway-generated MCP output items. Requires gateway tool execution on a transformed route."
+            },
+            "run_limits": {
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/WorkflowRunLimits"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             }
           },
           "required": [
@@ -12394,6 +12536,40 @@
             "acknowledge_opaque_unmetered"
           ],
           "type": "object"
+        },
+        "WorkflowRunLimits": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "max_iterations": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 1,
+              "maximum": 32
+            },
+            "max_tool_calls": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0,
+              "maximum": 128
+            },
+            "max_duration_seconds": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 1,
+              "maximum": 600
+            },
+            "max_concurrent_runs": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 1,
+              "maximum": 2147483647
+            },
+            "max_run_cost": {
+              "type": "string",
+              "pattern": "^[0-9]{1,12}(\\.[0-9]{1,12})?$"
+            }
+          }
         }
       }
     }
@@ -26127,6 +26303,16 @@
             "responses_mcp_items": {
               "type": "boolean",
               "description": "Operator declaration that Responses clients support gateway-generated MCP output items. Requires gateway tool execution on a transformed route."
+            },
+            "run_limits": {
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/WorkflowRunLimits"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             }
           },
           "required": [
@@ -26776,6 +26962,40 @@
             "acknowledge_opaque_unmetered"
           ],
           "type": "object"
+        },
+        "WorkflowRunLimits": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "max_iterations": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 1,
+              "maximum": 32
+            },
+            "max_tool_calls": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0,
+              "maximum": 128
+            },
+            "max_duration_seconds": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 1,
+              "maximum": 600
+            },
+            "max_concurrent_runs": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 1,
+              "maximum": 2147483647
+            },
+            "max_run_cost": {
+              "type": "string",
+              "pattern": "^[0-9]{1,12}(\\.[0-9]{1,12})?$"
+            }
+          }
         },
         "ConfigurationOrganizationEntry": {
           "type": "object",
@@ -33108,6 +33328,16 @@
             "responses_mcp_items": {
               "type": "boolean",
               "description": "Operator declaration that Responses clients support gateway-generated MCP output items. Requires gateway tool execution on a transformed route."
+            },
+            "run_limits": {
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/WorkflowRunLimits"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             }
           },
           "required": [
@@ -33767,6 +33997,40 @@
             "acknowledge_opaque_unmetered"
           ],
           "type": "object"
+        },
+        "WorkflowRunLimits": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "max_iterations": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 1,
+              "maximum": 32
+            },
+            "max_tool_calls": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0,
+              "maximum": 128
+            },
+            "max_duration_seconds": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 1,
+              "maximum": 600
+            },
+            "max_concurrent_runs": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 1,
+              "maximum": 2147483647
+            },
+            "max_run_cost": {
+              "type": "string",
+              "pattern": "^[0-9]{1,12}(\\.[0-9]{1,12})?$"
+            }
+          }
         }
       }
     }
@@ -39441,6 +39705,16 @@
                 "format": "uuid"
               },
               "maxItems": 100
+            },
+            "run_limits": {
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/WorkflowRunLimits"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             }
           },
           "type": "object"
@@ -39592,6 +39866,40 @@
               "format": "int64",
               "minimum": 1,
               "maximum": 2147483647
+            }
+          }
+        },
+        "WorkflowRunLimits": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "max_iterations": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 1,
+              "maximum": 32
+            },
+            "max_tool_calls": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0,
+              "maximum": 128
+            },
+            "max_duration_seconds": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 1,
+              "maximum": 600
+            },
+            "max_concurrent_runs": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 1,
+              "maximum": 2147483647
+            },
+            "max_run_cost": {
+              "type": "string",
+              "pattern": "^[0-9]{1,12}(\\.[0-9]{1,12})?$"
             }
           }
         }
@@ -42664,6 +42972,16 @@
             "responses_mcp_items": {
               "type": "boolean",
               "description": "Operator declaration that Responses clients support gateway-generated MCP output items. Requires gateway tool execution on a transformed route."
+            },
+            "run_limits": {
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/WorkflowRunLimits"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             }
           },
           "required": [
@@ -43323,6 +43641,40 @@
             "acknowledge_opaque_unmetered"
           ],
           "type": "object"
+        },
+        "WorkflowRunLimits": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "max_iterations": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 1,
+              "maximum": 32
+            },
+            "max_tool_calls": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0,
+              "maximum": 128
+            },
+            "max_duration_seconds": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 1,
+              "maximum": 600
+            },
+            "max_concurrent_runs": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 1,
+              "maximum": 2147483647
+            },
+            "max_run_cost": {
+              "type": "string",
+              "pattern": "^[0-9]{1,12}(\\.[0-9]{1,12})?$"
+            }
+          }
         }
       }
     }

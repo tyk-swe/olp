@@ -20,32 +20,33 @@ import (
 )
 
 type KeyPolicy struct {
-	AllowedToolsets         []string          `json:"allowed_toolsets,omitempty"`
-	AllowedAgents           []string          `json:"allowed_agents,omitempty"`
-	ForbidResponseCache     bool              `json:"forbid_response_cache"`
-	LimitTemplate           *string           `json:"limit_template"`
-	RouteLimits             RouteLimits       `json:"route_limits"`
-	RegionalLimits          RegionalLimits    `json:"regional_limits"`
-	RotationIntervalDays    *int              `json:"rotation_interval_days"`
-	AllowedRouteGroups      []string          `json:"allowed_route_groups"`
-	RequiredAttributionKeys []string          `json:"required_attribution_keys"`
-	AttributionDefaults     map[string]string `json:"attribution_defaults"`
-	Scopes                  []string          `json:"scopes"`
-	AllowedRoutes           []string          `json:"allowed_routes"`
-	AllowedCIDRs            []string          `json:"allowed_cidrs"`
-	AllowedAttributionKeys  []string          `json:"allowed_attribution_keys"`
-	RequestsPerMinute       *int64            `json:"requests_per_minute"`
-	TokensPerMinute         *int64            `json:"tokens_per_minute"`
-	MaxConcurrency          *int64            `json:"max_concurrency"`
-	DailyCostLimit          *string           `json:"daily_cost_limit"`
-	MonthlyCostLimit        *string           `json:"monthly_cost_limit"`
-	WeeklyCostLimit         *string           `json:"weekly_cost_limit"`
-	ExpiresAt               *time.Time        `json:"expires_at"`
-	CostBasis               string            `json:"cost_basis,omitempty"`
-	AllowProviderState      bool              `json:"allow_provider_state"`
-	ResponseMetadata        bool              `json:"response_metadata"`
-	EndUserSource           *string           `json:"end_user_source"`
-	EndUserPolicy           *EndUserPolicy    `json:"end_user_policy"`
+	RunLimits               *limits.WorkflowBounds `json:"run_limits,omitempty"`
+	AllowedToolsets         []string               `json:"allowed_toolsets,omitempty"`
+	AllowedAgents           []string               `json:"allowed_agents,omitempty"`
+	ForbidResponseCache     bool                   `json:"forbid_response_cache"`
+	LimitTemplate           *string                `json:"limit_template"`
+	RouteLimits             RouteLimits            `json:"route_limits"`
+	RegionalLimits          RegionalLimits         `json:"regional_limits"`
+	RotationIntervalDays    *int                   `json:"rotation_interval_days"`
+	AllowedRouteGroups      []string               `json:"allowed_route_groups"`
+	RequiredAttributionKeys []string               `json:"required_attribution_keys"`
+	AttributionDefaults     map[string]string      `json:"attribution_defaults"`
+	Scopes                  []string               `json:"scopes"`
+	AllowedRoutes           []string               `json:"allowed_routes"`
+	AllowedCIDRs            []string               `json:"allowed_cidrs"`
+	AllowedAttributionKeys  []string               `json:"allowed_attribution_keys"`
+	RequestsPerMinute       *int64                 `json:"requests_per_minute"`
+	TokensPerMinute         *int64                 `json:"tokens_per_minute"`
+	MaxConcurrency          *int64                 `json:"max_concurrency"`
+	DailyCostLimit          *string                `json:"daily_cost_limit"`
+	MonthlyCostLimit        *string                `json:"monthly_cost_limit"`
+	WeeklyCostLimit         *string                `json:"weekly_cost_limit"`
+	ExpiresAt               *time.Time             `json:"expires_at"`
+	CostBasis               string                 `json:"cost_basis,omitempty"`
+	AllowProviderState      bool                   `json:"allow_provider_state"`
+	ResponseMetadata        bool                   `json:"response_metadata"`
+	EndUserSource           *string                `json:"end_user_source"`
+	EndUserPolicy           *EndUserPolicy         `json:"end_user_policy"`
 	// Priority is the admission class the key's requests queue in, normal
 	// when unset; MaxPriority is the highest class a request may choose
 	// through the routing header, the key's own priority when unset.
@@ -109,6 +110,9 @@ func validateKey(input keyInput, expirationChanged bool) error {
 	}
 	if err := input.RegionalLimits.Validate(); err != nil {
 		return err
+	}
+	if input.RunLimits != nil && !input.RunLimits.Valid() {
+		return Invalid("run_limits", "Use valid workflow run limits.")
 	}
 	if err := validateKeyCIDRs(input.AllowedCIDRs); err != nil {
 		return err
@@ -213,7 +217,7 @@ func AdvanceAuthority(ctx context.Context, tx pgx.Tx) (any, error) {
 	return map[string]any{"id": id, "sequence": sequence}, err
 }
 
-const keyFields = `'allowed_toolsets',COALESCE(NULLIF(k.policy->'allowed_toolsets','null'::jsonb),'[]'::jsonb),
+const keyFields = `'run_limits',k.policy->'run_limits','allowed_toolsets',COALESCE(NULLIF(k.policy->'allowed_toolsets','null'::jsonb),'[]'::jsonb),
  'allowed_agents',COALESCE(NULLIF(k.policy->'allowed_agents','null'::jsonb),'[]'::jsonb),
  'workload_issuer_id',k.workload_issuer_id,'workload_digest',k.workload_digest,'workload_mapping',k.workload_mapping,'rotation_interval_days',k.policy->'rotation_interval_days',
  'rotation_due_at',CASE WHEN k.policy->>'rotation_interval_days' IS NOT NULL THEN COALESCE(k.rotated_at,k.created_at)+make_interval(secs=>86400.0*(k.policy->>'rotation_interval_days')::int) END,
@@ -366,7 +370,7 @@ func (s *Server) updateAPIKey(r *http.Request, _ Principal) (Reply, error) {
 	if patch == nil {
 		return Reply{}, Invalid("policy", "Send a policy object.")
 	}
-	allowed := []string{"allowed_toolsets", "allowed_agents", "regional_limits", "route_limits", "limit_template", "name", "scopes", "rotation_interval_days", "allowed_routes", "allowed_route_groups", "allowed_cidrs", "allowed_attribution_keys", "required_attribution_keys", "attribution_defaults", "requests_per_minute", "tokens_per_minute", "max_concurrency", "daily_cost_limit", "monthly_cost_limit", "weekly_cost_limit", "cost_basis", "expires_at", "budget_group_id", "allow_provider_state", "response_metadata", "forbid_response_cache", "end_user_source", "end_user_policy", "priority", "max_priority"}
+	allowed := []string{"run_limits", "allowed_toolsets", "allowed_agents", "regional_limits", "route_limits", "limit_template", "name", "scopes", "rotation_interval_days", "allowed_routes", "allowed_route_groups", "allowed_cidrs", "allowed_attribution_keys", "required_attribution_keys", "attribution_defaults", "requests_per_minute", "tokens_per_minute", "max_concurrency", "daily_cost_limit", "monthly_cost_limit", "weekly_cost_limit", "cost_basis", "expires_at", "budget_group_id", "allow_provider_state", "response_metadata", "forbid_response_cache", "end_user_source", "end_user_policy", "priority", "max_priority"}
 	for field, value := range patch {
 		if !slices.Contains(allowed, field) {
 			return Reply{}, Invalid(field, "Unknown policy field.")
@@ -761,6 +765,7 @@ func (a Authority) DelegatedInference(routes []string, agent Authority, memberID
 		BudgetGroupMonthlyCostLimit: a.BudgetGroupMonthlyCostLimit,
 		BudgetGroupWeeklyCostLimit:  a.BudgetGroupWeeklyCostLimit,
 		Policy: KeyPolicy{
+			RunLimits:               a.Policy.RunLimits,
 			Scopes: []string{"inference"}, AllowedRoutes: slices.Clone(routes),
 			ForbidResponseCache:     a.Policy.ForbidResponseCache || agent.Policy.ForbidResponseCache,
 			LimitTemplate:           a.Policy.LimitTemplate,
