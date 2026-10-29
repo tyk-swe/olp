@@ -99,7 +99,14 @@ func (s *Server) expandPrompt(x *call, body []byte) ([]byte, *usage.PromptRefere
 		if err != nil {
 			return nil, nil, serverError(http.StatusInternalServerError, "internal_error", "The prompt could not be prepared.")
 		}
-		return expanded.Bytes(), &usage.PromptReference{ID: revision.PublicationID, RevisionID: revision.ID}, nil
+		renderedBody := expanded.Bytes()
+		if int64(len(renderedBody)) > s.cfg.MaxBodyBytes {
+			return nil, nil, bodyTooLarge()
+		}
+		if x.request.body != nil {
+			x.request.body.decoded = max(x.request.body.decoded, int64(len(renderedBody)))
+		}
+		return renderedBody, &usage.PromptReference{ID: revision.PublicationID, RevisionID: revision.ID}, nil
 	}
 	return nil, nil, invalidRequest("invalid_prompt", "The published prompt revision was not found for this project.", &param)
 }

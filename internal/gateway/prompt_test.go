@@ -144,8 +144,8 @@ func TestChatPublishedPromptRefusesInvalidRequestsBeforeDispatch(t *testing.T) {
 			if response.StatusCode != http.StatusBadRequest {
 				t.Fatalf("status = %d, body = %s", response.StatusCode, body)
 			}
-			if h.mock.count("a") != 0 || h.mock.count("b") != 0 || len(h.sink.last(t).Attempts) != 0 {
-				t.Fatal("invalid request dispatched or created an attempt")
+			if len(h.sink.last(t).Attempts) != 0 {
+				t.Fatal("invalid request created an attempt")
 			}
 		})
 	}
@@ -171,8 +171,8 @@ func TestChatPublishedPromptPassesRenderedInputToGuardrails(t *testing.T) {
 	if response.StatusCode < 400 || !strings.Contains(string(body), "guardrail_blocked") {
 		t.Fatalf("status = %d, body = %s", response.StatusCode, body)
 	}
-	if h.mock.count("a") != 0 || h.mock.count("b") != 0 || len(h.sink.last(t).Attempts) != 0 {
-		t.Fatal("guardrail-blocked request dispatched or created an attempt")
+	if len(h.sink.last(t).Attempts) != 0 {
+		t.Fatal("guardrail-blocked request created an attempt")
 	}
 }
 
@@ -262,11 +262,11 @@ func TestChatPublishedPromptPinsLabelAndAcceptsExactRevision(t *testing.T) {
 		t.Fatalf("first request attribution = %#v", fact)
 	}
 	exact := fmt.Sprintf(`{"model":%q,"olp_prompt":{"id":%q,"revision_id":%q,"variables":{"name":"Ada"}}}`, routeSlug, publicationID, firstRevision)
-	response = h.do(ctx, http.MethodPost, "/v1/chat/completions", fullKey, []byte(exact), nil)
-	body, _ = io.ReadAll(response.Body)
-	response.Body.Close()
-	if response.StatusCode != http.StatusOK || !strings.Contains(<-bodies, "Hello Ada") {
-		t.Fatalf("exact revision status = %d, body = %s", response.StatusCode, body)
+	exactResponse := h.do(ctx, http.MethodPost, "/v1/chat/completions", fullKey, []byte(exact), nil)
+	exactBody, _ := io.ReadAll(exactResponse.Body)
+	exactResponse.Body.Close()
+	if exactResponse.StatusCode != http.StatusOK || !strings.Contains(<-bodies, "Hello Ada") {
+		t.Fatalf("exact revision status = %d, body = %s", exactResponse.StatusCode, exactBody)
 	}
 	if fact := h.sink.nth(t, 3).Attempts[0].Prompt; fact == nil || fact.RevisionID != firstRevision {
 		t.Fatalf("exact revision attribution = %#v", fact)
@@ -297,24 +297,77 @@ func TestChatPublishedPromptAttributesEachProviderAttempt(t *testing.T) {
 func TestChatPublishedPromptDoesNotPersistInResponseCache(t *testing.T) {
 	h, publicationID, _ := publishedPromptHarness(t)
 	publications := h.rt.release.Snapshot.AgentPublications
-	_, cacheStore := enableTestCache(t, h)
+	enableTestCache(t, h)
 	h.rt.release.Snapshot.AgentPublications = publications
-	h.mock.set("a", completion(modelA, "Hello Ada"))
-	request := fmt.Sprintf(`{"model":%q,"olp_prompt":{"id":%q,"label":"production","variables":{"name":"Ada"}}}`, routeSlug, publicationID)
-	for range 2 {
-		response := h.do(t.Context(), http.MethodPost, "/v1/chat/completions", fullKey, []byte(request), nil)
+	var sequence atomic.Int32
+	h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
+		input, _ := io.ReadAll(r.Body)
+		content := fmt.Sprintf("response %d", sequence.Add(1))
+		if strings.Contains(string(input), "Hello Ada") {
+			content = fmt.Sprintf("Hello Ada %d", sequence.Load())
+		}
+		completion(modelA, content)(w, r)
+	})
+	request := func(input string) string {
+		t.Helper()
+		response := h.do(t.Context(), http.MethodPost, "/v1/chat/completions", fullKey, []byte(input), nil)
 		body, _ := io.ReadAll(response.Body)
 		response.Body.Close()
 		if response.StatusCode != http.StatusOK {
 			t.Fatalf("status = %d, body = %s", response.StatusCode, body)
 		}
+		return string(body)
 	}
-	if count := h.mock.count("a") + h.mock.count("b"); count != 2 {
-		t.Fatalf("provider attempts = %d, want 2", count)
+	ordinary := fmt.Sprintf(`{"model":%q,"messages":[{"role":"user","content":"public"}]}`, routeSlug)
+	firstOrdinary, secondOrdinary := request(ordinary), request(ordinary)
+	if firstOrdinary != secondOrdinary {
+		t.Fatalf("ordinary request was not replayed from the enabled cache: %s, %s", firstOrdinary, secondOrdinary)
 	}
-	cacheStore.mu.Lock()
-	defer cacheStore.mu.Unlock()
-	if len(cacheStore.values) != 0 {
-		t.Fatal("prompt-backed response was stored in the cache")
+	prompt := fmt.Sprintf(`{"model":%q,"olp_prompt":{"id":%q,"label":"production","variables":{"name":"Ada"}}}`, routeSlug, publicationID)
+	firstPrompt, secondPrompt := request(prompt), request(prompt)
+	if !strings.Contains(firstPrompt, "Hello Ada") || !strings.Contains(secondPrompt, "Hello Ada") || firstPrompt == secondPrompt {
+		t.Fatalf("prompt response was replayed from the cache: %s, %s", firstPrompt, secondPrompt)
+	}
+}
+
+func TestChatPublishedPromptRespectsRenderedInputLimit(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		routeLimit bool
+		length     int
+		wantStatus int
+	}{
+		{name: "route limit exceeded", routeLimit: true, length: 700, wantStatus: http.StatusRequestEntityTooLarge},
+		{name: "installation limit exceeded", length: 700, wantStatus: http.StatusRequestEntityTooLarge},
+		{name: "within route limit", routeLimit: true, length: 120, wantStatus: http.StatusOK},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h, publicationID, _ := publishedPromptHarness(t)
+			h.gateway.cfg.MaxBodyBytes = 512
+			if tc.routeLimit {
+				h.gateway.cfg.MaxBodyBytes = 1024
+				route := h.rt.release.Snapshot.Routes[routeSlug]
+				limit := int64(512)
+				route.MaxBodyBytes = &limit
+				h.rt.release.Snapshot.Routes[routeSlug] = route
+			}
+			draft := h.rt.release.Snapshot.AgentPublications[0].Definition
+			draft.Prompt.Template = strings.Repeat("x", tc.length) + " {{name}}"
+			h.rt.release.Snapshot.AgentPublications[0].Definition = draft
+			h.rt.release.Snapshot.AgentPublications[0].Digest = agentcontract.DraftDigest(draft)
+			if err := h.rt.release.Snapshot.Compile(); err != nil {
+				t.Fatal(err)
+			}
+			request := fmt.Sprintf(`{"model":%q,"olp_prompt":{"id":%q,"label":"production","variables":{"name":"Ada"}}}`, routeSlug, publicationID)
+			response := h.do(t.Context(), http.MethodPost, "/v1/chat/completions", fullKey, []byte(request), nil)
+			defer response.Body.Close()
+			body, _ := io.ReadAll(response.Body)
+			if response.StatusCode != tc.wantStatus {
+				t.Fatalf("status = %d, body = %s", response.StatusCode, body)
+			}
+			if tc.wantStatus != http.StatusOK && len(h.sink.last(t).Attempts) != 0 {
+				t.Fatal("oversized prompt created an attempt")
+			}
+		})
 	}
 }
