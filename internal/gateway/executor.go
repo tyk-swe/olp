@@ -301,6 +301,53 @@ func forwardable(status int) bool {
 	return false
 }
 
+// A call owns mutexes, pinned authority, and request-wide accounting, so model steps update it in place.
+func (s *Server) executeModelStep(ctx context.Context, x *call, source *wire.Request) *outcome {
+	if x.generation.firstStep == nil {
+		x.generation.parsed = source
+		out := s.execute(ctx, x)
+		x.generation.firstStep = &modelStepAccounting{factEnd: len(x.facts), estimate: x.estimate}
+		return out
+	}
+	if source.Route != x.named().Slug || source.Family != x.generation.parsed.Family || x.cache != nil && x.cache.result != "bypass" {
+		return &outcome{err: invalidRequest("invalid_request", "The model step must use the original route and format without response caching.", nil)}
+	}
+	stepCtx, cancel := x.routeContext(ctx)
+	defer cancel()
+	first := x.generation.firstStep
+	actual := x.settledTokensFor(x.facts[:first.factEnd], first.estimate)
+	if err := x.lease.Reconcile(stepCtx, *actual); err != nil {
+		if e := s.Admission.outage(x.authority.ID, false, err); e != nil {
+			return &outcome{err: e}
+		}
+	}
+	x.generation.parsed = source
+	x.routeLeg = routeLeg{affinity: x.seed}
+	x.allowance = 0
+	x.frames = nil
+	x.delegators = nil
+	x.classified = nil
+	if e := s.prepare(stepCtx, x, x.authorize); e != nil {
+		return &outcome{err: e}
+	}
+	x.estimate = requestEstimate(x)
+	authority := cacheAuthority(x.admissionAuthority(x.authority), false, true, false)
+	reservation := keyReservationEstimate(x.estimate, s.dispatchableAttempts(x))
+	lease, e := s.Admission.reserveKeyCosted(stepCtx, &authority, x.clientSurface(), reservation, time.Duration(x.named().OverallTimeout)*time.Millisecond, costReservation{}, x.limitRoute())
+	if e != nil {
+		return &outcome{err: e}
+	}
+	if e := s.reserveFallbackCost(stepCtx, x); e != nil {
+		settleKey(ctx, lease, false, nil, s.log)
+		return &outcome{err: e}
+	}
+	start := len(x.facts)
+	x.stepDispatched = false
+	out := s.execute(stepCtx, x)
+	settleKey(ctx, lease, x.stepDispatched, x.settledTokensFor(x.facts[start:], x.estimate), s.log)
+	return out
+}
+
 // execute adapts canonical inference to shared attempt execution. The
 // canonical transport retains its first-byte and streaming idle deadlines.
 func (s *Server) execute(ctx context.Context, x *call) *outcome {
@@ -434,6 +481,7 @@ func endpointPath(family wire.Format) string {
 // newFact opens the record of one attempt against one credential slot.
 func (s *Server) newFact(x *call, a routing.Attempt, slot routing.Slot, ordinal int, pinned ...*routing.Provider) AttemptFact {
 	fact := AttemptFact{
+		Prompt:   x.prompt,
 		Strategy: a.Strategy, PolicyDigest: a.PolicyDigest, VendorID: a.VendorID, Price: a.Price,
 		Discount: a.Discount, CardPinned: x.cardPinned, CardRevisionID: x.cardRevisionID,
 		Ordinal:            ordinal,

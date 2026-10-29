@@ -662,12 +662,19 @@ func (s *Server) inferenceOperation(family wire.Format, dialect string) http.Han
 			out, status = s.serveUnary(w, r, x, body)
 			return
 		}
+		expandedBody, prompt, promptErr := s.expandPrompt(x, body)
+		if promptErr != nil {
+			x.failure, status = promptErr, promptErr.Status
+			writeError(w, promptErr)
+			return
+		}
+		x.prompt = prompt
 		var parsed *wire.Request
 		var err error
 		if family == wire.Bedrock {
 			parsed, err = protocols.ParseBedrockRequest(body, r.PathValue("model"), strings.HasSuffix(r.URL.Path, "/converse-stream"))
 		} else {
-			parsed, err = protocols.Parse(family, body, r.PathValue("model"))
+			parsed, err = protocols.Parse(family, expandedBody, r.PathValue("model"))
 		}
 		if err != nil {
 			e = requestError(err)
@@ -717,7 +724,7 @@ func (s *Server) inferenceOperation(family wire.Format, dialect string) http.Han
 			writeError(w, e)
 			return
 		}
-		if s.Capture != nil && x.origin == "" && x.operationName() == "generation" {
+		if s.Capture != nil && x.prompt == nil && x.origin == "" && x.operationName() == "generation" {
 			x.captureContext = r.Context()
 			x.capture = s.Capture.Resolve(x.captureProject(), x.named().Slug, x.keyID, x.endUserDigest, x.request.accountingID())
 		}
@@ -754,11 +761,11 @@ func (s *Server) inferenceOperation(family wire.Format, dialect string) http.Han
 				}
 				return err
 			}
-			out = s.execute(ctx, x)
+			out = s.executeModelStep(ctx, x, x.generation.parsed)
 			status = sw.finish(out)
 			return
 		}
-		out = s.execute(ctx, x)
+		out = s.executeModelStep(ctx, x, x.generation.parsed)
 		if out.err != nil {
 			status = out.err.Status
 			if out.err.Status > 0 {
@@ -860,6 +867,10 @@ func (s *Server) prepare(ctx context.Context, x *call, authorize func(*routing.R
 func (s *Server) planCanonical(ctx context.Context, x *call) *Error {
 	if e := s.bindGuardrails(ctx, x); e != nil {
 		return e
+	}
+	if x.prompt != nil && x.route.Fidelity.Strict() {
+		param := "olp_prompt"
+		return invalidRequest("invalid_prompt", "Published prompts require a transformed route.", &param)
 	}
 	if e := s.checkRouteFidelity(ctx, x.route); e != nil {
 		return e
@@ -984,7 +995,7 @@ func (s *Server) planCanonical(ctx context.Context, x *call) *Error {
 		return selectionError(&routing.SelectionError{Code: routing.NoEligibleTargets}, route.Slug)
 	}
 	if x.pin != nil {
-		x.budget, x.allowance = 1, 1
+		x.budget, x.allowance = x.spent+1, x.spent+1
 	}
 	return s.enforceContentPolicy(x)
 }

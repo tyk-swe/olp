@@ -218,8 +218,10 @@ bounded to 64 KiB each; rendered messages inherit the route's input limit.
 
 On transformed Responses routes, `prompt.id` beginning `olpp_` selects the OLP
 registry. Other IDs retain native provider behavior. Chat Completions,
-Anthropic and Gemini use consumed `olp_prompt` input. Combining a registry
-prompt with explicit messages is refused; merge ambiguity is not implicit.
+Anthropic and Gemini use consumed `olp_prompt` input. Chat requests supply a
+publication `id`, exactly one of `label` or `revision_id`, and a `variables`
+object of strings. Combining a registry prompt with explicit messages is
+refused; merge ambiguity is not implicit.
 Default parameters apply only when absent and cannot widen route constraints.
 Strict routes refuse OLP rendering. All rendered messages run input guardrails.
 Templates are durable configuration and promote without environment-local IDs;
@@ -353,9 +355,11 @@ and applicable candidate gates. A working HTTP-only slice does not close RM7.
 ### RM8: Agent workflows
 
 **State:** Planned. **Accountable:** agent maintainers; specialist owners are
-named below. **Entry:** RM7.1 and guardrail input/output execution for RM8.1–RM8.2;
-completed RM7 interoperability for RM8.3–RM8.4. RM8.5 follows those workflow
-contracts and existing observability exports; RM8.6 qualifies the combined result.
+named below. **Entry:** RM7.1 and guardrail input/output execution for RM8.1;
+existing prompt publications and input/output guardrails for RM8.2; the relevant
+completed RM7 transport and authentication work for RM8.3–RM8.4. RM8.5 follows
+those workflow contracts and existing observability exports; RM8.6 qualifies
+the combined result.
 Retrieval-backed tools additionally require certified [RM5.2 or RM5.3 retrieval](api-surface.md#rm5-retained-apis-and-retrieval)
 for their selected backend, not completion of every retrieval adapter.
 

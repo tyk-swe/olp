@@ -22,7 +22,7 @@ are stable identifiers; independent work can proceed in parallel.
 | Retained APIs and retrieval | Implemented RM5; service and live qualification tracked separately | Implemented RM4 foundations and each family's ownership and pricing contracts |
 | Protocol and provider expansion | RM6.1–RM6.6, independently by transport | Implemented RM4 foundations and each transport's control and accounting contracts |
 | Consumer MCP | Implemented RM7; live provider and tenant qualification tracked separately | Implemented RM4 accounting and agent contracts, plus existing tool governance |
-| Agent workflows | RM8.1 tool loops and RM8.2 prompt rendering | Implemented RM7.1 direct execution |
+| Agent workflows | RM8.1 tool loops and RM8.2 prompt rendering | Implemented RM7.1 direct execution for tool loops, and implemented prompt publications for prompt rendering |
 | Cloud invoice imports | RM9.1 import contracts, then each cloud adapter | Existing importer and reconciliation machinery |
 
 The [architecture map](develop/architecture.md#contracts-and-feature-ownership)
@@ -232,9 +232,10 @@ and identity-tenant qualification remains separate from the fixture evidence.
 ### RM8: Agent workflows
 
 **Status: Planned.** **Owners:** agent and access maintainers, with protocol,
-prompt, observability and console owners. **Dependencies:** RM7.1 for tool loops
-and prompts; the relevant MCP transport/auth implementation for delegation and
-A2A. Retrieval-backed tools also use their selected RM5 backend.
+prompt, observability and console owners. **Dependencies:** RM7.1 for tool loops,
+existing prompt publications for prompt rendering, and the relevant MCP
+transport/auth implementation for delegation and A2A. Retrieval-backed tools also
+use their selected RM5 backend.
 
 - [ ] **RM8.1 — Bounded tool loops:** implement OpenAI, Anthropic and Gemini
   dialects plus Responses projections, iteration/time/concurrency/cost bounds,
