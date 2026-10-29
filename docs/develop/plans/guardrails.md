@@ -189,9 +189,9 @@ spans with OLP's local replacement. Neither claims every upstream anonymizer opt
 | `vigil_guard` | `vigil_guard` native text contract | block, redact, mask, annotate | N | Not run | Connector maintainers: vigil_guard |
 | `repelloai` | `repelloai` native text contract | block, annotate | N | Not run | Connector maintainers: repelloai |
 | `singulr` | `singulr` native text contract | block, annotate | N | Not run | Connector maintainers: singulr |
-| `headroom` | `headroom` native text contract; synchronous input compression only | block, redact, mask, annotate | N | Not run | Connector maintainers: headroom |
-| `compresr` | `compresr` native text contract; synchronous input compression only | block, redact, mask, annotate | N | Not run | Connector maintainers: compresr |
-| `typesafe` | Excluded from RM2 text inspection: RM8.1: ordered tool-exchange relevance pruning | None in RM2 | Scope | Not applicable | Agent / accounting maintainers |
+| `headroom` | `headroom` native text contract; synchronous input compression and request-local workflow recovery | block, redact, mask, annotate | N | Not run | Connector maintainers: headroom |
+| `compresr` | `compresr` native text contract; synchronous input compression and request-local workflow recovery | block, redact, mask, annotate | N | Not run | Connector maintainers: compresr |
+| `typesafe` | Gateway workflow pruning of complete prior tool exchanges through an accounted System One decision route | input pruning | N | Not run | Agent / accounting maintainers |
 | `straiker` | `straiker` native text contract | block, redact, mask, annotate | N | Not run | Connector maintainers: straiker |
 | `alice` | `alice` native text contract | block, redact, mask, annotate | N | Not run | Connector maintainers: alice |
 | `agent_365` | Shared consumer Entra OBO user, issuer and audience checks; fixture-qualified in RM7.2 | Refuse before exchange or dispatch | MCP grant owner | Content-free identity decision | MCP / access maintainers |
@@ -214,18 +214,20 @@ execution owner; the remaining hooks still have the dependencies described below
   a verified delegated user assertion, explicit issuer and audience binding,
   and a sealed middle-tier credential. Local fixtures qualify the exchange;
   live tenant qualification remains separate.
-- `typesafe` constructs ordered tool exchanges and calls a paid relevance model
-  before pruning complete exchanges (`_candidate_exchanges`, `_build_state`,
-  `_call_systemone`). Agent/accounting maintainers own this in RM8.1; discarding
-  isolated text segments is not a substitute.
+- `typesafe` groups complete tool calls and results into ordered exchanges and
+  sends prior exchanges to the configured decision route for relevance scoring.
+  It retains the latest complete exchange and removes calls and results together.
+  The relevance attempt has a separate debit under the workflow run. System One
+  has no enforceable output bound, so a finite run cost limit prevents dispatch.
 
 The local code/tool filters expose explicit OLP configuration, not Python
 configuration compatibility. Semantic guardrails batch content and configured
 reference utterances through one authorized embedding route; decision and judge
 guardrails use explicit model verdict rules. Confined WASM remains the only
-native custom-code execution contract. Compression adapters provide stateless
-text replacement; recovery tools, original-content storage and tool-loop
-reinjection belong to RM8.1. Xecguard provides its scan endpoint; paired grounding
+native custom-code execution contract. Compression adapters provide text
+replacement and gateway workflows can recover compressed originals from
+request-local memory. Recovery calls are accounted without persisting the
+original content. Xecguard provides its scan endpoint; paired grounding
 is outside the segment contract. Purview uses an operator-rotated Graph access
 token; it does not impersonate the requesting user.
 

@@ -564,6 +564,10 @@ func activeAzureProviderInProject(t *testing.T, h *accessHarness, owner *browser
 	configuration := map[string]any{"kind": "azure_openai", "auth_mode": "api_key", "endpoint": endpoint, "deployment": vendorModel, "api_version": "2024-10-21"}
 	if len(providerFields) > 0 {
 		for field, value := range providerFields[0] {
+			if value == nil {
+				delete(configuration, field)
+				continue
+			}
 			configuration[field] = value
 		}
 	}

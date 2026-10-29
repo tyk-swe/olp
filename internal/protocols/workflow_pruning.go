@@ -28,6 +28,7 @@ type workflowPrunePiece struct {
 	part  int
 	field string
 	id    string
+	name  string
 	kind  string
 	raw   json.RawMessage
 }
@@ -222,13 +223,39 @@ func workflowCompleteExchange(calls, results []workflowPrunePiece) bool {
 		return false
 	}
 	for _, call := range calls {
-		if call.id == "" || slices.ContainsFunc(calls, func(other workflowPrunePiece) bool {
-			return other.id == call.id && (other.row != call.row || other.part != call.part)
-		}) || !slices.ContainsFunc(results, func(result workflowPrunePiece) bool { return result.id == call.id }) {
+		matched := -1
+		for i, result := range results {
+			if workflowPruneMatches(call, result) {
+				if matched != -1 {
+					return false
+				}
+				matched = i
+			}
+		}
+		if matched == -1 {
+			return false
+		}
+		matches := 0
+		for _, other := range calls {
+			if workflowPruneMatches(other, results[matched]) {
+				matches++
+			}
+		}
+		if matches != 1 {
 			return false
 		}
 	}
 	return true
+}
+
+func workflowPruneMatches(call, result workflowPrunePiece) bool {
+	if call.name != "" && result.name != "" && call.name != result.name {
+		return false
+	}
+	if call.id != "" && result.id != "" {
+		return call.id == result.id
+	}
+	return call.name != "" && call.name == result.name
 }
 
 func workflowPrunePieces(family wire.Format, row int, fields Object) []workflowPrunePiece {
@@ -273,7 +300,7 @@ func workflowPrunePieces(family wire.Format, row int, fields Object) []workflowP
 			if err != nil {
 				continue
 			}
-			kind, id := "", ""
+			kind, id, name := "", "", ""
 			if family.Surface() == "anthropic" {
 				if role == "assistant" && str(item["type"]) == "tool_use" {
 					kind, id = "call", str(item["id"])
@@ -283,13 +310,15 @@ func workflowPrunePieces(family wire.Format, row int, fields Object) []workflowP
 				}
 			} else {
 				if role == "model" && present(item["functionCall"]) {
-					kind, id = "call", workflowGeminiID(item["functionCall"])
+					kind = "call"
+					id, name = workflowGeminiID(item["functionCall"])
 				}
 				if role == "user" && present(item["functionResponse"]) {
-					kind, id = "result", workflowGeminiID(item["functionResponse"])
+					kind = "result"
+					id, name = workflowGeminiID(item["functionResponse"])
 				}
 			}
-			if kind != "" && !yield(workflowPrunePiece{row: row, part: part, field: field, id: id, kind: kind, raw: value}) {
+			if kind != "" && !yield(workflowPrunePiece{row: row, part: part, field: field, id: id, name: name, kind: kind, raw: value}) {
 				return
 			}
 		}
@@ -300,15 +329,12 @@ func workflowPrunePieces(family wire.Format, row int, fields Object) []workflowP
 	return pieces
 }
 
-func workflowGeminiID(rawValue json.RawMessage) string {
+func workflowGeminiID(rawValue json.RawMessage) (string, string) {
 	value, err := object(rawValue)
 	if err != nil {
-		return ""
+		return "", ""
 	}
-	if id := str(value["id"]); id != "" {
-		return id
-	}
-	return str(value["name"])
+	return str(value["id"]), str(value["name"])
 }
 
 func WorkflowExchangeName(index int) string { return "e" + strconv.Itoa(index) }

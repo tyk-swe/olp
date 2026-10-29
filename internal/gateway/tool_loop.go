@@ -323,6 +323,13 @@ func (s *Server) executeToolLoop(ctx context.Context, x *call) *outcome {
 		return &outcome{err: resumeError}
 	}
 	for iteration := firstIteration; int64(iteration) < *x.generation.runLimits.MaxIterations; iteration++ {
+		if iteration > 0 {
+			parsed, failure := s.pruneWorkflow(ctx, x, x.generation.parsed)
+			if failure != nil {
+				return &outcome{err: failure}
+			}
+			x.generation.parsed = parsed
+		}
 		authority, e := s.workflowAuthority(ctx, x, x.route, "")
 		if e != nil {
 			return &outcome{err: e}

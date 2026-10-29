@@ -54,3 +54,10 @@ func (e *Engine) TypeSafePolicies() []TypeSafePolicy {
 		}
 	})
 }
+
+func (e *Engine) OnlyTypeSafe() bool {
+	return e != nil && len(e.entries) > 0 && !slices.ContainsFunc(e.entries, func(entry compiledEntry) bool {
+		_, ok := entry.detector.(typeSafeDetector)
+		return !ok
+	})
+}

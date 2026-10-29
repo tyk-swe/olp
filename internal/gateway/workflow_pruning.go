@@ -54,9 +54,17 @@ func (s *Server) pruneWorkflowPolicies(ctx context.Context, x *call, request *wi
 	if len(candidates) == 0 {
 		return request, nil
 	}
-	selected, problem := s.typeSafeRelevance(ctx, x, policies[0], request, candidates)
-	if problem != nil {
-		return nil, problem
+	pruneCtx, cancel := context.WithTimeout(ctx, time.Duration(policies[0].Revision.TimeoutMS)*time.Millisecond)
+	defer cancel()
+	var selected []int
+	for start := 0; start < len(candidates); start += 256 {
+		batch, problem := s.typeSafeRelevance(pruneCtx, x, policies[0], request, candidates[start:min(start+256, len(candidates))])
+		if problem != nil {
+			return nil, problem
+		}
+		for _, index := range batch {
+			selected = append(selected, start+index)
+		}
 	}
 	pruned, err := plan.Apply(selected)
 	if err != nil {
@@ -66,36 +74,44 @@ func (s *Server) pruneWorkflowPolicies(ctx context.Context, x *call, request *wi
 }
 
 func (s *Server) typeSafeRelevance(ctx context.Context, parent *call, policy guardrails.TypeSafePolicy, request *wire.Request, candidates []protocols.WorkflowExchange) ([]int, *Error) {
-	if len(candidates) > 256 || parent.generation.runLimits.MaxRunCost != nil {
+	if parent.generation.runLimits.MaxRunCost != nil {
 		return nil, workflowUnboundedCost()
 	}
-	pruneCtx, cancel := context.WithTimeout(ctx, time.Duration(policy.Revision.TimeoutMS)*time.Millisecond)
-	defer cancel()
 	route, ok := parent.request.release.Snapshot.Routes[policy.Config.Route]
 	if !ok || !slices.Contains(route.Operations, "decision") {
+		if policy.Revision.OnError == guardrails.FailOpen {
+			return nil, nil
+		}
 		return nil, guardrailError(guardrails.ErrSurface)
 	}
-	current, problem := s.workflowAuthority(pruneCtx, parent, &route, "")
+	current, problem := s.workflowAuthority(ctx, parent, &route, "")
 	if problem != nil {
 		return nil, problem
 	}
 	state, err := json.Marshal(struct {
-		Task      string                       `json:"task"`
-		System    []string                     `json:"system,omitempty"`
-		Exchanges []protocols.WorkflowExchange `json:"exchanges"`
+		Task      string                                `json:"task"`
+		System    []string                              `json:"system,omitempty"`
+		Exchanges map[string]protocols.WorkflowExchange `json:"exchanges"`
 	}{Task: protocols.WorkflowPruningTask(request, guardrails.MaxContentBytes), System: slices.Collect(func(yield func(string) bool) {
 		for _, segment := range parent.guardrailInput {
 			if segment.Role == "system" && !yield(segment.Text) {
 				return
 			}
 		}
-	}), Exchanges: candidates})
+	}), Exchanges: maps.Collect(func(yield func(string, protocols.WorkflowExchange) bool) {
+		for index, candidate := range candidates {
+			if !yield(protocols.WorkflowExchangeName(index), candidate) {
+				return
+			}
+		}
+	})})
 	if err != nil {
 		return nil, guardrailError(err)
 	}
 	questions := maps.Collect(func(yield func(string, pruningQuestion) bool) {
 		for index := range candidates {
-			if !yield(protocols.WorkflowExchangeName(index), pruningQuestion{Type: "noul", Instructions: "Is this completed tool exchange relevant to the current task?"}) {
+			name := protocols.WorkflowExchangeName(index)
+			if !yield(name, pruningQuestion{Type: "noul", Instructions: "Is the completed tool exchange " + name + " relevant to the current task?"}) {
 				return
 			}
 		}
@@ -104,12 +120,30 @@ func (s *Server) typeSafeRelevance(ctx context.Context, parent *call, policy gua
 	if err != nil {
 		return nil, guardrailError(err)
 	}
+	if len(body) > int(s.cfg.MaxBodyBytes) && len(candidates) > 1 {
+		middle := len(candidates) / 2
+		first, problem := s.typeSafeRelevance(ctx, parent, policy, request, candidates[:middle])
+		if problem != nil {
+			return nil, problem
+		}
+		second, problem := s.typeSafeRelevance(ctx, parent, policy, request, candidates[middle:])
+		if problem != nil {
+			return nil, problem
+		}
+		for _, index := range second {
+			first = append(first, middle+index)
+		}
+		return first, nil
+	}
 	codec, ok := operationregistry.Lookup(decision.SystemOne)
 	if !ok {
 		return nil, guardrailError(guardrails.ErrSurface)
 	}
 	source, err := operationplan.Parse(decision.SystemOne, body, int(s.cfg.MaxBodyBytes))
 	if err != nil {
+		if policy.Revision.OnError == guardrails.FailOpen {
+			return nil, nil
+		}
 		return nil, guardrailError(err)
 	}
 	accountingID := parent.request.accountingID()
@@ -121,14 +155,14 @@ func (s *Server) typeSafeRelevance(ctx context.Context, parent *call, policy gua
 		priority: parent.priority, internalGuardrail: true, authorize: parent.authorize,
 		deadline: parent.deadline, spent: parent.spent, facts: slices.Clone(parent.facts),
 		routeLeg: routeLeg{route: &route}, workflow: parent.workflow,
-		unary: &unaryCall{source: source, dialect: codec, route: route.Slug, surface: "native"},
+		unary: &unaryCall{source: source, dialect: codec, route: route.Slug, surface: wire.SystemOne.Surface()},
 	}
-	if problem := s.prepareUnary(pruneCtx, x); problem != nil {
+	if problem := s.prepareUnary(ctx, x); problem != nil {
 		return nil, problem
 	}
 	x.primary = parent.named()
 	priorFacts := len(x.facts)
-	stepCtx, cancel := x.routeContext(pruneCtx)
+	stepCtx, cancel := x.routeContext(ctx)
 	defer cancel()
 	x.estimate = requestEstimate(x)
 	authority := cacheAuthority(x.admissionAuthority(x.authority), false, true, false)
@@ -139,21 +173,27 @@ func (s *Server) typeSafeRelevance(ctx context.Context, parent *call, policy gua
 	result := runAttempts(stepCtx, s, x, attemptAdapter[operationplan.Result]{estimate: x.attemptReservation, dispatch: func(attemptCtx context.Context, attempt routing.Attempt, provider *routing.Provider, slot routing.Slot, fact AttemptFact) (AttemptFact, operationplan.Result, *attemptFailure) {
 		return s.unaryAttempt(attemptCtx, x, attempt, provider, slot, fact)
 	}})
-	settleKey(pruneCtx, lease, x.stepDispatched, x.settledTokensFor(x.facts[priorFacts:], x.estimate), s.log)
+	settleKey(ctx, lease, x.stepDispatched, x.settledTokensFor(x.facts[priorFacts:], x.estimate), s.log)
 	parent.facts, parent.spent = x.facts, x.spent
 	if result.err != nil {
-		if policy.Revision.OnError == guardrails.FailOpen && (x.sessionDebit == nil || !x.sessionDebit.dispatched) {
+		if policy.Revision.OnError == guardrails.FailOpen && (x.sessionDebit == nil || !x.sessionDebit.dispatched) && (result.err.Code == "upstream_unavailable" || result.err.Code == "gateway_timeout") {
 			return nil, nil
 		}
 		return nil, result.err
 	}
 	var decoded pruningResponse
 	if json.Unmarshal(result.result.Body, &decoded) != nil || len(decoded.Answers) != len(candidates) {
+		if policy.Revision.OnError == guardrails.FailOpen {
+			return nil, nil
+		}
 		return nil, guardrailError(guardrails.ErrSurface)
 	}
 	for index := range candidates {
 		answer, exists := decoded.Answers[protocols.WorkflowExchangeName(index)]
 		if !exists || answer.Type != "noul" || answer.Noul == nil || *answer.Noul < 0 || *answer.Noul > 1 {
+			if policy.Revision.OnError == guardrails.FailOpen {
+				return nil, nil
+			}
 			return nil, guardrailError(guardrails.ErrSurface)
 		}
 	}
