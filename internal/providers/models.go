@@ -464,7 +464,7 @@ func (s *Server) certify(r *http.Request, p access.Principal) (access.Reply, err
 			certified++
 			c.Source, c.CertifiedAt = "certified", &at
 			c.CredentialFingerprint = defaultSlot.credentialFingerprint(&current.Configuration)
-			c.ToolCalls = c.Operation == "generation" && c.Surface == "openai" && (c.Mode == ModeUnary || c.Mode == ModeStreaming) && s.certifyToolCalls(probeCtx, &current.Configuration, credential, m.UpstreamModel, c.Mode == ModeStreaming) == nil
+			c.ToolCalls = c.Operation == "generation" && (c.Surface == "openai" || c.Surface == "anthropic" || c.Surface == "gemini") && (c.Mode == ModeUnary || c.Mode == ModeStreaming) && s.certifyToolCalls(probeCtx, &current.Configuration, credential, m.UpstreamModel, c.Mode == ModeStreaming) == nil
 			item["tool_calls"] = c.ToolCalls
 		} else {
 			pe := classify(err)

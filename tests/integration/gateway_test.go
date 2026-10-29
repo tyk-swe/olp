@@ -24,6 +24,8 @@ import (
 	"github.com/tyk-swe/olp/internal/gateway"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/mcp"
+	"github.com/tyk-swe/olp/internal/resources"
+	"github.com/tyk-swe/olp/internal/retainedapi"
 	"github.com/tyk-swe/olp/internal/usage"
 )
 
@@ -1045,5 +1047,230 @@ func TestGatewayToolWorkflowSettlesOneRun(t *testing.T) {
 		if unknown != 1 || !retained {
 			t.Fatalf("revoked %s call did not retain unknown exposure: count=%d retained=%t", scenario.name, unknown, retained)
 		}
+	}
+}
+
+func TestGatewayToolWorkflowWithPinnedGeminiCache(t *testing.T) {
+	h := newAccessHarness(t)
+	owner := h.owner()
+	project := createProject(h, owner, "Pinned Gemini workflow")
+	toolServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodDelete {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		var request struct {
+			ID     any    `json:"id"`
+			Method string `json:"method"`
+		}
+		if json.NewDecoder(r.Body).Decode(&request) != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		if request.Method == "notifications/initialized" {
+			w.WriteHeader(http.StatusAccepted)
+			return
+		}
+		result := func() any {
+			switch request.Method {
+			case "initialize":
+				w.Header().Set("Mcp-Session-Id", "pinned-gemini-session")
+				return map[string]any{"protocolVersion": "2025-11-25", "capabilities": map[string]any{"tools": map[string]any{}}}
+			case "tools/list":
+				return map[string]any{"tools": []any{map[string]any{"name": "lookup", "inputSchema": map[string]any{"type": "object", "properties": map[string]any{}}}}}
+			case "tools/call":
+				return map[string]any{"content": []any{map[string]any{"type": "text", "text": "pinned-result"}}, "isError": false}
+			default:
+				return nil
+			}
+		}()
+		if result == nil {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"jsonrpc": "2.0", "id": request.ID, "result": result})
+	}))
+	defer toolServer.Close()
+	registered := h.want(owner, "POST", "/api/v1/mcp-servers", map[string]any{"name": "Pinned tools", "project_id": project, "transport": "streamable_http", "endpoint": toolServer.URL, "enabled": true, "unit_price": "0.25"}, idem("pinned-server"), http.StatusCreated)
+	serverID := mcpExecString(t, registered, "id")
+	tool := agentcontract.Tool{ServerID: serverID, RevisionID: mcpExecString(t, registered, "revision_id"), CatalogDigest: mcpExecString(t, mcpExecObject(t, registered, "catalog"), "digest"), Name: "lookup", Alias: agentcontract.ToolAlias(serverID, "lookup"), Classification: "read_only"}
+	toolset := h.want(owner, "POST", "/api/v1/toolsets", map[string]any{"project_id": project, "name": "Pinned toolset", "toolset": agentcontract.Toolset{Tools: []agentcontract.Tool{tool}}}, idem("pinned-toolset"), http.StatusCreated)
+	toolsetID := mcpExecString(t, toolset, "id")
+	h.want(owner, "POST", "/api/v1/toolsets/"+toolsetID+"/publish", nil, withMatch(toolset, idem("pinned-publish")), http.StatusOK)
+
+	var calls atomic.Int64
+	providerRequests := make(chan map[string]json.RawMessage, 2)
+	vendor := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.Method == http.MethodGet {
+			_ = json.NewEncoder(w).Encode(map[string]any{"models": []any{map[string]string{"name": "models/" + vendorModel}}})
+			return
+		}
+		var request map[string]json.RawMessage
+		if json.NewDecoder(r.Body).Decode(&request) != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		name := func() string {
+			if strings.Contains(string(request["tools"]), "olp_certification_probe") {
+				return "olp_certification_probe"
+			}
+			if len(request["cachedContent"]) == 0 {
+				return ""
+			}
+			providerRequests <- request
+			calls.Add(1)
+			if strings.Contains(string(request["contents"]), "functionResponse") {
+				return ""
+			}
+			return tool.Alias
+		}()
+		parts := func() []any {
+			if name != "" {
+				return []any{map[string]any{"functionCall": map[string]any{"name": name, "args": map[string]any{}}}}
+			}
+			return []any{map[string]any{"text": "pinned-final"}}
+		}()
+		_ = json.NewEncoder(w).Encode(map[string]any{"candidates": []any{map[string]any{"content": map[string]any{"role": "model", "parts": parts}, "finishReason": "STOP"}}, "usageMetadata": map[string]any{"promptTokenCount": 4, "candidatesTokenCount": 6, "totalTokenCount": 10}})
+	}))
+	defer vendor.Close()
+	configuration := map[string]any{"kind": "gemini", "profile_id": "gemini-generation", "profile_revision": "1", "endpoint": vendor.URL + "/v1beta", "auth_mode": "api_key"}
+	provider := h.want(owner, "POST", "/api/v1/providers", map[string]any{"name": "Pinned Gemini", "project_id": project, "configuration": configuration, "model": vendorModel, "credential": vendorSecret}, idem("pinned-provider"), http.StatusCreated)
+	providerID := mcpExecString(t, provider, "id")
+	providerPath := "/api/v1/providers/" + providerID
+	probe := h.want(owner, "POST", providerPath+"/probe", nil, etagHeader(provider), http.StatusOK)
+	if probe["succeeded"] != true {
+		t.Fatalf("provider probe failed: %v", probe)
+	}
+	modelResponse := h.want(owner, "GET", providerPath+"/models", nil, nil, http.StatusOK)
+	modelItems, hasModels := modelResponse["items"].([]any)
+	if !hasModels || len(modelItems) != 1 {
+		t.Fatalf("unexpected provider models: %v", modelResponse)
+	}
+	model, isModel := modelItems[0].(map[string]any)
+	if !isModel {
+		t.Fatalf("unexpected provider model: %v", modelItems[0])
+	}
+	modelID := mcpExecString(t, model, "id")
+	declared := h.want(owner, "PATCH", providerPath+"/models/"+modelID, map[string]any{"enabled": true, "capabilities": []any{map[string]any{"operation": "generation", "surface": "gemini", "mode": "unary"}}}, etagHeader(provider), http.StatusOK)
+	certified := h.want(owner, "POST", providerPath+"/models/"+modelID+"/certify", nil, etagHeader(declared), http.StatusOK)
+	results, ok := certified["results"].([]any)
+	if !ok || len(results) != 1 {
+		t.Fatalf("provider certification failed: %v", certified)
+	}
+	result, isResult := results[0].(map[string]any)
+	if !isResult || result["tool_calls"] != true {
+		t.Fatalf("provider certification failed: %v", certified)
+	}
+	current := h.want(owner, "GET", providerPath, nil, nil, http.StatusOK)
+	h.want(owner, "POST", providerPath+"/activate", nil, withMatch(current, idem("pinned-provider-activate")), http.StatusOK)
+	priceEffective := time.Now().Add(-time.Second)
+	h.want(owner, "POST", "/api/v1/pricing/revisions", map[string]any{
+		"effective_at": priceEffective.UTC().Format(time.RFC3339Nano),
+		"prices":       []any{map[string]any{"provider_kind": "gemini", "provider_id": providerID, "model": vendorModel, "operation": "generation", "currency": "USD", "input_per_million": "1000000", "output_per_million": "1000000"}},
+	}, idem("pinned-price"), http.StatusCreated)
+	eventually(t, "Gemini price in routing inputs", 30*time.Second, func() bool {
+		h.refresh()
+		inputs := h.Runtime.RoutingInputs()
+		return inputs != nil && inputs.Price("gemini", providerID, "", vendorModel, "generation", time.Now()) != nil
+	})
+	const slug = "pinned-gemini-workflow"
+	draft := h.want(owner, "POST", "/api/v1/route-drafts", map[string]any{"project_id": project, "slug": slug, "operations": []string{"generation"}, "overall_timeout_ms": 10000, "max_attempts": 1, "fidelity": map[string]any{"mode": "transformed"}, "tool_execution": "gateway", "toolsets": []string{toolsetID}, "targets": []any{map[string]any{"provider_id": providerID, "provider_model": vendorModel, "priority": 0, "weight": 1, "timeout_ms": 5000}}}, idem("pinned-route"), http.StatusCreated)
+	h.want(owner, "POST", "/api/v1/route-drafts/"+draft["id"].(string)+"/activate", nil, withMatch(draft, idem("pinned-route-activate")), http.StatusOK)
+	key := h.want(owner, "POST", "/api/v1/api-keys", map[string]any{"name": "Pinned caller", "project_id": project, "scopes": []string{"inference", "tools"}, "allowed_routes": []string{slug}, "allowed_toolsets": []string{toolsetID}, "allow_provider_state": true}, idem("pinned-key"), http.StatusCreated)
+	prompt := h.want(owner, "POST", "/api/v1/prompts", map[string]any{"project_id": project, "name": "Pinned prompt", "prompt": json.RawMessage(`{"messages":[{"role":"user","content":"Hello {{name}}"}],"variable_schema":{"type":"object","properties":{"name":{"type":"string"}},"required":["name"]},"default_parameters":{"max_output_tokens":100}}`)}, idem("pinned-prompt"), http.StatusCreated)
+	promptID := mcpExecString(t, prompt, "id")
+	published := h.want(owner, "POST", "/api/v1/prompts/"+promptID+"/publish", nil, withMatch(prompt, idem("pinned-prompt-publish")), http.StatusOK)
+	promptRevision := mcpExecString(t, published, "revision_id")
+	secret := mcpExecString(t, key, "secret")
+	h.refresh()
+	authority, err := h.Runtime.Authenticate(secret)
+	if err != nil {
+		t.Fatal(err)
+	}
+	route := h.Runtime.Release().Snapshot.Routes[slug]
+	pinnedProvider := h.Runtime.Release().Snapshot.Providers[providerID]
+	expires := time.Now().Add(time.Hour)
+	version := retainedapi.Revision
+	cache, err := h.Gateway.Resources.Put(t.Context(), &resources.Resource{Kind: "context_cache", APIKeyID: authority.ID, RouteSlug: slug, ProviderID: pinnedProvider.ID, ProviderRevisionID: pinnedProvider.RevisionID, RouteRevisionID: route.RevisionID, TargetID: route.Targets[0].ID, SlotID: pinnedProvider.Slots[0].ID, CredentialID: pinnedProvider.Slots[0].CredentialID, UpstreamID: "cachedContents/pinned-test", State: "active", Metadata: json.RawMessage(`{"model":"fixture-model","upstream_model":"fixture-model","total_token_count":4,"no_cached_tools":true}`), ExpiresAt: &expires, ContractVersion: &version})
+	if err != nil {
+		t.Fatal(err)
+	}
+	valkey, prefix, _ := acctKeyspace(t)
+	limiter, err := limits.New(valkey, strings.TrimSuffix(prefix, ":"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	limiter.UseDurableDebits(h.Pool)
+	store := &limits.DebitStore{Pool: h.Pool, Limiter: limiter}
+	h.Gateway.Admission = gateway.NewAdmission(limiter, func() limits.OutagePolicy { return limits.FailClosed }, slog.New(slog.DiscardHandler))
+	h.Gateway.Debits = gateway.DurableSessionDebits(store)
+	h.Gateway.WorkflowRuns = &agents.WorkflowStore{Pool: h.Pool, Auth: h.AuthKey, Debits: store}
+	h.Gateway.WorkflowTools = &mcp.Server{Runtime: h.Runtime, Egress: &h.Policy, Auth: h.AuthKey, Limiter: limiter, Ledger: &mcp.DurableLedger{Pool: h.Pool, Store: store, Auth: h.AuthKey}}
+	h.Gateway.Sink = &gateway.AccountingSink{Emitter: usage.NewEmitter(8)}
+	response, raw := geminiPublic(t, h, http.MethodPost, "/gemini/v1beta/models/"+slug+":generateContent", secret, []byte(fmt.Sprintf(`{"cachedContent":%q,"olp_prompt":{"id":%q,"revision_id":%q,"variables":{"name":"world"}}}`, cache.ID, promptID, promptRevision)))
+	if response.StatusCode != http.StatusOK || calls.Load() != 2 || !strings.Contains(string(raw), "pinned-final") {
+		t.Fatalf("pinned workflow failed: status=%d body=%s model calls=%d", response.StatusCode, raw, calls.Load())
+	}
+	first, second := <-providerRequests, <-providerRequests
+	if string(first["cachedContent"]) != `"cachedContents/pinned-test"` || string(second["cachedContent"]) != `"cachedContents/pinned-test"` || !strings.Contains(string(first["contents"]), "Hello world") || !strings.Contains(string(second["contents"]), "pinned-result") || len(first["olp_prompt"]) != 0 {
+		t.Fatalf("workflow lost its pinned cache or tool result: first=%s second=%s", first["cachedContent"], second["cachedContent"])
+	}
+	var models, tools, runs int
+	if err := h.Pool.QueryRow(t.Context(), `SELECT count(*) FILTER(WHERE kind='model' AND state='settled'),count(*) FILTER(WHERE kind='tool' AND state='settled'),count(DISTINCT run_id) FROM olp.execution_debits WHERE api_key_id=$1`, authority.ID).Scan(&models, &tools, &runs); err != nil {
+		t.Fatal(err)
+	}
+	if models != 2 || tools != 1 || runs != 1 {
+		t.Fatalf("pinned workflow did not settle all steps: models=%d tools=%d runs=%d", models, tools, runs)
+	}
+}
+
+func TestAnthropicToolCallsCertification(t *testing.T) {
+	h := newAccessHarness(t)
+	owner := h.owner()
+	project := createProject(h, owner, "Anthropic tool certification")
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.Method == http.MethodGet {
+			_ = json.NewEncoder(w).Encode(map[string]any{"data": []any{map[string]string{"id": vendorModel}}})
+			return
+		}
+		var request map[string]json.RawMessage
+		if json.NewDecoder(r.Body).Decode(&request) != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		content := func() []any {
+			if strings.Contains(string(request["tools"]), "olp_certification_probe") {
+				return []any{map[string]any{"type": "tool_use", "id": "probe-call", "name": "olp_certification_probe", "input": map[string]any{}}}
+			}
+			return []any{map[string]any{"type": "text", "text": "ready"}}
+		}()
+		_ = json.NewEncoder(w).Encode(map[string]any{"id": "probe-message", "type": "message", "role": "assistant", "model": vendorModel, "content": content, "stop_reason": "end_turn", "usage": map[string]any{"input_tokens": 1, "output_tokens": 1}})
+	}))
+	defer upstream.Close()
+	configuration := map[string]any{"kind": "anthropic", "profile_id": "anthropic-messages", "profile_revision": "1", "endpoint": upstream.URL + "/v1", "auth_mode": "api_key"}
+	provider := h.want(owner, "POST", "/api/v1/providers", map[string]any{"name": "Anthropic tools", "project_id": project, "configuration": configuration, "model": vendorModel, "credential": vendorSecret}, idem("anthropic-tool-provider"), http.StatusCreated)
+	providerPath := "/api/v1/providers/" + mcpExecString(t, provider, "id")
+	modelResponse := h.want(owner, "GET", providerPath+"/models", nil, nil, http.StatusOK)
+	models, hasModels := modelResponse["items"].([]any)
+	if !hasModels || len(models) != 1 {
+		t.Fatalf("unexpected provider models: %v", modelResponse)
+	}
+	model, isModel := models[0].(map[string]any)
+	if !isModel {
+		t.Fatalf("unexpected provider model: %v", models[0])
+	}
+	modelID := mcpExecString(t, model, "id")
+	declared := h.want(owner, "PATCH", providerPath+"/models/"+modelID, map[string]any{"enabled": true, "capabilities": []any{map[string]any{"operation": "generation", "surface": "anthropic", "mode": "unary"}}}, etagHeader(provider), http.StatusOK)
+	certification := h.want(owner, "POST", providerPath+"/models/"+modelID+"/certify", nil, etagHeader(declared), http.StatusOK)
+	results, ok := certification["results"].([]any)
+	if !ok || len(results) != 1 {
+		t.Fatalf("provider certification failed: %v", certification)
+	}
+	result, isResult := results[0].(map[string]any)
+	if !isResult || result["tool_calls"] != true {
+		t.Fatalf("provider tool-call certification failed: %v", certification)
 	}
 }

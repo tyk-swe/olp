@@ -262,6 +262,58 @@ func TestGatewayToolExecutionNativeRefusals(t *testing.T) {
 	}
 }
 
+func TestGatewayToolExecutionNativeBounds(t *testing.T) {
+	for _, dialect := range []struct {
+		name, profile, path, body, tool, response string
+	}{
+		{"anthropic", "anthropic-messages", "/anthropic/v1/messages", `{"model":"` + routeSlug + `","max_tokens":20,"messages":[{"role":"user","content":"hello"}]}`, `{"type":"tool_use","id":"call-1","name":%q,"input":{}}`, `{"id":"bounded","type":"message","role":"assistant","model":"model-a","content":[%s],"stop_reason":"tool_use","usage":{"input_tokens":2,"output_tokens":3}}`},
+		{"gemini", "gemini-generation", "/gemini/v1beta/models/" + routeSlug + ":generateContent", `{"contents":[{"role":"user","parts":[{"text":"hello"}]}]}`, `{"functionCall":{"name":%q,"args":{}}}`, `{"candidates":[{"content":{"role":"model","parts":[%s]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":2,"candidatesTokenCount":3,"totalTokenCount":5}}`},
+	} {
+		for _, bound := range []struct {
+			name, code           string
+			calls, models, tools int
+		}{
+			{"iterations", "tool_iteration_limit", 1, 8, 7},
+			{"calls", "tool_call_limit", 33, 1, 0},
+		} {
+			t.Run(dialect.name+"/"+bound.name, func(t *testing.T) {
+				toolsetID, projectID := uuid.NewString(), uuid.NewString()
+				alias := "t_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+				h := strictHarness(t, func(snapshot *routing.Snapshot) {
+					route := snapshot.Routes[routeSlug]
+					route.Fidelity.Mode, route.ToolExecution, route.ProjectID = routing.FidelityTransformed, "gateway", &projectID
+					route.Toolsets = []string{toolsetID}
+					snapshot.Routes[routeSlug] = route
+					for id, provider := range snapshot.Providers {
+						provider.Kind, provider.ProfileID, provider.ProfileRevision = dialect.name, dialect.profile, connectors.ProfileRevision
+						provider.Capabilities = []routing.Capability{{Model: provider.Capabilities[0].Model, Operation: "generation", Surface: dialect.name, Mode: "unary", ToolCalls: true}}
+						snapshot.Providers[id] = provider
+					}
+				})
+				authority := h.rt.keys[fullKey]
+				authority.ProjectID = &projectID
+				h.rt.keys[fullKey] = authority
+				called := make(chan struct{}, 33)
+				fixture := &workflowFixture{runID: uuid.NewString(), tool: WorkflowTool{ToolsetID: toolsetID, RevisionID: uuid.NewString(), Definition: routing.MCPToolsetTool{Alias: alias, Classification: "read_only"}}, beforeCall: func() error { called <- struct{}{}; return nil }}
+				h.gateway.WorkflowRuns, h.gateway.WorkflowTools, h.gateway.Debits = fixture, fixture, &workflowDebitFixture{fakeSessionDebits: &fakeSessionDebits{}}
+				h.mock.set("a", func(w http.ResponseWriter, _ *http.Request) {
+					parts := strings.TrimSuffix(strings.Repeat(fmt.Sprintf(dialect.tool, alias)+",", bound.calls), ",")
+					fmt.Fprintf(w, dialect.response, parts)
+				})
+				response := h.do(t.Context(), http.MethodPost, dialect.path, fullKey, []byte(dialect.body), nil)
+				defer response.Body.Close()
+				body, err := io.ReadAll(response.Body)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if response.StatusCode != http.StatusBadRequest || !strings.Contains(string(body), bound.code) || h.mock.count("a") != bound.models || len(called) != bound.tools {
+					t.Fatalf("native workflow did not enforce its %s bound: status=%d body=%s model_calls=%d tool_calls=%d", bound.name, response.StatusCode, body, h.mock.count("a"), len(called))
+				}
+			})
+		}
+	}
+}
+
 func TestGatewayToolExecutionRejectsStrictRoutesBeforeDispatch(t *testing.T) {
 	h := strictHarness(t, func(snapshot *routing.Snapshot) {
 		route := snapshot.Routes[routeSlug]
