@@ -16,6 +16,18 @@ export type DelegationConsentRequest =
   components['schemas']['DelegationConsentRequest'];
 export type DelegationConsent = components['schemas']['DelegationConsent'];
 
+export async function getDelegationOptions(
+  keyID: string,
+  signal?: AbortSignal
+) {
+  return unwrap(
+    await apiClient.GET('/api/v1/delegation-options', {
+      params: { query: { api_key_id: keyID } },
+      signal
+    })
+  );
+}
+
 export async function createDelegationConsent(
   input: DelegationConsentRequest
 ): Promise<DelegationConsent> {

@@ -8909,6 +8909,18 @@ type DelegationConsentRequest struct {
 	TtlSeconds    *int               `json:"ttl_seconds,omitempty"`
 }
 
+// DelegationOption defines model for DelegationOption.
+type DelegationOption struct {
+	// AllowedRoutes Active inference routes currently allowed by both the key and the agent.
+	AllowedRoutes []string           `json:"allowed_routes"`
+	Id            openapi_types.UUID `json:"id"`
+}
+
+// DelegationOptions defines model for DelegationOptions.
+type DelegationOptions struct {
+	Agents []DelegationOption `json:"agents"`
+}
+
 // Discount defines model for Discount.
 type Discount struct {
 	CreatedAt   time.Time          `json:"created_at"`
@@ -15262,6 +15274,11 @@ type ListCodeTokenWindowsParams struct {
 type ApplyConfigurationParams struct {
 	// IdempotencyKey Unique mutation key
 	IdempotencyKey string `json:"Idempotency-Key"`
+}
+
+// GetDelegationOptionsParams defines parameters for GetDelegationOptions.
+type GetDelegationOptionsParams struct {
+	ApiKeyId openapi_types.UUID `form:"api_key_id" json:"api_key_id"`
 }
 
 // ListExecutionDebitsParams defines parameters for ListExecutionDebits.

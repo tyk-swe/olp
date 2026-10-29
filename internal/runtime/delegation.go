@@ -175,8 +175,12 @@ func (m *Manager) authenticateDelegation(ctx context.Context, token, assertion s
 	if err := tx.Commit(ctx); err != nil {
 		return nil, ErrStaleAuthority
 	}
-	pair, _ := json.Marshal([3]string{project, key.ID, agent.ID})
-	return key.DelegatedInference(routes, *agent, hex.EncodeToString(m.auth.Digest(secrets.DelegationPairDigest, string(pair))), boundDelegationExpiry(expires, agent.ExpiresAt)), nil
+	if memberID == nil {
+		pair, _ := json.Marshal([3]string{project, key.ID, agent.ID})
+		return key.DelegatedInference(routes, *agent, "", hex.EncodeToString(m.auth.Digest(secrets.DelegationPairDigest, string(pair))), boundDelegationExpiry(expires, agent.ExpiresAt)), nil
+	}
+	pair, _ := json.Marshal([4]string{project, "member", *memberID, agent.ID})
+	return key.DelegatedInference(routes, *agent, *memberID, hex.EncodeToString(m.auth.Digest(secrets.DelegationPairDigest, string(pair))), boundDelegationExpiry(expires, agent.ExpiresAt)), nil
 }
 
 func memberDelegationAllowed(ctx context.Context, tx pgx.Tx, memberID *string, project string) error {

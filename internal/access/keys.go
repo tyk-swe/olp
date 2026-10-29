@@ -669,6 +669,7 @@ type Authority struct {
 	SnapshotID                string
 	AgentPrincipal            bool
 	DelegationAgentID         string
+	DelegationMemberID        string
 	DelegationPairDigest      string
 	WorkloadIssuerID          *string
 	WorkloadDigest            string
@@ -703,11 +704,12 @@ type Authority struct {
 	ExpiresAt, RevokedAt                                   *time.Time
 }
 
-func (a Authority) DelegatedInference(routes []string, agent Authority, pairDigest string, expiresAt time.Time) *Authority {
+func (a Authority) DelegatedInference(routes []string, agent Authority, memberID, pairDigest string, expiresAt time.Time) *Authority {
 	return &Authority{
 		SnapshotID:           a.SnapshotID,
 		AgentPrincipal:       a.AgentPrincipal,
 		DelegationAgentID:    agent.ID,
+		DelegationMemberID:   memberID,
 		DelegationPairDigest: pairDigest,
 		DelegationAgentLimits: &DelegationAgentLimits{ID: agent.ID, LookupID: agent.LimitsLookup(), Limits: AdmissionLimits{
 			RequestsPerMinute: agent.Policy.RequestsPerMinute,

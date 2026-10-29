@@ -48,11 +48,16 @@ func Keyless(origin string) bool {
 }
 
 func validateDelegation(event *Event) error {
-	if event.AgentPrincipalID == "" && event.DelegationPairDigest == "" {
+	if event.AgentPrincipalID == "" && event.MemberPrincipalID == "" && event.DelegationPairDigest == "" {
 		return nil
 	}
 	if _, err := uuid.Parse(event.AgentPrincipalID); err != nil || !endUserDigestPattern.MatchString(event.DelegationPairDigest) || Keyless(event.Origin) || event.APIKeyID == "" {
 		return errors.New("request metadata delegation attribution is invalid")
+	}
+	if event.MemberPrincipalID != "" {
+		if _, err := uuid.Parse(event.MemberPrincipalID); err != nil {
+			return errors.New("request metadata delegation member is invalid")
+		}
 	}
 	return nil
 }
@@ -77,6 +82,7 @@ type Event struct {
 	// APIKeyID is empty exactly when the origin is keyless.
 	APIKeyID             string            `json:"api_key_id"`
 	AgentPrincipalID     string            `json:"agent_principal_id,omitempty"`
+	MemberPrincipalID    string            `json:"member_principal_id,omitempty"`
 	DelegationPairDigest string            `json:"delegation_pair_digest,omitempty"`
 	Attribution          map[string]string `json:"attribution,omitempty"`
 	// Origin is empty for a caller request. ParentRequestID names the caller
@@ -388,6 +394,7 @@ type wireEvent struct {
 	EndUserDigest           *string               `json:"end_user_digest"`
 	APIKeyID                *string               `json:"api_key_id"`
 	AgentPrincipalID        *string               `json:"agent_principal_id"`
+	MemberPrincipalID       *string               `json:"member_principal_id"`
 	DelegationPairDigest    *string               `json:"delegation_pair_digest"`
 	Attribution             *map[string]string    `json:"attribution"`
 	Origin                  *string               `json:"origin"`
@@ -558,6 +565,9 @@ func (w wireEvent) decode() (*Event, error) {
 	}
 	if w.AgentPrincipalID != nil {
 		event.AgentPrincipalID = *w.AgentPrincipalID
+	}
+	if w.MemberPrincipalID != nil {
+		event.MemberPrincipalID = *w.MemberPrincipalID
 	}
 	if w.DelegationPairDigest != nil {
 		event.DelegationPairDigest = *w.DelegationPairDigest

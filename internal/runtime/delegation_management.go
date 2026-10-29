@@ -1,6 +1,7 @@
 package runtime
 
 import (
+	"cmp"
 	"context"
 	"net/http"
 	"slices"
@@ -16,6 +17,11 @@ type DelegationManagement struct {
 	Manager *Manager
 }
 
+type delegationOption struct {
+	ID            string   `json:"id"`
+	AllowedRoutes []string `json:"allowed_routes"`
+}
+
 type delegationConsentRequest struct {
 	AgentID       string   `json:"agent_id"`
 	APIKeyID      string   `json:"api_key_id"`
@@ -25,6 +31,83 @@ type delegationConsentRequest struct {
 
 func (s *DelegationManagement) Register(mux *http.ServeMux) {
 	s.Access.Route(mux, "POST /api/v1/delegation-consents", s.create)
+	s.Access.Route(mux, "GET /api/v1/delegation-options", s.options)
+}
+
+func (s *DelegationManagement) options(r *http.Request, _ access.Principal) (access.Reply, error) {
+	keyID, err := access.ParseUUID(r.URL.Query().Get("api_key_id"))
+	if err != nil {
+		return access.Reply{}, err
+	}
+	tx, err := s.Access.Begin(r)
+	if err != nil {
+		return access.Reply{}, err
+	}
+	defer tx.Rollback(r.Context())
+	principal, err := s.Access.Reauthorize(r, tx)
+	if err != nil {
+		return access.Reply{}, err
+	}
+	var projectID *string
+	if err := tx.QueryRow(r.Context(), "SELECT project_id::text FROM olp.api_keys WHERE id=$1 AND workload_issuer_id IS NULL", keyID).Scan(&projectID); err != nil {
+		if err == pgx.ErrNoRows {
+			return access.Reply{}, access.Fail(http.StatusNotFound, "not_found", "The resource was not found.")
+		}
+		return access.Reply{}, err
+	}
+	if projectID == nil {
+		return access.Reply{}, access.Forbidden()
+	}
+	if err := principal.Project(projectID, access.Change); err != nil {
+		return access.Reply{}, err
+	}
+	rows, err := tx.Query(r.Context(), "SELECT slug FROM olp.routes WHERE project_id=$1 AND state='active' ORDER BY slug", *projectID)
+	if err != nil {
+		return access.Reply{}, err
+	}
+	routes, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		return access.Reply{}, err
+	}
+	var current string
+	if err := tx.QueryRow(r.Context(), "SELECT authority_id::text FROM olp.installation WHERE singleton").Scan(&current); err != nil {
+		return access.Reply{}, err
+	}
+	s.Manager.mu.RLock()
+	defer s.Manager.mu.RUnlock()
+	state := s.Manager.authority
+	if !state.loaded || state.id != current || time.Since(state.readAt) > AuthorityStaleAfter {
+		return access.Reply{}, access.Fail(http.StatusServiceUnavailable, "authority_unavailable", "Delegation is unavailable.")
+	}
+	key, ok := state.agentPrincipals[keyID]
+	if !ok || key.WorkloadIssuerID != nil || key.ProjectID == nil || *key.ProjectID != *projectID || !slices.Contains(key.Policy.Scopes, "delegate") {
+		return access.Reply{}, access.Forbidden()
+	}
+	now := time.Now()
+	options := slices.SortedFunc(func(yield func(delegationOption) bool) {
+		for _, registered := range state.workloadPrincipals {
+			if registered.ProjectID == nil || *registered.ProjectID != *projectID {
+				continue
+			}
+			agent, _, ok := state.memberConsentAgent(registered)
+			if !ok {
+				continue
+			}
+			allowed := slices.Collect(func(yieldRoute func(string) bool) {
+				for _, route := range routes {
+					if delegationRoutesAllowed(agent, key, []string{route}, now) && !yieldRoute(route) {
+						return
+					}
+				}
+			})
+			if len(allowed) != 0 && !yield(delegationOption{ID: registered.ID, AllowedRoutes: allowed}) {
+				return
+			}
+		}
+	}, func(left, right delegationOption) int { return cmp.Compare(left.ID, right.ID) })
+	return access.Commit(r, tx, access.Reply{Status: http.StatusOK, Body: struct {
+		Agents []delegationOption `json:"agents"`
+	}{Agents: append([]delegationOption{}, options...)}})
 }
 
 func (s *DelegationManagement) create(r *http.Request, _ access.Principal) (access.Reply, error) {
@@ -99,23 +182,34 @@ func (m *Manager) memberConsentTarget(ctx context.Context, tx pgx.Tx, agentID, k
 		return memberConsentTarget{}, access.Fail(http.StatusNotFound, "not_found", "The resource was not found.")
 	}
 	for _, principal := range state.workloadPrincipals {
-		if principal.ID != agentID || principal.WorkloadIssuerID == nil || principal.RevokedAt != nil {
+		if principal.ID != agentID {
 			continue
 		}
-		for _, issuer := range state.workloadIssuers {
-			if issuer.ID != *principal.WorkloadIssuerID || !issuer.Config.Enabled {
-				continue
-			}
-			for _, mapping := range issuer.Config.Mappings {
-				if mapping.Name != principal.WorkloadMapping || !mapping.AgentPrincipal {
-					continue
-				}
-				agent, exists := issuer.bindings[mapping.Name]
-				if exists {
-					return memberConsentTarget{agent: agent, key: key, revision: issuer.Revision}, nil
-				}
-			}
+		agent, revision, exists := state.memberConsentAgent(principal)
+		if exists {
+			return memberConsentTarget{agent: agent, key: key, revision: revision}, nil
 		}
 	}
 	return memberConsentTarget{}, access.Fail(http.StatusNotFound, "not_found", "The resource was not found.")
+}
+
+func (state authorityState) memberConsentAgent(principal access.Authority) (access.Authority, string, bool) {
+	if principal.WorkloadIssuerID == nil || principal.RevokedAt != nil || principal.ProjectID == nil {
+		return access.Authority{}, "", false
+	}
+	for _, issuer := range state.workloadIssuers {
+		if issuer.ID != *principal.WorkloadIssuerID || !issuer.Config.Enabled {
+			continue
+		}
+		for _, mapping := range issuer.Config.Mappings {
+			if mapping.Name != principal.WorkloadMapping || !mapping.AgentPrincipal || mapping.ProjectID != *principal.ProjectID {
+				continue
+			}
+			agent, exists := issuer.bindings[mapping.Name]
+			if exists {
+				return agent, issuer.Revision, true
+			}
+		}
+	}
+	return access.Authority{}, "", false
 }

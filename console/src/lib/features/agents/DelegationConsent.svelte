@@ -12,7 +12,11 @@
   } from '$lib/features/access/profile/api';
   import { useRole } from '$lib/features/access/session/useRole.svelte';
   import { usePrincipalLifetime } from '$lib/forms/mutationIntent.svelte';
-  import { createDelegationConsent, type DelegationConsent } from './api';
+  import {
+    createDelegationConsent,
+    getDelegationOptions,
+    type DelegationConsent
+  } from './api';
 
   const role = useRole();
   const inventory = createQuery(() => ({
@@ -58,14 +62,17 @@
     )
   );
   const selectedKey = $derived(manageableKeys.find((key) => key.id === keyID));
+  const options = createQuery(() => ({
+    queryKey: ['agent-delegation-options', keyID] as const,
+    queryFn: ({ queryKey, signal }) =>
+      getDelegationOptions(queryKey[1], signal),
+    enabled: !!selectedKey && role.allows('GET /api/v1/delegation-options')
+  }));
   const agents = $derived(
-    (inventory.data ?? []).filter(
-      (key) =>
-        key.workload_issuer_id &&
-        !key.revoked_at &&
-        selectedKey &&
-        key.project_id === selectedKey.project_id
-    )
+    (options.data?.agents ?? []).flatMap((option) => {
+      const agent = inventory.data?.find((key) => key.id === option.id);
+      return agent ? [{ ...agent, eligibleRoutes: option.allowed_routes }] : [];
+    })
   );
   const selectedAgent = $derived(agents.find((agent) => agent.id === agentID));
   const routes = $derived(
@@ -74,7 +81,15 @@
       .map((route) => route.trim())
       .filter(Boolean)
   );
-  const ready = $derived(!!selectedKey && !!selectedAgent && routes.length > 0);
+  const allowed = $derived(
+    routes.length > 0 &&
+      routes.every(
+        (route, index) =>
+          selectedAgent?.eligibleRoutes.includes(route) &&
+          routes.indexOf(route) === index
+      )
+  );
+  const ready = $derived(!!selectedKey && !!selectedAgent && allowed);
 
   onMount(() => {
     const parameters = new URLSearchParams(window.location.search);
@@ -166,7 +181,7 @@
           <select
             id="delegation-agent"
             bind:value={agentID}
-            disabled={busy || !selectedKey}
+            disabled={busy || !selectedKey || options.isPending}
           >
             <option value="">Choose a workload</option>
             {#each agents as agent (agent.id)}<option value={agent.id}
@@ -185,10 +200,18 @@
           />
         </label>
       </div>
-      <p>
-        Enter route names separated by commas. The key and agent must both allow
-        every selected route.
-      </p>
+      {#if selectedKey && options.isError}
+        <p role="alert">Eligible agents and routes could not be loaded.</p>
+      {:else if selectedKey && options.isSuccess && agents.length === 0}
+        <p>No eligible agents have access to an active route for this key.</p>
+      {/if}
+      {#if selectedAgent}
+        <p>Available routes: {selectedAgent.eligibleRoutes.join(', ')}.</p>
+        <p>Enter unique route names separated by commas.</p>
+        {#if routes.length > 0 && !allowed}
+          <p role="alert">Choose only routes listed above.</p>
+        {/if}
+      {/if}
       {#if ready}
         <p>
           Allow {selectedAgent?.name} to make one inference request on {routes.join(

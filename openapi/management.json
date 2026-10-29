@@ -28434,6 +28434,40 @@
           "allowed_routes"
         ],
         "type": "object"
+      },
+      "DelegationOptions": {
+        "type": "object",
+        "required": [
+          "agents"
+        ],
+        "properties": {
+          "agents": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DelegationOption"
+            }
+          }
+        }
+      },
+      "DelegationOption": {
+        "type": "object",
+        "required": [
+          "id",
+          "allowed_routes"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "allowed_routes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Active inference routes currently allowed by both the key and the agent."
+          }
+        }
       }
     },
     "securitySchemes": {
@@ -66258,6 +66292,92 @@
         "tags": [
           "agents"
         ]
+      }
+    },
+    "/api/v1/delegation-options": {
+      "get": {
+        "operationId": "get_delegation_options",
+        "parameters": [
+          {
+            "name": "api_key_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Eligible agents and currently authorized inference routes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DelegationOptions"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Project management permission required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Key not found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Authority is unavailable",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "sessionCookie": [
+              "keys"
+            ]
+          }
+        ],
+        "summary": "List eligible agents and routes for member consent"
       }
     }
   },
