@@ -33,15 +33,10 @@ func (m *Manager) CreateDelegation(ctx context.Context, agent, key access.Author
 	if agent.SnapshotID == "" || agent.SnapshotID != key.SnapshotID {
 		return DelegationGrant{}, ErrStaleAuthority
 	}
-	if len(bounds.Scopes) != 1 || bounds.Scopes[0] != "inference" || len(bounds.AllowedRoutes) == 0 || len(bounds.AllowedRoutes) > 100 || bounds.TTLSeconds < 0 || bounds.TTLSeconds > 900 {
+	if !validDelegationBounds(bounds) {
 		return DelegationGrant{}, ErrDelegationBounds
 	}
 	now := time.Now()
-	for index, route := range bounds.AllowedRoutes {
-		if !access.RouteSlug.MatchString(route) || slices.Contains(bounds.AllowedRoutes[:index], route) {
-			return DelegationGrant{}, ErrDelegationBounds
-		}
-	}
 	if !delegationRoutesAllowed(agent, key, bounds.AllowedRoutes, now) {
 		return DelegationGrant{}, access.Forbidden()
 	}
@@ -61,8 +56,71 @@ func (m *Manager) CreateDelegation(ctx context.Context, agent, key access.Author
 	return DelegationGrant{Token: token, ExpiresAt: expiry}, nil
 }
 
+func validDelegationBounds(bounds DelegationBounds) bool {
+	if len(bounds.Scopes) != 1 || bounds.Scopes[0] != "inference" || len(bounds.AllowedRoutes) == 0 || len(bounds.AllowedRoutes) > 100 || bounds.TTLSeconds < 0 || bounds.TTLSeconds > 900 {
+		return false
+	}
+	for index, route := range bounds.AllowedRoutes {
+		if !access.RouteSlug.MatchString(route) || slices.Contains(bounds.AllowedRoutes[:index], route) {
+			return false
+		}
+	}
+	return true
+}
+
 func (m *Manager) AuthenticateDelegation(ctx context.Context, token, assertion string) (*access.Authority, error) {
 	return m.authenticateDelegation(ctx, token, assertion, false)
+}
+
+func (m *Manager) ExchangeMemberConsent(ctx context.Context, agent access.Authority, consent string, bounds DelegationBounds) (DelegationGrant, error) {
+	if !validDelegationBounds(bounds) {
+		return DelegationGrant{}, ErrDelegationBounds
+	}
+	if !agent.AgentPrincipal || agent.WorkloadIssuerID == nil || agent.ProjectID == nil || agent.RevokedAt != nil || agent.ExpiresAt == nil || !agent.ExpiresAt.After(time.Now()) {
+		return DelegationGrant{}, ErrInvalidKey
+	}
+	tx, err := m.delegationTransaction(ctx, agent.SnapshotID)
+	if err != nil {
+		return DelegationGrant{}, err
+	}
+	defer tx.Rollback(ctx)
+	var keyID, project, agentID, revision string
+	var memberID *string
+	var approved []string
+	var expiry time.Time
+	queryErr := tx.QueryRow(ctx, `SELECT api_key_id::text,project_id::text,agent_id::text,issuer_revision::text,allowed_routes,expires_at,consenting_user_id::text FROM olp.agent_delegations WHERE consent_digest=$1 AND consumed_at IS NULL AND revoked_at IS NULL AND expires_at>now() FOR UPDATE`, m.auth.Digest(secrets.DelegationConsentDigest, consent)).Scan(&keyID, &project, &agentID, &revision, &approved, &expiry, &memberID)
+	if errors.Is(queryErr, pgx.ErrNoRows) {
+		return DelegationGrant{}, ErrInvalidKey
+	}
+	if queryErr != nil {
+		return DelegationGrant{}, ErrStaleAuthority
+	}
+	if agent.ID != agentID || *agent.ProjectID != project || agent.WorkloadRevision != revision {
+		return DelegationGrant{}, ErrInvalidKey
+	}
+	if err := memberDelegationAllowed(ctx, tx, memberID, project); err != nil {
+		return DelegationGrant{}, err
+	}
+	for _, route := range bounds.AllowedRoutes {
+		if !slices.Contains(approved, route) {
+			return DelegationGrant{}, access.Forbidden()
+		}
+	}
+	m.mu.RLock()
+	key, exists := m.authority.agentPrincipals[keyID]
+	m.mu.RUnlock()
+	if !exists || key.WorkloadIssuerID != nil || key.ProjectID == nil || *key.ProjectID != project || !slices.Contains(key.Policy.Scopes, "delegate") || !delegationRoutesAllowed(agent, key, bounds.AllowedRoutes, time.Now()) {
+		return DelegationGrant{}, ErrInvalidKey
+	}
+	token := "olpd_" + secrets.Token()
+	expires := boundDelegationExpiry(boundDelegationExpiry(time.Now().Add(delegationTTL(bounds.TTLSeconds)), &expiry), agent.ExpiresAt)
+	if _, err := tx.Exec(ctx, `UPDATE olp.agent_delegations SET token_digest=$1,consent_digest=NULL,allowed_routes=$2,expires_at=$3 WHERE consent_digest=$4`, m.auth.Digest(secrets.DelegationTokenDigest, token), bounds.AllowedRoutes, expires, m.auth.Digest(secrets.DelegationConsentDigest, consent)); err != nil {
+		return DelegationGrant{}, ErrStaleAuthority
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return DelegationGrant{}, ErrStaleAuthority
+	}
+	return DelegationGrant{Token: token, ExpiresAt: expires}, nil
 }
 
 func (m *Manager) ReauthenticateDelegation(ctx context.Context, token, assertion string) (*access.Authority, error) {
@@ -83,9 +141,10 @@ func (m *Manager) authenticateDelegation(ctx context.Context, token, assertion s
 	}
 	defer tx.Rollback(ctx)
 	var keyID, project, agentID, revision string
+	var memberID *string
 	var routes []string
 	var expires time.Time
-	queryErr := tx.QueryRow(ctx, `SELECT api_key_id::text,project_id::text,agent_id::text,issuer_revision::text,allowed_routes,expires_at FROM olp.agent_delegations WHERE token_digest=$1 AND (consumed_at IS NOT NULL)=$2 AND revoked_at IS NULL AND expires_at>now() FOR UPDATE`, m.auth.Digest(secrets.DelegationTokenDigest, token), consumed).Scan(&keyID, &project, &agentID, &revision, &routes, &expires)
+	queryErr := tx.QueryRow(ctx, `SELECT api_key_id::text,project_id::text,agent_id::text,issuer_revision::text,allowed_routes,expires_at,consenting_user_id::text FROM olp.agent_delegations WHERE token_digest=$1 AND (consumed_at IS NOT NULL)=$2 AND revoked_at IS NULL AND expires_at>now() FOR UPDATE`, m.auth.Digest(secrets.DelegationTokenDigest, token), consumed).Scan(&keyID, &project, &agentID, &revision, &routes, &expires, &memberID)
 	if errors.Is(queryErr, pgx.ErrNoRows) {
 		return nil, ErrInvalidKey
 	}
@@ -94,6 +153,9 @@ func (m *Manager) authenticateDelegation(ctx context.Context, token, assertion s
 	}
 	if agent.ID != agentID || *agent.ProjectID != project || agent.WorkloadRevision != revision {
 		return nil, ErrInvalidKey
+	}
+	if err := memberDelegationAllowed(ctx, tx, memberID, project); err != nil {
+		return nil, err
 	}
 	m.mu.RLock()
 	key, exists := m.authority.agentPrincipals[keyID]
@@ -113,8 +175,31 @@ func (m *Manager) authenticateDelegation(ctx context.Context, token, assertion s
 	if err := tx.Commit(ctx); err != nil {
 		return nil, ErrStaleAuthority
 	}
-	pair, _ := json.Marshal([3]string{project, key.ID, agent.ID})
-	return key.DelegatedInference(routes, *agent, hex.EncodeToString(m.auth.Digest(secrets.DelegationPairDigest, string(pair))), boundDelegationExpiry(expires, agent.ExpiresAt)), nil
+	if memberID == nil {
+		pair, _ := json.Marshal([3]string{project, key.ID, agent.ID})
+		return key.DelegatedInference(routes, *agent, "", hex.EncodeToString(m.auth.Digest(secrets.DelegationPairDigest, string(pair))), boundDelegationExpiry(expires, agent.ExpiresAt)), nil
+	}
+	pair, _ := json.Marshal([4]string{project, "member", *memberID, agent.ID})
+	return key.DelegatedInference(routes, *agent, *memberID, hex.EncodeToString(m.auth.Digest(secrets.DelegationPairDigest, string(pair))), boundDelegationExpiry(expires, agent.ExpiresAt)), nil
+}
+
+func memberDelegationAllowed(ctx context.Context, tx pgx.Tx, memberID *string, project string) error {
+	if memberID == nil {
+		return nil
+	}
+	var role, scope, projectRole string
+	err := tx.QueryRow(ctx, `SELECT u.role,u.access_scope,COALESCE(m.role,'') FROM olp.users u LEFT JOIN olp.effective_project_members m ON m.user_id=u.id AND m.project_id=$2 WHERE u.id=$1 AND u.active AND u.oidc_authorized`, *memberID, project).Scan(&role, &scope, &projectRole)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ErrInvalidKey
+	}
+	if err != nil {
+		return ErrStaleAuthority
+	}
+	principal := access.Principal{User: access.User{Role: role}, Kind: "user", AllProjects: scope == "global", Projects: map[string]string{project: projectRole}}
+	if principal.Authorize(access.Keys) != nil || principal.Project(&project, access.Change) != nil {
+		return ErrInvalidKey
+	}
+	return nil
 }
 
 func (m *Manager) delegationTransaction(ctx context.Context, expected string) (pgx.Tx, error) {

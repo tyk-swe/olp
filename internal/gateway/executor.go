@@ -1189,6 +1189,7 @@ func (s *Server) finish(x *call, out *outcome, status int) {
 			Actor:                x.actor,
 			KeyID:                x.keyID,
 			AgentPrincipalID:     x.authority.DelegationAgentID,
+			MemberPrincipalID:    x.authority.DelegationMemberID,
 			DelegationPairDigest: x.authority.DelegationPairDigest,
 			EndUserDigest:        x.endUserDigest,
 			BudgetGroupID:        x.budgetGroupID,
@@ -1223,6 +1224,7 @@ func (s *Server) finish(x *call, out *outcome, status int) {
 				env.KeyID = ""
 				env.EndUserDigest = ""
 				env.AgentPrincipalID = ""
+				env.MemberPrincipalID = ""
 				env.DelegationPairDigest = ""
 			}
 		}

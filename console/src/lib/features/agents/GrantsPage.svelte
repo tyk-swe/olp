@@ -9,6 +9,7 @@
     usePrincipalLifetime
   } from '$lib/forms/mutationIntent.svelte';
   import { agentKeys } from './agentKeys';
+  import DelegationConsent from './DelegationConsent.svelte';
   import {
     claimMCPGrant,
     authorizeMCPGrant,
@@ -396,6 +397,7 @@
     settings
   </p>
 </header>
+<DelegationConsent />
 {#if $state.error}<p role="alert">{$state.error}</p>{/if}
 {#if $state.message}<p role="status">{$state.message}</p>{/if}
 {#if $state.handoffToken}

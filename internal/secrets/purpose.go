@@ -25,6 +25,7 @@ var (
 	ManagementTokenDigest    = DigestPurpose{"management_token"}
 	SessionDigest            = DigestPurpose{"session"}
 	RecentAuthDigest         = DigestPurpose{"recent_auth"}
+	DelegationConsentDigest  = DigestPurpose{"delegation_consent"}
 	CSRFDigest               = DigestPurpose{"csrf"}
 	OIDCStateDigest          = DigestPurpose{"oidc_state"}
 	OIDCCookieDigest         = DigestPurpose{"oidc_cookie"}
@@ -47,7 +48,7 @@ var (
 // DigestPurposes lists every digest purpose.
 func DigestPurposes() []DigestPurpose {
 	return []DigestPurpose{CacheKeyDigest, SAMLStateDigest, SAMLCookieDigest, SAMLAssertionDigest, MFAChallengeDigest, MFARecoveryDigest, APIKeyDigest, WorkloadDigest, WorkloadAgentDigest, EndUserDigest, ManagementTokenDigest, SessionDigest, RecentAuthDigest, CSRFDigest,
-		OIDCStateDigest, OIDCCookieDigest, InvitationDigest, AdmissionDigest, MutationDigest, InstallationDigest, BatchSubmissionDigest, BatchLineDigest, ApprovalDigest, AgentPrincipalDigest, DelegationTokenDigest, DelegationPairDigest, RetainedSubmissionDigest, ToolInputDigest, ToolCallDigest, MCPEnrollmentDigest}
+		OIDCStateDigest, OIDCCookieDigest, InvitationDigest, AdmissionDigest, MutationDigest, InstallationDigest, BatchSubmissionDigest, BatchLineDigest, ApprovalDigest, AgentPrincipalDigest, DelegationTokenDigest, DelegationConsentDigest, DelegationPairDigest, RetainedSubmissionDigest, ToolInputDigest, ToolCallDigest, MCPEnrollmentDigest}
 }
 
 // SealPurpose binds an encrypted secret to what it is for: a ciphertext sealed

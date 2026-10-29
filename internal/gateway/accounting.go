@@ -140,6 +140,7 @@ func accountingEvent(e Envelope) (*usage.Event, error) {
 		RuntimeGenerationID:  e.RuntimeGenerationID,
 		APIKeyID:             e.KeyID,
 		AgentPrincipalID:     e.AgentPrincipalID,
+		MemberPrincipalID:    e.MemberPrincipalID,
 		DelegationPairDigest: e.DelegationPairDigest,
 		Origin:               e.Origin,
 		ParentRequestID:      optionalText(e.ParentRequestID),
