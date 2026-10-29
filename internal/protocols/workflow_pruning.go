@@ -33,6 +33,37 @@ type workflowPrunePiece struct {
 	raw   json.RawMessage
 }
 
+type WorkflowPieceLocation struct {
+	Pointer string
+	Call    bool
+}
+
+func (exchange WorkflowExchange) PieceLocations(family wire.Format) []WorkflowPieceLocation {
+	field := "messages"
+	if family == wire.Responses {
+		field = "input"
+	} else if family.Surface() == "gemini" {
+		field = "contents"
+	}
+	return slices.Collect(func(yield func(WorkflowPieceLocation) bool) {
+		for _, piece := range exchange.pieces {
+			pointer := "/" + field + "/" + strconv.Itoa(piece.row)
+			if piece.field != "" {
+				pointer += "/" + piece.field + "/" + strconv.Itoa(piece.part)
+			}
+			if !yield(WorkflowPieceLocation{Pointer: pointer, Call: piece.kind == "call"}) {
+				return
+			}
+		}
+	})
+}
+
+func (exchange WorkflowExchange) ContainsCallID(ids []string) bool {
+	return slices.ContainsFunc(exchange.pieces, func(piece workflowPrunePiece) bool {
+		return piece.id != "" && slices.Contains(ids, piece.id)
+	})
+}
+
 func WorkflowPruningTask(request *wire.Request, limit int) string {
 	if request == nil || limit <= 0 {
 		return ""

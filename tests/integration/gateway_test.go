@@ -1814,7 +1814,7 @@ func TestGatewayToolWorkflowSettlesOneRun(t *testing.T) {
 		writeJSON(w, map[string]any{"model": vendorModel, "answers": answers, "usage": map[string]int{"input_tokens": relevanceInputTokens, "output_tokens": relevanceOutputTokens, "total_tokens": relevanceInputTokens + relevanceOutputTokens}})
 	}))
 	defer relevanceServer.Close()
-	relevanceProvider := activeAzureProviderInProject(t, h, owner, "Relevance provider", relevanceServer.URL+"/v1", &project, []any{map[string]any{"operation": "decision", "surface": "openai", "mode": "unary"}}, map[string]any{"kind": "openai_compatible", "options": map[string]any{"vendor_id": "typesafe-jev"}, "profile_id": "systemone", "profile_revision": "1", "deployment": nil, "api_version": nil})
+	relevanceProvider := activeAzureProviderInProject(t, h, owner, "Relevance provider", relevanceServer.URL+"/v1", &project, []any{map[string]any{"operation": "decision", "surface": "openai", "mode": "unary"}}, map[string]any{"kind": "openai_compatible", "options": map[string]any{"vendor_id": "typesafe-jev", "models": map[string]any{vendorModel: map[string]any{"context_length": 1090, "max_output_tokens": 10}}}, "profile_id": "systemone", "profile_revision": "1", "deployment": nil, "api_version": nil})
 	const relevanceSlug = "workflow-relevance"
 	relevanceDraft := h.want(owner, http.MethodPost, "/api/v1/route-drafts", map[string]any{"project_id": project, "slug": relevanceSlug, "operations": []string{"decision"}, "overall_timeout_ms": 10000, "max_attempts": 1, "fidelity": map[string]any{"mode": "transformed"}, "targets": []any{map[string]any{"provider_id": relevanceProvider["id"], "provider_model": vendorModel, "priority": 0, "weight": 1, "timeout_ms": 5000}}}, idem("workflow-relevance-route"), http.StatusCreated)
 	h.want(owner, http.MethodPost, "/api/v1/route-drafts/"+mcpExecString(t, relevanceDraft, "id")+"/activate", nil, withMatch(relevanceDraft, idem("workflow-relevance-route-activate")), http.StatusOK)
@@ -1855,6 +1855,42 @@ func TestGatewayToolWorkflowSettlesOneRun(t *testing.T) {
 		return debit["kind"] == "model" && err == nil && cost == float64((relevanceInputTokens+relevanceOutputTokens)*relevanceRate)/1000000
 	}) {
 		t.Fatalf("priced relevance debit did not settle: %v", relevanceDebits)
+	}
+	for _, scenario := range []struct {
+		name      string
+		limit     string
+		status    int
+		debits    int
+		decisions int64
+	}{
+		{name: "bounded success", limit: "1200", status: http.StatusOK, debits: 4, decisions: 1},
+		{name: "prior spend exceeds remaining allowance", limit: "1105", status: http.StatusBadRequest, debits: 2, decisions: 0},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
+			key := h.want(owner, http.MethodPost, "/api/v1/api-keys", map[string]any{"name": scenario.name, "project_id": project, "scopes": []string{"inference", "tools"}, "allowed_routes": []string{slug, relevanceSlug}, "allowed_toolsets": []string{toolsetID}}, idem("workflow-relevance-"+scenario.limit), http.StatusCreated)
+			h.refresh()
+			pruningWorkflow.Store(true)
+			defer pruningWorkflow.Store(false)
+			before := relevanceCalls.Load()
+			status, response, _ := h.gateway(http.MethodPost, "/v1/chat/completions", mcpExecString(t, key, "secret"), map[string]any{"model": slug, "messages": []any{map[string]any{"role": "assistant", "content": "keep context", "tool_calls": []any{map[string]any{"id": "pruning-old", "type": "function", "function": map[string]any{"name": "old", "arguments": "{}"}}}}, map[string]any{"role": "tool", "tool_call_id": "pruning-old", "content": "pruning-old-result"}, map[string]any{"role": "user", "content": "current task"}}, "max_tokens": 100, "olp_run_limits": map[string]any{"max_run_cost": scenario.limit}})
+			if status != scenario.status || relevanceCalls.Load()-before != scenario.decisions || status != http.StatusOK && !strings.Contains(fmt.Sprint(response), "run_cost_limit") {
+				t.Fatalf("bounded relevance: status=%d response=%v decisions=%d", status, response, relevanceCalls.Load()-before)
+			}
+			debits := mcpExecItems(t, h.want(owner, http.MethodGet, "/api/v1/execution-debits?api_key_id="+mcpExecString(t, key, "id"), nil, nil, http.StatusOK), "items")
+			if len(debits) != scenario.debits || slices.ContainsFunc(debits, func(item any) bool {
+				debit := item.(map[string]any)
+				return debit["state"] != "settled" || debit["run_id"] != debits[0].(map[string]any)["run_id"]
+			}) {
+				t.Fatalf("bounded relevance debits: %v", debits)
+			}
+			if !slices.ContainsFunc(debits, func(item any) bool {
+				debit := item.(map[string]any)
+				cost, err := strconv.ParseFloat(debit["observed_cost"].(string), 64)
+				return debit["kind"] == "tool" && err == nil && cost == 0.25
+			}) {
+				t.Fatalf("prior tool cost was not settled: %v", debits)
+			}
+		})
 	}
 	relevanceAttachments := h.want(owner, http.MethodGet, "/api/v1/guardrail-attachments", nil, nil, http.StatusOK)
 	relevanceAttachmentItems := mcpExecItems(t, relevanceAttachments, "items")

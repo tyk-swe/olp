@@ -217,8 +217,9 @@ execution owner; the remaining hooks still have the dependencies described below
 - `typesafe` groups complete tool calls and results into ordered exchanges and
   sends prior exchanges to the configured decision route for relevance scoring.
   It retains the latest complete exchange and removes calls and results together.
-  The relevance attempt has a separate debit under the workflow run. System One
-  has no enforceable output bound, so a finite run cost limit prevents dispatch.
+  The relevance attempt has a separate debit under the workflow run. With a
+  finite run cost limit, dispatch requires pinned context and output bounds,
+  pricing and enough remaining allowance for the conservative cost bound.
 
 The local code/tool filters expose explicit OLP configuration, not Python
 configuration compatibility. Semantic guardrails batch content and configured

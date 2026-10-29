@@ -281,3 +281,21 @@ func (s *Surface) Apply(segments []Segment) (oif.Document, error) {
 	}
 	return oif.Apply(s.document, changes)
 }
+
+func (s *Surface) Replacement(index int, text string) string {
+	if s.slots[index].rawJSON {
+		value, _ := json.Marshal(text)
+		return string(value)
+	}
+	return text
+}
+
+func (s *Surface) TextAt(pointer string) []string {
+	return slices.Collect(func(yield func(string) bool) {
+		for i, slot := range s.slots {
+			if (slot.pointer == pointer || strings.HasPrefix(slot.pointer, pointer+"/")) && !yield(s.Segments[i].Text) {
+				return
+			}
+		}
+	})
+}
