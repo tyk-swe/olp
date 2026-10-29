@@ -45,9 +45,17 @@ func TestWorkloadAgentConsentRequiresSessionCSRFAndFreshAuthentication(t *testin
 
 func TestWorkloadAgentMemberConsentIssuesAgentBoundGrant(t *testing.T) {
 	h := newAccessHarness(t)
+	_, _, limiter := limSetup(t, "agent-member-consent")
+	h.Gateway.Admission = gateway.NewAdmission(limiter, nil, nil)
 	owner := h.owner()
 	project := createProject(h, owner, "Member delegation")
 	workloadProject(t, h, owner, project, map[string]any{"generation": []string{"member-chat"}})
+	vendor := newOpenAIFixture(t, "")
+	provider := activeAzureProviderInProject(t, h, owner, "Member provider", vendor.URL, &project, []any{map[string]any{"operation": "generation", "surface": "openai", "mode": "unary"}})
+	draft := h.want(owner, "POST", "/api/v1/route-drafts", map[string]any{"project_id": project, "slug": "member-chat", "overall_timeout_ms": 10000, "max_attempts": 1, "fidelity": map[string]any{"mode": "transformed"}, "targets": []any{map[string]any{"provider_id": provider["id"], "provider_model": vendorModel, "priority": 0, "weight": 1, "timeout_ms": 5000}}}, idem("member-route"), http.StatusCreated)
+	routePath := "/api/v1/route-drafts/" + draft["id"].(string)
+	validated := h.want(owner, "POST", routePath+"/validate", nil, etagHeader(draft), http.StatusOK)
+	h.want(owner, "POST", routePath+"/activate", nil, withMatch(validated, idem("activate-member-route")), http.StatusOK)
 	issuer := newWorkloadFixture(t, h, owner, project, []string{"generation"})
 	issuerPath := "/api/v1/workload-issuers/" + issuer.issuer["id"].(string)
 	current := h.want(owner, "GET", issuerPath, nil, nil, http.StatusOK)
@@ -60,7 +68,7 @@ func TestWorkloadAgentMemberConsentIssuesAgentBoundGrant(t *testing.T) {
 	h.want(owner, "PUT", issuerPath, issuerInput, etagHeader(current), http.StatusOK)
 	key := h.want(owner, "POST", "/api/v1/api-keys", map[string]any{"name": "member key", "project_id": project, "scopes": []string{"inference", "delegate"}, "allowed_routes": []string{"member-chat"}}, idem("member-key"), http.StatusCreated)
 	otherProject := createProject(h, owner, "Other member delegation")
-	otherKey := h.want(owner, "POST", "/api/v1/api-keys", map[string]any{"name": "other member key", "project_id": otherProject, "scopes": []string{"inference", "delegate"}, "allowed_routes": []string{"member-chat"}}, idem("other-member-key"), http.StatusCreated)
+	otherKey := h.want(owner, "POST", "/api/v1/api-keys", map[string]any{"name": "other member key", "project_id": otherProject, "scopes": []string{"inference", "delegate"}, "allowed_routes": []string{}}, idem("other-member-key"), http.StatusCreated)
 	member := h.invite(owner, "member@example.com", "developer")
 	profile := h.want(member, "GET", "/api/v1/profile", nil, nil, http.StatusOK)
 	memberID := profile["id"].(string)
@@ -69,21 +77,21 @@ func TestWorkloadAgentMemberConsentIssuesAgentBoundGrant(t *testing.T) {
 	addMember(h, owner, project, memberID, "viewer")
 	h.want(member, "POST", "/api/v1/sessions", map[string]any{"email": "member@example.com", "password": accessPassword}, nil, http.StatusCreated)
 	h.refresh()
-	signer, err := jose.NewSigner(jose.SigningKey{Algorithm: jose.EdDSA, Key: issuer.private}, (&jose.SignerOptions{}).WithHeader("kid", issuer.kid))
-	if err != nil {
-		t.Fatal(err)
+	signer, signerErr := jose.NewSigner(jose.SigningKey{Algorithm: jose.EdDSA, Key: issuer.private}, (&jose.SignerOptions{}).WithHeader("kid", issuer.kid))
+	if signerErr != nil {
+		t.Fatal(signerErr)
 	}
-	claims, err := json.Marshal(map[string]any{"iss": issuer.endpoint.URL, "aud": "olp", "sub": "member-agent", "client_id": "member-client", "iat": time.Now().Unix(), "exp": time.Now().Add(5 * time.Minute).Unix()})
-	if err != nil {
-		t.Fatal(err)
+	claims, claimsErr := json.Marshal(map[string]any{"iss": issuer.endpoint.URL, "aud": "olp", "sub": "member-agent", "client_id": "member-client", "iat": time.Now().Unix(), "exp": time.Now().Add(5 * time.Minute).Unix()})
+	if claimsErr != nil {
+		t.Fatal(claimsErr)
 	}
-	signed, err := signer.Sign(claims)
-	if err != nil {
-		t.Fatal(err)
+	signed, signErr := signer.Sign(claims)
+	if signErr != nil {
+		t.Fatal(signErr)
 	}
-	assertion, err := signed.CompactSerialize()
-	if err != nil {
-		t.Fatal(err)
+	assertion, serializeErr := signed.CompactSerialize()
+	if serializeErr != nil {
+		t.Fatal(serializeErr)
 	}
 	response, raw := h.do(nil, "POST", "/v1/delegations", runtime.DelegationBounds{Scopes: []string{"inference"}, AllowedRoutes: []string{"member-chat"}}, map[string]string{"Authorization": "Bearer " + assertion, "X-OLP-Delegating-Key": "invalid"})
 	if response.StatusCode != http.StatusUnauthorized {
@@ -121,9 +129,23 @@ func TestWorkloadAgentMemberConsentIssuesAgentBoundGrant(t *testing.T) {
 	if err := json.Unmarshal(body, &grant); err != nil || grant.Token == "" {
 		t.Fatalf("delegation grant missing: %s %v", body, err)
 	}
+	inference, inferenceBody := h.do(nil, "POST", "/v1/chat/completions", map[string]any{"model": "member-chat", "messages": []any{map[string]string{"role": "user", "content": "hello"}}}, map[string]string{"Authorization": "Bearer " + grant.Token, "X-OLP-Agent-Identity": assertion})
+	if inference.StatusCode != http.StatusOK {
+		t.Fatalf("consented agent could not perform inference: %d %s", inference.StatusCode, inferenceBody)
+	}
 	replay, replayBody := h.do(nil, "POST", "/v1/delegations", runtime.DelegationBounds{Scopes: []string{"inference"}, AllowedRoutes: []string{"member-chat"}}, map[string]string{"Authorization": "Bearer " + assertion, "X-OLP-Delegation-Consent": code})
 	if replay.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("consent replay accepted: %d %s", replay.StatusCode, replayBody)
+	}
+	h.want(member, "POST", "/api/v1/profile/reauthenticate", map[string]any{"current_password": accessPassword, "purpose": "agent_delegation", "resource_id": key["id"]}, nil, http.StatusNoContent)
+	revocationConsent := h.want(member, "POST", "/api/v1/delegation-consents", map[string]any{"agent_id": agentID, "api_key_id": key["id"], "allowed_routes": []string{"member-chat"}}, nil, http.StatusCreated)
+	revocationIssued, revocationBody := h.do(nil, "POST", "/v1/delegations", runtime.DelegationBounds{Scopes: []string{"inference"}, AllowedRoutes: []string{"member-chat"}}, map[string]string{"Authorization": "Bearer " + assertion, "X-OLP-Delegation-Consent": revocationConsent["consent"].(string)})
+	if revocationIssued.StatusCode != http.StatusCreated {
+		t.Fatalf("authenticated agent could not exchange consent: %d %s", revocationIssued.StatusCode, revocationBody)
+	}
+	var revocationGrant runtime.DelegationGrant
+	if err := json.Unmarshal(revocationBody, &revocationGrant); err != nil || revocationGrant.Token == "" {
+		t.Fatalf("delegation grant missing: %s %v", revocationBody, err)
 	}
 	h.want(member, "POST", "/api/v1/profile/reauthenticate", map[string]any{"current_password": accessPassword, "purpose": "agent_delegation", "resource_id": key["id"]}, nil, http.StatusNoContent)
 	pending := h.want(member, "POST", "/api/v1/delegation-consents", map[string]any{"agent_id": agentID, "api_key_id": key["id"], "allowed_routes": []string{"member-chat"}}, nil, http.StatusCreated)
@@ -133,7 +155,7 @@ func TestWorkloadAgentMemberConsentIssuesAgentBoundGrant(t *testing.T) {
 	if denied.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("consent survived member authority revocation: %d %s", denied.StatusCode, deniedBody)
 	}
-	revoked, revokedBody := h.do(nil, "POST", "/v1/chat/completions", map[string]any{"model": "member-chat", "messages": []any{map[string]string{"role": "user", "content": "hello"}}}, map[string]string{"Authorization": "Bearer " + grant.Token, "X-OLP-Agent-Identity": assertion})
+	revoked, revokedBody := h.do(nil, "POST", "/v1/chat/completions", map[string]any{"model": "member-chat", "messages": []any{map[string]string{"role": "user", "content": "hello"}}}, map[string]string{"Authorization": "Bearer " + revocationGrant.Token, "X-OLP-Agent-Identity": assertion})
 	if revoked.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("delegation survived member authority revocation: %d %s", revoked.StatusCode, revokedBody)
 	}
