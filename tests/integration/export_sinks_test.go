@@ -3,6 +3,7 @@
 package integration_test
 
 import (
+	"bytes"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
@@ -21,11 +22,135 @@ import (
 	"github.com/tyk-swe/olp/internal/contentpolicy"
 	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/egress"
+	"github.com/tyk-swe/olp/internal/gateway"
 
 	"github.com/tyk-swe/olp/internal/secrets"
 	"github.com/tyk-swe/olp/internal/sinks"
 	"github.com/tyk-swe/olp/internal/usage"
+	commonpb "go.opentelemetry.io/proto/otlp/common/v1"
+	tracepb "go.opentelemetry.io/proto/otlp/trace/v1"
 )
+
+func TestManagedEvidenceDeliveryRechecksAuthorityAndRetention(t *testing.T) {
+	h := newAccessHarness(t)
+	_, _, limiter := limSetup(t, "managed-evidence")
+	h.Gateway.Traces = &gateway.TraceDeps{Pool: h.Pool, Limiter: limiter, Auth: h.AuthKey}
+	owner := h.owner()
+	project := createProject(h, owner, "Managed evidence")
+	member := h.invite(owner, "evidence-manager@example.test", "developer")
+	memberID := mcpExecString(t, h.want(member, http.MethodGet, "/api/v1/profile", nil, nil, http.StatusOK), "id")
+	memberRecord := h.want(owner, http.MethodGet, "/api/v1/users/"+memberID, nil, nil, http.StatusOK)
+	h.want(owner, http.MethodPatch, "/api/v1/users/"+memberID, map[string]any{"access_scope": "assigned"}, etagHeader(memberRecord), http.StatusOK)
+	addMember(h, owner, project, memberID, "manager")
+	h.want(member, http.MethodPost, "/api/v1/sessions", map[string]any{"email": "evidence-manager@example.test", "password": accessPassword}, nil, http.StatusCreated)
+	received := make(chan []byte, 8)
+	receiver := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		payload, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		received <- payload
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer receiver.Close()
+	foreignReceived := make(chan struct{}, 1)
+	foreignReceiver := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		foreignReceived <- struct{}{}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer foreignReceiver.Close()
+	foreignProject := createProject(h, owner, "Other evidence")
+	h.want(owner, http.MethodPost, "/api/v1/sinks", map[string]any{"name": "Other project evidence", "type": "https", "project_id": foreignProject, "destination": foreignReceiver.URL, "streams": []string{"trace_spans"}, "enabled": true}, idem(uuid.NewString()), http.StatusCreated)
+	h.want(owner, http.MethodPost, "/api/v1/sinks", map[string]any{"name": "Unscoped evidence", "type": "https", "destination": receiver.URL, "streams": []string{"runs"}, "enabled": true}, idem(uuid.NewString()), http.StatusUnprocessableEntity)
+	h.want(member, http.MethodPost, "/api/v1/sinks", map[string]any{"name": "Project evidence", "type": "https", "project_id": project, "destination": receiver.URL, "streams": []string{"runs", "trace_spans"}, "enabled": true}, idem(uuid.NewString()), http.StatusCreated)
+	key := h.want(owner, http.MethodPost, "/api/v1/api-keys", map[string]any{"name": "Evidence writer", "project_id": project, "scopes": []string{"traces_write"}}, idem(uuid.NewString()), http.StatusCreated)
+	if err := h.Runtime.Refresh(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	writer := mcpExecString(t, key, "secret")
+	keyID := mcpExecString(t, key, "id")
+	worker := &sinks.Worker{Pool: h.Pool, Egress: &egress.Policy{AllowedNetworks: []netip.Prefix{netip.MustParsePrefix("127.0.0.0/8")}, PlainHTTPHosts: []string{"127.0.0.1"}}}
+	span := func(id byte) *tracepb.Span {
+		return &tracepb.Span{TraceId: bytes.Repeat([]byte{id}, 16), SpanId: bytes.Repeat([]byte{id}, 8), Name: "private-span-content", Attributes: []*commonpb.KeyValue{traceText("gen_ai.prompt", "private-prompt-content"), traceText("olp.evidence_origin", "gateway_observed")}}
+	}
+	if status, body := postTrace(h, writer, tracePayload(t, traceBatch(span(1)))); status != http.StatusOK {
+		t.Fatalf("first trace upload: %d %s", status, body)
+	}
+	if _, err := worker.Deliver(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case payload := <-received:
+		var event struct {
+			Stream string `json:"stream"`
+			Data   struct {
+				ProjectID string `json:"project_id"`
+				Origin    string `json:"evidence_origin"`
+			} `json:"data"`
+		}
+		if err := json.Unmarshal(payload, &event); err != nil {
+			t.Fatal(err)
+		}
+		if event.Stream != "trace_spans" || event.Data.ProjectID != project || event.Data.Origin != "client_asserted" {
+			t.Fatalf("unexpected trace evidence metadata: %+v", event)
+		}
+		if bytes.Contains(payload, []byte("private-")) || bytes.Contains(payload, []byte(writer)) {
+			t.Fatal("trace evidence included private content or a credential")
+		}
+	default:
+		t.Fatal("authorized trace evidence was not delivered")
+	}
+	select {
+	case <-foreignReceived:
+		t.Fatal("trace evidence was delivered to another project")
+	default:
+	}
+	if status, body := postTrace(h, writer, tracePayload(t, traceBatch(span(2)))); status != http.StatusOK {
+		t.Fatalf("second trace upload: %d %s", status, body)
+	}
+	h.want(owner, http.MethodDelete, "/api/v1/projects/"+project+"/members/"+memberID, nil, projectEtag(h, owner, project), http.StatusNoContent)
+	if _, err := worker.Deliver(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case payload := <-received:
+		t.Fatalf("evidence delivered after project access was revoked: %d bytes", len(payload))
+	default:
+	}
+	addMember(h, owner, project, memberID, "manager")
+	if _, err := h.Pool.Exec(t.Context(), `INSERT INTO olp.settings(key,value,etag,updated_by) SELECT 'retention.requests_days','1',gen_random_uuid(),created_by FROM olp.api_keys WHERE id=$1 ON CONFLICT(key) DO UPDATE SET value=excluded.value`, keyID); err != nil {
+		t.Fatal(err)
+	}
+	if status, body := postTrace(h, writer, tracePayload(t, traceBatch(span(3)))); status != http.StatusOK {
+		t.Fatalf("expiring trace upload: %d %s", status, body)
+	}
+	if _, err := h.Pool.Exec(t.Context(), `UPDATE olp.trace_spans SET received_at=now()-interval '2 days' WHERE api_key_id=$1 AND trace_id=$2`, keyID, bytes.Repeat([]byte{3}, 16)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := worker.Deliver(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case payload := <-received:
+		t.Fatalf("evidence delivered after its retention period: %d bytes", len(payload))
+	default:
+	}
+	if status, body := postTrace(h, writer, tracePayload(t, traceBatch(span(4)))); status != http.StatusOK {
+		t.Fatalf("removed trace upload: %d %s", status, body)
+	}
+	if _, err := h.Pool.Exec(t.Context(), `DELETE FROM olp.trace_spans WHERE api_key_id=$1 AND trace_id=$2`, keyID, bytes.Repeat([]byte{4}, 16)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := worker.Deliver(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case payload := <-received:
+		t.Fatalf("evidence delivered after its source was removed: %d bytes", len(payload))
+	default:
+	}
+}
 
 func TestExportSinksQueueScopedFactsAndRetrySignedStableEvents(t *testing.T) {
 	h := newAccessHarness(t)

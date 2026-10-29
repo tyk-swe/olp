@@ -135,12 +135,10 @@ func validate(in *input, policy *egress.Policy, project *string) error {
 	if len(in.Streams) < 1 || len(in.Streams) > 4 {
 		return access.Invalid("streams", "Choose supported content-free fact streams.")
 	}
-	seen := map[string]bool{}
-	for _, stream := range in.Streams {
-		if !slices.Contains([]string{"requests", "attempts", "guardrail_decisions", "audit"}, stream) || seen[stream] || (stream == "audit" && project != nil) {
-			return access.Invalid("streams", "Use unique streams; audit export requires an installation sink.")
+	for index, stream := range in.Streams {
+		if !slices.Contains([]string{"requests", "attempts", "guardrail_decisions", "audit", "runs", "trace_spans"}, stream) || slices.Contains(in.Streams[:index], stream) || (stream == "audit" && project != nil) || ((stream == "runs" || stream == "trace_spans") && project == nil) {
+			return access.Invalid("streams", "Use unique streams; audit export requires an installation sink and workflow evidence requires a project sink.")
 		}
-		seen[stream] = true
 	}
 	return nil
 }
