@@ -65,23 +65,17 @@ func investigationUUID(value string) bool {
 	return err == nil && id != uuid.Nil && id.String() == value
 }
 
+func investigationTime(value *string) (time.Time, error) {
+	if value == nil {
+		return time.Time{}, nil
+	}
+	return time.Parse(time.RFC3339, *value)
+}
+
 func validInvestigationFilters(filters InvestigationFilters) bool {
-	var from, to time.Time
-	if filters.From != nil {
-		parsed, err := time.Parse(time.RFC3339, *filters.From)
-		if err != nil {
-			return false
-		}
-		from = parsed
-	}
-	if filters.To != nil {
-		parsed, err := time.Parse(time.RFC3339, *filters.To)
-		if err != nil {
-			return false
-		}
-		to = parsed
-	}
-	if filters.From != nil && filters.To != nil && from.After(to) {
+	from, fromErr := investigationTime(filters.From)
+	to, toErr := investigationTime(filters.To)
+	if fromErr != nil || toErr != nil || filters.From != nil && filters.To != nil && from.After(to) {
 		return false
 	}
 	if filters.RunID != nil && !investigationUUID(*filters.RunID) {
@@ -139,16 +133,8 @@ func (s *Server) listInvestigations(r *http.Request, p access.Principal) (access
 	if err != nil {
 		return access.Reply{}, err
 	}
-	defer rows.Close()
-	items := []Investigation{}
-	for rows.Next() {
-		var item Investigation
-		if err := rows.Scan(&item.ID, &item.ProjectID, &item.Filters, &item.Evidence, &item.Summary, &item.CreatedAt); err != nil {
-			return access.Reply{}, err
-		}
-		items = append(items, item)
-	}
-	if err := rows.Err(); err != nil {
+	items, err := pgx.CollectRows(rows, pgx.RowToStructByName[Investigation])
+	if err != nil {
 		return access.Reply{}, err
 	}
 	return access.ListReplyBy(items, page, func(item Investigation) string { return item.ID }), nil
@@ -160,40 +146,27 @@ func (s *Server) getInvestigation(r *http.Request, p access.Principal) (access.R
 		return access.Reply{}, err
 	}
 	var item Investigation
-	err = s.Access.Pool.QueryRow(r.Context(), `SELECT id::text,project_id::text,filters,evidence,summary,created_at FROM olp.investigations WHERE id=$1`, id).
-		Scan(&item.ID, &item.ProjectID, &item.Filters, &item.Evidence, &item.Summary, &item.CreatedAt)
-	if err != nil {
+	if err := s.Access.Pool.QueryRow(r.Context(), `SELECT id::text,project_id::text,filters,evidence,summary,created_at FROM olp.investigations WHERE id=$1`, id).
+		Scan(&item.ID, &item.ProjectID, &item.Filters, &item.Evidence, &item.Summary, &item.CreatedAt); err != nil {
 		return access.Reply{}, err
 	}
 	if err := p.Project(&item.ProjectID, access.View); err != nil {
 		return access.Reply{}, err
 	}
-	rows, err := s.Access.Pool.Query(r.Context(), `SELECT ref.kind,ref.id::text,COALESCE(run.id,approval.run_id,span.run_id)::text
- FROM jsonb_to_recordset($1::jsonb) AS ref(kind text,id uuid)
- LEFT JOIN olp.agent_steps step ON ref.kind='step' AND step.id=ref.id
+	rows, err := s.Access.Pool.Query(r.Context(), `SELECT ref.value->>'kind' AS kind,ref.value->>'id' AS id,
+ COALESCE(COALESCE(run.id,approval.run_id,span.run_id)::text,'') AS run_id
+ FROM jsonb_array_elements($1::jsonb) WITH ORDINALITY AS ref(value,position)
+ LEFT JOIN olp.agent_steps step ON ref.value->>'kind'='step' AND step.id=(ref.value->>'id')::uuid
  LEFT JOIN olp.agent_runs run ON run.id=step.run_id AND run.project_id=$2
- LEFT JOIN olp.agent_approvals approval ON ref.kind='approval' AND approval.id=ref.id AND approval.project_id=$2
- LEFT JOIN olp.trace_spans span ON ref.kind='span' AND span.id=ref.id AND span.project_id=$2
- WHERE COALESCE(run.id,approval.run_id,span.run_id) IS NOT NULL`, item.Evidence, item.ProjectID)
+ LEFT JOIN olp.agent_approvals approval ON ref.value->>'kind'='approval' AND approval.id=(ref.value->>'id')::uuid AND approval.project_id=$2
+ LEFT JOIN olp.trace_spans span ON ref.value->>'kind'='span' AND span.id=(ref.value->>'id')::uuid AND span.project_id=$2
+ ORDER BY ref.position`, item.Evidence, item.ProjectID)
 	if err != nil {
 		return access.Reply{}, err
 	}
-	defer rows.Close()
-	runs := make(map[InvestigationEvidence]string)
-	for rows.Next() {
-		var reference InvestigationEvidence
-		var runID string
-		if err := rows.Scan(&reference.Kind, &reference.ID, &runID); err != nil {
-			return access.Reply{}, err
-		}
-		runs[reference] = runID
-	}
-	if err := rows.Err(); err != nil {
+	evidence, err := pgx.CollectRows(rows, pgx.RowToStructByName[investigationEvidenceView])
+	if err != nil {
 		return access.Reply{}, err
-	}
-	evidence := make([]investigationEvidenceView, 0, len(item.Evidence))
-	for _, reference := range item.Evidence {
-		evidence = append(evidence, investigationEvidenceView{InvestigationEvidence: reference, RunID: runs[reference]})
 	}
 	return access.OK(struct {
 		Investigation
