@@ -787,14 +787,14 @@ func (s *Server) inferenceOperation(family wire.Format, dialect string) http.Han
 				}
 				return err
 			}
-			out = s.executeModelStep(ctx, x, x.generation.parsed)
+			out = s.executeModelStep(ctx, x, x.generation.parsed, x.authority)
 			status = sw.finish(out)
 			return
 		}
 		if x.workflow != nil {
 			out = s.executeToolLoop(ctx, x)
 		} else {
-			out = s.executeModelStep(ctx, x, x.generation.parsed)
+			out = s.executeModelStep(ctx, x, x.generation.parsed, x.authority)
 		}
 		if out.err != nil {
 			status = out.err.Status

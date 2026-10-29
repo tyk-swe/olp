@@ -1026,12 +1026,47 @@ func TestWorkloadAgentDelegatesKeyForOneInference(t *testing.T) {
 		}
 	}
 	budgetGrant := exchange(replacement, secondKey["secret"].(string), http.StatusCreated)
+	beforeAgentRefusal := vendor.chatCalls.Load()
 	infer(budgetGrant, replacement, http.StatusTooManyRequests)
+	if vendor.chatCalls.Load() != beforeAgentRefusal {
+		t.Fatal("agent budget refusal dispatched to the provider")
+	}
 	if err := <-persisted; err != nil {
 		t.Fatal(err)
 	}
-	budgetTemplates = h.want(owner, "GET", templatesPath, nil, nil, http.StatusOK)
-	h.want(owner, "PUT", templatesPath, map[string]any{"templates": map[string]any{"worker": map[string]any{}}}, etagHeader(budgetTemplates), http.StatusOK)
+	increase := h.want(owner, "POST", "/api/v1/budget-increases", map[string]any{"target": map[string]any{"kind": "api_key", "id": replacementID}, "window": "day", "amount": "1000000", "reason": "delegated agent test"}, idem("delegated-agent-increase"), http.StatusCreated)
+	h.refresh()
+	increasedGrant := exchange(replacement, secondKey["secret"].(string), http.StatusCreated)
+	infer(increasedGrant, replacement, http.StatusOK)
+	if err := <-persisted; err != nil {
+		t.Fatal(err)
+	}
+	h.want(owner, "DELETE", "/api/v1/budget-increases/"+increase["id"].(string), nil, etagHeader(increase), http.StatusNoContent)
+	for _, scenario := range []struct {
+		name  string
+		limit string
+		basis string
+	}{
+		{name: "weekly agent cost", limit: "weekly_cost_limit", basis: "cost"},
+		{name: "monthly agent cost", limit: "monthly_cost_limit", basis: "cost"},
+		{name: "weekly agent charge", limit: "weekly_cost_limit", basis: "charge"},
+		{name: "monthly agent charge", limit: "monthly_cost_limit", basis: "charge"},
+	} {
+		currentTemplates := h.want(owner, "GET", templatesPath, nil, nil, http.StatusOK)
+		h.want(owner, "PUT", templatesPath, map[string]any{"templates": map[string]any{"worker": map[string]any{scenario.limit: "0.000001", "cost_basis": scenario.basis}}}, etagHeader(currentTemplates), http.StatusOK)
+		h.refresh()
+		grant := exchange(replacement, secondKey["secret"].(string), http.StatusCreated)
+		before := vendor.chatCalls.Load()
+		infer(grant, replacement, http.StatusTooManyRequests)
+		if vendor.chatCalls.Load() != before {
+			t.Fatalf("%s budget refusal dispatched to the provider", scenario.name)
+		}
+		if err := <-persisted; err != nil {
+			t.Fatal(err)
+		}
+	}
+	clearedTemplates := h.want(owner, "GET", templatesPath, nil, nil, http.StatusOK)
+	h.want(owner, "PUT", templatesPath, map[string]any{"templates": map[string]any{"worker": map[string]any{}}}, etagHeader(clearedTemplates), http.StatusOK)
 	h.refresh()
 	pairResponse, pairResponseBody := h.do(nil, "POST", "/v1/delegations", bounds, map[string]string{"Authorization": "Bearer " + replacement, "X-OLP-Delegating-Key": secondKey["secret"].(string)})
 	var pairMetadata struct {
@@ -1096,8 +1131,9 @@ func TestWorkloadAgentDelegatesKeyForOneInference(t *testing.T) {
 		}
 	}
 	teamGrant := exchange(replacement, secondKey["secret"].(string), http.StatusCreated)
+	beforeTeamRefusal := vendor.chatCalls.Load()
 	teamResponse, teamBody := h.do(nil, "POST", "/v1/chat/completions", map[string]any{"model": "delegated-chat", "messages": []any{map[string]string{"role": "user", "content": "hello"}}}, map[string]string{"Authorization": "Bearer " + teamGrant, "X-OLP-Agent-Identity": replacement, usage.AttributionHeader: `{"team":"core"}`})
-	if teamResponse.StatusCode != http.StatusTooManyRequests {
+	if teamResponse.StatusCode != http.StatusTooManyRequests || vendor.chatCalls.Load() != beforeTeamRefusal {
 		t.Fatalf("ordinary attribution budget was not enforced with a delegated pair: %d %s", teamResponse.StatusCode, teamBody)
 	}
 	if err := <-persisted; err != nil {
@@ -1107,7 +1143,11 @@ func TestWorkloadAgentDelegatesKeyForOneInference(t *testing.T) {
 	h.want(owner, "PUT", pairPath, map[string]any{"budgets": map[string]any{"delegation_pair": map[string]any{pairDigest: map[string]any{"daily_cost_limit": "0.000001"}}, "team": map[string]any{"core": map[string]any{"daily_cost_limit": "1000000"}}}}, etagHeader(updatedBudget), http.StatusOK)
 	h.refresh()
 	renewedGrant := exchange(replacement, secondKey["secret"].(string), http.StatusCreated)
+	beforePairRefusal := vendor.chatCalls.Load()
 	infer(renewedGrant, replacement, http.StatusTooManyRequests)
+	if vendor.chatCalls.Load() != beforePairRefusal {
+		t.Fatal("pair budget refusal dispatched to the provider")
+	}
 	if err := <-persisted; err != nil {
 		t.Fatal(err)
 	}

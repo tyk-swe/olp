@@ -124,27 +124,27 @@ func workflowDefinitions(family wire.Format, tools []WorkflowTool) (json.RawMess
 	return protocols.WorkflowDefinitions(family, definitions)
 }
 
-func (s *Server) checkWorkflowAuthority(ctx context.Context, x *call, route *routing.Route, toolsetID string) *Error {
+func (s *Server) workflowAuthority(ctx context.Context, x *call, route *routing.Route, toolsetID string) (*access.Authority, *Error) {
 	authority, err := s.reauthenticateSession(ctx, x, x.workflow.token)
 	if errors.Is(err, runtime.ErrStaleAuthority) {
-		return serverError(http.StatusServiceUnavailable, "authority_unavailable", "Key authority is unavailable; retry shortly.")
+		return nil, serverError(http.StatusServiceUnavailable, "authority_unavailable", "Key authority is unavailable; retry shortly.")
 	}
 	if err != nil || authority == nil || authority.ID != x.authority.ID || authority.DelegationAgentID != x.authority.DelegationAgentID || authority.DelegationMemberID != x.authority.DelegationMemberID || authority.DelegationPairDigest != x.authority.DelegationPairDigest {
-		return authenticationError("invalid_api_key", "This API key is no longer authorized.")
+		return nil, authenticationError("invalid_api_key", "This API key is no longer authorized.")
 	}
 	if e := s.keyAuthorizer(*authority)(x.named()); e != nil {
-		return e
+		return nil, e
 	}
 	if e := s.keyAuthorizer(*authority)(route); e != nil {
-		return e
+		return nil, e
 	}
 	if !authority.AllowsEndUser(x.endUserDigest) || (authority.WorkloadIssuerID != nil && authority.EndUserDigest != x.endUserDigest) || !authority.AllowsAttribution(x.attribution) || !authority.AllowsClientIP(x.request.clientIP) {
-		return permissionError("permission_denied", "This API key no longer permits the request.")
+		return nil, permissionError("permission_denied", "This API key no longer permits the request.")
 	}
 	if toolsetID != "" && (authority.ProjectID == nil || !authority.AllowsResource("tools", toolsetID, *authority.ProjectID, s.now())) {
-		return permissionError("permission_denied", "This API key no longer permits the toolset.")
+		return nil, permissionError("permission_denied", "This API key no longer permits the toolset.")
 	}
-	return nil
+	return authority, nil
 }
 
 func (s *Server) monitorWorkflowAuthority(ctx context.Context, x *call, toolsetID string) (context.Context, func() *Error) {
@@ -162,7 +162,7 @@ func (s *Server) monitorWorkflowAuthority(ctx context.Context, x *call, toolsetI
 				return
 			case <-ticker.C:
 				checkCtx, stopCheck := context.WithTimeout(callCtx, time.Second)
-				e := s.checkWorkflowAuthority(checkCtx, x, route, toolsetID)
+				_, e := s.workflowAuthority(checkCtx, x, route, toolsetID)
 				stopCheck()
 				if e != nil {
 					result <- e
@@ -221,7 +221,8 @@ func (s *Server) abandonWorkflowDebit(ctx context.Context, x *call) *Error {
 
 func (s *Server) executeToolLoop(ctx context.Context, x *call) *outcome {
 	for iteration := 0; iteration < 8; iteration++ {
-		if e := s.checkWorkflowAuthority(ctx, x, x.route, ""); e != nil {
+		authority, e := s.workflowAuthority(ctx, x, x.route, "")
+		if e != nil {
 			return &outcome{err: e}
 		}
 		var frames bytes.Buffer
@@ -234,7 +235,7 @@ func (s *Server) executeToolLoop(ctx context.Context, x *call) *outcome {
 				return err
 			}
 		}
-		out := s.executeModelStep(ctx, x, x.generation.parsed)
+		out := s.executeModelStep(ctx, x, x.generation.parsed, *authority)
 		if out.err == nil && out.completion != nil && x.generation.parsed.Stream {
 			completion, err := workflowStreamCompletion(x.family, bytes.NewReader(frames.Bytes()), int(s.cfg.MaxEventBytes), x.named().Slug)
 			if err != nil {
@@ -326,7 +327,8 @@ func (s *Server) continueToolLoop(ctx context.Context, x *call, completion *wire
 	}
 	results := make([]protocols.WorkflowResult, 0, len(completion.ToolCalls))
 	for _, call := range completion.ToolCalls {
-		if e := s.checkWorkflowAuthority(ctx, x, x.route, ""); e != nil {
+		authority, e := s.workflowAuthority(ctx, x, x.route, "")
+		if e != nil {
 			return nil, e
 		}
 		index := slices.IndexFunc(x.workflow.tools, func(tool WorkflowTool) bool { return tool.Definition.Alias == call.Name })
@@ -334,7 +336,7 @@ func (s *Server) continueToolLoop(ctx context.Context, x *call, completion *wire
 			return nil, invalidRequest("invalid_tool_call", "The model requested an unavailable tool or invalid arguments.", nil)
 		}
 		callCtx, finish := s.monitorWorkflowAuthority(ctx, x, x.workflow.tools[index].ToolsetID)
-		result, err := s.WorkflowTools.Call(callCtx, x.authority, x.request.release, x.workflow.tools[index], x.workflow.runID, x.workflow.ordinal, fmt.Sprintf("%s:%d:%s", x.workflow.runID, x.workflow.ordinal, call.ID), json.RawMessage(call.Arguments))
+		result, err := s.WorkflowTools.Call(callCtx, *authority, x.request.release, x.workflow.tools[index], x.workflow.runID, x.workflow.ordinal, fmt.Sprintf("%s:%d:%s", x.workflow.runID, x.workflow.ordinal, call.ID), json.RawMessage(call.Arguments))
 		authorityErr := finish()
 		x.workflow.ordinal++
 		x.workflow.calls++

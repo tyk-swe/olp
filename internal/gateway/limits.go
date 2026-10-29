@@ -230,7 +230,7 @@ func (a *Admission) reserveKeyWithLimits(ctx context.Context, authority *access.
 		return a.reserveCallerLimits(ctx, authority, surface, estimate, ttl, hold, route...)
 	}
 	agent := authority.DelegationAgentLimits
-	principal := access.Authority{ID: agent.ID, LookupID: agent.LookupID, Policy: access.KeyPolicy{
+	principal := access.Authority{ID: agent.ID, LookupID: agent.LookupID, BudgetIncreases: authority.BudgetIncreases, Policy: access.KeyPolicy{
 		RequestsPerMinute: agent.Limits.RequestsPerMinute,
 		TokensPerMinute:   agent.Limits.TokensPerMinute,
 		MaxConcurrency:    agent.Limits.MaxConcurrency,

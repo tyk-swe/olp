@@ -135,12 +135,17 @@ route:
 					continue
 				}
 				if x.workflow != nil {
+					authority, authorityErr := s.workflowAuthority(ctx, x, x.route, "")
+					if authorityErr != nil {
+						s.releaseHold(ctx, gate.hold)
+						return attemptOutcome[Result]{err: authorityErr}, nil
+					}
 					x.sessionDebit = nil
 					caps := attemptCaps(x.route, &provider, &slot)
 					if x.callerCostExempt() && provider.CredentialSource == "caller" {
 						caps = [3]cappedOwner{}
 					}
-					if e := s.reserveSessionDebit(ctx, x, x.authority, attempt, caps[:]); e != nil {
+					if e := s.reserveSessionDebit(ctx, x, *authority, attempt, caps[:]); e != nil {
 						s.releaseHold(ctx, gate.hold)
 						return attemptOutcome[Result]{err: e}, nil
 					}

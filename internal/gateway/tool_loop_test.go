@@ -17,6 +17,7 @@ import (
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/limits"
+	"github.com/tyk-swe/olp/internal/mcp"
 	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/runtime"
 	"github.com/tyk-swe/olp/internal/usage"
@@ -607,6 +608,128 @@ type workflowDebitFixture struct {
 	*fakeSessionDebits
 }
 
+type delegatedWorkflowRuntime struct {
+	*fakeRuntime
+}
+
+func (r delegatedWorkflowRuntime) CreateDelegation(context.Context, access.Authority, access.Authority, runtime.DelegationBounds) (runtime.DelegationGrant, error) {
+	return runtime.DelegationGrant{}, runtime.ErrInvalidKey
+}
+
+func (r delegatedWorkflowRuntime) AuthenticateDelegation(_ context.Context, token, _ string) (*access.Authority, error) {
+	return r.Authenticate(token)
+}
+
+func (r delegatedWorkflowRuntime) ReauthenticateDelegation(_ context.Context, token, _ string) (*access.Authority, error) {
+	return r.Authenticate(token)
+}
+
+type delegatedWorkflowDebits struct {
+	*workflowDebitFixture
+	agentID string
+}
+
+type pairBudgetWorkflowTools struct {
+	*workflowFixture
+	pair string
+}
+
+func (f *pairBudgetWorkflowTools) Call(ctx context.Context, authority access.Authority, release *runtime.Release, tool WorkflowTool, run string, ordinal int, callID string, arguments json.RawMessage) (json.RawMessage, error) {
+	if policy, ok := authority.ProjectAttributionBudgets["delegation_pair"][f.pair]; ok && policy.DailyCostLimit != nil {
+		return nil, &mcp.WorkflowError{Status: http.StatusTooManyRequests, Code: "budget_exhausted", Message: "The pair budget is exhausted."}
+	}
+	return f.workflowFixture.Call(ctx, authority, release, tool, run, ordinal, callID, arguments)
+}
+
+func (d *delegatedWorkflowDebits) Admit(_ context.Context, _, _ string, requests []limits.Request) error {
+	for _, request := range requests {
+		if request.CostOwnerID == d.agentID && request.DailyCostLimit != nil {
+			return &limits.ExceededError{Dimension: limits.DimensionDailyCost, Basis: limits.BasisCost}
+		}
+	}
+	return nil
+}
+
+func TestGatewayToolExecutionRechecksDelegatedAgentBudgetBeforeLaterModel(t *testing.T) {
+	toolsetID, projectID, agentID := uuid.NewString(), uuid.NewString(), uuid.NewString()
+	alias := "t_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+	h := strictHarness(t, func(snapshot *routing.Snapshot) {
+		route := snapshot.Routes[routeSlug]
+		route.Fidelity.Mode, route.ToolExecution, route.Toolsets, route.ProjectID = routing.FidelityTransformed, "gateway", []string{toolsetID}, &projectID
+		snapshot.Routes[routeSlug] = route
+		for id, provider := range snapshot.Providers {
+			for i := range provider.Capabilities {
+				provider.Capabilities[i].ToolCalls = true
+			}
+			snapshot.Providers[id] = provider
+		}
+	})
+	authority := h.rt.keys[fullKey]
+	authority.ProjectID = &projectID
+	authority.DelegationAgentID = agentID
+	authority.DelegationPairDigest = strings.Repeat("a", 64)
+	authority.DelegationAgentLimits = &access.DelegationAgentLimits{ID: agentID, LookupID: agentID}
+	h.rt.keys[fullKey] = authority
+	h.gateway.Runtime = delegatedWorkflowRuntime{fakeRuntime: h.rt}
+	fixture := &workflowFixture{runID: uuid.NewString(), tool: WorkflowTool{ToolsetID: toolsetID, RevisionID: uuid.NewString(), Definition: routing.MCPToolsetTool{Alias: alias, Classification: "read_only"}}, beforeCall: func() error {
+		h.rt.mu.Lock()
+		defer h.rt.mu.Unlock()
+		current := h.rt.keys[fullKey]
+		current.DelegationAgentLimits = &access.DelegationAgentLimits{ID: agentID, LookupID: agentID, Limits: access.AdmissionLimits{DailyCostLimit: stringptr("1")}}
+		h.rt.keys[fullKey] = current
+		return nil
+	}}
+	h.gateway.WorkflowRuns, h.gateway.WorkflowTools = fixture, fixture
+	h.gateway.Debits = &delegatedWorkflowDebits{workflowDebitFixture: &workflowDebitFixture{fakeSessionDebits: &fakeSessionDebits{}}, agentID: agentID}
+	h.mock.set("a", func(w http.ResponseWriter, _ *http.Request) {
+		fmt.Fprintf(w, `{"id":"step","object":"chat.completion","created":1,"model":"model-a","choices":[{"index":0,"message":{"role":"assistant","content":null,"tool_calls":[{"id":"call-1","type":"function","function":{"name":%q,"arguments":"{}"}}]},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":2,"completion_tokens":1,"total_tokens":3}}`, alias)
+	})
+	response, body := h.chat(fullKey, nil)
+	if response.StatusCode != http.StatusTooManyRequests || h.mock.count("a") != 1 {
+		t.Fatalf("workflow dispatched after agent budget changed: status=%d body=%v model_calls=%d", response.StatusCode, body, h.mock.count("a"))
+	}
+}
+
+func TestGatewayToolExecutionRechecksDelegatedPairBudgetBeforeTool(t *testing.T) {
+	toolsetID, projectID, agentID := uuid.NewString(), uuid.NewString(), uuid.NewString()
+	pair := strings.Repeat("a", 64)
+	alias := "t_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+	h := strictHarness(t, func(snapshot *routing.Snapshot) {
+		route := snapshot.Routes[routeSlug]
+		route.Fidelity.Mode, route.ToolExecution, route.Toolsets, route.ProjectID = routing.FidelityTransformed, "gateway", []string{toolsetID}, &projectID
+		snapshot.Routes[routeSlug] = route
+		for id, provider := range snapshot.Providers {
+			for i := range provider.Capabilities {
+				provider.Capabilities[i].ToolCalls = true
+			}
+			snapshot.Providers[id] = provider
+		}
+	})
+	authority := h.rt.keys[fullKey]
+	authority.ProjectID = &projectID
+	authority.DelegationAgentID = agentID
+	authority.DelegationPairDigest = pair
+	authority.DelegationAgentLimits = &access.DelegationAgentLimits{ID: agentID, LookupID: agentID}
+	h.rt.keys[fullKey] = authority
+	h.gateway.Runtime = delegatedWorkflowRuntime{fakeRuntime: h.rt}
+	fixture := &workflowFixture{runID: uuid.NewString(), tool: WorkflowTool{ToolsetID: toolsetID, RevisionID: uuid.NewString(), Definition: routing.MCPToolsetTool{Alias: alias, Classification: "read_only"}}}
+	h.gateway.WorkflowRuns = fixture
+	h.gateway.WorkflowTools = &pairBudgetWorkflowTools{workflowFixture: fixture, pair: pair}
+	h.gateway.Debits = &workflowDebitFixture{fakeSessionDebits: &fakeSessionDebits{}}
+	h.mock.set("a", func(w http.ResponseWriter, _ *http.Request) {
+		h.rt.mu.Lock()
+		current := h.rt.keys[fullKey]
+		current.ProjectAttributionBudgets = access.AttributionBudgets{"delegation_pair": {pair: {DailyCostLimit: stringptr("1")}}}
+		h.rt.keys[fullKey] = current
+		h.rt.mu.Unlock()
+		fmt.Fprintf(w, `{"id":"step","object":"chat.completion","created":1,"model":"model-a","choices":[{"index":0,"message":{"role":"assistant","content":null,"tool_calls":[{"id":"call-1","type":"function","function":{"name":%q,"arguments":"{}"}}]},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":2,"completion_tokens":1,"total_tokens":3}}`, alias)
+	})
+	response, body := h.chat(fullKey, nil)
+	if response.StatusCode != http.StatusTooManyRequests || h.mock.count("a") != 1 {
+		t.Fatalf("workflow continued after pair budget changed: status=%d body=%v model_calls=%d", response.StatusCode, body, h.mock.count("a"))
+	}
+}
+
 func (f *workflowDebitFixture) MarkNotSent(ctx context.Context, id, claim string) error {
 	return f.ReleaseUndispatched(ctx, id, claim)
 }
@@ -814,7 +937,7 @@ func TestGatewayToolExecutionBounds(t *testing.T) {
 			})
 			response, body := h.chat(fullKey, nil)
 			if response.StatusCode != http.StatusBadRequest || errorCode(t, body) != test.wantCode || h.mock.count("a") != test.wantModelCalls || len(fixture.calls) != test.wantToolCalls {
-				t.Fatalf("workflow limit was not enforced: status=%d body=%v model_calls=%d tool_calls=%d", response.StatusCode, body, h.mock.count("a"), len(fixture.calls))
+				t.Fatalf("workflow limit was not enforced: status=%d body=%v model_calls=%d", response.StatusCode, body, h.mock.count("a"))
 			}
 		})
 	}
@@ -895,7 +1018,7 @@ func TestGatewayToolExecutionAppliesDelegatedAgentQuotasAcrossSteps(t *testing.T
 			})
 			response, body := h.chat(fullKey, nil, `,"max_tokens":1`)
 			if response.StatusCode != test.status || len(fixture.calls) != 1 {
-				t.Fatalf("delegated quota failed during workflow: status=%d body=%v model_calls=%d tool_calls=%d", response.StatusCode, body, h.mock.count("a"), len(fixture.calls))
+				t.Fatalf("delegated quota failed during workflow: status=%d body=%v model_calls=%d", response.StatusCode, body, h.mock.count("a"))
 			}
 			if test.status == http.StatusTooManyRequests {
 				if h.mock.count("a") != 1 {
@@ -1073,7 +1196,7 @@ func TestGatewayToolExecutionStopsAfterAuthorityChanges(t *testing.T) {
 			})
 			response, body := h.chat(fullKey, nil)
 			if response.StatusCode != test.wantStatus || h.mock.count("a") != 1 || len(fixture.calls) != test.wantToolCalls {
-				t.Fatalf("workflow continued after authority changed: status=%d body=%v model_calls=%d tool_calls=%d", response.StatusCode, body, h.mock.count("a"), len(fixture.calls))
+				t.Fatalf("workflow continued after authority changed: status=%d body=%v model_calls=%d", response.StatusCode, body, h.mock.count("a"))
 			}
 		})
 	}
