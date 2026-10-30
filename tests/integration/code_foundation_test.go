@@ -673,6 +673,81 @@ func TestCodeFoundationAllowanceRecoveryRequiresSupportedReset(t *testing.T) {
 	}
 }
 
+func TestCodeFoundationAvailabilityDistinguishesUnknownObservations(t *testing.T) {
+	f := newCodeFixtureWithProfile(t, codexauth.ProfileID)
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	expired, future := now.Add(-time.Hour), now.Add(time.Hour)
+	for i, test := range []struct {
+		name      string
+		health    string
+		cooldown  *time.Time
+		remaining *int64
+		reset     *time.Time
+		eligible  bool
+	}{
+		{"unknown health and allowance", "unknown", nil, nil, nil, true},
+		{"unavailable without cooldown", "unavailable", nil, nil, nil, false},
+		{"quota limited without cooldown", "quota_limited", nil, nil, nil, false},
+		{"exhausted without reset", "healthy", nil, new(int64(0)), nil, false},
+		{"expired cooldown with unknown allowance", "unavailable", &expired, nil, nil, true},
+		{"exhausted with expired reset", "healthy", nil, new(int64(0)), &expired, true},
+		{"active cooldown with expired allowance reset", "quota_limited", &future, new(int64(0)), &expired, false},
+		{"expired cooldown with active allowance reset", "quota_limited", &expired, new(int64(0)), &future, false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			f.exec(t, `UPDATE olp.code_accounts SET health=$2,unavailable_until=$3,allowance=NULL WHERE id=$1`, f.account, test.health, test.cooldown)
+			if test.remaining != nil {
+				if err := f.store.ObserveAllowance(t.Context(), f.account, codemode.Allowance{
+					RemainingTokens: test.remaining, ObservedAt: now,
+					TokenObservation: &codemode.CountObservation{ObservedAt: now, ResetsAt: test.reset},
+				}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			listing := codePublicDecode[struct {
+				Items []codemode.Account `json:"items"`
+			}](t, f.h.want(f.owner, "GET", "/api/v1/code/accounts?project_id="+f.project, nil, nil, 200))
+			if len(listing.Items) != 1 || listing.Items[0].Eligible != test.eligible {
+				t.Fatalf("management eligibility %+v, want %t", listing.Items, test.eligible)
+			}
+			account := listing.Items[0]
+			if test.remaining == nil && account.Allowance != nil || test.remaining != nil && (account.Allowance == nil || account.Allowance.RemainingTokens == nil || *account.Allowance.RemainingTokens != *test.remaining) {
+				t.Fatalf("availability invented allowance %+v", account.Allowance)
+			}
+			offers, err := f.store.Models(t.Context(), f.route, f.key)
+			if err != nil || slices.ContainsFunc(codeclient.Catalog(f.route, offers), func(model codemode.Model) bool { return model.ID == f.route.Models[0] }) != test.eligible {
+				t.Fatalf("discovery eligibility %+v %v, want %t", offers, err, test.eligible)
+			}
+			permit, err := f.store.Admit(t.Context(), f.input(fmt.Sprintf("availability-observation-%d", i), "", nil))
+			if !test.eligible {
+				codeRefusal(t, err, "code_account_unavailable")
+				return
+			}
+			if err != nil || permit.Account.ID != f.account {
+				t.Fatalf("eligible account refused %+v %v", permit, err)
+			}
+			if err := f.store.Abort(t.Context(), permit.Attempt.ID); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+	f.exec(t, `UPDATE olp.code_accounts SET health='unavailable',unavailable_until=NULL,allowance=NULL WHERE id=$1`, f.account)
+	credential := access.NewID()
+	f.addCredential(t, credential, "available-alternative", 2)
+	alternative := codePublicDecode[codemode.Account](t, f.h.want(f.owner, "POST", "/api/v1/code/accounts", map[string]any{
+		"project_id": f.project, "provider_id": f.provider, "credential_id": credential,
+		"name": "Available alternative", "enabled": true, "models": f.route.Models,
+	}, idem("available-alternative"), 201))
+	f.h.want(f.owner, "PUT", "/api/v1/code/pools/"+f.pool, map[string]any{
+		"project_id": f.project, "name": "Available pool", "kind": "shared",
+		"account_ids": []string{f.account, alternative.ID}, "api_key_ids": []string{f.key},
+	}, etagHeader(f.poolRecord), 200)
+	permit, err := f.store.Admit(t.Context(), f.input("availability-prefers-eligible", "", nil))
+	if err != nil || permit.Account.ID != alternative.ID {
+		t.Fatalf("unavailable account prevented eligible selection %+v %v", permit, err)
+	}
+}
+
 func TestCodeFoundationExactAliasesPreservePinsAcrossPublication(t *testing.T) {
 	f := newCodeFixtureWithProfile(t, codexauth.ProfileID)
 	if f.route.ModelRewriting || len(f.route.Aliases) != 0 {
