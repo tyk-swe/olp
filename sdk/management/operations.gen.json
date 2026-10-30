@@ -19408,6 +19408,12 @@
         "in": "query",
         "required": false,
         "type": "string"
+      },
+      {
+        "name": "attempt_id",
+        "in": "query",
+        "required": false,
+        "type": "string"
       }
     ],
     "response_headers": {
@@ -19452,6 +19458,10 @@
             "end_user_digest": {
               "type": "string",
               "pattern": "^([0-9a-f]{64}|unidentified)$"
+            },
+            "attempt_id": {
+              "type": "string",
+              "format": "uuid"
             }
           },
           "additionalProperties": false

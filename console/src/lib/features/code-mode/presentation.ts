@@ -117,6 +117,23 @@ export function reservationLabel(attempt: CodeAttempt): string {
   return 'Original reservation';
 }
 
+export function usageCertaintyLabel(attempt: CodeAttempt): string {
+  if (attempt.state === 'prepared') return 'Awaiting dispatch';
+  if (attempt.state === 'aborted') return 'Not dispatched';
+  if (attempt.nonexecution && attempt.reported_tokens === 0)
+    return 'Confirmed zero consumption';
+  if (attempt.reported_tokens !== null) return 'Reported total';
+  return 'Unknown consumption';
+}
+
+export function recoveryReasonLabel(attempt: CodeAttempt): string {
+  if (attempt.recovery_reason === 'credential_rejected')
+    return 'Credential rejection, proven not executed';
+  if (attempt.recovery_reason === 'quota_rejected')
+    return 'Quota rejection, proven not executed';
+  return 'Recovery reason not recorded';
+}
+
 export function refusalAdvice(code: string): string {
   if (code === 'code_ip_not_allowed')
     return 'Check the API key’s allowed client networks and the gateway’s trusted-proxy configuration.';
