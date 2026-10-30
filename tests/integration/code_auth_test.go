@@ -24,7 +24,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/resources"
 	"github.com/tyk-swe/olp/internal/routing"
+	codexfixture "github.com/tyk-swe/olp/tests/fixtures/codex-qualified"
 
 	"github.com/google/uuid"
 
@@ -41,9 +43,11 @@ type codexAuthority struct {
 	roots          string
 	approved       atomic.Bool
 	changedAccount atomic.Bool
+	omitRotation   atomic.Bool
 	mu             sync.Mutex
 	calls          []string
 	refreshes      int
+	refreshToken   int
 	accessToken    string
 }
 
@@ -106,12 +110,15 @@ func newCodexAuthorityWithPeer(t *testing.T, accountID string, peer http.Handler
 				}
 			} else {
 				var request map[string]string
-				if json.NewDecoder(r.Body).Decode(&request) != nil || r.Header.Get("Content-Type") != "application/json" || request["grant_type"] != "refresh_token" || request["client_id"] != "app_EMoamEEZ73f0CkXaXp7hrann" || request["refresh_token"] != fmt.Sprintf("fixture-refresh-%d", f.refreshes) {
+				if json.NewDecoder(r.Body).Decode(&request) != nil || r.Header.Get("Content-Type") != "application/json" || request["grant_type"] != "refresh_token" || request["client_id"] != "app_EMoamEEZ73f0CkXaXp7hrann" || request["refresh_token"] != fmt.Sprintf("fixture-refresh-%d", f.refreshToken) {
 					t.Error("worker reused an old token or changed the refresh protocol")
 					w.WriteHeader(401)
 					return
 				}
 				f.refreshes++
+				if !f.omitRotation.Load() {
+					f.refreshToken++
+				}
 			}
 			account := accountID
 			if f.changedAccount.Load() {
@@ -119,7 +126,11 @@ func newCodexAuthorityWithPeer(t *testing.T, accountID string, peer http.Handler
 			}
 			payload := fmt.Sprintf(`{"exp":%d,"jti":"generation-%d","https://api.openai.com/auth":{"chatgpt_account_id":%q,"chatgpt_user_id":"fixture-user"}}`, time.Now().Add(time.Hour).Unix(), f.refreshes, account)
 			f.accessToken = "eyJhbGciOiJSUzI1NiJ9." + base64.RawURLEncoding.EncodeToString([]byte(payload)) + ".fixture-signature"
-			json.NewEncoder(w).Encode(map[string]string{"access_token": f.accessToken, "id_token": f.accessToken, "refresh_token": fmt.Sprintf("fixture-refresh-%d", f.refreshes)})
+			if f.omitRotation.Load() {
+				json.NewEncoder(w).Encode(map[string]string{"access_token": f.accessToken, "id_token": f.accessToken})
+				return
+			}
+			json.NewEncoder(w).Encode(map[string]string{"access_token": f.accessToken, "id_token": f.accessToken, "refresh_token": fmt.Sprintf("fixture-refresh-%d", f.refreshToken)})
 		default:
 			t.Errorf("setup or maintenance attempted inference: %s %s", r.Method, r.URL.Path)
 			w.WriteHeader(404)
@@ -279,5 +290,218 @@ func TestCodeAuthDeviceEnrollmentRefreshRotationAndPrincipalLapse(t *testing.T) 
 	defer authority.mu.Unlock()
 	if len(authority.calls) != 6 || authority.refreshes != 2 {
 		t.Fatalf("unexpected setup/maintenance dispatch count: %v", authority.calls)
+	}
+}
+
+func codexImportDocument(t *testing.T, account, user, refresh string) string {
+	t.Helper()
+	payload, err := json.Marshal(map[string]any{"exp": time.Now().Add(-time.Hour).Unix(), "https://api.openai.com/auth": map[string]string{"chatgpt_account_id": account, "chatgpt_user_id": user}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	token := "header." + base64.RawURLEncoding.EncodeToString(payload) + ".fixture-signature"
+	document, err := json.Marshal(map[string]any{"auth_mode": "chatgpt", "OPENAI_API_KEY": nil, "tokens": map[string]string{"access_token": token, "id_token": token, "refresh_token": refresh, "account_id": account}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(document)
+}
+
+func TestCodeAuthImportPreservesPinnedAccountAndOwnsRefresh(t *testing.T) {
+	codeAuthImportContinuity(t, true)
+}
+
+func TestCodeAuthImportRetainsTokenWhenIssuerDoesNotRotate(t *testing.T) {
+	codeAuthImportContinuity(t, false)
+}
+
+func codeAuthImportContinuity(t *testing.T, rotate bool) {
+	t.Helper()
+	f := newCodePublicFixtureWithPeer(t, codexfixture.New())
+	f.codexAuthorities[0].omitRotation.Store(!rotate)
+	h, owner := f.h, f.owner
+	account := f.accounts[0]
+	providerPath := "/api/v1/providers/" + account["provider_id"].(string)
+	poolInput := map[string]any{"project_id": f.project, "name": "Controlled import pool", "kind": "shared", "owner_user_id": nil, "account_ids": []string{account["id"].(string)}, "api_key_ids": []string{f.keyID}}
+	h.want(owner, "PUT", "/api/v1/code/pools/"+f.pool["id"].(string), poolInput, etagHeader(f.pool), 200)
+	worker := grantRefresher(t, h)
+	h.Gateway.CodeLedger = &resources.CodeStore{Pool: h.Pool}
+	h.Gateway.CodeAuthorizer = &providers.CodeAuthorizer{Pool: h.Pool, Credentials: h.Runtime, Plugins: worker.Plugins}
+	h.refresh()
+	mux := http.NewServeMux()
+	h.Gateway.RegisterCode(mux)
+	server := httptest.NewServer(mux)
+	defer server.Close()
+	request := func() codexfixture.Request {
+		t.Helper()
+		r, err := http.NewRequestWithContext(t.Context(), "POST", server.URL+"/code/qualification/responses", strings.NewReader(`{"model":"gpt-5.4","stream":true,"input":[]}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		r.Header.Set("Authorization", "Bearer "+f.key)
+		r.Header.Set("Content-Type", "application/json")
+		r.Header.Set("Thread-Id", "import-pinned-account")
+		response, err := server.Client().Do(r)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer response.Body.Close()
+		body, err := io.ReadAll(response.Body)
+		if err != nil || response.StatusCode != 200 || string(body) != codexfixture.SSE {
+			t.Fatalf("imported account request failed with status %d", response.StatusCode)
+		}
+		captured := f.peer.Requests()
+		return captured[len(captured)-1]
+	}
+	before := request()
+	provider := h.want(owner, "GET", providerPath, nil, nil, 200)
+	document := codexImportDocument(t, "controlled-0", "fixture-user", "fixture-refresh-0")
+	slot := h.want(owner, "GET", providerPath+"/credential-slots", nil, nil, 200)["items"].([]any)[0].(map[string]any)
+	imported := h.want(owner, "POST", providerPath+"/codex-import", map[string]any{"credentials": document, "slot_id": strings.ToUpper(slot["id"].(string))}, etagHeader(provider), 201)
+	encoded, err := json.Marshal(imported)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(encoded), "fixture-refresh") || strings.Contains(string(encoded), "fixture-signature") || imported["principal"] != account["principal"] {
+		t.Fatal("import exposed credentials or changed the verified principal")
+	}
+	if len(f.peer.Requests()) != 1 {
+		t.Fatal("import generated inference")
+	}
+	rotated := h.want(owner, "PUT", "/api/v1/code/accounts/"+account["id"].(string), map[string]any{"project_id": f.project, "provider_id": account["provider_id"], "credential_id": imported["credential_id"], "name": account["name"], "enabled": true, "models": account["models"]}, etagHeader(account), 200)
+	if rotated["principal"] != account["principal"] || rotated["health"] != "unknown" {
+		t.Fatal("import changed the account identity or certified inference")
+	}
+	h.refresh()
+	after := request()
+	if after.Header.Get("ChatGPT-Account-ID") != before.Header.Get("ChatGPT-Account-ID") || after.Header.Get("Authorization") == before.Header.Get("Authorization") {
+		t.Fatal("import did not retain the pinned account with a verified replacement grant")
+	}
+	dueNow(t, h, imported["credential_id"].(string))
+	if !pass(t, worker) {
+		t.Fatal("imported grant did not enter the refresh lifecycle")
+	}
+	h.refresh()
+	refreshed := request()
+	if refreshed.Header.Get("Authorization") == after.Header.Get("Authorization") || refreshed.Header.Get("ChatGPT-Account-ID") != before.Header.Get("ChatGPT-Account-ID") {
+		t.Fatal("OLP did not rotate the imported grant for the pinned account")
+	}
+	f.codexAuthorities[0].changedAccount.Store(true)
+	latest := h.want(owner, "GET", providerPath, nil, nil, 200)
+	f.codexAuthorities[0].mu.Lock()
+	refreshToken := f.codexAuthorities[0].refreshToken
+	f.codexAuthorities[0].mu.Unlock()
+	changed := codexImportDocument(t, "controlled-0", "fixture-user", fmt.Sprintf("fixture-refresh-%d", refreshToken))
+	rejected := h.want(owner, "POST", providerPath+"/codex-import", map[string]any{"credentials": changed}, etagHeader(latest), 422)
+	rejection, err := json.Marshal(rejected)
+	if err != nil || strings.Contains(string(rejection), "fixture-refresh") || strings.Contains(string(rejection), "fixture-signature") {
+		t.Fatal("failed identity verification exposed credentials")
+	}
+	unchanged := h.want(owner, "GET", providerPath, nil, nil, 200)
+	if unchanged["etag"] != latest["etag"] {
+		t.Fatal("changed identity modified the provider")
+	}
+	request()
+	bindings := f.list("bindings")
+	if len(bindings) != 1 || bindings[0].(map[string]any)["account_id"] != account["id"] {
+		t.Fatal("import discarded or changed the conversation pin")
+	}
+}
+
+func TestCodeAuthImportRejectsMalformedConflictingAndChangedAccount(t *testing.T) {
+	f := newCodePublicFixtureWithPeer(t, codexfixture.New())
+	h, owner := f.h, f.owner
+	account := f.accounts[0]
+	path := "/api/v1/providers/" + account["provider_id"].(string)
+	provider := h.want(owner, "GET", path, nil, nil, 200)
+	valid := codexImportDocument(t, "controlled-0", "fixture-user", "fixture-refresh-0")
+	for name, document := range map[string]string{
+		"malformed":           "{",
+		"missing refresh":     strings.Replace(valid, `"refresh_token":"fixture-refresh-0"`, `"refresh_token":""`, 1),
+		"conflicting account": strings.Replace(valid, `"account_id":"controlled-0"`, `"account_id":"different-account"`, 1),
+		"API key conflict":    strings.Replace(valid, `"OPENAI_API_KEY":null`, `"OPENAI_API_KEY":"fixture-api-key"`, 1),
+		"duplicate fields":    strings.Replace(valid, `"auth_mode":"chatgpt"`, `"auth_mode":"chatgpt","auth_mode":"chatgpt"`, 1),
+	} {
+		t.Run(name, func(t *testing.T) {
+			h.want(owner, "POST", path+"/codex-import", map[string]any{"credentials": document}, etagHeader(provider), 422)
+		})
+	}
+	unknown := h.want(owner, "POST", path+"/codex-import", map[string]any{"credentials": valid, "slot_id": uuid.NewString()}, etagHeader(provider), 422)
+	requireFieldError(t, unknown, "slot_id")
+	f.noSyntheticInference(t)
+	f.codexAuthorities[0].mu.Lock()
+	refreshes := f.codexAuthorities[0].refreshes
+	f.codexAuthorities[0].mu.Unlock()
+	if refreshes != 0 {
+		t.Fatal("malformed import reached the token issuer")
+	}
+	f.codexAuthorities[0].changedAccount.Store(true)
+	other := codexImportDocument(t, "another-account", "fixture-user", "fixture-refresh-0")
+	h.want(owner, "POST", path+"/codex-import", map[string]any{"credentials": other}, etagHeader(provider), 422)
+	unchanged := h.want(owner, "GET", path, nil, nil, 200)
+	if unchanged["etag"] != provider["etag"] {
+		t.Fatal("rejected import modified the connection")
+	}
+	accounts := f.list("accounts")
+	for _, value := range accounts {
+		current := value.(map[string]any)
+		if current["id"] == account["id"] && (current["principal"] != account["principal"] || current["credential_id"] != account["credential_id"]) {
+			t.Fatal("rejected import changed the existing account")
+		}
+	}
+	f.noSyntheticInference(t)
+}
+
+func TestCodeAuthImportRejectsSameNamedForeignPluginBeforeRefresh(t *testing.T) {
+	h := newAccessHarness(t)
+	owner := h.owner()
+	var received atomic.Int64
+	receiver := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		received.Add(1)
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer receiver.Close()
+	digest := installPlugin(t, h, owner, testutil.BuildPlugin(t, "./internal/plugins/testdata/fixture", "-X=main.behaviour=codex-import", "-X=main.upstream="+receiver.URL+"/v1"))
+	project := createProject(h, owner, "Import trust boundary")
+	provider := h.want(owner, "POST", "/api/v1/providers", map[string]any{"name": "Foreign Codex profile", "project_id": project, "model": "fixture-model",
+		"configuration": map[string]any{"kind": "plugin", "auth_mode": "grant", "profile_id": "codex-subscription", "profile_revision": digest}}, idem(uuid.NewString()), 201)
+	path := "/api/v1/providers/" + provider["id"].(string)
+	document := codexImportDocument(t, "fixture-account", "fixture-user", "fixture-refresh-0")
+	h.want(owner, "POST", path+"/codex-import", map[string]any{"credentials": document}, etagHeader(provider), 422)
+	if received.Load() != 0 {
+		t.Fatal("a same-named foreign plugin received imported refresh credentials")
+	}
+	unchanged := h.want(owner, "GET", path, nil, nil, 200)
+	if unchanged["etag"] != provider["etag"] {
+		t.Fatal("a rejected foreign plugin import modified the provider")
+	}
+	credentials := h.want(owner, "GET", path+"/credentials", nil, nil, 200)["items"].([]any)
+	if len(credentials) != 0 {
+		t.Fatal("a rejected foreign plugin import staged a credential")
+	}
+}
+
+func TestCodeAuthImportRejectsInvalidPluginTokenMaterial(t *testing.T) {
+	h := newAccessHarness(t)
+	owner := h.owner()
+	digest := installPlugin(t, h, owner, testutil.BuildPlugin(t, "./internal/plugins/testdata/fixture", "-X=main.behaviour=codex-import-invalid"))
+	project := createProject(h, owner, "Import grant validation")
+	provider := h.want(owner, "POST", "/api/v1/providers", map[string]any{"name": "Invalid import material", "project_id": project, "model": "fixture-model",
+		"configuration": map[string]any{"kind": "plugin", "auth_mode": "grant", "profile_id": "codex-subscription", "profile_revision": digest}}, idem(uuid.NewString()), 201)
+	path := "/api/v1/providers/" + provider["id"].(string)
+	for _, material := range []string{"empty-access", "unsafe-access", "oversized-refresh", "excessive-expiry"} {
+		t.Run(material, func(t *testing.T) {
+			document := codexImportDocument(t, "fixture-account", "fixture-user", material)
+			rejected := h.want(owner, "POST", path+"/codex-import", map[string]any{"credentials": document}, etagHeader(provider), 422)
+			requireFieldError(t, rejected, "credentials")
+		})
+	}
+	unchanged := h.want(owner, "GET", path, nil, nil, 200)
+	if unchanged["etag"] != provider["etag"] {
+		t.Fatal("invalid plugin token material modified the provider")
+	}
+	credentials := h.want(owner, "GET", path+"/credentials", nil, nil, 200)["items"].([]any)
+	if len(credentials) != 0 {
+		t.Fatal("invalid plugin token material was staged as a credential")
 	}
 }
