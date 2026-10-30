@@ -538,6 +538,9 @@
                 "$ref": "#/$defs/ExternalCredentialReference"
               },
               "description": "Destination bindings for logical credential references. Stored without resolved values; new versions must pass validation before activation. A name cannot also appear in secret_bindings. Introducing an external reference requires installation-wide settings authority in addition to configure authority."
+            },
+            "code_bindings": {
+              "$ref": "#/$defs/ConfigurationCodeBindings"
             }
           },
           "required": [
@@ -546,7 +549,7 @@
           "type": "object"
         },
         "ConfigurationDocument": {
-          "description": "Secret-free desired-state artifact identified by natural names, never UUIDs",
+          "description": "Secret-free desired-state artifact using natural destination identities. Code UUIDs are artifact-local references, never requested destination IDs.",
           "properties": {
             "api_version": {
               "enum": [
@@ -707,6 +710,9 @@
               "items": {
                 "$ref": "#/$defs/ConfigurationRetrievalBinding"
               }
+            },
+            "code": {
+              "$ref": "#/$defs/ConfigurationCode"
             }
           },
           "required": [
@@ -4637,6 +4643,477 @@
             }
           }
         },
+        "ConfigurationCode": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "accounts": {
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "$ref": "#/$defs/ConfigurationCodeAccount"
+              }
+            },
+            "pools": {
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "$ref": "#/$defs/ConfigurationCodePool"
+              }
+            },
+            "routes": {
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "$ref": "#/$defs/ConfigurationCodeRoute"
+              }
+            },
+            "budgets": {
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "$ref": "#/$defs/ConfigurationCodeBudget"
+              }
+            }
+          },
+          "required": [],
+          "description": "Resource IDs are artifact-local references. Accounts resolve through explicitly bound current destination enrollments. Pools and budgets reuse validated same-project artifact IDs or standard UUIDv5 destination IDs derived from project, resource kind and artifact reference, with unique natural matches as fallback. This preserves duplicate names and exact duplicate budgets without a registry. Routes resolve through unique slug. Unrelated ambiguous identities are refused. Source credentials, health, usage windows, conversation bindings and historical revisions stay local. Destination projects and providers must be prepared and enrolled before planning. Rename globally unique slugs for same-installation cross-project promotion."
+        },
+        "ConfigurationCodeAccount": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "project": {
+              "type": "string"
+            },
+            "provider": {
+              "type": "string"
+            },
+            "credential_ref": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "enabled": {
+              "type": "boolean"
+            },
+            "models": {
+              "items": {
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
+              },
+              "maxItems": 100,
+              "minItems": 1,
+              "type": "array",
+              "uniqueItems": true
+            }
+          },
+          "required": [
+            "id",
+            "project",
+            "provider",
+            "credential_ref",
+            "name",
+            "enabled",
+            "models"
+          ]
+        },
+        "ConfigurationCodePool": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "project": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "kind": {
+              "type": "string",
+              "enum": [
+                "shared",
+                "personal"
+              ]
+            },
+            "owner_ref": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "accounts": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 2147483647
+              }
+            },
+            "api_key_refs": {
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "id",
+            "project",
+            "name",
+            "kind",
+            "owner_ref",
+            "accounts",
+            "api_key_refs"
+          ]
+        },
+        "ConfigurationCodeRoute": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "project": {
+              "type": "string"
+            },
+            "slug": {
+              "pattern": "^[a-z0-9][a-z0-9._-]{0,99}$",
+              "type": "string"
+            },
+            "draft": {
+              "$ref": "#/$defs/ConfigurationCodeRoutePolicy"
+            },
+            "published": {
+              "$ref": "#/$defs/ConfigurationCodePublication"
+            }
+          },
+          "required": [
+            "id",
+            "project",
+            "slug",
+            "draft"
+          ]
+        },
+        "ConfigurationCodeRoutePolicy": {
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "models": {
+              "items": {
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
+              },
+              "maxItems": 100,
+              "minItems": 1,
+              "type": "array",
+              "uniqueItems": true
+            },
+            "max_body_bytes": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 1,
+              "maximum": 1073741824,
+              "description": "Optional ingress limit in bytes. Null inherits installation limits; a route can only lower them. Checks both encoded and decoded JSON, the complete multipart body, and individual client WebSocket messages. Published revisions pin this policy."
+            },
+            "tools": {
+              "$ref": "#/$defs/CodeResearchTools"
+            },
+            "messages_to_codex": {
+              "type": "boolean",
+              "default": false,
+              "description": "Explicitly allow Messages text and tool requests to use Codex subscription accounts through protocol translation. Published revisions pin this policy. Native forwarding remains the default. Client identity and prompts are preserved. Model rewriting requires its separate opt-in. Explicit low, medium and high reasoning effort is supported. Signed thinking, numeric reasoning budgets, beta features and unsupported required semantics are refused before dispatch."
+            },
+            "aliases": {
+              "type": "object",
+              "maxProperties": 100,
+              "additionalProperties": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200
+              },
+              "propertyNames": {
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]{0,199}$"
+              },
+              "description": "Stable public model names mapped directly to one native identifier in models. Requires model_rewriting. Alias chains and native name collisions are rejected. Immutable publications pin these mappings. Repointing an alias affects new conversations. Existing conversations retain their stored exact target while it remains published and authorized."
+            },
+            "model_rewriting": {
+              "type": "boolean",
+              "default": false,
+              "description": "Explicitly enable model identifier rewriting through exact aliases or configured model_pools. Disabled by default. This policy does not rewrite client identity or prompts."
+            },
+            "initial_recovery_attempts": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 2,
+              "description": "Maximum additional attempts per request for a new or established single-pin root conversation after an adapter proves nonexecution and the complete input is portable. Zero disables recovery. Published revisions pin this policy. Existing children, socket ownership and unresolved attempts prevent migration. Exact models remain the default. Only explicit model_pools authorize model changes. Live authority remains required. Producing-account reference ownership is preserved. Accepted, partial, ambiguous and opaque work never replays."
+            },
+            "model_pools": {
+              "type": "object",
+              "maxProperties": 100,
+              "additionalProperties": {
+                "type": "array",
+                "minItems": 2,
+                "maxItems": 100,
+                "uniqueItems": true,
+                "items": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 200
+                }
+              },
+              "description": "Explicit subscription model recovery pools keyed by a published native name or exact alias. Requires model_rewriting. Each ordered list starts with that name's normal exact target and contains distinct native identifiers from models. Recovery prefers the pinned exact target, then these alternatives, within initial_recovery_attempts and positive nonexecution, portability, live authorization and budget checks. Omitted pools preserve exact selection. Publications freeze the policy. Existing conversations retain their exact target, including after alias changes, while it remains published and authorized. Paid fallback is separately governed."
+            },
+            "pool": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "paid_participation": {
+              "type": "boolean"
+            },
+            "paid_targets": {
+              "type": "object",
+              "maxProperties": 100,
+              "additionalProperties": {
+                "$ref": "#/$defs/ConfigurationCodePaidTarget"
+              }
+            },
+            "chat_to_antigravity": {
+              "type": "boolean",
+              "description": "Explicit opt-in for chat translation through the Antigravity adapter."
+            },
+            "paid_fallback_targets": {
+              "type": "object",
+              "maxProperties": 100,
+              "additionalProperties": {
+                "$ref": "#/$defs/ConfigurationCodePaidTarget"
+              },
+              "description": "Explicit recovery-only paid targets keyed by native model, using the same named destination provider, slot and credential bindings as direct paid targets. Requires paid participation and a positive initial recovery limit."
+            }
+          },
+          "required": [
+            "models",
+            "enabled",
+            "pool"
+          ],
+          "type": "object"
+        },
+        "CodeResearchTools": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": false,
+          "description": "Research subscription binding, frozen at publication. Requires an eligible Z.ai global account in the same project and pool; independent of inference models. Null disables research.",
+          "properties": {
+            "account_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "services": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 3,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "enum": [
+                  "search",
+                  "reader",
+                  "zread"
+                ]
+              }
+            }
+          },
+          "required": [
+            "account_id",
+            "services"
+          ]
+        },
+        "ConfigurationCodePaidTarget": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "provider",
+            "slot",
+            "credential_ref"
+          ],
+          "properties": {
+            "provider": {
+              "type": "string"
+            },
+            "slot": {
+              "type": "string"
+            },
+            "credential_ref": {
+              "type": "string"
+            }
+          }
+        },
+        "ConfigurationCodePublication": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "policy": {
+              "$ref": "#/$defs/ConfigurationCodeRoutePolicy"
+            },
+            "connections": {
+              "type": "object",
+              "additionalProperties": {
+                "$ref": "#/$defs/ConfigurationCodeConnection"
+              }
+            },
+            "paid_connections": {
+              "type": "object",
+              "additionalProperties": {
+                "$ref": "#/$defs/ConfigurationCodePaidConnection"
+              }
+            }
+          },
+          "required": [
+            "policy",
+            "connections"
+          ]
+        },
+        "ConfigurationCodeConnection": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "configuration": {
+              "$ref": "#/$defs/ProviderConfiguration"
+            },
+            "network_credential_ref": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "configuration"
+          ]
+        },
+        "ConfigurationCodePaidConnection": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "provider",
+            "slot_key_refs"
+          ],
+          "properties": {
+            "provider": {
+              "$ref": "#/$defs/ConfigurationProviderEntry"
+            },
+            "slot_key_refs": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "ConfigurationCodeBudget": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "project": {
+              "type": "string"
+            },
+            "route": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "api_key_ref": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "daily_tokens": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "format": "int64",
+                  "minimum": 1,
+                  "maximum": 9007199254740991
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "monthly_tokens": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "format": "int64",
+                  "minimum": 1,
+                  "maximum": 9007199254740991
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "enabled": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "id",
+            "project",
+            "route",
+            "api_key_ref",
+            "daily_tokens",
+            "monthly_tokens",
+            "enabled"
+          ]
+        },
         "ExternalCredentialReference": {
           "type": "object",
           "additionalProperties": false,
@@ -4675,6 +5152,34 @@
             }
           },
           "description": "Immutable store version. Aliases such as latest/AWSCURRENT are refused. Authentication uses process workload identity; references contain no credential values."
+        },
+        "ConfigurationCodeBindings": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "credentials": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string",
+                "format": "uuid"
+              }
+            },
+            "users": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string",
+                "format": "uuid"
+              }
+            },
+            "api_keys": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string",
+                "format": "uuid"
+              }
+            }
+          },
+          "required": []
         }
       }
     }
@@ -23533,6 +24038,9 @@
                 "$ref": "#/$defs/ExternalCredentialReference"
               },
               "description": "Destination bindings for logical credential references. Stored without resolved values; new versions must pass validation before activation. A name cannot also appear in secret_bindings. Introducing an external reference requires installation-wide settings authority in addition to configure authority."
+            },
+            "code_bindings": {
+              "$ref": "#/$defs/ConfigurationCodeBindings"
             }
           },
           "required": [
@@ -23541,7 +24049,7 @@
           "type": "object"
         },
         "ConfigurationDocument": {
-          "description": "Secret-free desired-state artifact identified by natural names, never UUIDs",
+          "description": "Secret-free desired-state artifact using natural destination identities. Code UUIDs are artifact-local references, never requested destination IDs.",
           "properties": {
             "api_version": {
               "enum": [
@@ -23702,6 +24210,9 @@
               "items": {
                 "$ref": "#/$defs/ConfigurationRetrievalBinding"
               }
+            },
+            "code": {
+              "$ref": "#/$defs/ConfigurationCode"
             }
           },
           "required": [
@@ -27632,6 +28143,477 @@
             }
           }
         },
+        "ConfigurationCode": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "accounts": {
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "$ref": "#/$defs/ConfigurationCodeAccount"
+              }
+            },
+            "pools": {
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "$ref": "#/$defs/ConfigurationCodePool"
+              }
+            },
+            "routes": {
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "$ref": "#/$defs/ConfigurationCodeRoute"
+              }
+            },
+            "budgets": {
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "$ref": "#/$defs/ConfigurationCodeBudget"
+              }
+            }
+          },
+          "required": [],
+          "description": "Resource IDs are artifact-local references. Accounts resolve through explicitly bound current destination enrollments. Pools and budgets reuse validated same-project artifact IDs or standard UUIDv5 destination IDs derived from project, resource kind and artifact reference, with unique natural matches as fallback. This preserves duplicate names and exact duplicate budgets without a registry. Routes resolve through unique slug. Unrelated ambiguous identities are refused. Source credentials, health, usage windows, conversation bindings and historical revisions stay local. Destination projects and providers must be prepared and enrolled before planning. Rename globally unique slugs for same-installation cross-project promotion."
+        },
+        "ConfigurationCodeAccount": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "project": {
+              "type": "string"
+            },
+            "provider": {
+              "type": "string"
+            },
+            "credential_ref": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "enabled": {
+              "type": "boolean"
+            },
+            "models": {
+              "items": {
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
+              },
+              "maxItems": 100,
+              "minItems": 1,
+              "type": "array",
+              "uniqueItems": true
+            }
+          },
+          "required": [
+            "id",
+            "project",
+            "provider",
+            "credential_ref",
+            "name",
+            "enabled",
+            "models"
+          ]
+        },
+        "ConfigurationCodePool": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "project": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "kind": {
+              "type": "string",
+              "enum": [
+                "shared",
+                "personal"
+              ]
+            },
+            "owner_ref": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "accounts": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 2147483647
+              }
+            },
+            "api_key_refs": {
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "id",
+            "project",
+            "name",
+            "kind",
+            "owner_ref",
+            "accounts",
+            "api_key_refs"
+          ]
+        },
+        "ConfigurationCodeRoute": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "project": {
+              "type": "string"
+            },
+            "slug": {
+              "pattern": "^[a-z0-9][a-z0-9._-]{0,99}$",
+              "type": "string"
+            },
+            "draft": {
+              "$ref": "#/$defs/ConfigurationCodeRoutePolicy"
+            },
+            "published": {
+              "$ref": "#/$defs/ConfigurationCodePublication"
+            }
+          },
+          "required": [
+            "id",
+            "project",
+            "slug",
+            "draft"
+          ]
+        },
+        "ConfigurationCodeRoutePolicy": {
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "models": {
+              "items": {
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
+              },
+              "maxItems": 100,
+              "minItems": 1,
+              "type": "array",
+              "uniqueItems": true
+            },
+            "max_body_bytes": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 1,
+              "maximum": 1073741824,
+              "description": "Optional ingress limit in bytes. Null inherits installation limits; a route can only lower them. Checks both encoded and decoded JSON, the complete multipart body, and individual client WebSocket messages. Published revisions pin this policy."
+            },
+            "tools": {
+              "$ref": "#/$defs/CodeResearchTools"
+            },
+            "messages_to_codex": {
+              "type": "boolean",
+              "default": false,
+              "description": "Explicitly allow Messages text and tool requests to use Codex subscription accounts through protocol translation. Published revisions pin this policy. Native forwarding remains the default. Client identity and prompts are preserved. Model rewriting requires its separate opt-in. Explicit low, medium and high reasoning effort is supported. Signed thinking, numeric reasoning budgets, beta features and unsupported required semantics are refused before dispatch."
+            },
+            "aliases": {
+              "type": "object",
+              "maxProperties": 100,
+              "additionalProperties": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200
+              },
+              "propertyNames": {
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]{0,199}$"
+              },
+              "description": "Stable public model names mapped directly to one native identifier in models. Requires model_rewriting. Alias chains and native name collisions are rejected. Immutable publications pin these mappings. Repointing an alias affects new conversations. Existing conversations retain their stored exact target while it remains published and authorized."
+            },
+            "model_rewriting": {
+              "type": "boolean",
+              "default": false,
+              "description": "Explicitly enable model identifier rewriting through exact aliases or configured model_pools. Disabled by default. This policy does not rewrite client identity or prompts."
+            },
+            "initial_recovery_attempts": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 2,
+              "description": "Maximum additional attempts per request for a new or established single-pin root conversation after an adapter proves nonexecution and the complete input is portable. Zero disables recovery. Published revisions pin this policy. Existing children, socket ownership and unresolved attempts prevent migration. Exact models remain the default. Only explicit model_pools authorize model changes. Live authority remains required. Producing-account reference ownership is preserved. Accepted, partial, ambiguous and opaque work never replays."
+            },
+            "model_pools": {
+              "type": "object",
+              "maxProperties": 100,
+              "additionalProperties": {
+                "type": "array",
+                "minItems": 2,
+                "maxItems": 100,
+                "uniqueItems": true,
+                "items": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 200
+                }
+              },
+              "description": "Explicit subscription model recovery pools keyed by a published native name or exact alias. Requires model_rewriting. Each ordered list starts with that name's normal exact target and contains distinct native identifiers from models. Recovery prefers the pinned exact target, then these alternatives, within initial_recovery_attempts and positive nonexecution, portability, live authorization and budget checks. Omitted pools preserve exact selection. Publications freeze the policy. Existing conversations retain their exact target, including after alias changes, while it remains published and authorized. Paid fallback is separately governed."
+            },
+            "pool": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "paid_participation": {
+              "type": "boolean"
+            },
+            "paid_targets": {
+              "type": "object",
+              "maxProperties": 100,
+              "additionalProperties": {
+                "$ref": "#/$defs/ConfigurationCodePaidTarget"
+              }
+            },
+            "chat_to_antigravity": {
+              "type": "boolean",
+              "description": "Explicit opt-in for chat translation through the Antigravity adapter."
+            },
+            "paid_fallback_targets": {
+              "type": "object",
+              "maxProperties": 100,
+              "additionalProperties": {
+                "$ref": "#/$defs/ConfigurationCodePaidTarget"
+              },
+              "description": "Explicit recovery-only paid targets keyed by native model, using the same named destination provider, slot and credential bindings as direct paid targets. Requires paid participation and a positive initial recovery limit."
+            }
+          },
+          "required": [
+            "models",
+            "enabled",
+            "pool"
+          ],
+          "type": "object"
+        },
+        "CodeResearchTools": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": false,
+          "description": "Research subscription binding, frozen at publication. Requires an eligible Z.ai global account in the same project and pool; independent of inference models. Null disables research.",
+          "properties": {
+            "account_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "services": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 3,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "enum": [
+                  "search",
+                  "reader",
+                  "zread"
+                ]
+              }
+            }
+          },
+          "required": [
+            "account_id",
+            "services"
+          ]
+        },
+        "ConfigurationCodePaidTarget": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "provider",
+            "slot",
+            "credential_ref"
+          ],
+          "properties": {
+            "provider": {
+              "type": "string"
+            },
+            "slot": {
+              "type": "string"
+            },
+            "credential_ref": {
+              "type": "string"
+            }
+          }
+        },
+        "ConfigurationCodePublication": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "policy": {
+              "$ref": "#/$defs/ConfigurationCodeRoutePolicy"
+            },
+            "connections": {
+              "type": "object",
+              "additionalProperties": {
+                "$ref": "#/$defs/ConfigurationCodeConnection"
+              }
+            },
+            "paid_connections": {
+              "type": "object",
+              "additionalProperties": {
+                "$ref": "#/$defs/ConfigurationCodePaidConnection"
+              }
+            }
+          },
+          "required": [
+            "policy",
+            "connections"
+          ]
+        },
+        "ConfigurationCodeConnection": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "configuration": {
+              "$ref": "#/$defs/ProviderConfiguration"
+            },
+            "network_credential_ref": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "configuration"
+          ]
+        },
+        "ConfigurationCodePaidConnection": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "provider",
+            "slot_key_refs"
+          ],
+          "properties": {
+            "provider": {
+              "$ref": "#/$defs/ConfigurationProviderEntry"
+            },
+            "slot_key_refs": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "ConfigurationCodeBudget": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "project": {
+              "type": "string"
+            },
+            "route": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "api_key_ref": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "daily_tokens": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "format": "int64",
+                  "minimum": 1,
+                  "maximum": 9007199254740991
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "monthly_tokens": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "format": "int64",
+                  "minimum": 1,
+                  "maximum": 9007199254740991
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "enabled": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "id",
+            "project",
+            "route",
+            "api_key_ref",
+            "daily_tokens",
+            "monthly_tokens",
+            "enabled"
+          ]
+        },
         "ExternalCredentialReference": {
           "type": "object",
           "additionalProperties": false,
@@ -27670,6 +28652,34 @@
             }
           },
           "description": "Immutable store version. Aliases such as latest/AWSCURRENT are refused. Authentication uses process workload identity; references contain no credential values."
+        },
+        "ConfigurationCodeBindings": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "credentials": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string",
+                "format": "uuid"
+              }
+            },
+            "users": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string",
+                "format": "uuid"
+              }
+            },
+            "api_keys": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string",
+                "format": "uuid"
+              }
+            }
+          },
+          "required": []
         }
       }
     }

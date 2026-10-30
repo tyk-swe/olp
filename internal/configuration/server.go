@@ -53,6 +53,7 @@ func (s *Server) export(r *http.Request, p access.Principal) (access.Reply, erro
 }
 
 type promotionInput struct {
+	CodeBindings     CodeBindings                     `json:"code_bindings"`
 	Document         *Document                        `json:"document"`
 	ExpectedDigest   *string                          `json:"expected_digest"`
 	SecretBindings   map[string]string                `json:"secret_bindings"`
@@ -67,6 +68,7 @@ func (s *Server) planEndpoint(r *http.Request, p access.Principal) (access.Reply
 	if input.Document == nil {
 		return access.Reply{}, access.Invalid("document", "Send the configuration artifact.")
 	}
+	input.Document.codeBindings = input.CodeBindings
 	if input.Document.SAML != nil || len(input.Document.WorkloadIssuers) > 0 || len(input.Document.SCIMGroupMappings) > 0 {
 		if err := p.Authorize(access.Access); err != nil {
 			return access.Reply{}, err
@@ -77,6 +79,9 @@ func (s *Server) planEndpoint(r *http.Request, p access.Principal) (access.Reply
 	}
 	bindings, err := input.bindings()
 	if err != nil {
+		return access.Reply{}, err
+	}
+	if err := authorizeCodePromotion(r.Context(), s.Access.Pool, p, input.Document); err != nil {
 		return access.Reply{}, err
 	}
 	result, err := s.plan(r.Context(), s.Access.Pool, input.Document, bindings, input.ExpectedDigest)
@@ -132,6 +137,10 @@ func (s *Server) applyEndpoint(r *http.Request, _ access.Principal) (access.Repl
 		return access.Reply{}, err
 	}
 	if err := validateRetrievalBindings(input.Document); err != nil {
+		return access.Reply{}, err
+	}
+	input.Document.codeBindings = input.CodeBindings
+	if err := authorizeCodePromotion(r.Context(), tx, p, input.Document); err != nil {
 		return access.Reply{}, err
 	}
 	doc := input.Document
@@ -213,6 +222,9 @@ func (s *Server) applyEndpoint(r *http.Request, _ access.Principal) (access.Repl
 		}
 	}
 	if err = s.applyDocument(r.Context(), tx, p, doc, bindings); err != nil {
+		return access.Reply{}, err
+	}
+	if err = applyCode(r.Context(), tx, p, doc); err != nil {
 		return access.Reply{}, err
 	}
 	if err = s.applyMCPServers(r.Context(), tx, p, doc, bindings, preparedServers); err != nil {

@@ -1291,6 +1291,24 @@ func (e ConfigurationCapabilityEntryMode) Valid() bool {
 	}
 }
 
+// Defines values for ConfigurationCodePoolKind.
+const (
+	ConfigurationCodePoolKindPersonal ConfigurationCodePoolKind = "personal"
+	ConfigurationCodePoolKindShared   ConfigurationCodePoolKind = "shared"
+)
+
+// Valid indicates whether the value is a known member of the ConfigurationCodePoolKind enum.
+func (e ConfigurationCodePoolKind) Valid() bool {
+	switch e {
+	case ConfigurationCodePoolKindPersonal:
+		return true
+	case ConfigurationCodePoolKindShared:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for ConfigurationDocumentApiVersion.
 const (
 	OpenllmproxyDevconfigv1 ConfigurationDocumentApiVersion = "openllmproxy.dev/config/v1"
@@ -1674,6 +1692,10 @@ const (
 	ConfigurationPlanItemKindAgentPublication    ConfigurationPlanItemKind = "agent_publication"
 	ConfigurationPlanItemKindBillingImport       ConfigurationPlanItemKind = "billing_import"
 	ConfigurationPlanItemKindCatalogPublication  ConfigurationPlanItemKind = "catalog_publication"
+	ConfigurationPlanItemKindCodeAccount         ConfigurationPlanItemKind = "code_account"
+	ConfigurationPlanItemKindCodeBudget          ConfigurationPlanItemKind = "code_budget"
+	ConfigurationPlanItemKindCodePool            ConfigurationPlanItemKind = "code_pool"
+	ConfigurationPlanItemKindCodeRoute           ConfigurationPlanItemKind = "code_route"
 	ConfigurationPlanItemKindConfiguration       ConfigurationPlanItemKind = "configuration"
 	ConfigurationPlanItemKindCredential          ConfigurationPlanItemKind = "credential"
 	ConfigurationPlanItemKindDiscount            ConfigurationPlanItemKind = "discount"
@@ -1700,6 +1722,14 @@ func (e ConfigurationPlanItemKind) Valid() bool {
 	case ConfigurationPlanItemKindBillingImport:
 		return true
 	case ConfigurationPlanItemKindCatalogPublication:
+		return true
+	case ConfigurationPlanItemKindCodeAccount:
+		return true
+	case ConfigurationPlanItemKindCodeBudget:
+		return true
+	case ConfigurationPlanItemKindCodePool:
+		return true
+	case ConfigurationPlanItemKindCodeRoute:
 		return true
 	case ConfigurationPlanItemKindConfiguration:
 		return true
@@ -8011,13 +8041,137 @@ type ConfigurationCapabilityEntry struct {
 // ConfigurationCapabilityEntryMode defines model for ConfigurationCapabilityEntry.Mode.
 type ConfigurationCapabilityEntryMode string
 
-// ConfigurationDocument Secret-free desired-state artifact identified by natural names, never UUIDs
+// ConfigurationCode Resource IDs are artifact-local references. Accounts resolve through explicitly bound current destination enrollments. Pools and budgets reuse validated same-project artifact IDs or standard UUIDv5 destination IDs derived from project, resource kind and artifact reference, with unique natural matches as fallback. This preserves duplicate names and exact duplicate budgets without a registry. Routes resolve through unique slug. Unrelated ambiguous identities are refused. Source credentials, health, usage windows, conversation bindings and historical revisions stay local. Destination projects and providers must be prepared and enrolled before planning. Rename globally unique slugs for same-installation cross-project promotion.
+type ConfigurationCode struct {
+	Accounts nullable.Nullable[[]ConfigurationCodeAccount] `json:"accounts,omitempty"`
+	Budgets  nullable.Nullable[[]ConfigurationCodeBudget]  `json:"budgets,omitempty"`
+	Pools    nullable.Nullable[[]ConfigurationCodePool]    `json:"pools,omitempty"`
+	Routes   nullable.Nullable[[]ConfigurationCodeRoute]   `json:"routes,omitempty"`
+}
+
+// ConfigurationCodeAccount defines model for ConfigurationCodeAccount.
+type ConfigurationCodeAccount struct {
+	CredentialRef string             `json:"credential_ref"`
+	Enabled       bool               `json:"enabled"`
+	Id            openapi_types.UUID `json:"id"`
+	Models        []string           `json:"models"`
+	Name          string             `json:"name"`
+	Project       string             `json:"project"`
+	Provider      string             `json:"provider"`
+}
+
+// ConfigurationCodeBindings defines model for ConfigurationCodeBindings.
+type ConfigurationCodeBindings struct {
+	ApiKeys     *map[string]openapi_types.UUID `json:"api_keys,omitempty"`
+	Credentials *map[string]openapi_types.UUID `json:"credentials,omitempty"`
+	Users       *map[string]openapi_types.UUID `json:"users,omitempty"`
+}
+
+// ConfigurationCodeBudget defines model for ConfigurationCodeBudget.
+type ConfigurationCodeBudget struct {
+	ApiKeyRef     nullable.Nullable[string]             `json:"api_key_ref"`
+	DailyTokens   nullable.Nullable[int64]              `json:"daily_tokens"`
+	Enabled       bool                                  `json:"enabled"`
+	Id            openapi_types.UUID                    `json:"id"`
+	MonthlyTokens nullable.Nullable[int64]              `json:"monthly_tokens"`
+	Project       string                                `json:"project"`
+	Route         nullable.Nullable[openapi_types.UUID] `json:"route"`
+}
+
+// ConfigurationCodeConnection defines model for ConfigurationCodeConnection.
+type ConfigurationCodeConnection struct {
+	Configuration        ProviderConfiguration `json:"configuration"`
+	NetworkCredentialRef *string               `json:"network_credential_ref,omitempty"`
+}
+
+// ConfigurationCodePaidConnection defines model for ConfigurationCodePaidConnection.
+type ConfigurationCodePaidConnection struct {
+	Provider    ConfigurationProviderEntry `json:"provider"`
+	SlotKeyRefs map[string][]string        `json:"slot_key_refs"`
+}
+
+// ConfigurationCodePaidTarget defines model for ConfigurationCodePaidTarget.
+type ConfigurationCodePaidTarget struct {
+	CredentialRef string `json:"credential_ref"`
+	Provider      string `json:"provider"`
+	Slot          string `json:"slot"`
+}
+
+// ConfigurationCodePool defines model for ConfigurationCodePool.
+type ConfigurationCodePool struct {
+	Accounts   map[string]int              `json:"accounts"`
+	ApiKeyRefs nullable.Nullable[[]string] `json:"api_key_refs"`
+	Id         openapi_types.UUID          `json:"id"`
+	Kind       ConfigurationCodePoolKind   `json:"kind"`
+	Name       string                      `json:"name"`
+	OwnerRef   nullable.Nullable[string]   `json:"owner_ref"`
+	Project    string                      `json:"project"`
+}
+
+// ConfigurationCodePoolKind defines model for ConfigurationCodePool.Kind.
+type ConfigurationCodePoolKind string
+
+// ConfigurationCodePublication defines model for ConfigurationCodePublication.
+type ConfigurationCodePublication struct {
+	Connections     map[string]ConfigurationCodeConnection      `json:"connections"`
+	PaidConnections *map[string]ConfigurationCodePaidConnection `json:"paid_connections,omitempty"`
+	Policy          ConfigurationCodeRoutePolicy                `json:"policy"`
+}
+
+// ConfigurationCodeRoute defines model for ConfigurationCodeRoute.
+type ConfigurationCodeRoute struct {
+	Draft     ConfigurationCodeRoutePolicy  `json:"draft"`
+	Id        openapi_types.UUID            `json:"id"`
+	Project   string                        `json:"project"`
+	Published *ConfigurationCodePublication `json:"published,omitempty"`
+	Slug      string                        `json:"slug"`
+}
+
+// ConfigurationCodeRoutePolicy defines model for ConfigurationCodeRoutePolicy.
+type ConfigurationCodeRoutePolicy struct {
+	// Aliases Stable public model names mapped directly to one native identifier in models. Requires model_rewriting. Alias chains and native name collisions are rejected. Immutable publications pin these mappings. Repointing an alias affects new conversations. Existing conversations retain their stored exact target while it remains published and authorized.
+	Aliases *map[string]string `json:"aliases,omitempty"`
+
+	// ChatToAntigravity Explicit opt-in for chat translation through the Antigravity adapter.
+	ChatToAntigravity *bool `json:"chat_to_antigravity,omitempty"`
+	Enabled           bool  `json:"enabled"`
+
+	// InitialRecoveryAttempts Maximum additional attempts per request for a new or established single-pin root conversation after an adapter proves nonexecution and the complete input is portable. Zero disables recovery. Published revisions pin this policy. Existing children, socket ownership and unresolved attempts prevent migration. Exact models remain the default. Only explicit model_pools authorize model changes. Live authority remains required. Producing-account reference ownership is preserved. Accepted, partial, ambiguous and opaque work never replays.
+	InitialRecoveryAttempts *int `json:"initial_recovery_attempts,omitempty"`
+
+	// MaxBodyBytes Optional ingress limit in bytes. Null inherits installation limits; a route can only lower them. Checks both encoded and decoded JSON, the complete multipart body, and individual client WebSocket messages. Published revisions pin this policy.
+	MaxBodyBytes nullable.Nullable[int] `json:"max_body_bytes,omitempty"`
+
+	// MessagesToCodex Explicitly allow Messages text and tool requests to use Codex subscription accounts through protocol translation. Published revisions pin this policy. Native forwarding remains the default. Client identity and prompts are preserved. Model rewriting requires its separate opt-in. Explicit low, medium and high reasoning effort is supported. Signed thinking, numeric reasoning budgets, beta features and unsupported required semantics are refused before dispatch.
+	MessagesToCodex *bool `json:"messages_to_codex,omitempty"`
+
+	// ModelPools Explicit subscription model recovery pools keyed by a published native name or exact alias. Requires model_rewriting. Each ordered list starts with that name's normal exact target and contains distinct native identifiers from models. Recovery prefers the pinned exact target, then these alternatives, within initial_recovery_attempts and positive nonexecution, portability, live authorization and budget checks. Omitted pools preserve exact selection. Publications freeze the policy. Existing conversations retain their exact target, including after alias changes, while it remains published and authorized. Paid fallback is separately governed.
+	ModelPools *map[string][]string `json:"model_pools,omitempty"`
+
+	// ModelRewriting Explicitly enable model identifier rewriting through exact aliases or configured model_pools. Disabled by default. This policy does not rewrite client identity or prompts.
+	ModelRewriting *bool    `json:"model_rewriting,omitempty"`
+	Models         []string `json:"models"`
+
+	// PaidFallbackTargets Explicit recovery-only paid targets keyed by native model, using the same named destination provider, slot and credential bindings as direct paid targets. Requires paid participation and a positive initial recovery limit.
+	PaidFallbackTargets *map[string]ConfigurationCodePaidTarget `json:"paid_fallback_targets,omitempty"`
+	PaidParticipation   *bool                                   `json:"paid_participation,omitempty"`
+	PaidTargets         *map[string]ConfigurationCodePaidTarget `json:"paid_targets,omitempty"`
+	Pool                openapi_types.UUID                      `json:"pool"`
+
+	// Tools Research subscription binding, frozen at publication. Requires an eligible Z.ai global account in the same project and pool; independent of inference models. Null disables research.
+	Tools nullable.Nullable[CodeResearchTools] `json:"tools,omitempty"`
+}
+
+// ConfigurationDocument Secret-free desired-state artifact using natural destination identities. Code UUIDs are artifact-local references, never requested destination IDs.
 type ConfigurationDocument struct {
 	AgentPublications *[]ConfigurationAgentPublication `json:"agent_publications,omitempty"`
 	ApiVersion        ConfigurationDocumentApiVersion  `json:"api_version"`
 
 	// BudgetTimeZone Requested IANA budget time zone. Export includes it. Omission/null preserves the destination. Changes require settings permission and activate independently at the next existing day/week/month boundary; current spend and calendar history remain intact.
 	BudgetTimeZone nullable.Nullable[string] `json:"budget_time_zone,omitempty"`
+
+	// Code Resource IDs are artifact-local references. Accounts resolve through explicitly bound current destination enrollments. Pools and budgets reuse validated same-project artifact IDs or standard UUIDv5 destination IDs derived from project, resource kind and artifact reference, with unique natural matches as fallback. This preserves duplicate names and exact duplicate budgets without a registry. Routes resolve through unique slug. Unrelated ambiguous identities are refused. Source credentials, health, usage windows, conversation bindings and historical revisions stay local. Destination projects and providers must be prepared and enrolled before planning. Rename globally unique slugs for same-installation cross-project promotion.
+	Code *ConfigurationCode `json:"code,omitempty"`
 
 	// ExportedAt Informational only; excluded from the artifact digest
 	ExportedAt           *time.Time                           `json:"exported_at,omitempty"`
@@ -8062,7 +8216,7 @@ type ConfigurationExportResponse struct {
 	// Digest SHA-256 lowercase hex of the canonical document
 	Digest string `json:"digest"`
 
-	// Document Secret-free desired-state artifact identified by natural names, never UUIDs
+	// Document Secret-free desired-state artifact using natural destination identities. Code UUIDs are artifact-local references, never requested destination IDs.
 	Document ConfigurationDocument `json:"document"`
 }
 
@@ -8299,7 +8453,9 @@ type ConfigurationProjectEntry struct {
 
 // ConfigurationPromotionRequest defines model for ConfigurationPromotionRequest.
 type ConfigurationPromotionRequest struct {
-	// Document Secret-free desired-state artifact identified by natural names, never UUIDs
+	CodeBindings *ConfigurationCodeBindings `json:"code_bindings,omitempty"`
+
+	// Document Secret-free desired-state artifact using natural destination identities. Code UUIDs are artifact-local references, never requested destination IDs.
 	Document ConfigurationDocument `json:"document"`
 
 	// ExpectedDigest Digest the destination must still export for the apply to proceed
