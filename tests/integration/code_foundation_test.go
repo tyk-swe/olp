@@ -17,6 +17,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/codeadapter"
 	"github.com/tyk-swe/olp/internal/codemode"
 	"github.com/tyk-swe/olp/internal/codexauth"
 	"github.com/tyk-swe/olp/internal/resources"
@@ -747,8 +748,8 @@ func TestCodeFoundationModelPoolRecoveryPreservesRequestedModelAndAuthority(t *t
 		t.Run(test.name, func(t *testing.T) {
 			f := newCodeFixtureWithProfile(t, codexauth.ProfileID)
 			credential := access.NewID()
-			f.addCredential(t, credential, "alternate-principal", 2)
-			f.exec(t, `UPDATE olp.provider_credentials SET profile_id=$2 WHERE id=$1`, credential, codexauth.ProfileID)
+			f.exec(t, `INSERT INTO olp.provider_credentials(id,provider_id,version,profile_id,plugin_digest,principal,grant_facts) VALUES($1,$2,2,$3,'fixture-digest','alternate-principal','{}')`, credential, f.provider, codexauth.ProfileID)
+			f.exec(t, `INSERT INTO olp.provider_grants(credential_id) VALUES($1)`, credential)
 			alternate := f.h.want(f.owner, "POST", "/api/v1/code/accounts", map[string]any{
 				"project_id": f.project, "provider_id": f.provider, "credential_id": credential,
 				"name": "Alternate model account", "enabled": true, "models": []string{"native-next"},
@@ -779,7 +780,12 @@ func TestCodeFoundationModelPoolRecoveryPreservesRequestedModelAndAuthority(t *t
 				}
 				return nil
 			}()
-			input := resources.CodeAdmission{Route: route, APIKeyID: f.key, Providers: []string{f.provider}, Bound: bound, InitialRecovery: test.portable,
+			source := &routing.Snapshot{Generation: routing.Generation{ID: access.NewID(), Ordinal: 1}, CodeRoutes: map[string]codemode.Route{route.Slug: route},
+				CodeConnections: map[string]routing.Configuration{route.RevisionID + ":" + f.provider: {Kind: "plugin", AuthMode: "grant", ProfileID: codexauth.ProfileID}}}
+			if err := source.Compile(); err != nil {
+				t.Fatal(err)
+			}
+			input := resources.CodeAdmission{Route: route, APIKeyID: f.key, Providers: []string{f.provider}, ModelSource: source, ModelPath: "responses", ModelTransport: codeadapter.HTTP, Bound: bound, InitialRecovery: test.portable,
 				Operation: codemode.Operation{Name: "responses.create", Model: "team-code", Identity: codemode.Identity{Conversation: "model-recovery"}}}
 			first, err := f.store.Admit(t.Context(), input)
 			if err != nil {
@@ -821,13 +827,13 @@ func TestCodeFoundationModelPoolRecoveryPreservesRequestedModelAndAuthority(t *t
 				}
 				return bound
 			}()
-			recovery := resources.CodeAdmission{Route: route, APIKeyID: f.key, Providers: input.Providers, Bound: recoveryBound, InitialRecovery: test.portable,
+			recovery := resources.CodeAdmission{Route: route, APIKeyID: f.key, Providers: input.Providers, ModelSource: source, ModelPath: input.ModelPath, ModelTransport: input.ModelTransport, Bound: recoveryBound, InitialRecovery: test.portable,
 				Operation: input.Operation, Recovery: &resources.CodeRecovery{From: first.Attempt.ID, Number: 1}}
 			recovered, err := f.store.Admit(t.Context(), recovery)
 			if test.refusal != "" {
 				codeRefusal(t, err, test.refusal)
 				if test.change == "bound" || test.change == "budget" {
-					retry := resources.CodeAdmission{Route: route, APIKeyID: f.key, Providers: input.Providers, Operation: input.Operation,
+					retry := resources.CodeAdmission{Route: route, APIKeyID: f.key, Providers: input.Providers, ModelSource: source, ModelPath: input.ModelPath, ModelTransport: input.ModelTransport, Operation: input.Operation,
 						Bound: &codemode.TokenBound{Tokens: 5, Evidence: "controlled-test-bound"}}
 					unchanged, retryErr := f.store.Admit(t.Context(), retry)
 					if retryErr != nil || unchanged.Pin.TargetModel != first.Pin.TargetModel || unchanged.Account.ID != first.Account.ID {

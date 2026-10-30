@@ -75,6 +75,9 @@ type CodeAdmission struct {
 	EndUserDigest    string
 	Operation        codemode.Operation
 	ModelProviders   map[string][]string
+	ModelSource      *routing.Snapshot
+	ModelPath        string
+	ModelTransport   codeadapter.Transport
 	Providers        []string
 	Bound            *codemode.TokenBound
 	PreviousResponse string
@@ -172,9 +175,12 @@ func (in CodeAdmission) withOperation(operation codemode.Operation) CodeAdmissio
 		if in.ModelProviders != nil {
 			return in.ModelProviders[operation.Model]
 		}
+		if in.ModelSource != nil && operation.Model != in.Operation.Model {
+			return in.ModelSource.CodeModelProviders(in.Route, in.ModelPath, operation.Model, in.ModelTransport)
+		}
 		return in.Providers
 	}()
-	return CodeAdmission{ModelProviders: in.ModelProviders, InitialRecovery: in.InitialRecovery, Recovery: in.Recovery, Attribution: in.Attribution, Route: in.Route, APIKeyID: in.APIKeyID, EndUserDigest: in.EndUserDigest, Operation: operation, Providers: providers, Bound: in.Bound, PreviousResponse: in.PreviousResponse}
+	return CodeAdmission{ModelProviders: in.ModelProviders, ModelSource: in.ModelSource, ModelPath: in.ModelPath, ModelTransport: in.ModelTransport, InitialRecovery: in.InitialRecovery, Recovery: in.Recovery, Attribution: in.Attribution, Route: in.Route, APIKeyID: in.APIKeyID, EndUserDigest: in.EndUserDigest, Operation: operation, Providers: providers, Bound: in.Bound, PreviousResponse: in.PreviousResponse}
 }
 
 func (s *CodeStore) admit(ctx context.Context, admission CodeAdmission, connection bool) (CodePermit, error) {
