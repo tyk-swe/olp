@@ -1,6 +1,7 @@
 package providers
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 
@@ -17,7 +18,7 @@ func (s *Server) registerCodeMode(mux *http.ServeMux) {
 	s.Access.Route(mux, "PUT /api/v1/code/accounts/{id}", s.writeCodeAccount)
 }
 
-var codeAccountJSON = `SELECT jsonb_build_object('id',x.id,'project_id',x.project_id,'provider_id',x.provider_id,'credential_id',x.credential_id,'principal',x.principal,'name',x.name,'enabled',x.enabled,'models',x.models,'etag',x.etag,'health',x.health,
+var codeAccountJSON = `SELECT jsonb_build_object('id',x.id,'project_id',x.project_id,'provider_id',x.provider_id,'credential_id',x.credential_id,'principal',x.principal,'name',x.name,'enabled',x.enabled,'models',x.models,'etag',x.etag,'health',x.health,'health_observed_at',x.health_observed_at,'unavailable_until',x.unavailable_until,
 	'adapter',` + codeadapter.SQL("p.configuration") + `,
 	'research_services',CASE WHEN c.profile_id='` + codeplans.ZAIProfile + `' AND p.configuration->>'profile_id'=c.profile_id THEN '["search","reader","zread"]'::jsonb ELSE '[]'::jsonb END,
 	'research_eligible',coalesce(x.enabled AND p.state<>'disabled' AND p.project_id=x.project_id
@@ -32,7 +33,7 @@ func (s *Server) codeAccounts(r *http.Request, p access.Principal) (access.Reply
 	return s.Access.CodeList(r, p, codeAccountJSON)
 }
 
-type codeAccountInput struct {
+type CodeAccountInput struct {
 	ProjectID    string   `json:"project_id"`
 	ProviderID   string   `json:"provider_id"`
 	CredentialID string   `json:"credential_id"`
@@ -42,50 +43,76 @@ type codeAccountInput struct {
 }
 
 func (s *Server) writeCodeAccount(r *http.Request, _ access.Principal) (access.Reply, error) {
-	var in codeAccountInput
+	var in CodeAccountInput
 	if err := access.Decode(r, &in); err != nil {
 		return access.Reply{}, err
 	}
-	if err := access.ValidText("name", in.Name, 100); err != nil {
-		return access.Reply{}, err
+	input, validationError := in.Validated()
+	if validationError != nil {
+		return access.Reply{}, validationError
 	}
-	for _, id := range []*string{&in.ProviderID, &in.CredentialID} {
-		var err error
-		if *id, err = access.ParseUUID(*id); err != nil {
-			return access.Reply{}, err
-		}
-	}
-	if err := codemode.ValidateModels(in.Models); err != nil {
-		return access.Reply{}, access.Invalid("models", err.Error())
-	}
-	return s.Access.CodeWrite(r, "code_accounts", "code_account", in.ProjectID, in, func(tx pgx.Tx, p access.Principal, id, etag string) (any, error) {
-		var principal string
-		err := tx.QueryRow(r.Context(), `SELECT c.principal FROM olp.provider_credentials c JOIN olp.providers p ON p.id=c.provider_id JOIN olp.provider_grants g ON g.credential_id=c.id
-			WHERE p.id=$1 AND p.project_id=$2 AND c.id=$3 AND (NOT $4 OR (c.revoked_at IS NULL AND g.lapsed_at IS NULL AND (g.expires_at IS NULL OR g.expires_at>now())))`, in.ProviderID, in.ProjectID, in.CredentialID, in.Enabled).Scan(&principal)
-		if err != nil {
-			return nil, err
-		}
-		if principal == "" {
-			return nil, access.Invalid("credential_id", "Enrollment must establish an upstream principal.")
-		}
-		if r.PathValue("id") != "" {
-			var oldPrincipal, oldProvider string
-			if err = tx.QueryRow(r.Context(), `SELECT principal,provider_id::text FROM olp.code_accounts WHERE id=$1`, id).Scan(&oldPrincipal, &oldProvider); err != nil {
-				return nil, err
-			}
-			if oldPrincipal != principal || oldProvider != in.ProviderID {
-				return nil, access.Invalid("credential_id", "Account identity cannot change during credential rotation.")
-			}
-		}
-		models, _ := json.Marshal(in.Models)
-		_, err = tx.Exec(r.Context(), `INSERT INTO olp.code_accounts(id,project_id,provider_id,credential_id,principal,name,enabled,models,etag,created_by) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
-			ON CONFLICT(id) DO UPDATE SET credential_id=excluded.credential_id,name=excluded.name,enabled=excluded.enabled,models=excluded.models,etag=excluded.etag,
-			health=CASE WHEN code_accounts.credential_id<>excluded.credential_id THEN 'unknown' ELSE code_accounts.health END`, id, in.ProjectID, in.ProviderID, in.CredentialID, principal, in.Name, in.Enabled, models, etag, p.UserID())
-		if err != nil {
-			return nil, err
-		}
-		var body json.RawMessage
-		err = tx.QueryRow(r.Context(), codeAccountJSON+` WHERE x.id=$1`, id).Scan(&body)
-		return body, err
+	return s.Access.CodeWrite(r, "code_accounts", "code_account", input.ProjectID, input, func(tx pgx.Tx, p access.Principal, id, etag string) (any, error) {
+		return SaveCodeAccount(r.Context(), tx, p, id, etag, input, r.PathValue("id") != "")
 	})
 }
+
+func SaveCodeAccount(ctx context.Context, tx pgx.Tx, p access.Principal, id, etag string, raw CodeAccountInput, existing bool) (json.RawMessage, error) {
+	in, validationError := raw.Validated()
+	if validationError != nil {
+		return nil, validationError
+	}
+	if err := p.Project(&in.ProjectID, access.Change); err != nil {
+		return nil, err
+	}
+	var principal string
+	err := tx.QueryRow(ctx, `SELECT c.principal FROM olp.provider_credentials c JOIN olp.providers p ON p.id=c.provider_id JOIN olp.provider_grants g ON g.credential_id=c.id
+			WHERE p.id=$1 AND p.project_id=$2 AND c.id=$3 AND (NOT $4 OR (c.revoked_at IS NULL AND g.lapsed_at IS NULL AND (g.expires_at IS NULL OR g.expires_at>now())))`, in.ProviderID, in.ProjectID, in.CredentialID, in.Enabled).Scan(&principal)
+	if err != nil {
+		return nil, err
+	}
+	if principal == "" {
+		return nil, access.Invalid("credential_id", "Enrollment must establish an upstream principal.")
+	}
+	if existing {
+		var oldPrincipal, oldProvider string
+		if err = tx.QueryRow(ctx, `SELECT principal,provider_id::text FROM olp.code_accounts WHERE id=$1`, id).Scan(&oldPrincipal, &oldProvider); err != nil {
+			return nil, err
+		}
+		if oldPrincipal != principal || oldProvider != in.ProviderID {
+			return nil, access.Invalid("credential_id", "Account identity cannot change during credential rotation.")
+		}
+	}
+	models, _ := json.Marshal(in.Models)
+	_, err = tx.Exec(ctx, `INSERT INTO olp.code_accounts(id,project_id,provider_id,credential_id,principal,name,enabled,models,etag,created_by) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+			ON CONFLICT(id) DO UPDATE SET credential_id=excluded.credential_id,name=excluded.name,enabled=excluded.enabled,models=excluded.models,etag=excluded.etag,
+			health=CASE WHEN code_accounts.credential_id<>excluded.credential_id THEN 'unknown' ELSE code_accounts.health END,
+			health_observed_at=CASE WHEN code_accounts.credential_id<>excluded.credential_id THEN NULL ELSE code_accounts.health_observed_at END,
+			unavailable_until=CASE WHEN code_accounts.credential_id<>excluded.credential_id THEN NULL ELSE code_accounts.unavailable_until END`, id, in.ProjectID, in.ProviderID, in.CredentialID, principal, in.Name, in.Enabled, models, etag, p.UserID())
+	if err != nil {
+		return nil, err
+	}
+	var body json.RawMessage
+	err = tx.QueryRow(ctx, codeAccountJSON+` WHERE x.id=$1`, id).Scan(&body)
+	return body, err
+}
+
+func (in CodeAccountInput) validate() error {
+	if err := access.ValidText("name", in.Name, 100); err != nil {
+		return err
+	}
+	if err := codemode.ValidateModels(in.Models); err != nil {
+		return access.Invalid("models", err.Error())
+	}
+	return nil
+}
+
+func (in CodeAccountInput) Validated() (CodeAccountInput, error) {
+	ids, err := access.ParseUUIDs([]string{in.ProjectID, in.ProviderID, in.CredentialID})
+	if err != nil {
+		return CodeAccountInput{}, err
+	}
+	canonical := CodeAccountInput{ProjectID: ids[0], ProviderID: ids[1], CredentialID: ids[2], Name: in.Name, Enabled: in.Enabled, Models: in.Models}
+	return canonical, canonical.validate()
+}
+
+func (in CodeAccountInput) Validate() error { _, err := in.Validated(); return err }

@@ -1041,3 +1041,43 @@ func (a Authority) ToolDebitBoundaries(leaseTTL time.Duration) ToolDebitBoundari
 	}
 	return ToolDebitBoundariesResult{Boundaries: boundaries, CostBudgeted: costBudgeted, Resolved: true}
 }
+
+func ParseUUIDs(values []string) ([]string, error) {
+	type parsedUUID struct {
+		value string
+		err   error
+	}
+	parsed := slices.Collect(func(yield func(parsedUUID) bool) {
+		for _, raw := range values {
+			value, err := ParseUUID(raw)
+			if !yield(parsedUUID{value, err}) {
+				return
+			}
+		}
+	})
+	for _, value := range parsed {
+		if value.err != nil {
+			return nil, value.err
+		}
+	}
+	if values == nil {
+		return nil, nil
+	}
+	return append([]string{}, slices.Collect(func(yield func(string) bool) {
+		for _, value := range parsed {
+			if !yield(value.value) {
+				return
+			}
+		}
+	})...), nil
+}
+func ParseOptionalUUID(value *string) (*string, error) {
+	if value == nil {
+		return nil, nil
+	}
+	canonical, err := ParseUUID(*value)
+	if err != nil {
+		return nil, err
+	}
+	return &canonical, nil
+}

@@ -1684,7 +1684,7 @@
         "type": "object"
       },
       "ConfigurationDocument": {
-        "description": "Secret-free desired-state artifact identified by natural names, never UUIDs",
+        "description": "Secret-free desired-state artifact using natural destination identities. Code UUIDs are artifact-local references, never requested destination IDs.",
         "properties": {
           "api_version": {
             "enum": [
@@ -1845,6 +1845,9 @@
             "items": {
               "$ref": "#/components/schemas/ConfigurationRetrievalBinding"
             }
+          },
+          "code": {
+            "$ref": "#/components/schemas/ConfigurationCode"
           }
         },
         "required": [
@@ -1947,7 +1950,11 @@
               "billing_import",
               "guardrail_policy",
               "guardrail_attachment",
-              "agent_publication"
+              "agent_publication",
+              "code_account",
+              "code_pool",
+              "code_route",
+              "code_budget"
             ],
             "type": "string"
           }
@@ -2361,6 +2368,9 @@
               "$ref": "#/components/schemas/ExternalCredentialReference"
             },
             "description": "Destination bindings for logical credential references. Stored without resolved values; new versions must pass validation before activation. A name cannot also appear in secret_bindings. Introducing an external reference requires installation-wide settings authority in addition to configure authority."
+          },
+          "code_bindings": {
+            "$ref": "#/components/schemas/ConfigurationCodeBindings"
           }
         },
         "required": [
@@ -15543,6 +15553,7 @@
             "type": "string"
           },
           "grant_state": {
+            "description": "Grant authority is independent of serving health and allowance. A rejected refresh lapses the grant and requires enrollment again.",
             "enum": [
               "current",
               "expired",
@@ -15550,6 +15561,22 @@
               "revoked"
             ],
             "type": "string"
+          },
+          "health_observed_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "Time of the latest serving health observation. Enrollment and refresh do not qualify serving health."
+          },
+          "unavailable_until": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "End of the serving cooldown. Exhausted allowance and grant authority remain independent eligibility requirements."
           },
           "health": {
             "enum": [
@@ -15602,9 +15629,11 @@
             ]
           },
           "adapter": {
-            "description": "The subscription family of the account's provider profile: Codex, OpenCode Go, GLM Coding Plan, MiniMax M Plan, Kimi Code or Qwen Token Plan. Null for a profile no code-mode adapter serves. A pool may mix families; each request reaches an account whose family serves its path and model.",
+            "description": "The subscription family of the account's provider profile: Codex, Claude, OpenCode Go, GLM Coding Plan, MiniMax M Plan, Kimi Code or Qwen Token Plan. Null for a profile no code-mode adapter serves. A pool may mix families; each request reaches an account whose family serves its path and model.",
             "enum": [
               "codex",
+              "claude",
+              "antigravity",
               "opencode_go",
               "zai_coding",
               "minimax_plan",
@@ -15772,7 +15801,10 @@
           },
           "account_id": {
             "format": "uuid",
-            "type": "string"
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "api_key_id": {
             "format": "uuid",
@@ -15780,7 +15812,10 @@
           },
           "binding_id": {
             "format": "uuid",
-            "type": "string"
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "bound_evidence": {
             "type": [
@@ -15908,6 +15943,79 @@
               "type": "string",
               "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$"
             }
+          },
+          "requested_model": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Public model requested before explicit alias resolution."
+          },
+          "paid_slot_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "paid_monetary_state": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "pending",
+              "released",
+              "settled",
+              "unknown",
+              null
+            ]
+          },
+          "paid_binding_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "paid_provider_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "initial_recovery": {
+            "type": "boolean",
+            "description": "The portable initial input permitted recovery when admitted. False also includes historical attempts without that evidence. This does not establish account eligibility or permission to replay."
+          },
+          "nonexecution": {
+            "type": "boolean",
+            "description": "A bounded upstream rejection was verified to prove this attempt did not execute. False means nonexecution was not proven."
+          },
+          "recovery_from": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Prior attempt this admission recovered from, within the same project, route and API key. Null when no visible recovery source was recorded."
+          },
+          "recovery_reason": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "credential_rejected",
+              "quota_rejected",
+              null
+            ],
+            "description": "Reason from the recovery source that durably proved nonexecution. Null means historical evidence is unavailable or no recovery source exists. Never inferred from current account health."
+          },
+          "codex_cli_identity_enabled": {
+            "type": "boolean",
+            "description": "Whether the frozen route revision enabled Codex CLI identity compatibility. This is route policy, not evidence that an Originator header changed or that this attempt used Codex. No client identity header values or prompt content are recorded."
           }
         },
         "required": [
@@ -15935,7 +16043,11 @@
           "created_at",
           "finished_at",
           "route_revision_id",
-          "end_user_digest"
+          "end_user_digest",
+          "initial_recovery",
+          "nonexecution",
+          "recovery_from",
+          "recovery_reason"
         ],
         "type": "object"
       },
@@ -15967,7 +16079,10 @@
         "properties": {
           "account_id": {
             "format": "uuid",
-            "type": "string"
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "api_key_id": {
             "format": "uuid",
@@ -16000,7 +16115,10 @@
             "type": "array"
           },
           "principal": {
-            "type": "string"
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "project_id": {
             "format": "uuid",
@@ -16020,6 +16138,20 @@
           "route_id": {
             "format": "uuid",
             "type": "string"
+          },
+          "paid_provider_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "paid_slot_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
           }
         },
         "required": [
@@ -16203,10 +16335,12 @@
         "additionalProperties": false,
         "properties": {
           "adapters": {
-            "description": "The subscription families whose accounts serve the client's native models, in display order. A mixed route's configuration draws each model from its own family.",
+            "description": "The subscription families whose accounts serve the client's published models and exact aliases, in display order. A mixed route's configuration draws each model from its own family. Empty for paid-only setup.",
             "items": {
               "enum": [
                 "codex",
+                "claude",
+                "antigravity",
                 "opencode_go",
                 "zai_coding",
                 "minimax_plan",
@@ -16215,7 +16349,6 @@
               ],
               "type": "string"
             },
-            "minItems": 1,
             "type": "array",
             "uniqueItems": true
           },
@@ -16239,23 +16372,24 @@
             "type": "string"
           },
           "file": {
-            "description": "Where to save the configuration, or null for a shell file to source.",
+            "description": "Where to merge the configuration or save the shell setup. Follow instructions to preserve existing settings.",
             "type": [
               "string",
               "null"
             ]
           },
           "format": {
-            "description": "The configuration's format: Codex TOML, a POSIX shell file to source, or OpenCode JSON.",
+            "description": "Codex TOML, a POSIX shell or PowerShell setup to source, or OpenCode JSON.",
             "enum": [
               "toml",
               "shell",
-              "json"
+              "json",
+              "powershell"
             ],
             "type": "string"
           },
           "model": {
-            "description": "The native model the client uses for its main conversation.",
+            "description": "The published model or exact alias the client uses for its main conversation.",
             "maxLength": 200,
             "minLength": 1,
             "type": "string"
@@ -16273,7 +16407,7 @@
             "description": "The route's models an adapter supporting the client serves, in route order."
           },
           "plan_model": {
-            "description": "The native model for planning: Claude Code's plan mode through opusplan and OpenCode's plan agent. It equals model unless another was chosen. Null for Codex.",
+            "description": "The published model or exact alias for planning: Claude Code's plan mode through opusplan and OpenCode's plan agent. It equals model unless another was chosen. Null for Codex.",
             "type": [
               "string",
               "null"
@@ -16289,7 +16423,7 @@
             "type": "string"
           },
           "small_model": {
-            "description": "The native model for background requests: Claude Code's Haiku-class and OpenCode's small model. Null for Codex.",
+            "description": "The published model or exact alias for background requests: Claude Code's Haiku-class and OpenCode's small model. Null for Codex.",
             "type": [
               "string",
               "null"
@@ -16314,6 +16448,26 @@
             "items": {
               "$ref": "#/components/schemas/CodeConfigurationFile"
             }
+          },
+          "platform": {
+            "$ref": "#/components/schemas/CodeClientPlatform"
+          },
+          "instructions": {
+            "type": "string",
+            "description": "Platform-specific setup and merge instructions. Preserve unrelated client settings and retain environment references for credentials."
+          },
+          "models": {
+            "type": "array",
+            "description": "The same live route model and protocol catalog returned by the route models endpoint.",
+            "items": {
+              "$ref": "#/components/schemas/CodeModel"
+            }
+          },
+          "paid_models": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
           }
         },
         "required": [
@@ -16330,7 +16484,10 @@
           "format",
           "file",
           "configuration",
-          "qualification_gaps"
+          "qualification_gaps",
+          "platform",
+          "instructions",
+          "models"
         ],
         "type": "object"
       },
@@ -16340,7 +16497,10 @@
         "properties": {
           "account_id": {
             "format": "uuid",
-            "type": "string"
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "created_at": {
             "format": "date-time",
@@ -16352,14 +16512,36 @@
             "type": "string"
           },
           "principal": {
-            "type": "string"
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "target_model": {
+            "type": "string",
+            "description": "Durably pinned native model identifier. Existing native pins use their model identifier."
+          },
+          "paid_provider_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "paid_slot_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
           }
         },
         "required": [
           "model",
           "account_id",
           "principal",
-          "created_at"
+          "created_at",
+          "target_model"
         ],
         "type": "object"
       },
@@ -16414,6 +16596,17 @@
           "project_id": {
             "format": "uuid",
             "type": "string"
+          },
+          "account_weights": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 1,
+              "maximum": 2147483647
+            },
+            "maxProperties": 100,
+            "description": "Relative weights keyed by assigned account ID. Omitted accounts use weight 1."
           }
         },
         "required": [
@@ -16424,7 +16617,8 @@
           "owner_user_id",
           "account_ids",
           "api_key_ids",
-          "etag"
+          "etag",
+          "account_weights"
         ],
         "type": "object"
       },
@@ -16493,6 +16687,17 @@
           "project_id": {
             "format": "uuid",
             "type": "string"
+          },
+          "account_weights": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 1,
+              "maximum": 2147483647
+            },
+            "maxProperties": 100,
+            "description": "Relative weights keyed by assigned account ID. Omitted accounts use weight 1."
           }
         },
         "required": [
@@ -16612,13 +16817,15 @@
       },
       "CodeRoute": {
         "additionalProperties": false,
-        "description": "Dedicated coding contract. Base path is /code/{slug}; model identifiers remain native. Draft writes do not change the immutable runtime release. Publication does no inference. Enabled is independent of ordinary provider activation.",
+        "description": "Dedicated coding contract. Base path is /code/{slug}. Native model identifiers remain unchanged by default. Exact aliases require explicit model rewriting. Draft writes do not change the immutable runtime release. Publication does no inference. Enabled is independent of ordinary provider activation.",
         "properties": {
           "adapters": {
             "description": "The adapters the latest published revision serves, in display order, derived from the provider connections it froze. Together they select the route's ingress paths and supported clients: Codex serves `responses`; OpenCode Go serves `v1/chat/completions`, `v1/messages` and `v1/responses`; GLM Coding Plan, MiniMax M Plan, Kimi Code and Qwen Token Plan serve `v1/messages` and `v1/chat/completions`. Each request reaches an account whose adapter serves its path and that lists its model. Empty before publication or when the revision's accounts name no adapter.",
             "items": {
               "enum": [
                 "codex",
+                "claude",
+                "antigravity",
                 "opencode_go",
                 "zai_coding",
                 "minimax_plan",
@@ -16690,6 +16897,83 @@
           },
           "tools": {
             "$ref": "#/components/schemas/CodeResearchTools"
+          },
+          "messages_to_codex": {
+            "type": "boolean",
+            "default": false,
+            "description": "Explicitly allow Messages text and tool requests to use Codex subscription accounts through protocol translation. Published revisions pin this policy. Native forwarding remains the default. Translation alone preserves client identity and prompts. Codex identity compatibility requires its separate codex_cli_identity opt-in. Model rewriting requires its separate opt-in. Explicit low, medium and high reasoning effort is supported. Signed thinking, numeric reasoning budgets, beta features and unsupported required semantics are refused before dispatch."
+          },
+          "aliases": {
+            "type": "object",
+            "maxProperties": 100,
+            "additionalProperties": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "propertyNames": {
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]{0,199}$"
+            },
+            "description": "Stable public model names mapped directly to one native identifier in models. Requires model_rewriting. Alias chains and native name collisions are rejected. Immutable publications pin these mappings. Repointing an alias affects new conversations. Existing conversations retain their stored exact target while it remains published and authorized."
+          },
+          "model_rewriting": {
+            "type": "boolean",
+            "default": false,
+            "description": "Explicitly enable model identifier rewriting through exact aliases or configured model_pools. Disabled by default. This policy does not rewrite client identity or prompts."
+          },
+          "initial_recovery_attempts": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 2,
+            "description": "Maximum additional attempts per request for a new or established single-pin root conversation after an adapter proves nonexecution and the complete input is portable. Zero disables recovery. Published revisions pin this policy. Existing children, socket ownership and unresolved attempts prevent migration. Exact models remain the default. Only explicit model_pools authorize model changes. Live authority remains required. Producing-account reference ownership is preserved. Accepted, partial, ambiguous and opaque work never replays."
+          },
+          "model_pools": {
+            "type": "object",
+            "maxProperties": 100,
+            "additionalProperties": {
+              "type": "array",
+              "minItems": 2,
+              "maxItems": 100,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200
+              }
+            },
+            "description": "Explicit subscription model recovery pools keyed by a published native name or exact alias. Requires model_rewriting. Each ordered list starts with that name's normal exact target and contains distinct native identifiers from models. Recovery prefers the pinned exact target, then these alternatives, within initial_recovery_attempts and positive nonexecution, portability, live authorization and budget checks. Omitted pools preserve exact selection. Publications freeze the policy. Existing conversations retain their exact target, including after alias changes, while it remains published and authorized. Paid fallback is separately governed."
+          },
+          "paid_participation": {
+            "type": "boolean",
+            "default": false,
+            "description": "Explicitly permit metered API targets. Direct selection and subscription-first fallback require their separate target maps."
+          },
+          "paid_targets": {
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/CodePaidTarget"
+            },
+            "description": "Exact native model to directly selected published metered provider and credential slot. A mapped model takes precedence over subscription accounts."
+          },
+          "chat_to_antigravity": {
+            "type": "boolean",
+            "description": "Explicitly allow Chat Completions text and function tools through the internal Antigravity Gemini target over HTTP or SSE. Published revisions pin this policy. Native forwarding remains the default. Client identity and prompts are preserved. Signed thought state, reasoning controls, media and server tools are unsupported. Returned signature state is refused before actionable output rather than discarded. Controlled fixtures do not qualify any current model or live subscription workflow."
+          },
+          "paid_fallback_targets": {
+            "type": "object",
+            "maxProperties": 100,
+            "additionalProperties": {
+              "$ref": "#/components/schemas/CodePaidTarget"
+            },
+            "description": "Explicit native model to published metered provider and credential slot for subscription-first bounded recovery. Requires paid_participation and positive initial_recovery_attempts. Subscription candidates are preferred. Same-model fallback needs no model pool. Different models require model_rewriting and a model_pool. Proven nonexecution and complete-input portability are required. Direct paid_targets retain precedence and cannot overlap this map. Existing paid owners stay pinned. Unknown paid money remains held against applicable limits."
+          },
+          "codex_cli_identity": {
+            "type": "boolean",
+            "description": "Explicit route-administrator opt-in, disabled by default and independent of protocol translation. On Codex subscription HTTP and WebSocket requests only, fills Originator with codex_cli_rs when every supplied Originator value is absent or blank. Preserves explicit Originator values, User-Agent, all prompts, tools, reasoning, state and other headers. Does not enable translation or prompt changes. Publication freezes the policy. Using subscription accounts through this compatibility identity may violate provider terms and risk account suspension. Review this behavior and risk before enabling and publishing."
+          },
+          "chat_to_codex": {
+            "type": "boolean",
+            "description": "Explicit Chat text and function tool translation through Codex Responses, disabled by default and pinned by publication. Native forwarding remains the default. Low, medium and high reasoning effort is supported. Required signed reasoning, media, server-owned state and unsupported semantics are refused. Independent Codex identity and model rewriting policies remain separate. Current OpenCode client and live subscription acceptance remain unqualified."
           }
         },
         "required": [
@@ -16769,6 +17053,83 @@
           },
           "tools": {
             "$ref": "#/components/schemas/CodeResearchTools"
+          },
+          "messages_to_codex": {
+            "type": "boolean",
+            "default": false,
+            "description": "Explicitly allow Messages text and tool requests to use Codex subscription accounts through protocol translation. Published revisions pin this policy. Native forwarding remains the default. Translation alone preserves client identity and prompts. Codex identity compatibility requires its separate codex_cli_identity opt-in. Model rewriting requires its separate opt-in. Explicit low, medium and high reasoning effort is supported. Signed thinking, numeric reasoning budgets, beta features and unsupported required semantics are refused before dispatch."
+          },
+          "aliases": {
+            "type": "object",
+            "maxProperties": 100,
+            "additionalProperties": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "propertyNames": {
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]{0,199}$"
+            },
+            "description": "Stable public model names mapped directly to one native identifier in models. Requires model_rewriting. Alias chains and native name collisions are rejected. Immutable publications pin these mappings. Repointing an alias affects new conversations. Existing conversations retain their stored exact target while it remains published and authorized."
+          },
+          "model_rewriting": {
+            "type": "boolean",
+            "default": false,
+            "description": "Explicitly enable model identifier rewriting through exact aliases or configured model_pools. Disabled by default. This policy does not rewrite client identity or prompts."
+          },
+          "initial_recovery_attempts": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 2,
+            "description": "Maximum additional attempts per request for a new or established single-pin root conversation after an adapter proves nonexecution and the complete input is portable. Zero disables recovery. Published revisions pin this policy. Existing children, socket ownership and unresolved attempts prevent migration. Exact models remain the default. Only explicit model_pools authorize model changes. Live authority remains required. Producing-account reference ownership is preserved. Accepted, partial, ambiguous and opaque work never replays."
+          },
+          "model_pools": {
+            "type": "object",
+            "maxProperties": 100,
+            "additionalProperties": {
+              "type": "array",
+              "minItems": 2,
+              "maxItems": 100,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200
+              }
+            },
+            "description": "Explicit subscription model recovery pools keyed by a published native name or exact alias. Requires model_rewriting. Each ordered list starts with that name's normal exact target and contains distinct native identifiers from models. Recovery prefers the pinned exact target, then these alternatives, within initial_recovery_attempts and positive nonexecution, portability, live authorization and budget checks. Omitted pools preserve exact selection. Publications freeze the policy. Existing conversations retain their exact target, including after alias changes, while it remains published and authorized. Paid fallback is separately governed."
+          },
+          "paid_targets": {
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/CodePaidTarget"
+            },
+            "description": "Exact native model to directly selected published metered provider and credential slot. A mapped model takes precedence over subscription accounts."
+          },
+          "paid_participation": {
+            "type": "boolean",
+            "default": false,
+            "description": "Explicitly permit metered API targets. Direct selection and subscription-first fallback require their separate target maps."
+          },
+          "chat_to_antigravity": {
+            "type": "boolean",
+            "description": "Explicitly allow Chat Completions text and function tools through the internal Antigravity Gemini target over HTTP or SSE. Published revisions pin this policy. Native forwarding remains the default. Client identity and prompts are preserved. Signed thought state, reasoning controls, media and server tools are unsupported. Returned signature state is refused before actionable output rather than discarded. Controlled fixtures do not qualify any current model or live subscription workflow."
+          },
+          "paid_fallback_targets": {
+            "type": "object",
+            "maxProperties": 100,
+            "additionalProperties": {
+              "$ref": "#/components/schemas/CodePaidTarget"
+            },
+            "description": "Explicit native model to published metered provider and credential slot for subscription-first bounded recovery. Requires paid_participation and positive initial_recovery_attempts. Subscription candidates are preferred. Same-model fallback needs no model pool. Different models require model_rewriting and a model_pool. Proven nonexecution and complete-input portability are required. Direct paid_targets retain precedence and cannot overlap this map. Existing paid owners stay pinned. Unknown paid money remains held against applicable limits."
+          },
+          "codex_cli_identity": {
+            "type": "boolean",
+            "description": "Explicit route-administrator opt-in, disabled by default and independent of protocol translation. On Codex subscription HTTP and WebSocket requests only, fills Originator with codex_cli_rs when every supplied Originator value is absent or blank. Preserves explicit Originator values, User-Agent, all prompts, tools, reasoning, state and other headers. Does not enable translation or prompt changes. Publication freezes the policy. Using subscription accounts through this compatibility identity may violate provider terms and risk account suspension. Review this behavior and risk before enabling and publishing."
+          },
+          "chat_to_codex": {
+            "type": "boolean",
+            "description": "Explicit Chat text and function tool translation through Codex Responses, disabled by default and pinned by publication. Native forwarding remains the default. Low, medium and high reasoning effort is supported. Required signed reasoning, media, server-owned state and unsupported semantics are refused. Independent Codex identity and model rewriting policies remain separate. Current OpenCode client and live subscription acceptance remain unqualified."
           }
         },
         "required": [
@@ -30771,6 +31132,654 @@
           "certified_modes",
           "tools"
         ]
+      },
+      "CodeClientPlatform": {
+        "type": "string",
+        "enum": [
+          "linux",
+          "macos",
+          "windows"
+        ],
+        "description": "Developer platform for paths and shell syntax. Linux and macOS use POSIX shells, Windows uses PowerShell."
+      },
+      "CodeModel": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "A published model currently reachable through eligible accounts in the route pool.",
+        "required": [
+          "id",
+          "object",
+          "capabilities",
+          "clients"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "object": {
+            "type": "string",
+            "enum": [
+              "model"
+            ]
+          },
+          "capabilities": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CodeModelCapability"
+            },
+            "minItems": 1
+          },
+          "clients": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "codex",
+                "claude-code",
+                "opencode"
+              ]
+            },
+            "uniqueItems": true
+          },
+          "model_pool": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Configured ordered subscription recovery targets for this public model. This is policy metadata, not an availability or portability guarantee. Omitted for exact-model selection."
+          },
+          "paid": {
+            "type": "boolean",
+            "description": "This model has an authorized metered API target, selected directly or through explicit fallback. Paid attempts require monetary admission."
+          }
+        }
+      },
+      "CodeModelCapability": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "protocol",
+          "path",
+          "transports"
+        ],
+        "properties": {
+          "protocol": {
+            "type": "string",
+            "enum": [
+              "responses",
+              "messages",
+              "chat"
+            ]
+          },
+          "path": {
+            "type": "string"
+          },
+          "transports": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "http",
+                "websocket"
+              ]
+            },
+            "minItems": 1,
+            "uniqueItems": true
+          }
+        }
+      },
+      "CodexCredentialImportRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "credentials"
+        ],
+        "properties": {
+          "credentials": {
+            "type": "string",
+            "maxLength": 65536,
+            "writeOnly": true,
+            "description": "Codex auth.json JSON text. Supports chatgpt auth_mode or its omission, absent or null OPENAI_API_KEY, tokens with access_token, id_token, refresh_token and account_id, and optional RFC3339 last_refresh. Other fields and ambiguous JSON are rejected. Expired local tokens may be imported if refresh verifies the same account and user."
+          },
+          "slot_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Existing credential slot, defaults to the default slot"
+          }
+        }
+      },
+      "ConfigurationCodeBindings": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "credentials": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "users": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "api_keys": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        },
+        "required": []
+      },
+      "ConfigurationCodeAccount": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "project": {
+            "type": "string"
+          },
+          "provider": {
+            "type": "string"
+          },
+          "credential_ref": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "models": {
+            "items": {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 100,
+            "minItems": 1,
+            "type": "array",
+            "uniqueItems": true
+          }
+        },
+        "required": [
+          "id",
+          "project",
+          "provider",
+          "credential_ref",
+          "name",
+          "enabled",
+          "models"
+        ]
+      },
+      "ConfigurationCodePool": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "project": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "shared",
+              "personal"
+            ]
+          },
+          "owner_ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "accounts": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2147483647
+            }
+          },
+          "api_key_refs": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "project",
+          "name",
+          "kind",
+          "owner_ref",
+          "accounts",
+          "api_key_refs"
+        ]
+      },
+      "ConfigurationCodeRoutePolicy": {
+        "additionalProperties": false,
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "models": {
+            "items": {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 100,
+            "minItems": 1,
+            "type": "array",
+            "uniqueItems": true
+          },
+          "max_body_bytes": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 1,
+            "maximum": 1073741824,
+            "description": "Optional ingress limit in bytes. Null inherits installation limits; a route can only lower them. Checks both encoded and decoded JSON, the complete multipart body, and individual client WebSocket messages. Published revisions pin this policy."
+          },
+          "tools": {
+            "$ref": "#/components/schemas/CodeResearchTools"
+          },
+          "messages_to_codex": {
+            "type": "boolean",
+            "default": false,
+            "description": "Explicitly allow Messages text and tool requests to use Codex subscription accounts through protocol translation. Published revisions pin this policy. Native forwarding remains the default. Translation alone preserves client identity and prompts. Codex identity compatibility requires its separate codex_cli_identity opt-in. Model rewriting requires its separate opt-in. Explicit low, medium and high reasoning effort is supported. Signed thinking, numeric reasoning budgets, beta features and unsupported required semantics are refused before dispatch."
+          },
+          "aliases": {
+            "type": "object",
+            "maxProperties": 100,
+            "additionalProperties": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "propertyNames": {
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]{0,199}$"
+            },
+            "description": "Stable public model names mapped directly to one native identifier in models. Requires model_rewriting. Alias chains and native name collisions are rejected. Immutable publications pin these mappings. Repointing an alias affects new conversations. Existing conversations retain their stored exact target while it remains published and authorized."
+          },
+          "model_rewriting": {
+            "type": "boolean",
+            "default": false,
+            "description": "Explicitly enable model identifier rewriting through exact aliases or configured model_pools. Disabled by default. This policy does not rewrite client identity or prompts."
+          },
+          "initial_recovery_attempts": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 2,
+            "description": "Maximum additional attempts per request for a new or established single-pin root conversation after an adapter proves nonexecution and the complete input is portable. Zero disables recovery. Published revisions pin this policy. Existing children, socket ownership and unresolved attempts prevent migration. Exact models remain the default. Only explicit model_pools authorize model changes. Live authority remains required. Producing-account reference ownership is preserved. Accepted, partial, ambiguous and opaque work never replays."
+          },
+          "model_pools": {
+            "type": "object",
+            "maxProperties": 100,
+            "additionalProperties": {
+              "type": "array",
+              "minItems": 2,
+              "maxItems": 100,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200
+              }
+            },
+            "description": "Explicit subscription model recovery pools keyed by a published native name or exact alias. Requires model_rewriting. Each ordered list starts with that name's normal exact target and contains distinct native identifiers from models. Recovery prefers the pinned exact target, then these alternatives, within initial_recovery_attempts and positive nonexecution, portability, live authorization and budget checks. Omitted pools preserve exact selection. Publications freeze the policy. Existing conversations retain their exact target, including after alias changes, while it remains published and authorized. Paid fallback is separately governed."
+          },
+          "pool": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "paid_participation": {
+            "type": "boolean"
+          },
+          "paid_targets": {
+            "type": "object",
+            "maxProperties": 100,
+            "additionalProperties": {
+              "$ref": "#/components/schemas/ConfigurationCodePaidTarget"
+            }
+          },
+          "chat_to_antigravity": {
+            "type": "boolean",
+            "description": "Explicit opt-in for chat translation through the Antigravity adapter."
+          },
+          "paid_fallback_targets": {
+            "type": "object",
+            "maxProperties": 100,
+            "additionalProperties": {
+              "$ref": "#/components/schemas/ConfigurationCodePaidTarget"
+            },
+            "description": "Explicit recovery-only paid targets keyed by native model, using the same named destination provider, slot and credential bindings as direct paid targets. Requires paid participation and a positive initial recovery limit."
+          },
+          "codex_cli_identity": {
+            "type": "boolean",
+            "description": "Explicit route-administrator opt-in, disabled by default and independent of protocol translation. On Codex subscription HTTP and WebSocket requests only, fills Originator with codex_cli_rs when every supplied Originator value is absent or blank. Preserves explicit Originator values, User-Agent, all prompts, tools, reasoning, state and other headers. Does not enable translation or prompt changes. Publication freezes the policy. Using subscription accounts through this compatibility identity may violate provider terms and risk account suspension. Review this behavior and risk before enabling and publishing."
+          },
+          "chat_to_codex": {
+            "type": "boolean",
+            "description": "Explicit Chat text and function tool translation through Codex Responses, disabled by default and pinned by publication. Native forwarding remains the default. Low, medium and high reasoning effort is supported. Required signed reasoning, media, server-owned state and unsupported semantics are refused. Independent Codex identity and model rewriting policies remain separate. Current OpenCode client and live subscription acceptance remain unqualified."
+          }
+        },
+        "required": [
+          "models",
+          "enabled",
+          "pool"
+        ],
+        "type": "object"
+      },
+      "ConfigurationCodeConnection": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "configuration": {
+            "$ref": "#/components/schemas/ProviderConfiguration"
+          },
+          "network_credential_ref": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "configuration"
+        ]
+      },
+      "ConfigurationCodePublication": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "policy": {
+            "$ref": "#/components/schemas/ConfigurationCodeRoutePolicy"
+          },
+          "connections": {
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/ConfigurationCodeConnection"
+            }
+          },
+          "paid_connections": {
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/ConfigurationCodePaidConnection"
+            }
+          }
+        },
+        "required": [
+          "policy",
+          "connections"
+        ]
+      },
+      "ConfigurationCodeRoute": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "project": {
+            "type": "string"
+          },
+          "slug": {
+            "pattern": "^[a-z0-9][a-z0-9._-]{0,99}$",
+            "type": "string"
+          },
+          "draft": {
+            "$ref": "#/components/schemas/ConfigurationCodeRoutePolicy"
+          },
+          "published": {
+            "$ref": "#/components/schemas/ConfigurationCodePublication"
+          }
+        },
+        "required": [
+          "id",
+          "project",
+          "slug",
+          "draft"
+        ]
+      },
+      "ConfigurationCodeBudget": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "project": {
+            "type": "string"
+          },
+          "route": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "api_key_ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "daily_tokens": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "format": "int64",
+                "minimum": 1,
+                "maximum": 9007199254740991
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "monthly_tokens": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "format": "int64",
+                "minimum": 1,
+                "maximum": 9007199254740991
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "enabled": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "project",
+          "route",
+          "api_key_ref",
+          "daily_tokens",
+          "monthly_tokens",
+          "enabled"
+        ]
+      },
+      "ConfigurationCode": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "accounts": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "$ref": "#/components/schemas/ConfigurationCodeAccount"
+            }
+          },
+          "pools": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "$ref": "#/components/schemas/ConfigurationCodePool"
+            }
+          },
+          "routes": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "$ref": "#/components/schemas/ConfigurationCodeRoute"
+            }
+          },
+          "budgets": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "$ref": "#/components/schemas/ConfigurationCodeBudget"
+            }
+          }
+        },
+        "required": [],
+        "description": "Resource IDs are artifact-local references. Accounts resolve through explicitly bound current destination enrollments. Pools and budgets reuse validated same-project artifact IDs or standard UUIDv5 destination IDs derived from project, resource kind and artifact reference, with unique natural matches as fallback. This preserves duplicate names and exact duplicate budgets without a registry. Routes resolve through unique slug. Unrelated ambiguous identities are refused. Source credentials, health, usage windows, conversation bindings and historical revisions stay local. Destination projects and providers must be prepared and enrolled before planning. Rename globally unique slugs for same-installation cross-project promotion."
+      },
+      "CodePaidTarget": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "provider_id",
+          "slot_id"
+        ],
+        "properties": {
+          "provider_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "slot_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
+      "ConfigurationCodePaidTarget": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "provider",
+          "slot",
+          "credential_ref"
+        ],
+        "properties": {
+          "provider": {
+            "type": "string"
+          },
+          "slot": {
+            "type": "string"
+          },
+          "credential_ref": {
+            "type": "string"
+          }
+        }
+      },
+      "ConfigurationCodePaidConnection": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "provider",
+          "slot_key_refs"
+        ],
+        "properties": {
+          "provider": {
+            "$ref": "#/components/schemas/ConfigurationProviderEntry"
+          },
+          "slot_key_refs": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      },
+      "ClaudeCredentialImportRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "credentials"
+        ],
+        "properties": {
+          "credentials": {
+            "type": "string",
+            "maxLength": 65536,
+            "writeOnly": true,
+            "description": "Claude Code .credentials.json JSON text containing only claudeAiOauth with accessToken, refreshToken, expiresAt in epoch milliseconds and scopes including user:profile and user:inference. Optional metadata fields are refreshTokenExpiresAt, subscriptionType, subscriptionTypeSource, subscriptionTypeVerifiedAt, rateLimitTier and clientId. A supplied clientId must match the supported official client. Other fields, alternative credential stores and ambiguous JSON are rejected. The original access token must still authenticate the fixed profile endpoint. Import verifies account and organization before and after refresh, without decoding token claims."
+          },
+          "slot_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Existing credential slot, defaults to the default slot"
+          }
+        }
+      },
+      "AntigravityCredentialImportRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "credentials"
+        ],
+        "properties": {
+          "credentials": {
+            "type": "string",
+            "maxLength": 65536,
+            "writeOnly": true,
+            "description": "One-time Antigravity migration JSON with type=antigravity, access_token, refresh_token, client_id and client_secret for the original authorized OAuth client. The client_id must match the provider option. Optional pinned export metadata is expired (RFC3339), expires_in, timestamp, email and project_id. Supplied expiry must be current and supplied project_id must agree with authenticated project evidence. Email never establishes identity. Unknown fields, ambiguous JSON, raw IDE stores, service accounts and credentials without original client authorization are unsupported. The original access token must authenticate fixed userinfo and project endpoints. Import refreshes and verifies the same subject and project before encrypted staging."
+          },
+          "slot_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Existing credential slot, defaults to the default slot"
+          }
+        }
       }
     },
     "securitySchemes": {
@@ -46124,6 +47133,16 @@
               "type": "string",
               "pattern": "^([0-9a-f]{64}|unidentified)$"
             }
+          },
+          {
+            "name": "attempt_id",
+            "in": "query",
+            "required": false,
+            "description": "Select a single recorded attempt within current project visibility. Can resolve a recovery source across subscription and paid bindings. Other filters still apply.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
           }
         ],
         "responses": {
@@ -48293,6 +49312,15 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "in": "query",
+            "name": "platform",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/CodeClientPlatform"
+            },
+            "description": "Developer platform, defaulting to linux for backward-compatible POSIX shell output."
           }
         ],
         "responses": {
@@ -69533,6 +70561,321 @@
             "description": "Invalid request"
           }
         }
+      }
+    },
+    "/api/v1/providers/{provider_id}/codex-import": {
+      "post": {
+        "description": "Validates the supported Codex auth.json token format and exchanges its refresh token through the pinned Codex subscription profile to verify account and user identity. Stores only the verified grant in encrypted OLP storage. OLP owns refresh after import. Stop using the original local credentials. This does not synchronize local files or test inference. An existing slot must retain its principal.",
+        "operationId": "importCodexCredentials",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "provider_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Current provider draft ETag",
+            "in": "header",
+            "name": "If-Match",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CodexCredentialImportRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GrantEnrollmentCompletion"
+                }
+              }
+            },
+            "description": "Verified encrypted credential staged on the provider draft"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Provider not found"
+          },
+          "412": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Provider draft changed"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The provider's profile authenticates without a grant (grant_enrollment_unavailable), the named credential slot is unknown (validation_failed), its plugin is unusable (plugin_*), or the plugin failed (grant_enrollment_failed)"
+          },
+          "428": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "If-Match header is required"
+          }
+        },
+        "security": [
+          {
+            "csrfToken": [],
+            "sessionCookie": [
+              "configure"
+            ]
+          },
+          {
+            "managementToken": [
+              "configure"
+            ]
+          }
+        ],
+        "tags": [
+          "providers"
+        ],
+        "summary": "Import Codex subscription credentials once"
+      }
+    },
+    "/api/v1/providers/{provider_id}/claude-import": {
+      "post": {
+        "description": "Validates the supported Claude Code .credentials.json subscription format. Authenticates the original access token at the fixed profile endpoint, then refreshes through the pinned Claude subscription profile and requires the same verified account and organization. Stores only the verified grant in encrypted OLP storage. OLP owns refresh after import. Stop using the original local credentials. This does not synchronize local files or test inference. An existing slot must retain its principal.",
+        "operationId": "importClaudeCredentials",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "provider_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Current provider draft ETag",
+            "in": "header",
+            "name": "If-Match",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ClaudeCredentialImportRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GrantEnrollmentCompletion"
+                }
+              }
+            },
+            "description": "Verified encrypted credential staged on the provider draft"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Provider not found"
+          },
+          "412": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Provider draft changed"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unsupported format, original access token cannot verify identity, refresh failed, changed account or organization, occupied slot principal conflict, unknown slot, or untrusted subscription configuration. Responses omit credential material."
+          },
+          "428": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "If-Match header is required"
+          }
+        },
+        "security": [
+          {
+            "csrfToken": [],
+            "sessionCookie": [
+              "configure"
+            ]
+          },
+          {
+            "managementToken": [
+              "configure"
+            ]
+          }
+        ],
+        "tags": [
+          "providers"
+        ],
+        "summary": "Import Claude subscription credentials once"
+      }
+    },
+    "/api/v1/providers/{provider_id}/antigravity-import": {
+      "post": {
+        "description": "Validates the documented Antigravity migration envelope and its original OAuth client authorization. Authenticates the original access token at fixed userinfo and project endpoints, then refreshes through the trusted Antigravity subscription profile and requires the same verified subject and project. Stores only the verified grant in encrypted OLP storage. OLP owns refresh after import. Stop using the original local credentials. This does not extract IDE stores, synchronize local files or test inference. An existing slot must retain its principal.",
+        "operationId": "importAntigravityCredentials",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "provider_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Current provider draft ETag",
+            "in": "header",
+            "name": "If-Match",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AntigravityCredentialImportRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GrantEnrollmentCompletion"
+                }
+              }
+            },
+            "description": "Verified encrypted credential staged on the provider draft"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Provider not found"
+          },
+          "412": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Provider draft changed"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unsupported format, original access token cannot verify identity, refresh failed, changed subject or project, occupied slot principal conflict, unknown slot, or untrusted subscription configuration. Responses omit credential material."
+          },
+          "428": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "If-Match header is required"
+          }
+        },
+        "security": [
+          {
+            "csrfToken": [],
+            "sessionCookie": [
+              "configure"
+            ]
+          },
+          {
+            "managementToken": [
+              "configure"
+            ]
+          }
+        ],
+        "tags": [
+          "providers"
+        ],
+        "summary": "Import Antigravity subscription credentials once"
       }
     }
   },

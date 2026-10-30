@@ -132,6 +132,12 @@ jobs:
           path: .local/codecli/evidence/
           include-hidden-files: true
           if-no-files-found: ignore
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        if: always() && contains(matrix.lanes, 'browser')
+        with:
+          name: code-console-proof-${{ github.sha }}
+          path: console/test-results/access/**/*.png
+          if-no-files-found: warn
   dependencies:
     runs-on: ubuntu-26.04
     timeout-minutes: 20

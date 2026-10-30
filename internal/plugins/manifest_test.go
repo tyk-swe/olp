@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/tyk-swe/olp/internal/antigravityauth"
+	"github.com/tyk-swe/olp/internal/testutil"
 	"github.com/tyk-swe/olp/sdk/plugin/abi"
 )
 
@@ -104,5 +106,30 @@ func TestManifestValidation(t *testing.T) {
 			tc.mutate(&m)
 			wantError(t, validateManifest(m, false), tc.code, tc.field)
 		})
+	}
+}
+
+func TestCredentialImportFixturesDeclareUsableGrantEnrollment(t *testing.T) {
+	for _, behaviour := range []string{"codex-import", "codex-import-invalid", "claude-import", "antigravity-import"} {
+		t.Run(behaviour, func(t *testing.T) {
+			module := testutil.BuildPlugin(t, "./internal/plugins/testdata/fixture", "-X=main.behaviour="+behaviour)
+			if _, err := newTestRuntime(t, DefaultLimits, nil).Inspect(t.Context(), module); err != nil {
+				t.Fatalf("could not install the import fixture: %v", err)
+			}
+		})
+	}
+}
+
+func TestAntigravityManifestCanEnrollThroughGrantHost(t *testing.T) {
+	module := testutil.BuildPlugin(t, "./plugins/antigravity")
+	if _, err := newTestRuntime(t, DefaultLimits, nil).Inspect(t.Context(), module); err != nil {
+		t.Fatalf("could not install the Antigravity plugin: %v", err)
+	}
+	encoded, err := json.Marshal(antigravityauth.Manifest())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := decodeManifest(encoded, false); err != nil {
+		t.Fatalf("headless subscription plugin could not be installed: %v", err)
 	}
 }

@@ -66,14 +66,22 @@ func protocolError(message string) error { return &wire.ProtocolError{Detail: me
 // Parse validates a client envelope. Gemini's model and transport are path
 // parameters, so body fields can never replace them.
 func Parse(family wire.Format, data []byte, model string) (*wire.Request, error) {
+	return parseEnvelope(family, data, model, "")
+}
+
+func ParseForModel(family wire.Format, data []byte, model string) (*wire.Request, error) {
+	return parseEnvelope(family, data, model, model)
+}
+
+func parseEnvelope(family wire.Format, data []byte, model, expectedModel string) (*wire.Request, error) {
 	if family.Surface() == "openai" {
-		return openai.Parse(family, data)
+		return openai.ParseForModel(family, data, expectedModel)
 	}
 	doc, err := ParseSource(family, data)
 	if err != nil {
 		return nil, err
 	}
-	return ParseDocument(family, doc, model)
+	return parseDocument(family, doc, model, expectedModel)
 }
 
 func ParseSource(family wire.Format, data []byte) (oif.Document, error) {
@@ -91,8 +99,12 @@ func ParseSource(family wire.Format, data []byte) (oif.Document, error) {
 }
 
 func ParseDocument(family wire.Format, doc oif.Document, model string) (*wire.Request, error) {
+	return parseDocument(family, doc, model, "")
+}
+
+func parseDocument(family wire.Format, doc oif.Document, model, expectedModel string) (*wire.Request, error) {
 	if family.Surface() == "openai" {
-		return openai.ParseDocument(family, doc)
+		return openai.ParseDocumentForModel(family, doc, expectedModel)
 	}
 	if family.Surface() == "native" {
 		return parseNativeGeneration(family, doc, model)
@@ -176,7 +188,7 @@ func ParseDocument(family wire.Format, doc oif.Document, model string) (*wire.Re
 			}
 		}
 	}
-	if !openai.RouteSlug.MatchString(model) {
+	if (expectedModel == "" && !openai.RouteSlug.MatchString(model)) || (expectedModel != "" && model != expectedModel) {
 		return nil, requestError("model", "model must name a published route slug")
 	}
 	if family.Operation() != "generation" && stream {

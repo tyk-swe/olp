@@ -41,3 +41,29 @@ func assertRevisionJSON(t *testing.T, value any, want string) {
 		t.Fatalf("serialized revision = %s, want %s", encoded, want)
 	}
 }
+
+func TestCodePaidLimitsMatchServingPolicy(t *testing.T) {
+	provider := &Limits{RequestsPerMinute: new(int64(10))}
+	slot := Slot{RequestsPerMinute: new(int64(10)), TokensPerMinute: new(int64(100)), MaxConcurrency: new(int64(2)), Supply: Supply{DailyCostLimit: new("2.00")}}
+	if !CodePaidLimitsMatch(provider, &Limits{RequestsPerMinute: new(int64(10))}, slot, slot) {
+		t.Fatal("equivalent live limits refused frozen serving policy")
+	}
+	for name, live := range map[string]Slot{
+		"requests":    {RequestsPerMinute: new(int64(20)), TokensPerMinute: slot.TokensPerMinute, MaxConcurrency: slot.MaxConcurrency, Supply: slot.Supply},
+		"tokens":      {RequestsPerMinute: slot.RequestsPerMinute, TokensPerMinute: new(int64(200)), MaxConcurrency: slot.MaxConcurrency, Supply: slot.Supply},
+		"concurrency": {RequestsPerMinute: slot.RequestsPerMinute, TokensPerMinute: slot.TokensPerMinute, MaxConcurrency: new(int64(3)), Supply: slot.Supply},
+		"supply":      {RequestsPerMinute: slot.RequestsPerMinute, TokensPerMinute: slot.TokensPerMinute, MaxConcurrency: slot.MaxConcurrency, Supply: Supply{DailyCostLimit: new("3.00")}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if CodePaidLimitsMatch(provider, provider, live, slot) {
+				t.Fatal("changed live slot limits admitted frozen policy")
+			}
+		})
+	}
+	if CodePaidLimitsMatch(&Limits{RequestsPerMinute: new(int64(20))}, provider, slot, slot) {
+		t.Fatal("changed live provider limits admitted frozen policy")
+	}
+	if CodePaidLimitsMatch(nil, provider, slot, slot) {
+		t.Fatal("removing live provider limits admitted frozen policy")
+	}
+}

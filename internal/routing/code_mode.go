@@ -41,16 +41,33 @@ func (s *Snapshot) CodeProviders(route codemode.Route, path string, transport co
 	return s.codeRevisions[route.RevisionID].providers[codeCapability{path, transport}]
 }
 
+func (s *Snapshot) codeProvidersWithTranslation(route codemode.Route, path string) []string {
+	revision := s.codeRevisions[route.RevisionID]
+	return slices.Sorted(func(yield func(string) bool) {
+		for provider, adapter := range revision.vendors {
+			if endpoint, ok := codeadapter.RouteEndpoint(route, adapter, path); ok && endpoint.Supports(codeadapter.HTTP) {
+				if !yield(provider) {
+					return
+				}
+			}
+		}
+	})
+}
+
 // CodeModelProviders returns the providers of CodeProviders whose adapter
 // serves a model on the path's protocol: an adapter that serves each model on
 // one endpoint serves a path only for that endpoint's models.
-func (s *Snapshot) CodeModelProviders(route codemode.Route, path string, protocol codemode.Protocol, model string, transport codeadapter.Transport) []string {
+func (s *Snapshot) CodeModelProviders(route codemode.Route, path string, model string, transport codeadapter.Transport) []string {
+	resolved, err := route.ResolveModel(codemode.Operation{Model: model})
+	if err != nil {
+		return nil
+	}
 	revision := s.codeRevisions[route.RevisionID]
-	providers := revision.providers[codeCapability{path, transport}]
+	providers := s.CodeProviders(route, path, transport)
 	return slices.DeleteFunc(slices.Clone(providers), func(provider string) bool {
-		vendor := revision.vendors[provider]
-		endpoint, ok := vendor.Endpoint(path)
-		return !ok || endpoint.Protocol != protocol || !vendor.ServesModel(protocol, model)
+		adapter := revision.vendors[provider]
+		endpoint, ok := codeadapter.RouteEndpoint(route, adapter, path)
+		return !ok || !adapter.ServesModel(endpoint.Protocol, resolved.Model)
 	})
 }
 
@@ -59,6 +76,15 @@ func (s *Snapshot) validateCodeMode() error {
 		return err
 	}
 	for slug, route := range s.CodeRoutes {
+		if err := route.ValidatePaidTargets(); err != nil {
+			return err
+		}
+		if err := route.ValidateAliases(); err != nil {
+			return err
+		}
+		if route.InitialRecoveryAttempts < 0 || route.InitialRecoveryAttempts > 2 {
+			return fmt.Errorf("invalid initial recovery policy for %s", slug)
+		}
 		if err := route.Tools.Validate(); err != nil {
 			return err
 		}
@@ -97,7 +123,7 @@ func (s *Snapshot) compileCodeMode() error {
 		}
 		for _, endpoint := range vendor.Endpoints() {
 			for _, transport := range []codeadapter.Transport{codeadapter.HTTP, codeadapter.WebSocket} {
-				if endpoint.Supports(transport) {
+				if endpoint.Target == "" && endpoint.Supports(transport) {
 					capability := codeCapability{endpoint.ClientPath, transport}
 					revision.providers[capability] = append(revision.providers[capability], provider)
 				}
@@ -110,6 +136,18 @@ func (s *Snapshot) compileCodeMode() error {
 		slices.SortFunc(revision.adapters, codeadapter.Compare)
 		for _, providers := range revision.providers {
 			slices.Sort(providers)
+		}
+	}
+	for _, route := range s.CodeRoutes {
+		revision, ok := s.codeRevisions[route.RevisionID]
+		if !ok {
+			continue
+		}
+		if route.MessagesToCodex {
+			revision.providers[codeCapability{"v1/messages", codeadapter.HTTP}] = s.codeProvidersWithTranslation(route, "v1/messages")
+		}
+		if route.ChatToAntigravity || route.ChatToCodex {
+			revision.providers[codeCapability{"v1/chat/completions", codeadapter.HTTP}] = s.codeProvidersWithTranslation(route, "v1/chat/completions")
 		}
 	}
 	return nil

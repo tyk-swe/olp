@@ -88,3 +88,26 @@ export async function cancelGrantEnrollment(
   );
   ensureOk(response);
 }
+
+export async function importSubscriptionCredentials(
+  provider: Pick<Provider, 'id' | 'etag'>,
+  credentials: string,
+  profile:
+    'codex-subscription' | 'claude-subscription' | 'antigravity-subscription'
+): Promise<GrantEnrollmentCompletion> {
+  const response = await apiClient.POST(
+    profile === 'claude-subscription'
+      ? '/api/v1/providers/{provider_id}/claude-import'
+      : profile === 'antigravity-subscription'
+        ? '/api/v1/providers/{provider_id}/antigravity-import'
+        : '/api/v1/providers/{provider_id}/codex-import',
+    {
+      params: {
+        path: { provider_id: provider.id },
+        header: { 'If-Match': provider.etag }
+      },
+      body: { credentials }
+    }
+  );
+  return unwrap(response);
+}

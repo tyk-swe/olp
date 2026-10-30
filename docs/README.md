@@ -46,6 +46,7 @@ cost and operations from one self-hosted gateway. Start with
 | Maintain signed model facts, prices and calibration | [Catalog maintenance](develop/catalog.md) |
 | Reproduce benchmarks and assess performance budgets | [Performance](develop/performance.md) |
 | Qualify a candidate and find outstanding external checks | [Qualification](develop/qualification.md) |
+| Compare coding-client capabilities and planned contracts | [Code-mode baseline and roadmap](develop/plans/code-mode-parity.md) |
 | Choose the next unfinished outcome | [Roadmap](roadmap.md) |
 | Implement remaining designs | [Guardrails](develop/plans/guardrails.md), [API surfaces](develop/plans/api-surface.md), [agent gateway](develop/plans/agent-gateway.md) |
 

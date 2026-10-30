@@ -70,7 +70,7 @@ func legacyParseDocument(family wire.Format, doc oif.Document) (*wire.Request, e
 	if err != nil {
 		return nil, err
 	}
-	if err := validateFields(r, fields, oif.Value{}); err != nil {
+	if err := validateFields(r, fields, oif.Value{}, ""); err != nil {
 		return nil, err
 	}
 	r = r.WithValidation("openai")
@@ -81,7 +81,7 @@ func legacyParseDocument(family wire.Format, doc oif.Document) (*wire.Request, e
 // says whether it was accepted.
 func sameValidation(t testing.TB, family wire.Format, doc oif.Document) bool {
 	t.Helper()
-	got, gotErr := parseDocument(family, doc)
+	got, gotErr := parseDocument(family, doc, "")
 	want, wantErr := legacyParseDocument(family, doc)
 	if !reflect.DeepEqual(gotErr, wantErr) || (got == nil) != (want == nil) {
 		t.Fatalf("%s\nrequest %.1500s\ndocument: %v\nfields:   %v", family, doc.Raw(), gotErr, wantErr)

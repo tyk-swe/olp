@@ -24,6 +24,8 @@ const APIVersion = "openllmproxy.dev/config/v2"
 const LegacyAPIVersion = "openllmproxy.dev/config/v1"
 
 type Document struct {
+	Code                 *CodeConfiguration `json:"code,omitempty"`
+	codeBindings         CodeBindings
 	AgentPublications    []PublicationEntry         `json:"agent_publications,omitempty"`
 	GuardrailPolicies    []GuardrailPolicyEntry     `json:"guardrail_policies,omitempty"`
 	GuardrailAttachments []GuardrailAttachmentEntry `json:"guardrail_attachments,omitempty"`
@@ -406,6 +408,7 @@ func sortCapabilities(c []CapabilityEntry) {
 }
 
 func (d *Document) canonicalize() {
+	d.Code = canonicalCode(d.Code)
 	slices.SortFunc(d.RetrievalBindings, func(a, b RetrievalBindingEntry) int { return strings.Compare(retrievalKey(a), retrievalKey(b)) })
 	slices.SortFunc(d.AgentPublications, func(a, b PublicationEntry) int { return strings.Compare(publicationKey(a), publicationKey(b)) })
 	slices.SortFunc(d.MCPServers, func(a, b MCPServerEntry) int {

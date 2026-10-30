@@ -3,8 +3,11 @@
 package integration_test
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
+	"net/http"
 	"testing"
 	"time"
 
@@ -57,10 +60,42 @@ func TestCodeQualificationForwardedOutcomesRetainStatusAndUncertainty(t *testing
 			if test.upstream == 0 && attempt.UpstreamStatus != nil || test.upstream != 0 && (attempt.UpstreamStatus == nil || *attempt.UpstreamStatus != test.upstream) {
 				t.Fatalf("upstream status changed: %+v", attempt)
 			}
+			if attempt.Nonexecution || attempt.RecoveryFrom != nil || attempt.RecoveryReason != nil {
+				t.Fatal("unknown consumption was presented as proven safe recovery")
+			}
 			if len(f.peer.Requests()) != 1 {
 				t.Fatal("attempt was replayed")
 			}
 		})
+	}
+}
+
+func TestCodeQualificationPartialOutputDiagnosticsRemainUncertain(t *testing.T) {
+	f := newCodeFleet(t).initialRecovery(t, 1)
+	f.peer.SetResponder(func(context.Context, http.Header, []byte) [][]byte {
+		return [][]byte{
+			[]byte(`{"type":"response.created","response":{"id":"partial-private-response"}}`),
+			[]byte(`{"type":"response.output_text.delta","delta":"CONTROLLED_PARTIAL_PRIVATE_OUTPUT"}`),
+		}
+	})
+	response, body, err := f.request(t.Context(), 0, "partial-output-diagnostics", "", codeBody(), true)
+	if err != nil || response.StatusCode != http.StatusOK || !bytes.Contains(body, []byte("CONTROLLED_PARTIAL_PRIVATE_OUTPUT")) {
+		t.Fatal("partial output did not reach the caller")
+	}
+	attempt := codeSettledAttempts(t, f, 1)[0]
+	if attempt.State != "uncertain" || attempt.ReportedTokens != nil || attempt.Nonexecution || attempt.RecoveryFrom != nil || attempt.RecoveryReason != nil || attempt.Outcome == nil || *attempt.Outcome != "incomplete" {
+		t.Fatalf("partial output lost consumption uncertainty: %+v", attempt)
+	}
+	if len(f.peer.Requests()) != 1 {
+		t.Fatal("partial output was replayed")
+	}
+	status, listing, _ := f.h.request(f.owner, "GET", "/api/v1/code/attempts?project_id="+f.project+"&binding_id="+attempt.BindingID, nil, nil)
+	diagnostics, err := json.Marshal(listing)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status != http.StatusOK || bytes.Contains(diagnostics, []byte("CONTROLLED_PARTIAL_PRIVATE_OUTPUT")) || bytes.Contains(diagnostics, []byte("CONTROLLED_PRIVATE_PROMPT")) || bytes.Contains(diagnostics, []byte("partial-private-response")) {
+		t.Fatal("partial-output diagnostics exposed content or upstream state")
 	}
 }
 

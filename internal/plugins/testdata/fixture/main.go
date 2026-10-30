@@ -13,11 +13,15 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/antigravityauth"
+	"github.com/tyk-swe/olp/internal/claudeauth"
+	"github.com/tyk-swe/olp/internal/codexauth"
 	"github.com/tyk-swe/olp/sdk/plugin"
 	"github.com/tyk-swe/olp/sdk/plugin/abi"
 )
@@ -28,9 +32,25 @@ const secret = "sk-fixture-secret"
 var behaviour string
 var upstream = "https://api.example.com/v1"
 
-type fixture struct{}
+type fixture struct{ codexauth.Adapter }
 
 func (fixture) Manifest() plugin.Manifest {
+	if behaviour == "codex-import-invalid" {
+		return codexauth.Manifest()
+	}
+	if behaviour == "codex-import" || behaviour == "claude-import" || behaviour == "antigravity-import" {
+		native := func() plugin.Manifest {
+			if behaviour == "antigravity-import" {
+				return antigravityauth.Manifest()
+			}
+			if behaviour == "claude-import" {
+				return claudeauth.Manifest()
+			}
+			return codexauth.Manifest()
+		}()
+		return plugin.Manifest{Name: "fixture", Version: "1.0.0", Profiles: native.Profiles,
+			Origins: slices.Concat(native.Origins, []string{strings.TrimSuffix(upstream, "/v1")})}
+	}
 	m := plugin.Manifest{
 		Name:    "fixture",
 		Version: "1.0.0",
@@ -126,6 +146,25 @@ func (fixture) Sign(ctx context.Context, r plugin.SignRequest) (plugin.SignResul
 // "log" logs the refresh token, and "fetch:URL" GETs the URL and returns its
 // body as the access token. Anything else reports invalid_grant.
 func (fixture) RefreshGrant(ctx context.Context, r plugin.GrantRefresh) (plugin.Grant, error) {
+	if behaviour == "codex-import-invalid" {
+		material := map[string]struct {
+			access, refresh string
+			expiry          int64
+		}{
+			"empty-access":      {"", "fixture-returned-refresh", 3600},
+			"unsafe-access":     {"fixture\r\naccess", "fixture-returned-refresh", 3600},
+			"oversized-refresh": {"fixture-access", strings.Repeat("r", (16<<10)+1), 3600},
+			"excessive-expiry":  {"fixture-access", "fixture-returned-refresh", 11 * 365 * 24 * 60 * 60},
+		}[r.RefreshToken]
+		identity := codexauth.Identity{Account: r.Facts["account_id"], User: r.Facts["user_id"]}
+		return plugin.Grant{AccessToken: material.access, RefreshToken: material.refresh, ExpiresIn: material.expiry,
+			Principal: identity.Principal(), Facts: identity.Facts()}, nil
+	}
+	if behaviour == "codex-import" || behaviour == "claude-import" || behaviour == "antigravity-import" {
+		if _, err := plugin.Fetch(ctx, plugin.HTTPRequest{Method: "POST", URL: upstream + "/credential-import", Body: []byte(r.RefreshToken)}); err != nil {
+			return plugin.Grant{}, err
+		}
+	}
 	behaviour, rest, _ := strings.Cut(r.RefreshToken, ":")
 	switch behaviour {
 	case "log":
@@ -141,6 +180,6 @@ func (fixture) RefreshGrant(ctx context.Context, r plugin.GrantRefresh) (plugin.
 	return plugin.Grant{}, &plugin.Error{Code: abi.CodeInvalidGrant, Message: "the refresh token is spent"}
 }
 
-func init() { plugin.Register(fixture{}) }
+func init() { plugin.Register(fixture{Adapter: codexauth.Adapter{Fetch: plugin.Fetch}}) }
 
 func main() { plugin.Serve() }

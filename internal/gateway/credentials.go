@@ -105,9 +105,9 @@ func consumerFailure(failure *consumerauth.Failure) *Error {
 }
 
 func (s *Server) authenticateRequest(r *http.Request, token, scope string) (access.Authority, *Error) {
-	authority, failure := consumerauth.Authenticate(s.Runtime, r, token, scope, s.cfg.TrustedProxies, s.now())
+	authority, failure := s.authenticateKey(r, token, scope)
 	if failure != nil {
-		return access.Authority{}, consumerFailure(failure)
+		return access.Authority{}, failure
 	}
 	if authority.TaskCapability != nil && !taskCapabilityEndpoint(r) {
 		return access.Authority{}, permissionError("permission_denied", "This task capability cannot use this endpoint.")
@@ -172,4 +172,12 @@ func (x *call) dropQueryKey() *Error {
 	}
 	delete(x.semanticQuery, "key")
 	return nil
+}
+
+func (s *Server) authenticateKey(r *http.Request, token, scope string) (access.Authority, *Error) {
+	authority, failure := consumerauth.Authenticate(s.Runtime, r, token, scope, s.cfg.TrustedProxies, s.now())
+	if failure != nil {
+		return access.Authority{}, consumerFailure(failure)
+	}
+	return authority, nil
 }
