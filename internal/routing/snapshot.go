@@ -45,6 +45,7 @@ type Capability struct {
 	Operation string `json:"operation"`
 	Surface   string `json:"surface"`
 	Mode      string `json:"mode"`
+	ToolCalls bool   `json:"tool_calls,omitempty"`
 }
 
 // Slot is a credential slot pinned to an exact credential version.
@@ -257,6 +258,12 @@ func (p *Provider) Supports(model, operation, surface, mode string) bool {
 		}
 	}
 	return false
+}
+
+func (p *Provider) SupportsToolCalls(model, surface, mode string) bool {
+	return slices.ContainsFunc(p.Capabilities, func(c Capability) bool {
+		return c.Model == model && c.Operation == "generation" && c.Surface == surface && c.Mode == mode && c.ToolCalls
+	})
 }
 
 // validate rejects snapshots that could not serve safely: dangling references,

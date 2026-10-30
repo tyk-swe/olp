@@ -45,8 +45,7 @@ func CloneRevision(v Revision) Revision {
 		d.Agent = &copy
 	}
 	if d.Prompt != nil {
-		copy := *d.Prompt
-		copy.Variables = slices.Clone(copy.Variables)
+		copy := d.Prompt.Clone()
 		d.Prompt = &copy
 	}
 	v.Definition = d

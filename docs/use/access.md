@@ -502,6 +502,20 @@ Stable pair owners/history survive cap removal. Portable
 `projects[].attribution_budgets` omission/null/empty clears; changes need `keys`
 plus `configure`.
 
+Use the reserved `delegation_pair` budget key to set a shared limit for an agent
+and its delegating principal. The value is the `delegation_pair_digest` returned
+when a member consents or an agent obtains a delegation grant. For example,
+replace the complete budget map with the pair ID and the desired limit:
+
+```json
+{"budgets":{"delegation_pair":{"PAIR_BUDGET_ID":{"daily_cost_limit":"50"}}}}
+```
+
+The gateway derives the pair ID from the authenticated principals and rejects it
+in caller attribution. Pair limits apply alongside key, agent and other
+attribution limits. A member and agent keep the same pair ID across consent
+renewals and replacement keys. Removing a limit does not erase recorded spend.
+
 ## Temporary budget increases
 
 `POST /api/v1/budget-increases` adds exact USD to an existing day/week/month cap
@@ -556,6 +570,52 @@ replay. Omitted/empty lists preserve; disable explicitly. Principals and signing
 keys remain local. Realtime checks expiry/authority every five seconds;
 renewed same-subject tokens may finish retained work. Code mode also requires
 pool assignment and refuses concurrent issuer edits with `code_workload_changed`.
+
+### Delegating an API key to a workload agent
+
+To approve an agent, set `agent_principal` on its workload mapping and provide an
+exact `/sub` match together with an exact `/client_id`, `/azp` or `/appid` match.
+The principal is bound to the issuer, subject and approved client claims.
+
+An agent and an API key in the same project can request a delegated credential
+with `POST /v1/delegations`. The `Authorization` header contains the agent's
+workload JWT and `X-OLP-Delegating-Key` contains the API key. The key needs the
+`delegate` scope and both principals need each requested `inference`, `tools` or `agents`
+scope. The JSON body supplies `scopes` and a nonempty `allowed_routes` list for
+inference, a nonempty `allowed_toolsets` list for tools and a nonempty
+`allowed_agents` list for A2A. Include each list for its requested scope.
+Toolsets and agents use their published UUIDs. The optional
+`ttl_seconds` defaults to five minutes and cannot exceed fifteen minutes; the
+credential also expires when either principal expires.
+
+A project member with change access can instead approve an agent and key in the
+console or through `POST /api/v1/delegation-consents` after recent identity
+verification. The returned one-use consent can be exchanged at
+`POST /v1/delegations` in `X-OLP-Delegation-Consent` for no more than its
+approved scopes, routes, toolsets and agents. `GET /api/v1/delegation-options` lists
+eligible agents and their currently shared resources for a key.
+
+The delegation response contains a token and `expires_at`. Send the token as the
+bearer credential and the current agent workload JWT in `X-OLP-Agent-Identity`.
+One token authorizes one inference request, one JSON tool call, one MCP
+session or one A2A send. A session reuses the same token and agent identity
+until expiry. A renewed delegation for the same agent and caller can read or
+cancel its A2A task. A project operator with change permission can also use
+`GET /api/v1/a2a-tasks/{task_id}/remote` and
+`POST /api/v1/a2a-tasks/{task_id}/cancel` to contact the pinned remote agent.
+These actions use the original task credential and cannot use a revoked OAuth
+grant or send it to a replacement endpoint.
+Credentials cannot be used to delegate again. Both principals must continue to
+authorize the resources, and revoking either principal ends delegation. Caller,
+agent and applicable member and pair budgets apply together. Renewed credentials
+retain pair spend. The delegating key remains the accounting owner while each
+attempt records the agent and a stable pair digest, along with the member for
+member-consented calls. Grant records contain
+credential digests and bounds, not the JWT, key or raw claims.
+
+Only calls observed through OLP are counted. OLP cannot count or stop hidden
+iterations performed inside a remote agent, and an unavailable remote agent can
+leave cancellation outcomes unknown.
 
 ## Organizations
 

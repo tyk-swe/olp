@@ -8,6 +8,12 @@ import (
 	"net/http"
 	"testing"
 	"time"
+
+	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/egress"
+	"github.com/tyk-swe/olp/internal/runtime"
+	"github.com/tyk-swe/olp/internal/secrets"
 )
 
 func serveListener(t *testing.T, handler http.Handler, age, drain time.Duration, limit int) (*listenerServer, string) {
@@ -77,5 +83,35 @@ func TestConnectionCapacityAndForcedShutdownAreBounded(t *testing.T) {
 	case <-cancelled:
 	case <-time.After(time.Second):
 		t.Fatal("forced shutdown did not cancel request")
+	}
+}
+
+func TestManagementListenerFailsClosedWhenDelegationAuthenticationIsUnavailable(t *testing.T) {
+	pool, err := pgxpool.New(t.Context(), "postgres://olp:olp@127.0.0.1:1/olp?sslmode=disable")
+	if err != nil {
+		t.Fatal(err)
+	}
+	pool.Close()
+	mux := http.NewServeMux()
+	Management{Access: &access.Server{Pool: pool, Auth: secrets.NewAuthKey(make([]byte, 32), "test")}, Runtime: &runtime.Manager{}, Egress: &egress.Policy{}}.Register(mux)
+	_, address := serveListener(t, mux, time.Minute, time.Second, 4)
+	for _, request := range []struct{ method, path string }{
+		{http.MethodPost, "/api/v1/delegation-consents"},
+		{http.MethodGet, "/api/v1/delegation-options"},
+	} {
+		t.Run(request.path, func(t *testing.T) {
+			req, requestErr := http.NewRequestWithContext(t.Context(), request.method, "http://"+address+request.path, nil)
+			if requestErr != nil {
+				t.Fatal(requestErr)
+			}
+			response, responseErr := http.DefaultClient.Do(req)
+			if responseErr != nil {
+				t.Fatal(responseErr)
+			}
+			defer response.Body.Close()
+			if response.StatusCode != http.StatusServiceUnavailable {
+				t.Fatalf("delegation request with unavailable authentication returned %d", response.StatusCode)
+			}
+		})
 	}
 }

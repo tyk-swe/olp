@@ -107,7 +107,7 @@ func (s *Server) closeLegacyStream(ctx context.Context, record sessionRecord, st
 }
 
 func (s *Server) serveLegacyPOST(w http.ResponseWriter, r *http.Request) {
-	authority, failure := s.authenticate(r)
+	authority, failure := s.authenticateSession(r)
 	if failure != nil {
 		writeRPCFailure(w, nil, failureRPC(failure.status, rpcServerError, failure))
 		return

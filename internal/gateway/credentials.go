@@ -109,10 +109,33 @@ func (s *Server) authenticateRequest(r *http.Request, token, scope string) (acce
 	if failure != nil {
 		return access.Authority{}, failure
 	}
+	if authority.TaskCapability != nil && !taskCapabilityEndpoint(r) {
+		return access.Authority{}, permissionError("permission_denied", "This task capability cannot use this endpoint.")
+	}
 	if scope != "inference" {
 		return authority, nil
 	}
 	return s.identifyEndUser(r, authority)
+}
+
+func taskCapabilityEndpoint(r *http.Request) bool {
+	if r.Method != http.MethodPost {
+		return false
+	}
+	switch r.URL.Path {
+	case "/v1/chat/completions", "/v1/responses", "/anthropic/v1/messages":
+		return true
+	}
+	model, ok := strings.CutPrefix(r.URL.Path, "/gemini/v1beta/models/")
+	if !ok || strings.Contains(model, "/") {
+		return false
+	}
+	for _, suffix := range []string{":generateContent", ":streamGenerateContent"} {
+		if name, found := strings.CutSuffix(model, suffix); found && name != "" {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *Server) checkKeyAddress(r *http.Request, authority access.Authority) *Error {

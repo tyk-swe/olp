@@ -20,6 +20,7 @@ var ErrKeys = errors.New("workload verification keys are unavailable")
 var name = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,99}$`)
 
 type Mapping struct {
+	AgentPrincipal     bool              `json:"agent_principal,omitempty"`
 	Name               string            `json:"name"`
 	Match              map[string]string `json:"match"`
 	ProjectID          string            `json:"project_id"`
@@ -66,6 +67,9 @@ func (c Config) Validate() error {
 	names := map[string]bool{}
 	for _, m := range c.Mappings {
 		if !name.MatchString(m.Name) || names[m.Name] || !name.MatchString(m.LimitTemplate) || m.Match == nil || len(m.Match) > 16 {
+			return bad
+		}
+		if m.AgentPrincipal && (m.Match["/sub"] == "" || (m.Match["/client_id"] == "" && m.Match["/azp"] == "" && m.Match["/appid"] == "")) {
 			return bad
 		}
 		names[m.Name] = true

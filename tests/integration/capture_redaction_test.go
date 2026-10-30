@@ -168,3 +168,88 @@ func TestCaptureRedactedGatewayReadback(t *testing.T) {
 		}
 	}
 }
+
+func TestPublishedPromptDoesNotLeakThroughEnabledCapture(t *testing.T) {
+	fixture := newOpenAIFixture(t, "")
+	h := newAccessHarness(t)
+	h.Gateway.Sink = &gateway.PersistingSink{Persist: func(ctx context.Context, event *usage.Event, payload []byte) error {
+		_, err := usage.PersistEvent(ctx, h.Pool, event, payload)
+		return err
+	}}
+	owner := h.owner()
+	project := createProject(h, owner, "Prompt capture")
+	_, _, slug, secret := provisionOpenAIInProject(t, h, owner, &project, fixture.URL, []any{map[string]any{"operation": "generation", "surface": "openai", "mode": "unary"}}, []string{"generation"}, nil)
+	created := h.want(owner, http.MethodPost, "/api/v1/prompts", map[string]any{"project_id": project, "name": "private prompt", "prompt": map[string]any{"template": "Rendered prompt {{name}}", "variables": []string{"name"}}}, idem(uuid.NewString()), http.StatusCreated)
+	path := "/api/v1/prompts/" + created["id"].(string)
+	published := h.want(owner, http.MethodPost, path+"/publish", nil, withMatch(created, idem(uuid.NewString())), http.StatusOK)
+	h.want(owner, http.MethodPut, path+"/labels/production", map[string]any{"revision_id": published["revision_id"]}, withMatch(published, idem(uuid.NewString())), http.StatusOK)
+	if err := h.Runtime.Refresh(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	h.want(owner, http.MethodPatch, "/api/v1/observability/capture", map[string]any{"enabled": true}, etagHeader(h.want(owner, http.MethodGet, "/api/v1/observability/capture", nil, nil, http.StatusOK)), http.StatusOK)
+	receiver, server := newExportReceiver(t, "", http.StatusNoContent)
+	sink := h.want(owner, http.MethodPost, "/api/v1/observability/sinks", map[string]any{"name": "prompt-capture", "type": "https", "destination": server.URL, "streams": []string{"requests"}, "format": "json"}, idem(uuid.NewString()), http.StatusCreated)
+	h.want(owner, http.MethodPost, "/api/v1/observability/capture-policies", map[string]any{"route_slug": slug, "sink": sink["export_sink_id"], "sample_ratio": "1", "include": []string{"input", "output", "tool_calls"}, "max_bytes": 65536}, idem(uuid.NewString()), http.StatusCreated)
+	manager := &export.Manager{Pool: h.Pool, Keys: h.Ring2(), Installation: h.Server.Installation, Sender: export.NewSender(loopbackPolicy()), Log: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	h.Gateway.Capture = manager
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan struct{})
+	go func() { manager.Run(ctx); close(done) }()
+	t.Cleanup(func() { cancel(); <-done })
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		collector := manager.Resolve(project, slug, "", "", uuid.NewString())
+		if collector != nil {
+			collector.Close()
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("capture cache did not compile")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	control, err := json.Marshal(map[string]any{"model": slug, "messages": []any{map[string]any{"role": "user", "content": "capture-control"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	status, raw, _ := h.gatewayRaw(http.MethodPost, "/v1/chat/completions", secret, strings.NewReader(string(control)), map[string]string{"Content-Type": "application/json"})
+	if status != http.StatusOK {
+		t.Fatalf("control status = %d, body = %s", status, raw)
+	}
+	controlExports := awaitEnvelope(t, receiver, 1)
+	controlData, err := json.Marshal(controlExports[0]["data"])
+	if err != nil || !strings.Contains(string(controlData), "capture-control") {
+		t.Fatalf("capture control was not exported: %s, %v", controlData, err)
+	}
+	prompt, err := json.Marshal(map[string]any{"model": slug, "olp_prompt": map[string]any{"id": created["id"], "label": "production", "variables": map[string]string{"name": "capture-variable-sentinel"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	promptStatus, promptRaw, headers := h.gatewayRaw(http.MethodPost, "/v1/chat/completions", secret, strings.NewReader(string(prompt)), map[string]string{"Content-Type": "application/json"})
+	if promptStatus != http.StatusOK {
+		t.Fatalf("prompt status = %d, body = %s", promptStatus, promptRaw)
+	}
+	var captured bool
+	if err := h.Pool.QueryRow(t.Context(), `SELECT payload_captured FROM olp.requests WHERE id=$1`, headers.Get("X-Request-Id")).Scan(&captured); err != nil {
+		t.Fatal(err)
+	}
+	if captured {
+		awaitEnvelope(t, receiver, 2)
+	}
+	for _, envelope := range receiver.received() {
+		data, err := json.Marshal(envelope["data"])
+		if err != nil || strings.Contains(string(data), "capture-variable-sentinel") || strings.Contains(string(data), "Rendered prompt") {
+			t.Fatalf("prompt content reached capture export: %s, %v", data, err)
+		}
+	}
+	for _, query := range []string{
+		`SELECT count(*) FROM olp.requests r WHERE to_json(r)::text LIKE '%capture-variable-sentinel%' OR to_json(r)::text LIKE '%Rendered prompt%'`,
+		`SELECT count(*) FROM olp.attempts a WHERE to_json(a)::text LIKE '%capture-variable-sentinel%' OR to_json(a)::text LIKE '%Rendered prompt%'`,
+		`SELECT count(*) FROM olp.export_records WHERE payload::text LIKE '%capture-variable-sentinel%' OR payload::text LIKE '%Rendered prompt%'`,
+	} {
+		var count int
+		if err := h.Pool.QueryRow(t.Context(), query).Scan(&count); err != nil || count != 0 {
+			t.Fatalf("prompt content reached durable records: count=%d err=%v", count, err)
+		}
+	}
+}

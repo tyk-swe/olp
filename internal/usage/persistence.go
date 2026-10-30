@@ -131,7 +131,7 @@ const insertFactSQL = `INSERT INTO olp.attempt_usage_facts
          tool_calls, batch, pricing_components,
          commitment_weight, commitment_amount, commitment_period,
          discount_id, charge, rate_card_revision_id,
-         list_cost, contracted_cost, caller_credential, cost_lines, charge_lines, commitment_schedule_id, commitment_bucket, training_tokens, storage_byte_seconds, cache_token_seconds, container_sessions, invocation_count)
+         list_cost, contracted_cost, caller_credential, cost_lines, charge_lines, commitment_schedule_id, commitment_bucket, training_tokens, storage_byte_seconds, cache_token_seconds, container_sessions, invocation_count, agent_principal_id, delegation_pair_digest, member_principal_id)
     VALUES ($1::uuid, $2::uuid, $3::uuid, $4, $5, NULLIF($6, '')::uuid, $24::uuid, $7::uuid, $8, $9, $10, $11, $12,
             $13, $14, $15, $16, $17, $18, $25, $26, $27, $19::numeric, $20::numeric, $21, $22::uuid, $23,
             false, false, false, false, false, false, false, false, false, false, false, false, $28::jsonb,
@@ -139,7 +139,7 @@ const insertFactSQL = `INSERT INTO olp.attempt_usage_facts
             $36, $37, $38, $39, $40, $41, $42::jsonb, $43, $44::text[],
             $45::numeric, $46::numeric, $47,
             $48::uuid, $49::numeric, $50::uuid,
-            $51::numeric, $52::numeric, $53, $54::jsonb, $55::jsonb, $56::uuid, $57::timestamptz, $58, $59::text::numeric, $60::text::numeric, $61::jsonb, $62)
+            $51::numeric, $52::numeric, $53, $54::jsonb, $55::jsonb, $56::uuid, $57::timestamptz, $58, $59::text::numeric, $60::text::numeric, $61::jsonb, $62, NULLIF($63, '')::uuid, NULLIF($64, ''), NULLIF($65, '')::uuid)
     ON CONFLICT (request_id, attempt_ordinal) DO NOTHING`
 
 // factTotalsSQL sums exactly the facts this event inserted. The receipt
@@ -149,7 +149,7 @@ const factTotalsSQL = `SELECT count(*), COALESCE(sum(COALESCE(estimated_cost,0)+
         count(*) FILTER (WHERE NOT budget_exempt AND charge_status <> 'not_billable' AND unpriced),
         COALESCE(sum(COALESCE(charge,0)+cache_budget_charge) FILTER (WHERE NOT budget_exempt), 0)::text,
         count(*) FILTER (WHERE NOT budget_exempt AND charge_status <> 'not_billable' AND charge IS NULL)
-    FROM olp.attempt_usage_facts WHERE event_id = $1::uuid`
+    FROM olp.attempt_usage_facts WHERE event_id = $1::uuid AND ($2::uuid IS NULL OR attempt_id = $2::uuid)`
 
 // recomputeMarkersSQL decides, for each count scope, which attempt of a request
 // carries the request. Reports count the first attempt of a scope once, and
@@ -235,6 +235,9 @@ func PersistEvent(ctx context.Context, pool *pgxpool.Pool, ev *Event, payload []
 // PersistEventTx records accounting in the caller's transaction, allowing a
 // resource's reconciliation marker and its usage to commit atomically.
 func PersistEventTx(ctx context.Context, tx pgx.Tx, ev *Event, payload []byte) (Persisted, error) {
+	if workflowEvent(ev) {
+		return persistWorkflowTerminalTx(ctx, tx, ev, payload)
+	}
 	if _, present := debitDispatchID(ev); present {
 		return PersistDebitEventTx(ctx, tx, ev, payload)
 	}
@@ -472,7 +475,7 @@ func insertFact(ctx context.Context, tx pgx.Tx, ev *Event, attempt ValidatedAtte
 		pricing.listCost, pricing.contractedCost,
 		attempt.Attempt.Routing != nil && attempt.Attempt.Routing.CredentialSource == "caller",
 		pricing.costLines, pricing.chargeLines, pricing.commitmentScheduleID, pricing.commitmentBucket,
-		usage.TrainingTokens, usage.StorageByteSeconds, usage.CacheTokenSeconds, optionalJSON(usage.ContainerSessions), usage.InvocationCount,
+		usage.TrainingTokens, usage.StorageByteSeconds, usage.CacheTokenSeconds, optionalJSON(usage.ContainerSessions), usage.InvocationCount, ev.AgentPrincipalID, ev.DelegationPairDigest, ev.MemberPrincipalID,
 	); err != nil {
 		return factCharge{}, fmt.Errorf("persist attempt usage fact: %w", err)
 	}
@@ -537,14 +540,18 @@ func chargeSupply(ctx context.Context, tx pgx.Tx, ev *Event, attempt ValidatedAt
 // billable attempts accrue no money but are counted, so an operator can see
 // that a budget is being consumed by spend nobody can price.
 func applyCostDelta(ctx context.Context, tx pgx.Tx, ev *Event) ([]limits.CostSnapshot, error) {
+	return applyAttemptCostDelta(ctx, tx, ev, nil)
+}
+
+func applyAttemptCostDelta(ctx context.Context, tx pgx.Tx, ev *Event, attemptID *string) ([]limits.CostSnapshot, error) {
 	var facts, unpriced, uncharged int64
 	var cost, charge string
-	if err := tx.QueryRow(ctx, factTotalsSQL, ev.EventID).Scan(&facts, &cost, &unpriced, &charge, &uncharged); err != nil {
+	if err := tx.QueryRow(ctx, factTotalsSQL, ev.EventID, attemptID).Scan(&facts, &cost, &unpriced, &charge, &uncharged); err != nil {
 		return nil, fmt.Errorf("total attempt usage facts: %w", err)
 	}
 	// Keyless requests are the installation's own: they spend from no key's
 	// or group's budget.
-	endUsers, err := applyIdentityCostDelta(ctx, tx, ev, cost, unpriced, charge, uncharged)
+	endUsers, err := applyAttemptIdentityCostDelta(ctx, tx, ev, cost, unpriced, charge, uncharged, attemptID)
 	if err != nil {
 		return nil, err
 	}
@@ -556,14 +563,19 @@ func applyCostDelta(ctx context.Context, tx pgx.Tx, ev *Event) ([]limits.CostSna
 	if err != nil {
 		return nil, fmt.Errorf("apply request metadata cost delta: %w", err)
 	}
+	agent, err := applyAgentCostDelta(ctx, tx, ev, cost, unpriced, charge, uncharged)
+	if err != nil {
+		return nil, err
+	}
 	// Each snapshot names the request it accounts for, so that installing it in
 	// the distributed counters also removes the cost the gateway reserved for the
 	// request when it was admitted. The reservation can sit under either basis,
 	// so both snapshots carry the identifier.
-	for i := range snapshot {
-		snapshot[i].RequestID = ev.RequestID
+	keySnapshots := slices.Concat(snapshot, agent)
+	for i := range keySnapshots {
+		keySnapshots[i].RequestID = ev.RequestID
 	}
-	snapshots := append(snapshot, endUsers...)
+	snapshots := append(keySnapshots, endUsers...)
 	if ev.BudgetGroupID != nil {
 		group, err := limits.AddGroupCostDelta(ctx, tx, *ev.BudgetGroupID, ev.ObservedAt, cost, unpriced, charge, uncharged)
 		if err != nil {
@@ -573,6 +585,17 @@ func applyCostDelta(ctx context.Context, tx pgx.Tx, ev *Event) ([]limits.CostSna
 			group[i].RequestID = ev.RequestID
 		}
 		snapshots = append(snapshots, group...)
+	}
+	return snapshots, nil
+}
+
+func applyAgentCostDelta(ctx context.Context, tx pgx.Tx, ev *Event, cost string, unpriced int64, charge string, uncharged int64) ([]limits.CostSnapshot, error) {
+	if ev.AgentPrincipalID == "" {
+		return nil, nil
+	}
+	snapshots, err := limits.AddCostDelta(ctx, tx, ev.AgentPrincipalID, ev.ObservedAt, cost, unpriced, charge, uncharged)
+	if err != nil {
+		return nil, fmt.Errorf("apply agent cost delta: %w", err)
 	}
 	return snapshots, nil
 }
@@ -594,11 +617,15 @@ func applyEndUserCostDelta(ctx context.Context, tx pgx.Tx, ev *Event, cost strin
 }
 
 func applyIdentityCostDelta(ctx context.Context, tx pgx.Tx, ev *Event, cost string, unpriced int64, charge string, uncharged int64) ([]limits.CostSnapshot, error) {
+	return applyAttemptIdentityCostDelta(ctx, tx, ev, cost, unpriced, charge, uncharged, nil)
+}
+
+func applyAttemptIdentityCostDelta(ctx context.Context, tx pgx.Tx, ev *Event, cost string, unpriced int64, charge string, uncharged int64, attemptID *string) ([]limits.CostSnapshot, error) {
 	snapshots, err := applyEndUserCostDelta(ctx, tx, ev, cost, unpriced, charge, uncharged)
 	if err != nil {
 		return nil, err
 	}
-	aggregates, err := limits.AddAggregateCostDelta(ctx, tx, ev.EventID, ev.APIKeyID, ev.ProviderID, ev.RouteSlug, ev.Attribution, ev.ObservedAt)
+	aggregates, err := aggregateCostDelta(ctx, tx, ev, attemptID)
 	if err != nil {
 		return nil, fmt.Errorf("apply aggregate cost delta: %w", err)
 	}
@@ -606,6 +633,13 @@ func applyIdentityCostDelta(ctx context.Context, tx pgx.Tx, ev *Event, cost stri
 		aggregates[i].RequestID = ev.RequestID
 	}
 	return append(snapshots, aggregates...), nil
+}
+
+func aggregateCostDelta(ctx context.Context, tx pgx.Tx, ev *Event, attemptID *string) ([]limits.CostSnapshot, error) {
+	if attemptID != nil {
+		return limits.AddAggregateAttemptCostDelta(ctx, tx, ev.EventID, ev.APIKeyID, ev.ProviderID, ev.RouteSlug, ev.Attribution, ev.ObservedAt, *attemptID)
+	}
+	return limits.AddAggregateCostDelta(ctx, tx, ev.EventID, ev.APIKeyID, ev.ProviderID, ev.RouteSlug, ev.Attribution, ev.ObservedAt)
 }
 
 func guardrailJSON(v any) string {

@@ -1,12 +1,21 @@
-import { defineConfig } from 'vitest/config';
-import base from './vite.config';
+import { fileURLToPath } from 'node:url';
+import { mergeConfig } from 'vite';
+import config from './vite.config.ts';
 
-const unit = (base.test?.projects ?? []).find(
-  (project) => typeof project === 'object' && project.test?.name === 'unit'
-);
-if (!unit) throw new Error('vite.config.ts declares no Vitest unit project');
+const goldenImport =
+  '../../../../../../../internal/access/testdata/authorization.golden.json';
 
-export default defineConfig({
-  ...base,
-  test: { ...base.test, projects: [unit] }
-});
+export default process.env.STRYKER_MUTATOR_WORKER === undefined
+  ? config
+  : mergeConfig(config, {
+      resolve: {
+        alias: {
+          [goldenImport]: fileURLToPath(
+            new URL(
+              '../../../internal/access/testdata/authorization.golden.json',
+              import.meta.url
+            )
+          )
+        }
+      }
+    });

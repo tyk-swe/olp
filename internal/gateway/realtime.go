@@ -1084,7 +1084,7 @@ loop:
 			first, clientClosed, clientDeliveryFailed = end.err, end.client, end.deliveryFailed
 			break loop
 		case <-reauth.C:
-			authority, err := s.Runtime.Authenticate(token)
+			authority, err := s.reauthenticateSession(ctx, x, token)
 			if err != nil || authority.ID != keyID || !authority.Allows("inference", x.route.Slug, x.route.ProjectID, s.now()) || !authority.AllowsEndUser(x.endUserDigest) || (authority.WorkloadIssuerID != nil && authority.EndUserDigest != x.endUserDigest) || !authority.AllowsAttribution(x.attribution) || !authority.AllowsClientIP(x.request.clientIP) {
 				first = errRealtimeAuthorityRevoked
 				closeCode = websocket.StatusPolicyViolation

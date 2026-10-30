@@ -74,15 +74,37 @@ func ParseForModel(family wire.Format, data []byte, model string) (*wire.Request
 }
 
 func parseEnvelope(family wire.Format, data []byte, model, expectedModel string) (*wire.Request, error) {
-	if trimmed := bytes.TrimSpace(data); len(trimmed) == 0 || trimmed[0] != '{' {
-		return nil, &wire.RequestError{Code: "invalid_json", Message: "The request body must be one JSON object."}
-	}
 	if family.Surface() == "openai" {
 		return openai.ParseForModel(family, data, expectedModel)
 	}
+	doc, err := ParseSource(family, data)
+	if err != nil {
+		return nil, err
+	}
+	return parseDocument(family, doc, model, expectedModel)
+}
+
+func ParseSource(family wire.Format, data []byte) (oif.Document, error) {
+	if family.Surface() == "openai" {
+		return openai.ParseSource(data)
+	}
+	if trimmed := bytes.TrimSpace(data); len(trimmed) == 0 || trimmed[0] != '{' {
+		return oif.Document{}, &wire.RequestError{Code: "invalid_json", Message: "The request body must be one JSON object."}
+	}
 	doc, err := oif.ParseJSON(data, oif.Limits{})
 	if err != nil {
-		return nil, &wire.RequestError{Code: "invalid_json", Message: "The request body must be unambiguous valid JSON."}
+		return oif.Document{}, &wire.RequestError{Code: "invalid_json", Message: "The request body must be unambiguous valid JSON."}
+	}
+	return doc, nil
+}
+
+func ParseDocument(family wire.Format, doc oif.Document, model string) (*wire.Request, error) {
+	return parseDocument(family, doc, model, "")
+}
+
+func parseDocument(family wire.Format, doc oif.Document, model, expectedModel string) (*wire.Request, error) {
+	if family.Surface() == "openai" {
+		return openai.ParseDocumentForModel(family, doc, expectedModel)
 	}
 	if family.Surface() == "native" {
 		return parseNativeGeneration(family, doc, model)

@@ -18,6 +18,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/egress"
+	"github.com/tyk-swe/olp/internal/evidence"
 	"github.com/tyk-swe/olp/internal/secrets"
 	"github.com/tyk-swe/olp/internal/usage"
 )
@@ -38,6 +39,8 @@ type Worker struct {
 type delivery struct {
 	id, sink, event, stream, destination, lease string
 	credential                                  *string
+	sourceID, projectID                         *string
+	creatorID                                   string
 	payload                                     json.RawMessage
 	created                                     time.Time
 	attempts                                    int
@@ -132,6 +135,17 @@ func (w *Worker) expire(ctx context.Context) error {
 	return tx.Commit(ctx)
 }
 
+func deliveryStatus(code string) string {
+	switch code {
+	case "":
+		return "delivered"
+	case "evidence_ineligible":
+		return "cancelled"
+	default:
+		return "pending"
+	}
+}
+
 func (w *Worker) settle(ctx context.Context, d *delivery, code string) error {
 	tx, err := w.Pool.Begin(ctx)
 	if err != nil {
@@ -141,16 +155,13 @@ func (w *Worker) settle(ctx context.Context, d *delivery, code string) error {
 	if _, err = tx.Exec(ctx, "SELECT id FROM olp.managed_export_sinks WHERE id=$1 FOR NO KEY UPDATE", d.sink); err != nil {
 		return err
 	}
-	status := "pending"
-	if code == "" {
-		status = "delivered"
-	}
+	status := deliveryStatus(code)
 	delay := time.Second * time.Duration(1<<min(d.attempts, 10))
-	result, err := tx.Exec(ctx, "UPDATE olp.managed_export_deliveries SET status=$3,lease=NULL,last_error_code=NULLIF($4,''),next_attempt_at=now()+$5::interval WHERE id=$1 AND lease=$2 AND status='pending'", d.id, d.lease, status, code, delay.String())
+	result, err := tx.Exec(ctx, "UPDATE olp.managed_export_deliveries SET status=$3,lease=NULL,last_error_code=NULLIF($4,''),next_attempt_at=now()+$5::interval,payload=CASE WHEN $3='cancelled' THEN '{}'::jsonb ELSE payload END WHERE id=$1 AND lease=$2 AND status='pending'", d.id, d.lease, status, code, delay.String())
 	if err == nil && result.RowsAffected() == 1 {
 		if code == "" {
 			_, err = tx.Exec(ctx, "UPDATE olp.managed_export_sinks SET delivered_total=delivered_total+1,last_delivered_at=now() WHERE id=$1", d.sink)
-		} else {
+		} else if status == "pending" {
 			_, err = tx.Exec(ctx, "UPDATE olp.managed_export_sinks SET failed_total=failed_total+1 WHERE id=$1", d.sink)
 		}
 	}
@@ -170,9 +181,9 @@ func (w *Worker) claim(ctx context.Context) (*delivery, error) {
 	defer tx.Rollback(ctx)
 	d := &delivery{lease: access.NewID()}
 	err = tx.QueryRow(ctx, `SELECT d.id::text,d.sink_id::text,d.event_id::text,d.stream,d.payload,d.created_at,d.attempts,
-	 s.destination,s.credential_id::text FROM olp.managed_export_deliveries d JOIN olp.managed_export_sinks s ON s.id=d.sink_id
+	 s.destination,s.credential_id::text,d.evidence_source_id::text,d.evidence_project_id::text,s.created_by::text FROM olp.managed_export_deliveries d JOIN olp.managed_export_sinks s ON s.id=d.sink_id
 	 WHERE d.status='pending' AND d.next_attempt_at<=now() AND d.expires_at>now() AND s.enabled AND s.retired_at IS NULL
-	 AND d.stream=ANY(s.streams) ORDER BY d.next_attempt_at,d.id LIMIT 1 FOR UPDATE OF d SKIP LOCKED`).Scan(&d.id, &d.sink, &d.event, &d.stream, &d.payload, &d.created, &d.attempts, &d.destination, &d.credential)
+	 AND d.stream=ANY(s.streams) ORDER BY d.next_attempt_at,d.id LIMIT 1 FOR UPDATE OF d SKIP LOCKED`).Scan(&d.id, &d.sink, &d.event, &d.stream, &d.payload, &d.created, &d.attempts, &d.destination, &d.credential, &d.sourceID, &d.projectID, &d.creatorID)
 	if err != nil {
 		return nil, err
 	}
@@ -223,6 +234,18 @@ func (w *Worker) send(ctx context.Context, d *delivery) string {
 		_, _ = sum.Write(body)
 		clear(secret)
 		req.Header.Set("X-OLP-Signature", "sha256="+hex.EncodeToString(sum.Sum(nil)))
+	}
+	if d.stream == string(evidence.Runs) || d.stream == string(evidence.TraceSpans) {
+		if d.sourceID == nil || d.projectID == nil {
+			return "evidence_ineligible"
+		}
+		eligible, err := evidence.Eligible(bounded, w.Pool, evidence.Stream(d.stream), *d.sourceID, *d.projectID, d.creatorID)
+		if err != nil {
+			return "evidence_unavailable"
+		}
+		if !eligible {
+			return "evidence_ineligible"
+		}
 	}
 	w.clientOnce.Do(func() { w.client = w.Egress.Client(deliveryTimeout) })
 	response, err := w.client.Do(req)

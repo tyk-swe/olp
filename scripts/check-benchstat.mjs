@@ -12,13 +12,6 @@ import { appendFileSync, readFileSync, writeFileSync } from 'node:fs';
 // whatever the change did, and a renamed or deleted benchmark is one whose
 // regression would go unseen. A removal that is meant is allowed with
 // --allow-removed.
-//
-// A single benchmark can show a significant change by chance, and the more
-// benchmarks the gate compares the likelier one does. With --flagged the first
-// comparison only nominates regressions, writing for each package the -bench
-// pattern that selects them; the caller measures those again with more samples
-// and passes that comparison as --confirm, and only a regression that shows in
-// both fails.
 const units = new Map([
   ['sec/op', { label: 'time/op', gated: true }],
   ['allocs/op', { label: 'allocs/op', gated: true }],
@@ -284,35 +277,41 @@ export function confirmRegressions(first, second) {
   const reproduced = new Map(
     second.regressions.map((finding) => [keyOf(finding), finding])
   );
-  const confirmed = [];
-  const unconfirmed = [];
-  for (const finding of first.regressions) {
+  const confirmed = first.regressions.flatMap((finding) => {
     const key = keyOf(finding);
-    if (reproduced.has(key)) confirmed.push(reproduced.get(key));
-    else if (!second.measured.has(key)) confirmed.push(finding);
-    else unconfirmed.push(finding);
-  }
-  return { ...first, regressions: confirmed, unconfirmed };
+    if (reproduced.has(key)) return [reproduced.get(key)];
+    return second.measured.has(key) ? [] : [finding];
+  });
+  const unconfirmed = first.regressions.filter(
+    (finding) => second.measured.has(keyOf(finding)) && !reproduced.has(keyOf(finding))
+  );
+  const unmeasured = first.regressions.filter(
+    (finding) => !second.measured.has(keyOf(finding))
+  );
+  return { ...first, regressions: confirmed, unconfirmed, unmeasured };
 }
 
-// The -bench regexp that selects the named benchmarks, as benchstat prints them
-// (without the Benchmark prefix and with the GOMAXPROCS suffix). go test splits
-// the pattern at slashes and matches each part against one level of the name,
-// so the parts are the alternatives of that level, which may select more than
-// was asked for and never less.
 export function benchPattern(names) {
-  const levels = [];
-  for (const full of names) {
-    full
-      .replace(/-\d+$/, '')
-      .split('/')
-      .forEach((part, depth) => {
-        (levels[depth] ??= new Set()).add(depth === 0 ? `Benchmark${part}` : part);
-      });
-  }
-  return levels
-    .map((alternatives) => `^(?:${[...alternatives].map(quoteRegexp).join('|')})$`)
-    .join('/');
+  const byDepth = Map.groupBy(
+    names,
+    (name) => name.replace(/-\d+$/, '').split('/').length
+  );
+  return [...byDepth]
+    .toSorted(([left], [right]) => left - right)
+    .map(([, group]) => {
+      const parts = group.map((name) => name.replace(/-\d+$/, '').split('/'));
+      return parts[0]
+        .map((_, depth) => {
+          const alternatives = new Set(
+            parts.map((name) =>
+              quoteRegexp(depth === 0 ? `Benchmark${name[depth]}` : name[depth])
+            )
+          );
+          return `^(?:${[...alternatives].join('|')})$`;
+        })
+        .join('/');
+    })
+    .join('|');
 }
 
 const quoteRegexp = (text) => text.replace(/[\\.+*?()|[\]{}^$]/g, '\\$&');
@@ -371,10 +370,19 @@ export function summarize(result, { pending = false } = {}) {
       'No benchmark ran on both sides, so there is nothing to compare.'
     );
   const reproduced = result.unconfirmed !== undefined;
+  const unmeasured = result.unmeasured ?? [];
+  const unmeasuredKeys = new Set(unmeasured.map(keyOf));
+  const measuredRegressions = regressions.filter(
+    (finding) => !unmeasuredKeys.has(keyOf(finding))
+  );
   lines.push(
     ...section(
       `Regressions above ${threshold}%${reproduced ? ' (reproduced when measured again)' : ''}`,
-      regressions
+      measuredRegressions
+    ),
+    ...section(
+      `Regressions above ${threshold}% not measured again (retained as failures)`,
+      unmeasured
     ),
     ...(reproduced
       ? section(
@@ -428,9 +436,6 @@ export function summarize(result, { pending = false } = {}) {
   return lines.join('\n');
 }
 
-// Judges the benchstat output of a comparison. With `confirm`, the output of a
-// second comparison of the benchmarks the first flagged, only a regression that
-// shows in both counts.
 export function checkBenchstat(text, options = {}) {
   const evaluated = (input) => {
     const tables = parseBenchstat(input);

@@ -9,33 +9,42 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math/big"
+	"net/url"
 	"regexp"
 	"slices"
 	"strings"
 
 	"github.com/google/uuid"
+	grantconfig "github.com/tyk-swe/olp/internal/grants/config"
 	"github.com/tyk-swe/olp/internal/prompts"
 )
 
 type Tool struct {
-	ServerID      string `json:"server_id"`
-	RevisionID    string `json:"revision_id"`
-	CatalogDigest string `json:"catalog_digest"`
-	Name          string `json:"name"`
-	Alias         string `json:"alias"`
+	Classification string `json:"classification,omitempty"`
+	ServerID       string `json:"server_id"`
+	RevisionID     string `json:"revision_id"`
+	CatalogDigest  string `json:"catalog_digest"`
+	Name           string `json:"name"`
+	Alias          string `json:"alias"`
 }
 type Toolset struct {
 	Tools []Tool `json:"tools"`
 }
 type Definition struct {
-	Protocol          string   `json:"protocol"`
-	Endpoint          string   `json:"endpoint"`
-	CardDigest        string   `json:"card_digest"`
-	CredentialID      *string  `json:"credential_id,omitempty"`
-	ToolsetRevisions  []string `json:"toolset_revisions"`
-	RouteRevisions    []string `json:"route_revisions"`
-	PricingRevisionID string   `json:"pricing_revision_id"`
-	MaxCost           string   `json:"max_cost"`
+	Protocol               string             `json:"protocol"`
+	Endpoint               string             `json:"endpoint"`
+	CardDigest             string             `json:"card_digest"`
+	OAuth                  *grantconfig.OAuth `json:"oauth,omitempty"`
+	CredentialID           *string            `json:"credential_id,omitempty"`
+	ToolsetRevisions       []string           `json:"toolset_revisions"`
+	RouteRevisions         []string           `json:"route_revisions"`
+	PricingRevisionID      string             `json:"pricing_revision_id"`
+	MaxCost                string             `json:"max_cost"`
+	MessagePrice           string             `json:"message_price,omitempty"`
+	RemoteWorkBoundSeconds *int               `json:"remote_work_bound_seconds,omitempty"`
+	MaxTaskContinuations   *int               `json:"max_task_continuations,omitempty"`
+	TaskDeadlineSeconds    *int               `json:"task_deadline_seconds,omitempty"`
 }
 type Draft struct {
 	ProjectID string              `json:"project_id,omitempty"`
@@ -90,6 +99,9 @@ func (d Draft) Validate(kind string) error {
 		}
 		seen := map[string]bool{}
 		for _, t := range d.Toolset.Tools {
+			if t.Classification != "" && t.Classification != "read_only" && t.Classification != "approval_required" {
+				return invalid("toolset", "Use a supported operator classification for each tool.")
+			}
 			if !validID(t.ServerID) || !validID(t.RevisionID) || !hexDigest.MatchString(t.CatalogDigest) || len(t.Name) == 0 || len(t.Name) > 256 || t.Alias != ToolAlias(t.ServerID, t.Name) || seen[t.Alias] {
 				return invalid("toolset", "Use unique aliases and exact certified server revisions.")
 			}
@@ -103,8 +115,29 @@ func (d Draft) Validate(kind string) error {
 		if !slices.Contains([]string{"a2a-0.3.0", "a2a-1.0.0"}, a.Protocol) || !hexDigest.MatchString(a.CardDigest) || !validID(a.PricingRevisionID) || !validCost(a.MaxCost) {
 			return invalid("agent", "Supply pinned protocol, card, pricing and a finite positive cost bound.")
 		}
+		if a.MessagePrice != "" && (!validAmount(a.MessagePrice) || !priceWithinBound(a.MessagePrice, a.MaxCost)) {
+			return invalid("message_price", "Supply a nonnegative price within the cost bound.")
+		}
+		if a.RemoteWorkBoundSeconds != nil && (*a.RemoteWorkBoundSeconds < 1 || *a.RemoteWorkBoundSeconds > 3600) {
+			return invalid("remote_work_bound_seconds", "Use a remote-work duration between one second and one hour.")
+		}
+		if a.MaxTaskContinuations != nil && (*a.MaxTaskContinuations < 1 || *a.MaxTaskContinuations > 128) {
+			return invalid("max_task_continuations", "Use between 1 and 128 task continuations.")
+		}
+		if a.TaskDeadlineSeconds != nil && (*a.TaskDeadlineSeconds < 1 || *a.TaskDeadlineSeconds > 3600) {
+			return invalid("task_deadline_seconds", "Use a task deadline between one second and one hour.")
+		}
 		if a.CredentialID != nil && !validID(*a.CredentialID) {
 			return invalid("credential_id", "Use an agent credential reference.")
+		}
+		if a.OAuth != nil && (!a.OAuth.Valid() || (a.OAuth.EntraOBO == nil && a.CredentialID != nil)) {
+			return invalid("oauth", "Use browser or device OAuth without a static credential, or supply an Entra client secret.")
+		}
+		if a.OAuth != nil && a.OAuth.EntraOBO != nil {
+			issuer, err := url.Parse(a.OAuth.EntraOBO.Issuer)
+			if err != nil || issuer.Host == "" || (issuer.Scheme != "https" && issuer.Scheme != "http") || issuer.User != nil || issuer.RawQuery != "" || issuer.Fragment != "" {
+				return invalid("oauth", "Supply the exact registered workload issuer URL.")
+			}
 		}
 		for _, ids := range [][]string{a.ToolsetRevisions, a.RouteRevisions} {
 			if len(ids) > 100 {
@@ -152,7 +185,15 @@ func validName(v string) error {
 	return nil
 }
 func validCost(v string) bool {
-	return regexp.MustCompile(`^[0-9]{1,12}(\.[0-9]{1,12})?$`).MatchString(v) && strings.Trim(v, "0.") != ""
+	return validAmount(v) && strings.Trim(v, "0.") != ""
+}
+func validAmount(v string) bool {
+	return regexp.MustCompile(`^[0-9]{1,12}(\.[0-9]{1,12})?$`).MatchString(v)
+}
+func priceWithinBound(price, bound string) bool {
+	p, priceOK := new(big.Rat).SetString(price)
+	b, boundOK := new(big.Rat).SetString(bound)
+	return priceOK && boundOK && p.Cmp(b) <= 0
 }
 
 type Revision struct {

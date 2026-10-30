@@ -145,6 +145,8 @@
     { value: 'guardrail_decisions', label: 'Guardrail decisions' },
     { value: 'audit', label: 'Audit' },
     { value: 'metering', label: 'Metering' },
+    { value: 'runs', label: 'Runs (gateway observed)' },
+    { value: 'trace_spans', label: 'Trace spans (client asserted)' },
     { value: 'focus', label: 'FOCUS' }
   ];
   const stripeMeterValues = [

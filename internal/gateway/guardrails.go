@@ -215,6 +215,10 @@ func (x *call) guardrailEvidence() []guardrails.Evidence {
 	return slices.Clone(x.guardrailDecisions)
 }
 func (x *call) inspectGuardrailInput(document oif.Document) (oif.Document, []guardrails.Segment, error) {
+	return x.inspectGuardrailInputWithRecovery(x.guardrailCtx, document, true)
+}
+
+func (x *call) inspectGuardrailInputWithRecovery(ctx context.Context, document oif.Document, recoverable bool) (oif.Document, []guardrails.Segment, error) {
 	// Effective provider defaults may enable an unsupported stream surface.
 	if err := x.guardrailStreamSurface(document); err != nil {
 		return document, nil, err
@@ -225,7 +229,14 @@ func (x *call) inspectGuardrailInput(document oif.Document) (oif.Document, []gua
 		x.recordGuardrails(result.Decisions)
 		return document, nil, e
 	}
-	evaluation := guardrails.Evaluation{RequestID: x.request.accountingID(), Route: x.route.Slug, Phase: guardrails.Input, Segments: surface.Segments, InternalModel: x.internalGuardrail}
+	evaluation := guardrails.Evaluation{RequestID: x.request.accountingID(), Route: x.route.Slug, Phase: guardrails.Input, Segments: surface.Segments, InternalModel: x.internalGuardrail, WorkflowRecovery: recoverable && x.workflow != nil}
+	evaluation.CompressionExemptIDs = slices.Collect(func(yield func(string) bool) {
+		for _, segment := range surface.Segments {
+			if segment.Kind == "tool_result" && slices.Contains(x.workflowRecoveryCalls, segment.ToolCallID) && !yield(segment.ID) {
+				return
+			}
+		}
+	})
 	if x.strict() && x.guardrailEngine.HasLegacyInput() {
 		texts := contentpolicy.InputTexts(document)
 		evaluation.LegacyInput = make([]guardrails.Segment, len(texts))
@@ -233,7 +244,10 @@ func (x *call) inspectGuardrailInput(document oif.Document) (oif.Document, []gua
 			evaluation.LegacyInput[i] = guardrails.Segment{ID: "legacy_" + strconv.Itoa(i), Text: text}
 		}
 	}
-	result, err := x.guardrailEngine.Evaluate(x.guardrailCtx, evaluation, x.guardrailMasks)
+	result, err := x.guardrailEngine.Evaluate(ctx, evaluation, x.guardrailMasks)
+	if recoverable && x.workflow != nil && len(result.Recovery) > 0 {
+		x.workflowRecovery = result.Recovery
+	}
 	x.recordGuardrails(result.Decisions)
 	err = x.legacyGuardrailError(result, err)
 	if err != nil {

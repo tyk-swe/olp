@@ -90,6 +90,8 @@ semantic versioning and take their source from root `package.json`;
 
 Code-mode diagnostics now represent paid API ownership separately. Paid attempts and pins have nullable subscription account and binding fields, and expose paid binding, provider and slot identifiers instead. Paid target configuration is explicit per native model, with current pricing, separate cost and charge, and durable uncertainty holds.
 
+- A2A 1.0 requests require `A2A-Version: 1.0` or the equivalent query
+  parameter. Requests without a version use the A2A 0.3 adapter.
 - Notification webhooks refuse redirects instead of following up to five,
   because 301/302/303 turned signed POSTs into bodyless GETs that were recorded
   as delivered; refused redirects record `redirect`. Email notifications send

@@ -168,6 +168,28 @@ func TestParseForModelPreservesExactNativeIdentity(t *testing.T) {
 	}
 }
 
+func TestParseForModelPreservesExactOpenAIIdentity(t *testing.T) {
+	model := "Native/" + strings.Repeat("Long", 50) + ":Version"
+	body := []byte(`{"model":"` + model + `","messages":[{"role":"user","content":"hello"}]}`)
+	request, err := ParseForModel(wire.Chat, body, model)
+	if err != nil || request.Route != model {
+		t.Fatalf("native model %v %v", request, err)
+	}
+	if _, err := ParseForModel(wire.Chat, body, strings.ToLower(model)); err == nil {
+		t.Fatal("case-insensitive native model accepted")
+	}
+	if _, err := Parse(wire.Chat, body, ""); err == nil {
+		t.Fatal("inference slug validation bypassed")
+	}
+	doc, err := ParseSource(wire.Chat, body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ParseDocument(wire.Chat, doc, ""); err == nil {
+		t.Fatal("document slug validation bypassed")
+	}
+}
+
 func TestMessagesReasoningControlsArePreservedOrRefusedAcrossTargets(t *testing.T) {
 	request, err := Parse(wire.Anthropic, []byte(`{"model":"team-model","messages":[{"role":"user","content":"Think carefully"}],"max_tokens":64,"thinking":{"type":"adaptive"},"output_config":{"effort":"high"}}`), "")
 	if err != nil {
