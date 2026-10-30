@@ -2319,15 +2319,7 @@ func TestClaudeSubscriptionPreservesNativeToolRoundTrip(t *testing.T) {
 func TestCodeAntigravityToolRoundTripAndAccounting(t *testing.T) {
 	for _, stream := range []bool{false, true} {
 		t.Run(fmt.Sprint(stream), func(t *testing.T) {
-			h, ledger, server := newCodeForwardHarness(t, codeForwardSetup{Models: []string{"gemini-fixture"}, Policy: access.KeyPolicy{Scopes: []string{"inference"}}})
-			route := h.rt.release.Snapshot.CodeRoutes["coding"]
-			route.ChatToAntigravity = true
-			h.rt.release.Snapshot.CodeRoutes["coding"] = route
-			h.rt.release.Snapshot.CodeConnections = map[string]routing.Configuration{"revision:provider": {Kind: connectors.KindPlugin, AuthMode: connectors.AuthGrant, ProfileID: "antigravity-subscription", Endpoint: h.upstream.URL + "/a"}}
-			h.gateway.CodeAuthorizer = codeAntigravityAuthorizer{}
-			if err := h.rt.release.Snapshot.Compile(); err != nil {
-				t.Fatal(err)
-			}
+			h, ledger, server := newCodeAntigravityHarness(t, true)
 			h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
 				var body struct {
 					Project string `json:"project"`
@@ -2401,6 +2393,40 @@ func TestCodeAntigravityToolRoundTripAndAccounting(t *testing.T) {
 	}
 }
 
+type codeCapacityLedger struct {
+	CodeLedger
+	occupied chan struct{}
+}
+
+func (l *codeCapacityLedger) Admit(ctx context.Context, input resources.CodeAdmission) (resources.CodePermit, error) {
+	select {
+	case l.occupied <- struct{}{}:
+		permit, err := l.CodeLedger.Admit(ctx, input)
+		if err != nil {
+			<-l.occupied
+		}
+		return permit, err
+	default:
+		return resources.CodePermit{}, codemode.Refuse(429, "code_capacity_exceeded")
+	}
+}
+
+func (l *codeCapacityLedger) Abort(ctx context.Context, id string) error {
+	if err := l.CodeLedger.Abort(ctx, id); err != nil {
+		return err
+	}
+	<-l.occupied
+	return nil
+}
+
+func (l *codeCapacityLedger) Settle(ctx context.Context, id string, usage codemode.Usage) error {
+	if err := l.CodeLedger.Settle(ctx, id, usage); err != nil {
+		return err
+	}
+	<-l.occupied
+	return nil
+}
+
 type codeAntigravityAuthorizer struct{}
 
 func (codeAntigravityAuthorizer) AuthorizeCode(context.Context, routing.Configuration, codemode.Account, codemode.Dispatch) (codemode.Authorization, error) {
@@ -2414,6 +2440,7 @@ func TestCodeAntigravityRefusesUnrepresentableInputBeforeDispatch(t *testing.T) 
 		`{"model":"gemini-fixture","messages":[{"role":"assistant","content":null,"tool_calls":[{"id":"call-read","type":"function","function":{"name":"read_file","arguments":"{}","thoughtSignature":"opaque"}}]}]}`,
 	} {
 		h, ledger, server := newCodeAntigravityHarness(t, true)
+		h.gateway.CodeLedger = &codeCapacityLedger{CodeLedger: ledger, occupied: make(chan struct{}, 1)}
 		h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
 			t.Error("unrepresentable input was dispatched")
 			w.WriteHeader(500)
@@ -2430,11 +2457,23 @@ func TestCodeAntigravityRefusesUnrepresentableInputBeforeDispatch(t *testing.T) 
 		if response.StatusCode != 422 || !bytes.Contains(result, []byte("code_translation_unsupported_semantics")) {
 			t.Fatalf("unsupported input accepted, status %d body %s", response.StatusCode, result)
 		}
-		ledger.mu.Lock()
-		if len(ledger.marks) != 0 || len(ledger.aborts) == 0 {
-			t.Error("refused input crossed the dispatch boundary or kept its reservation")
+		h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
+			_, _ = io.Copy(io.Discard, r.Body)
+			w.Header().Set("Content-Type", "application/json")
+			fmt.Fprint(w, `{"response":{"candidates":[{"index":0,"content":{"role":"model","parts":[{"text":"admitted after refusal"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":2,"candidatesTokenCount":1,"totalTokenCount":3}}}`)
+		})
+		followup, _ := http.NewRequestWithContext(t.Context(), http.MethodPost, server.URL+"/code/coding/v1/chat/completions", strings.NewReader(`{"model":"gemini-fixture","messages":[{"role":"user","content":"hello"}]}`))
+		followup.Header = request.Header.Clone()
+		accepted, err := server.Client().Do(followup)
+		if err != nil {
+			t.Fatal(err)
 		}
-		ledger.mu.Unlock()
+		defer accepted.Body.Close()
+		acceptedBody, _ := io.ReadAll(accepted.Body)
+		if accepted.StatusCode != 200 || !bytes.Contains(acceptedBody, []byte("admitted after refusal")) {
+			t.Fatalf("refused input kept capacity reserved, status %d body %s", accepted.StatusCode, acceptedBody)
+		}
+
 	}
 }
 
@@ -2484,7 +2523,7 @@ func newCodeAntigravityHarness(t *testing.T, enabled bool) (*harness, *codeTestL
 }
 
 func TestCodeAntigravityDisabledPolicyDoesNotDispatch(t *testing.T) {
-	h, ledger, server := newCodeAntigravityHarness(t, false)
+	h, _, server := newCodeAntigravityHarness(t, false)
 	h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
 		t.Error("disabled translation dispatched")
 		w.WriteHeader(500)
@@ -2499,11 +2538,6 @@ func TestCodeAntigravityDisabledPolicyDoesNotDispatch(t *testing.T) {
 	defer response.Body.Close()
 	if response.StatusCode < 400 {
 		t.Fatalf("disabled translation accepted status %d", response.StatusCode)
-	}
-	ledger.mu.Lock()
-	defer ledger.mu.Unlock()
-	if len(ledger.marks) != 0 {
-		t.Fatal("disabled target crossed dispatch boundary")
 	}
 }
 

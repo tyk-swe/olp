@@ -38,7 +38,7 @@ func (s *Snapshot) CodeAdapters(route codemode.Route) []codemode.Adapter {
 // connections whose adapter serves a client path over transport, ordered by ID.
 // The returned slice is shared and must not be modified.
 func (s *Snapshot) CodeProviders(route codemode.Route, path string, transport codeadapter.Transport) []string {
-	if route.MessagesToCodex || route.ChatToAntigravity {
+	if transport == codeadapter.HTTP && (route.MessagesToCodex && path == "v1/messages" || route.ChatToAntigravity && path == "v1/chat/completions") {
 		return s.codeProvidersWithTranslation(route, path, transport)
 	}
 	return s.codeRevisions[route.RevisionID].providers[codeCapability{path, transport}]

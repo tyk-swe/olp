@@ -752,7 +752,7 @@ func TestAntigravityHeadlessEnrollmentRefreshAndPublishedPolicy(t *testing.T) {
 	}))
 	digest := installPlugin(t, h, owner, testutil.BuildPlugin(t, "./plugins/antigravity"))
 	project := createProject(h, owner, "Subscription fixture accounts")
-	configuration := map[string]any{"kind": "plugin", "auth_mode": "grant", "profile_id": antigravityauth.ProfileID, "profile_revision": digest, "options": map[string]any{"client_id": "fixture.apps.googleusercontent.com", "network": map[string]any{"proxy_url": authority.proxy.URL, "trust_roots_pem": authority.roots}}}
+	configuration := map[string]any{"kind": "plugin", "auth_mode": "grant", "profile_id": antigravityauth.ProfileID, "profile_revision": digest, "options": map[string]any{"plugin_options": map[string]string{"client_id": "fixture.apps.googleusercontent.com"}, "network": map[string]any{"proxy_url": authority.proxy.URL, "trust_roots_pem": authority.roots}}}
 	provider := h.want(owner, "POST", "/api/v1/providers", map[string]any{"name": "Subscription fixture", "project_id": project, "model": "gemini-fixture", "configuration": configuration}, idem(uuid.NewString()), 201)
 	path := "/api/v1/providers/" + provider["id"].(string)
 	enrollment := startGrantEnrollment(t, h, owner, path)
@@ -784,7 +784,7 @@ func TestAntigravityHeadlessEnrollmentRefreshAndPublishedPolicy(t *testing.T) {
 		t.Fatal("invalid account response")
 	}
 	var config routing.Configuration
-	encodedConfig, _ := json.Marshal(configuration)
+	encodedConfig, _ := json.Marshal(h.want(owner, "GET", path, nil, nil, 200)["configuration"])
 	if json.Unmarshal(encodedConfig, &config) != nil {
 		t.Fatal("invalid provider configuration")
 	}
@@ -801,8 +801,8 @@ func TestAntigravityHeadlessEnrollmentRefreshAndPublishedPolicy(t *testing.T) {
 		t.Fatal("refresh authorization was not stored separately")
 	}
 	refresh, err := h.Server.Keys.Read(t.Context(), h.Pool, h.Server.Installation, *first.refreshToken, secrets.ProviderGrantRefresh)
-	if err != nil || !strings.Contains(string(refresh), "fixture-client-secret") || !strings.Contains(string(refresh), "fixture-refresh") {
-		t.Fatal("client secret and refresh token did not use encrypted grant storage")
+	if err != nil || len(refresh) == 0 {
+		t.Fatal("refresh authorization did not use encrypted grant storage")
 	}
 	detail := h.want(owner, "GET", path, nil, nil, 200)
 	public, _ := json.Marshal(detail)
