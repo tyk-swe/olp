@@ -2,6 +2,7 @@ package resources
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"slices"
 	"testing"
@@ -11,16 +12,45 @@ import (
 	"github.com/tyk-swe/olp/internal/codeadapter"
 	"github.com/tyk-swe/olp/internal/codeclient"
 	"github.com/tyk-swe/olp/internal/codemode"
+	"github.com/tyk-swe/olp/internal/connectors"
+	"github.com/tyk-swe/olp/internal/routing"
 )
 
 type codeOffersQuery struct {
 	access.Queryer
 	rows pgx.Rows
+	row  pgx.Row
 	err  error
 }
 
 func (q codeOffersQuery) Query(context.Context, string, ...any) (pgx.Rows, error) {
 	return q.rows, q.err
+}
+
+func (q codeOffersQuery) QueryRow(context.Context, string, ...any) pgx.Row {
+	return q.row
+}
+
+type codeOfferTargetRow struct {
+	pgx.Row
+	restrictions  []byte
+	configuration []byte
+	limits        []byte
+	err           error
+}
+
+func (r codeOfferTargetRow) Scan(dest ...any) error {
+	if r.err != nil {
+		return r.err
+	}
+	for index, value := range [][]byte{r.restrictions, r.configuration, r.limits} {
+		destination, ok := dest[index].(*[]byte)
+		if !ok {
+			return errors.New("paid offer target destination has incompatible type")
+		}
+		*destination = value
+	}
+	return nil
 }
 
 type codeOfferRow struct {
@@ -111,5 +141,61 @@ func TestCodeOffersInvalidPaidPublicationFailsClosed(t *testing.T) {
 	source := codeOffersQuery{rows: &codeOfferRows{data: []codeOfferRow{{publication: []byte("{")}}}}
 	if _, err := CodeOffers(t.Context(), source, "published-revision"); err == nil {
 		t.Fatal("invalid paid publication was treated as an empty catalog")
+	}
+}
+
+func TestCodeOffersPreservesModelPoolDiscoveryWhenPaidAuthorityChanges(t *testing.T) {
+	for _, test := range []struct {
+		name             string
+		publishedKeys    []string
+		liveRestrictions routing.Slot
+		liveLimits       routing.Slot
+		sourceErr        error
+		available        bool
+	}{
+		{name: "eligible paid target", available: true},
+		{name: "published key restriction", publishedKeys: []string{"another-key"}},
+		{name: "live key restriction", liveRestrictions: routing.Slot{AllowedAPIKeys: []string{"another-key"}}},
+		{name: "live model restriction", liveRestrictions: routing.Slot{AllowedModels: []string{"another-model"}}},
+		{name: "live route restriction", liveRestrictions: routing.Slot{AllowedRoutes: []string{"another-route"}}},
+		{name: "live slot quota changed", liveLimits: routing.Slot{TokensPerMinute: new(int64(10))}},
+		{name: "credential unavailable", sourceErr: pgx.ErrNoRows},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			models := []string{"native-main", "native-alternate", "paid-model"}
+			route := codemode.Route{Slug: "coding", Enabled: true, RevisionID: "published-revision", Models: models,
+				ModelRewriting: true, Aliases: map[string]string{"team-code": models[0]}, ModelPools: map[string][]string{"team-code": models[:2]},
+				PaidParticipation: true, PaidTargets: map[string]codemode.PaidTarget{models[2]: {ProviderID: "paid-provider", SlotID: "paid-slot"}}}
+			provider := routing.Provider{ID: "paid-provider", Kind: "openai_compatible", ProfileID: "compatible-chat", ProfileRevision: connectors.ProfileRevision, Capabilities: []routing.Capability{{Model: models[2], Operation: "generation", Surface: "openai", Mode: "unary"}},
+				Slots: []routing.Slot{{ID: "paid-slot", Enabled: true, CredentialID: new("paid-credential"), CredentialVersion: new(1), AllowedAPIKeys: test.publishedKeys}}}
+			publication, publicationErr := json.Marshal(struct {
+				Route       codemode.Route              `json:"route"`
+				Connections map[string]routing.Provider `json:"connections"`
+			}{Route: route, Connections: map[string]routing.Provider{provider.ID: provider}})
+			restrictions, restrictionsErr := json.Marshal(test.liveRestrictions)
+			limits, limitsErr := json.Marshal(test.liveLimits)
+			if err := errors.Join(publicationErr, restrictionsErr, limitsErr); err != nil {
+				t.Fatal(err)
+			}
+			source := codeOffersQuery{rows: &codeOfferRows{data: []codeOfferRow{{publication: publication, adapter: new(string(codemode.AdapterCodex)), models: models[:2]}}},
+				row: codeOfferTargetRow{restrictions: restrictions, configuration: []byte(`{}`), limits: limits, err: test.sourceErr}}
+			offers, err := CodeOffers(t.Context(), source, route.RevisionID, "caller-key")
+			if err != nil {
+				t.Fatal(err)
+			}
+			catalog := codeclient.Catalog(route, offers)
+			paid := slices.IndexFunc(catalog, func(model codemode.Model) bool { return model.ID == models[2] && model.Paid })
+			if (paid >= 0) != test.available {
+				t.Fatalf("paid catalog ignored current target authority %+v", catalog)
+			}
+			public := slices.IndexFunc(catalog, func(model codemode.Model) bool { return model.ID == "team-code" })
+			if public < 0 || !slices.Equal(catalog[public].ModelPool, route.ModelPools[catalog[public].ID]) {
+				t.Fatalf("paid authority change removed subscription pool discovery %+v", catalog)
+			}
+			configuration, configurationErr := codeclient.Generate(route, offers, codeclient.Request{GatewayURL: "https://gateway.example", Client: codeadapter.ClientCodex, Model: catalog[public].ID})
+			if configurationErr != nil || configuration.Model != catalog[public].ID {
+				t.Fatalf("paid authority change affected subscription setup %+v, %v", configuration, configurationErr)
+			}
+		})
 	}
 }
