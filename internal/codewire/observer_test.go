@@ -3,6 +3,7 @@ package codewire
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"testing"
 
@@ -127,15 +128,53 @@ func TestGenericClientRejectsAmbiguousIdentity(t *testing.T) {
 	}
 }
 
+func TestGenericProtocolsKeepRequestsIndependentUnlessAffinityIsExplicit(t *testing.T) {
+	for _, test := range []struct {
+		protocol codemode.Protocol
+		classify func([]byte, http.Header) (codemode.Request, error)
+		body     string
+	}{
+		{codemode.ProtocolMessages, ClassifyMessages, `{"model":"native-model","max_tokens":7,"messages":[{"role":"user","content":[{"type":"text","text":"Inspect this image"},{"type":"image","source":{"type":"base64","media_type":"image/png","data":"aW1hZ2U="}}]},{"role":"assistant","content":[{"type":"tool_use","id":"call-local","name":"inspect","input":{"signature":"application-data"}}]},{"role":"user","content":[{"type":"tool_result","tool_use_id":"call-local","content":[{"type":"text","text":"Complete"}]}]}],"tools":[{"name":"inspect","input_schema":{"type":"object"}}],"client_metadata":{"thread_id":"application-thread"},"input":{"type":"native-extension"}}`},
+		{codemode.ProtocolChat, ClassifyChat, `{"model":"native-model","max_completion_tokens":7,"messages":[{"role":"user","content":"Inspect this function"},{"role":"assistant","tool_calls":[{"id":"call-local","type":"function","function":{"name":"inspect","arguments":"{\"signature\":\"application-data\"}"}}]},{"role":"tool","tool_call_id":"call-local","content":"Complete"}],"tools":[{"type":"function","function":{"name":"inspect","parameters":{"type":"object"}}}],"client_metadata":{"thread_id":"application-thread"},"input":{"type":"native-extension"}}`},
+	} {
+		t.Run(string(test.protocol), func(t *testing.T) {
+			first, firstErr := test.classify([]byte(test.body), nil)
+			second, secondErr := test.classify([]byte(test.body), nil)
+			if firstErr != nil || secondErr != nil || !first.Operation.Identity.Generic() || !second.Operation.Identity.Generic() || first.Operation.Identity.Conversation == second.Operation.Identity.Conversation {
+				t.Fatalf("independent generic requests shared identity or refused, first %+v error %v, second %+v error %v", first, firstErr, second, secondErr)
+			}
+			affinity := http.Header{"X-Olp-Code-Affinity": {"native-conversation"}}
+			bound, boundErr := test.classify([]byte(test.body), affinity)
+			continued, continuedErr := test.classify([]byte(test.body), affinity)
+			other, otherErr := test.classify([]byte(test.body), http.Header{"X-Olp-Code-Affinity": {"another-conversation"}})
+			if boundErr != nil || continuedErr != nil || otherErr != nil || !bound.Operation.Identity.Generic() || bound.Operation.Identity != continued.Operation.Identity || bound.Operation.Identity.Conversation == other.Operation.Identity.Conversation || bound.Operation.Identity.Conversation == first.Operation.Identity.Conversation {
+				t.Fatalf("explicit affinity lost conversation scope, bound %+v error %v, continued %+v error %v, other %+v error %v", bound, boundErr, continued, continuedErr, other, otherErr)
+			}
+			if bound.Operation.Identity.Parent != "" || bound.Operation.Model != "native-model" || bound.Operation.Name != string(test.protocol) || bound.Estimate < 7 {
+				t.Fatalf("generic classification changed native model, lineage or rate estimate %+v", bound)
+			}
+		})
+	}
+}
+
 func TestGenericMessagesRejectsOpaqueState(t *testing.T) {
 	for _, body := range []string{
 		`{"model":"native-model","messages":[{"role":"assistant","content":[{"type":"thinking","thinking":"secret","signature":"opaque"}]}]}`,
 		`{"model":"native-model","messages":[{"role":"assistant","content":[{"type":"redacted_thinking","data":"opaque"}]}]}`,
 		`{"model":"native-model","messages":[{"role":"user","content":[{"type":"document","source":{"type":"file","file_id":"unowned"}}]}]}`,
 		`{"model":"native-model","messages":[],"context_management":{"edits":[{"type":"clear_tool_uses"}]}}`,
+		`{"model":"native-model","messages":[],"previous_response_id":"unowned-response"}`,
+		`{"model":"native-model","messages":[],"conversation":"unowned-conversation"}`,
+		`{"model":"native-model","messages":[],"container":"unowned-container"}`,
+		`{"model":"native-model","messages":[],"tools":[{"type":"web_search"}]}`,
+		`{"model":"native-model","messages":[{"role":"user","content":[{"type":"tool_result","tool_use_id":"call-local","content":[{"type":"document","source":{"type":"file","file_id":"unowned"}}]}]}]}`,
 	} {
-		if _, err := ClassifyMessages([]byte(body), http.Header{"X-Olp-Code-Affinity": {"conversation"}}); err == nil {
-			t.Fatalf("opaque state accepted %s", body)
+		for _, headers := range []http.Header{nil, {"X-Olp-Code-Affinity": {"conversation"}}} {
+			_, err := ClassifyMessages([]byte(body), headers)
+			var refusal *codemode.Refusal
+			if !errors.As(err, &refusal) || refusal.Status != http.StatusConflict || refusal.Code != "code_parent_unresolved" {
+				t.Fatalf("opaque state did not refuse as unresolved, headers %+v body %s error %v", headers, body, err)
+			}
 		}
 	}
 }
