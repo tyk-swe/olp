@@ -7441,10 +7441,13 @@ type CodeAttempt struct {
 	ReasoningTokens   nullable.Nullable[int64]                    `json:"reasoning_tokens"`
 	Refusal           nullable.Nullable[string]                   `json:"refusal"`
 	ReportedTokens    nullable.Nullable[int64]                    `json:"reported_tokens"`
-	ReservedTokens    int64                                       `json:"reserved_tokens"`
-	RouteId           openapi_types.UUID                          `json:"route_id"`
-	RouteRevisionId   openapi_types.UUID                          `json:"route_revision_id"`
-	State             CodeAttemptState                            `json:"state"`
+
+	// RequestedModel Public model identifier requested by the client. Null for historical attempts where the identifier was not recorded. model identifies the selected exact target.
+	RequestedModel  nullable.Nullable[string] `json:"requested_model,omitempty"`
+	ReservedTokens  int64                     `json:"reserved_tokens"`
+	RouteId         openapi_types.UUID        `json:"route_id"`
+	RouteRevisionId openapi_types.UUID        `json:"route_revision_id"`
+	State           CodeAttemptState          `json:"state"`
 
 	// UpstreamStatus Observed upstream HTTP or WebSocket error status; null when not observed.
 	UpstreamStatus nullable.Nullable[int] `json:"upstream_status"`
@@ -7608,7 +7611,10 @@ type CodeModel struct {
 	Capabilities []CodeModelCapability `json:"capabilities"`
 	Clients      []CodeModelClients    `json:"clients"`
 	Id           string                `json:"id"`
-	Object       CodeModelObject       `json:"object"`
+
+	// ModelPool Configured ordered subscription recovery targets for this public model. This is policy metadata, not an availability or portability guarantee. Omitted for exact-model selection.
+	ModelPool *[]string       `json:"model_pool,omitempty"`
+	Object    CodeModelObject `json:"object"`
 }
 
 // CodeModelClients defines model for CodeModel.Clients.
@@ -7734,7 +7740,7 @@ type CodeRoute struct {
 	Etag    openapi_types.UUID `json:"etag"`
 	Id      openapi_types.UUID `json:"id"`
 
-	// InitialRecoveryAttempts Maximum additional attempts per request for a new or established single-pin root conversation after an adapter proves nonexecution and the complete input is portable. Zero disables recovery. Published revisions pin this policy. Existing children, socket ownership and unresolved attempts prevent migration. Exact models and live authority remain required. Producing-account reference ownership is preserved. Accepted, partial, ambiguous and opaque work never replays.
+	// InitialRecoveryAttempts Maximum additional attempts per request for a new or established single-pin root conversation after an adapter proves nonexecution and the complete input is portable. Zero disables recovery. Published revisions pin this policy. Existing children, socket ownership and unresolved attempts prevent migration. Exact models remain the default. Only explicit model_pools authorize model changes. Live authority remains required. Producing-account reference ownership is preserved. Accepted, partial, ambiguous and opaque work never replays.
 	InitialRecoveryAttempts *int `json:"initial_recovery_attempts,omitempty"`
 
 	// MaxBodyBytes Optional ingress limit in bytes. Null inherits installation limits; a route can only lower them. Checks both encoded and decoded JSON, the complete multipart body, and individual client WebSocket messages. Published revisions pin this policy.
@@ -7743,7 +7749,10 @@ type CodeRoute struct {
 	// MessagesToCodex Explicitly allow Messages text and tool requests to use Codex subscription accounts through protocol translation. Published revisions pin this policy. Native forwarding remains the default. Client identity and prompts are preserved. Model rewriting requires its separate opt-in. Explicit low, medium and high reasoning effort is supported. Signed thinking, numeric reasoning budgets, beta features and unsupported required semantics are refused before dispatch.
 	MessagesToCodex *bool `json:"messages_to_codex,omitempty"`
 
-	// ModelRewriting Explicitly enable exact model aliases independently of protocol translation and identity compatibility. Native identifiers remain unchanged. Only protocol model fields are rewritten for alias requests and responses.
+	// ModelPools Explicit subscription model recovery pools keyed by a published native name or exact alias. Requires model_rewriting. Each ordered list starts with that name's normal exact target and contains distinct native identifiers from models. Recovery prefers the pinned exact target, then these alternatives, within initial_recovery_attempts and positive nonexecution, portability, live authorization and budget checks. Omitted pools preserve exact selection. Publications freeze the policy. Existing conversations retain their exact target, including after alias changes, while it remains published and authorized. Paid fallback is separately governed.
+	ModelPools *map[string][]string `json:"model_pools,omitempty"`
+
+	// ModelRewriting Explicitly enable model identifier rewriting through exact aliases or configured model_pools. Disabled by default. This policy does not rewrite client identity or prompts.
 	ModelRewriting *bool                        `json:"model_rewriting,omitempty"`
 	Models         []string                     `json:"models"`
 	PoolId         openapi_types.UUID           `json:"pool_id"`
@@ -7772,7 +7781,7 @@ type CodeRouteWrite struct {
 	Aliases *map[string]string `json:"aliases,omitempty"`
 	Enabled bool               `json:"enabled"`
 
-	// InitialRecoveryAttempts Maximum additional attempts per request for a new or established single-pin root conversation after an adapter proves nonexecution and the complete input is portable. Zero disables recovery. Published revisions pin this policy. Existing children, socket ownership and unresolved attempts prevent migration. Exact models and live authority remain required. Producing-account reference ownership is preserved. Accepted, partial, ambiguous and opaque work never replays.
+	// InitialRecoveryAttempts Maximum additional attempts per request for a new or established single-pin root conversation after an adapter proves nonexecution and the complete input is portable. Zero disables recovery. Published revisions pin this policy. Existing children, socket ownership and unresolved attempts prevent migration. Exact models remain the default. Only explicit model_pools authorize model changes. Live authority remains required. Producing-account reference ownership is preserved. Accepted, partial, ambiguous and opaque work never replays.
 	InitialRecoveryAttempts *int `json:"initial_recovery_attempts,omitempty"`
 
 	// MaxBodyBytes Optional ingress limit in bytes. Null inherits installation limits; a route can only lower them. Checks both encoded and decoded JSON, the complete multipart body, and individual client WebSocket messages. Published revisions pin this policy.
@@ -7781,7 +7790,10 @@ type CodeRouteWrite struct {
 	// MessagesToCodex Explicitly allow Messages text and tool requests to use Codex subscription accounts through protocol translation. Published revisions pin this policy. Native forwarding remains the default. Client identity and prompts are preserved. Model rewriting requires its separate opt-in. Explicit low, medium and high reasoning effort is supported. Signed thinking, numeric reasoning budgets, beta features and unsupported required semantics are refused before dispatch.
 	MessagesToCodex *bool `json:"messages_to_codex,omitempty"`
 
-	// ModelRewriting Explicitly enable exact model aliases independently of protocol translation and identity compatibility. Native identifiers remain unchanged. Only protocol model fields are rewritten for alias requests and responses.
+	// ModelPools Explicit subscription model recovery pools keyed by a published native name or exact alias. Requires model_rewriting. Each ordered list starts with that name's normal exact target and contains distinct native identifiers from models. Recovery prefers the pinned exact target, then these alternatives, within initial_recovery_attempts and positive nonexecution, portability, live authorization and budget checks. Omitted pools preserve exact selection. Publications freeze the policy. Existing conversations retain their exact target, including after alias changes, while it remains published and authorized. Paid fallback is separately governed.
+	ModelPools *map[string][]string `json:"model_pools,omitempty"`
+
+	// ModelRewriting Explicitly enable model identifier rewriting through exact aliases or configured model_pools. Disabled by default. This policy does not rewrite client identity or prompts.
 	ModelRewriting *bool              `json:"model_rewriting,omitempty"`
 	Models         []string           `json:"models"`
 	PoolId         openapi_types.UUID `json:"pool_id"`

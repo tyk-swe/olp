@@ -25,7 +25,7 @@ func Catalog(route codemode.Route, offers Offers) []codemode.Model {
 				continue
 			}
 			capabilities := modelCapabilities(route, resolved.Model, declarations)
-			if len(capabilities) > 0 && !yield(codemode.Model{ID: id, Object: "model", Capabilities: capabilities, Clients: modelClients(route, resolved.Model, declarations)}) {
+			if len(capabilities) > 0 && !yield(codemode.Model{ModelPool: slices.Clone(route.ModelPools[id]), ID: id, Object: "model", Capabilities: capabilities, Clients: modelClients(route, resolved.Model, declarations)}) {
 				return
 			}
 		}

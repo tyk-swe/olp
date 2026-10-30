@@ -54,6 +54,7 @@ type codeTestLedger struct {
 	offers         codeclient.Offers
 	modelsErr      error
 	pinTarget      string
+	recoveryTarget string
 }
 
 func (l *codeTestLedger) Models(context.Context, codemode.Route, string) (codeclient.Offers, error) {
@@ -80,11 +81,28 @@ func (l *codeTestLedger) Admit(_ context.Context, in resources.CodeAdmission) (r
 	if l.refuse != "" {
 		return resources.CodePermit{}, codemode.Refuse(409, l.refuse)
 	}
-	permit, err := codeTestPermit(in.APIKeyID, in.Providers)
+	target := func() string {
+		if in.Recovery != nil && l.recoveryTarget != "" {
+			return l.recoveryTarget
+		}
+		return l.pinTarget
+	}()
+	providers := func() []string {
+		if target != "" && target != in.Operation.Model {
+			if in.ModelProviders != nil {
+				return in.ModelProviders[target]
+			}
+			if in.ModelSource != nil {
+				return in.ModelSource.CodeModelProviders(in.Route, in.ModelPath, target, in.ModelTransport)
+			}
+		}
+		return in.Providers
+	}()
+	permit, err := codeTestPermit(in.APIKeyID, providers)
 	permit.Authority.EndUserDigest = in.EndUserDigest
 	permit.InitialRecovery = in.InitialRecovery && in.Operation.Identity.Parent == "" && in.PreviousResponse == ""
 	permit.Attempt = codemode.Attempt{ID: fmt.Sprint(len(l.inputs))}
-	permit.Pin.TargetModel = l.pinTarget
+	permit.Pin.TargetModel = target
 	return permit, err
 }
 
@@ -1746,4 +1764,77 @@ type codeWriteDeadlineWriter struct{ socketDeadlineWriter }
 
 func (writer codeWriteDeadlineWriter) SetReadDeadline(deadline time.Time) error {
 	return http.NewResponseController(writer.ResponseWriter).SetReadDeadline(deadline)
+}
+
+func TestCodeModelPoolRecoveryPreservesNativeRequestedName(t *testing.T) {
+	h, ledger, server := newCodeForwardHarness(t, codeForwardSetup{Models: []string{"gpt-fixture-main", "gpt-fixture-alternate"}, InitialRecoveryAttempts: 1, Policy: access.KeyPolicy{Scopes: []string{"inference"}}})
+	route := h.rt.release.Snapshot.CodeRoutes["coding"]
+	route.ModelRewriting = true
+	route.ModelPools = map[string][]string{"gpt-fixture-main": {"gpt-fixture-main", "gpt-fixture-alternate"}}
+	h.rt.release.Snapshot.CodeRoutes[route.Slug] = route
+	ledger.pinTarget, ledger.recoveryTarget = "gpt-fixture-main", "gpt-fixture-alternate"
+	h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
+		var request struct{ Model, Input string }
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil || request.Input != "hello" {
+			t.Errorf("model recovery changed prompt %+v, %v", request, err)
+		}
+		if request.Model == "gpt-fixture-main" {
+			w.WriteHeader(http.StatusTooManyRequests)
+			io.WriteString(w, `{"error":{"type":"usage_limit_reached"}}`)
+			return
+		}
+		if request.Model != "gpt-fixture-alternate" {
+			t.Errorf("unexpected selected native model %q", request.Model)
+		}
+		io.WriteString(w, `{"id":"recovered","model":"gpt-fixture-alternate","usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}`)
+	})
+	response := codeDo(t, server, []byte(`{"model":"gpt-fixture-main","input":"hello"}`), nil)
+	defer response.Body.Close()
+	var completion struct{ ID, Model string }
+	if err := json.NewDecoder(response.Body).Decode(&completion); err != nil || response.StatusCode != http.StatusOK || completion.ID != "recovered" || completion.Model != "gpt-fixture-main" {
+		t.Fatalf("model recovery lost public name status=%d completion=%+v, %v", response.StatusCode, completion, err)
+	}
+	ledger.wait(t)
+	ledger.wait(t)
+}
+
+func TestCodeModelPoolRemovalKeepsRecoveredNativePinAndProvider(t *testing.T) {
+	h, ledger, server := newCodeForwardHarness(t, codeForwardSetup{Models: []string{"minimax-fixture-main", "gpt-fixture-selected"}, Policy: access.KeyPolicy{Scopes: []string{"inference"}}})
+	route := h.rt.release.Snapshot.CodeRoutes["coding"]
+	route.ModelRewriting, route.MessagesToCodex = true, true
+	route.ModelPools = map[string][]string{"minimax-fixture-main": {"minimax-fixture-main", "gpt-fixture-selected"}}
+	h.rt.release.Snapshot.CodeRoutes[route.Slug] = route
+	h.rt.release.Snapshot.CodeConnections["revision:other"] = routing.Configuration{Kind: connectors.KindPlugin, AuthMode: connectors.AuthGrant, ProfileID: codeplans.OpenCodeGoProfile, Endpoint: h.upstream.URL + "/b"}
+	if err := h.rt.release.Snapshot.Compile(); err != nil {
+		t.Fatal(err)
+	}
+	ledger.pinTarget = "gpt-fixture-selected"
+	h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
+		var request struct{ Model string }
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil || request.Model != ledger.pinTarget {
+			t.Errorf("continuation changed selected target %+v, %v", request, err)
+		}
+		io.WriteString(w, `{"id":"selected","model":"gpt-fixture-selected","status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"answer"}]}],"usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}`)
+	})
+	for _, pools := range []map[string][]string{route.ModelPools, nil} {
+		route.ModelPools = pools
+		h.rt.release.Snapshot.CodeRoutes[route.Slug] = route
+		request, err := http.NewRequestWithContext(t.Context(), http.MethodPost, server.URL+route.BasePath()+"/v1/messages", strings.NewReader(`{"model":"minimax-fixture-main","messages":[{"role":"user","content":"hello"}],"max_tokens":8}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		request.Header.Set("Authorization", "Bearer "+fullKey)
+		request.Header.Set("X-Claude-Code-Session-Id", "recovered-native")
+		response, err := server.Client().Do(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var completion struct{ ID, Model string }
+		decodeErr := json.NewDecoder(response.Body).Decode(&completion)
+		response.Body.Close()
+		if decodeErr != nil || response.StatusCode != http.StatusOK || completion.ID != "selected" || completion.Model != "minimax-fixture-main" {
+			t.Fatalf("pool removal changed recovered provider or public name pools=%v status=%d completion=%+v, %v", pools, response.StatusCode, completion, decodeErr)
+		}
+		ledger.wait(t)
+	}
 }

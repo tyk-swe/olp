@@ -75,6 +75,9 @@ type CodeAdmission struct {
 	EndUserDigest    string
 	Operation        codemode.Operation
 	ModelProviders   map[string][]string
+	ModelSource      *routing.Snapshot
+	ModelPath        string
+	ModelTransport   codeadapter.Transport
 	Providers        []string
 	Bound            *codemode.TokenBound
 	PreviousResponse string
@@ -172,9 +175,12 @@ func (in CodeAdmission) withOperation(operation codemode.Operation) CodeAdmissio
 		if in.ModelProviders != nil {
 			return in.ModelProviders[operation.Model]
 		}
+		if in.ModelSource != nil && operation.Model != in.Operation.Model {
+			return in.ModelSource.CodeModelProviders(in.Route, in.ModelPath, operation.Model, in.ModelTransport)
+		}
 		return in.Providers
 	}()
-	return CodeAdmission{ModelProviders: in.ModelProviders, InitialRecovery: in.InitialRecovery, Recovery: in.Recovery, Attribution: in.Attribution, Route: in.Route, APIKeyID: in.APIKeyID, EndUserDigest: in.EndUserDigest, Operation: operation, Providers: providers, Bound: in.Bound, PreviousResponse: in.PreviousResponse}
+	return CodeAdmission{ModelProviders: in.ModelProviders, ModelSource: in.ModelSource, ModelPath: in.ModelPath, ModelTransport: in.ModelTransport, InitialRecovery: in.InitialRecovery, Recovery: in.Recovery, Attribution: in.Attribution, Route: in.Route, APIKeyID: in.APIKeyID, EndUserDigest: in.EndUserDigest, Operation: operation, Providers: providers, Bound: in.Bound, PreviousResponse: in.PreviousResponse}
 }
 
 func (s *CodeStore) admit(ctx context.Context, admission CodeAdmission, connection bool) (CodePermit, error) {
@@ -271,7 +277,7 @@ func (s *CodeStore) admit(ctx context.Context, admission CodeAdmission, connecti
 		return out, tx.Commit(ctx)
 	}
 	out.InitialRecovery = in.InitialRecovery && out.Binding.ParentID == nil && in.Operation.Identity.Parent == "" && in.PreviousResponse == "" && in.Route.InitialRecoveryAttempts > 0
-	out.Attempt = codemode.Attempt{ID: access.NewID(), ProjectID: in.Route.ProjectID, RouteID: in.Route.ID, RouteRevisionID: in.Route.RevisionID, APIKeyID: in.APIKeyID, Attribution: in.Attribution, EndUserDigest: in.EndUserDigest, BindingID: out.Binding.ID, AccountID: out.Account.ID, Operation: in.Operation.Name, Model: in.Operation.Model, State: "prepared"}
+	out.Attempt = codemode.Attempt{ID: access.NewID(), ProjectID: in.Route.ProjectID, RouteID: in.Route.ID, RouteRevisionID: in.Route.RevisionID, APIKeyID: in.APIKeyID, Attribution: in.Attribution, EndUserDigest: in.EndUserDigest, BindingID: out.Binding.ID, AccountID: out.Account.ID, Operation: in.Operation.Name, Model: in.Operation.Model, RequestedModel: new(in.Operation.PublicModel()), State: "prepared"}
 	if in.Bound != nil {
 		if err = in.Bound.Validate(); err != nil {
 			return out, err
@@ -279,8 +285,8 @@ func (s *CodeStore) admit(ctx context.Context, admission CodeAdmission, connecti
 		out.Attempt.ReservedTokens = in.Bound.Tokens
 		out.Attempt.BoundEvidence = &in.Bound.Evidence
 	}
-	err = tx.QueryRow(ctx, `INSERT INTO olp.code_attempts(id,project_id,route_id,api_key_id,binding_id,account_id,operation,model,state,reserved_tokens,bound_evidence,route_revision_id,end_user_digest,attribution,initial_recovery,recovery_from)
-		VALUES($1,$2,$3,$4,$5,$6,$7,$8,'prepared',$9,$10,$11,$12,$13,$14,$15) RETURNING created_at`, out.Attempt.ID, in.Route.ProjectID, in.Route.ID, in.APIKeyID, out.Binding.ID, out.Account.ID, in.Operation.Name, in.Operation.Model, out.Attempt.ReservedTokens, out.Attempt.BoundEvidence, in.Route.RevisionID, in.EndUserDigest, attribution.JSON(in.Attribution), out.InitialRecovery, codeRecoveryFrom(in.Recovery)).Scan(&out.Attempt.CreatedAt)
+	err = tx.QueryRow(ctx, `INSERT INTO olp.code_attempts(id,project_id,route_id,api_key_id,binding_id,account_id,operation,model,state,reserved_tokens,bound_evidence,route_revision_id,end_user_digest,attribution,initial_recovery,recovery_from,requested_model)
+		VALUES($1,$2,$3,$4,$5,$6,$7,$8,'prepared',$9,$10,$11,$12,$13,$14,$15,$16) RETURNING created_at`, out.Attempt.ID, in.Route.ProjectID, in.Route.ID, in.APIKeyID, out.Binding.ID, out.Account.ID, in.Operation.Name, in.Operation.Model, out.Attempt.ReservedTokens, out.Attempt.BoundEvidence, in.Route.RevisionID, in.EndUserDigest, attribution.JSON(in.Attribution), out.InitialRecovery, codeRecoveryFrom(in.Recovery), in.Operation.PublicModel()).Scan(&out.Attempt.CreatedAt)
 	if err != nil {
 		return out, err
 	}

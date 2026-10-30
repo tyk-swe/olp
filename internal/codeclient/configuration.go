@@ -138,7 +138,12 @@ func Generate(route codemode.Route, offers Offers, in Request) (codemode.ClientC
 		return ""
 	}() + func() string {
 		if route.ModelRewriting {
-			return " Published aliases rewrite only model identifiers to their exact native targets. Existing conversations retain their pinned targets while authorized."
+			return " Outside configured model pools, published aliases rewrite only model identifiers to their exact native targets. Existing conversations retain their pinned targets while authorized."
+		}
+		return ""
+	}() + func() string {
+		if len(route.ModelPools) > 0 {
+			return " Published model pools permit ordered alternate native models only after proven nonexecution and portable state. Exact selection remains the default outside these pools. Model and account availability, current authorization and budgets still apply. Existing conversations retain the recovered exact target while published and authorized."
 		}
 		return ""
 	}()

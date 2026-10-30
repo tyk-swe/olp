@@ -15720,6 +15720,13 @@
               "type": "string",
               "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$"
             }
+          },
+          "requested_model": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Public model identifier requested by the client. Null for historical attempts where the identifier was not recorded. model identifies the selected exact target."
           }
         },
         "required": [
@@ -16570,13 +16577,29 @@
           "model_rewriting": {
             "type": "boolean",
             "default": false,
-            "description": "Explicitly enable exact model aliases independently of protocol translation and identity compatibility. Native identifiers remain unchanged. Only protocol model fields are rewritten for alias requests and responses."
+            "description": "Explicitly enable model identifier rewriting through exact aliases or configured model_pools. Disabled by default. This policy does not rewrite client identity or prompts."
           },
           "initial_recovery_attempts": {
             "type": "integer",
             "minimum": 0,
             "maximum": 2,
-            "description": "Maximum additional attempts per request for a new or established single-pin root conversation after an adapter proves nonexecution and the complete input is portable. Zero disables recovery. Published revisions pin this policy. Existing children, socket ownership and unresolved attempts prevent migration. Exact models and live authority remain required. Producing-account reference ownership is preserved. Accepted, partial, ambiguous and opaque work never replays."
+            "description": "Maximum additional attempts per request for a new or established single-pin root conversation after an adapter proves nonexecution and the complete input is portable. Zero disables recovery. Published revisions pin this policy. Existing children, socket ownership and unresolved attempts prevent migration. Exact models remain the default. Only explicit model_pools authorize model changes. Live authority remains required. Producing-account reference ownership is preserved. Accepted, partial, ambiguous and opaque work never replays."
+          },
+          "model_pools": {
+            "type": "object",
+            "maxProperties": 100,
+            "additionalProperties": {
+              "type": "array",
+              "minItems": 2,
+              "maxItems": 100,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200
+              }
+            },
+            "description": "Explicit subscription model recovery pools keyed by a published native name or exact alias. Requires model_rewriting. Each ordered list starts with that name's normal exact target and contains distinct native identifiers from models. Recovery prefers the pinned exact target, then these alternatives, within initial_recovery_attempts and positive nonexecution, portability, live authorization and budget checks. Omitted pools preserve exact selection. Publications freeze the policy. Existing conversations retain their exact target, including after alias changes, while it remains published and authorized. Paid fallback is separately governed."
           }
         },
         "required": [
@@ -16678,13 +16701,29 @@
           "model_rewriting": {
             "type": "boolean",
             "default": false,
-            "description": "Explicitly enable exact model aliases independently of protocol translation and identity compatibility. Native identifiers remain unchanged. Only protocol model fields are rewritten for alias requests and responses."
+            "description": "Explicitly enable model identifier rewriting through exact aliases or configured model_pools. Disabled by default. This policy does not rewrite client identity or prompts."
           },
           "initial_recovery_attempts": {
             "type": "integer",
             "minimum": 0,
             "maximum": 2,
-            "description": "Maximum additional attempts per request for a new or established single-pin root conversation after an adapter proves nonexecution and the complete input is portable. Zero disables recovery. Published revisions pin this policy. Existing children, socket ownership and unresolved attempts prevent migration. Exact models and live authority remain required. Producing-account reference ownership is preserved. Accepted, partial, ambiguous and opaque work never replays."
+            "description": "Maximum additional attempts per request for a new or established single-pin root conversation after an adapter proves nonexecution and the complete input is portable. Zero disables recovery. Published revisions pin this policy. Existing children, socket ownership and unresolved attempts prevent migration. Exact models remain the default. Only explicit model_pools authorize model changes. Live authority remains required. Producing-account reference ownership is preserved. Accepted, partial, ambiguous and opaque work never replays."
+          },
+          "model_pools": {
+            "type": "object",
+            "maxProperties": 100,
+            "additionalProperties": {
+              "type": "array",
+              "minItems": 2,
+              "maxItems": 100,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200
+              }
+            },
+            "description": "Explicit subscription model recovery pools keyed by a published native name or exact alias. Requires model_rewriting. Each ordered list starts with that name's normal exact target and contains distinct native identifiers from models. Recovery prefers the pinned exact target, then these alternatives, within initial_recovery_attempts and positive nonexecution, portability, live authorization and budget checks. Omitted pools preserve exact selection. Publications freeze the policy. Existing conversations retain their exact target, including after alias changes, while it remains published and authorized. Paid fallback is separately governed."
           }
         },
         "required": [
@@ -28520,6 +28559,13 @@
               ]
             },
             "uniqueItems": true
+          },
+          "model_pool": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Configured ordered subscription recovery targets for this public model. This is policy metadata, not an availability or portability guarantee. Omitted for exact-model selection."
           }
         }
       },
