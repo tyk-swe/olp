@@ -918,15 +918,18 @@ func (e CodeClientConfigurationClient) Valid() bool {
 
 // Defines values for CodeClientConfigurationFormat.
 const (
-	CodeClientConfigurationFormatJson  CodeClientConfigurationFormat = "json"
-	CodeClientConfigurationFormatShell CodeClientConfigurationFormat = "shell"
-	CodeClientConfigurationFormatToml  CodeClientConfigurationFormat = "toml"
+	CodeClientConfigurationFormatJson       CodeClientConfigurationFormat = "json"
+	CodeClientConfigurationFormatPowershell CodeClientConfigurationFormat = "powershell"
+	CodeClientConfigurationFormatShell      CodeClientConfigurationFormat = "shell"
+	CodeClientConfigurationFormatToml       CodeClientConfigurationFormat = "toml"
 )
 
 // Valid indicates whether the value is a known member of the CodeClientConfigurationFormat enum.
 func (e CodeClientConfigurationFormat) Valid() bool {
 	switch e {
 	case CodeClientConfigurationFormatJson:
+		return true
+	case CodeClientConfigurationFormatPowershell:
 		return true
 	case CodeClientConfigurationFormatShell:
 		return true
@@ -952,6 +955,27 @@ func (e CodeClientConfigurationSupportedClients) Valid() bool {
 	case CodeClientConfigurationSupportedClientsCodex:
 		return true
 	case CodeClientConfigurationSupportedClientsOpencode:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for CodeClientPlatform.
+const (
+	Linux   CodeClientPlatform = "linux"
+	Macos   CodeClientPlatform = "macos"
+	Windows CodeClientPlatform = "windows"
+)
+
+// Valid indicates whether the value is a known member of the CodeClientPlatform enum.
+func (e CodeClientPlatform) Valid() bool {
+	switch e {
+	case Linux:
+		return true
+	case Macos:
+		return true
+	case Windows:
 		return true
 	default:
 		return false
@@ -7424,11 +7448,14 @@ type CodeClientConfiguration struct {
 	ClientVersion string                        `json:"client_version"`
 	Configuration string                        `json:"configuration"`
 
-	// File Where to save the configuration, or null for a shell file to source.
+	// File Where to merge the configuration or save the shell setup. Follow instructions to preserve existing settings.
 	File nullable.Nullable[string] `json:"file"`
 
-	// Format The configuration's format: Codex TOML, a POSIX shell file to source, or OpenCode JSON.
+	// Format Codex TOML, a POSIX shell or PowerShell setup to source, or OpenCode JSON.
 	Format CodeClientConfigurationFormat `json:"format"`
+
+	// Instructions Platform-specific setup and merge instructions. Preserve unrelated client settings and retain environment references for credentials.
+	Instructions string `json:"instructions"`
 
 	// Model The native model the client uses for its main conversation.
 	Model string `json:"model"`
@@ -7437,9 +7464,12 @@ type CodeClientConfiguration struct {
 	NativeModels []string `json:"native_models"`
 
 	// PlanModel The native model for planning: Claude Code's plan mode through opusplan and OpenCode's plan agent. It equals model unless another was chosen. Null for Codex.
-	PlanModel         nullable.Nullable[string] `json:"plan_model"`
-	QualificationGaps []string                  `json:"qualification_gaps"`
-	RouteSlug         string                    `json:"route_slug"`
+	PlanModel nullable.Nullable[string] `json:"plan_model"`
+
+	// Platform Developer platform for paths and shell syntax. Linux and macOS use POSIX shells, Windows uses PowerShell.
+	Platform          CodeClientPlatform `json:"platform"`
+	QualificationGaps []string           `json:"qualification_gaps"`
+	RouteSlug         string             `json:"route_slug"`
 
 	// SmallModel The native model for background requests: Claude Code's Haiku-class and OpenCode's small model. Null for Codex.
 	SmallModel nullable.Nullable[string] `json:"small_model"`
@@ -7454,11 +7484,14 @@ type CodeClientConfigurationAdapters string
 // CodeClientConfigurationClient The client the configuration is for.
 type CodeClientConfigurationClient string
 
-// CodeClientConfigurationFormat The configuration's format: Codex TOML, a POSIX shell file to source, or OpenCode JSON.
+// CodeClientConfigurationFormat Codex TOML, a POSIX shell or PowerShell setup to source, or OpenCode JSON.
 type CodeClientConfigurationFormat string
 
 // CodeClientConfigurationSupportedClients defines model for CodeClientConfiguration.SupportedClients.
 type CodeClientConfigurationSupportedClients string
+
+// CodeClientPlatform Developer platform for paths and shell syntax. Linux and macOS use POSIX shells, Windows uses PowerShell.
+type CodeClientPlatform string
 
 // CodeConfigurationFile defines model for CodeConfigurationFile.
 type CodeConfigurationFile struct {
@@ -15213,6 +15246,9 @@ type GetCodeClientConfigurationParams struct {
 
 	// SmallModel The native model for background requests; defaults to model. Codex takes none.
 	SmallModel *string `form:"small_model,omitempty" json:"small_model,omitempty"`
+
+	// Platform Developer platform, defaulting to linux for backward-compatible POSIX shell output.
+	Platform *CodeClientPlatform `form:"platform,omitempty" json:"platform,omitempty"`
 }
 
 // GetCodeClientConfigurationParamsClient defines parameters for GetCodeClientConfiguration.
