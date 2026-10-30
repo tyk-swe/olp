@@ -4,9 +4,10 @@ import (
 	"github.com/tyk-swe/olp/internal/codemode"
 	"github.com/tyk-swe/olp/internal/protocols/wire"
 	"reflect"
+	"slices"
 )
 
-func CodePaidProtocol(provider Provider, model string) (codemode.Protocol, bool) {
+func CodePaidProtocol(provider Provider, model string, modes ...string) (codemode.Protocol, bool) {
 	connector := provider.Connector()
 	if connector.CredentialSource == "caller" || len(provider.ParameterDefaults) > 0 || len(provider.OperationDefaults) > 0 || len(provider.Models) > 0 || provider.Plugin != nil {
 		return "", false
@@ -19,7 +20,13 @@ func CodePaidProtocol(provider Provider, model string) (codemode.Protocol, bool)
 		return "", false
 	}
 	protocol, known := map[wire.Format]codemode.Protocol{wire.Responses: codemode.ProtocolResponses, wire.Anthropic: codemode.ProtocolMessages, wire.Chat: codemode.ProtocolChat}[family]
-	if !known || !provider.Supports(model, "generation", family.Surface(), "unary") && !provider.Supports(model, "generation", family.Surface(), "streaming") {
+	deliveries := func() []string {
+		if len(modes) > 0 {
+			return modes
+		}
+		return []string{"unary", "streaming"}
+	}()
+	if !known || !slices.ContainsFunc(deliveries, func(mode string) bool { return provider.Supports(model, "generation", family.Surface(), mode) }) {
 		return "", false
 	}
 	return protocol, true

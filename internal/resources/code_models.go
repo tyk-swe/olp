@@ -87,7 +87,8 @@ func CodeOffers(ctx context.Context, db access.Queryer, revision string, keys ..
 		}
 		protocol, ok := routing.CodePaidProtocol(provider, model)
 		if ok {
-			offers = append(offers, codeclient.Offer{PaidProtocol: protocol, Models: []string{model}})
+			_, streaming := routing.CodePaidProtocol(provider, model, "streaming")
+			offers = append(offers, codeclient.Offer{PaidProtocol: protocol, PaidStreaming: streaming, Models: []string{model}})
 		}
 	}
 	return offers, nil

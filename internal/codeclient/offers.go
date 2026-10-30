@@ -12,9 +12,10 @@ type Offers []Offer
 
 // Offer is the adapter and models of one or more accounts.
 type Offer struct {
-	PaidProtocol codemode.Protocol
-	Adapter      codemode.Adapter
-	Models       []string
+	PaidStreaming bool
+	PaidProtocol  codemode.Protocol
+	Adapter       codemode.Adapter
+	Models        []string
 }
 
 // adapters returns the adapters whose accounts serve model, in table order.

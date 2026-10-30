@@ -155,11 +155,14 @@ func TestCodeOffersPreservesModelPoolDiscoveryWhenPaidAuthorityChanges(t *testin
 		available          bool
 		management         bool
 		fallback           bool
+		unaryOnly          bool
 	}{
 		{name: "eligible paid target", available: true},
 		{name: "native fallback target", fallback: true, available: true},
 		{name: "restricted fallback target", fallback: true, liveRestrictions: routing.Slot{AllowedAPIKeys: []string{"another-key"}}},
 		{name: "management fallback setup", fallback: true, management: true, available: true},
+		{name: "unary target remains discoverable without client setup", management: true, available: true, unaryOnly: true},
+		{name: "unary fallback remains discoverable without client setup", fallback: true, management: true, available: true, unaryOnly: true},
 		{name: "authorized restricted key", publishedKeys: []string{"caller-key"}, liveRestrictions: routing.Slot{AllowedAPIKeys: []string{"caller-key"}}, available: true},
 		{name: "published key restriction", publishedKeys: []string{"another-key"}},
 		{name: "live key restriction", liveRestrictions: routing.Slot{AllowedAPIKeys: []string{"another-key"}}},
@@ -190,7 +193,13 @@ func TestCodeOffersPreservesModelPoolDiscoveryWhenPaidAuthorityChanges(t *testin
 					}
 					return map[string]codemode.PaidTarget{models[2]: {ProviderID: "paid-provider", SlotID: "paid-slot"}}
 				}()}
-			provider := routing.Provider{ID: "paid-provider", Kind: "openai_compatible", ProfileID: "compatible-chat", ProfileRevision: connectors.ProfileRevision, Capabilities: []routing.Capability{{Model: models[2], Operation: "generation", Surface: "openai", Mode: "unary"}},
+			mode := func() string {
+				if test.unaryOnly {
+					return "unary"
+				}
+				return "streaming"
+			}()
+			provider := routing.Provider{ID: "paid-provider", Kind: "openai_compatible", ProfileID: "compatible-chat", ProfileRevision: connectors.ProfileRevision, Capabilities: []routing.Capability{{Model: models[2], Operation: "generation", Surface: "openai", Mode: mode}},
 				Slots: []routing.Slot{{ID: "paid-slot", Enabled: true, CredentialID: new("paid-credential"), CredentialVersion: new(1), AllowedAPIKeys: test.publishedKeys}}}
 			publication, publicationErr := json.Marshal(struct {
 				Route       codemode.Route              `json:"route"`
@@ -221,7 +230,11 @@ func TestCodeOffersPreservesModelPoolDiscoveryWhenPaidAuthorityChanges(t *testin
 			}
 			if test.management && paid >= 0 {
 				configuration, configurationErr := codeclient.Generate(route, offers, codeclient.Request{GatewayURL: "https://gateway.example", Client: codeadapter.ClientOpenCode, Model: models[2]})
-				if configurationErr != nil || configuration.Model != models[2] || !slices.Contains(configuration.PaidModels, models[2]) {
+				if test.unaryOnly {
+					if configurationErr == nil || len(catalog[paid].Clients) != 0 || len(catalog[paid].Capabilities) == 0 {
+						t.Fatalf("unary target generated unusable streaming setup %+v, catalog %+v, %v", configuration, catalog[paid], configurationErr)
+					}
+				} else if configurationErr != nil || configuration.Model != models[2] || !slices.Contains(configuration.PaidModels, models[2]) {
 					t.Fatalf("paid setup unavailable %+v, %v", configuration, configurationErr)
 				}
 			}

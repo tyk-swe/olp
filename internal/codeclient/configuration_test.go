@@ -367,7 +367,7 @@ func TestModelPoolsAreVisibleWithoutChangingSetupModel(t *testing.T) {
 
 func TestCatalogAndConfigurationExposeDirectPaidModelsWithoutAdapters(t *testing.T) {
 	route := codemode.Route{ID: "route", Slug: "coding", Enabled: true, RevisionID: "revision", Models: []string{"paid-native"}, PaidParticipation: true, PaidTargets: map[string]codemode.PaidTarget{"paid-native": {ProviderID: "provider", SlotID: "slot"}}}
-	offers := Offers{{PaidProtocol: codemode.ProtocolResponses, Models: route.Models}, {Adapter: codemode.AdapterCodex, Models: route.Models}}
+	offers := Offers{{PaidStreaming: true, PaidProtocol: codemode.ProtocolResponses, Models: route.Models}, {Adapter: codemode.AdapterCodex, Models: route.Models}}
 	catalog := Catalog(route, offers)
 	if len(catalog) != 1 || !catalog[0].Paid || len(catalog[0].Capabilities) != 1 || catalog[0].Capabilities[0].Protocol != codemode.ProtocolResponses || !slices.Contains(catalog[0].Clients, codeadapter.ClientCodex) {
 		t.Fatalf("paid catalog %+v", catalog)
@@ -413,8 +413,8 @@ func TestCatalogAndConfigurationExposeDirectPaidModelsWithoutAdapters(t *testing
 func TestCatalogAndConfigurationExposeNativePaidFallback(t *testing.T) {
 	route := codemode.Route{Slug: "coding", Enabled: true, RevisionID: "revision", Models: []string{"fallback-native"}, PaidParticipation: true, InitialRecoveryAttempts: 1, PaidFallbackTargets: map[string]codemode.PaidTarget{"fallback-native": {ProviderID: "provider", SlotID: "slot"}}}
 	for _, offers := range []Offers{
-		{{PaidProtocol: codemode.ProtocolChat, Models: route.Models}},
-		{{PaidProtocol: codemode.ProtocolChat, Models: route.Models}, {Adapter: codemode.AdapterCodex, Models: route.Models}},
+		{{PaidStreaming: true, PaidProtocol: codemode.ProtocolChat, Models: route.Models}},
+		{{PaidStreaming: true, PaidProtocol: codemode.ProtocolChat, Models: route.Models}, {Adapter: codemode.AdapterCodex, Models: route.Models}},
 	} {
 		subscriptions := len(offers) > 1
 		catalog := Catalog(route, offers)
@@ -436,7 +436,7 @@ func TestCatalogAndConfigurationExposeNativePaidFallback(t *testing.T) {
 
 func TestConfigurationRejectsMixedPaidSubscriptionCompanions(t *testing.T) {
 	route := codemode.Route{ID: "route", Slug: "coding", Enabled: true, RevisionID: "revision", Models: []string{"paid-main", "subscription-main"}, ChatToCodex: true, PaidParticipation: true, PaidTargets: map[string]codemode.PaidTarget{"paid-main": {ProviderID: "provider", SlotID: "slot"}}}
-	offers := Offers{{PaidProtocol: codemode.ProtocolResponses, Models: route.Models[:1]}, {Adapter: codemode.AdapterCodex, Models: route.Models}}
+	offers := Offers{{PaidStreaming: true, PaidProtocol: codemode.ProtocolResponses, Models: route.Models[:1]}, {Adapter: codemode.AdapterCodex, Models: route.Models}}
 	for _, model := range route.Models {
 		if _, err := Generate(route, offers, Request{GatewayURL: "https://gateway.example", Client: codeadapter.ClientOpenCode, Model: model}); err != nil {
 			t.Fatalf("individual model %s is unavailable: %v", model, err)
@@ -475,7 +475,7 @@ func TestOpenCodePaidProtocolsKeepSeparateProvidersAndModelLists(t *testing.T) {
 	target := codemode.PaidTarget{ProviderID: "019a06bf-341f-7000-8000-000000000001", SlotID: "019a06bf-341f-7000-8000-000000000002"}
 	route := codemode.Route{Slug: "coding", Enabled: true, RevisionID: "published", Models: models, PaidParticipation: true,
 		PaidTargets: map[string]codemode.PaidTarget{models[0]: target, models[1]: target, models[2]: target}}
-	offers := Offers{{PaidProtocol: codemode.ProtocolResponses, Models: models[:1]}, {PaidProtocol: codemode.ProtocolMessages, Models: models[1:2]}, {PaidProtocol: codemode.ProtocolChat, Models: models[2:3]}, {Adapter: codemode.AdapterOpenCodeGo, Models: models[3:]}}
+	offers := Offers{{PaidStreaming: true, PaidProtocol: codemode.ProtocolResponses, Models: models[:1]}, {PaidStreaming: true, PaidProtocol: codemode.ProtocolMessages, Models: models[1:2]}, {PaidStreaming: true, PaidProtocol: codemode.ProtocolChat, Models: models[2:3]}, {Adapter: codemode.AdapterOpenCodeGo, Models: models[3:]}}
 	configuration, err := Generate(route, offers, Request{GatewayURL: "https://gateway.example/prefix", Client: codeadapter.ClientOpenCode, Model: models[0], PlanModel: models[1], SmallModel: models[2]})
 	if err != nil {
 		t.Fatal(err)

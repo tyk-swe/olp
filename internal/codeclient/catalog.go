@@ -25,20 +25,20 @@ func Catalog(route codemode.Route, offers Offers) []codemode.Model {
 				continue
 			}
 			if _, mapped := route.PaidTargets[resolved.Model]; mapped {
-				if protocol, ok := offers.nativePaidProtocol(route, id); ok {
-					capability, clients := paidCapability(protocol)
+				if protocol, streaming, ok := offers.nativePaidProtocol(route, id); ok {
+					capability, clients := paidCapability(protocol, streaming)
 					if !yield(codemode.Model{ID: id, Object: "model", Paid: true, Capabilities: []codemode.ModelCapability{capability}, Clients: clients}) {
 						return
 					}
 				}
 				continue
 			}
-			protocol, paid := offers.nativePaidProtocol(route, id)
+			protocol, streaming, paid := offers.nativePaidProtocol(route, id)
 			fallbackCapabilities, fallbackClients := func() ([]codemode.ModelCapability, []string) {
 				if !paid {
 					return nil, nil
 				}
-				capability, clients := paidCapability(protocol)
+				capability, clients := paidCapability(protocol, streaming)
 				return []codemode.ModelCapability{capability}, clients
 			}()
 			capabilities := modelCapabilities(route, resolved.Model, declarations, fallbackCapabilities...)
@@ -113,30 +113,30 @@ func modelClients(route codemode.Route, id string, declarations []codeadapter.Ve
 	})
 }
 
-func (offers Offers) nativePaidProtocol(route codemode.Route, model string) (codemode.Protocol, bool) {
+func (offers Offers) nativePaidProtocol(route codemode.Route, model string) (codemode.Protocol, bool, bool) {
 	resolved, err := route.ResolveModel(codemode.Operation{Model: model})
 	if err != nil || !route.PaidParticipation {
-		return "", false
+		return "", false, false
 	}
 	if _, direct := route.PaidTargets[resolved.Model]; !direct {
 		if _, fallback := route.PaidFallbackTargets[resolved.Model]; !fallback || route.InitialRecoveryAttempts < 1 {
-			return "", false
+			return "", false, false
 		}
 	}
 	for _, offer := range offers {
 		if offer.PaidProtocol != "" && slices.Contains(offer.Models, resolved.Model) {
-			return offer.PaidProtocol, true
+			return offer.PaidProtocol, offer.PaidStreaming, true
 		}
 	}
-	return "", false
+	return "", false, false
 }
 
 func (offers Offers) paidProtocol(route codemode.Route, model, client string) (codemode.Protocol, bool) {
-	protocol, ok := offers.nativePaidProtocol(route, model)
+	protocol, streaming, ok := offers.nativePaidProtocol(route, model)
 	if !ok {
 		return "", false
 	}
-	_, clients := paidCapability(protocol)
+	_, clients := paidCapability(protocol, streaming)
 	if !slices.Contains(clients, client) {
 		return "", false
 	}
@@ -152,13 +152,19 @@ func (offers Offers) paidProtocol(route codemode.Route, model, client string) (c
 	return protocol, true
 }
 
-func paidCapability(protocol codemode.Protocol) (codemode.ModelCapability, []string) {
+func paidCapability(protocol codemode.Protocol, streaming bool) (codemode.ModelCapability, []string) {
+	clients := func(values ...string) []string {
+		if !streaming {
+			return []string{}
+		}
+		return values
+	}
 	switch protocol {
 	case codemode.ProtocolResponses:
-		return codemode.ModelCapability{Protocol: protocol, Path: "v1/responses", Transports: []string{"http"}}, []string{codeadapter.ClientCodex, codeadapter.ClientOpenCode}
+		return codemode.ModelCapability{Protocol: protocol, Path: "v1/responses", Transports: []string{"http"}}, clients(codeadapter.ClientCodex, codeadapter.ClientOpenCode)
 	case codemode.ProtocolMessages:
-		return codemode.ModelCapability{Protocol: protocol, Path: "v1/messages", Transports: []string{"http"}}, []string{codeadapter.ClientClaudeCode, codeadapter.ClientOpenCode}
+		return codemode.ModelCapability{Protocol: protocol, Path: "v1/messages", Transports: []string{"http"}}, clients(codeadapter.ClientClaudeCode, codeadapter.ClientOpenCode)
 	default:
-		return codemode.ModelCapability{Protocol: protocol, Path: "v1/chat/completions", Transports: []string{"http"}}, []string{codeadapter.ClientOpenCode}
+		return codemode.ModelCapability{Protocol: protocol, Path: "v1/chat/completions", Transports: []string{"http"}}, clients(codeadapter.ClientOpenCode)
 	}
 }
