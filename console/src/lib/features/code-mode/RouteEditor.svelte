@@ -482,8 +482,8 @@
     Responses after publication. Low, medium and high reasoning effort is
     supported. Signed reasoning, media, server-owned state and other unsupported
     required semantics are refused. Identity compatibility and model rewriting
-    require their separate opt-ins. Current OpenCode client and live subscription
-    acceptance remain unqualified.
+    require their separate opt-ins. Current OpenCode client and live
+    subscription acceptance remain unqualified.
   </p>
   <label class="choice">
     <input
