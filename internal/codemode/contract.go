@@ -130,14 +130,15 @@ type ClientConfiguration struct {
 }
 
 type Pool struct {
-	ID          string   `json:"id"`
-	ProjectID   string   `json:"project_id"`
-	Name        string   `json:"name"`
-	Kind        string   `json:"kind"`
-	OwnerUserID *string  `json:"owner_user_id"`
-	AccountIDs  []string `json:"account_ids"`
-	APIKeyIDs   []string `json:"api_key_ids"`
-	ETag        string   `json:"etag"`
+	ID             string           `json:"id"`
+	ProjectID      string           `json:"project_id"`
+	Name           string           `json:"name"`
+	Kind           string           `json:"kind"`
+	OwnerUserID    *string          `json:"owner_user_id"`
+	AccountIDs     []string         `json:"account_ids"`
+	AccountWeights map[string]int64 `json:"account_weights"`
+	APIKeyIDs      []string         `json:"api_key_ids"`
+	ETag           string           `json:"etag"`
 }
 
 type Route struct {

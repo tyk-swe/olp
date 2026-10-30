@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -112,6 +113,162 @@ func (f *codeFleet) refused(t *testing.T, replica int, conversation, parent stri
 	}
 	if len(f.peer.Requests()) != before {
 		t.Fatal("refused generation reached upstream")
+	}
+}
+
+func TestCodeQualificationFleetWeightedDistribution(t *testing.T) {
+	f := newCodeFleet(t)
+	first, second := f.accounts[0]["id"].(string), f.accounts[1]["id"].(string)
+	f.h.want(f.owner, "PUT", "/api/v1/code/pools/"+f.pool["id"].(string), map[string]any{
+		"project_id": f.project, "name": "Weighted distribution", "kind": "shared", "owner_user_id": nil,
+		"account_ids": []string{first, second}, "api_key_ids": []string{f.keyID},
+		"account_weights": map[string]int64{first: 5, second: 1},
+	}, etagHeader(f.pool), 200)
+	for i := range 200 {
+		f.success(t, i%2, fmt.Sprintf("weighted-%d", i), "")
+	}
+	firstCount := len(slices.Collect(func(yield func(codexfixture.Request) bool) {
+		for _, request := range f.peer.Requests() {
+			if request.Header.Get("Authorization") == "Bearer "+f.codexAuthorities[0].accessToken && !yield(request) {
+				return
+			}
+		}
+	}))
+	if firstCount < 140 || firstCount > 190 {
+		t.Fatalf("5:1 weights selected the first account %d times in 200 new roots", firstCount)
+	}
+}
+
+func TestCodeQualificationFleetWeightsPreserveBindingsAndEligibility(t *testing.T) {
+	f := newCodeFleet(t)
+	first, second := f.accounts[0]["id"].(string), f.accounts[1]["id"].(string)
+	poolPath := "/api/v1/code/pools/" + f.pool["id"].(string)
+	firstHeavy := f.h.want(f.owner, "PUT", poolPath, map[string]any{
+		"project_id": f.project, "name": "Weighted shared", "kind": "shared", "owner_user_id": nil,
+		"account_ids": []string{first, second}, "api_key_ids": []string{f.keyID},
+		"account_weights": map[string]int64{first: 2147483647, second: 1},
+	}, etagHeader(f.pool), 200)
+	for i := range 4 {
+		f.success(t, i%2, fmt.Sprintf("first-heavy-%d", i), "")
+	}
+	firstBindings := codePublicDecode[[]codemode.Binding](t, f.list("bindings"))
+	for _, binding := range firstBindings {
+		if binding.AccountID != first {
+			t.Fatal("new roots did not follow account weights")
+		}
+	}
+	f.h.want(f.owner, "PUT", poolPath, map[string]any{
+		"project_id": f.project, "name": "Weighted shared", "kind": "shared", "owner_user_id": nil,
+		"account_ids": []string{first, second}, "api_key_ids": []string{f.keyID},
+		"account_weights": map[string]int64{first: 1, second: 2147483647},
+	}, etagHeader(firstHeavy), 200)
+	f.success(t, 1, "first-heavy-0", "")
+	f.success(t, 0, "weighted-child", "first-heavy-0")
+	for i := range 4 {
+		f.success(t, i%2, fmt.Sprintf("second-heavy-%d", i), "")
+	}
+	bindings := codePublicDecode[[]codemode.Binding](t, f.list("bindings"))
+	for _, binding := range bindings {
+		if strings.HasPrefix(binding.Conversation, "second-heavy-") {
+			if binding.AccountID != second {
+				t.Fatal("new roots ignored updated weight")
+			}
+			continue
+		}
+		if binding.AccountID != first {
+			t.Fatal("weight update moved a durable binding")
+		}
+	}
+
+	accountPath := "/api/v1/code/accounts/" + second
+	otherModel := f.h.want(f.owner, "PUT", accountPath, map[string]any{
+		"project_id": f.project, "provider_id": f.accounts[1]["provider_id"],
+		"credential_id": f.accounts[1]["credential_id"], "name": "Weighted account", "enabled": true,
+		"models": []string{"gpt-5.4-mini"},
+	}, etagHeader(f.accounts[1]), 200)
+	f.success(t, 0, "exact-model-root", "")
+	f.h.want(f.owner, "PUT", accountPath, map[string]any{
+		"project_id": f.project, "provider_id": f.accounts[1]["provider_id"],
+		"credential_id": f.accounts[1]["credential_id"], "name": "Weighted account", "enabled": true,
+		"models": []string{"gpt-5.4"},
+	}, etagHeader(otherModel), 200)
+	f.peer.Mode("quota")
+	response, _, err := f.request(t.Context(), 1, "second-heavy-0", "", codeBody())
+	if err != nil || response.StatusCode != 429 {
+		t.Fatalf("quota response: %v %v", response, err)
+	}
+	f.peer.Mode("")
+	f.success(t, 1, "available-root", "")
+	f.refused(t, 0, "second-heavy-0", "")
+	latest := codePublicDecode[[]codemode.Binding](t, f.list("bindings"))
+	for _, binding := range latest {
+		if (binding.Conversation == "available-root" || binding.Conversation == "exact-model-root") && binding.AccountID != first {
+			t.Fatal("weight overrode account eligibility")
+		}
+	}
+}
+
+func TestCodeQualificationFleetWeightedPersonalAndSharedIsolation(t *testing.T) {
+	f := newCodeFleet(t)
+	first, second := f.accounts[0]["id"].(string), f.accounts[1]["id"].(string)
+	f.h.want(f.owner, "PUT", "/api/v1/code/pools/"+f.pool["id"].(string), map[string]any{
+		"project_id": f.project, "name": "Weighted shared", "kind": "shared", "owner_user_id": nil,
+		"account_ids": []string{first, second}, "api_key_ids": []string{f.keyID},
+		"account_weights": map[string]int64{first: 1, second: 2147483647},
+	}, etagHeader(f.pool), 200)
+	ownerID := f.h.want(f.owner, "GET", "/api/v1/profile", nil, nil, 200)["id"].(string)
+	key := f.h.want(f.owner, "POST", "/api/v1/api-keys", map[string]any{
+		"project_id": f.project, "name": "Personal key", "scopes": []string{"inference"},
+		"allowed_routes": []string{"qualification", "qualification-personal"},
+	}, idem("weighted-personal-key"), 201)
+	personal := f.h.want(f.owner, "POST", "/api/v1/code/pools", map[string]any{
+		"project_id": f.project, "name": "Weighted personal", "kind": "personal", "owner_user_id": ownerID,
+		"account_ids": []string{first}, "account_weights": map[string]int64{first: 1}, "api_key_ids": []string{key["id"].(string)},
+	}, idem("weighted-personal-pool"), 201)
+	draft := f.h.want(f.owner, "POST", "/api/v1/code/routes", map[string]any{
+		"project_id": f.project, "slug": "qualification-personal", "pool_id": personal["id"],
+		"models": []string{"gpt-5.4"}, "enabled": true,
+	}, idem("weighted-personal-route"), 201)
+	f.h.want(f.owner, "POST", "/api/v1/code/routes/"+draft["id"].(string)+"/publish", nil, withMatch(draft, idem("weighted-personal-publish")), 200)
+	for _, process := range f.gateways {
+		if err := process.Kill(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	updatedFleet := &codeFleet{codePublicFixture: f.codePublicFixture, in: f.in, gateways: []*testutil.Process{f.in.replica("weighted-pools-0"), f.in.replica("weighted-pools-1")}}
+	for i := range 2 {
+		updatedFleet.success(t, i, fmt.Sprintf("shared-isolated-%d", i), "")
+		req, err := http.NewRequestWithContext(t.Context(), "POST", updatedFleet.gateways[i].PublicOrigin+"/code/qualification-personal/responses", bytes.NewReader(codeBody()))
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set("Authorization", "Bearer "+key["secret"].(string))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Thread-Id", fmt.Sprintf("personal-isolated-%d", i))
+		response, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, readErr := io.ReadAll(response.Body)
+		response.Body.Close()
+		if readErr != nil || response.StatusCode != 200 || string(body) != codexfixture.SSE {
+			t.Fatalf("personal pool request status %d, read error %v", response.StatusCode, readErr)
+		}
+	}
+	bindings := codePublicDecode[[]codemode.Binding](t, f.list("bindings"))
+	if len(bindings) != 4 {
+		t.Fatalf("expected four independent pool bindings, got %d", len(bindings))
+	}
+	for _, binding := range bindings {
+		if strings.HasPrefix(binding.Conversation, "personal-") {
+			if binding.AccountID != first {
+				t.Fatal("personal pool selected the weighted shared account")
+			}
+			continue
+		}
+		if binding.AccountID != second {
+			t.Fatal("shared pool selected outside its weighted membership")
+		}
 	}
 }
 

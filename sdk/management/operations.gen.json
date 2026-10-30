@@ -6285,6 +6285,17 @@
             "project_id": {
               "format": "uuid",
               "type": "string"
+            },
+            "account_weights": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "integer",
+                "format": "int64",
+                "minimum": 1,
+                "maximum": 2147483647
+              },
+              "maxProperties": 100,
+              "description": "Relative weights keyed by assigned account ID. Omitted accounts use weight 1."
             }
           },
           "required": [
@@ -31929,6 +31940,17 @@
             "project_id": {
               "format": "uuid",
               "type": "string"
+            },
+            "account_weights": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "integer",
+                "format": "int64",
+                "minimum": 1,
+                "maximum": 2147483647
+              },
+              "maxProperties": 100,
+              "description": "Relative weights keyed by assigned account ID. Omitted accounts use weight 1."
             }
           },
           "required": [

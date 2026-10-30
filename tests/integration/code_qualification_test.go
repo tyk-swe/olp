@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/codemode"
 	"github.com/tyk-swe/olp/internal/testutil"
 	codexfixture "github.com/tyk-swe/olp/tests/fixtures/codex-qualified"
 )
@@ -152,6 +154,31 @@ func TestCodeQualificationPublicManagementLifecycle(t *testing.T) {
 	revisions := h.want(owner, "GET", "/api/v1/code/routes/"+f.route["id"].(string)+"/revisions", nil, nil, 200)["items"].([]any)
 	if len(revisions) != 1 {
 		t.Fatalf("revisions: %d", len(revisions))
+	}
+	f.noSyntheticInference(t)
+}
+
+func TestCodeQualificationPublicPoolWeights(t *testing.T) {
+	f := newCodePublicFixture(t)
+	first, second := f.accounts[0]["id"].(string), f.accounts[1]["id"].(string)
+	initial := codePublicDecode[codemode.Pool](t, f.pool)
+	if initial.AccountWeights[first] != 1 || initial.AccountWeights[second] != 1 {
+		t.Fatal("omitted weights did not default to equal shares", initial.AccountWeights)
+	}
+	path := "/api/v1/code/pools/" + initial.ID
+	input := f.poolInput([]string{f.keyID})
+	input["account_weights"] = map[string]int64{first: 5}
+	saved := f.h.want(f.owner, "PUT", path, input, etagHeader(f.pool), 200)
+	for _, value := range []any{saved, f.list("pools")[0]} {
+		pool := codePublicDecode[codemode.Pool](t, value)
+		if pool.AccountWeights[first] != 5 || pool.AccountWeights[second] != 1 {
+			t.Fatal("pool weights did not round-trip", pool.AccountWeights)
+		}
+	}
+	for _, weights := range []map[string]int64{{first: 0}, {first: -1}, {first: 2147483648}, {access.NewID(): 2}} {
+		invalid := f.poolInput([]string{f.keyID})
+		invalid["account_weights"] = weights
+		f.h.want(f.owner, "PUT", path, invalid, etagHeader(saved), 422)
 	}
 	f.noSyntheticInference(t)
 }

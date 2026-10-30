@@ -8,7 +8,6 @@ import (
 	"slices"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/tyk-swe/olp/internal/codemode"
 )
 
 // CodeWrite shares the management transaction, current authority, optimistic
@@ -155,6 +154,7 @@ func (s *Server) registerCodeMode(mux *http.ServeMux) {
 }
 
 const codePoolJSON = `SELECT jsonb_build_object('id',x.id,'project_id',x.project_id,'name',x.name,'kind',x.kind,'owner_user_id',x.owner_user_id,'etag',x.etag,
+	'account_weights',coalesce((SELECT jsonb_object_agg(account_id::text,weight) FROM olp.code_pool_accounts WHERE pool_id=x.id),'{}'::jsonb),
 	'account_ids',ARRAY(SELECT account_id FROM olp.code_pool_accounts WHERE pool_id=x.id ORDER BY account_id),
 	'api_key_ids',ARRAY(SELECT api_key_id FROM olp.code_pool_keys WHERE pool_id=x.id ORDER BY api_key_id)) FROM olp.code_pools x`
 
@@ -166,12 +166,13 @@ func (s *Server) codeBudgets(r *http.Request, p Principal) (Reply, error) {
 }
 
 type codePoolInput struct {
-	ProjectID   string   `json:"project_id"`
-	Name        string   `json:"name"`
-	Kind        string   `json:"kind"`
-	OwnerUserID *string  `json:"owner_user_id"`
-	AccountIDs  []string `json:"account_ids"`
-	APIKeyIDs   []string `json:"api_key_ids"`
+	ProjectID      string           `json:"project_id"`
+	Name           string           `json:"name"`
+	Kind           string           `json:"kind"`
+	OwnerUserID    *string          `json:"owner_user_id"`
+	AccountIDs     []string         `json:"account_ids"`
+	AccountWeights map[string]int64 `json:"account_weights"`
+	APIKeyIDs      []string         `json:"api_key_ids"`
 }
 
 func (s *Server) writeCodePool(r *http.Request, _ Principal) (Reply, error) {
@@ -191,6 +192,11 @@ func (s *Server) writeCodePool(r *http.Request, _ Principal) (Reply, error) {
 	for _, id := range append(slices.Clone(in.AccountIDs), in.APIKeyIDs...) {
 		if _, err := ParseUUID(id); err != nil {
 			return Reply{}, err
+		}
+	}
+	for account, weight := range in.AccountWeights {
+		if !slices.Contains(in.AccountIDs, account) || weight < 1 || weight > 2147483647 {
+			return Reply{}, Invalid("account_weights", "Weights must be between 1 and 2147483647 and belong to assigned accounts.")
 		}
 	}
 	if in.OwnerUserID != nil {
@@ -251,7 +257,7 @@ func (s *Server) writeCodePool(r *http.Request, _ Principal) (Reply, error) {
 			return nil, err
 		}
 		for _, account := range in.AccountIDs {
-			if _, err = tx.Exec(r.Context(), `INSERT INTO olp.code_pool_accounts(pool_id,account_id) VALUES($1,$2) ON CONFLICT DO NOTHING`, id, account); err != nil {
+			if _, err = tx.Exec(r.Context(), `INSERT INTO olp.code_pool_accounts(pool_id,account_id,weight) VALUES($1,$2,$3) ON CONFLICT DO NOTHING`, id, account, max(1, in.AccountWeights[account])); err != nil {
 				return nil, err
 			}
 		}
@@ -260,7 +266,9 @@ func (s *Server) writeCodePool(r *http.Request, _ Principal) (Reply, error) {
 				return nil, err
 			}
 		}
-		return codemode.Pool{ID: id, ProjectID: in.ProjectID, Name: in.Name, Kind: in.Kind, OwnerUserID: in.OwnerUserID, AccountIDs: in.AccountIDs, APIKeyIDs: in.APIKeyIDs, ETag: etag}, nil
+		var result json.RawMessage
+		queryErr := tx.QueryRow(r.Context(), codePoolJSON+` WHERE x.id=$1`, id).Scan(&result)
+		return result, queryErr
 	})
 }
 
