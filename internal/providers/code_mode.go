@@ -17,7 +17,7 @@ func (s *Server) registerCodeMode(mux *http.ServeMux) {
 	s.Access.Route(mux, "PUT /api/v1/code/accounts/{id}", s.writeCodeAccount)
 }
 
-var codeAccountJSON = `SELECT jsonb_build_object('id',x.id,'project_id',x.project_id,'provider_id',x.provider_id,'credential_id',x.credential_id,'principal',x.principal,'name',x.name,'enabled',x.enabled,'models',x.models,'etag',x.etag,'health',x.health,
+var codeAccountJSON = `SELECT jsonb_build_object('id',x.id,'project_id',x.project_id,'provider_id',x.provider_id,'credential_id',x.credential_id,'principal',x.principal,'name',x.name,'enabled',x.enabled,'models',x.models,'etag',x.etag,'health',x.health,'health_observed_at',x.health_observed_at,'unavailable_until',x.unavailable_until,
 	'adapter',` + codeadapter.SQL("p.configuration") + `,
 	'research_services',CASE WHEN c.profile_id='` + codeplans.ZAIProfile + `' AND p.configuration->>'profile_id'=c.profile_id THEN '["search","reader","zread"]'::jsonb ELSE '[]'::jsonb END,
 	'research_eligible',coalesce(x.enabled AND p.state<>'disabled' AND p.project_id=x.project_id
@@ -80,7 +80,9 @@ func (s *Server) writeCodeAccount(r *http.Request, _ access.Principal) (access.R
 		models, _ := json.Marshal(in.Models)
 		_, err = tx.Exec(r.Context(), `INSERT INTO olp.code_accounts(id,project_id,provider_id,credential_id,principal,name,enabled,models,etag,created_by) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
 			ON CONFLICT(id) DO UPDATE SET credential_id=excluded.credential_id,name=excluded.name,enabled=excluded.enabled,models=excluded.models,etag=excluded.etag,
-			health=CASE WHEN code_accounts.credential_id<>excluded.credential_id THEN 'unknown' ELSE code_accounts.health END`, id, in.ProjectID, in.ProviderID, in.CredentialID, principal, in.Name, in.Enabled, models, etag, p.UserID())
+			health=CASE WHEN code_accounts.credential_id<>excluded.credential_id THEN 'unknown' ELSE code_accounts.health END,
+			health_observed_at=CASE WHEN code_accounts.credential_id<>excluded.credential_id THEN NULL ELSE code_accounts.health_observed_at END,
+			unavailable_until=CASE WHEN code_accounts.credential_id<>excluded.credential_id THEN NULL ELSE code_accounts.unavailable_until END`, id, in.ProjectID, in.ProviderID, in.CredentialID, principal, in.Name, in.Enabled, models, etag, p.UserID())
 		if err != nil {
 			return nil, err
 		}

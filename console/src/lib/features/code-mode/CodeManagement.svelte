@@ -24,6 +24,7 @@
   import { codeKeys } from './codeKeys';
   import {
     adapterLabel,
+    servingHealthLabel,
     mutationError,
     tokenCount,
     type CodeEditing
@@ -220,9 +221,12 @@
   {:else}
     {#if kind === 'accounts'}
       <p>
-        Eligibility reflects current grant authority. Unknown serving health
-        means no qualified observation; enrollment is not an inference test.
-        Provider allowance is separate from local budgets and reported usage.
+        Eligibility depends on grant authority, serving cooldowns and observed
+        allowance. Unknown serving health means no qualified observation.
+        Enrollment is not an inference test. A rejected refresh lapses the grant
+        and requires enrollment again. Passing a retry or reset time permits a
+        new attempt without changing the reported allowance. Provider allowance
+        is separate from local budgets and reported usage
       </p>
       {#each accounts.data?.items ?? [] as account (account.id)}
         <article class="card">
@@ -249,9 +253,24 @@
                 : 'disabled'}
             </dd>
             <dt>Grant state</dt>
-            <dd>{account.grant_state}</dd>
+            <dd>
+              {account.grant_state === 'lapsed'
+                ? 'Grant lapsed, enroll again'
+                : account.grant_state}
+            </dd>
             <dt>Serving health</dt>
-            <dd>{account.health}</dd>
+            <dd>
+              {servingHealthLabel(account.health)}
+              {#if account.health_observed_at}
+                · Observed {formatDate(account.health_observed_at)}
+              {/if}
+            </dd>
+            <dt>Serving retry time</dt>
+            <dd>
+              {account.unavailable_until
+                ? formatDate(account.unavailable_until)
+                : 'No serving cooldown reported'}
+            </dd>
             <dt>Native models</dt>
             <dd>{account.models.join(', ')}</dd>
             <dt>Provider / credential</dt>
