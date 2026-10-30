@@ -114,7 +114,7 @@ func TestTaskCapabilityAuthenticatesAndCountsOwnerCallbacks(t *testing.T) {
 	definition := agentcontract.Draft{Agent: &agentcontract.Definition{RouteRevisions: []string{"route-revision"}, ToolsetRevisions: []string{"toolset-revision"}, MaxTaskContinuations: &maximum}}
 	owner := access.Authority{ID: "owner", ProjectID: &project, Policy: access.KeyPolicy{Scopes: []string{"agents", "inference", "tools"}, AllowedAgents: []string{publication}, AllowedRoutes: []string{"route"}, AllowedToolsets: []string{"toolset"}}}
 	newFixture := func() (*Manager, *taskStoreFixture) {
-		store := &taskStoreFixture{row: taskRow{values: []any{owner.ID, project, publication, revision, "", (*time.Time)(nil), expires, "", []byte(nil), definition}}, tx: &taskTxFixture{rows: []taskRow{{values: []any{"dispatch", "task", definition}}, {values: []any{1}}}}}
+		store := &taskStoreFixture{row: taskRow{values: []any{owner.ID, project, publication, revision, "", (*time.Time)(nil), expires, "", []byte(nil), definition, "", ""}}, tx: &taskTxFixture{rows: []taskRow{{values: []any{"dispatch", "task", definition}}, {values: []any{1}}}}}
 		manager := &Manager{auth: secrets.NewAuthKey(make([]byte, 32), "installation"), taskStore: store, authority: authorityState{loaded: true, readAt: now, agentPrincipals: map[string]access.Authority{owner.ID: owner}, agentResources: map[string]agentResourceAuthority{publication: {ProjectID: project, Kind: "agent", Revisions: map[string]bool{revision: true}}}}}
 		return manager, store
 	}

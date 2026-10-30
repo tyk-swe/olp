@@ -112,7 +112,7 @@ func (s *Server) prepareWorkflow(ctx context.Context, x *call, token string) *Er
 			}
 			x.generation.parsed = parsed
 		}
-		x.workflow = &workflowCall{token: token, tools: tools, transcript: x.generation.parsed.Field(workflowTranscriptField(x.family))}
+		x.workflow = &workflowCall{token: token, tools: tools, transcript: x.generation.parsed.Field(x.family.WorkflowTranscriptField())}
 		return nil
 	}
 	raw, err := workflowDefinitions(x.family, tools)
@@ -124,7 +124,7 @@ func (s *Server) prepareWorkflow(ctx context.Context, x *call, token string) *Er
 		return invalidRequest("invalid_request", "The route tools could not be added to the request.", nil)
 	}
 	x.generation.parsed = parsed
-	x.workflow = &workflowCall{token: token, tools: tools, transcript: x.generation.parsed.Field(workflowTranscriptField(x.family)), responseMCP: x.family == wire.Responses && x.named().ResponsesMCPItems}
+	x.workflow = &workflowCall{token: token, tools: tools, transcript: x.generation.parsed.Field(x.family.WorkflowTranscriptField()), responseMCP: x.family == wire.Responses && x.named().ResponsesMCPItems}
 	if x.workflow.responseMCP {
 		x.workflow.responseItems = responseMCPListings(x.generation.toolsets, tools)
 	}
@@ -265,7 +265,7 @@ func (s *Server) executeToolLoop(ctx context.Context, x *call) *outcome {
 		}
 		state := x.workflow.resume
 		x.workflow.calls = state.Calls
-		parsed, err := x.generation.parsed.WithField(workflowTranscriptField(x.family), state.Transcript)
+		parsed, err := x.generation.parsed.WithField(x.family.WorkflowTranscriptField(), state.Transcript)
 		if err != nil {
 			return 0, invalidRequest("tool_approval_invalid", "The approved workflow could not be resumed.", nil)
 		}
@@ -375,16 +375,6 @@ func (s *Server) executeToolLoop(ctx context.Context, x *call) *outcome {
 	return &outcome{err: invalidRequest("tool_iteration_limit", "The workflow reached its model iteration limit.", nil)}
 }
 
-func workflowTranscriptField(family wire.Format) string {
-	if family.Surface() == "gemini" {
-		return "contents"
-	}
-	if family == wire.Responses {
-		return "input"
-	}
-	return "messages"
-}
-
 func workflowStreamCompletion(family wire.Format, frames *bytes.Reader, maxEvent, maxResponse int, route string) (*wire.Completion, error) {
 	if family == wire.Responses {
 		completion, err := openai.Aggregate(family, frames, maxEvent, maxResponse)
@@ -433,12 +423,7 @@ func (s *Server) continueToolLoop(ctx context.Context, x *call, completion *wire
 	} else if x.family == wire.Chat && (json.Unmarshal(completion.Body, &response) != nil || len(response.Choices) != 1 || len(response.Choices[0].Message) == 0) {
 		return nil, serverError(http.StatusBadGateway, "invalid_tool_response", "The model returned an invalid tool response.")
 	}
-	field := "messages"
-	if x.family.Surface() == "gemini" {
-		field = "contents"
-	} else if x.family == wire.Responses {
-		field = "input"
-	}
+	field := x.family.WorkflowTranscriptField()
 	input := x.generation.parsed.Field(field)
 	if x.family == wire.Responses && len(input) > 0 && input[0] == '"' {
 		message, err := json.Marshal(struct {

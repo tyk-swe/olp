@@ -2066,6 +2066,13 @@ func TestWorkloadAgentDelegatesKeyForTools(t *testing.T) {
 
 func TestWorkloadAgentDelegatesKeyForA2A(t *testing.T) {
 	h := newAccessHarness(t)
+	h.Server.ClientIP = func(request *http.Request) string {
+		if source := request.Header.Get("X-Test-Client-IP"); source != "" {
+			return source
+		}
+		host, _, _ := net.SplitHostPort(request.RemoteAddr)
+		return host
+	}
 	owner := h.owner()
 	project := createProject(h, owner, "Delegated A2A")
 	otherProject := createProject(h, owner, "Other delegated A2A")
@@ -2107,6 +2114,7 @@ func TestWorkloadAgentDelegatesKeyForA2A(t *testing.T) {
 	callbackCapability := make(chan string, 1)
 	cancellation := make(chan string, 4)
 	var watchCancellation atomic.Bool
+	var cardUnavailable atomic.Bool
 	var skipCallback atomic.Bool
 	var requireOAuth atomic.Bool
 	var originalOAuthCalls, replacementOAuthCalls atomic.Int32
@@ -2194,6 +2202,10 @@ func TestWorkloadAgentDelegatesKeyForA2A(t *testing.T) {
 			}
 			handler.ServeHTTP(a2aContentTypeWriter{w}, r)
 		case "/.well-known/agent-card.json":
+			if cardUnavailable.Load() {
+				w.WriteHeader(http.StatusServiceUnavailable)
+				return
+			}
 			_, _ = w.Write(cardFor("http://" + r.Host + "/rpc"))
 		default:
 			http.NotFound(w, r)
@@ -2727,9 +2739,41 @@ func TestWorkloadAgentDelegatesKeyForA2A(t *testing.T) {
 		t.Fatalf("caller task could not continue before revocation: %s", continuationBody)
 	}
 	callerNewToken, callerContinuationToken := callerGrant(), callerGrant()
+	activeToken := callerGrant()
+	skipCallback.Store(true)
+	holdRemote.Store(true)
+	activeResult := make(chan []byte, 1)
+	go func() {
+		_, body := h.do(nil, http.MethodPost, "/a2a/"+target, continuationRequest(callerTask.Result.Task.ID), map[string]string{"Authorization": "Bearer " + activeToken, "X-OLP-Agent-Identity": assertion, "A2A-Version": "1.0"})
+		activeResult <- body
+	}()
+	select {
+	case <-holdStarted:
+	case <-time.After(10 * time.Second):
+		holdRelease <- struct{}{}
+		t.Fatal("continuation did not reach the remote agent")
+	}
 	callerPolicy := h.want(owner, http.MethodGet, "/api/v1/api-keys/"+revokedCaller["id"].(string), nil, nil, http.StatusOK)
 	h.want(owner, http.MethodPost, "/api/v1/api-keys/"+revokedCaller["id"].(string)+"/revoke", nil, withMatch(callerPolicy, idem("revoke-a2a-caller")), http.StatusOK)
 	h.refresh()
+	select {
+	case body := <-activeResult:
+		var response struct {
+			Error *struct{} `json:"error"`
+		}
+		if err := json.Unmarshal(body, &response); err != nil || response.Error == nil {
+			t.Fatalf("revoked continuation did not return a JSON-RPC error: %s", body)
+		}
+	case <-time.After(8 * time.Second):
+		holdRelease <- struct{}{}
+		t.Fatal("revoked continuation did not stop within the authority freshness interval")
+	}
+	holdRemote.Store(false)
+	skipCallback.Store(false)
+	var activeDebitState string
+	if err := h.Pool.QueryRow(t.Context(), `SELECT d.state FROM olp.a2a_task_capabilities c JOIN olp.execution_debits d ON d.id=c.dispatch_id WHERE c.task_id=$1 ORDER BY d.created_at DESC LIMIT 1`, callerTask.Result.Task.ID).Scan(&activeDebitState); err != nil || activeDebitState != "outcome_unknown" {
+		t.Fatalf("revoked in-flight continuation did not retain unknown exposure: %s %v", activeDebitState, err)
+	}
 	assertRevokedSends("caller", callerNewToken, callerContinuationToken, callerTask.Result.Task.ID)
 	options := h.want(owner, http.MethodGet, "/api/v1/delegation-options?api_key_id="+key["id"].(string), nil, nil, http.StatusOK)
 	eligibleAgent := false
@@ -2750,9 +2794,12 @@ func TestWorkloadAgentDelegatesKeyForA2A(t *testing.T) {
 	if !eligibleAgent {
 		t.Fatalf("member consent omitted an eligible A2A agent: %v", options)
 	}
+	consentCount := 0
 	consentFor := func(keyID string) string {
 		t.Helper()
-		h.want(owner, http.MethodPost, "/api/v1/profile/reauthenticate", map[string]any{"current_password": accessPassword, "purpose": "agent_delegation", "resource_id": keyID}, nil, http.StatusNoContent)
+		consentCount++
+		source := fmt.Sprintf("192.0.2.%d", 1+(consentCount-1)/5)
+		h.want(owner, http.MethodPost, "/api/v1/profile/reauthenticate", map[string]any{"current_password": accessPassword, "purpose": "agent_delegation", "resource_id": keyID}, map[string]string{"X-Test-Client-IP": source}, http.StatusNoContent)
 		consent := h.want(owner, http.MethodPost, "/api/v1/delegation-consents", map[string]any{"agent_id": agentID, "api_key_id": keyID, "scopes": []string{"agents", "inference"}, "allowed_agents": []string{target}, "allowed_routes": []string{"delegated-callback"}}, nil, http.StatusCreated)
 		memberResponse, memberBody := h.do(nil, http.MethodPost, "/v1/delegations", bounds, map[string]string{"Authorization": "Bearer " + assertion, "X-OLP-Delegation-Consent": consent["consent"].(string)})
 		if memberResponse.StatusCode != http.StatusCreated {
@@ -2866,6 +2913,41 @@ func TestWorkloadAgentDelegatesKeyForA2A(t *testing.T) {
 	}
 	replacement := h.want(owner, http.MethodPost, "/api/v1/api-keys", map[string]any{"name": "replacement A2A key", "project_id": project, "scopes": []string{"agents", "inference", "delegate"}, "allowed_agents": []string{target}, "allowed_routes": []string{"delegated-callback"}}, idem("replacement-a2a-key"), http.StatusCreated)
 	h.refresh()
+	callbackAccounting := &captureSink{}
+	h.Gateway.Sink = callbackAccounting
+	_, rotatedContinuation := h.do(nil, http.MethodPost, "/a2a/"+target, continuationRequest(memberResult.Result.Task.ID), map[string]string{"Authorization": "Bearer " + consentFor(replacement["id"].(string)), "X-OLP-Agent-Identity": assertion, "A2A-Version": "1.0"})
+	if !bytes.Contains(rotatedContinuation, []byte("TASK_STATE_INPUT_REQUIRED")) {
+		t.Fatalf("replacement key could not continue its member's task: %s", rotatedContinuation)
+	}
+	if status := <-callbackStatus; status != http.StatusOK {
+		t.Fatalf("rotated task callback refused: %d", status)
+	}
+	rotatedCapability := <-callbackCapability
+	callbackEvent := callbackAccounting.last()
+	var callbackRecords int
+	if err := h.Pool.QueryRow(t.Context(), `SELECT count(*) FROM olp.a2a_task_callback_accounting WHERE kind='inference' AND accounting_id=$1`, callbackEvent.AccountingID).Scan(&callbackRecords); err != nil || callbackRecords != 1 || callbackEvent.KeyID != key["id"] || callbackEvent.AgentPrincipalID != agentID || callbackEvent.DelegationPairDigest != memberPair {
+		t.Fatalf("rotated callback lost original accounting owner or was counted more than once: %+v records=%d err=%v", callbackEvent, callbackRecords, err)
+	}
+	currentOriginal := h.want(owner, http.MethodGet, keyPath, nil, nil, http.StatusOK)
+	h.want(owner, http.MethodPatch, keyPath, map[string]any{"requests_per_minute": 1}, etagHeader(currentOriginal), http.StatusOK)
+	h.refresh()
+	callbackInput := map[string]any{"model": "delegated-callback", "messages": []any{map[string]string{"role": "user", "content": "hello"}}}
+	firstCallback, firstCallbackBody := h.do(nil, http.MethodPost, "/v1/chat/completions", callbackInput, map[string]string{"Authorization": "Bearer " + rotatedCapability})
+	if firstCallback.StatusCode != http.StatusOK {
+		t.Fatalf("original owner callback did not use its remaining request allowance: %d %s", firstCallback.StatusCode, firstCallbackBody)
+	}
+	modelCalls := modelProvider.chatCalls.Load()
+	_, limitedContinuation := h.do(nil, http.MethodPost, "/a2a/"+target, continuationRequest(memberResult.Result.Task.ID), map[string]string{"Authorization": "Bearer " + consentFor(replacement["id"].(string)), "X-OLP-Agent-Identity": assertion, "A2A-Version": "1.0"})
+	if !bytes.Contains(limitedContinuation, []byte("TASK_STATE_INPUT_REQUIRED")) {
+		t.Fatalf("replacement key could not continue after original owner reached its callback limit: %s", limitedContinuation)
+	}
+	if status := <-callbackStatus; status != http.StatusTooManyRequests || modelProvider.chatCalls.Load() != modelCalls {
+		t.Fatalf("rotated callback bypassed original owner budget: status=%d model calls=%d", status, modelProvider.chatCalls.Load()-modelCalls)
+	}
+	<-callbackCapability
+	currentOriginal = h.want(owner, http.MethodGet, keyPath, nil, nil, http.StatusOK)
+	h.want(owner, http.MethodPatch, keyPath, map[string]any{"requests_per_minute": nil}, etagHeader(currentOriginal), http.StatusOK)
+	h.refresh()
 	memberRead := struct {
 		JSONRPC string        `json:"jsonrpc"`
 		ID      int           `json:"id"`
@@ -2881,12 +2963,12 @@ func TestWorkloadAgentDelegatesKeyForA2A(t *testing.T) {
 		t.Fatalf("replacement key could not subscribe to its member's task: %s", memberSubscription)
 	}
 	_, memberCanceled := h.do(nil, http.MethodPost, "/a2a/"+target, map[string]any{"jsonrpc": "2.0", "id": 5, "method": "CancelTask", "params": map[string]any{"id": memberResult.Result.Task.ID}}, map[string]string{"Authorization": "Bearer " + consentFor(replacement["id"].(string)), "X-OLP-Agent-Identity": assertion, "A2A-Version": "1.0"})
-	if !bytes.Contains(memberCanceled, []byte("TASK_STATE_CANCELED")) || originalOAuthCalls.Load() != 5 || replacementOAuthCalls.Load() != 0 || len(oauthAuthority.Issued()) < 2 {
+	if !bytes.Contains(memberCanceled, []byte("TASK_STATE_CANCELED")) || originalOAuthCalls.Load() != 7 || replacementOAuthCalls.Load() != 0 || len(oauthAuthority.Issued()) < 2 {
 		t.Fatalf("replacement key did not use the original rotated grant and endpoint: %s", memberCanceled)
 	}
 	memberTaskPath := "/api/v1/a2a-tasks/" + string(secondMemberResult.Result.Task.ID)
 	canceled := h.want(manager, http.MethodPost, memberTaskPath+"/cancel", nil, nil, http.StatusOK)
-	if canceled["id"] != string(secondMemberResult.Result.Task.ID) || canceled["contextId"] != string(secondMemberResult.Result.Task.ID) || canceled["status"].(map[string]any)["state"] != string(protocol.TaskStateCanceled) || originalOAuthCalls.Load() != 6 || replacementOAuthCalls.Load() != 0 {
+	if canceled["id"] != string(secondMemberResult.Result.Task.ID) || canceled["contextId"] != string(secondMemberResult.Result.Task.ID) || canceled["status"].(map[string]any)["state"] != string(protocol.TaskStateCanceled) || originalOAuthCalls.Load() != 8 || replacementOAuthCalls.Load() != 0 {
 		t.Fatalf("project operator could not cancel delegated task: %v", canceled)
 	}
 	var stored string
@@ -2926,6 +3008,7 @@ func TestWorkloadAgentDelegatesKeyForA2A(t *testing.T) {
 	}
 	requireOAuth.Store(false)
 	watchCancellation.Store(true)
+	cardUnavailable.Store(true)
 	monitorContext, stopMonitor := context.WithCancel(t.Context())
 	defer stopMonitor()
 	go (&a2a.TaskMonitor{Server: h.A2A}).Run(monitorContext)
@@ -2935,6 +3018,6 @@ func TestWorkloadAgentDelegatesKeyForA2A(t *testing.T) {
 			t.Fatalf("revocation sent %q instead of cancellation", method)
 		}
 	case <-time.After(15 * time.Second):
-		t.Fatal("revoked agent task was not canceled")
+		t.Fatal("revoked agent task was not canceled while its card was unavailable")
 	}
 }

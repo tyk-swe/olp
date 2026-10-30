@@ -100,7 +100,7 @@
     enabled: access.allows('GET /api/v1/mcp-servers')
   }));
   const agents = createQuery(() => ({
-    queryKey: ['agent-publications', 'agents'],
+    queryKey: agentKeys.agents(),
     queryFn: () => listPublications('agents'),
     enabled: access.allows('GET /api/v1/agents')
   }));

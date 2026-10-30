@@ -224,14 +224,14 @@ func (m *Manager) authenticateDelegation(ctx context.Context, token, assertion s
 	return key.Delegated(scopes, routes, toolsets, agents, *agent, member, pairDigest, hex.EncodeToString(m.auth.Digest(secrets.DelegationTokenDigest, token)), boundDelegationExpiry(expires, agent.ExpiresAt)), nil
 }
 
-func (m *Manager) authorizeDelegatedTask(ctx context.Context, digest []byte, expectedKey, expectedProject, publication string) (*access.Authority, error) {
+func (m *Manager) authorizeDelegatedTask(ctx context.Context, digest []byte, expectedKey, expectedProject, publication, expectedPair, expectedRevision string) (*access.Authority, error) {
 	if m == nil || m.pool == nil {
 		return nil, ErrInvalidKey
 	}
 	m.mu.RLock()
 	snapshot := m.authority.id
 	m.mu.RUnlock()
-	tx, err := m.delegationTransaction(ctx, snapshot)
+	tx, err := m.delegationReadTransaction(ctx, snapshot)
 	if err != nil {
 		return nil, err
 	}
@@ -247,7 +247,11 @@ func (m *Manager) authorizeDelegatedTask(ctx context.Context, digest []byte, exp
 	if queryErr != nil {
 		return nil, ErrStaleAuthority
 	}
-	if keyID != expectedKey || project != expectedProject || !slices.Contains(scopes, "agents") || !slices.Contains(agents, publication) {
+	if project != expectedProject || expectedPair == "" && keyID != expectedKey || expectedRevision != "" && revision != expectedRevision || !slices.Contains(scopes, "agents") || !slices.Contains(agents, publication) {
+		return nil, ErrInvalidKey
+	}
+	pair, member := m.delegationPair(project, keyID, agentID, memberID)
+	if expectedPair != "" && pair != expectedPair {
 		return nil, ErrInvalidKey
 	}
 	if err := memberDelegationAllowed(ctx, tx, memberID, project); err != nil {
@@ -255,18 +259,18 @@ func (m *Manager) authorizeDelegatedTask(ctx context.Context, digest []byte, exp
 	}
 	m.mu.RLock()
 	key, keyExists := m.authority.agentPrincipals[keyID]
+	owner, ownerExists := m.authority.agentPrincipals[expectedKey]
 	policy, principal, currentSnapshot, _, agentExists := m.authority.taskCapabilityPrincipal(agentID, revision, &expires)
 	agent := policy.TaskAuthority(principal, currentSnapshot, revision, &expires, "", nil)
 	current := agentExists && m.authority.currentAgentPrincipal(agent, "agents", publication, project, time.Now())
 	m.mu.RUnlock()
-	if !keyExists || key.WorkloadIssuerID != nil || key.ProjectID == nil || *key.ProjectID != project || !slices.Contains(key.Policy.Scopes, "delegate") || !current || !delegationResourcesAllowed(agent, key, routes, toolsets, agents, time.Now()) {
+	if !keyExists || key.WorkloadIssuerID != nil || key.ProjectID == nil || *key.ProjectID != project || !slices.Contains(key.Policy.Scopes, "delegate") || !ownerExists || owner.WorkloadIssuerID != nil || owner.ProjectID == nil || *owner.ProjectID != project || !slices.Contains(owner.Policy.Scopes, "delegate") || !current || !delegationResourcesAllowed(agent, key, routes, toolsets, agents, time.Now()) || !delegationResourcesAllowed(agent, owner, routes, toolsets, agents, time.Now()) {
 		return nil, ErrInvalidKey
 	}
-	pair, member := m.delegationPair(project, keyID, agentID, memberID)
 	if err := tx.Commit(ctx); err != nil {
 		return nil, ErrStaleAuthority
 	}
-	return key.Delegated(scopes, routes, toolsets, agents, agent, member, pair, hex.EncodeToString(digest), expires), nil
+	return owner.Delegated(scopes, routes, toolsets, agents, agent, member, pair, hex.EncodeToString(digest), expires), nil
 }
 
 func (m *Manager) AuthorizeDelegatedAgentTask(ctx context.Context, digest, keyID, project, publication string) error {
@@ -274,7 +278,7 @@ func (m *Manager) AuthorizeDelegatedAgentTask(ctx context.Context, digest, keyID
 	if err != nil {
 		return ErrInvalidKey
 	}
-	_, err = m.authorizeDelegatedTask(ctx, raw, keyID, project, publication)
+	_, err = m.authorizeDelegatedTask(ctx, raw, keyID, project, publication, "", "")
 	return err
 }
 
@@ -306,6 +310,14 @@ func memberDelegationAllowed(ctx context.Context, tx pgx.Tx, memberID *string, p
 }
 
 func (m *Manager) delegationTransaction(ctx context.Context, expected string) (pgx.Tx, error) {
+	return m.delegationTransactionWithLock(ctx, expected, true)
+}
+
+func (m *Manager) delegationReadTransaction(ctx context.Context, expected string) (pgx.Tx, error) {
+	return m.delegationTransactionWithLock(ctx, expected, false)
+}
+
+func (m *Manager) delegationTransactionWithLock(ctx context.Context, expected string, exclusive bool) (pgx.Tx, error) {
 	m.mu.RLock()
 	status := m.authority
 	m.mu.RUnlock()
@@ -317,7 +329,11 @@ func (m *Manager) delegationTransaction(ctx context.Context, expected string) (p
 		return nil, ErrStaleAuthority
 	}
 	var current string
-	if err := tx.QueryRow(ctx, "SELECT authority_id::text FROM olp.installation WHERE singleton FOR UPDATE").Scan(&current); err != nil || current != status.id {
+	query := "SELECT authority_id::text FROM olp.installation WHERE singleton FOR SHARE"
+	if exclusive {
+		query = "SELECT authority_id::text FROM olp.installation WHERE singleton FOR UPDATE"
+	}
+	if err := tx.QueryRow(ctx, query).Scan(&current); err != nil || current != status.id {
 		tx.Rollback(ctx)
 		return nil, ErrStaleAuthority
 	}

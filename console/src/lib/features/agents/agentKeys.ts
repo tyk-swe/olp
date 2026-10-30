@@ -1,6 +1,10 @@
 export const agentKeys = {
   grants: () => ['mcp-grants'] as const,
   servers: () => ['agent-publications', 'servers'] as const,
+  agents: () => ['agent-publications', 'agents'] as const,
+  toolsets: () => ['agent-publications', 'toolsets'] as const,
+  delegationOptions: (keyID: string) =>
+    ['agent-delegation-options', keyID] as const,
   runs: (project: string, cursor?: string) =>
     ['agent-runs', project, cursor ?? ''] as const,
   run: (runID: string) => ['agent-run', runID] as const,

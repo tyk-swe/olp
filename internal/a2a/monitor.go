@@ -17,6 +17,7 @@ import (
 type TaskMonitor struct {
 	Server *Server
 	Log    *slog.Logger
+	cursor string
 }
 
 type taskAuthorizer interface {
@@ -66,13 +67,21 @@ func (m *TaskMonitor) Run(ctx context.Context) {
 }
 
 func (m *TaskMonitor) poll(ctx context.Context, authority taskAuthorizer, workers chan struct{}, outstanding *sync.WaitGroup) {
+	for {
+		if !m.pollPage(ctx, authority, workers, outstanding) {
+			return
+		}
+	}
+}
+
+func (m *TaskMonitor) pollPage(ctx context.Context, authority taskAuthorizer, workers chan struct{}, outstanding *sync.WaitGroup) bool {
 	rows, err := m.Server.Ledger.Pool.Query(ctx, `SELECT t.id::text,t.api_key_id::text,t.project_id::text,t.publication_id::text,t.revision_id::text,t.upstream_id,t.deadline_at,COALESCE(t.caller_workload_revision_id::text,''),t.caller_expires_at,v.definition,COALESCE(t.oauth_binding_digest,''),t.delegation_token_digest
  FROM olp.a2a_tasks t JOIN olp.agent_publication_revisions v ON v.id=t.revision_id
- WHERE t.state IN ('active','outcome_unknown') AND (t.cancel_claimed_until IS NULL OR t.cancel_claimed_until<=now())
- ORDER BY t.cancel_claimed_until NULLS FIRST,t.deadline_at,t.id`)
+ WHERE t.state IN ('active','outcome_unknown') AND (t.cancel_claimed_until IS NULL OR t.cancel_claimed_until<=now()) AND t.id>COALESCE(NULLIF($1,'')::uuid,'00000000-0000-0000-0000-000000000000'::uuid)
+ ORDER BY t.id LIMIT 128`, m.cursor)
 	if err != nil {
 		m.warn("agent task monitor could not read tasks")
-		return
+		return false
 	}
 	tasks, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (monitoredTask, error) {
 		var task monitoredTask
@@ -81,18 +90,20 @@ func (m *TaskMonitor) poll(ctx context.Context, authority taskAuthorizer, worker
 	})
 	if err != nil {
 		m.warn("agent task monitor could not read tasks")
-		return
+		return false
 	}
 	for _, task := range tasks {
 		if time.Now().Before(task.Deadline) && m.authorized(ctx, authority, task) {
+			m.cursor = task.ID
 			continue
 		}
 		select {
 		case workers <- struct{}{}:
 		default:
-			return
+			return false
 		}
 		claimed, err := m.claim(ctx, task.ID)
+		m.cursor = task.ID
 		if err != nil || !claimed {
 			<-workers
 			if err != nil {
@@ -107,6 +118,11 @@ func (m *TaskMonitor) poll(ctx context.Context, authority taskAuthorizer, worker
 			m.cancel(ctx, task)
 		}()
 	}
+	if len(tasks) < 128 {
+		m.cursor = ""
+		return false
+	}
+	return true
 }
 
 func (m *TaskMonitor) authorized(ctx context.Context, authority taskAuthorizer, task monitoredTask) bool {
@@ -147,9 +163,6 @@ func (m *TaskMonitor) cancelState(ctx context.Context, task monitoredTask) strin
 		return "outcome_unknown"
 	}
 	defer clear(credential)
-	if _, err := m.Server.loadCardWithCredential(ctx, *definition.Agent, credential); err != nil {
-		return "outcome_unknown"
-	}
 	transport, headers, cleanup, err := m.Server.transportWithCredential(ctx, *definition.Agent, credential)
 	if err != nil {
 		return "outcome_unknown"

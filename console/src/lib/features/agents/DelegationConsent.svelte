@@ -12,6 +12,7 @@
   } from '$lib/features/access/profile/api';
   import { useRole } from '$lib/features/access/session/useRole.svelte';
   import { usePrincipalLifetime } from '$lib/forms/mutationIntent.svelte';
+  import { agentKeys } from './agentKeys';
   import {
     createDelegationConsent,
     getDelegationOptions,
@@ -68,7 +69,7 @@
   );
   const selectedKey = $derived(manageableKeys.find((key) => key.id === keyID));
   const options = createQuery(() => ({
-    queryKey: ['agent-delegation-options', keyID] as const,
+    queryKey: agentKeys.delegationOptions(keyID),
     queryFn: ({ queryKey, signal }) =>
       getDelegationOptions(queryKey[1], signal),
     enabled: !!selectedKey && role.allows('GET /api/v1/delegation-options')

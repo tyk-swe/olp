@@ -223,7 +223,7 @@ func (s *Server) pauseWorkflow(ctx context.Context, x *call, completion *wire.Co
 		return x.workflow.startedAt
 	}()
 	priorCost := x.workflow.priorCost.Add(x.settledCost()).Add(x.workflow.toolCost)
-	state, err := json.Marshal(workflowResumeState{RunLimits: x.generation.runLimits, PriorCost: priorCost.String(), CostKnown: costKnown, StartedAt: startedAt, Family: x.family, Transcript: x.generation.parsed.Field(workflowTranscriptField(x.family)), Completion: completion, Iteration: iteration, Calls: x.workflow.calls, ResponseMCP: x.workflow.responseMCP, ResponseItems: x.workflow.responseItems, RecoveryCalls: x.workflowRecoveryCalls})
+	state, err := json.Marshal(workflowResumeState{RunLimits: x.generation.runLimits, PriorCost: priorCost.String(), CostKnown: costKnown, StartedAt: startedAt, Family: x.family, Transcript: x.generation.parsed.Field(x.family.WorkflowTranscriptField()), Completion: completion, Iteration: iteration, Calls: x.workflow.calls, ResponseMCP: x.workflow.responseMCP, ResponseItems: x.workflow.responseItems, RecoveryCalls: x.workflowRecoveryCalls})
 	if err != nil {
 		return nil, serverError(503, "tool_approval_unavailable", "The approval could not be prepared.")
 	}

@@ -39,12 +39,7 @@ type WorkflowPieceLocation struct {
 }
 
 func (exchange WorkflowExchange) PieceLocations(family wire.Format) []WorkflowPieceLocation {
-	field := "messages"
-	if family == wire.Responses {
-		field = "input"
-	} else if family.Surface() == "gemini" {
-		field = "contents"
-	}
+	field := family.WorkflowTranscriptField()
 	return slices.Collect(func(yield func(WorkflowPieceLocation) bool) {
 		for _, piece := range exchange.pieces {
 			pointer := "/" + field + "/" + strconv.Itoa(piece.row)
@@ -99,12 +94,7 @@ func PlanWorkflowPruning(request *wire.Request) (*WorkflowPruning, error) {
 	if request == nil {
 		return nil, unsupported("workflow transcript")
 	}
-	field := "messages"
-	if request.Family == wire.Responses {
-		field = "input"
-	} else if request.Family.Surface() == "gemini" {
-		field = "contents"
-	}
+	field := request.Family.WorkflowTranscriptField()
 	var rows []Object
 	if err := json.Unmarshal(request.Field(field), &rows); err != nil {
 		if request.Family == wire.Responses {

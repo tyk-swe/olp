@@ -34,6 +34,7 @@ import {
 } from '$lib/features/routes/api';
 import { listProviderModelInventory } from '$lib/features/providers/api/models';
 import { listPublications } from '$lib/features/agents/api';
+import { agentKeys } from '$lib/features/agents/agentKeys';
 import { inspectionDialects } from '$lib/features/routes/inspectionDialects';
 import { useRole } from '$lib/features/access/session/useRole.svelte';
 import { authLifecycle } from '$lib/features/access/session/lifecycle';
@@ -499,7 +500,7 @@ export class RouteDraftEditorState {
       queryFn: ({ signal }) => listProviderModelInventory(true, signal)
     }));
     this.toolsets = createQuery(() => ({
-      queryKey: ['agent-publications', 'toolsets'],
+      queryKey: agentKeys.toolsets(),
       queryFn: () => listPublications('toolsets'),
       enabled: this.behavior.tool_execution === 'gateway'
     }));

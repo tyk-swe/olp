@@ -220,34 +220,44 @@ func (s *Server) send(w http.ResponseWriter, r *http.Request, authority access.A
 		reply(w, request.ID, nil, failure)
 		return
 	}
-	credential, binding, err := s.preparedCredential(r.Context(), authority, prepared)
+	if !s.streamAuthorized(r, authority, prepared.Revision) {
+		fail(w, request.ID, -32603, "Authorization revoked")
+		return
+	}
+	ctx, stop := s.streamContext(r, authority, prepared.Revision)
+	defer stop()
+	credential, binding, err := s.preparedCredential(ctx, authority, prepared)
 	if err != nil {
 		fail(w, request.ID, -32603, "Agent credential unavailable")
 		return
 	}
 	defer clear(credential)
-	if _, err := s.loadCardWithCredential(r.Context(), *prepared.Revision.Definition.Agent, credential); err != nil {
+	if !s.streamAuthorized(r, authority, prepared.Revision) {
+		fail(w, request.ID, -32603, "Authorization revoked")
+		return
+	}
+	if _, err := s.loadCardWithCredential(ctx, *prepared.Revision.Definition.Agent, credential); err != nil {
 		fail(w, request.ID, -32603, "Internal error")
 		return
 	}
-	transport, headers, cleanup, err := s.transportWithCredential(r.Context(), *prepared.Revision.Definition.Agent, credential)
+	transport, headers, cleanup, err := s.transportWithCredential(ctx, *prepared.Revision.Definition.Agent, credential)
 	if err != nil {
 		fail(w, request.ID, -32603, "Internal error")
 		return
 	}
 	defer cleanup()
-	res, err := s.Ledger.reserve(r.Context(), authority, prepared.Revision, release)
+	res, err := s.Ledger.reserve(ctx, authority, prepared.Revision, release)
 	if err != nil {
 		fail(w, request.ID, -32603, "Internal error")
 		return
 	}
-	capability, err := s.Ledger.admitTask(r.Context(), res, authority, prepared.PublicTaskID, prepared.Revision)
+	capability, err := s.Ledger.admitTask(ctx, res, authority, prepared.PublicTaskID, prepared.Revision)
 	if err != nil {
 		s.Ledger.release(r.Context(), res)
 		fail(w, request.ID, -32002, "Agent task limit reached")
 		return
 	}
-	leases, err := s.Ledger.admitRate(r.Context(), authority)
+	leases, err := s.Ledger.admitRate(ctx, authority)
 	if err != nil {
 		s.Ledger.release(r.Context(), res)
 		fail(w, request.ID, -32002, "Agent send rate exceeded")
@@ -255,19 +265,19 @@ func (s *Server) send(w http.ResponseWriter, r *http.Request, authority access.A
 	}
 	dispatched := false
 	defer func() { finishRate(r.Context(), leases, dispatched) }()
-	if err := s.Runtime.AuthorizeAgentResource(authority, "agents", prepared.Revision.PublicationID, prepared.Revision.ID, prepared.Revision.ProjectID); err != nil {
+	if !s.streamAuthorized(r, authority, prepared.Revision) {
 		s.Ledger.release(r.Context(), res)
-		fail(w, request.ID, -32603, "Internal error")
+		fail(w, request.ID, -32603, "Authorization revoked")
 		return
 	}
-	if err := s.Ledger.Store.MarkDispatched(r.Context(), res.DispatchID, res.ClaimID); err != nil {
+	if err := s.Ledger.Store.MarkDispatched(ctx, res.DispatchID, res.ClaimID); err != nil {
 		s.Ledger.release(r.Context(), res)
 		fail(w, request.ID, -32603, "Internal error")
 		return
 	}
 	dispatched = true
 	headers["X-OLP-Task-Capability"] = []string{capability}
-	upstream, err := transport.SendMessage(r.Context(), headers, &prepared.Params)
+	upstream, err := transport.SendMessage(ctx, headers, &prepared.Params)
 	if err != nil {
 		s.Ledger.unknown(r.Context(), res)
 		fail(w, request.ID, -32603, "Internal error")
@@ -285,6 +295,10 @@ func (s *Server) send(w http.ResponseWriter, r *http.Request, authority access.A
 	if err != nil {
 		s.Ledger.unknown(r.Context(), res)
 		fail(w, request.ID, -32603, "Internal error")
+		return
+	}
+	if !s.streamAuthorized(r, authority, prepared.Revision) {
+		fail(w, request.ID, -32603, "Authorization revoked")
 		return
 	}
 	result, err := marshalEvent(prepared.Revision.Definition.Agent.Protocol, publicResult(upstream, publicID))
@@ -332,44 +346,60 @@ func (s *Server) getTask(w http.ResponseWriter, r *http.Request, authority acces
 		fail(w, request.ID, -32001, "Task not found")
 		return
 	}
-	credential, err := s.agentTaskCredential(r.Context(), authority, pinned, owned.Binding)
+	if !s.streamAuthorized(r, authority, pinned) {
+		fail(w, request.ID, -32001, "Task not found")
+		return
+	}
+	ctx, stop := s.streamContext(r, authority, pinned)
+	defer stop()
+	credential, err := s.agentTaskCredential(ctx, authority, pinned, owned.Binding)
 	if err != nil {
 		fail(w, request.ID, -32603, "Agent credential unavailable")
 		return
 	}
 	defer clear(credential)
-	if _, err := s.loadCardWithCredential(r.Context(), *pinned.Definition.Agent, credential); err != nil {
-		fail(w, request.ID, -32603, "Internal error")
-		return
-	}
-	if err := s.Runtime.AuthorizeAgentResource(authority, "agents", pinned.PublicationID, pinned.ID, pinned.ProjectID); err != nil {
+	if !s.streamAuthorized(r, authority, pinned) {
 		fail(w, request.ID, -32001, "Task not found")
 		return
 	}
-	transport, headers, cleanup, err := s.transportWithCredential(r.Context(), *pinned.Definition.Agent, credential)
+	if _, err := s.loadCardWithCredential(ctx, *pinned.Definition.Agent, credential); err != nil {
+		fail(w, request.ID, -32603, "Internal error")
+		return
+	}
+	if !s.streamAuthorized(r, authority, pinned) {
+		fail(w, request.ID, -32001, "Task not found")
+		return
+	}
+	transport, headers, cleanup, err := s.transportWithCredential(ctx, *pinned.Definition.Agent, credential)
 	if err != nil {
 		fail(w, request.ID, -32603, "Internal error")
 		return
 	}
 	defer cleanup()
 	if request.Method == "CancelTask" {
-		if err := s.Ledger.recordTaskState(r.Context(), owned.ID, "outcome_unknown"); err != nil {
+		if err := s.Ledger.recordTaskState(ctx, owned.ID, "outcome_unknown"); err != nil {
 			fail(w, request.ID, -32603, "Internal error")
 			return
 		}
 	}
 	upstream, err := func() (*protocol.Task, error) {
 		if request.Method == "CancelTask" {
-			return transport.CancelTask(r.Context(), headers, &protocol.CancelTaskRequest{ID: protocol.TaskID(owned.UpstreamID)})
+			return transport.CancelTask(ctx, headers, &protocol.CancelTaskRequest{ID: protocol.TaskID(owned.UpstreamID)})
 		}
-		return transport.GetTask(r.Context(), headers, &protocol.GetTaskRequest{ID: protocol.TaskID(owned.UpstreamID), HistoryLength: params.HistoryLength})
+		return transport.GetTask(ctx, headers, &protocol.GetTaskRequest{ID: protocol.TaskID(owned.UpstreamID), HistoryLength: params.HistoryLength})
 	}()
 	if err != nil || upstream == nil || string(upstream.ID) != owned.UpstreamID {
 		fail(w, request.ID, -32603, "Internal error")
 		return
 	}
-	if err := s.Ledger.recordTaskState(r.Context(), owned.ID, taskState(upstream.Status.State)); err != nil {
+	settleCtx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 5*time.Second)
+	defer cancel()
+	if err := s.Ledger.recordTaskState(settleCtx, owned.ID, taskState(upstream.Status.State)); err != nil {
 		fail(w, request.ID, -32603, "Internal error")
+		return
+	}
+	if !s.streamAuthorized(r, authority, pinned) {
+		fail(w, request.ID, -32603, "Authorization revoked")
 		return
 	}
 	result, err := marshalTask(pinned.Definition.Agent.Protocol, publicTask(upstream, owned.ID))

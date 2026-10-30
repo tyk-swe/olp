@@ -33,12 +33,12 @@ func (m *Manager) AuthenticateTaskCapability(ctx context.Context, token string) 
 }
 
 func (m *Manager) authenticateTaskCapability(ctx context.Context, digest []byte) (*access.Authority, error) {
-	var keyID, project, publication, revision, workloadRevision, endUser string
+	var keyID, project, publication, revision, workloadRevision, endUser, pair, delegationRevision string
 	var callerExpires *time.Time
 	var expires time.Time
 	var delegation []byte
 	var definition agentcontract.Draft
-	err := m.taskCapabilityStore().QueryRow(ctx, `SELECT d.api_key_id::text,d.project_id::text,c.publication_id::text,c.revision_id::text,COALESCE(c.caller_workload_revision_id::text,''),c.caller_expires_at,c.expires_at,c.end_user_digest,c.delegation_token_digest,v.definition FROM olp.a2a_task_capabilities c JOIN olp.execution_debits d ON d.id=c.dispatch_id JOIN olp.agent_publication_revisions v ON v.id=c.revision_id LEFT JOIN olp.a2a_tasks t ON t.id=c.task_id WHERE c.token_digest=$1 AND c.expires_at>now() AND ((c.task_id IS NULL AND d.state='dispatched' AND EXISTS(SELECT 1 FROM olp.a2a_task_admissions a WHERE a.dispatch_id=c.dispatch_id)) OR (t.state='active' AND t.deadline_at>now()))`, digest).Scan(&keyID, &project, &publication, &revision, &workloadRevision, &callerExpires, &expires, &endUser, &delegation, &definition)
+	err := m.taskCapabilityStore().QueryRow(ctx, `SELECT COALESCE(t.api_key_id,d.api_key_id)::text,d.project_id::text,c.publication_id::text,c.revision_id::text,COALESCE(CASE WHEN t.id IS NULL THEN c.caller_workload_revision_id ELSE t.caller_workload_revision_id END::text,''),CASE WHEN t.id IS NULL OR t.delegation_pair_digest<>'' THEN c.caller_expires_at ELSE t.caller_expires_at END,c.expires_at,CASE WHEN t.id IS NULL THEN c.end_user_digest ELSE original.end_user_digest END,c.delegation_token_digest,v.definition,COALESCE(t.delegation_pair_digest,''),COALESCE(original_delegation.issuer_revision::text,'') FROM olp.a2a_task_capabilities c JOIN olp.execution_debits d ON d.id=c.dispatch_id JOIN olp.agent_publication_revisions v ON v.id=c.revision_id LEFT JOIN olp.a2a_tasks t ON t.id=c.task_id LEFT JOIN olp.a2a_task_capabilities original ON original.dispatch_id=t.dispatch_id LEFT JOIN olp.agent_delegations original_delegation ON original_delegation.token_digest=decode(t.delegation_token_digest,'hex') WHERE c.token_digest=$1 AND c.expires_at>now() AND (t.id IS NULL OR original.dispatch_id IS NOT NULL) AND ((c.task_id IS NULL AND d.state='dispatched' AND EXISTS(SELECT 1 FROM olp.a2a_task_admissions a WHERE a.dispatch_id=c.dispatch_id)) OR (t.state='active' AND t.deadline_at>now()))`, digest).Scan(&keyID, &project, &publication, &revision, &workloadRevision, &callerExpires, &expires, &endUser, &delegation, &definition, &pair, &delegationRevision)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrInvalidKey
 	}
@@ -57,7 +57,7 @@ func (m *Manager) authenticateTaskCapability(ctx context.Context, digest []byte)
 	if !ok {
 		return nil, ErrInvalidKey
 	}
-	currentPolicy, err := m.taskCapabilityPolicy(ctx, policy, delegation, keyID, project, publication)
+	currentPolicy, err := m.taskCapabilityPolicy(ctx, policy, delegation, keyID, project, publication, pair, delegationRevision)
 	if err != nil {
 		return nil, err
 	}
@@ -73,11 +73,17 @@ func (m *Manager) authenticateTaskCapability(ctx context.Context, digest []byte)
 	return &callback, nil
 }
 
-func (m *Manager) taskCapabilityPolicy(ctx context.Context, policy access.Authority, delegation []byte, keyID, project, publication string) (*access.Authority, error) {
+func (m *Manager) taskCapabilityPolicy(ctx context.Context, policy access.Authority, delegation []byte, keyID, project, publication, pair, revision string) (*access.Authority, error) {
 	if len(delegation) == 0 {
+		if pair != "" {
+			return nil, ErrInvalidKey
+		}
 		return &policy, nil
 	}
-	return m.authorizeDelegatedTask(ctx, delegation, keyID, project, publication)
+	if pair != "" && revision == "" {
+		return nil, ErrInvalidKey
+	}
+	return m.authorizeDelegatedTask(ctx, delegation, keyID, project, publication, pair, revision)
 }
 
 func (state authorityState) taskCapabilityPrincipal(keyID, revision string, expiry *time.Time) (access.Authority, access.Authority, string, *time.Time, bool) {

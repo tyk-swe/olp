@@ -184,12 +184,7 @@ func WorkflowTurns(family wire.Format, completion *wire.Completion, results []Wo
 	if err != nil {
 		return nil, err
 	}
-	field := func() string {
-		if family.Surface() == "gemini" {
-			return "contents"
-		}
-		return "messages"
-	}()
+	field := family.WorkflowTranscriptField()
 	var turns []json.RawMessage
 	if err := json.Unmarshal(fields[field], &turns); err != nil || len(turns) == 0 {
 		return nil, unsupported("workflow turns")
