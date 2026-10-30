@@ -16576,7 +16576,7 @@
             "type": "integer",
             "minimum": 0,
             "maximum": 2,
-            "description": "Maximum additional attempts for a new conversation after an adapter proves nonexecution. Zero disables recovery. Published revisions pin this policy. Exact models, live authority and durable state ownership remain required. Accepted, partial, ambiguous and opaque work never replays."
+            "description": "Maximum additional attempts per request for a new or established single-pin root conversation after an adapter proves nonexecution and the complete input is portable. Zero disables recovery. Published revisions pin this policy. Existing children, socket ownership and unresolved attempts prevent migration. Exact models and live authority remain required. Producing-account reference ownership is preserved. Accepted, partial, ambiguous and opaque work never replays."
           }
         },
         "required": [
@@ -16684,7 +16684,7 @@
             "type": "integer",
             "minimum": 0,
             "maximum": 2,
-            "description": "Maximum additional attempts for a new conversation after an adapter proves nonexecution. Zero disables recovery. Published revisions pin this policy. Exact models, live authority and durable state ownership remain required. Accepted, partial, ambiguous and opaque work never replays."
+            "description": "Maximum additional attempts per request for a new or established single-pin root conversation after an adapter proves nonexecution and the complete input is portable. Zero disables recovery. Published revisions pin this policy. Existing children, socket ownership and unresolved attempts prevent migration. Exact models and live authority remain required. Producing-account reference ownership is preserved. Accepted, partial, ambiguous and opaque work never replays."
           }
         },
         "required": [

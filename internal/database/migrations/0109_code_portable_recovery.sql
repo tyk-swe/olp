@@ -1,5 +1,12 @@
 ALTER TABLE olp.code_bindings ADD COLUMN socket_bound boolean NOT NULL DEFAULT true;
 
+CREATE FUNCTION olp.code_recovery_chain(source uuid) RETURNS TABLE(id uuid,account_id uuid,nonexecution boolean) LANGUAGE sql STABLE AS $$
+    WITH RECURSIVE chain AS (
+        SELECT a.id,a.recovery_from,a.account_id,a.nonexecution FROM olp.code_attempts a WHERE a.id=source
+        UNION ALL SELECT prior.id,prior.recovery_from,prior.account_id,prior.nonexecution FROM olp.code_attempts prior JOIN chain ON prior.id=chain.recovery_from)
+    SELECT chain.id,chain.account_id,chain.nonexecution FROM chain
+$$;
+
 CREATE OR REPLACE FUNCTION olp.code_initial_recovery_safe(root uuid) RETURNS boolean LANGUAGE sql STABLE AS $$
     SELECT EXISTS(SELECT 1 FROM olp.code_bindings b WHERE b.id=root AND b.root_id=b.id AND b.parent_id IS NULL AND b.retired_at IS NULL AND NOT b.socket_bound)
       AND (SELECT count(*) FROM olp.code_bindings WHERE root_id=root)=1

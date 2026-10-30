@@ -15,6 +15,7 @@ import (
 	"github.com/tyk-swe/olp/internal/routing"
 
 	"github.com/coder/websocket"
+	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/codemode"
 )
 
@@ -157,10 +158,9 @@ func TestCodeInitialRecoveryUsesRefreshedGrantAfterProvenRejection(t *testing.T)
 }
 
 func TestCodeRecoveryExplainsNonportableEstablishedState(t *testing.T) {
-	h, ledger, server := newCodeForwardHarness(t)
-	route := h.rt.release.Snapshot.CodeRoutes["coding"]
-	route.InitialRecoveryAttempts = 1
-	h.rt.release.Snapshot.CodeRoutes["coding"] = route
+	h, ledger, server := newCodeForwardHarness(t, codeForwardSetup{
+		Models: []string{"native-model"}, Policy: access.KeyPolicy{Scopes: []string{"inference", "models_read"}}, InitialRecoveryAttempts: 1,
+	})
 	h.mock.set("a", func(w http.ResponseWriter, _ *http.Request) {
 		io.WriteString(w, `{"id":"owned-response","status":"completed","usage":{"input_tokens":1,"output_tokens":0,"total_tokens":1}}`)
 	})
@@ -184,10 +184,9 @@ func TestCodeRecoveryExplainsNonportableEstablishedState(t *testing.T) {
 }
 
 func TestCodeRecoveryEstablishedRequestUsesCompleteInput(t *testing.T) {
-	h, ledger, server := newCodeForwardHarness(t)
-	route := h.rt.release.Snapshot.CodeRoutes["coding"]
-	route.InitialRecoveryAttempts = 1
-	h.rt.release.Snapshot.CodeRoutes["coding"] = route
+	h, ledger, server := newCodeForwardHarness(t, codeForwardSetup{
+		Models: []string{"native-model"}, Policy: access.KeyPolicy{Scopes: []string{"inference", "models_read"}}, InitialRecoveryAttempts: 1,
+	})
 	h.gateway.CodeAuthorizer = &codeRecoveryAuthorizer{}
 	initialBody := []byte(`{"model":"native-model","input":"earlier work"}`)
 	completeBody := []byte(`{ "model":"native-model", "input":"Complete summary of earlier work and the new request", "reasoning":{"effort":"high"} }`)

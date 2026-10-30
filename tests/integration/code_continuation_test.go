@@ -29,16 +29,16 @@ func TestCodeQualificationPortableEstablishedRecoveryPreservesOwners(t *testing.
 		}
 		return nil
 	})
-	initial, _, err := f.request(t.Context(), 0, "portable-established", "", codeBody(), true)
-	if err != nil || initial.StatusCode != http.StatusOK {
-		t.Fatal("initial established request failed", err)
+	initial, _, initialErr := f.request(t.Context(), 0, "portable-established", "", codeBody(), true)
+	if initialErr != nil || initial.StatusCode != http.StatusOK {
+		t.Fatal("initial established request failed", initialErr)
 	}
 	original := codePublicDecode[[]codemode.Binding](t, f.list("bindings"))[0]
 	originalAttempt := codePublicDecode[[]codemode.Attempt](t, f.list("attempts"))[0]
 	f.peer.Faults("initial_quota")
-	response, body, err := f.request(t.Context(), 1, "portable-established", "", codeBody(), true)
-	if err != nil || response.StatusCode != http.StatusOK || string(body) != codexfixture.SSE {
-		t.Fatalf("portable recovery response=%v body=%s err=%v", response, body, err)
+	response, body, recoveryErr := f.request(t.Context(), 1, "portable-established", "", codeBody(), true)
+	if recoveryErr != nil || response.StatusCode != http.StatusOK || string(body) != codexfixture.SSE {
+		t.Fatalf("portable recovery response=%v body=%s err=%v", response, body, recoveryErr)
 	}
 	captures := f.peer.Requests()
 	if len(captures) != 3 || executions.Load() != 2 || captures[0].Header.Get("Authorization") != captures[1].Header.Get("Authorization") || captures[1].Header.Get("Authorization") == captures[2].Header.Get("Authorization") {
@@ -70,9 +70,9 @@ func TestCodeQualificationPortableEstablishedRecoveryPreservesOwners(t *testing.
 	}
 	f.restart(t, "portable-recovery")
 	previous := []byte(`{"model":"gpt-5.4","previous_response_id":"resp-before-recovery","input":[]}`)
-	foreign, guidance, err := f.request(t.Context(), 0, "portable-established", "", previous, true)
-	if err != nil || foreign.StatusCode != http.StatusConflict || !bytes.Contains(guidance, []byte("code_response_account_conflict")) || len(f.peer.Requests()) != len(captures) {
-		t.Fatalf("old response owner changed response=%v body=%s err=%v", foreign, guidance, err)
+	foreign, guidance, ownershipErr := f.request(t.Context(), 0, "portable-established", "", previous, true)
+	if ownershipErr != nil || foreign.StatusCode != http.StatusConflict || !bytes.Contains(guidance, []byte("code_response_account_conflict")) || len(f.peer.Requests()) != len(captures) {
+		t.Fatalf("old response owner changed response=%v body=%s err=%v", foreign, guidance, ownershipErr)
 	}
 	f.success(t, 1, "portable-child", "portable-established")
 	for _, binding := range codePublicDecode[[]codemode.Binding](t, f.list("bindings")) {

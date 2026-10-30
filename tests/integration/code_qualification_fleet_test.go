@@ -586,13 +586,17 @@ func (f *codeFleet) initialRecovery(t *testing.T, attempts int) *codeFleet {
 		ProjectId: route.ProjectId, Slug: route.Slug, PoolId: route.PoolId, Models: route.Models, Enabled: true,
 		InitialRecoveryAttempts: &attempts,
 	}, etagHeader(f.route), 200)
-	f.h.want(f.owner, "POST", "/api/v1/code/routes/"+route.Id.String()+"/publish", nil, withMatch(draft, idem("initial-recovery-publish")), 200)
+	published := f.h.want(f.owner, "POST", "/api/v1/code/routes/"+route.Id.String()+"/publish", nil, withMatch(draft, idem("initial-recovery-publish")), 200)
 	for _, process := range f.gateways {
 		if err := process.Kill(); err != nil {
 			t.Fatal(err)
 		}
 	}
-	return &codeFleet{codePublicFixture: f.codePublicFixture, in: f.in, gateways: []*testutil.Process{f.in.replica("recovery-one"), f.in.replica("recovery-two")}}
+	return &codeFleet{codePublicFixture: &codePublicFixture{
+		h: f.h, owner: f.owner, project: f.project, keyID: f.keyID, key: f.key,
+		accounts: f.accounts, pool: f.pool, route: published, upstream: f.upstream,
+		authority: f.authority, peer: f.peer, codexAuthorities: f.codexAuthorities,
+	}, in: f.in, gateways: []*testutil.Process{f.in.replica("recovery-one"), f.in.replica("recovery-two")}}
 }
 
 func TestCodeQualificationFleetInitialRecoveryPreservesAttemptsAndBinding(t *testing.T) {
@@ -704,8 +708,13 @@ func TestCodeQualificationFleetEstablishedRecoveryRefusesOwnedState(t *testing.T
 				f.success(t, 1, "owned-child", "owned-root")
 			}
 			if kind == "multiple-pins" {
-				path := "/api/v1/code/routes/" + f.route["id"].(string)
-				draft := f.h.want(f.owner, "PUT", path, map[string]any{"project_id": f.project, "slug": "qualification", "pool_id": f.pool["id"], "models": []string{"gpt-5.4"}, "aliases": map[string]string{"other-code": "gpt-5.4"}, "model_rewriting": true, "initial_recovery_attempts": 1, "enabled": true}, etagHeader(f.route), 200)
+				route := codeDiscoveryResponse[contract.CodeRoute](t, f.route)
+				path := "/api/v1/code/routes/" + route.Id.String()
+				aliases, rewriting := map[string]string{"other-code": route.Models[0]}, true
+				draft := f.h.want(f.owner, "PUT", path, contract.CodeRouteWrite{
+					ProjectId: route.ProjectId, Slug: route.Slug, PoolId: route.PoolId, Models: route.Models, Enabled: route.Enabled,
+					Aliases: &aliases, ModelRewriting: &rewriting, InitialRecoveryAttempts: route.InitialRecoveryAttempts,
+				}, etagHeader(f.route), 200)
 				f.h.want(f.owner, "POST", path+"/publish", nil, withMatch(draft, idem("multipin-recovery")), 200)
 				f.restart(t, "multipin")
 				response, data, err := f.request(t.Context(), 0, "owned-root", "", []byte(`{"model":"other-code","input":"complete context"}`), true)

@@ -448,7 +448,7 @@ allowed by the published route and enrolled account.
 The generated configuration retains Codex's default request and stream retries.
 Controlled tests cover interrupted-stream retries, WebSocket reconnect and HTTP
 fallback. OLP forwards each inference once by default. An explicitly published
-[initial recovery policy](#initial-conversation-recovery) can permit bounded
+[initial recovery policy](#portable-conversation-recovery) can permit bounded
 additional attempts after proven nonexecution and portable initial state. Every
 client retry gets fresh admission on its durable conversation account. A 503 can
 quarantine that account, and subsequent retries fail without dispatch until its
@@ -672,7 +672,7 @@ fixture request.
 Temporary transport failures that mark an account unavailable use the same
 fallback. The next client request can test recovery on the same pinned account.
 OLP schedules no synthetic health inference. Automatic replay requires the
-explicit [initial recovery policy](#initial-conversation-recovery), proven
+explicit [initial recovery policy](#portable-conversation-recovery), proven
 nonexecution and portable initial state. Temporary transport failures never
 qualify.
 

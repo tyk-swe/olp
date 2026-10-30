@@ -517,10 +517,7 @@ func codeAccount(ctx context.Context, tx pgx.Tx, in CodeAdmission, id, root stri
 		JOIN olp.code_route_revisions v ON v.id=$7 CROSS JOIN LATERAL (SELECT `+codeadapter.SQL("v.connections->(a.provider_id::text)")+` adapter) f
 		WHERE pa.pool_id=$1 AND a.project_id=$2 AND a.enabled AND p.state<>'disabled' AND p.project_id=a.project_id
 		AND c.provider_id=a.provider_id AND c.principal=a.principal AND c.revoked_at IS NULL AND g.lapsed_at IS NULL AND (g.expires_at IS NULL OR g.expires_at>now())
-		AND ($9::uuid IS NULL OR NOT EXISTS(WITH RECURSIVE rejected AS (
-			SELECT id,recovery_from,account_id,nonexecution FROM olp.code_attempts WHERE id=$9
-			UNION ALL SELECT prior.id,prior.recovery_from,prior.account_id,prior.nonexecution FROM olp.code_attempts prior JOIN rejected ON prior.id=rejected.recovery_from)
-			SELECT 1 FROM rejected WHERE rejected.account_id=a.id AND rejected.nonexecution))
+		AND ($9::uuid IS NULL OR NOT EXISTS(SELECT 1 FROM olp.code_recovery_chain($9) rejected WHERE rejected.account_id=a.id AND rejected.nonexecution))
 		AND a.models @> $3::jsonb AND ($4='' OR a.id::text=$4) AND a.provider_id::text=ANY($5::text[])
 		AND NOT EXISTS(SELECT 1 FROM olp.code_accounts t WHERE t.id::text=ANY($6::text[])
 			AND coalesce(array_position($6::text[],t.id::text)<array_position($6::text[],a.id::text),true)

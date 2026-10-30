@@ -178,10 +178,11 @@ func (a codeTestAuthorizer) AuthorizeCode(_ context.Context, _ routing.Configura
 }
 
 type codeForwardSetup struct {
-	Models      []string
-	Policy      access.KeyPolicy
-	Offers      codeclient.Offers
-	ModelsError error
+	Models                  []string
+	Policy                  access.KeyPolicy
+	Offers                  codeclient.Offers
+	ModelsError             error
+	InitialRecoveryAttempts int
 }
 
 func newCodeForwardHarness(t *testing.T, setups ...codeForwardSetup) (*harness, *codeTestLedger, *httptest.Server) {
@@ -195,7 +196,7 @@ func newCodeForwardHarness(t *testing.T, setups ...codeForwardSetup) (*harness, 
 	}()
 	ledger := &codeTestLedger{done: make(chan codemode.Usage, 100), offers: setup.Offers, modelsErr: setup.ModelsError}
 	publishedAt := time.Now()
-	route := codemode.Route{ID: "route", Slug: "coding", ProjectID: "project", PoolID: "pool", RevisionID: "revision", Revision: 1, PublishedAt: &publishedAt, Enabled: true, Models: setup.Models}
+	route := codemode.Route{ID: "route", Slug: "coding", ProjectID: "project", PoolID: "pool", RevisionID: "revision", Revision: 1, PublishedAt: &publishedAt, Enabled: true, Models: setup.Models, InitialRecoveryAttempts: setup.InitialRecoveryAttempts}
 	authority := access.Authority{ID: h.rt.keys[fullKey].ID, ProjectID: &route.ProjectID, Policy: setup.Policy}
 	h.rt.keys[fullKey] = authority
 	h.rt.release.Snapshot.CodeRoutes = map[string]codemode.Route{"coding": route}
