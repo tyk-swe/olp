@@ -550,6 +550,9 @@ func TestCodeMessagesToCodexRefusesUnsupportedSemantics(t *testing.T) {
 		{name: "adaptive numeric budget", extra: `,"thinking":{"type":"adaptive","budget_tokens":1024},"output_config":{"effort":"high"}`},
 		{name: "unsupported effort", extra: `,"output_config":{"effort":"max"}`},
 		{name: "adaptive without effort", extra: `,"thinking":{"type":"adaptive"}`},
+		{name: "signed thinking history", messages: `[{"role":"assistant","content":[{"type":"thinking","thinking":"private-prompt","signature":"opaque-signature"}]},{"role":"user","content":"Continue"}]`},
+		{name: "redacted thinking history", messages: `[{"role":"assistant","content":[{"type":"redacted_thinking","data":"private-prompt"}]},{"role":"user","content":"Continue"}]`},
+		{name: "opaque compaction history", messages: `[{"role":"user","content":[{"type":"compaction","content":"private-prompt"}]}]`},
 		{name: "thinking history", extra: `,"system":[{"type":"thinking","thinking":"private-prompt","signature":"opaque"}]`},
 		{name: "unsupported tool choice", extra: `,"tool_choice":{"type":"auto","required_extension":true}`},
 		{name: "thinking", extra: `,"thinking":{"type":"enabled","budget_tokens":1024}`},
@@ -1050,6 +1053,26 @@ func TestCodeForwardingRetainsExhaustionWithMalformedOrMissingReset(t *testing.T
 			}
 			if test.reset == nil && allowance.ResetsAt != nil || test.reset != nil && (allowance.ResetsAt == nil || !allowance.ResetsAt.Equal(*test.reset)) {
 				t.Fatalf("reset signal inferred or lost %+v", allowance)
+			}
+		})
+	}
+}
+
+func TestCodeContinuationRefusalsExplainRecovery(t *testing.T) {
+	for _, reason := range []string{"code_parent_unresolved", "code_response_account_conflict"} {
+		t.Run(reason, func(t *testing.T) {
+			_, ledger, server := newCodeForwardHarness(t)
+			ledger.refuse = reason
+			response := codeDo(t, server, []byte(`{"model":"native-model","input":[]}`), nil)
+			defer response.Body.Close()
+			var body struct {
+				Error struct{ Code, Message string } `json:"error"`
+			}
+			if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
+				t.Fatal(err)
+			}
+			if response.StatusCode != http.StatusConflict || body.Error.Code != reason || !strings.Contains(body.Error.Message, "full context") || !strings.Contains(body.Error.Message, "response reference") {
+				t.Fatalf("continuation recovery status %d body %+v", response.StatusCode, body)
 			}
 		})
 	}

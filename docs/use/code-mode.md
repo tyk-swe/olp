@@ -582,6 +582,22 @@ replicas must resolve to the same binding and pins. Resumes, reconnects, childre
 retries keep each model's pinned account. A child with an unresolved parent is
 refused instead of receiving a new account. Bindings list their tree's pins.
 
+Translated Messages requests use the same durable bindings and pins. Reusing a
+session and agent identifier after a gateway restart resumes that agent's
+account ownership. Send the complete portable text and tool history, or an
+explicit text summary after client compaction. OLP stores identity and account
+metadata rather than prompts or history. Signed thinking, redacted reasoning
+and opaque compaction blocks that cannot be represented refuse with
+`code_translation_unsupported_semantics` before dispatch. Use a native Messages
+account when those blocks are required.
+
+A `previous_response_id` belongs to the account that produced it, scoped to the
+route and API key. It cannot continue on another account in the same conversation
+tree. A conflicting owner returns `code_response_account_conflict`. Unknown or
+ambiguous ownership returns `code_parent_unresolved`. Legacy references remain
+usable when the tree's dispatched attempts prove a single producing account.
+Otherwise, start a new conversation with full context and no response reference.
+
 Fresh `codex exec review` is a child-first workflow. With the generated
 WebSocket-enabled configuration, controlled tests observe a root handshake
 establishing its pin before the review child, without parent inference. This
