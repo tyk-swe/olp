@@ -36,6 +36,7 @@ type Upstream struct {
 	handshakeStatus int
 	handshakes      []http.Header
 	responder       func(context.Context, http.Header, []byte) [][]byte
+	rejector        func(context.Context, http.Header, []byte) (int, []byte)
 	Canceled        chan struct{}
 }
 
@@ -67,6 +68,22 @@ func (u *Upstream) SetResponder(responder func(context.Context, http.Header, []b
 	u.mu.Lock()
 	defer u.mu.Unlock()
 	u.responder = responder
+}
+
+func (u *Upstream) SetRejector(rejector func(context.Context, http.Header, []byte) (int, []byte)) {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	u.rejector = rejector
+}
+
+func (u *Upstream) rejection(r *http.Request, body []byte) (int, []byte) {
+	u.mu.Lock()
+	rejector := u.rejector
+	u.mu.Unlock()
+	if rejector == nil {
+		return 0, nil
+	}
+	return rejector(r.Context(), r.Header, body)
 }
 
 func (u *Upstream) reply(r *http.Request, body []byte) [][]byte {
@@ -185,6 +202,22 @@ func (u *Upstream) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	mode := u.record(r, body, false)
+	if status, rejection := u.rejection(r, body); status != 0 {
+		w.WriteHeader(status)
+		w.Write(rejection)
+		return
+	}
+	if mode == "initial_quota" || mode == "initial_auth" {
+		if mode == "initial_auth" {
+			w.WriteHeader(401)
+			fmt.Fprint(w, `{"error":{"type":"authentication_error","code":"invalid_api_key"}}`)
+			return
+		}
+		w.Header().Set("Retry-After", "120")
+		w.WriteHeader(429)
+		fmt.Fprint(w, `{"error":{"type":"usage_limit_reached","resets_in_seconds":180}}`)
+		return
+	}
 	if mode == "transport_error" {
 		if connection, _, err := w.(http.Hijacker).Hijack(); err == nil {
 			_ = connection.Close()

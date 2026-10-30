@@ -28,21 +28,26 @@ import (
 	"github.com/tyk-swe/olp/internal/routing"
 )
 
+type codeTestRefusal struct {
+	key, digest, code string
+}
+
 type codeTestLedger struct {
-	mu         sync.Mutex
-	inputs     []resources.CodeAdmission
-	marks      []string
-	aborts     []string
-	usages     []codemode.Usage
-	health     codemode.HealthObservation
-	allowance  codemode.Allowance
-	refusals   []string
-	refuse     string
-	done       chan codemode.Usage
-	references map[string]bool
-	outcomes   []codemode.Outcome
-	offers     codeclient.Offers
-	modelsErr  error
+	mu             sync.Mutex
+	inputs         []resources.CodeAdmission
+	marks          []string
+	aborts         []string
+	usages         []codemode.Usage
+	health         codemode.HealthObservation
+	allowance      codemode.Allowance
+	refusalRecords []codeTestRefusal
+	refusals       []string
+	refuse         string
+	done           chan codemode.Usage
+	references     map[string]bool
+	outcomes       []codemode.Outcome
+	offers         codeclient.Offers
+	modelsErr      error
 }
 
 func (l *codeTestLedger) Models(context.Context, codemode.Route, string) (codeclient.Offers, error) {
@@ -62,6 +67,9 @@ func (l *codeTestLedger) ObserveOutcome(_ context.Context, _ string, outcome cod
 func (l *codeTestLedger) Admit(_ context.Context, in resources.CodeAdmission) (resources.CodePermit, error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	initial := !slices.ContainsFunc(l.inputs, func(previous resources.CodeAdmission) bool {
+		return previous.APIKeyID == in.APIKeyID && previous.Operation.Identity.Conversation == in.Operation.Identity.Conversation
+	})
 	l.inputs = append(l.inputs, in)
 	if in.PreviousResponse != "" && !l.references[in.PreviousResponse] {
 		return resources.CodePermit{}, codemode.Refuse(409, "code_parent_unresolved")
@@ -70,6 +78,8 @@ func (l *codeTestLedger) Admit(_ context.Context, in resources.CodeAdmission) (r
 		return resources.CodePermit{}, codemode.Refuse(409, l.refuse)
 	}
 	permit, err := codeTestPermit(in.APIKeyID, in.Providers)
+	permit.Authority.EndUserDigest = in.EndUserDigest
+	permit.InitialRecovery = in.InitialRecovery && (initial || in.Recovery != nil)
 	permit.Attempt = codemode.Attempt{ID: fmt.Sprint(len(l.inputs))}
 	return permit, err
 }
@@ -129,10 +139,11 @@ func (l *codeTestLedger) ObserveAllowance(_ context.Context, _ string, a codemod
 	l.allowance = l.allowance.Merge(a)
 	return nil
 }
-func (l *codeTestLedger) RecordRefusal(_ context.Context, _ codemode.Route, _, _ string, reason string) error {
+func (l *codeTestLedger) RecordRefusal(_ context.Context, _ codemode.Route, key, digest string, reason string) error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.refusals = append(l.refusals, reason)
+	l.refusalRecords = append(l.refusalRecords, codeTestRefusal{key: key, digest: digest, code: reason})
 	return nil
 }
 func (l *codeTestLedger) wait(t *testing.T) codemode.Usage {
@@ -626,6 +637,9 @@ func TestCodeMessagesToCodexPreservesNativeModelIdentifiers(t *testing.T) {
 		t.Fatalf("ordinary route accepted a native model identifier, status %d", ordinary.StatusCode)
 	}
 }
+
+func (l *codeTestLedger) ConfirmNonexecution(context.Context, string, int) error   { return nil }
+func (l *codeTestLedger) ObserveCooldown(context.Context, string, time.Time) error { return nil }
 
 func TestCodeMessagesToCodexToolExchange(t *testing.T) {
 	for _, source := range []string{"fragments", "complete", "arguments-done"} {
