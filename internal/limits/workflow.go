@@ -1,6 +1,8 @@
 package limits
 
 import (
+	"bytes"
+	"encoding/json"
 	"math/big"
 	"strings"
 )
@@ -11,6 +13,19 @@ type WorkflowBounds struct {
 	MaxDurationSeconds *int64  `json:"max_duration_seconds,omitempty"`
 	MaxConcurrentRuns  *int64  `json:"max_concurrent_runs,omitempty"`
 	MaxRunCost         *string `json:"max_run_cost,omitempty"`
+}
+
+func ParseWorkflowBounds(raw json.RawMessage) (WorkflowBounds, bool) {
+	if len(raw) == 0 {
+		return WorkflowBounds{}, true
+	}
+	var bounds WorkflowBounds
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.DisallowUnknownFields()
+	if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) || decoder.Decode(&bounds) != nil || !bounds.Valid() {
+		return WorkflowBounds{}, false
+	}
+	return bounds, true
 }
 
 func (b WorkflowBounds) Valid() bool {
@@ -70,4 +85,27 @@ func MinWorkflowCost(values ...*string) *string {
 		return values[0]
 	}
 	return remaining
+}
+
+func ResolveWorkflowBounds(prior, route, key, caller *WorkflowBounds) WorkflowBounds {
+	previous, operator, principal, requested := workflowBoundsOrZero(prior), workflowBoundsOrZero(route), workflowBoundsOrZero(key), workflowBoundsOrZero(caller)
+	iterations := MinWorkflowInteger(8, previous.MaxIterations, operator.MaxIterations, principal.MaxIterations, requested.MaxIterations)
+	tools := MinWorkflowInteger(32, previous.MaxToolCalls, operator.MaxToolCalls, principal.MaxToolCalls, requested.MaxToolCalls)
+	duration := MinWorkflowInteger(120, previous.MaxDurationSeconds, operator.MaxDurationSeconds, principal.MaxDurationSeconds, requested.MaxDurationSeconds)
+	concurrency := MinWorkflowInteger(0, previous.MaxConcurrentRuns, operator.MaxConcurrentRuns, principal.MaxConcurrentRuns, requested.MaxConcurrentRuns)
+	return WorkflowBounds{MaxIterations: &iterations, MaxToolCalls: &tools, MaxDurationSeconds: &duration, MaxConcurrentRuns: workflowConcurrency(concurrency), MaxRunCost: MinWorkflowCost(previous.MaxRunCost, operator.MaxRunCost, principal.MaxRunCost, requested.MaxRunCost)}
+}
+
+func workflowBoundsOrZero(bounds *WorkflowBounds) WorkflowBounds {
+	if bounds == nil {
+		return WorkflowBounds{}
+	}
+	return *bounds
+}
+
+func workflowConcurrency(value int64) *int64 {
+	if value == 0 {
+		return nil
+	}
+	return &value
 }

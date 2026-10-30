@@ -107,7 +107,7 @@ func (s *Server) prepareWorkflowResume(ctx context.Context, x *call) *Error {
 	if !validCost {
 		return permissionError("tool_approval_invalid", "The workflow approval is invalid or expired.")
 	}
-	bounds := resolveWorkflowBounds(&state.RunLimits, x.named().RunLimits, x.authority.Policy.RunLimits, &x.generation.callerRunLimits)
+	bounds := limits.ResolveWorkflowBounds(&state.RunLimits, x.named().RunLimits, x.authority.Policy.RunLimits, &x.generation.callerRunLimits)
 	if int64(state.Iteration)+1 >= *bounds.MaxIterations {
 		return invalidRequest("tool_iteration_limit", "The workflow reached its model iteration limit.", nil)
 	}

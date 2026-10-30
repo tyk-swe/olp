@@ -103,6 +103,16 @@ func (m Management) Register(mux *http.ServeMux) {
 	}
 	catalogue.Register(mux)
 	routeServer := routes.New(m.Access)
+	routeServer.WorkflowTools = func() mcp.WorkflowResolver {
+		if m.Gateway == nil {
+			return nil
+		}
+		return m.Gateway.WorkflowTools
+	}
+	routeServer.WorkflowRelease = m.Runtime.Release
+	routeServer.WorkflowAvailable = func() bool {
+		return m.Gateway != nil && m.Gateway.WorkflowRuns != nil && m.Gateway.WorkflowTools != nil && m.Gateway.Debits != nil
+	}
 	routeServer.Inputs = m.Runtime.RoutingInputs
 	if m.Runtime != nil {
 		routeServer.Region = m.Runtime.Region

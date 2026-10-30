@@ -35,6 +35,7 @@ import (
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/export"
 	"github.com/tyk-swe/olp/internal/guardrails"
+	"github.com/tyk-swe/olp/internal/mcp"
 	"github.com/tyk-swe/olp/internal/observability"
 	"github.com/tyk-swe/olp/internal/operations/tokenization/estimate"
 	"github.com/tyk-swe/olp/internal/protocols"
@@ -1128,13 +1129,26 @@ func (s *Server) planCanonical(ctx context.Context, x *call) *Error {
 }
 
 // modelObject renders a route as an OpenAI model object.
-func modelObject(snapshot *routing.Snapshot, route *routing.Route) map[string]any {
+func (s *Server) modelObject(ctx context.Context, release *runtime.Release, authority access.Authority, route *routing.Route) map[string]any {
+	capabilities := s.modelCapabilities(ctx, release, authority, *route, "openai")
 	return map[string]any{
 		"id":           route.Slug,
 		"object":       "model",
 		"created":      route.PublishedAt.Unix(),
 		"owned_by":     "openllmproxy",
-		"capabilities": routing.EffectiveCapabilities(snapshot, *route),
+		"capabilities": capabilities,
+	}
+}
+
+type modelCapabilities struct {
+	routing.RouteCapabilities
+	GatewayExecution *routing.WorkflowCapability `json:"gateway_execution,omitempty"`
+}
+
+func (s *Server) modelCapabilities(ctx context.Context, release *runtime.Release, authority access.Authority, route routing.Route, surface string) modelCapabilities {
+	return modelCapabilities{
+		RouteCapabilities: routing.EffectiveCapabilities(release.Snapshot, route),
+		GatewayExecution:  mcp.DescribeWorkflow(ctx, s.WorkflowTools, authority, release, route, route, surface, nil, s.WorkflowRuns != nil && s.Debits != nil, s.now()),
 	}
 }
 
@@ -1150,7 +1164,7 @@ func (s *Server) models(w http.ResponseWriter, r *http.Request) {
 	for _, slug := range slices.Sorted(mapsKeys(req.release.Snapshot.Routes)) {
 		if authority.Allows("models_read", slug, req.release.Snapshot.Routes[slug].ProjectID, now) {
 			route := req.release.Snapshot.Routes[slug]
-			data = append(data, modelObject(req.release.Snapshot, &route))
+			data = append(data, s.modelObject(r.Context(), req.release, authority, &route))
 		}
 	}
 	writeJSON(w, map[string]any{"object": "list", "data": data})
@@ -1169,7 +1183,7 @@ func (s *Server) model(w http.ResponseWriter, r *http.Request) {
 		writeError(w, modelNotFound(slug))
 		return
 	}
-	writeJSON(w, modelObject(req.release.Snapshot, &route))
+	writeJSON(w, s.modelObject(r.Context(), req.release, authority, &route))
 }
 
 func mapsKeys[V any](m map[string]V) func(func(string) bool) {

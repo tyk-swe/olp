@@ -862,3 +862,37 @@ func (r *RoutingCardRevision) ChargeBound(input, output int64, generation bool, 
 	total.Quo(total, costUnit)
 	return clampCost(total), true
 }
+
+func (p *RoutingPrice) WorkflowModelCostBound(input, output int64, discount *RoutingDiscount) (Cost, bool) {
+	if p == nil || input < 1 || output < 1 {
+		return Cost{}, false
+	}
+	for _, fee := range p.ToolCalls {
+		cost, ok := ParseCost(fee)
+		if !ok || !cost.IsZero() {
+			return Cost{}, false
+		}
+	}
+	return workflowModelCostThroughTiers(p, discount, input, output, p.Tiers)
+}
+
+func workflowModelCostThroughTiers(price *RoutingPrice, discount *RoutingDiscount, input, output int64, tiers []PriceTier) (Cost, bool) {
+	if len(tiers) == 0 {
+		return price.MaximumWindowCostBound(input, output, true, discount)
+	}
+	bound, ok := workflowModelCostThroughTiers(price, discount, input, output, tiers[1:])
+	if !ok {
+		return Cost{}, false
+	}
+	if tiers[0].AboveInputTokens >= input {
+		return bound, true
+	}
+	prior, ok := price.MaximumWindowCostBound(tiers[0].AboveInputTokens, output, true, discount)
+	if !ok {
+		return Cost{}, false
+	}
+	if prior.Cmp(bound) > 0 {
+		return prior, true
+	}
+	return bound, true
+}

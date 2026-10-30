@@ -3141,3 +3141,72 @@ func TestGatewayToolExecutionTypeSafeKeepsAmbiguousGeminiExchanges(t *testing.T)
 		t.Fatalf("ambiguous exchange workflow failed: status=%d response=%s model_calls=%d relevance_calls=%d", response.StatusCode, payload, h.mock.count("a"), h.mock.count("b"))
 	}
 }
+
+func TestGatewayWorkflowDiscoveryRespectsCallerAuthority(t *testing.T) {
+	project, allowed, hidden := uuid.NewString(), uuid.NewString(), uuid.NewString()
+	price, maxIterations := "0.25", int64(3)
+	fixture := &workflowFixture{runID: uuid.NewString(), tool: WorkflowTool{
+		ToolsetID: allowed, RevisionID: uuid.NewString(), Definition: routing.MCPToolsetTool{
+			Alias: "t_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", Name: "lookup", Classification: "approval_required", UnitPrice: &price,
+			InputSchema: json.RawMessage(`{"type":"object"}`),
+		},
+	}}
+	h := nativeWorkflowHarness(t, project, "openai", "openai-chat", "unary", "transformed", []string{allowed, hidden}, true, fixture)
+	h.rt.keys[fullKey] = access.Authority{ID: h.rt.keys[fullKey].ID, ProjectID: &project, Policy: access.KeyPolicy{
+		Scopes: []string{"models_read", "inference", "tools"}, AllowedToolsets: []string{allowed},
+		RunLimits: &limits.WorkflowBounds{MaxIterations: &maxIterations},
+	}}
+	h.rt.keys[readKey] = access.Authority{ID: h.rt.keys[readKey].ID, ProjectID: &project, Policy: access.KeyPolicy{Scopes: []string{"models_read"}}}
+	for _, endpoint := range []string{"/v1/models/" + routeSlug, "/anthropic/v1/models/" + routeSlug, "/gemini/v1/models/" + routeSlug} {
+		t.Run(endpoint, func(t *testing.T) {
+			resp := h.do(t.Context(), http.MethodGet, endpoint, fullKey, nil, nil)
+			defer resp.Body.Close()
+			var document struct {
+				Capabilities struct {
+					GatewayExecution struct {
+						Enabled                bool                  `json:"enabled"`
+						DefaultToolsetsAllowed bool                  `json:"default_toolsets_allowed"`
+						Limits                 limits.WorkflowBounds `json:"limits"`
+						Tools                  []struct {
+							ToolsetID      string  `json:"toolset_id"`
+							Name           string  `json:"name"`
+							Classification string  `json:"classification"`
+							Price          *string `json:"unit_price"`
+						} `json:"tools"`
+					} `json:"gateway_execution"`
+				} `json:"capabilities"`
+			}
+			if err := json.NewDecoder(resp.Body).Decode(&document); err != nil {
+				t.Fatal(err)
+			}
+			capability := document.Capabilities.GatewayExecution
+			wantEnabled := endpoint == "/v1/models/"+routeSlug
+			if resp.StatusCode != http.StatusOK || capability.Enabled != wantEnabled || capability.DefaultToolsetsAllowed {
+				t.Fatalf("status %d capability %+v", resp.StatusCode, capability)
+			}
+			if capability.Limits.MaxIterations == nil || *capability.Limits.MaxIterations != maxIterations || len(capability.Tools) != 1 {
+				t.Fatalf("unexpected caller limits or tools: %+v", capability)
+			}
+			tool := capability.Tools[0]
+			if tool.ToolsetID != allowed || tool.Name != "lookup" || tool.Classification != "approval_required" || tool.Price == nil || *tool.Price != price {
+				t.Fatalf("unexpected caller tool: %+v", tool)
+			}
+		})
+	}
+	resp := h.do(t.Context(), http.MethodGet, "/v1/models/"+routeSlug, readKey, nil, nil)
+	defer resp.Body.Close()
+	var document struct {
+		Capabilities struct {
+			GatewayExecution struct {
+				Enabled bool              `json:"enabled"`
+				Tools   []json.RawMessage `json:"tools"`
+			} `json:"gateway_execution"`
+		} `json:"capabilities"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&document); err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != http.StatusOK || document.Capabilities.GatewayExecution.Enabled || len(document.Capabilities.GatewayExecution.Tools) != 0 {
+		t.Fatalf("models-only caller saw workflow authority: %+v", document)
+	}
+}

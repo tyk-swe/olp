@@ -1032,6 +1032,82 @@ func TestGatewayToolWorkflowSettlesOneRun(t *testing.T) {
 		t.Fatalf("reconcile workflow cost caps: %v", err)
 	}
 	leader.Close(t.Context())
+	simulationSlug := "workflow-simulation"
+	hiddenToolset := h.want(owner, http.MethodPost, "/api/v1/toolsets", map[string]any{"project_id": project, "name": "Other workflow toolset", "toolset": agentcontract.Toolset{Tools: []agentcontract.Tool{approvalTool}}}, idem("workflow-other-toolset"), http.StatusCreated)
+	hiddenToolsetID := mcpExecString(t, hiddenToolset, "id")
+	h.want(owner, http.MethodPost, "/api/v1/toolsets/"+hiddenToolsetID+"/publish", nil, withMatch(hiddenToolset, idem("workflow-other-publish")), http.StatusOK)
+	simulationDraft := h.want(owner, http.MethodPost, "/api/v1/route-drafts", map[string]any{"project_id": project, "slug": simulationSlug, "operations": []string{"generation"}, "overall_timeout_ms": 10000, "max_attempts": 1, "fidelity": map[string]any{"mode": "transformed"}, "targets": []any{map[string]any{"provider_id": provider["id"], "provider_model": vendorModel, "priority": 0, "weight": 1, "timeout_ms": 5000}}, "tool_execution": "gateway", "toolsets": []string{toolsetID, hiddenToolsetID}}, idem("workflow-simulation-draft"), http.StatusCreated)
+	h.want(owner, http.MethodPost, "/api/v1/route-drafts/"+mcpExecString(t, simulationDraft, "id")+"/activate", nil, withMatch(simulationDraft, idem("workflow-simulation-activate")), http.StatusOK)
+	simulationKey := h.want(owner, http.MethodPost, "/api/v1/api-keys", map[string]any{"name": "Workflow simulation caller", "project_id": project, "scopes": []string{"inference", "tools"}, "allowed_routes": []string{simulationSlug}, "allowed_toolsets": []string{toolsetID}, "run_limits": map[string]any{"max_iterations": 3}}, idem("workflow-simulation-key"), http.StatusCreated)
+	deniedWorkflowKey := h.want(owner, http.MethodPost, "/api/v1/api-keys", map[string]any{"name": "Workflow without tool permission", "project_id": project, "scopes": []string{"inference"}, "allowed_routes": []string{simulationSlug}}, idem("workflow-no-tools-key"), http.StatusCreated)
+	h.refresh()
+	workflowRequest := map[string]any{"model": simulationSlug, "messages": []any{map[string]any{"role": "user", "content": "simulation"}}, "max_tokens": 100, "olp_toolsets": []string{toolsetID}, "olp_run_limits": map[string]any{"max_iterations": 2}}
+	for _, published := range []bool{false, true} {
+		for _, tc := range []struct {
+			name string
+			key  map[string]any
+			want bool
+		}{{"authorized", simulationKey, true}, {"without tool scope", deniedWorkflowKey, false}} {
+			decision := inspectorSimulation(t, h, owner, simulationDraft, published, workflowRequest, map[string]any{"api_key_id": tc.key["id"]})
+			if decision["eligible"] != tc.want {
+				t.Fatalf("workflow simulation published=%t caller=%s: %v", published, tc.name, decision)
+			}
+			if tc.want {
+				capability := mcpExecObject(t, decision, "gateway_execution")
+				bounds := mcpExecObject(t, capability, "limits")
+				if bounds["max_iterations"] != float64(2) {
+					t.Fatalf("workflow simulation published=%t does not apply caller bounds: %v", published, bounds)
+				}
+				tools, ok := capability["tools"].([]any)
+				if !ok || len(tools) != 2 {
+					t.Fatalf("workflow simulation published=%t does not describe available tools: %v", published, capability)
+				}
+				if capability["default_toolsets_allowed"] != false || strings.Contains(fmt.Sprint(capability), hiddenToolsetID) {
+					t.Fatalf("workflow simulation published=%t exposed an unauthorized default toolset: %v", published, capability)
+				}
+				for _, value := range tools {
+					item, ok := value.(map[string]any)
+					if !ok || item["toolset_id"] != toolsetID || item["unit_price"] != "0.25" {
+						t.Fatalf("workflow simulation published=%t returned incorrect tool pricing or scope: %v", published, value)
+					}
+					if item["classification"] != "read_only" && item["classification"] != "approval_required" {
+						t.Fatalf("workflow simulation published=%t did not describe approval requirements: %v", published, item)
+					}
+				}
+			}
+		}
+		defaultRequest := map[string]any{"model": simulationSlug, "messages": []any{map[string]any{"role": "user", "content": "simulation"}}, "max_tokens": 100}
+		decision := inspectorSimulation(t, h, owner, simulationDraft, published, defaultRequest, map[string]any{"api_key_id": simulationKey["id"]})
+		if decision["eligible"] != false || strings.Contains(fmt.Sprint(decision), hiddenToolsetID) {
+			t.Fatalf("workflow simulation published=%t admitted or exposed an unauthorized default selection: %v", published, decision)
+		}
+	}
+	defaultStatus, defaultResponse, _ := h.gateway("POST", "/v1/chat/completions", mcpExecString(t, simulationKey, "secret"), map[string]any{"model": simulationSlug, "messages": []any{map[string]any{"role": "user", "content": "simulation"}}, "max_tokens": 100})
+	if defaultStatus != http.StatusNotFound || modelCalls.Load() != 0 || toolCalls.Load() != 0 {
+		t.Fatalf("unauthorized default workflow selection dispatched: status=%d response=%v", defaultStatus, defaultResponse)
+	}
+	multipleChoicesRequest := map[string]any{"model": simulationSlug, "messages": []any{map[string]any{"role": "user", "content": "simulation"}}, "max_tokens": 100, "olp_toolsets": []string{toolsetID}, "n": 2}
+	for _, published := range []bool{false, true} {
+		decision := inspectorSimulation(t, h, owner, simulationDraft, published, multipleChoicesRequest, map[string]any{"api_key_id": simulationKey["id"]})
+		if decision["eligible"] != false || decision["reason"] != "tool_execution_choices_unsupported" {
+			t.Fatalf("workflow simulation published=%t admitted multiple choices: %v", published, decision)
+		}
+	}
+	choicesStatus, choicesResponse, _ := h.gateway("POST", "/v1/chat/completions", mcpExecString(t, simulationKey, "secret"), multipleChoicesRequest)
+	if choicesStatus != http.StatusBadRequest || !strings.Contains(fmt.Sprint(choicesResponse), "tool_execution_choices_unsupported") || modelCalls.Load() != 0 || toolCalls.Load() != 0 {
+		t.Fatalf("multiple workflow choices dispatched: status=%d response=%v", choicesStatus, choicesResponse)
+	}
+	boundedRequest := map[string]any{"model": simulationSlug, "messages": []any{map[string]any{"role": "user", "content": "simulation"}}, "max_tokens": 100, "olp_toolsets": []string{toolsetID}, "olp_run_limits": map[string]any{"max_run_cost": "0"}}
+	for _, published := range []bool{false, true} {
+		decision := inspectorSimulation(t, h, owner, simulationDraft, published, boundedRequest, map[string]any{"api_key_id": simulationKey["id"]})
+		if decision["eligible"] != false {
+			t.Fatalf("zero-cost workflow simulation published=%t admitted a priced model: %v", published, decision)
+		}
+	}
+	simulationDeniedStatus, simulationDeniedResponse, _ := h.gateway("POST", "/v1/chat/completions", mcpExecString(t, deniedWorkflowKey, "secret"), workflowRequest)
+	if simulationDeniedStatus != http.StatusNotFound || modelCalls.Load() != 0 || toolCalls.Load() != 0 {
+		t.Fatalf("workflow caller without tool authority: status=%d response=%v", simulationDeniedStatus, simulationDeniedResponse)
+	}
 	status, response, _ := h.gateway("POST", "/v1/chat/completions", secret, map[string]any{"model": slug, "messages": []any{map[string]any{"role": "user", "content": prompt}}, "max_tokens": 100})
 	if status != http.StatusOK || modelCalls.Load() != 2 || toolCalls.Load() != 1 || !strings.Contains(fmt.Sprint(response), "done") {
 		t.Fatalf("workflow did not finish: status=%d response=%v model_calls=%d tool_calls=%d", status, response, modelCalls.Load(), toolCalls.Load())

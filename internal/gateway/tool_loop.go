@@ -66,16 +66,12 @@ type workflowCall struct {
 }
 
 func workflowBounds(route, key *limits.WorkflowBounds, request *wire.Request) (limits.WorkflowBounds, limits.WorkflowBounds, *wire.Request, *Error) {
-	var caller limits.WorkflowBounds
 	raw := request.Field("olp_run_limits")
-	if len(raw) != 0 {
-		decoder := json.NewDecoder(bytes.NewReader(raw))
-		decoder.DisallowUnknownFields()
-		if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) || decoder.Decode(&caller) != nil || !caller.Valid() {
-			return limits.WorkflowBounds{}, limits.WorkflowBounds{}, nil, invalidRequest("invalid_run_limits", "Use valid workflow run limits.", nil)
-		}
+	caller, ok := limits.ParseWorkflowBounds(raw)
+	if !ok {
+		return limits.WorkflowBounds{}, limits.WorkflowBounds{}, nil, invalidRequest("invalid_run_limits", "Use valid workflow run limits.", nil)
 	}
-	resolved := resolveWorkflowBounds(nil, route, key, &caller)
+	resolved := limits.ResolveWorkflowBounds(nil, route, key, &caller)
 	if len(raw) == 0 {
 		return resolved, caller, request, nil
 	}
@@ -86,53 +82,12 @@ func workflowBounds(route, key *limits.WorkflowBounds, request *wire.Request) (l
 	return resolved, caller, stripped, nil
 }
 
-func resolveWorkflowBounds(prior, route, key, caller *limits.WorkflowBounds) limits.WorkflowBounds {
-	previous, operator, principal, requested := workflowBoundsOrZero(prior), workflowBoundsOrZero(route), workflowBoundsOrZero(key), workflowBoundsOrZero(caller)
-	iterations := limits.MinWorkflowInteger(8, previous.MaxIterations, operator.MaxIterations, principal.MaxIterations, requested.MaxIterations)
-	tools := limits.MinWorkflowInteger(32, previous.MaxToolCalls, operator.MaxToolCalls, principal.MaxToolCalls, requested.MaxToolCalls)
-	duration := limits.MinWorkflowInteger(120, previous.MaxDurationSeconds, operator.MaxDurationSeconds, principal.MaxDurationSeconds, requested.MaxDurationSeconds)
-	concurrency := limits.MinWorkflowInteger(0, previous.MaxConcurrentRuns, operator.MaxConcurrentRuns, principal.MaxConcurrentRuns, requested.MaxConcurrentRuns)
-	return limits.WorkflowBounds{MaxIterations: &iterations, MaxToolCalls: &tools, MaxDurationSeconds: &duration, MaxConcurrentRuns: workflowConcurrency(concurrency), MaxRunCost: limits.MinWorkflowCost(previous.MaxRunCost, operator.MaxRunCost, principal.MaxRunCost, requested.MaxRunCost)}
-}
-
-func workflowBoundsOrZero(bounds *limits.WorkflowBounds) limits.WorkflowBounds {
-	if bounds == nil {
-		return limits.WorkflowBounds{}
-	}
-	return *bounds
-}
-
-func workflowConcurrency(value int64) *int64 {
-	if value == 0 {
-		return nil
-	}
-	return &value
-}
-
 func (s *Server) prepareWorkflow(ctx context.Context, x *call, token string) *Error {
-	if x.family != wire.Chat && x.family != wire.Responses && x.family != wire.Anthropic && x.family.Surface() != "gemini" {
+	switch refusal := mcp.WorkflowRequestRefusal(x.generation.parsed); refusal {
+	case "tool_execution_unsupported":
 		return invalidRequest("tool_execution_unsupported", "Gateway tool execution is unavailable on this surface.", nil)
-	}
-	if raw := x.generation.parsed.Field("n"); x.family == wire.Chat && len(raw) != 0 {
-		var choices int
-		if json.Unmarshal(raw, &choices) != nil || choices != 1 {
-			return invalidRequest("tool_execution_choices_unsupported", "Gateway tool execution requires a single choice.", nil)
-		}
-	}
-	if x.family.Surface() == "gemini" {
-		for _, field := range []string{"generationConfig", "generation_config"} {
-			raw := x.generation.parsed.Field(field)
-			if len(raw) == 0 {
-				continue
-			}
-			var config struct {
-				CandidateCount      *int `json:"candidateCount"`
-				CandidateCountSnake *int `json:"candidate_count"`
-			}
-			if json.Unmarshal(raw, &config) != nil || config.CandidateCount != nil && *config.CandidateCount != 1 || config.CandidateCountSnake != nil && *config.CandidateCountSnake != 1 {
-				return invalidRequest("tool_execution_choices_unsupported", "Gateway tool execution requires a single choice.", nil)
-			}
-		}
+	case "tool_execution_choices_unsupported":
+		return invalidRequest(refusal, "Gateway tool execution requires a single choice.", nil)
 	}
 	tools, err := s.WorkflowTools.Resolve(ctx, x.authority, x.request.release, x.generation.toolsets)
 	if err != nil {
@@ -571,17 +526,15 @@ func (s *Server) continueToolLoop(ctx context.Context, x *call, completion *wire
 
 func selectToolsets(allowed []string, request *wire.Request) ([]string, *wire.Request, *Error) {
 	raw := request.Field("olp_toolsets")
-	if len(raw) == 0 {
-		return slices.Clone(allowed), request, nil
-	}
-	var selected []string
-	if err := json.Unmarshal(raw, &selected); err != nil || selected == nil {
+	selected, err := mcp.SelectWorkflowToolsets(allowed, raw)
+	if errors.Is(err, mcp.ErrWorkflowToolsetsInvalid) {
 		return nil, nil, invalidRequest("invalid_toolsets", "Use an array of toolset IDs.", nil)
 	}
-	for index, id := range selected {
-		if !slices.Contains(allowed, id) || slices.Index(selected, id) != index {
-			return nil, nil, invalidRequest("toolset_not_permitted", "The request can only select distinct toolsets allowed by the route.", nil)
-		}
+	if err != nil {
+		return nil, nil, invalidRequest("toolset_not_permitted", "The request can only select distinct toolsets allowed by the route.", nil)
+	}
+	if len(raw) == 0 {
+		return selected, request, nil
 	}
 	stripped, err := request.WithResourceBindings(oif.Change{Pointer: oif.Pointer("", "olp_toolsets"), Remove: true, Reason: "gateway toolset selection"})
 	if err != nil {

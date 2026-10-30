@@ -20,12 +20,6 @@ func (x *call) workflowModelCost(attempt routing.Attempt) *Error {
 	if attempt.Price == nil || x.snapshot() == nil {
 		return workflowUnboundedCost()
 	}
-	for _, fee := range attempt.Price.ToolCalls {
-		cost, ok := usage.ParseCost(fee)
-		if !ok || !cost.IsZero() {
-			return workflowUnboundedCost()
-		}
-	}
 	provider, ok := x.snapshot().Providers[attempt.ProviderID]
 	if !ok {
 		return workflowUnboundedCost()
@@ -46,32 +40,11 @@ func (x *call) workflowModelCost(attempt routing.Attempt) *Error {
 	if output == nil || *output < 1 {
 		return workflowUnboundedCost()
 	}
-	bound, priced := modelCostThroughTiers(attempt.Price, attempt.Discount, *metadata.ContextLength, *output, attempt.Price.Tiers)
+	bound, priced := attempt.Price.WorkflowModelCostBound(*metadata.ContextLength, *output, attempt.Discount)
 	if !priced {
 		return workflowUnboundedCost()
 	}
 	return x.workflowCheckCost(bound)
-}
-
-func modelCostThroughTiers(price *usage.RoutingPrice, discount *usage.RoutingDiscount, input, output int64, tiers []usage.PriceTier) (usage.Cost, bool) {
-	if len(tiers) == 0 {
-		return price.MaximumWindowCostBound(input, output, true, discount)
-	}
-	bound, ok := modelCostThroughTiers(price, discount, input, output, tiers[1:])
-	if !ok {
-		return usage.Cost{}, false
-	}
-	if tiers[0].AboveInputTokens >= input {
-		return bound, true
-	}
-	prior, ok := price.MaximumWindowCostBound(tiers[0].AboveInputTokens, output, true, discount)
-	if !ok {
-		return usage.Cost{}, false
-	}
-	if prior.Cmp(bound) > 0 {
-		return prior, true
-	}
-	return bound, true
 }
 
 func (x *call) workflowToolCost(tool WorkflowTool) (usage.Cost, bool, *Error) {

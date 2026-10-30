@@ -26,6 +26,7 @@ import (
 
 type inspectedDecision struct {
 	routing.Decision
+	GatewayExecution *routing.WorkflowCapability `json:"gateway_execution,omitempty"`
 	// EstimateProvenance and ModelFamily say how the estimated input of the
 	// decision was counted and for which family of models. They are null when
 	// the caller supplied the estimate or sent no request to count.
@@ -346,7 +347,7 @@ func inspectionAccept(route routing.Route, parsed *wire.Request, context interac
 	return accept, effective, inspections
 }
 
-func inspectedDecisions(decisions []routing.Decision, route routing.Route, inspected bool, details map[string]*interactionInspection, estimates map[string]estimate.Estimate) []inspectedDecision {
+func inspectedDecisions(decisions []routing.Decision, route routing.Route, inspected bool, details map[string]*interactionInspection, estimates map[string]estimate.Estimate, capability *routing.WorkflowCapability) []inspectedDecision {
 	result := make([]inspectedDecision, 0, len(decisions))
 	for _, decision := range decisions {
 		inspection := details[decision.TargetID]
@@ -357,7 +358,7 @@ func inspectedDecisions(decisions []routing.Decision, route routing.Route, inspe
 			}
 			inspection = &interactionInspection{Status: status, Fidelity: route.Fidelity.Mode, Evidence: []string{}}
 		}
-		entry := inspectedDecision{Decision: decision, Interaction: inspection}
+		entry := inspectedDecision{Decision: decision, Interaction: inspection, GatewayExecution: capability}
 		if e, ok := estimates[decision.TargetID]; ok {
 			provenance, family := string(e.Provenance), string(e.Family)
 			entry.EstimateProvenance, entry.ModelFamily = &provenance, &family

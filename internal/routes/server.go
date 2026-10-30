@@ -21,17 +21,22 @@ import (
 	"github.com/tyk-swe/olp/internal/catalog"
 	"github.com/tyk-swe/olp/internal/contentpolicy"
 	"github.com/tyk-swe/olp/internal/limits"
+	"github.com/tyk-swe/olp/internal/mcp"
 	"github.com/tyk-swe/olp/internal/operationregistry"
 	"github.com/tyk-swe/olp/internal/retainedapi"
+	"github.com/tyk-swe/olp/internal/runtime"
 	"github.com/tyk-swe/olp/internal/usage"
 	"github.com/tyk-swe/olp/internal/vendors"
 )
 
 // Server serves the route management surface.
 type Server struct {
-	Region string
-	Access *access.Server
-	Inputs func() *usage.RoutingInputs
+	Region            string
+	Access            *access.Server
+	Inputs            func() *usage.RoutingInputs
+	WorkflowTools     func() mcp.WorkflowResolver
+	WorkflowRelease   func() *runtime.Release
+	WorkflowAvailable func() bool
 	// Catalog is the reference catalog this release ships, whose documented
 	// retirements targets carry.
 	Catalog *catalog.Signed
