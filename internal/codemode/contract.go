@@ -340,6 +340,10 @@ func (b *TokenBound) Validate() error {
 }
 
 type Attempt struct {
+	InitialRecovery   bool              `json:"initial_recovery"`
+	Nonexecution      bool              `json:"nonexecution"`
+	RecoveryFrom      *string           `json:"recovery_from"`
+	RecoveryReason    *string           `json:"recovery_reason"`
 	RequestedModel    *string           `json:"requested_model"`
 	Attribution       map[string]string `json:"attribution,omitempty"`
 	EndUserDigest     string            `json:"end_user_digest"`

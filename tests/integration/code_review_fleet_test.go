@@ -201,6 +201,15 @@ func TestCodePaidFallbackRetainsOnePaidOwnerAcrossReplicas(t *testing.T) {
 	if len(bindings) != 1 || bindings[0].PaidProviderId.GetOrEmpty().String() != provider || bindings[0].Conversation != "paid-fleet-root" {
 		t.Fatalf("replicas split paid ownership %+v", bindings)
 	}
+	attempts := codePublicDecode[[]contract.CodeAttempt](t, f.h.want(f.owner, "GET", "/api/v1/code/attempts?project_id="+f.project+"&binding_id="+bindings[0].Id.String(), nil, nil, 200)["items"])
+	if len(attempts) != 2 {
+		t.Fatal("paid binding did not retain both attempts")
+	}
+	for _, attempt := range attempts {
+		if attempt.PaidBindingId.GetOrEmpty() != bindings[0].Id || attempt.PaidProviderId.GetOrEmpty().String() != provider || attempt.PaidSlotId.GetOrEmpty().String() != slot.ID || !attempt.AccountId.IsNull() || attempt.Nonexecution || !attempt.RecoveryFrom.IsNull() || !attempt.RecoveryReason.IsNull() {
+			t.Fatal("paid diagnostics lost target attribution or invented rejection evidence")
+		}
+	}
 	if slices.ContainsFunc(f.peer.Requests(), func(request codexfixture.Request) bool { return request.Header.Get("Session-Id") == "paid-fleet-root" }) {
 		t.Fatal("initial exhausted subscription work dispatched")
 	}

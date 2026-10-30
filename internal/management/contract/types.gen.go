@@ -871,6 +871,27 @@ func (e CodeAttemptPaidMonetaryState) Valid() bool {
 	}
 }
 
+// Defines values for CodeAttemptRecoveryReason.
+const (
+	CodeAttemptRecoveryReasonCredentialRejected CodeAttemptRecoveryReason = "credential_rejected"
+	CodeAttemptRecoveryReasonLessThannil        CodeAttemptRecoveryReason = "<nil>"
+	CodeAttemptRecoveryReasonQuotaRejected      CodeAttemptRecoveryReason = "quota_rejected"
+)
+
+// Valid indicates whether the value is a known member of the CodeAttemptRecoveryReason enum.
+func (e CodeAttemptRecoveryReason) Valid() bool {
+	switch e {
+	case CodeAttemptRecoveryReasonCredentialRejected:
+		return true
+	case CodeAttemptRecoveryReasonLessThannil:
+		return true
+	case CodeAttemptRecoveryReasonQuotaRejected:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for CodeAttemptState.
 const (
 	CodeAttemptStateAborted        CodeAttemptState = "aborted"
@@ -7522,8 +7543,14 @@ type CodeAttempt struct {
 	EndUserDigest string                       `json:"end_user_digest"`
 	FinishedAt    nullable.Nullable[time.Time] `json:"finished_at"`
 	Id            openapi_types.UUID           `json:"id"`
-	InputTokens   nullable.Nullable[int64]     `json:"input_tokens"`
-	Model         string                       `json:"model"`
+
+	// InitialRecovery The portable initial input permitted recovery when admitted. False also includes historical attempts without that evidence. This does not establish account eligibility or permission to replay.
+	InitialRecovery bool                     `json:"initial_recovery"`
+	InputTokens     nullable.Nullable[int64] `json:"input_tokens"`
+	Model           string                   `json:"model"`
+
+	// Nonexecution A bounded upstream rejection was verified to prove this attempt did not execute. False means nonexecution was not proven.
+	Nonexecution bool `json:"nonexecution"`
 
 	// Operation The operation the request performed: `responses`, `compact` or `prewarm` on the Responses API, `messages` on Anthropic Messages, or `chat` on Chat Completions.
 	Operation string `json:"operation"`
@@ -7539,8 +7566,14 @@ type CodeAttempt struct {
 	PaidSlotId        nullable.Nullable[openapi_types.UUID]           `json:"paid_slot_id,omitempty"`
 	ProjectId         openapi_types.UUID                              `json:"project_id"`
 	ReasoningTokens   nullable.Nullable[int64]                        `json:"reasoning_tokens"`
-	Refusal           nullable.Nullable[string]                       `json:"refusal"`
-	ReportedTokens    nullable.Nullable[int64]                        `json:"reported_tokens"`
+
+	// RecoveryFrom Prior attempt this admission recovered from, within the same project, route and API key. Null when no visible recovery source was recorded.
+	RecoveryFrom nullable.Nullable[openapi_types.UUID] `json:"recovery_from"`
+
+	// RecoveryReason Reason from the recovery source that durably proved nonexecution. Null means historical evidence is unavailable or no recovery source exists. Never inferred from current account health.
+	RecoveryReason nullable.Nullable[CodeAttemptRecoveryReason] `json:"recovery_reason"`
+	Refusal        nullable.Nullable[string]                    `json:"refusal"`
+	ReportedTokens nullable.Nullable[int64]                     `json:"reported_tokens"`
 
 	// RequestedModel Public model requested before explicit alias resolution.
 	RequestedModel  nullable.Nullable[string] `json:"requested_model,omitempty"`
@@ -7561,6 +7594,9 @@ type CodeAttemptOutcomeOrigin string
 
 // CodeAttemptPaidMonetaryState defines model for CodeAttempt.PaidMonetaryState.
 type CodeAttemptPaidMonetaryState string
+
+// CodeAttemptRecoveryReason Reason from the recovery source that durably proved nonexecution. Null means historical evidence is unavailable or no recovery source exists. Never inferred from current account health.
+type CodeAttemptRecoveryReason string
 
 // CodeAttemptState defines model for CodeAttempt.State.
 type CodeAttemptState string
@@ -15596,6 +15632,9 @@ type ListCodeAttemptsParams struct {
 
 	// EndUserDigest Filter by a project-scoped digest, or unidentified for requests without one.
 	EndUserDigest *string `form:"end_user_digest,omitempty" json:"end_user_digest,omitempty"`
+
+	// AttemptId Select a single recorded attempt within current project visibility. Can resolve a recovery source across subscription and paid bindings. Other filters still apply.
+	AttemptId *openapi_types.UUID `form:"attempt_id,omitempty" json:"attempt_id,omitempty"`
 }
 
 // ListCodeBindingsParams defines parameters for ListCodeBindings.

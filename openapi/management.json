@@ -15780,6 +15780,34 @@
             ],
             "format": "uuid"
           },
+          "initial_recovery": {
+            "type": "boolean",
+            "description": "The portable initial input permitted recovery when admitted. False also includes historical attempts without that evidence. This does not establish account eligibility or permission to replay."
+          },
+          "nonexecution": {
+            "type": "boolean",
+            "description": "A bounded upstream rejection was verified to prove this attempt did not execute. False means nonexecution was not proven."
+          },
+          "recovery_from": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Prior attempt this admission recovered from, within the same project, route and API key. Null when no visible recovery source was recorded."
+          },
+          "recovery_reason": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "credential_rejected",
+              "quota_rejected",
+              null
+            ],
+            "description": "Reason from the recovery source that durably proved nonexecution. Null means historical evidence is unavailable or no recovery source exists. Never inferred from current account health."
+          },
           "codex_cli_identity_enabled": {
             "type": "boolean",
             "description": "Whether the frozen route revision enabled Codex CLI identity compatibility. This is route policy, not evidence that an Originator header changed or that this attempt used Codex. No client identity header values or prompt content are recorded."
@@ -15810,7 +15838,11 @@
           "created_at",
           "finished_at",
           "route_revision_id",
-          "end_user_digest"
+          "end_user_digest",
+          "initial_recovery",
+          "nonexecution",
+          "recovery_from",
+          "recovery_reason"
         ],
         "type": "object"
       },
@@ -44681,6 +44713,16 @@
             "schema": {
               "type": "string",
               "pattern": "^([0-9a-f]{64}|unidentified)$"
+            }
+          },
+          {
+            "name": "attempt_id",
+            "in": "query",
+            "required": false,
+            "description": "Select a single recorded attempt within current project visibility. Can resolve a recovery source across subscription and paid bindings. Other filters still apply.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
             }
           }
         ],
