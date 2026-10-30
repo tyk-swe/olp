@@ -11,9 +11,11 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/santhosh-tekuri/jsonschema/v6"
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/codeadapter"
 	"github.com/tyk-swe/olp/internal/codemode"
+	"github.com/tyk-swe/olp/openapi"
 )
 
 func TestWindowsClaudeConfiguration(t *testing.T) {
@@ -337,6 +339,29 @@ func TestCatalogAndConfigurationExposeDirectPaidModelsWithoutAdapters(t *testing
 	config, err := Generate(route, offers, Request{GatewayURL: "https://gateway.example", Client: codeadapter.ClientCodex, Model: "paid-native"})
 	if err != nil || len(config.Adapters) != 0 || !strings.Contains(config.Configuration, "supports_websockets = false") || !slices.Equal(config.PaidModels, route.Models) {
 		t.Fatalf("paid configuration %+v %v", config, err)
+	}
+	var document map[string]any
+	if err := json.Unmarshal(openapi.Document, &document); err != nil {
+		t.Fatal(err)
+	}
+	compiler := jsonschema.NewCompiler()
+	if err := compiler.AddResource("https://contract.test/management.json", document); err != nil {
+		t.Fatal(err)
+	}
+	schema, err := compiler.Compile("https://contract.test/management.json#/components/schemas/CodeClientConfiguration")
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded, err := json.Marshal(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var value any
+	if err := json.Unmarshal(encoded, &value); err != nil {
+		t.Fatal(err)
+	}
+	if err := schema.Validate(value); err != nil {
+		t.Fatalf("paid setup violates its public response contract %v", err)
 	}
 	openCode, openErr := Generate(route, offers, Request{GatewayURL: "https://gateway.example", Client: codeadapter.ClientOpenCode, Model: "paid-native"})
 	if openErr != nil || !strings.Contains(openCode.Configuration, "olp-paid-responses/paid-native") {

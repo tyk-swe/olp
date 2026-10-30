@@ -2,6 +2,7 @@ package configuration
 
 import (
 	"encoding/json"
+	"maps"
 	"slices"
 
 	"github.com/tyk-swe/olp/internal/access"
@@ -20,7 +21,7 @@ func codePaidRevision(provider routing.Provider, labels []routing.RevisionModel)
 		value := provider.Limits
 		return &providers.Limits{MaxConcurrency: value.MaxConcurrency, RequestsPerMinute: value.RequestsPerMinute, TokensPerMinute: value.TokensPerMinute, Supply: value.Supply}
 	}()
-	configuration, err := json.Marshal(providers.Configuration{CredentialSource: provider.CredentialSource, ProfileID: provider.ProfileID, ProfileRevision: provider.ProfileRevision, Kind: provider.Kind, AuthMode: provider.AuthMode, Endpoint: codeString(provider.Endpoint), CloudRegion: codeString(provider.CloudRegion), CloudProject: codeString(provider.CloudProject), BatchStorage: provider.BatchStorage, Deployment: codeString(provider.Deployment), APIVersion: codeString(provider.APIVersion), Options: providers.Options{TuningDatasetURIPrefixes: provider.TuningDatasetURIPrefixes, DocumentURIPrefixes: provider.DocumentURIPrefixes, Network: provider.Network, SemanticHeaders: provider.SemanticHeaders, QuerySettings: provider.QuerySettings, OperationDefaults: provider.OperationDefaults, Bindings: provider.Bindings, CredentialHeaders: provider.CredentialHeaders, Limits: limits, Models: provider.Models, ParameterDefaults: provider.ParameterDefaults, VendorID: codeString(provider.VendorID), Commitment: provider.Commitment, PluginOptions: provider.PluginOptions, HealthProbe: provider.HealthProbe}})
+	configuration, err := json.Marshal(providers.Configuration{CredentialSource: provider.CredentialSource, ProfileID: provider.ProfileID, ProfileRevision: provider.ProfileRevision, Kind: provider.Kind, AuthMode: provider.AuthMode, Endpoint: codeString(provider.Endpoint), CloudRegion: codeString(provider.CloudRegion), CloudProject: codeString(provider.CloudProject), BatchStorage: provider.BatchStorage, Deployment: codeString(provider.Deployment), APIVersion: codeString(provider.APIVersion), Options: providers.Options{TuningDatasetURIPrefixes: provider.TuningDatasetURIPrefixes, DocumentURIPrefixes: provider.DocumentURIPrefixes, Network: provider.Network, SemanticHeaders: provider.SemanticHeaders, QuerySettings: provider.QuerySettings, OperationDefaults: provider.OperationDefaults, Bindings: provider.Bindings, CredentialHeaders: append([]string{}, provider.CredentialHeaders...), Limits: limits, Models: maps.Collect(maps.All(provider.Models)), ParameterDefaults: maps.Collect(maps.All(provider.ParameterDefaults)), VendorID: codeString(provider.VendorID), Commitment: provider.Commitment, PluginOptions: provider.PluginOptions, HealthProbe: provider.HealthProbe}})
 	if err != nil {
 		return nil, nil, nil, err
 	}

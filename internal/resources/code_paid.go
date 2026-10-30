@@ -313,7 +313,13 @@ func (s *CodeStore) ResolvePaidModel(ctx context.Context, in CodeAdmission, veri
 	}
 	defer tx.Rollback(ctx)
 	var selected *string
-	err = tx.QueryRow(ctx, `SELECT (SELECT b.selected_model FROM olp.code_paid_bindings b JOIN olp.code_paid_bindings root ON root.id=b.root_id WHERE b.route_id=$1 AND b.api_key_id=$2 AND b.model=$3 AND root.retired_at IS NULL AND (b.conversation=$4 OR b.conversation=$5 OR b.id=(SELECT r.binding_id FROM olp.code_paid_references r WHERE r.route_id=$1 AND r.api_key_id=$2 AND r.external_id=$6 AND NOT r.ambiguous)) ORDER BY CASE WHEN b.conversation=$4 THEN 0 WHEN b.conversation=$5 THEN 1 ELSE 2 END LIMIT 1)`, in.Route.ID, in.APIKeyID, in.Operation.PublicModel(), in.Operation.Identity.Conversation, in.Operation.Identity.Parent, in.PreviousResponse).Scan(&selected)
+	err = tx.QueryRow(ctx, `SELECT (SELECT selected_model FROM (
+ SELECT b.selected_model,b.conversation,0 AS ownership,b.id=(SELECT r.binding_id FROM olp.code_paid_references r WHERE r.route_id=$1 AND r.api_key_id=$2 AND r.external_id=$6 AND NOT r.ambiguous) AS referenced
+ FROM olp.code_paid_bindings b WHERE b.route_id=$1 AND b.api_key_id=$2 AND b.model=$3
+ UNION ALL
+ SELECT coalesce(p.target_model,p.model),b.conversation,1,b.id=(SELECT r.binding_id FROM olp.code_references r WHERE r.route_id=$1 AND r.api_key_id=$2 AND r.external_id=$6 AND NOT r.ambiguous AND r.account_id IS NOT NULL)
+ FROM olp.code_bindings b JOIN olp.code_pins p ON p.root_id=b.root_id WHERE b.route_id=$1 AND b.api_key_id=$2 AND p.model=$3
+ ) owners WHERE conversation=$4 OR conversation=$5 OR referenced ORDER BY CASE WHEN conversation=$4 THEN 0 WHEN conversation=$5 THEN 1 ELSE 2 END,ownership LIMIT 1)`, in.Route.ID, in.APIKeyID, in.Operation.PublicModel(), in.Operation.Identity.Conversation, in.Operation.Identity.Parent, in.PreviousResponse).Scan(&selected)
 	if err != nil {
 		return codemode.Operation{}, err
 	}

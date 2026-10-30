@@ -49,6 +49,9 @@ func TestCodeQualificationGenericAffinityPreservesAuthority(t *testing.T) {
 		if err != nil || response.StatusCode != status {
 			t.Fatalf("generic authority request returned %d body %s error %v", response.StatusCode, data, err)
 		}
+		if status == http.StatusNotFound && !strings.Contains(string(data), `"code":"code_route_unavailable"`) {
+			t.Fatalf("foreign project refusal changed %s", data)
+		}
 	}
 	request(f.key, "same-client-affinity", codeBody(), http.StatusOK)
 	continuation := []byte(`{"model":"gpt-5.4","previous_response_id":"resp-controlled","input":[]}`)
@@ -67,7 +70,7 @@ func TestCodeQualificationGenericAffinityPreservesAuthority(t *testing.T) {
 	if len(bindings) != 2 || bindings[0].RootID == bindings[1].RootID || bindings[0].APIKeyID == bindings[1].APIKeyID || bindings[0].Conversation != bindings[1].Conversation {
 		t.Fatal("equal generic affinity escaped API-key isolation")
 	}
-	request(foreign["secret"].(string), "same-client-affinity", codeBody(), http.StatusForbidden)
+	request(foreign["secret"].(string), "same-client-affinity", codeBody(), http.StatusNotFound)
 	if len(f.peer.Requests()) != 3 {
 		t.Fatal("another project's generic affinity reached upstream")
 	}

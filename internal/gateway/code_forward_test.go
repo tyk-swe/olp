@@ -1955,13 +1955,26 @@ func TestCodePaidTargetPreservesNativeRequestAndAttributesMeteredUsage(t *testin
 	requestBody := []byte(`{ "model":"model-a", "input":"Explain this function", "max_output_tokens":20, "vendor_extension":{"keep":true} }`)
 	responseBody := []byte(`{ "id":"paid-response", "status":"completed", "output":[], "usage":{"total_tokens":3,"input_tokens":2,"output_tokens":1,"input_tokens_details":{"cached_tokens":1}}, "vendor_extension":{"keep":true} }`)
 	h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.RawQuery != "fixture=opaque%2Fquery&fixture=second&future=unknown" {
+			t.Errorf("native query changed %q", r.URL.RawQuery)
+		}
 		body, _ := io.ReadAll(r.Body)
 		if !bytes.Equal(body, requestBody) || r.Header.Get("Authorization") != "Bearer "+secretA {
 			t.Error("paid target changed native request or authorization")
 		}
 		_, _ = w.Write(responseBody)
 	})
-	response := codeDo(t, server, requestBody, nil)
+	request, err := http.NewRequestWithContext(t.Context(), http.MethodPost, server.URL+"/code/coding/responses?fixture=opaque%2Fquery&fixture=second&future=unknown", bytes.NewReader(requestBody))
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.Header.Set("Authorization", "Bearer "+fullKey)
+	request.Header.Set("Thread-Id", "paid-native-query")
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
 	body, _ := io.ReadAll(response.Body)
 	if response.StatusCode != 200 || !bytes.Equal(body, responseBody) {
 		t.Fatalf("paid exchange %d %s", response.StatusCode, body)
@@ -1988,6 +2001,57 @@ func TestCodePaidTargetPreservesNativeRequestAndAttributesMeteredUsage(t *testin
 		}
 		return "1-0", nil
 	}), "metadata", quiet)
+}
+
+func TestCodePaidNativeIdentifiersAndAliasesPreserveExactTarget(t *testing.T) {
+	model := "Family/Model:" + strings.Repeat("x", 187)
+	for _, scenario := range []struct {
+		name, public string
+		alias        bool
+	}{{"native", model, false}, {"alias", "Team/Assistant:Stable", true}} {
+		t.Run(scenario.name, func(t *testing.T) {
+			h, ledger, server := newPaidCodeForwardHarness(t)
+			snapshot := h.rt.Release().Snapshot.Clone()
+			route := snapshot.CodeRoutes["coding"]
+			route.Models = []string{model}
+			route.PaidTargets = map[string]codemode.PaidTarget{model: route.PaidTargets[modelA]}
+			route.ModelRewriting = scenario.alias
+			if scenario.alias {
+				route.Aliases = map[string]string{scenario.public: model}
+			}
+			snapshot.CodeRoutes[route.Slug] = route
+			providerKey := route.RevisionID + ":" + route.PaidTargets[model].ProviderID
+			provider := snapshot.CodePaidConnections[providerKey]
+			provider.Capabilities = []routing.Capability{{Model: model, Operation: "generation", Surface: "openai", Mode: "unary"}}
+			snapshot.CodePaidConnections[providerKey] = provider
+			release, err := runtime.NewRelease(uuid.NewString(), 12, snapshot, map[string][]byte{h.credA: []byte(secretA)})
+			if err != nil {
+				t.Fatal(err)
+			}
+			h.rt.release = release
+			h.rt.inputs.Prices[0].Model = model
+			requestBody := fmt.Sprintf(`{ "model":%q, "input":"keep native input", "max_output_tokens":20, "vendor_extension":{"keep":true} }`, scenario.public)
+			responseBody := `{"id":"paid-exact-native","status":"completed","output":[],"usage":{"input_tokens":2,"output_tokens":1,"total_tokens":3}}`
+			h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
+				body, _ := io.ReadAll(r.Body)
+				if string(body) != strings.Replace(requestBody, scenario.public, model, 1) {
+					t.Errorf("native identifier changed request %s", body)
+				}
+				_, _ = io.WriteString(w, responseBody)
+			})
+			response := codeDo(t, server, []byte(requestBody), nil)
+			defer response.Body.Close()
+			body, _ := io.ReadAll(response.Body)
+			if response.StatusCode != 200 || string(body) != responseBody {
+				t.Fatalf("valid native model refused %d %s", response.StatusCode, body)
+			}
+			ledger.wait(t)
+			fact := h.sink.last(t).Attempts[0]
+			if fact.UpstreamModel != model || fact.Price.Model != model {
+				t.Fatalf("paid exact model lost pricing identity %+v", fact)
+			}
+		})
+	}
 }
 
 func TestCodeModelPoolRecoveryPreservesNativeRequestedName(t *testing.T) {
@@ -2362,6 +2426,42 @@ func TestCodePaidAliasContinuationUsesPinnedTargetBeforePricing(t *testing.T) {
 	fact := h.sink.await(t, 1)[0].Attempts[0]
 	if fact.UpstreamModel != modelA || fact.Price.Model != modelA {
 		t.Fatalf("paid alias pricing diverged from its selected target %+v", fact)
+	}
+}
+
+func TestCodeAliasRepointAcrossPaidAndSubscriptionRetainsPinnedTarget(t *testing.T) {
+	for _, scenario := range []struct {
+		name, pinned, repointed, credential string
+	}{{"paid", modelA, modelB, "Bearer " + secretA}, {"subscription", modelB, modelA, "Bearer upstream-only"}} {
+		t.Run(scenario.name, func(t *testing.T) {
+			h, ledger, server := newPaidCodeForwardHarness(t)
+			snapshot := h.rt.Release().Snapshot.Clone()
+			route := snapshot.CodeRoutes["coding"]
+			route.Models = []string{modelA, modelB}
+			route.ModelRewriting = true
+			route.Aliases = map[string]string{"assistant": scenario.repointed}
+			snapshot.CodeRoutes[route.Slug] = route
+			release, err := runtime.NewRelease(uuid.NewString(), 13, snapshot, map[string][]byte{h.credA: []byte(secretA)})
+			if err != nil {
+				t.Fatal(err)
+			}
+			h.rt.release = release
+			ledger.pinTarget = scenario.pinned
+			h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
+				body, _ := io.ReadAll(r.Body)
+				if !strings.Contains(string(body), `"model":"`+scenario.pinned+`"`) || r.Header.Get("Authorization") != scenario.credential {
+					t.Errorf("alias repoint changed target or owner %s", body)
+				}
+				_, _ = fmt.Fprintf(w, `{"id":"alias-owner","model":%q,"status":"completed","output":[],"usage":{"input_tokens":2,"output_tokens":1,"total_tokens":3}}`, scenario.pinned)
+			})
+			response := codeDo(t, server, []byte(`{"model":"assistant","input":"continue"}`), nil)
+			defer response.Body.Close()
+			body, _ := io.ReadAll(response.Body)
+			if response.StatusCode != 200 || !strings.Contains(string(body), `"model":"assistant"`) {
+				t.Fatalf("alias repoint stranded existing owner %d %s", response.StatusCode, body)
+			}
+			ledger.wait(t)
+		})
 	}
 }
 

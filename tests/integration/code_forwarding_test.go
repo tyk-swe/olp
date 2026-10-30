@@ -271,6 +271,8 @@ func TestCodePaidVendorPricingSettlesDistinctChargeAndEnforcesSpend(t *testing.T
 	}))
 	t.Cleanup(upstream.Close)
 	f, provider, _ := newPaidCodeFixture(t, upstream.URL)
+	lookup := limLookup()
+	f.exec(t, `UPDATE olp.api_keys SET lookup_id=$2 WHERE id=$1`, f.key, lookup)
 	f.h.want(f.owner, "POST", "/api/v1/pricing/revisions", map[string]any{"effective_at": time.Now().UTC().Format(time.RFC3339Nano), "prices": []any{map[string]any{"provider_kind": provider.Kind, "vendor_id": provider.VendorID, "model": "native-model", "operation": "generation", "currency": "USD", "input_per_million": "2", "cached_input_per_million": "1", "output_per_million": "3"}}}, idem("paid-vendor-price"), 201)
 	card := f.h.want(f.owner, "POST", "/api/v1/rate-cards", map[string]any{"owner": map[string]any{"kind": "installation"}}, idem("paid-card"), 201)
 	f.h.want(f.owner, "POST", "/api/v1/rate-cards/"+card["id"].(string)+"/revisions", map[string]any{"markup": "2"}, idem("paid-card-revision"), 201)
@@ -280,7 +282,7 @@ func TestCodePaidVendorPricingSettlesDistinctChargeAndEnforcesSpend(t *testing.T
 		return price != nil
 	})
 	policy := access.KeyPolicy{Scopes: []string{"inference"}, AllowedRoutes: []string{"coding"}}
-	f.h.Gateway.Runtime = &codeForwardRuntime{Runtime: f.h.Runtime, pinned: f.h.Runtime.Release(), authority: access.Authority{ID: f.key, LookupID: f.key, ProjectID: &f.project, Policy: policy}}
+	f.h.Gateway.Runtime = &codeForwardRuntime{Runtime: f.h.Runtime, pinned: f.h.Runtime.Release(), authority: access.Authority{ID: f.key, LookupID: lookup, ProjectID: &f.project, Policy: policy}}
 	f.h.Gateway.CodeLedger = f.store
 	_, _, limiter := limSetup(t, "paid-vendor-cost")
 	f.h.Gateway.Admission = gateway.NewAdmission(limiter, nil, slog.New(slog.DiscardHandler))
@@ -348,7 +350,7 @@ type codePaidFallbackForwardFixture struct {
 
 func newCodePaidFallbackForwardFixture(t *testing.T) codePaidFallbackForwardFixture {
 	t.Helper()
-	f := newCodeFixture(t)
+	f := newCodeFixtureWithProfile(t, "codex-subscription")
 	paid, subscription := new(atomic.Bool), new(atomic.Bool)
 	paidPeer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		paid.Store(true)
@@ -432,6 +434,86 @@ func TestCodePaidFallbackChecksEverySubscriptionModelBeforeSpending(t *testing.T
 	}
 	if !f.paid.Load() || f.subscription.Load() {
 		t.Fatal("exhausted work dispatched to the wrong destination")
+	}
+}
+
+func TestCodeAliasRepointPreservesPaidAndSubscriptionContinuation(t *testing.T) {
+	for _, scenario := range []struct {
+		name, pinned, repointed, response string
+		paid                              bool
+	}{{"paid", "alternate-model", "native-model", "paid-fallback", true}, {"subscription", "native-model", "alternate-model", "subscription-alias-owner", false}} {
+		t.Run(scenario.name, func(t *testing.T) {
+			f := newCodePaidFallbackForwardFixture(t)
+			var subscriptionCalls atomic.Int64
+			subscription := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				subscriptionCalls.Add(1)
+				var body struct {
+					Model string `json:"model"`
+				}
+				if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Model != "native-model" || r.Header.Get("Authorization") != "Bearer fixture-subscription" {
+					t.Errorf("subscription continuation changed model or owner %+v %v", body, err)
+				}
+				w.Header().Set("Content-Type", "application/json")
+				io.WriteString(w, `{"id":"subscription-alias-owner","model":"native-model","status":"completed","output":[],"usage":{"input_tokens":2,"output_tokens":1,"total_tokens":3}}`)
+			}))
+			t.Cleanup(subscription.Close)
+			f.exec(t, `UPDATE olp.providers SET configuration=jsonb_set(configuration::jsonb,'{endpoint}',to_jsonb($2::text))::json WHERE id=$1`, f.provider, subscription.URL)
+			f.exec(t, `UPDATE olp.code_accounts SET models=$2 WHERE id=$1`, f.account, []byte(`["native-model"]`))
+			publish := func(target string) {
+				t.Helper()
+				path := "/api/v1/code/routes/" + f.route.ID
+				current := f.h.want(f.owner, "GET", path, nil, nil, 200)
+				aliases := map[string]string{"assistant": target}
+				write := contract.CodeRouteWrite{ProjectId: uuid.MustParse(f.project), PoolId: uuid.MustParse(f.pool), Slug: f.route.Slug, Models: f.route.Models, Enabled: true, ModelRewriting: new(true), Aliases: &aliases, PaidParticipation: new(true), PaidTargets: f.write.PaidFallbackTargets}
+				saved := f.h.want(f.owner, "PUT", path, write, etagHeader(current), 200)
+				published := f.h.want(f.owner, "POST", path+"/publish", nil, withMatch(saved, idem("alias-"+target)), 200)
+				route := codePublicDecode[codemode.Route](t, published)
+				eventually(t, "alias publication", 15*time.Second, func() bool {
+					f.h.refresh()
+					return f.h.Runtime.Release().Snapshot.CodeRoutes[route.Slug].RevisionID == route.RevisionID
+				})
+				policy := access.KeyPolicy{Scopes: []string{"inference"}, AllowedRoutes: []string{route.Slug}}
+				f.h.Gateway.Runtime = &codeForwardRuntime{Runtime: f.h.Runtime, pinned: f.h.Runtime.Release(), authority: access.Authority{ID: f.key, LookupID: f.key, ProjectID: &f.project, Policy: policy}}
+			}
+			call := func(conversation, previous string) {
+				t.Helper()
+				payload, err := json.Marshal(struct {
+					Model    string `json:"model"`
+					Input    string `json:"input"`
+					Max      int    `json:"max_output_tokens"`
+					Previous string `json:"previous_response_id,omitempty"`
+				}{"assistant", "complete portable input", 1, previous})
+				if err != nil {
+					t.Fatal(err)
+				}
+				request, err := http.NewRequestWithContext(t.Context(), http.MethodPost, f.server.URL+"/code/coding/responses", strings.NewReader(string(payload)))
+				if err != nil {
+					t.Fatal(err)
+				}
+				request.Header.Set("Authorization", "Bearer olp-code-fixture")
+				request.Header.Set("Thread-Id", conversation)
+				response, err := http.DefaultClient.Do(request)
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer response.Body.Close()
+				body, err := io.ReadAll(response.Body)
+				if err != nil || response.StatusCode != 200 || !strings.Contains(string(body), scenario.response) {
+					t.Fatalf("published alias lost its original exact owner %d %s %v", response.StatusCode, body, err)
+				}
+			}
+			publish(scenario.pinned)
+			call("alias-owner-root", "")
+			codeForwardAwait(t, f.codeFixture, "settled", 1)
+			publish(scenario.repointed)
+			call("alias-owner-root", "")
+			codeForwardAwait(t, f.codeFixture, "settled", 2)
+			call("alias-owner-child", scenario.response)
+			codeForwardAwait(t, f.codeFixture, "settled", 3)
+			if scenario.paid && subscriptionCalls.Load() != 0 || !scenario.paid && (subscriptionCalls.Load() != 3 || f.paid.Load()) {
+				t.Fatal("alias repoint dispatched through a different ownership class")
+			}
+		})
 	}
 }
 

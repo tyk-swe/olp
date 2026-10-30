@@ -7663,7 +7663,7 @@ type CodeBudgetWrite struct {
 
 // CodeClientConfiguration defines model for CodeClientConfiguration.
 type CodeClientConfiguration struct {
-	// Adapters The subscription families whose accounts serve the client's published models and exact aliases, in display order. A mixed route's configuration draws each model from its own family.
+	// Adapters The subscription families whose accounts serve the client's published models and exact aliases, in display order. A mixed route's configuration draws each model from its own family. Empty for paid-only setup.
 	Adapters []CodeClientConfigurationAdapters `json:"adapters"`
 
 	// AdditionalFiles Companion configuration files required by this setup. Merge entries with existing client settings and MCP servers.
