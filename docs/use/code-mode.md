@@ -227,6 +227,47 @@ refresh do not send inference requests or establish subscription eligibility.
 This path has controlled-fixture coverage only. Real subscription qualification
 remains subject to the release gates linked above.
 
+## Import Claude credentials once
+
+In the code account editor, select a provider connection using the Claude
+subscription profile, paste the supported `.credentials.json` document into
+**Claude .credentials.json**, and choose **Import Claude credentials**. Save the
+account to associate the new credential. OLP encrypts the imported grant and owns
+refresh afterward. Stop using the original local credentials after import. This
+is a one-time operation. OLP does not read, watch or synchronize local files.
+
+The supported document contains only a `claudeAiOauth` object with opaque string
+fields `accessToken` and `refreshToken`, an `expiresAt` Unix timestamp in
+milliseconds, and a `scopes` array containing `user:profile` and `user:inference`.
+Optional fields are `refreshTokenExpiresAt` and `subscriptionTypeVerifiedAt` as
+positive Unix timestamps in milliseconds, `subscriptionType` and `rateLimitTier`
+as strings or `null`, `subscriptionTypeSource` set to `sign_in` or `profile`, and
+`clientId` matching the supported subscription client's identifier. This format
+was checked against the official Claude Code 2.1.314 credential writer. See the
+[official authentication documentation](https://code.claude.com/docs/en/authentication)
+for local sign-in. API keys, other credential stores, unknown fields, duplicate
+JSON fields and unsupported client identifiers are rejected.
+
+The management API accepts `POST /api/v1/providers/{provider_id}/claude-import`
+with the current provider `If-Match` header and a JSON body containing
+`credentials`, the supported document encoded as a string. Optional `slot_id`
+selects an existing credential slot. Otherwise import uses the default slot.
+OLP first authenticates the pasted access token against the fixed subscription
+profile endpoint. It then refreshes through the pinned Claude plugin and verifies
+the same account and organization again, using the provider's approved network
+controls. Credentials whose original identity cannot be verified, including
+expired or revoked access tokens, require a fresh local sign-in before import.
+OLP does not infer identity from opaque token contents or local metadata.
+
+An occupied slot requires the same verified principal. Account or organization
+changes are rejected without modifying the existing account or its conversation
+pins. The response contains credential metadata and never tokens. Same-identity
+replacement preserves pins after the account is saved with the returned
+credential identifier. Import and refresh do not send inference requests or
+establish subscription eligibility. This path has controlled-fixture coverage
+only. Real subscription qualification remains subject to the release gates
+linked above.
+
 ## Research tools
 
 Research tools use a pool account independently of the coding model. A route

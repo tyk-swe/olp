@@ -19,6 +19,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -834,5 +835,207 @@ func TestAntigravityHeadlessEnrollmentRefreshAndPublishedPolicy(t *testing.T) {
 	}
 	if _, err := authorizer.AuthorizeCode(t.Context(), config, account, dispatch); err == nil {
 		t.Fatal("changed subject remained authorized")
+	}
+}
+
+func TestClaudeImportPreservesNativeRequestsRefreshAndConversationPins(t *testing.T) {
+	h := newAccessHarness(t)
+	owner := h.owner()
+	const nativeRequest = `{"model":"claude-fixture","system":"preserve native instructions","metadata":{"user_id":"fixture-user"},"messages":[{"role":"user","content":"Read main.go"},{"role":"assistant","content":[{"type":"tool_use","id":"read-1","name":"read_file","input":{"path":"main.go"}}]},{"role":"user","content":[{"type":"tool_result","tool_use_id":"read-1","content":"package main"}]}],"tools":[{"name":"read_file","input_schema":{"type":"object"}}],"max_tokens":64,"fixture_extension":{"preserve":true}}`
+	const nativeResponse = `{"id":"fixture-message","type":"message","role":"assistant","content":[{"type":"text","text":"The file declares package main"}],"stop_reason":"end_turn","usage":{"input_tokens":20,"output_tokens":6}}`
+	var issued atomic.Int64
+	var changedAccount, changedOrganization, conflictingPrincipal, inferenceExpected atomic.Bool
+	var nativeCredential atomic.Pointer[string]
+	authority := newSubscriptionAuthority(t, []string{"platform.claude.com", "api.anthropic.com"}, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == "POST" && r.Host == "platform.claude.com" && r.URL.Path == "/v1/oauth/token":
+			var request struct {
+				GrantType    string `json:"grant_type"`
+				RefreshToken string `json:"refresh_token"`
+				ClientID     string `json:"client_id"`
+			}
+			if json.NewDecoder(r.Body).Decode(&request) != nil || request.GrantType != "refresh_token" || request.RefreshToken != "fixture-import-refresh" || request.ClientID != claudeauth.ClientID {
+				t.Error("import did not retain supported refresh ownership")
+				w.WriteHeader(400)
+				return
+			}
+			fmt.Fprintf(w, `{"access_token":"fixture-issued-%d","token_type":"bearer","expires_in":3600}`, issued.Add(1))
+		case r.Method == "GET" && r.Host == "api.anthropic.com" && r.URL.Path == "/api/oauth/profile":
+			original := r.Header.Get("Authorization") == "Bearer fixture-import-access"
+			if !original && !strings.HasPrefix(r.Header.Get("Authorization"), "Bearer fixture-issued-") {
+				t.Error("identity lookup lacked authenticated imported or issued material")
+				w.WriteHeader(401)
+				return
+			}
+			account := func() string {
+				if conflictingPrincipal.Load() || !original && changedAccount.Load() {
+					return "33333333-3333-4333-8333-333333333333"
+				}
+				return "11111111-1111-4111-8111-111111111111"
+			}()
+			organization := func() string {
+				if !original && changedOrganization.Load() {
+					return "44444444-4444-4444-8444-444444444444"
+				}
+				return "22222222-2222-4222-8222-222222222222"
+			}()
+			fmt.Fprintf(w, `{"account":{"uuid":%q},"organization":{"uuid":%q}}`, account, organization)
+		case r.Method == "POST" && r.Host == "api.anthropic.com" && r.URL.Path == "/v1/messages":
+			body, err := io.ReadAll(r.Body)
+			if !inferenceExpected.Load() || err != nil || string(body) != nativeRequest || r.Header.Get("Anthropic-Version") != "fixture-version" || !slices.Contains(strings.Split(r.Header.Get("Anthropic-Beta"), ","), "fixture-beta") || !slices.Contains(strings.Split(r.Header.Get("Anthropic-Beta"), ","), claudeauth.OAuthBeta) {
+				t.Error("import generated inference or rewrote native headers, prompt or tool history")
+			}
+			credential := r.Header.Get("Authorization")
+			if !strings.HasPrefix(credential, "Bearer fixture-issued-") {
+				t.Error("native inference did not use the imported verified grant")
+			}
+			nativeCredential.Store(&credential)
+			io.WriteString(w, nativeResponse)
+		default:
+			t.Errorf("import attempted an unsupported operation %s %s", r.Method, r.URL.Path)
+			w.WriteHeader(404)
+		}
+	}))
+	digest := installPlugin(t, h, owner, testutil.BuildPlugin(t, "./plugins/claude"))
+	project := createProject(h, owner, "Claude import fixture")
+	provider := h.want(owner, "POST", "/api/v1/providers", map[string]any{"name": "Imported Claude fixture", "project_id": project, "model": "claude-fixture",
+		"configuration": map[string]any{"kind": "plugin", "auth_mode": "grant", "profile_id": claudeauth.ProfileID, "profile_revision": digest,
+			"options": map[string]any{"network": map[string]any{"proxy_url": authority.proxy.URL, "trust_roots_pem": authority.roots}}}}, idem(uuid.NewString()), 201)
+	path := "/api/v1/providers/" + provider["id"].(string)
+	document := fmt.Sprintf(`{"claudeAiOauth":{"accessToken":"fixture-import-access","refreshToken":"fixture-import-refresh","expiresAt":%d,"scopes":["user:profile","user:inference"],"subscriptionType":null,"rateLimitTier":null,"clientId":%q}}`, time.Now().Add(time.Hour).UnixMilli(), claudeauth.ClientID)
+	for name, input := range map[string]struct {
+		body  map[string]any
+		field string
+	}{
+		"malformed":    {map[string]any{"credentials": `{"claudeAiOauth":{"accessToken":"fixture-import-access"}}`}, "credentials"},
+		"unknown slot": {map[string]any{"credentials": document, "slot_id": uuid.NewString()}, "slot_id"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			rejected := h.want(owner, "POST", path+"/claude-import", input.body, etagHeader(provider), 422)
+			requireFieldError(t, rejected, input.field)
+		})
+	}
+	imported := h.want(owner, "POST", path+"/claude-import", map[string]any{"credentials": document}, etagHeader(provider), 201)
+	account := h.want(owner, "POST", "/api/v1/code/accounts", map[string]any{"project_id": project, "provider_id": provider["id"], "credential_id": imported["credential_id"], "name": "Imported fixture only", "enabled": true, "models": []string{"claude-fixture"}}, idem(uuid.NewString()), 201)
+	if account["principal"] != imported["principal"] || account["health"] != "unknown" {
+		t.Fatal("import lost verified identity or fabricated inference health")
+	}
+	key := h.want(owner, "POST", "/api/v1/api-keys", map[string]any{"name": "Import fixture key", "project_id": project, "scopes": []string{"inference"}, "allowed_routes": []string{"claude-import"}}, idem(uuid.NewString()), 201)
+	pool := h.want(owner, "POST", "/api/v1/code/pools", map[string]any{"project_id": project, "name": "Import fixture pool", "kind": "shared", "owner_user_id": nil, "account_ids": []string{account["id"].(string)}, "api_key_ids": []string{key["id"].(string)}}, idem(uuid.NewString()), 201)
+	draft := h.want(owner, "POST", "/api/v1/code/routes", map[string]any{"project_id": project, "slug": "claude-import", "pool_id": pool["id"], "models": []string{"claude-fixture"}, "enabled": true}, idem(uuid.NewString()), 201)
+	h.want(owner, "POST", "/api/v1/code/routes/"+draft["id"].(string)+"/publish", nil, withMatch(draft, idem(uuid.NewString())), 200)
+	worker := grantRefresher(t, h)
+	h.Gateway.CodeLedger = &resources.CodeStore{Pool: h.Pool}
+	h.Gateway.CodeAuthorizer = &providers.CodeAuthorizer{Pool: h.Pool, Credentials: h.Runtime, Plugins: worker.Plugins}
+	h.refresh()
+	mux := http.NewServeMux()
+	h.Gateway.RegisterCode(mux)
+	server := httptest.NewServer(mux)
+	defer server.Close()
+	request := func() string {
+		t.Helper()
+		inferenceExpected.Store(true)
+		defer inferenceExpected.Store(false)
+		r, err := http.NewRequestWithContext(t.Context(), "POST", server.URL+"/code/claude-import/v1/messages", strings.NewReader(nativeRequest))
+		if err != nil {
+			t.Fatal(err)
+		}
+		r.Header = http.Header{"Authorization": {"Bearer " + key["secret"].(string)}, "Content-Type": {"application/json"}, "X-Claude-Code-Session-Id": {"import-pinned-session"}, "Anthropic-Version": {"fixture-version"}, "Anthropic-Beta": {"fixture-beta"}}
+		response, err := server.Client().Do(r)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer response.Body.Close()
+		body, err := io.ReadAll(response.Body)
+		if err != nil || response.StatusCode != 200 || string(body) != nativeResponse || nativeCredential.Load() == nil {
+			t.Fatalf("imported native request failed, status %d", response.StatusCode)
+		}
+		return *nativeCredential.Load()
+	}
+	first := request()
+	dueNow(t, h, imported["credential_id"].(string))
+	if !pass(t, worker) {
+		t.Fatal("imported Claude grant did not enter OLP refresh")
+	}
+	h.refresh()
+	if refreshed := request(); refreshed == first {
+		t.Fatal("OLP did not replace the imported access token without refresh-token rotation")
+	}
+	current := h.want(owner, "GET", path, nil, nil, 200)
+	replacement := h.want(owner, "POST", path+"/claude-import", map[string]any{"credentials": document}, etagHeader(current), 201)
+	updated := h.want(owner, "PUT", "/api/v1/code/accounts/"+account["id"].(string), map[string]any{"project_id": project, "provider_id": provider["id"], "credential_id": replacement["credential_id"], "name": account["name"], "enabled": true, "models": account["models"]}, etagHeader(account), 200)
+	if updated["principal"] != account["principal"] {
+		t.Fatal("same-identity import changed the account principal")
+	}
+	h.refresh()
+	request()
+	for name, changed := range map[string]*atomic.Bool{"account": &changedAccount, "organization": &changedOrganization, "occupied slot principal": &conflictingPrincipal} {
+		t.Run(name, func(t *testing.T) {
+			changed.Store(true)
+			defer changed.Store(false)
+			before := h.want(owner, "GET", path, nil, nil, 200)
+			rejected := h.want(owner, "POST", path+"/claude-import", map[string]any{"credentials": document}, etagHeader(before), 422)
+			requireFieldError(t, rejected, "credentials")
+			encoded, err := json.Marshal(rejected)
+			if err != nil || strings.Contains(string(encoded), "fixture-import-") || strings.Contains(string(encoded), "fixture-issued-") {
+				t.Fatal("identity refusal exposed token material")
+			}
+			after := h.want(owner, "GET", path, nil, nil, 200)
+			if after["etag"] != before["etag"] {
+				t.Fatal("identity refusal modified the provider")
+			}
+		})
+	}
+	request()
+	bindings := h.want(owner, "GET", "/api/v1/code/bindings?project_id="+project, nil, nil, 200)["items"].([]any)
+	if len(bindings) != 1 || bindings[0].(map[string]any)["account_id"] != account["id"] {
+		t.Fatal("Claude import or refresh lost the native conversation pin")
+	}
+	for _, value := range []map[string]any{imported, replacement, updated, h.want(owner, "GET", path, nil, nil, 200)} {
+		encoded, err := json.Marshal(value)
+		if err != nil || strings.Contains(string(encoded), "fixture-import-") || strings.Contains(string(encoded), "fixture-issued-") {
+			t.Fatal("import management response exposed token material")
+		}
+	}
+	stored := readGrant(t, h, replacement["credential_id"].(string))
+	if stored.refreshToken == nil {
+		t.Fatal("imported refresh material was not stored separately")
+	}
+	refresh, err := h.Server.Keys.Read(t.Context(), h.Pool, h.Server.Installation, *stored.refreshToken, secrets.ProviderGrantRefresh)
+	if err != nil || string(refresh) != "fixture-import-refresh" {
+		t.Fatal("imported refresh material did not use encrypted grant storage")
+	}
+}
+
+func TestClaudeImportRejectsSameNamedForeignPluginBeforeExposingCredentials(t *testing.T) {
+	h := newAccessHarness(t)
+	owner := h.owner()
+	var exposed atomic.Bool
+	authority := newSubscriptionAuthority(t, []string{"api.anthropic.com", "foreign.fixture.invalid"}, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Host == "api.anthropic.com" && r.URL.Path == "/api/oauth/profile" && r.Header.Get("Authorization") == "Bearer fixture-import-access" {
+			w.Header().Set("Content-Type", "application/json")
+			io.WriteString(w, `{"account":{"uuid":"11111111-1111-4111-8111-111111111111"},"organization":{"uuid":"22222222-2222-4222-8222-222222222222"}}`)
+			return
+		}
+		exposed.Store(true)
+		w.WriteHeader(400)
+	}))
+	digest := installPlugin(t, h, owner, testutil.BuildPlugin(t, "./internal/plugins/testdata/fixture", "-X=main.behaviour=claude-import", "-X=main.upstream=https://foreign.fixture.invalid/v1"))
+	project := createProject(h, owner, "Claude import trust boundary")
+	provider := h.want(owner, "POST", "/api/v1/providers", map[string]any{"name": "Foreign subscription profile", "project_id": project, "model": "claude-fixture",
+		"configuration": map[string]any{"kind": "plugin", "auth_mode": "grant", "profile_id": claudeauth.ProfileID, "profile_revision": digest,
+			"options": map[string]any{"network": map[string]any{"proxy_url": authority.proxy.URL, "trust_roots_pem": authority.roots}}}}, idem(uuid.NewString()), 201)
+	path := "/api/v1/providers/" + provider["id"].(string)
+	document := fmt.Sprintf(`{"claudeAiOauth":{"accessToken":"fixture-import-access","refreshToken":"fixture-import-refresh","expiresAt":%d,"scopes":["user:profile","user:inference"]}}`, time.Now().Add(time.Hour).UnixMilli())
+	rejected := h.want(owner, "POST", path+"/claude-import", map[string]any{"credentials": document}, etagHeader(provider), 422)
+	requireFieldError(t, rejected, "credentials")
+	if exposed.Load() {
+		t.Fatal("a same-named foreign plugin received imported credentials")
+	}
+	current := h.want(owner, "GET", path, nil, nil, 200)
+	credentials := h.want(owner, "GET", path+"/credentials", nil, nil, 200)["items"].([]any)
+	if current["etag"] != provider["etag"] || len(credentials) != 0 {
+		t.Fatal("a rejected foreign plugin import modified the provider")
 	}
 }

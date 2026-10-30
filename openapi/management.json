@@ -28784,6 +28784,26 @@
             "format": "uuid"
           }
         }
+      },
+      "ClaudeCredentialImportRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "credentials"
+        ],
+        "properties": {
+          "credentials": {
+            "type": "string",
+            "maxLength": 65536,
+            "writeOnly": true,
+            "description": "Claude Code .credentials.json JSON text containing only claudeAiOauth with accessToken, refreshToken, expiresAt in epoch milliseconds and scopes including user:profile and user:inference. Optional metadata fields are refreshTokenExpiresAt, subscriptionType, subscriptionTypeSource, subscriptionTypeVerifiedAt, rateLimitTier and clientId. A supplied clientId must match the supported official client. Other fields, alternative credential stores and ambiguous JSON are rejected. The original access token must still authenticate the fixed profile endpoint. Import verifies account and organization before and after refresh, without decoding token claims."
+          },
+          "slot_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Existing credential slot, defaults to the default slot"
+          }
+        }
       }
     },
     "securitySchemes": {
@@ -66614,6 +66634,111 @@
           "providers"
         ],
         "summary": "Import Codex subscription credentials once"
+      }
+    },
+    "/api/v1/providers/{provider_id}/claude-import": {
+      "post": {
+        "description": "Validates the supported Claude Code .credentials.json subscription format. Authenticates the original access token at the fixed profile endpoint, then refreshes through the pinned Claude subscription profile and requires the same verified account and organization. Stores only the verified grant in encrypted OLP storage. OLP owns refresh after import. Stop using the original local credentials. This does not synchronize local files or test inference. An existing slot must retain its principal.",
+        "operationId": "importClaudeCredentials",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "provider_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Current provider draft ETag",
+            "in": "header",
+            "name": "If-Match",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ClaudeCredentialImportRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GrantEnrollmentCompletion"
+                }
+              }
+            },
+            "description": "Verified encrypted credential staged on the provider draft"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Provider not found"
+          },
+          "412": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Provider draft changed"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unsupported format, original access token cannot verify identity, refresh failed, changed account or organization, occupied slot principal conflict, unknown slot, or untrusted subscription configuration. Responses omit credential material."
+          },
+          "428": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "If-Match header is required"
+          }
+        },
+        "security": [
+          {
+            "csrfToken": [],
+            "sessionCookie": [
+              "configure"
+            ]
+          },
+          {
+            "managementToken": [
+              "configure"
+            ]
+          }
+        ],
+        "tags": [
+          "providers"
+        ],
+        "summary": "Import Claude subscription credentials once"
       }
     }
   },

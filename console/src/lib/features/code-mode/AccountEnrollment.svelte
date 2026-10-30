@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onDestroy } from 'svelte';
-  import { importCodexCredentials } from '$lib/features/providers/api/grants';
+  import { importSubscriptionCredentials } from '$lib/features/providers/api/grants';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import { getProvider } from '$lib/features/providers/api/providers';
   import { listProviderKinds } from '$lib/features/providers/api/models';
@@ -38,6 +38,21 @@
     !!provider.data &&
       !!spec &&
       requiresGrant(spec, provider.data.configuration.auth_mode)
+  );
+  const importProfile = $derived(
+    provider.data?.configuration.profile_id === 'codex-subscription'
+      ? ({
+          id: 'codex-subscription',
+          name: 'Codex',
+          file: 'Codex auth.json'
+        } as const)
+      : provider.data?.configuration.profile_id === 'claude-subscription'
+        ? ({
+            id: 'claude-subscription',
+            name: 'Claude',
+            file: 'Claude .credentials.json'
+          } as const)
+        : null
   );
   const access = useRole();
   const principal = access.user?.id;
@@ -82,7 +97,15 @@
   });
 
   async function importCredentials() {
-    if (!enrollmentAllowed || importing || grant.busy || !provider.data) return;
+    const selectedImport = importProfile;
+    if (
+      !enrollmentAllowed ||
+      importing ||
+      grant.busy ||
+      !provider.data ||
+      !selectedImport
+    )
+      return;
     const credentials = importInput;
     importInput = '';
     error = '';
@@ -90,14 +113,15 @@
     try {
       JSON.parse(credentials);
     } catch {
-      error = 'Paste valid Codex auth.json JSON.';
+      error = `Paste valid ${selectedImport.file} JSON.`;
       return;
     }
     importing = true;
     try {
-      const completion = await importCodexCredentials(
+      const completion = await importSubscriptionCredentials(
         provider.data,
-        credentials
+        credentials,
+        selectedImport.id
       );
       if (!importActive || !enrollmentAllowed) return;
       onComplete(completion.credential_id);
@@ -111,8 +135,7 @@
       ]);
     } catch {
       if (importActive && enrollmentAllowed)
-        error =
-          'Could not import Codex credentials. Check the supported format and account, then sign in again before retrying.';
+        error = `Could not import ${selectedImport.name} credentials. Check the supported format and account, then sign in again before retrying.`;
     } finally {
       importing = false;
     }
@@ -171,15 +194,17 @@
     >
       {grant.busy ? 'Starting…' : 'Enroll subscription account'}
     </button>
-    {#if supported && provider.data?.configuration.profile_id === 'codex-subscription'}
-      <label for="codex-credential-import">Import Codex credentials once</label>
+    {#if supported && importProfile}
+      <label for="subscription-credential-import"
+        >Import {importProfile.name} credentials once</label
+      >
       <p>
-        Paste the contents of Codex auth.json with subscription tokens. OLP owns
+        Paste the contents of {importProfile.file} with subscription tokens. OLP owns
         refresh after import. This does not synchronize local files.
       </p>
       <textarea
-        id="codex-credential-import"
-        aria-label="Codex auth.json"
+        id="subscription-credential-import"
+        aria-label={importProfile.file}
         autocomplete="off"
         spellcheck="false"
         bind:value={importInput}
@@ -193,7 +218,7 @@
           !importInput.trim()}
         onclick={() => void importCredentials()}
       >
-        {importing ? 'Importing…' : 'Import Codex credentials'}
+        {importing ? 'Importing…' : `Import ${importProfile.name} credentials`}
       </button>
     {/if}
     {#if provider.data && !supported && !kinds.isPending}<p>
