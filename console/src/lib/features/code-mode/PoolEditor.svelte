@@ -38,6 +38,9 @@
     initial?.owner_user_id ?? untrack(() => access.user?.id) ?? ''
   );
   let accountIds = $state([...(initial?.account_ids ?? [])]);
+  let accountWeights = $state<Record<string, number>>(
+    initial?.account_weights ?? {}
+  );
   let keyIds = $state([...(initial?.api_key_ids ?? [])]);
 
   const keys = createQuery(() => ({
@@ -82,6 +85,9 @@
         kind,
         owner_user_id: kind === 'personal' ? owner : null,
         account_ids: accountIds,
+        account_weights: Object.fromEntries(
+          accountIds.map((id) => [id, accountWeights[id] ?? 1])
+        ),
         api_key_ids: keyIds
       };
     },
@@ -136,7 +142,28 @@
         />{account.name} · {adapterLabel(account.adapter)} · {account.eligible
           ? 'eligible'
           : 'ineligible'}</label
-      >{/each}
+      >
+      {#if accountIds.includes(account.id)}
+        <label for={`code-weight-${account.id}`}
+          >Weight for {account.name}</label
+        >
+        <input
+          id={`code-weight-${account.id}`}
+          type="number"
+          min="1"
+          max="2147483647"
+          step="1"
+          value={accountWeights[account.id] ?? 1}
+          oninput={(event) => {
+            accountWeights = {
+              ...accountWeights,
+              [account.id]: event.currentTarget.valueAsNumber
+            };
+          }}
+          required
+        />
+      {/if}
+    {/each}
     {#each selectedUnavailableAccounts as id (id)}<label class="choice"
         ><input type="checkbox" bind:group={accountIds} value={id} />{id} · unavailable
         selection</label

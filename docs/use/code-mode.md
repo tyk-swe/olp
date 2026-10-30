@@ -235,6 +235,13 @@ and retirement, and `If-Match` on updates and publication.
    several adapters may share one. A `shared` pool has no owner. A `personal`
    pool names `owner_user_id` and accepts only keys
    issued by that owner. Being a project member does not itself grant pool use.
+   In the console pool editor, set each selected account's weight, or send
+   `account_weights` keyed by account ID in the pool API. Weights are integers
+   from 1 to 2147483647, and omitted accounts default to weight 1. Larger weights
+   give eligible accounts a larger share of new conversations. Accounts must
+   still support the exact model, protocol and transport and be available.
+   Weight changes affect new account selections. Existing bindings and model
+   pins keep their accounts across resumes, reconnects and child conversations.
 4. Create a route with a stable `slug`, `pool_id`, `models` and `enabled`, then
    publish it; each model needs an enrolled pool account that lists it. The
    published revision freezes connection configuration. Adding

@@ -16227,6 +16227,17 @@
           "project_id": {
             "format": "uuid",
             "type": "string"
+          },
+          "account_weights": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 1,
+              "maximum": 2147483647
+            },
+            "maxProperties": 100,
+            "description": "Relative weights keyed by assigned account ID. Omitted accounts use weight 1."
           }
         },
         "required": [
@@ -16237,7 +16248,8 @@
           "owner_user_id",
           "account_ids",
           "api_key_ids",
-          "etag"
+          "etag",
+          "account_weights"
         ],
         "type": "object"
       },
@@ -16306,6 +16318,17 @@
           "project_id": {
             "format": "uuid",
             "type": "string"
+          },
+          "account_weights": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 1,
+              "maximum": 2147483647
+            },
+            "maxProperties": 100,
+            "description": "Relative weights keyed by assigned account ID. Omitted accounts use weight 1."
           }
         },
         "required": [
