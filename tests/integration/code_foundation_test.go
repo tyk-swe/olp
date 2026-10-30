@@ -1110,8 +1110,10 @@ func TestCodePaidPublicationRetainsOwnershipAndMonetaryUncertainty(t *testing.T)
 	if err := f.store.Abort(t.Context(), other.Attempt.ID); err != nil {
 		t.Fatal(err)
 	}
-	bindings := f.h.want(f.owner, "GET", "/api/v1/code/bindings?api_key_id="+f.key, nil, nil, 200)["items"].([]any)
-	if len(bindings) != 1 || bindings[0].(map[string]any)["id"] != permit.BindingID {
+	bindings := codePublicDecode[[]codemode.Binding](t, f.h.want(f.owner, "GET", "/api/v1/code/bindings?api_key_id="+f.key, nil, nil, 200)["items"])
+	if len(bindings) != 2 || !slices.ContainsFunc(bindings, func(binding codemode.Binding) bool {
+		return binding.ID == permit.BindingID && binding.Conversation == in.Operation.Identity.Conversation
+	}) {
 		t.Fatalf("paid binding disappeared %+v", bindings)
 	}
 	f.h.want(f.owner, "POST", "/api/v1/code/bindings/"+permit.BindingID+"/retire", nil, idem("retire-paid"), 200)
