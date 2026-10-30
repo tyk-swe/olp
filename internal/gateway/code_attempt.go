@@ -52,7 +52,20 @@ func (s *Server) prepareCode(r *http.Request, release *runtime.Release, route co
 	if !authority.Allows("inference", route.Slug, &route.ProjectID, s.now()) {
 		return nil, codemode.Refuse(403, "code_permission_denied")
 	}
-	operation, err := route.ResolveModel(observation.Operation)
+	resolved, err := route.ResolveModel(observation.Operation)
+	if err != nil {
+		return nil, err
+	}
+	operation, err := func() (codemode.Operation, error) {
+		if recovery != nil || len(route.PaidTargets) == 0 || resolved.PublicModel() == resolved.Model {
+			return resolved, nil
+		}
+		ledger, supported := s.CodeLedger.(PaidCodeLedger)
+		if !supported {
+			return codemode.Operation{}, codemode.Refuse(503, "code_paid_authority_unavailable")
+		}
+		return ledger.ResolvePaidModel(r.Context(), resources.CodeAdmission{Route: route, APIKeyID: authority.ID, Operation: resolved, EndUserDigest: authority.EndUserDigest, PreviousResponse: observation.PreviousResponse}, authority)
+	}()
 	if err != nil {
 		return nil, err
 	}

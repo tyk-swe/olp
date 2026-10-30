@@ -1034,6 +1034,7 @@ func publishPaidCodeFixture(t *testing.T, f *codeFixture, restricted bool, reque
 	draft := map[string]any{"project_id": f.project, "slug": f.route.Slug, "pool_id": f.pool, "models": f.route.Models, "enabled": true, "paid_participation": true, "paid_targets": map[string]codemode.PaidTarget{model: {ProviderID: strings.ToUpper(providerID), SlotID: strings.ToUpper(slot.ID)}}}
 	saved := f.h.want(f.owner, "PUT", "/api/v1/code/routes/"+f.route.ID, draft, withMatch(f.routeRecord, idem("paid-draft")), 200)
 	published := f.h.want(f.owner, "POST", "/api/v1/code/routes/"+f.route.ID+"/publish", nil, withMatch(saved, idem("paid-publish")), 200)
+	f.routeRecord = published
 	encoded, err := json.Marshal(published)
 	if err != nil {
 		t.Fatal(err)

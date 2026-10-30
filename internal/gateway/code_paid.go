@@ -55,25 +55,16 @@ func codeFamily(protocol codemode.Protocol) wire.Format {
 	}
 }
 
-func (s *Server) preparePaidCode(r *http.Request, release *runtime.Release, route codemode.Route, observation codemode.Request, candidate codemode.Operation, ingress codeIngress, transport codeadapter.Transport, verified access.Authority, body []byte, recovery *resources.CodeRecovery, fallback bool) (*codeAttempt, error) {
+func (s *Server) preparePaidCode(r *http.Request, release *runtime.Release, route codemode.Route, observation codemode.Request, operation codemode.Operation, ingress codeIngress, transport codeadapter.Transport, verified access.Authority, body []byte, recovery *resources.CodeRecovery, fallback bool) (*codeAttempt, error) {
 	if !route.PaidParticipation {
 		return nil, codemode.Refuse(403, "code_paid_participation_disabled")
 	}
-	if transport != codeadapter.HTTP || candidate.Name == "compact" || candidate.Name == "prewarm" {
+	if transport != codeadapter.HTTP || operation.Name == "compact" || operation.Name == "prewarm" {
 		return nil, codemode.Refuse(400, "code_paid_operation_unsupported")
 	}
 	ledger, supported := s.CodeLedger.(PaidCodeLedger)
 	if !supported {
 		return nil, codemode.Refuse(503, "code_paid_authority_unavailable")
-	}
-	operation, resolveErr := func() (codemode.Operation, error) {
-		if fallback {
-			return candidate, nil
-		}
-		return ledger.ResolvePaidModel(r.Context(), resources.CodeAdmission{Route: route, APIKeyID: verified.ID, Operation: candidate, EndUserDigest: verified.EndUserDigest, PreviousResponse: observation.PreviousResponse}, verified)
-	}()
-	if resolveErr != nil {
-		return nil, resolveErr
 	}
 	target := route.PaidTarget(operation.Model, fallback)
 	provider, exists := release.Snapshot.CodePaidConnections[route.RevisionID+":"+target.ProviderID]
@@ -91,7 +82,7 @@ func (s *Server) preparePaidCode(r *http.Request, release *runtime.Release, rout
 	if !nativeOK || native != ingress.protocol {
 		return nil, codemode.Refuse(400, "code_paid_operation_unsupported")
 	}
-	parsed, parseErr := protocols.Parse(family, body, operation.Model)
+	parsed, parseErr := protocols.ParseForModel(family, body, operation.PublicModel())
 	if parseErr != nil {
 		return nil, codemode.Refuse(400, "code_body_invalid")
 	}
@@ -240,14 +231,14 @@ func (a *codeAttempt) requestURL(query string, stream bool) (string, error) {
 	if err != nil {
 		return "", codemode.Refuse(502, "code_connection_invalid")
 	}
+	if _, err := a.server.egress.ValidateEndpoint(u.String()); err != nil {
+		return "", codemode.Refuse(502, "code_egress_refused")
+	}
 	if query != "" {
 		if u.RawQuery != "" {
 			return "", codemode.Refuse(400, "code_query_unsupported")
 		}
 		u.RawQuery = query
-	}
-	if _, err := a.server.egress.ValidateEndpoint(u.String()); err != nil {
-		return "", codemode.Refuse(502, "code_egress_refused")
 	}
 	return u.String(), nil
 }

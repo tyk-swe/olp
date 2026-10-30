@@ -16130,7 +16130,7 @@
         "additionalProperties": false,
         "properties": {
           "adapters": {
-            "description": "The subscription families whose accounts serve the client's published models and exact aliases, in display order. A mixed route's configuration draws each model from its own family.",
+            "description": "The subscription families whose accounts serve the client's published models and exact aliases, in display order. A mixed route's configuration draws each model from its own family. Empty for paid-only setup.",
             "items": {
               "enum": [
                 "codex",
@@ -16144,7 +16144,6 @@
               ],
               "type": "string"
             },
-            "minItems": 1,
             "type": "array",
             "uniqueItems": true
           },
