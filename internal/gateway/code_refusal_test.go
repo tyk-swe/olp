@@ -20,6 +20,54 @@ import (
 
 type codeGrantAuthorizer struct{ calls atomic.Int64 }
 
+func TestCodeGenericWebSocketRequiresExplicitAffinity(t *testing.T) {
+	h, ledger, server := newCodeForwardHarness(t)
+	h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("X-Olp-Code-Affinity") != "" || r.Header.Get("Thread-Id") != "" || r.Header.Get("Session_id") != "" {
+			t.Error("generic socket acquired an upstream identity")
+		}
+		conn, err := websocket.Accept(w, r, nil)
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		defer conn.CloseNow()
+		if _, _, err = conn.Read(r.Context()); err != nil {
+			t.Error(err)
+			return
+		}
+		if err = conn.Write(r.Context(), websocket.MessageText, []byte(`{"type":"response.completed","response":{"id":"generic-socket","usage":{"total_tokens":3,"input_tokens":2,"output_tokens":1}}}`)); err != nil {
+			t.Error(err)
+		}
+		_, _, _ = conn.Read(r.Context())
+	})
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	conn, response, err := websocket.Dial(ctx, server.URL+"/code/coding/responses", &websocket.DialOptions{HTTPHeader: http.Header{"Authorization": {"Bearer " + fullKey}}})
+	if conn != nil {
+		_ = conn.CloseNow()
+	}
+	if err == nil || response == nil || response.StatusCode != http.StatusBadRequest || h.mock.count("a") != 0 {
+		t.Fatalf("unaffined generic socket reached upstream, response %v error %v", response, err)
+	}
+	_ = response.Body.Close()
+	bound, _, err := websocket.Dial(ctx, server.URL+"/code/coding/responses", &websocket.DialOptions{HTTPHeader: http.Header{"Authorization": {"Bearer " + fullKey}, "X-Olp-Code-Affinity": {"socket"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer bound.CloseNow()
+	if err = bound.Write(ctx, websocket.MessageText, []byte(`{"type":"response.create","model":"native-model","input":"hello"}`)); err != nil {
+		t.Fatal(err)
+	}
+	_, body, err := bound.Read(ctx)
+	if err != nil || !strings.Contains(string(body), "response.completed") {
+		t.Fatalf("affined generic socket failed, body %s error %v", body, err)
+	}
+	if usage := ledger.wait(t); usage.Total == nil || *usage.Total != 3 {
+		t.Fatalf("generic socket usage lost %+v", usage)
+	}
+}
+
 func (a *codeGrantAuthorizer) AuthorizeCode(ctx context.Context, cfg routing.Configuration, account codemode.Account, dispatch codemode.Dispatch) (codemode.Authorization, error) {
 	auth, err := (codeTestAuthorizer{principal: "principal"}).AuthorizeCode(ctx, cfg, account, dispatch)
 	// Admission on a socket sees a newer token than its handshake used.

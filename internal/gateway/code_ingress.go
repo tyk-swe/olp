@@ -31,7 +31,7 @@ func classifyCode(ingress codeIngress, body []byte, headers http.Header, websock
 		if ingress.identity == codeadapter.IdentityCodex {
 			return codexwire.Classify(body, headers, ingress.operation, websocket)
 		}
-		return codexwire.ClassifyWith(body, ingress.operation, websocket, func(oif.Value) (codemode.Identity, error) { return codewire.ClientIdentity(headers) })
+		return codexwire.ClassifyWith(body, ingress.operation, websocket, func(root oif.Value) (codemode.Identity, error) { return codewire.RequestIdentity(headers, root) }, headers)
 	case codemode.ProtocolMessages:
 		return codewire.ClassifyMessages(body, headers)
 	case codemode.ProtocolChat:
@@ -41,10 +41,19 @@ func classifyCode(ingress codeIngress, body []byte, headers http.Header, websock
 }
 
 func codeConnectionIdentity(ingress codeIngress, headers http.Header) (codemode.Identity, error) {
-	if ingress.identity == codeadapter.IdentityCodex {
-		return codexwire.ConnectionIdentity(headers)
+	identity, err := func() (codemode.Identity, error) {
+		if ingress.identity == codeadapter.IdentityCodex {
+			return codexwire.ConnectionIdentity(headers)
+		}
+		return codewire.ClientIdentity(headers)
+	}()
+	if err != nil {
+		return identity, err
 	}
-	return codewire.ClientIdentity(headers)
+	if codewire.GenericConversation(identity) && len(headers.Values("X-Olp-Code-Affinity")) == 0 {
+		return identity, codemode.Refuse(400, "code_identity_invalid")
+	}
+	return identity, nil
 }
 
 func codeObserver(endpoint codeadapter.Endpoint) codewire.Observer {

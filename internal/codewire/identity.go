@@ -7,16 +7,74 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/google/uuid"
+
 	"github.com/tyk-swe/olp/internal/codemode"
+	"github.com/tyk-swe/olp/internal/oif"
 )
 
-// ClientIdentity reads the conversation identity of a Claude Code or OpenCode
-// request from the client's own headers. OpenCode names its session and, for a
-// child session, the parent session. Claude Code names its session and, on a
-// subagent's requests, the agent and any parent agent; an agent is a child of
-// its parent agent, or of the session itself. Agent identifiers are scoped by
-// their session, because teammates reuse name-based identifiers.
+type IdentityFamily uint8
+
+const (
+	SessionIdentity IdentityFamily = iota
+	CodexIdentity
+)
+
+func GenericIdentity(h http.Header, root oif.Value, family IdentityFamily) (codemode.Identity, bool, error) {
+	metadata := field(root, "client_metadata")
+	if family == CodexIdentity && metadata.Kind() != oif.Absent && metadata.Kind() != oif.Null && metadata.Kind() != oif.Object {
+		return codemode.Identity{}, false, codemode.Refuse(400, "code_identity_invalid")
+	}
+	codex := hasHeader(h, "Thread-Id", "Session-Id", "Session_id", "X-Codex-Parent-Thread-Id", "X-Openai-Subagent") || hasField(metadata, "thread_id", "x-codex-parent-thread-id", "x-openai-subagent")
+	claude := hasHeader(h, "X-Claude-Code-Session-Id", "X-Claude-Code-Agent-Id", "X-Claude-Code-Parent-Agent-Id")
+	opencode := hasHeader(h, "X-Opencode-Session-Id", "X-Opencode-Parent-Session-Id")
+	affinity := h.Values("X-Olp-Code-Affinity")
+	if codex && (claude || opencode || family != CodexIdentity) || claude && opencode || (claude || opencode) && family != SessionIdentity || len(affinity) != 0 && (codex || claude || opencode) {
+		return codemode.Identity{}, false, codemode.Refuse(400, "code_identity_ambiguous")
+	}
+	if codex || claude || opencode {
+		return codemode.Identity{}, false, nil
+	}
+	if len(affinity) == 0 {
+		return codemode.Identity{Conversation: "olp:request/" + uuid.NewString()}, true, nil
+	}
+	if len(affinity) != 1 || affinity[0] == "" || strings.TrimSpace(affinity[0]) != affinity[0] || len(affinity[0]) > 256 {
+		return codemode.Identity{}, false, codemode.Refuse(400, "code_identity_ambiguous")
+	}
+	sum := sha256.Sum256([]byte(affinity[0]))
+	return codemode.Identity{Conversation: "olp:affinity/" + hex.EncodeToString(sum[:])}, true, nil
+}
+
+func GenericConversation(identity codemode.Identity) bool {
+	return strings.HasPrefix(identity.Conversation, "olp:request/") || strings.HasPrefix(identity.Conversation, "olp:affinity/")
+}
+
+func hasHeader(h http.Header, names ...string) bool {
+	for _, name := range names {
+		if len(h.Values(name)) != 0 {
+			return true
+		}
+	}
+	return false
+}
+
+func hasField(value oif.Value, names ...string) bool {
+	for _, name := range names {
+		if _, present := value.Lookup(name); present {
+			return true
+		}
+	}
+	return false
+}
+
 func ClientIdentity(h http.Header) (codemode.Identity, error) {
+	return RequestIdentity(h, oif.Value{})
+}
+
+func RequestIdentity(h http.Header, root oif.Value) (codemode.Identity, error) {
+	if identity, generic, err := GenericIdentity(h, root, SessionIdentity); generic || err != nil {
+		return identity, err
+	}
 	var identity codemode.Identity
 	values := map[string]string{}
 	for _, name := range []string{"X-Opencode-Session-Id", "X-Opencode-Parent-Session-Id", "X-Claude-Code-Session-Id", "X-Claude-Code-Agent-Id", "X-Claude-Code-Parent-Agent-Id"} {

@@ -62,3 +62,32 @@ func TestClassifyChatRejectsMissingModel(t *testing.T) {
 		t.Fatalf("classified request: %+v", request)
 	}
 }
+
+func TestGenericClientRejectsAmbiguousIdentity(t *testing.T) {
+	for _, headers := range []http.Header{
+		{"X-Olp-Code-Affinity": {"one", "two"}},
+		{"X-Olp-Code-Affinity": {""}},
+		{"X-Olp-Code-Affinity": {" one"}},
+		{"X-Olp-Code-Affinity": {"one"}, "X-Claude-Code-Session-Id": {"session"}},
+		{"X-Olp-Code-Affinity": {"one"}, "X-Opencode-Session-Id": {"session"}},
+		{"Thread-Id": {"thread"}},
+		{"X-Claude-Code-Session-Id": {"session"}, "Thread-Id": {"thread"}},
+	} {
+		if _, err := ClassifyMessages([]byte(`{"model":"native-model","messages":[]}`), headers); err == nil {
+			t.Fatalf("ambiguous identity accepted %+v", headers)
+		}
+	}
+}
+
+func TestGenericMessagesRejectsOpaqueState(t *testing.T) {
+	for _, body := range []string{
+		`{"model":"native-model","messages":[{"role":"assistant","content":[{"type":"thinking","thinking":"secret","signature":"opaque"}]}]}`,
+		`{"model":"native-model","messages":[{"role":"assistant","content":[{"type":"redacted_thinking","data":"opaque"}]}]}`,
+		`{"model":"native-model","messages":[{"role":"user","content":[{"type":"document","source":{"type":"file","file_id":"unowned"}}]}]}`,
+		`{"model":"native-model","messages":[],"context_management":{"edits":[{"type":"clear_tool_uses"}]}}`,
+	} {
+		if _, err := ClassifyMessages([]byte(body), http.Header{"X-Olp-Code-Affinity": {"conversation"}}); err == nil {
+			t.Fatalf("opaque state accepted %s", body)
+		}
+	}
+}
