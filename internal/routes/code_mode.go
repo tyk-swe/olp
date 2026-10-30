@@ -389,7 +389,7 @@ func CodePaidProviders(ctx context.Context, tx access.Queryer, route codemode.Ro
 			}
 		}
 	})
-	rows, err := tx.Query(ctx, `SELECT p.id::text,p.state,v.id::text,v.name,v.configuration,v.models,v.slots,p.project_id::text,`+runtime.PluginColumn+` FROM olp.providers p JOIN olp.provider_revisions v ON v.id=p.active_revision_id WHERE p.id=ANY($1::uuid[]) AND p.project_id=$2 AND p.state<>'disabled'`, ids, route.ProjectID)
+	rows, err := tx.Query(ctx, `SELECT p.id::text,p.state,r.id::text,r.name,r.configuration,r.models,r.slots,p.project_id::text,`+runtime.PluginColumn+` FROM olp.providers p JOIN olp.provider_revisions r ON r.id=p.active_revision_id WHERE p.id=ANY($1::uuid[]) AND p.project_id=$2 AND p.state<>'disabled'`, ids, route.ProjectID)
 	if err != nil {
 		return nil, err
 	}
