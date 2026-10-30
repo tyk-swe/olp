@@ -38,8 +38,15 @@ func (s *Snapshot) CodeAdapters(route codemode.Route) []codemode.Adapter {
 // connections whose adapter serves a client path over transport, ordered by ID.
 // The returned slice is shared and must not be modified.
 func (s *Snapshot) CodeProviders(route codemode.Route, path string, transport codeadapter.Transport) []string {
+	if route.MessagesToCodex {
+		return s.codeProvidersWithTranslation(route, path, transport)
+	}
+	return s.codeRevisions[route.RevisionID].providers[codeCapability{path, transport}]
+}
+
+func (s *Snapshot) codeProvidersWithTranslation(route codemode.Route, path string, transport codeadapter.Transport) []string {
 	revision := s.codeRevisions[route.RevisionID]
-	if !route.MessagesToCodex || path != "v1/messages" || transport != codeadapter.HTTP {
+	if path != "v1/messages" || transport != codeadapter.HTTP {
 		return revision.providers[codeCapability{path, transport}]
 	}
 	return slices.Sorted(func(yield func(string) bool) {
