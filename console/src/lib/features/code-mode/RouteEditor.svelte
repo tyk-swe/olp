@@ -34,6 +34,7 @@
   let maxBodyBytes = $state(initial?.max_body_bytes?.toString() ?? '');
   let models = $state(initial?.models.join('\n') ?? '');
   let enabled = $state(initial?.enabled ?? true);
+  let messagesToCodex = $state(initial?.messages_to_codex ?? false);
   let research = $state(!!initial?.tools);
   let researchAccount = $state(initial?.tools?.account_id ?? '');
   let researchServices = $state<('search' | 'reader' | 'zread')[]>(
@@ -94,6 +95,7 @@
         pool_id: poolId,
         max_body_bytes: maxBodyBytes ? Number(maxBodyBytes) : null,
         models: nativeModels(models),
+        messages_to_codex: messagesToCodex,
         tools: research
           ? { account_id: researchAccount, services: researchServices }
           : null,
@@ -156,6 +158,20 @@
   <p>
     Model names pass through unchanged. An allowed model is not proof of client
     or inference qualification.
+  </p>
+  <label class="choice">
+    <input
+      id="code-messages-to-codex"
+      type="checkbox"
+      bind:checked={messagesToCodex}
+    />
+    Translate Messages text through Codex
+  </label>
+  <p>
+    Explicitly enables text-only Messages requests through Codex accounts after
+    publication. Tools, thinking, beta features and unsupported required
+    semantics are refused. Model identifiers, client identity and prompts stay
+    unchanged. Identity and prompt compatibility remain disabled.
   </p>
   <label class="choice"
     ><input

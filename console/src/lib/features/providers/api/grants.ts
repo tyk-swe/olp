@@ -88,3 +88,20 @@ export async function cancelGrantEnrollment(
   );
   ensureOk(response);
 }
+
+export async function importCodexCredentials(
+  provider: Pick<Provider, 'id' | 'etag'>,
+  credentials: string
+): Promise<GrantEnrollmentCompletion> {
+  const response = await apiClient.POST(
+    '/api/v1/providers/{provider_id}/codex-import',
+    {
+      params: {
+        path: { provider_id: provider.id },
+        header: { 'If-Match': provider.etag }
+      },
+      body: { credentials }
+    }
+  );
+  return unwrap(response);
+}

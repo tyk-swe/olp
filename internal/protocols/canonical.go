@@ -190,6 +190,29 @@ func encodeCanonical(c *Generation, family wire.Format, model, operation string)
 		return encodeBedrock(c, model, operation)
 	case wire.Chat, wire.InputTokens:
 		return encodeOpenAIGeneration(c, model, count)
+	case wire.Responses:
+		for key := range c.Parameters {
+			if key != "max_output_tokens" && key != "temperature" && key != "top_p" {
+				return nil, unsupported(key)
+			}
+		}
+		out, err := encodeOpenAIGeneration(c, model, true)
+		if err != nil {
+			return nil, err
+		}
+		return maps.Collect(func(yield func(string, json.RawMessage) bool) {
+			for key, value := range out {
+				if !yield(key, value) {
+					return
+				}
+			}
+			for key, value := range c.Parameters {
+				if !yield(key, value) {
+					return
+				}
+			}
+			yield("stream", raw(c.Stream))
+		}), nil
 	case wire.Anthropic, wire.AnthropicCount:
 		return encodeAnthropicGeneration(c, model, count)
 	case wire.Gemini, wire.GeminiCount:

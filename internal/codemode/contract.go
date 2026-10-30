@@ -160,18 +160,19 @@ type Pool struct {
 }
 
 type Route struct {
-	Tools        *ResearchTools `json:"tools,omitempty"`
-	MaxBodyBytes *int64         `json:"max_body_bytes,omitempty"`
-	ID           string         `json:"id"`
-	ProjectID    string         `json:"project_id"`
-	Slug         string         `json:"slug"`
-	PoolID       string         `json:"pool_id"`
-	Models       []string       `json:"models"`
-	Enabled      bool           `json:"enabled"`
-	RevisionID   string         `json:"revision_id"`
-	Revision     int            `json:"revision"`
-	ETag         string         `json:"etag"`
-	PublishedAt  *time.Time     `json:"published_at"`
+	MessagesToCodex bool           `json:"messages_to_codex,omitempty"`
+	Tools           *ResearchTools `json:"tools,omitempty"`
+	MaxBodyBytes    *int64         `json:"max_body_bytes,omitempty"`
+	ID              string         `json:"id"`
+	ProjectID       string         `json:"project_id"`
+	Slug            string         `json:"slug"`
+	PoolID          string         `json:"pool_id"`
+	Models          []string       `json:"models"`
+	Enabled         bool           `json:"enabled"`
+	RevisionID      string         `json:"revision_id"`
+	Revision        int            `json:"revision"`
+	ETag            string         `json:"etag"`
+	PublishedAt     *time.Time     `json:"published_at"`
 }
 
 func (r Route) BasePath() string { return BasePath + r.Slug }

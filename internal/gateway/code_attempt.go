@@ -47,7 +47,7 @@ func (s *Server) prepareCode(r *http.Request, release *runtime.Release, route co
 	if !authority.Allows("inference", route.Slug, &route.ProjectID, s.now()) {
 		return nil, codemode.Refuse(403, "code_permission_denied")
 	}
-	providers := release.Snapshot.CodeModelProviders(route, ingress.path, ingress.protocol, observation.Operation.Model, transport)
+	providers := release.Snapshot.CodeModelProviders(route, ingress.path, observation.Operation.Model, transport)
 	if len(providers) == 0 {
 		return nil, codemode.Refuse(400, "code_operation_unsupported")
 	}

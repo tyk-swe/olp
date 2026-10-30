@@ -419,3 +419,32 @@ func SQLAdapters(connections string) string {
 	return "(SELECT coalesce(jsonb_agg(adapter ORDER BY array_position(ARRAY[" + strings.Join(order, ",") + "],adapter)),'[]'::jsonb) FROM (SELECT DISTINCT " + SQL("c.value") +
 		" adapter FROM jsonb_each(" + connections + ") c) adapters WHERE adapter IS NOT NULL)"
 }
+
+func RouteEndpoint(route codemode.Route, adapter Vendor, path string) (Endpoint, bool) {
+	if endpoint, ok := adapter.Endpoint(path); ok {
+		return endpoint, true
+	}
+	if route.MessagesToCodex && path == "v1/messages" && adapter.Adapter == codemode.AdapterCodex {
+		return adapter.Endpoint("responses")
+	}
+	return Endpoint{}, false
+}
+
+func RouteClientProtocol(route codemode.Route, adapter Vendor, client, model string) (codemode.Protocol, bool) {
+	if protocol, ok := adapter.Protocol(client, model); ok {
+		return protocol, true
+	}
+	if !route.MessagesToCodex || adapter.Adapter != codemode.AdapterCodex || client != ClientClaudeCode {
+		return "", false
+	}
+	endpoint, ok := RouteEndpoint(route, adapter, "v1/messages")
+	return codemode.ProtocolMessages, ok && adapter.ServesModel(endpoint.Protocol, model)
+}
+
+func RouteClients(route codemode.Route, adapter Vendor) []string {
+	native := adapter.Clients()
+	if !route.MessagesToCodex || adapter.Adapter != codemode.AdapterCodex {
+		return native
+	}
+	return slices.Concat(native, []string{ClientClaudeCode})
+}
