@@ -2,7 +2,7 @@
 
 Code mode is the subscription-account forwarding contract for coding clients.
 It uses a route-specific URL such as `https://olp.example/code/team-coding` and
-keeps the native model in the request. Ordinary inference routes continue to
+keeps the native model in the request by default. Ordinary inference routes continue to
 use OLP route slugs as model names.
 
 A route can mix subscriptions. One OpenCode or Claude Code session can plan on
@@ -45,6 +45,33 @@ the responses paths the Responses API. OpenCode Go serves each model on one
 endpoint: most on Chat Completions, MiniMax and Qwen models on Messages and
 Grok and GPT models on Responses. OpenCode picks it per model; Claude Code
 speaks only Messages, so on OpenCode Go it works only with Messages models.
+
+### Exact model aliases
+
+Enable **Rewrite model identifiers using exact aliases** in the route editor,
+then enter one `alias=native-model` per line in **Exact model aliases**. Each
+alias must target one of the route's listed native models. Save and publish to
+include the aliases in authenticated model discovery and generated client setup.
+An alias uses its target's protocol and client capabilities, even when its name
+has no vendor prefix.
+
+The management route write uses `model_rewriting: true` and an `aliases` object,
+for example `"aliases": {"team-code": "native-model"}`. This opt-in is independent
+of Messages translation and identity compatibility. Native identifiers continue
+to pass through unchanged. Alias requests replace only the protocol's model
+identifier, and replies expose the public alias. Prompt content and unrelated
+payload fields remain unchanged.
+
+Alias chains, native-name collisions and targets outside the native model list
+are rejected. An unavailable target is omitted from discovery and refused for
+inference. An alias always names one exact model. It never selects a different
+model from the pool or adds implicit fallback behavior.
+
+Repointing an alias and publishing changes the target for new conversations.
+Existing conversations retain their durably stored target and account while
+that target remains published, eligible and authorized. Removing the old target
+or its access refuses the continuation instead of moving it to the new model.
+Existing native-model pins are preserved.
 
 ### Messages through Codex
 

@@ -2,6 +2,7 @@ package codewire
 
 import (
 	"bytes"
+	"encoding/json"
 	"net/http"
 	"testing"
 )
@@ -67,6 +68,13 @@ func TestClassifyChatRejectsMissingModel(t *testing.T) {
 func TestModelRewritingChangesOnlyProtocolModelFields(t *testing.T) {
 	body := []byte(`{ "model":"native-a", "response":{"model":"native-a","output":[{"model":"native-a"}]}, "message":{"model":"native-a"},"unknown": { "model":"native-a", "number":1.2300 } }`)
 	rewritten, err := RewriteResponseModel(body, "native-a", "team-code")
+	var public struct {
+		Model             string
+		Response, Message struct{ Model string }
+	}
+	if err := json.Unmarshal(rewritten, &public); err != nil || public.Model != "team-code" || public.Response.Model != public.Model || public.Message.Model != public.Model {
+		t.Fatalf("protocol model identifiers were not rewritten consistently %+v, %v", public, err)
+	}
 	if err != nil || !bytes.Contains(rewritten, []byte(`"model":"team-code"`)) || !bytes.Contains(rewritten, []byte(`"output":[{"model":"native-a"}]`)) || !bytes.Contains(rewritten, []byte(`{ "model":"native-a", "number":1.2300 }`)) {
 		t.Fatalf("model rewrite changed unrelated content %s, %v", rewritten, err)
 	}

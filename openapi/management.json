@@ -16552,7 +16552,7 @@
           "messages_to_codex": {
             "type": "boolean",
             "default": false,
-            "description": "Explicitly allow text-only Messages requests to use Codex subscription accounts through protocol translation. Published revisions pin this policy. Native forwarding remains the default. Client identity and prompts are preserved. Model rewriting requires its separate opt-in. Tools, thinking, beta features and unsupported required semantics are refused before dispatch."
+            "description": "Explicitly allow Messages text and tool requests to use Codex subscription accounts through protocol translation. Published revisions pin this policy. Native forwarding remains the default. Client identity and prompts are preserved. Model rewriting requires its separate opt-in. Explicit low, medium and high reasoning effort is supported. Signed thinking, numeric reasoning budgets, beta features and unsupported required semantics are refused before dispatch."
           },
           "aliases": {
             "type": "object",
@@ -16654,7 +16654,7 @@
           "messages_to_codex": {
             "type": "boolean",
             "default": false,
-            "description": "Explicitly allow text-only Messages requests to use Codex subscription accounts through protocol translation. Published revisions pin this policy. Native forwarding remains the default. Client identity and prompts are preserved. Model rewriting requires its separate opt-in. Tools, thinking, beta features and unsupported required semantics are refused before dispatch."
+            "description": "Explicitly allow Messages text and tool requests to use Codex subscription accounts through protocol translation. Published revisions pin this policy. Native forwarding remains the default. Client identity and prompts are preserved. Model rewriting requires its separate opt-in. Explicit low, medium and high reasoning effort is supported. Signed thinking, numeric reasoning budgets, beta features and unsupported required semantics are refused before dispatch."
           },
           "aliases": {
             "type": "object",
