@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/antigravityauth"
 	"github.com/tyk-swe/olp/internal/codeadapter"
 	"github.com/tyk-swe/olp/internal/codemode"
 	"github.com/tyk-swe/olp/internal/codeplans"
@@ -50,16 +51,21 @@ func TestPublishedMessagesPolicySelectsEligibleFrozenProviders(t *testing.T) {
 	snapshot := Snapshot{
 		Generation: Generation{ID: "0192cf87-d4ab-7f2e-a8b1-c2d3e4f50607", Ordinal: 1},
 		CodeRoutes: map[string]codemode.Route{
-			"native":     {ID: "native-route", ProjectID: "project", Slug: "native", PoolID: "pool", Models: []string{"gpt-fixture-model", "minimax-fixture-model"}, Enabled: true, RevisionID: "native-revision", Revision: 1, PublishedAt: &publishedAt, ModelRewriting: true, Aliases: map[string]string{"client-messages": "minimax-fixture-model"}},
-			"translated": {ID: "translated-route", ProjectID: "project", Slug: "translated", PoolID: "pool", Models: []string{"gpt-fixture-model", "minimax-fixture-model"}, Enabled: true, RevisionID: "translated-revision", Revision: 1, PublishedAt: &publishedAt, MessagesToCodex: true, ModelRewriting: true, Aliases: map[string]string{"client-stable": "gpt-fixture-model"}},
+			"native":      {ID: "native-route", ProjectID: "project", Slug: "native", PoolID: "pool", Models: []string{"gpt-fixture-model", "minimax-fixture-model", "gemini-fixture-model"}, Enabled: true, RevisionID: "native-revision", Revision: 1, PublishedAt: &publishedAt, ModelRewriting: true, Aliases: map[string]string{"client-messages": "minimax-fixture-model"}},
+			"antigravity": {ID: "antigravity-route", ProjectID: "project", Slug: "antigravity", PoolID: "pool", Models: []string{"gemini-fixture-model", "minimax-fixture-model"}, Enabled: true, RevisionID: "antigravity-revision", Revision: 1, PublishedAt: &publishedAt, ChatToAntigravity: true},
+			"translated":  {ID: "translated-route", ProjectID: "project", Slug: "translated", PoolID: "pool", Models: []string{"gpt-fixture-model", "minimax-fixture-model", "gemini-fixture-model"}, Enabled: true, RevisionID: "translated-revision", Revision: 1, PublishedAt: &publishedAt, MessagesToCodex: true, ModelRewriting: true, Aliases: map[string]string{"client-stable": "gpt-fixture-model"}},
 		},
 		CodeConnections: map[string]Configuration{
-			"native-revision:a-native":       {Kind: "plugin", AuthMode: "grant", ProfileID: codeplans.OpenCodeGoProfile},
-			"native-revision:b-codex":        {Kind: "plugin", AuthMode: "grant", ProfileID: codexauth.ProfileID},
-			"translated-revision:a-native":   {Kind: "plugin", AuthMode: "grant", ProfileID: codeplans.OpenCodeGoProfile},
-			"translated-revision:b-codex":    {Kind: "plugin", AuthMode: "grant", ProfileID: codexauth.ProfileID},
-			"translated-revision:wrong-auth": {Kind: "plugin", AuthMode: "api_key", ProfileID: codexauth.ProfileID},
-			"other-revision:foreign-codex":   {Kind: "plugin", AuthMode: "grant", ProfileID: codexauth.ProfileID},
+			"native-revision:antigravity":      {Kind: "plugin", AuthMode: "grant", ProfileID: antigravityauth.ProfileID},
+			"translated-revision:antigravity":  {Kind: "plugin", AuthMode: "grant", ProfileID: antigravityauth.ProfileID},
+			"antigravity-revision:antigravity": {Kind: "plugin", AuthMode: "grant", ProfileID: antigravityauth.ProfileID},
+			"antigravity-revision:a-native":    {Kind: "plugin", AuthMode: "grant", ProfileID: codeplans.OpenCodeGoProfile},
+			"native-revision:a-native":         {Kind: "plugin", AuthMode: "grant", ProfileID: codeplans.OpenCodeGoProfile},
+			"native-revision:b-codex":          {Kind: "plugin", AuthMode: "grant", ProfileID: codexauth.ProfileID},
+			"translated-revision:a-native":     {Kind: "plugin", AuthMode: "grant", ProfileID: codeplans.OpenCodeGoProfile},
+			"translated-revision:b-codex":      {Kind: "plugin", AuthMode: "grant", ProfileID: codexauth.ProfileID},
+			"translated-revision:wrong-auth":   {Kind: "plugin", AuthMode: "api_key", ProfileID: codexauth.ProfileID},
+			"other-revision:foreign-codex":     {Kind: "plugin", AuthMode: "grant", ProfileID: codexauth.ProfileID},
 		},
 	}
 	encoded, err := json.Marshal(snapshot)
@@ -88,6 +94,11 @@ func TestPublishedMessagesPolicySelectsEligibleFrozenProviders(t *testing.T) {
 		{"opt-in-preserves-native-responses", "translated", "responses", "gpt-fixture-model", codeadapter.HTTP, []string{"b-codex"}},
 		{"messages-translation-is-http-only", "translated", "v1/messages", "gpt-fixture-model", codeadapter.WebSocket, nil},
 		{"native-responses-keeps-websocket", "translated", "responses", "gpt-fixture-model", codeadapter.WebSocket, []string{"b-codex"}},
+		{"antigravity-disabled-by-default", "native", "v1/chat/completions", "gemini-fixture-model", codeadapter.HTTP, []string{"a-native"}},
+		{"messages-opt-in-does-not-enable-antigravity", "translated", "v1/chat/completions", "gemini-fixture-model", codeadapter.HTTP, []string{"a-native"}},
+		{"published-antigravity-opt-in-reaches-chat", "antigravity", "v1/chat/completions", "gemini-fixture-model", codeadapter.HTTP, []string{"a-native", "antigravity"}},
+		{"antigravity-opt-in-preserves-native-messages", "antigravity", "v1/messages", "minimax-fixture-model", codeadapter.HTTP, []string{"a-native"}},
+		{"antigravity-refuses-websocket", "antigravity", "v1/chat/completions", "gemini-fixture-model", codeadapter.WebSocket, nil},
 		{"unsupported-operation-remains-unserved", "translated", "unsupported-operation", "gpt-fixture-model", codeadapter.HTTP, nil},
 	} {
 		t.Run(test.name, func(t *testing.T) {

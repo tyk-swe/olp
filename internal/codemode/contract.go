@@ -22,6 +22,7 @@ type Adapter string
 
 const (
 	AdapterClaude        Adapter = "claude"
+	AdapterAntigravity   Adapter = "antigravity"
 	AdapterCodex         Adapter = "codex"
 	AdapterOpenCodeGo    Adapter = "opencode_go"
 	AdapterZAICoding     Adapter = "zai_coding"
@@ -53,6 +54,7 @@ type Authorization struct {
 	Principal       string
 	CredentialID    string
 	GrantGeneration int64
+	ProjectID       string
 }
 
 type Refusal struct {
@@ -190,6 +192,7 @@ func (r Route) ValidatePaidTargets() error {
 }
 
 type Route struct {
+	ChatToAntigravity       bool                  `json:"chat_to_antigravity,omitempty"`
 	PaidParticipation       bool                  `json:"paid_participation"`
 	PaidTargets             map[string]PaidTarget `json:"paid_targets,omitempty"`
 	ModelPools              map[string][]string   `json:"model_pools,omitempty"`

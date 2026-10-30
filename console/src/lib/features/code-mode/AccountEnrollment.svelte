@@ -56,7 +56,9 @@
     completed: async (result, { secret }) => {
       // The credential write succeeded independently of subsequent refresh.
       onComplete(result.credential_id);
-      notice = secret
+      notice =
+        secret &&
+        provider.data?.configuration.profile_id !== 'antigravity-subscription'
         ? 'Key enrolled. Save the account to associate this credential. Enrollment did not test the key or inference.'
         : 'Grant enrolled. Save the account to associate this credential. Enrollment did not test inference.';
       await Promise.all([
@@ -141,6 +143,7 @@
     </p>
   {:else if grant.enrollment}
     <GrantEnrollmentPanel
+      profileId={provider.data?.configuration.profile_id}
       enrollment={grant.enrollment}
       bind:input={grant.input}
       busy={grant.busy}

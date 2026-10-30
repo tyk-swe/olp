@@ -128,6 +128,10 @@ INSERT INTO olp.provider_grants(credential_id) VALUES(:'credential');
   expect(assignedPool.status).toBe(200);
   await page.getByRole('button', { name: 'Routes', exact: true }).click();
   await page.getByRole('button', { name: 'Create route', exact: true }).click();
+  await expect(
+    page.getByLabel('Translate Chat through Antigravity')
+  ).not.toBeChecked();
+  await page.getByLabel('Translate Chat through Antigravity').check();
   await page.getByLabel('Route slug').fill(`code-${suffix}`);
   await page.getByLabel('Pool', { exact: true }).selectOption(pool.id);
   await page
@@ -166,6 +170,13 @@ INSERT INTO olp.provider_grants(credential_id) VALUES(:'credential');
   expect(route.models).toEqual(['fixture-native-model', 'fixture-other-model']);
   expect(route.enabled).toBe(true);
   expect(route.model_rewriting).toBe(true);
+  expect(route.chat_to_antigravity).toBe(true);
+  const revisions = await manage<{ items: { route: CodeRoute }[] }>(
+    page,
+    'GET',
+    `/api/v1/code/routes/${route.id}/revisions`
+  );
+  expect(revisions.body.items[0].route.chat_to_antigravity).toBe(true);
   expect(route.aliases).toEqual({ 'team-code': 'fixture-native-model' });
   expect(route.revision).toBe(1);
   await expect(page.getByLabel('Client model')).toHaveValue(
@@ -220,6 +231,9 @@ INSERT INTO olp.provider_grants(credential_id) VALUES(:'credential');
   });
   await page.setViewportSize({ width: 1280, height: 720 });
   await page.getByRole('button', { name: 'Edit draft' }).click();
+  await expect(
+    page.getByLabel('Translate Chat through Antigravity')
+  ).toBeChecked();
   await expect(page.getByLabel('Maximum request body (bytes)')).toBeVisible();
   await page.getByLabel('Native models').fill('unsaved-native-model');
   await page

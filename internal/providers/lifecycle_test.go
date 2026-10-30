@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/tyk-swe/olp/internal/antigravityauth"
 	"github.com/tyk-swe/olp/internal/codemode"
 	"github.com/tyk-swe/olp/internal/codexauth"
 	"github.com/tyk-swe/olp/internal/plugins"
@@ -198,6 +199,53 @@ func TestCodeAuthorizationRefusesLapsedStaleAndUnprovenCredentials(t *testing.T)
 			authorization, err := authorizer.AuthorizeCode(t.Context(), configuration, account, codemode.Dispatch{ClientPath: "responses", Adapter: codemode.AdapterCodex, Protocol: codemode.ProtocolResponses})
 			if err == nil || len(authorization.Headers) != 0 {
 				t.Fatal("an unavailable or changed credential was authorized")
+			}
+		})
+	}
+}
+
+func TestCodeAuthorizationAcceptsOnlyDeclaredAntigravityClientOption(t *testing.T) {
+	manifest := antigravityauth.Manifest()
+	principal := antigravityauth.Principal("verified-subject", "verified-project")
+	credential, err := json.Marshal(connectors.GrantCredential{PluginDigest: "fixture-plugin", ProfileID: antigravityauth.ProfileID, AccessToken: "verified-access", Facts: map[string]string{"subject": "verified-subject", "project_id": "verified-project"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	account := codemode.Account{ID: "account", ProviderID: "provider", ProjectID: "project", CredentialID: "credential", Enabled: true, Principal: principal}
+	authority := codeAuthorizationStore{row: codeAuthorizationRow(func(destination ...any) error { *destination[0].(*bool) = true; return nil })}
+	for _, scenario := range []struct {
+		name     string
+		options  map[string]string
+		manifest abi.Manifest
+		allowed  bool
+	}{
+		{"required public client", map[string]string{"client_id": "fixture.apps.googleusercontent.com"}, manifest, true},
+		{"missing client", nil, manifest, false},
+		{"invalid client", map[string]string{"client_id": "invalid"}, manifest, false},
+		{"undeclared option", map[string]string{"client_id": "fixture.apps.googleusercontent.com", "client_secret": "must-remain-secret"}, manifest, false},
+		{"foreign origin", map[string]string{"client_id": "fixture.apps.googleusercontent.com"}, abi.Manifest{Name: manifest.Name, Version: manifest.Version, Profiles: manifest.Profiles, Origins: slices.Concat(manifest.Origins, []string{"https://foreign.invalid"})}, false},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
+			configuration := routing.Configuration{Kind: connectors.KindPlugin, AuthMode: connectors.AuthGrant, ProfileID: antigravityauth.ProfileID, ProfileRevision: "fixture-plugin", Endpoint: antigravityauth.Upstream}
+			options, err := json.Marshal(struct {
+				Options map[string]map[string]string `json:"options"`
+			}{Options: map[string]map[string]string{"plugin_options": scenario.options}})
+			if err != nil || json.Unmarshal(options, &configuration) != nil {
+				t.Fatal("invalid public provider options")
+			}
+			authorizer := CodeAuthorizer{Pool: authority, Credentials: codeAuthorizationSecret{data: credential, generation: 2}, Plugins: codeAuthorizationHost(t, scenario.manifest)}
+			auth, err := authorizer.AuthorizeCode(t.Context(), configuration, account, codemode.Dispatch{ClientPath: "v1/chat/completions", Adapter: codemode.AdapterAntigravity, Protocol: codemode.ProtocolChat})
+			if !scenario.allowed {
+				if err == nil || len(auth.Headers) != 0 {
+					t.Fatal("unsupported configuration received credentials")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if auth.Principal != principal || auth.ProjectID != "verified-project" || auth.GrantGeneration != 2 || auth.Headers.Get("Authorization") != "Bearer verified-access" {
+				t.Fatal("declared public client lost verified authorization")
 			}
 		})
 	}
