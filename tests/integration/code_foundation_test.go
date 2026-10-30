@@ -870,16 +870,29 @@ func TestCodeFoundationModelPoolRecoveryPreservesRequestedModelAndAuthority(t *t
 }
 
 func newPaidCodeFixture(t *testing.T, endpoints ...string) (*codeFixture, routing.Provider, routing.Slot) {
+	return newPaidCodeFixturePolicy(t, false, endpoints...)
+}
+func newPaidCodeFixturePolicy(t *testing.T, restricted bool, endpoints ...string) (*codeFixture, routing.Provider, routing.Slot) {
 	t.Helper()
-	f := newCodeFixture(t)
+	return publishPaidCodeFixture(t, newCodeFixture(t), restricted, nil, endpoints...)
+}
+func publishPaidCodeFixture(t *testing.T, f *codeFixture, restricted bool, requestedLimits *routing.Limits, endpoints ...string) (*codeFixture, routing.Provider, routing.Slot) {
+	t.Helper()
+	model := f.route.Models[0]
 	endpoint := func() string {
 		if len(endpoints) > 0 {
 			return endpoints[0]
 		}
 		return "https://fixture.invalid"
 	}()
-	providerID, slot := newCodePaidProvider(t, f.h, f.owner, f.project, endpoint, "native-model")
-	draft := map[string]any{"project_id": f.project, "slug": f.route.Slug, "pool_id": f.pool, "models": f.route.Models, "enabled": true, "paid_participation": true, "paid_targets": map[string]codemode.PaidTarget{"native-model": {ProviderID: providerID, SlotID: slot.ID}}}
+	keys := func() []string {
+		if restricted {
+			return []string{f.key}
+		}
+		return nil
+	}()
+	providerID, slot := newCodePaidProviderPolicy(t, f.h, f.owner, f.project, endpoint, model, requestedLimits, keys)
+	draft := map[string]any{"project_id": f.project, "slug": f.route.Slug, "pool_id": f.pool, "models": f.route.Models, "enabled": true, "paid_participation": true, "paid_targets": map[string]codemode.PaidTarget{model: {ProviderID: strings.ToUpper(providerID), SlotID: strings.ToUpper(slot.ID)}}}
 	saved := f.h.want(f.owner, "PUT", "/api/v1/code/routes/"+f.route.ID, draft, withMatch(f.routeRecord, idem("paid-draft")), 200)
 	published := f.h.want(f.owner, "POST", "/api/v1/code/routes/"+f.route.ID+"/publish", nil, withMatch(saved, idem("paid-publish")), 200)
 	encoded, err := json.Marshal(published)
@@ -1147,16 +1160,42 @@ func TestCodePaidFallbackProvenRecoveryRetainsOriginalReferenceOwnerAndRetiremen
 
 func newCodePaidProvider(t *testing.T, h *accessHarness, owner *browser, project, endpoint, model string) (string, routing.Slot) {
 	t.Helper()
-	write := contract.CreateProviderRequest{Name: "Metered fixture", ProjectId: nullable.NewNullableWithValue(uuid.MustParse(project)), Model: nullable.NewNullableWithValue(model), Credential: new("fixture-paid-secret"), Configuration: contract.ProviderConfiguration{Kind: "openai", AuthMode: "api_key", ProfileId: new("openai-responses"), ProfileRevision: new(connectors.ProfileRevision), Endpoint: nullable.NewNullableWithValue(endpoint), Options: &contract.ConnectionOptions{VendorId: nullable.NewNullableWithValue("openai")}}}
+	return newCodePaidProviderPolicy(t, h, owner, project, endpoint, model, nil, nil)
+}
+func newCodePaidProviderPolicy(t *testing.T, h *accessHarness, owner *browser, project, endpoint, model string, requestedLimits *routing.Limits, keys []string) (string, routing.Slot) {
+	t.Helper()
+	contractLimits := func() nullable.Nullable[contract.ConnectionLimits] {
+		if requestedLimits == nil {
+			var absent nullable.Nullable[contract.ConnectionLimits]
+			return absent
+		}
+		return nullable.NewNullableWithValue(codePublicDecode[contract.ConnectionLimits](t, requestedLimits))
+	}()
+	write := contract.CreateProviderRequest{Name: "Metered fixture", ProjectId: nullable.NewNullableWithValue(uuid.MustParse(project)), Model: nullable.NewNullableWithValue(model), Credential: new("fixture-paid-secret"), Configuration: contract.ProviderConfiguration{Kind: "openai", AuthMode: "api_key", ProfileId: new("openai-responses"), ProfileRevision: new(connectors.ProfileRevision), Endpoint: nullable.NewNullableWithValue(endpoint), Options: &contract.ConnectionOptions{VendorId: nullable.NewNullableWithValue("openai"), Limits: contractLimits}}}
 	created := codePublicDecode[contract.ProviderResponse](t, h.want(owner, "POST", "/api/v1/providers", write, idem("paid-provider"), 201))
 	providerID := created.Id.String()
-	var slotID, credential string
+	var slotID, slotName, credential string
 	var version int
-	if err := h.Pool.QueryRow(t.Context(), `SELECT s.id::text,s.credential_id::text,c.version FROM olp.provider_slots s JOIN olp.provider_credentials c ON c.id=s.credential_id WHERE s.provider_id=$1 AND s.is_default`, providerID).Scan(&slotID, &credential, &version); err != nil {
+	if err := h.Pool.QueryRow(t.Context(), `SELECT s.id::text,s.name,s.credential_id::text,c.version FROM olp.provider_slots s JOIN olp.provider_credentials c ON c.id=s.credential_id WHERE s.provider_id=$1 AND s.is_default`, providerID).Scan(&slotID, &slotName, &credential, &version); err != nil {
 		t.Fatal(err)
 	}
-	slot := routing.Slot{ID: slotID, Enabled: true, Weight: 1, CredentialID: &credential, CredentialVersion: &version}
-	models, err := json.Marshal([]routing.RevisionModel{{ID: access.NewID(), UpstreamModel: model, Capabilities: []routing.RevisionCapability{{Operation: "generation", Surface: "openai", Mode: "unary", Source: "certified"}}}})
+	limits := func() routing.Limits {
+		if requestedLimits == nil {
+			return routing.Limits{}
+		}
+		return *requestedLimits
+	}()
+	slot := routing.Slot{ID: slotID, Name: slotName, Enabled: true, Weight: 1, CredentialID: &credential, CredentialVersion: &version, AllowedAPIKeys: keys, RequestsPerMinute: limits.RequestsPerMinute, TokensPerMinute: limits.TokensPerMinute, MaxConcurrency: limits.MaxConcurrency, Supply: limits.Supply}
+	if requestedLimits != nil {
+		encodedLimits, err := json.Marshal(requestedLimits)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := h.Pool.Exec(t.Context(), `UPDATE olp.provider_slots SET limits=$2 WHERE id=$1`, slot.ID, encodedLimits); err != nil {
+			t.Fatal(err)
+		}
+	}
+	models, err := json.Marshal([]routing.RevisionModel{{ID: access.NewID(), UpstreamModel: model, DisplayName: "Native fixture", Capabilities: []routing.RevisionCapability{{Operation: "generation", Surface: "openai", Mode: "unary", Source: "certified"}}}})
 	if err != nil {
 		t.Fatal(err)
 	}

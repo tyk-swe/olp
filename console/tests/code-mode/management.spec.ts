@@ -299,3 +299,30 @@ function uuidv7(): string {
   const hex = bytes.toString('hex');
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
+
+test('requires a new configuration plan after changing code destination bindings', async ({
+  page
+}) => {
+  await signInGatewayOwner(page);
+  await page.goto('/settings');
+  const promotion = page.getByRole('region', {
+    name: 'Configuration promotion'
+  });
+  await promotion
+    .getByLabel('Artifact', { exact: true })
+    .fill(
+      JSON.stringify({ api_version: 'openllmproxy.dev/config/v2', code: {} })
+    );
+  await promotion.getByRole('button', { name: 'Plan', exact: true }).click();
+  await expect(
+    promotion.getByRole('button', { name: 'Apply', exact: true })
+  ).toBeVisible();
+  await promotion.getByLabel('Code destination bindings').fill('{}');
+  await expect(
+    promotion.getByRole('button', { name: 'Apply', exact: true })
+  ).toHaveCount(0);
+  await promotion.getByRole('button', { name: 'Plan', exact: true }).click();
+  await expect(
+    promotion.getByRole('button', { name: 'Apply', exact: true })
+  ).toBeVisible();
+});

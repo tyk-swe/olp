@@ -3,6 +3,7 @@ package routing
 import (
 	"github.com/tyk-swe/olp/internal/codemode"
 	"github.com/tyk-swe/olp/internal/protocols/wire"
+	"reflect"
 )
 
 func CodePaidProtocol(provider Provider, model string) (codemode.Protocol, bool) {
@@ -22,4 +23,8 @@ func CodePaidProtocol(provider Provider, model string) (codemode.Protocol, bool)
 		return "", false
 	}
 	return protocol, true
+}
+
+func CodePaidLimitsMatch(liveProvider, frozenProvider *Limits, liveSlot, frozenSlot Slot) bool {
+	return reflect.DeepEqual(liveProvider, frozenProvider) && reflect.DeepEqual(liveSlot.RequestsPerMinute, frozenSlot.RequestsPerMinute) && reflect.DeepEqual(liveSlot.TokensPerMinute, frozenSlot.TokensPerMinute) && reflect.DeepEqual(liveSlot.MaxConcurrency, frozenSlot.MaxConcurrency) && reflect.DeepEqual(liveSlot.Supply, frozenSlot.Supply)
 }
