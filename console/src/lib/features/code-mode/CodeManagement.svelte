@@ -29,6 +29,8 @@
     tokenCount,
     type CodeEditing
   } from './presentation';
+  import { listProviders } from '$lib/features/providers/api/providers';
+  import { listCredentialSlots } from '$lib/features/providers/api/credentials';
   import ResourceEditor from './ResourceEditor.svelte';
   import RouteRevisions from './RouteRevisions.svelte';
   import ClientConfiguration from './ClientConfiguration.svelte';
@@ -90,6 +92,27 @@
   const inventory = createQuery(() => ({
     queryKey: codeKeys.inventory(projectId, kind),
     queryFn: async ({ signal }) => ({
+      providers:
+        kind === 'routes'
+          ? await Promise.all(
+              (await listProviders(signal))
+                .filter(
+                  (provider) =>
+                    provider.project_id === projectId &&
+                    provider.state === 'active' &&
+                    provider.kind !== 'plugin'
+                )
+                .map(async (provider) => ({
+                  id: provider.id,
+                  name: provider.name,
+                  slots: (
+                    await listCredentialSlots(provider.id, signal)
+                  ).items.filter(
+                    (slot) => slot.enabled && slot.credential_version_id
+                  )
+                }))
+            )
+          : [],
       accounts:
         kind === 'pools' || kind === 'routes'
           ? await collectCursorPages((cursor) =>

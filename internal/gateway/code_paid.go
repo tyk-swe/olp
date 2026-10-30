@@ -23,21 +23,23 @@ import (
 )
 
 type paidCodeAttempt struct {
-	provider     routing.Provider
-	slot         routing.Slot
-	connector    connectors.Config
-	family       wire.Format
-	route        codemode.Route
-	release      *runtime.Release
-	authority    access.Authority
-	targetLease  *targetReservation
-	supplyLeases []*limits.Lease
-	price        *usage.RoutingPrice
-	discount     *usage.RoutingDiscount
-	card         *usage.RoutingCardRevision
-	started      time.Time
-	status       int
-	stream       bool
+	provider      routing.Provider
+	slot          routing.Slot
+	connector     connectors.Config
+	family        wire.Format
+	route         codemode.Route
+	release       *runtime.Release
+	authority     access.Authority
+	targetLease   *targetReservation
+	supplyLeases  []*limits.Lease
+	price         *usage.RoutingPrice
+	discount      *usage.RoutingDiscount
+	card          *usage.RoutingCardRevision
+	started       time.Time
+	status        int
+	usage         *wire.Usage
+	usageComplete bool
+	stream        bool
 }
 
 func codeFamily(protocol codemode.Protocol) wire.Format {
@@ -74,8 +76,8 @@ func (s *Server) preparePaidCode(r *http.Request, release *runtime.Release, rout
 	}
 	connector := provider.Connector()
 	family := codeFamily(ingress.protocol)
-	native, formatErr := connector.TargetFamily(family)
-	if formatErr != nil || native != family || connector.CredentialSource == "caller" || len(provider.ParameterDefaults) > 0 || len(provider.OperationDefaults) > 0 || len(provider.Models) > 0 || provider.Plugin != nil {
+	native, nativeOK := routing.CodePaidProtocol(provider, operation.Model)
+	if !nativeOK || native != ingress.protocol {
 		return nil, codemode.Refuse(400, "code_paid_operation_unsupported")
 	}
 	parsed, parseErr := protocols.Parse(family, body, operation.Model)
@@ -149,8 +151,11 @@ func (s *Server) preparePaidCode(r *http.Request, release *runtime.Release, rout
 	}
 	a.lease = lease
 	targetLease, rejection, skip := s.Admission.reserveTarget(r.Context(), &provider, &slot, demand.Tokens(), codeGenerationTimeout+time.Minute, "code")
-	if rejection != nil || skip {
+	if rejection != nil {
 		return nil, codemode.Refuse(429, "code_paid_target_rate_limited")
+	}
+	if skip {
+		return nil, codemode.Refuse(503, "code_limits_unavailable")
 	}
 	a.paid.targetLease = targetLease
 	supply, err := s.reservePaidSupply(r.Context(), provider, slot, hold)
@@ -192,7 +197,7 @@ func (s *Server) reservePaidCaps(ctx context.Context, owners []cappedOwner, hold
 	if !s.Admission.ready() {
 		return nil, codemode.Refuse(503, "code_limits_unavailable")
 	}
-	lease, err := s.Admission.limiter.Reserve(ctx, limits.Request{CostOwnerID: owner.id, LookupID: owner.lookup, DailyCostLimit: owner.limits.DailyCostLimit, MonthlyCostLimit: owner.limits.MonthlyCostLimit, CostEstimate: hold.amount, RequestID: hold.requestID, LeaseTTL: codeGenerationTimeout + time.Minute})
+	lease, err := s.Admission.limiter.Reserve(ctx, limits.Request{CostOwnerID: owner.id, CostBasis: limits.BasisCost, LookupID: owner.lookup, DailyCostLimit: owner.limits.DailyCostLimit, MonthlyCostLimit: owner.limits.MonthlyCostLimit, CostEstimate: hold.amount, RequestID: hold.requestID, LeaseTTL: codeGenerationTimeout + time.Minute})
 	if _, ok := errors.AsType[*limits.ExceededError](err); ok {
 		return nil, codemode.Refuse(429, "code_budget_exhausted")
 	}
@@ -242,6 +247,9 @@ func (a *codeAttempt) authorizePaid(request *http.Request, body []byte) error {
 	if err != nil {
 		return codemode.Refuse(503, "code_paid_credential_unavailable")
 	}
+	if err := a.paid.connector.ApplySemantic(request); err != nil {
+		return codemode.Refuse(503, "code_paid_configuration_unsupported")
+	}
 	if _, err := a.server.auth.Apply(request.Context(), request, a.paid.connector, secret, body); err != nil {
 		return codemode.Refuse(503, "code_paid_credential_unavailable")
 	}
@@ -251,35 +259,43 @@ func (a *codeAttempt) authorizePaid(request *http.Request, body []byte) error {
 
 func (a *codeAttempt) finishPaid(ctx context.Context) {
 	p := a.paid
-	observed := a.usage.Total != nil && a.usage.Input != nil && a.usage.Output != nil
-	measured := func() *wire.Usage {
-		if !observed {
-			return nil
+	observed := p.usage != nil && p.usageComplete && a.terminal && !a.conflicting
+	measured := p.usage
+	money := func() (string, string) {
+		if !a.dispatched || measured == nil {
+			return "", ""
 		}
-		return &wire.Usage{InputTokens: *a.usage.Input, OutputTokens: *a.usage.Output, TotalTokens: *a.usage.Total, CachedInputTokens: a.usage.Cached, ReasoningTokens: a.usage.Reasoning}
+		cost, known := p.price.Cost(usage.ObservedAttemptUsage(measured, observed, "generation"), p.started, p.status >= 200 && p.status < 300, p.discount)
+		if !known {
+			return "", ""
+		}
+		if p.card == nil {
+			return cost.String(), cost.String()
+		}
+		charge, chargeKnown := p.card.Charge(usage.ObservedAttemptUsage(measured, observed, "generation"), p.started, p.status >= 200 && p.status < 300, &cost, p.provider.Kind, p.provider.VendorID, a.model, "generation")
+		if !chargeKnown {
+			return cost.String(), ""
+		}
+		return cost.String(), charge.String()
+	}
+	cost, charge := money()
+	a.lease.SetActualCost(cost, charge)
+	for _, lease := range p.supplyLeases {
+		lease.SetActualCost(cost, cost)
+	}
+	cardID := func() *string {
+		if p.card != nil {
+			return &p.card.ID
+		}
+		return nil
 	}()
-	fact := AttemptFact{TargetID: p.slot.ID, ProviderID: p.provider.ID, ProviderRevisionID: p.provider.RevisionID, UpstreamModel: a.model, SlotID: p.slot.ID, CredentialID: *p.slot.CredentialID, CredentialVersion: *p.slot.CredentialVersion, Price: p.price, PricingPinned: true, Discount: p.discount, CardPinned: true, cardRev: p.card, Ordinal: 1, Mode: "unary", StartedAt: p.started, Duration: a.server.now().Sub(p.started), Status: p.status, Usage: measured, UsageObserved: observed, UsageComplete: observed, BillingUncertain: a.dispatched && !observed}
-	if p.card != nil {
-		fact.CardRevisionID = &p.card.ID
-	}
-	if p.stream {
-		fact.Mode = "streaming"
-	}
-	if a.dispatched && measured != nil {
-		cost, known := p.price.Cost(usage.AttemptUsage{InputTokens: &measured.InputTokens, OutputTokens: &measured.OutputTokens, CachedInputTokens: measured.CachedInputTokens}, p.started, p.status >= 200 && p.status < 300, p.discount)
-		charge, chargeKnown := func() (usage.Cost, bool) {
-			if p.card == nil {
-				return cost, known
-			}
-			return p.card.Charge(usage.AttemptUsage{InputTokens: &measured.InputTokens, OutputTokens: &measured.OutputTokens, CachedInputTokens: measured.CachedInputTokens}, p.started, p.status >= 200 && p.status < 300, &cost, p.provider.Kind, p.provider.VendorID, a.model, "generation")
-		}()
-		if known && chargeKnown {
-			a.lease.SetActualCost(cost.String(), charge.String())
-			for _, lease := range p.supplyLeases {
-				lease.SetActualCost(cost.String(), charge.String())
-			}
+	mode := func() string {
+		if p.stream {
+			return "streaming"
 		}
-	}
+		return "unary"
+	}()
+	fact := AttemptFact{TargetID: p.slot.ID, ProviderID: p.provider.ID, ProviderRevisionID: p.provider.RevisionID, UpstreamModel: a.model, SlotID: p.slot.ID, CredentialID: *p.slot.CredentialID, CredentialVersion: *p.slot.CredentialVersion, Price: p.price, PricingPinned: true, Discount: p.discount, CardPinned: true, cardRev: p.card, CardRevisionID: cardID, Budgets: []string{p.route.ID, p.provider.ID, p.slot.ID}, Ordinal: 1, Mode: mode, StartedAt: p.started, Duration: a.server.now().Sub(p.started), Status: p.status, Usage: measured, UsageObserved: measured != nil, UsageComplete: observed, BillingUncertain: a.dispatched && !observed}
 	p.targetLease.settle(ctx, a.dispatched, a.usage.Total)
 	for _, lease := range p.supplyLeases {
 		settleKey(ctx, lease, a.dispatched, a.usage.Total, a.server.log)

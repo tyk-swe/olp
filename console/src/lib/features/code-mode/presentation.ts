@@ -1,3 +1,9 @@
+import type { CredentialSlot } from '$lib/features/providers/api/credentials';
+export type PaidTargetOption = {
+  id: string;
+  name: string;
+  slots: CredentialSlot[];
+};
 import type {
   CodeAccount,
   CodeAttempt,

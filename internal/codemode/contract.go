@@ -4,9 +4,11 @@ package codemode
 
 import (
 	"fmt"
+	"github.com/google/uuid"
 	"math"
 	"net/http"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 )
@@ -115,6 +117,7 @@ func (a Allowance) Validate() error {
 // published route. Configuration is text in Format, saved as File, or sourced
 // in a shell when File is nil. It never contains an OLP key.
 type ClientConfiguration struct {
+	PaidModels        []string            `json:"paid_models,omitempty"`
 	Models            []Model             `json:"models"`
 	AdditionalFiles   []ConfigurationFile `json:"additional_files,omitempty"`
 	RouteSlug         string              `json:"route_slug"`
@@ -137,6 +140,7 @@ type ClientConfiguration struct {
 
 type Model struct {
 	ModelPool    []string          `json:"model_pool,omitempty"`
+	Paid         bool              `json:"paid"`
 	ID           string            `json:"id"`
 	Object       string            `json:"object"`
 	Capabilities []ModelCapability `json:"capabilities"`
@@ -186,7 +190,7 @@ func (r Route) ValidatePaidTargets() error {
 
 type Route struct {
 	PaidParticipation       bool                  `json:"paid_participation"`
-	PaidTargets             map[string]PaidTarget `json:"paid_targets"`
+	PaidTargets             map[string]PaidTarget `json:"paid_targets,omitempty"`
 	ModelPools              map[string][]string   `json:"model_pools,omitempty"`
 	InitialRecoveryAttempts int                   `json:"initial_recovery_attempts,omitempty"`
 	ModelRewriting          bool                  `json:"model_rewriting,omitempty"`

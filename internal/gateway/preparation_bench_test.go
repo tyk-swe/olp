@@ -152,7 +152,7 @@ func BenchmarkCodeNativePreparation(b *testing.B) {
 				observation := codemode.Request{Operation: codemode.Operation{Name: "responses", Model: models[0], Identity: codemode.Identity{Conversation: "benchmark"}}}
 				b.ReportAllocs()
 				for b.Loop() {
-					if _, err := server.prepareCode(request, release, route, observation, codeIngress{path: "responses"}, codeadapter.HTTP, nil); err != refusal {
+					if _, err := server.prepareCode(request, release, route, observation, codeIngress{path: "responses"}, codeadapter.HTTP, nil, nil); err != refusal {
 						b.Fatalf("native preparation did not reach admission, %v", err)
 					}
 				}

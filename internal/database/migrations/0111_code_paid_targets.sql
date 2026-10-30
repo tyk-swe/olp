@@ -24,7 +24,6 @@ ALTER TABLE olp.code_attempts
     ADD COLUMN paid_binding_id uuid REFERENCES olp.code_paid_bindings,
     ADD COLUMN paid_provider_id uuid REFERENCES olp.providers,
     ADD COLUMN paid_slot_id uuid REFERENCES olp.provider_slots,
-    ADD COLUMN requested_model text,
     ADD COLUMN paid_cost_owners uuid[] NOT NULL DEFAULT '{}',
     ADD CONSTRAINT code_attempt_target CHECK (
         (binding_id IS NOT NULL AND account_id IS NOT NULL AND paid_binding_id IS NULL AND paid_provider_id IS NULL AND paid_slot_id IS NULL)
@@ -41,12 +40,15 @@ CREATE TABLE olp.code_paid_references (
 );
 
 CREATE INDEX code_paid_pending_owners ON olp.code_attempts USING gin(paid_cost_owners)
-    WHERE paid_binding_id IS NOT NULL AND state IN ('uncertain','bound_violation');
+    WHERE paid_binding_id IS NOT NULL AND state NOT IN ('prepared','aborted');
 
 ALTER FUNCTION olp.has_pending_resource_usage(uuid) RENAME TO has_pending_resource_usage_before_code_paid;
 CREATE FUNCTION olp.has_pending_resource_usage(owner uuid) RETURNS boolean LANGUAGE sql STABLE AS $$
     SELECT olp.has_pending_resource_usage_before_code_paid(owner)
-        OR EXISTS(SELECT 1 FROM olp.code_attempts
-            WHERE paid_binding_id IS NOT NULL AND state IN ('uncertain','bound_violation')
-                AND paid_cost_owners @> ARRAY[owner])
+        OR EXISTS(SELECT 1 FROM olp.code_attempts a
+            WHERE paid_binding_id IS NOT NULL AND state NOT IN ('prepared','aborted')
+                AND paid_cost_owners @> ARRAY[owner]
+                AND NOT EXISTS(SELECT 1 FROM olp.attempt_usage_facts f WHERE f.request_id=a.id
+                    AND f.usage_complete AND f.estimated_cost IS NOT NULL
+                    AND (owner IN (a.paid_provider_id,a.paid_slot_id) OR (f.charge_status<>'billing_uncertain' AND f.charge IS NOT NULL))))
 $$;

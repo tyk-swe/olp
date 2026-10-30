@@ -3,6 +3,7 @@ package routes
 import (
 	"context"
 	"encoding/json"
+	"maps"
 	"net/http"
 	"slices"
 	"time"
@@ -13,6 +14,7 @@ import (
 	"github.com/tyk-swe/olp/internal/codeadapter"
 	"github.com/tyk-swe/olp/internal/codemode"
 	"github.com/tyk-swe/olp/internal/resources"
+	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/runtime"
 )
 
@@ -40,18 +42,20 @@ func (s *Server) codeRoutes(r *http.Request, p access.Principal) (access.Reply, 
 }
 
 type codeRouteInput struct {
-	ModelPools              map[string][]string     `json:"model_pools"`
-	InitialRecoveryAttempts int                     `json:"initial_recovery_attempts"`
-	ModelRewriting          bool                    `json:"model_rewriting"`
-	Aliases                 map[string]string       `json:"aliases"`
-	MessagesToCodex         bool                    `json:"messages_to_codex"`
-	Tools                   *codemode.ResearchTools `json:"tools"`
-	MaxBodyBytes            *int64                  `json:"max_body_bytes,omitempty"`
-	ProjectID               string                  `json:"project_id"`
-	Slug                    string                  `json:"slug"`
-	PoolID                  string                  `json:"pool_id"`
-	Models                  []string                `json:"models"`
-	Enabled                 bool                    `json:"enabled"`
+	ModelPools              map[string][]string            `json:"model_pools"`
+	InitialRecoveryAttempts int                            `json:"initial_recovery_attempts"`
+	ModelRewriting          bool                           `json:"model_rewriting"`
+	Aliases                 map[string]string              `json:"aliases"`
+	MessagesToCodex         bool                           `json:"messages_to_codex"`
+	Tools                   *codemode.ResearchTools        `json:"tools"`
+	MaxBodyBytes            *int64                         `json:"max_body_bytes,omitempty"`
+	ProjectID               string                         `json:"project_id"`
+	Slug                    string                         `json:"slug"`
+	PoolID                  string                         `json:"pool_id"`
+	Models                  []string                       `json:"models"`
+	Enabled                 bool                           `json:"enabled"`
+	PaidParticipation       bool                           `json:"paid_participation"`
+	PaidTargets             map[string]codemode.PaidTarget `json:"paid_targets"`
 }
 
 func (s *Server) writeCodeRoute(r *http.Request, _ access.Principal) (access.Reply, error) {
@@ -85,11 +89,14 @@ func (s *Server) writeCodeRoute(r *http.Request, _ access.Principal) (access.Rep
 	if err := (codemode.Route{Models: in.Models, Aliases: in.Aliases, ModelRewriting: in.ModelRewriting, ModelPools: in.ModelPools}).ValidateModelPools(); err != nil {
 		return access.Reply{}, access.Invalid("model_pools", err.Error())
 	}
+	if err := (codemode.Route{Models: in.Models, PaidParticipation: in.PaidParticipation, PaidTargets: in.PaidTargets}).ValidatePaidTargets(); err != nil {
+		return access.Reply{}, access.Invalid("paid_targets", err.Error())
+	}
 	if err := in.Tools.Validate(); err != nil {
 		return access.Reply{}, access.Invalid("tools", err.Error())
 	}
 	return s.Access.CodeWrite(r, "code_routes", "code_route", in.ProjectID, in, func(tx pgx.Tx, p access.Principal, id, etag string) (any, error) {
-		out := codemode.Route{ModelPools: in.ModelPools, InitialRecoveryAttempts: in.InitialRecoveryAttempts, Aliases: in.Aliases, ModelRewriting: in.ModelRewriting, MessagesToCodex: in.MessagesToCodex, Tools: in.Tools, MaxBodyBytes: in.MaxBodyBytes, ID: id, ProjectID: in.ProjectID, Slug: in.Slug, PoolID: in.PoolID, Models: in.Models, Enabled: in.Enabled, ETag: etag}
+		out := codemode.Route{PaidParticipation: in.PaidParticipation, PaidTargets: in.PaidTargets, ModelPools: in.ModelPools, InitialRecoveryAttempts: in.InitialRecoveryAttempts, Aliases: in.Aliases, ModelRewriting: in.ModelRewriting, MessagesToCodex: in.MessagesToCodex, Tools: in.Tools, MaxBodyBytes: in.MaxBodyBytes, ID: id, ProjectID: in.ProjectID, Slug: in.Slug, PoolID: in.PoolID, Models: in.Models, Enabled: in.Enabled, ETag: etag}
 		adapters := []codemode.Adapter{}
 		var matches bool
 		if err := tx.QueryRow(r.Context(), `SELECT EXISTS(SELECT 1 FROM olp.code_pools WHERE id=$1 AND project_id=$2)`, in.PoolID, in.ProjectID).Scan(&matches); err != nil {
@@ -162,6 +169,9 @@ func (s *Server) publishCodeRoute(r *http.Request, _ access.Principal) (access.R
 	if err = json.Unmarshal(document, &route); err != nil {
 		return access.Reply{}, err
 	}
+	if err := route.ValidatePaidTargets(); err != nil {
+		return access.Reply{}, access.Invalid("paid_targets", err.Error())
+	}
 	if err := route.ValidateAliases(); err != nil {
 		return access.Reply{}, access.Invalid("aliases", err.Error())
 	}
@@ -178,6 +188,9 @@ func (s *Server) publishCodeRoute(r *http.Request, _ access.Principal) (access.R
 	}
 	if route.Enabled {
 		for _, model := range route.Models {
+			if _, paid := route.PaidTargets[model]; paid {
+				continue
+			}
 			var available bool
 			err = tx.QueryRow(r.Context(), `SELECT EXISTS(SELECT 1 FROM olp.code_pool_accounts pa JOIN olp.code_accounts a ON a.id=pa.account_id JOIN olp.provider_credentials c ON c.id=a.credential_id JOIN olp.provider_grants g ON g.credential_id=c.id
 				WHERE pa.pool_id=$1 AND a.enabled AND a.project_id=$2 AND a.models ? $3 AND c.revoked_at IS NULL AND g.lapsed_at IS NULL AND (g.expires_at IS NULL OR g.expires_at>now()) AND c.principal=a.principal)`, route.PoolID, project, model).Scan(&available)
@@ -188,6 +201,10 @@ func (s *Server) publishCodeRoute(r *http.Request, _ access.Principal) (access.R
 				return access.Reply{}, access.Invalid("models", "Every model needs an enrolled pool account.")
 			}
 		}
+	}
+	paidConnections, paidErr := codePaidPublication(r.Context(), tx, route)
+	if paidErr != nil {
+		return access.Reply{}, paidErr
 	}
 	connections, adapters, err := codePublication(r.Context(), tx, route.PoolID)
 	if err != nil {
@@ -201,8 +218,8 @@ func (s *Server) publishCodeRoute(r *http.Request, _ access.Principal) (access.R
 		return access.Reply{}, err
 	}
 	document, _ = json.Marshal(route)
-	if _, err = tx.Exec(r.Context(), `INSERT INTO olp.code_route_revisions(id,route_id,revision,document,created_by,published_at,connections)
-		VALUES($1,$2,$3,$4,$5,$6,$7)`, route.RevisionID, id, route.Revision, document, p.UserID(), now, connections); err != nil {
+	if _, err = tx.Exec(r.Context(), `INSERT INTO olp.code_route_revisions(id,route_id,revision,document,created_by,published_at,connections,paid_connections)
+		VALUES($1,$2,$3,$4,$5,$6,$7,$8)`, route.RevisionID, id, route.Revision, document, p.UserID(), now, connections, paidConnections); err != nil {
 		return access.Reply{}, err
 	}
 	if _, err = tx.Exec(r.Context(), `UPDATE olp.code_routes SET latest_revision_id=$2,etag=$3,draft=$4 WHERE id=$1`, id, route.RevisionID, route.ETag, document); err != nil {
@@ -283,4 +300,57 @@ func codePublication(ctx context.Context, tx pgx.Tx, poolID string) ([]byte, []c
 	slices.SortFunc(adapters, codeadapter.Compare)
 	encoded, err := json.Marshal(connections)
 	return encoded, adapters, err
+}
+
+func codePaidPublication(ctx context.Context, tx pgx.Tx, route codemode.Route) ([]byte, error) {
+	if len(route.PaidTargets) == 0 {
+		return json.Marshal(map[string]routing.Provider{})
+	}
+	ids := slices.Collect(func(yield func(string) bool) {
+		for _, target := range route.PaidTargets {
+			if !yield(target.ProviderID) {
+				return
+			}
+		}
+	})
+	rows, err := tx.Query(ctx, `SELECT p.id::text,p.state,v.id::text,v.name,v.configuration,v.models,v.slots,p.project_id::text,`+runtime.PluginColumn+` FROM olp.providers p JOIN olp.provider_revisions v ON v.id=p.active_revision_id WHERE p.id=ANY($1::uuid[]) AND p.project_id=$2 AND p.state<>'disabled'`, ids, route.ProjectID)
+	if err != nil {
+		return nil, err
+	}
+	providers, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (routing.Provider, error) {
+		var revision routing.ProviderRevision
+		if err := row.Scan(&revision.ID, &revision.State, &revision.RevisionID, &revision.Name, &revision.Configuration, &revision.Models, &revision.Slots, &revision.ProjectID, &revision.InstalledPlugin); err != nil {
+			return routing.Provider{}, err
+		}
+		return routing.DecodeProviderRevision(revision)
+	})
+	if err != nil {
+		return nil, err
+	}
+	published := maps.Collect(func(yield func(string, routing.Provider) bool) {
+		for _, provider := range providers {
+			if !yield(provider.ID, provider) {
+				return
+			}
+		}
+	})
+	for model, target := range route.PaidTargets {
+		provider, exists := published[target.ProviderID]
+		if !exists {
+			return nil, access.Invalid("paid_targets", "Choose a published metered provider in this project.")
+		}
+		if _, ok := codeadapter.ForConnection(provider.Kind, provider.AuthMode, provider.ProfileID); ok {
+			return nil, access.Invalid("paid_targets", "Coding subscriptions belong in the subscription pool.")
+		}
+		if _, ok := routing.CodePaidProtocol(provider, model); !ok {
+			return nil, access.Invalid("paid_targets", "Use a native metered API profile without request defaults, model overrides, plugins or caller credentials.")
+		}
+		slot := slices.IndexFunc(provider.Slots, func(slot routing.Slot) bool {
+			return slot.ID == target.SlotID && slot.Enabled && slot.CredentialID != nil && slot.CredentialVersion != nil
+		})
+		if slot < 0 {
+			return nil, access.Invalid("paid_targets", "Choose an enabled credential slot from the selected provider.")
+		}
+	}
+	return json.Marshal(published)
 }

@@ -326,3 +326,25 @@ func TestModelPoolsAreVisibleWithoutChangingSetupModel(t *testing.T) {
 		t.Fatalf("discovery lost configured targets %+v", configuration.Models)
 	}
 }
+
+func TestCatalogAndConfigurationExposeDirectPaidModelsWithoutAdapters(t *testing.T) {
+	route := codemode.Route{ID: "route", Slug: "coding", Enabled: true, RevisionID: "revision", Models: []string{"paid-native"}, PaidParticipation: true, PaidTargets: map[string]codemode.PaidTarget{"paid-native": {ProviderID: "provider", SlotID: "slot"}}}
+	offers := Offers{{PaidProtocol: codemode.ProtocolResponses, Models: route.Models}, {Adapter: codemode.AdapterCodex, Models: route.Models}}
+	catalog := Catalog(route, offers)
+	if len(catalog) != 1 || !catalog[0].Paid || len(catalog[0].Capabilities) != 1 || catalog[0].Capabilities[0].Protocol != codemode.ProtocolResponses || !slices.Contains(catalog[0].Clients, codeadapter.ClientCodex) {
+		t.Fatalf("paid catalog %+v", catalog)
+	}
+	config, err := Generate(route, offers, Request{GatewayURL: "https://gateway.example", Client: codeadapter.ClientCodex, Model: "paid-native"})
+	if err != nil || len(config.Adapters) != 0 || !strings.Contains(config.Configuration, "supports_websockets = false") || !slices.Equal(config.PaidModels, route.Models) {
+		t.Fatalf("paid configuration %+v %v", config, err)
+	}
+	openCode, openErr := Generate(route, offers, Request{GatewayURL: "https://gateway.example", Client: codeadapter.ClientOpenCode, Model: "paid-native"})
+	if openErr != nil || !strings.Contains(openCode.Configuration, "olp-paid-responses/paid-native") {
+		t.Fatalf("paid OpenCode configuration %+v %v", openCode, openErr)
+	}
+	disabled := route
+	disabled.PaidParticipation = false
+	if got := Catalog(disabled, offers); len(got) != 0 {
+		t.Fatalf("disabled paid target advertised through subscription %+v", got)
+	}
+}

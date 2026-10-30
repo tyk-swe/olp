@@ -253,7 +253,7 @@
             ]
           },
           "end_user_source": {
-            "description": "Required end-user identity source: header reads X-OLP-End-User; native reads OpenAI safety_identifier (preferred) or user, or Anthropic metadata.user_id from JSON bodies. Tokens are 1–128 ASCII letters, digits, dots, underscores, colons or hyphens, starting with a letter or digit. Use header for other surfaces. Null disables identification. Only a project-scoped HMAC digest is retained.",
+            "description": "Required end-user identity source: header reads X-OLP-End-User; native reads OpenAI safety_identifier (preferred) or user, or Anthropic metadata.user_id from JSON bodies. Tokens are 1\u2013128 ASCII letters, digits, dots, underscores, colons or hyphens, starting with a letter or digit. Use header for other surfaces. Null disables identification. Only a project-scoped HMAC digest is retained.",
             "type": [
               "string",
               "null"
@@ -328,7 +328,7 @@
             },
             "maxItems": 64,
             "uniqueItems": true,
-            "description": "Existing group names in this key’s project. Grants the union of explicit allowed_routes and these groups. Both lists empty allow all routes in the project; missing or empty referenced groups grant nothing."
+            "description": "Existing group names in this key\u2019s project. Grants the union of explicit allowed_routes and these groups. Both lists empty allow all routes in the project; missing or empty referenced groups grant nothing."
           },
           "rotation_interval_days": {
             "type": [
@@ -3159,7 +3159,7 @@
             ]
           },
           "end_user_source": {
-            "description": "Required end-user identity source: header reads X-OLP-End-User; native reads OpenAI safety_identifier (preferred) or user, or Anthropic metadata.user_id from JSON bodies. Tokens are 1–128 ASCII letters, digits, dots, underscores, colons or hyphens, starting with a letter or digit. Use header for other surfaces. Null disables identification. Only a project-scoped HMAC digest is retained.",
+            "description": "Required end-user identity source: header reads X-OLP-End-User; native reads OpenAI safety_identifier (preferred) or user, or Anthropic metadata.user_id from JSON bodies. Tokens are 1\u2013128 ASCII letters, digits, dots, underscores, colons or hyphens, starting with a letter or digit. Use header for other surfaces. Null disables identification. Only a project-scoped HMAC digest is retained.",
             "type": [
               "string",
               "null"
@@ -3234,7 +3234,7 @@
             },
             "maxItems": 64,
             "uniqueItems": true,
-            "description": "Existing group names in this key’s project. Grants the union of explicit allowed_routes and these groups. Both lists empty allow all routes in the project; missing or empty referenced groups grant nothing."
+            "description": "Existing group names in this key\u2019s project. Grants the union of explicit allowed_routes and these groups. Both lists empty allow all routes in the project; missing or empty referenced groups grant nothing."
           },
           "rotation_interval_days": {
             "type": [
@@ -3623,7 +3623,7 @@
             ]
           },
           "secret": {
-            "description": "Sealed credentials: webhook HMAC secret string; Slack/Teams/Discord {\"webhook_url\"} carrying the full tokenized URL; PagerDuty {\"routing_key\"}; email optional {\"username\",\"password\"}. Null clears credentials — required-secret channels must be disabled first; omitting keeps the stored secret.",
+            "description": "Sealed credentials: webhook HMAC secret string; Slack/Teams/Discord {\"webhook_url\"} carrying the full tokenized URL; PagerDuty {\"routing_key\"}; email optional {\"username\",\"password\"}. Null clears credentials \u2014 required-secret channels must be disabled first; omitting keeps the stored secret.",
             "oneOf": [
               {
                 "type": "string"
@@ -3650,7 +3650,7 @@
             "description": "Delivery transport: webhook, slack, msteams, discord, pagerduty or email. Immutable after creation; defaults to webhook."
           },
           "url": {
-            "description": "Webhook destinations: the full HTTPS URL that receives JSON posts. Slack, Microsoft Teams and Discord destinations: the channel's origin URL only — the sealed secret must carry the full tokenized webhook URL on the same origin. PagerDuty destinations: the full Events API v2 endpoint. Email destinations: smtps:// or smtp+starttls:// host:port.",
+            "description": "Webhook destinations: the full HTTPS URL that receives JSON posts. Slack, Microsoft Teams and Discord destinations: the channel's origin URL only \u2014 the sealed secret must carry the full tokenized webhook URL on the same origin. PagerDuty destinations: the full Events API v2 endpoint. Email destinations: smtps:// or smtp+starttls:// host:port.",
             "type": "string"
           }
         },
@@ -5558,7 +5558,7 @@
           },
           "url": {
             "type": "string",
-            "description": "Webhook destinations: the full HTTPS URL that receives JSON posts. Slack, Microsoft Teams and Discord destinations: the channel's origin URL only — the sealed secret must carry the full tokenized webhook URL on the same origin. PagerDuty destinations: the full Events API v2 endpoint. Email destinations: smtps:// or smtp+starttls:// host:port."
+            "description": "Webhook destinations: the full HTTPS URL that receives JSON posts. Slack, Microsoft Teams and Discord destinations: the channel's origin URL only \u2014 the sealed secret must carry the full tokenized webhook URL on the same origin. PagerDuty destinations: the full Events API v2 endpoint. Email destinations: smtps:// or smtp+starttls:// host:port."
           }
         },
         "required": [
@@ -13411,7 +13411,7 @@
         "type": "object"
       },
       "UpdateApiKeyRequest": {
-        "description": "A merge patch: every field is optional, an omitted field keeps the stored\nvalue, and an explicit `null` clears one. Writing absent fields through\nwould silently widen a key's privileges — a rename would drop the route\nallowlist, the rate limits, and the expiry.",
+        "description": "A merge patch: every field is optional, an omitted field keeps the stored\nvalue, and an explicit `null` clears one. Writing absent fields through\nwould silently widen a key's privileges \u2014 a rename would drop the route\nallowlist, the rate limits, and the expiry.",
         "properties": {
           "allow_provider_state": {
             "description": "Permits stateful provider resources under this key. Provider state\nmay retain user content.",
@@ -13522,7 +13522,7 @@
             ]
           },
           "end_user_source": {
-            "description": "Required end-user identity source: header reads X-OLP-End-User; native reads OpenAI safety_identifier (preferred) or user, or Anthropic metadata.user_id from JSON bodies. Tokens are 1–128 ASCII letters, digits, dots, underscores, colons or hyphens, starting with a letter or digit. Use header for other surfaces. Null disables identification. Only a project-scoped HMAC digest is retained.",
+            "description": "Required end-user identity source: header reads X-OLP-End-User; native reads OpenAI safety_identifier (preferred) or user, or Anthropic metadata.user_id from JSON bodies. Tokens are 1\u2013128 ASCII letters, digits, dots, underscores, colons or hyphens, starting with a letter or digit. Use header for other surfaces. Null disables identification. Only a project-scoped HMAC digest is retained.",
             "type": [
               "string",
               "null"
@@ -13597,7 +13597,7 @@
             },
             "maxItems": 64,
             "uniqueItems": true,
-            "description": "Existing group names in this key’s project. Grants the union of explicit allowed_routes and these groups. Both lists empty allow all routes in the project; missing or empty referenced groups grant nothing."
+            "description": "Existing group names in this key\u2019s project. Grants the union of explicit allowed_routes and these groups. Both lists empty allow all routes in the project; missing or empty referenced groups grant nothing."
           },
           "rotation_interval_days": {
             "type": [
@@ -13760,7 +13760,7 @@
             "type": "string"
           },
           "secret": {
-            "description": "Sealed credentials: webhook HMAC secret string; Slack/Teams/Discord {\"webhook_url\"} carrying the full tokenized URL; PagerDuty {\"routing_key\"}; email optional {\"username\",\"password\"}. Null clears credentials — required-secret channels must be disabled first; omitting keeps the stored secret.",
+            "description": "Sealed credentials: webhook HMAC secret string; Slack/Teams/Discord {\"webhook_url\"} carrying the full tokenized URL; PagerDuty {\"routing_key\"}; email optional {\"username\",\"password\"}. Null clears credentials \u2014 required-secret channels must be disabled first; omitting keeps the stored secret.",
             "oneOf": [
               {
                 "type": "string"
@@ -13788,7 +13788,7 @@
           },
           "url": {
             "type": "string",
-            "description": "Webhook destinations: the full HTTPS URL that receives JSON posts. Slack, Microsoft Teams and Discord destinations: the channel's origin URL only — the sealed secret must carry the full tokenized webhook URL on the same origin. PagerDuty destinations: the full Events API v2 endpoint. Email destinations: smtps:// or smtp+starttls:// host:port."
+            "description": "Webhook destinations: the full HTTPS URL that receives JSON posts. Slack, Microsoft Teams and Discord destinations: the channel's origin URL only \u2014 the sealed secret must carry the full tokenized webhook URL on the same origin. PagerDuty destinations: the full Events API v2 endpoint. Email destinations: smtps:// or smtp+starttls:// host:port."
           }
         },
         "type": "object",
@@ -15584,7 +15584,10 @@
           },
           "account_id": {
             "format": "uuid",
-            "type": "string"
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "api_key_id": {
             "format": "uuid",
@@ -15592,7 +15595,10 @@
           },
           "binding_id": {
             "format": "uuid",
-            "type": "string"
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "bound_evidence": {
             "type": [
@@ -15726,7 +15732,41 @@
               "string",
               "null"
             ],
-            "description": "Public model identifier requested by the client. Null for historical attempts where the identifier was not recorded. model identifies the selected exact target."
+            "description": "Public model requested before explicit alias resolution."
+          },
+          "paid_slot_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "paid_monetary_state": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "pending",
+              "released",
+              "settled",
+              "unknown",
+              null
+            ]
+          },
+          "paid_binding_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "paid_provider_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
           }
         },
         "required": [
@@ -15786,7 +15826,10 @@
         "properties": {
           "account_id": {
             "format": "uuid",
-            "type": "string"
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "api_key_id": {
             "format": "uuid",
@@ -15819,7 +15862,10 @@
             "type": "array"
           },
           "principal": {
-            "type": "string"
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "project_id": {
             "format": "uuid",
@@ -15839,6 +15885,20 @@
           "route_id": {
             "format": "uuid",
             "type": "string"
+          },
+          "paid_provider_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "paid_slot_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
           }
         },
         "required": [
@@ -16148,6 +16208,12 @@
             "items": {
               "$ref": "#/components/schemas/CodeModel"
             }
+          },
+          "paid_models": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
           }
         },
         "required": [
@@ -16177,7 +16243,10 @@
         "properties": {
           "account_id": {
             "format": "uuid",
-            "type": "string"
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "created_at": {
             "format": "date-time",
@@ -16189,11 +16258,28 @@
             "type": "string"
           },
           "principal": {
-            "type": "string"
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "target_model": {
             "type": "string",
             "description": "Durably pinned native model identifier. Existing native pins use their model identifier."
+          },
+          "paid_provider_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "paid_slot_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
           }
         },
         "required": [
@@ -16600,6 +16686,18 @@
               }
             },
             "description": "Explicit subscription model recovery pools keyed by a published native name or exact alias. Requires model_rewriting. Each ordered list starts with that name's normal exact target and contains distinct native identifiers from models. Recovery prefers the pinned exact target, then these alternatives, within initial_recovery_attempts and positive nonexecution, portability, live authorization and budget checks. Omitted pools preserve exact selection. Publications freeze the policy. Existing conversations retain their exact target, including after alias changes, while it remains published and authorized. Paid fallback is separately governed."
+          },
+          "paid_participation": {
+            "type": "boolean",
+            "default": false,
+            "description": "Explicitly permit direct metered API targets. This does not enable paid fallback."
+          },
+          "paid_targets": {
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/CodePaidTarget"
+            },
+            "description": "Exact native model to directly selected published metered provider and credential slot. A mapped model takes precedence over subscription accounts."
           }
         },
         "required": [
@@ -16724,6 +16822,18 @@
               }
             },
             "description": "Explicit subscription model recovery pools keyed by a published native name or exact alias. Requires model_rewriting. Each ordered list starts with that name's normal exact target and contains distinct native identifiers from models. Recovery prefers the pinned exact target, then these alternatives, within initial_recovery_attempts and positive nonexecution, portability, live authorization and budget checks. Omitted pools preserve exact selection. Publications freeze the policy. Existing conversations retain their exact target, including after alias changes, while it remains published and authorized. Paid fallback is separately governed."
+          },
+          "paid_targets": {
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/CodePaidTarget"
+            },
+            "description": "Exact native model to directly selected published metered provider and credential slot. A mapped model takes precedence over subscription accounts."
+          },
+          "paid_participation": {
+            "type": "boolean",
+            "default": false,
+            "description": "Explicitly permit direct metered API targets. This does not enable paid fallback."
           }
         },
         "required": [
@@ -21384,7 +21494,7 @@
           "logo": {
             "type": "string",
             "maxLength": 100000,
-            "description": "Empty or an embedded PNG/JPEG data URL up to 64 KiB and 512 × 512 pixels."
+            "description": "Empty or an embedded PNG/JPEG data URL up to 64 KiB and 512 \u00d7 512 pixels."
           },
           "etag": {
             "type": "string"
@@ -21407,7 +21517,7 @@
           "logo": {
             "type": "string",
             "maxLength": 100000,
-            "description": "Empty or an embedded PNG/JPEG data URL up to 64 KiB and 512 × 512 pixels."
+            "description": "Empty or an embedded PNG/JPEG data URL up to 64 KiB and 512 \u00d7 512 pixels."
           }
         }
       },
@@ -28566,6 +28676,10 @@
               "type": "string"
             },
             "description": "Configured ordered subscription recovery targets for this public model. This is policy metadata, not an availability or portability guarantee. Omitted for exact-model selection."
+          },
+          "paid": {
+            "type": "boolean",
+            "description": "This model directly selects a metered API target and requires monetary admission."
           }
         }
       },
@@ -28622,6 +28736,24 @@
             "description": "Existing credential slot, defaults to the default slot"
           }
         }
+      },
+      "CodePaidTarget": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "provider_id",
+          "slot_id"
+        ],
+        "properties": {
+          "provider_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "slot_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
       }
     },
     "securitySchemes": {
@@ -28638,7 +28770,7 @@
         "type": "apiKey"
       },
       "managementToken": {
-        "description": "Management automation token (olpm_…). Requirement scopes name the operation the token must carry and its creator must currently hold; `installation` also requires an all-projects token whose creator has an installation-wide access scope.",
+        "description": "Management automation token (olpm_\u2026). Requirement scopes name the operation the token must carry and its creator must currently hold; `installation` also requires an all-projects token whose creator has an installation-wide access scope.",
         "scheme": "bearer",
         "type": "http"
       },
@@ -36918,7 +37050,7 @@
                 }
               },
               "OLP-Parent-ETag": {
-                "description": "Provider ETag committed by this slot mutation. Together these headers identify this request’s atomic parent transition, including idempotent replay.",
+                "description": "Provider ETag committed by this slot mutation. Together these headers identify this request\u2019s atomic parent transition, including idempotent replay.",
                 "schema": {
                   "type": "string"
                 }
@@ -37086,7 +37218,7 @@
                 }
               },
               "OLP-Parent-ETag": {
-                "description": "Provider ETag committed by this slot mutation. Together these headers identify this request’s atomic parent transition, including idempotent replay.",
+                "description": "Provider ETag committed by this slot mutation. Together these headers identify this request\u2019s atomic parent transition, including idempotent replay.",
                 "schema": {
                   "type": "string"
                 }

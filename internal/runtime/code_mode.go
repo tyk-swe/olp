@@ -10,17 +10,17 @@ import (
 )
 
 func compileCodeMode(ctx context.Context, tx pgx.Tx, s *routing.Snapshot) error {
-	rows, err := tx.Query(ctx, `SELECT r.slug,v.document,v.connections FROM olp.code_routes r JOIN olp.code_route_revisions v ON v.id=r.latest_revision_id ORDER BY r.slug`)
+	rows, err := tx.Query(ctx, `SELECT r.slug,v.document,v.connections,v.paid_connections FROM olp.code_routes r JOIN olp.code_route_revisions v ON v.id=r.latest_revision_id ORDER BY r.slug`)
 	if err != nil {
 		return err
 	}
 	defer rows.Close()
 	for rows.Next() {
 		var slug string
-		var document, encoded []byte
+		var document, encoded, paidEncoded []byte
 		var connections map[string]routing.Configuration
 		var route codemode.Route
-		if err = rows.Scan(&slug, &document, &encoded); err != nil {
+		if err = rows.Scan(&slug, &document, &encoded, &paidEncoded); err != nil {
 			return err
 		}
 		if err = json.Unmarshal(document, &route); err != nil {
@@ -30,6 +30,16 @@ func compileCodeMode(ctx context.Context, tx pgx.Tx, s *routing.Snapshot) error 
 			s.CodeRoutes = map[string]codemode.Route{}
 		}
 		s.CodeRoutes[slug] = route
+		var paid map[string]routing.Provider
+		if err := json.Unmarshal(paidEncoded, &paid); err != nil {
+			return err
+		}
+		if s.CodePaidConnections == nil {
+			s.CodePaidConnections = map[string]routing.Provider{}
+		}
+		for id, provider := range paid {
+			s.CodePaidConnections[route.RevisionID+":"+id] = provider
+		}
 		if err = json.Unmarshal(encoded, &connections); err != nil {
 			return err
 		}

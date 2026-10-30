@@ -12,8 +12,9 @@ type Offers []Offer
 
 // Offer is the adapter and models of one or more accounts.
 type Offer struct {
-	Adapter codemode.Adapter
-	Models  []string
+	PaidProtocol codemode.Protocol
+	Adapter      codemode.Adapter
+	Models       []string
 }
 
 // adapters returns the adapters whose accounts serve model, in table order.
@@ -22,9 +23,12 @@ func (o Offers) adapters(route codemode.Route, model string) []codemode.Adapter 
 	if err != nil {
 		return nil
 	}
+	if _, paid := route.PaidTargets[resolved.Model]; paid {
+		return nil
+	}
 	var adapters []codemode.Adapter
 	for _, offer := range o {
-		if slices.Contains(offer.Models, resolved.Model) && !slices.Contains(adapters, offer.Adapter) {
+		if offer.PaidProtocol == "" && slices.Contains(offer.Models, resolved.Model) && !slices.Contains(adapters, offer.Adapter) {
 			adapters = append(adapters, offer.Adapter)
 		}
 	}
@@ -40,6 +44,9 @@ func (o Offers) through(route codemode.Route, client string, models []string) (m
 	choose = func(i int) bool {
 		if i == len(models) {
 			return o.reaches(route, client, models, chosen)
+		}
+		if _, paid := o.paidProtocol(route, models[i]); paid {
+			return choose(i + 1)
 		}
 		for _, adapter := range o.adapters(route, models[i]) {
 			if declaration, _ := codeadapter.Lookup(adapter); routeReaches(route, declaration, client, models[i]) {
@@ -87,7 +94,7 @@ func (o Offers) reaches(route codemode.Route, client string, models []string, th
 			alike = append(alike, kind)
 		}
 	}
-	return alike.joins(nil, models)
+	return alike.joins(nil, slices.DeleteFunc(slices.Clone(models), func(model string) bool { _, paid := o.paidProtocol(route, model); return paid }))
 }
 
 // joins reports whether a conversation using tree reaches every model.

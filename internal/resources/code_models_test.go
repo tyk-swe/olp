@@ -15,12 +15,36 @@ import (
 
 type codeOffersQuery struct {
 	access.Queryer
-	rows pgx.Rows
-	err  error
+	rows        pgx.Rows
+	err         error
+	revisionErr error
 }
 
 func (q codeOffersQuery) Query(context.Context, string, ...any) (pgx.Rows, error) {
 	return q.rows, q.err
+}
+
+func (q codeOffersQuery) QueryRow(context.Context, string, ...any) pgx.Row {
+	return codeOfferRevisionRow{err: q.revisionErr}
+}
+
+type codeOfferRevisionRow struct{ err error }
+
+func (r codeOfferRevisionRow) Scan(dest ...any) error {
+	if r.err != nil {
+		return r.err
+	}
+	if len(dest) != 2 {
+		return errors.New("published offer needs route and connections")
+	}
+	document, validDocument := dest[0].(*[]byte)
+	connections, validConnections := dest[1].(*[]byte)
+	if !validDocument || !validConnections {
+		return errors.New("published offer destinations have incompatible types")
+	}
+	*document = []byte(`{}`)
+	*connections = []byte(`{}`)
+	return nil
 }
 
 type codeOfferRow struct {
@@ -95,6 +119,7 @@ func TestCodeOffersPropagatesDataSourceFailure(t *testing.T) {
 		{name: "query", source: codeOffersQuery{err: failure}},
 		{name: "scan after valid account", source: codeOffersQuery{rows: &codeOfferRows{data: []codeOfferRow{valid, {err: failure}}}}},
 		{name: "stream after valid account", source: codeOffersQuery{rows: &codeOfferRows{data: []codeOfferRow{valid}, err: failure}}},
+		{name: "revision after valid account", source: codeOffersQuery{rows: &codeOfferRows{data: []codeOfferRow{valid}}, revisionErr: failure}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if _, err := CodeOffers(t.Context(), tc.source, "published-revision"); !errors.Is(err, failure) {

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"maps"
+	"slices"
 
 	"github.com/tyk-swe/olp/internal/codeadapter"
 	"github.com/tyk-swe/olp/internal/codemode"
@@ -37,6 +38,10 @@ func openCodeConfiguration(route codemode.Route, adapters []codemode.Adapter, of
 	whitelists := map[codemode.Adapter][]string{}
 	qualified := map[string]string{}
 	for _, m := range native {
+		if protocol, paid := offers.paidProtocol(route, m); paid {
+			qualified[m] = "olp-paid-" + string(protocol) + "/" + m
+			continue
+		}
 		adapters := offers.adapters(route, m)
 		if adapter, ok := through[m]; ok {
 			adapters = []codemode.Adapter{adapter}
@@ -85,6 +90,27 @@ func openCodeConfiguration(route codemode.Route, adapters []codemode.Adapter, of
 			})
 			document.Provider[provider] = settings{Options: options{BaseURL: baseURL + client.URLSuffix, APIKey: "{env:OLP_API_KEY}"}, Whitelist: models, Models: definitions}
 		}
+	}
+	for _, protocol := range []codemode.Protocol{codemode.ProtocolResponses, codemode.ProtocolMessages, codemode.ProtocolChat} {
+		models := slices.DeleteFunc(slices.Clone(native), func(model string) bool { p, ok := offers.paidProtocol(route, model); return !ok || p != protocol })
+		if len(models) == 0 {
+			continue
+		}
+		provider := "olp-paid-" + string(protocol)
+		suffix := "/v1"
+		if protocol == codemode.ProtocolMessages {
+			suffix = ""
+		}
+		sdk := map[codemode.Protocol]string{codemode.ProtocolResponses: "@ai-sdk/openai", codemode.ProtocolMessages: "@ai-sdk/anthropic", codemode.ProtocolChat: "@ai-sdk/openai-compatible"}[protocol]
+		definitions := maps.Collect(func(yield func(string, modelDefinition) bool) {
+			for _, model := range models {
+				if !yield(model, modelDefinition{ID: model, Name: model, Provider: modelProvider{NPM: sdk}}) {
+					return
+				}
+			}
+		})
+		document.EnabledProviders = append(document.EnabledProviders, provider)
+		document.Provider[provider] = settings{Options: options{BaseURL: baseURL + suffix, APIKey: "{env:OLP_API_KEY}"}, Whitelist: models, Models: definitions}
 	}
 	var b bytes.Buffer
 	encoder := json.NewEncoder(&b)

@@ -2,6 +2,9 @@ package resources
 
 import (
 	"context"
+	"encoding/json"
+	"github.com/tyk-swe/olp/internal/routing"
+	"slices"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
@@ -20,10 +23,10 @@ func (s *CodeStore) Models(ctx context.Context, route codemode.Route, key string
 	if err := codeAuthorityFor(ctx, tx, CodeAdmission{Route: route, APIKeyID: key}, &authority, codeModels); err != nil {
 		return nil, err
 	}
-	return CodeOffers(ctx, tx, route.RevisionID)
+	return CodeOffers(ctx, tx, route.RevisionID, key)
 }
 
-func CodeOffers(ctx context.Context, db access.Queryer, revision string) (codeclient.Offers, error) {
+func CodeOffers(ctx context.Context, db access.Queryer, revision string, keys ...string) (codeclient.Offers, error) {
 	rows, err := db.Query(ctx, `SELECT DISTINCT a.models,`+codeadapter.SQL("(v.connections->(a.provider_id::text))")+`
 		FROM olp.code_route_revisions v JOIN olp.code_pool_accounts pa ON pa.pool_id=(v.document->>'pool_id')::uuid
 		JOIN olp.code_accounts a ON a.id=pa.account_id
@@ -49,5 +52,46 @@ func CodeOffers(ctx context.Context, db access.Queryer, revision string) (codecl
 			offers = append(offers, codeclient.Offer{Adapter: codemode.Adapter(*adapter), Models: models})
 		}
 	}
-	return offers, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	rows.Close()
+	var document, connections []byte
+	if err := db.QueryRow(ctx, `SELECT document,paid_connections FROM olp.code_route_revisions WHERE id=$1`, revision).Scan(&document, &connections); err != nil {
+		return nil, err
+	}
+	var route codemode.Route
+	var paid map[string]routing.Provider
+	if err := json.Unmarshal(document, &route); err != nil {
+		return nil, err
+	}
+	if err := json.Unmarshal(connections, &paid); err != nil {
+		return nil, err
+	}
+	if !route.PaidParticipation {
+		return offers, nil
+	}
+	key := ""
+	if len(keys) > 0 {
+		key = keys[0]
+	}
+	for model, target := range route.PaidTargets {
+		provider, ok := paid[target.ProviderID]
+		slot := slices.IndexFunc(provider.Slots, func(slot routing.Slot) bool { return slot.ID == target.SlotID })
+		if !ok || slot < 0 || provider.Slots[slot].CredentialID == nil || provider.Slots[slot].CredentialVersion == nil {
+			continue
+		}
+		selected := provider.Slots[slot]
+		if key != "" && !selected.Allows(model, route.Slug, key) {
+			continue
+		}
+		if err := paidCodeTarget(ctx, db, PaidCodeAdmission{CodeAdmission: CodeAdmission{Route: route, APIKeyID: key, Operation: codemode.Operation{Model: model}}, Provider: provider, Slot: selected}, false); err != nil {
+			continue
+		}
+		protocol, ok := routing.CodePaidProtocol(provider, model)
+		if ok {
+			offers = append(offers, codeclient.Offer{PaidProtocol: protocol, Models: []string{model}})
+		}
+	}
+	return offers, nil
 }

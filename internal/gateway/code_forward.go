@@ -153,10 +153,6 @@ func (s *Server) forwardCode(w http.ResponseWriter, r *http.Request, release *ru
 	}
 	request.ContentLength = int64(len(payload.body))
 	request.Header = attempt.headers(r.Header)
-	if err := attempt.authorizePaid(request, payload.body); err != nil {
-		refuse(err)
-		return
-	}
 	if attempt.model != attempt.publicModel {
 		request.Header.Del("Content-Encoding")
 		request.Header.Del("Content-Length")
@@ -179,6 +175,10 @@ func (s *Server) forwardCode(w http.ResponseWriter, r *http.Request, release *ru
 	// A non-rewindable body and a fresh HTTP/1 connection prevent net/http replay.
 	request.GetBody = nil
 	request.Close = true
+	if err := attempt.authorizePaid(request, payload.body); err != nil {
+		refuse(err)
+		return
+	}
 	if err := attempt.dispatch(ctx); err != nil {
 		refuse(err)
 		return
@@ -213,7 +213,9 @@ func (s *Server) forwardCode(w http.ResponseWriter, r *http.Request, release *ru
 		w.Header().Add("Trailer", name)
 	}
 	w.WriteHeader(response.StatusCode)
-	attempt.copyResponse(ctx, w, response)
+	meteredResponse, finishUsage := attempt.meterPaidResponse(response)
+	defer finishUsage()
+	attempt.copyResponse(ctx, w, meteredResponse)
 	for name, values := range codewire.ForwardTrailers(response.Trailer, response.Header, false) {
 		w.Header()[http.TrailerPrefix+name] = values
 	}

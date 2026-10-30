@@ -73,34 +73,7 @@ func (s *CodeStore) AdmitPaid(ctx context.Context, in PaidCodeAdmission) (PaidCo
 	if !current.PaidParticipation || !exists || !selected || target != frozen || target.ProviderID != in.Provider.ID || target.SlotID != in.Slot.ID || in.Slot.CredentialID == nil || in.Slot.CredentialVersion == nil {
 		return PaidCodePermit{}, codemode.Refuse(403, "code_paid_target_denied")
 	}
-	var liveRestrictions, liveConfiguration []byte
-	err = tx.QueryRow(ctx, `SELECT s.restrictions,p.configuration FROM olp.providers p
- JOIN olp.provider_slots s ON s.provider_id=p.id JOIN olp.provider_credentials c ON c.id=s.credential_id AND c.provider_id=p.id
- LEFT JOIN olp.provider_grants g ON g.credential_id=c.id
- WHERE p.id=$1 AND p.project_id=$2 AND p.state='active' AND p.active_revision_id=$3
- AND s.id=$4 AND s.enabled AND s.credential_id=$5 AND c.revoked_at IS NULL AND c.version=$6
- AND (g.credential_id IS NULL OR (g.lapsed_at IS NULL AND (g.expires_at IS NULL OR g.expires_at>now())))
- AND EXISTS(SELECT 1 FROM olp.provider_models m WHERE m.provider_id=p.id AND m.upstream_model=$7 AND m.enabled)
- FOR SHARE OF p,s,c`, target.ProviderID, in.Route.ProjectID, in.Provider.RevisionID, target.SlotID, *in.Slot.CredentialID, *in.Slot.CredentialVersion, in.Operation.Model).Scan(&liveRestrictions, &liveConfiguration)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return PaidCodePermit{}, codemode.Refuse(403, "code_paid_target_denied")
-	}
-	if err != nil {
-		return PaidCodePermit{}, err
-	}
-	var liveSlot routing.Slot
-	var configuration routing.Configuration
-	if err := json.Unmarshal(liveRestrictions, &liveSlot); err != nil {
-		return PaidCodePermit{}, err
-	}
-	if err := json.Unmarshal(liveConfiguration, &configuration); err != nil {
-		return PaidCodePermit{}, err
-	}
-	liveSlot.Enabled = true
-	if !liveSlot.Allows(in.Operation.Model, in.Route.Slug, in.APIKeyID) || !in.Slot.Allows(in.Operation.Model, in.Route.Slug, in.APIKeyID) || !reflect.DeepEqual(configuration.Options.Limits, in.Provider.Limits) {
-		return PaidCodePermit{}, codemode.Refuse(403, "code_paid_target_denied")
-	}
-	if err := tx.QueryRow(ctx, `SELECT coalesce(g.cost_basis,'cost') FROM olp.api_keys k LEFT JOIN olp.budget_groups g ON g.id=k.budget_group_id WHERE k.id=$1`, in.APIKeyID).Scan(&authority.BudgetGroupCostBasis); err != nil {
+	if err := paidCodeTarget(ctx, tx, in, true); err != nil {
 		return PaidCodePermit{}, err
 	}
 	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,0))`, in.Route.ID+":"+in.APIKeyID); err != nil {
@@ -180,6 +153,13 @@ func paidCodeBind(ctx context.Context, tx pgx.Tx, in PaidCodeAdmission) (paidCod
 		resolved.PreviousResponse = ""
 		return paidCodeBind(ctx, tx, resolved)
 	}
+	var subscription bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM olp.code_bindings b JOIN olp.code_pins p ON p.root_id=b.root_id WHERE b.route_id=$1 AND b.api_key_id=$2 AND b.conversation=$3 AND p.model=$4)`, in.Route.ID, in.APIKeyID, identity.Conversation, in.Operation.PublicModel()).Scan(&subscription); err != nil {
+		return paidCodeBinding{}, err
+	}
+	if subscription {
+		return paidCodeBinding{}, codemode.Refuse(409, "code_paid_target_conflict")
+	}
 	binding, err := paidCodeConversation(ctx, tx, in, identity.Conversation)
 	if err == nil {
 		if binding.Model != in.Operation.Model || binding.ProviderID != in.Provider.ID || binding.SlotID != in.Slot.ID || binding.CredentialID != *in.Slot.CredentialID {
@@ -238,4 +218,48 @@ func paidCodeConversation(ctx context.Context, tx pgx.Tx, in PaidCodeAdmission, 
 		return binding, codemode.Refuse(410, "code_binding_retired")
 	}
 	return binding, err
+}
+
+func samePaidSlotLimits(live, frozen routing.Slot) bool {
+	return reflect.DeepEqual(live.RequestsPerMinute, frozen.RequestsPerMinute) && reflect.DeepEqual(live.TokensPerMinute, frozen.TokensPerMinute) && reflect.DeepEqual(live.MaxConcurrency, frozen.MaxConcurrency) && reflect.DeepEqual(live.Supply, frozen.Supply)
+}
+
+func paidCodeTarget(ctx context.Context, db access.Queryer, in PaidCodeAdmission, lock bool) error {
+	locking := ""
+	if lock {
+		locking = " FOR SHARE OF p,s,c"
+	}
+	var liveRestrictions, liveConfiguration, liveLimits []byte
+	err := db.QueryRow(ctx, `SELECT s.restrictions,p.configuration,s.limits FROM olp.providers p
+ JOIN olp.provider_slots s ON s.provider_id=p.id JOIN olp.provider_credentials c ON c.id=s.credential_id AND c.provider_id=p.id
+ LEFT JOIN olp.provider_grants g ON g.credential_id=c.id
+ WHERE p.id=$1 AND p.project_id=$2 AND p.state='active' AND p.active_revision_id=$3
+ AND s.id=$4 AND s.enabled AND s.credential_id=$5 AND c.revoked_at IS NULL AND c.version=$6
+ AND (g.credential_id IS NULL OR (g.lapsed_at IS NULL AND (g.expires_at IS NULL OR g.expires_at>now())))
+ AND EXISTS(SELECT 1 FROM olp.provider_models m WHERE m.provider_id=p.id AND m.upstream_model=$7 AND m.enabled)
+ `+locking, in.Provider.ID, in.Route.ProjectID, in.Provider.RevisionID, in.Slot.ID, *in.Slot.CredentialID, *in.Slot.CredentialVersion, in.Operation.Model).Scan(&liveRestrictions, &liveConfiguration, &liveLimits)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return codemode.Refuse(403, "code_paid_target_denied")
+	}
+	if err != nil {
+		return err
+	}
+	var liveSlot routing.Slot
+	var slotLimits routing.Slot
+	if err := json.Unmarshal(liveLimits, &slotLimits); err != nil {
+		return err
+	}
+	var configuration routing.Configuration
+	if err := json.Unmarshal(liveRestrictions, &liveSlot); err != nil {
+		return err
+	}
+	if err := json.Unmarshal(liveConfiguration, &configuration); err != nil {
+		return err
+	}
+	liveSlot.Enabled = true
+	if !liveSlot.Allows(in.Operation.Model, in.Route.Slug, in.APIKeyID) || !in.Slot.Allows(in.Operation.Model, in.Route.Slug, in.APIKeyID) || !reflect.DeepEqual(configuration.Options.Limits, in.Provider.Limits) || !samePaidSlotLimits(slotLimits, in.Slot) {
+		return codemode.Refuse(403, "code_paid_target_denied")
+	}
+
+	return nil
 }
