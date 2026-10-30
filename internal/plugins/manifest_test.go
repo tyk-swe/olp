@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/tyk-swe/olp/internal/testutil"
 	"github.com/tyk-swe/olp/sdk/plugin/abi"
 )
 
@@ -103,6 +104,17 @@ func TestManifestValidation(t *testing.T) {
 			m := validManifest()
 			tc.mutate(&m)
 			wantError(t, validateManifest(m, false), tc.code, tc.field)
+		})
+	}
+}
+
+func TestCodexImportFixturesDeclareUsableGrantEnrollment(t *testing.T) {
+	for _, behaviour := range []string{"codex-import", "codex-import-invalid"} {
+		t.Run(behaviour, func(t *testing.T) {
+			module := testutil.BuildPlugin(t, "./internal/plugins/testdata/fixture", "-X=main.behaviour="+behaviour)
+			if _, err := newTestRuntime(t, DefaultLimits, nil).Inspect(t.Context(), module); err != nil {
+				t.Fatalf("could not install the import fixture: %v", err)
+			}
 		})
 	}
 }
