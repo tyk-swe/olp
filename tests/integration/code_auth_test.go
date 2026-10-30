@@ -337,7 +337,8 @@ func TestCodeAuthImportPreservesPinnedAccountAndOwnsRefresh(t *testing.T) {
 	before := request()
 	provider := h.want(owner, "GET", providerPath, nil, nil, 200)
 	document := codexImportDocument(t, "controlled-0", "fixture-user", "fixture-refresh-0")
-	imported := h.want(owner, "POST", providerPath+"/codex-import", map[string]any{"credentials": document}, etagHeader(provider), 201)
+	slot := h.want(owner, "GET", providerPath+"/credential-slots", nil, nil, 200)["items"].([]any)[0].(map[string]any)
+	imported := h.want(owner, "POST", providerPath+"/codex-import", map[string]any{"credentials": document, "slot_id": strings.ToUpper(slot["id"].(string))}, etagHeader(provider), 201)
 	encoded, err := json.Marshal(imported)
 	if err != nil {
 		t.Fatal(err)

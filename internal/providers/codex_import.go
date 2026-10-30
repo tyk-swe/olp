@@ -5,6 +5,8 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/codexauth"
 	"github.com/tyk-swe/olp/internal/grants"
@@ -68,15 +70,14 @@ func (s *Server) importCodexCredentials(r *http.Request, p access.Principal) (ac
 }
 
 func (s *Server) codexImportSlot(r *http.Request, providerID, slotID string) (codexImportSlot, error) {
-	if slotID != "" {
-		if _, err := access.ParseUUID(slotID); err != nil {
-			return codexImportSlot{}, access.Invalid("slot_id", "Use a credential slot identifier.")
-		}
+	identifier, parseErr := uuid.Parse(slotID)
+	if slotID != "" && parseErr != nil {
+		return codexImportSlot{}, access.Invalid("slot_id", "Use a credential slot identifier.")
 	}
 	var slot codexImportSlot
 	err := s.Access.Pool.QueryRow(r.Context(), `SELECT s.id::text,s.credential_id::text,coalesce(c.principal,'')
 		FROM olp.provider_slots s LEFT JOIN olp.provider_credentials c ON c.id=s.credential_id
-		WHERE s.provider_id=$1 AND (($2='' AND s.is_default) OR s.id::text=$2)`, providerID, slotID).Scan(&slot.ID, &slot.CredentialID, &slot.Principal)
+		WHERE s.provider_id=$1 AND (($3 AND s.is_default) OR (NOT $3 AND s.id=$2))`, providerID, identifier, slotID == "").Scan(&slot.ID, &slot.CredentialID, &slot.Principal)
 	return slot, err
 }
 
