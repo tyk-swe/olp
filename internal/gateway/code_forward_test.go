@@ -3494,3 +3494,236 @@ func TestCodeChatToCodexPaidFallbackPreservesNativeChatContract(t *testing.T) {
 		t.Fatalf("paid Chat accounting %+v", envelope)
 	}
 }
+
+func TestCodePaidOnlyRoutePreservesMeteredDelivery(t *testing.T) {
+	for _, fallback := range []bool{false, true} {
+		t.Run(fmt.Sprintf("fallback=%t", fallback), func(t *testing.T) {
+			h, ledger, server := newPaidCodeForwardHarness(t)
+			route := h.rt.release.Snapshot.CodeRoutes["coding"]
+			route.InitialRecoveryAttempts = 1
+			if fallback {
+				route.PaidFallbackTargets = route.PaidTargets
+				route.PaidTargets = nil
+				ledger.subscriptionUnavailable = true
+			} else {
+				route.Models = append(route.Models, modelB)
+				route.PaidFallbackTargets = map[string]codemode.PaidTarget{modelB: route.PaidTargets[modelA]}
+			}
+			h.rt.release.Snapshot.CodeRoutes[route.Slug] = route
+			h.rt.release.Snapshot.CodeConnections = nil
+			if err := h.rt.release.Snapshot.Compile(); err != nil {
+				t.Fatal(err)
+			}
+			const reply = `{"id":"paid-only","status":"completed","output":[],"usage":{"input_tokens":2,"output_tokens":1,"total_tokens":3}}`
+			h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
+				if r.Header.Get("Authorization") != "Bearer "+secretA {
+					t.Error("paid-only route lost its selected credential")
+				}
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = io.WriteString(w, reply)
+			})
+			response := codeDo(t, server, []byte(`{"model":"model-a","input":"hello","max_output_tokens":8}`), nil)
+			body, err := io.ReadAll(response.Body)
+			if err != nil || response.StatusCode != http.StatusOK || string(body) != reply {
+				t.Fatalf("paid-only delivery %d %s, %v", response.StatusCode, body, err)
+			}
+			if measured := ledger.wait(t); measured.Total == nil || *measured.Total != 3 {
+				t.Fatalf("paid-only usage lost %+v", measured)
+			}
+			fact := h.sink.last(t).Attempts[0]
+			if !fact.UsageComplete || fact.BillingUncertain || fact.Usage == nil || fact.Usage.InputTokens != 2 || fact.Usage.OutputTokens != 1 {
+				t.Fatalf("paid-only accounting lost %+v", fact)
+			}
+		})
+	}
+}
+
+func TestCodeTranslatedRedirectCannotBecomeCompletion(t *testing.T) {
+	for _, antigravity := range []bool{false, true} {
+		t.Run(fmt.Sprintf("antigravity=%t", antigravity), func(t *testing.T) {
+			h, ledger, server := func() (*harness, *codeTestLedger, *httptest.Server) {
+				if antigravity {
+					return newCodeAntigravityHarness(t, true)
+				}
+				h, ledger, server := newCodeForwardHarness(t)
+				route := h.rt.release.Snapshot.CodeRoutes["coding"]
+				route.ChatToCodex = true
+				h.rt.release.Snapshot.CodeRoutes[route.Slug] = route
+				if err := h.rt.release.Snapshot.Compile(); err != nil {
+					t.Fatal(err)
+				}
+				return h, ledger, server
+			}()
+			model, reply := func() (string, string) {
+				if antigravity {
+					return "gemini-fixture", `{"response":{"candidates":[{"content":{"role":"model","parts":[{"text":"unaccepted output"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":2,"candidatesTokenCount":1,"totalTokenCount":3}}}`
+				}
+				return "native-model", `{"id":"redirect","status":"completed","output":[],"usage":{"input_tokens":2,"output_tokens":1,"total_tokens":3}}`
+			}()
+			h.mock.set("a", func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusMultipleChoices)
+				_, _ = io.WriteString(w, reply)
+			})
+			request, err := http.NewRequestWithContext(t.Context(), http.MethodPost, server.URL+"/code/coding/v1/chat/completions", strings.NewReader(fmt.Sprintf(`{"model":%q,"messages":[{"role":"user","content":"hello"}]}`, model)))
+			if err != nil {
+				t.Fatal(err)
+			}
+			request.Header.Set("Authorization", "Bearer "+fullKey)
+			response, err := server.Client().Do(request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer response.Body.Close()
+			body, err := io.ReadAll(response.Body)
+			if err != nil || response.StatusCode != http.StatusMultipleChoices || !bytes.Contains(body, []byte("code_upstream_rejected")) {
+				t.Fatalf("redirect became a completion %d %s, %v", response.StatusCode, body, err)
+			}
+			if measured := ledger.wait(t); measured.Total != nil || measured.Input != nil || measured.Output != nil {
+				t.Fatalf("redirect became billable usage %+v", measured)
+			}
+			ledger.mu.Lock()
+			defer ledger.mu.Unlock()
+			if ledger.health.Status == "healthy" || slices.ContainsFunc(ledger.outcomes, func(outcome codemode.Outcome) bool { return outcome.Kind == "completed" }) {
+				t.Fatalf("redirect became successful health %+v outcomes %+v", ledger.health, ledger.outcomes)
+			}
+		})
+	}
+}
+
+func TestCodeAntigravityTruncationRetainsUsageWithoutSuccess(t *testing.T) {
+	for _, stream := range []bool{false, true} {
+		for _, truncated := range []bool{false, true} {
+			t.Run(fmt.Sprintf("stream=%t/truncated=%t", stream, truncated), func(t *testing.T) {
+				h, ledger, server := newCodeAntigravityHarness(t, true)
+				reason, finish, outcome := func() (string, string, string) {
+					if truncated {
+						return "MAX_TOKENS", "length", "incomplete"
+					}
+					return "STOP", "stop", "completed"
+				}()
+				h.mock.set("a", func(w http.ResponseWriter, _ *http.Request) {
+					body := fmt.Sprintf(`{"response":{"candidates":[{"index":0,"content":{"role":"model","parts":[{"text":"partial answer"}]},"finishReason":%q}],"usageMetadata":{"promptTokenCount":2,"candidatesTokenCount":1,"totalTokenCount":3}}}`, reason)
+					if stream {
+						w.Header().Set("Content-Type", "text/event-stream")
+						_, _ = fmt.Fprint(w, "data: "+body+"\n\n")
+						return
+					}
+					w.Header().Set("Content-Type", "application/json")
+					_, _ = io.WriteString(w, body)
+				})
+				request, err := http.NewRequestWithContext(t.Context(), http.MethodPost, server.URL+"/code/coding/v1/chat/completions", strings.NewReader(fmt.Sprintf(`{"model":"gemini-fixture","messages":[{"role":"user","content":"hello"}],"stream":%t}`, stream)))
+				if err != nil {
+					t.Fatal(err)
+				}
+				request.Header.Set("Authorization", "Bearer "+fullKey)
+				response, err := server.Client().Do(request)
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer response.Body.Close()
+				body, err := io.ReadAll(response.Body)
+				if err != nil || response.StatusCode != http.StatusOK || !bytes.Contains(body, []byte(`"finish_reason":"`+finish+`"`)) || !bytes.Contains(body, []byte("partial answer")) {
+					t.Fatalf("truncation changed delivery %d %s, %v", response.StatusCode, body, err)
+				}
+				if measured := ledger.wait(t); measured.Total == nil || *measured.Total != 3 || measured.Input == nil || *measured.Input != 2 || measured.Output == nil || *measured.Output != 1 {
+					t.Fatalf("truncated result lost measured usage %+v", measured)
+				}
+				ledger.mu.Lock()
+				defer ledger.mu.Unlock()
+				if !slices.ContainsFunc(ledger.outcomes, func(observed codemode.Outcome) bool { return observed.Origin == "upstream" && observed.Kind == outcome }) || (ledger.health.Status == "healthy") == truncated {
+					t.Fatalf("completion evidence disagrees with truncation, health %+v outcomes %+v", ledger.health, ledger.outcomes)
+				}
+			})
+		}
+	}
+}
+
+func TestCodeUnaryResponseLimitPreservesDeliveryAndUsage(t *testing.T) {
+	for _, scenario := range []string{"paid", "paid rejection", "alias", "translation", "antigravity"} {
+		t.Run(scenario, func(t *testing.T) {
+			h, ledger, server := func() (*harness, *codeTestLedger, *httptest.Server) {
+				switch scenario {
+				case "paid", "paid rejection":
+					return newPaidCodeForwardHarness(t)
+				case "antigravity":
+					return newCodeAntigravityHarness(t, true)
+				default:
+					return newCodeForwardHarness(t)
+				}
+			}()
+			path, requestBody, upstreamBody, expected := func() (string, string, string, string) {
+				switch scenario {
+				case "paid":
+					return "/responses", `{"model":"model-a","input":"hello","max_output_tokens":8}`, `{"id":"bounded","status":"completed","output":[],"usage":{"input_tokens":2,"output_tokens":1,"total_tokens":3}}`, "bounded"
+				case "paid rejection":
+					return "/responses", `{"model":"model-a","input":"hello","max_output_tokens":8}`, `{"error":{"message":"permission denied secret-a"}}`, "permission denied"
+				case "antigravity":
+					return "/v1/chat/completions", `{"model":"gemini-fixture","messages":[{"role":"user","content":"hello"}]}`, `{"response":{"responseId":"bounded","candidates":[{"content":{"role":"model","parts":[{"text":"bounded answer"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":2,"candidatesTokenCount":1,"totalTokenCount":3}}}`, "bounded answer"
+				case "translation":
+					route := h.rt.release.Snapshot.CodeRoutes["coding"]
+					route.ChatToCodex = true
+					h.rt.release.Snapshot.CodeRoutes[route.Slug] = route
+					return "/v1/chat/completions", `{"model":"native-model","messages":[{"role":"user","content":"hello"}]}`, `{"id":"bounded","status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"bounded answer"}]}],"usage":{"input_tokens":2,"output_tokens":1,"total_tokens":3}}`, "bounded answer"
+				default:
+					route := h.rt.release.Snapshot.CodeRoutes["coding"]
+					route.ModelRewriting = true
+					route.Aliases = map[string]string{"public-model": "native-model"}
+					h.rt.release.Snapshot.CodeRoutes[route.Slug] = route
+					return "/responses", `{"model":"public-model","input":"hello"}`, `{"id":"bounded","model":"native-model","status":"completed","output":[],"usage":{"input_tokens":2,"output_tokens":1,"total_tokens":3}}`, `"model":"public-model"`
+				}
+			}()
+			if err := h.rt.release.Snapshot.Compile(); err != nil {
+				t.Fatal(err)
+			}
+			padded := upstreamBody[:len(upstreamBody)-1] + strings.Repeat(" ", codewire.MaxBody-len(upstreamBody)) + "}"
+			h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
+				_, _ = io.Copy(io.Discard, r.Body)
+				w.Header().Set("Content-Type", "application/json")
+				w.Header().Set("Content-Length", fmt.Sprint(len(padded)))
+				if scenario == "paid rejection" {
+					w.WriteHeader(http.StatusBadRequest)
+				}
+				if _, err := io.WriteString(w, padded); err != nil {
+					t.Errorf("fixture write failed %v", err)
+				}
+			})
+			request, err := http.NewRequestWithContext(t.Context(), http.MethodPost, server.URL+"/code/coding"+path, strings.NewReader(requestBody))
+			if err != nil {
+				t.Fatal(err)
+			}
+			request.Header.Set("Authorization", "Bearer "+fullKey)
+			response, err := server.Client().Do(request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer response.Body.Close()
+			body, err := io.ReadAll(response.Body)
+			status := func() int {
+				if scenario == "paid rejection" {
+					return http.StatusBadRequest
+				}
+				return http.StatusOK
+			}()
+			if err != nil || response.StatusCode != status || !json.Valid(body) || !bytes.Contains(body, []byte(expected)) || scenario == "paid rejection" && bytes.Contains(body, []byte(secretA)) {
+				t.Fatalf("bounded response lost delivery, status %d bytes %d prefix %s, %v", response.StatusCode, len(body), body[:min(200, len(body))], err)
+			}
+			measured := ledger.wait(t)
+			if scenario == "paid rejection" {
+				if measured.Total != nil || measured.Input != nil || measured.Output != nil {
+					t.Fatalf("rejection fabricated usage %+v", measured)
+				}
+				return
+			}
+			if measured.Total == nil || *measured.Total != 3 || measured.Input == nil || *measured.Input != 2 || measured.Output == nil || *measured.Output != 1 {
+				t.Fatalf("bounded response lost usage %+v", measured)
+			}
+			if scenario == "paid" {
+				fact := h.sink.last(t).Attempts[0]
+				if !fact.UsageComplete || fact.BillingUncertain || fact.Usage == nil || fact.Usage.InputTokens != 2 || fact.Usage.OutputTokens != 1 {
+					t.Fatalf("bounded response lost paid accounting %+v", fact)
+				}
+			}
+		})
+	}
+}
