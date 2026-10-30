@@ -16,11 +16,13 @@ export type CodeAttempt = Schemas['CodeAttempt'];
 export type CodeClientConfiguration = Schemas['CodeClientConfiguration'];
 
 export type CodeClient = CodeClientConfiguration['client'];
+export type CodeClientPlatform = CodeClientConfiguration['platform'];
 
 /** The client and models a client configuration is generated for; omitted
  * fields take the route's defaults. */
 export type CodeClientSelection = {
   client?: CodeClient;
+  platform?: CodeClientPlatform;
   model?: string;
   plan_model?: string;
   small_model?: string;

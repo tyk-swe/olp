@@ -16034,18 +16034,19 @@
             "type": "string"
           },
           "file": {
-            "description": "Where to save the configuration, or null for a shell file to source.",
+            "description": "Where to merge the configuration or save the shell setup. Follow instructions to preserve existing settings.",
             "type": [
               "string",
               "null"
             ]
           },
           "format": {
-            "description": "The configuration's format: Codex TOML, a POSIX shell file to source, or OpenCode JSON.",
+            "description": "Codex TOML, a POSIX shell or PowerShell setup to source, or OpenCode JSON.",
             "enum": [
               "toml",
               "shell",
-              "json"
+              "json",
+              "powershell"
             ],
             "type": "string"
           },
@@ -16110,6 +16111,13 @@
               "$ref": "#/components/schemas/CodeConfigurationFile"
             }
           },
+          "platform": {
+            "$ref": "#/components/schemas/CodeClientPlatform"
+          },
+          "instructions": {
+            "type": "string",
+            "description": "Platform-specific setup and merge instructions. Preserve unrelated client settings and retain environment references for credentials."
+          },
           "models": {
             "type": "array",
             "description": "The same live route model and protocol catalog returned by the route models endpoint.",
@@ -16133,6 +16141,8 @@
           "file",
           "configuration",
           "qualification_gaps",
+          "platform",
+          "instructions",
           "models"
         ],
         "type": "object"
@@ -28360,39 +28370,14 @@
           }
         }
       },
-      "CodeModelCapability": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": [
-          "protocol",
-          "path",
-          "transports"
+      "CodeClientPlatform": {
+        "type": "string",
+        "enum": [
+          "linux",
+          "macos",
+          "windows"
         ],
-        "properties": {
-          "protocol": {
-            "type": "string",
-            "enum": [
-              "responses",
-              "messages",
-              "chat"
-            ]
-          },
-          "path": {
-            "type": "string"
-          },
-          "transports": {
-            "type": "array",
-            "items": {
-              "type": "string",
-              "enum": [
-                "http",
-                "websocket"
-              ]
-            },
-            "minItems": 1,
-            "uniqueItems": true
-          }
-        }
+        "description": "Developer platform for paths and shell syntax. Linux and macOS use POSIX shells, Windows uses PowerShell."
       },
       "CodeModel": {
         "type": "object",
@@ -28431,6 +28416,40 @@
                 "opencode"
               ]
             },
+            "uniqueItems": true
+          }
+        }
+      },
+      "CodeModelCapability": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "protocol",
+          "path",
+          "transports"
+        ],
+        "properties": {
+          "protocol": {
+            "type": "string",
+            "enum": [
+              "responses",
+              "messages",
+              "chat"
+            ]
+          },
+          "path": {
+            "type": "string"
+          },
+          "transports": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "http",
+                "websocket"
+              ]
+            },
+            "minItems": 1,
             "uniqueItems": true
           }
         }
@@ -45956,6 +45975,15 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "in": "query",
+            "name": "platform",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/CodeClientPlatform"
+            },
+            "description": "Developer platform, defaulting to linux for backward-compatible POSIX shell output."
           }
         ],
         "responses": {

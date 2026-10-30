@@ -38,10 +38,7 @@ type codeAttempt struct {
 	prewarm       bool
 }
 
-// prepareCode admits a request on a client path to an account whose adapter
-// serves the path for the request's model, and authorizes it with that
-// adapter's credential.
-func (s *Server) prepareCode(r *http.Request, release *runtime.Release, route codemode.Route, observation codemode.Request, path string, protocol codemode.Protocol, transport codeadapter.Transport) (*codeAttempt, error) {
+func (s *Server) prepareCode(r *http.Request, release *runtime.Release, route codemode.Route, observation codemode.Request, ingress codeIngress, transport codeadapter.Transport) (*codeAttempt, error) {
 	authority, failure := s.authenticate(r, "inference")
 	if failure != nil {
 		return nil, codemode.Refuse(failure.Status, "code_authentication_refused")
@@ -49,7 +46,7 @@ func (s *Server) prepareCode(r *http.Request, release *runtime.Release, route co
 	if !authority.Allows("inference", route.Slug, &route.ProjectID, s.now()) {
 		return nil, codemode.Refuse(403, "code_permission_denied")
 	}
-	providers := release.Snapshot.CodeModelProviders(route, path, protocol, observation.Operation.Model, transport)
+	providers := release.Snapshot.CodeModelProviders(route, ingress.path, ingress.protocol, observation.Operation.Model, transport)
 	if len(providers) == 0 {
 		return nil, codemode.Refuse(400, "code_operation_unsupported")
 	}
@@ -105,27 +102,23 @@ func (s *Server) prepareCode(r *http.Request, release *runtime.Release, route co
 	if permit.Pin.AccountID != permit.Account.ID || permit.Pin.Principal != permit.Account.Principal || permit.Authority.ID != authority.ID {
 		return nil, codemode.Refuse(503, "code_binding_invalid")
 	}
-	configuration, exists := release.Snapshot.CodeConnection(route, permit.Account.ProviderID)
-	if !exists {
-		return nil, codemode.Refuse(503, "code_connection_unpublished")
+	target, err := resolveCodeTarget(release.Snapshot, route, permit.Account.ProviderID, ingress, transport)
+	if err != nil {
+		return nil, err
 	}
-	// The account's frozen connection names the adapter that serves it.
-	vendor, known := codeadapter.ForConnection(configuration.Kind, configuration.AuthMode, configuration.ProfileID)
-	endpoint, served := vendor.Endpoint(path)
-	if !known || !served || endpoint.Protocol != protocol || !endpoint.Supports(transport) || !vendor.ServesModel(protocol, observation.Operation.Model) {
+	if !target.adapter.ServesModel(target.endpoint.Protocol, observation.Operation.Model) {
 		return nil, codemode.Refuse(503, "code_configuration_unsupported")
 	}
-	dispatch := codemode.Dispatch{Adapter: vendor.Adapter, Protocol: protocol, ClientPath: path}
-	a.config, a.endpoint, a.observer = configuration, endpoint, codeObserver(endpoint)
-	a.providerLease, failure = s.Admission.reserveCodeProvider(r.Context(), permit.Account.ProviderID, configuration, observation.Estimate, codeGenerationTimeout+time.Minute)
+	a.config, a.endpoint, a.observer = target.config, target.endpoint, codeObserver(target.endpoint)
+	a.providerLease, failure = s.Admission.reserveCodeProvider(r.Context(), permit.Account.ProviderID, target.config, observation.Estimate, codeGenerationTimeout+time.Minute)
 	if failure != nil {
 		return nil, codemode.Refuse(failure.Status, "code_provider_rate_limited")
 	}
-	a.auth, err = s.CodeAuthorizer.AuthorizeCode(r.Context(), configuration, permit.Account, dispatch)
+	a.auth, err = s.CodeAuthorizer.AuthorizeCode(r.Context(), target.config, permit.Account, target.dispatchDescriptor())
 	if err != nil {
 		return nil, codemode.Refuse(503, "code_account_unavailable")
 	}
-	if err := vendor.ValidateAuthorization(endpoint, a.auth, permit.Pin.Principal); err != nil {
+	if err := target.adapter.ValidateAuthorization(target.endpoint, a.auth, permit.Pin.Principal); err != nil {
 		return nil, err
 	}
 	ok = true

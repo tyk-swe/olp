@@ -119,6 +119,8 @@ type ClientConfiguration struct {
 	NativeModels      []string            `json:"native_models"`
 	Adapters          []Adapter           `json:"adapters"`
 	Client            string              `json:"client"`
+	Platform          string              `json:"platform"`
+	Instructions      string              `json:"instructions"`
 	SupportedClients  []string            `json:"supported_clients"`
 	ClientVersion     string              `json:"client_version"`
 	Model             string              `json:"model"`

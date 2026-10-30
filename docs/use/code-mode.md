@@ -16,6 +16,10 @@ controlled-fixture qualification. This is not yet a release claim for a real
 ChatGPT, OpenCode Go or coding-plan subscription. See the
 [support matrix and release gates](../develop/qualification.md) before rollout.
 
+The [coding-client baseline and roadmap](../develop/plans/code-mode-parity.md)
+records planned compatibility and recovery contracts separately from the
+native behavior documented here.
+
 ## Adapters and clients
 
 Each code account belongs to a subscription family, its **adapter**, which OLP
@@ -280,6 +284,42 @@ background requests, default to `model`; Codex takes neither. A client no
 subscription supports, or a model the client cannot reach, is a 422. No
 configuration ever contains an OLP key: each reads it from `OLP_API_KEY`.
 
+Choose Linux, macOS or Windows in the console before copying the setup. API
+callers pass `platform=linux`, `platform=macos` or `platform=windows` to
+`GET /api/v1/code/routes/{id}/client-config`. An omitted platform defaults to
+Linux for existing callers. The response includes `platform`, `instructions`
+and the destination in `file`. Linux and macOS use a POSIX shell. Windows uses
+PowerShell, including `$env:OLP_API_KEY`. Choose Linux when running inside WSL.
+
+Treat the generated configuration as a fragment. For Codex, update the root
+`model` and `model_provider` settings and replace only `model_providers.olp` in
+the user configuration. The path is `$CODEX_HOME/config.toml`, defaulting to
+`$HOME/.codex/config.toml`. In PowerShell, these paths are
+`$env:CODEX_HOME\config.toml` and `$HOME\.codex\config.toml`. Do not put the
+provider in a project-local `.codex/config.toml`, where Codex ignores provider
+and authentication settings. Merge MCP tables by name without duplicating TOML
+keys or tables, preserving unrelated settings and servers.
+
+For OpenCode, merge the generated fields into the project's `opencode.json`,
+or its existing `opencode.jsonc`. Update the selected models and provider list,
+including `agent.plan.model` when planning uses the main model again. Preserve
+other plan-agent settings while merging provider, agent and MCP entries by name,
+and retain other tools and settings. Keep environment references intact. For Claude Code, save the shell
+setup as `olp-claude.sh` on Linux or macOS, or `olp-claude.ps1` on Windows.
+Source it with `. ./olp-claude.sh` or `. .\olp-claude.ps1`, then launch `claude`
+in the same shell. The setup changes the process environment without writing
+`settings.json`. Merge companion MCP entries into the project `.mcp.json` and
+approve the project servers in Claude Code.
+
+These paths and merge rules follow the official
+[Codex configuration reference](https://developers.openai.com/codex/config-reference/),
+[Claude Code settings](https://code.claude.com/docs/en/settings),
+[Claude Code environment variables](https://code.claude.com/docs/en/env-vars) and
+[OpenCode configuration](https://opencode.ai/docs/config/) documentation, checked
+on 2026-10-30. The generated platform setup has renderer tests and a Linux
+shell evaluation check. This does not establish native client startup on
+Windows or macOS, or live subscription qualification on any platform.
+
 ### Codex
 
 The controlled suite resolves the unmodified official Codex CLI from npm **latest** on each run. This
@@ -321,8 +361,9 @@ overrides are not qualified for disjoint-model pools.
 
 ### Claude Code
 
-The controlled suite resolves Claude Code from npm **latest** on each run. OLP generates a POSIX shell
-file to source before starting `claude`:
+The controlled suite resolves Claude Code from npm **latest** on each run. OLP
+generates a POSIX shell file for Linux and macOS, or a PowerShell file for
+Windows, to source before starting `claude`. The POSIX setup includes:
 
 ```sh
 unset ANTHROPIC_API_KEY ANTHROPIC_SMALL_FAST_MODEL CLAUDE_CODE_USE_BEDROCK CLAUDE_CODE_USE_VERTEX CLAUDE_CODE_USE_FOUNDRY
