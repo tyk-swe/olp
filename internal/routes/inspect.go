@@ -218,10 +218,10 @@ func (b *inspectionBudget) reserve(size int) error {
 	return nil
 }
 
-func inspectionAccept(route routing.Route, parsed *wire.Request, context interaction.Context, demand *simulatedDemand, budget *inspectionBudget) (func(routing.Provider, routing.Target) error, func(routing.Provider, routing.Target) (routing.Names, *routing.TokenDemand), map[string]*interactionInspection) {
+func inspectionAccept(route routing.Route, parsed *wire.Request, context interaction.Context, demand *simulatedDemand, budget *inspectionBudget, workflow bool) (func(routing.Provider, routing.Target) error, func(routing.Provider, routing.Target) (routing.Names, *routing.TokenDemand), map[string]*interactionInspection, map[string]*wire.Request) {
 	inspections := map[string]*interactionInspection{}
 	if parsed == nil {
-		return nil, nil, inspections
+		return nil, nil, inspections, nil
 	}
 	fidelity := route.Fidelity.Mode
 	effectiveRequests := map[string]*wire.Request{}
@@ -265,7 +265,7 @@ func inspectionAccept(route routing.Route, parsed *wire.Request, context interac
 			if err != nil {
 				return err
 			}
-			if parsed.Family == wire.Completions {
+			if parsed.Family == wire.Completions || workflow {
 				request, err := wire.NewRequest(invocation.Wire, parsed.Route, parsed.Stream, invocation.Prepared.Document())
 				if err != nil {
 					return err
@@ -344,7 +344,7 @@ func inspectionAccept(route routing.Route, parsed *wire.Request, context interac
 		effectiveRequests[target.ID] = effectiveRequest
 		return nil
 	}
-	return accept, effective, inspections
+	return accept, effective, inspections, effectiveRequests
 }
 
 func inspectedDecisions(decisions []routing.Decision, route routing.Route, inspected bool, details map[string]*interactionInspection, estimates map[string]estimate.Estimate, capability *routing.WorkflowCapability) []inspectedDecision {

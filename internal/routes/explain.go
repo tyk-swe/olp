@@ -15,6 +15,7 @@ import (
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/mcp"
 	"github.com/tyk-swe/olp/internal/media"
+	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/operationregistry"
 	"github.com/tyk-swe/olp/internal/operations/tokenization/estimate"
 	"github.com/tyk-swe/olp/internal/protocols"
@@ -142,30 +143,21 @@ func (s *Server) leg(m *simulation, slug, via string) (simulatedLeg, routing.Pla
 		return simulatedLeg{}, routing.Plan{}, false, err
 	}
 	named := m.snapshot.Routes[cmp.Or(m.named, slug)]
-	workflowReason := s.workflowInspectionReason(m, named, key, parsed)
+	workflowReason := s.workflowInspectionReason(m, named, route, key, parsed)
 	workflowCapability := s.workflowInspectionCapability(m, named, route, key, parsed)
 	if input.Operation == "generation" {
 		if err = inspectionClientContract(input.ClientContract, &semantic, s.Access.Keys != nil); err != nil {
 			return simulatedLeg{}, routing.Plan{}, false, err
 		}
 	}
-	counted := newSimulatedDemand(parsed, input, m.demand)
-	accept, effective, inspections := inspectionAccept(route, parsed, semantic, counted, &m.inspectionBudget)
-	if input.Operation == "generation" && named.ToolExecution == "gateway" {
-		prior := accept
-		accept = func(provider routing.Provider, target routing.Target) error {
-			if !provider.SupportsToolCalls(target.ProviderModel, input.Surface, input.Mode) {
-				return &inspectionDiagnostic{"tool_execution_unsupported", "/tools", "certified_tool_calls", "The target is not certified for gateway tool execution."}
-			}
-			if prior == nil {
-				return workflowModelInspectionCost(m, provider, target, parsed, workflowCapability)
-			}
-			if err := prior(provider, target); err != nil {
-				return err
-			}
-			return workflowModelInspectionCost(m, provider, target, parsed, workflowCapability)
-		}
+	workflow := input.Operation == "generation" && named.ToolExecution == "gateway"
+	inspectionRequest, err := workflowInspectionRequest(parsed, workflow)
+	if err != nil {
+		return simulatedLeg{}, routing.Plan{}, false, access.Invalid("request", "The workflow controls could not be processed.")
 	}
+	counted := newSimulatedDemand(parsed, input, m.demand)
+	inspected, effective, inspections, effectiveRequests := inspectionAccept(route, inspectionRequest, semantic, counted, &m.inspectionBudget, workflow)
+	accept := workflowInspectionAccept(workflow, inspected, effectiveRequests, m, workflowCapability)
 	if unary != nil {
 		accept, effective, inspections = inspectionUnaryAccept(route, cmp.Or(m.named, slug), *unary, semantic, input.ClientContract, m.demand, &m.inspectionBudget)
 	}
@@ -302,11 +294,46 @@ func (s *Server) leg(m *simulation, slug, via string) (simulatedLeg, routing.Pla
 	return leg, plan, key.reason == "" && workflowReason == "", nil
 }
 
-func (s *Server) workflowInspectionReason(m *simulation, route routing.Route, key inspectionKeyContext, request *wire.Request) string {
+func workflowInspectionRequest(request *wire.Request, workflow bool) (*wire.Request, error) {
+	if !workflow || request == nil {
+		return request, nil
+	}
+	toolsets := oif.Change{Pointer: oif.Pointer("", "olp_toolsets"), Remove: true, Reason: "gateway toolset selection"}
+	limits := oif.Change{Pointer: oif.Pointer("", "olp_run_limits"), Remove: true, Reason: "gateway workflow bounds"}
+	switch {
+	case len(request.Field("olp_toolsets")) > 0 && len(request.Field("olp_run_limits")) > 0:
+		return request.WithResourceBindings(toolsets, limits)
+	case len(request.Field("olp_toolsets")) > 0:
+		return request.WithResourceBindings(toolsets)
+	case len(request.Field("olp_run_limits")) > 0:
+		return request.WithResourceBindings(limits)
+	default:
+		return request, nil
+	}
+}
+
+func workflowInspectionAccept(workflow bool, prior func(routing.Provider, routing.Target) error, requests map[string]*wire.Request, m *simulation, capability *routing.WorkflowCapability) func(routing.Provider, routing.Target) error {
+	if !workflow {
+		return prior
+	}
+	return func(provider routing.Provider, target routing.Target) error {
+		if !provider.SupportsToolCalls(target.ProviderModel, m.input.Surface, m.input.Mode) {
+			return &inspectionDiagnostic{"tool_execution_unsupported", "/tools", "certified_tool_calls", "The target is not certified for gateway tool execution."}
+		}
+		if prior != nil {
+			if err := prior(provider, target); err != nil {
+				return err
+			}
+		}
+		return workflowModelInspectionCost(m, provider, target, requests[target.ID], capability)
+	}
+}
+
+func (s *Server) workflowInspectionReason(m *simulation, route, serving routing.Route, key inspectionKeyContext, request *wire.Request) string {
 	if m.input.Operation != "generation" || route.ToolExecution != "gateway" || key.reason != "" {
 		return ""
 	}
-	if route.Fidelity.Strict() {
+	if route.Fidelity.Strict() || serving.Fidelity.Strict() {
 		return "tool_execution_requires_transformed"
 	}
 	if key.id == "" || s.WorkflowTools == nil || s.WorkflowTools() == nil || s.WorkflowRelease == nil || s.WorkflowAvailable == nil || !s.WorkflowAvailable() {
@@ -363,7 +390,7 @@ func workflowModelInspectionCost(m *simulation, provider routing.Provider, targe
 	if err := json.Unmarshal(provider.Models[target.ProviderModel], &metadata); err != nil || metadata.ContextLength == nil || *metadata.ContextLength < 1 {
 		return workflowUnboundedInspection()
 	}
-	output, _ := estimate.OutputBounds(request, provider.ParameterDefaults)
+	output, _ := estimate.OutputBounds(request, nil)
 	if output == nil || *output < 1 {
 		return workflowUnboundedInspection()
 	}
@@ -457,7 +484,7 @@ func (w *walk) adopt(slug, via string) string {
 		w.delegators = nil
 	}
 	w.route, w.visited = &route, append(w.visited, slug)
-	leg, plan, _, err := w.s.leg(w.m, slug, via)
+	leg, plan, permitted, err := w.s.leg(w.m, slug, via)
 	if err != nil {
 		w.conditions = nil
 		var refusal *routing.SelectionError
@@ -467,6 +494,10 @@ func (w *walk) adopt(slug, via string) string {
 		return routing.NoEligibleTargets
 	}
 	w.out.Legs = append(w.out.Legs, leg)
+	if !permitted {
+		w.conditions = nil
+		return routing.NoEligibleTargets
+	}
 	return w.settle(plan)
 }
 

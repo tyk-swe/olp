@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/tyk-swe/olp/internal/limits"
-	"github.com/tyk-swe/olp/internal/operations/tokenization/estimate"
 	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/usage"
 )
@@ -32,9 +31,11 @@ func (x *call) workflowModelCost(attempt routing.Attempt) *Error {
 	if x.unary != nil {
 		output = metadata.MaxOutputTokens
 	} else {
-		output, _ = estimate.OutputBounds(x.generation.parsed, provider.ParameterDefaults)
-		if record := x.targetPreparation(&provider, attempt.TargetID, attempt.UpstreamModel); record.hasOutput {
+		record := x.targetPreparation(&provider, attempt.TargetID, attempt.UpstreamModel)
+		if record.hasOutput {
 			output = record.output.output
+		} else if record.provider.demand != nil {
+			output = record.provider.demand.MaxOutputTokens
 		}
 	}
 	if output == nil || *output < 1 {

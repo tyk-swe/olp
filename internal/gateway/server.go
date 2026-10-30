@@ -745,7 +745,7 @@ func (s *Server) inferenceOperation(family wire.Format, dialect string) http.Han
 			writeError(w, e)
 			return
 		}
-		if x.route.ToolExecution == "gateway" {
+		if x.named().ToolExecution == "gateway" {
 			if e := s.prepareWorkflow(r.Context(), x, token); e != nil {
 				x.failure, status = e, e.Status
 				writeError(w, e)
@@ -990,6 +990,9 @@ func (s *Server) prepare(ctx context.Context, x *call, authorize func(*routing.R
 // content policy to it. A selector that delegates moves the request on to its
 // route, which is planned in turn.
 func (s *Server) planCanonical(ctx context.Context, x *call) *Error {
+	if x.named().ToolExecution == "gateway" && x.route.Fidelity.Strict() {
+		return invalidRequest("tool_execution_strict_route", "Gateway tool execution requires a transformed route.", nil)
+	}
 	if e := s.bindGuardrails(ctx, x); e != nil {
 		return e
 	}

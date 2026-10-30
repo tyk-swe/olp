@@ -762,6 +762,7 @@ func TestGatewayToolWorkflowSettlesOneRun(t *testing.T) {
 	const answer = "workflow-private-result"
 	const prompt = "workflow-private-prompt"
 	var toolCalls atomic.Int64
+	var parityCalls atomic.Int64
 	var responsesWorkflow atomic.Bool
 	var approvalWorkflow atomic.Bool
 	var recoveryWorkflow atomic.Bool
@@ -895,6 +896,11 @@ func TestGatewayToolWorkflowSettlesOneRun(t *testing.T) {
 		var input map[string]json.RawMessage
 		if json.NewDecoder(r.Body).Decode(&input) != nil {
 			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		if strings.Contains(string(input["messages"]), "workflow-parity-check") {
+			parityCalls.Add(1)
+			writeJSON(w, map[string]any{"id": "chat-parity", "object": "chat.completion", "created": 1, "model": vendorModel, "choices": []any{map[string]any{"index": 0, "message": map[string]any{"role": "assistant", "content": "done"}, "finish_reason": "stop"}}, "usage": map[string]any{"prompt_tokens": 4, "completion_tokens": 6, "total_tokens": 10}})
 			return
 		}
 		if pruningWorkflow.Load() {
@@ -2516,6 +2522,54 @@ func TestGatewayToolWorkflowSettlesOneRun(t *testing.T) {
 			return ok && debit["kind"] == "model" && debit["state"] == "settled"
 		})) {
 			t.Fatalf("retired %s workflow continued or lost its exposure: debits=%v model calls=%d", scenario.name, items, modelCalls.Load()-beforeModels)
+		}
+	}
+	parityProvider := activeAzureProviderInProject(t, h, owner, "Workflow parity provider", vendor.URL, &project,
+		[]any{map[string]any{"operation": "generation", "surface": "openai", "mode": "unary"}},
+		map[string]any{"profile_id": "azure-legacy-chat", "profile_revision": "1", "options": map[string]any{
+			"models":             map[string]any{vendorModel: map[string]any{"context_length": 1000}},
+			"operation_defaults": map[string]any{"generation": map[string]any{"dialect": "openai-chat", "values": map[string]any{"max_tokens": 100}}},
+		}})
+	addBatchPrice(t, h, owner, mcpExecString(t, parityProvider, "id"), "", time.Now().Add(-time.Hour))
+	const paritySlug = "workflow-prepared-cost-parity"
+	parityDraft := h.want(owner, http.MethodPost, "/api/v1/route-drafts", map[string]any{
+		"project_id": project, "slug": paritySlug, "operations": []string{"generation"}, "overall_timeout_ms": 10000, "max_attempts": 1,
+		"fidelity": map[string]any{"mode": "transformed"}, "tool_execution": "gateway",
+		"targets": []any{map[string]any{"provider_id": parityProvider["id"], "provider_model": vendorModel, "priority": 0, "weight": 1, "timeout_ms": 5000}},
+	}, idem("workflow-parity-draft"), http.StatusCreated)
+	h.want(owner, http.MethodPost, "/api/v1/route-drafts/"+mcpExecString(t, parityDraft, "id")+"/activate", nil, withMatch(parityDraft, idem("workflow-parity-activate")), http.StatusOK)
+	parityKey := h.want(owner, http.MethodPost, "/api/v1/api-keys", map[string]any{"name": "Workflow parity caller", "project_id": project, "scopes": []string{"inference", "tools"}, "allowed_routes": []string{paritySlug}}, idem("workflow-parity-key"), http.StatusCreated)
+	h.refresh()
+	for _, scenario := range []struct {
+		name    string
+		path    string
+		dialect string
+		body    func(string) map[string]any
+	}{
+		{name: "profile default", path: "/v1/chat/completions", dialect: "openai-chat", body: func(limit string) map[string]any {
+			return map[string]any{"model": paritySlug, "messages": []any{map[string]any{"role": "user", "content": "workflow-parity-check"}}, "olp_toolsets": []string{}, "olp_run_limits": map[string]any{"max_run_cost": limit}}
+		}},
+		{name: "translated Responses", path: "/v1/responses", dialect: "openai-responses", body: func(limit string) map[string]any {
+			return map[string]any{"model": paritySlug, "input": "workflow-parity-check", "max_output_tokens": 100, "olp_toolsets": []string{}, "olp_run_limits": map[string]any{"max_run_cost": limit}}
+		}},
+	} {
+		for _, limit := range []string{"1050", "1150"} {
+			request := scenario.body(limit)
+			for _, published := range []bool{false, true} {
+				decision := inspectorSimulation(t, h, owner, parityDraft, published, request, map[string]any{"api_key_id": parityKey["id"], "dialect": scenario.dialect})
+				if decision["eligible"] != (limit == "1150") {
+					t.Fatalf("%s simulation published=%t limit=%s: %v", scenario.name, published, limit, decision)
+				}
+			}
+			before := parityCalls.Load()
+			status, body, _ := h.gateway(http.MethodPost, scenario.path, mcpExecString(t, parityKey, "secret"), request)
+			if limit == "1050" {
+				if status != http.StatusBadRequest || !strings.Contains(fmt.Sprint(body), "run_cost_limit") || parityCalls.Load() != before {
+					t.Fatalf("%s cost limit dispatched: status=%d body=%v", scenario.name, status, body)
+				}
+			} else if status != http.StatusOK || parityCalls.Load() != before+1 {
+				t.Fatalf("%s bounded workflow did not run: status=%d body=%v", scenario.name, status, body)
+			}
 		}
 	}
 }

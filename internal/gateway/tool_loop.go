@@ -124,7 +124,7 @@ func (s *Server) prepareWorkflow(ctx context.Context, x *call, token string) *Er
 		return invalidRequest("invalid_request", "The route tools could not be added to the request.", nil)
 	}
 	x.generation.parsed = parsed
-	x.workflow = &workflowCall{token: token, tools: tools, transcript: x.generation.parsed.Field(workflowTranscriptField(x.family)), responseMCP: x.family == wire.Responses && x.route.ResponsesMCPItems}
+	x.workflow = &workflowCall{token: token, tools: tools, transcript: x.generation.parsed.Field(workflowTranscriptField(x.family)), responseMCP: x.family == wire.Responses && x.named().ResponsesMCPItems}
 	if x.workflow.responseMCP {
 		x.workflow.responseItems = responseMCPListings(x.generation.toolsets, tools)
 	}

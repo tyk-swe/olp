@@ -121,7 +121,7 @@ func (x *call) preparedProvider(provider *routing.Provider, targetID, model stri
 		decisions, err := plan.CheckInput()
 		var guardrailSegments []guardrails.Segment
 		if err == nil && x.guardrailEngine != nil {
-			if coverage := interaction.CheckGuardrailCoverage(plan.Wire(), plan.EffectiveRequest().OIF().Document()); coverage != nil && (x.route.ToolExecution != "gateway" || !x.guardrailEngine.OnlyTypeSafe()) {
+			if coverage := interaction.CheckGuardrailCoverage(plan.Wire(), plan.EffectiveRequest().OIF().Document()); coverage != nil && (x.named().ToolExecution != "gateway" || !x.guardrailEngine.OnlyTypeSafe()) {
 				result, e := x.guardrailEngine.Unavailable("")
 				x.recordGuardrails(result.Decisions)
 				if e != nil {
@@ -194,7 +194,7 @@ func (x *call) preparedProvider(provider *routing.Provider, targetID, model stri
 	}
 	var guardrailSegments []guardrails.Segment
 	if x.guardrailEngine != nil {
-		if coverage := interaction.CheckGuardrailCoverage(invocation.Wire, native.OIF().Document()); coverage != nil && (x.route.ToolExecution != "gateway" || !x.guardrailEngine.OnlyTypeSafe()) {
+		if coverage := interaction.CheckGuardrailCoverage(invocation.Wire, native.OIF().Document()); coverage != nil && (x.named().ToolExecution != "gateway" || !x.guardrailEngine.OnlyTypeSafe()) {
 			result, e := x.guardrailEngine.Unavailable("")
 			x.recordGuardrails(result.Decisions)
 			if e != nil {
