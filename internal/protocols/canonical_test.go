@@ -167,3 +167,55 @@ func TestParseForModelPreservesExactNativeIdentity(t *testing.T) {
 		t.Fatal("inference slug validation bypassed")
 	}
 }
+
+func TestMessagesReasoningControlsArePreservedOrRefusedAcrossTargets(t *testing.T) {
+	request, err := Parse(wire.Anthropic, []byte(`{"model":"team-model","messages":[{"role":"user","content":"Think carefully"}],"max_tokens":64,"thinking":{"type":"adaptive"},"output_config":{"effort":"high"}}`), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, test := range []struct {
+		family           wire.Format
+		provider, vendor string
+		supported        bool
+	}{
+		{wire.Chat, "openai", "openai", true},
+		{wire.Responses, "openai", "openai", true},
+		{wire.Anthropic, "anthropic", "anthropic", true},
+		{wire.Gemini, "gemini", "gemini", false},
+		{"bedrock", "bedrock", "amazon-bedrock", false},
+	} {
+		t.Run(string(test.family), func(t *testing.T) {
+			encoded, _, err := EncodeTarget(request, test.family, test.provider, test.vendor, "wire-model", nil)
+			if !test.supported {
+				if err == nil {
+					t.Fatalf("reasoning control silently dropped %s", encoded)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			var target struct {
+				ReasoningEffort string `json:"reasoning_effort"`
+				Reasoning       struct{ Effort string }
+				OutputConfig    struct{ Effort string } `json:"output_config"`
+			}
+			if err := json.Unmarshal(encoded, &target); err != nil {
+				t.Fatal(err)
+			}
+			effort := func() string {
+				switch test.family {
+				case wire.Chat:
+					return target.ReasoningEffort
+				case wire.Responses:
+					return target.Reasoning.Effort
+				default:
+					return target.OutputConfig.Effort
+				}
+			}()
+			if effort != "high" {
+				t.Fatalf("reasoning control lost %s", encoded)
+			}
+		})
+	}
+}

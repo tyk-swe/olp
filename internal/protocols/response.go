@@ -708,15 +708,20 @@ func renderCompletion(c *wire.Completion, family wire.Format, route string) []by
 		for _, t := range c.ToolCalls {
 			content = append(content, map[string]any{"type": "tool_use", "id": t.ID, "name": t.Name, "input": json.RawMessage(t.Arguments)})
 		}
-		reason := "end_turn"
-		switch c.FinishReason {
-		case "tool_calls":
-			reason = "tool_use"
-		case "length":
-			reason = "max_tokens"
-		case "content_filter":
-			reason = "refusal"
-		}
+		reason := func() string {
+			switch c.FinishReason {
+			case "tool_calls":
+				return "tool_use"
+			case "length":
+				return "max_tokens"
+			case "content_filter":
+				return "refusal"
+			}
+			if c.Refusal != "" {
+				return "refusal"
+			}
+			return "end_turn"
+		}()
 		f := map[string]any{"id": id, "type": "message", "role": "assistant", "model": route, "content": content, "stop_reason": reason, "stop_sequence": nil}
 		if c.Usage != nil {
 			f["usage"] = map[string]any{"input_tokens": c.Usage.InputTokens, "output_tokens": c.Usage.OutputTokens}

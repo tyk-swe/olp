@@ -185,6 +185,9 @@ func decodeParts(v json.RawMessage, family, path string, c *Generation) ([]Part,
 
 func encodeCanonical(c *Generation, family wire.Format, model, operation string) (Object, error) {
 	count := operation == "token_count"
+	if present(c.Parameters["reasoning_effort"]) && family != wire.Chat && family != wire.InputTokens && family != wire.Responses {
+		return nil, unsupported("reasoning_effort")
+	}
 	switch family {
 	case "bedrock", "bedrock_count":
 		return encodeBedrock(c, model, operation)

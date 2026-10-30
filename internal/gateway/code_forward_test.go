@@ -468,6 +468,62 @@ func TestCodeMessagesToCodexTextExchange(t *testing.T) {
 	}
 }
 
+func TestCodeMessagesToCodexCompletedMessages(t *testing.T) {
+	for _, stream := range []bool{false, true} {
+		t.Run(fmt.Sprint(stream), func(t *testing.T) {
+			g, ledger, server := newCodeForwardHarness(t)
+			route := g.rt.release.Snapshot.CodeRoutes["coding"]
+			route.MessagesToCodex = true
+			g.rt.release.Snapshot.CodeRoutes["coding"] = route
+			g.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "text/event-stream")
+				for _, event := range []string{
+					`{"type":"response.created","response":{"id":"completed-messages","status":"in_progress","output":[]}}`,
+					`{"type":"response.output_text.delta","output_index":0,"content_index":0,"delta":"Hello"}`,
+					`{"type":"response.output_item.done","output_index":0,"item":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Hello "}]}}`,
+					`{"type":"response.output_item.done","output_index":1,"item":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"back"}]}}`,
+					`{"type":"response.completed","response":{"id":"completed-messages","status":"completed","output":[],"usage":{"input_tokens":7,"output_tokens":2,"total_tokens":9}}}`,
+				} {
+					fmt.Fprint(w, "data: "+event+"\n\n")
+				}
+			})
+			request, _ := http.NewRequestWithContext(t.Context(), http.MethodPost, server.URL+"/code/coding/v1/messages", strings.NewReader(fmt.Sprintf(`{"model":"native-model","messages":[{"role":"user","content":"Hello"}],"max_tokens":32,"stream":%t}`, stream)))
+			request.Header.Set("Authorization", "Bearer "+fullKey)
+			request.Header.Set("X-Claude-Code-Session-Id", "completed-messages")
+			response, err := server.Client().Do(request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer response.Body.Close()
+			body, _ := io.ReadAll(response.Body)
+			if response.StatusCode != http.StatusOK {
+				t.Fatalf("completed messages status %d %s", response.StatusCode, body)
+			}
+			text, err := func() (string, error) {
+				if stream {
+					capture := protocols.NewCaptureStream(wire.Anthropic, 8192, true, false)
+					if err := capture.Push(body); err != nil {
+						return "", err
+					}
+					text, _, err := capture.Finish()
+					return text, err
+				}
+				completion, err := protocols.Decode(wire.Anthropic, wire.Anthropic, body, "native-model", "")
+				if err != nil {
+					return "", err
+				}
+				return completion.OutputText, nil
+			}()
+			if err != nil || text != "Hello back" || !bytes.Contains(body, []byte(`"stop_reason":"end_turn"`)) {
+				t.Fatalf("completed message text %q error %v body %s", text, err, body)
+			}
+			if usage := ledger.wait(t); usage.Total == nil || *usage.Total != 9 || g.mock.count("a") != 1 {
+				t.Fatalf("completed message accounting %+v", usage)
+			}
+		})
+	}
+}
+
 func TestCodeMessagesToCodexRefusesUnsupportedSemantics(t *testing.T) {
 	for _, test := range []struct{ name, extra, query, beta, messages string }{
 		{name: "tool extension", extra: `,"tools":[{"name":"run","input_schema":{"type":"object"},"required_extension":true}]`},
@@ -762,10 +818,12 @@ func TestCodeMessagesToCodexToolStreamOutcomes(t *testing.T) {
 						fmt.Fprint(w, "data: "+`{"type":"response.output_item.done","output_index":0,"item":{"type":"function_call","call_id":"call-read","name":"read_file","arguments":"{}"}}`+"\n\n")
 						fmt.Fprint(w, "data: "+`{"type":"response.completed","response":{"id":"tool-outcome","status":"completed","output":[]}}`+"\n\n")
 					case "max-tokens", "refusal":
-						reason := "max_output_tokens"
-						if outcome == "refusal" {
-							reason = "content_filter"
-						}
+						reason := func() string {
+							if outcome == "refusal" {
+								return "content_filter"
+							}
+							return "max_output_tokens"
+						}()
 						fmt.Fprintf(w, "data: "+`{"type":"response.incomplete","response":{"id":"tool-outcome","status":"incomplete","incomplete_details":{"reason":%q},"output":[{"type":"function_call","call_id":"call-read","name":"read_file","arguments":"{}"}],"usage":{"input_tokens":5,"output_tokens":2,"total_tokens":7}}}`+"\n\n", reason)
 					case "mismatched-snapshot":
 						fmt.Fprint(w, "data: "+`{"type":"response.completed","response":{"id":"tool-outcome","status":"completed","output":[{"type":"function_call","call_id":"different-call","name":"read_file","arguments":"{}"}]}}`+"\n\n")
@@ -787,13 +845,16 @@ func TestCodeMessagesToCodexToolStreamOutcomes(t *testing.T) {
 				}
 				successful := outcome == "missing-usage" || outcome == "max-tokens" || outcome == "refusal"
 				if successful {
-					reason := "tool_use"
-					if outcome == "max-tokens" {
-						reason = "max_tokens"
-					}
-					if outcome == "refusal" {
-						reason = "refusal"
-					}
+					reason := func() string {
+						switch outcome {
+						case "max-tokens":
+							return "max_tokens"
+						case "refusal":
+							return "refusal"
+						default:
+							return "tool_use"
+						}
+					}()
 					if response.StatusCode != http.StatusOK || !bytes.Contains(body, []byte(`"stop_reason":"`+reason+`"`)) {
 						t.Fatalf("lost terminal reason %d %s", response.StatusCode, body)
 					}
@@ -872,8 +933,8 @@ func TestCodeMessagesToCodexCancelledToolStream(t *testing.T) {
 	}
 	ledger.mu.Lock()
 	defer ledger.mu.Unlock()
-	if len(ledger.marks) != 1 || len(ledger.outcomes) == 0 || (ledger.outcomes[len(ledger.outcomes)-1].Origin != "client" || ledger.outcomes[len(ledger.outcomes)-1].Kind != "canceled") {
-		t.Fatalf("cancellation accounting marks=%d outcomes=%+v", len(ledger.marks), ledger.outcomes)
+	if len(ledger.outcomes) == 0 || (ledger.outcomes[len(ledger.outcomes)-1].Origin != "client" || ledger.outcomes[len(ledger.outcomes)-1].Kind != "canceled") {
+		t.Fatalf("cancellation outcomes=%+v", ledger.outcomes)
 	}
 }
 

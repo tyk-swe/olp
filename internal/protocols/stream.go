@@ -446,6 +446,8 @@ type streamTranslator struct {
 	started                   bool
 	id, text                  string
 	calls                     map[int]*wire.ToolCall
+	responseTexts             map[int]string
+	responseRefusals          map[int]string
 	blocks                    map[int]int
 	textBlock                 *int
 	refusalBlock              *int
@@ -646,35 +648,44 @@ func (t *streamTranslator) responseToolSnapshot(index int, item Object) error {
 	return t.toolDelta(index, "", "", strings.TrimPrefix(arguments, call.Arguments))
 }
 
-func (t *streamTranslator) responseTextSnapshot(response Object) error {
-	text := strings.Join(slices.Collect(func(yield func(string) bool) {
-		for _, value := range arr(response["output"]) {
-			item, _ := object(value)
-			if str(item["type"]) != "message" {
-				continue
-			}
-			for _, content := range arr(item["content"]) {
-				part, _ := object(content)
-				switch str(part["type"]) {
-				case "output_text":
-					if !yield(str(part["text"])) {
-						return
-					}
-				case "refusal":
-					if !yield(str(part["refusal"])) {
-						return
-					}
-				}
-			}
-		}
-	}), "")
-	if text == "" {
+func (t *streamTranslator) responseTextDelta(index int, text string) error {
+	if t.responseTexts == nil {
+		t.responseTexts = map[int]string{}
+	}
+	t.responseTexts[index] += text
+	return t.textDelta(text)
+}
+
+func (t *streamTranslator) responseRefusalDelta(index int, text string) error {
+	if t.responseRefusals == nil {
+		t.responseRefusals = map[int]string{}
+	}
+	t.responseRefusals[index] += text
+	return t.refusalDelta(text)
+}
+
+func (t *streamTranslator) responseMessageSnapshot(index int, item Object) error {
+	if str(item["type"]) != "message" {
 		return nil
 	}
-	if !strings.HasPrefix(text, t.text) {
-		return protocolError("Responses text snapshot disagrees with streamed deltas")
+	content := func(kind, field string) string {
+		return strings.Join(slices.Collect(func(yield func(string) bool) {
+			for _, content := range arr(item["content"]) {
+				part, _ := object(content)
+				if str(part["type"]) == kind && !yield(str(part[field])) {
+					return
+				}
+			}
+		}), "")
 	}
-	return t.textDelta(text[len(t.text):])
+	text, refusal := content("output_text", "text"), content("refusal", "refusal")
+	if !strings.HasPrefix(text, t.responseTexts[index]) || !strings.HasPrefix(refusal, t.responseRefusals[index]) {
+		return protocolError("Responses message snapshot disagrees with streamed deltas")
+	}
+	if err := t.responseTextDelta(index, text[len(t.responseTexts[index]):]); err != nil {
+		return err
+	}
+	return t.responseRefusalDelta(index, refusal[len(t.responseRefusals[index]):])
 }
 
 func (t *streamTranslator) frame(frame []byte) error {
@@ -737,7 +748,10 @@ func (t *streamTranslator) frame(frame []byte) error {
 					}
 				}
 				index, _ := count(f["output_index"])
-				return t.responseToolSnapshot(int(index), item)
+				if err := t.responseToolSnapshot(int(index), item); err != nil {
+					return err
+				}
+				return t.responseMessageSnapshot(int(index), item)
 			case "response.completed", "response.incomplete":
 				response, _ := object(f["response"])
 				if t.target == wire.Anthropic {
@@ -750,12 +764,17 @@ func (t *streamTranslator) frame(frame []byte) error {
 					if err := t.responseToolSnapshot(index, item); err != nil {
 						return err
 					}
+					if err := t.responseMessageSnapshot(index, item); err != nil {
+						return err
+					}
 				}
-				return t.responseTextSnapshot(response)
+				return nil
 			case "response.refusal.delta":
-				return t.refusalDelta(str(f["delta"]))
+				index, _ := count(f["output_index"])
+				return t.responseRefusalDelta(int(index), str(f["delta"]))
 			case "response.output_text.delta":
-				return t.textDelta(str(f["delta"]))
+				index, _ := count(f["output_index"])
+				return t.responseTextDelta(int(index), str(f["delta"]))
 			case "response.output_item.added":
 				item, _ := optionalObject(f["item"])
 				if t.target == wire.Anthropic {

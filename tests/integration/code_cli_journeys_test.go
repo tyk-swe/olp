@@ -5,6 +5,7 @@ package integration_test
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -119,11 +120,42 @@ func TestCodeQualificationMessagesToolsOfficialSDK(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	tooling := exec.CommandContext(t.Context(), "go", "env", "-json", "GOCACHE", "GOMODCACHE", "GOPATH", "GOTOOLCHAIN")
+	tooling.Dir = dir
+	toolingOutput, err := tooling.Output()
+	if err != nil {
+		t.Fatalf("resolve SDK tooling %v", err)
+	}
+	var paths struct{ GOCACHE, GOMODCACHE, GOPATH, GOTOOLCHAIN string }
+	if err := json.Unmarshal(toolingOutput, &paths); err != nil {
+		t.Fatalf("decode SDK tooling %v", err)
+	}
+	prefetch := exec.CommandContext(t.Context(), "go", "mod", "download")
+	prefetch.Dir = dir
+	if err := prefetch.Run(); err != nil {
+		t.Fatalf("prepare SDK dependencies %v", err)
+	}
+	private := t.TempDir()
+	for _, name := range []string{"home", "config", "data", "cache", "state", "tmp"} {
+		if err := os.MkdirAll(filepath.Join(private, name), 0700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	trap := codecli.NewTrap(t)
 	command := exec.CommandContext(t.Context(), "go", "test", "-mod=readonly", "-tags=integration,codemode", "-timeout=60s", "./gosdk", "-run=^TestCodeMessagesToolExchange$", "-count=1")
 	command.Dir = dir
-	command.Env = append(os.Environ(), "OLP_CODE_MESSAGES_BASE_URL="+gateway.PublicOrigin+"/code/qualification", "OLP_CODE_MESSAGES_API_KEY="+f.key, "OLP_CODE_MESSAGES_MODEL=gpt-5.4")
-	if output, err := command.CombinedOutput(); err != nil {
-		t.Fatalf("official Messages SDK %v\n%s", err, output)
+	command.Env = slices.Concat([]string{
+		"PATH=" + os.Getenv("PATH"), "LANG=C.UTF-8", "TERM=dumb", "NO_COLOR=1",
+		"HOME=" + filepath.Join(private, "home"), "XDG_CONFIG_HOME=" + filepath.Join(private, "config"), "XDG_DATA_HOME=" + filepath.Join(private, "data"), "XDG_CACHE_HOME=" + filepath.Join(private, "cache"), "XDG_STATE_HOME=" + filepath.Join(private, "state"), "TMPDIR=" + filepath.Join(private, "tmp"), "OLP_CLIENTS_SCRATCH=" + private,
+		"DO_NOT_TRACK=1", "NO_UPDATE_NOTIFIER=1", "DISABLE_AUTOUPDATER=1", "DISABLE_TELEMETRY=1", "NODE_USE_ENV_PROXY=1",
+		"GOCACHE=" + paths.GOCACHE, "GOMODCACHE=" + paths.GOMODCACHE, "GOPATH=" + paths.GOPATH, "GOTOOLCHAIN=" + paths.GOTOOLCHAIN, "GOPROXY=off", "GOFLAGS=-mod=readonly",
+		"OLP_CODE_MESSAGES_BASE_URL=" + gateway.PublicOrigin + "/code/qualification", "OLP_CODE_MESSAGES_API_KEY=" + f.key, "OLP_CODE_MESSAGES_MODEL=gpt-5.4",
+	}, trap.Environment())
+	if err := command.Run(); err != nil {
+		t.Fatalf("official Messages SDK %v", err)
+	}
+	if hosts := trap.Hosts(); len(hosts) != 0 {
+		t.Fatalf("SDK attempted %d external destinations", len(hosts))
 	}
 	requests := f.peer.Requests()
 	if len(requests) != 8 {
