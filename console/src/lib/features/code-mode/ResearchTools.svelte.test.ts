@@ -4,6 +4,7 @@ import { QueryClient } from '@tanstack/svelte-query';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import * as api from '$lib/api/code-mode';
 import * as clipboard from '$lib/clipboard';
+import { formatDate } from '$lib/format';
 import ResearchConfigurationProbe from './test/ResearchConfigurationProbe.svelte';
 
 vi.mock('$lib/api/code-mode', async (original) => ({
@@ -12,6 +13,11 @@ vi.mock('$lib/api/code-mode', async (original) => ({
   listCodePools: vi.fn(),
   listCodeRoutes: vi.fn(),
   saveCodeRoute: vi.fn()
+}));
+
+vi.mock('$lib/features/providers/api/providers', async (original) => ({
+  ...(await original<typeof import('$lib/features/providers/api/providers')>()),
+  listProviders: vi.fn().mockResolvedValue([])
 }));
 
 const projectId = '01980000-0000-7000-8000-000000000001';
@@ -24,6 +30,9 @@ const route: api.CodeRoute = {
   slug: 'team-code',
   pool_id: poolId,
   enabled: true,
+  messages_to_codex: false,
+  model_rewriting: false,
+  paid_participation: false,
   models: ['gpt-5.5'],
   revision_id: '01980000-0000-7000-8000-000000000032',
   revision: 1,
@@ -54,6 +63,7 @@ beforeEach(() => {
         kind: 'shared',
         owner_user_id: null,
         account_ids: [accountId],
+        account_weights: { [accountId]: 1 },
         api_key_ids: [],
         etag: route.etag
       }
@@ -162,8 +172,20 @@ it('shows and copies every companion configuration file', async () => {
     route_slug: route.slug,
     base_url: 'https://olp.example/code/team-code',
     native_models: ['minimax-m3'],
+    models: [
+      {
+        id: 'minimax-m3',
+        object: 'model',
+        capabilities: [
+          { protocol: 'messages', path: 'v1/messages', transports: ['http'] }
+        ],
+        clients: ['claude-code']
+      }
+    ],
     adapters: ['opencode_go'],
     client: 'claude-code',
+    platform: 'linux',
+    instructions: 'Merge companion MCP servers into the project configuration',
     supported_clients: ['claude-code'],
     client_version: 'latest',
     model: 'minimax-m3',
@@ -196,3 +218,167 @@ it('shows and copies every companion configuration file', async () => {
     'preserving other tools and settings'
   );
 });
+
+it('keeps platform across client changes and models across platform changes', async () => {
+  const load = vi.fn(
+    async (
+      _route: api.CodeRoute,
+      selection: api.CodeClientSelection
+    ): Promise<api.CodeClientConfiguration> => ({
+      route_slug: route.slug,
+      base_url: 'https://olp.example/code/team-code',
+      native_models: ['main-model', 'other-model'],
+      models: ['main-model', 'other-model'].map(
+        (id): api.CodeClientConfiguration['models'][number] => ({
+          id,
+          object: 'model',
+          capabilities: [
+            { protocol: 'messages', path: 'v1/messages', transports: ['http'] }
+          ],
+          clients: ['claude-code', 'codex', 'opencode']
+        })
+      ),
+      adapters: ['opencode_go'],
+      client: selection.client ?? 'claude-code',
+      platform: selection.platform ?? 'linux',
+      instructions: `Merge setup for ${selection.platform ?? 'linux'}`,
+      supported_clients: ['claude-code', 'codex', 'opencode'],
+      client_version: 'fixture',
+      model: selection.model ?? 'main-model',
+      plan_model: null,
+      small_model: null,
+      format: selection.platform === 'windows' ? 'powershell' : 'shell',
+      file:
+        selection.platform === 'windows' ? 'olp-claude.ps1' : 'olp-claude.sh',
+      configuration: `${selection.client ?? 'claude-code'} on ${selection.platform ?? 'linux'}`,
+      qualification_gaps: []
+    })
+  );
+  component = mount(ResearchConfigurationProbe, {
+    target: host,
+    props: { client, route, load }
+  });
+  flushSync();
+  await settle();
+  const model = host.querySelector<HTMLSelectElement>(
+    `#code-client-model-${route.id}`
+  )!;
+  model.value = 'other-model';
+  model.dispatchEvent(new Event('change', { bubbles: true }));
+  await settle();
+  const windows = host.querySelector<HTMLInputElement>(
+    'input[value="windows"]'
+  );
+  expect(windows).not.toBeNull();
+  windows!.click();
+  await settle();
+  expect(load).toHaveBeenLastCalledWith(
+    route,
+    { model: 'other-model', platform: 'windows' },
+    expect.any(AbortSignal)
+  );
+  expect(host.textContent).toContain('Merge setup for windows');
+  expect(
+    host.querySelector<HTMLTextAreaElement>(
+      `#code-client-configuration-${route.id}`
+    )!.value
+  ).toBe('claude-code on windows');
+  host.querySelector<HTMLInputElement>('input[value="codex"]')!.click();
+  await settle();
+  expect(load).toHaveBeenLastCalledWith(
+    route,
+    { client: 'codex', platform: 'windows' },
+    expect.any(AbortSignal)
+  );
+});
+
+it('saves explicit Messages translation in the route draft', async () => {
+  component = mount(ResearchConfigurationProbe, {
+    target: host,
+    props: { client, route }
+  });
+  flushSync();
+  await settle();
+  await click('Edit draft');
+  const translation = host.querySelector<HTMLInputElement>(
+    '#code-messages-to-codex'
+  );
+  expect(translation).not.toBeNull();
+  expect(translation!.checked).toBe(false);
+  translation!.click();
+  flushSync();
+  vi.mocked(api.saveCodeRoute).mockResolvedValue(route);
+  host
+    .querySelector('form')!
+    .dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+  await settle();
+  expect(api.saveCodeRoute).toHaveBeenCalledWith(
+    expect.objectContaining({
+      messages_to_codex: true,
+      models: route.models,
+      tools: null
+    }),
+    route,
+    expect.any(String)
+  );
+});
+
+it.each([
+  {
+    health: 'quota_limited',
+    grant: 'current',
+    label: 'Provider rate or quota limit',
+    retry: '2026-10-30T11:00:00Z'
+  },
+  {
+    health: 'unavailable',
+    grant: 'current',
+    label: 'Temporary upstream failure',
+    retry: '2026-10-30T11:00:00Z'
+  },
+  {
+    health: 'unknown',
+    grant: 'lapsed',
+    label: 'Grant lapsed, enroll again',
+    retry: null
+  }
+] as const)(
+  'shows distinct account availability evidence for $health and $grant',
+  async ({ health, grant, label, retry }) => {
+    const observed = '2026-10-30T10:00:00Z';
+    const account: api.CodeAccount = {
+      ...researchAccount,
+      health,
+      grant_state: grant,
+      eligible: false,
+      health_observed_at: observed,
+      unavailable_until: retry,
+      allowance: {
+        remaining_tokens: 0,
+        remaining_requests: null,
+        remaining_percent: null,
+        resets_at: null,
+        observed_at: observed
+      }
+    };
+    vi.mocked(api.listCodeAccounts).mockResolvedValue({
+      items: [account],
+      nextCursor: null
+    });
+    component = mount(ResearchConfigurationProbe, {
+      target: host,
+      props: { client, route, kind: 'accounts' }
+    });
+    flushSync();
+    await settle();
+    const card = host.querySelector('article')!;
+    expect(card.textContent).toContain(label);
+    expect(card.textContent).toContain('Tokens: 0');
+    expect(card.textContent).toContain('Reset Unknown');
+    expect(card.textContent).toContain(formatDate(observed));
+    expect(card.textContent).toContain(
+      retry ? formatDate(retry) : 'No serving cooldown reported'
+    );
+    expect(host.textContent).toContain('A rejected refresh lapses the grant');
+  }
+);

@@ -185,11 +185,40 @@ func decodeParts(v json.RawMessage, family, path string, c *Generation) ([]Part,
 
 func encodeCanonical(c *Generation, family wire.Format, model, operation string) (Object, error) {
 	count := operation == "token_count"
+	if present(c.Parameters["reasoning_effort"]) && family != wire.Chat && family != wire.InputTokens && family != wire.Responses {
+		return nil, unsupported("reasoning_effort")
+	}
 	switch family {
 	case "bedrock", "bedrock_count":
 		return encodeBedrock(c, model, operation)
 	case wire.Chat, wire.InputTokens:
 		return encodeOpenAIGeneration(c, model, count)
+	case wire.Responses:
+		for key := range c.Parameters {
+			if key != "max_output_tokens" && key != "temperature" && key != "top_p" && key != "tool_choice" && key != "parallel_tool_calls" && key != "reasoning_effort" {
+				return nil, unsupported(key)
+			}
+		}
+		out, err := encodeOpenAIGeneration(c, model, true)
+		if err != nil {
+			return nil, err
+		}
+		return maps.Collect(func(yield func(string, json.RawMessage) bool) {
+			for key, value := range out {
+				if !yield(key, value) {
+					return
+				}
+			}
+			for key, value := range c.Parameters {
+				if key == "tool_choice" || key == "parallel_tool_calls" || key == "reasoning_effort" {
+					continue
+				}
+				if !yield(key, value) {
+					return
+				}
+			}
+			yield("stream", raw(c.Stream))
+		}), nil
 	case wire.Anthropic, wire.AnthropicCount:
 		return encodeAnthropicGeneration(c, model, count)
 	case wire.Gemini, wire.GeminiCount:

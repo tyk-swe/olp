@@ -6,8 +6,15 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"github.com/google/uuid"
+	"github.com/oapi-codegen/nullable"
+	"github.com/tyk-swe/olp/internal/management/contract"
+	"io"
 	"net/http"
+	"net/http/httptest"
+	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -147,5 +154,68 @@ func TestCodeQualificationWebSocketModelSelectionAndPinnedReconnect(t *testing.T
 	_, _, err := conn.Read(ctx)
 	if websocket.CloseStatus(err) != websocket.StatusPolicyViolation || len(f.peer.Requests()) != before {
 		t.Fatalf("model change bypassed pinned account permission: %v", err)
+	}
+}
+
+func TestCodePaidFallbackRetainsOnePaidOwnerAcrossReplicas(t *testing.T) {
+	f := newCodeFleet(t)
+	route := codePublicDecode[codemode.Route](t, f.route)
+	model := route.Models[0]
+	var paid atomic.Bool
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer fixture-paid-secret" {
+			t.Error("fallback lost paid credential")
+		}
+		paid.Store(true)
+		w.Header().Set("Content-Type", "application/json")
+		io.WriteString(w, `{"id":"fleet-paid","status":"completed","output":[],"usage":{"input_tokens":2,"output_tokens":1,"total_tokens":3}}`)
+	}))
+	t.Cleanup(upstream.Close)
+	provider, slot := newCodePaidProvider(t, f.h, f.owner, f.project, upstream.URL, model)
+	price := contract.PricingRevisionRequest{EffectiveAt: time.Now().UTC(), Prices: []contract.PriceRequest{{ProviderKind: "openai", Model: model, Operation: "generation", Currency: "USD", InputPerMillion: nullable.NewNullableWithValue("1"), OutputPerMillion: nullable.NewNullableWithValue("2")}}}
+	f.h.want(f.owner, "POST", "/api/v1/pricing/revisions", price, idem("fleet-fallback-price"), 201)
+	targets := map[string]contract.CodePaidTarget{model: {ProviderId: uuid.MustParse(provider), SlotId: uuid.MustParse(slot.ID)}}
+	write := contract.CodeRouteWrite{ProjectId: uuid.MustParse(f.project), PoolId: uuid.MustParse(route.PoolID), Slug: route.Slug, Models: route.Models, Enabled: true, PaidParticipation: new(true), InitialRecoveryAttempts: new(1), PaidFallbackTargets: &targets}
+	path := "/api/v1/code/routes/" + route.ID
+	saved := f.h.want(f.owner, "PUT", path, write, etagHeader(f.route), 200)
+	f.h.want(f.owner, "POST", path+"/publish", nil, withMatch(saved, idem("fleet-paid-fallback")), 200)
+	if _, err := f.h.Pool.Exec(t.Context(), `UPDATE olp.code_accounts SET health='unavailable' WHERE project_id=$1`, f.project); err != nil {
+		t.Fatal(err)
+	}
+	for i, process := range f.gateways {
+		if err := process.Kill(); err != nil {
+			t.Fatal(err)
+		}
+		f.gateways[i] = f.in.replica(fmt.Sprintf("paid-fallback-%d", i))
+	}
+	bodyInput := []byte(fmt.Sprintf(`{"model":%q,"input":[{"role":"user","content":"CONTROLLED_PRIVATE_PROMPT"}],"stream":false,"store":false}`, model))
+	response, body, err := f.request(t.Context(), 0, "paid-fleet-root", "", bodyInput, true)
+	if err != nil || response.StatusCode != 200 || !strings.Contains(string(body), "fleet-paid") || !paid.Load() {
+		t.Fatalf("first replica fallback %v %s %v paid=%v", response, body, err, paid.Load())
+	}
+	response, body, err = f.request(t.Context(), 1, "paid-fleet-root", "", bodyInput, true)
+	if err != nil || response.StatusCode != 200 {
+		t.Fatalf("paid pin failed on second replica %v %s %v", response, body, err)
+	}
+	bindings := codePublicDecode[[]contract.CodeBinding](t, f.h.want(f.owner, "GET", "/api/v1/code/bindings?api_key_id="+f.keyID, nil, nil, 200)["items"])
+	if len(bindings) != 1 || bindings[0].PaidProviderId.GetOrEmpty().String() != provider || bindings[0].Conversation != "paid-fleet-root" {
+		t.Fatalf("replicas split paid ownership %+v", bindings)
+	}
+	attempts := codePublicDecode[[]contract.CodeAttempt](t, f.h.want(f.owner, "GET", "/api/v1/code/attempts?project_id="+f.project+"&binding_id="+bindings[0].Id.String(), nil, nil, 200)["items"])
+	if len(attempts) != 2 {
+		t.Fatal("paid binding did not retain both attempts")
+	}
+	for _, attempt := range attempts {
+		if attempt.PaidBindingId.GetOrEmpty() != bindings[0].Id || attempt.PaidProviderId.GetOrEmpty().String() != provider || attempt.PaidSlotId.GetOrEmpty().String() != slot.ID || !attempt.AccountId.IsNull() || attempt.Nonexecution || !attempt.RecoveryFrom.IsNull() || !attempt.RecoveryReason.IsNull() {
+			t.Fatal("paid diagnostics lost target attribution or invented rejection evidence")
+		}
+	}
+	if slices.ContainsFunc(f.peer.Requests(), func(request codexfixture.Request) bool { return request.Header.Get("Session-Id") == "paid-fleet-root" }) {
+		t.Fatal("initial exhausted subscription work dispatched")
+	}
+	f.h.want(f.owner, "POST", "/api/v1/code/bindings/"+bindings[0].Id.String()+"/retire", nil, idem("retire-fleet-paid"), 200)
+	response, body, err = f.request(t.Context(), 1, "paid-fleet-root", "", bodyInput, true)
+	if err != nil || response.StatusCode != 410 {
+		t.Fatalf("retirement changed across replicas %v %s %v", response, body, err)
 	}
 }

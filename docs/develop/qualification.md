@@ -415,6 +415,7 @@ mode's classifier needs a real model.
 | Surface | Evidence | Qualification |
 | --- | --- | --- |
 | Pasted-key enrollment | Production WASM plugins through public APIs and the console: key page at an approved origin, masked input, NULL expiry and refresh, fingerprint principal, no plaintext key in secrets or responses, ordinary probe and activation fenced, a different key refused as a rotation | Controlled only |
+| Claude subscription OAuth | Direct PKCE and verified-profile fixtures, stable refresh and refusal checks, native bearer plus OAuth beta, generated setup and a two-turn Messages tool exchange. Management/WASM lifecycle fixture authored and compiled | Fixture only. Service fixture execution, native-client startup and live subscription inference remain unqualified |
 | OLP-key-only configuration | Generated Claude Code shell and OpenCode JSON run unmodified; decoy credentials overridden; no `auth.json` | Controlled only |
 | Claude Code on GLM Coding Plan and OpenCode Go | Tool loop (`Read`), subagent (`Agent`) bound beneath its session, `--continue`; every model variable on the route | Controlled only; OpenCode Go only for Messages models |
 | OpenCode on GLM Coding Plan and OpenCode Go | Tool loop (`read`), child session (`task`) bound beneath its parent, `--continue`; Chat Completions with `include_usage`, and Messages for OpenCode Go | Controlled only |

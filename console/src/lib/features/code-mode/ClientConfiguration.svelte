@@ -6,6 +6,7 @@
   import LoadError from './LoadError.svelte';
   import type {
     CodeClient,
+    CodeClientPlatform,
     CodeClientConfiguration,
     CodeClientSelection,
     CodeRoute
@@ -41,6 +42,7 @@
   }>();
   const ids = $derived({
     client: `code-client-${route.id}`,
+    platform: `code-client-platform-${route.id}`,
     model: `code-client-model-${route.id}`,
     planModel: `code-client-plan-model-${route.id}`,
     smallModel: `code-client-small-model-${route.id}`,
@@ -83,7 +85,7 @@
   // On a mixed route each client has its own native models, so a new client
   // starts again from its default models.
   function selectClient(client: CodeClient) {
-    choose({ client });
+    choose({ client, platform: selection.platform ?? pickerConfig?.platform });
   }
 </script>
 
@@ -91,6 +93,18 @@
   <h3>Client configuration</h3>
   {#if pickerConfig}
     <div class="selection" aria-busy={configuration.isFetching}>
+      <SegmentedRadioGroup
+        label="Platform"
+        name={ids.platform}
+        value={pickerConfig.platform}
+        items={[
+          { value: 'linux', label: 'Linux' },
+          { value: 'macos', label: 'macOS' },
+          { value: 'windows', label: 'Windows (PowerShell)' }
+        ]}
+        onChange={(platform) =>
+          select({ platform: platform as CodeClientPlatform })}
+      />
       {#if pickerConfig.supported_clients.length > 1}
         <SegmentedRadioGroup
           label="Client"
@@ -104,7 +118,7 @@
         />
       {/if}
       <div class="form-field">
-        <label for={ids.model}>Client native model</label>
+        <label for={ids.model}>Client model</label>
         <select
           id={ids.model}
           value={pickerConfig.model}
@@ -131,8 +145,8 @@
           </select>
           <small id="{ids.planModel}-help"
             >{pickerConfig.client === 'claude-code'
-              ? 'Plan mode, through opusplan; other requests use the native model.'
-              : 'The plan agent; the build agent uses the native model.'}</small
+              ? 'Plan mode, through opusplan; other requests use the selected model.'
+              : 'The plan agent; the build agent uses the selected model.'}</small
           >
         </div>
       {/if}
@@ -185,7 +199,7 @@
       </dd>
       <dt>Route base URL</dt>
       <dd><code>{config.base_url}</code></dd>
-      <dt>Native models</dt>
+      <dt>Published models</dt>
       <dd>{config.native_models.join(', ')}</dd>
     </dl>
     <p>
@@ -196,6 +210,7 @@
       Merge generated entries into your existing files, preserving other tools
       and settings. Choose which tools to use in your client.
     </p>
+    <p>{config.instructions}</p>
     {#if config.qualification_gaps.length}<h4>Qualification gaps</h4>
       <ul>
         {#each config.qualification_gaps as gap (gap)}<li>{gap}</li>{/each}
@@ -212,7 +227,7 @@
         rows="12"></textarea>
       <small id="{ids.configuration}-help"
         >{config.file
-          ? `Save as ${config.file}.`
+          ? `Destination: ${config.file}. Follow the merge instructions above.`
           : 'Source this file in your shell before starting the client.'}</small
       >
     </div>

@@ -333,7 +333,6 @@ func TestNativeDuplexBedrockCleanStreamEndSettlesObservedUsage(t *testing.T) {
 	} {
 		upstream.frames <- []byte(frame)
 	}
-	close(upstream.frames)
 	h.gateway.bedrockStream = func(context.Context, *call, *pin) (duplexPeer, error) {
 		return upstream, nil
 	}
@@ -349,6 +348,7 @@ func TestNativeDuplexBedrockCleanStreamEndSettlesObservedUsage(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	close(upstream.frames)
 	for {
 		if _, _, err := conn.Read(ctx); err != nil {
 			break

@@ -4,6 +4,7 @@
     type QueryClient
   } from '@tanstack/svelte-query';
   import type { ComponentProps } from 'svelte';
+  import type { CodeManagementKind } from '../sections';
   import type { CodeRoute } from '$lib/api/code-mode';
   import ClientConfiguration from '../ClientConfiguration.svelte';
   import CodeManagement from '../CodeManagement.svelte';
@@ -11,9 +12,11 @@
   let {
     client,
     route,
-    load
+    load,
+    kind = 'routes'
   }: {
     client: QueryClient;
+    kind?: CodeManagementKind;
     route: CodeRoute;
     load?: ComponentProps<typeof ClientConfiguration>['load'];
   } = $props();
@@ -25,7 +28,7 @@
   {:else}
     <CodeManagement
       projectId={route.project_id}
-      kind="routes"
+      {kind}
       allowed={true}
       gatewayURL="https://olp.example"
       onDraftChange={() => {}}

@@ -10,7 +10,6 @@ import (
 
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/attribution"
-	"github.com/tyk-swe/olp/internal/providers"
 	"github.com/tyk-swe/olp/internal/usage"
 )
 
@@ -95,36 +94,13 @@ func (s *Server) exportDocument(ctx context.Context, q access.Queryer) (*Documen
 		}
 		entry := ProviderEntry{Name: name, Project: projectName}
 		if configuration != nil {
-			if err = json.Unmarshal(configuration, &entry.Configuration); err != nil {
+
+			portable, err := portableProviderRevision(entry, configuration, models, slots)
+			if err != nil {
 				return nil, err
 			}
-			var revisionModels []routing.RevisionModel
-			if err = json.Unmarshal(models, &revisionModels); err != nil {
-				return nil, err
-			}
-			for _, m := range revisionModels {
-				model := ModelEntry{UpstreamModel: m.UpstreamModel, DisplayName: m.DisplayName, Enabled: true}
-				for _, c := range m.Capabilities {
-					model.Capabilities = append(model.Capabilities, CapabilityEntry{Operation: c.Operation, Surface: c.Surface, Mode: c.Mode})
-				}
-				entry.Models = append(entry.Models, model)
-			}
-			var revisionSlots []routing.RevisionSlot
-			if err = json.Unmarshal(slots, &revisionSlots); err != nil {
-				return nil, err
-			}
-			for i, rs := range revisionSlots {
-				slot := SlotEntry{Name: rs.Name, IsDefault: rs.Default, Position: i, Enabled: rs.Enabled, Priority: rs.Priority, Weight: rs.Weight,
-					Restrictions: Restrictions{AllowedAPIKeys: []string{}, AllowedModels: orEmpty(rs.AllowedModels), AllowedRoutes: orEmpty(rs.AllowedRoutes)},
-					Limits:       providers.Limits{MaxConcurrency: rs.MaxConcurrency, RequestsPerMinute: rs.RequestsPerMinute, TokensPerMinute: rs.TokensPerMinute, Supply: rs.Supply}}
-				if rs.CredentialID != nil {
-					ref := CredentialRef(name, rs.Name)
-					slot.CredentialRef = &ref
-				}
-				entry.Slots = append(entry.Slots, slot)
-			}
-			portableNetwork(&entry)
-			referenceGrants(&entry)
+			entry = portable
+
 			if err = attachBillingImport(ctx, q, &entry, id); err != nil {
 				return nil, err
 			}
@@ -273,6 +249,10 @@ func (s *Server) exportDocument(ctx context.Context, q access.Queryer) (*Documen
 	if err := exportGuardrailPlatform(ctx, q, doc); err != nil {
 		return nil, err
 	}
+	if doc.Code, err = exportCode(ctx, q); err != nil {
+		return nil, err
+	}
+	doc.Code = canonicalCode(doc.Code)
 	return doc, nil
 }
 

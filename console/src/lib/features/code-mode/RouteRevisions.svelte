@@ -37,6 +37,11 @@
           <p>
             Pool {revision.route.pool_id} · {revision.route.models.join(', ')}
           </p>
+          <p>
+            Codex CLI identity compatibility {revision.route.codex_cli_identity
+              ? 'enabled. Codex subscription requests with no nonblank Originator receive Originator=codex_cli_rs. Explicit identity headers and prompts are preserved. This may violate provider terms and risk account suspension.'
+              : 'disabled. Identity headers and prompts are preserved.'}
+          </p>
           <code>{revision.id}</code>
         </li>{:else}<li>No published revisions.</li>{/each}
     </ul>

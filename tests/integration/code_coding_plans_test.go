@@ -10,6 +10,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"encoding/json"
 	"encoding/pem"
 	"fmt"
 	"io"
@@ -17,12 +18,17 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
+	"github.com/tyk-swe/olp/internal/codemode"
 	"github.com/tyk-swe/olp/internal/codeplans"
+	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/providers"
 	"github.com/tyk-swe/olp/internal/resources"
 	"github.com/tyk-swe/olp/internal/testutil"
@@ -272,6 +278,173 @@ func (f *codingPlanFixture) post(t *testing.T, path string, header http.Header, 
 	defer response.Body.Close()
 	out, _ := io.ReadAll(response.Body)
 	return response, out
+}
+
+func (p *fixedHostPeer) limitAllowance() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.respond = func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusTooManyRequests) }
+}
+
+func codeDiscoveryResponse[T any](t *testing.T, response map[string]any) T {
+	t.Helper()
+	encoded, err := json.Marshal(response)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var result T
+	if err := json.Unmarshal(encoded, &result); err != nil {
+		t.Fatal(err)
+	}
+	return result
+}
+
+func codeDiscoveryAccountInput(account contract.CodeAccount, enabled bool, models []string) contract.CodeAccountWrite {
+	return contract.CodeAccountWrite{ProjectId: account.ProjectId, ProviderId: account.ProviderId, CredentialId: account.CredentialId, Name: account.Name, Enabled: enabled, Models: models}
+}
+
+func codeDiscoveryCatalog(t *testing.T, f *codingPlanFixture, status int) []codemode.Model {
+	t.Helper()
+	request, err := http.NewRequestWithContext(t.Context(), http.MethodGet, f.gateway.URL+"/code/qualification/models", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.Header.Set("Authorization", "Bearer "+f.key)
+	response, err := f.gateway.Client().Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	body, err := io.ReadAll(response.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response.StatusCode != status {
+		t.Fatalf("discovery status %d body %s", response.StatusCode, body)
+	}
+	if status != 200 {
+		if strings.Contains(string(body), "private-code") || strings.Contains(string(body), "controlled-key") {
+			t.Fatalf("refusal leaked account details %s", body)
+		}
+		return nil
+	}
+	var result struct {
+		Data []codemode.Model `json:"data"`
+	}
+	if err := json.Unmarshal(body, &result); err != nil {
+		t.Fatal(err)
+	}
+	return result.Data
+}
+
+func TestCodeModelDiscoveryTracksLiveAccountEligibility(t *testing.T) {
+	f := newCodingPlanFixture(t, "zai-coding", codeplans.ZAIProfile, "controlled-key-a-0123456789abcdef", "controlled-key-b-0123456789abcdef", "controlled-key-c-0123456789abcdef")
+	models := []string{"private-code-a", "private-code-b", "private-code-c"}
+	accountResponses := slices.Collect(func(yield func(map[string]any) bool) {
+		for i, response := range f.accounts {
+			account := codeDiscoveryResponse[contract.CodeAccount](t, response)
+			updated := f.h.want(f.owner, "PUT", "/api/v1/code/accounts/"+account.Id.String(), codeDiscoveryAccountInput(account, true, models[i:i+1]), etagHeader(response), 200)
+			if !yield(updated) {
+				return
+			}
+		}
+	})
+	accounts := slices.Collect(func(yield func(contract.CodeAccount) bool) {
+		for _, response := range accountResponses {
+			if !yield(codeDiscoveryResponse[contract.CodeAccount](t, response)) {
+				return
+			}
+		}
+	})
+	route := codeDiscoveryResponse[contract.CodeRoute](t, f.route)
+	routeID := route.Id.String()
+	draft := f.h.want(f.owner, "PUT", "/api/v1/code/routes/"+routeID, contract.CodeRouteWrite{ProjectId: route.ProjectId, Slug: route.Slug, PoolId: route.PoolId, Models: models, Enabled: true}, etagHeader(f.route), 200)
+	f.h.want(f.owner, "POST", "/api/v1/code/routes/"+routeID+"/publish", nil, withMatch(draft, idem("discovery-publish")), 200)
+	f.h.refresh()
+	assertModels := func(want []string) {
+		t.Helper()
+		data := codeDiscoveryCatalog(t, f, 200)
+		ids := slices.Collect(func(yield func(string) bool) {
+			for _, model := range data {
+				if !yield(model.ID) {
+					return
+				}
+			}
+		})
+		if !slices.Equal(ids, want) {
+			t.Fatalf("models %v want %v", ids, want)
+		}
+		setup := codeDiscoveryResponse[codemode.ClientConfiguration](t, f.h.want(f.owner, "GET", "/api/v1/code/routes/"+routeID+"/client-config?gateway_url=https%3A%2F%2Fgateway.example&client=opencode", nil, nil, 200))
+		if !reflect.DeepEqual(setup.Models, data) {
+			t.Fatalf("setup models differ from discovery %+v %+v", setup.Models, data)
+		}
+	}
+	pool := codeDiscoveryResponse[contract.CodePool](t, f.pool)
+	poolInput := func(keyIDs []uuid.UUID) contract.CodePoolWrite {
+		return contract.CodePoolWrite{ProjectId: pool.ProjectId, Name: pool.Name, Kind: contract.CodePoolWriteKind(pool.Kind), OwnerUserId: pool.OwnerUserId, AccountIds: []uuid.UUID{accounts[0].Id, accounts[1].Id}, ApiKeyIds: keyIDs}
+	}
+	assertModels(models)
+	narrowedPool := f.h.want(f.owner, "PUT", "/api/v1/code/pools/"+pool.Id.String(), poolInput(pool.ApiKeyIds), etagHeader(f.pool), 200)
+	assertModels(models[:2])
+	disabledResponse := f.h.want(f.owner, "PUT", "/api/v1/code/accounts/"+accounts[1].Id.String(), codeDiscoveryAccountInput(accounts[1], false, models[1:2]), etagHeader(accountResponses[1]), 200)
+	disabled := codeDiscoveryResponse[contract.CodeAccount](t, disabledResponse)
+	assertModels(models[:1])
+	f.h.want(f.owner, "PUT", "/api/v1/code/accounts/"+disabled.Id.String(), codeDiscoveryAccountInput(disabled, true, models[1:2]), etagHeader(disabledResponse), 200)
+	assertModels(models[:2])
+	providerPath := "/api/v1/providers/" + disabled.ProviderId.String()
+	provider := f.h.want(f.owner, "GET", providerPath, nil, nil, 200)
+	f.h.want(f.owner, "POST", providerPath+"/credentials/"+disabled.CredentialId.String()+"/revoke", nil, withMatch(provider, idem("discovery-credential-revoke")), 200)
+	assertModels(models[:1])
+	f.peer.limitAllowance()
+	response, body := f.post(t, "v1/chat/completions", http.Header{"Authorization": {"Bearer " + f.key}, "X-Opencode-Session-Id": {"catalog-quota"}}, `{"model":"private-code-a","stream":true,"messages":[{"role":"user","content":"controlled"}]}`)
+	if response.StatusCode != http.StatusTooManyRequests {
+		t.Fatalf("quota response %d %s", response.StatusCode, body)
+	}
+	f.settled(t, 1)
+	if data := codeDiscoveryCatalog(t, f, 200); len(data) != 0 {
+		t.Fatalf("unavailable accounts remain discoverable %+v", data)
+	}
+	f.h.want(f.owner, "GET", "/api/v1/code/routes/"+routeID+"/client-config?gateway_url=https%3A%2F%2Fgateway.example&client=opencode", nil, nil, 409)
+	unlinkedPool := f.h.want(f.owner, "PUT", "/api/v1/code/pools/"+pool.Id.String(), poolInput([]uuid.UUID{}), etagHeader(narrowedPool), 200)
+	codeDiscoveryCatalog(t, f, 403)
+	f.h.want(f.owner, "PUT", "/api/v1/code/pools/"+pool.Id.String(), poolInput(pool.ApiKeyIds), etagHeader(unlinkedPool), 200)
+	path := "/api/v1/api-keys/" + f.keyID
+	key := f.h.want(f.owner, "GET", path, nil, nil, 200)
+	f.h.want(f.owner, "POST", path+"/revoke", nil, withMatch(key, idem("discovery-revoke")), 200)
+	codeDiscoveryCatalog(t, f, 403)
+}
+
+func TestCodeModelDiscoveryRequiresPublishedCredentialBuild(t *testing.T) {
+	const key = "controlled-catalog-key-0123456789abcdef"
+	f := newCodingPlanFixture(t, "zai-coding", codeplans.ZAIProfile, key)
+	account := codeDiscoveryResponse[contract.CodeAccount](t, f.accounts[0])
+	route := codeDiscoveryResponse[contract.CodeRoute](t, f.route)
+	initial := codeDiscoveryCatalog(t, f, 200)
+	if len(initial) == 0 {
+		t.Fatal("published credential has no discoverable models")
+	}
+	nextDigest := installPlugin(t, f.h, f.owner, testutil.BuildPlugin(t, "./plugins/zai-coding", "-buildid=code-catalog-next"))
+	providerPath := "/api/v1/providers/" + account.ProviderId.String()
+	providerResponse := f.h.want(f.owner, "GET", providerPath, nil, nil, 200)
+	provider := codeDiscoveryResponse[contract.ProviderDetailResponse](t, providerResponse)
+	configuration := contract.ProviderConfiguration{Kind: provider.Configuration.Kind, AuthMode: provider.Configuration.AuthMode, ProfileId: provider.Configuration.ProfileId, ProfileRevision: &nextDigest, Options: provider.Configuration.Options}
+	f.h.want(f.owner, "PATCH", providerPath, contract.UpdateProviderRequest{Name: provider.Name, Configuration: configuration}, etagHeader(providerResponse), 200)
+	nextCredentialID, err := uuid.Parse(f.enroll(t, account.ProviderId.String(), key))
+	if err != nil {
+		t.Fatal(err)
+	}
+	nextAccount := f.h.want(f.owner, "PUT", "/api/v1/code/accounts/"+account.Id.String(), contract.CodeAccountWrite{ProjectId: account.ProjectId, ProviderId: account.ProviderId, CredentialId: nextCredentialID, Name: account.Name, Enabled: true, Models: account.Models}, etagHeader(f.accounts[0]), 200)
+	if data := codeDiscoveryCatalog(t, f, 200); len(data) != 0 {
+		t.Fatalf("credential from an unpublished plugin build remained discoverable %+v", data)
+	}
+	setupPath := "/api/v1/code/routes/" + route.Id.String() + "/client-config?gateway_url=https%3A%2F%2Fgateway.example&client=opencode"
+	f.h.want(f.owner, "GET", setupPath, nil, nil, 409)
+	currentProvider := f.h.want(f.owner, "GET", providerPath, nil, nil, 200)
+	f.h.want(f.owner, "PATCH", providerPath, contract.UpdateProviderRequest{Name: provider.Name, Configuration: provider.Configuration}, etagHeader(currentProvider), 200)
+	f.h.want(f.owner, "PUT", "/api/v1/code/accounts/"+account.Id.String(), codeDiscoveryAccountInput(account, true, account.Models), etagHeader(nextAccount), 200)
+	if data := codeDiscoveryCatalog(t, f, 200); !reflect.DeepEqual(data, initial) {
+		t.Fatalf("restored published credential changed catalog %+v", data)
+	}
 }
 
 // settled waits until n attempts are no longer prepared or in flight.

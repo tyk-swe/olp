@@ -21,27 +21,14 @@ func Decode(raw []byte, encoding string, limit int64) ([]byte, error) {
 	if int64(len(raw)) > limit {
 		return nil, codemode.Refuse(413, "code_body_too_large")
 	}
-	var reader io.Reader
-	switch strings.ToLower(strings.TrimSpace(encoding)) {
-	case "", "identity":
+	if strings.TrimSpace(encoding) == "" || strings.EqualFold(strings.TrimSpace(encoding), "identity") {
 		return raw, nil
-	case "gzip":
-		gz, err := gzip.NewReader(bytes.NewReader(raw))
-		if err != nil {
-			return nil, codemode.Refuse(400, "code_encoding_invalid")
-		}
-		defer gz.Close()
-		reader = gz
-	case "zstd":
-		zr, err := zstd.NewReader(bytes.NewReader(raw), zstd.WithDecoderConcurrency(1), zstd.WithDecoderMaxMemory(uint64(limit)))
-		if err != nil {
-			return nil, codemode.Refuse(400, "code_encoding_invalid")
-		}
-		defer zr.Close()
-		reader = zr
-	default:
-		return nil, codemode.Refuse(415, "code_encoding_unsupported")
 	}
+	reader, err := OpenDecoder(bytes.NewReader(raw), encoding, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer reader.Close()
 	body, err := io.ReadAll(io.LimitReader(reader, limit+1))
 	if err != nil {
 		return nil, codemode.Refuse(400, "code_encoding_invalid")
@@ -50,6 +37,27 @@ func Decode(raw []byte, encoding string, limit int64) ([]byte, error) {
 		return nil, codemode.Refuse(413, "code_body_too_large")
 	}
 	return body, nil
+}
+
+func OpenDecoder(reader io.Reader, encoding string, limit int64) (io.ReadCloser, error) {
+	switch strings.ToLower(strings.TrimSpace(encoding)) {
+	case "", "identity":
+		return io.NopCloser(reader), nil
+	case "gzip":
+		decoded, err := gzip.NewReader(reader)
+		if err != nil {
+			return nil, codemode.Refuse(400, "code_encoding_invalid")
+		}
+		return decoded, nil
+	case "zstd":
+		decoded, err := zstd.NewReader(reader, zstd.WithDecoderConcurrency(1), zstd.WithDecoderMaxMemory(uint64(limit)))
+		if err != nil {
+			return nil, codemode.Refuse(400, "code_encoding_invalid")
+		}
+		return decoded.IOReadCloser(), nil
+	default:
+		return nil, codemode.Refuse(415, "code_encoding_unsupported")
+	}
 }
 
 func field(value oif.Value, name string) oif.Value { child, _ := value.Lookup(name); return child }

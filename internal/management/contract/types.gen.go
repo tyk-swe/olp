@@ -657,6 +657,8 @@ func (e CatalogSampleSdk) Valid() bool {
 
 // Defines values for CodeAccountAdapter.
 const (
+	CodeAccountAdapterAntigravity   CodeAccountAdapter = "antigravity"
+	CodeAccountAdapterClaude        CodeAccountAdapter = "claude"
 	CodeAccountAdapterCodex         CodeAccountAdapter = "codex"
 	CodeAccountAdapterKimiCode      CodeAccountAdapter = "kimi_code"
 	CodeAccountAdapterLessThannil   CodeAccountAdapter = "<nil>"
@@ -669,6 +671,10 @@ const (
 // Valid indicates whether the value is a known member of the CodeAccountAdapter enum.
 func (e CodeAccountAdapter) Valid() bool {
 	switch e {
+	case CodeAccountAdapterAntigravity:
+		return true
+	case CodeAccountAdapterClaude:
+		return true
 	case CodeAccountAdapterCodex:
 		return true
 	case CodeAccountAdapterKimiCode:
@@ -838,6 +844,54 @@ func (e CodeAttemptOutcomeOrigin) Valid() bool {
 	}
 }
 
+// Defines values for CodeAttemptPaidMonetaryState.
+const (
+	CodeAttemptPaidMonetaryStateLessThannil CodeAttemptPaidMonetaryState = "<nil>"
+	CodeAttemptPaidMonetaryStatePending     CodeAttemptPaidMonetaryState = "pending"
+	CodeAttemptPaidMonetaryStateReleased    CodeAttemptPaidMonetaryState = "released"
+	CodeAttemptPaidMonetaryStateSettled     CodeAttemptPaidMonetaryState = "settled"
+	CodeAttemptPaidMonetaryStateUnknown     CodeAttemptPaidMonetaryState = "unknown"
+)
+
+// Valid indicates whether the value is a known member of the CodeAttemptPaidMonetaryState enum.
+func (e CodeAttemptPaidMonetaryState) Valid() bool {
+	switch e {
+	case CodeAttemptPaidMonetaryStateLessThannil:
+		return true
+	case CodeAttemptPaidMonetaryStatePending:
+		return true
+	case CodeAttemptPaidMonetaryStateReleased:
+		return true
+	case CodeAttemptPaidMonetaryStateSettled:
+		return true
+	case CodeAttemptPaidMonetaryStateUnknown:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for CodeAttemptRecoveryReason.
+const (
+	CodeAttemptRecoveryReasonCredentialRejected CodeAttemptRecoveryReason = "credential_rejected"
+	CodeAttemptRecoveryReasonLessThannil        CodeAttemptRecoveryReason = "<nil>"
+	CodeAttemptRecoveryReasonQuotaRejected      CodeAttemptRecoveryReason = "quota_rejected"
+)
+
+// Valid indicates whether the value is a known member of the CodeAttemptRecoveryReason enum.
+func (e CodeAttemptRecoveryReason) Valid() bool {
+	switch e {
+	case CodeAttemptRecoveryReasonCredentialRejected:
+		return true
+	case CodeAttemptRecoveryReasonLessThannil:
+		return true
+	case CodeAttemptRecoveryReasonQuotaRejected:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for CodeAttemptState.
 const (
 	CodeAttemptStateAborted        CodeAttemptState = "aborted"
@@ -867,6 +921,8 @@ func (e CodeAttemptState) Valid() bool {
 
 // Defines values for CodeClientConfigurationAdapters.
 const (
+	CodeClientConfigurationAdaptersAntigravity   CodeClientConfigurationAdapters = "antigravity"
+	CodeClientConfigurationAdaptersClaude        CodeClientConfigurationAdapters = "claude"
 	CodeClientConfigurationAdaptersCodex         CodeClientConfigurationAdapters = "codex"
 	CodeClientConfigurationAdaptersKimiCode      CodeClientConfigurationAdapters = "kimi_code"
 	CodeClientConfigurationAdaptersMinimaxPlan   CodeClientConfigurationAdapters = "minimax_plan"
@@ -878,6 +934,10 @@ const (
 // Valid indicates whether the value is a known member of the CodeClientConfigurationAdapters enum.
 func (e CodeClientConfigurationAdapters) Valid() bool {
 	switch e {
+	case CodeClientConfigurationAdaptersAntigravity:
+		return true
+	case CodeClientConfigurationAdaptersClaude:
+		return true
 	case CodeClientConfigurationAdaptersCodex:
 		return true
 	case CodeClientConfigurationAdaptersKimiCode:
@@ -918,15 +978,18 @@ func (e CodeClientConfigurationClient) Valid() bool {
 
 // Defines values for CodeClientConfigurationFormat.
 const (
-	CodeClientConfigurationFormatJson  CodeClientConfigurationFormat = "json"
-	CodeClientConfigurationFormatShell CodeClientConfigurationFormat = "shell"
-	CodeClientConfigurationFormatToml  CodeClientConfigurationFormat = "toml"
+	CodeClientConfigurationFormatJson       CodeClientConfigurationFormat = "json"
+	CodeClientConfigurationFormatPowershell CodeClientConfigurationFormat = "powershell"
+	CodeClientConfigurationFormatShell      CodeClientConfigurationFormat = "shell"
+	CodeClientConfigurationFormatToml       CodeClientConfigurationFormat = "toml"
 )
 
 // Valid indicates whether the value is a known member of the CodeClientConfigurationFormat enum.
 func (e CodeClientConfigurationFormat) Valid() bool {
 	switch e {
 	case CodeClientConfigurationFormatJson:
+		return true
+	case CodeClientConfigurationFormatPowershell:
 		return true
 	case CodeClientConfigurationFormatShell:
 		return true
@@ -958,6 +1021,27 @@ func (e CodeClientConfigurationSupportedClients) Valid() bool {
 	}
 }
 
+// Defines values for CodeClientPlatform.
+const (
+	Linux   CodeClientPlatform = "linux"
+	Macos   CodeClientPlatform = "macos"
+	Windows CodeClientPlatform = "windows"
+)
+
+// Valid indicates whether the value is a known member of the CodeClientPlatform enum.
+func (e CodeClientPlatform) Valid() bool {
+	switch e {
+	case Linux:
+		return true
+	case Macos:
+		return true
+	case Windows:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for CodeConfigurationFileFormat.
 const (
 	CodeConfigurationFileFormatJson  CodeConfigurationFileFormat = "json"
@@ -973,6 +1057,81 @@ func (e CodeConfigurationFileFormat) Valid() bool {
 	case CodeConfigurationFileFormatShell:
 		return true
 	case CodeConfigurationFileFormatToml:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for CodeModelClients.
+const (
+	CodeModelClientsClaudeCode CodeModelClients = "claude-code"
+	CodeModelClientsCodex      CodeModelClients = "codex"
+	CodeModelClientsOpencode   CodeModelClients = "opencode"
+)
+
+// Valid indicates whether the value is a known member of the CodeModelClients enum.
+func (e CodeModelClients) Valid() bool {
+	switch e {
+	case CodeModelClientsClaudeCode:
+		return true
+	case CodeModelClientsCodex:
+		return true
+	case CodeModelClientsOpencode:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for CodeModelObject.
+const (
+	CodeModelObjectModel CodeModelObject = "model"
+)
+
+// Valid indicates whether the value is a known member of the CodeModelObject enum.
+func (e CodeModelObject) Valid() bool {
+	switch e {
+	case CodeModelObjectModel:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for CodeModelCapabilityProtocol.
+const (
+	CodeModelCapabilityProtocolChat      CodeModelCapabilityProtocol = "chat"
+	CodeModelCapabilityProtocolMessages  CodeModelCapabilityProtocol = "messages"
+	CodeModelCapabilityProtocolResponses CodeModelCapabilityProtocol = "responses"
+)
+
+// Valid indicates whether the value is a known member of the CodeModelCapabilityProtocol enum.
+func (e CodeModelCapabilityProtocol) Valid() bool {
+	switch e {
+	case CodeModelCapabilityProtocolChat:
+		return true
+	case CodeModelCapabilityProtocolMessages:
+		return true
+	case CodeModelCapabilityProtocolResponses:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for CodeModelCapabilityTransports.
+const (
+	Http      CodeModelCapabilityTransports = "http"
+	Websocket CodeModelCapabilityTransports = "websocket"
+)
+
+// Valid indicates whether the value is a known member of the CodeModelCapabilityTransports enum.
+func (e CodeModelCapabilityTransports) Valid() bool {
+	switch e {
+	case Http:
+		return true
+	case Websocket:
 		return true
 	default:
 		return false
@@ -1038,6 +1197,8 @@ func (e CodeResearchToolsServices) Valid() bool {
 
 // Defines values for CodeRouteAdapters.
 const (
+	CodeRouteAdaptersAntigravity   CodeRouteAdapters = "antigravity"
+	CodeRouteAdaptersClaude        CodeRouteAdapters = "claude"
 	CodeRouteAdaptersCodex         CodeRouteAdapters = "codex"
 	CodeRouteAdaptersKimiCode      CodeRouteAdapters = "kimi_code"
 	CodeRouteAdaptersMinimaxPlan   CodeRouteAdapters = "minimax_plan"
@@ -1049,6 +1210,10 @@ const (
 // Valid indicates whether the value is a known member of the CodeRouteAdapters enum.
 func (e CodeRouteAdapters) Valid() bool {
 	switch e {
+	case CodeRouteAdaptersAntigravity:
+		return true
+	case CodeRouteAdaptersClaude:
+		return true
 	case CodeRouteAdaptersCodex:
 		return true
 	case CodeRouteAdaptersKimiCode:
@@ -1141,6 +1306,24 @@ func (e ConfigurationCapabilityEntryMode) Valid() bool {
 	case ConfigurationCapabilityEntryModeStreaming:
 		return true
 	case ConfigurationCapabilityEntryModeUnary:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ConfigurationCodePoolKind.
+const (
+	ConfigurationCodePoolKindPersonal ConfigurationCodePoolKind = "personal"
+	ConfigurationCodePoolKindShared   ConfigurationCodePoolKind = "shared"
+)
+
+// Valid indicates whether the value is a known member of the ConfigurationCodePoolKind enum.
+func (e ConfigurationCodePoolKind) Valid() bool {
+	switch e {
+	case ConfigurationCodePoolKindPersonal:
+		return true
+	case ConfigurationCodePoolKindShared:
 		return true
 	default:
 		return false
@@ -1530,6 +1713,10 @@ const (
 	ConfigurationPlanItemKindAgentPublication    ConfigurationPlanItemKind = "agent_publication"
 	ConfigurationPlanItemKindBillingImport       ConfigurationPlanItemKind = "billing_import"
 	ConfigurationPlanItemKindCatalogPublication  ConfigurationPlanItemKind = "catalog_publication"
+	ConfigurationPlanItemKindCodeAccount         ConfigurationPlanItemKind = "code_account"
+	ConfigurationPlanItemKindCodeBudget          ConfigurationPlanItemKind = "code_budget"
+	ConfigurationPlanItemKindCodePool            ConfigurationPlanItemKind = "code_pool"
+	ConfigurationPlanItemKindCodeRoute           ConfigurationPlanItemKind = "code_route"
 	ConfigurationPlanItemKindConfiguration       ConfigurationPlanItemKind = "configuration"
 	ConfigurationPlanItemKindCredential          ConfigurationPlanItemKind = "credential"
 	ConfigurationPlanItemKindDiscount            ConfigurationPlanItemKind = "discount"
@@ -1556,6 +1743,14 @@ func (e ConfigurationPlanItemKind) Valid() bool {
 	case ConfigurationPlanItemKindBillingImport:
 		return true
 	case ConfigurationPlanItemKindCatalogPublication:
+		return true
+	case ConfigurationPlanItemKindCodeAccount:
+		return true
+	case ConfigurationPlanItemKindCodeBudget:
+		return true
+	case ConfigurationPlanItemKindCodePool:
+		return true
+	case ConfigurationPlanItemKindCodeRoute:
 		return true
 	case ConfigurationPlanItemKindConfiguration:
 		return true
@@ -6423,6 +6618,15 @@ type AggregateBudgetUsage struct {
 // AggregateBudgetUsageCostBasis The measure accrued expresses.
 type AggregateBudgetUsageCostBasis string
 
+// AntigravityCredentialImportRequest defines model for AntigravityCredentialImportRequest.
+type AntigravityCredentialImportRequest struct {
+	// Credentials One-time Antigravity migration JSON with type=antigravity, access_token, refresh_token, client_id and client_secret for the original authorized OAuth client. The client_id must match the provider option. Optional pinned export metadata is expired (RFC3339), expires_in, timestamp, email and project_id. Supplied expiry must be current and supplied project_id must agree with authenticated project evidence. Email never establishes identity. Unknown fields, ambiguous JSON, raw IDE stores, service accounts and credentials without original client authorization are unsupported. The original access token must authenticate fixed userinfo and project endpoints. Import refreshes and verifies the same subject and project before encrypted staging.
+	Credentials *string `json:"credentials,omitempty"`
+
+	// SlotId Existing credential slot, defaults to the default slot
+	SlotId *openapi_types.UUID `json:"slot_id,omitempty"`
+}
+
 // ApiKeyBudgetResponse defines model for ApiKeyBudgetResponse.
 type ApiKeyBudgetResponse struct {
 	CostBasis *ApiKeyBudgetResponseCostBasis `json:"cost_basis,omitempty"`
@@ -7218,35 +7422,52 @@ type ClassifierPredicate struct {
 	TimeoutMs int64                      `json:"timeout_ms"`
 }
 
+// ClaudeCredentialImportRequest defines model for ClaudeCredentialImportRequest.
+type ClaudeCredentialImportRequest struct {
+	// Credentials Claude Code .credentials.json JSON text containing only claudeAiOauth with accessToken, refreshToken, expiresAt in epoch milliseconds and scopes including user:profile and user:inference. Optional metadata fields are refreshTokenExpiresAt, subscriptionType, subscriptionTypeSource, subscriptionTypeVerifiedAt, rateLimitTier and clientId. A supplied clientId must match the supported official client. Other fields, alternative credential stores and ambiguous JSON are rejected. The original access token must still authenticate the fixed profile endpoint. Import verifies account and organization before and after refresh, without decoding token claims.
+	Credentials *string `json:"credentials,omitempty"`
+
+	// SlotId Existing credential slot, defaults to the default slot
+	SlotId *openapi_types.UUID `json:"slot_id,omitempty"`
+}
+
 // CodeAccount defines model for CodeAccount.
 type CodeAccount struct {
-	// Adapter The subscription family of the account's provider profile: Codex, OpenCode Go, GLM Coding Plan, MiniMax M Plan, Kimi Code or Qwen Token Plan. Null for a profile no code-mode adapter serves. A pool may mix families; each request reaches an account whose family serves its path and model.
+	// Adapter The subscription family of the account's provider profile: Codex, Claude, OpenCode Go, GLM Coding Plan, MiniMax M Plan, Kimi Code or Qwen Token Plan. Null for a profile no code-mode adapter serves. A pool may mix families; each request reaches an account whose family serves its path and model.
 	Adapter      nullable.Nullable[CodeAccountAdapter] `json:"adapter"`
 	Allowance    nullable.Nullable[CodeAllowance]      `json:"allowance"`
 	CredentialId openapi_types.UUID                    `json:"credential_id"`
 	Eligible     bool                                  `json:"eligible"`
 	Enabled      bool                                  `json:"enabled"`
 	Etag         openapi_types.UUID                    `json:"etag"`
-	GrantState   CodeAccountGrantState                 `json:"grant_state"`
-	Health       CodeAccountHealth                     `json:"health"`
-	Id           openapi_types.UUID                    `json:"id"`
-	Models       []string                              `json:"models"`
-	Name         string                                `json:"name"`
-	Principal    string                                `json:"principal"`
-	ProjectId    openapi_types.UUID                    `json:"project_id"`
-	ProviderId   openapi_types.UUID                    `json:"provider_id"`
+
+	// GrantState Grant authority is independent of serving health and allowance. A rejected refresh lapses the grant and requires enrollment again.
+	GrantState CodeAccountGrantState `json:"grant_state"`
+	Health     CodeAccountHealth     `json:"health"`
+
+	// HealthObservedAt Time of the latest serving health observation. Enrollment and refresh do not qualify serving health.
+	HealthObservedAt nullable.Nullable[time.Time] `json:"health_observed_at,omitempty"`
+	Id               openapi_types.UUID           `json:"id"`
+	Models           []string                     `json:"models"`
+	Name             string                       `json:"name"`
+	Principal        string                       `json:"principal"`
+	ProjectId        openapi_types.UUID           `json:"project_id"`
+	ProviderId       openapi_types.UUID           `json:"provider_id"`
 
 	// ResearchEligible Current research enrollment eligibility, independent of inference health and allowance; route pool membership is also required.
 	ResearchEligible *bool `json:"research_eligible,omitempty"`
 
 	// ResearchServices Research services supported by the enrolled profile; also requires research eligibility and route pool membership.
 	ResearchServices *[]CodeAccountResearchServices `json:"research_services,omitempty"`
+
+	// UnavailableUntil End of the serving cooldown. Exhausted allowance and grant authority remain independent eligibility requirements.
+	UnavailableUntil nullable.Nullable[time.Time] `json:"unavailable_until,omitempty"`
 }
 
-// CodeAccountAdapter The subscription family of the account's provider profile: Codex, OpenCode Go, GLM Coding Plan, MiniMax M Plan, Kimi Code or Qwen Token Plan. Null for a profile no code-mode adapter serves. A pool may mix families; each request reaches an account whose family serves its path and model.
+// CodeAccountAdapter The subscription family of the account's provider profile: Codex, Claude, OpenCode Go, GLM Coding Plan, MiniMax M Plan, Kimi Code or Qwen Token Plan. Null for a profile no code-mode adapter serves. A pool may mix families; each request reaches an account whose family serves its path and model.
 type CodeAccountAdapter string
 
-// CodeAccountGrantState defines model for CodeAccount.GrantState.
+// CodeAccountGrantState Grant authority is independent of serving health and allowance. A rejected refresh lapses the grant and requires enrollment again.
 type CodeAccountGrantState string
 
 // CodeAccountHealth defines model for CodeAccount.Health.
@@ -7307,37 +7528,59 @@ type CodeAllowanceWindowWindow string
 
 // CodeAttempt Metadata only. No request or response body, tools, headers or secrets are retained. Reserved tokens are conservative bounds, not reported usage; unreported consumption remains uncertain indefinitely. Cached and reasoning tokens are subsets.
 type CodeAttempt struct {
-	AccountId     openapi_types.UUID        `json:"account_id"`
-	ApiKeyId      openapi_types.UUID        `json:"api_key_id"`
-	Attribution   *map[string]string        `json:"attribution,omitempty"`
-	BindingId     openapi_types.UUID        `json:"binding_id"`
-	BoundEvidence nullable.Nullable[string] `json:"bound_evidence"`
-	CachedTokens  nullable.Nullable[int64]  `json:"cached_tokens"`
-	CreatedAt     time.Time                 `json:"created_at"`
+	AccountId     nullable.Nullable[openapi_types.UUID] `json:"account_id"`
+	ApiKeyId      openapi_types.UUID                    `json:"api_key_id"`
+	Attribution   *map[string]string                    `json:"attribution,omitempty"`
+	BindingId     nullable.Nullable[openapi_types.UUID] `json:"binding_id"`
+	BoundEvidence nullable.Nullable[string]             `json:"bound_evidence"`
+	CachedTokens  nullable.Nullable[int64]              `json:"cached_tokens"`
+
+	// CodexCliIdentityEnabled Whether the frozen route revision enabled Codex CLI identity compatibility. This is route policy, not evidence that an Originator header changed or that this attempt used Codex. No client identity header values or prompt content are recorded.
+	CodexCliIdentityEnabled *bool     `json:"codex_cli_identity_enabled,omitempty"`
+	CreatedAt               time.Time `json:"created_at"`
 
 	// EndUserDigest Project-scoped end-user HMAC, or empty when identification was not configured. Raw identifiers are never retained.
 	EndUserDigest string                       `json:"end_user_digest"`
 	FinishedAt    nullable.Nullable[time.Time] `json:"finished_at"`
 	Id            openapi_types.UUID           `json:"id"`
-	InputTokens   nullable.Nullable[int64]     `json:"input_tokens"`
-	Model         string                       `json:"model"`
+
+	// InitialRecovery The portable initial input permitted recovery when admitted. False also includes historical attempts without that evidence. This does not establish account eligibility or permission to replay.
+	InitialRecovery bool                     `json:"initial_recovery"`
+	InputTokens     nullable.Nullable[int64] `json:"input_tokens"`
+	Model           string                   `json:"model"`
+
+	// Nonexecution A bounded upstream rejection was verified to prove this attempt did not execute. False means nonexecution was not proven.
+	Nonexecution bool `json:"nonexecution"`
 
 	// Operation The operation the request performed: `responses`, `compact` or `prewarm` on the Responses API, `messages` on Anthropic Messages, or `chat` on Chat Completions.
 	Operation string `json:"operation"`
 
 	// Outcome Bounded transport or generation result, independent of usage settlement and durable uncertainty.
-	Outcome           nullable.Nullable[CodeAttemptOutcome]       `json:"outcome"`
-	OutcomeObservedAt nullable.Nullable[time.Time]                `json:"outcome_observed_at"`
-	OutcomeOrigin     nullable.Nullable[CodeAttemptOutcomeOrigin] `json:"outcome_origin"`
-	OutputTokens      nullable.Nullable[int64]                    `json:"output_tokens"`
-	ProjectId         openapi_types.UUID                          `json:"project_id"`
-	ReasoningTokens   nullable.Nullable[int64]                    `json:"reasoning_tokens"`
-	Refusal           nullable.Nullable[string]                   `json:"refusal"`
-	ReportedTokens    nullable.Nullable[int64]                    `json:"reported_tokens"`
-	ReservedTokens    int64                                       `json:"reserved_tokens"`
-	RouteId           openapi_types.UUID                          `json:"route_id"`
-	RouteRevisionId   openapi_types.UUID                          `json:"route_revision_id"`
-	State             CodeAttemptState                            `json:"state"`
+	Outcome           nullable.Nullable[CodeAttemptOutcome]           `json:"outcome"`
+	OutcomeObservedAt nullable.Nullable[time.Time]                    `json:"outcome_observed_at"`
+	OutcomeOrigin     nullable.Nullable[CodeAttemptOutcomeOrigin]     `json:"outcome_origin"`
+	OutputTokens      nullable.Nullable[int64]                        `json:"output_tokens"`
+	PaidBindingId     nullable.Nullable[openapi_types.UUID]           `json:"paid_binding_id,omitempty"`
+	PaidMonetaryState nullable.Nullable[CodeAttemptPaidMonetaryState] `json:"paid_monetary_state,omitempty"`
+	PaidProviderId    nullable.Nullable[openapi_types.UUID]           `json:"paid_provider_id,omitempty"`
+	PaidSlotId        nullable.Nullable[openapi_types.UUID]           `json:"paid_slot_id,omitempty"`
+	ProjectId         openapi_types.UUID                              `json:"project_id"`
+	ReasoningTokens   nullable.Nullable[int64]                        `json:"reasoning_tokens"`
+
+	// RecoveryFrom Prior attempt this admission recovered from, within the same project, route and API key. Null when no visible recovery source was recorded.
+	RecoveryFrom nullable.Nullable[openapi_types.UUID] `json:"recovery_from"`
+
+	// RecoveryReason Reason from the recovery source that durably proved nonexecution. Null means historical evidence is unavailable or no recovery source exists. Never inferred from current account health.
+	RecoveryReason nullable.Nullable[CodeAttemptRecoveryReason] `json:"recovery_reason"`
+	Refusal        nullable.Nullable[string]                    `json:"refusal"`
+	ReportedTokens nullable.Nullable[int64]                     `json:"reported_tokens"`
+
+	// RequestedModel Public model requested before explicit alias resolution.
+	RequestedModel  nullable.Nullable[string] `json:"requested_model,omitempty"`
+	ReservedTokens  int64                     `json:"reserved_tokens"`
+	RouteId         openapi_types.UUID        `json:"route_id"`
+	RouteRevisionId openapi_types.UUID        `json:"route_revision_id"`
+	State           CodeAttemptState          `json:"state"`
 
 	// UpstreamStatus Observed upstream HTTP or WebSocket error status; null when not observed.
 	UpstreamStatus nullable.Nullable[int] `json:"upstream_status"`
@@ -7348,6 +7591,12 @@ type CodeAttemptOutcome string
 
 // CodeAttemptOutcomeOrigin defines model for CodeAttempt.OutcomeOrigin.
 type CodeAttemptOutcomeOrigin string
+
+// CodeAttemptPaidMonetaryState defines model for CodeAttempt.PaidMonetaryState.
+type CodeAttemptPaidMonetaryState string
+
+// CodeAttemptRecoveryReason Reason from the recovery source that durably proved nonexecution. Null means historical evidence is unavailable or no recovery source exists. Never inferred from current account health.
+type CodeAttemptRecoveryReason string
 
 // CodeAttemptState defines model for CodeAttempt.State.
 type CodeAttemptState string
@@ -7360,16 +7609,18 @@ type CodeAttemptList struct {
 
 // CodeBinding Persistent per-key conversation tree identity. Retiring any member retires the whole tree; retirement never permits re-binding to another account. Account and principal are the tree's first account, which later models prefer; pins name the account each model is served from.
 type CodeBinding struct {
-	AccountId    openapi_types.UUID                    `json:"account_id"`
-	ApiKeyId     openapi_types.UUID                    `json:"api_key_id"`
-	Conversation string                                `json:"conversation"`
-	CreatedAt    time.Time                             `json:"created_at"`
-	Id           openapi_types.UUID                    `json:"id"`
-	ParentId     nullable.Nullable[openapi_types.UUID] `json:"parent_id"`
+	AccountId      nullable.Nullable[openapi_types.UUID] `json:"account_id"`
+	ApiKeyId       openapi_types.UUID                    `json:"api_key_id"`
+	Conversation   string                                `json:"conversation"`
+	CreatedAt      time.Time                             `json:"created_at"`
+	Id             openapi_types.UUID                    `json:"id"`
+	PaidProviderId nullable.Nullable[openapi_types.UUID] `json:"paid_provider_id,omitempty"`
+	PaidSlotId     nullable.Nullable[openapi_types.UUID] `json:"paid_slot_id,omitempty"`
+	ParentId       nullable.Nullable[openapi_types.UUID] `json:"parent_id"`
 
 	// Pins The tree's pins, oldest first. A tree's first admission of a model pins an account to it, and the pin never moves.
 	Pins      []CodePin                    `json:"pins"`
-	Principal string                       `json:"principal"`
+	Principal nullable.Nullable[string]    `json:"principal"`
 	ProjectId openapi_types.UUID           `json:"project_id"`
 	RetiredAt nullable.Nullable[time.Time] `json:"retired_at"`
 	RootId    openapi_types.UUID           `json:"root_id"`
@@ -7412,7 +7663,7 @@ type CodeBudgetWrite struct {
 
 // CodeClientConfiguration defines model for CodeClientConfiguration.
 type CodeClientConfiguration struct {
-	// Adapters The subscription families whose accounts serve the client's native models, in display order. A mixed route's configuration draws each model from its own family.
+	// Adapters The subscription families whose accounts serve the client's published models and exact aliases, in display order. A mixed route's configuration draws each model from its own family. Empty for paid-only setup.
 	Adapters []CodeClientConfigurationAdapters `json:"adapters"`
 
 	// AdditionalFiles Companion configuration files required by this setup. Merge entries with existing client settings and MCP servers.
@@ -7424,24 +7675,34 @@ type CodeClientConfiguration struct {
 	ClientVersion string                        `json:"client_version"`
 	Configuration string                        `json:"configuration"`
 
-	// File Where to save the configuration, or null for a shell file to source.
+	// File Where to merge the configuration or save the shell setup. Follow instructions to preserve existing settings.
 	File nullable.Nullable[string] `json:"file"`
 
-	// Format The configuration's format: Codex TOML, a POSIX shell file to source, or OpenCode JSON.
+	// Format Codex TOML, a POSIX shell or PowerShell setup to source, or OpenCode JSON.
 	Format CodeClientConfigurationFormat `json:"format"`
 
-	// Model The native model the client uses for its main conversation.
+	// Instructions Platform-specific setup and merge instructions. Preserve unrelated client settings and retain environment references for credentials.
+	Instructions string `json:"instructions"`
+
+	// Model The published model or exact alias the client uses for its main conversation.
 	Model string `json:"model"`
 
+	// Models The same live route model and protocol catalog returned by the route models endpoint.
+	Models []CodeModel `json:"models"`
+
 	// NativeModels The route's models an adapter supporting the client serves, in route order.
-	NativeModels []string `json:"native_models"`
+	NativeModels []string  `json:"native_models"`
+	PaidModels   *[]string `json:"paid_models,omitempty"`
 
-	// PlanModel The native model for planning: Claude Code's plan mode through opusplan and OpenCode's plan agent. It equals model unless another was chosen. Null for Codex.
-	PlanModel         nullable.Nullable[string] `json:"plan_model"`
-	QualificationGaps []string                  `json:"qualification_gaps"`
-	RouteSlug         string                    `json:"route_slug"`
+	// PlanModel The published model or exact alias for planning: Claude Code's plan mode through opusplan and OpenCode's plan agent. It equals model unless another was chosen. Null for Codex.
+	PlanModel nullable.Nullable[string] `json:"plan_model"`
 
-	// SmallModel The native model for background requests: Claude Code's Haiku-class and OpenCode's small model. Null for Codex.
+	// Platform Developer platform for paths and shell syntax. Linux and macOS use POSIX shells, Windows uses PowerShell.
+	Platform          CodeClientPlatform `json:"platform"`
+	QualificationGaps []string           `json:"qualification_gaps"`
+	RouteSlug         string             `json:"route_slug"`
+
+	// SmallModel The published model or exact alias for background requests: Claude Code's Haiku-class and OpenCode's small model. Null for Codex.
 	SmallModel nullable.Nullable[string] `json:"small_model"`
 
 	// SupportedClients The clients the route's adapters have configurations for; the first, a client of the first model's adapter, is the default.
@@ -7454,11 +7715,14 @@ type CodeClientConfigurationAdapters string
 // CodeClientConfigurationClient The client the configuration is for.
 type CodeClientConfigurationClient string
 
-// CodeClientConfigurationFormat The configuration's format: Codex TOML, a POSIX shell file to source, or OpenCode JSON.
+// CodeClientConfigurationFormat Codex TOML, a POSIX shell or PowerShell setup to source, or OpenCode JSON.
 type CodeClientConfigurationFormat string
 
 // CodeClientConfigurationSupportedClients defines model for CodeClientConfiguration.SupportedClients.
 type CodeClientConfigurationSupportedClients string
+
+// CodeClientPlatform Developer platform for paths and shell syntax. Linux and macOS use POSIX shells, Windows uses PowerShell.
+type CodeClientPlatform string
 
 // CodeConfigurationFile defines model for CodeConfigurationFile.
 type CodeConfigurationFile struct {
@@ -7484,24 +7748,71 @@ type CodeCredits struct {
 	Unlimited  bool                      `json:"unlimited"`
 }
 
+// CodeModel A published model currently reachable through eligible accounts in the route pool.
+type CodeModel struct {
+	Capabilities []CodeModelCapability `json:"capabilities"`
+	Clients      []CodeModelClients    `json:"clients"`
+	Id           string                `json:"id"`
+
+	// ModelPool Configured ordered subscription recovery targets for this public model. This is policy metadata, not an availability or portability guarantee. Omitted for exact-model selection.
+	ModelPool *[]string       `json:"model_pool,omitempty"`
+	Object    CodeModelObject `json:"object"`
+
+	// Paid This model has an authorized metered API target, selected directly or through explicit fallback. Paid attempts require monetary admission.
+	Paid *bool `json:"paid,omitempty"`
+}
+
+// CodeModelClients defines model for CodeModel.Clients.
+type CodeModelClients string
+
+// CodeModelObject defines model for CodeModel.Object.
+type CodeModelObject string
+
+// CodeModelCapability defines model for CodeModelCapability.
+type CodeModelCapability struct {
+	Path       string                          `json:"path"`
+	Protocol   CodeModelCapabilityProtocol     `json:"protocol"`
+	Transports []CodeModelCapabilityTransports `json:"transports"`
+}
+
+// CodeModelCapabilityProtocol defines model for CodeModelCapability.Protocol.
+type CodeModelCapabilityProtocol string
+
+// CodeModelCapabilityTransports defines model for CodeModelCapability.Transports.
+type CodeModelCapabilityTransports string
+
+// CodePaidTarget defines model for CodePaidTarget.
+type CodePaidTarget struct {
+	ProviderId openapi_types.UUID `json:"provider_id"`
+	SlotId     openapi_types.UUID `json:"slot_id"`
+}
+
 // CodePin The account a conversation tree serves one model from.
 type CodePin struct {
-	AccountId openapi_types.UUID `json:"account_id"`
-	CreatedAt time.Time          `json:"created_at"`
-	Model     string             `json:"model"`
-	Principal string             `json:"principal"`
+	AccountId      nullable.Nullable[openapi_types.UUID] `json:"account_id"`
+	CreatedAt      time.Time                             `json:"created_at"`
+	Model          string                                `json:"model"`
+	PaidProviderId nullable.Nullable[openapi_types.UUID] `json:"paid_provider_id,omitempty"`
+	PaidSlotId     nullable.Nullable[openapi_types.UUID] `json:"paid_slot_id,omitempty"`
+	Principal      nullable.Nullable[string]             `json:"principal"`
+
+	// TargetModel Durably pinned native model identifier. Existing native pins use their model identifier.
+	TargetModel string `json:"target_model"`
 }
 
 // CodePool defines model for CodePool.
 type CodePool struct {
-	AccountIds  []openapi_types.UUID                  `json:"account_ids"`
-	ApiKeyIds   []openapi_types.UUID                  `json:"api_key_ids"`
-	Etag        openapi_types.UUID                    `json:"etag"`
-	Id          openapi_types.UUID                    `json:"id"`
-	Kind        CodePoolKind                          `json:"kind"`
-	Name        string                                `json:"name"`
-	OwnerUserId nullable.Nullable[openapi_types.UUID] `json:"owner_user_id"`
-	ProjectId   openapi_types.UUID                    `json:"project_id"`
+	AccountIds []openapi_types.UUID `json:"account_ids"`
+
+	// AccountWeights Relative weights keyed by assigned account ID. Omitted accounts use weight 1.
+	AccountWeights map[string]int64                      `json:"account_weights"`
+	ApiKeyIds      []openapi_types.UUID                  `json:"api_key_ids"`
+	Etag           openapi_types.UUID                    `json:"etag"`
+	Id             openapi_types.UUID                    `json:"id"`
+	Kind           CodePoolKind                          `json:"kind"`
+	Name           string                                `json:"name"`
+	OwnerUserId    nullable.Nullable[openapi_types.UUID] `json:"owner_user_id"`
+	ProjectId      openapi_types.UUID                    `json:"project_id"`
 }
 
 // CodePoolKind defines model for CodePool.Kind.
@@ -7515,12 +7826,15 @@ type CodePoolList struct {
 
 // CodePoolWrite defines model for CodePoolWrite.
 type CodePoolWrite struct {
-	AccountIds  []openapi_types.UUID                  `json:"account_ids"`
-	ApiKeyIds   []openapi_types.UUID                  `json:"api_key_ids"`
-	Kind        CodePoolWriteKind                     `json:"kind"`
-	Name        string                                `json:"name"`
-	OwnerUserId nullable.Nullable[openapi_types.UUID] `json:"owner_user_id"`
-	ProjectId   openapi_types.UUID                    `json:"project_id"`
+	AccountIds []openapi_types.UUID `json:"account_ids"`
+
+	// AccountWeights Relative weights keyed by assigned account ID. Omitted accounts use weight 1.
+	AccountWeights *map[string]int64                     `json:"account_weights,omitempty"`
+	ApiKeyIds      []openapi_types.UUID                  `json:"api_key_ids"`
+	Kind           CodePoolWriteKind                     `json:"kind"`
+	Name           string                                `json:"name"`
+	OwnerUserId    nullable.Nullable[openapi_types.UUID] `json:"owner_user_id"`
+	ProjectId      openapi_types.UUID                    `json:"project_id"`
 }
 
 // CodePoolWriteKind defines model for CodePoolWrite.Kind.
@@ -7558,7 +7872,7 @@ type CodeResearchToolsServices string
 type CodeRevision struct {
 	Id openapi_types.UUID `json:"id"`
 
-	// Route Dedicated coding contract. Base path is /code/{slug}; model identifiers remain native. Draft writes do not change the immutable runtime release. Publication does no inference. Enabled is independent of ordinary provider activation.
+	// Route Dedicated coding contract. Base path is /code/{slug}. Native model identifiers remain unchanged by default. Exact aliases require explicit model rewriting. Draft writes do not change the immutable runtime release. Publication does no inference. Enabled is independent of ordinary provider activation.
 	Route CodeRoute `json:"route"`
 }
 
@@ -7568,23 +7882,56 @@ type CodeRevisionList struct {
 	NextCursor nullable.Nullable[string] `json:"next_cursor"`
 }
 
-// CodeRoute Dedicated coding contract. Base path is /code/{slug}; model identifiers remain native. Draft writes do not change the immutable runtime release. Publication does no inference. Enabled is independent of ordinary provider activation.
+// CodeRoute Dedicated coding contract. Base path is /code/{slug}. Native model identifiers remain unchanged by default. Exact aliases require explicit model rewriting. Draft writes do not change the immutable runtime release. Publication does no inference. Enabled is independent of ordinary provider activation.
 type CodeRoute struct {
 	// Adapters The adapters the latest published revision serves, in display order, derived from the provider connections it froze. Together they select the route's ingress paths and supported clients: Codex serves `responses`; OpenCode Go serves `v1/chat/completions`, `v1/messages` and `v1/responses`; GLM Coding Plan, MiniMax M Plan, Kimi Code and Qwen Token Plan serve `v1/messages` and `v1/chat/completions`. Each request reaches an account whose adapter serves its path and that lists its model. Empty before publication or when the revision's accounts name no adapter.
 	Adapters []CodeRouteAdapters `json:"adapters"`
-	Enabled  bool                `json:"enabled"`
-	Etag     openapi_types.UUID  `json:"etag"`
-	Id       openapi_types.UUID  `json:"id"`
+
+	// Aliases Stable public model names mapped directly to one native identifier in models. Requires model_rewriting. Alias chains and native name collisions are rejected. Immutable publications pin these mappings. Repointing an alias affects new conversations. Existing conversations retain their stored exact target while it remains published and authorized.
+	Aliases *map[string]string `json:"aliases,omitempty"`
+
+	// ChatToAntigravity Explicitly allow Chat Completions text and function tools through the internal Antigravity Gemini target over HTTP or SSE. Published revisions pin this policy. Native forwarding remains the default. Client identity and prompts are preserved. Signed thought state, reasoning controls, media and server tools are unsupported. Returned signature state is refused before actionable output rather than discarded. Controlled fixtures do not qualify any current model or live subscription workflow.
+	ChatToAntigravity *bool `json:"chat_to_antigravity,omitempty"`
+
+	// ChatToCodex Explicit Chat text and function tool translation through Codex Responses, disabled by default and pinned by publication. Native forwarding remains the default. Low, medium and high reasoning effort is supported. Required signed reasoning, media, server-owned state and unsupported semantics are refused. Independent Codex identity and model rewriting policies remain separate. Current OpenCode client and live subscription acceptance remain unqualified.
+	ChatToCodex *bool `json:"chat_to_codex,omitempty"`
+
+	// CodexCliIdentity Explicit route-administrator opt-in, disabled by default and independent of protocol translation. On Codex subscription HTTP and WebSocket requests only, fills Originator with codex_cli_rs when every supplied Originator value is absent or blank. Preserves explicit Originator values, User-Agent, all prompts, tools, reasoning, state and other headers. Does not enable translation or prompt changes. Publication freezes the policy. Using subscription accounts through this compatibility identity may violate provider terms and risk account suspension. Review this behavior and risk before enabling and publishing.
+	CodexCliIdentity *bool              `json:"codex_cli_identity,omitempty"`
+	Enabled          bool               `json:"enabled"`
+	Etag             openapi_types.UUID `json:"etag"`
+	Id               openapi_types.UUID `json:"id"`
+
+	// InitialRecoveryAttempts Maximum additional attempts per request for a new or established single-pin root conversation after an adapter proves nonexecution and the complete input is portable. Zero disables recovery. Published revisions pin this policy. Existing children, socket ownership and unresolved attempts prevent migration. Exact models remain the default. Only explicit model_pools authorize model changes. Live authority remains required. Producing-account reference ownership is preserved. Accepted, partial, ambiguous and opaque work never replays.
+	InitialRecoveryAttempts *int `json:"initial_recovery_attempts,omitempty"`
 
 	// MaxBodyBytes Optional ingress limit in bytes. Null inherits installation limits; a route can only lower them. Checks both encoded and decoded JSON, the complete multipart body, and individual client WebSocket messages. Published revisions pin this policy.
-	MaxBodyBytes nullable.Nullable[int]       `json:"max_body_bytes,omitempty"`
-	Models       []string                     `json:"models"`
-	PoolId       openapi_types.UUID           `json:"pool_id"`
-	ProjectId    openapi_types.UUID           `json:"project_id"`
-	PublishedAt  nullable.Nullable[time.Time] `json:"published_at"`
-	Revision     int32                        `json:"revision"`
-	RevisionId   string                       `json:"revision_id"`
-	Slug         string                       `json:"slug"`
+	MaxBodyBytes nullable.Nullable[int] `json:"max_body_bytes,omitempty"`
+
+	// MessagesToCodex Explicitly allow Messages text and tool requests to use Codex subscription accounts through protocol translation. Published revisions pin this policy. Native forwarding remains the default. Translation alone preserves client identity and prompts. Codex identity compatibility requires its separate codex_cli_identity opt-in. Model rewriting requires its separate opt-in. Explicit low, medium and high reasoning effort is supported. Signed thinking, numeric reasoning budgets, beta features and unsupported required semantics are refused before dispatch.
+	MessagesToCodex *bool `json:"messages_to_codex,omitempty"`
+
+	// ModelPools Explicit subscription model recovery pools keyed by a published native name or exact alias. Requires model_rewriting. Each ordered list starts with that name's normal exact target and contains distinct native identifiers from models. Recovery prefers the pinned exact target, then these alternatives, within initial_recovery_attempts and positive nonexecution, portability, live authorization and budget checks. Omitted pools preserve exact selection. Publications freeze the policy. Existing conversations retain their exact target, including after alias changes, while it remains published and authorized. Paid fallback is separately governed.
+	ModelPools *map[string][]string `json:"model_pools,omitempty"`
+
+	// ModelRewriting Explicitly enable model identifier rewriting through exact aliases or configured model_pools. Disabled by default. This policy does not rewrite client identity or prompts.
+	ModelRewriting *bool    `json:"model_rewriting,omitempty"`
+	Models         []string `json:"models"`
+
+	// PaidFallbackTargets Explicit native model to published metered provider and credential slot for subscription-first bounded recovery. Requires paid_participation and positive initial_recovery_attempts. Subscription candidates are preferred. Same-model fallback needs no model pool. Different models require model_rewriting and a model_pool. Proven nonexecution and complete-input portability are required. Direct paid_targets retain precedence and cannot overlap this map. Existing paid owners stay pinned. Unknown paid money remains held against applicable limits.
+	PaidFallbackTargets *map[string]CodePaidTarget `json:"paid_fallback_targets,omitempty"`
+
+	// PaidParticipation Explicitly permit metered API targets. Direct selection and subscription-first fallback require their separate target maps.
+	PaidParticipation *bool `json:"paid_participation,omitempty"`
+
+	// PaidTargets Exact native model to directly selected published metered provider and credential slot. A mapped model takes precedence over subscription accounts.
+	PaidTargets *map[string]CodePaidTarget   `json:"paid_targets,omitempty"`
+	PoolId      openapi_types.UUID           `json:"pool_id"`
+	ProjectId   openapi_types.UUID           `json:"project_id"`
+	PublishedAt nullable.Nullable[time.Time] `json:"published_at"`
+	Revision    int32                        `json:"revision"`
+	RevisionId  string                       `json:"revision_id"`
+	Slug        string                       `json:"slug"`
 
 	// Tools Research subscription binding, frozen at publication. Requires an eligible Z.ai global account in the same project and pool; independent of inference models. Null disables research.
 	Tools nullable.Nullable[CodeResearchTools] `json:"tools,omitempty"`
@@ -7601,14 +7948,46 @@ type CodeRouteList struct {
 
 // CodeRouteWrite defines model for CodeRouteWrite.
 type CodeRouteWrite struct {
-	Enabled bool `json:"enabled"`
+	// Aliases Stable public model names mapped directly to one native identifier in models. Requires model_rewriting. Alias chains and native name collisions are rejected. Immutable publications pin these mappings. Repointing an alias affects new conversations. Existing conversations retain their stored exact target while it remains published and authorized.
+	Aliases *map[string]string `json:"aliases,omitempty"`
+
+	// ChatToAntigravity Explicitly allow Chat Completions text and function tools through the internal Antigravity Gemini target over HTTP or SSE. Published revisions pin this policy. Native forwarding remains the default. Client identity and prompts are preserved. Signed thought state, reasoning controls, media and server tools are unsupported. Returned signature state is refused before actionable output rather than discarded. Controlled fixtures do not qualify any current model or live subscription workflow.
+	ChatToAntigravity *bool `json:"chat_to_antigravity,omitempty"`
+
+	// ChatToCodex Explicit Chat text and function tool translation through Codex Responses, disabled by default and pinned by publication. Native forwarding remains the default. Low, medium and high reasoning effort is supported. Required signed reasoning, media, server-owned state and unsupported semantics are refused. Independent Codex identity and model rewriting policies remain separate. Current OpenCode client and live subscription acceptance remain unqualified.
+	ChatToCodex *bool `json:"chat_to_codex,omitempty"`
+
+	// CodexCliIdentity Explicit route-administrator opt-in, disabled by default and independent of protocol translation. On Codex subscription HTTP and WebSocket requests only, fills Originator with codex_cli_rs when every supplied Originator value is absent or blank. Preserves explicit Originator values, User-Agent, all prompts, tools, reasoning, state and other headers. Does not enable translation or prompt changes. Publication freezes the policy. Using subscription accounts through this compatibility identity may violate provider terms and risk account suspension. Review this behavior and risk before enabling and publishing.
+	CodexCliIdentity *bool `json:"codex_cli_identity,omitempty"`
+	Enabled          bool  `json:"enabled"`
+
+	// InitialRecoveryAttempts Maximum additional attempts per request for a new or established single-pin root conversation after an adapter proves nonexecution and the complete input is portable. Zero disables recovery. Published revisions pin this policy. Existing children, socket ownership and unresolved attempts prevent migration. Exact models remain the default. Only explicit model_pools authorize model changes. Live authority remains required. Producing-account reference ownership is preserved. Accepted, partial, ambiguous and opaque work never replays.
+	InitialRecoveryAttempts *int `json:"initial_recovery_attempts,omitempty"`
 
 	// MaxBodyBytes Optional ingress limit in bytes. Null inherits installation limits; a route can only lower them. Checks both encoded and decoded JSON, the complete multipart body, and individual client WebSocket messages. Published revisions pin this policy.
 	MaxBodyBytes nullable.Nullable[int] `json:"max_body_bytes,omitempty"`
-	Models       []string               `json:"models"`
-	PoolId       openapi_types.UUID     `json:"pool_id"`
-	ProjectId    openapi_types.UUID     `json:"project_id"`
-	Slug         string                 `json:"slug"`
+
+	// MessagesToCodex Explicitly allow Messages text and tool requests to use Codex subscription accounts through protocol translation. Published revisions pin this policy. Native forwarding remains the default. Translation alone preserves client identity and prompts. Codex identity compatibility requires its separate codex_cli_identity opt-in. Model rewriting requires its separate opt-in. Explicit low, medium and high reasoning effort is supported. Signed thinking, numeric reasoning budgets, beta features and unsupported required semantics are refused before dispatch.
+	MessagesToCodex *bool `json:"messages_to_codex,omitempty"`
+
+	// ModelPools Explicit subscription model recovery pools keyed by a published native name or exact alias. Requires model_rewriting. Each ordered list starts with that name's normal exact target and contains distinct native identifiers from models. Recovery prefers the pinned exact target, then these alternatives, within initial_recovery_attempts and positive nonexecution, portability, live authorization and budget checks. Omitted pools preserve exact selection. Publications freeze the policy. Existing conversations retain their exact target, including after alias changes, while it remains published and authorized. Paid fallback is separately governed.
+	ModelPools *map[string][]string `json:"model_pools,omitempty"`
+
+	// ModelRewriting Explicitly enable model identifier rewriting through exact aliases or configured model_pools. Disabled by default. This policy does not rewrite client identity or prompts.
+	ModelRewriting *bool    `json:"model_rewriting,omitempty"`
+	Models         []string `json:"models"`
+
+	// PaidFallbackTargets Explicit native model to published metered provider and credential slot for subscription-first bounded recovery. Requires paid_participation and positive initial_recovery_attempts. Subscription candidates are preferred. Same-model fallback needs no model pool. Different models require model_rewriting and a model_pool. Proven nonexecution and complete-input portability are required. Direct paid_targets retain precedence and cannot overlap this map. Existing paid owners stay pinned. Unknown paid money remains held against applicable limits.
+	PaidFallbackTargets *map[string]CodePaidTarget `json:"paid_fallback_targets,omitempty"`
+
+	// PaidParticipation Explicitly permit metered API targets. Direct selection and subscription-first fallback require their separate target maps.
+	PaidParticipation *bool `json:"paid_participation,omitempty"`
+
+	// PaidTargets Exact native model to directly selected published metered provider and credential slot. A mapped model takes precedence over subscription accounts.
+	PaidTargets *map[string]CodePaidTarget `json:"paid_targets,omitempty"`
+	PoolId      openapi_types.UUID         `json:"pool_id"`
+	ProjectId   openapi_types.UUID         `json:"project_id"`
+	Slug        string                     `json:"slug"`
 
 	// Tools Research subscription binding, frozen at publication. Requires an eligible Z.ai global account in the same project and pool; independent of inference models. Null disables research.
 	Tools nullable.Nullable[CodeResearchTools] `json:"tools,omitempty"`
@@ -7636,6 +8015,15 @@ type CodeTokenWindows struct {
 type CodeTokenWindowsList struct {
 	Items      []CodeTokenWindows        `json:"items"`
 	NextCursor nullable.Nullable[string] `json:"next_cursor"`
+}
+
+// CodexCredentialImportRequest defines model for CodexCredentialImportRequest.
+type CodexCredentialImportRequest struct {
+	// Credentials Codex auth.json JSON text. Supports chatgpt auth_mode or its omission, absent or null OPENAI_API_KEY, tokens with access_token, id_token, refresh_token and account_id, and optional RFC3339 last_refresh. Other fields and ambiguous JSON are rejected. Expired local tokens may be imported if refresh verifies the same account and user.
+	Credentials *string `json:"credentials,omitempty"`
+
+	// SlotId Existing credential slot, defaults to the default slot
+	SlotId *openapi_types.UUID `json:"slot_id,omitempty"`
 }
 
 // Commitment Provisioned capacity the connection pays for: attempts bill at zero marginal cost and share the amount across each UTC calendar period by list-cost weight.
@@ -7704,13 +8092,143 @@ type ConfigurationCapabilityEntry struct {
 // ConfigurationCapabilityEntryMode defines model for ConfigurationCapabilityEntry.Mode.
 type ConfigurationCapabilityEntryMode string
 
-// ConfigurationDocument Secret-free desired-state artifact identified by natural names, never UUIDs
+// ConfigurationCode Resource IDs are artifact-local references. Accounts resolve through explicitly bound current destination enrollments. Pools and budgets reuse validated same-project artifact IDs or standard UUIDv5 destination IDs derived from project, resource kind and artifact reference, with unique natural matches as fallback. This preserves duplicate names and exact duplicate budgets without a registry. Routes resolve through unique slug. Unrelated ambiguous identities are refused. Source credentials, health, usage windows, conversation bindings and historical revisions stay local. Destination projects and providers must be prepared and enrolled before planning. Rename globally unique slugs for same-installation cross-project promotion.
+type ConfigurationCode struct {
+	Accounts nullable.Nullable[[]ConfigurationCodeAccount] `json:"accounts,omitempty"`
+	Budgets  nullable.Nullable[[]ConfigurationCodeBudget]  `json:"budgets,omitempty"`
+	Pools    nullable.Nullable[[]ConfigurationCodePool]    `json:"pools,omitempty"`
+	Routes   nullable.Nullable[[]ConfigurationCodeRoute]   `json:"routes,omitempty"`
+}
+
+// ConfigurationCodeAccount defines model for ConfigurationCodeAccount.
+type ConfigurationCodeAccount struct {
+	CredentialRef string             `json:"credential_ref"`
+	Enabled       bool               `json:"enabled"`
+	Id            openapi_types.UUID `json:"id"`
+	Models        []string           `json:"models"`
+	Name          string             `json:"name"`
+	Project       string             `json:"project"`
+	Provider      string             `json:"provider"`
+}
+
+// ConfigurationCodeBindings defines model for ConfigurationCodeBindings.
+type ConfigurationCodeBindings struct {
+	ApiKeys     *map[string]openapi_types.UUID `json:"api_keys,omitempty"`
+	Credentials *map[string]openapi_types.UUID `json:"credentials,omitempty"`
+	Users       *map[string]openapi_types.UUID `json:"users,omitempty"`
+}
+
+// ConfigurationCodeBudget defines model for ConfigurationCodeBudget.
+type ConfigurationCodeBudget struct {
+	ApiKeyRef     nullable.Nullable[string]             `json:"api_key_ref"`
+	DailyTokens   nullable.Nullable[int64]              `json:"daily_tokens"`
+	Enabled       bool                                  `json:"enabled"`
+	Id            openapi_types.UUID                    `json:"id"`
+	MonthlyTokens nullable.Nullable[int64]              `json:"monthly_tokens"`
+	Project       string                                `json:"project"`
+	Route         nullable.Nullable[openapi_types.UUID] `json:"route"`
+}
+
+// ConfigurationCodeConnection defines model for ConfigurationCodeConnection.
+type ConfigurationCodeConnection struct {
+	Configuration        ProviderConfiguration `json:"configuration"`
+	NetworkCredentialRef *string               `json:"network_credential_ref,omitempty"`
+}
+
+// ConfigurationCodePaidConnection defines model for ConfigurationCodePaidConnection.
+type ConfigurationCodePaidConnection struct {
+	Provider    ConfigurationProviderEntry `json:"provider"`
+	SlotKeyRefs map[string][]string        `json:"slot_key_refs"`
+}
+
+// ConfigurationCodePaidTarget defines model for ConfigurationCodePaidTarget.
+type ConfigurationCodePaidTarget struct {
+	CredentialRef string `json:"credential_ref"`
+	Provider      string `json:"provider"`
+	Slot          string `json:"slot"`
+}
+
+// ConfigurationCodePool defines model for ConfigurationCodePool.
+type ConfigurationCodePool struct {
+	Accounts   map[string]int              `json:"accounts"`
+	ApiKeyRefs nullable.Nullable[[]string] `json:"api_key_refs"`
+	Id         openapi_types.UUID          `json:"id"`
+	Kind       ConfigurationCodePoolKind   `json:"kind"`
+	Name       string                      `json:"name"`
+	OwnerRef   nullable.Nullable[string]   `json:"owner_ref"`
+	Project    string                      `json:"project"`
+}
+
+// ConfigurationCodePoolKind defines model for ConfigurationCodePool.Kind.
+type ConfigurationCodePoolKind string
+
+// ConfigurationCodePublication defines model for ConfigurationCodePublication.
+type ConfigurationCodePublication struct {
+	Connections     map[string]ConfigurationCodeConnection      `json:"connections"`
+	PaidConnections *map[string]ConfigurationCodePaidConnection `json:"paid_connections,omitempty"`
+	Policy          ConfigurationCodeRoutePolicy                `json:"policy"`
+}
+
+// ConfigurationCodeRoute defines model for ConfigurationCodeRoute.
+type ConfigurationCodeRoute struct {
+	Draft     ConfigurationCodeRoutePolicy  `json:"draft"`
+	Id        openapi_types.UUID            `json:"id"`
+	Project   string                        `json:"project"`
+	Published *ConfigurationCodePublication `json:"published,omitempty"`
+	Slug      string                        `json:"slug"`
+}
+
+// ConfigurationCodeRoutePolicy defines model for ConfigurationCodeRoutePolicy.
+type ConfigurationCodeRoutePolicy struct {
+	// Aliases Stable public model names mapped directly to one native identifier in models. Requires model_rewriting. Alias chains and native name collisions are rejected. Immutable publications pin these mappings. Repointing an alias affects new conversations. Existing conversations retain their stored exact target while it remains published and authorized.
+	Aliases *map[string]string `json:"aliases,omitempty"`
+
+	// ChatToAntigravity Explicit opt-in for chat translation through the Antigravity adapter.
+	ChatToAntigravity *bool `json:"chat_to_antigravity,omitempty"`
+
+	// ChatToCodex Explicit Chat text and function tool translation through Codex Responses, disabled by default and pinned by publication. Native forwarding remains the default. Low, medium and high reasoning effort is supported. Required signed reasoning, media, server-owned state and unsupported semantics are refused. Independent Codex identity and model rewriting policies remain separate. Current OpenCode client and live subscription acceptance remain unqualified.
+	ChatToCodex *bool `json:"chat_to_codex,omitempty"`
+
+	// CodexCliIdentity Explicit route-administrator opt-in, disabled by default and independent of protocol translation. On Codex subscription HTTP and WebSocket requests only, fills Originator with codex_cli_rs when every supplied Originator value is absent or blank. Preserves explicit Originator values, User-Agent, all prompts, tools, reasoning, state and other headers. Does not enable translation or prompt changes. Publication freezes the policy. Using subscription accounts through this compatibility identity may violate provider terms and risk account suspension. Review this behavior and risk before enabling and publishing.
+	CodexCliIdentity *bool `json:"codex_cli_identity,omitempty"`
+	Enabled          bool  `json:"enabled"`
+
+	// InitialRecoveryAttempts Maximum additional attempts per request for a new or established single-pin root conversation after an adapter proves nonexecution and the complete input is portable. Zero disables recovery. Published revisions pin this policy. Existing children, socket ownership and unresolved attempts prevent migration. Exact models remain the default. Only explicit model_pools authorize model changes. Live authority remains required. Producing-account reference ownership is preserved. Accepted, partial, ambiguous and opaque work never replays.
+	InitialRecoveryAttempts *int `json:"initial_recovery_attempts,omitempty"`
+
+	// MaxBodyBytes Optional ingress limit in bytes. Null inherits installation limits; a route can only lower them. Checks both encoded and decoded JSON, the complete multipart body, and individual client WebSocket messages. Published revisions pin this policy.
+	MaxBodyBytes nullable.Nullable[int] `json:"max_body_bytes,omitempty"`
+
+	// MessagesToCodex Explicitly allow Messages text and tool requests to use Codex subscription accounts through protocol translation. Published revisions pin this policy. Native forwarding remains the default. Translation alone preserves client identity and prompts. Codex identity compatibility requires its separate codex_cli_identity opt-in. Model rewriting requires its separate opt-in. Explicit low, medium and high reasoning effort is supported. Signed thinking, numeric reasoning budgets, beta features and unsupported required semantics are refused before dispatch.
+	MessagesToCodex *bool `json:"messages_to_codex,omitempty"`
+
+	// ModelPools Explicit subscription model recovery pools keyed by a published native name or exact alias. Requires model_rewriting. Each ordered list starts with that name's normal exact target and contains distinct native identifiers from models. Recovery prefers the pinned exact target, then these alternatives, within initial_recovery_attempts and positive nonexecution, portability, live authorization and budget checks. Omitted pools preserve exact selection. Publications freeze the policy. Existing conversations retain their exact target, including after alias changes, while it remains published and authorized. Paid fallback is separately governed.
+	ModelPools *map[string][]string `json:"model_pools,omitempty"`
+
+	// ModelRewriting Explicitly enable model identifier rewriting through exact aliases or configured model_pools. Disabled by default. This policy does not rewrite client identity or prompts.
+	ModelRewriting *bool    `json:"model_rewriting,omitempty"`
+	Models         []string `json:"models"`
+
+	// PaidFallbackTargets Explicit recovery-only paid targets keyed by native model, using the same named destination provider, slot and credential bindings as direct paid targets. Requires paid participation and a positive initial recovery limit.
+	PaidFallbackTargets *map[string]ConfigurationCodePaidTarget `json:"paid_fallback_targets,omitempty"`
+	PaidParticipation   *bool                                   `json:"paid_participation,omitempty"`
+	PaidTargets         *map[string]ConfigurationCodePaidTarget `json:"paid_targets,omitempty"`
+	Pool                openapi_types.UUID                      `json:"pool"`
+
+	// Tools Research subscription binding, frozen at publication. Requires an eligible Z.ai global account in the same project and pool; independent of inference models. Null disables research.
+	Tools nullable.Nullable[CodeResearchTools] `json:"tools,omitempty"`
+}
+
+// ConfigurationDocument Secret-free desired-state artifact using natural destination identities. Code UUIDs are artifact-local references, never requested destination IDs.
 type ConfigurationDocument struct {
 	AgentPublications *[]ConfigurationAgentPublication `json:"agent_publications,omitempty"`
 	ApiVersion        ConfigurationDocumentApiVersion  `json:"api_version"`
 
 	// BudgetTimeZone Requested IANA budget time zone. Export includes it. Omission/null preserves the destination. Changes require settings permission and activate independently at the next existing day/week/month boundary; current spend and calendar history remain intact.
 	BudgetTimeZone nullable.Nullable[string] `json:"budget_time_zone,omitempty"`
+
+	// Code Resource IDs are artifact-local references. Accounts resolve through explicitly bound current destination enrollments. Pools and budgets reuse validated same-project artifact IDs or standard UUIDv5 destination IDs derived from project, resource kind and artifact reference, with unique natural matches as fallback. This preserves duplicate names and exact duplicate budgets without a registry. Routes resolve through unique slug. Unrelated ambiguous identities are refused. Source credentials, health, usage windows, conversation bindings and historical revisions stay local. Destination projects and providers must be prepared and enrolled before planning. Rename globally unique slugs for same-installation cross-project promotion.
+	Code *ConfigurationCode `json:"code,omitempty"`
 
 	// ExportedAt Informational only; excluded from the artifact digest
 	ExportedAt           *time.Time                           `json:"exported_at,omitempty"`
@@ -7755,7 +8273,7 @@ type ConfigurationExportResponse struct {
 	// Digest SHA-256 lowercase hex of the canonical document
 	Digest string `json:"digest"`
 
-	// Document Secret-free desired-state artifact identified by natural names, never UUIDs
+	// Document Secret-free desired-state artifact using natural destination identities. Code UUIDs are artifact-local references, never requested destination IDs.
 	Document ConfigurationDocument `json:"document"`
 }
 
@@ -7992,7 +8510,9 @@ type ConfigurationProjectEntry struct {
 
 // ConfigurationPromotionRequest defines model for ConfigurationPromotionRequest.
 type ConfigurationPromotionRequest struct {
-	// Document Secret-free desired-state artifact identified by natural names, never UUIDs
+	CodeBindings *ConfigurationCodeBindings `json:"code_bindings,omitempty"`
+
+	// Document Secret-free desired-state artifact using natural destination identities. Code UUIDs are artifact-local references, never requested destination IDs.
 	Document ConfigurationDocument `json:"document"`
 
 	// ExpectedDigest Digest the destination must still export for the apply to proceed
@@ -15112,6 +15632,9 @@ type ListCodeAttemptsParams struct {
 
 	// EndUserDigest Filter by a project-scoped digest, or unidentified for requests without one.
 	EndUserDigest *string `form:"end_user_digest,omitempty" json:"end_user_digest,omitempty"`
+
+	// AttemptId Select a single recorded attempt within current project visibility. Can resolve a recovery source across subscription and paid bindings. Other filters still apply.
+	AttemptId *openapi_types.UUID `form:"attempt_id,omitempty" json:"attempt_id,omitempty"`
 }
 
 // ListCodeBindingsParams defines parameters for ListCodeBindings.
@@ -15207,6 +15730,9 @@ type GetCodeClientConfigurationParams struct {
 
 	// SmallModel The native model for background requests; defaults to model. Codex takes none.
 	SmallModel *string `form:"small_model,omitempty" json:"small_model,omitempty"`
+
+	// Platform Developer platform, defaulting to linux for backward-compatible POSIX shell output.
+	Platform *CodeClientPlatform `form:"platform,omitempty" json:"platform,omitempty"`
 }
 
 // GetCodeClientConfigurationParamsClient defines parameters for GetCodeClientConfiguration.
@@ -16059,6 +16585,12 @@ type ActivateProviderParams struct {
 	IdempotencyKey string `json:"Idempotency-Key"`
 }
 
+// ImportAntigravityCredentialsParams defines parameters for ImportAntigravityCredentials.
+type ImportAntigravityCredentialsParams struct {
+	// IfMatch Current provider draft ETag
+	IfMatch string `json:"If-Match"`
+}
+
 // DeleteProviderBillingImportParams defines parameters for DeleteProviderBillingImport.
 type DeleteProviderBillingImportParams struct {
 	IfMatch string `json:"If-Match"`
@@ -16082,6 +16614,18 @@ type AcceptProviderCatalogSuggestionsParams struct {
 
 	// IdempotencyKey Unique acceptance key
 	IdempotencyKey string `json:"Idempotency-Key"`
+}
+
+// ImportClaudeCredentialsParams defines parameters for ImportClaudeCredentials.
+type ImportClaudeCredentialsParams struct {
+	// IfMatch Current provider draft ETag
+	IfMatch string `json:"If-Match"`
+}
+
+// ImportCodexCredentialsParams defines parameters for ImportCodexCredentials.
+type ImportCodexCredentialsParams struct {
+	// IfMatch Current provider draft ETag
+	IfMatch string `json:"If-Match"`
 }
 
 // DeleteCredentialSlotParams defines parameters for DeleteCredentialSlot.
@@ -17202,11 +17746,20 @@ type CreateProviderJSONRequestBody = CreateProviderRequest
 // UpdateProviderJSONRequestBody defines body for UpdateProvider for application/json ContentType.
 type UpdateProviderJSONRequestBody = UpdateProviderRequest
 
+// ImportAntigravityCredentialsJSONRequestBody defines body for ImportAntigravityCredentials for application/json ContentType.
+type ImportAntigravityCredentialsJSONRequestBody = AntigravityCredentialImportRequest
+
 // PutProviderBillingImportJSONRequestBody defines body for PutProviderBillingImport for application/json ContentType.
 type PutProviderBillingImportJSONRequestBody = PutBillingImportRequest
 
 // AcceptProviderCatalogSuggestionsJSONRequestBody defines body for AcceptProviderCatalogSuggestions for application/json ContentType.
 type AcceptProviderCatalogSuggestionsJSONRequestBody = AcceptCatalogSuggestionsRequest
+
+// ImportClaudeCredentialsJSONRequestBody defines body for ImportClaudeCredentials for application/json ContentType.
+type ImportClaudeCredentialsJSONRequestBody = ClaudeCredentialImportRequest
+
+// ImportCodexCredentialsJSONRequestBody defines body for ImportCodexCredentials for application/json ContentType.
+type ImportCodexCredentialsJSONRequestBody = CodexCredentialImportRequest
 
 // PutCredentialSlotJSONRequestBody defines body for PutCredentialSlot for application/json ContentType.
 type PutCredentialSlotJSONRequestBody = SlotWrite
