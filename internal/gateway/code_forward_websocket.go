@@ -96,11 +96,11 @@ func (s *Server) prepareCodeWebSocket(r *http.Request, release *runtime.Release,
 	if err != nil {
 		return handshake, err
 	}
-	auth, err := s.CodeAuthorizer.AuthorizeCode(r.Context(), target.config, permit.Account, target.dispatch())
+	auth, err := s.CodeAuthorizer.AuthorizeCode(r.Context(), target.config, permit.Account, target.dispatchDescriptor())
 	if err != nil {
 		return handshake, codemode.Refuse(503, "code_account_unavailable")
 	}
-	if err := target.vendor.ValidateAuthorization(target.endpoint, auth, permit.Pin.Principal); err != nil {
+	if err := target.adapter.ValidateAuthorization(target.endpoint, auth, permit.Pin.Principal); err != nil {
 		// Keep the handshake's existing principal-refusal envelope.
 		if codeRefusal(err).Code == "code_principal_mismatch" {
 			err = codemode.Refuse(503, "code_account_unavailable")

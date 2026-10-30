@@ -106,7 +106,7 @@ func (s *Server) prepareCode(r *http.Request, release *runtime.Release, route co
 	if err != nil {
 		return nil, err
 	}
-	if !target.vendor.ServesModel(target.endpoint.Protocol, observation.Operation.Model) {
+	if !target.adapter.ServesModel(target.endpoint.Protocol, observation.Operation.Model) {
 		return nil, codemode.Refuse(503, "code_configuration_unsupported")
 	}
 	a.config, a.endpoint, a.observer = target.config, target.endpoint, codeObserver(target.endpoint)
@@ -114,11 +114,11 @@ func (s *Server) prepareCode(r *http.Request, release *runtime.Release, route co
 	if failure != nil {
 		return nil, codemode.Refuse(failure.Status, "code_provider_rate_limited")
 	}
-	a.auth, err = s.CodeAuthorizer.AuthorizeCode(r.Context(), target.config, permit.Account, target.dispatch())
+	a.auth, err = s.CodeAuthorizer.AuthorizeCode(r.Context(), target.config, permit.Account, target.dispatchDescriptor())
 	if err != nil {
 		return nil, codemode.Refuse(503, "code_account_unavailable")
 	}
-	if err := target.vendor.ValidateAuthorization(target.endpoint, a.auth, permit.Pin.Principal); err != nil {
+	if err := target.adapter.ValidateAuthorization(target.endpoint, a.auth, permit.Pin.Principal); err != nil {
 		return nil, err
 	}
 	ok = true

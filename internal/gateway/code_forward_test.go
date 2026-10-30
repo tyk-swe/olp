@@ -202,11 +202,11 @@ func TestCodeNativeMessagesPreservePayloadForSelectedAccount(t *testing.T) {
 	if err := h.rt.release.Snapshot.Compile(); err != nil {
 		t.Fatal(err)
 	}
-	vendor, ok := codeadapter.ForConnection(configuration.Kind, configuration.AuthMode, configuration.ProfileID)
+	adapter, ok := codeadapter.ForConnection(configuration.Kind, configuration.AuthMode, configuration.ProfileID)
 	if !ok {
 		t.Fatal("selected account has no adapter")
 	}
-	endpoint, ok := vendor.Endpoint("v1/messages")
+	endpoint, ok := adapter.Endpoint("v1/messages")
 	if !ok {
 		t.Fatal("selected account cannot serve Messages")
 	}

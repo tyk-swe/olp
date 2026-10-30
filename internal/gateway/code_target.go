@@ -8,7 +8,7 @@ import (
 
 type codeTarget struct {
 	config   routing.Configuration
-	vendor   codeadapter.Vendor
+	adapter  codeadapter.Vendor
 	endpoint codeadapter.Endpoint
 }
 
@@ -17,14 +17,14 @@ func resolveCodeTarget(snapshot *routing.Snapshot, route codemode.Route, provide
 	if !exists {
 		return codeTarget{}, codemode.Refuse(503, "code_connection_unpublished")
 	}
-	vendor, known := codeadapter.ForConnection(config.Kind, config.AuthMode, config.ProfileID)
-	endpoint, served := vendor.Endpoint(ingress.path)
+	adapter, known := codeadapter.ForConnection(config.Kind, config.AuthMode, config.ProfileID)
+	endpoint, served := adapter.Endpoint(ingress.path)
 	if !known || !served || endpoint.Protocol != ingress.protocol || !endpoint.Supports(transport) {
 		return codeTarget{}, codemode.Refuse(503, "code_configuration_unsupported")
 	}
-	return codeTarget{config: config, vendor: vendor, endpoint: endpoint}, nil
+	return codeTarget{config: config, adapter: adapter, endpoint: endpoint}, nil
 }
 
-func (t codeTarget) dispatch() codemode.Dispatch {
-	return codemode.Dispatch{Adapter: t.vendor.Adapter, Protocol: t.endpoint.Protocol, ClientPath: t.endpoint.ClientPath}
+func (t codeTarget) dispatchDescriptor() codemode.Dispatch {
+	return codemode.Dispatch{Adapter: t.adapter.Adapter, Protocol: t.endpoint.Protocol, ClientPath: t.endpoint.ClientPath}
 }
