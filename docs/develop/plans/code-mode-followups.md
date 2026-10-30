@@ -12,19 +12,19 @@ the evidence boundary rather than copying those specifications into the repo.
 
 ## Follow-up index
 
-The six issue bodies are prepared for publication under #554. Each includes a
+The six follow-up issues are published and linked below. Each includes a
 coding-client need, tools/reasoning/inputs/transports, account-owned state,
 content-retention limits, dependencies, observable acceptance and exclusions.
-Publication links will replace the #554 references once the issues exist.
+These are separate future implementation decisions, not remaining work in this change.
 
 | Follow-up | Current boundary and next decision | Tracking |
 | --- | --- | --- |
-| Messages token counting | `count_tokens` is an unsupported probe. Verify current Claude Code demand and a native subscription count contract before adding HTTP unary counting. Translated estimates must not claim provider-exact counts or a total generation bound | [#554](https://github.com/tyk-swe/olp/issues/554) |
-| Legacy Completions | Ordinary Completions exists. No selected coding-client need is established for a code-mode endpoint. First compare a complete prompt/suffix workflow with existing ordinary or modern-protocol access | [#554](https://github.com/tyk-swe/olp/issues/554) |
-| Public Gemini | Ordinary Gemini routing and restricted internal Antigravity translation are separate from public code-mode `generateContent`. Select one client/account workflow and preserve required native parts and signatures before claiming support | [#554](https://github.com/tyk-swe/olp/issues/554) |
-| Advanced Responses | Native foreground Responses, Codex compact, WebSocket/prewarm and owned response continuation already exist. Inventory additional operations against current client demand, including search, background work, stored references and opaque reasoning | [#554](https://github.com/tyk-swe/olp/issues/554) |
-| Remaining account families | Assess Kimi OAuth, xAI, Devin and Meta individually. Verify authorized login, principal/refresh, coding tools, transport, continuation and retention before selecting at most one adapter implementation | [#554](https://github.com/tyk-swe/olp/issues/554) |
-| Model-catalog refresh | Authorized discovery and generated setup already share eligible published models. Investigate one non-inference metadata source without treating its roster as entitlement, changing exact aliases or publishing new serving models | [#554](https://github.com/tyk-swe/olp/issues/554) |
+| Messages token counting | `count_tokens` is an unsupported probe. Verify current Claude Code demand and a native subscription count contract before adding HTTP unary counting. Translated estimates must not claim provider-exact counts or a total generation bound | [#559](https://github.com/tyk-swe/olp/issues/559) |
+| Legacy Completions | Ordinary Completions exists. No selected coding-client need is established for a code-mode endpoint. First compare a complete prompt/suffix workflow with existing ordinary or modern-protocol access | [#560](https://github.com/tyk-swe/olp/issues/560) |
+| Public Gemini | Ordinary Gemini routing and restricted internal Antigravity translation are separate from public code-mode `generateContent`. Select one client/account workflow and preserve required native parts and signatures before claiming support | [#561](https://github.com/tyk-swe/olp/issues/561) |
+| Advanced Responses | Native foreground Responses, Codex compact, WebSocket/prewarm and owned response continuation already exist. Inventory additional operations against current client demand, including search, background work, stored references and opaque reasoning | [#562](https://github.com/tyk-swe/olp/issues/562) |
+| Remaining account families | Assess Kimi OAuth, xAI, Devin and Meta individually. Verify authorized login, principal/refresh, coding tools, transport, continuation and retention before selecting at most one adapter implementation | [#563](https://github.com/tyk-swe/olp/issues/563) |
+| Model-catalog refresh | Authorized discovery and generated setup already share eligible published models. Investigate one non-inference metadata source without treating its roster as entitlement, changing exact aliases or publishing new serving models | [#564](https://github.com/tyk-swe/olp/issues/564) |
 
 ## Implementation and evidence
 
