@@ -1,15 +1,22 @@
 package providers
 
 import (
+	"cmp"
 	"context"
+	"encoding/json"
+	"errors"
 	"net/http"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/codeadapter"
+	"github.com/tyk-swe/olp/internal/codemode"
 	"github.com/tyk-swe/olp/internal/codexauth"
 	"github.com/tyk-swe/olp/internal/grants"
+	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/sdk/plugin/abi"
 )
 
@@ -44,8 +51,20 @@ func (s *Server) importCodexCredentials(r *http.Request, p access.Principal) (ac
 		return access.Reply{}, err
 	}
 	cfg := current.Configuration
-	if !cfg.Grant() || cfg.ProfileID != codexauth.ProfileID {
+	vendor, supported := codeadapter.ForConnection(cfg.Kind, cfg.AuthMode, cfg.ProfileID)
+	if !supported || vendor.Adapter != codemode.AdapterCodex {
 		return access.Reply{}, access.Invalid("credentials", "This connection does not use the Codex subscription profile.")
+	}
+	encoded, err := json.Marshal(cfg)
+	if err != nil {
+		return access.Reply{}, err
+	}
+	var connection routing.Configuration
+	if err := json.Unmarshal(encoded, &connection); err != nil {
+		return access.Reply{}, err
+	}
+	if err := codeConnection(r.Context(), s.Plugins, connection, vendor); err != nil {
+		return access.Reply{}, access.Invalid("credentials", "This connection must use the unmodified Codex subscription plugin and configuration.")
 	}
 	credentials, err := codexauth.ParseCredentialImport(input.Credentials, time.Now())
 	if err != nil {
@@ -60,13 +79,15 @@ func (s *Server) importCodexCredentials(r *http.Request, p access.Principal) (ac
 		return access.Reply{}, err
 	}
 	grant, err := s.Plugins.RefreshGrant(r.Context(), cfg.ProfileRevision, abi.Provider{Profile: cfg.ProfileID, Options: cfg.Options.PluginOptions}, credentials.RefreshRequest(), client, credentials.Secrets())
-	if err != nil || !credentials.Matches(grant) || slot.CredentialID != nil && slot.Principal != grant.Principal {
+	if err != nil || grants.ValidateTokenMaterial(grant.AccessToken, grant.RefreshToken, grant.ExpiresIn) != nil || !credentials.Matches(grant) || slot.CredentialID != nil && slot.Principal != grant.Principal {
 		if auditErr := s.auditFailedGrantEnrollment(r, p.Actor(), id); auditErr != nil {
 			return access.Reply{}, auditErr
 		}
 		return access.Reply{}, access.Invalid("credentials", "Could not verify the imported credentials for this account. Sign in again and retry.")
 	}
-	return s.stageCodexImport(r, current, slot, grant)
+	verified := abi.Grant{AccessToken: grant.AccessToken, RefreshToken: cmp.Or(grant.RefreshToken, credentials.RefreshRequest().RefreshToken),
+		ExpiresIn: grant.ExpiresIn, Principal: grant.Principal, Facts: grant.Facts}
+	return s.stageCodexImport(r, current, slot, verified)
 }
 
 func (s *Server) codexImportSlot(r *http.Request, providerID, slotID string) (codexImportSlot, error) {
@@ -78,6 +99,9 @@ func (s *Server) codexImportSlot(r *http.Request, providerID, slotID string) (co
 	err := s.Access.Pool.QueryRow(r.Context(), `SELECT s.id::text,s.credential_id::text,coalesce(c.principal,'')
 		FROM olp.provider_slots s LEFT JOIN olp.provider_credentials c ON c.id=s.credential_id
 		WHERE s.provider_id=$1 AND (($3 AND s.is_default) OR (NOT $3 AND s.id=$2))`, providerID, identifier, slotID == "").Scan(&slot.ID, &slot.CredentialID, &slot.Principal)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return codexImportSlot{}, access.Invalid("slot_id", "Unknown credential slot for this connection.")
+	}
 	return slot, err
 }
 
@@ -108,23 +132,7 @@ func (s *Server) stageCodexImport(request *http.Request, current *record, slot c
 	if err != nil {
 		return access.Reply{}, err
 	}
-	bound, err := tx.Exec(ctx, `UPDATE olp.provider_slots SET credential_id=$3,validated_at=NULL,validated_fingerprint=NULL
-		WHERE provider_id=$1 AND id=$2 AND credential_id IS NOT DISTINCT FROM $4::uuid`, current.ID, slot.ID, credentialID, slot.CredentialID)
-	if err != nil {
-		return access.Reply{}, err
-	}
-	if bound.RowsAffected() != 1 {
-		return access.Reply{}, access.Fail(409, "codex_import_stale", "The credential slot changed during import. Reload before retrying.")
-	}
-	etag, err := touch(ctx, tx, current.ID)
-	if err != nil {
-		return access.Reply{}, err
-	}
-	if _, err := tx.Exec(ctx, "UPDATE olp.providers SET slots_etag=$2 WHERE id=$1", current.ID, access.NewID()); err != nil {
-		return access.Reply{}, err
-	}
-	if err := access.Audit(ctx, tx, r, p.Actor(), "provider.grant.import", "provider_credential", credentialID, "success"); err != nil {
-		return access.Reply{}, err
-	}
-	return access.Commit(r, tx, access.Reply{Status: 201, ETag: etag, Body: completion(current.ID, etag, grants.Credential{ID: credentialID, Version: version, Principal: grant.Principal})})
+	return s.bindGrant(r, tx, p.Actor(), grantBinding{ProviderID: current.ID, SlotID: slot.ID, ExpectedCredentialID: slot.CredentialID,
+		Credential: grants.Credential{ID: credentialID, Version: version, Principal: grant.Principal}, Action: "provider.grant.import"},
+		access.Fail(409, "codex_import_stale", "The credential slot changed during import. Reload before retrying."))
 }

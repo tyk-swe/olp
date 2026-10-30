@@ -43,9 +43,11 @@ type codexAuthority struct {
 	roots          string
 	approved       atomic.Bool
 	changedAccount atomic.Bool
+	omitRotation   atomic.Bool
 	mu             sync.Mutex
 	calls          []string
 	refreshes      int
+	refreshToken   int
 	accessToken    string
 }
 
@@ -108,12 +110,15 @@ func newCodexAuthorityWithPeer(t *testing.T, accountID string, peer http.Handler
 				}
 			} else {
 				var request map[string]string
-				if json.NewDecoder(r.Body).Decode(&request) != nil || r.Header.Get("Content-Type") != "application/json" || request["grant_type"] != "refresh_token" || request["client_id"] != "app_EMoamEEZ73f0CkXaXp7hrann" || request["refresh_token"] != fmt.Sprintf("fixture-refresh-%d", f.refreshes) {
+				if json.NewDecoder(r.Body).Decode(&request) != nil || r.Header.Get("Content-Type") != "application/json" || request["grant_type"] != "refresh_token" || request["client_id"] != "app_EMoamEEZ73f0CkXaXp7hrann" || request["refresh_token"] != fmt.Sprintf("fixture-refresh-%d", f.refreshToken) {
 					t.Error("worker reused an old token or changed the refresh protocol")
 					w.WriteHeader(401)
 					return
 				}
 				f.refreshes++
+				if !f.omitRotation.Load() {
+					f.refreshToken++
+				}
 			}
 			account := accountID
 			if f.changedAccount.Load() {
@@ -121,7 +126,11 @@ func newCodexAuthorityWithPeer(t *testing.T, accountID string, peer http.Handler
 			}
 			payload := fmt.Sprintf(`{"exp":%d,"jti":"generation-%d","https://api.openai.com/auth":{"chatgpt_account_id":%q,"chatgpt_user_id":"fixture-user"}}`, time.Now().Add(time.Hour).Unix(), f.refreshes, account)
 			f.accessToken = "eyJhbGciOiJSUzI1NiJ9." + base64.RawURLEncoding.EncodeToString([]byte(payload)) + ".fixture-signature"
-			json.NewEncoder(w).Encode(map[string]string{"access_token": f.accessToken, "id_token": f.accessToken, "refresh_token": fmt.Sprintf("fixture-refresh-%d", f.refreshes)})
+			if f.omitRotation.Load() {
+				json.NewEncoder(w).Encode(map[string]string{"access_token": f.accessToken, "id_token": f.accessToken})
+				return
+			}
+			json.NewEncoder(w).Encode(map[string]string{"access_token": f.accessToken, "id_token": f.accessToken, "refresh_token": fmt.Sprintf("fixture-refresh-%d", f.refreshToken)})
 		default:
 			t.Errorf("setup or maintenance attempted inference: %s %s", r.Method, r.URL.Path)
 			w.WriteHeader(404)
@@ -299,7 +308,17 @@ func codexImportDocument(t *testing.T, account, user, refresh string) string {
 }
 
 func TestCodeAuthImportPreservesPinnedAccountAndOwnsRefresh(t *testing.T) {
+	codeAuthImportContinuity(t, true)
+}
+
+func TestCodeAuthImportRetainsTokenWhenIssuerDoesNotRotate(t *testing.T) {
+	codeAuthImportContinuity(t, false)
+}
+
+func codeAuthImportContinuity(t *testing.T, rotate bool) {
+	t.Helper()
 	f := newCodePublicFixtureWithPeer(t, codexfixture.New())
+	f.codexAuthorities[0].omitRotation.Store(!rotate)
 	h, owner := f.h, f.owner
 	account := f.accounts[0]
 	providerPath := "/api/v1/providers/" + account["provider_id"].(string)
@@ -369,7 +388,10 @@ func TestCodeAuthImportPreservesPinnedAccountAndOwnsRefresh(t *testing.T) {
 	}
 	f.codexAuthorities[0].changedAccount.Store(true)
 	latest := h.want(owner, "GET", providerPath, nil, nil, 200)
-	changed := codexImportDocument(t, "controlled-0", "fixture-user", "fixture-refresh-2")
+	f.codexAuthorities[0].mu.Lock()
+	refreshToken := f.codexAuthorities[0].refreshToken
+	f.codexAuthorities[0].mu.Unlock()
+	changed := codexImportDocument(t, "controlled-0", "fixture-user", fmt.Sprintf("fixture-refresh-%d", refreshToken))
 	rejected := h.want(owner, "POST", providerPath+"/codex-import", map[string]any{"credentials": changed}, etagHeader(latest), 422)
 	rejection, err := json.Marshal(rejected)
 	if err != nil || strings.Contains(string(rejection), "fixture-refresh") || strings.Contains(string(rejection), "fixture-signature") {
@@ -404,6 +426,8 @@ func TestCodeAuthImportRejectsMalformedConflictingAndChangedAccount(t *testing.T
 			h.want(owner, "POST", path+"/codex-import", map[string]any{"credentials": document}, etagHeader(provider), 422)
 		})
 	}
+	unknown := h.want(owner, "POST", path+"/codex-import", map[string]any{"credentials": valid, "slot_id": uuid.NewString()}, etagHeader(provider), 422)
+	requireFieldError(t, unknown, "slot_id")
 	f.noSyntheticInference(t)
 	f.codexAuthorities[0].mu.Lock()
 	refreshes := f.codexAuthorities[0].refreshes
@@ -426,4 +450,58 @@ func TestCodeAuthImportRejectsMalformedConflictingAndChangedAccount(t *testing.T
 		}
 	}
 	f.noSyntheticInference(t)
+}
+
+func TestCodeAuthImportRejectsSameNamedForeignPluginBeforeRefresh(t *testing.T) {
+	h := newAccessHarness(t)
+	owner := h.owner()
+	var received atomic.Int64
+	receiver := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		received.Add(1)
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer receiver.Close()
+	digest := installPlugin(t, h, owner, testutil.BuildPlugin(t, "./internal/plugins/testdata/fixture", "-X=main.behaviour=codex-import", "-X=main.upstream="+receiver.URL+"/v1"))
+	project := createProject(h, owner, "Import trust boundary")
+	provider := h.want(owner, "POST", "/api/v1/providers", map[string]any{"name": "Foreign Codex profile", "project_id": project, "model": "fixture-model",
+		"configuration": map[string]any{"kind": "plugin", "auth_mode": "grant", "profile_id": "codex-subscription", "profile_revision": digest}}, idem(uuid.NewString()), 201)
+	path := "/api/v1/providers/" + provider["id"].(string)
+	document := codexImportDocument(t, "fixture-account", "fixture-user", "fixture-refresh-0")
+	h.want(owner, "POST", path+"/codex-import", map[string]any{"credentials": document}, etagHeader(provider), 422)
+	if received.Load() != 0 {
+		t.Fatal("a same-named foreign plugin received imported refresh credentials")
+	}
+	unchanged := h.want(owner, "GET", path, nil, nil, 200)
+	if unchanged["etag"] != provider["etag"] {
+		t.Fatal("a rejected foreign plugin import modified the provider")
+	}
+	credentials := h.want(owner, "GET", path+"/credentials", nil, nil, 200)["items"].([]any)
+	if len(credentials) != 0 {
+		t.Fatal("a rejected foreign plugin import staged a credential")
+	}
+}
+
+func TestCodeAuthImportRejectsInvalidPluginTokenMaterial(t *testing.T) {
+	h := newAccessHarness(t)
+	owner := h.owner()
+	digest := installPlugin(t, h, owner, testutil.BuildPlugin(t, "./internal/plugins/testdata/fixture", "-X=main.behaviour=codex-import-invalid"))
+	project := createProject(h, owner, "Import grant validation")
+	provider := h.want(owner, "POST", "/api/v1/providers", map[string]any{"name": "Invalid import material", "project_id": project, "model": "fixture-model",
+		"configuration": map[string]any{"kind": "plugin", "auth_mode": "grant", "profile_id": "codex-subscription", "profile_revision": digest}}, idem(uuid.NewString()), 201)
+	path := "/api/v1/providers/" + provider["id"].(string)
+	for _, material := range []string{"empty-access", "unsafe-access", "oversized-refresh", "excessive-expiry"} {
+		t.Run(material, func(t *testing.T) {
+			document := codexImportDocument(t, "fixture-account", "fixture-user", material)
+			rejected := h.want(owner, "POST", path+"/codex-import", map[string]any{"credentials": document}, etagHeader(provider), 422)
+			requireFieldError(t, rejected, "credentials")
+		})
+	}
+	unchanged := h.want(owner, "GET", path, nil, nil, 200)
+	if unchanged["etag"] != provider["etag"] {
+		t.Fatal("invalid plugin token material modified the provider")
+	}
+	credentials := h.want(owner, "GET", path+"/credentials", nil, nil, 200)["items"].([]any)
+	if len(credentials) != 0 {
+		t.Fatal("invalid plugin token material was staged as a credential")
+	}
 }

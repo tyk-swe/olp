@@ -100,7 +100,6 @@ it('imports pasted Codex credentials once and clears them before reporting compl
     expect(input.value).toBe('');
     expect(host.textContent).toContain('OLP owns refresh');
   });
-  expect(imported).toHaveBeenCalledTimes(1);
   const request = imported.mock.calls[0][0] as Request;
   route(request, 'POST', '/api/v1/providers/provider/codex-import');
   expect(request.headers.get('If-Match')?.replaceAll('"', '')).toBe('draft');

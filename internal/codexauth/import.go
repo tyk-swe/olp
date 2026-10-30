@@ -76,5 +76,5 @@ func (c CredentialImport) Secrets() []string {
 }
 
 func (c CredentialImport) Matches(grant abi.Grant) bool {
-	return grant.Principal == c.identity.Principal() && maps.Equal(grant.Facts, c.identity.Facts()) && grant.RefreshToken != "" && grant.ExpiresIn > 0
+	return grant.Principal == c.identity.Principal() && maps.Equal(grant.Facts, c.identity.Facts()) && grant.ExpiresIn > 0
 }
