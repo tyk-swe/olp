@@ -16,6 +16,10 @@ controlled-fixture qualification. This is not yet a release claim for a real
 ChatGPT, OpenCode Go or coding-plan subscription. See the
 [support matrix and release gates](../develop/qualification.md) before rollout.
 
+The [coding-client baseline and roadmap](../develop/plans/code-mode-parity.md)
+records planned compatibility and recovery contracts separately from the
+native behavior documented here.
+
 ## Adapters and clients
 
 Each code account belongs to a subscription family, its **adapter**, which OLP
