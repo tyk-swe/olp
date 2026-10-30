@@ -188,11 +188,12 @@ func TestCodePaidFallbackRetainsOnePaidOwnerAcrossReplicas(t *testing.T) {
 		}
 		f.gateways[i] = f.in.replica(fmt.Sprintf("paid-fallback-%d", i))
 	}
-	response, body, err := f.request(t.Context(), 0, "paid-fleet-root", "", codeBody(), true)
+	bodyInput := []byte(fmt.Sprintf(`{"model":%q,"input":[{"role":"user","content":"CONTROLLED_PRIVATE_PROMPT"}],"stream":false,"store":false}`, model))
+	response, body, err := f.request(t.Context(), 0, "paid-fleet-root", "", bodyInput, true)
 	if err != nil || response.StatusCode != 200 || !strings.Contains(string(body), "fleet-paid") || !paid.Load() {
 		t.Fatalf("first replica fallback %v %s %v paid=%v", response, body, err, paid.Load())
 	}
-	response, body, err = f.request(t.Context(), 1, "paid-fleet-root", "", codeBody(), true)
+	response, body, err = f.request(t.Context(), 1, "paid-fleet-root", "", bodyInput, true)
 	if err != nil || response.StatusCode != 200 {
 		t.Fatalf("paid pin failed on second replica %v %s %v", response, body, err)
 	}
@@ -204,7 +205,7 @@ func TestCodePaidFallbackRetainsOnePaidOwnerAcrossReplicas(t *testing.T) {
 		t.Fatal("initial exhausted subscription work dispatched")
 	}
 	f.h.want(f.owner, "POST", "/api/v1/code/bindings/"+bindings[0].Id.String()+"/retire", nil, idem("retire-fleet-paid"), 200)
-	response, body, err = f.request(t.Context(), 1, "paid-fleet-root", "", codeBody(), true)
+	response, body, err = f.request(t.Context(), 1, "paid-fleet-root", "", bodyInput, true)
 	if err != nil || response.StatusCode != 410 {
 		t.Fatalf("retirement changed across replicas %v %s %v", response, body, err)
 	}

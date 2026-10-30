@@ -15,6 +15,8 @@
   } from './resourceSubmission.svelte';
   import ResourceEditorForm from './ResourceEditorForm.svelte';
 
+  type PaidTargets = NonNullable<CodeRouteWrite['paid_targets']>;
+
   type AliasValidation =
     | { kind: 'valid'; aliases: Record<string, string> }
     | { kind: 'invalid'; message: string };
@@ -272,6 +274,64 @@
   });
 </script>
 
+{#snippet paidTargetSelectors(
+  targets: PaidTargets,
+  prefix: string,
+  label: string,
+  emptyLabel: string,
+  onchange: (targets: PaidTargets) => void
+)}
+  {#each nativeModels(models) as model (model)}
+    {@const target = targets[model]}
+    <div class="form-field">
+      <label for={prefix + '-provider-' + model}
+        >{label} provider for {model}</label
+      >
+      <select
+        id={prefix + '-provider-' + model}
+        value={target?.provider_id ?? ''}
+        onchange={(event) =>
+          onchange({
+            ...targets,
+            [model]: { provider_id: event.currentTarget.value, slot_id: '' }
+          })}
+      >
+        <option value="">{emptyLabel}</option>
+        {#each providers as provider (provider.id)}<option value={provider.id}
+            >{provider.name}</option
+          >{/each}
+        {#if target?.provider_id && !providers.some((provider) => provider.id === target.provider_id)}<option
+            value={target.provider_id}
+            >{target.provider_id} · current selection</option
+          >{/if}
+      </select>
+      {#if target?.provider_id}
+        <label for={prefix + '-slot-' + model}
+          >{label} credential slot for {model}</label
+        >
+        <select
+          id={prefix + '-slot-' + model}
+          value={target.slot_id ?? ''}
+          onchange={(event) =>
+            onchange({
+              ...targets,
+              [model]: {
+                provider_id: target.provider_id,
+                slot_id: event.currentTarget.value
+              }
+            })}
+          required
+        >
+          <option value="">Choose a credential slot</option>
+          {#each providers.find((provider) => provider.id === target.provider_id)?.slots ?? [] as slot (slot.id)}<option
+              value={slot.id}>{slot.name || slot.id}</option
+            >{/each}
+        </select>
+      {/if}
+    </div>
+  {/each}
+{/snippet}
+
 <ResourceEditorForm
   title="route draft"
   creating={!current}
@@ -329,107 +389,25 @@
     limit are required on the actual paid attempt.
   </p>
   {#if paidParticipation}
-    {#each nativeModels(models) as model (model)}
-      <div class="form-field">
-        <label for={'paid-provider-' + model}
-          >Paid API provider for {model}</label
-        >
-        <select
-          id={'paid-provider-' + model}
-          value={paidTargets[model]?.provider_id ?? ''}
-          onchange={(event) =>
-            (paidTargets = {
-              ...paidTargets,
-              [model]: { provider_id: event.currentTarget.value, slot_id: '' }
-            })}
-        >
-          <option value="">Use the subscription pool</option>
-          {#each providers as provider (provider.id)}<option value={provider.id}
-              >{provider.name}</option
-            >{/each}
-          {#if paidTargets[model]?.provider_id && !providers.some((provider) => provider.id === paidTargets[model].provider_id)}<option
-              value={paidTargets[model].provider_id}
-              >{paidTargets[model].provider_id} · current selection</option
-            >{/if}
-        </select>
-        {#if paidTargets[model]?.provider_id}
-          <label for={'paid-slot-' + model}
-            >Paid API credential slot for {model}</label
-          >
-          <select
-            id={'paid-slot-' + model}
-            value={paidTargets[model]?.slot_id ?? ''}
-            onchange={(event) =>
-              (paidTargets = {
-                ...paidTargets,
-                [model]: {
-                  provider_id: paidTargets[model].provider_id,
-                  slot_id: event.currentTarget.value
-                }
-              })}
-            required
-          >
-            <option value="">Choose a credential slot</option>
-            {#each providers.find((provider) => provider.id === paidTargets[model].provider_id)?.slots ?? [] as slot (slot.id)}<option
-                value={slot.id}>{slot.name || slot.id}</option
-              >{/each}
-          </select>
-        {/if}
-      </div>
-    {/each}
+    {@render paidTargetSelectors(
+      paidTargets,
+      'paid',
+      'Paid API',
+      'Use the subscription pool',
+      (targets) => (paidTargets = targets)
+    )}
     <p>
       Subscription-first paid fallback requires bounded recovery, proven
       nonexecution and portable complete input. The exact model is preferred. A
       different model also requires model rewriting and an explicit model pool.
     </p>
-    {#each nativeModels(models) as model (model)}
-      <div class="form-field">
-        <label for={'fallback-provider-' + model}
-          >Paid fallback provider for {model}</label
-        >
-        <select
-          id={'fallback-provider-' + model}
-          value={paidFallbackTargets[model]?.provider_id ?? ''}
-          onchange={(event) =>
-            (paidFallbackTargets = {
-              ...paidFallbackTargets,
-              [model]: { provider_id: event.currentTarget.value, slot_id: '' }
-            })}
-        >
-          <option value="">No paid fallback</option>
-          {#each providers as provider (provider.id)}<option value={provider.id}
-              >{provider.name}</option
-            >{/each}
-          {#if paidFallbackTargets[model]?.provider_id && !providers.some((provider) => provider.id === paidFallbackTargets[model].provider_id)}<option
-              value={paidFallbackTargets[model].provider_id}
-              >{paidFallbackTargets[model].provider_id} · current selection</option
-            >{/if}
-        </select>
-        {#if paidFallbackTargets[model]?.provider_id}
-          <label for={'fallback-slot-' + model}
-            >Paid fallback credential slot for {model}</label
-          >
-          <select
-            id={'fallback-slot-' + model}
-            value={paidFallbackTargets[model]?.slot_id ?? ''}
-            onchange={(event) =>
-              (paidFallbackTargets = {
-                ...paidFallbackTargets,
-                [model]: {
-                  provider_id: paidFallbackTargets[model].provider_id,
-                  slot_id: event.currentTarget.value
-                }
-              })}
-            required
-          >
-            <option value="">Choose a credential slot</option>
-            {#each providers.find((provider) => provider.id === paidFallbackTargets[model].provider_id)?.slots ?? [] as slot (slot.id)}<option
-                value={slot.id}>{slot.name || slot.id}</option
-              >{/each}
-          </select>
-        {/if}
-      </div>
-    {/each}
+    {@render paidTargetSelectors(
+      paidFallbackTargets,
+      'fallback',
+      'Paid fallback',
+      'No paid fallback',
+      (targets) => (paidFallbackTargets = targets)
+    )}
     <small
       >Paid targets use their native HTTP protocol. Publish after changing a
       provider or slot. Targets with request defaults, caller credentials or

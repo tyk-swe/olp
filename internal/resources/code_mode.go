@@ -175,7 +175,7 @@ func (in CodeAdmission) withOperation(operation codemode.Operation) CodeAdmissio
 		if in.ModelProviders != nil {
 			return in.ModelProviders[operation.Model]
 		}
-		if in.ModelSource != nil && operation.Model != in.Operation.Model {
+		if in.ModelSource != nil {
 			return in.ModelSource.CodeModelProviders(in.Route, in.ModelPath, operation.Model, in.ModelTransport)
 		}
 		return in.Providers

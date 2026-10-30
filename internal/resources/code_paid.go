@@ -77,7 +77,7 @@ func (s *CodeStore) AdmitPaid(ctx context.Context, in PaidCodeAdmission) (PaidCo
 	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,0))`, in.Route.ID+":"+in.APIKeyID); err != nil {
 		return PaidCodePermit{}, err
 	}
-	binding, err := paidCodeBind(ctx, tx, in)
+	binding, err := paidCodeBind(ctx, tx, in, current)
 	if err != nil {
 		return PaidCodePermit{}, err
 	}
@@ -132,7 +132,7 @@ func paidCodeOwners(authority access.Authority, in PaidCodeAdmission) []string {
 	})
 }
 
-func paidCodeBind(ctx context.Context, tx pgx.Tx, in PaidCodeAdmission) (paidCodeBinding, error) {
+func paidCodeBind(ctx context.Context, tx pgx.Tx, in PaidCodeAdmission, current codemode.Route) (paidCodeBinding, error) {
 	requested := in.Operation.Identity
 	binding, bindingErr := paidCodeConversation(ctx, tx, in, requested.Conversation)
 	if bindingErr != nil && !errors.Is(bindingErr, pgx.ErrNoRows) {
@@ -167,7 +167,7 @@ func paidCodeBind(ctx context.Context, tx pgx.Tx, in PaidCodeAdmission) (paidCod
 	source, sourceErr := func() (*string, error) {
 		if !subscription {
 			if in.Fallback && bindingErr != nil && identity.Parent == "" {
-				return nil, codePaidInitialFallback(ctx, tx, in)
+				return nil, codePaidInitialFallback(ctx, tx, in, current)
 			}
 			return nil, nil
 		}
@@ -377,7 +377,7 @@ func (s *CodeStore) ResolvePaidFallback(ctx context.Context, in CodeAdmission, v
 	return in.Route.PaidFallbackModel(in.Operation, pins)
 }
 
-func codePaidInitialFallback(ctx context.Context, tx pgx.Tx, in PaidCodeAdmission) error {
+func codePaidInitialFallback(ctx context.Context, tx pgx.Tx, in PaidCodeAdmission, current codemode.Route) error {
 	if !in.InitialRecovery || in.Route.InitialRecoveryAttempts < 1 || in.Operation.Identity.Parent != "" || in.PreviousResponse != "" || in.Recovery != nil {
 		return codemode.Refuse(409, "code_recovery_unsafe")
 	}
@@ -396,6 +396,13 @@ func codePaidInitialFallback(ctx context.Context, tx pgx.Tx, in PaidCodeAdmissio
 	}
 	if !slices.ContainsFunc(operations, func(operation codemode.Operation) bool { return operation.Model == in.Operation.Model }) {
 		return codemode.Refuse(409, "code_recovery_unsafe")
+	}
+	currentOperations, err := current.RecoveryModels(public, nil)
+	if err != nil {
+		return err
+	}
+	if !slices.ContainsFunc(currentOperations, func(operation codemode.Operation) bool { return operation.Model == in.Operation.Model }) {
+		return codemode.Refuse(409, "code_recovery_policy_changed")
 	}
 	_, _, availabilityErr := codeRecoveryDestination(ctx, tx, in.CodeAdmission, operations)
 	if availabilityErr == nil {
