@@ -113,10 +113,22 @@ func (s *Server) forwardCode(w http.ResponseWriter, r *http.Request, release *ru
 	}
 	defer attempt.finish(ctx)
 	payload, err := func() (codePayload, error) {
+		requestBody, rewriteErr := func() ([]byte, error) {
+			if attempt.model != attempt.publicModel {
+				return codewire.RewriteRequestModel(body, attempt.publicModel, attempt.model)
+			}
+			return body, nil
+		}()
+		if rewriteErr != nil {
+			return codePayload{}, rewriteErr
+		}
 		if attempt.endpoint.Protocol == ingress.protocol {
+			if attempt.model != attempt.publicModel {
+				return codePayload{body: requestBody, query: r.URL.RawQuery}, nil
+			}
 			return codePayload{body: raw, query: r.URL.RawQuery}, nil
 		}
-		return codeTranslateMessages(body, r, observation.Operation.Model)
+		return codeTranslateMessages(requestBody, r, attempt.model)
 	}()
 	if err != nil {
 		refuse(err)
@@ -141,6 +153,11 @@ func (s *Server) forwardCode(w http.ResponseWriter, r *http.Request, release *ru
 	}
 	request.ContentLength = int64(len(payload.body))
 	request.Header = attempt.headers(r.Header)
+	if attempt.model != attempt.publicModel {
+		request.Header.Del("Content-Encoding")
+		request.Header.Del("Content-Length")
+		request.Header.Set("Accept-Encoding", "identity")
+	}
 	if payload.translated {
 		request.Header.Del("Content-Encoding")
 		request.Header.Del("Content-Length")
@@ -181,6 +198,10 @@ func (s *Server) forwardCode(w http.ResponseWriter, r *http.Request, release *ru
 		return
 	}
 	maps.Copy(w.Header(), codewire.ForwardHeaders(response.Header, false))
+	if attempt.model != attempt.publicModel {
+		w.Header().Del("Content-Encoding")
+		w.Header().Del("Content-Length")
+	}
 	for name := range codewire.ForwardTrailers(response.Trailer, response.Header, false) {
 		w.Header().Add("Trailer", name)
 	}
@@ -215,6 +236,12 @@ func (b *codeRequestBody) Read(p []byte) (int, error) {
 func (b *codeRequestBody) Close() error { return nil }
 
 func (a *codeAttempt) copyResponse(ctx context.Context, w http.ResponseWriter, response *http.Response) {
+	if a.model != a.publicModel {
+		if err := a.copyModelResponse(ctx, w, response); err != nil {
+			a.transportFailed(ctx, err)
+		}
+		return
+	}
 	streaming := strings.HasPrefix(strings.ToLower(response.Header.Get("Content-Type")), "text/event-stream")
 	encoded := response.Header.Get("Content-Encoding")
 	events := codewire.NewEvents(codewire.MaxBody, func(data []byte) { a.observe(a.observer.Event(data)) })
@@ -256,17 +283,10 @@ func (a *codeAttempt) copyResponse(ctx context.Context, w http.ResponseWriter, r
 					}
 				}
 			}
-			if err == io.EOF && !a.terminal {
-				if o, ok := a.observer.Finish(); ok {
-					a.observe(o)
-				}
-			}
-			if !a.terminal && ctx.Err() == nil {
-				outcome := codemode.Outcome{Origin: "gateway", Kind: "transport_error"}
-				if err == io.EOF {
-					outcome.Origin, outcome.Kind = "upstream", "incomplete"
-				}
-				a.outcome(ctx, outcome)
+			if err == io.EOF {
+				a.finishCodeStream(ctx)
+			} else if !a.terminal && ctx.Err() == nil {
+				a.outcome(ctx, codemode.Outcome{Origin: "gateway", Kind: "transport_error"})
 			}
 			return
 		}

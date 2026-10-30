@@ -50,8 +50,8 @@ func TestPublishedMessagesPolicySelectsEligibleFrozenProviders(t *testing.T) {
 	snapshot := Snapshot{
 		Generation: Generation{ID: "0192cf87-d4ab-7f2e-a8b1-c2d3e4f50607", Ordinal: 1},
 		CodeRoutes: map[string]codemode.Route{
-			"native":     {ID: "native-route", ProjectID: "project", Slug: "native", PoolID: "pool", Models: []string{"gpt-fixture-model", "minimax-fixture-model"}, Enabled: true, RevisionID: "native-revision", Revision: 1, PublishedAt: &publishedAt},
-			"translated": {ID: "translated-route", ProjectID: "project", Slug: "translated", PoolID: "pool", Models: []string{"gpt-fixture-model", "minimax-fixture-model"}, Enabled: true, RevisionID: "translated-revision", Revision: 1, PublishedAt: &publishedAt, MessagesToCodex: true},
+			"native":     {ID: "native-route", ProjectID: "project", Slug: "native", PoolID: "pool", Models: []string{"gpt-fixture-model", "minimax-fixture-model"}, Enabled: true, RevisionID: "native-revision", Revision: 1, PublishedAt: &publishedAt, ModelRewriting: true, Aliases: map[string]string{"client-messages": "minimax-fixture-model"}},
+			"translated": {ID: "translated-route", ProjectID: "project", Slug: "translated", PoolID: "pool", Models: []string{"gpt-fixture-model", "minimax-fixture-model"}, Enabled: true, RevisionID: "translated-revision", Revision: 1, PublishedAt: &publishedAt, MessagesToCodex: true, ModelRewriting: true, Aliases: map[string]string{"client-stable": "gpt-fixture-model"}},
 		},
 		CodeConnections: map[string]Configuration{
 			"native-revision:a-native":       {Kind: "plugin", AuthMode: "grant", ProfileID: codeplans.OpenCodeGoProfile},
@@ -79,6 +79,8 @@ func TestPublishedMessagesPolicySelectsEligibleFrozenProviders(t *testing.T) {
 		providers               []string
 	}{
 		{"native-default-refuses-cross-protocol", "native", "v1/messages", "gpt-fixture-model", codeadapter.HTTP, nil},
+		{"exact-alias-selects-target-protocol", "native", "v1/messages", "client-messages", codeadapter.HTTP, []string{"a-native"}},
+		{"exact-alias-reaches-native-target", "translated", "v1/messages", "client-stable", codeadapter.HTTP, []string{"b-codex"}},
 		{"published-opt-in-reaches-codex", "translated", "v1/messages", "gpt-fixture-model", codeadapter.HTTP, []string{"b-codex"}},
 		{"native-messages-remains-reachable", "native", "v1/messages", "minimax-fixture-model", codeadapter.HTTP, []string{"a-native"}},
 		{"native-codex-responses-remains-reachable", "native", "responses", "gpt-fixture-model", codeadapter.HTTP, []string{"b-codex"}},
@@ -98,5 +100,24 @@ func TestPublishedMessagesPolicySelectsEligibleFrozenProviders(t *testing.T) {
 	}
 	if got := published.CodeProviders(published.CodeRoutes["translated"], "v1/messages", codeadapter.HTTP); !slices.Equal(got, []string{"a-native", "b-codex"}) {
 		t.Fatalf("model filtering changed published path eligibility, got %v", got)
+	}
+}
+
+func TestExactAliasSnapshotFreezesPublishedModelMapping(t *testing.T) {
+	aliases := map[string]string{"team-code": "native-model"}
+	input := &Snapshot{CodeRoutes: map[string]codemode.Route{"coding": {Models: []string{"native-model"}, Aliases: aliases, ModelRewriting: true}}}
+	frozen := input.Clone()
+	before, err := frozen.Digest()
+	if err != nil {
+		t.Fatal(err)
+	}
+	aliases["team-code"] = "native-next"
+	after, err := frozen.Digest()
+	if err != nil || after != before {
+		t.Fatalf("draft alias edit changed frozen publication %s, %s, %v", before, after, err)
+	}
+	resolved, err := frozen.CodeRoutes["coding"].ResolveModel(codemode.Operation{Model: "team-code"})
+	if err != nil || resolved.Model != "native-model" {
+		t.Fatalf("frozen alias no longer resolves to published target %+v, %v", resolved, err)
 	}
 }

@@ -67,15 +67,14 @@ type CodeRecovery struct {
 }
 
 type CodeAdmission struct {
-	InitialRecovery bool
-	Recovery        *CodeRecovery
-	Attribution     map[string]string
-	Route           codemode.Route
-	APIKeyID        string
-	EndUserDigest   string
-	Operation       codemode.Operation
-	// Providers are the route revision's provider connections whose adapter
-	// serves the request's path; only their accounts serve it.
+	InitialRecovery  bool
+	Recovery         *CodeRecovery
+	Attribution      map[string]string
+	Route            codemode.Route
+	APIKeyID         string
+	EndUserDigest    string
+	Operation        codemode.Operation
+	ModelProviders   map[string][]string
 	Providers        []string
 	Bound            *codemode.TokenBound
 	PreviousResponse string
@@ -143,7 +142,7 @@ func codeReference(ctx context.Context, tx pgx.Tx, in CodeAdmission) (codemode.B
 		return reference, in, nil
 	}
 	reference, err := ScanCodeBinding(tx.QueryRow(ctx, `SELECT `+CodeBindingColumns+` FROM olp.code_references x JOIN olp.code_bindings b ON b.id=x.binding_id
-		WHERE x.route_id=$1 AND x.api_key_id=$2 AND x.external_id=$3 AND NOT x.ambiguous`, in.Route.ID, in.APIKeyID, in.PreviousResponse))
+		WHERE x.route_id=$1 AND x.api_key_id=$2 AND x.external_id=$3 AND NOT x.ambiguous AND x.account_id IS NOT NULL`, in.Route.ID, in.APIKeyID, in.PreviousResponse))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return reference, in, codemode.Refuse(409, "code_parent_unresolved")
 	}
@@ -164,9 +163,24 @@ func codeReference(ctx context.Context, tx pgx.Tx, in CodeAdmission) (codemode.B
 	return reference, in, nil
 }
 
+func (in CodeAdmission) withOperation(operation codemode.Operation) CodeAdmission {
+	providers := func() []string {
+		if in.ModelProviders != nil {
+			return in.ModelProviders[operation.Model]
+		}
+		return in.Providers
+	}()
+	return CodeAdmission{ModelProviders: in.ModelProviders, InitialRecovery: in.InitialRecovery, Recovery: in.Recovery, Attribution: in.Attribution, Route: in.Route, APIKeyID: in.APIKeyID, EndUserDigest: in.EndUserDigest, Operation: operation, Providers: providers, Bound: in.Bound, PreviousResponse: in.PreviousResponse}
+}
+
 func (s *CodeStore) admit(ctx context.Context, admission CodeAdmission, connection bool) (CodePermit, error) {
 	var out CodePermit
-	if err := validateCodeAdmission(admission); err != nil {
+	resolved, err := admission.Route.ResolveModel(admission.Operation)
+	if err != nil {
+		return out, err
+	}
+	input := admission.withOperation(resolved)
+	if err := validateCodeAdmission(input); err != nil {
 		return out, err
 	}
 	tx, err := s.Pool.Begin(ctx)
@@ -177,39 +191,49 @@ func (s *CodeStore) admit(ctx context.Context, admission CodeAdmission, connecti
 	if _, err = tx.Exec(ctx, `SELECT id FROM olp.installation WHERE singleton FOR SHARE`); err != nil {
 		return out, err
 	}
-	if err = codeAuthority(ctx, tx, admission, &out.Authority); err != nil {
+	if err = codeAuthority(ctx, tx, input, &out.Authority); err != nil {
 		return out, err
 	}
-	if _, err = tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,0))`, admission.Route.ID+":"+admission.APIKeyID); err != nil {
+	if _, err = tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,0))`, input.Route.ID+":"+input.APIKeyID); err != nil {
 		return out, err
 	}
-	reference, in, err := codeReference(ctx, tx, admission)
+	reference, referenced, err := codeReference(ctx, tx, input)
 	if err != nil {
 		return out, err
 	}
 	var newBinding bool
-	if in.InitialRecovery {
-		if err = tx.QueryRow(ctx, `SELECT NOT EXISTS(SELECT 1 FROM olp.code_bindings WHERE route_id=$1 AND api_key_id=$2 AND conversation=$3)`, in.Route.ID, in.APIKeyID, in.Operation.Identity.Conversation).Scan(&newBinding); err != nil {
+	if referenced.InitialRecovery {
+		if err = tx.QueryRow(ctx, `SELECT NOT EXISTS(SELECT 1 FROM olp.code_bindings WHERE route_id=$1 AND api_key_id=$2 AND conversation=$3)`, referenced.Route.ID, referenced.APIKeyID, referenced.Operation.Identity.Conversation).Scan(&newBinding); err != nil {
 			return out, err
 		}
 	}
-	if in.Recovery != nil {
-		if err = recoverCodeBinding(ctx, tx, in); err != nil {
+	if referenced.Recovery != nil {
+		if err = recoverCodeBinding(ctx, tx, referenced); err != nil {
 			return out, err
 		}
 	}
-	out.Binding, err = s.bind(ctx, tx, in)
+	out.Binding, err = s.bind(ctx, tx, referenced)
 	if err != nil {
 		return out, err
 	}
-	if in.PreviousResponse != "" && reference.RootID != out.Binding.RootID {
+	if referenced.PreviousResponse != "" && reference.RootID != out.Binding.RootID {
 		return out, codemode.Refuse(409, "code_parent_conflict")
 	}
 	pins, err := codePins(ctx, tx, out.Binding.RootID)
 	if err != nil {
 		return out, err
 	}
-	switch pinned := slices.IndexFunc(pins, func(p codemode.Pin) bool { return p.Model == in.Operation.Model }); {
+	selected, err := referenced.Route.ResolvePinnedModel(referenced.Operation, pins)
+	if err != nil {
+		return out, err
+	}
+	in := referenced.withOperation(selected)
+	if selected.Model != referenced.Operation.Model {
+		if err := codeAuthority(ctx, tx, in, &out.Authority); err != nil {
+			return out, err
+		}
+	}
+	switch pinned := slices.IndexFunc(pins, func(p codemode.Pin) bool { return p.Model == in.Operation.PublicModel() }); {
 	case pinned >= 0:
 		// A republish can give two of the tree's accounts one adapter, so
 		// the pinned account is checked against the earlier ones.
@@ -229,6 +253,15 @@ func (s *CodeStore) admit(ctx context.Context, admission CodeAdmission, connecti
 	}
 	if out.Account.Principal != out.Pin.Principal {
 		return out, codemode.Refuse(403, "code_principal_changed")
+	}
+	if in.PreviousResponse != "" {
+		var owned bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM olp.code_references WHERE route_id=$1 AND api_key_id=$2 AND external_id=$3 AND account_id=$4 AND NOT ambiguous)`, in.Route.ID, in.APIKeyID, in.PreviousResponse, out.Account.ID).Scan(&owned); err != nil {
+			return out, err
+		}
+		if !owned {
+			return out, codemode.Refuse(409, "code_response_account_conflict")
+		}
 	}
 	if !connection && !out.Authority.AllowsAttribution(in.Attribution) {
 		return out, codemode.Refuse(409, "code_attribution_changed")
@@ -301,6 +334,11 @@ func codeAuthorityFor(ctx context.Context, tx pgx.Tx, in CodeAdmission, a *acces
 	if !in.Route.Enabled || !current.Enabled || current.ID != in.Route.ID || current.Slug != in.Route.Slug || current.ProjectID != in.Route.ProjectID || current.PoolID != in.Route.PoolID ||
 		!a.Allows("inference", in.Route.Slug, &in.Route.ProjectID, time.Now()) {
 		return codemode.Refuse(403, "code_permission_denied")
+	}
+	if operation == codeInference {
+		if _, err := current.ResolveModel(codemode.Operation{Model: in.Operation.PublicModel()}); err != nil {
+			return err
+		}
 	}
 	if operation == codeInference && (!slices.Contains(in.Route.Models, in.Operation.Model) || !slices.Contains(current.Models, in.Operation.Model)) {
 		return codemode.Refuse(403, "code_model_denied")
@@ -397,13 +435,13 @@ func liveCodeTree(ctx context.Context, tx pgx.Tx, b codemode.Binding) error {
 
 // codePins returns the pins of a conversation tree in the order it made them.
 func codePins(ctx context.Context, tx pgx.Tx, root string) ([]codemode.Pin, error) {
-	rows, err := tx.Query(ctx, `SELECT model,account_id::text,principal,created_at FROM olp.code_pins WHERE root_id=$1 ORDER BY seq`, root)
+	rows, err := tx.Query(ctx, `SELECT model,coalesce(target_model,model),account_id::text,principal,created_at FROM olp.code_pins WHERE root_id=$1 ORDER BY seq`, root)
 	if err != nil {
 		return nil, err
 	}
 	return pgx.CollectRows(rows, func(row pgx.CollectableRow) (codemode.Pin, error) {
 		var p codemode.Pin
-		err := row.Scan(&p.Model, &p.AccountID, &p.Principal, &p.CreatedAt)
+		err := row.Scan(&p.Model, &p.TargetModel, &p.AccountID, &p.Principal, &p.CreatedAt)
 		return p, err
 	})
 }
@@ -434,13 +472,13 @@ func codePin(ctx context.Context, tx pgx.Tx, in CodeAdmission, b codemode.Bindin
 	if err != nil {
 		return codemode.Pin{}, account, err
 	}
-	pin := codemode.Pin{Model: in.Operation.Model, AccountID: account.ID, Principal: account.Principal}
+	pin := codemode.Pin{Model: in.Operation.PublicModel(), TargetModel: in.Operation.Model, AccountID: account.ID, Principal: account.Principal}
 	if principal, ok := principals[account.ID]; ok {
 		pin.Principal = principal
 	}
-	err = tx.QueryRow(ctx, `INSERT INTO olp.code_pins(root_id,model,account_id,principal,adapter)
-		SELECT $1,$2,$3,$4,`+codeadapter.SQL("v.connections->($5::text)")+` FROM olp.code_route_revisions v WHERE v.id=$6 RETURNING created_at`,
-		b.RootID, pin.Model, pin.AccountID, pin.Principal, account.ProviderID, in.Route.RevisionID).Scan(&pin.CreatedAt)
+	err = tx.QueryRow(ctx, `INSERT INTO olp.code_pins(root_id,model,account_id,principal,adapter,target_model)
+		SELECT $1,$2,$3,$4,`+codeadapter.SQL("v.connections->($5::text)")+`,$7 FROM olp.code_route_revisions v WHERE v.id=$6 RETURNING created_at`,
+		b.RootID, pin.Model, pin.AccountID, pin.Principal, account.ProviderID, in.Route.RevisionID, pin.TargetModel).Scan(&pin.CreatedAt)
 	return pin, account, err
 }
 
@@ -580,9 +618,10 @@ func (s *CodeStore) ObserveReference(ctx context.Context, attemptID, externalID 
 	if err := (codemode.Identity{Conversation: externalID}).Validate(); err != nil {
 		return err
 	}
-	_, err := s.Pool.Exec(ctx, `INSERT INTO olp.code_references(route_id,api_key_id,external_id,binding_id)
-		SELECT a.route_id,a.api_key_id,$2,a.binding_id FROM olp.code_attempts a WHERE a.id=$1 AND a.state<>'prepared'
+	_, err := s.Pool.Exec(ctx, `INSERT INTO olp.code_references(route_id,api_key_id,external_id,binding_id,account_id)
+		SELECT a.route_id,a.api_key_id,$2,a.binding_id,a.account_id FROM olp.code_attempts a WHERE a.id=$1 AND a.state<>'prepared'
 		ON CONFLICT(route_id,api_key_id,external_id) DO UPDATE SET ambiguous=olp.code_references.ambiguous OR
+		olp.code_references.account_id IS DISTINCT FROM EXCLUDED.account_id OR
 		(SELECT root_id FROM olp.code_bindings WHERE id=olp.code_references.binding_id)<>(SELECT root_id FROM olp.code_bindings WHERE id=EXCLUDED.binding_id)`, attemptID, externalID)
 	return err
 }

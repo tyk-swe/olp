@@ -49,7 +49,12 @@ func (s *Server) recordCodeRefusal(ctx context.Context, route codemode.Route, ke
 }
 
 func codeRefusalMessage(code string) string {
-	if code == "code_translation_unsupported_semantics" {
+	switch code {
+	case "code_parent_unresolved":
+		return "Establish the parent conversation first, or start a new conversation with full context and no response reference"
+	case "code_response_account_conflict":
+		return "Continue on the account that produced the response, or start a new conversation with full context and no response reference"
+	case "code_translation_unsupported_semantics":
 		return "This route supports text, tools and explicit reasoning effort. Use a native Messages account for required semantics this route cannot represent."
 	}
 	return code

@@ -28,9 +28,10 @@ func TestCodeMessagesToolExchange(t *testing.T) {
 	for _, stream := range []bool{false, true} {
 		for _, source := range []string{"fragments", "complete"} {
 			t.Run(fmt.Sprintf("%t/%s", stream, source), func(t *testing.T) {
-				client := h.anthropic(anthropicoption.WithHeader("X-Claude-Code-Session-Id", fmt.Sprintf("sdk-%t-%s", stream, source)))
+				session := fmt.Sprintf("sdk-%t-%s", stream, source)
+				client := h.anthropic(anthropicoption.WithHeader("X-Claude-Code-Session-Id", session))
 				messages := []anthropic.MessageParam{anthropic.NewUserMessage(anthropic.NewTextBlock("Read main.go"))}
-				request := func(history []anthropic.MessageParam) anthropic.Message {
+				request := func(client *anthropic.Client, history []anthropic.MessageParam) anthropic.Message {
 					t.Helper()
 					params := anthropic.MessageNewParams{Model: anthropic.Model(model), MaxTokens: 64, Messages: history, Tools: []anthropic.ToolUnionParam{{OfTool: &anthropic.ToolParam{Name: "read_file", InputSchema: anthropic.ToolInputSchemaParam{Properties: map[string]any{"path": map[string]string{"type": "string"}}, Required: []string{"path"}}}}}}
 					if !stream {
@@ -53,7 +54,7 @@ func TestCodeMessagesToolExchange(t *testing.T) {
 					}
 					return message
 				}
-				first := request(messages)
+				first := request(client, messages)
 				if first.StopReason != "tool_use" || len(first.Content) != 1 || first.Content[0].Type != "tool_use" {
 					t.Fatalf("SDK tool reply %+v", first)
 				}
@@ -63,9 +64,15 @@ func TestCodeMessagesToolExchange(t *testing.T) {
 					t.Fatalf("SDK tool arguments %+v %v", call, err)
 				}
 				history := slices.Concat(messages, []anthropic.MessageParam{first.ToParam(), anthropic.NewUserMessage(anthropic.NewToolResultBlock(call.ID, "package main", false))})
-				last := request(history)
+				child := h.anthropic(anthropicoption.WithHeader("X-Claude-Code-Session-Id", session), anthropicoption.WithHeader("X-Claude-Code-Agent-Id", "reader"))
+				last := request(child, history)
 				if last.StopReason != "end_turn" || len(last.Content) != 1 || last.Content[0].AsText().Text != "File read" || last.Usage.InputTokens != 13 || last.Usage.OutputTokens != 2 {
 					t.Fatalf("SDK result reply %+v", last)
+				}
+				resumed := h.anthropic(anthropicoption.WithHeader("X-Claude-Code-Session-Id", session), anthropicoption.WithHeader("X-Claude-Code-Agent-Id", "reader"))
+				compacted := request(resumed, []anthropic.MessageParam{anthropic.NewUserMessage(anthropic.NewTextBlock("CONTROLLED_COMPACT_SUMMARY"))})
+				if compacted.StopReason != "end_turn" || len(compacted.Content) != 1 || compacted.Content[0].AsText().Text != "File read" {
+					t.Fatalf("SDK compacted cold resume %+v", compacted)
 				}
 			})
 		}

@@ -170,7 +170,7 @@ func TestCodeQualificationPublicPoolWeights(t *testing.T) {
 		t.Fatal("omitted weights did not default to equal shares", initial.AccountWeights)
 	}
 	path := "/api/v1/code/pools/" + initial.Id.String()
-	saved := f.h.want(f.owner, "PUT", path, codePoolWeightInput(initial, map[string]int64{first: 5}), map[string]string{"If-Match": initial.Etag.String()}, 200)
+	saved := f.h.want(f.owner, "PUT", path, codePoolWeightInput(initial, map[string]int64{first: 5}), etagHeader(f.pool), 200)
 	for _, value := range []contract.CodePool{codeDiscoveryResponse[contract.CodePool](t, saved), codePublicDecode[contract.CodePool](t, f.list("pools")[0])} {
 		if value.AccountWeights[first] != 5 || value.AccountWeights[second] != 1 {
 			t.Fatal("pool weights did not round-trip", value.AccountWeights)

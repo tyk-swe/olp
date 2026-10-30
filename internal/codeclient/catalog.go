@@ -12,16 +12,20 @@ func Catalog(route codemode.Route, offers Offers) []codemode.Model {
 		return []codemode.Model{}
 	}
 	return slices.AppendSeq([]codemode.Model{}, func(yield func(codemode.Model) bool) {
-		for _, id := range route.Models {
+		for _, id := range route.PublicModels() {
 			declarations := slices.Collect(func(yield func(codeadapter.Vendor) bool) {
-				for _, adapter := range offers.adapters(id) {
+				for _, adapter := range offers.adapters(route, id) {
 					if declaration, ok := codeadapter.Lookup(adapter); ok && !yield(declaration) {
 						return
 					}
 				}
 			})
-			capabilities := modelCapabilities(route, id, declarations)
-			if len(capabilities) > 0 && !yield(codemode.Model{ID: id, Object: "model", Capabilities: capabilities, Clients: modelClients(route, id, declarations)}) {
+			resolved, err := route.ResolveModel(codemode.Operation{Model: id})
+			if err != nil {
+				continue
+			}
+			capabilities := modelCapabilities(route, resolved.Model, declarations)
+			if len(capabilities) > 0 && !yield(codemode.Model{ID: id, Object: "model", Capabilities: capabilities, Clients: modelClients(route, resolved.Model, declarations)}) {
 				return
 			}
 		}
