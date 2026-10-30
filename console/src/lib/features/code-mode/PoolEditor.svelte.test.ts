@@ -1,18 +1,18 @@
 // @vitest-environment jsdom
 import { flushSync, mount, unmount } from 'svelte';
 import { QueryClient } from '@tanstack/svelte-query';
-import { afterEach, expect, it, vi } from 'vitest';
-import type { CodeAccount } from '$lib/api/code-mode';
+import { expect, it, onTestFinished, vi } from 'vitest';
+import type { CodeAccount, CodePool } from '$lib/api/code-mode';
 import { authLifecycle } from '$lib/features/access/session/lifecycle';
 import PoolEditorProbe from './test/PoolEditorProbe.svelte';
 
 const accountId = '01980000-0000-7000-8000-000000000010';
 const otherId = '01980000-0000-7000-8000-000000000011';
-const pool = {
+const pool: CodePool = {
   id: '01980000-0000-7000-8000-000000000020',
   project_id: '01980000-0000-7000-8000-000000000001',
   name: 'Weighted pool',
-  kind: 'shared' as const,
+  kind: 'shared',
   owner_user_id: null,
   account_ids: [accountId, otherId],
   account_weights: { [accountId]: 3, [otherId]: 1 },
@@ -35,19 +35,6 @@ const accounts: CodeAccount[] = [accountId, otherId].map((id, index) => ({
   allowance: null,
   etag: pool.etag
 }));
-let component: ReturnType<typeof mount> | undefined;
-let host: HTMLDivElement;
-const client = new QueryClient({
-  defaultOptions: { queries: { retry: false } }
-});
-
-afterEach(async () => {
-  if (component) await unmount(component);
-  client.clear();
-  host?.remove();
-  vi.unstubAllGlobals();
-});
-
 it('edits selected account weights and drops the weight of a removed account', async () => {
   authLifecycle.establishSession({
     user: {
@@ -60,22 +47,25 @@ it('edits selected account weights and drops the weight of a removed account', a
     },
     csrf_token: 'fixture'
   });
-  const writes: unknown[] = [];
-  vi.stubGlobal(
-    'fetch',
-    vi.fn(async (request: Request) => {
-      if (request.method === 'PUT') {
-        writes.push(await request.json());
-        return Response.json(pool);
-      }
-      return Response.json({ items: [], next_cursor: null });
-    })
-  );
-  host = document.createElement('div');
+  const fetch = vi.fn(async (request: Request) => {
+    if (request.method === 'PUT') return Response.json(pool);
+    return Response.json({ items: [], next_cursor: null });
+  });
+  vi.stubGlobal('fetch', fetch);
+  const host = document.createElement('div');
   document.body.append(host);
-  component = mount(PoolEditorProbe, {
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false } }
+  });
+  const component = mount(PoolEditorProbe, {
     target: host,
     props: { client, current: pool, accounts }
+  });
+  onTestFinished(async () => {
+    await unmount(component);
+    client.clear();
+    host.remove();
+    vi.unstubAllGlobals();
   });
   flushSync();
   const weight = host.querySelector<HTMLInputElement>(
@@ -94,11 +84,17 @@ it('edits selected account weights and drops the weight of a removed account', a
     .querySelector('form')!
     .dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
   await vi.waitFor(() =>
-    expect(writes).toEqual([
-      expect.objectContaining({
-        account_ids: [accountId],
-        account_weights: { [accountId]: 7 }
-      })
-    ])
+    expect(
+      fetch.mock.calls.filter(([request]) => request.method === 'PUT')
+    ).toHaveLength(1)
+  );
+  const write = fetch.mock.calls.find(
+    ([request]) => request.method === 'PUT'
+  )![0];
+  expect(await write.json()).toEqual(
+    expect.objectContaining({
+      account_ids: [accountId],
+      account_weights: { [accountId]: 7 }
+    })
   );
 });

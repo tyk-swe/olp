@@ -10,7 +10,7 @@ import (
 	"testing"
 
 	"github.com/tyk-swe/olp/internal/access"
-	"github.com/tyk-swe/olp/internal/codemode"
+	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/testutil"
 	codexfixture "github.com/tyk-swe/olp/tests/fixtures/codex-qualified"
 )
@@ -105,6 +105,10 @@ func (f *codePublicFixture) poolInput(keys []string) map[string]any {
 	return map[string]any{"project_id": f.project, "name": "Controlled shared pool", "kind": "shared", "owner_user_id": nil, "account_ids": ids, "api_key_ids": keys}
 }
 
+func codePoolWeightInput(pool contract.CodePool, weights map[string]int64) contract.CodePoolWrite {
+	return contract.CodePoolWrite{ProjectId: pool.ProjectId, Name: pool.Name, Kind: contract.CodePoolWriteKind(pool.Kind), OwnerUserId: pool.OwnerUserId, AccountIds: pool.AccountIds, ApiKeyIds: pool.ApiKeyIds, AccountWeights: &weights}
+}
+
 func (f *codePublicFixture) list(collection string) []any {
 	return f.h.want(f.owner, "GET", "/api/v1/code/"+collection+"?project_id="+f.project, nil, nil, 200)["items"].([]any)
 }
@@ -160,25 +164,20 @@ func TestCodeQualificationPublicManagementLifecycle(t *testing.T) {
 
 func TestCodeQualificationPublicPoolWeights(t *testing.T) {
 	f := newCodePublicFixture(t)
-	first, second := f.accounts[0]["id"].(string), f.accounts[1]["id"].(string)
-	initial := codePublicDecode[codemode.Pool](t, f.pool)
+	initial := codeDiscoveryResponse[contract.CodePool](t, f.pool)
+	first, second := initial.AccountIds[0].String(), initial.AccountIds[1].String()
 	if initial.AccountWeights[first] != 1 || initial.AccountWeights[second] != 1 {
 		t.Fatal("omitted weights did not default to equal shares", initial.AccountWeights)
 	}
-	path := "/api/v1/code/pools/" + initial.ID
-	input := f.poolInput([]string{f.keyID})
-	input["account_weights"] = map[string]int64{first: 5}
-	saved := f.h.want(f.owner, "PUT", path, input, etagHeader(f.pool), 200)
-	for _, value := range []any{saved, f.list("pools")[0]} {
-		pool := codePublicDecode[codemode.Pool](t, value)
-		if pool.AccountWeights[first] != 5 || pool.AccountWeights[second] != 1 {
-			t.Fatal("pool weights did not round-trip", pool.AccountWeights)
+	path := "/api/v1/code/pools/" + initial.Id.String()
+	saved := f.h.want(f.owner, "PUT", path, codePoolWeightInput(initial, map[string]int64{first: 5}), map[string]string{"If-Match": initial.Etag.String()}, 200)
+	for _, value := range []contract.CodePool{codeDiscoveryResponse[contract.CodePool](t, saved), codePublicDecode[contract.CodePool](t, f.list("pools")[0])} {
+		if value.AccountWeights[first] != 5 || value.AccountWeights[second] != 1 {
+			t.Fatal("pool weights did not round-trip", value.AccountWeights)
 		}
 	}
 	for _, weights := range []map[string]int64{{first: 0}, {first: -1}, {first: 2147483648}, {access.NewID(): 2}} {
-		invalid := f.poolInput([]string{f.keyID})
-		invalid["account_weights"] = weights
-		f.h.want(f.owner, "PUT", path, invalid, etagHeader(saved), 422)
+		f.h.want(f.owner, "PUT", path, codePoolWeightInput(initial, weights), etagHeader(saved), 422)
 	}
 	f.noSyntheticInference(t)
 }
