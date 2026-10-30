@@ -64,12 +64,12 @@ func (s *Server) serveCode(w http.ResponseWriter, r *http.Request) {
 		refuse(codemode.Refuse(503, "code_adapter_unavailable"))
 		return
 	}
-	if endpoint, ok := codeadapter.ForPath(path); ok && r.Method == http.MethodGet && strings.EqualFold(r.Header.Get("Upgrade"), "websocket") && len(release.Snapshot.CodeProviders(route, path, codeadapter.WebSocket)) != 0 {
-		s.codeWebSocket(w, r, release, route, authority, endpoint)
+	ingress, ok := codeIngressFor(path)
+	if ok && r.Method == http.MethodGet && strings.EqualFold(r.Header.Get("Upgrade"), "websocket") && len(release.Snapshot.CodeProviders(route, path, codeadapter.WebSocket)) != 0 {
+		s.codeWebSocket(w, r, release, route, authority, ingress)
 		return
 	}
-	ingress, ok := codeIngressFor(r.Method, path)
-	if !ok || len(release.Snapshot.CodeProviders(route, path, codeadapter.HTTP)) == 0 {
+	if r.Method != http.MethodPost || !ok || len(release.Snapshot.CodeProviders(route, path, codeadapter.HTTP)) == 0 {
 		if codeProbe(r.Method, path) && len(release.Snapshot.CodeProviders(route, "v1/messages", codeadapter.HTTP)) != 0 {
 			codeWriteError(w, r, codemode.Refuse(404, "code_operation_unsupported"))
 			return
@@ -101,7 +101,7 @@ func (s *Server) serveCode(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), codeGenerationTimeout)
 	defer cancel()
-	attempt, err := s.prepareCode(r.WithContext(ctx), release, route, observation, path, ingress.Protocol, codeadapter.HTTP)
+	attempt, err := s.prepareCode(r.WithContext(ctx), release, route, observation, ingress, codeadapter.HTTP)
 	if err != nil {
 		refuse(err)
 		return

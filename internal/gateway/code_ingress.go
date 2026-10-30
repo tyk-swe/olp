@@ -10,22 +10,28 @@ import (
 	"github.com/tyk-swe/olp/internal/oif"
 )
 
-// codeIngressFor resolves shared request semantics from the static registry.
-// Forwarding and observation use the endpoint of the account selected later.
-func codeIngressFor(method, path string) (codeadapter.Endpoint, bool) {
-	if method != http.MethodPost {
-		return codeadapter.Endpoint{}, false
-	}
-	return codeadapter.ForPath(path)
+type codeIngress struct {
+	path      string
+	protocol  codemode.Protocol
+	operation string
+	identity  codeadapter.IdentityPolicy
 }
 
-func classifyCode(endpoint codeadapter.Endpoint, body []byte, headers http.Header, websocket bool) (codemode.Request, error) {
-	switch endpoint.Protocol {
+func codeIngressFor(path string) (codeIngress, bool) {
+	endpoint, ok := codeadapter.ForPath(path)
+	if !ok {
+		return codeIngress{}, false
+	}
+	return codeIngress{path: path, protocol: endpoint.Protocol, operation: endpoint.Operation, identity: endpoint.Identity}, true
+}
+
+func classifyCode(ingress codeIngress, body []byte, headers http.Header, websocket bool) (codemode.Request, error) {
+	switch ingress.protocol {
 	case codemode.ProtocolResponses:
-		if endpoint.Identity == codeadapter.IdentityCodex {
-			return codexwire.Classify(body, headers, endpoint.Operation, websocket)
+		if ingress.identity == codeadapter.IdentityCodex {
+			return codexwire.Classify(body, headers, ingress.operation, websocket)
 		}
-		return codexwire.ClassifyWith(body, endpoint.Operation, websocket, func(oif.Value) (codemode.Identity, error) { return codewire.ClientIdentity(headers) })
+		return codexwire.ClassifyWith(body, ingress.operation, websocket, func(oif.Value) (codemode.Identity, error) { return codewire.ClientIdentity(headers) })
 	case codemode.ProtocolMessages:
 		return codewire.ClassifyMessages(body, headers)
 	case codemode.ProtocolChat:
@@ -34,8 +40,8 @@ func classifyCode(endpoint codeadapter.Endpoint, body []byte, headers http.Heade
 	return codemode.Request{}, codemode.Refuse(400, "code_operation_unsupported")
 }
 
-func codeConnectionIdentity(endpoint codeadapter.Endpoint, headers http.Header) (codemode.Identity, error) {
-	if endpoint.Identity == codeadapter.IdentityCodex {
+func codeConnectionIdentity(ingress codeIngress, headers http.Header) (codemode.Identity, error) {
+	if ingress.identity == codeadapter.IdentityCodex {
 		return codexwire.ConnectionIdentity(headers)
 	}
 	return codewire.ClientIdentity(headers)
