@@ -253,7 +253,7 @@ func clonePredicate(p Predicate) Predicate {
 }
 func cloneCodeRoute(route codemode.Route) codemode.Route {
 	return codemode.Route{
-		ID: route.ID, ProjectID: route.ProjectID, Slug: route.Slug, PoolID: route.PoolID, PaidParticipation: route.PaidParticipation, PaidTargets: maps.Clone(route.PaidTargets),
+		ID: route.ID, ProjectID: route.ProjectID, Slug: route.Slug, PoolID: route.PoolID, PaidParticipation: route.PaidParticipation, PaidTargets: maps.Clone(route.PaidTargets), PaidFallbackTargets: maps.Clone(route.PaidFallbackTargets),
 		ModelPools: maps.Collect(func(yield func(string, []string) bool) {
 			for public, targets := range route.ModelPools {
 				if !yield(public, slices.Clone(targets)) {

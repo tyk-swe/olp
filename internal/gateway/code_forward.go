@@ -59,7 +59,7 @@ func (s *Server) serveCode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	adapters := release.Snapshot.CodeAdapters(route)
-	if len(adapters) == 0 && len(route.PaidTargets) == 0 {
+	if len(adapters) == 0 && len(route.PaidTargets)+len(route.PaidFallbackTargets) == 0 {
 		refuse(codemode.Refuse(503, "code_adapter_unavailable"))
 		return
 	}
@@ -68,7 +68,7 @@ func (s *Server) serveCode(w http.ResponseWriter, r *http.Request) {
 		s.codeWebSocket(w, r, release, route, authority, ingress)
 		return
 	}
-	if r.Method != http.MethodPost || !ok || len(release.Snapshot.CodeProviders(route, path, codeadapter.HTTP)) == 0 && len(route.PaidTargets) == 0 {
+	if r.Method != http.MethodPost || !ok || len(release.Snapshot.CodeProviders(route, path, codeadapter.HTTP)) == 0 && len(route.PaidTargets)+len(route.PaidFallbackTargets) == 0 {
 		if codeProbe(r.Method, path) && len(release.Snapshot.CodeProviders(route, "v1/messages", codeadapter.HTTP)) != 0 {
 			codeWriteError(w, r, codemode.Refuse(404, "code_operation_unsupported"))
 			return

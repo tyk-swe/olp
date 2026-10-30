@@ -55,7 +55,7 @@ func codeFamily(protocol codemode.Protocol) wire.Format {
 	}
 }
 
-func (s *Server) preparePaidCode(r *http.Request, release *runtime.Release, route codemode.Route, observation codemode.Request, candidate codemode.Operation, ingress codeIngress, transport codeadapter.Transport, verified access.Authority, body []byte) (*codeAttempt, error) {
+func (s *Server) preparePaidCode(r *http.Request, release *runtime.Release, route codemode.Route, observation codemode.Request, candidate codemode.Operation, ingress codeIngress, transport codeadapter.Transport, verified access.Authority, body []byte, recovery *resources.CodeRecovery, fallback bool) (*codeAttempt, error) {
 	if !route.PaidParticipation {
 		return nil, codemode.Refuse(403, "code_paid_participation_disabled")
 	}
@@ -66,11 +66,16 @@ func (s *Server) preparePaidCode(r *http.Request, release *runtime.Release, rout
 	if !supported {
 		return nil, codemode.Refuse(503, "code_paid_authority_unavailable")
 	}
-	operation, resolveErr := ledger.ResolvePaidModel(r.Context(), resources.CodeAdmission{Route: route, APIKeyID: verified.ID, Operation: candidate, EndUserDigest: verified.EndUserDigest, PreviousResponse: observation.PreviousResponse}, verified)
+	operation, resolveErr := func() (codemode.Operation, error) {
+		if fallback {
+			return candidate, nil
+		}
+		return ledger.ResolvePaidModel(r.Context(), resources.CodeAdmission{Route: route, APIKeyID: verified.ID, Operation: candidate, EndUserDigest: verified.EndUserDigest, PreviousResponse: observation.PreviousResponse}, verified)
+	}()
 	if resolveErr != nil {
 		return nil, resolveErr
 	}
-	target := route.PaidTargets[operation.Model]
+	target := route.PaidTarget(operation.Model, fallback)
 	provider, exists := release.Snapshot.CodePaidConnections[route.RevisionID+":"+target.ProviderID]
 	slotIndex := slices.IndexFunc(provider.Slots, func(slot routing.Slot) bool { return slot.ID == target.SlotID })
 	if !exists || !provider.Enabled || provider.ProjectID == nil || *provider.ProjectID != route.ProjectID || slotIndex < 0 {
@@ -129,7 +134,7 @@ func (s *Server) preparePaidCode(r *http.Request, release *runtime.Release, rout
 	if labelErr != nil {
 		return nil, codemode.Refuse(labelErr.Status, "code_"+labelErr.Code)
 	}
-	permit, err := ledger.AdmitPaid(r.Context(), resources.PaidCodeAdmission{CodeAdmission: resources.CodeAdmission{Route: route, APIKeyID: verified.ID, EndUserDigest: verified.EndUserDigest, Attribution: labels, Operation: operation, PreviousResponse: observation.PreviousResponse}, Authority: verified, Provider: provider, Slot: slot})
+	permit, err := ledger.AdmitPaid(r.Context(), resources.PaidCodeAdmission{CodeAdmission: resources.CodeAdmission{Route: route, APIKeyID: verified.ID, EndUserDigest: verified.EndUserDigest, Attribution: labels, Operation: operation, PreviousResponse: observation.PreviousResponse, InitialRecovery: observation.Recoverable, Recovery: recovery, ModelSource: release.Snapshot, ModelPath: ingress.path, ModelTransport: transport}, Fallback: fallback, Authority: verified, Provider: provider, Slot: slot})
 	if err != nil {
 		return nil, err
 	}

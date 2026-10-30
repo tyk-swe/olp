@@ -16,6 +16,7 @@ import (
 )
 
 type PaidCodeAdmission struct {
+	Fallback bool
 	CodeAdmission
 	Authority access.Authority
 	Provider  routing.Provider
@@ -29,13 +30,14 @@ type PaidCodePermit struct {
 }
 
 type paidCodeBinding struct {
-	ID           string
-	ParentID     *string
-	RootID       string
-	Model        string
-	ProviderID   string
-	SlotID       string
-	CredentialID string
+	ID                 string
+	ParentID           *string
+	RootID             string
+	Model              string
+	ProviderID         string
+	SlotID             string
+	CredentialID       string
+	SubscriptionRootID *string
 }
 
 func (s *CodeStore) AdmitPaid(ctx context.Context, in PaidCodeAdmission) (PaidCodePermit, error) {
@@ -61,9 +63,12 @@ func (s *CodeStore) AdmitPaid(ctx context.Context, in PaidCodeAdmission) (PaidCo
 	if !authority.AllowsAttribution(in.Attribution) {
 		return PaidCodePermit{}, codemode.Refuse(409, "code_attribution_changed")
 	}
-	target, exists := current.PaidTargets[in.Operation.Model]
-	frozen, selected := in.Route.PaidTargets[in.Operation.Model]
-	if !current.PaidParticipation || !exists || !selected || target != frozen || target.ProviderID != in.Provider.ID || target.SlotID != in.Slot.ID || in.Slot.CredentialID == nil || in.Slot.CredentialVersion == nil {
+	target := current.PaidTarget(in.Operation.Model, in.Fallback)
+	frozen := in.Route.PaidTarget(in.Operation.Model, in.Fallback)
+	if in.Fallback && current.InitialRecoveryAttempts < 1 {
+		return PaidCodePermit{}, codemode.Refuse(409, "code_recovery_policy_changed")
+	}
+	if !current.PaidParticipation || target.ProviderID == "" || frozen.ProviderID == "" || target != frozen || target.ProviderID != in.Provider.ID || target.SlotID != in.Slot.ID || in.Slot.CredentialID == nil || in.Slot.CredentialVersion == nil {
 		return PaidCodePermit{}, codemode.Refuse(403, "code_paid_target_denied")
 	}
 	if err := paidCodeTarget(ctx, tx, in, true); err != nil {
@@ -72,13 +77,13 @@ func (s *CodeStore) AdmitPaid(ctx context.Context, in PaidCodeAdmission) (PaidCo
 	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,0))`, in.Route.ID+":"+in.APIKeyID); err != nil {
 		return PaidCodePermit{}, err
 	}
-	binding, err := paidCodeBind(ctx, tx, in)
+	binding, err := paidCodeBind(ctx, tx, in, current)
 	if err != nil {
 		return PaidCodePermit{}, err
 	}
 	attempt := codemode.Attempt{ID: access.NewID(), ProjectID: in.Route.ProjectID, RouteID: in.Route.ID, RouteRevisionID: in.Route.RevisionID, APIKeyID: in.APIKeyID, Attribution: in.Attribution, EndUserDigest: in.EndUserDigest, Operation: in.Operation.Name, Model: in.Operation.Model, State: "prepared"}
-	if _, err := tx.Exec(ctx, `INSERT INTO olp.code_attempts(id,project_id,route_id,route_revision_id,api_key_id,paid_binding_id,paid_provider_id,paid_slot_id,requested_model,operation,model,state,reserved_tokens,end_user_digest,attribution,paid_cost_owners)
- VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'prepared',0,$12,$13,$14)`, attempt.ID, in.Route.ProjectID, in.Route.ID, in.Route.RevisionID, in.APIKeyID, binding.ID, target.ProviderID, target.SlotID, in.Operation.PublicModel(), in.Operation.Name, in.Operation.Model, in.EndUserDigest, attribution.JSON(in.Attribution), paidCodeOwners(authority, in)); err != nil {
+	if _, err := tx.Exec(ctx, `INSERT INTO olp.code_attempts(id,project_id,route_id,route_revision_id,api_key_id,paid_binding_id,paid_provider_id,paid_slot_id,requested_model,operation,model,state,reserved_tokens,end_user_digest,attribution,paid_cost_owners,recovery_from)
+ VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'prepared',0,$12,$13,$14,$15)`, attempt.ID, in.Route.ProjectID, in.Route.ID, in.Route.RevisionID, in.APIKeyID, binding.ID, target.ProviderID, target.SlotID, in.Operation.PublicModel(), in.Operation.Name, in.Operation.Model, in.EndUserDigest, attribution.JSON(in.Attribution), paidCodeOwners(authority, in), codeRecoveryFrom(in.Recovery)); err != nil {
 		return PaidCodePermit{}, err
 	}
 	if err := limits.ReserveCodeTokens(ctx, tx, attempt, in.Bound); err != nil {
@@ -127,7 +132,7 @@ func paidCodeOwners(authority access.Authority, in PaidCodeAdmission) []string {
 	})
 }
 
-func paidCodeBind(ctx context.Context, tx pgx.Tx, in PaidCodeAdmission) (paidCodeBinding, error) {
+func paidCodeBind(ctx context.Context, tx pgx.Tx, in PaidCodeAdmission, current codemode.Route) (paidCodeBinding, error) {
 	requested := in.Operation.Identity
 	binding, bindingErr := paidCodeConversation(ctx, tx, in, requested.Conversation)
 	if bindingErr != nil && !errors.Is(bindingErr, pgx.ErrNoRows) {
@@ -159,8 +164,41 @@ func paidCodeBind(ctx context.Context, tx pgx.Tx, in PaidCodeAdmission) (paidCod
 	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM olp.code_bindings b JOIN olp.code_pins p ON p.root_id=b.root_id WHERE b.route_id=$1 AND b.api_key_id=$2 AND b.conversation=$3 AND p.model=$4)`, in.Route.ID, in.APIKeyID, identity.Conversation, in.Operation.PublicModel()).Scan(&subscription); err != nil {
 		return paidCodeBinding{}, err
 	}
-	if subscription {
-		return paidCodeBinding{}, codemode.Refuse(409, "code_paid_target_conflict")
+	source, sourceErr := func() (*string, error) {
+		if !subscription {
+			if in.Fallback && bindingErr != nil && identity.Parent == "" {
+				return nil, codePaidInitialFallback(ctx, tx, in, current)
+			}
+			return nil, nil
+		}
+		if !in.Fallback {
+			return nil, codemode.Refuse(409, "code_paid_target_conflict")
+		}
+		if bindingErr == nil && binding.SubscriptionRootID != nil {
+			return binding.SubscriptionRootID, nil
+		}
+		owner, err := codeRecoverySource(ctx, tx, in.CodeAdmission)
+		if err != nil {
+			return nil, err
+		}
+		pins, err := codePins(ctx, tx, owner.root)
+		if err != nil {
+			return nil, err
+		}
+		operations, err := in.Route.RecoveryModels(in.Operation, pins)
+		if err != nil {
+			return nil, err
+		}
+		if !slices.ContainsFunc(operations, func(operation codemode.Operation) bool { return operation.Model == in.Operation.Model }) {
+			return nil, codemode.Refuse(409, "code_recovery_unsafe")
+		}
+		return &owner.root, liveCodeTree(ctx, tx, codemode.Binding{RootID: owner.root})
+	}()
+	if sourceErr != nil {
+		return paidCodeBinding{}, sourceErr
+	}
+	if in.Recovery != nil && source == nil {
+		return paidCodeBinding{}, codemode.Refuse(409, "code_recovery_unsafe")
 	}
 	if bindingErr == nil {
 		if binding.Model != in.Operation.Model || binding.ProviderID != in.Provider.ID || binding.SlotID != in.Slot.ID || binding.CredentialID != *in.Slot.CredentialID {
@@ -205,7 +243,7 @@ func paidCodeBind(ctx context.Context, tx pgx.Tx, in PaidCodeAdmission) (paidCod
 		}
 		return nil
 	}()
-	if _, err := tx.Exec(ctx, `INSERT INTO olp.code_paid_bindings(id,project_id,route_id,api_key_id,conversation,parent_id,root_id,model,selected_model,provider_id,slot_id,credential_id) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`, id, in.Route.ProjectID, in.Route.ID, in.APIKeyID, identity.Conversation, parentID, root, in.Operation.PublicModel(), in.Operation.Model, in.Provider.ID, in.Slot.ID, *in.Slot.CredentialID); err != nil {
+	if _, err := tx.Exec(ctx, `INSERT INTO olp.code_paid_bindings(id,project_id,route_id,api_key_id,conversation,parent_id,root_id,model,selected_model,provider_id,slot_id,credential_id,subscription_root_id) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`, id, in.Route.ProjectID, in.Route.ID, in.APIKeyID, identity.Conversation, parentID, root, in.Operation.PublicModel(), in.Operation.Model, in.Provider.ID, in.Slot.ID, *in.Slot.CredentialID, source); err != nil {
 		return binding, err
 	}
 	return paidCodeBinding{ID: id, ParentID: parentID, RootID: root, Model: in.Operation.Model, ProviderID: in.Provider.ID, SlotID: in.Slot.ID, CredentialID: *in.Slot.CredentialID}, nil
@@ -214,9 +252,12 @@ func paidCodeBind(ctx context.Context, tx pgx.Tx, in PaidCodeAdmission) (paidCod
 func paidCodeConversation(ctx context.Context, tx pgx.Tx, in PaidCodeAdmission, conversation string) (paidCodeBinding, error) {
 	var binding paidCodeBinding
 	var retired bool
-	err := tx.QueryRow(ctx, `SELECT b.id::text,b.parent_id::text,b.root_id::text,b.selected_model,b.provider_id::text,b.slot_id::text,b.credential_id::text,root.retired_at IS NOT NULL FROM olp.code_paid_bindings b JOIN olp.code_paid_bindings root ON root.id=b.root_id WHERE b.route_id=$1 AND b.api_key_id=$2 AND b.conversation=$3 AND b.model=$4 FOR SHARE OF root`, in.Route.ID, in.APIKeyID, conversation, in.Operation.PublicModel()).Scan(&binding.ID, &binding.ParentID, &binding.RootID, &binding.Model, &binding.ProviderID, &binding.SlotID, &binding.CredentialID, &retired)
+	err := tx.QueryRow(ctx, `SELECT b.id::text,b.parent_id::text,b.root_id::text,b.selected_model,b.provider_id::text,b.slot_id::text,b.credential_id::text,root.subscription_root_id::text,root.retired_at IS NOT NULL FROM olp.code_paid_bindings b JOIN olp.code_paid_bindings root ON root.id=b.root_id WHERE b.route_id=$1 AND b.api_key_id=$2 AND b.conversation=$3 AND b.model=$4 FOR SHARE OF root`, in.Route.ID, in.APIKeyID, conversation, in.Operation.PublicModel()).Scan(&binding.ID, &binding.ParentID, &binding.RootID, &binding.Model, &binding.ProviderID, &binding.SlotID, &binding.CredentialID, &binding.SubscriptionRootID, &retired)
 	if err == nil && retired {
 		return binding, codemode.Refuse(410, "code_binding_retired")
+	}
+	if err == nil && binding.SubscriptionRootID != nil {
+		return binding, liveCodeTree(ctx, tx, codemode.Binding{RootID: *binding.SubscriptionRootID})
 	}
 	return binding, err
 }
@@ -296,4 +337,80 @@ func (s *CodeStore) ResolvePaidModel(ctx context.Context, in CodeAdmission, veri
 		return codemode.Operation{}, err
 	}
 	return operation, nil
+}
+
+func (s *CodeStore) ResolvePaidFallback(ctx context.Context, in CodeAdmission, verified access.Authority) (*codemode.Operation, error) {
+	tx, err := s.Pool.BeginTx(ctx, pgx.TxOptions{AccessMode: pgx.ReadOnly})
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback(ctx)
+	if in.Recovery == nil {
+		var selected *string
+		err := tx.QueryRow(ctx, `SELECT (SELECT b.selected_model FROM olp.code_paid_bindings b WHERE b.route_id=$1 AND b.api_key_id=$2 AND b.model=$3 AND (b.conversation=$4 OR b.conversation=$5 OR b.id=(SELECT r.binding_id FROM olp.code_paid_references r WHERE r.route_id=$1 AND r.api_key_id=$2 AND r.external_id=$6 AND NOT r.ambiguous)) ORDER BY CASE WHEN b.conversation=$4 THEN 0 WHEN b.conversation=$5 THEN 1 ELSE 2 END LIMIT 1)`, in.Route.ID, in.APIKeyID, in.Operation.PublicModel(), in.Operation.Identity.Conversation, in.Operation.Identity.Parent, in.PreviousResponse).Scan(&selected)
+		if err != nil {
+			return nil, err
+		}
+		if selected == nil {
+			if !in.InitialRecovery || in.Operation.Identity.Parent != "" || in.PreviousResponse != "" || in.Route.InitialRecoveryAttempts < 1 {
+				return nil, nil
+			}
+			return in.Route.PaidFallbackModel(in.Operation, nil)
+		}
+		operation, err := in.Route.ResolvePinnedModel(in.Operation, []codemode.Pin{{Model: in.Operation.PublicModel(), TargetModel: *selected}})
+		if err != nil {
+			return nil, err
+		}
+		if _, allowed := in.Route.PaidFallbackTargets[operation.Model]; !allowed {
+			return nil, codemode.Refuse(403, "code_paid_target_denied")
+		}
+		return &operation, nil
+	}
+	owner, err := codeRecoverySource(ctx, tx, in)
+	if err != nil {
+		return nil, err
+	}
+	pins, err := codePins(ctx, tx, owner.root)
+	if err != nil {
+		return nil, err
+	}
+	return in.Route.PaidFallbackModel(in.Operation, pins)
+}
+
+func codePaidInitialFallback(ctx context.Context, tx pgx.Tx, in PaidCodeAdmission, current codemode.Route) error {
+	if !in.InitialRecovery || in.Route.InitialRecoveryAttempts < 1 || in.Operation.Identity.Parent != "" || in.PreviousResponse != "" || in.Recovery != nil {
+		return codemode.Refuse(409, "code_recovery_unsafe")
+	}
+	var occupied bool
+	err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM olp.code_bindings WHERE route_id=$1 AND api_key_id=$2 AND conversation=$3) OR EXISTS(SELECT 1 FROM olp.code_paid_bindings WHERE route_id=$1 AND api_key_id=$2 AND conversation=$3)`, in.Route.ID, in.APIKeyID, in.Operation.Identity.Conversation).Scan(&occupied)
+	if err != nil {
+		return err
+	}
+	if occupied {
+		return codemode.Refuse(409, "code_recovery_unsafe")
+	}
+	public := codemode.Operation{Name: in.Operation.Name, Model: in.Operation.PublicModel(), Identity: in.Operation.Identity}
+	operations, err := in.Route.RecoveryModels(public, nil)
+	if err != nil {
+		return err
+	}
+	if !slices.ContainsFunc(operations, func(operation codemode.Operation) bool { return operation.Model == in.Operation.Model }) {
+		return codemode.Refuse(409, "code_recovery_unsafe")
+	}
+	currentOperations, err := current.RecoveryModels(public, nil)
+	if err != nil {
+		return err
+	}
+	if !slices.ContainsFunc(currentOperations, func(operation codemode.Operation) bool { return operation.Model == in.Operation.Model }) {
+		return codemode.Refuse(409, "code_recovery_policy_changed")
+	}
+	_, _, availabilityErr := codeRecoveryDestination(ctx, tx, in.CodeAdmission, operations)
+	if availabilityErr == nil {
+		return codemode.Refuse(409, "code_paid_fallback_not_needed")
+	}
+	refusal, ok := errors.AsType[*codemode.Refusal](availabilityErr)
+	if !ok || refusal.Code != "code_account_unavailable" {
+		return availabilityErr
+	}
+	return nil
 }

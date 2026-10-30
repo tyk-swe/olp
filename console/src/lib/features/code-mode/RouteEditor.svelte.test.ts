@@ -98,117 +98,132 @@ it('validates ordered model pools and saves the explicit recovery policy', async
   );
 });
 
-it('requires explicit paid selection and a credential slot before saving', async () => {
-  const route: CodeRoute = {
-    id: '01980000-0000-7000-8000-000000000001',
-    project_id: '01980000-0000-7000-8000-000000000002',
-    pool_id: '01980000-0000-7000-8000-000000000003',
-    etag: '01980000-0000-7000-8000-000000000004',
-    slug: 'coding',
-    adapters: [],
-    published_at: null,
-    revision: 0,
-    revision_id: '',
-    messages_to_codex: false,
-    paid_participation: false,
-    models: ['native-main'],
-    enabled: true,
-    model_rewriting: true,
-    aliases: { 'team-code': 'native-main' },
-    initial_recovery_attempts: 0
-  };
-  authLifecycle.establishSession({
-    user: {
-      id: route.id,
-      email: 'owner@example.test',
-      display_name: 'Owner',
-      role: 'owner',
-      access_scope: 'global',
-      operations: []
-    },
-    csrf_token: 'fixture'
-  });
-  const fetch = vi.fn(async (request: Request) =>
-    request.method === 'PUT'
-      ? Response.json(route)
-      : Response.json({ items: [], next_cursor: null })
-  );
-  vi.stubGlobal('fetch', fetch);
-  const host = document.createElement('div');
-  document.body.append(host);
-  const client = new QueryClient({
-    defaultOptions: { queries: { retry: false } }
-  });
-  const component = mount(RouteEditorProbe, {
-    target: host,
-    props: {
-      client,
-      current: route,
-      providers: [
-        {
-          id: '01980000-0000-7000-8000-000000000005',
-          name: 'Metered API',
-          slots: [
-            {
-              id: '01980000-0000-7000-8000-000000000006',
-              name: 'Stored API key',
-              enabled: true
-            }
-          ]
-        }
-      ]
-    }
-  });
-  onTestFinished(async () => {
-    await unmount(component);
-    client.clear();
-    host.remove();
-    vi.unstubAllGlobals();
-  });
-
-  flushSync();
-  const paid = host.querySelector<HTMLInputElement>(
-    '#code-paid-participation'
-  )!;
-  paid.checked = true;
-  paid.dispatchEvent(new Event('change', { bubbles: true }));
-  flushSync();
-  const provider = host.querySelector<HTMLSelectElement>(
-    '#paid-provider-native-main'
-  )!;
-  provider.value = '01980000-0000-7000-8000-000000000005';
-  provider.dispatchEvent(new Event('change', { bubbles: true }));
-  flushSync();
-  host
-    .querySelector('form')!
-    .dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
-  await vi.waitFor(() =>
-    expect(host.textContent).toContain('Choose a credential slot')
-  );
-  expect(fetch.mock.calls.some(([request]) => request.method === 'PUT')).toBe(
-    false
-  );
-  const slot = host.querySelector<HTMLSelectElement>('#paid-slot-native-main')!;
-  slot.value = '01980000-0000-7000-8000-000000000006';
-  slot.dispatchEvent(new Event('change', { bubbles: true }));
-  flushSync();
-  host
-    .querySelector('form')!
-    .dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
-  await vi.waitFor(() =>
-    expect(
-      fetch.mock.calls.find(([request]) => request.method === 'PUT')
-    ).toBeDefined()
-  );
-  const write = fetch.mock.calls.find(
-    ([request]) => request.method === 'PUT'
-  )![0];
-  expect(await write.json()).toEqual(
-    expect.objectContaining({
-      paid_participation: true,
-      paid_targets: {
-        'native-main': { provider_id: provider.value, slot_id: slot.value }
+it.each(['direct', 'fallback'] as const)(
+  'requires explicit %s paid selection and a credential slot before saving',
+  async (policy) => {
+    const route: CodeRoute = {
+      id: '01980000-0000-7000-8000-000000000001',
+      project_id: '01980000-0000-7000-8000-000000000002',
+      pool_id: '01980000-0000-7000-8000-000000000003',
+      etag: '01980000-0000-7000-8000-000000000004',
+      slug: 'coding',
+      adapters: [],
+      published_at: null,
+      revision: 0,
+      revision_id: '',
+      messages_to_codex: false,
+      paid_participation: false,
+      models: ['native-main'],
+      enabled: true,
+      model_rewriting: true,
+      aliases: { 'team-code': 'native-main' },
+      initial_recovery_attempts: 0
+    };
+    authLifecycle.establishSession({
+      user: {
+        id: route.id,
+        email: 'owner@example.test',
+        display_name: 'Owner',
+        role: 'owner',
+        access_scope: 'global',
+        operations: []
+      },
+      csrf_token: 'fixture'
+    });
+    const fetch = vi.fn(async (request: Request) =>
+      request.method === 'PUT'
+        ? Response.json(route)
+        : Response.json({ items: [], next_cursor: null })
+    );
+    vi.stubGlobal('fetch', fetch);
+    const host = document.createElement('div');
+    document.body.append(host);
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false } }
+    });
+    const component = mount(RouteEditorProbe, {
+      target: host,
+      props: {
+        client,
+        current: route,
+        providers: [
+          {
+            id: '01980000-0000-7000-8000-000000000005',
+            name: 'Metered API',
+            slots: [
+              {
+                id: '01980000-0000-7000-8000-000000000006',
+                name: 'Stored API key',
+                enabled: true
+              }
+            ]
+          }
+        ]
       }
-    })
-  );
-});
+    });
+    onTestFinished(async () => {
+      await unmount(component);
+      client.clear();
+      host.remove();
+      vi.unstubAllGlobals();
+    });
+
+    flushSync();
+    const paid = host.querySelector<HTMLInputElement>(
+      '#code-paid-participation'
+    )!;
+    paid.checked = true;
+    paid.dispatchEvent(new Event('change', { bubbles: true }));
+    flushSync();
+    const provider = host.querySelector<HTMLSelectElement>(
+      policy === 'direct'
+        ? '#paid-provider-native-main'
+        : '#fallback-provider-native-main'
+    )!;
+    provider.value = '01980000-0000-7000-8000-000000000005';
+    provider.dispatchEvent(new Event('change', { bubbles: true }));
+    flushSync();
+    host
+      .querySelector('form')!
+      .dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    await vi.waitFor(() =>
+      expect(host.textContent).toContain('Choose a credential slot')
+    );
+    expect(fetch.mock.calls.some(([request]) => request.method === 'PUT')).toBe(
+      false
+    );
+    const slot = host.querySelector<HTMLSelectElement>(
+      policy === 'direct'
+        ? '#paid-slot-native-main'
+        : '#fallback-slot-native-main'
+    )!;
+    slot.value = '01980000-0000-7000-8000-000000000006';
+    slot.dispatchEvent(new Event('change', { bubbles: true }));
+    const recovery = host.querySelector<HTMLSelectElement>(
+      '#code-recovery-attempts'
+    )!;
+    recovery.value = '1';
+    recovery.dispatchEvent(new Event('change', { bubbles: true }));
+    flushSync();
+    host
+      .querySelector('form')!
+      .dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    await vi.waitFor(() =>
+      expect(
+        fetch.mock.calls.find(([request]) => request.method === 'PUT')
+      ).toBeDefined()
+    );
+    const write = fetch.mock.calls.find(
+      ([request]) => request.method === 'PUT'
+    )![0];
+    expect(await write.json()).toEqual(
+      expect.objectContaining({
+        paid_participation: true,
+        [policy === 'direct' ? 'paid_targets' : 'paid_fallback_targets']: {
+          'native-main': { provider_id: provider.value, slot_id: slot.value }
+        },
+        [policy === 'direct' ? 'paid_fallback_targets' : 'paid_targets']: {}
+      })
+    );
+  }
+);
