@@ -8,15 +8,19 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
 
 	"github.com/tyk-swe/olp/internal/codemode"
+	"github.com/tyk-swe/olp/internal/protocols"
+	"github.com/tyk-swe/olp/internal/protocols/wire"
 	"github.com/tyk-swe/olp/tests/codecli"
 	codexfixture "github.com/tyk-swe/olp/tests/fixtures/codex-qualified"
 )
@@ -91,31 +95,7 @@ func TestCodeQualificationMessagesToolsOfficialSDK(t *testing.T) {
 	draft := f.h.want(f.owner, "PUT", path, map[string]any{"project_id": f.project, "slug": "qualification", "pool_id": f.pool["id"], "models": []string{"gpt-5.4"}, "enabled": true, "messages_to_codex": true}, etagHeader(f.route), 200)
 	f.h.want(f.owner, "POST", path+"/publish", nil, withMatch(draft, idem("messages-tools-sdk")), 200)
 	gateway := f.in.replica("messages-sdk")
-	frames := func(events ...string) [][]byte {
-		return slices.Collect(func(yield func([]byte) bool) {
-			for _, event := range events {
-				if !yield([]byte("data: " + event + "\n\n")) {
-					return
-				}
-			}
-		})
-	}
-	f.peer.SetResponder(func(_ context.Context, header http.Header, body []byte) [][]byte {
-		created := frames(`{"type":"response.created","response":{"id":"sdk-tools","status":"in_progress","output":[]}}`)
-		if bytes.Contains(body, []byte(`"function_call_output"`)) || bytes.Contains(body, []byte("CONTROLLED_COMPACT_SUMMARY")) {
-			return slices.Concat(created, frames(`{"type":"response.completed","response":{"id":"sdk-tools","status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"File read"}]}],"usage":{"input_tokens":13,"output_tokens":2,"total_tokens":15}}}`))
-		}
-		if strings.HasSuffix(header.Get("X-Claude-Code-Session-Id"), "complete") {
-			return slices.Concat(created, frames(`{"type":"response.completed","response":{"id":"sdk-tools","status":"completed","output":[{"type":"function_call","call_id":"call-read","name":"read_file","arguments":"{\"path\":\"main.go\"}"}],"usage":{"input_tokens":7,"output_tokens":4,"total_tokens":11}}}`))
-		}
-		return slices.Concat(created, frames(
-			`{"type":"response.output_item.added","output_index":0,"item":{"type":"function_call","call_id":"call-read","name":"read_file","arguments":""}}`,
-			`{"type":"response.function_call_arguments.delta","output_index":0,"delta":"{\"path\":"}`,
-			`{"type":"response.function_call_arguments.delta","output_index":0,"delta":"\"main.go\"}"}`,
-			`{"type":"response.output_item.done","output_index":0,"item":{"type":"function_call","call_id":"call-read","name":"read_file","arguments":"{\"path\":\"main.go\"}"}}`,
-			`{"type":"response.completed","response":{"id":"sdk-tools","status":"completed","output":[],"usage":{"input_tokens":7,"output_tokens":4,"total_tokens":11}}}`,
-		))
-	})
+	f.peer.SetResponder(codeMessagesSDKResponses)
 	dir, err := filepath.Abs("../clients")
 	if err != nil {
 		t.Fatal(err)
@@ -142,7 +122,7 @@ func TestCodeQualificationMessagesToolsOfficialSDK(t *testing.T) {
 		}
 	}
 	trap := codecli.NewTrap(t)
-	command := exec.CommandContext(t.Context(), "go", "test", "-mod=readonly", "-tags=integration,codemode", "-timeout=60s", "./gosdk", "-run=^TestCodeMessagesToolExchange$", "-count=1")
+	command := exec.CommandContext(t.Context(), "go", "test", "-json", "-mod=readonly", "-tags=integration,codemode", "-timeout=60s", "./gosdk", "-run=^TestCodeMessagesToolExchange$", "-count=1")
 	command.Dir = dir
 	command.Env = slices.Concat([]string{
 		"PATH=" + os.Getenv("PATH"), "LANG=C.UTF-8", "TERM=dumb", "NO_COLOR=1",
@@ -151,8 +131,8 @@ func TestCodeQualificationMessagesToolsOfficialSDK(t *testing.T) {
 		"GOCACHE=" + paths.GOCACHE, "GOMODCACHE=" + paths.GOMODCACHE, "GOPATH=" + paths.GOPATH, "GOTOOLCHAIN=" + paths.GOTOOLCHAIN, "GOPROXY=off", "GOFLAGS=-mod=readonly",
 		"OLP_CODE_MESSAGES_BASE_URL=" + gateway.PublicOrigin + "/code/qualification", "OLP_CODE_MESSAGES_API_KEY=" + f.key, "OLP_CODE_MESSAGES_MODEL=gpt-5.4",
 	}, trap.Environment())
-	if err := command.Run(); err != nil {
-		t.Fatalf("official Messages SDK %v", err)
+	if output, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("official Messages SDK %v, %s, external destinations %d", err, codeMessagesSDKDiagnostics(output), len(trap.Hosts()))
 	}
 	if hosts := trap.Hosts(); len(hosts) != 0 {
 		t.Fatalf("SDK attempted %d external destinations", len(hosts))
@@ -185,5 +165,109 @@ func TestCodeQualificationMessagesToolsOfficialSDK(t *testing.T) {
 		if !bytes.Contains(request.Body, []byte(`"call_id":"call-read"`)) || !bytes.Contains(request.Body, []byte(`"arguments":"{\"path\":\"main.go\"}"`)) || !bytes.Contains(request.Body, []byte(`"output":"package main"`)) {
 			t.Fatalf("SDK tool history changed %s", request.Body)
 		}
+	}
+}
+
+func codeMessagesSDKResponses(_ context.Context, header http.Header, body []byte) [][]byte {
+	events := func(events ...string) [][]byte {
+		return slices.Collect(func(yield func([]byte) bool) {
+			for _, event := range events {
+				if !yield([]byte(event)) {
+					return
+				}
+			}
+		})
+	}
+	created := events(`{"type":"response.created","response":{"id":"sdk-tools","status":"in_progress","output":[]}}`)
+	if bytes.Contains(body, []byte(`"function_call_output"`)) || bytes.Contains(body, []byte("CONTROLLED_COMPACT_SUMMARY")) {
+		return slices.Concat(created, events(`{"type":"response.completed","response":{"id":"sdk-tools","status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"File read"}]}],"usage":{"input_tokens":13,"output_tokens":2,"total_tokens":15}}}`))
+	}
+	if strings.HasSuffix(header.Get("X-Claude-Code-Session-Id"), "complete") {
+		return slices.Concat(created, events(`{"type":"response.completed","response":{"id":"sdk-tools","status":"completed","output":[{"type":"function_call","call_id":"call-read","name":"read_file","arguments":"{\"path\":\"main.go\"}"}],"usage":{"input_tokens":7,"output_tokens":4,"total_tokens":11}}}`))
+	}
+	return slices.Concat(created, events(
+		`{"type":"response.output_item.added","output_index":0,"item":{"type":"function_call","call_id":"call-read","name":"read_file","arguments":""}}`,
+		`{"type":"response.function_call_arguments.delta","output_index":0,"delta":"{\"path\":"}`,
+		`{"type":"response.function_call_arguments.delta","output_index":0,"delta":"\"main.go\"}"}`,
+		`{"type":"response.output_item.done","output_index":0,"item":{"type":"function_call","call_id":"call-read","name":"read_file","arguments":"{\"path\":\"main.go\"}"}}`,
+		`{"type":"response.completed","response":{"id":"sdk-tools","status":"completed","output":[],"usage":{"input_tokens":7,"output_tokens":4,"total_tokens":11}}}`,
+	))
+}
+
+func TestCodeQualificationMessagesSDKFixtureProtocol(t *testing.T) {
+	for _, source := range []string{"fragments", "complete"} {
+		t.Run(source, func(t *testing.T) {
+			peer := codexfixture.New()
+			peer.SetResponder(codeMessagesSDKResponses)
+			for _, test := range []struct {
+				name, body string
+				tool       bool
+			}{
+				{name: "tool", body: `{"input":[{"role":"user","content":"Read main.go"}]}`, tool: true},
+				{name: "result", body: `{"input":[{"type":"function_call_output","call_id":"call-read","output":"package main"}]}`},
+				{name: "resume", body: `{"input":[{"role":"user","content":"CONTROLLED_COMPACT_SUMMARY"}]}`},
+			} {
+				t.Run(test.name, func(t *testing.T) {
+					request := httptest.NewRequest(http.MethodPost, "http://controlled/responses", strings.NewReader(test.body))
+					request.Header.Set("X-Claude-Code-Session-Id", "sdk-"+source)
+					response := httptest.NewRecorder()
+					peer.ServeHTTP(response, request)
+					completion, err := protocols.AggregateTranslatedResponses(wire.Anthropic, response.Body, 8192, "gpt-5.4", nil)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if test.tool {
+						if len(completion.ToolCalls) != 1 || completion.ToolCalls[0].Name != "read_file" || completion.ToolCalls[0].ID != "call-read" || completion.ToolCalls[0].Arguments != `{"path":"main.go"}` || completion.FinishReason != "tool_calls" {
+							t.Fatalf("fixture tool completion %+v", completion)
+						}
+						return
+					}
+					if completion.OutputText != "File read" || completion.FinishReason != "stop" || completion.Usage == nil || completion.Usage.InputTokens != 13 || completion.Usage.OutputTokens != 2 {
+						t.Fatalf("fixture result completion %+v", completion)
+					}
+				})
+			}
+		})
+	}
+}
+
+func codeMessagesSDKDiagnostics(output []byte) string {
+	diagnostics := strings.Join(slices.Collect(func(yield func(string) bool) {
+		for _, line := range bytes.Split(output, []byte("\n")) {
+			var event struct{ Action, Output string }
+			if json.Unmarshal(line, &event) != nil || event.Action != "output" {
+				continue
+			}
+			_, suffix, ok := strings.Cut(event.Output, "SDK diagnostic ")
+			if !ok {
+				continue
+			}
+			diagnostic := strings.TrimSpace(suffix)
+			safe, _ := regexp.MatchString(`^(tool|result|resume) (HTTP [1-5][0-9]{2}|timeout|canceled|request failed|invalid streamed message|invalid content|invalid arguments)$`, diagnostic)
+			if safe && !yield(diagnostic) {
+				return
+			}
+		}
+	}), ", ")
+	if diagnostics == "" {
+		return "no structured client diagnostic"
+	}
+	return diagnostics
+}
+
+func TestCodeQualificationMessagesSDKDiagnostics(t *testing.T) {
+	secret := "controlled-private-response"
+	output := strings.Join([]string{
+		`{"Action":"output","Output":"code_messages_test.go:40: SDK diagnostic tool HTTP 502\n"}`,
+		`{"Action":"output","Output":"code_messages_test.go:40: SDK diagnostic result request failed\n"}`,
+		`{"Action":"output","Output":"` + secret + `"}`,
+		`{"Action":"output","Output":"SDK diagnostic tool HTTP 502 ` + secret + `"}`,
+		`{"Action":"output","Output":"SDK diagnostic tool ` + secret + `"}`,
+	}, "\n")
+	if diagnostic := codeMessagesSDKDiagnostics([]byte(output)); diagnostic != "tool HTTP 502, result request failed" {
+		t.Fatal("subprocess diagnostic lost failure metadata or retained private output")
+	}
+	if diagnostic := codeMessagesSDKDiagnostics([]byte(secret)); diagnostic != "no structured client diagnostic" {
+		t.Fatal("unstructured subprocess output reached the diagnostic")
 	}
 }
