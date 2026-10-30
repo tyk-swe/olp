@@ -27,25 +27,26 @@ func (s *CodeStore) Models(ctx context.Context, route codemode.Route, key string
 }
 
 func CodeOffers(ctx context.Context, db access.Queryer, revision string, keys ...string) (codeclient.Offers, error) {
-	rows, err := db.Query(ctx, `SELECT DISTINCT a.models,`+codeadapter.SQL("(v.connections->(a.provider_id::text))")+`
-		FROM olp.code_route_revisions v JOIN olp.code_pool_accounts pa ON pa.pool_id=(v.document->>'pool_id')::uuid
-		JOIN olp.code_accounts a ON a.id=pa.account_id
-		JOIN olp.provider_credentials c ON c.id=a.credential_id JOIN olp.provider_grants g ON g.credential_id=c.id JOIN olp.providers p ON p.id=a.provider_id
-		WHERE v.id=$1 AND v.connections ? a.provider_id::text
-		AND a.project_id=(v.document->>'project_id')::uuid AND a.enabled AND olp.code_account_available(a)
-		AND p.state<>'disabled' AND p.project_id=a.project_id
-		AND c.plugin_digest=v.connections->(a.provider_id::text)->>'profile_revision'
-		AND c.profile_id=v.connections->(a.provider_id::text)->>'profile_id'
-		AND c.provider_id=a.provider_id AND c.principal=a.principal AND c.revoked_at IS NULL AND g.lapsed_at IS NULL AND (g.expires_at IS NULL OR g.expires_at>now())`, revision)
+	rows, err := db.Query(ctx, `SELECT DISTINCT a.models,`+codeadapter.SQL("(v.connections->(a.provider_id::text))")+`,CASE WHEN v.document->>'paid_participation'='true' THEN jsonb_build_object('route',v.document,'connections',v.paid_connections) ELSE NULL END
+ FROM olp.code_route_revisions v LEFT JOIN LATERAL(
+ SELECT a.* FROM olp.code_pool_accounts pa JOIN olp.code_accounts a ON a.id=pa.account_id
+ JOIN olp.provider_credentials c ON c.id=a.credential_id JOIN olp.provider_grants g ON g.credential_id=c.id JOIN olp.providers p ON p.id=a.provider_id
+ WHERE pa.pool_id=(v.document->>'pool_id')::uuid AND v.connections ? a.provider_id::text
+ AND a.project_id=(v.document->>'project_id')::uuid AND a.enabled AND olp.code_account_available(a)
+ AND p.state<>'disabled' AND p.project_id=a.project_id
+ AND c.plugin_digest=v.connections->(a.provider_id::text)->>'profile_revision' AND c.profile_id=v.connections->(a.provider_id::text)->>'profile_id'
+ AND c.provider_id=a.provider_id AND c.principal=a.principal AND c.revoked_at IS NULL AND g.lapsed_at IS NULL AND (g.expires_at IS NULL OR g.expires_at>now())
+ )a ON true WHERE v.id=$1`, revision)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
+	var publication []byte
 	offers := codeclient.Offers{}
 	for rows.Next() {
 		var models []string
 		var adapter *string
-		if err := rows.Scan(&models, &adapter); err != nil {
+		if err := rows.Scan(&models, &adapter, &publication); err != nil {
 			return nil, err
 		}
 		if adapter != nil {
@@ -56,21 +57,17 @@ func CodeOffers(ctx context.Context, db access.Queryer, revision string, keys ..
 		return nil, err
 	}
 	rows.Close()
-	var document, connections []byte
-	if err := db.QueryRow(ctx, `SELECT document,paid_connections FROM olp.code_route_revisions WHERE id=$1`, revision).Scan(&document, &connections); err != nil {
-		return nil, err
-	}
-	var route codemode.Route
-	var paid map[string]routing.Provider
-	if err := json.Unmarshal(document, &route); err != nil {
-		return nil, err
-	}
-	if err := json.Unmarshal(connections, &paid); err != nil {
-		return nil, err
-	}
-	if !route.PaidParticipation {
+	if len(publication) == 0 {
 		return offers, nil
 	}
+	var published struct {
+		Route       codemode.Route              `json:"route"`
+		Connections map[string]routing.Provider `json:"connections"`
+	}
+	if err := json.Unmarshal(publication, &published); err != nil {
+		return nil, err
+	}
+	route, paid := published.Route, published.Connections
 	key := ""
 	if len(keys) > 0 {
 		key = keys[0]

@@ -216,13 +216,6 @@ func (s *CodeStore) admit(ctx context.Context, admission CodeAdmission, connecti
 			return out, err
 		}
 	}
-	var paid bool
-	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM olp.code_paid_bindings WHERE route_id=$1 AND api_key_id=$2 AND conversation=$3 AND model=$4)`, referenced.Route.ID, referenced.APIKeyID, referenced.Operation.Identity.Conversation, referenced.Operation.PublicModel()).Scan(&paid); err != nil {
-		return out, err
-	}
-	if paid {
-		return out, codemode.Refuse(409, "code_paid_target_conflict")
-	}
 	out.Binding, err = s.bind(ctx, tx, referenced)
 	if err != nil {
 		return out, err
@@ -316,9 +309,15 @@ const (
 	codeInference codeAuthorityOperation = iota
 	codeResearch
 	codeModels
+	codePaidInference
 )
 
 func codeAuthorityFor(ctx context.Context, tx pgx.Tx, in CodeAdmission, a *access.Authority, operation codeAuthorityOperation) error {
+	_, err := codeAuthorityDocument(ctx, tx, in, a, operation)
+	return err
+}
+
+func codeAuthorityDocument(ctx context.Context, tx pgx.Tx, in CodeAdmission, a *access.Authority, operation codeAuthorityOperation) (codemode.Route, error) {
 	var policy, document []byte
 	var groups access.RouteGroups
 	var templates access.LimitTemplates
@@ -327,56 +326,59 @@ func codeAuthorityFor(ctx context.Context, tx pgx.Tx, in CodeAdmission, a *acces
 		WHERE k.id=$1 AND (k.workload_issuer_id IS NULL OR wi.document->>'enabled'='true') AND u.active AND u.oidc_authorized AND
 		(u.access_scope='global' OR EXISTS(SELECT 1 FROM olp.effective_project_members m WHERE m.user_id=u.id AND m.project_id=r.project_id))`, in.APIKeyID, in.Route.ID).Scan(&a.ID, &a.LookupID, &a.Issuer, &a.ProjectID, &policy, &a.ExpiresAt, &a.RevokedAt, &document, &a.ProjectAttributionPolicy, &groups, &a.LimitLookupID, &templates, &a.ProjectEndUserPolicy, &a.BudgetGroupID, &a.BudgetGroupTemplate, &a.BudgetGroupRPM, &a.BudgetGroupTPM, &a.BudgetGroupConcurrency, &a.BudgetGroupDailyCostLimit, &a.BudgetGroupMonthlyCostLimit, &a.BudgetGroupWeeklyCostLimit, &a.BudgetGroupCostBasis, &a.WorkloadIssuerID, &a.WorkloadDigest, &a.WorkloadMapping, &a.WorkloadRevision)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return codemode.Refuse(403, "code_permission_denied")
+		return codemode.Route{}, codemode.Refuse(403, "code_permission_denied")
 	}
 	if err != nil {
-		return err
+		return codemode.Route{}, err
 	}
 	if err = json.Unmarshal(policy, &a.Policy); err != nil {
-		return err
+		return codemode.Route{}, err
 	}
 	if err = a.BindLimitTemplates(templates); err != nil {
-		return err
+		return codemode.Route{}, err
 	}
 	if err = a.BindRouteGroups(groups); err != nil {
-		return err
+		return codemode.Route{}, err
 	}
 	var current codemode.Route
 	if err = json.Unmarshal(document, &current); err != nil {
-		return err
+		return codemode.Route{}, err
 	}
 	if !in.Route.Enabled || !current.Enabled || current.ID != in.Route.ID || current.Slug != in.Route.Slug || current.ProjectID != in.Route.ProjectID || current.PoolID != in.Route.PoolID ||
 		!a.Allows("inference", in.Route.Slug, &in.Route.ProjectID, time.Now()) {
-		return codemode.Refuse(403, "code_permission_denied")
+		return codemode.Route{}, codemode.Refuse(403, "code_permission_denied")
 	}
-	if operation == codeInference {
+	if operation == codeInference || operation == codePaidInference {
 		if _, err := current.ResolveModel(codemode.Operation{Model: in.Operation.PublicModel()}); err != nil {
-			return err
+			return codemode.Route{}, err
 		}
 	}
-	if operation == codeInference && (!slices.Contains(in.Route.Models, in.Operation.Model) || !slices.Contains(current.Models, in.Operation.Model)) {
-		return codemode.Refuse(403, "code_model_denied")
+	if (operation == codeInference || operation == codePaidInference) && (!slices.Contains(in.Route.Models, in.Operation.Model) || !slices.Contains(current.Models, in.Operation.Model)) {
+		return codemode.Route{}, codemode.Refuse(403, "code_model_denied")
 	}
 	if in.Recovery != nil && (current.RevisionID != in.Route.RevisionID || current.InitialRecoveryAttempts < in.Recovery.Number) {
-		return codemode.Refuse(409, "code_recovery_policy_changed")
+		return codemode.Route{}, codemode.Refuse(409, "code_recovery_policy_changed")
 	}
 	if operation == codeModels && current.RevisionID != in.Route.RevisionID {
-		return codemode.Refuse(409, "code_route_revision_changed")
+		return codemode.Route{}, codemode.Refuse(409, "code_route_revision_changed")
 	}
 	if operation == codeResearch && (current.RevisionID != in.Route.RevisionID || current.Tools == nil || in.Route.Tools == nil ||
 		current.Tools.AccountID != in.Route.Tools.AccountID || !slices.Equal(current.Tools.Services, in.Route.Tools.Services)) {
-		return codemode.Refuse(409, "code_research_revision_changed")
+		return codemode.Route{}, codemode.Refuse(409, "code_research_revision_changed")
 	}
-	var assigned bool
+	var assigned, paid bool
 	err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM olp.code_pool_keys pk JOIN olp.code_pools p ON p.id=pk.pool_id JOIN olp.api_keys k ON k.id=pk.api_key_id
-		WHERE p.id=$1 AND pk.api_key_id=$2 AND p.project_id=$3 AND (p.kind='shared' OR p.owner_user_id=k.created_by))`, in.Route.PoolID, in.APIKeyID, in.Route.ProjectID).Scan(&assigned)
+		WHERE p.id=$1 AND pk.api_key_id=$2 AND p.project_id=$3 AND (p.kind='shared' OR p.owner_user_id=k.created_by)), $6::bool AND EXISTS(SELECT 1 FROM olp.code_paid_bindings b WHERE b.route_id=$7 AND b.api_key_id=$2 AND b.conversation=$4 AND b.model=$5)`, in.Route.PoolID, in.APIKeyID, in.Route.ProjectID, in.Operation.Identity.Conversation, in.Operation.PublicModel(), operation == codeInference, in.Route.ID).Scan(&assigned, &paid)
 	if err != nil {
-		return err
+		return codemode.Route{}, err
 	}
 	if !assigned {
-		return codemode.Refuse(403, "code_pool_denied")
+		return codemode.Route{}, codemode.Refuse(403, "code_pool_denied")
 	}
-	return nil
+	if paid {
+		return codemode.Route{}, codemode.Refuse(409, "code_paid_target_conflict")
+	}
+	return current, nil
 }
 
 func (s *CodeStore) bind(ctx context.Context, tx pgx.Tx, in CodeAdmission) (codemode.Binding, error) {
@@ -630,39 +632,11 @@ func (s *CodeStore) ObserveHealth(ctx context.Context, accountID string, observa
 }
 
 func (s *CodeStore) ObserveReference(ctx context.Context, attemptID, externalID string) error {
-	if err := (codemode.Identity{Conversation: externalID}).Validate(); err != nil {
-		return err
+	if (codemode.Identity{Conversation: externalID}).Validate() != nil {
+		return codemode.Refuse(400, "code_response_reference_invalid")
 	}
-	tx, err := s.Pool.Begin(ctx)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback(ctx)
-	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended(a.route_id::text||':'||a.api_key_id::text,0)) FROM olp.code_attempts a WHERE a.id=$1`, attemptID); err != nil {
-		return err
-	}
-	if _, err := tx.Exec(ctx, `INSERT INTO olp.code_paid_references(route_id,api_key_id,external_id,binding_id)
- SELECT a.route_id,a.api_key_id,$2,a.paid_binding_id FROM olp.code_attempts a WHERE a.id=$1 AND a.paid_binding_id IS NOT NULL AND a.state<>'prepared'
- ON CONFLICT(route_id,api_key_id,external_id) DO UPDATE SET ambiguous=olp.code_paid_references.ambiguous OR
- (SELECT root_id FROM olp.code_paid_bindings WHERE id=olp.code_paid_references.binding_id)<>(SELECT root_id FROM olp.code_paid_bindings WHERE id=EXCLUDED.binding_id)`, attemptID, externalID); err != nil {
-		return err
-	}
-
-	_, err = tx.Exec(ctx, `INSERT INTO olp.code_references(route_id,api_key_id,external_id,binding_id,account_id)
-		SELECT a.route_id,a.api_key_id,$2,a.binding_id,a.account_id FROM olp.code_attempts a WHERE a.id=$1 AND a.state<>'prepared' AND a.paid_binding_id IS NULL
-		ON CONFLICT(route_id,api_key_id,external_id) DO UPDATE SET ambiguous=olp.code_references.ambiguous OR
-		olp.code_references.account_id IS DISTINCT FROM EXCLUDED.account_id OR
-		(SELECT root_id FROM olp.code_bindings WHERE id=olp.code_references.binding_id)<>(SELECT root_id FROM olp.code_bindings WHERE id=EXCLUDED.binding_id)`, attemptID, externalID)
-	if err != nil {
-		return err
-	}
-	if _, err := tx.Exec(ctx, `UPDATE olp.code_paid_references p SET ambiguous=true FROM olp.code_attempts a WHERE a.id=$1 AND p.route_id=a.route_id AND p.api_key_id=a.api_key_id AND p.external_id=$2 AND EXISTS(SELECT 1 FROM olp.code_references r WHERE r.route_id=p.route_id AND r.api_key_id=p.api_key_id AND r.external_id=p.external_id)`, attemptID, externalID); err != nil {
-		return err
-	}
-	if _, err := tx.Exec(ctx, `UPDATE olp.code_references r SET ambiguous=true FROM olp.code_attempts a WHERE a.id=$1 AND r.route_id=a.route_id AND r.api_key_id=a.api_key_id AND r.external_id=$2 AND EXISTS(SELECT 1 FROM olp.code_paid_references p WHERE p.route_id=r.route_id AND p.api_key_id=r.api_key_id AND p.external_id=r.external_id)`, attemptID, externalID); err != nil {
-		return err
-	}
-	return tx.Commit(ctx)
+	_, err := s.Pool.Exec(ctx, `SELECT olp.observe_code_reference($1,$2)`, attemptID, externalID)
+	return err
 }
 
 func (s *CodeStore) RecordRefusal(ctx context.Context, route codemode.Route, keyID, digest, code string) error {

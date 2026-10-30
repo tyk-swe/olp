@@ -52,3 +52,44 @@ CREATE FUNCTION olp.has_pending_resource_usage(owner uuid) RETURNS boolean LANGU
                     AND f.usage_complete AND f.estimated_cost IS NOT NULL
                     AND (owner IN (a.paid_provider_id,a.paid_slot_id) OR (f.charge_status<>'billing_uncertain' AND f.charge IS NOT NULL))))
 $$;
+
+CREATE FUNCTION olp.observe_code_reference(target_attempt uuid,reference_id text)
+RETURNS void LANGUAGE plpgsql AS $$
+BEGIN
+    PERFORM pg_advisory_xact_lock(hashtextextended(a.route_id::text||':'||a.api_key_id::text,0))
+    FROM olp.code_attempts a WHERE a.id=target_attempt;
+
+    INSERT INTO olp.code_paid_references(route_id,api_key_id,external_id,binding_id)
+    SELECT a.route_id,a.api_key_id,reference_id,a.paid_binding_id
+    FROM olp.code_attempts a
+    WHERE a.id=target_attempt AND a.paid_binding_id IS NOT NULL AND a.state<>'prepared'
+    ON CONFLICT(route_id,api_key_id,external_id) DO UPDATE SET
+        ambiguous=olp.code_paid_references.ambiguous OR
+        (SELECT root_id FROM olp.code_paid_bindings WHERE id=olp.code_paid_references.binding_id)<>
+        (SELECT root_id FROM olp.code_paid_bindings WHERE id=EXCLUDED.binding_id);
+
+    INSERT INTO olp.code_references(route_id,api_key_id,external_id,binding_id,account_id)
+    SELECT a.route_id,a.api_key_id,reference_id,a.binding_id,a.account_id
+    FROM olp.code_attempts a
+    WHERE a.id=target_attempt AND a.state<>'prepared' AND a.paid_binding_id IS NULL
+    ON CONFLICT(route_id,api_key_id,external_id) DO UPDATE SET
+        ambiguous=olp.code_references.ambiguous OR
+        olp.code_references.account_id IS DISTINCT FROM EXCLUDED.account_id OR
+        (SELECT root_id FROM olp.code_bindings WHERE id=olp.code_references.binding_id)<>
+        (SELECT root_id FROM olp.code_bindings WHERE id=EXCLUDED.binding_id);
+
+    UPDATE olp.code_paid_references p SET ambiguous=true
+    FROM olp.code_attempts a
+    WHERE a.id=target_attempt AND p.route_id=a.route_id AND p.api_key_id=a.api_key_id
+        AND p.external_id=reference_id AND EXISTS(
+            SELECT 1 FROM olp.code_references r WHERE r.route_id=p.route_id
+                AND r.api_key_id=p.api_key_id AND r.external_id=p.external_id);
+
+    UPDATE olp.code_references r SET ambiguous=true
+    FROM olp.code_attempts a
+    WHERE a.id=target_attempt AND r.route_id=a.route_id AND r.api_key_id=a.api_key_id
+        AND r.external_id=reference_id AND EXISTS(
+            SELECT 1 FROM olp.code_paid_references p WHERE p.route_id=r.route_id
+                AND p.api_key_id=r.api_key_id AND p.external_id=r.external_id);
+END
+$$;

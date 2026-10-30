@@ -417,9 +417,13 @@
                 <span class="badge">{adapterLabel(adapter)}</span>
               {:else}
                 {route.published_at
-                  ? 'No adapter: its accounts serve no supported client'
+                  ? 'No subscription adapter is published'
                   : 'Set at publication'}
               {/each}
+            </dd>
+            <dt>Paid native models</dt>
+            <dd>
+              {Object.keys(route.paid_targets ?? {}).join(', ') || 'None'}
             </dd>
             <dt>Draft models</dt>
             <dd>{route.models.join(', ')}</dd>
@@ -456,8 +460,8 @@
       <p>
         Daily and monthly periods use UTC. These are token caps, never
         subscription allowance or billed spend. Existing key
-        request/rate/concurrency limits also apply. Code-mode does not enforce
-        monetary estimates.
+        request/rate/concurrency limits also apply. Paid API targets
+        additionally require known pricing and monetary admission.
       </p>
       {#each budgets.data?.items ?? [] as budget (budget.id)}
         <article class="card">

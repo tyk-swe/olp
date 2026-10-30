@@ -221,10 +221,16 @@
       if (poolResult.kind === 'invalid') throw new Error(poolResult.message);
       const targets = paidParticipation
         ? Object.fromEntries(
-            routeModels.flatMap((model) =>
-              paidTargets[model]?.provider_id
-                ? [[model, paidTargets[model]]]
-                : []
+            routeModels.flatMap(
+              (
+                model
+              ): [
+                string,
+                NonNullable<CodeRouteWrite['paid_targets']>[string]
+              ][] => {
+                const target = paidTargets[model];
+                return target?.provider_id ? [[model, target]] : [];
+              }
             )
           )
         : {};

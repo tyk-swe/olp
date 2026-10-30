@@ -54,19 +54,12 @@ func (s *CodeStore) AdmitPaid(ctx context.Context, in PaidCodeAdmission) (PaidCo
 		return PaidCodePermit{}, err
 	}
 	authority := in.Authority
-	if err := codeAuthority(ctx, tx, in.CodeAdmission, &authority); err != nil {
-		return PaidCodePermit{}, err
+	current, authorityErr := codeAuthorityDocument(ctx, tx, in.CodeAdmission, &authority, codePaidInference)
+	if authorityErr != nil {
+		return PaidCodePermit{}, authorityErr
 	}
 	if !authority.AllowsAttribution(in.Attribution) {
 		return PaidCodePermit{}, codemode.Refuse(409, "code_attribution_changed")
-	}
-	var current codemode.Route
-	var document []byte
-	if err := tx.QueryRow(ctx, `SELECT v.document FROM olp.code_routes r JOIN olp.code_route_revisions v ON v.id=r.latest_revision_id WHERE r.id=$1`, in.Route.ID).Scan(&document); err != nil {
-		return PaidCodePermit{}, err
-	}
-	if err := json.Unmarshal(document, &current); err != nil {
-		return PaidCodePermit{}, err
 	}
 	target, exists := current.PaidTargets[in.Operation.Model]
 	frozen, selected := in.Route.PaidTargets[in.Operation.Model]
@@ -135,24 +128,33 @@ func paidCodeOwners(authority access.Authority, in PaidCodeAdmission) []string {
 }
 
 func paidCodeBind(ctx context.Context, tx pgx.Tx, in PaidCodeAdmission) (paidCodeBinding, error) {
-	identity := in.Operation.Identity
+	requested := in.Operation.Identity
+	binding, bindingErr := paidCodeConversation(ctx, tx, in, requested.Conversation)
+	if bindingErr != nil && !errors.Is(bindingErr, pgx.ErrNoRows) {
+		return binding, bindingErr
+	}
+	var referenceConversation, referenceRoot string
 	if in.PreviousResponse != "" {
-		var parent string
-		err := tx.QueryRow(ctx, `SELECT b.conversation FROM olp.code_paid_references r JOIN olp.code_paid_bindings b ON b.id=r.binding_id JOIN olp.code_paid_bindings root ON root.id=b.root_id WHERE r.route_id=$1 AND r.api_key_id=$2 AND r.external_id=$3 AND NOT r.ambiguous AND b.model=$4 AND b.provider_id=$5 AND b.slot_id=$6 AND b.credential_id=$7 AND root.retired_at IS NULL`, in.Route.ID, in.APIKeyID, in.PreviousResponse, in.Operation.PublicModel(), in.Provider.ID, in.Slot.ID, *in.Slot.CredentialID).Scan(&parent)
+		err := tx.QueryRow(ctx, `SELECT b.conversation,b.root_id::text FROM olp.code_paid_references r JOIN olp.code_paid_bindings b ON b.id=r.binding_id JOIN olp.code_paid_bindings root ON root.id=b.root_id WHERE r.route_id=$1 AND r.api_key_id=$2 AND r.external_id=$3 AND NOT r.ambiguous AND b.model=$4 AND b.provider_id=$5 AND b.slot_id=$6 AND b.credential_id=$7 AND root.retired_at IS NULL`, in.Route.ID, in.APIKeyID, in.PreviousResponse, in.Operation.PublicModel(), in.Provider.ID, in.Slot.ID, *in.Slot.CredentialID).Scan(&referenceConversation, &referenceRoot)
 		if errors.Is(err, pgx.ErrNoRows) {
-			return paidCodeBinding{}, codemode.Refuse(409, "code_response_account_conflict")
+			return binding, codemode.Refuse(409, "code_response_account_conflict")
 		}
 		if err != nil {
-			return paidCodeBinding{}, err
+			return binding, err
 		}
-		if identity.Parent != "" && identity.Parent != parent {
-			return paidCodeBinding{}, codemode.Refuse(409, "code_parent_conflict")
+		if referenceConversation != requested.Conversation && (requested.Generic() || (codemode.Identity{Conversation: referenceConversation}).Generic()) {
+			return binding, codemode.Refuse(409, "code_response_account_conflict")
 		}
-		resolved := in
-		resolved.Operation.Identity = codemode.Identity{Conversation: identity.Conversation, Parent: parent}
-		resolved.PreviousResponse = ""
-		return paidCodeBind(ctx, tx, resolved)
+		if bindingErr == nil && binding.RootID != referenceRoot {
+			return binding, codemode.Refuse(409, "code_response_account_conflict")
+		}
 	}
+	identity := func() codemode.Identity {
+		if bindingErr == nil || requested.Parent != "" || referenceConversation == "" || referenceConversation == requested.Conversation {
+			return requested
+		}
+		return codemode.Identity{Conversation: requested.Conversation, Parent: referenceConversation}
+	}()
 	var subscription bool
 	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM olp.code_bindings b JOIN olp.code_pins p ON p.root_id=b.root_id WHERE b.route_id=$1 AND b.api_key_id=$2 AND b.conversation=$3 AND p.model=$4)`, in.Route.ID, in.APIKeyID, identity.Conversation, in.Operation.PublicModel()).Scan(&subscription); err != nil {
 		return paidCodeBinding{}, err
@@ -160,8 +162,7 @@ func paidCodeBind(ctx context.Context, tx pgx.Tx, in PaidCodeAdmission) (paidCod
 	if subscription {
 		return paidCodeBinding{}, codemode.Refuse(409, "code_paid_target_conflict")
 	}
-	binding, err := paidCodeConversation(ctx, tx, in, identity.Conversation)
-	if err == nil {
+	if bindingErr == nil {
 		if binding.Model != in.Operation.Model || binding.ProviderID != in.Provider.ID || binding.SlotID != in.Slot.ID || binding.CredentialID != *in.Slot.CredentialID {
 			return binding, codemode.Refuse(409, "code_paid_target_conflict")
 		}
@@ -172,9 +173,6 @@ func paidCodeBind(ctx context.Context, tx pgx.Tx, in PaidCodeAdmission) (paidCod
 			}
 		}
 		return binding, nil
-	}
-	if !errors.Is(err, pgx.ErrNoRows) {
-		return binding, err
 	}
 	parent, parentErr := func() (paidCodeBinding, error) {
 		if identity.Parent == "" {
@@ -187,6 +185,9 @@ func paidCodeBind(ctx context.Context, tx pgx.Tx, in PaidCodeAdmission) (paidCod
 	}
 	if parentErr != nil {
 		return binding, parentErr
+	}
+	if referenceRoot != "" && parent.RootID != referenceRoot {
+		return binding, codemode.Refuse(409, "code_response_account_conflict")
 	}
 	if parent.ID != "" && (parent.ProviderID != in.Provider.ID || parent.SlotID != in.Slot.ID || parent.CredentialID != *in.Slot.CredentialID) {
 		return binding, codemode.Refuse(409, "code_paid_target_conflict")
@@ -225,10 +226,12 @@ func samePaidSlotLimits(live, frozen routing.Slot) bool {
 }
 
 func paidCodeTarget(ctx context.Context, db access.Queryer, in PaidCodeAdmission, lock bool) error {
-	locking := ""
-	if lock {
-		locking = " FOR SHARE OF p,s,c"
-	}
+	locking := func() string {
+		if lock {
+			return " FOR SHARE OF p,s,c"
+		}
+		return ""
+	}()
 	var liveRestrictions, liveConfiguration, liveLimits []byte
 	err := db.QueryRow(ctx, `SELECT s.restrictions,p.configuration,s.limits FROM olp.providers p
  JOIN olp.provider_slots s ON s.provider_id=p.id JOIN olp.provider_credentials c ON c.id=s.credential_id AND c.provider_id=p.id
@@ -262,4 +265,35 @@ func paidCodeTarget(ctx context.Context, db access.Queryer, in PaidCodeAdmission
 	}
 
 	return nil
+}
+
+func (s *CodeStore) ResolvePaidModel(ctx context.Context, in CodeAdmission, verified access.Authority) (codemode.Operation, error) {
+	if in.Operation.PublicModel() == in.Operation.Model {
+		return in.Operation, nil
+	}
+	tx, err := s.Pool.BeginTx(ctx, pgx.TxOptions{AccessMode: pgx.ReadOnly})
+	if err != nil {
+		return codemode.Operation{}, err
+	}
+	defer tx.Rollback(ctx)
+	var selected *string
+	err = tx.QueryRow(ctx, `SELECT (SELECT b.selected_model FROM olp.code_paid_bindings b JOIN olp.code_paid_bindings root ON root.id=b.root_id WHERE b.route_id=$1 AND b.api_key_id=$2 AND b.model=$3 AND root.retired_at IS NULL AND (b.conversation=$4 OR b.conversation=$5 OR b.id=(SELECT r.binding_id FROM olp.code_paid_references r WHERE r.route_id=$1 AND r.api_key_id=$2 AND r.external_id=$6 AND NOT r.ambiguous)) ORDER BY CASE WHEN b.conversation=$4 THEN 0 WHEN b.conversation=$5 THEN 1 ELSE 2 END LIMIT 1)`, in.Route.ID, in.APIKeyID, in.Operation.PublicModel(), in.Operation.Identity.Conversation, in.Operation.Identity.Parent, in.PreviousResponse).Scan(&selected)
+	if err != nil {
+		return codemode.Operation{}, err
+	}
+	pins := func() []codemode.Pin {
+		if selected == nil {
+			return nil
+		}
+		return []codemode.Pin{{Model: in.Operation.PublicModel(), TargetModel: *selected}}
+	}()
+	operation, err := in.Route.ResolvePinnedModel(in.Operation, pins)
+	if err != nil {
+		return codemode.Operation{}, err
+	}
+	fresh := verified
+	if err := codeAuthorityFor(ctx, tx, in.withOperation(operation), &fresh, codePaidInference); err != nil {
+		return codemode.Operation{}, err
+	}
+	return operation, nil
 }

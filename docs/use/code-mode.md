@@ -1,6 +1,6 @@
 # Code mode
 
-Code mode is the subscription-account forwarding contract for coding clients.
+Code mode forwards coding clients through authorized subscription accounts or explicitly selected metered API targets.
 It uses a route-specific URL such as `https://olp.example/code/team-coding` and
 keeps the native model in the request by default. Ordinary inference routes continue to
 use OLP route slugs as model names.
@@ -140,6 +140,26 @@ the ledger. Identity and prompt compatibility remain disabled. This translated
 path does not establish complete Claude Code qualification. CLI context and beta
 requirements and durable opaque state need separate qualification.
 Live Codex acceptance, including output-token caps, remains unqualified.
+
+### Paid API targets
+
+A paid API target is an existing metered provider and credential slot, separate from a coding account or subscription adapter. Enable paid participation in the route editor, select a provider and slot for each native model that should use it, then publish. The management API uses `paid_participation: true` and a `paid_targets` object keyed by exact native model, with `provider_id` and `slot_id` for each entry. The selected provider must be active in the same project and support the native protocol without request defaults, model overrides, caller credentials, plugin adaptation or hosting wrappers.
+
+A mapped model selects its paid target even when a subscription account serves the same model. Subscription failures do not activate paid targets. Aliases resolve an existing conversation pin before provider, credential and pricing selection, provided the selected native model and target remain authorized. Removing access or retiring the binding still refuses continuation. Generic affinity identifiers cannot adopt another conversation through a response reference.
+
+Paid targets currently support native HTTP Responses generation, Messages and Chat Completions. Compaction, prewarming, WebSockets and hosting that requires a different request body are refused before dispatch. Generated Codex setup disables WebSockets for paid models. Discovery marks these models with `paid` and setup returns `paid_models`, without inventing subscription adapters.
+
+Publication freezes the provider revision and slot. Admission checks the current key, project membership, pool assignment, personal ownership, provider, credential, slot restrictions and monetary policy again. Known pricing is required before dispatch. Cost and customer charge can differ through the selected rate card. Key, group, route, project, installation, provider and slot policies retain their applicable rate, token and spend checks. A hard coding-token budget still requires a proven bound, which a native request does not provide merely by specifying an output estimate.
+
+Paid usage records retain the requested and selected model, target ownership, native token counters, cache or media dimensions, pinned price and rate card. Subscription allowance remains separate. Public paid attempts have null subscription `account_id` and `binding_id`, with `paid_binding_id`, `paid_provider_id`, `paid_slot_id` and `paid_monetary_state` identifying their paid lifecycle. The binding filter accepts either ownership type.
+
+#### Paid target runbook
+
+After publishing, check the model catalog and generated client setup before sending a request. A missing target usually means its active revision, credential, slot restrictions or native protocol no longer matches the publication. Republish after an intentional provider or slot change. A pricing refusal requires a current matching price and usable rate card. A spend refusal requires reviewing the applicable cost or charge policy and recorded consumption, rather than changing the request model to bypass the policy.
+
+An interrupted request, missing usage, missing monetary dimension or failed accounting handoff leaves a durable hold for the affected owners after temporary leases expire. Complete measured provider cost can resolve provider and slot exposure while caller cost and charge remain distinct. Known token totals do not make unknown monetary usage free. Review standard usage evidence and accounting-loss records. There is currently no code-specific manual usage-resolution endpoint, so unresolved exposure remains blocked when definitive evidence is unavailable.
+
+HTTP error documents and recognized identity-encoded SSE error events are inspected with the bounded native error scrubber and the credentials actually applied by authentication. Error values are redacted and credential-bearing member names are refused. Successful unary responses and encoded streams retain native delivery without additional error-envelope classification. An oversized or malformed stream frame ends this bounded classification while delivery continues unchanged. Native error observation never persists prompt content or credential material.
 
 ### Mixing subscriptions
 

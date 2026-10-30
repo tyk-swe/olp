@@ -866,10 +866,16 @@ func TestCodeFoundationModelPoolRecoveryPreservesRequestedModelAndAuthority(t *t
 	}
 }
 
-func newPaidCodeFixture(t *testing.T) (*codeFixture, routing.Provider, routing.Slot) {
+func newPaidCodeFixture(t *testing.T, endpoints ...string) (*codeFixture, routing.Provider, routing.Slot) {
 	t.Helper()
 	f := newCodeFixture(t)
-	created := f.h.want(f.owner, "POST", "/api/v1/providers", map[string]any{"project_id": f.project, "name": "Metered fixture", "configuration": map[string]any{"kind": "openai", "auth_mode": "api_key", "profile_id": "openai-responses", "profile_revision": connectors.ProfileRevision, "endpoint": "https://fixture.invalid"}, "credential": "fixture-paid-secret", "model": "native-model"}, idem("paid-provider"), 201)
+	endpoint := func() string {
+		if len(endpoints) > 0 {
+			return endpoints[0]
+		}
+		return "https://fixture.invalid"
+	}()
+	created := f.h.want(f.owner, "POST", "/api/v1/providers", map[string]any{"project_id": f.project, "name": "Metered fixture", "configuration": map[string]any{"kind": "openai", "auth_mode": "api_key", "profile_id": "openai-responses", "profile_revision": connectors.ProfileRevision, "endpoint": endpoint, "options": map[string]any{"vendor_id": "openai"}}, "credential": "fixture-paid-secret", "model": "native-model"}, idem("paid-provider"), 201)
 	providerID := created["id"].(string)
 	var slot routing.Slot
 	slot.Enabled = true
@@ -942,7 +948,11 @@ func TestCodePaidPublicationRetainsOwnershipAndMonetaryUncertainty(t *testing.T)
 	if err := f.store.Settle(t.Context(), permit.Attempt.ID, codemode.Usage{Total: &total, Input: &input, Output: &output}); err != nil {
 		t.Fatal(err)
 	}
-	attempts := f.h.want(f.owner, "GET", "/api/v1/code/attempts?route_id="+f.route.ID, nil, nil, 200)["items"].([]any)
+	unrelated := f.input("unrelated", "", nil)
+	if _, err := f.store.AdmitPaid(t.Context(), resources.PaidCodeAdmission{CodeAdmission: unrelated, Provider: provider, Slot: slot}); err != nil {
+		t.Fatal(err)
+	}
+	attempts := f.h.want(f.owner, "GET", "/api/v1/code/attempts?route_id="+f.route.ID+"&binding_id="+permit.BindingID, nil, nil, 200)["items"].([]any)
 	if len(attempts) != 1 {
 		t.Fatalf("paid attempt disappeared %+v", attempts)
 	}
@@ -974,4 +984,49 @@ func TestCodePaidPublicationRetainsOwnershipAndMonetaryUncertainty(t *testing.T)
 	f.h.want(f.owner, "POST", "/api/v1/code/bindings/"+permit.BindingID+"/retire", nil, idem("retire-paid"), 200)
 	_, err = f.store.AdmitPaid(t.Context(), in)
 	codeRefusal(t, err, "code_binding_retired")
+}
+
+func TestCodePaidResponseReferencePreservesConversationOwnership(t *testing.T) {
+	for _, scenario := range []struct {
+		name, first, next, parent string
+		refused                   bool
+	}{{name: "same conversation", first: "root", next: "root"}, {name: "new child", first: "root", next: "child"}, {name: "generic affinity", first: "olp:affinity/one", next: "olp:affinity/two", refused: true}} {
+		t.Run(scenario.name, func(t *testing.T) {
+			f, provider, slot := newPaidCodeFixture(t)
+			admit := func(conversation, parent, previous string) (resources.PaidCodePermit, error) {
+				input := f.input(conversation, parent, nil)
+				input.PreviousResponse = previous
+				return f.store.AdmitPaid(t.Context(), resources.PaidCodeAdmission{CodeAdmission: input, Provider: provider, Slot: slot})
+			}
+			first, err := admit(scenario.first, "", "")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := f.store.MarkDispatched(t.Context(), first.Attempt.ID); err != nil {
+				t.Fatal(err)
+			}
+			if err := f.store.ObserveReference(t.Context(), first.Attempt.ID, "paid-response"); err != nil {
+				t.Fatal(err)
+			}
+			next, err := admit(scenario.next, scenario.parent, "paid-response")
+			if scenario.refused {
+				codeRefusal(t, err, "code_response_account_conflict")
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if scenario.first == scenario.next && next.BindingID != first.BindingID {
+				t.Fatal("same conversation changed paid ownership")
+			}
+			if scenario.first != scenario.next {
+				page := f.h.want(f.owner, "GET", "/api/v1/code/bindings?api_key_id="+f.key, nil, nil, 200)
+				bindings := page["items"].([]any)
+				child := slices.IndexFunc(bindings, func(item any) bool { return item.(map[string]any)["id"] == next.BindingID })
+				if child < 0 || bindings[child].(map[string]any)["parent_id"] != first.BindingID {
+					t.Fatalf("paid response reference lost child ownership %+v", bindings)
+				}
+			}
+		})
+	}
 }

@@ -183,14 +183,20 @@ func (s *Server) forwardCode(w http.ResponseWriter, r *http.Request, release *ru
 		refuse(err)
 		return
 	}
-	response, err := client.Do(request)
+	upstreamResponse, err := client.Do(request)
 	if err != nil {
 		attempt.transportFailed(ctx, err)
 		refuse(codemode.Refuse(502, "code_upstream_unavailable"))
 		return
 	}
+	defer upstreamResponse.Body.Close()
+	attempt.response(ctx, upstreamResponse.StatusCode, upstreamResponse.Header)
+	response, safetyErr := attempt.safePaidResponse(upstreamResponse)
+	if safetyErr != nil {
+		refuse(safetyErr)
+		return
+	}
 	defer response.Body.Close()
-	attempt.response(ctx, response.StatusCode, response.Header)
 	next, recoveryErr := attempt.recover(ctx, response, route, recovery)
 	if recoveryErr != nil {
 		refuse(recoveryErr)

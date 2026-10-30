@@ -78,11 +78,7 @@ func openCodeConfiguration(route codemode.Route, adapters []codemode.Adapter, of
 				for _, model := range models {
 					resolved, _ := route.ResolveModel(codemode.Operation{Model: model})
 					protocol, _ := vendor.Protocol(codeadapter.ClientOpenCode, resolved.Model)
-					sdk := map[codemode.Protocol]string{
-						codemode.ProtocolChat:      "@ai-sdk/openai-compatible",
-						codemode.ProtocolMessages:  "@ai-sdk/anthropic",
-						codemode.ProtocolResponses: "@ai-sdk/openai",
-					}[protocol]
+					sdk := openCodeSDK(protocol)
 					if !yield(model, modelDefinition{ID: model, Name: model, Provider: modelProvider{NPM: sdk}}) {
 						return
 					}
@@ -97,11 +93,13 @@ func openCodeConfiguration(route codemode.Route, adapters []codemode.Adapter, of
 			continue
 		}
 		provider := "olp-paid-" + string(protocol)
-		suffix := "/v1"
-		if protocol == codemode.ProtocolMessages {
-			suffix = ""
-		}
-		sdk := map[codemode.Protocol]string{codemode.ProtocolResponses: "@ai-sdk/openai", codemode.ProtocolMessages: "@ai-sdk/anthropic", codemode.ProtocolChat: "@ai-sdk/openai-compatible"}[protocol]
+		suffix := func() string {
+			if protocol == codemode.ProtocolMessages {
+				return ""
+			}
+			return "/v1"
+		}()
+		sdk := openCodeSDK(protocol)
 		definitions := maps.Collect(func(yield func(string, modelDefinition) bool) {
 			for _, model := range models {
 				if !yield(model, modelDefinition{ID: model, Name: model, Provider: modelProvider{NPM: sdk}}) {
@@ -118,4 +116,15 @@ func openCodeConfiguration(route codemode.Route, adapters []codemode.Adapter, of
 	encoder.SetIndent("", "  ")
 	err := encoder.Encode(document)
 	return b.String(), err
+}
+
+func openCodeSDK(protocol codemode.Protocol) string {
+	switch protocol {
+	case codemode.ProtocolResponses:
+		return "@ai-sdk/openai"
+	case codemode.ProtocolMessages:
+		return "@ai-sdk/anthropic"
+	default:
+		return "@ai-sdk/openai-compatible"
+	}
 }

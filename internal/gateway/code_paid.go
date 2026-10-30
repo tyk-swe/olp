@@ -12,6 +12,7 @@ import (
 	"github.com/tyk-swe/olp/internal/codeadapter"
 	"github.com/tyk-swe/olp/internal/codemode"
 	"github.com/tyk-swe/olp/internal/connectors"
+	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/operations/tokenization/estimate"
 	"github.com/tyk-swe/olp/internal/protocols"
@@ -23,6 +24,7 @@ import (
 )
 
 type paidCodeAttempt struct {
+	sensitive     egress.Sensitive
 	provider      routing.Provider
 	slot          routing.Slot
 	connector     connectors.Config
@@ -53,16 +55,20 @@ func codeFamily(protocol codemode.Protocol) wire.Format {
 	}
 }
 
-func (s *Server) preparePaidCode(r *http.Request, release *runtime.Release, route codemode.Route, observation codemode.Request, operation codemode.Operation, ingress codeIngress, transport codeadapter.Transport, verified access.Authority, body []byte) (*codeAttempt, error) {
+func (s *Server) preparePaidCode(r *http.Request, release *runtime.Release, route codemode.Route, observation codemode.Request, candidate codemode.Operation, ingress codeIngress, transport codeadapter.Transport, verified access.Authority, body []byte) (*codeAttempt, error) {
 	if !route.PaidParticipation {
 		return nil, codemode.Refuse(403, "code_paid_participation_disabled")
 	}
-	if transport != codeadapter.HTTP {
+	if transport != codeadapter.HTTP || candidate.Name == "compact" || candidate.Name == "prewarm" {
 		return nil, codemode.Refuse(400, "code_paid_operation_unsupported")
 	}
 	ledger, supported := s.CodeLedger.(PaidCodeLedger)
 	if !supported {
 		return nil, codemode.Refuse(503, "code_paid_authority_unavailable")
+	}
+	operation, resolveErr := ledger.ResolvePaidModel(r.Context(), resources.CodeAdmission{Route: route, APIKeyID: verified.ID, Operation: candidate, EndUserDigest: verified.EndUserDigest, PreviousResponse: observation.PreviousResponse}, verified)
+	if resolveErr != nil {
+		return nil, resolveErr
 	}
 	target := route.PaidTargets[operation.Model]
 	provider, exists := release.Snapshot.CodePaidConnections[route.RevisionID+":"+target.ProviderID]
@@ -84,10 +90,12 @@ func (s *Server) preparePaidCode(r *http.Request, release *runtime.Release, rout
 	if parseErr != nil {
 		return nil, codemode.Refuse(400, "code_body_invalid")
 	}
-	mode := "unary"
-	if parsed.Stream {
-		mode = "streaming"
-	}
+	mode := func() string {
+		if parsed.Stream {
+			return "streaming"
+		}
+		return "unary"
+	}()
 	surface := family.Surface()
 	if !provider.Supports(operation.Model, "generation", surface, mode) {
 		return nil, codemode.Refuse(400, "code_paid_operation_unsupported")
@@ -250,9 +258,11 @@ func (a *codeAttempt) authorizePaid(request *http.Request, body []byte) error {
 	if err := a.paid.connector.ApplySemantic(request); err != nil {
 		return codemode.Refuse(503, "code_paid_configuration_unsupported")
 	}
-	if _, err := a.server.auth.Apply(request.Context(), request, a.paid.connector, secret, body); err != nil {
+	sensitive, err := a.server.auth.Apply(request.Context(), request, a.paid.connector, secret, body)
+	if err != nil {
 		return codemode.Refuse(503, "code_paid_credential_unavailable")
 	}
+	a.paid.sensitive = sensitive
 	a.auth = codemode.Authorization{CredentialID: *a.paid.slot.CredentialID, GrantGeneration: generation}
 	return nil
 }
@@ -295,7 +305,13 @@ func (a *codeAttempt) finishPaid(ctx context.Context) {
 		}
 		return "unary"
 	}()
-	fact := AttemptFact{TargetID: p.slot.ID, ProviderID: p.provider.ID, ProviderRevisionID: p.provider.RevisionID, UpstreamModel: a.model, SlotID: p.slot.ID, CredentialID: *p.slot.CredentialID, CredentialVersion: *p.slot.CredentialVersion, Price: p.price, PricingPinned: true, Discount: p.discount, CardPinned: true, cardRev: p.card, CardRevisionID: cardID, Budgets: []string{p.route.ID, p.provider.ID, p.slot.ID}, Ordinal: 1, Mode: mode, StartedAt: p.started, Duration: a.server.now().Sub(p.started), Status: p.status, Usage: measured, UsageObserved: measured != nil, UsageComplete: observed, BillingUncertain: a.dispatched && !observed}
+	outcome := func() string {
+		if p.status >= 200 && p.status < 300 {
+			return "success"
+		}
+		return "failure"
+	}()
+	fact := AttemptFact{VendorID: p.provider.VendorID, Class: outcome, TargetID: p.slot.ID, ProviderID: p.provider.ID, ProviderRevisionID: p.provider.RevisionID, UpstreamModel: a.model, SlotID: p.slot.ID, CredentialID: *p.slot.CredentialID, CredentialVersion: *p.slot.CredentialVersion, Price: p.price, PricingPinned: true, Discount: p.discount, CardPinned: true, cardRev: p.card, CardRevisionID: cardID, Budgets: []string{p.route.ID, p.provider.ID, p.slot.ID}, Ordinal: 1, Mode: mode, StartedAt: p.started, Duration: a.server.now().Sub(p.started), Status: p.status, Usage: measured, UsageObserved: measured != nil, UsageComplete: observed, BillingUncertain: a.dispatched && !observed}
 	p.targetLease.settle(ctx, a.dispatched, a.usage.Total)
 	for _, lease := range p.supplyLeases {
 		settleKey(ctx, lease, a.dispatched, a.usage.Total, a.server.log)
@@ -303,11 +319,6 @@ func (a *codeAttempt) finishPaid(ctx context.Context) {
 	if !a.dispatched {
 		return
 	}
-	outcome := "failure"
-	if p.status >= 200 && p.status < 300 {
-		outcome = "success"
-	}
-	fact.Class = outcome
 	if a.server.Sink != nil {
 		a.server.Sink.Terminal(Envelope{RequestID: a.permit.Attempt.ID, AccountingID: a.permit.Attempt.ID, KeyID: p.authority.ID, EndUserDigest: p.authority.EndUserDigest, BudgetGroupID: p.authority.BudgetGroupID, Attribution: p.authority.Attribution, Route: p.route.Slug, RouteRevisionID: p.route.RevisionID, RuntimeGenerationID: p.release.Snapshot.Generation.ID, ReleaseSequence: p.release.Sequence, Family: string(p.family), Operation: "generation", Surface: p.family.Surface(), Mode: fact.Mode, Outcome: outcome, Status: p.status, Committed: true, StartedAt: p.started, CompletedAt: a.server.now(), Duration: a.server.now().Sub(p.started), Usage: measured, Attempts: []AttemptFact{fact}})
 	}

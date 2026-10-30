@@ -10,6 +10,9 @@ func CodePaidProtocol(provider Provider, model string) (codemode.Protocol, bool)
 	if connector.CredentialSource == "caller" || len(provider.ParameterDefaults) > 0 || len(provider.OperationDefaults) > 0 || len(provider.Models) > 0 || provider.Plugin != nil {
 		return "", false
 	}
+	if connector.Hosting() == "vertex-anthropic" || connector.Hosting() == "bedrock-anthropic" {
+		return "", false
+	}
 	family, err := connector.TargetFamily(wire.Chat)
 	if err != nil {
 		return "", false

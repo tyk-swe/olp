@@ -50,5 +50,6 @@ type ResearchLedger interface {
 }
 
 type PaidCodeLedger interface {
+	ResolvePaidModel(context.Context, resources.CodeAdmission, access.Authority) (codemode.Operation, error)
 	AdmitPaid(context.Context, resources.PaidCodeAdmission) (resources.PaidCodePermit, error)
 }

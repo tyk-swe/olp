@@ -22,11 +22,13 @@ func (m *Management) codeBindings(r *http.Request, p access.Principal) (access.R
 	return m.Access.CodeList(r, p, `SELECT to_jsonb(x)||jsonb_build_object('pins',`+codeBindingPins+`) FROM `+codeBindingRows+` x`, access.CodeMatch{Field: "account_id", SQL: `(x.account_id=$%[1]d::uuid OR EXISTS(SELECT 1 FROM olp.code_pins p WHERE p.root_id=x.root_id AND p.account_id=$%[1]d::uuid))`})
 }
 
-func codePinsJSON(root string) string {
-	return `(SELECT coalesce(jsonb_agg(jsonb_build_object('model',p.model,'target_model',coalesce(p.target_model,p.model),'account_id',p.account_id,'principal',p.principal,'created_at',p.created_at) ORDER BY p.seq),'[]'::jsonb) FROM olp.code_pins p WHERE p.root_id=` + root + `)`
-}
+const codePinProjection = `jsonb_build_object('model',p.model,'target_model',coalesce(p.target_model,p.model),'account_id',p.account_id,'principal',p.principal,'created_at',p.created_at)`
 
-const codeBindingPins = `CASE WHEN x.paid_provider_id IS NULL THEN ` + `(SELECT coalesce(jsonb_agg(jsonb_build_object('model',p.model,'target_model',coalesce(p.target_model,p.model),'account_id',p.account_id,'principal',p.principal,'created_at',p.created_at) ORDER BY p.seq),'[]'::jsonb) FROM olp.code_pins p WHERE p.root_id=x.root_id)` + ` ELSE (SELECT coalesce(jsonb_agg(jsonb_build_object('model',p.model,'target_model',p.selected_model,'account_id',NULL,'principal',NULL,'paid_provider_id',p.provider_id,'paid_slot_id',p.slot_id,'created_at',p.created_at) ORDER BY p.created_at,p.id),'[]'::jsonb) FROM olp.code_paid_bindings p WHERE p.root_id=x.root_id) END`
+const codePinsSelect = `(SELECT coalesce(jsonb_agg(` + codePinProjection + ` ORDER BY p.seq),'[]'::jsonb) FROM olp.code_pins p WHERE p.root_id=`
+
+func codePinsJSON(root string) string { return codePinsSelect + root + `)` }
+
+const codeBindingPins = `CASE WHEN x.paid_provider_id IS NULL THEN ` + codePinsSelect + `x.root_id)` + ` ELSE (SELECT coalesce(jsonb_agg(jsonb_build_object('model',p.model,'target_model',p.selected_model,'account_id',NULL,'principal',NULL,'paid_provider_id',p.provider_id,'paid_slot_id',p.slot_id,'created_at',p.created_at) ORDER BY p.created_at,p.id),'[]'::jsonb) FROM olp.code_paid_bindings p WHERE p.root_id=x.root_id) END`
 
 func (m *Management) retireCodeBinding(r *http.Request, _ access.Principal) (access.Reply, error) {
 	id, err := access.IDParam(r, "id")
