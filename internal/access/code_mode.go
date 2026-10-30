@@ -165,7 +165,7 @@ func (s *Server) codeBudgets(r *http.Request, p Principal) (Reply, error) {
 	return s.CodeList(r, p, `SELECT to_jsonb(x)-'created_by' FROM olp.code_token_budgets x`)
 }
 
-type codePoolInput struct {
+type CodePoolInput struct {
 	ProjectID      string           `json:"project_id"`
 	Name           string           `json:"name"`
 	Kind           string           `json:"kind"`
@@ -176,99 +176,15 @@ type codePoolInput struct {
 }
 
 func (s *Server) writeCodePool(r *http.Request, _ Principal) (Reply, error) {
-	var in codePoolInput
+	var in CodePoolInput
 	if err := Decode(r, &in); err != nil {
 		return Reply{}, err
 	}
-	if err := ValidText("name", in.Name, 100); err != nil {
+	if err := in.Validate(); err != nil {
 		return Reply{}, err
 	}
-	if in.Kind != "personal" && in.Kind != "shared" || (in.Kind == "personal") != (in.OwnerUserID != nil) {
-		return Reply{}, Invalid("kind", "Personal pools require an owner; shared pools have none.")
-	}
-	if in.AccountIDs == nil || in.APIKeyIDs == nil || len(in.AccountIDs) > 100 || len(in.APIKeyIDs) > 100 {
-		return Reply{}, Invalid("assignments", "Use at most 100 accounts and keys.")
-	}
-	for _, id := range append(slices.Clone(in.AccountIDs), in.APIKeyIDs...) {
-		if _, err := ParseUUID(id); err != nil {
-			return Reply{}, err
-		}
-	}
-	for account, weight := range in.AccountWeights {
-		if !slices.Contains(in.AccountIDs, account) || weight < 1 || weight > 2147483647 {
-			return Reply{}, Invalid("account_weights", "Weights must be between 1 and 2147483647 and belong to assigned accounts.")
-		}
-	}
-	if in.OwnerUserID != nil {
-		id, err := ParseUUID(*in.OwnerUserID)
-		if err != nil {
-			return Reply{}, err
-		}
-		in.OwnerUserID = &id
-	}
 	return s.CodeWrite(r, "code_pools", "code_pool", in.ProjectID, in, func(tx pgx.Tx, p Principal, id, etag string) (any, error) {
-		if in.OwnerUserID != nil {
-			var member bool
-			if err := tx.QueryRow(r.Context(), `SELECT EXISTS(SELECT 1 FROM olp.effective_project_members WHERE project_id=$1 AND user_id=$2)`, in.ProjectID, *in.OwnerUserID).Scan(&member); err != nil {
-				return nil, err
-			}
-			if !member {
-				return nil, Invalid("owner_user_id", "The owner must be a project member.")
-			}
-		}
-		for _, account := range in.AccountIDs {
-			if err := codeScoped(r.Context(), tx, "code_accounts", account, in.ProjectID); err != nil {
-				return nil, err
-			}
-		}
-		for _, key := range in.APIKeyIDs {
-			if err := codeScoped(r.Context(), tx, "api_keys", key, in.ProjectID); err != nil {
-				return nil, err
-			}
-			if in.OwnerUserID != nil {
-				var owner string
-				if err := tx.QueryRow(r.Context(), `SELECT created_by::text FROM olp.api_keys WHERE id=$1`, key).Scan(&owner); err != nil {
-					return nil, err
-				}
-				if owner != *in.OwnerUserID {
-					return nil, Invalid("api_key_ids", "Personal pools accept only their owner's keys.")
-				}
-			}
-		}
-		if r.PathValue("id") != "" {
-			var kind string
-			var owner *string
-			if err := tx.QueryRow(r.Context(), `SELECT kind,owner_user_id::text FROM olp.code_pools WHERE id=$1`, id).Scan(&kind, &owner); err != nil {
-				return nil, err
-			}
-			if kind != in.Kind || (owner == nil) != (in.OwnerUserID == nil) || owner != nil && *owner != *in.OwnerUserID {
-				return nil, Invalid("kind", "Pool ownership is immutable.")
-			}
-		}
-		_, err := tx.Exec(r.Context(), `INSERT INTO olp.code_pools(id,project_id,name,kind,owner_user_id,etag,created_by) VALUES($1,$2,$3,$4,$5,$6,$7)
-			ON CONFLICT(id) DO UPDATE SET name=excluded.name,etag=excluded.etag`, id, in.ProjectID, in.Name, in.Kind, in.OwnerUserID, etag, p.UserID())
-		if err != nil {
-			return nil, err
-		}
-		if _, err = tx.Exec(r.Context(), `DELETE FROM olp.code_pool_accounts WHERE pool_id=$1`, id); err != nil {
-			return nil, err
-		}
-		if _, err = tx.Exec(r.Context(), `DELETE FROM olp.code_pool_keys WHERE pool_id=$1`, id); err != nil {
-			return nil, err
-		}
-		for _, account := range in.AccountIDs {
-			if _, err = tx.Exec(r.Context(), `INSERT INTO olp.code_pool_accounts(pool_id,account_id,weight) VALUES($1,$2,$3) ON CONFLICT DO NOTHING`, id, account, max(1, in.AccountWeights[account])); err != nil {
-				return nil, err
-			}
-		}
-		for _, key := range in.APIKeyIDs {
-			if _, err = tx.Exec(r.Context(), `INSERT INTO olp.code_pool_keys(pool_id,api_key_id) VALUES($1,$2) ON CONFLICT DO NOTHING`, id, key); err != nil {
-				return nil, err
-			}
-		}
-		var result json.RawMessage
-		queryErr := tx.QueryRow(r.Context(), codePoolJSON+` WHERE x.id=$1`, id).Scan(&result)
-		return result, queryErr
+		return SaveCodePool(r.Context(), tx, p, id, etag, in, r.PathValue("id") != "")
 	})
 }
 
@@ -284,7 +200,7 @@ func codeScoped(ctx context.Context, tx pgx.Tx, table, id, project string) error
 	return nil
 }
 
-type codeBudgetInput struct {
+type CodeBudgetInput struct {
 	ProjectID     string  `json:"project_id"`
 	RouteID       *string `json:"route_id"`
 	APIKeyID      *string `json:"api_key_id"`
@@ -294,52 +210,168 @@ type codeBudgetInput struct {
 }
 
 func (s *Server) writeCodeBudget(r *http.Request, _ Principal) (Reply, error) {
-	var in codeBudgetInput
+	var in CodeBudgetInput
 	if err := Decode(r, &in); err != nil {
 		return Reply{}, err
 	}
+	if err := in.Validate(); err != nil {
+		return Reply{}, err
+	}
+	return s.CodeWrite(r, "code_token_budgets", "code_budget", in.ProjectID, in, func(tx pgx.Tx, p Principal, id, etag string) (any, error) {
+		return SaveCodeBudget(r.Context(), tx, p, id, etag, in, r.PathValue("id") != "")
+	})
+}
+
+func SaveCodePool(ctx context.Context, tx pgx.Tx, p Principal, id, etag string, in CodePoolInput, existing bool) (json.RawMessage, error) {
+	if err := in.Validate(); err != nil {
+		return nil, err
+	}
+	if err := p.Project(&in.ProjectID, Change); err != nil {
+		return nil, err
+	}
+	if in.OwnerUserID != nil {
+		var member bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM olp.effective_project_members WHERE project_id=$1 AND user_id=$2)`, in.ProjectID, *in.OwnerUserID).Scan(&member); err != nil {
+			return nil, err
+		}
+		if !member {
+			return nil, Invalid("owner_user_id", "The owner must be a project member.")
+		}
+	}
+	for _, account := range in.AccountIDs {
+		if err := codeScoped(ctx, tx, "code_accounts", account, in.ProjectID); err != nil {
+			return nil, err
+		}
+	}
+	for _, key := range in.APIKeyIDs {
+		if err := codeScoped(ctx, tx, "api_keys", key, in.ProjectID); err != nil {
+			return nil, err
+		}
+		if in.OwnerUserID != nil {
+			var owner string
+			if err := tx.QueryRow(ctx, `SELECT created_by::text FROM olp.api_keys WHERE id=$1`, key).Scan(&owner); err != nil {
+				return nil, err
+			}
+			if owner != *in.OwnerUserID {
+				return nil, Invalid("api_key_ids", "Personal pools accept only their owner's keys.")
+			}
+		}
+	}
+	if existing {
+		var kind string
+		var owner *string
+		if err := tx.QueryRow(ctx, `SELECT kind,owner_user_id::text FROM olp.code_pools WHERE id=$1`, id).Scan(&kind, &owner); err != nil {
+			return nil, err
+		}
+		if kind != in.Kind || (owner == nil) != (in.OwnerUserID == nil) || owner != nil && *owner != *in.OwnerUserID {
+			return nil, Invalid("kind", "Pool ownership is immutable.")
+		}
+	}
+	_, err := tx.Exec(ctx, `INSERT INTO olp.code_pools(id,project_id,name,kind,owner_user_id,etag,created_by) VALUES($1,$2,$3,$4,$5,$6,$7)
+			ON CONFLICT(id) DO UPDATE SET name=excluded.name,etag=excluded.etag`, id, in.ProjectID, in.Name, in.Kind, in.OwnerUserID, etag, p.UserID())
+	if err != nil {
+		return nil, err
+	}
+	if _, err = tx.Exec(ctx, `DELETE FROM olp.code_pool_accounts WHERE pool_id=$1`, id); err != nil {
+		return nil, err
+	}
+	if _, err = tx.Exec(ctx, `DELETE FROM olp.code_pool_keys WHERE pool_id=$1`, id); err != nil {
+		return nil, err
+	}
+	for _, account := range in.AccountIDs {
+		if _, err = tx.Exec(ctx, `INSERT INTO olp.code_pool_accounts(pool_id,account_id,weight) VALUES($1,$2,$3) ON CONFLICT DO NOTHING`, id, account, max(1, in.AccountWeights[account])); err != nil {
+			return nil, err
+		}
+	}
+	for _, key := range in.APIKeyIDs {
+		if _, err = tx.Exec(ctx, `INSERT INTO olp.code_pool_keys(pool_id,api_key_id) VALUES($1,$2) ON CONFLICT DO NOTHING`, id, key); err != nil {
+			return nil, err
+		}
+	}
+	var result json.RawMessage
+	queryErr := tx.QueryRow(ctx, codePoolJSON+` WHERE x.id=$1`, id).Scan(&result)
+	return result, queryErr
+}
+
+func SaveCodeBudget(ctx context.Context, tx pgx.Tx, p Principal, id, etag string, in CodeBudgetInput, existing bool) (json.RawMessage, error) {
+	if err := in.Validate(); err != nil {
+		return nil, err
+	}
+	if err := p.Project(&in.ProjectID, Change); err != nil {
+		return nil, err
+	}
+	if in.RouteID != nil {
+		if err := codeScoped(ctx, tx, "code_routes", *in.RouteID, in.ProjectID); err != nil {
+			return nil, err
+		}
+	}
+	if in.APIKeyID != nil {
+		if err := codeScoped(ctx, tx, "api_keys", *in.APIKeyID, in.ProjectID); err != nil {
+			return nil, err
+		}
+	}
+	if existing {
+		var matches bool
+		if err := tx.QueryRow(ctx, `SELECT route_id IS NOT DISTINCT FROM $2::uuid AND api_key_id IS NOT DISTINCT FROM $3::uuid FROM olp.code_token_budgets WHERE id=$1`, id, in.RouteID, in.APIKeyID).Scan(&matches); err != nil {
+			return nil, err
+		}
+		if !matches {
+			return nil, Invalid("scope", "Budget scope is immutable.")
+		}
+	}
+	_, err := tx.Exec(ctx, `INSERT INTO olp.code_token_budgets(id,project_id,route_id,api_key_id,daily_tokens,monthly_tokens,enabled,etag,created_by) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)
+			ON CONFLICT(id) DO UPDATE SET daily_tokens=excluded.daily_tokens,monthly_tokens=excluded.monthly_tokens,enabled=excluded.enabled,etag=excluded.etag`, id, in.ProjectID, in.RouteID, in.APIKeyID, in.DailyTokens, in.MonthlyTokens, in.Enabled, etag, p.UserID())
+	if err != nil {
+		return nil, err
+	}
+	var body json.RawMessage
+	err = tx.QueryRow(ctx, `SELECT to_jsonb(x)-'created_by' FROM olp.code_token_budgets x WHERE id=$1`, id).Scan(&body)
+	return body, err
+}
+
+func (in CodePoolInput) Validate() error {
+	if err := ValidText("name", in.Name, 100); err != nil {
+		return err
+	}
+	if in.Kind != "personal" && in.Kind != "shared" || (in.Kind == "personal") != (in.OwnerUserID != nil) {
+		return Invalid("kind", "Personal pools require an owner; shared pools have none.")
+	}
+	if in.AccountIDs == nil || in.APIKeyIDs == nil || len(in.AccountIDs) > 100 || len(in.APIKeyIDs) > 100 {
+		return Invalid("assignments", "Use at most 100 accounts and keys.")
+	}
+	for _, id := range append(slices.Clone(in.AccountIDs), in.APIKeyIDs...) {
+		if _, err := ParseUUID(id); err != nil {
+			return err
+		}
+	}
+	for account, weight := range in.AccountWeights {
+		if !slices.Contains(in.AccountIDs, account) || weight < 1 || weight > 2147483647 {
+			return Invalid("account_weights", "Weights must be between 1 and 2147483647 and belong to assigned accounts.")
+		}
+	}
+	if in.OwnerUserID != nil {
+		if _, err := ParseUUID(*in.OwnerUserID); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (in CodeBudgetInput) Validate() error {
 	if in.DailyTokens == nil && in.MonthlyTokens == nil {
-		return Reply{}, Invalid("tokens", "Set a daily or monthly token cap.")
+		return Invalid("tokens", "Set a daily or monthly token cap.")
 	}
 	for _, n := range []*int64{in.DailyTokens, in.MonthlyTokens} {
 		if n != nil && (*n < 1 || *n > 1<<53-1) {
-			return Reply{}, Invalid("tokens", "Use a positive safe integer.")
+			return Invalid("tokens", "Use a positive safe integer.")
 		}
 	}
 	for _, id := range []*string{in.RouteID, in.APIKeyID} {
 		if id != nil {
 			if _, err := ParseUUID(*id); err != nil {
-				return Reply{}, err
+				return err
 			}
 		}
 	}
-	return s.CodeWrite(r, "code_token_budgets", "code_budget", in.ProjectID, in, func(tx pgx.Tx, p Principal, id, etag string) (any, error) {
-		if in.RouteID != nil {
-			if err := codeScoped(r.Context(), tx, "code_routes", *in.RouteID, in.ProjectID); err != nil {
-				return nil, err
-			}
-		}
-		if in.APIKeyID != nil {
-			if err := codeScoped(r.Context(), tx, "api_keys", *in.APIKeyID, in.ProjectID); err != nil {
-				return nil, err
-			}
-		}
-		if r.PathValue("id") != "" {
-			var matches bool
-			if err := tx.QueryRow(r.Context(), `SELECT route_id IS NOT DISTINCT FROM $2::uuid AND api_key_id IS NOT DISTINCT FROM $3::uuid FROM olp.code_token_budgets WHERE id=$1`, id, in.RouteID, in.APIKeyID).Scan(&matches); err != nil {
-				return nil, err
-			}
-			if !matches {
-				return nil, Invalid("scope", "Budget scope is immutable.")
-			}
-		}
-		_, err := tx.Exec(r.Context(), `INSERT INTO olp.code_token_budgets(id,project_id,route_id,api_key_id,daily_tokens,monthly_tokens,enabled,etag,created_by) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)
-			ON CONFLICT(id) DO UPDATE SET daily_tokens=excluded.daily_tokens,monthly_tokens=excluded.monthly_tokens,enabled=excluded.enabled,etag=excluded.etag`, id, in.ProjectID, in.RouteID, in.APIKeyID, in.DailyTokens, in.MonthlyTokens, in.Enabled, etag, p.UserID())
-		if err != nil {
-			return nil, err
-		}
-		var body json.RawMessage
-		err = tx.QueryRow(r.Context(), `SELECT to_jsonb(x)-'created_by' FROM olp.code_token_budgets x WHERE id=$1`, id).Scan(&body)
-		return body, err
-	})
+	return nil
 }

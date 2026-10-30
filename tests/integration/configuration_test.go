@@ -4,6 +4,12 @@ package integration_test
 
 import (
 	"encoding/json"
+	"github.com/tyk-swe/olp/internal/codemode"
+	"github.com/tyk-swe/olp/internal/codeplans"
+	"github.com/tyk-swe/olp/internal/configuration"
+	"github.com/tyk-swe/olp/internal/routes"
+	"io"
+	"net/http"
 	"slices"
 	"strings"
 	"testing"
@@ -486,3 +492,141 @@ func seedPromotionEnrollment(t *testing.T, h *accessHarness, providerID, slotID 
 }
 
 // Exercise the unique positions/default constraints without changing IDs.
+
+func TestCodeConfigurationCrossProjectRoundTrip(t *testing.T) {
+	f := newCodingPlanFixture(t, "zai-coding", codeplans.ZAIProfile, "controlled-portability-source-0123456789")
+	h, owner := f.h, f.owner
+	profile := h.want(owner, "GET", "/api/v1/profile", nil, nil, 200)
+	ownerID := profile["id"].(string)
+	account := codeDiscoveryResponse[codemode.Account](t, f.accounts[0])
+	personal := h.want(owner, "POST", "/api/v1/code/pools", access.CodePoolInput{ProjectID: f.project, Name: "Personal portable pool", Kind: "personal", OwnerUserID: &ownerID, AccountIDs: []string{account.ID}, AccountWeights: map[string]int64{account.ID: 3}, APIKeyIDs: []string{f.keyID}}, idem("portable-personal"), 201)
+	poolID := personal["id"].(string)
+	routeID := f.route["id"].(string)
+	policy := routes.CodeRouteInput{ProjectID: f.project, Slug: "qualification", PoolID: poolID, Models: account.Models, Enabled: true, ModelRewriting: true, Aliases: map[string]string{"portable": account.Models[0]}, ModelPools: map[string][]string{"portable": account.Models}, InitialRecoveryAttempts: 2, MessagesToCodex: true, MaxBodyBytes: new(int64(1048576)), Tools: &codemode.ResearchTools{AccountID: account.ID, Services: []string{"search"}}}
+	draft := h.want(owner, "PUT", "/api/v1/code/routes/"+routeID, policy, etagHeader(f.route), 200)
+	published := h.want(owner, "POST", "/api/v1/code/routes/"+routeID+"/publish", nil, withMatch(draft, idem("portable-publish")), 200)
+	unpublished := policy
+	unpublished.Enabled = false
+	unpublished.InitialRecoveryAttempts = 0
+	h.want(owner, "PUT", "/api/v1/code/routes/"+routeID, unpublished, etagHeader(published), 200)
+	daily, monthly := int64(1000), int64(4000)
+	h.want(owner, "POST", "/api/v1/code/budgets", access.CodeBudgetInput{ProjectID: f.project, RouteID: &routeID, APIKeyID: &f.keyID, DailyTokens: &daily, MonthlyTokens: &monthly, Enabled: true}, idem("portable-budget"), 201)
+	exported := codeDiscoveryResponse[struct {
+		Document configuration.Document `json:"document"`
+	}](t, h.want(owner, "GET", "/api/v1/configuration/export", nil, nil, 200))
+	encoded, err := json.Marshal(exported.Document.Code)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, secret := range []string{f.keys[0], f.key, "credential_id", "ciphertext", "principal", "allowance", "health", "created_by", "revision_id"} {
+		if strings.Contains(string(encoded), secret) {
+			t.Fatalf("export contains local credential or observation %q", secret)
+		}
+	}
+	sourceCode := exported.Document.Code
+	if sourceCode == nil {
+		t.Fatal("code configuration missing")
+	}
+	sourceRoute := sourceCode.Routes[slices.IndexFunc(sourceCode.Routes, func(r configuration.CodeRouteEntry) bool { return r.ID == routeID })]
+	if sourceRoute.Published == nil || sourceRoute.Draft.Enabled || !sourceRoute.Published.Policy.Enabled {
+		t.Fatal("draft and publication were not preserved separately")
+	}
+	destinationProject := createProject(h, owner, "Portable destination")
+	destinationFixture := *f
+	destinationFixture.project = destinationProject
+	destinationName := "Portable destination provider"
+	destinationProvider := destinationFixture.provider(t, destinationName, f.profile)
+	destinationCredential := destinationFixture.enroll(t, destinationProvider, "controlled-portability-destination-0123456789")
+	slug := "portable-copy"
+	destinationKey := h.want(owner, "POST", "/api/v1/api-keys", map[string]any{"name": "Destination code key", "project_id": destinationProject, "scopes": []string{"inference"}, "allowed_routes": []string{slug}}, idem("portable-key"), 201)
+	destinationKeyID := destinationKey["id"].(string)
+	sourcePool := sourceCode.Pools[slices.IndexFunc(sourceCode.Pools, func(p configuration.CodePoolEntry) bool { return p.ID == poolID })]
+	sourceAccount := sourceCode.Accounts[slices.IndexFunc(sourceCode.Accounts, func(a configuration.CodeAccountEntry) bool { return a.ID == account.ID })]
+	sourceBudget := sourceCode.Budgets[slices.IndexFunc(sourceCode.Budgets, func(b configuration.CodeBudgetEntry) bool { return b.Route != nil && *b.Route == routeID })]
+	copiedAccount := sourceAccount
+	copiedAccount.Project = "Portable destination"
+	copiedAccount.Provider = destinationName
+	copiedPool := sourcePool
+	copiedPool.Project = "Portable destination"
+	copiedRoute := sourceRoute
+	copiedRoute.Project = "Portable destination"
+	copiedRoute.Slug = slug
+	copiedRoute.Published = &configuration.CodePublication{Policy: sourceRoute.Published.Policy, Connections: map[string]configuration.CodeConnectionEntry{destinationName: sourceRoute.Published.Connections["Coding plan 0"]}}
+	copiedBudget := sourceBudget
+	copiedBudget.Project = "Portable destination"
+	document := configuration.Document{APIVersion: configuration.APIVersion, Projects: []configuration.ProjectEntry{}, Providers: []configuration.ProviderEntry{}, Routes: []configuration.RouteEntry{}, Code: &configuration.CodeConfiguration{Accounts: []configuration.CodeAccountEntry{copiedAccount}, Pools: []configuration.CodePoolEntry{copiedPool}, Routes: []configuration.CodeRouteEntry{copiedRoute}, Budgets: []configuration.CodeBudgetEntry{copiedBudget}}}
+	bindings := configuration.CodeBindings{Credentials: map[string]string{sourceAccount.CredentialRef: destinationCredential}, Users: map[string]string{*sourcePool.OwnerRef: ownerID}, APIKeys: map[string]string{sourcePool.APIKeyRefs[0]: destinationKeyID}}
+	input := map[string]any{"document": document, "code_bindings": bindings}
+	h.want(owner, "POST", "/api/v1/configuration/plan", map[string]any{"document": document}, nil, 400)
+	wrongCredential := bindings
+	wrongCredential.Credentials = map[string]string{sourceAccount.CredentialRef: account.CredentialID}
+	h.want(owner, "POST", "/api/v1/configuration/plan", map[string]any{"document": document, "code_bindings": wrongCredential}, nil, 400)
+	wrongKey := bindings
+	wrongKey.APIKeys = map[string]string{sourcePool.APIKeyRefs[0]: f.keyID}
+	h.want(owner, "POST", "/api/v1/configuration/plan", map[string]any{"document": document, "code_bindings": wrongKey}, nil, 400)
+	outsider := h.invite(owner, "portable-outsider@example.test", "developer")
+	outsiderProfile := h.want(outsider, "GET", "/api/v1/profile", nil, nil, 200)
+	wrongOwner := bindings
+	wrongOwner.Users = map[string]string{*sourcePool.OwnerRef: outsiderProfile["id"].(string)}
+	h.want(owner, "POST", "/api/v1/configuration/plan", map[string]any{"document": document, "code_bindings": wrongOwner}, nil, 400)
+	planned := h.want(owner, "POST", "/api/v1/configuration/plan", input, nil, 200)
+	if len(planned["blockers"].([]any))+len(planned["conflicts"].([]any)) != 0 {
+		t.Fatal("destination plan refused valid bindings", planned)
+	}
+	h.want(owner, "POST", "/api/v1/configuration/apply", input, idem("portable-apply"), 200)
+	replanned := h.want(owner, "POST", "/api/v1/configuration/plan", input, nil, 200)
+	for _, raw := range replanned["actions"].([]any) {
+		action := raw.(map[string]any)
+		if strings.HasPrefix(action["kind"].(string), "code_") && action["action"] != "noop" {
+			t.Fatal("second code plan must be unchanged", action)
+		}
+	}
+	destinationExport := codeDiscoveryResponse[struct {
+		Document configuration.Document `json:"document"`
+	}](t, h.want(owner, "GET", "/api/v1/configuration/export", nil, nil, 200))
+	restored := destinationExport.Document.Code.Routes[slices.IndexFunc(destinationExport.Document.Code.Routes, func(r configuration.CodeRouteEntry) bool { return r.Slug == slug })]
+	if restored.ID == sourceRoute.ID || restored.Published == nil || restored.Draft.Enabled || !restored.Published.Policy.Enabled || restored.Published.Policy.InitialRecoveryAttempts != sourceRoute.Published.Policy.InitialRecoveryAttempts || restored.Published.Policy.Aliases["portable"] != sourceRoute.Published.Policy.Aliases["portable"] || !restored.Published.Policy.MessagesToCodex || restored.Published.Policy.Tools == nil {
+		t.Fatal("destination did not retain independent effective and draft policies", restored)
+	}
+	restoredPools := h.want(owner, "GET", "/api/v1/code/pools?project_id="+destinationProject, nil, nil, 200)
+	restoredPool := codeDiscoveryResponse[struct {
+		Items []codemode.Pool `json:"items"`
+	}](t, restoredPools).Items[0]
+	if restoredPool.Kind != sourcePool.Kind || restoredPool.OwnerUserID == nil || *restoredPool.OwnerUserID != ownerID || len(restoredPool.AccountWeights) != 1 || restoredPool.AccountWeights[restoredPool.AccountIDs[0]] != 3 || restoredPool.APIKeyIDs[0] != destinationKeyID {
+		t.Fatal("personal pool ownership, membership or weights changed", restoredPool)
+	}
+	budgets := codeDiscoveryResponse[struct {
+		Items []access.CodeBudgetInput `json:"items"`
+	}](t, h.want(owner, "GET", "/api/v1/code/budgets?project_id="+destinationProject, nil, nil, 200)).Items
+	if len(budgets) != 1 || budgets[0].DailyTokens == nil || *budgets[0].DailyTokens != daily || budgets[0].MonthlyTokens == nil || *budgets[0].MonthlyTokens != monthly || budgets[0].APIKeyID == nil || *budgets[0].APIKeyID != destinationKeyID {
+		t.Fatal("budget policy did not roundtrip", budgets)
+	}
+	h.refresh()
+	request, err := http.NewRequestWithContext(t.Context(), "POST", f.gateway.URL+"/code/"+slug+"/chat/completions", strings.NewReader(`{"model":"portable","stream":true,"messages":[{"role":"user","content":"configuration roundtrip"}]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.Header.Set("Authorization", "Bearer "+destinationKey["secret"].(string))
+	request.Header.Set("Content-Type", "application/json")
+	response, err := f.gateway.Client().Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	body, err := io.ReadAll(response.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response.StatusCode != 200 || !strings.Contains(string(body), "CONTROLLED_ANSWER") {
+		t.Fatalf("restored route response %d %s", response.StatusCode, body)
+	}
+	upstream := f.peer.received()
+	if !slices.ContainsFunc(upstream, func(r peerRequest) bool {
+		var body struct {
+			Model string `json:"model"`
+		}
+		return json.Unmarshal(r.Body, &body) == nil && body.Model == account.Models[0] && r.Header.Get("Authorization") == "Bearer controlled-portability-destination-0123456789"
+	}) {
+		t.Fatal("restored route did not use bound destination enrollment and published alias")
+	}
+}

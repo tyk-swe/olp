@@ -12,6 +12,7 @@ import (
 	"github.com/tyk-swe/olp/internal/bodylimit"
 	"github.com/tyk-swe/olp/internal/codeadapter"
 	"github.com/tyk-swe/olp/internal/codemode"
+	"github.com/tyk-swe/olp/internal/providers"
 	"github.com/tyk-swe/olp/internal/resources"
 	"github.com/tyk-swe/olp/internal/runtime"
 )
@@ -39,7 +40,7 @@ func (s *Server) codeRoutes(r *http.Request, p access.Principal) (access.Reply, 
 		FROM olp.code_routes x LEFT JOIN olp.code_route_revisions v ON v.id=x.latest_revision_id`)
 }
 
-type codeRouteInput struct {
+type CodeRouteInput struct {
 	ModelPools              map[string][]string     `json:"model_pools"`
 	InitialRecoveryAttempts int                     `json:"initial_recovery_attempts"`
 	ModelRewriting          bool                    `json:"model_rewriting"`
@@ -55,74 +56,15 @@ type codeRouteInput struct {
 }
 
 func (s *Server) writeCodeRoute(r *http.Request, _ access.Principal) (access.Reply, error) {
-	var in codeRouteInput
+	var in CodeRouteInput
 	if err := access.Decode(r, &in); err != nil {
 		return access.Reply{}, err
 	}
-	if in.InitialRecoveryAttempts < 0 || in.InitialRecoveryAttempts > 2 {
-		return access.Reply{}, access.Invalid("initial_recovery_attempts", "Use zero to disable recovery or allow at most two additional attempts.")
-	}
-	if !bodylimit.Valid(in.MaxBodyBytes) {
-		return access.Reply{}, access.Invalid("max_body_bytes", "Use 1 to 1073741824 bytes, or null to inherit the installation limit.")
-	}
-	projectID, err := access.ParseUUID(in.ProjectID)
-	if err != nil {
+	if err := in.Validate(); err != nil {
 		return access.Reply{}, err
-	}
-	in.ProjectID = projectID
-	if !access.RouteSlug.MatchString(in.Slug) {
-		return access.Reply{}, access.Invalid("slug", "Use a route slug.")
-	}
-	if in.PoolID, err = access.ParseUUID(in.PoolID); err != nil {
-		return access.Reply{}, err
-	}
-	if err := codemode.ValidateModels(in.Models); err != nil {
-		return access.Reply{}, access.Invalid("models", err.Error())
-	}
-	if err := (codemode.Route{Models: in.Models, Aliases: in.Aliases, ModelRewriting: in.ModelRewriting}).ValidateAliases(); err != nil {
-		return access.Reply{}, access.Invalid("aliases", err.Error())
-	}
-	if err := (codemode.Route{Models: in.Models, Aliases: in.Aliases, ModelRewriting: in.ModelRewriting, ModelPools: in.ModelPools}).ValidateModelPools(); err != nil {
-		return access.Reply{}, access.Invalid("model_pools", err.Error())
-	}
-	if err := in.Tools.Validate(); err != nil {
-		return access.Reply{}, access.Invalid("tools", err.Error())
 	}
 	return s.Access.CodeWrite(r, "code_routes", "code_route", in.ProjectID, in, func(tx pgx.Tx, p access.Principal, id, etag string) (any, error) {
-		out := codemode.Route{ModelPools: in.ModelPools, InitialRecoveryAttempts: in.InitialRecoveryAttempts, Aliases: in.Aliases, ModelRewriting: in.ModelRewriting, MessagesToCodex: in.MessagesToCodex, Tools: in.Tools, MaxBodyBytes: in.MaxBodyBytes, ID: id, ProjectID: in.ProjectID, Slug: in.Slug, PoolID: in.PoolID, Models: in.Models, Enabled: in.Enabled, ETag: etag}
-		adapters := []codemode.Adapter{}
-		var matches bool
-		if err := tx.QueryRow(r.Context(), `SELECT EXISTS(SELECT 1 FROM olp.code_pools WHERE id=$1 AND project_id=$2)`, in.PoolID, in.ProjectID).Scan(&matches); err != nil {
-			return nil, err
-		}
-		if !matches {
-			return nil, access.Fail(404, "not_found", "The pool was not found.")
-		}
-		if out.Tools != nil {
-			if _, err := resources.ResearchAccount(r.Context(), tx, out); err != nil {
-				return nil, err
-			}
-		}
-		if r.PathValue("id") != "" {
-			var slug string
-			if err := tx.QueryRow(r.Context(), `SELECT x.slug,coalesce(v.id::text,''),coalesce(v.revision,0),v.published_at,`+codeadapter.SQLAdapters("v.connections")+`
-				FROM olp.code_routes x LEFT JOIN olp.code_route_revisions v ON v.id=x.latest_revision_id WHERE x.id=$1`, id).Scan(&slug, &out.RevisionID, &out.Revision, &out.PublishedAt, &adapters); err != nil {
-				return nil, err
-			}
-			if slug != in.Slug {
-				return nil, access.Invalid("slug", "The route slug is immutable.")
-			}
-		}
-		if err := tx.QueryRow(r.Context(), `SELECT EXISTS(SELECT 1 FROM olp.routes WHERE slug=$1) OR EXISTS(SELECT 1 FROM olp.route_drafts WHERE slug=$1)`, in.Slug).Scan(&matches); err != nil {
-			return nil, err
-		}
-		if matches {
-			return nil, access.Invalid("slug", "This slug belongs to an ordinary route.")
-		}
-		document, _ := json.Marshal(out)
-		_, err := tx.Exec(r.Context(), `INSERT INTO olp.code_routes(id,project_id,slug,draft,etag,created_by) VALUES($1,$2,$3,$4,$5,$6)
-			ON CONFLICT(id) DO UPDATE SET draft=excluded.draft,etag=excluded.etag`, id, in.ProjectID, in.Slug, document, etag, p.UserID())
-		return codeRoute{Route: out, Adapters: adapters}, err
+		return SaveCodeRoute(r.Context(), tx, p, id, etag, in, r.PathValue("id") != "")
 	})
 }
 
@@ -162,55 +104,16 @@ func (s *Server) publishCodeRoute(r *http.Request, _ access.Principal) (access.R
 	if err = json.Unmarshal(document, &route); err != nil {
 		return access.Reply{}, err
 	}
-	if err := route.ValidateAliases(); err != nil {
-		return access.Reply{}, access.Invalid("aliases", err.Error())
-	}
-	if err := route.ValidateModelPools(); err != nil {
-		return access.Reply{}, access.Invalid("model_pools", err.Error())
-	}
-	if err = route.Tools.Validate(); err != nil {
-		return access.Reply{}, access.Invalid("tools", err.Error())
-	}
-	if route.Tools != nil {
-		if _, err = resources.ResearchAccount(r.Context(), tx, route); err != nil {
-			return access.Reply{}, err
-		}
-	}
-	if route.Enabled {
-		for _, model := range route.Models {
-			var available bool
-			err = tx.QueryRow(r.Context(), `SELECT EXISTS(SELECT 1 FROM olp.code_pool_accounts pa JOIN olp.code_accounts a ON a.id=pa.account_id JOIN olp.provider_credentials c ON c.id=a.credential_id JOIN olp.provider_grants g ON g.credential_id=c.id
-				WHERE pa.pool_id=$1 AND a.enabled AND a.project_id=$2 AND a.models ? $3 AND c.revoked_at IS NULL AND g.lapsed_at IS NULL AND (g.expires_at IS NULL OR g.expires_at>now()) AND c.principal=a.principal)`, route.PoolID, project, model).Scan(&available)
-			if err != nil {
-				return access.Reply{}, err
-			}
-			if !available {
-				return access.Reply{}, access.Invalid("models", "Every model needs an enrolled pool account.")
-			}
-		}
-	}
-	connections, adapters, err := codePublication(r.Context(), tx, route.PoolID)
+	published, err := SaveCodePublication(r.Context(), tx, p, id, route, nil)
 	if err != nil {
 		return access.Reply{}, err
 	}
-	route.RevisionID = access.NewID()
-	route.ETag = access.NewID()
-	now := time.Now().UTC().Truncate(time.Microsecond)
-	route.PublishedAt = &now
-	if err = tx.QueryRow(r.Context(), `SELECT COALESCE(max(revision),0)+1 FROM olp.code_route_revisions WHERE route_id=$1`, id).Scan(&route.Revision); err != nil {
+	route = published.Route
+	adapters := published.Adapters
+	if _, err := runtime.Publish(r.Context(), tx, p.UserID()); err != nil {
 		return access.Reply{}, err
 	}
-	document, _ = json.Marshal(route)
-	if _, err = tx.Exec(r.Context(), `INSERT INTO olp.code_route_revisions(id,route_id,revision,document,created_by,published_at,connections)
-		VALUES($1,$2,$3,$4,$5,$6,$7)`, route.RevisionID, id, route.Revision, document, p.UserID(), now, connections); err != nil {
-		return access.Reply{}, err
-	}
-	if _, err = tx.Exec(r.Context(), `UPDATE olp.code_routes SET latest_revision_id=$2,etag=$3,draft=$4 WHERE id=$1`, id, route.RevisionID, route.ETag, document); err != nil {
-		return access.Reply{}, err
-	}
-	if _, err = runtime.Publish(r.Context(), tx, p.UserID()); err != nil {
-		return access.Reply{}, err
-	}
+
 	if err = access.Audit(r.Context(), tx, r, p.Actor(), "code_route.publish", "code_route", id, "success"); err != nil {
 		return access.Reply{}, err
 	}
@@ -283,4 +186,156 @@ func codePublication(ctx context.Context, tx pgx.Tx, poolID string) ([]byte, []c
 	slices.SortFunc(adapters, codeadapter.Compare)
 	encoded, err := json.Marshal(connections)
 	return encoded, adapters, err
+}
+
+func SaveCodeRoute(ctx context.Context, tx pgx.Tx, p access.Principal, id, etag string, in CodeRouteInput, existing bool) (*codeRoute, error) {
+	if err := in.Validate(); err != nil {
+		return nil, err
+	}
+	if err := p.Project(&in.ProjectID, access.Change); err != nil {
+		return nil, err
+	}
+	out := codemode.Route{ModelPools: in.ModelPools, InitialRecoveryAttempts: in.InitialRecoveryAttempts, Aliases: in.Aliases, ModelRewriting: in.ModelRewriting, MessagesToCodex: in.MessagesToCodex, Tools: in.Tools, MaxBodyBytes: in.MaxBodyBytes, ID: id, ProjectID: in.ProjectID, Slug: in.Slug, PoolID: in.PoolID, Models: in.Models, Enabled: in.Enabled, ETag: etag}
+	adapters := []codemode.Adapter{}
+	var matches bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM olp.code_pools WHERE id=$1 AND project_id=$2)`, in.PoolID, in.ProjectID).Scan(&matches); err != nil {
+		return nil, err
+	}
+	if !matches {
+		return nil, access.Fail(404, "not_found", "The pool was not found.")
+	}
+	if out.Tools != nil {
+		if _, err := resources.ResearchAccount(ctx, tx, out); err != nil {
+			return nil, err
+		}
+	}
+	if existing {
+		var slug string
+		if err := tx.QueryRow(ctx, `SELECT x.slug,coalesce(v.id::text,''),coalesce(v.revision,0),v.published_at,`+codeadapter.SQLAdapters("v.connections")+`
+				FROM olp.code_routes x LEFT JOIN olp.code_route_revisions v ON v.id=x.latest_revision_id WHERE x.id=$1`, id).Scan(&slug, &out.RevisionID, &out.Revision, &out.PublishedAt, &adapters); err != nil {
+			return nil, err
+		}
+		if slug != in.Slug {
+			return nil, access.Invalid("slug", "The route slug is immutable.")
+		}
+	}
+	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM olp.routes WHERE slug=$1) OR EXISTS(SELECT 1 FROM olp.route_drafts WHERE slug=$1)`, in.Slug).Scan(&matches); err != nil {
+		return nil, err
+	}
+	if matches {
+		return nil, access.Invalid("slug", "This slug belongs to an ordinary route.")
+	}
+	document, _ := json.Marshal(out)
+	_, err := tx.Exec(ctx, `INSERT INTO olp.code_routes(id,project_id,slug,draft,etag,created_by) VALUES($1,$2,$3,$4,$5,$6)
+			ON CONFLICT(id) DO UPDATE SET draft=excluded.draft,etag=excluded.etag`, id, in.ProjectID, in.Slug, document, etag, p.UserID())
+	return &codeRoute{Route: out, Adapters: adapters}, err
+}
+
+func (in CodeRouteInput) Validate() error {
+	if in.InitialRecoveryAttempts < 0 || in.InitialRecoveryAttempts > 2 {
+		return access.Invalid("initial_recovery_attempts", "Use zero to disable recovery or allow at most two additional attempts.")
+	}
+	if !bodylimit.Valid(in.MaxBodyBytes) {
+		return access.Invalid("max_body_bytes", "Use 1 to 1073741824 bytes, or null to inherit the installation limit.")
+	}
+	if _, err := access.ParseUUID(in.ProjectID); err != nil {
+		return err
+	}
+	if !access.RouteSlug.MatchString(in.Slug) {
+		return access.Invalid("slug", "Use a route slug.")
+	}
+	if _, err := access.ParseUUID(in.PoolID); err != nil {
+		return err
+	}
+	if err := codemode.ValidateModels(in.Models); err != nil {
+		return access.Invalid("models", err.Error())
+	}
+	if err := (codemode.Route{Models: in.Models, Aliases: in.Aliases, ModelRewriting: in.ModelRewriting}).ValidateAliases(); err != nil {
+		return access.Invalid("aliases", err.Error())
+	}
+	if err := (codemode.Route{Models: in.Models, Aliases: in.Aliases, ModelRewriting: in.ModelRewriting, ModelPools: in.ModelPools}).ValidateModelPools(); err != nil {
+		return access.Invalid("model_pools", err.Error())
+	}
+	if err := in.Tools.Validate(); err != nil {
+		return access.Invalid("tools", err.Error())
+	}
+	return nil
+}
+
+func SaveCodePublication(ctx context.Context, tx pgx.Tx, p access.Principal, id string, in codemode.Route, frozen map[string]providers.Configuration) (*codeRoute, error) {
+	if err := p.Project(&in.ProjectID, access.Change); err != nil {
+		return nil, err
+	}
+	route := in
+	var err error
+	if err := route.ValidateAliases(); err != nil {
+		return nil, access.Invalid("aliases", err.Error())
+	}
+	if err := route.ValidateModelPools(); err != nil {
+		return nil, access.Invalid("model_pools", err.Error())
+	}
+	if err = route.Tools.Validate(); err != nil {
+		return nil, access.Invalid("tools", err.Error())
+	}
+	if route.Tools != nil {
+		if _, err = resources.ResearchAccount(ctx, tx, route); err != nil {
+			return nil, err
+		}
+	}
+	if route.Enabled {
+		for _, model := range route.Models {
+			var available bool
+			err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM olp.code_pool_accounts pa JOIN olp.code_accounts a ON a.id=pa.account_id JOIN olp.provider_credentials c ON c.id=a.credential_id JOIN olp.provider_grants g ON g.credential_id=c.id
+				WHERE pa.pool_id=$1 AND a.enabled AND a.project_id=$2 AND a.models ? $3 AND c.revoked_at IS NULL AND g.lapsed_at IS NULL AND (g.expires_at IS NULL OR g.expires_at>now()) AND c.principal=a.principal)`, route.PoolID, route.ProjectID, model).Scan(&available)
+			if err != nil {
+				return nil, err
+			}
+			if !available {
+				return nil, access.Invalid("models", "Every model needs an enrolled pool account.")
+			}
+		}
+	}
+	connections, adapters, err := codePublication(ctx, tx, route.PoolID)
+	if err != nil {
+		return nil, err
+	}
+	if frozen != nil {
+		var current map[string]json.RawMessage
+		if err := json.Unmarshal(connections, &current); err != nil {
+			return nil, err
+		}
+		if len(current) != len(frozen) {
+			return nil, access.Invalid("connections", "Frozen providers must match the publication pool.")
+		}
+		for provider, cfg := range frozen {
+			if _, ok := current[provider]; !ok {
+				return nil, access.Invalid("connections", "Frozen providers must match the publication pool.")
+			}
+			if _, ok := codeadapter.ForConnection(cfg.Kind, cfg.AuthMode, cfg.ProfileID); !ok {
+				return nil, access.Invalid("connections", "Frozen connections must support a coding adapter.")
+			}
+		}
+		encoded, err := json.Marshal(frozen)
+		if err != nil {
+			return nil, err
+		}
+		connections = encoded
+	}
+
+	route.RevisionID = access.NewID()
+	route.ETag = access.NewID()
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	route.PublishedAt = &now
+	if err = tx.QueryRow(ctx, `SELECT COALESCE(max(revision),0)+1 FROM olp.code_route_revisions WHERE route_id=$1`, id).Scan(&route.Revision); err != nil {
+		return nil, err
+	}
+	document, _ := json.Marshal(route)
+	if _, err = tx.Exec(ctx, `INSERT INTO olp.code_route_revisions(id,route_id,revision,document,created_by,published_at,connections)
+		VALUES($1,$2,$3,$4,$5,$6,$7)`, route.RevisionID, id, route.Revision, document, p.UserID(), now, connections); err != nil {
+		return nil, err
+	}
+	if _, err = tx.Exec(ctx, `UPDATE olp.code_routes SET latest_revision_id=$2,etag=$3,draft=$4 WHERE id=$1`, id, route.RevisionID, route.ETag, document); err != nil {
+		return nil, err
+	}
+	return &codeRoute{Route: route, Adapters: adapters}, nil
 }

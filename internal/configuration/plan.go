@@ -366,6 +366,11 @@ func normalizeDocument(doc *Document) {
 // plugin profiles its plugin providers name. It returns the plugins this
 // installation can't use yet, by digest, with why: they block the plan.
 func (s *Server) validateDocument(ctx context.Context, q access.Queryer, doc *Document) (map[string]string, error) {
+	if doc.Code != nil {
+		if err := doc.Code.Validate(); err != nil {
+			return nil, err
+		}
+	}
 	if doc.APIVersion != APIVersion && doc.APIVersion != LegacyAPIVersion {
 		return nil, access.Fail(422, "unsupported_api_version", "The artifact declares an unsupported api_version.")
 	}
@@ -475,6 +480,34 @@ func (s *Server) validateDocument(ctx context.Context, q access.Queryer, doc *Do
 	seen = map[string]bool{}
 	refs := map[string]bool{}
 	unavailable := map[string]string{}
+	if doc.Code != nil {
+		for _, route := range doc.Code.Routes {
+			if route.Published == nil {
+				continue
+			}
+			for name, entry := range route.Published.Connections {
+				cfg := entry.Configuration
+				if cfg.Options.Network != nil && cfg.Options.Network.CredentialID != "" {
+					return nil, access.Invalid("code.routes.published.connections", "Use a network credential reference instead of an installation credential ID.")
+				}
+				if entry.NetworkCredentialRef != nil && (*entry.NetworkCredentialRef != networkRef(name) || cfg.Options.Network == nil) {
+					return nil, access.Invalid("code.routes.published.connections", "Use the named provider network credential reference.")
+				}
+				refusal, err := pinPlugin(ctx, q, s.Unconfined, &cfg)
+				if err != nil {
+					return nil, err
+				}
+				if refusal != "" {
+					return nil, access.Invalid("code.routes.published.connections", "Install and approve the pinned frozen provider profile before promotion.")
+				}
+				cfg.Normalize()
+				if err := cfg.Validate(s.Egress); err != nil {
+					return nil, err
+				}
+			}
+		}
+	}
+
 	totalModels := 0
 	for i := range doc.Providers {
 		// Applying stores the entry's configuration, so a plugin provider
@@ -895,6 +928,9 @@ func (s *Server) plan(ctx context.Context, q access.Queryer, doc *Document, bind
 		return nil, err
 	}
 	result := &planResult{Digest: digest, Actions: []planItem{}, Conflicts: []planItem{}, Blockers: []planItem{}}
+	if err := planCode(ctx, q, doc, result); err != nil {
+		return nil, err
+	}
 	if err = planCatalogPolicies(ctx, q, doc, result); err != nil {
 		return nil, err
 	}
@@ -1393,7 +1429,7 @@ func bindingFingerprint(doc *Document, digest string, bindings bindingSet, expec
 		clear(value)
 		sealed = append(sealed, map[string]string{"ref": name, "sha256": hex.EncodeToString(sum[:])})
 	}
-	return map[string]any{"document_digest": digest, "expected_digest": expected, "secret_bindings": sealed}
+	return map[string]any{"document_digest": digest, "expected_digest": expected, "secret_bindings": sealed, "code_bindings": doc.codeBindings}
 }
 
 func templateNamed(templates []TemplateEntry, name string) *TemplateEntry {

@@ -273,6 +273,10 @@ func (s *Server) exportDocument(ctx context.Context, q access.Queryer) (*Documen
 	if err := exportGuardrailPlatform(ctx, q, doc); err != nil {
 		return nil, err
 	}
+	if doc.Code, err = exportCode(ctx, q); err != nil {
+		return nil, err
+	}
+	canonicalCode(doc.Code)
 	return doc, nil
 }
 

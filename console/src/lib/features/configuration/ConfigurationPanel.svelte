@@ -11,6 +11,7 @@
   import { downloadBlob } from '$lib/download';
   import {
     applyConfiguration,
+    isCodeBindings,
     exportConfiguration,
     grantEnrollments,
     missingSecretBindings,
@@ -32,6 +33,7 @@
   let plan = $state<ConfigurationPlan | null>(null);
   let secrets = $state<Record<string, string>>({});
   let externalBindingsJSON = $state('');
+  let codeBindingsJSON = $state('');
   let applyResult = $state<'staged' | ''>('');
   let busy = $state(false);
   let error = $state('');
@@ -87,6 +89,7 @@
     applyIntent.reset();
     secrets = {};
     externalBindingsJSON = '';
+    codeBindingsJSON = '';
     artifactDocument = null;
   }
 
@@ -129,8 +132,12 @@
     operation: typeof planConfiguration,
     document: ConfigurationDocument
   ) {
-    if (!externalBindingsJSON.trim()) return operation(document, bindings());
-    const parsed: unknown = JSON.parse(externalBindingsJSON);
+    const codeBindings: unknown = JSON.parse(codeBindingsJSON.trim() || '{}');
+    if (!isCodeBindings(codeBindings))
+      throw new Error(
+        'Code bindings must map credentials, users and api_keys to destination IDs.'
+      );
+    const parsed: unknown = JSON.parse(externalBindingsJSON.trim() || '{}');
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed))
       throw new Error(
         'External bindings must be an object keyed by artifact credential reference.'
@@ -141,7 +148,7 @@
         parseExternalReference(JSON.stringify(value))
       ])
     );
-    return operation(document, bindings(), undefined, references);
+    return operation(document, bindings(), undefined, references, codeBindings);
   }
 
   async function runPlan() {
@@ -174,18 +181,20 @@
     applyResult = '';
     try {
       const result = await withBindings(
-        (document, secretBindings, signal, externalBindings) => {
+        (document, secretBindings, signal, externalBindings, codeBindings) => {
           const submission = applyIntent.prepare({
             document,
             secretBindings,
-            externalBindings
+            externalBindings,
+            codeBindings
           });
           return applyConfiguration(
             submission.input.document,
             submission.input.secretBindings,
             submission.requestId,
             signal,
-            submission.input.externalBindings
+            submission.input.externalBindings,
+            submission.input.codeBindings
           );
         },
         applied
@@ -311,6 +320,27 @@
         Optionally bind artifact references to immutable secret-store versions.
         A reference must use either an external binding or a plaintext binding.
       </p>
+      {#if artifactDocument.code}
+        <label
+          >Code destination bindings<textarea
+            bind:value={codeBindingsJSON}
+            oninput={() => {
+              plan = null;
+              applyResult = '';
+            }}
+            readonly={busy}
+            rows="4"
+            maxlength="65536"
+            spellcheck="false"
+            placeholder={'{"credentials":{"account-ref":"destination-credential-id"},"users":{},"api_keys":{}}'}
+          ></textarea></label
+        >
+        <p>
+          Enroll destination credentials first, then bind every credential,
+          personal owner and API key reference to its destination ID. Rename
+          route slugs when copying into another project on this installation.
+        </p>
+      {/if}
       <div class="promotion-actions">
         <button
           class="button button-secondary"
