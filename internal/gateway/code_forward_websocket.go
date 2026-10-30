@@ -246,7 +246,7 @@ func (s *Server) codeWebSocket(w http.ResponseWriter, r *http.Request, release *
 				refuse(codemode.Refuse(409, "code_identity_changed"))
 				return
 			}
-			active, err = s.prepareCode(r.WithContext(ctx), release, route, observation, ingress, codeadapter.WebSocket, nil)
+			active, err = s.prepareCode(r.WithContext(ctx), release, route, observation, ingress, codeadapter.WebSocket, nil, message.body)
 			if err != nil {
 				refuse(err)
 				return

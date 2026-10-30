@@ -19,6 +19,9 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
+	"github.com/google/uuid"
+	"github.com/tyk-swe/olp/internal/runtime"
+	"github.com/tyk-swe/olp/internal/usage"
 
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/codeadapter"
@@ -1746,4 +1749,51 @@ type codeWriteDeadlineWriter struct{ socketDeadlineWriter }
 
 func (writer codeWriteDeadlineWriter) SetReadDeadline(deadline time.Time) error {
 	return http.NewResponseController(writer.ResponseWriter).SetReadDeadline(deadline)
+}
+
+func (l *codeTestLedger) AdmitPaid(_ context.Context, in resources.PaidCodeAdmission) (resources.PaidCodePermit, error) {
+	if l.refuse != "" {
+		return resources.PaidCodePermit{}, codemode.Refuse(403, l.refuse)
+	}
+	return resources.PaidCodePermit{Authority: in.Authority, Attempt: codemode.Attempt{ID: uuid.NewString()}, BindingID: uuid.NewString()}, nil
+}
+
+func TestCodePaidTargetPreservesNativeRequestAndAttributesMeteredUsage(t *testing.T) {
+	h, ledger, server := newCodeForwardHarness(t, codeForwardSetup{Models: []string{modelA}, Policy: access.KeyPolicy{Scopes: []string{"inference", "models_read"}}})
+	snapshot := h.rt.Release().Snapshot.Clone()
+	route := snapshot.CodeRoutes["coding"]
+	provider := snapshot.Providers[snapshot.Routes[routeSlug].Targets[0].ProviderID]
+	provider.ProjectID = &route.ProjectID
+	provider.Kind = "openai"
+	provider.ProfileID = "openai-responses"
+	provider.ProfileRevision = connectors.ProfileRevision
+	route.PaidParticipation = true
+	route.PaidTargets = map[string]codemode.PaidTarget{modelA: {ProviderID: provider.ID, SlotID: h.slotA}}
+	snapshot.CodeRoutes["coding"] = route
+	snapshot.CodePaidConnections = map[string]routing.Provider{route.RevisionID + ":" + provider.ID: provider}
+	release, err := runtime.NewRelease(uuid.NewString(), 8, snapshot, map[string][]byte{h.credA: []byte(secretA)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.rt.release = release
+	h.rt.inputs = &usage.RoutingInputs{RefreshedAt: time.Now(), Prices: []usage.RoutingPrice{{RevisionID: uuid.NewString(), EffectiveAt: time.Now().Add(-time.Hour), Price: usage.Price{ProviderKind: provider.Kind, Model: modelA, Operation: "generation", Currency: "USD", InputPerMillion: new("1"), OutputPerMillion: new("2")}}}}
+	requestBody := []byte(`{ "model":"model-a", "input":"Explain this function", "max_output_tokens":20, "vendor_extension":{"keep":true} }`)
+	responseBody := []byte(`{ "id":"paid-response", "status":"completed", "output":[], "usage":{"total_tokens":3,"input_tokens":2,"output_tokens":1}, "vendor_extension":{"keep":true} }`)
+	h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		if !bytes.Equal(body, requestBody) || r.Header.Get("Authorization") != "Bearer "+secretA {
+			t.Error("paid target changed native request or authorization")
+		}
+		_, _ = w.Write(responseBody)
+	})
+	response := codeDo(t, server, requestBody, nil)
+	body, _ := io.ReadAll(response.Body)
+	if response.StatusCode != 200 || !bytes.Equal(body, responseBody) {
+		t.Fatalf("paid exchange %d %s", response.StatusCode, body)
+	}
+	ledger.wait(t)
+	env := h.sink.last(t)
+	if env.KeyID != h.keyID || env.Route != route.Slug || len(env.Attempts) != 1 || env.Attempts[0].ProviderID != provider.ID || env.Attempts[0].SlotID != h.slotA || env.Attempts[0].Price == nil || !env.Attempts[0].UsageComplete || env.Attempts[0].Usage.InputTokens != 2 || env.Attempts[0].Usage.OutputTokens != 1 {
+		t.Fatalf("paid usage attribution %+v", env)
+	}
 }

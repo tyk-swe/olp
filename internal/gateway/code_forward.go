@@ -59,7 +59,7 @@ func (s *Server) serveCode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	adapters := release.Snapshot.CodeAdapters(route)
-	if len(adapters) == 0 {
+	if len(adapters) == 0 && len(route.PaidTargets) == 0 {
 		refuse(codemode.Refuse(503, "code_adapter_unavailable"))
 		return
 	}
@@ -68,7 +68,7 @@ func (s *Server) serveCode(w http.ResponseWriter, r *http.Request) {
 		s.codeWebSocket(w, r, release, route, authority, ingress)
 		return
 	}
-	if r.Method != http.MethodPost || !ok || len(release.Snapshot.CodeProviders(route, path, codeadapter.HTTP)) == 0 {
+	if r.Method != http.MethodPost || !ok || len(release.Snapshot.CodeProviders(route, path, codeadapter.HTTP)) == 0 && len(route.PaidTargets) == 0 {
 		if codeProbe(r.Method, path) && len(release.Snapshot.CodeProviders(route, "v1/messages", codeadapter.HTTP)) != 0 {
 			codeWriteError(w, r, codemode.Refuse(404, "code_operation_unsupported"))
 			return
@@ -106,7 +106,7 @@ func (s *Server) serveCode(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) forwardCode(w http.ResponseWriter, r *http.Request, release *runtime.Release, route codemode.Route, observation codemode.Request, ingress codeIngress, raw, body []byte, recovery *resources.CodeRecovery, refuse func(error)) {
 	ctx := r.Context()
-	attempt, err := s.prepareCode(r, release, route, observation, ingress, codeadapter.HTTP, recovery)
+	attempt, err := s.prepareCode(r, release, route, observation, ingress, codeadapter.HTTP, recovery, body)
 	if err != nil {
 		refuse(err)
 		return
@@ -135,13 +135,13 @@ func (s *Server) forwardCode(w http.ResponseWriter, r *http.Request, release *ru
 		return
 	}
 
-	client, err := s.codeClient(r.Context(), release, attempt.config, attempt.permit.Account.ProviderID)
+	client, err := s.codeClient(r.Context(), release, attempt.config, attempt.providerID())
 	if err != nil {
 		refuse(err)
 		return
 	}
 	defer client.CloseIdleConnections()
-	target, err := s.codeEndpoint(attempt.config, attempt.endpoint.UpstreamPath, payload.query)
+	target, err := attempt.requestURL(payload.query)
 	if err != nil {
 		refuse(err)
 		return
@@ -153,6 +153,10 @@ func (s *Server) forwardCode(w http.ResponseWriter, r *http.Request, release *ru
 	}
 	request.ContentLength = int64(len(payload.body))
 	request.Header = attempt.headers(r.Header)
+	if err := attempt.authorizePaid(request, payload.body); err != nil {
+		refuse(err)
+		return
+	}
 	if attempt.model != attempt.publicModel {
 		request.Header.Del("Content-Encoding")
 		request.Header.Del("Content-Length")

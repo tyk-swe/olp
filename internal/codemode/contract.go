@@ -7,8 +7,11 @@ import (
 	"math"
 	"net/http"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 const BasePath = "/code/"
@@ -160,23 +163,48 @@ type Pool struct {
 	ETag           string           `json:"etag"`
 }
 
+type PaidTarget struct {
+	ProviderID string `json:"provider_id"`
+	SlotID     string `json:"slot_id"`
+}
+
+func (r Route) ValidatePaidTargets() error {
+	if len(r.PaidTargets) > 100 || len(r.PaidTargets) > 0 && !r.PaidParticipation {
+		return Refuse(400, "code_paid_participation_disabled")
+	}
+	for model, target := range r.PaidTargets {
+		if !slices.Contains(r.Models, model) {
+			return Refuse(400, "code_paid_model_invalid")
+		}
+		for _, id := range []string{target.ProviderID, target.SlotID} {
+			parsed, err := uuid.Parse(id)
+			if err != nil || parsed == uuid.Nil || parsed.String() != id {
+				return Refuse(400, "code_paid_target_invalid")
+			}
+		}
+	}
+	return nil
+}
+
 type Route struct {
-	InitialRecoveryAttempts int               `json:"initial_recovery_attempts,omitempty"`
-	ModelRewriting          bool              `json:"model_rewriting,omitempty"`
-	Aliases                 map[string]string `json:"aliases,omitempty"`
-	MessagesToCodex         bool              `json:"messages_to_codex,omitempty"`
-	Tools                   *ResearchTools    `json:"tools,omitempty"`
-	MaxBodyBytes            *int64            `json:"max_body_bytes,omitempty"`
-	ID                      string            `json:"id"`
-	ProjectID               string            `json:"project_id"`
-	Slug                    string            `json:"slug"`
-	PoolID                  string            `json:"pool_id"`
-	Models                  []string          `json:"models"`
-	Enabled                 bool              `json:"enabled"`
-	RevisionID              string            `json:"revision_id"`
-	Revision                int               `json:"revision"`
-	ETag                    string            `json:"etag"`
-	PublishedAt             *time.Time        `json:"published_at"`
+	PaidParticipation       bool                  `json:"paid_participation"`
+	PaidTargets             map[string]PaidTarget `json:"paid_targets"`
+	InitialRecoveryAttempts int                   `json:"initial_recovery_attempts,omitempty"`
+	ModelRewriting          bool                  `json:"model_rewriting,omitempty"`
+	Aliases                 map[string]string     `json:"aliases,omitempty"`
+	MessagesToCodex         bool                  `json:"messages_to_codex,omitempty"`
+	Tools                   *ResearchTools        `json:"tools,omitempty"`
+	MaxBodyBytes            *int64                `json:"max_body_bytes,omitempty"`
+	ID                      string                `json:"id"`
+	ProjectID               string                `json:"project_id"`
+	Slug                    string                `json:"slug"`
+	PoolID                  string                `json:"pool_id"`
+	Models                  []string              `json:"models"`
+	Enabled                 bool                  `json:"enabled"`
+	RevisionID              string                `json:"revision_id"`
+	Revision                int                   `json:"revision"`
+	ETag                    string                `json:"etag"`
+	PublishedAt             *time.Time            `json:"published_at"`
 }
 
 func (r Route) BasePath() string { return BasePath + r.Slug }

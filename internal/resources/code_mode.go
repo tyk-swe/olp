@@ -617,8 +617,18 @@ func (s *CodeStore) ObserveReference(ctx context.Context, attemptID, externalID 
 	if err := (codemode.Identity{Conversation: externalID}).Validate(); err != nil {
 		return err
 	}
+	if _, err := s.Pool.Exec(ctx, `INSERT INTO olp.code_paid_references(route_id,api_key_id,external_id,binding_id)
+ SELECT a.route_id,a.api_key_id,$2,a.paid_binding_id FROM olp.code_attempts a WHERE a.id=$1 AND a.paid_binding_id IS NOT NULL AND a.state<>'prepared'
+ ON CONFLICT(route_id,api_key_id,external_id) DO UPDATE SET ambiguous=olp.code_paid_references.ambiguous OR
+ (SELECT root_id FROM olp.code_paid_bindings WHERE id=olp.code_paid_references.binding_id)<>(SELECT root_id FROM olp.code_paid_bindings WHERE id=EXCLUDED.binding_id)`, attemptID, externalID); err != nil {
+		return err
+	}
+
+	if err := (codemode.Identity{Conversation: externalID}).Validate(); err != nil {
+		return err
+	}
 	_, err := s.Pool.Exec(ctx, `INSERT INTO olp.code_references(route_id,api_key_id,external_id,binding_id,account_id)
-		SELECT a.route_id,a.api_key_id,$2,a.binding_id,a.account_id FROM olp.code_attempts a WHERE a.id=$1 AND a.state<>'prepared'
+		SELECT a.route_id,a.api_key_id,$2,a.binding_id,a.account_id FROM olp.code_attempts a WHERE a.id=$1 AND a.state<>'prepared' AND a.paid_binding_id IS NULL
 		ON CONFLICT(route_id,api_key_id,external_id) DO UPDATE SET ambiguous=olp.code_references.ambiguous OR
 		olp.code_references.account_id IS DISTINCT FROM EXCLUDED.account_id OR
 		(SELECT root_id FROM olp.code_bindings WHERE id=olp.code_references.binding_id)<>(SELECT root_id FROM olp.code_bindings WHERE id=EXCLUDED.binding_id)`, attemptID, externalID)

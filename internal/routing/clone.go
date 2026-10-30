@@ -17,7 +17,7 @@ func (s *Snapshot) Clone() *Snapshot {
 	if s == nil {
 		return nil
 	}
-	out := &Snapshot{Commitments: maps.Clone(s.Commitments), Generation: s.Generation, Providers: maps.Clone(s.Providers), Routes: maps.Clone(s.Routes), CodeRoutes: maps.Clone(s.CodeRoutes), CodeConnections: maps.Clone(s.CodeConnections), InstallationPolicy: s.InstallationPolicy.Clone(), KeyPolicies: maps.Clone(s.KeyPolicies)}
+	out := &Snapshot{Commitments: maps.Clone(s.Commitments), Generation: s.Generation, Providers: maps.Clone(s.Providers), Routes: maps.Clone(s.Routes), CodeRoutes: maps.Clone(s.CodeRoutes), CodeConnections: maps.Clone(s.CodeConnections), CodePaidConnections: maps.Clone(s.CodePaidConnections), InstallationPolicy: s.InstallationPolicy.Clone(), KeyPolicies: maps.Clone(s.KeyPolicies)}
 	out.MCPServers = slices.Collect(func(yield func(MCPServer) bool) {
 		for _, server := range s.MCPServers {
 			if !yield(MCPServer{
@@ -62,6 +62,9 @@ func (s *Snapshot) Clone() *Snapshot {
 	}
 	for id, r := range out.CodeRoutes {
 		out.CodeRoutes[id] = cloneCodeRoute(r)
+	}
+	for id, p := range out.CodePaidConnections {
+		out.CodePaidConnections[id] = cloneProvider(p)
 	}
 	for id, c := range out.CodeConnections {
 		out.CodeConnections[id] = cloneConfiguration(c)
@@ -250,7 +253,7 @@ func clonePredicate(p Predicate) Predicate {
 }
 func cloneCodeRoute(route codemode.Route) codemode.Route {
 	return codemode.Route{
-		ID: route.ID, ProjectID: route.ProjectID, Slug: route.Slug, PoolID: route.PoolID,
+		ID: route.ID, ProjectID: route.ProjectID, Slug: route.Slug, PoolID: route.PoolID, PaidParticipation: route.PaidParticipation, PaidTargets: maps.Clone(route.PaidTargets),
 		Models: slices.Clone(route.Models), Aliases: maps.Clone(route.Aliases), ModelRewriting: route.ModelRewriting,
 		MessagesToCodex: route.MessagesToCodex, InitialRecoveryAttempts: route.InitialRecoveryAttempts,
 		Tools: func() *codemode.ResearchTools {
