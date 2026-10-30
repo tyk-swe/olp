@@ -128,16 +128,3 @@ func exportCodePaid(ctx context.Context, q access.Queryer, frozen map[string]rou
 		}
 	}), nil
 }
-
-func codeFrozenPaidRefs(frozen map[string]routing.Provider, current map[string]CodePaidTarget) map[string]CodePaidTarget {
-	return maps.Collect(func(yield func(string, CodePaidTarget) bool) {
-		for id, provider := range frozen {
-			for _, slot := range provider.Slots {
-				ref := codePaidRef(id, slot.ID)
-				if !yield(ref, CodePaidTarget{Provider: current[ref].Provider, Slot: slot.Name, CredentialRef: ref}) {
-					return
-				}
-			}
-		}
-	})
-}
