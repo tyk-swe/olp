@@ -348,3 +348,18 @@ func TestCatalogAndConfigurationExposeDirectPaidModelsWithoutAdapters(t *testing
 		t.Fatalf("disabled paid target advertised through subscription %+v", got)
 	}
 }
+
+func TestClaudeSubscriptionSetupUsesNativeModelsAndReportsLiveGap(t *testing.T) {
+	models := []string{"claude-fixture-main", "claude-fixture-small"}
+	route := codemode.Route{Slug: "personal-code", Enabled: true, RevisionID: "published", Models: models}
+	configuration, err := Generate(route, Offers{{Adapter: codemode.AdapterClaude, Models: models}}, Request{GatewayURL: "https://olp.example", Client: "claude-code", Model: models[0], SmallModel: models[1]})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if configuration.Model != models[0] || !strings.Contains(configuration.Configuration, "ANTHROPIC_AUTH_TOKEN") || !strings.Contains(configuration.Configuration, models[1]) {
+		t.Fatal("native setup lost the selected models or gateway credential")
+	}
+	if !slices.ContainsFunc(configuration.QualificationGaps, func(gap string) bool { return strings.Contains(gap, "Live subscription inference is not qualified") }) {
+		t.Fatal("fixture-only subscription was advertised as qualified")
+	}
+}

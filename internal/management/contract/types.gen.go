@@ -657,6 +657,7 @@ func (e CatalogSampleSdk) Valid() bool {
 
 // Defines values for CodeAccountAdapter.
 const (
+	CodeAccountAdapterClaude        CodeAccountAdapter = "claude"
 	CodeAccountAdapterCodex         CodeAccountAdapter = "codex"
 	CodeAccountAdapterKimiCode      CodeAccountAdapter = "kimi_code"
 	CodeAccountAdapterLessThannil   CodeAccountAdapter = "<nil>"
@@ -669,6 +670,8 @@ const (
 // Valid indicates whether the value is a known member of the CodeAccountAdapter enum.
 func (e CodeAccountAdapter) Valid() bool {
 	switch e {
+	case CodeAccountAdapterClaude:
+		return true
 	case CodeAccountAdapterCodex:
 		return true
 	case CodeAccountAdapterKimiCode:
@@ -894,6 +897,7 @@ func (e CodeAttemptState) Valid() bool {
 
 // Defines values for CodeClientConfigurationAdapters.
 const (
+	CodeClientConfigurationAdaptersClaude        CodeClientConfigurationAdapters = "claude"
 	CodeClientConfigurationAdaptersCodex         CodeClientConfigurationAdapters = "codex"
 	CodeClientConfigurationAdaptersKimiCode      CodeClientConfigurationAdapters = "kimi_code"
 	CodeClientConfigurationAdaptersMinimaxPlan   CodeClientConfigurationAdapters = "minimax_plan"
@@ -905,6 +909,8 @@ const (
 // Valid indicates whether the value is a known member of the CodeClientConfigurationAdapters enum.
 func (e CodeClientConfigurationAdapters) Valid() bool {
 	switch e {
+	case CodeClientConfigurationAdaptersClaude:
+		return true
 	case CodeClientConfigurationAdaptersCodex:
 		return true
 	case CodeClientConfigurationAdaptersKimiCode:
@@ -1164,6 +1170,7 @@ func (e CodeResearchToolsServices) Valid() bool {
 
 // Defines values for CodeRouteAdapters.
 const (
+	CodeRouteAdaptersClaude        CodeRouteAdapters = "claude"
 	CodeRouteAdaptersCodex         CodeRouteAdapters = "codex"
 	CodeRouteAdaptersKimiCode      CodeRouteAdapters = "kimi_code"
 	CodeRouteAdaptersMinimaxPlan   CodeRouteAdapters = "minimax_plan"
@@ -1175,6 +1182,8 @@ const (
 // Valid indicates whether the value is a known member of the CodeRouteAdapters enum.
 func (e CodeRouteAdapters) Valid() bool {
 	switch e {
+	case CodeRouteAdaptersClaude:
+		return true
 	case CodeRouteAdaptersCodex:
 		return true
 	case CodeRouteAdaptersKimiCode:
@@ -7346,7 +7355,7 @@ type ClassifierPredicate struct {
 
 // CodeAccount defines model for CodeAccount.
 type CodeAccount struct {
-	// Adapter The subscription family of the account's provider profile: Codex, OpenCode Go, GLM Coding Plan, MiniMax M Plan, Kimi Code or Qwen Token Plan. Null for a profile no code-mode adapter serves. A pool may mix families; each request reaches an account whose family serves its path and model.
+	// Adapter The subscription family of the account's provider profile: Codex, Claude, OpenCode Go, GLM Coding Plan, MiniMax M Plan, Kimi Code or Qwen Token Plan. Null for a profile no code-mode adapter serves. A pool may mix families; each request reaches an account whose family serves its path and model.
 	Adapter      nullable.Nullable[CodeAccountAdapter] `json:"adapter"`
 	Allowance    nullable.Nullable[CodeAllowance]      `json:"allowance"`
 	CredentialId openapi_types.UUID                    `json:"credential_id"`
@@ -7377,7 +7386,7 @@ type CodeAccount struct {
 	UnavailableUntil nullable.Nullable[time.Time] `json:"unavailable_until,omitempty"`
 }
 
-// CodeAccountAdapter The subscription family of the account's provider profile: Codex, OpenCode Go, GLM Coding Plan, MiniMax M Plan, Kimi Code or Qwen Token Plan. Null for a profile no code-mode adapter serves. A pool may mix families; each request reaches an account whose family serves its path and model.
+// CodeAccountAdapter The subscription family of the account's provider profile: Codex, Claude, OpenCode Go, GLM Coding Plan, MiniMax M Plan, Kimi Code or Qwen Token Plan. Null for a profile no code-mode adapter serves. A pool may mix families; each request reaches an account whose family serves its path and model.
 type CodeAccountAdapter string
 
 // CodeAccountGrantState Grant authority is independent of serving health and allowance. A rejected refresh lapses the grant and requires enrollment again.

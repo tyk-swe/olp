@@ -28,6 +28,7 @@ import (
 	"github.com/tyk-swe/olp/internal/usage"
 
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/claudeauth"
 	"github.com/tyk-swe/olp/internal/codeadapter"
 	"github.com/tyk-swe/olp/internal/codeclient"
 	"github.com/tyk-swe/olp/internal/codemode"
@@ -196,6 +197,9 @@ func (a codeTestAuthorizer) AuthorizeCode(_ context.Context, _ routing.Configura
 		value = "Bearer " + value
 	}
 	headers := http.Header{endpoint.CredentialHeader: {value}}
+	if dispatch.Adapter == codemode.AdapterClaude {
+		headers.Set("Anthropic-Beta", claudeauth.OAuthBeta)
+	}
 	if endpoint.Observation == codeadapter.ObserveCodex {
 		headers.Set("Chatgpt-Account-Id", "upstream-account")
 	}
@@ -2266,5 +2270,48 @@ func TestCodePaidNativeErrorStreamRedactsCredential(t *testing.T) {
 	body, err := io.ReadAll(response.Body)
 	if err != nil || response.StatusCode != 200 || strings.Contains(string(body), secretA) || !strings.Contains(string(body), "[REDACTED]") {
 		t.Fatalf("native paid error frame was not scrubbed %d %s %v", response.StatusCode, body, err)
+	}
+}
+
+func TestClaudeSubscriptionPreservesNativeToolRoundTrip(t *testing.T) {
+	h, ledger, server := newCodeForwardHarness(t)
+	h.rt.release.Snapshot.CodeConnections = map[string]routing.Configuration{"revision:provider": {Kind: connectors.KindPlugin, AuthMode: connectors.AuthGrant, ProfileID: claudeauth.ProfileID, Endpoint: h.upstream.URL + "/a"}}
+	if err := h.rt.release.Snapshot.Compile(); err != nil {
+		t.Fatal(err)
+	}
+	first := `{"model":"native-model","system":"x-anthropic-billing-header: preserve","metadata":{"user_id":"native-user"},"messages":[{"role":"user","content":"Read main.go"}],"tools":[{"name":"read_file","input_schema":{"type":"object"}}],"max_tokens":64}`
+	second := `{"model":"native-model","system":"x-anthropic-billing-header: preserve","metadata":{"user_id":"native-user"},"messages":[{"role":"user","content":"Read main.go"},{"role":"assistant","content":[{"type":"tool_use","id":"read-1","name":"read_file","input":{"path":"main.go"}}]},{"role":"user","content":[{"type":"tool_result","tool_use_id":"read-1","content":"package main"}]}],"tools":[{"name":"read_file","input_schema":{"type":"object"}}],"max_tokens":64}`
+	for _, turn := range []struct{ request, response string }{
+		{first, `{"id":"msg-1","type":"message","role":"assistant","content":[{"type":"tool_use","id":"read-1","name":"read_file","input":{"path":"main.go"}}],"stop_reason":"tool_use","usage":{"input_tokens":10,"output_tokens":4}}`},
+		{second, `{"id":"msg-2","type":"message","role":"assistant","content":[{"type":"text","text":"The file declares package main"}],"stop_reason":"end_turn","usage":{"input_tokens":20,"output_tokens":6}}`},
+	} {
+		h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
+			body, err := io.ReadAll(r.Body)
+			if err != nil || string(body) != turn.request {
+				t.Error("native prompt, identity or tool history was rewritten")
+			}
+			if r.URL.Path != "/a/v1/messages" || r.Header.Get("Anthropic-Version") != "fixture-version" || !slices.Contains(strings.Split(r.Header.Get("Anthropic-Beta"), ","), "fixture-beta") || !slices.Contains(strings.Split(r.Header.Get("Anthropic-Beta"), ","), claudeauth.OAuthBeta) {
+				t.Error("native Messages capability headers or endpoint changed")
+			}
+			w.Header().Set("Content-Type", "application/json")
+			io.WriteString(w, turn.response)
+		})
+		request, err := http.NewRequestWithContext(t.Context(), "POST", server.URL+"/code/coding/v1/messages", strings.NewReader(turn.request))
+		if err != nil {
+			t.Fatal(err)
+		}
+		request.Header = http.Header{"Authorization": {"Bearer " + fullKey}, "Content-Type": {"application/json"}, "X-Claude-Code-Session-Id": {"claude-tool-session"}, "Anthropic-Version": {"fixture-version"}, "Anthropic-Beta": {"fixture-beta"}}
+		response, err := server.Client().Do(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, err := io.ReadAll(response.Body)
+		response.Body.Close()
+		if err != nil || response.StatusCode != 200 || string(body) != turn.response {
+			t.Fatalf("native tool turn changed, status %d error %v", response.StatusCode, err)
+		}
+		if usage := ledger.wait(t); usage.Total == nil || *usage.Total == 0 {
+			t.Fatal("native tool turn usage was lost")
+		}
 	}
 }
