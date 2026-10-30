@@ -162,11 +162,13 @@ func TestCodeRecoveryExplainsNonportableEstablishedState(t *testing.T) {
 	route.InitialRecoveryAttempts = 1
 	h.rt.release.Snapshot.CodeRoutes["coding"] = route
 	h.mock.set("a", func(w http.ResponseWriter, _ *http.Request) {
-		io.WriteString(w, `{"id":"owned-response","usage":{"total_tokens":1}}`)
+		io.WriteString(w, `{"id":"owned-response","status":"completed","usage":{"input_tokens":1,"output_tokens":0,"total_tokens":1}}`)
 	})
 	initial := codeDo(t, server, []byte(`{"model":"native-model","input":"full context"}`), nil)
 	io.Copy(io.Discard, initial.Body)
-	ledger.wait(t)
+	if usage := ledger.wait(t); usage.Total == nil || *usage.Total != 1 {
+		t.Fatal("initial turn did not establish completed work")
+	}
 	h.mock.set("a", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusTooManyRequests)
 		io.WriteString(w, `{"error":{"type":"usage_limit_reached"}}`)
