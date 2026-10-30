@@ -10318,19 +10318,19 @@ type FocusDatasetListResponse struct {
 
 // GatewayExecutionCapability Caller-specific gateway tool execution capability. This describes configured authority and certification, not a live quota reservation or guarantee of a successful run.
 type GatewayExecutionCapability struct {
-	// CertifiedModes Modes with at least one enabled target certified for tool calls on the request surface.
+	// CertifiedModes Modes with an enabled non-shadow serving target certified for generation tool calls on the request surface.
 	CertifiedModes []GatewayExecutionCapabilityCertifiedModes `json:"certified_modes"`
 
-	// DefaultToolsetsAllowed Whether all default route toolsets can be resolved together for the caller.
+	// DefaultToolsetsAllowed Whether all default toolsets on the named route can be resolved together for the caller.
 	DefaultToolsetsAllowed bool `json:"default_toolsets_allowed"`
 
-	// Enabled Whether an enabled route target has tool-call certification for a mode on this surface.
+	// Enabled Whether workflow accounting is available and an enabled non-shadow target is certified for generation tool calls on this surface.
 	Enabled bool `json:"enabled"`
 
-	// Limits Effective configured route, caller and request limits, including defaults.
+	// Limits Effective named-route, caller and request limits, including defaults. Delegated legs keep the named route workflow policy.
 	Limits WorkflowRunLimits `json:"limits"`
 
-	// Tools Tools from published route toolsets the caller may resolve, including their classification and pinned price.
+	// Tools Tools from published toolsets on the named route that the caller may resolve, including their classification and pinned price.
 	Tools []GatewayExecutionTool `json:"tools"`
 }
 

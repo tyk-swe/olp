@@ -608,13 +608,13 @@ type DelegationRequestScopes string
 
 // GatewayExecutionCapability Caller-specific gateway tool execution capability. Omitted when the route does not offer gateway execution to this caller. This describes configured rights and certification, not a live quota reservation or a guarantee of a successful run.
 type GatewayExecutionCapability struct {
-	// CertifiedModes Modes with at least one enabled target certified for tool calls on the discovery surface. Target selection and admission are still evaluated for each request.
+	// CertifiedModes Modes with an enabled non-shadow target certified for generation tool calls on the discovery surface. Target selection and admission are still evaluated for each request.
 	CertifiedModes []GatewayExecutionCapabilityCertifiedModes `json:"certified_modes"`
 
 	// DefaultToolsetsAllowed Whether all default route toolsets can be resolved together for the caller. A request can select a permitted subset with olp_toolsets.
 	DefaultToolsetsAllowed bool `json:"default_toolsets_allowed"`
 
-	// Enabled Whether at least one enabled route target has tool-call certification for a mode on this model discovery surface.
+	// Enabled Whether workflow accounting is available and an enabled non-shadow target is certified for generation tool calls on this discovery surface.
 	Enabled bool `json:"enabled"`
 
 	// Limits Effective configured route and caller limits, including defaults. Request limits can only narrow these bounds.

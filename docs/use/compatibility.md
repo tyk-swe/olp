@@ -93,8 +93,9 @@ for the bounds, approval and accounting behavior.
 
 Model list and detail responses on the OpenAI, Anthropic and Gemini surfaces
 include `capabilities.gateway_execution` when the route and calling key permit
-inspection. It reports surface-specific certified modes, the effective route
-and key limits, whether all default toolsets are usable together, and the
+inspection. It reports surface-specific certified modes for non-shadow targets,
+workflow accounting availability, the effective route and key limits, whether
+all default toolsets are usable together, and the
 caller's available tools with pinned revisions, classifications and unit prices.
 A null price is unpriced; zero is explicitly free. The capability describes
 current configuration and does not reserve a run or guarantee admission.
@@ -103,8 +104,9 @@ To inspect a particular request, select the same API key in the published route
 or draft route simulation and supply the native request, including any narrowed
 toolsets and bounds. The simulation capability reports the effective request
 bounds and caller-authorized tools and prices; target decisions report workflow
-refusals alongside normal routing decisions. Simulation does not dispatch a
-model or tool, reserve budget, or guarantee live admission.
+refusals alongside normal routing decisions. Delegated route legs use the named
+route's toolsets and bounds and their own serving targets. Simulation does not
+dispatch a model or tool, reserve budget, or guarantee live admission.
 
 The local gateway fixtures exercise unary and streaming workflows for Chat
 Completions, Responses, Anthropic and Gemini, including bounds, target
@@ -114,7 +116,14 @@ recovery. The caller-filtered discovery fixture is
 [`internal/gateway/tool_loop_test.go`](../../internal/gateway/tool_loop_test.go).
 `TestGatewayToolWorkflowSettlesOneRun` in
 [`tests/integration/gateway_test.go`](../../tests/integration/gateway_test.go)
-exercises a run and its durable settlement with local services.
+checks same-key simulation authorization and request bounds for draft and
+published routes, a run and its durable settlement, and rollback with local
+services.
+To stop new gateway execution, republish the transformed route without
+`tool_execution`, `toolsets`, `run_limits` and `responses_mcp_items`. The
+fixture verifies that pending approvals cannot resume, later requests do not
+dispatch gateway tools, caller-managed tool calls still return to the client,
+and authorized project viewers can read the retained run, steps and settlement.
 
 Responses MCP output additionally requires the route's
 `responses_mcp_items` declaration and the certified built-in `openai-responses`

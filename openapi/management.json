@@ -30731,11 +30731,11 @@
         "properties": {
           "enabled": {
             "type": "boolean",
-            "description": "Whether an enabled route target has tool-call certification for a mode on this surface."
+            "description": "Whether workflow accounting is available and an enabled non-shadow target is certified for generation tool calls on this surface."
           },
           "default_toolsets_allowed": {
             "type": "boolean",
-            "description": "Whether all default route toolsets can be resolved together for the caller."
+            "description": "Whether all default toolsets on the named route can be resolved together for the caller."
           },
           "limits": {
             "allOf": [
@@ -30743,7 +30743,7 @@
                 "$ref": "#/components/schemas/WorkflowRunLimits"
               }
             ],
-            "description": "Effective configured route, caller and request limits, including defaults."
+            "description": "Effective named-route, caller and request limits, including defaults. Delegated legs keep the named route workflow policy."
           },
           "certified_modes": {
             "type": "array",
@@ -30754,14 +30754,14 @@
                 "streaming"
               ]
             },
-            "description": "Modes with at least one enabled target certified for tool calls on the request surface."
+            "description": "Modes with an enabled non-shadow serving target certified for generation tool calls on the request surface."
           },
           "tools": {
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/GatewayExecutionTool"
             },
-            "description": "Tools from published route toolsets the caller may resolve, including their classification and pinned price."
+            "description": "Tools from published toolsets on the named route that the caller may resolve, including their classification and pinned price."
           }
         },
         "required": [

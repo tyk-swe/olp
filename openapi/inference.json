@@ -1639,7 +1639,7 @@
           "properties": {
             "enabled": {
               "type": "boolean",
-              "description": "Whether at least one enabled route target has tool-call certification for a mode on this model discovery surface."
+              "description": "Whether workflow accounting is available and an enabled non-shadow target is certified for generation tool calls on this discovery surface."
             },
             "default_toolsets_allowed": {
               "type": "boolean",
@@ -1662,7 +1662,7 @@
                   "streaming"
                 ]
               },
-              "description": "Modes with at least one enabled target certified for tool calls on the discovery surface. Target selection and admission are still evaluated for each request."
+              "description": "Modes with an enabled non-shadow target certified for generation tool calls on the discovery surface. Target selection and admission are still evaluated for each request."
             },
             "tools": {
               "type": "array",

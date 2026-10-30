@@ -372,11 +372,13 @@ observability exports; RM8.6 qualifies the combined result.
 Retrieval-backed tools additionally require certified [RM5.2 or RM5.3 retrieval](api-surface.md#rm5-retained-apis-and-retrieval)
 for their selected backend, not completion of every retrieval adapter.
 
-- [ ] **RM8.1 — Execute bounded tool loops** (gateway/protocol): implement the
-  three native dialects plus Responses projections under the published
-  transformed-route policy. Verify iteration/time/concurrency/cost bounds,
-  per-step attempts, approvals, digest-bound continuation and revocation.
-  Test cancellation/restart/unknown effects and prevent cache replay of runs.
+- [x] **RM8.1 — Execute bounded tool loops** (gateway/protocol): local fixtures
+  cover the three native dialects and Responses projections under the published
+  transformed-route policy, iteration/time/concurrency/cost bounds, per-step
+  attempts, approvals, digest-bound continuation, revocation, cancellation,
+  restart, unknown effects and prevention of cache replay. See the
+  [compatibility evidence](../../use/compatibility.md#gateway-executed-tool-workflows)
+  for discovery, simulation, rollback and the separate live qualification.
 - [x] **RM8.2 — Add prompt publication and rendering** (prompt/console):
   immutable revisions, labels and bounded string substitution use the same
   server rendering path for inference, playground and imported configuration.

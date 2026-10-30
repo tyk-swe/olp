@@ -239,12 +239,13 @@ A2A can begin independently. A2A OAuth uses RM7.2, tool callbacks use RM7.1, and
 delegated tasks use RM8.3. Retrieval-backed tools
 also use their selected RM5 backend.
 
-- [ ] **RM8.1 — Bounded tool loops:** implement OpenAI, Anthropic and Gemini
-  dialects plus Responses projections, iteration/time/concurrency/cost bounds,
-  per-step accounting, approvals, digest-bound continuation, revocation and
-  durable handling of cancellation, restart and unknown effects. Include
-  `typesafe` ordered tool-exchange pruning and compression recovery/tool
-  reinjection from the guardrail inventory.
+- [x] **RM8.1 — Bounded tool loops:** OpenAI, Anthropic and Gemini dialects and
+  Responses projections use bounded, accounted runs with approvals,
+  digest-bound continuation and revocation. Local fixtures cover cancellation,
+  restart, unknown effects, `typesafe` tool-exchange pruning, compression
+  recovery and tool reinjection. [Compatibility evidence](use/compatibility.md#gateway-executed-tool-workflows)
+  includes discovery, simulation and rollback; live provider qualification is
+  separate.
 - [x] **RM8.2 — Prompt publication and rendering:** immutable revisions, labels
   and bounded string substitution share a rendering path across inference,
   playground and imported configuration. Local fixtures cover fixed revisions,

@@ -385,13 +385,13 @@ export interface components {
         };
         /** @description Caller-specific gateway tool execution capability. Omitted when the route does not offer gateway execution to this caller. This describes configured rights and certification, not a live quota reservation or a guarantee of a successful run. */
         GatewayExecutionCapability: {
-            /** @description Whether at least one enabled route target has tool-call certification for a mode on this model discovery surface. */
+            /** @description Whether workflow accounting is available and an enabled non-shadow target is certified for generation tool calls on this discovery surface. */
             enabled: boolean;
             /** @description Whether all default route toolsets can be resolved together for the caller. A request can select a permitted subset with olp_toolsets. */
             default_toolsets_allowed: boolean;
             /** @description Effective configured route and caller limits, including defaults. Request limits can only narrow these bounds. */
             limits: components["schemas"]["WorkflowRunLimits"];
-            /** @description Modes with at least one enabled target certified for tool calls on the discovery surface. Target selection and admission are still evaluated for each request. */
+            /** @description Modes with an enabled non-shadow target certified for generation tool calls on the discovery surface. Target selection and admission are still evaluated for each request. */
             certified_modes: ("unary" | "streaming")[];
             /** @description Tools from published route toolsets that the caller may resolve. Toolsets the caller cannot resolve are omitted. */
             tools: components["schemas"]["GatewayExecutionTool"][];
