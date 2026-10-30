@@ -14,6 +14,9 @@ import (
 
 	"github.com/anthropics/anthropic-sdk-go"
 	anthropicoption "github.com/anthropics/anthropic-sdk-go/option"
+	"github.com/openai/openai-go/v3"
+	openaioption "github.com/openai/openai-go/v3/option"
+	"github.com/openai/openai-go/v3/shared"
 )
 
 func TestCodeMessagesToolExchange(t *testing.T) {
@@ -106,4 +109,84 @@ func TestCodeMessagesRequestFailureHidesPayload(t *testing.T) {
 	if diagnostic := codeMessagesRequestFailure(fmt.Errorf("controlled-private-response %w", context.DeadlineExceeded)); diagnostic != "timeout" {
 		t.Fatal("timeout diagnostic lost its category or retained error content")
 	}
+}
+
+func TestCodeChatToolExchange(t *testing.T) {
+	base := os.Getenv("OLP_CODE_CHAT_BASE_URL")
+	parsed, err := url.Parse(base)
+	if err != nil || parsed.Host == "" {
+		t.Fatal("OLP_CODE_CHAT_BASE_URL must name the controlled code route")
+	}
+	h := harness{origin: parsed.Scheme + "://" + parsed.Host, openAIBase: base, apiKey: os.Getenv("OLP_CODE_CHAT_API_KEY")}
+	model := os.Getenv("OLP_CODE_CHAT_MODEL")
+	if h.apiKey == "" || model == "" {
+		t.Fatal("code route API key and model are required")
+	}
+	for _, stream := range []bool{false, true} {
+		for _, source := range []string{"fragments", "complete"} {
+			t.Run(fmt.Sprintf("%t/%s", stream, source), func(t *testing.T) {
+				session := fmt.Sprintf("sdk-chat-%t-%s", stream, source)
+				client := h.openAI(openaioption.WithHeader("X-Opencode-Session-Id", session))
+				messages := []openai.ChatCompletionMessageParamUnion{openai.SystemMessage("Preserve my instructions"), openai.UserMessage("Read main.go")}
+				request := func(client *openai.Client, history []openai.ChatCompletionMessageParamUnion, stage string) openai.ChatCompletion {
+					t.Helper()
+					params := openai.ChatCompletionNewParams{Model: model, Messages: history, ReasoningEffort: shared.ReasoningEffortHigh, MaxCompletionTokens: openai.Int(64), Tools: []openai.ChatCompletionToolUnionParam{openai.ChatCompletionFunctionTool(shared.FunctionDefinitionParam{Name: "read_file", Parameters: shared.FunctionParameters{"type": "object", "properties": map[string]any{"path": map[string]string{"type": "string"}}, "required": []string{"path"}}})}}
+					if !stream {
+						completion, err := client.Chat.Completions.New(timeout(t), params)
+						if err != nil {
+							t.Fatalf("SDK diagnostic %s %s", stage, codeChatRequestFailure(err))
+						}
+						return *completion
+					}
+					params.StreamOptions = openai.ChatCompletionStreamOptionsParam{IncludeUsage: openai.Bool(true)}
+					events := client.Chat.Completions.NewStreaming(timeout(t), params)
+					defer events.Close()
+					completion := openai.ChatCompletionAccumulator{}
+					for events.Next() {
+						if !completion.AddChunk(events.Current()) {
+							t.Fatalf("SDK diagnostic %s invalid streamed message", stage)
+						}
+					}
+					if err := events.Err(); err != nil {
+						t.Fatalf("SDK diagnostic %s %s", stage, codeChatRequestFailure(err))
+					}
+					return completion.ChatCompletion
+				}
+				first := request(client, messages, "tool")
+				if len(first.Choices) != 1 || first.Choices[0].FinishReason != "tool_calls" || len(first.Choices[0].Message.ToolCalls) != 1 {
+					t.Fatal("SDK diagnostic tool invalid content")
+				}
+				call := first.Choices[0].Message.ToolCalls[0]
+				var arguments struct{ Path string }
+				if err := json.Unmarshal([]byte(call.Function.Arguments), &arguments); err != nil || call.ID != "call-read" || call.Function.Name != "read_file" || arguments.Path != "main.go" {
+					t.Fatal("SDK diagnostic tool invalid arguments")
+				}
+				history := slices.Concat(messages, []openai.ChatCompletionMessageParamUnion{{OfAssistant: &openai.ChatCompletionAssistantMessageParam{ToolCalls: []openai.ChatCompletionMessageToolCallUnionParam{{OfFunction: &openai.ChatCompletionMessageFunctionToolCallParam{ID: call.ID, Function: openai.ChatCompletionMessageFunctionToolCallFunctionParam{Name: call.Function.Name, Arguments: call.Function.Arguments}}}}}}, openai.ToolMessage("package main", call.ID)})
+				child := h.openAI(openaioption.WithHeader("X-Opencode-Session-Id", session+"-reader"), openaioption.WithHeader("X-Opencode-Parent-Session-Id", session))
+				last := request(child, history, "result")
+				if len(last.Choices) != 1 || last.Choices[0].FinishReason != "stop" || last.Choices[0].Message.Content != "File read" || last.Usage.PromptTokens != 13 || last.Usage.CompletionTokens != 2 {
+					t.Fatal("SDK diagnostic result invalid content")
+				}
+				resumed := h.openAI(openaioption.WithHeader("X-Opencode-Session-Id", session+"-reader"), openaioption.WithHeader("X-Opencode-Parent-Session-Id", session))
+				compacted := request(resumed, []openai.ChatCompletionMessageParamUnion{openai.UserMessage("CONTROLLED_COMPACT_SUMMARY")}, "resume")
+				if len(compacted.Choices) != 1 || compacted.Choices[0].FinishReason != "stop" || compacted.Choices[0].Message.Content != "File read" {
+					t.Fatal("SDK diagnostic resume invalid content")
+				}
+			})
+		}
+	}
+}
+
+func codeChatRequestFailure(err error) string {
+	var api *openai.Error
+	if errors.As(err, &api) && api.StatusCode >= 100 && api.StatusCode <= 599 {
+		return fmt.Sprintf("HTTP %d", api.StatusCode)
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return "timeout"
+	}
+	if errors.Is(err, context.Canceled) {
+		return "canceled"
+	}
+	return "request failed"
 }

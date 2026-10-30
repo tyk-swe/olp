@@ -467,7 +467,7 @@ func RouteEndpoint(route codemode.Route, adapter Vendor, path string) (Endpoint,
 	if endpoint, ok := adapter.Endpoint(path); ok {
 		return endpoint, endpoint.Target.Enabled(route)
 	}
-	if route.MessagesToCodex && path == "v1/messages" && adapter.Adapter == codemode.AdapterCodex {
+	if adapter.Adapter == codemode.AdapterCodex && (route.MessagesToCodex && path == "v1/messages" || route.ChatToCodex && path == "v1/chat/completions") {
 		return adapter.Endpoint("responses")
 	}
 	return Endpoint{}, false
@@ -477,24 +477,47 @@ func RouteClientProtocol(route codemode.Route, adapter Vendor, client, model str
 	if protocol, ok := adapter.Protocol(client, model); ok {
 		return protocol, slices.ContainsFunc(adapter.endpoints, func(endpoint Endpoint) bool { return endpoint.Protocol == protocol && endpoint.Target.Enabled(route) })
 	}
-	if !route.MessagesToCodex || adapter.Adapter != codemode.AdapterCodex || client != ClientClaudeCode {
+	if adapter.Adapter != codemode.AdapterCodex {
 		return "", false
 	}
-	endpoint, ok := RouteEndpoint(route, adapter, "v1/messages")
-	return codemode.ProtocolMessages, ok && adapter.ServesModel(endpoint.Protocol, model)
+	if client == ClientClaudeCode && route.MessagesToCodex {
+		endpoint, ok := RouteEndpoint(route, adapter, "v1/messages")
+		return codemode.ProtocolMessages, ok && adapter.ServesModel(endpoint.Protocol, model)
+	}
+	if client == ClientOpenCode && route.ChatToCodex {
+		endpoint, ok := RouteEndpoint(route, adapter, "v1/chat/completions")
+		return codemode.ProtocolChat, ok && adapter.ServesModel(endpoint.Protocol, model)
+	}
+	return "", false
+}
+
+func RouteClient(route codemode.Route, adapter Vendor, client string) (Client, bool) {
+	if native, ok := adapter.Client(client); ok {
+		return native, true
+	}
+	if route.ChatToCodex && adapter.Adapter == codemode.AdapterCodex && client == ClientOpenCode {
+		return Client{ID: ClientOpenCode, Provider: "olp-codex", URLSuffix: "/v1", Protocol: codemode.ProtocolChat}, true
+	}
+	return Client{}, false
 }
 
 func RouteClients(route codemode.Route, adapter Vendor) []string {
-	native := func() []string {
-		if slices.ContainsFunc(adapter.endpoints, func(endpoint Endpoint) bool { return endpoint.Target.Enabled(route) }) {
-			return adapter.Clients()
+	return slices.Collect(func(yield func(string) bool) {
+		for _, client := range adapter.Clients() {
+			if !yield(client) {
+				return
+			}
 		}
-		return nil
-	}()
-	if !route.MessagesToCodex || adapter.Adapter != codemode.AdapterCodex {
-		return native
-	}
-	return slices.Concat(native, []string{ClientClaudeCode})
+		if adapter.Adapter != codemode.AdapterCodex {
+			return
+		}
+		if route.MessagesToCodex && !yield(ClientClaudeCode) {
+			return
+		}
+		if route.ChatToCodex {
+			yield(ClientOpenCode)
+		}
+	})
 }
 
 func antigravityModelProtocol(model string) codemode.Protocol {

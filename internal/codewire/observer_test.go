@@ -178,3 +178,23 @@ func TestGenericMessagesRejectsOpaqueState(t *testing.T) {
 		}
 	}
 }
+
+func TestChatRecoveryRequiresPortableInitialState(t *testing.T) {
+	for _, test := range []struct {
+		body     string
+		portable bool
+	}{
+		{`{"model":"native","messages":[{"role":"system","content":"Keep this"},{"role":"user","content":"Hello"}],"reasoning_effort":"high","tools":[{"type":"function","function":{"name":"read_file","parameters":{"type":"object"}}}],"tool_choice":{"type":"function","function":{"name":"read_file"}},"max_completion_tokens":64}`, true},
+		{`{"model":"native","messages":[{"role":"assistant","content":"Earlier reply"},{"role":"user","content":"Continue"}]}`, false},
+		{`{"model":"native","messages":[{"role":"user","content":"Hello"}],"previous_response_id":"owned"}`, false},
+		{`{"model":"native","messages":[{"role":"user","content":"Hello"}],"tools":[{"type":"function","function":{"name":"read_file","signed_state":"required"}}]}`, false},
+	} {
+		request, err := ClassifyChat([]byte(test.body), http.Header{"X-Opencode-Session-Id": {"portable-chat"}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := PortableInitialRequest([]byte(test.body), nil, request); got != test.portable {
+			t.Fatalf("portable %t, want %t, body %s", got, test.portable, test.body)
+		}
+	}
+}
