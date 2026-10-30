@@ -6450,6 +6450,10 @@
               "type": "boolean",
               "default": false,
               "description": "Explicitly permit direct metered API targets. This does not enable paid fallback."
+            },
+            "chat_to_antigravity": {
+              "type": "boolean",
+              "description": "Explicitly allow Chat Completions text and function tools through the internal Antigravity Gemini target over HTTP or SSE. Published revisions pin this policy. Native forwarding remains the default. Client identity and prompts are preserved. Signed thought state, reasoning controls, media and server tools are unsupported. Returned signature state is refused before actionable output rather than discarded. Controlled fixtures do not qualify any current model or live subscription workflow."
             }
           },
           "required": [
@@ -32305,6 +32309,10 @@
               "type": "boolean",
               "default": false,
               "description": "Explicitly permit direct metered API targets. This does not enable paid fallback."
+            },
+            "chat_to_antigravity": {
+              "type": "boolean",
+              "description": "Explicitly allow Chat Completions text and function tools through the internal Antigravity Gemini target over HTTP or SSE. Published revisions pin this policy. Native forwarding remains the default. Client identity and prompts are preserved. Signed thought state, reasoning controls, media and server tools are unsupported. Returned signature state is refused before actionable output rather than discarded. Controlled fixtures do not qualify any current model or live subscription workflow."
             }
           },
           "required": [

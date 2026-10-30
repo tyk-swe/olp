@@ -132,6 +132,11 @@ func Generate(route codemode.Route, offers Offers, in Request) (codemode.ClientC
 	}()
 	file, nativeInstructions := platformInstructions(client, platform)
 	instructions := nativeInstructions + func() string {
+		if route.ChatToAntigravity && slices.Contains(adapters, codemode.AdapterAntigravity) {
+			return " This published route enables the controlled Antigravity Gemini target for Chat text and function tools over HTTP/SSE. Signed thought state, reasoning controls, media and server tools are refused. Client identity and prompt compatibility remain disabled. Current-model tool acceptance and live subscription qualification remain pending."
+		}
+		return ""
+	}() + func() string {
 		if client == codeadapter.ClientClaudeCode && route.MessagesToCodex && slices.Contains(adapters, codemode.AdapterCodex) {
 			return " This published route enables Messages text and tool use through Codex accounts. Explicit low, medium and high reasoning effort is supported. Signed thinking, numeric reasoning budgets, beta features and other unsupported required semantics are refused. Prompt text is preserved, and identity and prompt compatibility remain disabled."
 		}

@@ -34,7 +34,7 @@ func qualificationGaps(adapters []codemode.Adapter, client string) []string {
 			"Each generation is limited to ten minutes; raising API_TIMEOUT_MS cannot extend it.")
 	case codeadapter.ClientOpenCode:
 		gaps = append(gaps,
-			"Chat Completions usage settles only from the final usage chunk; a stream without it leaves consumption uncertain.")
+			"Native Chat Completions usage settles only from the final usage chunk; a stream without it leaves consumption uncertain.")
 	}
 	for _, adapter := range adapters {
 		vendor, _ := codeadapter.Lookup(adapter)

@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/tyk-swe/olp/internal/codeadapter"
 	"github.com/tyk-swe/olp/internal/codemode"
 	"github.com/tyk-swe/olp/internal/codewire"
 	"github.com/tyk-swe/olp/internal/oif"
@@ -17,10 +18,12 @@ import (
 )
 
 type codePayload struct {
-	body       []byte
-	query      string
-	stream     bool
-	translated bool
+	body         []byte
+	query        string
+	stream       bool
+	translated   bool
+	includeUsage bool
+	target       codeadapter.Target
 }
 
 func codeTranslateMessages(body []byte, r *http.Request, model string) (codePayload, error) {
