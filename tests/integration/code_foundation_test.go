@@ -28,7 +28,7 @@ type codeFixture struct {
 	h                                                       *accessHarness
 	owner                                                   *browser
 	project, user, key, provider, credential, account, pool string
-	accountRecord, routeRecord                              map[string]any
+	accountRecord, routeRecord, poolRecord                  map[string]any
 	route                                                   codemode.Route
 	store                                                   *resources.CodeStore
 }
@@ -56,6 +56,7 @@ func newCodeFixtureWithProfile(t *testing.T, profile string, bodyLimit ...int64)
 	f.accountRecord = h.want(owner, "POST", "/api/v1/code/accounts", map[string]any{"project_id": f.project, "provider_id": f.provider, "credential_id": f.credential, "name": "Fixture subscription", "enabled": true, "models": []string{"native-model"}}, idem("account"), 201)
 	f.account = f.accountRecord["id"].(string)
 	pool := h.want(owner, "POST", "/api/v1/code/pools", map[string]any{"project_id": f.project, "name": "Shared coding", "kind": "shared", "owner_user_id": nil, "account_ids": []string{f.account}, "api_key_ids": []string{f.key}}, idem("pool"), 201)
+	f.poolRecord = pool
 	f.pool = pool["id"].(string)
 	draft := h.want(owner, "POST", "/api/v1/code/routes", map[string]any{"project_id": f.project, "slug": "coding", "max_body_bytes": maxBody, "pool_id": f.pool, "models": []string{"native-model"}, "enabled": true}, idem("route"), 201)
 	headers := etagHeader(draft)
@@ -431,8 +432,7 @@ func TestCodeFoundationInitialRecoverySettlesBeforeReplacementReservation(t *tes
 	secondCredential := access.NewID()
 	f.addCredential(t, secondCredential, "replacement-principal", 2)
 	secondAccount := f.h.want(f.owner, "POST", "/api/v1/code/accounts", map[string]any{"project_id": f.project, "provider_id": f.provider, "credential_id": secondCredential, "name": "Replacement fixture", "enabled": true, "models": route.Models}, idem("replacement-account"), 201)
-	pool := f.h.want(f.owner, "GET", "/api/v1/code/pools/"+f.pool, nil, nil, 200)
-	f.h.want(f.owner, "PUT", "/api/v1/code/pools/"+f.pool, map[string]any{"project_id": f.project, "name": "Recovery pool", "kind": "shared", "account_ids": []string{f.account, secondAccount["id"].(string)}, "api_key_ids": []string{f.key}}, etagHeader(pool), 200)
+	f.h.want(f.owner, "PUT", "/api/v1/code/pools/"+f.pool, map[string]any{"project_id": f.project, "name": "Recovery pool", "kind": "shared", "account_ids": []string{f.account, secondAccount["id"].(string)}, "api_key_ids": []string{f.key}}, etagHeader(f.poolRecord), 200)
 	in := resources.CodeAdmission{Route: route, APIKeyID: f.key, Providers: []string{f.provider}, InitialRecovery: true,
 		Operation: codemode.Operation{Name: "responses", Model: "native-model", Identity: codemode.Identity{Conversation: "reserved-recovery"}}, Bound: &codemode.TokenBound{Tokens: 10, Evidence: "controlled-test-bound"}}
 	first, err := f.store.Admit(t.Context(), in)
