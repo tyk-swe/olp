@@ -57,6 +57,7 @@ type codeRouteInput struct {
 	Enabled                 bool                           `json:"enabled"`
 	PaidParticipation       bool                           `json:"paid_participation"`
 	PaidTargets             map[string]codemode.PaidTarget `json:"paid_targets"`
+	PaidFallbackTargets     map[string]codemode.PaidTarget `json:"paid_fallback_targets"`
 }
 
 func (s *Server) writeCodeRoute(r *http.Request, _ access.Principal) (access.Reply, error) {
@@ -90,14 +91,14 @@ func (s *Server) writeCodeRoute(r *http.Request, _ access.Principal) (access.Rep
 	if err := (codemode.Route{Models: in.Models, Aliases: in.Aliases, ModelRewriting: in.ModelRewriting, ModelPools: in.ModelPools}).ValidateModelPools(); err != nil {
 		return access.Reply{}, access.Invalid("model_pools", err.Error())
 	}
-	if err := (codemode.Route{Models: in.Models, PaidParticipation: in.PaidParticipation, PaidTargets: in.PaidTargets}).ValidatePaidTargets(); err != nil {
+	if err := (codemode.Route{Models: in.Models, PaidParticipation: in.PaidParticipation, PaidTargets: in.PaidTargets, PaidFallbackTargets: in.PaidFallbackTargets, InitialRecoveryAttempts: in.InitialRecoveryAttempts}).ValidatePaidTargets(); err != nil {
 		return access.Reply{}, access.Invalid("paid_targets", err.Error())
 	}
 	if err := in.Tools.Validate(); err != nil {
 		return access.Reply{}, access.Invalid("tools", err.Error())
 	}
 	return s.Access.CodeWrite(r, "code_routes", "code_route", in.ProjectID, in, func(tx pgx.Tx, p access.Principal, id, etag string) (any, error) {
-		out := codemode.Route{ChatToAntigravity: in.ChatToAntigravity, PaidParticipation: in.PaidParticipation, PaidTargets: in.PaidTargets, ModelPools: in.ModelPools, InitialRecoveryAttempts: in.InitialRecoveryAttempts, Aliases: in.Aliases, ModelRewriting: in.ModelRewriting, MessagesToCodex: in.MessagesToCodex, Tools: in.Tools, MaxBodyBytes: in.MaxBodyBytes, ID: id, ProjectID: in.ProjectID, Slug: in.Slug, PoolID: in.PoolID, Models: in.Models, Enabled: in.Enabled, ETag: etag}
+		out := codemode.Route{ChatToAntigravity: in.ChatToAntigravity, PaidParticipation: in.PaidParticipation, PaidTargets: in.PaidTargets, PaidFallbackTargets: in.PaidFallbackTargets, ModelPools: in.ModelPools, InitialRecoveryAttempts: in.InitialRecoveryAttempts, Aliases: in.Aliases, ModelRewriting: in.ModelRewriting, MessagesToCodex: in.MessagesToCodex, Tools: in.Tools, MaxBodyBytes: in.MaxBodyBytes, ID: id, ProjectID: in.ProjectID, Slug: in.Slug, PoolID: in.PoolID, Models: in.Models, Enabled: in.Enabled, ETag: etag}
 		adapters := []codemode.Adapter{}
 		var matches bool
 		if err := tx.QueryRow(r.Context(), `SELECT EXISTS(SELECT 1 FROM olp.code_pools WHERE id=$1 AND project_id=$2)`, in.PoolID, in.ProjectID).Scan(&matches); err != nil {
@@ -189,7 +190,7 @@ func (s *Server) publishCodeRoute(r *http.Request, _ access.Principal) (access.R
 	}
 	if route.Enabled {
 		for _, model := range route.Models {
-			if _, paid := route.PaidTargets[model]; paid {
+			if _, paid := route.AllPaidTargets()[model]; paid {
 				continue
 			}
 			var available bool
@@ -304,11 +305,11 @@ func codePublication(ctx context.Context, tx pgx.Tx, poolID string) ([]byte, []c
 }
 
 func codePaidPublication(ctx context.Context, tx pgx.Tx, route codemode.Route) ([]byte, error) {
-	if len(route.PaidTargets) == 0 {
+	if len(route.PaidTargets)+len(route.PaidFallbackTargets) == 0 {
 		return json.Marshal(map[string]routing.Provider{})
 	}
 	ids := slices.Collect(func(yield func(string) bool) {
-		for _, target := range route.PaidTargets {
+		for _, target := range route.AllPaidTargets() {
 			if !yield(target.ProviderID) {
 				return
 			}
@@ -335,7 +336,7 @@ func codePaidPublication(ctx context.Context, tx pgx.Tx, route codemode.Route) (
 			}
 		}
 	})
-	for model, target := range route.PaidTargets {
+	for model, target := range route.AllPaidTargets() {
 		provider, exists := published[target.ProviderID]
 		if !exists {
 			return nil, access.Invalid("paid_targets", "Choose a published metered provider in this project.")

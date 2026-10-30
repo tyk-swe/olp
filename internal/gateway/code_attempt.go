@@ -56,10 +56,21 @@ func (s *Server) prepareCode(r *http.Request, release *runtime.Release, route co
 		return nil, err
 	}
 	if _, paid := route.PaidTargets[operation.Model]; paid && recovery == nil {
-		return s.preparePaidCode(r, release, route, observation, operation, ingress, transport, authority, body)
+		return s.preparePaidCode(r, release, route, observation, operation, ingress, transport, authority, body, nil, false)
+	}
+	if recovery == nil && len(route.PaidFallbackTargets) > 0 {
+		if ledger, ok := s.CodeLedger.(PaidCodeLedger); ok {
+			selected, err := ledger.ResolvePaidFallback(r.Context(), resources.CodeAdmission{Route: route, APIKeyID: authority.ID, Operation: operation, PreviousResponse: observation.PreviousResponse}, authority)
+			if err != nil {
+				return nil, err
+			}
+			if selected != nil {
+				return s.preparePaidCode(r, release, route, observation, *selected, ingress, transport, authority, body, nil, true)
+			}
+		}
 	}
 	providers := release.Snapshot.CodeModelProviders(route, ingress.path, operation.Model, transport)
-	if len(providers) == 0 && (!route.ModelRewriting || len(release.Snapshot.CodeProviders(route, ingress.path, transport)) == 0) {
+	if len(providers) == 0 && len(route.PaidFallbackTargets) == 0 && (!route.ModelRewriting || len(release.Snapshot.CodeProviders(route, ingress.path, transport)) == 0) {
 		return nil, codemode.Refuse(400, "code_operation_unsupported")
 	}
 
@@ -77,6 +88,19 @@ func (s *Server) prepareCode(r *http.Request, release *runtime.Release, route co
 	})
 	if err != nil {
 		settleKey(r.Context(), lease, false, nil, s.log)
+		if refusal, ok := errors.AsType[*codemode.Refusal](err); ok && refusal.Code == "code_account_unavailable" && (recovery == nil || recovery.AccountID == "") && transport == codeadapter.HTTP && observation.Recoverable && len(route.PaidFallbackTargets) > 0 {
+			ledger, supported := s.CodeLedger.(PaidCodeLedger)
+			if !supported {
+				return nil, codemode.Refuse(503, "code_paid_authority_unavailable")
+			}
+			selected, selectionErr := ledger.ResolvePaidFallback(r.Context(), resources.CodeAdmission{Route: route, APIKeyID: authority.ID, Operation: operation, InitialRecovery: observation.Recoverable, Recovery: recovery, PreviousResponse: observation.PreviousResponse}, authority)
+			if selectionErr != nil {
+				return nil, selectionErr
+			}
+			if selected != nil {
+				return s.preparePaidCode(r, release, route, observation, *selected, ingress, transport, authority, body, recovery, true)
+			}
+		}
 		return nil, err
 	}
 	model := func() string {

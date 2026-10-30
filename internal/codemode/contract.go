@@ -5,6 +5,7 @@ package codemode
 import (
 	"fmt"
 	"github.com/google/uuid"
+	"maps"
 	"math"
 	"net/http"
 	"regexp"
@@ -174,10 +175,18 @@ type PaidTarget struct {
 }
 
 func (r Route) ValidatePaidTargets() error {
-	if len(r.PaidTargets) > 100 || len(r.PaidTargets) > 0 && !r.PaidParticipation {
+	if len(r.PaidTargets)+len(r.PaidFallbackTargets) > 100 || (len(r.PaidTargets) > 0 || len(r.PaidFallbackTargets) > 0) && !r.PaidParticipation {
 		return Refuse(400, "code_paid_participation_disabled")
 	}
-	for model, target := range r.PaidTargets {
+	if len(r.PaidFallbackTargets) > 0 && r.InitialRecoveryAttempts < 1 {
+		return Refuse(400, "code_paid_fallback_recovery_required")
+	}
+	for model := range r.PaidFallbackTargets {
+		if _, direct := r.PaidTargets[model]; direct {
+			return Refuse(400, "code_paid_target_conflict")
+		}
+	}
+	for model, target := range r.AllPaidTargets() {
 		if !slices.Contains(r.Models, model) {
 			return Refuse(400, "code_paid_model_invalid")
 		}
@@ -191,7 +200,27 @@ func (r Route) ValidatePaidTargets() error {
 	return nil
 }
 
+func (r Route) PaidTarget(model string, fallback bool) PaidTarget {
+	if fallback {
+		return r.PaidFallbackTargets[model]
+	}
+	return r.PaidTargets[model]
+}
+
+func (r Route) AllPaidTargets() map[string]PaidTarget {
+	return maps.Collect(func(yield func(string, PaidTarget) bool) {
+		for _, targets := range []map[string]PaidTarget{r.PaidTargets, r.PaidFallbackTargets} {
+			for model, target := range targets {
+				if !yield(model, target) {
+					return
+				}
+			}
+		}
+	})
+}
+
 type Route struct {
+	PaidFallbackTargets     map[string]PaidTarget `json:"paid_fallback_targets,omitempty"`
 	ChatToAntigravity       bool                  `json:"chat_to_antigravity,omitempty"`
 	PaidParticipation       bool                  `json:"paid_participation,omitempty"`
 	PaidTargets             map[string]PaidTarget `json:"paid_targets,omitempty"`

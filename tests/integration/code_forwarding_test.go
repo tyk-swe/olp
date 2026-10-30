@@ -17,7 +17,10 @@ import (
 	"github.com/tyk-swe/olp/internal/routing"
 
 	"github.com/coder/websocket"
+	"github.com/google/uuid"
+	"github.com/oapi-codegen/nullable"
 	"github.com/shopspring/decimal"
+	"github.com/tyk-swe/olp/internal/management/contract"
 
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/codemode"
@@ -333,5 +336,123 @@ func TestCodePaidVendorPricingSettlesDistinctChargeAndEnforcesSpend(t *testing.T
 	}
 	if dispatched.Load() != 1 {
 		t.Fatal("exhausted paid spend dispatched another upstream request")
+	}
+}
+
+type codePaidFallbackForwardFixture struct {
+	*codeFixture
+	server             *httptest.Server
+	write              contract.CodeRouteWrite
+	paid, subscription *atomic.Bool
+}
+
+func newCodePaidFallbackForwardFixture(t *testing.T) codePaidFallbackForwardFixture {
+	t.Helper()
+	f := newCodeFixture(t)
+	paid, subscription := new(atomic.Bool), new(atomic.Bool)
+	paidPeer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		paid.Store(true)
+		if r.Header.Get("Authorization") != "Bearer fixture-paid-secret" {
+			t.Error("fallback credential missing")
+		}
+		var request struct {
+			Model string `json:"model"`
+			Input string `json:"input"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil || request.Model != "alternate-model" || request.Input != "complete portable input" {
+			t.Errorf("fallback selected model or complete input lost %+v %v", request, err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		io.WriteString(w, `{"id":"paid-fallback","status":"completed","output":[],"usage":{"input_tokens":2,"output_tokens":1,"total_tokens":3}}`)
+	}))
+	subscriptionPeer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { subscription.Store(true); w.WriteHeader(500) }))
+	t.Cleanup(paidPeer.Close)
+	t.Cleanup(subscriptionPeer.Close)
+	provider, slot := newCodePaidProvider(t, f.h, f.owner, f.project, paidPeer.URL, "alternate-model")
+	f.exec(t, `UPDATE olp.providers SET configuration=jsonb_set(configuration::jsonb,'{endpoint}',to_jsonb($2::text))::json WHERE id=$1`, f.provider, subscriptionPeer.URL)
+	f.exec(t, `UPDATE olp.code_accounts SET models=$2 WHERE id=$1`, f.account, []byte(`["native-model","alternate-model"]`))
+	targets := map[string]contract.CodePaidTarget{"alternate-model": {ProviderId: uuid.MustParse(provider), SlotId: uuid.MustParse(slot.ID)}}
+	pools := map[string][]string{"native-model": {"native-model", "alternate-model"}}
+	write := contract.CodeRouteWrite{ProjectId: uuid.MustParse(f.project), PoolId: uuid.MustParse(f.pool), Slug: f.route.Slug, Models: []string{"native-model", "alternate-model"}, Enabled: true, ModelRewriting: new(true), ModelPools: &pools, PaidParticipation: new(true), InitialRecoveryAttempts: new(1), PaidFallbackTargets: &targets}
+	saved := f.h.want(f.owner, "PUT", "/api/v1/code/routes/"+f.route.ID, write, etagHeader(f.routeRecord), 200)
+	published := f.h.want(f.owner, "POST", "/api/v1/code/routes/"+f.route.ID+"/publish", nil, withMatch(saved, idem("fallback-forward")), 200)
+	f.route = codePublicDecode[codemode.Route](t, published)
+	f.routeRecord = published
+	price := contract.PricingRevisionRequest{EffectiveAt: time.Now().UTC(), Prices: []contract.PriceRequest{{ProviderKind: "openai", Model: "alternate-model", Operation: "generation", Currency: "USD", InputPerMillion: nullable.NewNullableWithValue("1"), OutputPerMillion: nullable.NewNullableWithValue("2")}}}
+	f.h.want(f.owner, "POST", "/api/v1/pricing/revisions", price, idem("fallback-forward-price"), 201)
+	eventually(t, "fallback price and frozen route", 15*time.Second, func() bool {
+		f.h.refresh()
+		return f.h.Runtime.RoutingInputs().Price("openai", provider, "openai", "alternate-model", "generation", time.Now()) != nil && f.h.Runtime.Release().Snapshot.CodeRoutes["coding"].RevisionID == f.route.RevisionID
+	})
+	f.exec(t, `UPDATE olp.code_accounts SET models=$2 WHERE id=$1`, f.account, []byte(`["alternate-model"]`))
+	policy := access.KeyPolicy{Scopes: []string{"inference"}, AllowedRoutes: []string{"coding"}}
+	f.h.Gateway.Runtime = &codeForwardRuntime{Runtime: f.h.Runtime, pinned: f.h.Runtime.Release(), authority: access.Authority{ID: f.key, LookupID: f.key, ProjectID: &f.project, Policy: policy}}
+	f.h.Gateway.CodeLedger = f.store
+	f.h.Gateway.CodeAuthorizer = codeForwardAuthorizer{}
+	_, _, limiter := limSetup(t, "fallback-forward")
+	f.h.Gateway.Admission = gateway.NewAdmission(limiter, nil, slog.New(slog.DiscardHandler))
+	mux := http.NewServeMux()
+	f.h.Gateway.RegisterCode(mux)
+	server := httptest.NewServer(mux)
+	t.Cleanup(server.Close)
+	return codePaidFallbackForwardFixture{codeFixture: f, server: server, write: write, paid: paid, subscription: subscription}
+}
+
+func (f codePaidFallbackForwardFixture) request(t *testing.T, conversation string) (int, []byte) {
+	t.Helper()
+	request, err := http.NewRequestWithContext(t.Context(), "POST", f.server.URL+"/code/coding/responses", strings.NewReader(`{"model":"native-model","input":"complete portable input","max_output_tokens":1}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.Header.Set("Authorization", "Bearer olp-code-fixture")
+	request.Header.Set("Thread-Id", conversation)
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	body, err := io.ReadAll(response.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return response.StatusCode, body
+}
+
+func TestCodePaidFallbackChecksEverySubscriptionModelBeforeSpending(t *testing.T) {
+	f := newCodePaidFallbackForwardFixture(t)
+	if status, body := f.request(t, "eligible-alternate"); status != 409 || !strings.Contains(string(body), "code_paid_fallback_not_needed") {
+		t.Fatalf("eligible alternate subscription bypassed %d %s", status, body)
+	}
+	if f.paid.Load() || f.subscription.Load() {
+		t.Fatal("admission refusal dispatched upstream")
+	}
+	f.exec(t, `UPDATE olp.code_accounts SET health='unavailable' WHERE id=$1`, f.account)
+	if status, body := f.request(t, "exhausted-alternate"); status != 200 || !strings.Contains(string(body), "paid-fallback") {
+		t.Fatalf("exhausted authorized fallback refused %d %s", status, body)
+	}
+	if !f.paid.Load() || f.subscription.Load() {
+		t.Fatal("exhausted work dispatched to the wrong destination")
+	}
+}
+
+func TestCodePaidFallbackCurrentSubstitutionPolicyOverridesCachedRelease(t *testing.T) {
+	for _, policy := range []string{"pool removed", "rewriting disabled"} {
+		t.Run(policy, func(t *testing.T) {
+			f := newCodePaidFallbackForwardFixture(t)
+			f.exec(t, `UPDATE olp.code_accounts SET health='unavailable',models=$2 WHERE id=$1`, f.account, []byte(`["native-model","alternate-model"]`))
+			write := f.write
+			write.ModelPools = nil
+			if policy == "rewriting disabled" {
+				write.ModelRewriting = new(false)
+			}
+			saved := f.h.want(f.owner, "PUT", "/api/v1/code/routes/"+f.route.ID, write, etagHeader(f.routeRecord), 200)
+			f.h.want(f.owner, "POST", "/api/v1/code/routes/"+f.route.ID+"/publish", nil, withMatch(saved, idem("revoke-fallback-substitution")), 200)
+			if status, body := f.request(t, "revoked-substitution"); status != 409 || !strings.Contains(string(body), "code_recovery_policy_changed") {
+				t.Fatalf("cached release bypassed current substitution policy %d %s", status, body)
+			}
+			if f.paid.Load() || f.subscription.Load() {
+				t.Fatal("revoked substitution dispatched upstream")
+			}
+		})
 	}
 }
