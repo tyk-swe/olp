@@ -59,8 +59,8 @@
       notice =
         secret &&
         provider.data?.configuration.profile_id !== 'antigravity-subscription'
-        ? 'Key enrolled. Save the account to associate this credential. Enrollment did not test the key or inference.'
-        : 'Grant enrolled. Save the account to associate this credential. Enrollment did not test inference.';
+          ? 'Key enrolled. Save the account to associate this credential. Enrollment did not test the key or inference.'
+          : 'Grant enrolled. Save the account to associate this credential. Enrollment did not test inference.';
       await Promise.all([
         client.invalidateQueries(
           {
