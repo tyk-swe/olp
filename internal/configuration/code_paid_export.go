@@ -12,7 +12,6 @@ import (
 	"github.com/tyk-swe/olp/internal/routing"
 )
 
-func codePaidRef(provider, slot string) string { return "code/paid/" + provider + "/" + slot }
 func exportCodePaidReferences(ctx context.Context, q access.Queryer) (map[string]CodePaidTarget, error) {
 	rows, err := q.Query(ctx, `SELECT p.id::text,p.name,s.id::text,s.name FROM olp.providers p JOIN olp.provider_slots s ON s.provider_id=p.id`)
 	if err != nil {
@@ -29,7 +28,7 @@ func exportCodePaidReferences(ctx context.Context, q access.Queryer) (map[string
 	}
 	return maps.Collect(func(yield func(string, CodePaidTarget) bool) {
 		for _, ref := range refs {
-			if !yield(ref.ProviderID+"/"+ref.SlotID, CodePaidTarget{Provider: ref.Provider, Slot: ref.Slot, CredentialRef: codePaidRef(ref.ProviderID, ref.SlotID)}) {
+			if !yield(ref.ProviderID+"/"+ref.SlotID, CodePaidTarget{Provider: ref.Provider, Slot: ref.Slot, CredentialRef: CredentialRef(ref.Provider, ref.Slot)}) {
 				return
 			}
 		}
@@ -98,18 +97,7 @@ func exportCodePaid(ctx context.Context, q access.Queryer, frozen map[string]rou
 		if err := json.Unmarshal(slots, &revisionSlots); err != nil {
 			return named{}, err
 		}
-		portableSlots := mapCode(entry.Slots, func(slot SlotEntry) SlotEntry {
-			index := slices.IndexFunc(revisionSlots, func(current routing.RevisionSlot) bool { return current.Name == slot.Name })
-			current := revisionSlots[index]
-			ref := func() *string {
-				if current.CredentialID == nil {
-					return nil
-				}
-				return new(codePaidRef(provider.ID, current.ID))
-			}()
-			return SlotEntry{Name: slot.Name, IsDefault: slot.IsDefault, Position: slot.Position, Enabled: slot.Enabled, Priority: slot.Priority, Weight: slot.Weight, Restrictions: slot.Restrictions, Limits: slot.Limits, CredentialRef: ref}
-		})
-		return named{Name: name, Value: CodePaidConnection{Provider: ProviderEntry{Name: entry.Name, Project: entry.Project, Configuration: entry.Configuration, Models: entry.Models, Slots: portableSlots, NetworkCredentialRef: entry.NetworkCredentialRef}, SlotKeyRefs: maps.Collect(func(yield func(string, []string) bool) {
+		return named{Name: name, Value: CodePaidConnection{Provider: entry, SlotKeyRefs: maps.Collect(func(yield func(string, []string) bool) {
 			for _, slot := range revisionSlots {
 				if len(slot.AllowedAPIKeys) > 0 && !yield(slot.Name, mapCode(slot.AllowedAPIKeys, func(id string) string { return "code/key/" + id })) {
 					return

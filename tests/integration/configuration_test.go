@@ -712,6 +712,7 @@ func codeConfigurationPaidFrozenPolicyRoundTrip(t *testing.T, fallback bool) {
 	}
 	bindings := configuration.CodeBindings{Credentials: credentials, APIKeys: map[string]string{source.Code.Pools[0].APIKeyRefs[0]: destinationKeyID, frozen.SlotKeyRefs[slot.Name][0]: destinationKeyID}}
 	request := map[string]any{"document": document, "code_bindings": bindings}
+	f.h.want(f.owner, "POST", "/api/v1/configuration/plan", request, nil, 200)
 
 	f.exec(t, `UPDATE olp.provider_slots SET limits=jsonb_build_object('requests_per_minute',20) WHERE id=$1`, slot.ID)
 	f.h.want(f.owner, "POST", "/api/v1/configuration/plan", request, nil, 422)
