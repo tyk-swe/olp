@@ -28770,7 +28770,7 @@
           },
           "paid": {
             "type": "boolean",
-            "description": "This model directly selects a metered API target and requires monetary admission."
+            "description": "This model has an authorized metered API target, selected directly or through explicit fallback. Paid attempts require monetary admission."
           }
         }
       },

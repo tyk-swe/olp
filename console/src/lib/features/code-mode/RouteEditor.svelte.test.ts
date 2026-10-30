@@ -193,6 +193,26 @@ it.each(['direct', 'fallback'] as const)(
     paid.checked = true;
     paid.dispatchEvent(new Event('change', { bubbles: true }));
     flushSync();
+    const models = host.querySelector<HTMLTextAreaElement>('#code-models')!;
+    for (const value of ['', 'native-main,native-main']) {
+      models.value = value;
+      models.dispatchEvent(new Event('input', { bubbles: true }));
+      flushSync();
+      host
+        .querySelector('form')!
+        .dispatchEvent(
+          new Event('submit', { bubbles: true, cancelable: true })
+        );
+      await vi.waitFor(() =>
+        expect(host.textContent).toContain('unique native model identifiers')
+      );
+      expect(
+        fetch.mock.calls.some(([request]) => request.method === 'PUT')
+      ).toBe(false);
+    }
+    models.value = 'native-main';
+    models.dispatchEvent(new Event('input', { bubbles: true }));
+    flushSync();
     const provider = host.querySelector<HTMLSelectElement>(
       policy === 'direct'
         ? '#paid-provider-native-main'

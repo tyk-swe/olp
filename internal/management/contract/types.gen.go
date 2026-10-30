@@ -7758,7 +7758,7 @@ type CodeModel struct {
 	ModelPool *[]string       `json:"model_pool,omitempty"`
 	Object    CodeModelObject `json:"object"`
 
-	// Paid This model directly selects a metered API target and requires monetary admission.
+	// Paid This model has an authorized metered API target, selected directly or through explicit fallback. Paid attempts require monetary admission.
 	Paid *bool `json:"paid,omitempty"`
 }
 

@@ -141,6 +141,14 @@
   let poolId = $state(initial?.pool_id ?? '');
   let maxBodyBytes = $state(initial?.max_body_bytes?.toString() ?? '');
   let models = $state(initial?.models.join('\n') ?? '');
+  const draftModels = $derived(
+    models
+      .split(/[\s,]+/)
+      .filter(
+        (model, index, values) =>
+          model !== '' && values.indexOf(model) === index
+      )
+  );
   let paidParticipation = $state(initial?.paid_participation ?? false);
   let paidTargets = $state(initial?.paid_targets ?? {});
   let paidFallbackTargets = $state(initial?.paid_fallback_targets ?? {});
@@ -285,7 +293,7 @@
   emptyLabel: string,
   onchange: (targets: PaidTargets) => void
 )}
-  {#each nativeModels(models) as model (model)}
+  {#each draftModels as model (model)}
     {@const target = targets[model]}
     <div class="form-field">
       <label for={prefix + '-provider-' + model}

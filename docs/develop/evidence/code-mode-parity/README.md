@@ -27,3 +27,17 @@ The environment uses fixture subscription metadata and a controlled provider. Th
 ### Published client setup on mobile
 
 ![Published route and generated client configuration](code-client-model-mobile.png)
+
+## Editing paid targets with incomplete model input
+
+The captures below use headful Chromium and the real route editor mounted in a controlled Svelte fixture, with authenticated management state and mocked management reads and writes. They demonstrate editing and validation, without provider or live subscription qualification.
+
+Before the fix, clearing the native model field while paid targets were enabled raised `Enter 1–100 unique native model identifiers, separated by spaces or commas.` during rendering and left the old paid selectors on screen. After the fix, empty input removes those selectors, native form validation prevents saving an empty list, and duplicate input displays the validation message. Restoring `native-main`, choosing its provider and stored credential slot, and saving produced one management write with that exact model and paid target, with no browser exception.
+
+1. Open `http://127.0.0.1:4182/code-mode` in the packaged test environment and edit a route with at least one native model.
+2. Enable **Permit paid API targets**, then clear **Native models**. Attempt to save, then enter the same model twice separated by a comma and attempt to save again.
+3. Restore one native model, choose its paid provider and credential slot, and select **Save**. The invalid inputs must not save, and the corrected route must save without a browser exception.
+
+| Before the fix, model list cleared | After the fix, model list cleared |
+| --- | --- |
+| ![Render failure leaves stale paid selectors](route-editor-empty-before.png) | ![Empty input removes paid selectors without an exception](route-editor-empty-after.png) |

@@ -98,7 +98,7 @@ func Generate(route codemode.Route, offers Offers, in Request) (codemode.ClientC
 		selected = append(selected, *companion.model)
 		var ok bool
 		if through, ok = offers.through(route, client, selected); !ok {
-			return empty, access.Invalid(companion.field, "A conversation uses one account of each subscription, so it cannot reach this model alongside the others selected.")
+			return empty, access.Invalid(companion.field, "These models cannot share a conversation. Choose models from compatible subscriptions or only paid API targets.")
 		}
 	}
 	base, err := url.Parse(in.GatewayURL)

@@ -434,6 +434,27 @@ func TestCatalogAndConfigurationExposeNativePaidFallback(t *testing.T) {
 	}
 }
 
+func TestConfigurationRejectsMixedPaidSubscriptionCompanions(t *testing.T) {
+	route := codemode.Route{ID: "route", Slug: "coding", Enabled: true, RevisionID: "revision", Models: []string{"paid-main", "subscription-main"}, ChatToCodex: true, PaidParticipation: true, PaidTargets: map[string]codemode.PaidTarget{"paid-main": {ProviderID: "provider", SlotID: "slot"}}}
+	offers := Offers{{PaidProtocol: codemode.ProtocolResponses, Models: route.Models[:1]}, {Adapter: codemode.AdapterCodex, Models: route.Models}}
+	for _, model := range route.Models {
+		if _, err := Generate(route, offers, Request{GatewayURL: "https://gateway.example", Client: codeadapter.ClientOpenCode, Model: model}); err != nil {
+			t.Fatalf("individual model %s is unavailable: %v", model, err)
+		}
+	}
+	for _, request := range []Request{
+		{Model: "paid-main", PlanModel: "subscription-main"},
+		{Model: "subscription-main", PlanModel: "paid-main"},
+		{Model: "paid-main", SmallModel: "subscription-main"},
+		{Model: "subscription-main", SmallModel: "paid-main"},
+	} {
+		input := Request{GatewayURL: "https://gateway.example", Client: codeadapter.ClientOpenCode, Model: request.Model, PlanModel: request.PlanModel, SmallModel: request.SmallModel}
+		if _, err := Generate(route, offers, input); err == nil {
+			t.Fatalf("generated unusable mixed companion setup %+v", request)
+		}
+	}
+}
+
 func TestClaudeSubscriptionSetupUsesNativeModelsAndReportsLiveGap(t *testing.T) {
 	models := []string{"claude-fixture-main", "claude-fixture-small"}
 	route := codemode.Route{Slug: "personal-code", Enabled: true, RevisionID: "published", Models: models}

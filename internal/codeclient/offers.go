@@ -39,6 +39,13 @@ func (o Offers) adapters(route codemode.Route, model string) []codemode.Adapter 
 // through returns the adapter a client sends each model through: the first
 // choice, in table order, with which one conversation reaches them all.
 func (o Offers) through(route codemode.Route, client string, models []string) (map[string]codemode.Adapter, bool) {
+	paid := func(model string) bool {
+		_, selected := o.paidProtocol(route, model, client)
+		return selected
+	}
+	if slices.ContainsFunc(models, paid) && slices.ContainsFunc(models, func(model string) bool { return !paid(model) }) {
+		return nil, false
+	}
 	chosen := make([]codemode.Adapter, len(models))
 	var choose func(i int) bool
 	choose = func(i int) bool {
