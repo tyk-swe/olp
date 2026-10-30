@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/tyk-swe/olp/internal/codemode"
@@ -117,10 +118,12 @@ func TestGenericClientRejectsAmbiguousIdentity(t *testing.T) {
 		{"X-Olp-Code-Affinity": {"one", "two"}},
 		{"X-Olp-Code-Affinity": {""}},
 		{"X-Olp-Code-Affinity": {" one"}},
+		{"X-Olp-Code-Affinity": {strings.Repeat("a", 257)}},
 		{"X-Olp-Code-Affinity": {"one"}, "X-Claude-Code-Session-Id": {"session"}},
 		{"X-Olp-Code-Affinity": {"one"}, "X-Opencode-Session-Id": {"session"}},
 		{"Thread-Id": {"thread"}},
 		{"X-Claude-Code-Session-Id": {"session"}, "Thread-Id": {"thread"}},
+		{"X-Claude-Code-Session-Id": {"session"}, "X-Opencode-Session-Id": {"session"}},
 	} {
 		if _, err := ClassifyMessages([]byte(`{"model":"native-model","messages":[]}`), headers); err == nil {
 			t.Fatalf("ambiguous identity accepted %+v", headers)
@@ -143,7 +146,7 @@ func TestGenericProtocolsKeepRequestsIndependentUnlessAffinityIsExplicit(t *test
 			if firstErr != nil || secondErr != nil || !first.Operation.Identity.Generic() || !second.Operation.Identity.Generic() || first.Operation.Identity.Conversation == second.Operation.Identity.Conversation {
 				t.Fatalf("independent generic requests shared identity or refused, first %+v error %v, second %+v error %v", first, firstErr, second, secondErr)
 			}
-			affinity := http.Header{"X-Olp-Code-Affinity": {"native-conversation"}}
+			affinity := http.Header{"X-Olp-Code-Affinity": {strings.Repeat("a", 256)}}
 			bound, boundErr := test.classify([]byte(test.body), affinity)
 			continued, continuedErr := test.classify([]byte(test.body), affinity)
 			other, otherErr := test.classify([]byte(test.body), http.Header{"X-Olp-Code-Affinity": {"another-conversation"}})
@@ -162,6 +165,7 @@ func TestGenericMessagesRejectsOpaqueState(t *testing.T) {
 		`{"model":"native-model","messages":[{"role":"assistant","content":[{"type":"thinking","thinking":"secret","signature":"opaque"}]}]}`,
 		`{"model":"native-model","messages":[{"role":"assistant","content":[{"type":"redacted_thinking","data":"opaque"}]}]}`,
 		`{"model":"native-model","messages":[{"role":"user","content":[{"type":"document","source":{"type":"file","file_id":"unowned"}}]}]}`,
+		`{"model":"native-model","messages":[{"role":"user","content":[{"type":"image","source":{"type":"url","url":"https://image.invalid/a.png","file_id":"unowned"}}]}]}`,
 		`{"model":"native-model","messages":[],"context_management":{"edits":[{"type":"clear_tool_uses"}]}}`,
 		`{"model":"native-model","messages":[],"previous_response_id":"unowned-response"}`,
 		`{"model":"native-model","messages":[],"conversation":"unowned-conversation"}`,
@@ -196,5 +200,31 @@ func TestChatRecoveryRequiresPortableInitialState(t *testing.T) {
 		if got := PortableInitialRequest([]byte(test.body), nil, request); got != test.portable {
 			t.Fatalf("portable %t, want %t, body %s", got, test.portable, test.body)
 		}
+	}
+}
+
+func TestMessagesRecoveryRequiresPortableInitialState(t *testing.T) {
+	conversation := http.Header{"X-Opencode-Session-Id": {"conversation"}}
+	for _, test := range []struct {
+		name, body string
+		headers    http.Header
+		portable   bool
+	}{
+		{"optional nulls", `{"model":"native","messages":[{"role":"user","content":"Hello"}],"system":null,"temperature":null,"metadata":null}`, conversation, true},
+		{"null messages", `{"model":"native","messages":null}`, conversation, false},
+		{"account continuation", `{"model":"native","messages":[]}`, http.Header{"X-Opencode-Session-Id": {"child"}, "X-Opencode-Parent-Session-Id": {"parent"}}, false},
+		{"opaque turn state", `{"model":"native","messages":[]}`, http.Header{"X-Opencode-Session-Id": {"conversation"}, "X-Codex-Turn-State": {"opaque"}}, false},
+		{"assistant history", `{"model":"native","messages":[{"role":"assistant","content":"Earlier reply"}]}`, conversation, false},
+		{"unknown policy", `{"model":"native","messages":[],"required_feature":true}`, conversation, false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			request, err := ClassifyMessages([]byte(test.body), test.headers)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := PortableInitialRequest([]byte(test.body), test.headers, request); got != test.portable {
+				t.Fatalf("portable %t, want %t", got, test.portable)
+			}
+		})
 	}
 }

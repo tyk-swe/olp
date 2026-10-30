@@ -54,16 +54,66 @@ func TestHeadlessEnrollmentVerifiesProfileBeforeIssuingGrant(t *testing.T) {
 			return abi.HTTPResponse{}, nil
 		}
 	}}
-	grant, exchangeErr := adapter.ExchangeGrant(t.Context(), abi.GrantExchange{Profile: ProfileID, Session: start.Session, Input: "authorized#" + state})
-	if exchangeErr != nil {
-		t.Fatal(exchangeErr)
-	}
-	if grant.Principal == "" || grant.ExpiresIn != 3600 || grant.RefreshToken != "fixture-refresh" || grant.Facts["account_uuid"] != "11111111-1111-4111-8111-111111111111" {
-		t.Fatal("verified grant was not returned")
+	for _, input := range []string{"authorized#" + state, RedirectURI + "?code=authorized&state=" + url.QueryEscape(state)} {
+		grant, exchangeErr := adapter.ExchangeGrant(t.Context(), abi.GrantExchange{Profile: ProfileID, Session: start.Session, Input: input})
+		if exchangeErr != nil {
+			t.Fatal(exchangeErr)
+		}
+		if grant.Principal == "" || grant.ExpiresIn != 3600 || grant.RefreshToken != "fixture-refresh" || grant.Facts["account_uuid"] != "11111111-1111-4111-8111-111111111111" {
+			t.Fatal("verified grant was not returned")
+		}
 	}
 	_, wrongStateErr := adapter.ExchangeGrant(t.Context(), abi.GrantExchange{Profile: ProfileID, Session: start.Session, Input: "authorized#another-state"})
 	if reported, ok := errors.AsType[*abi.Error](wrongStateErr); !ok || reported.Code != abi.CodeStateMismatch {
 		t.Fatalf("wrong state accepted: %v", wrongStateErr)
+	}
+}
+
+func TestRefreshOnlyIssuesGrantsWithBoundedPositiveLifetimes(t *testing.T) {
+	facts := map[string]string{"account_uuid": "11111111-1111-4111-8111-111111111111", "organization_uuid": "22222222-2222-4222-8222-222222222222"}
+	const maximumLifetime = int64(366 * 24 * 60 * 60)
+	for _, test := range []struct {
+		name    string
+		seconds int64
+		valid   bool
+	}{
+		{"minimum", 1, true},
+		{"maximum", maximumLifetime, true},
+		{"zero", 0, false},
+		{"negative", -1, false},
+		{"above maximum", maximumLifetime + 1, false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			tokens, err := json.Marshal(struct {
+				AccessToken string `json:"access_token"`
+				TokenType   string `json:"token_type"`
+				ExpiresIn   int64  `json:"expires_in"`
+			}{"fixture-access", "bearer", test.seconds})
+			if err != nil {
+				t.Fatal(err)
+			}
+			adapter := Adapter{Fetch: func(_ context.Context, request abi.HTTPRequest) (abi.HTTPResponse, error) {
+				switch request.URL {
+				case TokenURL:
+					return abi.HTTPResponse{Status: 200, Body: tokens}, nil
+				case ProfileURL:
+					return abi.HTTPResponse{Status: 200, Body: []byte(`{"account":{"uuid":"11111111-1111-4111-8111-111111111111"},"organization":{"uuid":"22222222-2222-4222-8222-222222222222"}}`)}, nil
+				default:
+					t.Fatal("refresh attempted an unsupported request")
+					return abi.HTTPResponse{}, nil
+				}
+			}}
+			grant, refreshErr := adapter.RefreshGrant(t.Context(), abi.GrantRefresh{Profile: ProfileID, RefreshToken: "fixture-refresh", Facts: facts})
+			if !test.valid {
+				if refreshErr == nil || grant.AccessToken != "" {
+					t.Fatalf("unsupported lifetime issued a grant %+v, error %v", grant, refreshErr)
+				}
+				return
+			}
+			if refreshErr != nil || grant.ExpiresIn != test.seconds || grant.Principal != Principal(facts) {
+				t.Fatalf("valid lifetime lost during refresh %+v, error %v", grant, refreshErr)
+			}
+		})
 	}
 }
 
