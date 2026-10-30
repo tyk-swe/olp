@@ -594,17 +594,21 @@ func TestClaudeHeadlessEnrollmentRefreshAndCredentialRefusal(t *testing.T) {
 					}
 					io.WriteString(w, `{"access_token":"fixture-claude-access","refresh_token":"fixture-claude-refresh","token_type":"bearer","expires_in":3600}`)
 				case r.Method == "GET" && r.Host == "api.anthropic.com" && r.URL.Path == "/api/oauth/profile":
-					expected := "Bearer fixture-claude-access"
-					if refreshed.Load() {
-						expected = "Bearer fixture-claude-rotated"
-					}
+					expected := func() string {
+						if refreshed.Load() {
+							return "Bearer fixture-claude-rotated"
+						}
+						return "Bearer fixture-claude-access"
+					}()
 					if r.Header.Get("Authorization") != expected {
 						t.Error("identity was not verified with the issued access token")
 					}
-					account := "11111111-1111-4111-8111-111111111111"
-					if changed.Load() {
-						account = "33333333-3333-4333-8333-333333333333"
-					}
+					account := func() string {
+						if changed.Load() {
+							return "33333333-3333-4333-8333-333333333333"
+						}
+						return "11111111-1111-4111-8111-111111111111"
+					}()
 					fmt.Fprintf(w, `{"account":{"uuid":%q},"organization":{"uuid":"22222222-2222-4222-8222-222222222222"}}`, account)
 				default:
 					t.Errorf("enrollment or maintenance attempted an unrelated operation %s %s", r.Method, r.URL.Path)
