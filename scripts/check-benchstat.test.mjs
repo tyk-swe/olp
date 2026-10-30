@@ -1,8 +1,10 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import test from 'node:test';
-import { checkBenchstat } from './check-benchstat.mjs';
+import { checkBenchstat, flaggedPatterns } from './check-benchstat.mjs';
 
 // The fixtures are verbatim `benchstat` output at the version pinned by
 // bench-gate.sh. `real-olp-*` are bench-gate.sh runs over BenchmarkSign in
@@ -304,4 +306,78 @@ test('--allow-removed lets a removal pass, and the default does not', () => {
   assert.equal(run(sample).status, 1);
   assert.equal(run(sample, '--allow-removed').status, 0);
   assert.equal(run(fixture('all-new'), '--allow-removed').status, 1);
+});
+
+test('the rerun selector measures each flagged mixed-depth benchmark once', () => {
+  const rows = [
+    ['Meter/gpt-4/code/50000-4', 20],
+    ['Estimate/openai-cl100k-4', 20],
+    ['WalkAgainstLegacy/small/walk+o200k-4', 20],
+    ['Direct-4', 20],
+    ['Tree/a/b-4', 20],
+    ['Tree/a/b/c-4', 20]
+  ];
+  const result = checkBenchstat(comparison(rows)).result;
+  const patterns = flaggedPatterns(result);
+  const dir = mkdtempSync(join(tmpdir(), 'bench-selection-'));
+  try {
+    const path = join(dir, 'selection_test.go');
+    writeFileSync(path, `package selection
+
+import "testing"
+
+func selected(t *testing.T) {
+  t.Run("selected", func(t *testing.T) {})
+}
+
+func TestBenchmarkDirect(t *testing.T) { selected(t) }
+func TestBenchmarkEstimate(t *testing.T) { t.Run("openai-cl100k", selected) }
+func TestBenchmarkWalkAgainstLegacy(t *testing.T) {
+  t.Run("small", func(t *testing.T) { t.Run("walk+o200k", selected) })
+}
+func TestBenchmarkMeter(t *testing.T) {
+  t.Run("gpt-4", func(t *testing.T) {
+    t.Run("code", func(t *testing.T) { t.Run("50000", selected) })
+  })
+}
+func TestBenchmarkTree(t *testing.T) {
+  t.Run("a/b", selected)
+  t.Run("a", func(t *testing.T) { t.Run("b/c", selected) })
+}
+`);
+    const selected = patterns.flatMap((entry) => {
+      const [pkg, pattern] = entry.split('\t');
+      assert.equal(pkg, 'example.com/p');
+      const selection = spawnSync('go', [
+        'test', '-v', '-count=1', '-run', pattern.replaceAll('Benchmark', 'TestBenchmark'), path
+      ], { encoding: 'utf8' });
+      assert.equal(selection.status, 0, selection.stderr);
+      return selection.stdout
+        .split('\n')
+        .filter((line) => /^=== RUN\s+TestBenchmark.*\/selected$/.test(line))
+        .map((line) => line.replace(/^=== RUN\s+TestBenchmark/, '').replace(/\/selected$/, ''));
+    }).toSorted();
+    assert.deepEqual(selected, rows.map(([name]) => name.replace(/-\d+$/, '')).toSorted());
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('a missing rerun remains a failure and is not reported as reproduced', () => {
+  const first = comparison([
+    ['Remeasured-8', 30],
+    ['Missing-8', 20],
+    ['Noise-8', 40]
+  ]);
+  const second = comparison([
+    ['Remeasured-8', 25],
+    ['Noise-8', '~']
+  ]);
+  const { ok, result, summary } = checkBenchstat(first, { confirm: second });
+  assert.equal(ok, false);
+  assert.deepEqual(names(result.regressions), ['p Remeasured-8 time/op', 'p Missing-8 time/op']);
+  assert.deepEqual(names(result.unconfirmed), ['p Noise-8 time/op']);
+  assert.match(summary, /Regressions above 10% \(reproduced when measured again\):\n  example\.com\/p  Remeasured-8/);
+  assert.match(summary, /Regressions above 10% not measured again \(retained as failures\):\n  example\.com\/p  Missing-8/);
+  assert.match(summary, /Regressions above 10% that did not reproduce when measured again \(taken for noise\):\n  example\.com\/p  Noise-8/);
 });
