@@ -80,6 +80,52 @@ to each record sent through an installation-wide sink. Local gateway and export
 fixtures exercise origin, privacy, project isolation and retention. They do not
 qualify a live external deployment.
 
+## Gateway-executed tool workflows
+
+On transformed routes with `tool_execution: gateway`, Chat Completions,
+Responses, Anthropic Messages and Gemini generation can execute published
+MCP tools as part of a bounded run. Only targets certified for model-emitted
+tool calls on the request surface and mode are eligible. The caller can narrow
+the route's toolsets with `olp_toolsets` and tighten its bounds with
+`olp_run_limits`. Read-only tools can execute without approval; other tools
+require approval. See [agent workflows](../develop/plans/agent-gateway.md#gateway-executed-tools)
+for the bounds, approval and accounting behavior.
+
+Model list and detail responses on the OpenAI, Anthropic and Gemini surfaces
+include `capabilities.gateway_execution` when the route and calling key permit
+inspection. It reports surface-specific certified modes, the effective route
+and key limits, whether all default toolsets are usable together, and the
+caller's available tools with pinned revisions, classifications and unit prices.
+A null price is unpriced; zero is explicitly free. The capability describes
+current configuration and does not reserve a run or guarantee admission.
+
+To inspect a particular request, select the same API key in the published route
+or draft route simulation and supply the native request, including any narrowed
+toolsets and bounds. The simulation capability reports the effective request
+bounds and caller-authorized tools and prices; target decisions report workflow
+refusals alongside normal routing decisions. Simulation does not dispatch a
+model or tool, reserve budget, or guarantee live admission.
+
+The local gateway fixtures exercise unary and streaming workflows for Chat
+Completions, Responses, Anthropic and Gemini, including bounds, target
+certification, approval, authority changes, `typesafe` pruning and compression
+recovery. The caller-filtered discovery fixture is
+`TestGatewayWorkflowDiscoveryRespectsCallerAuthority`. The tests live in
+[`internal/gateway/tool_loop_test.go`](../../internal/gateway/tool_loop_test.go).
+`TestGatewayToolWorkflowSettlesOneRun` in
+[`tests/integration/gateway_test.go`](../../tests/integration/gateway_test.go)
+exercises a run and its durable settlement with local services.
+
+Responses MCP output additionally requires the route's
+`responses_mcp_items` declaration and the certified built-in `openai-responses`
+contract on every successful model step. Other or mixed contracts return the
+final output or an approval pause without MCP items. The pinned official OpenAI
+Go SDK decodes the generated stream in
+`TestGatewayToolExecutionResponsesOfficialSDKDecodesMCPItems`; fixtures also
+cover the final-only fallback. These are local fixture results, not
+qualification of live provider deployments or untested dialect and target
+combinations.
+
 ## Consumer MCP qualification
 
 Published tools support the JSON call endpoint and Streamable HTTP at MCP

@@ -333,16 +333,16 @@ func (e AgentRunStepState) Valid() bool {
 
 // Defines values for AgentToolPinClassification.
 const (
-	ApprovalRequired AgentToolPinClassification = "approval_required"
-	ReadOnly         AgentToolPinClassification = "read_only"
+	AgentToolPinClassificationApprovalRequired AgentToolPinClassification = "approval_required"
+	AgentToolPinClassificationReadOnly         AgentToolPinClassification = "read_only"
 )
 
 // Valid indicates whether the value is a known member of the AgentToolPinClassification enum.
 func (e AgentToolPinClassification) Valid() bool {
 	switch e {
-	case ApprovalRequired:
+	case AgentToolPinClassificationApprovalRequired:
 		return true
-	case ReadOnly:
+	case AgentToolPinClassificationReadOnly:
 		return true
 	default:
 		return false
@@ -2878,6 +2878,42 @@ func (e FallbackCondition) Valid() bool {
 	case Exhausted:
 		return true
 	case RateLimit:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for GatewayExecutionCapabilityCertifiedModes.
+const (
+	GatewayExecutionCapabilityCertifiedModesStreaming GatewayExecutionCapabilityCertifiedModes = "streaming"
+	GatewayExecutionCapabilityCertifiedModesUnary     GatewayExecutionCapabilityCertifiedModes = "unary"
+)
+
+// Valid indicates whether the value is a known member of the GatewayExecutionCapabilityCertifiedModes enum.
+func (e GatewayExecutionCapabilityCertifiedModes) Valid() bool {
+	switch e {
+	case GatewayExecutionCapabilityCertifiedModesStreaming:
+		return true
+	case GatewayExecutionCapabilityCertifiedModesUnary:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for GatewayExecutionToolClassification.
+const (
+	GatewayExecutionToolClassificationApprovalRequired GatewayExecutionToolClassification = "approval_required"
+	GatewayExecutionToolClassificationReadOnly         GatewayExecutionToolClassification = "read_only"
+)
+
+// Valid indicates whether the value is a known member of the GatewayExecutionToolClassification enum.
+func (e GatewayExecutionToolClassification) Valid() bool {
+	switch e {
+	case GatewayExecutionToolClassificationApprovalRequired:
+		return true
+	case GatewayExecutionToolClassificationReadOnly:
 		return true
 	default:
 		return false
@@ -9140,7 +9176,7 @@ type ConfigurationRouteEntry struct {
 	// ProviderFetchedDocuments Allow the bound provider to fetch https document URLs named by callers on this route (default false). The gateway never fetches document bytes itself.
 	ProviderFetchedDocuments *bool `json:"provider_fetched_documents,omitempty"`
 
-	// ResponsesMcpItems Operator declaration that Responses clients support gateway-generated MCP output items. Requires gateway tool execution on a transformed route.
+	// ResponsesMcpItems Operator declaration that Responses clients support gateway-generated MCP output items. Requires gateway tool execution on a transformed route. MCP items are emitted only when the run uses the certified built-in Responses contract; other contracts omit them.
 	ResponsesMcpItems *bool `json:"responses_mcp_items,omitempty"`
 	Retired           *bool `json:"retired,omitempty"`
 
@@ -9841,7 +9877,7 @@ type CreateRouteDraftRequest struct {
 	// ProviderFetchedDocuments Allow the bound provider to fetch https document URLs named by callers on this route (default false). The gateway never fetches document bytes itself.
 	ProviderFetchedDocuments *bool `json:"provider_fetched_documents,omitempty"`
 
-	// ResponsesMcpItems Operator declaration that Responses clients support gateway-generated MCP output items. Requires gateway tool execution on a transformed route.
+	// ResponsesMcpItems Operator declaration that Responses clients support gateway-generated MCP output items. Requires gateway tool execution on a transformed route. MCP items are emitted only when the run uses the certified built-in Responses contract; other contracts omit them.
 	ResponsesMcpItems *bool `json:"responses_mcp_items,omitempty"`
 
 	// Retry Same-target retries per retryable failure class, with full-jitter exponential backoff. Retries consume the attempt budget and the overall deadline and never follow commitment or an ambiguous creation.
@@ -10279,6 +10315,47 @@ type FocusDatasetListResponse struct {
 	Items      []FocusDataset            `json:"items"`
 	NextCursor nullable.Nullable[string] `json:"next_cursor"`
 }
+
+// GatewayExecutionCapability Caller-specific gateway tool execution capability. This describes configured authority and certification, not a live quota reservation or guarantee of a successful run.
+type GatewayExecutionCapability struct {
+	// CertifiedModes Modes with at least one enabled target certified for tool calls on the request surface.
+	CertifiedModes []GatewayExecutionCapabilityCertifiedModes `json:"certified_modes"`
+
+	// DefaultToolsetsAllowed Whether all default route toolsets can be resolved together for the caller.
+	DefaultToolsetsAllowed bool `json:"default_toolsets_allowed"`
+
+	// Enabled Whether an enabled route target has tool-call certification for a mode on this surface.
+	Enabled bool `json:"enabled"`
+
+	// Limits Effective configured route, caller and request limits, including defaults.
+	Limits WorkflowRunLimits `json:"limits"`
+
+	// Tools Tools from published route toolsets the caller may resolve, including their classification and pinned price.
+	Tools []GatewayExecutionTool `json:"tools"`
+}
+
+// GatewayExecutionCapabilityCertifiedModes defines model for GatewayExecutionCapability.CertifiedModes.
+type GatewayExecutionCapabilityCertifiedModes string
+
+// GatewayExecutionTool defines model for GatewayExecutionTool.
+type GatewayExecutionTool struct {
+	// Alias Name exposed to the model during gateway execution.
+	Alias string `json:"alias"`
+
+	// Classification Operator classification. An unclassified tool is reported as approval_required.
+	Classification GatewayExecutionToolClassification `json:"classification"`
+
+	// Name Name in the published toolset.
+	Name       string             `json:"name"`
+	RevisionId openapi_types.UUID `json:"revision_id"`
+	ToolsetId  openapi_types.UUID `json:"toolset_id"`
+
+	// UnitPrice Pinned price per dispatched call in the installation pricing currency. Null means unpriced, while zero means free.
+	UnitPrice nullable.Nullable[string] `json:"unit_price"`
+}
+
+// GatewayExecutionToolClassification Operator classification. An unclassified tool is reported as approval_required.
+type GatewayExecutionToolClassification string
 
 // GrantDeviceAuthorization A device authorization the operator approves upstream: they open the verification URL, on any device, enter the user code and approve, while status requests poll the enrollment.
 type GrantDeviceAuthorization struct {
@@ -13817,7 +13894,7 @@ type ReplaceRouteDraftRequest struct {
 	// ProviderFetchedDocuments Allow the bound provider to fetch https document URLs named by callers on this route (default false). The gateway never fetches document bytes itself.
 	ProviderFetchedDocuments *bool `json:"provider_fetched_documents,omitempty"`
 
-	// ResponsesMcpItems Operator declaration that Responses clients support gateway-generated MCP output items. Requires gateway tool execution on a transformed route.
+	// ResponsesMcpItems Operator declaration that Responses clients support gateway-generated MCP output items. Requires gateway tool execution on a transformed route. MCP items are emitted only when the run uses the certified built-in Responses contract; other contracts omit them.
 	ResponsesMcpItems *bool `json:"responses_mcp_items,omitempty"`
 
 	// Retry Same-target retries per retryable failure class, with full-jitter exponential backoff. Retries consume the attempt budget and the overall deadline and never follow commitment or an ambiguous creation.
@@ -14339,7 +14416,7 @@ type RouteBehavior struct {
 	// ProviderFetchedDocuments Allow the bound provider to fetch https document URLs named by callers on this route (default false). The gateway never fetches document bytes itself.
 	ProviderFetchedDocuments *bool `json:"provider_fetched_documents,omitempty"`
 
-	// ResponsesMcpItems Operator declaration that Responses clients support gateway-generated MCP output items. Requires gateway tool execution on a transformed route.
+	// ResponsesMcpItems Operator declaration that Responses clients support gateway-generated MCP output items. Requires gateway tool execution on a transformed route. MCP items are emitted only when the run uses the certified built-in Responses contract; other contracts omit them.
 	ResponsesMcpItems *bool `json:"responses_mcp_items,omitempty"`
 
 	// Retry Same-target retries per retryable failure class, with full-jitter exponential backoff. Retries consume the attempt budget and the overall deadline and never follow commitment or an ambiguous creation.
@@ -14439,7 +14516,7 @@ type RouteDraftDetailResponse struct {
 	// ProviderFetchedDocuments Allow the bound provider to fetch https document URLs named by callers on this route (default false). The gateway never fetches document bytes itself.
 	ProviderFetchedDocuments *bool `json:"provider_fetched_documents,omitempty"`
 
-	// ResponsesMcpItems Operator declaration that Responses clients support gateway-generated MCP output items. Requires gateway tool execution on a transformed route.
+	// ResponsesMcpItems Operator declaration that Responses clients support gateway-generated MCP output items. Requires gateway tool execution on a transformed route. MCP items are emitted only when the run uses the certified built-in Responses contract; other contracts omit them.
 	ResponsesMcpItems *bool `json:"responses_mcp_items,omitempty"`
 
 	// Retry Same-target retries per retryable failure class, with full-jitter exponential backoff. Retries consume the attempt budget and the overall deadline and never follow commitment or an ambiguous creation.
@@ -14602,7 +14679,7 @@ type RouteRevisionResponse struct {
 	// ProviderFetchedDocuments Allow the bound provider to fetch https document URLs named by callers on this route (default false). The gateway never fetches document bytes itself.
 	ProviderFetchedDocuments *bool `json:"provider_fetched_documents,omitempty"`
 
-	// ResponsesMcpItems Operator declaration that Responses clients support gateway-generated MCP output items. Requires gateway tool execution on a transformed route.
+	// ResponsesMcpItems Operator declaration that Responses clients support gateway-generated MCP output items. Requires gateway tool execution on a transformed route. MCP items are emitted only when the run uses the certified built-in Responses contract; other contracts omit them.
 	ResponsesMcpItems *bool `json:"responses_mcp_items,omitempty"`
 
 	// Retry Same-target retries per retryable failure class, with full-jitter exponential backoff. Retries consume the attempt budget and the overall deadline and never follow commitment or an ambiguous creation.
@@ -14649,6 +14726,9 @@ type RouteSimulationResponse struct {
 	// Fallbacks Fallbacks the request started at plan time, then the ones a failed attempt could still start
 	Fallbacks []FallbackStep `json:"fallbacks"`
 
+	// GatewayExecution Caller-specific gateway tool execution capability. This describes configured authority and certification, not a live quota reservation or guarantee of a successful run.
+	GatewayExecution *GatewayExecutionCapability `json:"gateway_execution,omitempty"`
+
 	// Legs Routes the request moved to after the named route, in order
 	Legs      []SimulatedRouteLeg `json:"legs"`
 	Mode      string              `json:"mode"`
@@ -14669,8 +14749,10 @@ type RouteSimulationTargetResponse struct {
 	ProviderId    openapi_types.UUID                 `json:"provider_id"`
 	ProviderModel string                             `json:"provider_model"`
 	ProviderName  string                             `json:"provider_name"`
-	Reason        nullable.Nullable[string]          `json:"reason,omitempty"`
-	TargetId      openapi_types.UUID                 `json:"target_id"`
+
+	// Reason Reason the target is ineligible, including workflow toolset authority, target certification and run cost checks when gateway execution applies. Null when no refusal applies.
+	Reason   nullable.Nullable[string] `json:"reason,omitempty"`
+	TargetId openapi_types.UUID        `json:"target_id"`
 }
 
 // RouteTargetRequest defines model for RouteTargetRequest.
@@ -14866,6 +14948,9 @@ type RoutingDecision struct {
 	// EstimatedInputTokens The request's input tokens as this target's model counts them, which is the estimate routing weighs the target's context window by, or the estimate the caller supplied. Null when neither exists.
 	EstimatedInputTokens nullable.Nullable[int64] `json:"estimated_input_tokens,omitempty"`
 
+	// GatewayExecution Caller-specific gateway tool execution capability. This describes configured authority and certification, not a live quota reservation or guarantee of a successful run.
+	GatewayExecution *GatewayExecutionCapability `json:"gateway_execution,omitempty"`
+
 	// Headroom Smallest remaining fraction of the best credential slot's request, token and concurrency quotas.
 	Headroom nullable.Nullable[float32] `json:"headroom,omitempty"`
 
@@ -14878,13 +14963,15 @@ type RoutingDecision struct {
 	MetadataObservedAt nullable.Nullable[time.Time] `json:"metadata_observed_at,omitempty"`
 
 	// ModelFamily The family of models that share the tokenizer estimated_input_tokens was counted with: openai-o200k, openai-cl100k, anthropic, gemini or other. Null when the caller supplied the estimate or no request was inspected.
-	ModelFamily           nullable.Nullable[string]       `json:"model_family,omitempty"`
-	Performance           nullable.Nullable[Measurement]  `json:"performance,omitempty"`
-	Price                 nullable.Nullable[RoutingPrice] `json:"price,omitempty"`
-	Priority              int32                           `json:"priority"`
-	ProviderId            openapi_types.UUID              `json:"provider_id"`
-	Reason                nullable.Nullable[string]       `json:"reason,omitempty"`
-	RequestedOutputTokens nullable.Nullable[int64]        `json:"requested_output_tokens,omitempty"`
+	ModelFamily nullable.Nullable[string]       `json:"model_family,omitempty"`
+	Performance nullable.Nullable[Measurement]  `json:"performance,omitempty"`
+	Price       nullable.Nullable[RoutingPrice] `json:"price,omitempty"`
+	Priority    int32                           `json:"priority"`
+	ProviderId  openapi_types.UUID              `json:"provider_id"`
+
+	// Reason Reason the target is ineligible, including workflow toolset authority, target certification and run cost checks when gateway execution applies. Null when no refusal applies.
+	Reason                nullable.Nullable[string] `json:"reason,omitempty"`
+	RequestedOutputTokens nullable.Nullable[int64]  `json:"requested_output_tokens,omitempty"`
 
 	// Selector The request selector that chose this target.
 	Selector nullable.Nullable[string] `json:"selector,omitempty"`
@@ -15412,7 +15499,7 @@ type ShadowTarget struct {
 
 // SimulateRouteRequest defines model for SimulateRouteRequest.
 type SimulateRouteRequest struct {
-	// ApiKeyId Optional current key authority, including provider-state permission. Provider-retained state is denied when no key is selected.
+	// ApiKeyId Select a current API key to evaluate its route and toolset authority, including provider-state permission. Provider-retained state and gateway tool execution are not eligible without a selected key. Simulation does not dispatch or reserve quota, so it does not guarantee admission.
 	ApiKeyId nullable.Nullable[openapi_types.UUID] `json:"api_key_id,omitempty"`
 
 	// Attribution Attribution labels the request would carry. They only matter to a route keeping sessions by a label.
@@ -15439,7 +15526,7 @@ type SimulateRouteRequest struct {
 	// QuerySettings Profile-owned semantic query settings. This performs no provider, token, proxy or metadata request. Values are always redacted in inspection output.
 	QuerySettings *SimulationQuerySettings `json:"query_settings,omitempty"`
 
-	// Request Optional native request. Omission retains tuple-only eligibility and reports not_inspected; no request or qualification is fabricated. A request is also counted for each target's model: unless estimated_input_tokens is supplied, every decision reports the input tokens that model counts, how they were counted and for which model family, and each target's context window is checked against them.
+	// Request Optional native request. Omission retains tuple-only eligibility and reports not_inspected; no request or qualification is fabricated. A request is also counted for each target's model: unless estimated_input_tokens is supplied, every decision reports the input tokens that model counts, how they were counted and for which model family, and each target's context window is checked against them. For gateway tool execution, include olp_toolsets and olp_run_limits in the native request to inspect narrowed toolsets and run bounds.
 	Request *map[string]interface{} `json:"request,omitempty"`
 	Seed    string                  `json:"seed"`
 
@@ -15460,11 +15547,14 @@ type SimulatedAffinitySource string
 
 // SimulatedRouteLeg A route the request moved to by selector delegation or fallback.
 type SimulatedRouteLeg struct {
-	Affinity  nullable.Nullable[SimulatedAffinity]    `json:"affinity"`
-	Decisions []RoutingDecision                       `json:"decisions"`
-	Route     string                                  `json:"route"`
-	Selectors []SelectorOutcome                       `json:"selectors"`
-	Via       nullable.Nullable[SimulatedRouteLegVia] `json:"via"`
+	Affinity  nullable.Nullable[SimulatedAffinity] `json:"affinity"`
+	Decisions []RoutingDecision                    `json:"decisions"`
+
+	// GatewayExecution Caller-specific gateway tool execution capability. This describes configured authority and certification, not a live quota reservation or guarantee of a successful run.
+	GatewayExecution *GatewayExecutionCapability             `json:"gateway_execution,omitempty"`
+	Route            string                                  `json:"route"`
+	Selectors        []SelectorOutcome                       `json:"selectors"`
+	Via              nullable.Nullable[SimulatedRouteLegVia] `json:"via"`
 }
 
 // SimulatedRouteLegVia defines model for SimulatedRouteLeg.Via.
@@ -15477,7 +15567,7 @@ type SimulationDialect string
 type SimulationOperation struct {
 	Operation *string `json:"operation,omitempty"`
 
-	// Request Native request for complete inspection. A route/model-only object selects tuple-only inspection and does not establish an interaction contract. A request is also counted for each target's model: unless estimated_input_tokens is supplied, every decision reports the input tokens that model counts, how they were counted and for which model family, and each target's context window is checked against them.
+	// Request Native request for complete inspection. A route/model-only object selects tuple-only inspection and does not establish an interaction contract. A request is also counted for each target's model: unless estimated_input_tokens is supplied, every decision reports the input tokens that model counts, how they were counted and for which model family, and each target's context window is checked against them. For gateway tool execution, include olp_toolsets and olp_run_limits in the native request to inspect narrowed toolsets and run bounds.
 	Request *map[string]interface{} `json:"request,omitempty"`
 
 	// Route Explicit route selector outside the native request, required for URL-bound dialect bodies that omit model. Existing request.model and tuple-only request.route selectors remain supported.
@@ -15489,6 +15579,7 @@ type SimulationQuerySettings map[string]string
 
 // SimulationRequest defines model for SimulationRequest.
 type SimulationRequest struct {
+	// ApiKeyId Select a current API key to evaluate its route and toolset authority, including provider-state permission. Provider-retained state and gateway tool execution are not eligible without a selected key. Simulation does not dispatch or reserve quota, so it does not guarantee admission.
 	ApiKeyId nullable.Nullable[openapi_types.UUID] `json:"api_key_id,omitempty"`
 
 	// Attribution Attribution labels the request would carry. They only matter to a route keeping sessions by a label.
@@ -16000,7 +16091,7 @@ type UpdatePublishedRouteRequest struct {
 	// ProviderFetchedDocuments Allow the bound provider to fetch https document URLs named by callers on this route (default false). The gateway never fetches document bytes itself.
 	ProviderFetchedDocuments *bool `json:"provider_fetched_documents,omitempty"`
 
-	// ResponsesMcpItems Operator declaration that Responses clients support gateway-generated MCP output items. Requires gateway tool execution on a transformed route.
+	// ResponsesMcpItems Operator declaration that Responses clients support gateway-generated MCP output items. Requires gateway tool execution on a transformed route. MCP items are emitted only when the run uses the certified built-in Responses contract; other contracts omit them.
 	ResponsesMcpItems *bool `json:"responses_mcp_items,omitempty"`
 
 	// Retry Same-target retries per retryable failure class, with full-jitter exponential backoff. Retries consume the attempt budget and the overall deadline and never follow commitment or an ambiguous creation.

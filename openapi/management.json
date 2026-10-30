@@ -2589,7 +2589,7 @@
           },
           "responses_mcp_items": {
             "type": "boolean",
-            "description": "Operator declaration that Responses clients support gateway-generated MCP output items. Requires gateway tool execution on a transformed route."
+            "description": "Operator declaration that Responses clients support gateway-generated MCP output items. Requires gateway tool execution on a transformed route. MCP items are emitted only when the run uses the certified built-in Responses contract; other contracts omit them."
           },
           "run_limits": {
             "oneOf": [
@@ -4025,7 +4025,7 @@
           },
           "responses_mcp_items": {
             "type": "boolean",
-            "description": "Operator declaration that Responses clients support gateway-generated MCP output items. Requires gateway tool execution on a transformed route."
+            "description": "Operator declaration that Responses clients support gateway-generated MCP output items. Requires gateway tool execution on a transformed route. MCP items are emitted only when the run uses the certified built-in Responses contract; other contracts omit them."
           },
           "run_limits": {
             "oneOf": [
@@ -10343,7 +10343,7 @@
           },
           "responses_mcp_items": {
             "type": "boolean",
-            "description": "Operator declaration that Responses clients support gateway-generated MCP output items. Requires gateway tool execution on a transformed route."
+            "description": "Operator declaration that Responses clients support gateway-generated MCP output items. Requires gateway tool execution on a transformed route. MCP items are emitted only when the run uses the certified built-in Responses contract; other contracts omit them."
           },
           "run_limits": {
             "oneOf": [
@@ -11425,7 +11425,7 @@
           },
           "responses_mcp_items": {
             "type": "boolean",
-            "description": "Operator declaration that Responses clients support gateway-generated MCP output items. Requires gateway tool execution on a transformed route."
+            "description": "Operator declaration that Responses clients support gateway-generated MCP output items. Requires gateway tool execution on a transformed route. MCP items are emitted only when the run uses the certified built-in Responses contract; other contracts omit them."
           },
           "run_limits": {
             "oneOf": [
@@ -11866,7 +11866,7 @@
           },
           "responses_mcp_items": {
             "type": "boolean",
-            "description": "Operator declaration that Responses clients support gateway-generated MCP output items. Requires gateway tool execution on a transformed route."
+            "description": "Operator declaration that Responses clients support gateway-generated MCP output items. Requires gateway tool execution on a transformed route. MCP items are emitted only when the run uses the certified built-in Responses contract; other contracts omit them."
           },
           "run_limits": {
             "oneOf": [
@@ -11954,6 +11954,9 @@
               "$ref": "#/components/schemas/FallbackStep"
             },
             "type": "array"
+          },
+          "gateway_execution": {
+            "$ref": "#/components/schemas/GatewayExecutionCapability"
           }
         },
         "required": [
@@ -12009,7 +12012,8 @@
             "type": [
               "string",
               "null"
-            ]
+            ],
+            "description": "Reason the target is ineligible, including workflow toolset authority, target certification and run cost checks when gateway execution applies. Null when no refusal applies."
           },
           "target_id": {
             "format": "uuid",
@@ -12336,7 +12340,8 @@
             "type": [
               "string",
               "null"
-            ]
+            ],
+            "description": "Reason the target is ineligible, including workflow toolset authority, target certification and run cost checks when gateway execution applies. Null when no refusal applies."
           },
           "requested_output_tokens": {
             "format": "int64",
@@ -12414,6 +12419,9 @@
               "maximum",
               "currency"
             ]
+          },
+          "gateway_execution": {
+            "$ref": "#/components/schemas/GatewayExecutionCapability"
           }
         },
         "required": [
@@ -13195,7 +13203,7 @@
               "null"
             ],
             "format": "uuid",
-            "description": "Optional current key authority, including provider-state permission. Provider-retained state is denied when no key is selected."
+            "description": "Select a current API key to evaluate its route and toolset authority, including provider-state permission. Provider-retained state and gateway tool execution are not eligible without a selected key. Simulation does not dispatch or reserve quota, so it does not guarantee admission."
           },
           "dialect": {
             "$ref": "#/components/schemas/SimulationDialect"
@@ -13211,7 +13219,7 @@
           "request": {
             "type": "object",
             "additionalProperties": true,
-            "description": "Optional native request. Omission retains tuple-only eligibility and reports not_inspected; no request or qualification is fabricated. A request is also counted for each target's model: unless estimated_input_tokens is supplied, every decision reports the input tokens that model counts, how they were counted and for which model family, and each target's context window is checked against them."
+            "description": "Optional native request. Omission retains tuple-only eligibility and reports not_inspected; no request or qualification is fabricated. A request is also counted for each target's model: unless estimated_input_tokens is supplied, every decision reports the input tokens that model counts, how they were counted and for which model family, and each target's context window is checked against them. For gateway tool execution, include olp_toolsets and olp_run_limits in the native request to inspect narrowed toolsets and run bounds."
           },
           "semantic_headers": {
             "$ref": "#/components/schemas/SimulationSemanticHeaders"
@@ -13260,7 +13268,8 @@
             "type": [
               "string",
               "null"
-            ]
+            ],
+            "description": "Select a current API key to evaluate its route and toolset authority, including provider-state permission. Provider-retained state and gateway tool execution are not eligible without a selected key. Simulation does not dispatch or reserve quota, so it does not guarantee admission."
           },
           "estimated_input_tokens": {
             "description": "Input tokens to weigh every target's context window by. When supplied it stands for every target, the request is not counted, and the decisions report no provenance for it.",
@@ -15381,7 +15390,7 @@
           "request": {
             "type": "object",
             "additionalProperties": true,
-            "description": "Native request for complete inspection. A route/model-only object selects tuple-only inspection and does not establish an interaction contract. A request is also counted for each target's model: unless estimated_input_tokens is supplied, every decision reports the input tokens that model counts, how they were counted and for which model family, and each target's context window is checked against them."
+            "description": "Native request for complete inspection. A route/model-only object selects tuple-only inspection and does not establish an interaction contract. A request is also counted for each target's model: unless estimated_input_tokens is supplied, every decision reports the input tokens that model counts, how they were counted and for which model family, and each target's context window is checked against them. For gateway tool execution, include olp_toolsets and olp_run_limits in the native request to inspect narrowed toolsets and run bounds."
           },
           "route": {
             "type": "string",
@@ -17979,7 +17988,7 @@
           },
           "responses_mcp_items": {
             "type": "boolean",
-            "description": "Operator declaration that Responses clients support gateway-generated MCP output items. Requires gateway tool execution on a transformed route."
+            "description": "Operator declaration that Responses clients support gateway-generated MCP output items. Requires gateway tool execution on a transformed route. MCP items are emitted only when the run uses the certified built-in Responses contract; other contracts omit them."
           },
           "run_limits": {
             "oneOf": [
@@ -18652,6 +18661,9 @@
               "$ref": "#/components/schemas/RoutingDecision"
             },
             "type": "array"
+          },
+          "gateway_execution": {
+            "$ref": "#/components/schemas/GatewayExecutionCapability"
           }
         },
         "required": [
@@ -22229,7 +22241,7 @@
           },
           "responses_mcp_items": {
             "type": "boolean",
-            "description": "Operator declaration that Responses clients support gateway-generated MCP output items. Requires gateway tool execution on a transformed route."
+            "description": "Operator declaration that Responses clients support gateway-generated MCP output items. Requires gateway tool execution on a transformed route. MCP items are emitted only when the run uses the certified built-in Responses contract; other contracts omit them."
           },
           "run_limits": {
             "oneOf": [
@@ -30667,6 +30679,97 @@
           "stream",
           "occurred_at",
           "data"
+        ]
+      },
+      "GatewayExecutionTool": {
+        "type": "object",
+        "properties": {
+          "toolset_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "revision_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "alias": {
+            "type": "string",
+            "description": "Name exposed to the model during gateway execution."
+          },
+          "name": {
+            "type": "string",
+            "description": "Name in the published toolset."
+          },
+          "classification": {
+            "type": "string",
+            "enum": [
+              "read_only",
+              "approval_required"
+            ],
+            "description": "Operator classification. An unclassified tool is reported as approval_required."
+          },
+          "unit_price": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Pinned price per dispatched call in the installation pricing currency. Null means unpriced, while zero means free."
+          }
+        },
+        "required": [
+          "toolset_id",
+          "revision_id",
+          "alias",
+          "name",
+          "classification",
+          "unit_price"
+        ]
+      },
+      "GatewayExecutionCapability": {
+        "type": "object",
+        "description": "Caller-specific gateway tool execution capability. This describes configured authority and certification, not a live quota reservation or guarantee of a successful run.",
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "description": "Whether an enabled route target has tool-call certification for a mode on this surface."
+          },
+          "default_toolsets_allowed": {
+            "type": "boolean",
+            "description": "Whether all default route toolsets can be resolved together for the caller."
+          },
+          "limits": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/WorkflowRunLimits"
+              }
+            ],
+            "description": "Effective configured route, caller and request limits, including defaults."
+          },
+          "certified_modes": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "unary",
+                "streaming"
+              ]
+            },
+            "description": "Modes with at least one enabled target certified for tool calls on the request surface."
+          },
+          "tools": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/GatewayExecutionTool"
+            },
+            "description": "Tools from published route toolsets the caller may resolve, including their classification and pinned price."
+          }
+        },
+        "required": [
+          "enabled",
+          "default_toolsets_allowed",
+          "limits",
+          "certified_modes",
+          "tools"
         ]
       }
     },

@@ -6,6 +6,472 @@
     "description": "OLP-specific extensions to the consumer inference API. Provider-native fields retain their provider contracts."
   },
   "paths": {
+      "/v1/models": {
+        "get": {
+          "operationId": "listOpenAIModels",
+          "summary": "List visible published routes as models",
+          "description": "Requires models_read scope. Gateway execution details are filtered for the caller and describe the surface of this endpoint.",
+          "security": [
+            {
+              "BearerAuth": []
+            }
+          ],
+          "responses": {
+            "200": {
+              "description": "Visible published models",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/OpenAIModelList"
+                  }
+                }
+              }
+            },
+            "401": {
+              "description": "Invalid, expired or revoked credential",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/InferenceError"
+                  }
+                }
+              }
+            },
+            "403": {
+              "description": "Caller lacks models_read scope",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/InferenceError"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "/v1/models/{model}": {
+        "get": {
+          "operationId": "getOpenAIModel",
+          "summary": "Get a published route as a model",
+          "description": "Requires models_read scope. Gateway execution details are filtered for the caller and describe the surface of this endpoint.",
+          "security": [
+            {
+              "BearerAuth": []
+            }
+          ],
+          "parameters": [
+            {
+              "name": "model",
+              "in": "path",
+              "required": true,
+              "description": "Published route slug",
+              "schema": {
+                "type": "string"
+              }
+            }
+          ],
+          "responses": {
+            "200": {
+              "description": "Published model",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/OpenAIModel"
+                  }
+                }
+              }
+            },
+            "401": {
+              "description": "Invalid, expired or revoked credential",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/InferenceError"
+                  }
+                }
+              }
+            },
+            "403": {
+              "description": "Caller lacks models_read scope",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/InferenceError"
+                  }
+                }
+              }
+            },
+            "404": {
+              "description": "Route is unavailable to the caller",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/InferenceError"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "/anthropic/v1/models": {
+        "get": {
+          "operationId": "listAnthropicModels",
+          "summary": "List visible published routes as models",
+          "description": "Requires models_read scope. Gateway execution details are filtered for the caller and describe the surface of this endpoint.",
+          "security": [
+            {
+              "BearerAuth": []
+            },
+            {
+              "AnthropicAPIKey": []
+            }
+          ],
+          "responses": {
+            "200": {
+              "description": "Visible published models",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/AnthropicModelList"
+                  }
+                }
+              }
+            },
+            "401": {
+              "description": "Invalid, expired or revoked credential",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/AnthropicInferenceError"
+                  }
+                }
+              }
+            },
+            "403": {
+              "description": "Caller lacks models_read scope",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/AnthropicInferenceError"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "/anthropic/v1/models/{model}": {
+        "get": {
+          "operationId": "getAnthropicModel",
+          "summary": "Get a published route as a model",
+          "description": "Requires models_read scope. Gateway execution details are filtered for the caller and describe the surface of this endpoint.",
+          "security": [
+            {
+              "BearerAuth": []
+            },
+            {
+              "AnthropicAPIKey": []
+            }
+          ],
+          "parameters": [
+            {
+              "name": "model",
+              "in": "path",
+              "required": true,
+              "description": "Published route slug",
+              "schema": {
+                "type": "string"
+              }
+            }
+          ],
+          "responses": {
+            "200": {
+              "description": "Published model",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/AnthropicModel"
+                  }
+                }
+              }
+            },
+            "401": {
+              "description": "Invalid, expired or revoked credential",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/AnthropicInferenceError"
+                  }
+                }
+              }
+            },
+            "403": {
+              "description": "Caller lacks models_read scope",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/AnthropicInferenceError"
+                  }
+                }
+              }
+            },
+            "404": {
+              "description": "Route is unavailable to the caller",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/AnthropicInferenceError"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "/gemini/v1/models": {
+        "get": {
+          "operationId": "listGeminiModels",
+          "summary": "List visible published routes as models",
+          "description": "Requires models_read scope. Gateway execution details are filtered for the caller and describe the surface of this endpoint.",
+          "security": [
+            {
+              "BearerAuth": []
+            },
+            {
+              "GeminiAPIKey": []
+            },
+            {
+              "GeminiQueryKey": []
+            }
+          ],
+          "responses": {
+            "200": {
+              "description": "Visible published models",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/GeminiModelList"
+                  }
+                }
+              }
+            },
+            "401": {
+              "description": "Invalid, expired or revoked credential",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/GeminiInferenceError"
+                  }
+                }
+              }
+            },
+            "403": {
+              "description": "Caller lacks models_read scope",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/GeminiInferenceError"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "/gemini/v1/models/{model}": {
+        "get": {
+          "operationId": "getGeminiModel",
+          "summary": "Get a published route as a model",
+          "description": "Requires models_read scope. Gateway execution details are filtered for the caller and describe the surface of this endpoint.",
+          "security": [
+            {
+              "BearerAuth": []
+            },
+            {
+              "GeminiAPIKey": []
+            },
+            {
+              "GeminiQueryKey": []
+            }
+          ],
+          "parameters": [
+            {
+              "name": "model",
+              "in": "path",
+              "required": true,
+              "description": "Published route slug",
+              "schema": {
+                "type": "string"
+              }
+            }
+          ],
+          "responses": {
+            "200": {
+              "description": "Published model",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/GeminiModel"
+                  }
+                }
+              }
+            },
+            "401": {
+              "description": "Invalid, expired or revoked credential",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/GeminiInferenceError"
+                  }
+                }
+              }
+            },
+            "403": {
+              "description": "Caller lacks models_read scope",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/GeminiInferenceError"
+                  }
+                }
+              }
+            },
+            "404": {
+              "description": "Route is unavailable to the caller",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/GeminiInferenceError"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "/gemini/v1beta/models": {
+        "get": {
+          "operationId": "listGeminiBetaModels",
+          "summary": "List visible published routes as models",
+          "description": "Requires models_read scope. Gateway execution details are filtered for the caller and describe the surface of this endpoint.",
+          "security": [
+            {
+              "BearerAuth": []
+            },
+            {
+              "GeminiAPIKey": []
+            },
+            {
+              "GeminiQueryKey": []
+            }
+          ],
+          "responses": {
+            "200": {
+              "description": "Visible published models",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/GeminiModelList"
+                  }
+                }
+              }
+            },
+            "401": {
+              "description": "Invalid, expired or revoked credential",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/GeminiInferenceError"
+                  }
+                }
+              }
+            },
+            "403": {
+              "description": "Caller lacks models_read scope",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/GeminiInferenceError"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "/gemini/v1beta/models/{model}": {
+        "get": {
+          "operationId": "getGeminiBetaModel",
+          "summary": "Get a published route as a model",
+          "description": "Requires models_read scope. Gateway execution details are filtered for the caller and describe the surface of this endpoint.",
+          "security": [
+            {
+              "BearerAuth": []
+            },
+            {
+              "GeminiAPIKey": []
+            },
+            {
+              "GeminiQueryKey": []
+            }
+          ],
+          "parameters": [
+            {
+              "name": "model",
+              "in": "path",
+              "required": true,
+              "description": "Published route slug",
+              "schema": {
+                "type": "string"
+              }
+            }
+          ],
+          "responses": {
+            "200": {
+              "description": "Published model",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/GeminiModel"
+                  }
+                }
+              }
+            },
+            "401": {
+              "description": "Invalid, expired or revoked credential",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/GeminiInferenceError"
+                  }
+                }
+              }
+            },
+            "403": {
+              "description": "Caller lacks models_read scope",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/GeminiInferenceError"
+                  }
+                }
+              }
+            },
+            "404": {
+              "description": "Route is unavailable to the caller",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/GeminiInferenceError"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
     "/v1/traces": {
       "post": {
         "operationId": "exportTraces",
@@ -1070,6 +1536,24 @@
   },
   "components": {
     "securitySchemes": {
+        "AnthropicAPIKey": {
+          "type": "apiKey",
+          "in": "header",
+          "name": "X-Api-Key",
+          "description": "API key with models_read scope."
+        },
+        "GeminiAPIKey": {
+          "type": "apiKey",
+          "in": "header",
+          "name": "X-Goog-Api-Key",
+          "description": "API key with models_read scope."
+        },
+        "GeminiQueryKey": {
+          "type": "apiKey",
+          "in": "query",
+          "name": "key",
+          "description": "API key with models_read scope."
+        },
       "BearerAuth": {
         "type": "http",
         "scheme": "bearer",
@@ -1077,6 +1561,311 @@
       }
     },
     "schemas": {
+        "ModelCapabilities": {
+          "type": "object",
+          "required": [
+            "operations",
+            "operation_support",
+            "input_modalities",
+            "output_modalities",
+            "context_length",
+            "max_output_tokens",
+            "supported_parameters",
+            "unknown"
+          ],
+          "properties": {
+            "operations": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "operation_support": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            },
+            "input_modalities": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "output_modalities": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "context_length": {
+              "type": "integer",
+              "format": "int64",
+              "nullable": true
+            },
+            "max_output_tokens": {
+              "type": "integer",
+              "format": "int64",
+              "nullable": true
+            },
+            "supported_parameters": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "nullable": true
+            },
+            "unknown": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "gateway_execution": {
+              "$ref": "#/components/schemas/GatewayExecutionCapability"
+            }
+          }
+        },
+        "GatewayExecutionCapability": {
+          "type": "object",
+          "description": "Caller-specific gateway tool execution capability. Omitted when the route does not offer gateway execution to this caller. This describes configured rights and certification, not a live quota reservation or a guarantee of a successful run.",
+          "required": [
+            "enabled",
+            "default_toolsets_allowed",
+            "limits",
+            "certified_modes",
+            "tools"
+          ],
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "description": "Whether at least one enabled route target has tool-call certification for a mode on this model discovery surface."
+            },
+            "default_toolsets_allowed": {
+              "type": "boolean",
+              "description": "Whether all default route toolsets can be resolved together for the caller. A request can select a permitted subset with olp_toolsets."
+            },
+            "limits": {
+              "allOf": [
+                {
+                  "$ref": "#/components/schemas/WorkflowRunLimits"
+                }
+              ],
+              "description": "Effective configured route and caller limits, including defaults. Request limits can only narrow these bounds."
+            },
+            "certified_modes": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "enum": [
+                  "unary",
+                  "streaming"
+                ]
+              },
+              "description": "Modes with at least one enabled target certified for tool calls on the discovery surface. Target selection and admission are still evaluated for each request."
+            },
+            "tools": {
+              "type": "array",
+              "items": {
+                "$ref": "#/components/schemas/GatewayExecutionTool"
+              },
+              "description": "Tools from published route toolsets that the caller may resolve. Toolsets the caller cannot resolve are omitted."
+            }
+          }
+        },
+        "GatewayExecutionTool": {
+          "type": "object",
+          "required": [
+            "toolset_id",
+            "revision_id",
+            "alias",
+            "name",
+            "classification",
+            "unit_price"
+          ],
+          "properties": {
+            "toolset_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "revision_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "alias": {
+              "type": "string",
+              "description": "Name exposed to the model during gateway execution."
+            },
+            "name": {
+              "type": "string",
+              "description": "Name in the published toolset."
+            },
+            "classification": {
+              "type": "string",
+              "enum": [
+                "read_only",
+                "approval_required"
+              ],
+              "description": "Operator classification. An unclassified tool is reported as approval_required."
+            },
+            "unit_price": {
+              "type": "string",
+              "nullable": true,
+              "description": "Pinned price per dispatched call in the installation pricing currency. Null means unpriced, while zero means free."
+            }
+          }
+        },
+        "OpenAIModel": {
+          "type": "object",
+          "required": [
+            "id",
+            "object",
+            "created",
+            "owned_by",
+            "capabilities"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "object": {
+              "type": "string",
+              "enum": [
+                "model"
+              ]
+            },
+            "created": {
+              "type": "integer",
+              "format": "int64"
+            },
+            "owned_by": {
+              "type": "string"
+            },
+            "capabilities": {
+              "$ref": "#/components/schemas/ModelCapabilities"
+            }
+          }
+        },
+        "OpenAIModelList": {
+          "type": "object",
+          "required": [
+            "object",
+            "data"
+          ],
+          "properties": {
+            "object": {
+              "type": "string",
+              "enum": [
+                "list"
+              ]
+            },
+            "data": {
+              "type": "array",
+              "items": {
+                "$ref": "#/components/schemas/OpenAIModel"
+              }
+            }
+          }
+        },
+        "AnthropicModel": {
+          "type": "object",
+          "required": [
+            "id",
+            "type",
+            "display_name",
+            "created_at",
+            "capabilities"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "enum": [
+                "model"
+              ]
+            },
+            "display_name": {
+              "type": "string"
+            },
+            "created_at": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "capabilities": {
+              "$ref": "#/components/schemas/ModelCapabilities"
+            }
+          }
+        },
+        "AnthropicModelList": {
+          "type": "object",
+          "required": [
+            "data",
+            "has_more",
+            "first_id",
+            "last_id"
+          ],
+          "properties": {
+            "data": {
+              "type": "array",
+              "items": {
+                "$ref": "#/components/schemas/AnthropicModel"
+              }
+            },
+            "has_more": {
+              "type": "boolean"
+            },
+            "first_id": {
+              "type": "string",
+              "nullable": true
+            },
+            "last_id": {
+              "type": "string",
+              "nullable": true
+            }
+          }
+        },
+        "GeminiModel": {
+          "type": "object",
+          "required": [
+            "name",
+            "displayName",
+            "supportedGenerationMethods",
+            "capabilities"
+          ],
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "displayName": {
+              "type": "string"
+            },
+            "supportedGenerationMethods": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "capabilities": {
+              "$ref": "#/components/schemas/ModelCapabilities"
+            }
+          }
+        },
+        "GeminiModelList": {
+          "type": "object",
+          "required": [
+            "models"
+          ],
+          "properties": {
+            "models": {
+              "type": "array",
+              "items": {
+                "$ref": "#/components/schemas/GeminiModel"
+              }
+            }
+          }
+        },
       "ChatPromptRequest": {
         "type": "object",
         "required": [

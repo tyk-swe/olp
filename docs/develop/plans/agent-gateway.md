@@ -147,12 +147,13 @@ a separate attempt, including refused or uncertain continuations.
 
 Operators classify tools as read-only or approval-required; upstream annotations
 are untrusted hints. Unclassified tools require approval. Guardrail deny rules override
-approval. Responses emits `mcp_list_tools`, `mcp_call` and
-`mcp_approval_request` where its certified contract supports them. Chat
-Completions, Anthropic and Gemini expose only the final answer; when approval
-is required they return a typed pause with an OLP continuation token, never a
-fabricated native tool success. Intermediate tool output is not streamed on
-these surfaces.
+approval. With `responses_mcp_items` enabled, Responses emits `mcp_list_tools`,
+`mcp_call` and `mcp_approval_request` only when every successful model step uses
+the certified built-in `openai-responses` contract. Other or mixed contracts
+return final output or an approval pause without MCP items. Chat Completions,
+Anthropic and Gemini expose only the final answer; when approval is required
+they return a typed pause with an OLP continuation token, never a fabricated
+native tool success. Intermediate tool output is not streamed on these surfaces.
 
 An approval expires in five minutes and binds the principal, project, run,
 tool/route revisions, argument and transcript digests, deadline and cost

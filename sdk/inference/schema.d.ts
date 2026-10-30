@@ -4,6 +4,166 @@
  */
 
 export interface paths {
+    "/v1/models": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List visible published routes as models
+         * @description Requires models_read scope. Gateway execution details are filtered for the caller and describe the surface of this endpoint.
+         */
+        get: operations["listOpenAIModels"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/models/{model}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get a published route as a model
+         * @description Requires models_read scope. Gateway execution details are filtered for the caller and describe the surface of this endpoint.
+         */
+        get: operations["getOpenAIModel"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/anthropic/v1/models": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List visible published routes as models
+         * @description Requires models_read scope. Gateway execution details are filtered for the caller and describe the surface of this endpoint.
+         */
+        get: operations["listAnthropicModels"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/anthropic/v1/models/{model}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get a published route as a model
+         * @description Requires models_read scope. Gateway execution details are filtered for the caller and describe the surface of this endpoint.
+         */
+        get: operations["getAnthropicModel"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/gemini/v1/models": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List visible published routes as models
+         * @description Requires models_read scope. Gateway execution details are filtered for the caller and describe the surface of this endpoint.
+         */
+        get: operations["listGeminiModels"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/gemini/v1/models/{model}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get a published route as a model
+         * @description Requires models_read scope. Gateway execution details are filtered for the caller and describe the surface of this endpoint.
+         */
+        get: operations["getGeminiModel"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/gemini/v1beta/models": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List visible published routes as models
+         * @description Requires models_read scope. Gateway execution details are filtered for the caller and describe the surface of this endpoint.
+         */
+        get: operations["listGeminiBetaModels"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/gemini/v1beta/models/{model}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get a published route as a model
+         * @description Requires models_read scope. Gateway execution details are filtered for the caller and describe the surface of this endpoint.
+         */
+        get: operations["getGeminiBetaModel"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/traces": {
         parameters: {
             query?: never;
@@ -208,6 +368,89 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        ModelCapabilities: {
+            operations: string[];
+            operation_support: {
+                [key: string]: string;
+            };
+            input_modalities: string[];
+            output_modalities: string[];
+            /** Format: int64 */
+            context_length: number | null;
+            /** Format: int64 */
+            max_output_tokens: number | null;
+            supported_parameters: string[] | null;
+            unknown: string[];
+            gateway_execution?: components["schemas"]["GatewayExecutionCapability"];
+        };
+        /** @description Caller-specific gateway tool execution capability. Omitted when the route does not offer gateway execution to this caller. This describes configured rights and certification, not a live quota reservation or a guarantee of a successful run. */
+        GatewayExecutionCapability: {
+            /** @description Whether at least one enabled route target has tool-call certification for a mode on this model discovery surface. */
+            enabled: boolean;
+            /** @description Whether all default route toolsets can be resolved together for the caller. A request can select a permitted subset with olp_toolsets. */
+            default_toolsets_allowed: boolean;
+            /** @description Effective configured route and caller limits, including defaults. Request limits can only narrow these bounds. */
+            limits: components["schemas"]["WorkflowRunLimits"];
+            /** @description Modes with at least one enabled target certified for tool calls on the discovery surface. Target selection and admission are still evaluated for each request. */
+            certified_modes: ("unary" | "streaming")[];
+            /** @description Tools from published route toolsets that the caller may resolve. Toolsets the caller cannot resolve are omitted. */
+            tools: components["schemas"]["GatewayExecutionTool"][];
+        };
+        GatewayExecutionTool: {
+            /** Format: uuid */
+            toolset_id: string;
+            /** Format: uuid */
+            revision_id: string;
+            /** @description Name exposed to the model during gateway execution. */
+            alias: string;
+            /** @description Name in the published toolset. */
+            name: string;
+            /**
+             * @description Operator classification. An unclassified tool is reported as approval_required.
+             * @enum {string}
+             */
+            classification: "read_only" | "approval_required";
+            /** @description Pinned price per dispatched call in the installation pricing currency. Null means unpriced, while zero means free. */
+            unit_price: string | null;
+        };
+        OpenAIModel: {
+            id: string;
+            /** @enum {string} */
+            object: "model";
+            /** Format: int64 */
+            created: number;
+            owned_by: string;
+            capabilities: components["schemas"]["ModelCapabilities"];
+        };
+        OpenAIModelList: {
+            /** @enum {string} */
+            object: "list";
+            data: components["schemas"]["OpenAIModel"][];
+        };
+        AnthropicModel: {
+            id: string;
+            /** @enum {string} */
+            type: "model";
+            display_name: string;
+            /** Format: date-time */
+            created_at: string;
+            capabilities: components["schemas"]["ModelCapabilities"];
+        };
+        AnthropicModelList: {
+            data: components["schemas"]["AnthropicModel"][];
+            has_more: boolean;
+            first_id: string | null;
+            last_id: string | null;
+        };
+        GeminiModel: {
+            name: string;
+            displayName: string;
+            supportedGenerationMethods: string[];
+            capabilities: components["schemas"]["ModelCapabilities"];
+        };
+        GeminiModelList: {
+            models: components["schemas"]["GeminiModel"][];
+        };
         ChatPromptRequest: {
             model: string;
             olp_prompt: components["schemas"]["PublishedPromptReference"];
@@ -570,6 +813,358 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    listOpenAIModels: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Visible published models */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OpenAIModelList"];
+                };
+            };
+            /** @description Invalid, expired or revoked credential */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InferenceError"];
+                };
+            };
+            /** @description Caller lacks models_read scope */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InferenceError"];
+                };
+            };
+        };
+    };
+    getOpenAIModel: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Published route slug */
+                model: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Published model */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OpenAIModel"];
+                };
+            };
+            /** @description Invalid, expired or revoked credential */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InferenceError"];
+                };
+            };
+            /** @description Caller lacks models_read scope */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InferenceError"];
+                };
+            };
+            /** @description Route is unavailable to the caller */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InferenceError"];
+                };
+            };
+        };
+    };
+    listAnthropicModels: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Visible published models */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnthropicModelList"];
+                };
+            };
+            /** @description Invalid, expired or revoked credential */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnthropicInferenceError"];
+                };
+            };
+            /** @description Caller lacks models_read scope */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnthropicInferenceError"];
+                };
+            };
+        };
+    };
+    getAnthropicModel: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Published route slug */
+                model: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Published model */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnthropicModel"];
+                };
+            };
+            /** @description Invalid, expired or revoked credential */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnthropicInferenceError"];
+                };
+            };
+            /** @description Caller lacks models_read scope */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnthropicInferenceError"];
+                };
+            };
+            /** @description Route is unavailable to the caller */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnthropicInferenceError"];
+                };
+            };
+        };
+    };
+    listGeminiModels: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Visible published models */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GeminiModelList"];
+                };
+            };
+            /** @description Invalid, expired or revoked credential */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GeminiInferenceError"];
+                };
+            };
+            /** @description Caller lacks models_read scope */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GeminiInferenceError"];
+                };
+            };
+        };
+    };
+    getGeminiModel: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Published route slug */
+                model: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Published model */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GeminiModel"];
+                };
+            };
+            /** @description Invalid, expired or revoked credential */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GeminiInferenceError"];
+                };
+            };
+            /** @description Caller lacks models_read scope */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GeminiInferenceError"];
+                };
+            };
+            /** @description Route is unavailable to the caller */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GeminiInferenceError"];
+                };
+            };
+        };
+    };
+    listGeminiBetaModels: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Visible published models */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GeminiModelList"];
+                };
+            };
+            /** @description Invalid, expired or revoked credential */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GeminiInferenceError"];
+                };
+            };
+            /** @description Caller lacks models_read scope */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GeminiInferenceError"];
+                };
+            };
+        };
+    };
+    getGeminiBetaModel: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Published route slug */
+                model: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Published model */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GeminiModel"];
+                };
+            };
+            /** @description Invalid, expired or revoked credential */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GeminiInferenceError"];
+                };
+            };
+            /** @description Caller lacks models_read scope */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GeminiInferenceError"];
+                };
+            };
+            /** @description Route is unavailable to the caller */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GeminiInferenceError"];
+                };
+            };
+        };
+    };
     exportTraces: {
         parameters: {
             query?: never;

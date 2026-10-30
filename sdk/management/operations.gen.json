@@ -2877,7 +2877,7 @@
             },
             "responses_mcp_items": {
               "type": "boolean",
-              "description": "Operator declaration that Responses clients support gateway-generated MCP output items. Requires gateway tool execution on a transformed route."
+              "description": "Operator declaration that Responses clients support gateway-generated MCP output items. Requires gateway tool execution on a transformed route. MCP items are emitted only when the run uses the certified built-in Responses contract; other contracts omit them."
             },
             "run_limits": {
               "oneOf": [
@@ -11354,7 +11354,7 @@
             },
             "responses_mcp_items": {
               "type": "boolean",
-              "description": "Operator declaration that Responses clients support gateway-generated MCP output items. Requires gateway tool execution on a transformed route."
+              "description": "Operator declaration that Responses clients support gateway-generated MCP output items. Requires gateway tool execution on a transformed route. MCP items are emitted only when the run uses the certified built-in Responses contract; other contracts omit them."
             },
             "run_limits": {
               "oneOf": [
@@ -12273,7 +12273,7 @@
             },
             "responses_mcp_items": {
               "type": "boolean",
-              "description": "Operator declaration that Responses clients support gateway-generated MCP output items. Requires gateway tool execution on a transformed route."
+              "description": "Operator declaration that Responses clients support gateway-generated MCP output items. Requires gateway tool execution on a transformed route. MCP items are emitted only when the run uses the certified built-in Responses contract; other contracts omit them."
             },
             "run_limits": {
               "oneOf": [
@@ -27327,7 +27327,7 @@
             },
             "responses_mcp_items": {
               "type": "boolean",
-              "description": "Operator declaration that Responses clients support gateway-generated MCP output items. Requires gateway tool execution on a transformed route."
+              "description": "Operator declaration that Responses clients support gateway-generated MCP output items. Requires gateway tool execution on a transformed route. MCP items are emitted only when the run uses the certified built-in Responses contract; other contracts omit them."
             },
             "run_limits": {
               "oneOf": [
@@ -34414,7 +34414,7 @@
             },
             "responses_mcp_items": {
               "type": "boolean",
-              "description": "Operator declaration that Responses clients support gateway-generated MCP output items. Requires gateway tool execution on a transformed route."
+              "description": "Operator declaration that Responses clients support gateway-generated MCP output items. Requires gateway tool execution on a transformed route. MCP items are emitted only when the run uses the certified built-in Responses contract; other contracts omit them."
             },
             "run_limits": {
               "oneOf": [
@@ -39146,7 +39146,7 @@
                 "null"
               ],
               "format": "uuid",
-              "description": "Optional current key authority, including provider-state permission. Provider-retained state is denied when no key is selected."
+              "description": "Select a current API key to evaluate its route and toolset authority, including provider-state permission. Provider-retained state and gateway tool execution are not eligible without a selected key. Simulation does not dispatch or reserve quota, so it does not guarantee admission."
             },
             "dialect": {
               "$ref": "#/$defs/SimulationDialect"
@@ -39162,7 +39162,7 @@
             "request": {
               "type": "object",
               "additionalProperties": true,
-              "description": "Optional native request. Omission retains tuple-only eligibility and reports not_inspected; no request or qualification is fabricated. A request is also counted for each target's model: unless estimated_input_tokens is supplied, every decision reports the input tokens that model counts, how they were counted and for which model family, and each target's context window is checked against them."
+              "description": "Optional native request. Omission retains tuple-only eligibility and reports not_inspected; no request or qualification is fabricated. A request is also counted for each target's model: unless estimated_input_tokens is supplied, every decision reports the input tokens that model counts, how they were counted and for which model family, and each target's context window is checked against them. For gateway tool execution, include olp_toolsets and olp_run_limits in the native request to inspect narrowed toolsets and run bounds."
             },
             "semantic_headers": {
               "$ref": "#/$defs/SimulationSemanticHeaders"
@@ -39491,7 +39491,8 @@
               "type": [
                 "string",
                 "null"
-              ]
+              ],
+              "description": "Select a current API key to evaluate its route and toolset authority, including provider-state permission. Provider-retained state and gateway tool execution are not eligible without a selected key. Simulation does not dispatch or reserve quota, so it does not guarantee admission."
             },
             "estimated_input_tokens": {
               "description": "Input tokens to weigh every target's context window by. When supplied it stands for every target, the request is not counted, and the decisions report no provenance for it.",
@@ -39595,7 +39596,7 @@
             "request": {
               "type": "object",
               "additionalProperties": true,
-              "description": "Native request for complete inspection. A route/model-only object selects tuple-only inspection and does not establish an interaction contract. A request is also counted for each target's model: unless estimated_input_tokens is supplied, every decision reports the input tokens that model counts, how they were counted and for which model family, and each target's context window is checked against them."
+              "description": "Native request for complete inspection. A route/model-only object selects tuple-only inspection and does not establish an interaction contract. A request is also counted for each target's model: unless estimated_input_tokens is supplied, every decision reports the input tokens that model counts, how they were counted and for which model family, and each target's context window is checked against them. For gateway tool execution, include olp_toolsets and olp_run_limits in the native request to inspect narrowed toolsets and run bounds."
             },
             "route": {
               "type": "string",
@@ -44218,7 +44219,7 @@
             },
             "responses_mcp_items": {
               "type": "boolean",
-              "description": "Operator declaration that Responses clients support gateway-generated MCP output items. Requires gateway tool execution on a transformed route."
+              "description": "Operator declaration that Responses clients support gateway-generated MCP output items. Requires gateway tool execution on a transformed route. MCP items are emitted only when the run uses the certified built-in Responses contract; other contracts omit them."
             },
             "run_limits": {
               "oneOf": [

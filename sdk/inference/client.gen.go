@@ -171,6 +171,21 @@ func (e AnthropicInferenceErrorType) Valid() bool {
 	}
 }
 
+// Defines values for AnthropicModelType.
+const (
+	AnthropicModelTypeModel AnthropicModelType = "model"
+)
+
+// Valid indicates whether the value is a known member of the AnthropicModelType enum.
+func (e AnthropicModelType) Valid() bool {
+	switch e {
+	case AnthropicModelTypeModel:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for DelegationRequestScopes.
 const (
 	Agents    DelegationRequestScopes = "agents"
@@ -186,6 +201,72 @@ func (e DelegationRequestScopes) Valid() bool {
 	case Inference:
 		return true
 	case Tools:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for GatewayExecutionCapabilityCertifiedModes.
+const (
+	Streaming GatewayExecutionCapabilityCertifiedModes = "streaming"
+	Unary     GatewayExecutionCapabilityCertifiedModes = "unary"
+)
+
+// Valid indicates whether the value is a known member of the GatewayExecutionCapabilityCertifiedModes enum.
+func (e GatewayExecutionCapabilityCertifiedModes) Valid() bool {
+	switch e {
+	case Streaming:
+		return true
+	case Unary:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for GatewayExecutionToolClassification.
+const (
+	ApprovalRequired GatewayExecutionToolClassification = "approval_required"
+	ReadOnly         GatewayExecutionToolClassification = "read_only"
+)
+
+// Valid indicates whether the value is a known member of the GatewayExecutionToolClassification enum.
+func (e GatewayExecutionToolClassification) Valid() bool {
+	switch e {
+	case ApprovalRequired:
+		return true
+	case ReadOnly:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for OpenAIModelObject.
+const (
+	OpenAIModelObjectModel OpenAIModelObject = "model"
+)
+
+// Valid indicates whether the value is a known member of the OpenAIModelObject enum.
+func (e OpenAIModelObject) Valid() bool {
+	switch e {
+	case OpenAIModelObjectModel:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for OpenAIModelListObject.
+const (
+	List OpenAIModelListObject = "list"
+)
+
+// Valid indicates whether the value is a known member of the OpenAIModelListObject enum.
+func (e OpenAIModelListObject) Valid() bool {
+	switch e {
+	case List:
 		return true
 	default:
 		return false
@@ -416,6 +497,26 @@ type AnthropicInferenceError struct {
 // AnthropicInferenceErrorType defines model for AnthropicInferenceError.Type.
 type AnthropicInferenceErrorType string
 
+// AnthropicModel defines model for AnthropicModel.
+type AnthropicModel struct {
+	Capabilities ModelCapabilities  `json:"capabilities"`
+	CreatedAt    time.Time          `json:"created_at"`
+	DisplayName  string             `json:"display_name"`
+	Id           string             `json:"id"`
+	Type         AnthropicModelType `json:"type"`
+}
+
+// AnthropicModelType defines model for AnthropicModel.Type.
+type AnthropicModelType string
+
+// AnthropicModelList defines model for AnthropicModelList.
+type AnthropicModelList struct {
+	Data    []AnthropicModel `json:"data"`
+	FirstId *string          `json:"first_id"`
+	HasMore bool             `json:"has_more"`
+	LastId  *string          `json:"last_id"`
+}
+
 // AnthropicPromptRequest defines model for AnthropicPromptRequest.
 type AnthropicPromptRequest struct {
 	MaxTokens int    `json:"max_tokens"`
@@ -505,6 +606,47 @@ type DelegationRequest struct {
 // DelegationRequestScopes defines model for DelegationRequest.Scopes.
 type DelegationRequestScopes string
 
+// GatewayExecutionCapability Caller-specific gateway tool execution capability. Omitted when the route does not offer gateway execution to this caller. This describes configured rights and certification, not a live quota reservation or a guarantee of a successful run.
+type GatewayExecutionCapability struct {
+	// CertifiedModes Modes with at least one enabled target certified for tool calls on the discovery surface. Target selection and admission are still evaluated for each request.
+	CertifiedModes []GatewayExecutionCapabilityCertifiedModes `json:"certified_modes"`
+
+	// DefaultToolsetsAllowed Whether all default route toolsets can be resolved together for the caller. A request can select a permitted subset with olp_toolsets.
+	DefaultToolsetsAllowed bool `json:"default_toolsets_allowed"`
+
+	// Enabled Whether at least one enabled route target has tool-call certification for a mode on this model discovery surface.
+	Enabled bool `json:"enabled"`
+
+	// Limits Effective configured route and caller limits, including defaults. Request limits can only narrow these bounds.
+	Limits WorkflowRunLimits `json:"limits"`
+
+	// Tools Tools from published route toolsets that the caller may resolve. Toolsets the caller cannot resolve are omitted.
+	Tools []GatewayExecutionTool `json:"tools"`
+}
+
+// GatewayExecutionCapabilityCertifiedModes defines model for GatewayExecutionCapability.CertifiedModes.
+type GatewayExecutionCapabilityCertifiedModes string
+
+// GatewayExecutionTool defines model for GatewayExecutionTool.
+type GatewayExecutionTool struct {
+	// Alias Name exposed to the model during gateway execution.
+	Alias string `json:"alias"`
+
+	// Classification Operator classification. An unclassified tool is reported as approval_required.
+	Classification GatewayExecutionToolClassification `json:"classification"`
+
+	// Name Name in the published toolset.
+	Name       string             `json:"name"`
+	RevisionId openapi_types.UUID `json:"revision_id"`
+	ToolsetId  openapi_types.UUID `json:"toolset_id"`
+
+	// UnitPrice Pinned price per dispatched call in the installation pricing currency. Null means unpriced, while zero means free.
+	UnitPrice *string `json:"unit_price"`
+}
+
+// GatewayExecutionToolClassification Operator classification. An unclassified tool is reported as approval_required.
+type GatewayExecutionToolClassification string
+
 // GeminiInferenceError defines model for GeminiInferenceError.
 type GeminiInferenceError struct {
 	Error struct {
@@ -520,6 +662,19 @@ type GeminiInferenceError struct {
 		Message string `json:"message"`
 		Status  string `json:"status"`
 	} `json:"error"`
+}
+
+// GeminiModel defines model for GeminiModel.
+type GeminiModel struct {
+	Capabilities               ModelCapabilities `json:"capabilities"`
+	DisplayName                string            `json:"displayName"`
+	Name                       string            `json:"name"`
+	SupportedGenerationMethods []string          `json:"supportedGenerationMethods"`
+}
+
+// GeminiModelList defines model for GeminiModelList.
+type GeminiModelList struct {
+	Models []GeminiModel `json:"models"`
 }
 
 // GeminiPromptRequest defines model for GeminiPromptRequest.
@@ -559,6 +714,21 @@ type InferenceError struct {
 	} `json:"error"`
 }
 
+// ModelCapabilities defines model for ModelCapabilities.
+type ModelCapabilities struct {
+	ContextLength *int64 `json:"context_length"`
+
+	// GatewayExecution Caller-specific gateway tool execution capability. Omitted when the route does not offer gateway execution to this caller. This describes configured rights and certification, not a live quota reservation or a guarantee of a successful run.
+	GatewayExecution    *GatewayExecutionCapability `json:"gateway_execution,omitempty"`
+	InputModalities     []string                    `json:"input_modalities"`
+	MaxOutputTokens     *int64                      `json:"max_output_tokens"`
+	OperationSupport    map[string]string           `json:"operation_support"`
+	Operations          []string                    `json:"operations"`
+	OutputModalities    []string                    `json:"output_modalities"`
+	SupportedParameters *[]string                   `json:"supported_parameters"`
+	Unknown             []string                    `json:"unknown"`
+}
+
 // NativeResponsesPromptReference A provider-owned prompt reference. Fields and variables follow the provider contract.
 type NativeResponsesPromptReference struct {
 	Id                   string                 `json:"id"`
@@ -583,6 +753,27 @@ type OLPResponsesPromptRequest struct {
 	Prompt               ResponsesPublishedPromptReference `json:"prompt"`
 	AdditionalProperties map[string]interface{}            `json:"-"`
 }
+
+// OpenAIModel defines model for OpenAIModel.
+type OpenAIModel struct {
+	Capabilities ModelCapabilities `json:"capabilities"`
+	Created      int64             `json:"created"`
+	Id           string            `json:"id"`
+	Object       OpenAIModelObject `json:"object"`
+	OwnedBy      string            `json:"owned_by"`
+}
+
+// OpenAIModelObject defines model for OpenAIModel.Object.
+type OpenAIModelObject string
+
+// OpenAIModelList defines model for OpenAIModelList.
+type OpenAIModelList struct {
+	Data   []OpenAIModel         `json:"data"`
+	Object OpenAIModelListObject `json:"object"`
+}
+
+// OpenAIModelListObject defines model for OpenAIModelList.Object.
+type OpenAIModelListObject string
 
 // PromptLabelReference defines model for PromptLabelReference.
 type PromptLabelReference struct {
@@ -2944,6 +3135,48 @@ type ClientInterface interface {
 	// Corresponds with POST /anthropic/v1/messages (the `CreateAnthropicMessageWithPrompt` operationId).
 	CreateAnthropicMessageWithPrompt(ctx context.Context, params *CreateAnthropicMessageWithPromptParams, body CreateAnthropicMessageWithPromptJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
+	// ListAnthropicModels List visible published routes as models
+	//
+	// Requires models_read scope. Gateway execution details are filtered for the caller and describe the surface of this endpoint.
+	//
+	// Corresponds with GET /anthropic/v1/models (the `ListAnthropicModels` operationId).
+	ListAnthropicModels(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// GetAnthropicModel Get a published route as a model
+	//
+	// Requires models_read scope. Gateway execution details are filtered for the caller and describe the surface of this endpoint.
+	//
+	// Corresponds with GET /anthropic/v1/models/{model} (the `GetAnthropicModel` operationId).
+	GetAnthropicModel(ctx context.Context, model string, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ListGeminiModels List visible published routes as models
+	//
+	// Requires models_read scope. Gateway execution details are filtered for the caller and describe the surface of this endpoint.
+	//
+	// Corresponds with GET /gemini/v1/models (the `ListGeminiModels` operationId).
+	ListGeminiModels(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// GetGeminiModel Get a published route as a model
+	//
+	// Requires models_read scope. Gateway execution details are filtered for the caller and describe the surface of this endpoint.
+	//
+	// Corresponds with GET /gemini/v1/models/{model} (the `GetGeminiModel` operationId).
+	GetGeminiModel(ctx context.Context, model string, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ListGeminiBetaModels List visible published routes as models
+	//
+	// Requires models_read scope. Gateway execution details are filtered for the caller and describe the surface of this endpoint.
+	//
+	// Corresponds with GET /gemini/v1beta/models (the `ListGeminiBetaModels` operationId).
+	ListGeminiBetaModels(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// GetGeminiBetaModel Get a published route as a model
+	//
+	// Requires models_read scope. Gateway execution details are filtered for the caller and describe the surface of this endpoint.
+	//
+	// Corresponds with GET /gemini/v1beta/models/{model} (the `GetGeminiBetaModel` operationId).
+	GetGeminiBetaModel(ctx context.Context, model string, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// CreateGeminiContentWithPromptWithBody Generate Gemini content using a published OLP prompt
 	//
 	// For transformed routes, a published prompt replaces explicit contents. Gateway tool execution can select a subset of the route's published toolsets.
@@ -3015,6 +3248,20 @@ type ClientInterface interface {
 	//
 	// Corresponds with POST /v1/delegations (the `CreateDelegation` operationId).
 	CreateDelegation(ctx context.Context, params *CreateDelegationParams, body CreateDelegationJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ListOpenAIModels List visible published routes as models
+	//
+	// Requires models_read scope. Gateway execution details are filtered for the caller and describe the surface of this endpoint.
+	//
+	// Corresponds with GET /v1/models (the `ListOpenAIModels` operationId).
+	ListOpenAIModels(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// GetOpenAIModel Get a published route as a model
+	//
+	// Requires models_read scope. Gateway execution details are filtered for the caller and describe the surface of this endpoint.
+	//
+	// Corresponds with GET /v1/models/{model} (the `GetOpenAIModel` operationId).
+	GetOpenAIModel(ctx context.Context, model string, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// CreateResponseWithPromptWithBody Create a response using a published OLP prompt
 	//
@@ -3144,6 +3391,108 @@ func (c *Client) CreateAnthropicMessageWithPromptWithBody(ctx context.Context, p
 // Corresponds with POST /anthropic/v1/messages (the `CreateAnthropicMessageWithPrompt` operationId).
 func (c *Client) CreateAnthropicMessageWithPrompt(ctx context.Context, params *CreateAnthropicMessageWithPromptParams, body CreateAnthropicMessageWithPromptJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewCreateAnthropicMessageWithPromptRequest(c.Server, params, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// ListAnthropicModels List visible published routes as models
+//
+// Requires models_read scope. Gateway execution details are filtered for the caller and describe the surface of this endpoint.
+//
+// Corresponds with GET /anthropic/v1/models (the `ListAnthropicModels` operationId).
+func (c *Client) ListAnthropicModels(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewListAnthropicModelsRequest(c.Server)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// GetAnthropicModel Get a published route as a model
+//
+// Requires models_read scope. Gateway execution details are filtered for the caller and describe the surface of this endpoint.
+//
+// Corresponds with GET /anthropic/v1/models/{model} (the `GetAnthropicModel` operationId).
+func (c *Client) GetAnthropicModel(ctx context.Context, model string, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetAnthropicModelRequest(c.Server, model)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// ListGeminiModels List visible published routes as models
+//
+// Requires models_read scope. Gateway execution details are filtered for the caller and describe the surface of this endpoint.
+//
+// Corresponds with GET /gemini/v1/models (the `ListGeminiModels` operationId).
+func (c *Client) ListGeminiModels(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewListGeminiModelsRequest(c.Server)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// GetGeminiModel Get a published route as a model
+//
+// Requires models_read scope. Gateway execution details are filtered for the caller and describe the surface of this endpoint.
+//
+// Corresponds with GET /gemini/v1/models/{model} (the `GetGeminiModel` operationId).
+func (c *Client) GetGeminiModel(ctx context.Context, model string, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetGeminiModelRequest(c.Server, model)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// ListGeminiBetaModels List visible published routes as models
+//
+// Requires models_read scope. Gateway execution details are filtered for the caller and describe the surface of this endpoint.
+//
+// Corresponds with GET /gemini/v1beta/models (the `ListGeminiBetaModels` operationId).
+func (c *Client) ListGeminiBetaModels(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewListGeminiBetaModelsRequest(c.Server)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// GetGeminiBetaModel Get a published route as a model
+//
+// Requires models_read scope. Gateway execution details are filtered for the caller and describe the surface of this endpoint.
+//
+// Corresponds with GET /gemini/v1beta/models/{model} (the `GetGeminiBetaModel` operationId).
+func (c *Client) GetGeminiBetaModel(ctx context.Context, model string, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetGeminiBetaModelRequest(c.Server, model)
 	if err != nil {
 		return nil, err
 	}
@@ -3296,6 +3645,40 @@ func (c *Client) CreateDelegationWithBody(ctx context.Context, params *CreateDel
 // Corresponds with POST /v1/delegations (the `CreateDelegation` operationId).
 func (c *Client) CreateDelegation(ctx context.Context, params *CreateDelegationParams, body CreateDelegationJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewCreateDelegationRequest(c.Server, params, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// ListOpenAIModels List visible published routes as models
+//
+// Requires models_read scope. Gateway execution details are filtered for the caller and describe the surface of this endpoint.
+//
+// Corresponds with GET /v1/models (the `ListOpenAIModels` operationId).
+func (c *Client) ListOpenAIModels(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewListOpenAIModelsRequest(c.Server)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// GetOpenAIModel Get a published route as a model
+//
+// Requires models_read scope. Gateway execution details are filtered for the caller and describe the surface of this endpoint.
+//
+// Corresponds with GET /v1/models/{model} (the `GetOpenAIModel` operationId).
+func (c *Client) GetOpenAIModel(ctx context.Context, model string, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetOpenAIModelRequest(c.Server, model)
 	if err != nil {
 		return nil, err
 	}
@@ -3528,6 +3911,189 @@ func NewCreateAnthropicMessageWithPromptRequestWithBody(server string, params *C
 			req.Header.Set("X-OLP-Agent-Identity", headerParam0)
 		}
 
+	}
+
+	return req, nil
+}
+
+// NewListAnthropicModelsRequest constructs an http.Request for the ListAnthropicModels method
+func NewListAnthropicModelsRequest(server string) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/anthropic/v1/models")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewGetAnthropicModelRequest constructs an http.Request for the GetAnthropicModel method
+func NewGetAnthropicModelRequest(server string, model string) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "model", model, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/anthropic/v1/models/%s", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewListGeminiModelsRequest constructs an http.Request for the ListGeminiModels method
+func NewListGeminiModelsRequest(server string) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/gemini/v1/models")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewGetGeminiModelRequest constructs an http.Request for the GetGeminiModel method
+func NewGetGeminiModelRequest(server string, model string) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "model", model, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/gemini/v1/models/%s", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewListGeminiBetaModelsRequest constructs an http.Request for the ListGeminiBetaModels method
+func NewListGeminiBetaModelsRequest(server string) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/gemini/v1beta/models")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewGetGeminiBetaModelRequest constructs an http.Request for the GetGeminiBetaModel method
+func NewGetGeminiBetaModelRequest(server string, model string) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "model", model, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/gemini/v1beta/models/%s", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
 	}
 
 	return req, nil
@@ -3778,6 +4344,67 @@ func NewCreateDelegationRequestWithBody(server string, params *CreateDelegationP
 	return req, nil
 }
 
+// NewListOpenAIModelsRequest constructs an http.Request for the ListOpenAIModels method
+func NewListOpenAIModelsRequest(server string) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v1/models")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewGetOpenAIModelRequest constructs an http.Request for the GetOpenAIModel method
+func NewGetOpenAIModelRequest(server string, model string) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "model", model, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/v1/models/%s", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
 // NewCreateResponseWithPromptRequest calls the generic CreateResponseWithPrompt builder with application/json body
 func NewCreateResponseWithPromptRequest(server string, params *CreateResponseWithPromptParams, body CreateResponseWithPromptJSONRequestBody) (*http.Request, error) {
 	var bodyReader io.Reader
@@ -3975,6 +4602,60 @@ type ClientWithResponsesInterface interface {
 	// Corresponds with POST /anthropic/v1/messages (the `CreateAnthropicMessageWithPrompt` operationId).
 	CreateAnthropicMessageWithPromptWithResponse(ctx context.Context, params *CreateAnthropicMessageWithPromptParams, body CreateAnthropicMessageWithPromptJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateAnthropicMessageWithPromptResponse, error)
 
+	// ListAnthropicModelsWithResponse List visible published routes as models
+	//
+	// Requires models_read scope. Gateway execution details are filtered for the caller and describe the surface of this endpoint.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with GET /anthropic/v1/models (the `ListAnthropicModels` operationId).
+	ListAnthropicModelsWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*ListAnthropicModelsResponse, error)
+
+	// GetAnthropicModelWithResponse Get a published route as a model
+	//
+	// Requires models_read scope. Gateway execution details are filtered for the caller and describe the surface of this endpoint.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with GET /anthropic/v1/models/{model} (the `GetAnthropicModel` operationId).
+	GetAnthropicModelWithResponse(ctx context.Context, model string, reqEditors ...RequestEditorFn) (*GetAnthropicModelResponse, error)
+
+	// ListGeminiModelsWithResponse List visible published routes as models
+	//
+	// Requires models_read scope. Gateway execution details are filtered for the caller and describe the surface of this endpoint.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with GET /gemini/v1/models (the `ListGeminiModels` operationId).
+	ListGeminiModelsWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*ListGeminiModelsResponse, error)
+
+	// GetGeminiModelWithResponse Get a published route as a model
+	//
+	// Requires models_read scope. Gateway execution details are filtered for the caller and describe the surface of this endpoint.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with GET /gemini/v1/models/{model} (the `GetGeminiModel` operationId).
+	GetGeminiModelWithResponse(ctx context.Context, model string, reqEditors ...RequestEditorFn) (*GetGeminiModelResponse, error)
+
+	// ListGeminiBetaModelsWithResponse List visible published routes as models
+	//
+	// Requires models_read scope. Gateway execution details are filtered for the caller and describe the surface of this endpoint.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with GET /gemini/v1beta/models (the `ListGeminiBetaModels` operationId).
+	ListGeminiBetaModelsWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*ListGeminiBetaModelsResponse, error)
+
+	// GetGeminiBetaModelWithResponse Get a published route as a model
+	//
+	// Requires models_read scope. Gateway execution details are filtered for the caller and describe the surface of this endpoint.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with GET /gemini/v1beta/models/{model} (the `GetGeminiBetaModel` operationId).
+	GetGeminiBetaModelWithResponse(ctx context.Context, model string, reqEditors ...RequestEditorFn) (*GetGeminiBetaModelResponse, error)
+
 	// CreateGeminiContentWithPromptWithBodyWithResponse Generate Gemini content using a published OLP prompt
 	//
 	// For transformed routes, a published prompt replaces explicit contents. Gateway tool execution can select a subset of the route's published toolsets.
@@ -4046,6 +4727,24 @@ type ClientWithResponsesInterface interface {
 	//
 	// Corresponds with POST /v1/delegations (the `CreateDelegation` operationId).
 	CreateDelegationWithResponse(ctx context.Context, params *CreateDelegationParams, body CreateDelegationJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateDelegationResponse, error)
+
+	// ListOpenAIModelsWithResponse List visible published routes as models
+	//
+	// Requires models_read scope. Gateway execution details are filtered for the caller and describe the surface of this endpoint.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with GET /v1/models (the `ListOpenAIModels` operationId).
+	ListOpenAIModelsWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*ListOpenAIModelsResponse, error)
+
+	// GetOpenAIModelWithResponse Get a published route as a model
+	//
+	// Requires models_read scope. Gateway execution details are filtered for the caller and describe the surface of this endpoint.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with GET /v1/models/{model} (the `GetOpenAIModel` operationId).
+	GetOpenAIModelWithResponse(ctx context.Context, model string, reqEditors ...RequestEditorFn) (*GetOpenAIModelResponse, error)
 
 	// CreateResponseWithPromptWithBodyWithResponse Create a response using a published OLP prompt
 	//
@@ -4290,6 +4989,357 @@ func (r CreateAnthropicMessageWithPromptResponse) StatusCode() int {
 
 // ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
 func (r CreateAnthropicMessageWithPromptResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type ListAnthropicModelsResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *AnthropicModelList
+	// JSON401 the response for an HTTP 401 `application/json` response
+	JSON401 *AnthropicInferenceError
+	// JSON403 the response for an HTTP 403 `application/json` response
+	JSON403 *AnthropicInferenceError
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r ListAnthropicModelsResponse) GetJSON200() *AnthropicModelList {
+	return r.JSON200
+}
+
+// GetJSON401 returns the response for an HTTP 401 `application/json` response
+func (r ListAnthropicModelsResponse) GetJSON401() *AnthropicInferenceError {
+	return r.JSON401
+}
+
+// GetJSON403 returns the response for an HTTP 403 `application/json` response
+func (r ListAnthropicModelsResponse) GetJSON403() *AnthropicInferenceError {
+	return r.JSON403
+}
+
+// GetBody returns the raw response body bytes
+func (r ListAnthropicModelsResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r ListAnthropicModelsResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ListAnthropicModelsResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r ListAnthropicModelsResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type GetAnthropicModelResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *AnthropicModel
+	// JSON401 the response for an HTTP 401 `application/json` response
+	JSON401 *AnthropicInferenceError
+	// JSON403 the response for an HTTP 403 `application/json` response
+	JSON403 *AnthropicInferenceError
+	// JSON404 the response for an HTTP 404 `application/json` response
+	JSON404 *AnthropicInferenceError
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r GetAnthropicModelResponse) GetJSON200() *AnthropicModel {
+	return r.JSON200
+}
+
+// GetJSON401 returns the response for an HTTP 401 `application/json` response
+func (r GetAnthropicModelResponse) GetJSON401() *AnthropicInferenceError {
+	return r.JSON401
+}
+
+// GetJSON403 returns the response for an HTTP 403 `application/json` response
+func (r GetAnthropicModelResponse) GetJSON403() *AnthropicInferenceError {
+	return r.JSON403
+}
+
+// GetJSON404 returns the response for an HTTP 404 `application/json` response
+func (r GetAnthropicModelResponse) GetJSON404() *AnthropicInferenceError {
+	return r.JSON404
+}
+
+// GetBody returns the raw response body bytes
+func (r GetAnthropicModelResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r GetAnthropicModelResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetAnthropicModelResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r GetAnthropicModelResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type ListGeminiModelsResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *GeminiModelList
+	// JSON401 the response for an HTTP 401 `application/json` response
+	JSON401 *GeminiInferenceError
+	// JSON403 the response for an HTTP 403 `application/json` response
+	JSON403 *GeminiInferenceError
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r ListGeminiModelsResponse) GetJSON200() *GeminiModelList {
+	return r.JSON200
+}
+
+// GetJSON401 returns the response for an HTTP 401 `application/json` response
+func (r ListGeminiModelsResponse) GetJSON401() *GeminiInferenceError {
+	return r.JSON401
+}
+
+// GetJSON403 returns the response for an HTTP 403 `application/json` response
+func (r ListGeminiModelsResponse) GetJSON403() *GeminiInferenceError {
+	return r.JSON403
+}
+
+// GetBody returns the raw response body bytes
+func (r ListGeminiModelsResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r ListGeminiModelsResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ListGeminiModelsResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r ListGeminiModelsResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type GetGeminiModelResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *GeminiModel
+	// JSON401 the response for an HTTP 401 `application/json` response
+	JSON401 *GeminiInferenceError
+	// JSON403 the response for an HTTP 403 `application/json` response
+	JSON403 *GeminiInferenceError
+	// JSON404 the response for an HTTP 404 `application/json` response
+	JSON404 *GeminiInferenceError
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r GetGeminiModelResponse) GetJSON200() *GeminiModel {
+	return r.JSON200
+}
+
+// GetJSON401 returns the response for an HTTP 401 `application/json` response
+func (r GetGeminiModelResponse) GetJSON401() *GeminiInferenceError {
+	return r.JSON401
+}
+
+// GetJSON403 returns the response for an HTTP 403 `application/json` response
+func (r GetGeminiModelResponse) GetJSON403() *GeminiInferenceError {
+	return r.JSON403
+}
+
+// GetJSON404 returns the response for an HTTP 404 `application/json` response
+func (r GetGeminiModelResponse) GetJSON404() *GeminiInferenceError {
+	return r.JSON404
+}
+
+// GetBody returns the raw response body bytes
+func (r GetGeminiModelResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r GetGeminiModelResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetGeminiModelResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r GetGeminiModelResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type ListGeminiBetaModelsResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *GeminiModelList
+	// JSON401 the response for an HTTP 401 `application/json` response
+	JSON401 *GeminiInferenceError
+	// JSON403 the response for an HTTP 403 `application/json` response
+	JSON403 *GeminiInferenceError
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r ListGeminiBetaModelsResponse) GetJSON200() *GeminiModelList {
+	return r.JSON200
+}
+
+// GetJSON401 returns the response for an HTTP 401 `application/json` response
+func (r ListGeminiBetaModelsResponse) GetJSON401() *GeminiInferenceError {
+	return r.JSON401
+}
+
+// GetJSON403 returns the response for an HTTP 403 `application/json` response
+func (r ListGeminiBetaModelsResponse) GetJSON403() *GeminiInferenceError {
+	return r.JSON403
+}
+
+// GetBody returns the raw response body bytes
+func (r ListGeminiBetaModelsResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r ListGeminiBetaModelsResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ListGeminiBetaModelsResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r ListGeminiBetaModelsResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type GetGeminiBetaModelResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *GeminiModel
+	// JSON401 the response for an HTTP 401 `application/json` response
+	JSON401 *GeminiInferenceError
+	// JSON403 the response for an HTTP 403 `application/json` response
+	JSON403 *GeminiInferenceError
+	// JSON404 the response for an HTTP 404 `application/json` response
+	JSON404 *GeminiInferenceError
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r GetGeminiBetaModelResponse) GetJSON200() *GeminiModel {
+	return r.JSON200
+}
+
+// GetJSON401 returns the response for an HTTP 401 `application/json` response
+func (r GetGeminiBetaModelResponse) GetJSON401() *GeminiInferenceError {
+	return r.JSON401
+}
+
+// GetJSON403 returns the response for an HTTP 403 `application/json` response
+func (r GetGeminiBetaModelResponse) GetJSON403() *GeminiInferenceError {
+	return r.JSON403
+}
+
+// GetJSON404 returns the response for an HTTP 404 `application/json` response
+func (r GetGeminiBetaModelResponse) GetJSON404() *GeminiInferenceError {
+	return r.JSON404
+}
+
+// GetBody returns the raw response body bytes
+func (r GetGeminiBetaModelResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r GetGeminiBetaModelResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetGeminiBetaModelResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r GetGeminiBetaModelResponse) ContentType() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Header.Get("Content-Type")
 	}
@@ -4635,6 +5685,123 @@ func (r CreateDelegationResponse) ContentType() string {
 	return ""
 }
 
+type ListOpenAIModelsResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *OpenAIModelList
+	// JSON401 the response for an HTTP 401 `application/json` response
+	JSON401 *InferenceError
+	// JSON403 the response for an HTTP 403 `application/json` response
+	JSON403 *InferenceError
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r ListOpenAIModelsResponse) GetJSON200() *OpenAIModelList {
+	return r.JSON200
+}
+
+// GetJSON401 returns the response for an HTTP 401 `application/json` response
+func (r ListOpenAIModelsResponse) GetJSON401() *InferenceError {
+	return r.JSON401
+}
+
+// GetJSON403 returns the response for an HTTP 403 `application/json` response
+func (r ListOpenAIModelsResponse) GetJSON403() *InferenceError {
+	return r.JSON403
+}
+
+// GetBody returns the raw response body bytes
+func (r ListOpenAIModelsResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r ListOpenAIModelsResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ListOpenAIModelsResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r ListOpenAIModelsResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type GetOpenAIModelResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *OpenAIModel
+	// JSON401 the response for an HTTP 401 `application/json` response
+	JSON401 *InferenceError
+	// JSON403 the response for an HTTP 403 `application/json` response
+	JSON403 *InferenceError
+	// JSON404 the response for an HTTP 404 `application/json` response
+	JSON404 *InferenceError
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r GetOpenAIModelResponse) GetJSON200() *OpenAIModel {
+	return r.JSON200
+}
+
+// GetJSON401 returns the response for an HTTP 401 `application/json` response
+func (r GetOpenAIModelResponse) GetJSON401() *InferenceError {
+	return r.JSON401
+}
+
+// GetJSON403 returns the response for an HTTP 403 `application/json` response
+func (r GetOpenAIModelResponse) GetJSON403() *InferenceError {
+	return r.JSON403
+}
+
+// GetJSON404 returns the response for an HTTP 404 `application/json` response
+func (r GetOpenAIModelResponse) GetJSON404() *InferenceError {
+	return r.JSON404
+}
+
+// GetBody returns the raw response body bytes
+func (r GetOpenAIModelResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r GetOpenAIModelResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetOpenAIModelResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r GetOpenAIModelResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
 type CreateResponseWithPromptResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
@@ -4849,6 +6016,96 @@ func (c *ClientWithResponses) CreateAnthropicMessageWithPromptWithResponse(ctx c
 	return ParseCreateAnthropicMessageWithPromptResponse(rsp)
 }
 
+// ListAnthropicModelsWithResponse List visible published routes as models
+//
+// Requires models_read scope. Gateway execution details are filtered for the caller and describe the surface of this endpoint.
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with GET /anthropic/v1/models (the `ListAnthropicModels` operationId).
+func (c *ClientWithResponses) ListAnthropicModelsWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*ListAnthropicModelsResponse, error) {
+	rsp, err := c.ListAnthropicModels(ctx, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseListAnthropicModelsResponse(rsp)
+}
+
+// GetAnthropicModelWithResponse Get a published route as a model
+//
+// Requires models_read scope. Gateway execution details are filtered for the caller and describe the surface of this endpoint.
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with GET /anthropic/v1/models/{model} (the `GetAnthropicModel` operationId).
+func (c *ClientWithResponses) GetAnthropicModelWithResponse(ctx context.Context, model string, reqEditors ...RequestEditorFn) (*GetAnthropicModelResponse, error) {
+	rsp, err := c.GetAnthropicModel(ctx, model, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetAnthropicModelResponse(rsp)
+}
+
+// ListGeminiModelsWithResponse List visible published routes as models
+//
+// Requires models_read scope. Gateway execution details are filtered for the caller and describe the surface of this endpoint.
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with GET /gemini/v1/models (the `ListGeminiModels` operationId).
+func (c *ClientWithResponses) ListGeminiModelsWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*ListGeminiModelsResponse, error) {
+	rsp, err := c.ListGeminiModels(ctx, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseListGeminiModelsResponse(rsp)
+}
+
+// GetGeminiModelWithResponse Get a published route as a model
+//
+// Requires models_read scope. Gateway execution details are filtered for the caller and describe the surface of this endpoint.
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with GET /gemini/v1/models/{model} (the `GetGeminiModel` operationId).
+func (c *ClientWithResponses) GetGeminiModelWithResponse(ctx context.Context, model string, reqEditors ...RequestEditorFn) (*GetGeminiModelResponse, error) {
+	rsp, err := c.GetGeminiModel(ctx, model, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetGeminiModelResponse(rsp)
+}
+
+// ListGeminiBetaModelsWithResponse List visible published routes as models
+//
+// Requires models_read scope. Gateway execution details are filtered for the caller and describe the surface of this endpoint.
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with GET /gemini/v1beta/models (the `ListGeminiBetaModels` operationId).
+func (c *ClientWithResponses) ListGeminiBetaModelsWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*ListGeminiBetaModelsResponse, error) {
+	rsp, err := c.ListGeminiBetaModels(ctx, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseListGeminiBetaModelsResponse(rsp)
+}
+
+// GetGeminiBetaModelWithResponse Get a published route as a model
+//
+// Requires models_read scope. Gateway execution details are filtered for the caller and describe the surface of this endpoint.
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with GET /gemini/v1beta/models/{model} (the `GetGeminiBetaModel` operationId).
+func (c *ClientWithResponses) GetGeminiBetaModelWithResponse(ctx context.Context, model string, reqEditors ...RequestEditorFn) (*GetGeminiBetaModelResponse, error) {
+	rsp, err := c.GetGeminiBetaModel(ctx, model, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetGeminiBetaModelResponse(rsp)
+}
+
 // CreateGeminiContentWithPromptWithBodyWithResponse Generate Gemini content using a published OLP prompt
 //
 // For transformed routes, a published prompt replaces explicit contents. Gateway tool execution can select a subset of the route's published toolsets.
@@ -4967,6 +6224,36 @@ func (c *ClientWithResponses) CreateDelegationWithResponse(ctx context.Context, 
 		return nil, err
 	}
 	return ParseCreateDelegationResponse(rsp)
+}
+
+// ListOpenAIModelsWithResponse List visible published routes as models
+//
+// Requires models_read scope. Gateway execution details are filtered for the caller and describe the surface of this endpoint.
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with GET /v1/models (the `ListOpenAIModels` operationId).
+func (c *ClientWithResponses) ListOpenAIModelsWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*ListOpenAIModelsResponse, error) {
+	rsp, err := c.ListOpenAIModels(ctx, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseListOpenAIModelsResponse(rsp)
+}
+
+// GetOpenAIModelWithResponse Get a published route as a model
+//
+// Requires models_read scope. Gateway execution details are filtered for the caller and describe the surface of this endpoint.
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with GET /v1/models/{model} (the `GetOpenAIModel` operationId).
+func (c *ClientWithResponses) GetOpenAIModelWithResponse(ctx context.Context, model string, reqEditors ...RequestEditorFn) (*GetOpenAIModelResponse, error) {
+	rsp, err := c.GetOpenAIModel(ctx, model, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetOpenAIModelResponse(rsp)
 }
 
 // CreateResponseWithPromptWithBodyWithResponse Create a response using a published OLP prompt
@@ -5213,6 +6500,267 @@ func ParseCreateAnthropicMessageWithPromptResponse(rsp *http.Response) (*CreateA
 
 	case rsp.StatusCode == 200:
 		// Content-type (text/event-stream) unsupported
+
+	}
+
+	return response, nil
+}
+
+// ParseListAnthropicModelsResponse parses an HTTP response from a ListAnthropicModelsWithResponse call
+func ParseListAnthropicModelsResponse(rsp *http.Response) (*ListAnthropicModelsResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ListAnthropicModelsResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest AnthropicModelList
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest AnthropicInferenceError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest AnthropicInferenceError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseGetAnthropicModelResponse parses an HTTP response from a GetAnthropicModelWithResponse call
+func ParseGetAnthropicModelResponse(rsp *http.Response) (*GetAnthropicModelResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetAnthropicModelResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest AnthropicModel
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest AnthropicInferenceError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest AnthropicInferenceError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest AnthropicInferenceError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseListGeminiModelsResponse parses an HTTP response from a ListGeminiModelsWithResponse call
+func ParseListGeminiModelsResponse(rsp *http.Response) (*ListGeminiModelsResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ListGeminiModelsResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest GeminiModelList
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest GeminiInferenceError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest GeminiInferenceError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseGetGeminiModelResponse parses an HTTP response from a GetGeminiModelWithResponse call
+func ParseGetGeminiModelResponse(rsp *http.Response) (*GetGeminiModelResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetGeminiModelResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest GeminiModel
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest GeminiInferenceError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest GeminiInferenceError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest GeminiInferenceError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseListGeminiBetaModelsResponse parses an HTTP response from a ListGeminiBetaModelsWithResponse call
+func ParseListGeminiBetaModelsResponse(rsp *http.Response) (*ListGeminiBetaModelsResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ListGeminiBetaModelsResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest GeminiModelList
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest GeminiInferenceError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest GeminiInferenceError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseGetGeminiBetaModelResponse parses an HTTP response from a GetGeminiBetaModelWithResponse call
+func ParseGetGeminiBetaModelResponse(rsp *http.Response) (*GetGeminiBetaModelResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetGeminiBetaModelResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest GeminiModel
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest GeminiInferenceError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest GeminiInferenceError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest GeminiInferenceError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
 
 	}
 
@@ -5501,6 +7049,93 @@ func ParseCreateDelegationResponse(rsp *http.Response) (*CreateDelegationRespons
 			return nil, err
 		}
 		response.JSON503 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseListOpenAIModelsResponse parses an HTTP response from a ListOpenAIModelsWithResponse call
+func ParseListOpenAIModelsResponse(rsp *http.Response) (*ListOpenAIModelsResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ListOpenAIModelsResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest OpenAIModelList
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest InferenceError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest InferenceError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseGetOpenAIModelResponse parses an HTTP response from a GetOpenAIModelWithResponse call
+func ParseGetOpenAIModelResponse(rsp *http.Response) (*GetOpenAIModelResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetOpenAIModelResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest OpenAIModel
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest InferenceError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest InferenceError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest InferenceError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
 
 	}
 
