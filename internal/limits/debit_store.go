@@ -309,7 +309,21 @@ func (s *DebitStore) MarkNotSent(ctx context.Context, id, claim string) error {
 	if state == DebitNotAccepted {
 		return tx.Commit(ctx)
 	}
-	if state != DebitDispatched {
+	if state == DebitUnknown {
+		proof, err := tx.Exec(ctx, `INSERT INTO olp.workflow_model_nonacceptance_proofs(dispatch_id,claim_id,source)
+			SELECT d.id,d.claim_id,'transport_not_sent' FROM olp.execution_debits d
+			JOIN olp.workflow_model_leases l ON l.dispatch_id=d.id AND l.claim_id=d.claim_id
+			WHERE d.id=$1 AND d.claim_id=$2 AND d.kind='model' AND d.run_id IS NOT NULL
+			  AND d.observed_cost=0 AND d.observed_charge=0
+			  AND NOT EXISTS(SELECT 1 FROM olp.execution_debit_results r
+			    WHERE r.dispatch_id=d.id AND (r.cost<>0 OR r.charge<>0 OR r.complete))`, id, claim)
+		if err != nil {
+			return err
+		}
+		if proof.RowsAffected() != 1 {
+			return ErrDebitState
+		}
+	} else if state != DebitDispatched {
 		return ErrDebitState
 	}
 	owners, ownersErr := debitOwnersTx(ctx, tx, id)

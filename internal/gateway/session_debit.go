@@ -28,6 +28,11 @@ type SessionDebitLedger interface {
 
 type durableSessionDebits struct{ store *limits.DebitStore }
 
+type workflowModelLeases interface {
+	MarkWorkflowModelDispatched(context.Context, string, string) error
+	RenewWorkflowModelLease(context.Context, string, string) error
+}
+
 func DurableSessionDebits(store *limits.DebitStore) SessionDebitLedger {
 	if store == nil || store.Pool == nil {
 		return nil
@@ -45,6 +50,14 @@ func (d durableSessionDebits) Admit(ctx context.Context, id, claim string, reque
 
 func (d durableSessionDebits) MarkDispatched(ctx context.Context, id, claim string) error {
 	return d.store.MarkDispatched(ctx, id, claim)
+}
+
+func (d durableSessionDebits) MarkWorkflowModelDispatched(ctx context.Context, id, claim string) error {
+	return d.store.MarkWorkflowModelDispatched(ctx, id, claim)
+}
+
+func (d durableSessionDebits) RenewWorkflowModelLease(ctx context.Context, id, claim string) error {
+	return d.store.RenewWorkflowModelLease(ctx, id, claim)
 }
 
 func (d durableSessionDebits) MarkUnknown(ctx context.Context, id, claim string) error {
@@ -96,6 +109,7 @@ type sessionDebit struct {
 	targetID        string
 	routeRevisionID string
 	dispatched      bool
+	leaseStarted    chan struct{}
 }
 
 func (d *sessionDebit) reference() *usage.ExecutionReference {
@@ -103,6 +117,61 @@ func (d *sessionDebit) reference() *usage.ExecutionReference {
 		return nil
 	}
 	return &usage.ExecutionReference{DispatchID: d.id, RunID: d.runID, StepID: d.stepID, TargetID: d.targetID, RouteRevisionID: d.routeRevisionID}
+}
+
+func (s *Server) monitorWorkflowModelLease(ctx context.Context, debit *sessionDebit) (context.Context, func() *Error) {
+	callCtx, cancel := context.WithCancel(ctx)
+	result := make(chan *Error, 1)
+	done := make(chan struct{})
+	ledger, ok := s.Debits.(workflowModelLeases)
+	if !ok || debit == nil {
+		close(done)
+		return callCtx, func() *Error { cancel(); return nil }
+	}
+	go func() {
+		defer close(done)
+		select {
+		case <-callCtx.Done():
+			return
+		case <-debit.leaseStarted:
+		}
+		ticker := time.NewTicker(limits.WorkflowModelLeaseDuration / 3)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-callCtx.Done():
+				return
+			case <-ticker.C:
+				checkCtx, stop := context.WithTimeout(callCtx, time.Second)
+				err := ledger.RenewWorkflowModelLease(checkCtx, debit.id, debit.claim)
+				stop()
+				if err != nil {
+					result <- serverError(http.StatusServiceUnavailable, "workflow_owner_lost", "The workflow step owner could not be verified.")
+					cancel()
+					return
+				}
+			}
+		}
+	}()
+	return callCtx, func() *Error {
+		cancel()
+		<-done
+		select {
+		case problem := <-result:
+			return problem
+		default:
+		}
+		select {
+		case <-debit.leaseStarted:
+			checkCtx, stop := context.WithTimeout(context.WithoutCancel(ctx), time.Second)
+			defer stop()
+			if err := ledger.RenewWorkflowModelLease(checkCtx, debit.id, debit.claim); err != nil {
+				return serverError(http.StatusServiceUnavailable, "workflow_owner_lost", "The workflow step owner could not be verified.")
+			}
+		default:
+		}
+		return nil
+	}
 }
 
 func canonicalSessionID(id string) string {
@@ -180,7 +249,7 @@ func (s *Server) reserveSessionDebit(ctx context.Context, x *call, authority acc
 	if authority.ProjectID != nil {
 		projectID = *authority.ProjectID
 	}
-	debit := &sessionDebit{id: dispatchID, claim: claimID, targetID: canonicalSessionID(attempt.TargetID), routeRevisionID: routeRevisionID}
+	debit := &sessionDebit{id: dispatchID, claim: claimID, targetID: canonicalSessionID(attempt.TargetID), routeRevisionID: routeRevisionID, leaseStarted: make(chan struct{})}
 	intent := limits.DebitIntent{
 		ID: dispatchID, APIKeyID: authority.ID, ProjectID: projectID, Kind: "api", ClaimID: claimID,
 		Currency: currency, CostBound: bound.String(), ChargeBound: charge.String(),
@@ -351,10 +420,23 @@ func (s *Server) markSessionDispatched(ctx context.Context, x *call) *Error {
 	if x.sessionDebit == nil || s.Debits == nil {
 		return nil
 	}
-	if err := s.Debits.MarkDispatched(ctx, x.sessionDebit.id, x.sessionDebit.claim); err != nil {
+	err := func() error {
+		if x.workflow == nil {
+			return s.Debits.MarkDispatched(ctx, x.sessionDebit.id, x.sessionDebit.claim)
+		}
+		ledger, ok := s.Debits.(workflowModelLeases)
+		if !ok {
+			return limits.ErrDebitAuthority
+		}
+		return ledger.MarkWorkflowModelDispatched(ctx, x.sessionDebit.id, x.sessionDebit.claim)
+	}()
+	if err != nil {
 		return serverError(http.StatusInternalServerError, "debit_ledger_unavailable", "The durable debit could not be dispatched, so the provider session was not created.")
 	}
 	x.sessionDebit.dispatched = true
+	if x.workflow != nil {
+		close(x.sessionDebit.leaseStarted)
+	}
 	return nil
 }
 

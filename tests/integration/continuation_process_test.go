@@ -6,12 +6,19 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
+	"math/big"
+	"net"
 	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
 
@@ -29,6 +36,303 @@ func continuationProcessEnvironment(t *testing.T, h *accessHarness) map[string]s
 		t.Fatal(err)
 	}
 	return map[string]string{"OLP_DATABASE_URL": h.DBURL, "OLP_DATABASE_MAX_CONNECTIONS": "6", "OLP_VALKEY_URL": required(t, "OLP_TEST_VALKEY_URL"), "OLP_AUTH_HMAC_KEY_FILE": filepath.Join(dir, "auth"), "OLP_MASTER_KEY_FILE": filepath.Join(dir, "ring"), "OLP_LISTEN_ADDR": "127.0.0.1:0", "OLP_OBSERVABILITY_LISTEN_ADDR": "127.0.0.1:0", "OLP_PROVIDER_EGRESS_ALLOW_CIDRS": "127.0.0.0/8", "OLP_PROVIDER_EGRESS_ALLOW_HTTP_HOSTS": "127.0.0.1", "OLP_SHUTDOWN_TIMEOUT": "4s", "HOSTNAME": "continuation-recovery"}
+}
+
+func TestWorkflowModelRecoveryFencesLostReplicaWithoutInterruptingLiveReplica(t *testing.T) {
+	binary := required(t, "OLP_TEST_BINARY")
+	h := newAccessHarness(t)
+	owner := h.owner()
+	project := createProject(h, owner, "Workflow restart recovery")
+	started := make(chan string, 2)
+	release := make(chan struct{})
+	delivered := make(chan string, 2)
+	canceled := make(chan string, 1)
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = io.WriteString(w, `{"object":"list","data":[{"id":"`+vendorModel+`","object":"model"}]}`)
+			return
+		}
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			http.Error(w, "invalid request", http.StatusBadRequest)
+			return
+		}
+		if strings.HasSuffix(r.URL.Path, "/embeddings") {
+			writeJSON(w, map[string]any{"object": "list", "data": []any{map[string]any{"object": "embedding", "index": 0, "embedding": []float64{0.25, 0.5}}}, "model": vendorModel, "usage": map[string]int{"prompt_tokens": 4, "total_tokens": 4}})
+			return
+		}
+		if strings.HasSuffix(r.URL.Path, "/responses") {
+			writeResponsesFixture(w, vendorModel, "ok", false)
+			return
+		}
+		if bytes.Contains(body, []byte("olp_certification_probe")) {
+			writeJSON(w, map[string]any{"id": "probe", "object": "chat.completion", "model": vendorModel, "choices": []any{map[string]any{"index": 0, "message": map[string]any{"role": "assistant", "content": nil, "tool_calls": []any{map[string]any{"id": "probe-call", "type": "function", "function": map[string]any{"name": "olp_certification_probe", "arguments": `{}`}}}}, "finish_reason": "tool_calls"}}, "usage": map[string]int{"prompt_tokens": 4, "completion_tokens": 6, "total_tokens": 10}})
+			return
+		}
+		label := func() string {
+			switch {
+			case bytes.Contains(body, []byte("orphaned-call")):
+				return "orphaned-call"
+			case bytes.Contains(body, []byte("live-call")):
+				return "live-call"
+			case bytes.Contains(body, []byte("heartbeat-loss")):
+				return "heartbeat-loss"
+			default:
+				return ""
+			}
+		}()
+		if label == "" {
+			writeJSON(w, map[string]any{"id": "probe", "object": "chat.completion", "model": vendorModel, "choices": []any{map[string]any{"index": 0, "message": map[string]any{"role": "assistant", "content": "ok"}, "finish_reason": "stop"}}, "usage": map[string]int{"prompt_tokens": 4, "completion_tokens": 6, "total_tokens": 10}})
+			return
+		}
+		started <- label
+		if label == "heartbeat-loss" {
+			<-r.Context().Done()
+			canceled <- label
+			return
+		}
+		select {
+		case <-release:
+			writeJSON(w, map[string]any{"id": "completed", "object": "chat.completion", "model": vendorModel, "choices": []any{map[string]any{"index": 0, "message": map[string]any{"role": "assistant", "content": "completed"}, "finish_reason": "stop"}}, "usage": map[string]int{"prompt_tokens": 4, "completion_tokens": 6, "total_tokens": 10}})
+			delivered <- label
+		case <-r.Context().Done():
+		}
+	}))
+	t.Cleanup(upstream.Close)
+	provider := activeAzureProviderInProject(t, h, owner, "Workflow restart provider", upstream.URL, &project, []any{map[string]any{"operation": "generation", "surface": "openai", "mode": "unary"}})
+	providerID := mcpExecString(t, provider, "id")
+	addBatchPrice(t, h, owner, providerID, "", time.Now().Add(-time.Minute))
+	slug := "workflow-restart-recovery"
+	draft := h.want(owner, http.MethodPost, "/api/v1/route-drafts", map[string]any{"slug": slug, "project_id": project, "operations": []string{"generation"}, "fidelity": map[string]any{"mode": "transformed"}, "tool_execution": "gateway", "overall_timeout_ms": 90000, "max_attempts": 1, "targets": []any{map[string]any{"provider_id": providerID, "provider_model": vendorModel, "priority": 0, "weight": 1, "timeout_ms": 80000}}}, idem("workflow-restart-route"), http.StatusCreated)
+	h.want(owner, http.MethodPost, "/api/v1/route-drafts/"+mcpExecString(t, draft, "id")+"/activate", nil, withMatch(draft, idem("workflow-restart-activate")), http.StatusOK)
+	orphanKey := h.want(owner, http.MethodPost, "/api/v1/api-keys", map[string]any{"name": "Restart orphan", "project_id": project, "scopes": []string{"inference"}, "allowed_routes": []string{slug}}, idem("workflow-restart-orphan"), http.StatusCreated)
+	liveKey := h.want(owner, http.MethodPost, "/api/v1/api-keys", map[string]any{"name": "Restart live", "project_id": project, "scopes": []string{"inference"}, "allowed_routes": []string{slug}}, idem("workflow-restart-live"), http.StatusCreated)
+	env := continuationProcessEnvironment(t, h)
+	worker := testutil.StartProcess(t, binary, "worker", env)
+	_ = worker
+	orphan := testutil.StartProcess(t, binary, "gateway", env)
+	live := testutil.StartProcess(t, binary, "gateway", env)
+	type workflowResponse struct {
+		label  string
+		status int
+		body   []byte
+		err    error
+	}
+	responses := make(chan workflowResponse, 2)
+	start := func(origin, key, marker string) {
+		go func() {
+			request, err := http.NewRequestWithContext(t.Context(), http.MethodPost, origin+"/v1/chat/completions", strings.NewReader(fmt.Sprintf(`{"model":%q,"messages":[{"role":"user","content":%q}],"max_tokens":16}`, slug, marker)))
+			if err != nil {
+				responses <- workflowResponse{label: marker, err: err}
+				return
+			}
+			request.Header.Set("Authorization", "Bearer "+key)
+			request.Header.Set("Content-Type", "application/json")
+			response, err := http.DefaultClient.Do(request)
+			if err != nil {
+				responses <- workflowResponse{label: marker, err: err}
+				return
+			}
+			body, err := io.ReadAll(response.Body)
+			response.Body.Close()
+			responses <- workflowResponse{label: marker, status: response.StatusCode, body: body, err: err}
+		}()
+	}
+	start(orphan.PublicOrigin, mcpExecString(t, orphanKey, "secret"), "orphaned-call")
+	start(live.PublicOrigin, mcpExecString(t, liveKey, "secret"), "live-call")
+	for range 2 {
+		select {
+		case <-started:
+		case <-time.After(20 * time.Second):
+			t.Fatal("both model requests did not reach the upstream")
+		}
+	}
+	if err := orphan.Kill(); err != nil {
+		t.Fatal(err)
+	}
+	orphanID := mcpExecString(t, orphanKey, "id")
+	liveID := mcpExecString(t, liveKey, "id")
+	type observedDebit struct {
+		state     string
+		remaining string
+	}
+	readDebit := func(keyID string) (observedDebit, bool) {
+		t.Helper()
+		items := mcpExecItems(t, h.want(owner, http.MethodGet, "/api/v1/execution-debits?api_key_id="+keyID, nil, nil, http.StatusOK), "items")
+		if len(items) != 1 {
+			return observedDebit{}, false
+		}
+		item, ok := items[0].(map[string]any)
+		if !ok {
+			t.Fatalf("invalid debit: %v", items[0])
+		}
+		return observedDebit{state: mcpExecString(t, item, "state"), remaining: mcpExecString(t, item, "remaining_cost")}, true
+	}
+	eventually(t, "orphaned model debit to retain unknown exposure", 45*time.Second, func() bool {
+		debit, ok := readDebit(orphanID)
+		return ok && debit.state == "outcome_unknown"
+	})
+	liveDebit, exists := readDebit(liveID)
+	if !exists || liveDebit.state != "dispatched" {
+		t.Fatalf("live replica was marked orphaned: %v", liveDebit)
+	}
+	orphanDebit, exists := readDebit(orphanID)
+	exposure, valid := new(big.Rat).SetString(orphanDebit.remaining)
+	if !exists || !valid || exposure.Sign() <= 0 {
+		t.Fatalf("orphaned dispatch lost exposure: %v", orphanDebit)
+	}
+	select {
+	case unexpected := <-started:
+		t.Fatalf("orphaned dispatch was retried: %s", unexpected)
+	default:
+	}
+	if err := syscall.Kill(live.Pid(), syscall.SIGSTOP); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = syscall.Kill(live.Pid(), syscall.SIGCONT) })
+	eventually(t, "stopped replica's debit to retain unknown exposure", 45*time.Second, func() bool {
+		debit, ok := readDebit(liveID)
+		return ok && debit.state == "outcome_unknown"
+	})
+	close(release)
+	select {
+	case label := <-delivered:
+		if label != "live-call" {
+			t.Fatalf("unexpected response delivered after owner loss: %s", label)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("live model did not produce its complete result")
+	}
+	if err := syscall.Kill(live.Pid(), syscall.SIGCONT); err != nil {
+		t.Fatal(err)
+	}
+	for range 2 {
+		response := <-responses
+		if response.label == "live-call" && (response.err != nil || response.status == http.StatusOK) {
+			t.Fatalf("resumed producer returned success after losing ownership: status=%d body=%s error=%v", response.status, response.body, response.err)
+		}
+	}
+	eventually(t, "late complete model evidence to settle once", 10*time.Second, func() bool {
+		debit, ok := readDebit(liveID)
+		return ok && debit.state == "settled"
+	})
+	fencedKey := h.want(owner, http.MethodPost, "/api/v1/api-keys", map[string]any{"name": "Heartbeat loss", "project_id": project, "scopes": []string{"inference"}, "allowed_routes": []string{slug}}, idem("workflow-heartbeat-loss"), http.StatusCreated)
+	fencedID := mcpExecString(t, fencedKey, "id")
+	fenced := testutil.StartProcess(t, binary, "gateway", env)
+	start(fenced.PublicOrigin, mcpExecString(t, fencedKey, "secret"), "heartbeat-loss")
+	select {
+	case label := <-started:
+		if label != "heartbeat-loss" {
+			t.Fatalf("unexpected model dispatch: %s", label)
+		}
+	case <-time.After(20 * time.Second):
+		t.Fatal("model did not receive the heartbeat-loss request")
+	}
+	if err := syscall.Kill(fenced.Pid(), syscall.SIGSTOP); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = syscall.Kill(fenced.Pid(), syscall.SIGCONT) })
+	eventually(t, "heartbeat loss to retain unknown exposure", 45*time.Second, func() bool {
+		debit, ok := readDebit(fencedID)
+		return ok && debit.state == "outcome_unknown"
+	})
+	if err := syscall.Kill(fenced.Pid(), syscall.SIGCONT); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case label := <-canceled:
+		if label != "heartbeat-loss" {
+			t.Fatalf("unexpected upstream cancellation: %s", label)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("producer did not cancel the upstream after losing its lease")
+	}
+	select {
+	case response := <-responses:
+		if response.label != "heartbeat-loss" || response.err != nil || response.status == http.StatusOK {
+			t.Fatalf("unfenced producer response: %+v", response)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("producer did not stop after losing its lease")
+	}
+	if debit, ok := readDebit(fencedID); !ok || debit.state != "outcome_unknown" {
+		t.Fatalf("lost producer exposure was not retained: %v", debit)
+	}
+	select {
+	case unexpected := <-started:
+		t.Fatalf("producer dispatched another model after losing its lease: %s", unexpected)
+	default:
+	}
+	upstreamURL, err := url.Parse(upstream.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	port, err := strconv.Atoi(upstreamURL.Port())
+	if err != nil {
+		t.Fatal(err)
+	}
+	upstream.Close()
+	listener, err := syscall.Socket(syscall.AF_INET, syscall.SOCK_STREAM|syscall.SOCK_CLOEXEC, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	listenerFile := os.NewFile(uintptr(listener), "blocked-model-listener")
+	defer listenerFile.Close()
+	if err := syscall.SetsockoptInt(listener, syscall.SOL_SOCKET, syscall.SO_REUSEADDR, 1); err != nil {
+		t.Fatal(err)
+	}
+	if err := syscall.Bind(listener, &syscall.SockaddrInet4{Port: port, Addr: [4]byte{127, 0, 0, 1}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := syscall.Listen(listener, 1); err != nil {
+		t.Fatal(err)
+	}
+	for range 2 {
+		connection, err := net.DialTimeout("tcp", upstreamURL.Host, time.Second)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer connection.Close()
+	}
+	unsentKey := h.want(owner, http.MethodPost, "/api/v1/api-keys", map[string]any{"name": "Restart unsent", "project_id": project, "scopes": []string{"inference"}, "allowed_routes": []string{slug}}, idem("workflow-restart-unsent"), http.StatusCreated)
+	unsentID := mcpExecString(t, unsentKey, "id")
+	unsent := testutil.StartProcess(t, binary, "gateway", env)
+	start(unsent.PublicOrigin, mcpExecString(t, unsentKey, "secret"), "unsent-call")
+	eventually(t, "unconnected model dispatch to be fenced", 5*time.Second, func() bool {
+		debit, ok := readDebit(unsentID)
+		return ok && debit.state == "dispatched"
+	})
+	if err := syscall.Kill(unsent.Pid(), syscall.SIGSTOP); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = syscall.Kill(unsent.Pid(), syscall.SIGCONT) })
+	eventually(t, "unconnected dispatch to retain unknown exposure", 45*time.Second, func() bool {
+		debit, ok := readDebit(unsentID)
+		return ok && debit.state == "outcome_unknown"
+	})
+	if err := listenerFile.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := syscall.Kill(unsent.Pid(), syscall.SIGCONT); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case response := <-responses:
+		if response.label != "unsent-call" || response.err != nil || response.status == http.StatusOK {
+			t.Fatalf("resumed unsent producer returned success: %+v", response)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("resumed producer did not finish")
+	}
+	eventually(t, "late proven-unsent dispatch to release exposure", 10*time.Second, func() bool {
+		debit, ok := readDebit(unsentID)
+		if !ok || debit.state != "not_accepted" {
+			return false
+		}
+		remaining, valid := new(big.Rat).SetString(debit.remaining)
+		return valid && remaining.Sign() == 0
+	})
 }
 func processContinuationRequest(t *testing.T, origin, key, method, path string, body []byte, headers map[string]string) *http.Response {
 	t.Helper()

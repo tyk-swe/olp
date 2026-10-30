@@ -178,7 +178,12 @@ route:
 				if x.guardrailEngine != nil {
 					x.startGuardrailAttempt(fact.GuardrailDecisions)
 				}
-				fact, result, failure, authorityErr := adapter.dispatchWithAuthority(ctx, s, x, attempt, &provider, slot, fact)
+				dispatchCtx := ctx
+				finishLease := func() *Error { return nil }
+				if x.workflow != nil {
+					dispatchCtx, finishLease = s.monitorWorkflowModelLease(ctx, x.sessionDebit)
+				}
+				fact, result, failure, authorityErr := adapter.dispatchWithAuthority(dispatchCtx, s, x, attempt, &provider, slot, fact)
 				if x.guardrailEngine != nil {
 					fact.GuardrailDecisions = x.finishGuardrailAttempt()
 				}
@@ -194,17 +199,28 @@ route:
 				x.facts = append(x.facts, fact)
 				s.health.record(provider.ID, fact)
 				if x.workflow != nil && failure == nil {
-					if e := s.settleWorkflowModelAttempt(ctx, x, fact); e != nil {
+					settlementErr := s.settleWorkflowModelAttempt(ctx, x, fact)
+					leaseErr := finishLease()
+					if e := settlementErr; e != nil {
 						return attemptOutcome[Result]{err: e}, nil
+					}
+					if leaseErr != nil {
+						return attemptOutcome[Result]{err: leaseErr}, nil
 					}
 				}
 				if x.workflow != nil && failure != nil {
+					var releaseErr *Error
 					if failure.dispatched {
 						s.markSessionUnknown(ctx, x)
 					} else {
-						if e := s.abandonWorkflowDebit(ctx, x); e != nil {
-							return attemptOutcome[Result]{err: e}, nil
-						}
+						releaseErr = s.abandonWorkflowDebit(ctx, x)
+					}
+					leaseErr := finishLease()
+					if releaseErr != nil {
+						return attemptOutcome[Result]{err: releaseErr}, nil
+					}
+					if leaseErr != nil {
+						return attemptOutcome[Result]{err: leaseErr}, nil
 					}
 					if authorityErr != nil {
 						return attemptOutcome[Result]{err: authorityErr}, nil

@@ -984,6 +984,14 @@ type workflowDebitFixture struct {
 	*fakeSessionDebits
 }
 
+func (f *workflowDebitFixture) MarkWorkflowModelDispatched(ctx context.Context, id, claim string) error {
+	return f.MarkDispatched(ctx, id, claim)
+}
+
+func (f *workflowDebitFixture) RenewWorkflowModelLease(context.Context, string, string) error {
+	return nil
+}
+
 func (f *workflowDebitFixture) SettleRecovery(context.Context, limits.DebitResult) error {
 	return nil
 }
