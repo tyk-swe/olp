@@ -21,7 +21,7 @@ func (probeSocket) Read(p []byte) (int, error)  { return 0, io.EOF }
 func (probeSocket) Write(p []byte) (int, error) { return len(p), nil }
 func (probeSocket) Close() error                { return nil }
 
-func nativeMediaProbeServer(t *testing.T) *Server {
+func NativeMediaProbeServer(t *testing.T) (*Server, []CapabilityInput) {
 	t.Helper()
 	s := New(nil, &egress.Policy{}, nil)
 	s.client.Transport = mediaProbeTransport(func(r *http.Request) (*http.Response, error) {
@@ -57,15 +57,15 @@ func nativeMediaProbeServer(t *testing.T) *Server {
 		t.Errorf("unexpected certification request: %s %s", r.Method, r.URL)
 		return &http.Response{StatusCode: 404, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(`{}`)), Request: r}, nil
 	})
-	return s
+	return s, capabilitiesFor(KindOpenAI, KindOpenAI)
 }
 
 func TestNativeMediaCapabilitiesCanBeDeclaredAndCertified(t *testing.T) {
-	s := nativeMediaProbeServer(t)
+	s, capabilities := NativeMediaProbeServer(t)
 	cfg := Configuration{Kind: KindOpenAI, AuthMode: AuthAPIKey}
 	cfg.Normalize()
 	mediaTuples := 0
-	for _, tuple := range capabilitiesFor(KindOpenAI, KindOpenAI) {
+	for _, tuple := range capabilities {
 		switch tuple.Operation {
 		case "generation", "token_count", "embeddings", "moderation":
 			continue
