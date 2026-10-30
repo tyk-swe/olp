@@ -161,3 +161,74 @@ func TestOpenCodeGoServesEachModelOnOneProtocol(t *testing.T) {
 		t.Fatal("Claude Code did not reach a Messages model")
 	}
 }
+
+func TestRoutePolicySeparatesMessagesClientFromCodexTarget(t *testing.T) {
+	adapter, ok := Lookup(codemode.AdapterCodex)
+	if !ok {
+		t.Fatal("Codex adapter missing")
+	}
+	native, ok := adapter.Endpoint("responses")
+	if !ok {
+		t.Fatal("native Responses endpoint missing")
+	}
+	for _, enabled := range []bool{false, true} {
+		route := codemode.Route{MessagesToCodex: enabled}
+		endpoint, reachable := RouteEndpoint(route, adapter, "v1/messages")
+		if reachable != enabled {
+			t.Fatalf("policy %t, Messages target reachable %t", enabled, reachable)
+		}
+		if enabled && (endpoint.Protocol != native.Protocol || endpoint.UpstreamPath != native.UpstreamPath || endpoint.CredentialHeader != native.CredentialHeader || endpoint.Observation != native.Observation || endpoint.Identity != native.Identity) {
+			t.Fatalf("translated target changed native account contract, got %+v, native %+v", endpoint, native)
+		}
+		protocol, reachable := RouteClientProtocol(route, adapter, ClientClaudeCode, "native-fixture-model")
+		if reachable != enabled || enabled && protocol != codemode.ProtocolMessages {
+			t.Fatalf("policy %t, Claude client protocol %q, reachable %t", enabled, protocol, reachable)
+		}
+		if enabled && protocol == endpoint.Protocol {
+			t.Fatal("Messages client protocol was replaced with upstream target protocol")
+		}
+		clients := RouteClients(route, adapter)
+		if slices.Contains(clients, ClientClaudeCode) != enabled {
+			t.Fatalf("policy %t, generated clients %v", enabled, clients)
+		}
+		for _, client := range adapter.Clients() {
+			if !slices.Contains(clients, client) {
+				t.Fatalf("policy %t removed native client %s", enabled, client)
+			}
+			want, offered := adapter.Protocol(client, "native-fixture-model")
+			got, reachable := RouteClientProtocol(route, adapter, client, "native-fixture-model")
+			if reachable != offered || got != want {
+				t.Fatalf("policy %t changed native %s protocol from %q to %q", enabled, client, want, got)
+			}
+		}
+		if _, ok := RouteClientProtocol(route, adapter, "unsupported-client", "native-fixture-model"); ok {
+			t.Fatal("translation exposed an unsupported client")
+		}
+		if _, ok := RouteEndpoint(route, adapter, "unsupported-operation"); ok {
+			t.Fatal("translation exposed an unsupported operation")
+		}
+	}
+}
+
+func TestMessagesTranslationPolicyPreservesOtherAdaptersNativeReachability(t *testing.T) {
+	adapter, ok := Lookup(codemode.AdapterOpenCodeGo)
+	if !ok {
+		t.Fatal("account adapter missing")
+	}
+	route := codemode.Route{MessagesToCodex: true}
+	if !slices.Equal(RouteClients(route, adapter), adapter.Clients()) {
+		t.Fatal("Codex policy changed another adapter's generated clients")
+	}
+	for _, model := range []string{"minimax-fixture-model", "gpt-fixture-model"} {
+		want, offered := adapter.Protocol(ClientClaudeCode, model)
+		got, reachable := RouteClientProtocol(route, adapter, ClientClaudeCode, model)
+		if reachable != offered || got != want {
+			t.Fatalf("Codex policy changed another account's native reachability for %s, got %q %t, native %q %t", model, got, reachable, want, offered)
+		}
+	}
+	native, ok := adapter.Endpoint("v1/messages")
+	endpoint, reachable := RouteEndpoint(route, adapter, "v1/messages")
+	if !ok || !reachable || endpoint.Protocol != native.Protocol || endpoint.UpstreamPath != native.UpstreamPath || endpoint.CredentialHeader != native.CredentialHeader {
+		t.Fatalf("Codex policy replaced native Messages target, got %+v, native %+v", endpoint, native)
+	}
+}
