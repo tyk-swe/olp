@@ -48,11 +48,10 @@ func newCodeFixtureWithProfile(t *testing.T, profile string, bodyLimit ...int64)
 	f := &codeFixture{h: h, owner: owner, project: createProject(h, owner, "Coding"), key: access.NewID(), provider: access.NewID(), credential: access.NewID()}
 	f.user = h.want(owner, "GET", "/api/v1/profile", nil, nil, 200)["id"].(string)
 	f.exec(t, `INSERT INTO olp.providers(id,name,kind,state,configuration,etag,slots_etag,created_by,project_id) VALUES($1,'Fixture coding subscription','plugin','draft','{"kind":"plugin","auth_mode":"grant","endpoint":"https://fixture.invalid"}',$2,$3,$4,$5)`, f.provider, access.NewID(), access.NewID(), f.user, f.project)
-	f.addCredential(t, f.credential, "fixture-principal", 1)
 	if profile != "" {
 		f.exec(t, `UPDATE olp.providers SET configuration=(configuration::jsonb || jsonb_build_object('profile_id',$2::text,'profile_revision','fixture-digest'))::json WHERE id=$1`, f.provider, profile)
-		f.exec(t, `UPDATE olp.provider_credentials SET profile_id=$2 WHERE id=$1`, f.credential, profile)
 	}
+	f.addCredential(t, f.credential, "fixture-principal", 1)
 	f.addKey(t, f.key)
 	f.accountRecord = h.want(owner, "POST", "/api/v1/code/accounts", map[string]any{"project_id": f.project, "provider_id": f.provider, "credential_id": f.credential, "name": "Fixture subscription", "enabled": true, "models": []string{"native-model"}}, idem("account"), 201)
 	f.account = f.accountRecord["id"].(string)
@@ -79,7 +78,7 @@ func (f *codeFixture) exec(t *testing.T, sql string, args ...any) {
 }
 func (f *codeFixture) addCredential(t *testing.T, id, principal string, version int) {
 	t.Helper()
-	f.exec(t, `INSERT INTO olp.provider_credentials(id,provider_id,version,plugin_digest,principal,grant_facts) VALUES($1,$2,$3,'fixture-digest',$4,'{}')`, id, f.provider, version, principal)
+	f.exec(t, `INSERT INTO olp.provider_credentials(id,provider_id,version,plugin_digest,principal,grant_facts,profile_id) SELECT $1,id,$3,'fixture-digest',$4,'{}',configuration->>'profile_id' FROM olp.providers WHERE id=$2`, id, f.provider, version, principal)
 	f.exec(t, `INSERT INTO olp.provider_grants(credential_id) VALUES($1)`, id)
 }
 func (f *codeFixture) addKey(t *testing.T, id string) {
