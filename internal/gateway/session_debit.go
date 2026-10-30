@@ -146,6 +146,9 @@ func (s *Server) monitorWorkflowModelLease(ctx context.Context, debit *sessionDe
 				err := ledger.RenewWorkflowModelLease(checkCtx, debit.id, debit.claim)
 				stop()
 				if err != nil {
+					if callCtx.Err() != nil {
+						return
+					}
 					result <- serverError(http.StatusServiceUnavailable, "workflow_owner_lost", "The workflow step owner could not be verified.")
 					cancel()
 					return

@@ -1139,6 +1139,33 @@ func (f *workflowDebitFixture) RenewWorkflowModelLease(context.Context, string, 
 	return nil
 }
 
+type blockingRenewalDebits struct {
+	*workflowDebitFixture
+	enabled bool
+	lost    bool
+	started chan struct{}
+}
+
+func (f *blockingRenewalDebits) RenewWorkflowModelLease(ctx context.Context, _, _ string) error {
+	if !f.enabled {
+		if f.lost {
+			return limits.ErrDebitState
+		}
+		return nil
+	}
+	select {
+	case <-f.started:
+		if f.lost {
+			return limits.ErrDebitState
+		}
+		return nil
+	default:
+		close(f.started)
+		<-ctx.Done()
+		return ctx.Err()
+	}
+}
+
 func (f *workflowDebitFixture) SettleRecovery(context.Context, limits.DebitResult) error {
 	return nil
 }
@@ -1862,13 +1889,19 @@ func TestGatewayToolExecutionStopsAfterAuthorityChanges(t *testing.T) {
 
 func TestGatewayToolExecutionCancelsLongCallsAfterRevocation(t *testing.T) {
 	for _, test := range []struct {
-		name       string
-		model      bool
-		removeTool bool
+		name          string
+		model         bool
+		removeTool    bool
+		inFlightLease bool
+		lostLease     bool
+		wantStatus    int
 	}{
-		{name: "model", model: true},
-		{name: "tool"},
-		{name: "tool permission", removeTool: true},
+		{name: "model", model: true, wantStatus: http.StatusUnauthorized},
+		{name: "model with renewal in flight", model: true, inFlightLease: true, wantStatus: http.StatusForbidden},
+		{name: "model revoked after lease loss", model: true, inFlightLease: true, lostLease: true, wantStatus: http.StatusServiceUnavailable},
+		{name: "model loses lease", model: true, lostLease: true, wantStatus: http.StatusServiceUnavailable},
+		{name: "tool", wantStatus: http.StatusUnauthorized},
+		{name: "tool permission", removeTool: true, wantStatus: http.StatusForbidden},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
@@ -1906,12 +1939,25 @@ func TestGatewayToolExecutionCancelsLongCallsAfterRevocation(t *testing.T) {
 				h.rt.mu.Unlock()
 			}
 			fixture := &workflowFixture{runID: uuid.NewString(), tool: WorkflowTool{ToolsetID: toolsetID, RevisionID: uuid.NewString(), Definition: routing.MCPToolsetTool{Alias: alias, Classification: "read_only"}}}
-			h.gateway.WorkflowRuns, h.gateway.Debits = fixture, &workflowDebitFixture{fakeSessionDebits: &fakeSessionDebits{}}
+			debits := &blockingRenewalDebits{workflowDebitFixture: &workflowDebitFixture{fakeSessionDebits: &fakeSessionDebits{}}, enabled: test.inFlightLease, lost: test.lostLease, started: make(chan struct{})}
+			h.gateway.WorkflowRuns, h.gateway.Debits = fixture, debits
 			if test.model {
 				h.gateway.WorkflowTools = fixture
 				h.mock.set("a", func(_ http.ResponseWriter, r *http.Request) {
 					_, _ = io.Copy(io.Discard, r.Body)
-					revoke()
+					if test.inFlightLease {
+						h.rt.mu.Lock()
+						authority := h.rt.keys[fullKey]
+						authority.RevokedAt = new(time.Now())
+						h.rt.keys[fullKey] = authority
+						select {
+						case <-debits.started:
+						case <-r.Context().Done():
+						}
+						h.rt.mu.Unlock()
+					} else if !test.lostLease {
+						revoke()
+					}
 					<-r.Context().Done()
 				})
 			} else {
@@ -1921,12 +1967,17 @@ func TestGatewayToolExecutionCancelsLongCallsAfterRevocation(t *testing.T) {
 				})
 			}
 			response, body := h.chat(fullKey, nil)
-			wantStatus := http.StatusUnauthorized
-			if test.removeTool {
-				wantStatus = http.StatusForbidden
-			}
-			if response.StatusCode != wantStatus || h.mock.count("a") != 1 {
+			if response.StatusCode != test.wantStatus || h.mock.count("a") != 1 {
 				t.Fatalf("revoked long call continued: status=%d body=%v model_calls=%d", response.StatusCode, body, h.mock.count("a"))
+			}
+			if test.lostLease {
+				problem, ok := body["error"].(map[string]any)
+				if !ok || problem["code"] != "workflow_owner_lost" {
+					t.Fatalf("lost ownership returned wrong error: %v", body)
+				}
+			}
+			if (test.inFlightLease || test.lostLease) && !slices.Contains(debits.order(), "unknown") {
+				t.Fatal("revoked model call did not retain unknown exposure")
 			}
 		})
 	}
