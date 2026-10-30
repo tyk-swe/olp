@@ -7734,7 +7734,7 @@ type CodeRoute struct {
 	Etag    openapi_types.UUID `json:"etag"`
 	Id      openapi_types.UUID `json:"id"`
 
-	// InitialRecoveryAttempts Maximum additional attempts for a new conversation after an adapter proves nonexecution. Zero disables recovery. Published revisions pin this policy. Exact models, live authority and durable state ownership remain required. Accepted, partial, ambiguous and opaque work never replays.
+	// InitialRecoveryAttempts Maximum additional attempts per request for a new or established single-pin root conversation after an adapter proves nonexecution and the complete input is portable. Zero disables recovery. Published revisions pin this policy. Existing children, socket ownership and unresolved attempts prevent migration. Exact models and live authority remain required. Producing-account reference ownership is preserved. Accepted, partial, ambiguous and opaque work never replays.
 	InitialRecoveryAttempts *int `json:"initial_recovery_attempts,omitempty"`
 
 	// MaxBodyBytes Optional ingress limit in bytes. Null inherits installation limits; a route can only lower them. Checks both encoded and decoded JSON, the complete multipart body, and individual client WebSocket messages. Published revisions pin this policy.
@@ -7772,7 +7772,7 @@ type CodeRouteWrite struct {
 	Aliases *map[string]string `json:"aliases,omitempty"`
 	Enabled bool               `json:"enabled"`
 
-	// InitialRecoveryAttempts Maximum additional attempts for a new conversation after an adapter proves nonexecution. Zero disables recovery. Published revisions pin this policy. Exact models, live authority and durable state ownership remain required. Accepted, partial, ambiguous and opaque work never replays.
+	// InitialRecoveryAttempts Maximum additional attempts per request for a new or established single-pin root conversation after an adapter proves nonexecution and the complete input is portable. Zero disables recovery. Published revisions pin this policy. Existing children, socket ownership and unresolved attempts prevent migration. Exact models and live authority remain required. Producing-account reference ownership is preserved. Accepted, partial, ambiguous and opaque work never replays.
 	InitialRecoveryAttempts *int `json:"initial_recovery_attempts,omitempty"`
 
 	// MaxBodyBytes Optional ingress limit in bytes. Null inherits installation limits; a route can only lower them. Checks both encoded and decoded JSON, the complete multipart body, and individual client WebSocket messages. Published revisions pin this policy.

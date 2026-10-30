@@ -73,9 +73,6 @@ func (l *codeTestLedger) ObserveOutcome(_ context.Context, _ string, outcome cod
 func (l *codeTestLedger) Admit(_ context.Context, in resources.CodeAdmission) (resources.CodePermit, error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	initial := !slices.ContainsFunc(l.inputs, func(previous resources.CodeAdmission) bool {
-		return previous.APIKeyID == in.APIKeyID && previous.Operation.Identity.Conversation == in.Operation.Identity.Conversation
-	})
 	l.inputs = append(l.inputs, in)
 	if in.PreviousResponse != "" && !l.references[in.PreviousResponse] {
 		return resources.CodePermit{}, codemode.Refuse(409, "code_parent_unresolved")
@@ -85,7 +82,7 @@ func (l *codeTestLedger) Admit(_ context.Context, in resources.CodeAdmission) (r
 	}
 	permit, err := codeTestPermit(in.APIKeyID, in.Providers)
 	permit.Authority.EndUserDigest = in.EndUserDigest
-	permit.InitialRecovery = in.InitialRecovery && (initial || in.Recovery != nil)
+	permit.InitialRecovery = in.InitialRecovery && in.Operation.Identity.Parent == "" && in.PreviousResponse == ""
 	permit.Attempt = codemode.Attempt{ID: fmt.Sprint(len(l.inputs))}
 	permit.Pin.TargetModel = l.pinTarget
 	return permit, err
@@ -181,10 +178,11 @@ func (a codeTestAuthorizer) AuthorizeCode(_ context.Context, _ routing.Configura
 }
 
 type codeForwardSetup struct {
-	Models      []string
-	Policy      access.KeyPolicy
-	Offers      codeclient.Offers
-	ModelsError error
+	Models                  []string
+	Policy                  access.KeyPolicy
+	Offers                  codeclient.Offers
+	ModelsError             error
+	InitialRecoveryAttempts int
 }
 
 func newCodeForwardHarness(t *testing.T, setups ...codeForwardSetup) (*harness, *codeTestLedger, *httptest.Server) {
@@ -198,7 +196,7 @@ func newCodeForwardHarness(t *testing.T, setups ...codeForwardSetup) (*harness, 
 	}()
 	ledger := &codeTestLedger{done: make(chan codemode.Usage, 100), offers: setup.Offers, modelsErr: setup.ModelsError}
 	publishedAt := time.Now()
-	route := codemode.Route{ID: "route", Slug: "coding", ProjectID: "project", PoolID: "pool", RevisionID: "revision", Revision: 1, PublishedAt: &publishedAt, Enabled: true, Models: setup.Models}
+	route := codemode.Route{ID: "route", Slug: "coding", ProjectID: "project", PoolID: "pool", RevisionID: "revision", Revision: 1, PublishedAt: &publishedAt, Enabled: true, Models: setup.Models, InitialRecoveryAttempts: setup.InitialRecoveryAttempts}
 	authority := access.Authority{ID: h.rt.keys[fullKey].ID, ProjectID: &route.ProjectID, Policy: setup.Policy}
 	h.rt.keys[fullKey] = authority
 	h.rt.release.Snapshot.CodeRoutes = map[string]codemode.Route{"coding": route}

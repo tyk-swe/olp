@@ -10,12 +10,14 @@ import (
 	"net/http"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/tyk-swe/olp/internal/codemode"
 	"github.com/tyk-swe/olp/internal/codeplans"
 	"github.com/tyk-swe/olp/internal/testutil"
+	codexfixture "github.com/tyk-swe/olp/tests/fixtures/codex-qualified"
 )
 
 func TestCodeQualificationGenericAffinityPreservesAuthority(t *testing.T) {
@@ -78,6 +80,74 @@ func TestCodeQualificationGenericAffinityPreservesAuthority(t *testing.T) {
 	request(f.key, "recognized-root-adopter", []byte(`{"model":"gpt-5.4","previous_response_id":"resp-recognized","input":[]}`), http.StatusConflict)
 	if len(f.peer.Requests()) != 4 || len(codePublicDecode[[]codemode.Binding](t, f.list("bindings"))) != 3 {
 		t.Fatal("generic affinity adopted a recognized root")
+	}
+}
+
+func TestCodeQualificationPortableEstablishedRecoveryPreservesOwners(t *testing.T) {
+	f := newCodeFleet(t).initialRecovery(t, 1)
+	var executions atomic.Int64
+	f.peer.SetResponder(func(context.Context, http.Header, []byte) [][]byte {
+		if executions.Add(1) == 1 {
+			return [][]byte{[]byte(`{"type":"response.completed","response":{"id":"resp-before-recovery","status":"completed","usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}}`)}
+		}
+		return nil
+	})
+	initial, _, initialErr := f.request(t.Context(), 0, "portable-established", "", codeBody(), true)
+	if initialErr != nil || initial.StatusCode != http.StatusOK {
+		t.Fatal("initial established request failed", initialErr)
+	}
+	original := codePublicDecode[[]codemode.Binding](t, f.list("bindings"))[0]
+	originalAttempt := codePublicDecode[[]codemode.Attempt](t, f.list("attempts"))[0]
+	f.peer.Faults("initial_quota")
+	response, body, recoveryErr := f.request(t.Context(), 1, "portable-established", "", codeBody(), true)
+	if recoveryErr != nil || response.StatusCode != http.StatusOK || string(body) != codexfixture.SSE {
+		t.Fatalf("portable recovery response=%v body=%s err=%v", response, body, recoveryErr)
+	}
+	captures := f.peer.Requests()
+	if len(captures) != 3 || executions.Load() != 2 || captures[0].Header.Get("Authorization") != captures[1].Header.Get("Authorization") || captures[1].Header.Get("Authorization") == captures[2].Header.Get("Authorization") {
+		t.Fatal("established rejection did not recover exactly once on another account")
+	}
+	for _, capture := range captures {
+		if !bytes.Equal(capture.Body, codeBody()) {
+			t.Fatal("established recovery changed native model or payload")
+		}
+	}
+	recovered := codePublicDecode[[]codemode.Binding](t, f.list("bindings"))[0]
+	if recovered.ID != original.ID || recovered.AccountID == original.AccountID {
+		t.Fatal("established recovery lost durable identity or did not move account")
+	}
+	attempts := codePublicDecode[[]codemode.Attempt](t, f.list("attempts"))
+	if len(attempts) != 3 {
+		t.Fatalf("recovery attempts=%d", len(attempts))
+	}
+	for _, attempt := range attempts {
+		if attempt.BindingID != original.ID || attempt.ReportedTokens == nil {
+			t.Fatal("established recovery lost settlement or binding attribution")
+		}
+		if attempt.ID == originalAttempt.ID && attempt.AccountID != originalAttempt.AccountID {
+			t.Fatal("migration changed an executed turn's historical account")
+		}
+		if attempt.UpstreamStatus != nil && *attempt.UpstreamStatus == http.StatusTooManyRequests && (attempt.AccountID != original.AccountID || *attempt.ReportedTokens != 0) {
+			t.Fatal("proven rejected turn changed historical owner or consumed tokens")
+		}
+	}
+	f.restart(t, "portable-recovery")
+	previous := []byte(`{"model":"gpt-5.4","previous_response_id":"resp-before-recovery","input":[]}`)
+	foreign, guidance, ownershipErr := f.request(t.Context(), 0, "portable-established", "", previous, true)
+	if ownershipErr != nil || foreign.StatusCode != http.StatusConflict || !bytes.Contains(guidance, []byte("code_response_account_conflict")) || len(f.peer.Requests()) != len(captures) {
+		t.Fatalf("old response owner changed response=%v body=%s err=%v", foreign, guidance, ownershipErr)
+	}
+	f.success(t, 1, "portable-child", "portable-established")
+	for _, binding := range codePublicDecode[[]codemode.Binding](t, f.list("bindings")) {
+		if binding.RootID != recovered.RootID || binding.AccountID != recovered.AccountID {
+			t.Fatal("new child did not inherit recovered authority across replicas")
+		}
+	}
+	for _, collection := range []string{"attempts", "bindings", "refusals"} {
+		_, diagnostic := f.h.do(f.owner, "GET", "/api/v1/code/"+collection+"?project_id="+f.project, nil, nil)
+		if bytes.Contains(diagnostic, []byte("CONTROLLED_PRIVATE_PROMPT")) {
+			t.Fatalf("%s persisted portable input", collection)
+		}
 	}
 }
 

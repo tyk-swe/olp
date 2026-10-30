@@ -205,12 +205,6 @@ func (s *CodeStore) admit(ctx context.Context, admission CodeAdmission, connecti
 	if err != nil {
 		return out, err
 	}
-	var newBinding bool
-	if referenced.InitialRecovery {
-		if err = tx.QueryRow(ctx, `SELECT NOT EXISTS(SELECT 1 FROM olp.code_bindings WHERE route_id=$1 AND api_key_id=$2 AND conversation=$3)`, referenced.Route.ID, referenced.APIKeyID, referenced.Operation.Identity.Conversation).Scan(&newBinding); err != nil {
-			return out, err
-		}
-	}
 	if referenced.Recovery != nil {
 		if err = recoverCodeBinding(ctx, tx, referenced); err != nil {
 			return out, err
@@ -271,9 +265,12 @@ func (s *CodeStore) admit(ctx context.Context, admission CodeAdmission, connecti
 		return out, codemode.Refuse(409, "code_attribution_changed")
 	}
 	if connection {
+		if _, err := tx.Exec(ctx, `UPDATE olp.code_bindings SET socket_bound=true WHERE id=$1 AND NOT socket_bound`, out.Binding.RootID); err != nil {
+			return out, err
+		}
 		return out, tx.Commit(ctx)
 	}
-	out.InitialRecovery = in.InitialRecovery && (newBinding || in.Recovery != nil) && in.Operation.Identity.Parent == "" && in.PreviousResponse == "" && in.Route.InitialRecoveryAttempts > 0
+	out.InitialRecovery = in.InitialRecovery && out.Binding.ParentID == nil && in.Operation.Identity.Parent == "" && in.PreviousResponse == "" && in.Route.InitialRecoveryAttempts > 0
 	out.Attempt = codemode.Attempt{ID: access.NewID(), ProjectID: in.Route.ProjectID, RouteID: in.Route.ID, RouteRevisionID: in.Route.RevisionID, APIKeyID: in.APIKeyID, Attribution: in.Attribution, EndUserDigest: in.EndUserDigest, BindingID: out.Binding.ID, AccountID: out.Account.ID, Operation: in.Operation.Name, Model: in.Operation.Model, State: "prepared"}
 	if in.Bound != nil {
 		if err = in.Bound.Validate(); err != nil {
@@ -415,8 +412,8 @@ func (s *CodeStore) bind(ctx context.Context, tx pgx.Tx, in CodeAdmission) (code
 		b.AccountID = account.ID
 		b.Principal = account.Principal
 	}
-	err = tx.QueryRow(ctx, `INSERT INTO olp.code_bindings(id,project_id,route_id,api_key_id,conversation,parent_id,root_id,account_id,principal)
-		VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING created_at`, b.ID, b.ProjectID, b.RouteID, b.APIKeyID, b.Conversation, b.ParentID, b.RootID, b.AccountID, b.Principal).Scan(&b.CreatedAt)
+	err = tx.QueryRow(ctx, `INSERT INTO olp.code_bindings(id,project_id,route_id,api_key_id,conversation,parent_id,root_id,account_id,principal,socket_bound)
+		VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING created_at`, b.ID, b.ProjectID, b.RouteID, b.APIKeyID, b.Conversation, b.ParentID, b.RootID, b.AccountID, b.Principal, in.Operation.Name == "connect" || in.Operation.Name == "connect_model").Scan(&b.CreatedAt)
 	return b, err
 }
 
@@ -524,15 +521,13 @@ func codeAccount(ctx context.Context, tx pgx.Tx, in CodeAdmission, id, root stri
 		JOIN olp.code_route_revisions v ON v.id=$7 CROSS JOIN LATERAL (SELECT `+codeadapter.SQL("v.connections->(a.provider_id::text)")+` adapter) f
 		WHERE pa.pool_id=$1 AND a.project_id=$2 AND a.enabled AND p.state<>'disabled' AND p.project_id=a.project_id
 		AND c.provider_id=a.provider_id AND c.principal=a.principal AND c.revoked_at IS NULL AND g.lapsed_at IS NULL AND (g.expires_at IS NULL OR g.expires_at>now())
-		AND ($9::boolean=false OR NOT EXISTS(SELECT 1 FROM olp.code_attempts rejected
-			JOIN olp.code_bindings rejected_binding ON rejected_binding.id=rejected.binding_id
-			WHERE rejected.account_id=a.id AND rejected.nonexecution AND rejected_binding.route_id=$10 AND rejected_binding.api_key_id=$11 AND rejected_binding.conversation=$12))
+		AND ($9::uuid IS NULL OR NOT EXISTS(SELECT 1 FROM olp.code_recovery_chain($9) rejected WHERE rejected.account_id=a.id AND rejected.nonexecution))
 		AND a.models @> $3::jsonb AND ($4='' OR a.id::text=$4) AND a.provider_id::text=ANY($5::text[])
 		AND NOT EXISTS(SELECT 1 FROM olp.code_accounts t WHERE t.id::text=ANY($6::text[])
 			AND coalesce(array_position($6::text[],t.id::text)<array_position($6::text[],a.id::text),true)
 			AND (`+codeadapter.SQL("v.connections->(t.provider_id::text)")+` IS NOT DISTINCT FROM f.adapter
 				OR EXISTS(SELECT 1 FROM olp.code_pins p WHERE p.root_id=nullif($8,'')::uuid AND p.account_id=t.id AND p.adapter IS NOT DISTINCT FROM f.adapter)))`,
-		in.Route.PoolID, in.Route.ProjectID, requiredJSON, id, in.Providers, tree, in.Route.RevisionID, root, in.Recovery != nil && in.Recovery.AccountID == "", in.Route.ID, in.APIKeyID, in.Operation.Identity.Conversation)
+		in.Route.PoolID, in.Route.ProjectID, requiredJSON, id, in.Providers, tree, in.Route.RevisionID, root, codeRecoveryExclusion(in.Recovery))
 	if err != nil {
 		return a, err
 	}

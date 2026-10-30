@@ -187,11 +187,14 @@ func (s *Server) forwardCode(w http.ResponseWriter, r *http.Request, release *ru
 	}
 	defer response.Body.Close()
 	attempt.response(ctx, response.StatusCode, response.Header)
-	if observation.Recoverable {
-		if next := attempt.recover(ctx, response, route, recovery); next != nil {
-			s.forwardCode(w, r, release, route, observation, ingress, raw, body, next, refuse)
-			return
-		}
+	next, recoveryErr := attempt.recover(ctx, response, route, recovery)
+	if recoveryErr != nil {
+		refuse(recoveryErr)
+		return
+	}
+	if next != nil {
+		s.forwardCode(w, r, release, route, observation, ingress, raw, body, next, refuse)
+		return
 	}
 	if payload.translated {
 		attempt.translateResponse(ctx, w, r, response, observation.Operation.Model, payload.stream)

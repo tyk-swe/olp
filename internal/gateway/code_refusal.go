@@ -50,6 +50,8 @@ func (s *Server) recordCodeRefusal(ctx context.Context, route codemode.Route, ke
 
 func codeRefusalMessage(code string) string {
 	switch code {
+	case "code_recovery_unsafe", "code_account_unavailable":
+		return "Continue on the original account when available, or start a new conversation with full context and no response references, reasoning signatures or socket state"
 	case "code_parent_unresolved":
 		return "Establish the parent conversation first, or start a new conversation with full context and no response reference"
 	case "code_response_account_conflict":
