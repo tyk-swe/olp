@@ -15414,9 +15414,10 @@
             ]
           },
           "adapter": {
-            "description": "The subscription family of the account's provider profile: Codex, OpenCode Go, GLM Coding Plan, MiniMax M Plan, Kimi Code or Qwen Token Plan. Null for a profile no code-mode adapter serves. A pool may mix families; each request reaches an account whose family serves its path and model.",
+            "description": "The subscription family of the account's provider profile: Codex, Claude, OpenCode Go, GLM Coding Plan, MiniMax M Plan, Kimi Code or Qwen Token Plan. Null for a profile no code-mode adapter serves. A pool may mix families; each request reaches an account whose family serves its path and model.",
             "enum": [
               "codex",
+              "claude",
               "opencode_go",
               "zai_coding",
               "minimax_plan",
@@ -16026,6 +16027,7 @@
             "items": {
               "enum": [
                 "codex",
+                "claude",
                 "opencode_go",
                 "zai_coding",
                 "minimax_plan",
@@ -16484,6 +16486,7 @@
             "items": {
               "enum": [
                 "codex",
+                "claude",
                 "opencode_go",
                 "zai_coding",
                 "minimax_plan",

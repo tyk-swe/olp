@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/claudeauth"
 	"github.com/tyk-swe/olp/internal/codemode"
 	"github.com/tyk-swe/olp/internal/codeplans"
 	"github.com/tyk-swe/olp/internal/codexauth"
@@ -124,6 +125,17 @@ var vendors = []Vendor{
 			"Enrollment validates authorization only; live subscription inference and client workflow qualification must be established separately.",
 			"Hard token budgets require a separately proven operation/model bound; this authentication adapter supplies none.",
 			"ChatGPT cloud tasks, standalone web search, account management and FedRAMP accounts are outside this local code-mode configuration.",
+		},
+	},
+	{
+		Adapter: codemode.AdapterClaude, Name: "Claude", profiles: []string{claudeauth.ProfileID}, manifest: claudeauth.Manifest,
+		credential: claudeCredential, extra: []string{"Anthropic-Beta"},
+		endpoints: []Endpoint{{ClientPath: "v1/messages", UpstreamPath: "v1/messages", Protocol: codemode.ProtocolMessages, Operation: "messages", Identity: IdentityClient, CredentialHeader: "Authorization", Observation: ObserveUsage, transports: HTTP}},
+		clients:   []Client{{ID: ClientClaudeCode}},
+		enrollmentNotes: []string{
+			"Enrollment verifies the account and organization through the OAuth profile endpoint. It does not qualify inference, entitlement or allowance.",
+			"Claude subscription forwarding and native tool workflows are fixture-tested only. Live subscription inference is not qualified.",
+			"Hard token budgets require a separately proven operation/model bound; this authentication adapter supplies none.",
 		},
 	},
 	{

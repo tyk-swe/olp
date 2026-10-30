@@ -18,6 +18,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -30,6 +31,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/tyk-swe/olp/internal/claudeauth"
 	"github.com/tyk-swe/olp/internal/codemode"
 	"github.com/tyk-swe/olp/internal/providers"
 	"github.com/tyk-swe/olp/internal/secrets"
@@ -503,5 +505,205 @@ func TestCodeAuthImportRejectsInvalidPluginTokenMaterial(t *testing.T) {
 	credentials := h.want(owner, "GET", path+"/credentials", nil, nil, 200)["items"].([]any)
 	if len(credentials) != 0 {
 		t.Fatal("invalid plugin token material was staged as a credential")
+	}
+}
+
+type claudeAuthority struct {
+	proxy *httptest.Server
+	roots string
+}
+
+func newClaudeAuthority(t *testing.T, handler http.Handler) claudeAuthority {
+	t.Helper()
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	certificate := &x509.Certificate{
+		SerialNumber: big.NewInt(1), Subject: pkix.Name{CommonName: "Claude fixture authority"},
+		DNSNames: []string{"platform.claude.com", "api.anthropic.com"}, NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(time.Hour),
+		IsCA: true, BasicConstraintsValid: true, KeyUsage: x509.KeyUsageCertSign | x509.KeyUsageDigitalSignature,
+		ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+	}
+	der, err := x509.CreateCertificate(rand.Reader, certificate, certificate, &key.PublicKey, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewUnstartedServer(handler)
+	server.TLS = &tls.Config{MinVersion: tls.VersionTLS12, Certificates: []tls.Certificate{{Certificate: [][]byte{der}, PrivateKey: key}}}
+	server.StartTLS()
+	t.Cleanup(server.Close)
+	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodConnect {
+			w.WriteHeader(405)
+			return
+		}
+		target, err := net.DialTimeout("tcp", strings.TrimPrefix(server.URL, "https://"), 5*time.Second)
+		if err != nil {
+			w.WriteHeader(502)
+			return
+		}
+		defer target.Close()
+		client, buffered, err := w.(http.Hijacker).Hijack()
+		if err != nil {
+			return
+		}
+		defer client.Close()
+		buffered.WriteString("HTTP/1.1 200 Connection Established\r\n\r\n")
+		buffered.Flush()
+		go io.Copy(target, buffered)
+		io.Copy(client, target)
+	}))
+	t.Cleanup(proxy.Close)
+	return claudeAuthority{proxy: proxy, roots: string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}))}
+}
+
+func TestClaudeHeadlessEnrollmentRefreshAndCredentialRefusal(t *testing.T) {
+	for _, refusal := range []string{"changed identity", "revocation"} {
+		t.Run(refusal, func(t *testing.T) {
+			h := newAccessHarness(t)
+			owner := h.owner()
+			var refreshed atomic.Bool
+			var changed atomic.Bool
+			authority := newClaudeAuthority(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				switch {
+				case r.Method == "POST" && r.Host == "platform.claude.com" && r.URL.Path == "/v1/oauth/token":
+					var request struct {
+						GrantType    string `json:"grant_type"`
+						Code         string `json:"code"`
+						Verifier     string `json:"code_verifier"`
+						State        string `json:"state"`
+						RefreshToken string `json:"refresh_token"`
+					}
+					if json.NewDecoder(r.Body).Decode(&request) != nil {
+						t.Error("invalid OAuth request")
+						w.WriteHeader(400)
+						return
+					}
+					if request.GrantType == "refresh_token" {
+						if request.RefreshToken != "fixture-claude-refresh" {
+							t.Error("encrypted refresh identity was lost")
+						}
+						refreshed.Store(true)
+						io.WriteString(w, `{"access_token":"fixture-claude-rotated","refresh_token":"fixture-claude-refresh","token_type":"bearer","expires_in":3600}`)
+						return
+					}
+					if request.GrantType != "authorization_code" || request.Code != "fixture-approved" || request.Verifier == "" || request.State == "" {
+						t.Error("authorization session was not bound to the code")
+					}
+					io.WriteString(w, `{"access_token":"fixture-claude-access","refresh_token":"fixture-claude-refresh","token_type":"bearer","expires_in":3600}`)
+				case r.Method == "GET" && r.Host == "api.anthropic.com" && r.URL.Path == "/api/oauth/profile":
+					expected := func() string {
+						if refreshed.Load() {
+							return "Bearer fixture-claude-rotated"
+						}
+						return "Bearer fixture-claude-access"
+					}()
+					if r.Header.Get("Authorization") != expected {
+						t.Error("identity was not verified with the issued access token")
+					}
+					account := func() string {
+						if changed.Load() {
+							return "33333333-3333-4333-8333-333333333333"
+						}
+						return "11111111-1111-4111-8111-111111111111"
+					}()
+					fmt.Fprintf(w, `{"account":{"uuid":%q},"organization":{"uuid":"22222222-2222-4222-8222-222222222222"}}`, account)
+				default:
+					t.Errorf("enrollment or maintenance attempted an unrelated operation %s %s", r.Method, r.URL.Path)
+					w.WriteHeader(404)
+				}
+			}))
+			digest := installPlugin(t, h, owner, testutil.BuildPlugin(t, "./plugins/claude"))
+			project := createProject(h, owner, "Claude fixture accounts")
+			configuration := map[string]any{"kind": "plugin", "auth_mode": "grant", "profile_id": claudeauth.ProfileID, "profile_revision": digest,
+				"options": map[string]any{"network": map[string]any{"proxy_url": authority.proxy.URL, "trust_roots_pem": authority.roots}}}
+			provider := h.want(owner, "POST", "/api/v1/providers", map[string]any{"name": "Claude fixture", "project_id": project, "model": "claude-fixture", "configuration": configuration}, idem(uuid.NewString()), 201)
+			path := "/api/v1/providers/" + provider["id"].(string)
+			enrollment := startGrantEnrollment(t, h, owner, path)
+			authorization, err := url.Parse(enrollment["authorization_url"].(string))
+			if err != nil {
+				t.Fatal(err)
+			}
+			completion := continueGrantEnrollment(h, owner, path, enrollment, "fixture-approved#"+authorization.Query().Get("state"), 201)
+			principal := completion["principal"].(string)
+			credential := completion["credential_id"].(string)
+			accountResponse := h.want(owner, "POST", "/api/v1/code/accounts", map[string]any{"project_id": project, "provider_id": provider["id"], "credential_id": credential, "name": "Fixture only", "enabled": true, "models": []string{"claude-fixture"}}, idem(uuid.NewString()), 201)
+			if accountResponse["health"] != "unknown" || accountResponse["principal"] != principal || accountResponse["adapter"] != "claude" {
+				t.Fatal("enrollment fabricated health or lost verified metadata")
+			}
+			var account codemode.Account
+			encoded, err := json.Marshal(accountResponse)
+			if err != nil || json.Unmarshal(encoded, &account) != nil {
+				t.Fatal("invalid account response")
+			}
+			var configurationValue routing.Configuration
+			encodedConfiguration, err := json.Marshal(configuration)
+			if err != nil || json.Unmarshal(encodedConfiguration, &configurationValue) != nil {
+				t.Fatal("invalid configuration")
+			}
+			worker := grantRefresher(t, h)
+			authorizer := providers.CodeAuthorizer{Pool: h.Pool, Credentials: h.Runtime, Plugins: worker.Plugins}
+			dispatch := codemode.Dispatch{ClientPath: "v1/messages", Adapter: codemode.AdapterClaude, Protocol: codemode.ProtocolMessages}
+			h.refresh()
+			before, err := authorizer.AuthorizeCode(t.Context(), configurationValue, account, dispatch)
+			if err != nil || before.Principal != principal || before.Headers.Get("Authorization") != "Bearer fixture-claude-access" {
+				t.Fatalf("enrolled grant refused %v", err)
+			}
+			first := readGrant(t, h, credential)
+			if first.refreshToken == nil {
+				t.Fatal("refresh material was not stored separately")
+			}
+			refresh, err := h.Server.Keys.Read(t.Context(), h.Pool, h.Server.Installation, *first.refreshToken, secrets.ProviderGrantRefresh)
+			if err != nil || string(refresh) != "fixture-claude-refresh" {
+				t.Fatal("refresh material did not use encrypted grant storage")
+			}
+
+			if _, err := h.Pool.Exec(t.Context(), `UPDATE olp.provider_grants SET expires_at=now()-interval '1 minute' WHERE credential_id=$1`, credential); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := authorizer.AuthorizeCode(t.Context(), configurationValue, account, dispatch); err == nil {
+				t.Fatal("expired access material remained authorized")
+			}
+			dueNow(t, h, credential)
+			if !pass(t, worker) {
+				t.Fatal("due refresh did not execute")
+			}
+			h.refresh()
+			after, err := authorizer.AuthorizeCode(t.Context(), configurationValue, account, dispatch)
+			if err != nil || after.Principal != before.Principal || after.GrantGeneration <= before.GrantGeneration || after.Headers.Get("Authorization") == before.Headers.Get("Authorization") {
+				t.Fatal("refresh lost identity or kept expired access material")
+			}
+			detail := h.want(owner, "GET", path, nil, nil, 200)
+			probe := h.want(owner, "POST", path+"/probe", nil, etagHeader(detail), 200)
+			if probe["succeeded"] == true {
+				t.Fatal("ordinary probe bypassed the code-mode boundary")
+			}
+
+			if refusal == "revocation" {
+				current := h.want(owner, "GET", path, nil, nil, 200)
+				h.want(owner, "POST", path+"/credentials/"+credential+"/revoke", nil, withMatch(current, idem(uuid.NewString())), 200)
+				h.refresh()
+				if _, err := authorizer.AuthorizeCode(t.Context(), configurationValue, account, dispatch); err == nil {
+					t.Fatal("revoked credential remained authorized")
+				}
+				return
+			}
+
+			changed.Store(true)
+			dueNow(t, h, credential)
+			if !pass(t, worker) {
+				t.Fatal("changed identity refresh did not execute")
+			}
+			if _, err := authorizer.AuthorizeCode(t.Context(), configurationValue, account, dispatch); err == nil {
+				t.Fatal("changed identity remained authorized")
+			}
+			accounts := h.want(owner, "GET", "/api/v1/code/accounts?project_id="+project, nil, nil, 200)["items"].([]any)
+			if accounts[0].(map[string]any)["principal"] != principal || accounts[0].(map[string]any)["eligible"] != false {
+				t.Fatal("management lost stable identity or lapse eligibility")
+			}
+
+		})
 	}
 }
