@@ -133,8 +133,12 @@ INSERT INTO olp.provider_grants(credential_id) VALUES(:'credential');
   await page
     .getByLabel('Native models')
     .fill('fixture-native-model\nfixture-other-model');
-  await page.getByLabel('Rewrite model identifiers using exact aliases').check();
-  await page.getByLabel('Exact model aliases').fill('team-code=fixture-native-model');
+  await page
+    .getByLabel('Rewrite model identifiers using exact aliases')
+    .check();
+  await page
+    .getByLabel('Exact model aliases')
+    .fill('team-code=fixture-native-model');
   await page.getByRole('button', { name: 'Save', exact: true }).click();
   await expect(page.getByText('Not published', { exact: true })).toBeVisible();
   page.once('dialog', (dialog) => dialog.accept());

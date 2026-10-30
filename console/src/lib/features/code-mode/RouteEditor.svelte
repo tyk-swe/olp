@@ -121,7 +121,8 @@
         throw new Error('Enable model rewriting to publish aliases.');
       if (
         aliasEntries.length > 100 ||
-        new Set(aliasEntries.map(([alias]) => alias)).size !== aliasEntries.length
+        new Set(aliasEntries.map(([alias]) => alias)).size !==
+          aliasEntries.length
       )
         throw new Error('Use up to 100 unique aliases.');
       return {
