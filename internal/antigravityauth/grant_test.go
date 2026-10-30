@@ -53,7 +53,7 @@ func TestEnrollmentBindsAuthenticatedSubjectAndProject(t *testing.T) {
 			}
 		},
 	}
-	callback := RedirectURI + "?" + url.Values{"code": {"approved-code"}, "state": {login.Query().Get("state")}}.Encode()
+	callback := RedirectURI + "?" + url.Values{"code": {"approved-code"}, "state": {login.Query().Get("state")}, "iss": {Issuer}}.Encode()
 	input, _ := json.Marshal(map[string]string{"callback_url": callback, "client_secret": "operator-secret"})
 	grant, err := adapter.ExchangeGrant(t.Context(), abi.GrantExchange{Profile: ProfileID, Session: authorization.Session, Input: string(input)})
 	if err != nil || grant.AccessToken != "opaque-access" || grant.Principal != Principal("verified-subject", "verified-project") || grant.Facts["subject"] != "verified-subject" || grant.Facts["project_id"] != "verified-project" || grant.ExpiresIn <= 0 {
@@ -146,10 +146,26 @@ func TestEnrollmentRefusesCrossSessionCallbacksBeforeExchangingCredentials(t *te
 	if err != nil {
 		t.Fatal(err)
 	}
-	input, _ := json.Marshal(map[string]string{"callback_url": RedirectURI + "?code=unbound&state=another-session", "client_secret": "operator-secret"})
-	grant, err := adapter.ExchangeGrant(t.Context(), abi.GrantExchange{Profile: ProfileID, Session: authorization.Session, Input: string(input)})
-	if err == nil || grant.AccessToken != "" {
-		t.Fatal("unbound callback enrolled")
+	login, err := url.Parse(authorization.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	state := login.Query().Get("state")
+	for name, query := range map[string]url.Values{
+		"another session":  {"code": {"unbound"}, "state": {"another-session"}},
+		"another issuer":   {"code": {"unbound"}, "state": {state}, "iss": {"https://untrusted.invalid"}},
+		"duplicate issuer": {"code": {"unbound"}, "state": {state}, "iss": {Issuer, Issuer}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			input, marshalErr := json.Marshal(map[string]string{"callback_url": RedirectURI + "?" + query.Encode(), "client_secret": "operator-secret"})
+			if marshalErr != nil {
+				t.Fatal(marshalErr)
+			}
+			grant, exchangeErr := adapter.ExchangeGrant(t.Context(), abi.GrantExchange{Profile: ProfileID, Session: authorization.Session, Input: string(input)})
+			if exchangeErr == nil || grant.AccessToken != "" {
+				t.Fatal("unbound callback enrolled")
+			}
+		})
 	}
 }
 
@@ -230,6 +246,13 @@ func TestCredentialImportRejectsUnsupportedCredentialsAndUnverifiedIdentity(t *t
 		"duplicate token":                       strings.Replace(supported, `"access_token":"import-access"`, `"access_token":"import-access","access_token":"another-access"`, 1),
 		"unsupported store":                     `{"credentials":{"access_token":"import-access"}}`,
 		"expired constraint":                    strings.TrimSuffix(supported, "}") + `,"expired":"` + time.Now().Add(-time.Hour).Format(time.RFC3339) + `"}`,
+		"invalid project constraint":            strings.TrimSuffix(supported, "}") + `,"project_id":"untrusted/project"}`,
+		"oversized access token":                strings.Replace(supported, "import-access", strings.Repeat("a", (8<<10)+1), 1),
+		"nonnumeric lifetime":                   strings.TrimSuffix(supported, "}") + `,"expires_in":"3600"}`,
+		"zero lifetime":                         strings.TrimSuffix(supported, "}") + `,"expires_in":0}`,
+		"negative lifetime":                     strings.TrimSuffix(supported, "}") + `,"expires_in":-1}`,
+		"zero timestamp":                        strings.TrimSuffix(supported, "}") + `,"timestamp":0}`,
+		"negative timestamp":                    strings.TrimSuffix(supported, "}") + `,"timestamp":-1}`,
 	} {
 		t.Run(name, func(t *testing.T) {
 			if _, err := ParseCredentialImport(document, "fixture.apps.googleusercontent.com", time.Now()); err == nil || strings.Contains(err.Error(), "operator-secret") || strings.Contains(err.Error(), "import-access") {
@@ -270,6 +293,93 @@ func TestCredentialImportRejectsUnsupportedCredentialsAndUnverifiedIdentity(t *t
 			})}
 			if _, err := credentials.Verify(t.Context(), client); err == nil {
 				t.Fatal("local claims replaced authenticated subject or project evidence")
+			}
+		})
+	}
+}
+
+func TestCredentialImportAcceptsSupportedMetadataAndBoundedIdentityResponses(t *testing.T) {
+	const maximumBody = 64 << 10
+	const clientID = "fixture.apps.googleusercontent.com"
+	now := time.Unix(1800000000, 0)
+	document, err := json.Marshal(struct {
+		Type         string `json:"type"`
+		AccessToken  string `json:"access_token"`
+		RefreshToken string `json:"refresh_token"`
+		ClientID     string `json:"client_id"`
+		ClientSecret string `json:"client_secret"`
+		Project      string `json:"project_id"`
+		Expired      string `json:"expired"`
+		ExpiresIn    int64  `json:"expires_in"`
+		Timestamp    int64  `json:"timestamp"`
+	}{"antigravity", strings.Repeat("a", 8<<10), "import-refresh", clientID, "operator-secret", "verified-project", now.Add(time.Hour).Format(time.RFC3339), 3600, now.Unix()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	credentials, err := ParseCredentialImport(string(document), clientID, now)
+	if err != nil {
+		t.Fatal("supported import metadata was refused")
+	}
+	for _, endpoint := range []string{UserInfoEndpoint, ProjectEndpoint} {
+		for _, test := range []struct {
+			name string
+			size int
+		}{
+			{"maximum", maximumBody},
+			{"oversized", maximumBody + 1},
+		} {
+			t.Run(endpoint+"/"+test.name, func(t *testing.T) {
+				client := &http.Client{Transport: importRoundTripper(func(request *http.Request) (*http.Response, error) {
+					if request.Header.Get("Authorization") != "Bearer "+strings.Repeat("a", 8<<10) {
+						t.Fatal("verification lost the imported access token")
+					}
+					body := func() string {
+						switch request.URL.String() {
+						case UserInfoEndpoint:
+							return `{"sub":"verified-subject"}`
+						case ProjectEndpoint:
+							return `{"cloudaicompanionProject":"verified-project"}`
+						default:
+							t.Fatal("verification left the trusted identity endpoints")
+							return ""
+						}
+					}()
+					padded := func() string {
+						if request.URL.String() != endpoint {
+							return body
+						}
+						prefix := strings.TrimSuffix(body, "}") + `,"metadata":"`
+						return prefix + strings.Repeat("x", test.size-len(prefix)-2) + `"}`
+					}()
+					return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(padded))}, nil
+				})}
+				refresh, verifyErr := credentials.Verify(t.Context(), client)
+				if test.size > maximumBody {
+					if verifyErr == nil || refresh.RefreshToken != "" {
+						t.Fatal("oversized identity response issued refresh authorization")
+					}
+					return
+				}
+				if verifyErr != nil || refresh.Facts["subject"] != "verified-subject" || refresh.Facts["project_id"] != "verified-project" {
+					t.Fatalf("bounded authenticated identity was refused, error=%v", verifyErr)
+				}
+			})
+		}
+	}
+}
+
+func TestPrincipalRequiresBoundedSubjectAndProject(t *testing.T) {
+	for name, identifier := range map[string]string{
+		"empty": "", "minimum": "x", "maximum": strings.Repeat("x", 256), "oversized": strings.Repeat("x", 257),
+		"slash": "untrusted/identity", "backslash": `untrusted\identity`, "leading space": " identity", "newline": "identity\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			valid := name == "minimum" || name == "maximum"
+			for _, pair := range [][2]string{{identifier, "verified-project"}, {"verified-subject", identifier}} {
+				principal := Principal(pair[0], pair[1])
+				if (principal != "") != valid {
+					t.Fatalf("subject/project validity was lost for %q, principal=%q", name, principal)
+				}
 			}
 		})
 	}

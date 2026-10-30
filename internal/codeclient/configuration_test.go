@@ -425,6 +425,46 @@ func TestClaudeSubscriptionSetupUsesNativeModelsAndReportsLiveGap(t *testing.T) 
 	}
 }
 
+func TestOpenCodePaidProtocolsKeepSeparateProvidersAndModelLists(t *testing.T) {
+	models := []string{"paid-response", "paid-message", "paid-chat", "subscription"}
+	target := codemode.PaidTarget{ProviderID: "019a06bf-341f-7000-8000-000000000001", SlotID: "019a06bf-341f-7000-8000-000000000002"}
+	route := codemode.Route{Slug: "coding", Enabled: true, RevisionID: "published", Models: models, PaidParticipation: true,
+		PaidTargets: map[string]codemode.PaidTarget{models[0]: target, models[1]: target, models[2]: target}}
+	offers := Offers{{PaidProtocol: codemode.ProtocolResponses, Models: models[:1]}, {PaidProtocol: codemode.ProtocolMessages, Models: models[1:2]}, {PaidProtocol: codemode.ProtocolChat, Models: models[2:3]}, {Adapter: codemode.AdapterOpenCodeGo, Models: models[3:]}}
+	configuration, err := Generate(route, offers, Request{GatewayURL: "https://gateway.example/prefix", Client: codeadapter.ClientOpenCode, Model: models[0], PlanModel: models[1], SmallModel: models[2]})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var settings struct {
+		Model      string
+		SmallModel string `json:"small_model"`
+		Agent      map[string]struct{ Model string }
+		Provider   map[string]struct {
+			Options   struct{ BaseURL string }
+			Whitelist []string
+			Models    map[string]struct{ ID string }
+		}
+	}
+	if err := json.Unmarshal([]byte(configuration.Configuration), &settings); err != nil {
+		t.Fatal(err)
+	}
+	if settings.Model != "olp-paid-responses/"+models[0] || settings.Agent["plan"].Model != "olp-paid-messages/"+models[1] || settings.SmallModel != "olp-paid-chat/"+models[2] {
+		t.Fatalf("paid selections changed %s", configuration.Configuration)
+	}
+	for i, protocol := range []codemode.Protocol{codemode.ProtocolResponses, codemode.ProtocolMessages, codemode.ProtocolChat} {
+		provider := settings.Provider["olp-paid-"+string(protocol)]
+		suffix := func() string {
+			if protocol == codemode.ProtocolMessages {
+				return ""
+			}
+			return "/v1"
+		}()
+		if provider.Options.BaseURL != configuration.BaseURL+suffix || !slices.Equal(provider.Whitelist, models[i:i+1]) || len(provider.Models) != 1 || provider.Models[models[i]].ID != models[i] {
+			t.Fatalf("paid protocol %s mixed providers or changed its endpoint, settings %s", protocol, configuration.Configuration)
+		}
+	}
+}
+
 func TestAntigravitySetupRequiresExplicitPolicyAndReportsSignedStateGap(t *testing.T) {
 	offers := Offers{{Adapter: codemode.AdapterAntigravity, Models: []string{"gemini-fixture"}}}
 	route := codemode.Route{ID: "route", ProjectID: "project", Slug: "coding", PoolID: "pool", Models: []string{"gemini-fixture"}, Enabled: true, RevisionID: "published"}
@@ -503,6 +543,9 @@ func TestOpenCodeCodexTranslationUsesPublishedChatCapability(t *testing.T) {
 			}
 			if !strings.Contains(configuration.Instructions, "Chat") || !strings.Contains(configuration.Instructions, "unqualified") {
 				t.Fatalf("missing translation boundary %s", configuration.Instructions)
+			}
+			if strings.Contains(configuration.Instructions, "$env:OLP_API_KEY") != (platform == "windows") {
+				t.Fatalf("credential instructions use the wrong shell for %s, got %s", platform, configuration.Instructions)
 			}
 		}
 	}

@@ -2,6 +2,10 @@ package codemode
 
 import (
 	"errors"
+	"fmt"
+	"maps"
+	"slices"
+	"strings"
 	"testing"
 	"time"
 )
@@ -138,6 +142,10 @@ func TestHealthObservationRequiresTimestampAndCompatibleRetry(t *testing.T) {
 		{"missing time", HealthObservation{Status: "unavailable"}, false},
 		{"unknown status", HealthObservation{Status: "unknown", ObservedAt: observed}, false},
 		{"healthy cooldown", HealthObservation{Status: "healthy", ObservedAt: observed, RetryAt: new(observed.Add(time.Minute))}, false},
+		{"first retry year", HealthObservation{Status: "unavailable", ObservedAt: observed, RetryAt: new(time.Date(1, 1, 1, 0, 0, 0, 0, time.UTC))}, true},
+		{"last retry year", HealthObservation{Status: "quota_limited", ObservedAt: observed, RetryAt: new(time.Date(9999, 12, 31, 23, 59, 59, 0, time.UTC))}, true},
+		{"retry year below range", HealthObservation{Status: "unavailable", ObservedAt: observed, RetryAt: new(time.Date(0, 12, 31, 23, 59, 59, 0, time.UTC))}, false},
+		{"retry year above range", HealthObservation{Status: "quota_limited", ObservedAt: observed, RetryAt: new(time.Date(10000, 1, 1, 0, 0, 0, 0, time.UTC))}, false},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			if err := test.observation.Validate(); (err == nil) != test.valid {
@@ -160,6 +168,8 @@ func TestRouteExactAliasesRequireExplicitRewriting(t *testing.T) {
 		{"native collision", Route{Models: []string{"native-a"}, ModelRewriting: true, Aliases: map[string]string{"native-a": "native-a"}}, false},
 		{"alias chain", Route{Models: []string{"native-a"}, ModelRewriting: true, Aliases: map[string]string{"coding": "other", "other": "native-a"}}, false},
 		{"invalid name", Route{Models: []string{"native-a"}, ModelRewriting: true, Aliases: map[string]string{"bad name": "native-a"}}, false},
+		{"maximum alias length", Route{Models: []string{"native-a"}, ModelRewriting: true, Aliases: map[string]string{strings.Repeat("a", 200): "native-a"}}, true},
+		{"alias too long", Route{Models: []string{"native-a"}, ModelRewriting: true, Aliases: map[string]string{strings.Repeat("a", 201): "native-a"}}, false},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			if err := test.route.ValidateAliases(); (err == nil) != test.valid {
@@ -178,6 +188,69 @@ func TestRouteExactAliasesRequireExplicitRewriting(t *testing.T) {
 	}
 	if _, err := route.ResolveModel(Operation{Model: "unknown"}); err == nil {
 		t.Fatal("unpublished model accepted")
+	}
+}
+
+func TestRouteModelPolicyLimits(t *testing.T) {
+	models := slices.Collect(func(yield func(string) bool) {
+		for i := range 100 {
+			if !yield(fmt.Sprintf("native-%d", i)) {
+				return
+			}
+		}
+	})
+	for _, count := range []int{0, 1, 100, 101} {
+		t.Run(fmt.Sprintf("entries-%d", count), func(t *testing.T) {
+			aliases := maps.Collect(func(yield func(string, string) bool) {
+				for i := range count {
+					if !yield(fmt.Sprintf("alias-%d", i), models[0]) {
+						return
+					}
+				}
+			})
+			if err := (Route{Models: models, ModelRewriting: count > 0, Aliases: aliases}).ValidateAliases(); (err == nil) != (count <= 100) {
+				t.Fatalf("alias limit changed for %d entries, error %v", count, err)
+			}
+			pools := maps.Collect(func(yield func(string, []string) bool) {
+				for i := range count {
+					if !yield(fmt.Sprintf("native-%d", i), []string{models[i%100], models[(i+1)%100]}) {
+						return
+					}
+				}
+			})
+			route := Route{Models: models, ModelRewriting: true, Aliases: map[string]string{"native-100": models[0]}, ModelPools: pools}
+			if err := route.ValidateModelPools(); (err == nil) != (count <= 100) {
+				t.Fatalf("pool limit changed for %d entries, error %v", count, err)
+			}
+		})
+	}
+	if err := (Route{Models: models}).ValidateModelPools(); err != nil {
+		t.Fatalf("empty model pools require rewriting, error %v", err)
+	}
+	if err := (Route{Models: models}).ValidatePaidTargets(); err != nil {
+		t.Fatalf("empty paid targets require participation or recovery, error %v", err)
+	}
+	target := PaidTarget{ProviderID: "019a06bf-341f-7000-8000-000000000001", SlotID: "019a06bf-341f-7000-8000-000000000002"}
+	paidTargets := func(models []string) map[string]PaidTarget {
+		return maps.Collect(func(yield func(string, PaidTarget) bool) {
+			for _, model := range models {
+				if !yield(model, target) {
+					return
+				}
+			}
+		})
+	}
+	for _, directCount := range []int{0, 50, 100} {
+		route := Route{Models: models, PaidParticipation: true, InitialRecoveryAttempts: 1, PaidTargets: paidTargets(models[:directCount]), PaidFallbackTargets: paidTargets(models[directCount:])}
+		if err := route.ValidatePaidTargets(); err != nil {
+			t.Fatalf("valid maximum paid target policy rejected with %d direct targets, error %v", directCount, err)
+		}
+	}
+	for _, count := range []int{1, 2, 100} {
+		route := Route{Models: models, ModelRewriting: true, ModelPools: map[string][]string{models[0]: models[:count]}}
+		if err := route.ValidateModelPools(); (err == nil) != (count >= 2) {
+			t.Fatalf("model pool size %d changed validity, error %v", count, err)
+		}
 	}
 }
 

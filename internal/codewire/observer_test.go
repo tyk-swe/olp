@@ -9,7 +9,50 @@ import (
 	"testing"
 
 	"github.com/tyk-swe/olp/internal/codemode"
+	"github.com/tyk-swe/olp/internal/oif"
 )
+
+func TestGenericIdentitySeparatesNativeClientFamilies(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		family  IdentityFamily
+		body    string
+		headers http.Header
+		generic bool
+		refusal string
+	}{
+		{"codex absent metadata", CodexIdentity, `{}`, nil, true, ""},
+		{"codex null metadata", CodexIdentity, `{"client_metadata":null}`, nil, true, ""},
+		{"codex object metadata", CodexIdentity, `{"client_metadata":{}}`, nil, true, ""},
+		{"codex invalid metadata", CodexIdentity, `{"client_metadata":[]}`, nil, false, "code_identity_invalid"},
+		{"generic application metadata", SessionIdentity, `{"client_metadata":"application value"}`, nil, true, ""},
+		{"codex native metadata", CodexIdentity, `{"client_metadata":{"thread_id":"thread"}}`, nil, false, ""},
+		{"generic application thread", SessionIdentity, `{"client_metadata":{"thread_id":"thread"}}`, nil, true, ""},
+		{"codex native header", CodexIdentity, `{}`, http.Header{"Thread-Id": {"thread"}}, false, ""},
+		{"codex Claude header", CodexIdentity, `{}`, http.Header{"X-Claude-Code-Session-Id": {"session"}}, false, "code_identity_ambiguous"},
+		{"codex OpenCode header", CodexIdentity, `{}`, http.Header{"X-Opencode-Session-Id": {"session"}}, false, "code_identity_ambiguous"},
+		{"codex mixed native families", CodexIdentity, `{}`, http.Header{"Thread-Id": {"thread"}, "X-Opencode-Session-Id": {"session"}}, false, "code_identity_ambiguous"},
+		{"codex metadata with affinity", CodexIdentity, `{"client_metadata":{"thread_id":"thread"}}`, http.Header{"X-Olp-Code-Affinity": {"affinity"}}, false, "code_identity_ambiguous"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			document, err := oif.ParseJSON([]byte(test.body), oif.Limits{MaxBytes: MaxBody})
+			if err != nil {
+				t.Fatal(err)
+			}
+			identity, generic, err := GenericIdentity(test.headers, document.Root(), test.family)
+			if test.refusal != "" {
+				var refusal *codemode.Refusal
+				if !errors.As(err, &refusal) || refusal.Code != test.refusal || refusal.Status != 400 {
+					t.Fatalf("identity refusal %v", err)
+				}
+				return
+			}
+			if err != nil || generic != test.generic || generic && (!strings.HasPrefix(identity.Conversation, "olp:request/") || identity.Parent != "") {
+				t.Fatalf("identity %+v, generic %t, error %v", identity, generic, err)
+			}
+		})
+	}
+}
 
 func TestMessagesUsageIncludesCacheInInput(t *testing.T) {
 	observer := NewMessages()

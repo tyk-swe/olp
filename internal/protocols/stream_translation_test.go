@@ -158,6 +158,17 @@ func TestTranslatedResponsesRefuseOpaqueReasoning(t *testing.T) {
 		if _, err := Stream(wire.Responses, target, strings.NewReader(stream), 8192, "route", true, func(frame []byte) error { _, err := frames.Write(frame); return err }); err == nil || bytes.Contains(frames.Bytes(), []byte("[DONE]")) {
 			t.Fatal("streamed opaque reasoning silently disappeared", target)
 		}
+		for _, event := range []string{"response.output_item.added", "response.output_item.done"} {
+			t.Run(string(target)+"/"+event, func(t *testing.T) {
+				source := `data: {"type":"response.created","response":{"id":"opaque","status":"in_progress","output":[]}}` + "\n\ndata: " + `{"type":"` + event + `","output_index":0,"item":{"type":"reasoning","encrypted_content":"opaque-native-state"}}` + "\n\ndata: " + `{"type":"response.completed","response":{"id":"opaque","status":"completed","output":[],"usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}}` + "\n\n"
+				if _, err := AggregateTranslatedResponses(target, strings.NewReader(source), 8192, "route", nil); err == nil {
+					t.Fatal("aggregated opaque item silently disappeared")
+				}
+				if _, err := Stream(wire.Responses, target, strings.NewReader(source), 8192, "route", true, func([]byte) error { return nil }); err == nil {
+					t.Fatal("streamed opaque item silently disappeared")
+				}
+			})
+		}
 	}
 }
 
