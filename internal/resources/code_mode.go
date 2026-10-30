@@ -236,11 +236,18 @@ func (s *CodeStore) admit(ctx context.Context, admission CodeAdmission, connecti
 }
 
 func codeAuthority(ctx context.Context, tx pgx.Tx, in CodeAdmission, a *access.Authority) error {
-	return codeAuthorityFor(ctx, tx, in, a, true)
+	return codeAuthorityFor(ctx, tx, in, a, codeInference)
 }
 
-// Research shares live key and pool authority without a model or conversation.
-func codeAuthorityFor(ctx context.Context, tx pgx.Tx, in CodeAdmission, a *access.Authority, inference bool) error {
+type codeAuthorityOperation uint8
+
+const (
+	codeInference codeAuthorityOperation = iota
+	codeResearch
+	codeModels
+)
+
+func codeAuthorityFor(ctx context.Context, tx pgx.Tx, in CodeAdmission, a *access.Authority, operation codeAuthorityOperation) error {
 	var policy, document []byte
 	var groups access.RouteGroups
 	var templates access.LimitTemplates
@@ -271,10 +278,13 @@ func codeAuthorityFor(ctx context.Context, tx pgx.Tx, in CodeAdmission, a *acces
 		!a.Allows("inference", in.Route.Slug, &in.Route.ProjectID, time.Now()) {
 		return codemode.Refuse(403, "code_permission_denied")
 	}
-	if inference && (!slices.Contains(in.Route.Models, in.Operation.Model) || !slices.Contains(current.Models, in.Operation.Model)) {
+	if operation == codeInference && (!slices.Contains(in.Route.Models, in.Operation.Model) || !slices.Contains(current.Models, in.Operation.Model)) {
 		return codemode.Refuse(403, "code_model_denied")
 	}
-	if !inference && (current.RevisionID != in.Route.RevisionID || current.Tools == nil || in.Route.Tools == nil ||
+	if operation == codeModels && current.RevisionID != in.Route.RevisionID {
+		return codemode.Refuse(409, "code_route_revision_changed")
+	}
+	if operation == codeResearch && (current.RevisionID != in.Route.RevisionID || current.Tools == nil || in.Route.Tools == nil ||
 		current.Tools.AccountID != in.Route.Tools.AccountID || !slices.Equal(current.Tools.Services, in.Route.Tools.Services)) {
 		return codemode.Refuse(409, "code_research_revision_changed")
 	}
