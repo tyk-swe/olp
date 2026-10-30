@@ -459,13 +459,12 @@ func TestCodeAliasRepointPreservesPaidAndSubscriptionContinuation(t *testing.T) 
 			t.Cleanup(subscription.Close)
 			f.exec(t, `UPDATE olp.providers SET configuration=jsonb_set(configuration::jsonb,'{endpoint}',to_jsonb($2::text))::json WHERE id=$1`, f.provider, subscription.URL)
 			f.exec(t, `UPDATE olp.code_accounts SET models=$2 WHERE id=$1`, f.account, []byte(`["native-model"]`))
-			publish := func(target string) {
+			publish := func(target string, current codemode.Route) codemode.Route {
 				t.Helper()
-				path := "/api/v1/code/routes/" + f.route.ID
-				current := f.h.want(f.owner, "GET", path, nil, nil, 200)
+				path := "/api/v1/code/routes/" + current.ID
 				aliases := map[string]string{"assistant": target}
-				write := contract.CodeRouteWrite{ProjectId: uuid.MustParse(f.project), PoolId: uuid.MustParse(f.pool), Slug: f.route.Slug, Models: f.route.Models, Enabled: true, ModelRewriting: new(true), Aliases: &aliases, PaidParticipation: new(true), PaidTargets: f.write.PaidFallbackTargets}
-				saved := f.h.want(f.owner, "PUT", path, write, etagHeader(current), 200)
+				write := contract.CodeRouteWrite{ProjectId: uuid.MustParse(f.project), PoolId: uuid.MustParse(f.pool), Slug: current.Slug, Models: current.Models, Enabled: true, ModelRewriting: new(true), Aliases: &aliases, PaidParticipation: new(true), PaidTargets: f.write.PaidFallbackTargets}
+				saved := f.h.want(f.owner, "PUT", path, write, map[string]string{"If-Match": `"` + current.ETag + `"`}, 200)
 				published := f.h.want(f.owner, "POST", path+"/publish", nil, withMatch(saved, idem("alias-"+target)), 200)
 				route := codePublicDecode[codemode.Route](t, published)
 				eventually(t, "alias publication", 15*time.Second, func() bool {
@@ -474,6 +473,7 @@ func TestCodeAliasRepointPreservesPaidAndSubscriptionContinuation(t *testing.T) 
 				})
 				policy := access.KeyPolicy{Scopes: []string{"inference"}, AllowedRoutes: []string{route.Slug}}
 				f.h.Gateway.Runtime = &codeForwardRuntime{Runtime: f.h.Runtime, pinned: f.h.Runtime.Release(), authority: access.Authority{ID: f.key, LookupID: f.key, ProjectID: &f.project, Policy: policy}}
+				return route
 			}
 			call := func(conversation, previous string) {
 				t.Helper()
@@ -502,10 +502,10 @@ func TestCodeAliasRepointPreservesPaidAndSubscriptionContinuation(t *testing.T) 
 					t.Fatalf("published alias lost its original exact owner %d %s %v", response.StatusCode, body, err)
 				}
 			}
-			publish(scenario.pinned)
+			pinned := publish(scenario.pinned, f.route)
 			call("alias-owner-root", "")
 			codeForwardAwait(t, f.codeFixture, "settled", 1)
-			publish(scenario.repointed)
+			publish(scenario.repointed, pinned)
 			call("alias-owner-root", "")
 			codeForwardAwait(t, f.codeFixture, "settled", 2)
 			call("alias-owner-child", scenario.response)

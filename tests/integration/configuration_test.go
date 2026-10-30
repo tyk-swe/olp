@@ -717,10 +717,10 @@ func codeConfigurationPaidFrozenPolicyRoundTrip(t *testing.T, fallback bool) {
 	f.h.want(f.owner, "POST", "/api/v1/configuration/plan", request, nil, 422)
 	f.h.want(f.owner, "POST", "/api/v1/configuration/apply", request, idem("paid-slot-limit-refusal"), 422)
 	f.exec(t, `UPDATE olp.provider_slots SET limits=jsonb_build_object('requests_per_minute',10) WHERE id=$1`, slot.ID)
-	f.exec(t, `UPDATE olp.providers SET configuration=jsonb_set(configuration,'{options,limits,requests_per_minute}','20') WHERE id=$1`, paid.ID)
+	f.exec(t, `UPDATE olp.providers SET configuration=jsonb_set(configuration::jsonb,'{options,limits,requests_per_minute}','20')::json WHERE id=$1`, paid.ID)
 	f.h.want(f.owner, "POST", "/api/v1/configuration/plan", request, nil, 422)
 	f.h.want(f.owner, "POST", "/api/v1/configuration/apply", request, idem("paid-provider-limit-refusal"), 422)
-	f.exec(t, `UPDATE olp.providers SET configuration=jsonb_set(configuration,'{options,limits,requests_per_minute}','10') WHERE id=$1`, paid.ID)
+	f.exec(t, `UPDATE olp.providers SET configuration=jsonb_set(configuration::jsonb,'{options,limits,requests_per_minute}','10')::json WHERE id=$1`, paid.ID)
 	plan := f.h.want(f.owner, "POST", "/api/v1/configuration/plan", request, nil, 200)
 	if len(plan["conflicts"].([]any))+len(plan["blockers"].([]any)) != 0 {
 		t.Fatalf("paid plan was blocked %v", plan)
