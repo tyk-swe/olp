@@ -996,3 +996,7 @@ func decodeEmbeddings(body []byte, route, encoding string) (*wire.Completion, er
 	}
 	return c, nil
 }
+
+func RenderCompletion(c *wire.Completion, family wire.Format, model string) []byte {
+	return renderCompletion(c, family, model)
+}

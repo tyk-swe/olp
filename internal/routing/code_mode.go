@@ -38,7 +38,21 @@ func (s *Snapshot) CodeAdapters(route codemode.Route) []codemode.Adapter {
 // connections whose adapter serves a client path over transport, ordered by ID.
 // The returned slice is shared and must not be modified.
 func (s *Snapshot) CodeProviders(route codemode.Route, path string, transport codeadapter.Transport) []string {
-	return s.codeRevisions[route.RevisionID].providers[codeCapability{path, transport}]
+	revision := s.codeRevisions[route.RevisionID]
+	if !route.MessagesToCodex || path != "v1/messages" {
+		return revision.providers[codeCapability{path, transport}]
+	}
+	providers := slices.Collect(func(yield func(string) bool) {
+		for provider, vendor := range revision.vendors {
+			if endpoint, ok := codeadapter.RouteEndpoint(route, vendor, path); ok && endpoint.Supports(transport) {
+				if !yield(provider) {
+					return
+				}
+			}
+		}
+	})
+	slices.Sort(providers)
+	return providers
 }
 
 // CodeModelProviders returns the providers of CodeProviders whose adapter
@@ -46,11 +60,11 @@ func (s *Snapshot) CodeProviders(route codemode.Route, path string, transport co
 // one endpoint serves a path only for that endpoint's models.
 func (s *Snapshot) CodeModelProviders(route codemode.Route, path string, protocol codemode.Protocol, model string, transport codeadapter.Transport) []string {
 	revision := s.codeRevisions[route.RevisionID]
-	providers := revision.providers[codeCapability{path, transport}]
+	providers := s.CodeProviders(route, path, transport)
 	return slices.DeleteFunc(slices.Clone(providers), func(provider string) bool {
 		vendor := revision.vendors[provider]
-		endpoint, ok := vendor.Endpoint(path)
-		return !ok || endpoint.Protocol != protocol || !vendor.ServesModel(protocol, model)
+		endpoint, ok := codeadapter.RouteEndpoint(route, vendor, path)
+		return !ok || !vendor.ServesModel(endpoint.Protocol, model)
 	})
 }
 

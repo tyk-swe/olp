@@ -14,11 +14,6 @@ import (
 	"github.com/tyk-swe/olp/internal/codewire"
 )
 
-// RegisterCode mounts raw code-mode transport, which requires CodeLedger and
-// CodeAuthorizer. A route serves the paths of its accounts' adapters, and
-// each request goes to an account whose adapter serves its path. It never
-// invokes ordinary request preparation, credential failover, response
-// transformation or retries.
 func (s *Server) RegisterCode(mux *http.ServeMux) {
 	mux.HandleFunc("/code/{slug}/mcp/{service}", s.serveCodeResearch)
 	mux.HandleFunc("/code/{slug}/{operation...}", s.serveCode)
@@ -107,6 +102,16 @@ func (s *Server) serveCode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer attempt.finish(ctx)
+	translated := attempt.endpoint.Protocol != ingress.protocol
+	payload := raw
+	var translatedStream bool
+	if translated {
+		payload, translatedStream, err = codeTranslateMessages(body, r)
+		if err != nil {
+			refuse(err)
+			return
+		}
+	}
 	client, err := s.codeClient(r.Context(), release, attempt.config, attempt.permit.Account.ProviderID)
 	if err != nil {
 		refuse(err)
@@ -118,14 +123,23 @@ func (s *Server) serveCode(w http.ResponseWriter, r *http.Request) {
 		refuse(err)
 		return
 	}
-	request, err := http.NewRequestWithContext(ctx, http.MethodPost, target, &codeRequestBody{data: raw})
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, target, &codeRequestBody{data: payload})
 	if err != nil {
 		refuse(codemode.Refuse(502, "code_connection_invalid"))
 		return
 	}
-	request.ContentLength = int64(len(raw))
+	request.ContentLength = int64(len(payload))
 	request.Header = attempt.headers(r.Header)
-	request.Trailer = codewire.ForwardTrailers(r.Trailer, r.Header, true)
+	if translated {
+		request.Header.Del("Content-Encoding")
+		request.Header.Del("Content-Length")
+		request.Header.Del("Anthropic-Version")
+		request.Header.Del("Anthropic-Beta")
+		request.Header.Set("Accept-Encoding", "identity")
+		request.Header.Set("Content-Type", "application/json")
+	} else {
+		request.Trailer = codewire.ForwardTrailers(r.Trailer, r.Header, true)
+	}
 	if len(request.Trailer) != 0 {
 		request.ContentLength = -1
 		request.Header.Del("Content-Length")
@@ -145,6 +159,10 @@ func (s *Server) serveCode(w http.ResponseWriter, r *http.Request) {
 	}
 	defer response.Body.Close()
 	attempt.response(ctx, response.StatusCode, response.Header)
+	if translated {
+		attempt.translateResponse(ctx, w, r, response, observation.Operation.Model, translatedStream)
+		return
+	}
 	maps.Copy(w.Header(), codewire.ForwardHeaders(response.Header, false))
 	for name := range codewire.ForwardTrailers(response.Trailer, response.Header, false) {
 		w.Header().Add("Trailer", name)

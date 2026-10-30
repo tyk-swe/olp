@@ -190,6 +190,20 @@ func encodeCanonical(c *Generation, family wire.Format, model, operation string)
 		return encodeBedrock(c, model, operation)
 	case wire.Chat, wire.InputTokens:
 		return encodeOpenAIGeneration(c, model, count)
+	case wire.Responses:
+		out, err := encodeOpenAIGeneration(c, model, true)
+		if err != nil {
+			return nil, err
+		}
+		for key, value := range c.Parameters {
+			if key == "max_output_tokens" || key == "temperature" || key == "top_p" {
+				out[key] = value
+				continue
+			}
+			return nil, unsupported(key)
+		}
+		out["stream"] = raw(c.Stream)
+		return out, nil
 	case wire.Anthropic, wire.AnthropicCount:
 		return encodeAnthropicGeneration(c, model, count)
 	case wire.Gemini, wire.GeminiCount:

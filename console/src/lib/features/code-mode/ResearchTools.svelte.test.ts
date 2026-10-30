@@ -261,3 +261,34 @@ it('keeps platform across client changes and models across platform changes', as
     expect.any(AbortSignal)
   );
 });
+
+it('saves explicit Messages translation in the route draft', async () => {
+  component = mount(ResearchConfigurationProbe, {
+    target: host,
+    props: { client, route }
+  });
+  flushSync();
+  await settle();
+  await click('Edit draft');
+  const translation = host.querySelector<HTMLInputElement>(
+    '#code-messages-to-codex'
+  );
+  expect(translation).not.toBeNull();
+  expect(translation!.checked).toBe(false);
+  translation!.click();
+  flushSync();
+  vi.mocked(api.saveCodeRoute).mockResolvedValue(route);
+  host
+    .querySelector('form')!
+    .dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+  await settle();
+  expect(api.saveCodeRoute).toHaveBeenCalledWith(
+    expect.objectContaining({
+      messages_to_codex: true,
+      models: route.models,
+      tools: null
+    }),
+    route,
+    expect.any(String)
+  );
+});

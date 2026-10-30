@@ -7610,14 +7610,17 @@ type CodeRoute struct {
 	Id       openapi_types.UUID  `json:"id"`
 
 	// MaxBodyBytes Optional ingress limit in bytes. Null inherits installation limits; a route can only lower them. Checks both encoded and decoded JSON, the complete multipart body, and individual client WebSocket messages. Published revisions pin this policy.
-	MaxBodyBytes nullable.Nullable[int]       `json:"max_body_bytes,omitempty"`
-	Models       []string                     `json:"models"`
-	PoolId       openapi_types.UUID           `json:"pool_id"`
-	ProjectId    openapi_types.UUID           `json:"project_id"`
-	PublishedAt  nullable.Nullable[time.Time] `json:"published_at"`
-	Revision     int32                        `json:"revision"`
-	RevisionId   string                       `json:"revision_id"`
-	Slug         string                       `json:"slug"`
+	MaxBodyBytes nullable.Nullable[int] `json:"max_body_bytes,omitempty"`
+
+	// MessagesToCodex Explicitly allow text-only Messages requests to use Codex subscription accounts through protocol translation. Published revisions pin this policy. Native forwarding remains the default. Model identifiers, client identity and prompts are preserved. Tools, thinking, beta features and unsupported required semantics are refused before dispatch.
+	MessagesToCodex *bool                        `json:"messages_to_codex,omitempty"`
+	Models          []string                     `json:"models"`
+	PoolId          openapi_types.UUID           `json:"pool_id"`
+	ProjectId       openapi_types.UUID           `json:"project_id"`
+	PublishedAt     nullable.Nullable[time.Time] `json:"published_at"`
+	Revision        int32                        `json:"revision"`
+	RevisionId      string                       `json:"revision_id"`
+	Slug            string                       `json:"slug"`
 
 	// Tools Research subscription binding, frozen at publication. Requires an eligible Z.ai global account in the same project and pool; independent of inference models. Null disables research.
 	Tools nullable.Nullable[CodeResearchTools] `json:"tools,omitempty"`
@@ -7638,10 +7641,13 @@ type CodeRouteWrite struct {
 
 	// MaxBodyBytes Optional ingress limit in bytes. Null inherits installation limits; a route can only lower them. Checks both encoded and decoded JSON, the complete multipart body, and individual client WebSocket messages. Published revisions pin this policy.
 	MaxBodyBytes nullable.Nullable[int] `json:"max_body_bytes,omitempty"`
-	Models       []string               `json:"models"`
-	PoolId       openapi_types.UUID     `json:"pool_id"`
-	ProjectId    openapi_types.UUID     `json:"project_id"`
-	Slug         string                 `json:"slug"`
+
+	// MessagesToCodex Explicitly allow text-only Messages requests to use Codex subscription accounts through protocol translation. Published revisions pin this policy. Native forwarding remains the default. Model identifiers, client identity and prompts are preserved. Tools, thinking, beta features and unsupported required semantics are refused before dispatch.
+	MessagesToCodex *bool              `json:"messages_to_codex,omitempty"`
+	Models          []string           `json:"models"`
+	PoolId          openapi_types.UUID `json:"pool_id"`
+	ProjectId       openapi_types.UUID `json:"project_id"`
+	Slug            string             `json:"slug"`
 
 	// Tools Research subscription binding, frozen at publication. Requires an eligible Z.ai global account in the same project and pool; independent of inference models. Null disables research.
 	Tools nullable.Nullable[CodeResearchTools] `json:"tools,omitempty"`

@@ -383,3 +383,28 @@ func TestCodeFoundationManagementIsolationPublicationAndPrivacy(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestCodeFoundationMessagesTranslationPolicyPublication(t *testing.T) {
+	f := newCodeFixture(t)
+	if f.route.MessagesToCodex {
+		t.Fatal("translation enabled by default")
+	}
+	draft := f.h.want(f.owner, "PUT", "/api/v1/code/routes/"+f.route.ID, map[string]any{
+		"project_id": f.project, "slug": f.route.Slug, "pool_id": f.pool, "models": f.route.Models,
+		"enabled": true, "messages_to_codex": true,
+	}, map[string]string{"If-Match": `"` + f.route.ETag + `"`}, 200)
+	if draft["messages_to_codex"] != true {
+		t.Fatal("translation policy missing from draft", draft)
+	}
+	f.h.want(f.owner, "GET", "/api/v1/code/routes/"+f.route.ID+"/client-config?client=claude-code&gateway_url=https://olp.example", nil, nil, 422)
+	headers := etagHeader(draft)
+	headers["Idempotency-Key"] = "translate-messages"
+	published := f.h.want(f.owner, "POST", "/api/v1/code/routes/"+f.route.ID+"/publish", nil, headers, 200)
+	if published["messages_to_codex"] != true {
+		t.Fatal("translation policy missing from publication", published)
+	}
+	config := f.h.want(f.owner, "GET", "/api/v1/code/routes/"+f.route.ID+"/client-config?client=claude-code&gateway_url=https://olp.example", nil, nil, 200)
+	if config["model"] != f.route.Models[0] || !strings.Contains(config["configuration"].(string), "ANTHROPIC_BASE_URL") {
+		t.Fatal("translated Claude setup missing", config)
+	}
+}

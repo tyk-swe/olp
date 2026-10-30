@@ -419,3 +419,13 @@ func SQLAdapters(connections string) string {
 	return "(SELECT coalesce(jsonb_agg(adapter ORDER BY array_position(ARRAY[" + strings.Join(order, ",") + "],adapter)),'[]'::jsonb) FROM (SELECT DISTINCT " + SQL("c.value") +
 		" adapter FROM jsonb_each(" + connections + ") c) adapters WHERE adapter IS NOT NULL)"
 }
+
+func RouteEndpoint(route codemode.Route, vendor Vendor, path string) (Endpoint, bool) {
+	if endpoint, ok := vendor.Endpoint(path); ok {
+		return endpoint, true
+	}
+	if route.MessagesToCodex && path == "v1/messages" && vendor.Adapter == codemode.AdapterCodex {
+		return vendor.Endpoint("responses")
+	}
+	return Endpoint{}, false
+}

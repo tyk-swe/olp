@@ -145,3 +145,32 @@ func TestOpenCodeSelectionReplacesOnlyPlanningModel(t *testing.T) {
 		t.Fatalf("unrelated settings changed: %+v", settings)
 	}
 }
+
+func TestClaudeConfigurationThroughCodexRequiresTranslationPolicy(t *testing.T) {
+	models := []string{"fixture-main", "fixture-plan"}
+	offers := Offers{{Adapter: codemode.AdapterCodex, Models: models}}
+	for _, enabled := range []bool{false, true} {
+		route := codemode.Route{Slug: "team-code", Enabled: true, RevisionID: "published", Models: models, MessagesToCodex: enabled}
+		config, err := Generate(route, offers, Request{GatewayURL: "https://olp.example", Client: "claude-code", Model: models[0], PlanModel: models[1]})
+		if !enabled {
+			var problem *access.Problem
+			if !errors.As(err, &problem) || problem.Field != "client" {
+				t.Fatalf("native route allowed translated setup: %v", err)
+			}
+			continue
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		if config.Client != "claude-code" || config.Model != models[0] || config.PlanModel == nil || *config.PlanModel != models[1] || config.SmallModel == nil || *config.SmallModel != models[0] {
+			t.Fatalf("translated model selection lost: %+v", config)
+		}
+		if !strings.Contains(config.Configuration, "ANTHROPIC_BASE_URL") || !strings.Contains(config.Instructions, "text-only") || !strings.Contains(config.Instructions, "identity") {
+			t.Fatalf("missing translated setup or limitations: %+v", config)
+		}
+		defaults, err := Generate(route, offers, Request{GatewayURL: "https://olp.example"})
+		if err != nil || defaults.Client != "codex" {
+			t.Fatalf("translation changed native default: %+v, %v", defaults, err)
+		}
+	}
+}
