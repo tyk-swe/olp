@@ -71,7 +71,7 @@ func TestCredentialImportAuthorizationMatchesCanonicalMatrix(t *testing.T) {
 	if err := json.Unmarshal(raw, &matrix); err != nil {
 		t.Fatal(err)
 	}
-	for _, pattern := range []string{"POST /api/v1/providers/{provider_id}/codex-import", "POST /api/v1/providers/{provider_id}/claude-import"} {
+	for _, pattern := range []string{"POST /api/v1/providers/{provider_id}/codex-import", "POST /api/v1/providers/{provider_id}/claude-import", "POST /api/v1/providers/{provider_id}/antigravity-import"} {
 		row, ok := matrix.Routes[pattern]
 		if !ok || len(row) != len(matrix.Archetypes) {
 			t.Fatal("the import route needs an authorization expectation for every caller")

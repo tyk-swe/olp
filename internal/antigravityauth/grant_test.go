@@ -5,10 +5,12 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/url"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/tyk-swe/olp/sdk/plugin/abi"
 )
@@ -148,5 +150,127 @@ func TestEnrollmentRefusesCrossSessionCallbacksBeforeExchangingCredentials(t *te
 	grant, err := adapter.ExchangeGrant(t.Context(), abi.GrantExchange{Profile: ProfileID, Session: authorization.Session, Input: string(input)})
 	if err == nil || grant.AccessToken != "" {
 		t.Fatal("unbound callback enrolled")
+	}
+}
+
+func TestCredentialImportVerifiesOriginalAccessBeforeRefresh(t *testing.T) {
+	clientID := "fixture.apps.googleusercontent.com"
+	for _, changed := range []string{"", "subject", "project"} {
+		t.Run(changed, func(t *testing.T) {
+			credentials, err := ParseCredentialImport(`{"type":"antigravity","access_token":"import-access","refresh_token":"import-refresh","client_id":"fixture.apps.googleusercontent.com","client_secret":"operator-secret","project_id":"verified-project"}`, clientID, time.Now())
+			if err != nil {
+				t.Fatal("supported migration credentials were rejected")
+			}
+			fetch := func(_ context.Context, request abi.HTTPRequest) (abi.HTTPResponse, error) {
+				original := http.Header(request.Header).Get("Authorization") == "Bearer import-access"
+				switch request.URL {
+				case TokenEndpoint:
+					form, _ := url.ParseQuery(string(request.Body))
+					if form.Get("grant_type") != "refresh_token" || form.Get("client_id") != clientID || form.Get("client_secret") != "operator-secret" || form.Get("refresh_token") != "import-refresh" {
+						t.Fatal("import did not retain original client authorization")
+					}
+					return response(`{"access_token":"refreshed-access","token_type":"Bearer","expires_in":3600}`), nil
+				case UserInfoEndpoint:
+					if !original && http.Header(request.Header).Get("Authorization") != "Bearer refreshed-access" {
+						t.Fatal("identity verification lacked authenticated access")
+					}
+					if !original && changed == "subject" {
+						return response(`{"sub":"changed-subject"}`), nil
+					}
+					return response(`{"sub":"verified-subject"}`), nil
+				case ProjectEndpoint:
+					if !original && changed == "project" {
+						return response(`{"cloudaicompanionProject":"changed-project"}`), nil
+					}
+					return response(`{"cloudaicompanionProject":"verified-project"}`), nil
+				default:
+					t.Fatal("import reached an unapproved destination")
+					return abi.HTTPResponse{}, nil
+				}
+			}
+			client := &http.Client{Transport: importRoundTripper(func(request *http.Request) (*http.Response, error) {
+				body, _ := io.ReadAll(request.Body)
+				response, err := fetch(request.Context(), abi.HTTPRequest{Method: request.Method, URL: request.URL.String(), Header: request.Header, Body: body})
+				return &http.Response{StatusCode: response.Status, Header: http.Header{"Content-Type": {"application/json"}}, Body: io.NopCloser(strings.NewReader(string(response.Body)))}, err
+			})}
+			refresh, err := credentials.Verify(t.Context(), client)
+			if err != nil {
+				t.Fatal("original access could not establish verified identity")
+			}
+			adapter := Adapter{ClientID: func(context.Context) string { return clientID }, Fetch: fetch}
+			grant, err := adapter.RefreshGrant(t.Context(), refresh)
+			if changed != "" {
+				if err == nil || grant.AccessToken != "" || strings.Contains(err.Error(), "operator-secret") {
+					t.Fatal("refresh substituted a different verified identity")
+				}
+				return
+			}
+			if err != nil || grant.Principal != Principal("verified-subject", "verified-project") || grant.AccessToken != "refreshed-access" {
+				t.Fatal("import lost verified identity or fresh access")
+			}
+			continued, err := adapter.RefreshGrant(t.Context(), abi.GrantRefresh{Profile: ProfileID, RefreshToken: grant.RefreshToken, Facts: grant.Facts})
+			if err != nil || continued.Principal != grant.Principal {
+				t.Fatal("import did not retain OLP refresh ownership without token rotation")
+			}
+		})
+	}
+}
+
+type importRoundTripper func(*http.Request) (*http.Response, error)
+
+func (f importRoundTripper) RoundTrip(request *http.Request) (*http.Response, error) {
+	return f(request)
+}
+
+func TestCredentialImportRejectsUnsupportedCredentialsAndUnverifiedIdentity(t *testing.T) {
+	const supported = `{"type":"antigravity","access_token":"import-access","refresh_token":"import-refresh","client_id":"fixture.apps.googleusercontent.com","client_secret":"operator-secret"}`
+	for name, document := range map[string]string{
+		"missing original client authorization": strings.ReplaceAll(supported, `,"client_secret":"operator-secret"`, ""),
+		"another OAuth client":                  strings.ReplaceAll(supported, "fixture.apps", "another.apps"),
+		"duplicate token":                       strings.Replace(supported, `"access_token":"import-access"`, `"access_token":"import-access","access_token":"another-access"`, 1),
+		"unsupported store":                     `{"credentials":{"access_token":"import-access"}}`,
+		"expired constraint":                    strings.TrimSuffix(supported, "}") + `,"expired":"` + time.Now().Add(-time.Hour).Format(time.RFC3339) + `"}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := ParseCredentialImport(document, "fixture.apps.googleusercontent.com", time.Now()); err == nil || strings.Contains(err.Error(), "operator-secret") || strings.Contains(err.Error(), "import-access") {
+				t.Fatal("unsupported credentials were accepted or exposed")
+			}
+		})
+	}
+	for _, evidence := range []string{"denied", "missing subject", "missing project", "conflicting project", "redirect"} {
+		t.Run(evidence, func(t *testing.T) {
+			document := strings.TrimSuffix(supported, "}") + `,"email":"unverified@example.invalid","project_id":"verified-project"}`
+			credentials, err := ParseCredentialImport(document, "fixture.apps.googleusercontent.com", time.Now())
+			if err != nil {
+				t.Fatal("valid constraint envelope was rejected")
+			}
+			client := &http.Client{Transport: importRoundTripper(func(request *http.Request) (*http.Response, error) {
+				if request.URL.String() != UserInfoEndpoint && request.URL.String() != ProjectEndpoint {
+					t.Fatal("verification followed an untrusted redirect")
+				}
+				if request.Header.Get("Authorization") != "Bearer import-access" {
+					t.Fatal("verification omitted original access")
+				}
+				status, body := func() (int, string) {
+					if evidence == "denied" {
+						return http.StatusUnauthorized, `{"sub":"untrusted"}`
+					}
+					if evidence == "redirect" {
+						return http.StatusTemporaryRedirect, ""
+					}
+					if evidence == "missing subject" && request.URL.String() == UserInfoEndpoint || evidence == "missing project" && request.URL.String() == ProjectEndpoint {
+						return http.StatusOK, `{}`
+					}
+					if request.URL.String() == UserInfoEndpoint {
+						return http.StatusOK, `{"sub":"verified-subject"}`
+					}
+					return http.StatusOK, `{"cloudaicompanionProject":"another-project"}`
+				}()
+				return &http.Response{StatusCode: status, Header: http.Header{"Location": {"https://untrusted.example.invalid/credentials"}}, Body: io.NopCloser(strings.NewReader(body))}, nil
+			})}
+			if _, err := credentials.Verify(t.Context(), client); err == nil {
+				t.Fatal("local claims replaced authenticated subject or project evidence")
+			}
+		})
 	}
 }

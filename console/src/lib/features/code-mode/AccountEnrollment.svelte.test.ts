@@ -28,29 +28,43 @@ it.each([
     file: 'Claude .credentials.json',
     profile: 'claude-subscription',
     path: 'claude-import'
+  },
+  {
+    name: 'Antigravity',
+    file: 'Antigravity migration JSON',
+    profile: 'antigravity-subscription',
+    path: 'antigravity-import'
   }
 ])(
   'imports pasted $name credentials once and clears them before reporting completion',
   async ({ name, file, profile, path: importPath }) => {
     const credential = JSON.stringify(
-      profile === 'claude-subscription'
+      profile === 'antigravity-subscription'
         ? {
-            claudeAiOauth: {
-              accessToken: 'fixture-access',
-              refreshToken: 'fixture-refresh',
-              expiresAt: 1900000000000,
-              scopes: ['user:profile', 'user:inference']
-            }
+            type: 'antigravity',
+            access_token: 'fixture-access',
+            refresh_token: 'fixture-refresh',
+            client_id: 'fixture.apps.googleusercontent.com',
+            client_secret: 'fixture-secret'
           }
-        : {
-            auth_mode: 'chatgpt',
-            tokens: {
-              access_token: 'fixture-access',
-              id_token: 'fixture-id',
-              refresh_token: 'fixture-refresh',
-              account_id: 'fixture-account'
+        : profile === 'claude-subscription'
+          ? {
+              claudeAiOauth: {
+                accessToken: 'fixture-access',
+                refreshToken: 'fixture-refresh',
+                expiresAt: 1900000000000,
+                scopes: ['user:profile', 'user:inference']
+              }
             }
-          }
+          : {
+              auth_mode: 'chatgpt',
+              tokens: {
+                access_token: 'fixture-access',
+                id_token: 'fixture-id',
+                refresh_token: 'fixture-refresh',
+                account_id: 'fixture-account'
+              }
+            }
     );
     const completed = vi.fn();
     const imported = vi.fn();
@@ -97,11 +111,11 @@ it.each([
     await vi.waitFor(() => {
       flushSync();
       expect(
-        host.querySelector(`textarea[aria-label="${file}"]`)
+        host.querySelector(`input[type="password"][aria-label="${file}"]`)
       ).not.toBeNull();
     });
-    const input = host.querySelector<HTMLTextAreaElement>(
-      `textarea[aria-label="${file}"]`
+    const input = host.querySelector<HTMLInputElement>(
+      `input[type="password"][aria-label="${file}"]`
     )!;
     input.value = '{broken';
     input.dispatchEvent(new Event('input', { bubbles: true }));
@@ -138,7 +152,7 @@ it.each([
   }
 );
 
-it.each(['codex', 'claude'] as const)(
+it.each(['codex', 'claude', 'antigravity'] as const)(
   'clears rejected %s credentials and shows a safe failure without completing enrollment',
   async (adapter) => {
     const credential = '{"tokens":{"refresh_token":"rejected-fixture-secret"}}';
@@ -183,9 +197,9 @@ it.each(['codex', 'claude'] as const)(
     });
     await vi.waitFor(() => {
       flushSync();
-      expect(host.querySelector('textarea')).not.toBeNull();
+      expect(host.querySelector('input[type="password"]')).not.toBeNull();
     });
-    const input = host.querySelector('textarea')!;
+    const input = host.querySelector('input[type="password"]')!;
     input.value = credential;
     input.dispatchEvent(new Event('input', { bubbles: true }));
     flushSync();
@@ -193,7 +207,7 @@ it.each(['codex', 'claude'] as const)(
       .find(
         (button) =>
           button.textContent?.trim() ===
-          `Import ${adapter === 'claude' ? 'Claude' : 'Codex'} credentials`
+          `Import ${adapter === 'claude' ? 'Claude' : adapter === 'antigravity' ? 'Antigravity' : 'Codex'} credentials`
       )!
       .click();
     await vi.waitFor(() => {
