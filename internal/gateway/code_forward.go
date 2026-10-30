@@ -122,6 +122,9 @@ func (s *Server) forwardCode(w http.ResponseWriter, r *http.Request, release *ru
 		if rewriteErr != nil {
 			return codePayload{}, rewriteErr
 		}
+		if attempt.endpoint.Target == codeadapter.TargetAntigravity {
+			return codeTranslateAntigravity(requestBody, r, attempt.model, attempt.auth.ProjectID)
+		}
 		if attempt.endpoint.Protocol == ingress.protocol {
 			if attempt.model != attempt.publicModel {
 				return codePayload{body: requestBody, query: r.URL.RawQuery}, nil
@@ -141,7 +144,7 @@ func (s *Server) forwardCode(w http.ResponseWriter, r *http.Request, release *ru
 		return
 	}
 	defer client.CloseIdleConnections()
-	target, err := s.codeEndpoint(attempt.config, attempt.endpoint.UpstreamPath, payload.query)
+	target, err := s.codeEndpoint(attempt.config, attempt.endpoint.Path(payload.stream), payload.query)
 	if err != nil {
 		refuse(err)
 		return
@@ -158,7 +161,7 @@ func (s *Server) forwardCode(w http.ResponseWriter, r *http.Request, release *ru
 		request.Header.Del("Content-Length")
 		request.Header.Set("Accept-Encoding", "identity")
 	}
-	if payload.translated {
+	if payload.translated || payload.target != "" {
 		request.Header.Del("Content-Encoding")
 		request.Header.Del("Content-Length")
 		request.Header.Del("Anthropic-Version")
@@ -194,6 +197,10 @@ func (s *Server) forwardCode(w http.ResponseWriter, r *http.Request, release *ru
 	}
 	if next != nil {
 		s.forwardCode(w, r, release, route, observation, ingress, raw, body, next, refuse)
+		return
+	}
+	if payload.target == codeadapter.TargetAntigravity {
+		attempt.antigravityResponse(ctx, w, r, response, observation.Operation.Model, payload)
 		return
 	}
 	if payload.translated {

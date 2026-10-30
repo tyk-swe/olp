@@ -20,6 +20,7 @@ type Adapter string
 
 const (
 	AdapterClaude        Adapter = "claude"
+	AdapterAntigravity   Adapter = "antigravity"
 	AdapterCodex         Adapter = "codex"
 	AdapterOpenCodeGo    Adapter = "opencode_go"
 	AdapterZAICoding     Adapter = "zai_coding"
@@ -51,6 +52,7 @@ type Authorization struct {
 	Principal       string
 	CredentialID    string
 	GrantGeneration int64
+	ProjectID       string
 }
 
 type Refusal struct {
@@ -167,6 +169,7 @@ type Route struct {
 	InitialRecoveryAttempts int                 `json:"initial_recovery_attempts,omitempty"`
 	ModelRewriting          bool                `json:"model_rewriting,omitempty"`
 	Aliases                 map[string]string   `json:"aliases,omitempty"`
+	ChatToAntigravity       bool                `json:"chat_to_antigravity,omitempty"`
 	MessagesToCodex         bool                `json:"messages_to_codex,omitempty"`
 	Tools                   *ResearchTools      `json:"tools,omitempty"`
 	MaxBodyBytes            *int64              `json:"max_body_bytes,omitempty"`

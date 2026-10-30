@@ -128,6 +128,10 @@ INSERT INTO olp.provider_grants(credential_id) VALUES(:'credential');
   expect(assignedPool.status).toBe(200);
   await page.getByRole('button', { name: 'Routes', exact: true }).click();
   await page.getByRole('button', { name: 'Create route', exact: true }).click();
+  await expect(
+    page.getByLabel('Translate Chat through Antigravity')
+  ).not.toBeChecked();
+  await page.getByLabel('Translate Chat through Antigravity').check();
   await page.getByLabel('Route slug').fill(`code-${suffix}`);
   await page.getByLabel('Pool', { exact: true }).selectOption(pool.id);
   await page

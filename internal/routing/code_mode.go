@@ -38,7 +38,7 @@ func (s *Snapshot) CodeAdapters(route codemode.Route) []codemode.Adapter {
 // connections whose adapter serves a client path over transport, ordered by ID.
 // The returned slice is shared and must not be modified.
 func (s *Snapshot) CodeProviders(route codemode.Route, path string, transport codeadapter.Transport) []string {
-	if route.MessagesToCodex {
+	if route.MessagesToCodex || route.ChatToAntigravity {
 		return s.codeProvidersWithTranslation(route, path, transport)
 	}
 	return s.codeRevisions[route.RevisionID].providers[codeCapability{path, transport}]
@@ -46,7 +46,7 @@ func (s *Snapshot) CodeProviders(route codemode.Route, path string, transport co
 
 func (s *Snapshot) codeProvidersWithTranslation(route codemode.Route, path string, transport codeadapter.Transport) []string {
 	revision := s.codeRevisions[route.RevisionID]
-	if path != "v1/messages" || transport != codeadapter.HTTP {
+	if transport != codeadapter.HTTP {
 		return revision.providers[codeCapability{path, transport}]
 	}
 	return slices.Sorted(func(yield func(string) bool) {
@@ -126,7 +126,7 @@ func (s *Snapshot) compileCodeMode() error {
 		}
 		for _, endpoint := range vendor.Endpoints() {
 			for _, transport := range []codeadapter.Transport{codeadapter.HTTP, codeadapter.WebSocket} {
-				if endpoint.Supports(transport) {
+				if endpoint.Target == "" && endpoint.Supports(transport) {
 					capability := codeCapability{endpoint.ClientPath, transport}
 					revision.providers[capability] = append(revision.providers[capability], provider)
 				}

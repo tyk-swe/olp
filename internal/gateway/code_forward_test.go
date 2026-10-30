@@ -1885,3 +1885,288 @@ func TestClaudeSubscriptionPreservesNativeToolRoundTrip(t *testing.T) {
 		}
 	}
 }
+
+func TestCodeAntigravityToolRoundTripAndAccounting(t *testing.T) {
+	for _, stream := range []bool{false, true} {
+		t.Run(fmt.Sprint(stream), func(t *testing.T) {
+			h, ledger, server := newCodeForwardHarness(t, codeForwardSetup{Models: []string{"gemini-fixture"}, Policy: access.KeyPolicy{Scopes: []string{"inference"}}})
+			route := h.rt.release.Snapshot.CodeRoutes["coding"]
+			route.ChatToAntigravity = true
+			h.rt.release.Snapshot.CodeRoutes["coding"] = route
+			h.rt.release.Snapshot.CodeConnections = map[string]routing.Configuration{"revision:provider": {Kind: connectors.KindPlugin, AuthMode: connectors.AuthGrant, ProfileID: "antigravity-subscription", Endpoint: h.upstream.URL + "/a"}}
+			h.gateway.CodeAuthorizer = codeAntigravityAuthorizer{}
+			if err := h.rt.release.Snapshot.Compile(); err != nil {
+				t.Fatal(err)
+			}
+			h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
+				var body struct {
+					Project string `json:"project"`
+					Model   string `json:"model"`
+					Request struct {
+						System struct {
+							Parts []struct {
+								Text string `json:"text"`
+							} `json:"parts"`
+						} `json:"systemInstruction"`
+						Contents []struct {
+							Parts []json.RawMessage `json:"parts"`
+						} `json:"contents"`
+					} `json:"request"`
+				}
+				if json.NewDecoder(r.Body).Decode(&body) != nil || body.Project != "verified-project" || body.Model != "gemini-fixture" || len(body.Request.System.Parts) != 1 || body.Request.System.Parts[0].Text != "Keep this instruction" || r.Header.Get("User-Agent") != "fixture-client" || r.Header.Get("Authorization") != "Bearer upstream-only" {
+					t.Error("envelope lost verified project, credentials, prompt or client identity")
+				}
+				reply := `{"response":{"responseId":"fixture-response","candidates":[{"index":0,"content":{"role":"model","parts":[{"functionCall":{"id":"call-read","name":"read_file","args":{"path":"file.txt"}}}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":5,"candidatesTokenCount":2,"totalTokenCount":7}}}`
+				if len(body.Request.Contents) > 1 {
+					last := body.Request.Contents[len(body.Request.Contents)-1]
+					if len(last.Parts) != 1 || !bytes.Contains(last.Parts[0], []byte(`"functionResponse"`)) || !bytes.Contains(last.Parts[0], []byte(`"name":"read_file"`)) || !bytes.Contains(last.Parts[0], []byte(`"file contents"`)) {
+						t.Error("tool result lost its call binding or content")
+					}
+					reply = `{"response":{"responseId":"fixture-final","candidates":[{"index":0,"content":{"role":"model","parts":[{"text":"Read complete"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":9,"candidatesTokenCount":3,"totalTokenCount":12}}}`
+				}
+				if stream {
+					if r.URL.Path != "/a/v1internal:streamGenerateContent" || r.URL.RawQuery != "alt=sse" {
+						t.Error("stream did not select the declared SSE transport")
+					}
+					w.Header().Set("Content-Type", "text/event-stream")
+					fmt.Fprint(w, "data: "+reply+"\n\n")
+					return
+				}
+				if r.URL.Path != "/a/v1internal:generateContent" || r.URL.RawQuery != "" {
+					t.Error("unary did not select the declared transport")
+				}
+				w.Header().Set("Content-Type", "application/json")
+				fmt.Fprint(w, reply)
+			})
+			for _, continuation := range []bool{false, true} {
+				messages := `[{"role":"system","content":"Keep this instruction"},{"role":"user","content":"Read a file"}]`
+				if continuation {
+					messages = `[{"role":"system","content":"Keep this instruction"},{"role":"user","content":"Read a file"},{"role":"assistant","content":null,"tool_calls":[{"id":"call-read","type":"function","function":{"name":"read_file","arguments":"{\"path\":\"file.txt\"}"}}]},{"role":"tool","tool_call_id":"call-read","content":"file contents"}]`
+				}
+				body := fmt.Sprintf(`{"model":"gemini-fixture","messages":%s,"tools":[{"type":"function","function":{"name":"read_file","parameters":{"type":"object","properties":{"path":{"type":"string"}},"required":["path"]}}}],"stream":%t,"max_tokens":64}`, messages, stream)
+				request, _ := http.NewRequestWithContext(t.Context(), http.MethodPost, server.URL+"/code/coding/v1/chat/completions", strings.NewReader(body))
+				request.Header.Set("Authorization", "Bearer "+fullKey)
+				request.Header.Set("X-Opencode-Session-Id", "antigravity-roundtrip")
+				request.Header.Set("User-Agent", "fixture-client")
+				response, err := server.Client().Do(request)
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer response.Body.Close()
+				result, _ := io.ReadAll(response.Body)
+				expected := "read_file"
+				total := int64(7)
+				if continuation {
+					expected = "Read complete"
+					total = 12
+				}
+				if response.StatusCode != http.StatusOK || !bytes.Contains(result, []byte(expected)) || !bytes.Contains(result, []byte(`"choices"`)) || stream && !bytes.Contains(result, []byte("[DONE]")) {
+					t.Fatalf("tool exchange failed, status %d body %s", response.StatusCode, result)
+				}
+				if usage := ledger.wait(t); usage.Total == nil || *usage.Total != total {
+					t.Fatalf("lost authoritative Gemini usage %+v", usage)
+				}
+			}
+		})
+	}
+}
+
+type codeAntigravityAuthorizer struct{}
+
+func (codeAntigravityAuthorizer) AuthorizeCode(context.Context, routing.Configuration, codemode.Account, codemode.Dispatch) (codemode.Authorization, error) {
+	return codemode.Authorization{Principal: "principal", ProjectID: "verified-project", Headers: http.Header{"Authorization": {"Bearer upstream-only"}}}, nil
+}
+
+func TestCodeAntigravityRefusesUnrepresentableInputBeforeDispatch(t *testing.T) {
+	for _, input := range []string{
+		`{"model":"gemini-fixture","messages":[{"role":"user","content":[{"type":"image_url","image_url":{"url":"https://example.invalid/image"}}]}]}`,
+		`{"model":"gemini-fixture","messages":[{"role":"user","content":"hello"}],"reasoning_effort":"high"}`,
+		`{"model":"gemini-fixture","messages":[{"role":"assistant","content":null,"tool_calls":[{"id":"call-read","type":"function","function":{"name":"read_file","arguments":"{}","thoughtSignature":"opaque"}}]}]}`,
+	} {
+		h, ledger, server := newCodeAntigravityHarness(t, true)
+		h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
+			t.Error("unrepresentable input was dispatched")
+			w.WriteHeader(500)
+		})
+		request, _ := http.NewRequestWithContext(t.Context(), http.MethodPost, server.URL+"/code/coding/v1/chat/completions", strings.NewReader(input))
+		request.Header.Set("Authorization", "Bearer "+fullKey)
+		request.Header.Set("X-Opencode-Session-Id", "unsupported-state")
+		response, err := server.Client().Do(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer response.Body.Close()
+		result, _ := io.ReadAll(response.Body)
+		if response.StatusCode != 422 || !bytes.Contains(result, []byte("code_translation_unsupported_semantics")) {
+			t.Fatalf("unsupported input accepted, status %d body %s", response.StatusCode, result)
+		}
+		ledger.mu.Lock()
+		if len(ledger.marks) != 0 || len(ledger.aborts) == 0 {
+			t.Error("refused input crossed the dispatch boundary or kept its reservation")
+		}
+		ledger.mu.Unlock()
+	}
+}
+
+func TestCodeAntigravityRefusesSignedOutputInsteadOfDroppingState(t *testing.T) {
+	for _, stream := range []bool{false, true} {
+		h, ledger, server := newCodeAntigravityHarness(t, true)
+		h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
+			body := `{"response":{"candidates":[{"index":0,"content":{"role":"model","parts":[{"functionCall":{"id":"call-read","name":"read_file","args":{}},"thoughtSignature":"opaque"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":5,"candidatesTokenCount":2,"totalTokenCount":7}}}`
+			if stream {
+				w.Header().Set("Content-Type", "text/event-stream")
+				fmt.Fprint(w, "data: "+body+"\n\n")
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			fmt.Fprint(w, body)
+		})
+		request, _ := http.NewRequestWithContext(t.Context(), http.MethodPost, server.URL+"/code/coding/v1/chat/completions", strings.NewReader(fmt.Sprintf(`{"model":"gemini-fixture","messages":[{"role":"user","content":"Read a file"}],"stream":%t}`, stream)))
+		request.Header.Set("Authorization", "Bearer "+fullKey)
+		request.Header.Set("X-Opencode-Session-Id", "signed-output")
+		response, err := server.Client().Do(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer response.Body.Close()
+		body, _ := io.ReadAll(response.Body)
+		if response.StatusCode != 502 || bytes.Contains(body, []byte("read_file")) || !bytes.Contains(body, []byte("code_upstream_unsupported_state")) {
+			t.Fatalf("signed function call lost state, status %d body %s", response.StatusCode, body)
+		}
+		if usage := ledger.wait(t); usage.Total == nil || *usage.Total != 7 {
+			t.Fatalf("dispatched signed result lost authoritative usage %+v", usage)
+		}
+	}
+}
+
+func newCodeAntigravityHarness(t *testing.T, enabled bool) (*harness, *codeTestLedger, *httptest.Server) {
+	t.Helper()
+	h, ledger, server := newCodeForwardHarness(t, codeForwardSetup{Models: []string{"gemini-fixture"}, Policy: access.KeyPolicy{Scopes: []string{"inference"}}})
+	route := h.rt.release.Snapshot.CodeRoutes["coding"]
+	route.ChatToAntigravity = enabled
+	h.rt.release.Snapshot.CodeRoutes["coding"] = route
+	h.rt.release.Snapshot.CodeConnections = map[string]routing.Configuration{"revision:provider": {Kind: connectors.KindPlugin, AuthMode: connectors.AuthGrant, ProfileID: "antigravity-subscription", Endpoint: h.upstream.URL + "/a"}}
+	h.gateway.CodeAuthorizer = codeAntigravityAuthorizer{}
+	if err := h.rt.release.Snapshot.Compile(); err != nil {
+		t.Fatal(err)
+	}
+	return h, ledger, server
+}
+
+func TestCodeAntigravityDisabledPolicyDoesNotDispatch(t *testing.T) {
+	h, ledger, server := newCodeAntigravityHarness(t, false)
+	h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
+		t.Error("disabled translation dispatched")
+		w.WriteHeader(500)
+	})
+	request, _ := http.NewRequestWithContext(t.Context(), http.MethodPost, server.URL+"/code/coding/v1/chat/completions", strings.NewReader(`{"model":"gemini-fixture","messages":[{"role":"user","content":"hello"}]}`))
+	request.Header.Set("Authorization", "Bearer "+fullKey)
+	request.Header.Set("X-Opencode-Session-Id", "disabled-translation")
+	response, err := server.Client().Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode < 400 {
+		t.Fatalf("disabled translation accepted status %d", response.StatusCode)
+	}
+	ledger.mu.Lock()
+	defer ledger.mu.Unlock()
+	if len(ledger.marks) != 0 {
+		t.Fatal("disabled target crossed dispatch boundary")
+	}
+}
+
+func TestCodeAntigravityCancellationStopsUpstreamAndLeavesUnknownUsage(t *testing.T) {
+	h, ledger, server := newCodeAntigravityHarness(t, true)
+	stopped := make(chan struct{})
+	release := make(chan struct{})
+	t.Cleanup(func() { close(release) })
+	h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
+		defer close(stopped)
+		_, _ = io.Copy(io.Discard, r.Body)
+		w.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprint(w, "data: "+`{"response":{"candidates":[{"index":0,"content":{"role":"model","parts":[{"text":"partial text"}]}}]}}`+"\n\n")
+		w.(http.Flusher).Flush()
+		select {
+		case <-r.Context().Done():
+		case <-release:
+		}
+	})
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	request, _ := http.NewRequestWithContext(ctx, http.MethodPost, server.URL+"/code/coding/v1/chat/completions", strings.NewReader(`{"model":"gemini-fixture","messages":[{"role":"user","content":"hello"}],"stream":true}`))
+	request.Header.Set("Authorization", "Bearer "+fullKey)
+	request.Header.Set("X-Opencode-Session-Id", "cancel-antigravity")
+	response, err := server.Client().Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	reader := bufio.NewReader(response.Body)
+	for {
+		line, err := reader.ReadString('\n')
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(line, "partial text") {
+			break
+		}
+	}
+	cancel()
+	remaining, _ := io.ReadAll(reader)
+	if bytes.Contains(remaining, []byte("[DONE]")) {
+		t.Fatal("cancelled stream fabricated completion")
+	}
+	if usage := ledger.wait(t); usage.Total != nil || usage.Input != nil || usage.Output != nil {
+		t.Fatalf("cancelled stream fabricated usage %+v", usage)
+	}
+	select {
+	case <-stopped:
+	case <-time.After(5 * time.Second):
+		t.Fatal("cancelled stream kept upstream work alive")
+	}
+	ledger.mu.Lock()
+	defer ledger.mu.Unlock()
+	if len(ledger.outcomes) == 0 || ledger.outcomes[len(ledger.outcomes)-1].Origin != "client" || ledger.outcomes[len(ledger.outcomes)-1].Kind != "canceled" {
+		t.Fatalf("cancellation lost client outcome %+v", ledger.outcomes)
+	}
+}
+
+func TestCodeNativeChatPreservesBytesWithAntigravityPolicy(t *testing.T) {
+	for _, enabled := range []bool{false, true} {
+		h, ledger, server := newCodeForwardHarness(t)
+		route := h.rt.release.Snapshot.CodeRoutes["coding"]
+		route.ChatToAntigravity = enabled
+		h.rt.release.Snapshot.CodeRoutes["coding"] = route
+		h.rt.release.Snapshot.CodeConnections = map[string]routing.Configuration{"revision:provider": {Kind: connectors.KindPlugin, AuthMode: connectors.AuthGrant, ProfileID: codeplans.ZAIProfile, Endpoint: h.upstream.URL + "/a"}}
+		if err := h.rt.release.Snapshot.Compile(); err != nil {
+			t.Fatal(err)
+		}
+		body := []byte(`{ "model":"native-model", "messages":[{"role":"user","content":"hello"}], "vendor_extension":{"keep":true} }`)
+		reply := []byte(`{ "choices":[{"message":{"role":"assistant","content":"native reply"},"finish_reason":"stop"}],"usage":{"prompt_tokens":2,"completion_tokens":1,"total_tokens":3},"vendor_extension":{"keep":true} }`)
+		h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
+			received, _ := io.ReadAll(r.Body)
+			if !bytes.Equal(received, body) || r.URL.RawQuery != "native_option=1" {
+				t.Error("native request bytes or query changed")
+			}
+			w.Header().Set("Content-Type", "application/json")
+			w.Write(reply)
+		})
+		request, _ := http.NewRequestWithContext(t.Context(), http.MethodPost, server.URL+"/code/coding/v1/chat/completions?native_option=1", bytes.NewReader(body))
+		request.Header.Set("Authorization", "Bearer "+fullKey)
+		request.Header.Set("X-Opencode-Session-Id", "native-chat")
+		response, err := server.Client().Do(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer response.Body.Close()
+		result, _ := io.ReadAll(response.Body)
+		if response.StatusCode != 200 || !bytes.Equal(result, reply) {
+			t.Fatalf("native response changed status %d body %s", response.StatusCode, result)
+		}
+		if usage := ledger.wait(t); usage.Total == nil || *usage.Total != 3 {
+			t.Fatalf("native usage lost %+v", usage)
+		}
+	}
+}

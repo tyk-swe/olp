@@ -31,6 +31,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/tyk-swe/olp/internal/antigravityauth"
 	"github.com/tyk-swe/olp/internal/claudeauth"
 	"github.com/tyk-swe/olp/internal/codemode"
 	"github.com/tyk-swe/olp/internal/providers"
@@ -508,20 +509,20 @@ func TestCodeAuthImportRejectsInvalidPluginTokenMaterial(t *testing.T) {
 	}
 }
 
-type claudeAuthority struct {
+type subscriptionAuthority struct {
 	proxy *httptest.Server
 	roots string
 }
 
-func newClaudeAuthority(t *testing.T, handler http.Handler) claudeAuthority {
+func newSubscriptionAuthority(t *testing.T, names []string, handler http.Handler) subscriptionAuthority {
 	t.Helper()
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		t.Fatal(err)
 	}
 	certificate := &x509.Certificate{
-		SerialNumber: big.NewInt(1), Subject: pkix.Name{CommonName: "Claude fixture authority"},
-		DNSNames: []string{"platform.claude.com", "api.anthropic.com"}, NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(time.Hour),
+		SerialNumber: big.NewInt(1), Subject: pkix.Name{CommonName: "Subscription fixture authority"},
+		DNSNames: names, NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(time.Hour),
 		IsCA: true, BasicConstraintsValid: true, KeyUsage: x509.KeyUsageCertSign | x509.KeyUsageDigitalSignature,
 		ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
 	}
@@ -555,7 +556,7 @@ func newClaudeAuthority(t *testing.T, handler http.Handler) claudeAuthority {
 		io.Copy(client, target)
 	}))
 	t.Cleanup(proxy.Close)
-	return claudeAuthority{proxy: proxy, roots: string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}))}
+	return subscriptionAuthority{proxy: proxy, roots: string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}))}
 }
 
 func TestClaudeHeadlessEnrollmentRefreshAndCredentialRefusal(t *testing.T) {
@@ -565,7 +566,7 @@ func TestClaudeHeadlessEnrollmentRefreshAndCredentialRefusal(t *testing.T) {
 			owner := h.owner()
 			var refreshed atomic.Bool
 			var changed atomic.Bool
-			authority := newClaudeAuthority(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			authority := newSubscriptionAuthority(t, []string{"platform.claude.com", "api.anthropic.com"}, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				w.Header().Set("Content-Type", "application/json")
 				switch {
 				case r.Method == "POST" && r.Host == "platform.claude.com" && r.URL.Path == "/v1/oauth/token":
@@ -705,5 +706,133 @@ func TestClaudeHeadlessEnrollmentRefreshAndCredentialRefusal(t *testing.T) {
 			}
 
 		})
+	}
+}
+
+func TestAntigravityHeadlessEnrollmentRefreshAndPublishedPolicy(t *testing.T) {
+	h := newAccessHarness(t)
+	owner := h.owner()
+	var refreshed atomic.Bool
+	var changed atomic.Bool
+	authority := newSubscriptionAuthority(t, []string{"oauth2.googleapis.com", "openidconnect.googleapis.com", "daily-cloudcode-pa.googleapis.com"}, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == "POST" && r.Host == "oauth2.googleapis.com" && r.URL.Path == "/token":
+			if r.ParseForm() != nil || r.Form.Get("client_id") != "fixture.apps.googleusercontent.com" || r.Form.Get("client_secret") != "fixture-client-secret" {
+				t.Error("client authorization was lost")
+				w.WriteHeader(400)
+				return
+			}
+			if r.Form.Get("grant_type") == "refresh_token" {
+				if r.Form.Get("refresh_token") != "fixture-refresh" {
+					t.Error("encrypted refresh authorization was lost")
+				}
+				refreshed.Store(true)
+				io.WriteString(w, `{"access_token":"fixture-rotated","token_type":"Bearer","expires_in":3600}`)
+				return
+			}
+			if r.Form.Get("code") != "fixture-approved" || r.Form.Get("code_verifier") == "" || r.Form.Get("redirect_uri") != antigravityauth.RedirectURI {
+				t.Error("PKCE callback binding was lost")
+			}
+			io.WriteString(w, `{"access_token":"fixture-access","refresh_token":"fixture-refresh","token_type":"Bearer","expires_in":3600}`)
+		case r.Method == "GET" && r.Host == "openidconnect.googleapis.com" && r.URL.Path == "/v1/userinfo":
+			subject := func() string {
+				if changed.Load() {
+					return "changed-subject"
+				}
+				return "verified-subject"
+			}()
+			fmt.Fprintf(w, `{"sub":%q}`, subject)
+		case r.Method == "POST" && r.Host == "daily-cloudcode-pa.googleapis.com" && r.URL.Path == "/v1internal:loadCodeAssist":
+			io.WriteString(w, `{"cloudaicompanionProject":{"id":"verified-project"}}`)
+		default:
+			t.Errorf("enrollment attempted an unrelated operation %s %s", r.Method, r.URL.Path)
+			w.WriteHeader(404)
+		}
+	}))
+	digest := installPlugin(t, h, owner, testutil.BuildPlugin(t, "./plugins/antigravity"))
+	project := createProject(h, owner, "Subscription fixture accounts")
+	configuration := map[string]any{"kind": "plugin", "auth_mode": "grant", "profile_id": antigravityauth.ProfileID, "profile_revision": digest, "options": map[string]any{"client_id": "fixture.apps.googleusercontent.com", "network": map[string]any{"proxy_url": authority.proxy.URL, "trust_roots_pem": authority.roots}}}
+	provider := h.want(owner, "POST", "/api/v1/providers", map[string]any{"name": "Subscription fixture", "project_id": project, "model": "gemini-fixture", "configuration": configuration}, idem(uuid.NewString()), 201)
+	path := "/api/v1/providers/" + provider["id"].(string)
+	enrollment := startGrantEnrollment(t, h, owner, path)
+	authorization, err := url.Parse(enrollment["authorization_url"].(string))
+	if err != nil {
+		t.Fatal(err)
+	}
+	callback := antigravityauth.RedirectURI + "?code=fixture-approved&state=" + url.QueryEscape(authorization.Query().Get("state"))
+	input, err := json.Marshal(struct {
+		Callback string `json:"callback_url"`
+		Secret   string `json:"client_secret"`
+	}{callback, "fixture-client-secret"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	completion := continueGrantEnrollment(h, owner, path, enrollment, string(input), 201)
+	principal := antigravityauth.Principal("verified-subject", "verified-project")
+	if completion["principal"] != principal {
+		t.Fatal("unverified callback data established the principal")
+	}
+	credential := completion["credential_id"].(string)
+	accountResponse := h.want(owner, "POST", "/api/v1/code/accounts", map[string]any{"project_id": project, "provider_id": provider["id"], "credential_id": credential, "name": "Fixture only", "enabled": true, "models": []string{"gemini-fixture"}}, idem(uuid.NewString()), 201)
+	if accountResponse["health"] != "unknown" || accountResponse["principal"] != principal || accountResponse["adapter"] != "antigravity" {
+		t.Fatal("enrollment fabricated health or lost verified metadata")
+	}
+	var account codemode.Account
+	encoded, _ := json.Marshal(accountResponse)
+	if json.Unmarshal(encoded, &account) != nil {
+		t.Fatal("invalid account response")
+	}
+	var config routing.Configuration
+	encodedConfig, _ := json.Marshal(configuration)
+	if json.Unmarshal(encodedConfig, &config) != nil {
+		t.Fatal("invalid provider configuration")
+	}
+	worker := grantRefresher(t, h)
+	authorizer := providers.CodeAuthorizer{Pool: h.Pool, Credentials: h.Runtime, Plugins: worker.Plugins}
+	dispatch := codemode.Dispatch{ClientPath: "v1/chat/completions", Adapter: codemode.AdapterAntigravity, Protocol: codemode.ProtocolChat}
+	h.refresh()
+	before, err := authorizer.AuthorizeCode(t.Context(), config, account, dispatch)
+	if err != nil || before.Principal != principal || before.ProjectID != "verified-project" {
+		t.Fatalf("verified account authorization failed %v", err)
+	}
+	first := readGrant(t, h, credential)
+	if first.refreshToken == nil {
+		t.Fatal("refresh authorization was not stored separately")
+	}
+	refresh, err := h.Server.Keys.Read(t.Context(), h.Pool, h.Server.Installation, *first.refreshToken, secrets.ProviderGrantRefresh)
+	if err != nil || !strings.Contains(string(refresh), "fixture-client-secret") || !strings.Contains(string(refresh), "fixture-refresh") {
+		t.Fatal("client secret and refresh token did not use encrypted grant storage")
+	}
+	detail := h.want(owner, "GET", path, nil, nil, 200)
+	public, _ := json.Marshal(detail)
+	if strings.Contains(string(public), "fixture-client-secret") || strings.Contains(string(public), "fixture-refresh") {
+		t.Fatal("management disclosed encrypted authorization")
+	}
+	pool := h.want(owner, "POST", "/api/v1/code/pools", map[string]any{"project_id": project, "name": "Fixture pool", "kind": "shared", "account_ids": []string{account.ID}, "api_key_ids": []string{}}, idem(uuid.NewString()), 201)
+	draft := h.want(owner, "POST", "/api/v1/code/routes", map[string]any{"project_id": project, "slug": "antigravity-fixture", "pool_id": pool["id"], "models": []string{"gemini-fixture"}, "enabled": true, "chat_to_antigravity": true}, idem(uuid.NewString()), 201)
+	if draft["chat_to_antigravity"] != true {
+		t.Fatal("draft discarded the explicit policy")
+	}
+	published := h.want(owner, "POST", "/api/v1/code/routes/"+draft["id"].(string)+"/publish", nil, withMatch(draft, idem(uuid.NewString())), 200)
+	if published["chat_to_antigravity"] != true {
+		t.Fatal("publication discarded the explicit policy")
+	}
+	dueNow(t, h, credential)
+	if !pass(t, worker) || !refreshed.Load() {
+		t.Fatal("due refresh did not execute")
+	}
+	h.refresh()
+	after, err := authorizer.AuthorizeCode(t.Context(), config, account, dispatch)
+	if err != nil || after.Principal != before.Principal || after.ProjectID != before.ProjectID || after.GrantGeneration <= before.GrantGeneration || after.Headers.Get("Authorization") == before.Headers.Get("Authorization") {
+		t.Fatal("refresh changed verified identity or kept expired material")
+	}
+	changed.Store(true)
+	dueNow(t, h, credential)
+	if !pass(t, worker) {
+		t.Fatal("changed-subject refresh did not execute")
+	}
+	if _, err := authorizer.AuthorizeCode(t.Context(), config, account, dispatch); err == nil {
+		t.Fatal("changed subject remained authorized")
 	}
 }

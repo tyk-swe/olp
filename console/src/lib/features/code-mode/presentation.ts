@@ -17,6 +17,7 @@ export type CodeEditing =
 
 const adapterLabels: Record<string, string> = {
   codex: 'Codex',
+  antigravity: 'Antigravity',
   opencode_go: 'OpenCode Go',
   zai_coding: 'GLM Coding Plan',
   minimax_plan: 'MiniMax M Plan',

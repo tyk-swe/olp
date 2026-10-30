@@ -6,6 +6,7 @@
 
   let {
     enrollment,
+    profileId,
     input = $bindable(),
     busy,
     onContinue,
@@ -13,6 +14,7 @@
     onCancel
   }: {
     enrollment: GrantEnrollment;
+    profileId?: string;
     input: string;
     busy: string;
     onContinue: () => void | Promise<void>;
@@ -23,9 +25,8 @@
   } = $props();
 
   const device = $derived(enrollment.device);
-  // A secret input is an API key the authorization page issues, which the
-  // operator pastes masked; otherwise it is a callback URL or code.
   const secret = $derived(enrollment.input === 'secret');
+  const oauthSecret = $derived(secret && profileId === 'antigravity-subscription');
 
   // Status requests drive a device authorization's polling: each waits the
   // interval OLP last reported, and none follows once the enrollment ended or
@@ -83,7 +84,7 @@
 <section class="card grant" aria-labelledby="grant-enrollment-heading">
   <p class="eyebrow">Grant enrollment</p>
   <h2 id="grant-enrollment-heading">
-    {secret ? 'Issue an upstream API key' : 'Sign in upstream'}
+    {secret && !oauthSecret ? 'Issue an upstream API key' : 'Sign in upstream'}
   </h2>
   {#if device}
     <ol>
@@ -127,8 +128,9 @@
     <ol>
       <li>
         <p>
-          {#if secret}Open the vendor's API key page, in any browser, sign in to
-            the upstream account this provider should use, and create an API
+          {#if secret && !oauthSecret}Open the vendor's API key page, in any
+            browser, sign in to the upstream account this provider should use,
+            and create an API
             key.{:else}Open the plugin's authorization page, in any browser, and
             sign in to the upstream account this provider should use.{/if}
         </p>
@@ -139,7 +141,9 @@
             href={enrollment.authorization_url}
             target="_blank"
             rel="noreferrer noopener"
-            >{secret ? 'Open API key page' : 'Open authorization page'}</a
+            >{secret && !oauthSecret
+              ? 'Open API key page'
+              : 'Open authorization page'}</a
           >
           {@render copyButton(
             enrollment.authorization_url ?? '',
@@ -152,7 +156,9 @@
           <div class="form-field">
             {#if secret}
               <label for="grant-input"
-                >Paste the API key the vendor issued</label
+                >{oauthSecret
+                  ? 'Paste callback and OAuth client secret as JSON'
+                  : 'Paste the API key the vendor issued'}</label
               ><input
                 id="grant-input"
                 type="password"
@@ -161,14 +167,23 @@
                 spellcheck="false"
                 bind:value={input}
                 required
-              /><small id="grant-input-help"
-                >OLP encrypts the key beneath a credential version and
-                identifies it by a fingerprint; it is never shown again, and
-                developers receive only OLP keys. A different key is a different
-                account. Continue before {formatDate(
-                  enrollment.expires_at
-                )}.</small
-              >
+              /><small id="grant-input-help">
+                {#if oauthSecret}
+                  Use the desktop OAuth client secret supplied by your operator
+                  with the returned callback URL. Paste JSON with
+                  <code>callback_url</code> and <code>client_secret</code> fields.
+                  The callback may show a connection error because OLP does not
+                  open a local listener. OLP encrypts the secret and refresh
+                  authorization. Keep the secret out of provider options.
+                  Continue before {formatDate(enrollment.expires_at)}.
+                {:else}
+                  OLP encrypts the key beneath a credential version and
+                  identifies it by a fingerprint; it is never shown again, and
+                  developers receive only OLP keys. A different key is a
+                  different account. Continue before
+                  {formatDate(enrollment.expires_at)}.
+                {/if}
+              </small>
             {:else}
               <label for="grant-input"
                 >Paste back the callback URL or code the upstream returned</label

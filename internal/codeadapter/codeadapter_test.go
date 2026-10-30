@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/antigravityauth"
 	"github.com/tyk-swe/olp/internal/claudeauth"
 	"github.com/tyk-swe/olp/internal/codemode"
 	"github.com/tyk-swe/olp/internal/codeplans"
@@ -253,5 +254,53 @@ func TestClaudeSubscriptionUsesVerifiedNativeMessagesAuthorization(t *testing.T)
 	}
 	if _, err := vendor.Authorize(secret, "claude-subscription", "another-principal", dispatch, time.Now()); err == nil {
 		t.Fatal("another identity inherited the credential")
+	}
+}
+
+func TestAntigravityRequiresPublishedChatTranslationPolicy(t *testing.T) {
+	vendor, ok := Lookup("antigravity")
+	if !ok {
+		t.Fatal("Antigravity adapter is unavailable")
+	}
+	for _, enabled := range []bool{false, true} {
+		route := codemode.Route{ChatToAntigravity: enabled}
+		endpoint, served := RouteEndpoint(route, vendor, "v1/chat/completions")
+		protocol, client := RouteClientProtocol(route, vendor, ClientOpenCode, "gemini-fixture")
+		if served != enabled || client != enabled {
+			t.Fatalf("translation policy %t, endpoint %t client %t", enabled, served, client)
+		}
+		if enabled && (endpoint.Protocol != codemode.ProtocolChat || protocol != codemode.ProtocolChat || endpoint.Supports(WebSocket)) {
+			t.Fatal("Antigravity advertised an unsupported protocol or transport")
+		}
+		if _, served := RouteEndpoint(route, vendor, "v1/messages"); served {
+			t.Fatal("Antigravity advertised Messages")
+		}
+		if vendor.ServesModel(codemode.ProtocolChat, "claude-fixture") {
+			t.Fatal("Antigravity advertised an unqualified model family")
+		}
+	}
+}
+
+func TestAntigravityAuthorizationUsesVerifiedSubjectAndProject(t *testing.T) {
+	vendor, ok := ForConnection("plugin", "grant", antigravityauth.ProfileID)
+	if !ok {
+		t.Fatal("Antigravity enrollment is unavailable")
+	}
+	secret := []byte(`{"access_token":"fixture-access","facts":{"subject":"verified-subject","project_id":"verified-project"}}`)
+	principal := antigravityauth.Principal("verified-subject", "verified-project")
+	dispatch := codemode.Dispatch{Adapter: codemode.AdapterAntigravity, ClientPath: "v1/chat/completions", Protocol: codemode.ProtocolChat}
+	authorization, err := vendor.Authorize(secret, antigravityauth.ProfileID, principal, dispatch, time.Now())
+	if err != nil || authorization.Principal != principal || authorization.ProjectID != "verified-project" || authorization.Headers.Get("Authorization") != "Bearer fixture-access" {
+		t.Fatalf("verified authorization refused %v", err)
+	}
+	endpoint, _ := vendor.Endpoint(dispatch.ClientPath)
+	if err := vendor.ValidateAuthorization(endpoint, authorization, principal); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := vendor.Authorize(secret, antigravityauth.ProfileID, antigravityauth.Principal("another-subject", "verified-project"), dispatch, time.Now()); err == nil {
+		t.Fatal("another subject inherited the credential")
+	}
+	if _, err := vendor.Authorize([]byte(`{"access_token":"fixture-access","facts":{"subject":"verified-subject"}}`), antigravityauth.ProfileID, principal, dispatch, time.Now()); err == nil {
+		t.Fatal("unverified project became dispatch authority")
 	}
 }
