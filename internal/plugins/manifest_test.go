@@ -110,7 +110,7 @@ func TestManifestValidation(t *testing.T) {
 }
 
 func TestCredentialImportFixturesDeclareUsableGrantEnrollment(t *testing.T) {
-	for _, behaviour := range []string{"codex-import", "codex-import-invalid", "claude-import"} {
+	for _, behaviour := range []string{"codex-import", "codex-import-invalid", "claude-import", "antigravity-import"} {
 		t.Run(behaviour, func(t *testing.T) {
 			module := testutil.BuildPlugin(t, "./internal/plugins/testdata/fixture", "-X=main.behaviour="+behaviour)
 			if _, err := newTestRuntime(t, DefaultLimits, nil).Inspect(t.Context(), module); err != nil {
@@ -121,6 +121,10 @@ func TestCredentialImportFixturesDeclareUsableGrantEnrollment(t *testing.T) {
 }
 
 func TestAntigravityManifestCanEnrollThroughGrantHost(t *testing.T) {
+	module := testutil.BuildPlugin(t, "./plugins/antigravity")
+	if _, err := newTestRuntime(t, DefaultLimits, nil).Inspect(t.Context(), module); err != nil {
+		t.Fatalf("could not install the Antigravity plugin: %v", err)
+	}
 	encoded, err := json.Marshal(antigravityauth.Manifest())
 	if err != nil {
 		t.Fatal(err)

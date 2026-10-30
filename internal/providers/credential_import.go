@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/antigravityauth"
 	"github.com/tyk-swe/olp/internal/claudeauth"
 	"github.com/tyk-swe/olp/internal/codeadapter"
 	"github.com/tyk-swe/olp/internal/codemode"
@@ -39,6 +40,10 @@ func (s *Server) importCodexCredentials(r *http.Request, p access.Principal) (ac
 
 func (s *Server) importClaudeCredentials(r *http.Request, p access.Principal) (access.Reply, error) {
 	return s.importCredentials(r, p, codemode.AdapterClaude)
+}
+
+func (s *Server) importAntigravityCredentials(r *http.Request, p access.Principal) (access.Reply, error) {
+	return s.importCredentials(r, p, codemode.AdapterAntigravity)
 }
 
 func (s *Server) importCredentials(r *http.Request, p access.Principal, adapter codemode.Adapter) (access.Reply, error) {
@@ -84,7 +89,7 @@ func (s *Server) importCredentials(r *http.Request, p access.Principal, adapter 
 	if err != nil {
 		return access.Reply{}, err
 	}
-	credentials, err := prepareCredentialImport(r.Context(), adapter, input.Credentials, client)
+	credentials, err := prepareCredentialImport(r.Context(), adapter, input.Credentials, cfg.Options.PluginOptions["client_id"], client)
 	if err != nil {
 		return access.Reply{}, access.Invalid("credentials", "Could not verify the supported credential format and original account. Sign in again and retry.")
 	}
@@ -153,7 +158,7 @@ type importedCredential struct {
 	matches func(abi.Grant) bool
 }
 
-func prepareCredentialImport(ctx context.Context, adapter codemode.Adapter, input string, client *http.Client) (importedCredential, error) {
+func prepareCredentialImport(ctx context.Context, adapter codemode.Adapter, input, clientID string, client *http.Client) (importedCredential, error) {
 	switch adapter {
 	case codemode.AdapterCodex:
 		credentials, err := codexauth.ParseCredentialImport(input, time.Now())
@@ -172,6 +177,18 @@ func prepareCredentialImport(ctx context.Context, adapter codemode.Adapter, inpu
 		}
 		return importedCredential{refresh: refresh, secrets: credentials.Secrets(), matches: func(grant abi.Grant) bool {
 			return grant.Principal == claudeauth.Principal(refresh.Facts) && maps.Equal(grant.Facts, refresh.Facts)
+		}}, nil
+	case codemode.AdapterAntigravity:
+		credentials, err := antigravityauth.ParseCredentialImport(input, clientID, time.Now())
+		if err != nil {
+			return importedCredential{}, err
+		}
+		refresh, err := credentials.Verify(ctx, client)
+		if err != nil {
+			return importedCredential{}, err
+		}
+		return importedCredential{refresh: refresh, secrets: credentials.Secrets(), matches: func(grant abi.Grant) bool {
+			return grant.Principal == antigravityauth.Principal(refresh.Facts["subject"], refresh.Facts["project_id"]) && maps.Equal(grant.Facts, refresh.Facts)
 		}}, nil
 	default:
 		return importedCredential{}, access.Invalid("credentials", "This subscription profile does not support credential import.")

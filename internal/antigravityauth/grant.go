@@ -107,27 +107,40 @@ func (a Adapter) grant(ctx context.Context, token *oauth2.Token, authorization r
 	if !credential(token.AccessToken) || !strings.EqualFold(token.TokenType, "Bearer") || !credential(authorization.Token) || token.Expiry.IsZero() || !token.Expiry.After(time.Now()) {
 		return abi.Grant{}, invalid()
 	}
-	profile, err := a.fetchJSON(ctx, abi.HTTPRequest{Method: http.MethodGet, URL: UserInfoEndpoint, Header: map[string][]string{"Authorization": {"Bearer " + token.AccessToken}}})
+	identity, err := a.identity(ctx, token.AccessToken)
 	if err != nil {
 		return abi.Grant{}, err
-	}
-	subjectValue, _ := profile.Root().Lookup("sub")
-	subject, _ := subjectValue.Text()
-	project, err := a.fetchJSON(ctx, abi.HTTPRequest{Method: http.MethodPost, URL: ProjectEndpoint, Header: map[string][]string{"Authorization": {"Bearer " + token.AccessToken}, "Content-Type": {"application/json"}}, Body: []byte(`{"metadata":{}}`)})
-	if err != nil {
-		return abi.Grant{}, err
-	}
-	projectValue, _ := project.Root().Lookup("cloudaicompanionProject")
-	projectID := projectIdentifier(projectValue)
-	principal := Principal(subject, projectID)
-	if principal == "" {
-		return abi.Grant{}, invalid()
 	}
 	encoded, err := json.Marshal(authorization)
 	if err != nil || len(encoded) > 16<<10 {
 		return abi.Grant{}, invalid()
 	}
-	return abi.Grant{AccessToken: token.AccessToken, RefreshToken: string(encoded), ExpiresIn: int64(time.Until(token.Expiry).Seconds()), Principal: principal, Facts: map[string]string{"subject": subject, "project_id": projectID}}, nil
+	return abi.Grant{AccessToken: token.AccessToken, RefreshToken: string(encoded), ExpiresIn: int64(time.Until(token.Expiry).Seconds()), Principal: identity.principal, Facts: identity.facts}, nil
+}
+
+type verifiedIdentity struct {
+	principal string
+	facts     map[string]string
+}
+
+func (a Adapter) identity(ctx context.Context, accessToken string) (verifiedIdentity, error) {
+	profile, err := a.fetchJSON(ctx, abi.HTTPRequest{Method: http.MethodGet, URL: UserInfoEndpoint, Header: map[string][]string{"Authorization": {"Bearer " + accessToken}}})
+	if err != nil {
+		return verifiedIdentity{}, err
+	}
+	subjectValue, _ := profile.Root().Lookup("sub")
+	subject, _ := subjectValue.Text()
+	project, err := a.fetchJSON(ctx, abi.HTTPRequest{Method: http.MethodPost, URL: ProjectEndpoint, Header: map[string][]string{"Authorization": {"Bearer " + accessToken}, "Content-Type": {"application/json"}}, Body: []byte(`{"metadata":{}}`)})
+	if err != nil {
+		return verifiedIdentity{}, err
+	}
+	projectValue, _ := project.Root().Lookup("cloudaicompanionProject")
+	projectID := projectIdentifier(projectValue)
+	principal := Principal(subject, projectID)
+	if principal == "" {
+		return verifiedIdentity{}, invalid()
+	}
+	return verifiedIdentity{principal: principal, facts: map[string]string{"subject": subject, "project_id": projectID}}, nil
 }
 
 func projectIdentifier(value oif.Value) string {

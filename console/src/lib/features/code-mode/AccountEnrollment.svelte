@@ -52,7 +52,13 @@
             name: 'Claude',
             file: 'Claude .credentials.json'
           } as const)
-        : null
+        : provider.data?.configuration.profile_id === 'antigravity-subscription'
+          ? ({
+              id: 'antigravity-subscription',
+              name: 'Antigravity',
+              file: 'Antigravity migration JSON'
+            } as const)
+          : null
   );
   const access = useRole();
   const principal = access.user?.id;
@@ -199,16 +205,25 @@
         >Import {importProfile.name} credentials once</label
       >
       <p>
-        Paste the contents of {importProfile.file} with subscription tokens. OLP owns
-        refresh after import. This does not synchronize local files.
+        {#if importProfile.id === 'antigravity-subscription'}
+          Paste migration JSON with type "antigravity", access_token,
+          refresh_token, client_id and client_secret for the original OAuth
+          client. The client_id must match this provider. Raw IDE stores and
+          credentials missing the original client authorization are unsupported.
+        {:else}
+          Paste the contents of {importProfile.file} with subscription tokens.
+        {/if}
+        OLP owns refresh after import. This does not synchronize local files.
       </p>
-      <textarea
+      <input
+        type="password"
         id="subscription-credential-import"
         aria-label={importProfile.file}
         autocomplete="off"
         spellcheck="false"
         bind:value={importInput}
-        disabled={!enrollmentAllowed || !!grant.busy || importing}></textarea>
+        disabled={!enrollmentAllowed || !!grant.busy || importing}
+      />
       <button
         class="button button-secondary"
         type="button"
