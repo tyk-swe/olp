@@ -113,21 +113,22 @@ func (s *Server) forwardCode(w http.ResponseWriter, r *http.Request, release *ru
 	}
 	defer attempt.finish(ctx)
 	payload, err := func() (codePayload, error) {
+		requestBody, rewriteErr := func() ([]byte, error) {
+			if attempt.model != attempt.publicModel {
+				return codewire.RewriteRequestModel(body, attempt.publicModel, attempt.model)
+			}
+			return body, nil
+		}()
+		if rewriteErr != nil {
+			return codePayload{}, rewriteErr
+		}
 		if attempt.endpoint.Protocol == ingress.protocol {
 			if attempt.model != attempt.publicModel {
-				rewritten, err := codewire.RewriteRequestModel(body, attempt.publicModel, attempt.model)
-				return codePayload{body: rewritten, query: r.URL.RawQuery}, err
+				return codePayload{body: requestBody, query: r.URL.RawQuery}, nil
 			}
 			return codePayload{body: raw, query: r.URL.RawQuery}, nil
 		}
-		if attempt.model != attempt.publicModel {
-			rewritten, err := codewire.RewriteRequestModel(body, attempt.publicModel, attempt.model)
-			if err != nil {
-				return codePayload{}, err
-			}
-			return codeTranslateMessages(rewritten, r, attempt.model)
-		}
-		return codeTranslateMessages(body, r, attempt.model)
+		return codeTranslateMessages(requestBody, r, attempt.model)
 	}()
 	if err != nil {
 		refuse(err)
@@ -236,7 +237,7 @@ func (b *codeRequestBody) Close() error { return nil }
 
 func (a *codeAttempt) copyResponse(ctx context.Context, w http.ResponseWriter, response *http.Response) {
 	if a.model != a.publicModel {
-		if err := a.copyModelResponse(w, response); err != nil {
+		if err := a.copyModelResponse(ctx, w, response); err != nil {
 			a.transportFailed(ctx, err)
 		}
 		return
@@ -282,17 +283,10 @@ func (a *codeAttempt) copyResponse(ctx context.Context, w http.ResponseWriter, r
 					}
 				}
 			}
-			if err == io.EOF && !a.terminal {
-				if o, ok := a.observer.Finish(); ok {
-					a.observe(o)
-				}
-			}
-			if !a.terminal && ctx.Err() == nil {
-				outcome := codemode.Outcome{Origin: "gateway", Kind: "transport_error"}
-				if err == io.EOF {
-					outcome.Origin, outcome.Kind = "upstream", "incomplete"
-				}
-				a.outcome(ctx, outcome)
+			if err == io.EOF {
+				a.finishCodeStream(ctx)
+			} else if !a.terminal && ctx.Err() == nil {
+				a.outcome(ctx, codemode.Outcome{Origin: "gateway", Kind: "transport_error"})
 			}
 			return
 		}

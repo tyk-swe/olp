@@ -228,8 +228,26 @@ INSERT INTO olp.provider_grants(credential_id) VALUES(:'credential');
   await expect(page.getByLabel('Native models')).toHaveValue(
     'unsaved-native-model'
   );
-  await expect(page.getByLabel('Client model')).toHaveValue(model);
   await page.getByRole('button', { name: 'Save', exact: true }).click();
+  await expect(page.getByRole('alert')).toContainText(
+    'targeting a listed native model'
+  );
+  await page
+    .getByLabel('Exact model aliases')
+    .fill('team-code=unsaved-native-model');
+  await expect(page.getByLabel('Client model')).toHaveValue(model);
+  const [savedDraft] = await Promise.all([
+    page.waitForResponse(
+      (response) =>
+        response.request().method() === 'PUT' &&
+        new URL(response.url()).pathname.endsWith(`/code/routes/${route.id}`)
+    ),
+    page.getByRole('button', { name: 'Save', exact: true }).click()
+  ]);
+  expect(savedDraft.status()).toBe(200);
+  expect((await savedDraft.json()).aliases).toEqual({
+    'team-code': 'unsaved-native-model'
+  });
   await expect(page.getByLabel('Client model')).toHaveValue(model);
   await expect(page.getByLabel('Generated configuration')).toHaveValue(
     new RegExp(`"X-OLP-Code-Model" = "${model}"`)

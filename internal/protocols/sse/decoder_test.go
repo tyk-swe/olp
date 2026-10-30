@@ -1,6 +1,8 @@
 package sse_test
 
 import (
+	"bytes"
+	"io"
 	"reflect"
 	"strings"
 	"testing"
@@ -48,5 +50,35 @@ func TestEventLimitCountsWireBytesAcrossFragmentation(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestRawFramesPreserveLiteralFramingAndDataRanges(t *testing.T) {
+	wire := "\xef\xbb\xbf: before\r\nid: one\r\nretry: 0010\r\nx-vendor: yes\r\ndata: {\r\n: middle\r\ndata:\t\"model\" : \"native\"}\r\n\r\n: after\n"
+	for _, width := range []int{1, 2, 7, len(wire)} {
+		decoder := sse.NewRawDecoder(testutil.Fragmented([]byte(wire), width), 4096)
+		var output strings.Builder
+		for {
+			frame, err := decoder.Next()
+			if err == io.EOF {
+				break
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !frame.HasData {
+				output.Write(frame.Bytes)
+				continue
+			}
+			start := bytes.Index(frame.Data, []byte(`"native"`))
+			rewritten, err := frame.ReplaceData(start, start+len(`"native"`), []byte(`"alias"`))
+			if err != nil {
+				t.Fatal(err)
+			}
+			output.Write(rewritten)
+		}
+		if output.String() != strings.Replace(wire, `"native"`, `"alias"`, 1) {
+			t.Fatalf("width %d changed raw framing %q", width, output.String())
+		}
 	}
 }

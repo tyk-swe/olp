@@ -646,10 +646,19 @@ func TestCodeFoundationExactAliasesPreservePinsAcrossPublication(t *testing.T) {
 		t.Fatal(err)
 	}
 	publish("native-next", models, "alias-repointed")
-	continued, err := admit("alias-existing", "team-code")
+	continuedInput := f.input("alias-existing", "", nil)
+	continuedInput.Operation.Model = "team-code"
+	continuedInput.Providers = nil
+	continuedInput.ModelProviders = map[string][]string{"native-model": {f.provider}, "native-next": nil}
+	continued, err := f.store.Admit(t.Context(), continuedInput)
 	if err != nil || continued.Pin.TargetModel != first.Pin.TargetModel || continued.Account.ID != first.Account.ID || continued.Attempt.Model != first.Attempt.Model {
 		t.Fatalf("republish moved alias pin %+v, %v", continued, err)
 	}
+	ineligibleInput := f.input("alias-existing", "", nil)
+	ineligibleInput.Operation.Model = "team-code"
+	ineligibleInput.ModelProviders = map[string][]string{"native-model": nil, "native-next": {f.provider}}
+	_, ineligibleErr := f.store.Admit(t.Context(), ineligibleInput)
+	codeRefusal(t, ineligibleErr, "code_account_unavailable")
 	fresh, err := admit("alias-new", "team-code")
 	if err != nil || fresh.Pin.TargetModel != "native-next" || fresh.Attempt.Model != "native-next" {
 		t.Fatalf("new conversation ignored repointed alias %+v, %v", fresh, err)

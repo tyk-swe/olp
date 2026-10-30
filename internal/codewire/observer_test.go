@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"testing"
+
+	"github.com/tyk-swe/olp/internal/codemode"
 )
 
 func TestMessagesUsageIncludesCacheInInput(t *testing.T) {
@@ -66,16 +68,16 @@ func TestClassifyChatRejectsMissingModel(t *testing.T) {
 }
 
 func TestModelRewritingChangesOnlyProtocolModelFields(t *testing.T) {
-	body := []byte(`{ "model":"native-a", "response":{"model":"native-a","output":[{"model":"native-a"}]}, "message":{"model":"native-a"},"unknown": { "model":"native-a", "number":1.2300 } }`)
+	body := []byte(`{ "mo\u0064el" : "native-a", "response":{"model":"native-a","output":[{"model":"native-a"}]}, "message":{"model":"native-a"},"unknown": { "model":"native-a", "number":1.2300 } }`)
 	rewritten, err := RewriteResponseModel(body, "native-a", "team-code")
 	var public struct {
 		Model             string
 		Response, Message struct{ Model string }
 	}
-	if err := json.Unmarshal(rewritten, &public); err != nil || public.Model != "team-code" || public.Response.Model != public.Model || public.Message.Model != public.Model {
+	if err := json.Unmarshal(rewritten, &public); err != nil || public.Model != "team-code" || public.Response.Model != "native-a" || public.Message.Model != "native-a" {
 		t.Fatalf("protocol model identifiers were not rewritten consistently %+v, %v", public, err)
 	}
-	if err != nil || !bytes.Contains(rewritten, []byte(`"model":"team-code"`)) || !bytes.Contains(rewritten, []byte(`"output":[{"model":"native-a"}]`)) || !bytes.Contains(rewritten, []byte(`{ "model":"native-a", "number":1.2300 }`)) {
+	if err != nil || !bytes.Equal(rewritten, bytes.Replace(body, []byte(`"native-a"`), []byte(`"team-code"`), 1)) || !bytes.Contains(rewritten, []byte(`"output":[{"model":"native-a"}]`)) || !bytes.Contains(rewritten, []byte(`{ "model":"native-a", "number":1.2300 }`)) {
 		t.Fatalf("model rewrite changed unrelated content %s, %v", rewritten, err)
 	}
 	request, err := RewriteRequestModel(body, "native-a", "team-code")
@@ -88,5 +90,23 @@ func TestModelRewritingChangesOnlyProtocolModelFields(t *testing.T) {
 	}
 	if _, err := RewriteResponseModel([]byte(`{"model":"native-a","model":"native-b"}`), "native-a", "team-code"); err == nil {
 		t.Fatal("ambiguous request model rewritten")
+	}
+}
+
+func TestEventModelRewritingUsesOnlyKnownProtocolEnvelopes(t *testing.T) {
+	for _, test := range []struct {
+		protocol        codemode.Protocol
+		input, expected string
+	}{
+		{codemode.ProtocolResponses, `{ "type":"response.completed", "response": {"model" : "native"}, "message":{"model":"native"} }`, `{ "type":"response.completed", "response": {"model" : "alias"}, "message":{"model":"native"} }`},
+		{codemode.ProtocolMessages, `{ "type":"message_start", "message": {"model" : "native"}, "response":{"model":"native"} }`, `{ "type":"message_start", "message": {"model" : "alias"}, "response":{"model":"native"} }`},
+		{codemode.ProtocolChat, `{ "model" : "native", "message":{"model":"native"} }`, `{ "model" : "alias", "message":{"model":"native"} }`},
+		{codemode.ProtocolResponses, `{"type":"vendor.future","response":{"model":"native"},"message":{"model":"native"}}`, `{"type":"vendor.future","response":{"model":"native"},"message":{"model":"native"}}`},
+		{codemode.ProtocolMessages, `{"type":"vendor.future","response":{"model":"native"},"message":{"model":"native"}}`, `{"type":"vendor.future","response":{"model":"native"},"message":{"model":"native"}}`},
+	} {
+		actual, err := RewriteEventModel([]byte(test.input), test.protocol, "native", "alias")
+		if err != nil || string(actual) != test.expected {
+			t.Fatalf("%s %s, %v", test.protocol, actual, err)
+		}
 	}
 }

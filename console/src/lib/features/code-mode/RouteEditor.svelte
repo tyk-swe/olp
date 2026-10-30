@@ -15,6 +15,49 @@
   } from './resourceSubmission.svelte';
   import ResourceEditorForm from './ResourceEditorForm.svelte';
 
+  type AliasValidation =
+    | { kind: 'valid'; aliases: Record<string, string> }
+    | { kind: 'invalid'; message: string };
+
+  function parseAliases(
+    value: string,
+    models: readonly string[],
+    rewriting: boolean
+  ): AliasValidation {
+    const entries = value
+      .split('\n')
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .map((line) => line.split('=').map((part) => part.trim()));
+    if (
+      !entries.every(
+        (entry): entry is [string, string] =>
+          entry.length === 2 &&
+          !!entry[0] &&
+          !!entry[1] &&
+          /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,199}$/.test(entry[0]) &&
+          !models.includes(entry[0]) &&
+          models.includes(entry[1])
+      )
+    )
+      return {
+        kind: 'invalid',
+        message:
+          'Use one distinct alias=native-model per line, targeting a listed native model.'
+      };
+    if (entries.length && !rewriting)
+      return {
+        kind: 'invalid',
+        message: 'Enable model rewriting to publish aliases.'
+      };
+    if (
+      entries.length > 100 ||
+      new Set(entries.map(([alias]) => alias)).size !== entries.length
+    )
+      return { kind: 'invalid', message: 'Use up to 100 unique aliases.' };
+    return { kind: 'valid', aliases: Object.fromEntries(entries) };
+  }
+
   let {
     current,
     projectId,
@@ -96,42 +139,15 @@
           'Choose an eligible research account and at least one service.'
         );
       const routeModels = nativeModels(models);
-      const aliasEntries = aliases
-        .split('\n')
-        .map((line) => line.trim())
-        .filter(Boolean)
-        .map((line) => {
-          const [alias, target, ...extra] = line
-            .split('=')
-            .map((part) => part.trim());
-          if (
-            !alias ||
-            !target ||
-            extra.length ||
-            !/^[A-Za-z0-9][A-Za-z0-9._:/-]{0,199}$/.test(alias) ||
-            routeModels.includes(alias) ||
-            !routeModels.includes(target)
-          )
-            throw new Error(
-              'Use one distinct alias=native-model per line, targeting a listed native model.'
-            );
-          return [alias, target] as const;
-        });
-      if (aliasEntries.length && !modelRewriting)
-        throw new Error('Enable model rewriting to publish aliases.');
-      if (
-        aliasEntries.length > 100 ||
-        new Set(aliasEntries.map(([alias]) => alias)).size !==
-          aliasEntries.length
-      )
-        throw new Error('Use up to 100 unique aliases.');
+      const aliasResult = parseAliases(aliases, routeModels, modelRewriting);
+      if (aliasResult.kind === 'invalid') throw new Error(aliasResult.message);
       return {
         project_id: projectId,
         slug,
         pool_id: poolId,
         max_body_bytes: maxBodyBytes ? Number(maxBodyBytes) : null,
         models: routeModels,
-        aliases: Object.fromEntries(aliasEntries),
+        aliases: aliasResult.aliases,
         model_rewriting: modelRewriting,
         messages_to_codex: messagesToCodex,
         initial_recovery_attempts: initial?.initial_recovery_attempts ?? 0,

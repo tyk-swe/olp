@@ -67,15 +67,14 @@ type CodeRecovery struct {
 }
 
 type CodeAdmission struct {
-	InitialRecovery bool
-	Recovery        *CodeRecovery
-	Attribution     map[string]string
-	Route           codemode.Route
-	APIKeyID        string
-	EndUserDigest   string
-	Operation       codemode.Operation
-	// Providers are the route revision's provider connections whose adapter
-	// serves the request's path; only their accounts serve it.
+	InitialRecovery  bool
+	Recovery         *CodeRecovery
+	Attribution      map[string]string
+	Route            codemode.Route
+	APIKeyID         string
+	EndUserDigest    string
+	Operation        codemode.Operation
+	ModelProviders   map[string][]string
 	Providers        []string
 	Bound            *codemode.TokenBound
 	PreviousResponse string
@@ -165,7 +164,13 @@ func codeReference(ctx context.Context, tx pgx.Tx, in CodeAdmission) (codemode.B
 }
 
 func (in CodeAdmission) withOperation(operation codemode.Operation) CodeAdmission {
-	return CodeAdmission{InitialRecovery: in.InitialRecovery, Recovery: in.Recovery, Attribution: in.Attribution, Route: in.Route, APIKeyID: in.APIKeyID, EndUserDigest: in.EndUserDigest, Operation: operation, Providers: in.Providers, Bound: in.Bound, PreviousResponse: in.PreviousResponse}
+	providers := func() []string {
+		if in.ModelProviders != nil {
+			return in.ModelProviders[operation.Model]
+		}
+		return in.Providers
+	}()
+	return CodeAdmission{ModelProviders: in.ModelProviders, InitialRecovery: in.InitialRecovery, Recovery: in.Recovery, Attribution: in.Attribution, Route: in.Route, APIKeyID: in.APIKeyID, EndUserDigest: in.EndUserDigest, Operation: operation, Providers: providers, Bound: in.Bound, PreviousResponse: in.PreviousResponse}
 }
 
 func (s *CodeStore) admit(ctx context.Context, admission CodeAdmission, connection bool) (CodePermit, error) {
@@ -223,8 +228,10 @@ func (s *CodeStore) admit(ctx context.Context, admission CodeAdmission, connecti
 		return out, err
 	}
 	in := referenced.withOperation(selected)
-	if err := codeAuthority(ctx, tx, in, &out.Authority); err != nil {
-		return out, err
+	if selected.Model != referenced.Operation.Model {
+		if err := codeAuthority(ctx, tx, in, &out.Authority); err != nil {
+			return out, err
+		}
 	}
 	switch pinned := slices.IndexFunc(pins, func(p codemode.Pin) bool { return p.Model == in.Operation.PublicModel() }); {
 	case pinned >= 0:

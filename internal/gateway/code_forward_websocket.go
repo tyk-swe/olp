@@ -311,7 +311,7 @@ func (s *Server) codeWebSocket(w http.ResponseWriter, r *http.Request, release *
 			}
 			body := func() []byte {
 				if active != nil && active.model != active.publicModel {
-					return codeModelEvent(message.body, active.model, active.publicModel)
+					return codeModelEvent(message.body, active.endpoint.Protocol, active.model, active.publicModel)
 				}
 				return message.body
 			}()

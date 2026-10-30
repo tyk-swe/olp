@@ -272,13 +272,13 @@ func TestClaudeTranslatedCompanionsRequireReachableAccounts(t *testing.T) {
 }
 
 func TestExactAliasesAppearInDiscoveryAndGeneratedSetup(t *testing.T) {
-	route := codemode.Route{Slug: "coding", Enabled: true, RevisionID: "published", Models: []string{"minimax-fixture-model"}, ModelRewriting: true, MessagesToCodex: true, Aliases: map[string]string{"team-code": "minimax-fixture-model", "offline": "unavailable"}}
+	unavailableRoute := codemode.Route{Slug: "coding", Enabled: true, RevisionID: "published", Models: []string{"minimax-fixture-model"}, ModelRewriting: true, MessagesToCodex: true, Aliases: map[string]string{"team-code": "minimax-fixture-model", "offline": "unavailable"}}
+	route := codemode.Route{Slug: unavailableRoute.Slug, Enabled: true, RevisionID: unavailableRoute.RevisionID, Models: unavailableRoute.Models, ModelRewriting: true, MessagesToCodex: true, Aliases: map[string]string{"team-code": "minimax-fixture-model"}}
 	offers := Offers{{Adapter: codemode.AdapterOpenCodeGo, Models: route.Models}}
-	catalog := Catalog(route, offers)
+	catalog := Catalog(unavailableRoute, offers)
 	if len(catalog) != 2 || catalog[1].ID != "team-code" || !reflect.DeepEqual(catalog[0].Capabilities, catalog[1].Capabilities) || !reflect.DeepEqual(catalog[0].Clients, catalog[1].Clients) {
 		t.Fatalf("alias discovery lost the target's capabilities %+v", catalog)
 	}
-	delete(route.Aliases, "offline")
 	for _, client := range []string{"claude-code", "opencode"} {
 		config, err := Generate(route, offers, Request{GatewayURL: "https://olp.example", Client: client, Model: "team-code"})
 		if err != nil || config.Model != "team-code" || !strings.Contains(config.Configuration, "team-code") {
