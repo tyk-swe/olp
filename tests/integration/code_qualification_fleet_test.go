@@ -12,14 +12,18 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/coder/websocket"
+	"github.com/google/uuid"
+	"github.com/oapi-codegen/nullable"
 	"github.com/tyk-swe/olp/internal/codemode"
 	"github.com/tyk-swe/olp/internal/database"
+	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/testutil"
 	"github.com/tyk-swe/olp/tests/codecli"
 	codexfixture "github.com/tyk-swe/olp/tests/fixtures/codex-qualified"
@@ -112,6 +116,145 @@ func (f *codeFleet) refused(t *testing.T, replica int, conversation, parent stri
 	}
 	if len(f.peer.Requests()) != before {
 		t.Fatal("refused generation reached upstream")
+	}
+}
+
+func TestCodeQualificationFleetWeightedDistribution(t *testing.T) {
+	f := newCodeFleet(t)
+	pool := codeDiscoveryResponse[contract.CodePool](t, f.pool)
+	first := codeDiscoveryResponse[contract.CodeAccount](t, f.accounts[0]).Id.String()
+	second := codeDiscoveryResponse[contract.CodeAccount](t, f.accounts[1]).Id.String()
+	f.h.want(f.owner, "PUT", "/api/v1/code/pools/"+pool.Id.String(), codePoolWeightInput(pool, map[string]int64{first: 5, second: 1}), map[string]string{"If-Match": pool.Etag.String()}, 200)
+	for i := range 200 {
+		f.success(t, i%2, fmt.Sprintf("weighted-%d", i), "")
+	}
+	firstCount := len(slices.Collect(func(yield func(codexfixture.Request) bool) {
+		for _, request := range f.peer.Requests() {
+			if request.Header.Get("Authorization") == "Bearer "+f.codexAuthorities[0].accessToken && !yield(request) {
+				return
+			}
+		}
+	}))
+	if firstCount < 140 || firstCount > 190 {
+		t.Fatalf("5:1 weights selected the first account %d times in 200 new roots", firstCount)
+	}
+}
+
+func TestCodeQualificationFleetWeightsPreserveBindingsAndEligibility(t *testing.T) {
+	f := newCodeFleet(t)
+	pool := codeDiscoveryResponse[contract.CodePool](t, f.pool)
+	first := codeDiscoveryResponse[contract.CodeAccount](t, f.accounts[0]).Id.String()
+	secondAccount := codeDiscoveryResponse[contract.CodeAccount](t, f.accounts[1])
+	second := secondAccount.Id.String()
+	poolPath := "/api/v1/code/pools/" + pool.Id.String()
+	firstHeavy := codeDiscoveryResponse[contract.CodePool](t, f.h.want(f.owner, "PUT", poolPath, codePoolWeightInput(pool, map[string]int64{first: 2147483647, second: 1}), map[string]string{"If-Match": pool.Etag.String()}, 200))
+	for i := range 4 {
+		f.success(t, i%2, fmt.Sprintf("first-heavy-%d", i), "")
+	}
+	firstBindings := codePublicDecode[[]codemode.Binding](t, f.list("bindings"))
+	for _, binding := range firstBindings {
+		if binding.AccountID != first {
+			t.Fatal("new roots did not follow account weights")
+		}
+	}
+	f.h.want(f.owner, "PUT", poolPath, codePoolWeightInput(firstHeavy, map[string]int64{first: 1, second: 2147483647}), map[string]string{"If-Match": firstHeavy.Etag.String()}, 200)
+	f.success(t, 1, "first-heavy-0", "")
+	f.success(t, 0, "weighted-child", "first-heavy-0")
+	for i := range 4 {
+		f.success(t, i%2, fmt.Sprintf("second-heavy-%d", i), "")
+	}
+	bindings := codePublicDecode[[]codemode.Binding](t, f.list("bindings"))
+	for _, binding := range bindings {
+		if strings.HasPrefix(binding.Conversation, "second-heavy-") {
+			if binding.AccountID != second {
+				t.Fatal("new roots ignored updated weight")
+			}
+			continue
+		}
+		if binding.AccountID != first {
+			t.Fatal("weight update moved a durable binding")
+		}
+	}
+	accountPath := "/api/v1/code/accounts/" + second
+	otherModel := codeDiscoveryResponse[contract.CodeAccount](t, f.h.want(f.owner, "PUT", accountPath, codeDiscoveryAccountInput(secondAccount, true, []string{"gpt-5.4-mini"}), map[string]string{"If-Match": secondAccount.Etag.String()}, 200))
+	f.success(t, 0, "exact-model-root", "")
+	f.h.want(f.owner, "PUT", accountPath, codeDiscoveryAccountInput(otherModel, true, []string{"gpt-5.4"}), map[string]string{"If-Match": otherModel.Etag.String()}, 200)
+	f.peer.Mode("quota")
+	response, _, err := f.request(t.Context(), 1, "second-heavy-0", "", codeBody())
+	if err != nil || response.StatusCode != 429 {
+		t.Fatalf("quota response: %v %v", response, err)
+	}
+	f.peer.Mode("")
+	f.success(t, 1, "available-root", "")
+	f.refused(t, 0, "second-heavy-0", "")
+	latest := codePublicDecode[[]codemode.Binding](t, f.list("bindings"))
+	for _, binding := range latest {
+		if (binding.Conversation == "available-root" || binding.Conversation == "exact-model-root") && binding.AccountID != first {
+			t.Fatal("weight overrode account eligibility")
+		}
+	}
+}
+
+func TestCodeQualificationFleetWeightedPersonalAndSharedIsolation(t *testing.T) {
+	f := newCodeFleet(t)
+	pool := codeDiscoveryResponse[contract.CodePool](t, f.pool)
+	firstAccount := codeDiscoveryResponse[contract.CodeAccount](t, f.accounts[0])
+	first := firstAccount.Id.String()
+	second := codeDiscoveryResponse[contract.CodeAccount](t, f.accounts[1]).Id.String()
+	f.h.want(f.owner, "PUT", "/api/v1/code/pools/"+pool.Id.String(), codePoolWeightInput(pool, map[string]int64{first: 1, second: 2147483647}), map[string]string{"If-Match": pool.Etag.String()}, 200)
+	owner := codeDiscoveryResponse[contract.UserDetailResponse](t, f.h.want(f.owner, "GET", "/api/v1/profile", nil, nil, 200))
+	key := codeDiscoveryResponse[contract.CreateApiKeyResponse](t, f.h.want(f.owner, "POST", "/api/v1/api-keys", contract.CreateApiKeyRequest{
+		ProjectId: nullable.NewNullableWithValue(pool.ProjectId), Name: "Personal key", Scopes: &[]string{"inference"},
+		AllowedRoutes: &[]string{"qualification", "qualification-personal"},
+	}, idem("weighted-personal-key"), 201))
+	personal := codeDiscoveryResponse[contract.CodePool](t, f.h.want(f.owner, "POST", "/api/v1/code/pools", contract.CodePoolWrite{
+		ProjectId: pool.ProjectId, Name: "Weighted personal", Kind: contract.CodePoolWriteKindPersonal, OwnerUserId: nullable.NewNullableWithValue(owner.Id),
+		AccountIds: []uuid.UUID{firstAccount.Id}, AccountWeights: &map[string]int64{first: 1}, ApiKeyIds: []uuid.UUID{key.Id},
+	}, idem("weighted-personal-pool"), 201))
+	draft := codeDiscoveryResponse[contract.CodeRoute](t, f.h.want(f.owner, "POST", "/api/v1/code/routes", contract.CodeRouteWrite{
+		ProjectId: pool.ProjectId, Slug: "qualification-personal", PoolId: personal.Id,
+		Models: []string{"gpt-5.4"}, Enabled: true,
+	}, idem("weighted-personal-route"), 201))
+	f.h.want(f.owner, "POST", "/api/v1/code/routes/"+draft.Id.String()+"/publish", nil, map[string]string{"If-Match": draft.Etag.String(), "Idempotency-Key": "weighted-personal-publish"}, 200)
+	for _, process := range f.gateways {
+		if err := process.Kill(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	updatedFleet := &codeFleet{codePublicFixture: f.codePublicFixture, in: f.in, gateways: []*testutil.Process{f.in.replica("weighted-pools-0"), f.in.replica("weighted-pools-1")}}
+	for i := range 2 {
+		updatedFleet.success(t, i, fmt.Sprintf("shared-isolated-%d", i), "")
+		req, err := http.NewRequestWithContext(t.Context(), "POST", updatedFleet.gateways[i].PublicOrigin+"/code/qualification-personal/responses", bytes.NewReader(codeBody()))
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set("Authorization", "Bearer "+key.Secret)
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Thread-Id", fmt.Sprintf("personal-isolated-%d", i))
+		response, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, readErr := io.ReadAll(response.Body)
+		response.Body.Close()
+		if readErr != nil || response.StatusCode != 200 || string(body) != codexfixture.SSE {
+			t.Fatalf("personal pool request status %d, read error %v", response.StatusCode, readErr)
+		}
+	}
+	bindings := codePublicDecode[[]codemode.Binding](t, f.list("bindings"))
+	if len(bindings) != 4 {
+		t.Fatalf("expected four independent pool bindings, got %d", len(bindings))
+	}
+	for _, binding := range bindings {
+		if strings.HasPrefix(binding.Conversation, "personal-") {
+			if binding.AccountID != first {
+				t.Fatal("personal pool selected the weighted shared account")
+			}
+			continue
+		}
+		if binding.AccountID != second {
+			t.Fatal("shared pool selected outside its weighted membership")
+		}
 	}
 }
 
