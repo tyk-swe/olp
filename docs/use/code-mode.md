@@ -77,6 +77,37 @@ conversation mixes receives the turns the others produced. No live vendor is
 yet qualified to accept another vendor's reasoning and tool calls in that
 history; mixed conversations are qualified against scripted vendors only.
 
+## Import Codex credentials once
+
+In the code account editor, select a provider connection using the Codex
+subscription profile, paste its `auth.json` into **Codex auth.json**, and choose
+**Import Codex credentials**. Save the account to associate the new credential.
+This is a one-time migration. OLP stores encrypted credentials and owns refresh
+after import. Stop using the original local credentials after a successful import.
+OLP does not read, watch or synchronize local files.
+
+The supported JSON document contains a `tokens` object with string fields
+`access_token`, `id_token`, `refresh_token` and `account_id`. The token account and
+user claims must agree with each other and with `account_id`. Optional top-level
+fields are `auth_mode` set to `chatgpt`, `OPENAI_API_KEY` set to `null`, and
+`last_refresh` as an RFC3339 timestamp. Other fields, API keys, duplicate JSON
+fields and conflicting identities are rejected. Expired local access and identity
+tokens are accepted only when refresh verifies the same account and user.
+
+The management API accepts `POST /api/v1/providers/{provider_id}/codex-import`
+with the current provider `If-Match` header and a JSON body containing
+`credentials`, the document above encoded as a string. Optional `slot_id` selects
+an existing credential slot. Otherwise import uses the default slot. OLP verifies
+the refresh token through the pinned Codex profile and the provider's approved
+network controls before storing it. An occupied slot requires the same verified
+principal. The response contains credential metadata and never tokens.
+
+Import preserves account and conversation pins. Replacing an account's credential
+requires saving that account with the returned credential identifier. Import and
+refresh do not send inference requests or establish subscription eligibility.
+This path has controlled-fixture coverage only. Real subscription qualification
+remains subject to the release gates linked above.
+
 ## Research tools
 
 Research tools use a pool account independently of the coding model. A route

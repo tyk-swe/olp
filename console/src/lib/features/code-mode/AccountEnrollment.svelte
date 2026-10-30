@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { onDestroy } from 'svelte';
+  import { importCodexCredentials } from '$lib/features/providers/api/grants';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import { getProvider } from '$lib/features/providers/api/providers';
   import { listProviderKinds } from '$lib/features/providers/api/models';
@@ -41,6 +43,12 @@
   const principal = access.user?.id;
   let error = $state('');
   let notice = $state('');
+  let importInput = $state('');
+  let importing = $state(false);
+  let importActive = true;
+  onDestroy(() => {
+    importActive = false;
+  });
   const grant = new GrantEnrollmentState({
     reportTransientErrors: true,
     allowed: () => allowed && access.user?.id === principal,
@@ -65,7 +73,48 @@
       ]);
     }
   });
-  $effect(() => onBusyChange(!!grant.busy || !!grant.enrollment));
+  const enrollmentAllowed = $derived(allowed && access.user?.id === principal);
+  $effect(() => onBusyChange(!!grant.busy || !!grant.enrollment || importing));
+  $effect(() => {
+    if (!enrollmentAllowed) importInput = '';
+  });
+
+  async function importCredentials() {
+    if (!enrollmentAllowed || importing || grant.busy || !provider.data) return;
+    const credentials = importInput;
+    importInput = '';
+    error = '';
+    notice = '';
+    try {
+      JSON.parse(credentials);
+    } catch {
+      error = 'Paste valid Codex auth.json JSON.';
+      return;
+    }
+    importing = true;
+    try {
+      const completion = await importCodexCredentials(
+        provider.data,
+        credentials
+      );
+      if (!importActive || !enrollmentAllowed) return;
+      onComplete(completion.credential_id);
+      notice =
+        'Credentials imported. OLP owns refresh. Stop using the original local credentials. Inference has not been tested.';
+      await Promise.all([
+        client.invalidateQueries({
+          queryKey: providerKeys.credentials(providerId)
+        }),
+        client.invalidateQueries({ queryKey: providerKeys.detail(providerId) })
+      ]);
+    } catch {
+      if (importActive && enrollmentAllowed)
+        error =
+          'Could not import Codex credentials. Check the supported format and account, then sign in again before retrying.';
+    } finally {
+      importing = false;
+    }
+  }
 </script>
 
 <div class="enrollment">
@@ -108,7 +157,7 @@
     <button
       class="button button-secondary"
       type="button"
-      disabled={!allowed || !supported || !!grant.busy}
+      disabled={!enrollmentAllowed || !supported || !!grant.busy || importing}
       onclick={() => {
         if (provider.data) {
           notice = '';
@@ -118,6 +167,31 @@
     >
       {grant.busy ? 'Starting…' : 'Enroll subscription account'}
     </button>
+    {#if supported && provider.data?.configuration.profile_id === 'codex-subscription'}
+      <label for="codex-credential-import">Import Codex credentials once</label>
+      <p>
+        Paste the contents of Codex auth.json with subscription tokens. OLP owns
+        refresh after import. This does not synchronize local files.
+      </p>
+      <textarea
+        id="codex-credential-import"
+        aria-label="Codex auth.json"
+        autocomplete="off"
+        spellcheck="false"
+        bind:value={importInput}
+        disabled={!enrollmentAllowed || !!grant.busy || importing}></textarea>
+      <button
+        class="button button-secondary"
+        type="button"
+        disabled={!enrollmentAllowed ||
+          !!grant.busy ||
+          importing ||
+          !importInput.trim()}
+        onclick={() => void importCredentials()}
+      >
+        {importing ? 'Importing…' : 'Import Codex credentials'}
+      </button>
+    {/if}
     {#if provider.data && !supported && !kinds.isPending}<p>
         A supported grant authentication mode must be configured on this
         provider first.

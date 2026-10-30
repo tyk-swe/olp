@@ -28453,6 +28453,26 @@
             "uniqueItems": true
           }
         }
+      },
+      "CodexCredentialImportRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "credentials"
+        ],
+        "properties": {
+          "credentials": {
+            "type": "string",
+            "maxLength": 65536,
+            "writeOnly": true,
+            "description": "Codex auth.json JSON text. Supports chatgpt auth_mode or its omission, absent or null OPENAI_API_KEY, tokens with access_token, id_token, refresh_token and account_id, and optional RFC3339 last_refresh. Other fields and ambiguous JSON are rejected. Expired local tokens may be imported if refresh verifies the same account and user."
+          },
+          "slot_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Existing credential slot, defaults to the default slot"
+          }
+        }
       }
     },
     "securitySchemes": {
@@ -66178,6 +66198,111 @@
             }
           }
         ]
+      }
+    },
+    "/api/v1/providers/{provider_id}/codex-import": {
+      "post": {
+        "description": "Validates the supported Codex auth.json token format and exchanges its refresh token through the pinned Codex subscription profile to verify account and user identity. Stores only the verified grant in encrypted OLP storage. OLP owns refresh after import. Stop using the original local credentials. This does not synchronize local files or test inference. An existing slot must retain its principal.",
+        "operationId": "importCodexCredentials",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "provider_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Current provider draft ETag",
+            "in": "header",
+            "name": "If-Match",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CodexCredentialImportRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GrantEnrollmentCompletion"
+                }
+              }
+            },
+            "description": "Verified encrypted credential staged on the provider draft"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Provider not found"
+          },
+          "412": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Provider draft changed"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The provider's profile authenticates without a grant (grant_enrollment_unavailable), the named credential slot is unknown (validation_failed), its plugin is unusable (plugin_*), or the plugin failed (grant_enrollment_failed)"
+          },
+          "428": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "If-Match header is required"
+          }
+        },
+        "security": [
+          {
+            "csrfToken": [],
+            "sessionCookie": [
+              "configure"
+            ]
+          },
+          {
+            "managementToken": [
+              "configure"
+            ]
+          }
+        ],
+        "tags": [
+          "providers"
+        ],
+        "summary": "Import Codex subscription credentials once"
       }
     }
   },
