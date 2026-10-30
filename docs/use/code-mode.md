@@ -763,11 +763,11 @@ close on the five-second expiry/authority check. See
 [workload JWT identity](access.md#workload-jwt-identity) for provisioning and
 renewal behavior. No JWT or raw subject enters subscription ledgers.
 
-### Initial conversation recovery
+### Portable conversation recovery
 
 Published route policy `initial_recovery_attempts` defaults to zero. Setting it to
-one or two permits that many additional attempts for a new, text-only
-conversation on the exact requested model. Every attempt checks current key,
+one or two permits that many additional attempts per request for a new or
+established text-only conversation on the exact pinned model. Every attempt checks current key,
 project, pool, account and grant authority. Native forwarding remains unchanged
 when recovery is disabled.
 
@@ -782,14 +782,29 @@ another request still blocks that account. Without a refreshed grant, recovery
 selects another eligible account. Quota recovery respects longer upstream reset
 and Retry-After values when cooling the rejected account.
 
-Recovery refuses once another turn, child conversation, model pin or response
-reference establishes ownership. Concurrent first turns keep their common
-binding. Previous response IDs, turn-state headers, compact operations,
+An established root can move when the current request supplies complete portable
+input, all earlier attempts have settled or aborted, and its tree has one model
+pin and no existing children. Existing response references retain their producing
+account and cannot authorize continuation on the replacement account. A child
+request or a tree with existing children or multiple model pins refuses recovery
+without changing authority. New children inherit the recovered root's account.
+Concurrent admission and recovery share the durable admission lock, and an
+in-flight or uncertain attempt prevents migration.
+
+WebSocket-owned trees cannot move, including idle connections opened while a
+rejected HTTP request waits for recovery. Socket ownership is durable and is not
+cleared when the socket closes. Bindings created before portable recovery remain
+on their original account because their transport ownership is unknown. Start a
+new conversation with complete context to opt into recovery for those bindings.
+
+Previous response IDs, turn-state headers, compact operations,
 assistant/tool histories and opaque input items cannot move between accounts.
 Recovery checks the complete request against recognized fields and types.
 Function declarations with client-supplied schemas are portable, while account-owned tools, stored prompt IDs, unknown
 fields and unsupported nested options disable recovery. The first native
-dispatch still forwards those requests unchanged.
+dispatch still forwards those requests unchanged. A recognized nonexecution
+rejection then returns `code_recovery_unsafe` with guidance to use the original
+account or start a new conversation with full context and no account-owned state.
 Transport loss, server errors, accepted responses, partial output and stream
 errors never authorize replay.
 

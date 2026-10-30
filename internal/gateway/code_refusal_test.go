@@ -145,7 +145,7 @@ func TestCodeInitialRecoveryUsesRefreshedGrantAfterProvenRejection(t *testing.T)
 			return
 		}
 		executions.Add(1)
-		io.WriteString(w, `{"id":"recovered","usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}`)
+		io.WriteString(w, `{"id":"recovered","status":"completed","usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}`)
 	})
 	response := codeDo(t, server, body, nil)
 	got, _ := io.ReadAll(response.Body)
@@ -156,16 +156,84 @@ func TestCodeInitialRecoveryUsesRefreshedGrantAfterProvenRejection(t *testing.T)
 	ledger.wait(t)
 }
 
+func TestCodeRecoveryExplainsNonportableEstablishedState(t *testing.T) {
+	h, ledger, server := newCodeForwardHarness(t)
+	route := h.rt.release.Snapshot.CodeRoutes["coding"]
+	route.InitialRecoveryAttempts = 1
+	h.rt.release.Snapshot.CodeRoutes["coding"] = route
+	h.mock.set("a", func(w http.ResponseWriter, _ *http.Request) {
+		io.WriteString(w, `{"id":"owned-response","usage":{"total_tokens":1}}`)
+	})
+	initial := codeDo(t, server, []byte(`{"model":"native-model","input":"full context"}`), nil)
+	io.Copy(io.Discard, initial.Body)
+	ledger.wait(t)
+	h.mock.set("a", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusTooManyRequests)
+		io.WriteString(w, `{"error":{"type":"usage_limit_reached"}}`)
+	})
+	response := codeDo(t, server, []byte(`{"model":"native-model","input":[{"type":"reasoning","encrypted_content":"opaque"}]}`), nil)
+	body, _ := io.ReadAll(response.Body)
+	if response.StatusCode != http.StatusConflict || !strings.Contains(string(body), "code_recovery_unsafe") || !strings.Contains(string(body), "new conversation") || !strings.Contains(string(body), "full context") || h.mock.count("a") != 2 {
+		t.Fatalf("nonportable recovery status=%d body=%s requests=%d", response.StatusCode, body, h.mock.count("a"))
+	}
+	if usage := ledger.wait(t); usage.Total == nil || *usage.Total != 0 {
+		t.Fatalf("proven rejection lost zero consumption %+v", usage)
+	}
+}
+
+func TestCodeRecoveryEstablishedRequestUsesCompleteInput(t *testing.T) {
+	h, ledger, server := newCodeForwardHarness(t)
+	route := h.rt.release.Snapshot.CodeRoutes["coding"]
+	route.InitialRecoveryAttempts = 1
+	h.rt.release.Snapshot.CodeRoutes["coding"] = route
+	h.gateway.CodeAuthorizer = &codeRecoveryAuthorizer{}
+	initialBody := []byte(`{"model":"native-model","input":"earlier work"}`)
+	completeBody := []byte(`{ "model":"native-model", "input":"Complete summary of earlier work and the new request", "reasoning":{"effort":"high"} }`)
+	h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		if h.mock.count("a") == 1 {
+			if string(body) != string(initialBody) {
+				t.Error("initial native request changed")
+			}
+			io.WriteString(w, `{"id":"established","status":"completed","usage":{"input_tokens":1,"output_tokens":0,"total_tokens":1}}`)
+			return
+		}
+		if string(body) != string(completeBody) {
+			t.Error("established native request changed during recovery")
+		}
+		if h.mock.count("a") == 2 {
+			w.WriteHeader(http.StatusUnauthorized)
+			io.WriteString(w, `{"error":{"type":"authentication_error","code":"invalid_api_key"}}`)
+			return
+		}
+		io.WriteString(w, `{"id":"recovered","status":"completed","usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}`)
+	})
+	initial := codeDo(t, server, initialBody, nil)
+	io.Copy(io.Discard, initial.Body)
+	ledger.wait(t)
+	response := codeDo(t, server, completeBody, nil)
+	body, _ := io.ReadAll(response.Body)
+	if response.StatusCode != http.StatusOK || !strings.Contains(string(body), `"id":"recovered"`) || h.mock.count("a") != 3 {
+		t.Fatalf("established recovery status=%d body=%s requests=%d", response.StatusCode, body, h.mock.count("a"))
+	}
+	if usage := ledger.wait(t); usage.Total == nil || *usage.Total != 0 {
+		t.Fatalf("rejected turn consumed tokens %+v", usage)
+	}
+	if usage := ledger.wait(t); usage.Total == nil || *usage.Total != 2 {
+		t.Fatalf("recovered turn lost usage %+v", usage)
+	}
+}
+
 func TestCodeInitialRecoveryNeverReplaysUnprovenOrOpaqueWork(t *testing.T) {
 	for _, test := range []struct {
-		name        string
-		status      int
-		reply       string
-		body        string
-		headers     http.Header
-		enabled     bool
-		established bool
-		truncated   bool
+		name      string
+		status    int
+		reply     string
+		body      string
+		headers   http.Header
+		enabled   bool
+		unsafe    bool
+		truncated bool
 	}{
 		{name: "disabled", status: 429, reply: `{"error":{"type":"usage_limit_reached"}}`},
 		{name: "server-error", status: 500, reply: `{"error":{"type":"usage_limit_reached"}}`, enabled: true},
@@ -175,14 +243,13 @@ func TestCodeInitialRecoveryNeverReplaysUnprovenOrOpaqueWork(t *testing.T) {
 		{name: "unknown-quota", status: 429, reply: `{"error":{"code":"unknown"}}`, enabled: true},
 		{name: "transient-limit", status: 429, reply: `{"error":{"type":"rate_limit_error","code":"rate_limit_exceeded"}}`, enabled: true},
 		{name: "accepted-error", status: 200, reply: "data: {\"type\":\"error\",\"status\":429,\"error\":{\"type\":\"usage_limit_reached\"}}\n\n", enabled: true},
-		{name: "opaque-header", status: 429, reply: `{"error":{"type":"usage_limit_reached"}}`, headers: http.Header{"X-Codex-Turn-State": {"opaque"}}, enabled: true},
-		{name: "repeated-opaque-header", status: 429, reply: `{"error":{"type":"usage_limit_reached"}}`, headers: http.Header{"X-Codex-Turn-State": {"", "opaque"}}, enabled: true},
-		{name: "opaque-input", status: 429, reply: `{"error":{"type":"usage_limit_reached"}}`, body: `{"model":"native-model","input":[{"type":"reasoning","encrypted_content":"opaque"}]}`, enabled: true},
-		{name: "account-owned-tool", status: 429, reply: `{"error":{"type":"usage_limit_reached"}}`, body: `{"model":"native-model","input":"hello","tools":[{"type":"file_search","vector_store_ids":["vs_private"]}]}`, enabled: true},
-		{name: "account-owned-prompt", status: 429, reply: `{"error":{"type":"usage_limit_reached"}}`, body: `{"model":"native-model","input":"hello","prompt":{"id":"pmpt_private"}}`, enabled: true},
-		{name: "unknown-top-level-state", status: 429, reply: `{"error":{"type":"usage_limit_reached"}}`, body: `{"model":"native-model","input":"hello","future_state":{"id":"opaque"}}`, enabled: true},
-		{name: "unknown-nested-state", status: 429, reply: `{"error":{"type":"usage_limit_reached"}}`, body: `{"model":"native-model","input":"hello","reasoning":{"effort":"high","future_state":"opaque"}}`, enabled: true},
-		{name: "established", status: 429, reply: `{"error":{"type":"usage_limit_reached"}}`, established: true, enabled: true},
+		{name: "opaque-header", status: 429, reply: `{"error":{"type":"usage_limit_reached"}}`, headers: http.Header{"X-Codex-Turn-State": {"opaque"}}, enabled: true, unsafe: true},
+		{name: "repeated-opaque-header", status: 429, reply: `{"error":{"type":"usage_limit_reached"}}`, headers: http.Header{"X-Codex-Turn-State": {"", "opaque"}}, enabled: true, unsafe: true},
+		{name: "opaque-input", status: 429, reply: `{"error":{"type":"usage_limit_reached"}}`, body: `{"model":"native-model","input":[{"type":"reasoning","encrypted_content":"opaque"}]}`, enabled: true, unsafe: true},
+		{name: "account-owned-tool", status: 429, reply: `{"error":{"type":"usage_limit_reached"}}`, body: `{"model":"native-model","input":"hello","tools":[{"type":"file_search","vector_store_ids":["vs_private"]}]}`, enabled: true, unsafe: true},
+		{name: "account-owned-prompt", status: 429, reply: `{"error":{"type":"usage_limit_reached"}}`, body: `{"model":"native-model","input":"hello","prompt":{"id":"pmpt_private"}}`, enabled: true, unsafe: true},
+		{name: "unknown-top-level-state", status: 429, reply: `{"error":{"type":"usage_limit_reached"}}`, body: `{"model":"native-model","input":"hello","future_state":{"id":"opaque"}}`, enabled: true, unsafe: true},
+		{name: "unknown-nested-state", status: 429, reply: `{"error":{"type":"usage_limit_reached"}}`, body: `{"model":"native-model","input":"hello","reasoning":{"effort":"high","future_state":"opaque"}}`, enabled: true, unsafe: true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			h, ledger, server := newCodeForwardHarness(t)
@@ -194,12 +261,6 @@ func TestCodeInitialRecoveryNeverReplaysUnprovenOrOpaqueWork(t *testing.T) {
 			body := []byte(`{"model":"native-model","input":[]}`)
 			if test.body != "" {
 				body = []byte(test.body)
-			}
-			if test.established {
-				h.mock.set("a", func(w http.ResponseWriter, r *http.Request) { io.WriteString(w, `{"id":"established"}`) })
-				response := codeDo(t, server, body, nil)
-				io.Copy(io.Discard, response.Body)
-				ledger.wait(t)
 			}
 			before := h.mock.count("a")
 			h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
@@ -218,7 +279,14 @@ func TestCodeInitialRecoveryNeverReplaysUnprovenOrOpaqueWork(t *testing.T) {
 			})
 			response := codeDo(t, server, body, test.headers)
 			got, _ := io.ReadAll(response.Body)
-			if response.StatusCode != test.status || string(got) != test.reply || h.mock.count("a") != before+1 {
+			if h.mock.count("a") != before+1 {
+				t.Fatal("nonportable or unproven request replayed")
+			}
+			if test.unsafe {
+				if response.StatusCode != http.StatusConflict || !strings.Contains(string(got), "code_recovery_unsafe") || !strings.Contains(string(got), "full context") {
+					t.Fatalf("missing portability guidance status=%d body=%s", response.StatusCode, got)
+				}
+			} else if response.StatusCode != test.status || string(got) != test.reply {
 				t.Fatalf("unsafe recovery status=%d body=%s requests=%d", response.StatusCode, got, h.mock.count("a")-before)
 			}
 			ledger.wait(t)

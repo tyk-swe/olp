@@ -637,13 +637,20 @@ func TestCodeQualificationFleetInitialRecoveryPreservesAttemptsAndBinding(t *tes
 	}
 }
 
-func TestCodeQualificationFleetConcurrentInitialRecoveryNeverMovesInflightBinding(t *testing.T) {
+func TestCodeQualificationFleetConcurrentEstablishedRecoveryNeverMovesInflightBinding(t *testing.T) {
 	f := newCodeFleet(t).initialRecovery(t, 2)
+	f.success(t, 0, "concurrent-established", "")
 	var dispatches atomic.Int64
 	both := make(chan struct{})
+	release := make(chan struct{})
 	f.peer.SetRejector(func(ctx context.Context, _ http.Header, _ []byte) (int, []byte) {
 		if dispatches.Add(1) == 2 {
 			close(both)
+			select {
+			case <-release:
+			case <-ctx.Done():
+			}
+			return 0, nil
 		}
 		select {
 		case <-both:
@@ -651,38 +658,122 @@ func TestCodeQualificationFleetConcurrentInitialRecoveryNeverMovesInflightBindin
 		}
 		return 429, []byte(`{"error":{"type":"usage_limit_reached"}}`)
 	})
-	var wg sync.WaitGroup
-	errs := make(chan error, 2)
-	for replica := range 2 {
-		wg.Go(func() {
-			response, _, err := f.request(t.Context(), replica, "concurrent-initial", "", codeBody(), true)
-			if err != nil {
-				errs <- err
-				return
-			}
-			if response.StatusCode < 400 || response.StatusCode >= 500 {
-				errs <- fmt.Errorf("unsafe initial recovery returned %d", response.StatusCode)
-			}
-		})
+	type result struct {
+		response *http.Response
+		body     []byte
+		err      error
 	}
-	wg.Wait()
-	close(errs)
-	for err := range errs {
-		t.Error(err)
+	results := make(chan result, 2)
+	for replica := range 2 {
+		go func() {
+			response, body, err := f.request(t.Context(), replica, "concurrent-established", "", codeBody(), true)
+			results <- result{response, body, err}
+		}()
+	}
+	first := <-results
+	close(release)
+	if first.err != nil || first.response.StatusCode != http.StatusConflict || !bytes.Contains(first.body, []byte("code_recovery_unsafe")) {
+		t.Fatalf("inflight recovery response=%v body=%s err=%v", first.response, first.body, first.err)
+	}
+	second := <-results
+	if second.err != nil || second.response.StatusCode != http.StatusOK {
+		t.Fatalf("inflight original work response=%v body=%s err=%v", second.response, second.body, second.err)
 	}
 	captures := f.peer.Requests()
-	if len(captures) != 2 || captures[0].Header.Get("Authorization") != captures[1].Header.Get("Authorization") {
-		t.Fatal("concurrent first turns replayed or moved an in-flight binding")
+	if len(captures) != 3 || captures[0].Header.Get("Authorization") != captures[1].Header.Get("Authorization") || captures[1].Header.Get("Authorization") != captures[2].Header.Get("Authorization") {
+		t.Fatal("concurrent turns replayed or moved an in-flight binding")
 	}
 	attempts := codePublicDecode[[]codemode.Attempt](t, f.list("attempts"))
 	bindings := codePublicDecode[[]codemode.Binding](t, f.list("bindings"))
-	if len(attempts) != 2 || len(bindings) != 1 {
+	if len(attempts) != 3 || len(bindings) != 1 {
 		t.Fatalf("concurrent attempts=%d bindings=%d", len(attempts), len(bindings))
 	}
 	for _, attempt := range attempts {
 		if attempt.AccountID != bindings[0].AccountID || attempt.BindingID != bindings[0].ID {
-			t.Fatal("concurrent initial binding lost attempt ownership")
+			t.Fatal("concurrent established binding lost attempt ownership")
 		}
+	}
+}
+
+func TestCodeQualificationFleetEstablishedRecoveryRefusesOwnedState(t *testing.T) {
+	for _, kind := range []string{"existing-child", "child-request", "multiple-pins", "socket-during-rejection"} {
+		t.Run(kind, func(t *testing.T) {
+			f := newCodeFleet(t).initialRecovery(t, 1)
+			f.success(t, 0, "owned-root", "")
+			if kind == "existing-child" || kind == "child-request" {
+				f.success(t, 1, "owned-child", "owned-root")
+			}
+			if kind == "multiple-pins" {
+				path := "/api/v1/code/routes/" + f.route["id"].(string)
+				draft := f.h.want(f.owner, "PUT", path, map[string]any{"project_id": f.project, "slug": "qualification", "pool_id": f.pool["id"], "models": []string{"gpt-5.4"}, "aliases": map[string]string{"other-code": "gpt-5.4"}, "model_rewriting": true, "initial_recovery_attempts": 1, "enabled": true}, etagHeader(f.route), 200)
+				f.h.want(f.owner, "POST", path+"/publish", nil, withMatch(draft, idem("multipin-recovery")), 200)
+				f.restart(t, "multipin")
+				response, data, err := f.request(t.Context(), 0, "owned-root", "", []byte(`{"model":"other-code","input":"complete context"}`), true)
+				if err != nil || response.StatusCode != http.StatusOK {
+					t.Fatalf("second public model pin response=%v body=%s err=%v", response, data, err)
+				}
+			}
+			before := codePublicDecode[[]codemode.Binding](t, f.list("bindings"))
+			entered, release := make(chan struct{}), make(chan struct{})
+			f.peer.SetRejector(func(ctx context.Context, _ http.Header, _ []byte) (int, []byte) {
+				if kind == "socket-during-rejection" {
+					close(entered)
+					select {
+					case <-release:
+					case <-ctx.Done():
+					}
+				}
+				return http.StatusTooManyRequests, []byte(`{"error":{"type":"usage_limit_reached"}}`)
+			})
+			conversation, parent := func() (string, string) {
+				if kind == "child-request" {
+					return "owned-child", "owned-root"
+				}
+				return "owned-root", ""
+			}()
+			requests := len(f.peer.Requests())
+			type result struct {
+				response *http.Response
+				body     []byte
+				err      error
+			}
+			results := make(chan result, 1)
+			go func() {
+				response, body, err := f.request(t.Context(), 1, conversation, parent, codeBody(), true)
+				results <- result{response, body, err}
+			}()
+			if kind == "socket-during-rejection" {
+				select {
+				case <-entered:
+				case <-t.Context().Done():
+					t.Fatal("rejection did not reach upstream")
+				}
+				url := strings.Replace(f.gateways[0].PublicOrigin, "http", "ws", 1) + "/code/qualification/responses"
+				conn, _, err := websocket.Dial(t.Context(), url, &websocket.DialOptions{HTTPHeader: http.Header{"Authorization": {"Bearer " + f.key}, "Thread-Id": {"owned-root"}, "Session-Id": {"owned-root"}}})
+				if err != nil {
+					close(release)
+					t.Fatal(err)
+				}
+				defer conn.CloseNow()
+				close(release)
+			}
+			got := <-results
+			if got.err != nil || got.response.StatusCode != http.StatusConflict || !bytes.Contains(got.body, []byte("code_recovery_unsafe")) || !bytes.Contains(got.body, []byte("full context")) || len(f.peer.Requests()) != requests+1 {
+				t.Fatalf("owned state recovery response=%v body=%s err=%v", got.response, got.body, got.err)
+			}
+			after := codePublicDecode[[]codemode.Binding](t, f.list("bindings"))
+			if !reflect.DeepEqual(before, after) {
+				t.Fatal("unsafe recovery changed root or child authority")
+			}
+			f.peer.SetRejector(nil)
+			if _, err := f.h.Pool.Exec(t.Context(), `UPDATE olp.code_accounts SET health='healthy',unavailable_until=NULL WHERE project_id=$1`, f.project); err != nil {
+				t.Fatal(err)
+			}
+			f.success(t, 0, "owned-root", "")
+			if kind == "existing-child" || kind == "child-request" {
+				f.success(t, 1, "owned-child", "owned-root")
+			}
+		})
 	}
 }
 

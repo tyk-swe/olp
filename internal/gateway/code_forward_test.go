@@ -73,9 +73,6 @@ func (l *codeTestLedger) ObserveOutcome(_ context.Context, _ string, outcome cod
 func (l *codeTestLedger) Admit(_ context.Context, in resources.CodeAdmission) (resources.CodePermit, error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	initial := !slices.ContainsFunc(l.inputs, func(previous resources.CodeAdmission) bool {
-		return previous.APIKeyID == in.APIKeyID && previous.Operation.Identity.Conversation == in.Operation.Identity.Conversation
-	})
 	l.inputs = append(l.inputs, in)
 	if in.PreviousResponse != "" && !l.references[in.PreviousResponse] {
 		return resources.CodePermit{}, codemode.Refuse(409, "code_parent_unresolved")
@@ -85,7 +82,7 @@ func (l *codeTestLedger) Admit(_ context.Context, in resources.CodeAdmission) (r
 	}
 	permit, err := codeTestPermit(in.APIKeyID, in.Providers)
 	permit.Authority.EndUserDigest = in.EndUserDigest
-	permit.InitialRecovery = in.InitialRecovery && (initial || in.Recovery != nil)
+	permit.InitialRecovery = in.InitialRecovery && in.Operation.Identity.Parent == "" && in.PreviousResponse == ""
 	permit.Attempt = codemode.Attempt{ID: fmt.Sprint(len(l.inputs))}
 	permit.Pin.TargetModel = l.pinTarget
 	return permit, err
