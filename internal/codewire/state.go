@@ -10,7 +10,7 @@ import (
 )
 
 func ValidateGenericRequest(root oif.Value, headers http.Header, request codemode.Request) error {
-	if !GenericConversation(request.Operation.Identity) {
+	if !request.Operation.Identity.Generic() {
 		return nil
 	}
 	if hasHeader(headers, "X-Codex-Turn-State") || request.PreviousResponse != "" && !strings.HasPrefix(request.Operation.Identity.Conversation, "olp:affinity/") {
@@ -21,7 +21,7 @@ func ValidateGenericRequest(root oif.Value, headers http.Header, request codemod
 	}
 	switch request.Operation.Name {
 	case "responses":
-		if stateContent(field(root, "input")) || stateContent(field(root, "instructions")) {
+		if stateField(root, "prompt") || stateContent(field(root, "input")) || stateContent(field(root, "instructions")) {
 			return codemode.Refuse(409, "code_parent_unresolved")
 		}
 	case "messages":

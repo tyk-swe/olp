@@ -8,6 +8,7 @@ import (
 	"github.com/tyk-swe/olp/internal/codemode"
 	"github.com/tyk-swe/olp/internal/codewire"
 	"github.com/tyk-swe/olp/internal/oif"
+	"github.com/tyk-swe/olp/internal/protocols/wire"
 )
 
 const MaxBody = codewire.MaxBody
@@ -39,7 +40,8 @@ func ClassifyWith(body []byte, path string, websocket bool, identity func(oif.Va
 	for _, item := range field(root, "input").Elements() {
 		kind, _ := field(item, "type").Text()
 		compact = compact || kind == "compaction_trigger"
-		if kind == "item_reference" {
+		_, hasID := item.Lookup("id")
+		if wire.IsResponsesItemReference(kind, hasID) {
 			return request, codemode.Refuse(409, "code_parent_unresolved")
 		}
 	}
@@ -143,7 +145,7 @@ func Identity(headers http.Header, root oif.Value) (codemode.Identity, error) {
 	if subagent != "" && result.Parent == "" {
 		return result, codemode.Refuse(409, "code_parent_unresolved")
 	}
-	if codewire.GenericConversation(result) || codewire.GenericConversation(codemode.Identity{Conversation: result.Parent}) {
+	if result.Generic() || (codemode.Identity{Conversation: result.Parent}).Generic() {
 		return result, codemode.Refuse(400, "code_identity_ambiguous")
 	}
 	return result, result.Validate()

@@ -50,7 +50,7 @@ func codeConnectionIdentity(ingress codeIngress, headers http.Header) (codemode.
 	if err != nil {
 		return identity, err
 	}
-	if codewire.GenericConversation(identity) && len(headers.Values("X-Olp-Code-Affinity")) == 0 {
+	if identity.Generic() && len(headers.Values("X-Olp-Code-Affinity")) == 0 {
 		return identity, codemode.Refuse(400, "code_identity_invalid")
 	}
 	return identity, nil

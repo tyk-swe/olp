@@ -587,9 +587,11 @@ Generic WebSocket Responses require this header on the handshake.
 With explicit affinity, `previous_response_id` may continue a response OLP
 observed for that key and conversation, subject to its producing account and
 model ownership. Unknown, ambiguous or differently owned references refuse.
-Without affinity, response references refuse. Generic requests also refuse
-opaque or signed thinking history, turn state, compaction, stored item/file
-references, server tools and other unsupported stateful content. Complete
+An affinity cannot adopt another affinity's conversation or a recognized
+client's tree through a response reference. Without affinity, response
+references refuse. Generic requests also refuse opaque or signed thinking
+history, turn state, compaction, stored prompts, stored item/file references,
+server tools and other unsupported stateful content. Complete
 function-call arguments and tool results remain native input, including fields
 that happen to have names such as `signature`. OLP never converts opaque state
 into a stateless prompt. Every admitted generation uses the same live access,

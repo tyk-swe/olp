@@ -26,42 +26,42 @@ func TestCodeGenericWebSocketRequiresExplicitAffinity(t *testing.T) {
 		if r.Header.Get("X-Olp-Code-Affinity") != "" || r.Header.Get("Thread-Id") != "" || r.Header.Get("Session_id") != "" {
 			t.Error("generic socket acquired an upstream identity")
 		}
-		conn, err := websocket.Accept(w, r, nil)
-		if err != nil {
-			t.Error(err)
+		conn, acceptErr := websocket.Accept(w, r, nil)
+		if acceptErr != nil {
+			t.Error(acceptErr)
 			return
 		}
 		defer conn.CloseNow()
-		if _, _, err = conn.Read(r.Context()); err != nil {
-			t.Error(err)
+		if _, _, readErr := conn.Read(r.Context()); readErr != nil {
+			t.Error(readErr)
 			return
 		}
-		if err = conn.Write(r.Context(), websocket.MessageText, []byte(`{"type":"response.completed","response":{"id":"generic-socket","usage":{"total_tokens":3,"input_tokens":2,"output_tokens":1}}}`)); err != nil {
-			t.Error(err)
+		if writeErr := conn.Write(r.Context(), websocket.MessageText, []byte(`{"type":"response.completed","response":{"id":"generic-socket","usage":{"total_tokens":3,"input_tokens":2,"output_tokens":1}}}`)); writeErr != nil {
+			t.Error(writeErr)
 		}
 		_, _, _ = conn.Read(r.Context())
 	})
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
-	conn, response, err := websocket.Dial(ctx, server.URL+"/code/coding/responses", &websocket.DialOptions{HTTPHeader: http.Header{"Authorization": {"Bearer " + fullKey}}})
+	conn, response, dialErr := websocket.Dial(ctx, server.URL+"/code/coding/responses", &websocket.DialOptions{HTTPHeader: http.Header{"Authorization": {"Bearer " + fullKey}}})
 	if conn != nil {
 		_ = conn.CloseNow()
 	}
-	if err == nil || response == nil || response.StatusCode != http.StatusBadRequest || h.mock.count("a") != 0 {
-		t.Fatalf("unaffined generic socket reached upstream, response %v error %v", response, err)
+	if dialErr == nil || response == nil || response.StatusCode != http.StatusBadRequest || h.mock.count("a") != 0 {
+		t.Fatalf("unaffined generic socket reached upstream, response %v error %v", response, dialErr)
 	}
 	_ = response.Body.Close()
-	bound, _, err := websocket.Dial(ctx, server.URL+"/code/coding/responses", &websocket.DialOptions{HTTPHeader: http.Header{"Authorization": {"Bearer " + fullKey}, "X-Olp-Code-Affinity": {"socket"}}})
-	if err != nil {
-		t.Fatal(err)
+	bound, _, boundErr := websocket.Dial(ctx, server.URL+"/code/coding/responses", &websocket.DialOptions{HTTPHeader: http.Header{"Authorization": {"Bearer " + fullKey}, "X-Olp-Code-Affinity": {"socket"}}})
+	if boundErr != nil {
+		t.Fatal(boundErr)
 	}
 	defer bound.CloseNow()
-	if err = bound.Write(ctx, websocket.MessageText, []byte(`{"type":"response.create","model":"native-model","input":"hello"}`)); err != nil {
-		t.Fatal(err)
+	if writeErr := bound.Write(ctx, websocket.MessageText, []byte(`{"type":"response.create","model":"native-model","input":"hello"}`)); writeErr != nil {
+		t.Fatal(writeErr)
 	}
-	_, body, err := bound.Read(ctx)
-	if err != nil || !strings.Contains(string(body), "response.completed") {
-		t.Fatalf("affined generic socket failed, body %s error %v", body, err)
+	_, body, readErr := bound.Read(ctx)
+	if readErr != nil || !strings.Contains(string(body), "response.completed") {
+		t.Fatalf("affined generic socket failed, body %s error %v", body, readErr)
 	}
 	if usage := ledger.wait(t); usage.Total == nil || *usage.Total != 3 {
 		t.Fatalf("generic socket usage lost %+v", usage)

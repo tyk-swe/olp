@@ -348,35 +348,42 @@ func TestCodeGenericStateRefusesBeforeDispatch(t *testing.T) {
 		{"image-reference", `{"input":[{"role":"user","content":[{"type":"input_image","file_id":"unowned"}]}]}`, nil},
 		{"file-reference", `{"input":[{"role":"user","content":[{"type":"input_file","file_id":"unowned"}]}]}`, nil},
 		{"server-tool", `{"input":"hello","tools":[{"type":"file_search","vector_store_ids":["unowned"]}]}`, nil},
+		{"stored-prompt", `{"input":"hello","prompt":{"id":"pmpt-private"}}`, nil},
+		{"omitted-type-reference", `{"input":[{"id":"stored-item"}]}`, nil},
+		{"null-type-reference", `{"input":[{"type":null,"id":"stored-item"}]}`, nil},
 	} {
-		t.Run(state.name, func(t *testing.T) {
-			h, ledger, server := newCodeForwardHarness(t)
-			body := []byte(`{"model":"native-model",` + strings.TrimPrefix(state.body, "{"))
-			request, err := http.NewRequestWithContext(t.Context(), http.MethodPost, server.URL+"/code/coding/responses", bytes.NewReader(body))
-			if err != nil {
-				t.Fatal(err)
-			}
-			request.Header = state.headers.Clone()
-			if request.Header == nil {
-				request.Header = http.Header{}
-			}
-			request.Header.Set("Authorization", "Bearer "+fullKey)
-			request.Header.Set("X-Olp-Code-Affinity", "generic-state")
-			response, err := server.Client().Do(request)
-			if err != nil {
-				t.Fatal(err)
-			}
-			got, _ := io.ReadAll(response.Body)
-			_ = response.Body.Close()
-			if response.StatusCode != http.StatusConflict || !bytes.Contains(got, []byte("code_parent_unresolved")) {
-				t.Fatalf("unsupported generic state accepted, status %d body %s", response.StatusCode, got)
-			}
-			ledger.mu.Lock()
-			defer ledger.mu.Unlock()
-			if h.mock.count("a") != 0 || len(ledger.inputs) != 0 || len(ledger.usages) != 0 {
-				t.Fatal("unsupported state reached accounting or dispatch")
-			}
-		})
+		for _, affinity := range []string{"", "generic-state"} {
+			t.Run(state.name+"/"+affinity, func(t *testing.T) {
+				h, ledger, server := newCodeForwardHarness(t)
+				body := []byte(`{"model":"native-model",` + strings.TrimPrefix(state.body, "{"))
+				request, err := http.NewRequestWithContext(t.Context(), http.MethodPost, server.URL+"/code/coding/responses", bytes.NewReader(body))
+				if err != nil {
+					t.Fatal(err)
+				}
+				request.Header = state.headers.Clone()
+				if request.Header == nil {
+					request.Header = http.Header{}
+				}
+				request.Header.Set("Authorization", "Bearer "+fullKey)
+				if affinity != "" {
+					request.Header.Set("X-Olp-Code-Affinity", affinity)
+				}
+				response, err := server.Client().Do(request)
+				if err != nil {
+					t.Fatal(err)
+				}
+				got, _ := io.ReadAll(response.Body)
+				_ = response.Body.Close()
+				if response.StatusCode != http.StatusConflict || !bytes.Contains(got, []byte("code_parent_unresolved")) {
+					t.Fatalf("unsupported generic state accepted, status %d body %s", response.StatusCode, got)
+				}
+				ledger.mu.Lock()
+				defer ledger.mu.Unlock()
+				if h.mock.count("a") != 0 || len(ledger.inputs) != 0 || len(ledger.usages) != 0 {
+					t.Fatal("unsupported state reached accounting or dispatch")
+				}
+			})
+		}
 	}
 }
 
@@ -385,47 +392,57 @@ func TestCodeGenericNativeProtocolsPreserveToolHistory(t *testing.T) {
 		name, path, profile, model, request, response string
 	}{
 		{"messages", "v1/messages", codeplans.ZAIProfile, "native-model",
-			`{"model":"native-model","messages":[{"role":"assistant","content":[{"type":"tool_use","id":"call-1","name":"read","input":{"signature":"plain argument"}}]},{"role":"user","content":[{"type":"tool_result","tool_use_id":"call-1","content":"source text"}]}],"max_tokens":8,"client_metadata":"native extension","input":{"type":"native_extension"},"vendor_extension":{"keep":true}}`,
+			`{"model":"native-model","messages":[{"role":"assistant","content":[{"type":"tool_use","id":"call-1","name":"read","input":{"signature":"plain argument"}}]},{"role":"user","content":[{"type":"tool_result","tool_use_id":"call-1","content":"source text"}]}],"max_tokens":8,"client_metadata":{"thread_id":"application-thread"},"input":{"type":"native_extension"},"vendor_extension":{"keep":true}}`,
 			`{"type":"message","content":[{"type":"text","text":"native reply"}],"stop_reason":"end_turn","usage":{"input_tokens":2,"output_tokens":1}}`},
 		{"chat", "v1/chat/completions", codeplans.ZAIProfile, "native-model",
-			`{"model":"native-model","messages":[{"role":"assistant","tool_calls":[{"id":"call-1","type":"function","function":{"name":"read","arguments":"{\"signature\":\"plain argument\"}"}}]},{"role":"tool","tool_call_id":"call-1","content":"source text"}],"vendor_extension":{"keep":true}}`,
+			`{"model":"native-model","messages":[{"role":"assistant","tool_calls":[{"id":"call-1","type":"function","function":{"name":"read","arguments":"{\"signature\":\"plain argument\"}"}}]},{"role":"tool","tool_call_id":"call-1","content":"source text"}],"client_metadata":{"thread_id":"application-thread"},"vendor_extension":{"keep":true}}`,
 			`{"choices":[{"message":{"role":"assistant","content":"native reply"},"finish_reason":"stop"}],"usage":{"prompt_tokens":2,"completion_tokens":1,"total_tokens":3}}`},
 		{"responses", "v1/responses", codeplans.OpenCodeGoProfile, "gpt-fixture",
-			`{"model":"gpt-fixture","input":[{"type":"function_call","call_id":"call-1","name":"read","arguments":"{\"signature\":\"plain argument\"}"},{"type":"function_call_output","call_id":"call-1","output":"source text"}],"vendor_extension":{"keep":true}}`,
+			`{"model":"gpt-fixture","input":[{"type":"function_call","id":"inline-call","call_id":"call-1","name":"read","arguments":"{\"signature\":\"plain argument\"}"},{"type":"function_call_output","call_id":"call-1","output":"source text"}],"vendor_extension":{"keep":true}}`,
 			`{"id":"generic-native","status":"completed","output":[],"usage":{"input_tokens":2,"output_tokens":1,"total_tokens":3}}`},
 	} {
-		t.Run(protocol.name, func(t *testing.T) {
-			h, ledger, server := newCodeForwardHarness(t, codeForwardSetup{Models: []string{protocol.model}, Policy: access.KeyPolicy{Scopes: []string{"inference"}}})
-			h.rt.release.Snapshot.CodeConnections = map[string]routing.Configuration{"revision:provider": {Kind: connectors.KindPlugin, AuthMode: connectors.AuthGrant, ProfileID: protocol.profile, Endpoint: h.upstream.URL + "/a"}}
-			if err := h.rt.release.Snapshot.Compile(); err != nil {
-				t.Fatal(err)
-			}
-			h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
-				body, err := io.ReadAll(r.Body)
-				if err != nil || string(body) != protocol.request {
-					t.Error("generic native tool history changed")
+		for _, identity := range []struct {
+			name    string
+			headers http.Header
+		}{
+			{"generic", http.Header{}},
+			{"affinity", http.Header{"X-Olp-Code-Affinity": {"native-history"}}},
+			{"recognized", http.Header{"X-Claude-Code-Session-Id": {"native-session"}}},
+		} {
+			t.Run(protocol.name+"/"+identity.name, func(t *testing.T) {
+				h, ledger, server := newCodeForwardHarness(t, codeForwardSetup{Models: []string{protocol.model}, Policy: access.KeyPolicy{Scopes: []string{"inference"}}})
+				h.rt.release.Snapshot.CodeConnections = map[string]routing.Configuration{"revision:provider": {Kind: connectors.KindPlugin, AuthMode: connectors.AuthGrant, ProfileID: protocol.profile, Endpoint: h.upstream.URL + "/a"}}
+				if err := h.rt.release.Snapshot.Compile(); err != nil {
+					t.Fatal(err)
 				}
-				w.Header().Set("Content-Type", "application/json")
-				_, _ = io.WriteString(w, protocol.response)
+				h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
+					body, err := io.ReadAll(r.Body)
+					if err != nil || string(body) != protocol.request {
+						t.Error("generic native tool history changed")
+					}
+					w.Header().Set("Content-Type", "application/json")
+					_, _ = io.WriteString(w, protocol.response)
+				})
+				request, err := http.NewRequestWithContext(t.Context(), http.MethodPost, server.URL+"/code/coding/"+protocol.path, strings.NewReader(protocol.request))
+				if err != nil {
+					t.Fatal(err)
+				}
+				request.Header = identity.headers.Clone()
+				request.Header.Set("Authorization", "Bearer "+fullKey)
+				response, err := server.Client().Do(request)
+				if err != nil {
+					t.Fatal(err)
+				}
+				body, _ := io.ReadAll(response.Body)
+				_ = response.Body.Close()
+				if response.StatusCode != http.StatusOK || string(body) != protocol.response {
+					t.Fatalf("generic native tool exchange refused, status %d body %s", response.StatusCode, body)
+				}
+				if usage := ledger.wait(t); usage.Total == nil || *usage.Total != 3 {
+					t.Fatalf("generic native usage lost %+v", usage)
+				}
 			})
-			request, err := http.NewRequestWithContext(t.Context(), http.MethodPost, server.URL+"/code/coding/"+protocol.path, strings.NewReader(protocol.request))
-			if err != nil {
-				t.Fatal(err)
-			}
-			request.Header.Set("Authorization", "Bearer "+fullKey)
-			response, err := server.Client().Do(request)
-			if err != nil {
-				t.Fatal(err)
-			}
-			body, _ := io.ReadAll(response.Body)
-			_ = response.Body.Close()
-			if response.StatusCode != http.StatusOK || string(body) != protocol.response {
-				t.Fatalf("generic native tool exchange refused, status %d body %s", response.StatusCode, body)
-			}
-			if usage := ledger.wait(t); usage.Total == nil || *usage.Total != 3 {
-				t.Fatalf("generic native usage lost %+v", usage)
-			}
-		})
+		}
 	}
 }
 

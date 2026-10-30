@@ -313,10 +313,7 @@ func validateResponseInput(raw json.RawMessage, path string) error {
 	}
 	kind, _ := stringField(item, "type")
 	_, hasID := item["id"]
-	// ItemReference permits type to be omitted or null. Inline messages can
-	// omit type when they have no ID; replayed items with IDs need a type
-	// so they cannot be interpreted as references by the provider.
-	if kind == "item_reference" || (kind == "" && hasID) {
+	if wire.IsResponsesItemReference(kind, hasID) {
 		return &wire.RequestError{Code: "unsupported_stateful_reference", Message: "Input item references are not supported; send the full item inline.", Param: path}
 	}
 	if err := validateResponseFileReference(item, path); err != nil {
@@ -382,7 +379,7 @@ func validateResponseInputValue(item oif.Value, path string) error {
 	}
 	kind := memberText(item, "type")
 	_, hasID := item.Lookup("id")
-	if kind == "item_reference" || (kind == "" && hasID) {
+	if wire.IsResponsesItemReference(kind, hasID) {
 		return &wire.RequestError{Code: "unsupported_stateful_reference", Message: "Input item references are not supported; send the full item inline.", Param: path}
 	}
 	if err := validateResponseFileReferenceValue(item, path); err != nil {

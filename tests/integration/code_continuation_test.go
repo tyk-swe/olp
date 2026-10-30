@@ -28,7 +28,7 @@ func TestCodeQualificationGenericAffinityPreservesAuthority(t *testing.T) {
 		t.Fatal(err)
 	}
 	f.gateways[1] = f.in.replica("generic-keys")
-	request := func(key string, body []byte, status int) {
+	request := func(key, affinity string, body []byte, status int) {
 		t.Helper()
 		req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, f.gateways[1].PublicOrigin+"/code/qualification/responses", bytes.NewReader(body))
 		if err != nil {
@@ -36,7 +36,7 @@ func TestCodeQualificationGenericAffinityPreservesAuthority(t *testing.T) {
 		}
 		req.Header.Set("Authorization", "Bearer "+key)
 		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("X-Olp-Code-Affinity", "same-client-affinity")
+		req.Header.Set("X-Olp-Code-Affinity", affinity)
 		response, err := (&http.Client{Timeout: 15 * time.Second}).Do(req)
 		if err != nil {
 			t.Fatal(err)
@@ -47,21 +47,37 @@ func TestCodeQualificationGenericAffinityPreservesAuthority(t *testing.T) {
 			t.Fatalf("generic authority request returned %d body %s error %v", response.StatusCode, data, err)
 		}
 	}
-	request(f.key, codeBody(), http.StatusOK)
+	request(f.key, "same-client-affinity", codeBody(), http.StatusOK)
 	continuation := []byte(`{"model":"gpt-5.4","previous_response_id":"resp-controlled","input":[]}`)
-	request(second["secret"].(string), continuation, http.StatusConflict)
+	request(f.key, "other-affinity", continuation, http.StatusConflict)
+	recognizedResponse, recognizedBody := f.clientRequest(t, 1, "responses", http.Header{"Thread-Id": {"recognized-adopter"}}, continuation)
+	if recognizedResponse.StatusCode != http.StatusConflict {
+		t.Fatalf("recognized identity adopted generic state, status %d body %s", recognizedResponse.StatusCode, recognizedBody)
+	}
+	request(second["secret"].(string), "same-client-affinity", continuation, http.StatusConflict)
 	if len(f.peer.Requests()) != 1 {
 		t.Fatal("another key reused a generic response reference")
 	}
-	request(second["secret"].(string), codeBody(), http.StatusOK)
-	request(f.key, continuation, http.StatusOK)
+	request(second["secret"].(string), "same-client-affinity", codeBody(), http.StatusOK)
+	request(f.key, "same-client-affinity", continuation, http.StatusOK)
 	bindings := codePublicDecode[[]codemode.Binding](t, f.list("bindings"))
 	if len(bindings) != 2 || bindings[0].RootID == bindings[1].RootID || bindings[0].APIKeyID == bindings[1].APIKeyID || bindings[0].Conversation != bindings[1].Conversation {
 		t.Fatal("equal generic affinity escaped API-key isolation")
 	}
-	request(foreign["secret"].(string), codeBody(), http.StatusForbidden)
+	request(foreign["secret"].(string), "same-client-affinity", codeBody(), http.StatusForbidden)
 	if len(f.peer.Requests()) != 3 {
 		t.Fatal("another project's generic affinity reached upstream")
+	}
+	f.peer.SetResponder(func(context.Context, http.Header, []byte) [][]byte {
+		return [][]byte{[]byte(`{"type":"response.completed","response":{"id":"resp-recognized","status":"completed","output":[],"usage":{"input_tokens":2,"output_tokens":1,"total_tokens":3}}}`)}
+	})
+	rootResponse, rootBody := f.clientRequest(t, 1, "responses", http.Header{"Thread-Id": {"recognized-root"}}, codeBody())
+	if rootResponse.StatusCode != http.StatusOK {
+		t.Fatalf("recognized root refused, status %d body %s", rootResponse.StatusCode, rootBody)
+	}
+	request(f.key, "recognized-root-adopter", []byte(`{"model":"gpt-5.4","previous_response_id":"resp-recognized","input":[]}`), http.StatusConflict)
+	if len(f.peer.Requests()) != 4 || len(codePublicDecode[[]codemode.Binding](t, f.list("bindings"))) != 3 {
+		t.Fatal("generic affinity adopted a recognized root")
 	}
 }
 

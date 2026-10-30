@@ -25,7 +25,7 @@ func GenericIdentity(h http.Header, root oif.Value, family IdentityFamily) (code
 	if family == CodexIdentity && metadata.Kind() != oif.Absent && metadata.Kind() != oif.Null && metadata.Kind() != oif.Object {
 		return codemode.Identity{}, false, codemode.Refuse(400, "code_identity_invalid")
 	}
-	codex := hasHeader(h, "Thread-Id", "Session-Id", "Session_id", "X-Codex-Parent-Thread-Id", "X-Openai-Subagent") || hasField(metadata, "thread_id", "x-codex-parent-thread-id", "x-openai-subagent")
+	codex := hasHeader(h, "Thread-Id", "Session-Id", "Session_id", "X-Codex-Parent-Thread-Id", "X-Openai-Subagent") || family == CodexIdentity && hasField(metadata, "thread_id", "x-codex-parent-thread-id", "x-openai-subagent")
 	claude := hasHeader(h, "X-Claude-Code-Session-Id", "X-Claude-Code-Agent-Id", "X-Claude-Code-Parent-Agent-Id")
 	opencode := hasHeader(h, "X-Opencode-Session-Id", "X-Opencode-Parent-Session-Id")
 	affinity := h.Values("X-Olp-Code-Affinity")
@@ -43,10 +43,6 @@ func GenericIdentity(h http.Header, root oif.Value, family IdentityFamily) (code
 	}
 	sum := sha256.Sum256([]byte(affinity[0]))
 	return codemode.Identity{Conversation: "olp:affinity/" + hex.EncodeToString(sum[:])}, true, nil
-}
-
-func GenericConversation(identity codemode.Identity) bool {
-	return strings.HasPrefix(identity.Conversation, "olp:request/") || strings.HasPrefix(identity.Conversation, "olp:affinity/")
 }
 
 func hasHeader(h http.Header, names ...string) bool {
