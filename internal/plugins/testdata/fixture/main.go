@@ -13,11 +13,13 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/codexauth"
 	"github.com/tyk-swe/olp/sdk/plugin"
 	"github.com/tyk-swe/olp/sdk/plugin/abi"
 )
@@ -31,6 +33,14 @@ var upstream = "https://api.example.com/v1"
 type fixture struct{}
 
 func (fixture) Manifest() plugin.Manifest {
+	if behaviour == "codex-import-invalid" {
+		return codexauth.Manifest()
+	}
+	if behaviour == "codex-import" {
+		native := codexauth.Manifest()
+		return plugin.Manifest{Name: "fixture", Version: "1.0.0", Profiles: native.Profiles,
+			Origins: slices.Concat(native.Origins, []string{strings.TrimSuffix(upstream, "/v1")})}
+	}
 	m := plugin.Manifest{
 		Name:    "fixture",
 		Version: "1.0.0",
@@ -126,6 +136,25 @@ func (fixture) Sign(ctx context.Context, r plugin.SignRequest) (plugin.SignResul
 // "log" logs the refresh token, and "fetch:URL" GETs the URL and returns its
 // body as the access token. Anything else reports invalid_grant.
 func (fixture) RefreshGrant(ctx context.Context, r plugin.GrantRefresh) (plugin.Grant, error) {
+	if behaviour == "codex-import-invalid" {
+		material := map[string]struct {
+			access, refresh string
+			expiry          int64
+		}{
+			"empty-access":      {"", "fixture-returned-refresh", 3600},
+			"unsafe-access":     {"fixture\r\naccess", "fixture-returned-refresh", 3600},
+			"oversized-refresh": {"fixture-access", strings.Repeat("r", (16<<10)+1), 3600},
+			"excessive-expiry":  {"fixture-access", "fixture-returned-refresh", 11 * 365 * 24 * 60 * 60},
+		}[r.RefreshToken]
+		identity := codexauth.Identity{Account: r.Facts["account_id"], User: r.Facts["user_id"]}
+		return plugin.Grant{AccessToken: material.access, RefreshToken: material.refresh, ExpiresIn: material.expiry,
+			Principal: identity.Principal(), Facts: identity.Facts()}, nil
+	}
+	if behaviour == "codex-import" {
+		if _, err := plugin.Fetch(ctx, plugin.HTTPRequest{Method: "POST", URL: upstream + "/credential-import", Body: []byte(r.RefreshToken)}); err != nil {
+			return plugin.Grant{}, err
+		}
+	}
 	behaviour, rest, _ := strings.Cut(r.RefreshToken, ":")
 	switch behaviour {
 	case "log":

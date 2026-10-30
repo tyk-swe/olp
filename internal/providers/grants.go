@@ -243,25 +243,38 @@ func (s *Server) stageGrant(r *http.Request, current *record, enrollment grants.
 	if err = enrollment.Complete(r.Context(), tx, credentialID); err != nil {
 		return access.Reply{}, err
 	}
+	return s.bindGrant(r, tx, p.Actor(), grantBinding{ProviderID: current.ID, SlotID: enrollment.SlotID, ExpectedCredentialID: enrollment.ExpectedCredentialID,
+		Credential: grants.Credential{ID: credentialID, Version: version, Principal: grant.Principal}, Action: "provider.grant.enroll"}, stale)
+}
+
+type grantBinding struct {
+	ProviderID           string
+	SlotID               string
+	ExpectedCredentialID *string
+	Credential           grants.Credential
+	Action               string
+}
+
+func (s *Server) bindGrant(r *http.Request, tx pgx.Tx, actor access.Actor, binding grantBinding, stale error) (access.Reply, error) {
 	bound, err := tx.Exec(r.Context(), `UPDATE olp.provider_slots SET credential_id=$3,validated_at=NULL,validated_fingerprint=NULL
-		WHERE provider_id=$1 AND id=$2 AND credential_id IS NOT DISTINCT FROM $4::uuid`, current.ID, enrollment.SlotID, credentialID, enrollment.ExpectedCredentialID)
+		WHERE provider_id=$1 AND id=$2 AND credential_id IS NOT DISTINCT FROM $4::uuid`, binding.ProviderID, binding.SlotID, binding.Credential.ID, binding.ExpectedCredentialID)
 	if err != nil {
 		return access.Reply{}, err
 	}
-	if bound.RowsAffected() == 0 {
+	if bound.RowsAffected() != 1 {
 		return access.Reply{}, stale
 	}
-	etag, err := touch(r.Context(), tx, current.ID)
+	etag, err := touch(r.Context(), tx, binding.ProviderID)
 	if err != nil {
 		return access.Reply{}, err
 	}
-	if _, err = tx.Exec(r.Context(), "UPDATE olp.providers SET slots_etag=$2 WHERE id=$1", current.ID, access.NewID()); err != nil {
+	if _, err := tx.Exec(r.Context(), "UPDATE olp.providers SET slots_etag=$2 WHERE id=$1", binding.ProviderID, access.NewID()); err != nil {
 		return access.Reply{}, err
 	}
-	if err = access.Audit(r.Context(), tx, r, p.Actor(), "provider.grant.enroll", "provider_credential", credentialID, "success"); err != nil {
+	if err := access.Audit(r.Context(), tx, r, actor, binding.Action, "provider_credential", binding.Credential.ID, "success"); err != nil {
 		return access.Reply{}, err
 	}
-	return access.Commit(r, tx, access.Reply{Status: 201, ETag: etag, Body: completion(current.ID, etag, grants.Credential{ID: credentialID, Version: version, Principal: grant.Principal})})
+	return access.Commit(r, tx, access.Reply{Status: 201, ETag: etag, Body: completion(binding.ProviderID, etag, binding.Credential)})
 }
 
 // completion is what a completed grant enrollment reports: the credential

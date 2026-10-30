@@ -18054,6 +18054,91 @@
     }
   },
   {
+    "name": "importCodexCredentials",
+    "group": "providers",
+    "method": "POST",
+    "read_only": false,
+    "path": "/api/v1/providers/{provider_id}/codex-import",
+    "description": "Import Codex subscription credentials once",
+    "scopes": [
+      [
+        "configure"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "provider_id",
+        "in": "path",
+        "required": true,
+        "type": "string"
+      },
+      {
+        "name": "If-Match",
+        "in": "header",
+        "required": true,
+        "type": "string"
+      }
+    ],
+    "response_headers": {
+      "ETag": "etag"
+    },
+    "body_required": true,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "object",
+          "properties": {
+            "provider_id": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "provider_id"
+          ]
+        },
+        "if_match": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Current provider draft ETag"
+        },
+        "body": {
+          "$ref": "#/$defs/CodexCredentialImportRequest"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "if_match",
+        "body"
+      ],
+      "$defs": {
+        "CodexCredentialImportRequest": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "credentials"
+          ],
+          "properties": {
+            "credentials": {
+              "type": "string",
+              "maxLength": 65536,
+              "writeOnly": true,
+              "description": "Codex auth.json JSON text. Supports chatgpt auth_mode or its omission, absent or null OPENAI_API_KEY, tokens with access_token, id_token, refresh_token and account_id, and optional RFC3339 last_refresh. Other fields and ambiguous JSON are rejected. Expired local tokens may be imported if refresh verifies the same account and user."
+            },
+            "slot_id": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Existing credential slot, defaults to the default slot"
+            }
+          }
+        }
+      }
+    }
+  },
+  {
     "name": "list_agents",
     "group": "agents",
     "method": "GET",

@@ -7794,6 +7794,15 @@ type CodeTokenWindowsList struct {
 	NextCursor nullable.Nullable[string] `json:"next_cursor"`
 }
 
+// CodexCredentialImportRequest defines model for CodexCredentialImportRequest.
+type CodexCredentialImportRequest struct {
+	// Credentials Codex auth.json JSON text. Supports chatgpt auth_mode or its omission, absent or null OPENAI_API_KEY, tokens with access_token, id_token, refresh_token and account_id, and optional RFC3339 last_refresh. Other fields and ambiguous JSON are rejected. Expired local tokens may be imported if refresh verifies the same account and user.
+	Credentials *string `json:"credentials,omitempty"`
+
+	// SlotId Existing credential slot, defaults to the default slot
+	SlotId *openapi_types.UUID `json:"slot_id,omitempty"`
+}
+
 // Commitment Provisioned capacity the connection pays for: attempts bill at zero marginal cost and share the amount across each UTC calendar period by list-cost weight.
 type Commitment struct {
 	// Amount The commitment amount, a positive decimal string.
@@ -16243,6 +16252,12 @@ type AcceptProviderCatalogSuggestionsParams struct {
 	IdempotencyKey string `json:"Idempotency-Key"`
 }
 
+// ImportCodexCredentialsParams defines parameters for ImportCodexCredentials.
+type ImportCodexCredentialsParams struct {
+	// IfMatch Current provider draft ETag
+	IfMatch string `json:"If-Match"`
+}
+
 // DeleteCredentialSlotParams defines parameters for DeleteCredentialSlot.
 type DeleteCredentialSlotParams struct {
 	// IfMatch Observed individual credential-slot or collection ETag
@@ -17366,6 +17381,9 @@ type PutProviderBillingImportJSONRequestBody = PutBillingImportRequest
 
 // AcceptProviderCatalogSuggestionsJSONRequestBody defines body for AcceptProviderCatalogSuggestions for application/json ContentType.
 type AcceptProviderCatalogSuggestionsJSONRequestBody = AcceptCatalogSuggestionsRequest
+
+// ImportCodexCredentialsJSONRequestBody defines body for ImportCodexCredentials for application/json ContentType.
+type ImportCodexCredentialsJSONRequestBody = CodexCredentialImportRequest
 
 // PutCredentialSlotJSONRequestBody defines body for PutCredentialSlot for application/json ContentType.
 type PutCredentialSlotJSONRequestBody = SlotWrite

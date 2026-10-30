@@ -47,17 +47,16 @@ func (a *CodeAuthorizer) AuthorizeResearch(ctx context.Context, cfg routing.Conf
 func (a *CodeAuthorizer) AuthorizeCode(ctx context.Context, cfg routing.Configuration, account codemode.Account, dispatch codemode.Dispatch) (codemode.Authorization, error) {
 	vendor, ok := codeadapter.ForConnection(cfg.Kind, cfg.AuthMode, cfg.ProfileID)
 	endpoint, served := vendor.Endpoint(dispatch.ClientPath)
-	if a == nil || a.Pool == nil || a.Credentials == nil || a.Plugins == nil || !ok || vendor.Adapter != dispatch.Adapter || !served || endpoint.Protocol != dispatch.Protocol || !codeConfiguration(cfg, vendor) {
+	if a == nil || a.Pool == nil || a.Credentials == nil || !ok || vendor.Adapter != dispatch.Adapter || !served || endpoint.Protocol != dispatch.Protocol {
 		return codemode.Authorization{}, codemode.Refuse(503, "code_configuration_unsupported")
 	}
-	manifest, err := a.Plugins.Manifest(ctx, cfg.ProfileRevision)
-	if err != nil || !reflect.DeepEqual(manifest.Profiles, vendor.Manifest().Profiles) || !reflect.DeepEqual(manifest.Origins, vendor.Manifest().Origins) {
-		return codemode.Authorization{}, codemode.Refuse(503, "code_plugin_unavailable")
+	if err := codeConnection(ctx, a.Plugins, cfg, vendor); err != nil {
+		return codemode.Authorization{}, err
 	}
 	// A Codex grant is a refreshed access token that must be current; a
 	// pasted key never expires and has nothing to refresh.
 	var eligible bool
-	err = a.Pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM olp.provider_credentials c
+	err := a.Pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM olp.provider_credentials c
 		JOIN olp.provider_grants g ON g.credential_id=c.id JOIN olp.providers p ON p.id=c.provider_id
 		WHERE c.id=$1 AND c.provider_id=$2 AND p.project_id=$3 AND c.principal=$4 AND c.plugin_digest=$5 AND c.profile_id=$7
 		AND c.revoked_at IS NULL AND g.lapsed_at IS NULL
@@ -88,4 +87,16 @@ func codeConfiguration(c routing.Configuration, vendor codeadapter.Vendor) bool 
 		(c.Endpoint == "" || c.Endpoint == address) && c.CloudRegion == "" && c.CloudProject == "" && c.Deployment == "" && c.APIVersion == "" &&
 		len(o.SemanticHeaders) == 0 && len(o.QuerySettings) == 0 && len(o.OperationDefaults) == 0 && len(o.Bindings) == 0 &&
 		len(o.Models) == 0 && len(o.ParameterDefaults) == 0 && len(o.CredentialHeaders) == 0 && len(o.PluginOptions) == 0
+}
+
+func codeConnection(ctx context.Context, host *plugins.Host, cfg routing.Configuration, vendor codeadapter.Vendor) error {
+	if host == nil || !codeConfiguration(cfg, vendor) {
+		return codemode.Refuse(503, "code_configuration_unsupported")
+	}
+	manifest, err := host.Manifest(ctx, cfg.ProfileRevision)
+	expected := vendor.Manifest()
+	if err != nil || !reflect.DeepEqual(manifest.Profiles, expected.Profiles) || !reflect.DeepEqual(manifest.Origins, expected.Origins) {
+		return codemode.Refuse(503, "code_plugin_unavailable")
+	}
+	return nil
 }
