@@ -19,6 +19,28 @@ func TestValidateAcceptsShippedTable(t *testing.T) {
 	}
 }
 
+func TestCodexIdentityRequiresSeparateAdapterPolicy(t *testing.T) {
+	for _, adapter := range []codemode.Adapter{codemode.AdapterCodex, codemode.AdapterClaude, codemode.AdapterAntigravity, codemode.AdapterOpenCodeGo, codemode.AdapterZAICoding, codemode.AdapterMiniMaxPlan, codemode.AdapterKimiCode, codemode.AdapterQwenTokenPlan} {
+		vendor, ok := Lookup(adapter)
+		if !ok {
+			t.Fatalf("adapter %s unavailable", adapter)
+		}
+		for _, enabled := range []bool{false, true} {
+			route := codemode.Route{MessagesToCodex: true, ChatToAntigravity: true, CodexCLIIdentity: enabled}
+			originator := vendor.CompatibilityOriginator(route)
+			if vendor.Adapter == codemode.AdapterCodex && enabled {
+				if originator != "codex_cli_rs" {
+					t.Fatalf("opted-in Codex originator = %q", originator)
+				}
+				continue
+			}
+			if originator != "" {
+				t.Fatalf("identity enabled for %s with policy %t", vendor.Adapter, enabled)
+			}
+		}
+	}
+}
+
 func TestValidateRejectsInconsistentSharedPath(t *testing.T) {
 	registry := slices.Clone(vendors)
 	index := slices.IndexFunc(registry, func(vendor Vendor) bool { return vendor.Adapter == codemode.AdapterOpenCodeGo })

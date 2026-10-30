@@ -137,10 +137,47 @@ reasoning budgets, error-marked tool results, media, beta headers, unknown query
 fields, stop sequences and other unsupported required semantics are refused.
 Cancellation and partial upstream failures end the attempt without replay or a
 successful Messages terminal event. Missing terminal usage remains unknown in
-the ledger. Identity and prompt compatibility remain disabled. This translated
+the ledger. Translation alone does not enable identity compatibility, and prompt
+compatibility remains disabled. This translated
 path does not establish complete Claude Code qualification. CLI context and beta
 requirements and durable opaque state need separate qualification.
 Live Codex acceptance, including output-token caps, remains unqualified.
+
+### Codex CLI identity compatibility
+
+This independent route option is disabled by default. Before enabling it, review
+its exact behavior and account-suspension risk. For Codex subscription HTTP and
+WebSocket requests only, it supplies `Originator: codex_cli_rs` when all supplied
+Originator values are absent or blank. It preserves every explicit nonblank
+Originator value, User-Agent, other headers and all body content, including
+instructions, tools, reasoning and conversation state. It does not add a client
+version or platform, change prompts, enable translation or alter required OAuth
+authentication signals. Other subscription adapters and paid API targets retain
+their native identity behavior.
+
+An existing route administrator can select **Enable Codex CLI identity
+compatibility**, save the draft and publish it, or set `codex_cli_identity: true`
+through the existing route API and publish. This authorizes the policy for
+eligible accounts in the route pool without an additional account-contributor
+approval. The editor, API contract and publication confirmation describe the
+mutation and warn that using this compatibility identity may violate provider
+terms and risk account suspension. Turning the option off also requires
+publication. Draft changes leave earlier publications unchanged, and
+configuration export and apply preserve draft and published choices separately.
+
+Attempt diagnostics expose `codex_cli_identity_enabled` from the attempt's
+frozen route revision. This means the policy was enabled, not that the attempt
+used Codex or that a header changed. Diagnostics do not record client identity
+header values or prompts. Publication history shows the same frozen policy.
+
+The reviewed behavior is narrower than the pinned compatibility implementation
+at [CLIProxyAPI commit 90c447d3](https://github.com/router-for-me/CLIProxyAPI/blob/90c447d3a8727d115aa7552ec93ce023736ed492/internal/runtime/executor/codex_executor_request.go),
+which supplies a subscription Originator fallback. The value used here was
+reviewed on 2026-10-30 against the official Codex
+[default client at commit 5e769a1c](https://github.com/openai/codex/blob/5e769a1cdae3fd93efd5e7b9df71e39efb2223ab/codex-rs/login/src/auth/default_client.rs).
+These source references establish the reviewed header policy, not live provider
+acceptance. No prompt transformation or live subscription qualification is
+claimed.
 
 ### Paid API targets
 
@@ -674,9 +711,9 @@ curl --fail-with-body https://olp.example/code/team-coding/responses \
 Use `/v1/responses`, `/v1/messages` or `/v1/chat/completions` with the matching
 native body for other adapters. Native forwarding, model names and explicit
 translation or model-alias policies apply as usual. OLP preserves native bytes
-and unknown extensions and supplies the selected account's credential. It does
-not invent an official client's headers or identity. Provider access rules still
-apply, and accepting a generic request locally does not establish live provider
+and unknown extensions and supplies the selected account's credential. It adds
+a Codex identity fallback only when the separate policy is enabled and published.
+Provider access rules still apply, and accepting a generic request locally does not establish live provider
 qualification.
 
 Without affinity, each HTTP request starts an independent conversation. Send
@@ -874,9 +911,10 @@ places to store secrets.
 Z.ai restricts the GLM Coding Plan to its officially supported coding tools and
 scenarios, OpenCode Go has its own terms, and MiniMax, Kimi and Alibaba each
 govern their coding plans by theirs. Kimi's terms forbid altering the client's
-identity. OLP forwards the client's own
-requests unmodified, including its user agent and session headers, but it
-cannot guarantee that a vendor accepts a plan used through a gateway or shared
+identity. Native forwarding preserves the client's identity headers. The separate
+Codex identity policy changes only a missing or blank Originator and does
+not apply to Kimi or any other adapter. OLP cannot guarantee that a vendor
+accepts a plan used through a gateway or shared
 by several developers. Review each vendor's terms before pooling an account,
 and prefer a personal pool per subscriber where they require it.
 

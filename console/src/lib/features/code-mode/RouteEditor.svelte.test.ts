@@ -227,3 +227,101 @@ it.each(['direct', 'fallback'] as const)(
     );
   }
 );
+
+it.each([
+  { name: 'translation alone', allowed: true, initial: false, enable: false },
+  { name: 'explicit opt-in', allowed: true, initial: false, enable: true },
+  { name: 'published policy', allowed: true, initial: true, enable: false },
+  { name: 'read-only authority', allowed: false, initial: false, enable: false }
+])(
+  'keeps identity compatibility separate for $name',
+  async ({ allowed, initial, enable }) => {
+    const route: CodeRoute = {
+      id: '01980000-0000-7000-8000-000000000001',
+      project_id: '01980000-0000-7000-8000-000000000002',
+      pool_id: '01980000-0000-7000-8000-000000000003',
+      etag: '01980000-0000-7000-8000-000000000004',
+      slug: 'coding',
+      adapters: [],
+      published_at: null,
+      revision: 0,
+      revision_id: '',
+      messages_to_codex: true,
+      paid_participation: false,
+      models: ['native-main'],
+      enabled: true,
+      model_rewriting: false
+    };
+    authLifecycle.establishSession({
+      user: {
+        id: route.id,
+        email: 'owner@example.test',
+        display_name: 'Owner',
+        role: 'owner',
+        operations: []
+      },
+      csrf_token: 'fixture'
+    });
+    const fetch = vi.fn(async (request: Request) =>
+      request.method === 'PUT'
+        ? Response.json(route)
+        : Response.json({ items: [], next_cursor: null })
+    );
+    vi.stubGlobal('fetch', fetch);
+    const host = document.createElement('div');
+    document.body.append(host);
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false } }
+    });
+    const component = mount(RouteEditorProbe, {
+      target: host,
+      props: {
+        client,
+        current: initial ? { ...route, codex_cli_identity: true } : route,
+        allowed
+      }
+    });
+    onTestFinished(async () => {
+      await unmount(component);
+      client.clear();
+      host.remove();
+      vi.unstubAllGlobals();
+    });
+    flushSync();
+    const identity = host.querySelector<HTMLInputElement>(
+      '#code-codex-cli-identity'
+    )!;
+    expect(identity.checked).toBe(initial);
+    expect(identity.matches(':disabled')).toBe(!allowed);
+    expect(host.textContent).toContain('Originator=codex_cli_rs');
+    expect(host.textContent).toContain('account suspension');
+    if (enable) {
+      identity.click();
+      flushSync();
+    }
+    host
+      .querySelector('form')!
+      .dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    if (!allowed) {
+      await Promise.resolve();
+      expect(
+        fetch.mock.calls.find(([request]) => request.method === 'PUT')
+      ).toBeUndefined();
+      return;
+    }
+    await vi.waitFor(() =>
+      expect(
+        fetch.mock.calls.find(([request]) => request.method === 'PUT')
+      ).toBeDefined()
+    );
+    const request = fetch.mock.calls.find(
+      ([request]) => request.method === 'PUT'
+    )![0];
+    expect(await request.json()).toEqual(
+      expect.objectContaining({
+        messages_to_codex: true,
+        codex_cli_identity: initial || enable
+      })
+    );
+  }
+);

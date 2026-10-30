@@ -313,6 +313,12 @@
           </dd>
           <dt>Route / revision</dt>
           <dd>{attempt.route_id} / {attempt.route_revision_id}</dd>
+          <dt>Published Codex CLI identity policy</dt>
+          <dd>
+            {attempt.codex_cli_identity_enabled ? 'Enabled' : 'Disabled'}. Route
+            policy does not prove a header changed or the attempt used Codex.
+            Client identity header values and prompts are not recorded.
+          </dd>
           <dt>Key / account</dt>
           <dd>
             {attempt.api_key_id} / {attempt.paid_provider_id

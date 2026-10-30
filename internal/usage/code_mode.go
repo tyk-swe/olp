@@ -21,6 +21,7 @@ func (s *Server) codeAttempts(r *http.Request, p access.Principal) (access.Reply
 'reserved_tokens',x.reserved_tokens,'route_id',x.route_id,'state',x.state,'route_revision_id',x.route_revision_id,
 'end_user_digest',x.end_user_digest,'attribution',x.attribution,'paid_binding_id',x.paid_binding_id,'paid_provider_id',x.paid_provider_id,
 'paid_slot_id',x.paid_slot_id,'requested_model',x.requested_model,
+'codex_cli_identity_enabled',COALESCE((SELECT v.document->>'codex_cli_identity'='true' FROM olp.code_route_revisions v WHERE v.id=x.route_revision_id),false),
 'paid_monetary_state',CASE WHEN x.paid_binding_id IS NULL THEN NULL WHEN x.state='prepared' THEN 'pending' WHEN x.state='aborted' THEN 'released'
  WHEN EXISTS(SELECT 1 FROM olp.attempt_usage_facts f WHERE f.request_id=x.id AND f.usage_complete AND f.charge_status<>'billing_uncertain' AND f.estimated_cost IS NOT NULL AND f.charge IS NOT NULL) THEN 'settled' ELSE 'unknown' END
 ) FROM olp.code_attempts x`, access.CodeMatch{Field: "binding_id", SQL: `(x.binding_id=$%[1]d::uuid OR x.paid_binding_id=$%[1]d::uuid)`})

@@ -43,6 +43,7 @@ func (s *Server) codeRoutes(r *http.Request, p access.Principal) (access.Reply, 
 }
 
 type CodeRouteInput struct {
+	CodexCLIIdentity        bool                           `json:"codex_cli_identity"`
 	PaidFallbackTargets     map[string]codemode.PaidTarget `json:"paid_fallback_targets"`
 	ChatToAntigravity       bool                           `json:"chat_to_antigravity"`
 	PaidParticipation       bool                           `json:"paid_participation"`
@@ -203,7 +204,7 @@ func SaveCodeRoute(ctx context.Context, tx pgx.Tx, p access.Principal, id, etag 
 	if err := p.Project(&in.ProjectID, access.Change); err != nil {
 		return nil, err
 	}
-	out := codemode.Route{ChatToAntigravity: in.ChatToAntigravity, PaidParticipation: in.PaidParticipation, PaidTargets: in.PaidTargets, PaidFallbackTargets: in.PaidFallbackTargets, ModelPools: in.ModelPools, InitialRecoveryAttempts: in.InitialRecoveryAttempts, Aliases: in.Aliases, ModelRewriting: in.ModelRewriting, MessagesToCodex: in.MessagesToCodex, Tools: in.Tools, MaxBodyBytes: in.MaxBodyBytes, ID: id, ProjectID: in.ProjectID, Slug: in.Slug, PoolID: in.PoolID, Models: in.Models, Enabled: in.Enabled, ETag: etag}
+	out := codemode.Route{ChatToAntigravity: in.ChatToAntigravity, PaidParticipation: in.PaidParticipation, PaidTargets: in.PaidTargets, PaidFallbackTargets: in.PaidFallbackTargets, ModelPools: in.ModelPools, InitialRecoveryAttempts: in.InitialRecoveryAttempts, Aliases: in.Aliases, ModelRewriting: in.ModelRewriting, CodexCLIIdentity: in.CodexCLIIdentity, MessagesToCodex: in.MessagesToCodex, Tools: in.Tools, MaxBodyBytes: in.MaxBodyBytes, ID: id, ProjectID: in.ProjectID, Slug: in.Slug, PoolID: in.PoolID, Models: in.Models, Enabled: in.Enabled, ETag: etag}
 	adapters := []codemode.Adapter{}
 	var matches bool
 	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM olp.code_pools WHERE id=$1 AND project_id=$2)`, in.PoolID, in.ProjectID).Scan(&matches); err != nil {
@@ -463,7 +464,7 @@ func (in CodeRouteInput) Validated() (CodeRouteInput, error) {
 	if fallbackError != nil {
 		return CodeRouteInput{}, fallbackError
 	}
-	canonical := CodeRouteInput{ProjectID: ids[0], Slug: in.Slug, PoolID: ids[1], Models: in.Models, Enabled: in.Enabled, ChatToAntigravity: in.ChatToAntigravity, PaidParticipation: in.PaidParticipation, PaidTargets: paidTargets, PaidFallbackTargets: fallbackTargets, ModelPools: in.ModelPools, InitialRecoveryAttempts: in.InitialRecoveryAttempts, ModelRewriting: in.ModelRewriting, Aliases: in.Aliases, MessagesToCodex: in.MessagesToCodex, Tools: tools, MaxBodyBytes: in.MaxBodyBytes}
+	canonical := CodeRouteInput{ProjectID: ids[0], Slug: in.Slug, PoolID: ids[1], Models: in.Models, Enabled: in.Enabled, ChatToAntigravity: in.ChatToAntigravity, PaidParticipation: in.PaidParticipation, PaidTargets: paidTargets, PaidFallbackTargets: fallbackTargets, ModelPools: in.ModelPools, InitialRecoveryAttempts: in.InitialRecoveryAttempts, ModelRewriting: in.ModelRewriting, Aliases: in.Aliases, CodexCLIIdentity: in.CodexCLIIdentity, MessagesToCodex: in.MessagesToCodex, Tools: tools, MaxBodyBytes: in.MaxBodyBytes}
 	return canonical, canonical.validate()
 }
 

@@ -289,7 +289,14 @@ func ForPath(path string) (Endpoint, bool) {
 }
 
 func (v Vendor) Manifest() abi.Manifest { return v.manifest() }
-func (v Vendor) Endpoints() []Endpoint  { return slices.Clone(v.endpoints) }
+func (v Vendor) CompatibilityOriginator(route codemode.Route) string {
+	if v.Adapter != codemode.AdapterCodex || !route.CodexCLIIdentity {
+		return ""
+	}
+	return "codex_cli_rs"
+}
+
+func (v Vendor) Endpoints() []Endpoint { return slices.Clone(v.endpoints) }
 func (v Vendor) Endpoint(path string) (Endpoint, bool) {
 	for _, e := range v.endpoints {
 		if e.ClientPath == path {
