@@ -407,59 +407,61 @@ func TestCodeModelDiscoveryWithNativeEndUserSource(t *testing.T) {
 }
 
 func TestCodeMessagesToCodexTextExchange(t *testing.T) {
-	for _, stream := range []bool{false, true} {
-		t.Run(fmt.Sprint(stream), func(t *testing.T) {
-			g, ledger, server := newCodeForwardHarness(t)
-			route := g.rt.release.Snapshot.CodeRoutes["coding"]
-			route.MessagesToCodex = true
-			g.rt.release.Snapshot.CodeRoutes["coding"] = route
-			g.upstream.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				body, _ := io.ReadAll(r.Body)
-				var request struct {
-					Model string `json:"model"`
-					Input []struct {
-						Role    string `json:"role"`
-						Content []struct {
-							Text string `json:"text"`
-						} `json:"content"`
-					} `json:"input"`
-					Stream          bool    `json:"stream"`
-					Store           *bool   `json:"store"`
-					Instructions    *string `json:"instructions"`
-					MaxOutputTokens int     `json:"max_output_tokens"`
+	for _, query := range []string{"", "?beta=true"} {
+		for _, stream := range []bool{false, true} {
+			t.Run(fmt.Sprint(stream)+query, func(t *testing.T) {
+				g, ledger, server := newCodeForwardHarness(t)
+				route := g.rt.release.Snapshot.CodeRoutes["coding"]
+				route.MessagesToCodex = true
+				g.rt.release.Snapshot.CodeRoutes["coding"] = route
+				g.upstream.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					body, _ := io.ReadAll(r.Body)
+					var request struct {
+						Model string `json:"model"`
+						Input []struct {
+							Role    string `json:"role"`
+							Content []struct {
+								Text string `json:"text"`
+							} `json:"content"`
+						} `json:"input"`
+						Stream          bool    `json:"stream"`
+						Store           *bool   `json:"store"`
+						Instructions    *string `json:"instructions"`
+						MaxOutputTokens int     `json:"max_output_tokens"`
+					}
+					if err := json.Unmarshal(body, &request); err != nil || request.Model != "native-model" || len(request.Input) != 2 || request.Input[0].Role != "developer" || request.Input[0].Content[0].Text != "Keep the answer short\nx-anthropic-billing-header: preserve" || request.Input[1].Content[0].Text != "Hello" || !request.Stream || request.MaxOutputTokens != 32 || request.Store == nil || *request.Store || request.Instructions == nil || *request.Instructions != "" {
+						t.Errorf("translated request %s, error %v", body, err)
+					}
+					if r.URL.Path != "/a/responses" || r.URL.RawQuery != "" || r.Header.Get("Authorization") != "Bearer upstream-only" || r.Header.Get("Anthropic-Beta") != "" || r.Header.Get("X-Claude-Code-Session-Id") != "translated-text" {
+						t.Errorf("unexpected target %s, headers %v", r.URL.Path, r.Header)
+					}
+					w.Header().Set("Content-Type", "text/event-stream")
+					fmt.Fprint(w, "data: "+`{"type":"response.created","response":{"id":"response-text","model":"native-model","status":"in_progress","output":[]}}`+"\n\n")
+					fmt.Fprint(w, "data: "+`{"type":"response.output_text.delta","output_index":0,"content_index":0,"delta":"Hello back"}`+"\n\n")
+					fmt.Fprint(w, "data: "+`{"type":"response.completed","sequence_number":0,"response":{"id":"response-text","object":"response","model":"native-model","status":"completed","output":[{"id":"message-text","type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","text":"Hello back","annotations":[]}]}],"usage":{"input_tokens":7,"output_tokens":2,"total_tokens":9}}}`+"\n\n")
+				})
+				request, _ := http.NewRequest(http.MethodPost, server.URL+"/code/coding/v1/messages"+query, bytes.NewBufferString(fmt.Sprintf(`{"model":"native-model","system":"Keep the answer short\nx-anthropic-billing-header: preserve","messages":[{"role":"user","content":"Hello"}],"max_tokens":32,"stream":%t}`, stream)))
+				request.Header.Set("Authorization", "Bearer "+fullKey)
+				request.Header.Set("X-Claude-Code-Session-Id", "translated-text")
+				response, err := server.Client().Do(request)
+				if err != nil {
+					t.Fatal(err)
 				}
-				if err := json.Unmarshal(body, &request); err != nil || request.Model != "native-model" || len(request.Input) != 2 || request.Input[0].Role != "developer" || request.Input[0].Content[0].Text != "Keep the answer short\nx-anthropic-billing-header: preserve" || request.Input[1].Content[0].Text != "Hello" || !request.Stream || request.MaxOutputTokens != 32 || request.Store == nil || *request.Store || request.Instructions == nil || *request.Instructions != "" {
-					t.Errorf("translated request %s, error %v", body, err)
+				defer response.Body.Close()
+				body, _ := io.ReadAll(response.Body)
+				if response.StatusCode != 200 || !bytes.Contains(body, []byte(`"text":"Hello back"`)) || !bytes.Contains(body, []byte(`"model":"native-model"`)) || !bytes.Contains(body, []byte(`"output_tokens":2`)) {
+					t.Fatalf("Messages exchange status %d body %s", response.StatusCode, body)
 				}
-				if r.URL.Path != "/a/responses" || r.Header.Get("Authorization") != "Bearer upstream-only" || r.Header.Get("Anthropic-Beta") != "" || r.Header.Get("X-Claude-Code-Session-Id") != "translated-text" {
-					t.Errorf("unexpected target %s, headers %v", r.URL.Path, r.Header)
+				if stream && (!bytes.Contains(body, []byte("event: message_start")) || !bytes.Contains(body, []byte("event: message_stop")) || !bytes.Contains(body, []byte("event: content_block_delta"))) {
+					t.Fatalf("incomplete Messages stream %s", body)
 				}
-				w.Header().Set("Content-Type", "text/event-stream")
-				fmt.Fprint(w, "data: "+`{"type":"response.created","response":{"id":"response-text","model":"native-model","status":"in_progress","output":[]}}`+"\n\n")
-				fmt.Fprint(w, "data: "+`{"type":"response.output_text.delta","output_index":0,"content_index":0,"delta":"Hello back"}`+"\n\n")
-				fmt.Fprint(w, "data: "+`{"type":"response.completed","sequence_number":0,"response":{"id":"response-text","object":"response","model":"native-model","status":"completed","output":[{"id":"message-text","type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","text":"Hello back","annotations":[]}]}],"usage":{"input_tokens":7,"output_tokens":2,"total_tokens":9}}}`+"\n\n")
-			})
-			request, _ := http.NewRequest(http.MethodPost, server.URL+"/code/coding/v1/messages", bytes.NewBufferString(fmt.Sprintf(`{"model":"native-model","system":"Keep the answer short\nx-anthropic-billing-header: preserve","messages":[{"role":"user","content":"Hello"}],"max_tokens":32,"stream":%t}`, stream)))
-			request.Header.Set("Authorization", "Bearer "+fullKey)
-			request.Header.Set("X-Claude-Code-Session-Id", "translated-text")
-			response, err := server.Client().Do(request)
-			if err != nil {
-				t.Fatal(err)
-			}
-			defer response.Body.Close()
-			body, _ := io.ReadAll(response.Body)
-			if response.StatusCode != 200 || !bytes.Contains(body, []byte(`"text":"Hello back"`)) || !bytes.Contains(body, []byte(`"model":"native-model"`)) || !bytes.Contains(body, []byte(`"output_tokens":2`)) {
-				t.Fatalf("Messages exchange status %d body %s", response.StatusCode, body)
-			}
-			if stream && (!bytes.Contains(body, []byte("event: message_start")) || !bytes.Contains(body, []byte("event: message_stop")) || !bytes.Contains(body, []byte("event: content_block_delta"))) {
-				t.Fatalf("incomplete Messages stream %s", body)
-			}
-			usage := ledger.wait(t)
-			if usage.Total == nil || *usage.Total != 9 || len(ledger.marks) != 1 {
-				t.Fatalf("usage=%+v, marks=%v", usage, ledger.marks)
-			}
+				usage := ledger.wait(t)
+				if usage.Total == nil || *usage.Total != 9 || len(ledger.marks) != 1 {
+					t.Fatalf("usage=%+v, marks=%v", usage, ledger.marks)
+				}
 
-		})
+			})
+		}
 	}
 }
 
@@ -467,10 +469,14 @@ func TestCodeMessagesToCodexRefusesUnsupportedSemantics(t *testing.T) {
 	for _, test := range []struct{ name, extra, query, beta string }{
 		{name: "tools", extra: `,"tools":[{"name":"run","input_schema":{"type":"object"}}]`},
 		{name: "thinking", extra: `,"thinking":{"type":"enabled","budget_tokens":1024}`},
+		{name: "stream options", extra: `,"stream_options":{"required_extension":true}`},
 		{name: "stop", extra: `,"stop_sequences":["stop"]`},
 		{name: "unknown", extra: `,"required_extension":{"value":"private-prompt"}`},
 		{name: "beta", beta: "required-protocol"},
 		{name: "query", query: "?required_feature=true"},
+		{name: "unsupported beta query", query: "?beta=required-feature"},
+		{name: "duplicate beta query", query: "?beta=true&beta=true"},
+		{name: "beta plus unknown query", query: "?beta=true&required_feature=true"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			g, ledger, server := newCodeForwardHarness(t)
@@ -498,5 +504,53 @@ func TestCodeMessagesToCodexRefusesUnsupportedSemantics(t *testing.T) {
 				t.Fatalf("unsupported request dispatched: %v", ledger.marks)
 			}
 		})
+	}
+}
+
+func TestCodeMessagesToCodexPreservesNativeModelIdentifiers(t *testing.T) {
+	model := "Namespace/" + strings.Repeat("M", 182) + ":Variant"
+	g, ledger, server := newCodeForwardHarness(t, codeForwardSetup{Models: []string{model}, Policy: access.KeyPolicy{Scopes: []string{"inference"}}})
+	route := g.rt.release.Snapshot.CodeRoutes["coding"]
+	route.MessagesToCodex = true
+	g.rt.release.Snapshot.CodeRoutes["coding"] = route
+	g.upstream.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var request struct {
+			Model string `json:"model"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil || request.Model != model {
+			t.Errorf("native model changed, model %q, error %v", request.Model, err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprintf(w, `{"id":"response-model","object":"response","model":%q,"status":"completed","output":[{"id":"message-model","type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","text":"native model reply"}]}],"usage":{"input_tokens":2,"output_tokens":1,"total_tokens":3}}`, model)
+	})
+	body := []byte(fmt.Sprintf(`{"model":%q,"messages":[{"role":"user","content":"hello"}],"max_tokens":8}`, model))
+	request, err := http.NewRequestWithContext(t.Context(), http.MethodPost, server.URL+"/code/coding/v1/messages", bytes.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.Header.Set("Authorization", "Bearer "+fullKey)
+	request.Header.Set("X-Claude-Code-Session-Id", "native-model")
+	response, err := server.Client().Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	var message struct {
+		Model   string `json:"model"`
+		Content []struct {
+			Text string `json:"text"`
+		} `json:"content"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&message); err != nil || response.StatusCode != 200 || message.Model != model || len(message.Content) != 1 || message.Content[0].Text != "native model reply" {
+		t.Fatalf("native model exchange status %d, message %+v, error %v", response.StatusCode, message, err)
+	}
+	usage := ledger.wait(t)
+	if usage.Total == nil || *usage.Total != 3 {
+		t.Fatalf("native model usage %+v", usage)
+	}
+	ordinary := g.do(t.Context(), http.MethodPost, "/anthropic/v1/messages", fullKey, body, nil)
+	defer ordinary.Body.Close()
+	if ordinary.StatusCode != 400 {
+		t.Fatalf("ordinary route accepted a native model identifier, status %d", ordinary.StatusCode)
 	}
 }

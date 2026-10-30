@@ -70,7 +70,7 @@ func Generate(route codemode.Route, offers Offers, in Request) (codemode.ClientC
 		}
 		native = append(native, model.ID)
 		for _, adapter := range offers.adapters(model.ID) {
-			if vendor, _ := codeadapter.Lookup(adapter); routeReaches(route, vendor, client, model.ID) {
+			if declaration, _ := codeadapter.Lookup(adapter); routeReaches(route, declaration, client, model.ID) {
 				if !slices.Contains(adapters, adapter) {
 					adapters = append(adapters, adapter)
 				}

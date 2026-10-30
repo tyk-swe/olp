@@ -38,7 +38,7 @@ func (o Offers) through(route codemode.Route, client string, models []string) (m
 			return o.reaches(route, client, models, chosen)
 		}
 		for _, adapter := range o.adapters(models[i]) {
-			if vendor, _ := codeadapter.Lookup(adapter); routeReaches(route, vendor, client, models[i]) {
+			if declaration, _ := codeadapter.Lookup(adapter); routeReaches(route, declaration, client, models[i]) {
 				if chosen[i] = adapter; choose(i + 1) {
 					return true
 				}
@@ -66,11 +66,12 @@ func (o Offers) reaches(route codemode.Route, client string, models []string, th
 	// Accounts with one adapter serving the same of these models are alike.
 	var alike Offers
 	for _, offer := range o {
-		vendor, _ := codeadapter.Lookup(offer.Adapter)
+		adapter, _ := codeadapter.Lookup(offer.Adapter)
 		kind := Offer{Adapter: offer.Adapter}
 		for i, model := range models {
 			sender, _ := codeadapter.Lookup(through[i])
-			if p, ok := codeadapter.RouteProtocol(route, sender, client, model); ok && slices.Contains(offer.Models, model) && vendor.ServesModel(p, model) {
+			protocol, reachable := codeadapter.RouteClientProtocol(route, adapter, client, model)
+			if sent, ok := codeadapter.RouteClientProtocol(route, sender, client, model); ok && reachable && sent == protocol && slices.Contains(offer.Models, model) {
 				kind.Models = append(kind.Models, model)
 			}
 		}
@@ -107,7 +108,7 @@ func (o Offers) joins(tree Offers, models []string) bool {
 	return true
 }
 
-func routeReaches(route codemode.Route, vendor codeadapter.Vendor, client, model string) bool {
-	_, ok := codeadapter.RouteProtocol(route, vendor, client, model)
+func routeReaches(route codemode.Route, adapter codeadapter.Vendor, client, model string) bool {
+	_, ok := codeadapter.RouteClientProtocol(route, adapter, client, model)
 	return ok
 }

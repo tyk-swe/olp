@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"slices"
 	"strings"
 
@@ -16,37 +17,45 @@ import (
 	"github.com/tyk-swe/olp/internal/protocols/wire"
 )
 
-func codeTranslateMessages(body []byte, r *http.Request) ([]byte, bool, error) {
+type codePayload struct {
+	body       []byte
+	query      string
+	stream     bool
+	translated bool
+}
+
+func codeTranslateMessages(body []byte, r *http.Request, model string) (codePayload, error) {
 	refused := codemode.Refuse(422, "code_translation_unsupported_semantics")
-	if r.Header.Get("Anthropic-Beta") != "" || r.URL.RawQuery != "" || len(r.Trailer) != 0 {
-		return nil, false, refused
+	query, queryErr := url.ParseQuery(r.URL.RawQuery)
+	if queryErr != nil || (len(query) != 0 && (len(query) != 1 || !slices.Equal(query["beta"], []string{"true"}))) || r.Header.Get("Anthropic-Beta") != "" || len(r.Trailer) != 0 {
+		return codePayload{}, refused
 	}
-	request, err := protocols.Parse(wire.Anthropic, body, "")
-	if err != nil {
-		return nil, false, refused
+	request, requestErr := protocols.ParseForModel(wire.Anthropic, body, model)
+	if requestErr != nil {
+		return codePayload{}, refused
 	}
-	for _, name := range []string{"tools", "tool_choice"} {
+	for _, name := range []string{"tools", "tool_choice", "stream_options"} {
 		if request.Field(name) != nil {
-			return nil, false, refused
+			return codePayload{}, refused
 		}
 	}
 	root := request.OIF().Document().Root()
 	if !codeTextContent(root, "system") {
-		return nil, false, refused
+		return codePayload{}, refused
 	}
 	messages, _ := root.Lookup("messages")
 	for _, message := range messages.Elements() {
 		if !codeTextContent(message, "content") {
-			return nil, false, refused
+			return codePayload{}, refused
 		}
 	}
-	encoded, _, err := protocols.EncodeTarget(request, wire.Responses, "openai", "openai", request.Route, nil)
-	if err != nil {
-		return nil, false, refused
+	encoded, _, encodeErr := protocols.EncodeTarget(request, wire.Responses, "openai", "openai", request.Route, nil)
+	if encodeErr != nil {
+		return codePayload{}, refused
 	}
-	target, err := protocols.Parse(wire.Responses, encoded, request.Route)
-	if err != nil {
-		return nil, false, refused
+	target, targetErr := protocols.ParseForModel(wire.Responses, encoded, request.Route)
+	if targetErr != nil {
+		return codePayload{}, refused
 	}
 
 	input, _ := target.OIF().Document().Root().Lookup("input")
@@ -63,11 +72,11 @@ func codeTranslateMessages(body []byte, r *http.Request) ([]byte, bool, error) {
 		{Pointer: "/store", Value: "false", Origin: oif.TransportOption, Reason: "Stateless Messages translation"},
 		{Pointer: "/instructions", Value: `""`, Origin: oif.TransportOption, Reason: "Codex required empty transport instructions"},
 	}, roles)
-	prepared, err := target.OIF().WithChanges(changes...)
-	if err != nil {
-		return nil, false, refused
+	prepared, preparedErr := target.OIF().WithChanges(changes...)
+	if preparedErr != nil {
+		return codePayload{}, refused
 	}
-	return prepared.Document().Bytes(), request.Stream, nil
+	return codePayload{body: prepared.Document().Bytes(), stream: request.Stream, translated: true}, nil
 }
 
 func codeTextContent(parent oif.Value, key string) bool {
@@ -93,40 +102,8 @@ func (a *codeAttempt) translateResponse(ctx context.Context, w http.ResponseWrit
 		codeWriteError(w, r, codemode.Refuse(response.StatusCode, "code_upstream_rejected"))
 		return
 	}
-	var completion *wire.Completion
-	var err error
 	writer := &streamWriter{w: w, family: wire.Anthropic}
-	emit := func(frame []byte) error {
-		if !stream {
-			return nil
-		}
-		return writer.emit(frame)
-	}
-	if strings.HasPrefix(strings.ToLower(response.Header.Get("Content-Type")), "text/event-stream") {
-		observe := func(event oif.Event) error {
-			a.observe(a.observer.Event(event.Source().Bytes()))
-			return nil
-		}
-		if stream {
-			completion, err = protocols.StreamWithEvents(wire.Responses, wire.Anthropic, response.Body, codewire.MaxBody, model, true, emit, observe)
-		} else {
-			aggregated, aggregateErr := openai.AggregateEvents(wire.Responses, response.Body, codewire.MaxBody, codewire.MaxBody, observe)
-			err = aggregateErr
-			if aggregateErr == nil {
-				completion, err = protocols.Decode(wire.Responses, wire.Anthropic, aggregated.Body, model, "")
-			}
-		}
-	} else if stream {
-		err = codemode.Refuse(502, "code_upstream_invalid")
-	} else {
-		body, readErr := io.ReadAll(io.LimitReader(response.Body, codewire.MaxBody+1))
-		if readErr != nil || len(body) > codewire.MaxBody {
-			err = codemode.Refuse(502, "code_upstream_invalid")
-		} else {
-			a.observe(a.observer.Unary(body))
-			completion, err = protocols.Decode(wire.Responses, wire.Anthropic, body, model, "")
-		}
-	}
+	completion, err := a.translatedCompletion(response, model, stream, writer.emit)
 	if err != nil {
 		if !a.terminal {
 			a.outcome(ctx, codemode.Outcome{Origin: "upstream", Kind: "incomplete"})
@@ -134,8 +111,35 @@ func (a *codeAttempt) translateResponse(ctx context.Context, w http.ResponseWrit
 		writer.finish(&outcome{err: &Error{Status: 502, Code: "code_upstream_invalid", Type: "api_error", Message: "code_upstream_invalid"}, cancelled: ctx.Err() != nil})
 		return
 	}
-	if !stream {
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write(protocols.RenderCompletion(completion, wire.Anthropic, model))
+	if stream {
+		return
 	}
+	w.Header().Set("Content-Type", "application/json")
+	_, _ = w.Write(completion.Body)
+}
+
+func (a *codeAttempt) translatedCompletion(response *http.Response, model string, stream bool, emit func([]byte) error) (*wire.Completion, error) {
+	if strings.HasPrefix(strings.ToLower(response.Header.Get("Content-Type")), "text/event-stream") {
+		observe := func(event oif.Event) error {
+			a.observe(a.observer.Event(event.Source().Bytes()))
+			return nil
+		}
+		if stream {
+			return protocols.StreamWithEvents(wire.Responses, wire.Anthropic, response.Body, codewire.MaxBody, model, true, emit, observe)
+		}
+		aggregated, err := openai.AggregateEvents(wire.Responses, response.Body, codewire.MaxBody, codewire.MaxBody, observe)
+		if err != nil {
+			return nil, err
+		}
+		return protocols.Decode(wire.Responses, wire.Anthropic, aggregated.Body, model, "")
+	}
+	if stream {
+		return nil, codemode.Refuse(502, "code_upstream_invalid")
+	}
+	body, err := io.ReadAll(io.LimitReader(response.Body, codewire.MaxBody+1))
+	if err != nil || len(body) > codewire.MaxBody {
+		return nil, codemode.Refuse(502, "code_upstream_invalid")
+	}
+	a.observe(a.observer.Unary(body))
+	return protocols.Decode(wire.Responses, wire.Anthropic, body, model, "")
 }

@@ -61,9 +61,11 @@ is preserved. Admission, selected-account authorization and usage settlement use
 the existing code-mode ledger. Native Messages accounts continue to forward
 native payloads unchanged.
 
-Tools, thinking, beta features, stop sequences and other unsupported required
-semantics are refused before dispatch. Identity and prompt compatibility remain
-disabled. This text path does not establish complete Claude Code qualification.
+The documented Claude `?beta=true` transport flag is accepted and removed before
+the Codex request is sent. Tools, thinking, beta headers, unknown query fields,
+stop sequences and other unsupported required semantics are refused before
+dispatch. Identity and prompt compatibility remain disabled. This text path does
+not establish complete Claude Code qualification.
 Live Codex acceptance, including output-token caps, remains unqualified.
 
 ### Mixing subscriptions

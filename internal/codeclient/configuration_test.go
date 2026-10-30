@@ -236,3 +236,37 @@ func TestClaudeConfigurationThroughCodexRequiresTranslationPolicy(t *testing.T) 
 		}
 	}
 }
+
+func TestClaudeTranslatedCompanionsRequireReachableAccounts(t *testing.T) {
+	models := []string{"gpt-fixture-main", "gpt-fixture-plan"}
+	route := codemode.Route{Slug: "coding", RevisionID: "revision", Enabled: true, Models: models, MessagesToCodex: true}
+	for _, test := range []struct {
+		name     string
+		offers   Offers
+		accepted bool
+	}{
+		{name: "disjoint Codex accounts with unrelated Responses account", offers: Offers{
+			{Adapter: codemode.AdapterCodex, Models: models[:1]},
+			{Adapter: codemode.AdapterCodex, Models: models[1:]},
+			{Adapter: codemode.AdapterOpenCodeGo, Models: models},
+		}},
+		{name: "one Codex account serves both models", offers: Offers{
+			{Adapter: codemode.AdapterCodex, Models: models},
+			{Adapter: codemode.AdapterOpenCodeGo, Models: models},
+		}, accepted: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			config, err := Generate(route, test.offers, Request{GatewayURL: "https://olp.example", Client: codeadapter.ClientClaudeCode, Model: models[0], PlanModel: models[1]})
+			if test.accepted {
+				if err != nil || config.PlanModel == nil || *config.PlanModel != models[1] {
+					t.Fatalf("reachable companions refused, config %+v, error %v", config, err)
+				}
+				return
+			}
+			var problem *access.Problem
+			if !errors.As(err, &problem) || problem.Field != "plan_model" {
+				t.Fatalf("unreachable companions accepted, config %+v, error %v", config, err)
+			}
+		})
+	}
+}

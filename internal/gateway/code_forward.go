@@ -104,35 +104,36 @@ func (s *Server) serveCode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer attempt.finish(ctx)
-	translated := attempt.endpoint.Protocol != ingress.protocol
-	payload := raw
-	var translatedStream bool
-	if translated {
-		payload, translatedStream, err = codeTranslateMessages(body, r)
-		if err != nil {
-			refuse(err)
-			return
+	payload, err := func() (codePayload, error) {
+		if attempt.endpoint.Protocol == ingress.protocol {
+			return codePayload{body: raw, query: r.URL.RawQuery}, nil
 		}
+		return codeTranslateMessages(body, r, observation.Operation.Model)
+	}()
+	if err != nil {
+		refuse(err)
+		return
 	}
+
 	client, err := s.codeClient(r.Context(), release, attempt.config, attempt.permit.Account.ProviderID)
 	if err != nil {
 		refuse(err)
 		return
 	}
 	defer client.CloseIdleConnections()
-	target, err := s.codeEndpoint(attempt.config, attempt.endpoint.UpstreamPath, r.URL.RawQuery)
+	target, err := s.codeEndpoint(attempt.config, attempt.endpoint.UpstreamPath, payload.query)
 	if err != nil {
 		refuse(err)
 		return
 	}
-	request, err := http.NewRequestWithContext(ctx, http.MethodPost, target, &codeRequestBody{data: payload})
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, target, &codeRequestBody{data: payload.body})
 	if err != nil {
 		refuse(codemode.Refuse(502, "code_connection_invalid"))
 		return
 	}
-	request.ContentLength = int64(len(payload))
+	request.ContentLength = int64(len(payload.body))
 	request.Header = attempt.headers(r.Header)
-	if translated {
+	if payload.translated {
 		request.Header.Del("Content-Encoding")
 		request.Header.Del("Content-Length")
 		request.Header.Del("Anthropic-Version")
@@ -161,8 +162,8 @@ func (s *Server) serveCode(w http.ResponseWriter, r *http.Request) {
 	}
 	defer response.Body.Close()
 	attempt.response(ctx, response.StatusCode, response.Header)
-	if translated {
-		attempt.translateResponse(ctx, w, r, response, observation.Operation.Model, translatedStream)
+	if payload.translated {
+		attempt.translateResponse(ctx, w, r, response, observation.Operation.Model, payload.stream)
 		return
 	}
 	maps.Copy(w.Header(), codewire.ForwardHeaders(response.Header, false))

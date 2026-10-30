@@ -420,30 +420,30 @@ func SQLAdapters(connections string) string {
 		" adapter FROM jsonb_each(" + connections + ") c) adapters WHERE adapter IS NOT NULL)"
 }
 
-func RouteEndpoint(route codemode.Route, vendor Vendor, path string) (Endpoint, bool) {
-	if endpoint, ok := vendor.Endpoint(path); ok {
+func RouteEndpoint(route codemode.Route, adapter Vendor, path string) (Endpoint, bool) {
+	if endpoint, ok := adapter.Endpoint(path); ok {
 		return endpoint, true
 	}
-	if route.MessagesToCodex && path == "v1/messages" && vendor.Adapter == codemode.AdapterCodex {
-		return vendor.Endpoint("responses")
+	if route.MessagesToCodex && path == "v1/messages" && adapter.Adapter == codemode.AdapterCodex {
+		return adapter.Endpoint("responses")
 	}
 	return Endpoint{}, false
 }
 
-func RouteProtocol(route codemode.Route, vendor Vendor, client, model string) (codemode.Protocol, bool) {
-	if protocol, ok := vendor.Protocol(client, model); ok {
+func RouteClientProtocol(route codemode.Route, adapter Vendor, client, model string) (codemode.Protocol, bool) {
+	if protocol, ok := adapter.Protocol(client, model); ok {
 		return protocol, true
 	}
-	if !route.MessagesToCodex || vendor.Adapter != codemode.AdapterCodex || client != ClientClaudeCode {
+	if !route.MessagesToCodex || adapter.Adapter != codemode.AdapterCodex || client != ClientClaudeCode {
 		return "", false
 	}
-	endpoint, ok := RouteEndpoint(route, vendor, "v1/messages")
-	return endpoint.Protocol, ok && vendor.ServesModel(endpoint.Protocol, model)
+	endpoint, ok := RouteEndpoint(route, adapter, "v1/messages")
+	return codemode.ProtocolMessages, ok && adapter.ServesModel(endpoint.Protocol, model)
 }
 
-func RouteClients(route codemode.Route, vendor Vendor) []string {
-	native := vendor.Clients()
-	if !route.MessagesToCodex || vendor.Adapter != codemode.AdapterCodex {
+func RouteClients(route codemode.Route, adapter Vendor) []string {
+	native := adapter.Clients()
+	if !route.MessagesToCodex || adapter.Adapter != codemode.AdapterCodex {
 		return native
 	}
 	return slices.Concat(native, []string{ClientClaudeCode})

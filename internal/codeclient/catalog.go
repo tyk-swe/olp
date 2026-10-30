@@ -72,7 +72,7 @@ func modelClients(route codemode.Route, id string, declarations []codeadapter.Ve
 	clients := slices.Collect(func(yield func(string) bool) {
 		for _, declaration := range declarations {
 			for _, client := range codeadapter.RouteClients(route, declaration) {
-				if _, ok := codeadapter.RouteProtocol(route, declaration, client, id); ok && !yield(client) {
+				if _, ok := codeadapter.RouteClientProtocol(route, declaration, client, id); ok && !yield(client) {
 					return
 				}
 			}

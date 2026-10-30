@@ -42,17 +42,15 @@ func (s *Snapshot) CodeProviders(route codemode.Route, path string, transport co
 	if !route.MessagesToCodex || path != "v1/messages" || transport != codeadapter.HTTP {
 		return revision.providers[codeCapability{path, transport}]
 	}
-	providers := slices.Collect(func(yield func(string) bool) {
-		for provider, vendor := range revision.vendors {
-			if endpoint, ok := codeadapter.RouteEndpoint(route, vendor, path); ok && endpoint.Supports(transport) {
+	return slices.Sorted(func(yield func(string) bool) {
+		for provider, adapter := range revision.vendors {
+			if endpoint, ok := codeadapter.RouteEndpoint(route, adapter, path); ok && endpoint.Supports(transport) {
 				if !yield(provider) {
 					return
 				}
 			}
 		}
 	})
-	slices.Sort(providers)
-	return providers
 }
 
 // CodeModelProviders returns the providers of CodeProviders whose adapter
@@ -62,9 +60,9 @@ func (s *Snapshot) CodeModelProviders(route codemode.Route, path string, model s
 	revision := s.codeRevisions[route.RevisionID]
 	providers := s.CodeProviders(route, path, transport)
 	return slices.DeleteFunc(slices.Clone(providers), func(provider string) bool {
-		vendor := revision.vendors[provider]
-		endpoint, ok := codeadapter.RouteEndpoint(route, vendor, path)
-		return !ok || !vendor.ServesModel(endpoint.Protocol, model)
+		adapter := revision.vendors[provider]
+		endpoint, ok := codeadapter.RouteEndpoint(route, adapter, path)
+		return !ok || !adapter.ServesModel(endpoint.Protocol, model)
 	})
 }
 
