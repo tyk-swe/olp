@@ -100,7 +100,7 @@ func (s *Server) serveCode(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), codeGenerationTimeout)
 	defer cancel()
-	observation.Recoverable = route.InitialRecoveryAttempts > 0 && (ingress.protocol != codemode.ProtocolChat || route.ChatToCodex) && codewire.PortableInitialRequest(body, r.Header, observation)
+	observation.Recoverable = route.InitialRecoveryAttempts > 0 && codewire.PortableInitialRequest(body, r.Header, observation)
 	s.forwardCode(w, r.WithContext(ctx), release, route, observation, ingress, raw, body, nil, refuse)
 }
 

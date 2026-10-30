@@ -153,8 +153,10 @@ func TestCodeOffersPreservesModelPoolDiscoveryWhenPaidAuthorityChanges(t *testin
 		liveProviderLimits *routing.Limits
 		sourceErr          error
 		available          bool
+		management         bool
 	}{
 		{name: "eligible paid target", available: true},
+		{name: "authorized restricted key", publishedKeys: []string{"caller-key"}, liveRestrictions: routing.Slot{AllowedAPIKeys: []string{"caller-key"}}, available: true},
 		{name: "published key restriction", publishedKeys: []string{"another-key"}},
 		{name: "live key restriction", liveRestrictions: routing.Slot{AllowedAPIKeys: []string{"another-key"}}},
 		{name: "live model restriction", liveRestrictions: routing.Slot{AllowedModels: []string{"another-model"}}},
@@ -162,6 +164,10 @@ func TestCodeOffersPreservesModelPoolDiscoveryWhenPaidAuthorityChanges(t *testin
 		{name: "live slot quota changed", liveLimits: routing.Slot{TokensPerMinute: new(int64(10))}},
 		{name: "live provider quota changed", liveProviderLimits: &routing.Limits{RequestsPerMinute: new(int64(10))}},
 		{name: "credential unavailable", sourceErr: pgx.ErrNoRows},
+		{name: "management setup with key restrictions", management: true, publishedKeys: []string{"caller-key"}, liveRestrictions: routing.Slot{AllowedAPIKeys: []string{"caller-key"}}, available: true},
+		{name: "management live model restriction", management: true, liveRestrictions: routing.Slot{AllowedModels: []string{"another-model"}}},
+		{name: "management live route restriction", management: true, liveRestrictions: routing.Slot{AllowedRoutes: []string{"another-route"}}},
+		{name: "management credential unavailable", management: true, sourceErr: pgx.ErrNoRows},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			models := []string{"native-main", "native-alternate", "paid-model"}
@@ -182,7 +188,13 @@ func TestCodeOffersPreservesModelPoolDiscoveryWhenPaidAuthorityChanges(t *testin
 			}
 			source := codeOffersQuery{rows: &codeOfferRows{data: []codeOfferRow{{publication: publication, adapter: new(string(codemode.AdapterCodex)), models: models[:2]}}},
 				row: codeOfferTargetRow{restrictions: restrictions, configuration: liveConfigurationJSON, limits: limits, err: test.sourceErr}}
-			offers, err := CodeOffers(t.Context(), source, route.RevisionID, "caller-key")
+			keys := func() []string {
+				if test.management {
+					return nil
+				}
+				return []string{"caller-key"}
+			}()
+			offers, err := CodeOffers(t.Context(), source, route.RevisionID, keys...)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -190,6 +202,12 @@ func TestCodeOffersPreservesModelPoolDiscoveryWhenPaidAuthorityChanges(t *testin
 			paid := slices.IndexFunc(catalog, func(model codemode.Model) bool { return model.ID == models[2] && model.Paid })
 			if (paid >= 0) != test.available {
 				t.Fatalf("paid catalog ignored current target authority %+v", catalog)
+			}
+			if test.management && paid >= 0 {
+				configuration, configurationErr := codeclient.Generate(route, offers, codeclient.Request{GatewayURL: "https://gateway.example", Client: codeadapter.ClientOpenCode, Model: models[2]})
+				if configurationErr != nil || configuration.Model != models[2] || !slices.Contains(configuration.PaidModels, models[2]) {
+					t.Fatalf("paid setup unavailable %+v, %v", configuration, configurationErr)
+				}
 			}
 			public := slices.IndexFunc(catalog, func(model codemode.Model) bool { return model.ID == "team-code" })
 			if public < 0 || !slices.Equal(catalog[public].ModelPool, route.ModelPools[catalog[public].ID]) {

@@ -68,10 +68,14 @@ type Slot struct {
 // Allows applies the published slot restrictions shared by live requests and
 // simulation. Credential authority and transient health are checked by callers.
 func (s *Slot) Allows(model, route, keyID string) bool {
+	return s.AllowsModelRoute(model, route) &&
+		(len(s.AllowedAPIKeys) == 0 || (keyID != "" && slices.Contains(s.AllowedAPIKeys, keyID)))
+}
+
+func (s *Slot) AllowsModelRoute(model, route string) bool {
 	return s.Enabled &&
 		(len(s.AllowedModels) == 0 || slices.Contains(s.AllowedModels, model)) &&
-		(len(s.AllowedRoutes) == 0 || slices.Contains(s.AllowedRoutes, route)) &&
-		(len(s.AllowedAPIKeys) == 0 || (keyID != "" && slices.Contains(s.AllowedAPIKeys, keyID)))
+		(len(s.AllowedRoutes) == 0 || slices.Contains(s.AllowedRoutes, route))
 }
 
 // Limits is the connection-level quota published for one provider. A nil

@@ -254,6 +254,11 @@ func TestMessagesRecoveryRequiresPortableInitialState(t *testing.T) {
 		portable   bool
 	}{
 		{"optional nulls", `{"model":"native","messages":[{"role":"user","content":"Hello"}],"system":null,"temperature":null,"metadata":null}`, conversation, true},
+		{"function tools", `{"model":"native","messages":[{"role":"user","content":"Read main.go"}],"tools":[{"name":"read_file","description":"Read a file","input_schema":{"type":"object"},"eager_input_streaming":true}],"tool_choice":{"type":"tool","name":"read_file","disable_parallel_tool_use":true}}`, conversation, true},
+		{"server tools", `{"model":"native","messages":[],"tools":[{"type":"web_search","name":"web_search"}]}`, conversation, false},
+		{"signed tool state", `{"model":"native","messages":[],"tools":[{"name":"read_file","input_schema":{"type":"object"},"signed_state":"required"}]}`, conversation, false},
+		{"malformed tool schema", `{"model":"native","messages":[],"tools":[{"name":"read_file","input_schema":"opaque"}]}`, conversation, false},
+		{"unknown tool choice", `{"model":"native","messages":[],"tool_choice":{"type":"server","state":"required"}}`, conversation, false},
 		{"null messages", `{"model":"native","messages":null}`, conversation, false},
 		{"account continuation", `{"model":"native","messages":[]}`, http.Header{"X-Opencode-Session-Id": {"child"}, "X-Opencode-Parent-Session-Id": {"parent"}}, false},
 		{"opaque turn state", `{"model":"native","messages":[]}`, http.Header{"X-Opencode-Session-Id": {"conversation"}, "X-Codex-Turn-State": {"opaque"}}, false},

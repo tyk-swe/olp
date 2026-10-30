@@ -296,7 +296,13 @@ func paidCodeTarget(ctx context.Context, db access.Queryer, in PaidCodeAdmission
 		return err
 	}
 	liveSlot.Enabled = true
-	if !liveSlot.Allows(in.Operation.Model, in.Route.Slug, in.APIKeyID) || !in.Slot.Allows(in.Operation.Model, in.Route.Slug, in.APIKeyID) || !routing.CodePaidLimitsMatch(configuration.Options.Limits, in.Provider.Limits, slotLimits, in.Slot) {
+	allows := func(slot routing.Slot) bool {
+		if in.APIKeyID == "" {
+			return slot.AllowsModelRoute(in.Operation.Model, in.Route.Slug)
+		}
+		return slot.Allows(in.Operation.Model, in.Route.Slug, in.APIKeyID)
+	}
+	if !allows(liveSlot) || !allows(in.Slot) || !routing.CodePaidLimitsMatch(configuration.Options.Limits, in.Provider.Limits, slotLimits, in.Slot) {
 		return codemode.Refuse(403, "code_paid_target_denied")
 	}
 

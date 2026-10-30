@@ -3050,6 +3050,39 @@ func newPaidFallbackHarness(t *testing.T) (*harness, *codeTestLedger, *httptest.
 	return h, ledger, server
 }
 
+func TestCodePaidFallbackAdmitsNativeChatWithoutTranslation(t *testing.T) {
+	h, ledger, server := newPaidFallbackHarness(t)
+	route := h.rt.release.Snapshot.CodeRoutes["coding"]
+	providerKey := route.RevisionID + ":" + route.PaidFallbackTargets[modelA].ProviderID
+	provider := h.rt.release.Snapshot.CodePaidConnections[providerKey]
+	provider.ProfileID = "openai-chat"
+	h.rt.release.Snapshot.CodePaidConnections[providerKey] = provider
+	const input = `{"model":"model-a","messages":[{"role":"user","content":"hello"}],"max_completion_tokens":20}`
+	const reply = `{"id":"paid-chat","model":"model-a","choices":[{"index":0,"message":{"role":"assistant","content":"Paid reply"},"finish_reason":"stop"}],"usage":{"prompt_tokens":2,"completion_tokens":1,"total_tokens":3}}`
+	h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		if r.Header.Get("Authorization") != "Bearer "+secretA || r.URL.Path != "/a/v1/chat/completions" || string(body) != input {
+			t.Errorf("native paid request %s %s", r.URL.Path, body)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		io.WriteString(w, reply)
+	})
+	request, _ := http.NewRequestWithContext(t.Context(), http.MethodPost, server.URL+"/code/coding/v1/chat/completions", strings.NewReader(input))
+	request.Header.Set("Authorization", "Bearer "+fullKey)
+	response, err := server.Client().Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	body, _ := io.ReadAll(response.Body)
+	if response.StatusCode != 200 || string(body) != reply || h.mock.count("a") != 1 {
+		t.Fatalf("native Chat fallback %d %s, dispatches=%d", response.StatusCode, body, h.mock.count("a"))
+	}
+	if usage := ledger.wait(t); usage.Total == nil || *usage.Total != 3 {
+		t.Fatalf("native paid usage %+v", usage)
+	}
+}
+
 func TestCodePaidFallbackRefusesBeforePaidDispatch(t *testing.T) {
 	for _, scenario := range []struct {
 		name, code string

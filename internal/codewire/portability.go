@@ -21,15 +21,55 @@ func PortableInitialRequest(body []byte, headers http.Header, request codemode.R
 		return portableInitialChat(root)
 	}
 	if request.Operation.Name == "messages" {
-		if !portableFields(root, "model", "messages", "system", "max_tokens", "stream", "temperature", "top_p", "top_k", "stop_sequences", "metadata") {
+		if !portableFields(root, "model", "messages", "system", "max_tokens", "stream", "temperature", "top_p", "top_k", "stop_sequences", "metadata", "tools", "tool_choice") {
 			return false
 		}
 	} else if !portableFields(root, "model", "input", "instructions", "stream", "store", "background", "max_output_tokens", "temperature", "top_p", "parallel_tool_calls", "service_tier", "truncation", "max_tool_calls", "safety_identifier", "user", "prompt_cache_key", "prompt_cache_retention", "metadata", "reasoning", "text", "include", "stream_options", "tools", "tool_choice", "conversation", "previous_response_id", "compaction_trigger") {
 		return false
 	}
 	return !slices.ContainsFunc(root.Members(), func(member oif.Member) bool {
+		if request.Operation.Name == "messages" {
+			return !portableMessagesField(member)
+		}
 		return !portableInitialField(member)
 	})
+}
+
+func portableMessagesField(member oif.Member) bool {
+	if member.Value.Kind() == oif.Null {
+		return portableInitialField(member)
+	}
+	switch member.Name {
+	case "tools":
+		return member.Value.Kind() == oif.Array && !slices.ContainsFunc(member.Value.Elements(), func(tool oif.Value) bool {
+			nameValue, _ := tool.Lookup("name")
+			name, _ := nameValue.Text()
+			schema, _ := tool.Lookup("input_schema")
+			return name == "" || schema.Kind() != oif.Object || !portableFields(tool, "name", "description", "input_schema", "eager_input_streaming") || slices.ContainsFunc(tool.Members(), func(field oif.Member) bool {
+				switch field.Name {
+				case "input_schema":
+					return field.Value.Kind() != oif.Object
+				case "eager_input_streaming":
+					return field.Value.Kind() != oif.Boolean
+				default:
+					return field.Value.Kind() != oif.String
+				}
+			})
+		})
+	case "tool_choice":
+		typeValue, _ := member.Value.Lookup("type")
+		kind, _ := typeValue.Text()
+		nameValue, hasName := member.Value.Lookup("name")
+		name, _ := nameValue.Text()
+		return slices.Contains([]string{"auto", "any", "none", "tool"}, kind) && (kind != "tool" || name != "") && (!hasName || kind == "tool") && portableFields(member.Value, "type", "name", "disable_parallel_tool_use") && !slices.ContainsFunc(member.Value.Members(), func(field oif.Member) bool {
+			if field.Name == "disable_parallel_tool_use" {
+				return field.Value.Kind() != oif.Boolean
+			}
+			return field.Value.Kind() != oif.String
+		})
+	default:
+		return portableInitialField(member)
+	}
 }
 
 func portableInitialField(member oif.Member) bool {
