@@ -166,12 +166,19 @@ func (a Adapter) issue(ctx context.Context, request tokenRequest) (abi.Grant, er
 		return abi.Grant{}, err
 	}
 
-	facts := map[string]string{"account_uuid": strings.ToLower(identity.Account.UUID), "organization_uuid": strings.ToLower(identity.Organization.UUID)}
-	principal := Principal(facts)
-	if principal == "" {
-		return abi.Grant{}, invalid()
+	facts, err := profileFacts(identity)
+	if err != nil {
+		return abi.Grant{}, err
 	}
-	return abi.Grant{AccessToken: tokens.AccessToken, RefreshToken: tokens.RefreshToken, ExpiresIn: tokens.ExpiresIn, Principal: principal, Facts: facts}, nil
+	return abi.Grant{AccessToken: tokens.AccessToken, RefreshToken: tokens.RefreshToken, ExpiresIn: tokens.ExpiresIn, Principal: Principal(facts), Facts: facts}, nil
+}
+
+func profileFacts(identity profile) (map[string]string, error) {
+	facts := map[string]string{"account_uuid": strings.ToLower(identity.Account.UUID), "organization_uuid": strings.ToLower(identity.Organization.UUID)}
+	if Principal(facts) == "" {
+		return nil, invalid()
+	}
+	return facts, nil
 }
 
 type tokenResponse struct {
