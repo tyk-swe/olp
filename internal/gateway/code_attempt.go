@@ -37,11 +37,12 @@ type codeAttempt struct {
 	terminal      bool
 	conflicting   bool
 	prewarm       bool
+	finished      bool
 	model         string
 	publicModel   string
 }
 
-func (s *Server) prepareCode(r *http.Request, release *runtime.Release, route codemode.Route, observation codemode.Request, ingress codeIngress, transport codeadapter.Transport) (*codeAttempt, error) {
+func (s *Server) prepareCode(r *http.Request, release *runtime.Release, route codemode.Route, observation codemode.Request, ingress codeIngress, transport codeadapter.Transport, recovery *resources.CodeRecovery) (*codeAttempt, error) {
 	authority, failure := s.authenticate(r, "inference")
 	if failure != nil {
 		return nil, codemode.Refuse(failure.Status, "code_authentication_refused")
@@ -72,7 +73,7 @@ func (s *Server) prepareCode(r *http.Request, release *runtime.Release, route co
 	}
 	permit, err := s.CodeLedger.Admit(r.Context(), resources.CodeAdmission{
 		Attribution: labels, Route: route, APIKeyID: authority.ID, EndUserDigest: authority.EndUserDigest,
-		Operation: operation, Providers: providers, PreviousResponse: observation.PreviousResponse,
+		InitialRecovery: observation.Recoverable, Recovery: recovery, Operation: operation, Providers: providers, PreviousResponse: observation.PreviousResponse,
 	})
 	if err != nil {
 		settleKey(r.Context(), lease, false, nil, s.log)
@@ -139,6 +140,9 @@ func (s *Server) prepareCode(r *http.Request, release *runtime.Release, route co
 	if err := target.adapter.ValidateAuthorization(target.endpoint, a.auth, permit.Pin.Principal); err != nil {
 		return nil, err
 	}
+	if recovery != nil && recovery.AccountID != "" && (a.auth.CredentialID != recovery.CredentialID || a.auth.GrantGeneration <= recovery.GrantGeneration) {
+		return nil, codemode.Refuse(409, "code_recovery_unsafe")
+	}
 	ok = true
 	return a, nil
 }
@@ -183,6 +187,10 @@ func (a *codeAttempt) observe(o codemode.Observation) {
 }
 
 func (a *codeAttempt) finish(ctx context.Context) {
+	if a.finished {
+		return
+	}
+	a.finished = true
 	if !a.dispatched {
 		a.outcome(ctx, codemode.Outcome{Origin: "gateway", Kind: "rejected"})
 	} else if !a.terminal {

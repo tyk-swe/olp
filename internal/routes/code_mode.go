@@ -40,22 +40,26 @@ func (s *Server) codeRoutes(r *http.Request, p access.Principal) (access.Reply, 
 }
 
 type codeRouteInput struct {
-	ModelRewriting  bool                    `json:"model_rewriting"`
-	Aliases         map[string]string       `json:"aliases"`
-	MessagesToCodex bool                    `json:"messages_to_codex"`
-	Tools           *codemode.ResearchTools `json:"tools"`
-	MaxBodyBytes    *int64                  `json:"max_body_bytes,omitempty"`
-	ProjectID       string                  `json:"project_id"`
-	Slug            string                  `json:"slug"`
-	PoolID          string                  `json:"pool_id"`
-	Models          []string                `json:"models"`
-	Enabled         bool                    `json:"enabled"`
+	InitialRecoveryAttempts int                     `json:"initial_recovery_attempts"`
+	ModelRewriting          bool                    `json:"model_rewriting"`
+	Aliases                 map[string]string       `json:"aliases"`
+	MessagesToCodex         bool                    `json:"messages_to_codex"`
+	Tools                   *codemode.ResearchTools `json:"tools"`
+	MaxBodyBytes            *int64                  `json:"max_body_bytes,omitempty"`
+	ProjectID               string                  `json:"project_id"`
+	Slug                    string                  `json:"slug"`
+	PoolID                  string                  `json:"pool_id"`
+	Models                  []string                `json:"models"`
+	Enabled                 bool                    `json:"enabled"`
 }
 
 func (s *Server) writeCodeRoute(r *http.Request, _ access.Principal) (access.Reply, error) {
 	var in codeRouteInput
 	if err := access.Decode(r, &in); err != nil {
 		return access.Reply{}, err
+	}
+	if in.InitialRecoveryAttempts < 0 || in.InitialRecoveryAttempts > 2 {
+		return access.Reply{}, access.Invalid("initial_recovery_attempts", "Use zero to disable recovery or allow at most two additional attempts.")
 	}
 	if !bodylimit.Valid(in.MaxBodyBytes) {
 		return access.Reply{}, access.Invalid("max_body_bytes", "Use 1 to 1073741824 bytes, or null to inherit the installation limit.")
@@ -81,7 +85,7 @@ func (s *Server) writeCodeRoute(r *http.Request, _ access.Principal) (access.Rep
 		return access.Reply{}, access.Invalid("tools", err.Error())
 	}
 	return s.Access.CodeWrite(r, "code_routes", "code_route", in.ProjectID, in, func(tx pgx.Tx, p access.Principal, id, etag string) (any, error) {
-		out := codemode.Route{Aliases: in.Aliases, ModelRewriting: in.ModelRewriting, MessagesToCodex: in.MessagesToCodex, Tools: in.Tools, MaxBodyBytes: in.MaxBodyBytes, ID: id, ProjectID: in.ProjectID, Slug: in.Slug, PoolID: in.PoolID, Models: in.Models, Enabled: in.Enabled, ETag: etag}
+		out := codemode.Route{InitialRecoveryAttempts: in.InitialRecoveryAttempts, Aliases: in.Aliases, ModelRewriting: in.ModelRewriting, MessagesToCodex: in.MessagesToCodex, Tools: in.Tools, MaxBodyBytes: in.MaxBodyBytes, ID: id, ProjectID: in.ProjectID, Slug: in.Slug, PoolID: in.PoolID, Models: in.Models, Enabled: in.Enabled, ETag: etag}
 		adapters := []codemode.Adapter{}
 		var matches bool
 		if err := tx.QueryRow(r.Context(), `SELECT EXISTS(SELECT 1 FROM olp.code_pools WHERE id=$1 AND project_id=$2)`, in.PoolID, in.ProjectID).Scan(&matches); err != nil {

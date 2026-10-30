@@ -133,6 +133,7 @@
         aliases: Object.fromEntries(aliasEntries),
         model_rewriting: modelRewriting,
         messages_to_codex: messagesToCodex,
+        initial_recovery_attempts: initial?.initial_recovery_attempts ?? 0,
         tools: research
           ? { account_id: researchAccount, services: researchServices }
           : null,

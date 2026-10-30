@@ -12,6 +12,8 @@ import (
 	"github.com/tyk-swe/olp/internal/codeadapter"
 	"github.com/tyk-swe/olp/internal/codemode"
 	"github.com/tyk-swe/olp/internal/codewire"
+	"github.com/tyk-swe/olp/internal/resources"
+	"github.com/tyk-swe/olp/internal/runtime"
 )
 
 func (s *Server) RegisterCode(mux *http.ServeMux) {
@@ -98,7 +100,13 @@ func (s *Server) serveCode(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), codeGenerationTimeout)
 	defer cancel()
-	attempt, err := s.prepareCode(r.WithContext(ctx), release, route, observation, ingress, codeadapter.HTTP)
+	observation.Recoverable = route.InitialRecoveryAttempts > 0 && codewire.PortableInitialRequest(body, r.Header, observation)
+	s.forwardCode(w, r.WithContext(ctx), release, route, observation, ingress, raw, body, nil, refuse)
+}
+
+func (s *Server) forwardCode(w http.ResponseWriter, r *http.Request, release *runtime.Release, route codemode.Route, observation codemode.Request, ingress codeIngress, raw, body []byte, recovery *resources.CodeRecovery, refuse func(error)) {
+	ctx := r.Context()
+	attempt, err := s.prepareCode(r, release, route, observation, ingress, codeadapter.HTTP, recovery)
 	if err != nil {
 		refuse(err)
 		return
@@ -178,6 +186,12 @@ func (s *Server) serveCode(w http.ResponseWriter, r *http.Request) {
 	}
 	defer response.Body.Close()
 	attempt.response(ctx, response.StatusCode, response.Header)
+	if observation.Recoverable {
+		if next := attempt.recover(ctx, response, route, recovery); next != nil {
+			s.forwardCode(w, r, release, route, observation, ingress, raw, body, next, refuse)
+			return
+		}
+	}
 	if payload.translated {
 		attempt.translateResponse(ctx, w, r, response, observation.Operation.Model, payload.stream)
 		return

@@ -418,6 +418,57 @@ func TestCodeFoundationMessagesTranslationPolicyPublication(t *testing.T) {
 	}
 }
 
+func TestCodeFoundationInitialRecoverySettlesBeforeReplacementReservation(t *testing.T) {
+	f := newCodeFixture(t)
+	draft := f.h.want(f.owner, "PUT", "/api/v1/code/routes/"+f.route.ID, map[string]any{
+		"project_id": f.project, "slug": f.route.Slug, "pool_id": f.pool, "models": f.route.Models, "enabled": true, "initial_recovery_attempts": 1,
+	}, map[string]string{"If-Match": f.route.ETag}, 200)
+	published := f.h.want(f.owner, "POST", "/api/v1/code/routes/"+f.route.ID+"/publish", nil, withMatch(draft, idem("bounded-recovery-publish")), 200)
+	route := codePublicDecode[codemode.Route](t, published)
+	f.h.want(f.owner, "POST", "/api/v1/code/budgets", map[string]any{"project_id": f.project, "route_id": route.ID, "api_key_id": nil, "daily_tokens": 10, "monthly_tokens": 10, "enabled": true}, idem("recovery-budget"), 201)
+	secondCredential := access.NewID()
+	f.addCredential(t, secondCredential, "replacement-principal", 2)
+	secondAccount := f.h.want(f.owner, "POST", "/api/v1/code/accounts", map[string]any{"project_id": f.project, "provider_id": f.provider, "credential_id": secondCredential, "name": "Replacement fixture", "enabled": true, "models": route.Models}, idem("replacement-account"), 201)
+	pool := f.h.want(f.owner, "GET", "/api/v1/code/pools/"+f.pool, nil, nil, 200)
+	f.h.want(f.owner, "PUT", "/api/v1/code/pools/"+f.pool, map[string]any{"project_id": f.project, "name": "Recovery pool", "kind": "shared", "account_ids": []string{f.account, secondAccount["id"].(string)}, "api_key_ids": []string{f.key}}, etagHeader(pool), 200)
+	in := resources.CodeAdmission{Route: route, APIKeyID: f.key, Providers: []string{f.provider}, InitialRecovery: true,
+		Operation: codemode.Operation{Name: "responses", Model: "native-model", Identity: codemode.Identity{Conversation: "reserved-recovery"}}, Bound: &codemode.TokenBound{Tokens: 10, Evidence: "controlled-test-bound"}}
+	first, err := f.store.Admit(t.Context(), in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.store.MarkDispatched(t.Context(), first.Attempt.ID); err != nil {
+		t.Fatal(err)
+	}
+	replacement := resources.CodeAdmission{Route: route, APIKeyID: f.key, Providers: in.Providers, InitialRecovery: true, Operation: in.Operation, Bound: in.Bound,
+		Recovery: &resources.CodeRecovery{From: first.Attempt.ID, Number: 1}}
+	_, err = f.store.Admit(t.Context(), replacement)
+	codeRefusal(t, err, "code_recovery_unsafe")
+	rejectionStatus := 429
+	if err := f.store.ObserveOutcome(t.Context(), first.Attempt.ID, codemode.Outcome{Origin: "upstream", Kind: "rejected", UpstreamStatus: &rejectionStatus, ObservedAt: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.store.ConfirmNonexecution(t.Context(), first.Attempt.ID, 429); err != nil {
+		t.Fatal(err)
+	}
+	zero := int64(0)
+	if err := f.store.Settle(t.Context(), first.Attempt.ID, codemode.Usage{Total: &zero}); err != nil {
+		t.Fatal(err)
+	}
+	next, err := f.store.Admit(t.Context(), replacement)
+	if err != nil {
+		t.Fatal("proven rejection did not release capacity before replacement", err)
+	}
+	if first.Attempt.AccountID == next.Attempt.AccountID || first.Attempt.BindingID != next.Attempt.BindingID {
+		t.Fatal("replacement lost original attribution or durable conversation identity")
+	}
+	if err := f.store.Abort(t.Context(), next.Attempt.ID); err != nil {
+		t.Fatal(err)
+	}
+	_, err = f.store.Admit(t.Context(), replacement)
+	codeRefusal(t, err, "code_recovery_unsafe")
+}
+
 func TestCodeFoundationAvailabilityPreservesFreshHealthAndIndependentAllowance(t *testing.T) {
 	f := newCodeFixture(t)
 	now := time.Now().UTC().Truncate(time.Microsecond)
@@ -450,14 +501,35 @@ func TestCodeFoundationAvailabilityPreservesFreshHealthAndIndependentAllowance(t
 	if blocked.Eligible || blocked.Health != "quota_limited" || blocked.UnavailableUntil == nil || !blocked.UnavailableUntil.Equal(retry) || blocked.HealthObservedAt == nil || !blocked.HealthObservedAt.Equal(observed.Add(time.Minute)) {
 		t.Fatalf("stale or partial observation erased cooldown %+v", blocked)
 	}
+	shorter := observed.Add(90 * time.Second)
+	observeHealth(codemode.HealthObservation{Status: "quota_limited", ObservedAt: shorter, RetryAt: &shorter})
+	shortened := readAccount()
+	if shortened.Eligible || shortened.UnavailableUntil == nil || !shortened.UnavailableUntil.Equal(retry) {
+		t.Fatalf("shorter concurrent failure erased active reset %+v", shortened)
+	}
 	observeHealth(codemode.HealthObservation{Status: "healthy", ObservedAt: observed.Add(2 * time.Minute)})
 	completed := readAccount()
-	if completed.Eligible || completed.Health != "quota_limited" || completed.UnavailableUntil == nil || !completed.UnavailableUntil.Equal(retry) || completed.HealthObservedAt == nil || !completed.HealthObservedAt.Equal(*blocked.HealthObservedAt) {
+	if completed.Eligible || completed.Health != "quota_limited" || completed.UnavailableUntil == nil || !completed.UnavailableUntil.Equal(retry) || completed.HealthObservedAt == nil || !completed.HealthObservedAt.Equal(*shortened.HealthObservedAt) {
 		t.Fatalf("overlapping completion erased active retry deadline %+v", completed)
 	}
 	_, cooldownErr := f.store.Admit(t.Context(), f.input("during-retry-after", "", nil))
 	codeRefusal(t, cooldownErr, "code_account_unavailable")
+	extended := retry.Add(time.Hour)
+	if err := f.store.ObserveCooldown(t.Context(), f.account, extended); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.store.ObserveCooldown(t.Context(), f.account, shorter); err != nil {
+		t.Fatal(err)
+	}
+	observeHealth(codemode.HealthObservation{Status: "unavailable", ObservedAt: observed.Add(150 * time.Second)})
+	concurrent := readAccount()
+	if concurrent.Eligible || concurrent.UnavailableUntil == nil || !concurrent.UnavailableUntil.Equal(extended) {
+		t.Fatalf("shorter recovery or transport observation erased active reset %+v", concurrent)
+	}
+	_, concurrentErr := f.store.Admit(t.Context(), f.input("after-shorter-concurrent-failure", "", nil))
+	codeRefusal(t, concurrentErr, "code_account_unavailable")
 	expired := now.Add(-time.Minute)
+	f.exec(t, `UPDATE olp.code_accounts SET unavailable_until=$2 WHERE id=$1`, f.account, expired)
 	observeHealth(codemode.HealthObservation{Status: "quota_limited", ObservedAt: observed.Add(3 * time.Minute), RetryAt: &expired})
 	recovered := readAccount()
 	if !recovered.Eligible || recovered.Health != "quota_limited" || recovered.Allowance != nil {
@@ -538,7 +610,7 @@ func TestCodeFoundationExactAliasesPreservePinsAcrossPublication(t *testing.T) {
 	write := func(target string, rewriting bool, models []string, status int) map[string]any {
 		return f.h.want(f.owner, "PUT", "/api/v1/code/routes/"+f.route.ID, map[string]any{
 			"project_id": f.project, "slug": f.route.Slug, "pool_id": f.pool, "models": models,
-			"aliases": map[string]string{"team-code": target}, "model_rewriting": rewriting, "enabled": true,
+			"aliases": map[string]string{"team-code": target}, "model_rewriting": rewriting, "initial_recovery_attempts": 1, "enabled": true,
 		}, map[string]string{"If-Match": `"` + f.route.ETag + `"`}, status)
 	}
 	models := []string{"native-model", "native-next"}
@@ -550,7 +622,7 @@ func TestCodeFoundationExactAliasesPreservePinsAcrossPublication(t *testing.T) {
 		headers["Idempotency-Key"] = idempotency
 		published := f.h.want(f.owner, "POST", "/api/v1/code/routes/"+f.route.ID+"/publish", nil, headers, 200)
 		encoded, _ := json.Marshal(published)
-		if err := json.Unmarshal(encoded, &f.route); err != nil || !f.route.ModelRewriting || f.route.Aliases["team-code"] != target || f.route.MessagesToCodex {
+		if err := json.Unmarshal(encoded, &f.route); err != nil || !f.route.ModelRewriting || f.route.Aliases["team-code"] != target || f.route.MessagesToCodex || f.route.InitialRecoveryAttempts != 1 {
 			t.Fatalf("exact alias publication %+v, %v", f.route, err)
 		}
 	}
@@ -562,10 +634,11 @@ func TestCodeFoundationExactAliasesPreservePinsAcrossPublication(t *testing.T) {
 	admit := func(conversation, model string) (resources.CodePermit, error) {
 		input := f.input(conversation, "", nil)
 		input.Operation.Model = model
+		input.InitialRecovery = true
 		return f.store.Admit(t.Context(), input)
 	}
 	first, err := admit("alias-existing", "team-code")
-	if err != nil || first.Pin.Model != "team-code" || first.Pin.TargetModel != "native-model" || first.Attempt.Model != "native-model" {
+	if err != nil || !first.InitialRecovery || first.Pin.Model != "team-code" || first.Pin.TargetModel != "native-model" || first.Attempt.Model != "native-model" {
 		t.Fatalf("alias first admission %+v, %v", first, err)
 	}
 	native, err := admit("native-existing", "native-model")
@@ -591,4 +664,52 @@ func TestCodeFoundationExactAliasesPreservePinsAcrossPublication(t *testing.T) {
 	f.exec(t, `UPDATE olp.code_accounts SET health='unavailable' WHERE id=$1`, f.account)
 	_, err = admit("alias-unavailable", "team-code")
 	codeRefusal(t, err, "code_account_unavailable")
+}
+
+func TestCodeFoundationInitialRecoveryRefreshPreservesConcurrentCooldown(t *testing.T) {
+	f := newCodeFixture(t)
+	draft := f.h.want(f.owner, "PUT", "/api/v1/code/routes/"+f.route.ID, map[string]any{
+		"project_id": f.project, "slug": f.route.Slug, "pool_id": f.pool, "models": f.route.Models, "enabled": true, "initial_recovery_attempts": 1,
+	}, map[string]string{"If-Match": f.route.ETag}, 200)
+	published := f.h.want(f.owner, "POST", "/api/v1/code/routes/"+f.route.ID+"/publish", nil, withMatch(draft, idem("concurrent-cooldown-publish")), 200)
+	route := codePublicDecode[codemode.Route](t, published)
+	input := f.input("refresh-with-concurrent-cooldown", "", nil)
+	input.Route, input.InitialRecovery = route, true
+	first, err := f.store.Admit(t.Context(), input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.store.MarkDispatched(t.Context(), first.Attempt.ID); err != nil {
+		t.Fatal(err)
+	}
+	status := 401
+	if err := f.store.ObserveOutcome(t.Context(), first.Attempt.ID, codemode.Outcome{Origin: "upstream", Kind: "rejected", UpstreamStatus: &status, ObservedAt: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.store.ConfirmNonexecution(t.Context(), first.Attempt.ID, status); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.store.Settle(t.Context(), first.Attempt.ID, codemode.Usage{Total: new(int64(0))}); err != nil {
+		t.Fatal(err)
+	}
+	var generation int64
+	if err := f.h.Pool.QueryRow(t.Context(), `UPDATE olp.provider_grants SET generation=generation+1 WHERE credential_id=$1 RETURNING generation`, f.credential).Scan(&generation); err != nil {
+		t.Fatal(err)
+	}
+	observed := time.Now().UTC().Truncate(time.Microsecond)
+	rejectedUntil := observed.Add(time.Minute)
+	concurrentUntil := rejectedUntil.Add(time.Hour)
+	replacement := input
+	replacement.Recovery = &resources.CodeRecovery{From: first.Attempt.ID, Number: 1, AccountID: f.account, CredentialID: f.credential, GrantGeneration: generation - 1, RejectedUntil: rejectedUntil}
+	for index, health := range []string{"quota_limited", "unavailable"} {
+		if err := f.store.ObserveHealth(t.Context(), f.account, codemode.HealthObservation{Status: health, ObservedAt: observed.Add(time.Duration(index) * time.Second), RetryAt: &concurrentUntil}); err != nil {
+			t.Fatal(err)
+		}
+		_, recoveryErr := f.store.Admit(t.Context(), replacement)
+		codeRefusal(t, recoveryErr, "code_account_unavailable")
+		accounts := codePublicDecode[[]codemode.Account](t, f.h.want(f.owner, "GET", "/api/v1/code/accounts?project_id="+f.project, nil, nil, 200)["items"])
+		if len(accounts) != 1 || accounts[0].Eligible || accounts[0].Health != health || accounts[0].UnavailableUntil == nil || !accounts[0].UnavailableUntil.Equal(concurrentUntil) {
+			t.Fatalf("refreshed grant erased concurrent cooldown %+v", accounts)
+		}
+	}
 }

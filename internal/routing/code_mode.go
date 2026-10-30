@@ -78,6 +78,9 @@ func (s *Snapshot) validateCodeMode() error {
 		if err := route.ValidateAliases(); err != nil {
 			return err
 		}
+		if route.InitialRecoveryAttempts < 0 || route.InitialRecoveryAttempts > 2 {
+			return fmt.Errorf("invalid initial recovery policy for %s", slug)
+		}
 		if err := route.Tools.Validate(); err != nil {
 			return err
 		}

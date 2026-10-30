@@ -6416,6 +6416,12 @@
               "type": "boolean",
               "default": false,
               "description": "Explicitly enable exact model aliases independently of protocol translation and identity compatibility. Native identifiers remain unchanged. Only protocol model fields are rewritten for alias requests and responses."
+            },
+            "initial_recovery_attempts": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 2,
+              "description": "Maximum additional attempts for a new conversation after an adapter proves nonexecution. Zero disables recovery. Published revisions pin this policy. Exact models, live authority and durable state ownership remain required. Accepted, partial, ambiguous and opaque work never replays."
             }
           },
           "required": [
@@ -32219,6 +32225,12 @@
               "type": "boolean",
               "default": false,
               "description": "Explicitly enable exact model aliases independently of protocol translation and identity compatibility. Native identifiers remain unchanged. Only protocol model fields are rewritten for alias requests and responses."
+            },
+            "initial_recovery_attempts": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 2,
+              "description": "Maximum additional attempts for a new conversation after an adapter proves nonexecution. Zero disables recovery. Published revisions pin this policy. Exact models, live authority and durable state ownership remain required. Accepted, partial, ambiguous and opaque work never replays."
             }
           },
           "required": [

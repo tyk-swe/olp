@@ -31,22 +31,27 @@ import (
 	"github.com/tyk-swe/olp/internal/routing"
 )
 
+type codeTestRefusal struct {
+	key, digest, code string
+}
+
 type codeTestLedger struct {
-	mu         sync.Mutex
-	inputs     []resources.CodeAdmission
-	marks      []string
-	aborts     []string
-	usages     []codemode.Usage
-	health     codemode.HealthObservation
-	allowance  codemode.Allowance
-	refusals   []string
-	refuse     string
-	done       chan codemode.Usage
-	references map[string]bool
-	outcomes   []codemode.Outcome
-	offers     codeclient.Offers
-	modelsErr  error
-	pinTarget  string
+	refusalRecords []codeTestRefusal
+	mu             sync.Mutex
+	inputs         []resources.CodeAdmission
+	marks          []string
+	aborts         []string
+	usages         []codemode.Usage
+	health         codemode.HealthObservation
+	allowance      codemode.Allowance
+	refusals       []string
+	refuse         string
+	done           chan codemode.Usage
+	references     map[string]bool
+	outcomes       []codemode.Outcome
+	offers         codeclient.Offers
+	modelsErr      error
+	pinTarget      string
 }
 
 func (l *codeTestLedger) Models(context.Context, codemode.Route, string) (codeclient.Offers, error) {
@@ -66,6 +71,9 @@ func (l *codeTestLedger) ObserveOutcome(_ context.Context, _ string, outcome cod
 func (l *codeTestLedger) Admit(_ context.Context, in resources.CodeAdmission) (resources.CodePermit, error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	initial := !slices.ContainsFunc(l.inputs, func(previous resources.CodeAdmission) bool {
+		return previous.APIKeyID == in.APIKeyID && previous.Operation.Identity.Conversation == in.Operation.Identity.Conversation
+	})
 	l.inputs = append(l.inputs, in)
 	if in.PreviousResponse != "" && !l.references[in.PreviousResponse] {
 		return resources.CodePermit{}, codemode.Refuse(409, "code_parent_unresolved")
@@ -74,6 +82,8 @@ func (l *codeTestLedger) Admit(_ context.Context, in resources.CodeAdmission) (r
 		return resources.CodePermit{}, codemode.Refuse(409, l.refuse)
 	}
 	permit, err := codeTestPermit(in.APIKeyID, in.Providers)
+	permit.Authority.EndUserDigest = in.EndUserDigest
+	permit.InitialRecovery = in.InitialRecovery && (initial || in.Recovery != nil)
 	permit.Attempt = codemode.Attempt{ID: fmt.Sprint(len(l.inputs))}
 	permit.Pin.TargetModel = l.pinTarget
 	return permit, err
@@ -134,10 +144,11 @@ func (l *codeTestLedger) ObserveAllowance(_ context.Context, _ string, a codemod
 	l.allowance = l.allowance.Merge(a)
 	return nil
 }
-func (l *codeTestLedger) RecordRefusal(_ context.Context, _ codemode.Route, _, _ string, reason string) error {
+func (l *codeTestLedger) RecordRefusal(_ context.Context, _ codemode.Route, key, digest string, reason string) error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.refusals = append(l.refusals, reason)
+	l.refusalRecords = append(l.refusalRecords, codeTestRefusal{key: key, digest: digest, code: reason})
 	return nil
 }
 func (l *codeTestLedger) wait(t *testing.T) codemode.Usage {
@@ -631,6 +642,9 @@ func TestCodeMessagesToCodexPreservesNativeModelIdentifiers(t *testing.T) {
 		t.Fatalf("ordinary route accepted a native model identifier, status %d", ordinary.StatusCode)
 	}
 }
+
+func (l *codeTestLedger) ConfirmNonexecution(context.Context, string, int) error   { return nil }
+func (l *codeTestLedger) ObserveCooldown(context.Context, string, time.Time) error { return nil }
 
 func TestCodeMessagesToCodexToolExchange(t *testing.T) {
 	for _, source := range []string{"fragments", "complete", "arguments-done"} {
@@ -1200,5 +1214,46 @@ func TestCodeExactAliasRefusesUnauthorizedOrUnavailableTargets(t *testing.T) {
 				t.Fatalf("invalid alias dispatched, status %d, body %s", response.StatusCode, body)
 			}
 		})
+	}
+}
+
+func TestCodeExactAliasRecoveryKeepsSelectedNativeModel(t *testing.T) {
+	h, ledger, server := newCodeForwardHarness(t)
+	route := h.rt.release.Snapshot.CodeRoutes["coding"]
+	route.InitialRecoveryAttempts = 1
+	route.ModelRewriting = true
+	route.Aliases = map[string]string{"team-code": "native-model"}
+	h.rt.release.Snapshot.CodeRoutes[route.Slug] = route
+	h.gateway.CodeAuthorizer = &codeRecoveryAuthorizer{}
+	ledger.pinTarget = "native-model"
+	h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
+		var request struct{ Model, Input string }
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil || request.Model != "native-model" || request.Input != "hello" {
+			t.Errorf("alias recovery changed exact target or prompt %+v, %v", request, err)
+		}
+		if h.mock.count("a") == 1 {
+			w.WriteHeader(http.StatusUnauthorized)
+			io.WriteString(w, `{"error":{"type":"authentication_error","code":"invalid_api_key"}}`)
+			return
+		}
+		io.WriteString(w, `{"id":"recovered","model":"native-model","usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}`)
+	})
+	response := codeDo(t, server, []byte(`{"model":"team-code","input":"hello"}`), nil)
+	defer response.Body.Close()
+	var completion struct{ ID, Model string }
+	if err := json.NewDecoder(response.Body).Decode(&completion); err != nil || response.StatusCode != http.StatusOK || completion.ID != "recovered" || completion.Model != "team-code" || h.mock.count("a") != 2 {
+		t.Fatalf("alias recovery status=%d completion=%+v err=%v requests=%d", response.StatusCode, completion, err, h.mock.count("a"))
+	}
+	ledger.wait(t)
+	ledger.wait(t)
+	ledger.mu.Lock()
+	defer ledger.mu.Unlock()
+	if len(ledger.inputs) != 2 || ledger.inputs[1].Recovery == nil {
+		t.Fatalf("alias recovery did not use durable recovery admission %+v", ledger.inputs)
+	}
+	for _, admission := range ledger.inputs {
+		if !admission.InitialRecovery || admission.Operation.Model != "native-model" || admission.Operation.PublicModel() != "team-code" {
+			t.Fatalf("alias recovery lost requested or exact model %+v", admission)
+		}
 	}
 }
