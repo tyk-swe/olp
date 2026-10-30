@@ -1,6 +1,7 @@
 package resources
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -8,6 +9,7 @@ import (
 	"slices"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/tyk-swe/olp/internal/access"
@@ -15,6 +17,7 @@ import (
 	"github.com/tyk-swe/olp/internal/codeadapter"
 	"github.com/tyk-swe/olp/internal/codemode"
 	"github.com/tyk-swe/olp/internal/limits"
+	"github.com/tyk-swe/olp/internal/routing"
 )
 
 type CodeStore struct{ Pool *pgxpool.Pool }
@@ -414,6 +417,13 @@ func codePin(ctx context.Context, tx pgx.Tx, in CodeAdmission, b codemode.Bindin
 	return pin, account, err
 }
 
+type codeCandidate struct {
+	account   codemode.Account
+	available bool
+	position  int
+	score     float64
+}
+
 // codeAccount selects the pool account that serves an admission: an eligible
 // one of the admission's providers, so its adapter serves the request's path
 // and the gateway can reach it. It is the account id when given, else the
@@ -424,8 +434,6 @@ func codePin(ctx context.Context, tx pgx.Tx, in CodeAdmission, b codemode.Bindin
 // that is unavailable refuses the admission.
 func codeAccount(ctx context.Context, tx pgx.Tx, in CodeAdmission, id, root string, tree []string) (codemode.Account, error) {
 	var a codemode.Account
-	var models, allowance []byte
-	var available bool
 	required := []string{in.Operation.Model}
 	if in.Operation.Name == "connect" {
 		required = in.Route.Models
@@ -437,7 +445,11 @@ func codeAccount(ctx context.Context, tx pgx.Tx, in CodeAdmission, id, root stri
 	if err != nil {
 		return a, err
 	}
-	err = tx.QueryRow(ctx, `SELECT a.id::text,a.project_id::text,a.provider_id::text,a.credential_id::text,a.principal,a.models,a.name,a.enabled,a.etag::text,a.health,a.allowance,olp.code_account_available(a)
+	routeID, err := uuid.Parse(in.Route.ID)
+	if err != nil {
+		return a, err
+	}
+	rows, err := tx.Query(ctx, `SELECT a.id::text,a.project_id::text,a.provider_id::text,a.credential_id::text,a.principal,a.models,a.name,a.enabled,a.etag::text,a.health,a.allowance,olp.code_account_available(a),coalesce(array_position($6::text[],a.id::text),2147483647),pa.weight
 		FROM olp.code_accounts a JOIN olp.code_pool_accounts pa ON pa.account_id=a.id
 		JOIN olp.provider_credentials c ON c.id=a.credential_id JOIN olp.provider_grants g ON g.credential_id=c.id JOIN olp.providers p ON p.id=a.provider_id
 		JOIN olp.code_route_revisions v ON v.id=$7 CROSS JOIN LATERAL (SELECT `+codeadapter.SQL("v.connections->(a.provider_id::text)")+` adapter) f
@@ -447,22 +459,48 @@ func codeAccount(ctx context.Context, tx pgx.Tx, in CodeAdmission, id, root stri
 		AND NOT EXISTS(SELECT 1 FROM olp.code_accounts t WHERE t.id::text=ANY($6::text[])
 			AND coalesce(array_position($6::text[],t.id::text)<array_position($6::text[],a.id::text),true)
 			AND (`+codeadapter.SQL("v.connections->(t.provider_id::text)")+` IS NOT DISTINCT FROM f.adapter
-				OR EXISTS(SELECT 1 FROM olp.code_pins p WHERE p.root_id=nullif($8,'')::uuid AND p.account_id=t.id AND p.adapter IS NOT DISTINCT FROM f.adapter)))
-		ORDER BY array_position($6::text[],a.id::text) NULLS LAST,olp.code_account_available(a) DESC,a.id LIMIT 1`,
-		in.Route.PoolID, in.Route.ProjectID, requiredJSON, id, in.Providers, tree, in.Route.RevisionID, root).Scan(&a.ID, &a.ProjectID, &a.ProviderID, &a.CredentialID, &a.Principal, &models, &a.Name, &a.Enabled, &a.ETag, &a.Health, &allowance, &available)
-	if errors.Is(err, pgx.ErrNoRows) || err == nil && !available {
-		return a, codemode.Refuse(503, "code_account_unavailable")
-	}
+				OR EXISTS(SELECT 1 FROM olp.code_pins p WHERE p.root_id=nullif($8,'')::uuid AND p.account_id=t.id AND p.adapter IS NOT DISTINCT FROM f.adapter)))`,
+		in.Route.PoolID, in.Route.ProjectID, requiredJSON, id, in.Providers, tree, in.Route.RevisionID, root)
 	if err != nil {
 		return a, err
 	}
-	if len(allowance) > 0 {
-		if err = json.Unmarshal(allowance, &a.Allowance); err != nil {
-			return a, err
+	candidates, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (codeCandidate, error) {
+		var candidate codeCandidate
+		var weight int64
+		if err := row.Scan(&candidate.account.ID, &candidate.account.ProjectID, &candidate.account.ProviderID, &candidate.account.CredentialID, &candidate.account.Principal, &candidate.account.Models, &candidate.account.Name, &candidate.account.Enabled, &candidate.account.ETag, &candidate.account.Health, &candidate.account.Allowance, &candidate.available, &candidate.position, &weight); err != nil {
+			return candidate, err
 		}
+		accountID, err := uuid.Parse(candidate.account.ID)
+		if err != nil {
+			return candidate, err
+		}
+		return codeCandidate{account: candidate.account, available: candidate.available, position: candidate.position, score: routing.Score(routeID, accountID, weight, in.Operation.Name, "code", in.Operation.Model, []byte(in.APIKeyID+":"+in.Operation.Identity.Conversation))}, nil
+	})
+	if err != nil {
+		return a, err
 	}
-	err = json.Unmarshal(models, &a.Models)
-	return a, err
+	if len(candidates) == 0 {
+		return a, codemode.Refuse(503, "code_account_unavailable")
+	}
+	chosen := slices.MaxFunc(candidates, func(left, right codeCandidate) int {
+		if left.position != right.position {
+			return cmp.Compare(right.position, left.position)
+		}
+		if left.available != right.available {
+			if left.available {
+				return 1
+			}
+			return -1
+		}
+		if left.score != right.score {
+			return cmp.Compare(left.score, right.score)
+		}
+		return cmp.Compare(right.account.ID, left.account.ID)
+	})
+	if !chosen.available {
+		return a, codemode.Refuse(503, "code_account_unavailable")
+	}
+	return chosen.account, nil
 }
 
 // MarkDispatched is the irreversible pre-send transition. Network ambiguity

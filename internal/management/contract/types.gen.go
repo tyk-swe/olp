@@ -7632,14 +7632,17 @@ type CodePin struct {
 
 // CodePool defines model for CodePool.
 type CodePool struct {
-	AccountIds  []openapi_types.UUID                  `json:"account_ids"`
-	ApiKeyIds   []openapi_types.UUID                  `json:"api_key_ids"`
-	Etag        openapi_types.UUID                    `json:"etag"`
-	Id          openapi_types.UUID                    `json:"id"`
-	Kind        CodePoolKind                          `json:"kind"`
-	Name        string                                `json:"name"`
-	OwnerUserId nullable.Nullable[openapi_types.UUID] `json:"owner_user_id"`
-	ProjectId   openapi_types.UUID                    `json:"project_id"`
+	AccountIds []openapi_types.UUID `json:"account_ids"`
+
+	// AccountWeights Relative weights keyed by assigned account ID. Omitted accounts use weight 1.
+	AccountWeights map[string]int64                      `json:"account_weights"`
+	ApiKeyIds      []openapi_types.UUID                  `json:"api_key_ids"`
+	Etag           openapi_types.UUID                    `json:"etag"`
+	Id             openapi_types.UUID                    `json:"id"`
+	Kind           CodePoolKind                          `json:"kind"`
+	Name           string                                `json:"name"`
+	OwnerUserId    nullable.Nullable[openapi_types.UUID] `json:"owner_user_id"`
+	ProjectId      openapi_types.UUID                    `json:"project_id"`
 }
 
 // CodePoolKind defines model for CodePool.Kind.
@@ -7653,12 +7656,15 @@ type CodePoolList struct {
 
 // CodePoolWrite defines model for CodePoolWrite.
 type CodePoolWrite struct {
-	AccountIds  []openapi_types.UUID                  `json:"account_ids"`
-	ApiKeyIds   []openapi_types.UUID                  `json:"api_key_ids"`
-	Kind        CodePoolWriteKind                     `json:"kind"`
-	Name        string                                `json:"name"`
-	OwnerUserId nullable.Nullable[openapi_types.UUID] `json:"owner_user_id"`
-	ProjectId   openapi_types.UUID                    `json:"project_id"`
+	AccountIds []openapi_types.UUID `json:"account_ids"`
+
+	// AccountWeights Relative weights keyed by assigned account ID. Omitted accounts use weight 1.
+	AccountWeights *map[string]int64                     `json:"account_weights,omitempty"`
+	ApiKeyIds      []openapi_types.UUID                  `json:"api_key_ids"`
+	Kind           CodePoolWriteKind                     `json:"kind"`
+	Name           string                                `json:"name"`
+	OwnerUserId    nullable.Nullable[openapi_types.UUID] `json:"owner_user_id"`
+	ProjectId      openapi_types.UUID                    `json:"project_id"`
 }
 
 // CodePoolWriteKind defines model for CodePoolWrite.Kind.
