@@ -131,6 +131,10 @@ INSERT INTO olp.provider_grants(credential_id) VALUES(:'credential');
   await expect(
     page.getByLabel('Translate Chat through Antigravity')
   ).not.toBeChecked();
+  await page.screenshot({
+    path: info.outputPath('code-route-before-policy.png'),
+    fullPage: true
+  });
   await page.getByLabel('Translate Chat through Antigravity').check();
   await page.getByLabel('Route slug').fill(`code-${suffix}`);
   await page.getByLabel('Pool', { exact: true }).selectOption(pool.id);
@@ -143,6 +147,10 @@ INSERT INTO olp.provider_grants(credential_id) VALUES(:'credential');
   await page
     .getByLabel('Exact model aliases')
     .fill('team-code=fixture-native-model');
+  await page.screenshot({
+    path: info.outputPath('code-route-after-policy.png'),
+    fullPage: true
+  });
   await page.getByRole('button', { name: 'Save', exact: true }).click();
   await expect(page.getByText('Not published', { exact: true })).toBeVisible();
   page.once('dialog', (dialog) => dialog.accept());
