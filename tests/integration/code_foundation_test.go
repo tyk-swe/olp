@@ -1017,6 +1017,10 @@ func newPaidCodeFixturePolicy(t *testing.T, restricted bool, endpoints ...string
 }
 func publishPaidCodeFixture(t *testing.T, f *codeFixture, restricted bool, requestedLimits *routing.Limits, endpoints ...string) (*codeFixture, routing.Provider, routing.Slot) {
 	t.Helper()
+	return publishPaidCodeFixtureModes(t, f, restricted, requestedLimits, []string{"unary"}, endpoints...)
+}
+func publishPaidCodeFixtureModes(t *testing.T, f *codeFixture, restricted bool, requestedLimits *routing.Limits, modes []string, endpoints ...string) (*codeFixture, routing.Provider, routing.Slot) {
+	t.Helper()
 	model := f.route.Models[0]
 	endpoint := func() string {
 		if len(endpoints) > 0 {
@@ -1030,7 +1034,7 @@ func publishPaidCodeFixture(t *testing.T, f *codeFixture, restricted bool, reque
 		}
 		return nil
 	}()
-	providerID, slot := newCodePaidProviderPolicy(t, f.h, f.owner, f.project, endpoint, model, requestedLimits, keys)
+	providerID, slot := newCodePaidProviderPolicy(t, f.h, f.owner, f.project, endpoint, model, requestedLimits, keys, modes...)
 	draft := map[string]any{"project_id": f.project, "slug": f.route.Slug, "pool_id": f.pool, "models": f.route.Models, "enabled": true, "paid_participation": true, "paid_targets": map[string]codemode.PaidTarget{model: {ProviderID: strings.ToUpper(providerID), SlotID: strings.ToUpper(slot.ID)}}}
 	saved := f.h.want(f.owner, "PUT", "/api/v1/code/routes/"+f.route.ID, draft, withMatch(f.routeRecord, idem("paid-draft")), 200)
 	published := f.h.want(f.owner, "POST", "/api/v1/code/routes/"+f.route.ID+"/publish", nil, withMatch(saved, idem("paid-publish")), 200)
@@ -1059,7 +1063,14 @@ func publishPaidCodeFixture(t *testing.T, f *codeFixture, restricted bool, reque
 }
 
 func TestCodePaidPublicationRetainsOwnershipAndMonetaryUncertainty(t *testing.T) {
-	f, provider, slot := newPaidCodeFixture(t)
+	t.Run("unary target refuses client setup", func(t *testing.T) {
+		f, _, _ := newPaidCodeFixture(t)
+		problem := f.h.want(f.owner, "GET", "/api/v1/code/routes/"+f.route.ID+"/client-config?client=codex&model=native-model&gateway_url=https://olp.example", nil, nil, 409)
+		if code := problemCode(t, problem); code != "code_route_adapter_unsupported" {
+			t.Fatalf("unary target returned the wrong refusal %s", code)
+		}
+	})
+	f, provider, slot := publishPaidCodeFixtureModes(t, newCodeFixture(t), false, nil, []string{"unary", "streaming"})
 	offers, err := f.store.Models(t.Context(), f.route, f.key)
 	models := codeclient.Catalog(f.route, offers)
 	if err != nil || len(models) != 1 || !models[0].Paid || slices.ContainsFunc(offers, func(offer codeclient.Offer) bool { return offer.PaidProtocol != "" && offer.Adapter != "" }) {
@@ -1403,7 +1414,7 @@ func newCodePaidProvider(t *testing.T, h *accessHarness, owner *browser, project
 	t.Helper()
 	return newCodePaidProviderPolicy(t, h, owner, project, endpoint, model, nil, nil)
 }
-func newCodePaidProviderPolicy(t *testing.T, h *accessHarness, owner *browser, project, endpoint, model string, requestedLimits *routing.Limits, keys []string) (string, routing.Slot) {
+func newCodePaidProviderPolicy(t *testing.T, h *accessHarness, owner *browser, project, endpoint, model string, requestedLimits *routing.Limits, keys []string, modes ...string) (string, routing.Slot) {
 	t.Helper()
 	contractLimits := func() nullable.Nullable[contract.ConnectionLimits] {
 		if requestedLimits == nil {
@@ -1413,7 +1424,7 @@ func newCodePaidProviderPolicy(t *testing.T, h *accessHarness, owner *browser, p
 		return nullable.NewNullableWithValue(codePublicDecode[contract.ConnectionLimits](t, requestedLimits))
 	}()
 	write := contract.CreateProviderRequest{Name: "Metered fixture", ProjectId: nullable.NewNullableWithValue(uuid.MustParse(project)), Model: nullable.NewNullableWithValue(model), Credential: new("fixture-paid-secret"), Configuration: contract.ProviderConfiguration{Kind: "openai", AuthMode: "api_key", ProfileId: new("openai-responses"), ProfileRevision: new(connectors.ProfileRevision), Endpoint: nullable.NewNullableWithValue(endpoint), Options: &contract.ConnectionOptions{VendorId: nullable.NewNullableWithValue("openai"), Limits: contractLimits}}}
-	created := codePublicDecode[contract.ProviderResponse](t, h.want(owner, "POST", "/api/v1/providers", write, idem("paid-provider"), 201))
+	created := codePublicDecode[contract.ProviderResponse](t, h.want(owner, "POST", "/api/v1/providers", write, idem(uuid.NewString()), 201))
 	providerID := created.Id.String()
 	var slotID, slotName, credential string
 	var version int
@@ -1436,7 +1447,19 @@ func newCodePaidProviderPolicy(t *testing.T, h *accessHarness, owner *browser, p
 			t.Fatal(err)
 		}
 	}
-	models, err := json.Marshal([]routing.RevisionModel{{ID: access.NewID(), UpstreamModel: model, DisplayName: "Native fixture", Capabilities: []routing.RevisionCapability{{Operation: "generation", Surface: "openai", Mode: "unary", Source: "certified"}}}})
+	models, err := json.Marshal([]routing.RevisionModel{{ID: access.NewID(), UpstreamModel: model, DisplayName: "Native fixture", Capabilities: slices.Collect(func(yield func(routing.RevisionCapability) bool) {
+		deliveries := func() []string {
+			if len(modes) > 0 {
+				return modes
+			}
+			return []string{"unary"}
+		}()
+		for _, mode := range deliveries {
+			if !yield(routing.RevisionCapability{Operation: "generation", Surface: "openai", Mode: mode, Source: "certified"}) {
+				return
+			}
+		}
+	})}})
 	if err != nil {
 		t.Fatal(err)
 	}
