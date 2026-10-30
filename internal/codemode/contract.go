@@ -112,6 +112,7 @@ func (a Allowance) Validate() error {
 // published route. Configuration is text in Format, saved as File, or sourced
 // in a shell when File is nil. It never contains an OLP key.
 type ClientConfiguration struct {
+	Models            []Model             `json:"models"`
 	AdditionalFiles   []ConfigurationFile `json:"additional_files,omitempty"`
 	RouteSlug         string              `json:"route_slug"`
 	BaseURL           string              `json:"base_url"`
@@ -129,6 +130,19 @@ type ClientConfiguration struct {
 	File              *string             `json:"file"`
 	Configuration     string              `json:"configuration"`
 	QualificationGaps []string            `json:"qualification_gaps"`
+}
+
+type Model struct {
+	ID           string            `json:"id"`
+	Object       string            `json:"object"`
+	Capabilities []ModelCapability `json:"capabilities"`
+	Clients      []string          `json:"clients"`
+}
+
+type ModelCapability struct {
+	Protocol   Protocol `json:"protocol"`
+	Path       string   `json:"path"`
+	Transports []string `json:"transports"`
 }
 
 type Pool struct {

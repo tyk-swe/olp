@@ -3,6 +3,7 @@ package codeclient
 import (
 	"bytes"
 	"encoding/json"
+	"maps"
 
 	"github.com/tyk-swe/olp/internal/codeadapter"
 	"github.com/tyk-swe/olp/internal/codemode"
@@ -17,9 +18,18 @@ func openCodeConfiguration(adapters []codemode.Adapter, offers Offers, through m
 		BaseURL string `json:"baseURL"`
 		APIKey  string `json:"apiKey"`
 	}
+	type modelProvider struct {
+		NPM string `json:"npm"`
+	}
+	type modelDefinition struct {
+		ID       string        `json:"id"`
+		Name     string        `json:"name"`
+		Provider modelProvider `json:"provider"`
+	}
 	type settings struct {
-		Options   options  `json:"options"`
-		Whitelist []string `json:"whitelist"`
+		Options   options                    `json:"options"`
+		Whitelist []string                   `json:"whitelist"`
+		Models    map[string]modelDefinition `json:"models"`
 	}
 	type agent struct {
 		Model string `json:"model"`
@@ -33,6 +43,9 @@ func openCodeConfiguration(adapters []codemode.Adapter, offers Offers, through m
 		}
 		for _, adapter := range adapters {
 			vendor, _ := codeadapter.Lookup(adapter)
+			if !vendor.Reaches(codeadapter.ClientOpenCode, m) {
+				continue
+			}
 			if client, ok := vendor.Client(codeadapter.ClientOpenCode); ok && client.Provider != "" {
 				provider := client.Provider
 				whitelists[adapter] = append(whitelists[adapter], m)
@@ -55,7 +68,20 @@ func openCodeConfiguration(adapters []codemode.Adapter, offers Offers, through m
 			client, _ := vendor.Client(codeadapter.ClientOpenCode)
 			provider := client.Provider
 			document.EnabledProviders = append(document.EnabledProviders, provider)
-			document.Provider[provider] = settings{Options: options{BaseURL: baseURL + client.URLSuffix, APIKey: "{env:OLP_API_KEY}"}, Whitelist: models}
+			definitions := maps.Collect(func(yield func(string, modelDefinition) bool) {
+				for _, model := range models {
+					protocol, _ := vendor.Protocol(codeadapter.ClientOpenCode, model)
+					sdk := map[codemode.Protocol]string{
+						codemode.ProtocolChat:      "@ai-sdk/openai-compatible",
+						codemode.ProtocolMessages:  "@ai-sdk/anthropic",
+						codemode.ProtocolResponses: "@ai-sdk/openai",
+					}[protocol]
+					if !yield(model, modelDefinition{ID: model, Name: model, Provider: modelProvider{NPM: sdk}}) {
+						return
+					}
+				}
+			})
+			document.Provider[provider] = settings{Options: options{BaseURL: baseURL + client.URLSuffix, APIKey: "{env:OLP_API_KEY}"}, Whitelist: models, Models: definitions}
 		}
 	}
 	var b bytes.Buffer
