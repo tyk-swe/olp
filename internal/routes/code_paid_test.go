@@ -85,12 +85,8 @@ func newPaidPublicationFixture(t *testing.T, source string, enabled bool) paidPu
 
 func TestCodePaidPublicationFreezesNativeAuthorityAndLimits(t *testing.T) {
 	fixture := newPaidPublicationFixture(t, "", true)
-	encoded, err := codePaidPublication(t.Context(), paidPublicationTx{revisions: []routing.ProviderRevision{fixture.revision}}, fixture.route)
+	published, err := CodePaidProviders(t.Context(), paidPublicationTx{revisions: []routing.ProviderRevision{fixture.revision}}, fixture.route)
 	if err != nil {
-		t.Fatal(err)
-	}
-	var published map[string]routing.Provider
-	if err := json.Unmarshal(encoded, &published); err != nil {
 		t.Fatal(err)
 	}
 	target := published[fixture.revision.ID]
@@ -132,10 +128,10 @@ func TestCodePaidPublicationRefusesUnavailableTargets(t *testing.T) {
 				}
 				return []routing.ProviderRevision{fixture.revision}
 			}()
-			encoded, err := codePaidPublication(t.Context(), paidPublicationTx{revisions: revisions}, fixture.route)
+			published, err := CodePaidProviders(t.Context(), paidPublicationTx{revisions: revisions}, fixture.route)
 			var problem *access.Problem
-			if !errors.As(err, &problem) || problem.Status != http.StatusUnprocessableEntity || problem.Field != "paid_targets" || len(encoded) != 0 {
-				t.Fatalf("unusable paid target was not refused %s %v", encoded, err)
+			if !errors.As(err, &problem) || problem.Status != http.StatusUnprocessableEntity || problem.Field != "paid_targets" || len(published) != 0 {
+				t.Fatalf("unusable paid target was not refused %v %v", published, err)
 			}
 		})
 	}
