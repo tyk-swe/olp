@@ -18635,6 +18635,91 @@
     }
   },
   {
+    "name": "importAntigravityCredentials",
+    "group": "providers",
+    "method": "POST",
+    "read_only": false,
+    "path": "/api/v1/providers/{provider_id}/antigravity-import",
+    "description": "Import Antigravity subscription credentials once",
+    "scopes": [
+      [
+        "configure"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "provider_id",
+        "in": "path",
+        "required": true,
+        "type": "string"
+      },
+      {
+        "name": "If-Match",
+        "in": "header",
+        "required": true,
+        "type": "string"
+      }
+    ],
+    "response_headers": {
+      "ETag": "etag"
+    },
+    "body_required": true,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "object",
+          "properties": {
+            "provider_id": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "provider_id"
+          ]
+        },
+        "if_match": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Current provider draft ETag"
+        },
+        "body": {
+          "$ref": "#/$defs/AntigravityCredentialImportRequest"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "if_match",
+        "body"
+      ],
+      "$defs": {
+        "AntigravityCredentialImportRequest": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "credentials"
+          ],
+          "properties": {
+            "credentials": {
+              "type": "string",
+              "maxLength": 65536,
+              "writeOnly": true,
+              "description": "One-time Antigravity migration JSON with type=antigravity, access_token, refresh_token, client_id and client_secret for the original authorized OAuth client. The client_id must match the provider option. Optional pinned export metadata is expired (RFC3339), expires_in, timestamp, email and project_id. Supplied expiry must be current and supplied project_id must agree with authenticated project evidence. Email never establishes identity. Unknown fields, ambiguous JSON, raw IDE stores, service accounts and credentials without original client authorization are unsupported. The original access token must authenticate fixed userinfo and project endpoints. Import refreshes and verifies the same subject and project before encrypted staging."
+            },
+            "slot_id": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Existing credential slot, defaults to the default slot"
+            }
+          }
+        }
+      }
+    }
+  },
+  {
     "name": "importClaudeCredentials",
     "group": "providers",
     "method": "POST",
