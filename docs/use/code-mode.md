@@ -18,8 +18,8 @@ ChatGPT, OpenCode Go or coding-plan subscription. See the
 
 The [coding-client baseline and roadmap](../develop/plans/code-mode-parity.md)
 records broader compatibility and recovery work. Native forwarding is the
-default. An explicitly published route policy can enable the Messages text
-translation described below.
+default. Explicitly published route policies can enable the Messages and Chat
+translations described below.
 
 ## Adapters and clients
 
@@ -143,6 +143,37 @@ path does not establish complete Claude Code qualification. CLI context and beta
 requirements and durable opaque state need separate qualification.
 Live Codex acceptance, including output-token caps, remains unqualified.
 
+### OpenCode Chat through Codex
+
+Enable **Translate Chat through Codex** in the route editor, or set
+`chat_to_codex: true` in the management route write, then publish the draft.
+This independent policy is disabled by default and frozen in the published
+revision. Generate OpenCode setup through the existing route client-config
+endpoint. It declares each offered model explicitly under `olp-codex`, with the
+Chat SDK and the route's `/v1` base URL. It does not require those models to be
+present in OpenCode's bundled catalog. Exact model names and published aliases
+remain the public selection, including planning and small models.
+
+HTTP `v1/chat/completions` text and function tools translate through the Codex
+Responses transport. System and developer text, function names, call IDs, JSON
+arguments, text results and output-token caps are preserved. Explicit
+`reasoning_effort` values `low`, `medium` and `high` map to the same Responses
+effort. Unary and SSE replies share the existing Responses codec and native
+Codex usage accounting. OpenCode session and parent headers retain code-mode
+conversation ownership across tool results, child sessions and cold resumes.
+Portable initial requests can use the existing bounded recovery policy after
+proven nonexecution. Accepted, partial and ambiguous execution is never replayed.
+
+Signed or opaque reasoning, server-owned continuation state, media, named
+messages, unsupported generation controls, beta headers, query parameters and
+unknown required fields are refused. Unsupported upstream state fails the
+projection while preserving observed usage. Cancellation emits no successful
+terminal marker, and missing terminal usage remains unknown. Native Chat,
+Messages and Responses forwarding retain their wire behavior. Translation does
+not enable the independent Codex identity policy or change prompts. Controlled
+codec and SDK fixtures do not establish current OpenCode client acceptance or
+live Codex subscription acceptance. Both remain unqualified.
+
 ### Codex CLI identity compatibility
 
 This independent route option is disabled by default. Before enabling it, review
@@ -213,7 +244,7 @@ client's configuration.
 | Client | Paths it uses | Models a mixed route can give it |
 | --- | --- | --- |
 | Claude Code | `v1/messages` | GLM Coding Plan, MiniMax M Plan, Kimi Code and Qwen Token Plan models, and OpenCode Go's Messages models such as MiniMax and Qwen |
-| OpenCode | `v1/chat/completions`, `v1/messages`, `v1/responses` | Every coding-plan model, and every OpenCode Go model including GPT and Grok |
+| OpenCode | `v1/chat/completions`, `v1/messages`, `v1/responses` | Every coding-plan model, every OpenCode Go model including GPT and Grok, and Codex models with explicit Chat translation |
 | Codex CLI | `responses`, `responses/compact` | ChatGPT subscription models only |
 
 To plan with a GPT model and implement with GLM in OpenCode, put an OpenCode Go
@@ -221,7 +252,8 @@ account listing `gpt-5.5` and a GLM Coding Plan account listing `glm-5.3` in one
 pool, publish a route with both models, and generate the OpenCode configuration
 with `model=glm-5.3` and `plan_model=gpt-5.5`. Claude Code can plan the same way
 with MiniMax or Qwen using native forwarding. Codex accounts become available
-to Claude Code only when the route explicitly enables Messages text translation.
+to Claude Code only with explicit Messages translation, and to OpenCode only
+with explicit Chat translation.
 When several accounts list a model, the conversation's own accounts come first;
 see [Conversations and authority](#conversations-and-authority). A conversation
 uses one account of each adapter, so the planning and background models must be

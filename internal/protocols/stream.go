@@ -742,7 +742,7 @@ func (t *streamTranslator) frame(frame []byte) error {
 				return t.responseToolSnapshot(int(index), Object{"type": raw("function_call"), "call_id": raw(call.ID), "name": raw(call.Name), "arguments": f["arguments"]})
 			case "response.output_item.done":
 				item, _ := object(f["item"])
-				if t.target == wire.Anthropic {
+				if t.target == wire.Anthropic || t.target == wire.Chat {
 					if err := validateResponsesItem(item); err != nil {
 						return err
 					}
@@ -754,7 +754,7 @@ func (t *streamTranslator) frame(frame []byte) error {
 				return t.responseMessageSnapshot(int(index), item)
 			case "response.completed", "response.incomplete":
 				response, _ := object(f["response"])
-				if t.target == wire.Anthropic {
+				if t.target == wire.Anthropic || t.target == wire.Chat {
 					if err := validateResponsesOutput(response); err != nil {
 						return err
 					}
@@ -777,7 +777,7 @@ func (t *streamTranslator) frame(frame []byte) error {
 				return t.responseTextDelta(int(index), str(f["delta"]))
 			case "response.output_item.added":
 				item, _ := optionalObject(f["item"])
-				if t.target == wire.Anthropic {
+				if t.target == wire.Anthropic || t.target == wire.Chat {
 					if err := validateResponsesItem(item); err != nil {
 						return err
 					}

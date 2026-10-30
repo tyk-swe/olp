@@ -9,7 +9,7 @@ import (
 )
 
 func PortableInitialRequest(body []byte, headers http.Header, request codemode.Request) bool {
-	if request.Operation.Name != "responses" && request.Operation.Name != "messages" || request.Operation.Identity.Parent != "" || request.PreviousResponse != "" || len(headers.Values("X-Codex-Turn-State")) != 0 {
+	if request.Operation.Name != "responses" && request.Operation.Name != "messages" && request.Operation.Name != "chat" || request.Operation.Identity.Parent != "" || request.PreviousResponse != "" || len(headers.Values("X-Codex-Turn-State")) != 0 {
 		return false
 	}
 	document, err := oif.ParseJSON(body, oif.Limits{MaxBytes: MaxBody})
@@ -17,6 +17,9 @@ func PortableInitialRequest(body []byte, headers http.Header, request codemode.R
 		return false
 	}
 	root := document.Root()
+	if request.Operation.Name == "chat" {
+		return portableInitialChat(root)
+	}
 	if request.Operation.Name == "messages" {
 		if !portableFields(root, "model", "messages", "system", "max_tokens", "stream", "temperature", "top_p", "top_k", "stop_sequences", "metadata") {
 			return false
@@ -59,16 +62,7 @@ func portableInitialField(member oif.Member) bool {
 		return value.Kind() == oif.Array && !slices.ContainsFunc(value.Elements(), func(tool oif.Value) bool {
 			typeValue, _ := tool.Lookup("type")
 			name, _ := typeValue.Text()
-			return name != "function" || !portableFields(tool, "type", "name", "description", "parameters", "strict") || slices.ContainsFunc(tool.Members(), func(field oif.Member) bool {
-				switch field.Name {
-				case "parameters":
-					return field.Value.Kind() != oif.Object
-				case "strict":
-					return field.Value.Kind() != oif.Boolean && field.Value.Kind() != oif.Null
-				default:
-					return field.Value.Kind() != oif.String
-				}
-			})
+			return name != "function" || !portableFunction(tool)
 		})
 	case "tool_choice":
 		name, _ := value.Text()
@@ -131,5 +125,52 @@ func portableTextContent(content oif.Value) bool {
 func portableFields(value oif.Value, allowed ...string) bool {
 	return value.Kind() == oif.Object && !slices.ContainsFunc(value.Members(), func(member oif.Member) bool {
 		return !slices.Contains(allowed, member.Name)
+	})
+}
+
+func portableInitialChat(root oif.Value) bool {
+	if !portableFields(root, "model", "messages", "stream", "stream_options", "max_tokens", "max_completion_tokens", "temperature", "top_p", "parallel_tool_calls", "tools", "tool_choice", "reasoning_effort") {
+		return false
+	}
+	return !slices.ContainsFunc(root.Members(), func(member oif.Member) bool {
+		switch member.Name {
+		case "reasoning_effort":
+			value, _ := member.Value.Text()
+			return !slices.Contains([]string{"low", "medium", "high"}, value)
+		case "max_completion_tokens":
+			return member.Value.Kind() != oif.Number
+		case "tools":
+			return member.Value.Kind() != oif.Array || slices.ContainsFunc(member.Value.Elements(), func(tool oif.Value) bool {
+				typeValue, _ := tool.Lookup("type")
+				kind, _ := typeValue.Text()
+				function, _ := tool.Lookup("function")
+				return kind != "function" || !portableFields(tool, "type", "function") || !portableFunction(function)
+			})
+		case "tool_choice":
+			if member.Value.Kind() == oif.String || member.Value.Kind() == oif.Null {
+				return !portableInitialField(member)
+			}
+			typeValue, _ := member.Value.Lookup("type")
+			kind, _ := typeValue.Text()
+			function, _ := member.Value.Lookup("function")
+			return kind != "function" || !portableFields(member.Value, "type", "function") || !portableFields(function, "name") || !portableObjectValues(function, oif.String)
+		case "stream_options":
+			return !portableFields(member.Value, "include_usage") || !portableObjectValues(member.Value, oif.Boolean)
+		default:
+			return !portableInitialField(member)
+		}
+	})
+}
+
+func portableFunction(function oif.Value) bool {
+	return portableFields(function, "type", "name", "description", "parameters", "strict") && !slices.ContainsFunc(function.Members(), func(field oif.Member) bool {
+		switch field.Name {
+		case "parameters":
+			return field.Value.Kind() != oif.Object
+		case "strict":
+			return field.Value.Kind() != oif.Boolean && field.Value.Kind() != oif.Null
+		default:
+			return field.Value.Kind() != oif.String
+		}
 	})
 }

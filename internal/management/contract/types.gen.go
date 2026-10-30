@@ -7893,6 +7893,9 @@ type CodeRoute struct {
 	// ChatToAntigravity Explicitly allow Chat Completions text and function tools through the internal Antigravity Gemini target over HTTP or SSE. Published revisions pin this policy. Native forwarding remains the default. Client identity and prompts are preserved. Signed thought state, reasoning controls, media and server tools are unsupported. Returned signature state is refused before actionable output rather than discarded. Controlled fixtures do not qualify any current model or live subscription workflow.
 	ChatToAntigravity *bool `json:"chat_to_antigravity,omitempty"`
 
+	// ChatToCodex Explicit Chat text and function tool translation through Codex Responses, disabled by default and pinned by publication. Native forwarding remains the default. Low, medium and high reasoning effort is supported. Required signed reasoning, media, server-owned state and unsupported semantics are refused. Independent Codex identity and model rewriting policies remain separate. Current OpenCode client and live subscription acceptance remain unqualified.
+	ChatToCodex *bool `json:"chat_to_codex,omitempty"`
+
 	// CodexCliIdentity Explicit route-administrator opt-in, disabled by default and independent of protocol translation. On Codex subscription HTTP and WebSocket requests only, fills Originator with codex_cli_rs when every supplied Originator value is absent or blank. Preserves explicit Originator values, User-Agent, all prompts, tools, reasoning, state and other headers. Does not enable translation or prompt changes. Publication freezes the policy. Using subscription accounts through this compatibility identity may violate provider terms and risk account suspension. Review this behavior and risk before enabling and publishing.
 	CodexCliIdentity *bool              `json:"codex_cli_identity,omitempty"`
 	Enabled          bool               `json:"enabled"`
@@ -7950,6 +7953,9 @@ type CodeRouteWrite struct {
 
 	// ChatToAntigravity Explicitly allow Chat Completions text and function tools through the internal Antigravity Gemini target over HTTP or SSE. Published revisions pin this policy. Native forwarding remains the default. Client identity and prompts are preserved. Signed thought state, reasoning controls, media and server tools are unsupported. Returned signature state is refused before actionable output rather than discarded. Controlled fixtures do not qualify any current model or live subscription workflow.
 	ChatToAntigravity *bool `json:"chat_to_antigravity,omitempty"`
+
+	// ChatToCodex Explicit Chat text and function tool translation through Codex Responses, disabled by default and pinned by publication. Native forwarding remains the default. Low, medium and high reasoning effort is supported. Required signed reasoning, media, server-owned state and unsupported semantics are refused. Independent Codex identity and model rewriting policies remain separate. Current OpenCode client and live subscription acceptance remain unqualified.
+	ChatToCodex *bool `json:"chat_to_codex,omitempty"`
 
 	// CodexCliIdentity Explicit route-administrator opt-in, disabled by default and independent of protocol translation. On Codex subscription HTTP and WebSocket requests only, fills Originator with codex_cli_rs when every supplied Originator value is absent or blank. Preserves explicit Originator values, User-Agent, all prompts, tools, reasoning, state and other headers. Does not enable translation or prompt changes. Publication freezes the policy. Using subscription accounts through this compatibility identity may violate provider terms and risk account suspension. Review this behavior and risk before enabling and publishing.
 	CodexCliIdentity *bool `json:"codex_cli_identity,omitempty"`
@@ -8179,6 +8185,9 @@ type ConfigurationCodeRoutePolicy struct {
 
 	// ChatToAntigravity Explicit opt-in for chat translation through the Antigravity adapter.
 	ChatToAntigravity *bool `json:"chat_to_antigravity,omitempty"`
+
+	// ChatToCodex Explicit Chat text and function tool translation through Codex Responses, disabled by default and pinned by publication. Native forwarding remains the default. Low, medium and high reasoning effort is supported. Required signed reasoning, media, server-owned state and unsupported semantics are refused. Independent Codex identity and model rewriting policies remain separate. Current OpenCode client and live subscription acceptance remain unqualified.
+	ChatToCodex *bool `json:"chat_to_codex,omitempty"`
 
 	// CodexCliIdentity Explicit route-administrator opt-in, disabled by default and independent of protocol translation. On Codex subscription HTTP and WebSocket requests only, fills Originator with codex_cli_rs when every supplied Originator value is absent or blank. Preserves explicit Originator values, User-Agent, all prompts, tools, reasoning, state and other headers. Does not enable translation or prompt changes. Publication freezes the policy. Using subscription accounts through this compatibility identity may violate provider terms and risk account suspension. Review this behavior and risk before enabling and publishing.
 	CodexCliIdentity *bool `json:"codex_cli_identity,omitempty"`

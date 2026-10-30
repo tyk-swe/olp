@@ -60,7 +60,7 @@ func decodeTransformed(encodedWire, target wire.Format, body []byte, route, enco
 	case wire.Chat:
 		c, err = openai.DecodeChat(body, route, target)
 	case wire.Responses:
-		if target == wire.Anthropic {
+		if target == wire.Anthropic || target == wire.Chat {
 			response, parseErr := object(body)
 			if parseErr != nil {
 				return nil, parseErr

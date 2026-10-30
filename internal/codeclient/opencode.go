@@ -52,7 +52,7 @@ func openCodeConfiguration(route codemode.Route, adapters []codemode.Adapter, of
 			if err != nil || !routeReaches(route, vendor, codeadapter.ClientOpenCode, resolved.Model) {
 				continue
 			}
-			if client, ok := vendor.Client(codeadapter.ClientOpenCode); ok && client.Provider != "" {
+			if client, ok := codeadapter.RouteClient(route, vendor, codeadapter.ClientOpenCode); ok && client.Provider != "" {
 				provider := client.Provider
 				whitelists[adapter] = append(whitelists[adapter], m)
 				qualified[m] = provider + "/" + m
@@ -71,7 +71,7 @@ func openCodeConfiguration(route codemode.Route, adapters []codemode.Adapter, of
 	for _, adapter := range adapters {
 		if models := whitelists[adapter]; len(models) != 0 {
 			vendor, _ := codeadapter.Lookup(adapter)
-			client, _ := vendor.Client(codeadapter.ClientOpenCode)
+			client, _ := codeadapter.RouteClient(route, vendor, codeadapter.ClientOpenCode)
 			provider := client.Provider
 			document.EnabledProviders = append(document.EnabledProviders, provider)
 			definitions := maps.Collect(func(yield func(string, modelDefinition) bool) {

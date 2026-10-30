@@ -4923,6 +4923,10 @@
             "codex_cli_identity": {
               "type": "boolean",
               "description": "Explicit route-administrator opt-in, disabled by default and independent of protocol translation. On Codex subscription HTTP and WebSocket requests only, fills Originator with codex_cli_rs when every supplied Originator value is absent or blank. Preserves explicit Originator values, User-Agent, all prompts, tools, reasoning, state and other headers. Does not enable translation or prompt changes. Publication freezes the policy. Using subscription accounts through this compatibility identity may violate provider terms and risk account suspension. Review this behavior and risk before enabling and publishing."
+            },
+            "chat_to_codex": {
+              "type": "boolean",
+              "description": "Explicit Chat text and function tool translation through Codex Responses, disabled by default and pinned by publication. Native forwarding remains the default. Low, medium and high reasoning effort is supported. Required signed reasoning, media, server-owned state and unsupported semantics are refused. Independent Codex identity and model rewriting policies remain separate. Current OpenCode client and live subscription acceptance remain unqualified."
             }
           },
           "required": [
@@ -6975,6 +6979,10 @@
             "codex_cli_identity": {
               "type": "boolean",
               "description": "Explicit route-administrator opt-in, disabled by default and independent of protocol translation. On Codex subscription HTTP and WebSocket requests only, fills Originator with codex_cli_rs when every supplied Originator value is absent or blank. Preserves explicit Originator values, User-Agent, all prompts, tools, reasoning, state and other headers. Does not enable translation or prompt changes. Publication freezes the policy. Using subscription accounts through this compatibility identity may violate provider terms and risk account suspension. Review this behavior and risk before enabling and publishing."
+            },
+            "chat_to_codex": {
+              "type": "boolean",
+              "description": "Explicit Chat text and function tool translation through Codex Responses, disabled by default and pinned by publication. Native forwarding remains the default. Low, medium and high reasoning effort is supported. Required signed reasoning, media, server-owned state and unsupported semantics are refused. Independent Codex identity and model rewriting policies remain separate. Current OpenCode client and live subscription acceptance remain unqualified."
             }
           },
           "required": [
@@ -28441,6 +28449,10 @@
             "codex_cli_identity": {
               "type": "boolean",
               "description": "Explicit route-administrator opt-in, disabled by default and independent of protocol translation. On Codex subscription HTTP and WebSocket requests only, fills Originator with codex_cli_rs when every supplied Originator value is absent or blank. Preserves explicit Originator values, User-Agent, all prompts, tools, reasoning, state and other headers. Does not enable translation or prompt changes. Publication freezes the policy. Using subscription accounts through this compatibility identity may violate provider terms and risk account suspension. Review this behavior and risk before enabling and publishing."
+            },
+            "chat_to_codex": {
+              "type": "boolean",
+              "description": "Explicit Chat text and function tool translation through Codex Responses, disabled by default and pinned by publication. Native forwarding remains the default. Low, medium and high reasoning effort is supported. Required signed reasoning, media, server-owned state and unsupported semantics are refused. Independent Codex identity and model rewriting policies remain separate. Current OpenCode client and live subscription acceptance remain unqualified."
             }
           },
           "required": [
@@ -33535,6 +33547,10 @@
             "codex_cli_identity": {
               "type": "boolean",
               "description": "Explicit route-administrator opt-in, disabled by default and independent of protocol translation. On Codex subscription HTTP and WebSocket requests only, fills Originator with codex_cli_rs when every supplied Originator value is absent or blank. Preserves explicit Originator values, User-Agent, all prompts, tools, reasoning, state and other headers. Does not enable translation or prompt changes. Publication freezes the policy. Using subscription accounts through this compatibility identity may violate provider terms and risk account suspension. Review this behavior and risk before enabling and publishing."
+            },
+            "chat_to_codex": {
+              "type": "boolean",
+              "description": "Explicit Chat text and function tool translation through Codex Responses, disabled by default and pinned by publication. Native forwarding remains the default. Low, medium and high reasoning effort is supported. Required signed reasoning, media, server-owned state and unsupported semantics are refused. Independent Codex identity and model rewriting policies remain separate. Current OpenCode client and live subscription acceptance remain unqualified."
             }
           },
           "required": [
