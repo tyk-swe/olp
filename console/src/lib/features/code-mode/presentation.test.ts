@@ -40,7 +40,11 @@ const attempt: CodeAttempt = {
   outcome: null,
   upstream_status: null,
   outcome_observed_at: null,
-  end_user_digest: ''
+  end_user_digest: '',
+  initial_recovery: false,
+  nonexecution: false,
+  recovery_from: null,
+  recovery_reason: null
 };
 
 describe('code configuration input', () => {
