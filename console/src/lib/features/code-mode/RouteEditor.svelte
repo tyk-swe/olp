@@ -452,9 +452,9 @@
   >
   <p>
     Enables the controlled Gemini text and function tool path after publication.
-    Signed thought state, reasoning controls, media and server tools are refused.
-    Identity and prompt compatibility remain disabled. Current models and live
-    subscription tool workflows remain unqualified.
+    Signed thought state, reasoning controls, media and server tools are
+    refused. Identity and prompt compatibility remain disabled. Current models
+    and live subscription tool workflows remain unqualified.
   </p>
   <label class="choice"
     ><input
