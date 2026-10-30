@@ -25,7 +25,7 @@ func TestCodeQualificationGenericAffinityPreservesAuthority(t *testing.T) {
 	f := newCodeFleet(t)
 	second := f.h.want(f.owner, "POST", "/api/v1/api-keys", map[string]any{"name": "Second coding key", "project_id": f.project, "scopes": []string{"inference"}, "allowed_routes": []string{"qualification"}}, idem("generic-second-key"), 201)
 	foreignProject := createProject(f.h, f.owner, "Other coding project")
-	foreign := f.h.want(f.owner, "POST", "/api/v1/api-keys", map[string]any{"name": "Other project key", "project_id": foreignProject, "scopes": []string{"inference"}, "allowed_routes": []string{"qualification"}}, idem("generic-foreign-key"), 201)
+	foreign := f.h.want(f.owner, "POST", "/api/v1/api-keys", map[string]any{"name": "Other project key", "project_id": foreignProject, "scopes": []string{"inference"}, "allowed_routes": []string{}}, idem("generic-foreign-key"), 201)
 	f.h.want(f.owner, "PUT", "/api/v1/code/pools/"+f.pool["id"].(string), f.poolInput([]string{f.keyID, second["id"].(string)}), etagHeader(f.pool), 200)
 	if err := f.gateways[1].Stop(8 * time.Second); err != nil {
 		t.Fatal(err)
