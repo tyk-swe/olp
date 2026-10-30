@@ -16706,7 +16706,7 @@
           "paid_participation": {
             "type": "boolean",
             "default": false,
-            "description": "Explicitly permit direct metered API targets. This does not enable paid fallback."
+            "description": "Explicitly permit metered API targets. Direct selection and subscription-first fallback require their separate target maps."
           },
           "paid_targets": {
             "type": "object",
@@ -16718,6 +16718,14 @@
           "chat_to_antigravity": {
             "type": "boolean",
             "description": "Explicitly allow Chat Completions text and function tools through the internal Antigravity Gemini target over HTTP or SSE. Published revisions pin this policy. Native forwarding remains the default. Client identity and prompts are preserved. Signed thought state, reasoning controls, media and server tools are unsupported. Returned signature state is refused before actionable output rather than discarded. Controlled fixtures do not qualify any current model or live subscription workflow."
+          },
+          "paid_fallback_targets": {
+            "type": "object",
+            "maxProperties": 100,
+            "additionalProperties": {
+              "$ref": "#/components/schemas/CodePaidTarget"
+            },
+            "description": "Explicit native model to published metered provider and credential slot for subscription-first bounded recovery. Requires paid_participation and positive initial_recovery_attempts. Subscription candidates are preferred. Same-model fallback needs no model pool. Different models require model_rewriting and a model_pool. Proven nonexecution and complete-input portability are required. Direct paid_targets retain precedence and cannot overlap this map. Existing paid owners stay pinned. Unknown paid money remains held against applicable limits."
           }
         },
         "required": [
@@ -16853,11 +16861,19 @@
           "paid_participation": {
             "type": "boolean",
             "default": false,
-            "description": "Explicitly permit direct metered API targets. This does not enable paid fallback."
+            "description": "Explicitly permit metered API targets. Direct selection and subscription-first fallback require their separate target maps."
           },
           "chat_to_antigravity": {
             "type": "boolean",
             "description": "Explicitly allow Chat Completions text and function tools through the internal Antigravity Gemini target over HTTP or SSE. Published revisions pin this policy. Native forwarding remains the default. Client identity and prompts are preserved. Signed thought state, reasoning controls, media and server tools are unsupported. Returned signature state is refused before actionable output rather than discarded. Controlled fixtures do not qualify any current model or live subscription workflow."
+          },
+          "paid_fallback_targets": {
+            "type": "object",
+            "maxProperties": 100,
+            "additionalProperties": {
+              "$ref": "#/components/schemas/CodePaidTarget"
+            },
+            "description": "Explicit native model to published metered provider and credential slot for subscription-first bounded recovery. Requires paid_participation and positive initial_recovery_attempts. Subscription candidates are preferred. Same-model fallback needs no model pool. Different models require model_rewriting and a model_pool. Proven nonexecution and complete-input portability are required. Direct paid_targets retain precedence and cannot overlap this map. Existing paid owners stay pinned. Unknown paid money remains held against applicable limits."
           }
         },
         "required": [

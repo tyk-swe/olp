@@ -98,3 +98,15 @@ func (r Route) RecoveryModels(operation Operation, pins []Pin) ([]Operation, err
 		}
 	}), nil
 }
+
+func (r Route) PaidFallbackModel(operation Operation, pins []Pin) (*Operation, error) {
+	operations, err := r.RecoveryModels(operation, pins)
+	if err != nil {
+		return nil, err
+	}
+	index := slices.IndexFunc(operations, func(candidate Operation) bool { _, allowed := r.PaidFallbackTargets[candidate.Model]; return allowed })
+	if index < 0 {
+		return nil, nil
+	}
+	return &operations[index], nil
+}
