@@ -24,6 +24,7 @@ func (s *Server) codeAttempts(r *http.Request, p access.Principal) (access.Reply
 'initial_recovery',x.initial_recovery,'nonexecution',x.nonexecution,'recovery_from',prior.id,
 'recovery_reason',CASE WHEN prior.nonexecution AND prior.outcome_origin='upstream' AND prior.outcome='rejected'
  THEN CASE prior.upstream_status WHEN 401 THEN 'credential_rejected' WHEN 429 THEN 'quota_rejected' END END,
+'codex_cli_identity_enabled',COALESCE((SELECT v.document->>'codex_cli_identity'='true' FROM olp.code_route_revisions v WHERE v.id=x.route_revision_id),false),
 'paid_monetary_state',CASE WHEN x.paid_binding_id IS NULL THEN NULL WHEN x.state='prepared' THEN 'pending' WHEN x.state='aborted' THEN 'released'
  WHEN EXISTS(SELECT 1 FROM olp.attempt_usage_facts f WHERE f.request_id=x.id AND f.usage_complete AND f.charge_status<>'billing_uncertain' AND f.estimated_cost IS NOT NULL AND f.charge IS NOT NULL) THEN 'settled' ELSE 'unknown' END
 ) FROM olp.code_attempts x LEFT JOIN olp.code_attempts prior ON prior.id=x.recovery_from

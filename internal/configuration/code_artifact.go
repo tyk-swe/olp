@@ -54,6 +54,7 @@ type CodePaidConnection struct {
 	SlotKeyRefs map[string][]string `json:"slot_key_refs"`
 }
 type CodeRoutePolicy struct {
+	CodexCLIIdentity        bool                      `json:"codex_cli_identity,omitempty"`
 	PaidFallbackTargets     map[string]CodePaidTarget `json:"paid_fallback_targets,omitempty"`
 	ChatToAntigravity       bool                      `json:"chat_to_antigravity,omitempty"`
 	PaidParticipation       bool                      `json:"paid_participation"`
@@ -119,10 +120,10 @@ func codeNativePaidTargets(targets map[string]CodePaidTarget) map[string]codemod
 	})
 }
 func codePolicy(route codemode.Route) CodeRoutePolicy {
-	return CodeRoutePolicy{ChatToAntigravity: route.ChatToAntigravity, PaidParticipation: route.PaidParticipation, PaidTargets: codePortablePaidTargets(route.PaidTargets), PaidFallbackTargets: codePortablePaidTargets(route.PaidFallbackTargets), Pool: route.PoolID, Models: route.Models, Enabled: route.Enabled, ModelPools: route.ModelPools, InitialRecoveryAttempts: route.InitialRecoveryAttempts, ModelRewriting: route.ModelRewriting, Aliases: route.Aliases, MessagesToCodex: route.MessagesToCodex, Tools: route.Tools, MaxBodyBytes: route.MaxBodyBytes}
+	return CodeRoutePolicy{ChatToAntigravity: route.ChatToAntigravity, PaidParticipation: route.PaidParticipation, PaidTargets: codePortablePaidTargets(route.PaidTargets), PaidFallbackTargets: codePortablePaidTargets(route.PaidFallbackTargets), Pool: route.PoolID, Models: route.Models, Enabled: route.Enabled, ModelPools: route.ModelPools, InitialRecoveryAttempts: route.InitialRecoveryAttempts, ModelRewriting: route.ModelRewriting, Aliases: route.Aliases, CodexCLIIdentity: route.CodexCLIIdentity, MessagesToCodex: route.MessagesToCodex, Tools: route.Tools, MaxBodyBytes: route.MaxBodyBytes}
 }
 func (policy CodeRoutePolicy) input(project, slug, pool string) routes.CodeRouteInput {
-	return routes.CodeRouteInput{ChatToAntigravity: policy.ChatToAntigravity, PaidParticipation: policy.PaidParticipation, PaidTargets: codeNativePaidTargets(policy.PaidTargets), PaidFallbackTargets: codeNativePaidTargets(policy.PaidFallbackTargets), ProjectID: project, Slug: slug, PoolID: pool, Models: policy.Models, Enabled: policy.Enabled, ModelPools: policy.ModelPools, InitialRecoveryAttempts: policy.InitialRecoveryAttempts, ModelRewriting: policy.ModelRewriting, Aliases: policy.Aliases, MessagesToCodex: policy.MessagesToCodex, Tools: policy.Tools, MaxBodyBytes: policy.MaxBodyBytes}
+	return routes.CodeRouteInput{ChatToAntigravity: policy.ChatToAntigravity, PaidParticipation: policy.PaidParticipation, PaidTargets: codeNativePaidTargets(policy.PaidTargets), PaidFallbackTargets: codeNativePaidTargets(policy.PaidFallbackTargets), ProjectID: project, Slug: slug, PoolID: pool, Models: policy.Models, Enabled: policy.Enabled, ModelPools: policy.ModelPools, InitialRecoveryAttempts: policy.InitialRecoveryAttempts, ModelRewriting: policy.ModelRewriting, Aliases: policy.Aliases, CodexCLIIdentity: policy.CodexCLIIdentity, MessagesToCodex: policy.MessagesToCodex, Tools: policy.Tools, MaxBodyBytes: policy.MaxBodyBytes}
 }
 func (policy CodeRoutePolicy) allPaidTargets() map[string]CodePaidTarget {
 	return maps.Collect(func(yield func(string, CodePaidTarget) bool) {

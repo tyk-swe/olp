@@ -22,6 +22,9 @@ func (a *codeAttempt) headers(source http.Header) http.Header {
 		}
 		h[http.CanonicalHeaderKey(name)] = append([]string(nil), values...)
 	}
+	if a.identityOriginator != "" && !slices.ContainsFunc(h.Values("Originator"), func(value string) bool { return strings.TrimSpace(value) != "" }) {
+		h.Set("Originator", a.identityOriginator)
+	}
 	if _, present := h["User-Agent"]; !present {
 		h["User-Agent"] = []string{""}
 	}

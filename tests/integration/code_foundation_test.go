@@ -27,6 +27,7 @@ import (
 	"github.com/tyk-swe/olp/internal/codemode"
 	"github.com/tyk-swe/olp/internal/codexauth"
 	"github.com/tyk-swe/olp/internal/resources"
+	"github.com/tyk-swe/olp/internal/routes"
 	"github.com/tyk-swe/olp/internal/runtime"
 )
 
@@ -424,6 +425,69 @@ func TestCodeFoundationMessagesTranslationPolicyPublication(t *testing.T) {
 	config := f.h.want(f.owner, "GET", "/api/v1/code/routes/"+f.route.ID+"/client-config?client=claude-code&gateway_url=https://olp.example", nil, nil, 200)
 	if config["model"] != f.route.Models[0] || !strings.Contains(config["configuration"].(string), "ANTHROPIC_BASE_URL") {
 		t.Fatal("translated Claude setup missing", config)
+	}
+}
+
+func TestCodeFoundationCodexIdentityPublicationAndDiagnostics(t *testing.T) {
+	f := newCodeFixtureWithProfile(t, codexauth.ProfileID)
+	if f.route.CodexCLIIdentity {
+		t.Fatal("identity compatibility was enabled by default")
+	}
+	before, err := f.store.Admit(t.Context(), f.input("identity-disabled", "", nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.store.Abort(t.Context(), before.Attempt.ID); err != nil {
+		t.Fatal(err)
+	}
+	input := routes.CodeRouteInput{ProjectID: f.project, Slug: f.route.Slug, PoolID: f.pool, Models: f.route.Models, Enabled: true, CodexCLIIdentity: true}
+	viewer := f.h.invite(f.owner, "identity-viewer@example.test", "viewer")
+	f.h.want(viewer, "PUT", "/api/v1/code/routes/"+f.route.ID, input, etagHeader(f.routeRecord), 403)
+	f.h.want(viewer, "POST", "/api/v1/code/routes/"+f.route.ID+"/publish", nil, idem("identity-forbidden"), 403)
+	saved := f.h.want(f.owner, "PUT", "/api/v1/code/routes/"+f.route.ID, input, etagHeader(f.routeRecord), 200)
+	type revision struct {
+		ID    string         `json:"id"`
+		Route codemode.Route `json:"route"`
+	}
+	list := func() []revision {
+		return codePublicDecode[[]revision](t, f.h.want(f.owner, "GET", "/api/v1/code/routes/"+f.route.ID+"/revisions", nil, nil, 200)["items"])
+	}
+	if revisions := list(); len(revisions) != 1 || revisions[0].Route.CodexCLIIdentity {
+		t.Fatal("unpublished draft changed the active revision", revisions)
+	}
+	publishedRecord := f.h.want(f.owner, "POST", "/api/v1/code/routes/"+f.route.ID+"/publish", nil, withMatch(saved, idem("identity-enabled")), 200)
+	published := codePublicDecode[codemode.Route](t, publishedRecord)
+	if !published.CodexCLIIdentity || published.MessagesToCodex {
+		t.Fatal("separate identity opt-in was lost or enabled translation", published)
+	}
+	enabled, err := f.store.Admit(t.Context(), resources.CodeAdmission{Route: published, APIKeyID: f.key, Providers: []string{f.provider}, Operation: codemode.Operation{Name: "responses.create", Model: "native-model", Identity: codemode.Identity{Conversation: "identity-enabled"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.store.Abort(t.Context(), enabled.Attempt.ID); err != nil {
+		t.Fatal(err)
+	}
+	disabledInput := routes.CodeRouteInput{ProjectID: f.project, Slug: f.route.Slug, PoolID: f.pool, Models: f.route.Models, Enabled: true}
+	disabledSaved := f.h.want(f.owner, "PUT", "/api/v1/code/routes/"+f.route.ID, disabledInput, etagHeader(publishedRecord), 200)
+	disabled := codePublicDecode[codemode.Route](t, f.h.want(f.owner, "POST", "/api/v1/code/routes/"+f.route.ID+"/publish", nil, withMatch(disabledSaved, idem("identity-disabled")), 200))
+	if disabled.CodexCLIIdentity || disabled.RevisionID == published.RevisionID {
+		t.Fatal("republishing did not disable the identity policy", disabled)
+	}
+	for _, item := range list() {
+		if item.Route.CodexCLIIdentity != (item.ID == published.RevisionID) {
+			t.Fatal("a later publication changed frozen identity policy", item)
+		}
+	}
+	type diagnostic struct {
+		ID                      string `json:"id"`
+		RevisionID              string `json:"route_revision_id"`
+		CodexCLIIdentityEnabled bool   `json:"codex_cli_identity_enabled"`
+	}
+	attempts := codePublicDecode[[]diagnostic](t, f.h.want(f.owner, "GET", "/api/v1/code/attempts?route_id="+f.route.ID, nil, nil, 200)["items"])
+	for _, want := range []diagnostic{{ID: before.Attempt.ID, RevisionID: f.route.RevisionID}, {ID: enabled.Attempt.ID, RevisionID: published.RevisionID, CodexCLIIdentityEnabled: true}} {
+		if !slices.Contains(attempts, want) {
+			t.Fatal("diagnostic policy did not follow the attempt's frozen revision", want, attempts)
+		}
 	}
 }
 

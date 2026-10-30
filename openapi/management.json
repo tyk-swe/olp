@@ -15807,6 +15807,10 @@
               null
             ],
             "description": "Reason from the recovery source that durably proved nonexecution. Null means historical evidence is unavailable or no recovery source exists. Never inferred from current account health."
+          },
+          "codex_cli_identity_enabled": {
+            "type": "boolean",
+            "description": "Whether the frozen route revision enabled Codex CLI identity compatibility. This is route policy, not evidence that an Originator header changed or that this attempt used Codex. No client identity header values or prompt content are recorded."
           }
         },
         "required": [
@@ -16693,7 +16697,7 @@
           "messages_to_codex": {
             "type": "boolean",
             "default": false,
-            "description": "Explicitly allow Messages text and tool requests to use Codex subscription accounts through protocol translation. Published revisions pin this policy. Native forwarding remains the default. Client identity and prompts are preserved. Model rewriting requires its separate opt-in. Explicit low, medium and high reasoning effort is supported. Signed thinking, numeric reasoning budgets, beta features and unsupported required semantics are refused before dispatch."
+            "description": "Explicitly allow Messages text and tool requests to use Codex subscription accounts through protocol translation. Published revisions pin this policy. Native forwarding remains the default. Translation alone preserves client identity and prompts. Codex identity compatibility requires its separate codex_cli_identity opt-in. Model rewriting requires its separate opt-in. Explicit low, medium and high reasoning effort is supported. Signed thinking, numeric reasoning budgets, beta features and unsupported required semantics are refused before dispatch."
           },
           "aliases": {
             "type": "object",
@@ -16758,6 +16762,10 @@
               "$ref": "#/components/schemas/CodePaidTarget"
             },
             "description": "Explicit native model to published metered provider and credential slot for subscription-first bounded recovery. Requires paid_participation and positive initial_recovery_attempts. Subscription candidates are preferred. Same-model fallback needs no model pool. Different models require model_rewriting and a model_pool. Proven nonexecution and complete-input portability are required. Direct paid_targets retain precedence and cannot overlap this map. Existing paid owners stay pinned. Unknown paid money remains held against applicable limits."
+          },
+          "codex_cli_identity": {
+            "type": "boolean",
+            "description": "Explicit route-administrator opt-in, disabled by default and independent of protocol translation. On Codex subscription HTTP and WebSocket requests only, fills Originator with codex_cli_rs when every supplied Originator value is absent or blank. Preserves explicit Originator values, User-Agent, all prompts, tools, reasoning, state and other headers. Does not enable translation or prompt changes. Publication freezes the policy. Using subscription accounts through this compatibility identity may violate provider terms and risk account suspension. Review this behavior and risk before enabling and publishing."
           }
         },
         "required": [
@@ -16841,7 +16849,7 @@
           "messages_to_codex": {
             "type": "boolean",
             "default": false,
-            "description": "Explicitly allow Messages text and tool requests to use Codex subscription accounts through protocol translation. Published revisions pin this policy. Native forwarding remains the default. Client identity and prompts are preserved. Model rewriting requires its separate opt-in. Explicit low, medium and high reasoning effort is supported. Signed thinking, numeric reasoning budgets, beta features and unsupported required semantics are refused before dispatch."
+            "description": "Explicitly allow Messages text and tool requests to use Codex subscription accounts through protocol translation. Published revisions pin this policy. Native forwarding remains the default. Translation alone preserves client identity and prompts. Codex identity compatibility requires its separate codex_cli_identity opt-in. Model rewriting requires its separate opt-in. Explicit low, medium and high reasoning effort is supported. Signed thinking, numeric reasoning budgets, beta features and unsupported required semantics are refused before dispatch."
           },
           "aliases": {
             "type": "object",
@@ -16906,6 +16914,10 @@
               "$ref": "#/components/schemas/CodePaidTarget"
             },
             "description": "Explicit native model to published metered provider and credential slot for subscription-first bounded recovery. Requires paid_participation and positive initial_recovery_attempts. Subscription candidates are preferred. Same-model fallback needs no model pool. Different models require model_rewriting and a model_pool. Proven nonexecution and complete-input portability are required. Direct paid_targets retain precedence and cannot overlap this map. Existing paid owners stay pinned. Unknown paid money remains held against applicable limits."
+          },
+          "codex_cli_identity": {
+            "type": "boolean",
+            "description": "Explicit route-administrator opt-in, disabled by default and independent of protocol translation. On Codex subscription HTTP and WebSocket requests only, fills Originator with codex_cli_rs when every supplied Originator value is absent or blank. Preserves explicit Originator values, User-Agent, all prompts, tools, reasoning, state and other headers. Does not enable translation or prompt changes. Publication freezes the policy. Using subscription accounts through this compatibility identity may violate provider terms and risk account suspension. Review this behavior and risk before enabling and publishing."
           }
         },
         "required": [
@@ -28973,7 +28985,7 @@
           "messages_to_codex": {
             "type": "boolean",
             "default": false,
-            "description": "Explicitly allow Messages text and tool requests to use Codex subscription accounts through protocol translation. Published revisions pin this policy. Native forwarding remains the default. Client identity and prompts are preserved. Model rewriting requires its separate opt-in. Explicit low, medium and high reasoning effort is supported. Signed thinking, numeric reasoning budgets, beta features and unsupported required semantics are refused before dispatch."
+            "description": "Explicitly allow Messages text and tool requests to use Codex subscription accounts through protocol translation. Published revisions pin this policy. Native forwarding remains the default. Translation alone preserves client identity and prompts. Codex identity compatibility requires its separate codex_cli_identity opt-in. Model rewriting requires its separate opt-in. Explicit low, medium and high reasoning effort is supported. Signed thinking, numeric reasoning budgets, beta features and unsupported required semantics are refused before dispatch."
           },
           "aliases": {
             "type": "object",
@@ -29040,6 +29052,10 @@
               "$ref": "#/components/schemas/ConfigurationCodePaidTarget"
             },
             "description": "Explicit recovery-only paid targets keyed by native model, using the same named destination provider, slot and credential bindings as direct paid targets. Requires paid participation and a positive initial recovery limit."
+          },
+          "codex_cli_identity": {
+            "type": "boolean",
+            "description": "Explicit route-administrator opt-in, disabled by default and independent of protocol translation. On Codex subscription HTTP and WebSocket requests only, fills Originator with codex_cli_rs when every supplied Originator value is absent or blank. Preserves explicit Originator values, User-Agent, all prompts, tools, reasoning, state and other headers. Does not enable translation or prompt changes. Publication freezes the policy. Using subscription accounts through this compatibility identity may violate provider terms and risk account suspension. Review this behavior and risk before enabling and publishing."
           }
         },
         "required": [

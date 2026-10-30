@@ -509,11 +509,12 @@ func TestCodeConfigurationCrossProjectRoundTrip(t *testing.T) {
 	upperOwner := strings.ToUpper(ownerID)
 	h.want(owner, "PUT", "/api/v1/code/pools/"+poolID, access.CodePoolInput{ProjectID: strings.ToUpper(f.project), Name: "Personal portable pool", Kind: "personal", OwnerUserID: &upperOwner, AccountIDs: []string{strings.ToUpper(account.ID)}, AccountWeights: map[string]int64{strings.ToUpper(account.ID): 3}, APIKeyIDs: []string{strings.ToUpper(f.keyID)}}, etagHeader(personal), 200)
 	routeID := f.route["id"].(string)
-	policy := routes.CodeRouteInput{ProjectID: strings.ToUpper(f.project), Slug: "qualification", PoolID: strings.ToUpper(poolID), Models: account.Models, Enabled: true, ModelRewriting: true, Aliases: map[string]string{"portable": account.Models[0]}, ModelPools: map[string][]string{"portable": account.Models}, InitialRecoveryAttempts: 2, MessagesToCodex: true, ChatToAntigravity: true, MaxBodyBytes: new(int64(1048576)), Tools: &codemode.ResearchTools{AccountID: strings.ToUpper(account.ID), Services: []string{"search"}}}
+	policy := routes.CodeRouteInput{ProjectID: strings.ToUpper(f.project), Slug: "qualification", PoolID: strings.ToUpper(poolID), Models: account.Models, Enabled: true, ModelRewriting: true, Aliases: map[string]string{"portable": account.Models[0]}, ModelPools: map[string][]string{"portable": account.Models}, InitialRecoveryAttempts: 2, CodexCLIIdentity: true, MessagesToCodex: true, ChatToAntigravity: true, MaxBodyBytes: new(int64(1048576)), Tools: &codemode.ResearchTools{AccountID: strings.ToUpper(account.ID), Services: []string{"search"}}}
 	draft := h.want(owner, "PUT", "/api/v1/code/routes/"+routeID, policy, etagHeader(f.route), 200)
 	published := h.want(owner, "POST", "/api/v1/code/routes/"+routeID+"/publish", nil, withMatch(draft, idem("portable-publish")), 200)
 	unpublished := policy
 	unpublished.Enabled = false
+	unpublished.CodexCLIIdentity = false
 	unpublished.InitialRecoveryAttempts = 0
 	h.want(owner, "PUT", "/api/v1/code/routes/"+routeID, unpublished, etagHeader(published), 200)
 	daily, monthly := int64(1000), int64(4000)
@@ -535,7 +536,7 @@ func TestCodeConfigurationCrossProjectRoundTrip(t *testing.T) {
 		t.Fatal("code configuration missing")
 	}
 	sourceRoute := sourceCode.Routes[slices.IndexFunc(sourceCode.Routes, func(r configuration.CodeRouteEntry) bool { return r.ID == routeID })]
-	if sourceRoute.Published == nil || sourceRoute.Draft.Enabled || !sourceRoute.Published.Policy.Enabled || !sourceRoute.Draft.ChatToAntigravity || !sourceRoute.Published.Policy.ChatToAntigravity {
+	if sourceRoute.Published == nil || sourceRoute.Draft.CodexCLIIdentity || !sourceRoute.Published.Policy.CodexCLIIdentity || sourceRoute.Draft.Enabled || !sourceRoute.Published.Policy.Enabled || !sourceRoute.Draft.ChatToAntigravity || !sourceRoute.Published.Policy.ChatToAntigravity {
 		t.Fatal("draft and publication were not preserved separately")
 	}
 	destinationProject := createProject(h, owner, "Portable destination")
@@ -592,7 +593,7 @@ func TestCodeConfigurationCrossProjectRoundTrip(t *testing.T) {
 		Document configuration.Document `json:"document"`
 	}](t, h.want(owner, "GET", "/api/v1/configuration/export", nil, nil, 200))
 	restored := destinationExport.Document.Code.Routes[slices.IndexFunc(destinationExport.Document.Code.Routes, func(r configuration.CodeRouteEntry) bool { return r.Slug == slug })]
-	if restored.ID == sourceRoute.ID || restored.Published == nil || restored.Draft.Enabled || !restored.Draft.ChatToAntigravity || !restored.Published.Policy.Enabled || restored.Published.Policy.InitialRecoveryAttempts != sourceRoute.Published.Policy.InitialRecoveryAttempts || restored.Published.Policy.Aliases["portable"] != sourceRoute.Published.Policy.Aliases["portable"] || !restored.Published.Policy.MessagesToCodex || !restored.Published.Policy.ChatToAntigravity || restored.Published.Policy.Tools == nil {
+	if restored.ID == sourceRoute.ID || restored.Published == nil || restored.Draft.CodexCLIIdentity || !restored.Published.Policy.CodexCLIIdentity || restored.Draft.Enabled || !restored.Draft.ChatToAntigravity || !restored.Published.Policy.Enabled || restored.Published.Policy.InitialRecoveryAttempts != sourceRoute.Published.Policy.InitialRecoveryAttempts || restored.Published.Policy.Aliases["portable"] != sourceRoute.Published.Policy.Aliases["portable"] || !restored.Published.Policy.MessagesToCodex || !restored.Published.Policy.ChatToAntigravity || restored.Published.Policy.Tools == nil {
 		t.Fatal("destination did not retain independent effective and draft policies", restored)
 	}
 	restoredPools := h.want(owner, "GET", "/api/v1/code/pools?project_id="+destinationProject, nil, nil, 200)

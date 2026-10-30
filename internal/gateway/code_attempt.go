@@ -24,23 +24,24 @@ import (
 const codeGenerationTimeout = 10 * time.Minute
 
 type codeAttempt struct {
-	paid          *paidCodeAttempt
-	server        *Server
-	permit        resources.CodePermit
-	config        routing.Configuration
-	auth          codemode.Authorization
-	lease         *limits.Lease
-	providerLease *limits.Lease
-	observer      codewire.Observer
-	endpoint      codeadapter.Endpoint
-	dispatched    bool
-	usage         codemode.Usage
-	terminal      bool
-	conflicting   bool
-	prewarm       bool
-	finished      bool
-	model         string
-	publicModel   string
+	identityOriginator string
+	paid               *paidCodeAttempt
+	server             *Server
+	permit             resources.CodePermit
+	config             routing.Configuration
+	auth               codemode.Authorization
+	lease              *limits.Lease
+	providerLease      *limits.Lease
+	observer           codewire.Observer
+	endpoint           codeadapter.Endpoint
+	dispatched         bool
+	usage              codemode.Usage
+	terminal           bool
+	conflicting        bool
+	prewarm            bool
+	finished           bool
+	model              string
+	publicModel        string
 }
 
 func (s *Server) prepareCode(r *http.Request, release *runtime.Release, route codemode.Route, observation codemode.Request, ingress codeIngress, transport codeadapter.Transport, recovery *resources.CodeRecovery, body []byte) (*codeAttempt, error) {
@@ -153,6 +154,7 @@ func (s *Server) prepareCode(r *http.Request, release *runtime.Release, route co
 		return nil, codemode.Refuse(503, "code_configuration_unsupported")
 	}
 	a.config, a.endpoint, a.observer = target.config, target.endpoint, codeObserver(target.endpoint)
+	a.identityOriginator = target.adapter.CompatibilityOriginator(route)
 	a.providerLease, failure = s.Admission.reserveCodeProvider(r.Context(), permit.Account.ProviderID, target.config, observation.Estimate, codeGenerationTimeout+time.Minute)
 	if failure != nil {
 		return nil, codemode.Refuse(failure.Status, "code_provider_rate_limited")
