@@ -15,6 +15,11 @@ vi.mock('$lib/api/code-mode', async (original) => ({
   saveCodeRoute: vi.fn()
 }));
 
+vi.mock('$lib/features/providers/api/providers', async (original) => ({
+  ...(await original<typeof import('$lib/features/providers/api/providers')>()),
+  listProviders: vi.fn().mockResolvedValue([])
+}));
+
 const projectId = '01980000-0000-7000-8000-000000000001';
 const accountId = '01980000-0000-7000-8000-000000000010';
 const poolId = '01980000-0000-7000-8000-000000000020';
@@ -27,6 +32,7 @@ const route: api.CodeRoute = {
   enabled: true,
   messages_to_codex: false,
   model_rewriting: false,
+  paid_participation: false,
   models: ['gpt-5.5'],
   revision_id: '01980000-0000-7000-8000-000000000032',
   revision: 1,

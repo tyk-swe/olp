@@ -133,6 +133,14 @@ func TestPublishedMessagesPolicySelectsEligibleFrozenProviders(t *testing.T) {
 			}
 		})
 	}
+	t.Run("unpublished-policy-cannot-expand-compiled-membership", func(t *testing.T) {
+		draft := codemode.Route{RevisionID: published.CodeRoutes["native"].RevisionID, MessagesToCodex: true, ChatToCodex: true, ChatToAntigravity: true}
+		for _, path := range []string{"v1/messages", "v1/chat/completions"} {
+			if got := published.CodeProviders(draft, path, codeadapter.HTTP); !slices.Equal(got, []string{"a-native"}) {
+				t.Fatalf("unpublished policy changed compiled providers on %s, got %v", path, got)
+			}
+		}
+	})
 	if got := published.CodeProviders(published.CodeRoutes["translated"], "v1/messages", codeadapter.HTTP); !slices.Equal(got, []string{"a-native", "b-codex"}) {
 		t.Fatalf("model filtering changed published path eligibility, got %v", got)
 	}

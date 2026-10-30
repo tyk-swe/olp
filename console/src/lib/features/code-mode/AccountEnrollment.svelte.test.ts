@@ -199,7 +199,9 @@ it.each(['codex', 'claude', 'antigravity'] as const)(
       flushSync();
       expect(host.querySelector('input[type="password"]')).not.toBeNull();
     });
-    const input = host.querySelector('input[type="password"]')!;
+    const input = host.querySelector<HTMLInputElement>(
+      'input[type="password"]'
+    )!;
     input.value = credential;
     input.dispatchEvent(new Event('input', { bubbles: true }));
     flushSync();

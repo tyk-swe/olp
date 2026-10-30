@@ -789,6 +789,9 @@ func TestCodeMessagesToCodexTextExchange(t *testing.T) {
 				route := g.rt.release.Snapshot.CodeRoutes["coding"]
 				route.MessagesToCodex = true
 				g.rt.release.Snapshot.CodeRoutes["coding"] = route
+				if err := g.rt.release.Snapshot.Compile(); err != nil {
+					t.Fatal(err)
+				}
 				g.upstream.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 					body, _ := io.ReadAll(r.Body)
 					var request struct {
@@ -847,6 +850,9 @@ func TestCodeMessagesToCodexCompletedMessages(t *testing.T) {
 			route := g.rt.release.Snapshot.CodeRoutes["coding"]
 			route.MessagesToCodex = true
 			g.rt.release.Snapshot.CodeRoutes["coding"] = route
+			if err := g.rt.release.Snapshot.Compile(); err != nil {
+				t.Fatal(err)
+			}
 			g.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
 				w.Header().Set("Content-Type", "text/event-stream")
 				for _, event := range []string{
@@ -924,6 +930,9 @@ func TestCodeMessagesToCodexRefusesUnsupportedSemantics(t *testing.T) {
 			route := g.rt.release.Snapshot.CodeRoutes["coding"]
 			route.MessagesToCodex = true
 			g.rt.release.Snapshot.CodeRoutes["coding"] = route
+			if err := g.rt.release.Snapshot.Compile(); err != nil {
+				t.Fatal(err)
+			}
 			messages := func() string {
 				if test.messages != "" {
 					return test.messages
@@ -960,6 +969,9 @@ func TestCodeMessagesToCodexPreservesNativeModelIdentifiers(t *testing.T) {
 	route := g.rt.release.Snapshot.CodeRoutes["coding"]
 	route.MessagesToCodex = true
 	g.rt.release.Snapshot.CodeRoutes["coding"] = route
+	if err := g.rt.release.Snapshot.Compile(); err != nil {
+		t.Fatal(err)
+	}
 	g.upstream.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var request struct {
 			Model string `json:"model"`
@@ -1014,6 +1026,9 @@ func TestCodeMessagesToCodexToolExchange(t *testing.T) {
 				route.MessagesToCodex = true
 				route.CodexCLIIdentity = true
 				g.rt.release.Snapshot.CodeRoutes["coding"] = route
+				if err := g.rt.release.Snapshot.Compile(); err != nil {
+					t.Fatal(err)
+				}
 				g.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
 					if r.Header.Get("Originator") != "codex_cli_rs" {
 						t.Error("separate identity policy did not reach translated tool request")
@@ -1147,6 +1162,9 @@ func TestCodeMessagesToCodexReasoningControls(t *testing.T) {
 			route := g.rt.release.Snapshot.CodeRoutes["coding"]
 			route.MessagesToCodex = true
 			g.rt.release.Snapshot.CodeRoutes["coding"] = route
+			if err := g.rt.release.Snapshot.Compile(); err != nil {
+				t.Fatal(err)
+			}
 			g.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
 				var body struct{ Reasoning struct{ Effort string } }
 				if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Reasoning.Effort != effort {
@@ -1182,6 +1200,9 @@ func TestCodeMessagesToCodexToolStreamOutcomes(t *testing.T) {
 				route := g.rt.release.Snapshot.CodeRoutes["coding"]
 				route.MessagesToCodex = true
 				g.rt.release.Snapshot.CodeRoutes["coding"] = route
+				if err := g.rt.release.Snapshot.Compile(); err != nil {
+					t.Fatal(err)
+				}
 				g.mock.set("a", func(w http.ResponseWriter, _ *http.Request) {
 					w.Header().Set("Content-Type", "text/event-stream")
 					for _, event := range []string{
@@ -1276,6 +1297,9 @@ func TestCodeMessagesToCodexCancelledToolStream(t *testing.T) {
 			route := g.rt.release.Snapshot.CodeRoutes["coding"]
 			route.MessagesToCodex, route.ChatToCodex = true, input.chat
 			g.rt.release.Snapshot.CodeRoutes["coding"] = route
+			if err := g.rt.release.Snapshot.Compile(); err != nil {
+				t.Fatal(err)
+			}
 			g.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
 				_, _ = io.Copy(io.Discard, r.Body)
 				w.Header().Set("Content-Type", "text/event-stream")
@@ -1464,6 +1488,9 @@ func TestCodeExactAliasHTTPUsesNativeTargetAndPublicResponse(t *testing.T) {
 			}
 			route.MessagesToCodex = test.translated
 			h.rt.release.Snapshot.CodeRoutes["coding"] = route
+			if err := h.rt.release.Snapshot.Compile(); err != nil {
+				t.Fatal(err)
+			}
 			h.upstream.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				body, _ := io.ReadAll(r.Body)
 				if !bytes.Contains(body, []byte(`"model":"native-model"`)) || !bytes.Contains(body, []byte(`"private-prompt"`)) {
@@ -3131,6 +3158,9 @@ func TestCodeChatToCodexToolContinuation(t *testing.T) {
 			route.ChatToCodex, route.ModelRewriting = true, true
 			route.Aliases = map[string]string{"team-model": "native-model"}
 			h.rt.release.Snapshot.CodeRoutes["coding"] = route
+			if err := h.rt.release.Snapshot.Compile(); err != nil {
+				t.Fatal(err)
+			}
 			h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
 				body, _ := io.ReadAll(r.Body)
 				var request struct {
@@ -3217,6 +3247,9 @@ func TestCodeChatToCodexRefusesUnsupportedRequiredState(t *testing.T) {
 			route := h.rt.release.Snapshot.CodeRoutes["coding"]
 			route.ChatToCodex = true
 			h.rt.release.Snapshot.CodeRoutes["coding"] = route
+			if err := h.rt.release.Snapshot.Compile(); err != nil {
+				t.Fatal(err)
+			}
 			request, _ := http.NewRequestWithContext(t.Context(), http.MethodPost, server.URL+"/code/coding/v1/chat/completions"+test.query, strings.NewReader(`{"model":"native-model","messages":[`+test.body+`],"stream":true}`))
 			request.Header = test.headers.Clone()
 			if request.Header == nil {
@@ -3238,6 +3271,9 @@ func TestCodeChatToCodexRefusesUnsupportedRequiredState(t *testing.T) {
 		route := h.rt.release.Snapshot.CodeRoutes["coding"]
 		route.ChatToCodex = true
 		h.rt.release.Snapshot.CodeRoutes["coding"] = route
+		if err := h.rt.release.Snapshot.Compile(); err != nil {
+			t.Fatal(err)
+		}
 		request, _ := http.NewRequestWithContext(t.Context(), http.MethodPost, server.URL+"/code/coding/v1/chat/completions", strings.NewReader(`{"model":"native-model","messages":[{"role":"user","content":"Hello"}],`+field+`}`))
 		request.Header.Set("Authorization", "Bearer "+fullKey)
 		response, err := server.Client().Do(request)
@@ -3254,6 +3290,9 @@ func TestCodeChatToCodexRefusesUnsupportedRequiredState(t *testing.T) {
 		route := h.rt.release.Snapshot.CodeRoutes["coding"]
 		route.ChatToCodex = true
 		h.rt.release.Snapshot.CodeRoutes["coding"] = route
+		if err := h.rt.release.Snapshot.Compile(); err != nil {
+			t.Fatal(err)
+		}
 		request, _ := http.NewRequestWithContext(t.Context(), http.MethodPost, server.URL+"/code/coding/v1/chat/completions", strings.NewReader(`{"model":"native-model","messages":[{"role":"user","content":"Read main.go"}],"tools":[{"type":"function","function":{"name":"read_file","parameters":{"type":"object"}}}],"tool_choice":{"type":"function","function":{"name":"read_file","required_state":"opaque"}}}`))
 		request.Header.Set("Authorization", "Bearer "+fullKey)
 		response, err := server.Client().Do(request)
@@ -3273,6 +3312,9 @@ func TestCodeChatToCodexPreservesNativeUsageOnProjectionFailure(t *testing.T) {
 		route := h.rt.release.Snapshot.CodeRoutes["coding"]
 		route.ChatToCodex = true
 		h.rt.release.Snapshot.CodeRoutes["coding"] = route
+		if err := h.rt.release.Snapshot.Compile(); err != nil {
+			t.Fatal(err)
+		}
 		h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
 			_, _ = io.Copy(io.Discard, r.Body)
 			w.Header().Set("Content-Type", "text/event-stream")
@@ -3303,6 +3345,9 @@ func TestCodeChatToCodexPortableRecoveryUsesExactModelPool(t *testing.T) {
 	route.ChatToCodex, route.ModelRewriting = true, true
 	route.ModelPools = map[string][]string{"gpt-fixture-main": {"gpt-fixture-main", "gpt-fixture-alternate"}}
 	h.rt.release.Snapshot.CodeRoutes[route.Slug] = route
+	if err := h.rt.release.Snapshot.Compile(); err != nil {
+		t.Fatal(err)
+	}
 	ledger.pinTarget, ledger.recoveryTarget = "gpt-fixture-main", "gpt-fixture-alternate"
 	h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
 		var request struct {
@@ -3348,6 +3393,9 @@ func TestCodeChatToCodexPaidFallbackPreservesNativeChatContract(t *testing.T) {
 	route.ChatToCodex, route.InitialRecoveryAttempts = true, 1
 	ledger.recoveryUnavailable = true
 	h.rt.release.Snapshot.CodeRoutes[route.Slug] = route
+	if err := h.rt.release.Snapshot.Compile(); err != nil {
+		t.Fatal(err)
+	}
 	providerKey := route.RevisionID + ":" + route.PaidFallbackTargets[modelA].ProviderID
 	provider := h.rt.release.Snapshot.CodePaidConnections[providerKey]
 	provider.ProfileID = "openai-chat"
