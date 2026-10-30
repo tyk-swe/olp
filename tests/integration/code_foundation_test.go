@@ -1178,9 +1178,12 @@ func TestCodePaidFallbackConcurrentSubscriptionOwnershipRefusesCrossover(t *test
 
 func TestCodePaidFallbackProvenRecoveryRetainsOriginalReferenceOwnerAndRetirement(t *testing.T) {
 	f, provider, slot := newPaidCodeFixture(t)
-	personal := f.h.want(f.owner, "POST", "/api/v1/code/pools", map[string]any{"project_id": f.project, "name": "Personal recovery", "kind": "personal", "owner_user_id": f.user, "account_ids": []string{f.account}, "api_key_ids": []string{f.key}}, idem("personal-recovery"), 201)
+	personal := codePublicDecode[contract.CodePool](t, f.h.want(f.owner, "POST", "/api/v1/code/pools", contract.CodePoolWrite{
+		ProjectId: uuid.MustParse(f.project), Name: "Personal recovery", Kind: contract.CodePoolWriteKindPersonal,
+		OwnerUserId: nullable.NewNullableWithValue(uuid.MustParse(f.user)), AccountIds: []uuid.UUID{uuid.MustParse(f.account)}, ApiKeyIds: []uuid.UUID{uuid.MustParse(f.key)},
+	}, idem("personal-recovery"), 201))
 	targets := map[string]contract.CodePaidTarget{"native-model": {ProviderId: uuid.MustParse(provider.ID), SlotId: uuid.MustParse(slot.ID)}}
-	write := contract.CodeRouteWrite{ProjectId: uuid.MustParse(f.project), Slug: f.route.Slug, PoolId: uuid.MustParse(personal["id"].(string)), Models: f.route.Models, Enabled: true, PaidParticipation: new(true), InitialRecoveryAttempts: new(1), PaidFallbackTargets: &targets}
+	write := contract.CodeRouteWrite{ProjectId: uuid.MustParse(f.project), Slug: f.route.Slug, PoolId: personal.Id, Models: f.route.Models, Enabled: true, PaidParticipation: new(true), InitialRecoveryAttempts: new(1), PaidFallbackTargets: &targets}
 	saved := f.h.want(f.owner, "PUT", "/api/v1/code/routes/"+f.route.ID, write, etagHeader(f.routeRecord), 200)
 	route := codePublicDecode[codemode.Route](t, f.h.want(f.owner, "POST", "/api/v1/code/routes/"+f.route.ID+"/publish", nil, withMatch(saved, idem("personal-fallback")), 200))
 	input := f.input("proven-fallback-root", "", nil)
@@ -1239,14 +1242,15 @@ func TestCodePaidFallbackProvenRecoveryRetainsOriginalReferenceOwnerAndRetiremen
 	if len(combined) != 0 {
 		t.Fatal("attempt selection bypassed the paid binding filter")
 	}
-	outsider := f.h.invite(f.owner, "recovery-outsider@example.test", "operator")
-	profile := f.h.want(outsider, "GET", "/api/v1/profile", nil, nil, 200)
-	f.h.want(f.owner, "PATCH", "/api/v1/users/"+profile["id"].(string), map[string]any{"access_scope": "assigned"}, etagHeader(profile), 200)
-	outsider = login(f.h, "recovery-outsider@example.test")
+	invitationSession := f.h.invite(f.owner, "recovery-outsider@example.test", "operator")
+	profileRecord := f.h.want(invitationSession, "GET", "/api/v1/profile", nil, nil, 200)
+	profile := codePublicDecode[contract.UserDetailResponse](t, profileRecord)
+	f.h.want(f.owner, "PATCH", "/api/v1/users/"+profile.Id.String(), contract.UpdateUserRoleRequest{AccessScope: nullable.NewNullableWithValue(contract.UpdateUserRoleRequestAccessScopeAssigned)}, etagHeader(profileRecord), 200)
+	assignedSession := login(f.h, "recovery-outsider@example.test")
 	for _, attemptID := range []string{rejected.Attempt.ID, permit.Attempt.ID} {
 		path := "/api/v1/code/attempts?attempt_id=" + attemptID
-		f.h.want(outsider, "GET", path+"&project_id="+f.project, nil, nil, 404)
-		invisible := f.h.want(outsider, "GET", path, nil, nil, 200)["items"].([]any)
+		f.h.want(assignedSession, "GET", path+"&project_id="+f.project, nil, nil, 404)
+		invisible := f.h.want(assignedSession, "GET", path, nil, nil, 200)["items"].([]any)
 		if len(invisible) != 0 {
 			t.Fatal("exact recovery navigation exposed another owner's private project")
 		}

@@ -272,12 +272,12 @@ func TestCodeQualificationFleetWeightedPersonalAndSharedIsolation(t *testing.T) 
 		if len(visible) != 1 || visible[0].BindingID != binding.ID || visible[0].AccountID != first {
 			t.Fatal("personal-pool diagnostics lost account or binding attribution")
 		}
-		outsider := f.h.invite(f.owner, "diagnostics-outsider@example.test", "operator")
-		outsiderID := f.h.want(outsider, "GET", "/api/v1/profile", nil, nil, 200)["id"].(string)
-		f.assignOnly(outsiderID)
-		outsider = login(f.h, "diagnostics-outsider@example.test")
-		f.h.want(outsider, "GET", path+"&project_id="+f.project, nil, nil, 404)
-		invisible := f.h.want(outsider, "GET", path, nil, nil, 200)["items"].([]any)
+		invitationSession := f.h.invite(f.owner, "diagnostics-outsider@example.test", "operator")
+		profile := codePublicDecode[contract.UserDetailResponse](t, f.h.want(invitationSession, "GET", "/api/v1/profile", nil, nil, 200))
+		f.assignOnly(profile.Id.String())
+		assignedSession := login(f.h, "diagnostics-outsider@example.test")
+		f.h.want(assignedSession, "GET", path+"&project_id="+f.project, nil, nil, 404)
+		invisible := f.h.want(assignedSession, "GET", path, nil, nil, 200)["items"].([]any)
 		if len(invisible) != 0 {
 			t.Fatal("personal-pool diagnostics crossed project visibility")
 		}
