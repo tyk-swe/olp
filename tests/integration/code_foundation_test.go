@@ -501,14 +501,35 @@ func TestCodeFoundationAvailabilityPreservesFreshHealthAndIndependentAllowance(t
 	if blocked.Eligible || blocked.Health != "quota_limited" || blocked.UnavailableUntil == nil || !blocked.UnavailableUntil.Equal(retry) || blocked.HealthObservedAt == nil || !blocked.HealthObservedAt.Equal(observed.Add(time.Minute)) {
 		t.Fatalf("stale or partial observation erased cooldown %+v", blocked)
 	}
+	shorter := observed.Add(90 * time.Second)
+	observeHealth(codemode.HealthObservation{Status: "quota_limited", ObservedAt: shorter, RetryAt: &shorter})
+	shortened := readAccount()
+	if shortened.Eligible || shortened.UnavailableUntil == nil || !shortened.UnavailableUntil.Equal(retry) {
+		t.Fatalf("shorter concurrent failure erased active reset %+v", shortened)
+	}
 	observeHealth(codemode.HealthObservation{Status: "healthy", ObservedAt: observed.Add(2 * time.Minute)})
 	completed := readAccount()
-	if completed.Eligible || completed.Health != "quota_limited" || completed.UnavailableUntil == nil || !completed.UnavailableUntil.Equal(retry) || completed.HealthObservedAt == nil || !completed.HealthObservedAt.Equal(*blocked.HealthObservedAt) {
+	if completed.Eligible || completed.Health != "quota_limited" || completed.UnavailableUntil == nil || !completed.UnavailableUntil.Equal(retry) || completed.HealthObservedAt == nil || !completed.HealthObservedAt.Equal(*shortened.HealthObservedAt) {
 		t.Fatalf("overlapping completion erased active retry deadline %+v", completed)
 	}
 	_, cooldownErr := f.store.Admit(t.Context(), f.input("during-retry-after", "", nil))
 	codeRefusal(t, cooldownErr, "code_account_unavailable")
+	extended := retry.Add(time.Hour)
+	if err := f.store.ObserveCooldown(t.Context(), f.account, extended); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.store.ObserveCooldown(t.Context(), f.account, shorter); err != nil {
+		t.Fatal(err)
+	}
+	observeHealth(codemode.HealthObservation{Status: "unavailable", ObservedAt: observed.Add(150 * time.Second)})
+	concurrent := readAccount()
+	if concurrent.Eligible || concurrent.UnavailableUntil == nil || !concurrent.UnavailableUntil.Equal(extended) {
+		t.Fatalf("shorter recovery or transport observation erased active reset %+v", concurrent)
+	}
+	_, concurrentErr := f.store.Admit(t.Context(), f.input("after-shorter-concurrent-failure", "", nil))
+	codeRefusal(t, concurrentErr, "code_account_unavailable")
 	expired := now.Add(-time.Minute)
+	f.exec(t, `UPDATE olp.code_accounts SET unavailable_until=$2 WHERE id=$1`, f.account, expired)
 	observeHealth(codemode.HealthObservation{Status: "quota_limited", ObservedAt: observed.Add(3 * time.Minute), RetryAt: &expired})
 	recovered := readAccount()
 	if !recovered.Eligible || recovered.Health != "quota_limited" || recovered.Allowance != nil {
@@ -577,5 +598,53 @@ func TestCodeFoundationAllowanceRecoveryRequiresSupportedReset(t *testing.T) {
 				t.Fatalf("reset recovery changed reported allowance or guessed a reset %+v", accounts)
 			}
 		})
+	}
+}
+
+func TestCodeFoundationInitialRecoveryRefreshPreservesConcurrentCooldown(t *testing.T) {
+	f := newCodeFixture(t)
+	draft := f.h.want(f.owner, "PUT", "/api/v1/code/routes/"+f.route.ID, map[string]any{
+		"project_id": f.project, "slug": f.route.Slug, "pool_id": f.pool, "models": f.route.Models, "enabled": true, "initial_recovery_attempts": 1,
+	}, map[string]string{"If-Match": f.route.ETag}, 200)
+	published := f.h.want(f.owner, "POST", "/api/v1/code/routes/"+f.route.ID+"/publish", nil, withMatch(draft, idem("concurrent-cooldown-publish")), 200)
+	route := codePublicDecode[codemode.Route](t, published)
+	input := f.input("refresh-with-concurrent-cooldown", "", nil)
+	input.Route, input.InitialRecovery = route, true
+	first, err := f.store.Admit(t.Context(), input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.store.MarkDispatched(t.Context(), first.Attempt.ID); err != nil {
+		t.Fatal(err)
+	}
+	status := 401
+	if err := f.store.ObserveOutcome(t.Context(), first.Attempt.ID, codemode.Outcome{Origin: "upstream", Kind: "rejected", UpstreamStatus: &status, ObservedAt: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.store.ConfirmNonexecution(t.Context(), first.Attempt.ID, status); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.store.Settle(t.Context(), first.Attempt.ID, codemode.Usage{Total: new(int64(0))}); err != nil {
+		t.Fatal(err)
+	}
+	var generation int64
+	if err := f.h.Pool.QueryRow(t.Context(), `UPDATE olp.provider_grants SET generation=generation+1 WHERE credential_id=$1 RETURNING generation`, f.credential).Scan(&generation); err != nil {
+		t.Fatal(err)
+	}
+	observed := time.Now().UTC().Truncate(time.Microsecond)
+	rejectedUntil := observed.Add(time.Minute)
+	concurrentUntil := rejectedUntil.Add(time.Hour)
+	replacement := input
+	replacement.Recovery = &resources.CodeRecovery{From: first.Attempt.ID, Number: 1, AccountID: f.account, CredentialID: f.credential, GrantGeneration: generation - 1, RejectedUntil: rejectedUntil}
+	for index, health := range []string{"quota_limited", "unavailable"} {
+		if err := f.store.ObserveHealth(t.Context(), f.account, codemode.HealthObservation{Status: health, ObservedAt: observed.Add(time.Duration(index) * time.Second), RetryAt: &concurrentUntil}); err != nil {
+			t.Fatal(err)
+		}
+		_, recoveryErr := f.store.Admit(t.Context(), replacement)
+		codeRefusal(t, recoveryErr, "code_account_unavailable")
+		accounts := codePublicDecode[[]codemode.Account](t, f.h.want(f.owner, "GET", "/api/v1/code/accounts?project_id="+f.project, nil, nil, 200)["items"])
+		if len(accounts) != 1 || accounts[0].Eligible || accounts[0].Health != health || accounts[0].UnavailableUntil == nil || !accounts[0].UnavailableUntil.Equal(concurrentUntil) {
+			t.Fatalf("refreshed grant erased concurrent cooldown %+v", accounts)
+		}
 	}
 }

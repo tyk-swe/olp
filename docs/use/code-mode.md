@@ -410,9 +410,12 @@ allowed by the published route and enrolled account.
 
 The generated configuration retains Codex's default request and stream retries.
 Controlled tests cover interrupted-stream retries, WebSocket reconnect and HTTP
-fallback. OLP itself never retries or replays inference. Every client retry gets
-fresh admission on the original account. A 503 can quarantine that account;
-automatic retries then fail without dispatch until the cooldown expires.
+fallback. OLP forwards each inference once by default. An explicitly published
+[initial recovery policy](#initial-conversation-recovery) can permit bounded
+additional attempts after proven nonexecution and portable initial state. Every
+client retry gets fresh admission on its durable conversation account. A 503 can
+quarantine that account, and subsequent retries fail without dispatch until its
+cooldown expires.
 
 `X-OLP-Code-Model` is an OLP-only selection hint for the initial WebSocket
 handshake, before the native body arrives. It is removed upstream. It cannot
@@ -596,9 +599,11 @@ accounts show none, and their health comes from response status alone. For
 responses that mark an account unavailable or quota-limited, OLP honors a
 single valid Retry-After header as unsigned seconds or an HTTP date. Zero
 seconds and past dates permit an immediate retry when other eligibility checks
-pass. Missing, invalid or duplicated Retry-After values use a one-minute
-fallback and preserve a longer active cooldown. Successful generations already
-running when another request starts a cooldown do not shorten it.
+pass and no longer active cooldown exists. Every failure observation preserves a
+longer active deadline, including concurrent responses and credential recovery.
+Missing, invalid or duplicated Retry-After values use a one-minute fallback.
+Successful generations already running when another request starts a cooldown
+do not shorten it.
 
 Primary and secondary windows are retained independently for each metered limit.
 Token and request counts also retain their own observation and reset times.
@@ -613,8 +618,10 @@ fixture request.
 
 Temporary transport failures that mark an account unavailable use the same
 fallback. The next client request can test recovery on the same pinned account.
-OLP schedules no synthetic health inference and never automatically replays the
-failed request.
+OLP schedules no synthetic health inference. Automatic replay requires the
+explicit [initial recovery policy](#initial-conversation-recovery), proven
+nonexecution and portable initial state. Temporary transport failures never
+qualify.
 
 ## Fidelity and privacy
 
@@ -717,14 +724,19 @@ with type `usage_limit_reached`. Arbitrary 401/429 responses and transient
 `rate_limit_exceeded` errors do not qualify. No bytes from a rejected attempt are
 sent to the client before the recovery decision. A 401 can reuse its account only
 after the existing refresh worker supplies a newer grant for the same credential
-and verified principal within ten seconds. Otherwise recovery selects another
-eligible account. Quota recovery respects longer upstream reset and Retry-After
-values when cooling the rejected account.
+and verified principal within ten seconds. A longer cooldown observed from
+another request still blocks that account. Without a refreshed grant, recovery
+selects another eligible account. Quota recovery respects longer upstream reset
+and Retry-After values when cooling the rejected account.
 
 Recovery refuses once another turn, child conversation, model pin or response
 reference establishes ownership. Concurrent first turns keep their common
 binding. Previous response IDs, turn-state headers, compact operations,
 assistant/tool histories and opaque input items cannot move between accounts.
+Recovery checks the complete request against recognized fields and types.
+Function declarations with client-supplied schemas are portable, while account-owned tools, stored prompt IDs, unknown
+fields and unsupported nested options disable recovery. The first native
+dispatch still forwards those requests unchanged.
 Transport loss, server errors, accepted responses, partial output and stream
 errors never authorize replay.
 

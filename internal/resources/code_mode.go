@@ -62,6 +62,7 @@ type CodeRecovery struct {
 	AccountID       string
 	CredentialID    string
 	GrantGeneration int64
+	RejectedUntil   time.Time
 	Number          int
 }
 
@@ -569,8 +570,7 @@ func (s *CodeStore) ObserveHealth(ctx context.Context, accountID string, observa
 	}
 	_, err := s.Pool.Exec(ctx, `UPDATE olp.code_accounts SET health=$2,health_observed_at=$3,
 		unavailable_until=CASE WHEN $2='healthy' THEN NULL
-			WHEN $4::timestamptz IS NOT NULL THEN $4
-			ELSE greatest(unavailable_until,$3::timestamptz+interval '1 minute') END
+			ELSE greatest(unavailable_until,coalesce($4::timestamptz,$3::timestamptz+interval '1 minute')) END
 		WHERE id=$1 AND (health_observed_at IS NULL OR health_observed_at<$3)
 		AND ($2<>'healthy' OR unavailable_until IS NULL OR unavailable_until<=now())`, accountID, observation.Status, observation.ObservedAt, observation.RetryAt)
 	return err

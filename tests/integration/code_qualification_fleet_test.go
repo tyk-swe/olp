@@ -738,4 +738,12 @@ func TestCodeQualificationFleetInitialRecoveryRechecksPoolAuthority(t *testing.T
 	if got.err != nil || got.response.StatusCode != 403 || !bytes.Contains(got.body, []byte("code_pool_denied")) || len(f.peer.Requests()) != 1 {
 		t.Fatalf("revoked pool dispatched recovery response=%v body=%s err=%v", got.response, got.body, got.err)
 	}
+	refusals := f.list("refusals")
+	if len(refusals) != 1 {
+		t.Fatalf("replacement refusal missing from diagnostics %+v", refusals)
+	}
+	refusal := refusals[0].(map[string]any)
+	if refusal["code"] != "code_pool_denied" || refusal["api_key_id"] != f.keyID || refusal["project_id"] != f.project || refusal["route_id"] != f.route["id"] {
+		t.Fatalf("replacement refusal lost admission attribution %+v", refusal)
+	}
 }

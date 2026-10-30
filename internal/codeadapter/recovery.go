@@ -40,14 +40,6 @@ func (v Vendor) InitialRejection(endpoint Endpoint, status int, body []byte, hea
 	resetSeconds, _ := strconv.ParseInt(reset.Raw(), 10, 64)
 	delay, _ := document.Lookup("/error/resets_in_seconds")
 	delaySeconds, _ := strconv.ParseInt(delay.Raw(), 10, 32)
-	retryAt := slices.MaxFunc([]time.Time{now.Add(time.Minute), retryAfter(headers, now), time.Unix(resetSeconds, 0), now.Add(time.Duration(delaySeconds) * time.Second)}, time.Time.Compare)
+	retryAt := slices.MaxFunc([]time.Time{now.Add(time.Minute), now.Add(upstream.RetryAfter(headers.Get("Retry-After"), now)), time.Unix(resetSeconds, 0), now.Add(time.Duration(delaySeconds) * time.Second)}, time.Time.Compare)
 	return Rejection{Class: outcome.Class, RetryAt: retryAt}, true
-}
-
-func retryAfter(headers http.Header, now time.Time) time.Time {
-	if seconds, err := strconv.ParseInt(headers.Get("Retry-After"), 10, 32); err == nil && seconds > 0 {
-		return now.Add(time.Duration(seconds) * time.Second)
-	}
-	date, _ := http.ParseTime(headers.Get("Retry-After"))
-	return date
 }

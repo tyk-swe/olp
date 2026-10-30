@@ -41,8 +41,14 @@ func recoverCodeBinding(ctx context.Context, tx pgx.Tx, in CodeAdmission) error 
 		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM olp.code_accounts a JOIN olp.provider_grants g ON g.credential_id=a.credential_id WHERE a.id=$1 AND a.principal=$2 AND a.credential_id=$3 AND g.generation>$4 AND g.lapsed_at IS NULL)`, account, principal, in.Recovery.CredentialID, in.Recovery.GrantGeneration).Scan(&current); err != nil || !current {
 			return codemode.Refuse(409, "code_recovery_unsafe")
 		}
-		_, err := tx.Exec(ctx, `UPDATE olp.code_accounts SET health='healthy',unavailable_until=NULL WHERE id=$1`, account)
-		return err
+		updated, err := tx.Exec(ctx, `UPDATE olp.code_accounts SET health='healthy',unavailable_until=NULL WHERE id=$1 AND health='unavailable' AND unavailable_until<=$2`, account, in.Recovery.RejectedUntil)
+		if err != nil {
+			return err
+		}
+		if updated.RowsAffected() != 1 {
+			return codemode.Refuse(503, "code_account_unavailable")
+		}
+		return nil
 	}
 	destination, err := codeAccount(ctx, tx, in, "", "", nil)
 	if err != nil {

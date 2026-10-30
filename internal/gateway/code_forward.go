@@ -100,13 +100,12 @@ func (s *Server) serveCode(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), codeGenerationTimeout)
 	defer cancel()
-	observation.Recoverable = route.InitialRecoveryAttempts > 0 && codewire.InitialRecoveryRequest(body, r.Header, observation)
-	s.forwardCode(w, r.WithContext(ctx), release, route, observation, ingress, raw, body, nil)
+	observation.Recoverable = route.InitialRecoveryAttempts > 0 && codewire.PortableInitialRequest(body, r.Header, observation)
+	s.forwardCode(w, r.WithContext(ctx), release, route, observation, ingress, raw, body, nil, refuse)
 }
 
-func (s *Server) forwardCode(w http.ResponseWriter, r *http.Request, release *runtime.Release, route codemode.Route, observation codemode.Request, ingress codeIngress, raw, body []byte, recovery *resources.CodeRecovery) {
+func (s *Server) forwardCode(w http.ResponseWriter, r *http.Request, release *runtime.Release, route codemode.Route, observation codemode.Request, ingress codeIngress, raw, body []byte, recovery *resources.CodeRecovery, refuse func(error)) {
 	ctx := r.Context()
-	refuse := func(err error) { codeWriteError(w, r, err) }
 	attempt, err := s.prepareCode(r, release, route, observation, ingress, codeadapter.HTTP, recovery)
 	if err != nil {
 		refuse(err)
@@ -173,7 +172,7 @@ func (s *Server) forwardCode(w http.ResponseWriter, r *http.Request, release *ru
 	attempt.response(ctx, response.StatusCode, response.Header)
 	if observation.Recoverable {
 		if next := attempt.recover(ctx, response, route, recovery); next != nil {
-			s.forwardCode(w, r, release, route, observation, ingress, raw, body, next)
+			s.forwardCode(w, r, release, route, observation, ingress, raw, body, next, refuse)
 			return
 		}
 	}

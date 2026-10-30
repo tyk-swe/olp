@@ -28,8 +28,8 @@ func (a *codeAttempt) recover(ctx context.Context, response *http.Response, rout
 	if err != nil || len(body) > 64<<10 {
 		return nil
 	}
-	vendor, ok := codeadapter.ForConnection(a.config.Kind, a.config.AuthMode, a.config.ProfileID)
-	rejection, proven := vendor.InitialRejection(a.endpoint, response.StatusCode, body, response.Header, a.server.now())
+	adapter, ok := codeadapter.ForConnection(a.config.Kind, a.config.AuthMode, a.config.ProfileID)
+	rejection, proven := adapter.InitialRejection(a.endpoint, response.StatusCode, body, response.Header, a.server.now())
 	if !ok || !proven {
 		return nil
 	}
@@ -45,20 +45,20 @@ func (a *codeAttempt) recover(ctx context.Context, response *http.Response, rout
 	if ordinal > route.InitialRecoveryAttempts {
 		return nil
 	}
-	if rejection.Class == upstream.Credential && a.auth.CredentialID != "" && a.auth.GrantGeneration > 0 && a.refreshed(ctx, vendor) {
-		return &resources.CodeRecovery{From: a.permit.Attempt.ID, Number: ordinal, AccountID: a.permit.Account.ID, CredentialID: a.auth.CredentialID, GrantGeneration: a.auth.GrantGeneration}
+	if rejection.Class == upstream.Credential && a.auth.CredentialID != "" && a.auth.GrantGeneration > 0 && a.refreshed(ctx, adapter) {
+		return &resources.CodeRecovery{From: a.permit.Attempt.ID, Number: ordinal, AccountID: a.permit.Account.ID, CredentialID: a.auth.CredentialID, GrantGeneration: a.auth.GrantGeneration, RejectedUntil: rejection.RetryAt}
 	}
 	return &resources.CodeRecovery{From: a.permit.Attempt.ID, Number: ordinal}
 }
 
-func (a *codeAttempt) refreshed(ctx context.Context, vendor codeadapter.Vendor) bool {
+func (a *codeAttempt) refreshed(ctx context.Context, adapter codeadapter.Vendor) bool {
 	refreshCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 	ticker := time.NewTicker(200 * time.Millisecond)
 	defer ticker.Stop()
 	for {
-		auth, err := a.server.CodeAuthorizer.AuthorizeCode(refreshCtx, a.config, a.permit.Account, codemode.Dispatch{Adapter: vendor.Adapter, Protocol: a.endpoint.Protocol, ClientPath: a.endpoint.ClientPath})
-		if err == nil && auth.CredentialID == a.auth.CredentialID && auth.GrantGeneration > a.auth.GrantGeneration && vendor.ValidateAuthorization(a.endpoint, auth, a.permit.Pin.Principal) == nil {
+		auth, err := a.server.CodeAuthorizer.AuthorizeCode(refreshCtx, a.config, a.permit.Account, codemode.Dispatch{Adapter: adapter.Adapter, Protocol: a.endpoint.Protocol, ClientPath: a.endpoint.ClientPath})
+		if err == nil && auth.CredentialID == a.auth.CredentialID && auth.GrantGeneration > a.auth.GrantGeneration && adapter.ValidateAuthorization(a.endpoint, auth, a.permit.Pin.Principal) == nil {
 			return true
 		}
 		select {
