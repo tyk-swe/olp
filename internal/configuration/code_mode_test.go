@@ -45,7 +45,7 @@ func TestCodeConfigurationDigestRetainsPublishedAndDraftPolicies(t *testing.T) {
 
 func TestCodeConfigurationDigestRetainsIndependentCodexIdentityPolicy(t *testing.T) {
 	document := func(draft, published bool) configuration.Document {
-		return configuration.Document{APIVersion: configuration.APIVersion, Code: &configuration.CodeConfiguration{Routes: []configuration.CodeRouteEntry{{ID: "route", Draft: configuration.CodeRoutePolicy{CodexCLIIdentity: draft, MessagesToCodex: true}, Published: &configuration.CodePublication{Policy: configuration.CodeRoutePolicy{CodexCLIIdentity: published, MessagesToCodex: true}}}}}}
+		return configuration.Document{APIVersion: configuration.APIVersion, Code: &configuration.CodeConfiguration{Routes: []configuration.CodeRouteEntry{{ID: "route", Draft: configuration.CodeRoutePolicy{CodexCLIIdentity: draft, ChatToCodex: true, MessagesToCodex: true}, Published: &configuration.CodePublication{Policy: configuration.CodeRoutePolicy{CodexCLIIdentity: published, ChatToCodex: true, MessagesToCodex: true}}}}}}
 	}
 	digest := func(value configuration.Document) string {
 		digest, err := configuration.Digest(&value)
@@ -173,5 +173,33 @@ func TestCodeConfigurationPaidFallbackRequiresRecovery(t *testing.T) {
 	}
 	if err := artifact(1).Validate(); err != nil {
 		t.Fatalf("authorized fallback was rejected %v", err)
+	}
+}
+
+func TestCodeConfigurationDigestRetainsChatToCodexPolicy(t *testing.T) {
+	document := func(draft, published bool) *configuration.Document {
+		return &configuration.Document{APIVersion: configuration.APIVersion, Code: &configuration.CodeConfiguration{Routes: []configuration.CodeRouteEntry{{ID: "route", Draft: configuration.CodeRoutePolicy{ChatToCodex: draft}, Published: &configuration.CodePublication{Policy: configuration.CodeRoutePolicy{ChatToCodex: published}}}}}}
+	}
+	before, err := configuration.Digest(document(false, true))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, changed := range []*configuration.Document{document(true, true), document(false, false)} {
+		after, err := configuration.Digest(changed)
+		if err != nil || after == before {
+			t.Fatal("draft or publication lost the explicit Chat policy", err)
+		}
+	}
+	encoded, err := json.Marshal(document(false, true))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded configuration.Document
+	if err := json.Unmarshal(encoded, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	after, err := configuration.Digest(&decoded)
+	if err != nil || before != after || decoded.Code.Routes[0].Draft.ChatToCodex || !decoded.Code.Routes[0].Published.Policy.ChatToCodex {
+		t.Fatal("configuration lost independent draft/published Chat policy", err)
 	}
 }

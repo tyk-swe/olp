@@ -229,6 +229,7 @@ type Route struct {
 	InitialRecoveryAttempts int                   `json:"initial_recovery_attempts,omitempty"`
 	ModelRewriting          bool                  `json:"model_rewriting,omitempty"`
 	Aliases                 map[string]string     `json:"aliases,omitempty"`
+	ChatToCodex             bool                  `json:"chat_to_codex,omitempty"`
 	MessagesToCodex         bool                  `json:"messages_to_codex,omitempty"`
 	Tools                   *ResearchTools        `json:"tools,omitempty"`
 	MaxBodyBytes            *int64                `json:"max_body_bytes,omitempty"`

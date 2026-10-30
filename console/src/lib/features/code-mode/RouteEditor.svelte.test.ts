@@ -58,6 +58,13 @@ it('validates ordered model pools and saves the explicit recovery policy', async
     vi.unstubAllGlobals();
   });
   flushSync();
+  const translation = host.querySelector<HTMLInputElement>(
+    '#code-chat-to-codex'
+  )!;
+  expect(translation.checked).toBe(false);
+  translation.checked = true;
+  translation.dispatchEvent(new Event('change', { bubbles: true }));
+  flushSync();
   const input = host.querySelector<HTMLTextAreaElement>('#code-model-pools')!;
   input.value = 'team-code=native-alternate,native-main';
   input.dispatchEvent(new Event('input', { bubbles: true }));
@@ -93,7 +100,9 @@ it('validates ordered model pools and saves the explicit recovery policy', async
       model_pools: { 'team-code': ['native-main', 'native-alternate'] },
       aliases: route.aliases,
       model_rewriting: true,
-      initial_recovery_attempts: 1
+      initial_recovery_attempts: 1,
+      chat_to_codex: true,
+      codex_cli_identity: false
     })
   );
 });

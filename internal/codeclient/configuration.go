@@ -137,6 +137,11 @@ func Generate(route codemode.Route, offers Offers, in Request) (codemode.ClientC
 		}
 		return ""
 	}() + func() string {
+		return ""
+	}() + func() string {
+		if client == codeadapter.ClientOpenCode && route.ChatToCodex && slices.Contains(adapters, codemode.AdapterCodex) {
+			return " This published route explicitly translates Chat text and function tool workflows through Codex Responses. Low, medium and high reasoning effort is supported. Signed reasoning, media, server-owned state and unsupported required semantics are refused. Identity compatibility requires its independent opt-in. Current OpenCode client and live subscription acceptance remain unqualified."
+		}
 		if client == codeadapter.ClientClaudeCode && route.MessagesToCodex && slices.Contains(adapters, codemode.AdapterCodex) {
 			return " This published route enables Messages text and tool use through Codex accounts. Explicit low, medium and high reasoning effort is supported. Signed thinking, numeric reasoning budgets, beta features and other unsupported required semantics are refused. Prompt text is preserved, and identity and prompt compatibility remain disabled."
 		}

@@ -53,7 +53,7 @@ func TestPublishedCodexIdentityFreezesSeparatePolicy(t *testing.T) {
 	if adapter.CompatibilityOriginator(frozen.CodeRoutes["coding"]) == "" {
 		t.Fatal("publication dropped explicit identity policy")
 	}
-	input.CodeRoutes["coding"] = codemode.Route{MessagesToCodex: true}
+	input.CodeRoutes["coding"] = codemode.Route{MessagesToCodex: true, ChatToCodex: true}
 	if adapter.CompatibilityOriginator(frozen.CodeRoutes["coding"]) == "" || adapter.CompatibilityOriginator(input.Clone().CodeRoutes["coding"]) != "" {
 		t.Fatal("draft edit changed an existing publication or translation enabled identity")
 	}
@@ -74,7 +74,7 @@ func TestPublishedMessagesPolicySelectsEligibleFrozenProviders(t *testing.T) {
 		CodeRoutes: map[string]codemode.Route{
 			"native":      {ID: "native-route", ProjectID: "project", Slug: "native", PoolID: "pool", Models: []string{"gpt-fixture-model", "minimax-fixture-model", "gemini-fixture-model"}, Enabled: true, RevisionID: "native-revision", Revision: 1, PublishedAt: &publishedAt, ModelRewriting: true, Aliases: map[string]string{"client-messages": "minimax-fixture-model"}},
 			"antigravity": {ID: "antigravity-route", ProjectID: "project", Slug: "antigravity", PoolID: "pool", Models: []string{"gemini-fixture-model", "minimax-fixture-model"}, Enabled: true, RevisionID: "antigravity-revision", Revision: 1, PublishedAt: &publishedAt, ChatToAntigravity: true},
-			"translated":  {ID: "translated-route", ProjectID: "project", Slug: "translated", PoolID: "pool", Models: []string{"gpt-fixture-model", "minimax-fixture-model", "gemini-fixture-model"}, Enabled: true, RevisionID: "translated-revision", Revision: 1, PublishedAt: &publishedAt, MessagesToCodex: true, ModelRewriting: true, Aliases: map[string]string{"client-stable": "gpt-fixture-model"}},
+			"translated":  {ID: "translated-route", ProjectID: "project", Slug: "translated", PoolID: "pool", Models: []string{"gpt-fixture-model", "minimax-fixture-model", "gemini-fixture-model"}, Enabled: true, RevisionID: "translated-revision", Revision: 1, PublishedAt: &publishedAt, ChatToCodex: true, MessagesToCodex: true, ModelRewriting: true, Aliases: map[string]string{"client-stable": "gpt-fixture-model"}},
 		},
 		CodeConnections: map[string]Configuration{
 			"native-revision:antigravity":      {Kind: "plugin", AuthMode: "grant", ProfileID: antigravityauth.ProfileID},
@@ -105,6 +105,9 @@ func TestPublishedMessagesPolicySelectsEligibleFrozenProviders(t *testing.T) {
 		transport               codeadapter.Transport
 		providers               []string
 	}{
+		{"chat-disabled-by-default", "native", "v1/chat/completions", "gpt-fixture-model", codeadapter.HTTP, nil},
+		{"chat-published-opt-in", "translated", "v1/chat/completions", "gpt-fixture-model", codeadapter.HTTP, []string{"b-codex"}},
+		{"chat-translation-is-http-only", "translated", "v1/chat/completions", "gpt-fixture-model", codeadapter.WebSocket, nil},
 		{"native-default-refuses-cross-protocol", "native", "v1/messages", "gpt-fixture-model", codeadapter.HTTP, nil},
 		{"exact-alias-selects-target-protocol", "native", "v1/messages", "client-messages", codeadapter.HTTP, []string{"a-native"}},
 		{"exact-alias-reaches-native-target", "translated", "v1/messages", "client-stable", codeadapter.HTTP, []string{"b-codex"}},
@@ -116,7 +119,7 @@ func TestPublishedMessagesPolicySelectsEligibleFrozenProviders(t *testing.T) {
 		{"messages-translation-is-http-only", "translated", "v1/messages", "gpt-fixture-model", codeadapter.WebSocket, nil},
 		{"native-responses-keeps-websocket", "translated", "responses", "gpt-fixture-model", codeadapter.WebSocket, []string{"b-codex"}},
 		{"antigravity-disabled-by-default", "native", "v1/chat/completions", "gemini-fixture-model", codeadapter.HTTP, []string{"a-native"}},
-		{"messages-opt-in-does-not-enable-antigravity", "translated", "v1/chat/completions", "gemini-fixture-model", codeadapter.HTTP, []string{"a-native"}},
+		{"codex-chat-opt-in-excludes-antigravity", "translated", "v1/chat/completions", "gemini-fixture-model", codeadapter.HTTP, []string{"a-native", "b-codex"}},
 		{"published-antigravity-opt-in-reaches-chat", "antigravity", "v1/chat/completions", "gemini-fixture-model", codeadapter.HTTP, []string{"a-native", "antigravity"}},
 		{"antigravity-opt-in-preserves-native-messages", "antigravity", "v1/messages", "minimax-fixture-model", codeadapter.HTTP, []string{"a-native"}},
 		{"antigravity-refuses-websocket", "antigravity", "v1/chat/completions", "gemini-fixture-model", codeadapter.WebSocket, nil},

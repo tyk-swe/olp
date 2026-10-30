@@ -326,3 +326,29 @@ func TestAntigravityAuthorizationUsesVerifiedSubjectAndProject(t *testing.T) {
 		t.Fatal("unverified project became dispatch authority")
 	}
 }
+
+func TestRoutePolicySeparatesChatClientFromCodexTarget(t *testing.T) {
+	adapter, _ := Lookup(codemode.AdapterCodex)
+	native, _ := adapter.Endpoint("responses")
+	for _, enabled := range []bool{false, true} {
+		route := codemode.Route{ChatToCodex: enabled}
+		endpoint, reachable := RouteEndpoint(route, adapter, "v1/chat/completions")
+		if reachable != enabled || enabled && (endpoint.Protocol != native.Protocol || endpoint.UpstreamPath != native.UpstreamPath || endpoint.Observation != native.Observation || endpoint.Identity != native.Identity || endpoint.CredentialHeader != native.CredentialHeader) {
+			t.Fatalf("Chat policy changed native target or ignored opt-in %+v, %t", endpoint, reachable)
+		}
+		protocol, reachable := RouteClientProtocol(route, adapter, ClientOpenCode, "native-fixture")
+		if reachable != enabled || enabled && protocol != codemode.ProtocolChat || slices.Contains(RouteClients(route, adapter), ClientOpenCode) != enabled {
+			t.Fatalf("OpenCode capability disagrees with policy %t, %s, %t", enabled, protocol, reachable)
+		}
+		client, declared := RouteClient(route, adapter, ClientOpenCode)
+		if declared != enabled || enabled && (client.Provider == "" || client.Protocol != protocol || client.URLSuffix != "/v1") {
+			t.Fatalf("configured client %+v, %t", client, declared)
+		}
+		if _, reachable := RouteEndpoint(route, adapter, "v1/messages"); reachable {
+			t.Fatal("Chat translation enabled Messages translation")
+		}
+		if adapter.CompatibilityOriginator(route) != "" {
+			t.Fatal("Chat translation enabled identity compatibility")
+		}
+	}
+}

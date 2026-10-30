@@ -694,7 +694,7 @@ func TestCodeNativeMessagesPreservePayloadForSelectedAccount(t *testing.T) {
 		t.Run(fmt.Sprint(enabled), func(t *testing.T) {
 			h, ledger, server := newCodeForwardHarness(t)
 			route := h.rt.release.Snapshot.CodeRoutes["coding"]
-			route.MessagesToCodex = enabled
+			route.MessagesToCodex, route.ChatToCodex = enabled, enabled
 			h.rt.release.Snapshot.CodeRoutes["coding"] = route
 			configuration := routing.Configuration{Kind: connectors.KindPlugin, AuthMode: connectors.AuthGrant, ProfileID: codeplans.ZAIProfile, Endpoint: h.upstream.URL + "/a"}
 			h.rt.release.Snapshot.CodeConnections = map[string]routing.Configuration{"revision:provider": configuration}
@@ -1264,62 +1264,71 @@ func TestCodeMessagesToCodexToolStreamOutcomes(t *testing.T) {
 }
 
 func TestCodeMessagesToCodexCancelledToolStream(t *testing.T) {
-	g, ledger, server := newCodeForwardHarness(t)
-	route := g.rt.release.Snapshot.CodeRoutes["coding"]
-	route.MessagesToCodex = true
-	g.rt.release.Snapshot.CodeRoutes["coding"] = route
-	g.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
-		_, _ = io.Copy(io.Discard, r.Body)
-		w.Header().Set("Content-Type", "text/event-stream")
-		for _, event := range []string{
-			`{"type":"response.created","response":{"id":"cancelled-tool","status":"in_progress","output":[]}}`,
-			`{"type":"response.output_item.added","output_index":0,"item":{"type":"function_call","call_id":"call-read","name":"read_file","arguments":""}}`,
-			`{"type":"response.function_call_arguments.delta","output_index":0,"delta":"{\"path\":"}`,
-		} {
-			fmt.Fprint(w, "data: "+event+"\n\n")
-		}
-		w.(http.Flusher).Flush()
-		<-r.Context().Done()
-	})
-	ctx, cancel := context.WithCancel(t.Context())
-	defer cancel()
-	request, _ := http.NewRequestWithContext(ctx, http.MethodPost, server.URL+"/code/coding/v1/messages", strings.NewReader(`{"model":"native-model","messages":[{"role":"user","content":"Read a file"}],"max_tokens":64,"stream":true}`))
-	request.Header.Set("Authorization", "Bearer "+fullKey)
-	request.Header.Set("X-Claude-Code-Session-Id", "cancelled-tool")
-	response, err := server.Client().Do(request)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer response.Body.Close()
-	reader := bufio.NewReader(response.Body)
-	for {
-		line, err := reader.ReadString('\n')
-		if err != nil {
-			t.Fatal(err)
-		}
-		if strings.Contains(line, "input_json_delta") {
-			break
-		}
-	}
-	cancel()
-	remaining, _ := io.ReadAll(reader)
-	if bytes.Contains(remaining, []byte("message_stop")) {
-		t.Fatalf("cancelled tool reported success %s", remaining)
-	}
-	usage := ledger.wait(t)
-	if usage.Total != nil || usage.Input != nil || usage.Output != nil {
-		t.Fatalf("cancelled tool invented usage %+v", usage)
-	}
-	if g.mock.count("a") != 1 {
-		t.Fatal("cancelled tool was replayed")
-	}
-	ledger.mu.Lock()
-	defer ledger.mu.Unlock()
-	if len(ledger.outcomes) == 0 || (ledger.outcomes[len(ledger.outcomes)-1].Origin != "client" || ledger.outcomes[len(ledger.outcomes)-1].Kind != "canceled") {
-		t.Fatalf("cancellation outcomes=%+v", ledger.outcomes)
+	for _, input := range []struct {
+		path, header, delta string
+		chat                bool
+	}{
+		{"v1/messages", "X-Claude-Code-Session-Id", "input_json_delta", false},
+		{"v1/chat/completions", "X-Opencode-Session-Id", "tool_calls", true},
+	} {
+		t.Run(input.path, func(t *testing.T) {
+			g, ledger, server := newCodeForwardHarness(t)
+			route := g.rt.release.Snapshot.CodeRoutes["coding"]
+			route.MessagesToCodex, route.ChatToCodex = true, input.chat
+			g.rt.release.Snapshot.CodeRoutes["coding"] = route
+			g.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
+				_, _ = io.Copy(io.Discard, r.Body)
+				w.Header().Set("Content-Type", "text/event-stream")
+				for _, event := range []string{
+					`{"type":"response.created","response":{"id":"cancelled-tool","status":"in_progress","output":[]}}`,
+					`{"type":"response.output_item.added","output_index":0,"item":{"type":"function_call","call_id":"call-read","name":"read_file","arguments":""}}`,
+					`{"type":"response.function_call_arguments.delta","output_index":0,"delta":"{\"path\":"}`,
+				} {
+					fmt.Fprint(w, "data: "+event+"\n\n")
+				}
+				w.(http.Flusher).Flush()
+				<-r.Context().Done()
+			})
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			request, _ := http.NewRequestWithContext(ctx, http.MethodPost, server.URL+"/code/coding/"+input.path, strings.NewReader(`{"model":"native-model","messages":[{"role":"user","content":"Read a file"}],"max_tokens":64,"stream":true}`))
+			request.Header.Set("Authorization", "Bearer "+fullKey)
+			request.Header.Set(input.header, "cancelled-tool")
+			response, err := server.Client().Do(request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer response.Body.Close()
+			reader := bufio.NewReader(response.Body)
+			for {
+				line, err := reader.ReadString('\n')
+				if err != nil {
+					t.Fatal(err)
+				}
+				if strings.Contains(line, input.delta) {
+					break
+				}
+			}
+			cancel()
+			remaining, _ := io.ReadAll(reader)
+			if bytes.Contains(remaining, []byte("message_stop")) || bytes.Contains(remaining, []byte("[DONE]")) {
+				t.Fatalf("cancelled tool reported success %s", remaining)
+			}
+			usage := ledger.wait(t)
+			if usage.Total != nil || usage.Input != nil || usage.Output != nil {
+				t.Fatalf("cancelled tool invented usage %+v", usage)
+			}
+			if g.mock.count("a") != 1 {
+				t.Fatal("cancelled tool was replayed")
+			}
+			ledger.mu.Lock()
+			defer ledger.mu.Unlock()
+			if len(ledger.outcomes) == 0 || (ledger.outcomes[len(ledger.outcomes)-1].Origin != "client" || ledger.outcomes[len(ledger.outcomes)-1].Kind != "canceled") {
+				t.Fatalf("cancellation outcomes=%+v", ledger.outcomes)
+			}
+		})
 	}
 }
-
 func TestCodeForwardingObservesRetryAfterWithoutChangingAllowance(t *testing.T) {
 	now := time.Date(2026, 10, 30, 10, 0, 0, 0, time.UTC)
 	for _, test := range []struct {
@@ -2729,7 +2738,7 @@ func TestCodeNativeChatPreservesBytesWithAntigravityPolicy(t *testing.T) {
 	for _, enabled := range []bool{false, true} {
 		h, ledger, server := newCodeForwardHarness(t)
 		route := h.rt.release.Snapshot.CodeRoutes["coding"]
-		route.ChatToAntigravity = enabled
+		route.ChatToAntigravity, route.ChatToCodex = enabled, enabled
 		h.rt.release.Snapshot.CodeRoutes["coding"] = route
 		h.rt.release.Snapshot.CodeConnections = map[string]routing.Configuration{"revision:provider": {Kind: connectors.KindPlugin, AuthMode: connectors.AuthGrant, ProfileID: codeplans.ZAIProfile, Endpoint: h.upstream.URL + "/a"}}
 		if err := h.rt.release.Snapshot.Compile(); err != nil {
@@ -3011,5 +3020,254 @@ func TestCodePaidFallbackSubstitutionRequiresExplicitModelPool(t *testing.T) {
 				t.Fatalf("substitution attribution %+v", fact)
 			}
 		})
+	}
+}
+
+func TestCodeChatToCodexToolContinuation(t *testing.T) {
+	for _, stream := range []bool{false, true} {
+		t.Run(fmt.Sprint(stream), func(t *testing.T) {
+			h, ledger, server := newCodeForwardHarness(t)
+			route := h.rt.release.Snapshot.CodeRoutes["coding"]
+			route.ChatToCodex, route.ModelRewriting = true, true
+			route.Aliases = map[string]string{"team-model": "native-model"}
+			h.rt.release.Snapshot.CodeRoutes["coding"] = route
+			h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
+				body, _ := io.ReadAll(r.Body)
+				var request struct {
+					Model        string
+					Stream       bool
+					Store        *bool
+					Instructions *string
+					Reasoning    struct{ Effort string }
+					Input        []struct {
+						Type, Role, CallID, Arguments, Output string
+						Content                               []struct{ Text string }
+					}
+				}
+				if err := json.Unmarshal(body, &request); err != nil || request.Model != "native-model" || !request.Stream || request.Store == nil || *request.Store || request.Instructions == nil || *request.Instructions != "" || request.Reasoning.Effort != "high" || request.Input[0].Role != "developer" || request.Input[0].Content[0].Text != "Preserve my instructions" {
+					t.Errorf("translated request %s, %v", body, err)
+				}
+				if r.URL.Path != "/a/responses" || r.Header.Get("Originator") != "" || r.Header.Get("X-Opencode-Session-Id") != "chat-tools" || r.Header.Get("Authorization") != "Bearer upstream-only" {
+					t.Errorf("target %s headers %v", r.URL, r.Header)
+				}
+				w.Header().Set("Content-Type", "text/event-stream")
+				fmt.Fprint(w, "data: "+`{"type":"response.created","response":{"id":"chat-tool","status":"in_progress","output":[]}}`+"\n\n")
+				if bytes.Contains(body, []byte(`"function_call_output"`)) {
+					if !bytes.Contains(body, []byte(`"call_id":"call-read"`)) || !bytes.Contains(body, []byte(`"arguments":"{\"path\":\"main.go\"}"`)) || !bytes.Contains(body, []byte(`"output":"package main"`)) {
+						t.Errorf("tool history lost %s", body)
+					}
+					fmt.Fprint(w, "data: "+`{"type":"response.completed","response":{"id":"chat-tool","status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"File read"}]}],"usage":{"input_tokens":13,"output_tokens":2,"total_tokens":15}}}`+"\n\n")
+					return
+				}
+				for _, event := range []string{
+					`{"type":"response.output_item.added","output_index":0,"item":{"type":"function_call","call_id":"call-read","name":"read_file","arguments":""}}`,
+					`{"type":"response.function_call_arguments.delta","output_index":0,"delta":"{\"path\":"}`,
+					`{"type":"response.function_call_arguments.delta","output_index":0,"delta":"\"main.go\"}"}`,
+					`{"type":"response.output_item.done","output_index":0,"item":{"type":"function_call","call_id":"call-read","name":"read_file","arguments":"{\"path\":\"main.go\"}"}}`,
+					`{"type":"response.completed","response":{"id":"chat-tool","status":"completed","output":[{"type":"function_call","call_id":"call-read","name":"read_file","arguments":"{\"path\":\"main.go\"}"}],"usage":{"input_tokens":7,"output_tokens":4,"total_tokens":11}}}`,
+				} {
+					fmt.Fprint(w, "data: "+event+"\n\n")
+				}
+			})
+			for _, history := range []string{
+				``,
+				`,{"role":"assistant","content":null,"tool_calls":[{"id":"call-read","type":"function","function":{"name":"read_file","arguments":"{\"path\":\"main.go\"}"}}]},{"role":"tool","tool_call_id":"call-read","content":"package main"}`,
+			} {
+				request, _ := http.NewRequestWithContext(t.Context(), http.MethodPost, server.URL+"/code/coding/v1/chat/completions", strings.NewReader(fmt.Sprintf(`{"model":"team-model","messages":[{"role":"system","content":"Preserve my instructions"},{"role":"user","content":"Read main.go"}%s],"tools":[{"type":"function","function":{"name":"read_file","parameters":{"type":"object","properties":{"path":{"type":"string"}}}}}],"reasoning_effort":"high","stream":%t,"stream_options":{"include_usage":true}}`, history, stream)))
+				request.Header.Set("Authorization", "Bearer "+fullKey)
+				request.Header.Set("X-Opencode-Session-Id", "chat-tools")
+				response, err := server.Client().Do(request)
+				if err != nil {
+					t.Fatal(err)
+				}
+				body, _ := io.ReadAll(response.Body)
+				response.Body.Close()
+				if response.StatusCode != 200 || !bytes.Contains(body, []byte(`"model":"team-model"`)) || !bytes.Contains(body, []byte(`"total_tokens":`)) || stream && !bytes.Contains(body, []byte("[DONE]")) {
+					t.Fatalf("Chat exchange %d %s", response.StatusCode, body)
+				}
+				if history == "" && (!bytes.Contains(body, []byte(`"tool_calls"`)) || !bytes.Contains(body, []byte(`"name":"read_file"`))) || history != "" && !bytes.Contains(body, []byte("File read")) {
+					t.Fatalf("lost tool exchange %s", body)
+				}
+				want := int64(11)
+				if history != "" {
+					want = 15
+				}
+				if usage := ledger.wait(t); usage.Total == nil || *usage.Total != want {
+					t.Fatalf("native usage %+v", usage)
+				}
+			}
+		})
+	}
+}
+
+func TestCodeChatToCodexRefusesUnsupportedRequiredState(t *testing.T) {
+	for _, test := range []struct {
+		name, body, query string
+		headers           http.Header
+	}{
+		{"signed reasoning", `{"role":"assistant","content":"Earlier","reasoning_content":"signed"}`, "", nil},
+		{"message name", `{"role":"user","name":"owner","content":"Hello"}`, "", nil},
+		{"media", `{"role":"user","content":[{"type":"image_url","image_url":{"url":"https://image.example/required"}}]}`, "", nil},
+		{"role", `{"role":"custom","content":"Hello"}`, "", nil},
+		{"query", `{"role":"user","content":"Hello"}`, "?required=true", nil},
+		{"turn state", `{"role":"user","content":"Hello"}`, "", http.Header{"X-Codex-Turn-State": {"required"}}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			h, _, server := newCodeForwardHarness(t)
+			route := h.rt.release.Snapshot.CodeRoutes["coding"]
+			route.ChatToCodex = true
+			h.rt.release.Snapshot.CodeRoutes["coding"] = route
+			request, _ := http.NewRequestWithContext(t.Context(), http.MethodPost, server.URL+"/code/coding/v1/chat/completions"+test.query, strings.NewReader(`{"model":"native-model","messages":[`+test.body+`],"stream":true}`))
+			request.Header = test.headers.Clone()
+			if request.Header == nil {
+				request.Header = make(http.Header)
+			}
+			request.Header.Set("Authorization", "Bearer "+fullKey)
+			response, err := server.Client().Do(request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			response.Body.Close()
+			if response.StatusCode < 400 || response.StatusCode >= 500 || h.mock.count("a") != 0 {
+				t.Fatalf("required state dispatched, status %d", response.StatusCode)
+			}
+		})
+	}
+	for _, field := range []string{`"stream_options":{"include_usage":true,"required_state":true}`, `"reasoning_effort":"numeric"`, `"previous_response_id":"owned"`, `"tools":[{"type":"function","function":{"name":"read_file","strict":true,"parameters":{"type":"object"}}}]`} {
+		h, _, server := newCodeForwardHarness(t)
+		route := h.rt.release.Snapshot.CodeRoutes["coding"]
+		route.ChatToCodex = true
+		h.rt.release.Snapshot.CodeRoutes["coding"] = route
+		request, _ := http.NewRequestWithContext(t.Context(), http.MethodPost, server.URL+"/code/coding/v1/chat/completions", strings.NewReader(`{"model":"native-model","messages":[{"role":"user","content":"Hello"}],`+field+`}`))
+		request.Header.Set("Authorization", "Bearer "+fullKey)
+		response, err := server.Client().Do(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		response.Body.Close()
+		if response.StatusCode < 400 || response.StatusCode >= 500 || h.mock.count("a") != 0 {
+			t.Fatalf("required field dispatched, status %d, %s", response.StatusCode, field)
+		}
+	}
+}
+
+func TestCodeChatToCodexPreservesNativeUsageOnProjectionFailure(t *testing.T) {
+	for _, known := range []bool{false, true} {
+		h, ledger, server := newCodeForwardHarness(t)
+		route := h.rt.release.Snapshot.CodeRoutes["coding"]
+		route.ChatToCodex = true
+		h.rt.release.Snapshot.CodeRoutes["coding"] = route
+		h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
+			_, _ = io.Copy(io.Discard, r.Body)
+			w.Header().Set("Content-Type", "text/event-stream")
+			if known {
+				fmt.Fprint(w, "data: "+`{"type":"response.completed","response":{"id":"required-state","status":"completed","output":[{"type":"reasoning","encrypted_content":"required"}],"usage":{"input_tokens":2,"output_tokens":1,"total_tokens":3}}}`+"\n\n")
+				return
+			}
+			fmt.Fprint(w, "data: "+`{"type":"response.completed","response":{"id":"unknown-usage","status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Hello"}]}]}}`+"\n\n")
+		})
+		request, _ := http.NewRequestWithContext(t.Context(), http.MethodPost, server.URL+"/code/coding/v1/chat/completions", strings.NewReader(`{"model":"native-model","messages":[{"role":"user","content":"Hello"}]}`))
+		request.Header.Set("Authorization", "Bearer "+fullKey)
+		response, err := server.Client().Do(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, _ := io.ReadAll(response.Body)
+		response.Body.Close()
+		usage := ledger.wait(t)
+		if known && (response.StatusCode != 502 || usage.Total == nil || *usage.Total != 3 || !bytes.Contains(body, []byte("code_upstream_invalid"))) || !known && (response.StatusCode != 200 || usage.Total != nil) {
+			t.Fatalf("usage/projection mismatch known=%t status=%d usage=%+v body=%s", known, response.StatusCode, usage, body)
+		}
+	}
+}
+
+func TestCodeChatToCodexPortableRecoveryUsesExactModelPool(t *testing.T) {
+	h, ledger, server := newCodeForwardHarness(t, codeForwardSetup{Models: []string{"gpt-fixture-main", "gpt-fixture-alternate"}, InitialRecoveryAttempts: 1, Policy: access.KeyPolicy{Scopes: []string{"inference"}}})
+	route := h.rt.release.Snapshot.CodeRoutes["coding"]
+	route.ChatToCodex, route.ModelRewriting = true, true
+	route.ModelPools = map[string][]string{"gpt-fixture-main": {"gpt-fixture-main", "gpt-fixture-alternate"}}
+	h.rt.release.Snapshot.CodeRoutes[route.Slug] = route
+	ledger.pinTarget, ledger.recoveryTarget = "gpt-fixture-main", "gpt-fixture-alternate"
+	h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
+		var request struct {
+			Model string
+			Input []struct{ Content []struct{ Text string } }
+		}
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil || len(request.Input) != 1 || request.Input[0].Content[0].Text != "Preserve this prompt" {
+			t.Errorf("model recovery changed prompt %+v, %v", request, err)
+		}
+		if request.Model == "gpt-fixture-main" {
+			w.WriteHeader(http.StatusTooManyRequests)
+			io.WriteString(w, `{"error":{"type":"usage_limit_reached"}}`)
+			return
+		}
+		if request.Model != "gpt-fixture-alternate" {
+			t.Errorf("unexpected selected native model %q", request.Model)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		io.WriteString(w, `{"id":"recovered-chat","model":"gpt-fixture-alternate","status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Recovered"}]}],"usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}`)
+	})
+	request, _ := http.NewRequestWithContext(t.Context(), http.MethodPost, server.URL+"/code/coding/v1/chat/completions", strings.NewReader(`{"model":"gpt-fixture-main","messages":[{"role":"user","content":"Preserve this prompt"}]}`))
+	request.Header.Set("Authorization", "Bearer "+fullKey)
+	request.Header.Set("X-Opencode-Session-Id", "portable-recovery")
+	response, err := server.Client().Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	body, _ := io.ReadAll(response.Body)
+	if response.StatusCode != 200 || !bytes.Contains(body, []byte(`"model":"gpt-fixture-main"`)) || !bytes.Contains(body, []byte("Recovered")) || h.mock.count("a") != 2 {
+		t.Fatalf("Chat recovery %d %s", response.StatusCode, body)
+	}
+	ledger.wait(t)
+	if usage := ledger.wait(t); usage.Total == nil || *usage.Total != 2 {
+		t.Fatalf("recovered native usage %+v", usage)
+	}
+}
+
+func TestCodeChatToCodexPaidFallbackPreservesNativeChatContract(t *testing.T) {
+	h, ledger, server := newPaidCodeForwardHarness(t)
+	route := h.rt.release.Snapshot.CodeRoutes["coding"]
+	route.PaidFallbackTargets, route.PaidTargets = route.PaidTargets, nil
+	route.ChatToCodex, route.InitialRecoveryAttempts = true, 1
+	ledger.recoveryUnavailable = true
+	h.rt.release.Snapshot.CodeRoutes[route.Slug] = route
+	providerKey := route.RevisionID + ":" + route.PaidFallbackTargets[modelA].ProviderID
+	provider := h.rt.release.Snapshot.CodePaidConnections[providerKey]
+	provider.ProfileID = "openai-chat"
+	h.rt.release.Snapshot.CodePaidConnections[providerKey] = provider
+	const body = `{"model":"model-a","messages":[{"role":"user","content":"hello"}],"max_completion_tokens":20}`
+	const reply = `{ "id":"paid-chat", "model":"model-a", "choices":[{"index":0,"message":{"role":"assistant","content":"Paid reply"},"finish_reason":"stop"}], "usage":{"prompt_tokens":2,"completion_tokens":1,"total_tokens":3}, "extension":{"keep":true} }`
+	h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") == "Bearer upstream-only" {
+			w.WriteHeader(429)
+			io.WriteString(w, `{"error":{"type":"usage_limit_reached"}}`)
+			return
+		}
+		received, _ := io.ReadAll(r.Body)
+		if r.Header.Get("Authorization") != "Bearer "+secretA || !bytes.Equal(received, []byte(body)) {
+			t.Errorf("paid fallback changed native Chat request %s", received)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		io.WriteString(w, reply)
+	})
+	request, _ := http.NewRequestWithContext(t.Context(), http.MethodPost, server.URL+"/code/coding/v1/chat/completions", strings.NewReader(body))
+	request.Header.Set("Authorization", "Bearer "+fullKey)
+	response, err := server.Client().Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	output, _ := io.ReadAll(response.Body)
+	if response.StatusCode != 200 || !bytes.Equal(output, []byte(reply)) || h.mock.count("a") != 2 {
+		t.Fatalf("paid Chat fallback %d %s", response.StatusCode, output)
+	}
+	ledger.wait(t)
+	if usage := ledger.wait(t); usage.Total == nil || *usage.Total != 3 {
+		t.Fatalf("paid Chat native usage %+v", usage)
+	}
+	envelope := h.sink.last(t)
+	if len(envelope.Attempts) != 1 || envelope.Attempts[0].ProviderID != provider.ID || envelope.Attempts[0].SlotID != h.slotA || !envelope.Attempts[0].UsageComplete || envelope.Attempts[0].Price == nil {
+		t.Fatalf("paid Chat accounting %+v", envelope)
 	}
 }

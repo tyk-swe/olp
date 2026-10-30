@@ -9,6 +9,9 @@ import (
 
 func decodeOpenAIGeneration(r *reader, family wire.Format) error {
 	c := r.c
+	if family == wire.Chat {
+		r.parameter("reasoning_effort", "reasoning_effort")
+	}
 	for _, k := range []string{"temperature", "top_p", "stop", "seed", "n", "tool_choice", "parallel_tool_calls", "response_format"} {
 		r.parameter(k, k)
 	}

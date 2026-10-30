@@ -92,7 +92,7 @@ func TestCodeQualificationOfficialCLICompleteJourneysThroughFleet(t *testing.T) 
 func TestCodeQualificationMessagesToolsOfficialSDK(t *testing.T) {
 	f := newCodeFleet(t)
 	path := "/api/v1/code/routes/" + f.route["id"].(string)
-	draft := f.h.want(f.owner, "PUT", path, map[string]any{"project_id": f.project, "slug": "qualification", "pool_id": f.pool["id"], "models": []string{"gpt-5.4"}, "enabled": true, "messages_to_codex": true}, etagHeader(f.route), 200)
+	draft := f.h.want(f.owner, "PUT", path, map[string]any{"project_id": f.project, "slug": "qualification", "pool_id": f.pool["id"], "models": []string{"gpt-5.4"}, "enabled": true, "messages_to_codex": true, "chat_to_codex": true}, etagHeader(f.route), 200)
 	f.h.want(f.owner, "POST", path+"/publish", nil, withMatch(draft, idem("messages-tools-sdk")), 200)
 	gateway := f.in.replica("messages-sdk")
 	f.peer.SetResponder(codeMessagesSDKResponses)
@@ -122,7 +122,7 @@ func TestCodeQualificationMessagesToolsOfficialSDK(t *testing.T) {
 		}
 	}
 	trap := codecli.NewTrap(t)
-	command := exec.CommandContext(t.Context(), "go", "test", "-json", "-mod=readonly", "-tags=integration,codemode", "-timeout=60s", "./gosdk", "-run=^TestCodeMessagesToolExchange$", "-count=1")
+	command := exec.CommandContext(t.Context(), "go", "test", "-json", "-mod=readonly", "-tags=integration,codemode", "-timeout=60s", "./gosdk", "-run=^TestCode(Chat|Messages)ToolExchange$", "-count=1")
 	command.Dir = dir
 	command.Env = slices.Concat([]string{
 		"PATH=" + os.Getenv("PATH"), "LANG=C.UTF-8", "TERM=dumb", "NO_COLOR=1",
@@ -130,6 +130,7 @@ func TestCodeQualificationMessagesToolsOfficialSDK(t *testing.T) {
 		"DO_NOT_TRACK=1", "NO_UPDATE_NOTIFIER=1", "DISABLE_AUTOUPDATER=1", "DISABLE_TELEMETRY=1", "NODE_USE_ENV_PROXY=1",
 		"GOCACHE=" + paths.GOCACHE, "GOMODCACHE=" + paths.GOMODCACHE, "GOPATH=" + paths.GOPATH, "GOTOOLCHAIN=" + paths.GOTOOLCHAIN, "GOPROXY=off", "GOFLAGS=-mod=readonly",
 		"OLP_CODE_MESSAGES_BASE_URL=" + gateway.PublicOrigin + "/code/qualification", "OLP_CODE_MESSAGES_API_KEY=" + f.key, "OLP_CODE_MESSAGES_MODEL=gpt-5.4",
+		"OLP_CODE_CHAT_BASE_URL=" + gateway.PublicOrigin + "/code/qualification/v1", "OLP_CODE_CHAT_API_KEY=" + f.key, "OLP_CODE_CHAT_MODEL=gpt-5.4",
 	}, trap.Environment())
 	if output, err := command.CombinedOutput(); err != nil {
 		t.Fatalf("official Messages SDK %v, %s, external destinations %d", err, codeMessagesSDKDiagnostics(output), len(trap.Hosts()))
@@ -138,11 +139,11 @@ func TestCodeQualificationMessagesToolsOfficialSDK(t *testing.T) {
 		t.Fatalf("SDK attempted %d external destinations", len(hosts))
 	}
 	requests := f.peer.Requests()
-	if len(requests) != 12 {
-		t.Fatalf("SDK tool exchanges and resumes dispatched %d requests, want twelve", len(requests))
+	if len(requests) != 24 {
+		t.Fatalf("SDK tool exchanges and resumes dispatched %d requests, want twenty-four", len(requests))
 	}
 	bindings := codePublicDecode[[]codemode.Binding](t, f.list("bindings"))
-	if len(bindings) != 8 {
+	if len(bindings) != 16 {
 		t.Fatalf("SDK roots and children created %d bindings", len(bindings))
 	}
 	for _, binding := range bindings {
@@ -182,7 +183,7 @@ func codeMessagesSDKResponses(_ context.Context, header http.Header, body []byte
 	if bytes.Contains(body, []byte(`"function_call_output"`)) || bytes.Contains(body, []byte("CONTROLLED_COMPACT_SUMMARY")) {
 		return slices.Concat(created, events(`{"type":"response.completed","response":{"id":"sdk-tools","status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"File read"}]}],"usage":{"input_tokens":13,"output_tokens":2,"total_tokens":15}}}`))
 	}
-	if strings.HasSuffix(header.Get("X-Claude-Code-Session-Id"), "complete") {
+	if strings.HasSuffix(header.Get("X-Claude-Code-Session-Id"), "complete") || strings.HasSuffix(header.Get("X-Opencode-Session-Id"), "complete") {
 		return slices.Concat(created, events(`{"type":"response.completed","response":{"id":"sdk-tools","status":"completed","output":[{"type":"function_call","call_id":"call-read","name":"read_file","arguments":"{\"path\":\"main.go\"}"}],"usage":{"input_tokens":7,"output_tokens":4,"total_tokens":11}}}`))
 	}
 	return slices.Concat(created, events(

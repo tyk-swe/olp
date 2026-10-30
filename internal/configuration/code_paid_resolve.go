@@ -58,7 +58,7 @@ func resolveCodePaidTargets(ctx context.Context, q access.Queryer, references ma
 	}), nil
 }
 func codePolicyPaid(policy CodeRoutePolicy, targets, fallback map[string]CodePaidTarget) CodeRoutePolicy {
-	return CodeRoutePolicy{ChatToAntigravity: policy.ChatToAntigravity, Pool: policy.Pool, Models: policy.Models, Enabled: policy.Enabled, ModelPools: policy.ModelPools, InitialRecoveryAttempts: policy.InitialRecoveryAttempts, ModelRewriting: policy.ModelRewriting, Aliases: policy.Aliases, CodexCLIIdentity: policy.CodexCLIIdentity, MessagesToCodex: policy.MessagesToCodex, Tools: policy.Tools, MaxBodyBytes: policy.MaxBodyBytes, PaidParticipation: policy.PaidParticipation, PaidTargets: targets, PaidFallbackTargets: fallback}
+	return CodeRoutePolicy{ChatToAntigravity: policy.ChatToAntigravity, Pool: policy.Pool, Models: policy.Models, Enabled: policy.Enabled, ModelPools: policy.ModelPools, InitialRecoveryAttempts: policy.InitialRecoveryAttempts, ModelRewriting: policy.ModelRewriting, Aliases: policy.Aliases, CodexCLIIdentity: policy.CodexCLIIdentity, ChatToCodex: policy.ChatToCodex, MessagesToCodex: policy.MessagesToCodex, Tools: policy.Tools, MaxBodyBytes: policy.MaxBodyBytes, PaidParticipation: policy.PaidParticipation, PaidTargets: targets, PaidFallbackTargets: fallback}
 }
 
 func resolveCodePaid(ctx context.Context, q access.Queryer, publication *CodePublication, policy CodeRoutePolicy, project string, bindings CodeBindings) (map[string]routing.Provider, error) {

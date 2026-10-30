@@ -157,6 +157,7 @@
       .join('\n')
   );
   let recoveryAttempts = $state(initial?.initial_recovery_attempts ?? 0);
+  let chatToCodex = $state(initial?.chat_to_codex ?? false);
   let messagesToCodex = $state(initial?.messages_to_codex ?? false);
   let codexCLIIdentity = $state(initial?.codex_cli_identity ?? false);
   let chatToAntigravity = $state(initial?.chat_to_antigravity ?? false);
@@ -262,6 +263,7 @@
         aliases: aliasResult.aliases,
         model_rewriting: modelRewriting,
         model_pools: poolResult.pools,
+        chat_to_codex: chatToCodex,
         messages_to_codex: messagesToCodex,
         codex_cli_identity: codexCLIIdentity,
         chat_to_antigravity: chatToAntigravity,
@@ -470,6 +472,18 @@
   <p>
     Without a configured model pool, recovery keeps the exact model. Zero
     attempts disables automatic recovery.
+  </p>
+  <label class="choice">
+    <input id="code-chat-to-codex" type="checkbox" bind:checked={chatToCodex} />
+    Translate Chat through Codex
+  </label>
+  <p>
+    Explicitly enables OpenCode Chat text and function tools through Codex
+    Responses after publication. Low, medium and high reasoning effort is
+    supported. Signed reasoning, media, server-owned state and other unsupported
+    required semantics are refused. Identity compatibility and model rewriting
+    require their separate opt-ins. Current OpenCode client and live subscription
+    acceptance remain unqualified.
   </p>
   <label class="choice">
     <input

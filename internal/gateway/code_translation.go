@@ -49,6 +49,53 @@ func codeTranslateMessages(body []byte, r *http.Request, model string) (codePayl
 			return codePayload{}, refused
 		}
 	}
+	return codeTranslateResponses(request)
+}
+
+func codeTranslateChat(body []byte, r *http.Request, model string) (codePayload, error) {
+	refused := codemode.Refuse(422, "code_translation_unsupported_semantics")
+	if r.URL.RawQuery != "" || len(r.Trailer) != 0 || len(r.Header.Values("X-Codex-Turn-State")) != 0 || len(r.Header.Values("OpenAI-Beta")) != 0 {
+		return codePayload{}, refused
+	}
+	request, err := protocols.ParseForModel(wire.Chat, body, model)
+	if err != nil {
+		return codePayload{}, refused
+	}
+	root := request.OIF().Document().Root()
+	options, _ := root.Lookup("stream_options")
+	if options.Kind() != oif.Absent && options.Kind() != oif.Null {
+		if options.Kind() != oif.Object {
+			return codePayload{}, refused
+		}
+		for _, member := range options.Members() {
+			if member.Name != "include_usage" || member.Value.Kind() != oif.Boolean {
+				return codePayload{}, refused
+			}
+		}
+	}
+	effort, _ := root.Lookup("reasoning_effort")
+	if effort.Kind() != oif.Absent && effort.Kind() != oif.Null && !slices.Contains([]string{"low", "medium", "high"}, stringValue(effort)) {
+		return codePayload{}, refused
+	}
+	messages, _ := root.Lookup("messages")
+	for _, message := range messages.Elements() {
+		role, _ := message.Lookup("role")
+		name, _ := message.Lookup("name")
+		content, _ := message.Lookup("content")
+		if !slices.Contains([]string{"system", "developer", "user", "assistant", "tool"}, stringValue(role)) || name.Kind() != oif.Absent && name.Kind() != oif.Null || content.Kind() != oif.Null && !codeTextContent(message, "content") {
+			return codePayload{}, refused
+		}
+	}
+	return codeTranslateResponses(request)
+}
+
+func stringValue(value oif.Value) string {
+	text, _ := value.Text()
+	return text
+}
+
+func codeTranslateResponses(request *wire.Request) (codePayload, error) {
+	refused := codemode.Refuse(422, "code_translation_unsupported_semantics")
 	encoded, _, encodeErr := protocols.EncodeTarget(request, wire.Responses, "openai", "openai", request.Route, nil)
 	if encodeErr != nil {
 		return codePayload{}, refused
@@ -69,14 +116,14 @@ func codeTranslateMessages(body []byte, r *http.Request, model string) (codePayl
 	})
 	changes := slices.Concat([]oif.Change{
 		{Pointer: "/stream", Value: "true", Origin: oif.TransportOption, Reason: "Codex subscription streaming transport"},
-		{Pointer: "/store", Value: "false", Origin: oif.TransportOption, Reason: "Stateless Messages translation"},
+		{Pointer: "/store", Value: "false", Origin: oif.TransportOption, Reason: "Stateless code-mode translation"},
 		{Pointer: "/instructions", Value: `""`, Origin: oif.TransportOption, Reason: "Codex required empty transport instructions"},
 	}, roles)
 	prepared, preparedErr := target.OIF().WithChanges(changes...)
 	if preparedErr != nil {
 		return codePayload{}, refused
 	}
-	return codePayload{body: prepared.Document().Bytes(), stream: request.Stream, translated: true}, nil
+	return codePayload{body: prepared.Document().Bytes(), stream: request.Stream, translated: true, includeUsage: request.IncludeUsage}, nil
 }
 
 func codeMessagesContent(message oif.Value) bool {
@@ -120,13 +167,13 @@ func codeTextContent(parent oif.Value, key string) bool {
 	return true
 }
 
-func (a *codeAttempt) translateResponse(ctx context.Context, w http.ResponseWriter, r *http.Request, response *http.Response, model string, stream bool) {
+func (a *codeAttempt) translateResponse(ctx context.Context, w http.ResponseWriter, r *http.Request, response *http.Response, model string, stream bool, family wire.Format, includeUsage bool) {
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		codeWriteError(w, r, codemode.Refuse(response.StatusCode, "code_upstream_rejected"))
 		return
 	}
-	writer := &streamWriter{w: w, family: wire.Anthropic}
-	completion, err := a.translatedCompletion(response, model, stream, writer.emit)
+	writer := &streamWriter{w: w, family: family}
+	completion, err := a.translatedCompletion(response, model, stream, family, includeUsage, writer.emit)
 	if err != nil {
 		if !a.terminal {
 			a.outcome(ctx, codemode.Outcome{Origin: "upstream", Kind: "incomplete"})
@@ -141,16 +188,16 @@ func (a *codeAttempt) translateResponse(ctx context.Context, w http.ResponseWrit
 	_, _ = w.Write(completion.Body)
 }
 
-func (a *codeAttempt) translatedCompletion(response *http.Response, model string, stream bool, emit func([]byte) error) (*wire.Completion, error) {
+func (a *codeAttempt) translatedCompletion(response *http.Response, model string, stream bool, family wire.Format, includeUsage bool, emit func([]byte) error) (*wire.Completion, error) {
 	if strings.HasPrefix(strings.ToLower(response.Header.Get("Content-Type")), "text/event-stream") {
 		observe := func(event oif.Event) error {
 			a.observe(a.observer.Event(event.Source().Bytes()))
 			return nil
 		}
 		if stream {
-			return protocols.StreamWithEvents(wire.Responses, wire.Anthropic, response.Body, codewire.MaxBody, model, true, emit, observe)
+			return protocols.StreamWithEvents(wire.Responses, family, response.Body, codewire.MaxBody, model, includeUsage, emit, observe)
 		}
-		return protocols.AggregateTranslatedResponses(wire.Anthropic, response.Body, codewire.MaxBody, model, observe)
+		return protocols.AggregateTranslatedResponses(family, response.Body, codewire.MaxBody, model, observe)
 	}
 	if stream {
 		return nil, codemode.Refuse(502, "code_upstream_invalid")
@@ -160,5 +207,5 @@ func (a *codeAttempt) translatedCompletion(response *http.Response, model string
 		return nil, codemode.Refuse(502, "code_upstream_invalid")
 	}
 	a.observe(a.observer.Unary(body))
-	return protocols.Decode(wire.Responses, wire.Anthropic, body, model, "")
+	return protocols.Decode(wire.Responses, family, body, model, "")
 }

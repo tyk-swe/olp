@@ -219,3 +219,41 @@ func TestMessagesReasoningControlsArePreservedOrRefusedAcrossTargets(t *testing.
 		})
 	}
 }
+
+func TestChatToolsAndReasoningEncodeAsResponses(t *testing.T) {
+	const body = `{"model":"route","max_completion_tokens":64,"reasoning_effort":"high","parallel_tool_calls":false,"tools":[{"type":"function","function":{"name":"read_file","description":"Read a file","parameters":{"type":"object","properties":{"path":{"type":"string"}}}}}],"tool_choice":{"type":"function","function":{"name":"read_file"}},"messages":[{"role":"assistant","content":null,"tool_calls":[{"id":"call-read","type":"function","function":{"name":"read_file","arguments":"{\"path\":\"main.go\"}"}}]},{"role":"tool","tool_call_id":"call-read","content":"package main"}]}`
+	request, err := Parse(wire.Chat, []byte(body), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded, _, err := EncodeTarget(request, wire.Responses, "openai", "openai", "native-model", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var target struct {
+		Input []struct {
+			Type                    string
+			CallID                  string `json:"call_id"`
+			Name, Arguments, Output string
+		}
+		Tools []struct {
+			Type, Name, Description string
+			Parameters              struct {
+				Properties map[string]struct{ Type string }
+			}
+		}
+		ToolChoice struct{ Type, Name string } `json:"tool_choice"`
+		Parallel   *bool                       `json:"parallel_tool_calls"`
+		Reasoning  struct{ Effort string }
+		MaxTokens  int `json:"max_output_tokens"`
+	}
+	if err := json.Unmarshal(encoded, &target); err != nil {
+		t.Fatal(err)
+	}
+	if len(target.Input) != 2 || target.Input[0].Type != "function_call" || target.Input[0].CallID != "call-read" || target.Input[0].Name != "read_file" || target.Input[0].Arguments != `{"path":"main.go"}` || target.Input[1].Type != "function_call_output" || target.Input[1].CallID != target.Input[0].CallID || target.Input[1].Output != "package main" {
+		t.Fatalf("tool history %s", encoded)
+	}
+	if len(target.Tools) != 1 || target.Tools[0].Type != "function" || target.Tools[0].Name != target.Input[0].Name || target.Tools[0].Description != "Read a file" || target.Tools[0].Parameters.Properties["path"].Type != "string" || target.ToolChoice.Type != "function" || target.ToolChoice.Name != target.Tools[0].Name || target.Parallel == nil || *target.Parallel || target.Reasoning.Effort != "high" || target.MaxTokens != 64 {
+		t.Fatalf("tool and reasoning controls %s", encoded)
+	}
+}
