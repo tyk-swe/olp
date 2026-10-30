@@ -15,6 +15,8 @@ import (
 )
 
 func (s *Server) RegisterCode(mux *http.ServeMux) {
+	mux.HandleFunc("GET /code/{slug}/models", s.codeModels)
+	mux.HandleFunc("GET /code/{slug}/v1/models", s.codeModels)
 	mux.HandleFunc("/code/{slug}/mcp/{service}", s.serveCodeResearch)
 	mux.HandleFunc("/code/{slug}/{operation...}", s.serveCode)
 }
