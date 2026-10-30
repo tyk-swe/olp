@@ -363,3 +363,30 @@ func TestClaudeSubscriptionSetupUsesNativeModelsAndReportsLiveGap(t *testing.T) 
 		t.Fatal("fixture-only subscription was advertised as qualified")
 	}
 }
+
+func TestAntigravitySetupRequiresExplicitPolicyAndReportsSignedStateGap(t *testing.T) {
+	offers := Offers{{Adapter: codemode.AdapterAntigravity, Models: []string{"gemini-fixture"}}}
+	route := codemode.Route{ID: "route", ProjectID: "project", Slug: "coding", PoolID: "pool", Models: []string{"gemini-fixture"}, Enabled: true, RevisionID: "published"}
+	request := Request{Client: codeadapter.ClientOpenCode, GatewayURL: "https://gateway.invalid", Model: "gemini-fixture"}
+	if _, err := Generate(route, offers, request); err == nil {
+		t.Fatal("disabled target produced setup")
+	}
+	enabled := codemode.Route{ID: route.ID, ProjectID: route.ProjectID, Slug: route.Slug, PoolID: route.PoolID, Models: route.Models, Enabled: true, RevisionID: "published", ChatToAntigravity: true}
+	configuration, err := Generate(enabled, offers, request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(configuration.Configuration, `"olp-antigravity"`) || !strings.Contains(configuration.Configuration, `"@ai-sdk/openai-compatible"`) || !strings.Contains(configuration.Configuration, `https://gateway.invalid/code/coding/v1`) || configuration.Model != "gemini-fixture" {
+		t.Fatalf("OpenCode setup lost the existing Chat client mapping %+v", configuration)
+	}
+	notes := strings.ToLower(strings.Join(configuration.QualificationGaps, " "))
+	if !strings.Contains(notes, "signed") || !strings.Contains(notes, "live") || !strings.Contains(notes, "pending") {
+		t.Fatalf("setup omitted qualification gaps %s", notes)
+	}
+	catalog := Catalog(route, offers)
+	for _, model := range catalog {
+		if len(model.Capabilities) > 0 || len(model.Clients) > 0 {
+			t.Fatalf("disabled translation advertised capability %+v", model)
+		}
+	}
+}

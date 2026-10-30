@@ -932,3 +932,11 @@ and [typed terminal classification](https://github.com/router-for-me/CLIProxyAPI
 Those sources establish error shapes. They do not establish live subscription
 qualification or permission to replay streams. The complete pre-output HTTP
 boundary and durable ownership checks remain required.
+
+## Antigravity enrollment and controlled translation
+
+The `antigravity-subscription` profile uses an operator-supplied Google desktop OAuth client. Configure its public `client_id` and complete headless PKCE enrollment with the callback URL and client secret in the masked grant input. The existing encrypted grant store holds the secret and refresh token. Authenticated Google subject and existing cloudcode project evidence establish identity, and both must remain unchanged on refresh. See the [plugin setup](../../plugins/antigravity/README.md) for the completion payload and credential setup requirement.
+
+The independent `chat_to_antigravity` route flag enables an internal Gemini target after publication. Existing OpenCode Chat Completions ingress supports controlled single-candidate text/function tool fixtures over HTTP unary or SSE. Eligible operator-configured model IDs start with `gemini-`, which does not establish model inventory, entitlement or live compatibility. Native forwarding remains the default. Public Gemini ingress, Responses, Messages, WebSocket, reasoning controls, signed state, media and server tools are unsupported. Identity and prompt compatibility remain disabled.
+
+Google documents that current generateContent responses may carry required thought signatures on any part. This target refuses that state instead of discarding it, preserves authoritative usage from dispatched requests and never replays an unsupported result. No current model or live subscription tool workflow has been qualified. Signature-free fixtures do not close that gap. A current model/tool combination that works within the restricted path, or faithful signature support, remains a prerequisite for live qualification.

@@ -657,6 +657,7 @@ func (e CatalogSampleSdk) Valid() bool {
 
 // Defines values for CodeAccountAdapter.
 const (
+	CodeAccountAdapterAntigravity   CodeAccountAdapter = "antigravity"
 	CodeAccountAdapterClaude        CodeAccountAdapter = "claude"
 	CodeAccountAdapterCodex         CodeAccountAdapter = "codex"
 	CodeAccountAdapterKimiCode      CodeAccountAdapter = "kimi_code"
@@ -670,6 +671,8 @@ const (
 // Valid indicates whether the value is a known member of the CodeAccountAdapter enum.
 func (e CodeAccountAdapter) Valid() bool {
 	switch e {
+	case CodeAccountAdapterAntigravity:
+		return true
 	case CodeAccountAdapterClaude:
 		return true
 	case CodeAccountAdapterCodex:
@@ -897,6 +900,7 @@ func (e CodeAttemptState) Valid() bool {
 
 // Defines values for CodeClientConfigurationAdapters.
 const (
+	CodeClientConfigurationAdaptersAntigravity   CodeClientConfigurationAdapters = "antigravity"
 	CodeClientConfigurationAdaptersClaude        CodeClientConfigurationAdapters = "claude"
 	CodeClientConfigurationAdaptersCodex         CodeClientConfigurationAdapters = "codex"
 	CodeClientConfigurationAdaptersKimiCode      CodeClientConfigurationAdapters = "kimi_code"
@@ -909,6 +913,8 @@ const (
 // Valid indicates whether the value is a known member of the CodeClientConfigurationAdapters enum.
 func (e CodeClientConfigurationAdapters) Valid() bool {
 	switch e {
+	case CodeClientConfigurationAdaptersAntigravity:
+		return true
 	case CodeClientConfigurationAdaptersClaude:
 		return true
 	case CodeClientConfigurationAdaptersCodex:
@@ -1170,6 +1176,7 @@ func (e CodeResearchToolsServices) Valid() bool {
 
 // Defines values for CodeRouteAdapters.
 const (
+	CodeRouteAdaptersAntigravity   CodeRouteAdapters = "antigravity"
 	CodeRouteAdaptersClaude        CodeRouteAdapters = "claude"
 	CodeRouteAdaptersCodex         CodeRouteAdapters = "codex"
 	CodeRouteAdaptersKimiCode      CodeRouteAdapters = "kimi_code"
@@ -1182,6 +1189,8 @@ const (
 // Valid indicates whether the value is a known member of the CodeRouteAdapters enum.
 func (e CodeRouteAdapters) Valid() bool {
 	switch e {
+	case CodeRouteAdaptersAntigravity:
+		return true
 	case CodeRouteAdaptersClaude:
 		return true
 	case CodeRouteAdaptersCodex:
@@ -7793,9 +7802,12 @@ type CodeRoute struct {
 
 	// Aliases Stable public model names mapped directly to one native identifier in models. Requires model_rewriting. Alias chains and native name collisions are rejected. Immutable publications pin these mappings. Repointing an alias affects new conversations. Existing conversations retain their stored exact target while it remains published and authorized.
 	Aliases *map[string]string `json:"aliases,omitempty"`
-	Enabled bool               `json:"enabled"`
-	Etag    openapi_types.UUID `json:"etag"`
-	Id      openapi_types.UUID `json:"id"`
+
+	// ChatToAntigravity Explicitly allow Chat Completions text and function tools through the internal Antigravity Gemini target over HTTP or SSE. Published revisions pin this policy. Native forwarding remains the default. Client identity and prompts are preserved. Signed thought state, reasoning controls, media and server tools are unsupported. Returned signature state is refused before actionable output rather than discarded. Controlled fixtures do not qualify any current model or live subscription workflow.
+	ChatToAntigravity *bool              `json:"chat_to_antigravity,omitempty"`
+	Enabled           bool               `json:"enabled"`
+	Etag              openapi_types.UUID `json:"etag"`
+	Id                openapi_types.UUID `json:"id"`
 
 	// InitialRecoveryAttempts Maximum additional attempts per request for a new or established single-pin root conversation after an adapter proves nonexecution and the complete input is portable. Zero disables recovery. Published revisions pin this policy. Existing children, socket ownership and unresolved attempts prevent migration. Exact models remain the default. Only explicit model_pools authorize model changes. Live authority remains required. Producing-account reference ownership is preserved. Accepted, partial, ambiguous and opaque work never replays.
 	InitialRecoveryAttempts *int `json:"initial_recovery_attempts,omitempty"`
@@ -7842,7 +7854,10 @@ type CodeRouteList struct {
 type CodeRouteWrite struct {
 	// Aliases Stable public model names mapped directly to one native identifier in models. Requires model_rewriting. Alias chains and native name collisions are rejected. Immutable publications pin these mappings. Repointing an alias affects new conversations. Existing conversations retain their stored exact target while it remains published and authorized.
 	Aliases *map[string]string `json:"aliases,omitempty"`
-	Enabled bool               `json:"enabled"`
+
+	// ChatToAntigravity Explicitly allow Chat Completions text and function tools through the internal Antigravity Gemini target over HTTP or SSE. Published revisions pin this policy. Native forwarding remains the default. Client identity and prompts are preserved. Signed thought state, reasoning controls, media and server tools are unsupported. Returned signature state is refused before actionable output rather than discarded. Controlled fixtures do not qualify any current model or live subscription workflow.
+	ChatToAntigravity *bool `json:"chat_to_antigravity,omitempty"`
+	Enabled           bool  `json:"enabled"`
 
 	// InitialRecoveryAttempts Maximum additional attempts per request for a new or established single-pin root conversation after an adapter proves nonexecution and the complete input is portable. Zero disables recovery. Published revisions pin this policy. Existing children, socket ownership and unresolved attempts prevent migration. Exact models remain the default. Only explicit model_pools authorize model changes. Live authority remains required. Producing-account reference ownership is preserved. Accepted, partial, ambiguous and opaque work never replays.
 	InitialRecoveryAttempts *int `json:"initial_recovery_attempts,omitempty"`

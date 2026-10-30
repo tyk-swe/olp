@@ -223,9 +223,9 @@ func (a *codeAttempt) providerID() string {
 	return a.permit.Account.ProviderID
 }
 
-func (a *codeAttempt) requestURL(query string) (string, error) {
+func (a *codeAttempt) requestURL(query string, stream bool) (string, error) {
 	if a.paid == nil {
-		return a.server.codeEndpoint(a.config, a.endpoint.UpstreamPath, query)
+		return a.server.codeEndpoint(a.config, a.endpoint.Path(stream), query)
 	}
 	target, err := a.paid.connector.URL(a.paid.family, a.model, a.paid.stream)
 	if err != nil {

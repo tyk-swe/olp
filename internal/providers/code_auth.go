@@ -3,6 +3,7 @@ package providers
 import (
 	"context"
 	"reflect"
+	"slices"
 	"time"
 
 	"github.com/tyk-swe/olp/internal/routing"
@@ -14,6 +15,7 @@ import (
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/plugins"
 	"github.com/tyk-swe/olp/internal/runtime"
+	"github.com/tyk-swe/olp/sdk/plugin/abi"
 )
 
 type CodeAuthorizer struct {
@@ -86,7 +88,7 @@ func codeConfiguration(c routing.Configuration, vendor codeadapter.Vendor) bool 
 	return ok && c.Kind == connectors.KindPlugin && c.AuthMode == connectors.AuthGrant && c.ProfileRevision != "" &&
 		(c.Endpoint == "" || c.Endpoint == address) && c.CloudRegion == "" && c.CloudProject == "" && c.Deployment == "" && c.APIVersion == "" &&
 		len(o.SemanticHeaders) == 0 && len(o.QuerySettings) == 0 && len(o.OperationDefaults) == 0 && len(o.Bindings) == 0 &&
-		len(o.Models) == 0 && len(o.ParameterDefaults) == 0 && len(o.CredentialHeaders) == 0 && len(o.PluginOptions) == 0
+		len(o.Models) == 0 && len(o.ParameterDefaults) == 0 && len(o.CredentialHeaders) == 0
 }
 
 func codeConnection(ctx context.Context, host *plugins.Host, cfg routing.Configuration, vendor codeadapter.Vendor) error {
@@ -97,6 +99,15 @@ func codeConnection(ctx context.Context, host *plugins.Host, cfg routing.Configu
 	expected := vendor.Manifest()
 	if err != nil || !reflect.DeepEqual(manifest.Profiles, expected.Profiles) || !reflect.DeepEqual(manifest.Origins, expected.Origins) {
 		return codemode.Refuse(503, "code_plugin_unavailable")
+	}
+	if len(cfg.Options.PluginOptions) == 0 && !slices.ContainsFunc(expected.Profiles, func(profile abi.Profile) bool {
+		return profile.ID == cfg.ProfileID && len(profile.Options) != 0
+	}) {
+		return nil
+	}
+	profile, profileErr := connectors.NewPluginProfile(cfg.ProfileRevision, expected, cfg.ProfileID)
+	if profileErr != nil || profile.ValidateOptions(cfg.Options.PluginOptions) != nil {
+		return codemode.Refuse(503, "code_configuration_unsupported")
 	}
 	return nil
 }

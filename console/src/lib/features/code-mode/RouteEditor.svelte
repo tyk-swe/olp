@@ -155,6 +155,7 @@
   );
   let recoveryAttempts = $state(initial?.initial_recovery_attempts ?? 0);
   let messagesToCodex = $state(initial?.messages_to_codex ?? false);
+  let chatToAntigravity = $state(initial?.chat_to_antigravity ?? false);
   let research = $state(!!initial?.tools);
   let researchAccount = $state(initial?.tools?.account_id ?? '');
   let researchServices = $state<('search' | 'reader' | 'zread')[]>(
@@ -248,6 +249,7 @@
         model_rewriting: modelRewriting,
         model_pools: poolResult.pools,
         messages_to_codex: messagesToCodex,
+        chat_to_antigravity: chatToAntigravity,
         initial_recovery_attempts: recoveryAttempts,
         tools: research
           ? { account_id: researchAccount, services: researchServices }
@@ -440,6 +442,19 @@
     unsupported required semantics are refused. Client identity and prompts stay
     unchanged. Model rewriting requires its separate opt-in. Identity and prompt
     compatibility remain disabled.
+  </p>
+  <label class="choice"
+    ><input
+      id="code-chat-to-antigravity"
+      type="checkbox"
+      bind:checked={chatToAntigravity}
+    /> Translate Chat through Antigravity</label
+  >
+  <p>
+    Enables the controlled Gemini text and function tool path after publication.
+    Signed thought state, reasoning controls, media and server tools are refused.
+    Identity and prompt compatibility remain disabled. Current models and live
+    subscription tool workflows remain unqualified.
   </p>
   <label class="choice"
     ><input
