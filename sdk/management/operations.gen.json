@@ -6398,6 +6398,12 @@
               "type": "boolean",
               "default": false,
               "description": "Explicitly allow text-only Messages requests to use Codex subscription accounts through protocol translation. Published revisions pin this policy. Native forwarding remains the default. Model identifiers, client identity and prompts are preserved. Tools, thinking, beta features and unsupported required semantics are refused before dispatch."
+            },
+            "initial_recovery_attempts": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 2,
+              "description": "Maximum additional attempts for a new conversation after an adapter proves nonexecution. Zero disables recovery. Published revisions pin this policy. Exact models, live authority and durable state ownership remain required. Accepted, partial, ambiguous and opaque work never replays."
             }
           },
           "required": [
@@ -32098,6 +32104,12 @@
               "type": "boolean",
               "default": false,
               "description": "Explicitly allow text-only Messages requests to use Codex subscription accounts through protocol translation. Published revisions pin this policy. Native forwarding remains the default. Model identifiers, client identity and prompts are preserved. Tools, thinking, beta features and unsupported required semantics are refused before dispatch."
+            },
+            "initial_recovery_attempts": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 2,
+              "description": "Maximum additional attempts for a new conversation after an adapter proves nonexecution. Zero disables recovery. Published revisions pin this policy. Exact models, live authority and durable state ownership remain required. Accepted, partial, ambiguous and opaque work never replays."
             }
           },
           "required": [

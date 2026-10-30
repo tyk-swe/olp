@@ -15,6 +15,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -61,7 +62,7 @@ func codeBody() []byte {
 	return []byte("{ \"model\" : \"gpt-5.4\", \"stream\":true, \"store\":false, \"input\":[{\"role\":\"user\",\"content\":\"CONTROLLED_PRIVATE_PROMPT\"}], \"metadata\":{\"unknown_future_field\":\"\\u0041\"} }\n")
 }
 
-func (f *codeFleet) request(ctx context.Context, replica int, conversation, parent string, body []byte) (*http.Response, []byte, error) {
+func (f *codeFleet) request(ctx context.Context, replica int, conversation, parent string, body []byte, portable ...bool) (*http.Response, []byte, error) {
 	req, err := http.NewRequestWithContext(ctx, "POST", f.gateways[replica].PublicOrigin+"/code/qualification/responses?fixture=opaque%2Fquery", bytes.NewReader(body))
 	if err != nil {
 		return nil, nil, err
@@ -74,7 +75,9 @@ func (f *codeFleet) request(ctx context.Context, replica int, conversation, pare
 		req.Header.Set("X-Codex-Parent-Thread-Id", parent)
 	}
 	req.Header["X-Controlled-Multi"] = []string{"one", "two"}
-	req.Header.Set("X-Codex-Turn-State", "opaque-state")
+	if len(portable) == 0 || !portable[0] {
+		req.Header.Set("X-Codex-Turn-State", "opaque-state")
+	}
 	req.Header.Set("Connection", "X-Controlled-Hop")
 	req.Header.Set("X-Controlled-Hop", "must-not-forward")
 	client := &http.Client{Timeout: 15 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
@@ -570,5 +573,169 @@ func TestCodeQualificationCancellationPropagatesToUpstream(t *testing.T) {
 				t.Fatal("canceled inference was replayed")
 			}
 		})
+	}
+}
+
+func (f *codeFleet) initialRecovery(t *testing.T, attempts int) *codeFleet {
+	t.Helper()
+	route := codeDiscoveryResponse[contract.CodeRoute](t, f.route)
+	draft := f.h.want(f.owner, "PUT", "/api/v1/code/routes/"+route.Id.String(), contract.CodeRouteWrite{
+		ProjectId: route.ProjectId, Slug: route.Slug, PoolId: route.PoolId, Models: route.Models, Enabled: true,
+		InitialRecoveryAttempts: &attempts,
+	}, map[string]string{"If-Match": route.Etag.String()}, 200)
+	f.h.want(f.owner, "POST", "/api/v1/code/routes/"+route.Id.String()+"/publish", nil, withMatch(draft, idem("initial-recovery-publish")), 200)
+	for _, process := range f.gateways {
+		if err := process.Kill(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return &codeFleet{codePublicFixture: f.codePublicFixture, in: f.in, gateways: []*testutil.Process{f.in.replica("recovery-one"), f.in.replica("recovery-two")}}
+}
+
+func TestCodeQualificationFleetInitialRecoveryPreservesAttemptsAndBinding(t *testing.T) {
+	f := newCodeFleet(t).initialRecovery(t, 1)
+	f.peer.Faults("initial_quota")
+	var executions atomic.Int64
+	f.peer.SetResponder(func(context.Context, http.Header, []byte) [][]byte {
+		executions.Add(1)
+		return nil
+	})
+	response, body, err := f.request(t.Context(), 0, "initial-recovery", "", codeBody(), true)
+	if err != nil || response.StatusCode != 200 || string(body) != codexfixture.SSE {
+		t.Fatalf("initial recovery response=%v body=%s err=%v", response, body, err)
+	}
+	captures := f.peer.Requests()
+	if len(captures) != 2 || executions.Load() != 1 || captures[0].Header.Get("Authorization") == captures[1].Header.Get("Authorization") {
+		t.Fatal("proven rejection did not dispatch exactly once on another eligible account")
+	}
+	for _, capture := range captures {
+		if !bytes.Equal(capture.Body, codeBody()) {
+			t.Fatal("recovery changed requested model or payload")
+		}
+	}
+	attempts := codePublicDecode[[]codemode.Attempt](t, f.list("attempts"))
+	bindings := codePublicDecode[[]codemode.Binding](t, f.list("bindings"))
+	if len(attempts) != 2 || len(bindings) != 1 || attempts[0].BindingID != attempts[1].BindingID || attempts[0].AccountID == attempts[1].AccountID {
+		t.Fatalf("attempt attribution or durable binding changed: attempts=%+v bindings=%+v", attempts, bindings)
+	}
+	for _, attempt := range attempts {
+		if attempt.UpstreamStatus != nil && *attempt.UpstreamStatus == 429 {
+			if attempt.State != "settled" || attempt.ReportedTokens == nil || *attempt.ReportedTokens != 0 || attempt.AccountID == bindings[0].AccountID {
+				t.Fatal("rejected attempt lost original attribution or retained uncertain reservations")
+			}
+		} else if attempt.AccountID != bindings[0].AccountID || attempt.ReportedTokens == nil || *attempt.ReportedTokens <= 0 {
+			t.Fatal("executed attempt lost usage or recovered binding")
+		}
+	}
+	f.success(t, 1, "initial-recovery", "")
+	captures = f.peer.Requests()
+	if len(captures) != 3 || captures[1].Header.Get("Authorization") != captures[2].Header.Get("Authorization") {
+		t.Fatal("another replica lost the recovered account binding")
+	}
+}
+
+func TestCodeQualificationFleetConcurrentInitialRecoveryNeverMovesInflightBinding(t *testing.T) {
+	f := newCodeFleet(t).initialRecovery(t, 2)
+	var dispatches atomic.Int64
+	both := make(chan struct{})
+	f.peer.SetRejector(func(ctx context.Context, _ http.Header, _ []byte) (int, []byte) {
+		if dispatches.Add(1) == 2 {
+			close(both)
+		}
+		select {
+		case <-both:
+		case <-ctx.Done():
+		}
+		return 429, []byte(`{"error":{"type":"usage_limit_reached"}}`)
+	})
+	var wg sync.WaitGroup
+	errs := make(chan error, 2)
+	for replica := range 2 {
+		wg.Go(func() {
+			response, _, err := f.request(t.Context(), replica, "concurrent-initial", "", codeBody(), true)
+			if err != nil {
+				errs <- err
+				return
+			}
+			if response.StatusCode < 400 || response.StatusCode >= 500 {
+				errs <- fmt.Errorf("unsafe initial recovery returned %d", response.StatusCode)
+			}
+		})
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Error(err)
+	}
+	captures := f.peer.Requests()
+	if len(captures) != 2 || captures[0].Header.Get("Authorization") != captures[1].Header.Get("Authorization") {
+		t.Fatal("concurrent first turns replayed or moved an in-flight binding")
+	}
+	attempts := codePublicDecode[[]codemode.Attempt](t, f.list("attempts"))
+	bindings := codePublicDecode[[]codemode.Binding](t, f.list("bindings"))
+	if len(attempts) != 2 || len(bindings) != 1 {
+		t.Fatalf("concurrent attempts=%d bindings=%d", len(attempts), len(bindings))
+	}
+	for _, attempt := range attempts {
+		if attempt.AccountID != bindings[0].AccountID || attempt.BindingID != bindings[0].ID {
+			t.Fatal("concurrent initial binding lost attempt ownership")
+		}
+	}
+}
+
+func TestCodeQualificationFleetInitialRecoveryObservesNewGrantGeneration(t *testing.T) {
+	f := newCodeFleet(t).initialRecovery(t, 1)
+	f.in.worker("code-initial-refresh")
+	f.peer.Faults("initial_auth")
+	var executions atomic.Int64
+	f.peer.SetResponder(func(context.Context, http.Header, []byte) [][]byte {
+		executions.Add(1)
+		return nil
+	})
+	response, body, err := f.request(t.Context(), 0, "initial-refresh", "", codeBody(), true)
+	if err != nil || response.StatusCode != 200 || string(body) != codexfixture.SSE {
+		t.Fatalf("refresh recovery response=%v body=%s err=%v", response, body, err)
+	}
+	captures := f.peer.Requests()
+	if len(captures) != 2 || executions.Load() != 1 || captures[0].Header.Get("Authorization") == captures[1].Header.Get("Authorization") || captures[0].Header.Get("Chatgpt-Account-Id") != captures[1].Header.Get("Chatgpt-Account-Id") {
+		t.Fatal("refresh recovery replayed or did not use a new grant for the same principal")
+	}
+	attempts := codePublicDecode[[]codemode.Attempt](t, f.list("attempts"))
+	if len(attempts) != 2 || attempts[0].AccountID != attempts[1].AccountID {
+		t.Fatal("supported grant refresh changed account ownership")
+	}
+}
+
+func TestCodeQualificationFleetInitialRecoveryRechecksPoolAuthority(t *testing.T) {
+	f := newCodeFleet(t).initialRecovery(t, 1)
+	started, release := make(chan struct{}), make(chan struct{})
+	f.peer.SetRejector(func(ctx context.Context, _ http.Header, _ []byte) (int, []byte) {
+		close(started)
+		select {
+		case <-release:
+		case <-ctx.Done():
+		}
+		return 429, []byte(`{"error":{"type":"usage_limit_reached"}}`)
+	})
+	type result struct {
+		response *http.Response
+		body     []byte
+		err      error
+	}
+	results := make(chan result, 1)
+	go func() {
+		response, body, err := f.request(t.Context(), 0, "initial-live-pool", "", codeBody(), true)
+		results <- result{response: response, body: body, err: err}
+	}()
+	select {
+	case <-started:
+	case <-time.After(15 * time.Second):
+		t.Fatal("initial dispatch never reached the controlled peer")
+	}
+	f.h.want(f.owner, "PUT", "/api/v1/code/pools/"+f.pool["id"].(string), f.poolInput([]string{}), etagHeader(f.pool), 200)
+	close(release)
+	got := <-results
+	if got.err != nil || got.response.StatusCode != 403 || !bytes.Contains(got.body, []byte("code_pool_denied")) || len(f.peer.Requests()) != 1 {
+		t.Fatalf("revoked pool dispatched recovery response=%v body=%s err=%v", got.response, got.body, got.err)
 	}
 }

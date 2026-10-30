@@ -59,6 +59,9 @@ func (l *codeTestLedger) ObserveOutcome(_ context.Context, _ string, outcome cod
 func (l *codeTestLedger) Admit(_ context.Context, in resources.CodeAdmission) (resources.CodePermit, error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	initial := !slices.ContainsFunc(l.inputs, func(previous resources.CodeAdmission) bool {
+		return previous.APIKeyID == in.APIKeyID && previous.Operation.Identity.Conversation == in.Operation.Identity.Conversation
+	})
 	l.inputs = append(l.inputs, in)
 	if in.PreviousResponse != "" && !l.references[in.PreviousResponse] {
 		return resources.CodePermit{}, codemode.Refuse(409, "code_parent_unresolved")
@@ -67,6 +70,7 @@ func (l *codeTestLedger) Admit(_ context.Context, in resources.CodeAdmission) (r
 		return resources.CodePermit{}, codemode.Refuse(409, l.refuse)
 	}
 	permit, err := codeTestPermit(in.APIKeyID, in.Providers)
+	permit.InitialRecovery = in.InitialRecovery && (initial || in.Recovery != nil)
 	permit.Attempt = codemode.Attempt{ID: fmt.Sprint(len(l.inputs))}
 	return permit, err
 }
@@ -554,3 +558,6 @@ func TestCodeMessagesToCodexPreservesNativeModelIdentifiers(t *testing.T) {
 		t.Fatalf("ordinary route accepted a native model identifier, status %d", ordinary.StatusCode)
 	}
 }
+
+func (l *codeTestLedger) ConfirmNonexecution(context.Context, string, int) error   { return nil }
+func (l *codeTestLedger) ObserveCooldown(context.Context, string, time.Time) error { return nil }

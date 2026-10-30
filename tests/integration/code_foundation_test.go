@@ -417,3 +417,54 @@ func TestCodeFoundationMessagesTranslationPolicyPublication(t *testing.T) {
 		t.Fatal("translated Claude setup missing", config)
 	}
 }
+
+func TestCodeFoundationInitialRecoverySettlesBeforeReplacementReservation(t *testing.T) {
+	f := newCodeFixture(t)
+	draft := f.h.want(f.owner, "PUT", "/api/v1/code/routes/"+f.route.ID, map[string]any{
+		"project_id": f.project, "slug": f.route.Slug, "pool_id": f.pool, "models": f.route.Models, "enabled": true, "initial_recovery_attempts": 1,
+	}, map[string]string{"If-Match": f.route.ETag}, 200)
+	published := f.h.want(f.owner, "POST", "/api/v1/code/routes/"+f.route.ID+"/publish", nil, withMatch(draft, idem("bounded-recovery-publish")), 200)
+	route := codePublicDecode[codemode.Route](t, published)
+	f.h.want(f.owner, "POST", "/api/v1/code/budgets", map[string]any{"project_id": f.project, "route_id": route.ID, "api_key_id": nil, "daily_tokens": 10, "monthly_tokens": 10, "enabled": true}, idem("recovery-budget"), 201)
+	secondCredential := access.NewID()
+	f.addCredential(t, secondCredential, "replacement-principal", 2)
+	secondAccount := f.h.want(f.owner, "POST", "/api/v1/code/accounts", map[string]any{"project_id": f.project, "provider_id": f.provider, "credential_id": secondCredential, "name": "Replacement fixture", "enabled": true, "models": route.Models}, idem("replacement-account"), 201)
+	pool := f.h.want(f.owner, "GET", "/api/v1/code/pools/"+f.pool, nil, nil, 200)
+	f.h.want(f.owner, "PUT", "/api/v1/code/pools/"+f.pool, map[string]any{"project_id": f.project, "name": "Recovery pool", "kind": "shared", "account_ids": []string{f.account, secondAccount["id"].(string)}, "api_key_ids": []string{f.key}}, etagHeader(pool), 200)
+	in := resources.CodeAdmission{Route: route, APIKeyID: f.key, Providers: []string{f.provider}, InitialRecovery: true,
+		Operation: codemode.Operation{Name: "responses", Model: "native-model", Identity: codemode.Identity{Conversation: "reserved-recovery"}}, Bound: &codemode.TokenBound{Tokens: 10, Evidence: "controlled-test-bound"}}
+	first, err := f.store.Admit(t.Context(), in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.store.MarkDispatched(t.Context(), first.Attempt.ID); err != nil {
+		t.Fatal(err)
+	}
+	replacement := resources.CodeAdmission{Route: route, APIKeyID: f.key, Providers: in.Providers, InitialRecovery: true, Operation: in.Operation, Bound: in.Bound,
+		Recovery: &resources.CodeRecovery{From: first.Attempt.ID, Number: 1}}
+	_, err = f.store.Admit(t.Context(), replacement)
+	codeRefusal(t, err, "code_recovery_unsafe")
+	rejectionStatus := 429
+	if err := f.store.ObserveOutcome(t.Context(), first.Attempt.ID, codemode.Outcome{Origin: "upstream", Kind: "rejected", UpstreamStatus: &rejectionStatus, ObservedAt: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.store.ConfirmNonexecution(t.Context(), first.Attempt.ID, 429); err != nil {
+		t.Fatal(err)
+	}
+	zero := int64(0)
+	if err := f.store.Settle(t.Context(), first.Attempt.ID, codemode.Usage{Total: &zero}); err != nil {
+		t.Fatal(err)
+	}
+	next, err := f.store.Admit(t.Context(), replacement)
+	if err != nil {
+		t.Fatal("proven rejection did not release capacity before replacement", err)
+	}
+	if first.Attempt.AccountID == next.Attempt.AccountID || first.Attempt.BindingID != next.Attempt.BindingID {
+		t.Fatal("replacement lost original attribution or durable conversation identity")
+	}
+	if err := f.store.Abort(t.Context(), next.Attempt.ID); err != nil {
+		t.Fatal(err)
+	}
+	_, err = f.store.Admit(t.Context(), replacement)
+	codeRefusal(t, err, "code_recovery_unsafe")
+}

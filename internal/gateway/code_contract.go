@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"context"
+	"time"
 
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/codeclient"
@@ -17,6 +18,8 @@ type CodeLedger interface {
 	Admit(context.Context, resources.CodeAdmission) (resources.CodePermit, error)
 	BindConnection(context.Context, codemode.Route, string, codemode.Identity, string, []string) (resources.CodePermit, error)
 	MarkDispatched(context.Context, string) error
+	ConfirmNonexecution(context.Context, string, int) error
+	ObserveCooldown(context.Context, string, time.Time) error
 	Settle(context.Context, string, codemode.Usage) error
 	Abort(context.Context, string) error
 	ObserveHealth(context.Context, string, string) error

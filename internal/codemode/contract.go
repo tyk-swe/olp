@@ -158,19 +158,20 @@ type Pool struct {
 }
 
 type Route struct {
-	MessagesToCodex bool           `json:"messages_to_codex,omitempty"`
-	Tools           *ResearchTools `json:"tools,omitempty"`
-	MaxBodyBytes    *int64         `json:"max_body_bytes,omitempty"`
-	ID              string         `json:"id"`
-	ProjectID       string         `json:"project_id"`
-	Slug            string         `json:"slug"`
-	PoolID          string         `json:"pool_id"`
-	Models          []string       `json:"models"`
-	Enabled         bool           `json:"enabled"`
-	RevisionID      string         `json:"revision_id"`
-	Revision        int            `json:"revision"`
-	ETag            string         `json:"etag"`
-	PublishedAt     *time.Time     `json:"published_at"`
+	InitialRecoveryAttempts int            `json:"initial_recovery_attempts,omitempty"`
+	MessagesToCodex         bool           `json:"messages_to_codex,omitempty"`
+	Tools                   *ResearchTools `json:"tools,omitempty"`
+	MaxBodyBytes            *int64         `json:"max_body_bytes,omitempty"`
+	ID                      string         `json:"id"`
+	ProjectID               string         `json:"project_id"`
+	Slug                    string         `json:"slug"`
+	PoolID                  string         `json:"pool_id"`
+	Models                  []string       `json:"models"`
+	Enabled                 bool           `json:"enabled"`
+	RevisionID              string         `json:"revision_id"`
+	Revision                int            `json:"revision"`
+	ETag                    string         `json:"etag"`
+	PublishedAt             *time.Time     `json:"published_at"`
 }
 
 func (r Route) BasePath() string { return BasePath + r.Slug }
@@ -220,6 +221,7 @@ type Operation struct {
 
 // Request is what OLP reads from a forwarded request body without rewriting it.
 type Request struct {
+	Recoverable      bool
 	Operation        Operation
 	PreviousResponse string
 	Estimate         int64

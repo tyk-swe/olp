@@ -96,6 +96,7 @@
         max_body_bytes: maxBodyBytes ? Number(maxBodyBytes) : null,
         models: nativeModels(models),
         messages_to_codex: messagesToCodex,
+        initial_recovery_attempts: initial?.initial_recovery_attempts ?? 0,
         tools: research
           ? { account_id: researchAccount, services: researchServices }
           : null,

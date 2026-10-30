@@ -659,3 +659,41 @@ issuer changes before dispatch require a retry, and idle subscription sockets
 close on the five-second expiry/authority check. See
 [workload JWT identity](access.md#workload-jwt-identity) for provisioning and
 renewal behavior. No JWT or raw subject enters subscription ledgers.
+
+### Initial conversation recovery
+
+Published route policy `initial_recovery_attempts` defaults to zero. Setting it to
+one or two permits that many additional attempts for a new, text-only
+conversation on the exact requested model. Every attempt checks current key,
+project, pool, account and grant authority. Native forwarding remains unchanged
+when recovery is disabled.
+
+The Codex adapter currently recognizes complete HTTP 401 errors with type
+`authentication_error` and code `invalid_api_key`, and complete HTTP 429 errors
+with type `usage_limit_reached`. Arbitrary 401/429 responses and transient
+`rate_limit_exceeded` errors do not qualify. No bytes from a rejected attempt are
+sent to the client before the recovery decision. A 401 can reuse its account only
+after the existing refresh worker supplies a newer grant for the same credential
+and verified principal within ten seconds. Otherwise recovery selects another
+eligible account. Quota recovery respects longer upstream reset and Retry-After
+values when cooling the rejected account.
+
+Recovery refuses once another turn, child conversation, model pin or response
+reference establishes ownership. Concurrent first turns keep their common
+binding. Previous response IDs, turn-state headers, compact operations,
+assistant/tool histories and opaque input items cannot move between accounts.
+Transport loss, server errors, accepted responses, partial output and stream
+errors never authorize replay.
+
+Each rejected attempt retains its actual account and route revision. Proven
+nonexecution settles at zero before another attempt reserves capacity. The
+recovered root and model pin change atomically under the same admission lock,
+while later attempts and replicas keep that recovered binding. Unsafe recovery
+returns a typed refusal rather than silently choosing a different model.
+
+The rejection envelopes are controlled assumptions observed on 2026-10-30 in
+[the pinned Codex executor fixtures](https://github.com/router-for-me/CLIProxyAPI/blob/90c447d3a8727d115aa7552ec93ce023736ed492/internal/runtime/executor/codex_executor_retry_test.go)
+and [typed terminal classification](https://github.com/router-for-me/CLIProxyAPI/blob/90c447d3a8727d115aa7552ec93ce023736ed492/internal/runtime/executor/codex_executor_terminal.go).
+Those sources establish error shapes. They do not establish live subscription
+qualification or permission to replay streams. The complete pre-output HTTP
+boundary and durable ownership checks remain required.
