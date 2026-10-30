@@ -7834,7 +7834,10 @@ type CodeRoute struct {
 	ModelRewriting *bool    `json:"model_rewriting,omitempty"`
 	Models         []string `json:"models"`
 
-	// PaidParticipation Explicitly permit direct metered API targets. This does not enable paid fallback.
+	// PaidFallbackTargets Explicit native model to published metered provider and credential slot for subscription-first bounded recovery. Requires paid_participation and positive initial_recovery_attempts. Subscription candidates are preferred. Same-model fallback needs no model pool. Different models require model_rewriting and a model_pool. Proven nonexecution and complete-input portability are required. Direct paid_targets retain precedence and cannot overlap this map. Existing paid owners stay pinned. Unknown paid money remains held against applicable limits.
+	PaidFallbackTargets *map[string]CodePaidTarget `json:"paid_fallback_targets,omitempty"`
+
+	// PaidParticipation Explicitly permit metered API targets. Direct selection and subscription-first fallback require their separate target maps.
 	PaidParticipation *bool `json:"paid_participation,omitempty"`
 
 	// PaidTargets Exact native model to directly selected published metered provider and credential slot. A mapped model takes precedence over subscription accounts.
@@ -7884,7 +7887,10 @@ type CodeRouteWrite struct {
 	ModelRewriting *bool    `json:"model_rewriting,omitempty"`
 	Models         []string `json:"models"`
 
-	// PaidParticipation Explicitly permit direct metered API targets. This does not enable paid fallback.
+	// PaidFallbackTargets Explicit native model to published metered provider and credential slot for subscription-first bounded recovery. Requires paid_participation and positive initial_recovery_attempts. Subscription candidates are preferred. Same-model fallback needs no model pool. Different models require model_rewriting and a model_pool. Proven nonexecution and complete-input portability are required. Direct paid_targets retain precedence and cannot overlap this map. Existing paid owners stay pinned. Unknown paid money remains held against applicable limits.
+	PaidFallbackTargets *map[string]CodePaidTarget `json:"paid_fallback_targets,omitempty"`
+
+	// PaidParticipation Explicitly permit metered API targets. Direct selection and subscription-first fallback require their separate target maps.
 	PaidParticipation *bool `json:"paid_participation,omitempty"`
 
 	// PaidTargets Exact native model to directly selected published metered provider and credential slot. A mapped model takes precedence over subscription accounts.

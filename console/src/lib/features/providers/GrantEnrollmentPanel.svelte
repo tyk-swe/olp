@@ -26,7 +26,9 @@
 
   const device = $derived(enrollment.device);
   const secret = $derived(enrollment.input === 'secret');
-  const oauthSecret = $derived(secret && profileId === 'antigravity-subscription');
+  const oauthSecret = $derived(
+    secret && profileId === 'antigravity-subscription'
+  );
 
   // Status requests drive a device authorization's polling: each waits the
   // interval OLP last reported, and none follows once the enrollment ended or
@@ -130,9 +132,9 @@
         <p>
           {#if secret && !oauthSecret}Open the vendor's API key page, in any
             browser, sign in to the upstream account this provider should use,
-            and create an API
-            key.{:else}Open the plugin's authorization page, in any browser, and
-            sign in to the upstream account this provider should use.{/if}
+            and create an API key.{:else}Open the plugin's authorization page,
+            in any browser, and sign in to the upstream account this provider
+            should use.{/if}
         </p>
         <div class="authorization">
           <code>{enrollment.authorization_url}</code>
@@ -171,11 +173,12 @@
                 {#if oauthSecret}
                   Use the desktop OAuth client secret supplied by your operator
                   with the returned callback URL. Paste JSON with
-                  <code>callback_url</code> and <code>client_secret</code> fields.
-                  The callback may show a connection error because OLP does not
-                  open a local listener. OLP encrypts the secret and refresh
-                  authorization. Keep the secret out of provider options.
-                  Continue before {formatDate(enrollment.expires_at)}.
+                  <code>callback_url</code> and <code>client_secret</code>
+                  fields. The callback may show a connection error because OLP does
+                  not open a local listener. OLP encrypts the secret and refresh authorization.
+                  Keep the secret out of provider options. Continue before {formatDate(
+                    enrollment.expires_at
+                  )}.
                 {:else}
                   OLP encrypts the key beneath a credential version and
                   identifies it by a fingerprint; it is never shown again, and
