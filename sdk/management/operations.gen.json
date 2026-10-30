@@ -4685,7 +4685,7 @@
             }
           },
           "required": [],
-          "description": "Resource IDs are artifact-local references. Accounts resolve through explicitly bound current destination enrollments, pools through project/name/kind/owner, routes through unique slug, and budgets through project/route/key and configured daily/monthly dimensions. Ambiguous identities are refused. Source credentials, health, usage windows, conversation bindings and historical revisions stay local. Destination projects and providers must be prepared and enrolled before planning. Rename globally unique slugs for same-installation cross-project promotion."
+          "description": "Resource IDs are artifact-local references. Accounts resolve through explicitly bound current destination enrollments. Pools and budgets reuse validated same-project artifact IDs or standard UUIDv5 destination IDs derived from project, resource kind and artifact reference, with unique natural matches as fallback. This preserves duplicate names and exact duplicate budgets without a registry. Routes resolve through unique slug. Unrelated ambiguous identities are refused. Source credentials, health, usage windows, conversation bindings and historical revisions stay local. Destination projects and providers must be prepared and enrolled before planning. Rename globally unique slugs for same-installation cross-project promotion."
         },
         "ConfigurationCodeAccount": {
           "type": "object",
@@ -4897,6 +4897,16 @@
             "pool": {
               "type": "string",
               "format": "uuid"
+            },
+            "paid_participation": {
+              "type": "boolean"
+            },
+            "paid_targets": {
+              "type": "object",
+              "maxProperties": 100,
+              "additionalProperties": {
+                "$ref": "#/$defs/ConfigurationCodePaidTarget"
+              }
             }
           },
           "required": [
@@ -4938,6 +4948,26 @@
             "services"
           ]
         },
+        "ConfigurationCodePaidTarget": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "provider",
+            "slot",
+            "credential_ref"
+          ],
+          "properties": {
+            "provider": {
+              "type": "string"
+            },
+            "slot": {
+              "type": "string"
+            },
+            "credential_ref": {
+              "type": "string"
+            }
+          }
+        },
         "ConfigurationCodePublication": {
           "type": "object",
           "additionalProperties": false,
@@ -4949,6 +4979,12 @@
               "type": "object",
               "additionalProperties": {
                 "$ref": "#/$defs/ConfigurationCodeConnection"
+              }
+            },
+            "paid_connections": {
+              "type": "object",
+              "additionalProperties": {
+                "$ref": "#/$defs/ConfigurationCodePaidConnection"
               }
             }
           },
@@ -4971,6 +5007,28 @@
           "required": [
             "configuration"
           ]
+        },
+        "ConfigurationCodePaidConnection": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "provider",
+            "slot_key_refs"
+          ],
+          "properties": {
+            "provider": {
+              "$ref": "#/$defs/ConfigurationProviderEntry"
+            },
+            "slot_key_refs": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            }
+          }
         },
         "ConfigurationCodeBudget": {
           "type": "object",
@@ -27933,7 +27991,7 @@
             }
           },
           "required": [],
-          "description": "Resource IDs are artifact-local references. Accounts resolve through explicitly bound current destination enrollments, pools through project/name/kind/owner, routes through unique slug, and budgets through project/route/key and configured daily/monthly dimensions. Ambiguous identities are refused. Source credentials, health, usage windows, conversation bindings and historical revisions stay local. Destination projects and providers must be prepared and enrolled before planning. Rename globally unique slugs for same-installation cross-project promotion."
+          "description": "Resource IDs are artifact-local references. Accounts resolve through explicitly bound current destination enrollments. Pools and budgets reuse validated same-project artifact IDs or standard UUIDv5 destination IDs derived from project, resource kind and artifact reference, with unique natural matches as fallback. This preserves duplicate names and exact duplicate budgets without a registry. Routes resolve through unique slug. Unrelated ambiguous identities are refused. Source credentials, health, usage windows, conversation bindings and historical revisions stay local. Destination projects and providers must be prepared and enrolled before planning. Rename globally unique slugs for same-installation cross-project promotion."
         },
         "ConfigurationCodeAccount": {
           "type": "object",
@@ -28145,6 +28203,16 @@
             "pool": {
               "type": "string",
               "format": "uuid"
+            },
+            "paid_participation": {
+              "type": "boolean"
+            },
+            "paid_targets": {
+              "type": "object",
+              "maxProperties": 100,
+              "additionalProperties": {
+                "$ref": "#/$defs/ConfigurationCodePaidTarget"
+              }
             }
           },
           "required": [
@@ -28186,6 +28254,26 @@
             "services"
           ]
         },
+        "ConfigurationCodePaidTarget": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "provider",
+            "slot",
+            "credential_ref"
+          ],
+          "properties": {
+            "provider": {
+              "type": "string"
+            },
+            "slot": {
+              "type": "string"
+            },
+            "credential_ref": {
+              "type": "string"
+            }
+          }
+        },
         "ConfigurationCodePublication": {
           "type": "object",
           "additionalProperties": false,
@@ -28197,6 +28285,12 @@
               "type": "object",
               "additionalProperties": {
                 "$ref": "#/$defs/ConfigurationCodeConnection"
+              }
+            },
+            "paid_connections": {
+              "type": "object",
+              "additionalProperties": {
+                "$ref": "#/$defs/ConfigurationCodePaidConnection"
               }
             }
           },
@@ -28219,6 +28313,28 @@
           "required": [
             "configuration"
           ]
+        },
+        "ConfigurationCodePaidConnection": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "provider",
+            "slot_key_refs"
+          ],
+          "properties": {
+            "provider": {
+              "$ref": "#/$defs/ConfigurationProviderEntry"
+            },
+            "slot_key_refs": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            }
+          }
         },
         "ConfigurationCodeBudget": {
           "type": "object",

@@ -480,33 +480,11 @@ func (s *Server) validateDocument(ctx context.Context, q access.Queryer, doc *Do
 	seen = map[string]bool{}
 	refs := map[string]bool{}
 	unavailable := map[string]string{}
-	if doc.Code != nil {
-		for _, route := range doc.Code.Routes {
-			if route.Published == nil {
-				continue
-			}
-			for name, entry := range route.Published.Connections {
-				cfg := entry.Configuration
-				if cfg.Options.Network != nil && cfg.Options.Network.CredentialID != "" {
-					return nil, access.Invalid("code.routes.published.connections", "Use a network credential reference instead of an installation credential ID.")
-				}
-				if entry.NetworkCredentialRef != nil && (*entry.NetworkCredentialRef != networkRef(name) || cfg.Options.Network == nil) {
-					return nil, access.Invalid("code.routes.published.connections", "Use the named provider network credential reference.")
-				}
-				refusal, err := pinPlugin(ctx, q, s.Unconfined, &cfg)
-				if err != nil {
-					return nil, err
-				}
-				if refusal != "" {
-					return nil, access.Invalid("code.routes.published.connections", "Install and approve the pinned frozen provider profile before promotion.")
-				}
-				cfg.Normalize()
-				if err := cfg.Validate(s.Egress); err != nil {
-					return nil, err
-				}
-			}
-		}
+	preparedCode, err := s.prepareCode(ctx, q, doc.Code)
+	if err != nil {
+		return nil, err
 	}
+	doc.Code = preparedCode
 
 	totalModels := 0
 	for i := range doc.Providers {

@@ -867,6 +867,9 @@ func TestCodeFoundationModelPoolRecoveryPreservesRequestedModelAndAuthority(t *t
 }
 
 func newPaidCodeFixture(t *testing.T, endpoints ...string) (*codeFixture, routing.Provider, routing.Slot) {
+	return newPaidCodeFixturePolicy(t, false, endpoints...)
+}
+func newPaidCodeFixturePolicy(t *testing.T, restricted bool, endpoints ...string) (*codeFixture, routing.Provider, routing.Slot) {
 	t.Helper()
 	f := newCodeFixture(t)
 	endpoint := func() string {
@@ -880,14 +883,17 @@ func newPaidCodeFixture(t *testing.T, endpoints ...string) (*codeFixture, routin
 	var slot routing.Slot
 	slot.Enabled = true
 	slot.Weight = 1
+	if restricted {
+		slot.AllowedAPIKeys = []string{f.key}
+	}
 	var credential string
 	var version int
-	if err := f.h.Pool.QueryRow(t.Context(), `SELECT s.id::text,s.credential_id::text,c.version FROM olp.provider_slots s JOIN olp.provider_credentials c ON c.id=s.credential_id WHERE s.provider_id=$1 AND s.is_default`, providerID).Scan(&slot.ID, &credential, &version); err != nil {
+	if err := f.h.Pool.QueryRow(t.Context(), `SELECT s.id::text,s.name,s.credential_id::text,c.version FROM olp.provider_slots s JOIN olp.provider_credentials c ON c.id=s.credential_id WHERE s.provider_id=$1 AND s.is_default`, providerID).Scan(&slot.ID, &slot.Name, &credential, &version); err != nil {
 		t.Fatal(err)
 	}
 	slot.CredentialID = &credential
 	slot.CredentialVersion = &version
-	models, err := json.Marshal([]routing.RevisionModel{{ID: access.NewID(), UpstreamModel: "native-model", Capabilities: []routing.RevisionCapability{{Operation: "generation", Surface: "openai", Mode: "unary", Source: "certified"}}}})
+	models, err := json.Marshal([]routing.RevisionModel{{ID: access.NewID(), UpstreamModel: "native-model", DisplayName: "Native fixture", Capabilities: []routing.RevisionCapability{{Operation: "generation", Surface: "openai", Mode: "unary", Source: "certified"}}}})
 	if err != nil {
 		t.Fatal(err)
 	}

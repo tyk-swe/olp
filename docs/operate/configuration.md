@@ -451,3 +451,13 @@ apply, and publish in the immutable runtime snapshot. The cache deployment URL
 and credentials are environment bindings, not promotion artifacts. Restoring
 configuration into an empty installation restores policy, not cached content.
 See [response caching](../use/caching.md).
+
+### Coding configuration
+
+The optional `code` section carries subscription accounts, shared and personal pools, coding route drafts and latest publications, and local token budget policies. It preserves account weights, model aliases and model pools, compatibility choices, recovery policy, research tools, request limits and paid participation. A publication retains its frozen provider configuration and paid model and slot policy independently from the current provider revision. Historical revisions, conversations, allowance observations, credentials and budget usage stay on their installation.
+
+Enroll or configure the destination providers first. Supply `code_bindings` on plan and apply, or use `--code-bindings-file` with the CLI. Its `credentials`, `users` and `api_keys` objects map artifact references to explicitly authorized destination UUIDs. Subscription principals come from enrolled destination credentials. Paid credentials must match the destination provider slot's active published credential. Frozen paid slot key restrictions require explicit destination key bindings. Personal owners must be active project members, and their assigned keys must belong to them.
+
+Code UUIDs identify references inside the artifact. Destination accounts match project, provider and credential principal. Pools and budgets first reuse same-project artifact references or a UUIDv5 destination identity derived from the destination project, resource kind and artifact reference. This preserves duplicate pool names and duplicate budget policies without a registry. A unique natural match can reuse a pool by project, name, kind and owner, or a budget by project, route, key and the presence of daily and monthly windows. Routes match project and slug. Unrelated ambiguous identities and unresolved or cross-project references are refused. Existing budget windows retain their usage. Rename route slugs when copying to another project in the same installation because slugs are globally unique.
+
+Plan and apply use the existing configuration endpoints, transactions and live management authorization. Reapplying an equivalent artifact produces `noop` actions. Changing a CLI binding file after planning requires a new plan. The console also clears its reviewed plan when code bindings change. Coding publication validates both the frozen policy and the destination's current provider eligibility without certification or inference.

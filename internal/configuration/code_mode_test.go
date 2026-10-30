@@ -2,6 +2,7 @@ package configuration_test
 
 import (
 	"encoding/json"
+	"fmt"
 	"testing"
 
 	"github.com/tyk-swe/olp/internal/configuration"
@@ -63,5 +64,31 @@ func TestCodeConfigurationRefusesCrossProjectAndUnresolvedReferences(t *testing.
 	bad.Routes = []configuration.CodeRouteEntry{{ID: route, Project: "team", Slug: "coding", Draft: configuration.CodeRoutePolicy{Pool: account, Models: []string{"native"}, Enabled: true}}}
 	if err := bad.Validate(); err == nil {
 		t.Fatal("unresolved pool reference accepted")
+	}
+}
+
+func TestCodeConfigurationDigestRetainsPaidAuthorization(t *testing.T) {
+	digest := func(enabled bool) string {
+		t.Helper()
+		raw := fmt.Sprintf(`{"api_version":"%s","code":{"routes":[{"id":"00000000-0000-4000-8000-000000000001","project":"source","slug":"coding","draft":{"pool":"00000000-0000-4000-8000-000000000002","models":["native"],"paid_participation":%t,"paid_targets":{"native":{"provider":"metered","slot":"primary","credential_ref":"paid-primary"}}}}]}}`, configuration.APIVersion, enabled)
+		var doc configuration.Document
+		if err := json.Unmarshal([]byte(raw), &doc); err != nil {
+			t.Fatal(err)
+		}
+		value, err := configuration.Digest(&doc)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return value
+	}
+	if digest(true) == digest(false) {
+		t.Fatal("paid monetary authorization was discarded from configuration intent")
+	}
+}
+
+func TestCodeConfigurationPreservesUnassignedPools(t *testing.T) {
+	code := configuration.CodeConfiguration{Pools: []configuration.CodePoolEntry{{ID: "0192cf87-d4ab-7f2e-a8b1-c2d3e4f50601", Project: "team", Name: "unassigned", Kind: "shared", Accounts: map[string]int64{}, APIKeyRefs: []string{}}}}
+	if err := code.Validate(); err != nil {
+		t.Fatalf("unassigned pool policy was rejected %v", err)
 	}
 }

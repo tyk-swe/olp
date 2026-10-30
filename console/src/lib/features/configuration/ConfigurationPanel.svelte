@@ -263,8 +263,9 @@
   <div class="card">
     <p>
       Export the logical configuration as a secret-free artifact, then plan and
-      stage it on another installation. Providers and routes are staged as
-      drafts — certification and activation stay local.
+      stage it on another installation or project. Ordinary providers and routes
+      are staged as drafts. Coding routes retain their draft and latest
+      publication after explicit destination enrollment and binding.
     </p>
     <div class="promotion-actions">
       <button
@@ -408,7 +409,9 @@
         </button>
       {/if}
       {#if applyResult === 'staged'}<p role="status" data-testid="apply-result">
-          Configuration staged.
+          {artifactDocument?.code
+            ? 'Configuration applied.'
+            : 'Configuration staged.'}
         </p>{/if}
     </div>
   {/if}

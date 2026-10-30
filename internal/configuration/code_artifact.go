@@ -8,6 +8,7 @@ import (
 	"github.com/tyk-swe/olp/internal/codemode"
 	"github.com/tyk-swe/olp/internal/providers"
 	"github.com/tyk-swe/olp/internal/routes"
+	"github.com/tyk-swe/olp/internal/routing"
 )
 
 type CodeConfiguration struct {
@@ -43,17 +44,28 @@ type CodePoolEntry struct {
 	APIKeyRefs []string         `json:"api_key_refs"`
 }
 
+type CodePaidTarget struct {
+	Provider      string `json:"provider"`
+	Slot          string `json:"slot"`
+	CredentialRef string `json:"credential_ref,omitempty"`
+}
+type CodePaidConnection struct {
+	Provider    ProviderEntry       `json:"provider"`
+	SlotKeyRefs map[string][]string `json:"slot_key_refs"`
+}
 type CodeRoutePolicy struct {
-	Pool                    string                  `json:"pool"`
-	Models                  []string                `json:"models"`
-	Enabled                 bool                    `json:"enabled"`
-	ModelPools              map[string][]string     `json:"model_pools"`
-	InitialRecoveryAttempts int                     `json:"initial_recovery_attempts"`
-	ModelRewriting          bool                    `json:"model_rewriting"`
-	Aliases                 map[string]string       `json:"aliases"`
-	MessagesToCodex         bool                    `json:"messages_to_codex"`
-	Tools                   *codemode.ResearchTools `json:"tools"`
-	MaxBodyBytes            *int64                  `json:"max_body_bytes"`
+	PaidParticipation       bool                      `json:"paid_participation"`
+	PaidTargets             map[string]CodePaidTarget `json:"paid_targets,omitempty"`
+	Pool                    string                    `json:"pool"`
+	Models                  []string                  `json:"models"`
+	Enabled                 bool                      `json:"enabled"`
+	ModelPools              map[string][]string       `json:"model_pools"`
+	InitialRecoveryAttempts int                       `json:"initial_recovery_attempts"`
+	ModelRewriting          bool                      `json:"model_rewriting"`
+	Aliases                 map[string]string         `json:"aliases"`
+	MessagesToCodex         bool                      `json:"messages_to_codex"`
+	Tools                   *codemode.ResearchTools   `json:"tools"`
+	MaxBodyBytes            *int64                    `json:"max_body_bytes"`
 }
 
 type CodeConnectionEntry struct {
@@ -62,8 +74,10 @@ type CodeConnectionEntry struct {
 }
 
 type CodePublication struct {
-	Policy      CodeRoutePolicy                `json:"policy"`
-	Connections map[string]CodeConnectionEntry `json:"connections"`
+	PaidConnections map[string]CodePaidConnection `json:"paid_connections,omitempty"`
+	paidResolved    map[string]routing.Provider
+	Policy          CodeRoutePolicy                `json:"policy"`
+	Connections     map[string]CodeConnectionEntry `json:"connections"`
 }
 
 type CodeRouteEntry struct {
@@ -85,27 +99,37 @@ type CodeBudgetEntry struct {
 }
 
 func codePolicy(route codemode.Route) CodeRoutePolicy {
-	return CodeRoutePolicy{Pool: route.PoolID, Models: route.Models, Enabled: route.Enabled, ModelPools: route.ModelPools, InitialRecoveryAttempts: route.InitialRecoveryAttempts, ModelRewriting: route.ModelRewriting, Aliases: route.Aliases, MessagesToCodex: route.MessagesToCodex, Tools: route.Tools, MaxBodyBytes: route.MaxBodyBytes}
+	return CodeRoutePolicy{PaidParticipation: route.PaidParticipation, PaidTargets: maps.Collect(func(yield func(string, CodePaidTarget) bool) {
+		for model, target := range route.PaidTargets {
+			if !yield(model, CodePaidTarget{Provider: target.ProviderID, Slot: target.SlotID}) {
+				return
+			}
+		}
+	}), Pool: route.PoolID, Models: route.Models, Enabled: route.Enabled, ModelPools: route.ModelPools, InitialRecoveryAttempts: route.InitialRecoveryAttempts, ModelRewriting: route.ModelRewriting, Aliases: route.Aliases, MessagesToCodex: route.MessagesToCodex, Tools: route.Tools, MaxBodyBytes: route.MaxBodyBytes}
 }
 
 func (policy CodeRoutePolicy) input(project, slug, pool string) routes.CodeRouteInput {
-	return routes.CodeRouteInput{ProjectID: project, Slug: slug, PoolID: pool, Models: policy.Models, Enabled: policy.Enabled, ModelPools: policy.ModelPools, InitialRecoveryAttempts: policy.InitialRecoveryAttempts, ModelRewriting: policy.ModelRewriting, Aliases: policy.Aliases, MessagesToCodex: policy.MessagesToCodex, Tools: policy.Tools, MaxBodyBytes: policy.MaxBodyBytes}
+	return routes.CodeRouteInput{PaidParticipation: policy.PaidParticipation, PaidTargets: maps.Collect(func(yield func(string, codemode.PaidTarget) bool) {
+		for model, target := range policy.PaidTargets {
+			if !yield(model, codemode.PaidTarget{ProviderID: target.Provider, SlotID: target.Slot}) {
+				return
+			}
+		}
+	}), ProjectID: project, Slug: slug, PoolID: pool, Models: policy.Models, Enabled: policy.Enabled, ModelPools: policy.ModelPools, InitialRecoveryAttempts: policy.InitialRecoveryAttempts, ModelRewriting: policy.ModelRewriting, Aliases: policy.Aliases, MessagesToCodex: policy.MessagesToCodex, Tools: policy.Tools, MaxBodyBytes: policy.MaxBodyBytes}
 }
 
-func canonicalCode(code *CodeConfiguration) {
+func canonicalCode(code *CodeConfiguration) *CodeConfiguration {
 	if code == nil {
-		return
+		return nil
 	}
-	slices.SortFunc(code.Accounts, func(a, b CodeAccountEntry) int { return strings.Compare(a.ID, b.ID) })
-	slices.SortFunc(code.Pools, func(a, b CodePoolEntry) int { return strings.Compare(a.ID, b.ID) })
-	slices.SortFunc(code.Routes, func(a, b CodeRouteEntry) int { return strings.Compare(a.ID, b.ID) })
-	slices.SortFunc(code.Budgets, func(a, b CodeBudgetEntry) int { return strings.Compare(a.ID, b.ID) })
-	for _, pool := range code.Pools {
-		slices.Sort(pool.APIKeyRefs)
-	}
+	pools := mapCode(code.Pools, func(pool CodePoolEntry) CodePoolEntry {
+		return CodePoolEntry{ID: pool.ID, Project: pool.Project, Name: pool.Name, Kind: pool.Kind, OwnerRef: pool.OwnerRef, Accounts: pool.Accounts, APIKeyRefs: slices.Sorted(slices.Values(pool.APIKeyRefs))}
+	})
+	return &CodeConfiguration{Accounts: slices.SortedFunc(slices.Values(code.Accounts), func(a, b CodeAccountEntry) int { return strings.Compare(a.ID, b.ID) }), Pools: slices.SortedFunc(slices.Values(pools), func(a, b CodePoolEntry) int { return strings.Compare(a.ID, b.ID) }), Routes: slices.SortedFunc(slices.Values(code.Routes), func(a, b CodeRouteEntry) int { return strings.Compare(a.ID, b.ID) }), Budgets: slices.SortedFunc(slices.Values(code.Budgets), func(a, b CodeBudgetEntry) int { return strings.Compare(a.ID, b.ID) })}
 }
-
-func codeAccountRefs(pool CodePoolEntry) []string { return slices.Sorted(maps.Keys(pool.Accounts)) }
+func codeAccountRefs(pool CodePoolEntry) []string {
+	return append([]string{}, slices.Sorted(maps.Keys(pool.Accounts))...)
+}
 
 type codeResult[T any] struct {
 	value T

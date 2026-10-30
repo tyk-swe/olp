@@ -63,7 +63,7 @@ func applyCode(ctx context.Context, tx pgx.Tx, p access.Principal, doc *Document
 						return
 					}
 				}
-			})); err != nil {
+			}), publication.paidResolved); err != nil {
 				return err
 			}
 		}

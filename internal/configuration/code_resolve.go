@@ -6,13 +6,13 @@ import (
 	"errors"
 	"maps"
 	"slices"
-	"strconv"
 	"strings"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/codemode"
 	"github.com/tyk-swe/olp/internal/providers"
+	"github.com/tyk-swe/olp/internal/routes"
 )
 
 type resolvedCodeResource[T any] struct {
@@ -29,8 +29,7 @@ type resolvedCode struct {
 	Budgets  []resolvedCodeResource[access.CodeBudgetInput]
 }
 
-func codeIdentity(ctx context.Context, q access.Queryer, query string, args ...any) (string, bool, error) {
-	rows, err := q.Query(ctx, query, args...)
+func codeIdentity(rows pgx.Rows, err error) (string, bool, error) {
 	if err != nil {
 		return "", false, err
 	}
@@ -86,7 +85,7 @@ func resolveCode(ctx context.Context, q access.Queryer, code *CodeConfiguration,
 		if err != nil {
 			return resolvedCodeResource[providers.CodeAccountInput]{}, err
 		}
-		id, exists, err := codeIdentity(ctx, q, `SELECT id::text FROM olp.code_accounts WHERE project_id=$1 AND provider_id=$2 AND principal=$3`, project, provider, principal)
+		id, exists, err := codeIdentity(q.Query(ctx, `SELECT id::text FROM olp.code_accounts WHERE project_id=$1 AND provider_id=$2 AND principal=$3`, project, provider, principal))
 		return resolvedCodeResource[providers.CodeAccountInput]{Ref: entry.ID, ID: id, Existing: exists, Identity: codeIdentityKey(project, provider, principal), Input: providers.CodeAccountInput{ProjectID: project, ProviderID: provider, CredentialID: credential, Name: entry.Name, Enabled: entry.Enabled, Models: entry.Models}}, err
 	})
 	if err != nil {
@@ -112,14 +111,25 @@ func resolveCode(ctx context.Context, q access.Queryer, code *CodeConfiguration,
 		if err != nil {
 			return resolvedCodeResource[access.CodePoolInput]{}, err
 		}
-		id, exists, err := codeIdentity(ctx, q, `SELECT id::text FROM olp.code_pools WHERE project_id=$1 AND name=$2 AND kind=$3 AND owner_user_id IS NOT DISTINCT FROM $4::uuid`, project, entry.Name, entry.Kind, owner)
-		return resolvedCodeResource[access.CodePoolInput]{Ref: entry.ID, ID: id, Existing: exists, Identity: codeIdentityKey(project, entry.Name, entry.Kind, codePointer(owner)), Input: access.CodePoolInput{ProjectID: project, Name: entry.Name, Kind: entry.Kind, OwnerUserID: owner, AccountIDs: mapCode(codeAccountRefs(entry), func(ref string) string { return accountIDs[ref] }), AccountWeights: maps.Collect(func(yield func(string, int64) bool) {
+		mapped, err := codeDestinationID("pool", project, entry.ID)
+		if err != nil {
+			return resolvedCodeResource[access.CodePoolInput]{}, err
+		}
+		candidates, err := codeMappedCandidates(q.Query(ctx, `SELECT id::text,project_id::text,(kind=$3 AND owner_user_id IS NOT DISTINCT FROM $4::uuid),(name=$2 AND kind=$3 AND owner_user_id IS NOT DISTINCT FROM $4::uuid) FROM olp.code_pools WHERE id=$5 OR id=$6 OR (project_id=$1 AND name=$2 AND kind=$3 AND owner_user_id IS NOT DISTINCT FROM $4::uuid)`, project, entry.Name, entry.Kind, owner, entry.ID, mapped))
+		if err != nil {
+			return resolvedCodeResource[access.CodePoolInput]{}, err
+		}
+		unique := !slices.ContainsFunc(code.Pools, func(other CodePoolEntry) bool {
+			return other.ID != entry.ID && strings.EqualFold(other.Project, entry.Project) && other.Name == entry.Name && other.Kind == entry.Kind && codeBoundValue(other.OwnerRef, bindings.Users) == codePointer(owner)
+		})
+		id, exists, err := codeMappedIdentity(project, entry.ID, mapped, unique, candidates)
+		return resolvedCodeResource[access.CodePoolInput]{Ref: entry.ID, ID: id, Existing: exists, Input: access.CodePoolInput{ProjectID: project, Name: entry.Name, Kind: entry.Kind, OwnerUserID: owner, AccountIDs: append([]string{}, slices.Sorted(slices.Values(mapCode(codeAccountRefs(entry), func(ref string) string { return accountIDs[ref] })))...), AccountWeights: maps.Collect(func(yield func(string, int64) bool) {
 			for ref, weight := range entry.Accounts {
 				if !yield(accountIDs[ref], weight) {
 					return
 				}
 			}
-		}), APIKeyIDs: keys}}, err
+		}), APIKeyIDs: append([]string{}, slices.Sorted(slices.Values(keys))...)}}, err
 	})
 	if err != nil {
 		return nil, err
@@ -143,15 +153,19 @@ func resolveCode(ctx context.Context, q access.Queryer, code *CodeConfiguration,
 		if ordinary {
 			return resolvedCodeResource[CodeRouteEntry]{}, access.Invalid("code.routes.slug", "Choose an unused slug or a code route in the destination project.")
 		}
-		id, exists, err := codeIdentity(ctx, q, `SELECT id::text FROM olp.code_routes WHERE slug=$1 AND project_id=$2`, entry.Slug, project)
+		id, exists, err := codeIdentity(q.Query(ctx, `SELECT id::text FROM olp.code_routes WHERE slug=$1 AND project_id=$2`, entry.Slug, project))
 		if err != nil {
 			return resolvedCodeResource[CodeRouteEntry]{}, err
 		}
-		publication, err := resolveCodePublication(ctx, q, entry.Published, poolIDs, accountIDs, project)
+		publication, err := resolveCodePublication(ctx, q, entry.Published, poolIDs, accountIDs, project, bindings)
 		if err != nil {
 			return resolvedCodeResource[CodeRouteEntry]{}, err
 		}
-		return resolvedCodeResource[CodeRouteEntry]{Ref: entry.ID, ID: id, Existing: exists, Input: CodeRouteEntry{ID: id, Project: project, Slug: entry.Slug, Draft: resolveCodePolicy(entry.Draft, poolIDs, accountIDs), Published: publication}}, err
+		draft, err := resolveCodePaidPolicy(ctx, q, resolveCodePolicy(entry.Draft, poolIDs, accountIDs), project, bindings)
+		if err != nil {
+			return resolvedCodeResource[CodeRouteEntry]{}, err
+		}
+		return resolvedCodeResource[CodeRouteEntry]{Ref: entry.ID, ID: id, Existing: exists, Input: CodeRouteEntry{ID: id, Project: project, Slug: entry.Slug, Draft: draft, Published: publication}}, err
 	})
 	if err != nil {
 		return nil, err
@@ -173,8 +187,19 @@ func resolveCode(ctx context.Context, q access.Queryer, code *CodeConfiguration,
 			return resolvedCodeResource[access.CodeBudgetInput]{}, err
 		}
 		route := codeOptionalRef(entry.Route, routeIDs)
-		id, exists, err := codeIdentity(ctx, q, `SELECT id::text FROM olp.code_token_budgets WHERE project_id=$1 AND route_id IS NOT DISTINCT FROM $2::uuid AND api_key_id IS NOT DISTINCT FROM $3::uuid AND (daily_tokens IS NOT NULL)=$4 AND (monthly_tokens IS NOT NULL)=$5`, project, route, key, entry.DailyTokens != nil, entry.MonthlyTokens != nil)
-		return resolvedCodeResource[access.CodeBudgetInput]{Ref: entry.ID, ID: id, Existing: exists, Identity: codeIdentityKey(project, codePointer(route), codePointer(key), strconv.FormatBool(entry.DailyTokens != nil), strconv.FormatBool(entry.MonthlyTokens != nil)), Input: access.CodeBudgetInput{ProjectID: project, RouteID: route, APIKeyID: key, DailyTokens: entry.DailyTokens, MonthlyTokens: entry.MonthlyTokens, Enabled: entry.Enabled}}, err
+		mapped, err := codeDestinationID("budget", project, entry.ID)
+		if err != nil {
+			return resolvedCodeResource[access.CodeBudgetInput]{}, err
+		}
+		candidates, err := codeMappedCandidates(q.Query(ctx, `SELECT id::text,project_id::text,(route_id IS NOT DISTINCT FROM $2::uuid AND api_key_id IS NOT DISTINCT FROM $3::uuid),(route_id IS NOT DISTINCT FROM $2::uuid AND api_key_id IS NOT DISTINCT FROM $3::uuid AND (daily_tokens IS NOT NULL)=$4 AND (monthly_tokens IS NOT NULL)=$5) FROM olp.code_token_budgets WHERE id=$6 OR id=$7 OR (project_id=$1 AND route_id IS NOT DISTINCT FROM $2::uuid AND api_key_id IS NOT DISTINCT FROM $3::uuid AND (daily_tokens IS NOT NULL)=$4 AND (monthly_tokens IS NOT NULL)=$5)`, project, route, key, entry.DailyTokens != nil, entry.MonthlyTokens != nil, entry.ID, mapped))
+		if err != nil {
+			return resolvedCodeResource[access.CodeBudgetInput]{}, err
+		}
+		unique := !slices.ContainsFunc(code.Budgets, func(other CodeBudgetEntry) bool {
+			return other.ID != entry.ID && strings.EqualFold(other.Project, entry.Project) && codePointer(codeOptionalRef(other.Route, routeIDs)) == codePointer(route) && codeBoundValue(other.APIKeyRef, bindings.APIKeys) == codePointer(key) && (other.DailyTokens != nil) == (entry.DailyTokens != nil) && (other.MonthlyTokens != nil) == (entry.MonthlyTokens != nil)
+		})
+		id, exists, err := codeMappedIdentity(project, entry.ID, mapped, unique, candidates)
+		return resolvedCodeResource[access.CodeBudgetInput]{Ref: entry.ID, ID: id, Existing: exists, Input: access.CodeBudgetInput{ProjectID: project, RouteID: route, APIKeyID: key, DailyTokens: entry.DailyTokens, MonthlyTokens: entry.MonthlyTokens, Enabled: entry.Enabled}}, err
 	})
 	if err != nil {
 		return nil, err
@@ -242,10 +267,10 @@ func resolveCodePolicy(policy CodeRoutePolicy, pools, accounts map[string]string
 		}
 		return &codemode.ResearchTools{AccountID: accounts[policy.Tools.AccountID], Services: policy.Tools.Services}
 	}()
-	return CodeRoutePolicy{Pool: pools[policy.Pool], Models: policy.Models, Enabled: policy.Enabled, ModelPools: policy.ModelPools, InitialRecoveryAttempts: policy.InitialRecoveryAttempts, ModelRewriting: policy.ModelRewriting, Aliases: policy.Aliases, MessagesToCodex: policy.MessagesToCodex, Tools: tools, MaxBodyBytes: policy.MaxBodyBytes}
+	return CodeRoutePolicy{PaidParticipation: policy.PaidParticipation, PaidTargets: policy.PaidTargets, Pool: pools[policy.Pool], Models: policy.Models, Enabled: policy.Enabled, ModelPools: policy.ModelPools, InitialRecoveryAttempts: policy.InitialRecoveryAttempts, ModelRewriting: policy.ModelRewriting, Aliases: policy.Aliases, MessagesToCodex: policy.MessagesToCodex, Tools: tools, MaxBodyBytes: policy.MaxBodyBytes}
 }
 
-func resolveCodePublication(ctx context.Context, q access.Queryer, publication *CodePublication, pools, accounts map[string]string, project string) (*CodePublication, error) {
+func resolveCodePublication(ctx context.Context, q access.Queryer, publication *CodePublication, pools, accounts map[string]string, project string, bindings CodeBindings) (*CodePublication, error) {
 	if publication == nil {
 		return nil, nil
 	}
@@ -264,25 +289,27 @@ func resolveCodePublication(ctx context.Context, q access.Queryer, publication *
 		if cfg.Kind != current.Kind || cfg.AuthMode != current.AuthMode || cfg.ProfileID != current.ProfileID {
 			return connection{}, access.Invalid("code.routes.published.connections", "Frozen connections must retain the destination provider's kind, authentication and profile.")
 		}
-		if entry.NetworkCredentialRef != nil {
-			if *entry.NetworkCredentialRef != networkRef(name) || cfg.Options.Network == nil {
-				return connection{}, access.Invalid("code.routes.published.connections", "Use the named provider network credential reference.")
-			}
-			if current.Options.Network == nil || current.Options.Network.CredentialID == "" {
-				return connection{}, access.Invalid("code.routes.published.connections", "Bind the destination provider network credential first.")
-			}
-			network := *cfg.Options.Network
-			network.CredentialID = current.Options.Network.CredentialID
-			options := cfg.Options
-			options.Network = &network
-			cfg.Options = options
+		bound, err := codeNetworkConfiguration(cfg, current, entry.NetworkCredentialRef, name)
+		if err != nil {
+			return connection{}, err
 		}
-		return connection{id, cfg}, nil
+		return connection{id, bound}, nil
 	})
 	if err != nil {
 		return nil, err
 	}
-	return &CodePublication{Policy: resolveCodePolicy(publication.Policy, pools, accounts), Connections: maps.Collect(func(yield func(string, CodeConnectionEntry) bool) {
+	policy, err := resolveCodePaidPolicy(ctx, q, resolveCodePolicy(publication.Policy, pools, accounts), project, bindings)
+	if err != nil {
+		return nil, err
+	}
+	paid, err := resolveCodePaid(ctx, q, publication, policy, project, bindings)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := routes.CodePaidProviders(ctx, q, codemode.Route{Models: policy.Models, PaidParticipation: policy.PaidParticipation, PaidTargets: policy.input(project, "", policy.Pool).PaidTargets, ProjectID: project}); err != nil {
+		return nil, err
+	}
+	return &CodePublication{Policy: policy, paidResolved: paid, Connections: maps.Collect(func(yield func(string, CodeConnectionEntry) bool) {
 		for _, c := range connections {
 			if !yield(c.ID, CodeConnectionEntry{Configuration: c.Configuration}) {
 				return
@@ -331,4 +358,11 @@ func codePointer(value *string) string {
 		return ""
 	}
 	return *value
+}
+
+func codeBoundValue(ref *string, bindings map[string]string) string {
+	if ref == nil {
+		return ""
+	}
+	return bindings[*ref]
 }

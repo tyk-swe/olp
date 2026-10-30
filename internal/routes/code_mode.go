@@ -108,7 +108,7 @@ func (s *Server) publishCodeRoute(r *http.Request, _ access.Principal) (access.R
 	if err = json.Unmarshal(document, &route); err != nil {
 		return access.Reply{}, err
 	}
-	published, err := SaveCodePublication(r.Context(), tx, p, id, route, nil)
+	published, err := SaveCodePublication(r.Context(), tx, p, id, route, nil, nil)
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -269,7 +269,7 @@ func (in CodeRouteInput) Validate() error {
 	return nil
 }
 
-func SaveCodePublication(ctx context.Context, tx pgx.Tx, p access.Principal, id string, in codemode.Route, frozen map[string]providers.Configuration) (*codeRoute, error) {
+func SaveCodePublication(ctx context.Context, tx pgx.Tx, p access.Principal, id string, in codemode.Route, frozen map[string]providers.Configuration, frozenPaid map[string]routing.Provider) (*codeRoute, error) {
 	if err := p.Project(&in.ProjectID, access.Change); err != nil {
 		return nil, err
 	}
@@ -305,9 +305,31 @@ func SaveCodePublication(ctx context.Context, tx pgx.Tx, p access.Principal, id 
 			}
 		}
 	}
-	paidConnections, paidErr := codePaidPublication(ctx, tx, route)
+	paidProviders, paidErr := CodePaidProviders(ctx, tx, route)
 	if paidErr != nil {
 		return nil, paidErr
+	}
+	if frozenPaid != nil {
+		if len(frozenPaid) != len(paidProviders) {
+			return nil, access.Invalid("paid_connections", "Frozen metered providers must match the published paid targets.")
+		}
+		for id := range frozenPaid {
+			if _, ok := paidProviders[id]; !ok {
+				return nil, access.Invalid("paid_connections", "Frozen metered providers must match the published paid targets.")
+			}
+		}
+		if err := ValidateCodePaidProviders(route, frozenPaid); err != nil {
+			return nil, err
+		}
+	}
+	paidConnections, err := json.Marshal(func() map[string]routing.Provider {
+		if frozenPaid != nil {
+			return frozenPaid
+		}
+		return paidProviders
+	}())
+	if err != nil {
+		return nil, err
 	}
 	connections, adapters, err := codePublication(ctx, tx, route.PoolID)
 	if err != nil {
@@ -354,9 +376,9 @@ func SaveCodePublication(ctx context.Context, tx pgx.Tx, p access.Principal, id 
 	return &codeRoute{Route: route, Adapters: adapters}, nil
 }
 
-func codePaidPublication(ctx context.Context, tx pgx.Tx, route codemode.Route) ([]byte, error) {
+func CodePaidProviders(ctx context.Context, tx access.Queryer, route codemode.Route) (map[string]routing.Provider, error) {
 	if len(route.PaidTargets) == 0 {
-		return json.Marshal(map[string]routing.Provider{})
+		return map[string]routing.Provider{}, nil
 	}
 	ids := slices.Collect(func(yield func(string) bool) {
 		for _, target := range route.PaidTargets {
@@ -386,23 +408,29 @@ func codePaidPublication(ctx context.Context, tx pgx.Tx, route codemode.Route) (
 			}
 		}
 	})
+	if err := ValidateCodePaidProviders(route, published); err != nil {
+		return nil, err
+	}
+	return published, nil
+}
+func ValidateCodePaidProviders(route codemode.Route, published map[string]routing.Provider) error {
 	for model, target := range route.PaidTargets {
 		provider, exists := published[target.ProviderID]
 		if !exists {
-			return nil, access.Invalid("paid_targets", "Choose a published metered provider in this project.")
+			return access.Invalid("paid_targets", "Choose a published metered provider in this project.")
 		}
 		if _, ok := codeadapter.ForConnection(provider.Kind, provider.AuthMode, provider.ProfileID); ok {
-			return nil, access.Invalid("paid_targets", "Coding subscriptions belong in the subscription pool.")
+			return access.Invalid("paid_targets", "Coding subscriptions belong in the subscription pool.")
 		}
 		if _, ok := routing.CodePaidProtocol(provider, model); !ok {
-			return nil, access.Invalid("paid_targets", "Use a native metered API profile without request defaults, model overrides, plugins or caller credentials.")
+			return access.Invalid("paid_targets", "Use a native metered API profile without request defaults, model overrides, plugins or caller credentials.")
 		}
 		slot := slices.IndexFunc(provider.Slots, func(slot routing.Slot) bool {
 			return slot.ID == target.SlotID && slot.Enabled && slot.CredentialID != nil && slot.CredentialVersion != nil
 		})
 		if slot < 0 {
-			return nil, access.Invalid("paid_targets", "Choose an enabled credential slot from the selected provider.")
+			return access.Invalid("paid_targets", "Choose an enabled credential slot from the selected provider.")
 		}
 	}
-	return json.Marshal(published)
+	return nil
 }

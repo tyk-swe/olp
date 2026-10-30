@@ -401,7 +401,7 @@ func sortCapabilities(c []CapabilityEntry) {
 }
 
 func (d *Document) canonicalize() {
-	canonicalCode(d.Code)
+	d.Code = canonicalCode(d.Code)
 	slices.SortFunc(d.RetrievalBindings, func(a, b RetrievalBindingEntry) int { return strings.Compare(retrievalKey(a), retrievalKey(b)) })
 	slices.SortFunc(d.AgentPublications, func(a, b PublicationEntry) int { return strings.Compare(publicationKey(a), publicationKey(b)) })
 	slices.SortFunc(d.MCPServers, func(a, b MCPServerEntry) int {

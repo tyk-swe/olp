@@ -8,6 +8,7 @@ import (
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/codemode"
 	"github.com/tyk-swe/olp/internal/providers"
+	"github.com/tyk-swe/olp/internal/routing"
 )
 
 type codeChange struct {
@@ -15,7 +16,6 @@ type codeChange struct {
 	Key                string
 	ID                 string
 	Action             string
-	DraftChanged       bool
 	PublicationChanged bool
 }
 
@@ -50,25 +50,26 @@ func codeChanges(ctx context.Context, q access.Queryer, resolved *resolvedCode) 
 	}
 	routes, err := mapCodeResult(resolved.Routes, func(e resolvedCodeResource[CodeRouteEntry]) (codeChange, error) {
 		if !e.Existing {
-			return codeChange{Kind: "code_route", Key: e.Ref, ID: e.ID, Action: "create", DraftChanged: true, PublicationChanged: e.Input.Published != nil}, nil
+			return codeChange{Kind: "code_route", Key: e.Ref, ID: e.ID, Action: "create", PublicationChanged: e.Input.Published != nil}, nil
 		}
 		var draft codemode.Route
 		var published *codemode.Route
 		var connections map[string]providers.Configuration
-		if err := q.QueryRow(ctx, `SELECT x.draft,v.document,coalesce(v.connections,'{}') FROM olp.code_routes x LEFT JOIN olp.code_route_revisions v ON v.id=x.latest_revision_id WHERE x.id=$1`, e.ID).Scan(&draft, &published, &connections); err != nil {
+		var paid map[string]routing.Provider
+		if err := q.QueryRow(ctx, `SELECT x.draft,v.document,coalesce(v.connections,'{}'),coalesce(v.paid_connections,'{}') FROM olp.code_routes x LEFT JOIN olp.code_route_revisions v ON v.id=x.latest_revision_id WHERE x.id=$1`, e.ID).Scan(&draft, &published, &connections, &paid); err != nil {
 			return codeChange{}, err
 		}
 		var publication *CodePublication
 		if published != nil {
-			publication = &CodePublication{Policy: codePolicy(*published), Connections: mapCodeConnections(connections)}
+			publication = &CodePublication{Policy: codePolicy(*published), Connections: mapCodeConnections(connections), paidResolved: paid}
 		}
 		draftChanged := !codeJSONEqual(codePolicy(draft), e.Input.Draft)
-		publishedChanged := !codeJSONEqual(publication, e.Input.Published)
+		publishedChanged := !codePublicationEqual(publication, e.Input.Published)
 		action := "noop"
 		if draftChanged || publishedChanged {
 			action = "replace"
 		}
-		return codeChange{Kind: "code_route", Key: e.Ref, ID: e.ID, Action: action, DraftChanged: draftChanged, PublicationChanged: publishedChanged}, nil
+		return codeChange{Kind: "code_route", Key: e.Ref, ID: e.ID, Action: action, PublicationChanged: publishedChanged}, nil
 	})
 	if err != nil {
 		return nil, err
@@ -116,4 +117,11 @@ func mapCodeConnections(connections map[string]providers.Configuration) map[stri
 			}
 		}
 	})
+}
+
+func codePublicationEqual(left, right *CodePublication) bool {
+	if left == nil || right == nil {
+		return left == nil && right == nil
+	}
+	return codeJSONEqual(left.Policy, right.Policy) && codeJSONEqual(left.Connections, right.Connections) && codeJSONEqual(left.paidResolved, right.paidResolved)
 }

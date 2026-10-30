@@ -8002,7 +8002,7 @@ type ConfigurationCapabilityEntry struct {
 // ConfigurationCapabilityEntryMode defines model for ConfigurationCapabilityEntry.Mode.
 type ConfigurationCapabilityEntryMode string
 
-// ConfigurationCode Resource IDs are artifact-local references. Accounts resolve through explicitly bound current destination enrollments, pools through project/name/kind/owner, routes through unique slug, and budgets through project/route/key and configured daily/monthly dimensions. Ambiguous identities are refused. Source credentials, health, usage windows, conversation bindings and historical revisions stay local. Destination projects and providers must be prepared and enrolled before planning. Rename globally unique slugs for same-installation cross-project promotion.
+// ConfigurationCode Resource IDs are artifact-local references. Accounts resolve through explicitly bound current destination enrollments. Pools and budgets reuse validated same-project artifact IDs or standard UUIDv5 destination IDs derived from project, resource kind and artifact reference, with unique natural matches as fallback. This preserves duplicate names and exact duplicate budgets without a registry. Routes resolve through unique slug. Unrelated ambiguous identities are refused. Source credentials, health, usage windows, conversation bindings and historical revisions stay local. Destination projects and providers must be prepared and enrolled before planning. Rename globally unique slugs for same-installation cross-project promotion.
 type ConfigurationCode struct {
 	Accounts nullable.Nullable[[]ConfigurationCodeAccount] `json:"accounts,omitempty"`
 	Budgets  nullable.Nullable[[]ConfigurationCodeBudget]  `json:"budgets,omitempty"`
@@ -8045,6 +8045,19 @@ type ConfigurationCodeConnection struct {
 	NetworkCredentialRef *string               `json:"network_credential_ref,omitempty"`
 }
 
+// ConfigurationCodePaidConnection defines model for ConfigurationCodePaidConnection.
+type ConfigurationCodePaidConnection struct {
+	Provider    ConfigurationProviderEntry `json:"provider"`
+	SlotKeyRefs map[string][]string        `json:"slot_key_refs"`
+}
+
+// ConfigurationCodePaidTarget defines model for ConfigurationCodePaidTarget.
+type ConfigurationCodePaidTarget struct {
+	CredentialRef string `json:"credential_ref"`
+	Provider      string `json:"provider"`
+	Slot          string `json:"slot"`
+}
+
 // ConfigurationCodePool defines model for ConfigurationCodePool.
 type ConfigurationCodePool struct {
 	Accounts   map[string]int              `json:"accounts"`
@@ -8061,8 +8074,9 @@ type ConfigurationCodePoolKind string
 
 // ConfigurationCodePublication defines model for ConfigurationCodePublication.
 type ConfigurationCodePublication struct {
-	Connections map[string]ConfigurationCodeConnection `json:"connections"`
-	Policy      ConfigurationCodeRoutePolicy           `json:"policy"`
+	Connections     map[string]ConfigurationCodeConnection      `json:"connections"`
+	PaidConnections *map[string]ConfigurationCodePaidConnection `json:"paid_connections,omitempty"`
+	Policy          ConfigurationCodeRoutePolicy                `json:"policy"`
 }
 
 // ConfigurationCodeRoute defines model for ConfigurationCodeRoute.
@@ -8093,9 +8107,11 @@ type ConfigurationCodeRoutePolicy struct {
 	ModelPools *map[string][]string `json:"model_pools,omitempty"`
 
 	// ModelRewriting Explicitly enable model identifier rewriting through exact aliases or configured model_pools. Disabled by default. This policy does not rewrite client identity or prompts.
-	ModelRewriting *bool              `json:"model_rewriting,omitempty"`
-	Models         []string           `json:"models"`
-	Pool           openapi_types.UUID `json:"pool"`
+	ModelRewriting    *bool                                   `json:"model_rewriting,omitempty"`
+	Models            []string                                `json:"models"`
+	PaidParticipation *bool                                   `json:"paid_participation,omitempty"`
+	PaidTargets       *map[string]ConfigurationCodePaidTarget `json:"paid_targets,omitempty"`
+	Pool              openapi_types.UUID                      `json:"pool"`
 
 	// Tools Research subscription binding, frozen at publication. Requires an eligible Z.ai global account in the same project and pool; independent of inference models. Null disables research.
 	Tools nullable.Nullable[CodeResearchTools] `json:"tools,omitempty"`
@@ -8109,7 +8125,7 @@ type ConfigurationDocument struct {
 	// BudgetTimeZone Requested IANA budget time zone. Export includes it. Omission/null preserves the destination. Changes require settings permission and activate independently at the next existing day/week/month boundary; current spend and calendar history remain intact.
 	BudgetTimeZone nullable.Nullable[string] `json:"budget_time_zone,omitempty"`
 
-	// Code Resource IDs are artifact-local references. Accounts resolve through explicitly bound current destination enrollments, pools through project/name/kind/owner, routes through unique slug, and budgets through project/route/key and configured daily/monthly dimensions. Ambiguous identities are refused. Source credentials, health, usage windows, conversation bindings and historical revisions stay local. Destination projects and providers must be prepared and enrolled before planning. Rename globally unique slugs for same-installation cross-project promotion.
+	// Code Resource IDs are artifact-local references. Accounts resolve through explicitly bound current destination enrollments. Pools and budgets reuse validated same-project artifact IDs or standard UUIDv5 destination IDs derived from project, resource kind and artifact reference, with unique natural matches as fallback. This preserves duplicate names and exact duplicate budgets without a registry. Routes resolve through unique slug. Unrelated ambiguous identities are refused. Source credentials, health, usage windows, conversation bindings and historical revisions stay local. Destination projects and providers must be prepared and enrolled before planning. Rename globally unique slugs for same-installation cross-project promotion.
 	Code *ConfigurationCode `json:"code,omitempty"`
 
 	// ExportedAt Informational only; excluded from the artifact digest

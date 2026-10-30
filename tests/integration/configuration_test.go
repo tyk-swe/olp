@@ -4,6 +4,7 @@ package integration_test
 
 import (
 	"encoding/json"
+	"fmt"
 	"github.com/tyk-swe/olp/internal/codemode"
 	"github.com/tyk-swe/olp/internal/codeplans"
 	"github.com/tyk-swe/olp/internal/configuration"
@@ -629,4 +630,173 @@ func TestCodeConfigurationCrossProjectRoundTrip(t *testing.T) {
 	}) {
 		t.Fatal("restored route did not use bound destination enrollment and published alias")
 	}
+}
+
+func TestCodeConfigurationPaidFrozenPolicyRoundTrip(t *testing.T) {
+	f, paid, slot := newPaidCodeFixturePolicy(t, true)
+	exported := f.h.want(f.owner, "GET", "/api/v1/configuration/export", nil, nil, 200)
+	source := codePublicDecode[configuration.Document](t, exported["document"])
+	sourceRoute := source.Code.Routes[0]
+	frozen := sourceRoute.Published.PaidConnections[paid.Name]
+	if len(frozen.SlotKeyRefs[slot.Name]) != 1 || frozen.Provider.Slots[0].Weight != slot.Weight {
+		t.Fatal("export lost frozen slot policy")
+	}
+	currentRevision := access.NewID()
+	f.exec(t, `INSERT INTO olp.provider_revisions(id,provider_id,revision,name,configuration,models,slots,credential_version,source_etag,activated_by) SELECT $2,provider_id,revision+1,name,configuration,jsonb_set(models,'{0,capabilities}',(models->0->'capabilities')||'[{"operation":"generation","surface":"openai","mode":"streaming","source":"certified"}]'::jsonb),jsonb_set(jsonb_set(slots,'{0,weight}','7'),'{0,requests_per_minute}','23'),credential_version,source_etag,activated_by FROM olp.provider_revisions WHERE id=$1`, paid.RevisionID, currentRevision)
+	f.exec(t, `UPDATE olp.providers SET active_revision_id=$2,active_revision=active_revision+1 WHERE id=$1`, paid.ID, currentRevision)
+	route := configuration.CodeRouteEntry{ID: sourceRoute.ID, Project: sourceRoute.Project, Slug: "portable-paid-copy", Draft: sourceRoute.Draft, Published: sourceRoute.Published}
+	document := configuration.Document{APIVersion: configuration.APIVersion, Code: &configuration.CodeConfiguration{Accounts: source.Code.Accounts, Pools: source.Code.Pools, Routes: []configuration.CodeRouteEntry{route}, Budgets: source.Code.Budgets}}
+	credentials := map[string]string{source.Code.Accounts[0].CredentialRef: f.credential}
+	for _, snapshot := range route.Published.PaidConnections {
+		for _, portableSlot := range snapshot.Provider.Slots {
+			if portableSlot.CredentialRef != nil {
+				credentials[*portableSlot.CredentialRef] = *slot.CredentialID
+			}
+		}
+	}
+	bindings := configuration.CodeBindings{Credentials: credentials, APIKeys: map[string]string{source.Code.Pools[0].APIKeyRefs[0]: f.key, frozen.SlotKeyRefs[slot.Name][0]: f.key}}
+	request := map[string]any{"document": document, "code_bindings": bindings}
+	plan := f.h.want(f.owner, "POST", "/api/v1/configuration/plan", request, nil, 200)
+	if len(plan["conflicts"].([]any))+len(plan["blockers"].([]any)) != 0 {
+		t.Fatalf("paid plan was blocked %v", plan)
+	}
+	f.h.want(f.owner, "POST", "/api/v1/configuration/apply", request, idem("paid-portability"), 200)
+	again := f.h.want(f.owner, "POST", "/api/v1/configuration/plan", request, nil, 200)
+	for _, action := range again["actions"].([]any) {
+		item := action.(map[string]any)
+		if strings.HasPrefix(item["kind"].(string), "code_") && item["action"] != "noop" {
+			t.Fatalf("paid roundtrip did not converge %v", again)
+		}
+	}
+	result := codePublicDecode[configuration.Document](t, f.h.want(f.owner, "GET", "/api/v1/configuration/export", nil, nil, 200)["document"])
+	copied := slices.IndexFunc(result.Code.Routes, func(entry configuration.CodeRouteEntry) bool { return entry.Slug == route.Slug })
+	if copied < 0 {
+		t.Fatal("paid route was not copied")
+	}
+	actual := result.Code.Routes[copied].Published.PaidConnections[paid.Name]
+	if actual.Provider.Slots[0].Weight != frozen.Provider.Slots[0].Weight || actual.Provider.Slots[0].Limits.RequestsPerMinute != frozen.Provider.Slots[0].Limits.RequestsPerMinute || len(actual.Provider.Models[0].Capabilities) != len(frozen.Provider.Models[0].Capabilities) || len(actual.SlotKeyRefs[slot.Name]) != 1 {
+		t.Fatalf("current paid provider replaced frozen policy %+v", actual)
+	}
+	if !result.Code.Routes[copied].Published.Policy.PaidParticipation {
+		t.Fatal("paid authorization was lost")
+	}
+}
+
+func TestCodeConfigurationDuplicatePoolsAndBudgetsRoundTrip(t *testing.T) {
+	h := newAccessHarness(t)
+	owner := h.owner()
+	sourceProject := createProject(h, owner, "Duplicate source")
+	createProject(h, owner, "Duplicate destination")
+	for index, cap := range []int64{1000, 2000, 1000} {
+		h.want(owner, "POST", "/api/v1/code/pools", access.CodePoolInput{ProjectID: sourceProject, Name: "Same pool name", Kind: "shared", AccountIDs: []string{}, APIKeyIDs: []string{}}, idem(fmt.Sprintf("duplicate-pool-%d", index)), 201)
+		h.want(owner, "POST", "/api/v1/code/budgets", access.CodeBudgetInput{ProjectID: sourceProject, DailyTokens: &cap, Enabled: true}, idem(fmt.Sprintf("duplicate-budget-%d", index)), 201)
+	}
+	exported := codePublicDecode[configuration.Document](t, h.want(owner, "GET", "/api/v1/configuration/export", nil, nil, 200)["document"])
+	pools := slices.Collect(func(yield func(configuration.CodePoolEntry) bool) {
+		for _, pool := range exported.Code.Pools {
+			pool.Project = "Duplicate destination"
+			if !yield(pool) {
+				return
+			}
+		}
+	})
+	budgets := slices.Collect(func(yield func(configuration.CodeBudgetEntry) bool) {
+		for _, budget := range exported.Code.Budgets {
+			budget.Project = "Duplicate destination"
+			if !yield(budget) {
+				return
+			}
+		}
+	})
+	document := configuration.Document{APIVersion: configuration.APIVersion, Code: &configuration.CodeConfiguration{Pools: pools, Budgets: budgets}}
+	request := map[string]any{"document": document}
+	assertNoops := func(request map[string]any) {
+		t.Helper()
+		plan := h.want(owner, "POST", "/api/v1/configuration/plan", request, nil, 200)
+		if len(plan["conflicts"].([]any))+len(plan["blockers"].([]any)) != 0 {
+			t.Fatalf("duplicate policy was blocked %v", plan)
+		}
+		for _, entry := range plan["actions"].([]any) {
+			action := entry.(map[string]any)
+			if strings.HasPrefix(action["kind"].(string), "code_") && action["action"] != "noop" {
+				t.Fatalf("duplicate configuration did not converge %v", plan)
+			}
+		}
+	}
+	h.want(owner, "POST", "/api/v1/configuration/plan", request, nil, 200)
+	h.want(owner, "POST", "/api/v1/configuration/apply", request, idem("duplicate-apply"), 200)
+	assertNoops(request)
+	destinationCode := func() *configuration.CodeConfiguration {
+		t.Helper()
+		result := codePublicDecode[configuration.Document](t, h.want(owner, "GET", "/api/v1/configuration/export", nil, nil, 200)["document"])
+		return &configuration.CodeConfiguration{Pools: slices.Collect(func(yield func(configuration.CodePoolEntry) bool) {
+			for _, pool := range result.Code.Pools {
+				if pool.Project == "Duplicate destination" && !yield(pool) {
+					return
+				}
+			}
+		}), Budgets: slices.Collect(func(yield func(configuration.CodeBudgetEntry) bool) {
+			for _, budget := range result.Code.Budgets {
+				if budget.Project == "Duplicate destination" && !yield(budget) {
+					return
+				}
+			}
+		})}
+	}
+	initial := destinationCode()
+	if len(initial.Pools) != 3 || len(initial.Budgets) != 3 {
+		t.Fatalf("duplicate policies were collapsed %+v", initial)
+	}
+	for _, pool := range initial.Pools {
+		if slices.ContainsFunc(exported.Code.Pools, func(source configuration.CodePoolEntry) bool { return source.ID == pool.ID }) {
+			t.Fatal("destination pool collided with source")
+		}
+	}
+	for _, budget := range initial.Budgets {
+		if slices.ContainsFunc(exported.Code.Budgets, func(source configuration.CodeBudgetEntry) bool { return source.ID == budget.ID }) {
+			t.Fatal("destination budget collided with source")
+		}
+	}
+	reexport := map[string]any{"document": configuration.Document{APIVersion: configuration.APIVersion, Code: initial}}
+	assertNoops(reexport)
+	h.want(owner, "POST", "/api/v1/configuration/apply", reexport, idem("duplicate-reexport"), 200)
+	document.Code.Pools[0].Name = "Independently edited pool"
+	document.Code.Budgets[0].DailyTokens = new(int64(3500))
+	request["document"] = document
+	h.want(owner, "POST", "/api/v1/configuration/apply", request, idem("duplicate-edit"), 200)
+	assertNoops(request)
+	edited := destinationCode()
+	if len(edited.Pools) != 3 || len(edited.Budgets) != 3 || !slices.ContainsFunc(edited.Pools, func(pool configuration.CodePoolEntry) bool { return pool.Name == document.Code.Pools[0].Name }) {
+		t.Fatalf("editing a duplicate replaced another resource %+v", edited)
+	}
+	expectedCaps := slices.Sorted(func(yield func(int64) bool) {
+		for _, budget := range document.Code.Budgets {
+			if !yield(*budget.DailyTokens) {
+				return
+			}
+		}
+	})
+	actualCaps := slices.Sorted(func(yield func(int64) bool) {
+		for _, budget := range edited.Budgets {
+			if !yield(*budget.DailyTokens) {
+				return
+			}
+		}
+	})
+	if !slices.Equal(expectedCaps, actualCaps) {
+		t.Fatalf("budget edits affected another duplicate %v %v", expectedCaps, actualCaps)
+	}
+	ambiguousProject := createProject(h, owner, "Ambiguous destination")
+	for index := range 2 {
+		h.want(owner, "POST", "/api/v1/code/pools", access.CodePoolInput{ProjectID: ambiguousProject, Name: "Same pool name", Kind: "shared", AccountIDs: []string{}, APIKeyIDs: []string{}}, idem(fmt.Sprintf("ambiguous-pool-%d", index)), 201)
+	}
+	for index := range 2 {
+		h.want(owner, "POST", "/api/v1/code/budgets", access.CodeBudgetInput{ProjectID: ambiguousProject, DailyTokens: new(int64(1000)), Enabled: true}, idem(fmt.Sprintf("ambiguous-budget-%d", index)), 201)
+	}
+	unrelatedBudget := exported.Code.Budgets[0]
+	unrelatedBudget.Project = "Ambiguous destination"
+	h.want(owner, "POST", "/api/v1/configuration/plan", map[string]any{"document": configuration.Document{APIVersion: configuration.APIVersion, Code: &configuration.CodeConfiguration{Budgets: []configuration.CodeBudgetEntry{unrelatedBudget}}}}, nil, 400)
+	unrelated := exported.Code.Pools[0]
+	unrelated.Project = "Ambiguous destination"
+	h.want(owner, "POST", "/api/v1/configuration/plan", map[string]any{"document": configuration.Document{APIVersion: configuration.APIVersion, Code: &configuration.CodeConfiguration{Pools: []configuration.CodePoolEntry{unrelated}}}}, nil, 400)
 }

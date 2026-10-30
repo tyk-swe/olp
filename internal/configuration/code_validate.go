@@ -55,13 +55,16 @@ func (code CodeConfiguration) Validate() error {
 		if err := code.validatePolicy(e, e.Draft); err != nil {
 			return err
 		}
+		if err := validateCodePaidPublication(e); err != nil {
+			return err
+		}
 		if e.Published == nil {
 			continue
 		}
 		if err := code.validatePolicy(e, e.Published.Policy); err != nil {
 			return err
 		}
-		if len(e.Published.Connections) == 0 {
+		if len(e.Published.Connections) == 0 && len(e.Published.Policy.PaidTargets) == 0 {
 			return access.Invalid("code.routes.published.connections", "Published routes require frozen provider connections.")
 		}
 		pool := slices.IndexFunc(code.Pools, func(p CodePoolEntry) bool { return p.ID == e.Published.Policy.Pool })
@@ -100,7 +103,19 @@ func (code CodeConfiguration) validatePolicy(route CodeRouteEntry, policy CodeRo
 	if policy.Tools != nil && !codeRefProject(policy.Tools.AccountID, route.Project, code.Accounts, func(a CodeAccountEntry) (string, string) { return a.ID, a.Project }) {
 		return access.Invalid("code.routes.tools", "Research accounts must resolve within the route project.")
 	}
-	return policy.input(route.ID, route.Slug, policy.Pool).Validate()
+	for model, target := range policy.PaidTargets {
+		if !slices.Contains(policy.Models, model) || access.ValidText("code", target.Provider, 100) != nil || access.ValidText("code", target.Slot, 100) != nil || access.ValidText("code", target.CredentialRef, 300) != nil {
+			return access.Invalid("code.paid_targets", "Use declared models and named provider, slot and explicit credential references.")
+		}
+	}
+	targets := maps.Collect(func(yield func(string, CodePaidTarget) bool) {
+		for model := range policy.PaidTargets {
+			if !yield(model, CodePaidTarget{Provider: route.ID, Slot: route.ID}) {
+				return
+			}
+		}
+	})
+	return codePolicyPaid(policy, targets).input(route.ID, route.Slug, policy.Pool).Validate()
 }
 func placeholderOwner(ref *string, id string) *string {
 	if ref == nil {
@@ -116,7 +131,7 @@ func (bindings CodeBindings) validate(code *CodeConfiguration) error {
 		}
 		return nil
 	}
-	credentials := mapCode(code.Accounts, func(a CodeAccountEntry) string { return a.CredentialRef })
+	credentials := slices.Concat(mapCode(code.Accounts, func(a CodeAccountEntry) string { return a.CredentialRef }), codePaidCredentialRefs(code))
 	users := slices.Collect(func(yield func(string) bool) {
 		for _, p := range code.Pools {
 			if p.OwnerRef != nil && !yield(*p.OwnerRef) {
@@ -124,7 +139,7 @@ func (bindings CodeBindings) validate(code *CodeConfiguration) error {
 			}
 		}
 	})
-	keys := slices.Concat(slices.Collect(func(yield func(string) bool) {
+	keys := slices.Concat(codePaidKeyRefs(code), slices.Collect(func(yield func(string) bool) {
 		for _, p := range code.Pools {
 			for _, ref := range p.APIKeyRefs {
 				if !yield(ref) {
