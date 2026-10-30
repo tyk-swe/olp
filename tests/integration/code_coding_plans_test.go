@@ -340,19 +340,26 @@ func codeDiscoveryCatalog(t *testing.T, f *codingPlanFixture, status int) []code
 func TestCodeModelDiscoveryTracksLiveAccountEligibility(t *testing.T) {
 	f := newCodingPlanFixture(t, "zai-coding", codeplans.ZAIProfile, "controlled-key-a-0123456789abcdef", "controlled-key-b-0123456789abcdef", "controlled-key-c-0123456789abcdef")
 	models := []string{"private-code-a", "private-code-b", "private-code-c"}
-	accounts := slices.Collect(func(yield func(contract.CodeAccount) bool) {
+	accountResponses := slices.Collect(func(yield func(map[string]any) bool) {
 		for i, response := range f.accounts {
 			account := codeDiscoveryResponse[contract.CodeAccount](t, response)
-			updated := codeDiscoveryResponse[contract.CodeAccount](t, f.h.want(f.owner, "PUT", "/api/v1/code/accounts/"+account.Id.String(), codeDiscoveryAccountInput(account, true, models[i:i+1]), map[string]string{"If-Match": account.Etag.String()}, 200))
+			updated := f.h.want(f.owner, "PUT", "/api/v1/code/accounts/"+account.Id.String(), codeDiscoveryAccountInput(account, true, models[i:i+1]), etagHeader(response), 200)
 			if !yield(updated) {
+				return
+			}
+		}
+	})
+	accounts := slices.Collect(func(yield func(contract.CodeAccount) bool) {
+		for _, response := range accountResponses {
+			if !yield(codeDiscoveryResponse[contract.CodeAccount](t, response)) {
 				return
 			}
 		}
 	})
 	route := codeDiscoveryResponse[contract.CodeRoute](t, f.route)
 	routeID := route.Id.String()
-	draft := codeDiscoveryResponse[contract.CodeRoute](t, f.h.want(f.owner, "PUT", "/api/v1/code/routes/"+routeID, contract.CodeRouteWrite{ProjectId: route.ProjectId, Slug: route.Slug, PoolId: route.PoolId, Models: models, Enabled: true}, map[string]string{"If-Match": route.Etag.String()}, 200))
-	f.h.want(f.owner, "POST", "/api/v1/code/routes/"+routeID+"/publish", nil, map[string]string{"If-Match": draft.Etag.String(), "Idempotency-Key": "discovery-publish"}, 200)
+	draft := f.h.want(f.owner, "PUT", "/api/v1/code/routes/"+routeID, contract.CodeRouteWrite{ProjectId: route.ProjectId, Slug: route.Slug, PoolId: route.PoolId, Models: models, Enabled: true}, etagHeader(f.route), 200)
+	f.h.want(f.owner, "POST", "/api/v1/code/routes/"+routeID+"/publish", nil, withMatch(draft, idem("discovery-publish")), 200)
 	f.h.refresh()
 	assertModels := func(want []string) {
 		t.Helper()
@@ -377,15 +384,16 @@ func TestCodeModelDiscoveryTracksLiveAccountEligibility(t *testing.T) {
 		return contract.CodePoolWrite{ProjectId: pool.ProjectId, Name: pool.Name, Kind: contract.CodePoolWriteKind(pool.Kind), OwnerUserId: pool.OwnerUserId, AccountIds: []uuid.UUID{accounts[0].Id, accounts[1].Id}, ApiKeyIds: keyIDs}
 	}
 	assertModels(models)
-	narrowedPool := codeDiscoveryResponse[contract.CodePool](t, f.h.want(f.owner, "PUT", "/api/v1/code/pools/"+pool.Id.String(), poolInput(pool.ApiKeyIds), map[string]string{"If-Match": pool.Etag.String()}, 200))
+	narrowedPool := f.h.want(f.owner, "PUT", "/api/v1/code/pools/"+pool.Id.String(), poolInput(pool.ApiKeyIds), etagHeader(f.pool), 200)
 	assertModels(models[:2])
-	disabled := codeDiscoveryResponse[contract.CodeAccount](t, f.h.want(f.owner, "PUT", "/api/v1/code/accounts/"+accounts[1].Id.String(), codeDiscoveryAccountInput(accounts[1], false, models[1:2]), map[string]string{"If-Match": accounts[1].Etag.String()}, 200))
+	disabledResponse := f.h.want(f.owner, "PUT", "/api/v1/code/accounts/"+accounts[1].Id.String(), codeDiscoveryAccountInput(accounts[1], false, models[1:2]), etagHeader(accountResponses[1]), 200)
+	disabled := codeDiscoveryResponse[contract.CodeAccount](t, disabledResponse)
 	assertModels(models[:1])
-	f.h.want(f.owner, "PUT", "/api/v1/code/accounts/"+disabled.Id.String(), codeDiscoveryAccountInput(disabled, true, models[1:2]), map[string]string{"If-Match": disabled.Etag.String()}, 200)
+	f.h.want(f.owner, "PUT", "/api/v1/code/accounts/"+disabled.Id.String(), codeDiscoveryAccountInput(disabled, true, models[1:2]), etagHeader(disabledResponse), 200)
 	assertModels(models[:2])
 	providerPath := "/api/v1/providers/" + disabled.ProviderId.String()
-	provider := codeDiscoveryResponse[contract.ProviderDetailResponse](t, f.h.want(f.owner, "GET", providerPath, nil, nil, 200))
-	f.h.want(f.owner, "POST", providerPath+"/credentials/"+disabled.CredentialId.String()+"/revoke", nil, map[string]string{"If-Match": provider.Etag.String(), "Idempotency-Key": "discovery-credential-revoke"}, 200)
+	provider := f.h.want(f.owner, "GET", providerPath, nil, nil, 200)
+	f.h.want(f.owner, "POST", providerPath+"/credentials/"+disabled.CredentialId.String()+"/revoke", nil, withMatch(provider, idem("discovery-credential-revoke")), 200)
 	assertModels(models[:1])
 	f.peer.limitAllowance()
 	response, body := f.post(t, "v1/chat/completions", http.Header{"Authorization": {"Bearer " + f.key}, "X-Opencode-Session-Id": {"catalog-quota"}}, `{"model":"private-code-a","stream":true,"messages":[{"role":"user","content":"controlled"}]}`)
@@ -397,12 +405,12 @@ func TestCodeModelDiscoveryTracksLiveAccountEligibility(t *testing.T) {
 		t.Fatalf("unavailable accounts remain discoverable %+v", data)
 	}
 	f.h.want(f.owner, "GET", "/api/v1/code/routes/"+routeID+"/client-config?gateway_url=https%3A%2F%2Fgateway.example&client=opencode", nil, nil, 409)
-	unlinkedPool := codeDiscoveryResponse[contract.CodePool](t, f.h.want(f.owner, "PUT", "/api/v1/code/pools/"+pool.Id.String(), poolInput([]uuid.UUID{}), map[string]string{"If-Match": narrowedPool.Etag.String()}, 200))
+	unlinkedPool := f.h.want(f.owner, "PUT", "/api/v1/code/pools/"+pool.Id.String(), poolInput([]uuid.UUID{}), etagHeader(narrowedPool), 200)
 	codeDiscoveryCatalog(t, f, 403)
-	f.h.want(f.owner, "PUT", "/api/v1/code/pools/"+pool.Id.String(), poolInput(pool.ApiKeyIds), map[string]string{"If-Match": unlinkedPool.Etag.String()}, 200)
+	f.h.want(f.owner, "PUT", "/api/v1/code/pools/"+pool.Id.String(), poolInput(pool.ApiKeyIds), etagHeader(unlinkedPool), 200)
 	path := "/api/v1/api-keys/" + f.keyID
-	key := codeDiscoveryResponse[contract.ApiKeyDetailResponse](t, f.h.want(f.owner, "GET", path, nil, nil, 200))
-	f.h.want(f.owner, "POST", path+"/revoke", nil, map[string]string{"If-Match": key.Etag.String(), "Idempotency-Key": "discovery-revoke"}, 200)
+	key := f.h.want(f.owner, "GET", path, nil, nil, 200)
+	f.h.want(f.owner, "POST", path+"/revoke", nil, withMatch(key, idem("discovery-revoke")), 200)
 	codeDiscoveryCatalog(t, f, 403)
 }
 
@@ -417,22 +425,23 @@ func TestCodeModelDiscoveryRequiresPublishedCredentialBuild(t *testing.T) {
 	}
 	nextDigest := installPlugin(t, f.h, f.owner, testutil.BuildPlugin(t, "./plugins/zai-coding", "-buildid=code-catalog-next"))
 	providerPath := "/api/v1/providers/" + account.ProviderId.String()
-	provider := codeDiscoveryResponse[contract.ProviderDetailResponse](t, f.h.want(f.owner, "GET", providerPath, nil, nil, 200))
+	providerResponse := f.h.want(f.owner, "GET", providerPath, nil, nil, 200)
+	provider := codeDiscoveryResponse[contract.ProviderDetailResponse](t, providerResponse)
 	configuration := contract.ProviderConfiguration{Kind: provider.Configuration.Kind, AuthMode: provider.Configuration.AuthMode, ProfileId: provider.Configuration.ProfileId, ProfileRevision: &nextDigest, Options: provider.Configuration.Options}
-	f.h.want(f.owner, "PATCH", providerPath, contract.UpdateProviderRequest{Name: provider.Name, Configuration: configuration}, map[string]string{"If-Match": provider.Etag.String()}, 200)
+	f.h.want(f.owner, "PATCH", providerPath, contract.UpdateProviderRequest{Name: provider.Name, Configuration: configuration}, etagHeader(providerResponse), 200)
 	nextCredentialID, err := uuid.Parse(f.enroll(t, account.ProviderId.String(), key))
 	if err != nil {
 		t.Fatal(err)
 	}
-	nextAccount := codeDiscoveryResponse[contract.CodeAccount](t, f.h.want(f.owner, "PUT", "/api/v1/code/accounts/"+account.Id.String(), contract.CodeAccountWrite{ProjectId: account.ProjectId, ProviderId: account.ProviderId, CredentialId: nextCredentialID, Name: account.Name, Enabled: true, Models: account.Models}, map[string]string{"If-Match": account.Etag.String()}, 200))
+	nextAccount := f.h.want(f.owner, "PUT", "/api/v1/code/accounts/"+account.Id.String(), contract.CodeAccountWrite{ProjectId: account.ProjectId, ProviderId: account.ProviderId, CredentialId: nextCredentialID, Name: account.Name, Enabled: true, Models: account.Models}, etagHeader(f.accounts[0]), 200)
 	if data := codeDiscoveryCatalog(t, f, 200); len(data) != 0 {
 		t.Fatalf("credential from an unpublished plugin build remained discoverable %+v", data)
 	}
 	setupPath := "/api/v1/code/routes/" + route.Id.String() + "/client-config?gateway_url=https%3A%2F%2Fgateway.example&client=opencode"
 	f.h.want(f.owner, "GET", setupPath, nil, nil, 409)
-	currentProvider := codeDiscoveryResponse[contract.ProviderDetailResponse](t, f.h.want(f.owner, "GET", providerPath, nil, nil, 200))
-	f.h.want(f.owner, "PATCH", providerPath, contract.UpdateProviderRequest{Name: provider.Name, Configuration: provider.Configuration}, map[string]string{"If-Match": currentProvider.Etag.String()}, 200)
-	f.h.want(f.owner, "PUT", "/api/v1/code/accounts/"+account.Id.String(), codeDiscoveryAccountInput(account, true, account.Models), map[string]string{"If-Match": nextAccount.Etag.String()}, 200)
+	currentProvider := f.h.want(f.owner, "GET", providerPath, nil, nil, 200)
+	f.h.want(f.owner, "PATCH", providerPath, contract.UpdateProviderRequest{Name: provider.Name, Configuration: provider.Configuration}, etagHeader(currentProvider), 200)
+	f.h.want(f.owner, "PUT", "/api/v1/code/accounts/"+account.Id.String(), codeDiscoveryAccountInput(account, true, account.Models), etagHeader(nextAccount), 200)
 	if data := codeDiscoveryCatalog(t, f, 200); !reflect.DeepEqual(data, initial) {
 		t.Fatalf("restored published credential changed catalog %+v", data)
 	}
