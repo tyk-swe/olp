@@ -2278,38 +2278,92 @@ func TestCodePaidNativeCacheWriteUsageIsPreserved(t *testing.T) {
 }
 
 func TestCodePaidStreamPreservesNativeBytesAndUsage(t *testing.T) {
-	h, _, server := newPaidCodeForwardHarness(t)
-	native := "event: response.completed\ndata: " + `{"type":"response.completed","response":{"id":"paid-stream","object":"response","model":"model-a","status":"completed","output":[],"usage":{"input_tokens":2,"output_tokens":1,"total_tokens":3}}}` + "\n\n"
-	h.mock.set("a", func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "text/event-stream")
-		_, _ = io.WriteString(w, native)
-	})
-	response := codeDo(t, server, []byte(`{"model":"model-a","input":"hello","stream":true}`), nil)
-	defer response.Body.Close()
-	body, err := io.ReadAll(response.Body)
-	if err != nil || response.StatusCode != 200 || string(body) != native {
-		t.Fatalf("native paid stream changed %d %s %v", response.StatusCode, body, err)
+	for _, encoding := range []string{"", "identity", "gzip"} {
+		t.Run("encoding="+encoding, func(t *testing.T) {
+			h, _, server := newPaidCodeForwardHarness(t)
+			native := "event: response.completed\ndata: " + `{"type":"response.completed","response":{"id":"paid-stream","object":"response","model":"model-a","status":"completed","output":[],"usage":{"input_tokens":2,"output_tokens":1,"total_tokens":3}}}` + "\n\n"
+			payload := func() []byte {
+				if encoding != "gzip" {
+					return []byte(native)
+				}
+				var compressed bytes.Buffer
+				writer := gzip.NewWriter(&compressed)
+				if _, err := writer.Write([]byte(native)); err != nil {
+					t.Fatal(err)
+				}
+				if err := writer.Close(); err != nil {
+					t.Fatal(err)
+				}
+				return compressed.Bytes()
+			}()
+			h.mock.set("a", func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "text/event-stream")
+				if encoding != "" {
+					w.Header().Set("Content-Encoding", encoding)
+				}
+				_, _ = w.Write(payload)
+			})
+			response := codeDo(t, server, []byte(`{"model":"model-a","input":"hello","stream":true}`), http.Header{"Accept-Encoding": {"gzip"}})
+			defer response.Body.Close()
+			body, err := io.ReadAll(response.Body)
+			if err != nil || response.StatusCode != 200 || !bytes.Equal(body, payload) || response.Header.Get("Content-Encoding") != encoding {
+				t.Fatalf("native paid stream changed %d %q %v", response.StatusCode, body, err)
+			}
+			fact := h.sink.await(t, 1)[0].Attempts[0]
+			if !fact.UsageComplete || fact.BillingUncertain || fact.Usage == nil || fact.Usage.TotalTokens != 3 {
+				t.Fatalf("paid stream usage was not attributed %+v", fact)
+			}
+		})
 	}
-	fact := h.sink.await(t, 1)[0].Attempts[0]
-	if !fact.UsageComplete || fact.BillingUncertain || fact.Usage == nil || fact.Usage.TotalTokens != 3 {
-		t.Fatalf("paid stream usage was not attributed %+v", fact)
+}
+
+func TestCodePaidHTTPStatusDeterminesAccountingOutcome(t *testing.T) {
+	for _, scenario := range []struct {
+		status  int
+		outcome string
+	}{{200, "success"}, {299, "success"}, {300, "failure"}} {
+		t.Run(fmt.Sprint(scenario.status), func(t *testing.T) {
+			h, _, server := newPaidCodeForwardHarness(t)
+			const native = `{"id":"paid-status","status":"completed","output":[],"usage":{"input_tokens":2,"output_tokens":1,"total_tokens":3}}`
+			h.mock.set("a", func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(scenario.status)
+				_, _ = io.WriteString(w, native)
+			})
+			response := codeDo(t, server, []byte(`{"model":"model-a","input":"hello"}`), nil)
+			defer response.Body.Close()
+			body, err := io.ReadAll(response.Body)
+			if err != nil || response.StatusCode != scenario.status || string(body) != native {
+				t.Fatalf("paid status response changed %d %s %v", response.StatusCode, body, err)
+			}
+			envelope := h.sink.await(t, 1)[0]
+			if envelope.Outcome != scenario.outcome || envelope.Attempts[0].Class != scenario.outcome || envelope.Attempts[0].Status != response.StatusCode {
+				t.Fatalf("paid HTTP status lost accounting outcome %+v", envelope)
+			}
+		})
 	}
 }
 
 func TestCodePaidProviderErrorRedactsAppliedCredential(t *testing.T) {
-	for _, shape := range []string{"message", "escaped message", "member", "escaped member"} {
-		t.Run(shape, func(t *testing.T) {
+	for _, scenario := range []struct {
+		shape  string
+		status int
+	}{{"message", 400}, {"escaped message", 401}, {"member", 400}, {"escaped member", 401}, {"text", 400}} {
+		t.Run(scenario.shape, func(t *testing.T) {
 			h, _, server := newPaidCodeForwardHarness(t)
 			h.mock.set("a", func(w http.ResponseWriter, _ *http.Request) {
-				w.WriteHeader(401)
+				w.WriteHeader(scenario.status)
 				credential := func() string {
-					if strings.Contains(shape, "escaped") {
+					if strings.Contains(scenario.shape, "escaped") {
 						return strings.ReplaceAll(secretA, "s", `\u0073`)
 					}
 					return secretA
 				}()
-				if strings.Contains(shape, "member") {
+				if strings.Contains(scenario.shape, "member") {
 					_, _ = io.WriteString(w, `{"error":{"`+credential+`":"failed"}}`)
+					return
+				}
+				if scenario.shape == "text" {
+					_, _ = io.WriteString(w, "rejected Bearer "+credential)
 					return
 				}
 				_, _ = io.WriteString(w, `{"error":{"message":"rejected Bearer `+credential+`","code":"`+credential+`"}}`)
@@ -2320,10 +2374,10 @@ func TestCodePaidProviderErrorRedactsAppliedCredential(t *testing.T) {
 			if err != nil || strings.Contains(string(body), secretA) {
 				t.Fatalf("paid error exposed applied credentials %q %v", body, err)
 			}
-			if strings.Contains(shape, "member") && response.StatusCode != 502 {
+			if strings.Contains(scenario.shape, "member") && response.StatusCode != 502 {
 				t.Fatalf("credential member was forwarded %d %s", response.StatusCode, body)
 			}
-			if strings.Contains(shape, "message") && (response.StatusCode != 401 || !strings.Contains(string(body), "[REDACTED]")) {
+			if !strings.Contains(scenario.shape, "member") && (response.StatusCode != scenario.status || !strings.Contains(string(body), "[REDACTED]")) {
 				t.Fatalf("native error was not safely retained %d %s", response.StatusCode, body)
 			}
 		})
@@ -2524,16 +2578,21 @@ func TestCodePaidSuccessfulDeliveryRetainsLargeAndEncodedNativeBytes(t *testing.
 }
 
 func TestCodePaidNativeErrorStreamRedactsCredential(t *testing.T) {
-	h, _, server := newPaidCodeForwardHarness(t)
-	h.mock.set("a", func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "text/event-stream")
-		_, _ = io.WriteString(w, "event: error\ndata: "+`{"type":"error","error":{"message":"Bearer `+secretA+`"}}`+"\n\n")
-	})
-	response := codeDo(t, server, []byte(`{"model":"model-a","input":"hello","stream":true}`), nil)
-	defer response.Body.Close()
-	body, err := io.ReadAll(response.Body)
-	if err != nil || response.StatusCode != 200 || strings.Contains(string(body), secretA) || !strings.Contains(string(body), "[REDACTED]") {
-		t.Fatalf("native paid error frame was not scrubbed %d %s %v", response.StatusCode, body, err)
+	for _, kind := range []string{"error", "response.failed", "response.incomplete"} {
+		t.Run(kind, func(t *testing.T) {
+			h, _, server := newPaidCodeForwardHarness(t)
+			native := fmt.Sprintf("id: paid-error\r\nevent: %s\r\ndata: {\"type\":%q,\"response\":{\"error\":{\"message\":\"Bearer %s\"}},\"extension\":1.2300}\r\n\r\n", kind, kind, secretA)
+			h.mock.set("a", func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "text/event-stream")
+				_, _ = io.WriteString(w, native)
+			})
+			response := codeDo(t, server, []byte(`{"model":"model-a","input":"hello","stream":true}`), nil)
+			defer response.Body.Close()
+			body, err := io.ReadAll(response.Body)
+			if err != nil || response.StatusCode != 200 || string(body) != strings.ReplaceAll(native, secretA, "[REDACTED]") {
+				t.Fatalf("native paid error frame was not safely retained %d %s %v", response.StatusCode, body, err)
+			}
+		})
 	}
 }
 
