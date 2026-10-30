@@ -175,7 +175,7 @@ build() { # base|head, tree
     # depends only on its offset inside its function, so identical code lands
     # on identical fetch lines, branch-predictor entries and uop-cache sets —
     # inner loops included — whatever text the change adds before it.
-    (cd -- "$tree" && go test -c -vet=off -ldflags=-funcalign=4096 -o "$scratch/bin/$side/${package//\//_}.test" "$package")
+    (cd -- "$tree" && go test -c -vet=off -trimpath -buildvcs=false -ldflags=-funcalign=4096 -o "$scratch/bin/$side/${package//\//_}.test" "$package")
     test_dir[$side/$package]=$dir
   done <<<"$listing"
 }
