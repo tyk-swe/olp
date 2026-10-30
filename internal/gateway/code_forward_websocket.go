@@ -66,7 +66,7 @@ type codeWebSocketHandshake struct {
 	target     string
 }
 
-func (s *Server) prepareCodeWebSocket(r *http.Request, release *runtime.Release, route codemode.Route, authority access.Authority, ingress codeadapter.Endpoint) (codeWebSocketHandshake, error) {
+func (s *Server) prepareCodeWebSocket(r *http.Request, release *runtime.Release, route codemode.Route, authority access.Authority, ingress codeIngress) (codeWebSocketHandshake, error) {
 	var handshake codeWebSocketHandshake
 	identity, err := codeConnectionIdentity(ingress, r.Header)
 	if err != nil {
@@ -77,7 +77,7 @@ func (s *Server) prepareCodeWebSocket(r *http.Request, release *runtime.Release,
 	if len(models) > 1 || len(models) == 1 && strings.TrimSpace(models[0]) == "" {
 		return handshake, codemode.Refuse(400, "code_model_invalid")
 	}
-	permit, err := s.CodeLedger.BindConnection(r.Context(), route, authority.ID, identity, r.Header.Get("X-OLP-Code-Model"), release.Snapshot.CodeProviders(route, ingress.ClientPath, codeadapter.WebSocket))
+	permit, err := s.CodeLedger.BindConnection(r.Context(), route, authority.ID, identity, r.Header.Get("X-OLP-Code-Model"), release.Snapshot.CodeProviders(route, ingress.path, codeadapter.WebSocket))
 	if err != nil {
 		return handshake, err
 	}
@@ -92,32 +92,27 @@ func (s *Server) prepareCodeWebSocket(r *http.Request, release *runtime.Release,
 	if failure := s.checkKeyAddress(r, permit.Authority); failure != nil {
 		return handshake, codemode.Refuse(failure.Status, "code_ip_not_allowed")
 	}
-	config, ok := release.Snapshot.CodeConnection(route, permit.Account.ProviderID)
-	if !ok {
-		return handshake, codemode.Refuse(503, "code_connection_unpublished")
+	target, err := resolveCodeTarget(release.Snapshot, route, permit.Account.ProviderID, ingress, codeadapter.WebSocket)
+	if err != nil {
+		return handshake, err
 	}
-	vendor, known := codeadapter.ForConnection(config.Kind, config.AuthMode, config.ProfileID)
-	endpoint, served := vendor.Endpoint(ingress.ClientPath)
-	if !known || !served || endpoint.Protocol != ingress.Protocol || !endpoint.Supports(codeadapter.WebSocket) {
-		return handshake, codemode.Refuse(503, "code_configuration_unsupported")
-	}
-	auth, err := s.CodeAuthorizer.AuthorizeCode(r.Context(), config, permit.Account, codemode.Dispatch{Adapter: vendor.Adapter, Protocol: endpoint.Protocol, ClientPath: ingress.ClientPath})
+	auth, err := s.CodeAuthorizer.AuthorizeCode(r.Context(), target.config, permit.Account, target.dispatch())
 	if err != nil {
 		return handshake, codemode.Refuse(503, "code_account_unavailable")
 	}
-	if err := vendor.ValidateAuthorization(endpoint, auth, permit.Pin.Principal); err != nil {
+	if err := target.vendor.ValidateAuthorization(target.endpoint, auth, permit.Pin.Principal); err != nil {
 		// Keep the handshake's existing principal-refusal envelope.
 		if codeRefusal(err).Code == "code_principal_mismatch" {
 			err = codemode.Refuse(503, "code_account_unavailable")
 		}
 		return handshake, err
 	}
-	handshake.connection = &codeAttempt{server: s, permit: permit, config: config, auth: auth, endpoint: endpoint, observer: codeObserver(endpoint)}
-	handshake.client, err = s.codeClient(r.Context(), release, config, permit.Account.ProviderID)
+	handshake.connection = &codeAttempt{server: s, permit: permit, config: target.config, auth: auth, endpoint: target.endpoint, observer: codeObserver(target.endpoint)}
+	handshake.client, err = s.codeClient(r.Context(), release, target.config, permit.Account.ProviderID)
 	if err != nil {
 		return handshake, err
 	}
-	handshake.target, err = s.codeEndpoint(config, endpoint.UpstreamPath, r.URL.RawQuery)
+	handshake.target, err = s.codeEndpoint(target.config, target.endpoint.UpstreamPath, r.URL.RawQuery)
 	if err != nil {
 		handshake.client.CloseIdleConnections()
 		return handshake, err
@@ -125,7 +120,7 @@ func (s *Server) prepareCodeWebSocket(r *http.Request, release *runtime.Release,
 	return handshake, nil
 }
 
-func (s *Server) codeWebSocket(w http.ResponseWriter, r *http.Request, release *runtime.Release, route codemode.Route, authority access.Authority, ingress codeadapter.Endpoint) {
+func (s *Server) codeWebSocket(w http.ResponseWriter, r *http.Request, release *runtime.Release, route codemode.Route, authority access.Authority, ingress codeIngress) {
 	keyID, digest := authority.ID, authority.EndUserDigest
 	reject := func(err error) { s.codeRefuse(w, r, route, keyID, digest, err) }
 	if r.Header.Get("Sec-Websocket-Protocol") != "" {
@@ -251,7 +246,7 @@ func (s *Server) codeWebSocket(w http.ResponseWriter, r *http.Request, release *
 				refuse(codemode.Refuse(409, "code_identity_changed"))
 				return
 			}
-			active, err = s.prepareCode(r.WithContext(ctx), release, route, observation, ingress.ClientPath, ingress.Protocol, codeadapter.WebSocket)
+			active, err = s.prepareCode(r.WithContext(ctx), release, route, observation, ingress, codeadapter.WebSocket)
 			if err != nil {
 				refuse(err)
 				return
