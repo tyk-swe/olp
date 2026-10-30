@@ -30,7 +30,7 @@ const secret = "sk-fixture-secret"
 var behaviour string
 var upstream = "https://api.example.com/v1"
 
-type fixture struct{}
+type fixture struct{ codexauth.Adapter }
 
 func (fixture) Manifest() plugin.Manifest {
 	if behaviour == "codex-import-invalid" {
@@ -170,6 +170,6 @@ func (fixture) RefreshGrant(ctx context.Context, r plugin.GrantRefresh) (plugin.
 	return plugin.Grant{}, &plugin.Error{Code: abi.CodeInvalidGrant, Message: "the refresh token is spent"}
 }
 
-func init() { plugin.Register(fixture{}) }
+func init() { plugin.Register(fixture{Adapter: codexauth.Adapter{Fetch: plugin.Fetch}}) }
 
 func main() { plugin.Serve() }
