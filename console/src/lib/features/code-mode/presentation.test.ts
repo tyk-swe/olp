@@ -12,6 +12,7 @@ import {
   servingHealthLabel,
   tokenCount,
   tokenLimit,
+  utcWindowStart,
   usageCertaintyLabel
 } from './presentation';
 
@@ -58,7 +59,14 @@ describe('code configuration input', () => {
 
   it.each(['', ', \n ', 'same,same', '_invalid', 'invalid*', 'm'.repeat(201)])(
     'rejects invalid model declarations %s',
-    (value) => expect(() => nativeModels(value)).toThrow()
+    (value) =>
+      expect(() => nativeModels(value)).toThrow(/native model identifiers/)
+  );
+
+  it.each(['valid-model,invalid*', 'invalid*,valid-model'])(
+    'rejects a declaration containing an invalid member %s',
+    (value) =>
+      expect(() => nativeModels(value)).toThrow(/native model identifiers/)
   );
 
   it('accepts the declared model capacity and refuses overflow', () => {
@@ -71,7 +79,9 @@ describe('code configuration input', () => {
   });
 
   it('distinguishes no token cap from positive safe integer caps', () => {
+    expect(tokenLimit('')).toBeNull();
     expect(tokenLimit(' \n ')).toBeNull();
+    expect(tokenLimit('1')).toBe(1);
     expect(tokenLimit('0012')).toBe(12);
     expect(tokenLimit(String(Number.MAX_SAFE_INTEGER))).toBe(
       Number.MAX_SAFE_INTEGER
@@ -87,11 +97,20 @@ describe('code configuration input', () => {
     'Infinity',
     String(Number.MAX_SAFE_INTEGER + 1)
   ])('rejects an invalid token cap %s', (value) =>
-    expect(() => tokenLimit(value)).toThrow()
+    expect(() => tokenLimit(value)).toThrow(/positive whole numbers/)
   );
 });
 
 describe('code diagnostics', () => {
+  it.each(['2026-01-01T00:30:00.000Z', '2026-07-01T00:30:00.000Z'])(
+    'shows the UTC budget boundary despite the local timezone %s',
+    (start) => {
+      const label = utcWindowStart(start);
+      expect(label).toMatch(/\bUTC$/);
+      expect(new Date(label).toISOString()).toBe(start);
+    }
+  );
+
   it('keeps missing token observations distinct from reported zero', () => {
     expect(tokenCount(null)).toBe('Unknown');
     expect(tokenCount(undefined)).toBe('Unknown');
@@ -114,6 +133,16 @@ describe('code diagnostics', () => {
     expect(usageCertaintyLabel({ ...attempt, reported_tokens: 12 })).toBe(
       'Reported total'
     );
+    expect(usageCertaintyLabel({ ...attempt, nonexecution: true })).toBe(
+      'Unknown consumption'
+    );
+    expect(
+      usageCertaintyLabel({
+        ...attempt,
+        nonexecution: true,
+        reported_tokens: 12
+      })
+    ).toBe('Reported total');
   });
 
   it('distinguishes pending, undispatched and retained uncertain attempts', () => {
@@ -154,8 +183,27 @@ describe('code diagnostics', () => {
       'Provider rate or quota limit'
     );
     expect(adapterLabel(null)).toBe('No adapter');
+    expect(adapterLabel(undefined)).toBe('No adapter');
+    expect(adapterLabel('')).toBe('No adapter');
     expect(adapterLabel('fixture-adapter')).toBe('fixture-adapter');
     expect(clientLabel('fixture-client')).toBe('fixture-client');
+  });
+
+  it('uses operator-facing names for supported subscription families and clients', () => {
+    expect(adapterLabel('codex')).toBe('Codex');
+    expect(adapterLabel('antigravity')).toBe('Antigravity');
+    expect(adapterLabel('zai_coding')).toBe('GLM Coding Plan');
+    expect(clientLabel('codex')).toBe('Codex CLI');
+    expect(clientLabel('claude-code')).toBe('Claude Code');
+    expect(clientLabel('opencode')).toBe('OpenCode');
+  });
+
+  it.each([
+    'code_invalid_attribution',
+    'code_pinned_attribution_override',
+    'code_attribution_changed'
+  ])('keeps %s focused on repairing attribution', (code) => {
+    expect(refusalAdvice(code)).toBe(refusalAdvice('code_missing_attribution'));
   });
 
   it('directs different refusal classes to their own recovery action', () => {
@@ -166,6 +214,9 @@ describe('code diagnostics', () => {
       'attribution labels'
     );
     expect(refusalAdvice('code_authority_revoked')).toContain(
+      'issuer and route permissions'
+    );
+    expect(refusalAdvice('code_workload_changed')).toContain(
       'issuer and route permissions'
     );
     expect(refusalAdvice('code_end_user_required')).toContain(
@@ -187,6 +238,12 @@ describe('code diagnostics', () => {
     expect(refusalAdvice('code_model_unavailable')).toContain(
       'native model permissions'
     );
+    expect(refusalAdvice('code_operation_invalid')).toContain(
+      'native model permissions'
+    );
+    expect(refusalAdvice('code_protocol_unsupported')).toContain(
+      'native model permissions'
+    );
     expect(refusalAdvice('fixture_unknown')).toContain(
       'never overrides revoked access'
     );
@@ -196,9 +253,14 @@ describe('code diagnostics', () => {
     const fields = new ApiProblem({
       title: 'Invalid input',
       status: 422,
-      errors: { name: [{ code: 'invalid', message: 'Pick an unused name' }] }
+      errors: {
+        name: [{ code: 'invalid', message: 'Pick an unused name' }],
+        models: [{ code: 'invalid', message: 'Choose a qualified model' }]
+      }
     });
-    expect(mutationError(fields)).toBe('name: Pick an unused name');
+    expect(mutationError(fields)).toBe(
+      'name: Pick an unused name models: Choose a qualified model'
+    );
     expect(mutationError(new Error('Fixture failure'))).toBe('Fixture failure');
     const stale = new ApiProblem({
       type: 'https://openllmproxy.dev/problems/etag_mismatch',
@@ -207,5 +269,17 @@ describe('code diagnostics', () => {
     });
     expect(mutationError(stale)).toContain('Your edits have been kept');
     expect(mutationError(stale)).toContain('latest version');
+  });
+
+  it('retains the problem summary when field feedback is empty', () => {
+    expect(
+      mutationError(
+        new ApiProblem({ title: 'Admission denied', status: 403, errors: {} })
+      )
+    ).toBe('Admission denied');
+  });
+
+  it.each([null, undefined])('explains missing failure detail %s', (error) => {
+    expect(mutationError(error)).toContain('control API');
   });
 });

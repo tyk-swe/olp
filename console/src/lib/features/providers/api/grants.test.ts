@@ -36,7 +36,9 @@ const completion: GrantEnrollmentCompletion = {
 };
 
 function respond(handler: (request: Request) => Response | Promise<Response>) {
-  vi.stubGlobal('fetch', vi.fn(handler));
+  const transport = vi.fn(handler);
+  vi.stubGlobal('fetch', transport);
+  return transport;
 }
 
 afterEach(() => vi.unstubAllGlobals());
@@ -110,7 +112,7 @@ describe('provider grant API', () => {
   });
 
   it('cancels the selected enrollment without expecting a response body', async () => {
-    respond((request) => {
+    const transport = respond((request) => {
       expect(new URL(request.url).pathname).toBe(
         `/api/v1/providers/${provider.id}/grant-enrollments/${enrollment.id}`
       );
@@ -118,6 +120,19 @@ describe('provider grant API', () => {
       return new Response(null, { status: 204 });
     });
     await expect(cancelGrantEnrollment(enrollment)).resolves.toBeUndefined();
+    expect(transport).toHaveBeenCalled();
+  });
+
+  it('reports cancellation refusal instead of claiming the enrollment was canceled', async () => {
+    respond(() =>
+      Response.json(
+        { title: 'Cancellation denied', status: 403 },
+        { status: 403 }
+      )
+    );
+    await expect(cancelGrantEnrollment(enrollment)).rejects.toMatchObject({
+      problem: { status: 403, title: 'Cancellation denied' }
+    });
   });
 
   it('surfaces import refusal without returning a partial credential', async () => {
