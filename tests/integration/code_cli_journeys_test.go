@@ -102,7 +102,7 @@ func TestCodeQualificationMessagesToolsOfficialSDK(t *testing.T) {
 	}
 	f.peer.SetResponder(func(_ context.Context, header http.Header, body []byte) [][]byte {
 		created := frames(`{"type":"response.created","response":{"id":"sdk-tools","status":"in_progress","output":[]}}`)
-		if bytes.Contains(body, []byte(`"function_call_output"`)) {
+		if bytes.Contains(body, []byte(`"function_call_output"`)) || bytes.Contains(body, []byte("CONTROLLED_COMPACT_SUMMARY")) {
 			return slices.Concat(created, frames(`{"type":"response.completed","response":{"id":"sdk-tools","status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"File read"}]}],"usage":{"input_tokens":13,"output_tokens":2,"total_tokens":15}}}`))
 		}
 		if strings.HasSuffix(header.Get("X-Claude-Code-Session-Id"), "complete") {
@@ -158,8 +158,25 @@ func TestCodeQualificationMessagesToolsOfficialSDK(t *testing.T) {
 		t.Fatalf("SDK attempted %d external destinations", len(hosts))
 	}
 	requests := f.peer.Requests()
-	if len(requests) != 8 {
-		t.Fatalf("SDK tool exchanges dispatched %d requests, want eight", len(requests))
+	if len(requests) != 12 {
+		t.Fatalf("SDK tool exchanges and resumes dispatched %d requests, want twelve", len(requests))
+	}
+	bindings := codePublicDecode[[]codemode.Binding](t, f.list("bindings"))
+	if len(bindings) != 8 {
+		t.Fatalf("SDK roots and children created %d bindings", len(bindings))
+	}
+	for _, binding := range bindings {
+		if binding.ParentID == nil {
+			child := slices.IndexFunc(bindings, func(b codemode.Binding) bool { return b.ParentID != nil && *b.ParentID == binding.ID })
+			if child < 0 || binding.RootID != binding.ID {
+				t.Fatal("SDK root has no child")
+			}
+			continue
+		}
+		parent := slices.IndexFunc(bindings, func(b codemode.Binding) bool { return b.ID == *binding.ParentID })
+		if parent < 0 || bindings[parent].ParentID != nil || binding.RootID != bindings[parent].ID || binding.AccountID != bindings[parent].AccountID {
+			t.Fatal("SDK child or cold resume lost parent ownership")
+		}
 	}
 	for _, request := range requests {
 		if !bytes.Contains(request.Body, []byte(`"function_call_output"`)) {

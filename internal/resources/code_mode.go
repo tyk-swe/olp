@@ -131,7 +131,7 @@ func codeReference(ctx context.Context, tx pgx.Tx, in CodeAdmission) (codemode.B
 		return reference, in, nil
 	}
 	reference, err := ScanCodeBinding(tx.QueryRow(ctx, `SELECT `+CodeBindingColumns+` FROM olp.code_references x JOIN olp.code_bindings b ON b.id=x.binding_id
-		WHERE x.route_id=$1 AND x.api_key_id=$2 AND x.external_id=$3 AND NOT x.ambiguous`, in.Route.ID, in.APIKeyID, in.PreviousResponse))
+		WHERE x.route_id=$1 AND x.api_key_id=$2 AND x.external_id=$3 AND NOT x.ambiguous AND x.account_id IS NOT NULL`, in.Route.ID, in.APIKeyID, in.PreviousResponse))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return reference, in, codemode.Refuse(409, "code_parent_unresolved")
 	}
@@ -206,6 +206,15 @@ func (s *CodeStore) admit(ctx context.Context, admission CodeAdmission, connecti
 	}
 	if out.Account.Principal != out.Pin.Principal {
 		return out, codemode.Refuse(403, "code_principal_changed")
+	}
+	if in.PreviousResponse != "" {
+		var owned bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM olp.code_references WHERE route_id=$1 AND api_key_id=$2 AND external_id=$3 AND account_id=$4 AND NOT ambiguous)`, in.Route.ID, in.APIKeyID, in.PreviousResponse, out.Account.ID).Scan(&owned); err != nil {
+			return out, err
+		}
+		if !owned {
+			return out, codemode.Refuse(409, "code_response_account_conflict")
+		}
 	}
 	if !connection && !out.Authority.AllowsAttribution(in.Attribution) {
 		return out, codemode.Refuse(409, "code_attribution_changed")
@@ -551,9 +560,10 @@ func (s *CodeStore) ObserveReference(ctx context.Context, attemptID, externalID 
 	if err := (codemode.Identity{Conversation: externalID}).Validate(); err != nil {
 		return err
 	}
-	_, err := s.Pool.Exec(ctx, `INSERT INTO olp.code_references(route_id,api_key_id,external_id,binding_id)
-		SELECT a.route_id,a.api_key_id,$2,a.binding_id FROM olp.code_attempts a WHERE a.id=$1 AND a.state<>'prepared'
+	_, err := s.Pool.Exec(ctx, `INSERT INTO olp.code_references(route_id,api_key_id,external_id,binding_id,account_id)
+		SELECT a.route_id,a.api_key_id,$2,a.binding_id,a.account_id FROM olp.code_attempts a WHERE a.id=$1 AND a.state<>'prepared'
 		ON CONFLICT(route_id,api_key_id,external_id) DO UPDATE SET ambiguous=olp.code_references.ambiguous OR
+		olp.code_references.account_id IS DISTINCT FROM EXCLUDED.account_id OR
 		(SELECT root_id FROM olp.code_bindings WHERE id=olp.code_references.binding_id)<>(SELECT root_id FROM olp.code_bindings WHERE id=EXCLUDED.binding_id)`, attemptID, externalID)
 	return err
 }
