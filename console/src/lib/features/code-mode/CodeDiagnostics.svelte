@@ -285,6 +285,10 @@
       <article class="card">
         <h3>{attempt.operation} · {attempt.model}</h3>
         <dl>
+          <dt>Requested model</dt>
+          <dd>{attempt.requested_model ?? 'Unknown for historical attempt'}</dd>
+          <dt>Selected model</dt>
+          <dd>{attempt.model}</dd>
           <dt>Attempt / state</dt>
           <dd>{attempt.id} / {attempt.state}</dd>
           <dt>Upstream status</dt>

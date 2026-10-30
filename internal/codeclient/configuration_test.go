@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -310,5 +311,18 @@ func TestExactAliasesAppearInDiscoveryAndGeneratedSetup(t *testing.T) {
 		if err != nil || config.Model != "team-code" || !strings.Contains(config.Configuration, "team-code") {
 			t.Fatalf("alias setup for %s %+v, %v", client, config, err)
 		}
+	}
+}
+
+func TestModelPoolsAreVisibleWithoutChangingSetupModel(t *testing.T) {
+	route := codemode.Route{Slug: "coding", Enabled: true, RevisionID: "published", Models: []string{"gpt-fixture-main", "gpt-fixture-alternate"}, ModelRewriting: true, InitialRecoveryAttempts: 1, Aliases: map[string]string{"team-code": "gpt-fixture-main"}, ModelPools: map[string][]string{"team-code": {"gpt-fixture-main", "gpt-fixture-alternate"}}}
+	offers := Offers{{Adapter: codemode.AdapterCodex, Models: route.Models}}
+	configuration, err := Generate(route, offers, Request{GatewayURL: "https://olp.example", Client: "codex", Model: "team-code"})
+	if err != nil || configuration.Model != "team-code" || !strings.Contains(configuration.Configuration, "team-code") || !strings.Contains(configuration.Instructions, "model pools") {
+		t.Fatalf("model pool setup changed public selection or hid policy %+v, %v", configuration, err)
+	}
+	model := slices.IndexFunc(configuration.Models, func(model codemode.Model) bool { return model.ID == "team-code" })
+	if model < 0 || !slices.Equal(configuration.Models[model].ModelPool, route.ModelPools["team-code"]) {
+		t.Fatalf("discovery lost configured targets %+v", configuration.Models)
 	}
 }

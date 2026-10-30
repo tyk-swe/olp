@@ -56,11 +56,11 @@ func (s *Server) prepareCode(r *http.Request, release *runtime.Release, route co
 		return nil, err
 	}
 	providers := release.Snapshot.CodeModelProviders(route, ingress.path, operation.Model, transport)
-	if len(providers) == 0 && (operation.RequestedModel == "" || len(release.Snapshot.CodeProviders(route, ingress.path, transport)) == 0) {
+	if len(providers) == 0 && (!route.ModelRewriting || len(release.Snapshot.CodeProviders(route, ingress.path, transport)) == 0) {
 		return nil, codemode.Refuse(400, "code_operation_unsupported")
 	}
 	modelProviders := func() map[string][]string {
-		if operation.RequestedModel == "" {
+		if !route.ModelRewriting {
 			return nil
 		}
 		return maps.Collect(func(yield func(string, []string) bool) {

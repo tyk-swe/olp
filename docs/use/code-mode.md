@@ -48,7 +48,7 @@ speaks only Messages, so on OpenCode Go it works only with Messages models.
 
 ### Exact model aliases
 
-Enable **Rewrite model identifiers using exact aliases** in the route editor,
+Enable **Rewrite model identifiers using exact aliases or model pools** in the route editor,
 then enter one `alias=native-model` per line in **Exact model aliases**. Each
 alias must target one of the route's listed native models. Save and publish to
 include the aliases in authenticated model discovery and generated client setup.
@@ -57,21 +57,57 @@ has no vendor prefix.
 
 The management route write uses `model_rewriting: true` and an `aliases` object,
 for example `"aliases": {"team-code": "native-model"}`. This opt-in is independent
-of Messages translation and identity compatibility. Native identifiers continue
-to pass through unchanged. Alias requests replace only the protocol's model
+of Messages translation and identity compatibility. Native identifiers pass through unchanged unless their public name has an
+explicit model pool. Alias requests replace only the protocol's model
 identifier, and replies expose the public alias. Prompt content and unrelated
 payload fields remain unchanged.
 
 Alias chains, native-name collisions and targets outside the native model list
 are rejected. An unavailable target is omitted from discovery and refused for
-inference. An alias always names one exact model. It never selects a different
-model from the pool or adds implicit fallback behavior.
+inference. Without an explicit model pool, an alias always names one exact model and
+recovery keeps that exact target.
 
 Repointing an alias and publishing changes the target for new conversations.
 Existing conversations retain their durably stored target and account while
 that target remains published, eligible and authorized. Removing the old target
 or its access refuses the continuation instead of moving it to the new model.
 Existing native-model pins are preserved.
+
+### Explicit model recovery pools
+
+Model changes require a published opt-in. In **Model recovery pools**, enter
+`public-model=primary,alternate` on each line. The public name can be a native
+model or an exact alias. Its first target must match normal exact resolution,
+and every target must be distinct and listed under **Native models**. Enable
+model rewriting, choose one or two **Recovery attempts**, then save and publish.
+Zero attempts disables automatic recovery, including configured model pools.
+
+The management route write carries `model_pools`, for example
+`"model_pools": {"team-code": ["native-main", "native-alternate"]}`. Discovery
+and client setup expose the ordered targets as policy metadata. Availability
+and protocol compatibility are checked again for each selected account.
+Configuration and publication do not send inference requests.
+
+Recovery first tries another eligible account for the currently pinned exact
+model, then considers the configured targets in order. Substitution requires a
+positive nonexecution result and positively portable input. Accepted work,
+partial output, uncertain dispatch and opaque input are never replayed. The
+existing single-pin root bound still applies. Child-bearing trees, multiple
+pins and socket-owned state refuse recovery. Current key and pool authority,
+account eligibility, protocol support and applicable budgets are checked before
+execution. A missing proven token bound refuses a request with a hard token
+budget. An unavailable alternate never bypasses these checks. Paid participation
+and paid fallback have separate policies.
+
+The client keeps requesting the same public name. Replies retain that name,
+and the recovered exact target and account are stored on the conversation pin.
+Later requests retain that target while it remains published, eligible and
+authorized. Repointing an alias changes new conversations. Recovery for an
+existing pin still tries its stored exact target first, then the currently
+published pool order. Removing a pool restores exact recovery for that pin
+without moving it back to an earlier target. Attempts record the public
+`requested_model` separately from the selected exact `model`. Historical
+attempts have an unknown requested model rather than an inferred value.
 
 ### Messages through Codex
 

@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -722,5 +723,137 @@ func TestCodeFoundationInitialRecoveryRefreshPreservesConcurrentCooldown(t *test
 		if len(accounts) != 1 || accounts[0].Eligible || accounts[0].Health != health || accounts[0].UnavailableUntil == nil || !accounts[0].UnavailableUntil.Equal(concurrentUntil) {
 			t.Fatalf("refreshed grant erased concurrent cooldown %+v", accounts)
 		}
+	}
+}
+
+func TestCodeFoundationModelPoolRecoveryPreservesRequestedModelAndAuthority(t *testing.T) {
+	for _, test := range []struct {
+		name      string
+		pool      bool
+		portable  bool
+		available bool
+		change    string
+		refusal   string
+	}{
+		{name: "exact default", portable: true, available: true, refusal: "code_account_unavailable"},
+		{name: "explicit pool", pool: true, portable: true, available: true},
+		{name: "unavailable alternate", pool: true, portable: true, refusal: "code_account_unavailable"},
+		{name: "unportable state", pool: true, available: true, refusal: "code_recovery_unsafe"},
+		{name: "live pool authority revoked", pool: true, portable: true, available: true, change: "authority", refusal: "code_pool_denied"},
+		{name: "qualified bound unavailable", pool: true, portable: true, available: true, change: "bound", refusal: "code_token_bound_unavailable"},
+		{name: "current token budget exhausted", pool: true, portable: true, available: true, change: "budget", refusal: "code_token_budget_exhausted"},
+		{name: "qualified bound reserved", pool: true, portable: true, available: true, change: "qualified"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			f := newCodeFixtureWithProfile(t, codexauth.ProfileID)
+			credential := access.NewID()
+			f.addCredential(t, credential, "alternate-principal", 2)
+			f.exec(t, `UPDATE olp.provider_credentials SET profile_id=$2 WHERE id=$1`, credential, codexauth.ProfileID)
+			alternate := f.h.want(f.owner, "POST", "/api/v1/code/accounts", map[string]any{
+				"project_id": f.project, "provider_id": f.provider, "credential_id": credential,
+				"name": "Alternate model account", "enabled": true, "models": []string{"native-next"},
+			}, idem("model-pool-account"), 201)
+			pool := f.h.want(f.owner, "POST", "/api/v1/code/pools", map[string]any{
+				"project_id": f.project, "name": "Model recovery", "kind": "shared", "owner_user_id": nil,
+				"account_ids": []string{f.account, alternate["id"].(string)}, "api_key_ids": []string{f.key},
+			}, idem("model-pool"), 201)
+			pools := func() map[string][]string {
+				if test.pool {
+					return map[string][]string{"team-code": {"native-model", "native-next"}}
+				}
+				return map[string][]string{}
+			}()
+			draft := f.h.want(f.owner, "PUT", "/api/v1/code/routes/"+f.route.ID, map[string]any{
+				"project_id": f.project, "slug": f.route.Slug, "pool_id": pool["id"], "models": []string{"native-model", "native-next"},
+				"aliases": map[string]string{"team-code": "native-model"}, "model_rewriting": true,
+				"model_pools": pools, "initial_recovery_attempts": 1, "enabled": true,
+			}, etagHeader(f.routeRecord), 200)
+			published := f.h.want(f.owner, "POST", "/api/v1/code/routes/"+f.route.ID+"/publish", nil, withMatch(draft, idem("model-pool-publish")), 200)
+			route := codePublicDecode[codemode.Route](t, published)
+			if len(route.ModelPools) != len(pools) {
+				t.Fatal("publication lost explicit model pool", published)
+			}
+			bound := func() *codemode.TokenBound {
+				if test.change == "qualified" {
+					return &codemode.TokenBound{Tokens: 5, Evidence: "controlled-test-bound"}
+				}
+				return nil
+			}()
+			input := resources.CodeAdmission{Route: route, APIKeyID: f.key, Providers: []string{f.provider}, Bound: bound, InitialRecovery: test.portable,
+				Operation: codemode.Operation{Name: "responses.create", Model: "team-code", Identity: codemode.Identity{Conversation: "model-recovery"}}}
+			first, err := f.store.Admit(t.Context(), input)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := f.store.MarkDispatched(t.Context(), first.Attempt.ID); err != nil {
+				t.Fatal(err)
+			}
+			status := 429
+			if err := f.store.ObserveOutcome(t.Context(), first.Attempt.ID, codemode.Outcome{Origin: "upstream", Kind: "rejected", UpstreamStatus: &status, ObservedAt: time.Now()}); err != nil {
+				t.Fatal(err)
+			}
+			if err := f.store.ConfirmNonexecution(t.Context(), first.Attempt.ID, status); err != nil {
+				t.Fatal(err)
+			}
+			if err := f.store.Settle(t.Context(), first.Attempt.ID, codemode.Usage{Total: new(int64(0))}); err != nil {
+				t.Fatal(err)
+			}
+			if !test.available {
+				f.h.want(f.owner, "PUT", "/api/v1/code/accounts/"+alternate["id"].(string), map[string]any{
+					"project_id": f.project, "provider_id": f.provider, "credential_id": credential,
+					"name": "Alternate model account", "enabled": false, "models": []string{"native-next"},
+				}, etagHeader(alternate), 200)
+			}
+			switch test.change {
+			case "authority":
+				f.h.want(f.owner, "PUT", "/api/v1/code/pools/"+pool["id"].(string), map[string]any{
+					"project_id": f.project, "name": "Model recovery", "kind": "shared", "owner_user_id": nil,
+					"account_ids": []string{f.account, alternate["id"].(string)}, "api_key_ids": []string{},
+				}, etagHeader(pool), 200)
+			case "bound", "budget", "qualified":
+				f.h.want(f.owner, "POST", "/api/v1/code/budgets", map[string]any{
+					"project_id": f.project, "route_id": route.ID, "api_key_id": nil, "daily_tokens": 10, "monthly_tokens": 100, "enabled": true,
+				}, idem("model-recovery-budget"), 201)
+			}
+			recoveryBound := func() *codemode.TokenBound {
+				if test.change == "budget" {
+					return &codemode.TokenBound{Tokens: 20, Evidence: "controlled-test-bound"}
+				}
+				return bound
+			}()
+			recovery := resources.CodeAdmission{Route: route, APIKeyID: f.key, Providers: input.Providers, Bound: recoveryBound, InitialRecovery: test.portable,
+				Operation: input.Operation, Recovery: &resources.CodeRecovery{From: first.Attempt.ID, Number: 1}}
+			recovered, err := f.store.Admit(t.Context(), recovery)
+			if test.refusal != "" {
+				codeRefusal(t, err, test.refusal)
+				if test.change == "bound" || test.change == "budget" {
+					retry := resources.CodeAdmission{Route: route, APIKeyID: f.key, Providers: input.Providers, Operation: input.Operation,
+						Bound: &codemode.TokenBound{Tokens: 5, Evidence: "controlled-test-bound"}}
+					unchanged, retryErr := f.store.Admit(t.Context(), retry)
+					if retryErr != nil || unchanged.Pin.TargetModel != first.Pin.TargetModel || unchanged.Account.ID != first.Account.ID {
+						t.Fatalf("refused budget moved model or account %+v, %v", unchanged, retryErr)
+					}
+				}
+				return
+			}
+			if err != nil || recovered.Pin.Model != "team-code" || recovered.Pin.TargetModel != "native-next" || recovered.Account.ID != alternate["id"] || recovered.Attempt.Model != "native-next" || recovered.Attempt.RequestedModel == nil || *recovered.Attempt.RequestedModel != "team-code" {
+				t.Fatalf("explicit model recovery lost selection or ownership %+v, %v", recovered, err)
+			}
+			if test.change == "qualified" && (recovered.Attempt.ReservedTokens != bound.Tokens || recovered.Attempt.BoundEvidence == nil || *recovered.Attempt.BoundEvidence != bound.Evidence) {
+				t.Fatalf("model change lost qualified reservation %+v", recovered.Attempt)
+			}
+			if err := f.store.Abort(t.Context(), recovered.Attempt.ID); err != nil {
+				t.Fatal(err)
+			}
+			continued, err := f.store.Admit(t.Context(), input)
+			if err != nil || continued.Account.ID != recovered.Account.ID || continued.Pin.TargetModel != recovered.Pin.TargetModel {
+				t.Fatalf("continuation lost recovered model %+v, %v", continued, err)
+			}
+			attempts := codePublicDecode[[]codemode.Attempt](t, f.h.want(f.owner, "GET", "/api/v1/code/attempts?route_id="+route.ID, nil, nil, 200)["items"])
+			diagnosed := slices.IndexFunc(attempts, func(attempt codemode.Attempt) bool { return attempt.ID == recovered.Attempt.ID })
+			if diagnosed < 0 || attempts[diagnosed].RequestedModel == nil || *attempts[diagnosed].RequestedModel != "team-code" || attempts[diagnosed].Model != recovered.Pin.TargetModel {
+				t.Fatalf("diagnostics lost requested or selected model %+v", attempts)
+			}
+		})
 	}
 }

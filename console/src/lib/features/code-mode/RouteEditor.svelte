@@ -58,6 +58,67 @@
     return { kind: 'valid', aliases: Object.fromEntries(entries) };
   }
 
+  type ModelPoolValidation =
+    | { kind: 'valid'; pools: Record<string, string[]> }
+    | { kind: 'invalid'; message: string };
+
+  function parseModelPools(
+    value: string,
+    models: readonly string[],
+    aliases: Readonly<Record<string, string>>,
+    rewriting: boolean
+  ): ModelPoolValidation {
+    const lines = value
+      .split('\n')
+      .map((line) => line.trim())
+      .filter(Boolean);
+    const entries = lines.map((line) =>
+      line.split('=').map((part) => part.trim())
+    );
+    if (
+      !entries.every(
+        (entry): entry is [string, string] =>
+          entry.length === 2 && !!entry[0] && !!entry[1]
+      )
+    )
+      return {
+        kind: 'invalid',
+        message: 'Use public-model=primary,alternate per line.'
+      };
+    const pools = entries.map(
+      ([publicName, targets]) =>
+        [publicName, targets.split(',').map((target) => target.trim())] as const
+    );
+    if (pools.length && !rewriting)
+      return {
+        kind: 'invalid',
+        message: 'Enable model rewriting to publish model pools.'
+      };
+    if (
+      pools.length > 100 ||
+      new Set(pools.map(([publicName]) => publicName)).size !== pools.length ||
+      !pools.every(([publicName, targets]) => {
+        const primary = models.includes(publicName)
+          ? publicName
+          : aliases[publicName];
+        return (
+          !!primary &&
+          targets.length >= 2 &&
+          targets.length <= 100 &&
+          targets[0] === primary &&
+          new Set(targets).size === targets.length &&
+          targets.every((target) => models.includes(target))
+        );
+      })
+    )
+      return {
+        kind: 'invalid',
+        message:
+          'Use distinct published native targets, starting with the public model’s normal exact target.'
+      };
+    return { kind: 'valid', pools: Object.fromEntries(pools) };
+  }
+
   let {
     current,
     projectId,
@@ -83,6 +144,12 @@
       .map(([alias, target]) => `${alias}=${target}`)
       .join('\n')
   );
+  let modelPools = $state(
+    Object.entries(initial?.model_pools ?? {})
+      .map(([publicName, targets]) => `${publicName}=${targets.join(',')}`)
+      .join('\n')
+  );
+  let recoveryAttempts = $state(initial?.initial_recovery_attempts ?? 0);
   let messagesToCodex = $state(initial?.messages_to_codex ?? false);
   let research = $state(!!initial?.tools);
   let researchAccount = $state(initial?.tools?.account_id ?? '');
@@ -141,6 +208,13 @@
       const routeModels = nativeModels(models);
       const aliasResult = parseAliases(aliases, routeModels, modelRewriting);
       if (aliasResult.kind === 'invalid') throw new Error(aliasResult.message);
+      const poolResult = parseModelPools(
+        modelPools,
+        routeModels,
+        aliasResult.aliases,
+        modelRewriting
+      );
+      if (poolResult.kind === 'invalid') throw new Error(poolResult.message);
       return {
         project_id: projectId,
         slug,
@@ -149,8 +223,9 @@
         models: routeModels,
         aliases: aliasResult.aliases,
         model_rewriting: modelRewriting,
+        model_pools: poolResult.pools,
         messages_to_codex: messagesToCodex,
-        initial_recovery_attempts: initial?.initial_recovery_attempts ?? 0,
+        initial_recovery_attempts: recoveryAttempts,
         tools: research
           ? { account_id: researchAccount, services: researchServices }
           : null,
@@ -220,7 +295,7 @@
       type="checkbox"
       bind:checked={modelRewriting}
     />
-    Rewrite model identifiers using exact aliases
+    Rewrite model identifiers using exact aliases or model pools
   </label>
   <label for="code-aliases">Exact model aliases</label>
   <textarea
@@ -233,6 +308,31 @@
     model. Publish to make aliases available in discovery and client setup.
     Repointing an alias affects new conversations. Existing conversations keep
     their pinned target while it remains published and authorized.
+  </p>
+  <label for="code-model-pools">Model recovery pools</label>
+  <textarea
+    id="code-model-pools"
+    bind:value={modelPools}
+    rows="3"
+    placeholder="team-code=native-model,alternate-model"></textarea>
+  <p>
+    Use public-model=primary,alternate per line. Start with the public name’s
+    normal exact target, followed by distinct listed native models in recovery
+    order. Recovery prefers the pinned target. Substitution requires proven
+    nonexecution, portable input, an eligible subscription account, current
+    authorization and available budgets. Accepted, uncertain, opaque,
+    socket-owned, child-bearing and multiple-model state is not replayed across
+    models. Paid fallback is separate.
+  </p>
+  <label for="code-recovery-attempts">Recovery attempts</label>
+  <select id="code-recovery-attempts" bind:value={recoveryAttempts}>
+    <option value={0}>Disabled</option>
+    <option value={1}>One recovery attempt</option>
+    <option value={2}>Two recovery attempts</option>
+  </select>
+  <p>
+    Without a configured model pool, recovery keeps the exact model. Zero
+    attempts disables automatic recovery.
   </p>
   <label class="choice">
     <input
