@@ -7362,6 +7362,15 @@ type ClassifierPredicate struct {
 	TimeoutMs int64                      `json:"timeout_ms"`
 }
 
+// ClaudeCredentialImportRequest defines model for ClaudeCredentialImportRequest.
+type ClaudeCredentialImportRequest struct {
+	// Credentials Claude Code .credentials.json JSON text containing only claudeAiOauth with accessToken, refreshToken, expiresAt in epoch milliseconds and scopes including user:profile and user:inference. Optional metadata fields are refreshTokenExpiresAt, subscriptionType, subscriptionTypeSource, subscriptionTypeVerifiedAt, rateLimitTier and clientId. A supplied clientId must match the supported official client. Other fields, alternative credential stores and ambiguous JSON are rejected. The original access token must still authenticate the fixed profile endpoint. Import verifies account and organization before and after refresh, without decoding token claims.
+	Credentials *string `json:"credentials,omitempty"`
+
+	// SlotId Existing credential slot, defaults to the default slot
+	SlotId *openapi_types.UUID `json:"slot_id,omitempty"`
+}
+
 // CodeAccount defines model for CodeAccount.
 type CodeAccount struct {
 	// Adapter The subscription family of the account's provider profile: Codex, Claude, OpenCode Go, GLM Coding Plan, MiniMax M Plan, Kimi Code or Qwen Token Plan. Null for a profile no code-mode adapter serves. A pool may mix families; each request reaches an account whose family serves its path and model.
@@ -16370,6 +16379,12 @@ type AcceptProviderCatalogSuggestionsParams struct {
 	IdempotencyKey string `json:"Idempotency-Key"`
 }
 
+// ImportClaudeCredentialsParams defines parameters for ImportClaudeCredentials.
+type ImportClaudeCredentialsParams struct {
+	// IfMatch Current provider draft ETag
+	IfMatch string `json:"If-Match"`
+}
+
 // ImportCodexCredentialsParams defines parameters for ImportCodexCredentials.
 type ImportCodexCredentialsParams struct {
 	// IfMatch Current provider draft ETag
@@ -17499,6 +17514,9 @@ type PutProviderBillingImportJSONRequestBody = PutBillingImportRequest
 
 // AcceptProviderCatalogSuggestionsJSONRequestBody defines body for AcceptProviderCatalogSuggestions for application/json ContentType.
 type AcceptProviderCatalogSuggestionsJSONRequestBody = AcceptCatalogSuggestionsRequest
+
+// ImportClaudeCredentialsJSONRequestBody defines body for ImportClaudeCredentials for application/json ContentType.
+type ImportClaudeCredentialsJSONRequestBody = ClaudeCredentialImportRequest
 
 // ImportCodexCredentialsJSONRequestBody defines body for ImportCodexCredentials for application/json ContentType.
 type ImportCodexCredentialsJSONRequestBody = CodexCredentialImportRequest
