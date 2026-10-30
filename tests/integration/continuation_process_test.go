@@ -148,14 +148,12 @@ func TestWorkflowModelRecoveryFencesLostReplicaWithoutInterruptingLiveReplica(t 
 			t.Fatal("both model requests did not reach the upstream")
 		}
 	}
-	if err := orphan.Kill(); err != nil {
-		t.Fatal(err)
-	}
 	orphanID := mcpExecString(t, orphanKey, "id")
 	liveID := mcpExecString(t, liveKey, "id")
 	type observedDebit struct {
-		state     string
-		remaining string
+		state           string
+		remainingCost   string
+		remainingCharge string
 	}
 	readDebit := func(keyID string) (observedDebit, bool) {
 		t.Helper()
@@ -167,7 +165,14 @@ func TestWorkflowModelRecoveryFencesLostReplicaWithoutInterruptingLiveReplica(t 
 		if !ok {
 			t.Fatalf("invalid debit: %v", items[0])
 		}
-		return observedDebit{state: mcpExecString(t, item, "state"), remaining: mcpExecString(t, item, "remaining_cost")}, true
+		return observedDebit{state: mcpExecString(t, item, "state"), remainingCost: mcpExecString(t, item, "remaining_cost"), remainingCharge: mcpExecString(t, item, "remaining_charge")}, true
+	}
+	orphanBefore, exists := readDebit(orphanID)
+	if !exists || orphanBefore.state != "dispatched" {
+		t.Fatalf("model dispatch was not recorded: %v", orphanBefore)
+	}
+	if err := orphan.Kill(); err != nil {
+		t.Fatal(err)
 	}
 	eventually(t, "orphaned model debit to retain unknown exposure", 45*time.Second, func() bool {
 		debit, ok := readDebit(orphanID)
@@ -178,8 +183,8 @@ func TestWorkflowModelRecoveryFencesLostReplicaWithoutInterruptingLiveReplica(t 
 		t.Fatalf("live replica was marked orphaned: %v", liveDebit)
 	}
 	orphanDebit, exists := readDebit(orphanID)
-	exposure, valid := new(big.Rat).SetString(orphanDebit.remaining)
-	if !exists || !valid || exposure.Sign() <= 0 {
+	exposure, valid := new(big.Rat).SetString(orphanDebit.remainingCost)
+	if !exists || !valid || exposure.Sign() <= 0 || orphanDebit.remainingCost != orphanBefore.remainingCost || orphanDebit.remainingCharge != orphanBefore.remainingCharge {
 		t.Fatalf("orphaned dispatch lost exposure: %v", orphanDebit)
 	}
 	select {
@@ -330,8 +335,9 @@ func TestWorkflowModelRecoveryFencesLostReplicaWithoutInterruptingLiveReplica(t 
 		if !ok || debit.state != "not_accepted" {
 			return false
 		}
-		remaining, valid := new(big.Rat).SetString(debit.remaining)
-		return valid && remaining.Sign() == 0
+		remainingCost, validCost := new(big.Rat).SetString(debit.remainingCost)
+		remainingCharge, validCharge := new(big.Rat).SetString(debit.remainingCharge)
+		return validCost && validCharge && remainingCost.Sign() == 0 && remainingCharge.Sign() == 0
 	})
 }
 func processContinuationRequest(t *testing.T, origin, key, method, path string, body []byte, headers map[string]string) *http.Response {
