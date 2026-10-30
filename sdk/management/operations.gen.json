@@ -15419,6 +15419,12 @@
         "in": "query",
         "required": false,
         "type": "string"
+      },
+      {
+        "name": "platform",
+        "in": "query",
+        "required": false,
+        "type": "string"
       }
     ],
     "response_headers": {
@@ -15464,6 +15470,9 @@
             },
             "small_model": {
               "type": "string"
+            },
+            "platform": {
+              "$ref": "#/$defs/CodeClientPlatform"
             }
           },
           "additionalProperties": false,
@@ -15476,7 +15485,18 @@
       "required": [
         "path",
         "query"
-      ]
+      ],
+      "$defs": {
+        "CodeClientPlatform": {
+          "type": "string",
+          "enum": [
+            "linux",
+            "macos",
+            "windows"
+          ],
+          "description": "Developer platform for paths and shell syntax. Linux and macOS use POSIX shells, Windows uses PowerShell."
+        }
+      }
     }
   },
   {

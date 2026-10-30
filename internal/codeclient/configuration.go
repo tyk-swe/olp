@@ -20,7 +20,7 @@ import (
 // fields take the route's default client, the first native model the route
 // serves it, and that model for planning and background work.
 type Request struct {
-	GatewayURL, Client, Model, PlanModel, SmallModel string
+	GatewayURL, Client, Platform, Model, PlanModel, SmallModel string
 }
 
 // Generate generates a client's configuration for a published
@@ -34,6 +34,10 @@ func Generate(route codemode.Route, offers Offers, in Request) (codemode.ClientC
 	var out codemode.ClientConfiguration
 	if !route.Enabled || route.RevisionID == "" || !access.RouteSlug.MatchString(route.Slug) {
 		return out, access.Fail(409, "code_route_unpublished", "Publish an enabled code-mode route first.")
+	}
+	platform := cmp.Or(in.Platform, "linux")
+	if !slices.Contains([]string{"linux", "macos", "windows"}, platform) {
+		return out, access.Invalid("platform", "Choose Linux, macOS or Windows.")
 	}
 	if err := codemode.ValidateModels(route.Models); err != nil {
 		return out, access.Invalid("models", err.Error())
@@ -115,25 +119,25 @@ func Generate(route codemode.Route, offers Offers, in Request) (codemode.ClientC
 	}
 	base.Path = strings.TrimRight(base.Path, "/") + route.BasePath()
 	base.RawPath = ""
+	file, instructions := platformInstructions(client, platform)
 	out = codemode.ClientConfiguration{
 		RouteSlug: route.Slug, BaseURL: base.String(), NativeModels: native, Adapters: adapters,
-		Client: client, SupportedClients: supported, Model: model, PlanModel: plan, SmallModel: small,
-		QualificationGaps: qualificationGaps(adapters, client),
+		Client: client, Platform: platform, File: file, Instructions: instructions, SupportedClients: supported, Model: model, PlanModel: plan, SmallModel: small,
+		QualificationGaps: append(qualificationGaps(adapters, client), "Generated configuration is not evidence of native platform startup or live subscription qualification."),
 	}
 	switch client {
 	case codeadapter.ClientCodex:
-		out.ClientVersion, out.Format, out.File = codexauth.ClientVersion, "toml", new("$CODEX_HOME/config.toml")
+		out.ClientVersion, out.Format = codexauth.ClientVersion, "toml"
 		out.Configuration = codexConfiguration(out.BaseURL, model)
 	case codeadapter.ClientClaudeCode:
-		names := make([]string, len(adapters))
-		for i, adapter := range adapters {
-			vendor, _ := codeadapter.Lookup(adapter)
-			names[i] = vendor.Name
-		}
 		out.ClientVersion, out.Format = codeadapter.ClaudeCodeVersion, "shell"
-		out.Configuration = claudeCodeConfiguration(route.Slug, conjoin(names), out.BaseURL, model, *plan, *small)
+		out.Configuration = claudeCodeConfiguration(out.BaseURL, model, *plan, *small)
+		if platform == "windows" {
+			out.Format = "powershell"
+			out.Configuration = claudeCodePowerShellConfiguration(out.BaseURL, model, *plan, *small)
+		}
 	case codeadapter.ClientOpenCode:
-		out.ClientVersion, out.Format, out.File = codeadapter.OpenCodeVersion, "json", new("opencode.json")
+		out.ClientVersion, out.Format = codeadapter.OpenCodeVersion, "json"
 		out.Configuration, err = openCodeConfiguration(adapters, offers, through, native, out.BaseURL, model, *plan, *small)
 	}
 	if err == nil {

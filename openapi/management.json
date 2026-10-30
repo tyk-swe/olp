@@ -16034,18 +16034,19 @@
             "type": "string"
           },
           "file": {
-            "description": "Where to save the configuration, or null for a shell file to source.",
+            "description": "Where to merge the configuration or save the shell setup. Follow instructions to preserve existing settings.",
             "type": [
               "string",
               "null"
             ]
           },
           "format": {
-            "description": "The configuration's format: Codex TOML, a POSIX shell file to source, or OpenCode JSON.",
+            "description": "Codex TOML, a POSIX shell or PowerShell setup to source, or OpenCode JSON.",
             "enum": [
               "toml",
               "shell",
-              "json"
+              "json",
+              "powershell"
             ],
             "type": "string"
           },
@@ -16109,6 +16110,13 @@
             "items": {
               "$ref": "#/components/schemas/CodeConfigurationFile"
             }
+          },
+          "platform": {
+            "$ref": "#/components/schemas/CodeClientPlatform"
+          },
+          "instructions": {
+            "type": "string",
+            "description": "Platform-specific setup and merge instructions. Preserve unrelated client settings and retain environment references for credentials."
           }
         },
         "required": [
@@ -16125,7 +16133,9 @@
           "format",
           "file",
           "configuration",
-          "qualification_gaps"
+          "qualification_gaps",
+          "platform",
+          "instructions"
         ],
         "type": "object"
       },
@@ -28351,6 +28361,15 @@
             "description": "Exact registered workload issuer trusted for delegated user assertions."
           }
         }
+      },
+      "CodeClientPlatform": {
+        "type": "string",
+        "enum": [
+          "linux",
+          "macos",
+          "windows"
+        ],
+        "description": "Developer platform for paths and shell syntax. Linux and macOS use POSIX shells, Windows uses PowerShell."
       }
     },
     "securitySchemes": {
@@ -45873,6 +45892,15 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "in": "query",
+            "name": "platform",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/CodeClientPlatform"
+            },
+            "description": "Developer platform, defaulting to linux for backward-compatible POSIX shell output."
           }
         ],
         "responses": {
