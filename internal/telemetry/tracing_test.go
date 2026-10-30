@@ -15,6 +15,10 @@ import (
 
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/trace"
+	collectortrace "go.opentelemetry.io/proto/otlp/collector/trace/v1"
+	commonpb "go.opentelemetry.io/proto/otlp/common/v1"
+	tracepb "go.opentelemetry.io/proto/otlp/trace/v1"
+	"google.golang.org/protobuf/proto"
 )
 
 func TestOTLPExportsMetadataAndPreservesTraceParentWithoutSecrets(t *testing.T) {
@@ -45,6 +49,10 @@ func TestOTLPExportsMetadataAndPreservesTraceParentWithoutSecrets(t *testing.T) 
 	r.Header.Set("Tracestate", "vendor=tracestate-secret")
 	r.Header.Set("Traceparent", "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01")
 	r.Header.Set("X-Request-Id", "01a00000-0000-7000-8000-000000000001")
+	inputTokens, outputTokens, cachedTokens := int64(12), int64(7), int64(3)
+	model := "observed-model"
+	mediaUnits := "audio_ms=240"
+	finishReasons := []string{"stop"}
 	AdmittedRequest(h.Runtime().ForInstallation("installation"), h.Tracer(), "openai", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		root := trace.SpanContextFromContext(r.Context())
 		if root.TraceID().String() != "4bf92f3577b34da6a3ce929d0e0e4736" || root.TraceState().String() != "" {
@@ -53,6 +61,9 @@ func TestOTLPExportsMetadataAndPreservesTraceParentWithoutSecrets(t *testing.T) 
 		request := RequestFromContext(r.Context())
 		request.RecordInferenceContext("openai", "generation", "chat", "safe-route", "safe-key-id", "generation")
 		_, attempt := request.Attempt(r.Context(), "openai", "revision", "model")
+		attempt.RecordUsage(&inputTokens, &outputTokens, &cachedTokens, &mediaUnits)
+		attempt.RecordResponse(model, finishReasons)
+		request.RecordResponse("openai", model, &inputTokens, &outputTokens, finishReasons)
 		headers := http.Header{}
 		attempt.InjectUpstream(headers, true)
 		if !strings.Contains(headers.Get("Traceparent"), root.TraceID().String()) || headers.Get("Tracestate") != "" {
@@ -69,8 +80,23 @@ func TestOTLPExportsMetadataAndPreservesTraceParentWithoutSecrets(t *testing.T) 
 	}
 	close(payloads)
 	var payload []byte
+	spans := map[string]*tracepb.Span{}
 	for part := range payloads {
 		payload = append(payload, part...)
+		batch := &collectortrace.ExportTraceServiceRequest{}
+		if err := proto.Unmarshal(part, batch); err != nil {
+			t.Fatalf("decode exported spans: %v", err)
+		}
+		for _, resource := range batch.GetResourceSpans() {
+			for _, scope := range resource.GetScopeSpans() {
+				for _, span := range scope.GetSpans() {
+					if spans[span.GetName()] != nil {
+						t.Fatalf("duplicate exported span %q", span.GetName())
+					}
+					spans[span.GetName()] = span
+				}
+			}
+		}
 	}
 	for _, required := range []string{"request", "attempt", "safe-route", "safe-key-id", "openllmproxy", "0.1.0"} {
 		if !bytes.Contains(payload, []byte(required)) {
@@ -81,6 +107,42 @@ func TestOTLPExportsMetadataAndPreservesTraceParentWithoutSecrets(t *testing.T) 
 		if bytes.Contains(payload, []byte(secret)) {
 			t.Errorf("export included private %s", secret)
 		}
+	}
+	for _, name := range []string{"request", "attempt"} {
+		span := spans[name]
+		if span == nil {
+			t.Fatalf("missing %s span", name)
+		}
+		attrs := map[string]*commonpb.AnyValue{}
+		for _, attr := range span.GetAttributes() {
+			attrs[attr.GetKey()] = attr.GetValue()
+		}
+		if got := attrs["olp.evidence_origin"].GetStringValue(); got != "gateway_observed" {
+			t.Errorf("%s origin = %q, want gateway_observed", name, got)
+		}
+		if got := attrs["gen_ai.response.model"].GetStringValue(); got != model {
+			t.Errorf("%s response model = %q, want %q", name, got, model)
+		}
+		if got := attrs["gen_ai.usage.input_tokens"].GetIntValue(); got != inputTokens {
+			t.Errorf("%s input tokens = %d, want %d", name, got, inputTokens)
+		}
+		if got := attrs["gen_ai.usage.output_tokens"].GetIntValue(); got != outputTokens {
+			t.Errorf("%s output tokens = %d, want %d", name, got, outputTokens)
+		}
+		if got := attrs["gen_ai.response.finish_reasons"].GetArrayValue().GetValues(); len(got) != len(finishReasons) || got[0].GetStringValue() != finishReasons[0] {
+			t.Errorf("%s finish reasons = %v, want %v", name, got, finishReasons)
+		}
+		if name == "attempt" {
+			if got := attrs["olp.usage.cached_input_tokens"].GetIntValue(); got != cachedTokens {
+				t.Errorf("%s cached input tokens = %d, want %d", name, got, cachedTokens)
+			}
+			if got := attrs["olp.usage.media_units"].GetStringValue(); got != mediaUnits {
+				t.Errorf("%s media units = %q, want %q", name, got, mediaUnits)
+			}
+		}
+	}
+	if !bytes.Equal(spans["attempt"].GetParentSpanId(), spans["request"].GetSpanId()) {
+		t.Error("attempt span is not parented to the request span")
 	}
 }
 
