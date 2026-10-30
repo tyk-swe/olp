@@ -10,11 +10,13 @@
   let {
     client,
     current,
-    providers = []
+    providers = [],
+    allowed = true
   }: {
     client: QueryClient;
     current: CodeRoute;
     providers?: PaidTargetOption[];
+    allowed?: boolean;
   } = $props();
 </script>
 
@@ -25,7 +27,7 @@
     accounts={[]}
     pools={[]}
     projectId={current.project_id}
-    allowed={true}
+    {allowed}
     onDraftChange={() => {}}
     onSaved={async () => {}}
     onCancel={() => {}}

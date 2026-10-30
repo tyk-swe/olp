@@ -43,6 +43,36 @@ func TestCodeConfigurationDigestRetainsPublishedAndDraftPolicies(t *testing.T) {
 	}
 }
 
+func TestCodeConfigurationDigestRetainsIndependentCodexIdentityPolicy(t *testing.T) {
+	document := func(draft, published bool) configuration.Document {
+		return configuration.Document{APIVersion: configuration.APIVersion, Code: &configuration.CodeConfiguration{Routes: []configuration.CodeRouteEntry{{ID: "route", Draft: configuration.CodeRoutePolicy{CodexCLIIdentity: draft, MessagesToCodex: true}, Published: &configuration.CodePublication{Policy: configuration.CodeRoutePolicy{CodexCLIIdentity: published, MessagesToCodex: true}}}}}}
+	}
+	digest := func(value configuration.Document) string {
+		digest, err := configuration.Digest(&value)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return digest
+	}
+	baseline := digest(document(false, false))
+	for _, policy := range []struct{ draft, published bool }{{true, false}, {false, true}, {true, true}} {
+		if digest(document(policy.draft, policy.published)) == baseline {
+			t.Fatal("configuration lost an independently selected identity policy", policy)
+		}
+	}
+	encoded, err := json.Marshal(document(false, true))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var restored configuration.Document
+	if err := json.Unmarshal(encoded, &restored); err != nil {
+		t.Fatal(err)
+	}
+	if restored.Code.Routes[0].Draft.CodexCLIIdentity || !restored.Code.Routes[0].Published.Policy.CodexCLIIdentity {
+		t.Fatal("roundtrip changed the draft or published opt-in", restored.Code.Routes[0])
+	}
+}
+
 func TestCodeConfigurationRefusesCrossProjectAndUnresolvedReferences(t *testing.T) {
 	const account = "0192cf87-d4ab-7f2e-a8b1-c2d3e4f50601"
 	const pool = "0192cf87-d4ab-7f2e-a8b1-c2d3e4f50602"

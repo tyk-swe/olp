@@ -155,7 +155,7 @@
       busy ||
       !allowed ||
       !confirm(
-        `Publish the current draft for ${route.slug}? Provider connections will be captured without an inference probe.`
+        `Publish the current draft for ${route.slug}? Provider connections will be captured without an inference probe.${route.codex_cli_identity ? ' Codex CLI identity compatibility will fill Originator=codex_cli_rs only when all supplied Originator values are absent or blank on Codex subscription HTTP and WebSocket requests. Explicit identity headers, User-Agent, prompts, tools, reasoning and state are preserved. This compatibility identity may violate provider terms and risk account suspension.' : ' Codex CLI identity compatibility is disabled. Identity headers and prompts are preserved.'}`
       )
     )
       return;
@@ -429,6 +429,12 @@
             <dd>{route.models.join(', ')}</dd>
             <dt>Draft pool</dt>
             <dd>{route.pool_id}</dd>
+            <dt>Draft Codex CLI identity compatibility</dt>
+            <dd>
+              {route.codex_cli_identity
+                ? 'Enabled, requires publication'
+                : 'Disabled'}
+            </dd>
             <dt>Draft enabled</dt>
             <dd>{route.enabled ? 'Yes' : 'No'}</dd>
             <dt>Latest publication</dt>

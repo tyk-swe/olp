@@ -46,6 +46,27 @@ func TestResearchSnapshotCloneOwnsBindingAndServices(t *testing.T) {
 	}
 }
 
+func TestPublishedCodexIdentityFreezesSeparatePolicy(t *testing.T) {
+	input := &Snapshot{CodeRoutes: map[string]codemode.Route{"coding": {CodexCLIIdentity: true}}}
+	frozen := input.Clone()
+	adapter, _ := codeadapter.Lookup(codemode.AdapterCodex)
+	if adapter.CompatibilityOriginator(frozen.CodeRoutes["coding"]) == "" {
+		t.Fatal("publication dropped explicit identity policy")
+	}
+	input.CodeRoutes["coding"] = codemode.Route{MessagesToCodex: true}
+	if adapter.CompatibilityOriginator(frozen.CodeRoutes["coding"]) == "" || adapter.CompatibilityOriginator(input.Clone().CodeRoutes["coding"]) != "" {
+		t.Fatal("draft edit changed an existing publication or translation enabled identity")
+	}
+	enabled, err := frozen.Digest()
+	if err != nil {
+		t.Fatal(err)
+	}
+	disabled, err := input.Clone().Digest()
+	if err != nil || enabled == disabled {
+		t.Fatal("new publication did not capture policy change", err)
+	}
+}
+
 func TestPublishedMessagesPolicySelectsEligibleFrozenProviders(t *testing.T) {
 	publishedAt := time.Date(2026, time.October, 30, 0, 0, 0, 0, time.UTC)
 	snapshot := Snapshot{

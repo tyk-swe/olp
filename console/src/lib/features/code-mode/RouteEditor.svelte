@@ -158,6 +158,7 @@
   );
   let recoveryAttempts = $state(initial?.initial_recovery_attempts ?? 0);
   let messagesToCodex = $state(initial?.messages_to_codex ?? false);
+  let codexCLIIdentity = $state(initial?.codex_cli_identity ?? false);
   let chatToAntigravity = $state(initial?.chat_to_antigravity ?? false);
   let research = $state(!!initial?.tools);
   let researchAccount = $state(initial?.tools?.account_id ?? '');
@@ -262,6 +263,7 @@
         model_rewriting: modelRewriting,
         model_pools: poolResult.pools,
         messages_to_codex: messagesToCodex,
+        codex_cli_identity: codexCLIIdentity,
         chat_to_antigravity: chatToAntigravity,
         initial_recovery_attempts: recoveryAttempts,
         tools: research
@@ -481,9 +483,9 @@
     Explicitly enables Messages text and tool use through Codex accounts after
     publication. Explicit low, medium and high reasoning effort is supported.
     Signed thinking, numeric reasoning budgets, beta features and other
-    unsupported required semantics are refused. Client identity and prompts stay
-    unchanged. Model rewriting requires its separate opt-in. Identity and prompt
-    compatibility remain disabled.
+    unsupported required semantics are refused. Translation alone preserves
+    client identity and prompts. Model rewriting and Codex identity
+    compatibility require their separate opt-ins.
   </p>
   <label class="choice"
     ><input
@@ -495,8 +497,26 @@
   <p>
     Enables the controlled Gemini text and function tool path after publication.
     Signed thought state, reasoning controls, media and server tools are
-    refused. Identity and prompt compatibility remain disabled. Current models
-    and live subscription tool workflows remain unqualified.
+    refused. This translation preserves identity and prompts. Current models and
+    live subscription tool workflows remain unqualified.
+  </p>
+  <label class="choice">
+    <input
+      id="code-codex-cli-identity"
+      type="checkbox"
+      bind:checked={codexCLIIdentity}
+    />
+    Enable Codex CLI identity compatibility
+  </label>
+  <p>
+    Disabled by default and independent of translation. After publication, Codex
+    subscription HTTP and WebSocket requests with no nonblank Originator value
+    receive Originator=codex_cli_rs. Explicit Originator values, User-Agent,
+    prompts, tools, reasoning and state stay unchanged. No prompt changes are
+    enabled. This compatibility identity may violate provider terms and risk
+    account suspension. Review the exact change and risk before enabling and
+    publishing. Existing route administrators authorize this policy for eligible
+    accounts in the route pool.
   </p>
   <label class="choice"
     ><input

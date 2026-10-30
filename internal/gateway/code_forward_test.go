@@ -271,6 +271,117 @@ func codeDo(t *testing.T, server *httptest.Server, body []byte, extra http.Heade
 	return response
 }
 
+func TestCodeCodexIdentityPreservesNativeExchange(t *testing.T) {
+	for _, test := range []struct {
+		name, profile, path, model string
+		enabled                    bool
+		originators                []string
+		want                       []string
+	}{
+		{"disabled", codexauth.ProfileID, "responses", "native-model", false, nil, nil},
+		{"enabled", codexauth.ProfileID, "responses", "native-model", true, nil, []string{"codex_cli_rs"}},
+		{"blank", codexauth.ProfileID, "responses", "native-model", true, []string{""}, []string{"codex_cli_rs"}},
+		{"mixed-blank-caller", codexauth.ProfileID, "responses", "native-model", true, []string{"", "caller-extension"}, []string{"", "caller-extension"}},
+		{"caller", codexauth.ProfileID, "responses", "native-model", true, []string{"caller-client", "caller-extension"}, []string{"caller-client", "caller-extension"}},
+		{"other-adapter", codeplans.OpenCodeGoProfile, "v1/responses", "gpt-fixture", true, nil, nil},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			h, ledger, server := newCodeForwardHarness(t, codeForwardSetup{Models: []string{test.model}, Policy: access.KeyPolicy{Scopes: []string{"inference"}}})
+			route := h.rt.release.Snapshot.CodeRoutes["coding"]
+			route.CodexCLIIdentity, route.MessagesToCodex = test.enabled, true
+			h.rt.release.Snapshot.CodeRoutes["coding"] = route
+			h.rt.release.Snapshot.CodeConnections["revision:provider"] = routing.Configuration{Kind: connectors.KindPlugin, AuthMode: connectors.AuthGrant, ProfileID: test.profile, Endpoint: h.upstream.URL + "/a"}
+			if err := h.rt.release.Snapshot.Compile(); err != nil {
+				t.Fatal(err)
+			}
+			requestBody := []byte(`{ "model":"` + test.model + `", "instructions":"Preserve all instructions", "input":[{"type":"function_call","call_id":"call-1","name":"read","arguments":"{}"},{"type":"function_call_output","call_id":"call-1","output":"source"}], "reasoning":{"effort":"high"}, "extension":{"unknown":true} }`)
+			responseBody := []byte(`{ "id":"identity-response", "status":"completed", "output":[], "usage":{"input_tokens":2,"output_tokens":1,"total_tokens":3}, "extension":{"unknown":true} }`)
+			h.upstream.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				body, err := io.ReadAll(r.Body)
+				if err != nil || !bytes.Equal(body, requestBody) || !slices.Equal(r.Header.Values("Originator"), test.want) || r.Header.Get("User-Agent") != "caller-agent" || r.Header.Get("X-Caller-Extension") != "preserve" || r.Header.Get("Authorization") != "Bearer upstream-only" {
+					t.Errorf("identity policy changed native content or headers, body %s originator %v error %v", body, r.Header.Values("Originator"), err)
+				}
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write(responseBody)
+			})
+			request, err := http.NewRequestWithContext(t.Context(), http.MethodPost, server.URL+"/code/coding/"+test.path, bytes.NewReader(requestBody))
+			if err != nil {
+				t.Fatal(err)
+			}
+			request.Header = http.Header{"Authorization": {"Bearer " + fullKey}, "X-Olp-Code-Affinity": {"identity-session"}, "Originator": test.originators, "User-Agent": {"caller-agent"}, "X-Caller-Extension": {"preserve"}}
+			response, err := server.Client().Do(request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer response.Body.Close()
+			body, err := io.ReadAll(response.Body)
+			if err != nil || response.StatusCode != http.StatusOK || !bytes.Equal(body, responseBody) {
+				t.Fatalf("native response changed, status %d body %s error %v", response.StatusCode, body, err)
+			}
+			usage := ledger.wait(t)
+			if usage.Total == nil || *usage.Total != 3 {
+				t.Fatalf("usage lost %+v", usage)
+			}
+		})
+	}
+}
+
+func TestCodeCodexIdentityPreservesWebSocketExchange(t *testing.T) {
+	for _, test := range []struct {
+		name, originator, want string
+		enabled                bool
+	}{
+		{"disabled", "", "", false},
+		{"enabled", "", "codex_cli_rs", true},
+		{"caller", "caller-client", "caller-client", true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			h, ledger, server := newCodeForwardHarness(t)
+			route := h.rt.release.Snapshot.CodeRoutes["coding"]
+			route.CodexCLIIdentity = test.enabled
+			h.rt.release.Snapshot.CodeRoutes["coding"] = route
+			requestBody := []byte(`{ "type":"response.create", "model":"native-model", "instructions":"Keep instructions", "input":"private-prompt", "reasoning":{"effort":"high"}, "extension":{"number":1.2300} }`)
+			responseBody := []byte(`{ "type":"response.completed", "response":{"id":"identity-ws","usage":{"input_tokens":2,"output_tokens":1,"total_tokens":3},"extension":{"number":1.2300}} }`)
+			h.upstream.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Header.Get("Originator") != test.want || r.Header.Get("User-Agent") != "caller-agent" || r.Header.Get("Authorization") != "Bearer upstream-only" {
+					t.Error("WebSocket identity policy changed explicit caller or authorization headers")
+				}
+				conn, err := websocket.Accept(w, r, nil)
+				if err != nil {
+					t.Error(err)
+					return
+				}
+				defer conn.CloseNow()
+				kind, body, err := conn.Read(t.Context())
+				if err != nil || kind != websocket.MessageText || !bytes.Equal(body, requestBody) {
+					t.Errorf("WebSocket request changed, body %s error %v", body, err)
+					return
+				}
+				_ = conn.Write(t.Context(), websocket.MessageText, responseBody)
+				_, _, _ = conn.Read(t.Context())
+			})
+			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+			defer cancel()
+			conn, response, err := websocket.Dial(ctx, server.URL+"/code/coding/responses", &websocket.DialOptions{HTTPHeader: http.Header{"Authorization": {"Bearer " + fullKey}, "Thread-Id": {"identity-ws"}, "Originator": {test.originator}, "User-Agent": {"caller-agent"}}})
+			if err != nil {
+				t.Fatalf("identity WebSocket handshake %v %v", response, err)
+			}
+			defer conn.CloseNow()
+			if err := conn.Write(ctx, websocket.MessageText, requestBody); err != nil {
+				t.Fatal(err)
+			}
+			_, body, err := conn.Read(ctx)
+			if err != nil || !bytes.Equal(body, responseBody) {
+				t.Fatalf("WebSocket response changed, body %s error %v", body, err)
+			}
+			usage := ledger.wait(t)
+			if usage.Total == nil || *usage.Total != 3 {
+				t.Fatalf("WebSocket usage lost %+v", usage)
+			}
+		})
+	}
+}
+
 func TestCodeGenericResponsesPreserveNativeExchange(t *testing.T) {
 	h, ledger, server := newCodeForwardHarness(t)
 	requestBody := []byte(`{ "model":"native-model", "input":"Explain this function", "vendor_extension":{"keep":true} }`)
@@ -696,7 +807,7 @@ func TestCodeMessagesToCodexTextExchange(t *testing.T) {
 					if err := json.Unmarshal(body, &request); err != nil || request.Model != "native-model" || len(request.Input) != 2 || request.Input[0].Role != "developer" || request.Input[0].Content[0].Text != "Keep the answer short\nx-anthropic-billing-header: preserve" || request.Input[1].Content[0].Text != "Hello" || !request.Stream || request.MaxOutputTokens != 32 || request.Store == nil || *request.Store || request.Instructions == nil || *request.Instructions != "" {
 						t.Errorf("translated request %s, error %v", body, err)
 					}
-					if r.URL.Path != "/a/responses" || r.URL.RawQuery != "" || r.Header.Get("Authorization") != "Bearer upstream-only" || r.Header.Get("Anthropic-Beta") != "" || r.Header.Get("X-Claude-Code-Session-Id") != "translated-text" {
+					if r.URL.Path != "/a/responses" || r.URL.RawQuery != "" || r.Header.Get("Authorization") != "Bearer upstream-only" || r.Header.Get("Anthropic-Beta") != "" || r.Header.Get("Originator") != "" || r.Header.Get("X-Claude-Code-Session-Id") != "translated-text" {
 						t.Errorf("unexpected target %s, headers %v", r.URL.Path, r.Header)
 					}
 					w.Header().Set("Content-Type", "text/event-stream")
@@ -901,8 +1012,12 @@ func TestCodeMessagesToCodexToolExchange(t *testing.T) {
 				g, ledger, server := newCodeForwardHarness(t)
 				route := g.rt.release.Snapshot.CodeRoutes["coding"]
 				route.MessagesToCodex = true
+				route.CodexCLIIdentity = true
 				g.rt.release.Snapshot.CodeRoutes["coding"] = route
 				g.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
+					if r.Header.Get("Originator") != "codex_cli_rs" {
+						t.Error("separate identity policy did not reach translated tool request")
+					}
 					var request struct {
 						Input []struct {
 							Type, CallID, Name, Arguments, Output string
