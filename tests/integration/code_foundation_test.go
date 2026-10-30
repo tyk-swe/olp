@@ -26,7 +26,7 @@ type codeFixture struct {
 	h                                                       *accessHarness
 	owner                                                   *browser
 	project, user, key, provider, credential, account, pool string
-	accountRecord                                           map[string]any
+	accountRecord, routeRecord                              map[string]any
 	route                                                   codemode.Route
 	store                                                   *resources.CodeStore
 }
@@ -60,6 +60,7 @@ func newCodeFixtureWithProfile(t *testing.T, profile string, bodyLimit ...int64)
 	headers := etagHeader(draft)
 	headers["Idempotency-Key"] = "publish"
 	published := h.want(owner, "POST", "/api/v1/code/routes/"+draft["id"].(string)+"/publish", nil, headers, 200)
+	f.routeRecord = published
 	encoded, _ := json.Marshal(published)
 	if err := json.Unmarshal(encoded, &f.route); err != nil {
 		t.Fatal(err)
@@ -422,7 +423,7 @@ func TestCodeFoundationInitialRecoverySettlesBeforeReplacementReservation(t *tes
 	f := newCodeFixture(t)
 	draft := f.h.want(f.owner, "PUT", "/api/v1/code/routes/"+f.route.ID, map[string]any{
 		"project_id": f.project, "slug": f.route.Slug, "pool_id": f.pool, "models": f.route.Models, "enabled": true, "initial_recovery_attempts": 1,
-	}, map[string]string{"If-Match": f.route.ETag}, 200)
+	}, etagHeader(f.routeRecord), 200)
 	published := f.h.want(f.owner, "POST", "/api/v1/code/routes/"+f.route.ID+"/publish", nil, withMatch(draft, idem("bounded-recovery-publish")), 200)
 	route := codePublicDecode[codemode.Route](t, published)
 	f.h.want(f.owner, "POST", "/api/v1/code/budgets", map[string]any{"project_id": f.project, "route_id": route.ID, "api_key_id": nil, "daily_tokens": 10, "monthly_tokens": 10, "enabled": true}, idem("recovery-budget"), 201)
@@ -621,6 +622,7 @@ func TestCodeFoundationExactAliasesPreservePinsAcrossPublication(t *testing.T) {
 		headers := etagHeader(draft)
 		headers["Idempotency-Key"] = idempotency
 		published := f.h.want(f.owner, "POST", "/api/v1/code/routes/"+f.route.ID+"/publish", nil, headers, 200)
+		f.routeRecord = published
 		encoded, _ := json.Marshal(published)
 		if err := json.Unmarshal(encoded, &f.route); err != nil || !f.route.ModelRewriting || f.route.Aliases["team-code"] != target || f.route.MessagesToCodex || f.route.InitialRecoveryAttempts != 1 {
 			t.Fatalf("exact alias publication %+v, %v", f.route, err)
@@ -679,7 +681,7 @@ func TestCodeFoundationInitialRecoveryRefreshPreservesConcurrentCooldown(t *test
 	f := newCodeFixture(t)
 	draft := f.h.want(f.owner, "PUT", "/api/v1/code/routes/"+f.route.ID, map[string]any{
 		"project_id": f.project, "slug": f.route.Slug, "pool_id": f.pool, "models": f.route.Models, "enabled": true, "initial_recovery_attempts": 1,
-	}, map[string]string{"If-Match": f.route.ETag}, 200)
+	}, etagHeader(f.routeRecord), 200)
 	published := f.h.want(f.owner, "POST", "/api/v1/code/routes/"+f.route.ID+"/publish", nil, withMatch(draft, idem("concurrent-cooldown-publish")), 200)
 	route := codePublicDecode[codemode.Route](t, published)
 	input := f.input("refresh-with-concurrent-cooldown", "", nil)
