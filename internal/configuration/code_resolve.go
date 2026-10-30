@@ -157,7 +157,7 @@ func resolveCode(ctx context.Context, q access.Queryer, code *CodeConfiguration,
 		if err != nil {
 			return resolvedCodeResource[CodeRouteEntry]{}, err
 		}
-		publication, err := resolveCodePublication(ctx, q, entry.Published, poolIDs, accountIDs, project, bindings)
+		publication, err := resolveCodePublication(ctx, q, entry.Published, poolIDs, accountIDs, project, bindings, accounts, pools)
 		if err != nil {
 			return resolvedCodeResource[CodeRouteEntry]{}, err
 		}
@@ -267,10 +267,10 @@ func resolveCodePolicy(policy CodeRoutePolicy, pools, accounts map[string]string
 		}
 		return &codemode.ResearchTools{AccountID: accounts[policy.Tools.AccountID], Services: policy.Tools.Services}
 	}()
-	return CodeRoutePolicy{PaidParticipation: policy.PaidParticipation, PaidTargets: policy.PaidTargets, Pool: pools[policy.Pool], Models: policy.Models, Enabled: policy.Enabled, ModelPools: policy.ModelPools, InitialRecoveryAttempts: policy.InitialRecoveryAttempts, ModelRewriting: policy.ModelRewriting, Aliases: policy.Aliases, MessagesToCodex: policy.MessagesToCodex, Tools: tools, MaxBodyBytes: policy.MaxBodyBytes}
+	return CodeRoutePolicy{ChatToAntigravity: policy.ChatToAntigravity, PaidParticipation: policy.PaidParticipation, PaidTargets: policy.PaidTargets, Pool: pools[policy.Pool], Models: policy.Models, Enabled: policy.Enabled, ModelPools: policy.ModelPools, InitialRecoveryAttempts: policy.InitialRecoveryAttempts, ModelRewriting: policy.ModelRewriting, Aliases: policy.Aliases, MessagesToCodex: policy.MessagesToCodex, Tools: tools, MaxBodyBytes: policy.MaxBodyBytes}
 }
 
-func resolveCodePublication(ctx context.Context, q access.Queryer, publication *CodePublication, pools, accounts map[string]string, project string, bindings CodeBindings) (*CodePublication, error) {
+func resolveCodePublication(ctx context.Context, q access.Queryer, publication *CodePublication, poolIDs, accountIDs map[string]string, project string, bindings CodeBindings, accounts []resolvedCodeResource[providers.CodeAccountInput], pools []resolvedCodeResource[access.CodePoolInput]) (*CodePublication, error) {
 	if publication == nil {
 		return nil, nil
 	}
@@ -289,6 +289,9 @@ func resolveCodePublication(ctx context.Context, q access.Queryer, publication *
 		if cfg.Kind != current.Kind || cfg.AuthMode != current.AuthMode || cfg.ProfileID != current.ProfileID {
 			return connection{}, access.Invalid("code.routes.published.connections", "Frozen connections must retain the destination provider's kind, authentication and profile.")
 		}
+		if err := validateCodeFrozenCredentials(ctx, q, id, cfg, publication.Policy.Pool, accounts, pools); err != nil {
+			return connection{}, err
+		}
 		bound, err := codeNetworkConfiguration(cfg, current, entry.NetworkCredentialRef, name)
 		if err != nil {
 			return connection{}, err
@@ -298,7 +301,7 @@ func resolveCodePublication(ctx context.Context, q access.Queryer, publication *
 	if err != nil {
 		return nil, err
 	}
-	policy, err := resolveCodePaidPolicy(ctx, q, resolveCodePolicy(publication.Policy, pools, accounts), project, bindings)
+	policy, err := resolveCodePaidPolicy(ctx, q, resolveCodePolicy(publication.Policy, poolIDs, accountIDs), project, bindings)
 	if err != nil {
 		return nil, err
 	}
@@ -365,4 +368,24 @@ func codeBoundValue(ref *string, bindings map[string]string) string {
 		return ""
 	}
 	return bindings[*ref]
+}
+
+func validateCodeFrozenCredentials(ctx context.Context, q access.Queryer, provider string, configuration providers.Configuration, poolRef string, accounts []resolvedCodeResource[providers.CodeAccountInput], pools []resolvedCodeResource[access.CodePoolInput]) error {
+	pool := slices.IndexFunc(pools, func(pool resolvedCodeResource[access.CodePoolInput]) bool { return pool.Ref == poolRef })
+	if pool < 0 {
+		return access.Invalid("code.routes.published", "Resolve the published pool before its credential bindings.")
+	}
+	for _, account := range accounts {
+		if account.Input.ProviderID != provider || !slices.Contains(pools[pool].Input.AccountIDs, account.ID) {
+			continue
+		}
+		var matches bool
+		if err := q.QueryRow(ctx, `SELECT coalesce(plugin_digest=$2 AND profile_id=$3,false) FROM olp.provider_credentials WHERE id=$1`, account.Input.CredentialID, configuration.ProfileRevision, configuration.ProfileID).Scan(&matches); err != nil {
+			return err
+		}
+		if !matches {
+			return access.Invalid("code.routes.published.connections", "Bind destination account credentials enrolled for the frozen provider profile and revision.")
+		}
+	}
+	return nil
 }

@@ -1407,6 +1407,9 @@ func bindingFingerprint(doc *Document, digest string, bindings bindingSet, expec
 		clear(value)
 		sealed = append(sealed, map[string]string{"ref": name, "sha256": hex.EncodeToString(sum[:])})
 	}
+	if len(doc.codeBindings.Credentials)+len(doc.codeBindings.Users)+len(doc.codeBindings.APIKeys) == 0 {
+		return map[string]any{"document_digest": digest, "expected_digest": expected, "secret_bindings": sealed}
+	}
 	return map[string]any{"document_digest": digest, "expected_digest": expected, "secret_bindings": sealed, "code_bindings": doc.codeBindings}
 }
 

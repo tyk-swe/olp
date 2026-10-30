@@ -92,3 +92,21 @@ func TestCodeConfigurationPreservesUnassignedPools(t *testing.T) {
 		t.Fatalf("unassigned pool policy was rejected %v", err)
 	}
 }
+
+func TestCodeConfigurationDigestRetainsChatCompatibility(t *testing.T) {
+	digest := func(enabled bool) string {
+		t.Helper()
+		var document configuration.Document
+		if err := json.Unmarshal([]byte(fmt.Sprintf(`{"api_version":"openllmproxy.dev/config/v2","code":{"routes":[{"id":"0192cf87-d4ab-7f2e-a8b1-c2d3e4f50601","project":"team","slug":"coding","draft":{"pool":"0192cf87-d4ab-7f2e-a8b1-c2d3e4f50602","models":["native"],"enabled":true,"chat_to_antigravity":%t}}]}}`, enabled)), &document); err != nil {
+			t.Fatal(err)
+		}
+		value, err := configuration.Digest(&document)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return value
+	}
+	if digest(true) == digest(false) {
+		t.Fatal("explicit chat compatibility was discarded from the configuration intent")
+	}
+}

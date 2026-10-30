@@ -503,7 +503,7 @@ func TestCodeConfigurationCrossProjectRoundTrip(t *testing.T) {
 	personal := h.want(owner, "POST", "/api/v1/code/pools", access.CodePoolInput{ProjectID: f.project, Name: "Personal portable pool", Kind: "personal", OwnerUserID: &ownerID, AccountIDs: []string{account.ID}, AccountWeights: map[string]int64{account.ID: 3}, APIKeyIDs: []string{f.keyID}}, idem("portable-personal"), 201)
 	poolID := personal["id"].(string)
 	routeID := f.route["id"].(string)
-	policy := routes.CodeRouteInput{ProjectID: f.project, Slug: "qualification", PoolID: poolID, Models: account.Models, Enabled: true, ModelRewriting: true, Aliases: map[string]string{"portable": account.Models[0]}, ModelPools: map[string][]string{"portable": account.Models}, InitialRecoveryAttempts: 2, MessagesToCodex: true, MaxBodyBytes: new(int64(1048576)), Tools: &codemode.ResearchTools{AccountID: account.ID, Services: []string{"search"}}}
+	policy := routes.CodeRouteInput{ProjectID: f.project, Slug: "qualification", PoolID: poolID, Models: account.Models, Enabled: true, ModelRewriting: true, Aliases: map[string]string{"portable": account.Models[0]}, ModelPools: map[string][]string{"portable": account.Models}, InitialRecoveryAttempts: 2, MessagesToCodex: true, ChatToAntigravity: true, MaxBodyBytes: new(int64(1048576)), Tools: &codemode.ResearchTools{AccountID: account.ID, Services: []string{"search"}}}
 	draft := h.want(owner, "PUT", "/api/v1/code/routes/"+routeID, policy, etagHeader(f.route), 200)
 	published := h.want(owner, "POST", "/api/v1/code/routes/"+routeID+"/publish", nil, withMatch(draft, idem("portable-publish")), 200)
 	unpublished := policy
@@ -586,7 +586,7 @@ func TestCodeConfigurationCrossProjectRoundTrip(t *testing.T) {
 		Document configuration.Document `json:"document"`
 	}](t, h.want(owner, "GET", "/api/v1/configuration/export", nil, nil, 200))
 	restored := destinationExport.Document.Code.Routes[slices.IndexFunc(destinationExport.Document.Code.Routes, func(r configuration.CodeRouteEntry) bool { return r.Slug == slug })]
-	if restored.ID == sourceRoute.ID || restored.Published == nil || restored.Draft.Enabled || !restored.Published.Policy.Enabled || restored.Published.Policy.InitialRecoveryAttempts != sourceRoute.Published.Policy.InitialRecoveryAttempts || restored.Published.Policy.Aliases["portable"] != sourceRoute.Published.Policy.Aliases["portable"] || !restored.Published.Policy.MessagesToCodex || restored.Published.Policy.Tools == nil {
+	if restored.ID == sourceRoute.ID || restored.Published == nil || restored.Draft.Enabled || !restored.Published.Policy.Enabled || restored.Published.Policy.InitialRecoveryAttempts != sourceRoute.Published.Policy.InitialRecoveryAttempts || restored.Published.Policy.Aliases["portable"] != sourceRoute.Published.Policy.Aliases["portable"] || !restored.Published.Policy.MessagesToCodex || !restored.Published.Policy.ChatToAntigravity || restored.Published.Policy.Tools == nil {
 		t.Fatal("destination did not retain independent effective and draft policies", restored)
 	}
 	restoredPools := h.want(owner, "GET", "/api/v1/code/pools?project_id="+destinationProject, nil, nil, 200)
@@ -603,7 +603,7 @@ func TestCodeConfigurationCrossProjectRoundTrip(t *testing.T) {
 		t.Fatal("budget policy did not roundtrip", budgets)
 	}
 	h.refresh()
-	request, err := http.NewRequestWithContext(t.Context(), "POST", f.gateway.URL+"/code/"+slug+"/chat/completions", strings.NewReader(`{"model":"portable","stream":true,"messages":[{"role":"user","content":"configuration roundtrip"}]}`))
+	request, err := http.NewRequestWithContext(t.Context(), "POST", f.gateway.URL+"/code/"+slug+"/v1/chat/completions", strings.NewReader(`{"model":"portable","stream":true,"max_tokens":16,"messages":[{"role":"user","content":"configuration roundtrip"}]}`))
 	if err != nil {
 		t.Fatal(err)
 	}

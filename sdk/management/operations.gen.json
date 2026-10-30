@@ -4907,6 +4907,10 @@
               "additionalProperties": {
                 "$ref": "#/$defs/ConfigurationCodePaidTarget"
               }
+            },
+            "chat_to_antigravity": {
+              "type": "boolean",
+              "description": "Explicit opt-in for chat translation through the Antigravity adapter."
             }
           },
           "required": [
@@ -28217,6 +28221,10 @@
               "additionalProperties": {
                 "$ref": "#/$defs/ConfigurationCodePaidTarget"
               }
+            },
+            "chat_to_antigravity": {
+              "type": "boolean",
+              "description": "Explicit opt-in for chat translation through the Antigravity adapter."
             }
           },
           "required": [

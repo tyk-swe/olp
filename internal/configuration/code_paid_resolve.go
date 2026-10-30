@@ -48,7 +48,7 @@ func resolveCodePaidPolicy(ctx context.Context, q access.Queryer, policy CodeRou
 	})), nil
 }
 func codePolicyPaid(policy CodeRoutePolicy, targets map[string]CodePaidTarget) CodeRoutePolicy {
-	return CodeRoutePolicy{Pool: policy.Pool, Models: policy.Models, Enabled: policy.Enabled, ModelPools: policy.ModelPools, InitialRecoveryAttempts: policy.InitialRecoveryAttempts, ModelRewriting: policy.ModelRewriting, Aliases: policy.Aliases, MessagesToCodex: policy.MessagesToCodex, Tools: policy.Tools, MaxBodyBytes: policy.MaxBodyBytes, PaidParticipation: policy.PaidParticipation, PaidTargets: targets}
+	return CodeRoutePolicy{ChatToAntigravity: policy.ChatToAntigravity, Pool: policy.Pool, Models: policy.Models, Enabled: policy.Enabled, ModelPools: policy.ModelPools, InitialRecoveryAttempts: policy.InitialRecoveryAttempts, ModelRewriting: policy.ModelRewriting, Aliases: policy.Aliases, MessagesToCodex: policy.MessagesToCodex, Tools: policy.Tools, MaxBodyBytes: policy.MaxBodyBytes, PaidParticipation: policy.PaidParticipation, PaidTargets: targets}
 }
 
 func resolveCodePaid(ctx context.Context, q access.Queryer, publication *CodePublication, policy CodeRoutePolicy, project string, bindings CodeBindings) (map[string]routing.Provider, error) {

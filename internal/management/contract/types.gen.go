@@ -8107,7 +8107,10 @@ type ConfigurationCodeRoute struct {
 type ConfigurationCodeRoutePolicy struct {
 	// Aliases Stable public model names mapped directly to one native identifier in models. Requires model_rewriting. Alias chains and native name collisions are rejected. Immutable publications pin these mappings. Repointing an alias affects new conversations. Existing conversations retain their stored exact target while it remains published and authorized.
 	Aliases *map[string]string `json:"aliases,omitempty"`
-	Enabled bool               `json:"enabled"`
+
+	// ChatToAntigravity Explicit opt-in for chat translation through the Antigravity adapter.
+	ChatToAntigravity *bool `json:"chat_to_antigravity,omitempty"`
+	Enabled           bool  `json:"enabled"`
 
 	// InitialRecoveryAttempts Maximum additional attempts per request for a new or established single-pin root conversation after an adapter proves nonexecution and the complete input is portable. Zero disables recovery. Published revisions pin this policy. Existing children, socket ownership and unresolved attempts prevent migration. Exact models remain the default. Only explicit model_pools authorize model changes. Live authority remains required. Producing-account reference ownership is preserved. Accepted, partial, ambiguous and opaque work never replays.
 	InitialRecoveryAttempts *int `json:"initial_recovery_attempts,omitempty"`

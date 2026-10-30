@@ -27,11 +27,7 @@ func codeChangeFor[T any](ctx context.Context, q access.Queryer, kind string, en
 	if err := q.QueryRow(ctx, query, entry.ID).Scan(&current); err != nil {
 		return codeChange{}, err
 	}
-	action := "replace"
-	if codeJSONEqual(current, entry.Input) {
-		action = "noop"
-	}
-	return codeChange{Kind: kind, Key: entry.Ref, ID: entry.ID, Action: action}, nil
+	return codeChange{Kind: kind, Key: entry.Ref, ID: entry.ID, Action: codeReplacement(!codeJSONEqual(current, entry.Input))}, nil
 }
 func codeChanges(ctx context.Context, q access.Queryer, resolved *resolvedCode) ([]codeChange, error) {
 	accounts, err := mapCodeResult(resolved.Accounts, func(e resolvedCodeResource[providers.CodeAccountInput]) (codeChange, error) {
@@ -65,11 +61,7 @@ func codeChanges(ctx context.Context, q access.Queryer, resolved *resolvedCode) 
 		}
 		draftChanged := !codeJSONEqual(codePolicy(draft), e.Input.Draft)
 		publishedChanged := !codePublicationEqual(publication, e.Input.Published)
-		action := "noop"
-		if draftChanged || publishedChanged {
-			action = "replace"
-		}
-		return codeChange{Kind: "code_route", Key: e.Ref, ID: e.ID, Action: action, PublicationChanged: publishedChanged}, nil
+		return codeChange{Kind: "code_route", Key: e.Ref, ID: e.ID, Action: codeReplacement(draftChanged || publishedChanged), PublicationChanged: publishedChanged}, nil
 	})
 	if err != nil {
 		return nil, err
@@ -124,4 +116,11 @@ func codePublicationEqual(left, right *CodePublication) bool {
 		return left == nil && right == nil
 	}
 	return codeJSONEqual(left.Policy, right.Policy) && codeJSONEqual(left.Connections, right.Connections) && codeJSONEqual(left.paidResolved, right.paidResolved)
+}
+
+func codeReplacement(changed bool) string {
+	if changed {
+		return "replace"
+	}
+	return "noop"
 }

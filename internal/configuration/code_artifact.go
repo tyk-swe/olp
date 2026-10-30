@@ -54,6 +54,7 @@ type CodePaidConnection struct {
 	SlotKeyRefs map[string][]string `json:"slot_key_refs"`
 }
 type CodeRoutePolicy struct {
+	ChatToAntigravity       bool                      `json:"chat_to_antigravity,omitempty"`
 	PaidParticipation       bool                      `json:"paid_participation"`
 	PaidTargets             map[string]CodePaidTarget `json:"paid_targets,omitempty"`
 	Pool                    string                    `json:"pool"`
@@ -99,7 +100,7 @@ type CodeBudgetEntry struct {
 }
 
 func codePolicy(route codemode.Route) CodeRoutePolicy {
-	return CodeRoutePolicy{PaidParticipation: route.PaidParticipation, PaidTargets: maps.Collect(func(yield func(string, CodePaidTarget) bool) {
+	return CodeRoutePolicy{ChatToAntigravity: route.ChatToAntigravity, PaidParticipation: route.PaidParticipation, PaidTargets: maps.Collect(func(yield func(string, CodePaidTarget) bool) {
 		for model, target := range route.PaidTargets {
 			if !yield(model, CodePaidTarget{Provider: target.ProviderID, Slot: target.SlotID}) {
 				return
@@ -109,7 +110,7 @@ func codePolicy(route codemode.Route) CodeRoutePolicy {
 }
 
 func (policy CodeRoutePolicy) input(project, slug, pool string) routes.CodeRouteInput {
-	return routes.CodeRouteInput{PaidParticipation: policy.PaidParticipation, PaidTargets: maps.Collect(func(yield func(string, codemode.PaidTarget) bool) {
+	return routes.CodeRouteInput{ChatToAntigravity: policy.ChatToAntigravity, PaidParticipation: policy.PaidParticipation, PaidTargets: maps.Collect(func(yield func(string, codemode.PaidTarget) bool) {
 		for model, target := range policy.PaidTargets {
 			if !yield(model, codemode.PaidTarget{ProviderID: target.Provider, SlotID: target.Slot}) {
 				return
