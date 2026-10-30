@@ -79,10 +79,10 @@ test('manages real project pools, draft routes and publications without inferenc
       input: `
 INSERT INTO olp.providers(id,name,kind,state,configuration,etag,slots_etag,created_by,project_id)
 VALUES(:'provider','Fixture coding subscription','plugin','draft',
-  '{"kind":"plugin","auth_mode":"grant","endpoint":"https://fixture.invalid"}',
+  '{"kind":"plugin","auth_mode":"grant","endpoint":"https://fixture.invalid","profile_id":"codex-subscription","profile_revision":"fixture-digest"}',
   :'etag',:'slots_etag',:'owner',:'project');
-INSERT INTO olp.provider_credentials(id,provider_id,version,plugin_digest,principal,grant_facts)
-VALUES(:'credential',:'provider',1,'fixture-digest','fixture-principal','{}');
+INSERT INTO olp.provider_credentials(id,provider_id,version,plugin_digest,profile_id,principal,grant_facts)
+VALUES(:'credential',:'provider',1,'fixture-digest','codex-subscription','fixture-principal','{}');
 INSERT INTO olp.provider_grants(credential_id) VALUES(:'credential');
 `,
       stdio: ['pipe', 'pipe', 'pipe']
