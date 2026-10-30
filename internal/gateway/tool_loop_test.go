@@ -3152,6 +3152,12 @@ func TestGatewayWorkflowDiscoveryRespectsCallerAuthority(t *testing.T) {
 		},
 	}}
 	h := nativeWorkflowHarness(t, project, "openai", "openai-chat", "unary", "transformed", []string{allowed, hidden}, true, fixture)
+	hiddenPrice := "0.3141592653589793"
+	hiddenTool := WorkflowTool{ToolsetID: hidden, RevisionID: uuid.NewString(), Definition: routing.MCPToolsetTool{
+		Alias: "t_dddddddddddddddddddddddddddddddd_eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", Name: "hidden_tool_canary", Classification: "read_only", UnitPrice: &hiddenPrice,
+		InputSchema: json.RawMessage(`{"type":"object","properties":{"hidden_schema_canary":{"type":"string"}}}`),
+	}}
+	h.gateway.WorkflowTools = &multipleWorkflowTools{tools: []WorkflowTool{fixture.tool, hiddenTool}}
 	h.rt.keys[fullKey] = access.Authority{ID: h.rt.keys[fullKey].ID, ProjectID: &project, Policy: access.KeyPolicy{
 		Scopes: []string{"models_read", "inference", "tools"}, AllowedToolsets: []string{allowed},
 		RunLimits: &limits.WorkflowBounds{MaxIterations: &maxIterations},
@@ -3176,8 +3182,17 @@ func TestGatewayWorkflowDiscoveryRespectsCallerAuthority(t *testing.T) {
 					} `json:"gateway_execution"`
 				} `json:"capabilities"`
 			}
-			if err := json.NewDecoder(resp.Body).Decode(&document); err != nil {
+			body, err := io.ReadAll(resp.Body)
+			if err != nil {
 				t.Fatal(err)
+			}
+			if err := json.Unmarshal(body, &document); err != nil {
+				t.Fatal(err)
+			}
+			for _, secret := range []string{hiddenTool.ToolsetID, hiddenTool.RevisionID, hiddenTool.Definition.Alias, hiddenTool.Definition.Name, "hidden_schema_canary", hiddenPrice} {
+				if bytes.Contains(body, []byte(secret)) {
+					t.Fatalf("response disclosed hidden tool data %q: %s", secret, body)
+				}
 			}
 			capability := document.Capabilities.GatewayExecution
 			wantEnabled := endpoint == "/v1/models/"+routeSlug
@@ -3208,5 +3223,125 @@ func TestGatewayWorkflowDiscoveryRespectsCallerAuthority(t *testing.T) {
 	}
 	if resp.StatusCode != http.StatusOK || document.Capabilities.GatewayExecution.Enabled || len(document.Capabilities.GatewayExecution.Tools) != 0 {
 		t.Fatalf("models-only caller saw workflow authority: %+v", document)
+	}
+}
+
+func TestGatewayWorkflowDiscoveryRespectsReachableServingRoutes(t *testing.T) {
+	for _, test := range []struct {
+		name              string
+		edge              string
+		predicate         routing.Predicate
+		primaryCertified  bool
+		backupCertified   bool
+		backupStreaming   bool
+		backupStrict      bool
+		backupUnavailable bool
+		backupForbidden   bool
+		backupUnsupported bool
+		contextBound      bool
+		fallbackOn        string
+		invoke            bool
+		modes             []string
+	}{
+		{name: "selector delegation", edge: "selector", backupCertified: true, modes: []string{"unary"}},
+		{name: "context fallback", edge: "fallback", backupCertified: true, contextBound: true, fallbackOn: routing.FallbackContextWindow, invoke: true, modes: []string{"unary"}},
+		{name: "unreachable exhausted fallback", edge: "fallback", backupCertified: true, fallbackOn: routing.FallbackExhausted},
+		{name: "context fallback without a context bound", edge: "fallback", backupCertified: true, fallbackOn: routing.FallbackContextWindow},
+		{name: "unrelated route", backupCertified: true},
+		{name: "forbidden selector route", edge: "selector", backupCertified: true, backupForbidden: true},
+		{name: "forbidden fallback route", edge: "fallback", backupCertified: true, backupForbidden: true, contextBound: true, fallbackOn: routing.FallbackContextWindow},
+		{name: "strict selector route", edge: "selector", backupCertified: true, backupStrict: true},
+		{name: "strict fallback route", edge: "fallback", backupCertified: true, backupStrict: true, contextBound: true, fallbackOn: routing.FallbackContextWindow},
+		{name: "strict delegated route stops before fallback", edge: "strict-selector-with-fallback", backupCertified: true, backupStrict: true},
+		{name: "selector route lacks generation", edge: "selector", backupCertified: true, backupUnavailable: true},
+		{name: "selector connector does not support generation", edge: "selector", backupCertified: true, backupUnsupported: true},
+		{name: "selector requires another operation", edge: "selector", predicate: routing.Predicate{Operations: []string{"embedding"}}, backupCertified: true},
+		{name: "stream selector cannot advertise unary", edge: "selector", predicate: routing.Predicate{Streaming: new(true)}, backupCertified: true},
+		{name: "stream selector advertises streaming", edge: "selector", predicate: routing.Predicate{Streaming: new(true)}, backupStreaming: true, modes: []string{"streaming"}},
+		{name: "unconditional selector hides primary target", edge: "selector", primaryCertified: true},
+		{name: "conditional selector can leave primary target", edge: "selector", predicate: routing.Predicate{Tools: new(true)}, primaryCertified: true, modes: []string{"unary"}},
+		{name: "tag selector hides primary target", edge: "tags", primaryCertified: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			project, toolset := uuid.NewString(), uuid.NewString()
+			fixture := &workflowFixture{runID: uuid.NewString(), tool: WorkflowTool{ToolsetID: toolset}}
+			h := nativeWorkflowHarness(t, project, "openai", "openai-chat", "unary", routing.FidelityTransformed, []string{toolset}, true, fixture)
+			routes := []string{}
+			if test.backupForbidden {
+				routes = []string{routeSlug}
+			}
+			h.rt.keys[fullKey] = access.Authority{ID: h.rt.keys[fullKey].ID, ProjectID: &project, Policy: access.KeyPolicy{
+				Scopes: []string{"models_read", "inference", "tools"}, AllowedToolsets: []string{toolset}, AllowedRoutes: routes,
+			}}
+			h.republish(func(snapshot *routing.Snapshot, a, b routing.Provider) {
+				primary := snapshot.Routes[routeSlug]
+				backup := primary
+				primary.Targets = []routing.Target{primary.Targets[0]}
+				backup.ID, backup.RoutingID, backup.RevisionID, backup.Slug = uuid.NewString(), uuid.NewString(), uuid.NewString(), backupSlug
+				backup.Targets = []routing.Target{{ID: uuid.NewString(), ProviderID: b.ID, ProviderModel: modelB, Weight: 1, Timeout: 2000, RoutingID: uuid.NewString(), Tags: []string{"selected"}}}
+				backup.Behavior = routing.Behavior{}
+				if test.backupStrict {
+					backup.Fidelity.Mode = routing.FidelityStrict
+				}
+				if test.backupUnavailable {
+					backup.Operations = []string{"embedding"}
+				}
+				switch test.edge {
+				case "selector", "strict-selector-with-fallback":
+					primary.Selectors = []routing.Selector{{ID: "delegate", Route: backupSlug, When: test.predicate}}
+				case "fallback":
+					primary.Fallbacks = []routing.Fallback{{Route: backupSlug, On: []string{test.fallbackOn}}}
+				case "tags":
+					primary.Targets = append(primary.Targets, backup.Targets[0])
+					primary.Selectors = []routing.Selector{{ID: "tags", Tags: []string{"selected"}}}
+				}
+				if test.edge == "strict-selector-with-fallback" {
+					rescue := backup
+					rescue.ID, rescue.RoutingID, rescue.RevisionID, rescue.Slug = uuid.NewString(), uuid.NewString(), uuid.NewString(), "rescue-route"
+					rescue.Fidelity.Mode = routing.FidelityTransformed
+					primary.Fallbacks = []routing.Fallback{{Route: rescue.Slug, On: []string{routing.FallbackExhausted}}}
+					snapshot.Routes[rescue.Slug] = rescue
+				}
+				a.Capabilities[0].ToolCalls, b.Capabilities[0].ToolCalls = test.primaryCertified, test.backupCertified
+				if test.contextBound {
+					a.Models = map[string]json.RawMessage{modelA: json.RawMessage(`{"context_length":1}`)}
+				}
+				if test.backupUnsupported {
+					b.Kind, b.ProfileID = "gemini", "gemini-live"
+				}
+				if test.backupStreaming {
+					b.Capabilities = append(b.Capabilities, routing.Capability{Model: modelB, Operation: "generation", Surface: "openai", Mode: "streaming", ToolCalls: true})
+				}
+				snapshot.Providers[a.ID], snapshot.Providers[b.ID], snapshot.Routes[routeSlug], snapshot.Routes[backupSlug] = a, b, primary, backup
+			})
+			resp := h.do(t.Context(), http.MethodGet, "/v1/models/"+routeSlug, fullKey, nil, nil)
+			defer resp.Body.Close()
+			var document struct {
+				Capabilities struct {
+					GatewayExecution *routing.WorkflowCapability `json:"gateway_execution"`
+				} `json:"capabilities"`
+			}
+			body, err := io.ReadAll(resp.Body)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if test.backupForbidden && bytes.Contains(body, []byte(backupSlug)) {
+				t.Fatalf("response disclosed forbidden route: %s", body)
+			}
+			if err := json.Unmarshal(body, &document); err != nil {
+				t.Fatal(err)
+			}
+			capability := document.Capabilities.GatewayExecution
+			if resp.StatusCode != http.StatusOK || capability == nil || capability.Enabled != (len(test.modes) != 0) || !slices.Equal(capability.CertifiedModes, test.modes) {
+				t.Fatalf("status=%d capability=%+v, want modes %v", resp.StatusCode, capability, test.modes)
+			}
+			if test.invoke {
+				h.mock.set("b", completion(modelB, answerText))
+				response, body := h.chat(fullKey, nil, `,"olp_toolsets":[],"max_tokens":100`)
+				if response.StatusCode != http.StatusOK || h.mock.count("a") != 0 || h.mock.count("b") != 1 {
+					t.Fatalf("context fallback did not serve the workflow: status=%d body=%v a=%d b=%d", response.StatusCode, body, h.mock.count("a"), h.mock.count("b"))
+				}
+			}
+		})
 	}
 }

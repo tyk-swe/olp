@@ -1151,7 +1151,7 @@ type modelCapabilities struct {
 func (s *Server) modelCapabilities(ctx context.Context, release *runtime.Release, authority access.Authority, route routing.Route, surface string) modelCapabilities {
 	return modelCapabilities{
 		RouteCapabilities: routing.EffectiveCapabilities(release.Snapshot, route),
-		GatewayExecution:  mcp.DescribeWorkflow(ctx, s.WorkflowTools, authority, release, route, route, surface, nil, s.WorkflowRuns != nil && s.Debits != nil, s.now()),
+		GatewayExecution:  mcp.DescribeReachableWorkflow(ctx, s.WorkflowTools, authority, release, route, surface, s.WorkflowRuns != nil && s.Debits != nil, s.now()),
 	}
 }
 
