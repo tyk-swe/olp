@@ -127,7 +127,7 @@ func TestCodeQualificationFleetWeightedDistribution(t *testing.T) {
 	pool := codeDiscoveryResponse[contract.CodePool](t, f.pool)
 	first := codeDiscoveryResponse[contract.CodeAccount](t, f.accounts[0]).Id.String()
 	second := codeDiscoveryResponse[contract.CodeAccount](t, f.accounts[1]).Id.String()
-	f.h.want(f.owner, "PUT", "/api/v1/code/pools/"+pool.Id.String(), codePoolWeightInput(pool, map[string]int64{first: 5, second: 1}), map[string]string{"If-Match": pool.Etag.String()}, 200)
+	f.h.want(f.owner, "PUT", "/api/v1/code/pools/"+pool.Id.String(), codePoolWeightInput(pool, map[string]int64{first: 5, second: 1}), etagHeader(f.pool), 200)
 	for i := range 200 {
 		f.success(t, i%2, fmt.Sprintf("weighted-%d", i), "")
 	}
@@ -150,7 +150,8 @@ func TestCodeQualificationFleetWeightsPreserveBindingsAndEligibility(t *testing.
 	secondAccount := codeDiscoveryResponse[contract.CodeAccount](t, f.accounts[1])
 	second := secondAccount.Id.String()
 	poolPath := "/api/v1/code/pools/" + pool.Id.String()
-	firstHeavy := codeDiscoveryResponse[contract.CodePool](t, f.h.want(f.owner, "PUT", poolPath, codePoolWeightInput(pool, map[string]int64{first: 2147483647, second: 1}), map[string]string{"If-Match": pool.Etag.String()}, 200))
+	firstHeavyResponse := f.h.want(f.owner, "PUT", poolPath, codePoolWeightInput(pool, map[string]int64{first: 2147483647, second: 1}), etagHeader(f.pool), 200)
+	firstHeavy := codeDiscoveryResponse[contract.CodePool](t, firstHeavyResponse)
 	for i := range 4 {
 		f.success(t, i%2, fmt.Sprintf("first-heavy-%d", i), "")
 	}
@@ -160,7 +161,7 @@ func TestCodeQualificationFleetWeightsPreserveBindingsAndEligibility(t *testing.
 			t.Fatal("new roots did not follow account weights")
 		}
 	}
-	f.h.want(f.owner, "PUT", poolPath, codePoolWeightInput(firstHeavy, map[string]int64{first: 1, second: 2147483647}), map[string]string{"If-Match": firstHeavy.Etag.String()}, 200)
+	f.h.want(f.owner, "PUT", poolPath, codePoolWeightInput(firstHeavy, map[string]int64{first: 1, second: 2147483647}), etagHeader(firstHeavyResponse), 200)
 	f.success(t, 1, "first-heavy-0", "")
 	f.success(t, 0, "weighted-child", "first-heavy-0")
 	for i := range 4 {
@@ -179,9 +180,10 @@ func TestCodeQualificationFleetWeightsPreserveBindingsAndEligibility(t *testing.
 		}
 	}
 	accountPath := "/api/v1/code/accounts/" + second
-	otherModel := codeDiscoveryResponse[contract.CodeAccount](t, f.h.want(f.owner, "PUT", accountPath, codeDiscoveryAccountInput(secondAccount, true, []string{"gpt-5.4-mini"}), map[string]string{"If-Match": secondAccount.Etag.String()}, 200))
+	otherModelResponse := f.h.want(f.owner, "PUT", accountPath, codeDiscoveryAccountInput(secondAccount, true, []string{"gpt-5.4-mini"}), etagHeader(f.accounts[1]), 200)
+	otherModel := codeDiscoveryResponse[contract.CodeAccount](t, otherModelResponse)
 	f.success(t, 0, "exact-model-root", "")
-	f.h.want(f.owner, "PUT", accountPath, codeDiscoveryAccountInput(otherModel, true, []string{"gpt-5.4"}), map[string]string{"If-Match": otherModel.Etag.String()}, 200)
+	f.h.want(f.owner, "PUT", accountPath, codeDiscoveryAccountInput(otherModel, true, []string{"gpt-5.4"}), etagHeader(otherModelResponse), 200)
 	f.peer.Mode("quota")
 	response, _, err := f.request(t.Context(), 1, "second-heavy-0", "", codeBody())
 	if err != nil || response.StatusCode != 429 {
@@ -204,7 +206,7 @@ func TestCodeQualificationFleetWeightedPersonalAndSharedIsolation(t *testing.T) 
 	firstAccount := codeDiscoveryResponse[contract.CodeAccount](t, f.accounts[0])
 	first := firstAccount.Id.String()
 	second := codeDiscoveryResponse[contract.CodeAccount](t, f.accounts[1]).Id.String()
-	f.h.want(f.owner, "PUT", "/api/v1/code/pools/"+pool.Id.String(), codePoolWeightInput(pool, map[string]int64{first: 1, second: 2147483647}), map[string]string{"If-Match": pool.Etag.String()}, 200)
+	f.h.want(f.owner, "PUT", "/api/v1/code/pools/"+pool.Id.String(), codePoolWeightInput(pool, map[string]int64{first: 1, second: 2147483647}), etagHeader(f.pool), 200)
 	owner := codeDiscoveryResponse[contract.UserDetailResponse](t, f.h.want(f.owner, "GET", "/api/v1/profile", nil, nil, 200))
 	key := codeDiscoveryResponse[contract.CreateApiKeyResponse](t, f.h.want(f.owner, "POST", "/api/v1/api-keys", contract.CreateApiKeyRequest{
 		ProjectId: nullable.NewNullableWithValue(pool.ProjectId), Name: "Personal key", Scopes: &[]string{"inference"},
@@ -214,11 +216,12 @@ func TestCodeQualificationFleetWeightedPersonalAndSharedIsolation(t *testing.T) 
 		ProjectId: pool.ProjectId, Name: "Weighted personal", Kind: contract.CodePoolWriteKindPersonal, OwnerUserId: nullable.NewNullableWithValue(owner.Id),
 		AccountIds: []uuid.UUID{firstAccount.Id}, AccountWeights: &map[string]int64{first: 1}, ApiKeyIds: []uuid.UUID{key.Id},
 	}, idem("weighted-personal-pool"), 201))
-	draft := codeDiscoveryResponse[contract.CodeRoute](t, f.h.want(f.owner, "POST", "/api/v1/code/routes", contract.CodeRouteWrite{
+	draftResponse := f.h.want(f.owner, "POST", "/api/v1/code/routes", contract.CodeRouteWrite{
 		ProjectId: pool.ProjectId, Slug: "qualification-personal", PoolId: personal.Id,
 		Models: []string{"gpt-5.4"}, Enabled: true,
-	}, idem("weighted-personal-route"), 201))
-	f.h.want(f.owner, "POST", "/api/v1/code/routes/"+draft.Id.String()+"/publish", nil, map[string]string{"If-Match": draft.Etag.String(), "Idempotency-Key": "weighted-personal-publish"}, 200)
+	}, idem("weighted-personal-route"), 201)
+	draft := codeDiscoveryResponse[contract.CodeRoute](t, draftResponse)
+	f.h.want(f.owner, "POST", "/api/v1/code/routes/"+draft.Id.String()+"/publish", nil, withMatch(draftResponse, idem("weighted-personal-publish")), 200)
 	for _, process := range f.gateways {
 		if err := process.Kill(); err != nil {
 			t.Fatal(err)
