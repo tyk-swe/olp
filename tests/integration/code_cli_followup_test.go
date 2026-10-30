@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/tyk-swe/olp/internal/codemode"
+	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/tests/codecli"
 	codexfixture "github.com/tyk-swe/olp/tests/fixtures/codex-qualified"
 )
@@ -123,7 +124,7 @@ func TestCodeCLIFollowupFreshReviewParentEstablishment(t *testing.T) {
 				t.Log("Official WebSocket root handshake establishes a pin before review child; no parent inference.")
 				return
 			}
-			if ctx.Err() != nil || err == nil || !bytes.Contains(out, []byte("code_parent_unresolved")) {
+			if ctx.Err() != nil || err == nil || !bytes.Contains(out, []byte("409 Conflict")) || !bytes.Contains(out, []byte("full context")) {
 				t.Fatalf("expected unresolved-parent refusal: %v\n%s", err, out)
 			}
 			requests := ingress.captures()
@@ -133,6 +134,15 @@ func TestCodeCLIFollowupFreshReviewParentEstablishment(t *testing.T) {
 			for _, r := range requests {
 				if r.Header.Get("X-Openai-Subagent") != "review" || r.Header.Get("X-Codex-Parent-Thread-Id") == "" || r.Header.Get("X-Codex-Parent-Thread-Id") == r.Header.Get("Thread-Id") {
 					t.Fatal("review no longer starts with distinct child and parent identities")
+				}
+			}
+			refusals := codePublicDecode[[]contract.CodeRefusal](t, f.list("refusals"))
+			if len(refusals) == 0 {
+				t.Fatal("unresolved review child recorded no refusal")
+			}
+			for _, refusal := range refusals {
+				if refusal.Code != "code_parent_unresolved" || refusal.ApiKeyId.String() != f.keyID || refusal.RouteId.String() != f.route["id"] {
+					t.Fatalf("unexpected review refusal: %+v", refusal)
 				}
 			}
 			if len(f.peer.Requests()) != 0 || len(f.peer.Handshakes()) != 0 || len(f.list("bindings")) != 0 || len(f.list("attempts")) != 0 {
