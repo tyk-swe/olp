@@ -131,6 +131,7 @@ INSERT INTO olp.provider_grants(credential_id) VALUES(:'credential');
   await expect(
     page.getByLabel('Translate Chat through Antigravity')
   ).not.toBeChecked();
+  await page.evaluate(() => window.scrollTo(0, 0));
   await page.screenshot({
     path: info.outputPath('code-route-before-policy.png'),
     fullPage: true
@@ -147,6 +148,7 @@ INSERT INTO olp.provider_grants(credential_id) VALUES(:'credential');
   await page
     .getByLabel('Exact model aliases')
     .fill('team-code=fixture-native-model');
+  await page.evaluate(() => window.scrollTo(0, 0));
   await page.screenshot({
     path: info.outputPath('code-route-after-policy.png'),
     fullPage: true
@@ -233,6 +235,7 @@ INSERT INTO olp.provider_grants(credential_id) VALUES(:'credential');
   await expect(page.getByLabel('Client model')).toHaveValue(model);
   expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
   await page.setViewportSize({ width: 390, height: 844 });
+  await page.evaluate(() => window.scrollTo(0, 0));
   await page.screenshot({
     path: info.outputPath('code-client-model-mobile.png'),
     fullPage: true
