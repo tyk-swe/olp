@@ -16,6 +16,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/codemode"
 	"github.com/tyk-swe/olp/internal/codeplans"
+	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/testutil"
 	codexfixture "github.com/tyk-swe/olp/tests/fixtures/codex-qualified"
 )
@@ -388,12 +389,18 @@ func TestCodeQualificationTranslatedContinuationRechecksLiveAuthority(t *testing
 				if transferResponse.StatusCode != http.StatusUnprocessableEntity || !bytes.Contains(refusal, []byte("ownership is immutable")) {
 					t.Fatalf("personal pool owner transfer status %d body %s", transferResponse.StatusCode, refusal)
 				}
-				unchanged := f.h.want(f.owner, "GET", poolPath, nil, nil, 200)
-				if unchanged["owner_user_id"] != memberID {
-					t.Fatal("personal pool owner changed after refused transfer")
+				pools := codePublicDecode[[]contract.CodePool](t, f.list("pools"))
+				index := slices.IndexFunc(pools, func(candidate contract.CodePool) bool { return candidate.Id.String() == pool["id"] })
+				if index < 0 {
+					t.Fatal("personal pool disappeared after refused transfer")
+				}
+				unchanged := pools[index]
+				ownerID, ownerErr := unchanged.OwnerUserId.Get()
+				if ownerErr != nil || ownerID.String() != memberID || unchanged.Etag.String() != pool["etag"] {
+					t.Fatal("personal pool owner or revision changed after refused transfer")
 				}
 				removedKey := map[string]any{"project_id": f.project, "name": "Controlled personal membership removed", "kind": "personal", "owner_user_id": memberID, "account_ids": []string{f.accounts[0]["id"].(string), f.accounts[1]["id"].(string)}, "api_key_ids": []string{}}
-				f.h.want(f.owner, "PUT", poolPath, removedKey, etagHeader(unchanged), 200)
+				f.h.want(f.owner, "PUT", poolPath, removedKey, map[string]string{"If-Match": fmt.Sprintf("%q", unchanged.Etag.String())}, 200)
 			default:
 				f.revoke(t, target, key, memberID)
 			}
