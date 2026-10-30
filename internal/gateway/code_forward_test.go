@@ -31,8 +31,8 @@ type codeTestLedger struct {
 	marks      []string
 	aborts     []string
 	usages     []codemode.Usage
-	health     []string
-	allowances []codemode.Allowance
+	health     codemode.HealthObservation
+	allowance  codemode.Allowance
 	refusals   []string
 	refuse     string
 	done       chan codemode.Usage
@@ -114,16 +114,16 @@ func (l *codeTestLedger) Abort(_ context.Context, id string) error {
 	l.aborts = append(l.aborts, id)
 	return nil
 }
-func (l *codeTestLedger) ObserveHealth(_ context.Context, _ string, status string) error {
+func (l *codeTestLedger) ObserveHealth(_ context.Context, _ string, status codemode.HealthObservation) error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	l.health = append(l.health, status)
+	l.health = status
 	return nil
 }
 func (l *codeTestLedger) ObserveAllowance(_ context.Context, _ string, a codemode.Allowance) error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	l.allowances = append(l.allowances, a)
+	l.allowance = l.allowance.Merge(a)
 	return nil
 }
 func (l *codeTestLedger) RecordRefusal(_ context.Context, _ codemode.Route, _, _ string, reason string) error {
@@ -552,5 +552,101 @@ func TestCodeMessagesToCodexPreservesNativeModelIdentifiers(t *testing.T) {
 	defer ordinary.Body.Close()
 	if ordinary.StatusCode != 400 {
 		t.Fatalf("ordinary route accepted a native model identifier, status %d", ordinary.StatusCode)
+	}
+}
+
+func TestCodeForwardingObservesRetryAfterWithoutChangingAllowance(t *testing.T) {
+	now := time.Date(2026, 10, 30, 10, 0, 0, 0, time.UTC)
+	for _, test := range []struct {
+		name    string
+		status  int
+		headers []string
+		delay   *time.Duration
+	}{
+		{"seconds", 429, []string{"120"}, new(2 * time.Minute)},
+		{"date", 503, []string{now.Add(3 * time.Minute).Format(http.TimeFormat)}, new(3 * time.Minute)},
+		{"zero", 429, []string{"0"}, new(time.Duration(0))},
+		{"past", 503, []string{now.Add(-time.Minute).Format(http.TimeFormat)}, new(time.Duration(0))},
+		{"malformed", 429, []string{"soon"}, nil},
+		{"negative", 503, []string{"-1"}, nil},
+		{"missing", 429, nil, nil},
+		{"ambiguous", 503, []string{"30", "120"}, nil},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			h, ledger, server := newCodeForwardHarness(t)
+			h.gateway.now = func() time.Time { return now }
+			h.mock.set("a", func(w http.ResponseWriter, _ *http.Request) {
+				for _, value := range test.headers {
+					w.Header().Add("Retry-After", value)
+				}
+				w.WriteHeader(test.status)
+				_, _ = io.WriteString(w, `{"error":"controlled rejection"}`)
+			})
+			response := codeDo(t, server, []byte(`{"model":"native-model","input":[]}`), nil)
+			_, _ = io.Copy(io.Discard, response.Body)
+			ledger.wait(t)
+			ledger.mu.Lock()
+			defer ledger.mu.Unlock()
+			if response.StatusCode != test.status || ledger.health.Status == "" {
+				t.Fatalf("status %d observations %+v", response.StatusCode, ledger.health)
+			}
+			observed := ledger.health
+			if !observed.ObservedAt.Equal(now) {
+				t.Fatalf("observation time %s", observed.ObservedAt)
+			}
+			if test.delay == nil && observed.RetryAt != nil || test.delay != nil && (observed.RetryAt == nil || !observed.RetryAt.Equal(now.Add(*test.delay))) {
+				t.Fatalf("retry at %v", observed.RetryAt)
+			}
+			if test.status == 429 && observed.Status != "quota_limited" || test.status == 503 && observed.Status != "unavailable" {
+				t.Fatalf("health %s", observed.Status)
+			}
+			if ledger.allowance.RemainingTokens != nil || ledger.allowance.RemainingRequests != nil ||
+				ledger.allowance.RemainingPercent != nil || len(ledger.allowance.Windows) != 0 || ledger.allowance.Credits != nil {
+				t.Fatal("rejection invented allowance")
+			}
+			if h.mock.count("a") != 1 {
+				t.Fatal("rejection replayed generation")
+			}
+		})
+	}
+}
+
+func TestCodeForwardingRetainsExhaustionWithMalformedOrMissingReset(t *testing.T) {
+	now := time.Date(2026, 10, 30, 10, 0, 0, 0, time.UTC)
+	for _, test := range []struct {
+		name, signal string
+		reset        *time.Time
+	}{
+		{"future", fmt.Sprint(now.Add(time.Hour).Unix()), new(now.Add(time.Hour))},
+		{"expired", fmt.Sprint(now.Add(-time.Hour).Unix()), new(now.Add(-time.Hour))},
+		{"malformed", "soon", nil},
+		{"missing", "", nil},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			h, ledger, server := newCodeForwardHarness(t)
+			h.gateway.now = func() time.Time { return now }
+			h.mock.set("a", func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("X-Codex-Primary-Used-Percent", "100")
+				if test.signal != "" {
+					w.Header().Set("X-Codex-Primary-Reset-At", test.signal)
+				}
+				w.WriteHeader(429)
+			})
+			response := codeDo(t, server, []byte(`{"model":"native-model","input":[]}`), nil)
+			_, _ = io.Copy(io.Discard, response.Body)
+			ledger.wait(t)
+			ledger.mu.Lock()
+			defer ledger.mu.Unlock()
+			if response.StatusCode != 429 || ledger.allowance.RemainingPercent == nil {
+				t.Fatalf("exhaustion not observed, status %d allowance %+v", response.StatusCode, ledger.allowance)
+			}
+			allowance := ledger.allowance
+			if allowance.RemainingPercent == nil || *allowance.RemainingPercent != 0 || !allowance.ObservedAt.Equal(now) {
+				t.Fatalf("exhaustion or observation time changed %+v", allowance)
+			}
+			if test.reset == nil && allowance.ResetsAt != nil || test.reset != nil && (allowance.ResetsAt == nil || !allowance.ResetsAt.Equal(*test.reset)) {
+				t.Fatalf("reset signal inferred or lost %+v", allowance)
+			}
+		})
 	}
 }

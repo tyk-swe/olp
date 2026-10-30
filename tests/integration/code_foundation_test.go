@@ -417,3 +417,114 @@ func TestCodeFoundationMessagesTranslationPolicyPublication(t *testing.T) {
 		t.Fatal("translated Claude setup missing", config)
 	}
 }
+
+func TestCodeFoundationAvailabilityPreservesFreshHealthAndIndependentAllowance(t *testing.T) {
+	f := newCodeFixture(t)
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	observed := now.Add(-10 * time.Minute)
+	retry := now.Add(2 * time.Hour)
+	readAccount := func() codemode.Account {
+		listing := f.h.want(f.owner, "GET", "/api/v1/code/accounts?project_id="+f.project, nil, nil, 200)
+		raw, err := json.Marshal(listing["items"])
+		if err != nil {
+			t.Fatal(err)
+		}
+		var accounts []codemode.Account
+		if err := json.Unmarshal(raw, &accounts); err != nil {
+			t.Fatal(err)
+		}
+		if len(accounts) != 1 {
+			t.Fatalf("accounts %+v", accounts)
+		}
+		return accounts[0]
+	}
+	observeHealth := func(observation codemode.HealthObservation) {
+		if err := f.store.ObserveHealth(t.Context(), f.account, observation); err != nil {
+			t.Fatal(err)
+		}
+	}
+	observeHealth(codemode.HealthObservation{Status: "quota_limited", ObservedAt: observed, RetryAt: &retry})
+	observeHealth(codemode.HealthObservation{Status: "healthy", ObservedAt: observed.Add(-time.Minute)})
+	observeHealth(codemode.HealthObservation{Status: "quota_limited", ObservedAt: observed.Add(time.Minute)})
+	blocked := readAccount()
+	if blocked.Eligible || blocked.Health != "quota_limited" || blocked.UnavailableUntil == nil || !blocked.UnavailableUntil.Equal(retry) || blocked.HealthObservedAt == nil || !blocked.HealthObservedAt.Equal(observed.Add(time.Minute)) {
+		t.Fatalf("stale or partial observation erased cooldown %+v", blocked)
+	}
+	observeHealth(codemode.HealthObservation{Status: "healthy", ObservedAt: observed.Add(2 * time.Minute)})
+	completed := readAccount()
+	if completed.Eligible || completed.Health != "quota_limited" || completed.UnavailableUntil == nil || !completed.UnavailableUntil.Equal(retry) || completed.HealthObservedAt == nil || !completed.HealthObservedAt.Equal(*blocked.HealthObservedAt) {
+		t.Fatalf("overlapping completion erased active retry deadline %+v", completed)
+	}
+	_, cooldownErr := f.store.Admit(t.Context(), f.input("during-retry-after", "", nil))
+	codeRefusal(t, cooldownErr, "code_account_unavailable")
+	expired := now.Add(-time.Minute)
+	observeHealth(codemode.HealthObservation{Status: "quota_limited", ObservedAt: observed.Add(3 * time.Minute), RetryAt: &expired})
+	recovered := readAccount()
+	if !recovered.Eligible || recovered.Health != "quota_limited" || recovered.Allowance != nil {
+		t.Fatalf("retry deadline invented allowance or failed to recover %+v", recovered)
+	}
+	if _, err := f.store.Admit(t.Context(), f.input("after-retry-after", "", nil)); err != nil {
+		t.Fatalf("expired retry deadline still blocks admission %v", err)
+	}
+	if err := f.store.ObserveAllowance(t.Context(), f.account, codemode.Allowance{RemainingTokens: new(int64(0)), ObservedAt: observed, TokenObservation: &codemode.CountObservation{ObservedAt: observed, ResetsAt: &retry}}); err != nil {
+		t.Fatal(err)
+	}
+	observeHealth(codemode.HealthObservation{Status: "healthy", ObservedAt: observed.Add(4 * time.Minute)})
+	exhausted := readAccount()
+	if exhausted.Eligible || exhausted.Health != "healthy" || exhausted.UnavailableUntil != nil || exhausted.Allowance == nil || *exhausted.Allowance.RemainingTokens != 0 {
+		t.Fatalf("serving recovery bypassed exhausted allowance %+v", exhausted)
+	}
+	_, allowanceErr := f.store.Admit(t.Context(), f.input("after-retry-with-exhaustion", "", nil))
+	codeRefusal(t, allowanceErr, "code_account_unavailable")
+	if err := f.store.ObserveAllowance(t.Context(), f.account, codemode.Allowance{RemainingTokens: new(int64(1)), ObservedAt: observed.Add(5 * time.Minute)}); err != nil {
+		t.Fatal(err)
+	}
+	if !readAccount().Eligible {
+		t.Fatal("fresh allowance observation did not restore eligibility after serving recovery")
+	}
+	f.exec(t, `UPDATE olp.provider_grants SET lapsed_at=now() WHERE credential_id=$1`, f.credential)
+	rejected := readAccount()
+	if rejected.Eligible || rejected.GrantState != "lapsed" || rejected.Health != "healthy" {
+		t.Fatalf("refresh rejection conflated with serving health %+v", rejected)
+	}
+	_, grantErr := f.store.Admit(t.Context(), f.input("after-retry-with-lapsed-grant", "", nil))
+	codeRefusal(t, grantErr, "code_account_unavailable")
+}
+
+func TestCodeFoundationAllowanceRecoveryRequiresSupportedReset(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	for _, test := range []struct {
+		name     string
+		reset    *time.Time
+		eligible bool
+	}{
+		{"future", new(now.Add(time.Hour)), false},
+		{"expired", new(now.Add(-time.Hour)), true},
+		{"missing", nil, false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			f := newCodeFixture(t)
+			observed := now.Add(-2 * time.Hour)
+			allowance := codemode.Allowance{
+				RemainingTokens: new(int64(0)), RemainingRequests: new(int64(0)), ObservedAt: observed,
+				TokenObservation: &codemode.CountObservation{ObservedAt: observed, ResetsAt: test.reset}, RequestObservation: &codemode.CountObservation{ObservedAt: observed, ResetsAt: test.reset},
+				Windows: []codemode.AllowanceWindow{{LimitID: "codex", Window: "primary", UsedPercent: 100, RemainingPercent: 0, ResetsAt: test.reset, ObservedAt: observed}},
+			}
+			if err := f.store.ObserveAllowance(t.Context(), f.account, allowance); err != nil {
+				t.Fatal(err)
+			}
+			listing := f.h.want(f.owner, "GET", "/api/v1/code/accounts?project_id="+f.project, nil, nil, 200)
+			raw, err := json.Marshal(listing["items"])
+			if err != nil {
+				t.Fatal(err)
+			}
+			var accounts []codemode.Account
+			if err := json.Unmarshal(raw, &accounts); err != nil {
+				t.Fatal(err)
+			}
+			if len(accounts) != 1 || accounts[0].Eligible != test.eligible || accounts[0].Allowance == nil || *accounts[0].Allowance.RemainingTokens != 0 || *accounts[0].Allowance.RemainingRequests != 0 || *accounts[0].Allowance.RemainingPercent != 0 {
+				t.Fatalf("reset recovery changed reported allowance or guessed a reset %+v", accounts)
+			}
+		})
+	}
+}

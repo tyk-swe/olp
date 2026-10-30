@@ -7326,26 +7326,34 @@ type CodeAccount struct {
 	Eligible     bool                                  `json:"eligible"`
 	Enabled      bool                                  `json:"enabled"`
 	Etag         openapi_types.UUID                    `json:"etag"`
-	GrantState   CodeAccountGrantState                 `json:"grant_state"`
-	Health       CodeAccountHealth                     `json:"health"`
-	Id           openapi_types.UUID                    `json:"id"`
-	Models       []string                              `json:"models"`
-	Name         string                                `json:"name"`
-	Principal    string                                `json:"principal"`
-	ProjectId    openapi_types.UUID                    `json:"project_id"`
-	ProviderId   openapi_types.UUID                    `json:"provider_id"`
+
+	// GrantState Grant authority is independent of serving health and allowance. A rejected refresh lapses the grant and requires enrollment again.
+	GrantState CodeAccountGrantState `json:"grant_state"`
+	Health     CodeAccountHealth     `json:"health"`
+
+	// HealthObservedAt Time of the latest serving health observation. Enrollment and refresh do not qualify serving health.
+	HealthObservedAt nullable.Nullable[time.Time] `json:"health_observed_at,omitempty"`
+	Id               openapi_types.UUID           `json:"id"`
+	Models           []string                     `json:"models"`
+	Name             string                       `json:"name"`
+	Principal        string                       `json:"principal"`
+	ProjectId        openapi_types.UUID           `json:"project_id"`
+	ProviderId       openapi_types.UUID           `json:"provider_id"`
 
 	// ResearchEligible Current research enrollment eligibility, independent of inference health and allowance; route pool membership is also required.
 	ResearchEligible *bool `json:"research_eligible,omitempty"`
 
 	// ResearchServices Research services supported by the enrolled profile; also requires research eligibility and route pool membership.
 	ResearchServices *[]CodeAccountResearchServices `json:"research_services,omitempty"`
+
+	// UnavailableUntil End of the serving cooldown. Exhausted allowance and grant authority remain independent eligibility requirements.
+	UnavailableUntil nullable.Nullable[time.Time] `json:"unavailable_until,omitempty"`
 }
 
 // CodeAccountAdapter The subscription family of the account's provider profile: Codex, OpenCode Go, GLM Coding Plan, MiniMax M Plan, Kimi Code or Qwen Token Plan. Null for a profile no code-mode adapter serves. A pool may mix families; each request reaches an account whose family serves its path and model.
 type CodeAccountAdapter string
 
-// CodeAccountGrantState defines model for CodeAccount.GrantState.
+// CodeAccountGrantState Grant authority is independent of serving health and allowance. A rejected refresh lapses the grant and requires enrollment again.
 type CodeAccountGrantState string
 
 // CodeAccountHealth defines model for CodeAccount.Health.

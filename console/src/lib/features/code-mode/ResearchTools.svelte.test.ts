@@ -4,6 +4,7 @@ import { QueryClient } from '@tanstack/svelte-query';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import * as api from '$lib/api/code-mode';
 import * as clipboard from '$lib/clipboard';
+import { formatDate } from '$lib/format';
 import ResearchConfigurationProbe from './test/ResearchConfigurationProbe.svelte';
 
 vi.mock('$lib/api/code-mode', async (original) => ({
@@ -314,3 +315,63 @@ it('saves explicit Messages translation in the route draft', async () => {
     expect.any(String)
   );
 });
+
+it.each([
+  {
+    health: 'quota_limited',
+    grant: 'current',
+    label: 'Provider rate or quota limit',
+    retry: '2026-10-30T11:00:00Z'
+  },
+  {
+    health: 'unavailable',
+    grant: 'current',
+    label: 'Temporary upstream failure',
+    retry: '2026-10-30T11:00:00Z'
+  },
+  {
+    health: 'unknown',
+    grant: 'lapsed',
+    label: 'Grant lapsed, enroll again',
+    retry: null
+  }
+] as const)(
+  'shows distinct account availability evidence for $health and $grant',
+  async ({ health, grant, label, retry }) => {
+    const observed = '2026-10-30T10:00:00Z';
+    const account: api.CodeAccount = {
+      ...researchAccount,
+      health,
+      grant_state: grant,
+      eligible: false,
+      health_observed_at: observed,
+      unavailable_until: retry,
+      allowance: {
+        remaining_tokens: 0,
+        remaining_requests: null,
+        remaining_percent: null,
+        resets_at: null,
+        observed_at: observed
+      }
+    };
+    vi.mocked(api.listCodeAccounts).mockResolvedValue({
+      items: [account],
+      nextCursor: null
+    });
+    component = mount(ResearchConfigurationProbe, {
+      target: host,
+      props: { client, route, kind: 'accounts' }
+    });
+    flushSync();
+    await settle();
+    const card = host.querySelector('article')!;
+    expect(card.textContent).toContain(label);
+    expect(card.textContent).toContain('Tokens: 0');
+    expect(card.textContent).toContain('Reset Unknown');
+    expect(card.textContent).toContain(formatDate(observed));
+    expect(card.textContent).toContain(
+      retry ? formatDate(retry) : 'No serving cooldown reported'
+    );
+    expect(host.textContent).toContain('A rejected refresh lapses the grant');
+  }
+);

@@ -15338,6 +15338,7 @@
             "type": "string"
           },
           "grant_state": {
+            "description": "Grant authority is independent of serving health and allowance. A rejected refresh lapses the grant and requires enrollment again.",
             "enum": [
               "current",
               "expired",
@@ -15345,6 +15346,22 @@
               "revoked"
             ],
             "type": "string"
+          },
+          "health_observed_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "Time of the latest serving health observation. Enrollment and refresh do not qualify serving health."
+          },
+          "unavailable_until": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "End of the serving cooldown. Exhausted allowance and grant authority remain independent eligibility requirements."
           },
           "health": {
             "enum": [

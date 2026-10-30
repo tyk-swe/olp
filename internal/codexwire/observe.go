@@ -46,7 +46,7 @@ func Observe(body []byte, unary bool) Observation {
 		if status != 0 {
 			outcome.UpstreamStatus = &status
 		}
-		return Observation{Terminal: true, Status: status, Outcome: outcome, Allowance: Allowance(headers, now)}
+		return Observation{Terminal: true, Status: status, RetryAfter: headers.Values("Retry-After"), Outcome: outcome, Allowance: Allowance(headers, now)}
 	}
 	terminal := kind == "response.completed" || kind == "response.incomplete" || kind == "response.failed"
 	successful := kind == "response.completed"
