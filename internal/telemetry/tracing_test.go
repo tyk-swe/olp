@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -79,25 +80,42 @@ func TestOTLPExportsMetadataAndPreservesTraceParentWithoutSecrets(t *testing.T) 
 		t.Fatal(err)
 	}
 	close(payloads)
-	var payload []byte
-	spans := map[string]*tracepb.Span{}
-	for part := range payloads {
-		payload = append(payload, part...)
-		batch := &collectortrace.ExportTraceServiceRequest{}
-		if err := proto.Unmarshal(part, batch); err != nil {
-			t.Fatalf("decode exported spans: %v", err)
+	payload := bytes.Join(slices.Collect(func(yield func([]byte) bool) {
+		for part := range payloads {
+			if !yield(part) {
+				return
+			}
 		}
+	}), nil)
+	batch := &collectortrace.ExportTraceServiceRequest{}
+	if err := proto.Unmarshal(payload, batch); err != nil {
+		t.Fatalf("decode exported spans: %v", err)
+	}
+	spans := slices.Collect(func(yield func(*tracepb.Span) bool) {
 		for _, resource := range batch.GetResourceSpans() {
 			for _, scope := range resource.GetScopeSpans() {
 				for _, span := range scope.GetSpans() {
-					if spans[span.GetName()] != nil {
-						t.Fatalf("duplicate exported span %q", span.GetName())
+					if !yield(span) {
+						return
 					}
-					spans[span.GetName()] = span
 				}
 			}
 		}
+	})
+	for index, span := range spans {
+		if slices.ContainsFunc(spans[index+1:], func(candidate *tracepb.Span) bool { return candidate.GetName() == span.GetName() }) {
+			t.Fatalf("duplicate exported span %q", span.GetName())
+		}
 	}
+	findSpan := func(name string) *tracepb.Span {
+		matches := func(span *tracepb.Span) bool { return span.GetName() == name }
+		index := slices.IndexFunc(spans, matches)
+		if index < 0 {
+			t.Fatalf("missing %s span", name)
+		}
+		return spans[index]
+	}
+	requestSpan, attemptSpan := findSpan("request"), findSpan("attempt")
 	for _, required := range []string{"request", "attempt", "safe-route", "safe-key-id", "openllmproxy", "0.1.0"} {
 		if !bytes.Contains(payload, []byte(required)) {
 			t.Errorf("export omitted %s", required)
@@ -108,40 +126,40 @@ func TestOTLPExportsMetadataAndPreservesTraceParentWithoutSecrets(t *testing.T) 
 			t.Errorf("export included private %s", secret)
 		}
 	}
-	for _, name := range []string{"request", "attempt"} {
-		span := spans[name]
-		if span == nil {
-			t.Fatalf("missing %s span", name)
+	for _, span := range []*tracepb.Span{requestSpan, attemptSpan} {
+		name := span.GetName()
+		attr := func(key string) *commonpb.AnyValue {
+			index := slices.IndexFunc(span.GetAttributes(), func(value *commonpb.KeyValue) bool { return value.GetKey() == key })
+			if index < 0 {
+				return nil
+			}
+			return span.GetAttributes()[index].GetValue()
 		}
-		attrs := map[string]*commonpb.AnyValue{}
-		for _, attr := range span.GetAttributes() {
-			attrs[attr.GetKey()] = attr.GetValue()
-		}
-		if got := attrs["olp.evidence_origin"].GetStringValue(); got != "gateway_observed" {
+		if got := attr("olp.evidence_origin").GetStringValue(); got != "gateway_observed" {
 			t.Errorf("%s origin = %q, want gateway_observed", name, got)
 		}
-		if got := attrs["gen_ai.response.model"].GetStringValue(); got != model {
+		if got := attr("gen_ai.response.model").GetStringValue(); got != model {
 			t.Errorf("%s response model = %q, want %q", name, got, model)
 		}
-		if got := attrs["gen_ai.usage.input_tokens"].GetIntValue(); got != inputTokens {
+		if got := attr("gen_ai.usage.input_tokens").GetIntValue(); got != inputTokens {
 			t.Errorf("%s input tokens = %d, want %d", name, got, inputTokens)
 		}
-		if got := attrs["gen_ai.usage.output_tokens"].GetIntValue(); got != outputTokens {
+		if got := attr("gen_ai.usage.output_tokens").GetIntValue(); got != outputTokens {
 			t.Errorf("%s output tokens = %d, want %d", name, got, outputTokens)
 		}
-		if got := attrs["gen_ai.response.finish_reasons"].GetArrayValue().GetValues(); len(got) != len(finishReasons) || got[0].GetStringValue() != finishReasons[0] {
+		if got := attr("gen_ai.response.finish_reasons").GetArrayValue().GetValues(); len(got) != len(finishReasons) || got[0].GetStringValue() != finishReasons[0] {
 			t.Errorf("%s finish reasons = %v, want %v", name, got, finishReasons)
 		}
 		if name == "attempt" {
-			if got := attrs["olp.usage.cached_input_tokens"].GetIntValue(); got != cachedTokens {
+			if got := attr("olp.usage.cached_input_tokens").GetIntValue(); got != cachedTokens {
 				t.Errorf("%s cached input tokens = %d, want %d", name, got, cachedTokens)
 			}
-			if got := attrs["olp.usage.media_units"].GetStringValue(); got != mediaUnits {
+			if got := attr("olp.usage.media_units").GetStringValue(); got != mediaUnits {
 				t.Errorf("%s media units = %q, want %q", name, got, mediaUnits)
 			}
 		}
 	}
-	if !bytes.Equal(spans["attempt"].GetParentSpanId(), spans["request"].GetSpanId()) {
+	if !bytes.Equal(attemptSpan.GetParentSpanId(), requestSpan.GetSpanId()) {
 		t.Error("attempt span is not parented to the request span")
 	}
 }
