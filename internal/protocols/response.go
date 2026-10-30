@@ -60,6 +60,15 @@ func decodeTransformed(encodedWire, target wire.Format, body []byte, route, enco
 	case wire.Chat:
 		c, err = openai.DecodeChat(body, route, target)
 	case wire.Responses:
+		if target == wire.Anthropic {
+			response, parseErr := object(body)
+			if parseErr != nil {
+				return nil, parseErr
+			}
+			if validationErr := validateResponsesOutput(response); validationErr != nil {
+				return nil, validationErr
+			}
+		}
 		var background bool
 		if request != nil && target == wire.Responses {
 			_ = json.Unmarshal(request.Field("background"), &background)
@@ -195,6 +204,36 @@ func decodeTransformed(encodedWire, target wire.Format, body []byte, route, enco
 		c.Body = renderCompletion(c, target, route)
 	}
 	return c, nil
+}
+
+func validateResponsesOutput(response Object) error {
+	for _, value := range arr(response["output"]) {
+		item, err := object(value)
+		if err != nil {
+			return protocolError("invalid translated output item")
+		}
+		if err := validateResponsesItem(item); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateResponsesItem(item Object) error {
+	switch str(item["type"]) {
+	case "function_call":
+		return nil
+	case "message":
+		for _, value := range arr(item["content"]) {
+			part, err := object(value)
+			if err != nil || (str(part["type"]) != "output_text" && str(part["type"]) != "refusal") {
+				return protocolError("unrepresentable translated response content")
+			}
+		}
+		return nil
+	default:
+		return protocolError("unrepresentable translated output item")
+	}
 }
 func count(v json.RawMessage) (int64, bool) {
 	if !present(v) {
@@ -669,15 +708,20 @@ func renderCompletion(c *wire.Completion, family wire.Format, route string) []by
 		for _, t := range c.ToolCalls {
 			content = append(content, map[string]any{"type": "tool_use", "id": t.ID, "name": t.Name, "input": json.RawMessage(t.Arguments)})
 		}
-		reason := "end_turn"
-		switch c.FinishReason {
-		case "tool_calls":
-			reason = "tool_use"
-		case "length":
-			reason = "max_tokens"
-		case "content_filter":
-			reason = "refusal"
-		}
+		reason := func() string {
+			switch c.FinishReason {
+			case "tool_calls":
+				return "tool_use"
+			case "length":
+				return "max_tokens"
+			case "content_filter":
+				return "refusal"
+			}
+			if c.Refusal != "" {
+				return "refusal"
+			}
+			return "end_turn"
+		}()
 		f := map[string]any{"id": id, "type": "message", "role": "assistant", "model": route, "content": content, "stop_reason": reason, "stop_sequence": nil}
 		if c.Usage != nil {
 			f["usage"] = map[string]any{"input_tokens": c.Usage.InputTokens, "output_tokens": c.Usage.OutputTokens}

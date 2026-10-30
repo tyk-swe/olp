@@ -97,6 +97,20 @@ func StreamWithEvents(encodedWire, target wire.Format, r io.Reader, maxEvent int
 	}
 	return c, err
 }
+
+func AggregateTranslatedResponses(target wire.Format, r io.Reader, maxEvent int, route string, observe func(oif.Event) error) (*wire.Completion, error) {
+	translator := &streamTranslator{source: wire.Responses, target: target, route: route, limit: maxEvent, includeUsage: true, emit: func([]byte) error { return nil }, calls: map[int]*wire.ToolCall{}, blocks: map[int]int{}}
+	completion, err := openai.StreamMetadataEvents(wire.Responses, target, r, maxEvent, route, true, translator.frame, observe)
+	if err != nil {
+		return completion, err
+	}
+	summary, err := translator.summary(completion)
+	if err != nil {
+		return nil, err
+	}
+	return &wire.Completion{Body: renderCompletion(summary, target, route), UpstreamID: summary.UpstreamID, ProviderModel: summary.ProviderModel, FinishReason: summary.FinishReason, OutputText: summary.OutputText, Refusal: summary.Refusal, ToolCalls: summary.ToolCalls, Usage: summary.Usage, UsageComplete: summary.UsageComplete, Terminal: summary.Terminal, Failure: summary.Failure}, nil
+}
+
 func eventFrame(event string, v any) []byte {
 	prefix := ""
 	if event != "" {
@@ -432,6 +446,8 @@ type streamTranslator struct {
 	started                   bool
 	id, text                  string
 	calls                     map[int]*wire.ToolCall
+	responseTexts             map[int]string
+	responseRefusals          map[int]string
 	blocks                    map[int]int
 	textBlock                 *int
 	refusalBlock              *int
@@ -484,6 +500,12 @@ func (t *streamTranslator) textDelta(text string) error {
 	}
 	if e := t.start(""); e != nil {
 		return e
+	}
+	if t.source == wire.Responses && t.target != wire.Responses {
+		if err := t.reserve(len(text)); err != nil {
+			return err
+		}
+		t.text += text
 	}
 	switch t.target {
 	case wire.Chat:
@@ -604,6 +626,68 @@ func (t *streamTranslator) chat(delta Object, finish *string, usage *wire.Usage)
 	}
 	return t.send("", f)
 }
+
+func (t *streamTranslator) responseToolSnapshot(index int, item Object) error {
+	if str(item["type"]) != "function_call" {
+		return nil
+	}
+	id, name, arguments := str(item["call_id"]), str(item["name"]), str(item["arguments"])
+	if id == "" || name == "" {
+		return protocolError("incomplete translated tool identity")
+	}
+	if _, err := object([]byte(arguments)); err != nil {
+		return protocolError("incomplete translated tool arguments")
+	}
+	call := t.calls[index]
+	if call == nil {
+		return t.toolDelta(index, id, name, arguments)
+	}
+	if call.ID != id || call.Name != name || !strings.HasPrefix(arguments, call.Arguments) {
+		return protocolError("translated tool snapshot disagrees with deltas")
+	}
+	return t.toolDelta(index, "", "", strings.TrimPrefix(arguments, call.Arguments))
+}
+
+func (t *streamTranslator) responseTextDelta(index int, text string) error {
+	if t.responseTexts == nil {
+		t.responseTexts = map[int]string{}
+	}
+	t.responseTexts[index] += text
+	return t.textDelta(text)
+}
+
+func (t *streamTranslator) responseRefusalDelta(index int, text string) error {
+	if t.responseRefusals == nil {
+		t.responseRefusals = map[int]string{}
+	}
+	t.responseRefusals[index] += text
+	return t.refusalDelta(text)
+}
+
+func (t *streamTranslator) responseMessageSnapshot(index int, item Object) error {
+	if str(item["type"]) != "message" {
+		return nil
+	}
+	content := func(kind, field string) string {
+		return strings.Join(slices.Collect(func(yield func(string) bool) {
+			for _, content := range arr(item["content"]) {
+				part, _ := object(content)
+				if str(part["type"]) == kind && !yield(str(part[field])) {
+					return
+				}
+			}
+		}), "")
+	}
+	text, refusal := content("output_text", "text"), content("refusal", "refusal")
+	if !strings.HasPrefix(text, t.responseTexts[index]) || !strings.HasPrefix(refusal, t.responseRefusals[index]) {
+		return protocolError("Responses message snapshot disagrees with streamed deltas")
+	}
+	if err := t.responseTextDelta(index, text[len(t.responseTexts[index]):]); err != nil {
+		return err
+	}
+	return t.responseRefusalDelta(index, refusal[len(t.responseRefusals[index]):])
+}
+
 func (t *streamTranslator) frame(frame []byte) error {
 	return sse.Decode(strings.NewReader(string(frame)), max(t.limit, len(frame)), func(event sse.Frame) error {
 		if event.Data == "[DONE]" {
@@ -649,12 +733,55 @@ func (t *streamTranslator) frame(frame []byte) error {
 				}
 			}
 			switch str(f["type"]) {
+			case "response.function_call_arguments.done":
+				index, _ := count(f["output_index"])
+				call, present := t.calls[int(index)]
+				if !present {
+					return protocolError("Responses argument snapshot has no tool call")
+				}
+				return t.responseToolSnapshot(int(index), Object{"type": raw("function_call"), "call_id": raw(call.ID), "name": raw(call.Name), "arguments": f["arguments"]})
+			case "response.output_item.done":
+				item, _ := object(f["item"])
+				if t.target == wire.Anthropic {
+					if err := validateResponsesItem(item); err != nil {
+						return err
+					}
+				}
+				index, _ := count(f["output_index"])
+				if err := t.responseToolSnapshot(int(index), item); err != nil {
+					return err
+				}
+				return t.responseMessageSnapshot(int(index), item)
+			case "response.completed", "response.incomplete":
+				response, _ := object(f["response"])
+				if t.target == wire.Anthropic {
+					if err := validateResponsesOutput(response); err != nil {
+						return err
+					}
+				}
+				for index, value := range arr(response["output"]) {
+					item, _ := object(value)
+					if err := t.responseToolSnapshot(index, item); err != nil {
+						return err
+					}
+					if err := t.responseMessageSnapshot(index, item); err != nil {
+						return err
+					}
+				}
+				return nil
 			case "response.refusal.delta":
-				return t.refusalDelta(str(f["delta"]))
+				index, _ := count(f["output_index"])
+				return t.responseRefusalDelta(int(index), str(f["delta"]))
 			case "response.output_text.delta":
-				return t.textDelta(str(f["delta"]))
+				index, _ := count(f["output_index"])
+				return t.responseTextDelta(int(index), str(f["delta"]))
 			case "response.output_item.added":
 				item, _ := optionalObject(f["item"])
+				if t.target == wire.Anthropic {
+					if err := validateResponsesItem(item); err != nil {
+						return err
+					}
+				}
 				if str(item["type"]) == "function_call" {
 					index, _ := count(f["output_index"])
 					return t.toolDelta(int(index), str(item["call_id"]), str(item["name"]), str(item["arguments"]))
@@ -729,10 +856,7 @@ func (t *streamTranslator) frame(frame []byte) error {
 		return nil
 	})
 }
-func (t *streamTranslator) finish(c *wire.Completion) error {
-	if e := t.start(c.UpstreamID); e != nil {
-		return e
-	}
+func (t *streamTranslator) summary(c *wire.Completion) (*wire.Completion, error) {
 	summary := *c
 	summary.UpstreamID = t.id
 	summary.OutputText = t.text
@@ -741,28 +865,34 @@ func (t *streamTranslator) finish(c *wire.Completion) error {
 		summary.FinishReason = "content_filter"
 	}
 	summary.ToolCalls = nil
-	indices := []int{}
-	for i := range t.calls {
-		indices = append(indices, i)
-	}
-	slices.Sort(indices)
-	for _, i := range indices {
+	for _, i := range slices.Sorted(maps.Keys(t.calls)) {
 		call := t.calls[i]
 		if call.ID == "" || call.Name == "" {
-			return protocolError("incomplete translated tool call")
+			return nil, protocolError("incomplete translated tool call")
 		}
 		if call.Arguments == "" {
 			if err := t.toolDelta(i, "", "", "{}"); err != nil {
-				return err
+				return nil, err
 			}
 		}
 		if _, e := object([]byte(call.Arguments)); e != nil {
-			return protocolError("incomplete translated tool arguments")
+			return nil, protocolError("incomplete translated tool arguments")
 		}
 		summary.ToolCalls = append(summary.ToolCalls, *call)
 	}
 	if len(summary.ToolCalls) > 0 && summary.FinishReason == "stop" {
 		summary.FinishReason = "tool_calls"
+	}
+	return &summary, nil
+}
+
+func (t *streamTranslator) finish(c *wire.Completion) error {
+	if e := t.start(c.UpstreamID); e != nil {
+		return e
+	}
+	summary, err := t.summary(c)
+	if err != nil {
+		return err
 	}
 	switch t.target {
 	case wire.Chat:
@@ -811,7 +941,7 @@ func (t *streamTranslator) finish(c *wire.Completion) error {
 			}
 			output[index] = Object{"id": raw("msg_" + t.id), "type": raw("message"), "role": raw("assistant"), "status": raw("completed"), "content": raw([]Object{part})}
 		}
-		for _, i := range indices {
+		for _, i := range slices.Sorted(maps.Keys(t.calls)) {
 			call := t.calls[i]
 			index := t.blocks[i]
 			if e := t.send("response.function_call_arguments.done", Object{"type": raw("response.function_call_arguments.done"), "item_id": raw("fc_" + call.ID), "output_index": raw(index), "arguments": raw(call.Arguments)}); e != nil {
@@ -827,13 +957,13 @@ func (t *streamTranslator) finish(c *wire.Completion) error {
 				return e
 			}
 		}
-		f, _ := object(renderCompletion(&summary, t.target, t.route))
+		f, _ := object(renderCompletion(summary, t.target, t.route))
 		f["output"] = raw(output)
 		kind := "response." + str(f["status"])
 		return t.send(kind, Object{"type": raw(kind), "response": raw(f)})
 	default:
 		summary.OutputText = ""
-		body := renderCompletion(&summary, t.target, t.route)
+		body := renderCompletion(summary, t.target, t.route)
 		f, _ := object(body)
 		return t.send("", f)
 	}

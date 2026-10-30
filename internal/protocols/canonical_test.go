@@ -106,3 +106,116 @@ func TestGeminiSchemaTypesBecomeJSONSchemaTypes(t *testing.T) {
 
 // Each of Gemini's type names is lowered when it is the only one the schema
 // has to give it away.
+
+func TestMessagesToolsAndReasoningEncodeAsResponses(t *testing.T) {
+	const body = `{"model":"route","max_tokens":64,"tools":[{"name":"read_file","description":"Read a file","input_schema":{"type":"object","properties":{"path":{"type":"string"}}}}],"tool_choice":{"type":"tool","name":"read_file","disable_parallel_tool_use":true},"thinking":{"type":"adaptive"},"output_config":{"effort":"high"},"messages":[{"role":"assistant","content":[{"type":"tool_use","id":"call-read","name":"read_file","input":{"path":"main.go"}}]},{"role":"user","content":[{"type":"tool_result","tool_use_id":"call-read","content":"package main"}]}]}`
+	request, err := Parse(wire.Anthropic, []byte(body), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded, _, err := EncodeTarget(request, wire.Responses, "openai", "openai", "native-model", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var target struct {
+		Input []struct {
+			Type                    string
+			CallID                  string `json:"call_id"`
+			Name, Arguments, Output string
+		}
+		Tools []struct {
+			Type, Name, Description string
+			Parameters              struct {
+				Properties map[string]struct{ Type string }
+			}
+		}
+		ToolChoice struct{ Type, Name string } `json:"tool_choice"`
+		Parallel   *bool                       `json:"parallel_tool_calls"`
+		Reasoning  struct{ Effort string }
+		MaxTokens  int `json:"max_output_tokens"`
+	}
+	if err := json.Unmarshal(encoded, &target); err != nil {
+		t.Fatal(err)
+	}
+	if len(target.Input) != 2 || target.Input[0].Type != "function_call" || target.Input[0].CallID != "call-read" || target.Input[0].Name != "read_file" || target.Input[0].Arguments != `{"path":"main.go"}` || target.Input[1].Type != "function_call_output" || target.Input[1].CallID != target.Input[0].CallID || target.Input[1].Output != "package main" {
+		t.Fatalf("tool history %s", encoded)
+	}
+	if len(target.Tools) != 1 || target.Tools[0].Type != "function" || target.Tools[0].Name != target.Input[0].Name || target.Tools[0].Description != "Read a file" || target.Tools[0].Parameters.Properties["path"].Type != "string" || target.ToolChoice.Type != "function" || target.ToolChoice.Name != target.Tools[0].Name || target.Parallel == nil || *target.Parallel || target.Reasoning.Effort != "high" || target.MaxTokens != 64 {
+		t.Fatalf("tool and reasoning controls %s", encoded)
+	}
+}
+
+func TestParseForModelPreservesExactNativeIdentity(t *testing.T) {
+	model := "Native/" + strings.Repeat("Long", 50) + ":Version"
+	body := []byte(`{"model":"` + model + `","messages":[{"role":"user","content":"hello"}],"max_tokens":64}`)
+	request, err := ParseForModel(wire.Anthropic, body, model)
+	if err != nil || request.Route != model {
+		t.Fatalf("native model %v %v", request, err)
+	}
+	encoded, _, err := EncodeTarget(request, wire.Responses, "openai", "openai", request.Route, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var forwarded struct{ Model string }
+	if err := json.Unmarshal(encoded, &forwarded); err != nil || forwarded.Model != model {
+		t.Fatalf("forwarded native model %s %v", encoded, err)
+	}
+	if _, err := ParseForModel(wire.Anthropic, body, strings.ToLower(model)); err == nil {
+		t.Fatal("case-insensitive native model accepted")
+	}
+	if _, err := Parse(wire.Anthropic, body, ""); err == nil {
+		t.Fatal("inference slug validation bypassed")
+	}
+}
+
+func TestMessagesReasoningControlsArePreservedOrRefusedAcrossTargets(t *testing.T) {
+	request, err := Parse(wire.Anthropic, []byte(`{"model":"team-model","messages":[{"role":"user","content":"Think carefully"}],"max_tokens":64,"thinking":{"type":"adaptive"},"output_config":{"effort":"high"}}`), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, test := range []struct {
+		family           wire.Format
+		provider, vendor string
+		supported        bool
+	}{
+		{wire.Chat, "openai", "openai", true},
+		{wire.Responses, "openai", "openai", true},
+		{wire.Anthropic, "anthropic", "anthropic", true},
+		{wire.Gemini, "gemini", "gemini", false},
+		{"bedrock", "bedrock", "amazon-bedrock", false},
+	} {
+		t.Run(string(test.family), func(t *testing.T) {
+			encoded, _, err := EncodeTarget(request, test.family, test.provider, test.vendor, "wire-model", nil)
+			if !test.supported {
+				if err == nil {
+					t.Fatalf("reasoning control silently dropped %s", encoded)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			var target struct {
+				ReasoningEffort string `json:"reasoning_effort"`
+				Reasoning       struct{ Effort string }
+				OutputConfig    struct{ Effort string } `json:"output_config"`
+			}
+			if err := json.Unmarshal(encoded, &target); err != nil {
+				t.Fatal(err)
+			}
+			effort := func() string {
+				switch test.family {
+				case wire.Chat:
+					return target.ReasoningEffort
+				case wire.Responses:
+					return target.Reasoning.Effort
+				default:
+					return target.OutputConfig.Effort
+				}
+			}()
+			if effort != "high" {
+				t.Fatalf("reasoning control lost %s", encoded)
+			}
+		})
+	}
+}

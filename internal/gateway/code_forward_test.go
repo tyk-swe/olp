@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -21,6 +22,8 @@ import (
 	"github.com/tyk-swe/olp/internal/codeplans"
 	"github.com/tyk-swe/olp/internal/codexauth"
 	"github.com/tyk-swe/olp/internal/connectors"
+	"github.com/tyk-swe/olp/internal/protocols"
+	"github.com/tyk-swe/olp/internal/protocols/wire"
 	"github.com/tyk-swe/olp/internal/resources"
 	"github.com/tyk-swe/olp/internal/routing"
 )
@@ -476,9 +479,72 @@ func TestCodeMessagesToCodexTextExchange(t *testing.T) {
 	}
 }
 
+func TestCodeMessagesToCodexCompletedMessages(t *testing.T) {
+	for _, stream := range []bool{false, true} {
+		t.Run(fmt.Sprint(stream), func(t *testing.T) {
+			g, ledger, server := newCodeForwardHarness(t)
+			route := g.rt.release.Snapshot.CodeRoutes["coding"]
+			route.MessagesToCodex = true
+			g.rt.release.Snapshot.CodeRoutes["coding"] = route
+			g.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "text/event-stream")
+				for _, event := range []string{
+					`{"type":"response.created","response":{"id":"completed-messages","status":"in_progress","output":[]}}`,
+					`{"type":"response.output_text.delta","output_index":0,"content_index":0,"delta":"Hello"}`,
+					`{"type":"response.output_item.done","output_index":0,"item":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Hello "}]}}`,
+					`{"type":"response.output_item.done","output_index":1,"item":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"back"}]}}`,
+					`{"type":"response.completed","response":{"id":"completed-messages","status":"completed","output":[],"usage":{"input_tokens":7,"output_tokens":2,"total_tokens":9}}}`,
+				} {
+					fmt.Fprint(w, "data: "+event+"\n\n")
+				}
+			})
+			request, _ := http.NewRequestWithContext(t.Context(), http.MethodPost, server.URL+"/code/coding/v1/messages", strings.NewReader(fmt.Sprintf(`{"model":"native-model","messages":[{"role":"user","content":"Hello"}],"max_tokens":32,"stream":%t}`, stream)))
+			request.Header.Set("Authorization", "Bearer "+fullKey)
+			request.Header.Set("X-Claude-Code-Session-Id", "completed-messages")
+			response, err := server.Client().Do(request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer response.Body.Close()
+			body, _ := io.ReadAll(response.Body)
+			if response.StatusCode != http.StatusOK {
+				t.Fatalf("completed messages status %d %s", response.StatusCode, body)
+			}
+			text, err := func() (string, error) {
+				if stream {
+					capture := protocols.NewCaptureStream(wire.Anthropic, 8192, true, false)
+					if err := capture.Push(body); err != nil {
+						return "", err
+					}
+					text, _, err := capture.Finish()
+					return text, err
+				}
+				completion, err := protocols.Decode(wire.Anthropic, wire.Anthropic, body, "native-model", "")
+				if err != nil {
+					return "", err
+				}
+				return completion.OutputText, nil
+			}()
+			if err != nil || text != "Hello back" || !bytes.Contains(body, []byte(`"stop_reason":"end_turn"`)) {
+				t.Fatalf("completed message text %q error %v body %s", text, err, body)
+			}
+			if usage := ledger.wait(t); usage.Total == nil || *usage.Total != 9 || g.mock.count("a") != 1 {
+				t.Fatalf("completed message accounting %+v", usage)
+			}
+		})
+	}
+}
+
 func TestCodeMessagesToCodexRefusesUnsupportedSemantics(t *testing.T) {
-	for _, test := range []struct{ name, extra, query, beta string }{
-		{name: "tools", extra: `,"tools":[{"name":"run","input_schema":{"type":"object"}}]`},
+	for _, test := range []struct{ name, extra, query, beta, messages string }{
+		{name: "tool extension", extra: `,"tools":[{"name":"run","input_schema":{"type":"object"},"required_extension":true}]`},
+		{name: "error-marked tool result", messages: `[{"role":"user","content":[{"type":"tool_result","tool_use_id":"call-read","is_error":true,"content":"failed"}]}]`},
+		{name: "media tool result", messages: `[{"role":"user","content":[{"type":"tool_result","tool_use_id":"call-read","content":[{"type":"image","source":{"type":"base64","media_type":"image/png","data":"aGVsbG8="}}]}]}]`},
+		{name: "adaptive numeric budget", extra: `,"thinking":{"type":"adaptive","budget_tokens":1024},"output_config":{"effort":"high"}`},
+		{name: "unsupported effort", extra: `,"output_config":{"effort":"max"}`},
+		{name: "adaptive without effort", extra: `,"thinking":{"type":"adaptive"}`},
+		{name: "thinking history", extra: `,"system":[{"type":"thinking","thinking":"private-prompt","signature":"opaque"}]`},
+		{name: "unsupported tool choice", extra: `,"tool_choice":{"type":"auto","required_extension":true}`},
 		{name: "thinking", extra: `,"thinking":{"type":"enabled","budget_tokens":1024}`},
 		{name: "stream options", extra: `,"stream_options":{"required_extension":true}`},
 		{name: "stop", extra: `,"stop_sequences":["stop"]`},
@@ -494,7 +560,13 @@ func TestCodeMessagesToCodexRefusesUnsupportedSemantics(t *testing.T) {
 			route := g.rt.release.Snapshot.CodeRoutes["coding"]
 			route.MessagesToCodex = true
 			g.rt.release.Snapshot.CodeRoutes["coding"] = route
-			request, _ := http.NewRequestWithContext(t.Context(), http.MethodPost, server.URL+"/code/coding/v1/messages"+test.query, strings.NewReader(`{"model":"native-model","messages":[{"role":"user","content":"private-prompt"}],"max_tokens":32`+test.extra+`}`))
+			messages := func() string {
+				if test.messages != "" {
+					return test.messages
+				}
+				return `[{"role":"user","content":"private-prompt"}]`
+			}()
+			request, _ := http.NewRequestWithContext(t.Context(), http.MethodPost, server.URL+"/code/coding/v1/messages"+test.query, strings.NewReader(`{"model":"native-model","messages":`+messages+`,"max_tokens":32`+test.extra+`}`))
 			request.Header.Set("Authorization", "Bearer "+fullKey)
 			request.Header.Set("X-Claude-Code-Session-Id", "unsupported-text")
 			if test.beta != "" {
@@ -568,6 +640,317 @@ func TestCodeMessagesToCodexPreservesNativeModelIdentifiers(t *testing.T) {
 
 func (l *codeTestLedger) ConfirmNonexecution(context.Context, string, int) error   { return nil }
 func (l *codeTestLedger) ObserveCooldown(context.Context, string, time.Time) error { return nil }
+
+func TestCodeMessagesToCodexToolExchange(t *testing.T) {
+	for _, source := range []string{"fragments", "complete", "arguments-done"} {
+		for _, stream := range []bool{false, true} {
+			t.Run(fmt.Sprint(stream)+"/"+source, func(t *testing.T) {
+				g, ledger, server := newCodeForwardHarness(t)
+				route := g.rt.release.Snapshot.CodeRoutes["coding"]
+				route.MessagesToCodex = true
+				g.rt.release.Snapshot.CodeRoutes["coding"] = route
+				g.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
+					var request struct {
+						Input []struct {
+							Type, CallID, Name, Arguments, Output string
+						} `json:"input"`
+						Tools []struct {
+							Type, Name, Description string
+							Parameters              json.RawMessage
+						} `json:"tools"`
+						ToolChoice struct{ Type, Name string } `json:"tool_choice"`
+						Parallel   *bool                       `json:"parallel_tool_calls"`
+					}
+					body, _ := io.ReadAll(r.Body)
+					if err := json.Unmarshal(body, &request); err != nil {
+						t.Error(err)
+					}
+					if len(request.Tools) != 1 || request.Tools[0].Name != "read_file" || !bytes.Contains(request.Tools[0].Parameters, []byte(`"path"`)) || request.ToolChoice.Type != "function" || request.ToolChoice.Name != "read_file" || request.Parallel == nil || *request.Parallel {
+						t.Errorf("tool controls lost %s", body)
+					}
+					w.Header().Set("Content-Type", "text/event-stream")
+					fmt.Fprint(w, "data: "+`{"type":"response.created","response":{"id":"response-tools","model":"native-model","status":"in_progress","output":[]}}`+"\n\n")
+					if len(request.Input) > 1 {
+						if !bytes.Contains(body, []byte(`"call_id":"call-read"`)) || !bytes.Contains(body, []byte(`"arguments":"{\"path\":\"main.go\"}"`)) || !bytes.Contains(body, []byte(`"output":"package main\n"`)) {
+							t.Errorf("tool history or result lost %s", body)
+						}
+						if source == "fragments" {
+							fmt.Fprint(w, "data: "+`{"type":"response.output_text.delta","output_index":0,"content_index":0,"delta":"File read"}`+"\n\n")
+						}
+						fmt.Fprint(w, "data: "+`{"type":"response.completed","response":{"id":"response-tools","status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"File read"}]}],"usage":{"input_tokens":13,"output_tokens":2,"total_tokens":15}}}`+"\n\n")
+						return
+					}
+					if source == "complete" {
+						fmt.Fprint(w, "data: "+`{"type":"response.completed","response":{"id":"response-tools","status":"completed","output":[{"type":"function_call","call_id":"call-read","name":"read_file","arguments":"{\"path\":\"main.go\"}"}],"usage":{"input_tokens":7,"output_tokens":4,"total_tokens":11}}}`+"\n\n")
+						return
+					}
+					if source == "arguments-done" {
+						for _, event := range []string{
+							`{"type":"response.output_item.added","output_index":0,"item":{"type":"function_call","call_id":"call-read","name":"read_file","arguments":""}}`,
+							`{"type":"response.function_call_arguments.done","output_index":0,"arguments":"{\"path\":\"main.go\"}"}`,
+							`{"type":"response.completed","response":{"id":"response-tools","status":"completed","output":[],"usage":{"input_tokens":7,"output_tokens":4,"total_tokens":11}}}`,
+						} {
+							fmt.Fprint(w, "data: "+event+"\n\n")
+						}
+						return
+					}
+					for _, event := range []string{
+						`{"type":"response.output_item.added","output_index":0,"item":{"type":"function_call","call_id":"call-read","name":"read_file","arguments":""}}`,
+						`{"type":"response.function_call_arguments.delta","output_index":0,"delta":"{\"path\":"}`,
+						`{"type":"response.function_call_arguments.delta","output_index":0,"delta":"\"main.go\"}"}`,
+						`{"type":"response.output_item.done","output_index":0,"item":{"type":"function_call","call_id":"call-read","name":"read_file","arguments":"{\"path\":\"main.go\"}"}}`,
+						`{"type":"response.completed","response":{"id":"response-tools","status":"completed","output":[],"usage":{"input_tokens":7,"output_tokens":4,"total_tokens":11}}}`,
+					} {
+						fmt.Fprint(w, "data: "+event+"\n\n")
+					}
+				})
+				send := func(history string) []byte {
+					t.Helper()
+					body := fmt.Sprintf(`{"model":"native-model","messages":[{"role":"user","content":"Read main.go"}%s],"max_tokens":64,"stream":%t,"tools":[{"name":"read_file","description":"Read a file","input_schema":{"type":"object","properties":{"path":{"type":"string"}},"required":["path"]}}],"tool_choice":{"type":"tool","name":"read_file","disable_parallel_tool_use":true}}`, history, stream)
+					request, _ := http.NewRequestWithContext(t.Context(), http.MethodPost, server.URL+"/code/coding/v1/messages", strings.NewReader(body))
+					request.Header.Set("Authorization", "Bearer "+fullKey)
+					request.Header.Set("X-Claude-Code-Session-Id", "tools")
+					response, err := server.Client().Do(request)
+					if err != nil {
+						t.Fatal(err)
+					}
+					defer response.Body.Close()
+					reply, err := io.ReadAll(response.Body)
+					if err != nil || response.StatusCode != http.StatusOK {
+						t.Fatalf("status %d body %s error %v", response.StatusCode, reply, err)
+					}
+					return reply
+				}
+				first := send("")
+				if stream {
+					if _, err := protocols.Stream(wire.Anthropic, wire.Anthropic, bytes.NewReader(first), 8192, "native-model", true, func([]byte) error { return nil }); err != nil {
+						t.Fatal(err)
+					}
+					for _, field := range []string{`"id":"call-read"`, `"name":"read_file"`, `"stop_reason":"tool_use"`, `"output_tokens":4`} {
+						if !bytes.Contains(first, []byte(field)) {
+							t.Fatalf("missing %s in %s", field, first)
+						}
+					}
+					capture := protocols.NewCaptureStream(wire.Anthropic, 8192, false, true)
+					if err := capture.Push(first); err != nil {
+						t.Fatal(err)
+					}
+					_, calls, err := capture.Finish()
+					if err != nil || len(calls) != 1 {
+						t.Fatalf("streamed tool calls %s %v", first, err)
+					}
+					var call struct {
+						Name      string
+						Arguments struct{ Path string }
+					}
+					if err := json.Unmarshal(calls[0], &call); err != nil || call.Name != "read_file" || call.Arguments.Path != "main.go" {
+						t.Fatalf("streamed tool arguments %s %v", first, err)
+					}
+					if source == "fragments" && (!bytes.Contains(first, []byte(`"partial_json":"{\"path\":"`)) || !bytes.Contains(first, []byte(`"partial_json":"\"main.go\"}"`))) {
+						t.Fatalf("fragmented arguments lost %s", first)
+					}
+				} else {
+					completion, err := protocols.Decode(wire.Anthropic, wire.Anthropic, first, "native-model", "")
+					if err != nil || len(completion.ToolCalls) != 1 || completion.ToolCalls[0].ID != "call-read" || completion.ToolCalls[0].Name != "read_file" || completion.ToolCalls[0].Arguments != `{"path":"main.go"}` || completion.FinishReason != "tool_calls" {
+						t.Fatalf("tool reply %s error %v", first, err)
+					}
+				}
+				second := send(`,{"role":"assistant","content":[{"type":"tool_use","id":"call-read","name":"read_file","input":{"path":"main.go"}}]},{"role":"user","content":[{"type":"tool_result","tool_use_id":"call-read","is_error":false,"content":[{"type":"text","text":"package main\n"}]}]}`)
+				if !bytes.Contains(second, []byte(`"text":"File read"`)) || !bytes.Contains(second, []byte(`"stop_reason":"end_turn"`)) {
+					t.Fatalf("tool result reply %s", second)
+				}
+				for _, total := range []int64{11, 15} {
+					if usage := ledger.wait(t); usage.Total == nil || *usage.Total != total {
+						t.Fatalf("usage %+v, expected %d", usage, total)
+					}
+				}
+				if g.mock.count("a") != 2 {
+					t.Fatal("tool exchange replayed work")
+				}
+			})
+		}
+	}
+}
+
+func TestCodeMessagesToCodexReasoningControls(t *testing.T) {
+	for _, effort := range []string{"low", "medium", "high"} {
+		t.Run(effort, func(t *testing.T) {
+			g, ledger, server := newCodeForwardHarness(t)
+			route := g.rt.release.Snapshot.CodeRoutes["coding"]
+			route.MessagesToCodex = true
+			g.rt.release.Snapshot.CodeRoutes["coding"] = route
+			g.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
+				var body struct{ Reasoning struct{ Effort string } }
+				if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Reasoning.Effort != effort {
+					t.Errorf("reasoning control %+v error %v", body, err)
+				}
+				w.Header().Set("Content-Type", "application/json")
+				fmt.Fprint(w, `{"id":"reasoning-control","status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Done"}]}],"usage":{"input_tokens":2,"output_tokens":4,"total_tokens":6,"output_tokens_details":{"reasoning_tokens":3}}}`)
+			})
+			request, _ := http.NewRequestWithContext(t.Context(), http.MethodPost, server.URL+"/code/coding/v1/messages", strings.NewReader(fmt.Sprintf(`{"model":"native-model","messages":[{"role":"user","content":"Think"}],"max_tokens":64,"thinking":{"type":"adaptive"},"output_config":{"effort":%q}}`, effort)))
+			request.Header.Set("Authorization", "Bearer "+fullKey)
+			request.Header.Set("X-Claude-Code-Session-Id", "reasoning-control")
+			response, err := server.Client().Do(request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer response.Body.Close()
+			body, _ := io.ReadAll(response.Body)
+			if response.StatusCode != http.StatusOK || !bytes.Contains(body, []byte(`"output_tokens":4`)) {
+				t.Fatalf("reasoning reply %d %s", response.StatusCode, body)
+			}
+			if usage := ledger.wait(t); usage.Reasoning == nil || *usage.Reasoning != 3 || usage.Total == nil || *usage.Total != 6 {
+				t.Fatalf("reasoning usage %+v", usage)
+			}
+		})
+	}
+}
+
+func TestCodeMessagesToCodexToolStreamOutcomes(t *testing.T) {
+	for _, stream := range []bool{false, true} {
+		for _, outcome := range []string{"truncated", "failed", "missing-usage", "max-tokens", "refusal", "mismatched-snapshot", "opaque-reasoning"} {
+			t.Run(fmt.Sprintf("stream=%t/%s", stream, outcome), func(t *testing.T) {
+				g, ledger, server := newCodeForwardHarness(t)
+				route := g.rt.release.Snapshot.CodeRoutes["coding"]
+				route.MessagesToCodex = true
+				g.rt.release.Snapshot.CodeRoutes["coding"] = route
+				g.mock.set("a", func(w http.ResponseWriter, _ *http.Request) {
+					w.Header().Set("Content-Type", "text/event-stream")
+					for _, event := range []string{
+						`{"type":"response.created","response":{"id":"tool-outcome","status":"in_progress","output":[]}}`,
+						`{"type":"response.output_item.added","output_index":0,"item":{"type":"function_call","call_id":"call-read","name":"read_file","arguments":""}}`,
+						`{"type":"response.function_call_arguments.delta","output_index":0,"delta":"{}"}`,
+					} {
+						fmt.Fprint(w, "data: "+event+"\n\n")
+					}
+					switch outcome {
+					case "truncated":
+						return
+					case "failed":
+						fmt.Fprint(w, "data: "+`{"type":"response.failed","response":{"id":"tool-outcome","status":"failed","error":{"code":"server_error","message":"failed"},"output":[],"usage":{"input_tokens":5,"output_tokens":2,"total_tokens":7}}}`+"\n\n")
+					case "missing-usage":
+						fmt.Fprint(w, "data: "+`{"type":"response.output_item.done","output_index":0,"item":{"type":"function_call","call_id":"call-read","name":"read_file","arguments":"{}"}}`+"\n\n")
+						fmt.Fprint(w, "data: "+`{"type":"response.completed","response":{"id":"tool-outcome","status":"completed","output":[]}}`+"\n\n")
+					case "max-tokens", "refusal":
+						reason := func() string {
+							if outcome == "refusal" {
+								return "content_filter"
+							}
+							return "max_output_tokens"
+						}()
+						fmt.Fprintf(w, "data: "+`{"type":"response.incomplete","response":{"id":"tool-outcome","status":"incomplete","incomplete_details":{"reason":%q},"output":[{"type":"function_call","call_id":"call-read","name":"read_file","arguments":"{}"}],"usage":{"input_tokens":5,"output_tokens":2,"total_tokens":7}}}`+"\n\n", reason)
+					case "mismatched-snapshot":
+						fmt.Fprint(w, "data: "+`{"type":"response.completed","response":{"id":"tool-outcome","status":"completed","output":[{"type":"function_call","call_id":"different-call","name":"read_file","arguments":"{}"}]}}`+"\n\n")
+					case "opaque-reasoning":
+						fmt.Fprint(w, "data: "+`{"type":"response.completed","response":{"id":"tool-outcome","status":"completed","output":[{"type":"reasoning","id":"reasoning-state","encrypted_content":"opaque"}]}}`+"\n\n")
+					}
+				})
+				request, _ := http.NewRequestWithContext(t.Context(), http.MethodPost, server.URL+"/code/coding/v1/messages", strings.NewReader(fmt.Sprintf(`{"model":"native-model","messages":[{"role":"user","content":"Read a file"}],"max_tokens":64,"stream":%t}`, stream)))
+				request.Header.Set("Authorization", "Bearer "+fullKey)
+				request.Header.Set("X-Claude-Code-Session-Id", "tool-outcome")
+				response, err := server.Client().Do(request)
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer response.Body.Close()
+				body, err := io.ReadAll(response.Body)
+				if err != nil {
+					t.Fatal(err)
+				}
+				successful := outcome == "missing-usage" || outcome == "max-tokens" || outcome == "refusal"
+				if successful {
+					reason := func() string {
+						switch outcome {
+						case "max-tokens":
+							return "max_tokens"
+						case "refusal":
+							return "refusal"
+						default:
+							return "tool_use"
+						}
+					}()
+					if response.StatusCode != http.StatusOK || !bytes.Contains(body, []byte(`"stop_reason":"`+reason+`"`)) {
+						t.Fatalf("lost terminal reason %d %s", response.StatusCode, body)
+					}
+				} else if stream {
+					if !bytes.Contains(body, []byte("event: error")) || bytes.Contains(body, []byte("event: message_stop")) {
+						t.Fatalf("fabricated stream success %s", body)
+					}
+				} else if response.StatusCode != http.StatusBadGateway {
+					t.Fatalf("fabricated unary success %d %s", response.StatusCode, body)
+				}
+				usage := ledger.wait(t)
+				if outcome == "failed" || outcome == "max-tokens" || outcome == "refusal" {
+					if usage.Total == nil || *usage.Total != 7 {
+						t.Fatalf("authoritative terminal usage lost %+v", usage)
+					}
+				} else if usage.Total != nil || usage.Input != nil || usage.Output != nil {
+					t.Fatalf("invented usage %+v", usage)
+				}
+				if g.mock.count("a") != 1 {
+					t.Fatal("partial exchange replayed")
+				}
+			})
+		}
+	}
+}
+
+func TestCodeMessagesToCodexCancelledToolStream(t *testing.T) {
+	g, ledger, server := newCodeForwardHarness(t)
+	route := g.rt.release.Snapshot.CodeRoutes["coding"]
+	route.MessagesToCodex = true
+	g.rt.release.Snapshot.CodeRoutes["coding"] = route
+	g.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.Copy(io.Discard, r.Body)
+		w.Header().Set("Content-Type", "text/event-stream")
+		for _, event := range []string{
+			`{"type":"response.created","response":{"id":"cancelled-tool","status":"in_progress","output":[]}}`,
+			`{"type":"response.output_item.added","output_index":0,"item":{"type":"function_call","call_id":"call-read","name":"read_file","arguments":""}}`,
+			`{"type":"response.function_call_arguments.delta","output_index":0,"delta":"{\"path\":"}`,
+		} {
+			fmt.Fprint(w, "data: "+event+"\n\n")
+		}
+		w.(http.Flusher).Flush()
+		<-r.Context().Done()
+	})
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	request, _ := http.NewRequestWithContext(ctx, http.MethodPost, server.URL+"/code/coding/v1/messages", strings.NewReader(`{"model":"native-model","messages":[{"role":"user","content":"Read a file"}],"max_tokens":64,"stream":true}`))
+	request.Header.Set("Authorization", "Bearer "+fullKey)
+	request.Header.Set("X-Claude-Code-Session-Id", "cancelled-tool")
+	response, err := server.Client().Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	reader := bufio.NewReader(response.Body)
+	for {
+		line, err := reader.ReadString('\n')
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(line, "input_json_delta") {
+			break
+		}
+	}
+	cancel()
+	remaining, _ := io.ReadAll(reader)
+	if bytes.Contains(remaining, []byte("message_stop")) {
+		t.Fatalf("cancelled tool reported success %s", remaining)
+	}
+	usage := ledger.wait(t)
+	if usage.Total != nil || usage.Input != nil || usage.Output != nil {
+		t.Fatalf("cancelled tool invented usage %+v", usage)
+	}
+	if g.mock.count("a") != 1 {
+		t.Fatal("cancelled tool was replayed")
+	}
+	ledger.mu.Lock()
+	defer ledger.mu.Unlock()
+	if len(ledger.outcomes) == 0 || (ledger.outcomes[len(ledger.outcomes)-1].Origin != "client" || ledger.outcomes[len(ledger.outcomes)-1].Kind != "canceled") {
+		t.Fatalf("cancellation outcomes=%+v", ledger.outcomes)
+	}
+}
 
 func TestCodeForwardingObservesRetryAfterWithoutChangingAllowance(t *testing.T) {
 	now := time.Date(2026, 10, 30, 10, 0, 0, 0, time.UTC)

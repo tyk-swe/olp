@@ -13,7 +13,6 @@ import (
 	"github.com/tyk-swe/olp/internal/codewire"
 	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/protocols"
-	"github.com/tyk-swe/olp/internal/protocols/openai"
 	"github.com/tyk-swe/olp/internal/protocols/wire"
 )
 
@@ -34,10 +33,8 @@ func codeTranslateMessages(body []byte, r *http.Request, model string) (codePayl
 	if requestErr != nil {
 		return codePayload{}, refused
 	}
-	for _, name := range []string{"tools", "tool_choice", "stream_options"} {
-		if request.Field(name) != nil {
-			return codePayload{}, refused
-		}
+	if request.Field("stream_options") != nil {
+		return codePayload{}, refused
 	}
 	root := request.OIF().Document().Root()
 	if !codeTextContent(root, "system") {
@@ -45,7 +42,7 @@ func codeTranslateMessages(body []byte, r *http.Request, model string) (codePayl
 	}
 	messages, _ := root.Lookup("messages")
 	for _, message := range messages.Elements() {
-		if !codeTextContent(message, "content") {
+		if !codeMessagesContent(message) {
 			return codePayload{}, refused
 		}
 	}
@@ -77,6 +74,29 @@ func codeTranslateMessages(body []byte, r *http.Request, model string) (codePayl
 		return codePayload{}, refused
 	}
 	return codePayload{body: prepared.Document().Bytes(), stream: request.Stream, translated: true}, nil
+}
+
+func codeMessagesContent(message oif.Value) bool {
+	content, _ := message.Lookup("content")
+	if content.Kind() == oif.String {
+		return true
+	}
+	if content.Kind() != oif.Array {
+		return false
+	}
+	for _, block := range content.Elements() {
+		kind, _ := block.Lookup("type")
+		switch name, _ := kind.Text(); name {
+		case "text", "tool_use":
+		case "tool_result":
+			if !codeTextContent(block, "content") {
+				return false
+			}
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 func codeTextContent(parent oif.Value, key string) bool {
@@ -127,11 +147,7 @@ func (a *codeAttempt) translatedCompletion(response *http.Response, model string
 		if stream {
 			return protocols.StreamWithEvents(wire.Responses, wire.Anthropic, response.Body, codewire.MaxBody, model, true, emit, observe)
 		}
-		aggregated, err := openai.AggregateEvents(wire.Responses, response.Body, codewire.MaxBody, codewire.MaxBody, observe)
-		if err != nil {
-			return nil, err
-		}
-		return protocols.Decode(wire.Responses, wire.Anthropic, aggregated.Body, model, "")
+		return protocols.AggregateTranslatedResponses(wire.Anthropic, response.Body, codewire.MaxBody, model, observe)
 	}
 	if stream {
 		return nil, codemode.Refuse(502, "code_upstream_invalid")

@@ -227,7 +227,7 @@ func TestClaudeConfigurationThroughCodexRequiresTranslationPolicy(t *testing.T) 
 		if config.Client != "claude-code" || config.Model != models[0] || config.PlanModel == nil || *config.PlanModel != models[1] || config.SmallModel == nil || *config.SmallModel != models[0] {
 			t.Fatalf("translated model selection lost: %+v", config)
 		}
-		if !strings.Contains(config.Configuration, "ANTHROPIC_BASE_URL") || !strings.Contains(config.Instructions, "text-only") || !strings.Contains(config.Instructions, "identity") {
+		if !strings.Contains(config.Configuration, "ANTHROPIC_BASE_URL") || !strings.Contains(config.Instructions, "tool use") || !strings.Contains(config.Instructions, "reasoning effort") || !strings.Contains(config.Instructions, "identity") {
 			t.Fatalf("missing translated setup or limitations: %+v", config)
 		}
 		defaults, err := Generate(route, offers, Request{GatewayURL: "https://olp.example"})
