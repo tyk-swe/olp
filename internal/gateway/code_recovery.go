@@ -19,6 +19,9 @@ type codeRejectionBody struct {
 }
 
 func (a *codeAttempt) recover(ctx context.Context, response *http.Response, route codemode.Route, previous *resources.CodeRecovery) (*resources.CodeRecovery, error) {
+	if a.paid != nil {
+		return nil, nil
+	}
 	ordinal := recoveryOrdinal(previous)
 	if route.InitialRecoveryAttempts < 1 || response.StatusCode != 401 && response.StatusCode != 429 || ctx.Err() != nil {
 		return nil, nil

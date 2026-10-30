@@ -13,6 +13,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/codeclient"
+	"github.com/tyk-swe/olp/internal/connectors"
+	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/routing"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -858,6 +861,171 @@ func TestCodeFoundationModelPoolRecoveryPreservesRequestedModelAndAuthority(t *t
 			diagnosed := slices.IndexFunc(attempts, func(attempt codemode.Attempt) bool { return attempt.ID == recovered.Attempt.ID })
 			if diagnosed < 0 || attempts[diagnosed].RequestedModel == nil || *attempts[diagnosed].RequestedModel != "team-code" || attempts[diagnosed].Model != recovered.Pin.TargetModel {
 				t.Fatalf("diagnostics lost requested or selected model %+v", attempts)
+			}
+		})
+	}
+}
+
+func newPaidCodeFixture(t *testing.T, endpoints ...string) (*codeFixture, routing.Provider, routing.Slot) {
+	t.Helper()
+	f := newCodeFixture(t)
+	endpoint := func() string {
+		if len(endpoints) > 0 {
+			return endpoints[0]
+		}
+		return "https://fixture.invalid"
+	}()
+	created := f.h.want(f.owner, "POST", "/api/v1/providers", map[string]any{"project_id": f.project, "name": "Metered fixture", "configuration": map[string]any{"kind": "openai", "auth_mode": "api_key", "profile_id": "openai-responses", "profile_revision": connectors.ProfileRevision, "endpoint": endpoint, "options": map[string]any{"vendor_id": "openai"}}, "credential": "fixture-paid-secret", "model": "native-model"}, idem("paid-provider"), 201)
+	providerID := created["id"].(string)
+	var slot routing.Slot
+	slot.Enabled = true
+	slot.Weight = 1
+	var credential string
+	var version int
+	if err := f.h.Pool.QueryRow(t.Context(), `SELECT s.id::text,s.credential_id::text,c.version FROM olp.provider_slots s JOIN olp.provider_credentials c ON c.id=s.credential_id WHERE s.provider_id=$1 AND s.is_default`, providerID).Scan(&slot.ID, &credential, &version); err != nil {
+		t.Fatal(err)
+	}
+	slot.CredentialID = &credential
+	slot.CredentialVersion = &version
+	models, err := json.Marshal([]routing.RevisionModel{{ID: access.NewID(), UpstreamModel: "native-model", Capabilities: []routing.RevisionCapability{{Operation: "generation", Surface: "openai", Mode: "unary", Source: "certified"}}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	slots, err := json.Marshal([]routing.RevisionSlot{{Slot: slot, Default: true}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	revision := access.NewID()
+	f.exec(t, `UPDATE olp.provider_models SET enabled=true WHERE provider_id=$1`, providerID)
+	f.exec(t, `INSERT INTO olp.provider_revisions(id,provider_id,revision,name,configuration,models,slots,credential_version,source_etag,activated_by) SELECT $2,id,1,name,configuration,$3,$4,$5,etag,created_by FROM olp.providers WHERE id=$1`, providerID, revision, models, slots, version)
+	f.exec(t, `UPDATE olp.providers SET state='active',active_revision=1,active_revision_id=$2 WHERE id=$1`, providerID, revision)
+	draft := map[string]any{"project_id": f.project, "slug": f.route.Slug, "pool_id": f.pool, "models": f.route.Models, "enabled": true, "paid_participation": true, "paid_targets": map[string]codemode.PaidTarget{"native-model": {ProviderID: providerID, SlotID: slot.ID}}}
+	saved := f.h.want(f.owner, "PUT", "/api/v1/code/routes/"+f.route.ID, draft, withMatch(f.routeRecord, idem("paid-draft")), 200)
+	published := f.h.want(f.owner, "POST", "/api/v1/code/routes/"+f.route.ID+"/publish", nil, withMatch(saved, idem("paid-publish")), 200)
+	encoded, err := json.Marshal(published)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(encoded, &f.route); err != nil {
+		t.Fatal(err)
+	}
+	tx, err := f.h.Pool.Begin(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(t.Context())
+	snapshot, err := runtime.ReadSnapshot(t.Context(), tx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	provider, ok := snapshot.CodePaidConnections[f.route.RevisionID+":"+providerID]
+	if !ok {
+		t.Fatal("paid provider was not published into the serving snapshot")
+	}
+	return f, provider, slot
+}
+
+func TestCodePaidPublicationRetainsOwnershipAndMonetaryUncertainty(t *testing.T) {
+	f, provider, slot := newPaidCodeFixture(t)
+	offers, err := f.store.Models(t.Context(), f.route, f.key)
+	models := codeclient.Catalog(f.route, offers)
+	if err != nil || len(models) != 1 || !models[0].Paid || slices.ContainsFunc(offers, func(offer codeclient.Offer) bool { return offer.PaidProtocol != "" && offer.Adapter != "" }) {
+		t.Fatalf("paid discovery %+v %v", models, err)
+	}
+	config := f.h.want(f.owner, "GET", "/api/v1/code/routes/"+f.route.ID+"/client-config?client=codex&model=native-model&gateway_url=https://olp.example", nil, nil, 200)
+	if len(config["adapters"].([]any)) != 0 || len(config["paid_models"].([]any)) != 1 || !strings.Contains(config["configuration"].(string), "supports_websockets = false") {
+		t.Fatalf("paid setup lost direct target metadata %+v", config)
+	}
+	in := resources.PaidCodeAdmission{CodeAdmission: f.input("paid-conversation", "", nil), Authority: access.Authority{ID: f.key, LookupID: f.key}, Provider: provider, Slot: slot}
+	permit, err := f.store.AdmitPaid(t.Context(), in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.store.MarkDispatched(t.Context(), permit.Attempt.ID); err != nil {
+		t.Fatal(err)
+	}
+	total, input, output := int64(3), int64(2), int64(1)
+	if err := f.store.Settle(t.Context(), permit.Attempt.ID, codemode.Usage{Total: &total, Input: &input, Output: &output}); err != nil {
+		t.Fatal(err)
+	}
+	unrelated := f.input("unrelated", "", nil)
+	if _, err := f.store.AdmitPaid(t.Context(), resources.PaidCodeAdmission{CodeAdmission: unrelated, Provider: provider, Slot: slot}); err != nil {
+		t.Fatal(err)
+	}
+	attempts := f.h.want(f.owner, "GET", "/api/v1/code/attempts?route_id="+f.route.ID+"&binding_id="+permit.BindingID, nil, nil, 200)["items"].([]any)
+	if len(attempts) != 1 {
+		t.Fatalf("paid attempt disappeared %+v", attempts)
+	}
+	attempt := attempts[0].(map[string]any)
+	if attempt["account_id"] != nil || attempt["binding_id"] != nil || attempt["paid_binding_id"] != permit.BindingID || attempt["paid_provider_id"] != provider.ID || attempt["state"] != "settled" || attempt["paid_monetary_state"] != "unknown" {
+		t.Fatalf("token settlement hid paid money uncertainty %+v", attempt)
+	}
+	accounting := &limits.DebitStore{Pool: f.h.Pool}
+	if err := accounting.CheckOwnerAccounting(t.Context(), f.key); !errors.Is(err, limits.ErrUninitializedCost) {
+		t.Fatalf("unresolved paid use lost its durable monetary hold %v", err)
+	}
+	peer := access.NewID()
+	f.addKey(t, peer)
+	f.exec(t, `INSERT INTO olp.code_pool_keys(pool_id,api_key_id) VALUES($1,$2)`, f.pool, peer)
+	independent := in
+	independent.APIKeyID = peer
+	independent.Authority = access.Authority{ID: peer, LookupID: peer}
+	other, err := f.store.AdmitPaid(t.Context(), independent)
+	if err != nil || other.BindingID == permit.BindingID {
+		t.Fatalf("paid ownership crossed keys %+v %v", other, err)
+	}
+	if err := f.store.Abort(t.Context(), other.Attempt.ID); err != nil {
+		t.Fatal(err)
+	}
+	bindings := f.h.want(f.owner, "GET", "/api/v1/code/bindings?api_key_id="+f.key, nil, nil, 200)["items"].([]any)
+	if len(bindings) != 1 || bindings[0].(map[string]any)["id"] != permit.BindingID {
+		t.Fatalf("paid binding disappeared %+v", bindings)
+	}
+	f.h.want(f.owner, "POST", "/api/v1/code/bindings/"+permit.BindingID+"/retire", nil, idem("retire-paid"), 200)
+	_, err = f.store.AdmitPaid(t.Context(), in)
+	codeRefusal(t, err, "code_binding_retired")
+}
+
+func TestCodePaidResponseReferencePreservesConversationOwnership(t *testing.T) {
+	for _, scenario := range []struct {
+		name, first, next, parent string
+		refused                   bool
+	}{{name: "same conversation", first: "root", next: "root"}, {name: "new child", first: "root", next: "child"}, {name: "generic affinity", first: "olp:affinity/one", next: "olp:affinity/two", refused: true}} {
+		t.Run(scenario.name, func(t *testing.T) {
+			f, provider, slot := newPaidCodeFixture(t)
+			admit := func(conversation, parent, previous string) (resources.PaidCodePermit, error) {
+				input := f.input(conversation, parent, nil)
+				input.PreviousResponse = previous
+				return f.store.AdmitPaid(t.Context(), resources.PaidCodeAdmission{CodeAdmission: input, Provider: provider, Slot: slot})
+			}
+			first, err := admit(scenario.first, "", "")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := f.store.MarkDispatched(t.Context(), first.Attempt.ID); err != nil {
+				t.Fatal(err)
+			}
+			if err := f.store.ObserveReference(t.Context(), first.Attempt.ID, "paid-response"); err != nil {
+				t.Fatal(err)
+			}
+			next, err := admit(scenario.next, scenario.parent, "paid-response")
+			if scenario.refused {
+				codeRefusal(t, err, "code_response_account_conflict")
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if scenario.first == scenario.next && next.BindingID != first.BindingID {
+				t.Fatal("same conversation changed paid ownership")
+			}
+			if scenario.first != scenario.next {
+				page := f.h.want(f.owner, "GET", "/api/v1/code/bindings?api_key_id="+f.key, nil, nil, 200)
+				bindings := page["items"].([]any)
+				child := slices.IndexFunc(bindings, func(item any) bool { return item.(map[string]any)["id"] == next.BindingID })
+				if child < 0 || bindings[child].(map[string]any)["parent_id"] != first.BindingID {
+					t.Fatalf("paid response reference lost child ownership %+v", bindings)
+				}
 			}
 		})
 	}

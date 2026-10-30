@@ -82,6 +82,9 @@ func (s *Snapshot) validateCodeMode() error {
 		return err
 	}
 	for slug, route := range s.CodeRoutes {
+		if err := route.ValidatePaidTargets(); err != nil {
+			return err
+		}
 		if err := route.ValidateAliases(); err != nil {
 			return err
 		}

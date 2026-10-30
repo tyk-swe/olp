@@ -29,6 +29,8 @@
     tokenCount,
     type CodeEditing
   } from './presentation';
+  import { listProviders } from '$lib/features/providers/api/providers';
+  import { listCredentialSlots } from '$lib/features/providers/api/credentials';
   import ResourceEditor from './ResourceEditor.svelte';
   import RouteRevisions from './RouteRevisions.svelte';
   import ClientConfiguration from './ClientConfiguration.svelte';
@@ -90,6 +92,27 @@
   const inventory = createQuery(() => ({
     queryKey: codeKeys.inventory(projectId, kind),
     queryFn: async ({ signal }) => ({
+      providers:
+        kind === 'routes'
+          ? await Promise.all(
+              (await listProviders(signal))
+                .filter(
+                  (provider) =>
+                    provider.project_id === projectId &&
+                    provider.state === 'active' &&
+                    provider.kind !== 'plugin'
+                )
+                .map(async (provider) => ({
+                  id: provider.id,
+                  name: provider.name,
+                  slots: (
+                    await listCredentialSlots(provider.id, signal)
+                  ).items.filter(
+                    (slot) => slot.enabled && slot.credential_version_id
+                  )
+                }))
+            )
+          : [],
       accounts:
         kind === 'pools' || kind === 'routes'
           ? await collectCursorPages((cursor) =>
@@ -394,9 +417,13 @@
                 <span class="badge">{adapterLabel(adapter)}</span>
               {:else}
                 {route.published_at
-                  ? 'No adapter: its accounts serve no supported client'
+                  ? 'No subscription adapter is published'
                   : 'Set at publication'}
               {/each}
+            </dd>
+            <dt>Paid native models</dt>
+            <dd>
+              {Object.keys(route.paid_targets ?? {}).join(', ') || 'None'}
             </dd>
             <dt>Draft models</dt>
             <dd>{route.models.join(', ')}</dd>
@@ -433,8 +460,8 @@
       <p>
         Daily and monthly periods use UTC. These are token caps, never
         subscription allowance or billed spend. Existing key
-        request/rate/concurrency limits also apply. Code-mode does not enforce
-        monetary estimates.
+        request/rate/concurrency limits also apply. Paid API targets
+        additionally require known pricing and monetary admission.
       </p>
       {#each budgets.data?.items ?? [] as budget (budget.id)}
         <article class="card">

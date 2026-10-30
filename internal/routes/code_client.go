@@ -39,7 +39,7 @@ func (s *Server) CodeClientConfiguration(r *http.Request, p access.Principal) (a
 		return access.Reply{}, err
 	}
 	if len(offers) == 0 {
-		return access.Reply{}, access.Fail(409, "code_route_unserved", "No eligible pool account serves this route's published subscriptions.")
+		return access.Reply{}, access.Fail(409, "code_route_unserved", "No eligible target serves this published code route.")
 	}
 	query := r.URL.Query()
 	config, err := codeclient.Generate(route, offers, codeclient.Request{GatewayURL: query.Get("gateway_url"), Client: query.Get("client"), Platform: query.Get("platform"), Model: query.Get("model"), PlanModel: query.Get("plan_model"), SmallModel: query.Get("small_model")})

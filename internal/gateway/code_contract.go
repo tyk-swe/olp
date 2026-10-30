@@ -48,3 +48,8 @@ type ResearchLedger interface {
 	CreateResearchSession(context.Context, codemode.ResearchSessionBinding, string) (string, error)
 	DeleteResearchSession(context.Context, string, string) error
 }
+
+type PaidCodeLedger interface {
+	ResolvePaidModel(context.Context, resources.CodeAdmission, access.Authority) (codemode.Operation, error)
+	AdmitPaid(context.Context, resources.PaidCodeAdmission) (resources.PaidCodePermit, error)
+}

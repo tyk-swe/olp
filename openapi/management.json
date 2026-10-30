@@ -15595,7 +15595,10 @@
           },
           "account_id": {
             "format": "uuid",
-            "type": "string"
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "api_key_id": {
             "format": "uuid",
@@ -15603,7 +15606,10 @@
           },
           "binding_id": {
             "format": "uuid",
-            "type": "string"
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "bound_evidence": {
             "type": [
@@ -15737,7 +15743,41 @@
               "string",
               "null"
             ],
-            "description": "Public model identifier requested by the client. Null for historical attempts where the identifier was not recorded. model identifies the selected exact target."
+            "description": "Public model requested before explicit alias resolution."
+          },
+          "paid_slot_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "paid_monetary_state": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "pending",
+              "released",
+              "settled",
+              "unknown",
+              null
+            ]
+          },
+          "paid_binding_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "paid_provider_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
           }
         },
         "required": [
@@ -15797,7 +15837,10 @@
         "properties": {
           "account_id": {
             "format": "uuid",
-            "type": "string"
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "api_key_id": {
             "format": "uuid",
@@ -15830,7 +15873,10 @@
             "type": "array"
           },
           "principal": {
-            "type": "string"
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "project_id": {
             "format": "uuid",
@@ -15850,6 +15896,20 @@
           "route_id": {
             "format": "uuid",
             "type": "string"
+          },
+          "paid_provider_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "paid_slot_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
           }
         },
         "required": [
@@ -16160,6 +16220,12 @@
             "items": {
               "$ref": "#/components/schemas/CodeModel"
             }
+          },
+          "paid_models": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
           }
         },
         "required": [
@@ -16189,7 +16255,10 @@
         "properties": {
           "account_id": {
             "format": "uuid",
-            "type": "string"
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "created_at": {
             "format": "date-time",
@@ -16201,11 +16270,28 @@
             "type": "string"
           },
           "principal": {
-            "type": "string"
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "target_model": {
             "type": "string",
             "description": "Durably pinned native model identifier. Existing native pins use their model identifier."
+          },
+          "paid_provider_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "paid_slot_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
           }
         },
         "required": [
@@ -16613,6 +16699,18 @@
               }
             },
             "description": "Explicit subscription model recovery pools keyed by a published native name or exact alias. Requires model_rewriting. Each ordered list starts with that name's normal exact target and contains distinct native identifiers from models. Recovery prefers the pinned exact target, then these alternatives, within initial_recovery_attempts and positive nonexecution, portability, live authorization and budget checks. Omitted pools preserve exact selection. Publications freeze the policy. Existing conversations retain their exact target, including after alias changes, while it remains published and authorized. Paid fallback is separately governed."
+          },
+          "paid_participation": {
+            "type": "boolean",
+            "default": false,
+            "description": "Explicitly permit direct metered API targets. This does not enable paid fallback."
+          },
+          "paid_targets": {
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/CodePaidTarget"
+            },
+            "description": "Exact native model to directly selected published metered provider and credential slot. A mapped model takes precedence over subscription accounts."
           }
         },
         "required": [
@@ -16737,6 +16835,18 @@
               }
             },
             "description": "Explicit subscription model recovery pools keyed by a published native name or exact alias. Requires model_rewriting. Each ordered list starts with that name's normal exact target and contains distinct native identifiers from models. Recovery prefers the pinned exact target, then these alternatives, within initial_recovery_attempts and positive nonexecution, portability, live authorization and budget checks. Omitted pools preserve exact selection. Publications freeze the policy. Existing conversations retain their exact target, including after alias changes, while it remains published and authorized. Paid fallback is separately governed."
+          },
+          "paid_targets": {
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/CodePaidTarget"
+            },
+            "description": "Exact native model to directly selected published metered provider and credential slot. A mapped model takes precedence over subscription accounts."
+          },
+          "paid_participation": {
+            "type": "boolean",
+            "default": false,
+            "description": "Explicitly permit direct metered API targets. This does not enable paid fallback."
           }
         },
         "required": [
@@ -28579,6 +28689,10 @@
               "type": "string"
             },
             "description": "Configured ordered subscription recovery targets for this public model. This is policy metadata, not an availability or portability guarantee. Omitted for exact-model selection."
+          },
+          "paid": {
+            "type": "boolean",
+            "description": "This model directly selects a metered API target and requires monetary admission."
           }
         }
       },
@@ -29032,6 +29146,24 @@
         },
         "required": [],
         "description": "Resource IDs are artifact-local references. Accounts resolve through explicitly bound current destination enrollments, pools through project/name/kind/owner, routes through unique slug, and budgets through project/route/key and configured daily/monthly dimensions. Ambiguous identities are refused. Source credentials, health, usage windows, conversation bindings and historical revisions stay local. Destination projects and providers must be prepared and enrolled before planning. Rename globally unique slugs for same-installation cross-project promotion."
+      },
+      "CodePaidTarget": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "provider_id",
+          "slot_id"
+        ],
+        "properties": {
+          "provider_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "slot_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
       }
     },
     "securitySchemes": {

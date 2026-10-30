@@ -3,6 +3,7 @@ package gateway
 import (
 	"bufio"
 	"bytes"
+	"compress/gzip"
 	"context"
 	"encoding/json"
 	"errors"
@@ -15,10 +16,16 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/coder/websocket"
+	"github.com/google/uuid"
+	"github.com/tyk-swe/olp/internal/codewire"
+	"github.com/tyk-swe/olp/internal/limits"
+	"github.com/tyk-swe/olp/internal/runtime"
+	"github.com/tyk-swe/olp/internal/usage"
 
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/claudeauth"
@@ -260,7 +267,7 @@ func codeDo(t *testing.T, server *httptest.Server, body []byte, extra http.Heade
 func TestCodeGenericResponsesPreserveNativeExchange(t *testing.T) {
 	h, ledger, server := newCodeForwardHarness(t)
 	requestBody := []byte(`{ "model":"native-model", "input":"Explain this function", "vendor_extension":{"keep":true} }`)
-	responseBody := []byte(`{ "id":"generic-response", "status":"completed", "output":[], "usage":{"total_tokens":3,"input_tokens":2,"output_tokens":1}, "vendor_extension":{"keep":true} }`)
+	responseBody := []byte(`{ "id":"generic-response", "status":"completed", "output":[], "usage":{"total_tokens":3,"input_tokens":2,"output_tokens":1,"input_tokens_details":{"cached_tokens":1}}, "vendor_extension":{"keep":true} }`)
 	h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
 		body, err := io.ReadAll(r.Body)
 		if err != nil || !bytes.Equal(body, requestBody) {
@@ -585,7 +592,7 @@ func TestCodeNativeMessagesPreservePayloadForSelectedAccount(t *testing.T) {
 				t.Fatal("selected account cannot serve Messages")
 			}
 			requestBody := []byte(`{ "model":"native-model", "messages":[{"role":"user","content":"hello"}], "max_tokens":8, "vendor_extension":{"keep":true} }`)
-			responseBody := []byte(`{ "type":"message", "content":[{"type":"text","text":"native reply"}], "stop_reason":"end_turn", "usage":{"input_tokens":2,"output_tokens":1}, "vendor_extension":{"keep":true} }`)
+			responseBody := []byte(`{ "type":"message", "content":[{"type":"text","text":"native reply"}], "stop_reason":"end_turn", "usage":{"input_tokens":2,"output_tokens":1,"input_tokens_details":{"cached_tokens":1}}, "vendor_extension":{"keep":true} }`)
 			h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
 				body, err := io.ReadAll(r.Body)
 				if err != nil || !bytes.Equal(body, requestBody) {
@@ -1770,6 +1777,55 @@ func (writer codeWriteDeadlineWriter) SetReadDeadline(deadline time.Time) error 
 	return http.NewResponseController(writer.ResponseWriter).SetReadDeadline(deadline)
 }
 
+func (l *codeTestLedger) AdmitPaid(_ context.Context, in resources.PaidCodeAdmission) (resources.PaidCodePermit, error) {
+	if l.refuse != "" {
+		return resources.PaidCodePermit{}, codemode.Refuse(403, l.refuse)
+	}
+	return resources.PaidCodePermit{Authority: in.Authority, Attempt: codemode.Attempt{ID: uuid.NewString()}, BindingID: uuid.NewString()}, nil
+}
+
+func TestCodePaidTargetPreservesNativeRequestAndAttributesMeteredUsage(t *testing.T) {
+	h, ledger, server := newPaidCodeForwardHarness(t)
+	route := h.rt.Release().Snapshot.CodeRoutes["coding"]
+	provider := h.rt.Release().Snapshot.CodePaidConnections[route.RevisionID+":"+route.PaidTargets[modelA].ProviderID]
+	requestBody := []byte(`{ "model":"model-a", "input":"Explain this function", "max_output_tokens":20, "vendor_extension":{"keep":true} }`)
+	responseBody := []byte(`{ "id":"paid-response", "status":"completed", "output":[], "usage":{"total_tokens":3,"input_tokens":2,"output_tokens":1,"input_tokens_details":{"cached_tokens":1}}, "vendor_extension":{"keep":true} }`)
+	h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		if !bytes.Equal(body, requestBody) || r.Header.Get("Authorization") != "Bearer "+secretA {
+			t.Error("paid target changed native request or authorization")
+		}
+		_, _ = w.Write(responseBody)
+	})
+	response := codeDo(t, server, requestBody, nil)
+	body, _ := io.ReadAll(response.Body)
+	if response.StatusCode != 200 || !bytes.Equal(body, responseBody) {
+		t.Fatalf("paid exchange %d %s", response.StatusCode, body)
+	}
+	ledger.wait(t)
+	env := h.sink.last(t)
+	if env.KeyID != h.keyID || env.Route != route.Slug || len(env.Attempts) != 1 || env.Attempts[0].ProviderID != provider.ID || env.Attempts[0].VendorID != provider.VendorID || env.Attempts[0].SlotID != h.slotA || env.Attempts[0].Price == nil || !env.Attempts[0].UsageComplete || env.Attempts[0].Usage.InputTokens != 2 || env.Attempts[0].Usage.OutputTokens != 1 {
+		t.Fatalf("paid usage attribution %+v", env)
+	}
+	emitter := usage.NewEmitter(1)
+	defer emitter.Close()
+	(&AccountingSink{Emitter: emitter, Log: quiet}).Terminal(env)
+	if state := emitter.Snapshot(); state.Accepted != 1 || state.Lost() != 0 {
+		t.Fatalf("paid accounting was not accepted by the shared pipeline %+v", state)
+	}
+	emitter.Close()
+	emitter.RunWriter(t.Context(), accountingStreamFunc(func(_ context.Context, args ...string) (any, error) {
+		event, err := usage.Decode([]byte(args[4]))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(event.Attempts) != 1 || event.Attempts[0].Usage == nil || !event.Attempts[0].Usage.Complete || event.Attempts[0].Routing == nil || event.Attempts[0].Routing.PricingRevisionID == nil || event.APIKeyID != h.keyID {
+			t.Fatalf("paid monetary accounting lost ownership or measured cost %+v", event)
+		}
+		return "1-0", nil
+	}), "metadata", quiet)
+}
+
 func TestCodeModelPoolRecoveryPreservesNativeRequestedName(t *testing.T) {
 	h, ledger, server := newCodeForwardHarness(t, codeForwardSetup{Models: []string{"gpt-fixture-main", "gpt-fixture-alternate"}, InitialRecoveryAttempts: 1, Policy: access.KeyPolicy{Scopes: []string{"inference"}}})
 	route := h.rt.release.Snapshot.CodeRoutes["coding"]
@@ -1840,6 +1896,380 @@ func TestCodeModelPoolRemovalKeepsRecoveredNativePinAndProvider(t *testing.T) {
 			t.Fatalf("pool removal changed recovered provider or public name pools=%v status=%d completion=%+v, %v", pools, response.StatusCode, completion, decodeErr)
 		}
 		ledger.wait(t)
+	}
+}
+
+func newPaidCodeForwardHarness(t *testing.T) (*harness, *codeTestLedger, *httptest.Server) {
+	t.Helper()
+	h, ledger, server := newCodeForwardHarness(t, codeForwardSetup{Models: []string{modelA}, Policy: access.KeyPolicy{Scopes: []string{"inference", "models_read"}}})
+	snapshot := h.rt.Release().Snapshot.Clone()
+	route := snapshot.CodeRoutes["coding"]
+	route.ID = uuid.NewString()
+	provider := snapshot.Providers[snapshot.Routes[routeSlug].Targets[0].ProviderID]
+	provider.ProjectID = &route.ProjectID
+	provider.Kind = "openai"
+	provider.VendorID = "openai"
+	provider.ProfileID = "openai-responses"
+	provider.ProfileRevision = connectors.ProfileRevision
+	route.PaidParticipation = true
+	route.PaidTargets = map[string]codemode.PaidTarget{modelA: {ProviderID: provider.ID, SlotID: h.slotA}}
+	snapshot.CodeRoutes["coding"] = route
+	snapshot.CodePaidConnections = map[string]routing.Provider{route.RevisionID + ":" + provider.ID: provider}
+	release, err := runtime.NewRelease(uuid.NewString(), 8, snapshot, map[string][]byte{h.credA: []byte(secretA)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.rt.release = release
+	authority := h.rt.keys[fullKey]
+	authority.LookupID = "paid_key_lookup"
+	h.rt.keys[fullKey] = authority
+	h.rt.inputs = &usage.RoutingInputs{RefreshedAt: time.Now(), Prices: []usage.RoutingPrice{{RevisionID: uuid.NewString(), EffectiveAt: time.Now().Add(-time.Hour), Price: usage.Price{ProviderKind: provider.Kind, VendorID: new(provider.VendorID), Model: modelA, Operation: "generation", Currency: "USD", InputPerMillion: new("1"), OutputPerMillion: new("2")}}}}
+
+	return h, ledger, server
+}
+
+type paidBudgetRefusal struct{}
+
+func (paidBudgetRefusal) Do(context.Context, ...string) (any, error) {
+	return []any{int64(1), int64(0), "daily_cost", int64(1000), int64(20_000), int64(24_000)}, nil
+}
+
+func TestCodePaidTargetRefusesBeforeUpstreamDispatch(t *testing.T) {
+	for _, scenario := range []struct {
+		name, code string
+		status     int
+		setup      func(*testing.T, *harness, *codeTestLedger)
+	}{
+		{"missing pricing", "code_paid_pricing_unavailable", 503, func(_ *testing.T, h *harness, _ *codeTestLedger) { h.rt.inputs = nil }},
+		{"live access denied", "code_permission_denied", 403, func(_ *testing.T, _ *harness, l *codeTestLedger) { l.refuse = "code_permission_denied" }},
+		{"credential revoked", "code_paid_target_denied", 403, func(_ *testing.T, h *harness, _ *codeTestLedger) { h.rt.revoked = map[string]bool{h.credA: true} }},
+		{"slot restricted", "code_paid_target_denied", 403, func(_ *testing.T, h *harness, _ *codeTestLedger) {
+			for key, p := range h.rt.release.Snapshot.CodePaidConnections {
+				p.Slots[0].AllowedAPIKeys = []string{"other-key"}
+				h.rt.release.Snapshot.CodePaidConnections[key] = p
+			}
+		}},
+		{"paid disabled", "code_paid_participation_disabled", 403, func(_ *testing.T, h *harness, _ *codeTestLedger) {
+			route := h.rt.release.Snapshot.CodeRoutes["coding"]
+			route.PaidParticipation = false
+			h.rt.release.Snapshot.CodeRoutes["coding"] = route
+		}},
+		{"exhausted spend", "code_budget_exhausted", 429, func(t *testing.T, h *harness, _ *codeTestLedger) {
+			authority := h.rt.keys[fullKey]
+			authority.Policy.DailyCostLimit = new("0.01")
+			authority.Policy.CostBasis = string(limits.BasisCost)
+			h.rt.keys[fullKey] = authority
+			limiter, err := limits.New(paidBudgetRefusal{}, "olp:paid-refusal")
+			if err != nil {
+				t.Fatal(err)
+			}
+			h.gateway.Admission = NewAdmission(limiter, nil, h.gateway.log)
+		}},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
+			h, ledger, server := newPaidCodeForwardHarness(t)
+			scenario.setup(t, h, ledger)
+			var dispatched atomic.Bool
+			handler := func(w http.ResponseWriter, _ *http.Request) { dispatched.Store(true); w.WriteHeader(502) }
+			h.mock.set("a", handler)
+			h.mock.set("b", handler)
+			response := codeDo(t, server, []byte(`{"model":"model-a","input":"hello","max_output_tokens":20}`), nil)
+			body, _ := io.ReadAll(response.Body)
+			if response.StatusCode != scenario.status || !strings.Contains(string(body), scenario.code) {
+				t.Fatalf("refusal %d %s", response.StatusCode, body)
+			}
+			if dispatched.Load() {
+				t.Fatal("refused paid request reached upstream")
+			}
+		})
+	}
+}
+
+func TestCodePaidUnknownUsageRemainsUncertain(t *testing.T) {
+	h, ledger, server := newPaidCodeForwardHarness(t)
+	native := `{"id":"response-without-usage","object":"response","status":"completed","output":[]}`
+	h.mock.set("a", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, native)
+	})
+	response := codeDo(t, server, []byte(`{"model":"`+modelA+`","input":"private prompt"}`), nil)
+	defer response.Body.Close()
+	body, err := io.ReadAll(response.Body)
+	if err != nil || response.StatusCode != http.StatusOK || string(body) != native {
+		t.Fatalf("native exchange changed %d %s %v", response.StatusCode, body, err)
+	}
+	h.sink.await(t, 1)
+	fact := h.sink.last(t).Attempts[0]
+	if !fact.BillingUncertain || fact.UsageComplete || fact.UsageObserved || fact.Usage != nil {
+		t.Fatalf("unknown usage became zero or known %+v", fact)
+	}
+	settled := ledger.wait(t)
+	if settled.Total != nil {
+		t.Fatalf("unreported coding tokens became known %+v", settled)
+	}
+	if !reflect.DeepEqual(ledger.allowance, codemode.Allowance{}) {
+		t.Fatal("paid usage became subscription allowance")
+	}
+}
+
+func TestCodePaidNativeCacheWriteUsageIsPreserved(t *testing.T) {
+	h, _, server := newPaidCodeForwardHarness(t)
+	snapshot := h.rt.Release().Snapshot.Clone()
+	route := snapshot.CodeRoutes["coding"]
+	id := route.RevisionID + ":" + route.PaidTargets[modelA].ProviderID
+	provider := snapshot.CodePaidConnections[id]
+	provider.ProfileID = "openai-chat"
+	snapshot.CodePaidConnections[id] = provider
+	release, err := runtime.NewRelease(uuid.NewString(), 9, snapshot, map[string][]byte{h.credA: []byte(secretA)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.rt.release = release
+	h.rt.inputs.Prices[0].CacheWriteInputPerMillion = new("3")
+	native := `{"id":"chat-paid","object":"chat.completion","model":"model-a","choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":6,"completion_tokens":1,"total_tokens":7,"prompt_tokens_details":{"cache_write_tokens":4}}}`
+	h.mock.set("a", func(w http.ResponseWriter, _ *http.Request) { _, _ = io.WriteString(w, native) })
+	request, err := http.NewRequestWithContext(t.Context(), http.MethodPost, server.URL+"/code/coding/v1/chat/completions", strings.NewReader(`{"model":"model-a","messages":[{"role":"user","content":"hello"}],"max_completion_tokens":20}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.Header.Set("Authorization", "Bearer "+fullKey)
+	request.Header.Set("X-Olp-Code-Affinity", "cache-write")
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	body, err := io.ReadAll(response.Body)
+	if err != nil || response.StatusCode != 200 || string(body) != native {
+		t.Fatalf("native paid response changed %d %s %v", response.StatusCode, body, err)
+	}
+	fact := h.sink.await(t, 1)[0].Attempts[0]
+	if !fact.UsageComplete || fact.BillingUncertain || fact.Usage.CacheWriteInputTokens == nil || *fact.Usage.CacheWriteInputTokens != 4 {
+		t.Fatalf("metered cache-write evidence was lost %+v", fact)
+	}
+}
+
+func TestCodePaidStreamPreservesNativeBytesAndUsage(t *testing.T) {
+	h, _, server := newPaidCodeForwardHarness(t)
+	native := "event: response.completed\ndata: " + `{"type":"response.completed","response":{"id":"paid-stream","object":"response","model":"model-a","status":"completed","output":[],"usage":{"input_tokens":2,"output_tokens":1,"total_tokens":3}}}` + "\n\n"
+	h.mock.set("a", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, native)
+	})
+	response := codeDo(t, server, []byte(`{"model":"model-a","input":"hello","stream":true}`), nil)
+	defer response.Body.Close()
+	body, err := io.ReadAll(response.Body)
+	if err != nil || response.StatusCode != 200 || string(body) != native {
+		t.Fatalf("native paid stream changed %d %s %v", response.StatusCode, body, err)
+	}
+	fact := h.sink.await(t, 1)[0].Attempts[0]
+	if !fact.UsageComplete || fact.BillingUncertain || fact.Usage == nil || fact.Usage.TotalTokens != 3 {
+		t.Fatalf("paid stream usage was not attributed %+v", fact)
+	}
+}
+
+func TestCodePaidProviderErrorRedactsAppliedCredential(t *testing.T) {
+	for _, shape := range []string{"message", "escaped message", "member", "escaped member"} {
+		t.Run(shape, func(t *testing.T) {
+			h, _, server := newPaidCodeForwardHarness(t)
+			h.mock.set("a", func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(401)
+				credential := func() string {
+					if strings.Contains(shape, "escaped") {
+						return strings.ReplaceAll(secretA, "s", `\u0073`)
+					}
+					return secretA
+				}()
+				if strings.Contains(shape, "member") {
+					_, _ = io.WriteString(w, `{"error":{"`+credential+`":"failed"}}`)
+					return
+				}
+				_, _ = io.WriteString(w, `{"error":{"message":"rejected Bearer `+credential+`","code":"`+credential+`"}}`)
+			})
+			response := codeDo(t, server, []byte(`{"model":"model-a","input":"hello"}`), nil)
+			defer response.Body.Close()
+			body, err := io.ReadAll(response.Body)
+			if err != nil || strings.Contains(string(body), secretA) {
+				t.Fatalf("paid error exposed applied credentials %q %v", body, err)
+			}
+			if strings.Contains(shape, "member") && response.StatusCode != 502 {
+				t.Fatalf("credential member was forwarded %d %s", response.StatusCode, body)
+			}
+			if strings.Contains(shape, "message") && (response.StatusCode != 401 || !strings.Contains(string(body), "[REDACTED]")) {
+				t.Fatalf("native error was not safely retained %d %s", response.StatusCode, body)
+			}
+		})
+	}
+}
+
+func TestCodePaidCompactionRefusesBeforeDispatch(t *testing.T) {
+	h, _, server := newPaidCodeForwardHarness(t)
+	var dispatched atomic.Bool
+	h.mock.set("a", func(w http.ResponseWriter, _ *http.Request) {
+		dispatched.Store(true)
+		_, _ = io.WriteString(w, `{"id":"wrong-generation"}`)
+	})
+	request, err := http.NewRequestWithContext(t.Context(), http.MethodPost, server.URL+"/code/coding/responses/compact", strings.NewReader(`{"model":"model-a","input":"hello"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.Header.Set("Authorization", "Bearer "+fullKey)
+	request.Header.Set("Session_id", "compact")
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	body, _ := io.ReadAll(response.Body)
+	if response.StatusCode != 400 || !strings.Contains(string(body), "code_paid_operation_unsupported") || dispatched.Load() {
+		t.Fatalf("paid compaction reached generation %d %s dispatched %v", response.StatusCode, body, dispatched.Load())
+	}
+}
+
+func TestCodePaidHostingAdaptationRefusesBeforeDispatch(t *testing.T) {
+	h, _, server := newPaidCodeForwardHarness(t)
+	snapshot := h.rt.Release().Snapshot.Clone()
+	route := snapshot.CodeRoutes["coding"]
+	key := route.RevisionID + ":" + route.PaidTargets[modelA].ProviderID
+	provider := snapshot.CodePaidConnections[key]
+	provider.Kind = "vertex_ai"
+	provider.ProfileID = "vertex-anthropic"
+	provider.CloudProject = "fixture-project"
+	provider.CloudRegion = "us-central1"
+	provider.Capabilities = []routing.Capability{{Model: modelA, Operation: "generation", Surface: "anthropic", Mode: "unary"}}
+	snapshot.CodePaidConnections[key] = provider
+	release, releaseErr := runtime.NewRelease(uuid.NewString(), 10, snapshot, map[string][]byte{h.credA: []byte(secretA)})
+	if releaseErr != nil {
+		t.Fatal(releaseErr)
+	}
+	h.rt.release = release
+	h.rt.inputs.Prices[0].ProviderKind = provider.Kind
+	var dispatched atomic.Bool
+	h.mock.set("a", func(http.ResponseWriter, *http.Request) { dispatched.Store(true) })
+	request, err := http.NewRequestWithContext(t.Context(), http.MethodPost, server.URL+"/code/coding/v1/messages", strings.NewReader(`{"model":"model-a","messages":[{"role":"user","content":"hello"}],"max_tokens":20}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.Header.Set("Authorization", "Bearer "+fullKey)
+	request.Header.Set("X-Olp-Code-Affinity", "hosting")
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	body, _ := io.ReadAll(response.Body)
+	if response.StatusCode != 400 || !strings.Contains(string(body), "code_paid_operation_unsupported") || dispatched.Load() {
+		t.Fatalf("unsupported hosting advertised raw native forwarding %d %s", response.StatusCode, body)
+	}
+}
+
+func TestCodePaidAliasContinuationUsesPinnedTargetBeforePricing(t *testing.T) {
+	h, ledger, server := newPaidCodeForwardHarness(t)
+	snapshot := h.rt.Release().Snapshot.Clone()
+	route := snapshot.CodeRoutes["coding"]
+	route.Models = []string{modelA, modelB}
+	route.ModelRewriting = true
+	route.Aliases = map[string]string{"assistant": modelB}
+	route.PaidTargets = map[string]codemode.PaidTarget{modelA: route.PaidTargets[modelA], modelB: route.PaidTargets[modelA]}
+	snapshot.CodeRoutes["coding"] = route
+	providerKey := route.RevisionID + ":" + route.PaidTargets[modelA].ProviderID
+	provider := snapshot.CodePaidConnections[providerKey]
+	provider.Capabilities = slices.Concat(provider.Capabilities, []routing.Capability{{Model: modelB, Operation: "generation", Surface: "openai", Mode: "unary"}})
+	snapshot.CodePaidConnections[providerKey] = provider
+	release, err := runtime.NewRelease(uuid.NewString(), 11, snapshot, map[string][]byte{h.credA: []byte(secretA)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.rt.release = release
+	ledger.pinTarget = modelA
+	h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		if !strings.Contains(string(body), `"model":"model-a"`) {
+			t.Errorf("pinned alias changed upstream target %s", body)
+		}
+		_, _ = io.WriteString(w, `{"id":"paid-alias","object":"response","model":"model-a","status":"completed","output":[],"usage":{"input_tokens":2,"output_tokens":1,"total_tokens":3}}`)
+	})
+	response := codeDo(t, server, []byte(`{"model":"assistant","input":"hello"}`), nil)
+	defer response.Body.Close()
+	body, _ := io.ReadAll(response.Body)
+	if response.StatusCode != 200 {
+		t.Fatalf("paid alias selected current alias before its pin %d %s", response.StatusCode, body)
+	}
+	fact := h.sink.await(t, 1)[0].Attempts[0]
+	if fact.UpstreamModel != modelA || fact.Price.Model != modelA {
+		t.Fatalf("paid alias pricing diverged from its selected target %+v", fact)
+	}
+}
+
+func (l *codeTestLedger) ResolvePaidModel(_ context.Context, in resources.CodeAdmission, _ access.Authority) (codemode.Operation, error) {
+	pins := func() []codemode.Pin {
+		if l.pinTarget == "" {
+			return nil
+		}
+		return []codemode.Pin{{Model: in.Operation.PublicModel(), TargetModel: l.pinTarget}}
+	}()
+	return in.Route.ResolvePinnedModel(in.Operation, pins)
+}
+
+func TestCodePaidSuccessfulDeliveryRetainsLargeAndEncodedNativeBytes(t *testing.T) {
+	for _, kind := range []string{"large unary", "large stream", "encoded stream"} {
+		t.Run(kind, func(t *testing.T) {
+			h, ledger, server := newPaidCodeForwardHarness(t)
+			payload := func() []byte {
+				if kind == "large unary" {
+					return []byte(`{"output":"` + strings.Repeat("x", codewire.MaxBody+1) + `"}`)
+				}
+				if kind == "large stream" {
+					return []byte("data: " + `{"type":"response.output_text.delta","delta":"` + strings.Repeat("x", codewire.MaxBody+1) + `"}` + "\n\n")
+				}
+				var compressed bytes.Buffer
+				writer := gzip.NewWriter(&compressed)
+				if _, err := writer.Write([]byte("data: " + `{"type":"response.completed","response":{"status":"completed","output":[]}}` + "\n\n")); err != nil {
+					t.Fatal(err)
+				}
+				if err := writer.Close(); err != nil {
+					t.Fatal(err)
+				}
+				return compressed.Bytes()
+			}()
+			h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
+				if _, err := io.Copy(io.Discard, r.Body); err != nil {
+					t.Error(err)
+					return
+				}
+				if kind != "large unary" {
+					w.Header().Set("Content-Type", "text/event-stream")
+				}
+				if kind == "encoded stream" {
+					w.Header().Set("Content-Encoding", "gzip")
+				}
+				_, _ = w.Write(payload)
+			})
+			response := codeDo(t, server, []byte(`{"model":"model-a","input":"hello"}`), http.Header{"Accept-Encoding": {"gzip"}})
+			defer response.Body.Close()
+			body, err := io.ReadAll(response.Body)
+			if err != nil || response.StatusCode != 200 || !bytes.Equal(body, payload) {
+				h.sink.await(t, 1)
+				ledger.mu.Lock()
+				outcomes := slices.Clone(ledger.outcomes)
+				ledger.mu.Unlock()
+				t.Fatalf("successful paid native delivery changed %d bytes %d/%d %v outcomes %+v", response.StatusCode, len(body), len(payload), err, outcomes)
+			}
+		})
+	}
+}
+
+func TestCodePaidNativeErrorStreamRedactsCredential(t *testing.T) {
+	h, _, server := newPaidCodeForwardHarness(t)
+	h.mock.set("a", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, "event: error\ndata: "+`{"type":"error","error":{"message":"Bearer `+secretA+`"}}`+"\n\n")
+	})
+	response := codeDo(t, server, []byte(`{"model":"model-a","input":"hello","stream":true}`), nil)
+	defer response.Body.Close()
+	body, err := io.ReadAll(response.Body)
+	if err != nil || response.StatusCode != 200 || strings.Contains(string(body), secretA) || !strings.Contains(string(body), "[REDACTED]") {
+		t.Fatalf("native paid error frame was not scrubbed %d %s %v", response.StatusCode, body, err)
 	}
 }
 
