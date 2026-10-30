@@ -161,7 +161,7 @@ func TestCodeChatToolExchange(t *testing.T) {
 				if err := json.Unmarshal([]byte(call.Function.Arguments), &arguments); err != nil || call.ID != "call-read" || call.Function.Name != "read_file" || arguments.Path != "main.go" {
 					t.Fatal("SDK diagnostic tool invalid arguments")
 				}
-				history := slices.Concat(messages, []openai.ChatCompletionMessageParamUnion{{OfAssistant: &openai.ChatCompletionAssistantMessageParam{ToolCalls: []openai.ChatCompletionMessageToolCallUnionParam{call.ToParam()}}}, openai.ToolMessage("package main", call.ID)})
+				history := slices.Concat(messages, []openai.ChatCompletionMessageParamUnion{{OfAssistant: &openai.ChatCompletionAssistantMessageParam{ToolCalls: []openai.ChatCompletionMessageToolCallUnionParam{{OfFunction: &openai.ChatCompletionMessageFunctionToolCallParam{ID: call.ID, Function: openai.ChatCompletionMessageFunctionToolCallFunctionParam{Name: call.Function.Name, Arguments: call.Function.Arguments}}}}}}, openai.ToolMessage("package main", call.ID)})
 				child := h.openAI(openaioption.WithHeader("X-Opencode-Session-Id", session+"-reader"), openaioption.WithHeader("X-Opencode-Parent-Session-Id", session))
 				last := request(child, history, "result")
 				if len(last.Choices) != 1 || last.Choices[0].FinishReason != "stop" || last.Choices[0].Message.Content != "File read" || last.Usage.PromptTokens != 13 || last.Usage.CompletionTokens != 2 {

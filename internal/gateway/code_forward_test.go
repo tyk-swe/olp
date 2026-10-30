@@ -3024,8 +3024,8 @@ func TestCodePaidFallbackSubstitutionRequiresExplicitModelPool(t *testing.T) {
 }
 
 func TestCodeChatToCodexToolContinuation(t *testing.T) {
-	for _, stream := range []bool{false, true} {
-		t.Run(fmt.Sprint(stream), func(t *testing.T) {
+	for _, input := range []struct{ stream, usage bool }{{false, false}, {true, true}, {true, false}} {
+		t.Run(fmt.Sprint(input), func(t *testing.T) {
 			h, ledger, server := newCodeForwardHarness(t)
 			route := h.rt.release.Snapshot.CodeRoutes["coding"]
 			route.ChatToCodex, route.ModelRewriting = true, true
@@ -3069,11 +3069,14 @@ func TestCodeChatToCodexToolContinuation(t *testing.T) {
 					fmt.Fprint(w, "data: "+event+"\n\n")
 				}
 			})
-			for _, history := range []string{
-				``,
-				`,{"role":"assistant","content":null,"tool_calls":[{"id":"call-read","type":"function","function":{"name":"read_file","arguments":"{\"path\":\"main.go\"}"}}]},{"role":"tool","tool_call_id":"call-read","content":"package main"}`,
+			for _, history := range []struct {
+				body  string
+				total int64
+			}{
+				{``, 11},
+				{`,{"role":"assistant","content":null,"tool_calls":[{"id":"call-read","type":"function","function":{"name":"read_file","arguments":"{\"path\":\"main.go\"}"}}]},{"role":"tool","tool_call_id":"call-read","content":"package main"}`, 15},
 			} {
-				request, _ := http.NewRequestWithContext(t.Context(), http.MethodPost, server.URL+"/code/coding/v1/chat/completions", strings.NewReader(fmt.Sprintf(`{"model":"team-model","messages":[{"role":"system","content":"Preserve my instructions"},{"role":"user","content":"Read main.go"}%s],"tools":[{"type":"function","function":{"name":"read_file","parameters":{"type":"object","properties":{"path":{"type":"string"}}}}}],"reasoning_effort":"high","stream":%t,"stream_options":{"include_usage":true}}`, history, stream)))
+				request, _ := http.NewRequestWithContext(t.Context(), http.MethodPost, server.URL+"/code/coding/v1/chat/completions", strings.NewReader(fmt.Sprintf(`{"model":"team-model","messages":[{"role":"system","content":"Preserve my instructions"},{"role":"user","content":"Read main.go"}%s],"tools":[{"type":"function","function":{"name":"read_file","parameters":{"type":"object","properties":{"path":{"type":"string"}}}}}],"reasoning_effort":"high","stream":%t,"stream_options":{"include_usage":%t}}`, history.body, input.stream, input.usage)))
 				request.Header.Set("Authorization", "Bearer "+fullKey)
 				request.Header.Set("X-Opencode-Session-Id", "chat-tools")
 				response, err := server.Client().Do(request)
@@ -3082,17 +3085,13 @@ func TestCodeChatToCodexToolContinuation(t *testing.T) {
 				}
 				body, _ := io.ReadAll(response.Body)
 				response.Body.Close()
-				if response.StatusCode != 200 || !bytes.Contains(body, []byte(`"model":"team-model"`)) || !bytes.Contains(body, []byte(`"total_tokens":`)) || stream && !bytes.Contains(body, []byte("[DONE]")) {
+				if response.StatusCode != 200 || !bytes.Contains(body, []byte(`"model":"team-model"`)) || bytes.Contains(body, []byte(`"total_tokens":`)) != (!input.stream || input.usage) || input.stream && !bytes.Contains(body, []byte("[DONE]")) {
 					t.Fatalf("Chat exchange %d %s", response.StatusCode, body)
 				}
-				if history == "" && (!bytes.Contains(body, []byte(`"tool_calls"`)) || !bytes.Contains(body, []byte(`"name":"read_file"`))) || history != "" && !bytes.Contains(body, []byte("File read")) {
+				if history.body == "" && (!bytes.Contains(body, []byte(`"tool_calls"`)) || !bytes.Contains(body, []byte(`"name":"read_file"`))) || history.body != "" && !bytes.Contains(body, []byte("File read")) {
 					t.Fatalf("lost tool exchange %s", body)
 				}
-				want := int64(11)
-				if history != "" {
-					want = 15
-				}
-				if usage := ledger.wait(t); usage.Total == nil || *usage.Total != want {
+				if usage := ledger.wait(t); usage.Total == nil || *usage.Total != history.total {
 					t.Fatalf("native usage %+v", usage)
 				}
 			}
