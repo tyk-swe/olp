@@ -26,6 +26,7 @@ const route: api.CodeRoute = {
   pool_id: poolId,
   enabled: true,
   messages_to_codex: false,
+  model_rewriting: false,
   models: ['gpt-5.5'],
   revision_id: '01980000-0000-7000-8000-000000000032',
   revision: 1,
