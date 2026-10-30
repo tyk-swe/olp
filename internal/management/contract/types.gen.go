@@ -6567,6 +6567,15 @@ type AggregateBudgetUsage struct {
 // AggregateBudgetUsageCostBasis The measure accrued expresses.
 type AggregateBudgetUsageCostBasis string
 
+// AntigravityCredentialImportRequest defines model for AntigravityCredentialImportRequest.
+type AntigravityCredentialImportRequest struct {
+	// Credentials One-time Antigravity migration JSON with type=antigravity, access_token, refresh_token, client_id and client_secret for the original authorized OAuth client. The client_id must match the provider option. Optional pinned export metadata is expired (RFC3339), expires_in, timestamp, email and project_id. Supplied expiry must be current and supplied project_id must agree with authenticated project evidence. Email never establishes identity. Unknown fields, ambiguous JSON, raw IDE stores, service accounts and credentials without original client authorization are unsupported. The original access token must authenticate fixed userinfo and project endpoints. Import refreshes and verifies the same subject and project before encrypted staging.
+	Credentials *string `json:"credentials,omitempty"`
+
+	// SlotId Existing credential slot, defaults to the default slot
+	SlotId *openapi_types.UUID `json:"slot_id,omitempty"`
+}
+
 // ApiKeyBudgetResponse defines model for ApiKeyBudgetResponse.
 type ApiKeyBudgetResponse struct {
 	CostBasis *ApiKeyBudgetResponseCostBasis `json:"cost_basis,omitempty"`
@@ -16360,6 +16369,12 @@ type ActivateProviderParams struct {
 	IdempotencyKey string `json:"Idempotency-Key"`
 }
 
+// ImportAntigravityCredentialsParams defines parameters for ImportAntigravityCredentials.
+type ImportAntigravityCredentialsParams struct {
+	// IfMatch Current provider draft ETag
+	IfMatch string `json:"If-Match"`
+}
+
 // DeleteProviderBillingImportParams defines parameters for DeleteProviderBillingImport.
 type DeleteProviderBillingImportParams struct {
 	IfMatch string `json:"If-Match"`
@@ -17514,6 +17529,9 @@ type CreateProviderJSONRequestBody = CreateProviderRequest
 
 // UpdateProviderJSONRequestBody defines body for UpdateProvider for application/json ContentType.
 type UpdateProviderJSONRequestBody = UpdateProviderRequest
+
+// ImportAntigravityCredentialsJSONRequestBody defines body for ImportAntigravityCredentials for application/json ContentType.
+type ImportAntigravityCredentialsJSONRequestBody = AntigravityCredentialImportRequest
 
 // PutProviderBillingImportJSONRequestBody defines body for PutProviderBillingImport for application/json ContentType.
 type PutProviderBillingImportJSONRequestBody = PutBillingImportRequest

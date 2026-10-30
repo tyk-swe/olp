@@ -156,6 +156,7 @@ func (s *Server) Register(mux *http.ServeMux) {
 	s.Access.Route(mux, "POST /api/v1/providers/{provider_id}/credentials/{credential_id}/revoke", s.revoke)
 	s.Access.Route(mux, "POST /api/v1/providers/{provider_id}/codex-import", s.importCodexCredentials, access.MaxBody(128<<10), access.Deadline(grantStepTimeout))
 	s.Access.Route(mux, "POST /api/v1/providers/{provider_id}/claude-import", s.importClaudeCredentials, access.MaxBody(128<<10), access.Deadline(grantStepTimeout))
+	s.Access.Route(mux, "POST /api/v1/providers/{provider_id}/antigravity-import", s.importAntigravityCredentials, access.MaxBody(128<<10), access.Deadline(grantStepTimeout))
 	s.Access.Route(mux, "POST /api/v1/providers/{provider_id}/grant-enrollments", s.startGrantEnrollment, access.MaxBody(65536), access.Deadline(grantStepTimeout))
 	s.Access.Route(mux, "POST /api/v1/providers/{provider_id}/grant-enrollments/{enrollment_id}/continue", s.continueGrantEnrollment, access.MaxBody(65536), access.Deadline(grantStepTimeout))
 	s.Access.Route(mux, "POST /api/v1/providers/{provider_id}/grant-enrollments/{enrollment_id}/poll", s.pollGrantEnrollment, access.MaxBody(65536), access.Deadline(grantStepTimeout))
