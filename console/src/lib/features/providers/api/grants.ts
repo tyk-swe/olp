@@ -89,12 +89,15 @@ export async function cancelGrantEnrollment(
   ensureOk(response);
 }
 
-export async function importCodexCredentials(
+export async function importSubscriptionCredentials(
   provider: Pick<Provider, 'id' | 'etag'>,
-  credentials: string
+  credentials: string,
+  profile: 'codex-subscription' | 'claude-subscription'
 ): Promise<GrantEnrollmentCompletion> {
   const response = await apiClient.POST(
-    '/api/v1/providers/{provider_id}/codex-import',
+    profile === 'claude-subscription'
+      ? '/api/v1/providers/{provider_id}/claude-import'
+      : '/api/v1/providers/{provider_id}/codex-import',
     {
       params: {
         path: { provider_id: provider.id },

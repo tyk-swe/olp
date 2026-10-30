@@ -18635,6 +18635,91 @@
     }
   },
   {
+    "name": "importClaudeCredentials",
+    "group": "providers",
+    "method": "POST",
+    "read_only": false,
+    "path": "/api/v1/providers/{provider_id}/claude-import",
+    "description": "Import Claude subscription credentials once",
+    "scopes": [
+      [
+        "configure"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "provider_id",
+        "in": "path",
+        "required": true,
+        "type": "string"
+      },
+      {
+        "name": "If-Match",
+        "in": "header",
+        "required": true,
+        "type": "string"
+      }
+    ],
+    "response_headers": {
+      "ETag": "etag"
+    },
+    "body_required": true,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "object",
+          "properties": {
+            "provider_id": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "provider_id"
+          ]
+        },
+        "if_match": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Current provider draft ETag"
+        },
+        "body": {
+          "$ref": "#/$defs/ClaudeCredentialImportRequest"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "if_match",
+        "body"
+      ],
+      "$defs": {
+        "ClaudeCredentialImportRequest": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "credentials"
+          ],
+          "properties": {
+            "credentials": {
+              "type": "string",
+              "maxLength": 65536,
+              "writeOnly": true,
+              "description": "Claude Code .credentials.json JSON text containing only claudeAiOauth with accessToken, refreshToken, expiresAt in epoch milliseconds and scopes including user:profile and user:inference. Optional metadata fields are refreshTokenExpiresAt, subscriptionType, subscriptionTypeSource, subscriptionTypeVerifiedAt, rateLimitTier and clientId. A supplied clientId must match the supported official client. Other fields, alternative credential stores and ambiguous JSON are rejected. The original access token must still authenticate the fixed profile endpoint. Import verifies account and organization before and after refresh, without decoding token claims."
+            },
+            "slot_id": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Existing credential slot, defaults to the default slot"
+            }
+          }
+        }
+      }
+    }
+  },
+  {
     "name": "importCodexCredentials",
     "group": "providers",
     "method": "POST",

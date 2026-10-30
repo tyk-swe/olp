@@ -52,7 +52,7 @@ func goldenTokenScopes(t *testing.T, names []string) operationSet {
 	return 1<<op | goldenTokenScopes(t, names[1:])
 }
 
-func TestCodexImportAuthorizationMatchesCanonicalMatrix(t *testing.T) {
+func TestCredentialImportAuthorizationMatchesCanonicalMatrix(t *testing.T) {
 	raw, err := os.ReadFile("testdata/authorization.golden.json")
 	if err != nil {
 		t.Fatal(err)
@@ -71,22 +71,23 @@ func TestCodexImportAuthorizationMatchesCanonicalMatrix(t *testing.T) {
 	if err := json.Unmarshal(raw, &matrix); err != nil {
 		t.Fatal(err)
 	}
-	const pattern = "POST /api/v1/providers/{provider_id}/codex-import"
-	row, ok := matrix.Routes[pattern]
-	if !ok || len(row) != len(matrix.Archetypes) {
-		t.Fatal("the import route needs an authorization expectation for every caller")
-	}
-	requirements, err := ContractRequirements()
-	if err != nil {
-		t.Fatal(err)
-	}
-	for index, caller := range matrix.Archetypes {
-		t.Run(caller.Name, func(t *testing.T) {
-			principal := Principal{User: User{Role: caller.Role}, Kind: caller.Kind, AllProjects: caller.Global,
-				creatorRole: caller.CreatorRole, scopes: goldenTokenScopes(t, caller.Scopes)}
-			if admitted := requirements[pattern].Admits(principal) == nil; admitted != (row[index] == 'Y') {
-				t.Fatalf("import authority disagrees with the canonical expectation, admitted=%t", admitted)
-			}
-		})
+	for _, pattern := range []string{"POST /api/v1/providers/{provider_id}/codex-import", "POST /api/v1/providers/{provider_id}/claude-import"} {
+		row, ok := matrix.Routes[pattern]
+		if !ok || len(row) != len(matrix.Archetypes) {
+			t.Fatal("the import route needs an authorization expectation for every caller")
+		}
+		requirements, err := ContractRequirements()
+		if err != nil {
+			t.Fatal(err)
+		}
+		for index, caller := range matrix.Archetypes {
+			t.Run(caller.Name, func(t *testing.T) {
+				principal := Principal{User: User{Role: caller.Role}, Kind: caller.Kind, AllProjects: caller.Global,
+					creatorRole: caller.CreatorRole, scopes: goldenTokenScopes(t, caller.Scopes)}
+				if admitted := requirements[pattern].Admits(principal) == nil; admitted != (row[index] == 'Y') {
+					t.Fatalf("import authority disagrees with the canonical expectation, admitted=%t", admitted)
+				}
+			})
+		}
 	}
 }
