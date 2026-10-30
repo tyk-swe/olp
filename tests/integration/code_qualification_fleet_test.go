@@ -585,7 +585,7 @@ func (f *codeFleet) initialRecovery(t *testing.T, attempts int) *codeFleet {
 	draft := f.h.want(f.owner, "PUT", "/api/v1/code/routes/"+route.Id.String(), contract.CodeRouteWrite{
 		ProjectId: route.ProjectId, Slug: route.Slug, PoolId: route.PoolId, Models: route.Models, Enabled: true,
 		InitialRecoveryAttempts: &attempts,
-	}, map[string]string{"If-Match": route.Etag.String()}, 200)
+	}, etagHeader(f.route), 200)
 	f.h.want(f.owner, "POST", "/api/v1/code/routes/"+route.Id.String()+"/publish", nil, withMatch(draft, idem("initial-recovery-publish")), 200)
 	for _, process := range f.gateways {
 		if err := process.Kill(); err != nil {
