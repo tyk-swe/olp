@@ -2150,6 +2150,74 @@ func TestGatewayToolWorkflowSettlesOneRun(t *testing.T) {
 	if routeResumeStatus != http.StatusForbidden || toolCalls.Load() != routeTools {
 		t.Fatalf("revised route approval dispatched an earlier tool: status=%d tools=%d", routeResumeStatus, toolCalls.Load()-routeTools)
 	}
+	{
+		h.refresh()
+		messages := []any{map[string]any{"role": "user", "content": "workflow-approval-test rollback"}}
+		pauseStatus, pause, _ := h.gateway(http.MethodPost, "/v1/chat/completions", secret, map[string]any{"model": slug, "messages": messages, "max_tokens": 100})
+		continuation, ok := pause["continuation_token"].(string)
+		if pauseStatus != http.StatusOK || pause["type"] != "tool_approval_required" || !ok || continuation == "" {
+			t.Fatalf("workflow did not pause before rollback: status=%d type=%v", pauseStatus, pause["type"])
+		}
+		runDebits := func(caller *browser) []any {
+			page := h.want(caller, http.MethodGet, "/api/v1/execution-debits?api_key_id="+keyID+"&limit=200", nil, nil, http.StatusOK)
+			return slices.Collect(func(yield func(any) bool) {
+				for _, item := range mcpExecItems(t, page, "items") {
+					if item.(map[string]any)["run_id"] == runID && !yield(item) {
+						return
+					}
+				}
+			})
+		}
+		debitsBefore := runDebits(owner)
+		if len(debitsBefore) != 3 {
+			t.Fatalf("settled run debits unavailable before rollback: %v", debitsBefore)
+		}
+		current := h.want(owner, http.MethodGet, "/api/v1/routes/"+route.ID, nil, nil, http.StatusOK)
+		previousRevision := mcpExecString(t, mcpExecObject(t, current, "latest_revision"), "id")
+		rollback := map[string]any{
+			"project_id": project, "slug": slug, "operations": []string{"generation"}, "overall_timeout_ms": 10000, "max_attempts": 1,
+			"fidelity": map[string]any{"mode": "transformed"},
+			"targets":  []any{map[string]any{"provider_id": provider["id"], "provider_model": vendorModel, "priority": 0, "weight": 1, "timeout_ms": 5000}},
+		}
+		h.want(owner, http.MethodPut, "/api/v1/routes/"+route.ID, rollback, withMatch(current, idem("workflow-disable-gateway-execution")), http.StatusOK)
+		h.refresh()
+		beforeTools := toolCalls.Load()
+		beforeModels := modelCalls.Load()
+		resume := map[string]any{"model": slug, "messages": messages, "max_tokens": 100, "olp_approval": map[string]any{"continuation_token": continuation, "approved": true, "arguments": map[string]any{"call-one": map[string]any{"query": argument}}}}
+		resumeStatus, _, _ := h.gateway(http.MethodPost, "/v1/chat/completions", secret, resume)
+		if resumeStatus != http.StatusForbidden || modelCalls.Load() != beforeModels || toolCalls.Load() != beforeTools {
+			t.Fatalf("rollback resumed pending gateway execution: status=%d models=%d tools=%d", resumeStatus, modelCalls.Load()-beforeModels, toolCalls.Load()-beforeTools)
+		}
+		plainStatus, plain, _ := h.gateway(http.MethodPost, "/v1/chat/completions", secret, map[string]any{"model": slug, "messages": []any{map[string]any{"role": "user", "content": "after rollback"}}, "max_tokens": 100})
+		if plainStatus != http.StatusOK || !strings.Contains(fmt.Sprint(plain), "done") || modelCalls.Load() != beforeModels || toolCalls.Load() != beforeTools {
+			t.Fatalf("rollback still injected or dispatched gateway tools: status=%d models=%d tools=%d", plainStatus, modelCalls.Load()-beforeModels, toolCalls.Load()-beforeTools)
+		}
+		clientTools := []any{map[string]any{"type": "function", "function": map[string]any{"name": tool.Alias, "parameters": map[string]any{"type": "object", "properties": map[string]any{"query": map[string]any{"type": "string"}}}}}}
+		clientStatus, client, _ := h.gateway(http.MethodPost, "/v1/chat/completions", secret, map[string]any{"model": slug, "messages": []any{map[string]any{"role": "user", "content": "client-managed tool"}}, "max_tokens": 100, "tools": clientTools})
+		if clientStatus != http.StatusOK || modelCalls.Load() != beforeModels+1 || toolCalls.Load() != beforeTools {
+			t.Fatalf("client-managed tools failed after rollback: status=%d models=%d tools=%d", clientStatus, modelCalls.Load()-beforeModels, toolCalls.Load()-beforeTools)
+		}
+		choice := mcpExecItem(t, mcpExecItems(t, client, "choices"), 0, client)
+		message := mcpExecObject(t, choice, "message")
+		call := mcpExecItem(t, mcpExecItems(t, message, "tool_calls"), 0, message)
+		if mcpExecObject(t, call, "function")["name"] != tool.Alias {
+			t.Fatalf("client-managed tool call was not returned: %v", call)
+		}
+		h.want(assignedViewer, http.MethodGet, "/api/v1/agent-runs/"+runID, nil, nil, http.StatusNotFound)
+		if visible := runDebits(assignedViewer); len(visible) != 0 {
+			t.Fatalf("rollback exposed settlement history to another project: %v", visible)
+		}
+		addMember(h, owner, project, viewerID, "viewer")
+		history := h.want(assignedViewer, http.MethodGet, "/api/v1/agent-runs/"+runID, nil, nil, http.StatusOK)
+		debitsAfter := runDebits(assignedViewer)
+		if !reflect.DeepEqual(history, runDetail) || !reflect.DeepEqual(debitsAfter, debitsBefore) {
+			t.Fatalf("rollback changed run or settlement history: run=%v debits=%v", history, debitsAfter)
+		}
+		h.want(owner, http.MethodDelete, "/api/v1/projects/"+project+"/members/"+viewerID, nil, projectEtag(h, owner, project), http.StatusNoContent)
+		restored := h.want(owner, http.MethodPost, "/api/v1/routes/"+route.ID+"/revisions/"+previousRevision+"/restore-as-draft", nil, idem("workflow-restore-after-rollback"), http.StatusCreated)
+		h.want(owner, http.MethodPost, "/api/v1/route-drafts/"+mcpExecString(t, restored, "id")+"/activate", nil, withMatch(restored, idem("workflow-reactivate-after-rollback")), http.StatusOK)
+		h.refresh()
+	}
 	const relevanceInputTokens, relevanceOutputTokens, relevanceRate = 1, 1, 1000000
 	var relevanceCalls atomic.Int64
 	relevanceServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
