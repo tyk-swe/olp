@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"reflect"
 	"slices"
 
 	"github.com/jackc/pgx/v5"
@@ -262,10 +261,6 @@ func paidCodeConversation(ctx context.Context, tx pgx.Tx, in PaidCodeAdmission, 
 	return binding, err
 }
 
-func samePaidSlotLimits(live, frozen routing.Slot) bool {
-	return reflect.DeepEqual(live.RequestsPerMinute, frozen.RequestsPerMinute) && reflect.DeepEqual(live.TokensPerMinute, frozen.TokensPerMinute) && reflect.DeepEqual(live.MaxConcurrency, frozen.MaxConcurrency) && reflect.DeepEqual(live.Supply, frozen.Supply)
-}
-
 func paidCodeTarget(ctx context.Context, db access.Queryer, in PaidCodeAdmission, lock bool) error {
 	locking := func() string {
 		if lock {
@@ -301,7 +296,7 @@ func paidCodeTarget(ctx context.Context, db access.Queryer, in PaidCodeAdmission
 		return err
 	}
 	liveSlot.Enabled = true
-	if !liveSlot.Allows(in.Operation.Model, in.Route.Slug, in.APIKeyID) || !in.Slot.Allows(in.Operation.Model, in.Route.Slug, in.APIKeyID) || !reflect.DeepEqual(configuration.Options.Limits, in.Provider.Limits) || !samePaidSlotLimits(slotLimits, in.Slot) {
+	if !liveSlot.Allows(in.Operation.Model, in.Route.Slug, in.APIKeyID) || !in.Slot.Allows(in.Operation.Model, in.Route.Slug, in.APIKeyID) || !routing.CodePaidLimitsMatch(configuration.Options.Limits, in.Provider.Limits, slotLimits, in.Slot) {
 		return codemode.Refuse(403, "code_paid_target_denied")
 	}
 

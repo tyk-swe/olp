@@ -146,12 +146,13 @@ func TestCodeOffersInvalidPaidPublicationFailsClosed(t *testing.T) {
 
 func TestCodeOffersPreservesModelPoolDiscoveryWhenPaidAuthorityChanges(t *testing.T) {
 	for _, test := range []struct {
-		name             string
-		publishedKeys    []string
-		liveRestrictions routing.Slot
-		liveLimits       routing.Slot
-		sourceErr        error
-		available        bool
+		name               string
+		publishedKeys      []string
+		liveRestrictions   routing.Slot
+		liveLimits         routing.Slot
+		liveProviderLimits *routing.Limits
+		sourceErr          error
+		available          bool
 	}{
 		{name: "eligible paid target", available: true},
 		{name: "published key restriction", publishedKeys: []string{"another-key"}},
@@ -159,6 +160,7 @@ func TestCodeOffersPreservesModelPoolDiscoveryWhenPaidAuthorityChanges(t *testin
 		{name: "live model restriction", liveRestrictions: routing.Slot{AllowedModels: []string{"another-model"}}},
 		{name: "live route restriction", liveRestrictions: routing.Slot{AllowedRoutes: []string{"another-route"}}},
 		{name: "live slot quota changed", liveLimits: routing.Slot{TokensPerMinute: new(int64(10))}},
+		{name: "live provider quota changed", liveProviderLimits: &routing.Limits{RequestsPerMinute: new(int64(10))}},
 		{name: "credential unavailable", sourceErr: pgx.ErrNoRows},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -174,11 +176,12 @@ func TestCodeOffersPreservesModelPoolDiscoveryWhenPaidAuthorityChanges(t *testin
 			}{Route: route, Connections: map[string]routing.Provider{provider.ID: provider}})
 			restrictions, restrictionsErr := json.Marshal(test.liveRestrictions)
 			limits, limitsErr := json.Marshal(test.liveLimits)
-			if err := errors.Join(publicationErr, restrictionsErr, limitsErr); err != nil {
+			liveConfigurationJSON, liveConfigurationError := json.Marshal(map[string]map[string]*routing.Limits{"options": {"limits": test.liveProviderLimits}})
+			if err := errors.Join(publicationErr, restrictionsErr, limitsErr, liveConfigurationError); err != nil {
 				t.Fatal(err)
 			}
 			source := codeOffersQuery{rows: &codeOfferRows{data: []codeOfferRow{{publication: publication, adapter: new(string(codemode.AdapterCodex)), models: models[:2]}}},
-				row: codeOfferTargetRow{restrictions: restrictions, configuration: []byte(`{}`), limits: limits, err: test.sourceErr}}
+				row: codeOfferTargetRow{restrictions: restrictions, configuration: liveConfigurationJSON, limits: limits, err: test.sourceErr}}
 			offers, err := CodeOffers(t.Context(), source, route.RevisionID, "caller-key")
 			if err != nil {
 				t.Fatal(err)
