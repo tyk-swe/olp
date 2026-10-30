@@ -429,3 +429,22 @@ func RouteEndpoint(route codemode.Route, vendor Vendor, path string) (Endpoint, 
 	}
 	return Endpoint{}, false
 }
+
+func RouteProtocol(route codemode.Route, vendor Vendor, client, model string) (codemode.Protocol, bool) {
+	if protocol, ok := vendor.Protocol(client, model); ok {
+		return protocol, true
+	}
+	if !route.MessagesToCodex || vendor.Adapter != codemode.AdapterCodex || client != ClientClaudeCode {
+		return "", false
+	}
+	endpoint, ok := RouteEndpoint(route, vendor, "v1/messages")
+	return endpoint.Protocol, ok && vendor.ServesModel(endpoint.Protocol, model)
+}
+
+func RouteClients(route codemode.Route, vendor Vendor) []string {
+	native := vendor.Clients()
+	if !route.MessagesToCodex || vendor.Adapter != codemode.AdapterCodex {
+		return native
+	}
+	return slices.Concat(native, []string{ClientClaudeCode})
+}

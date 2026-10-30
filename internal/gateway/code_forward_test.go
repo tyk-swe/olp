@@ -14,8 +14,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tyk-swe/olp/internal/routing"
-
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/codeadapter"
 	"github.com/tyk-swe/olp/internal/codeclient"
@@ -24,6 +22,7 @@ import (
 	"github.com/tyk-swe/olp/internal/codexauth"
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/resources"
+	"github.com/tyk-swe/olp/internal/routing"
 )
 
 type codeTestLedger struct {
@@ -316,57 +315,64 @@ func TestCodeModelDiscoveryEnforcesAuthority(t *testing.T) {
 // The revision froze another provider's connection, not the account's.
 
 func TestCodeNativeMessagesPreservePayloadForSelectedAccount(t *testing.T) {
-	h, ledger, server := newCodeForwardHarness(t)
-	configuration := routing.Configuration{Kind: connectors.KindPlugin, AuthMode: connectors.AuthGrant, ProfileID: codeplans.ZAIProfile, Endpoint: h.upstream.URL + "/a"}
-	h.rt.release.Snapshot.CodeConnections = map[string]routing.Configuration{"revision:provider": configuration}
-	if err := h.rt.release.Snapshot.Compile(); err != nil {
-		t.Fatal(err)
-	}
-	adapter, ok := codeadapter.ForConnection(configuration.Kind, configuration.AuthMode, configuration.ProfileID)
-	if !ok {
-		t.Fatal("selected account has no adapter")
-	}
-	endpoint, ok := adapter.Endpoint("v1/messages")
-	if !ok {
-		t.Fatal("selected account cannot serve Messages")
-	}
-	requestBody := []byte(`{ "model":"native-model", "messages":[{"role":"user","content":"hello"}], "max_tokens":8, "vendor_extension":{"keep":true} }`)
-	responseBody := []byte(`{ "type":"message", "content":[{"type":"text","text":"native reply"}], "stop_reason":"end_turn", "usage":{"input_tokens":2,"output_tokens":1}, "vendor_extension":{"keep":true} }`)
-	h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
-		body, err := io.ReadAll(r.Body)
-		if err != nil || !bytes.Equal(body, requestBody) {
-			t.Error("native request bytes changed")
-		}
-		if r.URL.Path != "/a/"+endpoint.UpstreamPath || r.URL.RawQuery != "native_option=1" {
-			t.Error("request did not use the selected account's endpoint")
-		}
-		if r.Header.Get(endpoint.CredentialHeader) != "Bearer upstream-only" || r.Header.Get("X-Api-Key") != "" {
-			t.Error("request did not use the selected account's credential header")
-		}
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write(responseBody)
-	})
-	request, err := http.NewRequestWithContext(t.Context(), http.MethodPost, server.URL+"/code/coding/v1/messages?native_option=1", bytes.NewReader(requestBody))
-	if err != nil {
-		t.Fatal(err)
-	}
-	request.Header.Set("X-Api-Key", fullKey)
-	request.Header.Set("X-Claude-Code-Session-Id", "native-messages")
-	request.Header.Set("Content-Type", "application/json")
-	response, err := http.DefaultClient.Do(request)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer response.Body.Close()
-	body, err := io.ReadAll(response.Body)
-	if err != nil || response.StatusCode != http.StatusOK || !bytes.Equal(body, responseBody) {
-		t.Fatalf("native response changed: status=%d body=%s error=%v", response.StatusCode, body, err)
-	}
-	if usage := ledger.wait(t); usage.Total == nil || *usage.Total != 3 {
-		t.Fatalf("selected account's response usage was lost: %+v", usage)
-	}
-	if h.mock.count("a") != 1 {
-		t.Fatal("native request dispatched more than once")
+	for _, enabled := range []bool{false, true} {
+		t.Run(fmt.Sprint(enabled), func(t *testing.T) {
+			h, ledger, server := newCodeForwardHarness(t)
+			route := h.rt.release.Snapshot.CodeRoutes["coding"]
+			route.MessagesToCodex = enabled
+			h.rt.release.Snapshot.CodeRoutes["coding"] = route
+			configuration := routing.Configuration{Kind: connectors.KindPlugin, AuthMode: connectors.AuthGrant, ProfileID: codeplans.ZAIProfile, Endpoint: h.upstream.URL + "/a"}
+			h.rt.release.Snapshot.CodeConnections = map[string]routing.Configuration{"revision:provider": configuration}
+			if err := h.rt.release.Snapshot.Compile(); err != nil {
+				t.Fatal(err)
+			}
+			adapter, ok := codeadapter.ForConnection(configuration.Kind, configuration.AuthMode, configuration.ProfileID)
+			if !ok {
+				t.Fatal("selected account has no adapter")
+			}
+			endpoint, ok := adapter.Endpoint("v1/messages")
+			if !ok {
+				t.Fatal("selected account cannot serve Messages")
+			}
+			requestBody := []byte(`{ "model":"native-model", "messages":[{"role":"user","content":"hello"}], "max_tokens":8, "vendor_extension":{"keep":true} }`)
+			responseBody := []byte(`{ "type":"message", "content":[{"type":"text","text":"native reply"}], "stop_reason":"end_turn", "usage":{"input_tokens":2,"output_tokens":1}, "vendor_extension":{"keep":true} }`)
+			h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
+				body, err := io.ReadAll(r.Body)
+				if err != nil || !bytes.Equal(body, requestBody) {
+					t.Error("native request bytes changed")
+				}
+				if r.URL.Path != "/a/"+endpoint.UpstreamPath || r.URL.RawQuery != "native_option=1" {
+					t.Error("request did not use the selected account's endpoint")
+				}
+				if r.Header.Get(endpoint.CredentialHeader) != "Bearer upstream-only" || r.Header.Get("X-Api-Key") != "" {
+					t.Error("request did not use the selected account's credential header")
+				}
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write(responseBody)
+			})
+			request, err := http.NewRequestWithContext(t.Context(), http.MethodPost, server.URL+"/code/coding/v1/messages?native_option=1", bytes.NewReader(requestBody))
+			if err != nil {
+				t.Fatal(err)
+			}
+			request.Header.Set("X-Api-Key", fullKey)
+			request.Header.Set("X-Claude-Code-Session-Id", "native-messages")
+			request.Header.Set("Content-Type", "application/json")
+			response, err := http.DefaultClient.Do(request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer response.Body.Close()
+			body, err := io.ReadAll(response.Body)
+			if err != nil || response.StatusCode != http.StatusOK || !bytes.Equal(body, responseBody) {
+				t.Fatalf("native response changed: status=%d body=%s error=%v", response.StatusCode, body, err)
+			}
+			if usage := ledger.wait(t); usage.Total == nil || *usage.Total != 3 {
+				t.Fatalf("selected account's response usage was lost: %+v", usage)
+			}
+			if h.mock.count("a") != 1 {
+				t.Fatal("native request dispatched more than once")
+			}
+		})
 	}
 }
 
@@ -417,10 +423,12 @@ func TestCodeMessagesToCodexTextExchange(t *testing.T) {
 							Text string `json:"text"`
 						} `json:"content"`
 					} `json:"input"`
-					Stream          bool `json:"stream"`
-					MaxOutputTokens int  `json:"max_output_tokens"`
+					Stream          bool    `json:"stream"`
+					Store           *bool   `json:"store"`
+					Instructions    *string `json:"instructions"`
+					MaxOutputTokens int     `json:"max_output_tokens"`
 				}
-				if err := json.Unmarshal(body, &request); err != nil || request.Model != "native-model" || len(request.Input) != 2 || request.Input[0].Role != "system" || request.Input[0].Content[0].Text != "Keep the answer short" || request.Input[1].Content[0].Text != "Hello" || !request.Stream || request.MaxOutputTokens != 32 {
+				if err := json.Unmarshal(body, &request); err != nil || request.Model != "native-model" || len(request.Input) != 2 || request.Input[0].Role != "developer" || request.Input[0].Content[0].Text != "Keep the answer short\nx-anthropic-billing-header: preserve" || request.Input[1].Content[0].Text != "Hello" || !request.Stream || request.MaxOutputTokens != 32 || request.Store == nil || *request.Store || request.Instructions == nil || *request.Instructions != "" {
 					t.Errorf("translated request %s, error %v", body, err)
 				}
 				if r.URL.Path != "/a/responses" || r.Header.Get("Authorization") != "Bearer upstream-only" || r.Header.Get("Anthropic-Beta") != "" || r.Header.Get("X-Claude-Code-Session-Id") != "translated-text" {
@@ -431,7 +439,7 @@ func TestCodeMessagesToCodexTextExchange(t *testing.T) {
 				fmt.Fprint(w, "data: "+`{"type":"response.output_text.delta","output_index":0,"content_index":0,"delta":"Hello back"}`+"\n\n")
 				fmt.Fprint(w, "data: "+`{"type":"response.completed","sequence_number":0,"response":{"id":"response-text","object":"response","model":"native-model","status":"completed","output":[{"id":"message-text","type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","text":"Hello back","annotations":[]}]}],"usage":{"input_tokens":7,"output_tokens":2,"total_tokens":9}}}`+"\n\n")
 			})
-			request, _ := http.NewRequest(http.MethodPost, server.URL+"/code/coding/v1/messages", bytes.NewBufferString(fmt.Sprintf(`{"model":"native-model","system":"Keep the answer short","messages":[{"role":"user","content":"Hello"}],"max_tokens":32,"stream":%t}`, stream)))
+			request, _ := http.NewRequest(http.MethodPost, server.URL+"/code/coding/v1/messages", bytes.NewBufferString(fmt.Sprintf(`{"model":"native-model","system":"Keep the answer short\nx-anthropic-billing-header: preserve","messages":[{"role":"user","content":"Hello"}],"max_tokens":32,"stream":%t}`, stream)))
 			request.Header.Set("Authorization", "Bearer "+fullKey)
 			request.Header.Set("X-Claude-Code-Session-Id", "translated-text")
 			response, err := server.Client().Do(request)
@@ -440,7 +448,7 @@ func TestCodeMessagesToCodexTextExchange(t *testing.T) {
 			}
 			defer response.Body.Close()
 			body, _ := io.ReadAll(response.Body)
-			if response.StatusCode != 200 || !bytes.Contains(body, []byte(`"text":"Hello back"`)) || !bytes.Contains(body, []byte(`"model":"native-model"`)) {
+			if response.StatusCode != 200 || !bytes.Contains(body, []byte(`"text":"Hello back"`)) || !bytes.Contains(body, []byte(`"model":"native-model"`)) || !bytes.Contains(body, []byte(`"output_tokens":2`)) {
 				t.Fatalf("Messages exchange status %d body %s", response.StatusCode, body)
 			}
 			if stream && (!bytes.Contains(body, []byte("event: message_start")) || !bytes.Contains(body, []byte("event: message_stop")) || !bytes.Contains(body, []byte("event: content_block_delta"))) {

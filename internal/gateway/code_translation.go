@@ -2,8 +2,10 @@ package gateway
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"net/http"
+	"slices"
 	"strings"
 
 	"github.com/tyk-swe/olp/internal/codemode"
@@ -46,10 +48,22 @@ func codeTranslateMessages(body []byte, r *http.Request) ([]byte, bool, error) {
 	if err != nil {
 		return nil, false, refused
 	}
-	prepared, err := target.OIF().WithChanges(
-		oif.Change{Pointer: "/stream", Value: "true", Origin: oif.TransportOption, Reason: "Codex subscription streaming transport"},
-		oif.Change{Pointer: "/store", Value: "false", Origin: oif.TransportOption, Reason: "Stateless Messages translation"},
-	)
+
+	input, _ := target.OIF().Document().Root().Lookup("input")
+	roles := slices.Collect(func(yield func(oif.Change) bool) {
+		for index, item := range input.Elements() {
+			role, _ := item.Lookup("role")
+			if text, _ := role.Text(); text == "system" && !yield(oif.Change{Pointer: fmt.Sprintf("/input/%d/role", index), Value: `"developer"`, Origin: oif.TransformedMapping, Reason: "Codex system instruction representation"}) {
+				return
+			}
+		}
+	})
+	changes := slices.Concat([]oif.Change{
+		{Pointer: "/stream", Value: "true", Origin: oif.TransportOption, Reason: "Codex subscription streaming transport"},
+		{Pointer: "/store", Value: "false", Origin: oif.TransportOption, Reason: "Stateless Messages translation"},
+		{Pointer: "/instructions", Value: `""`, Origin: oif.TransportOption, Reason: "Codex required empty transport instructions"},
+	}, roles)
+	prepared, err := target.OIF().WithChanges(changes...)
 	if err != nil {
 		return nil, false, refused
 	}
