@@ -82,56 +82,53 @@ func (f *codeFleet) clientRequest(t *testing.T, replica int, path string, header
 	return response, out
 }
 
-func (f *codeFleet) translateMessages(t *testing.T) {
+func (f *codeFleet) restart(t *testing.T, name string) {
 	t.Helper()
-	path := "/api/v1/code/routes/" + f.route["id"].(string)
-	draft := f.h.want(f.owner, "PUT", path, map[string]any{"project_id": f.project, "slug": "qualification", "pool_id": f.pool["id"], "models": []string{"gpt-5.4"}, "enabled": true, "messages_to_codex": true}, etagHeader(f.route), 200)
-	f.route = f.h.want(f.owner, "POST", path+"/publish", nil, withMatch(draft, idem("translated-continuity")), 200)
 	for i, process := range f.gateways {
 		if err := process.Kill(); err != nil {
 			t.Fatal(err)
 		}
-		f.gateways[i] = f.in.replica(fmt.Sprintf("translated-%d", i))
+		f.gateways[i] = f.in.replica(fmt.Sprintf("%s-%d", name, i))
 	}
+}
+
+func (f *codeFleet) translateMessages(t *testing.T, poolID string) map[string]any {
+	t.Helper()
+	path := "/api/v1/code/routes/" + f.route["id"].(string)
+	draft := f.h.want(f.owner, "PUT", path, map[string]any{"project_id": f.project, "slug": "qualification", "pool_id": poolID, "models": []string{"gpt-5.4"}, "enabled": true, "messages_to_codex": true}, etagHeader(f.route), 200)
+	route := f.h.want(f.owner, "POST", path+"/publish", nil, withMatch(draft, idem("translated-continuity")), 200)
+	f.restart(t, "translated")
 	f.peer.SetResponder(func(context.Context, http.Header, []byte) [][]byte {
 		return [][]byte{[]byte(`{"type":"response.completed","response":{"id":"resp-translated","status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"CONTROLLED_PRIVATE_OUTPUT"}]}],"usage":{"input_tokens":13,"output_tokens":2,"total_tokens":15}}}`)}
 	})
+	return route
 }
 
 func TestCodeQualificationTranslatedLineageColdResumeAndSummaryCompaction(t *testing.T) {
 	f := newCodeFleet(t)
-	f.translateMessages(t)
+	f.translateMessages(t, f.pool["id"].(string))
 	header := http.Header{"X-Claude-Code-Session-Id": {"translated-session"}}
 	toolHistory := []byte(`{"model":"gpt-5.4","max_tokens":64,"messages":[{"role":"user","content":"CONTROLLED_PRIVATE_PROMPT"},{"role":"assistant","content":[{"type":"tool_use","id":"call-owned","name":"read_file","input":{"path":"main.go"}}]},{"role":"user","content":[{"type":"tool_result","tool_use_id":"call-owned","content":"CONTROLLED_PRIVATE_TOOL"}]}]}`)
-	for i, identity := range []struct{ agent, parent string }{{}, {agent: "child"}, {agent: "grandchild", parent: "child"}} {
-		requestHeader := header.Clone()
-		if identity.agent != "" {
-			requestHeader.Set("X-Claude-Code-Agent-Id", identity.agent)
-		}
-		if identity.parent != "" {
-			requestHeader.Set("X-Claude-Code-Parent-Agent-Id", identity.parent)
-		}
+	for i, requestHeader := range []http.Header{
+		header,
+		{"X-Claude-Code-Session-Id": {"translated-session"}, "X-Claude-Code-Agent-Id": {"child"}},
+		{"X-Claude-Code-Session-Id": {"translated-session"}, "X-Claude-Code-Agent-Id": {"grandchild"}, "X-Claude-Code-Parent-Agent-Id": {"child"}},
+	} {
 		response, body := f.clientRequest(t, i%2, "v1/messages", requestHeader, toolHistory)
 		if response.StatusCode != http.StatusOK || !bytes.Contains(body, []byte("CONTROLLED_PRIVATE_OUTPUT")) {
 			t.Fatalf("translated lineage status %d body %s", response.StatusCode, body)
 		}
 	}
-	for i, process := range f.gateways {
-		if err := process.Kill(); err != nil {
-			t.Fatal(err)
-		}
-		f.gateways[i] = f.in.replica(fmt.Sprintf("translated-cold-%d", i))
-	}
-	child := header.Clone()
-	child.Set("X-Claude-Code-Agent-Id", "child")
+	f.restart(t, "translated-cold")
+	child := http.Header{"X-Claude-Code-Session-Id": {"translated-session"}, "X-Claude-Code-Agent-Id": {"child"}}
 	response, body := f.clientRequest(t, 1, "v1/messages", child, toolHistory)
 	if response.StatusCode != http.StatusOK {
 		t.Fatalf("cold child resume status %d body %s", response.StatusCode, body)
 	}
 	summary := []byte(`{"model":"gpt-5.4","max_tokens":64,"output_config":{"effort":"high"},"messages":[{"role":"user","content":"CONTROLLED_PRIVATE_SUMMARY"}]}`)
-	response, body = f.clientRequest(t, 0, "v1/messages", child, summary)
-	if response.StatusCode != http.StatusOK {
-		t.Fatalf("summary continuation status %d body %s", response.StatusCode, body)
+	summaryResponse, summaryBody := f.clientRequest(t, 0, "v1/messages", child, summary)
+	if summaryResponse.StatusCode != http.StatusOK {
+		t.Fatalf("summary continuation status %d body %s", summaryResponse.StatusCode, summaryBody)
 	}
 	bindings := codePublicDecode[[]codemode.Binding](t, f.list("bindings"))
 	if len(bindings) != 3 {
@@ -162,9 +159,9 @@ func TestCodeQualificationTranslatedLineageColdResumeAndSummaryCompaction(t *tes
 	if !bytes.Contains(captures[3].Body, []byte(`"call_id":"call-owned"`)) || !bytes.Contains(captures[3].Body, []byte("CONTROLLED_PRIVATE_TOOL")) || !bytes.Contains(captures[4].Body, []byte("CONTROLLED_PRIVATE_SUMMARY")) || !bytes.Contains(captures[4].Body, []byte(`"effort":"high"`)) {
 		t.Fatal("cold tool history or explicit summary reasoning was lost")
 	}
-	response, body = f.clientRequest(t, 1, "v1/messages", child, []byte(`{"model":"gpt-5.4","max_tokens":64,"messages":[{"role":"assistant","content":[{"type":"thinking","thinking":"CONTROLLED_PRIVATE_REASONING","signature":"CONTROLLED_PRIVATE_SIGNATURE"}]},{"role":"user","content":"Continue"}]}`))
-	if response.StatusCode != http.StatusUnprocessableEntity || !bytes.Contains(body, []byte("code_translation_unsupported_semantics")) || len(f.peer.Requests()) != len(captures) {
-		t.Fatalf("opaque continuation dispatched or lost state, status %d body %s", response.StatusCode, body)
+	opaqueResponse, opaqueBody := f.clientRequest(t, 1, "v1/messages", child, []byte(`{"model":"gpt-5.4","max_tokens":64,"messages":[{"role":"assistant","content":[{"type":"thinking","thinking":"CONTROLLED_PRIVATE_REASONING","signature":"CONTROLLED_PRIVATE_SIGNATURE"}]},{"role":"user","content":"Continue"}]}`))
+	if opaqueResponse.StatusCode != http.StatusUnprocessableEntity || !bytes.Contains(opaqueBody, []byte("code_translation_unsupported_semantics")) || len(f.peer.Requests()) != len(captures) {
+		t.Fatalf("opaque continuation dispatched or lost state, status %d body %s", opaqueResponse.StatusCode, opaqueBody)
 	}
 	for _, collection := range []string{"attempts", "bindings", "refusals"} {
 		_, raw := f.h.do(f.owner, "GET", "/api/v1/code/"+collection+"?project_id="+f.project, nil, nil)
@@ -178,35 +175,31 @@ func TestCodeQualificationTranslatedLineageColdResumeAndSummaryCompaction(t *tes
 
 func TestCodeQualificationTranslatedResponseReferencesStayOnTheirProducingAccount(t *testing.T) {
 	f := newCodeFleet(t)
-	f.translateMessages(t)
-	plans := &codingPlanFixture{h: f.h, owner: f.owner, project: f.project, peer: newFixedHostPeer(t, "opencode.ai")}
-	plans.digest = installPlugin(t, f.h, f.owner, testutil.BuildPlugin(t, "./plugins/opencode-go"))
+	translatedRoute := f.translateMessages(t, f.pool["id"].(string))
+	plans := &codingPlanFixture{h: f.h, owner: f.owner, project: f.project, peer: newFixedHostPeer(t, "opencode.ai"), digest: installPlugin(t, f.h, f.owner, testutil.BuildPlugin(t, "./plugins/opencode-go"))}
 	provider := plans.provider(t, "Controlled other family", codeplans.OpenCodeGoProfile)
 	credential := plans.enroll(t, provider, "opencode0123456789abcdef0123456789")
 	account := f.h.want(f.owner, "POST", "/api/v1/code/accounts", map[string]any{"project_id": f.project, "provider_id": provider, "credential_id": credential, "name": "Controlled response owner", "enabled": true, "models": []string{"gpt-5.5"}}, idem("reference-owner"), 201)
 	accounts := []string{f.accounts[0]["id"].(string), f.accounts[1]["id"].(string), account["id"].(string)}
 	f.h.want(f.owner, "PUT", "/api/v1/code/pools/"+f.pool["id"].(string), map[string]any{"project_id": f.project, "name": "Controlled mixed pool", "kind": "shared", "owner_user_id": nil, "account_ids": accounts, "api_key_ids": []string{f.keyID}}, etagHeader(f.pool), 200)
 	path := "/api/v1/code/routes/" + f.route["id"].(string)
-	draft := f.h.want(f.owner, "PUT", path, map[string]any{"project_id": f.project, "slug": "qualification", "pool_id": f.pool["id"], "models": []string{"gpt-5.4", "gpt-5.5"}, "enabled": true, "messages_to_codex": true}, etagHeader(f.route), 200)
+	draft := f.h.want(f.owner, "PUT", path, map[string]any{"project_id": f.project, "slug": "qualification", "pool_id": f.pool["id"], "models": []string{"gpt-5.4", "gpt-5.5"}, "enabled": true, "messages_to_codex": true}, etagHeader(translatedRoute), 200)
 	f.h.want(f.owner, "POST", path+"/publish", nil, withMatch(draft, idem("reference-owner-publish")), 200)
-	if err := f.gateways[0].Kill(); err != nil {
-		t.Fatal(err)
-	}
-	f.gateways[0] = f.in.replica("reference-owner")
+	f.restart(t, "reference-owner")
 	header := http.Header{"X-Claude-Code-Session-Id": {"owned-translated-response"}}
 	response, body := f.clientRequest(t, 0, "v1/messages", header, []byte(`{"model":"gpt-5.4","max_tokens":64,"messages":[{"role":"user","content":"controlled"}]}`))
 	if response.StatusCode != http.StatusOK {
 		t.Fatalf("translated response status %d body %s", response.StatusCode, body)
 	}
-	response, body = f.clientRequest(t, 0, "v1/responses", header, []byte(`{"model":"gpt-5.5","previous_response_id":"resp-translated","input":[]}`))
-	if response.StatusCode != http.StatusConflict || !bytes.Contains(body, []byte("code_response_account_conflict")) || len(plans.peer.received()) != 0 {
-		t.Fatalf("foreign response reached another account, status %d body %s", response.StatusCode, body)
+	foreignResponse, foreignBody := f.clientRequest(t, 0, "v1/responses", header, []byte(`{"model":"gpt-5.5","previous_response_id":"resp-translated","input":[]}`))
+	if foreignResponse.StatusCode != http.StatusConflict || !bytes.Contains(foreignBody, []byte("code_response_account_conflict")) || len(plans.peer.received()) != 0 {
+		t.Fatalf("foreign response reached another account, status %d body %s", foreignResponse.StatusCode, foreignBody)
 	}
 	nativeHeader := http.Header{"Thread-Id": {"owned-translated-response"}, "Session-Id": {"owned-translated-response"}}
 	nativeBody := []byte(`{"model":"gpt-5.4","previous_response_id":"resp-translated","input":[]}`)
-	response, body = f.clientRequest(t, 0, "responses", nativeHeader, nativeBody)
-	if response.StatusCode != http.StatusOK || len(f.peer.Requests()) != 2 || !bytes.Equal(f.peer.Requests()[1].Body, nativeBody) {
-		t.Fatalf("owned native continuation changed or refused, status %d body %s", response.StatusCode, body)
+	nativeResponse, nativeOutput := f.clientRequest(t, 0, "responses", nativeHeader, nativeBody)
+	if nativeResponse.StatusCode != http.StatusOK || len(f.peer.Requests()) != 2 || !bytes.Equal(f.peer.Requests()[1].Body, nativeBody) {
+		t.Fatalf("owned native continuation changed or refused, status %d body %s", nativeResponse.StatusCode, nativeOutput)
 	}
 	plans.peer.mu.Lock()
 	plans.peer.respond = func(w http.ResponseWriter, _ *http.Request) {
@@ -214,13 +207,13 @@ func TestCodeQualificationTranslatedResponseReferencesStayOnTheirProducingAccoun
 		io.WriteString(w, strings.ReplaceAll(codingPlanResponsesSSE, "resp_fixture", "resp-translated"))
 	}
 	plans.peer.mu.Unlock()
-	response, body = f.clientRequest(t, 0, "v1/responses", header, []byte(`{"model":"gpt-5.5","input":[{"role":"user","content":"full controlled context"}]}`))
-	if response.StatusCode != http.StatusOK || len(plans.peer.received()) != 1 {
-		t.Fatalf("full-context recovery status %d body %s", response.StatusCode, body)
+	recoveryResponse, recoveryBody := f.clientRequest(t, 0, "v1/responses", header, []byte(`{"model":"gpt-5.5","input":[{"role":"user","content":"full controlled context"}]}`))
+	if recoveryResponse.StatusCode != http.StatusOK || len(plans.peer.received()) != 1 {
+		t.Fatalf("full-context recovery status %d body %s", recoveryResponse.StatusCode, recoveryBody)
 	}
-	response, body = f.clientRequest(t, 0, "responses", nativeHeader, nativeBody)
-	if response.StatusCode != http.StatusConflict || !bytes.Contains(body, []byte("code_parent_unresolved")) || len(f.peer.Requests()) != 2 {
-		t.Fatalf("ambiguous response ownership dispatched, status %d body %s", response.StatusCode, body)
+	ambiguousResponse, ambiguousBody := f.clientRequest(t, 0, "responses", nativeHeader, nativeBody)
+	if ambiguousResponse.StatusCode != http.StatusConflict || !bytes.Contains(ambiguousBody, []byte("code_parent_unresolved")) || len(f.peer.Requests()) != 2 {
+		t.Fatalf("ambiguous response ownership dispatched, status %d body %s", ambiguousResponse.StatusCode, ambiguousBody)
 	}
 }
 
@@ -229,11 +222,14 @@ func TestCodeQualificationTranslatedContinuationRechecksLiveAuthority(t *testing
 		t.Run(target, func(t *testing.T) {
 			f := newCodeFleet(t)
 			key, memberID := f.memberKey(t)
-			if target == "personal-owner" {
+			pool := func() map[string]any {
+				if target != "personal-owner" {
+					return f.pool
+				}
 				input := map[string]any{"project_id": f.project, "name": "Controlled personal pool", "kind": "personal", "owner_user_id": memberID, "account_ids": []string{f.accounts[0]["id"].(string), f.accounts[1]["id"].(string)}, "api_key_ids": []string{f.keyID}}
-				f.pool = f.h.want(f.owner, "PUT", "/api/v1/code/pools/"+f.pool["id"].(string), input, etagHeader(f.pool), 200)
-			}
-			f.translateMessages(t)
+				return f.h.want(f.owner, "POST", "/api/v1/code/pools", input, idem("translated-personal-pool"), 201)
+			}()
+			f.translateMessages(t, pool["id"].(string))
 			header := http.Header{"X-Claude-Code-Session-Id": {"translated-authority"}}
 			body := []byte(`{"model":"gpt-5.4","max_tokens":64,"messages":[{"role":"user","content":"controlled"}]}`)
 			response, out := f.clientRequest(t, 0, "v1/messages", header, body)
@@ -253,13 +249,22 @@ func TestCodeQualificationTranslatedContinuationRechecksLiveAuthority(t *testing
 				f.h.want(f.owner, "PUT", "/api/v1/code/pools/"+f.pool["id"].(string), input, etagHeader(f.pool), 200)
 			case "personal-owner":
 				owner := f.h.want(f.owner, "GET", "/api/v1/profile", nil, nil, 200)
-				input := map[string]any{"project_id": f.project, "name": "Controlled changed owner", "kind": "personal", "owner_user_id": owner["id"], "account_ids": []string{f.accounts[0]["id"].(string), f.accounts[1]["id"].(string)}, "api_key_ids": []string{f.keyID}}
-				f.h.want(f.owner, "PUT", "/api/v1/code/pools/"+f.pool["id"].(string), input, etagHeader(f.pool), 200)
+				input := map[string]any{"project_id": f.project, "name": "Controlled changed owner", "kind": "personal", "owner_user_id": owner["id"], "account_ids": []string{f.accounts[0]["id"].(string), f.accounts[1]["id"].(string)}, "api_key_ids": []string{}}
+				poolPath := "/api/v1/code/pools/" + pool["id"].(string)
+				transferResponse, refusal := f.h.do(f.owner, "PUT", poolPath, input, etagHeader(pool))
+				if transferResponse.StatusCode != http.StatusUnprocessableEntity || !bytes.Contains(refusal, []byte("ownership is immutable")) {
+					t.Fatalf("personal pool owner transfer status %d body %s", transferResponse.StatusCode, refusal)
+				}
+				unchanged := f.h.want(f.owner, "GET", poolPath, nil, nil, 200)
+				if unchanged["owner_user_id"] != memberID {
+					t.Fatal("personal pool owner changed after refused transfer")
+				}
+				removedKey := map[string]any{"project_id": f.project, "name": "Controlled personal membership removed", "kind": "personal", "owner_user_id": memberID, "account_ids": []string{f.accounts[0]["id"].(string), f.accounts[1]["id"].(string)}, "api_key_ids": []string{}}
+				f.h.want(f.owner, "PUT", poolPath, removedKey, etagHeader(unchanged), 200)
 			default:
 				f.revoke(t, target, key, memberID)
 			}
-			child := header.Clone()
-			child.Set("X-Claude-Code-Agent-Id", "revoked-child")
+			child := http.Header{"X-Claude-Code-Session-Id": {"translated-authority"}, "X-Claude-Code-Agent-Id": {"revoked-child"}}
 			for i, identity := range []http.Header{header, child} {
 				response, out := f.clientRequest(t, i, "v1/messages", identity, body)
 				if response.StatusCode < 400 || !bytes.Contains(out, []byte("code_")) || len(f.peer.Requests()) != 1 {
