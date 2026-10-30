@@ -110,7 +110,8 @@ func generationReferences(source oif.Document, family wire.Format) ([]generation
 	}
 	for i, item := range input.Elements() {
 		kind, _ := item.Lookup("type")
-		if name, _ := kind.Text(); name == "item_reference" {
+		_, hasID := item.Lookup("id")
+		if name, _ := kind.Text(); wire.IsResponsesItemReference(name, hasID) {
 			return nil, errors.New("item_reference is not qualified for generation")
 		}
 		if name, _ := kind.Text(); name == "code_interpreter_call" {

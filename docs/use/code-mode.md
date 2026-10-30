@@ -551,7 +551,55 @@ not a guarantee that a later request will succeed.
 
 ## Conversations and authority
 
-Clients name their conversations in headers OLP reads and forwards unchanged:
+### Generic protocol access
+
+An authorized client can send complete native Responses, Messages or Chat
+Completions requests to the paths its published route serves. An OLP key with
+the `inference` scope, route permission and pool membership is sufficient.
+Private coding-client identity headers are optional. For example, set
+`OLP_API_KEY` to your project key and `OLP_NATIVE_MODEL` to a model the route
+allows, then send a complete Responses request to a Codex-backed route.
+
+```sh
+curl --fail-with-body https://olp.example/code/team-coding/responses \
+  -H "Authorization: Bearer ${OLP_API_KEY}" \
+  -H 'Content-Type: application/json' \
+  --data "{\"model\":\"${OLP_NATIVE_MODEL}\",\"input\":\"Explain what this function does\",\"store\":false}"
+```
+
+Use `/v1/responses`, `/v1/messages` or `/v1/chat/completions` with the matching
+native body for other adapters. Native forwarding, model names and explicit
+translation or model-alias policies apply as usual. OLP preserves native bytes
+and unknown extensions and supplies the selected account's credential. It does
+not invent an official client's headers or identity. Provider access rules still
+apply, and accepting a generic request locally does not establish live provider
+qualification.
+
+Without affinity, each HTTP request starts an independent conversation. Send
+the complete text and function-tool history needed for that request. To keep
+the same account binding across requests, add `X-OLP-Code-Affinity` with a stable
+identifier of at most 256 bytes. The header must contain one nonempty value
+without surrounding whitespace. OLP consumes it locally and scopes the binding
+by route and API key, so equal values from different keys or projects do not
+share a conversation. The value selects no recognized client's parent or child.
+Generic WebSocket Responses require this header on the handshake.
+
+With explicit affinity, `previous_response_id` may continue a response OLP
+observed for that key and conversation, subject to its producing account and
+model ownership. Unknown, ambiguous or differently owned references refuse.
+An affinity cannot adopt another affinity's conversation or a recognized
+client's tree through a response reference. Without affinity, response
+references refuse. Generic requests also refuse opaque or signed thinking
+history, turn state, compaction, stored prompts, stored item/file references,
+server tools and other unsupported stateful content. Complete
+function-call arguments and tool results remain native input, including fields
+that happen to have names such as `signature`. OLP never converts opaque state
+into a stateless prompt. Every admitted generation uses the same live access,
+limits and accounting checks described below.
+
+### Recognized client lineage
+
+Recognized clients name their conversations in headers OLP reads and forwards unchanged.
 
 | Client | Conversation | Child conversation |
 | --- | --- | --- |
@@ -562,9 +610,10 @@ Clients name their conversations in headers OLP reads and forwards unchanged:
 A Claude Code agent is scoped by its session, as `session/agent`, because
 teammate agents reuse name-based identifiers. Identifier bytes outside letters,
 digits, `.` and `-` are encoded as `:xx`, so OpenCode's `ses_…` appears as
-`ses:5f…`. A request naming no conversation, or naming both clients', refuses.
-The request's path decides whose headers count: the Codex paths read only
-Codex's, and the `v1/` paths only Claude Code's and OpenCode's.
+`ses:5f…`. Mixing recognized client families or combining their identities with
+`X-OLP-Code-Affinity` refuses. The Codex paths accept Codex identities, and the
+`v1/` paths accept Claude Code or OpenCode identities. Recognized identities
+keep their existing conversation and parent lineage.
 
 The first admitted top-level conversation selects one eligible pool account and
 atomically persists its binding. The first admission of each model in the

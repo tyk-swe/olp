@@ -149,6 +149,10 @@ func codeReference(ctx context.Context, tx pgx.Tx, in CodeAdmission) (codemode.B
 	if err != nil {
 		return reference, in, err
 	}
+	identity := in.Operation.Identity
+	if (identity.Generic() || (codemode.Identity{Conversation: reference.Conversation}).Generic()) && identity.Conversation != reference.Conversation {
+		return reference, in, codemode.Refuse(409, "code_parent_conflict")
+	}
 	if in.Operation.Identity.Conversation != reference.Conversation && in.Operation.Identity.Parent == "" {
 		var exists bool
 		if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM olp.code_bindings WHERE route_id=$1 AND api_key_id=$2 AND conversation=$3)`, in.Route.ID, in.APIKeyID, in.Operation.Identity.Conversation).Scan(&exists); err != nil {
