@@ -44,9 +44,14 @@ func Catalog(route codemode.Route, offers Offers) []codemode.Model {
 func modelCapabilities(route codemode.Route, id string, declarations []codeadapter.Vendor) []codemode.ModelCapability {
 	capabilities := slices.Collect(func(yield func(codemode.ModelCapability) bool) {
 		for _, declaration := range declarations {
-			if target, ok := codeadapter.RouteEndpoint(route, declaration, "v1/messages"); ok && target.ClientPath != "v1/messages" && declaration.ServesModel(target.Protocol, id) {
-				if !yield(codemode.ModelCapability{Protocol: codemode.ProtocolMessages, Path: "v1/messages", Transports: []string{"http"}}) {
-					return
+			for _, translated := range []struct {
+				path     string
+				protocol codemode.Protocol
+			}{{"v1/messages", codemode.ProtocolMessages}, {"v1/chat/completions", codemode.ProtocolChat}} {
+				if target, ok := codeadapter.RouteEndpoint(route, declaration, translated.path); ok && target.ClientPath != translated.path && declaration.ServesModel(target.Protocol, id) {
+					if !yield(codemode.ModelCapability{Protocol: translated.protocol, Path: translated.path, Transports: []string{"http"}}) {
+						return
+					}
 				}
 			}
 			for _, endpoint := range declaration.Endpoints() {

@@ -390,3 +390,59 @@ func TestAntigravitySetupRequiresExplicitPolicyAndReportsSignedStateGap(t *testi
 		}
 	}
 }
+
+func TestOpenCodeCodexTranslationUsesPublishedChatCapability(t *testing.T) {
+	models := []string{"fixture-main", "fixture-small"}
+	offers := Offers{{Adapter: codemode.AdapterCodex, Models: models}}
+	for _, enabled := range []bool{false, true} {
+		route := codemode.Route{Slug: "coding", RevisionID: "published", Enabled: true, Models: models, ChatToCodex: enabled, ModelRewriting: true, Aliases: map[string]string{"team-code": models[0]}}
+		catalog := Catalog(route, offers)
+		for _, model := range catalog {
+			chat := slices.ContainsFunc(model.Capabilities, func(capability codemode.ModelCapability) bool {
+				return capability.Protocol == codemode.ProtocolChat && capability.Path == "v1/chat/completions" && slices.Equal(capability.Transports, []string{"http"})
+			})
+			if chat != enabled || slices.Contains(model.Clients, codeadapter.ClientOpenCode) != enabled {
+				t.Fatalf("policy %t catalog %+v", enabled, model)
+			}
+		}
+		for _, platform := range []string{"linux", "macos", "windows"} {
+			configuration, err := Generate(route, offers, Request{GatewayURL: "https://gateway.example/prefix", Client: codeadapter.ClientOpenCode, Platform: platform, Model: "team-code", PlanModel: models[0], SmallModel: models[1]})
+			if !enabled {
+				if err == nil {
+					t.Fatal("disabled translation generated setup")
+				}
+				continue
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			var settings struct {
+				Model      string
+				SmallModel string `json:"small_model"`
+				Agent      map[string]struct{ Model string }
+				Provider   map[string]struct {
+					Options struct{ BaseURL, APIKey string }
+					Models  map[string]struct {
+						ID       string
+						Provider struct{ NPM string }
+					}
+				}
+			}
+			if err := json.Unmarshal([]byte(configuration.Configuration), &settings); err != nil {
+				t.Fatal(err)
+			}
+			provider := settings.Provider["olp-codex"]
+			if settings.Model != "olp-codex/team-code" || settings.SmallModel != "olp-codex/"+models[1] || settings.Agent["plan"].Model != "olp-codex/"+models[0] || provider.Options.BaseURL != configuration.BaseURL+"/v1" || provider.Options.APIKey != "{env:OLP_API_KEY}" || len(provider.Models) != 3 {
+				t.Fatalf("generated setup %s", configuration.Configuration)
+			}
+			for name, model := range provider.Models {
+				if model.ID != name || model.Provider.NPM != "@ai-sdk/openai-compatible" {
+					t.Fatalf("explicit model declaration %s", configuration.Configuration)
+				}
+			}
+			if !strings.Contains(configuration.Instructions, "Chat") || !strings.Contains(configuration.Instructions, "unqualified") {
+				t.Fatalf("missing translation boundary %s", configuration.Instructions)
+			}
+		}
+	}
+}
