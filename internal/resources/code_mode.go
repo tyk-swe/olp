@@ -43,7 +43,7 @@ func (s *CodeStore) ObserveAllowance(ctx context.Context, account string, allowa
 			return err
 		}
 	}
-	merged := mergeCodeAllowance(current, allowance)
+	merged := current.Merge(allowance)
 	if err = merged.Validate(); err != nil {
 		return err
 	}
@@ -534,13 +534,16 @@ func (s *CodeStore) finish(ctx context.Context, id string, u codemode.Usage, abo
 	return tx.Commit(ctx)
 }
 
-func (s *CodeStore) ObserveHealth(ctx context.Context, accountID, health string) error {
-	if !slices.Contains([]string{"healthy", "unavailable", "quota_limited"}, health) {
-		return codemode.Refuse(400, "code_health_invalid")
+func (s *CodeStore) ObserveHealth(ctx context.Context, accountID string, observation codemode.HealthObservation) error {
+	if err := observation.Validate(); err != nil {
+		return err
 	}
-	_, err := s.Pool.Exec(ctx, `UPDATE olp.code_accounts SET health=$2,
-		unavailable_until=CASE WHEN $2 IN ('unavailable','quota_limited') THEN now()+interval '1 minute' END
-		WHERE id=$1 AND ($2<>'healthy' OR unavailable_until IS NULL OR unavailable_until<=now())`, accountID, health)
+	_, err := s.Pool.Exec(ctx, `UPDATE olp.code_accounts SET health=$2,health_observed_at=$3,
+		unavailable_until=CASE WHEN $2='healthy' THEN NULL
+			WHEN $4::timestamptz IS NOT NULL THEN $4
+			ELSE greatest(unavailable_until,$3::timestamptz+interval '1 minute') END
+		WHERE id=$1 AND (health_observed_at IS NULL OR health_observed_at<$3)
+		AND ($2<>'healthy' OR unavailable_until IS NULL OR unavailable_until<=now())`, accountID, observation.Status, observation.ObservedAt, observation.RetryAt)
 	return err
 }
 
