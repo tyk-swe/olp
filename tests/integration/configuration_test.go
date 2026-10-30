@@ -651,14 +651,40 @@ func TestCodeConfigurationCrossProjectRoundTrip(t *testing.T) {
 }
 
 func TestCodeConfigurationPaidFrozenPolicyRoundTrip(t *testing.T) {
-
+	for _, fallback := range []bool{false, true} {
+		t.Run(fmt.Sprintf("fallback-%t", fallback), func(t *testing.T) { codeConfigurationPaidFrozenPolicyRoundTrip(t, fallback) })
+	}
+}
+func codeConfigurationPaidFrozenPolicyRoundTrip(t *testing.T, fallback bool) {
+	t.Helper()
 	coding := newCodingPlanFixture(t, "zai-coding", codeplans.ZAIProfile, "controlled-paid-portability-source-0123456789")
 	account := codeDiscoveryResponse[codemode.Account](t, coding.accounts[0])
 	fixture := &codeFixture{h: coding.h, owner: coding.owner, project: coding.project, key: coding.keyID, provider: account.ProviderID, credential: account.CredentialID, account: account.ID, pool: coding.pool["id"].(string), accountRecord: coding.accounts[0], poolRecord: coding.pool, routeRecord: coding.route, route: codeDiscoveryResponse[codemode.Route](t, coding.route)}
 	f, paid, slot := publishPaidCodeFixture(t, fixture, true, &routing.Limits{RequestsPerMinute: new(int64(10))})
+
+	if fallback {
+		target := codemode.PaidTarget{ProviderID: strings.ToUpper(paid.ID), SlotID: strings.ToUpper(slot.ID)}
+		saved := f.h.want(f.owner, "PUT", "/api/v1/code/routes/"+f.route.ID, routes.CodeRouteInput{ProjectID: f.project, Slug: f.route.Slug, PoolID: f.pool, Models: f.route.Models, Enabled: true, PaidParticipation: true, PaidFallbackTargets: map[string]codemode.PaidTarget{account.Models[0]: target}, InitialRecoveryAttempts: 1}, map[string]string{"If-Match": `"` + f.route.ETag + `"`}, 200)
+		published := f.h.want(f.owner, "POST", "/api/v1/code/routes/"+f.route.ID+"/publish", nil, withMatch(saved, idem("portable-fallback-publish")), 200)
+		f.h.want(f.owner, "PUT", "/api/v1/code/routes/"+f.route.ID, routes.CodeRouteInput{ProjectID: f.project, Slug: f.route.Slug, PoolID: f.pool, Models: f.route.Models, Enabled: true, PaidParticipation: true, PaidTargets: map[string]codemode.PaidTarget{account.Models[0]: target}}, etagHeader(published), 200)
+	}
 	exported := f.h.want(f.owner, "GET", "/api/v1/configuration/export", nil, nil, 200)
 	source := codePublicDecode[configuration.Document](t, exported["document"])
+
+	portableJSON, portableError := json.Marshal(source.Code)
+	if portableError != nil {
+		t.Fatal(portableError)
+	}
+	for _, local := range []string{*slot.CredentialID, "subscription_root_id", "paid_bindings", "credential_id", "ciphertext"} {
+		if strings.Contains(string(portableJSON), local) {
+			t.Fatal("coding export included credentials or runtime linkage")
+		}
+	}
 	sourceRoute := source.Code.Routes[0]
+
+	if fallback && (len(sourceRoute.Published.Policy.PaidFallbackTargets) != 1 || len(sourceRoute.Published.Policy.PaidTargets) != 0 || sourceRoute.Published.Policy.InitialRecoveryAttempts != 1 || len(sourceRoute.Draft.PaidTargets) != 1 || len(sourceRoute.Draft.PaidFallbackTargets) != 0) {
+		t.Fatalf("public export changed separate fallback publication and direct draft %+v", sourceRoute)
+	}
 	frozen := sourceRoute.Published.PaidConnections[paid.Name]
 	if len(frozen.SlotKeyRefs[slot.Name]) != 1 || frozen.Provider.Slots[0].Weight != slot.Weight {
 		t.Fatal("export lost frozen slot policy")
@@ -669,8 +695,9 @@ func TestCodeConfigurationPaidFrozenPolicyRoundTrip(t *testing.T) {
 
 	poolRef := access.NewID()
 	pool := configuration.CodePoolEntry{ID: poolRef, Project: source.Code.Pools[0].Project, Name: "Portable paid pool", Kind: source.Code.Pools[0].Kind, Accounts: source.Code.Pools[0].Accounts, APIKeyRefs: source.Code.Pools[0].APIKeyRefs}
-	policy := configuration.CodeRoutePolicy{Pool: poolRef, Models: sourceRoute.Draft.Models, Enabled: sourceRoute.Draft.Enabled, PaidParticipation: sourceRoute.Draft.PaidParticipation, PaidTargets: sourceRoute.Draft.PaidTargets}
-	route := configuration.CodeRouteEntry{ID: sourceRoute.ID, Project: sourceRoute.Project, Slug: "portable-paid-copy", Draft: policy, Published: &configuration.CodePublication{Policy: policy, Connections: sourceRoute.Published.Connections, PaidConnections: sourceRoute.Published.PaidConnections}}
+	policy := configuration.CodeRoutePolicy{Pool: poolRef, Models: sourceRoute.Draft.Models, Enabled: sourceRoute.Draft.Enabled, PaidParticipation: sourceRoute.Draft.PaidParticipation, PaidTargets: sourceRoute.Draft.PaidTargets, PaidFallbackTargets: sourceRoute.Draft.PaidFallbackTargets, InitialRecoveryAttempts: sourceRoute.Draft.InitialRecoveryAttempts}
+	publishedPolicy := configuration.CodeRoutePolicy{Pool: poolRef, Models: sourceRoute.Published.Policy.Models, Enabled: sourceRoute.Published.Policy.Enabled, PaidParticipation: sourceRoute.Published.Policy.PaidParticipation, PaidTargets: sourceRoute.Published.Policy.PaidTargets, PaidFallbackTargets: sourceRoute.Published.Policy.PaidFallbackTargets, InitialRecoveryAttempts: sourceRoute.Published.Policy.InitialRecoveryAttempts}
+	route := configuration.CodeRouteEntry{ID: sourceRoute.ID, Project: sourceRoute.Project, Slug: "portable-paid-copy", Draft: policy, Published: &configuration.CodePublication{Policy: publishedPolicy, Connections: sourceRoute.Published.Connections, PaidConnections: sourceRoute.Published.PaidConnections}}
 	destinationKey := f.h.want(f.owner, "POST", "/api/v1/api-keys", map[string]any{"name": "Paid destination key", "project_id": f.project, "scopes": []string{"inference"}, "allowed_routes": []string{route.Slug}}, idem("paid-portable-key"), 201)
 	destinationKeyID := destinationKey["id"].(string)
 	document := configuration.Document{APIVersion: configuration.APIVersion, Code: &configuration.CodeConfiguration{Accounts: source.Code.Accounts, Pools: []configuration.CodePoolEntry{pool}, Routes: []configuration.CodeRouteEntry{route}, Budgets: source.Code.Budgets}}
@@ -714,6 +741,14 @@ func TestCodeConfigurationPaidFrozenPolicyRoundTrip(t *testing.T) {
 	if actual.Provider.Slots[0].Weight != frozen.Provider.Slots[0].Weight || !reflect.DeepEqual(actual.Provider.Slots[0].Limits, frozen.Provider.Slots[0].Limits) || !reflect.DeepEqual(actual.Provider.Configuration.Options.Limits, frozen.Provider.Configuration.Options.Limits) || len(actual.Provider.Models[0].Capabilities) != len(frozen.Provider.Models[0].Capabilities) || len(actual.SlotKeyRefs[slot.Name]) != 1 {
 		t.Fatalf("current paid provider replaced frozen policy %+v", actual)
 	}
+
+	if fallback {
+		restored := result.Code.Routes[copied]
+		target := restored.Published.Policy.PaidFallbackTargets[account.Models[0]]
+		if target.Provider != paid.Name || target.Slot != slot.Name || target.CredentialRef == "" || restored.Published.Policy.InitialRecoveryAttempts != 1 || len(restored.Published.Policy.PaidTargets) != 0 || len(restored.Draft.PaidTargets) != 1 || len(restored.Draft.PaidFallbackTargets) != 0 {
+			t.Fatalf("roundtrip changed fallback publication or direct draft %+v", restored)
+		}
+	}
 	if !result.Code.Routes[copied].Published.Policy.PaidParticipation {
 		t.Fatal("paid authorization was lost")
 	}
@@ -734,7 +769,7 @@ func TestCodeConfigurationPaidFrozenPolicyRoundTrip(t *testing.T) {
 	if err := json.NewDecoder(response.Body).Decode(&catalog); err != nil {
 		t.Fatal(err)
 	}
-	if response.StatusCode != 200 || !slices.ContainsFunc(catalog.Data, func(model codemode.Model) bool { return model.ID == account.Models[0] && model.Paid }) {
+	if response.StatusCode != 200 || !slices.ContainsFunc(catalog.Data, func(model codemode.Model) bool { return model.ID == account.Models[0] && model.Paid != fallback }) {
 		t.Fatalf("restored paid model disappeared from public discovery %d %+v", response.StatusCode, catalog.Data)
 	}
 

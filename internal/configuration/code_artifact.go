@@ -54,6 +54,7 @@ type CodePaidConnection struct {
 	SlotKeyRefs map[string][]string `json:"slot_key_refs"`
 }
 type CodeRoutePolicy struct {
+	PaidFallbackTargets     map[string]CodePaidTarget `json:"paid_fallback_targets,omitempty"`
 	ChatToAntigravity       bool                      `json:"chat_to_antigravity,omitempty"`
 	PaidParticipation       bool                      `json:"paid_participation"`
 	PaidTargets             map[string]CodePaidTarget `json:"paid_targets,omitempty"`
@@ -99,24 +100,43 @@ type CodeBudgetEntry struct {
 	Enabled       bool    `json:"enabled"`
 }
 
-func codePolicy(route codemode.Route) CodeRoutePolicy {
-	return CodeRoutePolicy{ChatToAntigravity: route.ChatToAntigravity, PaidParticipation: route.PaidParticipation, PaidTargets: maps.Collect(func(yield func(string, CodePaidTarget) bool) {
-		for model, target := range route.PaidTargets {
+func codePortablePaidTargets(targets map[string]codemode.PaidTarget) map[string]CodePaidTarget {
+	return maps.Collect(func(yield func(string, CodePaidTarget) bool) {
+		for model, target := range targets {
 			if !yield(model, CodePaidTarget{Provider: target.ProviderID, Slot: target.SlotID}) {
 				return
 			}
 		}
-	}), Pool: route.PoolID, Models: route.Models, Enabled: route.Enabled, ModelPools: route.ModelPools, InitialRecoveryAttempts: route.InitialRecoveryAttempts, ModelRewriting: route.ModelRewriting, Aliases: route.Aliases, MessagesToCodex: route.MessagesToCodex, Tools: route.Tools, MaxBodyBytes: route.MaxBodyBytes}
+	})
 }
-
-func (policy CodeRoutePolicy) input(project, slug, pool string) routes.CodeRouteInput {
-	return routes.CodeRouteInput{ChatToAntigravity: policy.ChatToAntigravity, PaidParticipation: policy.PaidParticipation, PaidTargets: maps.Collect(func(yield func(string, codemode.PaidTarget) bool) {
-		for model, target := range policy.PaidTargets {
+func codeNativePaidTargets(targets map[string]CodePaidTarget) map[string]codemode.PaidTarget {
+	return maps.Collect(func(yield func(string, codemode.PaidTarget) bool) {
+		for model, target := range targets {
 			if !yield(model, codemode.PaidTarget{ProviderID: target.Provider, SlotID: target.Slot}) {
 				return
 			}
 		}
-	}), ProjectID: project, Slug: slug, PoolID: pool, Models: policy.Models, Enabled: policy.Enabled, ModelPools: policy.ModelPools, InitialRecoveryAttempts: policy.InitialRecoveryAttempts, ModelRewriting: policy.ModelRewriting, Aliases: policy.Aliases, MessagesToCodex: policy.MessagesToCodex, Tools: policy.Tools, MaxBodyBytes: policy.MaxBodyBytes}
+	})
+}
+func codePolicy(route codemode.Route) CodeRoutePolicy {
+	return CodeRoutePolicy{ChatToAntigravity: route.ChatToAntigravity, PaidParticipation: route.PaidParticipation, PaidTargets: codePortablePaidTargets(route.PaidTargets), PaidFallbackTargets: codePortablePaidTargets(route.PaidFallbackTargets), Pool: route.PoolID, Models: route.Models, Enabled: route.Enabled, ModelPools: route.ModelPools, InitialRecoveryAttempts: route.InitialRecoveryAttempts, ModelRewriting: route.ModelRewriting, Aliases: route.Aliases, MessagesToCodex: route.MessagesToCodex, Tools: route.Tools, MaxBodyBytes: route.MaxBodyBytes}
+}
+func (policy CodeRoutePolicy) input(project, slug, pool string) routes.CodeRouteInput {
+	return routes.CodeRouteInput{ChatToAntigravity: policy.ChatToAntigravity, PaidParticipation: policy.PaidParticipation, PaidTargets: codeNativePaidTargets(policy.PaidTargets), PaidFallbackTargets: codeNativePaidTargets(policy.PaidFallbackTargets), ProjectID: project, Slug: slug, PoolID: pool, Models: policy.Models, Enabled: policy.Enabled, ModelPools: policy.ModelPools, InitialRecoveryAttempts: policy.InitialRecoveryAttempts, ModelRewriting: policy.ModelRewriting, Aliases: policy.Aliases, MessagesToCodex: policy.MessagesToCodex, Tools: policy.Tools, MaxBodyBytes: policy.MaxBodyBytes}
+}
+func (policy CodeRoutePolicy) allPaidTargets() map[string]CodePaidTarget {
+	return maps.Collect(func(yield func(string, CodePaidTarget) bool) {
+		for _, targets := range []map[string]CodePaidTarget{policy.PaidTargets, policy.PaidFallbackTargets} {
+			for model, target := range targets {
+				if !yield(model, target) {
+					return
+				}
+			}
+		}
+	})
+}
+func (policy CodeRoutePolicy) paidRoute(project string) codemode.Route {
+	return codemode.Route{Models: policy.Models, ProjectID: project, PaidParticipation: policy.PaidParticipation, PaidTargets: codeNativePaidTargets(policy.PaidTargets), PaidFallbackTargets: codeNativePaidTargets(policy.PaidFallbackTargets), InitialRecoveryAttempts: policy.InitialRecoveryAttempts}
 }
 
 func canonicalCode(code *CodeConfiguration) *CodeConfiguration {

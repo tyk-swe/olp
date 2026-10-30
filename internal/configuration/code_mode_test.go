@@ -110,3 +110,38 @@ func TestCodeConfigurationDigestRetainsChatCompatibility(t *testing.T) {
 		t.Fatal("explicit chat compatibility was discarded from the configuration intent")
 	}
 }
+
+func TestCodeConfigurationDigestRetainsPaidFallbackAuthorization(t *testing.T) {
+	artifact := func(slot string) configuration.Document {
+		var document configuration.Document
+		if err := json.Unmarshal([]byte(fmt.Sprintf(`{"api_version":"openllmproxy.dev/config/v2","code":{"routes":[{"id":"0192cf87-d4ab-7f2e-a8b1-c2d3e4f50601","project":"Coding","slug":"portable","draft":{"pool":"0192cf87-d4ab-7f2e-a8b1-c2d3e4f50602","models":["native"],"enabled":true,"initial_recovery_attempts":1,"paid_participation":true,"paid_fallback_targets":{"native":{"provider":"metered","slot":%q,"credential_ref":"paid"}}}}]}}`, slot)), &document); err != nil {
+			t.Fatal(err)
+		}
+		return document
+	}
+	first, firstError := configuration.Digest(new(artifact("first")))
+	if firstError != nil {
+		t.Fatal(firstError)
+	}
+	second, secondError := configuration.Digest(new(artifact("second")))
+	if secondError != nil {
+		t.Fatal(secondError)
+	}
+	if first == second {
+		t.Fatal("paid fallback authorization was discarded from configuration intent")
+	}
+}
+
+func TestCodeConfigurationPaidFallbackRequiresRecovery(t *testing.T) {
+	const pool = "0192cf87-d4ab-7f2e-a8b1-c2d3e4f50601"
+	const route = "0192cf87-d4ab-7f2e-a8b1-c2d3e4f50602"
+	artifact := func(recovery int) configuration.CodeConfiguration {
+		return configuration.CodeConfiguration{Pools: []configuration.CodePoolEntry{{ID: pool, Project: "coding", Name: "shared", Kind: "shared", Accounts: map[string]int64{}, APIKeyRefs: []string{}}}, Routes: []configuration.CodeRouteEntry{{ID: route, Project: "coding", Slug: "coding", Draft: configuration.CodeRoutePolicy{Pool: pool, Models: []string{"native"}, Enabled: true, PaidParticipation: true, InitialRecoveryAttempts: recovery, PaidFallbackTargets: map[string]configuration.CodePaidTarget{"native": {Provider: "metered", Slot: "primary", CredentialRef: "paid"}}}}}}
+	}
+	if err := artifact(0).Validate(); err == nil {
+		t.Fatal("fallback bypassed the required recovery authorization")
+	}
+	if err := artifact(1).Validate(); err != nil {
+		t.Fatalf("authorized fallback was rejected %v", err)
+	}
+}

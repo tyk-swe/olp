@@ -29000,6 +29000,14 @@
           "chat_to_antigravity": {
             "type": "boolean",
             "description": "Explicit opt-in for chat translation through the Antigravity adapter."
+          },
+          "paid_fallback_targets": {
+            "type": "object",
+            "maxProperties": 100,
+            "additionalProperties": {
+              "$ref": "#/components/schemas/ConfigurationCodePaidTarget"
+            },
+            "description": "Explicit recovery-only paid targets keyed by native model, using the same named destination provider, slot and credential bindings as direct paid targets. Requires paid participation and a positive initial recovery limit."
           }
         },
         "required": [

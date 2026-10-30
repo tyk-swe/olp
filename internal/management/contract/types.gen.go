@@ -8131,11 +8131,14 @@ type ConfigurationCodeRoutePolicy struct {
 	ModelPools *map[string][]string `json:"model_pools,omitempty"`
 
 	// ModelRewriting Explicitly enable model identifier rewriting through exact aliases or configured model_pools. Disabled by default. This policy does not rewrite client identity or prompts.
-	ModelRewriting    *bool                                   `json:"model_rewriting,omitempty"`
-	Models            []string                                `json:"models"`
-	PaidParticipation *bool                                   `json:"paid_participation,omitempty"`
-	PaidTargets       *map[string]ConfigurationCodePaidTarget `json:"paid_targets,omitempty"`
-	Pool              openapi_types.UUID                      `json:"pool"`
+	ModelRewriting *bool    `json:"model_rewriting,omitempty"`
+	Models         []string `json:"models"`
+
+	// PaidFallbackTargets Explicit recovery-only paid targets keyed by native model, using the same named destination provider, slot and credential bindings as direct paid targets. Requires paid participation and a positive initial recovery limit.
+	PaidFallbackTargets *map[string]ConfigurationCodePaidTarget `json:"paid_fallback_targets,omitempty"`
+	PaidParticipation   *bool                                   `json:"paid_participation,omitempty"`
+	PaidTargets         *map[string]ConfigurationCodePaidTarget `json:"paid_targets,omitempty"`
+	Pool                openapi_types.UUID                      `json:"pool"`
 
 	// Tools Research subscription binding, frozen at publication. Requires an eligible Z.ai global account in the same project and pool; independent of inference models. Null disables research.
 	Tools nullable.Nullable[CodeResearchTools] `json:"tools,omitempty"`

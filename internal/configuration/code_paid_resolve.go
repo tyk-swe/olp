@@ -9,19 +9,29 @@ import (
 	"slices"
 
 	"github.com/tyk-swe/olp/internal/access"
-	"github.com/tyk-swe/olp/internal/codemode"
 	"github.com/tyk-swe/olp/internal/providers"
 	"github.com/tyk-swe/olp/internal/routes"
 	"github.com/tyk-swe/olp/internal/routing"
 )
 
 func resolveCodePaidPolicy(ctx context.Context, q access.Queryer, policy CodeRoutePolicy, project string, bindings CodeBindings) (CodeRoutePolicy, error) {
+	direct, err := resolveCodePaidTargets(ctx, q, policy.PaidTargets, project, bindings)
+	if err != nil {
+		return CodeRoutePolicy{}, err
+	}
+	fallback, fallbackError := resolveCodePaidTargets(ctx, q, policy.PaidFallbackTargets, project, bindings)
+	if fallbackError != nil {
+		return CodeRoutePolicy{}, fallbackError
+	}
+	return codePolicyPaid(policy, direct, fallback), nil
+}
+func resolveCodePaidTargets(ctx context.Context, q access.Queryer, references map[string]CodePaidTarget, project string, bindings CodeBindings) (map[string]CodePaidTarget, error) {
 	type target struct {
 		Model string
 		Value CodePaidTarget
 	}
-	targets, err := mapCodeResult(slices.Collect(maps.Keys(policy.PaidTargets)), func(model string) (target, error) {
-		ref := policy.PaidTargets[model]
+	targets, err := mapCodeResult(slices.Collect(maps.Keys(references)), func(model string) (target, error) {
+		ref := references[model]
 		credential, err := codeBound(ref.CredentialRef, bindings.Credentials)
 		if err != nil {
 			return target{}, err
@@ -37,18 +47,18 @@ func resolveCodePaidPolicy(ctx context.Context, q access.Queryer, policy CodeRou
 		return target{Model: model, Value: CodePaidTarget{Provider: provider, Slot: slot}}, nil
 	})
 	if err != nil {
-		return CodeRoutePolicy{}, err
+		return nil, err
 	}
-	return codePolicyPaid(policy, maps.Collect(func(yield func(string, CodePaidTarget) bool) {
+	return maps.Collect(func(yield func(string, CodePaidTarget) bool) {
 		for _, target := range targets {
 			if !yield(target.Model, target.Value) {
 				return
 			}
 		}
-	})), nil
+	}), nil
 }
-func codePolicyPaid(policy CodeRoutePolicy, targets map[string]CodePaidTarget) CodeRoutePolicy {
-	return CodeRoutePolicy{ChatToAntigravity: policy.ChatToAntigravity, Pool: policy.Pool, Models: policy.Models, Enabled: policy.Enabled, ModelPools: policy.ModelPools, InitialRecoveryAttempts: policy.InitialRecoveryAttempts, ModelRewriting: policy.ModelRewriting, Aliases: policy.Aliases, MessagesToCodex: policy.MessagesToCodex, Tools: policy.Tools, MaxBodyBytes: policy.MaxBodyBytes, PaidParticipation: policy.PaidParticipation, PaidTargets: targets}
+func codePolicyPaid(policy CodeRoutePolicy, targets, fallback map[string]CodePaidTarget) CodeRoutePolicy {
+	return CodeRoutePolicy{ChatToAntigravity: policy.ChatToAntigravity, Pool: policy.Pool, Models: policy.Models, Enabled: policy.Enabled, ModelPools: policy.ModelPools, InitialRecoveryAttempts: policy.InitialRecoveryAttempts, ModelRewriting: policy.ModelRewriting, Aliases: policy.Aliases, MessagesToCodex: policy.MessagesToCodex, Tools: policy.Tools, MaxBodyBytes: policy.MaxBodyBytes, PaidParticipation: policy.PaidParticipation, PaidTargets: targets, PaidFallbackTargets: fallback}
 }
 
 func resolveCodePaid(ctx context.Context, q access.Queryer, publication *CodePublication, policy CodeRoutePolicy, project string, bindings CodeBindings) (map[string]routing.Provider, error) {
@@ -162,10 +172,10 @@ func resolveCodePaid(ctx context.Context, q access.Queryer, publication *CodePub
 			}
 		}
 	})
-	if err := routes.ValidateCodePaidProviders(codemode.Route{Models: policy.Models, PaidParticipation: policy.PaidParticipation, PaidTargets: policy.input(project, "", policy.Pool).PaidTargets}, providers); err != nil {
+	if err := routes.ValidateCodePaidProviders(policy.paidRoute(project), providers); err != nil {
 		return nil, err
 	}
-	for _, target := range policy.PaidTargets {
+	for _, target := range policy.allPaidTargets() {
 		provider := providers[target.Provider]
 		slot := slices.IndexFunc(provider.Slots, func(slot routing.Slot) bool { return slot.ID == target.Slot })
 		if slot < 0 {

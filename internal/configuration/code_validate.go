@@ -64,7 +64,7 @@ func (code CodeConfiguration) Validate() error {
 		if err := code.validatePolicy(e, e.Published.Policy); err != nil {
 			return err
 		}
-		if len(e.Published.Connections) == 0 && len(e.Published.Policy.PaidTargets) == 0 {
+		if len(e.Published.Connections) == 0 && len(e.Published.Policy.PaidTargets)+len(e.Published.Policy.PaidFallbackTargets) == 0 {
 			return access.Invalid("code.routes.published.connections", "Published routes require frozen provider connections.")
 		}
 		pool := slices.IndexFunc(code.Pools, func(p CodePoolEntry) bool { return p.ID == e.Published.Policy.Pool })
@@ -103,19 +103,23 @@ func (code CodeConfiguration) validatePolicy(route CodeRouteEntry, policy CodeRo
 	if policy.Tools != nil && !codeRefProject(policy.Tools.AccountID, route.Project, code.Accounts, func(a CodeAccountEntry) (string, string) { return a.ID, a.Project }) {
 		return access.Invalid("code.routes.tools", "Research accounts must resolve within the route project.")
 	}
-	for model, target := range policy.PaidTargets {
+	for model, target := range policy.allPaidTargets() {
 		if !slices.Contains(policy.Models, model) || access.ValidText("code", target.Provider, 100) != nil || access.ValidText("code", target.Slot, 100) != nil || access.ValidText("code", target.CredentialRef, 300) != nil {
 			return access.Invalid("code.paid_targets", "Use declared models and named provider, slot and explicit credential references.")
 		}
 	}
-	targets := maps.Collect(func(yield func(string, CodePaidTarget) bool) {
-		for model := range policy.PaidTargets {
-			if !yield(model, CodePaidTarget{Provider: route.ID, Slot: route.ID}) {
-				return
+
+	placeholders := func(targets map[string]CodePaidTarget) map[string]CodePaidTarget {
+		return maps.Collect(func(yield func(string, CodePaidTarget) bool) {
+			for model := range targets {
+				if !yield(model, CodePaidTarget{Provider: route.ID, Slot: route.ID}) {
+					return
+				}
 			}
-		}
-	})
-	return codePolicyPaid(policy, targets).input(route.ID, route.Slug, policy.Pool).Validate()
+		})
+	}
+	return codePolicyPaid(policy, placeholders(policy.PaidTargets), placeholders(policy.PaidFallbackTargets)).input(route.ID, route.Slug, policy.Pool).Validate()
+
 }
 func placeholderOwner(ref *string, id string) *string {
 	if ref == nil {

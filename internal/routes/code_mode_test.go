@@ -34,11 +34,11 @@ func TestCodeConfigurationRouteRequiresProjectManagement(t *testing.T) {
 
 func TestCodeConfigurationRouteNormalizesReferences(t *testing.T) {
 	const id = "0192cf87-d4ab-7f2e-a8b1-c2d3e4f50601"
-	input, err := (routes.CodeRouteInput{ProjectID: strings.ToUpper(id), PoolID: strings.ToUpper(id), Slug: "coding", Models: []string{"native"}, PaidParticipation: true, PaidTargets: map[string]codemode.PaidTarget{"native": {ProviderID: strings.ToUpper(id), SlotID: strings.ToUpper(id)}}, Tools: &codemode.ResearchTools{AccountID: strings.ToUpper(id), Services: []string{"search"}}}).Validated()
+	input, err := (routes.CodeRouteInput{ProjectID: strings.ToUpper(id), PoolID: strings.ToUpper(id), Slug: "coding", Models: []string{"native", "fallback-native"}, InitialRecoveryAttempts: 1, PaidParticipation: true, PaidFallbackTargets: map[string]codemode.PaidTarget{"fallback-native": {ProviderID: strings.ToUpper(id), SlotID: strings.ToUpper(id)}}, PaidTargets: map[string]codemode.PaidTarget{"native": {ProviderID: strings.ToUpper(id), SlotID: strings.ToUpper(id)}}, Tools: &codemode.ResearchTools{AccountID: strings.ToUpper(id), Services: []string{"search"}}}).Validated()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if input.ProjectID != id || input.PoolID != id || input.Tools.AccountID != id || input.PaidTargets["native"].ProviderID != id || input.PaidTargets["native"].SlotID != id {
+	if input.ProjectID != id || input.PoolID != id || input.Tools.AccountID != id || input.PaidTargets["native"].ProviderID != id || input.PaidTargets["native"].SlotID != id || input.PaidFallbackTargets["fallback-native"].ProviderID != id || input.PaidFallbackTargets["fallback-native"].SlotID != id {
 		t.Fatalf("validated route kept noncanonical references %+v", input)
 	}
 }

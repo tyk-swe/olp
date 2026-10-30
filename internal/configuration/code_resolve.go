@@ -267,7 +267,7 @@ func resolveCodePolicy(policy CodeRoutePolicy, pools, accounts map[string]string
 		}
 		return &codemode.ResearchTools{AccountID: accounts[policy.Tools.AccountID], Services: policy.Tools.Services}
 	}()
-	return CodeRoutePolicy{ChatToAntigravity: policy.ChatToAntigravity, PaidParticipation: policy.PaidParticipation, PaidTargets: policy.PaidTargets, Pool: pools[policy.Pool], Models: policy.Models, Enabled: policy.Enabled, ModelPools: policy.ModelPools, InitialRecoveryAttempts: policy.InitialRecoveryAttempts, ModelRewriting: policy.ModelRewriting, Aliases: policy.Aliases, MessagesToCodex: policy.MessagesToCodex, Tools: tools, MaxBodyBytes: policy.MaxBodyBytes}
+	return CodeRoutePolicy{ChatToAntigravity: policy.ChatToAntigravity, PaidParticipation: policy.PaidParticipation, PaidTargets: policy.PaidTargets, PaidFallbackTargets: policy.PaidFallbackTargets, Pool: pools[policy.Pool], Models: policy.Models, Enabled: policy.Enabled, ModelPools: policy.ModelPools, InitialRecoveryAttempts: policy.InitialRecoveryAttempts, ModelRewriting: policy.ModelRewriting, Aliases: policy.Aliases, MessagesToCodex: policy.MessagesToCodex, Tools: tools, MaxBodyBytes: policy.MaxBodyBytes}
 }
 
 func resolveCodePublication(ctx context.Context, q access.Queryer, publication *CodePublication, poolIDs, accountIDs map[string]string, project string, bindings CodeBindings, accounts []resolvedCodeResource[providers.CodeAccountInput], pools []resolvedCodeResource[access.CodePoolInput]) (*CodePublication, error) {
@@ -309,7 +309,7 @@ func resolveCodePublication(ctx context.Context, q access.Queryer, publication *
 	if err != nil {
 		return nil, err
 	}
-	if _, err := routes.CodePaidProviders(ctx, q, codemode.Route{Models: policy.Models, PaidParticipation: policy.PaidParticipation, PaidTargets: policy.input(project, "", policy.Pool).PaidTargets, ProjectID: project}); err != nil {
+	if _, err := routes.CodePaidProviders(ctx, q, policy.paidRoute(project)); err != nil {
 		return nil, err
 	}
 	return &CodePublication{Policy: policy, paidResolved: paid, Connections: maps.Collect(func(yield func(string, CodeConnectionEntry) bool) {

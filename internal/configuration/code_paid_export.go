@@ -36,12 +36,22 @@ func exportCodePaidReferences(ctx context.Context, q access.Queryer) (map[string
 	}), nil
 }
 func exportCodePaidPolicy(route codemode.Route, refs map[string]CodePaidTarget) (CodeRoutePolicy, error) {
-	policy := codePolicy(route)
-	targets, err := mapCodeResult(slices.Collect(maps.Keys(route.PaidTargets)), func(model string) (struct {
+	direct, err := exportCodePaidTargets(route.PaidTargets, refs)
+	if err != nil {
+		return CodeRoutePolicy{}, err
+	}
+	fallback, fallbackError := exportCodePaidTargets(route.PaidFallbackTargets, refs)
+	if fallbackError != nil {
+		return CodeRoutePolicy{}, fallbackError
+	}
+	return codePolicyPaid(codePolicy(route), direct, fallback), nil
+}
+func exportCodePaidTargets(references map[string]codemode.PaidTarget, refs map[string]CodePaidTarget) (map[string]CodePaidTarget, error) {
+	targets, err := mapCodeResult(slices.Collect(maps.Keys(references)), func(model string) (struct {
 		Model  string
 		Target CodePaidTarget
 	}, error) {
-		target := route.PaidTargets[model]
+		target := references[model]
 		ref, ok := refs[target.ProviderID+"/"+target.SlotID]
 		if !ok {
 			return struct {
@@ -55,15 +65,15 @@ func exportCodePaidPolicy(route codemode.Route, refs map[string]CodePaidTarget) 
 		}{Model: model, Target: ref}, nil
 	})
 	if err != nil {
-		return CodeRoutePolicy{}, err
+		return nil, err
 	}
-	return codePolicyPaid(policy, maps.Collect(func(yield func(string, CodePaidTarget) bool) {
+	return maps.Collect(func(yield func(string, CodePaidTarget) bool) {
 		for _, target := range targets {
 			if !yield(target.Model, target.Target) {
 				return
 			}
 		}
-	})), nil
+	}), nil
 }
 func exportCodePaid(ctx context.Context, q access.Queryer, frozen map[string]routing.Provider) (map[string]CodePaidConnection, error) {
 	type named struct {
