@@ -3,6 +3,7 @@ package gateway
 import (
 	"context"
 	"errors"
+	"maps"
 	"net/http"
 	"reflect"
 	"time"
@@ -38,6 +39,8 @@ type codeAttempt struct {
 	conflicting   bool
 	prewarm       bool
 	finished      bool
+	model         string
+	publicModel   string
 }
 
 func (s *Server) prepareCode(r *http.Request, release *runtime.Release, route codemode.Route, observation codemode.Request, ingress codeIngress, transport codeadapter.Transport, recovery *resources.CodeRecovery) (*codeAttempt, error) {
@@ -48,10 +51,26 @@ func (s *Server) prepareCode(r *http.Request, release *runtime.Release, route co
 	if !authority.Allows("inference", route.Slug, &route.ProjectID, s.now()) {
 		return nil, codemode.Refuse(403, "code_permission_denied")
 	}
-	providers := release.Snapshot.CodeModelProviders(route, ingress.path, observation.Operation.Model, transport)
-	if len(providers) == 0 {
+	operation, err := route.ResolveModel(observation.Operation)
+	if err != nil {
+		return nil, err
+	}
+	providers := release.Snapshot.CodeModelProviders(route, ingress.path, operation.Model, transport)
+	if len(providers) == 0 && (operation.RequestedModel == "" || len(release.Snapshot.CodeProviders(route, ingress.path, transport)) == 0) {
 		return nil, codemode.Refuse(400, "code_operation_unsupported")
 	}
+	modelProviders := func() map[string][]string {
+		if operation.RequestedModel == "" {
+			return nil
+		}
+		return maps.Collect(func(yield func(string, []string) bool) {
+			for _, model := range route.Models {
+				if !yield(model, release.Snapshot.CodeModelProviders(route, ingress.path, model, transport)) {
+					return
+				}
+			}
+		})
+	}()
 	labels, failure := s.parseAttribution(r, authority)
 	if failure != nil {
 		return nil, codemode.Refuse(failure.Status, "code_"+failure.Code)
@@ -62,13 +81,19 @@ func (s *Server) prepareCode(r *http.Request, release *runtime.Release, route co
 	}
 	permit, err := s.CodeLedger.Admit(r.Context(), resources.CodeAdmission{
 		Attribution: labels, Route: route, APIKeyID: authority.ID, EndUserDigest: authority.EndUserDigest,
-		InitialRecovery: observation.Recoverable, Recovery: recovery, Operation: observation.Operation, Providers: providers, PreviousResponse: observation.PreviousResponse,
+		InitialRecovery: observation.Recoverable, Recovery: recovery, Operation: operation, Providers: providers, ModelProviders: modelProviders, PreviousResponse: observation.PreviousResponse,
 	})
 	if err != nil {
 		settleKey(r.Context(), lease, false, nil, s.log)
 		return nil, err
 	}
-	a := &codeAttempt{server: s, permit: permit, lease: lease, prewarm: observation.Operation.Name == "prewarm"}
+	model := func() string {
+		if permit.Pin.TargetModel != "" {
+			return permit.Pin.TargetModel
+		}
+		return operation.Model
+	}()
+	a := &codeAttempt{model: model, publicModel: operation.PublicModel(), server: s, permit: permit, lease: lease, prewarm: observation.Operation.Name == "prewarm"}
 	ok := false
 	defer func() {
 		if !ok {
@@ -108,7 +133,7 @@ func (s *Server) prepareCode(r *http.Request, release *runtime.Release, route co
 	if err != nil {
 		return nil, err
 	}
-	if !target.adapter.ServesModel(target.endpoint.Protocol, observation.Operation.Model) {
+	if !target.adapter.ServesModel(target.endpoint.Protocol, model) {
 		return nil, codemode.Refuse(503, "code_configuration_unsupported")
 	}
 	a.config, a.endpoint, a.observer = target.config, target.endpoint, codeObserver(target.endpoint)

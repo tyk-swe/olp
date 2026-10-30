@@ -160,20 +160,22 @@ type Pool struct {
 }
 
 type Route struct {
-	InitialRecoveryAttempts int            `json:"initial_recovery_attempts,omitempty"`
-	MessagesToCodex         bool           `json:"messages_to_codex,omitempty"`
-	Tools                   *ResearchTools `json:"tools,omitempty"`
-	MaxBodyBytes            *int64         `json:"max_body_bytes,omitempty"`
-	ID                      string         `json:"id"`
-	ProjectID               string         `json:"project_id"`
-	Slug                    string         `json:"slug"`
-	PoolID                  string         `json:"pool_id"`
-	Models                  []string       `json:"models"`
-	Enabled                 bool           `json:"enabled"`
-	RevisionID              string         `json:"revision_id"`
-	Revision                int            `json:"revision"`
-	ETag                    string         `json:"etag"`
-	PublishedAt             *time.Time     `json:"published_at"`
+	InitialRecoveryAttempts int               `json:"initial_recovery_attempts,omitempty"`
+	ModelRewriting          bool              `json:"model_rewriting,omitempty"`
+	Aliases                 map[string]string `json:"aliases,omitempty"`
+	MessagesToCodex         bool              `json:"messages_to_codex,omitempty"`
+	Tools                   *ResearchTools    `json:"tools,omitempty"`
+	MaxBodyBytes            *int64            `json:"max_body_bytes,omitempty"`
+	ID                      string            `json:"id"`
+	ProjectID               string            `json:"project_id"`
+	Slug                    string            `json:"slug"`
+	PoolID                  string            `json:"pool_id"`
+	Models                  []string          `json:"models"`
+	Enabled                 bool              `json:"enabled"`
+	RevisionID              string            `json:"revision_id"`
+	Revision                int               `json:"revision"`
+	ETag                    string            `json:"etag"`
+	PublishedAt             *time.Time        `json:"published_at"`
 }
 
 func (r Route) BasePath() string { return BasePath + r.Slug }
@@ -195,10 +197,11 @@ func (i Identity) Validate() error {
 // Pin is the account a conversation tree serves one model from. A tree's
 // first admission of a model pins it, and the pin never moves.
 type Pin struct {
-	Model     string    `json:"model"`
-	AccountID string    `json:"account_id"`
-	Principal string    `json:"principal"`
-	CreatedAt time.Time `json:"created_at"`
+	TargetModel string    `json:"target_model"`
+	Model       string    `json:"model"`
+	AccountID   string    `json:"account_id"`
+	Principal   string    `json:"principal"`
+	CreatedAt   time.Time `json:"created_at"`
 }
 
 type Binding struct {
@@ -216,9 +219,17 @@ type Binding struct {
 }
 
 type Operation struct {
-	Name     string
-	Model    string
-	Identity Identity
+	RequestedModel string
+	Name           string
+	Model          string
+	Identity       Identity
+}
+
+func (o Operation) PublicModel() string {
+	if o.RequestedModel != "" {
+		return o.RequestedModel
+	}
+	return o.Model
 }
 
 // Request is what OLP reads from a forwarded request body without rewriting it.

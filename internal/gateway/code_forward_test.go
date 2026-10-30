@@ -5,15 +5,20 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"slices"
 	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/coder/websocket"
 
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/codeadapter"
@@ -33,6 +38,7 @@ type codeTestRefusal struct {
 }
 
 type codeTestLedger struct {
+	refusalRecords []codeTestRefusal
 	mu             sync.Mutex
 	inputs         []resources.CodeAdmission
 	marks          []string
@@ -40,7 +46,6 @@ type codeTestLedger struct {
 	usages         []codemode.Usage
 	health         codemode.HealthObservation
 	allowance      codemode.Allowance
-	refusalRecords []codeTestRefusal
 	refusals       []string
 	refuse         string
 	done           chan codemode.Usage
@@ -48,6 +53,7 @@ type codeTestLedger struct {
 	outcomes       []codemode.Outcome
 	offers         codeclient.Offers
 	modelsErr      error
+	pinTarget      string
 }
 
 func (l *codeTestLedger) Models(context.Context, codemode.Route, string) (codeclient.Offers, error) {
@@ -81,6 +87,7 @@ func (l *codeTestLedger) Admit(_ context.Context, in resources.CodeAdmission) (r
 	permit.Authority.EndUserDigest = in.EndUserDigest
 	permit.InitialRecovery = in.InitialRecovery && (initial || in.Recovery != nil)
 	permit.Attempt = codemode.Attempt{ID: fmt.Sprint(len(l.inputs))}
+	permit.Pin.TargetModel = l.pinTarget
 	return permit, err
 }
 
@@ -1046,4 +1053,467 @@ func TestCodeForwardingRetainsExhaustionWithMalformedOrMissingReset(t *testing.T
 			}
 		})
 	}
+}
+
+func TestCodeExactAliasHTTPUsesNativeTargetAndPublicResponse(t *testing.T) {
+	for _, test := range []struct {
+		name                       string
+		stream, translated, pinned bool
+	}{
+		{"unary", false, false, false}, {"stream", true, false, false}, {"translated", true, true, false}, {"republished-alias-retains-pin", false, false, true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			h, ledger, server := newCodeForwardHarness(t)
+			route := h.rt.release.Snapshot.CodeRoutes["coding"]
+			route.ModelRewriting = true
+			route.Aliases = map[string]string{"team-code": "native-model"}
+			if test.pinned {
+				route.Models = []string{"native-model", "native-next"}
+				route.Aliases = map[string]string{"team-code": "native-next"}
+				ledger.pinTarget = "native-model"
+			}
+			route.MessagesToCodex = test.translated
+			h.rt.release.Snapshot.CodeRoutes["coding"] = route
+			h.upstream.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				body, _ := io.ReadAll(r.Body)
+				if !bytes.Contains(body, []byte(`"model":"native-model"`)) || !bytes.Contains(body, []byte(`"private-prompt"`)) {
+					t.Errorf("upstream received wrong model or prompt %s", body)
+				}
+				if !test.translated && !bytes.Contains(body, []byte(`{ "model":"team-code", "number":1.2300 }`)) {
+					t.Errorf("alias changed unknown request subtree %s", body)
+				}
+				if test.stream {
+					w.Header().Set("Content-Type", "text/event-stream")
+					fmt.Fprint(w, "event: response.completed\nid: event-one\ndata: "+`{"type":"response.completed","response":{"id":"alias-response","model":"native-model","status":"completed","output":[{"id":"text-one","type":"message","role":"assistant","content":[{"type":"output_text","text":"hello","annotations":[]}]}],"usage":{"input_tokens":2,"output_tokens":1,"total_tokens":3}}}`+"\n\n")
+					return
+				}
+				w.Header().Set("Content-Type", "application/json")
+				fmt.Fprint(w, `{"id":"alias-response","model":"native-model","status":"completed","output":[],"usage":{"input_tokens":2,"output_tokens":1,"total_tokens":3},"extension":{"model":"native-model"}}`)
+			})
+			body := []byte(`{"model":"team-code","input":"private-prompt","extension": { "model":"team-code", "number":1.2300 }}`)
+			response := func() *http.Response {
+				if !test.translated {
+					return codeDo(t, server, body, nil)
+				}
+				request, _ := http.NewRequest(http.MethodPost, server.URL+"/code/coding/v1/messages", strings.NewReader(`{"model":"team-code","messages":[{"role":"user","content":"private-prompt"}],"max_tokens":32,"stream":true}`))
+				request.Header.Set("Authorization", "Bearer "+fullKey)
+				request.Header.Set("X-Claude-Code-Session-Id", "alias-text")
+				response, err := server.Client().Do(request)
+				if err != nil {
+					t.Fatal(err)
+				}
+				return response
+			}()
+			defer response.Body.Close()
+			output, _ := io.ReadAll(response.Body)
+			if response.StatusCode != 200 || !bytes.Contains(output, []byte(`"model":"team-code"`)) {
+				t.Fatalf("client alias response %d %s", response.StatusCode, output)
+			}
+			usage := ledger.wait(t)
+			if usage.Total == nil || *usage.Total != 3 || len(ledger.inputs) != 1 || ledger.inputs[0].Operation.Model != route.Aliases["team-code"] || ledger.inputs[0].Operation.PublicModel() != "team-code" {
+				t.Fatalf("alias accounting %+v inputs %+v", usage, ledger.inputs)
+			}
+		})
+	}
+}
+
+func TestCodeExactAliasWebSocketRewritesOnlyModelFields(t *testing.T) {
+	h, ledger, server := newCodeForwardHarness(t)
+	route := h.rt.release.Snapshot.CodeRoutes["coding"]
+	route.ModelRewriting = true
+	route.Aliases = map[string]string{"team-code": "native-model"}
+	h.rt.release.Snapshot.CodeRoutes[route.Slug] = route
+	h.upstream.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := websocket.Accept(w, r, nil)
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		defer conn.CloseNow()
+		kind, request, err := conn.Read(t.Context())
+		if err != nil || kind != websocket.MessageText || !bytes.Contains(request, []byte(`"model":"native-model"`)) || !bytes.Contains(request, []byte(`{ "model":"team-code", "number":1.2300 }`)) {
+			t.Errorf("native alias dispatch %s %v", request, err)
+			return
+		}
+		_ = conn.Write(t.Context(), websocket.MessageText, []byte(`{"type":"response.completed","response":{"id":"alias-ws","model":"native-model","usage":{"input_tokens":2,"output_tokens":1,"total_tokens":3},"extension":{"model":"native-model"}}}`))
+		_, _, _ = conn.Read(t.Context())
+	})
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	conn, response, err := websocket.Dial(ctx, strings.Replace(server.URL, "http://", "ws://", 1)+"/code/coding/responses", &websocket.DialOptions{HTTPHeader: http.Header{"Authorization": {"Bearer " + fullKey}, "Thread-Id": {"alias-ws"}, "X-OLP-Code-Model": {"team-code"}}})
+	if err != nil {
+		t.Fatalf("alias WebSocket handshake %v %v", response, err)
+	}
+	defer conn.CloseNow()
+	if err := conn.Write(ctx, websocket.MessageText, []byte(`{"type":"response.create","model":"team-code","input":"private-prompt","extension": { "model":"team-code", "number":1.2300 }}`)); err != nil {
+		t.Fatal(err)
+	}
+	_, body, err := conn.Read(ctx)
+	if err != nil || !bytes.Contains(body, []byte(`"model":"team-code"`)) || !bytes.Contains(body, []byte(`"extension":{"model":"native-model"}`)) {
+		t.Fatalf("alias WebSocket response %s %v", body, err)
+	}
+	select {
+	case usage := <-ledger.done:
+		if usage.Total == nil || *usage.Total != 3 {
+			t.Fatalf("alias usage %+v", usage)
+		}
+	case <-ctx.Done():
+		t.Fatal("alias usage missing")
+	}
+}
+
+func TestCodeExactAliasesDiscoverOnlyAvailableNativeTargets(t *testing.T) {
+	h, _, server := newCodeForwardHarness(t, codeForwardSetup{
+		Models: []string{"native-model", "unavailable-model"},
+		Policy: access.KeyPolicy{Scopes: []string{"inference", "models_read"}},
+		Offers: codeclient.Offers{{Adapter: codemode.AdapterCodex, Models: []string{"native-model"}}},
+	})
+	route := h.rt.release.Snapshot.CodeRoutes["coding"]
+	route.ModelRewriting = true
+	route.Aliases = map[string]string{"team-code": "native-model", "unavailable-alias": "unavailable-model"}
+	h.rt.release.Snapshot.CodeRoutes[route.Slug] = route
+	for _, path := range []string{"models", "v1/models"} {
+		request, _ := http.NewRequestWithContext(t.Context(), http.MethodGet, server.URL+route.BasePath()+"/"+path, nil)
+		request.Header.Set("Authorization", "Bearer "+fullKey)
+		response, err := server.Client().Do(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var catalog struct {
+			Data []codemode.Model `json:"data"`
+		}
+		err = json.NewDecoder(response.Body).Decode(&catalog)
+		response.Body.Close()
+		if err != nil || response.StatusCode != http.StatusOK || len(catalog.Data) != 2 || catalog.Data[0].ID != "native-model" || catalog.Data[1].ID != "team-code" || !reflect.DeepEqual(catalog.Data[0].Capabilities, catalog.Data[1].Capabilities) {
+			t.Fatalf("alias discovery %+v %v", catalog, err)
+		}
+	}
+}
+
+func TestCodeExactAliasRefusesUnauthorizedOrUnavailableTargets(t *testing.T) {
+	for _, test := range []struct {
+		name, requested, target, refusal string
+		rewriting                        bool
+	}{
+		{"disabled", "team-code", "native-model", "code_model_denied", false},
+		{"unknown", "unknown-alias", "native-model", "code_model_denied", true},
+		{"unpublished", "team-code", "unpublished-model", "code_model_denied", true},
+		{"unavailable", "team-code", "native-model", "code_account_unavailable", true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			h, ledger, server := newCodeForwardHarness(t)
+			route := h.rt.release.Snapshot.CodeRoutes["coding"]
+			route.Aliases = map[string]string{"team-code": test.target}
+			route.ModelRewriting = test.rewriting
+			h.rt.release.Snapshot.CodeRoutes["coding"] = route
+			if test.name == "unavailable" {
+				ledger.refuse = test.refusal
+			}
+			response := codeDo(t, server, []byte(`{"model":"`+test.requested+`","input":"hello"}`), nil)
+			body, _ := io.ReadAll(response.Body)
+			response.Body.Close()
+			if response.StatusCode < 400 || !bytes.Contains(body, []byte(test.refusal)) || len(ledger.marks) != 0 || h.mock.count("a") != 0 {
+				t.Fatalf("invalid alias dispatched, status %d, body %s", response.StatusCode, body)
+			}
+		})
+	}
+}
+
+func TestCodeExactAliasRecoveryKeepsSelectedNativeModel(t *testing.T) {
+	h, ledger, server := newCodeForwardHarness(t)
+	route := h.rt.release.Snapshot.CodeRoutes["coding"]
+	route.InitialRecoveryAttempts = 1
+	route.ModelRewriting = true
+	route.Aliases = map[string]string{"team-code": "native-model"}
+	h.rt.release.Snapshot.CodeRoutes[route.Slug] = route
+	h.gateway.CodeAuthorizer = &codeRecoveryAuthorizer{}
+	ledger.pinTarget = "native-model"
+	h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
+		var request struct{ Model, Input string }
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil || request.Model != "native-model" || request.Input != "hello" {
+			t.Errorf("alias recovery changed exact target or prompt %+v, %v", request, err)
+		}
+		if h.mock.count("a") == 1 {
+			w.WriteHeader(http.StatusUnauthorized)
+			io.WriteString(w, `{"error":{"type":"authentication_error","code":"invalid_api_key"}}`)
+			return
+		}
+		io.WriteString(w, `{"id":"recovered","model":"native-model","usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}`)
+	})
+	response := codeDo(t, server, []byte(`{"model":"team-code","input":"hello"}`), nil)
+	defer response.Body.Close()
+	var completion struct{ ID, Model string }
+	if err := json.NewDecoder(response.Body).Decode(&completion); err != nil || response.StatusCode != http.StatusOK || completion.ID != "recovered" || completion.Model != "team-code" || h.mock.count("a") != 2 {
+		t.Fatalf("alias recovery status=%d completion=%+v err=%v requests=%d", response.StatusCode, completion, err, h.mock.count("a"))
+	}
+	ledger.wait(t)
+	ledger.wait(t)
+	ledger.mu.Lock()
+	defer ledger.mu.Unlock()
+	if len(ledger.inputs) != 2 || ledger.inputs[1].Recovery == nil {
+		t.Fatalf("alias recovery did not use durable recovery admission %+v", ledger.inputs)
+	}
+	for _, admission := range ledger.inputs {
+		if !admission.InitialRecovery || admission.Operation.Model != "native-model" || admission.Operation.PublicModel() != "team-code" {
+			t.Fatalf("alias recovery lost requested or exact model %+v", admission)
+		}
+	}
+}
+
+func TestCodeExactAliasFiltersNativeProtocolBeforeAdmission(t *testing.T) {
+	h, ledger, server := newCodeForwardHarness(t, codeForwardSetup{Models: []string{"gpt-fixture-model"}, Policy: access.KeyPolicy{Scopes: []string{"inference"}}})
+	route := h.rt.release.Snapshot.CodeRoutes["coding"]
+	route.MessagesToCodex = true
+	route.ModelRewriting = true
+	route.Aliases = map[string]string{"team-code": "gpt-fixture-model"}
+	h.rt.release.Snapshot.CodeRoutes[route.Slug] = route
+	h.rt.release.Snapshot.CodeConnections["revision:other"] = routing.Configuration{Kind: connectors.KindPlugin, AuthMode: connectors.AuthGrant, ProfileID: codeplans.OpenCodeGoProfile, Endpoint: h.upstream.URL + "/b"}
+	if err := h.rt.release.Snapshot.Compile(); err != nil {
+		t.Fatal(err)
+	}
+	h.mock.set("a", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"id":"eligible","model":"gpt-fixture-model","status":"completed","output":[],"usage":{"input_tokens":2,"output_tokens":1,"total_tokens":3}}`)
+	})
+	request, _ := http.NewRequestWithContext(t.Context(), http.MethodPost, server.URL+route.BasePath()+"/v1/messages", strings.NewReader(`{"model":"team-code","messages":[{"role":"user","content":"hello"}],"max_tokens":8}`))
+	request.Header.Set("Authorization", "Bearer "+fullKey)
+	request.Header.Set("X-Claude-Code-Session-Id", "mixed-alias")
+	response, err := server.Client().Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	body, _ := io.ReadAll(response.Body)
+	if response.StatusCode != http.StatusOK || !bytes.Contains(body, []byte(`"model":"team-code"`)) {
+		t.Fatalf("eligible alias failed %d %s", response.StatusCode, body)
+	}
+	ledger.wait(t)
+	if len(ledger.inputs) != 1 || !reflect.DeepEqual(ledger.inputs[0].Providers, []string{"provider"}) {
+		t.Fatalf("protocol-ineligible accounts reached durable admission %+v", ledger.inputs)
+	}
+}
+
+func TestCodeExactAliasPreservesLiteralJSONAndUnrelatedEnvelopes(t *testing.T) {
+	h, ledger, server := newCodeForwardHarness(t)
+	route := h.rt.release.Snapshot.CodeRoutes["coding"]
+	route.ModelRewriting = true
+	route.Aliases = map[string]string{"team-code": "native-model"}
+	h.rt.release.Snapshot.CodeRoutes[route.Slug] = route
+	requestBody := []byte("{\n  \"mo\\u0064el\" : \"team-code\", \"input\" : \"hello\", \"\\u0065xtension\":{\"model\":\"team-code\",\"number\":1.2300}\n}")
+	upstreamRequest := []byte("{\n  \"mo\\u0064el\" : \"native-model\", \"input\" : \"hello\", \"\\u0065xtension\":{\"model\":\"team-code\",\"number\":1.2300}\n}")
+	upstreamResponse := []byte("{\n \"model\" : \"native-model\", \"id\":\"literal\", \"status\":\"completed\", \"response\": { \"model\":\"native-model\" }, \"message\": { \"model\":\"native-model\" }, \"\\u0065xtension\":1.2300, \"usage\":{\"input_tokens\":2,\"output_tokens\":1,\"total_tokens\":3}\n}")
+	clientResponse := []byte("{\n \"model\" : \"team-code\", \"id\":\"literal\", \"status\":\"completed\", \"response\": { \"model\":\"native-model\" }, \"message\": { \"model\":\"native-model\" }, \"\\u0065xtension\":1.2300, \"usage\":{\"input_tokens\":2,\"output_tokens\":1,\"total_tokens\":3}\n}")
+	h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		if !bytes.Equal(body, upstreamRequest) {
+			t.Errorf("untouched request bytes changed %q", body)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write(upstreamResponse)
+	})
+	response := codeDo(t, server, requestBody, nil)
+	body, _ := io.ReadAll(response.Body)
+	if response.StatusCode != http.StatusOK || !bytes.Equal(body, clientResponse) {
+		t.Fatalf("untouched response bytes changed %d %q", response.StatusCode, body)
+	}
+	if usage := ledger.wait(t); usage.Total == nil || *usage.Total != 3 {
+		t.Fatalf("native usage lost %+v", usage)
+	}
+}
+
+func TestCodeExactAliasPreservesRawSSEFraming(t *testing.T) {
+	h, ledger, server := newCodeForwardHarness(t)
+	route := h.rt.release.Snapshot.CodeRoutes["coding"]
+	route.ModelRewriting = true
+	route.Aliases = map[string]string{"team-code": "native-model"}
+	h.rt.release.Snapshot.CodeRoutes[route.Slug] = route
+	wire := "\xef\xbb\xbf: before\r\nid: event-one\r\nretry: 0010\r\nx-vendor: untouched\r\nevent: response.completed\r\ndata: { \"type\":\"response.completed\",\r\n: interleaved\r\ndata:\t\"response\": { \"id\":\"raw-stream\", \"model\" : \"native-model\", \"status\":\"completed\", \"usage\":{\"input_tokens\":2,\"output_tokens\":1,\"total_tokens\":3}}, \"message\":{\"model\":\"native-model\"}, \"extension\":1.2300 }\r\n\r\n: final\n"
+	h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, wire)
+	})
+	response := codeDo(t, server, []byte(`{"model":"team-code","input":"hello","stream":true}`), nil)
+	body, err := io.ReadAll(response.Body)
+	want := strings.Replace(wire, `"model" : "native-model"`, `"model" : "team-code"`, 1)
+	if err != nil || response.StatusCode != http.StatusOK || string(body) != want {
+		t.Fatalf("SSE framing changed %d %q, %v", response.StatusCode, body, err)
+	}
+	if usage := ledger.wait(t); usage.Total == nil || *usage.Total != 3 {
+		t.Fatalf("raw SSE usage lost %+v", usage)
+	}
+}
+
+func TestCodeExactAliasFinalizesUsageAtCleanEOF(t *testing.T) {
+	for _, test := range []struct{ name, path, request, stream string }{
+		{"messages", "v1/messages", `{"model":"team-code","messages":[{"role":"user","content":"hello"}],"max_tokens":8,"stream":true}`, "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"model\":\"native-model\",\"usage\":{\"input_tokens\":2,\"output_tokens\":0}}}\n\nevent: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":1}}\n\n"},
+		{"chat", "v1/chat/completions", `{"model":"team-code","messages":[{"role":"user","content":"hello"}],"max_tokens":8,"stream":true}`, "data: {\"model\":\"native-model\",\"choices\":[{\"delta\":{\"content\":\"reply\"},\"finish_reason\":\"stop\"}]}\n\ndata: {\"model\":\"native-model\",\"choices\":[],\"usage\":{\"prompt_tokens\":2,\"completion_tokens\":1,\"total_tokens\":3}}\n\n"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			h, ledger, server := newCodeForwardHarness(t)
+			route := h.rt.release.Snapshot.CodeRoutes["coding"]
+			route.ModelRewriting = true
+			route.Aliases = map[string]string{"team-code": "native-model"}
+			h.rt.release.Snapshot.CodeRoutes[route.Slug] = route
+			h.rt.release.Snapshot.CodeConnections = map[string]routing.Configuration{"revision:provider": {Kind: connectors.KindPlugin, AuthMode: connectors.AuthGrant, ProfileID: codeplans.ZAIProfile, Endpoint: h.upstream.URL + "/a"}}
+			if err := h.rt.release.Snapshot.Compile(); err != nil {
+				t.Fatal(err)
+			}
+			h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "text/event-stream")
+				_, _ = io.WriteString(w, test.stream)
+			})
+			request, _ := http.NewRequestWithContext(t.Context(), http.MethodPost, server.URL+"/code/coding/"+test.path, strings.NewReader(test.request))
+			request.Header.Set("Authorization", "Bearer "+fullKey)
+			if test.name == "messages" {
+				request.Header.Set("X-Claude-Code-Session-Id", "alias-eof")
+			} else {
+				request.Header.Set("X-Opencode-Session-Id", "alias-eof")
+			}
+			response, err := server.Client().Do(request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer response.Body.Close()
+			body, err := io.ReadAll(response.Body)
+			if err != nil || response.StatusCode != http.StatusOK || !strings.Contains(string(body), `"model":"team-code"`) {
+				t.Fatalf("alias EOF response %d %s, %v", response.StatusCode, body, err)
+			}
+			if usage := ledger.wait(t); usage.Total == nil || *usage.Total != 3 {
+				t.Fatalf("EOF usage not finalized %+v", usage)
+			}
+			ledger.mu.Lock()
+			defer ledger.mu.Unlock()
+			if !slices.ContainsFunc(ledger.outcomes, func(outcome codemode.Outcome) bool { return outcome.Kind == "completed" }) {
+				t.Fatalf("clean EOF outcome %+v", ledger.outcomes)
+			}
+		})
+	}
+}
+
+func TestCodeExactAliasBoundsDeliveryAndRetainsObservedUsage(t *testing.T) {
+	for _, streaming := range []bool{false, true} {
+		for _, failure := range []string{"write", "flush"} {
+			t.Run(fmt.Sprintf("stream=%v/%s", streaming, failure), func(t *testing.T) {
+				h, ledger, _ := newCodeForwardHarness(t)
+				route := h.rt.release.Snapshot.CodeRoutes["coding"]
+				route.ModelRewriting = true
+				route.Aliases = map[string]string{"team-code": "native-model"}
+				h.rt.release.Snapshot.CodeRoutes[route.Slug] = route
+				h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
+					if streaming {
+						w.Header().Set("Content-Type", "text/event-stream")
+						_, _ = io.WriteString(w, "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"delivery\",\"model\":\"native-model\",\"status\":\"completed\",\"usage\":{\"input_tokens\":2,\"output_tokens\":1,\"total_tokens\":3}}}\n\n")
+						return
+					}
+					w.Header().Set("Content-Type", "application/json")
+					_, _ = io.WriteString(w, `{"id":"delivery","model":"native-model","status":"completed","usage":{"input_tokens":2,"output_tokens":1,"total_tokens":3}}`)
+				})
+				mux := http.NewServeMux()
+				h.gateway.RegisterCode(mux)
+				request := httptest.NewRequest(http.MethodPost, "/code/coding/responses", strings.NewReader(`{"model":"team-code","input":"hello"}`))
+				request.Header.Set("Authorization", "Bearer "+fullKey)
+				request.Header.Set("Session_id", "alias-delivery")
+				writer := &unaryResponseWriter{ResponseRecorder: httptest.NewRecorder()}
+				if failure == "write" {
+					writer.writeErr = errors.New("fixture write failed")
+				} else {
+					writer.flushErr = errors.New("fixture flush failed")
+				}
+				writer.beforeDelivery = func() {
+					if remaining := time.Until(writer.deadline); remaining <= 0 || remaining > responseWriteTimeout {
+						t.Fatalf("unbounded alias delivery %s", remaining)
+					}
+				}
+				mux.ServeHTTP(writer, request)
+				if usage := ledger.wait(t); usage.Total == nil || *usage.Total != 3 {
+					t.Fatalf("terminal usage lost on %s failure %+v", failure, usage)
+				}
+				ledger.mu.Lock()
+				defer ledger.mu.Unlock()
+				if !slices.ContainsFunc(ledger.outcomes, func(outcome codemode.Outcome) bool { return outcome.Origin == "client" && outcome.Kind == "canceled" }) {
+					t.Fatalf("delivery failure outcome %+v", ledger.outcomes)
+				}
+			})
+		}
+	}
+}
+
+func TestCodeExactAliasSlowReaderTerminatesWithinWriteDeadline(t *testing.T) {
+	for _, streaming := range []bool{false, true} {
+		t.Run(fmt.Sprintf("stream=%v", streaming), func(t *testing.T) {
+			h, ledger, _ := newCodeForwardHarness(t)
+			route := h.rt.release.Snapshot.CodeRoutes["coding"]
+			route.ModelRewriting = true
+			route.Aliases = map[string]string{"team-code": "native-model"}
+			h.rt.release.Snapshot.CodeRoutes[route.Slug] = route
+			h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
+				_, _ = io.Copy(io.Discard, r.Body)
+				if streaming {
+					w.Header().Set("Content-Type", "text/event-stream")
+					_, _ = io.WriteString(w, `data: {"type":"response.completed","response":`)
+				} else {
+					w.Header().Set("Content-Type", "application/json")
+				}
+				_, _ = fmt.Fprintf(w, `{"id":"slow-reader","model":"native-model","status":"completed","usage":{"input_tokens":2,"output_tokens":1,"total_tokens":3},"extension":"%s"}`, strings.Repeat("x", 768<<10))
+				if streaming {
+					_, _ = io.WriteString(w, "}\n\n")
+				}
+			})
+			mux := http.NewServeMux()
+			h.gateway.RegisterCode(mux)
+			finished := make(chan struct{})
+			server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				defer close(finished)
+				mux.ServeHTTP(codeWriteDeadlineWriter{socketDeadlineWriter{ResponseWriter: w, t: t}}, r)
+			}))
+			server.Config.ConnState = func(connection net.Conn, state http.ConnState) {
+				if state == http.StateNew {
+					if tcp, ok := connection.(*net.TCPConn); ok {
+						_ = tcp.SetWriteBuffer(1024)
+					}
+				}
+			}
+			server.Start()
+			defer server.Close()
+			connection, err := net.DialTimeout("tcp", server.Listener.Addr().String(), time.Second)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer connection.Close()
+			body := `{"model":"team-code","input":"hello"}`
+			_, err = fmt.Fprintf(connection, "POST /code/coding/responses HTTP/1.1\r\nHost: %s\r\nAuthorization: Bearer %s\r\nSession_id: slow-alias\r\nContent-Length: %d\r\nConnection: close\r\n\r\n%s", server.Listener.Addr().String(), fullKey, len(body), body)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_ = connection.SetReadDeadline(time.Now().Add(3 * time.Second))
+			reader := bufio.NewReader(connection)
+			status, readErr := reader.ReadString('\n')
+			if readErr != nil || !strings.Contains(status, "200") {
+				t.Fatalf("alias slow response %q, %v", status, readErr)
+			}
+			for {
+				line, readErr := reader.ReadString('\n')
+				if readErr != nil {
+					t.Fatal(readErr)
+				}
+				if line == "\r\n" {
+					break
+				}
+			}
+			select {
+			case <-finished:
+			case <-time.After(3 * time.Second):
+				t.Fatal("alias write did not stop for a nonreading client")
+			}
+			if usage := ledger.wait(t); usage.Total == nil || *usage.Total != 3 {
+				t.Fatalf("slow delivery lost native terminal usage %+v", usage)
+			}
+		})
+	}
+}
+
+type codeWriteDeadlineWriter struct{ socketDeadlineWriter }
+
+func (writer codeWriteDeadlineWriter) SetReadDeadline(deadline time.Time) error {
+	return http.NewResponseController(writer.ResponseWriter).SetReadDeadline(deadline)
 }

@@ -248,16 +248,20 @@ func clonePredicate(p Predicate) Predicate {
 	}
 	return p
 }
-func cloneCodeRoute(r codemode.Route) codemode.Route {
-	if r.Tools != nil {
-		tools := *r.Tools
-		tools.Services = slices.Clone(tools.Services)
-		r.Tools = &tools
+func cloneCodeRoute(route codemode.Route) codemode.Route {
+	return codemode.Route{
+		ID: route.ID, ProjectID: route.ProjectID, Slug: route.Slug, PoolID: route.PoolID,
+		Models: slices.Clone(route.Models), Aliases: maps.Clone(route.Aliases), ModelRewriting: route.ModelRewriting,
+		MessagesToCodex: route.MessagesToCodex, InitialRecoveryAttempts: route.InitialRecoveryAttempts,
+		Tools: func() *codemode.ResearchTools {
+			if route.Tools == nil {
+				return nil
+			}
+			return &codemode.ResearchTools{AccountID: route.Tools.AccountID, Services: slices.Clone(route.Tools.Services)}
+		}(),
+		MaxBodyBytes: copyPointer(route.MaxBodyBytes), Enabled: route.Enabled, ETag: route.ETag,
+		RevisionID: route.RevisionID, Revision: route.Revision, PublishedAt: copyPointer(route.PublishedAt),
 	}
-	r.MaxBodyBytes = copyPointer(r.MaxBodyBytes)
-	r.Models = slices.Clone(r.Models)
-	r.PublishedAt = copyPointer(r.PublishedAt)
-	return r
 }
 func cloneConfiguration(c Configuration) Configuration {
 	cfg := connectors.Config{Network: c.Options.Network, BatchStorage: c.BatchStorage, TuningDatasetURIPrefixes: c.Options.TuningDatasetURIPrefixes, DocumentURIPrefixes: c.Options.DocumentURIPrefixes, SemanticHeaders: c.Options.SemanticHeaders, QuerySettings: c.Options.QuerySettings, OperationDefaults: c.Options.OperationDefaults, Bindings: c.Options.Bindings, Models: c.Options.Models, CredentialHeaders: c.Options.CredentialHeaders, PluginOptions: c.Options.PluginOptions}.Clone()

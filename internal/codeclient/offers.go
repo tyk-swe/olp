@@ -17,10 +17,14 @@ type Offer struct {
 }
 
 // adapters returns the adapters whose accounts serve model, in table order.
-func (o Offers) adapters(model string) []codemode.Adapter {
+func (o Offers) adapters(route codemode.Route, model string) []codemode.Adapter {
+	resolved, err := route.ResolveModel(codemode.Operation{Model: model})
+	if err != nil {
+		return nil
+	}
 	var adapters []codemode.Adapter
 	for _, offer := range o {
-		if slices.Contains(offer.Models, model) && !slices.Contains(adapters, offer.Adapter) {
+		if slices.Contains(offer.Models, resolved.Model) && !slices.Contains(adapters, offer.Adapter) {
 			adapters = append(adapters, offer.Adapter)
 		}
 	}
@@ -37,7 +41,7 @@ func (o Offers) through(route codemode.Route, client string, models []string) (m
 		if i == len(models) {
 			return o.reaches(route, client, models, chosen)
 		}
-		for _, adapter := range o.adapters(models[i]) {
+		for _, adapter := range o.adapters(route, models[i]) {
 			if declaration, _ := codeadapter.Lookup(adapter); routeReaches(route, declaration, client, models[i]) {
 				if chosen[i] = adapter; choose(i + 1) {
 					return true
@@ -69,9 +73,13 @@ func (o Offers) reaches(route codemode.Route, client string, models []string, th
 		adapter, _ := codeadapter.Lookup(offer.Adapter)
 		kind := Offer{Adapter: offer.Adapter}
 		for i, model := range models {
+			resolved, err := route.ResolveModel(codemode.Operation{Model: model})
+			if err != nil {
+				return false
+			}
 			sender, _ := codeadapter.Lookup(through[i])
-			protocol, reachable := codeadapter.RouteClientProtocol(route, adapter, client, model)
-			if sent, ok := codeadapter.RouteClientProtocol(route, sender, client, model); ok && reachable && sent == protocol && slices.Contains(offer.Models, model) {
+			protocol, reachable := codeadapter.RouteClientProtocol(route, adapter, client, resolved.Model)
+			if sent, ok := codeadapter.RouteClientProtocol(route, sender, client, resolved.Model); ok && reachable && sent == protocol && slices.Contains(offer.Models, resolved.Model) {
 				kind.Models = append(kind.Models, model)
 			}
 		}
@@ -109,6 +117,10 @@ func (o Offers) joins(tree Offers, models []string) bool {
 }
 
 func routeReaches(route codemode.Route, adapter codeadapter.Vendor, client, model string) bool {
-	_, ok := codeadapter.RouteClientProtocol(route, adapter, client, model)
+	resolved, err := route.ResolveModel(codemode.Operation{Model: model})
+	if err != nil {
+		return false
+	}
+	_, ok := codeadapter.RouteClientProtocol(route, adapter, client, resolved.Model)
 	return ok
 }

@@ -6397,7 +6397,25 @@
             "messages_to_codex": {
               "type": "boolean",
               "default": false,
-              "description": "Explicitly allow text-only Messages requests to use Codex subscription accounts through protocol translation. Published revisions pin this policy. Native forwarding remains the default. Model identifiers, client identity and prompts are preserved. Tools, thinking, beta features and unsupported required semantics are refused before dispatch."
+              "description": "Explicitly allow Messages text and tool requests to use Codex subscription accounts through protocol translation. Published revisions pin this policy. Native forwarding remains the default. Client identity and prompts are preserved. Model rewriting requires its separate opt-in. Explicit low, medium and high reasoning effort is supported. Signed thinking, numeric reasoning budgets, beta features and unsupported required semantics are refused before dispatch."
+            },
+            "aliases": {
+              "type": "object",
+              "maxProperties": 100,
+              "additionalProperties": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200
+              },
+              "propertyNames": {
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]{0,199}$"
+              },
+              "description": "Stable public model names mapped directly to one native identifier in models. Requires model_rewriting. Alias chains and native name collisions are rejected. Immutable publications pin these mappings. Repointing an alias affects new conversations. Existing conversations retain their stored exact target while it remains published and authorized."
+            },
+            "model_rewriting": {
+              "type": "boolean",
+              "default": false,
+              "description": "Explicitly enable exact model aliases independently of protocol translation and identity compatibility. Native identifiers remain unchanged. Only protocol model fields are rewritten for alias requests and responses."
             },
             "initial_recovery_attempts": {
               "type": "integer",
@@ -32188,7 +32206,25 @@
             "messages_to_codex": {
               "type": "boolean",
               "default": false,
-              "description": "Explicitly allow text-only Messages requests to use Codex subscription accounts through protocol translation. Published revisions pin this policy. Native forwarding remains the default. Model identifiers, client identity and prompts are preserved. Tools, thinking, beta features and unsupported required semantics are refused before dispatch."
+              "description": "Explicitly allow Messages text and tool requests to use Codex subscription accounts through protocol translation. Published revisions pin this policy. Native forwarding remains the default. Client identity and prompts are preserved. Model rewriting requires its separate opt-in. Explicit low, medium and high reasoning effort is supported. Signed thinking, numeric reasoning budgets, beta features and unsupported required semantics are refused before dispatch."
+            },
+            "aliases": {
+              "type": "object",
+              "maxProperties": 100,
+              "additionalProperties": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200
+              },
+              "propertyNames": {
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]{0,199}$"
+              },
+              "description": "Stable public model names mapped directly to one native identifier in models. Requires model_rewriting. Alias chains and native name collisions are rejected. Immutable publications pin these mappings. Repointing an alias affects new conversations. Existing conversations retain their stored exact target while it remains published and authorized."
+            },
+            "model_rewriting": {
+              "type": "boolean",
+              "default": false,
+              "description": "Explicitly enable exact model aliases independently of protocol translation and identity compatibility. Native identifiers remain unchanged. Only protocol model fields are rewritten for alias requests and responses."
             },
             "initial_recovery_attempts": {
               "type": "integer",
