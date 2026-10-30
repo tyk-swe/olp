@@ -19,6 +19,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/claudeauth"
 	"github.com/tyk-swe/olp/internal/codexauth"
 	"github.com/tyk-swe/olp/sdk/plugin"
 	"github.com/tyk-swe/olp/sdk/plugin/abi"
@@ -36,8 +37,13 @@ func (fixture) Manifest() plugin.Manifest {
 	if behaviour == "codex-import-invalid" {
 		return codexauth.Manifest()
 	}
-	if behaviour == "codex-import" {
-		native := codexauth.Manifest()
+	if behaviour == "codex-import" || behaviour == "claude-import" {
+		native := func() plugin.Manifest {
+			if behaviour == "claude-import" {
+				return claudeauth.Manifest()
+			}
+			return codexauth.Manifest()
+		}()
 		return plugin.Manifest{Name: "fixture", Version: "1.0.0", Profiles: native.Profiles,
 			Origins: slices.Concat(native.Origins, []string{strings.TrimSuffix(upstream, "/v1")})}
 	}
@@ -150,7 +156,7 @@ func (fixture) RefreshGrant(ctx context.Context, r plugin.GrantRefresh) (plugin.
 		return plugin.Grant{AccessToken: material.access, RefreshToken: material.refresh, ExpiresIn: material.expiry,
 			Principal: identity.Principal(), Facts: identity.Facts()}, nil
 	}
-	if behaviour == "codex-import" {
+	if behaviour == "codex-import" || behaviour == "claude-import" {
 		if _, err := plugin.Fetch(ctx, plugin.HTTPRequest{Method: "POST", URL: upstream + "/credential-import", Body: []byte(r.RefreshToken)}); err != nil {
 			return plugin.Grant{}, err
 		}

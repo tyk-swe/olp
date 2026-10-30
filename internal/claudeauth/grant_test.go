@@ -199,6 +199,10 @@ func TestCredentialImportRejectsUnsupportedDocumentsWithoutDisclosingTokens(t *t
 		"missing inference": strings.Replace(supported, `,"user:inference"`, "", 1),
 		"wrong client":      strings.Replace(supported, `"scopes":`, `"clientId":"unsupported-client","scopes":`, 1),
 		"wrong metadata":    strings.Replace(supported, `"subscriptionType":null`, `"subscriptionType":false`, 1),
+		"null scope":        strings.Replace(supported, `"scopes":[`, `"scopes":[null,`, 1),
+		"null client":       strings.Replace(supported, `"scopes":`, `"clientId":null,"scopes":`, 1),
+		"empty source":      strings.Replace(supported, `"scopes":`, `"subscriptionTypeSource":"","scopes":`, 1),
+		"null timestamp":    strings.Replace(supported, `"scopes":`, `"subscriptionTypeVerifiedAt":null,"scopes":`, 1),
 	} {
 		t.Run(name, func(t *testing.T) {
 			_, err := ParseCredentialImport(input, time.UnixMilli(1800000000000))

@@ -27,7 +27,24 @@ func ParseCredentialImport(input string, now time.Time) (CredentialImport, error
 		return CredentialImport{}, invalid()
 	}
 	for _, field := range entry.Members() {
-		if !slices.Contains([]string{"accessToken", "refreshToken", "expiresAt", "refreshTokenExpiresAt", "scopes", "subscriptionType", "subscriptionTypeSource", "subscriptionTypeVerifiedAt", "rateLimitTier", "clientId"}, field.Name) {
+		switch field.Name {
+		case "accessToken", "refreshToken", "subscriptionTypeSource", "clientId":
+			if field.Value.Kind() != oif.String {
+				return CredentialImport{}, invalid()
+			}
+		case "expiresAt", "refreshTokenExpiresAt", "subscriptionTypeVerifiedAt":
+			if field.Value.Kind() != oif.Number {
+				return CredentialImport{}, invalid()
+			}
+		case "subscriptionType", "rateLimitTier":
+			if field.Value.Kind() != oif.String && field.Value.Kind() != oif.Null {
+				return CredentialImport{}, invalid()
+			}
+		case "scopes":
+			if field.Value.Kind() != oif.Array || slices.ContainsFunc(field.Value.Elements(), func(scope oif.Value) bool { return scope.Kind() != oif.String }) {
+				return CredentialImport{}, invalid()
+			}
+		default:
 			return CredentialImport{}, invalid()
 		}
 	}
@@ -38,7 +55,7 @@ func ParseCredentialImport(input string, now time.Time) (CredentialImport, error
 		RefreshTokenExpiresAt      *int64   `json:"refreshTokenExpiresAt"`
 		Scopes                     []string `json:"scopes"`
 		SubscriptionType           *string  `json:"subscriptionType"`
-		SubscriptionTypeSource     string   `json:"subscriptionTypeSource"`
+		SubscriptionTypeSource     *string  `json:"subscriptionTypeSource"`
 		SubscriptionTypeVerifiedAt *int64   `json:"subscriptionTypeVerifiedAt"`
 		RateLimitTier              *string  `json:"rateLimitTier"`
 		ClientID                   *string  `json:"clientId"`
@@ -49,7 +66,7 @@ func ParseCredentialImport(input string, now time.Time) (CredentialImport, error
 	if stored.ExpiresAt <= 0 || stored.ExpiresAt > now.AddDate(10, 0, 0).UnixMilli() || !slices.Contains(stored.Scopes, "user:profile") || !slices.Contains(stored.Scopes, "user:inference") {
 		return CredentialImport{}, invalid()
 	}
-	if stored.ClientID != nil && *stored.ClientID != ClientID || stored.SubscriptionTypeSource != "" && stored.SubscriptionTypeSource != "sign_in" && stored.SubscriptionTypeSource != "profile" {
+	if stored.ClientID != nil && *stored.ClientID != ClientID || stored.SubscriptionTypeSource != nil && *stored.SubscriptionTypeSource != "sign_in" && *stored.SubscriptionTypeSource != "profile" {
 		return CredentialImport{}, invalid()
 	}
 	if stored.RefreshTokenExpiresAt != nil && *stored.RefreshTokenExpiresAt <= 0 || stored.SubscriptionTypeVerifiedAt != nil && *stored.SubscriptionTypeVerifiedAt <= 0 {

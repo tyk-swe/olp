@@ -109,8 +109,8 @@ func TestManifestValidation(t *testing.T) {
 	}
 }
 
-func TestCodexImportFixturesDeclareUsableGrantEnrollment(t *testing.T) {
-	for _, behaviour := range []string{"codex-import", "codex-import-invalid"} {
+func TestCredentialImportFixturesDeclareUsableGrantEnrollment(t *testing.T) {
+	for _, behaviour := range []string{"codex-import", "codex-import-invalid", "claude-import"} {
 		t.Run(behaviour, func(t *testing.T) {
 			module := testutil.BuildPlugin(t, "./internal/plugins/testdata/fixture", "-X=main.behaviour="+behaviour)
 			if _, err := newTestRuntime(t, DefaultLimits, nil).Inspect(t.Context(), module); err != nil {
