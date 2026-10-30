@@ -118,7 +118,8 @@ func Generate(route codemode.Route, offers Offers, in Request) (codemode.ClientC
 	version, format, configuration, renderErr := func() (string, string, string, error) {
 		switch client {
 		case codeadapter.ClientCodex:
-			return codexauth.ClientVersion, "toml", codexConfiguration(baseURL, model, !catalogPaid(catalog, model)), nil
+			_, paid := offers.paidProtocol(route, model, client)
+			return codexauth.ClientVersion, "toml", codexConfiguration(baseURL, model, !paid), nil
 		case codeadapter.ClientClaudeCode:
 			if platform == "windows" {
 				return codeadapter.ClaudeCodeVersion, "powershell", claudeCodePowerShellConfiguration(baseURL, model, *plan, *small), nil
@@ -205,7 +206,3 @@ func conjoin(names []string) string {
 }
 
 var clientNames = map[string]string{codeadapter.ClientCodex: "Codex", codeadapter.ClientClaudeCode: "Claude Code", codeadapter.ClientOpenCode: "OpenCode"}
-
-func catalogPaid(catalog []codemode.Model, model string) bool {
-	return slices.ContainsFunc(catalog, func(m codemode.Model) bool { return m.ID == model && m.Paid })
-}

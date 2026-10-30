@@ -427,7 +427,7 @@ func TestCatalogAndConfigurationExposeNativePaidFallback(t *testing.T) {
 		}
 		if subscriptions {
 			codex, err := Generate(route, offers, Request{GatewayURL: "https://gateway.example", Client: codeadapter.ClientCodex, Model: route.Models[0]})
-			if err != nil || !strings.Contains(codex.Configuration, "wire_api = \"responses\"") {
+			if err != nil || !strings.Contains(codex.Configuration, "wire_api = \"responses\"") || !strings.Contains(codex.Configuration, "supports_websockets = true") {
 				t.Fatalf("fallback changed existing native setup %+v, %v", codex, err)
 			}
 		}
