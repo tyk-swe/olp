@@ -222,7 +222,7 @@ func (r Route) AllPaidTargets() map[string]PaidTarget {
 type Route struct {
 	PaidFallbackTargets     map[string]PaidTarget `json:"paid_fallback_targets,omitempty"`
 	ChatToAntigravity       bool                  `json:"chat_to_antigravity,omitempty"`
-	PaidParticipation       bool                  `json:"paid_participation"`
+	PaidParticipation       bool                  `json:"paid_participation,omitempty"`
 	PaidTargets             map[string]PaidTarget `json:"paid_targets,omitempty"`
 	ModelPools              map[string][]string   `json:"model_pools,omitempty"`
 	InitialRecoveryAttempts int                   `json:"initial_recovery_attempts,omitempty"`
