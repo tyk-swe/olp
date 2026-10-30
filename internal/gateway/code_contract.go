@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/codeclient"
 	"github.com/tyk-swe/olp/internal/codemode"
 	"github.com/tyk-swe/olp/internal/resources"
 	"github.com/tyk-swe/olp/internal/routing"
@@ -12,6 +13,7 @@ import (
 // CodeLedger is the durable authority and admission boundary used before each
 // coding generation, including each generation on an upgraded connection.
 type CodeLedger interface {
+	Models(context.Context, codemode.Route, string) (codeclient.Offers, error)
 	Admit(context.Context, resources.CodeAdmission) (resources.CodePermit, error)
 	BindConnection(context.Context, codemode.Route, string, codemode.Identity, string, []string) (resources.CodePermit, error)
 	MarkDispatched(context.Context, string) error

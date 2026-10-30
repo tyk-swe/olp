@@ -10,6 +10,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"encoding/json"
 	"encoding/pem"
 	"fmt"
 	"io"
@@ -17,11 +18,13 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/codemode"
 	"github.com/tyk-swe/olp/internal/codeplans"
 	"github.com/tyk-swe/olp/internal/providers"
 	"github.com/tyk-swe/olp/internal/resources"
@@ -272,6 +275,116 @@ func (f *codingPlanFixture) post(t *testing.T, path string, header http.Header, 
 	defer response.Body.Close()
 	out, _ := io.ReadAll(response.Body)
 	return response, out
+}
+
+func TestCodeModelDiscoveryTracksLiveAccountEligibility(t *testing.T) {
+	f := newCodingPlanFixture(t, "zai-coding", codeplans.ZAIProfile, "controlled-key-a-0123456789abcdef", "controlled-key-b-0123456789abcdef", "controlled-key-c-0123456789abcdef")
+	models := []string{"private-code-a", "private-code-b", "private-code-c"}
+	accounts := make([]map[string]any, len(models))
+	for i, account := range f.accounts {
+		accounts[i] = f.h.want(f.owner, "PUT", "/api/v1/code/accounts/"+account["id"].(string), map[string]any{
+			"project_id": f.project, "provider_id": account["provider_id"], "credential_id": account["credential_id"], "name": account["name"], "enabled": true, "models": models[i : i+1],
+		}, etagHeader(account), 200)
+	}
+	routeID := f.route["id"].(string)
+	draft := f.h.want(f.owner, "PUT", "/api/v1/code/routes/"+routeID, map[string]any{
+		"project_id": f.project, "slug": "qualification", "pool_id": f.pool["id"], "models": models, "enabled": true,
+	}, etagHeader(f.route), 200)
+	f.h.want(f.owner, "POST", "/api/v1/code/routes/"+routeID+"/publish", nil, withMatch(draft, idem("discovery-publish")), 200)
+	f.h.refresh()
+	catalog := func(status int) []codemode.Model {
+		t.Helper()
+		request, err := http.NewRequestWithContext(t.Context(), http.MethodGet, f.gateway.URL+"/code/qualification/models", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		request.Header.Set("Authorization", "Bearer "+f.key)
+		response, err := f.gateway.Client().Do(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer response.Body.Close()
+		body, err := io.ReadAll(response.Body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if response.StatusCode != status {
+			t.Fatalf("discovery status %d body %s", response.StatusCode, body)
+		}
+		if status != 200 {
+			if strings.Contains(string(body), "private-code") || strings.Contains(string(body), "controlled-key") {
+				t.Fatalf("refusal leaked account details %s", body)
+			}
+			return nil
+		}
+		var result struct {
+			Data []codemode.Model `json:"data"`
+		}
+		if err := json.Unmarshal(body, &result); err != nil {
+			t.Fatal(err)
+		}
+		return result.Data
+	}
+	assertModels := func(want []string) {
+		t.Helper()
+		data := catalog(200)
+		ids := make([]string, len(data))
+		for i, model := range data {
+			ids[i] = model.ID
+		}
+		if !reflect.DeepEqual(ids, want) {
+			t.Fatalf("models %v want %v", ids, want)
+		}
+		config := f.h.want(f.owner, "GET", "/api/v1/code/routes/"+routeID+"/client-config?gateway_url=https%3A%2F%2Fgateway.example&client=opencode", nil, nil, 200)
+		encoded, err := json.Marshal(config)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var setup codemode.ClientConfiguration
+		if err := json.Unmarshal(encoded, &setup); err != nil {
+			t.Fatal(err)
+		}
+		if !reflect.DeepEqual(setup.Models, data) {
+			t.Fatalf("setup models differ from discovery %+v %+v", setup.Models, data)
+		}
+	}
+	assertModels(models)
+	f.pool = f.h.want(f.owner, "PUT", "/api/v1/code/pools/"+f.pool["id"].(string), f.poolInput(accounts[:2]...), etagHeader(f.pool), 200)
+	assertModels(models[:2])
+	b := accounts[1]
+	b = f.h.want(f.owner, "PUT", "/api/v1/code/accounts/"+b["id"].(string), map[string]any{
+		"project_id": f.project, "provider_id": b["provider_id"], "credential_id": b["credential_id"], "name": b["name"], "enabled": false, "models": models[1:2],
+	}, etagHeader(b), 200)
+	assertModels(models[:1])
+	f.h.want(f.owner, "PUT", "/api/v1/code/accounts/"+b["id"].(string), map[string]any{
+		"project_id": f.project, "provider_id": b["provider_id"], "credential_id": b["credential_id"], "name": b["name"], "enabled": true, "models": models[1:2],
+	}, etagHeader(b), 200)
+	assertModels(models[:2])
+	providerPath := "/api/v1/providers/" + b["provider_id"].(string)
+	provider := f.h.want(f.owner, "GET", providerPath, nil, nil, 200)
+	f.h.want(f.owner, "POST", providerPath+"/credentials/"+b["credential_id"].(string)+"/revoke", nil, withMatch(provider, idem("discovery-credential-revoke")), 200)
+	assertModels(models[:1])
+	f.peer.mu.Lock()
+	f.peer.respond = func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusTooManyRequests) }
+	f.peer.mu.Unlock()
+	response, body := f.post(t, "v1/chat/completions", http.Header{"Authorization": {"Bearer " + f.key}, "X-Opencode-Session-Id": {"catalog-quota"}}, `{"model":"private-code-a","stream":true,"messages":[{"role":"user","content":"controlled"}]}`)
+	if response.StatusCode != http.StatusTooManyRequests {
+		t.Fatalf("quota response %d %s", response.StatusCode, body)
+	}
+	f.settled(t, 1)
+	if data := catalog(200); len(data) != 0 {
+		t.Fatalf("unavailable accounts remain discoverable %+v", data)
+	}
+	f.h.want(f.owner, "GET", "/api/v1/code/routes/"+routeID+"/client-config?gateway_url=https%3A%2F%2Fgateway.example&client=opencode", nil, nil, 409)
+	pool := f.poolInput(accounts[:2]...)
+	pool["api_key_ids"] = []string{}
+	f.pool = f.h.want(f.owner, "PUT", "/api/v1/code/pools/"+f.pool["id"].(string), pool, etagHeader(f.pool), 200)
+	catalog(403)
+	f.pool = f.h.want(f.owner, "PUT", "/api/v1/code/pools/"+f.pool["id"].(string), f.poolInput(accounts[:2]...), etagHeader(f.pool), 200)
+	path := "/api/v1/api-keys/" + f.keyID
+	key := f.h.want(f.owner, "GET", path, nil, nil, 200)
+	f.h.want(f.owner, "POST", path+"/revoke", nil, withMatch(key, idem("discovery-revoke")), 200)
+	catalog(403)
 }
 
 // settled waits until n attempts are no longer prepared or in flight.

@@ -16109,6 +16109,13 @@
             "items": {
               "$ref": "#/components/schemas/CodeConfigurationFile"
             }
+          },
+          "models": {
+            "type": "array",
+            "description": "The same live route model and protocol catalog returned by the route models endpoint.",
+            "items": {
+              "$ref": "#/components/schemas/CodeModel"
+            }
           }
         },
         "required": [
@@ -16125,7 +16132,8 @@
           "format",
           "file",
           "configuration",
-          "qualification_gaps"
+          "qualification_gaps",
+          "models"
         ],
         "type": "object"
       },
@@ -28349,6 +28357,81 @@
             "type": "string",
             "maxLength": 2048,
             "description": "Exact registered workload issuer trusted for delegated user assertions."
+          }
+        }
+      },
+      "CodeModelCapability": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "protocol",
+          "path",
+          "transports"
+        ],
+        "properties": {
+          "protocol": {
+            "type": "string",
+            "enum": [
+              "responses",
+              "messages",
+              "chat"
+            ]
+          },
+          "path": {
+            "type": "string"
+          },
+          "transports": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "http",
+                "websocket"
+              ]
+            },
+            "minItems": 1,
+            "uniqueItems": true
+          }
+        }
+      },
+      "CodeModel": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "A published model currently reachable through eligible accounts in the route pool.",
+        "required": [
+          "id",
+          "object",
+          "capabilities",
+          "clients"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "object": {
+            "type": "string",
+            "enum": [
+              "model"
+            ]
+          },
+          "capabilities": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CodeModelCapability"
+            },
+            "minItems": 1
+          },
+          "clients": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "codex",
+                "claude-code",
+                "opencode"
+              ]
+            },
+            "uniqueItems": true
           }
         }
       }

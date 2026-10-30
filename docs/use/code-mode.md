@@ -389,12 +389,21 @@ the planning model and its build agent `model`. For a route mixing both plans:
 }
 ```
 
-OpenCode keeps choosing each model's endpoint and SDK from its bundled model
-catalogue, so a route model the installed release does not know is unavailable.
+Generated OpenCode settings define each reachable model and its native SDK,
+including models absent from the client's bundled catalogue.
 `enabled_providers` stops OpenCode loading other providers; `small_model` keeps
 title generation on the route. Never run `opencode auth login` for the plan on a
 developer machine. OpenCode asks the npm registry for its own dependencies at
 startup; that is not model traffic.
+
+`GET /code/{slug}/models` and `GET /code/{slug}/v1/models` return the published
+models currently served by eligible pool accounts, their native protocol paths
+and transports, and supported clients. Authenticate with the same OLP inference
+key used for requests. Key revocation, pool membership, account availability,
+and credential eligibility apply to every discovery request. Generated setup
+uses the same catalog and returns it in `models`; discovery does not contact
+upstream services or report account identities. The catalog is a current view,
+not a guarantee that a later request will succeed.
 
 ## Conversations and authority
 

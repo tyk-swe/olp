@@ -38,14 +38,12 @@ func Generate(route codemode.Route, offers Offers, in Request) (codemode.ClientC
 	if err := codemode.ValidateModels(route.Models); err != nil {
 		return out, access.Invalid("models", err.Error())
 	}
+	catalog := Catalog(route, offers)
 	var supported []string
-	for _, model := range route.Models {
-		for _, adapter := range offers.adapters(model) {
-			vendor, _ := codeadapter.Lookup(adapter)
-			for _, client := range vendor.Clients() {
-				if vendor.Reaches(client, model) && !slices.Contains(supported, client) {
-					supported = append(supported, client)
-				}
+	for _, model := range catalog {
+		for _, client := range model.Clients {
+			if !slices.Contains(supported, client) {
+				supported = append(supported, client)
 			}
 		}
 	}
@@ -62,12 +60,13 @@ func Generate(route codemode.Route, offers Offers, in Request) (codemode.ClientC
 	}
 	var native []string
 	var adapters []codemode.Adapter
-	for _, model := range route.Models {
-		for _, adapter := range offers.adapters(model) {
-			if vendor, _ := codeadapter.Lookup(adapter); vendor.Reaches(client, model) {
-				if !slices.Contains(native, model) {
-					native = append(native, model)
-				}
+	for _, model := range catalog {
+		if !slices.Contains(model.Clients, client) {
+			continue
+		}
+		native = append(native, model.ID)
+		for _, adapter := range offers.adapters(model.ID) {
+			if vendor, _ := codeadapter.Lookup(adapter); vendor.Reaches(client, model.ID) {
 				if !slices.Contains(adapters, adapter) {
 					adapters = append(adapters, adapter)
 				}
@@ -116,6 +115,7 @@ func Generate(route codemode.Route, offers Offers, in Request) (codemode.ClientC
 	base.Path = strings.TrimRight(base.Path, "/") + route.BasePath()
 	base.RawPath = ""
 	out = codemode.ClientConfiguration{
+		Models:    catalog,
 		RouteSlug: route.Slug, BaseURL: base.String(), NativeModels: native, Adapters: adapters,
 		Client: client, SupportedClients: supported, Model: model, PlanModel: plan, SmallModel: small,
 		QualificationGaps: qualificationGaps(adapters, client),

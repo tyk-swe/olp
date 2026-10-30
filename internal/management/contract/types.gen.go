@@ -979,6 +979,81 @@ func (e CodeConfigurationFileFormat) Valid() bool {
 	}
 }
 
+// Defines values for CodeModelClients.
+const (
+	CodeModelClientsClaudeCode CodeModelClients = "claude-code"
+	CodeModelClientsCodex      CodeModelClients = "codex"
+	CodeModelClientsOpencode   CodeModelClients = "opencode"
+)
+
+// Valid indicates whether the value is a known member of the CodeModelClients enum.
+func (e CodeModelClients) Valid() bool {
+	switch e {
+	case CodeModelClientsClaudeCode:
+		return true
+	case CodeModelClientsCodex:
+		return true
+	case CodeModelClientsOpencode:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for CodeModelObject.
+const (
+	CodeModelObjectModel CodeModelObject = "model"
+)
+
+// Valid indicates whether the value is a known member of the CodeModelObject enum.
+func (e CodeModelObject) Valid() bool {
+	switch e {
+	case CodeModelObjectModel:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for CodeModelCapabilityProtocol.
+const (
+	CodeModelCapabilityProtocolChat      CodeModelCapabilityProtocol = "chat"
+	CodeModelCapabilityProtocolMessages  CodeModelCapabilityProtocol = "messages"
+	CodeModelCapabilityProtocolResponses CodeModelCapabilityProtocol = "responses"
+)
+
+// Valid indicates whether the value is a known member of the CodeModelCapabilityProtocol enum.
+func (e CodeModelCapabilityProtocol) Valid() bool {
+	switch e {
+	case CodeModelCapabilityProtocolChat:
+		return true
+	case CodeModelCapabilityProtocolMessages:
+		return true
+	case CodeModelCapabilityProtocolResponses:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for CodeModelCapabilityTransports.
+const (
+	Http      CodeModelCapabilityTransports = "http"
+	Websocket CodeModelCapabilityTransports = "websocket"
+)
+
+// Valid indicates whether the value is a known member of the CodeModelCapabilityTransports enum.
+func (e CodeModelCapabilityTransports) Valid() bool {
+	switch e {
+	case Http:
+		return true
+	case Websocket:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for CodePoolKind.
 const (
 	CodePoolKindPersonal CodePoolKind = "personal"
@@ -7433,6 +7508,9 @@ type CodeClientConfiguration struct {
 	// Model The native model the client uses for its main conversation.
 	Model string `json:"model"`
 
+	// Models The same live route model and protocol catalog returned by the route models endpoint.
+	Models []CodeModel `json:"models"`
+
 	// NativeModels The route's models an adapter supporting the client serves, in route order.
 	NativeModels []string `json:"native_models"`
 
@@ -7483,6 +7561,33 @@ type CodeCredits struct {
 	ObservedAt time.Time                 `json:"observed_at"`
 	Unlimited  bool                      `json:"unlimited"`
 }
+
+// CodeModel A published model currently reachable through eligible accounts in the route pool.
+type CodeModel struct {
+	Capabilities []CodeModelCapability `json:"capabilities"`
+	Clients      []CodeModelClients    `json:"clients"`
+	Id           string                `json:"id"`
+	Object       CodeModelObject       `json:"object"`
+}
+
+// CodeModelClients defines model for CodeModel.Clients.
+type CodeModelClients string
+
+// CodeModelObject defines model for CodeModel.Object.
+type CodeModelObject string
+
+// CodeModelCapability defines model for CodeModelCapability.
+type CodeModelCapability struct {
+	Path       string                          `json:"path"`
+	Protocol   CodeModelCapabilityProtocol     `json:"protocol"`
+	Transports []CodeModelCapabilityTransports `json:"transports"`
+}
+
+// CodeModelCapabilityProtocol defines model for CodeModelCapability.Protocol.
+type CodeModelCapabilityProtocol string
+
+// CodeModelCapabilityTransports defines model for CodeModelCapability.Transports.
+type CodeModelCapabilityTransports string
 
 // CodePin The account a conversation tree serves one model from.
 type CodePin struct {

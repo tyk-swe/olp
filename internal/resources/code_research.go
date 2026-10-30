@@ -48,7 +48,7 @@ func (s *CodeStore) AuthorizeResearch(ctx context.Context, route codemode.Route,
 		return authority, account, err
 	}
 	defer tx.Rollback(ctx)
-	if err = codeAuthorityFor(ctx, tx, CodeAdmission{Route: route, APIKeyID: key}, &authority, false); err != nil {
+	if err = codeAuthorityFor(ctx, tx, CodeAdmission{Route: route, APIKeyID: key}, &authority, codeResearch); err != nil {
 		return authority, account, err
 	}
 	// Dispatch uses the frozen connection, which the gateway authorizer checks.
