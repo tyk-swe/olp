@@ -46,23 +46,27 @@ type codeTestRefusal struct {
 }
 
 type codeTestLedger struct {
-	refusalRecords []codeTestRefusal
-	mu             sync.Mutex
-	inputs         []resources.CodeAdmission
-	marks          []string
-	aborts         []string
-	usages         []codemode.Usage
-	health         codemode.HealthObservation
-	allowance      codemode.Allowance
-	refusals       []string
-	refuse         string
-	done           chan codemode.Usage
-	references     map[string]bool
-	outcomes       []codemode.Outcome
-	offers         codeclient.Offers
-	modelsErr      error
-	pinTarget      string
-	recoveryTarget string
+	paidOperation           codemode.Operation
+	paidRefuse              string
+	refusalRecords          []codeTestRefusal
+	mu                      sync.Mutex
+	inputs                  []resources.CodeAdmission
+	marks                   []string
+	aborts                  []string
+	usages                  []codemode.Usage
+	health                  codemode.HealthObservation
+	allowance               codemode.Allowance
+	refusals                []string
+	refuse                  string
+	done                    chan codemode.Usage
+	references              map[string]bool
+	outcomes                []codemode.Outcome
+	offers                  codeclient.Offers
+	modelsErr               error
+	pinTarget               string
+	recoveryTarget          string
+	recoveryUnavailable     bool
+	subscriptionUnavailable bool
 }
 
 func (l *codeTestLedger) Models(context.Context, codemode.Route, string) (codeclient.Offers, error) {
@@ -83,6 +87,9 @@ func (l *codeTestLedger) Admit(_ context.Context, in resources.CodeAdmission) (r
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.inputs = append(l.inputs, in)
+	if l.subscriptionUnavailable || in.Recovery != nil && l.recoveryUnavailable {
+		return resources.CodePermit{}, codemode.Refuse(503, "code_account_unavailable")
+	}
 	if in.PreviousResponse != "" && !l.references[in.PreviousResponse] {
 		return resources.CodePermit{}, codemode.Refuse(409, "code_parent_unresolved")
 	}
@@ -1778,6 +1785,12 @@ func (writer codeWriteDeadlineWriter) SetReadDeadline(deadline time.Time) error 
 }
 
 func (l *codeTestLedger) AdmitPaid(_ context.Context, in resources.PaidCodeAdmission) (resources.PaidCodePermit, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.paidOperation = in.Operation
+	if l.paidRefuse != "" {
+		return resources.PaidCodePermit{}, codemode.Refuse(403, l.paidRefuse)
+	}
 	if l.refuse != "" {
 		return resources.PaidCodePermit{}, codemode.Refuse(403, l.refuse)
 	}
@@ -2632,5 +2645,256 @@ func TestCodeNativeChatPreservesBytesWithAntigravityPolicy(t *testing.T) {
 		if usage := ledger.wait(t); usage.Total == nil || *usage.Total != 3 {
 			t.Fatalf("native usage lost %+v", usage)
 		}
+	}
+}
+
+func TestCodePaidFallbackRecoversSameModelWithoutModelPool(t *testing.T) {
+	h, ledger, server := newPaidCodeForwardHarness(t)
+	route := h.rt.release.Snapshot.CodeRoutes["coding"]
+	route.PaidFallbackTargets, route.PaidTargets = route.PaidTargets, nil
+	route.InitialRecoveryAttempts = 1
+	h.rt.release.Snapshot.CodeRoutes[route.Slug] = route
+	ledger.recoveryUnavailable = true
+	var subscription, paid atomic.Bool
+	h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") == "Bearer upstream-only" {
+			subscription.Store(true)
+			w.WriteHeader(429)
+			io.WriteString(w, `{"error":{"type":"usage_limit_reached"}}`)
+			return
+		}
+		paid.Store(true)
+		body, _ := io.ReadAll(r.Body)
+		if !bytes.Equal(body, []byte(`{"model":"model-a","input":"hello","max_output_tokens":20}`)) {
+			t.Error("same-model fallback changed input")
+		}
+		w.Header().Set("Content-Type", "application/json")
+		io.WriteString(w, `{"id":"paid-recovery","status":"completed","output":[],"usage":{"input_tokens":2,"output_tokens":1,"total_tokens":3}}`)
+	})
+	response := codeDo(t, server, []byte(`{"model":"model-a","input":"hello","max_output_tokens":20}`), nil)
+	body, _ := io.ReadAll(response.Body)
+	if response.StatusCode != 200 || !strings.Contains(string(body), "paid-recovery") || !subscription.Load() || !paid.Load() {
+		t.Fatalf("fallback %d %s subscription=%v paid=%v", response.StatusCode, body, subscription.Load(), paid.Load())
+	}
+	if u := ledger.wait(t); u.Total == nil || *u.Total != 0 {
+		t.Fatalf("rejected subscription consumption %+v", u)
+	}
+	if u := ledger.wait(t); u.Total == nil || *u.Total != 3 {
+		t.Fatalf("paid fallback consumption %+v", u)
+	}
+	env := h.sink.last(t)
+	if env.KeyID != h.keyID || env.Attempts[0].UpstreamModel != modelA || !env.Attempts[0].UsageComplete || env.Attempts[0].ProviderID != route.PaidFallbackTargets[modelA].ProviderID {
+		t.Fatalf("fallback attribution %+v", env)
+	}
+}
+
+func (l *codeTestLedger) ResolvePaidFallback(_ context.Context, in resources.CodeAdmission, _ access.Authority) (*codemode.Operation, error) {
+	if in.Recovery == nil && !in.InitialRecovery {
+		return nil, nil
+	}
+	pins := func() []codemode.Pin {
+		if l.pinTarget == "" {
+			return nil
+		}
+		return []codemode.Pin{{Model: in.Operation.PublicModel(), TargetModel: l.pinTarget}}
+	}()
+	return in.Route.PaidFallbackModel(in.Operation, pins)
+}
+
+func TestCodePaidFallbackAdmitsNewPortableWorkBeforeAnySubscriptionDispatch(t *testing.T) {
+	h, ledger, server := newPaidCodeForwardHarness(t)
+	route := h.rt.release.Snapshot.CodeRoutes["coding"]
+	route.PaidFallbackTargets, route.PaidTargets = route.PaidTargets, nil
+	route.InitialRecoveryAttempts = 1
+	h.rt.release.Snapshot.CodeRoutes[route.Slug] = route
+	ledger.subscriptionUnavailable = true
+	var subscription, paid atomic.Bool
+	h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") == "Bearer upstream-only" {
+			subscription.Store(true)
+			w.WriteHeader(500)
+			return
+		}
+		paid.Store(true)
+		w.Header().Set("Content-Type", "application/json")
+		io.WriteString(w, `{"id":"new-paid","status":"completed","output":[],"usage":{"input_tokens":2,"output_tokens":1,"total_tokens":3}}`)
+	})
+	response := codeDo(t, server, []byte(`{"model":"model-a","input":"complete input","max_output_tokens":20}`), nil)
+	body, _ := io.ReadAll(response.Body)
+	if response.StatusCode != 200 || !strings.Contains(string(body), "new-paid") || subscription.Load() || !paid.Load() {
+		t.Fatalf("initial fallback %d %s subscription=%v paid=%v", response.StatusCode, body, subscription.Load(), paid.Load())
+	}
+	if u := ledger.wait(t); u.Total == nil || *u.Total != 3 {
+		t.Fatalf("initial fallback usage %+v", u)
+	}
+}
+
+func newPaidFallbackHarness(t *testing.T) (*harness, *codeTestLedger, *httptest.Server) {
+	t.Helper()
+	h, ledger, server := newPaidCodeForwardHarness(t)
+	route := h.rt.release.Snapshot.CodeRoutes["coding"]
+	route.PaidFallbackTargets, route.PaidTargets = route.PaidTargets, nil
+	route.InitialRecoveryAttempts = 1
+	h.rt.release.Snapshot.CodeRoutes[route.Slug] = route
+	ledger.subscriptionUnavailable = true
+	return h, ledger, server
+}
+
+func TestCodePaidFallbackRefusesBeforePaidDispatch(t *testing.T) {
+	for _, scenario := range []struct {
+		name, code string
+		setup      func(*testing.T, *harness, *codeTestLedger)
+	}{
+		{"fallback disabled", "code_account_unavailable", func(_ *testing.T, h *harness, _ *codeTestLedger) {
+			route := h.rt.release.Snapshot.CodeRoutes["coding"]
+			route.PaidFallbackTargets = nil
+			h.rt.release.Snapshot.CodeRoutes[route.Slug] = route
+		}},
+		{"recovery disabled", "code_account_unavailable", func(_ *testing.T, h *harness, _ *codeTestLedger) {
+			route := h.rt.release.Snapshot.CodeRoutes["coding"]
+			route.InitialRecoveryAttempts = 0
+			h.rt.release.Snapshot.CodeRoutes[route.Slug] = route
+		}},
+		{"paid participation disabled", "code_paid_participation_disabled", func(_ *testing.T, h *harness, _ *codeTestLedger) {
+			route := h.rt.release.Snapshot.CodeRoutes["coding"]
+			route.PaidParticipation = false
+			h.rt.release.Snapshot.CodeRoutes[route.Slug] = route
+		}},
+		{"paid authority denied", "code_pool_denied", func(_ *testing.T, _ *harness, l *codeTestLedger) { l.paidRefuse = "code_pool_denied" }},
+		{"revoked credential", "code_paid_target_denied", func(_ *testing.T, h *harness, _ *codeTestLedger) { h.rt.revoked = map[string]bool{h.credA: true} }},
+		{"missing pricing", "code_paid_pricing_unavailable", func(_ *testing.T, h *harness, _ *codeTestLedger) { h.rt.inputs = nil }},
+		{"spend exhausted", "code_budget_exhausted", func(t *testing.T, h *harness, _ *codeTestLedger) {
+			authority := h.rt.keys[fullKey]
+			authority.Policy.DailyCostLimit = new("0.01")
+			authority.Policy.CostBasis = string(limits.BasisCost)
+			h.rt.keys[fullKey] = authority
+			limiter, err := limits.New(paidBudgetRefusal{}, "olp:fallback-refusal")
+			if err != nil {
+				t.Fatal(err)
+			}
+			h.gateway.Admission = NewAdmission(limiter, nil, h.gateway.log)
+		}},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
+			h, ledger, server := newPaidFallbackHarness(t)
+			scenario.setup(t, h, ledger)
+			var dispatched atomic.Bool
+			h.mock.set("a", func(w http.ResponseWriter, _ *http.Request) { dispatched.Store(true); w.WriteHeader(502) })
+			response := codeDo(t, server, []byte(`{"model":"model-a","input":"hello","max_output_tokens":20}`), nil)
+			body, _ := io.ReadAll(response.Body)
+			if response.StatusCode < 400 || !strings.Contains(string(body), scenario.code) || dispatched.Load() {
+				t.Fatalf("paid refusal %d %s dispatched=%v", response.StatusCode, body, dispatched.Load())
+			}
+		})
+	}
+}
+
+func TestCodePaidFallbackDoesNotReplayAcceptedAmbiguousOrOpaqueWork(t *testing.T) {
+	for _, scenario := range []struct {
+		name    string
+		status  int
+		body    string
+		headers http.Header
+	}{
+		{"accepted", 200, `{"id":"accepted","status":"completed","output":[],"usage":{"total_tokens":1}}`, nil},
+		{"ambiguous failure", 500, `{"error":{"type":"usage_limit_reached"}}`, nil},
+		{"unproven rejection", 429, `{"error":{"type":"server_error"}}`, nil},
+		{"opaque continuation", 429, `{"error":{"type":"usage_limit_reached"}}`, http.Header{"X-Codex-Turn-State": []string{"opaque"}}},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
+			h, ledger, server := newPaidFallbackHarness(t)
+			ledger.subscriptionUnavailable = false
+			ledger.recoveryUnavailable = true
+			var paid atomic.Bool
+			h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
+				if r.Header.Get("Authorization") != "Bearer upstream-only" {
+					paid.Store(true)
+				}
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(scenario.status)
+				io.WriteString(w, scenario.body)
+			})
+			response := codeDo(t, server, []byte(`{"model":"model-a","input":"hello","max_output_tokens":20}`), scenario.headers)
+			body, _ := io.ReadAll(response.Body)
+			if scenario.name == "opaque continuation" {
+				if response.StatusCode != 409 || !strings.Contains(string(body), "code_recovery_unsafe") || paid.Load() {
+					t.Fatalf("opaque replay %d %s paid=%v", response.StatusCode, body, paid.Load())
+				}
+				return
+			}
+			if response.StatusCode != scenario.status || string(body) != scenario.body || paid.Load() {
+				t.Fatalf("unsafe replay %d %s paid=%v", response.StatusCode, body, paid.Load())
+			}
+		})
+	}
+}
+
+func TestCodePaidFallbackUnknownMoneyRetainsUncertainAccounting(t *testing.T) {
+	h, ledger, server := newPaidFallbackHarness(t)
+	native := `{"id":"unmetered","status":"completed","output":[]}`
+	h.mock.set("a", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		io.WriteString(w, native)
+	})
+	response := codeDo(t, server, []byte(`{"model":"model-a","input":"hello","max_output_tokens":20}`), nil)
+	body, _ := io.ReadAll(response.Body)
+	if response.StatusCode != 200 || string(body) != native {
+		t.Fatalf("paid delivery %d %s", response.StatusCode, body)
+	}
+	if usage := ledger.wait(t); usage.Total != nil {
+		t.Fatalf("unknown paid usage became known %+v", usage)
+	}
+	fact := h.sink.last(t).Attempts[0]
+	if !fact.BillingUncertain || fact.UsageComplete || fact.Usage != nil {
+		t.Fatalf("paid uncertainty lost %+v", fact)
+	}
+}
+
+func TestCodePaidFallbackSubstitutionRequiresExplicitModelPool(t *testing.T) {
+	for _, pool := range []bool{false, true} {
+		t.Run(fmt.Sprint(pool), func(t *testing.T) {
+			h, ledger, server := newPaidFallbackHarness(t)
+			route := h.rt.release.Snapshot.CodeRoutes["coding"]
+			route.Models = []string{modelA, modelB}
+			route.PaidFallbackTargets = map[string]codemode.PaidTarget{modelB: route.PaidFallbackTargets[modelA]}
+			if pool {
+				route.ModelRewriting = true
+				route.ModelPools = map[string][]string{modelA: {modelA, modelB}}
+			}
+			h.rt.release.Snapshot.CodeRoutes[route.Slug] = route
+			for key, provider := range h.rt.release.Snapshot.CodePaidConnections {
+				provider.Capabilities = append(provider.Capabilities, routing.Capability{Model: modelB, Operation: "generation", Surface: "openai", Mode: "unary"})
+				h.rt.release.Snapshot.CodePaidConnections[key] = provider
+			}
+			price := h.rt.inputs.Prices[0]
+			price.Price.Model = modelB
+			h.rt.inputs.Prices = append(h.rt.inputs.Prices, price)
+			var paid atomic.Bool
+			h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
+				paid.Store(true)
+				body, _ := io.ReadAll(r.Body)
+				if !strings.Contains(string(body), `"model":"model-b"`) || !strings.Contains(string(body), `"input":"hello"`) {
+					t.Errorf("substitution changed input or ignored target %s", body)
+				}
+				w.Header().Set("Content-Type", "application/json")
+				io.WriteString(w, `{"id":"substituted","model":"model-b","status":"completed","output":[],"usage":{"input_tokens":2,"output_tokens":1,"total_tokens":3}}`)
+			})
+			response := codeDo(t, server, []byte(`{"model":"model-a","input":"hello","max_output_tokens":20}`), nil)
+			body, _ := io.ReadAll(response.Body)
+			if !pool {
+				if response.StatusCode != 503 || paid.Load() {
+					t.Fatalf("implicit substitution %d %s paid=%v", response.StatusCode, body, paid.Load())
+				}
+				return
+			}
+			if response.StatusCode != 200 || !paid.Load() {
+				t.Fatalf("explicit substitution refused %d %s", response.StatusCode, body)
+			}
+			ledger.wait(t)
+			fact := h.sink.last(t)
+			if ledger.paidOperation.PublicModel() != modelA || fact.Attempts[0].UpstreamModel != modelB {
+				t.Fatalf("substitution attribution %+v", fact)
+			}
+		})
 	}
 }

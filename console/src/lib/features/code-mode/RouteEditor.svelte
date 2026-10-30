@@ -141,6 +141,7 @@
   let models = $state(initial?.models.join('\n') ?? '');
   let paidParticipation = $state(initial?.paid_participation ?? false);
   let paidTargets = $state(initial?.paid_targets ?? {});
+  let paidFallbackTargets = $state(initial?.paid_fallback_targets ?? {});
   let enabled = $state(initial?.enabled ?? true);
   let modelRewriting = $state(initial?.model_rewriting ?? false);
   let aliases = $state(
@@ -220,26 +221,36 @@
         modelRewriting
       );
       if (poolResult.kind === 'invalid') throw new Error(poolResult.message);
-      const targets = paidParticipation
-        ? Object.fromEntries(
-            routeModels.flatMap(
-              (
-                model
-              ): [
-                string,
-                NonNullable<CodeRouteWrite['paid_targets']>[string]
-              ][] => {
-                const target = paidTargets[model];
-                return target?.provider_id ? [[model, target]] : [];
-              }
+      const selectedTargets = (
+        values: NonNullable<CodeRouteWrite['paid_targets']>
+      ): NonNullable<CodeRouteWrite['paid_targets']> =>
+        paidParticipation
+          ? Object.fromEntries(
+              routeModels.flatMap((model) =>
+                values[model]?.provider_id ? [[model, values[model]]] : []
+              )
             )
-          )
-        : {};
-      if (Object.values(targets).some((target) => !target.slot_id))
+          : {};
+      const targets = selectedTargets(paidTargets);
+      const fallbackTargets = selectedTargets(paidFallbackTargets);
+      if (
+        Object.values({ ...targets, ...fallbackTargets }).some(
+          (target) => !target.slot_id
+        )
+      )
         throw new Error('Choose a credential slot for every paid API target.');
+      if (Object.keys(fallbackTargets).length && !recoveryAttempts)
+        throw new Error(
+          'Enable bounded recovery before selecting paid fallback targets.'
+        );
+      if (Object.keys(fallbackTargets).some((model) => !!targets[model]))
+        throw new Error(
+          'Choose either direct paid selection or subscription-first fallback for each native model.'
+        );
       return {
         paid_participation: paidParticipation,
         paid_targets: targets,
+        paid_fallback_targets: fallbackTargets,
         project_id: projectId,
         slug,
         pool_id: poolId,
@@ -313,9 +324,9 @@
   >
   <p>
     Mapped models directly use the selected metered API target, even when a
-    subscription supports the same model. Subscription failures never enable
-    paid fallback. Known pricing and every applicable spend limit are required
-    before dispatch.
+    subscription supports the same model. Fallback targets are separate and keep
+    subscription candidates first. Known pricing and every applicable spend
+    limit are required on the actual paid attempt.
   </p>
   {#if paidParticipation}
     {#each nativeModels(models) as model (model)}
@@ -360,6 +371,59 @@
           >
             <option value="">Choose a credential slot</option>
             {#each providers.find((provider) => provider.id === paidTargets[model].provider_id)?.slots ?? [] as slot (slot.id)}<option
+                value={slot.id}>{slot.name || slot.id}</option
+              >{/each}
+          </select>
+        {/if}
+      </div>
+    {/each}
+    <p>
+      Subscription-first paid fallback requires bounded recovery, proven
+      nonexecution and portable complete input. The exact model is preferred. A
+      different model also requires model rewriting and an explicit model pool.
+    </p>
+    {#each nativeModels(models) as model (model)}
+      <div class="form-field">
+        <label for={'fallback-provider-' + model}
+          >Paid fallback provider for {model}</label
+        >
+        <select
+          id={'fallback-provider-' + model}
+          value={paidFallbackTargets[model]?.provider_id ?? ''}
+          onchange={(event) =>
+            (paidFallbackTargets = {
+              ...paidFallbackTargets,
+              [model]: { provider_id: event.currentTarget.value, slot_id: '' }
+            })}
+        >
+          <option value="">No paid fallback</option>
+          {#each providers as provider (provider.id)}<option value={provider.id}
+              >{provider.name}</option
+            >{/each}
+          {#if paidFallbackTargets[model]?.provider_id && !providers.some((provider) => provider.id === paidFallbackTargets[model].provider_id)}<option
+              value={paidFallbackTargets[model].provider_id}
+              >{paidFallbackTargets[model].provider_id} · current selection</option
+            >{/if}
+        </select>
+        {#if paidFallbackTargets[model]?.provider_id}
+          <label for={'fallback-slot-' + model}
+            >Paid fallback credential slot for {model}</label
+          >
+          <select
+            id={'fallback-slot-' + model}
+            value={paidFallbackTargets[model]?.slot_id ?? ''}
+            onchange={(event) =>
+              (paidFallbackTargets = {
+                ...paidFallbackTargets,
+                [model]: {
+                  provider_id: paidFallbackTargets[model].provider_id,
+                  slot_id: event.currentTarget.value
+                }
+              })}
+            required
+          >
+            <option value="">Choose a credential slot</option>
+            {#each providers.find((provider) => provider.id === paidFallbackTargets[model].provider_id)?.slots ?? [] as slot (slot.id)}<option
                 value={slot.id}>{slot.name || slot.id}</option
               >{/each}
           </select>
@@ -452,9 +516,9 @@
   >
   <p>
     Enables the controlled Gemini text and function tool path after publication.
-    Signed thought state, reasoning controls, media and server tools are refused.
-    Identity and prompt compatibility remain disabled. Current models and live
-    subscription tool workflows remain unqualified.
+    Signed thought state, reasoning controls, media and server tools are
+    refused. Identity and prompt compatibility remain disabled. Current models
+    and live subscription tool workflows remain unqualified.
   </p>
   <label class="choice"
     ><input

@@ -262,3 +262,43 @@ func TestModelPoolsKeepExactDefaultsAndPermitOnlyPublishedAlternates(t *testing.
 		}
 	}
 }
+
+func TestPaidFallbackTargetsRequireRecoveryAndKeepDirectSelectionDistinct(t *testing.T) {
+	target := PaidTarget{ProviderID: "019a06bf-341f-7000-8000-000000000001", SlotID: "019a06bf-341f-7000-8000-000000000002"}
+	valid := Route{Models: []string{"native-model"}, PaidParticipation: true, InitialRecoveryAttempts: 1, PaidFallbackTargets: map[string]PaidTarget{"native-model": target}}
+	if err := valid.ValidatePaidTargets(); err != nil {
+		t.Fatal(err)
+	}
+	for _, invalid := range []Route{
+		{Models: valid.Models, InitialRecoveryAttempts: 1, PaidFallbackTargets: valid.PaidFallbackTargets},
+		{Models: valid.Models, PaidParticipation: true, PaidFallbackTargets: valid.PaidFallbackTargets},
+		{Models: valid.Models, PaidParticipation: true, InitialRecoveryAttempts: 1, PaidFallbackTargets: valid.PaidFallbackTargets, PaidTargets: valid.PaidFallbackTargets},
+		{Models: valid.Models, PaidParticipation: true, InitialRecoveryAttempts: 1, PaidFallbackTargets: map[string]PaidTarget{"other": target}},
+	} {
+		if err := invalid.ValidatePaidTargets(); err == nil {
+			t.Fatal("invalid fallback policy accepted")
+		}
+	}
+}
+
+func TestPaidFallbackModelRequiresSeparateSubstitutionPolicy(t *testing.T) {
+	operation := Operation{Name: "responses.create", Model: "native", Identity: Identity{Conversation: "root"}}
+	route := Route{Models: []string{"native", "alternate"}, PaidParticipation: true, InitialRecoveryAttempts: 1, PaidFallbackTargets: map[string]PaidTarget{"alternate": {ProviderID: "provider", SlotID: "slot"}}}
+	selected, err := route.PaidFallbackModel(operation, nil)
+	if err != nil || selected != nil {
+		t.Fatalf("fallback substituted without a pool %+v %v", selected, err)
+	}
+	same := route
+	same.PaidFallbackTargets = map[string]PaidTarget{"native": {ProviderID: "provider", SlotID: "slot"}}
+	selected, err = same.PaidFallbackModel(operation, nil)
+	if err != nil || selected == nil || selected.Model != operation.Model {
+		t.Fatalf("same model required rewriting %+v %v", selected, err)
+	}
+	permitted := route
+	permitted.ModelRewriting = true
+	permitted.ModelPools = map[string][]string{"native": {"native", "alternate"}}
+	selected, err = permitted.PaidFallbackModel(operation, nil)
+	if err != nil || selected == nil || selected.Model != "alternate" || selected.PublicModel() != operation.PublicModel() || selected.Identity != operation.Identity {
+		t.Fatalf("explicit paid substitution %+v %v", selected, err)
+	}
+}

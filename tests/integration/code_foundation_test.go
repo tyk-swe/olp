@@ -13,9 +13,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
+	"github.com/oapi-codegen/nullable"
 	"github.com/tyk-swe/olp/internal/codeclient"
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/limits"
+	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/routing"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -875,30 +878,7 @@ func newPaidCodeFixture(t *testing.T, endpoints ...string) (*codeFixture, routin
 		}
 		return "https://fixture.invalid"
 	}()
-	created := f.h.want(f.owner, "POST", "/api/v1/providers", map[string]any{"project_id": f.project, "name": "Metered fixture", "configuration": map[string]any{"kind": "openai", "auth_mode": "api_key", "profile_id": "openai-responses", "profile_revision": connectors.ProfileRevision, "endpoint": endpoint, "options": map[string]any{"vendor_id": "openai"}}, "credential": "fixture-paid-secret", "model": "native-model"}, idem("paid-provider"), 201)
-	providerID := created["id"].(string)
-	var slot routing.Slot
-	slot.Enabled = true
-	slot.Weight = 1
-	var credential string
-	var version int
-	if err := f.h.Pool.QueryRow(t.Context(), `SELECT s.id::text,s.credential_id::text,c.version FROM olp.provider_slots s JOIN olp.provider_credentials c ON c.id=s.credential_id WHERE s.provider_id=$1 AND s.is_default`, providerID).Scan(&slot.ID, &credential, &version); err != nil {
-		t.Fatal(err)
-	}
-	slot.CredentialID = &credential
-	slot.CredentialVersion = &version
-	models, err := json.Marshal([]routing.RevisionModel{{ID: access.NewID(), UpstreamModel: "native-model", Capabilities: []routing.RevisionCapability{{Operation: "generation", Surface: "openai", Mode: "unary", Source: "certified"}}}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	slots, err := json.Marshal([]routing.RevisionSlot{{Slot: slot, Default: true}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	revision := access.NewID()
-	f.exec(t, `UPDATE olp.provider_models SET enabled=true WHERE provider_id=$1`, providerID)
-	f.exec(t, `INSERT INTO olp.provider_revisions(id,provider_id,revision,name,configuration,models,slots,credential_version,source_etag,activated_by) SELECT $2,id,1,name,configuration,$3,$4,$5,etag,created_by FROM olp.providers WHERE id=$1`, providerID, revision, models, slots, version)
-	f.exec(t, `UPDATE olp.providers SET state='active',active_revision=1,active_revision_id=$2 WHERE id=$1`, providerID, revision)
+	providerID, slot := newCodePaidProvider(t, f.h, f.owner, f.project, endpoint, "native-model")
 	draft := map[string]any{"project_id": f.project, "slug": f.route.Slug, "pool_id": f.pool, "models": f.route.Models, "enabled": true, "paid_participation": true, "paid_targets": map[string]codemode.PaidTarget{"native-model": {ProviderID: providerID, SlotID: slot.ID}}}
 	saved := f.h.want(f.owner, "PUT", "/api/v1/code/routes/"+f.route.ID, draft, withMatch(f.routeRecord, idem("paid-draft")), 200)
 	published := f.h.want(f.owner, "POST", "/api/v1/code/routes/"+f.route.ID+"/publish", nil, withMatch(saved, idem("paid-publish")), 200)
@@ -1029,4 +1009,170 @@ func TestCodePaidResponseReferencePreservesConversationOwnership(t *testing.T) {
 			}
 		})
 	}
+}
+
+func publishPaidFallback(t *testing.T, f *codeFixture, provider routing.Provider, slot routing.Slot) codemode.Route {
+	t.Helper()
+	targets := map[string]contract.CodePaidTarget{"native-model": {ProviderId: uuid.MustParse(provider.ID), SlotId: uuid.MustParse(slot.ID)}}
+	write := contract.CodeRouteWrite{ProjectId: uuid.MustParse(f.project), Slug: f.route.Slug, PoolId: uuid.MustParse(f.pool), Models: f.route.Models, Enabled: true, PaidParticipation: new(true), InitialRecoveryAttempts: new(1), PaidFallbackTargets: &targets}
+	saved := f.h.want(f.owner, "PUT", "/api/v1/code/routes/"+f.route.ID, write, map[string]string{"If-Match": fmt.Sprintf("%q", f.route.ETag)}, 200)
+	published := f.h.want(f.owner, "POST", "/api/v1/code/routes/"+f.route.ID+"/publish", nil, withMatch(saved, idem("explicit-paid-fallback")), 200)
+	route := codePublicDecode[codemode.Route](t, published)
+	if len(route.PaidTargets) != 0 || route.PaidFallbackTargets["native-model"].ProviderID != provider.ID || route.InitialRecoveryAttempts != 1 {
+		t.Fatalf("fallback publication lost policy %+v", route)
+	}
+	return route
+}
+
+func TestCodePaidFallbackNewRootKeepsDurableUncertaintyAndLiveAuthority(t *testing.T) {
+	f, provider, slot := newPaidCodeFixture(t)
+	route := publishPaidFallback(t, f, provider, slot)
+	input := f.input("new-fallback-root", "", nil)
+	input.Route, input.InitialRecovery = route, true
+	paid := resources.PaidCodeAdmission{CodeAdmission: input, Provider: provider, Slot: slot, Fallback: true}
+	_, err := f.store.AdmitPaid(t.Context(), paid)
+	codeRefusal(t, err, "code_paid_fallback_not_needed")
+	f.exec(t, `UPDATE olp.code_accounts SET health='unavailable' WHERE id=$1`, f.account)
+	_, err = f.store.Admit(t.Context(), input)
+	codeRefusal(t, err, "code_account_unavailable")
+	permit, err := f.store.AdmitPaid(t.Context(), paid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.store.MarkDispatched(t.Context(), permit.Attempt.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.store.Settle(t.Context(), permit.Attempt.ID, codemode.Usage{}); err != nil {
+		t.Fatal(err)
+	}
+	attempts := codePublicDecode[[]contract.CodeAttempt](t, f.h.want(f.owner, "GET", "/api/v1/code/attempts?binding_id="+permit.BindingID, nil, nil, 200)["items"])
+	if len(attempts) != 1 || attempts[0].Model != "native-model" || attempts[0].RequestedModel.GetOrEmpty() != "native-model" || !attempts[0].ReportedTokens.IsNull() || attempts[0].PaidMonetaryState.GetOrEmpty() != "unknown" {
+		t.Fatalf("fallback uncertainty or selected model lost %+v", attempts)
+	}
+	if err := (&limits.DebitStore{Pool: f.h.Pool}).CheckOwnerAccounting(t.Context(), f.key); !errors.Is(err, limits.ErrUninitializedCost) {
+		t.Fatalf("fallback money became zero %v", err)
+	}
+	selected, err := f.store.ResolvePaidFallback(t.Context(), input, access.Authority{})
+	if err != nil || selected == nil || selected.Model != "native-model" {
+		t.Fatalf("fallback pin lost %+v %v", selected, err)
+	}
+	f.exec(t, `DELETE FROM olp.code_pool_keys WHERE pool_id=$1 AND api_key_id=$2`, f.pool, f.key)
+	_, err = f.store.AdmitPaid(t.Context(), paid)
+	codeRefusal(t, err, "code_pool_denied")
+}
+
+func TestCodePaidFallbackConcurrentSubscriptionOwnershipRefusesCrossover(t *testing.T) {
+	f, provider, slot := newPaidCodeFixture(t)
+	route := publishPaidFallback(t, f, provider, slot)
+	input := f.input("competing-new-root", "", nil)
+	input.Route, input.InitialRecovery = route, true
+	start := make(chan struct{})
+	subscription := make(chan error, 1)
+	paid := make(chan error, 1)
+	go func() { <-start; _, err := f.store.Admit(t.Context(), input); subscription <- err }()
+	go func() {
+		<-start
+		_, err := f.store.AdmitPaid(t.Context(), resources.PaidCodeAdmission{CodeAdmission: input, Provider: provider, Slot: slot, Fallback: true})
+		paid <- err
+	}()
+	close(start)
+	if err := <-subscription; err != nil {
+		t.Fatal("subscription ownership refused", err)
+	}
+	if err := <-paid; err == nil {
+		t.Fatal("paid fallback bypassed concurrent subscription ownership")
+	}
+	bindings := codePublicDecode[[]contract.CodeBinding](t, f.h.want(f.owner, "GET", "/api/v1/code/bindings?api_key_id="+f.key, nil, nil, 200)["items"])
+	if len(bindings) != 1 || bindings[0].PaidProviderId.IsSpecified() && !bindings[0].PaidProviderId.IsNull() || bindings[0].Conversation != input.Operation.Identity.Conversation {
+		t.Fatalf("competing ownership %+v", bindings)
+	}
+}
+
+func TestCodePaidFallbackProvenRecoveryRetainsOriginalReferenceOwnerAndRetirement(t *testing.T) {
+	f, provider, slot := newPaidCodeFixture(t)
+	route := publishPaidFallback(t, f, provider, slot)
+	input := f.input("proven-fallback-root", "", nil)
+	input.Route, input.InitialRecovery = route, true
+	first, err := f.store.Admit(t.Context(), input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.store.MarkDispatched(t.Context(), first.Attempt.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.store.ObserveReference(t.Context(), first.Attempt.ID, "subscription-owned"); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.store.Settle(t.Context(), first.Attempt.ID, codemode.Usage{Total: new(int64(1))}); err != nil {
+		t.Fatal(err)
+	}
+	rejected, err := f.store.Admit(t.Context(), input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.store.MarkDispatched(t.Context(), rejected.Attempt.ID); err != nil {
+		t.Fatal(err)
+	}
+	status := 429
+	if err := f.store.ObserveOutcome(t.Context(), rejected.Attempt.ID, codemode.Outcome{Origin: "upstream", Kind: "rejected", UpstreamStatus: &status, ObservedAt: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.store.ConfirmNonexecution(t.Context(), rejected.Attempt.ID, status); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.store.Settle(t.Context(), rejected.Attempt.ID, codemode.Usage{Total: new(int64(0))}); err != nil {
+		t.Fatal(err)
+	}
+	f.exec(t, `UPDATE olp.code_accounts SET health='unavailable' WHERE id=$1`, f.account)
+	input.Recovery = &resources.CodeRecovery{From: rejected.Attempt.ID, Number: 1}
+	paid := resources.PaidCodeAdmission{CodeAdmission: input, Provider: provider, Slot: slot, Fallback: true}
+	permit, err := f.store.AdmitPaid(t.Context(), paid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.store.Abort(t.Context(), permit.Attempt.ID); err != nil {
+		t.Fatal(err)
+	}
+	reference := paid
+	reference.Recovery = nil
+	reference.PreviousResponse = "subscription-owned"
+	_, err = f.store.AdmitPaid(t.Context(), reference)
+	codeRefusal(t, err, "code_response_account_conflict")
+	f.h.want(f.owner, "POST", "/api/v1/code/bindings/"+first.Binding.ID+"/retire", nil, idem("retire-fallback-source"), 200)
+	continuation := paid
+	continuation.Recovery = nil
+	_, err = f.store.AdmitPaid(t.Context(), continuation)
+	codeRefusal(t, err, "code_binding_retired")
+}
+
+func newCodePaidProvider(t *testing.T, h *accessHarness, owner *browser, project, endpoint, model string) (string, routing.Slot) {
+	t.Helper()
+	write := contract.CreateProviderRequest{Name: "Metered fixture", ProjectId: nullable.NewNullableWithValue(uuid.MustParse(project)), Model: nullable.NewNullableWithValue(model), Credential: new("fixture-paid-secret"), Configuration: contract.ProviderConfiguration{Kind: "openai", AuthMode: "api_key", ProfileId: new("openai-responses"), ProfileRevision: new(connectors.ProfileRevision), Endpoint: nullable.NewNullableWithValue(endpoint), Options: &contract.ConnectionOptions{VendorId: nullable.NewNullableWithValue("openai")}}}
+	created := codePublicDecode[contract.ProviderResponse](t, h.want(owner, "POST", "/api/v1/providers", write, idem("paid-provider"), 201))
+	providerID := created.Id.String()
+	var slotID, credential string
+	var version int
+	if err := h.Pool.QueryRow(t.Context(), `SELECT s.id::text,s.credential_id::text,c.version FROM olp.provider_slots s JOIN olp.provider_credentials c ON c.id=s.credential_id WHERE s.provider_id=$1 AND s.is_default`, providerID).Scan(&slotID, &credential, &version); err != nil {
+		t.Fatal(err)
+	}
+	slot := routing.Slot{ID: slotID, Enabled: true, Weight: 1, CredentialID: &credential, CredentialVersion: &version}
+	models, err := json.Marshal([]routing.RevisionModel{{ID: access.NewID(), UpstreamModel: model, Capabilities: []routing.RevisionCapability{{Operation: "generation", Surface: "openai", Mode: "unary", Source: "certified"}}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	slots, err := json.Marshal([]routing.RevisionSlot{{Slot: slot, Default: true}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	revision := access.NewID()
+	if _, err := h.Pool.Exec(t.Context(), `UPDATE olp.provider_models SET enabled=true WHERE provider_id=$1`, providerID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.Pool.Exec(t.Context(), `INSERT INTO olp.provider_revisions(id,provider_id,revision,name,configuration,models,slots,credential_version,source_etag,activated_by) SELECT $2,id,1,name,configuration,$3,$4,$5,etag,created_by FROM olp.providers WHERE id=$1`, providerID, revision, models, slots, version); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.Pool.Exec(t.Context(), `UPDATE olp.providers SET state='active',active_revision=1,active_revision_id=$2 WHERE id=$1`, providerID, revision); err != nil {
+		t.Fatal(err)
+	}
+	return providerID, slot
 }

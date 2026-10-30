@@ -25,9 +25,15 @@ func codeRecoveryExclusion(recovery *CodeRecovery) *string {
 	return &recovery.From
 }
 
-func recoverCodeBinding(ctx context.Context, tx pgx.Tx, in CodeAdmission) error {
+type codeRecoveryOwner struct {
+	root      string
+	account   string
+	principal string
+}
+
+func codeRecoverySource(ctx context.Context, tx pgx.Tx, in CodeAdmission) (codeRecoveryOwner, error) {
 	if in.Recovery == nil || !in.InitialRecovery || in.Route.InitialRecoveryAttempts < 1 || in.Operation.Identity.Parent != "" || in.PreviousResponse != "" {
-		return codemode.Refuse(409, "code_recovery_unsafe")
+		return codeRecoveryOwner{}, codemode.Refuse(409, "code_recovery_unsafe")
 	}
 	var root, account, principal string
 	var safe bool
@@ -42,8 +48,17 @@ func recoverCodeBinding(ctx context.Context, tx pgx.Tx, in CodeAdmission) error 
 		WHERE a.id=$1 AND b.route_id=$2 AND b.api_key_id=$3 AND b.conversation=$4`,
 		in.Recovery.From, in.Route.ID, in.APIKeyID, in.Operation.Identity.Conversation, in.Operation.PublicModel(), in.Operation.Name, in.Route.RevisionID, in.Recovery.Number, in.Route.InitialRecoveryAttempts).Scan(&root, &account, &principal, &safe)
 	if sourceErr != nil || !safe {
-		return codemode.Refuse(409, "code_recovery_unsafe")
+		return codeRecoveryOwner{}, codemode.Refuse(409, "code_recovery_unsafe")
 	}
+	return codeRecoveryOwner{root: root, account: account, principal: principal}, nil
+}
+
+func recoverCodeBinding(ctx context.Context, tx pgx.Tx, in CodeAdmission) error {
+	source, err := codeRecoverySource(ctx, tx, in)
+	if err != nil {
+		return err
+	}
+	root, account, principal := source.root, source.account, source.principal
 	if in.Recovery.AccountID != "" {
 		if in.Recovery.AccountID != account || in.Recovery.GrantGeneration < 1 {
 			return codemode.Refuse(409, "code_recovery_unsafe")
