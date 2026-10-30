@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/tyk-swe/olp/internal/antigravityauth"
 	"github.com/tyk-swe/olp/internal/testutil"
 	"github.com/tyk-swe/olp/sdk/plugin/abi"
 )
@@ -116,5 +117,15 @@ func TestCodexImportFixturesDeclareUsableGrantEnrollment(t *testing.T) {
 				t.Fatalf("could not install the import fixture: %v", err)
 			}
 		})
+	}
+}
+
+func TestAntigravityManifestCanEnrollThroughGrantHost(t *testing.T) {
+	encoded, err := json.Marshal(antigravityauth.Manifest())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := decodeManifest(encoded, false); err != nil {
+		t.Fatalf("headless subscription plugin could not be installed: %v", err)
 	}
 }

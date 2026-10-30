@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/antigravityauth"
 	"github.com/tyk-swe/olp/internal/claudeauth"
 	"github.com/tyk-swe/olp/internal/codemode"
 	"github.com/tyk-swe/olp/internal/codeplans"
@@ -66,7 +67,16 @@ const (
 
 // Endpoint describes one native operation. Operation names the wire parser's
 // operation, independently of either the client or upstream URL.
+type Target string
+
+const TargetAntigravity Target = "antigravity"
+
+func (t Target) Enabled(route codemode.Route) bool {
+	return t == "" || t == TargetAntigravity && route.ChatToAntigravity
+}
+
 type Endpoint struct {
+	Target                   Target
 	ClientPath, UpstreamPath string
 	Protocol                 codemode.Protocol
 	Operation                string
@@ -137,6 +147,17 @@ var vendors = []Vendor{
 			"Claude subscription forwarding and native tool workflows are fixture-tested only. Live subscription inference is not qualified.",
 			"Hard token budgets require a separately proven operation/model bound; this authentication adapter supplies none.",
 		},
+	},
+	{
+		Adapter: codemode.AdapterAntigravity, Name: "Antigravity", profiles: []string{antigravityauth.ProfileID}, manifest: antigravityauth.Manifest,
+		credential: antigravityCredential, modelProtocol: antigravityModelProtocol,
+		endpoints: []Endpoint{{ClientPath: "v1/chat/completions", UpstreamPath: "v1internal:generateContent", Protocol: codemode.ProtocolChat, Operation: "chat/completions", Identity: IdentityClient, CredentialHeader: "Authorization", Observation: ObserveUsage, transports: HTTP, Target: TargetAntigravity}},
+		clients:   []Client{{ID: ClientOpenCode, Provider: "olp-antigravity", URLSuffix: "/v1", Protocol: codemode.ProtocolChat}},
+		enrollmentNotes: []string{
+			"Supply an authorized Google desktop OAuth client ID as the provider option. Complete masked enrollment with callback_url and client_secret JSON. Client secrets and refresh tokens remain encrypted.",
+			"Enrollment verifies the Google subject and an existing cloudcode project. It does not onboard accounts or establish live inference, entitlement, allowance or hard token bounds.",
+		},
+		notes: []string{"Explicit chat_to_antigravity policy enables controlled Gemini text and function tools over HTTP or SSE. Signed reasoning, media and server tools are unsupported. Client identity and prompt compatibility remain disabled. Live subscription and OpenCode workflow qualification remain pending."},
 	},
 	{
 		Adapter: codemode.AdapterOpenCodeGo, Name: "OpenCode Go", profiles: []string{codeplans.OpenCodeGoProfile}, manifest: codeplans.OpenCodeGoManifest, KeyGrant: true,
@@ -230,6 +251,9 @@ func validate(registry []Vendor) error {
 }
 
 func (e Endpoint) valid() bool {
+	if e.Target != "" && (e.Target != TargetAntigravity || e.Protocol != codemode.ProtocolChat || e.transports != HTTP) {
+		return false
+	}
 	if e.ClientPath == "" || e.UpstreamPath == "" || e.CredentialHeader == "" || e.transports == 0 || e.transports & ^(HTTP|WebSocket) != 0 {
 		return false
 	}
@@ -434,7 +458,7 @@ func SQLAdapters(connections string) string {
 
 func RouteEndpoint(route codemode.Route, adapter Vendor, path string) (Endpoint, bool) {
 	if endpoint, ok := adapter.Endpoint(path); ok {
-		return endpoint, true
+		return endpoint, endpoint.Target.Enabled(route)
 	}
 	if route.MessagesToCodex && path == "v1/messages" && adapter.Adapter == codemode.AdapterCodex {
 		return adapter.Endpoint("responses")
@@ -444,7 +468,7 @@ func RouteEndpoint(route codemode.Route, adapter Vendor, path string) (Endpoint,
 
 func RouteClientProtocol(route codemode.Route, adapter Vendor, client, model string) (codemode.Protocol, bool) {
 	if protocol, ok := adapter.Protocol(client, model); ok {
-		return protocol, true
+		return protocol, slices.ContainsFunc(adapter.endpoints, func(endpoint Endpoint) bool { return endpoint.Protocol == protocol && endpoint.Target.Enabled(route) })
 	}
 	if !route.MessagesToCodex || adapter.Adapter != codemode.AdapterCodex || client != ClientClaudeCode {
 		return "", false
@@ -454,9 +478,28 @@ func RouteClientProtocol(route codemode.Route, adapter Vendor, client, model str
 }
 
 func RouteClients(route codemode.Route, adapter Vendor) []string {
-	native := adapter.Clients()
+	native := func() []string {
+		if slices.ContainsFunc(adapter.endpoints, func(endpoint Endpoint) bool { return endpoint.Target.Enabled(route) }) {
+			return adapter.Clients()
+		}
+		return nil
+	}()
 	if !route.MessagesToCodex || adapter.Adapter != codemode.AdapterCodex {
 		return native
 	}
 	return slices.Concat(native, []string{ClientClaudeCode})
+}
+
+func antigravityModelProtocol(model string) codemode.Protocol {
+	if strings.HasPrefix(model, "gemini-") {
+		return codemode.ProtocolChat
+	}
+	return ""
+}
+
+func (e Endpoint) Path(stream bool) string {
+	if e.Target == TargetAntigravity && stream {
+		return "v1internal:streamGenerateContent"
+	}
+	return e.UpstreamPath
 }

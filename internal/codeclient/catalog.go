@@ -50,7 +50,7 @@ func modelCapabilities(route codemode.Route, id string, declarations []codeadapt
 				}
 			}
 			for _, endpoint := range declaration.Endpoints() {
-				if !declaration.ServesModel(endpoint.Protocol, id) {
+				if !endpoint.Target.Enabled(route) || !declaration.ServesModel(endpoint.Protocol, id) {
 					continue
 				}
 				transports := slices.Collect(func(yield func(string) bool) {

@@ -49,7 +49,7 @@ func openCodeConfiguration(route codemode.Route, adapters []codemode.Adapter, of
 		for _, adapter := range adapters {
 			vendor, _ := codeadapter.Lookup(adapter)
 			resolved, err := route.ResolveModel(codemode.Operation{Model: m})
-			if err != nil || !vendor.Reaches(codeadapter.ClientOpenCode, resolved.Model) {
+			if err != nil || !routeReaches(route, vendor, codeadapter.ClientOpenCode, resolved.Model) {
 				continue
 			}
 			if client, ok := vendor.Client(codeadapter.ClientOpenCode); ok && client.Provider != "" {
@@ -77,7 +77,7 @@ func openCodeConfiguration(route codemode.Route, adapters []codemode.Adapter, of
 			definitions := maps.Collect(func(yield func(string, modelDefinition) bool) {
 				for _, model := range models {
 					resolved, _ := route.ResolveModel(codemode.Operation{Model: model})
-					protocol, _ := vendor.Protocol(codeadapter.ClientOpenCode, resolved.Model)
+					protocol, _ := codeadapter.RouteClientProtocol(route, vendor, codeadapter.ClientOpenCode, resolved.Model)
 					sdk := openCodeSDK(protocol)
 					if !yield(model, modelDefinition{ID: model, Name: model, Provider: modelProvider{NPM: sdk}}) {
 						return
