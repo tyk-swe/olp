@@ -47,17 +47,19 @@ func (s *Server) writeCodeAccount(r *http.Request, _ access.Principal) (access.R
 	if err := access.Decode(r, &in); err != nil {
 		return access.Reply{}, err
 	}
-	if err := in.Validate(); err != nil {
-		return access.Reply{}, err
+	input, validationError := in.Validated()
+	if validationError != nil {
+		return access.Reply{}, validationError
 	}
-	return s.Access.CodeWrite(r, "code_accounts", "code_account", in.ProjectID, in, func(tx pgx.Tx, p access.Principal, id, etag string) (any, error) {
-		return SaveCodeAccount(r.Context(), tx, p, id, etag, in, r.PathValue("id") != "")
+	return s.Access.CodeWrite(r, "code_accounts", "code_account", input.ProjectID, input, func(tx pgx.Tx, p access.Principal, id, etag string) (any, error) {
+		return SaveCodeAccount(r.Context(), tx, p, id, etag, input, r.PathValue("id") != "")
 	})
 }
 
-func SaveCodeAccount(ctx context.Context, tx pgx.Tx, p access.Principal, id, etag string, in CodeAccountInput, existing bool) (json.RawMessage, error) {
-	if err := in.Validate(); err != nil {
-		return nil, err
+func SaveCodeAccount(ctx context.Context, tx pgx.Tx, p access.Principal, id, etag string, raw CodeAccountInput, existing bool) (json.RawMessage, error) {
+	in, validationError := raw.Validated()
+	if validationError != nil {
+		return nil, validationError
 	}
 	if err := p.Project(&in.ProjectID, access.Change); err != nil {
 		return nil, err
@@ -94,17 +96,23 @@ func SaveCodeAccount(ctx context.Context, tx pgx.Tx, p access.Principal, id, eta
 	return body, err
 }
 
-func (in CodeAccountInput) Validate() error {
+func (in CodeAccountInput) validate() error {
 	if err := access.ValidText("name", in.Name, 100); err != nil {
 		return err
-	}
-	for _, id := range []string{in.ProjectID, in.ProviderID, in.CredentialID} {
-		if _, err := access.ParseUUID(id); err != nil {
-			return err
-		}
 	}
 	if err := codemode.ValidateModels(in.Models); err != nil {
 		return access.Invalid("models", err.Error())
 	}
 	return nil
 }
+
+func (in CodeAccountInput) Validated() (CodeAccountInput, error) {
+	ids, err := access.ParseUUIDs([]string{in.ProjectID, in.ProviderID, in.CredentialID})
+	if err != nil {
+		return CodeAccountInput{}, err
+	}
+	canonical := CodeAccountInput{ProjectID: ids[0], ProviderID: ids[1], CredentialID: ids[2], Name: in.Name, Enabled: in.Enabled, Models: in.Models}
+	return canonical, canonical.validate()
+}
+
+func (in CodeAccountInput) Validate() error { _, err := in.Validated(); return err }

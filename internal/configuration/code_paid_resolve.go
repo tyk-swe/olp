@@ -165,8 +165,37 @@ func resolveCodePaid(ctx context.Context, q access.Queryer, publication *CodePub
 	if err := routes.ValidateCodePaidProviders(codemode.Route{Models: policy.Models, PaidParticipation: policy.PaidParticipation, PaidTargets: policy.input(project, "", policy.Pool).PaidTargets}, providers); err != nil {
 		return nil, err
 	}
+	for _, target := range policy.PaidTargets {
+		provider := providers[target.Provider]
+		slot := slices.IndexFunc(provider.Slots, func(slot routing.Slot) bool { return slot.ID == target.Slot })
+		if slot < 0 {
+			return nil, access.Invalid("code.paid_connections.slots", "Resolve every frozen paid target slot before checking its destination limits.")
+		}
+		if err := validateCodePaidLimits(ctx, q, provider, provider.Slots[slot], project); err != nil {
+			return nil, err
+		}
+	}
 	if len(providers) != len(publication.PaidConnections) {
 		return nil, access.Invalid("code.paid_connections", "Frozen paid provider identities must be distinct.")
 	}
 	return providers, nil
+}
+
+func validateCodePaidLimits(ctx context.Context, q access.Queryer, provider routing.Provider, slot routing.Slot, project string) error {
+	var configurationJSON, slotJSON []byte
+	if err := q.QueryRow(ctx, `SELECT p.configuration,s.limits FROM olp.providers p JOIN olp.provider_slots s ON s.provider_id=p.id WHERE p.id=$1 AND s.id=$2 AND p.project_id=$3`, provider.ID, slot.ID, project).Scan(&configurationJSON, &slotJSON); err != nil {
+		return err
+	}
+	var configuration routing.Configuration
+	if err := json.Unmarshal(configurationJSON, &configuration); err != nil {
+		return err
+	}
+	var liveSlot routing.Slot
+	if err := json.Unmarshal(slotJSON, &liveSlot); err != nil {
+		return err
+	}
+	if !routing.CodePaidLimitsMatch(configuration.Options.Limits, provider.Limits, liveSlot, slot) {
+		return access.Invalid("code.paid_connections.limits", "Frozen paid provider and slot limits must match the destination's live serving policy.")
+	}
+	return nil
 }

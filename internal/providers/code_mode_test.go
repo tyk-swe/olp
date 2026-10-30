@@ -2,6 +2,7 @@ package providers_test
 
 import (
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/tyk-swe/olp/internal/access"
@@ -11,9 +12,20 @@ import (
 func TestCodeConfigurationAccountRequiresProjectManagement(t *testing.T) {
 	const project = "0192cf87-d4ab-7f2e-a8b1-c2d3e4f50601"
 	principal := access.Principal{Projects: map[string]string{project: "developer"}}
-	_, err := providers.SaveCodeAccount(t.Context(), nil, principal, project, project, providers.CodeAccountInput{ProjectID: project, ProviderID: project, CredentialID: project, Name: "account", Models: []string{"native"}, Enabled: true}, false)
+	_, err := providers.SaveCodeAccount(t.Context(), nil, principal, project, project, providers.CodeAccountInput{ProjectID: strings.ToUpper(project), ProviderID: project, CredentialID: project, Name: "account", Models: []string{"native"}, Enabled: true}, false)
 	var problem *access.Problem
 	if !errors.As(err, &problem) || problem.Status != 403 {
 		t.Fatalf("project member changed a coding account, got %v", err)
+	}
+}
+
+func TestCodeConfigurationAccountNormalizesIdentity(t *testing.T) {
+	const id = "0192cf87-d4ab-7f2e-a8b1-c2d3e4f50601"
+	input, err := (providers.CodeAccountInput{ProjectID: strings.ToUpper(id), ProviderID: strings.ToUpper(id), CredentialID: strings.ToUpper(id), Name: "account", Models: []string{"native"}}).Validated()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if input.ProjectID != id || input.ProviderID != id || input.CredentialID != id {
+		t.Fatalf("validated account kept noncanonical identity %+v", input)
 	}
 }

@@ -57,13 +57,13 @@ func exportCodePaidPolicy(route codemode.Route, refs map[string]CodePaidTarget) 
 	if err != nil {
 		return CodeRoutePolicy{}, err
 	}
-	return CodeRoutePolicy{Pool: policy.Pool, Models: policy.Models, Enabled: policy.Enabled, ModelPools: policy.ModelPools, InitialRecoveryAttempts: policy.InitialRecoveryAttempts, ModelRewriting: policy.ModelRewriting, Aliases: policy.Aliases, MessagesToCodex: policy.MessagesToCodex, Tools: policy.Tools, MaxBodyBytes: policy.MaxBodyBytes, PaidParticipation: policy.PaidParticipation, PaidTargets: maps.Collect(func(yield func(string, CodePaidTarget) bool) {
+	return codePolicyPaid(policy, maps.Collect(func(yield func(string, CodePaidTarget) bool) {
 		for _, target := range targets {
 			if !yield(target.Model, target.Target) {
 				return
 			}
 		}
-	})}, nil
+	})), nil
 }
 func exportCodePaid(ctx context.Context, q access.Queryer, frozen map[string]routing.Provider) (map[string]CodePaidConnection, error) {
 	type named struct {

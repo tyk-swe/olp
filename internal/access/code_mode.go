@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"net/http"
 	"slices"
 
@@ -180,11 +181,12 @@ func (s *Server) writeCodePool(r *http.Request, _ Principal) (Reply, error) {
 	if err := Decode(r, &in); err != nil {
 		return Reply{}, err
 	}
-	if err := in.Validate(); err != nil {
-		return Reply{}, err
+	input, validationError := in.Validated()
+	if validationError != nil {
+		return Reply{}, validationError
 	}
-	return s.CodeWrite(r, "code_pools", "code_pool", in.ProjectID, in, func(tx pgx.Tx, p Principal, id, etag string) (any, error) {
-		return SaveCodePool(r.Context(), tx, p, id, etag, in, r.PathValue("id") != "")
+	return s.CodeWrite(r, "code_pools", "code_pool", input.ProjectID, input, func(tx pgx.Tx, p Principal, id, etag string) (any, error) {
+		return SaveCodePool(r.Context(), tx, p, id, etag, input, r.PathValue("id") != "")
 	})
 }
 
@@ -214,17 +216,19 @@ func (s *Server) writeCodeBudget(r *http.Request, _ Principal) (Reply, error) {
 	if err := Decode(r, &in); err != nil {
 		return Reply{}, err
 	}
-	if err := in.Validate(); err != nil {
-		return Reply{}, err
+	input, validationError := in.Validated()
+	if validationError != nil {
+		return Reply{}, validationError
 	}
-	return s.CodeWrite(r, "code_token_budgets", "code_budget", in.ProjectID, in, func(tx pgx.Tx, p Principal, id, etag string) (any, error) {
-		return SaveCodeBudget(r.Context(), tx, p, id, etag, in, r.PathValue("id") != "")
+	return s.CodeWrite(r, "code_token_budgets", "code_budget", input.ProjectID, input, func(tx pgx.Tx, p Principal, id, etag string) (any, error) {
+		return SaveCodeBudget(r.Context(), tx, p, id, etag, input, r.PathValue("id") != "")
 	})
 }
 
-func SaveCodePool(ctx context.Context, tx pgx.Tx, p Principal, id, etag string, in CodePoolInput, existing bool) (json.RawMessage, error) {
-	if err := in.Validate(); err != nil {
-		return nil, err
+func SaveCodePool(ctx context.Context, tx pgx.Tx, p Principal, id, etag string, raw CodePoolInput, existing bool) (json.RawMessage, error) {
+	in, validationError := raw.Validated()
+	if validationError != nil {
+		return nil, validationError
 	}
 	if err := p.Project(&in.ProjectID, Change); err != nil {
 		return nil, err
@@ -293,9 +297,10 @@ func SaveCodePool(ctx context.Context, tx pgx.Tx, p Principal, id, etag string, 
 	return result, queryErr
 }
 
-func SaveCodeBudget(ctx context.Context, tx pgx.Tx, p Principal, id, etag string, in CodeBudgetInput, existing bool) (json.RawMessage, error) {
-	if err := in.Validate(); err != nil {
-		return nil, err
+func SaveCodeBudget(ctx context.Context, tx pgx.Tx, p Principal, id, etag string, raw CodeBudgetInput, existing bool) (json.RawMessage, error) {
+	in, validationError := raw.Validated()
+	if validationError != nil {
+		return nil, validationError
 	}
 	if err := p.Project(&in.ProjectID, Change); err != nil {
 		return nil, err
@@ -329,7 +334,7 @@ func SaveCodeBudget(ctx context.Context, tx pgx.Tx, p Principal, id, etag string
 	return body, err
 }
 
-func (in CodePoolInput) Validate() error {
+func (in CodePoolInput) validate() error {
 	if err := ValidText("name", in.Name, 100); err != nil {
 		return err
 	}
@@ -339,25 +344,15 @@ func (in CodePoolInput) Validate() error {
 	if in.AccountIDs == nil || in.APIKeyIDs == nil || len(in.AccountIDs) > 100 || len(in.APIKeyIDs) > 100 {
 		return Invalid("assignments", "Use at most 100 accounts and keys.")
 	}
-	for _, id := range append(slices.Clone(in.AccountIDs), in.APIKeyIDs...) {
-		if _, err := ParseUUID(id); err != nil {
-			return err
-		}
-	}
 	for account, weight := range in.AccountWeights {
 		if !slices.Contains(in.AccountIDs, account) || weight < 1 || weight > 2147483647 {
 			return Invalid("account_weights", "Weights must be between 1 and 2147483647 and belong to assigned accounts.")
 		}
 	}
-	if in.OwnerUserID != nil {
-		if _, err := ParseUUID(*in.OwnerUserID); err != nil {
-			return err
-		}
-	}
 	return nil
 }
 
-func (in CodeBudgetInput) Validate() error {
+func (in CodeBudgetInput) validate() error {
 	if in.DailyTokens == nil && in.MonthlyTokens == nil {
 		return Invalid("tokens", "Set a daily or monthly token cap.")
 	}
@@ -366,12 +361,55 @@ func (in CodeBudgetInput) Validate() error {
 			return Invalid("tokens", "Use a positive safe integer.")
 		}
 	}
-	for _, id := range []*string{in.RouteID, in.APIKeyID} {
-		if id != nil {
-			if _, err := ParseUUID(*id); err != nil {
-				return err
-			}
-		}
-	}
 	return nil
 }
+
+func (in CodePoolInput) Validated() (CodePoolInput, error) {
+	if in.AccountIDs == nil || in.APIKeyIDs == nil || len(in.AccountIDs) > 100 || len(in.APIKeyIDs) > 100 {
+		return CodePoolInput{}, Invalid("assignments", "Use at most 100 accounts and keys.")
+	}
+	weightKeys := slices.Sorted(maps.Keys(in.AccountWeights))
+	ids, err := ParseUUIDs(slices.Concat([]string{in.ProjectID}, in.AccountIDs, in.APIKeyIDs, weightKeys))
+	if err != nil {
+		return CodePoolInput{}, err
+	}
+	owner, ownerError := ParseOptionalUUID(in.OwnerUserID)
+	if ownerError != nil {
+		return CodePoolInput{}, ownerError
+	}
+	accountEnd := 1 + len(in.AccountIDs)
+	keyEnd := accountEnd + len(in.APIKeyIDs)
+	canonicalWeights := ids[keyEnd:]
+	if len(slices.Compact(slices.Sorted(slices.Values(canonicalWeights)))) != len(weightKeys) {
+		return CodePoolInput{}, Invalid("account_weights", "Assign each account weight once.")
+	}
+	weights := maps.Collect(func(yield func(string, int64) bool) {
+		for index, key := range weightKeys {
+			if !yield(canonicalWeights[index], in.AccountWeights[key]) {
+				return
+			}
+		}
+	})
+	canonical := CodePoolInput{ProjectID: ids[0], Name: in.Name, Kind: in.Kind, OwnerUserID: owner, AccountIDs: ids[1:accountEnd], APIKeyIDs: ids[accountEnd:keyEnd], AccountWeights: weights}
+	return canonical, canonical.validate()
+}
+func (in CodeBudgetInput) Validated() (CodeBudgetInput, error) {
+	project, projectError := ParseUUID(in.ProjectID)
+	if projectError != nil {
+		return CodeBudgetInput{}, projectError
+	}
+	route, routeError := ParseOptionalUUID(in.RouteID)
+	if routeError != nil {
+		return CodeBudgetInput{}, routeError
+	}
+	key, keyError := ParseOptionalUUID(in.APIKeyID)
+	if keyError != nil {
+		return CodeBudgetInput{}, keyError
+	}
+	canonical := CodeBudgetInput{ProjectID: project, RouteID: route, APIKeyID: key, DailyTokens: in.DailyTokens, MonthlyTokens: in.MonthlyTokens, Enabled: in.Enabled}
+	return canonical, canonical.validate()
+}
+
+func (in CodePoolInput) Validate() error { _, err := in.Validated(); return err }
+
+func (in CodeBudgetInput) Validate() error { _, err := in.Validated(); return err }

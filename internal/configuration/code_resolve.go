@@ -367,7 +367,8 @@ func codeBoundValue(ref *string, bindings map[string]string) string {
 	if ref == nil {
 		return ""
 	}
-	return bindings[*ref]
+	value, _ := codeBound(*ref, bindings)
+	return value
 }
 
 func validateCodeFrozenCredentials(ctx context.Context, q access.Queryer, provider string, configuration providers.Configuration, poolRef string, accounts []resolvedCodeResource[providers.CodeAccountInput], pools []resolvedCodeResource[access.CodePoolInput]) error {

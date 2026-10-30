@@ -871,29 +871,46 @@ func newPaidCodeFixture(t *testing.T, endpoints ...string) (*codeFixture, routin
 }
 func newPaidCodeFixturePolicy(t *testing.T, restricted bool, endpoints ...string) (*codeFixture, routing.Provider, routing.Slot) {
 	t.Helper()
-	f := newCodeFixture(t)
+	return publishPaidCodeFixture(t, newCodeFixture(t), restricted, nil, endpoints...)
+}
+func publishPaidCodeFixture(t *testing.T, f *codeFixture, restricted bool, requestedLimits *routing.Limits, endpoints ...string) (*codeFixture, routing.Provider, routing.Slot) {
+	t.Helper()
+	model := f.route.Models[0]
 	endpoint := func() string {
 		if len(endpoints) > 0 {
 			return endpoints[0]
 		}
 		return "https://fixture.invalid"
 	}()
-	created := f.h.want(f.owner, "POST", "/api/v1/providers", map[string]any{"project_id": f.project, "name": "Metered fixture", "configuration": map[string]any{"kind": "openai", "auth_mode": "api_key", "profile_id": "openai-responses", "profile_revision": connectors.ProfileRevision, "endpoint": endpoint, "options": map[string]any{"vendor_id": "openai"}}, "credential": "fixture-paid-secret", "model": "native-model"}, idem("paid-provider"), 201)
+	created := f.h.want(f.owner, "POST", "/api/v1/providers", map[string]any{"project_id": f.project, "name": "Metered fixture", "configuration": map[string]any{"kind": "openai", "auth_mode": "api_key", "profile_id": "openai-responses", "profile_revision": connectors.ProfileRevision, "endpoint": endpoint, "options": map[string]any{"vendor_id": "openai", "limits": requestedLimits}}, "credential": "fixture-paid-secret", "model": model}, idem("paid-provider"), 201)
 	providerID := created["id"].(string)
-	var slot routing.Slot
-	slot.Enabled = true
-	slot.Weight = 1
-	if restricted {
-		slot.AllowedAPIKeys = []string{f.key}
-	}
-	var credential string
+
+	var slotID, slotName, credential string
 	var version int
-	if err := f.h.Pool.QueryRow(t.Context(), `SELECT s.id::text,s.name,s.credential_id::text,c.version FROM olp.provider_slots s JOIN olp.provider_credentials c ON c.id=s.credential_id WHERE s.provider_id=$1 AND s.is_default`, providerID).Scan(&slot.ID, &slot.Name, &credential, &version); err != nil {
+	if err := f.h.Pool.QueryRow(t.Context(), `SELECT s.id::text,s.name,s.credential_id::text,c.version FROM olp.provider_slots s JOIN olp.provider_credentials c ON c.id=s.credential_id WHERE s.provider_id=$1 AND s.is_default`, providerID).Scan(&slotID, &slotName, &credential, &version); err != nil {
 		t.Fatal(err)
 	}
-	slot.CredentialID = &credential
-	slot.CredentialVersion = &version
-	models, err := json.Marshal([]routing.RevisionModel{{ID: access.NewID(), UpstreamModel: "native-model", DisplayName: "Native fixture", Capabilities: []routing.RevisionCapability{{Operation: "generation", Surface: "openai", Mode: "unary", Source: "certified"}}}})
+	limits := func() routing.Limits {
+		if requestedLimits == nil {
+			return routing.Limits{}
+		}
+		return *requestedLimits
+	}()
+	keys := func() []string {
+		if restricted {
+			return []string{f.key}
+		}
+		return nil
+	}()
+	slot := routing.Slot{ID: slotID, Name: slotName, Enabled: true, Weight: 1, CredentialID: &credential, CredentialVersion: &version, AllowedAPIKeys: keys, RequestsPerMinute: limits.RequestsPerMinute, TokensPerMinute: limits.TokensPerMinute, MaxConcurrency: limits.MaxConcurrency, Supply: limits.Supply}
+	if requestedLimits != nil {
+		encodedLimits, err := json.Marshal(requestedLimits)
+		if err != nil {
+			t.Fatal(err)
+		}
+		f.exec(t, `UPDATE olp.provider_slots SET limits=$2 WHERE id=$1`, slot.ID, encodedLimits)
+	}
+	models, err := json.Marshal([]routing.RevisionModel{{ID: access.NewID(), UpstreamModel: model, DisplayName: "Native fixture", Capabilities: []routing.RevisionCapability{{Operation: "generation", Surface: "openai", Mode: "unary", Source: "certified"}}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -905,7 +922,7 @@ func newPaidCodeFixturePolicy(t *testing.T, restricted bool, endpoints ...string
 	f.exec(t, `UPDATE olp.provider_models SET enabled=true WHERE provider_id=$1`, providerID)
 	f.exec(t, `INSERT INTO olp.provider_revisions(id,provider_id,revision,name,configuration,models,slots,credential_version,source_etag,activated_by) SELECT $2,id,1,name,configuration,$3,$4,$5,etag,created_by FROM olp.providers WHERE id=$1`, providerID, revision, models, slots, version)
 	f.exec(t, `UPDATE olp.providers SET state='active',active_revision=1,active_revision_id=$2 WHERE id=$1`, providerID, revision)
-	draft := map[string]any{"project_id": f.project, "slug": f.route.Slug, "pool_id": f.pool, "models": f.route.Models, "enabled": true, "paid_participation": true, "paid_targets": map[string]codemode.PaidTarget{"native-model": {ProviderID: providerID, SlotID: slot.ID}}}
+	draft := map[string]any{"project_id": f.project, "slug": f.route.Slug, "pool_id": f.pool, "models": f.route.Models, "enabled": true, "paid_participation": true, "paid_targets": map[string]codemode.PaidTarget{model: {ProviderID: strings.ToUpper(providerID), SlotID: strings.ToUpper(slot.ID)}}}
 	saved := f.h.want(f.owner, "PUT", "/api/v1/code/routes/"+f.route.ID, draft, withMatch(f.routeRecord, idem("paid-draft")), 200)
 	published := f.h.want(f.owner, "POST", "/api/v1/code/routes/"+f.route.ID+"/publish", nil, withMatch(saved, idem("paid-publish")), 200)
 	encoded, err := json.Marshal(published)

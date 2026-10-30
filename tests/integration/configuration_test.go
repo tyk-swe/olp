@@ -5,18 +5,21 @@ package integration_test
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/tyk-swe/olp/internal/codemode"
-	"github.com/tyk-swe/olp/internal/codeplans"
-	"github.com/tyk-swe/olp/internal/configuration"
-	"github.com/tyk-swe/olp/internal/routes"
 	"io"
 	"net/http"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/codemode"
+	"github.com/tyk-swe/olp/internal/codeplans"
+	"github.com/tyk-swe/olp/internal/configuration"
+	"github.com/tyk-swe/olp/internal/providers"
+	"github.com/tyk-swe/olp/internal/routes"
+	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/secrets"
 )
 
@@ -500,10 +503,13 @@ func TestCodeConfigurationCrossProjectRoundTrip(t *testing.T) {
 	profile := h.want(owner, "GET", "/api/v1/profile", nil, nil, 200)
 	ownerID := profile["id"].(string)
 	account := codeDiscoveryResponse[codemode.Account](t, f.accounts[0])
+	h.want(owner, "PUT", "/api/v1/code/accounts/"+account.ID, providers.CodeAccountInput{ProjectID: strings.ToUpper(f.project), ProviderID: strings.ToUpper(account.ProviderID), CredentialID: strings.ToUpper(account.CredentialID), Name: account.Name, Enabled: account.Enabled, Models: account.Models}, etagHeader(f.accounts[0]), 200)
 	personal := h.want(owner, "POST", "/api/v1/code/pools", access.CodePoolInput{ProjectID: f.project, Name: "Personal portable pool", Kind: "personal", OwnerUserID: &ownerID, AccountIDs: []string{account.ID}, AccountWeights: map[string]int64{account.ID: 3}, APIKeyIDs: []string{f.keyID}}, idem("portable-personal"), 201)
 	poolID := personal["id"].(string)
+	upperOwner := strings.ToUpper(ownerID)
+	h.want(owner, "PUT", "/api/v1/code/pools/"+poolID, access.CodePoolInput{ProjectID: strings.ToUpper(f.project), Name: "Personal portable pool", Kind: "personal", OwnerUserID: &upperOwner, AccountIDs: []string{strings.ToUpper(account.ID)}, AccountWeights: map[string]int64{strings.ToUpper(account.ID): 3}, APIKeyIDs: []string{strings.ToUpper(f.keyID)}}, etagHeader(personal), 200)
 	routeID := f.route["id"].(string)
-	policy := routes.CodeRouteInput{ProjectID: f.project, Slug: "qualification", PoolID: poolID, Models: account.Models, Enabled: true, ModelRewriting: true, Aliases: map[string]string{"portable": account.Models[0]}, ModelPools: map[string][]string{"portable": account.Models}, InitialRecoveryAttempts: 2, MessagesToCodex: true, ChatToAntigravity: true, MaxBodyBytes: new(int64(1048576)), Tools: &codemode.ResearchTools{AccountID: account.ID, Services: []string{"search"}}}
+	policy := routes.CodeRouteInput{ProjectID: strings.ToUpper(f.project), Slug: "qualification", PoolID: strings.ToUpper(poolID), Models: account.Models, Enabled: true, ModelRewriting: true, Aliases: map[string]string{"portable": account.Models[0]}, ModelPools: map[string][]string{"portable": account.Models}, InitialRecoveryAttempts: 2, MessagesToCodex: true, ChatToAntigravity: true, MaxBodyBytes: new(int64(1048576)), Tools: &codemode.ResearchTools{AccountID: strings.ToUpper(account.ID), Services: []string{"search"}}}
 	draft := h.want(owner, "PUT", "/api/v1/code/routes/"+routeID, policy, etagHeader(f.route), 200)
 	published := h.want(owner, "POST", "/api/v1/code/routes/"+routeID+"/publish", nil, withMatch(draft, idem("portable-publish")), 200)
 	unpublished := policy
@@ -529,7 +535,7 @@ func TestCodeConfigurationCrossProjectRoundTrip(t *testing.T) {
 		t.Fatal("code configuration missing")
 	}
 	sourceRoute := sourceCode.Routes[slices.IndexFunc(sourceCode.Routes, func(r configuration.CodeRouteEntry) bool { return r.ID == routeID })]
-	if sourceRoute.Published == nil || sourceRoute.Draft.Enabled || !sourceRoute.Published.Policy.Enabled {
+	if sourceRoute.Published == nil || sourceRoute.Draft.Enabled || !sourceRoute.Published.Policy.Enabled || !sourceRoute.Draft.ChatToAntigravity || !sourceRoute.Published.Policy.ChatToAntigravity {
 		t.Fatal("draft and publication were not preserved separately")
 	}
 	destinationProject := createProject(h, owner, "Portable destination")
@@ -556,20 +562,20 @@ func TestCodeConfigurationCrossProjectRoundTrip(t *testing.T) {
 	copiedBudget := sourceBudget
 	copiedBudget.Project = "Portable destination"
 	document := configuration.Document{APIVersion: configuration.APIVersion, Projects: []configuration.ProjectEntry{}, Providers: []configuration.ProviderEntry{}, Routes: []configuration.RouteEntry{}, Code: &configuration.CodeConfiguration{Accounts: []configuration.CodeAccountEntry{copiedAccount}, Pools: []configuration.CodePoolEntry{copiedPool}, Routes: []configuration.CodeRouteEntry{copiedRoute}, Budgets: []configuration.CodeBudgetEntry{copiedBudget}}}
-	bindings := configuration.CodeBindings{Credentials: map[string]string{sourceAccount.CredentialRef: destinationCredential}, Users: map[string]string{*sourcePool.OwnerRef: ownerID}, APIKeys: map[string]string{sourcePool.APIKeyRefs[0]: destinationKeyID}}
+	bindings := configuration.CodeBindings{Credentials: map[string]string{sourceAccount.CredentialRef: strings.ToUpper(destinationCredential)}, Users: map[string]string{*sourcePool.OwnerRef: strings.ToUpper(ownerID)}, APIKeys: map[string]string{sourcePool.APIKeyRefs[0]: strings.ToUpper(destinationKeyID)}}
 	input := map[string]any{"document": document, "code_bindings": bindings}
-	h.want(owner, "POST", "/api/v1/configuration/plan", map[string]any{"document": document}, nil, 400)
+	h.want(owner, "POST", "/api/v1/configuration/plan", map[string]any{"document": document}, nil, 422)
 	wrongCredential := bindings
 	wrongCredential.Credentials = map[string]string{sourceAccount.CredentialRef: account.CredentialID}
-	h.want(owner, "POST", "/api/v1/configuration/plan", map[string]any{"document": document, "code_bindings": wrongCredential}, nil, 400)
+	h.want(owner, "POST", "/api/v1/configuration/plan", map[string]any{"document": document, "code_bindings": wrongCredential}, nil, 422)
 	wrongKey := bindings
 	wrongKey.APIKeys = map[string]string{sourcePool.APIKeyRefs[0]: f.keyID}
-	h.want(owner, "POST", "/api/v1/configuration/plan", map[string]any{"document": document, "code_bindings": wrongKey}, nil, 400)
+	h.want(owner, "POST", "/api/v1/configuration/plan", map[string]any{"document": document, "code_bindings": wrongKey}, nil, 422)
 	outsider := h.invite(owner, "portable-outsider@example.test", "developer")
 	outsiderProfile := h.want(outsider, "GET", "/api/v1/profile", nil, nil, 200)
 	wrongOwner := bindings
 	wrongOwner.Users = map[string]string{*sourcePool.OwnerRef: outsiderProfile["id"].(string)}
-	h.want(owner, "POST", "/api/v1/configuration/plan", map[string]any{"document": document, "code_bindings": wrongOwner}, nil, 400)
+	h.want(owner, "POST", "/api/v1/configuration/plan", map[string]any{"document": document, "code_bindings": wrongOwner}, nil, 422)
 	planned := h.want(owner, "POST", "/api/v1/configuration/plan", input, nil, 200)
 	if len(planned["blockers"].([]any))+len(planned["conflicts"].([]any)) != 0 {
 		t.Fatal("destination plan refused valid bindings", planned)
@@ -586,7 +592,7 @@ func TestCodeConfigurationCrossProjectRoundTrip(t *testing.T) {
 		Document configuration.Document `json:"document"`
 	}](t, h.want(owner, "GET", "/api/v1/configuration/export", nil, nil, 200))
 	restored := destinationExport.Document.Code.Routes[slices.IndexFunc(destinationExport.Document.Code.Routes, func(r configuration.CodeRouteEntry) bool { return r.Slug == slug })]
-	if restored.ID == sourceRoute.ID || restored.Published == nil || restored.Draft.Enabled || !restored.Published.Policy.Enabled || restored.Published.Policy.InitialRecoveryAttempts != sourceRoute.Published.Policy.InitialRecoveryAttempts || restored.Published.Policy.Aliases["portable"] != sourceRoute.Published.Policy.Aliases["portable"] || !restored.Published.Policy.MessagesToCodex || !restored.Published.Policy.ChatToAntigravity || restored.Published.Policy.Tools == nil {
+	if restored.ID == sourceRoute.ID || restored.Published == nil || restored.Draft.Enabled || !restored.Draft.ChatToAntigravity || !restored.Published.Policy.Enabled || restored.Published.Policy.InitialRecoveryAttempts != sourceRoute.Published.Policy.InitialRecoveryAttempts || restored.Published.Policy.Aliases["portable"] != sourceRoute.Published.Policy.Aliases["portable"] || !restored.Published.Policy.MessagesToCodex || !restored.Published.Policy.ChatToAntigravity || restored.Published.Policy.Tools == nil {
 		t.Fatal("destination did not retain independent effective and draft policies", restored)
 	}
 	restoredPools := h.want(owner, "GET", "/api/v1/code/pools?project_id="+destinationProject, nil, nil, 200)
@@ -596,30 +602,42 @@ func TestCodeConfigurationCrossProjectRoundTrip(t *testing.T) {
 	if restoredPool.Kind != sourcePool.Kind || restoredPool.OwnerUserID == nil || *restoredPool.OwnerUserID != ownerID || len(restoredPool.AccountWeights) != 1 || restoredPool.AccountWeights[restoredPool.AccountIDs[0]] != 3 || restoredPool.APIKeyIDs[0] != destinationKeyID {
 		t.Fatal("personal pool ownership, membership or weights changed", restoredPool)
 	}
+	budgetRecords := h.want(owner, "GET", "/api/v1/code/budgets?project_id="+destinationProject, nil, nil, 200)
 	budgets := codeDiscoveryResponse[struct {
 		Items []access.CodeBudgetInput `json:"items"`
-	}](t, h.want(owner, "GET", "/api/v1/code/budgets?project_id="+destinationProject, nil, nil, 200)).Items
+	}](t, budgetRecords).Items
 	if len(budgets) != 1 || budgets[0].DailyTokens == nil || *budgets[0].DailyTokens != daily || budgets[0].MonthlyTokens == nil || *budgets[0].MonthlyTokens != monthly || budgets[0].APIKeyID == nil || *budgets[0].APIKeyID != destinationKeyID {
 		t.Fatal("budget policy did not roundtrip", budgets)
 	}
 	h.refresh()
-	request, err := http.NewRequestWithContext(t.Context(), "POST", f.gateway.URL+"/code/"+slug+"/v1/chat/completions", strings.NewReader(`{"model":"portable","stream":true,"max_tokens":16,"messages":[{"role":"user","content":"configuration roundtrip"}]}`))
-	if err != nil {
-		t.Fatal(err)
+
+	call := func() (int, []byte) {
+		request, requestError := http.NewRequestWithContext(t.Context(), "POST", f.gateway.URL+"/code/"+slug+"/v1/chat/completions", strings.NewReader(`{"model":"portable","stream":true,"max_tokens":16,"messages":[{"role":"user","content":"configuration roundtrip"}]}`))
+		if requestError != nil {
+			t.Fatal(requestError)
+		}
+		request.Header.Set("Authorization", "Bearer "+destinationKey["secret"].(string))
+		request.Header.Set("Content-Type", "application/json")
+		response, responseError := f.gateway.Client().Do(request)
+		if responseError != nil {
+			t.Fatal(responseError)
+		}
+		defer response.Body.Close()
+		body, bodyError := io.ReadAll(response.Body)
+		if bodyError != nil {
+			t.Fatal(bodyError)
+		}
+		return response.StatusCode, body
 	}
-	request.Header.Set("Authorization", "Bearer "+destinationKey["secret"].(string))
-	request.Header.Set("Content-Type", "application/json")
-	response, err := f.gateway.Client().Do(request)
-	if err != nil {
-		t.Fatal(err)
+	blockedStatus, blockedBody := call()
+	if blockedStatus != 422 || !strings.Contains(string(blockedBody), "code_token_bound_unavailable") {
+		t.Fatalf("restored hard budget did not refuse an unbounded request %d %s", blockedStatus, blockedBody)
 	}
-	defer response.Body.Close()
-	body, err := io.ReadAll(response.Body)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if response.StatusCode != 200 || !strings.Contains(string(body), "CONTROLLED_ANSWER") {
-		t.Fatalf("restored route response %d %s", response.StatusCode, body)
+	budgetRecord := budgetRecords["items"].([]any)[0].(map[string]any)
+	h.want(owner, "PUT", "/api/v1/code/budgets/"+budgetRecord["id"].(string), access.CodeBudgetInput{ProjectID: strings.ToUpper(destinationProject), RouteID: new(strings.ToUpper(restored.ID)), APIKeyID: new(strings.ToUpper(destinationKeyID)), DailyTokens: &daily, MonthlyTokens: &monthly, Enabled: false}, etagHeader(budgetRecord), 200)
+	status, responseBody := call()
+	if status != 200 || !strings.Contains(string(responseBody), "CONTROLLED_ANSWER") {
+		t.Fatalf("restored route response after explicit budget disable %d %s", status, responseBody)
 	}
 	upstream := f.peer.received()
 	if !slices.ContainsFunc(upstream, func(r peerRequest) bool {
@@ -633,7 +651,11 @@ func TestCodeConfigurationCrossProjectRoundTrip(t *testing.T) {
 }
 
 func TestCodeConfigurationPaidFrozenPolicyRoundTrip(t *testing.T) {
-	f, paid, slot := newPaidCodeFixturePolicy(t, true)
+
+	coding := newCodingPlanFixture(t, "zai-coding", codeplans.ZAIProfile, "controlled-paid-portability-source-0123456789")
+	account := codeDiscoveryResponse[codemode.Account](t, coding.accounts[0])
+	fixture := &codeFixture{h: coding.h, owner: coding.owner, project: coding.project, key: coding.keyID, provider: account.ProviderID, credential: account.CredentialID, account: account.ID, pool: coding.pool["id"].(string), accountRecord: coding.accounts[0], poolRecord: coding.pool, routeRecord: coding.route, route: codeDiscoveryResponse[codemode.Route](t, coding.route)}
+	f, paid, slot := publishPaidCodeFixture(t, fixture, true, &routing.Limits{RequestsPerMinute: new(int64(10))})
 	exported := f.h.want(f.owner, "GET", "/api/v1/configuration/export", nil, nil, 200)
 	source := codePublicDecode[configuration.Document](t, exported["document"])
 	sourceRoute := source.Code.Routes[0]
@@ -642,10 +664,16 @@ func TestCodeConfigurationPaidFrozenPolicyRoundTrip(t *testing.T) {
 		t.Fatal("export lost frozen slot policy")
 	}
 	currentRevision := access.NewID()
-	f.exec(t, `INSERT INTO olp.provider_revisions(id,provider_id,revision,name,configuration,models,slots,credential_version,source_etag,activated_by) SELECT $2,provider_id,revision+1,name,configuration,jsonb_set(models,'{0,capabilities}',(models->0->'capabilities')||'[{"operation":"generation","surface":"openai","mode":"streaming","source":"certified"}]'::jsonb),jsonb_set(jsonb_set(slots,'{0,weight}','7'),'{0,requests_per_minute}','23'),credential_version,source_etag,activated_by FROM olp.provider_revisions WHERE id=$1`, paid.RevisionID, currentRevision)
+	f.exec(t, `INSERT INTO olp.provider_revisions(id,provider_id,revision,name,configuration,models,slots,credential_version,source_etag,activated_by) SELECT $2,provider_id,revision+1,name,configuration,jsonb_set(models,'{0,capabilities}',(models->0->'capabilities')||'[{"operation":"generation","surface":"openai","mode":"streaming","source":"certified"}]'::jsonb),jsonb_set(slots,'{0,weight}','7'),credential_version,source_etag,activated_by FROM olp.provider_revisions WHERE id=$1`, paid.RevisionID, currentRevision)
 	f.exec(t, `UPDATE olp.providers SET active_revision_id=$2,active_revision=active_revision+1 WHERE id=$1`, paid.ID, currentRevision)
-	route := configuration.CodeRouteEntry{ID: sourceRoute.ID, Project: sourceRoute.Project, Slug: "portable-paid-copy", Draft: sourceRoute.Draft, Published: sourceRoute.Published}
-	document := configuration.Document{APIVersion: configuration.APIVersion, Code: &configuration.CodeConfiguration{Accounts: source.Code.Accounts, Pools: source.Code.Pools, Routes: []configuration.CodeRouteEntry{route}, Budgets: source.Code.Budgets}}
+
+	poolRef := access.NewID()
+	pool := configuration.CodePoolEntry{ID: poolRef, Project: source.Code.Pools[0].Project, Name: "Portable paid pool", Kind: source.Code.Pools[0].Kind, Accounts: source.Code.Pools[0].Accounts, APIKeyRefs: source.Code.Pools[0].APIKeyRefs}
+	policy := configuration.CodeRoutePolicy{Pool: poolRef, Models: sourceRoute.Draft.Models, Enabled: sourceRoute.Draft.Enabled, PaidParticipation: sourceRoute.Draft.PaidParticipation, PaidTargets: sourceRoute.Draft.PaidTargets}
+	route := configuration.CodeRouteEntry{ID: sourceRoute.ID, Project: sourceRoute.Project, Slug: "portable-paid-copy", Draft: policy, Published: &configuration.CodePublication{Policy: policy, Connections: sourceRoute.Published.Connections, PaidConnections: sourceRoute.Published.PaidConnections}}
+	destinationKey := f.h.want(f.owner, "POST", "/api/v1/api-keys", map[string]any{"name": "Paid destination key", "project_id": f.project, "scopes": []string{"inference"}, "allowed_routes": []string{route.Slug}}, idem("paid-portable-key"), 201)
+	destinationKeyID := destinationKey["id"].(string)
+	document := configuration.Document{APIVersion: configuration.APIVersion, Code: &configuration.CodeConfiguration{Accounts: source.Code.Accounts, Pools: []configuration.CodePoolEntry{pool}, Routes: []configuration.CodeRouteEntry{route}, Budgets: source.Code.Budgets}}
 	credentials := map[string]string{source.Code.Accounts[0].CredentialRef: f.credential}
 	for _, snapshot := range route.Published.PaidConnections {
 		for _, portableSlot := range snapshot.Provider.Slots {
@@ -654,8 +682,17 @@ func TestCodeConfigurationPaidFrozenPolicyRoundTrip(t *testing.T) {
 			}
 		}
 	}
-	bindings := configuration.CodeBindings{Credentials: credentials, APIKeys: map[string]string{source.Code.Pools[0].APIKeyRefs[0]: f.key, frozen.SlotKeyRefs[slot.Name][0]: f.key}}
+	bindings := configuration.CodeBindings{Credentials: credentials, APIKeys: map[string]string{source.Code.Pools[0].APIKeyRefs[0]: destinationKeyID, frozen.SlotKeyRefs[slot.Name][0]: destinationKeyID}}
 	request := map[string]any{"document": document, "code_bindings": bindings}
+
+	f.exec(t, `UPDATE olp.provider_slots SET limits=jsonb_build_object('requests_per_minute',20) WHERE id=$1`, slot.ID)
+	f.h.want(f.owner, "POST", "/api/v1/configuration/plan", request, nil, 422)
+	f.h.want(f.owner, "POST", "/api/v1/configuration/apply", request, idem("paid-slot-limit-refusal"), 422)
+	f.exec(t, `UPDATE olp.provider_slots SET limits=jsonb_build_object('requests_per_minute',10) WHERE id=$1`, slot.ID)
+	f.exec(t, `UPDATE olp.providers SET configuration=jsonb_set(configuration,'{options,limits,requests_per_minute}','20') WHERE id=$1`, paid.ID)
+	f.h.want(f.owner, "POST", "/api/v1/configuration/plan", request, nil, 422)
+	f.h.want(f.owner, "POST", "/api/v1/configuration/apply", request, idem("paid-provider-limit-refusal"), 422)
+	f.exec(t, `UPDATE olp.providers SET configuration=jsonb_set(configuration,'{options,limits,requests_per_minute}','10') WHERE id=$1`, paid.ID)
 	plan := f.h.want(f.owner, "POST", "/api/v1/configuration/plan", request, nil, 200)
 	if len(plan["conflicts"].([]any))+len(plan["blockers"].([]any)) != 0 {
 		t.Fatalf("paid plan was blocked %v", plan)
@@ -674,12 +711,33 @@ func TestCodeConfigurationPaidFrozenPolicyRoundTrip(t *testing.T) {
 		t.Fatal("paid route was not copied")
 	}
 	actual := result.Code.Routes[copied].Published.PaidConnections[paid.Name]
-	if actual.Provider.Slots[0].Weight != frozen.Provider.Slots[0].Weight || actual.Provider.Slots[0].Limits.RequestsPerMinute != frozen.Provider.Slots[0].Limits.RequestsPerMinute || len(actual.Provider.Models[0].Capabilities) != len(frozen.Provider.Models[0].Capabilities) || len(actual.SlotKeyRefs[slot.Name]) != 1 {
+	if actual.Provider.Slots[0].Weight != frozen.Provider.Slots[0].Weight || !reflect.DeepEqual(actual.Provider.Slots[0].Limits, frozen.Provider.Slots[0].Limits) || !reflect.DeepEqual(actual.Provider.Configuration.Options.Limits, frozen.Provider.Configuration.Options.Limits) || len(actual.Provider.Models[0].Capabilities) != len(frozen.Provider.Models[0].Capabilities) || len(actual.SlotKeyRefs[slot.Name]) != 1 {
 		t.Fatalf("current paid provider replaced frozen policy %+v", actual)
 	}
 	if !result.Code.Routes[copied].Published.Policy.PaidParticipation {
 		t.Fatal("paid authorization was lost")
 	}
+	f.h.refresh()
+	discovery, discoveryError := http.NewRequestWithContext(t.Context(), "GET", coding.gateway.URL+"/code/"+route.Slug+"/v1/models", nil)
+	if discoveryError != nil {
+		t.Fatal(discoveryError)
+	}
+	discovery.Header.Set("Authorization", "Bearer "+destinationKey["secret"].(string))
+	response, responseError := coding.gateway.Client().Do(discovery)
+	if responseError != nil {
+		t.Fatal(responseError)
+	}
+	defer response.Body.Close()
+	var catalog struct {
+		Data []codemode.Model `json:"data"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&catalog); err != nil {
+		t.Fatal(err)
+	}
+	if response.StatusCode != 200 || !slices.ContainsFunc(catalog.Data, func(model codemode.Model) bool { return model.ID == account.Models[0] && model.Paid }) {
+		t.Fatalf("restored paid model disappeared from public discovery %d %+v", response.StatusCode, catalog.Data)
+	}
+
 }
 
 func TestCodeConfigurationDuplicatePoolsAndBudgetsRoundTrip(t *testing.T) {
@@ -795,8 +853,8 @@ func TestCodeConfigurationDuplicatePoolsAndBudgetsRoundTrip(t *testing.T) {
 	}
 	unrelatedBudget := exported.Code.Budgets[0]
 	unrelatedBudget.Project = "Ambiguous destination"
-	h.want(owner, "POST", "/api/v1/configuration/plan", map[string]any{"document": configuration.Document{APIVersion: configuration.APIVersion, Code: &configuration.CodeConfiguration{Budgets: []configuration.CodeBudgetEntry{unrelatedBudget}}}}, nil, 400)
+	h.want(owner, "POST", "/api/v1/configuration/plan", map[string]any{"document": configuration.Document{APIVersion: configuration.APIVersion, Code: &configuration.CodeConfiguration{Budgets: []configuration.CodeBudgetEntry{unrelatedBudget}}}}, nil, 422)
 	unrelated := exported.Code.Pools[0]
 	unrelated.Project = "Ambiguous destination"
-	h.want(owner, "POST", "/api/v1/configuration/plan", map[string]any{"document": configuration.Document{APIVersion: configuration.APIVersion, Code: &configuration.CodeConfiguration{Pools: []configuration.CodePoolEntry{unrelated}}}}, nil, 400)
+	h.want(owner, "POST", "/api/v1/configuration/plan", map[string]any{"document": configuration.Document{APIVersion: configuration.APIVersion, Code: &configuration.CodeConfiguration{Pools: []configuration.CodePoolEntry{unrelated}}}}, nil, 422)
 }

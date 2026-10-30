@@ -65,11 +65,12 @@ func (s *Server) writeCodeRoute(r *http.Request, _ access.Principal) (access.Rep
 	if err := access.Decode(r, &in); err != nil {
 		return access.Reply{}, err
 	}
-	if err := in.Validate(); err != nil {
-		return access.Reply{}, err
+	input, validationError := in.Validated()
+	if validationError != nil {
+		return access.Reply{}, validationError
 	}
-	return s.Access.CodeWrite(r, "code_routes", "code_route", in.ProjectID, in, func(tx pgx.Tx, p access.Principal, id, etag string) (any, error) {
-		return SaveCodeRoute(r.Context(), tx, p, id, etag, in, r.PathValue("id") != "")
+	return s.Access.CodeWrite(r, "code_routes", "code_route", input.ProjectID, input, func(tx pgx.Tx, p access.Principal, id, etag string) (any, error) {
+		return SaveCodeRoute(r.Context(), tx, p, id, etag, input, r.PathValue("id") != "")
 	})
 }
 
@@ -193,9 +194,10 @@ func codePublication(ctx context.Context, tx pgx.Tx, poolID string) ([]byte, []c
 	return encoded, adapters, err
 }
 
-func SaveCodeRoute(ctx context.Context, tx pgx.Tx, p access.Principal, id, etag string, in CodeRouteInput, existing bool) (*codeRoute, error) {
-	if err := in.Validate(); err != nil {
-		return nil, err
+func SaveCodeRoute(ctx context.Context, tx pgx.Tx, p access.Principal, id, etag string, raw CodeRouteInput, existing bool) (*codeRoute, error) {
+	in, validationError := raw.Validated()
+	if validationError != nil {
+		return nil, validationError
 	}
 	if err := p.Project(&in.ProjectID, access.Change); err != nil {
 		return nil, err
@@ -236,7 +238,7 @@ func SaveCodeRoute(ctx context.Context, tx pgx.Tx, p access.Principal, id, etag 
 	return &codeRoute{Route: out, Adapters: adapters}, err
 }
 
-func (in CodeRouteInput) Validate() error {
+func (in CodeRouteInput) validate() error {
 	if err := (codemode.Route{Models: in.Models, PaidParticipation: in.PaidParticipation, PaidTargets: in.PaidTargets}).ValidatePaidTargets(); err != nil {
 		return access.Invalid("paid_targets", err.Error())
 	}
@@ -246,14 +248,8 @@ func (in CodeRouteInput) Validate() error {
 	if !bodylimit.Valid(in.MaxBodyBytes) {
 		return access.Invalid("max_body_bytes", "Use 1 to 1073741824 bytes, or null to inherit the installation limit.")
 	}
-	if _, err := access.ParseUUID(in.ProjectID); err != nil {
-		return err
-	}
 	if !access.RouteSlug.MatchString(in.Slug) {
 		return access.Invalid("slug", "Use a route slug.")
-	}
-	if _, err := access.ParseUUID(in.PoolID); err != nil {
-		return err
 	}
 	if err := codemode.ValidateModels(in.Models); err != nil {
 		return access.Invalid("models", err.Error())
@@ -271,7 +267,11 @@ func (in CodeRouteInput) Validate() error {
 }
 
 func SaveCodePublication(ctx context.Context, tx pgx.Tx, p access.Principal, id string, in codemode.Route, frozen map[string]providers.Configuration, frozenPaid map[string]routing.Provider) (*codeRoute, error) {
-	if err := p.Project(&in.ProjectID, access.Change); err != nil {
+	project, projectError := access.ParseUUID(in.ProjectID)
+	if projectError != nil {
+		return nil, projectError
+	}
+	if err := p.Project(&project, access.Change); err != nil {
 		return nil, err
 	}
 	route := in
@@ -435,3 +435,52 @@ func ValidateCodePaidProviders(route codemode.Route, published map[string]routin
 	}
 	return nil
 }
+
+func (in CodeRouteInput) Validated() (CodeRouteInput, error) {
+	ids, err := access.ParseUUIDs([]string{in.ProjectID, in.PoolID})
+	if err != nil {
+		return CodeRouteInput{}, err
+	}
+	tools, toolsError := func() (*codemode.ResearchTools, error) {
+		if in.Tools == nil {
+			return nil, nil
+		}
+		account, accountError := access.ParseUUID(in.Tools.AccountID)
+		if accountError != nil {
+			return nil, accountError
+		}
+		return &codemode.ResearchTools{AccountID: account, Services: in.Tools.Services}, nil
+	}()
+	if toolsError != nil {
+		return CodeRouteInput{}, toolsError
+	}
+	models := slices.Sorted(maps.Keys(in.PaidTargets))
+	rawTargets := slices.Collect(func(yield func(string) bool) {
+		for _, model := range models {
+			target := in.PaidTargets[model]
+			if !yield(target.ProviderID) || !yield(target.SlotID) {
+				return
+			}
+		}
+	})
+	targets, targetError := access.ParseUUIDs(rawTargets)
+	if targetError != nil {
+		return CodeRouteInput{}, targetError
+	}
+	paidTargets := func() map[string]codemode.PaidTarget {
+		if in.PaidTargets == nil {
+			return nil
+		}
+		return maps.Collect(func(yield func(string, codemode.PaidTarget) bool) {
+			for index, model := range models {
+				if !yield(model, codemode.PaidTarget{ProviderID: targets[2*index], SlotID: targets[2*index+1]}) {
+					return
+				}
+			}
+		})
+	}()
+	canonical := CodeRouteInput{ProjectID: ids[0], Slug: in.Slug, PoolID: ids[1], Models: in.Models, Enabled: in.Enabled, ChatToAntigravity: in.ChatToAntigravity, PaidParticipation: in.PaidParticipation, PaidTargets: paidTargets, ModelPools: in.ModelPools, InitialRecoveryAttempts: in.InitialRecoveryAttempts, ModelRewriting: in.ModelRewriting, Aliases: in.Aliases, MessagesToCodex: in.MessagesToCodex, Tools: tools, MaxBodyBytes: in.MaxBodyBytes}
+	return canonical, canonical.validate()
+}
+
+func (in CodeRouteInput) Validate() error { _, err := in.Validated(); return err }
