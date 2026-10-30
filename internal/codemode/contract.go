@@ -19,6 +19,7 @@ const BasePath = "/code/"
 type Adapter string
 
 const (
+	AdapterClaude        Adapter = "claude"
 	AdapterCodex         Adapter = "codex"
 	AdapterOpenCodeGo    Adapter = "opencode_go"
 	AdapterZAICoding     Adapter = "zai_coding"

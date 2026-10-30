@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/claudeauth"
 	"github.com/tyk-swe/olp/internal/codemode"
 	"github.com/tyk-swe/olp/internal/codeplans"
 	"github.com/tyk-swe/olp/internal/connectors"
@@ -19,13 +20,14 @@ func TestValidateAcceptsShippedTable(t *testing.T) {
 
 func TestValidateRejectsInconsistentSharedPath(t *testing.T) {
 	registry := slices.Clone(vendors)
-	other := registry[1]
+	index := slices.IndexFunc(registry, func(vendor Vendor) bool { return vendor.Adapter == codemode.AdapterOpenCodeGo })
+	other := registry[index]
 	other.Adapter = "other"
 	other.profiles = nil
 	other.endpoints = slices.Clone(other.endpoints)
 	other.endpoints[0].Operation = "messages"
 	other.endpoints[0].Protocol = codemode.ProtocolMessages
-	registry[1] = other
+	registry[index] = other
 	if err := validate(registry); err == nil {
 		t.Fatal("shared client path with different semantics accepted")
 	}
@@ -230,5 +232,26 @@ func TestMessagesTranslationPolicyPreservesOtherAdaptersNativeReachability(t *te
 	endpoint, reachable := RouteEndpoint(route, adapter, "v1/messages")
 	if !ok || !reachable || endpoint.Protocol != native.Protocol || endpoint.UpstreamPath != native.UpstreamPath || endpoint.CredentialHeader != native.CredentialHeader {
 		t.Fatalf("Codex policy replaced native Messages target, got %+v, native %+v", endpoint, native)
+	}
+}
+
+func TestClaudeSubscriptionUsesVerifiedNativeMessagesAuthorization(t *testing.T) {
+	vendor, ok := ForConnection("plugin", "grant", "claude-subscription")
+	if !ok {
+		t.Fatal("Claude subscription enrollment is unavailable")
+	}
+	secret := []byte(`{"access_token":"fixture-access","facts":{"account_uuid":"11111111-1111-4111-8111-111111111111","organization_uuid":"22222222-2222-4222-8222-222222222222"}}`)
+	principal := "claude:46bfea7713358f59899a7e3efd31117f654890abb9752ca9063761118779aebe"
+	dispatch := codemode.Dispatch{Adapter: "claude", ClientPath: "v1/messages", Protocol: codemode.ProtocolMessages}
+	authorization, err := vendor.Authorize(secret, "claude-subscription", principal, dispatch, time.Now())
+	if err != nil || authorization.Headers.Get("Authorization") != "Bearer fixture-access" || authorization.Headers.Get("Anthropic-Beta") != claudeauth.OAuthBeta || authorization.Principal != principal {
+		t.Fatalf("verified authorization refused: %v", err)
+	}
+	endpoint, _ := vendor.Endpoint(dispatch.ClientPath)
+	if err := vendor.ValidateAuthorization(endpoint, authorization, principal); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := vendor.Authorize(secret, "claude-subscription", "another-principal", dispatch, time.Now()); err == nil {
+		t.Fatal("another identity inherited the credential")
 	}
 }

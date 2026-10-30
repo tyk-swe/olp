@@ -34,6 +34,7 @@ path refuses before upstream dispatch.
 | Adapter | Plugin and profiles | Paths under `/code/{slug}/` | Upstream | Clients (default first) |
 | --- | --- | --- | --- | --- |
 | Codex | [`codex`](../../plugins/codex/README.md): `codex-subscription` | `responses`, `responses/compact`, WebSocket `responses` | `https://chatgpt.com/backend-api/codex` | Codex CLI |
+| Claude subscription, fixture only | [`claude`](../../plugins/claude/README.md), `claude-subscription` | `v1/messages` | `https://api.anthropic.com` | Claude Code, live qualification pending |
 | OpenCode Go | [`opencode-go`](../../plugins/opencode-go/README.md): `opencode-go` | `v1/chat/completions`, `v1/messages`, `v1/responses` | `https://opencode.ai/zen/go/v1` | OpenCode, Claude Code |
 | GLM Coding Plan | [`zai-coding`](../../plugins/zai-coding/README.md): `zai-coding-plan`, `bigmodel-coding-plan` | `v1/messages`, `v1/chat/completions` | `https://api.z.ai/api/{anthropic,coding/paas/v4}` or the same paths on `https://open.bigmodel.cn/api` | Claude Code, OpenCode |
 | MiniMax M Plan | [`minimax-plan`](../../plugins/minimax-plan/README.md): `minimax-plan`, `minimax-plan-cn` | `v1/messages`, `v1/chat/completions` | `https://api.minimax.io/{anthropic,v1}` or the same paths on `https://api.minimax.cn` | Claude Code, OpenCode |
@@ -349,6 +350,12 @@ and retirement, and `If-Match` on updates and publication.
    Codex account authorization. Do not paste an access token into a developer's
    CLI or mark a fixture account as production-qualified.
    - Codex enrolls through the official device sign-in.
+   - Claude uses headless browser sign-in. Open the authorization URL, sign in
+     upstream, and paste its returned `code#state` or full HTTPS callback into
+     OLP. The profile endpoint verifies account and organization identity on
+     enrollment and every refresh. Health stays unknown. Native forwarding and
+     tool exchanges have controlled fixtures, while live subscription inference
+     remains unqualified. See the [plugin guide](../../plugins/claude/README.md).
    - OpenCode Go and the coding plans enroll a pasted API key: the operator opens
      the vendor's key page, creates a key and pastes it into a masked field. OLP
      makes no upstream call; it stores the key encrypted and takes a SHA-256

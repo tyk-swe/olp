@@ -119,9 +119,10 @@
 
 <div class="enrollment">
   <p>
-    Enroll through the provider's supported grant flow: a device sign-in for
-    Codex, or a pasted API key for OpenCode Go and the coding plans. Upstream
-    credentials stay in OLP; developers receive only an OLP key.
+    Enroll through the provider's supported grant flow. Use device sign-in for
+    Codex, browser sign-in for Claude, or a pasted API key for OpenCode Go and
+    the coding plans. Upstream credentials stay in OLP. Developers receive only
+    an OLP key
   </p>
   {#if error}<p class="field-error" role="alert">{error}</p>{/if}
   {#if notice}<p role="status">{notice}</p>{/if}
