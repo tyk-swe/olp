@@ -6393,6 +6393,11 @@
             },
             "tools": {
               "$ref": "#/$defs/CodeResearchTools"
+            },
+            "messages_to_codex": {
+              "type": "boolean",
+              "default": false,
+              "description": "Explicitly allow text-only Messages requests to use Codex subscription accounts through protocol translation. Published revisions pin this policy. Native forwarding remains the default. Model identifiers, client identity and prompts are preserved. Tools, thinking, beta features and unsupported required semantics are refused before dispatch."
             }
           },
           "required": [
@@ -32088,6 +32093,11 @@
             },
             "tools": {
               "$ref": "#/$defs/CodeResearchTools"
+            },
+            "messages_to_codex": {
+              "type": "boolean",
+              "default": false,
+              "description": "Explicitly allow text-only Messages requests to use Codex subscription accounts through protocol translation. Published revisions pin this policy. Native forwarding remains the default. Model identifiers, client identity and prompts are preserved. Tools, thinking, beta features and unsupported required semantics are refused before dispatch."
             }
           },
           "required": [

@@ -18,8 +18,8 @@ func resolveCodeTarget(snapshot *routing.Snapshot, route codemode.Route, provide
 		return codeTarget{}, codemode.Refuse(503, "code_connection_unpublished")
 	}
 	adapter, known := codeadapter.ForConnection(config.Kind, config.AuthMode, config.ProfileID)
-	endpoint, served := adapter.Endpoint(ingress.path)
-	if !known || !served || endpoint.Protocol != ingress.protocol || !endpoint.Supports(transport) {
+	endpoint, served := codeadapter.RouteEndpoint(route, adapter, ingress.path)
+	if !known || !served || !endpoint.Supports(transport) {
 		return codeTarget{}, codemode.Refuse(503, "code_configuration_unsupported")
 	}
 	return codeTarget{config: config, adapter: adapter, endpoint: endpoint}, nil

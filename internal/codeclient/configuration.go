@@ -70,7 +70,7 @@ func Generate(route codemode.Route, offers Offers, in Request) (codemode.ClientC
 		}
 		native = append(native, model.ID)
 		for _, adapter := range offers.adapters(model.ID) {
-			if vendor, _ := codeadapter.Lookup(adapter); vendor.Reaches(client, model.ID) {
+			if declaration, _ := codeadapter.Lookup(adapter); routeReaches(route, declaration, client, model.ID) {
 				if !slices.Contains(adapters, adapter) {
 					adapters = append(adapters, adapter)
 				}
@@ -91,7 +91,7 @@ func Generate(route codemode.Route, offers Offers, in Request) (codemode.ClientC
 		return empty, err
 	}
 	selected := []string{model}
-	through, _ := offers.through(client, selected)
+	through, _ := offers.through(route, client, selected)
 	for _, companion := range []struct {
 		field string
 		model *string
@@ -101,7 +101,7 @@ func Generate(route codemode.Route, offers Offers, in Request) (codemode.ClientC
 		}
 		selected = append(selected, *companion.model)
 		var ok bool
-		if through, ok = offers.through(client, selected); !ok {
+		if through, ok = offers.through(route, client, selected); !ok {
 			return empty, access.Invalid(companion.field, "A conversation uses one account of each subscription, so it cannot reach this model alongside the others selected.")
 		}
 	}
@@ -134,7 +134,13 @@ func Generate(route codemode.Route, offers Offers, in Request) (codemode.ClientC
 		}
 		return "", "", "", nil
 	}()
-	file, instructions := platformInstructions(client, platform)
+	file, nativeInstructions := platformInstructions(client, platform)
+	instructions := func() string {
+		if client == codeadapter.ClientClaudeCode && route.MessagesToCodex && slices.Contains(adapters, codemode.AdapterCodex) {
+			return nativeInstructions + " This published route enables text-only Messages translation through Codex accounts. Tools, thinking, beta features and unsupported required semantics are refused. Model identifiers and prompt text are preserved, and identity and prompt compatibility remain disabled"
+		}
+		return nativeInstructions
+	}()
 	out := codemode.ClientConfiguration{
 		Models:    catalog,
 		RouteSlug: route.Slug, BaseURL: baseURL, NativeModels: native, Adapters: adapters,

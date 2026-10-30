@@ -33,7 +33,7 @@ func codeWriteError(w http.ResponseWriter, r *http.Request, err error) {
 			kind = "permission_error"
 		}
 	}
-	writeSurfaceError(w, &Error{Status: refusal.Status, Code: refusal.Code, Type: kind, Message: refusal.Code}, surface)
+	writeSurfaceError(w, &Error{Status: refusal.Status, Code: refusal.Code, Type: kind, Message: codeRefusalMessage(refusal.Code)}, surface)
 }
 
 func (s *Server) codeRefuse(w http.ResponseWriter, r *http.Request, route codemode.Route, keyID, digest string, err error) {
@@ -46,4 +46,11 @@ func (s *Server) recordCodeRefusal(ctx context.Context, route codemode.Route, ke
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
 	defer cancel()
 	_ = s.CodeLedger.RecordRefusal(ctx, route, keyID, digest, code)
+}
+
+func codeRefusalMessage(code string) string {
+	if code == "code_translation_unsupported_semantics" {
+		return "This route translates text only. Use a native Messages account for tools, thinking, beta features, stop sequences or other required extensions."
+	}
+	return code
 }

@@ -17,6 +17,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/codemode"
+	"github.com/tyk-swe/olp/internal/codexauth"
 	"github.com/tyk-swe/olp/internal/resources"
 	"github.com/tyk-swe/olp/internal/runtime"
 )
@@ -31,6 +32,10 @@ type codeFixture struct {
 }
 
 func newCodeFixture(t *testing.T, bodyLimit ...int64) *codeFixture {
+	return newCodeFixtureWithProfile(t, "", bodyLimit...)
+}
+
+func newCodeFixtureWithProfile(t *testing.T, profile string, bodyLimit ...int64) *codeFixture {
 	var maxBody *int64
 	if len(bodyLimit) > 0 {
 		maxBody = &bodyLimit[0]
@@ -42,6 +47,10 @@ func newCodeFixture(t *testing.T, bodyLimit ...int64) *codeFixture {
 	f.user = h.want(owner, "GET", "/api/v1/profile", nil, nil, 200)["id"].(string)
 	f.exec(t, `INSERT INTO olp.providers(id,name,kind,state,configuration,etag,slots_etag,created_by,project_id) VALUES($1,'Fixture coding subscription','plugin','draft','{"kind":"plugin","auth_mode":"grant","endpoint":"https://fixture.invalid"}',$2,$3,$4,$5)`, f.provider, access.NewID(), access.NewID(), f.user, f.project)
 	f.addCredential(t, f.credential, "fixture-principal", 1)
+	if profile != "" {
+		f.exec(t, `UPDATE olp.providers SET configuration=configuration || jsonb_build_object('profile_id',$2::text,'profile_revision','fixture-digest') WHERE id=$1`, f.provider, profile)
+		f.exec(t, `UPDATE olp.provider_credentials SET profile_id=$2 WHERE id=$1`, f.credential, profile)
+	}
 	f.addKey(t, f.key)
 	f.accountRecord = h.want(owner, "POST", "/api/v1/code/accounts", map[string]any{"project_id": f.project, "provider_id": f.provider, "credential_id": f.credential, "name": "Fixture subscription", "enabled": true, "models": []string{"native-model"}}, idem("account"), 201)
 	f.account = f.accountRecord["id"].(string)
@@ -381,5 +390,30 @@ func TestCodeFoundationManagementIsolationPublicationAndPrivacy(t *testing.T) {
 	f.h.want(f.owner, "POST", "/api/v1/code/pools", map[string]any{"project_id": foreignProject, "name": "Cross project", "kind": "shared", "owner_user_id": nil, "account_ids": []string{f.account}, "api_key_ids": []string{}}, idem("cross-project"), 404)
 	if err = f.h.Pool.Ping(context.Background()); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestCodeFoundationMessagesTranslationPolicyPublication(t *testing.T) {
+	f := newCodeFixtureWithProfile(t, codexauth.ProfileID)
+	if f.route.MessagesToCodex {
+		t.Fatal("translation enabled by default")
+	}
+	draft := f.h.want(f.owner, "PUT", "/api/v1/code/routes/"+f.route.ID, map[string]any{
+		"project_id": f.project, "slug": f.route.Slug, "pool_id": f.pool, "models": f.route.Models,
+		"enabled": true, "messages_to_codex": true,
+	}, map[string]string{"If-Match": `"` + f.route.ETag + `"`}, 200)
+	if draft["messages_to_codex"] != true {
+		t.Fatal("translation policy missing from draft", draft)
+	}
+	f.h.want(f.owner, "GET", "/api/v1/code/routes/"+f.route.ID+"/client-config?client=claude-code&gateway_url=https://olp.example", nil, nil, 422)
+	headers := etagHeader(draft)
+	headers["Idempotency-Key"] = "translate-messages"
+	published := f.h.want(f.owner, "POST", "/api/v1/code/routes/"+f.route.ID+"/publish", nil, headers, 200)
+	if published["messages_to_codex"] != true {
+		t.Fatal("translation policy missing from publication", published)
+	}
+	config := f.h.want(f.owner, "GET", "/api/v1/code/routes/"+f.route.ID+"/client-config?client=claude-code&gateway_url=https://olp.example", nil, nil, 200)
+	if config["model"] != f.route.Models[0] || !strings.Contains(config["configuration"].(string), "ANTHROPIC_BASE_URL") {
+		t.Fatal("translated Claude setup missing", config)
 	}
 }

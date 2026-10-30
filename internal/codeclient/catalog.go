@@ -20,17 +20,22 @@ func Catalog(route codemode.Route, offers Offers) []codemode.Model {
 					}
 				}
 			})
-			capabilities := modelCapabilities(id, declarations)
-			if len(capabilities) > 0 && !yield(codemode.Model{ID: id, Object: "model", Capabilities: capabilities, Clients: modelClients(id, declarations)}) {
+			capabilities := modelCapabilities(route, id, declarations)
+			if len(capabilities) > 0 && !yield(codemode.Model{ID: id, Object: "model", Capabilities: capabilities, Clients: modelClients(route, id, declarations)}) {
 				return
 			}
 		}
 	})
 }
 
-func modelCapabilities(id string, declarations []codeadapter.Vendor) []codemode.ModelCapability {
+func modelCapabilities(route codemode.Route, id string, declarations []codeadapter.Vendor) []codemode.ModelCapability {
 	capabilities := slices.Collect(func(yield func(codemode.ModelCapability) bool) {
 		for _, declaration := range declarations {
+			if target, ok := codeadapter.RouteEndpoint(route, declaration, "v1/messages"); ok && target.ClientPath != "v1/messages" && declaration.ServesModel(target.Protocol, id) {
+				if !yield(codemode.ModelCapability{Protocol: codemode.ProtocolMessages, Path: "v1/messages", Transports: []string{"http"}}) {
+					return
+				}
+			}
 			for _, endpoint := range declaration.Endpoints() {
 				if !declaration.ServesModel(endpoint.Protocol, id) {
 					continue
@@ -63,11 +68,11 @@ func modelCapabilities(id string, declarations []codeadapter.Vendor) []codemode.
 	})
 }
 
-func modelClients(id string, declarations []codeadapter.Vendor) []string {
+func modelClients(route codemode.Route, id string, declarations []codeadapter.Vendor) []string {
 	clients := slices.Collect(func(yield func(string) bool) {
 		for _, declaration := range declarations {
-			for _, client := range declaration.Clients() {
-				if declaration.Reaches(client, id) && !yield(client) {
+			for _, client := range codeadapter.RouteClients(route, declaration) {
+				if _, ok := codeadapter.RouteClientProtocol(route, declaration, client, id); ok && !yield(client) {
 					return
 				}
 			}
