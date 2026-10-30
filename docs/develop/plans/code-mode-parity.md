@@ -6,6 +6,8 @@ The comparison was checked on October 30, 2026 against CLIProxyAPI **v8.0.47**, 
 
 This investigation inspected source and existing qualification records. It did not run competitor code, fixture suites or real subscription workflows. OLP's existing [qualification record][O-qualification] reports controlled fixtures, not live subscription acceptance. Live qualification is outside the authorized implementation work and remains open. Neither this document nor a completed implementation ticket closes a live gate.
 
+Later allowance, reset and hard-token evidence is recorded separately in the [allowance research report](code-mode-allowance-research.md). That report preserves unsupported guarantees and defines bounded follow-up qualification work.
+
 ## Reading the matrix
 
 | Classification | Meaning |
