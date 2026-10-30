@@ -11,8 +11,33 @@ func decodeOpenAIGeneration(r *reader, family wire.Format) error {
 	c := r.c
 	if family == wire.Chat {
 		r.parameter("reasoning_effort", "reasoning_effort")
+		if value := r.take("tool_choice"); present(value) {
+			switch str(value) {
+			case "auto", "none", "required":
+			default:
+				choice, err := read(value, "/tool_choice", c)
+				if err != nil {
+					return err
+				}
+				if str(choice.take("type")) != "function" {
+					return unsupported("/tool_choice/type")
+				}
+				function, err := read(choice.take("function"), "/tool_choice/function", c)
+				if err != nil {
+					return err
+				}
+				if str(function.take("name")) == "" {
+					return unsupported("/tool_choice/function/name")
+				}
+				function.finish()
+				choice.finish()
+			}
+			c.Parameters["tool_choice"] = value
+		}
+	} else {
+		r.parameter("tool_choice", "tool_choice")
 	}
-	for _, k := range []string{"temperature", "top_p", "stop", "seed", "n", "tool_choice", "parallel_tool_calls", "response_format"} {
+	for _, k := range []string{"temperature", "top_p", "stop", "seed", "n", "parallel_tool_calls", "response_format"} {
 		r.parameter(k, k)
 	}
 	r.parameter("max_tokens", "max_output_tokens")

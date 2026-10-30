@@ -2744,7 +2744,7 @@ func TestCodeNativeChatPreservesBytesWithAntigravityPolicy(t *testing.T) {
 		if err := h.rt.release.Snapshot.Compile(); err != nil {
 			t.Fatal(err)
 		}
-		body := []byte(`{ "model":"native-model", "messages":[{"role":"user","content":"hello"}], "vendor_extension":{"keep":true} }`)
+		body := []byte(`{ "model":"native-model", "messages":[{"role":"user","content":"hello"}], "tools":[{"type":"function","function":{"name":"read_file","parameters":{"type":"object"}}}], "tool_choice":{"type":"function","function":{"name":"read_file","required_state":"opaque"}}, "vendor_extension":{"keep":true} }`)
 		reply := []byte(`{ "choices":[{"message":{"role":"assistant","content":"native reply"},"finish_reason":"stop"}],"usage":{"prompt_tokens":2,"completion_tokens":1,"total_tokens":3},"vendor_extension":{"keep":true} }`)
 		h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
 			received, _ := io.ReadAll(r.Body)
@@ -3039,12 +3039,13 @@ func TestCodeChatToCodexToolContinuation(t *testing.T) {
 					Store        *bool
 					Instructions *string
 					Reasoning    struct{ Effort string }
+					ToolChoice   struct{ Type, Name string } `json:"tool_choice"`
 					Input        []struct {
 						Type, Role, CallID, Arguments, Output string
 						Content                               []struct{ Text string }
 					}
 				}
-				if err := json.Unmarshal(body, &request); err != nil || request.Model != "native-model" || !request.Stream || request.Store == nil || *request.Store || request.Instructions == nil || *request.Instructions != "" || request.Reasoning.Effort != "high" || request.Input[0].Role != "developer" || request.Input[0].Content[0].Text != "Preserve my instructions" {
+				if err := json.Unmarshal(body, &request); err != nil || request.Model != "native-model" || !request.Stream || request.Store == nil || *request.Store || request.Instructions == nil || *request.Instructions != "" || request.Reasoning.Effort != "high" || request.ToolChoice.Type != "function" || request.ToolChoice.Name != "read_file" || request.Input[0].Role != "developer" || request.Input[0].Content[0].Text != "Preserve my instructions" {
 					t.Errorf("translated request %s, %v", body, err)
 				}
 				if r.URL.Path != "/a/responses" || r.Header.Get("Originator") != "" || r.Header.Get("X-Opencode-Session-Id") != "chat-tools" || r.Header.Get("Authorization") != "Bearer upstream-only" {
@@ -3076,7 +3077,7 @@ func TestCodeChatToCodexToolContinuation(t *testing.T) {
 				{``, 11},
 				{`,{"role":"assistant","content":null,"tool_calls":[{"id":"call-read","type":"function","function":{"name":"read_file","arguments":"{\"path\":\"main.go\"}"}}]},{"role":"tool","tool_call_id":"call-read","content":"package main"}`, 15},
 			} {
-				request, _ := http.NewRequestWithContext(t.Context(), http.MethodPost, server.URL+"/code/coding/v1/chat/completions", strings.NewReader(fmt.Sprintf(`{"model":"team-model","messages":[{"role":"system","content":"Preserve my instructions"},{"role":"user","content":"Read main.go"}%s],"tools":[{"type":"function","function":{"name":"read_file","parameters":{"type":"object","properties":{"path":{"type":"string"}}}}}],"reasoning_effort":"high","stream":%t,"stream_options":{"include_usage":%t}}`, history.body, input.stream, input.usage)))
+				request, _ := http.NewRequestWithContext(t.Context(), http.MethodPost, server.URL+"/code/coding/v1/chat/completions", strings.NewReader(fmt.Sprintf(`{"model":"team-model","messages":[{"role":"system","content":"Preserve my instructions"},{"role":"user","content":"Read main.go"}%s],"tools":[{"type":"function","function":{"name":"read_file","parameters":{"type":"object","properties":{"path":{"type":"string"}}}}}],"tool_choice":{"type":"function","function":{"name":"read_file"}},"reasoning_effort":"high","stream":%t,"stream_options":{"include_usage":%t}}`, history.body, input.stream, input.usage)))
 				request.Header.Set("Authorization", "Bearer "+fullKey)
 				request.Header.Set("X-Opencode-Session-Id", "chat-tools")
 				response, err := server.Client().Do(request)
@@ -3148,6 +3149,22 @@ func TestCodeChatToCodexRefusesUnsupportedRequiredState(t *testing.T) {
 			t.Fatalf("required field dispatched, status %d, %s", response.StatusCode, field)
 		}
 	}
+	t.Run("required nested tool choice", func(t *testing.T) {
+		h, _, server := newCodeForwardHarness(t)
+		route := h.rt.release.Snapshot.CodeRoutes["coding"]
+		route.ChatToCodex = true
+		h.rt.release.Snapshot.CodeRoutes["coding"] = route
+		request, _ := http.NewRequestWithContext(t.Context(), http.MethodPost, server.URL+"/code/coding/v1/chat/completions", strings.NewReader(`{"model":"native-model","messages":[{"role":"user","content":"Read main.go"}],"tools":[{"type":"function","function":{"name":"read_file","parameters":{"type":"object"}}}],"tool_choice":{"type":"function","function":{"name":"read_file","required_state":"opaque"}}}`))
+		request.Header.Set("Authorization", "Bearer "+fullKey)
+		response, err := server.Client().Do(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		response.Body.Close()
+		if response.StatusCode != http.StatusUnprocessableEntity || h.mock.count("a") != 0 {
+			t.Fatalf("required tool choice dispatched, status %d", response.StatusCode)
+		}
+	})
 }
 
 func TestCodeChatToCodexPreservesNativeUsageOnProjectionFailure(t *testing.T) {
