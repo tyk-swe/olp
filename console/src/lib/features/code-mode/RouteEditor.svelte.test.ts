@@ -163,7 +163,16 @@ it.each(['direct', 'fallback'] as const)(
               {
                 id: '01980000-0000-7000-8000-000000000006',
                 name: 'Stored API key',
-                enabled: true
+                enabled: true,
+                allowed_api_keys: [],
+                allowed_models: [],
+                allowed_routes: [],
+                credential_version_id: null,
+                max_concurrency: null,
+                priority: 0,
+                requests_per_minute: null,
+                tokens_per_minute: null,
+                weight: 1
               }
             ]
           }
@@ -267,6 +276,7 @@ it.each([
         email: 'owner@example.test',
         display_name: 'Owner',
         role: 'owner',
+        access_scope: 'global',
         operations: []
       },
       csrf_token: 'fixture'
