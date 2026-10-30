@@ -293,12 +293,22 @@ func TestWorkflowModelRecoveryFencesLostReplicaWithoutInterruptingLiveReplica(t 
 	if err := syscall.Listen(listener, 1); err != nil {
 		t.Fatal(err)
 	}
-	for range 2 {
-		connection, err := net.DialTimeout("tcp", upstreamURL.Host, time.Second)
-		if err != nil {
-			t.Fatal(err)
+	saturated := func() bool {
+		for range 64 {
+			connection, err := net.DialTimeout("tcp", upstreamURL.Host, 500*time.Millisecond)
+			if err == nil {
+				t.Cleanup(func() { _ = connection.Close() })
+				continue
+			}
+			if networkErr, ok := err.(net.Error); ok && networkErr.Timeout() {
+				return true
+			}
+			t.Fatalf("filling upstream listener failed: %v", err)
 		}
-		defer connection.Close()
+		return false
+	}()
+	if !saturated {
+		t.Fatal("upstream listener did not become saturated")
 	}
 	unsentKey := h.want(owner, http.MethodPost, "/api/v1/api-keys", map[string]any{"name": "Restart unsent", "project_id": project, "scopes": []string{"inference"}, "allowed_routes": []string{slug}}, idem("workflow-restart-unsent"), http.StatusCreated)
 	unsentID := mcpExecString(t, unsentKey, "id")

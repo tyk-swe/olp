@@ -2299,25 +2299,22 @@ func TestGatewayToolWorkflowSettlesOneRun(t *testing.T) {
 	}, idem("workflow-model-retirement-draft"), http.StatusCreated)
 	h.want(owner, http.MethodPost, "/api/v1/route-drafts/"+mcpExecString(t, modelRetirementDraft, "id")+"/activate", nil, withMatch(modelRetirementDraft, idem("workflow-model-retirement-activate")), http.StatusOK)
 	for _, scenario := range []struct {
-		name       string
-		toolsetID  string
-		slug       string
-		retire     string
-		blockModel bool
+		name           string
+		toolsetID      string
+		slug           string
+		retire         string
+		blocked        *atomic.Bool
+		unknownKind    string
+		expectedDebits int
+		expectedModels int64
 	}{
-		{name: "model", toolsetID: modelToolsetID, slug: modelRetirementSlug, retire: "/api/v1/toolsets/" + modelToolsetID, blockModel: true},
-		{name: "toolset", toolsetID: toolsetID, slug: revocationSlug, retire: "/api/v1/toolsets/" + toolsetID},
-		{name: "server", toolsetID: serverToolsetID, slug: serverRetirementSlug, retire: "/api/v1/mcp-servers/" + serverID},
+		{name: "model", toolsetID: modelToolsetID, slug: modelRetirementSlug, retire: "/api/v1/toolsets/" + modelToolsetID, blocked: &deadlineModel, unknownKind: "model", expectedDebits: 1},
+		{name: "toolset", toolsetID: toolsetID, slug: revocationSlug, retire: "/api/v1/toolsets/" + toolsetID, blocked: &deadlineTool, unknownKind: "tool", expectedDebits: 2, expectedModels: 1},
+		{name: "server", toolsetID: serverToolsetID, slug: serverRetirementSlug, retire: "/api/v1/mcp-servers/" + serverID, blocked: &deadlineTool, unknownKind: "tool", expectedDebits: 2, expectedModels: 1},
 	} {
 		caller := h.want(owner, http.MethodPost, "/api/v1/api-keys", map[string]any{"name": "Workflow retirement " + scenario.name, "project_id": project, "scopes": []string{"inference", "tools"}, "allowed_routes": []string{scenario.slug}, "allowed_toolsets": []string{scenario.toolsetID}}, idem("workflow-retirement-key-"+scenario.name), http.StatusCreated)
 		h.refresh()
-		blocked := &deadlineTool
-		unknownKind, expectedDebits, expectedModels := "tool", 2, int64(1)
-		if scenario.blockModel {
-			blocked = &deadlineModel
-			unknownKind, expectedDebits, expectedModels = "model", 1, 0
-		}
-		blocked.Store(true)
+		scenario.blocked.Store(true)
 		beforeModels := modelCalls.Load()
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
@@ -2364,13 +2361,13 @@ func TestGatewayToolWorkflowSettlesOneRun(t *testing.T) {
 			t.Fatalf("retired %s workflow did not finish", scenario.name)
 		}
 		cancel()
-		blocked.Store(false)
+		scenario.blocked.Store(false)
 		debits := h.want(owner, http.MethodGet, "/api/v1/execution-debits?api_key_id="+mcpExecString(t, caller, "id"), nil, nil, http.StatusOK)
 		items := mcpExecItems(t, debits, "items")
-		if len(items) != expectedDebits || modelCalls.Load() != beforeModels+expectedModels || !slices.ContainsFunc(items, func(item any) bool {
+		if len(items) != scenario.expectedDebits || modelCalls.Load() != beforeModels+scenario.expectedModels || !slices.ContainsFunc(items, func(item any) bool {
 			debit, ok := item.(map[string]any)
-			return ok && debit["kind"] == unknownKind && debit["state"] == "outcome_unknown" && !mcpAmountIsZero(t, debit, "remaining_cost") && mcpAmountsEqual(t, debit, "remaining_cost", "cost_bound") && mcpAmountsEqual(t, debit, "remaining_charge", "charge_bound")
-		}) || (!scenario.blockModel && !slices.ContainsFunc(items, func(item any) bool {
+			return ok && debit["kind"] == scenario.unknownKind && debit["state"] == "outcome_unknown" && !mcpAmountIsZero(t, debit, "remaining_cost") && mcpAmountsEqual(t, debit, "remaining_cost", "cost_bound") && mcpAmountsEqual(t, debit, "remaining_charge", "charge_bound")
+		}) || (scenario.unknownKind == "tool" && !slices.ContainsFunc(items, func(item any) bool {
 			debit, ok := item.(map[string]any)
 			return ok && debit["kind"] == "model" && debit["state"] == "settled"
 		})) {

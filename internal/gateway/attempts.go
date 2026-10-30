@@ -178,11 +178,12 @@ route:
 				if x.guardrailEngine != nil {
 					x.startGuardrailAttempt(fact.GuardrailDecisions)
 				}
-				dispatchCtx := ctx
-				finishLease := func() *Error { return nil }
-				if x.workflow != nil {
-					dispatchCtx, finishLease = s.monitorWorkflowModelLease(ctx, x.sessionDebit)
-				}
+				dispatchCtx, finishLease := func() (context.Context, func() *Error) {
+					if x.workflow == nil {
+						return ctx, func() *Error { return nil }
+					}
+					return s.monitorWorkflowModelLease(ctx, x.sessionDebit)
+				}()
 				fact, result, failure, authorityErr := adapter.dispatchWithAuthority(dispatchCtx, s, x, attempt, &provider, slot, fact)
 				if x.guardrailEngine != nil {
 					fact.GuardrailDecisions = x.finishGuardrailAttempt()
