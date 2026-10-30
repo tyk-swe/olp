@@ -92,7 +92,7 @@ func TestCodeAuthenticationRefusalRequestsDispatchedGrantRefreshWithoutReplay(t 
 					ledger.wait(t)
 				}
 				ledger.mu.Lock()
-				if len(ledger.health) != 1 || ledger.health[0].RetryAt == nil || !ledger.health[0].RetryAt.Equal(now.Add(2*time.Minute)) {
+				if ledger.health.RetryAt == nil || !ledger.health.RetryAt.Equal(now.Add(2*time.Minute)) {
 					t.Errorf("retry timing lost for %s: %+v", transport, ledger.health)
 				}
 				ledger.mu.Unlock()

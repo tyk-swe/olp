@@ -31,8 +31,8 @@ type codeTestLedger struct {
 	marks      []string
 	aborts     []string
 	usages     []codemode.Usage
-	health     []codemode.HealthObservation
-	allowances []codemode.Allowance
+	health     codemode.HealthObservation
+	allowance  codemode.Allowance
 	refusals   []string
 	refuse     string
 	done       chan codemode.Usage
@@ -117,13 +117,13 @@ func (l *codeTestLedger) Abort(_ context.Context, id string) error {
 func (l *codeTestLedger) ObserveHealth(_ context.Context, _ string, status codemode.HealthObservation) error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	l.health = append(l.health, status)
+	l.health = status
 	return nil
 }
 func (l *codeTestLedger) ObserveAllowance(_ context.Context, _ string, a codemode.Allowance) error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	l.allowances = append(l.allowances, a)
+	l.allowance = l.allowance.Merge(a)
 	return nil
 }
 func (l *codeTestLedger) RecordRefusal(_ context.Context, _ codemode.Route, _, _ string, reason string) error {
@@ -587,10 +587,10 @@ func TestCodeForwardingObservesRetryAfterWithoutChangingAllowance(t *testing.T) 
 			ledger.wait(t)
 			ledger.mu.Lock()
 			defer ledger.mu.Unlock()
-			if response.StatusCode != test.status || len(ledger.health) != 1 {
+			if response.StatusCode != test.status || ledger.health.Status == "" {
 				t.Fatalf("status %d observations %+v", response.StatusCode, ledger.health)
 			}
-			observed := ledger.health[0]
+			observed := ledger.health
 			if !observed.ObservedAt.Equal(now) {
 				t.Fatalf("observation time %s", observed.ObservedAt)
 			}
@@ -600,8 +600,12 @@ func TestCodeForwardingObservesRetryAfterWithoutChangingAllowance(t *testing.T) 
 			if test.status == 429 && observed.Status != "quota_limited" || test.status == 503 && observed.Status != "unavailable" {
 				t.Fatalf("health %s", observed.Status)
 			}
-			if len(ledger.allowances) != 0 || h.mock.count("a") != 1 {
-				t.Fatal("rejection invented allowance or replayed generation")
+			if ledger.allowance.RemainingTokens != nil || ledger.allowance.RemainingRequests != nil ||
+				ledger.allowance.RemainingPercent != nil || len(ledger.allowance.Windows) != 0 || ledger.allowance.Credits != nil {
+				t.Fatal("rejection invented allowance")
+			}
+			if h.mock.count("a") != 1 {
+				t.Fatal("rejection replayed generation")
 			}
 		})
 	}
@@ -633,10 +637,10 @@ func TestCodeForwardingRetainsExhaustionWithMalformedOrMissingReset(t *testing.T
 			ledger.wait(t)
 			ledger.mu.Lock()
 			defer ledger.mu.Unlock()
-			if response.StatusCode != 429 || len(ledger.allowances) != 1 {
-				t.Fatalf("exhaustion not observed, status %d allowance %+v", response.StatusCode, ledger.allowances)
+			if response.StatusCode != 429 || ledger.allowance.RemainingPercent == nil {
+				t.Fatalf("exhaustion not observed, status %d allowance %+v", response.StatusCode, ledger.allowance)
 			}
-			allowance := ledger.allowances[0]
+			allowance := ledger.allowance
 			if allowance.RemainingPercent == nil || *allowance.RemainingPercent != 0 || !allowance.ObservedAt.Equal(now) {
 				t.Fatalf("exhaustion or observation time changed %+v", allowance)
 			}
