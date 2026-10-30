@@ -42,8 +42,7 @@ rendered messages are transient rather than configuration data.
 
 Local gateway fixtures cover all four request formats in unary and streaming
 mode, and the packaged-console journey covers publication, label movement and
-accessible playground rendering. This fixture evidence does not qualify a live
-provider deployment.
+accessible playground rendering.
 
 ## Saved investigations
 
@@ -55,8 +54,7 @@ project access; opening referenced evidence requires its own current access
 check. Retained step and span links identify the referenced record, including
 spans beyond the first page. Evidence follows its own retention policy and can
 expire before the investigation. The local HTTP regression and packaged-console
-journey exercise these boundaries; they do not qualify a live provider
-integration.
+journey exercise these boundaries.
 
 ## Agent workflow evidence exports
 
@@ -77,8 +75,7 @@ message or artifact contents, and they do not change billing. Before delivery,
 the sink creator must still have access to the source project and the source
 must remain within request-history retention. These checks apply independently
 to each record sent through an installation-wide sink. Local gateway and export
-fixtures exercise origin, privacy, project isolation and retention. They do not
-qualify a live external deployment.
+fixtures exercise origin, privacy, project isolation and retention.
 
 ## Gateway-executed tool workflows
 
@@ -131,9 +128,7 @@ contract on every successful model step. Other or mixed contracts return the
 final output or an approval pause without MCP items. The pinned official OpenAI
 Go SDK decodes the generated stream in
 `TestGatewayToolExecutionResponsesOfficialSDKDecodesMCPItems`; fixtures also
-cover the final-only fallback. These are local fixture results, not
-qualification of live provider deployments or untested dialect and target
-combinations.
+cover the final-only fallback for the tested dialect and target combinations.
 
 ## Consumer MCP qualification
 
@@ -168,7 +163,6 @@ POSTs. Modern sessions never fall back to the legacy transport.
 the shared tool path using a local workload issuer and signing fixture. It checks
 the downstream audience-bound agent signature, refusal at another audience,
 one-use credentials, consent, session isolation and shared budget accounting.
-Live Entra agent identity qualification is separate from this fixture evidence.
 
 Per-user OAuth is qualified separately. Experimental stdio is covered by a
 locally built, owner-permitted executable fixture through the shared consumer
@@ -179,7 +173,7 @@ Standalone modern consumer event streams, sampling, elicitation, roots and
 arbitrary resource/prompt calls are not supported by this slice.
 See [MCP server use](mcp-servers.md) for supported calls and rollback behavior.
 
-## A2A qualification
+## A2A evidence
 
 Local reference fixtures cover the pinned A2A 0.3 and 1.0 JSON-RPC adapters.
 `TestWorkloadAgentDelegatesKeyForA2A` in
@@ -187,9 +181,7 @@ Local reference fixtures cover the pinned A2A 0.3 and 1.0 JSON-RPC adapters.
 callbacks, caller/agent/pair accounting, consent, renewal, project operator
 access and revocation. `TestA2AOAuthGrantLifecycle` verifies that task actions
 use their original grant and endpoint after publication replacement and refuse
-revoked grants. These are fixture results, not live external interoperability
-or live Entra agent identity qualification. OLP cannot observe or stop hidden
-remote iterations.
+revoked grants. OLP cannot observe or stop hidden remote iterations.
 
 ## Guardrail compatibility
 

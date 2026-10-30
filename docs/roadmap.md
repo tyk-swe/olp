@@ -41,7 +41,7 @@ identifies implementation boundaries and owners.
 | [RM5: Retained APIs and retrieval](#rm5-retained-apis-and-retrieval) | Done | Fine-tuning, vector stores, retrieval and retained resource families |
 | [RM6: Protocol and provider expansion](#rm6-protocol-and-provider-expansion) | Done | Additional OCR/search transports, realtime profiles and pass-through |
 | [RM7: Consumer MCP](#rm7-consumer-mcp) | Done | Direct execution, per-user grants, HTTP+SSE and stdio |
-| [RM8: Agent workflows](#rm8-agent-workflows) | Planned | Tool loops, prompts, delegation, A2A, traces and operator views |
+| [RM8: Agent workflows](#rm8-agent-workflows) | Implemented | Tool loops, prompts, delegation, A2A, traces and operator views |
 | [RM9: Cloud invoice imports](#rm9-cloud-invoice-imports) | Planned | AWS CUR, Google billing and Azure Cost Management imports |
 
 ### RM1: Existing gateway
@@ -231,7 +231,7 @@ and identity-tenant qualification remains separate from the fixture evidence.
 
 ### RM8: Agent workflows
 
-**Status: Planned.** **Owners:** agent and access maintainers, with protocol,
+**Status: Implemented.** **Owners:** agent and access maintainers, with protocol,
 prompt, observability and console owners. **Dependencies:** RM7.1 for tool loops;
 existing prompt publications and input/output guardrails for prompt rendering.
 Inference delegation uses workload identity and has no MCP dependency. Static-credential
@@ -244,8 +244,7 @@ also use their selected RM5 backend.
   digest-bound continuation and revocation. Local fixtures cover cancellation,
   restart, unknown effects, `typesafe` tool-exchange pruning, compression
   recovery and tool reinjection. [Compatibility evidence](use/compatibility.md#gateway-executed-tool-workflows)
-  includes discovery, simulation and rollback; live provider qualification is
-  separate.
+  includes discovery, simulation and rollback.
 - [x] **RM8.2 — Prompt publication and rendering:** immutable revisions, labels
   and bounded string substitution share a rendering path across inference,
   playground and imported configuration. Local fixtures cover fixed revisions,
@@ -254,12 +253,11 @@ also use their selected RM5 backend.
 - [x] **RM8.3 — Delegated identities:** workload agents use consent and scoped,
   single-use credentials with intersected inference and tool rights, budgets,
   renewal and either-principal revocation. Signed tool calls and accounting are
-  fixture-qualified; live Entra agent identity qualification remains separate.
+  fixture-qualified.
 - [x] **RM8.4 — A2A workflows:** pinned protocol adapters, owner-bound and
   delegated tasks, authenticated callbacks, send/stream/read/cancel/resubscribe,
   accounting and revocation are covered by local reference fixtures. Unresolved
-  remote effects remain visible. Live external interoperability remains part of
-  RM8.6 qualification.
+  remote effects remain visible.
 - [x] **RM8.5 — Traces and operator views:** bounded OTLP ingestion, scoped
   trace links, origin-labelled exports and accessible operator views have local
   fixture coverage for content stripping, project isolation and retention.

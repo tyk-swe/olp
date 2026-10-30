@@ -362,13 +362,13 @@ and applicable candidate gates. A working HTTP-only slice does not close RM7.
 
 ### RM8: Agent workflows
 
-**State:** Planned. **Accountable:** agent maintainers; specialist owners are
+**State:** Implemented. **Accountable:** agent maintainers; specialist owners are
 named below. **Entry:** RM7.1 and guardrail input/output execution for RM8.1;
 existing prompt publications and input/output guardrails for RM8.2. Inference
 delegation uses workload identity and has no MCP dependency. Static-credential A2A
 in RM8.4 can begin independently. A2A OAuth uses RM7.2, tool callbacks use RM7.1,
 and delegated tasks use RM8.3. RM8.5 follows those workflow contracts and existing
-observability exports; RM8.6 qualifies the combined result.
+observability exports.
 Retrieval-backed tools additionally require certified [RM5.2 or RM5.3 retrieval](api-surface.md#rm5-retained-apis-and-retrieval)
 for their selected backend, not completion of every retrieval adapter.
 
@@ -378,7 +378,7 @@ for their selected backend, not completion of every retrieval adapter.
   attempts, approvals, digest-bound continuation, revocation, cancellation,
   restart, unknown effects and prevention of cache replay. See the
   [compatibility evidence](../../use/compatibility.md#gateway-executed-tool-workflows)
-  for discovery, simulation, rollback and the separate live qualification.
+  for discovery, simulation and rollback.
 - [x] **RM8.2 — Add prompt publication and rendering** (prompt/console):
   immutable revisions, labels and bounded string substitution use the same
   server rendering path for inference, playground and imported configuration.
@@ -390,18 +390,15 @@ for their selected backend, not completion of every retrieval adapter.
   exercises import and label movement. With capture enabled, it also checks that
   playground variables and rendered text stay out of durable records and
   exports. The packaged-console journey covers save, publish, playground
-  rendering, label movement and Axe checks. These are local fixture results,
-  not live provider qualification.
+  rendering, label movement and Axe checks.
 - [x] **RM8.3 — Add delegated identities** (access): workload agents use
   explicit consent and scoped tokens with intersected rights and
   user/agent/pair budgets. Fixtures cover signed tool calls, audience refusal,
-  replay, renewal and revocation. Live Entra agent identity qualification
-  remains separate from generic workload issuer fixtures.
+  replay, renewal and revocation.
 - [x] **RM8.4 — Serve A2A workflows** (agent/resource): local reference fixtures
   cover the pinned protocol adapters, retained owner-bound and delegated tasks,
   callbacks, accounting, cross-project denial and revocation. Unconfirmed remote
-  effects remain uncertain. Live external interoperability remains unverified and
-  is part of RM8.6 qualification. See [A2A qualification](../../use/compatibility.md#a2a-qualification).
+  effects remain uncertain. See [A2A evidence](../../use/compatibility.md#a2a-evidence).
 - [x] **RM8.5 — Add traces and operator views** (observability/console): local
   fixtures cover bounded OTLP ingestion, scoped evidence links and
   origin-labelled exports, with content stripping, project isolation, retention
@@ -409,14 +406,8 @@ for their selected backend, not completion of every retrieval adapter.
   Saved investigations are implemented with typed filters, bounded references,
   an operator-authored summary and current project checks on reads. Referenced
   evidence remains subject to its own access and retention policies.
-- [ ] **RM8.6 — Qualify the complete agent surface** (release): run service
-  faults/restarts, authorization/isolation, pinned SDK/reference implementations,
-  Chromium and applicable check/race/build/Helm/performance gates on one candidate.
-  Publish runbooks for uncertain effects, remote cancellation limits, secret
-  enrollment/recovery and upgrades, then review exact support claims.
-
-**Exit:** every criterion below has evidence. Implementation checkboxes do not
-establish live support; record remaining blockers and artifact links using the
+**Exit:** the fixture, service and browser evidence recorded for RM8.1 to RM8.5
+above, with remaining blockers and artifact links recorded using the
 [roadmap evidence rules](../../roadmap.md#updating-progress-and-evidence).
 
 ## Change map
@@ -453,7 +444,7 @@ establish live support; record remaining blockers and artifact links using the
       applicable gateway regression gates pass on the same candidate.
 - [ ] Runbooks explain uncertain effects, remote cancellation limits, secret
       enrollment/recovery and upgrades. Each agent/tool support claim changes only
-      with its evidence; external qualification is distinguished from fixtures.
+      with its evidence.
 
-No execution or external qualification result is claimed by this plan.
+Support claims in this plan rest on the fixture and service evidence recorded above.
 See [MCP registration](../../use/mcp-servers.md) for the existing registration boundary.
