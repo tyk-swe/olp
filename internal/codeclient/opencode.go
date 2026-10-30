@@ -13,7 +13,7 @@ import (
 // adapter it is sent through, which picks its protocol, and every other native
 // model under the provider of the first adapter that offers it, and enables
 // those providers.
-func openCodeConfiguration(adapters []codemode.Adapter, offers Offers, through map[string]codemode.Adapter, native []string, baseURL, model, plan, small string) (string, error) {
+func openCodeConfiguration(route codemode.Route, adapters []codemode.Adapter, offers Offers, through map[string]codemode.Adapter, native []string, baseURL, model, plan, small string) (string, error) {
 	type options struct {
 		BaseURL string `json:"baseURL"`
 		APIKey  string `json:"apiKey"`
@@ -37,13 +37,14 @@ func openCodeConfiguration(adapters []codemode.Adapter, offers Offers, through m
 	whitelists := map[codemode.Adapter][]string{}
 	qualified := map[string]string{}
 	for _, m := range native {
-		adapters := offers.adapters(m)
+		adapters := offers.adapters(route, m)
 		if adapter, ok := through[m]; ok {
 			adapters = []codemode.Adapter{adapter}
 		}
 		for _, adapter := range adapters {
 			vendor, _ := codeadapter.Lookup(adapter)
-			if !vendor.Reaches(codeadapter.ClientOpenCode, m) {
+			resolved, err := route.ResolveModel(codemode.Operation{Model: m})
+			if err != nil || !vendor.Reaches(codeadapter.ClientOpenCode, resolved.Model) {
 				continue
 			}
 			if client, ok := vendor.Client(codeadapter.ClientOpenCode); ok && client.Provider != "" {
@@ -70,7 +71,8 @@ func openCodeConfiguration(adapters []codemode.Adapter, offers Offers, through m
 			document.EnabledProviders = append(document.EnabledProviders, provider)
 			definitions := maps.Collect(func(yield func(string, modelDefinition) bool) {
 				for _, model := range models {
-					protocol, _ := vendor.Protocol(codeadapter.ClientOpenCode, model)
+					resolved, _ := route.ResolveModel(codemode.Operation{Model: model})
+					protocol, _ := vendor.Protocol(codeadapter.ClientOpenCode, resolved.Model)
 					sdk := map[codemode.Protocol]string{
 						codemode.ProtocolChat:      "@ai-sdk/openai-compatible",
 						codemode.ProtocolMessages:  "@ai-sdk/anthropic",

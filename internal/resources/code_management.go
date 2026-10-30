@@ -21,7 +21,7 @@ func (m *Management) codeBindings(r *http.Request, p access.Principal) (access.R
 
 // codePinsJSON is the JSON array of a conversation tree's pins, oldest first.
 func codePinsJSON(root string) string {
-	return `(SELECT coalesce(jsonb_agg(to_jsonb(p)-'root_id'-'seq'-'adapter' ORDER BY p.seq),'[]'::jsonb) FROM olp.code_pins p WHERE p.root_id=` + root + `)`
+	return `(SELECT coalesce(jsonb_agg((to_jsonb(p)-'root_id'-'seq'-'adapter')||jsonb_build_object('target_model',coalesce(p.target_model,p.model)) ORDER BY p.seq),'[]'::jsonb) FROM olp.code_pins p WHERE p.root_id=` + root + `)`
 }
 
 func (m *Management) retireCodeBinding(r *http.Request, _ access.Principal) (access.Reply, error) {

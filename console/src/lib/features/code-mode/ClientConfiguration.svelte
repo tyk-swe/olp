@@ -118,7 +118,7 @@
         />
       {/if}
       <div class="form-field">
-        <label for={ids.model}>Client native model</label>
+        <label for={ids.model}>Client model</label>
         <select
           id={ids.model}
           value={pickerConfig.model}
@@ -145,8 +145,8 @@
           </select>
           <small id="{ids.planModel}-help"
             >{pickerConfig.client === 'claude-code'
-              ? 'Plan mode, through opusplan; other requests use the native model.'
-              : 'The plan agent; the build agent uses the native model.'}</small
+              ? 'Plan mode, through opusplan; other requests use the selected model.'
+              : 'The plan agent; the build agent uses the selected model.'}</small
           >
         </div>
       {/if}
@@ -199,7 +199,7 @@
       </dd>
       <dt>Route base URL</dt>
       <dd><code>{config.base_url}</code></dd>
-      <dt>Native models</dt>
+      <dt>Published models</dt>
       <dd>{config.native_models.join(', ')}</dd>
     </dl>
     <p>

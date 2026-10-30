@@ -7519,7 +7519,7 @@ type CodeBudgetWrite struct {
 
 // CodeClientConfiguration defines model for CodeClientConfiguration.
 type CodeClientConfiguration struct {
-	// Adapters The subscription families whose accounts serve the client's native models, in display order. A mixed route's configuration draws each model from its own family.
+	// Adapters The subscription families whose accounts serve the client's published models and exact aliases, in display order. A mixed route's configuration draws each model from its own family.
 	Adapters []CodeClientConfigurationAdapters `json:"adapters"`
 
 	// AdditionalFiles Companion configuration files required by this setup. Merge entries with existing client settings and MCP servers.
@@ -7540,7 +7540,7 @@ type CodeClientConfiguration struct {
 	// Instructions Platform-specific setup and merge instructions. Preserve unrelated client settings and retain environment references for credentials.
 	Instructions string `json:"instructions"`
 
-	// Model The native model the client uses for its main conversation.
+	// Model The published model or exact alias the client uses for its main conversation.
 	Model string `json:"model"`
 
 	// Models The same live route model and protocol catalog returned by the route models endpoint.
@@ -7549,7 +7549,7 @@ type CodeClientConfiguration struct {
 	// NativeModels The route's models an adapter supporting the client serves, in route order.
 	NativeModels []string `json:"native_models"`
 
-	// PlanModel The native model for planning: Claude Code's plan mode through opusplan and OpenCode's plan agent. It equals model unless another was chosen. Null for Codex.
+	// PlanModel The published model or exact alias for planning: Claude Code's plan mode through opusplan and OpenCode's plan agent. It equals model unless another was chosen. Null for Codex.
 	PlanModel nullable.Nullable[string] `json:"plan_model"`
 
 	// Platform Developer platform for paths and shell syntax. Linux and macOS use POSIX shells, Windows uses PowerShell.
@@ -7557,7 +7557,7 @@ type CodeClientConfiguration struct {
 	QualificationGaps []string           `json:"qualification_gaps"`
 	RouteSlug         string             `json:"route_slug"`
 
-	// SmallModel The native model for background requests: Claude Code's Haiku-class and OpenCode's small model. Null for Codex.
+	// SmallModel The published model or exact alias for background requests: Claude Code's Haiku-class and OpenCode's small model. Null for Codex.
 	SmallModel nullable.Nullable[string] `json:"small_model"`
 
 	// SupportedClients The clients the route's adapters have configurations for; the first, a client of the first model's adapter, is the default.
@@ -7636,6 +7636,9 @@ type CodePin struct {
 	CreatedAt time.Time          `json:"created_at"`
 	Model     string             `json:"model"`
 	Principal string             `json:"principal"`
+
+	// TargetModel Durably pinned native model identifier. Existing native pins use their model identifier.
+	TargetModel string `json:"target_model"`
 }
 
 // CodePool defines model for CodePool.
@@ -7710,7 +7713,7 @@ type CodeResearchToolsServices string
 type CodeRevision struct {
 	Id openapi_types.UUID `json:"id"`
 
-	// Route Dedicated coding contract. Base path is /code/{slug}; model identifiers remain native. Draft writes do not change the immutable runtime release. Publication does no inference. Enabled is independent of ordinary provider activation.
+	// Route Dedicated coding contract. Base path is /code/{slug}. Native model identifiers remain unchanged by default. Exact aliases require explicit model rewriting. Draft writes do not change the immutable runtime release. Publication does no inference. Enabled is independent of ordinary provider activation.
 	Route CodeRoute `json:"route"`
 }
 
@@ -7720,13 +7723,16 @@ type CodeRevisionList struct {
 	NextCursor nullable.Nullable[string] `json:"next_cursor"`
 }
 
-// CodeRoute Dedicated coding contract. Base path is /code/{slug}; model identifiers remain native. Draft writes do not change the immutable runtime release. Publication does no inference. Enabled is independent of ordinary provider activation.
+// CodeRoute Dedicated coding contract. Base path is /code/{slug}. Native model identifiers remain unchanged by default. Exact aliases require explicit model rewriting. Draft writes do not change the immutable runtime release. Publication does no inference. Enabled is independent of ordinary provider activation.
 type CodeRoute struct {
 	// Adapters The adapters the latest published revision serves, in display order, derived from the provider connections it froze. Together they select the route's ingress paths and supported clients: Codex serves `responses`; OpenCode Go serves `v1/chat/completions`, `v1/messages` and `v1/responses`; GLM Coding Plan, MiniMax M Plan, Kimi Code and Qwen Token Plan serve `v1/messages` and `v1/chat/completions`. Each request reaches an account whose adapter serves its path and that lists its model. Empty before publication or when the revision's accounts name no adapter.
 	Adapters []CodeRouteAdapters `json:"adapters"`
-	Enabled  bool                `json:"enabled"`
-	Etag     openapi_types.UUID  `json:"etag"`
-	Id       openapi_types.UUID  `json:"id"`
+
+	// Aliases Stable public model names mapped directly to one native identifier in models. Requires model_rewriting. Alias chains and native name collisions are rejected. Immutable publications pin these mappings. Repointing an alias affects new conversations. Existing conversations retain their stored exact target while it remains published and authorized.
+	Aliases *map[string]string `json:"aliases,omitempty"`
+	Enabled bool               `json:"enabled"`
+	Etag    openapi_types.UUID `json:"etag"`
+	Id      openapi_types.UUID `json:"id"`
 
 	// InitialRecoveryAttempts Maximum additional attempts for a new conversation after an adapter proves nonexecution. Zero disables recovery. Published revisions pin this policy. Exact models, live authority and durable state ownership remain required. Accepted, partial, ambiguous and opaque work never replays.
 	InitialRecoveryAttempts *int `json:"initial_recovery_attempts,omitempty"`
@@ -7734,15 +7740,18 @@ type CodeRoute struct {
 	// MaxBodyBytes Optional ingress limit in bytes. Null inherits installation limits; a route can only lower them. Checks both encoded and decoded JSON, the complete multipart body, and individual client WebSocket messages. Published revisions pin this policy.
 	MaxBodyBytes nullable.Nullable[int] `json:"max_body_bytes,omitempty"`
 
-	// MessagesToCodex Explicitly allow text-only Messages requests to use Codex subscription accounts through protocol translation. Published revisions pin this policy. Native forwarding remains the default. Model identifiers, client identity and prompts are preserved. Tools, thinking, beta features and unsupported required semantics are refused before dispatch.
-	MessagesToCodex *bool                        `json:"messages_to_codex,omitempty"`
-	Models          []string                     `json:"models"`
-	PoolId          openapi_types.UUID           `json:"pool_id"`
-	ProjectId       openapi_types.UUID           `json:"project_id"`
-	PublishedAt     nullable.Nullable[time.Time] `json:"published_at"`
-	Revision        int32                        `json:"revision"`
-	RevisionId      string                       `json:"revision_id"`
-	Slug            string                       `json:"slug"`
+	// MessagesToCodex Explicitly allow Messages text and tool requests to use Codex subscription accounts through protocol translation. Published revisions pin this policy. Native forwarding remains the default. Client identity and prompts are preserved. Model rewriting requires its separate opt-in. Explicit low, medium and high reasoning effort is supported. Signed thinking, numeric reasoning budgets, beta features and unsupported required semantics are refused before dispatch.
+	MessagesToCodex *bool `json:"messages_to_codex,omitempty"`
+
+	// ModelRewriting Explicitly enable exact model aliases independently of protocol translation and identity compatibility. Native identifiers remain unchanged. Only protocol model fields are rewritten for alias requests and responses.
+	ModelRewriting *bool                        `json:"model_rewriting,omitempty"`
+	Models         []string                     `json:"models"`
+	PoolId         openapi_types.UUID           `json:"pool_id"`
+	ProjectId      openapi_types.UUID           `json:"project_id"`
+	PublishedAt    nullable.Nullable[time.Time] `json:"published_at"`
+	Revision       int32                        `json:"revision"`
+	RevisionId     string                       `json:"revision_id"`
+	Slug           string                       `json:"slug"`
 
 	// Tools Research subscription binding, frozen at publication. Requires an eligible Z.ai global account in the same project and pool; independent of inference models. Null disables research.
 	Tools nullable.Nullable[CodeResearchTools] `json:"tools,omitempty"`
@@ -7759,7 +7768,9 @@ type CodeRouteList struct {
 
 // CodeRouteWrite defines model for CodeRouteWrite.
 type CodeRouteWrite struct {
-	Enabled bool `json:"enabled"`
+	// Aliases Stable public model names mapped directly to one native identifier in models. Requires model_rewriting. Alias chains and native name collisions are rejected. Immutable publications pin these mappings. Repointing an alias affects new conversations. Existing conversations retain their stored exact target while it remains published and authorized.
+	Aliases *map[string]string `json:"aliases,omitempty"`
+	Enabled bool               `json:"enabled"`
 
 	// InitialRecoveryAttempts Maximum additional attempts for a new conversation after an adapter proves nonexecution. Zero disables recovery. Published revisions pin this policy. Exact models, live authority and durable state ownership remain required. Accepted, partial, ambiguous and opaque work never replays.
 	InitialRecoveryAttempts *int `json:"initial_recovery_attempts,omitempty"`
@@ -7767,12 +7778,15 @@ type CodeRouteWrite struct {
 	// MaxBodyBytes Optional ingress limit in bytes. Null inherits installation limits; a route can only lower them. Checks both encoded and decoded JSON, the complete multipart body, and individual client WebSocket messages. Published revisions pin this policy.
 	MaxBodyBytes nullable.Nullable[int] `json:"max_body_bytes,omitempty"`
 
-	// MessagesToCodex Explicitly allow text-only Messages requests to use Codex subscription accounts through protocol translation. Published revisions pin this policy. Native forwarding remains the default. Model identifiers, client identity and prompts are preserved. Tools, thinking, beta features and unsupported required semantics are refused before dispatch.
-	MessagesToCodex *bool              `json:"messages_to_codex,omitempty"`
-	Models          []string           `json:"models"`
-	PoolId          openapi_types.UUID `json:"pool_id"`
-	ProjectId       openapi_types.UUID `json:"project_id"`
-	Slug            string             `json:"slug"`
+	// MessagesToCodex Explicitly allow Messages text and tool requests to use Codex subscription accounts through protocol translation. Published revisions pin this policy. Native forwarding remains the default. Client identity and prompts are preserved. Model rewriting requires its separate opt-in. Explicit low, medium and high reasoning effort is supported. Signed thinking, numeric reasoning budgets, beta features and unsupported required semantics are refused before dispatch.
+	MessagesToCodex *bool `json:"messages_to_codex,omitempty"`
+
+	// ModelRewriting Explicitly enable exact model aliases independently of protocol translation and identity compatibility. Native identifiers remain unchanged. Only protocol model fields are rewritten for alias requests and responses.
+	ModelRewriting *bool              `json:"model_rewriting,omitempty"`
+	Models         []string           `json:"models"`
+	PoolId         openapi_types.UUID `json:"pool_id"`
+	ProjectId      openapi_types.UUID `json:"project_id"`
+	Slug           string             `json:"slug"`
 
 	// Tools Research subscription binding, frozen at publication. Requires an eligible Z.ai global account in the same project and pool; independent of inference models. Null disables research.
 	Tools nullable.Nullable[CodeResearchTools] `json:"tools,omitempty"`

@@ -57,12 +57,16 @@ func (s *Snapshot) CodeProviders(route codemode.Route, path string, transport co
 // serves a model on the path's protocol: an adapter that serves each model on
 // one endpoint serves a path only for that endpoint's models.
 func (s *Snapshot) CodeModelProviders(route codemode.Route, path string, model string, transport codeadapter.Transport) []string {
+	resolved, err := route.ResolveModel(codemode.Operation{Model: model})
+	if err != nil {
+		return nil
+	}
 	revision := s.codeRevisions[route.RevisionID]
 	providers := s.CodeProviders(route, path, transport)
 	return slices.DeleteFunc(slices.Clone(providers), func(provider string) bool {
 		adapter := revision.vendors[provider]
 		endpoint, ok := codeadapter.RouteEndpoint(route, adapter, path)
-		return !ok || !adapter.ServesModel(endpoint.Protocol, model)
+		return !ok || !adapter.ServesModel(endpoint.Protocol, resolved.Model)
 	})
 }
 
@@ -71,6 +75,9 @@ func (s *Snapshot) validateCodeMode() error {
 		return err
 	}
 	for slug, route := range s.CodeRoutes {
+		if err := route.ValidateAliases(); err != nil {
+			return err
+		}
 		if route.InitialRecoveryAttempts < 0 || route.InitialRecoveryAttempts > 2 {
 			return fmt.Errorf("invalid initial recovery policy for %s", slug)
 		}

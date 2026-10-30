@@ -23,13 +23,6 @@ type Request struct {
 	GatewayURL, Client, Platform, Model, PlanModel, SmallModel string
 }
 
-// Generate generates a client's configuration for a published
-// route, never its mutable draft. GatewayURL is the operator-configured public
-// gateway origin and prefix. A client's native models are the route's models
-// an adapter offers on a protocol the client speaks, so one configuration can
-// draw on several subscriptions: each request reaches an account serving its
-// model. Its planning and background models are those one conversation reaches
-// with the main model, which uses one account of each adapter.
 func Generate(route codemode.Route, offers Offers, in Request) (codemode.ClientConfiguration, error) {
 	empty := codemode.ClientConfiguration{}
 	if !route.Enabled || route.RevisionID == "" || !access.RouteSlug.MatchString(route.Slug) {
@@ -41,6 +34,9 @@ func Generate(route codemode.Route, offers Offers, in Request) (codemode.ClientC
 	}
 	if err := codemode.ValidateModels(route.Models); err != nil {
 		return empty, access.Invalid("models", err.Error())
+	}
+	if err := route.ValidateAliases(); err != nil {
+		return empty, access.Invalid("aliases", err.Error())
 	}
 	catalog := Catalog(route, offers)
 	var supported []string
@@ -69,7 +65,7 @@ func Generate(route codemode.Route, offers Offers, in Request) (codemode.ClientC
 			continue
 		}
 		native = append(native, model.ID)
-		for _, adapter := range offers.adapters(model.ID) {
+		for _, adapter := range offers.adapters(route, model.ID) {
 			if declaration, _ := codeadapter.Lookup(adapter); routeReaches(route, declaration, client, model.ID) {
 				if !slices.Contains(adapters, adapter) {
 					adapters = append(adapters, adapter)
@@ -129,17 +125,22 @@ func Generate(route codemode.Route, offers Offers, in Request) (codemode.ClientC
 			}
 			return codeadapter.ClaudeCodeVersion, "shell", claudeCodeConfiguration(baseURL, model, *plan, *small), nil
 		case codeadapter.ClientOpenCode:
-			text, err := openCodeConfiguration(adapters, offers, through, native, baseURL, model, *plan, *small)
+			text, err := openCodeConfiguration(route, adapters, offers, through, native, baseURL, model, *plan, *small)
 			return codeadapter.OpenCodeVersion, "json", text, err
 		}
 		return "", "", "", nil
 	}()
 	file, nativeInstructions := platformInstructions(client, platform)
-	instructions := func() string {
+	instructions := nativeInstructions + func() string {
 		if client == codeadapter.ClientClaudeCode && route.MessagesToCodex && slices.Contains(adapters, codemode.AdapterCodex) {
-			return nativeInstructions + " This published route enables Messages text and tool use through Codex accounts. Explicit low, medium and high reasoning effort is supported. Signed thinking, numeric reasoning budgets, beta features and other unsupported required semantics are refused. Model identifiers and prompt text are preserved, and identity and prompt compatibility remain disabled"
+			return " This published route enables Messages text and tool use through Codex accounts. Explicit low, medium and high reasoning effort is supported. Signed thinking, numeric reasoning budgets, beta features and other unsupported required semantics are refused. Prompt text is preserved, and identity and prompt compatibility remain disabled."
 		}
-		return nativeInstructions
+		return ""
+	}() + func() string {
+		if route.ModelRewriting {
+			return " Published aliases rewrite only model identifiers to their exact native targets. Existing conversations retain their pinned targets while authorized."
+		}
+		return ""
 	}()
 	out := codemode.ClientConfiguration{
 		Models:    catalog,
@@ -155,7 +156,7 @@ func Generate(route codemode.Route, offers Offers, in Request) (codemode.ClientC
 	return out, researchErr
 }
 
-const nativeModel = "Choose a native model the published route serves this client."
+const nativeModel = "Choose a published model or exact alias this route serves for the client."
 
 // companionModel returns a client's planning or background model: the main
 // model unless another native one is selected. Codex takes neither.
