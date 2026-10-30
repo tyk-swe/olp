@@ -18,6 +18,69 @@ import (
 	"github.com/tyk-swe/olp/internal/testutil"
 )
 
+func TestCodeQualificationGenericAffinityPreservesAuthority(t *testing.T) {
+	f := newCodeFleet(t)
+	second := f.h.want(f.owner, "POST", "/api/v1/api-keys", map[string]any{"name": "Second coding key", "project_id": f.project, "scopes": []string{"inference"}, "allowed_routes": []string{"qualification"}}, idem("generic-second-key"), 201)
+	foreignProject := createProject(f.h, f.owner, "Other coding project")
+	foreign := f.h.want(f.owner, "POST", "/api/v1/api-keys", map[string]any{"name": "Other project key", "project_id": foreignProject, "scopes": []string{"inference"}, "allowed_routes": []string{"qualification"}}, idem("generic-foreign-key"), 201)
+	f.h.want(f.owner, "PUT", "/api/v1/code/pools/"+f.pool["id"].(string), f.poolInput([]string{f.keyID, second["id"].(string)}), etagHeader(f.pool), 200)
+	if err := f.gateways[1].Stop(8 * time.Second); err != nil {
+		t.Fatal(err)
+	}
+	f.gateways[1] = f.in.replica("generic-keys")
+	request := func(key, affinity string, body []byte, status int) {
+		t.Helper()
+		req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, f.gateways[1].PublicOrigin+"/code/qualification/responses", bytes.NewReader(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set("Authorization", "Bearer "+key)
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("X-Olp-Code-Affinity", affinity)
+		response, err := (&http.Client{Timeout: 15 * time.Second}).Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer response.Body.Close()
+		data, err := io.ReadAll(response.Body)
+		if err != nil || response.StatusCode != status {
+			t.Fatalf("generic authority request returned %d body %s error %v", response.StatusCode, data, err)
+		}
+	}
+	request(f.key, "same-client-affinity", codeBody(), http.StatusOK)
+	continuation := []byte(`{"model":"gpt-5.4","previous_response_id":"resp-controlled","input":[]}`)
+	request(f.key, "other-affinity", continuation, http.StatusConflict)
+	recognizedResponse, recognizedBody := f.clientRequest(t, 1, "responses", http.Header{"Thread-Id": {"recognized-adopter"}}, continuation)
+	if recognizedResponse.StatusCode != http.StatusConflict {
+		t.Fatalf("recognized identity adopted generic state, status %d body %s", recognizedResponse.StatusCode, recognizedBody)
+	}
+	request(second["secret"].(string), "same-client-affinity", continuation, http.StatusConflict)
+	if len(f.peer.Requests()) != 1 {
+		t.Fatal("another key reused a generic response reference")
+	}
+	request(second["secret"].(string), "same-client-affinity", codeBody(), http.StatusOK)
+	request(f.key, "same-client-affinity", continuation, http.StatusOK)
+	bindings := codePublicDecode[[]codemode.Binding](t, f.list("bindings"))
+	if len(bindings) != 2 || bindings[0].RootID == bindings[1].RootID || bindings[0].APIKeyID == bindings[1].APIKeyID || bindings[0].Conversation != bindings[1].Conversation {
+		t.Fatal("equal generic affinity escaped API-key isolation")
+	}
+	request(foreign["secret"].(string), "same-client-affinity", codeBody(), http.StatusForbidden)
+	if len(f.peer.Requests()) != 3 {
+		t.Fatal("another project's generic affinity reached upstream")
+	}
+	f.peer.SetResponder(func(context.Context, http.Header, []byte) [][]byte {
+		return [][]byte{[]byte(`{"type":"response.completed","response":{"id":"resp-recognized","status":"completed","output":[],"usage":{"input_tokens":2,"output_tokens":1,"total_tokens":3}}}`)}
+	})
+	rootResponse, rootBody := f.clientRequest(t, 1, "responses", http.Header{"Thread-Id": {"recognized-root"}}, codeBody())
+	if rootResponse.StatusCode != http.StatusOK {
+		t.Fatalf("recognized root refused, status %d body %s", rootResponse.StatusCode, rootBody)
+	}
+	request(f.key, "recognized-root-adopter", []byte(`{"model":"gpt-5.4","previous_response_id":"resp-recognized","input":[]}`), http.StatusConflict)
+	if len(f.peer.Requests()) != 4 || len(codePublicDecode[[]codemode.Binding](t, f.list("bindings"))) != 3 {
+		t.Fatal("generic affinity adopted a recognized root")
+	}
+}
+
 func TestCodeQualificationDurableResponseReferencesAndGeneratedConfiguration(t *testing.T) {
 	f := newCodeFleet(t)
 	path := "/api/v1/code/routes/" + f.route["id"].(string) + "/client-config?gateway_url=" + f.gateways[0].PublicOrigin

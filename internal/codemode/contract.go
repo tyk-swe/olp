@@ -7,6 +7,7 @@ import (
 	"math"
 	"net/http"
 	"regexp"
+	"strings"
 	"time"
 )
 
@@ -192,6 +193,10 @@ func (i Identity) Validate() error {
 		return Refuse(400, "code_identity_invalid")
 	}
 	return nil
+}
+
+func (i Identity) Generic() bool {
+	return strings.HasPrefix(i.Conversation, "olp:request/") || strings.HasPrefix(i.Conversation, "olp:affinity/")
 }
 
 // Pin is the account a conversation tree serves one model from. A tree's
