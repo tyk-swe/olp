@@ -7,11 +7,8 @@ import (
 	"math"
 	"net/http"
 	"regexp"
-	"slices"
 	"strings"
 	"time"
-
-	"github.com/google/uuid"
 )
 
 const BasePath = "/code/"
@@ -139,6 +136,7 @@ type ClientConfiguration struct {
 }
 
 type Model struct {
+	ModelPool    []string          `json:"model_pool,omitempty"`
 	ID           string            `json:"id"`
 	Object       string            `json:"object"`
 	Capabilities []ModelCapability `json:"capabilities"`
@@ -189,6 +187,7 @@ func (r Route) ValidatePaidTargets() error {
 type Route struct {
 	PaidParticipation       bool                  `json:"paid_participation"`
 	PaidTargets             map[string]PaidTarget `json:"paid_targets"`
+	ModelPools              map[string][]string   `json:"model_pools,omitempty"`
 	InitialRecoveryAttempts int                   `json:"initial_recovery_attempts,omitempty"`
 	ModelRewriting          bool                  `json:"model_rewriting,omitempty"`
 	Aliases                 map[string]string     `json:"aliases,omitempty"`
@@ -302,6 +301,7 @@ func (b *TokenBound) Validate() error {
 }
 
 type Attempt struct {
+	RequestedModel    *string           `json:"requested_model"`
 	Attribution       map[string]string `json:"attribution,omitempty"`
 	EndUserDigest     string            `json:"end_user_digest"`
 	UpstreamStatus    *int              `json:"upstream_status"`

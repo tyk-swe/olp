@@ -105,13 +105,15 @@ func TestPublishedMessagesPolicySelectsEligibleFrozenProviders(t *testing.T) {
 
 func TestExactAliasSnapshotFreezesPublishedModelMapping(t *testing.T) {
 	aliases := map[string]string{"team-code": "native-model"}
-	input := &Snapshot{CodeRoutes: map[string]codemode.Route{"coding": {Models: []string{"native-model"}, Aliases: aliases, ModelRewriting: true}}}
+	pools := map[string][]string{"team-code": {"native-model", "native-next"}}
+	input := &Snapshot{CodeRoutes: map[string]codemode.Route{"coding": {Models: []string{"native-model", "native-next", "native-other"}, Aliases: aliases, ModelRewriting: true, ModelPools: pools}}}
 	frozen := input.Clone()
 	before, err := frozen.Digest()
 	if err != nil {
 		t.Fatal(err)
 	}
 	aliases["team-code"] = "native-next"
+	pools["team-code"][1] = "native-other"
 	after, err := frozen.Digest()
 	if err != nil || after != before {
 		t.Fatalf("draft alias edit changed frozen publication %s, %s, %v", before, after, err)
@@ -119,5 +121,9 @@ func TestExactAliasSnapshotFreezesPublishedModelMapping(t *testing.T) {
 	resolved, err := frozen.CodeRoutes["coding"].ResolveModel(codemode.Operation{Model: "team-code"})
 	if err != nil || resolved.Model != "native-model" {
 		t.Fatalf("frozen alias no longer resolves to published target %+v, %v", resolved, err)
+	}
+	operations, err := frozen.CodeRoutes["coding"].RecoveryModels(codemode.Operation{Model: "team-code"}, nil)
+	if err != nil || len(operations) != 2 || operations[1].Model != "native-next" {
+		t.Fatalf("draft pool edit changed frozen recovery %+v, %v", operations, err)
 	}
 }

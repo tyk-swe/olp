@@ -3,7 +3,6 @@ package gateway
 import (
 	"context"
 	"errors"
-	"maps"
 	"net/http"
 	"reflect"
 	"time"
@@ -60,21 +59,10 @@ func (s *Server) prepareCode(r *http.Request, release *runtime.Release, route co
 		return s.preparePaidCode(r, release, route, observation, operation, ingress, transport, authority, body)
 	}
 	providers := release.Snapshot.CodeModelProviders(route, ingress.path, operation.Model, transport)
-	if len(providers) == 0 && (operation.RequestedModel == "" || len(release.Snapshot.CodeProviders(route, ingress.path, transport)) == 0) {
+	if len(providers) == 0 && (!route.ModelRewriting || len(release.Snapshot.CodeProviders(route, ingress.path, transport)) == 0) {
 		return nil, codemode.Refuse(400, "code_operation_unsupported")
 	}
-	modelProviders := func() map[string][]string {
-		if operation.RequestedModel == "" {
-			return nil
-		}
-		return maps.Collect(func(yield func(string, []string) bool) {
-			for _, model := range route.Models {
-				if !yield(model, release.Snapshot.CodeModelProviders(route, ingress.path, model, transport)) {
-					return
-				}
-			}
-		})
-	}()
+
 	labels, failure := s.parseAttribution(r, authority)
 	if failure != nil {
 		return nil, codemode.Refuse(failure.Status, "code_"+failure.Code)
@@ -85,7 +73,7 @@ func (s *Server) prepareCode(r *http.Request, release *runtime.Release, route co
 	}
 	permit, err := s.CodeLedger.Admit(r.Context(), resources.CodeAdmission{
 		Attribution: labels, Route: route, APIKeyID: authority.ID, EndUserDigest: authority.EndUserDigest,
-		InitialRecovery: observation.Recoverable, Recovery: recovery, Operation: operation, Providers: providers, ModelProviders: modelProviders, PreviousResponse: observation.PreviousResponse,
+		InitialRecovery: observation.Recoverable, Recovery: recovery, Operation: operation, Providers: providers, ModelSource: release.Snapshot, ModelPath: ingress.path, ModelTransport: transport, PreviousResponse: observation.PreviousResponse,
 	})
 	if err != nil {
 		settleKey(r.Context(), lease, false, nil, s.log)

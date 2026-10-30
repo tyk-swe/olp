@@ -2,9 +2,11 @@ package resources
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/codeadapter"
 	"github.com/tyk-swe/olp/internal/codemode"
 )
@@ -63,11 +65,11 @@ func recoverCodeBinding(ctx context.Context, tx pgx.Tx, in CodeAdmission) error 
 	if pinsErr != nil {
 		return pinsErr
 	}
-	operation, modelErr := in.Route.ResolvePinnedModel(in.Operation, pins)
+	operations, modelErr := in.Route.RecoveryModels(in.Operation, pins)
 	if modelErr != nil {
 		return modelErr
 	}
-	destination, destinationErr := codeAccount(ctx, tx, in.withOperation(operation), "", "", nil)
+	operation, destination, destinationErr := codeRecoveryDestination(ctx, tx, in, operations)
 	if destinationErr != nil {
 		return destinationErr
 	}
@@ -77,7 +79,7 @@ func recoverCodeBinding(ctx context.Context, tx pgx.Tx, in CodeAdmission) error 
 	if _, err := tx.Exec(ctx, `UPDATE olp.code_bindings SET account_id=$2,principal=$3 WHERE id=$1`, root, destination.ID, destination.Principal); err != nil {
 		return err
 	}
-	_, pinErr := tx.Exec(ctx, `UPDATE olp.code_pins SET account_id=$2,principal=$3,adapter=`+codeadapter.SQL("v.connections->($4::text)")+` FROM olp.code_route_revisions v WHERE root_id=$1 AND v.id=$5`, root, destination.ID, destination.Principal, destination.ProviderID, in.Route.RevisionID)
+	_, pinErr := tx.Exec(ctx, `UPDATE olp.code_pins SET account_id=$2,principal=$3,target_model=$6,adapter=`+codeadapter.SQL("v.connections->($4::text)")+` FROM olp.code_route_revisions v WHERE root_id=$1 AND v.id=$5`, root, destination.ID, destination.Principal, destination.ProviderID, in.Route.RevisionID, operation.Model)
 	return pinErr
 }
 
@@ -99,4 +101,24 @@ func (s *CodeStore) ConfirmNonexecution(ctx context.Context, attempt string, sta
 func (s *CodeStore) ObserveCooldown(ctx context.Context, account string, until time.Time) error {
 	_, err := s.Pool.Exec(ctx, `UPDATE olp.code_accounts SET unavailable_until=greatest(unavailable_until,$2) WHERE id=$1`, account, until)
 	return err
+}
+
+func codeRecoveryDestination(ctx context.Context, tx pgx.Tx, in CodeAdmission, operations []codemode.Operation) (codemode.Operation, codemode.Account, error) {
+	if len(operations) == 0 {
+		return codemode.Operation{}, codemode.Account{}, codemode.Refuse(503, "code_account_unavailable")
+	}
+	selected := in.withOperation(operations[0])
+	var authority access.Authority
+	if err := codeAuthority(ctx, tx, selected, &authority); err != nil {
+		return codemode.Operation{}, codemode.Account{}, err
+	}
+	account, err := codeAccount(ctx, tx, selected, "", "", nil)
+	if err == nil {
+		return operations[0], account, nil
+	}
+	var refusal *codemode.Refusal
+	if !errors.As(err, &refusal) || refusal.Code != "code_account_unavailable" {
+		return codemode.Operation{}, codemode.Account{}, err
+	}
+	return codeRecoveryDestination(ctx, tx, in, operations[1:])
 }

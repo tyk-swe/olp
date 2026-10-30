@@ -223,3 +223,42 @@ func TestPaidTargetsRequireExplicitParticipationAndExactNativeModel(t *testing.T
 		}
 	}
 }
+
+func TestModelPoolsKeepExactDefaultsAndPermitOnlyPublishedAlternates(t *testing.T) {
+	operation := Operation{Name: "responses", Model: "team-code", Identity: Identity{Conversation: "recovery"}}
+	route := Route{Models: []string{"native-a", "native-b"}, Aliases: map[string]string{"team-code": "native-a"}, ModelRewriting: true, InitialRecoveryAttempts: 1}
+	pins := []Pin{{Model: "team-code", TargetModel: "native-a"}}
+	exact, err := route.RecoveryModels(operation, pins)
+	if err != nil || len(exact) != 1 || exact[0].Model != "native-a" || exact[0].PublicModel() != "team-code" {
+		t.Fatalf("exact default changed %+v, %v", exact, err)
+	}
+	pooled := Route{Models: route.Models, Aliases: route.Aliases, ModelRewriting: route.ModelRewriting, InitialRecoveryAttempts: route.InitialRecoveryAttempts,
+		ModelPools: map[string][]string{"team-code": {"native-a", "native-b"}}}
+	if err := pooled.ValidateModelPools(); err != nil {
+		t.Fatal(err)
+	}
+	alternates, err := pooled.RecoveryModels(operation, pins)
+	if err != nil || len(alternates) != 2 || alternates[1].Model != "native-b" || alternates[1].PublicModel() != "team-code" || alternates[1].Identity != operation.Identity {
+		t.Fatalf("explicit pool lost target or public identity %+v, %v", alternates, err)
+	}
+	continued, err := pooled.ResolvePinnedModel(operation, []Pin{{Model: "team-code", TargetModel: "native-b"}})
+	if err != nil || continued.Model != "native-b" || continued.PublicModel() != "team-code" {
+		t.Fatalf("recovered model did not stay pinned %+v, %v", continued, err)
+	}
+	nativePool := Route{Models: route.Models, ModelRewriting: true, ModelPools: map[string][]string{"native-a": {"native-a", "native-b"}}}
+	nativeSelected, nativeErr := nativePool.ResolvePinnedModel(Operation{Model: "native-a"}, []Pin{{Model: "native-a", TargetModel: "native-b"}})
+	if nativeErr != nil || nativeSelected.Model != "native-b" || nativeSelected.PublicModel() != "native-a" {
+		t.Fatalf("native pool lost requested model %+v, %v", nativeSelected, nativeErr)
+	}
+	for _, invalid := range []Route{
+		{Models: route.Models, ModelPools: map[string][]string{"native-a": {"native-a", "native-b"}}},
+		{Models: route.Models, ModelRewriting: true, ModelPools: map[string][]string{"unknown": {"native-a", "native-b"}}},
+		{Models: route.Models, ModelRewriting: true, ModelPools: map[string][]string{"native-a": {"native-b", "native-a"}}},
+		{Models: route.Models, ModelRewriting: true, ModelPools: map[string][]string{"native-a": {"native-a", "unpublished"}}},
+		{Models: route.Models, ModelRewriting: true, ModelPools: map[string][]string{"native-a": {"native-a", "native-a"}}},
+	} {
+		if err := invalid.ValidateModelPools(); err == nil {
+			t.Fatalf("invalid pool accepted %+v", invalid)
+		}
+	}
+}

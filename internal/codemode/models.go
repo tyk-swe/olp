@@ -55,5 +55,46 @@ func (r Route) ResolvePinnedModel(operation Operation, pins []Pin) (Operation, e
 	if !slices.Contains(r.Models, target) {
 		return Operation{}, Refuse(403, "code_model_denied")
 	}
-	return Operation{Name: resolved.Name, Model: target, RequestedModel: resolved.RequestedModel, Identity: resolved.Identity}, nil
+	requested := func() string {
+		if target != resolved.Model {
+			return resolved.PublicModel()
+		}
+		return resolved.RequestedModel
+	}()
+	return Operation{Name: resolved.Name, Model: target, RequestedModel: requested, Identity: resolved.Identity}, nil
+}
+
+func (r Route) ValidateModelPools() error {
+	if len(r.ModelPools) > 100 || len(r.ModelPools) > 0 && !r.ModelRewriting {
+		return fmt.Errorf("use at most 100 model pools and explicitly enable model rewriting")
+	}
+	for public, targets := range r.ModelPools {
+		primary, err := r.ResolveModel(Operation{Model: public})
+		if err != nil || len(targets) < 2 || len(targets) > 100 || targets[0] != primary.Model {
+			return fmt.Errorf("each model pool must start with its published exact target and include an alternate")
+		}
+		for i, target := range targets {
+			if !slices.Contains(r.Models, target) || slices.Contains(targets[:i], target) {
+				return fmt.Errorf("model pools require distinct published native targets")
+			}
+		}
+	}
+	return nil
+}
+
+func (r Route) RecoveryModels(operation Operation, pins []Pin) ([]Operation, error) {
+	selected, err := r.ResolvePinnedModel(operation, pins)
+	if err != nil {
+		return nil, err
+	}
+	return slices.AppendSeq([]Operation{selected}, func(yield func(Operation) bool) {
+		if !r.ModelRewriting {
+			return
+		}
+		for _, model := range r.ModelPools[selected.PublicModel()] {
+			if model != selected.Model && slices.Contains(r.Models, model) && !yield(Operation{Name: selected.Name, Model: model, RequestedModel: selected.PublicModel(), Identity: selected.Identity}) {
+				return
+			}
+		}
+	}), nil
 }
