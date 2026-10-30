@@ -674,13 +674,17 @@
   }
 
   let datasetSinkId = $state('');
+  let datasetCursors = $state<string[]>([]);
+  const datasetCursor = $derived(datasetCursors.at(-1));
   const focusDatasets = createQuery(() => ({
-    queryKey: observabilityKeys.focusDatasets(datasetSinkId),
-    queryFn: ({ signal }) => listExportSinkFocusDatasets(datasetSinkId, signal),
+    queryKey: observabilityKeys.focusDatasets(datasetSinkId, datasetCursor),
+    queryFn: ({ signal }) =>
+      listExportSinkFocusDatasets(datasetSinkId, datasetCursor, signal),
     enabled: datasetSinkId !== ''
   }));
 
   function toggleDatasets(sink: ExportSink) {
+    datasetCursors = [];
     datasetSinkId =
       datasetSinkId === sink.export_sink_id ? '' : sink.export_sink_id;
   }
@@ -1063,12 +1067,13 @@
             {#if datasetSinkId === sink.export_sink_id}
               <tr class="gap-row"
                 ><td colspan="7"
-                  >{#if focusDatasets.isPending}<span class="inline-status"
-                      >Loading datasets…</span
+                  >{#if focusDatasets.isPending}<span
+                      class="inline-status"
+                      role="status">Loading datasets…</span
                     >{:else if focusDatasets.isError}<span
                       class="inline-problem"
-                      >Focus datasets are unavailable.</span
-                    >{:else if !(focusDatasets.data ?? []).length}<span
+                      role="alert">Focus datasets are unavailable.</span
+                    >{:else if !(focusDatasets.data?.items ?? []).length}<span
                       class="section-help">No datasets delivered yet.</span
                     >{:else}<table class="data-table focus-datasets">
                       <thead
@@ -1082,7 +1087,7 @@
                           ><th scope="col">Status</th></tr
                         ></thead
                       ><tbody>
-                        {#each focusDatasets.data ?? [] as dataset (dataset.charge_date)}
+                        {#each focusDatasets.data?.items ?? [] as dataset (dataset.charge_date)}
                           <tr
                             ><td class="mono">{dataset.charge_date}</td><td
                               >{dataset.revision}</td
@@ -1119,7 +1124,44 @@
                           >
                         {/each}
                       </tbody>
-                    </table>{/if}</td
+                    </table>{/if}
+                  <div
+                    class="form-actions"
+                    role="group"
+                    aria-label="Dataset pages"
+                  >
+                    {#if datasetCursors.length > 0}
+                      <button
+                        class="button button-secondary"
+                        type="button"
+                        disabled={focusDatasets.isFetching}
+                        onclick={() => {
+                          datasetCursors = datasetCursors.slice(0, -1);
+                        }}>Newer datasets</button
+                      >
+                    {/if}
+                    {#if focusDatasets.isError}
+                      <button
+                        class="button button-secondary"
+                        type="button"
+                        disabled={focusDatasets.isFetching}
+                        onclick={() => focusDatasets.refetch()}
+                        >Retry datasets</button
+                      >
+                    {/if}
+                    {#if focusDatasets.data?.nextCursor}
+                      <button
+                        class="button button-secondary"
+                        type="button"
+                        disabled={focusDatasets.isFetching}
+                        onclick={() => {
+                          const cursor = focusDatasets.data?.nextCursor;
+                          if (cursor)
+                            datasetCursors = [...datasetCursors, cursor];
+                        }}>Older datasets</button
+                      >
+                    {/if}
+                  </div></td
                 ></tr
               >
             {/if}
