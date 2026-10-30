@@ -1,8 +1,12 @@
 package codexwire
 
 import (
+	"errors"
 	"net/http"
 	"testing"
+
+	"github.com/tyk-swe/olp/internal/codemode"
+	"github.com/tyk-swe/olp/internal/codewire"
 )
 
 func TestClassifyRejectsBackgroundGenerations(t *testing.T) {
@@ -50,6 +54,34 @@ func TestClassifyRejectsStoredItemReferences(t *testing.T) {
 				t.Fatalf("stored reference accepted %s", item)
 			}
 		}
+	}
+}
+
+func TestResponsesRecoveryKeepsPreviousResponseOnItsAccount(t *testing.T) {
+	for _, test := range []struct {
+		name, body, previous string
+		portable             bool
+	}{
+		{"initial", `{"model":"native","input":"Hello"}`, "", true},
+		{"optional nulls", `{"model":"native","input":"Hello","previous_response_id":null,"conversation":null,"instructions":null}`, "", true},
+		{"null input", `{"model":"native","input":null}`, "", false},
+		{"previous response", `{"model":"native","input":"Continue","previous_response_id":"response-owned"}`, "response-owned", false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			headers := http.Header{"X-Olp-Code-Affinity": {"conversation"}}
+			request, err := Classify([]byte(test.body), headers, "responses", false)
+			if err != nil || request.PreviousResponse != test.previous {
+				t.Fatalf("continuation %q, want %q, error %v", request.PreviousResponse, test.previous, err)
+			}
+			if portable := codewire.PortableInitialRequest([]byte(test.body), headers, request); portable != test.portable {
+				t.Fatalf("portable %t, want %t", portable, test.portable)
+			}
+		})
+	}
+	_, err := Classify([]byte(`{"model":"native","input":"Continue","previous_response_id":"response-owned"}`), nil, "responses", false)
+	var refusal *codemode.Refusal
+	if !errors.As(err, &refusal) || refusal.Code != "code_parent_unresolved" || refusal.Status != http.StatusConflict {
+		t.Fatalf("unowned previous response was accepted %v", err)
 	}
 }
 

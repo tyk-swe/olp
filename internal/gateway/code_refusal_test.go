@@ -343,6 +343,39 @@ func TestCodeInitialRecoveryNeverReplaysUnprovenOrOpaqueWork(t *testing.T) {
 	}
 }
 
+func TestCodeInitialRecoveryRequiresCompleteBoundedRejection(t *testing.T) {
+	for _, size := range []int{64 << 10, (64 << 10) + 1} {
+		t.Run(fmt.Sprint(size), func(t *testing.T) {
+			h, _, server := newCodeForwardHarness(t, codeForwardSetup{
+				Models: []string{"native-model"}, Policy: access.KeyPolicy{Scopes: []string{"inference", "models_read"}}, InitialRecoveryAttempts: 1,
+			})
+			const rejectionShape = `{"error":{"type":"usage_limit_reached","message":""}}`
+			rejection := strings.Replace(rejectionShape, `"message":""`, `"message":"`+strings.Repeat("x", size-len(rejectionShape))+`"`, 1)
+			const recovered = `{"id":"bounded-recovery","status":"completed","output":[],"usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}`
+			h.mock.set("a", func(w http.ResponseWriter, _ *http.Request) {
+				h.mock.set("a", func(w http.ResponseWriter, _ *http.Request) { _, _ = io.WriteString(w, recovered) })
+				w.WriteHeader(http.StatusTooManyRequests)
+				_, _ = io.WriteString(w, rejection)
+			})
+			response := codeDo(t, server, []byte(`{"model":"native-model","input":"hello"}`), nil)
+			defer response.Body.Close()
+			body, err := io.ReadAll(response.Body)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if size == 64<<10 {
+				if response.StatusCode != http.StatusOK || string(body) != recovered {
+					t.Fatalf("bounded complete rejection did not recover, received HTTP %d and %d bytes", response.StatusCode, len(body))
+				}
+				return
+			}
+			if response.StatusCode != http.StatusTooManyRequests || string(body) != rejection {
+				t.Fatalf("oversized rejection was replayed or changed, received HTTP %d and %d bytes", response.StatusCode, len(body))
+			}
+		})
+	}
+}
+
 func TestCodeInitialRecoveryStopsAtPublishedBound(t *testing.T) {
 	h, ledger, server := newCodeForwardHarness(t)
 	route := h.rt.release.Snapshot.CodeRoutes["coding"]

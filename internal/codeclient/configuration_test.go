@@ -76,6 +76,42 @@ func TestPlatformPathsAndInvalidPlatform(t *testing.T) {
 	}
 }
 
+func TestGeneratedConfigurationRequiresSecureOrLoopbackGateway(t *testing.T) {
+	route := codemode.Route{Slug: "team-code", Enabled: true, RevisionID: "published", Models: []string{"fixture-model"}}
+	offers := Offers{{Adapter: codemode.AdapterCodex, Models: route.Models}}
+	for _, test := range []struct {
+		gateway string
+		valid   bool
+	}{
+		{"https://gateway.invalid/prefix///", true},
+		{"http://localhost:8080/prefix", true},
+		{"http://127.2.3.4:8080", true},
+		{"http://[::1]:8080", true},
+		{"http://gateway.invalid", false},
+		{"http://localhost.gateway.invalid", false},
+		{"http://192.0.2.1", false},
+		{"ftp://localhost", false},
+		{"https://user:secret@gateway.invalid", false},
+		{"https://gateway.invalid?secret=value", false},
+		{"https://gateway.invalid#fragment", false},
+	} {
+		t.Run(test.gateway, func(t *testing.T) {
+			configuration, err := Generate(route, offers, Request{GatewayURL: test.gateway})
+			if !test.valid {
+				var problem *access.Problem
+				if !errors.As(err, &problem) || problem.Status != 422 || problem.Field != "gateway_url" {
+					t.Fatalf("unsafe gateway accepted, error %v", err)
+				}
+				return
+			}
+			want := strings.TrimRight(test.gateway, "/") + route.BasePath()
+			if err != nil || configuration.BaseURL != want || !strings.Contains(configuration.Configuration, `base_url = "`+want+`"`) {
+				t.Fatalf("gateway address changed during setup %+v, error %v", configuration, err)
+			}
+		})
+	}
+}
+
 func TestClaudeShellPreservesSettingsAndSelectedModels(t *testing.T) {
 	models := []string{"minimax-test-main", "minimax-test-plan", "minimax-test-small"}
 	route := codemode.Route{Slug: "team-code", Enabled: true, RevisionID: "published", Models: models}
