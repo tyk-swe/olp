@@ -383,3 +383,94 @@ func TestCodeFoundationManagementIsolationPublicationAndPrivacy(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestCodeFoundationAvailabilityPreservesFreshHealthAndIndependentAllowance(t *testing.T) {
+	f := newCodeFixture(t)
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	observed := now.Add(-10 * time.Minute)
+	retry := now.Add(2 * time.Hour)
+	readAccount := func() codemode.Account {
+		listing := f.h.want(f.owner, "GET", "/api/v1/code/accounts?project_id="+f.project, nil, nil, 200)
+		raw, err := json.Marshal(listing["items"])
+		if err != nil {
+			t.Fatal(err)
+		}
+		var accounts []codemode.Account
+		if err := json.Unmarshal(raw, &accounts); err != nil {
+			t.Fatal(err)
+		}
+		if len(accounts) != 1 {
+			t.Fatalf("accounts %+v", accounts)
+		}
+		return accounts[0]
+	}
+	observeHealth := func(observation codemode.HealthObservation) {
+		if err := f.store.ObserveHealth(t.Context(), f.account, observation); err != nil {
+			t.Fatal(err)
+		}
+	}
+	observeHealth(codemode.HealthObservation{Status: "unavailable", ObservedAt: observed, RetryAt: &retry})
+	observeHealth(codemode.HealthObservation{Status: "healthy", ObservedAt: observed.Add(-time.Minute)})
+	observeHealth(codemode.HealthObservation{Status: "unavailable", ObservedAt: observed.Add(time.Minute)})
+	blocked := readAccount()
+	if blocked.Eligible || blocked.Health != "unavailable" || blocked.UnavailableUntil == nil || !blocked.UnavailableUntil.Equal(retry) || blocked.HealthObservedAt == nil || !blocked.HealthObservedAt.Equal(observed.Add(time.Minute)) {
+		t.Fatalf("stale or partial observation erased cooldown %+v", blocked)
+	}
+	expired := now.Add(-time.Minute)
+	observeHealth(codemode.HealthObservation{Status: "quota_limited", ObservedAt: observed.Add(2 * time.Minute), RetryAt: &expired})
+	recovered := readAccount()
+	if !recovered.Eligible || recovered.Health != "quota_limited" || recovered.Allowance != nil {
+		t.Fatalf("retry deadline invented allowance or failed to recover %+v", recovered)
+	}
+	if err := f.store.ObserveAllowance(t.Context(), f.account, codemode.Allowance{RemainingTokens: new(int64(0)), ObservedAt: observed, TokenObservation: &codemode.CountObservation{ObservedAt: observed, ResetsAt: &retry}}); err != nil {
+		t.Fatal(err)
+	}
+	observeHealth(codemode.HealthObservation{Status: "healthy", ObservedAt: observed.Add(3 * time.Minute)})
+	exhausted := readAccount()
+	if exhausted.Eligible || exhausted.Health != "healthy" || exhausted.UnavailableUntil != nil || exhausted.Allowance == nil || *exhausted.Allowance.RemainingTokens != 0 {
+		t.Fatalf("serving recovery bypassed exhausted allowance %+v", exhausted)
+	}
+	f.exec(t, `UPDATE olp.provider_grants SET lapsed_at=now() WHERE credential_id=$1`, f.credential)
+	rejected := readAccount()
+	if rejected.Eligible || rejected.GrantState != "lapsed" || rejected.Health != "healthy" {
+		t.Fatalf("refresh rejection conflated with serving health %+v", rejected)
+	}
+}
+
+func TestCodeFoundationAllowanceRecoveryRequiresSupportedReset(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	for _, test := range []struct {
+		name     string
+		reset    *time.Time
+		eligible bool
+	}{
+		{"future", new(now.Add(time.Hour)), false},
+		{"expired", new(now.Add(-time.Hour)), true},
+		{"missing", nil, false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			f := newCodeFixture(t)
+			observed := now.Add(-2 * time.Hour)
+			allowance := codemode.Allowance{
+				RemainingTokens: new(int64(0)), RemainingRequests: new(int64(0)), ObservedAt: observed,
+				TokenObservation: &codemode.CountObservation{ObservedAt: observed, ResetsAt: test.reset}, RequestObservation: &codemode.CountObservation{ObservedAt: observed, ResetsAt: test.reset},
+				Windows: []codemode.AllowanceWindow{{LimitID: "codex", Window: "primary", UsedPercent: 100, RemainingPercent: 0, ResetsAt: test.reset, ObservedAt: observed}},
+			}
+			if err := f.store.ObserveAllowance(t.Context(), f.account, allowance); err != nil {
+				t.Fatal(err)
+			}
+			listing := f.h.want(f.owner, "GET", "/api/v1/code/accounts?project_id="+f.project, nil, nil, 200)
+			raw, err := json.Marshal(listing["items"])
+			if err != nil {
+				t.Fatal(err)
+			}
+			var accounts []codemode.Account
+			if err := json.Unmarshal(raw, &accounts); err != nil {
+				t.Fatal(err)
+			}
+			if len(accounts) != 1 || accounts[0].Eligible != test.eligible || accounts[0].Allowance == nil || *accounts[0].Allowance.RemainingTokens != 0 || *accounts[0].Allowance.RemainingRequests != 0 || *accounts[0].Allowance.RemainingPercent != 0 {
+				t.Fatalf("reset recovery changed reported allowance or guessed a reset %+v", accounts)
+			}
+		})
+	}
+}
