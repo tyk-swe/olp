@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"maps"
 	"net"
 	"net/http"
@@ -36,6 +37,152 @@ import (
 )
 
 const nativeToolResult = "private-tool-result"
+
+func TestGatewayToolExecutionFollowsLimiterOutagePolicy(t *testing.T) {
+	for _, test := range []struct {
+		name      string
+		noLimiter bool
+		policy    limits.OutagePolicy
+		runLimit  string
+		keyCost   *string
+		keyRate   *int64
+		groupID   *string
+		groupCost *string
+		status    int
+		failOpen  int64
+	}{
+		{name: "unbounded run without limiter", noLimiter: true, status: http.StatusOK},
+		{name: "bounded run without limiter", noLimiter: true, runLimit: `,"olp_run_limits":{"max_concurrent_runs":1}`, status: http.StatusServiceUnavailable},
+		{name: "unbounded run fails open", policy: limits.FailOpen, status: http.StatusOK, failOpen: 1},
+		{name: "bounded run fails open", policy: limits.FailOpen, runLimit: `,"olp_run_limits":{"max_concurrent_runs":1}`, status: http.StatusOK, failOpen: 1},
+		{name: "rate limited key fails open", policy: limits.FailOpen, keyRate: new(int64(10)), status: http.StatusOK, failOpen: 2},
+		{name: "unbounded run fails closed", policy: limits.FailClosed, status: http.StatusServiceUnavailable},
+		{name: "bounded run fails closed", policy: limits.FailClosed, runLimit: `,"olp_run_limits":{"max_concurrent_runs":1}`, status: http.StatusServiceUnavailable},
+		{name: "key cost fails closed under fail open", policy: limits.FailOpen, keyCost: new("1"), status: http.StatusServiceUnavailable},
+		{name: "group cost fails closed under fail open", policy: limits.FailOpen, groupID: new(uuid.NewString()), groupCost: new("1"), status: http.StatusServiceUnavailable},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			projectID, toolsetID := uuid.NewString(), uuid.NewString()
+			fixture := &workflowFixture{runID: uuid.NewString(), tool: WorkflowTool{ToolsetID: toolsetID}}
+			h := nativeWorkflowHarness(t, projectID, "openai", "openai-chat", "unary", routing.FidelityTransformed, []string{toolsetID}, true, fixture)
+			h.rt.keys[fullKey] = access.Authority{
+				ID: h.rt.keys[fullKey].ID, LookupID: "lookup_workflow", ProjectID: &projectID,
+				BudgetGroupID: test.groupID, BudgetGroupDailyCostLimit: test.groupCost,
+				Policy: access.KeyPolicy{Scopes: []string{"inference", "models_read"}, DailyCostLimit: test.keyCost, RequestsPerMinute: test.keyRate},
+			}
+			if !test.noLimiter {
+				limiter, err := limits.New(&window{down: true}, "olp:test")
+				if err != nil {
+					t.Fatal(err)
+				}
+				h.gateway.Admission = NewAdmission(limiter, func() limits.OutagePolicy { return test.policy }, slog.New(slog.DiscardHandler))
+			}
+			upstream := make(chan struct{}, 1)
+			h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
+				upstream <- struct{}{}
+				completion(modelA, answerText)(w, r)
+			})
+			response, body := h.chat(fullKey, nil, `,"olp_toolsets":[]`, test.runLimit)
+			if response.StatusCode != test.status {
+				t.Fatalf("status=%d body=%v, want %d", response.StatusCode, body, test.status)
+			}
+			if test.status == http.StatusOK {
+				select {
+				case <-upstream:
+				default:
+					t.Fatal("the admitted workflow did not reach the model")
+				}
+			} else {
+				if code := errorCode(t, body); code != "distributed_limits_unavailable" {
+					t.Fatalf("code=%q, want distributed_limits_unavailable", code)
+				}
+				select {
+				case <-upstream:
+					t.Fatal("the refused workflow reached the model")
+				default:
+				}
+			}
+			if total := h.gateway.Admission.FailOpenTotal(); total != test.failOpen {
+				t.Fatalf("fail-open total=%d, want %d", total, test.failOpen)
+			}
+		})
+	}
+}
+
+func TestGatewayToolExecutionRejectsConcurrentLimitUnderFailOpen(t *testing.T) {
+	projectID, toolsetID := uuid.NewString(), uuid.NewString()
+	fixture := &workflowFixture{runID: uuid.NewString(), tool: WorkflowTool{ToolsetID: toolsetID}}
+	h := nativeWorkflowHarness(t, projectID, "openai", "openai-chat", "unary", routing.FidelityTransformed, []string{toolsetID}, true, fixture)
+	limiter, err := limits.New(&window{}, "olp:test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.gateway.Admission = NewAdmission(limiter, func() limits.OutagePolicy { return limits.FailOpen }, slog.New(slog.DiscardHandler))
+	started, unexpected, release := make(chan struct{}, 1), make(chan struct{}, 1), make(chan struct{})
+	type result struct {
+		status int
+		err    error
+	}
+	finished := make(chan result, 1)
+	defer close(release)
+	h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		if bytes.Contains(body, []byte("first workflow")) {
+			started <- struct{}{}
+			<-release
+		} else {
+			unexpected <- struct{}{}
+		}
+		completion(modelA, answerText)(w, r)
+	})
+	bounded := `,"olp_toolsets":[],"olp_run_limits":{"max_concurrent_runs":1}`
+	request, err := http.NewRequestWithContext(t.Context(), http.MethodPost, h.server.URL+"/v1/chat/completions", strings.NewReader(`{"model":"`+routeSlug+`","messages":[{"role":"user","content":"first workflow"}]`+bounded+`}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.Header.Set("Authorization", "Bearer "+fullKey)
+	request.Header.Set("Content-Type", "application/json")
+	go func() {
+		response, err := http.DefaultClient.Do(request)
+		if err != nil {
+			finished <- result{err: err}
+			return
+		}
+		defer response.Body.Close()
+		_, readErr := io.Copy(io.Discard, response.Body)
+		finished <- result{status: response.StatusCode, err: readErr}
+	}()
+	select {
+	case <-started:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the first workflow did not reach the model")
+	}
+	response, body := h.chat(fullKey, nil, bounded)
+	if response.StatusCode != http.StatusTooManyRequests {
+		t.Fatalf("concurrent workflow returned %d: %v", response.StatusCode, body)
+	}
+	select {
+	case <-unexpected:
+		t.Fatal("the refused workflow reached the model")
+	default:
+	}
+	if h.gateway.Admission.FailOpenTotal() != 0 {
+		t.Fatal("an actual limit rejection was counted as a fail-open outage")
+	}
+	release <- struct{}{}
+	select {
+	case outcome := <-finished:
+		if outcome.err != nil || outcome.status != http.StatusOK {
+			t.Fatalf("the first workflow returned %d: %v", outcome.status, outcome.err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("the first workflow did not finish")
+	}
+}
 
 func TestGatewayToolExecutionRecoversCompressedInputAfterApproval(t *testing.T) {
 	for _, previousRecovery := range []bool{false, true} {

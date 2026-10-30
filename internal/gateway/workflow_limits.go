@@ -135,5 +135,5 @@ func (s *Server) reserveWorkflowRun(ctx context.Context, x *call) (*limits.Lease
 	if errors.As(err, &exceeded) {
 		return nil, rateLimited(exceeded.Dimension, exceeded.RetryAfter, exceeded.Estimate)
 	}
-	return nil, limitsUnavailable()
+	return nil, s.Admission.outage(x.keyID, false, err)
 }
