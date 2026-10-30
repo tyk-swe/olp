@@ -24,6 +24,15 @@ func Catalog(route codemode.Route, offers Offers) []codemode.Model {
 			if err != nil {
 				continue
 			}
+			if _, mapped := route.PaidTargets[resolved.Model]; mapped {
+				if protocol, ok := offers.paidProtocol(route, id); ok {
+					capability, clients := paidCapability(protocol)
+					if !yield(codemode.Model{ID: id, Object: "model", Paid: true, Capabilities: []codemode.ModelCapability{capability}, Clients: clients}) {
+						return
+					}
+				}
+				continue
+			}
 			capabilities := modelCapabilities(route, resolved.Model, declarations)
 			if len(capabilities) > 0 && !yield(codemode.Model{ModelPool: slices.Clone(route.ModelPools[id]), ID: id, Object: "model", Capabilities: capabilities, Clients: modelClients(route, resolved.Model, declarations)}) {
 				return
@@ -89,4 +98,31 @@ func modelClients(route codemode.Route, id string, declarations []codeadapter.Ve
 			}
 		}
 	})
+}
+
+func (offers Offers) paidProtocol(route codemode.Route, model string) (codemode.Protocol, bool) {
+	resolved, err := route.ResolveModel(codemode.Operation{Model: model})
+	if err != nil || !route.PaidParticipation {
+		return "", false
+	}
+	if _, mapped := route.PaidTargets[resolved.Model]; !mapped {
+		return "", false
+	}
+	for _, offer := range offers {
+		if offer.PaidProtocol != "" && slices.Contains(offer.Models, resolved.Model) {
+			return offer.PaidProtocol, true
+		}
+	}
+	return "", false
+}
+
+func paidCapability(protocol codemode.Protocol) (codemode.ModelCapability, []string) {
+	switch protocol {
+	case codemode.ProtocolResponses:
+		return codemode.ModelCapability{Protocol: protocol, Path: "v1/responses", Transports: []string{"http"}}, []string{codeadapter.ClientCodex, codeadapter.ClientOpenCode}
+	case codemode.ProtocolMessages:
+		return codemode.ModelCapability{Protocol: protocol, Path: "v1/messages", Transports: []string{"http"}}, []string{codeadapter.ClientClaudeCode, codeadapter.ClientOpenCode}
+	default:
+		return codemode.ModelCapability{Protocol: protocol, Path: "v1/chat/completions", Transports: []string{"http"}}, []string{codeadapter.ClientOpenCode}
+	}
 }

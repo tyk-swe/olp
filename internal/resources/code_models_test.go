@@ -24,9 +24,10 @@ func (q codeOffersQuery) Query(context.Context, string, ...any) (pgx.Rows, error
 }
 
 type codeOfferRow struct {
-	models  []string
-	adapter *string
-	err     error
+	publication []byte
+	models      []string
+	adapter     *string
+	err         error
 }
 
 // pgx.Rows requires a mutable cursor and caller-owned Scan destinations.
@@ -48,16 +49,18 @@ func (r *codeOfferRows) Scan(dest ...any) error {
 	if row.err != nil {
 		return row.err
 	}
-	if len(dest) != 2 {
+	if len(dest) != 3 {
 		return errors.New("account offer needs models and adapter destinations")
 	}
 	models, validModels := dest[0].(*[]string)
 	adapter, validAdapter := dest[1].(**string)
-	if !validModels || !validAdapter {
+	publication, validPublication := dest[2].(*[]byte)
+	if !validModels || !validAdapter || !validPublication {
 		return errors.New("account offer destinations have incompatible types")
 	}
 	*models = row.models
 	*adapter = row.adapter
+	*publication = row.publication
 	return nil
 }
 
@@ -101,5 +104,12 @@ func TestCodeOffersPropagatesDataSourceFailure(t *testing.T) {
 				t.Fatalf("data-source failure was reported as success or replaced, got %v", err)
 			}
 		})
+	}
+}
+
+func TestCodeOffersInvalidPaidPublicationFailsClosed(t *testing.T) {
+	source := codeOffersQuery{rows: &codeOfferRows{data: []codeOfferRow{{publication: []byte("{")}}}}
+	if _, err := CodeOffers(t.Context(), source, "published-revision"); err == nil {
+		t.Fatal("invalid paid publication was treated as an empty catalog")
 	}
 }

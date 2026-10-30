@@ -6439,9 +6439,20 @@
               },
               "description": "Explicit subscription model recovery pools keyed by a published native name or exact alias. Requires model_rewriting. Each ordered list starts with that name's normal exact target and contains distinct native identifiers from models. Recovery prefers the pinned exact target, then these alternatives, within initial_recovery_attempts and positive nonexecution, portability, live authorization and budget checks. Omitted pools preserve exact selection. Publications freeze the policy. Existing conversations retain their exact target, including after alias changes, while it remains published and authorized. Paid fallback is separately governed."
             },
-            "chat_to_antigravity": {
+            "paid_targets": {
+              "type": "object",
+              "additionalProperties": {
+                "$ref": "#/$defs/CodePaidTarget"
+              },
+              "description": "Exact native model to directly selected published metered provider and credential slot. A mapped model takes precedence over subscription accounts."
+            },
+            "paid_participation": {
               "type": "boolean",
               "default": false,
+              "description": "Explicitly permit direct metered API targets. This does not enable paid fallback."
+            },
+            "chat_to_antigravity": {
+              "type": "boolean",
               "description": "Explicitly allow Chat Completions text and function tools through the internal Antigravity Gemini target over HTTP or SSE. Published revisions pin this policy. Native forwarding remains the default. Client identity and prompts are preserved. Signed thought state, reasoning controls, media and server tools are unsupported. Returned signature state is refused before actionable output rather than discarded. Controlled fixtures do not qualify any current model or live subscription workflow."
             }
           },
@@ -6485,6 +6496,24 @@
             "account_id",
             "services"
           ]
+        },
+        "CodePaidTarget": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "provider_id",
+            "slot_id"
+          ],
+          "properties": {
+            "provider_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "slot_id": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
         }
       }
     }
@@ -32269,9 +32298,20 @@
               },
               "description": "Explicit subscription model recovery pools keyed by a published native name or exact alias. Requires model_rewriting. Each ordered list starts with that name's normal exact target and contains distinct native identifiers from models. Recovery prefers the pinned exact target, then these alternatives, within initial_recovery_attempts and positive nonexecution, portability, live authorization and budget checks. Omitted pools preserve exact selection. Publications freeze the policy. Existing conversations retain their exact target, including after alias changes, while it remains published and authorized. Paid fallback is separately governed."
             },
-            "chat_to_antigravity": {
+            "paid_targets": {
+              "type": "object",
+              "additionalProperties": {
+                "$ref": "#/$defs/CodePaidTarget"
+              },
+              "description": "Exact native model to directly selected published metered provider and credential slot. A mapped model takes precedence over subscription accounts."
+            },
+            "paid_participation": {
               "type": "boolean",
               "default": false,
+              "description": "Explicitly permit direct metered API targets. This does not enable paid fallback."
+            },
+            "chat_to_antigravity": {
+              "type": "boolean",
               "description": "Explicitly allow Chat Completions text and function tools through the internal Antigravity Gemini target over HTTP or SSE. Published revisions pin this policy. Native forwarding remains the default. Client identity and prompts are preserved. Signed thought state, reasoning controls, media and server tools are unsupported. Returned signature state is refused before actionable output rather than discarded. Controlled fixtures do not qualify any current model or live subscription workflow."
             }
           },
@@ -32315,6 +32355,24 @@
             "account_id",
             "services"
           ]
+        },
+        "CodePaidTarget": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "provider_id",
+            "slot_id"
+          ],
+          "properties": {
+            "provider_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "slot_id": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
         }
       }
     }

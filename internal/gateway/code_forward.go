@@ -59,7 +59,7 @@ func (s *Server) serveCode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	adapters := release.Snapshot.CodeAdapters(route)
-	if len(adapters) == 0 {
+	if len(adapters) == 0 && len(route.PaidTargets) == 0 {
 		refuse(codemode.Refuse(503, "code_adapter_unavailable"))
 		return
 	}
@@ -68,7 +68,7 @@ func (s *Server) serveCode(w http.ResponseWriter, r *http.Request) {
 		s.codeWebSocket(w, r, release, route, authority, ingress)
 		return
 	}
-	if r.Method != http.MethodPost || !ok || len(release.Snapshot.CodeProviders(route, path, codeadapter.HTTP)) == 0 {
+	if r.Method != http.MethodPost || !ok || len(release.Snapshot.CodeProviders(route, path, codeadapter.HTTP)) == 0 && len(route.PaidTargets) == 0 {
 		if codeProbe(r.Method, path) && len(release.Snapshot.CodeProviders(route, "v1/messages", codeadapter.HTTP)) != 0 {
 			codeWriteError(w, r, codemode.Refuse(404, "code_operation_unsupported"))
 			return
@@ -106,7 +106,7 @@ func (s *Server) serveCode(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) forwardCode(w http.ResponseWriter, r *http.Request, release *runtime.Release, route codemode.Route, observation codemode.Request, ingress codeIngress, raw, body []byte, recovery *resources.CodeRecovery, refuse func(error)) {
 	ctx := r.Context()
-	attempt, err := s.prepareCode(r, release, route, observation, ingress, codeadapter.HTTP, recovery)
+	attempt, err := s.prepareCode(r, release, route, observation, ingress, codeadapter.HTTP, recovery, body)
 	if err != nil {
 		refuse(err)
 		return
@@ -138,13 +138,13 @@ func (s *Server) forwardCode(w http.ResponseWriter, r *http.Request, release *ru
 		return
 	}
 
-	client, err := s.codeClient(r.Context(), release, attempt.config, attempt.permit.Account.ProviderID)
+	client, err := s.codeClient(r.Context(), release, attempt.config, attempt.providerID())
 	if err != nil {
 		refuse(err)
 		return
 	}
 	defer client.CloseIdleConnections()
-	target, err := s.codeEndpoint(attempt.config, attempt.endpoint.Path(payload.stream), payload.query)
+	target, err := attempt.requestURL(payload.query, payload.stream)
 	if err != nil {
 		refuse(err)
 		return
@@ -178,18 +178,28 @@ func (s *Server) forwardCode(w http.ResponseWriter, r *http.Request, release *ru
 	// A non-rewindable body and a fresh HTTP/1 connection prevent net/http replay.
 	request.GetBody = nil
 	request.Close = true
+	if err := attempt.authorizePaid(request, payload.body); err != nil {
+		refuse(err)
+		return
+	}
 	if err := attempt.dispatch(ctx); err != nil {
 		refuse(err)
 		return
 	}
-	response, err := client.Do(request)
+	upstreamResponse, err := client.Do(request)
 	if err != nil {
 		attempt.transportFailed(ctx, err)
 		refuse(codemode.Refuse(502, "code_upstream_unavailable"))
 		return
 	}
+	defer upstreamResponse.Body.Close()
+	attempt.response(ctx, upstreamResponse.StatusCode, upstreamResponse.Header)
+	response, safetyErr := attempt.safePaidResponse(upstreamResponse)
+	if safetyErr != nil {
+		refuse(safetyErr)
+		return
+	}
 	defer response.Body.Close()
-	attempt.response(ctx, response.StatusCode, response.Header)
 	next, recoveryErr := attempt.recover(ctx, response, route, recovery)
 	if recoveryErr != nil {
 		refuse(recoveryErr)
@@ -216,7 +226,9 @@ func (s *Server) forwardCode(w http.ResponseWriter, r *http.Request, release *ru
 		w.Header().Add("Trailer", name)
 	}
 	w.WriteHeader(response.StatusCode)
-	attempt.copyResponse(ctx, w, response)
+	meteredResponse, finishUsage := attempt.meterPaidResponse(response)
+	defer finishUsage()
+	attempt.copyResponse(ctx, w, meteredResponse)
 	for name, values := range codewire.ForwardTrailers(response.Trailer, response.Header, false) {
 		w.Header()[http.TrailerPrefix+name] = values
 	}

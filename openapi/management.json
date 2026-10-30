@@ -15418,13 +15418,13 @@
             "enum": [
               "codex",
               "claude",
+              "antigravity",
               "opencode_go",
               "zai_coding",
               "minimax_plan",
               "kimi_code",
               "qwen_token_plan",
-              null,
-              "antigravity"
+              null
             ],
             "type": [
               "string",
@@ -15586,7 +15586,10 @@
           },
           "account_id": {
             "format": "uuid",
-            "type": "string"
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "api_key_id": {
             "format": "uuid",
@@ -15594,7 +15597,10 @@
           },
           "binding_id": {
             "format": "uuid",
-            "type": "string"
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "bound_evidence": {
             "type": [
@@ -15728,7 +15734,41 @@
               "string",
               "null"
             ],
-            "description": "Public model identifier requested by the client. Null for historical attempts where the identifier was not recorded. model identifies the selected exact target."
+            "description": "Public model requested before explicit alias resolution."
+          },
+          "paid_slot_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "paid_monetary_state": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "pending",
+              "released",
+              "settled",
+              "unknown",
+              null
+            ]
+          },
+          "paid_binding_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "paid_provider_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
           }
         },
         "required": [
@@ -15788,7 +15828,10 @@
         "properties": {
           "account_id": {
             "format": "uuid",
-            "type": "string"
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "api_key_id": {
             "format": "uuid",
@@ -15821,7 +15864,10 @@
             "type": "array"
           },
           "principal": {
-            "type": "string"
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "project_id": {
             "format": "uuid",
@@ -15841,6 +15887,20 @@
           "route_id": {
             "format": "uuid",
             "type": "string"
+          },
+          "paid_provider_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "paid_slot_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
           }
         },
         "required": [
@@ -16029,12 +16089,12 @@
               "enum": [
                 "codex",
                 "claude",
+                "antigravity",
                 "opencode_go",
                 "zai_coding",
                 "minimax_plan",
                 "kimi_code",
-                "qwen_token_plan",
-                "antigravity"
+                "qwen_token_plan"
               ],
               "type": "string"
             },
@@ -16152,6 +16212,12 @@
             "items": {
               "$ref": "#/components/schemas/CodeModel"
             }
+          },
+          "paid_models": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
           }
         },
         "required": [
@@ -16181,7 +16247,10 @@
         "properties": {
           "account_id": {
             "format": "uuid",
-            "type": "string"
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "created_at": {
             "format": "date-time",
@@ -16193,11 +16262,28 @@
             "type": "string"
           },
           "principal": {
-            "type": "string"
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "target_model": {
             "type": "string",
             "description": "Durably pinned native model identifier. Existing native pins use their model identifier."
+          },
+          "paid_provider_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "paid_slot_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
           }
         },
         "required": [
@@ -16489,12 +16575,12 @@
               "enum": [
                 "codex",
                 "claude",
+                "antigravity",
                 "opencode_go",
                 "zai_coding",
                 "minimax_plan",
                 "kimi_code",
-                "qwen_token_plan",
-                "antigravity"
+                "qwen_token_plan"
               ],
               "type": "string"
             },
@@ -16607,9 +16693,20 @@
             },
             "description": "Explicit subscription model recovery pools keyed by a published native name or exact alias. Requires model_rewriting. Each ordered list starts with that name's normal exact target and contains distinct native identifiers from models. Recovery prefers the pinned exact target, then these alternatives, within initial_recovery_attempts and positive nonexecution, portability, live authorization and budget checks. Omitted pools preserve exact selection. Publications freeze the policy. Existing conversations retain their exact target, including after alias changes, while it remains published and authorized. Paid fallback is separately governed."
           },
-          "chat_to_antigravity": {
+          "paid_participation": {
             "type": "boolean",
             "default": false,
+            "description": "Explicitly permit direct metered API targets. This does not enable paid fallback."
+          },
+          "paid_targets": {
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/CodePaidTarget"
+            },
+            "description": "Exact native model to directly selected published metered provider and credential slot. A mapped model takes precedence over subscription accounts."
+          },
+          "chat_to_antigravity": {
+            "type": "boolean",
             "description": "Explicitly allow Chat Completions text and function tools through the internal Antigravity Gemini target over HTTP or SSE. Published revisions pin this policy. Native forwarding remains the default. Client identity and prompts are preserved. Signed thought state, reasoning controls, media and server tools are unsupported. Returned signature state is refused before actionable output rather than discarded. Controlled fixtures do not qualify any current model or live subscription workflow."
           }
         },
@@ -16736,9 +16833,20 @@
             },
             "description": "Explicit subscription model recovery pools keyed by a published native name or exact alias. Requires model_rewriting. Each ordered list starts with that name's normal exact target and contains distinct native identifiers from models. Recovery prefers the pinned exact target, then these alternatives, within initial_recovery_attempts and positive nonexecution, portability, live authorization and budget checks. Omitted pools preserve exact selection. Publications freeze the policy. Existing conversations retain their exact target, including after alias changes, while it remains published and authorized. Paid fallback is separately governed."
           },
-          "chat_to_antigravity": {
+          "paid_targets": {
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/CodePaidTarget"
+            },
+            "description": "Exact native model to directly selected published metered provider and credential slot. A mapped model takes precedence over subscription accounts."
+          },
+          "paid_participation": {
             "type": "boolean",
             "default": false,
+            "description": "Explicitly permit direct metered API targets. This does not enable paid fallback."
+          },
+          "chat_to_antigravity": {
+            "type": "boolean",
             "description": "Explicitly allow Chat Completions text and function tools through the internal Antigravity Gemini target over HTTP or SSE. Published revisions pin this policy. Native forwarding remains the default. Client identity and prompts are preserved. Signed thought state, reasoning controls, media and server tools are unsupported. Returned signature state is refused before actionable output rather than discarded. Controlled fixtures do not qualify any current model or live subscription workflow."
           }
         },
@@ -28582,6 +28690,10 @@
               "type": "string"
             },
             "description": "Configured ordered subscription recovery targets for this public model. This is policy metadata, not an availability or portability guarantee. Omitted for exact-model selection."
+          },
+          "paid": {
+            "type": "boolean",
+            "description": "This model directly selects a metered API target and requires monetary admission."
           }
         }
       },
@@ -28636,6 +28748,24 @@
             "type": "string",
             "format": "uuid",
             "description": "Existing credential slot, defaults to the default slot"
+          }
+        }
+      },
+      "CodePaidTarget": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "provider_id",
+          "slot_id"
+        ],
+        "properties": {
+          "provider_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "slot_id": {
+            "type": "string",
+            "format": "uuid"
           }
         }
       }

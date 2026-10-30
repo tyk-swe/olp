@@ -249,12 +249,19 @@
           <dd>{item.id} / {item.root_id}</dd>
           <dt>Parent binding</dt>
           <dd>{item.parent_id ?? 'Root conversation'}</dd>
-          <dt>First account / principal</dt>
-          <dd>{item.account_id} / {item.principal}</dd>
+          <dt>First target</dt>
+          <dd>
+            {item.paid_provider_id
+              ? 'Paid API ' + item.paid_provider_id + ' / ' + item.paid_slot_id
+              : item.account_id + ' / ' + item.principal}
+          </dd>
           <dt>Model pins</dt>
           <dd>
             {item.pins
-              .map((pin) => `${pin.model} → ${pin.account_id}`)
+              .map(
+                (pin) =>
+                  `${pin.model} -> ${pin.paid_provider_id ?? pin.account_id}`
+              )
               .join(', ') || 'No model served yet'}
           </dd>
           <dt>Route / key</dt>
@@ -307,7 +314,14 @@
           <dt>Route / revision</dt>
           <dd>{attempt.route_id} / {attempt.route_revision_id}</dd>
           <dt>Key / account</dt>
-          <dd>{attempt.api_key_id} / {attempt.account_id}</dd>
+          <dd>
+            {attempt.api_key_id} / {attempt.paid_provider_id
+              ? 'Paid API ' +
+                attempt.paid_provider_id +
+                ' / ' +
+                attempt.paid_slot_id
+              : attempt.account_id}
+          </dd>
           <dt>End user</dt>
           <dd>{attempt.end_user_digest || 'Unidentified'}</dd>
           {#if Object.keys(attempt.attribution ?? {}).length}
@@ -319,7 +333,7 @@
             </dd>
           {/if}
           <dt>Binding</dt>
-          <dd>{attempt.binding_id}</dd>
+          <dd>{attempt.paid_binding_id ?? attempt.binding_id}</dd>
           <dt>{reservationLabel(attempt)}</dt>
           <dd>{tokenCount(attempt.reserved_tokens)} tokens</dd>
           <dt>Measured tokens</dt>
