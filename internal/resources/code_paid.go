@@ -33,6 +33,7 @@ type paidCodeBinding struct {
 	ParentID           *string
 	RootID             string
 	Model              string
+	PublicModel        string
 	ProviderID         string
 	SlotID             string
 	CredentialID       string
@@ -137,6 +138,7 @@ func paidCodeBind(ctx context.Context, tx pgx.Tx, in PaidCodeAdmission, current 
 	if bindingErr != nil && !errors.Is(bindingErr, pgx.ErrNoRows) {
 		return binding, bindingErr
 	}
+	modelBound := bindingErr == nil && binding.PublicModel == in.Operation.PublicModel()
 	var referenceConversation, referenceRoot string
 	if in.PreviousResponse != "" {
 		err := tx.QueryRow(ctx, `SELECT b.conversation,b.root_id::text FROM olp.code_paid_references r JOIN olp.code_paid_bindings b ON b.id=r.binding_id JOIN olp.code_paid_bindings root ON root.id=b.root_id WHERE r.route_id=$1 AND r.api_key_id=$2 AND r.external_id=$3 AND NOT r.ambiguous AND b.model=$4 AND b.provider_id=$5 AND b.slot_id=$6 AND b.credential_id=$7 AND root.retired_at IS NULL`, in.Route.ID, in.APIKeyID, in.PreviousResponse, in.Operation.PublicModel(), in.Provider.ID, in.Slot.ID, *in.Slot.CredentialID).Scan(&referenceConversation, &referenceRoot)
@@ -165,7 +167,7 @@ func paidCodeBind(ctx context.Context, tx pgx.Tx, in PaidCodeAdmission, current 
 	}
 	source, sourceErr := func() (*string, error) {
 		if !subscription {
-			if in.Fallback && bindingErr != nil && identity.Parent == "" {
+			if in.Fallback && !modelBound && identity.Parent == "" {
 				return nil, codePaidInitialFallback(ctx, tx, in, current)
 			}
 			return nil, nil
@@ -200,7 +202,7 @@ func paidCodeBind(ctx context.Context, tx pgx.Tx, in PaidCodeAdmission, current 
 		return paidCodeBinding{}, codemode.Refuse(409, "code_recovery_unsafe")
 	}
 	if bindingErr == nil {
-		if binding.Model != in.Operation.Model || binding.ProviderID != in.Provider.ID || binding.SlotID != in.Slot.ID || binding.CredentialID != *in.Slot.CredentialID {
+		if modelBound && (binding.Model != in.Operation.Model || binding.ProviderID != in.Provider.ID || binding.SlotID != in.Slot.ID || binding.CredentialID != *in.Slot.CredentialID) {
 			return binding, codemode.Refuse(409, "code_paid_target_conflict")
 		}
 		if identity.Parent != "" {
@@ -209,9 +211,14 @@ func paidCodeBind(ctx context.Context, tx pgx.Tx, in PaidCodeAdmission, current 
 				return binding, codemode.Refuse(409, "code_parent_conflict")
 			}
 		}
-		return binding, nil
+		if modelBound {
+			return binding, nil
+		}
 	}
 	parent, parentErr := func() (paidCodeBinding, error) {
+		if bindingErr == nil {
+			return binding, nil
+		}
 		if identity.Parent == "" {
 			return paidCodeBinding{}, nil
 		}
@@ -226,8 +233,15 @@ func paidCodeBind(ctx context.Context, tx pgx.Tx, in PaidCodeAdmission, current 
 	if referenceRoot != "" && parent.RootID != referenceRoot {
 		return binding, codemode.Refuse(409, "code_response_account_conflict")
 	}
-	if parent.ID != "" && (parent.ProviderID != in.Provider.ID || parent.SlotID != in.Slot.ID || parent.CredentialID != *in.Slot.CredentialID) {
-		return binding, codemode.Refuse(409, "code_paid_target_conflict")
+	if parent.ID != "" {
+		var pinned paidCodeBinding
+		err := tx.QueryRow(ctx, `SELECT selected_model,provider_id::text,slot_id::text,credential_id::text FROM olp.code_paid_bindings WHERE root_id=$1 AND model=$2 ORDER BY id LIMIT 1`, parent.RootID, in.Operation.PublicModel()).Scan(&pinned.Model, &pinned.ProviderID, &pinned.SlotID, &pinned.CredentialID)
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return binding, err
+		}
+		if err == nil && (pinned.Model != in.Operation.Model || pinned.ProviderID != in.Provider.ID || pinned.SlotID != in.Slot.ID || pinned.CredentialID != *in.Slot.CredentialID) {
+			return binding, codemode.Refuse(409, "code_paid_target_conflict")
+		}
 	}
 	id := access.NewID()
 	root := func() string {
@@ -237,6 +251,9 @@ func paidCodeBind(ctx context.Context, tx pgx.Tx, in PaidCodeAdmission, current 
 		return id
 	}()
 	parentID := func() *string {
+		if bindingErr == nil {
+			return binding.ParentID
+		}
 		if parent.ID != "" {
 			return &parent.ID
 		}
@@ -245,13 +262,13 @@ func paidCodeBind(ctx context.Context, tx pgx.Tx, in PaidCodeAdmission, current 
 	if _, err := tx.Exec(ctx, `INSERT INTO olp.code_paid_bindings(id,project_id,route_id,api_key_id,conversation,parent_id,root_id,model,selected_model,provider_id,slot_id,credential_id,subscription_root_id) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`, id, in.Route.ProjectID, in.Route.ID, in.APIKeyID, identity.Conversation, parentID, root, in.Operation.PublicModel(), in.Operation.Model, in.Provider.ID, in.Slot.ID, *in.Slot.CredentialID, source); err != nil {
 		return binding, err
 	}
-	return paidCodeBinding{ID: id, ParentID: parentID, RootID: root, Model: in.Operation.Model, ProviderID: in.Provider.ID, SlotID: in.Slot.ID, CredentialID: *in.Slot.CredentialID}, nil
+	return paidCodeBinding{ID: id, ParentID: parentID, RootID: root, Model: in.Operation.Model, PublicModel: in.Operation.PublicModel(), ProviderID: in.Provider.ID, SlotID: in.Slot.ID, CredentialID: *in.Slot.CredentialID}, nil
 }
 
 func paidCodeConversation(ctx context.Context, tx pgx.Tx, in PaidCodeAdmission, conversation string) (paidCodeBinding, error) {
 	var binding paidCodeBinding
 	var retired bool
-	err := tx.QueryRow(ctx, `SELECT b.id::text,b.parent_id::text,b.root_id::text,b.selected_model,b.provider_id::text,b.slot_id::text,b.credential_id::text,root.subscription_root_id::text,root.retired_at IS NOT NULL FROM olp.code_paid_bindings b JOIN olp.code_paid_bindings root ON root.id=b.root_id WHERE b.route_id=$1 AND b.api_key_id=$2 AND b.conversation=$3 AND b.model=$4 FOR SHARE OF root`, in.Route.ID, in.APIKeyID, conversation, in.Operation.PublicModel()).Scan(&binding.ID, &binding.ParentID, &binding.RootID, &binding.Model, &binding.ProviderID, &binding.SlotID, &binding.CredentialID, &binding.SubscriptionRootID, &retired)
+	err := tx.QueryRow(ctx, `SELECT b.id::text,b.parent_id::text,b.root_id::text,b.selected_model,b.provider_id::text,b.slot_id::text,b.credential_id::text,root.subscription_root_id::text,root.retired_at IS NOT NULL,b.model FROM olp.code_paid_bindings b JOIN olp.code_paid_bindings root ON root.id=b.root_id WHERE b.route_id=$1 AND b.api_key_id=$2 AND b.conversation=$3 ORDER BY (b.model=$4) DESC,b.id LIMIT 1 FOR SHARE OF root`, in.Route.ID, in.APIKeyID, conversation, in.Operation.PublicModel()).Scan(&binding.ID, &binding.ParentID, &binding.RootID, &binding.Model, &binding.ProviderID, &binding.SlotID, &binding.CredentialID, &binding.SubscriptionRootID, &retired, &binding.PublicModel)
 	if err == nil && retired {
 		return binding, codemode.Refuse(410, "code_binding_retired")
 	}
@@ -320,8 +337,8 @@ func (s *CodeStore) ResolvePaidModel(ctx context.Context, in CodeAdmission, veri
 	defer tx.Rollback(ctx)
 	var selected *string
 	err = tx.QueryRow(ctx, `SELECT (SELECT selected_model FROM (
- SELECT b.selected_model,b.conversation,0 AS ownership,b.id=(SELECT r.binding_id FROM olp.code_paid_references r WHERE r.route_id=$1 AND r.api_key_id=$2 AND r.external_id=$6 AND NOT r.ambiguous) AS referenced
- FROM olp.code_paid_bindings b WHERE b.route_id=$1 AND b.api_key_id=$2 AND b.model=$3
+ SELECT b.selected_model,anchor.conversation,0 AS ownership,anchor.id=(SELECT r.binding_id FROM olp.code_paid_references r WHERE r.route_id=$1 AND r.api_key_id=$2 AND r.external_id=$6 AND NOT r.ambiguous) AS referenced
+ FROM olp.code_paid_bindings b JOIN olp.code_paid_bindings anchor ON anchor.root_id=b.root_id WHERE b.route_id=$1 AND b.api_key_id=$2 AND b.model=$3
  UNION ALL
  SELECT coalesce(p.target_model,p.model),b.conversation,1,b.id=(SELECT r.binding_id FROM olp.code_references r WHERE r.route_id=$1 AND r.api_key_id=$2 AND r.external_id=$6 AND NOT r.ambiguous AND r.account_id IS NOT NULL)
  FROM olp.code_bindings b JOIN olp.code_pins p ON p.root_id=b.root_id WHERE b.route_id=$1 AND b.api_key_id=$2 AND p.model=$3
@@ -354,7 +371,7 @@ func (s *CodeStore) ResolvePaidFallback(ctx context.Context, in CodeAdmission, v
 	defer tx.Rollback(ctx)
 	if in.Recovery == nil {
 		var selected *string
-		err := tx.QueryRow(ctx, `SELECT (SELECT b.selected_model FROM olp.code_paid_bindings b WHERE b.route_id=$1 AND b.api_key_id=$2 AND b.model=$3 AND (b.conversation=$4 OR b.conversation=$5 OR b.id=(SELECT r.binding_id FROM olp.code_paid_references r WHERE r.route_id=$1 AND r.api_key_id=$2 AND r.external_id=$6 AND NOT r.ambiguous)) ORDER BY CASE WHEN b.conversation=$4 THEN 0 WHEN b.conversation=$5 THEN 1 ELSE 2 END LIMIT 1)`, in.Route.ID, in.APIKeyID, in.Operation.PublicModel(), in.Operation.Identity.Conversation, in.Operation.Identity.Parent, in.PreviousResponse).Scan(&selected)
+		err := tx.QueryRow(ctx, `SELECT (SELECT b.selected_model FROM olp.code_paid_bindings b JOIN olp.code_paid_bindings anchor ON anchor.root_id=b.root_id WHERE b.route_id=$1 AND b.api_key_id=$2 AND b.model=$3 AND (anchor.conversation=$4 OR anchor.conversation=$5 OR anchor.id=(SELECT r.binding_id FROM olp.code_paid_references r WHERE r.route_id=$1 AND r.api_key_id=$2 AND r.external_id=$6 AND NOT r.ambiguous)) ORDER BY CASE WHEN anchor.conversation=$4 THEN 0 WHEN anchor.conversation=$5 THEN 1 ELSE 2 END LIMIT 1)`, in.Route.ID, in.APIKeyID, in.Operation.PublicModel(), in.Operation.Identity.Conversation, in.Operation.Identity.Parent, in.PreviousResponse).Scan(&selected)
 		if err != nil {
 			return nil, err
 		}

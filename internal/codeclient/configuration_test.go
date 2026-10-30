@@ -410,6 +410,30 @@ func TestCatalogAndConfigurationExposeDirectPaidModelsWithoutAdapters(t *testing
 	}
 }
 
+func TestCatalogAndConfigurationExposeNativePaidFallback(t *testing.T) {
+	route := codemode.Route{Slug: "coding", Enabled: true, RevisionID: "revision", Models: []string{"fallback-native"}, PaidParticipation: true, InitialRecoveryAttempts: 1, PaidFallbackTargets: map[string]codemode.PaidTarget{"fallback-native": {ProviderID: "provider", SlotID: "slot"}}}
+	for _, offers := range []Offers{
+		{{PaidProtocol: codemode.ProtocolChat, Models: route.Models}},
+		{{PaidProtocol: codemode.ProtocolChat, Models: route.Models}, {Adapter: codemode.AdapterCodex, Models: route.Models}},
+	} {
+		subscriptions := len(offers) > 1
+		catalog := Catalog(route, offers)
+		if len(catalog) != 1 || !slices.Contains(catalog[0].Clients, codeadapter.ClientOpenCode) || !slices.ContainsFunc(catalog[0].Capabilities, func(capability codemode.ModelCapability) bool { return capability.Protocol == codemode.ProtocolChat }) {
+			t.Fatalf("native fallback hidden with subscriptions=%v, %+v", subscriptions, catalog)
+		}
+		configuration, err := Generate(route, offers, Request{GatewayURL: "https://gateway.example", Client: codeadapter.ClientOpenCode, Model: route.Models[0]})
+		if err != nil || !strings.Contains(configuration.Configuration, "olp-paid-chat/"+route.Models[0]) {
+			t.Fatalf("native fallback setup unavailable %+v, %v", configuration, err)
+		}
+		if subscriptions {
+			codex, err := Generate(route, offers, Request{GatewayURL: "https://gateway.example", Client: codeadapter.ClientCodex, Model: route.Models[0]})
+			if err != nil || !strings.Contains(codex.Configuration, "wire_api = \"responses\"") {
+				t.Fatalf("fallback changed existing native setup %+v, %v", codex, err)
+			}
+		}
+	}
+}
+
 func TestClaudeSubscriptionSetupUsesNativeModelsAndReportsLiveGap(t *testing.T) {
 	models := []string{"claude-fixture-main", "claude-fixture-small"}
 	route := codemode.Route{Slug: "personal-code", Enabled: true, RevisionID: "published", Models: models}

@@ -1121,6 +1121,71 @@ func TestCodePaidPublicationRetainsOwnershipAndMonetaryUncertainty(t *testing.T)
 	codeRefusal(t, err, "code_binding_retired")
 }
 
+func TestCodePaidConversationSharesOwnershipAcrossModels(t *testing.T) {
+	f, mainProvider, mainSlot := newPaidCodeFixture(t)
+	f.exec(t, `UPDATE olp.providers SET name='Metered main fixture' WHERE id=$1`, mainProvider.ID)
+	planModel := "native-planning"
+	planProviderID, planSlot := newCodePaidProviderPolicy(t, f.h, f.owner, f.project, "https://fixture.invalid", planModel, nil, nil)
+	targets := map[string]contract.CodePaidTarget{"native-model": {ProviderId: uuid.MustParse(mainProvider.ID), SlotId: uuid.MustParse(mainSlot.ID)}, planModel: {ProviderId: uuid.MustParse(planProviderID), SlotId: uuid.MustParse(planSlot.ID)}}
+	write := func(aliasTarget string) contract.CodeRouteWrite {
+		return contract.CodeRouteWrite{ProjectId: uuid.MustParse(f.project), Slug: f.route.Slug, PoolId: uuid.MustParse(f.pool), Models: []string{"native-model", planModel}, Enabled: true, PaidParticipation: new(true), PaidTargets: &targets, ModelRewriting: new(true), Aliases: new(map[string]string{"planning": aliasTarget})}
+	}
+	saved := f.h.want(f.owner, "PUT", "/api/v1/code/routes/"+f.route.ID, write(planModel), withMatch(f.routeRecord, idem("paid-models")), 200)
+	published := f.h.want(f.owner, "POST", "/api/v1/code/routes/"+f.route.ID+"/publish", nil, withMatch(saved, idem("paid-models-publish")), 200)
+	route := codePublicDecode[codemode.Route](t, published)
+	tx, err := f.h.Pool.Begin(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(t.Context())
+	snapshot, err := runtime.ReadSnapshot(t.Context(), tx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	planProvider := snapshot.CodePaidConnections[route.RevisionID+":"+planProviderID]
+	admit := func(conversation, parent, model, requested string, provider routing.Provider, slot routing.Slot) (resources.PaidCodePermit, error) {
+		return f.store.AdmitPaid(t.Context(), resources.PaidCodeAdmission{CodeAdmission: resources.CodeAdmission{Route: route, APIKeyID: f.key, Operation: codemode.Operation{Name: "responses.create", Model: model, RequestedModel: requested, Identity: codemode.Identity{Conversation: conversation, Parent: parent}}}, Provider: provider, Slot: slot})
+	}
+	root, err := admit("paid-root", "", "native-model", "", mainProvider, mainSlot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	child, err := admit("paid-child", "paid-root", planModel, "planning", planProvider, planSlot)
+	if err != nil {
+		t.Fatalf("planning child lost its main-model parent %v", err)
+	}
+	otherModel, err := admit("paid-root", "", planModel, "planning", planProvider, planSlot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	grandchild, err := admit("paid-grandchild", "paid-child", "native-model", "", mainProvider, mainSlot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	repointed := f.h.want(f.owner, "PUT", "/api/v1/code/routes/"+f.route.ID, write("native-model"), withMatch(published, idem("repoint-paid-alias")), 200)
+	current := codePublicDecode[codemode.Route](t, f.h.want(f.owner, "POST", "/api/v1/code/routes/"+f.route.ID+"/publish", nil, withMatch(repointed, idem("repoint-paid-publish")), 200))
+	selected, err := f.store.ResolvePaidModel(t.Context(), resources.CodeAdmission{Route: current, APIKeyID: f.key, Operation: codemode.Operation{Name: "responses.create", Model: "native-model", RequestedModel: "planning", Identity: codemode.Identity{Conversation: "paid-sibling", Parent: "paid-grandchild"}}}, access.Authority{})
+	if err != nil || selected.Model != planModel {
+		t.Fatalf("planning alias lost the root's selected model %+v, %v", selected, err)
+	}
+	bindings := codePublicDecode[[]codemode.Binding](t, f.h.want(f.owner, "GET", "/api/v1/code/bindings?api_key_id="+f.key, nil, nil, 200)["items"])
+	if len(bindings) != 4 || slices.ContainsFunc(bindings, func(binding codemode.Binding) bool { return binding.RootID != root.BindingID }) {
+		t.Fatalf("paid models split one conversation tree %+v", bindings)
+	}
+	f.h.want(f.owner, "POST", "/api/v1/code/bindings/"+otherModel.BindingID+"/retire", nil, idem("retire-paid-models"), 200)
+	for _, permit := range []resources.PaidCodePermit{root, child, otherModel, grandchild} {
+		binding := bindings[slices.IndexFunc(bindings, func(binding codemode.Binding) bool { return binding.ID == permit.BindingID })]
+		provider, slot := func() (routing.Provider, routing.Slot) {
+			if binding.Conversation == "paid-child" || binding.ID == otherModel.BindingID {
+				return planProvider, planSlot
+			}
+			return mainProvider, mainSlot
+		}()
+		_, err := admit(binding.Conversation, "", provider.Capabilities[0].Model, "", provider, slot)
+		codeRefusal(t, err, "code_binding_retired")
+	}
+}
+
 func TestCodePaidResponseReferencePreservesConversationOwnership(t *testing.T) {
 	for _, scenario := range []struct {
 		name, first, next, parent string

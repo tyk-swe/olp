@@ -221,6 +221,20 @@ func validateResponsesOutput(response Object) error {
 
 func validateResponsesItem(item Object) error {
 	switch str(item["type"]) {
+	case "reasoning":
+		for name, value := range item {
+			switch name {
+			case "type", "id", "status":
+			case "summary":
+				var summary []json.RawMessage
+				if err := json.Unmarshal(value, &summary); err != nil || len(summary) != 0 {
+					return protocolError("unrepresentable translated reasoning summary")
+				}
+			default:
+				return protocolError("unrepresentable translated reasoning state")
+			}
+		}
+		return nil
 	case "function_call":
 		return nil
 	case "message":

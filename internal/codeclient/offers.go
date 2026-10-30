@@ -45,7 +45,7 @@ func (o Offers) through(route codemode.Route, client string, models []string) (m
 		if i == len(models) {
 			return o.reaches(route, client, models, chosen)
 		}
-		if _, paid := o.paidProtocol(route, models[i]); paid {
+		if _, paid := o.paidProtocol(route, models[i], client); paid {
 			return choose(i + 1)
 		}
 		for _, adapter := range o.adapters(route, models[i]) {
@@ -94,7 +94,7 @@ func (o Offers) reaches(route codemode.Route, client string, models []string, th
 			alike = append(alike, kind)
 		}
 	}
-	return alike.joins(nil, slices.DeleteFunc(slices.Clone(models), func(model string) bool { _, paid := o.paidProtocol(route, model); return paid }))
+	return alike.joins(nil, slices.DeleteFunc(slices.Clone(models), func(model string) bool { _, paid := o.paidProtocol(route, model, client); return paid }))
 }
 
 // joins reports whether a conversation using tree reaches every model.

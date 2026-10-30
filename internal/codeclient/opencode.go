@@ -38,7 +38,7 @@ func openCodeConfiguration(route codemode.Route, adapters []codemode.Adapter, of
 	whitelists := map[codemode.Adapter][]string{}
 	qualified := map[string]string{}
 	for _, m := range native {
-		if protocol, paid := offers.paidProtocol(route, m); paid {
+		if protocol, paid := offers.paidProtocol(route, m, codeadapter.ClientOpenCode); paid {
 			qualified[m] = "olp-paid-" + string(protocol) + "/" + m
 			continue
 		}
@@ -88,7 +88,10 @@ func openCodeConfiguration(route codemode.Route, adapters []codemode.Adapter, of
 		}
 	}
 	for _, protocol := range []codemode.Protocol{codemode.ProtocolResponses, codemode.ProtocolMessages, codemode.ProtocolChat} {
-		models := slices.DeleteFunc(slices.Clone(native), func(model string) bool { p, ok := offers.paidProtocol(route, model); return !ok || p != protocol })
+		models := slices.DeleteFunc(slices.Clone(native), func(model string) bool {
+			p, ok := offers.paidProtocol(route, model, codeadapter.ClientOpenCode)
+			return !ok || p != protocol
+		})
 		if len(models) == 0 {
 			continue
 		}

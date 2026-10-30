@@ -72,7 +72,7 @@ func CodeOffers(ctx context.Context, db access.Queryer, revision string, keys ..
 	if len(keys) > 0 {
 		key = keys[0]
 	}
-	for model, target := range route.PaidTargets {
+	for model, target := range route.AllPaidTargets() {
 		provider, ok := paid[target.ProviderID]
 		slot := slices.IndexFunc(provider.Slots, func(slot routing.Slot) bool { return slot.ID == target.SlotID })
 		if !ok || slot < 0 || provider.Slots[slot].CredentialID == nil || provider.Slots[slot].CredentialVersion == nil {

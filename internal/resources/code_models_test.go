@@ -154,8 +154,12 @@ func TestCodeOffersPreservesModelPoolDiscoveryWhenPaidAuthorityChanges(t *testin
 		sourceErr          error
 		available          bool
 		management         bool
+		fallback           bool
 	}{
 		{name: "eligible paid target", available: true},
+		{name: "native fallback target", fallback: true, available: true},
+		{name: "restricted fallback target", fallback: true, liveRestrictions: routing.Slot{AllowedAPIKeys: []string{"another-key"}}},
+		{name: "management fallback setup", fallback: true, management: true, available: true},
 		{name: "authorized restricted key", publishedKeys: []string{"caller-key"}, liveRestrictions: routing.Slot{AllowedAPIKeys: []string{"caller-key"}}, available: true},
 		{name: "published key restriction", publishedKeys: []string{"another-key"}},
 		{name: "live key restriction", liveRestrictions: routing.Slot{AllowedAPIKeys: []string{"another-key"}}},
@@ -173,7 +177,19 @@ func TestCodeOffersPreservesModelPoolDiscoveryWhenPaidAuthorityChanges(t *testin
 			models := []string{"native-main", "native-alternate", "paid-model"}
 			route := codemode.Route{Slug: "coding", Enabled: true, RevisionID: "published-revision", Models: models,
 				ModelRewriting: true, Aliases: map[string]string{"team-code": models[0]}, ModelPools: map[string][]string{"team-code": models[:2]},
-				PaidParticipation: true, PaidTargets: map[string]codemode.PaidTarget{models[2]: {ProviderID: "paid-provider", SlotID: "paid-slot"}}}
+				PaidParticipation: true, InitialRecoveryAttempts: 1,
+				PaidTargets: func() map[string]codemode.PaidTarget {
+					if test.fallback {
+						return nil
+					}
+					return map[string]codemode.PaidTarget{models[2]: {ProviderID: "paid-provider", SlotID: "paid-slot"}}
+				}(),
+				PaidFallbackTargets: func() map[string]codemode.PaidTarget {
+					if !test.fallback {
+						return nil
+					}
+					return map[string]codemode.PaidTarget{models[2]: {ProviderID: "paid-provider", SlotID: "paid-slot"}}
+				}()}
 			provider := routing.Provider{ID: "paid-provider", Kind: "openai_compatible", ProfileID: "compatible-chat", ProfileRevision: connectors.ProfileRevision, Capabilities: []routing.Capability{{Model: models[2], Operation: "generation", Surface: "openai", Mode: "unary"}},
 				Slots: []routing.Slot{{ID: "paid-slot", Enabled: true, CredentialID: new("paid-credential"), CredentialVersion: new(1), AllowedAPIKeys: test.publishedKeys}}}
 			publication, publicationErr := json.Marshal(struct {

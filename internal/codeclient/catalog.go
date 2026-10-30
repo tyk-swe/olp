@@ -25,7 +25,7 @@ func Catalog(route codemode.Route, offers Offers) []codemode.Model {
 				continue
 			}
 			if _, mapped := route.PaidTargets[resolved.Model]; mapped {
-				if protocol, ok := offers.paidProtocol(route, id); ok {
+				if protocol, ok := offers.nativePaidProtocol(route, id); ok {
 					capability, clients := paidCapability(protocol)
 					if !yield(codemode.Model{ID: id, Object: "model", Paid: true, Capabilities: []codemode.ModelCapability{capability}, Clients: clients}) {
 						return
@@ -33,16 +33,24 @@ func Catalog(route codemode.Route, offers Offers) []codemode.Model {
 				}
 				continue
 			}
-			capabilities := modelCapabilities(route, resolved.Model, declarations)
-			if len(capabilities) > 0 && !yield(codemode.Model{ModelPool: slices.Clone(route.ModelPools[id]), ID: id, Object: "model", Capabilities: capabilities, Clients: modelClients(route, resolved.Model, declarations)}) {
+			protocol, paid := offers.nativePaidProtocol(route, id)
+			fallbackCapabilities, fallbackClients := func() ([]codemode.ModelCapability, []string) {
+				if !paid {
+					return nil, nil
+				}
+				capability, clients := paidCapability(protocol)
+				return []codemode.ModelCapability{capability}, clients
+			}()
+			capabilities := modelCapabilities(route, resolved.Model, declarations, fallbackCapabilities...)
+			if len(capabilities) > 0 && !yield(codemode.Model{ModelPool: slices.Clone(route.ModelPools[id]), ID: id, Object: "model", Paid: paid, Capabilities: capabilities, Clients: modelClients(route, resolved.Model, declarations, fallbackClients...)}) {
 				return
 			}
 		}
 	})
 }
 
-func modelCapabilities(route codemode.Route, id string, declarations []codeadapter.Vendor) []codemode.ModelCapability {
-	capabilities := slices.Collect(func(yield func(codemode.ModelCapability) bool) {
+func modelCapabilities(route codemode.Route, id string, declarations []codeadapter.Vendor, extra ...codemode.ModelCapability) []codemode.ModelCapability {
+	capabilities := slices.Concat(extra, slices.Collect(func(yield func(codemode.ModelCapability) bool) {
 		for _, declaration := range declarations {
 			for _, translated := range []struct {
 				path     string
@@ -73,7 +81,7 @@ func modelCapabilities(route codemode.Route, id string, declarations []codeadapt
 				}
 			}
 		}
-	})
+	}))
 	return slices.AppendSeq([]codemode.ModelCapability{}, func(yield func(codemode.ModelCapability) bool) {
 		for i, capability := range capabilities {
 			duplicate := slices.ContainsFunc(capabilities[:i], func(previous codemode.ModelCapability) bool {
@@ -86,8 +94,8 @@ func modelCapabilities(route codemode.Route, id string, declarations []codeadapt
 	})
 }
 
-func modelClients(route codemode.Route, id string, declarations []codeadapter.Vendor) []string {
-	clients := slices.Collect(func(yield func(string) bool) {
+func modelClients(route codemode.Route, id string, declarations []codeadapter.Vendor, extra ...string) []string {
+	clients := slices.Concat(extra, slices.Collect(func(yield func(string) bool) {
 		for _, declaration := range declarations {
 			for _, client := range codeadapter.RouteClients(route, declaration) {
 				if _, ok := codeadapter.RouteClientProtocol(route, declaration, client, id); ok && !yield(client) {
@@ -95,7 +103,7 @@ func modelClients(route codemode.Route, id string, declarations []codeadapter.Ve
 				}
 			}
 		}
-	})
+	}))
 	return slices.AppendSeq([]string{}, func(yield func(string) bool) {
 		for i, client := range clients {
 			if !slices.Contains(clients[:i], client) && !yield(client) {
@@ -105,13 +113,15 @@ func modelClients(route codemode.Route, id string, declarations []codeadapter.Ve
 	})
 }
 
-func (offers Offers) paidProtocol(route codemode.Route, model string) (codemode.Protocol, bool) {
+func (offers Offers) nativePaidProtocol(route codemode.Route, model string) (codemode.Protocol, bool) {
 	resolved, err := route.ResolveModel(codemode.Operation{Model: model})
 	if err != nil || !route.PaidParticipation {
 		return "", false
 	}
-	if _, mapped := route.PaidTargets[resolved.Model]; !mapped {
-		return "", false
+	if _, direct := route.PaidTargets[resolved.Model]; !direct {
+		if _, fallback := route.PaidFallbackTargets[resolved.Model]; !fallback || route.InitialRecoveryAttempts < 1 {
+			return "", false
+		}
 	}
 	for _, offer := range offers {
 		if offer.PaidProtocol != "" && slices.Contains(offer.Models, resolved.Model) {
@@ -119,6 +129,27 @@ func (offers Offers) paidProtocol(route codemode.Route, model string) (codemode.
 		}
 	}
 	return "", false
+}
+
+func (offers Offers) paidProtocol(route codemode.Route, model, client string) (codemode.Protocol, bool) {
+	protocol, ok := offers.nativePaidProtocol(route, model)
+	if !ok {
+		return "", false
+	}
+	_, clients := paidCapability(protocol)
+	if !slices.Contains(clients, client) {
+		return "", false
+	}
+	resolved, _ := route.ResolveModel(codemode.Operation{Model: model})
+	if _, direct := route.PaidTargets[resolved.Model]; !direct {
+		for _, adapter := range offers.adapters(route, model) {
+			declaration, _ := codeadapter.Lookup(adapter)
+			if routeReaches(route, declaration, client, resolved.Model) {
+				return "", false
+			}
+		}
+	}
+	return protocol, true
 }
 
 func paidCapability(protocol codemode.Protocol) (codemode.ModelCapability, []string) {
