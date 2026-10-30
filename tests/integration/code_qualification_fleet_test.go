@@ -5,6 +5,7 @@ package integration_test
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -261,6 +262,26 @@ func TestCodeQualificationFleetWeightedPersonalAndSharedIsolation(t *testing.T) 
 		if binding.AccountID != second {
 			t.Fatal("shared pool selected outside its weighted membership")
 		}
+	}
+	for _, binding := range bindings {
+		if !strings.HasPrefix(binding.Conversation, "personal-") {
+			continue
+		}
+		path := "/api/v1/code/attempts?binding_id=" + binding.ID
+		visible := codePublicDecode[[]codemode.Attempt](t, f.h.want(f.owner, "GET", path+"&project_id="+f.project, nil, nil, 200)["items"])
+		if len(visible) != 1 || visible[0].BindingID != binding.ID || visible[0].AccountID != first {
+			t.Fatal("personal-pool diagnostics lost account or binding attribution")
+		}
+		outsider := f.h.invite(f.owner, "diagnostics-outsider@example.test", "operator")
+		outsiderID := f.h.want(outsider, "GET", "/api/v1/profile", nil, nil, 200)["id"].(string)
+		f.assignOnly(outsiderID)
+		outsider = login(f.h, "diagnostics-outsider@example.test")
+		f.h.want(outsider, "GET", path+"&project_id="+f.project, nil, nil, 404)
+		invisible := f.h.want(outsider, "GET", path, nil, nil, 200)["items"].([]any)
+		if len(invisible) != 0 {
+			t.Fatal("personal-pool diagnostics crossed project visibility")
+		}
+		break
 	}
 }
 
@@ -630,8 +651,29 @@ func TestCodeQualificationFleetInitialRecoveryPreservesAttemptsAndBinding(t *tes
 			if attempt.State != "settled" || attempt.ReportedTokens == nil || *attempt.ReportedTokens != 0 || attempt.AccountID == bindings[0].AccountID {
 				t.Fatal("rejected attempt lost original attribution or retained uncertain reservations")
 			}
+			if !attempt.InitialRecovery || !attempt.Nonexecution || attempt.RecoveryFrom != nil || attempt.RecoveryReason != nil {
+				t.Fatal("definite rejection lost its recorded nonexecution evidence")
+			}
 		} else if attempt.AccountID != bindings[0].AccountID || attempt.ReportedTokens == nil || *attempt.ReportedTokens <= 0 {
 			t.Fatal("executed attempt lost usage or recovered binding")
+		} else {
+			if attempt.RecoveryFrom == nil || attempt.RecoveryReason == nil || *attempt.RecoveryReason != "quota_rejected" || attempt.Nonexecution {
+				t.Fatal("recovered attempt lost its safe recovery reason")
+			}
+			if !slices.ContainsFunc(attempts, func(source codemode.Attempt) bool {
+				return source.ID == *attempt.RecoveryFrom && source.Nonexecution && source.RouteRevisionID == attempt.RouteRevisionID && source.RequestedModel != nil && attempt.RequestedModel != nil && *source.RequestedModel == *attempt.RequestedModel
+			}) {
+				t.Fatal("recovery source did not retain the route and requested-model evidence")
+			}
+		}
+	}
+	diagnostics, err := json.Marshal(f.list("attempts"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, forbidden := range []string{"CONTROLLED_PRIVATE_PROMPT", "CONTROLLED_PRIVATE_OUTPUT", captures[0].Header.Get("Authorization"), captures[1].Header.Get("Authorization"), "X-Controlled-Multi"} {
+		if forbidden != "" && bytes.Contains(diagnostics, []byte(forbidden)) {
+			t.Fatal("recovery diagnostics exposed private request, output or header data")
 		}
 	}
 	f.success(t, 1, "initial-recovery", "")
@@ -806,6 +848,17 @@ func TestCodeQualificationFleetInitialRecoveryObservesNewGrantGeneration(t *test
 	attempts := codePublicDecode[[]codemode.Attempt](t, f.list("attempts"))
 	if len(attempts) != 2 || attempts[0].AccountID != attempts[1].AccountID {
 		t.Fatal("supported grant refresh changed account ownership")
+	}
+	for _, attempt := range attempts {
+		if attempt.RecoveryFrom == nil {
+			if !attempt.Nonexecution || attempt.UpstreamStatus == nil || *attempt.UpstreamStatus != 401 {
+				t.Fatal("credential rejection lost its proven nonexecution")
+			}
+			continue
+		}
+		if attempt.RecoveryReason == nil || *attempt.RecoveryReason != "credential_rejected" || !slices.ContainsFunc(attempts, func(source codemode.Attempt) bool { return source.ID == *attempt.RecoveryFrom && source.Nonexecution }) {
+			t.Fatal("refreshed attempt lost its credential-rejection source")
+		}
 	}
 }
 
