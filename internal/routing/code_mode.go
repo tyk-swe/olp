@@ -38,20 +38,14 @@ func (s *Snapshot) CodeAdapters(route codemode.Route) []codemode.Adapter {
 // connections whose adapter serves a client path over transport, ordered by ID.
 // The returned slice is shared and must not be modified.
 func (s *Snapshot) CodeProviders(route codemode.Route, path string, transport codeadapter.Transport) []string {
-	if transport == codeadapter.HTTP && (route.MessagesToCodex && path == "v1/messages" || (route.ChatToAntigravity || route.ChatToCodex) && path == "v1/chat/completions") {
-		return s.codeProvidersWithTranslation(route, path, transport)
-	}
 	return s.codeRevisions[route.RevisionID].providers[codeCapability{path, transport}]
 }
 
-func (s *Snapshot) codeProvidersWithTranslation(route codemode.Route, path string, transport codeadapter.Transport) []string {
+func (s *Snapshot) codeProvidersWithTranslation(route codemode.Route, path string) []string {
 	revision := s.codeRevisions[route.RevisionID]
-	if transport != codeadapter.HTTP {
-		return revision.providers[codeCapability{path, transport}]
-	}
 	return slices.Sorted(func(yield func(string) bool) {
 		for provider, adapter := range revision.vendors {
-			if endpoint, ok := codeadapter.RouteEndpoint(route, adapter, path); ok && endpoint.Supports(transport) {
+			if endpoint, ok := codeadapter.RouteEndpoint(route, adapter, path); ok && endpoint.Supports(codeadapter.HTTP) {
 				if !yield(provider) {
 					return
 				}
@@ -142,6 +136,18 @@ func (s *Snapshot) compileCodeMode() error {
 		slices.SortFunc(revision.adapters, codeadapter.Compare)
 		for _, providers := range revision.providers {
 			slices.Sort(providers)
+		}
+	}
+	for _, route := range s.CodeRoutes {
+		revision, ok := s.codeRevisions[route.RevisionID]
+		if !ok {
+			continue
+		}
+		if route.MessagesToCodex {
+			revision.providers[codeCapability{"v1/messages", codeadapter.HTTP}] = s.codeProvidersWithTranslation(route, "v1/messages")
+		}
+		if route.ChatToAntigravity || route.ChatToCodex {
+			revision.providers[codeCapability{"v1/chat/completions", codeadapter.HTTP}] = s.codeProvidersWithTranslation(route, "v1/chat/completions")
 		}
 	}
 	return nil
