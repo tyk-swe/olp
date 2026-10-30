@@ -123,7 +123,15 @@ func (s *Server) codeList(r *http.Request, p Principal, selectSQL string, endUse
 		args = append(args, digest)
 		where += fmt.Sprintf(" AND x.end_user_digest=$%d", len(args))
 	}
-	for _, field := range []string{"route_id", "api_key_id", "account_id", "binding_id"} {
+	fields := []string{"route_id", "api_key_id", "account_id", "binding_id"}
+	extra := slices.Collect(func(yield func(string) bool) {
+		for _, match := range matches {
+			if !slices.Contains(fields, match.Field) && !yield(match.Field) {
+				return
+			}
+		}
+	})
+	for _, field := range slices.Concat(fields, extra) {
 		if value := r.URL.Query().Get(field); value != "" {
 			id, err := ParseUUID(value)
 			if err != nil {
