@@ -193,6 +193,10 @@ func encodeOpenAIGeneration(c *Generation, model string, count bool) (Object, er
 		f["tools"] = raw(tools)
 	}
 	if count {
+		if effort := f["reasoning_effort"]; present(effort) {
+			delete(f, "reasoning_effort")
+			f["reasoning"] = raw(map[string]json.RawMessage{"effort": effort})
+		}
 		input := []Object{}
 		for _, m := range c.Messages {
 			if len(m.Calls) > 0 {

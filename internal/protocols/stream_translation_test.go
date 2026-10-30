@@ -2,6 +2,8 @@ package protocols
 
 import (
 	"bytes"
+	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -88,5 +90,64 @@ func TestGeminiParallelResultsKeepDistinctCallRelationships(t *testing.T) {
 		if _, _, err = Encode(request, "openai", "openai", "wire-model", nil); err == nil {
 			t.Fatal("response schema was silently dropped")
 		}
+	}
+}
+
+func TestResponsesToolSnapshotsSurviveStreamingAndAggregation(t *testing.T) {
+	for _, fragmented := range []bool{false, true} {
+		t.Run(fmt.Sprintf("fragmented=%t", fragmented), func(t *testing.T) {
+			created := `{"type":"response.created","response":{"id":"tools","status":"in_progress","output":[]}}`
+			item := `{"type":"function_call","call_id":"call-read","name":"read_file","arguments":"{\"path\":\"main.go\"}"}`
+			terminal := `{"type":"response.completed","response":{"id":"tools","status":"completed","output":[` + item + `],"usage":{"input_tokens":3,"output_tokens":2,"total_tokens":5}}}`
+			deltas := ""
+			if fragmented {
+				deltas = "data: " + `{"type":"response.output_item.added","output_index":0,"item":{"type":"function_call","call_id":"call-read","name":"read_file","arguments":""}}` + "\n\ndata: " + `{"type":"response.function_call_arguments.delta","output_index":0,"delta":"{\"path\":"}` + "\n\ndata: " + `{"type":"response.function_call_arguments.delta","output_index":0,"delta":"\"main.go\"}"}` + "\n\ndata: " + `{"type":"response.output_item.done","output_index":0,"item":` + item + `}` + "\n\n"
+			}
+			source := "data: " + created + "\n\n" + deltas + "data: " + terminal + "\n\n"
+			unary, err := AggregateTranslatedResponses(wire.Anthropic, strings.NewReader(source), 8192, "route", nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if unary.FinishReason != "tool_calls" || len(unary.ToolCalls) != 1 || unary.ToolCalls[0].ID != "call-read" || unary.ToolCalls[0].Name != "read_file" || unary.ToolCalls[0].Arguments != `{"path":"main.go"}` || unary.Usage == nil || unary.Usage.TotalTokens != 5 || !unary.UsageComplete {
+				t.Fatalf("aggregated tools %+v", unary)
+			}
+			var frames bytes.Buffer
+			if _, err := Stream(wire.Responses, wire.Anthropic, strings.NewReader(source), 8192, "route", true, func(frame []byte) error { frames.Write(frame); return nil }); err != nil {
+				t.Fatal(err)
+			}
+			capture := NewCaptureStream(wire.Anthropic, 8192, true, true)
+			if err := capture.Push(frames.Bytes()); err != nil {
+				t.Fatal(err)
+			}
+			_, calls, err := capture.Finish()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(calls) != 1 {
+				t.Fatalf("stream tool count %d", len(calls))
+			}
+			var streamed struct {
+				Name      string
+				Arguments json.RawMessage
+			}
+			if err := json.Unmarshal(calls[0], &streamed); err != nil {
+				t.Fatal(err)
+			}
+			if streamed.Name != unary.ToolCalls[0].Name || string(streamed.Arguments) != unary.ToolCalls[0].Arguments || bytes.Count(frames.Bytes(), []byte(`"id":"call-read"`)) != 1 || !bytes.Contains(frames.Bytes(), []byte(`"stop_reason":"tool_use"`)) || !bytes.Contains(frames.Bytes(), []byte(`"output_tokens":2`)) {
+				t.Fatalf("stream tools %s, aggregate %+v", frames.String(), unary)
+			}
+
+		})
+	}
+}
+
+func TestTranslatedResponsesRefuseOpaqueReasoning(t *testing.T) {
+	body := `{"id":"opaque","status":"completed","output":[{"type":"reasoning","encrypted_content":"opaque-native-state"}],"usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}`
+	if _, err := Decode(wire.Responses, wire.Anthropic, []byte(body), "route", ""); err == nil {
+		t.Fatal("opaque reasoning silently disappeared")
+	}
+	stream := "data: " + `{"type":"response.completed","response":` + body + `}` + "\n\n"
+	if _, err := AggregateTranslatedResponses(wire.Anthropic, strings.NewReader(stream), 8192, "route", nil); err == nil {
+		t.Fatal("aggregated opaque reasoning silently disappeared")
 	}
 }

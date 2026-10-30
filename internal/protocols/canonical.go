@@ -192,7 +192,7 @@ func encodeCanonical(c *Generation, family wire.Format, model, operation string)
 		return encodeOpenAIGeneration(c, model, count)
 	case wire.Responses:
 		for key := range c.Parameters {
-			if key != "max_output_tokens" && key != "temperature" && key != "top_p" {
+			if key != "max_output_tokens" && key != "temperature" && key != "top_p" && key != "tool_choice" && key != "parallel_tool_calls" && key != "reasoning_effort" {
 				return nil, unsupported(key)
 			}
 		}
@@ -207,6 +207,9 @@ func encodeCanonical(c *Generation, family wire.Format, model, operation string)
 				}
 			}
 			for key, value := range c.Parameters {
+				if key == "tool_choice" || key == "parallel_tool_calls" || key == "reasoning_effort" {
+					continue
+				}
 				if !yield(key, value) {
 					return
 				}

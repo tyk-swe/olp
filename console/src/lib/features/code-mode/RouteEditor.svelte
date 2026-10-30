@@ -165,12 +165,13 @@
       type="checkbox"
       bind:checked={messagesToCodex}
     />
-    Translate Messages text through Codex
+    Translate Messages through Codex
   </label>
   <p>
-    Explicitly enables text-only Messages requests through Codex accounts after
-    publication. Tools, thinking, beta features and unsupported required
-    semantics are refused. Model identifiers, client identity and prompts stay
+    Explicitly enables Messages text and tool use through Codex accounts after
+    publication. Explicit low, medium and high reasoning effort is supported.
+    Signed thinking, numeric reasoning budgets, beta features and other
+    unsupported required semantics are refused. Model identifiers, client identity and prompts stay
     unchanged. Identity and prompt compatibility remain disabled.
   </p>
   <label class="choice"

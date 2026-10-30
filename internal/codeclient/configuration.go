@@ -137,7 +137,7 @@ func Generate(route codemode.Route, offers Offers, in Request) (codemode.ClientC
 	file, nativeInstructions := platformInstructions(client, platform)
 	instructions := func() string {
 		if client == codeadapter.ClientClaudeCode && route.MessagesToCodex && slices.Contains(adapters, codemode.AdapterCodex) {
-			return nativeInstructions + " This published route enables text-only Messages translation through Codex accounts. Tools, thinking, beta features and unsupported required semantics are refused. Model identifiers and prompt text are preserved, and identity and prompt compatibility remain disabled"
+			return nativeInstructions + " This published route enables Messages text and tool use through Codex accounts. Explicit low, medium and high reasoning effort is supported. Signed thinking, numeric reasoning budgets, beta features and other unsupported required semantics are refused. Model identifiers and prompt text are preserved, and identity and prompt compatibility remain disabled"
 		}
 		return nativeInstructions
 	}()

@@ -50,7 +50,7 @@ func (s *Server) recordCodeRefusal(ctx context.Context, route codemode.Route, ke
 
 func codeRefusalMessage(code string) string {
 	if code == "code_translation_unsupported_semantics" {
-		return "This route translates text only. Use a native Messages account for tools, thinking, beta features, stop sequences or other required extensions."
+		return "This route supports text, tools and explicit reasoning effort. Use a native Messages account for required semantics this route cannot represent."
 	}
 	return code
 }
