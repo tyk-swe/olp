@@ -24,6 +24,7 @@ const route: api.CodeRoute = {
   slug: 'team-code',
   pool_id: poolId,
   enabled: true,
+  messages_to_codex: false,
   models: ['gpt-5.5'],
   revision_id: '01980000-0000-7000-8000-000000000032',
   revision: 1,
@@ -54,6 +55,7 @@ beforeEach(() => {
         kind: 'shared',
         owner_user_id: null,
         account_ids: [accountId],
+        account_weights: { [accountId]: 1 },
         api_key_ids: [],
         etag: route.etag
       }
@@ -162,6 +164,16 @@ it('shows and copies every companion configuration file', async () => {
     route_slug: route.slug,
     base_url: 'https://olp.example/code/team-code',
     native_models: ['minimax-m3'],
+    models: [
+      {
+        id: 'minimax-m3',
+        object: 'model',
+        capabilities: [
+          { protocol: 'messages', path: 'v1/messages', transports: ['http'] }
+        ],
+        clients: ['claude-code']
+      }
+    ],
     adapters: ['opencode_go'],
     client: 'claude-code',
     platform: 'linux',
@@ -208,6 +220,16 @@ it('keeps platform across client changes and models across platform changes', as
       route_slug: route.slug,
       base_url: 'https://olp.example/code/team-code',
       native_models: ['main-model', 'other-model'],
+      models: ['main-model', 'other-model'].map(
+        (id): api.CodeClientConfiguration['models'][number] => ({
+          id,
+          object: 'model',
+          capabilities: [
+            { protocol: 'messages', path: 'v1/messages', transports: ['http'] }
+          ],
+          clients: ['claude-code', 'codex', 'opencode']
+        })
+      ),
       adapters: ['opencode_go'],
       client: selection.client ?? 'claude-code',
       platform: selection.platform ?? 'linux',
@@ -259,5 +281,36 @@ it('keeps platform across client changes and models across platform changes', as
     route,
     { client: 'codex', platform: 'windows' },
     expect.any(AbortSignal)
+  );
+});
+
+it('saves explicit Messages translation in the route draft', async () => {
+  component = mount(ResearchConfigurationProbe, {
+    target: host,
+    props: { client, route }
+  });
+  flushSync();
+  await settle();
+  await click('Edit draft');
+  const translation = host.querySelector<HTMLInputElement>(
+    '#code-messages-to-codex'
+  );
+  expect(translation).not.toBeNull();
+  expect(translation!.checked).toBe(false);
+  translation!.click();
+  flushSync();
+  vi.mocked(api.saveCodeRoute).mockResolvedValue(route);
+  host
+    .querySelector('form')!
+    .dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+  await settle();
+  expect(api.saveCodeRoute).toHaveBeenCalledWith(
+    expect.objectContaining({
+      messages_to_codex: true,
+      models: route.models,
+      tools: null
+    }),
+    route,
+    expect.any(String)
   );
 });

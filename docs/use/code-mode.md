@@ -17,8 +17,9 @@ ChatGPT, OpenCode Go or coding-plan subscription. See the
 [support matrix and release gates](../develop/qualification.md) before rollout.
 
 The [coding-client baseline and roadmap](../develop/plans/code-mode-parity.md)
-records planned compatibility and recovery contracts separately from the
-native behavior documented here.
+records broader compatibility and recovery work. Native forwarding is the
+default. An explicitly published route policy can enable the Messages text
+translation described below.
 
 ## Adapters and clients
 
@@ -45,6 +46,28 @@ endpoint: most on Chat Completions, MiniMax and Qwen models on Messages and
 Grok and GPT models on Responses. OpenCode picks it per model; Claude Code
 speaks only Messages, so on OpenCode Go it works only with Messages models.
 
+### Messages text through Codex
+
+Enable **Translate Messages text through Codex** in the route editor, or set
+`messages_to_codex: true` in the management route write, then publish the draft.
+The policy is disabled by default and pinned to the published revision. A route
+with Codex accounts can then generate Claude Code setup using the same native
+model identifiers. Codex remains the default client for those accounts.
+
+The policy translates HTTP `v1/messages` text requests into the Codex Responses
+transport. Both unary Messages replies and Messages event streams are supported.
+System text is preserved in developer input, and the caller's output-token cap
+is preserved. Admission, selected-account authorization and usage settlement use
+the existing code-mode ledger. Native Messages accounts continue to forward
+native payloads unchanged.
+
+The documented Claude `?beta=true` transport flag is accepted and removed before
+the Codex request is sent. Tools, thinking, beta headers, unknown query fields,
+stop sequences and other unsupported required semantics are refused before
+dispatch. Identity and prompt compatibility remain disabled. This text path does
+not establish complete Claude Code qualification.
+Live Codex acceptance, including output-token caps, remains unqualified.
+
 ### Mixing subscriptions
 
 A pool may hold accounts of several adapters, and a route may list the models
@@ -52,8 +75,9 @@ of all of them. Each request reaches an account that lists its model and whose
 adapter serves the model on the request's path, with that account's credential,
 at that subscription's upstream; a model no adapter serves on the path is
 refused with `code_operation_unsupported` before any account is chosen. A
-client can use every route model its own protocols reach. OLP never translates between protocols, so a model no subscription
-serves on the client's protocol stays out of that client's configuration.
+client can use every route model its own protocols reach. With native forwarding,
+a model no subscription serves on the client's protocol stays out of that
+client's configuration.
 
 | Client | Paths it uses | Models a mixed route can give it |
 | --- | --- | --- |
@@ -65,7 +89,8 @@ To plan with a GPT model and implement with GLM in OpenCode, put an OpenCode Go
 account listing `gpt-5.5` and a GLM Coding Plan account listing `glm-5.3` in one
 pool, publish a route with both models, and generate the OpenCode configuration
 with `model=glm-5.3` and `plan_model=gpt-5.5`. Claude Code can plan the same way
-with MiniMax or Qwen, but not with GPT: no subscription serves GPT on Messages.
+with MiniMax or Qwen using native forwarding. Codex accounts become available
+to Claude Code only when the route explicitly enables Messages text translation.
 When several accounts list a model, the conversation's own accounts come first;
 see [Conversations and authority](#conversations-and-authority). A conversation
 uses one account of each adapter, so the planning and background models must be

@@ -30,15 +30,15 @@ func (o Offers) adapters(model string) []codemode.Adapter {
 
 // through returns the adapter a client sends each model through: the first
 // choice, in table order, with which one conversation reaches them all.
-func (o Offers) through(client string, models []string) (map[string]codemode.Adapter, bool) {
+func (o Offers) through(route codemode.Route, client string, models []string) (map[string]codemode.Adapter, bool) {
 	chosen := make([]codemode.Adapter, len(models))
 	var choose func(i int) bool
 	choose = func(i int) bool {
 		if i == len(models) {
-			return o.reaches(client, models, chosen)
+			return o.reaches(route, client, models, chosen)
 		}
 		for _, adapter := range o.adapters(models[i]) {
-			if vendor, _ := codeadapter.Lookup(adapter); vendor.Reaches(client, models[i]) {
+			if declaration, _ := codeadapter.Lookup(adapter); routeReaches(route, declaration, client, models[i]) {
 				if chosen[i] = adapter; choose(i + 1) {
 					return true
 				}
@@ -62,15 +62,16 @@ func (o Offers) through(client string, models []string) (map[string]codemode.Ada
 // protocol, and an account serves it when its adapter serves the model on that
 // protocol; another account joins the conversation only with an adapter it
 // does not use yet.
-func (o Offers) reaches(client string, models []string, through []codemode.Adapter) bool {
+func (o Offers) reaches(route codemode.Route, client string, models []string, through []codemode.Adapter) bool {
 	// Accounts with one adapter serving the same of these models are alike.
 	var alike Offers
 	for _, offer := range o {
-		vendor, _ := codeadapter.Lookup(offer.Adapter)
+		adapter, _ := codeadapter.Lookup(offer.Adapter)
 		kind := Offer{Adapter: offer.Adapter}
 		for i, model := range models {
 			sender, _ := codeadapter.Lookup(through[i])
-			if p, ok := sender.Protocol(client, model); ok && slices.Contains(offer.Models, model) && vendor.ServesModel(p, model) {
+			protocol, reachable := codeadapter.RouteClientProtocol(route, adapter, client, model)
+			if sent, ok := codeadapter.RouteClientProtocol(route, sender, client, model); ok && reachable && sent == protocol && slices.Contains(offer.Models, model) {
 				kind.Models = append(kind.Models, model)
 			}
 		}
@@ -105,4 +106,9 @@ func (o Offers) joins(tree Offers, models []string) bool {
 		}
 	}
 	return true
+}
+
+func routeReaches(route codemode.Route, adapter codeadapter.Vendor, client, model string) bool {
+	_, ok := codeadapter.RouteClientProtocol(route, adapter, client, model)
+	return ok
 }

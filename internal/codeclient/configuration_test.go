@@ -207,3 +207,66 @@ func TestGenerateKeepsDisjointAccountModelsSeparate(t *testing.T) {
 		t.Fatal("configuration combined disjoint accounts of the same subscription")
 	}
 }
+
+func TestClaudeConfigurationThroughCodexRequiresTranslationPolicy(t *testing.T) {
+	models := []string{"fixture-main", "fixture-plan"}
+	offers := Offers{{Adapter: codemode.AdapterCodex, Models: models}}
+	for _, enabled := range []bool{false, true} {
+		route := codemode.Route{Slug: "team-code", Enabled: true, RevisionID: "published", Models: models, MessagesToCodex: enabled}
+		config, err := Generate(route, offers, Request{GatewayURL: "https://olp.example", Client: "claude-code", Model: models[0], PlanModel: models[1]})
+		if !enabled {
+			var problem *access.Problem
+			if !errors.As(err, &problem) || problem.Field != "client" {
+				t.Fatalf("native route allowed translated setup: %v", err)
+			}
+			continue
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		if config.Client != "claude-code" || config.Model != models[0] || config.PlanModel == nil || *config.PlanModel != models[1] || config.SmallModel == nil || *config.SmallModel != models[0] {
+			t.Fatalf("translated model selection lost: %+v", config)
+		}
+		if !strings.Contains(config.Configuration, "ANTHROPIC_BASE_URL") || !strings.Contains(config.Instructions, "text-only") || !strings.Contains(config.Instructions, "identity") {
+			t.Fatalf("missing translated setup or limitations: %+v", config)
+		}
+		defaults, err := Generate(route, offers, Request{GatewayURL: "https://olp.example"})
+		if err != nil || defaults.Client != "codex" {
+			t.Fatalf("translation changed native default: %+v, %v", defaults, err)
+		}
+	}
+}
+
+func TestClaudeTranslatedCompanionsRequireReachableAccounts(t *testing.T) {
+	models := []string{"gpt-fixture-main", "gpt-fixture-plan"}
+	route := codemode.Route{Slug: "coding", RevisionID: "revision", Enabled: true, Models: models, MessagesToCodex: true}
+	for _, test := range []struct {
+		name     string
+		offers   Offers
+		accepted bool
+	}{
+		{name: "disjoint Codex accounts with unrelated Responses account", offers: Offers{
+			{Adapter: codemode.AdapterCodex, Models: models[:1]},
+			{Adapter: codemode.AdapterCodex, Models: models[1:]},
+			{Adapter: codemode.AdapterOpenCodeGo, Models: models},
+		}},
+		{name: "one Codex account serves both models", offers: Offers{
+			{Adapter: codemode.AdapterCodex, Models: models},
+			{Adapter: codemode.AdapterOpenCodeGo, Models: models},
+		}, accepted: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			config, err := Generate(route, test.offers, Request{GatewayURL: "https://olp.example", Client: codeadapter.ClientClaudeCode, Model: models[0], PlanModel: models[1]})
+			if test.accepted {
+				if err != nil || config.PlanModel == nil || *config.PlanModel != models[1] {
+					t.Fatalf("reachable companions refused, config %+v, error %v", config, err)
+				}
+				return
+			}
+			var problem *access.Problem
+			if !errors.As(err, &problem) || problem.Field != "plan_model" {
+				t.Fatalf("unreachable companions accepted, config %+v, error %v", config, err)
+			}
+		})
+	}
+}
