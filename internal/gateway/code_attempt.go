@@ -18,6 +18,7 @@ import (
 	"github.com/tyk-swe/olp/internal/resources"
 	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/runtime"
+	"github.com/tyk-swe/olp/internal/upstream"
 )
 
 const codeGenerationTimeout = 10 * time.Minute
@@ -144,7 +145,7 @@ func (a *codeAttempt) observe(o codemode.Observation) {
 		cancel()
 	}
 	if o.Status != 0 {
-		a.response(context.Background(), o.Status, nil)
+		a.response(context.Background(), o.Status, http.Header{"Retry-After": o.RetryAfter})
 	}
 	if o.Allowance != nil {
 		a.observeAllowance(context.Background(), *o.Allowance)
@@ -243,9 +244,13 @@ func (a *codeAttempt) observeAllowance(ctx context.Context, allowance codemode.A
 }
 
 func (a *codeAttempt) health(ctx context.Context, status string) {
+	a.observeHealth(ctx, codemode.HealthObservation{Status: status, ObservedAt: a.server.now().UTC()})
+}
+
+func (a *codeAttempt) observeHealth(ctx context.Context, observation codemode.HealthObservation) {
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
 	defer cancel()
-	_ = a.server.CodeLedger.ObserveHealth(ctx, a.permit.Account.ID, status)
+	_ = a.server.CodeLedger.ObserveHealth(ctx, a.permit.Account.ID, observation)
 }
 
 func (a *codeAttempt) response(ctx context.Context, status int, headers http.Header) {
@@ -257,11 +262,27 @@ func (a *codeAttempt) response(ctx context.Context, status int, headers http.Hea
 	if status == http.StatusUnauthorized {
 		a.server.Runtime.CredentialRefused(a.auth.CredentialID, a.auth.GrantGeneration)
 	}
-	switch {
-	case status == 429:
-		a.health(ctx, "quota_limited")
-	case status == 401 || status == 403 || status >= 500:
-		a.health(ctx, "unavailable")
+	if status == 429 || status == 401 || status == 403 || status >= 500 {
+		health := func() string {
+			if status == 429 {
+				return "quota_limited"
+			}
+			return "unavailable"
+		}()
+		now := a.server.now().UTC()
+		retryAt := func() *time.Time {
+			values := headers.Values("Retry-After")
+			if len(values) != 1 {
+				return nil
+			}
+			delay, valid := upstream.ParseRetryAfter(values[0], now)
+			if !valid {
+				return nil
+			}
+			at := now.Add(delay)
+			return &at
+		}()
+		a.observeHealth(ctx, codemode.HealthObservation{Status: health, ObservedAt: now, RetryAt: retryAt})
 	}
 	if a.endpoint.Observation != codeadapter.ObserveCodex {
 		return

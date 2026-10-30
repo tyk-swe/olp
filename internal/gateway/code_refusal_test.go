@@ -30,13 +30,16 @@ func (a *codeGrantAuthorizer) AuthorizeCode(ctx context.Context, cfg routing.Con
 
 func TestCodeAuthenticationRefusalRequestsDispatchedGrantRefreshWithoutReplay(t *testing.T) {
 	for _, transport := range []string{"http", "websocket-handshake", "websocket-message"} {
-		for _, status := range []int{401, 403, 500} {
+		for _, status := range []int{401, 403, 429, 500} {
 			t.Run(fmt.Sprintf("%s/%d", transport, status), func(t *testing.T) {
 				h, ledger, server := newCodeForwardHarness(t)
 				h.gateway.CodeAuthorizer = &codeGrantAuthorizer{}
-				body := fmt.Sprintf(`{"type":"error","status":%d}`, status)
+				now := time.Date(2026, 10, 30, 10, 0, 0, 0, time.UTC)
+				h.gateway.now = func() time.Time { return now }
+				body := fmt.Sprintf(`{"type":"error","status":%d,"headers":{"retry-after":"120"}}`, status)
 				h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
 					if transport != "websocket-message" {
+						w.Header().Set("Retry-After", "120")
 						w.WriteHeader(status)
 						io.WriteString(w, "opaque refusal")
 						return
@@ -90,6 +93,11 @@ func TestCodeAuthenticationRefusalRequestsDispatchedGrantRefreshWithoutReplay(t 
 					}
 					ledger.wait(t)
 				}
+				ledger.mu.Lock()
+				if ledger.health.RetryAt == nil || !ledger.health.RetryAt.Equal(now.Add(2*time.Minute)) {
+					t.Errorf("retry timing lost for %s: %+v", transport, ledger.health)
+				}
+				ledger.mu.Unlock()
 				h.rt.mu.Lock()
 				defer h.rt.mu.Unlock()
 				if status == 401 {

@@ -29,6 +29,17 @@ export function adapterLabel(adapter: string | null | undefined): string {
   return adapter ? (adapterLabels[adapter] ?? adapter) : 'No adapter';
 }
 
+const servingHealthLabels: Record<CodeAccount['health'], string> = {
+  unknown: 'Unknown',
+  healthy: 'Healthy',
+  unavailable: 'Temporary upstream failure',
+  quota_limited: 'Provider rate or quota limit'
+};
+
+export function servingHealthLabel(health: CodeAccount['health']): string {
+  return servingHealthLabels[health];
+}
+
 const clientLabels: Record<string, string> = {
   codex: 'Codex CLI',
   'claude-code': 'Claude Code',

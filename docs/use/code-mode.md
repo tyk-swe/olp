@@ -590,19 +590,31 @@ release a reservation as unused. A bound overrun is a `bound_violation` and must
 block subsequent budgeted admission. Historical unknown usage prevents falsely
 enabling a hard guarantee.
 
-Provider-reported allowance is separate metadata with observation/reset times.
-Only Codex reports allowance OLP reads; OpenCode Go and coding-plan accounts
-show none, and their health comes from response status alone. A 429, such as
-Z.ai's 5-hour limit or its concurrency limit, cools the account for a minute.
-Primary and secondary windows are retained independently for each metered limit;
-credits remain separate from those windows and from local budgets. Partial
-observations merge by window and do not erase other windows.
-Never infer subscription allowance from a local budget, monetary estimate or a
-successful fixture request. Stale allowance observations cannot replace newer ones.
-Observed exhausted allowance refuses admission until its reported reset.
-Temporary transport/quota failures impose a one-minute cooldown; the next
-client request can test recovery on the same pinned account. OLP schedules no
-synthetic health inference and never automatically replays the failed request.
+Provider-reported allowance is separate metadata with observation and reset
+times. Only Codex reports allowance OLP reads. OpenCode Go and coding-plan
+accounts show none, and their health comes from response status alone. For
+responses that mark an account unavailable or quota-limited, OLP honors a
+single valid Retry-After header as unsigned seconds or an HTTP date. Zero
+seconds and past dates permit an immediate retry when other eligibility checks
+pass. Missing, invalid or duplicated Retry-After values use a one-minute
+fallback and preserve a longer active cooldown. Successful generations already
+running when another request starts a cooldown do not shorten it.
+
+Primary and secondary windows are retained independently for each metered limit.
+Token and request counts also retain their own observation and reset times.
+Credits remain separate from those windows and from local budgets. Partial
+observations preserve other dimensions, and stale observations cannot replace
+newer ones. An exhausted count or window refuses admission until its supported
+reset. An unknown reset keeps that exhausted dimension blocked. Passing a retry
+or reset time permits another attempt once all eligibility checks pass, while
+reported allowance values remain tied to upstream observations. Never infer
+subscription allowance from a local budget, monetary estimate or a successful
+fixture request.
+
+Temporary transport failures that mark an account unavailable use the same
+fallback. The next client request can test recovery on the same pinned account.
+OLP schedules no synthetic health inference and never automatically replays the
+failed request.
 
 ## Fidelity and privacy
 

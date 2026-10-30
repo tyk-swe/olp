@@ -22,7 +22,7 @@ type CodeLedger interface {
 	ObserveCooldown(context.Context, string, time.Time) error
 	Settle(context.Context, string, codemode.Usage) error
 	Abort(context.Context, string) error
-	ObserveHealth(context.Context, string, string) error
+	ObserveHealth(context.Context, string, codemode.HealthObservation) error
 	ObserveAllowance(context.Context, string, codemode.Allowance) error
 	ObserveReference(context.Context, string, string) error
 	ObserveOutcome(context.Context, string, codemode.Outcome) error
