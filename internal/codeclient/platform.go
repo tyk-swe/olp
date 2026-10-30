@@ -19,7 +19,7 @@ func platformInstructions(client, platform string) (*string, string) {
 		}
 		return new("olp-claude.sh"), posixKey + "Save the shell setup as olp-claude.sh. Run . ./olp-claude.sh in bash or zsh, then run claude in the same shell. " + merge
 	case codeadapter.ClientOpenCode:
-		const merge = "In opencode.json at the project root, update the generated model, small_model and enabled_providers fields. Merge provider entries and the plan agent by name, preserving other agents, tools and settings. Merge mcp entries by name and keep {env:OLP_API_KEY} references unchanged. If the project uses opencode.jsonc, merge there instead of creating a competing file. Run opencode from that project. Regenerate this setup to change models."
+		const merge = "In opencode.json at the project root, update the generated model, small_model, enabled_providers and agent.plan.model fields, including when planning uses the main model. Merge provider entries by name, preserving other plan-agent settings, agents, tools and settings. Merge mcp entries by name and keep {env:OLP_API_KEY} references unchanged. If the project uses opencode.jsonc, merge there instead of creating a competing file. Run opencode from that project. Regenerate this setup to change models."
 		if platform == "windows" {
 			return new("opencode.json"), windowsKey + merge
 		}

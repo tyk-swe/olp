@@ -298,8 +298,9 @@ keys or tables, preserving unrelated settings and servers.
 
 For OpenCode, merge the generated fields into the project's `opencode.json`,
 or its existing `opencode.jsonc`. Update the selected models and provider list,
-merge provider, agent and MCP entries by name, and retain other tools and
-settings. Keep environment references intact. For Claude Code, save the shell
+including `agent.plan.model` when planning uses the main model again. Preserve
+other plan-agent settings while merging provider, agent and MCP entries by name,
+and retain other tools and settings. Keep environment references intact. For Claude Code, save the shell
 setup as `olp-claude.sh` on Linux or macOS, or `olp-claude.ps1` on Windows.
 Source it with `. ./olp-claude.sh` or `. .\olp-claude.ps1`, then launch `claude`
 in the same shell. The setup changes the process environment without writing

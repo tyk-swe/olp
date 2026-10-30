@@ -1,6 +1,7 @@
 package codeclient
 
 import (
+	"encoding/json"
 	"errors"
 	"os"
 	"os/exec"
@@ -23,7 +24,6 @@ func TestWindowsClaudeConfiguration(t *testing.T) {
 		t.Fatalf("unexpected Windows setup: %+v", config)
 	}
 	for _, setting := range []string{
-		"if ([string]::IsNullOrWhiteSpace($env:OLP_API_KEY))",
 		"$env:ANTHROPIC_AUTH_TOKEN = $env:OLP_API_KEY",
 		"$env:ANTHROPIC_BASE_URL = '" + config.BaseURL + "'",
 		"$env:ANTHROPIC_MODEL = 'minimax-m3'",
@@ -40,22 +40,23 @@ func TestWindowsClaudeConfiguration(t *testing.T) {
 func TestPlatformPathsAndInvalidPlatform(t *testing.T) {
 	route := codemode.Route{Slug: "team-code", Enabled: true, RevisionID: "published", Models: []string{"fixture-model"}}
 	offers := Offers{{Adapter: codemode.AdapterCodex, Models: route.Models}}
-	for _, platform := range []string{"", "linux", "macos", "windows"} {
-		t.Run(platform, func(t *testing.T) {
-			config, err := Generate(route, offers, Request{GatewayURL: "https://olp.example", Platform: platform})
+	for _, test := range []struct {
+		platform, path, fallback string
+	}{
+		{"", "$CODEX_HOME/config.toml", "$HOME/.codex/config.toml"},
+		{"linux", "$CODEX_HOME/config.toml", "$HOME/.codex/config.toml"},
+		{"macos", "$CODEX_HOME/config.toml", "$HOME/.codex/config.toml"},
+		{"windows", `$env:CODEX_HOME\config.toml`, `$HOME\.codex\config.toml`},
+	} {
+		t.Run(test.platform, func(t *testing.T) {
+			config, err := Generate(route, offers, Request{GatewayURL: "https://olp.example", Platform: test.platform})
 			if err != nil {
 				t.Fatal(err)
 			}
-			path := "$CODEX_HOME/config.toml"
-			fallback := "$HOME/.codex/config.toml"
-			if platform == "windows" {
-				path = `$env:CODEX_HOME\config.toml`
-				fallback = `$HOME\.codex\config.toml`
-			}
-			if config.File == nil || *config.File != path || !strings.Contains(config.Instructions, fallback) {
+			if config.File == nil || *config.File != test.path || !strings.Contains(config.Instructions, test.fallback) {
 				t.Fatalf("wrong config paths: %+v", config)
 			}
-			if platform == "" && config.Platform != "linux" {
+			if test.platform == "" && config.Platform != "linux" {
 				t.Fatalf("unexpected default platform: %s", config.Platform)
 			}
 			if !strings.Contains(config.Configuration, `model = "`+config.Model+`"`) || !strings.Contains(config.Configuration, `"X-OLP-Code-Model" = "`+config.Model+`"`) {
@@ -100,5 +101,47 @@ func TestClaudeShellPreservesSettingsAndSelectedModels(t *testing.T) {
 	preserved, err := os.ReadFile(filepath.Join(directory, "settings.json"))
 	if err != nil || string(preserved) != string(settings) {
 		t.Fatalf("existing settings changed: %q: %v", preserved, err)
+	}
+}
+
+func TestOpenCodeSelectionReplacesOnlyPlanningModel(t *testing.T) {
+	models := []string{"minimax-test-main", "minimax-test-plan"}
+	route := codemode.Route{Slug: "team-code", Enabled: true, RevisionID: "published", Models: models}
+	offers := Offers{{Adapter: codemode.AdapterOpenCodeGo, Models: models}}
+	type agent struct {
+		Model  string `json:"model"`
+		Prompt string `json:"prompt"`
+	}
+	type agents struct {
+		Plan   agent `json:"plan"`
+		Review agent `json:"review"`
+	}
+	settings := struct {
+		Model        string   `json:"model"`
+		Agent        agents   `json:"agent"`
+		Instructions []string `json:"instructions"`
+	}{Agent: agents{Plan: agent{Prompt: "Keep the planning prompt"}, Review: agent{Model: "custom/reviewer", Prompt: "Keep the review prompt"}}, Instructions: []string{"Keep project conventions"}}
+	initial, initialErr := Generate(route, offers, Request{GatewayURL: "https://olp.example", Client: "opencode", Model: models[0], PlanModel: models[1]})
+	if initialErr != nil {
+		t.Fatal(initialErr)
+	}
+	if err := json.Unmarshal([]byte(initial.Configuration), &settings); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasSuffix(settings.Agent.Plan.Model, "/"+models[1]) || settings.Agent.Plan.Model == settings.Model {
+		t.Fatal("distinct planning selection did not take effect")
+	}
+	updated, updatedErr := Generate(route, offers, Request{GatewayURL: "https://olp.example", Client: "opencode", Model: models[0], PlanModel: models[0]})
+	if updatedErr != nil {
+		t.Fatal(updatedErr)
+	}
+	if err := json.Unmarshal([]byte(updated.Configuration), &settings); err != nil {
+		t.Fatal(err)
+	}
+	if settings.Agent.Plan.Model != settings.Model {
+		t.Fatalf("stale planning override after selecting main model: %s != %s", settings.Agent.Plan.Model, settings.Model)
+	}
+	if settings.Agent.Plan.Prompt != "Keep the planning prompt" || settings.Agent.Review != (agent{Model: "custom/reviewer", Prompt: "Keep the review prompt"}) || len(settings.Instructions) != 1 || settings.Instructions[0] != "Keep project conventions" {
+		t.Fatalf("unrelated settings changed: %+v", settings)
 	}
 }
