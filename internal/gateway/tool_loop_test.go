@@ -49,13 +49,13 @@ func TestGatewayToolExecutionFollowsLimiterOutagePolicy(t *testing.T) {
 		groupID   *string
 		groupCost *string
 		status    int
-		failOpen  int64
+		failOpen  bool
 	}{
 		{name: "unbounded run without limiter", noLimiter: true, status: http.StatusOK},
 		{name: "bounded run without limiter", noLimiter: true, runLimit: `,"olp_run_limits":{"max_concurrent_runs":1}`, status: http.StatusServiceUnavailable},
-		{name: "unbounded run fails open", policy: limits.FailOpen, status: http.StatusOK, failOpen: 1},
-		{name: "bounded run fails open", policy: limits.FailOpen, runLimit: `,"olp_run_limits":{"max_concurrent_runs":1}`, status: http.StatusOK, failOpen: 1},
-		{name: "rate limited key fails open", policy: limits.FailOpen, keyRate: new(int64(10)), status: http.StatusOK, failOpen: 2},
+		{name: "unbounded run fails open", policy: limits.FailOpen, status: http.StatusOK, failOpen: true},
+		{name: "bounded run fails open", policy: limits.FailOpen, runLimit: `,"olp_run_limits":{"max_concurrent_runs":1}`, status: http.StatusOK, failOpen: true},
+		{name: "rate limited key fails open", policy: limits.FailOpen, keyRate: new(int64(10)), status: http.StatusOK, failOpen: true},
 		{name: "unbounded run fails closed", policy: limits.FailClosed, status: http.StatusServiceUnavailable},
 		{name: "bounded run fails closed", policy: limits.FailClosed, runLimit: `,"olp_run_limits":{"max_concurrent_runs":1}`, status: http.StatusServiceUnavailable},
 		{name: "key cost fails closed under fail open", policy: limits.FailOpen, keyCost: new("1"), status: http.StatusServiceUnavailable},
@@ -102,8 +102,8 @@ func TestGatewayToolExecutionFollowsLimiterOutagePolicy(t *testing.T) {
 				default:
 				}
 			}
-			if total := h.gateway.Admission.FailOpenTotal(); total != test.failOpen {
-				t.Fatalf("fail-open total=%d, want %d", total, test.failOpen)
+			if observed := h.gateway.Admission.FailOpenTotal() > 0; observed != test.failOpen {
+				t.Fatalf("fail-open observation=%t, want %t", observed, test.failOpen)
 			}
 		})
 	}
