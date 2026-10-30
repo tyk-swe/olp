@@ -121,6 +121,10 @@ func TestCredentialImportFixturesDeclareUsableGrantEnrollment(t *testing.T) {
 }
 
 func TestAntigravityManifestCanEnrollThroughGrantHost(t *testing.T) {
+	module := testutil.BuildPlugin(t, "./plugins/antigravity")
+	if _, err := newTestRuntime(t, DefaultLimits, nil).Inspect(t.Context(), module); err != nil {
+		t.Fatalf("could not install the Antigravity plugin: %v", err)
+	}
 	encoded, err := json.Marshal(antigravityauth.Manifest())
 	if err != nil {
 		t.Fatal(err)
