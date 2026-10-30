@@ -48,7 +48,7 @@ func newCodeFixtureWithProfile(t *testing.T, profile string, bodyLimit ...int64)
 	f.exec(t, `INSERT INTO olp.providers(id,name,kind,state,configuration,etag,slots_etag,created_by,project_id) VALUES($1,'Fixture coding subscription','plugin','draft','{"kind":"plugin","auth_mode":"grant","endpoint":"https://fixture.invalid"}',$2,$3,$4,$5)`, f.provider, access.NewID(), access.NewID(), f.user, f.project)
 	f.addCredential(t, f.credential, "fixture-principal", 1)
 	if profile != "" {
-		f.exec(t, `UPDATE olp.providers SET configuration=configuration || jsonb_build_object('profile_id',$2::text,'profile_revision','fixture-digest') WHERE id=$1`, f.provider, profile)
+		f.exec(t, `UPDATE olp.providers SET configuration=(configuration::jsonb || jsonb_build_object('profile_id',$2::text,'profile_revision','fixture-digest'))::json WHERE id=$1`, f.provider, profile)
 		f.exec(t, `UPDATE olp.provider_credentials SET profile_id=$2 WHERE id=$1`, f.credential, profile)
 	}
 	f.addKey(t, f.key)
