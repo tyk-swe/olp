@@ -92,8 +92,8 @@ func (s *Server) CodeList(r *http.Request, p Principal, selectSQL string, matche
 }
 
 // CodeUsageList adds digest filtering for the two content-free usage ledgers.
-func (s *Server) CodeUsageList(r *http.Request, p Principal, selectSQL string) (Reply, error) {
-	return s.codeList(r, p, selectSQL, true, nil)
+func (s *Server) CodeUsageList(r *http.Request, p Principal, selectSQL string, matches ...CodeMatch) (Reply, error) {
+	return s.codeList(r, p, selectSQL, true, matches)
 }
 
 func (s *Server) codeList(r *http.Request, p Principal, selectSQL string, endUsers bool, matches []CodeMatch) (Reply, error) {

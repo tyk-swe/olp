@@ -17,6 +17,7 @@ import (
 	"github.com/tyk-swe/olp/internal/routing"
 
 	"github.com/coder/websocket"
+	"github.com/shopspring/decimal"
 
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/codemode"
@@ -253,5 +254,84 @@ func TestCodeForwardingWebSocketUnavailableCloseAppliesAccountCooldown(t *testin
 				t.Fatalf("recovery did not dispatch: calls=%d", calls.Load())
 			}
 		})
+	}
+}
+
+func TestCodePaidVendorPricingSettlesDistinctChargeAndEnforcesSpend(t *testing.T) {
+	var dispatched atomic.Int64
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		dispatched.Add(1)
+		if r.Header.Get("Authorization") != "Bearer fixture-paid-secret" {
+			t.Error("paid request did not use its encrypted provider credential")
+		}
+		_, _ = io.WriteString(w, `{"id":"paid-priced","object":"response","model":"native-model","status":"completed","output":[],"usage":{"input_tokens":6,"output_tokens":1,"total_tokens":7,"input_tokens_details":{"cached_tokens":4}}}`)
+	}))
+	t.Cleanup(upstream.Close)
+	f, provider, _ := newPaidCodeFixture(t, upstream.URL)
+	f.h.want(f.owner, "POST", "/api/v1/pricing/revisions", map[string]any{"effective_at": time.Now().UTC().Format(time.RFC3339Nano), "prices": []any{map[string]any{"provider_kind": provider.Kind, "vendor_id": provider.VendorID, "model": "native-model", "operation": "generation", "currency": "USD", "input_per_million": "2", "cached_input_per_million": "1", "output_per_million": "3"}}}, idem("paid-vendor-price"), 201)
+	card := f.h.want(f.owner, "POST", "/api/v1/rate-cards", map[string]any{"owner": map[string]any{"kind": "installation"}}, idem("paid-card"), 201)
+	f.h.want(f.owner, "POST", "/api/v1/rate-cards/"+card["id"].(string)+"/revisions", map[string]any{"markup": "2"}, idem("paid-card-revision"), 201)
+	eventually(t, "paid vendor price", 15*time.Second, func() bool {
+		f.h.refresh()
+		price := f.h.Runtime.RoutingInputs().Price(provider.Kind, provider.ID, provider.VendorID, "native-model", "generation", time.Now())
+		return price != nil
+	})
+	policy := access.KeyPolicy{Scopes: []string{"inference"}, AllowedRoutes: []string{"coding"}}
+	f.h.Gateway.Runtime = &codeForwardRuntime{Runtime: f.h.Runtime, pinned: f.h.Runtime.Release(), authority: access.Authority{ID: f.key, LookupID: f.key, ProjectID: &f.project, Policy: policy}}
+	f.h.Gateway.CodeLedger = f.store
+	_, _, limiter := limSetup(t, "paid-vendor-cost")
+	f.h.Gateway.Admission = gateway.NewAdmission(limiter, nil, slog.New(slog.DiscardHandler))
+	f.h.Gateway.Admission.PendingCostAccountingReady = (&limits.DebitStore{Pool: f.h.Pool, Limiter: limiter}).CheckOwnerAccounting
+	await := endUserAccounting(t, f.h, limiter)
+	mux := http.NewServeMux()
+	f.h.Gateway.RegisterCode(mux)
+	server := httptest.NewServer(mux)
+	t.Cleanup(server.Close)
+	call := func() (int, []byte) {
+		request, err := http.NewRequestWithContext(t.Context(), http.MethodPost, server.URL+"/code/coding/responses", strings.NewReader(`{"model":"native-model","input":"hello","max_output_tokens":1}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		request.Header.Set("Authorization", "Bearer olp-code-fixture")
+		request.Header.Set("Session_id", "paid-cost")
+		response, err := http.DefaultClient.Do(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer response.Body.Close()
+		body, err := io.ReadAll(response.Body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return response.StatusCode, body
+	}
+	if status, body := call(); status != 200 {
+		t.Fatalf("paid request refused %d %s", status, body)
+	}
+	await()
+	var cost, charge *string
+	if err := f.h.Pool.QueryRow(t.Context(), `SELECT estimated_cost::text,charge::text FROM olp.attempt_usage_facts WHERE provider_id=$1`, provider.ID).Scan(&cost, &charge); err != nil {
+		t.Fatal(err)
+	}
+	if cost == nil || charge == nil {
+		t.Fatalf("vendor-scoped paid usage was unpriced %v %v", cost, charge)
+	}
+	measuredCost, costErr := decimal.NewFromString(*cost)
+	measuredCharge, chargeErr := decimal.NewFromString(*charge)
+	expected := decimal.NewFromInt((6-4)*2 + 4*1 + 1*3).Div(decimal.NewFromInt(1_000_000))
+	if costErr != nil || chargeErr != nil || !measuredCost.Equal(expected) || !measuredCharge.Equal(expected.Mul(decimal.NewFromInt(2))) {
+		t.Fatalf("paid cache cost/charge diverged from admission prices %s %s", *cost, *charge)
+	}
+	exhausted := access.KeyPolicy{Scopes: policy.Scopes, AllowedRoutes: policy.AllowedRoutes, CostBasis: "charge", DailyCostLimit: charge}
+	encoded, err := json.Marshal(exhausted)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.exec(t, `UPDATE olp.api_keys SET policy=$2 WHERE id=$1`, f.key, encoded)
+	if status, body := call(); status != 429 || !strings.Contains(string(body), "code_budget_exhausted") {
+		t.Fatalf("settled charge did not enforce the next admission %d %s", status, body)
+	}
+	if dispatched.Load() != 1 {
+		t.Fatal("exhausted paid spend dispatched another upstream request")
 	}
 }

@@ -88,6 +88,8 @@ semantic versioning and take their source from root `package.json`;
 
 ### Changed
 
+Code-mode diagnostics now represent paid API ownership separately. Paid attempts and pins have nullable subscription account and binding fields, and expose paid binding, provider and slot identifiers instead. Paid target configuration is explicit per native model, with current pricing, separate cost and charge, and durable uncertainty holds.
+
 - Notification webhooks refuse redirects instead of following up to five,
   because 301/302/303 turned signed POSTs into bodyless GETs that were recorded
   as delivered; refused redirects record `redirect`. Email notifications send

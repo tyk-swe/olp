@@ -841,6 +841,33 @@ func (e CodeAttemptOutcomeOrigin) Valid() bool {
 	}
 }
 
+// Defines values for CodeAttemptPaidMonetaryState.
+const (
+	CodeAttemptPaidMonetaryStateLessThannil CodeAttemptPaidMonetaryState = "<nil>"
+	CodeAttemptPaidMonetaryStatePending     CodeAttemptPaidMonetaryState = "pending"
+	CodeAttemptPaidMonetaryStateReleased    CodeAttemptPaidMonetaryState = "released"
+	CodeAttemptPaidMonetaryStateSettled     CodeAttemptPaidMonetaryState = "settled"
+	CodeAttemptPaidMonetaryStateUnknown     CodeAttemptPaidMonetaryState = "unknown"
+)
+
+// Valid indicates whether the value is a known member of the CodeAttemptPaidMonetaryState enum.
+func (e CodeAttemptPaidMonetaryState) Valid() bool {
+	switch e {
+	case CodeAttemptPaidMonetaryStateLessThannil:
+		return true
+	case CodeAttemptPaidMonetaryStatePending:
+		return true
+	case CodeAttemptPaidMonetaryStateReleased:
+		return true
+	case CodeAttemptPaidMonetaryStateSettled:
+		return true
+	case CodeAttemptPaidMonetaryStateUnknown:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for CodeAttemptState.
 const (
 	CodeAttemptStateAborted        CodeAttemptState = "aborted"
@@ -7423,13 +7450,13 @@ type CodeAllowanceWindowWindow string
 
 // CodeAttempt Metadata only. No request or response body, tools, headers or secrets are retained. Reserved tokens are conservative bounds, not reported usage; unreported consumption remains uncertain indefinitely. Cached and reasoning tokens are subsets.
 type CodeAttempt struct {
-	AccountId     openapi_types.UUID        `json:"account_id"`
-	ApiKeyId      openapi_types.UUID        `json:"api_key_id"`
-	Attribution   *map[string]string        `json:"attribution,omitempty"`
-	BindingId     openapi_types.UUID        `json:"binding_id"`
-	BoundEvidence nullable.Nullable[string] `json:"bound_evidence"`
-	CachedTokens  nullable.Nullable[int64]  `json:"cached_tokens"`
-	CreatedAt     time.Time                 `json:"created_at"`
+	AccountId     nullable.Nullable[openapi_types.UUID] `json:"account_id"`
+	ApiKeyId      openapi_types.UUID                    `json:"api_key_id"`
+	Attribution   *map[string]string                    `json:"attribution,omitempty"`
+	BindingId     nullable.Nullable[openapi_types.UUID] `json:"binding_id"`
+	BoundEvidence nullable.Nullable[string]             `json:"bound_evidence"`
+	CachedTokens  nullable.Nullable[int64]              `json:"cached_tokens"`
+	CreatedAt     time.Time                             `json:"created_at"`
 
 	// EndUserDigest Project-scoped end-user HMAC, or empty when identification was not configured. Raw identifiers are never retained.
 	EndUserDigest string                       `json:"end_user_digest"`
@@ -7442,16 +7469,20 @@ type CodeAttempt struct {
 	Operation string `json:"operation"`
 
 	// Outcome Bounded transport or generation result, independent of usage settlement and durable uncertainty.
-	Outcome           nullable.Nullable[CodeAttemptOutcome]       `json:"outcome"`
-	OutcomeObservedAt nullable.Nullable[time.Time]                `json:"outcome_observed_at"`
-	OutcomeOrigin     nullable.Nullable[CodeAttemptOutcomeOrigin] `json:"outcome_origin"`
-	OutputTokens      nullable.Nullable[int64]                    `json:"output_tokens"`
-	ProjectId         openapi_types.UUID                          `json:"project_id"`
-	ReasoningTokens   nullable.Nullable[int64]                    `json:"reasoning_tokens"`
-	Refusal           nullable.Nullable[string]                   `json:"refusal"`
-	ReportedTokens    nullable.Nullable[int64]                    `json:"reported_tokens"`
+	Outcome           nullable.Nullable[CodeAttemptOutcome]           `json:"outcome"`
+	OutcomeObservedAt nullable.Nullable[time.Time]                    `json:"outcome_observed_at"`
+	OutcomeOrigin     nullable.Nullable[CodeAttemptOutcomeOrigin]     `json:"outcome_origin"`
+	OutputTokens      nullable.Nullable[int64]                        `json:"output_tokens"`
+	PaidBindingId     nullable.Nullable[openapi_types.UUID]           `json:"paid_binding_id,omitempty"`
+	PaidMonetaryState nullable.Nullable[CodeAttemptPaidMonetaryState] `json:"paid_monetary_state,omitempty"`
+	PaidProviderId    nullable.Nullable[openapi_types.UUID]           `json:"paid_provider_id,omitempty"`
+	PaidSlotId        nullable.Nullable[openapi_types.UUID]           `json:"paid_slot_id,omitempty"`
+	ProjectId         openapi_types.UUID                              `json:"project_id"`
+	ReasoningTokens   nullable.Nullable[int64]                        `json:"reasoning_tokens"`
+	Refusal           nullable.Nullable[string]                       `json:"refusal"`
+	ReportedTokens    nullable.Nullable[int64]                        `json:"reported_tokens"`
 
-	// RequestedModel Public model identifier requested by the client. Null for historical attempts where the identifier was not recorded. model identifies the selected exact target.
+	// RequestedModel Public model requested before explicit alias resolution.
 	RequestedModel  nullable.Nullable[string] `json:"requested_model,omitempty"`
 	ReservedTokens  int64                     `json:"reserved_tokens"`
 	RouteId         openapi_types.UUID        `json:"route_id"`
@@ -7468,6 +7499,9 @@ type CodeAttemptOutcome string
 // CodeAttemptOutcomeOrigin defines model for CodeAttempt.OutcomeOrigin.
 type CodeAttemptOutcomeOrigin string
 
+// CodeAttemptPaidMonetaryState defines model for CodeAttempt.PaidMonetaryState.
+type CodeAttemptPaidMonetaryState string
+
 // CodeAttemptState defines model for CodeAttempt.State.
 type CodeAttemptState string
 
@@ -7479,16 +7513,18 @@ type CodeAttemptList struct {
 
 // CodeBinding Persistent per-key conversation tree identity. Retiring any member retires the whole tree; retirement never permits re-binding to another account. Account and principal are the tree's first account, which later models prefer; pins name the account each model is served from.
 type CodeBinding struct {
-	AccountId    openapi_types.UUID                    `json:"account_id"`
-	ApiKeyId     openapi_types.UUID                    `json:"api_key_id"`
-	Conversation string                                `json:"conversation"`
-	CreatedAt    time.Time                             `json:"created_at"`
-	Id           openapi_types.UUID                    `json:"id"`
-	ParentId     nullable.Nullable[openapi_types.UUID] `json:"parent_id"`
+	AccountId      nullable.Nullable[openapi_types.UUID] `json:"account_id"`
+	ApiKeyId       openapi_types.UUID                    `json:"api_key_id"`
+	Conversation   string                                `json:"conversation"`
+	CreatedAt      time.Time                             `json:"created_at"`
+	Id             openapi_types.UUID                    `json:"id"`
+	PaidProviderId nullable.Nullable[openapi_types.UUID] `json:"paid_provider_id,omitempty"`
+	PaidSlotId     nullable.Nullable[openapi_types.UUID] `json:"paid_slot_id,omitempty"`
+	ParentId       nullable.Nullable[openapi_types.UUID] `json:"parent_id"`
 
 	// Pins The tree's pins, oldest first. A tree's first admission of a model pins an account to it, and the pin never moves.
 	Pins      []CodePin                    `json:"pins"`
-	Principal string                       `json:"principal"`
+	Principal nullable.Nullable[string]    `json:"principal"`
 	ProjectId openapi_types.UUID           `json:"project_id"`
 	RetiredAt nullable.Nullable[time.Time] `json:"retired_at"`
 	RootId    openapi_types.UUID           `json:"root_id"`
@@ -7559,7 +7595,8 @@ type CodeClientConfiguration struct {
 	Models []CodeModel `json:"models"`
 
 	// NativeModels The route's models an adapter supporting the client serves, in route order.
-	NativeModels []string `json:"native_models"`
+	NativeModels []string  `json:"native_models"`
+	PaidModels   *[]string `json:"paid_models,omitempty"`
 
 	// PlanModel The published model or exact alias for planning: Claude Code's plan mode through opusplan and OpenCode's plan agent. It equals model unless another was chosen. Null for Codex.
 	PlanModel nullable.Nullable[string] `json:"plan_model"`
@@ -7624,6 +7661,9 @@ type CodeModel struct {
 	// ModelPool Configured ordered subscription recovery targets for this public model. This is policy metadata, not an availability or portability guarantee. Omitted for exact-model selection.
 	ModelPool *[]string       `json:"model_pool,omitempty"`
 	Object    CodeModelObject `json:"object"`
+
+	// Paid This model directly selects a metered API target and requires monetary admission.
+	Paid *bool `json:"paid,omitempty"`
 }
 
 // CodeModelClients defines model for CodeModel.Clients.
@@ -7645,12 +7685,20 @@ type CodeModelCapabilityProtocol string
 // CodeModelCapabilityTransports defines model for CodeModelCapability.Transports.
 type CodeModelCapabilityTransports string
 
+// CodePaidTarget defines model for CodePaidTarget.
+type CodePaidTarget struct {
+	ProviderId openapi_types.UUID `json:"provider_id"`
+	SlotId     openapi_types.UUID `json:"slot_id"`
+}
+
 // CodePin The account a conversation tree serves one model from.
 type CodePin struct {
-	AccountId openapi_types.UUID `json:"account_id"`
-	CreatedAt time.Time          `json:"created_at"`
-	Model     string             `json:"model"`
-	Principal string             `json:"principal"`
+	AccountId      nullable.Nullable[openapi_types.UUID] `json:"account_id"`
+	CreatedAt      time.Time                             `json:"created_at"`
+	Model          string                                `json:"model"`
+	PaidProviderId nullable.Nullable[openapi_types.UUID] `json:"paid_provider_id,omitempty"`
+	PaidSlotId     nullable.Nullable[openapi_types.UUID] `json:"paid_slot_id,omitempty"`
+	Principal      nullable.Nullable[string]             `json:"principal"`
 
 	// TargetModel Durably pinned native model identifier. Existing native pins use their model identifier.
 	TargetModel string `json:"target_model"`
@@ -7762,14 +7810,20 @@ type CodeRoute struct {
 	ModelPools *map[string][]string `json:"model_pools,omitempty"`
 
 	// ModelRewriting Explicitly enable model identifier rewriting through exact aliases or configured model_pools. Disabled by default. This policy does not rewrite client identity or prompts.
-	ModelRewriting *bool                        `json:"model_rewriting,omitempty"`
-	Models         []string                     `json:"models"`
-	PoolId         openapi_types.UUID           `json:"pool_id"`
-	ProjectId      openapi_types.UUID           `json:"project_id"`
-	PublishedAt    nullable.Nullable[time.Time] `json:"published_at"`
-	Revision       int32                        `json:"revision"`
-	RevisionId     string                       `json:"revision_id"`
-	Slug           string                       `json:"slug"`
+	ModelRewriting *bool    `json:"model_rewriting,omitempty"`
+	Models         []string `json:"models"`
+
+	// PaidParticipation Explicitly permit direct metered API targets. This does not enable paid fallback.
+	PaidParticipation *bool `json:"paid_participation,omitempty"`
+
+	// PaidTargets Exact native model to directly selected published metered provider and credential slot. A mapped model takes precedence over subscription accounts.
+	PaidTargets *map[string]CodePaidTarget   `json:"paid_targets,omitempty"`
+	PoolId      openapi_types.UUID           `json:"pool_id"`
+	ProjectId   openapi_types.UUID           `json:"project_id"`
+	PublishedAt nullable.Nullable[time.Time] `json:"published_at"`
+	Revision    int32                        `json:"revision"`
+	RevisionId  string                       `json:"revision_id"`
+	Slug        string                       `json:"slug"`
 
 	// Tools Research subscription binding, frozen at publication. Requires an eligible Z.ai global account in the same project and pool; independent of inference models. Null disables research.
 	Tools nullable.Nullable[CodeResearchTools] `json:"tools,omitempty"`
@@ -7803,11 +7857,17 @@ type CodeRouteWrite struct {
 	ModelPools *map[string][]string `json:"model_pools,omitempty"`
 
 	// ModelRewriting Explicitly enable model identifier rewriting through exact aliases or configured model_pools. Disabled by default. This policy does not rewrite client identity or prompts.
-	ModelRewriting *bool              `json:"model_rewriting,omitempty"`
-	Models         []string           `json:"models"`
-	PoolId         openapi_types.UUID `json:"pool_id"`
-	ProjectId      openapi_types.UUID `json:"project_id"`
-	Slug           string             `json:"slug"`
+	ModelRewriting *bool    `json:"model_rewriting,omitempty"`
+	Models         []string `json:"models"`
+
+	// PaidParticipation Explicitly permit direct metered API targets. This does not enable paid fallback.
+	PaidParticipation *bool `json:"paid_participation,omitempty"`
+
+	// PaidTargets Exact native model to directly selected published metered provider and credential slot. A mapped model takes precedence over subscription accounts.
+	PaidTargets *map[string]CodePaidTarget `json:"paid_targets,omitempty"`
+	PoolId      openapi_types.UUID         `json:"pool_id"`
+	ProjectId   openapi_types.UUID         `json:"project_id"`
+	Slug        string                     `json:"slug"`
 
 	// Tools Research subscription binding, frozen at publication. Requires an eligible Z.ai global account in the same project and pool; independent of inference models. Null disables research.
 	Tools nullable.Nullable[CodeResearchTools] `json:"tools,omitempty"`

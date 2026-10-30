@@ -118,7 +118,7 @@ func Generate(route codemode.Route, offers Offers, in Request) (codemode.ClientC
 	version, format, configuration, renderErr := func() (string, string, string, error) {
 		switch client {
 		case codeadapter.ClientCodex:
-			return codexauth.ClientVersion, "toml", codexConfiguration(baseURL, model), nil
+			return codexauth.ClientVersion, "toml", codexConfiguration(baseURL, model, !catalogPaid(catalog, model)), nil
 		case codeadapter.ClientClaudeCode:
 			if platform == "windows" {
 				return codeadapter.ClaudeCodeVersion, "powershell", claudeCodePowerShellConfiguration(baseURL, model, *plan, *small), nil
@@ -148,8 +148,15 @@ func Generate(route codemode.Route, offers Offers, in Request) (codemode.ClientC
 		return ""
 	}()
 	out := codemode.ClientConfiguration{
-		Models:    catalog,
-		RouteSlug: route.Slug, BaseURL: baseURL, NativeModels: native, Adapters: adapters,
+		Models: catalog,
+		PaidModels: slices.Collect(func(yield func(string) bool) {
+			for _, m := range catalog {
+				if m.Paid && !yield(m.ID) {
+					return
+				}
+			}
+		}),
+		RouteSlug: route.Slug, BaseURL: baseURL, NativeModels: native, Adapters: append([]codemode.Adapter{}, adapters...),
 		Client: client, Platform: platform, File: file, Instructions: instructions, SupportedClients: supported, Model: model, PlanModel: plan, SmallModel: small,
 		ClientVersion: version, Format: format, Configuration: configuration,
 		QualificationGaps: append(qualificationGaps(adapters, client), "Generated configuration is not evidence of native platform startup or live subscription qualification."),
@@ -188,3 +195,7 @@ func conjoin(names []string) string {
 }
 
 var clientNames = map[string]string{codeadapter.ClientCodex: "Codex", codeadapter.ClientClaudeCode: "Claude Code", codeadapter.ClientOpenCode: "OpenCode"}
+
+func catalogPaid(catalog []codemode.Model, model string) bool {
+	return slices.ContainsFunc(catalog, func(m codemode.Model) bool { return m.ID == model && m.Paid })
+}

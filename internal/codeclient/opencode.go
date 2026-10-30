@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"maps"
+	"slices"
 
 	"github.com/tyk-swe/olp/internal/codeadapter"
 	"github.com/tyk-swe/olp/internal/codemode"
@@ -37,6 +38,10 @@ func openCodeConfiguration(route codemode.Route, adapters []codemode.Adapter, of
 	whitelists := map[codemode.Adapter][]string{}
 	qualified := map[string]string{}
 	for _, m := range native {
+		if protocol, paid := offers.paidProtocol(route, m); paid {
+			qualified[m] = "olp-paid-" + string(protocol) + "/" + m
+			continue
+		}
 		adapters := offers.adapters(route, m)
 		if adapter, ok := through[m]; ok {
 			adapters = []codemode.Adapter{adapter}
@@ -73,11 +78,7 @@ func openCodeConfiguration(route codemode.Route, adapters []codemode.Adapter, of
 				for _, model := range models {
 					resolved, _ := route.ResolveModel(codemode.Operation{Model: model})
 					protocol, _ := vendor.Protocol(codeadapter.ClientOpenCode, resolved.Model)
-					sdk := map[codemode.Protocol]string{
-						codemode.ProtocolChat:      "@ai-sdk/openai-compatible",
-						codemode.ProtocolMessages:  "@ai-sdk/anthropic",
-						codemode.ProtocolResponses: "@ai-sdk/openai",
-					}[protocol]
+					sdk := openCodeSDK(protocol)
 					if !yield(model, modelDefinition{ID: model, Name: model, Provider: modelProvider{NPM: sdk}}) {
 						return
 					}
@@ -86,10 +87,44 @@ func openCodeConfiguration(route codemode.Route, adapters []codemode.Adapter, of
 			document.Provider[provider] = settings{Options: options{BaseURL: baseURL + client.URLSuffix, APIKey: "{env:OLP_API_KEY}"}, Whitelist: models, Models: definitions}
 		}
 	}
+	for _, protocol := range []codemode.Protocol{codemode.ProtocolResponses, codemode.ProtocolMessages, codemode.ProtocolChat} {
+		models := slices.DeleteFunc(slices.Clone(native), func(model string) bool { p, ok := offers.paidProtocol(route, model); return !ok || p != protocol })
+		if len(models) == 0 {
+			continue
+		}
+		provider := "olp-paid-" + string(protocol)
+		suffix := func() string {
+			if protocol == codemode.ProtocolMessages {
+				return ""
+			}
+			return "/v1"
+		}()
+		sdk := openCodeSDK(protocol)
+		definitions := maps.Collect(func(yield func(string, modelDefinition) bool) {
+			for _, model := range models {
+				if !yield(model, modelDefinition{ID: model, Name: model, Provider: modelProvider{NPM: sdk}}) {
+					return
+				}
+			}
+		})
+		document.EnabledProviders = append(document.EnabledProviders, provider)
+		document.Provider[provider] = settings{Options: options{BaseURL: baseURL + suffix, APIKey: "{env:OLP_API_KEY}"}, Whitelist: models, Models: definitions}
+	}
 	var b bytes.Buffer
 	encoder := json.NewEncoder(&b)
 	encoder.SetEscapeHTML(false)
 	encoder.SetIndent("", "  ")
 	err := encoder.Encode(document)
 	return b.String(), err
+}
+
+func openCodeSDK(protocol codemode.Protocol) string {
+	switch protocol {
+	case codemode.ProtocolResponses:
+		return "@ai-sdk/openai"
+	case codemode.ProtocolMessages:
+		return "@ai-sdk/anthropic"
+	default:
+		return "@ai-sdk/openai-compatible"
+	}
 }

@@ -206,6 +206,24 @@ func TestAliasRepublishKeepsExistingExactModelPins(t *testing.T) {
 	}
 }
 
+func TestPaidTargetsRequireExplicitParticipationAndExactNativeModel(t *testing.T) {
+	const provider = "019a06bf-341f-7000-8000-000000000001"
+	const slot = "019a06bf-341f-7000-8000-000000000002"
+	valid := Route{Models: []string{"native-model"}, PaidParticipation: true, PaidTargets: map[string]PaidTarget{"native-model": {ProviderID: provider, SlotID: slot}}}
+	if err := valid.ValidatePaidTargets(); err != nil {
+		t.Fatal(err)
+	}
+	for _, route := range []Route{
+		{Models: valid.Models, PaidTargets: valid.PaidTargets},
+		{Models: valid.Models, PaidParticipation: true, PaidTargets: map[string]PaidTarget{"other": {ProviderID: provider, SlotID: slot}}},
+		{Models: valid.Models, PaidParticipation: true, PaidTargets: map[string]PaidTarget{"native-model": {ProviderID: provider}}},
+	} {
+		if err := route.ValidatePaidTargets(); err == nil {
+			t.Fatal("invalid paid participation accepted")
+		}
+	}
+}
+
 func TestModelPoolsKeepExactDefaultsAndPermitOnlyPublishedAlternates(t *testing.T) {
 	operation := Operation{Name: "responses", Model: "team-code", Identity: Identity{Conversation: "recovery"}}
 	route := Route{Models: []string{"native-a", "native-b"}, Aliases: map[string]string{"team-code": "native-a"}, ModelRewriting: true, InitialRecoveryAttempts: 1}

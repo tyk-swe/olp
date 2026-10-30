@@ -24,6 +24,7 @@ import (
 const codeGenerationTimeout = 10 * time.Minute
 
 type codeAttempt struct {
+	paid          *paidCodeAttempt
 	server        *Server
 	permit        resources.CodePermit
 	config        routing.Configuration
@@ -42,7 +43,7 @@ type codeAttempt struct {
 	publicModel   string
 }
 
-func (s *Server) prepareCode(r *http.Request, release *runtime.Release, route codemode.Route, observation codemode.Request, ingress codeIngress, transport codeadapter.Transport, recovery *resources.CodeRecovery) (*codeAttempt, error) {
+func (s *Server) prepareCode(r *http.Request, release *runtime.Release, route codemode.Route, observation codemode.Request, ingress codeIngress, transport codeadapter.Transport, recovery *resources.CodeRecovery, body []byte) (*codeAttempt, error) {
 	authority, failure := s.authenticate(r, "inference")
 	if failure != nil {
 		return nil, codemode.Refuse(failure.Status, "code_authentication_refused")
@@ -53,6 +54,9 @@ func (s *Server) prepareCode(r *http.Request, release *runtime.Release, route co
 	operation, err := route.ResolveModel(observation.Operation)
 	if err != nil {
 		return nil, err
+	}
+	if _, paid := route.PaidTargets[operation.Model]; paid && recovery == nil {
+		return s.preparePaidCode(r, release, route, observation, operation, ingress, transport, authority, body)
 	}
 	providers := release.Snapshot.CodeModelProviders(route, ingress.path, operation.Model, transport)
 	if len(providers) == 0 && (!route.ModelRewriting || len(release.Snapshot.CodeProviders(route, ingress.path, transport)) == 0) {
@@ -210,6 +214,9 @@ func (a *codeAttempt) finish(ctx context.Context) {
 	if err != nil {
 		a.server.log.Warn("code accounting unavailable", "attempt_id", a.permit.Attempt.ID)
 	}
+	if a.paid != nil {
+		a.finishPaid(ctx)
+	}
 	settleKey(ctx, a.lease, a.dispatched, a.usage.Total, a.server.log)
 	settleKey(ctx, a.providerLease, a.dispatched, a.usage.Total, a.server.log)
 }
@@ -251,6 +258,9 @@ func codeUnavailableClose(err error) bool {
 }
 
 func (a *codeAttempt) observeAllowance(ctx context.Context, allowance codemode.Allowance) {
+	if a.paid != nil {
+		return
+	}
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
 	defer cancel()
 	_ = a.server.CodeLedger.ObserveAllowance(ctx, a.permit.Account.ID, allowance)
@@ -261,12 +271,18 @@ func (a *codeAttempt) health(ctx context.Context, status string) {
 }
 
 func (a *codeAttempt) observeHealth(ctx context.Context, observation codemode.HealthObservation) {
+	if a.paid != nil {
+		return
+	}
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
 	defer cancel()
 	_ = a.server.CodeLedger.ObserveHealth(ctx, a.permit.Account.ID, observation)
 }
 
 func (a *codeAttempt) response(ctx context.Context, status int, headers http.Header) {
+	if a.paid != nil {
+		a.paid.status = status
+	}
 	outcome := codemode.Outcome{Origin: "upstream", Kind: "headers", UpstreamStatus: &status}
 	if status >= 400 {
 		outcome.Kind = "rejected"
