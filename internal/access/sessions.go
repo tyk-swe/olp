@@ -378,11 +378,11 @@ func validatePurpose(purpose, resource string) error {
 		if resource == "" {
 			return nil
 		}
-	case "oidc_unlink", "saml_unlink":
+	case "oidc_unlink", "saml_unlink", "agent_delegation":
 		_, err := ParseUUID(resource)
 		return err
 	}
-	return Invalid("purpose", "Use password_enrollment, oidc_link, plugin_permit, mfa_manage, or oidc_unlink with its identity ID.")
+	return Invalid("purpose", "Use a supported security purpose and its required resource ID.")
 }
 func (s *Server) reauthenticate(r *http.Request, p Principal) (Reply, error) {
 	var err error

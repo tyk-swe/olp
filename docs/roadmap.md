@@ -22,7 +22,7 @@ are stable identifiers; independent work can proceed in parallel.
 | Retained APIs and retrieval | Implemented RM5; service and live qualification tracked separately | Implemented RM4 foundations and each family's ownership and pricing contracts |
 | Protocol and provider expansion | RM6.1–RM6.6, independently by transport | Implemented RM4 foundations and each transport's control and accounting contracts |
 | Consumer MCP | Implemented RM7; live provider and tenant qualification tracked separately | Implemented RM4 accounting and agent contracts, plus existing tool governance |
-| Agent workflows | RM8.1 tool loops and RM8.2 prompt rendering | Implemented RM7.1 direct execution |
+| Agent workflows | RM8.1 tool loops | Implemented RM7.1 direct execution and RM8.2 prompt rendering |
 | Cloud invoice imports | RM9.1 import contracts, then each cloud adapter | Existing importer and reconciliation machinery |
 
 The [architecture map](develop/architecture.md#contracts-and-feature-ownership)
@@ -41,7 +41,7 @@ identifies implementation boundaries and owners.
 | [RM5: Retained APIs and retrieval](#rm5-retained-apis-and-retrieval) | Done | Fine-tuning, vector stores, retrieval and retained resource families |
 | [RM6: Protocol and provider expansion](#rm6-protocol-and-provider-expansion) | Done | Additional OCR/search transports, realtime profiles and pass-through |
 | [RM7: Consumer MCP](#rm7-consumer-mcp) | Done | Direct execution, per-user grants, HTTP+SSE and stdio |
-| [RM8: Agent workflows](#rm8-agent-workflows) | Planned | Tool loops, prompts, delegation, A2A, traces and operator views |
+| [RM8: Agent workflows](#rm8-agent-workflows) | Implemented | Tool loops, prompts, delegation, A2A, traces and operator views |
 | [RM9: Cloud invoice imports](#rm9-cloud-invoice-imports) | Planned | AWS CUR, Google billing and Azure Cost Management imports |
 
 ### RM1: Existing gateway
@@ -231,31 +231,42 @@ and identity-tenant qualification remains separate from the fixture evidence.
 
 ### RM8: Agent workflows
 
-**Status: Planned.** **Owners:** agent and access maintainers, with protocol,
-prompt, observability and console owners. **Dependencies:** RM7.1 for tool loops
-and prompts; the relevant MCP transport/auth implementation for delegation and
-A2A. Retrieval-backed tools also use their selected RM5 backend.
+**Status: Implemented.** **Owners:** agent and access maintainers, with protocol,
+prompt, observability and console owners. **Dependencies:** RM7.1 for tool loops;
+existing prompt publications and input/output guardrails for prompt rendering.
+Inference delegation uses workload identity and has no MCP dependency. Static-credential
+A2A can begin independently. A2A OAuth uses RM7.2, tool callbacks use RM7.1, and
+delegated tasks use RM8.3. Retrieval-backed tools
+also use their selected RM5 backend.
 
-- [ ] **RM8.1 — Bounded tool loops:** implement OpenAI, Anthropic and Gemini
-  dialects plus Responses projections, iteration/time/concurrency/cost bounds,
-  per-step accounting, approvals, digest-bound continuation, revocation and
-  durable handling of cancellation, restart and unknown effects. Include
-  `typesafe` ordered tool-exchange pruning and compression recovery/tool
-  reinjection from the guardrail inventory.
-- [ ] **RM8.2 — Prompt publication and rendering:** implement immutable
-  revisions, labels and bounded string substitution across API, playground
-  and import, with fixed in-flight revisions, variable handling, input guards
-  and content-free persistence.
-- [ ] **RM8.3 — Delegated identities:** extend workload issuers and implement
-  consent, scoped tokens, intersected rights, user/agent/pair budgets, expiry,
-  renewal and either-principal revocation.
-- [ ] **RM8.4 — A2A workflows:** implement the declared protocol adapters,
-  owner-bound tasks, authenticated callbacks, send/stream/read/cancel/
-  resubscribe operations, callback accounting and kill-switch behavior.
-  Preserve unresolved remote effects; delegated cases use RM8.3.
-- [ ] **RM8.5 — Traces and operator views:** implement bounded OTLP ingestion,
-  scoped trace links, origin-labelled exports and accessible operator views,
-  with content stripping, project isolation and retention controls.
+- [x] **RM8.1 — Bounded tool loops:** OpenAI, Anthropic and Gemini dialects and
+  Responses projections use bounded, accounted runs with approvals,
+  digest-bound continuation and revocation. Local fixtures cover cancellation,
+  restart, unknown effects, `typesafe` tool-exchange pruning, compression
+  recovery and tool reinjection. [Compatibility evidence](use/compatibility.md#gateway-executed-tool-workflows)
+  includes discovery, simulation and rollback.
+- [x] **RM8.2 — Prompt publication and rendering:** immutable revisions, labels
+  and bounded string substitution share a rendering path across inference,
+  playground and imported configuration. Local fixtures cover fixed revisions,
+  variable refusals, input guards and content-free persistence. A packaged
+  console journey covers publishing, label movement and accessibility.
+- [x] **RM8.3 — Delegated identities:** workload agents use consent and scoped,
+  single-use credentials with intersected inference and tool rights, budgets,
+  renewal and either-principal revocation. Signed tool calls and accounting are
+  fixture-qualified.
+- [x] **RM8.4 — A2A workflows:** pinned protocol adapters, owner-bound and
+  delegated tasks, authenticated callbacks, send/stream/read/cancel/resubscribe,
+  accounting and revocation are covered by local reference fixtures. Unresolved
+  remote effects remain visible.
+- [x] **RM8.5 — Traces and operator views:** bounded OTLP ingestion, scoped
+  trace links, origin-labelled exports and accessible operator views have local
+  fixture coverage for content stripping, project isolation and retention.
+  - [x] Save project-scoped investigations with typed filters, up to 100
+    evidence references and an operator-authored summary. The
+    [HTTP regressions](../tests/integration/investigations_test.go) and
+    [run workflow](../tests/integration/gateway_test.go) cover validation and
+    revoked access; the [console journey](../console/tests/journeys/run-inspection.ts)
+    covers the packaged workflow and accessibility.
 
 RM8.5 builds on the RM8.1–RM8.4 workflow contracts and existing observability
 exports.

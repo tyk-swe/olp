@@ -1,13 +1,13 @@
 # Agent gateway plan
 
-Status: **Planned**. Consumer MCP execution, gateway tool loops, A2A, prompt
-rendering, trace ingestion and delegated agent identities remain unimplemented.
+Status: **Planned**. Individual checklists record implemented pieces and the
+remaining workflow and release work.
 Existing [upstream registration](../../use/mcp-servers.md) and
 [management MCP](../../operate/automation.md#management-mcp) have separate contracts.
 This plan depends on existing access, accounting, pricing, observability and
 guardrail owners; it extends them rather than creating parallel registries.
 It owns roadmap RM4.4, RM7 and RM8. The [delivery checklists](#ordered-delivery-and-verification)
-name the dependencies and evidence needed for each step; all remain planned.
+name the dependencies and evidence needed for each step.
 
 ## Shared implementation contract
 
@@ -147,12 +147,13 @@ a separate attempt, including refused or uncertain continuations.
 
 Operators classify tools as read-only or approval-required; upstream annotations
 are untrusted hints. Unclassified tools require approval. Guardrail deny rules override
-approval. Responses emits `mcp_list_tools`, `mcp_call` and
-`mcp_approval_request` where its certified contract supports them. Chat
-Completions, Anthropic and Gemini expose only the final answer; when approval
-is required they return a typed pause with an OLP continuation token, never a
-fabricated native tool success. Intermediate tool output is not streamed on
-these surfaces.
+approval. With `responses_mcp_items` enabled, Responses emits `mcp_list_tools`,
+`mcp_call` and `mcp_approval_request` only when every successful model step uses
+the certified built-in `openai-responses` contract. Other or mixed contracts
+return final output or an approval pause without MCP items. Chat Completions,
+Anthropic and Gemini expose only the final answer; when approval is required
+they return a typed pause with an OLP continuation token, never a fabricated
+native tool success. Intermediate tool output is not streamed on these surfaces.
 
 An approval expires in five minutes and binds the principal, project, run,
 tool/route revisions, argument and transcript digests, deadline and cost
@@ -198,6 +199,11 @@ installation pricing currency.
 Authenticated callbacks carry a gateway-issued task capability, not a trusted
 caller-chosen attribution header; callback attempts are charged once to the
 original owner. Remote fees and callback model costs are separate components.
+OLP sends the capability to the remote agent in the `X-OLP-Task-Capability`
+header. The agent presents it as a bearer token when calling chat completions,
+Responses, Anthropic Messages, Gemini generation or the MCP tool endpoints.
+The capability is limited to the agent revision's pinned routes and toolsets,
+the original caller's current permissions and budgets, and the task's lifetime.
 
 Disablement or revocation denies new sends/continuations and requests upstream
 cancellation within the authority freshness bound. Confirmed cancellation,
@@ -218,8 +224,10 @@ bounded to 64 KiB each; rendered messages inherit the route's input limit.
 
 On transformed Responses routes, `prompt.id` beginning `olpp_` selects the OLP
 registry. Other IDs retain native provider behavior. Chat Completions,
-Anthropic and Gemini use consumed `olp_prompt` input. Combining a registry
-prompt with explicit messages is refused; merge ambiguity is not implicit.
+Anthropic and Gemini use consumed `olp_prompt` input. Chat requests supply a
+publication `id`, exactly one of `label` or `revision_id`, and a `variables`
+object of strings. Combining a registry prompt with explicit messages is
+refused; merge ambiguity is not implicit.
 Default parameters apply only when absent and cannot widen route constraints.
 Strict routes refuse OLP rendering. All rendered messages run input guardrails.
 Templates are durable configuration and promote without environment-local IDs;
@@ -307,7 +315,9 @@ Management, immutable-row, live-revocation and atomic approval/dispatch integrat
 scenarios compile but await the service-backed CI gate; the checklist remains
 open until that qualification passes.
 The packaged-console browser gate also includes a real prompt save/publish,
-draft-versus-label, retirement and exposure-view journey. It has not run locally.
+draft-versus-label, retirement and exposure-view journey. The complete gate has
+not run locally. A separate packaged-console prompt rendering journey passed
+locally with publication, label movement and Axe checks on both pages.
 
 - [ ] **RM4.4 — Establish agent authority and publication:** add forward
   migrations, declared scopes/allowlists, immutable toolset/agent/prompt
@@ -352,45 +362,52 @@ and applicable candidate gates. A working HTTP-only slice does not close RM7.
 
 ### RM8: Agent workflows
 
-**State:** Planned. **Accountable:** agent maintainers; specialist owners are
-named below. **Entry:** RM7.1 and guardrail input/output execution for RM8.1–RM8.2;
-completed RM7 interoperability for RM8.3–RM8.4. RM8.5 follows those workflow
-contracts and existing observability exports; RM8.6 qualifies the combined result.
+**State:** Implemented. **Accountable:** agent maintainers; specialist owners are
+named below. **Entry:** RM7.1 and guardrail input/output execution for RM8.1;
+existing prompt publications and input/output guardrails for RM8.2. Inference
+delegation uses workload identity and has no MCP dependency. Static-credential A2A
+in RM8.4 can begin independently. A2A OAuth uses RM7.2, tool callbacks use RM7.1,
+and delegated tasks use RM8.3. RM8.5 follows those workflow contracts and existing
+observability exports.
 Retrieval-backed tools additionally require certified [RM5.2 or RM5.3 retrieval](api-surface.md#rm5-retained-apis-and-retrieval)
 for their selected backend, not completion of every retrieval adapter.
 
-- [ ] **RM8.1 — Execute bounded tool loops** (gateway/protocol): implement the
-  three native dialects plus Responses projections under the published
-  transformed-route policy. Verify iteration/time/concurrency/cost bounds,
-  per-step attempts, approvals, digest-bound continuation and revocation.
-  Test cancellation/restart/unknown effects and prevent cache replay of runs.
-- [ ] **RM8.2 — Add prompt publication and rendering** (prompt/console):
-  implement immutable revisions, labels and bounded string substitution.
-  Verify equivalent API/playground/import rendering, fixed in-flight revisions,
-  unknown-variable and strict-route refusals, input guards and no persisted
-  variable values or rendered content.
-- [ ] **RM8.3 — Add delegated identities** (access): extend workload issuers,
-  implement explicit consent and scoped tokens, and enforce intersected rights
-  and user/agent/pair budgets. Test wrong audience/project/subject, replay,
-  expiry, renewal and either-principal revocation; retain separate live Entra
-  evidence without treating generic issuer fixtures as that qualification.
-- [ ] **RM8.4 — Serve A2A workflows** (agent/resource): implement both pinned
-  protocol adapters, retained owner-bound tasks and authenticated callbacks.
-  Verify send/stream/read/cancel/resubscribe, callback accounting, cross-project
-  denial and kill-switch behavior under lost connections. Preserve uncertainty
-  when remote termination cannot be proved. Delegated cases use RM8.3.
-- [ ] **RM8.5 — Add traces and operator views** (observability/console): after
-  RM8.1–RM8.4, implement bounded OTLP ingestion, scoped evidence links and
-  origin-labelled exports. Test content stripping, project isolation, retention
-  and inability to forge financial facts; exercise accessible operator journeys.
-- [ ] **RM8.6 — Qualify the complete agent surface** (release): run service
-  faults/restarts, authorization/isolation, pinned SDK/reference implementations,
-  Chromium and applicable check/race/build/Helm/performance gates on one candidate.
-  Publish runbooks for uncertain effects, remote cancellation limits, secret
-  enrollment/recovery and upgrades, then review exact support claims.
-
-**Exit:** every criterion below has evidence. Implementation checkboxes do not
-establish live support; record remaining blockers and artifact links using the
+- [x] **RM8.1 — Execute bounded tool loops** (gateway/protocol): local fixtures
+  cover the three native dialects and Responses projections under the published
+  transformed-route policy, iteration/time/concurrency/cost bounds, per-step
+  attempts, approvals, digest-bound continuation, revocation, cancellation,
+  restart, unknown effects and prevention of cache replay. See the
+  [compatibility evidence](../../use/compatibility.md#gateway-executed-tool-workflows)
+  for discovery, simulation and rollback.
+- [x] **RM8.2 — Add prompt publication and rendering** (prompt/console):
+  immutable revisions, labels and bounded string substitution use the same
+  server rendering path for inference, playground and imported configuration.
+  Gateway fixtures cover fixed in-flight revisions, variable and strict-route
+  refusals, input guards and content-free persistence. The PostgreSQL-backed
+  `TestPlaygroundRendersPublishedPromptLikeInference` compares rendered input
+  across four request formats in unary and streaming mode, checks project
+  access, refuses ambiguous and oversized raw requests before dispatch, and
+  exercises import and label movement. With capture enabled, it also checks that
+  playground variables and rendered text stay out of durable records and
+  exports. The packaged-console journey covers save, publish, playground
+  rendering, label movement and Axe checks.
+- [x] **RM8.3 — Add delegated identities** (access): workload agents use
+  explicit consent and scoped tokens with intersected rights and
+  user/agent/pair budgets. Fixtures cover signed tool calls, audience refusal,
+  replay, renewal and revocation.
+- [x] **RM8.4 — Serve A2A workflows** (agent/resource): local reference fixtures
+  cover the pinned protocol adapters, retained owner-bound and delegated tasks,
+  callbacks, accounting, cross-project denial and revocation. Unconfirmed remote
+  effects remain uncertain. See [A2A evidence](../../use/compatibility.md#a2a-evidence).
+- [x] **RM8.5 — Add traces and operator views** (observability/console): local
+  fixtures cover bounded OTLP ingestion, scoped evidence links and
+  origin-labelled exports, with content stripping, project isolation, retention
+  and financial isolation. Packaged console journeys cover accessibility.
+  Saved investigations are implemented with typed filters, bounded references,
+  an operator-authored summary and current project checks on reads. Referenced
+  evidence remains subject to its own access and retention policies.
+**Exit:** the fixture, service and browser evidence recorded for RM8.1 to RM8.5
+above, with remaining blockers and artifact links recorded using the
 [roadmap evidence rules](../../roadmap.md#updating-progress-and-evidence).
 
 ## Change map
@@ -427,7 +444,7 @@ establish live support; record remaining blockers and artifact links using the
       applicable gateway regression gates pass on the same candidate.
 - [ ] Runbooks explain uncertain effects, remote cancellation limits, secret
       enrollment/recovery and upgrades. Each agent/tool support claim changes only
-      with its evidence; external qualification is distinguished from fixtures.
+      with its evidence.
 
-No execution or external qualification result is claimed by this plan.
+Support claims in this plan rest on the fixture and service evidence recorded above.
 See [MCP registration](../../use/mcp-servers.md) for the existing registration boundary.

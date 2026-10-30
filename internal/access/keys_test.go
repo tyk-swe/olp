@@ -1,11 +1,39 @@
 package access
 
 import (
+	"slices"
 	"testing"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/attribution"
 	"github.com/tyk-swe/olp/internal/limits"
 )
+
+func TestTaskAuthorityKeepsOwnerIdentityAndBindingLimits(t *testing.T) {
+	project, issuer := "project", "issuer"
+	daily := "7"
+	expires := time.Now().Add(time.Hour)
+	policy := Authority{
+		Issuer: "binding", ProjectID: &project,
+		Policy: KeyPolicy{Scopes: []string{"inference"}, AllowedRoutes: []string{"allowed"}, DailyCostLimit: &daily},
+	}
+	owner := Authority{ID: "owner", LookupID: "owner-lookup", LimitLookupID: "owner-limits", WorkloadIssuerID: &issuer, WorkloadDigest: "workload", WorkloadMapping: "mapping"}
+	capability := &TaskCapability{Digest: "capability", RouteRevisions: []string{"revision"}}
+	callback := policy.TaskAuthority(owner, "snapshot", "workload-revision", &expires, "end-user", capability)
+	if !callback.Allows("inference", "allowed", &project, time.Now()) || callback.Allows("inference", "other", &project, time.Now()) {
+		t.Fatal("task authority did not retain the binding's route policy")
+	}
+	debit := callback.KeyDebitRequest(time.Minute)
+	if debit.CostOwnerID != owner.ID || debit.LookupID != owner.LimitLookupID || debit.DailyCostLimit == nil || *debit.DailyCostLimit != daily {
+		t.Fatalf("task debit did not retain owner and budget boundaries: %+v", debit)
+	}
+	if callback.SnapshotID != "snapshot" || callback.WorkloadIssuerID == nil || *callback.WorkloadIssuerID != issuer || callback.WorkloadRevision != "workload-revision" || callback.WorkloadDigest != owner.WorkloadDigest || callback.WorkloadMapping != owner.WorkloadMapping || callback.EndUserDigest != "end-user" || callback.TaskCapability != capability || callback.ExpiresAt == nil || !callback.ExpiresAt.Equal(expires) {
+		t.Fatalf("task identity or lifetime was not retained: %+v", callback)
+	}
+	if policy.TaskCapability != nil || policy.EndUserDigest != "" || policy.ID != "" {
+		t.Fatal("constructing a task authority changed the source binding")
+	}
+}
 
 func TestKeyDebitRequestCarriesKeyBudgetsAndStableLookup(t *testing.T) {
 	daily, weekly, monthly := "1", "2", "3"
@@ -127,5 +155,52 @@ func TestToolDebitBoundariesUncappedKeyHasNoCeiling(t *testing.T) {
 	authority.OrganizationBudget = &BudgetPolicy{DailyCostLimit: &limited}
 	if authority.ToolDebitBoundaries(time.Hour).Resolved {
 		t.Fatal("aggregate boundary without a subject resolved")
+	}
+}
+
+func TestDelegatedToolDebitEnforcesAgentPairAndAttributionBudgets(t *testing.T) {
+	project, pair := "0192cf87-d4ab-7f2e-a8b1-c2d3e4f50601", "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+	agentDaily, pairWeekly, teamMonthly := "3", "4", "5"
+	agentID, keyID := "0192cf87-d4ab-7f2e-a8b1-c2d3e4f50602", "0192cf87-d4ab-7f2e-a8b1-c2d3e4f50603"
+	authority := Authority{
+		ID: keyID, ProjectID: &project, Attribution: map[string]string{"team": "core"}, DelegationPairDigest: pair,
+		DelegationAgentLimits: &DelegationAgentLimits{ID: agentID, LookupID: "agent", Limits: AdmissionLimits{DailyCostLimit: &agentDaily}},
+		ProjectAttributionBudgets: AttributionBudgets{
+			attribution.DelegationPairKey: {pair: {WeeklyCostLimit: &pairWeekly}},
+			"team":                        {"core": {MonthlyCostLimit: &teamMonthly}},
+		},
+	}
+	result := authority.ToolDebitBoundaries(time.Minute)
+	if !result.Resolved || !result.CostBudgeted {
+		t.Fatalf("delegated budgets not available: %+v", result)
+	}
+	requests := result.Requests()
+	checks := []struct {
+		owner                  string
+		daily, weekly, monthly *string
+	}{
+		{agentID, &agentDaily, nil, nil},
+		{limits.AttributionBudgetID(project, attribution.DelegationPairKey, pair), nil, &pairWeekly, nil},
+		{limits.AttributionBudgetID(project, "team", "core"), nil, nil, &teamMonthly},
+	}
+	for _, check := range checks {
+		index := slices.IndexFunc(requests, func(request limits.Request) bool { return request.CostOwnerID == check.owner })
+		if index < 0 {
+			t.Fatalf("missing delegated budget owner %s", check.owner)
+		}
+		request := requests[index]
+		equal := func(actual, expected *string) bool {
+			if actual == nil || expected == nil {
+				return actual == nil && expected == nil
+			}
+			return *actual == *expected
+		}
+		if !equal(request.DailyCostLimit, check.daily) || !equal(request.WeeklyCostLimit, check.weekly) || !equal(request.MonthlyCostLimit, check.monthly) {
+			t.Fatalf("wrong limits for owner %s: %+v", check.owner, request)
+		}
+	}
+	uncapped := Authority{ID: keyID, ProjectID: &project, DelegationPairDigest: pair, DelegationAgentLimits: &DelegationAgentLimits{ID: agentID}}
+	if uncapped.ToolDebitBoundaries(time.Minute).CostBudgeted {
+		t.Fatal("tracking an uncapped delegated pair must not create a cost limit")
 	}
 }

@@ -106,7 +106,7 @@ func (s *DebitStore) initializeFreshOwnerTx(ctx context.Context, tx pgx.Tx, owne
 	if w.WeeklyEnd.After(end) {
 		end = w.WeeklyEnd
 	}
-	if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM olp.attempt_usage_facts WHERE `+column+`=$1 AND observed_at>=$2 AND observed_at<$3) OR EXISTS(SELECT 1 FROM olp.attempt_usage_hourly WHERE `+column+`=$1 AND budget_bucket>=$2 AND budget_bucket<$3)`, owner.ID, start, end).Scan(&hasFacts); err != nil {
+	if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM olp.attempt_usage_facts WHERE (`+column+`=$1 OR ($4::boolean AND agent_principal_id=$1)) AND observed_at>=$2 AND observed_at<$3) OR EXISTS(SELECT 1 FROM olp.attempt_usage_hourly WHERE (`+column+`=$1 OR ($4::boolean AND agent_principal_id=$1)) AND budget_bucket>=$2 AND budget_bucket<$3)`, owner.ID, start, end, owner.Kind == "key").Scan(&hasFacts); err != nil {
 		return err
 	}
 	if hasFacts {

@@ -48,7 +48,7 @@ func (s *Store) Poll(ctx context.Context, id, member string) (Authorization, err
 	if commitErr := tx.Commit(ctx); commitErr != nil {
 		return Authorization{}, commitErr
 	}
-	client, clientErr := s.oauthClient(ctx, item.Binding, "")
+	client, clientErr := s.oauthClient(ctx, item.Binding, "", "")
 	if clientErr != nil {
 		return Authorization{}, clientErr
 	}

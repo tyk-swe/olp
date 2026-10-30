@@ -12,7 +12,11 @@ export type RecentAuthenticationCallback = {
   // unconfined plugin, which the Plugins page continues.
   purpose: Exclude<
     RecentAuthenticationPurpose,
-    'plugin_permit' | 'mfa_manage' | 'saml_link' | 'saml_unlink'
+    | 'plugin_permit'
+    | 'mfa_manage'
+    | 'saml_link'
+    | 'saml_unlink'
+    | 'agent_delegation'
   >;
   resourceId?: string;
 };

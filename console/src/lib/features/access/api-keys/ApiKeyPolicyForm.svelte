@@ -1,4 +1,5 @@
 <script lang="ts">
+  import RunLimits from '$lib/features/workflows/RunLimits.svelte';
   import { currentBudgetLimit } from './budgetPresentation';
   import RouteLimitFields from '../route-limits/RouteLimitFields.svelte';
   import { routeLimitsError } from '../route-limits/policy';
@@ -645,6 +646,12 @@
         >
       </div>
     </div>
+    <RunLimits
+      prefix="key-run"
+      value={form.runLimits}
+      disabled={!canManage}
+      onChange={(value) => (form.runLimits = value)}
+    />
   </section>
   <section aria-labelledby="budget-heading">
     <p class="eyebrow">Spend controls</p>

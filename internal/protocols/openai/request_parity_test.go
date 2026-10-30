@@ -1,6 +1,7 @@
 package openai
 
 import (
+	"errors"
 	"reflect"
 	"testing"
 
@@ -8,6 +9,48 @@ import (
 
 	"github.com/tyk-swe/olp/internal/oif"
 )
+
+func TestParseSourceAndDocumentValidateOpenAIRequests(t *testing.T) {
+	for _, raw := range []string{"", "null", "[]", `{"model":`, `{"model":"route"} {}`} {
+		t.Run(raw, func(t *testing.T) {
+			_, err := ParseSource([]byte(raw))
+			requestError, isRequestError := errors.AsType[*wire.RequestError](err)
+			if !isRequestError || requestError.Code != "invalid_json" {
+				t.Fatalf("invalid request object was not refused: %v", err)
+			}
+		})
+	}
+	for _, tc := range []struct {
+		name   string
+		family wire.Format
+		body   string
+	}{
+		{"chat", wire.Chat, `{"model":"assistant","messages":[{"role":"user","content":"hi"}],"stream":true}`},
+		{"responses", wire.Responses, `{"model":"assistant","input":"hello"}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			doc, parseErr := ParseSource([]byte(tc.body))
+			if parseErr != nil {
+				t.Fatal(parseErr)
+			}
+			parsed, validationErr := ParseDocument(tc.family, doc)
+			if validationErr != nil {
+				t.Fatal(validationErr)
+			}
+			direct, directErr := Parse(tc.family, []byte(tc.body))
+			if directErr != nil || parsed.Route != "assistant" || parsed.Route != direct.Route || parsed.Stream != direct.Stream {
+				t.Fatalf("request changed between supported parsing paths: %+v %+v %v", parsed, direct, directErr)
+			}
+		})
+	}
+	doc, err := ParseSource([]byte(`{"model":"assistant"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ParseDocument(wire.Chat, doc); err == nil {
+		t.Fatal("chat request without messages was accepted")
+	}
+}
 
 // validateFields reads the conversation of a request from its parsed document
 // when it has one and from the copies in fields when it has not, which is what a

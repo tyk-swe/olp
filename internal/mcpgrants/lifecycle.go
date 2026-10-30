@@ -77,7 +77,7 @@ func (s *Store) Authorize(ctx context.Context, id, member string, flow Flow, red
 	if _, bindingErr := liveBinding(ctx, tx, item.Binding); bindingErr != nil {
 		return Authorization{}, bindingErr
 	}
-	client, clientErr := s.oauthClient(ctx, item.Binding, redirect)
+	client, clientErr := s.oauthClient(ctx, item.Binding, redirect, "")
 	if clientErr != nil {
 		return Authorization{}, clientErr
 	}
@@ -204,7 +204,7 @@ func (s *Store) Complete(ctx context.Context, id, member, code, state string) (A
 	if commitErr := tx.Commit(ctx); commitErr != nil {
 		return Authorization{}, commitErr
 	}
-	client, clientErr := s.oauthClient(ctx, item.Binding, session.Redirect)
+	client, clientErr := s.oauthClient(ctx, item.Binding, session.Redirect, "")
 	if clientErr != nil {
 		return Authorization{}, clientErr
 	}
@@ -248,14 +248,14 @@ func (s *Store) completeGrant(ctx context.Context, item flowRecord, attempt stri
 		return ErrRequired
 	}
 	accessID := access.NewID()
-	if err := s.Keys.Store(record, tx, s.Installation, accessID, secrets.MCPGrantAccess, []byte(token.AccessToken), nil); err != nil {
+	if err := s.Keys.Store(record, tx, s.Installation, accessID, item.Binding.accessPurpose(), []byte(token.AccessToken), nil); err != nil {
 		return err
 	}
-	refreshID, refreshErr := s.storeRefresh(record, tx, token.RefreshToken)
+	refreshID, refreshErr := s.storeRefresh(record, tx, item.Binding, token.RefreshToken)
 	if refreshErr != nil {
 		return refreshErr
 	}
-	_, insertErr := tx.Exec(record, `INSERT INTO olp.mcp_user_grants(id,enrollment_id,server_id,project_id,binding,binding_digest,member_id,access_secret_id,refresh_secret_id,expires_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) ON CONFLICT(binding_digest) DO UPDATE SET id=excluded.id,enrollment_id=excluded.enrollment_id,member_id=excluded.member_id,access_secret_id=excluded.access_secret_id,refresh_secret_id=excluded.refresh_secret_id,expires_at=excluded.expires_at,revoked_at=NULL,refresh_attempt_id=NULL,failure_code=NULL`, access.NewID(), item.ID, item.Binding.ServerID, item.Binding.ProjectID, item.Binding, item.Binding.Digest(), item.ClaimedBy, accessID, refreshID, token.Expiry)
+	_, insertErr := tx.Exec(record, `INSERT INTO olp.mcp_user_grants(id,enrollment_id,server_id,agent_id,project_id,binding,binding_digest,member_id,access_secret_id,refresh_secret_id,expires_at) VALUES($1,$2,NULLIF($3,'')::uuid,NULLIF($4,'')::uuid,$5,$6,$7,$8,$9,$10,$11) ON CONFLICT(binding_digest) DO UPDATE SET id=excluded.id,enrollment_id=excluded.enrollment_id,member_id=excluded.member_id,access_secret_id=excluded.access_secret_id,refresh_secret_id=excluded.refresh_secret_id,expires_at=excluded.expires_at,revoked_at=NULL,refresh_attempt_id=NULL,failure_code=NULL`, access.NewID(), item.ID, item.Binding.ServerID, item.Binding.AgentID, item.Binding.ProjectID, item.Binding, item.Binding.Digest(), item.ClaimedBy, accessID, refreshID, token.Expiry)
 	if insertErr != nil {
 		return insertErr
 	}
@@ -270,12 +270,12 @@ func (s *Store) completeGrant(ctx context.Context, item flowRecord, attempt stri
 	return tx.Commit(record)
 }
 
-func (s *Store) storeRefresh(ctx context.Context, tx pgx.Tx, token string) (*string, error) {
+func (s *Store) storeRefresh(ctx context.Context, tx pgx.Tx, binding Binding, token string) (*string, error) {
 	if token == "" {
 		return nil, nil
 	}
 	id := access.NewID()
-	if err := s.Keys.Store(ctx, tx, s.Installation, id, secrets.MCPGrantRefresh, []byte(token), nil); err != nil {
+	if err := s.Keys.Store(ctx, tx, s.Installation, id, binding.refreshPurpose(), []byte(token), nil); err != nil {
 		return nil, err
 	}
 	return &id, nil

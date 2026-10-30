@@ -140,6 +140,7 @@ func (s *Server) runShadow(parent *call, attempt routing.Attempt) {
 			startedAt: s.now(),
 			release:   parent.request.release,
 		},
+		prompt:  parent.prompt,
 		family:  parent.family,
 		ingress: parent.ingress,
 

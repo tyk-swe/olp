@@ -33,13 +33,29 @@ func Parse(family wire.Format, data []byte) (*wire.Request, error) {
 }
 
 func ParseForModel(family wire.Format, data []byte, model string) (*wire.Request, error) {
+	doc, err := ParseSource(data)
+	if err != nil {
+		return nil, err
+	}
+	return ParseDocumentForModel(family, doc, model)
+}
+
+func ParseSource(data []byte) (oif.Document, error) {
 	if trimmed := bytes.TrimSpace(data); len(trimmed) == 0 || trimmed[0] != '{' {
-		return nil, &wire.RequestError{Code: "invalid_json", Message: "The request body must be one JSON object."}
+		return oif.Document{}, &wire.RequestError{Code: "invalid_json", Message: "The request body must be one JSON object."}
 	}
 	doc, err := oif.ParseJSON(data, oif.Limits{})
 	if err != nil {
-		return nil, &wire.RequestError{Code: "invalid_json", Message: "The request body must be one JSON object."}
+		return oif.Document{}, &wire.RequestError{Code: "invalid_json", Message: "The request body must be one JSON object."}
 	}
+	return doc, nil
+}
+
+func ParseDocument(family wire.Format, doc oif.Document) (*wire.Request, error) {
+	return ParseDocumentForModel(family, doc, "")
+}
+
+func ParseDocumentForModel(family wire.Format, doc oif.Document, model string) (*wire.Request, error) {
 	return parseDocument(family, doc, model)
 }
 

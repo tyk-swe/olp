@@ -16,6 +16,120 @@ The [gateway](../develop/architecture.md) applies shared admission and response 
 surfaces. Current protocol, connector, SDK, and media tests are described in
 [tests/README.md](../../tests/README.md).
 
+## Published prompt compatibility
+
+Prompts have project-scoped drafts, immutable published revisions and
+`production` and `staging` labels. A request selects one label or exact
+revision for a prompt in the route's project. The gateway resolves the label
+once, substitutes declared string variables in `{{name}}` placeholders and
+applies the route's input limit and input guardrails to the rendered messages.
+Unknown or missing required variables are refused before dispatch. Strict routes
+do not support registry prompt rendering.
+
+Chat Completions, Anthropic Messages and Gemini generation accept an
+`olp_prompt` object in place of explicit messages:
+
+```json
+{"olp_prompt":{"id":"PROMPT_ID","label":"production","variables":{"name":"Ada"}}}
+```
+
+Responses uses the same selection inside `prompt`, with `id` prefixed by
+`olpp_`. Other Responses prompt IDs retain their provider behavior. An exact
+`revision_id` can be used instead of `label` on either form. The console
+playground and inference render on the server using the same published
+revision, including after configuration export and import. Variable values and
+rendered messages are transient rather than configuration data.
+
+Local gateway fixtures cover all four request formats in unary and streaming
+mode, and the packaged-console journey covers publication, label movement and
+accessible playground rendering.
+
+## Saved investigations
+
+The management API and console save project-scoped investigations with time,
+run, duration, error and tool filters, an operator-authored summary and up to
+100 references to run, step, approval, span, task or delegation evidence. The
+record contains no source payloads. Reading an investigation requires current
+project access; opening referenced evidence requires its own current access
+check. Retained step and span links identify the referenced record, including
+spans beyond the first page. Evidence follows its own retention policy and can
+expire before the investigation. The local HTTP regression and packaged-console
+journey exercise these boundaries.
+
+## Agent workflow evidence exports
+
+Observability and managed sinks can export `runs` and `trace_spans` for
+project-scoped or installation-wide configurations. Gateway-created runs carry
+`evidence_origin` set to `gateway_observed`. Ingested spans carry
+`evidence_origin` set to `client_asserted`, even if a client supplies a
+different value. Gateway request and attempt spans set the
+`olp.evidence_origin` attribute to `gateway_observed`. The existing request
+`origin` continues to describe the invocation source.
+
+Span exports retain the nullable `parent_span_id` as a hexadecimal identifier.
+The management [OpenAPI contract](../../openapi/management.json) describes
+the observability and managed `runs` and `trace_spans` webhook envelopes.
+
+Run and span exports contain metadata only. They do not include prompt, tool,
+message or artifact contents, and they do not change billing. Before delivery,
+the sink creator must still have access to the source project and the source
+must remain within request-history retention. These checks apply independently
+to each record sent through an installation-wide sink. Local gateway and export
+fixtures exercise origin, privacy, project isolation and retention.
+
+## Gateway-executed tool workflows
+
+On transformed routes with `tool_execution: gateway`, Chat Completions,
+Responses, Anthropic Messages and Gemini generation can execute published
+MCP tools as part of a bounded run. Only targets certified for model-emitted
+tool calls on the request surface and mode are eligible. The caller can narrow
+the route's toolsets with `olp_toolsets` and tighten its bounds with
+`olp_run_limits`. Read-only tools can execute without approval; other tools
+require approval. See [agent workflows](../develop/plans/agent-gateway.md#gateway-executed-tools)
+for the bounds, approval and accounting behavior.
+
+Model list and detail responses on the OpenAI, Anthropic and Gemini surfaces
+include `capabilities.gateway_execution` when the route and calling key permit
+inspection. It reports surface-specific certified modes for non-shadow targets,
+workflow accounting availability, the effective route and key limits, whether
+all default toolsets are usable together, and the
+caller's available tools with pinned revisions, classifications and unit prices.
+A null price is unpriced; zero is explicitly free. The capability describes
+current configuration and does not reserve a run or guarantee admission.
+
+To inspect a particular request, select the same API key in the published route
+or draft route simulation and supply the native request, including any narrowed
+toolsets and bounds. The simulation capability reports the effective request
+bounds and caller-authorized tools and prices; target decisions report workflow
+refusals alongside normal routing decisions. Delegated route legs use the named
+route's toolsets and bounds and their own serving targets. Simulation does not
+dispatch a model or tool, reserve budget, or guarantee live admission.
+
+The local gateway fixtures exercise unary and streaming workflows for Chat
+Completions, Responses, Anthropic and Gemini, including bounds, target
+certification, approval, authority changes, `typesafe` pruning and compression
+recovery. The caller-filtered discovery fixture is
+`TestGatewayWorkflowDiscoveryRespectsCallerAuthority`. The tests live in
+[`internal/gateway/tool_loop_test.go`](../../internal/gateway/tool_loop_test.go).
+`TestGatewayToolWorkflowSettlesOneRun` in
+[`tests/integration/gateway_test.go`](../../tests/integration/gateway_test.go)
+checks same-key simulation authorization and request bounds for draft and
+published routes, a run and its durable settlement, and rollback with local
+services.
+To stop new gateway execution, republish the transformed route without
+`tool_execution`, `toolsets`, `run_limits` and `responses_mcp_items`. The
+fixture verifies that pending approvals cannot resume, later requests do not
+dispatch gateway tools, caller-managed tool calls still return to the client,
+and authorized project viewers can read the retained run, steps and settlement.
+
+Responses MCP output additionally requires the route's
+`responses_mcp_items` declaration and the certified built-in `openai-responses`
+contract on every successful model step. Other or mixed contracts return the
+final output or an approval pause without MCP items. The pinned official OpenAI
+Go SDK decodes the generated stream in
+`TestGatewayToolExecutionResponsesOfficialSDKDecodesMCPItems`; fixtures also
+cover the final-only fallback for the tested dialect and target combinations.
+
 ## Consumer MCP qualification
 
 Published tools support the JSON call endpoint and Streamable HTTP at MCP
@@ -44,6 +158,12 @@ modern/legacy session isolation and refusal when a replica lacks the live stream
 Legacy deployments require connection affinity between the SSE GET and its
 POSTs. Modern sessions never fall back to the legacy transport.
 
+`TestWorkloadAgentDelegatesKeyForTools` in
+`tests/integration/workload_identity_test.go` exercises a delegated agent through
+the shared tool path using a local workload issuer and signing fixture. It checks
+the downstream audience-bound agent signature, refusal at another audience,
+one-use credentials, consent, session isolation and shared budget accounting.
+
 Per-user OAuth is qualified separately. Experimental stdio is covered by a
 locally built, owner-permitted executable fixture through the shared consumer
 path. It preserves the unconfined native execution contract and does not provide
@@ -52,6 +172,16 @@ deployment, permission and lifecycle requirements.
 Standalone modern consumer event streams, sampling, elicitation, roots and
 arbitrary resource/prompt calls are not supported by this slice.
 See [MCP server use](mcp-servers.md) for supported calls and rollback behavior.
+
+## A2A evidence
+
+Local reference fixtures cover the pinned A2A 0.3 and 1.0 JSON-RPC adapters.
+`TestWorkloadAgentDelegatesKeyForA2A` in
+`tests/integration/workload_identity_test.go` exercises delegated sends,
+callbacks, caller/agent/pair accounting, consent, renewal, project operator
+access and revocation. `TestA2AOAuthGrantLifecycle` verifies that task actions
+use their original grant and endpoint after publication replacement and refuse
+revoked grants. OLP cannot observe or stop hidden remote iterations.
 
 ## Guardrail compatibility
 

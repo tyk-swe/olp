@@ -175,7 +175,7 @@ build() { # base|head, tree
     # depends only on its offset inside its function, so identical code lands
     # on identical fetch lines, branch-predictor entries and uop-cache sets —
     # inner loops included — whatever text the change adds before it.
-    (cd -- "$tree" && go test -c -vet=off -ldflags=-funcalign=4096 -o "$scratch/bin/$side/${package//\//_}.test" "$package")
+    (cd -- "$tree" && go test -c -vet=off -trimpath -buildvcs=false -ldflags=-funcalign=4096 -o "$scratch/bin/$side/${package//\//_}.test" "$package")
     test_dir[$side/$package]=$dir
   done <<<"$listing"
 }
@@ -192,7 +192,7 @@ measure() { # base|head, output, -bench pattern, packages...
   [[ -z ${BENCH_TIME:-} ]] || flags+=(-test.benchtime "$BENCH_TIME")
   [[ -z $skip ]] || flags+=(-test.skip "$skip")
   for package; do
-    if ! (cd -- "${test_dir[$side/$package]}" && "$scratch/bin/$side/${package//\//_}.test" "${flags[@]}") >"$scratch/stdout" 2>"$scratch/stderr"; then
+    if ! (cd -- "${test_dir[$side/$package]}" && GOFLAGS="${GOFLAGS:+$GOFLAGS }-trimpath -buildvcs=false" "$scratch/bin/$side/${package//\//_}.test" "${flags[@]}") >"$scratch/stdout" 2>"$scratch/stderr"; then
       cat "$scratch/stdout" "$scratch/stderr" >&2
       echo "bench-gate: benchmarks of $package failed at the $side" >&2
       exit 1

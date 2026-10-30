@@ -66,6 +66,9 @@ func (x *call) attemptCostReservation(authority access.Authority, attempt routin
 // included, so the bound is their sum; it is replaced by the cost of what was
 // actually dispatched.
 func (s *Server) costReservation(x *call, authority access.Authority) costReservation {
+	if x.workflow != nil {
+		return costReservation{}
+	}
 	if s.Runtime != nil {
 		if release := s.Runtime.Release(); release != nil {
 			x.currentCommitments = release.Snapshot
@@ -121,6 +124,9 @@ func (s *Server) routeBound(x *call, boundOf func(routing.Attempt) usage.Cost) u
 // reserveFallbackCost covers the remaining route's work alongside the bound
 // already dispatched, even when an earlier attempt could not report its usage.
 func (s *Server) reserveFallbackCost(ctx context.Context, x *call) *Error {
+	if x.workflow != nil {
+		return nil
+	}
 	if s.Runtime != nil {
 		if release := s.Runtime.Release(); release != nil {
 			x.currentCommitments = release.Snapshot
@@ -417,6 +423,10 @@ func (s *Server) settleAdmission(ctx context.Context, x *call) {
 	if x.operationOverride == "guardrail" {
 		actual := x.estimate
 		settleKey(ctx, x.lease, x.dispatched, &actual, s.log)
+		return
+	}
+	if first := x.generation.firstStep; first != nil {
+		settleKey(ctx, x.lease, x.dispatched || x.cacheHit(), x.settledTokensFor(x.facts[:first.factEnd], first.estimate), s.log)
 		return
 	}
 	settleKey(ctx, x.lease, x.dispatched || x.cacheHit(), x.settledTokens(), s.log)

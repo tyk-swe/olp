@@ -2863,6 +2863,37 @@
                   "type": "null"
                 }
               ]
+            },
+            "tool_execution": {
+              "type": "string",
+              "enum": [
+                "",
+                "gateway"
+              ],
+              "description": "When gateway, the gateway executes authorized read-only tools on transformed Chat Completions routes."
+            },
+            "toolsets": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "uniqueItems": true,
+              "description": "Published toolset IDs that gateway execution may use. Callers can select a subset."
+            },
+            "responses_mcp_items": {
+              "type": "boolean",
+              "description": "Operator declaration that Responses clients support gateway-generated MCP output items. Requires gateway tool execution on a transformed route. MCP items are emitted only when the run uses the certified built-in Responses contract; other contracts omit them."
+            },
+            "run_limits": {
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/WorkflowRunLimits"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             }
           },
           "required": [
@@ -3513,6 +3544,40 @@
           ],
           "type": "object"
         },
+        "WorkflowRunLimits": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "max_iterations": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 1,
+              "maximum": 32
+            },
+            "max_tool_calls": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0,
+              "maximum": 128
+            },
+            "max_duration_seconds": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 1,
+              "maximum": 600
+            },
+            "max_concurrent_runs": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 1,
+              "maximum": 2147483647
+            },
+            "max_run_cost": {
+              "type": "string",
+              "pattern": "^[0-9]{1,12}(\\.[0-9]{1,12})?$"
+            }
+          }
+        },
         "ConfigurationOrganizationEntry": {
           "type": "object",
           "additionalProperties": false,
@@ -3719,6 +3784,10 @@
                 "format": "uuid"
               },
               "maxItems": 100
+            },
+            "agent_principal": {
+              "type": "boolean",
+              "description": "Allow this mapping to authenticate an agent principal. Exact subject and client claims are required."
             }
           },
           "description": "Owner-declared permissions, never project or template names chosen freely by the token. A registered subject stays bound to its first matching name/project."
@@ -3930,7 +3999,8 @@
                 "xecguard",
                 "zscaler_ai_guard",
                 "semantic_guard",
-                "decision_model"
+                "decision_model",
+                "typesafe"
               ]
             },
             "policy": {
@@ -3991,7 +4061,9 @@
                   "requests",
                   "attempts",
                   "guardrail_decisions",
-                  "audit"
+                  "audit",
+                  "runs",
+                  "trace_spans"
                 ]
               }
             },
@@ -4449,6 +4521,14 @@
             "alias": {
               "type": "string",
               "pattern": "^t_[a-f0-9]{32}_[a-f0-9]{32}$"
+            },
+            "classification": {
+              "type": "string",
+              "enum": [
+                "read_only",
+                "approval_required"
+              ],
+              "description": "Operator classification of a published tool. Unclassified tools require approval."
             }
           },
           "required": [
@@ -4476,11 +4556,15 @@
             },
             "card_digest": {
               "type": "string",
-              "pattern": "^[a-f0-9]{64}$"
+              "pattern": "^[a-f0-9]{64}$",
+              "description": "SHA-256 digest of the reviewed agent card. An OAuth agent's card must be publicly readable for publication and discovery. Task requests use the caller's grant."
             },
             "credential_id": {
               "type": "string",
               "format": "uuid"
+            },
+            "oauth": {
+              "$ref": "#/$defs/AgentOAuthConfiguration"
             },
             "toolset_revisions": {
               "type": "array",
@@ -4505,6 +4589,28 @@
             "max_cost": {
               "type": "string",
               "pattern": "^[0-9]{1,12}(\\.[0-9]{1,12})?$"
+            },
+            "message_price": {
+              "type": "string",
+              "pattern": "^[0-9]{1,12}(\\.[0-9]{1,12})?$"
+            },
+            "remote_work_bound_seconds": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 3600,
+              "description": "The agent's declared maximum duration for remote work on one task, in seconds. Required for budgeted calls and enforced by the agent."
+            },
+            "max_task_continuations": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 128,
+              "description": "Maximum observed continuations per task. Defaults to 32."
+            },
+            "task_deadline_seconds": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 3600,
+              "description": "Maximum gateway task duration in seconds. Defaults to 600."
             }
           },
           "required": [
@@ -4517,8 +4623,64 @@
             "max_cost"
           ]
         },
+        "AgentOAuthConfiguration": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "client_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "audience": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2048
+            },
+            "scopes": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 32,
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              }
+            },
+            "authorization_endpoint": {
+              "type": "string",
+              "format": "uri",
+              "maxLength": 2048,
+              "description": "Required for browser and device OAuth."
+            },
+            "token_endpoint": {
+              "type": "string",
+              "format": "uri",
+              "maxLength": 2048
+            },
+            "device_authorization_endpoint": {
+              "type": "string",
+              "format": "uri",
+              "maxLength": 2048
+            },
+            "entra_obo": {
+              "$ref": "#/$defs/MCPEntraOBO"
+            }
+          },
+          "required": [
+            "client_id",
+            "audience",
+            "scopes",
+            "token_endpoint"
+          ],
+          "description": "OAuth grants are bound to the approved agent endpoint and caller identity. Browser and device flows use personal enrollment. Entra OBO uses verified workload assertions and a sealed middle-tier client secret."
+        },
         "PromptDefinition": {
           "type": "object",
+          "description": "Use template and variables for a single user message, or messages and variable_schema for a structured prompt.",
           "additionalProperties": false,
           "properties": {
             "template": {
@@ -4526,18 +4688,127 @@
               "maxLength": 65536
             },
             "variables": {
-              "type": "array",
+              "type": [
+                "array",
+                "null"
+              ],
               "items": {
                 "type": "string",
                 "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
               },
               "maxItems": 256
+            },
+            "messages": {
+              "type": "array",
+              "maxItems": 256,
+              "items": {
+                "$ref": "#/$defs/PromptMessage"
+              }
+            },
+            "variable_schema": {
+              "$ref": "#/$defs/PromptVariableSchema"
+            },
+            "default_parameters": {
+              "$ref": "#/$defs/PromptDefaultParameters"
+            }
+          }
+        },
+        "PromptMessage": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "role": {
+              "type": "string",
+              "enum": [
+                "system",
+                "user",
+                "assistant"
+              ]
+            },
+            "content": {
+              "type": "string",
+              "maxLength": 65536
             }
           },
           "required": [
-            "template",
-            "variables"
+            "role",
+            "content"
           ]
+        },
+        "PromptVariableSchema": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "object"
+              ]
+            },
+            "properties": {
+              "type": "object",
+              "additionalProperties": {
+                "$ref": "#/$defs/PromptVariableProperty"
+              }
+            },
+            "required": {
+              "type": "array",
+              "maxItems": 256,
+              "items": {
+                "type": "string",
+                "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
+              },
+              "uniqueItems": true
+            },
+            "additionalProperties": {
+              "type": "boolean",
+              "enum": [
+                false
+              ]
+            }
+          },
+          "required": [
+            "type",
+            "properties",
+            "required",
+            "additionalProperties"
+          ]
+        },
+        "PromptVariableProperty": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "string"
+              ]
+            }
+          },
+          "required": [
+            "type"
+          ]
+        },
+        "PromptDefaultParameters": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "temperature": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 2
+            },
+            "top_p": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "max_output_tokens": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2147483647
+            }
+          }
         },
         "ConfigurationRetrievalBinding": {
           "type": "object",
@@ -5252,6 +5523,53 @@
     }
   },
   {
+    "name": "cancel_a2a_task_remote",
+    "group": "a2a-tasks",
+    "method": "POST",
+    "read_only": false,
+    "path": "/api/v1/a2a-tasks/{task_id}/cancel",
+    "description": "Cancel the task on its pinned remote agent. Requires project change permission and uses the task’s original credential binding.",
+    "scopes": [
+      [
+        "configure"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "task_id",
+        "in": "path",
+        "required": true,
+        "type": "string"
+      }
+    ],
+    "response_headers": {
+      "ETag": "etag"
+    },
+    "body_required": false,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "object",
+          "properties": {
+            "task_id": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "task_id"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "path"
+      ]
+    }
+  },
+  {
     "name": "cancel_grant_enrollment",
     "group": "providers",
     "method": "DELETE",
@@ -5530,6 +5848,13 @@
               "maxLength": 8192,
               "writeOnly": true,
               "description": "Bearer credential; absent preserves, null removes. Never returned."
+            },
+            "entra_client_secret": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 16384,
+              "writeOnly": true,
+              "description": "Replacement Entra OBO middle-tier client secret. Required when enabling Entra or changing the issuer, client ID, or token endpoint. Never returned."
             }
           },
           "required": [
@@ -5575,6 +5900,14 @@
             "alias": {
               "type": "string",
               "pattern": "^t_[a-f0-9]{32}_[a-f0-9]{32}$"
+            },
+            "classification": {
+              "type": "string",
+              "enum": [
+                "read_only",
+                "approval_required"
+              ],
+              "description": "Operator classification of a published tool. Unclassified tools require approval."
             }
           },
           "required": [
@@ -5602,11 +5935,15 @@
             },
             "card_digest": {
               "type": "string",
-              "pattern": "^[a-f0-9]{64}$"
+              "pattern": "^[a-f0-9]{64}$",
+              "description": "SHA-256 digest of the reviewed agent card. An OAuth agent's card must be publicly readable for publication and discovery. Task requests use the caller's grant."
             },
             "credential_id": {
               "type": "string",
               "format": "uuid"
+            },
+            "oauth": {
+              "$ref": "#/$defs/AgentOAuthConfiguration"
             },
             "toolset_revisions": {
               "type": "array",
@@ -5631,6 +5968,28 @@
             "max_cost": {
               "type": "string",
               "pattern": "^[0-9]{1,12}(\\.[0-9]{1,12})?$"
+            },
+            "message_price": {
+              "type": "string",
+              "pattern": "^[0-9]{1,12}(\\.[0-9]{1,12})?$"
+            },
+            "remote_work_bound_seconds": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 3600,
+              "description": "The agent's declared maximum duration for remote work on one task, in seconds. Required for budgeted calls and enforced by the agent."
+            },
+            "max_task_continuations": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 128,
+              "description": "Maximum observed continuations per task. Defaults to 32."
+            },
+            "task_deadline_seconds": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 3600,
+              "description": "Maximum gateway task duration in seconds. Defaults to 600."
             }
           },
           "required": [
@@ -5643,8 +6002,78 @@
             "max_cost"
           ]
         },
+        "AgentOAuthConfiguration": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "client_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "audience": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2048
+            },
+            "scopes": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 32,
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              }
+            },
+            "authorization_endpoint": {
+              "type": "string",
+              "format": "uri",
+              "maxLength": 2048,
+              "description": "Required for browser and device OAuth."
+            },
+            "token_endpoint": {
+              "type": "string",
+              "format": "uri",
+              "maxLength": 2048
+            },
+            "device_authorization_endpoint": {
+              "type": "string",
+              "format": "uri",
+              "maxLength": 2048
+            },
+            "entra_obo": {
+              "$ref": "#/$defs/MCPEntraOBO"
+            }
+          },
+          "required": [
+            "client_id",
+            "audience",
+            "scopes",
+            "token_endpoint"
+          ],
+          "description": "OAuth grants are bound to the approved agent endpoint and caller identity. Browser and device flows use personal enrollment. Entra OBO uses verified workload assertions and a sealed middle-tier client secret."
+        },
+        "MCPEntraOBO": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "issuer"
+          ],
+          "properties": {
+            "issuer": {
+              "type": "string",
+              "maxLength": 2048,
+              "description": "Exact registered workload issuer trusted for delegated user assertions."
+            }
+          }
+        },
         "PromptDefinition": {
           "type": "object",
+          "description": "Use template and variables for a single user message, or messages and variable_schema for a structured prompt.",
           "additionalProperties": false,
           "properties": {
             "template": {
@@ -5652,18 +6081,127 @@
               "maxLength": 65536
             },
             "variables": {
-              "type": "array",
+              "type": [
+                "array",
+                "null"
+              ],
               "items": {
                 "type": "string",
                 "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
               },
               "maxItems": 256
+            },
+            "messages": {
+              "type": "array",
+              "maxItems": 256,
+              "items": {
+                "$ref": "#/$defs/PromptMessage"
+              }
+            },
+            "variable_schema": {
+              "$ref": "#/$defs/PromptVariableSchema"
+            },
+            "default_parameters": {
+              "$ref": "#/$defs/PromptDefaultParameters"
+            }
+          }
+        },
+        "PromptMessage": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "role": {
+              "type": "string",
+              "enum": [
+                "system",
+                "user",
+                "assistant"
+              ]
+            },
+            "content": {
+              "type": "string",
+              "maxLength": 65536
             }
           },
           "required": [
-            "template",
-            "variables"
+            "role",
+            "content"
           ]
+        },
+        "PromptVariableSchema": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "object"
+              ]
+            },
+            "properties": {
+              "type": "object",
+              "additionalProperties": {
+                "$ref": "#/$defs/PromptVariableProperty"
+              }
+            },
+            "required": {
+              "type": "array",
+              "maxItems": 256,
+              "items": {
+                "type": "string",
+                "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
+              },
+              "uniqueItems": true
+            },
+            "additionalProperties": {
+              "type": "boolean",
+              "enum": [
+                false
+              ]
+            }
+          },
+          "required": [
+            "type",
+            "properties",
+            "required",
+            "additionalProperties"
+          ]
+        },
+        "PromptVariableProperty": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "string"
+              ]
+            }
+          },
+          "required": [
+            "type"
+          ]
+        },
+        "PromptDefaultParameters": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "temperature": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 2
+            },
+            "top_p": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "max_output_tokens": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2147483647
+            }
+          }
         }
       }
     }
@@ -5977,6 +6515,16 @@
                 "format": "uuid"
               },
               "maxItems": 100
+            },
+            "run_limits": {
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/WorkflowRunLimits"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             }
           },
           "required": [
@@ -6131,6 +6679,40 @@
               "format": "int64",
               "minimum": 1,
               "maximum": 2147483647
+            }
+          }
+        },
+        "WorkflowRunLimits": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "max_iterations": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 1,
+              "maximum": 32
+            },
+            "max_tool_calls": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0,
+              "maximum": 128
+            },
+            "max_duration_seconds": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 1,
+              "maximum": 600
+            },
+            "max_concurrent_runs": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 1,
+              "maximum": 2147483647
+            },
+            "max_run_cost": {
+              "type": "string",
+              "pattern": "^[0-9]{1,12}(\\.[0-9]{1,12})?$"
             }
           }
         }
@@ -7053,7 +7635,7 @@
     "method": "POST",
     "read_only": false,
     "path": "/api/v1/observability/sinks",
-    "description": "create export sink",
+    "description": "Create an observability sink. The observability.runs and observability.trace_spans webhooks describe the corresponding evidence envelopes.",
     "scopes": [
       [
         "keys"
@@ -7129,7 +7711,9 @@
                   "guardrail_decisions",
                   "audit",
                   "metering",
-                  "focus"
+                  "focus",
+                  "runs",
+                  "trace_spans"
                 ],
                 "type": "string"
               },
@@ -7322,7 +7906,8 @@
                 "xecguard",
                 "zscaler_ai_guard",
                 "semantic_guard",
-                "decision_model"
+                "decision_model",
+                "typesafe"
               ]
             },
             "project_id": {
@@ -7683,6 +8268,147 @@
             "phase",
             "action"
           ]
+        }
+      }
+    }
+  },
+  {
+    "name": "create_investigation",
+    "group": "agents",
+    "method": "POST",
+    "read_only": false,
+    "path": "/api/v1/investigations",
+    "description": "Save an investigation",
+    "scopes": [
+      [
+        "configure"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "Idempotency-Key",
+        "in": "header",
+        "required": true,
+        "type": "string"
+      }
+    ],
+    "response_headers": {
+      "ETag": "etag"
+    },
+    "body_required": true,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "idempotency_key": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Idempotency-Key"
+        },
+        "body": {
+          "$ref": "#/$defs/InvestigationWrite"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "idempotency_key",
+        "body"
+      ],
+      "$defs": {
+        "InvestigationWrite": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "project_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "filters": {
+              "$ref": "#/$defs/InvestigationFilters"
+            },
+            "evidence": {
+              "type": "array",
+              "maxItems": 100,
+              "items": {
+                "$ref": "#/$defs/InvestigationEvidence"
+              }
+            },
+            "summary": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096
+            }
+          },
+          "required": [
+            "project_id",
+            "filters",
+            "evidence",
+            "summary"
+          ],
+          "description": "Operator-authored filters, evidence references and summary. Do not submit source payloads."
+        },
+        "InvestigationFilters": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "from": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "to": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "run_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "min_duration_ms": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            },
+            "max_duration_ms": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            },
+            "error": {
+              "type": "boolean"
+            },
+            "tool": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            }
+          },
+          "required": [],
+          "description": "Typed filters used to investigate agent evidence."
+        },
+        "InvestigationEvidence": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "run",
+                "step",
+                "approval",
+                "span",
+                "task",
+                "delegation"
+              ]
+            },
+            "id": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "required": [
+            "kind",
+            "id"
+          ],
+          "description": "Reference to evidence in the investigation project. A retained reference can outlive its source evidence."
         }
       }
     }
@@ -9112,6 +9838,13 @@
               "maxLength": 8192,
               "writeOnly": true,
               "description": "Bearer credential; absent preserves, null removes. Never returned."
+            },
+            "entra_client_secret": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 16384,
+              "writeOnly": true,
+              "description": "Replacement Entra OBO middle-tier client secret. Required when enabling Entra or changing the issuer, client ID, or token endpoint. Never returned."
             }
           },
           "required": [
@@ -9157,6 +9890,14 @@
             "alias": {
               "type": "string",
               "pattern": "^t_[a-f0-9]{32}_[a-f0-9]{32}$"
+            },
+            "classification": {
+              "type": "string",
+              "enum": [
+                "read_only",
+                "approval_required"
+              ],
+              "description": "Operator classification of a published tool. Unclassified tools require approval."
             }
           },
           "required": [
@@ -9184,11 +9925,15 @@
             },
             "card_digest": {
               "type": "string",
-              "pattern": "^[a-f0-9]{64}$"
+              "pattern": "^[a-f0-9]{64}$",
+              "description": "SHA-256 digest of the reviewed agent card. An OAuth agent's card must be publicly readable for publication and discovery. Task requests use the caller's grant."
             },
             "credential_id": {
               "type": "string",
               "format": "uuid"
+            },
+            "oauth": {
+              "$ref": "#/$defs/AgentOAuthConfiguration"
             },
             "toolset_revisions": {
               "type": "array",
@@ -9213,6 +9958,28 @@
             "max_cost": {
               "type": "string",
               "pattern": "^[0-9]{1,12}(\\.[0-9]{1,12})?$"
+            },
+            "message_price": {
+              "type": "string",
+              "pattern": "^[0-9]{1,12}(\\.[0-9]{1,12})?$"
+            },
+            "remote_work_bound_seconds": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 3600,
+              "description": "The agent's declared maximum duration for remote work on one task, in seconds. Required for budgeted calls and enforced by the agent."
+            },
+            "max_task_continuations": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 128,
+              "description": "Maximum observed continuations per task. Defaults to 32."
+            },
+            "task_deadline_seconds": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 3600,
+              "description": "Maximum gateway task duration in seconds. Defaults to 600."
             }
           },
           "required": [
@@ -9225,8 +9992,78 @@
             "max_cost"
           ]
         },
+        "AgentOAuthConfiguration": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "client_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "audience": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2048
+            },
+            "scopes": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 32,
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              }
+            },
+            "authorization_endpoint": {
+              "type": "string",
+              "format": "uri",
+              "maxLength": 2048,
+              "description": "Required for browser and device OAuth."
+            },
+            "token_endpoint": {
+              "type": "string",
+              "format": "uri",
+              "maxLength": 2048
+            },
+            "device_authorization_endpoint": {
+              "type": "string",
+              "format": "uri",
+              "maxLength": 2048
+            },
+            "entra_obo": {
+              "$ref": "#/$defs/MCPEntraOBO"
+            }
+          },
+          "required": [
+            "client_id",
+            "audience",
+            "scopes",
+            "token_endpoint"
+          ],
+          "description": "OAuth grants are bound to the approved agent endpoint and caller identity. Browser and device flows use personal enrollment. Entra OBO uses verified workload assertions and a sealed middle-tier client secret."
+        },
+        "MCPEntraOBO": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "issuer"
+          ],
+          "properties": {
+            "issuer": {
+              "type": "string",
+              "maxLength": 2048,
+              "description": "Exact registered workload issuer trusted for delegated user assertions."
+            }
+          }
+        },
         "PromptDefinition": {
           "type": "object",
+          "description": "Use template and variables for a single user message, or messages and variable_schema for a structured prompt.",
           "additionalProperties": false,
           "properties": {
             "template": {
@@ -9234,18 +10071,127 @@
               "maxLength": 65536
             },
             "variables": {
-              "type": "array",
+              "type": [
+                "array",
+                "null"
+              ],
               "items": {
                 "type": "string",
                 "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
               },
               "maxItems": 256
+            },
+            "messages": {
+              "type": "array",
+              "maxItems": 256,
+              "items": {
+                "$ref": "#/$defs/PromptMessage"
+              }
+            },
+            "variable_schema": {
+              "$ref": "#/$defs/PromptVariableSchema"
+            },
+            "default_parameters": {
+              "$ref": "#/$defs/PromptDefaultParameters"
+            }
+          }
+        },
+        "PromptMessage": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "role": {
+              "type": "string",
+              "enum": [
+                "system",
+                "user",
+                "assistant"
+              ]
+            },
+            "content": {
+              "type": "string",
+              "maxLength": 65536
             }
           },
           "required": [
-            "template",
-            "variables"
+            "role",
+            "content"
           ]
+        },
+        "PromptVariableSchema": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "object"
+              ]
+            },
+            "properties": {
+              "type": "object",
+              "additionalProperties": {
+                "$ref": "#/$defs/PromptVariableProperty"
+              }
+            },
+            "required": {
+              "type": "array",
+              "maxItems": 256,
+              "items": {
+                "type": "string",
+                "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
+              },
+              "uniqueItems": true
+            },
+            "additionalProperties": {
+              "type": "boolean",
+              "enum": [
+                false
+              ]
+            }
+          },
+          "required": [
+            "type",
+            "properties",
+            "required",
+            "additionalProperties"
+          ]
+        },
+        "PromptVariableProperty": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "string"
+              ]
+            }
+          },
+          "required": [
+            "type"
+          ]
+        },
+        "PromptDefaultParameters": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "temperature": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 2
+            },
+            "top_p": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "max_output_tokens": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2147483647
+            }
+          }
         }
       }
     }
@@ -11007,6 +11953,37 @@
                   "type": "null"
                 }
               ]
+            },
+            "tool_execution": {
+              "type": "string",
+              "enum": [
+                "",
+                "gateway"
+              ],
+              "description": "When gateway, the gateway executes authorized read-only tools on transformed Chat Completions routes."
+            },
+            "toolsets": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "uniqueItems": true,
+              "description": "Published toolset IDs that gateway execution may use. Callers can select a subset."
+            },
+            "responses_mcp_items": {
+              "type": "boolean",
+              "description": "Operator declaration that Responses clients support gateway-generated MCP output items. Requires gateway tool execution on a transformed route. MCP items are emitted only when the run uses the certified built-in Responses contract; other contracts omit them."
+            },
+            "run_limits": {
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/WorkflowRunLimits"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             }
           },
           "required": [
@@ -11672,6 +12649,40 @@
             "acknowledge_opaque_unmetered"
           ],
           "type": "object"
+        },
+        "WorkflowRunLimits": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "max_iterations": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 1,
+              "maximum": 32
+            },
+            "max_tool_calls": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0,
+              "maximum": 128
+            },
+            "max_duration_seconds": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 1,
+              "maximum": 600
+            },
+            "max_concurrent_runs": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 1,
+              "maximum": 2147483647
+            },
+            "max_run_cost": {
+              "type": "string",
+              "pattern": "^[0-9]{1,12}(\\.[0-9]{1,12})?$"
+            }
+          }
         }
       }
     }
@@ -11861,6 +12872,37 @@
                   "type": "null"
                 }
               ]
+            },
+            "tool_execution": {
+              "type": "string",
+              "enum": [
+                "",
+                "gateway"
+              ],
+              "description": "When gateway, the gateway executes authorized read-only tools on transformed Chat Completions routes."
+            },
+            "toolsets": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "uniqueItems": true,
+              "description": "Published toolset IDs that gateway execution may use. Callers can select a subset."
+            },
+            "responses_mcp_items": {
+              "type": "boolean",
+              "description": "Operator declaration that Responses clients support gateway-generated MCP output items. Requires gateway tool execution on a transformed route. MCP items are emitted only when the run uses the certified built-in Responses contract; other contracts omit them."
+            },
+            "run_limits": {
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/WorkflowRunLimits"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             }
           },
           "required": [
@@ -12526,6 +13568,40 @@
             "acknowledge_opaque_unmetered"
           ],
           "type": "object"
+        },
+        "WorkflowRunLimits": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "max_iterations": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 1,
+              "maximum": 32
+            },
+            "max_tool_calls": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0,
+              "maximum": 128
+            },
+            "max_duration_seconds": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 1,
+              "maximum": 600
+            },
+            "max_concurrent_runs": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 1,
+              "maximum": 2147483647
+            },
+            "max_run_cost": {
+              "type": "string",
+              "pattern": "^[0-9]{1,12}(\\.[0-9]{1,12})?$"
+            }
+          }
         }
       }
     }
@@ -13069,7 +14145,9 @@
                   "requests",
                   "attempts",
                   "guardrail_decisions",
-                  "audit"
+                  "audit",
+                  "runs",
+                  "trace_spans"
                 ]
               }
             },
@@ -13184,6 +14262,13 @@
               "maxLength": 8192,
               "writeOnly": true,
               "description": "Bearer credential; absent preserves, null removes. Never returned."
+            },
+            "entra_client_secret": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 16384,
+              "writeOnly": true,
+              "description": "Replacement Entra OBO middle-tier client secret. Required when enabling Entra or changing the issuer, client ID, or token endpoint. Never returned."
             }
           },
           "required": [
@@ -13229,6 +14314,14 @@
             "alias": {
               "type": "string",
               "pattern": "^t_[a-f0-9]{32}_[a-f0-9]{32}$"
+            },
+            "classification": {
+              "type": "string",
+              "enum": [
+                "read_only",
+                "approval_required"
+              ],
+              "description": "Operator classification of a published tool. Unclassified tools require approval."
             }
           },
           "required": [
@@ -13256,11 +14349,15 @@
             },
             "card_digest": {
               "type": "string",
-              "pattern": "^[a-f0-9]{64}$"
+              "pattern": "^[a-f0-9]{64}$",
+              "description": "SHA-256 digest of the reviewed agent card. An OAuth agent's card must be publicly readable for publication and discovery. Task requests use the caller's grant."
             },
             "credential_id": {
               "type": "string",
               "format": "uuid"
+            },
+            "oauth": {
+              "$ref": "#/$defs/AgentOAuthConfiguration"
             },
             "toolset_revisions": {
               "type": "array",
@@ -13285,6 +14382,28 @@
             "max_cost": {
               "type": "string",
               "pattern": "^[0-9]{1,12}(\\.[0-9]{1,12})?$"
+            },
+            "message_price": {
+              "type": "string",
+              "pattern": "^[0-9]{1,12}(\\.[0-9]{1,12})?$"
+            },
+            "remote_work_bound_seconds": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 3600,
+              "description": "The agent's declared maximum duration for remote work on one task, in seconds. Required for budgeted calls and enforced by the agent."
+            },
+            "max_task_continuations": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 128,
+              "description": "Maximum observed continuations per task. Defaults to 32."
+            },
+            "task_deadline_seconds": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 3600,
+              "description": "Maximum gateway task duration in seconds. Defaults to 600."
             }
           },
           "required": [
@@ -13297,8 +14416,78 @@
             "max_cost"
           ]
         },
+        "AgentOAuthConfiguration": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "client_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "audience": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2048
+            },
+            "scopes": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 32,
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              }
+            },
+            "authorization_endpoint": {
+              "type": "string",
+              "format": "uri",
+              "maxLength": 2048,
+              "description": "Required for browser and device OAuth."
+            },
+            "token_endpoint": {
+              "type": "string",
+              "format": "uri",
+              "maxLength": 2048
+            },
+            "device_authorization_endpoint": {
+              "type": "string",
+              "format": "uri",
+              "maxLength": 2048
+            },
+            "entra_obo": {
+              "$ref": "#/$defs/MCPEntraOBO"
+            }
+          },
+          "required": [
+            "client_id",
+            "audience",
+            "scopes",
+            "token_endpoint"
+          ],
+          "description": "OAuth grants are bound to the approved agent endpoint and caller identity. Browser and device flows use personal enrollment. Entra OBO uses verified workload assertions and a sealed middle-tier client secret."
+        },
+        "MCPEntraOBO": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "issuer"
+          ],
+          "properties": {
+            "issuer": {
+              "type": "string",
+              "maxLength": 2048,
+              "description": "Exact registered workload issuer trusted for delegated user assertions."
+            }
+          }
+        },
         "PromptDefinition": {
           "type": "object",
+          "description": "Use template and variables for a single user message, or messages and variable_schema for a structured prompt.",
           "additionalProperties": false,
           "properties": {
             "template": {
@@ -13306,18 +14495,127 @@
               "maxLength": 65536
             },
             "variables": {
-              "type": "array",
+              "type": [
+                "array",
+                "null"
+              ],
               "items": {
                 "type": "string",
                 "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
               },
               "maxItems": 256
+            },
+            "messages": {
+              "type": "array",
+              "maxItems": 256,
+              "items": {
+                "$ref": "#/$defs/PromptMessage"
+              }
+            },
+            "variable_schema": {
+              "$ref": "#/$defs/PromptVariableSchema"
+            },
+            "default_parameters": {
+              "$ref": "#/$defs/PromptDefaultParameters"
+            }
+          }
+        },
+        "PromptMessage": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "role": {
+              "type": "string",
+              "enum": [
+                "system",
+                "user",
+                "assistant"
+              ]
+            },
+            "content": {
+              "type": "string",
+              "maxLength": 65536
             }
           },
           "required": [
-            "template",
-            "variables"
+            "role",
+            "content"
           ]
+        },
+        "PromptVariableSchema": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "object"
+              ]
+            },
+            "properties": {
+              "type": "object",
+              "additionalProperties": {
+                "$ref": "#/$defs/PromptVariableProperty"
+              }
+            },
+            "required": {
+              "type": "array",
+              "maxItems": 256,
+              "items": {
+                "type": "string",
+                "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
+              },
+              "uniqueItems": true
+            },
+            "additionalProperties": {
+              "type": "boolean",
+              "enum": [
+                false
+              ]
+            }
+          },
+          "required": [
+            "type",
+            "properties",
+            "required",
+            "additionalProperties"
+          ]
+        },
+        "PromptVariableProperty": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "string"
+              ]
+            }
+          },
+          "required": [
+            "type"
+          ]
+        },
+        "PromptDefaultParameters": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "temperature": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 2
+            },
+            "top_p": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "max_output_tokens": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2147483647
+            }
+          }
         }
       }
     }
@@ -15628,6 +16926,100 @@
     }
   },
   {
+    "name": "get_a2a_task",
+    "group": "agents",
+    "method": "GET",
+    "read_only": true,
+    "path": "/api/v1/a2a-tasks/{task_id}",
+    "description": "Get an A2A task",
+    "scopes": [
+      [
+        "read"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "task_id",
+        "in": "path",
+        "required": true,
+        "type": "string"
+      }
+    ],
+    "response_headers": {
+      "ETag": "etag"
+    },
+    "body_required": false,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "object",
+          "properties": {
+            "task_id": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "task_id"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "path"
+      ]
+    }
+  },
+  {
+    "name": "get_a2a_task_remote",
+    "group": "a2a-tasks",
+    "method": "GET",
+    "read_only": true,
+    "path": "/api/v1/a2a-tasks/{task_id}/remote",
+    "description": "Retrieve the task from its pinned remote agent. Requires project change permission and uses the task’s original credential binding.",
+    "scopes": [
+      [
+        "configure"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "task_id",
+        "in": "path",
+        "required": true,
+        "type": "string"
+      }
+    ],
+    "response_headers": {
+      "ETag": "etag"
+    },
+    "body_required": false,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "object",
+          "properties": {
+            "task_id": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "task_id"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "path"
+      ]
+    }
+  },
+  {
     "name": "get_agent",
     "group": "agents",
     "method": "GET",
@@ -15723,6 +17115,53 @@
           "required": [
             "publication_id",
             "revision_id"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "path"
+      ]
+    }
+  },
+  {
+    "name": "get_agent_run",
+    "group": "agents",
+    "method": "GET",
+    "read_only": true,
+    "path": "/api/v1/agent-runs/{run_id}",
+    "description": "Get a gateway run",
+    "scopes": [
+      [
+        "read"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "run_id",
+        "in": "path",
+        "required": true,
+        "type": "string"
+      }
+    ],
+    "response_headers": {
+      "ETag": "etag"
+    },
+    "body_required": false,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "object",
+          "properties": {
+            "run_id": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "run_id"
           ]
         }
       },
@@ -16502,6 +17941,53 @@
       "type": "object",
       "properties": {},
       "additionalProperties": false
+    }
+  },
+  {
+    "name": "get_investigation",
+    "group": "agents",
+    "method": "GET",
+    "read_only": true,
+    "path": "/api/v1/investigations/{investigation_id}",
+    "description": "Get an investigation",
+    "scopes": [
+      [
+        "read"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "investigation_id",
+        "in": "path",
+        "required": true,
+        "type": "string"
+      }
+    ],
+    "response_headers": {
+      "ETag": "etag"
+    },
+    "body_required": false,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "object",
+          "properties": {
+            "investigation_id": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "investigation_id"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "path"
+      ]
     }
   },
   {
@@ -18906,6 +20392,286 @@
     }
   },
   {
+    "name": "list_a2a_tasks",
+    "group": "agents",
+    "method": "GET",
+    "read_only": true,
+    "path": "/api/v1/a2a-tasks",
+    "description": "List A2A tasks",
+    "scopes": [
+      [
+        "read"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "cursor",
+        "in": "query",
+        "required": false,
+        "type": "string"
+      },
+      {
+        "name": "limit",
+        "in": "query",
+        "required": false,
+        "type": "integer"
+      },
+      {
+        "name": "project_id",
+        "in": "query",
+        "required": false,
+        "type": "string"
+      }
+    ],
+    "response_headers": {
+      "ETag": "etag"
+    },
+    "body_required": false,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "type": "object",
+          "properties": {
+            "cursor": {
+              "type": "string"
+            },
+            "limit": {
+              "format": "int32",
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
+            },
+            "project_id": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "list_agent_delegations",
+    "group": "agents",
+    "method": "GET",
+    "read_only": true,
+    "path": "/api/v1/agent-delegations",
+    "description": "List delegations",
+    "scopes": [
+      [
+        "read"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "cursor",
+        "in": "query",
+        "required": false,
+        "type": "string"
+      },
+      {
+        "name": "limit",
+        "in": "query",
+        "required": false,
+        "type": "integer"
+      },
+      {
+        "name": "project_id",
+        "in": "query",
+        "required": false,
+        "type": "string"
+      },
+      {
+        "name": "delegation_id",
+        "in": "query",
+        "required": false,
+        "type": "string"
+      }
+    ],
+    "response_headers": {
+      "ETag": "etag"
+    },
+    "body_required": false,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "type": "object",
+          "properties": {
+            "cursor": {
+              "type": "string"
+            },
+            "limit": {
+              "format": "int32",
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
+            },
+            "project_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "delegation_id": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "list_agent_run_spans",
+    "group": "agents",
+    "method": "GET",
+    "read_only": true,
+    "path": "/api/v1/agent-runs/{run_id}/spans",
+    "description": "List correlated run spans",
+    "scopes": [
+      [
+        "read"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "run_id",
+        "in": "path",
+        "required": true,
+        "type": "string"
+      },
+      {
+        "name": "span_id",
+        "in": "query",
+        "required": false,
+        "type": "string"
+      },
+      {
+        "name": "cursor",
+        "in": "query",
+        "required": false,
+        "type": "string"
+      },
+      {
+        "name": "limit",
+        "in": "query",
+        "required": false,
+        "type": "integer"
+      }
+    ],
+    "response_headers": {
+      "ETag": "etag"
+    },
+    "body_required": false,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "object",
+          "properties": {
+            "run_id": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "run_id"
+          ]
+        },
+        "query": {
+          "type": "object",
+          "properties": {
+            "span_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "cursor": {
+              "type": "string"
+            },
+            "limit": {
+              "format": "int32",
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "path"
+      ]
+    }
+  },
+  {
+    "name": "list_agent_runs",
+    "group": "agents",
+    "method": "GET",
+    "read_only": true,
+    "path": "/api/v1/agent-runs",
+    "description": "List gateway runs",
+    "scopes": [
+      [
+        "read"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "cursor",
+        "in": "query",
+        "required": false,
+        "type": "string"
+      },
+      {
+        "name": "limit",
+        "in": "query",
+        "required": false,
+        "type": "integer"
+      },
+      {
+        "name": "project_id",
+        "in": "query",
+        "required": false,
+        "type": "string"
+      }
+    ],
+    "response_headers": {
+      "ETag": "etag"
+    },
+    "body_required": false,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "type": "object",
+          "properties": {
+            "cursor": {
+              "type": "string"
+            },
+            "limit": {
+              "format": "int32",
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
+            },
+            "project_id": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  {
     "name": "list_agents",
     "group": "agents",
     "method": "GET",
@@ -20346,6 +22112,68 @@
             "search": {
               "type": "string",
               "maxLength": 200
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "list_investigations",
+    "group": "agents",
+    "method": "GET",
+    "read_only": true,
+    "path": "/api/v1/investigations",
+    "description": "List investigations",
+    "scopes": [
+      [
+        "read"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "cursor",
+        "in": "query",
+        "required": false,
+        "type": "string"
+      },
+      {
+        "name": "limit",
+        "in": "query",
+        "required": false,
+        "type": "integer"
+      },
+      {
+        "name": "project_id",
+        "in": "query",
+        "required": false,
+        "type": "string"
+      }
+    ],
+    "response_headers": {
+      "ETag": "etag"
+    },
+    "body_required": false,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "type": "object",
+          "properties": {
+            "cursor": {
+              "type": "string"
+            },
+            "limit": {
+              "format": "int32",
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
+            },
+            "project_id": {
+              "type": "string",
+              "format": "uuid"
             }
           },
           "additionalProperties": false
@@ -26389,6 +28217,37 @@
                   "type": "null"
                 }
               ]
+            },
+            "tool_execution": {
+              "type": "string",
+              "enum": [
+                "",
+                "gateway"
+              ],
+              "description": "When gateway, the gateway executes authorized read-only tools on transformed Chat Completions routes."
+            },
+            "toolsets": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "uniqueItems": true,
+              "description": "Published toolset IDs that gateway execution may use. Callers can select a subset."
+            },
+            "responses_mcp_items": {
+              "type": "boolean",
+              "description": "Operator declaration that Responses clients support gateway-generated MCP output items. Requires gateway tool execution on a transformed route. MCP items are emitted only when the run uses the certified built-in Responses contract; other contracts omit them."
+            },
+            "run_limits": {
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/WorkflowRunLimits"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             }
           },
           "required": [
@@ -27039,6 +28898,40 @@
           ],
           "type": "object"
         },
+        "WorkflowRunLimits": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "max_iterations": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 1,
+              "maximum": 32
+            },
+            "max_tool_calls": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0,
+              "maximum": 128
+            },
+            "max_duration_seconds": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 1,
+              "maximum": 600
+            },
+            "max_concurrent_runs": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 1,
+              "maximum": 2147483647
+            },
+            "max_run_cost": {
+              "type": "string",
+              "pattern": "^[0-9]{1,12}(\\.[0-9]{1,12})?$"
+            }
+          }
+        },
         "ConfigurationOrganizationEntry": {
           "type": "object",
           "additionalProperties": false,
@@ -27245,6 +29138,10 @@
                 "format": "uuid"
               },
               "maxItems": 100
+            },
+            "agent_principal": {
+              "type": "boolean",
+              "description": "Allow this mapping to authenticate an agent principal. Exact subject and client claims are required."
             }
           },
           "description": "Owner-declared permissions, never project or template names chosen freely by the token. A registered subject stays bound to its first matching name/project."
@@ -27456,7 +29353,8 @@
                 "xecguard",
                 "zscaler_ai_guard",
                 "semantic_guard",
-                "decision_model"
+                "decision_model",
+                "typesafe"
               ]
             },
             "policy": {
@@ -27517,7 +29415,9 @@
                   "requests",
                   "attempts",
                   "guardrail_decisions",
-                  "audit"
+                  "audit",
+                  "runs",
+                  "trace_spans"
                 ]
               }
             },
@@ -27975,6 +29875,14 @@
             "alias": {
               "type": "string",
               "pattern": "^t_[a-f0-9]{32}_[a-f0-9]{32}$"
+            },
+            "classification": {
+              "type": "string",
+              "enum": [
+                "read_only",
+                "approval_required"
+              ],
+              "description": "Operator classification of a published tool. Unclassified tools require approval."
             }
           },
           "required": [
@@ -28002,11 +29910,15 @@
             },
             "card_digest": {
               "type": "string",
-              "pattern": "^[a-f0-9]{64}$"
+              "pattern": "^[a-f0-9]{64}$",
+              "description": "SHA-256 digest of the reviewed agent card. An OAuth agent's card must be publicly readable for publication and discovery. Task requests use the caller's grant."
             },
             "credential_id": {
               "type": "string",
               "format": "uuid"
+            },
+            "oauth": {
+              "$ref": "#/$defs/AgentOAuthConfiguration"
             },
             "toolset_revisions": {
               "type": "array",
@@ -28031,6 +29943,28 @@
             "max_cost": {
               "type": "string",
               "pattern": "^[0-9]{1,12}(\\.[0-9]{1,12})?$"
+            },
+            "message_price": {
+              "type": "string",
+              "pattern": "^[0-9]{1,12}(\\.[0-9]{1,12})?$"
+            },
+            "remote_work_bound_seconds": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 3600,
+              "description": "The agent's declared maximum duration for remote work on one task, in seconds. Required for budgeted calls and enforced by the agent."
+            },
+            "max_task_continuations": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 128,
+              "description": "Maximum observed continuations per task. Defaults to 32."
+            },
+            "task_deadline_seconds": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 3600,
+              "description": "Maximum gateway task duration in seconds. Defaults to 600."
             }
           },
           "required": [
@@ -28043,8 +29977,64 @@
             "max_cost"
           ]
         },
+        "AgentOAuthConfiguration": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "client_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "audience": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2048
+            },
+            "scopes": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 32,
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              }
+            },
+            "authorization_endpoint": {
+              "type": "string",
+              "format": "uri",
+              "maxLength": 2048,
+              "description": "Required for browser and device OAuth."
+            },
+            "token_endpoint": {
+              "type": "string",
+              "format": "uri",
+              "maxLength": 2048
+            },
+            "device_authorization_endpoint": {
+              "type": "string",
+              "format": "uri",
+              "maxLength": 2048
+            },
+            "entra_obo": {
+              "$ref": "#/$defs/MCPEntraOBO"
+            }
+          },
+          "required": [
+            "client_id",
+            "audience",
+            "scopes",
+            "token_endpoint"
+          ],
+          "description": "OAuth grants are bound to the approved agent endpoint and caller identity. Browser and device flows use personal enrollment. Entra OBO uses verified workload assertions and a sealed middle-tier client secret."
+        },
         "PromptDefinition": {
           "type": "object",
+          "description": "Use template and variables for a single user message, or messages and variable_schema for a structured prompt.",
           "additionalProperties": false,
           "properties": {
             "template": {
@@ -28052,18 +30042,127 @@
               "maxLength": 65536
             },
             "variables": {
-              "type": "array",
+              "type": [
+                "array",
+                "null"
+              ],
               "items": {
                 "type": "string",
                 "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
               },
               "maxItems": 256
+            },
+            "messages": {
+              "type": "array",
+              "maxItems": 256,
+              "items": {
+                "$ref": "#/$defs/PromptMessage"
+              }
+            },
+            "variable_schema": {
+              "$ref": "#/$defs/PromptVariableSchema"
+            },
+            "default_parameters": {
+              "$ref": "#/$defs/PromptDefaultParameters"
+            }
+          }
+        },
+        "PromptMessage": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "role": {
+              "type": "string",
+              "enum": [
+                "system",
+                "user",
+                "assistant"
+              ]
+            },
+            "content": {
+              "type": "string",
+              "maxLength": 65536
             }
           },
           "required": [
-            "template",
-            "variables"
+            "role",
+            "content"
           ]
+        },
+        "PromptVariableSchema": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "object"
+              ]
+            },
+            "properties": {
+              "type": "object",
+              "additionalProperties": {
+                "$ref": "#/$defs/PromptVariableProperty"
+              }
+            },
+            "required": {
+              "type": "array",
+              "maxItems": 256,
+              "items": {
+                "type": "string",
+                "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
+              },
+              "uniqueItems": true
+            },
+            "additionalProperties": {
+              "type": "boolean",
+              "enum": [
+                false
+              ]
+            }
+          },
+          "required": [
+            "type",
+            "properties",
+            "required",
+            "additionalProperties"
+          ]
+        },
+        "PromptVariableProperty": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "string"
+              ]
+            }
+          },
+          "required": [
+            "type"
+          ]
+        },
+        "PromptDefaultParameters": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "temperature": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 2
+            },
+            "top_p": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "max_output_tokens": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2147483647
+            }
+          }
         },
         "ConfigurationRetrievalBinding": {
           "type": "object",
@@ -28999,6 +31098,10 @@
                 "format": "uuid"
               },
               "maxItems": 100
+            },
+            "agent_principal": {
+              "type": "boolean",
+              "description": "Allow this mapping to authenticate an agent principal. Exact subject and client claims are required."
             }
           },
           "description": "Owner-declared permissions, never project or template names chosen freely by the token. A registered subject stays bound to its first matching name/project."
@@ -32848,6 +34951,10 @@
                 "format": "uuid"
               },
               "maxItems": 100
+            },
+            "agent_principal": {
+              "type": "boolean",
+              "description": "Allow this mapping to authenticate an agent principal. Exact subject and client claims are required."
             }
           },
           "description": "Owner-declared permissions, never project or template names chosen freely by the token. A registered subject stays bound to its first matching name/project."
@@ -33810,6 +35917,37 @@
                   "type": "null"
                 }
               ]
+            },
+            "tool_execution": {
+              "type": "string",
+              "enum": [
+                "",
+                "gateway"
+              ],
+              "description": "When gateway, the gateway executes authorized read-only tools on transformed Chat Completions routes."
+            },
+            "toolsets": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "uniqueItems": true,
+              "description": "Published toolset IDs that gateway execution may use. Callers can select a subset."
+            },
+            "responses_mcp_items": {
+              "type": "boolean",
+              "description": "Operator declaration that Responses clients support gateway-generated MCP output items. Requires gateway tool execution on a transformed route. MCP items are emitted only when the run uses the certified built-in Responses contract; other contracts omit them."
+            },
+            "run_limits": {
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/WorkflowRunLimits"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             }
           },
           "required": [
@@ -34469,6 +36607,40 @@
             "acknowledge_opaque_unmetered"
           ],
           "type": "object"
+        },
+        "WorkflowRunLimits": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "max_iterations": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 1,
+              "maximum": 32
+            },
+            "max_tool_calls": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0,
+              "maximum": 128
+            },
+            "max_duration_seconds": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 1,
+              "maximum": 600
+            },
+            "max_concurrent_runs": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 1,
+              "maximum": 2147483647
+            },
+            "max_run_cost": {
+              "type": "string",
+              "pattern": "^[0-9]{1,12}(\\.[0-9]{1,12})?$"
+            }
+          }
         }
       }
     }
@@ -38497,7 +40669,7 @@
                 "null"
               ],
               "format": "uuid",
-              "description": "Optional current key authority, including provider-state permission. Provider-retained state is denied when no key is selected."
+              "description": "Select a current API key to evaluate its route and toolset authority, including provider-state permission. Provider-retained state and gateway tool execution are not eligible without a selected key. Simulation does not dispatch or reserve quota, so it does not guarantee admission."
             },
             "dialect": {
               "$ref": "#/$defs/SimulationDialect"
@@ -38513,7 +40685,7 @@
             "request": {
               "type": "object",
               "additionalProperties": true,
-              "description": "Optional native request. Omission retains tuple-only eligibility and reports not_inspected; no request or qualification is fabricated. A request is also counted for each target's model: unless estimated_input_tokens is supplied, every decision reports the input tokens that model counts, how they were counted and for which model family, and each target's context window is checked against them."
+              "description": "Optional native request. Omission retains tuple-only eligibility and reports not_inspected; no request or qualification is fabricated. A request is also counted for each target's model: unless estimated_input_tokens is supplied, every decision reports the input tokens that model counts, how they were counted and for which model family, and each target's context window is checked against them. For gateway tool execution, include olp_toolsets and olp_run_limits in the native request to inspect narrowed toolsets and run bounds."
             },
             "semantic_headers": {
               "$ref": "#/$defs/SimulationSemanticHeaders"
@@ -38842,7 +41014,8 @@
               "type": [
                 "string",
                 "null"
-              ]
+              ],
+              "description": "Select a current API key to evaluate its route and toolset authority, including provider-state permission. Provider-retained state and gateway tool execution are not eligible without a selected key. Simulation does not dispatch or reserve quota, so it does not guarantee admission."
             },
             "estimated_input_tokens": {
               "description": "Input tokens to weigh every target's context window by. When supplied it stands for every target, the request is not counted, and the decisions report no provenance for it.",
@@ -38946,7 +41119,7 @@
             "request": {
               "type": "object",
               "additionalProperties": true,
-              "description": "Native request for complete inspection. A route/model-only object selects tuple-only inspection and does not establish an interaction contract. A request is also counted for each target's model: unless estimated_input_tokens is supplied, every decision reports the input tokens that model counts, how they were counted and for which model family, and each target's context window is checked against them."
+              "description": "Native request for complete inspection. A route/model-only object selects tuple-only inspection and does not establish an interaction contract. A request is also counted for each target's model: unless estimated_input_tokens is supplied, every decision reports the input tokens that model counts, how they were counted and for which model family, and each target's context window is checked against them. For gateway tool execution, include olp_toolsets and olp_run_limits in the native request to inspect narrowed toolsets and run bounds."
             },
             "route": {
               "type": "string",
@@ -39542,6 +41715,13 @@
               "maxLength": 8192,
               "writeOnly": true,
               "description": "Bearer credential; absent preserves, null removes. Never returned."
+            },
+            "entra_client_secret": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 16384,
+              "writeOnly": true,
+              "description": "Replacement Entra OBO middle-tier client secret. Required when enabling Entra or changing the issuer, client ID, or token endpoint. Never returned."
             }
           },
           "required": [
@@ -39587,6 +41767,14 @@
             "alias": {
               "type": "string",
               "pattern": "^t_[a-f0-9]{32}_[a-f0-9]{32}$"
+            },
+            "classification": {
+              "type": "string",
+              "enum": [
+                "read_only",
+                "approval_required"
+              ],
+              "description": "Operator classification of a published tool. Unclassified tools require approval."
             }
           },
           "required": [
@@ -39614,11 +41802,15 @@
             },
             "card_digest": {
               "type": "string",
-              "pattern": "^[a-f0-9]{64}$"
+              "pattern": "^[a-f0-9]{64}$",
+              "description": "SHA-256 digest of the reviewed agent card. An OAuth agent's card must be publicly readable for publication and discovery. Task requests use the caller's grant."
             },
             "credential_id": {
               "type": "string",
               "format": "uuid"
+            },
+            "oauth": {
+              "$ref": "#/$defs/AgentOAuthConfiguration"
             },
             "toolset_revisions": {
               "type": "array",
@@ -39643,6 +41835,28 @@
             "max_cost": {
               "type": "string",
               "pattern": "^[0-9]{1,12}(\\.[0-9]{1,12})?$"
+            },
+            "message_price": {
+              "type": "string",
+              "pattern": "^[0-9]{1,12}(\\.[0-9]{1,12})?$"
+            },
+            "remote_work_bound_seconds": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 3600,
+              "description": "The agent's declared maximum duration for remote work on one task, in seconds. Required for budgeted calls and enforced by the agent."
+            },
+            "max_task_continuations": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 128,
+              "description": "Maximum observed continuations per task. Defaults to 32."
+            },
+            "task_deadline_seconds": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 3600,
+              "description": "Maximum gateway task duration in seconds. Defaults to 600."
             }
           },
           "required": [
@@ -39655,8 +41869,78 @@
             "max_cost"
           ]
         },
+        "AgentOAuthConfiguration": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "client_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "audience": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2048
+            },
+            "scopes": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 32,
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              }
+            },
+            "authorization_endpoint": {
+              "type": "string",
+              "format": "uri",
+              "maxLength": 2048,
+              "description": "Required for browser and device OAuth."
+            },
+            "token_endpoint": {
+              "type": "string",
+              "format": "uri",
+              "maxLength": 2048
+            },
+            "device_authorization_endpoint": {
+              "type": "string",
+              "format": "uri",
+              "maxLength": 2048
+            },
+            "entra_obo": {
+              "$ref": "#/$defs/MCPEntraOBO"
+            }
+          },
+          "required": [
+            "client_id",
+            "audience",
+            "scopes",
+            "token_endpoint"
+          ],
+          "description": "OAuth grants are bound to the approved agent endpoint and caller identity. Browser and device flows use personal enrollment. Entra OBO uses verified workload assertions and a sealed middle-tier client secret."
+        },
+        "MCPEntraOBO": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "issuer"
+          ],
+          "properties": {
+            "issuer": {
+              "type": "string",
+              "maxLength": 2048,
+              "description": "Exact registered workload issuer trusted for delegated user assertions."
+            }
+          }
+        },
         "PromptDefinition": {
           "type": "object",
+          "description": "Use template and variables for a single user message, or messages and variable_schema for a structured prompt.",
           "additionalProperties": false,
           "properties": {
             "template": {
@@ -39664,18 +41948,127 @@
               "maxLength": 65536
             },
             "variables": {
-              "type": "array",
+              "type": [
+                "array",
+                "null"
+              ],
               "items": {
                 "type": "string",
                 "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
               },
               "maxItems": 256
+            },
+            "messages": {
+              "type": "array",
+              "maxItems": 256,
+              "items": {
+                "$ref": "#/$defs/PromptMessage"
+              }
+            },
+            "variable_schema": {
+              "$ref": "#/$defs/PromptVariableSchema"
+            },
+            "default_parameters": {
+              "$ref": "#/$defs/PromptDefaultParameters"
+            }
+          }
+        },
+        "PromptMessage": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "role": {
+              "type": "string",
+              "enum": [
+                "system",
+                "user",
+                "assistant"
+              ]
+            },
+            "content": {
+              "type": "string",
+              "maxLength": 65536
             }
           },
           "required": [
-            "template",
-            "variables"
+            "role",
+            "content"
           ]
+        },
+        "PromptVariableSchema": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "object"
+              ]
+            },
+            "properties": {
+              "type": "object",
+              "additionalProperties": {
+                "$ref": "#/$defs/PromptVariableProperty"
+              }
+            },
+            "required": {
+              "type": "array",
+              "maxItems": 256,
+              "items": {
+                "type": "string",
+                "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
+              },
+              "uniqueItems": true
+            },
+            "additionalProperties": {
+              "type": "boolean",
+              "enum": [
+                false
+              ]
+            }
+          },
+          "required": [
+            "type",
+            "properties",
+            "required",
+            "additionalProperties"
+          ]
+        },
+        "PromptVariableProperty": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "string"
+              ]
+            }
+          },
+          "required": [
+            "type"
+          ]
+        },
+        "PromptDefaultParameters": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "temperature": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 2
+            },
+            "top_p": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "max_output_tokens": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2147483647
+            }
+          }
         }
       }
     }
@@ -40003,6 +42396,16 @@
                 "format": "uuid"
               },
               "maxItems": 100
+            },
+            "run_limits": {
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/WorkflowRunLimits"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             }
           },
           "type": "object"
@@ -40154,6 +42557,40 @@
               "format": "int64",
               "minimum": 1,
               "maximum": 2147483647
+            }
+          }
+        },
+        "WorkflowRunLimits": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "max_iterations": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 1,
+              "maximum": 32
+            },
+            "max_tool_calls": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0,
+              "maximum": 128
+            },
+            "max_duration_seconds": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 1,
+              "maximum": 600
+            },
+            "max_concurrent_runs": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 1,
+              "maximum": 2147483647
+            },
+            "max_run_cost": {
+              "type": "string",
+              "pattern": "^[0-9]{1,12}(\\.[0-9]{1,12})?$"
             }
           }
         }
@@ -41828,6 +44265,13 @@
               "maxLength": 8192,
               "writeOnly": true,
               "description": "Bearer credential; absent preserves, null removes. Never returned."
+            },
+            "entra_client_secret": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 16384,
+              "writeOnly": true,
+              "description": "Replacement Entra OBO middle-tier client secret. Required when enabling Entra or changing the issuer, client ID, or token endpoint. Never returned."
             }
           },
           "required": [
@@ -41873,6 +44317,14 @@
             "alias": {
               "type": "string",
               "pattern": "^t_[a-f0-9]{32}_[a-f0-9]{32}$"
+            },
+            "classification": {
+              "type": "string",
+              "enum": [
+                "read_only",
+                "approval_required"
+              ],
+              "description": "Operator classification of a published tool. Unclassified tools require approval."
             }
           },
           "required": [
@@ -41900,11 +44352,15 @@
             },
             "card_digest": {
               "type": "string",
-              "pattern": "^[a-f0-9]{64}$"
+              "pattern": "^[a-f0-9]{64}$",
+              "description": "SHA-256 digest of the reviewed agent card. An OAuth agent's card must be publicly readable for publication and discovery. Task requests use the caller's grant."
             },
             "credential_id": {
               "type": "string",
               "format": "uuid"
+            },
+            "oauth": {
+              "$ref": "#/$defs/AgentOAuthConfiguration"
             },
             "toolset_revisions": {
               "type": "array",
@@ -41929,6 +44385,28 @@
             "max_cost": {
               "type": "string",
               "pattern": "^[0-9]{1,12}(\\.[0-9]{1,12})?$"
+            },
+            "message_price": {
+              "type": "string",
+              "pattern": "^[0-9]{1,12}(\\.[0-9]{1,12})?$"
+            },
+            "remote_work_bound_seconds": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 3600,
+              "description": "The agent's declared maximum duration for remote work on one task, in seconds. Required for budgeted calls and enforced by the agent."
+            },
+            "max_task_continuations": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 128,
+              "description": "Maximum observed continuations per task. Defaults to 32."
+            },
+            "task_deadline_seconds": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 3600,
+              "description": "Maximum gateway task duration in seconds. Defaults to 600."
             }
           },
           "required": [
@@ -41941,8 +44419,78 @@
             "max_cost"
           ]
         },
+        "AgentOAuthConfiguration": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "client_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "audience": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2048
+            },
+            "scopes": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 32,
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              }
+            },
+            "authorization_endpoint": {
+              "type": "string",
+              "format": "uri",
+              "maxLength": 2048,
+              "description": "Required for browser and device OAuth."
+            },
+            "token_endpoint": {
+              "type": "string",
+              "format": "uri",
+              "maxLength": 2048
+            },
+            "device_authorization_endpoint": {
+              "type": "string",
+              "format": "uri",
+              "maxLength": 2048
+            },
+            "entra_obo": {
+              "$ref": "#/$defs/MCPEntraOBO"
+            }
+          },
+          "required": [
+            "client_id",
+            "audience",
+            "scopes",
+            "token_endpoint"
+          ],
+          "description": "OAuth grants are bound to the approved agent endpoint and caller identity. Browser and device flows use personal enrollment. Entra OBO uses verified workload assertions and a sealed middle-tier client secret."
+        },
+        "MCPEntraOBO": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "issuer"
+          ],
+          "properties": {
+            "issuer": {
+              "type": "string",
+              "maxLength": 2048,
+              "description": "Exact registered workload issuer trusted for delegated user assertions."
+            }
+          }
+        },
         "PromptDefinition": {
           "type": "object",
+          "description": "Use template and variables for a single user message, or messages and variable_schema for a structured prompt.",
           "additionalProperties": false,
           "properties": {
             "template": {
@@ -41950,18 +44498,127 @@
               "maxLength": 65536
             },
             "variables": {
-              "type": "array",
+              "type": [
+                "array",
+                "null"
+              ],
               "items": {
                 "type": "string",
                 "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
               },
               "maxItems": 256
+            },
+            "messages": {
+              "type": "array",
+              "maxItems": 256,
+              "items": {
+                "$ref": "#/$defs/PromptMessage"
+              }
+            },
+            "variable_schema": {
+              "$ref": "#/$defs/PromptVariableSchema"
+            },
+            "default_parameters": {
+              "$ref": "#/$defs/PromptDefaultParameters"
+            }
+          }
+        },
+        "PromptMessage": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "role": {
+              "type": "string",
+              "enum": [
+                "system",
+                "user",
+                "assistant"
+              ]
+            },
+            "content": {
+              "type": "string",
+              "maxLength": 65536
             }
           },
           "required": [
-            "template",
-            "variables"
+            "role",
+            "content"
           ]
+        },
+        "PromptVariableSchema": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "object"
+              ]
+            },
+            "properties": {
+              "type": "object",
+              "additionalProperties": {
+                "$ref": "#/$defs/PromptVariableProperty"
+              }
+            },
+            "required": {
+              "type": "array",
+              "maxItems": 256,
+              "items": {
+                "type": "string",
+                "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
+              },
+              "uniqueItems": true
+            },
+            "additionalProperties": {
+              "type": "boolean",
+              "enum": [
+                false
+              ]
+            }
+          },
+          "required": [
+            "type",
+            "properties",
+            "required",
+            "additionalProperties"
+          ]
+        },
+        "PromptVariableProperty": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "string"
+              ]
+            }
+          },
+          "required": [
+            "type"
+          ]
+        },
+        "PromptDefaultParameters": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "temperature": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 2
+            },
+            "top_p": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "max_output_tokens": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2147483647
+            }
+          }
         }
       }
     }
@@ -43065,6 +45722,37 @@
                   "type": "null"
                 }
               ]
+            },
+            "tool_execution": {
+              "type": "string",
+              "enum": [
+                "",
+                "gateway"
+              ],
+              "description": "When gateway, the gateway executes authorized read-only tools on transformed Chat Completions routes."
+            },
+            "toolsets": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "uniqueItems": true,
+              "description": "Published toolset IDs that gateway execution may use. Callers can select a subset."
+            },
+            "responses_mcp_items": {
+              "type": "boolean",
+              "description": "Operator declaration that Responses clients support gateway-generated MCP output items. Requires gateway tool execution on a transformed route. MCP items are emitted only when the run uses the certified built-in Responses contract; other contracts omit them."
+            },
+            "run_limits": {
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/WorkflowRunLimits"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             }
           },
           "required": [
@@ -43724,6 +46412,40 @@
             "acknowledge_opaque_unmetered"
           ],
           "type": "object"
+        },
+        "WorkflowRunLimits": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "max_iterations": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 1,
+              "maximum": 32
+            },
+            "max_tool_calls": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0,
+              "maximum": 128
+            },
+            "max_duration_seconds": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 1,
+              "maximum": 600
+            },
+            "max_concurrent_runs": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 1,
+              "maximum": 2147483647
+            },
+            "max_run_cost": {
+              "type": "string",
+              "pattern": "^[0-9]{1,12}(\\.[0-9]{1,12})?$"
+            }
+          }
         }
       }
     }
@@ -44035,7 +46757,9 @@
                   "requests",
                   "attempts",
                   "guardrail_decisions",
-                  "audit"
+                  "audit",
+                  "runs",
+                  "trace_spans"
                 ]
               }
             },
@@ -44165,6 +46889,13 @@
               "maxLength": 8192,
               "writeOnly": true,
               "description": "Bearer credential; absent preserves, null removes. Never returned."
+            },
+            "entra_client_secret": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 16384,
+              "writeOnly": true,
+              "description": "Replacement Entra OBO middle-tier client secret. Required when enabling Entra or changing the issuer, client ID, or token endpoint. Never returned."
             }
           },
           "required": [
@@ -44210,6 +46941,14 @@
             "alias": {
               "type": "string",
               "pattern": "^t_[a-f0-9]{32}_[a-f0-9]{32}$"
+            },
+            "classification": {
+              "type": "string",
+              "enum": [
+                "read_only",
+                "approval_required"
+              ],
+              "description": "Operator classification of a published tool. Unclassified tools require approval."
             }
           },
           "required": [
@@ -44237,11 +46976,15 @@
             },
             "card_digest": {
               "type": "string",
-              "pattern": "^[a-f0-9]{64}$"
+              "pattern": "^[a-f0-9]{64}$",
+              "description": "SHA-256 digest of the reviewed agent card. An OAuth agent's card must be publicly readable for publication and discovery. Task requests use the caller's grant."
             },
             "credential_id": {
               "type": "string",
               "format": "uuid"
+            },
+            "oauth": {
+              "$ref": "#/$defs/AgentOAuthConfiguration"
             },
             "toolset_revisions": {
               "type": "array",
@@ -44266,6 +47009,28 @@
             "max_cost": {
               "type": "string",
               "pattern": "^[0-9]{1,12}(\\.[0-9]{1,12})?$"
+            },
+            "message_price": {
+              "type": "string",
+              "pattern": "^[0-9]{1,12}(\\.[0-9]{1,12})?$"
+            },
+            "remote_work_bound_seconds": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 3600,
+              "description": "The agent's declared maximum duration for remote work on one task, in seconds. Required for budgeted calls and enforced by the agent."
+            },
+            "max_task_continuations": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 128,
+              "description": "Maximum observed continuations per task. Defaults to 32."
+            },
+            "task_deadline_seconds": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 3600,
+              "description": "Maximum gateway task duration in seconds. Defaults to 600."
             }
           },
           "required": [
@@ -44278,8 +47043,78 @@
             "max_cost"
           ]
         },
+        "AgentOAuthConfiguration": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "client_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "audience": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2048
+            },
+            "scopes": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 32,
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              }
+            },
+            "authorization_endpoint": {
+              "type": "string",
+              "format": "uri",
+              "maxLength": 2048,
+              "description": "Required for browser and device OAuth."
+            },
+            "token_endpoint": {
+              "type": "string",
+              "format": "uri",
+              "maxLength": 2048
+            },
+            "device_authorization_endpoint": {
+              "type": "string",
+              "format": "uri",
+              "maxLength": 2048
+            },
+            "entra_obo": {
+              "$ref": "#/$defs/MCPEntraOBO"
+            }
+          },
+          "required": [
+            "client_id",
+            "audience",
+            "scopes",
+            "token_endpoint"
+          ],
+          "description": "OAuth grants are bound to the approved agent endpoint and caller identity. Browser and device flows use personal enrollment. Entra OBO uses verified workload assertions and a sealed middle-tier client secret."
+        },
+        "MCPEntraOBO": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "issuer"
+          ],
+          "properties": {
+            "issuer": {
+              "type": "string",
+              "maxLength": 2048,
+              "description": "Exact registered workload issuer trusted for delegated user assertions."
+            }
+          }
+        },
         "PromptDefinition": {
           "type": "object",
+          "description": "Use template and variables for a single user message, or messages and variable_schema for a structured prompt.",
           "additionalProperties": false,
           "properties": {
             "template": {
@@ -44287,18 +47122,127 @@
               "maxLength": 65536
             },
             "variables": {
-              "type": "array",
+              "type": [
+                "array",
+                "null"
+              ],
               "items": {
                 "type": "string",
                 "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
               },
               "maxItems": 256
+            },
+            "messages": {
+              "type": "array",
+              "maxItems": 256,
+              "items": {
+                "$ref": "#/$defs/PromptMessage"
+              }
+            },
+            "variable_schema": {
+              "$ref": "#/$defs/PromptVariableSchema"
+            },
+            "default_parameters": {
+              "$ref": "#/$defs/PromptDefaultParameters"
+            }
+          }
+        },
+        "PromptMessage": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "role": {
+              "type": "string",
+              "enum": [
+                "system",
+                "user",
+                "assistant"
+              ]
+            },
+            "content": {
+              "type": "string",
+              "maxLength": 65536
             }
           },
           "required": [
-            "template",
-            "variables"
+            "role",
+            "content"
           ]
+        },
+        "PromptVariableSchema": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "object"
+              ]
+            },
+            "properties": {
+              "type": "object",
+              "additionalProperties": {
+                "$ref": "#/$defs/PromptVariableProperty"
+              }
+            },
+            "required": {
+              "type": "array",
+              "maxItems": 256,
+              "items": {
+                "type": "string",
+                "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
+              },
+              "uniqueItems": true
+            },
+            "additionalProperties": {
+              "type": "boolean",
+              "enum": [
+                false
+              ]
+            }
+          },
+          "required": [
+            "type",
+            "properties",
+            "required",
+            "additionalProperties"
+          ]
+        },
+        "PromptVariableProperty": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "string"
+              ]
+            }
+          },
+          "required": [
+            "type"
+          ]
+        },
+        "PromptDefaultParameters": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "temperature": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 2
+            },
+            "top_p": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "max_output_tokens": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2147483647
+            }
+          }
         }
       }
     }

@@ -145,6 +145,9 @@ func (s *Server) retainedResultFor(attemptID string) (mcpservers.ToolResult, boo
 }
 
 func retainedPrincipal(authority access.Authority) string {
+	if authority.DelegationAgentID != "" {
+		return authority.ID + "\x00delegation\x00" + authority.DelegationAgentID + "\x00" + authority.DelegationPairDigest
+	}
 	if individual := verifiedEndUser(authority); individual != "" {
 		return authority.ID + "\x00" + individual
 	}

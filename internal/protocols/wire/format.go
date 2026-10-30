@@ -115,3 +115,13 @@ func (f Format) Surface() string {
 	}
 	return "openai"
 }
+
+func (f Format) WorkflowTranscriptField() string {
+	if f == Responses {
+		return "input"
+	}
+	if f.Surface() == "gemini" {
+		return "contents"
+	}
+	return "messages"
+}

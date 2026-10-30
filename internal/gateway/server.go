@@ -35,6 +35,7 @@ import (
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/export"
 	"github.com/tyk-swe/olp/internal/guardrails"
+	"github.com/tyk-swe/olp/internal/mcp"
 	"github.com/tyk-swe/olp/internal/observability"
 	"github.com/tyk-swe/olp/internal/operations/tokenization/estimate"
 	"github.com/tyk-swe/olp/internal/protocols"
@@ -116,8 +117,11 @@ type Server struct {
 	// Admission enforces the budgets shared by every replica. A nil Admission
 	// means none were configured: keys and targets that bound nothing are
 	// served, and anything that must be metered fails closed.
-	Admission *Admission
-	Debits    SessionDebitLedger
+	Admission     *Admission
+	Debits        SessionDebitLedger
+	WorkflowRuns  WorkflowRunStore
+	WorkflowTools WorkflowToolRunner
+	Traces        *TraceDeps
 	// Media wires the bounded media substrate into the public surface. A nil
 	// Media leaves the media routes unregistered.
 	Media    *MediaDeps
@@ -221,6 +225,8 @@ func (s *Server) Register(mux *http.ServeMux) {
 		s.RegisterCode(mux)
 	}
 	mux.HandleFunc("POST /v1/guardrails/apply", s.applyGuardrails)
+	mux.HandleFunc("POST /v1/delegations", s.createDelegation)
+	mux.HandleFunc("POST /v1/traces", s.ingestTraces)
 	s.registerNative(mux)
 	s.registerGeminiLifecycle(mux)
 	s.registerMedia(mux)
@@ -240,12 +246,13 @@ var requestIDPattern = regexp.MustCompile(`^[A-Za-z0-9._-]{1,128}$`)
 
 // request carries per-request identity shared by handlers.
 type request struct {
-	guardrailMetadata bool
-	cacheDirectives   string
-	callerCredential  *callerCredential
-	body              *measuredBody
-	id                string
-	durableID         string
+	delegationAssertion string
+	guardrailMetadata   bool
+	cacheDirectives     string
+	callerCredential    *callerCredential
+	body                *measuredBody
+	id                  string
+	durableID           string
 	// minted records that this gateway chose the request id. A caller may name
 	// its own, and nothing stops two callers from naming the same one.
 	minted    bool
@@ -293,7 +300,7 @@ func (s *Server) begin(w http.ResponseWriter, r *http.Request) request {
 		measured = &measuredBody{ReadCloser: r.Body, declared: r.ContentLength}
 		r.Body = measured
 	}
-	return request{cacheDirectives: strings.Join(r.Header.Values("X-OLP-Cache"), ","), guardrailMetadata: r.Header.Get("X-OLP-Guardrails") == "true", callerCredential: readCallerCredential(r.Header), body: measured, id: id, minted: minted, clientIP: ClientIP(r, s.cfg.TrustedProxies), startedAt: s.now(), release: release, trace: telemetry.RequestFromContext(r.Context()), counted: s.counted}
+	return request{delegationAssertion: strings.TrimSpace(r.Header.Get("X-OLP-Agent-Identity")), cacheDirectives: strings.Join(r.Header.Values("X-OLP-Cache"), ","), guardrailMetadata: r.Header.Get("X-OLP-Guardrails") == "true", callerCredential: readCallerCredential(r.Header), body: measured, id: id, minted: minted, clientIP: ClientIP(r, s.cfg.TrustedProxies), startedAt: s.now(), release: release, trace: telemetry.RequestFromContext(r.Context()), counted: s.counted}
 }
 
 func sameOrigin(r *http.Request, origin string) bool {
@@ -331,7 +338,7 @@ func (s *Server) preflight(w http.ResponseWriter, r *http.Request) {
 	s.cors(w, r)
 	h := w.Header()
 	h.Set("Access-Control-Allow-Methods", "GET, HEAD, POST, PUT, PATCH, DELETE, OPTIONS")
-	h.Set("Access-Control-Allow-Headers", "Authorization, Idempotency-Key, X-Api-Key, X-Goog-Api-Key, X-Goog-Api-Client, X-Goog-Upload-Protocol, X-Goog-Upload-Command, X-Goog-Upload-Header-Content-Length, X-Goog-Upload-Header-Content-Type, X-Goog-Upload-Offset, Anthropic-Version, Anthropic-Beta, Anthropic-Dangerous-Direct-Browser-Access, Content-Type, X-Request-Id, X-OLP-Routing, X-OLP-Cache, OpenAI-Organization, OpenAI-Project, OpenAI-Beta, X-OLP-API-Key, X-OLP-Client-Contract, X-OLP-Route, X-OLP-Attribution, X-OLP-Guardrails, X-OLP-End-User, X-OLP-Provider-Credential, X-OLP-Continuation, X-OLP-Continuation-Handle, X-OLP-Submission-ID, X-Stainless-Lang, X-Stainless-Package-Version, X-Stainless-OS, X-Stainless-Arch, X-Stainless-Runtime, X-Stainless-Runtime-Version, X-Stainless-Retry-Count, X-Stainless-Timeout, X-Stainless-Helper-Method")
+	h.Set("Access-Control-Allow-Headers", "Authorization, Idempotency-Key, X-Api-Key, X-Goog-Api-Key, X-Goog-Api-Client, X-Goog-Upload-Protocol, X-Goog-Upload-Command, X-Goog-Upload-Header-Content-Length, X-Goog-Upload-Header-Content-Type, X-Goog-Upload-Offset, Anthropic-Version, Anthropic-Beta, Anthropic-Dangerous-Direct-Browser-Access, Content-Type, X-Request-Id, X-OLP-Routing, X-OLP-Cache, OpenAI-Organization, OpenAI-Project, OpenAI-Beta, X-OLP-API-Key, X-OLP-Client-Contract, X-OLP-Route, X-OLP-Attribution, X-OLP-Guardrails, X-OLP-End-User, X-OLP-Provider-Credential, X-OLP-Continuation, X-OLP-Continuation-Handle, X-OLP-Submission-ID, X-OLP-Delegating-Key, X-OLP-Agent-Identity, X-Stainless-Lang, X-Stainless-Package-Version, X-Stainless-OS, X-Stainless-Arch, X-Stainless-Runtime, X-Stainless-Runtime-Version, X-Stainless-Retry-Count, X-Stainless-Timeout, X-Stainless-Helper-Method")
 	h.Set("Access-Control-Max-Age", "600")
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -630,7 +637,13 @@ func (s *Server) inferenceOperation(family wire.Format, dialect string) http.Han
 			return
 		}
 		defer s.release(r.Context())
-		authority, e := s.authenticate(r, "inference")
+		token, e := presentedKey(r)
+		if e != nil {
+			x.failure, status = e, e.Status
+			writeError(w, e)
+			return
+		}
+		authority, e := s.authenticateRequest(r, token, "inference")
 		if e != nil {
 			x.failure, status = e, e.Status
 			writeError(w, e)
@@ -664,13 +677,22 @@ func (s *Server) inferenceOperation(family wire.Format, dialect string) http.Han
 		}
 		var parsed *wire.Request
 		var err error
-		if family == wire.Bedrock {
+		if family == wire.Chat || family == wire.Responses || family == wire.Anthropic || family == wire.Gemini || family == wire.GeminiStream {
+			var prompt parsedRequest
+			prompt, e = s.parsePrompt(x, family, body, r.PathValue("model"), s.keyAuthorizer(x.authority))
+			parsed, x.prompt = prompt.request, prompt.reference
+			if x.request.body != nil {
+				x.request.body.decoded = max(x.request.body.decoded, prompt.decoded)
+			}
+		} else if family == wire.Bedrock {
 			parsed, err = protocols.ParseBedrockRequest(body, r.PathValue("model"), strings.HasSuffix(r.URL.Path, "/converse-stream"))
 		} else {
 			parsed, err = protocols.Parse(family, body, r.PathValue("model"))
 		}
 		if err != nil {
 			e = requestError(err)
+		}
+		if e != nil {
 			x.failure, status = e, e.Status
 			writeError(w, e)
 			return
@@ -681,7 +703,13 @@ func (s *Server) inferenceOperation(family wire.Format, dialect string) http.Han
 			writeError(w, e)
 			return
 		}
-		x.generation.parsed = parsed
+		x.generation.parsed, x.generation.approval, err = stripWorkflowApproval(parsed)
+		if err != nil {
+			e = invalidRequest("invalid_request", "The workflow approval could not be removed from the request.", nil)
+			x.failure, status = e, e.Status
+			writeError(w, e)
+			return
+		}
 		if e := s.prepareContinuation(r.Context(), x); e != nil {
 			x.failure, status = e, e.Status
 			writeError(w, e)
@@ -717,7 +745,24 @@ func (s *Server) inferenceOperation(family wire.Format, dialect string) http.Han
 			writeError(w, e)
 			return
 		}
-		if s.Capture != nil && x.origin == "" && x.operationName() == "generation" {
+		if x.named().ToolExecution == "gateway" {
+			if e := s.prepareWorkflow(r.Context(), x, token); e != nil {
+				x.failure, status = e, e.Status
+				writeError(w, e)
+				return
+			}
+			if e := s.prepareWorkflowResume(r.Context(), x); e != nil {
+				x.failure, status = e, e.Status
+				writeError(w, e)
+				return
+			}
+		} else if len(x.generation.approval) > 0 {
+			e := permissionError("tool_approval_invalid", "The workflow approval is invalid or expired.")
+			x.failure, status = e, e.Status
+			writeError(w, e)
+			return
+		}
+		if s.Capture != nil && x.prompt == nil && x.workflow == nil && x.origin == "" && x.operationName() == "generation" {
 			x.captureContext = r.Context()
 			x.capture = s.Capture.Resolve(x.captureProject(), x.named().Slug, x.keyID, x.endUserDigest, x.request.accountingID())
 		}
@@ -744,7 +789,28 @@ func (s *Server) inferenceOperation(family wire.Format, dialect string) http.Han
 			writeError(w, e)
 			return
 		}
-		if parsed.Stream {
+		workflowLease, e := s.reserveWorkflowRun(ctx, x)
+		if e != nil {
+			x.failure, status = e, e.Status
+			writeError(w, e)
+			return
+		}
+		defer func() {
+			if err := workflowLease.Release(ctx); err != nil {
+				s.Admission.logger().Error("release workflow concurrency", "error", err)
+			}
+		}()
+		if x.workflow != nil && x.workflow.runID == "" {
+			runID, err := s.WorkflowRuns.Start(ctx, authority, x.named().ID, x.named().RevisionID)
+			if err != nil {
+				x.failure = serverError(http.StatusServiceUnavailable, "tool_execution_unavailable", "The workflow run could not be reserved.")
+				status = x.failure.Status
+				writeError(w, x.failure)
+				return
+			}
+			x.workflow.runID = runID
+		}
+		if parsed.Stream && x.workflow == nil {
 			sw := &streamWriter{w: w, family: family, x: x}
 			x.generation.emit = func(frame []byte) error {
 				err := sw.emit(frame)
@@ -754,16 +820,56 @@ func (s *Server) inferenceOperation(family wire.Format, dialect string) http.Han
 				}
 				return err
 			}
-			out = s.execute(ctx, x)
+			out = s.executeModelStep(ctx, x, x.generation.parsed, x.authority)
 			status = sw.finish(out)
 			return
 		}
-		out = s.execute(ctx, x)
+		if x.workflow != nil {
+			out = s.executeToolLoop(ctx, x)
+		} else {
+			out = s.executeModelStep(ctx, x, x.generation.parsed, x.authority)
+		}
 		if out.err != nil {
 			status = out.err.Status
 			if out.err.Status > 0 {
 				writeError(w, out.err)
 			}
+			return
+		}
+		if out.approval != nil {
+			if parsed.Stream {
+				frames, err := workflowPauseFrames(family, x.named().Slug, x.request.accountingID(), out.approval, int(s.cfg.MaxEventBytes), int(s.cfg.MaxResponseBytes))
+				if err != nil {
+					out.err = serverError(http.StatusBadGateway, "invalid_tool_response", "The approval response could not be prepared.")
+					status = out.err.Status
+					writeError(w, out.err)
+					return
+				}
+				w.Header().Set("Content-Type", "text/event-stream")
+				status = http.StatusOK
+				if _, err := w.Write(frames); err != nil {
+					out.cancelled = true
+				}
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			status = http.StatusOK
+			if err := json.NewEncoder(w).Encode(out.approval); err != nil {
+				out.cancelled = true
+			}
+			return
+		}
+		if parsed.Stream && x.workflow != nil {
+			sw := &streamWriter{w: w, family: family, x: x}
+			if err := sw.emit(x.workflow.finalFrames); err != nil {
+				out.err = (&attemptFailure{class: classCancelled}).toError()
+				out.cancelled = true
+			} else {
+				out.committed = true
+				x.facts[len(x.facts)-1].Committed = true
+				x.delivered(s.now())
+			}
+			status = sw.finish(out)
 			return
 		}
 		if err := rc.SetWriteDeadline(time.Now().Add(responseWriteTimeout)); err != nil {
@@ -843,6 +949,32 @@ func (s *Server) prepare(ctx context.Context, x *call, authorize func(*routing.R
 	if e := authorize(&route); e != nil {
 		return e
 	}
+	if route.ToolExecution != "gateway" && len(x.generation.approval) > 0 {
+		return permissionError("tool_approval_invalid", "The workflow approval is invalid or expired.")
+	}
+	if route.ToolExecution == "gateway" && x.strict() {
+		return invalidRequest("tool_execution_strict_route", "Gateway tool execution requires a transformed route.", nil)
+	}
+	if route.ToolExecution == "gateway" && !x.generation.toolsetsSelected {
+		x.mirrors = false
+		bounds, callerBounds, bounded, boundErr := workflowBounds(route.RunLimits, x.authority.Policy.RunLimits, x.generation.parsed)
+		if boundErr != nil {
+			return boundErr
+		}
+		x.generation.runLimits = bounds
+		x.generation.callerRunLimits = callerBounds
+		x.generation.parsed = bounded
+		selected, parsed, e := selectToolsets(route.Toolsets, x.generation.parsed)
+		if e != nil {
+			return e
+		}
+		x.generation.toolsets = selected
+		x.generation.parsed = parsed
+		x.generation.toolsetsSelected = true
+	}
+	if route.ToolExecution == "gateway" && (s.WorkflowRuns == nil || s.WorkflowTools == nil || s.Debits == nil) {
+		return serverError(http.StatusServiceUnavailable, "tool_execution_unavailable", "Gateway tool execution requires durable accounting and tool services.")
+	}
 	if x.pin != nil {
 		if e := s.pinAttempts(ctx, x); e != nil {
 			return e
@@ -858,8 +990,15 @@ func (s *Server) prepare(ctx context.Context, x *call, authorize func(*routing.R
 // content policy to it. A selector that delegates moves the request on to its
 // route, which is planned in turn.
 func (s *Server) planCanonical(ctx context.Context, x *call) *Error {
+	if x.named().ToolExecution == "gateway" && x.route.Fidelity.Strict() {
+		return invalidRequest("tool_execution_strict_route", "Gateway tool execution requires a transformed route.", nil)
+	}
 	if e := s.bindGuardrails(ctx, x); e != nil {
 		return e
+	}
+	if x.prompt != nil && x.route.Fidelity.Strict() {
+		param := "olp_prompt"
+		return invalidRequest("invalid_prompt", "Published prompts require a transformed route.", &param)
 	}
 	if e := s.checkRouteFidelity(ctx, x.route); e != nil {
 		return e
@@ -907,6 +1046,9 @@ func (s *Server) planCanonical(ctx context.Context, x *call) *Error {
 	}
 	options.Accept = func(p routing.Provider, t routing.Target) error {
 		cfg := p.Connector()
+		if x.named().ToolExecution == "gateway" && !p.SupportsToolCalls(t.ProviderModel, x.family.Surface(), x.mode) {
+			return errors.New("model tool-call capability unavailable")
+		}
 		if p.Network != nil && p.Network.CredentialID != "" && s.Runtime.Eligibility(p.Network.CredentialID) != routing.Eligible {
 			return errors.New("provider network credential unavailable")
 		}
@@ -984,19 +1126,32 @@ func (s *Server) planCanonical(ctx context.Context, x *call) *Error {
 		return selectionError(&routing.SelectionError{Code: routing.NoEligibleTargets}, route.Slug)
 	}
 	if x.pin != nil {
-		x.budget, x.allowance = 1, 1
+		x.budget, x.allowance = x.spent+1, x.spent+1
 	}
 	return s.enforceContentPolicy(x)
 }
 
 // modelObject renders a route as an OpenAI model object.
-func modelObject(snapshot *routing.Snapshot, route *routing.Route) map[string]any {
+func (s *Server) modelObject(ctx context.Context, release *runtime.Release, authority access.Authority, route *routing.Route) map[string]any {
+	capabilities := s.modelCapabilities(ctx, release, authority, *route, "openai")
 	return map[string]any{
 		"id":           route.Slug,
 		"object":       "model",
 		"created":      route.PublishedAt.Unix(),
 		"owned_by":     "openllmproxy",
-		"capabilities": routing.EffectiveCapabilities(snapshot, *route),
+		"capabilities": capabilities,
+	}
+}
+
+type modelCapabilities struct {
+	routing.RouteCapabilities
+	GatewayExecution *routing.WorkflowCapability `json:"gateway_execution,omitempty"`
+}
+
+func (s *Server) modelCapabilities(ctx context.Context, release *runtime.Release, authority access.Authority, route routing.Route, surface string) modelCapabilities {
+	return modelCapabilities{
+		RouteCapabilities: routing.EffectiveCapabilities(release.Snapshot, route),
+		GatewayExecution:  mcp.DescribeReachableWorkflow(ctx, s.WorkflowTools, authority, release, route, surface, s.WorkflowRuns != nil && s.Debits != nil, s.now()),
 	}
 }
 
@@ -1012,7 +1167,7 @@ func (s *Server) models(w http.ResponseWriter, r *http.Request) {
 	for _, slug := range slices.Sorted(mapsKeys(req.release.Snapshot.Routes)) {
 		if authority.Allows("models_read", slug, req.release.Snapshot.Routes[slug].ProjectID, now) {
 			route := req.release.Snapshot.Routes[slug]
-			data = append(data, modelObject(req.release.Snapshot, &route))
+			data = append(data, s.modelObject(r.Context(), req.release, authority, &route))
 		}
 	}
 	writeJSON(w, map[string]any{"object": "list", "data": data})
@@ -1031,7 +1186,7 @@ func (s *Server) model(w http.ResponseWriter, r *http.Request) {
 		writeError(w, modelNotFound(slug))
 		return
 	}
-	writeJSON(w, modelObject(req.release.Snapshot, &route))
+	writeJSON(w, s.modelObject(r.Context(), req.release, authority, &route))
 }
 
 func mapsKeys[V any](m map[string]V) func(func(string) bool) {
