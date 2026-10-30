@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"sync"
@@ -15,6 +16,7 @@ import (
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/codeadapter"
 	"github.com/tyk-swe/olp/internal/codemode"
+	"github.com/tyk-swe/olp/internal/codeplans"
 	"github.com/tyk-swe/olp/internal/codexauth"
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/resources"
@@ -191,6 +193,61 @@ func codeDo(t *testing.T, server *httptest.Server, body []byte, extra http.Heade
 	}
 	t.Cleanup(func() { _ = response.Body.Close() })
 	return response
+}
+
+func TestCodeNativeMessagesPreservePayloadForSelectedAccount(t *testing.T) {
+	h, ledger, server := newCodeForwardHarness(t)
+	configuration := routing.Configuration{Kind: connectors.KindPlugin, AuthMode: connectors.AuthGrant, ProfileID: codeplans.ZAIProfile, Endpoint: h.upstream.URL + "/a"}
+	h.rt.release.Snapshot.CodeConnections = map[string]routing.Configuration{"revision:provider": configuration}
+	if err := h.rt.release.Snapshot.Compile(); err != nil {
+		t.Fatal(err)
+	}
+	adapter, ok := codeadapter.ForConnection(configuration.Kind, configuration.AuthMode, configuration.ProfileID)
+	if !ok {
+		t.Fatal("selected account has no adapter")
+	}
+	endpoint, ok := adapter.Endpoint("v1/messages")
+	if !ok {
+		t.Fatal("selected account cannot serve Messages")
+	}
+	requestBody := []byte(`{ "model":"native-model", "messages":[{"role":"user","content":"hello"}], "max_tokens":8, "vendor_extension":{"keep":true} }`)
+	responseBody := []byte(`{ "type":"message", "content":[{"type":"text","text":"native reply"}], "stop_reason":"end_turn", "usage":{"input_tokens":2,"output_tokens":1}, "vendor_extension":{"keep":true} }`)
+	h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		if err != nil || !bytes.Equal(body, requestBody) {
+			t.Error("native request bytes changed")
+		}
+		if r.URL.Path != "/a/"+endpoint.UpstreamPath || r.URL.RawQuery != "native_option=1" {
+			t.Error("request did not use the selected account's endpoint")
+		}
+		if r.Header.Get(endpoint.CredentialHeader) != "Bearer upstream-only" || r.Header.Get("X-Api-Key") != "" {
+			t.Error("request did not use the selected account's credential header")
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write(responseBody)
+	})
+	request, err := http.NewRequestWithContext(t.Context(), http.MethodPost, server.URL+"/code/coding/v1/messages?native_option=1", bytes.NewReader(requestBody))
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.Header.Set("X-Api-Key", fullKey)
+	request.Header.Set("X-Claude-Code-Session-Id", "native-messages")
+	request.Header.Set("Content-Type", "application/json")
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	body, err := io.ReadAll(response.Body)
+	if err != nil || response.StatusCode != http.StatusOK || !bytes.Equal(body, responseBody) {
+		t.Fatalf("native response changed: status=%d body=%s error=%v", response.StatusCode, body, err)
+	}
+	if usage := ledger.wait(t); usage.Total == nil || *usage.Total != 3 {
+		t.Fatalf("selected account's response usage was lost: %+v", usage)
+	}
+	if h.mock.count("a") != 1 {
+		t.Fatal("native request dispatched more than once")
+	}
 }
 
 // The revision froze another provider's connection, not the account's.
