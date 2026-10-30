@@ -14,7 +14,12 @@ func (s *Server) codeModels(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer s.release(r.Context())
-	authority, failure := s.authenticate(r, "inference")
+	token, failure := presentedKey(r)
+	if failure != nil {
+		codeWriteError(w, r, codemode.Refuse(failure.Status, "code_authentication_refused"))
+		return
+	}
+	authority, failure := s.authenticateKey(r, token, "inference")
 	if failure != nil {
 		codeWriteError(w, r, codemode.Refuse(failure.Status, "code_authentication_refused"))
 		return

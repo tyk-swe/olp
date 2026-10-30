@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -159,14 +160,26 @@ func (a codeTestAuthorizer) AuthorizeCode(_ context.Context, _ routing.Configura
 	return codemode.Authorization{Principal: a.principal, Headers: headers}, nil
 }
 
-func newCodeForwardHarness(t *testing.T) (*harness, *codeTestLedger, *httptest.Server) {
+type codeForwardSetup struct {
+	Models      []string
+	Policy      access.KeyPolicy
+	Offers      codeclient.Offers
+	ModelsError error
+}
+
+func newCodeForwardHarness(t *testing.T, setups ...codeForwardSetup) (*harness, *codeTestLedger, *httptest.Server) {
 	t.Helper()
 	h := newHarness(t, Config{})
-	ledger := &codeTestLedger{done: make(chan codemode.Usage, 100)}
+	setup := func() codeForwardSetup {
+		if len(setups) > 0 {
+			return setups[0]
+		}
+		return codeForwardSetup{Models: []string{"native-model"}, Policy: access.KeyPolicy{Scopes: []string{"inference", "models_read"}}}
+	}()
+	ledger := &codeTestLedger{done: make(chan codemode.Usage, 100), offers: setup.Offers, modelsErr: setup.ModelsError}
 	publishedAt := time.Now()
-	route := codemode.Route{ID: "route", Slug: "coding", ProjectID: "project", PoolID: "pool", RevisionID: "revision", Revision: 1, PublishedAt: &publishedAt, Enabled: true, Models: []string{"native-model"}}
-	authority := h.rt.keys[fullKey]
-	authority.ProjectID = &route.ProjectID
+	route := codemode.Route{ID: "route", Slug: "coding", ProjectID: "project", PoolID: "pool", RevisionID: "revision", Revision: 1, PublishedAt: &publishedAt, Enabled: true, Models: setup.Models}
+	authority := access.Authority{ID: h.rt.keys[fullKey].ID, ProjectID: &route.ProjectID, Policy: setup.Policy}
 	h.rt.keys[fullKey] = authority
 	h.rt.release.Snapshot.CodeRoutes = map[string]codemode.Route{"coding": route}
 	h.rt.release.Snapshot.CodeConnections = map[string]routing.Configuration{"revision:provider": {Kind: connectors.KindPlugin, AuthMode: connectors.AuthGrant, ProfileID: codexauth.ProfileID, Endpoint: h.upstream.URL + "/a"}}
@@ -205,14 +218,11 @@ func codeDo(t *testing.T, server *httptest.Server, body []byte, extra http.Heade
 }
 
 func TestCodeModelDiscoveryUsesAuthorizedOffers(t *testing.T) {
-	h, ledger, server := newCodeForwardHarness(t)
-	authority := h.rt.keys[fullKey]
-	authority.Policy.Scopes = []string{"inference"}
-	h.rt.keys[fullKey] = authority
-	route := h.rt.release.Snapshot.CodeRoutes["coding"]
-	route.Models = []string{"private-code-v42", "unavailable-model"}
-	h.rt.release.Snapshot.CodeRoutes["coding"] = route
-	ledger.offers = codeclient.Offers{{Adapter: codemode.AdapterCodex, Models: []string{"private-code-v42", "unpublished-model"}}}
+	_, _, server := newCodeForwardHarness(t, codeForwardSetup{
+		Models: []string{"private-code-v42", "unavailable-model"},
+		Policy: access.KeyPolicy{Scopes: []string{"inference"}},
+		Offers: codeclient.Offers{{Adapter: codemode.AdapterCodex, Models: []string{"private-code-v42", "unpublished-model"}}},
+	})
 	for _, path := range []string{"models", "v1/models"} {
 		t.Run(path, func(t *testing.T) {
 			r, err := http.NewRequestWithContext(t.Context(), http.MethodGet, server.URL+"/code/coding/"+path, nil)
@@ -245,6 +255,18 @@ func TestCodeModelDiscoveryUsesAuthorizedOffers(t *testing.T) {
 			if len(body.Data[0].Capabilities) == 0 || body.Data[0].Capabilities[0].Protocol != "responses" || body.Data[0].Capabilities[0].Path != "responses" {
 				t.Fatalf("missing native protocol capabilities %+v", body)
 			}
+
+			for _, capability := range body.Data[0].Capabilities {
+				expected := func() []string {
+					if capability.Path == "responses" {
+						return []string{"http", "websocket"}
+					}
+					return []string{"http"}
+				}()
+				if !slices.Equal(capability.Transports, expected) {
+					t.Fatalf("transports must use public names, got %q", capability.Transports)
+				}
+			}
 		})
 	}
 }
@@ -264,9 +286,10 @@ func TestCodeModelDiscoveryEnforcesAuthority(t *testing.T) {
 		{name: "revision changed", key: fullKey, liveError: codemode.Refuse(409, "code_route_revision_changed"), status: 409},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			_, ledger, server := newCodeForwardHarness(t)
-			ledger.offers = codeclient.Offers{{Adapter: codemode.AdapterCodex, Models: []string{"native-model"}}}
-			ledger.modelsErr = tc.liveError
+			_, _, server := newCodeForwardHarness(t, codeForwardSetup{
+				Models: []string{"native-model"}, Policy: access.KeyPolicy{Scopes: []string{"inference"}},
+				Offers: codeclient.Offers{{Adapter: codemode.AdapterCodex, Models: []string{"native-model"}}}, ModelsError: tc.liveError,
+			})
 			r, err := http.NewRequestWithContext(t.Context(), http.MethodGet, server.URL+"/code/coding/models", nil)
 			if err != nil {
 				t.Fatal(err)
@@ -344,5 +367,35 @@ func TestCodeNativeMessagesPreservePayloadForSelectedAccount(t *testing.T) {
 	}
 	if h.mock.count("a") != 1 {
 		t.Fatal("native request dispatched more than once")
+	}
+}
+
+func TestCodeModelDiscoveryWithNativeEndUserSource(t *testing.T) {
+	_, _, server := newCodeForwardHarness(t, codeForwardSetup{
+		Models: []string{"native-model"}, Policy: access.KeyPolicy{Scopes: []string{"inference"}, EndUserSource: new("native")},
+		Offers: codeclient.Offers{{Adapter: codemode.AdapterCodex, Models: []string{"native-model"}}},
+	})
+	request, err := http.NewRequestWithContext(t.Context(), http.MethodGet, server.URL+"/code/coding/models", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.Header.Set("Authorization", "Bearer "+fullKey)
+	response, err := server.Client().Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	var catalog struct {
+		Data []codemode.Model `json:"data"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&catalog); err != nil {
+		t.Fatal(err)
+	}
+	if response.StatusCode != http.StatusOK || len(catalog.Data) != 1 || catalog.Data[0].ID != "native-model" {
+		t.Fatalf("discovery required a generation identity, status %d, catalog %+v", response.StatusCode, catalog)
+	}
+	generation := codeDo(t, server, []byte(`{"model":"native-model","input":[]}`), http.Header{"Content-Type": {"application/json"}})
+	if generation.StatusCode != http.StatusBadRequest {
+		t.Fatalf("generation accepted a missing native identity, status %d", generation.StatusCode)
 	}
 }

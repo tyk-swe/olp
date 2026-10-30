@@ -8,42 +8,76 @@ import (
 )
 
 func Catalog(route codemode.Route, offers Offers) []codemode.Model {
-	models := []codemode.Model{}
 	if !route.Enabled || route.RevisionID == "" {
-		return models
+		return []codemode.Model{}
 	}
-	for _, id := range route.Models {
-		model := codemode.Model{ID: id, Object: "model", Capabilities: []codemode.ModelCapability{}, Clients: []string{}}
-		for _, adapter := range offers.adapters(id) {
-			vendor, ok := codeadapter.Lookup(adapter)
-			if !ok {
-				continue
-			}
-			for _, endpoint := range vendor.Endpoints() {
-				if !vendor.ServesModel(endpoint.Protocol, id) {
-					continue
-				}
-				capability := codemode.ModelCapability{Protocol: endpoint.Protocol, Path: endpoint.ClientPath, Transports: []string{}}
-				for _, transport := range []codeadapter.Transport{codeadapter.HTTP, codeadapter.WebSocket} {
-					if endpoint.Supports(transport) {
-						capability.Transports = append(capability.Transports, string(transport))
+	return slices.AppendSeq([]codemode.Model{}, func(yield func(codemode.Model) bool) {
+		for _, id := range route.Models {
+			declarations := slices.Collect(func(yield func(codeadapter.Vendor) bool) {
+				for _, adapter := range offers.adapters(id) {
+					if declaration, ok := codeadapter.Lookup(adapter); ok && !yield(declaration) {
+						return
 					}
 				}
-				if !slices.ContainsFunc(model.Capabilities, func(c codemode.ModelCapability) bool {
-					return c.Protocol == capability.Protocol && c.Path == capability.Path && slices.Equal(c.Transports, capability.Transports)
-				}) {
-					model.Capabilities = append(model.Capabilities, capability)
-				}
+			})
+			capabilities := modelCapabilities(id, declarations)
+			if len(capabilities) > 0 && !yield(codemode.Model{ID: id, Object: "model", Capabilities: capabilities, Clients: modelClients(id, declarations)}) {
+				return
 			}
-			for _, client := range vendor.Clients() {
-				if vendor.Reaches(client, id) && !slices.Contains(model.Clients, client) {
-					model.Clients = append(model.Clients, client)
+		}
+	})
+}
+
+func modelCapabilities(id string, declarations []codeadapter.Vendor) []codemode.ModelCapability {
+	capabilities := slices.Collect(func(yield func(codemode.ModelCapability) bool) {
+		for _, declaration := range declarations {
+			for _, endpoint := range declaration.Endpoints() {
+				if !declaration.ServesModel(endpoint.Protocol, id) {
+					continue
+				}
+				transports := slices.Collect(func(yield func(string) bool) {
+					for _, transport := range []struct {
+						flag codeadapter.Transport
+						name string
+					}{{codeadapter.HTTP, "http"}, {codeadapter.WebSocket, "websocket"}} {
+						if endpoint.Supports(transport.flag) && !yield(transport.name) {
+							return
+						}
+					}
+				})
+				if !yield(codemode.ModelCapability{Protocol: endpoint.Protocol, Path: endpoint.ClientPath, Transports: transports}) {
+					return
 				}
 			}
 		}
-		if len(model.Capabilities) > 0 {
-			models = append(models, model)
+	})
+	return slices.AppendSeq([]codemode.ModelCapability{}, func(yield func(codemode.ModelCapability) bool) {
+		for i, capability := range capabilities {
+			duplicate := slices.ContainsFunc(capabilities[:i], func(previous codemode.ModelCapability) bool {
+				return previous.Protocol == capability.Protocol && previous.Path == capability.Path && slices.Equal(previous.Transports, capability.Transports)
+			})
+			if !duplicate && !yield(capability) {
+				return
+			}
 		}
-	}
-	return models
+	})
+}
+
+func modelClients(id string, declarations []codeadapter.Vendor) []string {
+	clients := slices.Collect(func(yield func(string) bool) {
+		for _, declaration := range declarations {
+			for _, client := range declaration.Clients() {
+				if declaration.Reaches(client, id) && !yield(client) {
+					return
+				}
+			}
+		}
+	})
+	return slices.AppendSeq([]string{}, func(yield func(string) bool) {
+		for i, client := range clients {
+			if !slices.Contains(clients[:i], client) && !yield(client) {
+				return
+			}
+		}
+	})
 }
