@@ -11,6 +11,10 @@ func (t *streamTranslator) refusalDelta(text string) error {
 	}
 	t.refused = true
 	if t.target == wire.Chat {
+		if err := t.reserve(len(text)); err != nil {
+			return err
+		}
+		t.refusal += text
 		return t.chat(Object{"refusal": raw(text)}, nil, nil)
 	}
 	if t.target != wire.Responses {

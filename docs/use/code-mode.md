@@ -46,26 +46,36 @@ endpoint: most on Chat Completions, MiniMax and Qwen models on Messages and
 Grok and GPT models on Responses. OpenCode picks it per model; Claude Code
 speaks only Messages, so on OpenCode Go it works only with Messages models.
 
-### Messages text through Codex
+### Messages through Codex
 
-Enable **Translate Messages text through Codex** in the route editor, or set
+Enable **Translate Messages through Codex** in the route editor, or set
 `messages_to_codex: true` in the management route write, then publish the draft.
 The policy is disabled by default and pinned to the published revision. A route
 with Codex accounts can then generate Claude Code setup using the same native
 model identifiers. Codex remains the default client for those accounts.
 
-The policy translates HTTP `v1/messages` text requests into the Codex Responses
-transport. Both unary Messages replies and Messages event streams are supported.
+The policy translates HTTP `v1/messages` text and tool requests into the Codex
+Responses transport. Tool names, call IDs, JSON arguments and text results are
+preserved across turns, including fragmented argument streams. Explicit
+`output_config.effort` values `low`, `medium` and `high` map to the same
+`reasoning.effort` values. `thinking.type: adaptive` is accepted with one of
+those explicit effort values. This mapping follows the
+[pinned translator](https://github.com/router-for-me/CLIProxyAPI/blob/90c447d3a8727d115aa7552ec93ce023736ed492/internal/translator/codex/claude/codex_claude_request.go#L407-L453)
+reviewed on 2026-10-30. Both unary Messages replies and Messages event streams are supported.
 System text is preserved in developer input, and the caller's output-token cap
 is preserved. Admission, selected-account authorization and usage settlement use
 the existing code-mode ledger. Native Messages accounts continue to forward
 native payloads unchanged.
 
 The documented Claude `?beta=true` transport flag is accepted and removed before
-the Codex request is sent. Tools, thinking, beta headers, unknown query fields,
-stop sequences and other unsupported required semantics are refused before
-dispatch. Identity and prompt compatibility remain disabled. This text path does
-not establish complete Claude Code qualification.
+the Codex request is sent. Signed thinking, opaque reasoning state, numeric
+reasoning budgets, error-marked tool results, media, beta headers, unknown query
+fields, stop sequences and other unsupported required semantics are refused.
+Cancellation and partial upstream failures end the attempt without replay or a
+successful Messages terminal event. Missing terminal usage remains unknown in
+the ledger. Identity and prompt compatibility remain disabled. This translated
+path does not establish complete Claude Code qualification. CLI context and beta
+requirements and durable opaque state need separate qualification.
 Live Codex acceptance, including output-token caps, remains unqualified.
 
 ### Mixing subscriptions
