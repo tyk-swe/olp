@@ -20,7 +20,7 @@ import (
 // fields take the route's default client, the first native model the route
 // serves it, and that model for planning and background work.
 type Request struct {
-	GatewayURL, Client, Model, PlanModel, SmallModel string
+	GatewayURL, Client, Platform, Model, PlanModel, SmallModel string
 }
 
 // Generate generates a client's configuration for a published
@@ -31,12 +31,16 @@ type Request struct {
 // model. Its planning and background models are those one conversation reaches
 // with the main model, which uses one account of each adapter.
 func Generate(route codemode.Route, offers Offers, in Request) (codemode.ClientConfiguration, error) {
-	var out codemode.ClientConfiguration
+	empty := codemode.ClientConfiguration{}
 	if !route.Enabled || route.RevisionID == "" || !access.RouteSlug.MatchString(route.Slug) {
-		return out, access.Fail(409, "code_route_unpublished", "Publish an enabled code-mode route first.")
+		return empty, access.Fail(409, "code_route_unpublished", "Publish an enabled code-mode route first.")
+	}
+	platform := cmp.Or(in.Platform, "linux")
+	if !slices.Contains([]string{"linux", "macos", "windows"}, platform) {
+		return empty, access.Invalid("platform", "Choose Linux, macOS or Windows.")
 	}
 	if err := codemode.ValidateModels(route.Models); err != nil {
-		return out, access.Invalid("models", err.Error())
+		return empty, access.Invalid("models", err.Error())
 	}
 	var supported []string
 	for _, model := range route.Models {
@@ -50,7 +54,7 @@ func Generate(route codemode.Route, offers Offers, in Request) (codemode.ClientC
 		}
 	}
 	if len(supported) == 0 {
-		return out, access.Fail(409, "code_route_adapter_unsupported", "This route's accounts have no supported client.")
+		return empty, access.Fail(409, "code_route_adapter_unsupported", "This route's accounts have no supported client.")
 	}
 	client := cmp.Or(in.Client, supported[0])
 	if !slices.Contains(supported, client) {
@@ -58,7 +62,7 @@ func Generate(route codemode.Route, offers Offers, in Request) (codemode.ClientC
 		for i, c := range supported {
 			names[i] = clientNames[c]
 		}
-		return out, access.Invalid("client", fmt.Sprintf("This route's accounts support %s.", conjoin(names)))
+		return empty, access.Invalid("client", fmt.Sprintf("This route's accounts support %s.", conjoin(names)))
 	}
 	var native []string
 	var adapters []codemode.Adapter
@@ -77,15 +81,15 @@ func Generate(route codemode.Route, offers Offers, in Request) (codemode.ClientC
 	slices.SortFunc(adapters, codeadapter.Compare)
 	model := cmp.Or(in.Model, native[0])
 	if !slices.Contains(native, model) {
-		return out, access.Invalid("model", nativeModel)
+		return empty, access.Invalid("model", nativeModel)
 	}
 	plan, err := companionModel(client, "plan_model", "planning", in.PlanModel, model, native)
 	if err != nil {
-		return out, err
+		return empty, err
 	}
 	small, err := companionModel(client, "small_model", "background", in.SmallModel, model, native)
 	if err != nil {
-		return out, err
+		return empty, err
 	}
 	selected := []string{model}
 	through, _ := offers.through(client, selected)
@@ -99,47 +103,50 @@ func Generate(route codemode.Route, offers Offers, in Request) (codemode.ClientC
 		selected = append(selected, *companion.model)
 		var ok bool
 		if through, ok = offers.through(client, selected); !ok {
-			return out, access.Invalid(companion.field, "A conversation uses one account of each subscription, so it cannot reach this model alongside the others selected.")
+			return empty, access.Invalid(companion.field, "A conversation uses one account of each subscription, so it cannot reach this model alongside the others selected.")
 		}
 	}
 	base, err := url.Parse(in.GatewayURL)
 	if err != nil || base.Host == "" || base.User != nil || base.RawQuery != "" || base.Fragment != "" || base.Opaque != "" {
-		return out, access.Invalid("gateway_url", "Use the public HTTPS gateway URL without credentials, query or fragment.")
+		return empty, access.Invalid("gateway_url", "Use the public HTTPS gateway URL without credentials, query or fragment.")
 	}
 	local := base.Hostname() == "localhost"
 	if ip := net.ParseIP(base.Hostname()); ip != nil {
 		local = ip.IsLoopback()
 	}
 	if base.Scheme != "https" && !(base.Scheme == "http" && local) {
-		return out, access.Invalid("gateway_url", "Use HTTPS, or HTTP on loopback for local development.")
+		return empty, access.Invalid("gateway_url", "Use HTTPS, or HTTP on loopback for local development.")
 	}
 	base.Path = strings.TrimRight(base.Path, "/") + route.BasePath()
 	base.RawPath = ""
-	out = codemode.ClientConfiguration{
-		RouteSlug: route.Slug, BaseURL: base.String(), NativeModels: native, Adapters: adapters,
-		Client: client, SupportedClients: supported, Model: model, PlanModel: plan, SmallModel: small,
-		QualificationGaps: qualificationGaps(adapters, client),
-	}
-	switch client {
-	case codeadapter.ClientCodex:
-		out.ClientVersion, out.Format, out.File = codexauth.ClientVersion, "toml", new("$CODEX_HOME/config.toml")
-		out.Configuration = codexConfiguration(out.BaseURL, model)
-	case codeadapter.ClientClaudeCode:
-		names := make([]string, len(adapters))
-		for i, adapter := range adapters {
-			vendor, _ := codeadapter.Lookup(adapter)
-			names[i] = vendor.Name
+	baseURL := base.String()
+	version, format, configuration, renderErr := func() (string, string, string, error) {
+		switch client {
+		case codeadapter.ClientCodex:
+			return codexauth.ClientVersion, "toml", codexConfiguration(baseURL, model), nil
+		case codeadapter.ClientClaudeCode:
+			if platform == "windows" {
+				return codeadapter.ClaudeCodeVersion, "powershell", claudeCodePowerShellConfiguration(baseURL, model, *plan, *small), nil
+			}
+			return codeadapter.ClaudeCodeVersion, "shell", claudeCodeConfiguration(baseURL, model, *plan, *small), nil
+		case codeadapter.ClientOpenCode:
+			text, err := openCodeConfiguration(adapters, offers, through, native, baseURL, model, *plan, *small)
+			return codeadapter.OpenCodeVersion, "json", text, err
 		}
-		out.ClientVersion, out.Format = codeadapter.ClaudeCodeVersion, "shell"
-		out.Configuration = claudeCodeConfiguration(route.Slug, conjoin(names), out.BaseURL, model, *plan, *small)
-	case codeadapter.ClientOpenCode:
-		out.ClientVersion, out.Format, out.File = codeadapter.OpenCodeVersion, "json", new("opencode.json")
-		out.Configuration, err = openCodeConfiguration(adapters, offers, through, native, out.BaseURL, model, *plan, *small)
+		return "", "", "", nil
+	}()
+	file, instructions := platformInstructions(client, platform)
+	out := codemode.ClientConfiguration{
+		RouteSlug: route.Slug, BaseURL: baseURL, NativeModels: native, Adapters: adapters,
+		Client: client, Platform: platform, File: file, Instructions: instructions, SupportedClients: supported, Model: model, PlanModel: plan, SmallModel: small,
+		ClientVersion: version, Format: format, Configuration: configuration,
+		QualificationGaps: append(qualificationGaps(adapters, client), "Generated configuration is not evidence of native platform startup or live subscription qualification."),
 	}
-	if err == nil {
-		err = addResearchConfiguration(&out, route.Tools)
+	if renderErr != nil {
+		return out, renderErr
 	}
-	return out, err
+	researchErr := addResearchConfiguration(&out, route.Tools)
+	return out, researchErr
 }
 
 const nativeModel = "Choose a native model the published route serves this client."

@@ -164,6 +164,8 @@ it('shows and copies every companion configuration file', async () => {
     native_models: ['minimax-m3'],
     adapters: ['opencode_go'],
     client: 'claude-code',
+    platform: 'linux',
+    instructions: 'Merge companion MCP servers into the project configuration',
     supported_clients: ['claude-code'],
     client_version: 'latest',
     model: 'minimax-m3',
@@ -194,5 +196,68 @@ it('shows and copies every companion configuration file', async () => {
   expect(host.textContent).toContain('.mcp.json copied.');
   expect(host.textContent?.replace(/\s+/g, ' ')).toContain(
     'preserving other tools and settings'
+  );
+});
+
+it('keeps platform across client changes and models across platform changes', async () => {
+  const load = vi.fn(
+    async (
+      _route: api.CodeRoute,
+      selection: api.CodeClientSelection
+    ): Promise<api.CodeClientConfiguration> => ({
+      route_slug: route.slug,
+      base_url: 'https://olp.example/code/team-code',
+      native_models: ['main-model', 'other-model'],
+      adapters: ['opencode_go'],
+      client: selection.client ?? 'claude-code',
+      platform: selection.platform ?? 'linux',
+      instructions: `Merge setup for ${selection.platform ?? 'linux'}`,
+      supported_clients: ['claude-code', 'codex', 'opencode'],
+      client_version: 'fixture',
+      model: selection.model ?? 'main-model',
+      plan_model: null,
+      small_model: null,
+      format: selection.platform === 'windows' ? 'powershell' : 'shell',
+      file:
+        selection.platform === 'windows' ? 'olp-claude.ps1' : 'olp-claude.sh',
+      configuration: `${selection.client ?? 'claude-code'} on ${selection.platform ?? 'linux'}`,
+      qualification_gaps: []
+    })
+  );
+  component = mount(ResearchConfigurationProbe, {
+    target: host,
+    props: { client, route, load }
+  });
+  flushSync();
+  await settle();
+  const model = host.querySelector<HTMLSelectElement>(
+    `#code-client-model-${route.id}`
+  )!;
+  model.value = 'other-model';
+  model.dispatchEvent(new Event('change', { bubbles: true }));
+  await settle();
+  const windows = host.querySelector<HTMLInputElement>(
+    'input[value="windows"]'
+  );
+  expect(windows).not.toBeNull();
+  windows!.click();
+  await settle();
+  expect(load).toHaveBeenLastCalledWith(
+    route,
+    { model: 'other-model', platform: 'windows' },
+    expect.any(AbortSignal)
+  );
+  expect(host.textContent).toContain('Merge setup for windows');
+  expect(
+    host.querySelector<HTMLTextAreaElement>(
+      `#code-client-configuration-${route.id}`
+    )!.value
+  ).toBe('claude-code on windows');
+  host.querySelector<HTMLInputElement>('input[value="codex"]')!.click();
+  await settle();
+  expect(load).toHaveBeenLastCalledWith(
+    route,
+    { client: 'codex', platform: 'windows' },
+    expect.any(AbortSignal)
   );
 });
