@@ -249,6 +249,7 @@ func clonePredicate(p Predicate) Predicate {
 	return p
 }
 func cloneCodeRoute(r codemode.Route) codemode.Route {
+	r.Aliases = maps.Clone(r.Aliases)
 	if r.Tools != nil {
 		tools := *r.Tools
 		tools.Services = slices.Clone(tools.Services)

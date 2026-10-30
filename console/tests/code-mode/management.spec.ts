@@ -133,6 +133,8 @@ INSERT INTO olp.provider_grants(credential_id) VALUES(:'credential');
   await page
     .getByLabel('Native models')
     .fill('fixture-native-model\nfixture-other-model');
+  await page.getByLabel('Rewrite model identifiers using exact aliases').check();
+  await page.getByLabel('Exact model aliases').fill('team-code=fixture-native-model');
   await page.getByRole('button', { name: 'Save', exact: true }).click();
   await expect(page.getByText('Not published', { exact: true })).toBeVisible();
   page.once('dialog', (dialog) => dialog.accept());
@@ -159,12 +161,14 @@ INSERT INTO olp.provider_grants(credential_id) VALUES(:'credential');
   const route = routes.body.items[0];
   expect(route.models).toEqual(['fixture-native-model', 'fixture-other-model']);
   expect(route.enabled).toBe(true);
+  expect(route.model_rewriting).toBe(true);
+  expect(route.aliases).toEqual({ 'team-code': 'fixture-native-model' });
   expect(route.revision).toBe(1);
-  await expect(page.getByLabel('Client native model')).toHaveValue(
+  await expect(page.getByLabel('Client model')).toHaveValue(
     'fixture-native-model'
   );
   const model = 'fixture-other-model';
-  await page.getByLabel('Client native model').focus();
+  await page.getByLabel('Client model').focus();
   await Promise.all([
     page.waitForResponse((response) => {
       const url = new URL(response.url());
@@ -173,7 +177,7 @@ INSERT INTO olp.provider_grants(credential_id) VALUES(:'credential');
         url.searchParams.get('model') === model
       );
     }),
-    page.getByLabel('Client native model').selectOption(model)
+    page.getByLabel('Client model').selectOption(model)
   ]);
   await expect(page.getByLabel('Generated configuration')).toHaveValue(
     new RegExp(`model = "${model}"`)
@@ -181,7 +185,7 @@ INSERT INTO olp.provider_grants(credential_id) VALUES(:'credential');
   await expect(page.getByLabel('Generated configuration')).toHaveValue(
     new RegExp(`"X-OLP-Code-Model" = "${model}"`)
   );
-  await expect(page.getByLabel('Client native model')).toBeFocused();
+  await expect(page.getByLabel('Client model')).toBeFocused();
   const gatewayURL = 'https://gateway.example';
   await Promise.all([
     page.waitForResponse((response) => {
@@ -203,7 +207,7 @@ INSERT INTO olp.provider_grants(credential_id) VALUES(:'credential');
   await expect(
     page.getByRole('heading', { name: 'Published route revisions' })
   ).toBeVisible();
-  await expect(page.getByLabel('Client native model')).toHaveValue(model);
+  await expect(page.getByLabel('Client model')).toHaveValue(model);
   expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
   await page.setViewportSize({ width: 390, height: 844 });
   await page.screenshot({
@@ -220,9 +224,9 @@ INSERT INTO olp.provider_grants(credential_id) VALUES(:'credential');
   await expect(page.getByLabel('Native models')).toHaveValue(
     'unsaved-native-model'
   );
-  await expect(page.getByLabel('Client native model')).toHaveValue(model);
+  await expect(page.getByLabel('Client model')).toHaveValue(model);
   await page.getByRole('button', { name: 'Save', exact: true }).click();
-  await expect(page.getByLabel('Client native model')).toHaveValue(model);
+  await expect(page.getByLabel('Client model')).toHaveValue(model);
   await expect(page.getByLabel('Generated configuration')).toHaveValue(
     new RegExp(`"X-OLP-Code-Model" = "${model}"`)
   );
@@ -242,7 +246,7 @@ INSERT INTO olp.provider_grants(credential_id) VALUES(:'credential');
   ]);
   expect(publication.status()).toBe(200);
   expect(configuration.status()).toBe(200);
-  await expect(page.getByLabel('Client native model')).toHaveValue(
+  await expect(page.getByLabel('Client model')).toHaveValue(
     'unsaved-native-model'
   );
   await expect(page.getByLabel('Generated configuration')).toHaveValue(

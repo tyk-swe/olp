@@ -528,3 +528,67 @@ func TestCodeFoundationAllowanceRecoveryRequiresSupportedReset(t *testing.T) {
 		})
 	}
 }
+
+func TestCodeFoundationExactAliasesPreservePinsAcrossPublication(t *testing.T) {
+	f := newCodeFixtureWithProfile(t, codexauth.ProfileID)
+	if f.route.ModelRewriting || len(f.route.Aliases) != 0 {
+		t.Fatal("model rewriting enabled by default")
+	}
+	f.exec(t, `UPDATE olp.code_accounts SET models='["native-model","native-next"]' WHERE id=$1`, f.account)
+	write := func(target string, rewriting bool, models []string, status int) map[string]any {
+		return f.h.want(f.owner, "PUT", "/api/v1/code/routes/"+f.route.ID, map[string]any{
+			"project_id": f.project, "slug": f.route.Slug, "pool_id": f.pool, "models": models,
+			"aliases": map[string]string{"team-code": target}, "model_rewriting": rewriting, "enabled": true,
+		}, map[string]string{"If-Match": `"` + f.route.ETag + `"`}, status)
+	}
+	models := []string{"native-model", "native-next"}
+	write("native-model", false, models, 422)
+	write("unpublished-target", true, models, 422)
+	publish := func(target string, models []string, idempotency string) {
+		draft := write(target, true, models, 200)
+		headers := etagHeader(draft)
+		headers["Idempotency-Key"] = idempotency
+		published := f.h.want(f.owner, "POST", "/api/v1/code/routes/"+f.route.ID+"/publish", nil, headers, 200)
+		encoded, _ := json.Marshal(published)
+		if err := json.Unmarshal(encoded, &f.route); err != nil || !f.route.ModelRewriting || f.route.Aliases["team-code"] != target || f.route.MessagesToCodex {
+			t.Fatalf("exact alias publication %+v, %v", f.route, err)
+		}
+	}
+	publish("native-model", models, "alias-first")
+	config := f.h.want(f.owner, "GET", "/api/v1/code/routes/"+f.route.ID+"/client-config?client=codex&model=team-code&gateway_url=https://olp.example", nil, nil, 200)
+	if config["model"] != "team-code" || !strings.Contains(config["configuration"].(string), `team-code`) {
+		t.Fatal("published alias missing from setup", config)
+	}
+	admit := func(conversation, model string) (resources.CodePermit, error) {
+		input := f.input(conversation, "", nil)
+		input.Operation.Model = model
+		return f.store.Admit(t.Context(), input)
+	}
+	first, err := admit("alias-existing", "team-code")
+	if err != nil || first.Pin.Model != "team-code" || first.Pin.TargetModel != "native-model" || first.Attempt.Model != "native-model" {
+		t.Fatalf("alias first admission %+v, %v", first, err)
+	}
+	native, err := admit("native-existing", "native-model")
+	if err != nil {
+		t.Fatal(err)
+	}
+	publish("native-next", models, "alias-repointed")
+	continued, err := admit("alias-existing", "team-code")
+	if err != nil || continued.Pin.TargetModel != first.Pin.TargetModel || continued.Account.ID != first.Account.ID || continued.Attempt.Model != first.Attempt.Model {
+		t.Fatalf("republish moved alias pin %+v, %v", continued, err)
+	}
+	fresh, err := admit("alias-new", "team-code")
+	if err != nil || fresh.Pin.TargetModel != "native-next" || fresh.Attempt.Model != "native-next" {
+		t.Fatalf("new conversation ignored repointed alias %+v, %v", fresh, err)
+	}
+	continuedNative, err := admit("native-existing", "native-model")
+	if err != nil || continuedNative.Pin.TargetModel != "native-model" || continuedNative.Account.ID != native.Account.ID {
+		t.Fatalf("pre-alias native pin changed %+v, %v", continuedNative, err)
+	}
+	publish("native-next", []string{"native-next"}, "alias-old-target-removed")
+	_, err = admit("alias-existing", "team-code")
+	codeRefusal(t, err, "code_model_denied")
+	f.exec(t, `UPDATE olp.code_accounts SET health='unavailable' WHERE id=$1`, f.account)
+	_, err = admit("alias-unavailable", "team-code")
+	codeRefusal(t, err, "code_account_unavailable")
+}

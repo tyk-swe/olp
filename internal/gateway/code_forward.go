@@ -106,9 +106,20 @@ func (s *Server) serveCode(w http.ResponseWriter, r *http.Request) {
 	defer attempt.finish(ctx)
 	payload, err := func() (codePayload, error) {
 		if attempt.endpoint.Protocol == ingress.protocol {
+			if attempt.model != attempt.publicModel {
+				rewritten, err := codewire.RewriteRequestModel(body, attempt.publicModel, attempt.model)
+				return codePayload{body: rewritten, query: r.URL.RawQuery}, err
+			}
 			return codePayload{body: raw, query: r.URL.RawQuery}, nil
 		}
-		return codeTranslateMessages(body, r, observation.Operation.Model)
+		if attempt.model != attempt.publicModel {
+			rewritten, err := codewire.RewriteRequestModel(body, attempt.publicModel, attempt.model)
+			if err != nil {
+				return codePayload{}, err
+			}
+			return codeTranslateMessages(rewritten, r, attempt.model)
+		}
+		return codeTranslateMessages(body, r, attempt.model)
 	}()
 	if err != nil {
 		refuse(err)
@@ -133,6 +144,11 @@ func (s *Server) serveCode(w http.ResponseWriter, r *http.Request) {
 	}
 	request.ContentLength = int64(len(payload.body))
 	request.Header = attempt.headers(r.Header)
+	if attempt.model != attempt.publicModel {
+		request.Header.Del("Content-Encoding")
+		request.Header.Del("Content-Length")
+		request.Header.Set("Accept-Encoding", "identity")
+	}
 	if payload.translated {
 		request.Header.Del("Content-Encoding")
 		request.Header.Del("Content-Length")
@@ -167,6 +183,10 @@ func (s *Server) serveCode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	maps.Copy(w.Header(), codewire.ForwardHeaders(response.Header, false))
+	if attempt.model != attempt.publicModel {
+		w.Header().Del("Content-Encoding")
+		w.Header().Del("Content-Length")
+	}
 	for name := range codewire.ForwardTrailers(response.Trailer, response.Header, false) {
 		w.Header().Add("Trailer", name)
 	}
@@ -201,6 +221,12 @@ func (b *codeRequestBody) Read(p []byte) (int, error) {
 func (b *codeRequestBody) Close() error { return nil }
 
 func (a *codeAttempt) copyResponse(ctx context.Context, w http.ResponseWriter, response *http.Response) {
+	if a.model != a.publicModel {
+		if err := a.copyModelResponse(w, response); err != nil {
+			a.transportFailed(ctx, err)
+		}
+		return
+	}
 	streaming := strings.HasPrefix(strings.ToLower(response.Header.Get("Content-Type")), "text/event-stream")
 	encoded := response.Header.Get("Content-Encoding")
 	events := codewire.NewEvents(codewire.MaxBody, func(data []byte) { a.observe(a.observer.Event(data)) })

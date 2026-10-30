@@ -37,6 +37,8 @@ type codeAttempt struct {
 	terminal      bool
 	conflicting   bool
 	prewarm       bool
+	model         string
+	publicModel   string
 }
 
 func (s *Server) prepareCode(r *http.Request, release *runtime.Release, route codemode.Route, observation codemode.Request, ingress codeIngress, transport codeadapter.Transport) (*codeAttempt, error) {
@@ -47,7 +49,16 @@ func (s *Server) prepareCode(r *http.Request, release *runtime.Release, route co
 	if !authority.Allows("inference", route.Slug, &route.ProjectID, s.now()) {
 		return nil, codemode.Refuse(403, "code_permission_denied")
 	}
-	providers := release.Snapshot.CodeModelProviders(route, ingress.path, observation.Operation.Model, transport)
+	operation, err := route.ResolveModel(observation.Operation)
+	if err != nil {
+		return nil, err
+	}
+	providers := func() []string {
+		if operation.RequestedModel != "" {
+			return release.Snapshot.CodeProviders(route, ingress.path, transport)
+		}
+		return release.Snapshot.CodeModelProviders(route, ingress.path, operation.Model, transport)
+	}()
 	if len(providers) == 0 {
 		return nil, codemode.Refuse(400, "code_operation_unsupported")
 	}
@@ -61,13 +72,19 @@ func (s *Server) prepareCode(r *http.Request, release *runtime.Release, route co
 	}
 	permit, err := s.CodeLedger.Admit(r.Context(), resources.CodeAdmission{
 		Attribution: labels, Route: route, APIKeyID: authority.ID, EndUserDigest: authority.EndUserDigest,
-		Operation: observation.Operation, Providers: providers, PreviousResponse: observation.PreviousResponse,
+		Operation: operation, Providers: providers, PreviousResponse: observation.PreviousResponse,
 	})
 	if err != nil {
 		settleKey(r.Context(), lease, false, nil, s.log)
 		return nil, err
 	}
-	a := &codeAttempt{server: s, permit: permit, lease: lease, prewarm: observation.Operation.Name == "prewarm"}
+	model := func() string {
+		if permit.Pin.TargetModel != "" {
+			return permit.Pin.TargetModel
+		}
+		return operation.Model
+	}()
+	a := &codeAttempt{model: model, publicModel: operation.PublicModel(), server: s, permit: permit, lease: lease, prewarm: observation.Operation.Name == "prewarm"}
 	ok := false
 	defer func() {
 		if !ok {
@@ -107,7 +124,7 @@ func (s *Server) prepareCode(r *http.Request, release *runtime.Release, route co
 	if err != nil {
 		return nil, err
 	}
-	if !target.adapter.ServesModel(target.endpoint.Protocol, observation.Operation.Model) {
+	if !target.adapter.ServesModel(target.endpoint.Protocol, model) {
 		return nil, codemode.Refuse(503, "code_configuration_unsupported")
 	}
 	a.config, a.endpoint, a.observer = target.config, target.endpoint, codeObserver(target.endpoint)

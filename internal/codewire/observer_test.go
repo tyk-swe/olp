@@ -1,6 +1,7 @@
 package codewire
 
 import (
+	"bytes"
 	"net/http"
 	"testing"
 )
@@ -60,5 +61,24 @@ func TestClassifyChatRejectsMissingModel(t *testing.T) {
 	}
 	if request.Operation.Model != "glm-5.3" || request.Estimate < 7 {
 		t.Fatalf("classified request: %+v", request)
+	}
+}
+
+func TestModelRewritingChangesOnlyProtocolModelFields(t *testing.T) {
+	body := []byte(`{ "model":"native-a", "response":{"model":"native-a","output":[{"model":"native-a"}]}, "message":{"model":"native-a"},"unknown": { "model":"native-a", "number":1.2300 } }`)
+	rewritten, err := RewriteResponseModel(body, "native-a", "team-code")
+	if err != nil || !bytes.Contains(rewritten, []byte(`"model":"team-code"`)) || !bytes.Contains(rewritten, []byte(`"output":[{"model":"native-a"}]`)) || !bytes.Contains(rewritten, []byte(`{ "model":"native-a", "number":1.2300 }`)) {
+		t.Fatalf("model rewrite changed unrelated content %s, %v", rewritten, err)
+	}
+	request, err := RewriteRequestModel(body, "native-a", "team-code")
+	if err != nil || !bytes.Contains(request, []byte(`"response":{"model":"native-a","output":[{"model":"native-a"}]}`)) {
+		t.Fatalf("request rewrite changed unrelated response metadata %s, %v", request, err)
+	}
+	unchanged, err := RewriteResponseModel(body, "different-model", "team-code")
+	if err != nil || !bytes.Equal(unchanged, body) {
+		t.Fatalf("unrelated model rewritten %s, %v", unchanged, err)
+	}
+	if _, err := RewriteResponseModel([]byte(`{"model":"native-a","model":"native-b"}`), "native-a", "team-code"); err == nil {
+		t.Fatal("ambiguous request model rewritten")
 	}
 }

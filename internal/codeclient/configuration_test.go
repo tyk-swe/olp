@@ -270,3 +270,45 @@ func TestClaudeTranslatedCompanionsRequireReachableAccounts(t *testing.T) {
 		})
 	}
 }
+
+func TestExactAliasesAppearInDiscoveryAndGeneratedSetup(t *testing.T) {
+	route := codemode.Route{Slug: "coding", Enabled: true, RevisionID: "published", Models: []string{"minimax-fixture-model"}, ModelRewriting: true, MessagesToCodex: true, Aliases: map[string]string{"team-code": "minimax-fixture-model", "offline": "unavailable"}}
+	offers := Offers{{Adapter: codemode.AdapterOpenCodeGo, Models: route.Models}}
+	catalog := Catalog(route, offers)
+	if len(catalog) != 2 || catalog[1].ID != "team-code" || !reflect.DeepEqual(catalog[0].Capabilities, catalog[1].Capabilities) || !reflect.DeepEqual(catalog[0].Clients, catalog[1].Clients) {
+		t.Fatalf("alias discovery lost the target's capabilities %+v", catalog)
+	}
+	delete(route.Aliases, "offline")
+	for _, client := range []string{"claude-code", "opencode"} {
+		config, err := Generate(route, offers, Request{GatewayURL: "https://olp.example", Client: client, Model: "team-code"})
+		if err != nil || config.Model != "team-code" || !strings.Contains(config.Configuration, "team-code") {
+			t.Fatalf("alias setup for %s %+v, %v", client, config, err)
+		}
+		if client == "opencode" {
+			var document struct {
+				Provider map[string]struct {
+					Models map[string]struct {
+						Provider struct {
+							NPM string `json:"npm"`
+						} `json:"provider"`
+					} `json:"models"`
+				} `json:"provider"`
+			}
+			if err := json.Unmarshal([]byte(config.Configuration), &document); err != nil {
+				t.Fatal(err)
+			}
+			for _, provider := range document.Provider {
+				if provider.Models["team-code"].Provider.NPM != provider.Models["minimax-fixture-model"].Provider.NPM {
+					t.Fatalf("alias and native model use different protocols %s", config.Configuration)
+				}
+			}
+		}
+	}
+	codexOffers := Offers{{Adapter: codemode.AdapterCodex, Models: route.Models}}
+	for _, client := range []string{"codex", "claude-code"} {
+		config, err := Generate(route, codexOffers, Request{GatewayURL: "https://olp.example", Client: client, Model: "team-code"})
+		if err != nil || config.Model != "team-code" || !strings.Contains(config.Configuration, "team-code") {
+			t.Fatalf("alias setup for %s %+v, %v", client, config, err)
+		}
+	}
+}

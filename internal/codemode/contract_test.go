@@ -146,3 +146,62 @@ func TestHealthObservationRequiresTimestampAndCompatibleRetry(t *testing.T) {
 		})
 	}
 }
+
+func TestRouteExactAliasesRequireExplicitRewriting(t *testing.T) {
+	for _, test := range []struct {
+		name  string
+		route Route
+		valid bool
+	}{
+		{"native default", Route{Models: []string{"native-a"}}, true},
+		{"exact alias", Route{Models: []string{"native-a"}, ModelRewriting: true, Aliases: map[string]string{"coding": "native-a"}}, true},
+		{"missing opt in", Route{Models: []string{"native-a"}, Aliases: map[string]string{"coding": "native-a"}}, false},
+		{"unknown target", Route{Models: []string{"native-a"}, ModelRewriting: true, Aliases: map[string]string{"coding": "native-b"}}, false},
+		{"native collision", Route{Models: []string{"native-a"}, ModelRewriting: true, Aliases: map[string]string{"native-a": "native-a"}}, false},
+		{"alias chain", Route{Models: []string{"native-a"}, ModelRewriting: true, Aliases: map[string]string{"coding": "other", "other": "native-a"}}, false},
+		{"invalid name", Route{Models: []string{"native-a"}, ModelRewriting: true, Aliases: map[string]string{"bad name": "native-a"}}, false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if err := test.route.ValidateAliases(); (err == nil) != test.valid {
+				t.Fatalf("alias policy validity %v, error %v", test.valid, err)
+			}
+		})
+	}
+	route := Route{Models: []string{"native-a", "native-b"}, ModelRewriting: true, Aliases: map[string]string{"coding": "native-a"}}
+	alias, err := route.ResolveModel(Operation{Model: "coding"})
+	if err != nil || alias.Model != "native-a" || alias.PublicModel() != "coding" {
+		t.Fatalf("exact alias resolution %+v, %v", alias, err)
+	}
+	native, err := route.ResolveModel(Operation{Model: "native-b"})
+	if err != nil || native.Model != "native-b" || native.PublicModel() != "native-b" {
+		t.Fatalf("native resolution %+v, %v", native, err)
+	}
+	if _, err := route.ResolveModel(Operation{Model: "unknown"}); err == nil {
+		t.Fatal("unpublished model accepted")
+	}
+}
+
+func TestAliasRepublishKeepsExistingExactModelPins(t *testing.T) {
+	route := Route{Models: []string{"native-a", "native-b"}, Aliases: map[string]string{"team-code": "native-b"}, ModelRewriting: true}
+	operation := Operation{Name: "responses.create", Model: "team-code", Identity: Identity{Conversation: "continued"}}
+	pins := []Pin{{Model: "team-code", TargetModel: "native-a", AccountID: "original"}, {Model: "native-b", AccountID: "native"}}
+	continued, err := route.ResolvePinnedModel(operation, pins)
+	if err != nil || continued.Model != "native-a" || continued.PublicModel() != operation.Model || continued.Identity != operation.Identity {
+		t.Fatalf("republished alias moved existing conversation %+v, %v", continued, err)
+	}
+	fresh, err := route.ResolvePinnedModel(operation, nil)
+	if err != nil || fresh.Model != "native-b" || fresh.PublicModel() != operation.Model {
+		t.Fatalf("new conversation did not use current target %+v, %v", fresh, err)
+	}
+	native, err := route.ResolvePinnedModel(Operation{Model: "native-b"}, pins)
+	if err != nil || native.Model != "native-b" || native.RequestedModel != "" {
+		t.Fatalf("existing native pin changed %+v, %v", native, err)
+	}
+	removed := Route{Models: []string{"native-b"}, Aliases: route.Aliases, ModelRewriting: true}
+	if _, err := removed.ResolvePinnedModel(operation, pins); err == nil {
+		t.Fatal("removed target silently moved existing alias pin")
+	}
+	if _, err := (Route{Models: route.Models}).ResolvePinnedModel(operation, pins); err == nil {
+		t.Fatal("removed alias kept serving old pin")
+	}
+}

@@ -34,6 +34,12 @@
   let maxBodyBytes = $state(initial?.max_body_bytes?.toString() ?? '');
   let models = $state(initial?.models.join('\n') ?? '');
   let enabled = $state(initial?.enabled ?? true);
+  let modelRewriting = $state(initial?.model_rewriting ?? false);
+  let aliases = $state(
+    Object.entries(initial?.aliases ?? {})
+      .map(([alias, target]) => `${alias}=${target}`)
+      .join('\n')
+  );
   let messagesToCodex = $state(initial?.messages_to_codex ?? false);
   let research = $state(!!initial?.tools);
   let researchAccount = $state(initial?.tools?.account_id ?? '');
@@ -89,12 +95,43 @@
         throw new Error(
           'Choose an eligible research account and at least one service.'
         );
+      const routeModels = nativeModels(models);
+      const aliasEntries = aliases
+        .split('\n')
+        .map((line) => line.trim())
+        .filter(Boolean)
+        .map((line) => {
+          const [alias, target, ...extra] = line
+            .split('=')
+            .map((part) => part.trim());
+          if (
+            !alias ||
+            !target ||
+            extra.length ||
+            !/^[A-Za-z0-9][A-Za-z0-9._:/-]{0,199}$/.test(alias) ||
+            routeModels.includes(alias) ||
+            !routeModels.includes(target)
+          )
+            throw new Error(
+              'Use one distinct alias=native-model per line, targeting a listed native model.'
+            );
+          return [alias, target] as const;
+        });
+      if (aliasEntries.length && !modelRewriting)
+        throw new Error('Enable model rewriting to publish aliases.');
+      if (
+        aliasEntries.length > 100 ||
+        new Set(aliasEntries.map(([alias]) => alias)).size !== aliasEntries.length
+      )
+        throw new Error('Use up to 100 unique aliases.');
       return {
         project_id: projectId,
         slug,
         pool_id: poolId,
         max_body_bytes: maxBodyBytes ? Number(maxBodyBytes) : null,
-        models: nativeModels(models),
+        models: routeModels,
+        aliases: Object.fromEntries(aliasEntries),
+        model_rewriting: modelRewriting,
         messages_to_codex: messagesToCodex,
         tools: research
           ? { account_id: researchAccount, services: researchServices }
@@ -161,6 +198,26 @@
   </p>
   <label class="choice">
     <input
+      id="code-model-rewriting"
+      type="checkbox"
+      bind:checked={modelRewriting}
+    />
+    Rewrite model identifiers using exact aliases
+  </label>
+  <label for="code-aliases">Exact model aliases</label>
+  <textarea
+    id="code-aliases"
+    bind:value={aliases}
+    rows="3"
+    placeholder="team-code=native-model"></textarea>
+  <p>
+    Use one alias=native-model per line. Each alias targets one listed native
+    model. Publish to make aliases available in discovery and client setup.
+    Repointing an alias affects new conversations. Existing conversations keep
+    their pinned target while it remains published and authorized.
+  </p>
+  <label class="choice">
+    <input
       id="code-messages-to-codex"
       type="checkbox"
       bind:checked={messagesToCodex}
@@ -170,8 +227,9 @@
   <p>
     Explicitly enables text-only Messages requests through Codex accounts after
     publication. Tools, thinking, beta features and unsupported required
-    semantics are refused. Model identifiers, client identity and prompts stay
-    unchanged. Identity and prompt compatibility remain disabled.
+    semantics are refused. Client identity and prompts stay unchanged. Model
+    rewriting requires its separate opt-in. Identity and prompt compatibility
+    remain disabled.
   </p>
   <label class="choice"
     ><input

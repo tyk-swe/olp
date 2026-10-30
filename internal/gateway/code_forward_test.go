@@ -8,11 +8,14 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"slices"
 	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/coder/websocket"
 
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/codeadapter"
@@ -40,6 +43,7 @@ type codeTestLedger struct {
 	outcomes   []codemode.Outcome
 	offers     codeclient.Offers
 	modelsErr  error
+	pinTarget  string
 }
 
 func (l *codeTestLedger) Models(context.Context, codemode.Route, string) (codeclient.Offers, error) {
@@ -68,6 +72,7 @@ func (l *codeTestLedger) Admit(_ context.Context, in resources.CodeAdmission) (r
 	}
 	permit, err := codeTestPermit(in.APIKeyID, in.Providers)
 	permit.Attempt = codemode.Attempt{ID: fmt.Sprint(len(l.inputs))}
+	permit.Pin.TargetModel = l.pinTarget
 	return permit, err
 }
 
@@ -646,6 +651,170 @@ func TestCodeForwardingRetainsExhaustionWithMalformedOrMissingReset(t *testing.T
 			}
 			if test.reset == nil && allowance.ResetsAt != nil || test.reset != nil && (allowance.ResetsAt == nil || !allowance.ResetsAt.Equal(*test.reset)) {
 				t.Fatalf("reset signal inferred or lost %+v", allowance)
+			}
+		})
+	}
+}
+
+func TestCodeExactAliasHTTPUsesNativeTargetAndPublicResponse(t *testing.T) {
+	for _, test := range []struct {
+		name                       string
+		stream, translated, pinned bool
+	}{
+		{"unary", false, false, false}, {"stream", true, false, false}, {"translated", true, true, false}, {"republished-alias-retains-pin", false, false, true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			h, ledger, server := newCodeForwardHarness(t)
+			route := h.rt.release.Snapshot.CodeRoutes["coding"]
+			route.ModelRewriting = true
+			route.Aliases = map[string]string{"team-code": "native-model"}
+			if test.pinned {
+				route.Models = []string{"native-model", "native-next"}
+				route.Aliases = map[string]string{"team-code": "native-next"}
+				ledger.pinTarget = "native-model"
+			}
+			route.MessagesToCodex = test.translated
+			h.rt.release.Snapshot.CodeRoutes["coding"] = route
+			h.upstream.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				body, _ := io.ReadAll(r.Body)
+				if !bytes.Contains(body, []byte(`"model":"native-model"`)) || !bytes.Contains(body, []byte(`"private-prompt"`)) {
+					t.Errorf("upstream received wrong model or prompt %s", body)
+				}
+				if !test.translated && !bytes.Contains(body, []byte(`{ "model":"team-code", "number":1.2300 }`)) {
+					t.Errorf("alias changed unknown request subtree %s", body)
+				}
+				if test.stream {
+					w.Header().Set("Content-Type", "text/event-stream")
+					fmt.Fprint(w, "event: response.completed\nid: event-one\ndata: "+`{"type":"response.completed","response":{"id":"alias-response","model":"native-model","status":"completed","output":[{"id":"text-one","type":"message","role":"assistant","content":[{"type":"output_text","text":"hello","annotations":[]}]}],"usage":{"input_tokens":2,"output_tokens":1,"total_tokens":3}}}`+"\n\n")
+					return
+				}
+				w.Header().Set("Content-Type", "application/json")
+				fmt.Fprint(w, `{"id":"alias-response","model":"native-model","status":"completed","output":[],"usage":{"input_tokens":2,"output_tokens":1,"total_tokens":3},"extension":{"model":"native-model"}}`)
+			})
+			body := []byte(`{"model":"team-code","input":"private-prompt","extension": { "model":"team-code", "number":1.2300 }}`)
+			response := func() *http.Response {
+				if !test.translated {
+					return codeDo(t, server, body, nil)
+				}
+				request, _ := http.NewRequest(http.MethodPost, server.URL+"/code/coding/v1/messages", strings.NewReader(`{"model":"team-code","messages":[{"role":"user","content":"private-prompt"}],"max_tokens":32,"stream":true}`))
+				request.Header.Set("Authorization", "Bearer "+fullKey)
+				request.Header.Set("X-Claude-Code-Session-Id", "alias-text")
+				response, err := server.Client().Do(request)
+				if err != nil {
+					t.Fatal(err)
+				}
+				return response
+			}()
+			defer response.Body.Close()
+			output, _ := io.ReadAll(response.Body)
+			if response.StatusCode != 200 || !bytes.Contains(output, []byte(`"model":"team-code"`)) {
+				t.Fatalf("client alias response %d %s", response.StatusCode, output)
+			}
+			usage := ledger.wait(t)
+			if usage.Total == nil || *usage.Total != 3 || len(ledger.inputs) != 1 || ledger.inputs[0].Operation.Model != route.Aliases["team-code"] || ledger.inputs[0].Operation.PublicModel() != "team-code" {
+				t.Fatalf("alias accounting %+v inputs %+v", usage, ledger.inputs)
+			}
+		})
+	}
+}
+
+func TestCodeExactAliasWebSocketRewritesOnlyModelFields(t *testing.T) {
+	h, ledger, server := newCodeForwardHarness(t)
+	route := h.rt.release.Snapshot.CodeRoutes["coding"]
+	route.ModelRewriting = true
+	route.Aliases = map[string]string{"team-code": "native-model"}
+	h.rt.release.Snapshot.CodeRoutes[route.Slug] = route
+	h.upstream.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := websocket.Accept(w, r, nil)
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		defer conn.CloseNow()
+		kind, request, err := conn.Read(t.Context())
+		if err != nil || kind != websocket.MessageText || !bytes.Contains(request, []byte(`"model":"native-model"`)) || !bytes.Contains(request, []byte(`{ "model":"team-code", "number":1.2300 }`)) {
+			t.Errorf("native alias dispatch %s %v", request, err)
+			return
+		}
+		_ = conn.Write(t.Context(), websocket.MessageText, []byte(`{"type":"response.completed","response":{"id":"alias-ws","model":"native-model","usage":{"input_tokens":2,"output_tokens":1,"total_tokens":3},"extension":{"model":"native-model"}}}`))
+		_, _, _ = conn.Read(t.Context())
+	})
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	conn, response, err := websocket.Dial(ctx, strings.Replace(server.URL, "http://", "ws://", 1)+"/code/coding/responses", &websocket.DialOptions{HTTPHeader: http.Header{"Authorization": {"Bearer " + fullKey}, "Thread-Id": {"alias-ws"}, "X-OLP-Code-Model": {"team-code"}}})
+	if err != nil {
+		t.Fatalf("alias WebSocket handshake %v %v", response, err)
+	}
+	defer conn.CloseNow()
+	if err := conn.Write(ctx, websocket.MessageText, []byte(`{"type":"response.create","model":"team-code","input":"private-prompt","extension": { "model":"team-code", "number":1.2300 }}`)); err != nil {
+		t.Fatal(err)
+	}
+	_, body, err := conn.Read(ctx)
+	if err != nil || !bytes.Contains(body, []byte(`"model":"team-code"`)) || !bytes.Contains(body, []byte(`"extension":{"model":"native-model"}`)) {
+		t.Fatalf("alias WebSocket response %s %v", body, err)
+	}
+	select {
+	case usage := <-ledger.done:
+		if usage.Total == nil || *usage.Total != 3 {
+			t.Fatalf("alias usage %+v", usage)
+		}
+	case <-ctx.Done():
+		t.Fatal("alias usage missing")
+	}
+}
+
+func TestCodeExactAliasesDiscoverOnlyAvailableNativeTargets(t *testing.T) {
+	h, _, server := newCodeForwardHarness(t, codeForwardSetup{
+		Models: []string{"native-model", "unavailable-model"},
+		Policy: access.KeyPolicy{Scopes: []string{"inference", "models_read"}},
+		Offers: codeclient.Offers{{Adapter: codemode.AdapterCodex, Models: []string{"native-model"}}},
+	})
+	route := h.rt.release.Snapshot.CodeRoutes["coding"]
+	route.ModelRewriting = true
+	route.Aliases = map[string]string{"team-code": "native-model", "unavailable-alias": "unavailable-model"}
+	h.rt.release.Snapshot.CodeRoutes[route.Slug] = route
+	for _, path := range []string{"models", "v1/models"} {
+		request, _ := http.NewRequestWithContext(t.Context(), http.MethodGet, server.URL+route.BasePath()+"/"+path, nil)
+		request.Header.Set("Authorization", "Bearer "+fullKey)
+		response, err := server.Client().Do(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var catalog struct {
+			Data []codemode.Model `json:"data"`
+		}
+		err = json.NewDecoder(response.Body).Decode(&catalog)
+		response.Body.Close()
+		if err != nil || response.StatusCode != http.StatusOK || len(catalog.Data) != 2 || catalog.Data[0].ID != "native-model" || catalog.Data[1].ID != "team-code" || !reflect.DeepEqual(catalog.Data[0].Capabilities, catalog.Data[1].Capabilities) {
+			t.Fatalf("alias discovery %+v %v", catalog, err)
+		}
+	}
+}
+
+func TestCodeExactAliasRefusesUnauthorizedOrUnavailableTargets(t *testing.T) {
+	for _, test := range []struct {
+		name, requested, target, refusal string
+		rewriting                        bool
+	}{
+		{"disabled", "team-code", "native-model", "code_model_denied", false},
+		{"unknown", "unknown-alias", "native-model", "code_model_denied", true},
+		{"unpublished", "team-code", "unpublished-model", "code_model_denied", true},
+		{"unavailable", "team-code", "native-model", "code_account_unavailable", true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			h, ledger, server := newCodeForwardHarness(t)
+			route := h.rt.release.Snapshot.CodeRoutes["coding"]
+			route.Aliases = map[string]string{"team-code": test.target}
+			route.ModelRewriting = test.rewriting
+			h.rt.release.Snapshot.CodeRoutes["coding"] = route
+			if test.name == "unavailable" {
+				ledger.refuse = test.refusal
+			}
+			response := codeDo(t, server, []byte(`{"model":"`+test.requested+`","input":"hello"}`), nil)
+			body, _ := io.ReadAll(response.Body)
+			response.Body.Close()
+			if response.StatusCode < 400 || !bytes.Contains(body, []byte(test.refusal)) || len(ledger.marks) != 0 || h.mock.count("a") != 0 {
+				t.Fatalf("invalid alias dispatched, status %d, body %s", response.StatusCode, body)
 			}
 		})
 	}

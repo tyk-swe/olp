@@ -268,11 +268,21 @@ func (s *Server) codeWebSocket(w http.ResponseWriter, r *http.Request, release *
 				refuse(codemode.Refuse(503, "code_network_credential_unavailable"))
 				return
 			}
+			body, err := func() ([]byte, error) {
+				if active.model != active.publicModel {
+					return codewire.RewriteRequestModel(message.body, active.publicModel, active.model)
+				}
+				return message.body, nil
+			}()
+			if err != nil {
+				refuse(err)
+				return
+			}
 			if err := active.dispatch(ctx); err != nil {
 				refuse(err)
 				return
 			}
-			if err := codeWrite(ctx, upstream, message.kind, message.body); err != nil {
+			if err := codeWrite(ctx, upstream, message.kind, body); err != nil {
 				active.transportFailed(ctx, err)
 				return
 			}
@@ -299,7 +309,13 @@ func (s *Server) codeWebSocket(w http.ResponseWriter, r *http.Request, release *
 			} else if observation.Allowance != nil {
 				connection.observeAllowance(ctx, *observation.Allowance)
 			}
-			if err := codeWrite(ctx, client, message.kind, message.body); err != nil {
+			body := func() []byte {
+				if active != nil && active.model != active.publicModel {
+					return codeModelEvent(message.body, active.model, active.publicModel)
+				}
+				return message.body
+			}()
+			if err := codeWrite(ctx, client, message.kind, body); err != nil {
 				if active != nil {
 					active.outcome(ctx, codemode.Outcome{Origin: "client", Kind: "canceled"})
 				}
