@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -161,6 +162,7 @@ func TestEnrollmentRefusesUnverifiedResponsesWithoutExposingSecrets(t *testing.T
 		transport  bool
 	}{
 		{"revoked refresh", `{"error":"invalid_grant","error_description":"fixture-secret"}`, 400, false},
+		{"unauthorized refresh", `{"message":"fixture-secret"}`, 401, false},
 		{"ambiguous provider refusal", `{"error":"fixture-secret"}`, 503, false},
 		{"duplicate access token", `{"access_token":"fixture-secret","access_token":"another","refresh_token":"refresh","token_type":"bearer","expires_in":3600}`, 200, false},
 		{"transport failure", "", 0, true},
@@ -176,7 +178,7 @@ func TestEnrollmentRefusesUnverifiedResponsesWithoutExposingSecrets(t *testing.T
 			if err == nil || grant.AccessToken != "" || strings.Contains(err.Error(), "fixture-secret") {
 				t.Fatal("unverified token or secret escaped a refusal")
 			}
-			if scenario.name == "revoked refresh" {
+			if scenario.name == "revoked refresh" || scenario.name == "unauthorized refresh" {
 				reported, ok := errors.AsType[*abi.Error](err)
 				if !ok || reported.Code != abi.CodeInvalidGrant {
 					t.Fatal("revocation did not permanently refuse refresh")
@@ -235,24 +237,28 @@ func (transport importTransport) RoundTrip(request *http.Request) (*http.Respons
 func TestCredentialImportRejectsUnsupportedDocumentsWithoutDisclosingTokens(t *testing.T) {
 	const supported = `{"claudeAiOauth":{"accessToken":"fixture-import-access","refreshToken":"fixture-import-refresh","expiresAt":1900000000000,"scopes":["user:profile","user:inference"],"subscriptionType":null,"rateLimitTier":null}}`
 	for name, input := range map[string]string{
-		"empty":             "",
-		"other store":       `{"accessToken":"fixture-import-access","refreshToken":"fixture-import-refresh"}`,
-		"additional store":  strings.Replace(supported, `{"claudeAiOauth":`, `{"otherCredential":"fixture-import-refresh","claudeAiOauth":`, 1),
-		"ambiguous access":  strings.Replace(supported, `"accessToken":`, `"accessToken":"injected","accessToken":`, 1),
-		"unknown field":     strings.Replace(supported, `"scopes":`, `"issuer":"https://untrusted.invalid","scopes":`, 1),
-		"unsafe access":     strings.Replace(supported, "fixture-import-access", `fixture\nimport-access`, 1),
-		"unsafe refresh":    strings.Replace(supported, "fixture-import-refresh", "fixture import-refresh", 1),
-		"missing refresh":   strings.Replace(supported, "fixture-import-refresh", "", 1),
-		"wrong expiry type": strings.Replace(supported, "1900000000000", `"1900000000000"`, 1),
-		"missing expiry":    strings.Replace(supported, `"expiresAt":1900000000000,`, "", 1),
-		"missing profile":   strings.Replace(supported, `"user:profile",`, "", 1),
-		"missing inference": strings.Replace(supported, `,"user:inference"`, "", 1),
-		"wrong client":      strings.Replace(supported, `"scopes":`, `"clientId":"unsupported-client","scopes":`, 1),
-		"wrong metadata":    strings.Replace(supported, `"subscriptionType":null`, `"subscriptionType":false`, 1),
-		"null scope":        strings.Replace(supported, `"scopes":[`, `"scopes":[null,`, 1),
-		"null client":       strings.Replace(supported, `"scopes":`, `"clientId":null,"scopes":`, 1),
-		"empty source":      strings.Replace(supported, `"scopes":`, `"subscriptionTypeSource":"","scopes":`, 1),
-		"null timestamp":    strings.Replace(supported, `"scopes":`, `"subscriptionTypeVerifiedAt":null,"scopes":`, 1),
+		"empty":                           "",
+		"other store":                     `{"accessToken":"fixture-import-access","refreshToken":"fixture-import-refresh"}`,
+		"additional store":                strings.Replace(supported, `{"claudeAiOauth":`, `{"otherCredential":"fixture-import-refresh","claudeAiOauth":`, 1),
+		"ambiguous access":                strings.Replace(supported, `"accessToken":`, `"accessToken":"injected","accessToken":`, 1),
+		"unknown field":                   strings.Replace(supported, `"scopes":`, `"issuer":"https://untrusted.invalid","scopes":`, 1),
+		"unsafe access":                   strings.Replace(supported, "fixture-import-access", `fixture\nimport-access`, 1),
+		"unsafe refresh":                  strings.Replace(supported, "fixture-import-refresh", "fixture import-refresh", 1),
+		"missing refresh":                 strings.Replace(supported, "fixture-import-refresh", "", 1),
+		"wrong expiry type":               strings.Replace(supported, "1900000000000", `"1900000000000"`, 1),
+		"missing expiry":                  strings.Replace(supported, `"expiresAt":1900000000000,`, "", 1),
+		"missing profile":                 strings.Replace(supported, `"user:profile",`, "", 1),
+		"missing inference":               strings.Replace(supported, `,"user:inference"`, "", 1),
+		"wrong client":                    strings.Replace(supported, `"scopes":`, `"clientId":"unsupported-client","scopes":`, 1),
+		"wrong metadata":                  strings.Replace(supported, `"subscriptionType":null`, `"subscriptionType":false`, 1),
+		"null scope":                      strings.Replace(supported, `"scopes":[`, `"scopes":[null,`, 1),
+		"null client":                     strings.Replace(supported, `"scopes":`, `"clientId":null,"scopes":`, 1),
+		"empty source":                    strings.Replace(supported, `"scopes":`, `"subscriptionTypeSource":"","scopes":`, 1),
+		"null timestamp":                  strings.Replace(supported, `"scopes":`, `"subscriptionTypeVerifiedAt":null,"scopes":`, 1),
+		"zero refresh expiry":             strings.Replace(supported, `"scopes":`, `"refreshTokenExpiresAt":0,"scopes":`, 1),
+		"negative refresh expiry":         strings.Replace(supported, `"scopes":`, `"refreshTokenExpiresAt":-1,"scopes":`, 1),
+		"zero verification timestamp":     strings.Replace(supported, `"scopes":`, `"subscriptionTypeVerifiedAt":0,"scopes":`, 1),
+		"negative verification timestamp": strings.Replace(supported, `"scopes":`, `"subscriptionTypeVerifiedAt":-1,"scopes":`, 1),
 	} {
 		t.Run(name, func(t *testing.T) {
 			_, err := ParseCredentialImport(input, time.UnixMilli(1800000000000))
@@ -292,6 +298,89 @@ func TestCredentialImportRefusesUnverifiedOriginalIdentity(t *testing.T) {
 			})}
 			if _, err := credentials.Verify(t.Context(), client); err == nil || strings.Contains(err.Error(), "fixture-import") {
 				t.Fatal("unverified original identity was accepted or disclosed")
+			}
+		})
+	}
+}
+
+func TestCredentialImportBoundsExpiryRelativeToImportTime(t *testing.T) {
+	now := time.UnixMilli(1800000000000)
+	maximumExpiry := now.AddDate(10, 0, 0).UnixMilli()
+	for _, test := range []struct {
+		name      string
+		expiresAt int64
+		valid     bool
+	}{
+		{"expired access still requires verification", now.Add(-time.Hour).UnixMilli(), true},
+		{"maximum expiry", maximumExpiry, true},
+		{"above maximum expiry", maximumExpiry + 1, false},
+		{"zero expiry", 0, false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			input := `{"claudeAiOauth":{"accessToken":"fixture-access","refreshToken":"fixture-refresh","expiresAt":` + strconv.FormatInt(test.expiresAt, 10) + `,"scopes":["user:profile","user:inference"]}}`
+			_, parseErr := ParseCredentialImport(input, now)
+			if (parseErr == nil) != test.valid {
+				t.Fatalf("import expiry validity was lost, error=%v", parseErr)
+			}
+		})
+	}
+}
+
+func TestAccessTokenValidationBoundsOpaquePrintableTokens(t *testing.T) {
+	for _, test := range []struct {
+		name, token string
+		valid       bool
+	}{
+		{"minimum", "!", true},
+		{"last printable character", "~", true},
+		{"maximum", strings.Repeat("a", 16<<10), true},
+		{"oversized", strings.Repeat("a", (16<<10)+1), false},
+		{"empty", "", false},
+		{"space", "fixture token", false},
+		{"control character", "fixture\x1f", false},
+		{"delete", "fixture\x7f", false},
+		{"non ASCII", "fixture\u0080", false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if ValidAccessToken(test.token) != test.valid {
+				t.Fatal("opaque access token validation accepted unsafe bytes or refused supported bytes")
+			}
+		})
+	}
+}
+
+func TestCredentialImportVerifiesIdentityWithinResponseLimit(t *testing.T) {
+	credentials, err := ParseCredentialImport(`{"claudeAiOauth":{"accessToken":"fixture-access","refreshToken":"fixture-refresh","expiresAt":1900000000000,"scopes":["user:profile","user:inference"]}}`, time.UnixMilli(1800000000000))
+	if err != nil {
+		t.Fatal(err)
+	}
+	const maximumBody = 64 << 10
+	for _, test := range []struct {
+		name  string
+		size  int
+		valid bool
+	}{
+		{"maximum", maximumBody, true},
+		{"oversized", maximumBody + 1, false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			prefix := `{"account":{"uuid":"11111111-1111-4111-8111-111111111111"},"organization":{"uuid":"22222222-2222-4222-8222-222222222222"},"metadata":"`
+			body := prefix + strings.Repeat("x", test.size-len(prefix)-2) + `"}`
+			client := &http.Client{Transport: importTransport(func(request *http.Request) (*http.Response, error) {
+				if request.URL.String() != ProfileURL || request.Header.Get("Authorization") != "Bearer fixture-access" {
+					t.Fatal("verification lost the trusted authenticated identity endpoint")
+				}
+				return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(body))}, nil
+			})}
+			refresh, verifyErr := credentials.Verify(t.Context(), client)
+			if !test.valid {
+				if verifyErr == nil || refresh.RefreshToken != "" {
+					t.Fatal("oversized identity response issued refresh authorization")
+				}
+				return
+			}
+			if verifyErr != nil || Principal(refresh.Facts) == "" || refresh.RefreshToken != "fixture-refresh" {
+				t.Fatalf("bounded authenticated identity was refused, error=%v", verifyErr)
 			}
 		})
 	}
