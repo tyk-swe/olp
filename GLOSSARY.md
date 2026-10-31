@@ -28,7 +28,7 @@ The amount a consumer owes for an attempt under the applicable rate card.
 
 ### Code mode
 
-These definitions include accepted target contracts. The [baseline and roadmap](docs/develop/plans/code-mode-parity.md) separates implemented behavior from planned capabilities.
+These definitions include accepted target contracts.
 
 **Code mode**:
 The route-specific contract through which coding clients use authorized accounts, models and conversation state. Native forwarding is its default, while compatibility behavior requires explicit route policy.
