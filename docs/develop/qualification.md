@@ -135,6 +135,54 @@ exact allocation, scoped APIs, late facts, retained history and backup/restore.
 FOCUS static checks and explicit unused/period reconciliation assertions do not
 qualify every Dynamic rule or physical capacity utilization.
 
+### Cloud billing fixture evidence
+
+The following fixture runs used Go 1.27.3 on Linux amd64 and a private test
+database on October 31, 2026. They used simulated cloud endpoints, with no real
+billing account. The database version and raw test logs were not recorded here.
+These results apply to the named revisions and do not replace candidate gates.
+
+At `0ab835c0d84838c890d288d133769c9d06d45b23`, the following command passed in
+32.789 seconds:
+
+```bash
+go test -mod=readonly -vet=off -tags=integration,oidctest -timeout=5m ./tests/integration -run '^(TestAzureBilling|TestGoogleBilling|TestBillingImportAWS|TestBillingImportHistory)' -count=1
+```
+
+For AWS, `tests/integration/billing_aws_test.go` exercises an S3 peer with
+versioned CUR manifests and compressed CSV parts. Its fixtures cover scoped
+Bedrock costs, revisions, restatements, retention, coverage and bounded reads.
+The documented CUR sources are linked from [FinOps](../operate/finops.md#promotion-and-fixtures).
+
+For Azure, `tests/integration/billing_test.go` exercises simulated authentication
+and Blob Storage with month-to-date amortized CSV exports and manifests. Its
+fixtures cover scoped OpenAI meters, credits and adjustments, revisions,
+retention, coverage and bounds. The manifest fixture cites the
+[Cost Management export documentation](https://learn.microsoft.com/en-us/azure/cost-management-billing/costs/tutorial-improved-exports),
+reviewed October 31, 2026.
+
+At `232fb6cb0b312f1df92996d0cb5dc93f447ae68e`, the following Google fixture
+command passed:
+
+```bash
+go test -mod=readonly -tags integration,oidctest,google_sql -timeout=5m ./tests/integration -run '^TestGoogleBillingImportEndToEnd$' -count=1
+```
+
+The Google fixture in `tests/integration/billing_google_sql_test.go` uses the
+documented detailed export rows in `internal/billing/testdata` and executes the
+submitted query with GoogleSQLite 0.3.1 against a simulated BigQuery peer. It
+covers scoping, corrections, credits, revisions, coverage and bounded failures.
+The test substitutes a fixture column for `_PARTITIONTIME`; it does not qualify
+BigQuery's partition pruning, production query behavior or export completeness.
+The export schema and service references are recorded in the
+[fixture README](../../internal/billing/testdata/README.md).
+
+Live qualification remains open separately for AWS CUR, Google detailed billing
+exports and Azure Cost Management exports. For each claimed source, record the
+candidate revision, account and export scope, authentication, observed coverage,
+restatements and failures. Fixture results do not establish live account access
+or complete invoice coverage.
+
 ## Operator ecosystem
 
 Release/automation maintainers rerun generation/drift, machine authorization and

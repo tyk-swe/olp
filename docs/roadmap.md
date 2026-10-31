@@ -14,10 +14,9 @@ behavior belongs in the [Use](README.md#use-the-gateway) and
 
 ## Start here
 
-RM1 through RM8 are implementation-complete. The remaining implementation work is
-RM9, whose shared contracts unblock the three cloud billing adapters. Milestone
-numbers are stable identifiers, and independent work can proceed in parallel when
-its stated dependencies are available.
+RM1 through RM9 are implementation-complete. Milestone numbers are stable
+identifiers. Live and release qualification remain separate from implementation
+status, and the deferred work below remains open.
 
 | Workstream | Current state | Dependencies |
 | --- | --- | --- |
@@ -26,7 +25,7 @@ its stated dependencies are available.
 | Protocol and provider expansion | RM6 done. Transport qualification is scoped per transport | RM4 foundations and each transport's control and accounting contracts |
 | Consumer MCP | RM7 done. Live provider and tenant qualification are tracked separately | RM4 accounting and agent contracts, plus existing tool governance |
 | Agent workflows | RM8 done. Live and release qualification are tracked separately | RM7 direct execution and the workflow contracts in RM8 |
-| Cloud invoice imports | RM9.1 import contracts, then each cloud adapter independently | Existing importer and reconciliation machinery |
+| Cloud invoice imports | RM9 done. Live cloud qualification is tracked separately | Existing importer and reconciliation machinery |
 
 The [architecture map](develop/architecture.md#contracts-and-feature-ownership)
 identifies implementation boundaries and owners.
@@ -45,7 +44,7 @@ identifies implementation boundaries and owners.
 | [RM6: Protocol and provider expansion](#rm6-protocol-and-provider-expansion) | Done | Additional OCR/search transports, realtime profiles and pass-through |
 | [RM7: Consumer MCP](#rm7-consumer-mcp) | Done | Direct execution, per-user grants, HTTP+SSE and stdio |
 | [RM8: Agent workflows](#rm8-agent-workflows) | Done | Tool loops, prompts, delegation, A2A, traces and operator views |
-| [RM9: Cloud invoice imports](#rm9-cloud-invoice-imports) | Planned | AWS CUR, Google billing and Azure Cost Management imports |
+| [RM9: Cloud invoice imports](#rm9-cloud-invoice-imports) | Done | AWS CUR, Google billing and Azure Cost Management imports |
 
 ### RM1: Existing gateway
 
@@ -276,10 +275,10 @@ exports.
 
 ### RM9: Cloud invoice imports
 
-**Status: Planned.** **Owners:** billing maintainers, with export and connector
+**Status: Done.** **Owners:** billing maintainers, with export and connector
 owners. **Dependencies:** existing importer and reconciliation contracts.
 
-- [ ] **RM9.1 Cloud import contracts:** add source account scope, source
+- [x] **RM9.1 Cloud import contracts:** add source account scope, source
   revision, currency, UTC-day mapping and idempotent late-correction handling
   for AWS CUR, Google billing and Azure Cost Management.
 - [x] **RM9.2 AWS CUR import:** implement scoped ingestion, pagination,
@@ -292,8 +291,8 @@ owners. **Dependencies:** existing importer and reconciliation contracts.
   pagination, empty-day handling, deduplication, restatements and reconciliation
   for the Azure source.
 
-Each adapter depends on its own RM9.1 contract and can be implemented
-independently of the other adapters and of agent work.
+Each adapter uses the shared RM9.1 contracts. Fixture evidence and the remaining
+live cloud qualification are tracked in [Qualification](develop/qualification.md#observability-and-billing).
 
 ## Deferred implementation
 

@@ -90,7 +90,8 @@ Cost estimates what the provider charges the installation. Charge applies the
 consumer's rate card. Missing usage remains incomplete and missing pricing
 remains unpriced instead of being converted to zero.
 [Pricing](operate/pricing.md) defines the exact calculation rules, and
-[FinOps](operate/finops.md) covers exports and invoice reconciliation.
+[FinOps](operate/finops.md) covers exports and invoice reconciliation for
+OpenAI, Anthropic, Bedrock, Vertex AI and Azure OpenAI connections.
 
 <a id="what-is-stored--and-what-never-is"></a>
 
