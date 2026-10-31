@@ -163,16 +163,13 @@ func (i *Importer) importAWSDelivery(ctx context.Context, row *importRow, client
 }
 
 func (i *Importer) completedCloudPeriods(ctx context.Context, row *importRow, earliest, today time.Time) (map[string]struct{}, error) {
-	digest, err := scopeDigest(row.Source, row.Scope)
-	if err != nil {
-		return nil, err
-	}
-	rows, err := i.Pool.Query(ctx, `SELECT period_start FROM olp.provider_billing_revisions
-		WHERE provider_id=$1::uuid AND source=$2 AND scope_digest=$3
-		AND period_start < date_trunc('month', $4::date) - interval '1 month'
-		AND covered_from <= GREATEST(period_start, $5::date)
-		AND covered_through >= (period_start + interval '1 month')::date - 1`,
-		row.ProviderID, row.Source, digest[:], today.Format(dayFormat), earliest.Format(dayFormat))
+	rows, err := i.Pool.Query(ctx, `SELECT period_start FROM (
+			SELECT date_trunc('month',day)::date AS period_start FROM olp.provider_billing_days
+			WHERE provider_id=$1::uuid AND source=$2 AND scope=$3::jsonb
+			AND day >= $4::date AND day < date_trunc('month', $5::date) - interval '1 month'
+		) days GROUP BY period_start
+		HAVING COUNT(*) = (period_start + interval '1 month')::date - GREATEST(period_start,$4::date)`,
+		row.ProviderID, row.Source, row.Scope, earliest.Format(dayFormat), today.Format(dayFormat))
 	if err != nil {
 		return nil, err
 	}

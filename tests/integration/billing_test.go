@@ -2151,3 +2151,75 @@ func TestBillingImportPollingDisjointRecreation(t *testing.T) {
 		t.Fatalf("status must report a contiguous fetched range: %v", status)
 	}
 }
+
+func TestAzureBillingRetentionExpansionRetriesGappedPeriod(t *testing.T) {
+	fake := newAzureBillingFake(t)
+	h, owner, id, importer := azureBillingTest(t, fake)
+	today := time.Now().UTC().Truncate(24 * time.Hour)
+	month := time.Date(today.Year(), today.Month(), 1, 0, 0, 0, 0, time.UTC)
+	period := month.AddDate(0, -4, 0)
+	early, gap, late := period.AddDate(0, 0, 5), period.AddDate(0, 0, 11), period.AddDate(0, 0, 19)
+	setRetention := func(first time.Time) {
+		t.Helper()
+		setting := h.want(owner, "GET", "/api/v1/settings/retention.usage_days", nil, nil, 200)
+		days := int(today.Sub(first).Hours() / 24)
+		h.want(owner, "PUT", "/api/v1/settings/retention.usage_days", map[string]any{"value": fmt.Sprint(days)}, etagHeader(setting), 200)
+	}
+	setRetention(period.AddDate(0, 0, 14))
+	fake.delivery(t, late, "later-days", period.AddDate(0, 1, 5), azureRow(late, "Usage", "0.2"))
+	fake.delivery(t, month.AddDate(0, -1, 14), "recent", month.AddDate(0, 0, 1), "")
+	price := "0.1"
+	for _, day := range []time.Time{early, gap, late} {
+		billingFact(t, h, id, uuid.NewString(), day, "billable", true, &price, false, false, false)
+	}
+	if err := importer.Pass(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	report := func(day time.Time) map[string]any {
+		t.Helper()
+		query := fmt.Sprintf("/api/v1/usage/reconciliation?start=%s&end=%s&provider_id=%s", day.Format("2006-01-02"), day.AddDate(0, 0, 1).Format("2006-01-02"), id)
+		return h.want(owner, "GET", query, nil, nil, 200)["items"].([]any)[0].(map[string]any)
+	}
+	if item := report(late); item["invoiced_cost"] != "0.2" {
+		t.Fatalf("initial retained days not imported: %v", item)
+	}
+	setRetention(period)
+	partial := fake.delivery(t, early, "earlier-days", period.AddDate(0, 1, 6), azureRow(early, "Usage", "0.3"))
+	fake.mu.Lock()
+	var manifest map[string]any
+	if err := json.Unmarshal([]byte(fake.objects[partial+"_manifest.json"]), &manifest); err != nil {
+		fake.mu.Unlock()
+		t.Fatal(err)
+	}
+	manifest["runInfo"].(map[string]any)["endDate"] = period.AddDate(0, 0, 9).Format(time.RFC3339)
+	data, err := json.Marshal(manifest)
+	if err != nil {
+		fake.mu.Unlock()
+		t.Fatal(err)
+	}
+	fake.objects[partial+"_manifest.json"] = string(data)
+	fake.mu.Unlock()
+	path := "/api/v1/providers/" + id + "/billing-import"
+	run := func() {
+		t.Helper()
+		current := h.want(owner, "GET", path, nil, nil, 200)
+		headers := etagHeader(current)
+		headers["Idempotency-Key"] = uuid.NewString()
+		h.want(owner, "POST", path+"/run", nil, headers, 202)
+		if err := importer.Pass(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+		if status := h.want(owner, "GET", path, nil, nil, 200)["status"].(map[string]any); status["last_error_code"] != nil {
+			t.Fatalf("import failed: %v", status)
+		}
+	}
+	run()
+	if first, middle, last := report(early), report(gap), report(late); first["invoiced_cost"] != "0.3" || middle["capture_rate_unavailable_reason"] != "not_imported" || last["invoiced_cost"] != "0.2" {
+		t.Fatalf("partial expansion did not preserve the coverage gap: %v %v %v", first, middle, last)
+	}
+	fake.delivery(t, gap, "full-period", period.AddDate(0, 1, 7), azureRow(early, "Usage", "0.5")+azureRow(gap, "Usage", "0.4")+azureRow(late, "Usage", "0.6"))
+	run()
+	if first, middle, last := report(early), report(gap), report(late); first["invoiced_cost"] != "0.5" || middle["invoiced_cost"] != "0.4" || last["invoiced_cost"] != "0.6" {
+		t.Fatalf("expanded retention did not retry the uncovered days: %v %v %v", first, middle, last)
+	}
+}

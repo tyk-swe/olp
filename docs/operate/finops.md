@@ -351,8 +351,9 @@ and reports that overwrite previous versions are not supported.
 ### Azure Cost Management setup
 
 Create a Cost Management export for cost and usage details (amortized), with CSV
-format and daily delivery to a Blob Storage container. Partitioned and gzip
-exports are supported. Parquet, actual cost, usage-only and FOCUS exports use
+format and daily delivery of month-to-date costs to a Blob Storage container.
+Each delivery must start on the first day of its billing month. Partitioned and
+gzip exports are supported. Parquet, actual cost, usage-only and FOCUS exports use
 different schemas and are not accepted. Management group exports do not support
 amortized costs. The export must already exist and historical imports are
 limited to deliveries still present in the container. Azure can deliver prior
@@ -461,7 +462,7 @@ out; on failure `last_error_code` records `credential`, `status`, `network`,
 `timeout`, `response` or `endpoint`, and the retry backs off from five
 minutes to one hour. Rows older than `retention.usage_days` are purged in
 bounded batches and their coverage is cleared. If retention later increases,
-AWS imports retry the newly uncovered historical periods.
+AWS and Azure imports retry the newly uncovered historical periods.
 
 Google uses the fixed BigQuery endpoint through the same connection egress
 policy, with a 1 GiB maximum bytes billed per query, a 45-second import budget

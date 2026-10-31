@@ -321,7 +321,8 @@ func (a *azureReader) manifest(ctx context.Context, name string) (azureRun, erro
 	return azureRun{manifest: manifest, name: name, start: start, end: end, submitted: submitted}, nil
 }
 
-func (a *azureReader) readRun(ctx context.Context, run azureRun, totals azureTotals, aggregateLimit int, earliest, today time.Time) (reportAccumulator, azureTotals, error) {
+func (a *azureReader) readRun(ctx context.Context, run azureRun, initialTotals azureTotals, aggregateLimit int, earliest, today time.Time) (reportAccumulator, azureTotals, error) {
+	totals := initialTotals
 	days := reportAccumulator{}
 	last := slices.MinFunc([]time.Time{run.end.Truncate(24 * time.Hour), today.AddDate(0, 0, -1), run.start.AddDate(0, 1, -1), run.submitted.Truncate(24*time.Hour).AddDate(0, 0, -1)}, time.Time.Compare)
 	start := slices.MaxFunc([]time.Time{run.start.Truncate(24 * time.Hour), earliest}, time.Time.Compare)
