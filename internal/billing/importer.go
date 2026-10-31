@@ -197,7 +197,6 @@ func window(through *string, today time.Time) (start, end time.Time) {
 	return end.AddDate(0, 0, -7), end
 }
 
-// importOne fetches one provider's window and commits its days.
 func (i *Importer) completedBillingPeriods(ctx context.Context, row *importRow, earliest, today time.Time) (map[string]struct{}, error) {
 	digest, err := scopeDigest(row.Source, row.Scope)
 	if err != nil {

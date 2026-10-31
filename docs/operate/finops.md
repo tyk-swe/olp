@@ -430,19 +430,22 @@ The Google query selects the Vertex AI [billing service ID](https://cloud.google
 currency. Regular charges, adjustments and credit types have separate line
 items. Corrections stay on the original usage day even when their invoice month
 is later. Google stores detailed export costs and credits as FLOAT. The query
-casts each value to BIGNUMERIC before summing and the importer keeps the returned
-decimal without converting it through a Go float. This cannot recover precision
+converts each value through its decimal string representation to BIGNUMERIC before
+summing and the importer keeps the returned decimal without converting it through
+a Go float. This cannot recover precision
 already lost in the source FLOAT.
 
 The importer queries retained billing periods and records the export watermark
-with each period. It rereads the current and previous periods, retries missing
-historical periods and replaces a covered period only with an equal or newer
-watermark. The watermark scan starts at the earliest retained day. If the table
-has no exports in that interval, no watermark is available and the period cannot
-be marked covered. Google exports can begin after historical usage, contain gaps
-or arrive late.
-A successful query and watermark do not prove that the export contained all
-historical costs.
+with each period. It revisits retained historical periods alongside the current
+and previous periods, and replaces a covered day only with an equal or newer
+watermark. The watermark scan starts at the beginning of the queried period and
+includes later arrivals. A day is covered only when the export contains activity
+for the configured account and projects on that UTC day, across any service,
+and the day closed before the watermark. An evidenced day with no Vertex charges
+is covered zero. Days without scope activity remain not imported. Google exports
+can begin after historical usage, contain gaps or arrive late. Activity and a
+watermark provide evidence of coverage, but do not guarantee that the export
+contained every historical cost.
 
 ### Importer
 
@@ -451,9 +454,10 @@ to ten, one at a time under a ten-minute lease, and fetches through the connecti
 egress-validated client with redirects disabled and a 30-second request timeout.
 OpenAI and Anthropic imports cover closed UTC days only. The first covers the 30
 days before today, and later imports refresh the last 7 so vendor restatements
-land. AWS and Google imports cover closed UTC days within retention on the first
-pass and refresh the current and previous billing periods on later passes.
-Incomplete historical periods are retried until covered. An AWS delivery covers
+land. AWS imports cover closed UTC days within retention and refresh the current
+and previous billing periods on later passes. Google imports rotate through
+retained historical billing periods while also revisiting the current and
+previous periods. Incomplete historical periods are retried. An AWS delivery covers
 only days closed before its manifest was written, and gaps remain unimported.
 AWS reads have a 45-second deadline and cumulative compressed and expanded byte,
 row and aggregation limits. Azure streams up to 200 CSV parts, 128 MiB compressed
@@ -468,8 +472,10 @@ bounded batches and their coverage is cleared. If retention later increases,
 AWS imports retry the newly uncovered historical periods.
 
 Google uses the fixed BigQuery endpoint through the same connection egress
-policy, with a 1 GiB maximum bytes billed per query, a 45-second import budget
-and a maximum of 200,000 aggregate rows. A failed query or an incomplete result
+policy, with a 1 GiB maximum bytes billed per query, a 20-second job timeout, a
+45-second import budget and a maximum of 200,000 aggregate rows. A pass submits
+at most three queries and rotates their order so a slow period does not starve
+other periods. A failed query or an incomplete result
 does not replace any invoice rows. Token exchanges use the configured connection
 proxy while validating the Google authentication destination with a public-only
 policy. Workload credentials are used only when ADC is explicitly selected.

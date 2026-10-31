@@ -94,5 +94,21 @@
     "cost_type": "regular",
     "usage_start_time": "2025-01-20T15:00:00Z",
     "cost": 200
+  },
+  {
+    "billing_account_id": "123456-ABCDEF-123456",
+    "service": {
+      "id": "6F81-5844-456A"
+    },
+    "sku": {
+      "id": "HISTORICAL"
+    },
+    "project": {
+      "id": "workload-project"
+    },
+    "currency": "USD",
+    "cost_type": "regular",
+    "usage_start_time": "2025-01-20T10:00:00Z",
+    "cost": 1
   }
 ]

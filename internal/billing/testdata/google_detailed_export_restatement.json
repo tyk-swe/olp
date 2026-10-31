@@ -11,7 +11,7 @@
       "id": "workload-project"
     },
     "currency": "USD",
-    "cost_type": "adjustment",
+    "cost_type": "regular",
     "usage_start_time": "2025-01-20T12:00:00Z",
     "invoice": {
       "month": "202502"
@@ -26,7 +26,12 @@
         "type": "PROMOTION",
         "amount": -0.025
       }
-    ]
+    ],
+    "adjustment_info": {
+      "id": "sensitive-modification-id",
+      "type": "USAGE_CORRECTION",
+      "mode": "PARTIAL_CORRECTION"
+    }
   },
   {
     "billing_account_id": "123456-ABCDEF-123456",
@@ -71,6 +76,26 @@
       "month": "202502"
     },
     "cost": -0.2,
+    "credits": []
+  },
+  {
+    "billing_account_id": "123456-ABCDEF-123456",
+    "service": {
+      "id": "C7E2-9256-1C43"
+    },
+    "sku": {
+      "id": "HISTORICAL-CORRECTION"
+    },
+    "project": {
+      "id": "workload-project"
+    },
+    "currency": "USD",
+    "cost_type": "adjustment",
+    "usage_start_time": "2025-01-20T12:00:00Z",
+    "invoice": {
+      "month": "202502"
+    },
+    "cost": -0.3,
     "credits": []
   }
 ]
