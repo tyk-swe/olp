@@ -16,6 +16,8 @@ import (
 	"google.golang.org/api/googleapi"
 	"google.golang.org/api/iterator"
 	"google.golang.org/api/option"
+
+	"github.com/tyk-swe/olp/internal/connectors"
 )
 
 const (
@@ -30,7 +32,7 @@ var errGoogleAuthentication = errors.New("Google billing authentication failed")
 
 type googleQueryTransport struct {
 	base       http.RoundTripper
-	auth       GoogleBillingAuthorizer
+	auth       *connectors.Auth
 	credential googleCredential
 }
 
@@ -62,7 +64,7 @@ func googleProjectFilter(ids []string) (string, []bigquery.QueryParameter) {
 	return " AND project.id IN UNNEST(@project_ids)", []bigquery.QueryParameter{{Name: "project_ids", Value: ids}}
 }
 
-func fetchGoogle(ctx context.Context, client *http.Client, auth GoogleBillingAuthorizer, rawScope json.RawMessage, rawCredential []byte, start, end time.Time) (map[string]map[lineKey]lineSum, error) {
+func fetchGoogle(ctx context.Context, client *http.Client, auth *connectors.Auth, rawScope json.RawMessage, rawCredential []byte, start, end time.Time) (map[string]map[lineKey]lineSum, error) {
 	var scope googleScope
 	if err := json.Unmarshal(rawScope, &scope); err != nil {
 		return nil, failFetch("response", errors.New("invalid Google billing scope"))
@@ -90,6 +92,7 @@ func fetchGoogle(ctx context.Context, client *http.Client, auth GoogleBillingAut
 		CAST(SUM(CAST(cost AS BIGNUMERIC)) AS STRING) AS amount
 		FROM %s
 		WHERE billing_account_id = @billing_account_id AND service.id = @service_id
+		AND _PARTITIONTIME >= TIMESTAMP(@start)
 		AND usage_start_time >= TIMESTAMP(@start) AND usage_start_time < TIMESTAMP(@end)
 		AND cost_type = 'regular'%s
 		GROUP BY 1, 2, 3, 4`, "`"+scope.BigQueryProjectID+"."+scope.DatasetID+"."+scope.TableID+"`", projectFilter)
@@ -117,6 +120,7 @@ func fetchGoogle(ctx context.Context, client *http.Client, auth GoogleBillingAut
 	if err != nil {
 		return nil, googleQueryError(queryCtx, err)
 	}
+	rows.PageInfo().MaxSize = 100
 	result := reportAccumulator{}
 	for day := start; day.Before(end); day = day.AddDate(0, 0, 1) {
 		result.ensureDay(day.Format(dayFormat))

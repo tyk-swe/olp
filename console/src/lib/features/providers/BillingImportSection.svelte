@@ -39,7 +39,7 @@
   );
   const scopePattern = $derived(
     kind === 'vertex_ai'
-      ? /^[a-z][a-z0-9-]{4,28}[a-z0-9]$/
+      ? /^(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)+:)?[a-z][a-z0-9-]{4,28}[a-z0-9]$/
       : kind === 'openai'
         ? /^proj_[A-Za-z0-9]{1,64}$/
         : /^wrkspc_[A-Za-z0-9]{1,64}$/
@@ -224,18 +224,22 @@
         return 'A billing account, BigQuery project, dataset and table are required.';
       if (googleAuthMode === 'service_account' && !adminKey.trim())
         return 'A service account key is required.';
-      if (googleAuthMode === 'service_account' && adminKey.trim()) {
-        try {
-          const key: unknown = JSON.parse(adminKey);
-          if (!key || typeof key !== 'object' || Array.isArray(key))
-            return 'The service account key must be a JSON object.';
-        } catch {
-          return 'The service account key must be a JSON object.';
-        }
-      }
+      if (googleAuthMode === 'service_account' && !serviceAccountKey())
+        return 'The service account key must be a JSON object.';
     } else if (!editing && !adminKey.trim())
       return 'An admin key is required to create the import.';
     return '';
+  }
+
+  function serviceAccountKey(): Record<string, unknown> | undefined {
+    try {
+      const key: unknown = JSON.parse(adminKey);
+      if (!key || typeof key !== 'object' || Array.isArray(key))
+        return undefined;
+      return Object.fromEntries(Object.entries(key));
+    } catch {
+      return undefined;
+    }
   }
 
   async function save() {
@@ -254,7 +258,7 @@
             ? { auth_mode: 'adc' as const }
             : {
                 auth_mode: 'service_account' as const,
-                service_account: JSON.parse(adminKey) as Record<string, never>
+                service_account: serviceAccountKey()
               }
         : adminKey.trim() || undefined;
     const submission = intent.prepare<Parameters<typeof putBillingImport>[2]>({

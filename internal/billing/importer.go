@@ -38,8 +38,6 @@ type Importer struct {
 	Connections  *egress.ConnectionClientCache
 	Log          *slog.Logger
 	PassBudget   time.Duration
-	GoogleClient *http.Client
-	GoogleAuth   GoogleBillingAuthorizer
 	AWSClient    func(aws.Config) *s3.Client
 	Now          func() time.Time
 
@@ -244,17 +242,15 @@ func (i *Importer) importOne(ctx context.Context, row *importRow) error {
 	case SourceAnthropic:
 		days, err = fetchAnthropic(ctx, client, cfg.Endpoint, key, scope, start, end)
 	case SourceGoogle:
-		if i.GoogleClient != nil {
-			client = i.GoogleClient
-		}
 		bounded := *client
 		bounded.Timeout = requestTimout
-		client = &bounded
-		auth := i.GoogleAuth
-		if auth == nil {
-			auth = connectors.NewAuth(i.Egress)
+		authClient, clientErr := i.googleAuthenticationClient(ctx, cfg)
+		if clientErr != nil {
+			return failFetch("endpoint", clientErr)
 		}
-		days, err = fetchGoogle(ctx, client, auth, row.Scope, key, start, end)
+		defer authClient.CloseIdleConnections()
+		auth := connectors.NewGoogleBillingAuth(i.Egress, authClient)
+		days, err = fetchGoogle(ctx, &bounded, auth, row.Scope, key, start, end)
 	default:
 		err = failFetch("response", errors.New("unsupported billing source"))
 	}
@@ -262,6 +258,18 @@ func (i *Importer) importOne(ctx context.Context, row *importRow) error {
 		return err
 	}
 	return i.storeDays(ctx, row, "", nil, days)
+}
+
+func (i *Importer) googleAuthenticationClient(ctx context.Context, cfg *providerConfig) (*http.Client, error) {
+	var secret []byte
+	if options := cfg.Options.Network; options != nil && options.CredentialID != "" {
+		data, err := i.Keys.Read(ctx, i.Pool, i.Installation, options.CredentialID, secrets.ProviderCredential)
+		if err != nil {
+			return nil, errors.New("network credential could not be read")
+		}
+		secret = data
+	}
+	return i.Egress.PublicDestinationClient(cfg.Options.Network, secret, requestTimout)
 }
 
 // client builds the connection-scoped HTTP client the import's provider
