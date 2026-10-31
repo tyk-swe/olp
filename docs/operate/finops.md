@@ -306,17 +306,43 @@ rules, so the in-repo interpreter is the conformance authority.
 
 ### Billing imports
 
-An OpenAI, Anthropic or Vertex AI connection gains a billing import at
+An OpenAI, Anthropic or Bedrock connection gains a billing import at
 `PUT /api/v1/providers/{provider_id}/billing-import` with `{enabled, scope,
-credential}`. OpenAI and Anthropic use a vendor **admin key**, sealed under purpose
-`billing_credential` and never served inference. It is required on create,
-omitted keeps the stored key, and `null` is rejected. Delete the import to remove it. Scope is source-shaped: `{"project_ids": ["proj_…"]}` for OpenAI
-(up to 100 entries) and `{"workspace_ids": ["wrkspc_…", "default"]}` for
-Anthropic; `{}` imports the whole organization. `GET` returns the import with
-its status (`next_import_at`, `last_import_at`, `last_success_at`,
-`last_error_code`, `imported_from`, `imported_through`), `POST …/run`
-reschedules it immediately, and `DELETE` removes it and the sealed key while
-keeping imported costs.
+credential}`. The billing credential is sealed under purpose
+`billing_credential` and is separate from the inference credential. It is
+required on create, omitting it keeps the stored credential, and `null` is
+rejected. `GET` returns the import and its status, including the covered dates,
+last error and applied source revision. `POST …/run` reschedules it immediately.
+`DELETE` removes the import and sealed credential while keeping imported costs.
+
+For OpenAI and Anthropic, use a vendor admin key. Scope is
+`{"project_ids": ["proj_…"]}` for OpenAI or
+`{"workspace_ids": ["wrkspc_…", "default"]}` for Anthropic. Each list can
+contain up to 100 entries and `{}` imports the whole organization.
+
+For Bedrock, configure a legacy AWS Cost and Usage Report with hourly time
+granularity, CSV format, GZIP or ZIP compression and **create new report
+versions** enabled. Include resource IDs and deliver the report to S3. Set
+`scope` to `{"payer_account_id":"123456789012", "bucket":"billing-bucket",
+"report_prefix":"prefix/report-name", "region":"us-east-1"}`. The prefix
+includes the report name and is relative to the bucket. Optionally provide
+`"linked_account_ids":["123456789013"]` to limit the import to up to 100 linked
+accounts. Without that list all linked accounts in the payer's report are
+included. Keep scopes disjoint when multiple providers use the same payer,
+since overlapping imports each record the same matching costs.
+
+Use a dedicated billing identity with `s3:ListBucket` on the bucket limited to
+the report prefix and `s3:GetObject` on objects under that prefix. Grant any
+KMS decrypt permission required by the bucket's encryption key. Supply
+`{"auth_mode":"static", "access_key_id":"…", "secret_access_key":"…"}`
+as the billing credential, adding `session_token` for temporary credentials,
+or `{"auth_mode":"workload"}` to use the workload's AWS credential chain.
+The workload chain uses the bounded AWS metadata transport; S3 access uses the
+connection's normal network and egress policy. The import reads only Bedrock
+service rows, uses effective costs for reserved and Savings Plan usage, and
+excludes commitment fees and negation lines. It uses the assembly manifest and
+its S3 modification time as the revision and ordering marker. Parquet exports
+and reports that overwrite previous versions are not supported.
 
 For Vertex AI, first enable the [detailed Cloud Billing export to BigQuery](https://cloud.google.com/billing/docs/how-to/export-data-bigquery-tables/detailed-usage).
 Grant the billing principal `bigquery.jobs.create` in the query project and
@@ -353,14 +379,17 @@ not prove the export contained all historical costs.
 ### Importer
 
 The `billing_import` worker scans every 60 seconds for imports due, claims up
-to ten under a ten-minute lease, and fetches through the connection's
-egress-validated client (no redirects, 30 seconds per request and a 4 MiB
-response cap). OpenAI and Anthropic imports read at most 20 pages. Imports cover
-closed UTC days only: the first covers the 30 days before today, and later
-imports refresh the last 7 so vendor restatements land. Each day's returned line
-items are summed per `(day, line_item, currency)` and replace the stored rows. A
-returned bucket with no results
-records an invoiced zero. On success the import schedules one hour
+to ten, one at a time under a ten-minute lease, and fetches through the connection's
+egress-validated client with redirects disabled. OpenAI and Anthropic imports
+cover closed UTC days only. The first covers the 30 days before today, and
+later imports refresh the last 7 so vendor restatements land. AWS imports cover
+closed UTC days within retention on the first pass and refresh the current and
+previous billing periods on later passes. Incomplete historical periods are
+retried until covered. A delivery covers only days closed before its manifest
+was written, and gaps remain unimported. AWS reads are bounded by a 45-second
+deadline and cumulative compressed and expanded byte, row and aggregation limits.
+Each day's returned line items are summed per `(day, line_item, currency)` and
+replace the stored rows. A returned bucket with no results records an invoiced zero. On success the import schedules one hour
 out; on failure `last_error_code` records `credential`, `status`, `network`,
 `timeout`, `response` or `endpoint`, and the retry backs off from five
 minutes to one hour. Rows older than `retention.usage_days` are purged in
@@ -409,6 +438,11 @@ A provider entry in a configuration document carries `billing_import`
 `{enabled, scope, credential_ref}` with `credential_ref`
 `<provider name>/billing`; a missing `secret_bindings` entry blocks apply,
 reusing a matching binding keeps the stored key, and an entry's absence
-deletes the import. `internal/billing/testdata` fixtures follow the vendors'
-documented response shapes. There is no live-account qualification for them. AWS CUR
-and Azure Cost Management imports remain planned.
+deletes the import. The fixtures in `internal/billing/testdata` and the hand-built
+AWS CUR fixtures in `tests/integration/billing_aws_test.go` follow documented
+response shapes. The AWS fixture follows the documented [report versions](https://docs.aws.amazon.com/cur/latest/userguide/understanding-report-versions.html),
+[latest report locations](https://docs.aws.amazon.com/cur/latest/userguide/view-latest-cur.html),
+[identity columns](https://docs.aws.amazon.com/cur/latest/userguide/identity-columns.html)
+and [line item columns](https://docs.aws.amazon.com/cur/latest/userguide/Lineitem-columns.html),
+reviewed October 31, 2026. The fixtures have not been qualified against live billing accounts.
+Google Cloud billing export and Azure Cost Management imports remain planned.

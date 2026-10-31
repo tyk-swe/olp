@@ -17,7 +17,12 @@ const (
 	// SourceAnthropic costs come from the organization's cost report.
 	SourceAnthropic = "anthropic_cost_report"
 	SourceGoogle    = "google_bigquery"
+	SourceAWS       = "aws_cur"
 )
+
+func revisionBacked(source string) bool {
+	return source == SourceAWS
+}
 
 // SourceFor names the vendor cost endpoint a provider kind imports, or
 // refuses a kind that has none.
@@ -27,11 +32,13 @@ func SourceFor(kind string) (string, error) {
 		return SourceOpenAI, nil
 	case "anthropic":
 		return SourceAnthropic, nil
+	case "bedrock":
+		return SourceAWS, nil
 	case "vertex_ai":
 		return SourceGoogle, nil
 	}
 	return "", access.Invalid("billing_import",
-		fmt.Sprintf("Billing imports are only supported for openai, anthropic and vertex_ai providers, not %q.", kind))
+		fmt.Sprintf("Billing imports are only supported for openai, anthropic, bedrock and vertex_ai providers, not %q.", kind))
 }
 
 var (
@@ -52,6 +59,9 @@ type Scope struct {
 func ValidateScope(source string, raw json.RawMessage) (json.RawMessage, error) {
 	if source == SourceGoogle {
 		return validateGoogleScope(raw)
+	}
+	if source == SourceAWS {
+		return validateAWSScope(raw)
 	}
 	if len(raw) == 0 || bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
 		return json.RawMessage(`{}`), nil

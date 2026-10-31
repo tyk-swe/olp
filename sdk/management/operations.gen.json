@@ -2693,7 +2693,7 @@
               "type": "boolean"
             },
             "scope": {
-              "type": "object"
+              "$ref": "#/$defs/BillingScope"
             },
             "credential_ref": {
               "type": "string",
@@ -2705,6 +2705,120 @@
             "scope",
             "credential_ref"
           ]
+        },
+        "BillingScope": {
+          "description": "Source-shaped billing scope. Polling sources accept an empty scope. AWS and Google require their export details.",
+          "oneOf": [
+            {
+              "$ref": "#/$defs/PollingBillingScope"
+            },
+            {
+              "$ref": "#/$defs/AWSBillingScope"
+            },
+            {
+              "$ref": "#/$defs/GoogleBillingScope"
+            }
+          ]
+        },
+        "PollingBillingScope": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "project_ids": {
+              "type": "array",
+              "maxItems": 100,
+              "items": {
+                "type": "string",
+                "pattern": "^proj_[A-Za-z0-9]{1,64}$"
+              }
+            },
+            "workspace_ids": {
+              "type": "array",
+              "maxItems": 100,
+              "items": {
+                "type": "string",
+                "pattern": "^(wrkspc_[A-Za-z0-9]{1,64}|default)$"
+              }
+            }
+          },
+          "not": {
+            "required": [
+              "project_ids",
+              "workspace_ids"
+            ]
+          }
+        },
+        "AWSBillingScope": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "payer_account_id",
+            "bucket",
+            "report_prefix",
+            "region"
+          ],
+          "properties": {
+            "payer_account_id": {
+              "type": "string",
+              "pattern": "^[0-9]{12}$"
+            },
+            "bucket": {
+              "type": "string",
+              "minLength": 3,
+              "maxLength": 63,
+              "pattern": "^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$"
+            },
+            "report_prefix": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 1024,
+              "description": "CUR report prefix including the report name"
+            },
+            "region": {
+              "type": "string",
+              "maxLength": 64,
+              "pattern": "^[a-z]{2}(-[a-z0-9]+)+-[0-9]+$"
+            },
+            "linked_account_ids": {
+              "type": "array",
+              "maxItems": 100,
+              "items": {
+                "type": "string",
+                "pattern": "^[0-9]{12}$"
+              }
+            }
+          }
+        },
+        "GoogleBillingScope": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "billing_account_id",
+            "bigquery_project_id",
+            "dataset_id",
+            "table_id"
+          ],
+          "properties": {
+            "billing_account_id": {
+              "type": "string"
+            },
+            "bigquery_project_id": {
+              "type": "string"
+            },
+            "dataset_id": {
+              "type": "string"
+            },
+            "table_id": {
+              "type": "string"
+            },
+            "project_ids": {
+              "type": "array",
+              "maxItems": 100,
+              "items": {
+                "type": "string"
+              }
+            }
+          }
         },
         "ConfigurationRouteEntry": {
           "properties": {
@@ -28047,7 +28161,7 @@
               "type": "boolean"
             },
             "scope": {
-              "type": "object"
+              "$ref": "#/$defs/BillingScope"
             },
             "credential_ref": {
               "type": "string",
@@ -28059,6 +28173,120 @@
             "scope",
             "credential_ref"
           ]
+        },
+        "BillingScope": {
+          "description": "Source-shaped billing scope. Polling sources accept an empty scope. AWS and Google require their export details.",
+          "oneOf": [
+            {
+              "$ref": "#/$defs/PollingBillingScope"
+            },
+            {
+              "$ref": "#/$defs/AWSBillingScope"
+            },
+            {
+              "$ref": "#/$defs/GoogleBillingScope"
+            }
+          ]
+        },
+        "PollingBillingScope": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "project_ids": {
+              "type": "array",
+              "maxItems": 100,
+              "items": {
+                "type": "string",
+                "pattern": "^proj_[A-Za-z0-9]{1,64}$"
+              }
+            },
+            "workspace_ids": {
+              "type": "array",
+              "maxItems": 100,
+              "items": {
+                "type": "string",
+                "pattern": "^(wrkspc_[A-Za-z0-9]{1,64}|default)$"
+              }
+            }
+          },
+          "not": {
+            "required": [
+              "project_ids",
+              "workspace_ids"
+            ]
+          }
+        },
+        "AWSBillingScope": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "payer_account_id",
+            "bucket",
+            "report_prefix",
+            "region"
+          ],
+          "properties": {
+            "payer_account_id": {
+              "type": "string",
+              "pattern": "^[0-9]{12}$"
+            },
+            "bucket": {
+              "type": "string",
+              "minLength": 3,
+              "maxLength": 63,
+              "pattern": "^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$"
+            },
+            "report_prefix": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 1024,
+              "description": "CUR report prefix including the report name"
+            },
+            "region": {
+              "type": "string",
+              "maxLength": 64,
+              "pattern": "^[a-z]{2}(-[a-z0-9]+)+-[0-9]+$"
+            },
+            "linked_account_ids": {
+              "type": "array",
+              "maxItems": 100,
+              "items": {
+                "type": "string",
+                "pattern": "^[0-9]{12}$"
+              }
+            }
+          }
+        },
+        "GoogleBillingScope": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "billing_account_id",
+            "bigquery_project_id",
+            "dataset_id",
+            "table_id"
+          ],
+          "properties": {
+            "billing_account_id": {
+              "type": "string"
+            },
+            "bigquery_project_id": {
+              "type": "string"
+            },
+            "dataset_id": {
+              "type": "string"
+            },
+            "table_id": {
+              "type": "string"
+            },
+            "project_ids": {
+              "type": "array",
+              "maxItems": 100,
+              "items": {
+                "type": "string"
+              }
+            }
+          }
         },
         "ConfigurationRouteEntry": {
           "properties": {
@@ -34081,11 +34309,10 @@
               "description": "Defaults to true when omitted."
             },
             "scope": {
-              "type": "object",
-              "description": "Source-shaped import scope. Google requires billing_account_id, bigquery_project_id, dataset_id and table_id, with optional project_ids. Omitted keeps the stored scope."
+              "$ref": "#/$defs/BillingScope"
             },
             "credential": {
-              "description": "Write-only billing credential. OpenAI and Anthropic use an admin key string. Google uses an object with auth_mode service_account and a service_account key document, or auth_mode adc. Required on create; omitted keeps the stored credential; null is rejected.",
+              "description": "Billing credential. Required on create, omitted retains the stored credential, and null is rejected. AWS and Google credentials are source-shaped objects.",
               "oneOf": [
                 {
                   "type": "string",
@@ -34095,6 +34322,34 @@
                 {
                   "type": "object",
                   "additionalProperties": false,
+                  "required": [
+                    "auth_mode"
+                  ],
+                  "properties": {
+                    "auth_mode": {
+                      "type": "string",
+                      "enum": [
+                        "static",
+                        "workload"
+                      ]
+                    },
+                    "access_key_id": {
+                      "type": "string"
+                    },
+                    "secret_access_key": {
+                      "type": "string"
+                    },
+                    "session_token": {
+                      "type": "string"
+                    }
+                  }
+                },
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "auth_mode"
+                  ],
                   "properties": {
                     "auth_mode": {
                       "type": "string",
@@ -34107,12 +34362,123 @@
                       "type": "object",
                       "additionalProperties": true
                     }
-                  },
-                  "required": [
-                    "auth_mode"
-                  ]
+                  }
                 }
               ]
+            }
+          }
+        },
+        "BillingScope": {
+          "description": "Source-shaped billing scope. Polling sources accept an empty scope. AWS and Google require their export details.",
+          "oneOf": [
+            {
+              "$ref": "#/$defs/PollingBillingScope"
+            },
+            {
+              "$ref": "#/$defs/AWSBillingScope"
+            },
+            {
+              "$ref": "#/$defs/GoogleBillingScope"
+            }
+          ]
+        },
+        "PollingBillingScope": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "project_ids": {
+              "type": "array",
+              "maxItems": 100,
+              "items": {
+                "type": "string",
+                "pattern": "^proj_[A-Za-z0-9]{1,64}$"
+              }
+            },
+            "workspace_ids": {
+              "type": "array",
+              "maxItems": 100,
+              "items": {
+                "type": "string",
+                "pattern": "^(wrkspc_[A-Za-z0-9]{1,64}|default)$"
+              }
+            }
+          },
+          "not": {
+            "required": [
+              "project_ids",
+              "workspace_ids"
+            ]
+          }
+        },
+        "AWSBillingScope": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "payer_account_id",
+            "bucket",
+            "report_prefix",
+            "region"
+          ],
+          "properties": {
+            "payer_account_id": {
+              "type": "string",
+              "pattern": "^[0-9]{12}$"
+            },
+            "bucket": {
+              "type": "string",
+              "minLength": 3,
+              "maxLength": 63,
+              "pattern": "^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$"
+            },
+            "report_prefix": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 1024,
+              "description": "CUR report prefix including the report name"
+            },
+            "region": {
+              "type": "string",
+              "maxLength": 64,
+              "pattern": "^[a-z]{2}(-[a-z0-9]+)+-[0-9]+$"
+            },
+            "linked_account_ids": {
+              "type": "array",
+              "maxItems": 100,
+              "items": {
+                "type": "string",
+                "pattern": "^[0-9]{12}$"
+              }
+            }
+          }
+        },
+        "GoogleBillingScope": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "billing_account_id",
+            "bigquery_project_id",
+            "dataset_id",
+            "table_id"
+          ],
+          "properties": {
+            "billing_account_id": {
+              "type": "string"
+            },
+            "bigquery_project_id": {
+              "type": "string"
+            },
+            "dataset_id": {
+              "type": "string"
+            },
+            "table_id": {
+              "type": "string"
+            },
+            "project_ids": {
+              "type": "array",
+              "maxItems": 100,
+              "items": {
+                "type": "string"
+              }
             }
           }
         }

@@ -1,6 +1,7 @@
 package billing
 
 import (
+	"bytes"
 	"net/http"
 	"sort"
 	"strings"
@@ -97,6 +98,36 @@ func (s *Server) reconciliation(r *http.Request, p access.Principal) (access.Rep
 	for i := range imports {
 		providerIDs = append(providerIDs, imports[i].ProviderID)
 		byProvider[imports[i].ProviderID] = &imports[i]
+	}
+	coverage := map[string][][2]string{}
+	if len(providerIDs) > 0 {
+		rows, err := s.Access.Pool.Query(r.Context(), `SELECT provider_id::text,source,scope_digest,covered_from::text,covered_through::text
+			FROM olp.provider_billing_revisions WHERE provider_id=ANY($1::uuid[]) AND covered_from IS NOT NULL
+			AND covered_from<$3::date AND covered_through>=$2::date`, providerIDs, start.Format(dayFormat), end.Format(dayFormat))
+		if err != nil {
+			return access.Reply{}, err
+		}
+		for rows.Next() {
+			var provider, source, from, through string
+			var storedDigest []byte
+			if err := rows.Scan(&provider, &source, &storedDigest, &from, &through); err != nil {
+				rows.Close()
+				return access.Reply{}, err
+			}
+			imp := byProvider[provider]
+			digest, err := scopeDigest(imp.Source, imp.Scope)
+			if err != nil {
+				rows.Close()
+				return access.Reply{}, err
+			}
+			if imp.Source == source && bytes.Equal(digest[:], storedDigest) {
+				coverage[provider] = append(coverage[provider], [2]string{from, through})
+			}
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			return access.Reply{}, err
+		}
 	}
 	// Invoiced totals per provider and day over the whole window.
 	invoiced := map[string]map[string]*invoiceDay{}
@@ -214,9 +245,18 @@ func (s *Server) reconciliation(r *http.Request, p access.Principal) (access.Rep
 			var covered bool
 			// Invoiced cost reads "0" on covered days the import returned
 			// without buckets, and null outside the imported window.
-			if imp != nil && imp.ImportedFrom != nil && imp.ImportedThrough != nil &&
+			if imp != nil && revisionBacked(imp.Source) {
+				for _, span := range coverage[provider] {
+					if day >= span[0] && day <= span[1] {
+						covered = true
+						break
+					}
+				}
+			} else if imp != nil && imp.ImportedFrom != nil && imp.ImportedThrough != nil &&
 				day >= *imp.ImportedFrom && day <= *imp.ImportedThrough {
 				covered = true
+			}
+			if covered {
 				amount := decimal.Zero
 				currencies := ""
 				if c.invoiced != nil {

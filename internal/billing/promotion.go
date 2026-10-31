@@ -81,6 +81,18 @@ func ImportCredentialMatches(ctx context.Context, q access.Queryer, keys *secret
 		return false, err
 	}
 	defer clear(key)
+	if source == SourceAWS {
+		document, err := validateAWSCredential(credential)
+		if err != nil {
+			return false, err
+		}
+		canonical, err := json.Marshal(document)
+		if err != nil {
+			return false, err
+		}
+		defer clear(canonical)
+		return sha256.Sum256(key) == sha256.Sum256(canonical), nil
+	}
 	return sha256.Sum256(key) == sha256.Sum256([]byte(credential)), nil
 }
 

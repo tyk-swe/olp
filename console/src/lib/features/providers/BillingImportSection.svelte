@@ -14,7 +14,8 @@
     getBillingImport,
     putBillingImport,
     runBillingImport,
-    type BillingImport
+    type BillingImport,
+    type PutBillingImportInput
   } from '$lib/features/providers/api/billing';
   import { providerKeys } from '$lib/features/providers/providerKeys';
   import type { Provider } from '$lib/features/providers/api/providers';
@@ -24,7 +25,10 @@
 
   const kind = $derived(provider.configuration.kind);
   const supported = $derived(
-    kind === 'openai' || kind === 'anthropic' || kind === 'vertex_ai'
+    kind === 'openai' ||
+      kind === 'anthropic' ||
+      kind === 'vertex_ai' ||
+      kind === 'bedrock'
   );
   const scopeLabel = $derived(
     kind === 'vertex_ai'
@@ -50,6 +54,16 @@
   }));
 
   let adminKey = $state('');
+  let payerAccount = $state('');
+  let bucket = $state('');
+  let reportPrefix = $state('');
+  let region = $state('');
+  let linkedAccounts = $state('');
+  let awsAuthMode = $state<'static' | 'workload'>('static');
+  let accessKeyId = $state('');
+  let secretAccessKey = $state('');
+  let sessionToken = $state('');
+  let replaceCredential = $state(false);
   let scopeText = $state('');
   let billingAccountID = $state('');
   let bigQueryProjectID = $state('');
@@ -67,6 +81,9 @@
 
   const captureOwner = usePrincipalLifetime(() => {
     adminKey = '';
+    payerAccount = bucket = reportPrefix = region = linkedAccounts = '';
+    accessKeyId = secretAccessKey = sessionToken = '';
+    replaceCredential = false;
     scopeText = '';
     billingAccountID = bigQueryProjectID = datasetID = tableID = '';
     googleAuthMode = 'service_account';
@@ -84,13 +101,21 @@
     const current = detail;
     if (current && !initialized) {
       scopeText = scopeLines(current);
-      if (kind === 'vertex_ai') {
-        const scope = current.scope as unknown as Record<string, string>;
+      if (kind === 'vertex_ai' && 'billing_account_id' in current.scope) {
+        const scope = current.scope;
         billingAccountID = scope.billing_account_id ?? '';
         bigQueryProjectID = scope.bigquery_project_id ?? '';
         datasetID = scope.dataset_id ?? '';
         tableID = scope.table_id ?? '';
         googleAuthMode = 'keep';
+      }
+      if (kind === 'bedrock' && 'payer_account_id' in current.scope) {
+        const scope = current.scope;
+        payerAccount = scope.payer_account_id;
+        bucket = scope.bucket;
+        reportPrefix = scope.report_prefix;
+        region = scope.region;
+        linkedAccounts = (scope.linked_account_ids ?? []).join('\n');
       }
       enabled = current.enabled;
       initialized = true;
@@ -98,8 +123,14 @@
   });
 
   function scopeLines(document: BillingImport): string {
-    const scope = document.scope as Record<string, string[]>;
-    const entries = scope.project_ids ?? scope.workspace_ids ?? [];
+    const scope = document.scope;
+    if ('payer_account_id' in scope) return '';
+    const entries =
+      'project_ids' in scope
+        ? (scope.project_ids ?? [])
+        : 'workspace_ids' in scope
+          ? (scope.workspace_ids ?? [])
+          : [];
     return entries.join('\n');
   }
 
@@ -122,7 +153,20 @@
     }
   }
 
-  function scopeBody(): Record<string, never> {
+  function scopeBody(): NonNullable<PutBillingImportInput['scope']> {
+    if (kind === 'bedrock') {
+      const ids = linkedAccounts
+        .split('\n')
+        .map((line) => line.trim())
+        .filter(Boolean);
+      return {
+        payer_account_id: payerAccount.trim(),
+        bucket: bucket.trim(),
+        report_prefix: reportPrefix.trim(),
+        region: region.trim(),
+        ...(ids.length ? { linked_account_ids: ids } : {})
+      };
+    }
     const ids = scopeText
       .split('\n')
       .map((line) => line.trim())
@@ -134,15 +178,32 @@
         dataset_id: datasetID.trim(),
         table_id: tableID.trim(),
         ...(ids.length ? { project_ids: ids } : {})
-      } as unknown as Record<string, never>;
+      };
     }
     if (!ids.length) return {};
-    const scope: Record<string, string[]> =
-      kind === 'openai' ? { project_ids: ids } : { workspace_ids: ids };
-    return scope as Record<string, never>;
+    return kind === 'openai' ? { project_ids: ids } : { workspace_ids: ids };
   }
 
   function validateForm(): string {
+    if (kind === 'bedrock') {
+      if (!/^\d{12}$/.test(payerAccount.trim()))
+        return 'Enter the 12-digit payer account ID';
+      if (!bucket.trim() || !reportPrefix.trim() || !region.trim())
+        return 'Enter the bucket, report prefix, and region';
+      const ids = linkedAccounts
+        .split('\n')
+        .map((line) => line.trim())
+        .filter(Boolean);
+      if (ids.length > 100 || ids.some((id) => !/^\d{12}$/.test(id)))
+        return 'Enter at most 100 12-digit linked account IDs';
+      if (
+        (!editing || replaceCredential) &&
+        awsAuthMode === 'static' &&
+        (!accessKeyId.trim() || !secretAccessKey.trim())
+      )
+        return 'Enter an access key ID and secret access key';
+      return '';
+    }
     const ids = scopeText
       .split('\n')
       .map((line) => line.trim())
@@ -199,7 +260,25 @@
     const submission = intent.prepare<Parameters<typeof putBillingImport>[2]>({
       enabled,
       scope: scopeBody(),
-      ...(credential ? { credential } : {})
+      ...(kind === 'bedrock'
+        ? !editing || replaceCredential
+          ? {
+              credential:
+                awsAuthMode === 'workload'
+                  ? { auth_mode: 'workload' as const }
+                  : {
+                      auth_mode: 'static' as const,
+                      access_key_id: accessKeyId.trim(),
+                      secret_access_key: secretAccessKey.trim(),
+                      ...(sessionToken.trim()
+                        ? { session_token: sessionToken.trim() }
+                        : {})
+                    }
+            }
+          : {}
+        : credential
+          ? { credential }
+          : {})
     });
     const isCurrent = captureOwner();
     busy = true;
@@ -215,6 +294,8 @@
       if (!isCurrent()) return;
       adminKey = '';
       if (kind === 'vertex_ai') googleAuthMode = 'keep';
+      accessKeyId = secretAccessKey = sessionToken = '';
+      replaceCredential = false;
       notice = 'Billing import saved.';
       await queryClient.invalidateQueries({
         queryKey: providerKeys.billingImport(provider.id)
@@ -321,6 +402,10 @@
             {detail.status.imported_from ?? '—'} → {detail.status
               .imported_through ?? '—'}
           </dd>
+          {#if detail.status.source_revision}
+            <dt>Source revision</dt>
+            <dd class="mono">{detail.status.source_revision}</dd>
+          {/if}
           <dt>Next import</dt>
           <dd>{formatDate(detail.status.next_import_at)}</dd>
         </dl>
@@ -338,82 +423,175 @@
         >
           <fieldset class="submission-fields" disabled={busy}>
             <div class="form-grid">
-              <div class="form-field">
+              {#if kind === 'bedrock'}
+                <div class="form-field">
+                  <label for="aws-payer">Payer account ID</label><input
+                    id="aws-payer"
+                    bind:value={payerAccount}
+                  />
+                </div>
+                <div class="form-field">
+                  <label for="aws-bucket">S3 bucket</label><input
+                    id="aws-bucket"
+                    bind:value={bucket}
+                  />
+                </div>
+                <div class="form-field">
+                  <label for="aws-prefix">CUR report prefix</label><input
+                    id="aws-prefix"
+                    bind:value={reportPrefix}
+                    placeholder="prefix/report-name"
+                  />
+                </div>
+                <div class="form-field">
+                  <label for="aws-region">S3 region</label><input
+                    id="aws-region"
+                    bind:value={region}
+                    placeholder="us-east-1"
+                  />
+                </div>
+                <div class="form-field">
+                  <label for="aws-linked">Linked account IDs</label><textarea
+                    id="aws-linked"
+                    rows="3"
+                    bind:value={linkedAccounts}></textarea><small
+                    >One 12-digit ID per line, leave empty for all linked
+                    accounts</small
+                  >
+                </div>
+                {#if editing}<div class="form-field">
+                    <label class="inline-check"
+                      ><input
+                        type="checkbox"
+                        bind:checked={replaceCredential}
+                      />Replace billing credential</label
+                    >
+                  </div>{/if}
+                {#if !editing || replaceCredential}
+                  <div class="form-field">
+                    <label for="aws-auth">Authentication</label><select
+                      id="aws-auth"
+                      bind:value={awsAuthMode}
+                      ><option value="static">Access keys</option><option
+                        value="workload">Workload identity</option
+                      ></select
+                    >
+                  </div>
+                  {#if awsAuthMode === 'static'}
+                    <div class="form-field">
+                      <label for="aws-access">Access key ID</label><input
+                        id="aws-access"
+                        type="password"
+                        autocomplete="off"
+                        bind:value={accessKeyId}
+                      />
+                    </div>
+                    <div class="form-field">
+                      <label for="aws-secret">Secret access key</label><input
+                        id="aws-secret"
+                        type="password"
+                        autocomplete="off"
+                        bind:value={secretAccessKey}
+                      />
+                    </div>
+                    <div class="form-field">
+                      <label for="aws-token">Session token (optional)</label
+                      ><input
+                        id="aws-token"
+                        type="password"
+                        autocomplete="off"
+                        bind:value={sessionToken}
+                      />
+                    </div>
+                  {/if}
+                {/if}
+                <p class="section-help">
+                  Use a legacy CSV CUR export with create-new-versions enabled
+                  and grant list and read access to this report
+                </p>
+              {:else}
+                <div class="form-field">
+                  {#if kind === 'vertex_ai'}
+                    <label for="billing-auth-mode">Billing authentication</label
+                    >
+                    <select
+                      id="billing-auth-mode"
+                      bind:value={googleAuthMode}
+                      onchange={() => {
+                        adminKey = '';
+                      }}
+                    >
+                      {#if editing}<option value="keep"
+                          >Keep existing credential</option
+                        >{/if}
+                      <option value="service_account"
+                        >Service account key</option
+                      >
+                      <option value="adc">Workload identity</option>
+                    </select>
+                  {/if}
+                  {#if kind !== 'vertex_ai' || googleAuthMode === 'service_account'}
+                    <label for="billing-admin-key"
+                      >{kind === 'vertex_ai'
+                        ? 'Service account JSON'
+                        : 'Admin key'}</label
+                    >
+                    <input
+                      id="billing-admin-key"
+                      type="password"
+                      autocomplete="off"
+                      bind:value={adminKey}
+                      placeholder={kind === 'vertex_ai'
+                        ? 'Paste the service account JSON'
+                        : editing
+                          ? 'Blank keeps the stored key'
+                          : 'sk-admin-…'}
+                    />
+                  {/if}
+                </div>
                 {#if kind === 'vertex_ai'}
-                  <label for="billing-auth-mode">Billing authentication</label>
-                  <select
-                    id="billing-auth-mode"
-                    bind:value={googleAuthMode}
-                    onchange={() => {
-                      adminKey = '';
-                    }}
-                  >
-                    {#if editing}<option value="keep"
-                        >Keep existing credential</option
-                      >{/if}
-                    <option value="service_account">Service account key</option>
-                    <option value="adc">Workload identity</option>
-                  </select>
+                  <div class="form-field">
+                    <label for="billing-account">Billing account ID</label
+                    ><input
+                      id="billing-account"
+                      bind:value={billingAccountID}
+                    />
+                  </div>
+                  <div class="form-field">
+                    <label for="billing-project">BigQuery project ID</label
+                    ><input
+                      id="billing-project"
+                      bind:value={bigQueryProjectID}
+                    />
+                  </div>
+                  <div class="form-field">
+                    <label for="billing-dataset">Dataset ID</label><input
+                      id="billing-dataset"
+                      bind:value={datasetID}
+                    />
+                  </div>
+                  <div class="form-field">
+                    <label for="billing-table">Detailed export table ID</label
+                    ><input id="billing-table" bind:value={tableID} />
+                  </div>
                 {/if}
-                {#if kind !== 'vertex_ai' || googleAuthMode === 'service_account'}
-                  <label for="billing-admin-key"
-                    >{kind === 'vertex_ai'
-                      ? 'Service account JSON'
-                      : 'Admin key'}</label
-                  >
-                  <input
-                    id="billing-admin-key"
-                    type="password"
-                    autocomplete="off"
-                    bind:value={adminKey}
+                <div class="form-field">
+                  <label for="billing-scope">{scopeLabel}</label>
+                  <textarea
+                    id="billing-scope"
+                    rows="3"
+                    bind:value={scopeText}
                     placeholder={kind === 'vertex_ai'
-                      ? 'Paste the service account JSON'
-                      : editing
-                        ? 'Blank keeps the stored key'
-                        : 'sk-admin-…'}
-                  />
-                {/if}
-              </div>
-              {#if kind === 'vertex_ai'}
-                <div class="form-field">
-                  <label for="billing-account">Billing account ID</label><input
-                    id="billing-account"
-                    bind:value={billingAccountID}
-                  />
-                </div>
-                <div class="form-field">
-                  <label for="billing-project">BigQuery project ID</label><input
-                    id="billing-project"
-                    bind:value={bigQueryProjectID}
-                  />
-                </div>
-                <div class="form-field">
-                  <label for="billing-dataset">Dataset ID</label><input
-                    id="billing-dataset"
-                    bind:value={datasetID}
-                  />
-                </div>
-                <div class="form-field">
-                  <label for="billing-table">Detailed export table ID</label
-                  ><input id="billing-table" bind:value={tableID} />
+                      ? 'workload-project'
+                      : kind === 'openai'
+                        ? 'proj_…'
+                        : 'wrkspc_… or default'}></textarea>
+                  <small
+                    >One ID per line. Leave empty to include all projects or
+                    workspaces.</small
+                  >
                 </div>
               {/if}
-              <div class="form-field">
-                <label for="billing-scope">{scopeLabel}</label>
-                <textarea
-                  id="billing-scope"
-                  rows="3"
-                  bind:value={scopeText}
-                  placeholder={kind === 'vertex_ai'
-                    ? 'workload-project'
-                    : kind === 'openai'
-                      ? 'proj_…'
-                      : 'wrkspc_… or default'}></textarea>
-                <small
-                  >One ID per line. Leave empty to include all projects or
-                  workspaces.</small
-                >
-              </div>
               <div class="form-field">
                 <label class="inline-check"
                   ><input
