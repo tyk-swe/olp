@@ -81,19 +81,17 @@ func ImportCredentialMatches(ctx context.Context, q access.Queryer, keys *secret
 		return false, err
 	}
 	defer clear(key)
-	if source == SourceAWS {
-		document, err := validateAWSCredential(credential)
-		if err != nil {
-			return false, err
-		}
-		canonical, err := json.Marshal(document)
-		if err != nil {
-			return false, err
-		}
-		defer clear(canonical)
-		return sha256.Sum256(key) == sha256.Sum256(canonical), nil
+	encoded, err := encodeCredential(source, credential)
+	if err != nil {
+		return false, err
 	}
-	return sha256.Sum256(key) == sha256.Sum256([]byte(credential)), nil
+	defer clear(encoded)
+	canonical, err := decodeCredential(source, encoded)
+	if err != nil {
+		return false, err
+	}
+	defer clear(canonical)
+	return sha256.Sum256(key) == sha256.Sum256(canonical), nil
 }
 
 // ApplyImport creates, replaces or deletes a provider's billing import to
