@@ -14,6 +14,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -35,6 +37,8 @@ type Importer struct {
 	Connections  *egress.ConnectionClientCache
 	Log          *slog.Logger
 	PassBudget   time.Duration
+	AWSClient    func(aws.Config) *s3.Client
+	Now          func() time.Time
 
 	mu       sync.Mutex
 	outcomes map[[2]string]int64
@@ -152,36 +156,23 @@ const claimSQL = `UPDATE olp.provider_billing_imports
 		SELECT provider_id FROM olp.provider_billing_imports
 		WHERE enabled AND next_import_at <= now()
 		ORDER BY next_import_at
-		LIMIT 10
+		LIMIT 1
 		FOR UPDATE SKIP LOCKED
 	)
 	RETURNING ` + importColumns
 
-// pass claims the due rows, runs each import, then purges expired invoice
-// rows. Claiming and each import commit separately so one slow vendor cannot
-// hold the batch.
 func (i *Importer) pass(ctx context.Context) (bool, error) {
-	var due []importRow
-	rows, err := i.Pool.Query(ctx, claimSQL)
-	if err != nil {
-		return false, err
-	}
-	for rows.Next() {
-		row, err := scanImport(rows)
-		if err != nil {
-			rows.Close()
-			return false, err
+	for n := 0; n < 10; n++ {
+		row, err := scanImport(i.Pool.QueryRow(ctx, claimSQL))
+		if errors.Is(err, errImportMissing) {
+			return n > 0, i.purge(ctx)
 		}
-		due = append(due, *row)
-	}
-	rows.Close()
-	if err := rows.Err(); err != nil {
-		return false, err
-	}
-	for _, row := range due {
-		if err := i.importOne(ctx, &row); err != nil {
+		if err != nil {
+			return n > 0, err
+		}
+		if err := i.importOne(ctx, row); err != nil {
 			code := fetchCode(err)
-			if err := i.recordFailure(ctx, &row, code); err != nil {
+			if err := i.recordFailure(ctx, row, code); err != nil {
 				return true, err
 			}
 			i.outcome(row.ProviderID, code)
@@ -190,7 +181,7 @@ func (i *Importer) pass(ctx context.Context) (bool, error) {
 			i.outcome(row.ProviderID, "success")
 		}
 	}
-	return len(due) > 0, i.purge(ctx)
+	return true, i.purge(ctx)
 }
 
 // window is the fetch range for one import: the first successful import looks
@@ -223,6 +214,9 @@ func (i *Importer) importOne(ctx context.Context, row *importRow) error {
 		return failFetch("credential", err)
 	}
 	defer clear(key)
+	if row.Source == SourceAWS {
+		return i.importAWS(ctx, row, cfg, key)
+	}
 	client, err := i.client(ctx, row.ProviderID, cfg, key)
 	if err != nil {
 		return failFetch("endpoint", err)

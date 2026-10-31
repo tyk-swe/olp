@@ -188,11 +188,16 @@ func (s *Server) putImport(r *http.Request, _ access.Principal) (access.Reply, e
 	credentialNull := bytes.Equal(bytes.TrimSpace(input.Credential), []byte("null"))
 	var credential *string
 	if len(input.Credential) > 0 && !credentialNull {
-		var secret string
-		if err := json.Unmarshal(input.Credential, &secret); err != nil {
-			return access.Reply{}, access.Invalid("credential", "credential must be a string")
+		if source == SourceAWS {
+			secret := string(input.Credential)
+			credential = &secret
+		} else {
+			var secret string
+			if err := json.Unmarshal(input.Credential, &secret); err != nil {
+				return access.Reply{}, access.Invalid("credential", "credential must be a string")
+			}
+			credential = &secret
 		}
-		credential = &secret
 	}
 	switch {
 	case credentialNull:

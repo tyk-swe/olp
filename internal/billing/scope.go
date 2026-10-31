@@ -16,6 +16,7 @@ const (
 	SourceOpenAI = "openai_costs"
 	// SourceAnthropic costs come from the organization's cost report.
 	SourceAnthropic = "anthropic_cost_report"
+	SourceAWS       = "aws_cur"
 )
 
 // SourceFor names the vendor cost endpoint a provider kind imports, or
@@ -26,9 +27,11 @@ func SourceFor(kind string) (string, error) {
 		return SourceOpenAI, nil
 	case "anthropic":
 		return SourceAnthropic, nil
+	case "bedrock":
+		return SourceAWS, nil
 	}
 	return "", access.Invalid("billing_import",
-		fmt.Sprintf("Billing imports are only supported for openai and anthropic providers, not %q.", kind))
+		fmt.Sprintf("Billing imports are only supported for openai, anthropic, and bedrock providers, not %q.", kind))
 }
 
 var (
@@ -47,6 +50,9 @@ type Scope struct {
 // returns the canonical document stored. Anything the document does not list
 // is rejected rather than silently narrowed.
 func ValidateScope(source string, raw json.RawMessage) (json.RawMessage, error) {
+	if source == SourceAWS {
+		return validateAWSScope(raw)
+	}
 	if len(raw) == 0 || bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
 		return json.RawMessage(`{}`), nil
 	}
