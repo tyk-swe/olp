@@ -315,7 +315,7 @@ func awsReadPart(ctx context.Context, client *s3.Client, scope awsScope, key str
 			return failFetch("response", err)
 		}
 		defer csvFile.Close()
-		return awsReadCSV(csvFile, scope, days, state, key, budget)
+		return awsReadCSV(csvFile, scope, days, state, budget)
 	}
 	out, err := client.GetObject(ctx, &s3.GetObjectInput{Bucket: aws.String(scope.Bucket), Key: aws.String(key)})
 	if err != nil {
@@ -333,7 +333,7 @@ func awsReadPart(ctx context.Context, client *s3.Client, scope awsScope, key str
 		return failFetch("response", err)
 	}
 	defer gz.Close()
-	if err := awsReadCSV(gz, scope, days, state, key, budget); err != nil {
+	if err := awsReadCSV(gz, scope, days, state, budget); err != nil {
 		return err
 	}
 	if bounded.N == 0 {
@@ -342,7 +342,7 @@ func awsReadPart(ctx context.Context, client *s3.Client, scope awsScope, key str
 	return nil
 }
 
-func awsReadCSV(input io.Reader, scope awsScope, days reportAccumulator, state *awsReadState, partition string, budget *awsBudget) error {
+func awsReadCSV(input io.Reader, scope awsScope, days reportAccumulator, state *awsReadState, budget *awsBudget) error {
 	remaining := awsMaxExpanded - budget.expanded
 	bounded := &io.LimitedReader{R: input, N: remaining + 1}
 	defer func() { budget.expanded += remaining + 1 - bounded.N }()
@@ -385,7 +385,14 @@ func awsReadCSV(input io.Reader, scope awsScope, days reportAccumulator, state *
 			continue
 		}
 		if idColumn, ok := columns["identity/LineItemId"]; ok && record[idColumn] != "" {
-			id := sha256.Sum256([]byte(partition + "\x00" + record[idColumn]))
+			optional := func(name, fallback string) string {
+				if n, exists := columns[name]; exists && record[n] != "" {
+					return record[n]
+				}
+				return fallback
+			}
+			identity := []string{record[idColumn], optional("identity/TimeInterval", field("lineItem/UsageStartDate")), optional("bill/BillType", "")}
+			id := sha256.Sum256([]byte(strings.Join(identity, "\x00")))
 			content := sha256.Sum256([]byte(strings.Join(record, "\x00")))
 			if previous, exists := state.seen[id]; exists {
 				if previous != content {

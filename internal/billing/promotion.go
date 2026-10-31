@@ -141,6 +141,9 @@ func RemoveImport(ctx context.Context, tx pgx.Tx, providerID string) error {
 	if existing == nil {
 		return nil
 	}
+	if err := rememberImportCoverage(ctx, tx, providerID); err != nil {
+		return err
+	}
 	if _, err := tx.Exec(ctx, `DELETE FROM olp.provider_billing_imports WHERE provider_id=$1::uuid`, providerID); err != nil {
 		return err
 	}

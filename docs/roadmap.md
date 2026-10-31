@@ -282,7 +282,7 @@ owners. **Dependencies:** existing importer and reconciliation contracts.
 - [ ] **RM9.1 Cloud import contracts:** add source account scope, source
   revision, currency, UTC-day mapping and idempotent late-correction handling
   for AWS CUR, Google billing and Azure Cost Management.
-- [ ] **RM9.2 AWS CUR import:** implement scoped ingestion, pagination,
+- [x] **RM9.2 AWS CUR import:** implement scoped ingestion, pagination,
   empty-day handling, deduplication, restatements and reconciliation without
   duplicate charges.
 - [x] **RM9.3 Google billing import:** implement scoped ingestion,
