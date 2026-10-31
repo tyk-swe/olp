@@ -245,7 +245,6 @@ func newOpenAIFixture(t *testing.T, fileContent string) *openaiFixture {
 				close(read)
 			}
 			<-hold
-			return
 		}
 		if status := f.batchCreateStatus.Load(); status != 0 {
 			w.Header().Set("Content-Type", "application/json")
@@ -602,6 +601,131 @@ func stateKey(t *testing.T, h *accessHarness, owner *browser, slug string, allow
 	t.Helper()
 	key := h.want(owner, "POST", "/api/v1/api-keys", map[string]any{"name": "state key", "scopes": []string{"inference"}, "allowed_routes": []string{slug}, "allow_provider_state": allowState}, map[string]string{"Idempotency-Key": uuid.NewString()}, 201)
 	return key["secret"].(string)
+}
+
+func TestRetainedAdmissionReleasesCapacity(t *testing.T) {
+	fixture := newOpenAIFixture(t, "")
+	h := newAccessHarness(t)
+	_, _, limiter := limSetup(t, "retained-admission")
+	h.Gateway.Admission = gateway.NewAdmission(limiter, nil, nil)
+	owner, provider, slug, _ := provisionOpenAIWith(t, h, fixture.URL,
+		[]any{map[string]any{"operation": "batch", "surface": "openai", "mode": "unary"}, map[string]any{"operation": "generation", "surface": "openai", "mode": "unary"}},
+		[]string{"batch", "generation"}, map[string]any{"overall_timeout_ms": 60000})
+	providerPath := "/api/v1/providers/" + provider["id"].(string)
+	slots := h.want(owner, "GET", providerPath+"/credential-slots", nil, nil, 200)
+	slot := slots["items"].([]any)[0].(map[string]any)
+	h.want(owner, "PUT", providerPath+"/credential-slots/"+slot["id"].(string),
+		map[string]any{"slot": map[string]any{"name": "default", "max_concurrency": 1}}, withMatch(slots, idem(uuid.NewString())), 200)
+	detail := h.want(owner, "GET", providerPath, nil, nil, 200)
+	h.want(owner, "POST", providerPath+"/activate", nil, withMatch(detail, idem(uuid.NewString())), 200)
+	makeKey := func(name string) string {
+		key := h.want(owner, "POST", "/api/v1/api-keys", map[string]any{
+			"name": name, "scopes": []string{"inference"}, "allowed_routes": []string{slug},
+			"allow_provider_state": true, "max_concurrency": 1,
+		}, idem(uuid.NewString()), 201)
+		return key["secret"].(string)
+	}
+	firstKey, secondKey := makeKey("first retained key"), makeKey("second retained key")
+	h.refresh()
+	upload := func(key, name string) string {
+		status, body := h.uploadTestFile(slug, key, nativeBatchInput(name))
+		if status != http.StatusOK {
+			t.Fatalf("upload %s: %d %v", name, status, body)
+		}
+		return body["id"].(string)
+	}
+	firstFile, heldFile := upload(firstKey, "first"), upload(firstKey, "held")
+	secondFile, secondNewFile := upload(secondKey, "second"), upload(secondKey, "new")
+	firstBatch := createBatchForSettlement(t, h, firstKey, slug, firstFile)
+	secondBatch := createBatchForSettlement(t, h, secondKey, slug, secondFile)
+	status, stored, _ := h.gateway("POST", "/v1/responses", secondKey, map[string]any{
+		"model": slug, "input": "retained admission", "background": true, "store": true,
+	})
+	if status != http.StatusOK {
+		t.Fatalf("create stored response: %d %v", status, stored)
+	}
+
+	hold, read := make(chan struct{}), make(chan struct{})
+	fixture.mu.Lock()
+	fixture.batchCreateHold, fixture.batchCreateRead = hold, read
+	fixture.mu.Unlock()
+	var releaseOnce sync.Once
+	release := func() { releaseOnce.Do(func() { close(hold) }) }
+	defer release()
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, h.HTTP.URL+"/v1/batches", bytes.NewReader(batchCreateBody(heldFile)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Authorization", "Bearer "+firstKey)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-OLP-Route", slug)
+	type result struct {
+		status int
+		err    error
+	}
+	response := make(chan result, 1)
+	go func() {
+		resp, requestErr := http.DefaultClient.Do(req)
+		if requestErr != nil {
+			response <- result{err: requestErr}
+			return
+		}
+		_, readErr := io.Copy(io.Discard, resp.Body)
+		_ = resp.Body.Close()
+		response <- result{status: resp.StatusCode, err: readErr}
+	}()
+	select {
+	case <-read:
+		fixture.mu.Lock()
+		fixture.batchCreateHold, fixture.batchCreateRead = nil, nil
+		fixture.mu.Unlock()
+	case <-time.After(10 * time.Second):
+		t.Fatal("provider did not receive the held batch")
+	}
+
+	requests := []struct {
+		name, method, path, key, reason string
+		body                            any
+		retry                           bool
+	}{
+		{"first file", "GET", "/v1/files/" + firstFile, firstKey, "API key", nil, true},
+		{"first batch", "GET", "/v1/batches/" + firstBatch, firstKey, "API key", nil, true},
+		{"first create", "POST", "/v1/batches", firstKey, "API key", map[string]any{"input_file_id": heldFile, "endpoint": "/v1/chat/completions", "completion_window": "24h"}, false},
+		{"second file", "GET", "/v1/files/" + secondFile, secondKey, "provider credential", nil, true},
+		{"second batch", "GET", "/v1/batches/" + secondBatch, secondKey, "provider credential", nil, true},
+		{"second response", "GET", "/v1/responses/" + stored["id"].(string), secondKey, "provider credential", nil, true},
+		{"second create", "POST", "/v1/batches", secondKey, "provider credential", map[string]any{"input_file_id": secondNewFile, "endpoint": "/v1/chat/completions", "completion_window": "24h"}, true},
+	}
+	dials := fixture.dials.Load()
+	for _, request := range requests {
+		status, body, _ := h.gateway(request.method, request.path, request.key, request.body)
+		errorBody, _ := body["error"].(map[string]any)
+		message, _ := errorBody["message"].(string)
+		if status != http.StatusTooManyRequests || h.gatewayCode(status, body) != "rate_limit_exceeded" || !strings.Contains(message, request.reason) {
+			t.Fatalf("%s admission: %d %v", request.name, status, body)
+		}
+	}
+	if fixture.dials.Load() != dials {
+		t.Fatal("refused retained requests reached the provider")
+	}
+	release()
+	select {
+	case result := <-response:
+		if result.err != nil || result.status != http.StatusOK {
+			t.Fatalf("held batch: %d %v", result.status, result.err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("held batch did not finish")
+	}
+	for _, request := range requests {
+		if !request.retry {
+			continue
+		}
+		status, body, _ := h.gateway(request.method, request.path, request.key, request.body)
+		if status != http.StatusOK {
+			t.Fatalf("%s after release: %d %v", request.name, status, body)
+		}
+	}
 }
 
 func TestBatchLifecycle(t *testing.T) {
