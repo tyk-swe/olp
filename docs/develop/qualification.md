@@ -137,13 +137,15 @@ qualify every Dynamic rule or physical capacity utilization.
 
 ### Cloud billing fixture evidence
 
-The following fixture runs used Go 1.27.3 on Linux amd64 and a private test
-database on October 31, 2026. They used simulated cloud endpoints, with no real
-billing account. The database version and raw test logs were not recorded here.
-These results apply to the named revisions and do not replace candidate gates.
+The following fixture runs used Go 1.27.3 on Linux amd64 and a private
+PostgreSQL 18.6 test database (Debian 18.6-1.pgdg13+2) on October 31, 2026.
+They used simulated cloud endpoints, with no real billing account. Raw test logs
+and per-test skip status were not recorded, so the successful commands do not
+establish that every selected test ran. These results apply to the named
+revisions and do not replace candidate gates.
 
 At `0ab835c0d84838c890d288d133769c9d06d45b23`, the following command passed in
-32.789 seconds:
+32.789 seconds.
 
 ```bash
 go test -mod=readonly -vet=off -tags=integration,oidctest -timeout=5m ./tests/integration -run '^(TestAzureBilling|TestGoogleBilling|TestBillingImportAWS|TestBillingImportHistory)' -count=1
@@ -162,7 +164,7 @@ retention, coverage and bounds. The manifest fixture cites the
 reviewed October 31, 2026.
 
 At `232fb6cb0b312f1df92996d0cb5dc93f447ae68e`, the following Google fixture
-command passed:
+command passed.
 
 ```bash
 go test -mod=readonly -tags integration,oidctest,google_sql -timeout=5m ./tests/integration -run '^TestGoogleBillingImportEndToEnd$' -count=1
@@ -172,7 +174,7 @@ The Google fixture in `tests/integration/billing_google_sql_test.go` uses the
 documented detailed export rows in `internal/billing/testdata` and executes the
 submitted query with GoogleSQLite 0.3.1 against a simulated BigQuery peer. It
 covers scoping, corrections, credits, revisions, coverage and bounded failures.
-The test substitutes a fixture column for `_PARTITIONTIME`; it does not qualify
+The test substitutes a fixture column for `_PARTITIONTIME`. It does not qualify
 BigQuery's partition pruning, production query behavior or export completeness.
 The export schema and service references are recorded in the
 [fixture README](../../internal/billing/testdata/README.md).

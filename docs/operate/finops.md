@@ -320,7 +320,7 @@ clears the current import's coverage status. Previously imported days remain
 available for reconciliation until a later import replaces them or retention
 purges them.
 
-Amounts retain the source currency; reconciliation does not convert currencies.
+Amounts retain the source currency, and reconciliation does not convert currencies.
 Imports from connections with overlapping account, project, workspace,
 linked-account or subscription scopes can count the same invoice costs twice.
 Choose non-overlapping scopes when combining connections.
@@ -402,7 +402,7 @@ Azure imports only the documented Cognitive Services meter subcategories
 Azure Open AI and Azure Open AI Reservation. Vendor meter names can change, so
 review the export if expected charges are missing. Amounts use
 `CostInBillingCurrency` from the amortized export. Non-tax credit and adjustment
-rows are retained when the export assigns them to those meters; account-wide
+rows are retained when the export assigns them to those meters. Account-wide
 credits cannot be allocated to the meters. Tax and other Azure services are
 excluded, so these amounts do not necessarily equal the final invoice. The
 importer validates the export resource ID, manifest and part counts before
@@ -518,12 +518,17 @@ end-exclusive and at most 93 days.
 | Field | Meaning |
 | --- | --- |
 | `attributed_cost` | `estimated_cost` plus allocated commitment for the day's billable attempts |
-| `invoiced_cost` | imported line-item total for a covered day, else null; `0` for a covered day with no costs |
+| `invoiced_cost` | imported line-item total for a covered day, else null. A covered day with no costs has value `0` |
 | `capture_rate` | `attributed / invoiced` to six decimals, or null with `capture_rate_unavailable_reason` (`not_imported`, `zero_invoice`, `currency_mismatch`) |
 | `priced_attempts`, `unpriced_attempts`, `incomplete_attempts` | billable attempt counts; `unpriced_share` is `unpriced/(priced+unpriced)` |
 | `excluded_caller_attempts` | billable attempts excluded for caller-paid or budget-exempt status |
-| `provisional` | true within two days of today, or when the day's import has not succeeded since 30 hours after the day began |
+| `provisional` | true within two days of today, when no applicable import success exists, or when it was before 30 hours after the day began |
 | `import` | the import's `last_success_at`/`last_error_code`, or null after deletion |
+
+For a covered day, `provisional` uses that day's last successful import. For an
+uncovered day, it uses the import's latest success, if any. A non-provisional
+result does not establish coverage. Uncovered days have a null `invoiced_cost`
+and a `capture_rate_unavailable_reason` of `not_imported`.
 
 Totals per provider add `attributed_cost` (whole range),
 `attributed_cost_covered` (covered days only, the numerator `capture_rate`

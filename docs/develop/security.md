@@ -206,9 +206,11 @@ sinks and endpoints are operator-declared and egress-validated, and sink
 signing/API credentials are write-only `sink_credential` secrets validated
 against the sink type. For example, Stripe meter keys must use an `sk_` or `rk_`
 prefix.
-Billing credentials use the dedicated `billing_credential` seal purpose and are
-read only by the import worker. They are never returned by a read, exported or
-used for inference. Stripe meter posts and billing export reads use the provider
+Billing credentials use the dedicated `billing_credential` seal purpose. The
+import worker reads them to fetch invoice data. Configuration apply can decrypt
+a stored credential to compare it internally with a supplied binding. Clients
+cannot read billing credentials, and the credentials are not exported or used
+for inference. Stripe meter posts and billing export reads use the provider
 egress policy, so `OLP_PROVIDER_EGRESS_*` exceptions govern them like provider
 traffic. Cloud authentication depends on the selected credential mode. See
 [FinOps](../operate/finops.md) for source-specific credentials and egress.

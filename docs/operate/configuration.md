@@ -426,8 +426,10 @@ rides its `budget_policy`, so they promote with their owners. A provider's
 `billing_import` entry (`enabled`, `scope`, `credential_ref` as
 `<provider>/billing`) promotes the same way. The source-specific billing
 credential binds through `secret_bindings` like other provider secrets, and a
-missing binding blocks apply. An entry's absence deletes the import and its
-sealed credential. See [FinOps](finops.md#billing-imports) for credential shapes.
+missing binding blocks apply. Apply can decrypt a stored credential to compare
+it internally with the supplied binding, while clients cannot read credentials.
+An entry's absence deletes the import and its sealed credential. See
+[FinOps](finops.md#billing-imports) for credential shapes.
 Feature-specific budget/group/calendar omission semantics are in
 [access](../use/access.md), not a
 global merge rule. `expected_digest` fences destination drift; remaining blockers return

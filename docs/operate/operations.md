@@ -51,13 +51,14 @@ A FOCUS day with `last_error_code` remains in `focus_datasets` with a future
 the same revision, manifest last. Do not edit the row. `current: false` marks a
 dirty day awaiting restatement.
 
-For billing-import errors, `credential` means a missing or invalid sealed
-billing credential. `status` and `response` indicate upstream or export errors,
-and `endpoint` means a missing provider or egress refusal. Imported costs
-expire at `retention.usage_days`. Restricted egress deployments need
+For billing-import errors, `credential` means a missing, invalid or unreadable
+sealed billing credential, or an upstream authentication or authorization
+failure. `status` and `response` indicate upstream or export errors, and
+`endpoint` means a missing provider or egress refusal. Imported costs expire at
+`retention.usage_days`. Restricted egress deployments need
 `api.stripe.com`, `api.openai.com` and `api.anthropic.com` for the corresponding
 meter or import APIs. Cloud export and authentication access depend on the
-selected source and credential; see [FinOps](finops.md#billing-imports).
+selected source and credential. See [FinOps](finops.md#billing-imports).
 
 Capture failures drop records without changing inference. Review
 `olp_capture_dropped_total` and `olp_capture_redaction_failed_total`; a queued
@@ -82,7 +83,7 @@ or `all`; configured capability flags do not establish live worker health.
 | Cost reconciliation | 60-second region-scoped leader pass |
 | Notifications | 60-second claims, durable attempt evidence, up to five retries with exponential minute backoff |
 | FOCUS dataset export | 60-second pass; PostgreSQL leases, no Valkey; at most four due days per sink |
-| Billing import | 60-second scan; hourly after success, with Google backfill eligible after one minute; five-minute geometric backoff on failure |
+| Billing import | The scan runs every 60 seconds. Imports run hourly after success, with Google backfill eligible after one minute. Failures use five-minute geometric backoff |
 | Batch settlement | 5-second durable claim scan for submission reconciliation, polling and result settlement |
 
 Media/grant/consumer/epoch/batch settlement checkpoints stale at 20 seconds; maintenance/cost/
