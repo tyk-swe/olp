@@ -88,7 +88,7 @@ func (i *Importer) importAWS(ctx context.Context, row *importRow, cfg *providerC
 		return err
 	}
 	earliest := today.AddDate(0, 0, -retention)
-	completed, err := i.completedBillingPeriods(fetchCtx, row, earliest, today)
+	completed, err := i.completedCloudPeriods(fetchCtx, row, earliest, today)
 	if err != nil {
 		return err
 	}

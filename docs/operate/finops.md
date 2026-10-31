@@ -351,8 +351,9 @@ and reports that overwrite previous versions are not supported.
 ### Azure Cost Management setup
 
 Create a Cost Management export for cost and usage details (amortized), with CSV
-format and daily delivery to a Blob Storage container. Partitioned and gzip
-exports are supported. Parquet, actual cost, usage-only and FOCUS exports use
+format and daily delivery of month-to-date costs to a Blob Storage container.
+Each delivery must start on the first day of its billing month. Partitioned and
+gzip exports are supported. Parquet, actual cost, usage-only and FOCUS exports use
 different schemas and are not accepted. Management group exports do not support
 amortized costs. The export must already exist and historical imports are
 limited to deliveries still present in the container. Azure can deliver prior
@@ -454,22 +455,29 @@ to ten, one at a time under a ten-minute lease, and fetches through the connecti
 egress-validated client with redirects disabled and a 30-second request timeout.
 OpenAI and Anthropic imports cover closed UTC days only. The first covers the 30
 days before today, and later imports refresh the last 7 so vendor restatements
-land. AWS imports cover closed UTC days within retention and refresh the current
-and previous billing periods on later passes. Google imports rotate through
-retained historical billing periods while also revisiting the current and
-previous periods. Incomplete historical periods are retried. An AWS delivery covers
-only days closed before its manifest was written, and gaps remain unimported.
-AWS reads have a 45-second deadline and cumulative compressed and expanded byte,
-row and aggregation limits. Azure streams up to 200 CSV parts, 128 MiB compressed
-and 512 MiB expanded per pass, with two million rows, 100,000 aggregates and a
-one-minute import budget. Each day's returned line items are summed per
+land. AWS imports cover closed UTC days within retention on the first pass and
+refresh the current and previous billing periods on later passes. Incomplete
+historical periods are retried until covered. A delivery covers only days closed
+before its manifest was written, and gaps remain unimported. AWS reads have a
+45-second deadline and cumulative compressed and expanded byte, row and
+aggregation limits. Azure searches retained billing periods on the first pass,
+then refreshes the current and previous periods and retries missing or incomplete
+historical periods. A run covers only days closed before it was submitted, and
+gaps remain unimported. Newer complete runs replace their period's totals;
+older runs cannot overwrite them. Azure keeps service-scoped credits and
+adjustments present in the export separate from usage and excludes taxes. Azure
+streams up to 200 CSV parts, 128 MiB compressed and 512 MiB expanded per pass,
+with two million rows, 100,000 aggregates and a one-minute import budget. Each
+day's returned line items are summed per
 `(day, line_item, currency)` and replace the stored rows. A returned bucket with
 no results records an invoiced zero. On success the import schedules one hour
 out; on failure `last_error_code` records `credential`, `status`, `network`,
 `timeout`, `response` or `endpoint`, and the retry backs off from five
 minutes to one hour. Rows older than `retention.usage_days` are purged in
 bounded batches and their coverage is cleared. If retention later increases,
-AWS imports retry the newly uncovered historical periods.
+AWS and Azure imports retry the newly uncovered historical periods. Google revisits
+retained billing periods in rotation, including newly retained periods and days
+without scope evidence.
 
 Google uses the fixed BigQuery endpoint through the same connection egress
 policy, with a 1 GiB maximum bytes billed per query, a 20-second job timeout, a

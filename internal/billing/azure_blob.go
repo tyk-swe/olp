@@ -81,6 +81,7 @@ type azurePeriod struct {
 }
 
 type azureTotals struct {
+	files      int
 	rows       int64
 	compressed int64
 	expanded   int64
@@ -142,7 +143,7 @@ func azureSDKError(err error) error {
 	return failFetch("network", errors.New("Azure storage request failed"))
 }
 
-func fetchAzure(ctx context.Context, client *http.Client, egressPolicy *egress.Policy, endpoint string, scope azureScope, key []byte) ([]azurePeriod, error) {
+func fetchAzure(ctx context.Context, client *http.Client, egressPolicy *egress.Policy, endpoint string, scope azureScope, key []byte, earliest, today time.Time, completed map[string]struct{}) ([]azurePeriod, error) {
 	var credential azureCredential
 	if err := json.Unmarshal(key, &credential); err != nil {
 		return nil, failFetch("credential", errors.New("invalid credential"))
@@ -168,7 +169,7 @@ func fetchAzure(ctx context.Context, client *http.Client, egressPolicy *egress.P
 		return nil, failFetch("endpoint", errors.New("invalid Azure storage endpoint"))
 	}
 	reader := azureReader{container: storage.ServiceClient().NewContainerClient(scope.Container), scope: scope}
-	names, err := reader.list(ctx)
+	names, err := reader.list(ctx, earliest, today, completed)
 	if err != nil {
 		return nil, err
 	}
@@ -191,7 +192,7 @@ func fetchAzure(ctx context.Context, client *http.Client, egressPolicy *egress.P
 		candidates := runs[period]
 		slices.SortFunc(candidates, func(a, b azureRun) int { return b.submitted.Compare(a.submitted) })
 		for index, run := range candidates {
-			days, nextTotals, err := reader.readRun(ctx, run, totals, azureMaxAggregates-aggregates)
+			days, nextTotals, err := reader.readRun(ctx, run, totals, azureMaxAggregates-aggregates, earliest, today)
 			totals = nextTotals
 			if errors.Is(err, azureMissing) && index+1 < len(candidates) {
 				continue
@@ -229,34 +230,44 @@ func (a *azureReader) document(ctx context.Context, name string) (azureManifest,
 	return manifest, nil
 }
 
-func (a *azureReader) list(ctx context.Context) ([]string, error) {
-	prefix := strings.Trim(strings.Join([]string{a.scope.Prefix, a.scope.ExportName}, "/"), "/") + "/"
-	pager := a.container.NewListBlobsFlatPager(&container.ListBlobsFlatOptions{Prefix: &prefix})
+func (a *azureReader) list(ctx context.Context, earliest, today time.Time, completed map[string]struct{}) ([]string, error) {
+	base := strings.Trim(strings.Join([]string{a.scope.Prefix, a.scope.ExportName}, "/"), "/") + "/"
+	first := time.Date(earliest.Year(), earliest.Month(), 1, 0, 0, 0, 0, time.UTC)
 	names := []string{}
-	for page := 0; pager.More(); page++ {
-		if page >= maxPages {
-			return nil, failFetch("response", errors.New("too many listing pages"))
+	for month := first; !month.After(today); month = month.AddDate(0, 1, 0) {
+		period := month.Format("20060102") + "-" + month.AddDate(0, 1, 0).Format("20060102")
+		if _, done := completed[period]; done {
+			continue
 		}
-		result, err := pager.NextPage(ctx)
-		if err != nil {
-			return nil, azureSDKError(err)
-		}
-		if result.NextMarker != nil && len(*result.NextMarker) > 2048 {
-			return nil, failFetch("response", errors.New("invalid listing continuation"))
-		}
-		if result.Segment == nil {
-			return nil, failFetch("response", errors.New("invalid Azure listing"))
-		}
-		for _, blob := range result.Segment.BlobItems {
-			if blob == nil || blob.Name == nil {
+		prefix := base + month.Format("20060102") + "-"
+		pager := a.container.NewListBlobsFlatPager(&container.ListBlobsFlatOptions{Prefix: &prefix})
+		pages := 0
+		for pager.More() {
+			if pages >= maxPages {
+				return nil, failFetch("response", errors.New("too many listing pages"))
+			}
+			pages++
+			result, err := pager.NextPage(ctx)
+			if err != nil {
+				return nil, azureSDKError(err)
+			}
+			if result.NextMarker != nil && len(*result.NextMarker) > 2048 {
+				return nil, failFetch("response", errors.New("invalid listing continuation"))
+			}
+			if result.Segment == nil {
 				return nil, failFetch("response", errors.New("invalid Azure listing"))
 			}
-			name := *blob.Name
-			if strings.HasPrefix(name, prefix) && strings.HasSuffix(strings.ToLower(name), "manifest.json") {
-				if !validAzurePath(name, true) || len(names) >= azureMaxManifests {
-					return nil, failFetch("response", errors.New("too many or invalid export manifests"))
+			for _, blob := range result.Segment.BlobItems {
+				if blob == nil || blob.Name == nil {
+					return nil, failFetch("response", errors.New("invalid Azure listing"))
 				}
-				names = append(names, name)
+				name := *blob.Name
+				if strings.HasPrefix(name, prefix) && strings.HasSuffix(strings.ToLower(name), "manifest.json") {
+					if !validAzurePath(name, true) || len(names) >= azureMaxManifests {
+						return nil, failFetch("response", errors.New("too many or invalid export manifests"))
+					}
+					names = append(names, name)
+				}
 			}
 		}
 	}
@@ -281,7 +292,8 @@ func (a *azureReader) manifest(ctx context.Context, name string) (azureRun, erro
 	end, endErr := azureTime(manifest.RunInfo.EndDate)
 	submitted, submittedErr := azureTime(manifest.RunInfo.SubmittedTime)
 	resourceID := strings.TrimRight(a.scope.BillingScope, "/") + "/providers/Microsoft.CostManagement/exports/" + a.scope.ExportName
-	if !strings.EqualFold(manifest.ExportConfig.ResourceID, resourceID) || !strings.EqualFold(manifest.ExportConfig.ExportName, a.scope.ExportName) ||
+	deliveryPrefix := strings.Trim(strings.Join([]string{a.scope.Prefix, a.scope.ExportName}, "/"), "/") + "/" + start.Format("20060102") + "-"
+	if !strings.HasPrefix(name, deliveryPrefix) || !strings.EqualFold(manifest.ExportConfig.ResourceID, resourceID) || !strings.EqualFold(manifest.ExportConfig.ExportName, a.scope.ExportName) ||
 		!strings.EqualFold(manifest.ExportConfig.Type, "AmortizedCost") || !strings.EqualFold(manifest.DeliveryConfig.FileFormat, "Csv") ||
 		(!strings.EqualFold(manifest.DeliveryConfig.CompressionMode, "None") && !strings.EqualFold(manifest.DeliveryConfig.CompressionMode, "Gzip")) ||
 		startErr != nil || endErr != nil || submittedErr != nil || manifest.RunInfo.RunID == "" || len(manifest.RunInfo.RunID) > 256 ||
@@ -309,14 +321,19 @@ func (a *azureReader) manifest(ctx context.Context, name string) (azureRun, erro
 	return azureRun{manifest: manifest, name: name, start: start, end: end, submitted: submitted}, nil
 }
 
-func (a *azureReader) readRun(ctx context.Context, run azureRun, totals azureTotals, aggregateLimit int) (reportAccumulator, azureTotals, error) {
+func (a *azureReader) readRun(ctx context.Context, run azureRun, initialTotals azureTotals, aggregateLimit int, earliest, today time.Time) (reportAccumulator, azureTotals, error) {
+	totals := initialTotals
 	days := reportAccumulator{}
-	today := time.Now().UTC().Truncate(24 * time.Hour)
-	last := slices.MinFunc([]time.Time{run.end.Truncate(24 * time.Hour), today.AddDate(0, 0, -1), run.start.AddDate(0, 1, -1)}, time.Time.Compare)
-	for day := run.start.Truncate(24 * time.Hour); !day.After(last); day = day.AddDate(0, 0, 1) {
+	last := slices.MinFunc([]time.Time{run.end.Truncate(24 * time.Hour), today.AddDate(0, 0, -1), run.start.AddDate(0, 1, -1), run.submitted.Truncate(24*time.Hour).AddDate(0, 0, -1)}, time.Time.Compare)
+	start := slices.MaxFunc([]time.Time{run.start.Truncate(24 * time.Hour), earliest}, time.Time.Compare)
+	for day := start; !day.After(last); day = day.AddDate(0, 0, 1) {
 		days.ensureDay(day.Format(dayFormat))
 	}
 	for _, blob := range run.manifest.Blobs {
+		if totals.files >= azureMaxFiles {
+			return nil, totals, failFetch("response", errors.New("too many export blobs"))
+		}
+		totals.files++
 		resp, err := a.container.NewBlobClient(blob.BlobName).DownloadStream(ctx, nil)
 		if err != nil {
 			return nil, totals, azureSDKError(err)
@@ -334,11 +351,11 @@ func (a *azureReader) readRun(ctx context.Context, run azureRun, totals azureTot
 			contents = zipped
 		}
 		decoded := &io.LimitedReader{R: contents, N: azureMaxExpanded - totals.expanded + 1}
-		count, err := a.csv(decoded, days, run.start, last, azureMaxRows-totals.rows, aggregateLimit)
+		count, err := a.csv(decoded, days, start, last, azureMaxRows-totals.rows, aggregateLimit)
 		resp.Body.Close()
 		readBytes := azureMaxCompressed - totals.compressed + 1 - limited.N
 		readExpanded := azureMaxExpanded - totals.expanded + 1 - decoded.N
-		totals = azureTotals{rows: totals.rows + count, compressed: totals.compressed + readBytes, expanded: totals.expanded + readExpanded}
+		totals = azureTotals{files: totals.files, rows: totals.rows + count, compressed: totals.compressed + readBytes, expanded: totals.expanded + readExpanded}
 		if err != nil {
 			var timeout net.Error
 			if errors.Is(err, context.DeadlineExceeded) || errors.As(err, &timeout) && timeout.Timeout() {

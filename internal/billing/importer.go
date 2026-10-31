@@ -197,17 +197,14 @@ func window(through *string, today time.Time) (start, end time.Time) {
 	return end.AddDate(0, 0, -7), end
 }
 
-func (i *Importer) completedBillingPeriods(ctx context.Context, row *importRow, earliest, today time.Time) (map[string]struct{}, error) {
-	digest, err := scopeDigest(row.Source, row.Scope)
-	if err != nil {
-		return nil, err
-	}
-	rows, err := i.Pool.Query(ctx, `SELECT period_start FROM olp.provider_billing_revisions
-		WHERE provider_id=$1::uuid AND source=$2 AND scope_digest=$3
-		AND period_start < date_trunc('month', $4::date) - interval '1 month'
-		AND covered_from <= GREATEST(period_start, $5::date)
-		AND covered_through >= (period_start + interval '1 month')::date - 1`,
-		row.ProviderID, row.Source, digest[:], today.Format(dayFormat), earliest.Format(dayFormat))
+func (i *Importer) completedCloudPeriods(ctx context.Context, row *importRow, earliest, today time.Time) (map[string]struct{}, error) {
+	rows, err := i.Pool.Query(ctx, `SELECT period_start FROM (
+			SELECT date_trunc('month',day)::date AS period_start FROM olp.provider_billing_days
+			WHERE provider_id=$1::uuid AND source=$2 AND scope=$3::jsonb
+			AND day >= $4::date AND day < date_trunc('month', $5::date) - interval '1 month'
+		) days GROUP BY period_start
+		HAVING COUNT(*) = (period_start + interval '1 month')::date - GREATEST(period_start,$4::date)`,
+		row.ProviderID, row.Source, row.Scope, earliest.Format(dayFormat), today.Format(dayFormat))
 	if err != nil {
 		return nil, err
 	}
@@ -279,7 +276,17 @@ func (i *Importer) importOne(ctx context.Context, row *importRow) error {
 		return i.importGoogle(ctx, row, &bounded, connectors.NewGoogleBillingAuth(i.Egress, authClient), key)
 	}
 	if row.Source == SourceAzureCostManagement {
-		periods, err := fetchAzure(ctx, client, i.Egress, endpoint, cloudScope, key)
+		today := i.now().UTC().Truncate(24 * time.Hour)
+		var retention int
+		if err := i.Pool.QueryRow(ctx, `SELECT COALESCE((SELECT value::int FROM olp.settings WHERE key='retention.usage_days'),90)`).Scan(&retention); err != nil {
+			return err
+		}
+		earliest := today.AddDate(0, 0, -retention)
+		completed, err := i.completedCloudPeriods(ctx, row, earliest, today)
+		if err != nil {
+			return err
+		}
+		periods, err := fetchAzure(ctx, client, i.Egress, endpoint, cloudScope, key, earliest, today, completed)
 		if err != nil {
 			return err
 		}
