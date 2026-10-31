@@ -25950,6 +25950,21 @@
           }
         }
       },
+      "BillingImportScope": {
+        "type": "object",
+        "description": "Source-specific billing scope. Azure requires billing_scope, export_name, storage_account and container.",
+        "additionalProperties": false,
+        "properties": {
+          "project_ids": { "type": "array", "items": { "type": "string" } },
+          "workspace_ids": { "type": "array", "items": { "type": "string" } },
+          "billing_scope": { "type": "string" },
+          "export_name": { "type": "string" },
+          "storage_account": { "type": "string" },
+          "container": { "type": "string" },
+          "prefix": { "type": "string" },
+          "subscription_ids": { "type": "array", "items": { "type": "string", "format": "uuid" } }
+        }
+      },
       "BillingImport": {
         "type": "object",
         "properties": {
@@ -25969,8 +25984,7 @@
             "type": "boolean"
           },
           "scope": {
-            "type": "object",
-            "description": "Source-shaped import scope; {} reads the whole organization for OpenAI or Anthropic. Azure requires a billing scope and export storage location."
+            "$ref": "#/components/schemas/BillingImportScope"
           },
           "credential_configured": {
             "type": "boolean"
@@ -26061,8 +26075,7 @@
             "description": "Defaults to true when omitted."
           },
           "scope": {
-            "type": "object",
-            "description": "OpenAI and Anthropic accept project_ids and workspace_ids respectively. Azure requires billing_scope, export_name, storage_account, container, and optional prefix and subscription_ids. Omitted keeps the stored scope."
+            "$ref": "#/components/schemas/BillingImportScope"
           },
           "credential": {
             "description": "Source credential sealed as a billing_credential secret. Required on create; omitted keeps the stored credential. Azure accepts an azure_default or azure_client_secret document.",
@@ -26326,7 +26339,7 @@
             "type": "boolean"
           },
           "scope": {
-            "type": "object"
+            "$ref": "#/components/schemas/BillingImportScope"
           },
           "credential_ref": {
             "type": "string",

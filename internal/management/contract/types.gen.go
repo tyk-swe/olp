@@ -8112,9 +8112,9 @@ type BillingImport struct {
 	Etag                 string             `json:"etag"`
 	ProviderId           openapi_types.UUID `json:"provider_id"`
 
-	// Scope Source-shaped import scope; {} reads the whole organization for OpenAI or Anthropic. Azure requires a billing scope and export storage location.
-	Scope  map[string]interface{} `json:"scope"`
-	Source BillingImportSource    `json:"source"`
+	// Scope Source-specific billing scope. Azure requires billing_scope, export_name, storage_account and container.
+	Scope  BillingImportScope  `json:"scope"`
+	Source BillingImportSource `json:"source"`
 	Status struct {
 		ImportedFrom    nullable.Nullable[openapi_types.Date] `json:"imported_from"`
 		ImportedThrough nullable.Nullable[openapi_types.Date] `json:"imported_through"`
@@ -8132,6 +8132,18 @@ type BillingImport struct {
 
 // BillingImportSource defines model for BillingImport.Source.
 type BillingImportSource string
+
+// BillingImportScope Source-specific billing scope. Azure requires billing_scope, export_name, storage_account and container.
+type BillingImportScope struct {
+	BillingScope    *string               `json:"billing_scope,omitempty"`
+	Container       *string               `json:"container,omitempty"`
+	ExportName      *string               `json:"export_name,omitempty"`
+	Prefix          *string               `json:"prefix,omitempty"`
+	ProjectIds      *[]string             `json:"project_ids,omitempty"`
+	StorageAccount  *string               `json:"storage_account,omitempty"`
+	SubscriptionIds *[]openapi_types.UUID `json:"subscription_ids,omitempty"`
+	WorkspaceIds    *[]string             `json:"workspace_ids,omitempty"`
+}
 
 // BudgetGroupBudgetResponse defines model for BudgetGroupBudgetResponse.
 type BudgetGroupBudgetResponse struct {
@@ -9202,9 +9214,11 @@ type ConfigurationAgentPublicationKind string
 // ConfigurationBillingImport defines model for ConfigurationBillingImport.
 type ConfigurationBillingImport struct {
 	// CredentialRef Portable secret binding name, provider name followed by /billing; supply the credential through secret_bindings.
-	CredentialRef string                 `json:"credential_ref"`
-	Enabled       bool                   `json:"enabled"`
-	Scope         map[string]interface{} `json:"scope"`
+	CredentialRef string `json:"credential_ref"`
+	Enabled       bool   `json:"enabled"`
+
+	// Scope Source-specific billing scope. Azure requires billing_scope, export_name, storage_account and container.
+	Scope BillingImportScope `json:"scope"`
 }
 
 // ConfigurationCapabilityEntry defines model for ConfigurationCapabilityEntry.
@@ -14161,8 +14175,8 @@ type PutBillingImportRequest struct {
 	// Enabled Defaults to true when omitted.
 	Enabled *bool `json:"enabled,omitempty"`
 
-	// Scope OpenAI and Anthropic accept project_ids and workspace_ids respectively. Azure requires billing_scope, export_name, storage_account, container, and optional prefix and subscription_ids. Omitted keeps the stored scope.
-	Scope *map[string]interface{} `json:"scope,omitempty"`
+	// Scope Source-specific billing scope. Azure requires billing_scope, export_name, storage_account and container.
+	Scope *BillingImportScope `json:"scope,omitempty"`
 }
 
 // PutBillingImportRequestCredential0 defines model for PutBillingImportRequest.Credential.0.

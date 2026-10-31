@@ -31,7 +31,7 @@ type azureCredential struct {
 
 var azureStorageAccount = regexp.MustCompile(`^[a-z0-9]{3,24}$`)
 var azureContainer = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9-]{1,61}[a-z0-9])$`)
-var azureResourceScope = regexp.MustCompile(`(?i)^/(?:providers/Microsoft\.Billing/billingAccounts/[^/]+(?:/[^/]+/[^/]+)*|providers/Microsoft\.Management/managementGroups/[^/]+|subscriptions/[0-9a-f-]{36})$`)
+var azureResourceScope = regexp.MustCompile(`(?i)^/(?:providers/Microsoft\.Billing/billingAccounts/[^/]+(?:/billingProfiles/[^/]+(?:/invoiceSections/[^/]+)?|/departments/[^/]+|/enrollmentAccounts/[^/]+)?|providers/Microsoft\.Management/managementGroups/[^/]+|subscriptions/[0-9a-f-]{36}(?:/resourceGroups/[^/]+)?)$`)
 
 func validAzurePath(value string, allowSlash bool) bool {
 	if len(value) > 1024 || strings.ContainsAny(value, "\\?#\x00\r\n") || (!allowSlash && strings.Contains(value, "/")) {
@@ -46,15 +46,16 @@ func validAzurePath(value string, allowSlash bool) bool {
 }
 
 func validateAzureScope(raw json.RawMessage) (json.RawMessage, error) {
-	var scope azureScope
-	if decodeAzureDocument(raw, &scope) != nil || !azureResourceScope.MatchString(scope.BillingScope) ||
+	scope, err := decodeAzureDocument[azureScope](raw)
+	if err != nil || !azureResourceScope.MatchString(scope.BillingScope) ||
 		!validAzurePath(scope.BillingScope, true) || scope.ExportName == "" || !validAzurePath(scope.ExportName, false) ||
 		!azureStorageAccount.MatchString(scope.StorageAccount) || !azureContainer.MatchString(scope.Container) ||
 		strings.Contains(scope.Container, "--") || !validAzurePath(scope.Prefix, true) || len(scope.SubscriptionIDs) > 100 {
 		return nil, access.Invalid("scope", "Provide a billing scope, export name, storage account, container, and optional prefix and subscription IDs.")
 	}
 	if strings.HasPrefix(strings.ToLower(scope.BillingScope), "/subscriptions/") {
-		if _, err := uuid.Parse(strings.TrimPrefix(strings.ToLower(scope.BillingScope), "/subscriptions/")); err != nil {
+		subscription := strings.Split(scope.BillingScope, "/")[2]
+		if parsed, err := uuid.Parse(subscription); err != nil || parsed.String() != strings.ToLower(subscription) {
 			return nil, access.Invalid("scope.billing_scope", "The subscription billing scope must contain a valid subscription ID.")
 		}
 	}
@@ -72,8 +73,8 @@ func validateAzureScope(raw json.RawMessage) (json.RawMessage, error) {
 }
 
 func validateAzureCredential(raw []byte) ([]byte, error) {
-	var credential azureCredential
-	if decodeAzureDocument(raw, &credential) != nil {
+	credential, err := decodeAzureDocument[azureCredential](raw)
+	if err != nil {
 		return nil, access.Invalid("credential", "Provide an Azure credential document.")
 	}
 	switch credential.AuthMode {
@@ -95,7 +96,9 @@ func azureCredentialPart(value string, max int) bool {
 	return len(value) > 0 && len(value) <= max && !strings.ContainsAny(value, "\x00\r\n")
 }
 
-func decodeAzureDocument(raw []byte, destination any) error {
+func decodeAzureDocument[T any](raw []byte) (T, error) {
+	var value T
 	request := &http.Request{Header: http.Header{"Content-Type": []string{"application/json"}}, Body: io.NopCloser(bytes.NewReader(raw))}
-	return access.DecodeUnique(request, destination, 16384)
+	err := access.DecodeUnique(request, &value, 16384)
+	return value, err
 }

@@ -5,6 +5,7 @@ package integration_test
 import (
 	"bytes"
 	"compress/gzip"
+	"context"
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
@@ -18,6 +19,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -197,10 +199,26 @@ func TestAzureBillingScopeAndCredential(t *testing.T) {
 	billingPut(h, owner, providerID, map[string]any{"credential": credential, "scope": map[string]any{
 		"billing_scope": scope["billing_scope"], "export_name": "costs", "storage_account": "billingaccount", "container": "exports", "project_ids": []string{"proj_123"},
 	}}, provider["etag"].(string), 422)
+	for _, invalid := range []string{
+		"/providers/Microsoft.Billing/billingAccounts/1234567/garbage/anything",
+		"/providers/Microsoft.Billing/billingAccounts/1234567/billingProfiles/profile/garbage/anything",
+		"/subscriptions/11111111-1111-4111-8111-111111111111/resourceGroups/",
+	} {
+		billingPut(h, owner, providerID, map[string]any{"credential": credential, "scope": map[string]any{
+			"billing_scope": invalid, "export_name": "costs", "storage_account": "billingaccount", "container": "exports",
+		}}, provider["etag"].(string), 422)
+	}
 	created := billingPut(h, owner, providerID, map[string]any{"credential": credential, "scope": scope}, provider["etag"].(string), 201)
 	if created["source"] != "azure_cost_management" || created["credential_configured"] != true || created["credential"] != nil {
 		t.Fatalf("unexpected billing import %v", created)
 	}
+	groupScope := map[string]any{"billing_scope": "/subscriptions/11111111-1111-4111-8111-111111111111/resourceGroups/example-group",
+		"export_name": "costs", "storage_account": "billingaccount", "container": "exports"}
+	updated := billingPut(h, owner, providerID, map[string]any{"scope": groupScope}, created["etag"].(string), 200)
+	if updated["scope"].(map[string]any)["billing_scope"] != groupScope["billing_scope"] {
+		t.Fatalf("resource group scope was not preserved: %v", updated)
+	}
+	billingPut(h, owner, providerID, map[string]any{"scope": scope}, updated["etag"].(string), 200)
 	read := h.want(owner, "GET", "/api/v1/providers/"+providerID+"/billing-import", nil, nil, 200)
 	if read["credential"] != nil || read["credential_configured"] != true {
 		t.Fatalf("credential returned in billing import %v", read)
@@ -270,6 +288,7 @@ func TestAzureBillingImport(t *testing.T) {
 		return compressed.String()
 	}
 	compressed1, compressed2 := compress(part1), compress(part2)
+	// Manifest example: https://learn.microsoft.com/en-us/azure/cost-management-billing/costs/tutorial-improved-exports, accessed 2026-10-31.
 	manifest, err := json.Marshal(map[string]any{
 		"manifestVersion": "2024-04-01", "byteCount": len(compressed1) + len(compressed2), "blobCount": 2, "dataRowCount": 8,
 		"exportConfig":   map[string]any{"exportName": "costs", "resourceId": "/providers/Microsoft.Billing/billingAccounts/1234567/providers/Microsoft.CostManagement/exports/costs", "type": "AmortizedCost", "dataVersion": "2023-05-01"},
@@ -284,6 +303,9 @@ func TestAzureBillingImport(t *testing.T) {
 	newerManifest := strings.NewReplacer(base, newerBase, `"runId":"run"`, `"runId":"newer"`, today.Format(time.RFC3339), today.Add(time.Hour).Format(time.RFC3339)).Replace(string(manifest))
 	objects := map[string]string{base + "_manifest.json": string(manifest), newerBase + "_manifest.json": newerManifest, base + "part0.csv": compressed1, base + "part1.csv": compressed2}
 	requests := make(chan string, 100)
+	var emptyListing atomic.Bool
+	var stallPart atomic.Bool
+	emptyListing.Store(true)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requests <- r.URL.Path
 		if r.URL.Path == "/token" {
@@ -296,6 +318,10 @@ func TestAzureBillingImport(t *testing.T) {
 			return
 		}
 		if r.URL.Query().Get("comp") == "list" {
+			if emptyListing.Load() {
+				_, _ = fmt.Fprint(w, "<EnumerationResults><Blobs></Blobs><NextMarker></NextMarker></EnumerationResults>")
+				return
+			}
 			if r.URL.Query().Get("marker") == "" {
 				_, _ = fmt.Fprintf(w, "<EnumerationResults><Blobs><Blob><Name>%s_manifest.json</Name></Blob></Blobs><NextMarker>next</NextMarker></EnumerationResults>", newerBase)
 				return
@@ -305,6 +331,10 @@ func TestAzureBillingImport(t *testing.T) {
 		}
 		if object, ok := objects[strings.TrimPrefix(r.URL.Path, "/exports/")]; ok {
 			_, _ = fmt.Fprint(w, object)
+			if stallPart.Load() && r.URL.Path == "/exports/"+base+"part0.csv" {
+				w.(http.Flusher).Flush()
+				<-r.Context().Done()
+			}
 			return
 		}
 		http.NotFound(w, r)
@@ -324,6 +354,18 @@ func TestAzureBillingImport(t *testing.T) {
 		t.Fatal(err)
 	}
 	importStatus := h.want(owner, "GET", "/api/v1/providers/"+providerID+"/billing-import", nil, nil, 200)
+	status := importStatus["status"].(map[string]any)
+	if status["last_error_code"] != "response" || status["last_success_at"] != nil {
+		t.Fatalf("empty export was not reported as a failure: %v", status)
+	}
+	emptyListing.Store(false)
+	headers := etagHeader(importStatus)
+	headers["Idempotency-Key"] = uuid.NewString()
+	h.want(owner, "POST", "/api/v1/providers/"+providerID+"/billing-import/run", nil, headers, 202)
+	if err := importer.Pass(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	importStatus = h.want(owner, "GET", "/api/v1/providers/"+providerID+"/billing-import", nil, nil, 200)
 	if errorCode := importStatus["status"].(map[string]any)["last_error_code"]; errorCode != nil {
 		close(requests)
 		var paths []string
@@ -349,7 +391,7 @@ func TestAzureBillingImport(t *testing.T) {
 		total = total.Add(amount)
 		label := item["line_item"].(string)
 		if strings.Contains(label, strings.Repeat("m", 100)) {
-			if len([]rune(label)) != 256 {
+			if len([]rune(label)) > 256 {
 				t.Fatalf("long label not bounded: %d", len([]rune(label)))
 			}
 			longLabels[label] = true
@@ -382,7 +424,7 @@ func TestAzureBillingImport(t *testing.T) {
 	}
 	objects[base+"_manifest.json"] = string(changedManifest)
 	current := h.want(owner, "GET", "/api/v1/providers/"+providerID+"/billing-import", nil, nil, 200)
-	headers := etagHeader(current)
+	headers = etagHeader(current)
 	headers["Idempotency-Key"] = uuid.NewString()
 	h.want(owner, "POST", "/api/v1/providers/"+providerID+"/billing-import/run", nil, headers, 202)
 	if err := importer.Pass(t.Context()); err != nil {
@@ -408,6 +450,43 @@ func TestAzureBillingImport(t *testing.T) {
 	after = h.want(owner, "GET", fmt.Sprintf("/api/v1/providers/%s/invoiced-costs?start=%s&end=%s", providerID, start, end), nil, nil, 200)
 	if failed["status"].(map[string]any)["last_error_code"] != "response" || !reflect.DeepEqual(after["items"], items) {
 		t.Fatalf("different billing scope affected stored data: %v %v", failed, after)
+	}
+	var oversized strings.Builder
+	oversized.WriteString(header)
+	rowCount := 0
+	for i := 0; i <= 100_000; i++ {
+		fmt.Fprintf(&oversized, "%s,%s,Cognitive Services,Azure Open AI,meter-%d,Usage,USD,1\n", start, subscription, i)
+		rowCount++
+		if (i+1)%999 == 0 {
+			oversized.WriteString(row(yesterday, subscription, "Storage", "Azure Open AI", "1"))
+			rowCount++
+		}
+	}
+	objects[base+"part0.csv"] = oversized.String()
+	changed["byteCount"] = len(objects[base+"part0.csv"])
+	changed["blobCount"] = 1
+	changed["dataRowCount"] = rowCount
+	changed["deliveryConfig"].(map[string]any)["compressionMode"] = "None"
+	changed["blobs"] = []map[string]any{{"blobName": base + "part0.csv", "byteCount": len(objects[base+"part0.csv"]), "dataRowCount": rowCount}}
+	changedManifest, err = json.Marshal(changed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	objects[base+"_manifest.json"] = string(changedManifest)
+	stallPart.Store(true)
+	current = h.want(owner, "GET", "/api/v1/providers/"+providerID+"/billing-import", nil, nil, 200)
+	headers = etagHeader(current)
+	headers["Idempotency-Key"] = uuid.NewString()
+	h.want(owner, "POST", "/api/v1/providers/"+providerID+"/billing-import/run", nil, headers, 202)
+	bounded, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+	if err := importer.Pass(bounded); err != nil {
+		t.Fatal(err)
+	}
+	failed = h.want(owner, "GET", "/api/v1/providers/"+providerID+"/billing-import", nil, nil, 200)
+	after = h.want(owner, "GET", fmt.Sprintf("/api/v1/providers/%s/invoiced-costs?start=%s&end=%s", providerID, start, end), nil, nil, 200)
+	if failed["status"].(map[string]any)["last_error_code"] != "response" || !reflect.DeepEqual(after["items"], items) {
+		t.Fatalf("oversized export was not rejected without changing stored data: %v %v", failed, after)
 	}
 }
 

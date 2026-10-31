@@ -367,7 +367,8 @@ billing-currency costs, before credits and taxes, and do not necessarily equal
 the final invoice. The importer validates the export resource ID, manifest and
 part counts before storing closed UTC days. Blob manifests have no documented
 completion status, so a delivery that appears complete from its manifest can
-still be subject to later correction. See the
+still be subject to later correction. If no manifests are found at the configured
+location, the import reports a response error and retries. See the
 [Cost Management overview](https://learn.microsoft.com/en-us/azure/cost-management-billing/cost-management-billing-overview).
 
 ### Importer

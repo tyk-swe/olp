@@ -83,12 +83,12 @@
     if (current && !initialized) {
       scopeText = scopeLines(current);
       if (azure) {
-        const scope = current.scope as Record<string, unknown>;
-        billingScope = String(scope.billing_scope ?? '');
-        exportName = String(scope.export_name ?? '');
-        storageAccount = String(scope.storage_account ?? '');
-        container = String(scope.container ?? '');
-        prefix = String(scope.prefix ?? '');
+        const scope = current.scope;
+        billingScope = scope.billing_scope ?? '';
+        exportName = scope.export_name ?? '';
+        storageAccount = scope.storage_account ?? '';
+        container = scope.container ?? '';
+        prefix = scope.prefix ?? '';
       }
       enabled = current.enabled;
       initialized = true;
@@ -96,7 +96,7 @@
   });
 
   function scopeLines(document: BillingImport): string {
-    const scope = document.scope as Record<string, string[]>;
+    const scope = document.scope;
     const entries =
       scope.project_ids ?? scope.workspace_ids ?? scope.subscription_ids ?? [];
     return entries.join('\n');
@@ -123,7 +123,7 @@
     }
   }
 
-  function scopeBody(): Record<string, never> {
+  function scopeBody(): BillingImport['scope'] {
     const ids = scopeText
       .split('\n')
       .map((line) => line.trim())
@@ -136,12 +136,10 @@
         container: container.trim(),
         ...(prefix.trim() ? { prefix: prefix.trim() } : {}),
         ...(ids.length ? { subscription_ids: ids } : {})
-      } as unknown as Record<string, never>;
+      };
     }
     if (!ids.length) return {};
-    const scope: Record<string, string[]> =
-      kind === 'openai' ? { project_ids: ids } : { workspace_ids: ids };
-    return scope as Record<string, never>;
+    return kind === 'openai' ? { project_ids: ids } : { workspace_ids: ids };
   }
 
   function validateForm(): string {
@@ -193,7 +191,7 @@
       return;
     }
     const etag = detail?.etag ?? provider.etag;
-    const submission = intent.prepare<Parameters<typeof putBillingImport>[2]>({
+    const input: Parameters<typeof putBillingImport>[2] = {
       enabled,
       scope: scopeBody(),
       ...(azure && authMode
@@ -211,17 +209,14 @@
         : adminKey.trim()
           ? { credential: adminKey.trim() }
           : {})
-    });
+    };
     const isCurrent = captureOwner();
     busy = true;
     error = notice = '';
     conflicted = false;
     try {
-      await putBillingImport(
-        provider.id,
-        etag,
-        submission.input,
-        submission.requestId
+      await intent.submit(input, (submission, requestId) =>
+        putBillingImport(provider.id, etag, submission, requestId)
       );
       if (!isCurrent()) return;
       adminKey = '';

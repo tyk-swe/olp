@@ -225,14 +225,14 @@ func (i *Importer) importOne(ctx context.Context, row *importRow) error {
 	}
 	defer clear(key)
 	endpoint := cfg.Endpoint
+	var cloudScope azureScope
 	if row.Source == SourceAzureCostManagement {
-		var scope azureScope
-		if err := json.Unmarshal(row.Scope, &scope); err != nil {
+		if err := json.Unmarshal(row.Scope, &cloudScope); err != nil {
 			return failFetch("response", err)
 		}
-		storageEndpoint := "https://" + scope.StorageAccount + ".blob.core.windows.net"
+		storageEndpoint := "https://" + cloudScope.StorageAccount + ".blob.core.windows.net"
 		if i.AzureBlobEndpoint != nil {
-			storageEndpoint = i.AzureBlobEndpoint(scope.StorageAccount)
+			storageEndpoint = i.AzureBlobEndpoint(cloudScope.StorageAccount)
 		}
 		endpoint = &storageEndpoint
 	}
@@ -241,11 +241,7 @@ func (i *Importer) importOne(ctx context.Context, row *importRow) error {
 		return failFetch("endpoint", err)
 	}
 	if row.Source == SourceAzureCostManagement {
-		var scope azureScope
-		if err := json.Unmarshal(row.Scope, &scope); err != nil {
-			return failFetch("response", err)
-		}
-		periods, err := fetchAzure(ctx, client, i.Egress, *endpoint, scope, key)
+		periods, err := fetchAzure(ctx, client, i.Egress, *endpoint, cloudScope, key)
 		if err != nil {
 			return err
 		}
