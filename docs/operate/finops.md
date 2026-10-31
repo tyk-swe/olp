@@ -306,7 +306,7 @@ rules, so the in-repo interpreter is the conformance authority.
 
 ### Billing imports
 
-An OpenAI, Anthropic or Bedrock connection gains a billing import at
+An OpenAI, Anthropic, Bedrock, Vertex AI or Azure OpenAI connection gains a billing import at
 `PUT /api/v1/providers/{provider_id}/billing-import` with `{enabled, scope,
 credential}`. The billing credential is sealed under purpose
 `billing_credential` and is separate from the inference credential. It is
@@ -346,6 +346,58 @@ excludes commitment fees and negation lines. It uses the assembly manifest and
 its S3 modification time as the revision and ordering marker. Parquet exports
 and reports that overwrite previous versions are not supported.
 
+### Azure Cost Management setup
+
+Create a Cost Management export for cost and usage details (amortized), with CSV
+format and daily delivery to a Blob Storage container. Partitioned and gzip
+exports are supported. Parquet, actual cost, usage-only and FOCUS exports use
+different schemas and are not accepted. Management group exports do not support
+amortized costs. The export must already exist and historical imports are
+limited to deliveries still present in the container. Azure can deliver prior
+month corrections during the first five days of the month
+([Microsoft export documentation](https://learn.microsoft.com/en-us/azure/cost-management-billing/costs/tutorial-improved-exports)).
+
+Grant the chosen identity Storage Blob Data Reader on the container or a
+narrower appropriate scope. The billing connection uses its own storage
+account endpoint and the provider connection's network and egress settings.
+Use `azure_default` for an explicitly selected workload identity, or supply a
+client secret for `azure_client_secret`. Both credentials are write-only. For
+example, create the import with the following scope and workload credential,
+replacing the values with your own:
+
+```json
+{
+  "enabled": true,
+  "scope": {
+    "billing_scope": "/providers/Microsoft.Billing/billingAccounts/1234567",
+    "export_name": "costs",
+    "storage_account": "billingaccount",
+    "container": "exports",
+    "prefix": "billing",
+    "subscription_ids": ["11111111-1111-4111-8111-111111111111"]
+  },
+  "credential": {"auth_mode": "azure_default"}
+}
+```
+
+The `billing_scope` must match the export resource scope. `prefix` is the
+export's storage directory and may be omitted. Omit `subscription_ids` to
+include all subscriptions in that scope. A client-secret credential is
+`{"auth_mode":"azure_client_secret","tenant_id":"...","client_id":"...","client_secret":"..."}`.
+Choose disjoint subscription scopes when multiple providers share an export,
+or their reported invoice totals overlap.
+
+Azure imports only the documented Cognitive Services meter subcategories
+Azure Open AI and Azure Open AI Reservation. Vendor meter names can change, so
+review the export if expected charges are missing. Amounts use amortized
+billing-currency costs, before credits and taxes, and do not necessarily equal
+the final invoice. The importer validates the export resource ID, manifest and
+part counts before storing closed UTC days. Blob manifests have no documented
+completion status, so a delivery that appears complete from its manifest can
+still be subject to later correction. If no manifests are found at the configured
+location, the import reports a response error and retries. See the
+[Cost Management overview](https://learn.microsoft.com/en-us/azure/cost-management-billing/cost-management-billing-overview).
+
 For Vertex AI, first enable the [detailed Cloud Billing export to BigQuery](https://cloud.google.com/billing/docs/how-to/export-data-bigquery-tables/detailed-usage).
 Grant the billing principal `bigquery.jobs.create` in the query project and
 `bigquery.tables.getData` on the export table. Set the required scope to the
@@ -384,16 +436,19 @@ not prove the export contained all historical costs.
 
 The `billing_import` worker scans every 60 seconds for imports due, claims up
 to ten, one at a time under a ten-minute lease, and fetches through the connection's
-egress-validated client with redirects disabled. OpenAI and Anthropic imports
-cover closed UTC days only. The first covers the 30 days before today, and
-later imports refresh the last 7 so vendor restatements land. AWS imports cover
-closed UTC days within retention on the first pass and refresh the current and
-previous billing periods on later passes. Incomplete historical periods are
-retried until covered. A delivery covers only days closed before its manifest
-was written, and gaps remain unimported. AWS reads are bounded by a 45-second
-deadline and cumulative compressed and expanded byte, row and aggregation limits.
-Each day's returned line items are summed per `(day, line_item, currency)` and
-replace the stored rows. A returned bucket with no results records an invoiced zero. On success the import schedules one hour
+egress-validated client with redirects disabled and a 30-second request timeout.
+OpenAI and Anthropic imports cover closed UTC days only. The first covers the 30
+days before today, and later imports refresh the last 7 so vendor restatements
+land. AWS imports cover closed UTC days within retention on the first pass and
+refresh the current and previous billing periods on later passes. Incomplete
+historical periods are retried until covered. A delivery covers only days closed
+before its manifest was written, and gaps remain unimported. AWS reads have a
+45-second deadline and cumulative compressed and expanded byte, row and
+aggregation limits. Azure streams up to 200 CSV parts, 128 MiB compressed and
+512 MiB expanded per pass, with two million rows, 100,000 aggregates and a
+one-minute import budget. Each day's returned line items are summed per
+`(day, line_item, currency)` and replace the stored rows. A returned bucket with
+no results records an invoiced zero. On success the import schedules one hour
 out; on failure `last_error_code` records `credential`, `status`, `network`,
 `timeout`, `response` or `endpoint`, and the retry backs off from five
 minutes to one hour. Rows older than `retention.usage_days` are purged in
@@ -450,4 +505,3 @@ response shapes. The AWS fixture follows the documented [report versions](https:
 [identity columns](https://docs.aws.amazon.com/cur/latest/userguide/identity-columns.html)
 and [line item columns](https://docs.aws.amazon.com/cur/latest/userguide/Lineitem-columns.html),
 reviewed October 31, 2026. The fixtures have not been qualified against live billing accounts.
-Azure Cost Management imports remain planned.

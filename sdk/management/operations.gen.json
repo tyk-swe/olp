@@ -2707,7 +2707,7 @@
           ]
         },
         "BillingScope": {
-          "description": "Source-shaped billing scope. Polling sources accept an empty scope. AWS and Google require their export details.",
+          "description": "Source-shaped billing scope. Polling sources accept an empty scope. Cloud sources require their export details.",
           "oneOf": [
             {
               "$ref": "#/$defs/PollingBillingScope"
@@ -2717,6 +2717,9 @@
             },
             {
               "$ref": "#/$defs/GoogleBillingScope"
+            },
+            {
+              "$ref": "#/$defs/AzureBillingScope"
             }
           ]
         },
@@ -2816,6 +2819,49 @@
               "maxItems": 100,
               "items": {
                 "type": "string"
+              }
+            }
+          }
+        },
+        "AzureBillingScope": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "billing_scope",
+            "export_name",
+            "storage_account",
+            "container"
+          ],
+          "properties": {
+            "billing_scope": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 1024
+            },
+            "export_name": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 1024
+            },
+            "storage_account": {
+              "type": "string",
+              "pattern": "^[a-z0-9]{3,24}$"
+            },
+            "container": {
+              "type": "string",
+              "minLength": 3,
+              "maxLength": 63
+            },
+            "prefix": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "subscription_ids": {
+              "type": "array",
+              "maxItems": 100,
+              "items": {
+                "type": "string",
+                "format": "uuid"
               }
             }
           }
@@ -28175,7 +28221,7 @@
           ]
         },
         "BillingScope": {
-          "description": "Source-shaped billing scope. Polling sources accept an empty scope. AWS and Google require their export details.",
+          "description": "Source-shaped billing scope. Polling sources accept an empty scope. Cloud sources require their export details.",
           "oneOf": [
             {
               "$ref": "#/$defs/PollingBillingScope"
@@ -28185,6 +28231,9 @@
             },
             {
               "$ref": "#/$defs/GoogleBillingScope"
+            },
+            {
+              "$ref": "#/$defs/AzureBillingScope"
             }
           ]
         },
@@ -28284,6 +28333,49 @@
               "maxItems": 100,
               "items": {
                 "type": "string"
+              }
+            }
+          }
+        },
+        "AzureBillingScope": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "billing_scope",
+            "export_name",
+            "storage_account",
+            "container"
+          ],
+          "properties": {
+            "billing_scope": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 1024
+            },
+            "export_name": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 1024
+            },
+            "storage_account": {
+              "type": "string",
+              "pattern": "^[a-z0-9]{3,24}$"
+            },
+            "container": {
+              "type": "string",
+              "minLength": 3,
+              "maxLength": 63
+            },
+            "prefix": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "subscription_ids": {
+              "type": "array",
+              "maxItems": 100,
+              "items": {
+                "type": "string",
+                "format": "uuid"
               }
             }
           }
@@ -34312,7 +34404,7 @@
               "$ref": "#/$defs/BillingScope"
             },
             "credential": {
-              "description": "Billing credential. Required on create, omitted retains the stored credential, and null is rejected. AWS and Google credentials are source-shaped objects.",
+              "description": "Billing credential. Required on create, omitted retains the stored credential, and null is rejected. Cloud credentials are source-shaped objects.",
               "oneOf": [
                 {
                   "type": "string",
@@ -34363,13 +34455,38 @@
                       "additionalProperties": true
                     }
                   }
+                },
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "auth_mode"
+                  ],
+                  "properties": {
+                    "auth_mode": {
+                      "type": "string",
+                      "enum": [
+                        "azure_default",
+                        "azure_client_secret"
+                      ]
+                    },
+                    "tenant_id": {
+                      "type": "string"
+                    },
+                    "client_id": {
+                      "type": "string"
+                    },
+                    "client_secret": {
+                      "type": "string"
+                    }
+                  }
                 }
               ]
             }
           }
         },
         "BillingScope": {
-          "description": "Source-shaped billing scope. Polling sources accept an empty scope. AWS and Google require their export details.",
+          "description": "Source-shaped billing scope. Polling sources accept an empty scope. Cloud sources require their export details.",
           "oneOf": [
             {
               "$ref": "#/$defs/PollingBillingScope"
@@ -34379,6 +34496,9 @@
             },
             {
               "$ref": "#/$defs/GoogleBillingScope"
+            },
+            {
+              "$ref": "#/$defs/AzureBillingScope"
             }
           ]
         },
@@ -34478,6 +34598,49 @@
               "maxItems": 100,
               "items": {
                 "type": "string"
+              }
+            }
+          }
+        },
+        "AzureBillingScope": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "billing_scope",
+            "export_name",
+            "storage_account",
+            "container"
+          ],
+          "properties": {
+            "billing_scope": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 1024
+            },
+            "export_name": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 1024
+            },
+            "storage_account": {
+              "type": "string",
+              "pattern": "^[a-z0-9]{3,24}$"
+            },
+            "container": {
+              "type": "string",
+              "minLength": 3,
+              "maxLength": 63
+            },
+            "prefix": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "subscription_ids": {
+              "type": "array",
+              "maxItems": 100,
+              "items": {
+                "type": "string",
+                "format": "uuid"
               }
             }
           }

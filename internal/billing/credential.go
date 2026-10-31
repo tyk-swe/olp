@@ -9,8 +9,9 @@ import (
 )
 
 type credentialDocument struct {
-	Source string `json:"source"`
-	APIKey string `json:"api_key"`
+	Source     string          `json:"source"`
+	APIKey     string          `json:"api_key,omitempty"`
+	Credential json.RawMessage `json:"credential,omitempty"`
 }
 
 func ValidateCredential(source, credential string) error {
@@ -25,6 +26,12 @@ func encodeCredential(source, key string) ([]byte, error) {
 		if err := ValidCredential(key); err != nil {
 			return nil, err
 		}
+	case SourceAzureCostManagement:
+		credential, err := validateAzureCredential([]byte(key))
+		if err != nil {
+			return nil, err
+		}
+		return json.MarshalIndent(credentialDocument{Source: source, Credential: credential}, "", "  ")
 	case SourceGoogle:
 		return encodeGoogleCredential(key)
 	case SourceAWS:
@@ -33,12 +40,6 @@ func encodeCredential(source, key string) ([]byte, error) {
 		return nil, access.Invalid("credential", "unknown billing source")
 	}
 	return json.MarshalIndent(credentialDocument{Source: source, APIKey: key}, "", "  ")
-}
-
-func ValidateSourceCredential(source, credential string) error {
-	document, err := encodeCredential(source, credential)
-	clear(document)
-	return err
 }
 
 var errIncompatibleCredential = errors.New("billing credential source does not match")
@@ -63,6 +64,9 @@ func decodeCredential(source string, data []byte) ([]byte, error) {
 	}
 	if document.Source != source && !(pollingSource(document.Source) && pollingSource(source)) {
 		return nil, errIncompatibleCredential
+	}
+	if source == SourceAzureCostManagement {
+		return validateAzureCredential(document.Credential)
 	}
 	if source == SourceAWS {
 		return decodeAWSCredential(data)

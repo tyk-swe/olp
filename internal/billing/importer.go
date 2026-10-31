@@ -31,15 +31,16 @@ import (
 // paths, so it runs on any process that can reach both, independent of the
 // coordination store.
 type Importer struct {
-	Pool         *pgxpool.Pool
-	Keys         *secrets.KeyRing
-	Installation string
-	Egress       *egress.Policy
-	Connections  *egress.ConnectionClientCache
-	Log          *slog.Logger
-	PassBudget   time.Duration
-	AWSClient    func(aws.Config) *s3.Client
-	Now          func() time.Time
+	Pool              *pgxpool.Pool
+	Keys              *secrets.KeyRing
+	Installation      string
+	Egress            *egress.Policy
+	Connections       *egress.ConnectionClientCache
+	Log               *slog.Logger
+	PassBudget        time.Duration
+	AzureBlobEndpoint func(string) string
+	AWSClient         func(aws.Config) *s3.Client
+	Now               func() time.Time
 
 	mu       sync.Mutex
 	outcomes map[[2]string]int64
@@ -219,7 +220,16 @@ func (i *Importer) importOne(ctx context.Context, row *importRow) error {
 		return i.importAWS(ctx, row, cfg, key)
 	}
 	endpoint := googleBigQueryEndpoint
-	if row.Source != SourceGoogle {
+	var cloudScope azureScope
+	if row.Source == SourceAzureCostManagement {
+		if err := json.Unmarshal(row.Scope, &cloudScope); err != nil {
+			return failFetch("response", err)
+		}
+		endpoint = "https://" + cloudScope.StorageAccount + ".blob.core.windows.net"
+		if i.AzureBlobEndpoint != nil {
+			endpoint = i.AzureBlobEndpoint(cloudScope.StorageAccount)
+		}
+	} else if row.Source != SourceGoogle {
 		if cfg.Endpoint == nil || *cfg.Endpoint == "" {
 			return failFetch("endpoint", errors.New("the provider has no endpoint"))
 		}
@@ -228,6 +238,18 @@ func (i *Importer) importOne(ctx context.Context, row *importRow) error {
 	client, err := i.client(ctx, row.ProviderID, cfg, key, endpoint)
 	if err != nil {
 		return failFetch("endpoint", err)
+	}
+	if row.Source == SourceAzureCostManagement {
+		periods, err := fetchAzure(ctx, client, i.Egress, endpoint, cloudScope, key)
+		if err != nil {
+			return err
+		}
+		for _, period := range periods {
+			if err := i.storeDays(ctx, row, period.start, &period.revision, period.days); err != nil {
+				return err
+			}
+		}
+		return nil
 	}
 	var scope Scope
 	if err := json.Unmarshal(row.Scope, &scope); err != nil {

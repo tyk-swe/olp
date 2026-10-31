@@ -24,11 +24,13 @@
     $props();
 
   const kind = $derived(provider.configuration.kind);
+  const azure = $derived(kind === 'azure_openai');
   const supported = $derived(
     kind === 'openai' ||
       kind === 'anthropic' ||
       kind === 'vertex_ai' ||
-      kind === 'bedrock'
+      kind === 'bedrock' ||
+      azure
   );
   const scopeLabel = $derived(
     kind === 'vertex_ai'
@@ -65,6 +67,15 @@
   let sessionToken = $state('');
   let replaceCredential = $state(false);
   let scopeText = $state('');
+  let billingScope = $state('');
+  let exportName = $state('');
+  let storageAccount = $state('');
+  let container = $state('');
+  let prefix = $state('');
+  let authMode = $state<'' | 'azure_default' | 'azure_client_secret'>('');
+  let tenantId = $state('');
+  let clientId = $state('');
+  let clientSecret = $state('');
   let billingAccountID = $state('');
   let bigQueryProjectID = $state('');
   let datasetID = $state('');
@@ -85,6 +96,9 @@
     accessKeyId = secretAccessKey = sessionToken = '';
     replaceCredential = false;
     scopeText = '';
+    billingScope = exportName = storageAccount = container = prefix = '';
+    authMode = '';
+    tenantId = clientId = clientSecret = '';
     billingAccountID = bigQueryProjectID = datasetID = tableID = '';
     googleAuthMode = 'service_account';
     enabled = true;
@@ -101,15 +115,21 @@
     const current = detail;
     if (current && !initialized) {
       scopeText = scopeLines(current);
-      if (kind === 'vertex_ai' && 'billing_account_id' in current.scope) {
+      if ('billing_scope' in current.scope) {
         const scope = current.scope;
-        billingAccountID = scope.billing_account_id ?? '';
-        bigQueryProjectID = scope.bigquery_project_id ?? '';
-        datasetID = scope.dataset_id ?? '';
-        tableID = scope.table_id ?? '';
+        billingScope = scope.billing_scope;
+        exportName = scope.export_name;
+        storageAccount = scope.storage_account;
+        container = scope.container;
+        prefix = scope.prefix ?? '';
+      } else if ('billing_account_id' in current.scope) {
+        const scope = current.scope;
+        billingAccountID = scope.billing_account_id;
+        bigQueryProjectID = scope.bigquery_project_id;
+        datasetID = scope.dataset_id;
+        tableID = scope.table_id;
         googleAuthMode = 'keep';
-      }
-      if (kind === 'bedrock' && 'payer_account_id' in current.scope) {
+      } else if ('payer_account_id' in current.scope) {
         const scope = current.scope;
         payerAccount = scope.payer_account_id;
         bucket = scope.bucket;
@@ -125,6 +145,8 @@
   function scopeLines(document: BillingImport): string {
     const scope = document.scope;
     if ('payer_account_id' in scope) return '';
+    if ('billing_scope' in scope)
+      return (scope.subscription_ids ?? []).join('\n');
     const entries =
       'project_ids' in scope
         ? (scope.project_ids ?? [])
@@ -171,6 +193,16 @@
       .split('\n')
       .map((line) => line.trim())
       .filter(Boolean);
+    if (azure) {
+      return {
+        billing_scope: billingScope.trim(),
+        export_name: exportName.trim(),
+        storage_account: storageAccount.trim(),
+        container: container.trim(),
+        ...(prefix.trim() ? { prefix: prefix.trim() } : {}),
+        ...(ids.length ? { subscription_ids: ids } : {})
+      };
+    }
     if (kind === 'vertex_ai') {
       return {
         billing_account_id: billingAccountID.trim(),
@@ -209,6 +241,31 @@
       .map((line) => line.trim())
       .filter(Boolean);
     if (ids.length > 100) return 'At most 100 scope IDs can be listed.';
+    if (azure) {
+      if (
+        !billingScope.trim() ||
+        !exportName.trim() ||
+        !storageAccount.trim() ||
+        !container.trim()
+      )
+        return 'Billing scope, export name, storage account, and container are required.';
+      if (
+        ids.some(
+          (id) =>
+            !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+              id
+            )
+        )
+      )
+        return 'Subscription IDs must be UUIDs.';
+      if (!editing && !authMode) return 'Choose an Azure credential mode.';
+      if (
+        authMode === 'azure_client_secret' &&
+        (!tenantId.trim() || !clientId.trim() || !clientSecret)
+      )
+        return 'Tenant ID, client ID, and client secret are required.';
+      return '';
+    }
     for (const id of ids) {
       if (kind === 'anthropic' && id === 'default') continue;
       if (!scopePattern.test(id))
@@ -250,7 +307,7 @@
       return;
     }
     const etag = detail?.etag ?? provider.etag;
-    const credential =
+    const googleCredential =
       kind === 'vertex_ai'
         ? googleAuthMode === 'keep'
           ? undefined
@@ -260,8 +317,8 @@
                 auth_mode: 'service_account' as const,
                 service_account: serviceAccountKey()
               }
-        : adminKey.trim() || undefined;
-    const submission = intent.prepare<Parameters<typeof putBillingImport>[2]>({
+        : undefined;
+    const input: Parameters<typeof putBillingImport>[2] = {
       enabled,
       scope: scopeBody(),
       ...(kind === 'bedrock'
@@ -280,23 +337,38 @@
                     }
             }
           : {}
-        : credential
-          ? { credential }
-          : {})
-    });
+        : azure && authMode
+          ? {
+              credential:
+                authMode === 'azure_default'
+                  ? { auth_mode: authMode }
+                  : {
+                      auth_mode: authMode,
+                      tenant_id: tenantId.trim(),
+                      client_id: clientId.trim(),
+                      client_secret: clientSecret
+                    }
+            }
+          : kind === 'vertex_ai'
+            ? googleCredential
+              ? { credential: googleCredential }
+              : {}
+            : adminKey.trim()
+              ? { credential: adminKey.trim() }
+              : {})
+    };
     const isCurrent = captureOwner();
     busy = true;
     error = notice = '';
     conflicted = false;
     try {
-      await putBillingImport(
-        provider.id,
-        etag,
-        submission.input,
-        submission.requestId
+      await intent.submit(input, (submission, requestId) =>
+        putBillingImport(provider.id, etag, submission, requestId)
       );
       if (!isCurrent()) return;
       adminKey = '';
+      authMode = '';
+      tenantId = clientId = clientSecret = '';
       if (kind === 'vertex_ai') googleAuthMode = 'keep';
       accessKeyId = secretAccessKey = sessionToken = '';
       replaceCredential = false;
@@ -347,6 +419,9 @@
       if (!isCurrent()) return;
       adminKey = '';
       scopeText = '';
+      billingScope = exportName = storageAccount = container = prefix = '';
+      authMode = '';
+      tenantId = clientId = clientSecret = '';
       billingAccountID = bigQueryProjectID = datasetID = tableID = '';
       googleAuthMode = 'service_account';
       enabled = true;
@@ -513,6 +588,82 @@
                   Use a legacy CSV CUR export with create-new-versions enabled
                   and grant list and read access to this report
                 </p>
+              {:else if azure}
+                <div class="form-field">
+                  <label for="billing-azure-scope"
+                    >Billing scope resource ID</label
+                  ><input id="billing-azure-scope" bind:value={billingScope} />
+                </div>
+                <div class="form-field">
+                  <label for="billing-azure-export">Export name</label><input
+                    id="billing-azure-export"
+                    bind:value={exportName}
+                  />
+                </div>
+                <div class="form-field">
+                  <label for="billing-azure-account">Storage account</label
+                  ><input
+                    id="billing-azure-account"
+                    bind:value={storageAccount}
+                  />
+                </div>
+                <div class="form-field">
+                  <label for="billing-azure-container">Container</label><input
+                    id="billing-azure-container"
+                    bind:value={container}
+                  />
+                </div>
+                <div class="form-field">
+                  <label for="billing-azure-prefix"
+                    >Storage directory prefix</label
+                  ><input id="billing-azure-prefix" bind:value={prefix} />
+                </div>
+                <div class="form-field">
+                  <label for="billing-azure-subscriptions"
+                    >Subscription IDs</label
+                  ><textarea
+                    id="billing-azure-subscriptions"
+                    rows="3"
+                    bind:value={scopeText}></textarea><small
+                    >One ID per line. Empty includes all subscriptions in the
+                    export.</small
+                  >
+                </div>
+                <div class="form-field">
+                  <label for="billing-azure-auth">Azure credential</label>
+                  <select id="billing-azure-auth" bind:value={authMode}>
+                    <option value=""
+                      >{editing
+                        ? 'Keep stored credential'
+                        : 'Choose a credential'}</option
+                    >
+                    <option value="azure_default">Workload identity</option>
+                    <option value="azure_client_secret">Client secret</option>
+                  </select>
+                </div>
+                {#if authMode === 'azure_client_secret'}
+                  <div class="form-field">
+                    <label for="billing-azure-tenant">Tenant ID</label><input
+                      id="billing-azure-tenant"
+                      bind:value={tenantId}
+                    />
+                  </div>
+                  <div class="form-field">
+                    <label for="billing-azure-client">Client ID</label><input
+                      id="billing-azure-client"
+                      bind:value={clientId}
+                    />
+                  </div>
+                  <div class="form-field">
+                    <label for="billing-azure-secret">Client secret</label
+                    ><input
+                      id="billing-azure-secret"
+                      type="password"
+                      autocomplete="off"
+                      bind:value={clientSecret}
+                    />
+                  </div>
+                {/if}
               {:else}
                 <div class="form-field">
                   {#if kind === 'vertex_ai'}

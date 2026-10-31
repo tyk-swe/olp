@@ -133,7 +133,8 @@
       >
     {:else if !(report.data?.items ?? []).length}
       <p class="section-help">
-        Configure a billing import on an OpenAI or Anthropic connection.
+        Configure a billing import on an OpenAI, Anthropic, Bedrock, Vertex AI
+        or Azure OpenAI connection.
       </p>
     {:else}
       <div class="table-scroll">
