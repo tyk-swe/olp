@@ -5,9 +5,9 @@ This handbook explains how to use, operate and extend OpenLLMProxy. Start with
 publish a route and make a request. Read [Concepts](concepts.md) next for the
 route, publication, key and accounting model that the task guides rely on.
 
-Guides describe current behavior. Internal plans and qualification evidence can
-describe accepted targets or scoped test results, so they should not be read as
-product documentation unless a guide links to them for that purpose.
+Guides describe current behavior. Qualification records can describe accepted
+targets or scoped test results, so they should not be read as product
+documentation unless a guide links to them for that purpose.
 
 ## Use the gateway
 
@@ -53,9 +53,6 @@ remaining guides cover the implementation contracts behind a change.
 | Maintain signed model facts, prices and calibration data | [Catalog maintenance](develop/catalog.md) |
 | Reproduce benchmarks and assess performance budgets | [Performance](develop/performance.md) |
 | Qualify a candidate and identify outstanding external checks | [Qualification](develop/qualification.md) |
-| Compare coding-client capabilities with accepted target contracts | [Code-mode baseline and roadmap](develop/plans/code-mode-parity.md) |
-| Choose the next unfinished implementation outcome | [Roadmap](roadmap.md) |
-| Work from the retained implementation designs | [Guardrails](develop/plans/guardrails.md), [API surfaces](develop/plans/api-surface.md) and [Agent gateway](develop/plans/agent-gateway.md) |
 
 The seven retained console screenshots live in [assets](assets/). The provider,
 console and external-secrets guides link to the screenshot that belongs to each

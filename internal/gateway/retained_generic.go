@@ -25,7 +25,7 @@ import (
 	"github.com/tyk-swe/olp/internal/usage"
 )
 
-// RM5 generic retained families share the RM5.9 lifecycle contracts:
+// Generic retained families share the managed-agent lifecycle contracts:
 // owner-scoped gateway IDs, pinned route/provider/credential affinity,
 // submission fences for creates, and no local content retention. Each
 // family keeps its native wire shape; only identity fields are rewritten.
@@ -962,7 +962,7 @@ func (s *Server) listRetainedGeneric(w http.ResponseWriter, r *http.Request, x *
 	return 200
 }
 
-// retainedSearch serves RM5.2 native search and RM5.3 query-only bindings
+// retainedSearch serves native vector-store search and query-only bindings
 // through the one authorized retrieval path. It creates no resource.
 func (s *Server) retainedSearch(w http.ResponseWriter, r *http.Request) {
 	if id, err := uuid.Parse(r.PathValue("id")); err == nil {
@@ -973,7 +973,7 @@ func (s *Server) retainedSearch(w http.ResponseWriter, r *http.Request) {
 	s.retainedProxy(w, r, "retrieval", "vector_stores/{id}/search", "vector_store")
 }
 
-// retainedCompact serves RM5.4 native compaction as its own priced call.
+// retainedCompact serves native compaction as its own priced call.
 func (s *Server) retainedCompact(w http.ResponseWriter, r *http.Request) {
 	s.retainedProxy(w, r, "generation", "responses/compact", "")
 }
