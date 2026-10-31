@@ -24,7 +24,6 @@ import (
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/container"
 	"github.com/shopspring/decimal"
 	"github.com/tyk-swe/olp/internal/connectors"
-	"github.com/tyk-swe/olp/internal/egress"
 )
 
 const (
@@ -143,7 +142,7 @@ func azureSDKError(err error) error {
 	return failFetch("network", errors.New("Azure storage request failed"))
 }
 
-func fetchAzure(ctx context.Context, client *http.Client, egressPolicy *egress.Policy, endpoint string, scope azureScope, key []byte, earliest, today time.Time, completed map[string]struct{}, row *importRow, store func(azurePeriod) error) error {
+func fetchAzure(ctx context.Context, client *http.Client, auth *connectors.Auth, endpoint string, scope azureScope, key []byte, earliest, today time.Time, completed map[string]struct{}, row *importRow, store func(azurePeriod) error) error {
 	var credential azureCredential
 	if err := json.Unmarshal(key, &credential); err != nil {
 		return failFetch("credential", errors.New("invalid credential"))
@@ -161,7 +160,7 @@ func fetchAzure(ctx context.Context, client *http.Client, egressPolicy *egress.P
 	defer cancel()
 	boundedClient := *client
 	boundedClient.Timeout = requestTimout
-	transport := &azureTransport{client: &boundedClient, auth: connectors.NewAuth(egressPolicy), credential: credential, secret: secret}
+	transport := &azureTransport{client: &boundedClient, auth: auth, credential: credential, secret: secret}
 	storage, err := azblob.NewClientWithNoCredential(endpoint, &azblob.ClientOptions{ClientOptions: azcore.ClientOptions{
 		Transport: transport, Retry: policy.RetryOptions{MaxRetries: -1},
 	}})
@@ -301,7 +300,7 @@ func (a *azureReader) list(ctx context.Context, earliest, today time.Time, compl
 }
 
 func azureTime(value string) (time.Time, error) {
-	for _, layout := range []string{time.RFC3339Nano, "2006-01-02T15:04:05", "2006-01-02"} {
+	for _, layout := range []string{time.RFC3339Nano, "2006-01-02T15:04:05", "2006-01-02", "01/02/2006"} {
 		if date, err := time.Parse(layout, value); err == nil {
 			return date.UTC(), nil
 		}
@@ -417,6 +416,9 @@ func (a *azureReader) csv(input io.Reader, days reportAccumulator, start, end ti
 			return 0, errors.New("duplicate export column")
 		}
 		fields[key] = index
+	}
+	if index, ok := fields["billingcurrencycode"]; ok {
+		fields["billingcurrency"] = index
 	}
 	for _, name := range []string{"date", "subscriptionid", "metercategory", "metersubcategory", "meterid", "chargetype", "billingcurrency", "costinbillingcurrency"} {
 		if _, ok := fields[name]; !ok {

@@ -13,6 +13,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"sync"
@@ -96,7 +98,7 @@ func (f *awsBillingFake) delivery(t *testing.T, day time.Time, assembly string, 
 	period := start.Format("20060102") + "-" + start.AddDate(0, 1, 0).Format("20060102")
 	prefix := "billing/cur/" + period + "/" + assembly + "/"
 	part := prefix + "cur-1.csv.gz"
-	manifest, _ := json.Marshal(map[string]any{"assemblyId": assembly, "billingPeriod": map[string]string{"start": start.Format(time.RFC3339), "end": start.AddDate(0, 1, 0).Format(time.RFC3339)}, "reportKeys": []string{part}})
+	manifest, _ := json.Marshal(map[string]any{"assemblyId": assembly, "billingPeriod": map[string]string{"start": start.Format("20060102T150405.000Z"), "end": start.AddDate(0, 1, 0).Format("20060102T150405.000Z")}, "reportKeys": []string{part}})
 	header := "bill/PayerAccountId,lineItem/UsageAccountId,lineItem/ProductCode,lineItem/UsageStartDate,lineItem/LineItemType,lineItem/UsageType,lineItem/Operation,product/sku,lineItem/CurrencyCode,lineItem/UnblendedCost\n"
 	row := func(account, product, hour, amount string) string {
 		return fmt.Sprintf("111122223333,%s,%s,%sT%s:00:00Z,Usage,InputTokens,InvokeModel,sku1,USD,%s\n", account, product, day.Format("2006-01-02"), hour, amount)
@@ -778,31 +780,74 @@ func TestBillingImportAWSEgressAndRedirects(t *testing.T) {
 }
 
 func TestBillingImportAWSWorkloadCredential(t *testing.T) {
-	t.Setenv("AWS_ACCESS_KEY_ID", "BILLINGKEY1234567890")
-	t.Setenv("AWS_SECRET_ACCESS_KEY", "billing-workload-secret")
-	t.Setenv("AWS_SESSION_TOKEN", "")
-	t.Setenv("AWS_EC2_METADATA_DISABLED", "true")
-	t.Setenv("AWS_PROFILE", "")
-	h := newAccessHarness(t)
-	owner := h.owner()
-	fake := newAWSBillingFake(t)
-	today := time.Now().UTC().Truncate(24 * time.Hour)
-	day := time.Date(today.Year(), today.Month(), 1, 0, 0, 0, 0, time.UTC).AddDate(0, -1, 3)
-	fake.delivery(t, day, "workload", day.AddDate(0, 0, 1).Add(time.Hour), "0.1")
-	provider := h.want(owner, "POST", "/api/v1/providers", map[string]any{"name": "AWS workload", "configuration": map[string]any{"kind": "bedrock", "auth_mode": "static", "endpoint": "https://bedrock-runtime.us-east-1.amazonaws.com", "cloud_region": "us-east-1"}, "credential": `{"access_key_id":"BEDROCKKEY1234567890","secret_access_key":"bedrock-secret-123456789"}`, "model": "amazon.titan-text-express-v1"}, idem("aws-workload-provider"), 201)
-	id := billingProviderID(provider)
-	scope := map[string]any{"payer_account_id": "111122223333", "bucket": "billing-report-bucket", "report_prefix": "billing/cur", "region": "us-east-1"}
-	billingPut(h, owner, id, map[string]any{"scope": scope, "credential": map[string]any{"auth_mode": "workload"}}, provider["etag"].(string), 201)
-	importer := billingImporter(h, t)
-	importer.AWSClient = func(config aws.Config) *s3.Client {
-		return s3.NewFromConfig(config, func(o *s3.Options) { o.BaseEndpoint = aws.String(fake.server.URL); o.UsePathStyle = true })
-	}
-	if err := importer.Pass(t.Context()); err != nil {
-		t.Fatal(err)
-	}
-	status := h.want(owner, "GET", "/api/v1/providers/"+id+"/billing-import", nil, nil, 200)["status"].(map[string]any)
-	if status["last_error_code"] != nil || status["source_revision"] != "workload" {
-		t.Fatalf("workload credential did not import: %v", status)
+	for _, mode := range []string{"environment", "web_identity", "container"} {
+		t.Run(mode, func(t *testing.T) {
+			t.Setenv("AWS_ACCESS_KEY_ID", "BILLINGKEY1234567890")
+			t.Setenv("AWS_SECRET_ACCESS_KEY", "billing-workload-secret")
+			t.Setenv("AWS_SESSION_TOKEN", "")
+			t.Setenv("AWS_EC2_METADATA_DISABLED", "true")
+			t.Setenv("AWS_PROFILE", "")
+			t.Setenv("AWS_WEB_IDENTITY_TOKEN_FILE", "")
+			t.Setenv("AWS_CONTAINER_CREDENTIALS_RELATIVE_URI", "")
+			t.Setenv("AWS_CONTAINER_CREDENTIALS_FULL_URI", "")
+			configFile := filepath.Join(t.TempDir(), "config")
+			if err := os.WriteFile(configFile, []byte("[default]\n"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv("AWS_CONFIG_FILE", configFile)
+			t.Setenv("AWS_SHARED_CREDENTIALS_FILE", configFile)
+			peer := newFixedHostPeer(t, "sts.us-east-1.amazonaws.com", "sts.amazonaws.com")
+			peer.respond = func(w http.ResponseWriter, r *http.Request) {
+				if r.FormValue("Action") != "AssumeRoleWithWebIdentity" || r.FormValue("WebIdentityToken") != "fixture-web-identity" {
+					http.Error(w, "invalid fixture identity", http.StatusBadRequest)
+					return
+				}
+				w.Header().Set("Content-Type", "text/xml")
+				_, _ = fmt.Fprintf(w, `<AssumeRoleWithWebIdentityResponse xmlns="https://sts.amazonaws.com/doc/2011-06-15/"><AssumeRoleWithWebIdentityResult><Credentials><AccessKeyId>BILLINGKEY1234567890</AccessKeyId><SecretAccessKey>billing-workload-secret</SecretAccessKey><SessionToken>fixture-session</SessionToken><Expiration>%s</Expiration></Credentials></AssumeRoleWithWebIdentityResult></AssumeRoleWithWebIdentityResponse>`, time.Now().UTC().Add(time.Hour).Format(time.RFC3339))
+			}
+			if mode != "environment" {
+				t.Setenv("AWS_ACCESS_KEY_ID", "")
+				t.Setenv("AWS_SECRET_ACCESS_KEY", "")
+			}
+			if mode == "web_identity" {
+				tokenFile := filepath.Join(t.TempDir(), "token")
+				if err := os.WriteFile(tokenFile, []byte("fixture-web-identity"), 0600); err != nil {
+					t.Fatal(err)
+				}
+				t.Setenv("AWS_WEB_IDENTITY_TOKEN_FILE", tokenFile)
+				t.Setenv("AWS_ROLE_ARN", "arn:aws:iam::111122223333:role/billing-fixture")
+				t.Setenv("AWS_ROLE_SESSION_NAME", "billing-fixture")
+			}
+			if mode == "container" {
+				metadata := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					w.Header().Set("Content-Type", "application/json")
+					_, _ = fmt.Fprintf(w, `{"AccessKeyId":"BILLINGKEY1234567890","SecretAccessKey":"billing-workload-secret","Token":"fixture-session","Expiration":%q}`, time.Now().UTC().Add(time.Hour).Format(time.RFC3339))
+				}))
+				t.Cleanup(metadata.Close)
+				t.Setenv("AWS_CONTAINER_CREDENTIALS_FULL_URI", metadata.URL)
+			}
+			h := newAccessHarness(t)
+			owner := h.owner()
+			fake := newAWSBillingFake(t)
+			today := time.Now().UTC().Truncate(24 * time.Hour)
+			day := time.Date(today.Year(), today.Month(), 1, 0, 0, 0, 0, time.UTC).AddDate(0, -1, 3)
+			fake.delivery(t, day, "workload", day.AddDate(0, 0, 1).Add(time.Hour), "0.1")
+			provider := h.want(owner, "POST", "/api/v1/providers", map[string]any{"name": "AWS workload", "configuration": map[string]any{"kind": "bedrock", "auth_mode": "static", "endpoint": "https://bedrock-runtime.us-east-1.amazonaws.com", "cloud_region": "us-east-1", "options": map[string]any{"network": map[string]any{"proxy_url": peer.proxy.URL, "trust_roots_pem": peer.roots}}}, "credential": `{"access_key_id":"BEDROCKKEY1234567890","secret_access_key":"bedrock-secret-123456789"}`, "model": "amazon.titan-text-express-v1"}, idem("aws-workload-provider"), 201)
+			id := billingProviderID(provider)
+			scope := map[string]any{"payer_account_id": "111122223333", "bucket": "billing-report-bucket", "report_prefix": "billing/cur", "region": "us-east-1"}
+			billingPut(h, owner, id, map[string]any{"scope": scope, "credential": map[string]any{"auth_mode": "workload"}}, provider["etag"].(string), 201)
+			importer := billingImporter(h, t)
+			importer.AWSClient = func(config aws.Config) *s3.Client {
+				return s3.NewFromConfig(aws.Config{Region: config.Region, Credentials: config.Credentials, HTTPClient: fake.server.Client(), Retryer: config.Retryer}, func(o *s3.Options) { o.BaseEndpoint = aws.String(fake.server.URL); o.UsePathStyle = true })
+			}
+			if err := importer.Pass(t.Context()); err != nil {
+				t.Fatal(err)
+			}
+			status := h.want(owner, "GET", "/api/v1/providers/"+id+"/billing-import", nil, nil, 200)["status"].(map[string]any)
+			if status["last_error_code"] != nil || status["source_revision"] != "workload" {
+				t.Fatalf("workload credential did not import: %v", status)
+			}
+		})
 	}
 }
 

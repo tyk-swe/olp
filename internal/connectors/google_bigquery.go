@@ -7,7 +7,7 @@ import (
 	"github.com/tyk-swe/olp/internal/egress"
 )
 
-func NewGoogleBillingAuth(policy *egress.Policy, client *http.Client) *Auth {
+func NewBillingAuth(policy *egress.Policy, client *http.Client) *Auth {
 	auth := NewAuth(policy)
 	public := &egress.Policy{}
 	auth.publicClient = &http.Client{
@@ -15,6 +15,8 @@ func NewGoogleBillingAuth(policy *egress.Policy, client *http.Client) *Auth {
 		Timeout:       authTimeout,
 		CheckRedirect: func(*http.Request, []*http.Request) error { return egress.ErrRedirect },
 	}
+	auth.client.Transport = awsIdentityTransport{metadata: auth.client.Transport, public: auth.publicClient.Transport}
+	auth.azureClient.Transport = azureIdentityTransport{base: auth.azureClient.Transport, public: auth.publicClient.Transport}
 	return auth
 }
 

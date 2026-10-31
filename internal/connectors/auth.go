@@ -78,7 +78,7 @@ func NewAuth(policy *egress.Policy) *Auth {
 	awsPolicy := *policy
 	awsPolicy.AllowedNetworks = append([]netip.Prefix{}, policy.AllowedNetworks...)
 	awsPolicy.PlainHTTPHosts = append([]string{}, policy.PlainHTTPHosts...)
-	for _, host := range []string{"169.254.169.254", "169.254.170.2", "169.254.170.23", "fd00:ec2::254", "fd00:ec2::23"} {
+	for _, host := range awsMetadataHosts() {
 		address := netip.MustParseAddr(host)
 		awsPolicy.AllowedNetworks = append(awsPolicy.AllowedNetworks, netip.PrefixFrom(address, address.BitLen()))
 		awsPolicy.PlainHTTPHosts = append(awsPolicy.PlainHTTPHosts, host)
@@ -122,6 +122,31 @@ func NewAuth(policy *egress.Policy) *Auth {
 		client: client, publicClient: publicClient, azureClient: azureClient, iamEndpoint: ibmIAMEndpoint}
 }
 
+func awsMetadataHosts() []string {
+	return []string{"169.254.169.254", "169.254.170.2", "169.254.170.23", "fd00:ec2::254", "fd00:ec2::23"}
+}
+
+type awsIdentityTransport struct {
+	metadata http.RoundTripper
+	public   http.RoundTripper
+}
+
+func (t awsIdentityTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+	host := r.URL.Hostname()
+	for _, address := range awsMetadataHosts() {
+		if host == address {
+			return t.metadata.RoundTrip(r)
+		}
+	}
+	for _, name := range []string{"AWS_CONTAINER_CREDENTIALS_FULL_URI", "AWS_EC2_METADATA_SERVICE_ENDPOINT"} {
+		endpoint, err := url.Parse(os.Getenv(name))
+		if err == nil && strings.EqualFold(endpoint.Hostname(), host) {
+			return t.metadata.RoundTrip(r)
+		}
+	}
+	return t.public.RoundTrip(r)
+}
+
 var azureAuthorityHosts = map[string]bool{
 	"login.microsoftonline.com":              true,
 	"login.microsoftonline.us":               true,
@@ -132,13 +157,17 @@ var azureAuthorityHosts = map[string]bool{
 }
 
 type azureIdentityTransport struct {
-	base http.RoundTripper
+	base   http.RoundTripper
+	public http.RoundTripper
 }
 
 func (t azureIdentityTransport) RoundTrip(r *http.Request) (*http.Response, error) {
 	host := strings.ToLower(strings.TrimSuffix(r.URL.Hostname(), "."))
 	if !azureIdentityHost(host) {
 		return nil, ErrAuthentication
+	}
+	if t.public != nil && azureAuthorityHosts[host] {
+		return t.public.RoundTrip(r)
 	}
 	return t.base.RoundTrip(r)
 }

@@ -290,14 +290,19 @@ func (i *Importer) importOne(ctx context.Context, row *importRow) error {
 	if row.Source == SourceGoogle {
 		bounded := *client
 		bounded.Timeout = requestTimout
-		authClient, err := i.googleAuthenticationClient(ctx, cfg)
+		authClient, err := i.billingAuthenticationClient(ctx, cfg)
 		if err != nil {
 			return failFetch("endpoint", err)
 		}
 		defer authClient.CloseIdleConnections()
-		return i.importGoogle(ctx, row, &bounded, connectors.NewGoogleBillingAuth(i.Egress, authClient), key)
+		return i.importGoogle(ctx, row, &bounded, connectors.NewBillingAuth(i.Egress, authClient), key)
 	}
 	if row.Source == SourceAzureCostManagement {
+		authClient, err := i.billingAuthenticationClient(ctx, cfg)
+		if err != nil {
+			return failFetch("endpoint", err)
+		}
+		defer authClient.CloseIdleConnections()
 		today := i.now().UTC().Truncate(24 * time.Hour)
 		var retention int
 		if err := i.Pool.QueryRow(ctx, `SELECT COALESCE((SELECT value::int FROM olp.settings WHERE key='retention.usage_days'),90)`).Scan(&retention); err != nil {
@@ -308,7 +313,7 @@ func (i *Importer) importOne(ctx context.Context, row *importRow) error {
 		if err != nil {
 			return err
 		}
-		return fetchAzure(ctx, client, i.Egress, endpoint, cloudScope, key, earliest, today, completed, row, func(period azurePeriod) error {
+		return fetchAzure(ctx, client, connectors.NewBillingAuth(i.Egress, authClient), endpoint, cloudScope, key, earliest, today, completed, row, func(period azurePeriod) error {
 			return i.storeDays(ctx, row, period.start, &period.revision, period.days)
 		})
 	}
@@ -333,7 +338,7 @@ func (i *Importer) importOne(ctx context.Context, row *importRow) error {
 	return i.storeDays(ctx, row, "", nil, days)
 }
 
-func (i *Importer) googleAuthenticationClient(ctx context.Context, cfg *providerConfig) (*http.Client, error) {
+func (i *Importer) billingAuthenticationClient(ctx context.Context, cfg *providerConfig) (*http.Client, error) {
 	var secret []byte
 	if options := cfg.Options.Network; options != nil && options.CredentialID != "" {
 		data, err := i.Keys.Read(ctx, i.Pool, i.Installation, options.CredentialID, secrets.ProviderCredential)

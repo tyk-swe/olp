@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"regexp"
-	"slices"
 
 	"github.com/tyk-swe/olp/internal/access"
 )
@@ -110,10 +109,7 @@ func ValidateScope(source string, raw json.RawMessage) (json.RawMessage, error) 
 	}
 	// Stored scope is the decoded document's canonical serialization, so equal
 	// scopes compare equal regardless of how the request formatted them.
-	canonical, err := json.Marshal(Scope{
-		ProjectIDs:   slices.Sorted(slices.Values(scope.ProjectIDs)),
-		WorkspaceIDs: slices.Sorted(slices.Values(scope.WorkspaceIDs)),
-	})
+	canonical, err := json.Marshal(scope)
 	if err != nil {
 		return nil, err
 	}

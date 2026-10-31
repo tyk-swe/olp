@@ -31,6 +31,7 @@ const (
 	awsMaxKeys       = 100000
 	awsMaxCompressed = 64 << 20
 	awsMaxExpanded   = 512 << 20
+	awsManifestTime  = "20060102T150405.000Z"
 )
 
 type awsManifest struct {
@@ -72,7 +73,12 @@ func (i *Importer) importAWS(ctx context.Context, row *importRow, cfg *providerC
 	}
 	provider := aws.CredentialsProvider(credentials.NewStaticCredentialsProvider(credential.AccessKeyID, credential.SecretAccessKey, credential.SessionToken))
 	if credential.AuthMode == "workload" {
-		value, e := connectors.NewAuth(i.Egress).AWSWorkloadCredentials(fetchCtx, scope.Region)
+		authClient, err := i.billingAuthenticationClient(fetchCtx, cfg)
+		if err != nil {
+			return failFetch("endpoint", err)
+		}
+		defer authClient.CloseIdleConnections()
+		value, e := connectors.NewBillingAuth(i.Egress, authClient).AWSWorkloadCredentials(fetchCtx, scope.Region)
 		if e != nil {
 			return failFetch("credential", e)
 		}
@@ -140,11 +146,11 @@ func (i *Importer) importAWSDelivery(ctx context.Context, row *importRow, client
 	if err != nil {
 		return err
 	}
-	start, err := time.Parse(time.RFC3339, manifest.BillingPeriod.Start)
+	start, err := time.Parse(awsManifestTime, manifest.BillingPeriod.Start)
 	if err != nil {
 		return failFetch("response", err)
 	}
-	end, err := time.Parse(time.RFC3339, manifest.BillingPeriod.End)
+	end, err := time.Parse(awsManifestTime, manifest.BillingPeriod.End)
 	if err != nil || !end.After(start) {
 		return failFetch("response", errors.New("invalid AWS billing period"))
 	}

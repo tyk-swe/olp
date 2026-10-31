@@ -263,16 +263,16 @@ func TestAzureBillingImport(t *testing.T) {
 	yesterday := today.AddDate(0, 0, -1)
 	period := time.Date(yesterday.Year(), yesterday.Month(), 1, 0, 0, 0, 0, time.UTC)
 	base := "billing/costs/" + period.Format("20060102") + "-" + period.AddDate(0, 1, 0).Format("20060102") + "/run/"
-	header := "Date,SubscriptionId,MeterCategory,MeterSubCategory,MeterId,ChargeType,BillingCurrency,CostInBillingCurrency\n"
+	header := "Date,SubscriptionId,MeterCategory,MeterSubCategory,MeterId,ChargeType,BillingCurrencyCode,CostInBillingCurrency\n"
 	row := func(day time.Time, sub, category, meter, amount string) string {
-		return fmt.Sprintf("%s,%s,%s,%s,meter-123,Usage,USD,%s\n", day.Format("2006-01-02"), sub, category, meter, amount)
+		return fmt.Sprintf("%s,%s,%s,%s,meter-123,Usage,USD,%s\n", day.Format("01/02/2006"), sub, category, meter, amount)
 	}
 	part1 := header + row(yesterday, subscription, "Cognitive Services", "Azure Open AI", "0.100000000000000001") +
 		row(yesterday, subscription, "Cognitive Services", "Speech Services", "99") +
 		row(yesterday, "22222222-2222-4222-8222-222222222222", "Cognitive Services", "Azure Open AI", "99")
 	longMeter := strings.Repeat("m", 280)
 	longRow := func(suffix string) string {
-		return fmt.Sprintf("%s,%s,Cognitive Services,Azure Open AI,%s%s,Usage,USD,0\n", yesterday.Format("2006-01-02"), subscription, longMeter, suffix)
+		return fmt.Sprintf("%s,%s,Cognitive Services,Azure Open AI,%s%s,Usage,USD,0\n", yesterday.Format("01/02/2006"), subscription, longMeter, suffix)
 	}
 	part2 := header + row(yesterday, subscription, "Cognitive Services", "Azure Open AI", "0.200000000000000002") +
 		row(today, subscription, "Cognitive Services", "Azure Open AI", "99") +
@@ -1319,11 +1319,11 @@ func TestBillingImportMigrationPreservesHistory(t *testing.T) {
 	}
 	legacyOldDay := day1.AddDate(0, 0, -45)
 	if _, err := pool.Exec(t.Context(), `INSERT INTO olp.provider_billing_imports(provider_id,source,scope,etag,created_by,imported_from,imported_through,last_success_at)
-		VALUES($1::uuid,'openai_costs','{"project_ids":["proj_legacy"]}',$2::uuid,$3::uuid,$4::date,$5::date,now())`, legacyProvider, uuid.NewString(), userID, legacyOldDay, day2); err != nil {
+		VALUES($1::uuid,'openai_costs','{"project_ids":["proj_zlegacy","proj_alegacy"]}',$2::uuid,$3::uuid,$4::date,$5::date,now())`, legacyProvider, uuid.NewString(), userID, legacyOldDay, day2); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := pool.Exec(t.Context(), `INSERT INTO olp.provider_billing_contexts(provider_id,source,scope)
-		VALUES($1::uuid,'openai_costs','{"project_ids":["proj_legacy"]}')`, legacyProvider); err != nil {
+		VALUES($1::uuid,'openai_costs','{"project_ids":["proj_zlegacy","proj_alegacy"]}')`, legacyProvider); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := pool.Exec(t.Context(), `INSERT INTO olp.provider_invoiced_costs(provider_id,day,line_item,currency,amount,source)
@@ -1343,9 +1343,17 @@ func TestBillingImportMigrationPreservesHistory(t *testing.T) {
 	if legacyItem["invoiced_cost"] != "0" || legacyItem["capture_rate_unavailable_reason"] != "zero_invoice" {
 		t.Fatalf("migration lost an empty covered day: %v", legacyReport)
 	}
-	legacyStatus := h.want(owner, "GET", "/api/v1/providers/"+legacyProvider+"/billing-import", nil, nil, 200)["status"].(map[string]any)
+	legacyImport := h.want(owner, "GET", "/api/v1/providers/"+legacyProvider+"/billing-import", nil, nil, 200)
+	legacyStatus := legacyImport["status"].(map[string]any)
 	if legacyStatus["imported_from"] != legacyOldDay.Format("2006-01-02") || legacyStatus["imported_through"] != day2.Format("2006-01-02") {
 		t.Fatalf("migration lost the current import's covered range: %v", legacyStatus)
+	}
+	updatedImport := billingPut(h, owner, legacyProvider, map[string]any{
+		"scope": map[string]any{"project_ids": []string{"proj_zlegacy", "proj_alegacy"}}, "credential": "sk-admin-" + strings.Repeat("x", 24),
+	}, legacyImport["etag"].(string), 200)
+	updatedStatus := updatedImport["status"].(map[string]any)
+	if updatedStatus["imported_from"] != legacyStatus["imported_from"] || updatedStatus["imported_through"] != legacyStatus["imported_through"] {
+		t.Fatalf("unchanged scope lost migrated coverage: %v", updatedStatus)
 	}
 	oldReport := h.want(owner, "GET", fmt.Sprintf("/api/v1/usage/reconciliation?start=%s&end=%s&provider_id=%s", legacyOldDay.Format("2006-01-02"), legacyOldDay.AddDate(0, 0, 1).Format("2006-01-02"), legacyProvider), nil, nil, 200)
 	oldItem := oldReport["items"].([]any)[0].(map[string]any)
@@ -1502,6 +1510,58 @@ func azureBillingTest(t *testing.T, fake *azureBillingFake) (*accessHarness, *br
 
 func azureRow(day time.Time, charge, amount string) string {
 	return fmt.Sprintf("%s,11111111-1111-4111-8111-111111111111,Cognitive Services,Azure Open AI,meter-123,%s,USD,%s\n", day.Format("2006-01-02"), charge, amount)
+}
+
+func TestAzureBillingClientSecretProxy(t *testing.T) {
+	fake := newAzureBillingFake(t)
+	peer := newFixedHostPeer(t, "login.microsoftonline.com")
+	tenant, clientID, clientSecret := uuid.NewString(), uuid.NewString(), "fixture-client-secret"
+	authority := "https://login.microsoftonline.com/" + tenant
+	peer.respond = func(w http.ResponseWriter, r *http.Request) {
+		if r.Host != "login.microsoftonline.com" {
+			fake.server.Config.Handler.ServeHTTP(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/token"):
+			if r.FormValue("client_id") != clientID || r.FormValue("client_secret") != clientSecret {
+				http.Error(w, "invalid fixture credential", http.StatusUnauthorized)
+				return
+			}
+			_, _ = fmt.Fprint(w, `{"access_token":"azure-proxy-token","expires_in":3600,"token_type":"Bearer"}`)
+		case strings.HasSuffix(r.URL.Path, "/discovery/instance"):
+			_, _ = fmt.Fprintf(w, `{"tenant_discovery_endpoint":%q,"metadata":[{"preferred_network":"login.microsoftonline.com","preferred_cache":"login.microsoftonline.com","aliases":["login.microsoftonline.com"]}]}`, authority+"/v2.0/.well-known/openid-configuration")
+		default:
+			_, _ = fmt.Fprintf(w, `{"token_endpoint":%q,"authorization_endpoint":%q,"issuer":%q}`, authority+"/oauth2/v2.0/token", authority+"/oauth2/v2.0/authorize", authority+"/v2.0")
+		}
+	}
+	h := newAccessHarness(t)
+	owner := h.owner()
+	provider := h.want(owner, "POST", "/api/v1/providers", map[string]any{
+		"name": "Azure billing proxy", "configuration": map[string]any{
+			"kind": "azure_openai", "auth_mode": "api_key", "endpoint": "https://example.openai.azure.com", "deployment": "model", "api_version": "2024-10-21",
+			"options": map[string]any{"network": map[string]any{"proxy_url": peer.proxy.URL, "trust_roots_pem": peer.roots}},
+		}, "credential": "inference-key", "model": "model",
+	}, idem("azure-billing-proxy"), 201)
+	id := billingProviderID(provider)
+	billingPut(h, owner, id, map[string]any{
+		"scope":      map[string]any{"billing_scope": "/providers/Microsoft.Billing/billingAccounts/1234567", "export_name": "costs", "storage_account": "billingaccount", "container": "exports", "prefix": "billing"},
+		"credential": map[string]any{"auth_mode": "azure_client_secret", "tenant_id": tenant, "client_id": clientID, "client_secret": clientSecret},
+	}, provider["etag"].(string), 201)
+	today := time.Now().UTC().Truncate(24 * time.Hour)
+	day := today.AddDate(0, 0, -1)
+	fake.delivery(t, day, "proxy-run", today, azureRow(day, "Usage", "0.75"))
+	importer := billingImporter(h, t)
+	importer.AzureBlobEndpoint = func(string) string { return "https://127.0.0.1" }
+	if err := importer.Pass(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	result := h.want(owner, "GET", fmt.Sprintf("/api/v1/providers/%s/invoiced-costs?start=%s&end=%s", id, day.Format("2006-01-02"), today.Format("2006-01-02")), nil, nil, 200)
+	items := result["items"].([]any)
+	if len(items) != 1 || items[0].(map[string]any)["amount"] != "0.75" {
+		t.Fatalf("client-secret import through the configured proxy failed: %v", result)
+	}
 }
 
 func TestAzureBillingRetentionAndMissingPeriodRetry(t *testing.T) {
