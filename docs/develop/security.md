@@ -1,23 +1,25 @@
 # Security architecture
 
-This page describes how OpenLLMProxy protects an installation: the boundaries
-it defends, who can call it, how each call is authorized, how secrets are held,
-where it may connect, and what every public response carries. Each rule lives
-in one module, named in the sections below, and a test holds the rule and this
-page together. Report suspected vulnerabilities as [SECURITY.md](../../SECURITY.md)
-describes.
+This guide describes the security architecture that protects an OpenLLMProxy
+installation. It covers trust boundaries, principals, authorization, secret
+handling, network egress and the contract for public responses. The sections
+name the module that owns each rule, and tests connect the implemented rule to
+the behavior described here.
+
+Report suspected vulnerabilities privately through the
+[security policy](../../SECURITY.md).
 
 ## Trust boundaries
 
 | Boundary | What crosses it | How it is protected |
 | --- | --- | --- |
-| Edge → public listener | Console, management API, and inference traffic | The edge terminates TLS. OLP classifies each path's surface (`internal/surface`), admits it from that surface's pool, and sets the [perimeter headers](#public-perimeter). Forwarded client addresses are trusted only through `OLP_TRUSTED_PROXY_CIDRS`. `OLP_MANAGEMENT_ALLOWED_CIDRS` optionally restricts management and console clients before admission and authentication. |
+| Edge to public listener | Console, management API, and inference traffic | The edge terminates TLS. OLP classifies each path's surface (`internal/surface`), admits it from that surface's pool, and sets the [perimeter headers](#public-perimeter). Forwarded client addresses are trusted only through `OLP_TRUSTED_PROXY_CIDRS`. `OLP_MANAGEMENT_ALLOWED_CIDRS` optionally restricts management and console clients before admission and authentication. |
 | Private listener | Health probes and metrics | Unauthenticated by design. Bind it to a private interface and restrict it with the chart's NetworkPolicy. |
-| OLP → PostgreSQL | All durable state | Bearer credentials are stored only as digests and other secrets only sealed by the master key ring; see [secrets](#secrets). |
-| OLP → Valkey | Limits, routing hints, accounting events | Carries metadata, never credentials or content. Installations sharing one Valkey stay isolated by namespace. |
-| OLP → providers | Inference and management calls | [Provider egress](#egress) validates every destination and pins every dial; provider errors are scrubbed of the credentials OLP sent. |
-| OLP → identity provider | OIDC discovery/tokens/keys; declared SAML metadata | Identity egress applies the provider denylist with no operator exceptions. |
-| Operator → CLI | [Remote administration](../operate/automation.md), recovery, key rotation and `doctor` | Remote commands use a mounted scoped management token and HTTPS. Local maintenance requires protected secret files and database access. |
+| OLP to PostgreSQL | All durable state | Bearer credentials are stored only as digests and other secrets only sealed by the master key ring; see [secrets](#secrets). |
+| OLP to Valkey | Limits, routing hints, accounting events | Carries metadata, never credentials or content. Installations sharing one Valkey stay isolated by namespace. |
+| OLP to providers | Inference and management calls | [Provider egress](#egress) validates every destination and pins every dial; provider errors are scrubbed of the credentials OLP sent. |
+| OLP to identity provider | OIDC discovery/tokens/keys; declared SAML metadata | Identity egress applies the provider denylist with no operator exceptions. |
+| Operator to CLI | [Remote administration](../operate/automation.md), recovery, key rotation and `doctor` | Remote commands use a mounted scoped management token and HTTPS. Local maintenance requires protected secret files and database access. |
 
 ## Principals
 
@@ -202,7 +204,8 @@ they do carry provider, connection and project names, API key ids, route
 slugs, attribution labels and, in metering payloads, end-user digests; object
 sinks and endpoints are operator-declared and egress-validated, and sink
 signing/API credentials are write-only `sink_credential` secrets validated
-against the sink type — Stripe meter keys must be `sk_`/`rk_` prefixed.
+against the sink type. For example, Stripe meter keys must use an `sk_` or `rk_`
+prefix.
 Billing-import admin keys are a dedicated `billing_credential` seal purpose
 read only by the import worker; they are never returned by any read, never
 exported, and never serve inference. Stripe meter posts and the OpenAI and
@@ -247,14 +250,14 @@ user-agent family, never request bodies, credentials, or content. See
 - Notification webhooks refuse redirects like other egress clients, and the
   OTLP exporter connects to its configured endpoint with its own client.
   Notification bodies are metadata only: events,
-  rule subjects, windows and amounts — never request content, credentials, or
-  secret material. Channel credentials (chat webhook URLs, PagerDuty routing
+  rule subjects, windows and amounts. They never contain request content,
+  credentials or secret material. Channel credentials (chat webhook URLs, PagerDuty routing
   keys, SMTP credentials, signing secrets) are write-only, sealed under
   `notification_secret`, and never returned by any read.
 - Payload capture is opt-in, owner-enabled and memory-only; empty redactor lists
-  capture unredacted content, while configured local redactors fail closed for capture — see
-  [operations](../operate/observability.md#payload-capture);
-  captured content never enters the database, Valkey, logs, or spans and is
+  capture unredacted content, while configured local redactors fail closed for
+  capture. See [payload capture](../operate/observability.md#payload-capture).
+  Captured content never enters the database, Valkey, logs or spans and is
   delivered only to the operator-configured sink.
 - Provider authentication may reach cloud metadata endpoints to obtain workload
   identity for AWS and Azure providers.

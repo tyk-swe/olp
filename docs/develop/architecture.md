@@ -1,8 +1,9 @@
 # Architecture and gateway execution
 
-The Go module owns production code under `internal/` and the public provider
-plugin SDK under `sdk/`; `cmd/olp` starts the CLI.
-The console mirrors feature ownership under `console/src/lib/features/`.
+This guide maps OLP's feature ownership and explains how a request moves through
+the gateway. Production Go code lives under `internal/`, the public provider
+plugin SDK lives under `sdk/`, and `cmd/olp` starts the binary. The console
+mirrors the same feature boundaries under `console/src/lib/features/`.
 PostgreSQL migrations live under `internal/database/migrations/`.
 
 | Area | Backend and console owner |

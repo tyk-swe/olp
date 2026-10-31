@@ -1,8 +1,10 @@
 # Operations runbook
 
-Availability, monitoring, recovery, version, incident, and key-rotation
-procedures for production OpenLLMProxy. Keep this runbook with the deployed
-release; deployment topology is in [`deployment.md`](deployment.md).
+This runbook covers production availability, monitoring, recovery, version
+changes, incidents and key rotation. Keep the runbook version with the deployed
+release because recovery details can depend on the storage and runtime contract
+in that release. Installation topology and first deployment belong in
+[Deployment](deployment.md).
 
 ## Commitment accounting recovery
 
@@ -107,10 +109,11 @@ state returns 503; known exhaustion returns 429. New budgets normally wait for
 next minute's pass. Never insert zero, remove policy or reset a valid counter to
 bypass initialization. Supply caps skip targets while unknown/exhausted.
 
-Accounting installs every owner's spend on both bases — `accrued`/
-`unpriced_attempts` from `estimated_cost`, `charged`/`uncharged_attempts` from
-`charge` — so a `cost_basis` change takes effect on the next admission and
-reconciliation installs both bases for every owner it reconciles.
+Accounting installs every owner's spend on both bases. It derives `accrued` and
+`unpriced_attempts` from `estimated_cost`, and `charged` and
+`uncharged_attempts` from `charge`. A `cost_basis` change therefore takes effect
+on the next admission. Reconciliation likewise installs both bases for every
+owner it reconciles.
 
 Each region has one dedicated PostgreSQL leader session, never returned while
 locked. Failure/cancellation/120-second pass deadline closes it; followers cannot
@@ -173,8 +176,8 @@ Attribution filters and end-user digest breakdowns preserve raw-ID privacy.
 Estimate error compares only attempts with both estimated/reported input;
 model family/provenance breakdowns distinguish unestimated and historical unknown.
 Committed connections report zero marginal cost; `allocated_commitment`
-apportions each commitment amount across the period's list-cost weight —
-see [pricing](pricing.md#commitments).
+apportions each commitment amount across the period's list-cost weight. See
+[Pricing](pricing.md#commitments) for the allocation contract.
 
 Pricing entries and every component's exact billing semantics are covered in
 [pricing](pricing.md). Managed pricing sources refresh bounded, egress-checked immutable snapshots and
@@ -605,7 +608,8 @@ scanning content. [Configuration, controls and accounting](../use/caching.md).
 ## Batch settlement recovery
 
 The `batch_settlement` worker claims due work on its 5-second pass. Normal
-transitions are `submitting → active → settling → settled`; ambiguous creates
+transitions move from `submitting` to `active`, then `settling`, then `settled`.
+Ambiguous creates
 remain `submission_unknown` until provider-specific reconciliation proves one
 job. Conflicting evidence closes as `conflict`; missing or incomplete result
 evidence closes as `uncertain`, never as zero cost. Monitor its health task,

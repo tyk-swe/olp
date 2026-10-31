@@ -1,13 +1,17 @@
 # Qualification
 
-Use this guide to qualify a change or release and to track evidence still owed.
+Qualification turns a claim about behavior into scoped, reviewable evidence.
+This guide states what evidence is required for a change or release and records
+the gates that remain open.
+
 A fixture, compile-only run, reduced-rate benchmark or historical green suite
-covers only its stated scope and revision. **Implemented** means code and focused
-checks exist; **Shipped** additionally requires the applicable candidate gates.
-Record commit/image digest, tool/provider versions, environment, commands,
-artifacts, skips and unsupported combinations. Missing credentials or hardware
-leave a gate open. This documentation consolidation does not rerun the historical
-campaigns below.
+covers only its stated scope and revision. **Implemented** means the code and
+focused checks exist. **Shipped** also requires the applicable candidate gates.
+Each result must record its commit or image digest, tool and provider versions,
+environment, commands, artifacts, skips and unsupported combinations. Missing
+credentials or hardware leave the gate open rather than converting it into a
+pass. Historical campaigns retain the evidence and limits of the runs that
+produced them.
 
 ## Change acceptance
 
@@ -312,7 +316,7 @@ web search disabled, and the selected WebSocket setting.
 | Optional hard budgets | Unbounded operation succeeds without matching budget and returns 422 with one; durable ledger overlap/reservation/uncertainty tests | No proven native operation bound |
 | Console | Typed API loader, role/project gating, component/unit/type checks and Chromium lifecycle journeys | Controlled only; run the browser suite separately from shell qualification |
 | Real subscription account | No credential supplied or used | Unqualified |
-| Client retries and transport recovery | Default retries, interrupted SSE/WS, WS→HTTP after 426, 503 account quarantine; pool/account/key/project/retirement refusal across alternating gateways | Controlled only |
+| Client retries and transport recovery | Default retries, interrupted SSE/WS, WS-to-HTTP fallback after 426, 503 account quarantine; pool/account/key/project/retirement refusal across alternating gateways | Controlled only |
 | Local files/search | Official `exec_command` writes a file, enumerates files, searches and reads it; tool outputs continue over both transports | Controlled only; no hosted search claim |
 | Fresh review | Root WS handshake before review child, including upstream-426 HTTP fallback; HTTP-only unresolved child refuses | Controlled only |
 | Review after a parent task | Official app-server `thread/start`, `turn/start`, then inline `review/start`; shared root/account on both transports | Controlled only |

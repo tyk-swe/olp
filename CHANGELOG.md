@@ -1,9 +1,9 @@
 # Changelog
 
 All notable changes to OpenLLMProxy are recorded here. The format follows
-[Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
-semantic versioning and take their source from root `package.json`;
-`console/package.json`, `deploy/helm/Chart.yaml` and the release image agree.
+[Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow
+semantic versioning and take their source from root `package.json`. The
+`console/package.json`, `deploy/helm/Chart.yaml` and release image versions agree.
 
 ## [Unreleased]
 
@@ -41,7 +41,7 @@ semantic versioning and take their source from root `package.json`;
 
 - OCR and search result inspection fails closed on unrecognized fields: only
   nulls, numbers, booleans and empty containers pass uninspected, and upstream
-  search ids never reach the caller — transformed results mint `search_` ids.
+  search ids never reach the caller, and transformed results mint `search_` ids.
 - Decisions refuse token caps, and USD caps outside caller-paid exempt routes,
   with `unbounded_work_budget` before dispatch. Route simulation and key
   inspection report the same refusal, including hierarchy and named-route budgets.
@@ -87,6 +87,10 @@ semantic versioning and take their source from root `package.json`;
   discovery again. Restricted Helm deployments must configure DNS resolver CIDRs.
 
 ### Changed
+
+- Refresh the root guides and handbook for consistency with current behavior,
+  and add an automated documentation check for scoped local links, anchors and
+  handbook index coverage.
 
 Code-mode diagnostics now represent paid API ownership separately. Paid attempts and pins have nullable subscription account and binding fields, and expose paid binding, provider and slot identifiers instead. Paid target configuration is explicit per native model, with current pricing, separate cost and charge, and durable uncertainty holds.
 

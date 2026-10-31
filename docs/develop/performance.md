@@ -1,8 +1,9 @@
 # Performance
 
-How OLP measures what it adds to a request, how to reproduce the measurements
-against LiteLLM, and the gates that keep hot-path performance from slipping. The
-[scenarios and targets](#scenarios-and-targets) below are the benchmark contract;
+This guide defines how OLP measures gateway overhead, how to reproduce the
+measurements and how the comparison with LiteLLM is run. It also records the
+gates that protect hot-path performance. The
+[scenarios and targets](#scenarios-and-targets) form the benchmark contract, and
 the harness lives in [`tests/bench/`](../../tests/bench/README.md).
 
 ## Status of the numbers

@@ -1,10 +1,14 @@
 # Upstream MCP server registration
 
-Register project-owned upstream servers through `/api/v1/mcp-servers`. This API
-is separate from the [generated management MCP endpoint](../operate/automation.md#management-mcp).
-Reads require management `read` and project visibility; mutations require
-`configure` and project-change authority. Installation-wide configuration
-promotion retains those checks. Up to 128 active registrations are permitted.
+Project-owned upstream MCP servers are registered through `/api/v1/mcp-servers`.
+This consumer tool registry is separate from the
+[generated management MCP endpoint](../operate/automation.md#management-mcp) that
+administers OLP itself.
+
+Reads require management `read` authority and project visibility. Mutations
+require `configure` authority and permission to change the project. The same
+checks apply during installation-wide configuration promotion. An installation
+can retain up to 128 active registrations.
 
 Create requires a project UUID, name, an explicit `streamable_http` or `sse`
 transport, endpoint and enabled flag. PUT replaces editable metadata with an

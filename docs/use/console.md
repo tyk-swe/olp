@@ -1,106 +1,160 @@
 # Console
 
-Use the console at the installation’s public origin to manage providers, routes,
-access, usage and settings. Every action uses the management API’s permissions,
-session, ETag and audit rules. Begin with [Getting Started](../getting-started.md).
+The console is the browser interface at an installation's public origin. It
+manages providers, routes, access, usage and installation settings through the
+management API. Console actions use the signed-in member's permissions, project
+visibility, ETag concurrency rules and audit handling, so the interface never
+grants authority that the API would refuse.
+[Getting Started](../getting-started.md) covers first-owner setup and the first
+provider workflow.
 
 ## Notifications
 
-Access → Notifications manages destinations, event rules and delivery status.
-Channel-specific secrets are write-only; re-enter them only to replace them.
-Viewers see read-only rows, and project managers see only permitted project events.
-See [notification configuration](../operate/observability.md#notifications).
+The Notifications page under Access manages destinations, event rules and
+delivery status. Channel-specific secrets are write-only and are entered again
+only when they need to be replaced. Viewers see read-only rows. Project managers
+see events only for projects they are allowed to manage. Destination and
+delivery contracts are defined in
+[Observability](../operate/observability.md#notifications).
 
 ## Observability
 
-Settings → Observability manages export sinks and owner-enabled payload capture.
-Sink transport, stream set, format and project scope are fixed at creation;
-rows show settings, delivery counters, safe errors and lag. FOCUS sinks expand
-into revisioned datasets. See [observability](../operate/observability.md) for
-formats, credentials, filters and delivery contracts.
+The Observability page under Settings manages export sinks and owner-enabled
+payload capture. A sink's transport, stream set, format and project scope are
+fixed when it is created. Each row shows its settings, delivery counters, safe
+error information and lag. FOCUS sinks expand into revisioned datasets. Formats,
+credentials, filters and delivery behavior are covered in
+[Observability](../operate/observability.md).
 
-Capture controls select sampling, fields, scope, byte bounds and ordered local
-redactors. Rows show immutable revision pins; unrelated edits preserve them and
-**Refresh pinned revisions on save** adopts current active revisions. Empty lists
-are labelled unredacted. Row-level Disable remains available while the owner
-master switch is off. See [payload capture](../operate/observability.md#payload-capture).
+Capture controls select the sampling rule, captured fields, scope, byte bounds
+and ordered local redactors. Rows display their immutable revision pins. An
+unrelated edit preserves those pins, while **Refresh pinned revisions on save**
+deliberately adopts the current active revisions. An empty redactor list is
+labelled unredacted so the risk is visible before saving. A row can still be
+disabled while the owner-level capture switch is off. The storage and failure
+boundary is described under
+[payload capture](../operate/observability.md#payload-capture).
 
 ## Usage and requests
 
-Usage filters project/session, refusing conflicting non-session attribution;
-breakdowns and CSV exports retain visible filters/current axes. Request detail
-links session attribution to filtered history. Summary and breakdown show
-consumer charge beside cost and the month's uncharged-attempt count.
+Usage can filter by project or session and refuses conflicting non-session
+attribution. Breakdowns and CSV exports retain the visible filters and current
+axes. Request detail links a request's session attribution back to the matching
+filtered history. Summary and breakdown views show consumer charge beside
+provider cost and include the month's count of attempts that could not be
+charged.
 
-The **cost calculator** bounds a published route's request or prices a usage
-record exactly as accounting would record it. *Route* mode simulates and lists
-every target's minimum/maximum bound and exclusion reason. *Usage* mode prices
-an attempt's token/media/tool usage against a provider's price, discount,
-commitment and the applicable rate card, including the recorded components and
-provenance; nothing is written or retained.
+The cost calculator either bounds a request against a published route or prices
+an existing usage record. Route mode simulates each target and lists its minimum
+and maximum bounds or exclusion reason. Usage mode prices an attempt's token,
+media and tool usage with the provider price, discount, commitment and
+applicable rate card. It returns the recorded components and provenance without
+writing or retaining a new accounting record.
 
-The **reconciliation panel** compares attributed spend with imported provider
-invoices per UTC day for the page's range — clamped to 93 days — showing
-attributed and invoiced cost, capture rate, unpriced share, provisional marks
-and the unavailable reason, plus per-provider covered-day totals. An OpenAI or
-Anthropic provider's detail page carries a **billing import** section for
-configuring its admin key and scope, running an import on demand and removing
-it; read-only roles see status only. See [finops](../operate/finops.md).
+The reconciliation panel compares attributed spend with imported provider
+invoices by UTC day. Its visible range is clamped to 93 days and shows
+attributed cost, invoiced cost, capture rate, unpriced share, provisional marks
+and any unavailable-data reason. It also gives covered-day totals for each
+provider. An OpenAI or Anthropic provider detail page has a billing import
+section for its admin key and scope, on-demand import and removal. Read-only
+roles can inspect import status but cannot change it. See
+[FinOps](../operate/finops.md) for the import and reconciliation model.
 
 ## Installation identity
 
-Settings → Installation identity edits the local name/logo under installation-wide
-settings authority and observed ETag. PNG/JPEG logos are validated, ≤64 KiB and
-512 × 512 pixels; theme/accessibility stay unchanged. Branding changes neither
-API endpoints nor portable configuration. Generated CLI/MCP branding operations
-use the same authority/validation/concurrency.
+The Installation identity page under Settings edits the local display name and
+logo. Changes require installation-wide settings authority and the observed
+ETag. A logo must be a validated PNG or JPEG no larger than 64 KiB and 512 by
+512 pixels. Branding does not change API endpoints or portable configuration.
+Generated CLI and MCP branding operations use the same authority, validation and
+concurrency rules.
 
 ## Independent installations
 
-The installation label in the header opens a bookmark menu. Add a name and an
-HTTPS origin; HTTP is accepted on loopback for development. Bookmarks contain
-only names and origins, are limited to 20 entries and are stored in this
-browser's local storage. No request is made to a bookmarked installation until
-you select it.
+The installation label in the header opens a bookmark menu for other OLP
+consoles. A bookmark holds only a display name and origin. HTTPS is required
+outside loopback development, at most 20 bookmarks are retained, and they live
+in the current browser's local storage. OLP makes no request to a bookmarked
+installation until the user selects it.
 
-Selecting an installation navigates to its console. Its own browser session
-applies, or its sign-in page opens. Use a distinct hostname for every
-installation: browser cookies are shared across ports on the same hostname.
-The switcher rejects bookmarks that would share a hostname with another
-installation. Separate subdomains work with OLP's host-only session cookies.
+Selecting a bookmark navigates to that installation's console. Its own browser
+session applies, or its sign-in page opens when no session exists. Use a
+distinct hostname for every installation because browser cookies are shared
+across ports on the same hostname. The switcher rejects a bookmark that would
+share a hostname with another installation. Separate subdomains work with OLP's
+host-only session cookies.
 
-Independent installations have their own databases, authentication keys, master
-keys and Valkey namespaces. The switcher does not combine their data or copy
-credentials. Regional gateways sharing one installation's PostgreSQL primary
-are described in [deployment](../operate/deployment.md#regional-fleets).
+Independent installations keep separate databases, authentication keys, master
+keys and Valkey namespaces. The switcher does not merge data or copy credentials
+between them. Regional gateways that deliberately share one installation and
+PostgreSQL primary are a different topology and are covered in
+[Deployment](../operate/deployment.md#regional-fleets).
 
 ## Bulk member editing
 
-Access → Members applies sequential current-page role/active edits with each
-observed ETag, excluding self. Deactivation confirms and revokes sessions, not
-API keys. Successes remain committed; failed rows stay selected for reviewed
-fresh-data retry. Last-owner and external-ownership checks apply per member.
+The Members page under Access can apply role and active-state edits across the
+current page. Each member updates sequentially under its observed ETag, and the
+acting member is excluded. Deactivation requires confirmation and revokes
+browser sessions without revoking API keys. Successful rows remain committed if
+another row fails. Failed rows stay selected so the operator can review fresh
+data before retrying. Last-owner and external-ownership checks still apply to
+each member.
 
 ## Saved views
 
-Usage/Request Explorer save filters (Usage includes time/axes), not cursors or
-unrelated parameters. At most twenty views/page live in tab session storage,
-scoped to verified session public ID; a new session retires old views. They never
-bypass current permissions/retention. Origins keep separate browser storage.
+Usage and Request Explorer saved views retain filters, with Usage also retaining
+its time selection and axes. They do not retain cursors or unrelated parameters.
+Each page allows at most twenty views in tab session storage, scoped to the
+verified session public ID. Starting a new session retires views from the
+earlier session. A saved view never bypasses current permissions or retention,
+and each origin keeps separate browser storage.
 
-Browser-qualified examples: [branding](../assets/operator-identity.png)
-and [installations/views](../assets/independent-installations.png).
+The browser-qualified [branding example](../assets/operator-identity.png) and
+[installation and saved-view example](../assets/independent-installations.png)
+show the retained console layouts.
 
 ## Model catalog
 
-The console’s **Catalog** page and `GET /api/v1/catalog` describe published route names available to the caller. Installation members and read-scoped management tokens see their permitted projects. Consumer keys need `models_read` and see only the routes admitted by their current key authority. Revoked keys and authority older than 60 seconds receive the same refusal as ordinary model discovery.
+The Catalog page and `GET /api/v1/catalog` describe the published route names
+available to the caller. Installation members and read-scoped management tokens
+see their permitted projects. Consumer API keys need `models_read` and see only
+routes admitted by their current key authority. Revoked keys and authority older
+than 60 seconds receive the same refusal as ordinary model discovery.
 
-Each entry includes operations, common context and output limits, input/output modalities, privacy declarations, current decimal price ranges, and Python SDK examples. Unknown facts remain explicit. Prices preserve decimal precision and summarize enabled non-shadow targets; incomplete target coverage is marked. Examples use the route name and `OLP_API_KEY` from the environment. Examples appear only for certified unary surfaces. Generation covers eligible OpenAI, Anthropic and Gemini interfaces; strict routes use the pinned native dialect, including Responses rather than Chat Completions where required. Embeddings and token counting show eligible native interfaces. Streaming-only or uncertified choices do not receive a unary example.
+Each entry lists supported operations, common context and output limits, input
+and output modalities, privacy declarations, current decimal price ranges and
+Python SDK examples where a certified unary example is available. Unknown facts
+remain explicit rather than being filled with estimates. Prices preserve decimal
+precision, summarize enabled non-shadow targets and mark incomplete target
+coverage.
 
-Provider names, endpoints and upstream model names remain private by default. Under **Catalog disclosure settings**, select a published route and explicitly enable upstream model names. This choice affects both authenticated and public catalogs. Provider identities and credentials remain private.
+Examples use the route name and read `OLP_API_KEY` from the environment.
+Generation examples cover eligible OpenAI, Anthropic and Gemini interfaces. A
+strict route uses its pinned native dialect, including Responses rather than
+Chat Completions where required. Embeddings and token counting show eligible
+native interfaces. Streaming-only and uncertified choices do not receive a unary
+example. SDK code regions support keyboard focus and scrolling.
 
-Installation owners can enable an anonymous catalog in **Project policies → Public model catalog**. `/catalog/public/{project_id}` provides the public page. `GET /api/v1/catalog/public/{project_id}` then lists only that project’s published routes. Publishing prices is a separate checkbox; anonymous responses include `prices_visible` so clients can distinguish withheld pricing from missing current declarations. Disabled projects return 404. Publication and disclosure changes use observed ETags and ordinary authorization/audit handling.
+Provider names, endpoints and upstream model names stay private by default.
+Under Catalog disclosure settings, an operator can select a published route and
+explicitly enable upstream model names. That choice affects both authenticated
+and public catalogs, while provider identities and credentials remain private.
 
-Configuration exports preserve `public_catalog` and `public_catalog_prices` on projects and `expose_upstream_models` on routes. Changing publication through promotion requires installation access authority. Imported route disclosure is staged with its draft and takes effect when that draft is activated; normal draft activations preserve the route’s existing disclosure choice.
+Installation owners can enable an anonymous catalog from the Public model
+catalog controls under Project policies. The public page is
+`/catalog/public/{project_id}`, and `GET /api/v1/catalog/public/{project_id}`
+returns only that project's published routes. Publishing prices is a separate
+choice. Anonymous responses include `prices_visible` so clients can distinguish
+withheld pricing from a missing current price declaration. Disabled projects
+return 404. Publication and disclosure changes use observed ETags, ordinary
+authorization and audit handling.
 
-See the browser-qualified [catalog example](../assets/model-catalog.png). SDK code regions support keyboard focus and scrolling.
+Configuration exports preserve `public_catalog` and `public_catalog_prices` on
+projects and `expose_upstream_models` on routes. Changing publication through
+configuration promotion requires installation access authority. Imported route
+disclosure is staged with its draft and takes effect when that draft is
+activated. A normal draft activation preserves the route's existing disclosure
+choice.
+
+The browser-qualified [catalog example](../assets/model-catalog.png) shows the
+resulting authenticated catalog.

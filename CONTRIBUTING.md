@@ -89,11 +89,15 @@ changed packages must not drop against the merge base, the comparison in the
 [test baseline](tests/baseline.md) lanes, so the floor ratchets with every merge.
 Run `make integration` for service or browser behavior changes.
 
-Use short imperative commit subjects and name agent-created branches `tyk/{name}`.
-Follow the [PR template](.github/PULL_REQUEST_TEMPLATE.md): describe the problem,
-resulting behavior and validation; include screenshots for visible console changes.
-Regenerate affected contracts with `make api`. Migrations are forward-only and
-sequential; update Helm values, schema and templates together.
+Documentation changes also run `node scripts/check-docs.mjs`. The same scoped
+link, anchor and handbook-index contract runs through `make test-scripts`.
+
+Use conventional commit subjects and name agent-created branches `tyk-{name}`.
+Follow the [PR template](.github/PULL_REQUEST_TEMPLATE.md) and describe the problem,
+the resulting behavior and the validation performed. Include screenshots for
+visible console changes. Regenerate affected contracts with `make api`.
+Migrations are forward-only and sequential, and Helm values, schema and templates
+change together.
 
 During 0.x, target the current storage, configuration and management API formats.
 Compatibility with provider protocols and official OpenAI, Anthropic and Gemini
@@ -101,9 +105,9 @@ SDKs remains part of the product contract.
 
 ## Dependency policy
 
-Use current stable dependencies; update Go and pnpm through their package managers.
-Commit the
-corresponding lockfiles. `scripts/check-dependencies.sh` checks reachable Go
+Use current stable dependencies and update Go and pnpm through their package
+managers. Commit the corresponding lockfiles with each update.
+`scripts/check-dependencies.sh` checks reachable Go
 vulnerabilities, licenses and production JavaScript packages. Image qualification
 also scans runtime/build SBOMs and retains native linking/license evidence.
 

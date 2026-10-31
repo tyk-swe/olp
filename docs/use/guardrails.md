@@ -1,14 +1,19 @@
 # Guardrails
 
-Guardrails are project-owned definitions with typed configuration, a timeout and
-an error policy. An ordered policy pins immutable definition revisions. Both
-resources have a draft revision and an explicitly activated revision. Editing a
-draft does not change serving requests or existing attachments.
+Guardrails inspect requests, responses and tool content under project-owned
+policy. A guardrail definition supplies typed evaluator configuration, a timeout
+and an error policy. An ordered guardrail policy pins immutable definition
+revisions and decides how findings affect a request.
 
-The console's **Guardrails** page manages definitions, policies, activation and
-attachments. Its playground evaluates the same engine without storing entered
-content. It requires a signed-in member with playground access and project
-visibility. External evaluations still send content to their configured service.
+Definitions and policies each move through draft and explicitly activated
+revisions. Editing a draft does not change serving traffic or existing
+attachments until the new revision is activated and published through the normal
+route flow.
+
+The console Guardrails page manages definitions, policies, activation and
+attachments. Its playground runs the same evaluation engine without storing the
+entered content, subject to playground access and project visibility. An external
+evaluator still receives the content required by its configured service.
 
 ## Definitions and policies
 

@@ -1,15 +1,19 @@
 # Configuration reference
 
-For remote administration, see the [management CLI and MCP](automation.md).
-These clients use `OLP_MANAGEMENT_URL` and `OLP_MANAGEMENT_TOKEN_FILE`, not the
-server configuration below.
+This reference covers configuration for the OLP server processes. Remote
+administration clients use `OLP_MANAGEMENT_URL` and
+`OLP_MANAGEMENT_TOKEN_FILE` instead, as described in
+[management automation](automation.md).
 
-Runtime settings come from environment variables or CLI flags; flags take
-precedence. Use `olp <subcommand> --help` and the source in
-[`internal/config/config.go`](../../internal/config/config.go) for accepted flags.
-Credential secrets use mounted files; database and Valkey URLs support either
-inline or file-based settings. Invalid configuration fails before listeners
-bind.
+Server settings come from environment variables or command-line flags, and flags
+take precedence. Run `olp <subcommand> --help` for the flags accepted by the
+installed binary. The implementation in
+[`internal/config/config.go`](../../internal/config/config.go) is the source for
+generated environment names and defaults.
+
+Credential secrets use mounted files. Database and Valkey URLs can be supplied
+inline or through their corresponding file variables. OLP validates the complete
+configuration before binding any listener.
 
 ## Runtime variables
 
@@ -410,8 +414,8 @@ Future effective times survive, past/current times rebase to apply.
 Top-level `discounts` carries every scope's in-force multiplier, multiplier-1
 scope endings included (`provider_kind`, optional `vendor_id`, `provider` by
 name). Apply publishes a new now-effective discount for each listed scope
-whose multiplier differs — listing `multiplier` "1" ends a discount — and
-leaves scopes the document omits untouched, like every other collection.
+whose multiplier differs. Listing `multiplier` "1" ends that scope's discount.
+Scopes omitted from the document remain untouched, as with every other collection.
 Top-level `rate_cards` carries each card's in-force revision, neutral ones
 included: `owner` (`kind` installation/organization/project, named like
 routes), `markup`, `prices` in the price-entry shape minus provider scope.
@@ -420,14 +424,14 @@ the listed revision differs; a listed card is neutralized by publishing
 `markup` "1" with no prices, and cards the document omits are untouched. Connection commitments ride provider `options` and each budget's `cost_basis`
 rides its `budget_policy`, so they promote with their owners. A provider's
 `billing_import` entry (`enabled`, `scope`, `credential_ref` as
-`<provider>/billing`) promotes the same way — the admin key binds via
-`secret_bindings` like other provider secrets, a missing binding blocks apply,
+`<provider>/billing`) promotes the same way. The admin key binds through
+`secret_bindings` like other provider secrets, and a missing binding blocks apply.
 and an entry's absence deletes the import and its sealed key. Feature-specific
 budget/group/calendar omission semantics are in [access](../use/access.md), not a
 global merge rule. `expected_digest` fences destination drift; remaining blockers return
 409 with plan body, successful staging records one digest-only audit event.
 
-Console **Settings → Configuration promotion** forgets secrets on artifact changes;
+The **Configuration promotion** page under Settings forgets secrets on artifact changes;
 CLI [reviewed promotion](automation.md#configuration-promotion),
 [GitHub Actions](automation.md#github-actions) and [Terraform](automation.md#terraform-and-opentofu) preserve
 review/atomicity boundaries.

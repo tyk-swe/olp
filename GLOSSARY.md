@@ -1,8 +1,32 @@
 # OLP
 
-OLP is a gateway that lets teams share model provider accounts and coding subscriptions behind their own keys, routes and budgets.
+OLP is a gateway that lets teams share model provider accounts and coding subscriptions behind their own keys, routes and budgets. This glossary records the canonical domain language for that gateway, while [Concepts](docs/concepts.md) explains how the gateway applies the general terms.
 
-## Code mode
+## Language
+
+### Gateway
+
+**Route slug**:
+The public model name that identifies a published route independently from the provider deployment serving it.
+_Avoid_: Upstream model name
+
+**Certification**:
+Evidence that one exact provider, model, operation, surface and mode passed bounded serving probes.
+_Avoid_: Discovery, model listing
+
+**Runtime generation**:
+One numbered and immutable publication of the provider, route and policy revisions that gateways serve together.
+
+**Attempt**:
+One provider execution made for a client request, with its own pinned revisions, usage and outcome.
+
+**Cost**:
+The estimated amount a provider bills the installation for an attempt.
+
+**Charge**:
+The amount a consumer owes for an attempt under the applicable rate card.
+
+### Code mode
 
 These definitions include accepted target contracts. The [baseline and roadmap](docs/develop/plans/code-mode-parity.md) separates implemented behavior from planned capabilities.
 

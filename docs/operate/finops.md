@@ -1,15 +1,17 @@
 # FinOps export and invoice reconciliation
 
-Three workflows cover cost accounting outside OLP: the `metering` stream to
-CloudEvents consumers and Stripe Billing meters, FOCUS 1.4 cost-and-usage
-datasets on object storage, and provider invoice imports that reconcile
-attributed spend against billed spend. The export worker delivers metering
-records from a durable queue; a separate FOCUS worker generates and delivers
-datasets through the FOCUS ledger. The billing importer independently polls
-provider cost reports and stores daily invoice totals using PostgreSQL and
-provider egress, without the export queue or coordination store. All three
-are content-free. Export retries preserve event or dataset identity; invoice
-imports replace the stored totals for the fetched days.
+FinOps has three separate content-free workflows. The `metering` stream sends
+priced attempt records to CloudEvents consumers and Stripe Billing meters. FOCUS
+1.4 datasets publish cost and usage data to object storage. Provider invoice
+imports store daily billed totals so operators can reconcile them against OLP's
+attributed spend.
+
+The export worker delivers metering records from a durable queue. A separate
+FOCUS worker generates and delivers datasets through the FOCUS ledger. The
+billing importer polls provider cost reports independently and uses PostgreSQL
+and provider egress without the export queue or coordination store. Export
+retries preserve event or dataset identity, while a later invoice import replaces
+the stored totals for the days it fetched.
 
 ## Metering stream
 
@@ -76,8 +78,8 @@ with `Authorization: Bearer <key>`:
 The credential is `{"api_key": "sk_…|rk_…"}`, sealed as `sink_credential`; the
 server validates the key prefix and rejects `signing_secret`, `region`,
 `auth_mode` and `secret` in the document.
-Each event sends `identifier` — deterministic
-`olp-<sink id>-<attempt id>` — and repeats it as the `Idempotency-Key`, so a
+Each event sends the deterministic identifier `olp-<sink id>-<attempt id>` and
+repeats it as the `Idempotency-Key`, so a
 redelivery is the same event to Stripe. A `duplicate_meter_event` response
 counts as delivered. Stripe enforces identifier uniqueness for at least 24
 hours while OLP retries within minutes, and accepts event timestamps up to
@@ -95,7 +97,7 @@ An object-storage sink (`s3`, `gcs` or `azure_blob`) with format `csv_gzip` and
 stream `focus` produces a daily [FOCUS 1.4](https://focus.finops.org/) cost
 and usage dataset per UTC charge date. `settings.cost_basis` is `cost` or
 `charge` and is immutable after creation; `settings.start_date` bounds how far
-back generation reaches — at most 90 days before the day it is set, and never
+back generation reaches. It can reach at most 90 days before the day it is set and never
 before the usage-retention cutoff.
 
 ### Layout
@@ -163,11 +165,11 @@ ingestion gap overlaps the day. `metadata` follows FOCUS 1.4 §5:
 
 A day becomes eligible two hours after it ends. The worker (`focus_export`,
 a 60-second pass on PostgreSQL leases, independent of Valkey) processes at
-most four days per sink per pass, oldest first. A delivered day whose fact
-set changed — a late fact marks it dirty, as does every day of a committed
-fact's bucket — regenerates no sooner than one hour after the previous
-delivery, writes the next `revision=NNNN` keys, and bumps the manifest
-revision; restatement applies even after the day's billing month has closed.
+most four days per sink per pass, oldest first. A late fact marks its delivered
+day dirty, as does every day in a committed fact's bucket. A dirty day regenerates
+no sooner than one hour after the previous delivery, writes the next
+`revision=NNNN` keys and bumps the manifest revision. Restatement applies even
+after the day's billing month has closed.
 Days older than the usage-retention cutoff are never generated or restated,
 and their dirty markers are purged each pass. Failure records a content-free
 `last_error_code` (`endpoint`, `credential`, `authentication`, `status`,
@@ -187,13 +189,13 @@ revisions never gap.
 One usage row per (UTC day, consumer project, provider, upstream model,
 operation, route, API key, attribution set, committed flag, price-line
 component/tier/unit/list and contracted unit price). Facts store `cost_lines`
-and `charge_lines`: the exact decomposition `olp.price_usage_lines` produces —
-`quantity` in the line's unit (`1000000 Tokens`, `Requests`, `Calls`, `Units`),
+and `charge_lines` from the exact decomposition produced by
+`olp.price_usage_lines`. Each line has a `quantity` in its unit (`1000000 Tokens`, `Requests`, `Calls` or `Units`),
 a `list_unit_price` that already includes the window and batch multipliers,
-and a `contracted_unit_price` that also includes the discount. A fact with no
-stored lines — written before migration 0067, or where the line-total guard
-did not match the fact totals — falls back to a single `attempt` component
-line priced from the fact totals; the manifest counts such facts in
+and a `contracted_unit_price` that also includes the discount. A fact can have no
+stored lines when it was written before migration 0067 or when the line-total
+guard did not match the fact totals. It then falls back to a single `attempt`
+component line priced from the fact totals. The manifest counts such facts in
 `fallback_line_attempts`. Line amounts are exact, while accounting rounds each
 attempt to 12 decimal places, so `accounting_totals` can differ slightly from
 `totals`; the manifest reports both.
@@ -209,8 +211,8 @@ UTC month of `ChargePeriodStart`, which spans the charge day for usage rows;
 `ServiceCategory` is `AI and Machine Learning`, `ServiceSubcategory`
 `Generative AI`, `ServiceName` the vendor contract name (else the connection),
 and `ServiceProviderName`/`HostProviderName`/`InvoiceIssuerName` the contract
-maintainer (else name, else connection) — on the charge basis,
-`ServiceProviderName` and `InvoiceIssuerName` are the installation name.
+maintainer, falling back to name and then connection. On the charge basis,
+`ServiceProviderName` and `InvoiceIssuerName` instead use the installation name.
 `Tags` is the attribution object or null.
 
 | FOCUS column | Cost basis | Charge basis |
@@ -224,7 +226,7 @@ maintainer (else name, else connection) — on the charge basis,
 | `ConsumedQuantity`, `ConsumedUnit` | natural units (`Tokens`, `Requests`, `Calls`, `Units`) | same |
 | `SkuId` | `<vendor>/<model>/<operation>/<component>` | same |
 | `SkuPriceId` | `SkuId@<list unit price>` (`@above=<tier>` when tiered) | `SkuId@<charge unit price>` |
-| `SkuMeter` | component display name (for example `Input Tokens`, `Requests`, `Tool Calls (web_search)`; `attempt` → `Attempts`) | same |
+| `SkuMeter` | Component display name, such as `Input Tokens`, `Requests` or `Tool Calls (web_search)`. The `attempt` component displays as `Attempts` | same |
 | `SubAccountId`/`SubAccountName` | consumer project | consumer project |
 | `CommitmentDiscount*` | set on committed usage and Purchase rows | null |
 | `x_ApiKeyId`, `x_ConnectionId`, `x_ConnectionName`, `x_Model`, `x_Operation`, `x_PriceComponent`, `x_PriceTier`, `x_Route`, `x_Attempts` | row context and distinct attempt count | same |
@@ -305,11 +307,10 @@ rules, so the in-repo interpreter is the conformance authority.
 ### Billing imports
 
 An OpenAI or Anthropic connection gains a billing import at
-`PUT /api/v1/providers/{provider_id}/billing-import` — `{enabled, scope,
+`PUT /api/v1/providers/{provider_id}/billing-import` with `{enabled, scope,
 credential}`. The credential is a vendor **admin key**, sealed under purpose
 `billing_credential` and never served inference; it is required on create,
-omitted keeps the stored key, and `null` is rejected — delete the import
-instead. Scope is source-shaped: `{"project_ids": ["proj_…"]}` for OpenAI
+omitted keeps the stored key, and `null` is rejected. Delete the import to remove it. Scope is source-shaped: `{"project_ids": ["proj_…"]}` for OpenAI
 (up to 100 entries) and `{"workspace_ids": ["wrkspc_…", "default"]}` for
 Anthropic; `{}` imports the whole organization. `GET` returns the import with
 its status (`next_import_at`, `last_import_at`, `last_success_at`,
@@ -325,8 +326,8 @@ egress-validated client (no redirects, 30 seconds per request, a 4 MiB
 response cap, at most 20 pages). Imports cover closed UTC days only: the first
 covers the 30 days before today, and later imports refresh the last 7 so
 vendor restatements land. Each day's returned line items are summed per
-`(day, line_item)` and replace the stored rows — a returned bucket with no
-results records an invoiced zero. On success the import schedules one hour
+`(day, line_item)` and replace the stored rows. A returned bucket with no results
+records an invoiced zero. On success the import schedules one hour
 out; on failure `last_error_code` records `credential`, `status`, `network`,
 `timeout`, `response` or `endpoint`, and the retry backs off from five
 minutes to one hour. Rows older than `retention.usage_days` are purged in
@@ -356,7 +357,7 @@ Totals per provider add `attributed_cost` (whole range),
 uses), `invoiced_cost`, `capture_rate` and `unpriced_share`. Caller-paid and
 budget-exempt attempts are excluded from attributed cost; hourly rollup rows
 only approximate priced/incomplete counts and cannot distinguish caller-paid
-usage, so their `budget_exempt` request count is counted as excluded — the
+usage, so their `budget_exempt` request count is counted as excluded. That
 limitation is documented in the code.
 
 Metrics: `olp_billing_imports_total{provider,outcome}` (process-local) and
@@ -369,5 +370,5 @@ A provider entry in a configuration document carries `billing_import`
 `<provider name>/billing`; a missing `secret_bindings` entry blocks apply,
 reusing a matching binding keeps the stored key, and an entry's absence
 deletes the import. `internal/billing/testdata` fixtures follow the vendors'
-documented response shapes — there is no live-account qualification. AWS CUR,
+documented response shapes. There is no live-account qualification for them. AWS CUR,
 Google Cloud billing export and Azure Cost Management imports remain planned.
