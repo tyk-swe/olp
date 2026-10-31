@@ -1,7 +1,6 @@
 package billing
 
 import (
-	"bytes"
 	"net/http"
 	"sort"
 	"strings"
@@ -42,28 +41,35 @@ func dayRange(r *http.Request) (time.Time, time.Time, error) {
 	return start.UTC(), end.UTC(), nil
 }
 
-// visibleImports lists the billing imports a principal may see: a
-// project-scoped principal sees only imports on providers in its projects.
-func (s *Server) visibleImports(r *http.Request, p access.Principal, providerID *string) ([]importRow, error) {
-	// importColumns are unqualified; the join with olp.providers needs each
-	// column bound to the import alias (etag exists on both tables).
-	query := `SELECT ` + qualifiedImportColumns("bi") + ` FROM olp.provider_billing_imports bi
-		JOIN olp.providers pr ON pr.id=bi.provider_id
-		WHERE ($1::text IS NULL OR bi.provider_id=$1::uuid)
-		  AND ($2 OR pr.project_id::text=ANY($3::text[]))`
-	rows, err := s.Access.Pool.Query(r.Context(), query+" ORDER BY bi.provider_id",
-		providerID, p.AllProjects, p.ProjectIDs())
+type reconciliationImport struct {
+	ProviderID    string
+	LastSuccessAt *time.Time
+	LastErrorCode *string
+	Active        bool
+}
+
+func (s *Server) visibleImports(r *http.Request, p access.Principal, providerID *string) ([]reconciliationImport, error) {
+	rows, err := s.Access.Pool.Query(r.Context(), `SELECT pr.id::text,CASE WHEN bi.provider_id IS NOT NULL THEN bi.last_success_at ELSE bc.last_success_at END,
+		bi.last_error_code,bi.provider_id IS NOT NULL
+		FROM olp.providers pr
+		LEFT JOIN olp.provider_billing_imports bi ON bi.provider_id=pr.id
+		LEFT JOIN olp.provider_billing_contexts bc ON bc.provider_id=pr.id
+		WHERE ($1::text IS NULL OR pr.id=$1::uuid)
+		  AND ($2 OR pr.project_id::text=ANY($3::text[]))
+		  AND (bi.provider_id IS NOT NULL OR bc.provider_id IS NOT NULL
+		       OR EXISTS(SELECT 1 FROM olp.provider_billing_days bd WHERE bd.provider_id=pr.id))
+		ORDER BY pr.id`, providerID, p.AllProjects, p.ProjectIDs())
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []importRow
+	var items []reconciliationImport
 	for rows.Next() {
-		row, err := scanImport(rows)
-		if err != nil {
+		var item reconciliationImport
+		if err := rows.Scan(&item.ProviderID, &item.LastSuccessAt, &item.LastErrorCode, &item.Active); err != nil {
 			return nil, err
 		}
-		items = append(items, *row)
+		items = append(items, item)
 	}
 	return items, rows.Err()
 }
@@ -94,40 +100,42 @@ func (s *Server) reconciliation(r *http.Request, p access.Principal) (access.Rep
 		return access.Reply{}, access.Fail(404, "not_found", "No billing import covers this provider.")
 	}
 	providerIDs := make([]string, 0, len(imports))
-	byProvider := map[string]*importRow{}
+	byProvider := map[string]*reconciliationImport{}
 	for i := range imports {
 		providerIDs = append(providerIDs, imports[i].ProviderID)
 		byProvider[imports[i].ProviderID] = &imports[i]
 	}
-	coverage := map[string][][2]string{}
+	coverage := map[string]map[string]*time.Time{}
 	if len(providerIDs) > 0 {
-		rows, err := s.Access.Pool.Query(r.Context(), `SELECT provider_id::text,source,scope_digest,covered_from::text,covered_through::text
-			FROM olp.provider_billing_revisions WHERE provider_id=ANY($1::uuid[]) AND covered_from IS NOT NULL
-			AND covered_from<$3::date AND covered_through>=$2::date`, providerIDs, start.Format(dayFormat), end.Format(dayFormat))
+		rows, err := s.Access.Pool.Query(r.Context(), `SELECT provider_id::text,day::text,last_success_at
+			FROM olp.provider_billing_days WHERE provider_id=ANY($1::uuid[])
+			AND day>=$2::date AND day<$3::date`, providerIDs, start.Format(dayFormat), end.Format(dayFormat))
 		if err != nil {
 			return access.Reply{}, err
 		}
 		for rows.Next() {
-			var provider, source, from, through string
-			var storedDigest []byte
-			if err := rows.Scan(&provider, &source, &storedDigest, &from, &through); err != nil {
+			var provider, day string
+			var lastSuccess *time.Time
+			if err := rows.Scan(&provider, &day, &lastSuccess); err != nil {
 				rows.Close()
 				return access.Reply{}, err
 			}
-			imp := byProvider[provider]
-			digest, err := scopeDigest(imp.Source, imp.Scope)
-			if err != nil {
-				rows.Close()
-				return access.Reply{}, err
+			if coverage[provider] == nil {
+				coverage[provider] = map[string]*time.Time{}
 			}
-			if imp.Source == source && bytes.Equal(digest[:], storedDigest) {
-				coverage[provider] = append(coverage[provider], [2]string{from, through})
-			}
+			coverage[provider][day] = lastSuccess
 		}
 		rows.Close()
 		if err := rows.Err(); err != nil {
 			return access.Reply{}, err
 		}
+	}
+	coveredDay := func(imp *reconciliationImport, day string) bool {
+		if imp == nil {
+			return false
+		}
+		_, covered := coverage[imp.ProviderID][day]
+		return covered
 	}
 	// Invoiced totals per provider and day over the whole window.
 	invoiced := map[string]map[string]*invoiceDay{}
@@ -175,14 +183,23 @@ func (s *Server) reconciliation(r *http.Request, p access.Principal) (access.Rep
 	today := time.Now().UTC().Truncate(24 * time.Hour)
 	twoDaysAgo := today.Add(-48 * time.Hour)
 	items := []map[string]any{}
-	// A day is an item when accounting or the invoice recorded anything for
-	// it; covered days the provider's invoice does not mention at all still
-	// report invoiced "0".
 	type cell struct {
 		spend    *usage.ProviderDaySpend
 		invoiced *invoiceDay
 	}
 	byProviderDay := map[string]map[string]*cell{}
+	for provider, imp := range byProvider {
+		for current := start; current.Before(end); current = current.AddDate(0, 0, 1) {
+			day := current.Format(dayFormat)
+			if !coveredDay(imp, day) {
+				continue
+			}
+			if byProviderDay[provider] == nil {
+				byProviderDay[provider] = map[string]*cell{}
+			}
+			byProviderDay[provider][day] = &cell{}
+		}
+	}
 	for i := range spend {
 		row := &spend[i]
 		if byProviderDay[row.ProviderID] == nil {
@@ -242,20 +259,7 @@ func (s *Server) reconciliation(r *http.Request, p access.Principal) (access.Rep
 			}
 			var invoicedAmount *decimal.Decimal
 			var invoicedCurrency *string
-			var covered bool
-			// Invoiced cost reads "0" on covered days the import returned
-			// without buckets, and null outside the imported window.
-			if imp != nil && revisionBacked(imp.Source) {
-				for _, span := range coverage[provider] {
-					if day >= span[0] && day <= span[1] {
-						covered = true
-						break
-					}
-				}
-			} else if imp != nil && imp.ImportedFrom != nil && imp.ImportedThrough != nil &&
-				day >= *imp.ImportedFrom && day <= *imp.ImportedThrough {
-				covered = true
-			}
+			covered := coveredDay(imp, day)
 			if covered {
 				amount := decimal.Zero
 				currencies := ""
@@ -287,10 +291,13 @@ func (s *Server) reconciliation(r *http.Request, p access.Principal) (access.Rep
 				v := attributed.Div(*invoicedAmount).Round(6).String()
 				rate = &v
 			}
-			provisional := !dayTime.Before(twoDaysAgo) || imp == nil || imp.LastSuccessAt == nil ||
-				imp.LastSuccessAt.Before(dayTime.Add(30*time.Hour))
+			lastSuccess := imp.LastSuccessAt
+			if covered {
+				lastSuccess = coverage[provider][day]
+			}
+			provisional := !dayTime.Before(twoDaysAgo) || lastSuccess == nil || lastSuccess.Before(dayTime.Add(30*time.Hour))
 			var importStatus map[string]any
-			if imp != nil {
+			if imp != nil && imp.Active {
 				importStatus = map[string]any{
 					"last_success_at": imp.LastSuccessAt,
 					"last_error_code": imp.LastErrorCode,

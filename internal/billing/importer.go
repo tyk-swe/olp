@@ -401,6 +401,12 @@ func (i *Importer) storeDays(ctx context.Context, row *importRow, periodStart st
 		}
 	}
 	for _, day := range daysList {
+		if _, err := tx.Exec(ctx, `INSERT INTO olp.provider_billing_days(provider_id,day,source,scope,last_success_at)
+			VALUES($1::uuid,$2::date,$3,$4::jsonb,now())
+			ON CONFLICT (provider_id,day) DO UPDATE SET source=EXCLUDED.source,scope=EXCLUDED.scope,last_success_at=EXCLUDED.last_success_at`,
+			row.ProviderID, day, row.Source, row.Scope); err != nil {
+			return err
+		}
 		if _, err := tx.Exec(ctx, `DELETE FROM olp.provider_invoiced_costs WHERE provider_id=$1::uuid AND day=$2::date`,
 			row.ProviderID, day); err != nil {
 			return err
@@ -424,36 +430,28 @@ func (i *Importer) storeDays(ctx context.Context, row *importRow, periodStart st
 	if _, err := tx.Exec(ctx, `UPDATE olp.provider_billing_imports SET
 		last_import_at=now(),last_success_at=now(),last_error_code=NULL,
 		consecutive_failures=0,next_import_at=now()+interval '1 hour',updated_at=now(),
-		imported_from=LEAST(COALESCE(imported_from,$2::date),$2::date),
-		imported_through=GREATEST(COALESCE(imported_through,$3::date),$3::date),
-		source_revision=COALESCE($4,source_revision)
-		WHERE provider_id=$1::uuid`, row.ProviderID, minDay, maxDay, appliedRevision); err != nil {
+		source_revision=COALESCE($2,source_revision)
+		WHERE provider_id=$1::uuid`, row.ProviderID, appliedRevision); err != nil {
 		return err
 	}
-	if revision != nil && appliedRevision != nil {
-		if err := refreshRevisionCoverage(ctx, tx, row.ProviderID, row.Source, row.Scope); err != nil {
-			return err
-		}
+	if err := refreshImportCoverage(ctx, tx, row.ProviderID, row.Source, row.Scope); err != nil {
+		return err
 	}
 	return tx.Commit(ctx)
 }
 
-func refreshRevisionCoverage(ctx context.Context, tx pgx.Tx, providerID, source string, scope json.RawMessage) error {
-	digest, err := scopeDigest(source, scope)
-	if err != nil {
-		return err
-	}
-	_, err = tx.Exec(ctx, `WITH spans AS (
-		SELECT unnest(range_agg(daterange(covered_from,covered_through,'[]'))) AS span
-		FROM olp.provider_billing_revisions
-		WHERE provider_id=$1::uuid AND source=$2 AND scope_digest=$3 AND covered_from IS NOT NULL
+func refreshImportCoverage(ctx context.Context, tx pgx.Tx, providerID, source string, scope json.RawMessage) error {
+	_, err := tx.Exec(ctx, `WITH spans AS (
+		SELECT unnest(range_agg(daterange(day,day,'[]'))) AS span
+		FROM olp.provider_billing_days
+		WHERE provider_id=$1::uuid AND source=$2 AND scope=$3::jsonb
 	), latest AS (
 		SELECT lower(span) AS first_day,upper(span)-1 AS last_day
 		FROM spans ORDER BY upper(span) DESC LIMIT 1
 	)
 	UPDATE olp.provider_billing_imports SET
 		imported_from=(SELECT first_day FROM latest),imported_through=(SELECT last_day FROM latest)
-	WHERE provider_id=$1::uuid`, providerID, source, digest[:])
+	WHERE provider_id=$1::uuid`, providerID, source, scope)
 	return err
 }
 
@@ -483,7 +481,42 @@ func (i *Importer) purge(ctx context.Context) error {
 		return err
 	}
 	cutoff := time.Now().UTC().AddDate(0, 0, -days).Format(dayFormat)
-	for range 20 {
+	tx, err := i.Pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback(context.Background()) }()
+	for _, query := range []string{
+		`UPDATE olp.provider_billing_imports SET
+			imported_from=CASE WHEN imported_through < $1::date THEN NULL ELSE GREATEST(imported_from,$1::date) END,
+			imported_through=CASE WHEN imported_through < $1::date THEN NULL ELSE imported_through END
+			WHERE imported_from < $1::date`,
+		`UPDATE olp.provider_billing_contexts SET
+			imported_from=CASE WHEN imported_through < $1::date THEN NULL ELSE GREATEST(imported_from,$1::date) END,
+			imported_through=CASE WHEN imported_through < $1::date THEN NULL ELSE imported_through END
+			WHERE imported_from < $1::date`,
+		`DELETE FROM olp.provider_billing_days WHERE day < $1::date`,
+		`UPDATE olp.provider_billing_revisions SET
+			covered_from=CASE WHEN covered_through < $1::date THEN NULL ELSE GREATEST(covered_from,$1::date) END,
+			covered_through=CASE WHEN covered_through < $1::date THEN NULL ELSE covered_through END
+			WHERE covered_from < $1::date`,
+	} {
+		if _, err := tx.Exec(ctx, query, cutoff); err != nil {
+			return err
+		}
+	}
+	tag, err := tx.Exec(ctx, `DELETE FROM olp.provider_invoiced_costs WHERE ctid IN (
+		SELECT ctid FROM olp.provider_invoiced_costs WHERE day < $1::date LIMIT $2)`, cutoff, purgeBatch)
+	if err != nil {
+		return err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return err
+	}
+	if tag.RowsAffected() < purgeBatch {
+		return nil
+	}
+	for range 19 {
 		tag, err := i.Pool.Exec(ctx, `DELETE FROM olp.provider_invoiced_costs WHERE ctid IN (
 			SELECT ctid FROM olp.provider_invoiced_costs WHERE day < $1::date LIMIT $2)`, cutoff, purgeBatch)
 		if err != nil {
@@ -524,8 +557,8 @@ func syncImportRevision(ctx context.Context, tx pgx.Tx, providerID, source strin
 		return err
 	}
 	if previousSource != source || previousDigest != digest {
-		if _, err := tx.Exec(ctx, `UPDATE olp.provider_billing_contexts SET source=$2,scope=$3::jsonb
-			WHERE provider_id=$1::uuid`, providerID, source, scope); err != nil {
+		if _, err := tx.Exec(ctx, `UPDATE olp.provider_billing_contexts SET source=$2,scope=$3::jsonb,
+			imported_from=NULL,imported_through=NULL,last_success_at=NULL WHERE provider_id=$1::uuid`, providerID, source, scope); err != nil {
 			return err
 		}
 		if _, err := tx.Exec(ctx, `UPDATE olp.provider_billing_revisions SET covered_from=NULL,covered_through=NULL
@@ -533,18 +566,28 @@ func syncImportRevision(ctx context.Context, tx pgx.Tx, providerID, source strin
 			return err
 		}
 		_, err := tx.Exec(ctx, `UPDATE olp.provider_billing_imports SET
-			imported_from=NULL,imported_through=NULL,source_revision=NULL WHERE provider_id=$1::uuid`, providerID)
+			imported_from=NULL,imported_through=NULL,source_revision=NULL,last_success_at=NULL WHERE provider_id=$1::uuid`, providerID)
 		return err
 	}
-	if revisionBacked(source) {
-		if err := refreshRevisionCoverage(ctx, tx, providerID, source, scope); err != nil {
-			return err
-		}
+	if err := refreshImportCoverage(ctx, tx, providerID, source, scope); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, `UPDATE olp.provider_billing_imports bi SET
+		last_success_at=COALESCE(bi.last_success_at,bc.last_success_at)
+		FROM olp.provider_billing_contexts bc WHERE bi.provider_id=$1::uuid AND bc.provider_id=bi.provider_id`, providerID); err != nil {
+		return err
 	}
 	_, err = tx.Exec(ctx, `UPDATE olp.provider_billing_imports SET
 		source_revision=(SELECT source_revision FROM olp.provider_billing_revisions
 			WHERE provider_id=$1::uuid AND source=$2 AND scope_digest=$3 AND covered_from IS NOT NULL
 			ORDER BY ordering_at DESC,period_start DESC LIMIT 1)
 		WHERE provider_id=$1::uuid`, providerID, source, digest[:])
+	return err
+}
+
+func rememberImportCoverage(ctx context.Context, tx pgx.Tx, providerID string) error {
+	_, err := tx.Exec(ctx, `UPDATE olp.provider_billing_contexts bc SET
+		imported_from=bi.imported_from,imported_through=bi.imported_through,last_success_at=bi.last_success_at
+		FROM olp.provider_billing_imports bi WHERE bi.provider_id=$1::uuid AND bc.provider_id=bi.provider_id`, providerID)
 	return err
 }
