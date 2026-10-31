@@ -1746,6 +1746,17 @@ func TestAzureBillingLongRetentionListsEachRelevantMonth(t *testing.T) {
 	}
 }
 
+func assertBillingSchedule(t *testing.T, status map[string]any, errorCode any, minDelay, maxDelay time.Duration) {
+	t.Helper()
+	if status["last_error_code"] != errorCode {
+		t.Fatalf("unexpected import error: %v", status)
+	}
+	next, err := time.Parse(time.RFC3339Nano, status["next_import_at"].(string))
+	if err != nil || time.Until(next) < minDelay || time.Until(next) > maxDelay {
+		t.Fatalf("unexpected next import time: %v", status)
+	}
+}
+
 func TestAzureBillingPartLimitAcrossPeriods(t *testing.T) {
 	fake := newAzureBillingFake(t)
 	h, owner, id, importer := azureBillingTest(t, fake)
@@ -1799,15 +1810,60 @@ func TestAzureBillingPartLimitAcrossPeriods(t *testing.T) {
 	if len(items) != 1 || items[0].(map[string]any)["amount"] != "20" {
 		t.Fatalf("the first bounded pass did not commit the complete previous period: %v", items)
 	}
+	assertBillingSchedule(t, h.want(owner, "GET", path, nil, nil, 200)["status"].(map[string]any), nil, -time.Minute, 2*time.Minute)
 	headers = etagHeader(h.want(owner, "GET", path, nil, nil, 200))
 	headers["Idempotency-Key"] = uuid.NewString()
 	h.want(owner, "POST", path+"/run", nil, headers, 202)
-	if err := importer.Pass(t.Context()); err != nil {
+	resumed := billingImporter(h, t)
+	resumed.Now = func() time.Time { return month.AddDate(0, 0, 20) }
+	resumed.AzureBlobEndpoint = func(string) string { return fake.server.URL }
+	if err := resumed.Pass(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	items = h.want(owner, "GET", query, nil, nil, 200)["items"].([]any)
 	if len(items) != 2 || items[0].(map[string]any)["amount"] != "20" || items[1].(map[string]any)["amount"] != "30.3" {
 		t.Fatalf("bounded passes did not eventually refresh both periods: %v", items)
+	}
+	assertBillingSchedule(t, h.want(owner, "GET", path, nil, nil, 200)["status"].(map[string]any), nil, 50*time.Minute, 61*time.Minute)
+
+	setting := h.want(owner, "GET", "/api/v1/settings/retention.usage_days", nil, nil, 200)
+	h.want(owner, "PUT", "/api/v1/settings/retention.usage_days", map[string]any{"value": "180"}, etagHeader(setting), 200)
+	historical := month.AddDate(0, -2, 9)
+	historicalRun := fake.delivery(t, historical, "historical", month.AddDate(0, -1, 1), azureRow(historical, "Usage", "0.5"))
+	expand(historicalRun, 101)
+	for index, revision := range []string{"historical", "revised", "recent"} {
+		headers := etagHeader(h.want(owner, "GET", path, nil, nil, 200))
+		headers["Idempotency-Key"] = uuid.NewString()
+		h.want(owner, "POST", path+"/run", nil, headers, 202)
+		worker := billingImporter(h, t)
+		worker.Now = func() time.Time { return month.AddDate(0, 0, 20) }
+		worker.AzureBlobEndpoint = func(string) string { return fake.server.URL }
+		if err := worker.Pass(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+		status := h.want(owner, "GET", path, nil, nil, 200)["status"].(map[string]any)
+		if status["source_revision"] != revision {
+			t.Fatalf("continuation %d processed the wrong period: %v", index, status)
+		}
+		if index < 2 {
+			assertBillingSchedule(t, status, nil, -time.Minute, 2*time.Minute)
+		} else {
+			assertBillingSchedule(t, status, nil, 50*time.Minute, 61*time.Minute)
+		}
+	}
+
+	oversized := fake.delivery(t, current, "oversized", month.AddDate(0, 0, 15), azureRow(current, "Usage", "0.4"))
+	expand(oversized, 201)
+	headers = etagHeader(h.want(owner, "GET", path, nil, nil, 200))
+	headers["Idempotency-Key"] = uuid.NewString()
+	h.want(owner, "POST", path+"/run", nil, headers, 202)
+	if err := resumed.Pass(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	assertBillingSchedule(t, h.want(owner, "GET", path, nil, nil, 200)["status"].(map[string]any), "response", 4*time.Minute, 6*time.Minute)
+	items = h.want(owner, "GET", query, nil, nil, 200)["items"].([]any)
+	if len(items) != 2 || items[1].(map[string]any)["amount"] != "30.3" {
+		t.Fatalf("an individually oversized export changed the previous costs: %v", items)
 	}
 }
 

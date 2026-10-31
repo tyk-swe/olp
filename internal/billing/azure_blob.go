@@ -143,7 +143,7 @@ func azureSDKError(err error) error {
 	return failFetch("network", errors.New("Azure storage request failed"))
 }
 
-func fetchAzure(ctx context.Context, client *http.Client, egressPolicy *egress.Policy, endpoint string, scope azureScope, key []byte, earliest, today time.Time, completed map[string]struct{}, failures int, store func(azurePeriod) error) error {
+func fetchAzure(ctx context.Context, client *http.Client, egressPolicy *egress.Policy, endpoint string, scope azureScope, key []byte, earliest, today time.Time, completed map[string]struct{}, row *importRow, store func(azurePeriod) error) error {
 	var credential azureCredential
 	if err := json.Unmarshal(key, &credential); err != nil {
 		return failFetch("credential", errors.New("invalid credential"))
@@ -182,12 +182,12 @@ func fetchAzure(ctx context.Context, client *http.Client, egressPolicy *egress.P
 		period := strings.SplitN(strings.TrimPrefix(name, base), "/", 2)[0]
 		groups[period] = append(groups[period], name)
 	}
-	periods := slices.Sorted(maps.Keys(groups))
+	periods := cloudPeriodOrder(row, slices.Sorted(maps.Keys(groups)))
 	var totals azureTotals
 	var aggregates int
 	var failure error
-	for index := range periods {
-		period := periods[(index+failures)%len(periods)]
+	completedCount := 0
+	for periodIndex, period := range periods {
 		var candidates []azureRun
 		valid := true
 		for _, name := range groups[period] {
@@ -212,6 +212,9 @@ func fetchAzure(ctx context.Context, client *http.Client, egressPolicy *egress.P
 				continue
 			}
 			if err != nil {
+				if errors.Is(err, errCloudBudget) && completedCount > 0 && failure == nil {
+					return &cloudContinuation{next: period, remaining: len(periods) - periodIndex}
+				}
 				if failure == nil {
 					failure = err
 				}
@@ -229,6 +232,7 @@ func fetchAzure(ctx context.Context, client *http.Client, egressPolicy *egress.P
 			if err := store(azurePeriod{start: run.start.Format(dayFormat), revision: sourceRevision{id: run.manifest.RunInfo.RunID, orderingAt: run.submitted}, days: days}); err != nil {
 				return err
 			}
+			completedCount++
 			break
 		}
 	}
@@ -346,7 +350,7 @@ func (a *azureReader) manifest(ctx context.Context, name string) (azureRun, erro
 func (a *azureReader) readRun(ctx context.Context, run azureRun, initialTotals azureTotals, aggregateLimit int, earliest, today time.Time) (reportAccumulator, azureTotals, error) {
 	totals := initialTotals
 	if totals.files+run.manifest.BlobCount > azureMaxFiles || totals.compressed+run.manifest.ByteCount > azureMaxCompressed || totals.rows+run.manifest.DataRowCount > azureMaxRows {
-		return nil, totals, failFetch("response", errors.New("export exceeds remaining import limits"))
+		return nil, totals, failFetch("response", errCloudBudget)
 	}
 	days := reportAccumulator{}
 	last := slices.MinFunc([]time.Time{run.end.Truncate(24 * time.Hour), today.AddDate(0, 0, -1), run.start.AddDate(0, 1, -1), run.submitted.Truncate(24*time.Hour).AddDate(0, 0, -1)}, time.Time.Compare)
@@ -356,7 +360,7 @@ func (a *azureReader) readRun(ctx context.Context, run azureRun, initialTotals a
 	}
 	for _, blob := range run.manifest.Blobs {
 		if totals.files >= azureMaxFiles {
-			return nil, totals, failFetch("response", errors.New("too many export blobs"))
+			return nil, totals, failFetch("response", errCloudBudget)
 		}
 		totals.files++
 		resp, err := a.container.NewBlobClient(blob.BlobName).DownloadStream(ctx, nil)
@@ -370,6 +374,9 @@ func (a *azureReader) readRun(ctx context.Context, run azureRun, initialTotals a
 			if err != nil {
 				resp.Body.Close()
 				totals.compressed = azureMaxCompressed + 1 - limited.N
+				if limited.N == 0 {
+					return nil, totals, failFetch("response", errCloudBudget)
+				}
 				return nil, totals, failFetch("response", errors.New("invalid compressed export"))
 			}
 			defer zipped.Close()
@@ -381,6 +388,9 @@ func (a *azureReader) readRun(ctx context.Context, run azureRun, initialTotals a
 		readBytes := azureMaxCompressed - totals.compressed + 1 - limited.N
 		readExpanded := azureMaxExpanded - totals.expanded + 1 - decoded.N
 		totals = azureTotals{files: totals.files, rows: totals.rows + count, compressed: totals.compressed + readBytes, expanded: totals.expanded + readExpanded}
+		if limited.N == 0 || decoded.N == 0 || errors.Is(err, errCloudBudget) {
+			return nil, totals, failFetch("response", errCloudBudget)
+		}
 		if err != nil {
 			var timeout net.Error
 			if errors.Is(err, context.DeadlineExceeded) || errors.As(err, &timeout) && timeout.Timeout() {
@@ -423,7 +433,10 @@ func (a *azureReader) csv(input io.Reader, days reportAccumulator, start, end ti
 		if errors.Is(err, io.EOF) {
 			return count, nil
 		}
-		if err != nil || count >= rowLimit {
+		if count >= rowLimit && err == nil {
+			return count, errCloudBudget
+		}
+		if err != nil {
 			return count, errors.New("invalid export row")
 		}
 		count++
@@ -459,7 +472,7 @@ func (a *azureReader) csv(input io.Reader, days reportAccumulator, start, end ti
 		key := lineKey{item: label, currency: strings.ToUpper(currency)}
 		if _, exists := days[dayKey][key]; !exists {
 			if aggregates >= aggregateLimit {
-				return count, errors.New("too many aggregates")
+				return count, errCloudBudget
 			}
 			aggregates++
 		}

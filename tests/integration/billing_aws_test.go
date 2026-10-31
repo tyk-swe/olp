@@ -1070,16 +1070,23 @@ func TestBillingImportAWSBoundedPeriodsMakeProgress(t *testing.T) {
 	if len(items) != 1 || items[0].(map[string]any)["amount"] != "0.40000000000000000001" {
 		t.Fatalf("the first bounded pass did not preserve its completed period: %v", items)
 	}
+	assertBillingSchedule(t, h.want(owner, "GET", path, nil, nil, 200)["status"].(map[string]any), nil, -time.Minute, 2*time.Minute)
 	headers := etagHeader(h.want(owner, "GET", path, nil, nil, 200))
 	headers["Idempotency-Key"] = uuid.NewString()
 	h.want(owner, "POST", path+"/run", nil, headers, 202)
-	if err := importer.Pass(t.Context()); err != nil {
+	resumed := billingImporter(h, t)
+	resumed.Now = func() time.Time { return month.AddDate(0, 0, 20) }
+	resumed.AWSClient = func(config aws.Config) *s3.Client {
+		return s3.NewFromConfig(config, func(o *s3.Options) { o.BaseEndpoint = aws.String(fake.server.URL); o.UsePathStyle = true })
+	}
+	if err := resumed.Pass(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	items = h.want(owner, "GET", query, nil, nil, 200)["items"].([]any)
 	if len(items) != 2 || items[0].(map[string]any)["amount"] != "0.40000000000000000001" || items[1].(map[string]any)["amount"] != "0.50000000000000000001" {
 		t.Fatalf("bounded passes did not eventually refresh both periods: %v", items)
 	}
+	assertBillingSchedule(t, h.want(owner, "GET", path, nil, nil, 200)["status"].(map[string]any), nil, 50*time.Minute, 61*time.Minute)
 }
 
 func TestBillingImportAWSIncompletePeriodDoesNotBlockOtherPeriods(t *testing.T) {
@@ -1208,6 +1215,7 @@ func TestBillingImportAWSCumulativeByteBudgets(t *testing.T) {
 			if status["last_error_code"] != "response" || status["source_revision"] != "baseline" {
 				t.Fatalf("%s byte cap did not preserve the previous revision: %v", limit, status)
 			}
+			assertBillingSchedule(t, status, "response", 4*time.Minute, 6*time.Minute)
 		})
 	}
 }

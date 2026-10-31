@@ -486,7 +486,10 @@ with two million rows, 100,000 aggregates and a one-minute import budget. Each
 day's returned line items are summed per
 `(day, line_item, currency)` and replace the stored rows. A returned bucket with
 no results records an invoiced zero. On success the import schedules one hour
-out. Google schedules the next worker scan after a successful pass while retained
+out. When AWS or Azure reaches the pass budget after completing a period, it
+continues the remaining periods on the next worker scan. An individual period
+that exceeds the limits still fails and backs off. Google schedules the next
+worker scan after a successful pass while retained
 historical periods have not yet been queried; it returns to hourly refresh once
 they have all been visited. On failure `last_error_code` records `credential`, `status`, `network`,
 `timeout`, `response` or `endpoint`, and the retry backs off from five

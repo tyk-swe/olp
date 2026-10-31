@@ -16,33 +16,35 @@ import (
 
 // importRow is one provider_billing_imports row.
 type importRow struct {
-	ProviderID          string
-	Source              string
-	CredentialID        *string
-	Scope               json.RawMessage
-	Enabled             bool
-	ETag                string
-	NextImportAt        *time.Time
-	LastImportAt        *time.Time
-	LastSuccessAt       *time.Time
-	LastErrorCode       *string
-	ConsecutiveFailures int
-	ImportedFrom        *string
-	ImportedThrough     *string
-	SourceRevision      *string
+	ProviderID            string
+	Source                string
+	CredentialID          *string
+	Scope                 json.RawMessage
+	Enabled               bool
+	ETag                  string
+	NextImportAt          *time.Time
+	LastImportAt          *time.Time
+	LastSuccessAt         *time.Time
+	LastErrorCode         *string
+	ConsecutiveFailures   int
+	ImportedFrom          *string
+	ImportedThrough       *string
+	SourceRevision        *string
+	CloudNextPeriod       *string
+	CloudPeriodsRemaining int
 }
 
 var errImportMissing = access.Fail(404, "not_found", "The provider has no billing import.")
 
 const importColumns = `provider_id::text,source,credential_id::text,scope,enabled,etag::text,
 	next_import_at,last_import_at,last_success_at,last_error_code,consecutive_failures,
-	imported_from::text,imported_through::text,source_revision`
+	imported_from::text,imported_through::text,source_revision,cloud_next_period,cloud_periods_remaining`
 
 func scanImport(row pgx.Row) (*importRow, error) {
 	var r importRow
 	err := row.Scan(&r.ProviderID, &r.Source, &r.CredentialID, &r.Scope, &r.Enabled, &r.ETag,
 		&r.NextImportAt, &r.LastImportAt, &r.LastSuccessAt, &r.LastErrorCode, &r.ConsecutiveFailures,
-		&r.ImportedFrom, &r.ImportedThrough, &r.SourceRevision)
+		&r.ImportedFrom, &r.ImportedThrough, &r.SourceRevision, &r.CloudNextPeriod, &r.CloudPeriodsRemaining)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, errImportMissing
 	}

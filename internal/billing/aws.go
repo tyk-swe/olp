@@ -105,10 +105,10 @@ func (i *Importer) importAWS(ctx context.Context, row *importRow, cfg *providerC
 	for _, delivery := range deliveries {
 		groups[delivery.period] = append(groups[delivery.period], delivery)
 	}
-	periods := slices.Sorted(maps.Keys(groups))
+	periods := cloudPeriodOrder(row, slices.Sorted(maps.Keys(groups)))
 	var failure error
-	for index := range periods {
-		period := periods[(index+row.ConsecutiveFailures)%len(periods)]
+	completedCount := 0
+	for index, period := range periods {
 		complete := false
 		for _, delivery := range groups[period] {
 			err := i.importAWSDelivery(fetchCtx, row, client, scope, delivery, earliest, today, &budget)
@@ -116,12 +116,16 @@ func (i *Importer) importAWS(ctx context.Context, row *importRow, cfg *providerC
 				continue
 			}
 			if err != nil {
+				if errors.Is(err, errCloudBudget) && completedCount > 0 && failure == nil {
+					return &cloudContinuation{next: period, remaining: len(periods) - index}
+				}
 				if failure == nil {
 					failure = err
 				}
 				break
 			}
 			complete = true
+			completedCount++
 			break
 		}
 		if !complete && failure == nil {
@@ -221,11 +225,14 @@ func awsReadManifest(ctx context.Context, client *s3.Client, scope awsScope, del
 	defer out.Body.Close()
 	remaining := min(int64(maxBodyBytes), awsMaxCompressed-budget.compressed, awsMaxExpanded-budget.expanded)
 	if remaining < 0 {
-		return manifest, failFetch("response", errors.New("AWS import exceeds size cap"))
+		return manifest, failFetch("response", errCloudBudget)
 	}
 	data, err := io.ReadAll(io.LimitReader(out.Body, remaining+1))
 	budget.compressed += int64(len(data))
 	budget.expanded += int64(len(data))
+	if int64(len(data)) > remaining && remaining < maxBodyBytes {
+		return manifest, failFetch("response", errCloudBudget)
+	}
 	if err != nil || int64(len(data)) > remaining || json.Unmarshal(data, &manifest) != nil {
 		return manifest, failFetch("response", errors.New("invalid AWS manifest"))
 	}
@@ -288,7 +295,7 @@ func (r *awsRangeReader) ReadAt(p []byte, offset int64) (int, error) {
 		return 0, errors.New("AWS ZIP exceeds request cap")
 	}
 	if int64(len(p)) > awsMaxCompressed-r.budget.compressed {
-		return 0, errors.New("AWS import exceeds compressed size cap")
+		return 0, errCloudBudget
 	}
 	out, err := r.client.GetObject(r.ctx, &s3.GetObjectInput{Bucket: aws.String(r.bucket), Key: aws.String(r.key), Range: aws.String(fmt.Sprintf("bytes=%d-%d", offset, offset+int64(len(p))-1))})
 	if err != nil {
@@ -306,13 +313,28 @@ func awsReadPart(ctx context.Context, client *s3.Client, scope awsScope, key str
 		if err != nil {
 			return awsError(err)
 		}
-		if head.ContentLength == nil || *head.ContentLength <= 0 || *head.ContentLength > awsMaxCompressed-budget.compressed {
+		if head.ContentLength == nil || *head.ContentLength <= 0 {
 			return failFetch("response", errors.New("invalid AWS ZIP size"))
+		}
+		if *head.ContentLength > awsMaxCompressed {
+			return failFetch("response", errors.New("AWS ZIP exceeds size cap"))
+		}
+		if *head.ContentLength > awsMaxCompressed-budget.compressed {
+			return failFetch("response", errCloudBudget)
 		}
 		reader := &awsRangeReader{ctx: ctx, client: client, bucket: scope.Bucket, key: key, budget: budget}
 		archive, err := zip.NewReader(reader, *head.ContentLength)
-		if err != nil || len(archive.File) != 1 || !strings.HasSuffix(archive.File[0].Name, ".csv") || archive.File[0].UncompressedSize64 > uint64(awsMaxExpanded-budget.expanded) {
+		if errors.Is(err, errCloudBudget) {
+			return failFetch("response", errCloudBudget)
+		}
+		if err != nil || len(archive.File) != 1 || !strings.HasSuffix(archive.File[0].Name, ".csv") {
 			return failFetch("response", errors.New("invalid AWS ZIP"))
+		}
+		if archive.File[0].UncompressedSize64 > awsMaxExpanded {
+			return failFetch("response", errors.New("AWS ZIP exceeds expanded size cap"))
+		}
+		if archive.File[0].UncompressedSize64 > uint64(awsMaxExpanded-budget.expanded) {
+			return failFetch("response", errCloudBudget)
 		}
 		csvFile, err := archive.File[0].Open()
 		if err != nil {
@@ -326,22 +348,31 @@ func awsReadPart(ctx context.Context, client *s3.Client, scope awsScope, key str
 		return awsError(err)
 	}
 	defer out.Body.Close()
-	if out.ContentLength != nil && *out.ContentLength > awsMaxCompressed-budget.compressed {
+	if out.ContentLength != nil && *out.ContentLength > awsMaxCompressed {
 		return failFetch("response", errors.New("AWS part exceeds size cap"))
+	}
+	if out.ContentLength != nil && *out.ContentLength > awsMaxCompressed-budget.compressed {
+		return failFetch("response", errCloudBudget)
 	}
 	remaining := awsMaxCompressed - budget.compressed
 	bounded := &io.LimitedReader{R: out.Body, N: remaining + 1}
 	defer func() { budget.compressed += remaining + 1 - bounded.N }()
 	gz, err := gzip.NewReader(bounded)
 	if err != nil {
+		if bounded.N == 0 {
+			return failFetch("response", errCloudBudget)
+		}
 		return failFetch("response", err)
 	}
 	defer gz.Close()
 	if err := awsReadCSV(gz, scope, days, state, budget); err != nil {
+		if bounded.N == 0 {
+			return failFetch("response", errCloudBudget)
+		}
 		return err
 	}
 	if bounded.N == 0 {
-		return failFetch("response", errors.New("AWS import exceeds compressed size cap"))
+		return failFetch("response", errCloudBudget)
 	}
 	return nil
 }
@@ -353,6 +384,9 @@ func awsReadCSV(input io.Reader, scope awsScope, days reportAccumulator, state *
 	reader := csv.NewReader(bounded)
 	header, err := reader.Read()
 	if err != nil {
+		if bounded.N == 0 {
+			return failFetch("response", errCloudBudget)
+		}
 		return failFetch("response", err)
 	}
 	columns := map[string]int{}
@@ -371,6 +405,9 @@ func awsReadCSV(input io.Reader, scope awsScope, days reportAccumulator, state *
 			break
 		}
 		if err != nil {
+			if bounded.N == 0 {
+				return failFetch("response", errCloudBudget)
+			}
 			return failFetch("response", err)
 		}
 		state.rows++
@@ -451,7 +488,7 @@ func awsReadCSV(input io.Reader, scope awsScope, days reportAccumulator, state *
 		}
 	}
 	if bounded.N == 0 {
-		return failFetch("response", errors.New("AWS part exceeds expanded size cap"))
+		return failFetch("response", errCloudBudget)
 	}
 	return nil
 }

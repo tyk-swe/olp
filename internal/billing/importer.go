@@ -172,7 +172,14 @@ func (i *Importer) pass(ctx context.Context) (bool, error) {
 		if err != nil {
 			return n > 0, err
 		}
-		if err := i.importOne(ctx, row); err != nil {
+		err = i.importOne(ctx, row)
+		var continuation *cloudContinuation
+		if errors.As(err, &continuation) {
+			if err := i.recordContinuation(ctx, row, continuation); err != nil {
+				return true, err
+			}
+			i.outcome(row.ProviderID, "success")
+		} else if err != nil {
 			code := fetchCode(err)
 			if err := i.recordFailure(ctx, row, code); err != nil {
 				return true, err
@@ -180,10 +187,25 @@ func (i *Importer) pass(ctx context.Context) (bool, error) {
 			i.outcome(row.ProviderID, code)
 			i.log().Warn("billing import failed", "provider", row.ProviderID, "code", code)
 		} else {
+			if row.CloudNextPeriod != nil {
+				if _, err := i.Pool.Exec(ctx, `UPDATE olp.provider_billing_imports SET cloud_next_period=NULL,cloud_periods_remaining=0
+					WHERE provider_id=$1::uuid AND etag=$2::uuid`, row.ProviderID, row.ETag); err != nil {
+					return true, err
+				}
+			}
 			i.outcome(row.ProviderID, "success")
 		}
 	}
 	return true, i.purge(ctx)
+}
+
+func (i *Importer) recordContinuation(ctx context.Context, row *importRow, continuation *cloudContinuation) error {
+	_, err := i.Pool.Exec(ctx, `UPDATE olp.provider_billing_imports SET
+		cloud_next_period=$3,cloud_periods_remaining=$4,next_import_at=now()+$5::interval,
+		last_error_code=NULL,consecutive_failures=0,updated_at=now()
+		WHERE provider_id=$1::uuid AND etag=$2::uuid`, row.ProviderID, row.ETag,
+		continuation.next, continuation.remaining, ImportInterval.String())
+	return err
 }
 
 // window is the fetch range for one import: the first successful import looks
@@ -286,7 +308,7 @@ func (i *Importer) importOne(ctx context.Context, row *importRow) error {
 		if err != nil {
 			return err
 		}
-		return fetchAzure(ctx, client, i.Egress, endpoint, cloudScope, key, earliest, today, completed, row.ConsecutiveFailures, func(period azurePeriod) error {
+		return fetchAzure(ctx, client, i.Egress, endpoint, cloudScope, key, earliest, today, completed, row, func(period azurePeriod) error {
 			return i.storeDays(ctx, row, period.start, &period.revision, period.days)
 		})
 	}
@@ -486,7 +508,7 @@ func (i *Importer) recordFailure(ctx context.Context, row *importRow, code strin
 		delay = maxBackoff
 	}
 	_, err := i.Pool.Exec(ctx, `UPDATE olp.provider_billing_imports SET
-		last_import_at=now(),last_error_code=$2,consecutive_failures=$3,
+		last_import_at=now(),last_error_code=$2,consecutive_failures=$3,cloud_next_period=NULL,cloud_periods_remaining=0,
 		next_import_at=now()+$4::interval,updated_at=now()
 		WHERE provider_id=$1::uuid AND etag=$5`, row.ProviderID, code, failures, delay.String(), row.ETag)
 	return err
@@ -585,7 +607,8 @@ func syncImportRevision(ctx context.Context, tx pgx.Tx, providerID, source strin
 			return err
 		}
 		_, err := tx.Exec(ctx, `UPDATE olp.provider_billing_imports SET
-			imported_from=NULL,imported_through=NULL,source_revision=NULL,last_success_at=NULL WHERE provider_id=$1::uuid`, providerID)
+			imported_from=NULL,imported_through=NULL,source_revision=NULL,last_success_at=NULL,
+			cloud_next_period=NULL,cloud_periods_remaining=0 WHERE provider_id=$1::uuid`, providerID)
 		return err
 	}
 	if err := refreshImportCoverage(ctx, tx, providerID, source, scope); err != nil {
