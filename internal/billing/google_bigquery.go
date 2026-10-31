@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"strings"
 	"time"
 
 	"cloud.google.com/go/bigquery"
@@ -55,6 +56,8 @@ type googleInvoiceRow struct {
 	SKU      string `bigquery:"sku_id"`
 	Currency string `bigquery:"currency"`
 	Amount   string `bigquery:"amount"`
+	Kind     string `bigquery:"line_kind"`
+	Revision string `bigquery:"source_revision"`
 }
 
 func googleProjectFilter(ids []string) (string, []bigquery.QueryParameter) {
@@ -64,14 +67,55 @@ func googleProjectFilter(ids []string) (string, []bigquery.QueryParameter) {
 	return " AND project.id IN UNNEST(@project_ids)", []bigquery.QueryParameter{{Name: "project_ids", Value: ids}}
 }
 
-func fetchGoogle(ctx context.Context, client *http.Client, auth *connectors.Auth, rawScope json.RawMessage, rawCredential []byte, start, end time.Time) (map[string]map[lineKey]lineSum, error) {
+func (i *Importer) importGoogle(ctx context.Context, row *importRow, client *http.Client, auth *connectors.Auth, key []byte) error {
+	importCtx, cancel := context.WithTimeout(ctx, googleImportTimeout)
+	defer cancel()
+	today := i.now().UTC().Truncate(24 * time.Hour)
+	var retention int
+	if err := i.Pool.QueryRow(importCtx, `SELECT COALESCE((SELECT value::int FROM olp.settings WHERE key='retention.usage_days'),90)`).Scan(&retention); err != nil {
+		return err
+	}
+	earliest := today.AddDate(0, 0, -retention)
+	completed, err := i.completedBillingPeriods(importCtx, row, earliest, today)
+	if err != nil {
+		return err
+	}
+	current := time.Date(today.Year(), today.Month(), 1, 0, 0, 0, 0, time.UTC)
+	first := time.Date(earliest.Year(), earliest.Month(), 1, 0, 0, 0, 0, time.UTC)
+	for month := current; !month.Before(first); month = month.AddDate(0, -1, 0) {
+		period := month.Format("20060102") + "-" + month.AddDate(0, 1, 0).Format("20060102")
+		if _, ok := completed[period]; ok {
+			continue
+		}
+		start, end := month, month.AddDate(0, 1, 0)
+		if start.Before(earliest) {
+			start = earliest
+		}
+		if end.After(today) {
+			end = today
+		}
+		if !start.Before(end) {
+			continue
+		}
+		days, revision, err := fetchGoogle(importCtx, client, auth, row.Scope, key, start, end, earliest)
+		if err != nil {
+			return err
+		}
+		if err := i.storeDays(importCtx, row, month.Format(dayFormat), revision, days); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func fetchGoogle(ctx context.Context, client *http.Client, auth *connectors.Auth, rawScope json.RawMessage, rawCredential []byte, start, end, watermarkStart time.Time) (map[string]map[lineKey]lineSum, *sourceRevision, error) {
 	var scope googleScope
 	if err := json.Unmarshal(rawScope, &scope); err != nil {
-		return nil, failFetch("response", errors.New("invalid Google billing scope"))
+		return nil, nil, failFetch("response", errors.New("invalid Google billing scope"))
 	}
 	var credential googleCredential
 	if err := json.Unmarshal(rawCredential, &credential); err != nil {
-		return nil, failFetch("credential", errors.New("invalid Google billing credential"))
+		return nil, nil, failFetch("credential", errors.New("invalid Google billing credential"))
 	}
 	base := client.Transport
 	if base == nil {
@@ -83,19 +127,35 @@ func fetchGoogle(ctx context.Context, client *http.Client, auth *connectors.Auth
 	defer cancel()
 	bq, err := bigquery.NewClient(queryCtx, scope.BigQueryProjectID, option.WithHTTPClient(&authenticated))
 	if err != nil {
-		return nil, googleQueryError(queryCtx, err)
+		return nil, nil, googleQueryError(queryCtx, err)
 	}
 	defer bq.Close()
 	projectFilter, projectParameters := googleProjectFilter(scope.ProjectIDs)
-	statement := fmt.Sprintf(`SELECT CAST(DATE(usage_start_time, 'UTC') AS STRING) AS usage_day,
-		service.id AS service_id, sku.id AS sku_id, currency,
-		CAST(SUM(CAST(cost AS BIGNUMERIC)) AS STRING) AS amount
-		FROM %s
-		WHERE billing_account_id = @billing_account_id AND service.id = @service_id
-		AND _PARTITIONTIME >= TIMESTAMP(@start)
+	statement := fmt.Sprintf(`WITH snapshot AS (
+		SELECT billing_account_id, service, sku, project, usage_start_time, currency, cost, cost_type, credits, export_time
+		FROM %s WHERE _PARTITIONTIME >= TIMESTAMP(@start)
+	), revision AS (
+		SELECT COALESCE(FORMAT_TIMESTAMP('%%Y-%%m-%%dT%%H:%%M:%%E6SZ', MAX(export_time), 'UTC'), '') AS source_revision
+		FROM %s WHERE _PARTITIONTIME >= TIMESTAMP(@watermark_start)
+	), scoped AS (
+		SELECT * FROM snapshot WHERE billing_account_id = @billing_account_id AND service.id = @service_id
 		AND usage_start_time >= TIMESTAMP(@start) AND usage_start_time < TIMESTAMP(@end)
-		AND cost_type = 'regular'%s
-		GROUP BY 1, 2, 3, 4`, "`"+scope.BigQueryProjectID+"."+scope.DatasetID+"."+scope.TableID+"`", projectFilter)
+		AND cost_type IN ('regular', 'adjustment', 'rounding error')%s
+	), amounts AS (
+		SELECT DATE(usage_start_time, 'UTC') AS usage_day, service.id AS service_id, sku.id AS sku_id, currency,
+		CASE WHEN cost_type = 'regular' THEN 'cost' ELSE cost_type END AS line_kind, CAST(cost AS BIGNUMERIC) AS amount FROM scoped
+		UNION ALL
+		SELECT DATE(usage_start_time, 'UTC'), service.id, sku.id, currency,
+		CONCAT('credit/', COALESCE(credit.type, 'unknown')), CAST(credit.amount AS BIGNUMERIC)
+		FROM scoped CROSS JOIN UNNEST(credits) AS credit
+	), totals AS (
+		SELECT CAST(usage_day AS STRING) AS usage_day, service_id, sku_id, currency, line_kind, CAST(SUM(amount) AS STRING) AS amount
+		FROM amounts GROUP BY 1, 2, 3, 4, 5
+	)
+	SELECT COALESCE(totals.usage_day, '') AS usage_day, COALESCE(totals.service_id, '') AS service_id,
+		COALESCE(totals.sku_id, '') AS sku_id, COALESCE(totals.currency, '') AS currency,
+		COALESCE(totals.amount, '') AS amount, COALESCE(totals.line_kind, '') AS line_kind, revision.source_revision
+	FROM revision LEFT JOIN totals ON TRUE`, "`"+scope.BigQueryProjectID+"."+scope.DatasetID+"."+scope.TableID+"`", "`"+scope.BigQueryProjectID+"."+scope.DatasetID+"."+scope.TableID+"`", projectFilter)
 	query := bq.Query(statement)
 	query.MaxBytesBilled = googleMaximumBytes
 	query.JobTimeout = googleImportTimeout
@@ -103,11 +163,12 @@ func fetchGoogle(ctx context.Context, client *http.Client, auth *connectors.Auth
 		{Name: "billing_account_id", Value: scope.BillingAccountID},
 		{Name: "service_id", Value: googleVertexServiceID},
 		{Name: "start", Value: start.Format(dayFormat)},
+		{Name: "watermark_start", Value: watermarkStart.Format(dayFormat)},
 		{Name: "end", Value: end.Format(dayFormat)},
 	}, projectParameters...)
 	job, err := query.Run(queryCtx)
 	if err != nil {
-		return nil, googleQueryError(queryCtx, err)
+		return nil, nil, googleQueryError(queryCtx, err)
 	}
 	defer func() {
 		if queryCtx.Err() != nil {
@@ -118,27 +179,43 @@ func fetchGoogle(ctx context.Context, client *http.Client, auth *connectors.Auth
 	}()
 	rows, err := job.Read(queryCtx)
 	if err != nil {
-		return nil, googleQueryError(queryCtx, err)
+		return nil, nil, googleQueryError(queryCtx, err)
 	}
 	rows.PageInfo().MaxSize = 100
 	result := reportAccumulator{}
 	for day := start; day.Before(end); day = day.AddDate(0, 0, 1) {
 		result.ensureDay(day.Format(dayFormat))
 	}
+	var revision *sourceRevision
 	for count := 0; ; count++ {
 		var row googleInvoiceRow
 		err := rows.Next(&row)
 		if errors.Is(err, iterator.Done) {
-			return result, nil
+			if revision == nil {
+				return nil, nil, failFetch("response", errors.New("Google query omitted its revision"))
+			}
+			return result, revision, nil
 		}
 		if err != nil {
-			return nil, googleQueryError(queryCtx, err)
+			return nil, nil, googleQueryError(queryCtx, err)
 		}
 		if count >= googleMaximumRows {
-			return nil, failFetch("response", errors.New("Google query returned too many rows"))
+			return nil, nil, failFetch("response", errors.New("Google query returned too many rows"))
+		}
+		observed, err := time.Parse(time.RFC3339Nano, row.Revision)
+		if err != nil {
+			return nil, nil, failFetch("status", errors.New("Google export has no valid watermark"))
+		}
+		id := observed.UTC().Format(time.RFC3339Nano)
+		if revision != nil && revision.id != id {
+			return nil, nil, failFetch("response", errors.New("Google query returned inconsistent watermarks"))
+		}
+		revision = &sourceRevision{id: id, orderingAt: observed}
+		if row.Kind == "" && row.Day == "" && row.Service == "" && row.SKU == "" && row.Currency == "" && row.Amount == "" {
+			continue
 		}
 		if err := addGoogleRow(result, row, start, end); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 	}
 }
@@ -152,7 +229,14 @@ func addGoogleRow(result reportAccumulator, row googleInvoiceRow, start, end tim
 	if err != nil {
 		return failFetch("response", errors.New("invalid Google query amount"))
 	}
-	item := googleLineItem(row.Service + "/" + row.SKU)
+	if row.Kind != "cost" && row.Kind != "adjustment" && row.Kind != "rounding error" && !strings.HasPrefix(row.Kind, "credit/") {
+		return failFetch("response", errors.New("invalid Google query line kind"))
+	}
+	item := row.Service + "/" + row.SKU
+	if row.Kind != "cost" {
+		item += "/" + row.Kind
+	}
+	item = googleLineItem(item)
 	result.add(row.Day, amount, row.Currency, &item)
 	return nil
 }

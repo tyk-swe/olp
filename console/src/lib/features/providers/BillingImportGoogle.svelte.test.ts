@@ -45,10 +45,10 @@ it('validates, creates, runs, updates and removes a Google billing import', asyn
           next_import_at: null,
           last_import_at: null,
           last_success_at: null,
-          last_error_code: null,
-          imported_from: null,
-          imported_through: null,
-          source_revision: null
+          last_error_code: 'status',
+          imported_from: '2025-01-01',
+          imported_through: '2025-01-31',
+          source_revision: '2025-02-01T12:34:56Z'
         }
       };
       return current;
@@ -109,6 +109,10 @@ it('validates, creates, runs, updates and removes a Google billing import', asyn
     fill(id, value);
   submit();
   await vi.waitFor(() => expect(host.textContent).toContain('Run now'));
+  expect(host.textContent).toContain('2025-02-01T12:34:56Z');
+  expect(host.textContent).toContain('the vendor returned an error');
+  expect(host.textContent).toContain('2025-01-01');
+  expect(host.textContent).toContain('2025-01-31');
   expect(api.putBillingImport).toHaveBeenLastCalledWith(
     'provider',
     'provider-etag',

@@ -370,13 +370,23 @@ same JSON object serialized as the value of the billing credential's secret
 binding. Keep this binding out of the configuration document itself.
 
 The Google query selects the Vertex AI [billing service ID](https://cloud.google.com/billing/docs/how-to/budgets-spend-caps)
-`C7E2-9256-1C43` and sums regular costs by UTC usage day, service, SKU and
-currency. Credits and other adjustment types are not included yet. Google
-stores the detailed export's cost as FLOAT. The query casts each value to
-BIGNUMERIC before summing and the importer keeps
-the returned decimal without converting it through a Go float. Google export
-can begin after historical usage and may arrive late, so an empty result does
-not prove the export contained all historical costs.
+`C7E2-9256-1C43` and sums costs by UTC usage day, service, SKU and
+currency. Regular charges, adjustments and credit types have separate line
+items. Corrections stay on the original usage day even when their invoice month
+is later. Google stores detailed export costs and credits as FLOAT. The query
+casts each value to BIGNUMERIC before summing and the importer keeps the returned
+decimal without converting it through a Go float. This cannot recover precision
+already lost in the source FLOAT.
+
+The importer queries retained billing periods and records the export watermark
+with each period. It rereads the current and previous periods, retries missing
+historical periods and replaces a covered period only with an equal or newer
+watermark. The watermark scan starts at the earliest retained day. If the table
+has no exports in that interval, no watermark is available and the period cannot
+be marked covered. Google exports can begin after historical usage, contain gaps
+or arrive late.
+A successful query and watermark do not prove that the export contained all
+historical costs.
 
 ### Importer
 
@@ -384,10 +394,10 @@ The `billing_import` worker scans every 60 seconds for imports due, claims up
 to ten, one at a time under a ten-minute lease, and fetches through the connection's
 egress-validated client with redirects disabled. OpenAI and Anthropic imports
 cover closed UTC days only. The first covers the 30 days before today, and
-later imports refresh the last 7 so vendor restatements land. AWS imports cover
-closed UTC days within retention on the first pass and refresh the current and
-previous billing periods on later passes. Incomplete historical periods are
-retried until covered. A delivery covers only days closed before its manifest
+later imports refresh the last 7 so vendor restatements land. AWS and Google
+imports cover closed UTC days within retention on the first pass and refresh the
+current and previous billing periods on later passes. Incomplete historical
+periods are retried until covered. A delivery covers only days closed before its manifest
 was written, and gaps remain unimported. AWS reads are bounded by a 45-second
 deadline and cumulative compressed and expanded byte, row and aggregation limits.
 Each day's returned line items are summed per `(day, line_item, currency)` and

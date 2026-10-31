@@ -21,7 +21,7 @@ const (
 )
 
 func revisionBacked(source string) bool {
-	return source == SourceAWS
+	return source == SourceAWS || source == SourceGoogle
 }
 
 // SourceFor names the vendor cost endpoint a provider kind imports, or

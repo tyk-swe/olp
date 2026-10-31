@@ -88,7 +88,7 @@ func (i *Importer) importAWS(ctx context.Context, row *importRow, cfg *providerC
 		return err
 	}
 	earliest := today.AddDate(0, 0, -retention)
-	completed, err := i.awsCompletedPeriods(fetchCtx, row, earliest, today)
+	completed, err := i.completedBillingPeriods(fetchCtx, row, earliest, today)
 	if err != nil {
 		return err
 	}
@@ -160,36 +160,6 @@ func (i *Importer) importAWSDelivery(ctx context.Context, row *importRow, client
 		return err
 	}
 	return nil
-}
-
-func (i *Importer) awsCompletedPeriods(ctx context.Context, row *importRow, earliest, today time.Time) (map[string]struct{}, error) {
-	digest, err := scopeDigest(row.Source, row.Scope)
-	if err != nil {
-		return nil, err
-	}
-	rows, err := i.Pool.Query(ctx, `SELECT period_start FROM olp.provider_billing_revisions
-		WHERE provider_id=$1::uuid AND source=$2 AND scope_digest=$3
-		AND period_start < date_trunc('month', $4::date) - interval '1 month'
-		AND covered_from <= GREATEST(period_start, $5::date)
-		AND covered_through >= (period_start + interval '1 month')::date - 1`,
-		row.ProviderID, row.Source, digest[:], today.Format(dayFormat), earliest.Format(dayFormat))
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	completed := map[string]struct{}{}
-	for rows.Next() {
-		var month time.Time
-		if err := rows.Scan(&month); err != nil {
-			return nil, err
-		}
-		period := month.Format("20060102") + "-" + month.AddDate(0, 1, 0).Format("20060102")
-		completed[period] = struct{}{}
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return completed, nil
 }
 
 func awsDeliveries(ctx context.Context, client *s3.Client, scope awsScope, earliest, today time.Time, completed map[string]struct{}) ([]awsDelivery, error) {

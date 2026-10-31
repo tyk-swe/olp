@@ -252,9 +252,13 @@ type googleExportFixture struct {
 	Currency   string      `json:"currency"`
 	CostType   string      `json:"cost_type"`
 	Cost       json.Number `json:"cost"`
+	Credits    []struct {
+		Type   string      `json:"type"`
+		Amount json.Number `json:"amount"`
+	} `json:"credits"`
 }
 
-func googleFixtureResults(t *testing.T, day time.Time, filters map[string]string, invalidCurrency bool) []any {
+func googleFixtureResults(t *testing.T, day time.Time, filters map[string]string, invalidCurrency, restated, empty bool, revision time.Time) []any {
 	t.Helper()
 	// Google detailed export schema, https://docs.cloud.google.com/billing/docs/how-to/export-data-bigquery-tables/detailed-usage, accessed 2026-10-31.
 	data, err := os.ReadFile("../../internal/billing/testdata/google_detailed_export.json")
@@ -265,6 +269,20 @@ func googleFixtureResults(t *testing.T, day time.Time, filters map[string]string
 	if err := json.Unmarshal(data, &input); err != nil {
 		t.Fatal(err)
 	}
+	if restated {
+		data, err := os.ReadFile("../../internal/billing/testdata/google_detailed_export_restatement.json")
+		if err != nil {
+			t.Fatal(err)
+		}
+		var additions []googleExportFixture
+		if err := json.Unmarshal(data, &additions); err != nil {
+			t.Fatal(err)
+		}
+		input = append(input, additions...)
+	}
+	if empty {
+		input = nil
+	}
 	start, err := time.Parse("2006-01-02", filters["start"])
 	if err != nil {
 		t.Fatal(err)
@@ -273,12 +291,16 @@ func googleFixtureResults(t *testing.T, day time.Time, filters map[string]string
 	if err != nil {
 		t.Fatal(err)
 	}
-	type key struct{ day, service, sku, currency string }
+	type key struct{ day, service, sku, currency, kind string }
 	groups := map[key]decimal.Decimal{}
 	shift := day.Sub(time.Date(2025, 1, 20, 0, 0, 0, 0, time.UTC))
 	for _, item := range input {
 		usage := item.UsageStart.Add(shift)
-		if item.BillingAccountID != filters["billing_account_id"] || item.Service.ID != filters["service_id"] || item.Project.ID != filters["project_ids"] || item.CostType != "regular" || usage.Before(start) || !usage.Before(end) {
+		if item.SKU.ID == "PREVIOUS-MONTH" {
+			today := day.AddDate(0, 0, 3)
+			usage = time.Date(today.Year(), today.Month(), 10, 12, 0, 0, 0, time.UTC).AddDate(0, -1, 0)
+		}
+		if item.BillingAccountID != filters["billing_account_id"] || item.Service.ID != filters["service_id"] || item.Project.ID != filters["project_ids"] || (item.CostType != "regular" && item.CostType != "adjustment" && item.CostType != "rounding error") || usage.Before(start) || !usage.Before(end) {
 			continue
 		}
 		amount, err := decimal.NewFromString(item.Cost.String())
@@ -289,17 +311,29 @@ func googleFixtureResults(t *testing.T, day time.Time, filters map[string]string
 		if invalidCurrency {
 			currency = "U1D"
 		}
-		k := key{usage.UTC().Format("2006-01-02"), item.Service.ID, item.SKU.ID, currency}
+		kind := item.CostType
+		if kind == "regular" {
+			kind = "cost"
+		}
+		k := key{usage.UTC().Format("2006-01-02"), item.Service.ID, item.SKU.ID, currency, kind}
 		groups[k] = groups[k].Add(amount)
+		for _, credit := range item.Credits {
+			creditAmount, err := decimal.NewFromString(credit.Amount.String())
+			if err != nil {
+				t.Fatal(err)
+			}
+			creditKey := key{k.day, k.service, k.sku, k.currency, "credit/" + credit.Type}
+			groups[creditKey] = groups[creditKey].Add(creditAmount)
+		}
 	}
 	keys := make([]key, 0, len(groups))
 	for k := range groups {
 		keys = append(keys, k)
 	}
-	slices.SortFunc(keys, func(a, b key) int { return strings.Compare(a.sku, b.sku) })
+	slices.SortFunc(keys, func(a, b key) int { return strings.Compare(a.sku+"/"+a.kind, b.sku+"/"+b.kind) })
 	result := make([]any, 0, len(keys))
 	for _, k := range keys {
-		result = append(result, map[string]any{"f": []any{map[string]any{"v": k.day}, map[string]any{"v": k.service}, map[string]any{"v": k.sku}, map[string]any{"v": k.currency}, map[string]any{"v": groups[k].String()}}})
+		result = append(result, map[string]any{"f": []any{map[string]any{"v": k.day}, map[string]any{"v": k.service}, map[string]any{"v": k.sku}, map[string]any{"v": k.currency}, map[string]any{"v": groups[k].String()}, map[string]any{"v": k.kind}, map[string]any{"v": revision.Format(time.RFC3339Nano)}}})
 	}
 	return result
 }
@@ -329,8 +363,21 @@ func TestGoogleBillingImportEndToEnd(t *testing.T) {
 	owner := h.owner()
 	day, _, _ := billingDays()
 	dayText := day.Format("2006-01-02")
+	setting := h.want(owner, "GET", "/api/v1/settings/retention.usage_days", nil, nil, 200)
+	h.want(owner, "PUT", "/api/v1/settings/retention.usage_days", map[string]any{"value": "180"}, etagHeader(setting), 200)
+	today := time.Now().UTC().Truncate(24 * time.Hour)
+	historicalMonth := time.Date(today.Year(), today.Month(), 1, 0, 0, 0, 0, time.UTC).AddDate(0, -2, 0)
+	historicalDay := historicalMonth.AddDate(0, 0, 5)
+	previousDay := time.Date(today.Year(), today.Month(), 10, 0, 0, 0, 0, time.UTC).AddDate(0, -1, 0)
+	var failHistorical atomic.Bool
+	failHistorical.Store(true)
 	var invalidCurrency atomic.Bool
+	var failBytes atomic.Bool
+	var emptyExport atomic.Bool
 	var blockQuery atomic.Bool
+	var restated atomic.Bool
+	var empty atomic.Bool
+	var revisionOffset atomic.Int64
 	var tokenExchanges atomic.Int64
 	var queryParameters atomic.Value
 	// Google lists the Vertex billing service ID at https://docs.cloud.google.com/billing/docs/how-to/budgets-spend-caps, accessed 2026-10-31.
@@ -393,6 +440,14 @@ func TestGoogleBillingImportEndToEnd(t *testing.T) {
 				http.Error(w, "bad query parameters", http.StatusBadRequest)
 				return
 			}
+			if failBytes.Load() {
+				http.Error(w, `{"error":{"code":400,"message":"maximum bytes exceeded with private query details"}}`, http.StatusBadRequest)
+				return
+			}
+			if values["start"] == historicalMonth.Format("2006-01-02") && failHistorical.CompareAndSwap(true, false) {
+				http.Error(w, `{"error":{"code":400,"message":"sensitive vendor query detail"}}`, http.StatusBadRequest)
+				return
+			}
 			queryParameters.Store(values)
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(submission)
@@ -408,9 +463,19 @@ func TestGoogleBillingImportEndToEnd(t *testing.T) {
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		allRows := googleFixtureResults(t, day, queryParameters.Load().(map[string]string), invalidCurrency.Load())
+		revision := day.AddDate(0, 0, 1).Add(time.Duration(revisionOffset.Load()) * time.Second)
+		allRows := googleFixtureResults(t, day, queryParameters.Load().(map[string]string), invalidCurrency.Load(), restated.Load(), empty.Load(), revision)
+		if emptyExport.Load() {
+			allRows = []any{map[string]any{"f": []any{map[string]any{"v": ""}, map[string]any{"v": ""}, map[string]any{"v": ""}, map[string]any{"v": ""}, map[string]any{"v": ""}, map[string]any{"v": ""}, map[string]any{"v": ""}}}}
+		}
+		if len(allRows) == 0 {
+			allRows = []any{map[string]any{"f": []any{map[string]any{"v": ""}, map[string]any{"v": ""}, map[string]any{"v": ""}, map[string]any{"v": ""}, map[string]any{"v": ""}, map[string]any{"v": ""}, map[string]any{"v": revision.Format(time.RFC3339Nano)}}}}
+		}
 		rows := allRows[:1]
-		pageToken := "second-page"
+		pageToken := ""
+		if len(allRows) > 1 {
+			pageToken = "second-page"
+		}
 		if req.URL.Query().Get("pageToken") == "second-page" {
 			if req.URL.Query().Get("maxResults") != "100" {
 				t.Errorf("BigQuery result page was not bounded: %q", req.URL.Query().Get("maxResults"))
@@ -419,11 +484,12 @@ func TestGoogleBillingImportEndToEnd(t *testing.T) {
 			pageToken = ""
 		}
 		_ = json.NewEncoder(w).Encode(map[string]any{
-			"jobComplete": true, "totalRows": "3",
+			"jobComplete": true, "totalRows": strconv.Itoa(len(allRows)),
 			"pageToken": pageToken,
 			"schema": map[string]any{"fields": []any{
 				map[string]any{"name": "usage_day", "type": "STRING"}, map[string]any{"name": "service_id", "type": "STRING"},
 				map[string]any{"name": "sku_id", "type": "STRING"}, map[string]any{"name": "currency", "type": "STRING"}, map[string]any{"name": "amount", "type": "STRING"},
+				map[string]any{"name": "line_kind", "type": "STRING"}, map[string]any{"name": "source_revision", "type": "STRING"},
 			}},
 			"rows": rows,
 		})
@@ -437,12 +503,45 @@ func TestGoogleBillingImportEndToEnd(t *testing.T) {
 	scope := map[string]any{"billing_account_id": "123456-ABCDEF-123456", "bigquery_project_id": "fixture-project", "dataset_id": "billing_export", "table_id": "gcp_billing_export_resource_v1_fixture", "project_ids": []string{"workload-project"}}
 	serviceAccount := googleTestServiceAccount(t)
 	billingPut(h, owner, id, map[string]any{"scope": scope, "credential": map[string]any{"auth_mode": "service_account", "service_account": serviceAccount}}, provider["etag"].(string), 201)
+	priced := "0.001"
+	billingFact(t, h, id, uuid.NewString(), day, "billable", true, &priced, false, false, false)
+	billingFact(t, h, id, uuid.NewString(), historicalDay, "billable", true, &priced, false, false, false)
+	billingFact(t, h, id, uuid.NewString(), previousDay, "billable", true, &priced, false, false, false)
 	importer := billingImporter(h, t)
 	if err := importer.Pass(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	if tokenExchanges.Load() == 0 {
 		t.Fatal("service account did not exchange a token through the configured proxy")
+	}
+	initialStatus := h.want(owner, "GET", "/api/v1/providers/"+id+"/billing-import", nil, nil, 200)["status"].(map[string]any)
+	if initialStatus["last_error_code"] != "status" || strings.Contains(fmt.Sprint(initialStatus), "sensitive vendor query detail") || initialStatus["imported_from"].(string) <= historicalDay.Format("2006-01-02") {
+		t.Fatalf("failed historical period was reported as covered: %v", initialStatus)
+	}
+	lastAttempt, lastErr := time.Parse(time.RFC3339Nano, initialStatus["last_import_at"].(string))
+	nextAttempt, nextErr := time.Parse(time.RFC3339Nano, initialStatus["next_import_at"].(string))
+	if lastErr != nil || nextErr != nil || !nextAttempt.After(lastAttempt) || nextAttempt.Sub(lastAttempt) > time.Hour {
+		t.Fatalf("failed historical period did not back off: %v", initialStatus)
+	}
+	historicalURL := fmt.Sprintf("/api/v1/usage/reconciliation?start=%s&end=%s&provider_id=%s", historicalDay.Format("2006-01-02"), historicalDay.AddDate(0, 0, 1).Format("2006-01-02"), id)
+	historical := h.want(owner, "GET", historicalURL, nil, nil, 200)["items"].([]any)[0].(map[string]any)
+	if historical["capture_rate_unavailable_reason"] != "not_imported" || historical["invoiced_cost"] != nil {
+		t.Fatalf("failed historical period appeared as zero: %v", historical)
+	}
+	currentImport := h.want(owner, "GET", "/api/v1/providers/"+id+"/billing-import", nil, nil, 200)
+	runHeaders := etagHeader(currentImport)
+	runHeaders["Idempotency-Key"] = uuid.NewString()
+	h.want(owner, "POST", "/api/v1/providers/"+id+"/billing-import/run", nil, runHeaders, 202)
+	if err := importer.Pass(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	recovered := h.want(owner, "GET", historicalURL, nil, nil, 200)["items"].([]any)[0].(map[string]any)
+	if recovered["capture_rate_unavailable_reason"] != "zero_invoice" || recovered["invoiced_cost"] != "0" {
+		t.Fatalf("historical period was not retried: %v", recovered)
+	}
+	initialStatus = h.want(owner, "GET", "/api/v1/providers/"+id+"/billing-import", nil, nil, 200)["status"].(map[string]any)
+	if initialStatus["last_error_code"] != nil || initialStatus["imported_from"] != today.AddDate(0, 0, -180).Format("2006-01-02") || initialStatus["imported_through"] != today.AddDate(0, 0, -1).Format("2006-01-02") || initialStatus["source_revision"] != day.AddDate(0, 0, 1).Format(time.RFC3339Nano) {
+		t.Fatalf("Google export revision was not applied: %v", initialStatus)
 	}
 	end := day.AddDate(0, 0, 1).Format("2006-01-02")
 	costs := h.want(owner, "GET", fmt.Sprintf("/api/v1/providers/%s/invoiced-costs?start=%s&end=%s", id, dayText, end), nil, nil, 200)
@@ -465,6 +564,98 @@ func TestGoogleBillingImportEndToEnd(t *testing.T) {
 	if len(report["items"].([]any)) != 1 || report["items"].([]any)[0].(map[string]any)["invoiced_cost"] != "3.600000000001" {
 		t.Fatalf("Google reconciliation: %v", report)
 	}
+	runImport := func() {
+		current := h.want(owner, "GET", "/api/v1/providers/"+id+"/billing-import", nil, nil, 200)
+		headers := etagHeader(current)
+		headers["Idempotency-Key"] = uuid.NewString()
+		h.want(owner, "POST", "/api/v1/providers/"+id+"/billing-import/run", nil, headers, 202)
+		if err := importer.Pass(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	restated.Store(true)
+	revisionOffset.Store(1)
+	runImport()
+	restatedItems := h.want(owner, "GET", fmt.Sprintf("/api/v1/providers/%s/invoiced-costs?start=%s&end=%s", id, dayText, end), nil, nil, 200)["items"].([]any)
+	if len(restatedItems) != 6 {
+		t.Fatalf("restated Google invoice lines: %v", restatedItems)
+	}
+	restatedAmounts := map[string]string{}
+	for _, value := range restatedItems {
+		line := value.(map[string]any)
+		restatedAmounts[line["line_item"].(string)] = line["amount"].(string)
+	}
+	base := fixtureService + "/123456-ABCDEF-654321"
+	if restatedAmounts[base] != "0.300000000001" || restatedAmounts[base+"/adjustment"] != "-0.1" || restatedAmounts[base+"/credit/DISCOUNT"] != "-0.05" || restatedAmounts[base+"/credit/PROMOTION"] != "-0.025" {
+		t.Fatalf("adjustments and credits were not stored separately: %v", restatedAmounts)
+	}
+	previousURL := fmt.Sprintf("/api/v1/providers/%s/invoiced-costs?start=%s&end=%s", id, previousDay.Format("2006-01-02"), previousDay.AddDate(0, 0, 1).Format("2006-01-02"))
+	previousItems := h.want(owner, "GET", previousURL, nil, nil, 200)["items"].([]any)
+	if len(previousItems) != 1 || previousItems[0].(map[string]any)["amount"] != "-0.2" {
+		t.Fatalf("previous period was not refreshed: %v", previousItems)
+	}
+	restatedReport := h.want(owner, "GET", fmt.Sprintf("/api/v1/usage/reconciliation?start=%s&end=%s&provider_id=%s", dayText, end, id), nil, nil, 200)
+	if restatedReport["items"].([]any)[0].(map[string]any)["invoiced_cost"] != "3.425000000001" {
+		t.Fatalf("restated reconciliation: %v", restatedReport)
+	}
+	invoiceAmounts := func() map[string]string {
+		current := h.want(owner, "GET", fmt.Sprintf("/api/v1/providers/%s/invoiced-costs?start=%s&end=%s", id, dayText, end), nil, nil, 200)["items"].([]any)
+		amounts := map[string]string{}
+		for _, value := range current {
+			line := value.(map[string]any)
+			amounts[line["line_item"].(string)] = line["amount"].(string)
+		}
+		return amounts
+	}
+	runImport()
+	if equal := invoiceAmounts(); !reflect.DeepEqual(restatedAmounts, equal) {
+		t.Fatalf("equal revision changed invoice amounts: %v", equal)
+	}
+	restated.Store(false)
+	revisionOffset.Store(0)
+	runImport()
+	if older := invoiceAmounts(); !reflect.DeepEqual(restatedAmounts, older) {
+		t.Fatalf("older revision replaced newer rows: %v", older)
+	}
+	if previous := h.want(owner, "GET", previousURL, nil, nil, 200)["items"].([]any); len(previous) != 1 || previous[0].(map[string]any)["amount"] != "-0.2" {
+		t.Fatalf("older revision replaced previous period: %v", previous)
+	}
+	newerStatus := h.want(owner, "GET", "/api/v1/providers/"+id+"/billing-import", nil, nil, 200)["status"].(map[string]any)
+	if newerStatus["source_revision"] != day.AddDate(0, 0, 1).Add(time.Second).Format(time.RFC3339Nano) {
+		t.Fatalf("older revision regressed status: %v", newerStatus)
+	}
+	empty.Store(true)
+	revisionOffset.Store(2)
+	runImport()
+	if zero := h.want(owner, "GET", fmt.Sprintf("/api/v1/providers/%s/invoiced-costs?start=%s&end=%s", id, dayText, end), nil, nil, 200)["items"].([]any); len(zero) != 0 {
+		t.Fatalf("empty covered day retained rows: %v", zero)
+	}
+	emptyReport := h.want(owner, "GET", fmt.Sprintf("/api/v1/usage/reconciliation?start=%s&end=%s&provider_id=%s", dayText, end, id), nil, nil, 200)
+	if emptyReport["items"].([]any)[0].(map[string]any)["invoiced_cost"] != "0" {
+		t.Fatalf("empty covered day was not zero: %v", emptyReport)
+	}
+	empty.Store(false)
+	revisionOffset.Store(3)
+	runImport()
+	beforeInvalid := h.want(owner, "GET", fmt.Sprintf("/api/v1/providers/%s/invoiced-costs?start=%s&end=%s", id, dayText, end), nil, nil, 200)["items"].([]any)
+	emptyExport.Store(true)
+	runImport()
+	noWatermark := h.want(owner, "GET", "/api/v1/providers/"+id+"/billing-import", nil, nil, 200)["status"].(map[string]any)
+	if noWatermark["last_error_code"] != "status" || !reflect.DeepEqual(beforeInvalid, h.want(owner, "GET", fmt.Sprintf("/api/v1/providers/%s/invoiced-costs?start=%s&end=%s", id, dayText, end), nil, nil, 200)["items"].([]any)) {
+		t.Fatalf("empty export incorrectly advanced coverage: %v", noWatermark)
+	}
+	emptyExport.Store(false)
+	failBytes.Store(true)
+	runImport()
+	failedStatus := h.want(owner, "GET", "/api/v1/providers/"+id+"/billing-import", nil, nil, 200)["status"].(map[string]any)
+	failedRows := h.want(owner, "GET", fmt.Sprintf("/api/v1/providers/%s/invoiced-costs?start=%s&end=%s", id, dayText, end), nil, nil, 200)["items"].([]any)
+	if failedStatus["last_error_code"] != "status" || strings.Contains(fmt.Sprint(failedStatus), "private query details") || !reflect.DeepEqual(beforeInvalid, failedRows) {
+		t.Fatalf("query limit failure changed stored data or exposed details: %v %v", failedStatus, failedRows)
+	}
+	if metrics := importer.Metrics(); metrics[[2]string{id, "status"}] == 0 || metrics[[2]string{id, "success"}] == 0 {
+		t.Fatalf("missing import outcome metrics: %v", metrics)
+	}
+	failBytes.Store(false)
 	invalidCurrency.Store(true)
 	current := h.want(owner, "GET", "/api/v1/providers/"+id+"/billing-import", nil, nil, 200)
 	headers := etagHeader(current)
@@ -475,7 +666,7 @@ func TestGoogleBillingImportEndToEnd(t *testing.T) {
 	}
 	after := h.want(owner, "GET", fmt.Sprintf("/api/v1/providers/%s/invoiced-costs?start=%s&end=%s", id, dayText, end), nil, nil, 200)["items"].([]any)
 	status := h.want(owner, "GET", "/api/v1/providers/"+id+"/billing-import", nil, nil, 200)["status"].(map[string]any)
-	if !reflect.DeepEqual(items, after) || status["last_error_code"] != "response" {
+	if !reflect.DeepEqual(beforeInvalid, after) || status["last_error_code"] != "response" {
 		t.Fatalf("malformed currency changed invoiced costs or was accepted: %v %v", after, status)
 	}
 	blockQuery.Store(true)

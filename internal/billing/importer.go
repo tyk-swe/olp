@@ -197,6 +197,36 @@ func window(through *string, today time.Time) (start, end time.Time) {
 }
 
 // importOne fetches one provider's window and commits its days.
+func (i *Importer) completedBillingPeriods(ctx context.Context, row *importRow, earliest, today time.Time) (map[string]struct{}, error) {
+	digest, err := scopeDigest(row.Source, row.Scope)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := i.Pool.Query(ctx, `SELECT period_start FROM olp.provider_billing_revisions
+		WHERE provider_id=$1::uuid AND source=$2 AND scope_digest=$3
+		AND period_start < date_trunc('month', $4::date) - interval '1 month'
+		AND covered_from <= GREATEST(period_start, $5::date)
+		AND covered_through >= (period_start + interval '1 month')::date - 1`,
+		row.ProviderID, row.Source, digest[:], today.Format(dayFormat), earliest.Format(dayFormat))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	completed := map[string]struct{}{}
+	for rows.Next() {
+		var month time.Time
+		if err := rows.Scan(&month); err != nil {
+			return nil, err
+		}
+		period := month.Format("20060102") + "-" + month.AddDate(0, 1, 0).Format("20060102")
+		completed[period] = struct{}{}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return completed, nil
+}
+
 func (i *Importer) importOne(ctx context.Context, row *importRow) error {
 	cfg, err := loadProviderConfig(ctx, i.Pool, row.ProviderID)
 	if err != nil {
@@ -229,6 +259,16 @@ func (i *Importer) importOne(ctx context.Context, row *importRow) error {
 	if err != nil {
 		return failFetch("endpoint", err)
 	}
+	if row.Source == SourceGoogle {
+		bounded := *client
+		bounded.Timeout = requestTimout
+		authClient, err := i.googleAuthenticationClient(ctx, cfg)
+		if err != nil {
+			return failFetch("endpoint", err)
+		}
+		defer authClient.CloseIdleConnections()
+		return i.importGoogle(ctx, row, &bounded, connectors.NewGoogleBillingAuth(i.Egress, authClient), key)
+	}
 	var scope Scope
 	if err := json.Unmarshal(row.Scope, &scope); err != nil {
 		return failFetch("response", err)
@@ -241,16 +281,6 @@ func (i *Importer) importOne(ctx context.Context, row *importRow) error {
 		days, err = fetchOpenAI(ctx, client, cfg.Endpoint, key, scope, start, end)
 	case SourceAnthropic:
 		days, err = fetchAnthropic(ctx, client, cfg.Endpoint, key, scope, start, end)
-	case SourceGoogle:
-		bounded := *client
-		bounded.Timeout = requestTimout
-		authClient, clientErr := i.googleAuthenticationClient(ctx, cfg)
-		if clientErr != nil {
-			return failFetch("endpoint", clientErr)
-		}
-		defer authClient.CloseIdleConnections()
-		auth := connectors.NewGoogleBillingAuth(i.Egress, authClient)
-		days, err = fetchGoogle(ctx, &bounded, auth, row.Scope, key, start, end)
 	default:
 		err = failFetch("response", errors.New("unsupported billing source"))
 	}

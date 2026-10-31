@@ -285,7 +285,7 @@ owners. **Dependencies:** existing importer and reconciliation contracts.
 - [ ] **RM9.2 AWS CUR import:** implement scoped ingestion, pagination,
   empty-day handling, deduplication, restatements and reconciliation without
   duplicate charges.
-- [ ] **RM9.3 Google billing import:** implement scoped ingestion,
+- [x] **RM9.3 Google billing import:** implement scoped ingestion,
   pagination, empty-day handling, deduplication, restatements and reconciliation
   for the Google source.
 - [ ] **RM9.4 Azure Cost Management import:** implement scoped ingestion,
