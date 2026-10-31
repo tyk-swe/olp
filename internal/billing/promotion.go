@@ -38,12 +38,14 @@ func ReadImportState(ctx context.Context, q access.Queryer, providerID string) (
 
 // ImportCredential stores a billing credential under its purpose and returns
 // the new secret's id.
-func ImportCredential(ctx context.Context, tx pgx.Tx, keys *secrets.KeyRing, installation, credential string) (string, error) {
-	if err := ValidCredential(credential); err != nil {
+func ImportCredential(ctx context.Context, tx pgx.Tx, keys *secrets.KeyRing, installation, source, credential string) (string, error) {
+	document, err := encodeCredential(source, credential)
+	if err != nil {
 		return "", err
 	}
+	defer clear(document)
 	id := access.NewID()
-	if err := keys.Store(ctx, tx, installation, id, secrets.BillingCredential, []byte(credential), nil); err != nil {
+	if err := keys.Store(ctx, tx, installation, id, secrets.BillingCredential, document, nil); err != nil {
 		return "", err
 	}
 	return id, nil
@@ -51,7 +53,7 @@ func ImportCredential(ctx context.Context, tx pgx.Tx, keys *secrets.KeyRing, ins
 
 // ImportCredentialMatches reports whether the stored credential holds the
 // same material as the supplied secret.
-func ImportCredentialMatches(ctx context.Context, q access.Queryer, keys *secrets.KeyRing, installation string, credentialID *string, credential string) (bool, error) {
+func ImportCredentialMatches(ctx context.Context, q access.Queryer, keys *secrets.KeyRing, installation, source string, credentialID *string, credential string) (bool, error) {
 	if credentialID == nil {
 		return false, nil
 	}
@@ -63,7 +65,12 @@ func ImportCredentialMatches(ctx context.Context, q access.Queryer, keys *secret
 		return false, err
 	}
 	defer clear(current)
-	return sha256.Sum256(current) == sha256.Sum256([]byte(credential)), nil
+	key, err := decodeCredential(source, current)
+	if err != nil {
+		return false, err
+	}
+	defer clear(key)
+	return sha256.Sum256(key) == sha256.Sum256([]byte(credential)), nil
 }
 
 // ApplyImport creates, replaces or deletes a provider's billing import to
@@ -93,6 +100,9 @@ func ApplyImport(ctx context.Context, tx pgx.Tx, providerID, source string, enab
 			source=$2,credential_id=$3::uuid,scope=$4::jsonb,enabled=$5,etag=$6,updated_at=now()
 			WHERE provider_id=$1::uuid`,
 			providerID, source, credentialID, canonical, enabled, access.NewID())
+		if err == nil {
+			err = resetImportRevisions(ctx, tx, providerID, existing.Source, source, existing.Scope, canonical)
+		}
 		if err == nil && old != nil {
 			_, err = tx.Exec(ctx, `DELETE FROM olp.secrets WHERE id=$1::uuid AND purpose=$2`, *old, secrets.BillingCredential)
 		}

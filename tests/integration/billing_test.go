@@ -16,21 +16,25 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/shopspring/decimal"
 
 	"github.com/tyk-swe/olp/internal/billing"
+	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/egress"
+	"github.com/tyk-swe/olp/internal/secrets"
 )
 
 // billingFake serves the documented-shape vendor fixtures as an admin cost
 // endpoint, recording the query of every request it answers.
 type billingFake struct {
-	mu      sync.Mutex
-	path    string
-	pages   map[string]string // page token -> fixture name; "" is page 1
-	shift   map[string]string // fixture text rewrites (dates near today)
-	queries []url.Values
-	fails   int
-	server  *httptest.Server
+	mu                    sync.Mutex
+	path                  string
+	pages                 map[string]string // page token -> fixture name; "" is page 1
+	shift                 map[string]string // fixture text rewrites (dates near today)
+	queries               []url.Values
+	fails                 int
+	expectedAuthorization string
+	server                *httptest.Server
 }
 
 // billingDays are the three consecutive UTC days the shifted fixtures cover,
@@ -47,7 +51,7 @@ func newBillingFake(t *testing.T, path string, pages map[string]string, shift ma
 		f.mu.Lock()
 		defer f.mu.Unlock()
 		f.queries = append(f.queries, r.URL.Query())
-		if r.URL.Path != f.path || f.fails > 0 {
+		if r.URL.Path != f.path || f.fails > 0 || (f.expectedAuthorization != "" && r.Header.Get("Authorization") != f.expectedAuthorization) {
 			f.fails--
 			w.WriteHeader(http.StatusUnauthorized)
 			return
@@ -381,3 +385,242 @@ func TestBillingImportEndToEnd(t *testing.T) {
 // slot another.
 
 // Dropping billing_import from the entry deletes the import on apply.
+
+func TestBillingImportPreservesCurrencies(t *testing.T) {
+	h := newAccessHarness(t)
+	owner := h.owner()
+	day1, day2, day3 := billingDays()
+	fake := newBillingFake(t, "/v1/organization/costs", map[string]string{
+		"": "openai_costs_page1.json", "page-2-token": "openai_costs_page2.json",
+	}, map[string]string{
+		"1759104000": fmt.Sprint(day1.Unix()),
+		"1759190400": fmt.Sprint(day2.Unix()),
+		"1759276800": fmt.Sprint(day3.Unix()),
+		"\"value\": 0.2,\n            \"currency\": \"usd\"": "\"value\": -0.1,\n            \"currency\": \"eur\"",
+		"\"value\": 1234.5678901234,":                        "\"value\": 0,",
+		"\"value\": 5,":                                      "\"value\": 0,",
+	})
+	provider := billingProvider(h, owner, "Currencies", "openai", fake.server.URL+"/v1", nil)
+	providerID := billingProviderID(provider)
+	billingPut(h, owner, providerID, map[string]any{"credential": "sk-admin-" + strings.Repeat("k", 30)}, provider["etag"].(string), 201)
+	if err := billingImporter(h, t).Pass(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	start := day1.Format("2006-01-02")
+	end := day1.AddDate(0, 0, 1).Format("2006-01-02")
+	costs := h.want(owner, "GET", fmt.Sprintf("/api/v1/providers/%s/invoiced-costs?start=%s&end=%s", providerID, start, end), nil, nil, 200)
+	amounts := map[string]decimal.Decimal{}
+	for _, raw := range costs["items"].([]any) {
+		item := raw.(map[string]any)
+		if item["line_item"] != "gpt-4o, input_tokens" {
+			continue
+		}
+		amount, err := decimal.NewFromString(item["amount"].(string))
+		if err != nil {
+			t.Fatal(err)
+		}
+		amounts[item["currency"].(string)] = amount
+	}
+	if len(amounts) != 2 || !amounts["USD"].Equal(decimal.RequireFromString("0.1")) || !amounts["EUR"].Equal(decimal.RequireFromString("-0.1")) {
+		t.Fatalf("same line item must preserve its amounts by currency: %v", amounts)
+	}
+	report := h.want(owner, "GET", fmt.Sprintf("/api/v1/usage/reconciliation?start=%s&end=%s&provider_id=%s", start, end, providerID), nil, nil, 200)
+	items := report["items"].([]any)
+	if len(items) != 1 {
+		t.Fatalf("reconciliation items: %v", items)
+	}
+	item := items[0].(map[string]any)
+	if item["capture_rate"] != nil || item["capture_rate_unavailable_reason"] != "currency_mismatch" {
+		t.Fatalf("multi-currency day must not have a capture rate: %v", item)
+	}
+	totals := report["totals"].([]any)[0].(map[string]any)
+	if totals["capture_rate"] != nil || totals["capture_rate_unavailable_reason"] != "currency_mismatch" {
+		t.Fatalf("multi-currency total must not have a capture rate: %v", totals)
+	}
+}
+
+func TestBillingImportPreservesPrecision(t *testing.T) {
+	h := newAccessHarness(t)
+	owner := h.owner()
+	day1, day2, day3 := billingDays()
+	fake := newBillingFake(t, "/v1/organization/costs", map[string]string{
+		"": "openai_costs_page1.json", "page-2-token": "openai_costs_page2.json",
+	}, map[string]string{
+		"1759104000":      fmt.Sprint(day1.Unix()),
+		"1759190400":      fmt.Sprint(day2.Unix()),
+		"1759276800":      fmt.Sprint(day3.Unix()),
+		"\"value\": 0.1,": "\"value\": 0.00000000000000000001,",
+	})
+	provider := billingProvider(h, owner, "Precision", "openai", fake.server.URL+"/v1", nil)
+	providerID := billingProviderID(provider)
+	billingPut(h, owner, providerID, map[string]any{"credential": "sk-admin-" + strings.Repeat("k", 30)}, provider["etag"].(string), 201)
+	if err := billingImporter(h, t).Pass(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	start := day1.Format("2006-01-02")
+	end := day1.AddDate(0, 0, 1).Format("2006-01-02")
+	costs := h.want(owner, "GET", fmt.Sprintf("/api/v1/providers/%s/invoiced-costs?start=%s&end=%s", providerID, start, end), nil, nil, 200)
+	for _, raw := range costs["items"].([]any) {
+		item := raw.(map[string]any)
+		if item["line_item"] != "gpt-4o, input_tokens" {
+			continue
+		}
+		amount, err := decimal.NewFromString(item["amount"].(string))
+		if err != nil || !amount.Equal(decimal.RequireFromString("0.20000000000000000001")) {
+			t.Fatalf("invoice amount lost precision: %v, %v", item, err)
+		}
+		return
+	}
+	t.Fatalf("invoice line item missing: %v", costs)
+}
+
+func TestBillingImportCredentialCompatibility(t *testing.T) {
+	h := newAccessHarness(t)
+	owner := h.owner()
+	day1, day2, day3 := billingDays()
+	fake := newBillingFake(t, "/v1/organization/costs", map[string]string{
+		"": "openai_costs_page1.json", "page-2-token": "openai_costs_page2.json",
+	}, map[string]string{
+		"1759104000": fmt.Sprint(day1.Unix()),
+		"1759190400": fmt.Sprint(day2.Unix()),
+		"1759276800": fmt.Sprint(day3.Unix()),
+	})
+	provider := billingProvider(h, owner, "Compatibility", "openai", fake.server.URL+"/v1", nil)
+	providerID := billingProviderID(provider)
+	path := "/api/v1/providers/" + providerID + "/billing-import"
+	billingPut(h, owner, providerID, map[string]any{}, provider["etag"].(string), 422)
+	billingPut(h, owner, providerID, map[string]any{"credential": nil}, provider["etag"].(string), 422)
+	key := `{"source":"openai_costs","api_key":"` + strings.Repeat("k", 30) + `"}`
+	fake.expectedAuthorization = "Bearer " + key
+	created := billingPut(h, owner, providerID, map[string]any{"credential": key}, provider["etag"].(string), 201)
+	if strings.Contains(fmt.Sprint(created), key) {
+		t.Fatal("create response exposed the billing credential")
+	}
+	importer := billingImporter(h, t)
+	checkImport := func() {
+		t.Helper()
+		if err := importer.Pass(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+		result := h.want(owner, "GET", path, nil, nil, 200)
+		status := result["status"].(map[string]any)
+		if _, ok := status["source_revision"]; !ok {
+			t.Fatal("billing import status did not include the source revision")
+		}
+		if status["last_success_at"] == nil || status["last_error_code"] != nil {
+			t.Fatalf("billing credential did not authenticate: %v", status)
+		}
+		if strings.Contains(fmt.Sprint(result), key) {
+			t.Fatal("import response exposed the billing credential")
+		}
+	}
+	schedule := func() {
+		t.Helper()
+		current := h.want(owner, "GET", path, nil, nil, 200)
+		headers := etagHeader(current)
+		headers["Idempotency-Key"] = uuid.NewString()
+		h.want(owner, "POST", path+"/run", nil, headers, 202)
+	}
+	checkImport()
+	current := h.want(owner, "GET", path, nil, nil, 200)
+	billingPut(h, owner, providerID, map[string]any{}, current["etag"].(string), 200)
+	schedule()
+	checkImport()
+	var credentialID string
+	if err := h.Pool.QueryRow(t.Context(), `SELECT credential_id::text FROM olp.provider_billing_imports WHERE provider_id=$1::uuid`, providerID).Scan(&credentialID); err != nil {
+		t.Fatal(err)
+	}
+	tx, err := h.Pool.Begin(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(t.Context())
+	if err := h.Ring2().Store(t.Context(), tx, h.Server.Installation, credentialID, secrets.BillingCredential, []byte(key), nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Commit(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	schedule()
+	checkImport()
+	export := h.want(owner, "GET", "/api/v1/configuration/export", nil, nil, 200)
+	if strings.Contains(fmt.Sprint(export), key) {
+		t.Fatal("configuration export exposed the billing credential")
+	}
+	body := map[string]any{"document": export["document"], "secret_bindings": map[string]any{"Compatibility/billing": key}}
+	h.want(owner, "POST", "/api/v1/configuration/plan", body, nil, 200)
+	h.want(owner, "POST", "/api/v1/configuration/apply", body, idem("billing-compatibility"), 200)
+	schedule()
+	checkImport()
+	rotated := "sk-admin-" + strings.Repeat("r", 30)
+	rotatedBody := map[string]any{"document": export["document"], "secret_bindings": map[string]any{"Compatibility/billing": rotated}}
+	h.want(owner, "POST", "/api/v1/configuration/apply", rotatedBody, idem("billing-rotate"), 200)
+	fake.mu.Lock()
+	fake.expectedAuthorization = "Bearer " + rotated
+	fake.mu.Unlock()
+	schedule()
+	checkImport()
+	rotatedExport := h.want(owner, "GET", "/api/v1/configuration/export", nil, nil, 200)
+	if strings.Contains(fmt.Sprint(rotatedExport), rotated) {
+		t.Fatal("configuration export exposed the rotated billing credential")
+	}
+	h.want(owner, "POST", "/api/v1/configuration/apply", rotatedBody, idem("billing-unchanged"), 200)
+	schedule()
+	checkImport()
+}
+
+func TestBillingImportMigrationPreservesHistory(t *testing.T) {
+	h := newAccessHarness(t)
+	owner := h.owner()
+	day1, day2, day3 := billingDays()
+	fake := newBillingFake(t, "/v1/organization/costs", map[string]string{
+		"": "openai_costs_page1.json", "page-2-token": "openai_costs_page2.json",
+	}, map[string]string{
+		"1759104000": fmt.Sprint(day1.Unix()),
+		"1759190400": fmt.Sprint(day2.Unix()),
+		"1759276800": fmt.Sprint(day3.Unix()),
+	})
+	provider := billingProvider(h, owner, "Migration", "openai", fake.server.URL+"/v1", nil)
+	providerID := billingProviderID(provider)
+	billingPut(h, owner, providerID, map[string]any{"credential": "sk-admin-" + strings.Repeat("k", 30)}, provider["etag"].(string), 201)
+	if err := billingImporter(h, t).Pass(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	path := fmt.Sprintf("/api/v1/providers/%s/invoiced-costs?start=%s&end=%s", providerID, day1.Format("2006-01-02"), day3.AddDate(0, 0, 1).Format("2006-01-02"))
+	before := h.want(owner, "GET", path, nil, nil, 200)["items"].([]any)
+	if len(before) == 0 {
+		t.Fatal("invoice history was empty before migration")
+	}
+	if _, err := h.Pool.Exec(t.Context(), `
+		DROP TABLE olp.provider_billing_revisions;
+		ALTER TABLE olp.provider_billing_imports DROP COLUMN source_revision;
+		ALTER TABLE olp.provider_invoiced_costs
+			DROP COLUMN source_revision,
+			DROP CONSTRAINT provider_invoiced_costs_pkey,
+			ALTER COLUMN amount TYPE numeric(30,12),
+			ADD PRIMARY KEY (provider_id, day, line_item);
+		DELETE FROM olp.migrations WHERE version='0123_billing_currency_revision.sql';`); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.Migrate(t.Context(), h.Pool); err != nil {
+		t.Fatal(err)
+	}
+	after := h.want(owner, "GET", path, nil, nil, 200)["items"].([]any)
+	if len(after) != len(before) {
+		t.Fatalf("invoice history changed after migration: before=%v after=%v", before, after)
+	}
+	for index := range before {
+		oldItem := before[index].(map[string]any)
+		newItem := after[index].(map[string]any)
+		for _, field := range []string{"day", "line_item", "currency", "source", "fetched_at"} {
+			if oldItem[field] != newItem[field] {
+				t.Fatalf("invoice history changed after migration: before=%v after=%v", oldItem, newItem)
+			}
+		}
+		oldAmount, oldErr := decimal.NewFromString(oldItem["amount"].(string))
+		newAmount, newErr := decimal.NewFromString(newItem["amount"].(string))
+		if oldErr != nil || newErr != nil || !oldAmount.Equal(newAmount) {
+			t.Fatalf("invoice amount changed after migration: before=%v after=%v", oldItem, newItem)
+		}
+	}
+}

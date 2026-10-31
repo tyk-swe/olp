@@ -1,17 +1,21 @@
 package billing
 
 import (
+	"bytes"
+	"cmp"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"log/slog"
+	"maps"
 	"net/http"
-	"sort"
+	"slices"
 	"sync"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/tyk-swe/olp/internal/access"
@@ -210,9 +214,14 @@ func (i *Importer) importOne(ctx context.Context, row *importRow) error {
 	if row.CredentialID == nil {
 		return failFetch("credential", errors.New("no billing credential is stored"))
 	}
-	key, err := i.Keys.Read(ctx, i.Pool, i.Installation, *row.CredentialID, secrets.BillingCredential)
+	stored, err := i.Keys.Read(ctx, i.Pool, i.Installation, *row.CredentialID, secrets.BillingCredential)
 	if err != nil {
 		return failFetch("credential", errors.New("billing credential could not be read"))
+	}
+	defer clear(stored)
+	key, err := decodeCredential(row.Source, stored)
+	if err != nil {
+		return failFetch("credential", err)
 	}
 	defer clear(key)
 	client, err := i.client(ctx, row.ProviderID, cfg, key)
@@ -225,7 +234,7 @@ func (i *Importer) importOne(ctx context.Context, row *importRow) error {
 	}
 	today := time.Now().UTC().Truncate(24 * time.Hour)
 	start, end := window(row.ImportedThrough, today)
-	var days map[string]map[string]lineSum
+	var days map[string]map[lineKey]lineSum
 	switch row.Source {
 	case SourceOpenAI:
 		days, err = fetchOpenAI(ctx, client, cfg.Endpoint, key, scope, start, end)
@@ -237,7 +246,7 @@ func (i *Importer) importOne(ctx context.Context, row *importRow) error {
 	if err != nil {
 		return err
 	}
-	return i.storeDays(ctx, row, days)
+	return i.storeDays(ctx, row, "", nil, days)
 }
 
 // client builds the connection-scoped HTTP client the import's provider
@@ -280,36 +289,54 @@ func loadProviderConfig(ctx context.Context, q access.Queryer, providerID string
 	return &cfg, nil
 }
 
-// storeDays commits one successful import: every bucket the vendor returned
-// replaces that day's stored invoice rows wholesale, including buckets with
-// no results, which leave the day with an explicit invoiced zero.
-func (i *Importer) storeDays(ctx context.Context, row *importRow, days map[string]map[string]lineSum) error {
+type sourceRevision struct {
+	id         string
+	observedAt time.Time
+}
+
+func (i *Importer) storeDays(ctx context.Context, row *importRow, periodStart string, revision *sourceRevision, days map[string]map[lineKey]lineSum) error {
 	tx, err := i.Pool.Begin(ctx)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback(ctx)
-	daysList := make([]string, 0, len(days))
-	for day := range days {
-		daysList = append(daysList, day)
+	var appliedRevision *string
+	if revision != nil {
+		tag, err := tx.Exec(ctx, `INSERT INTO olp.provider_billing_revisions
+			(provider_id,period_start,source_revision,observed_at) VALUES($1::uuid,$2::date,$3,$4)
+			ON CONFLICT (provider_id,period_start) DO UPDATE SET
+				source_revision=EXCLUDED.source_revision,observed_at=EXCLUDED.observed_at
+			WHERE olp.provider_billing_revisions.observed_at < EXCLUDED.observed_at
+				AND olp.provider_billing_revisions.source_revision <> EXCLUDED.source_revision`,
+			row.ProviderID, periodStart, revision.id, revision.observedAt)
+		if err != nil {
+			return err
+		}
+		if tag.RowsAffected() != 0 {
+			appliedRevision = &revision.id
+		}
 	}
-	sort.Strings(daysList)
+	var daysList []string
+	if revision == nil || appliedRevision != nil {
+		daysList = slices.Sorted(maps.Keys(days))
+	}
 	for _, day := range daysList {
 		if _, err := tx.Exec(ctx, `DELETE FROM olp.provider_invoiced_costs WHERE provider_id=$1::uuid AND day=$2::date`,
 			row.ProviderID, day); err != nil {
 			return err
 		}
 		items := days[day]
-		names := make([]string, 0, len(items))
-		for name := range items {
-			names = append(names, name)
-		}
-		sort.Strings(names)
-		for _, name := range names {
-			sum := items[name]
+		keys := slices.SortedFunc(maps.Keys(items), func(a, b lineKey) int {
+			if result := cmp.Compare(a.item, b.item); result != 0 {
+				return result
+			}
+			return cmp.Compare(a.currency, b.currency)
+		})
+		for _, key := range keys {
+			sum := items[key]
 			if _, err := tx.Exec(ctx, `INSERT INTO olp.provider_invoiced_costs
-				(provider_id,day,line_item,currency,amount,source) VALUES($1::uuid,$2::date,$3,$4,$5,$6)`,
-				row.ProviderID, day, name, sum.currency, sum.amount.String(), row.Source); err != nil {
+				(provider_id,day,line_item,currency,amount,source,source_revision) VALUES($1::uuid,$2::date,$3,$4,$5,$6,$7)`,
+				row.ProviderID, day, key.item, key.currency, sum.amount.String(), row.Source, appliedRevision); err != nil {
 				return err
 			}
 		}
@@ -322,8 +349,9 @@ func (i *Importer) storeDays(ctx context.Context, row *importRow, days map[strin
 		last_import_at=now(),last_success_at=now(),last_error_code=NULL,
 		consecutive_failures=0,next_import_at=now()+interval '1 hour',updated_at=now(),
 		imported_from=LEAST(COALESCE(imported_from,$2::date),$2::date),
-		imported_through=GREATEST(COALESCE(imported_through,$3::date),$3::date)
-		WHERE provider_id=$1::uuid`, row.ProviderID, minDay, maxDay); err != nil {
+		imported_through=GREATEST(COALESCE(imported_through,$3::date),$3::date),
+		source_revision=COALESCE($4,source_revision)
+		WHERE provider_id=$1::uuid`, row.ProviderID, minDay, maxDay, appliedRevision); err != nil {
 		return err
 	}
 	return tx.Commit(ctx)
@@ -366,4 +394,19 @@ func (i *Importer) purge(ctx context.Context) error {
 		}
 	}
 	return nil
+}
+
+func resetImportRevisions(ctx context.Context, tx pgx.Tx, providerID, previousSource, source string, previousScope, scope json.RawMessage) error {
+	canonical, err := ValidateScope(previousSource, previousScope)
+	if err != nil {
+		return err
+	}
+	if previousSource == source && bytes.Equal(canonical, scope) {
+		return nil
+	}
+	if _, err := tx.Exec(ctx, `DELETE FROM olp.provider_billing_revisions WHERE provider_id=$1::uuid`, providerID); err != nil {
+		return err
+	}
+	_, err = tx.Exec(ctx, `UPDATE olp.provider_billing_imports SET source_revision=NULL WHERE provider_id=$1::uuid`, providerID)
+	return err
 }

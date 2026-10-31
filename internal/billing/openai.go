@@ -14,7 +14,7 @@ import (
 // Query array encoding follows openai-go v3.74.0
 // AdminOrganizationUsageCostsParams (adminorganizationusage.go), which uses
 // apiquery.ArrayQueryFormatBrackets: group_by[]=…&project_ids[]=….
-func fetchOpenAI(ctx context.Context, client *http.Client, endpoint *string, key []byte, scope Scope, start, end time.Time) (map[string]map[string]lineSum, error) {
+func fetchOpenAI(ctx context.Context, client *http.Client, endpoint *string, key []byte, scope Scope, start, end time.Time) (map[string]map[lineKey]lineSum, error) {
 	if endpoint == nil {
 		return nil, failFetch("endpoint", errors.New("the provider has no endpoint"))
 	}

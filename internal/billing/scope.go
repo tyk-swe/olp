@@ -98,8 +98,6 @@ func ValidateScope(source string, raw json.RawMessage) (json.RawMessage, error) 
 	return canonical, nil
 }
 
-// ValidCredential holds a billing import credential to the same discipline as
-// an API key: printable, bounded, and impossible to confuse with a document.
 func ValidCredential(credential string) error {
 	if n := len(credential); n < 20 || n > 512 {
 		return access.Invalid("credential", "credential must be 20 to 512 bytes")

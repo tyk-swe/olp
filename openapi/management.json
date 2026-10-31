@@ -26021,6 +26021,13 @@
                   "null"
                 ],
                 "format": "date"
+              },
+              "source_revision": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "Identifier of the most recently applied source revision, if the source provides one."
               }
             },
             "required": [
@@ -26029,7 +26036,8 @@
               "last_success_at",
               "last_error_code",
               "imported_from",
-              "imported_through"
+              "imported_through",
+              "source_revision"
             ]
           }
         },

@@ -234,14 +234,14 @@ func (s *Server) reconciliation(r *http.Request, p access.Principal) (access.Rep
 				r := "not_imported"
 				reason = &r
 				total.unimported = true
+			case invoicedCurrency != nil && *invoicedCurrency != pricingCurrency:
+				r := "currency_mismatch"
+				reason = &r
+				total.currencyMismatch = true
 			case invoicedAmount.IsZero():
 				r := "zero_invoice"
 				reason = &r
 				total.zeroInvoice = true
-			case invoicedCurrency == nil || *invoicedCurrency != pricingCurrency:
-				r := "currency_mismatch"
-				reason = &r
-				total.currencyMismatch = true
 			default:
 				v := attributed.Div(*invoicedAmount).Round(6).String()
 				rate = &v
@@ -306,11 +306,11 @@ func (s *Server) reconciliation(r *http.Request, p access.Principal) (access.Rep
 		case total.invoicedDays == 0:
 			r := "not_imported"
 			reason = &r
-		case total.invoiced.IsZero():
-			r := "zero_invoice"
-			reason = &r
 		case total.currencyMismatch:
 			r := "currency_mismatch"
+			reason = &r
+		case total.invoiced.IsZero():
+			r := "zero_invoice"
 			reason = &r
 		default:
 			v := total.attributedCovered.Div(total.invoiced).Round(6).String()

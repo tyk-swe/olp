@@ -30,13 +30,14 @@ type importRow struct {
 	ConsecutiveFailures int
 	ImportedFrom        *string
 	ImportedThrough     *string
+	SourceRevision      *string
 }
 
 var errImportMissing = access.Fail(404, "not_found", "The provider has no billing import.")
 
 const importColumns = `provider_id::text,source,credential_id::text,scope,enabled,etag::text,
 	next_import_at,last_import_at,last_success_at,last_error_code,consecutive_failures,
-	imported_from::text,imported_through::text`
+	imported_from::text,imported_through::text,source_revision`
 
 // qualifiedImportColumns binds every importColumns column to a table alias,
 // for queries that join another table sharing names such as etag.
@@ -56,7 +57,7 @@ func scanImport(row pgx.Row) (*importRow, error) {
 	var r importRow
 	err := row.Scan(&r.ProviderID, &r.Source, &r.CredentialID, &r.Scope, &r.Enabled, &r.ETag,
 		&r.NextImportAt, &r.LastImportAt, &r.LastSuccessAt, &r.LastErrorCode, &r.ConsecutiveFailures,
-		&r.ImportedFrom, &r.ImportedThrough)
+		&r.ImportedFrom, &r.ImportedThrough, &r.SourceRevision)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, errImportMissing
 	}
@@ -88,6 +89,7 @@ func importDocument(r *importRow) map[string]any {
 			"last_error_code":  r.LastErrorCode,
 			"imported_from":    r.ImportedFrom,
 			"imported_through": r.ImportedThrough,
+			"source_revision":  r.SourceRevision,
 		},
 	}
 }
@@ -196,11 +198,13 @@ func (s *Server) putImport(r *http.Request, _ access.Principal) (access.Reply, e
 	case credentialNull:
 		return access.Reply{}, access.Invalid("credential", "credential cannot be null; delete the billing import instead")
 	case credential != nil:
-		if err := ValidCredential(*credential); err != nil {
+		document, err := encodeCredential(source, *credential)
+		if err != nil {
 			return access.Reply{}, err
 		}
+		defer clear(document)
 		newID := access.NewID()
-		if err := s.Access.Keys.Store(r.Context(), tx, s.Access.Installation, newID, secrets.BillingCredential, []byte(*credential), nil); err != nil {
+		if err := s.Access.Keys.Store(r.Context(), tx, s.Access.Installation, newID, secrets.BillingCredential, document, nil); err != nil {
 			return access.Reply{}, err
 		}
 		credentialID = &newID
@@ -225,6 +229,11 @@ func (s *Server) putImport(r *http.Request, _ access.Principal) (access.Reply, e
 	}
 	if err != nil {
 		return access.Reply{}, err
+	}
+	if existing != nil {
+		if err := resetImportRevisions(r.Context(), tx, id, existing.Source, source, existing.Scope, scope); err != nil {
+			return access.Reply{}, err
+		}
 	}
 	// The row no longer references the replaced credential, so the old secret
 	// can go once the pointer moved.
@@ -365,7 +374,7 @@ func (s *Server) invoicedCosts(r *http.Request, p access.Principal) (access.Repl
 	rows, err := s.Access.Pool.Query(r.Context(), `SELECT day::text,line_item,btrim(currency),amount::text,source,fetched_at
 		FROM olp.provider_invoiced_costs
 		WHERE provider_id=$1::uuid AND day>=$2::date AND day<$3::date
-		ORDER BY day,line_item`, id, start.Format(dayFormat), end.Format(dayFormat))
+		ORDER BY day,line_item,currency`, id, start.Format(dayFormat), end.Format(dayFormat))
 	if err != nil {
 		return access.Reply{}, err
 	}

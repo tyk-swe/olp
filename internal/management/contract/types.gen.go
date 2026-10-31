@@ -8103,6 +8103,9 @@ type BillingImport struct {
 		LastImportAt  nullable.Nullable[time.Time] `json:"last_import_at"`
 		LastSuccessAt nullable.Nullable[time.Time] `json:"last_success_at"`
 		NextImportAt  nullable.Nullable[time.Time] `json:"next_import_at"`
+
+		// SourceRevision Identifier of the most recently applied source revision, if the source provides one.
+		SourceRevision nullable.Nullable[string] `json:"source_revision"`
 	} `json:"status"`
 }
 
