@@ -113,34 +113,33 @@
 
   $effect(() => {
     const current = detail;
-    if (current && !initialized) {
-      scopeText = scopeLines(current);
-      if ('billing_scope' in current.scope) {
-        const scope = current.scope;
-        billingScope = scope.billing_scope;
-        exportName = scope.export_name;
-        storageAccount = scope.storage_account;
-        container = scope.container;
-        prefix = scope.prefix ?? '';
-      } else if ('billing_account_id' in current.scope) {
-        const scope = current.scope;
-        billingAccountID = scope.billing_account_id;
-        bigQueryProjectID = scope.bigquery_project_id;
-        datasetID = scope.dataset_id;
-        tableID = scope.table_id;
-        googleAuthMode = 'keep';
-      } else if ('payer_account_id' in current.scope) {
-        const scope = current.scope;
-        payerAccount = scope.payer_account_id;
-        bucket = scope.bucket;
-        reportPrefix = scope.report_prefix;
-        region = scope.region;
-        linkedAccounts = (scope.linked_account_ids ?? []).join('\n');
-      }
-      enabled = current.enabled;
-      initialized = true;
-    }
+    if (current && !initialized) hydrate(current);
   });
+
+  function hydrate(document: BillingImport | null) {
+    const scope = document?.scope;
+    scopeText = document ? scopeLines(document) : '';
+    const aws = scope && 'payer_account_id' in scope ? scope : null;
+    payerAccount = aws?.payer_account_id ?? '';
+    bucket = aws?.bucket ?? '';
+    reportPrefix = aws?.report_prefix ?? '';
+    region = aws?.region ?? '';
+    linkedAccounts = (aws?.linked_account_ids ?? []).join('\n');
+    const azureScope = scope && 'billing_scope' in scope ? scope : null;
+    billingScope = azureScope?.billing_scope ?? '';
+    exportName = azureScope?.export_name ?? '';
+    storageAccount = azureScope?.storage_account ?? '';
+    container = azureScope?.container ?? '';
+    prefix = azureScope?.prefix ?? '';
+    const google = scope && 'billing_account_id' in scope ? scope : null;
+    billingAccountID = google?.billing_account_id ?? '';
+    bigQueryProjectID = google?.bigquery_project_id ?? '';
+    datasetID = google?.dataset_id ?? '';
+    tableID = google?.table_id ?? '';
+    googleAuthMode = google ? 'keep' : 'service_account';
+    enabled = document?.enabled ?? true;
+    initialized = true;
+  }
 
   function scopeLines(document: BillingImport): string {
     const scope = document.scope;
@@ -388,6 +387,41 @@
     }
   }
 
+  async function reload() {
+    if (busy) return;
+    const isCurrent = captureOwner();
+    busy = true;
+    error = notice = '';
+    try {
+      const result = await billing.refetch();
+      if (!isCurrent()) return;
+      if (result.error) {
+        error = errorMessage(
+          result.error,
+          'The billing import could not be reloaded.'
+        );
+        return;
+      }
+      hydrate(result.data ?? null);
+      adminKey = '';
+      awsAuthMode = 'static';
+      accessKeyId = secretAccessKey = sessionToken = '';
+      replaceCredential = false;
+      authMode = '';
+      tenantId = clientId = clientSecret = '';
+      conflicted = false;
+      intent.reset();
+    } catch (cause) {
+      if (isCurrent())
+        error = errorMessage(
+          cause,
+          'The billing import could not be reloaded.'
+        );
+    } finally {
+      if (isCurrent()) busy = false;
+    }
+  }
+
   async function runNow() {
     if (!canManage || busy) return;
     const isCurrent = captureOwner();
@@ -452,13 +486,7 @@
     {#if error}<div class="inline-problem" role="alert">{error}</div>{/if}
     {#if notice}<p class="section-help" role="status">{notice}</p>{/if}
     {#if conflicted}
-      <ConflictNotice
-        notice="conflict"
-        onReload={async () => {
-          await billing.refetch();
-        }}
-        disabled={busy}
-      />
+      <ConflictNotice notice="conflict" onReload={reload} disabled={busy} />
     {/if}
 
     {#if billing.isPending}

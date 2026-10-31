@@ -2,6 +2,7 @@ import { QueryClient } from '@tanstack/svelte-query';
 import { flushSync, mount, unmount } from 'svelte';
 import { expect, it, onTestFinished, vi } from 'vitest';
 import * as api from './api/billing';
+import { ApiProblem } from '$lib/api/http';
 import type { Provider } from './api/providers';
 import BillingImportProbe from './test/BillingImportProbe.svelte';
 
@@ -136,13 +137,85 @@ it('creates, runs, removes and recreates an Azure import with a fresh write iden
   await vi.waitFor(() =>
     expect(host.textContent).toContain('Import scheduled.')
   );
+  const setField = (id: string, value: string) => {
+    const field = host.querySelector<HTMLInputElement | HTMLSelectElement>(
+      `#${id}`
+    )!;
+    field.value = value;
+    field.dispatchEvent(
+      new Event(field.tagName === 'SELECT' ? 'change' : 'input', {
+        bubbles: true
+      })
+    );
+    flushSync();
+  };
+  setField('billing-azure-export', 'local-export');
+  setField('billing-azure-auth', 'azure_client_secret');
+  setField('billing-azure-tenant', 'local-tenant');
+  setField('billing-azure-client', 'local-client');
+  setField('billing-azure-secret', 'local-secret');
+  const remote = {
+    ...current!,
+    enabled: false,
+    etag: 'remote-etag',
+    scope: {
+      billing_scope: '/subscriptions/22222222-2222-4222-8222-222222222222',
+      export_name: 'remote-export',
+      storage_account: 'remoteaccount',
+      container: 'remotecontainer',
+      prefix: 'remote-prefix',
+      subscription_ids: ['33333333-3333-4333-8333-333333333333']
+    }
+  };
+  current = remote;
+  vi.mocked(api.putBillingImport).mockRejectedValueOnce(
+    new ApiProblem({
+      title: 'Changed elsewhere',
+      status: 412,
+      type: 'https://openllmproxy.dev/problems/etag_mismatch'
+    })
+  );
+  submit();
+  await vi.waitFor(() =>
+    expect(host.textContent).toContain('This item changed elsewhere.')
+  );
+  click('Reload');
+  await vi.waitFor(() =>
+    expect(host.textContent).not.toContain('This item changed elsewhere.')
+  );
+  expect(
+    host.querySelector<HTMLInputElement>('#billing-azure-export')?.value
+  ).toBe('remote-export');
+  expect(
+    host.querySelector<HTMLSelectElement>('#billing-azure-auth')?.value
+  ).toBe('');
+  setField('billing-azure-auth', 'azure_client_secret');
+  for (const id of [
+    'billing-azure-tenant',
+    'billing-azure-client',
+    'billing-azure-secret'
+  ])
+    expect(host.querySelector<HTMLInputElement>(`#${id}`)?.value).toBe('');
+  setField('billing-azure-auth', '');
+  submit();
+  await vi.waitFor(() =>
+    expect(api.putBillingImport).toHaveBeenLastCalledWith(
+      'provider',
+      'remote-etag',
+      { enabled: false, scope: remote.scope },
+      expect.any(String)
+    )
+  );
+  await vi.waitFor(() =>
+    expect(host.textContent).toContain('Billing import saved.')
+  );
   click('Remove');
   await vi.waitFor(() => expect(host.textContent).toContain('Create import'));
   fill();
   submit();
   await vi.waitFor(() => expect(host.textContent).toContain('Run now'));
   const calls = vi.mocked(api.putBillingImport).mock.calls;
-  expect(calls).toHaveLength(3);
+  expect(calls).toHaveLength(5);
   expect(calls[1][3]).toBe(calls[0][3]);
-  expect(calls[2][3]).not.toBe(calls[1][3]);
+  expect(calls[4][3]).not.toBe(calls[3][3]);
 });
