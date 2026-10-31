@@ -25969,8 +25969,7 @@
             "type": "boolean"
           },
           "scope": {
-            "type": "object",
-            "description": "Source-shaped import scope; {} reads the whole organization."
+            "$ref": "#/components/schemas/BillingScope"
           },
           "credential_configured": {
             "type": "boolean"
@@ -26061,8 +26060,7 @@
             "description": "Defaults to true when omitted."
           },
           "scope": {
-            "type": "object",
-            "description": "openai_costs: {\"project_ids\":[\"proj_...\"]}; anthropic_cost_report: {\"workspace_ids\":[\"wrkspc_...\",\"default\"]}; {} reads the whole organization. Omitted keeps the stored scope."
+            "$ref": "#/components/schemas/BillingScope"
           },
           "credential": {
             "description": "Billing credential. Required on create, omitted retains the stored credential, and null is rejected. AWS credentials are a source-shaped object.",
@@ -26340,7 +26338,7 @@
             "type": "boolean"
           },
           "scope": {
-            "type": "object"
+            "$ref": "#/components/schemas/BillingScope"
           },
           "credential_ref": {
             "type": "string",
@@ -31816,6 +31814,86 @@
             "type": "string",
             "format": "uuid",
             "description": "Existing credential slot, defaults to the default slot"
+          }
+        }
+      },
+      "BillingScope": {
+        "description": "Source-shaped billing scope. Empty scope reads the whole organization for polling sources. AWS requires its payer, bucket, report prefix, and region.",
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/PollingBillingScope"
+          },
+          {
+            "$ref": "#/components/schemas/AWSBillingScope"
+          }
+        ]
+      },
+      "PollingBillingScope": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "project_ids": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "type": "string",
+              "pattern": "^proj_[A-Za-z0-9]{1,64}$"
+            }
+          },
+          "workspace_ids": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "type": "string",
+              "pattern": "^(wrkspc_[A-Za-z0-9]{1,64}|default)$"
+            }
+          }
+        },
+        "not": {
+          "required": [
+            "project_ids",
+            "workspace_ids"
+          ]
+        }
+      },
+      "AWSBillingScope": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "payer_account_id",
+          "bucket",
+          "report_prefix",
+          "region"
+        ],
+        "properties": {
+          "payer_account_id": {
+            "type": "string",
+            "pattern": "^[0-9]{12}$"
+          },
+          "bucket": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 63,
+            "pattern": "^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$"
+          },
+          "report_prefix": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1024,
+            "description": "CUR report prefix including the report name"
+          },
+          "region": {
+            "type": "string",
+            "maxLength": 64,
+            "pattern": "^[a-z]{2}(-[a-z0-9]+)+-[0-9]+$"
+          },
+          "linked_account_ids": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "type": "string",
+              "pattern": "^[0-9]{12}$"
+            }
           }
         }
       }

@@ -352,10 +352,12 @@ egress-validated client with redirects disabled. OpenAI and Anthropic imports
 cover closed UTC days only. The first covers the 30 days before today, and
 later imports refresh the last 7 so vendor restatements land. AWS imports cover
 closed UTC days within retention on the first pass and refresh the current and
-previous billing periods on later passes. AWS reads are bounded by a 45-second
-deadline and size, row and aggregation limits. Each day's returned line items
-are summed per `(day, line_item, currency)` and replace the stored rows. A returned bucket with no results
-records an invoiced zero. On success the import schedules one hour
+previous billing periods on later passes. Incomplete historical periods are
+retried until covered. A delivery covers only days closed before its manifest
+was written, and gaps remain unimported. AWS reads are bounded by a 45-second
+deadline and cumulative compressed and expanded byte, row and aggregation limits.
+Each day's returned line items are summed per `(day, line_item, currency)` and
+replace the stored rows. A returned bucket with no results records an invoiced zero. On success the import schedules one hour
 out; on failure `last_error_code` records `credential`, `status`, `network`,
 `timeout`, `response` or `endpoint`, and the retry backs off from five
 minutes to one hour. Rows older than `retention.usage_days` are purged in
@@ -399,5 +401,9 @@ A provider entry in a configuration document carries `billing_import`
 reusing a matching binding keeps the stored key, and an entry's absence
 deletes the import. The fixtures in `internal/billing/testdata` and the hand-built
 AWS CUR fixtures in `tests/integration/billing_aws_test.go` follow documented
-response shapes. They have not been qualified against live billing accounts.
+response shapes. The AWS fixture follows the documented [report versions](https://docs.aws.amazon.com/cur/latest/userguide/understanding-report-versions.html),
+[latest report locations](https://docs.aws.amazon.com/cur/latest/userguide/view-latest-cur.html),
+[identity columns](https://docs.aws.amazon.com/cur/latest/userguide/identity-columns.html)
+and [line item columns](https://docs.aws.amazon.com/cur/latest/userguide/Lineitem-columns.html),
+reviewed October 31, 2026. The fixtures have not been qualified against live billing accounts.
 Google Cloud billing export and Azure Cost Management imports remain planned.

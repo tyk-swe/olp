@@ -7420,6 +7420,17 @@ type A2ATaskToolCallback struct {
 // A2ATaskToolCallbackPricingState defines model for A2ATaskToolCallback.PricingState.
 type A2ATaskToolCallbackPricingState string
 
+// AWSBillingScope defines model for AWSBillingScope.
+type AWSBillingScope struct {
+	Bucket           string    `json:"bucket"`
+	LinkedAccountIds *[]string `json:"linked_account_ids,omitempty"`
+	PayerAccountId   string    `json:"payer_account_id"`
+	Region           string    `json:"region"`
+
+	// ReportPrefix CUR report prefix including the report name
+	ReportPrefix string `json:"report_prefix"`
+}
+
 // AcceptCatalogSuggestionsRequest defines model for AcceptCatalogSuggestionsRequest.
 type AcceptCatalogSuggestionsRequest struct {
 	// CatalogSha256 Digest of the catalog the suggestions were reviewed against; a different catalog answers 409.
@@ -8112,9 +8123,9 @@ type BillingImport struct {
 	Etag                 string             `json:"etag"`
 	ProviderId           openapi_types.UUID `json:"provider_id"`
 
-	// Scope Source-shaped import scope; {} reads the whole organization.
-	Scope  map[string]interface{} `json:"scope"`
-	Source BillingImportSource    `json:"source"`
+	// Scope Source-shaped billing scope. Empty scope reads the whole organization for polling sources. AWS requires its payer, bucket, report prefix, and region.
+	Scope  BillingScope        `json:"scope"`
+	Source BillingImportSource `json:"source"`
 	Status struct {
 		ImportedFrom    nullable.Nullable[openapi_types.Date] `json:"imported_from"`
 		ImportedThrough nullable.Nullable[openapi_types.Date] `json:"imported_through"`
@@ -8132,6 +8143,11 @@ type BillingImport struct {
 
 // BillingImportSource defines model for BillingImport.Source.
 type BillingImportSource string
+
+// BillingScope Source-shaped billing scope. Empty scope reads the whole organization for polling sources. AWS requires its payer, bucket, report prefix, and region.
+type BillingScope struct {
+	union json.RawMessage
+}
 
 // BudgetGroupBudgetResponse defines model for BudgetGroupBudgetResponse.
 type BudgetGroupBudgetResponse struct {
@@ -9202,9 +9218,11 @@ type ConfigurationAgentPublicationKind string
 // ConfigurationBillingImport defines model for ConfigurationBillingImport.
 type ConfigurationBillingImport struct {
 	// CredentialRef Portable secret binding name, provider name followed by /billing; supply the credential through secret_bindings.
-	CredentialRef string                 `json:"credential_ref"`
-	Enabled       bool                   `json:"enabled"`
-	Scope         map[string]interface{} `json:"scope"`
+	CredentialRef string `json:"credential_ref"`
+	Enabled       bool   `json:"enabled"`
+
+	// Scope Source-shaped billing scope. Empty scope reads the whole organization for polling sources. AWS requires its payer, bucket, report prefix, and region.
+	Scope BillingScope `json:"scope"`
 }
 
 // ConfigurationCapabilityEntry defines model for ConfigurationCapabilityEntry.
@@ -12895,6 +12913,12 @@ type PolicyResponse struct {
 	Policy     RoutingPolicy      `json:"policy"`
 }
 
+// PollingBillingScope defines model for PollingBillingScope.
+type PollingBillingScope struct {
+	ProjectIds   *[]string `json:"project_ids,omitempty"`
+	WorkspaceIds *[]string `json:"workspace_ids,omitempty"`
+}
+
 // PriceCeiling defines model for PriceCeiling.
 type PriceCeiling struct {
 	InputPerMillion  nullable.Nullable[string] `json:"input_per_million,omitempty"`
@@ -14161,8 +14185,8 @@ type PutBillingImportRequest struct {
 	// Enabled Defaults to true when omitted.
 	Enabled *bool `json:"enabled,omitempty"`
 
-	// Scope openai_costs: {"project_ids":["proj_..."]}; anthropic_cost_report: {"workspace_ids":["wrkspc_...","default"]}; {} reads the whole organization. Omitted keeps the stored scope.
-	Scope *map[string]interface{} `json:"scope,omitempty"`
+	// Scope Source-shaped billing scope. Empty scope reads the whole organization for polling sources. AWS requires its payer, bucket, report prefix, and region.
+	Scope *BillingScope `json:"scope,omitempty"`
 }
 
 // PutBillingImportRequestCredential0 defines model for PutBillingImportRequest.Credential.0.
@@ -20080,6 +20104,68 @@ func (a SCIMUser) MarshalJSON() ([]byte, error) {
 		}
 	}
 	return json.Marshal(object)
+}
+
+// AsPollingBillingScope returns the union data inside the BillingScope as a PollingBillingScope
+func (t BillingScope) AsPollingBillingScope() (PollingBillingScope, error) {
+	var body PollingBillingScope
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromPollingBillingScope overwrites any union data inside the BillingScope as the provided PollingBillingScope
+func (t *BillingScope) FromPollingBillingScope(v PollingBillingScope) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergePollingBillingScope performs a merge with any union data inside the BillingScope, using the provided PollingBillingScope
+func (t *BillingScope) MergePollingBillingScope(v PollingBillingScope) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsAWSBillingScope returns the union data inside the BillingScope as a AWSBillingScope
+func (t BillingScope) AsAWSBillingScope() (AWSBillingScope, error) {
+	var body AWSBillingScope
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromAWSBillingScope overwrites any union data inside the BillingScope as the provided AWSBillingScope
+func (t *BillingScope) FromAWSBillingScope(v AWSBillingScope) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeAWSBillingScope performs a merge with any union data inside the BillingScope, using the provided AWSBillingScope
+func (t *BillingScope) MergeAWSBillingScope(v AWSBillingScope) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+func (t BillingScope) MarshalJSON() ([]byte, error) {
+	b, err := t.union.MarshalJSON()
+	return b, err
+}
+
+func (t *BillingScope) UnmarshalJSON(b []byte) error {
+	err := t.union.UnmarshalJSON(b)
+	return err
 }
 
 // AsCreateNotificationDestinationRequestSecret0 returns the union data inside the CreateNotificationDestinationRequest_Secret as a CreateNotificationDestinationRequestSecret0

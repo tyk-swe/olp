@@ -151,7 +151,7 @@ func TestBillingImportAWSDelivery(t *testing.T) {
 	fake := newAWSBillingFake(t)
 	today := time.Now().UTC().Truncate(24 * time.Hour)
 	day := time.Date(today.Year(), today.Month(), 1, 0, 0, 0, 0, time.UTC).AddDate(0, -1, 3)
-	fake.delivery(t, day, "assembly-one", day.AddDate(0, 0, 1), "0.1")
+	fake.delivery(t, day, "assembly-one", day.AddDate(0, 0, 4), "0.1")
 	fake.rewriteCSV(t, func(csv string) string {
 		rows := strings.Split(strings.TrimSuffix(csv, "\n"), "\n")
 		result := rows[0] + ",identity/LineItemId,reservation/EffectiveCost,savingsPlan/SavingsPlanEffectiveCost,lineItem/UsageEndDate\n"
@@ -285,7 +285,7 @@ func TestBillingImportAWSRevisions(t *testing.T) {
 	fake := newAWSBillingFake(t)
 	today := time.Now().UTC().Truncate(24 * time.Hour)
 	day := time.Date(today.Year(), today.Month(), 1, 0, 0, 0, 0, time.UTC).AddDate(0, -1, 3)
-	newer := day.Add(2 * time.Hour)
+	newer := day.AddDate(0, 0, 1).Add(2 * time.Hour)
 	fake.delivery(t, day, "newer", newer, "0.1")
 	fake.rewriteCSV(t, func(csv string) string {
 		return csv + fmt.Sprintf("111122223333,444455556666,AmazonBedrock,%sT01:00:00Z,Usage,InputTokens,InvokeModel,sku1,USD,99\n", day.AddDate(0, 0, 2).Format("2006-01-02"))
@@ -328,8 +328,8 @@ func TestBillingImportAWSRevisions(t *testing.T) {
 	current = current.AddDate(0, 0, 1)
 	schedule()
 	pass()
-	if status()["imported_through"] != day.AddDate(0, 0, 1).Format("2006-01-02") || len(amounts()) != 1 {
-		t.Fatalf("equal revision did not cover the next closed day: %v %v", status(), amounts())
+	if status()["imported_through"] != day.Format("2006-01-02") || len(amounts()) != 1 {
+		t.Fatalf("stale equal revision extended coverage: %v %v", status(), amounts())
 	}
 	openDay := day.AddDate(0, 0, 2)
 	openCosts := h.want(owner, "GET", fmt.Sprintf("/api/v1/providers/%s/invoiced-costs?start=%s&end=%s", id, openDay.Format("2006-01-02"), openDay.AddDate(0, 0, 1).Format("2006-01-02")), nil, nil, 200)
@@ -340,7 +340,7 @@ func TestBillingImportAWSRevisions(t *testing.T) {
 	h.want(owner, "DELETE", "/api/v1/providers/"+id+"/billing-import", nil, headers, 204)
 	provider = h.want(owner, "GET", "/api/v1/providers/"+id, nil, nil, 200)
 	billingPut(h, owner, id, map[string]any{"scope": scope, "credential": credential}, provider["etag"].(string), 201)
-	if status()["source_revision"] != "newer" || status()["imported_through"] != day.AddDate(0, 0, 1).Format("2006-01-02") {
+	if status()["source_revision"] != "newer" || status()["imported_through"] != day.Format("2006-01-02") {
 		t.Fatalf("recreated import lost coverage: %v", status())
 	}
 	fake.mu.Lock()
@@ -396,7 +396,7 @@ func TestBillingImportAWSDiscardsChangedInFlightDelivery(t *testing.T) {
 			fake := newAWSBillingFake(t)
 			today := time.Now().UTC().Truncate(24 * time.Hour)
 			day := time.Date(today.Year(), today.Month(), 1, 0, 0, 0, 0, time.UTC).AddDate(0, -1, 3)
-			fake.delivery(t, day, "in-flight", day.Add(time.Hour), "0.1")
+			fake.delivery(t, day, "in-flight", day.AddDate(0, 0, 1).Add(time.Hour), "0.1")
 			fake.pauseKey = ".csv.gz"
 			fake.started, fake.release = make(chan struct{}), make(chan struct{})
 			provider := h.want(owner, "POST", "/api/v1/providers", map[string]any{"name": "AWS in flight", "configuration": map[string]any{"kind": "bedrock", "auth_mode": "static", "endpoint": "https://bedrock-runtime.us-east-1.amazonaws.com", "cloud_region": "us-east-1"}, "credential": `{"access_key_id":"BEDROCKKEY1234567890","secret_access_key":"bedrock-secret-123456789"}`, "model": "amazon.titan-text-express-v1"}, idem("aws-flight-provider"), 201)
@@ -472,7 +472,7 @@ func TestBillingImportAWSFormatsAndLabels(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	fake.delivery(t, day, "parquet", day.Add(time.Hour), "0.1")
+	fake.delivery(t, day, "parquet", day.AddDate(0, 0, 1).Add(time.Hour), "0.1")
 	fake.mu.Lock()
 	for key, object := range fake.objects {
 		if strings.HasSuffix(key, "-Manifest.json") {
@@ -487,7 +487,7 @@ func TestBillingImportAWSFormatsAndLabels(t *testing.T) {
 	fake.mu.Lock()
 	fake.objects = map[string]awsObject{}
 	fake.mu.Unlock()
-	fake.delivery(t, day, "bad-currency", day.Add(2*time.Hour), "0.1")
+	fake.delivery(t, day, "bad-currency", day.AddDate(0, 0, 1).Add(2*time.Hour), "0.1")
 	fake.rewriteCSV(t, func(csv string) string { return strings.Replace(csv, "sku1,USD,0.1", "sku1,US,0.1", 1) })
 	schedule()
 	pass()
@@ -497,7 +497,7 @@ func TestBillingImportAWSFormatsAndLabels(t *testing.T) {
 	fake.mu.Lock()
 	fake.objects = map[string]awsObject{}
 	fake.mu.Unlock()
-	fake.delivery(t, day, "zip-delivery", day.Add(3*time.Hour), "0.1")
+	fake.delivery(t, day, "zip-delivery", day.AddDate(0, 0, 1).Add(3*time.Hour), "0.1")
 	fake.rewriteCSV(t, func(csv string) string {
 		long := strings.Repeat("x", 300)
 		csv = strings.Replace(csv, "sku1,USD,0.1", long+"one,USD,0.1", 1)
@@ -557,7 +557,7 @@ func TestBillingImportAWSFormatsAndLabels(t *testing.T) {
 	schedule()
 	pass()
 	checkFailure("status")
-	fake.delivery(t, day, "truncated", day.Add(4*time.Hour), "0.1")
+	fake.delivery(t, day, "truncated", day.AddDate(0, 0, 1).Add(4*time.Hour), "0.1")
 	fake.mu.Lock()
 	for key, object := range fake.objects {
 		if strings.HasSuffix(key, ".csv.gz") {
@@ -571,7 +571,7 @@ func TestBillingImportAWSFormatsAndLabels(t *testing.T) {
 	fake.mu.Lock()
 	fake.objects = map[string]awsObject{}
 	fake.mu.Unlock()
-	fake.delivery(t, day, "too-many-parts", day.Add(5*time.Hour), "0.1")
+	fake.delivery(t, day, "too-many-parts", day.AddDate(0, 0, 1).Add(5*time.Hour), "0.1")
 	fake.mu.Lock()
 	for key, object := range fake.objects {
 		if strings.HasSuffix(key, "-Manifest.json") {
@@ -579,9 +579,11 @@ func TestBillingImportAWSFormatsAndLabels(t *testing.T) {
 			if err := json.Unmarshal(object.body, &manifest); err != nil {
 				t.Fatal(err)
 			}
+			original := fake.objects[manifest["reportKeys"].([]any)[0].(string)]
 			parts := make([]string, 1001)
 			for index := range parts {
-				parts[index] = fmt.Sprintf("billing/cur/part-%d.csv.gz", index)
+				parts[index] = fmt.Sprintf("%scur-%d.csv.gz", strings.TrimSuffix(key, "cur-Manifest.json"), index)
+				fake.objects[parts[index]] = original
 			}
 			manifest["reportKeys"] = parts
 			body, err := json.Marshal(manifest)
@@ -609,7 +611,7 @@ func TestBillingImportAWSSlowDeliveryDoesNotLeaseOtherImports(t *testing.T) {
 	fake := newAWSBillingFake(t)
 	today := time.Now().UTC().Truncate(24 * time.Hour)
 	day := time.Date(today.Year(), today.Month(), 1, 0, 0, 0, 0, time.UTC).AddDate(0, -1, 3)
-	fake.delivery(t, day, "slow", day.Add(time.Hour), "0.1")
+	fake.delivery(t, day, "slow", day.AddDate(0, 0, 1).Add(time.Hour), "0.1")
 	fake.pauseKey = ".csv.gz"
 	fake.started, fake.release = make(chan struct{}), make(chan struct{})
 	scope := map[string]any{"payer_account_id": "111122223333", "bucket": "billing-report-bucket", "report_prefix": "billing/cur", "region": "us-east-1", "linked_account_ids": []string{"444455556666"}}
@@ -651,8 +653,8 @@ func TestBillingImportAWSUsesNewestCompleteDelivery(t *testing.T) {
 	fake := newAWSBillingFake(t)
 	today := time.Now().UTC().Truncate(24 * time.Hour)
 	day := time.Date(today.Year(), today.Month(), 1, 0, 0, 0, 0, time.UTC).AddDate(0, -1, 3)
-	fake.delivery(t, day, "complete", day.Add(time.Hour), "0.1")
-	fake.delivery(t, day, "uploading", day.Add(2*time.Hour), "0.5")
+	fake.delivery(t, day, "complete", day.AddDate(0, 0, 1).Add(time.Hour), "0.1")
+	fake.delivery(t, day, "uploading", day.AddDate(0, 0, 1).Add(2*time.Hour), "0.5")
 	var partKey string
 	var missing awsObject
 	fake.mu.Lock()
@@ -756,7 +758,7 @@ func TestBillingImportAWSWorkloadCredential(t *testing.T) {
 	fake := newAWSBillingFake(t)
 	today := time.Now().UTC().Truncate(24 * time.Hour)
 	day := time.Date(today.Year(), today.Month(), 1, 0, 0, 0, 0, time.UTC).AddDate(0, -1, 3)
-	fake.delivery(t, day, "workload", day.Add(time.Hour), "0.1")
+	fake.delivery(t, day, "workload", day.AddDate(0, 0, 1).Add(time.Hour), "0.1")
 	provider := h.want(owner, "POST", "/api/v1/providers", map[string]any{"name": "AWS workload", "configuration": map[string]any{"kind": "bedrock", "auth_mode": "static", "endpoint": "https://bedrock-runtime.us-east-1.amazonaws.com", "cloud_region": "us-east-1"}, "credential": `{"access_key_id":"BEDROCKKEY1234567890","secret_access_key":"bedrock-secret-123456789"}`, "model": "amazon.titan-text-express-v1"}, idem("aws-workload-provider"), 201)
 	id := billingProviderID(provider)
 	scope := map[string]any{"payer_account_id": "111122223333", "bucket": "billing-report-bucket", "report_prefix": "billing/cur", "region": "us-east-1"}
@@ -771,5 +773,300 @@ func TestBillingImportAWSWorkloadCredential(t *testing.T) {
 	status := h.want(owner, "GET", "/api/v1/providers/"+id+"/billing-import", nil, nil, 200)["status"].(map[string]any)
 	if status["last_error_code"] != nil || status["source_revision"] != "workload" {
 		t.Fatalf("workload credential did not import: %v", status)
+	}
+}
+
+func TestBillingImportAWSPartitionIdentities(t *testing.T) {
+	h := newAccessHarness(t)
+	owner := h.owner()
+	fake := newAWSBillingFake(t)
+	today := time.Now().UTC().Truncate(24 * time.Hour)
+	day := time.Date(today.Year(), today.Month(), 1, 0, 0, 0, 0, time.UTC).AddDate(0, -1, 3)
+	fake.delivery(t, day, "partitions", day.AddDate(0, 0, 1), "0.1")
+	fake.rewriteCSV(t, func(csv string) string {
+		rows := strings.Split(strings.TrimSuffix(csv, "\n"), "\n")
+		out := rows[0] + ",identity/LineItemId\n"
+		for index, row := range rows[1:] {
+			out += fmt.Sprintf("%s,id-%d\n", row, index)
+		}
+		return out
+	})
+	fake.mu.Lock()
+	for key, object := range fake.objects {
+		if strings.HasSuffix(key, ".csv.gz") {
+			fake.objects[strings.Replace(key, "cur-1.csv.gz", "cur-2.csv.gz", 1)] = object
+		}
+		if strings.HasSuffix(key, "-Manifest.json") {
+			var manifest map[string]any
+			if err := json.Unmarshal(object.body, &manifest); err != nil {
+				t.Fatal(err)
+			}
+			parts := manifest["reportKeys"].([]any)
+			manifest["reportKeys"] = append(parts, strings.Replace(parts[0].(string), "cur-1.csv.gz", "cur-2.csv.gz", 1))
+			body, err := json.Marshal(manifest)
+			if err != nil {
+				t.Fatal(err)
+			}
+			fake.objects[key] = awsObject{body: body, modified: object.modified}
+		}
+	}
+	fake.mu.Unlock()
+	provider := h.want(owner, "POST", "/api/v1/providers", map[string]any{"name": "AWS partitions", "configuration": map[string]any{"kind": "bedrock", "auth_mode": "static", "endpoint": "https://bedrock-runtime.us-east-1.amazonaws.com", "cloud_region": "us-east-1"}, "credential": `{"access_key_id":"BEDROCKKEY1234567890","secret_access_key":"bedrock-secret-123456789"}`, "model": "amazon.titan-text-express-v1"}, idem("aws-partitions-provider"), 201)
+	id := billingProviderID(provider)
+	scope := map[string]any{"payer_account_id": "111122223333", "bucket": "billing-report-bucket", "report_prefix": "billing/cur", "region": "us-east-1", "linked_account_ids": []string{"444455556666"}}
+	credential := map[string]any{"auth_mode": "static", "access_key_id": "BILLINGKEY1234567890", "secret_access_key": "billing-secret-example"}
+	billingPut(h, owner, id, map[string]any{"scope": scope, "credential": credential}, provider["etag"].(string), 201)
+	importer := billingImporter(h, t)
+	importer.AWSClient = func(config aws.Config) *s3.Client {
+		return s3.NewFromConfig(config, func(o *s3.Options) { o.BaseEndpoint = aws.String(fake.server.URL); o.UsePathStyle = true })
+	}
+	if err := importer.Pass(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	costs := h.want(owner, "GET", fmt.Sprintf("/api/v1/providers/%s/invoiced-costs?start=%s&end=%s", id, day.Format("2006-01-02"), day.AddDate(0, 0, 1).Format("2006-01-02")), nil, nil, 200)["items"].([]any)
+	if len(costs) != 1 || costs[0].(map[string]any)["amount"] != "0.60000000000000000002" {
+		t.Fatalf("equal line IDs in distinct partitions did not both contribute: %v", costs)
+	}
+}
+
+func TestBillingImportAWSDoesNotCoverDaysAfterDelivery(t *testing.T) {
+	h := newAccessHarness(t)
+	owner := h.owner()
+	fake := newAWSBillingFake(t)
+	today := time.Now().UTC().Truncate(24 * time.Hour)
+	day := time.Date(today.Year(), today.Month(), 1, 0, 0, 0, 0, time.UTC).AddDate(0, -1, 3)
+	fake.delivery(t, day, "stale", day.AddDate(0, 0, 1).Add(3*time.Hour), "0.1")
+	provider := h.want(owner, "POST", "/api/v1/providers", map[string]any{"name": "AWS stale delivery", "configuration": map[string]any{"kind": "bedrock", "auth_mode": "static", "endpoint": "https://bedrock-runtime.us-east-1.amazonaws.com", "cloud_region": "us-east-1"}, "credential": `{"access_key_id":"BEDROCKKEY1234567890","secret_access_key":"bedrock-secret-123456789"}`, "model": "amazon.titan-text-express-v1"}, idem("aws-stale-provider"), 201)
+	id := billingProviderID(provider)
+	scope := map[string]any{"payer_account_id": "111122223333", "bucket": "billing-report-bucket", "report_prefix": "billing/cur", "region": "us-east-1"}
+	credential := map[string]any{"auth_mode": "static", "access_key_id": "BILLINGKEY1234567890", "secret_access_key": "billing-secret-example"}
+	billingPut(h, owner, id, map[string]any{"scope": scope, "credential": credential}, provider["etag"].(string), 201)
+	priced := "0.15"
+	uncovered := day.AddDate(0, 0, 1)
+	billingFact(t, h, id, uuid.NewString(), uncovered, "billable", true, &priced, false, false, false)
+	importer := billingImporter(h, t)
+	importer.AWSClient = func(config aws.Config) *s3.Client {
+		return s3.NewFromConfig(config, func(o *s3.Options) { o.BaseEndpoint = aws.String(fake.server.URL); o.UsePathStyle = true })
+	}
+	if err := importer.Pass(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	status := h.want(owner, "GET", "/api/v1/providers/"+id+"/billing-import", nil, nil, 200)["status"].(map[string]any)
+	if status["imported_through"] != day.Format("2006-01-02") {
+		t.Fatalf("stale report covered a later day: %v", status)
+	}
+	report := h.want(owner, "GET", fmt.Sprintf("/api/v1/usage/reconciliation?start=%s&end=%s&provider_id=%s", uncovered.Format("2006-01-02"), uncovered.AddDate(0, 0, 1).Format("2006-01-02"), id), nil, nil, 200)
+	item := report["items"].([]any)[0].(map[string]any)
+	if item["capture_rate_unavailable_reason"] != "not_imported" || item["invoiced_cost"] != nil {
+		t.Fatalf("stale report treated an unimported day as zero: %v", item)
+	}
+}
+
+func TestBillingImportAWSMissingPeriodsRemainUncoveredAndRetry(t *testing.T) {
+	h := newAccessHarness(t)
+	owner := h.owner()
+	setting := h.want(owner, "GET", "/api/v1/settings/retention.usage_days", nil, nil, 200)
+	h.want(owner, "PUT", "/api/v1/settings/retention.usage_days", map[string]any{"value": "180"}, etagHeader(setting), 200)
+	fake := newAWSBillingFake(t)
+	today := time.Now().UTC().Truncate(24 * time.Hour)
+	month := time.Date(today.Year(), today.Month(), 1, 0, 0, 0, 0, time.UTC)
+	oldDay := month.AddDate(0, -4, 14)
+	missingDay := month.AddDate(0, -2, 14)
+	newDay := month.AddDate(0, -1, 14)
+	fake.delivery(t, oldDay, "old-period", time.Date(oldDay.Year(), oldDay.Month(), 1, 0, 0, 0, 0, time.UTC).AddDate(0, 1, 1), "0.1")
+	fake.delivery(t, newDay, "recent-period", newDay.AddDate(0, 0, 1), "0.1")
+	provider := h.want(owner, "POST", "/api/v1/providers", map[string]any{"name": "AWS missing periods", "configuration": map[string]any{"kind": "bedrock", "auth_mode": "static", "endpoint": "https://bedrock-runtime.us-east-1.amazonaws.com", "cloud_region": "us-east-1"}, "credential": `{"access_key_id":"BEDROCKKEY1234567890","secret_access_key":"bedrock-secret-123456789"}`, "model": "amazon.titan-text-express-v1"}, idem("aws-missing-period-provider"), 201)
+	id := billingProviderID(provider)
+	scope := map[string]any{"payer_account_id": "111122223333", "bucket": "billing-report-bucket", "report_prefix": "billing/cur", "region": "us-east-1"}
+	credential := map[string]any{"auth_mode": "static", "access_key_id": "BILLINGKEY1234567890", "secret_access_key": "billing-secret-example"}
+	billingPut(h, owner, id, map[string]any{"scope": scope, "credential": credential}, provider["etag"].(string), 201)
+	priced := "0.15"
+	billingFact(t, h, id, uuid.NewString(), missingDay, "billable", true, &priced, false, false, false)
+	importer := billingImporter(h, t)
+	importer.AWSClient = func(config aws.Config) *s3.Client {
+		return s3.NewFromConfig(config, func(o *s3.Options) { o.BaseEndpoint = aws.String(fake.server.URL); o.UsePathStyle = true })
+	}
+	if err := importer.Pass(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	status := h.want(owner, "GET", "/api/v1/providers/"+id+"/billing-import", nil, nil, 200)["status"].(map[string]any)
+	if status["imported_from"].(string) <= missingDay.Format("2006-01-02") && status["imported_through"].(string) >= missingDay.Format("2006-01-02") {
+		t.Fatalf("disjoint periods produced a coverage range across the gap: %v", status)
+	}
+	report := func() map[string]any {
+		t.Helper()
+		return h.want(owner, "GET", fmt.Sprintf("/api/v1/usage/reconciliation?start=%s&end=%s&provider_id=%s", missingDay.Format("2006-01-02"), missingDay.AddDate(0, 0, 1).Format("2006-01-02"), id), nil, nil, 200)["items"].([]any)[0].(map[string]any)
+	}
+	if item := report(); item["capture_rate_unavailable_reason"] != "not_imported" || item["invoiced_cost"] != nil {
+		t.Fatalf("missing period was treated as invoiced zero: %v", item)
+	}
+	for _, coveredDay := range []time.Time{oldDay, newDay} {
+		costs := h.want(owner, "GET", fmt.Sprintf("/api/v1/providers/%s/invoiced-costs?start=%s&end=%s", id, coveredDay.Format("2006-01-02"), coveredDay.AddDate(0, 0, 1).Format("2006-01-02")), nil, nil, 200)
+		if len(costs["items"].([]any)) == 0 {
+			t.Fatalf("expected imported costs on both sides of the gap: %v", costs)
+		}
+	}
+	fake.delivery(t, missingDay, "recovered-period", missingDay.AddDate(0, 0, 1), "0.4")
+	var missingKey string
+	var missingPart awsObject
+	fake.mu.Lock()
+	for key, object := range fake.objects {
+		if strings.Contains(key, "/recovered-period/") && strings.HasSuffix(key, ".csv.gz") {
+			missingKey, missingPart = key, object
+			delete(fake.objects, key)
+		}
+	}
+	fake.mu.Unlock()
+	if missingKey == "" {
+		t.Fatal("expected a historical report part")
+	}
+	fake.mu.Lock()
+	for key, object := range fake.objects {
+		if strings.Contains(key, "/old-period/") && strings.HasSuffix(key, "-Manifest.json") {
+			fake.objects[key] = awsObject{body: []byte("malformed"), modified: object.modified}
+		}
+	}
+	fake.mu.Unlock()
+	path := "/api/v1/providers/" + id + "/billing-import"
+	headers := etagHeader(h.want(owner, "GET", path, nil, nil, 200))
+	headers["Idempotency-Key"] = uuid.NewString()
+	h.want(owner, "POST", path+"/run", nil, headers, 202)
+	if err := importer.Pass(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	status = h.want(owner, "GET", path, nil, nil, 200)["status"].(map[string]any)
+	if status["last_error_code"] != "status" || report()["capture_rate_unavailable_reason"] != "not_imported" {
+		t.Fatalf("incomplete historical period did not remain retryable: %v", status)
+	}
+	fake.mu.Lock()
+	fake.objects[missingKey] = missingPart
+	fake.mu.Unlock()
+	headers = etagHeader(h.want(owner, "GET", path, nil, nil, 200))
+	headers["Idempotency-Key"] = uuid.NewString()
+	h.want(owner, "POST", path+"/run", nil, headers, 202)
+	if err := importer.Pass(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if item := report(); item["capture_rate_unavailable_reason"] != nil || item["invoiced_cost"] == nil {
+		t.Fatalf("missing historical period was not retried: %v", item)
+	}
+	status = h.want(owner, "GET", path, nil, nil, 200)["status"].(map[string]any)
+	if status["last_error_code"] != nil {
+		t.Fatalf("completed old period was unnecessarily fetched: %v", status)
+	}
+}
+
+func TestBillingImportAWSListsOnlyRetainedPeriods(t *testing.T) {
+	h := newAccessHarness(t)
+	owner := h.owner()
+	fake := newAWSBillingFake(t)
+	today := time.Now().UTC().Truncate(24 * time.Hour)
+	day := time.Date(today.Year(), today.Month(), 1, 0, 0, 0, 0, time.UTC).AddDate(0, -1, 3)
+	fake.delivery(t, day, "current", day.AddDate(0, 0, 1), "0.1")
+	old := day.AddDate(-1, 0, 0)
+	oldStart := time.Date(old.Year(), old.Month(), 1, 0, 0, 0, 0, time.UTC)
+	oldPrefix := fmt.Sprintf("billing/cur/%s-%s/old/", oldStart.Format("20060102"), oldStart.AddDate(0, 1, 0).Format("20060102"))
+	fake.mu.Lock()
+	for index := range 4001 {
+		fake.objects[fmt.Sprintf("%spart-%d.csv.gz", oldPrefix, index)] = awsObject{body: []byte("old"), modified: old}
+	}
+	fake.mu.Unlock()
+	provider := h.want(owner, "POST", "/api/v1/providers", map[string]any{"name": "AWS retained periods", "configuration": map[string]any{"kind": "bedrock", "auth_mode": "static", "endpoint": "https://bedrock-runtime.us-east-1.amazonaws.com", "cloud_region": "us-east-1"}, "credential": `{"access_key_id":"BEDROCKKEY1234567890","secret_access_key":"bedrock-secret-123456789"}`, "model": "amazon.titan-text-express-v1"}, idem("aws-retained-provider"), 201)
+	id := billingProviderID(provider)
+	scope := map[string]any{"payer_account_id": "111122223333", "bucket": "billing-report-bucket", "report_prefix": "billing/cur", "region": "us-east-1"}
+	credential := map[string]any{"auth_mode": "static", "access_key_id": "BILLINGKEY1234567890", "secret_access_key": "billing-secret-example"}
+	billingPut(h, owner, id, map[string]any{"scope": scope, "credential": credential}, provider["etag"].(string), 201)
+	importer := billingImporter(h, t)
+	importer.AWSClient = func(config aws.Config) *s3.Client {
+		return s3.NewFromConfig(config, func(o *s3.Options) { o.BaseEndpoint = aws.String(fake.server.URL); o.UsePathStyle = true })
+	}
+	if err := importer.Pass(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	status := h.want(owner, "GET", "/api/v1/providers/"+id+"/billing-import", nil, nil, 200)["status"].(map[string]any)
+	if status["last_error_code"] != nil || status["source_revision"] != "current" {
+		t.Fatalf("historical objects blocked a retained report: %v", status)
+	}
+}
+
+func TestBillingImportAWSCumulativeByteBudgets(t *testing.T) {
+	for _, limit := range []string{"compressed", "expanded"} {
+		t.Run(limit, func(t *testing.T) {
+			h := newAccessHarness(t)
+			owner := h.owner()
+			fake := newAWSBillingFake(t)
+			today := time.Now().UTC().Truncate(24 * time.Hour)
+			day := time.Date(today.Year(), today.Month(), 1, 0, 0, 0, 0, time.UTC).AddDate(0, -1, 3)
+			fake.delivery(t, day, "baseline", day.AddDate(0, 0, 1), "0.1")
+			provider := h.want(owner, "POST", "/api/v1/providers", map[string]any{"name": "AWS byte budget", "configuration": map[string]any{"kind": "bedrock", "auth_mode": "static", "endpoint": "https://bedrock-runtime.us-east-1.amazonaws.com", "cloud_region": "us-east-1"}, "credential": `{"access_key_id":"BEDROCKKEY1234567890","secret_access_key":"bedrock-secret-123456789"}`, "model": "amazon.titan-text-express-v1"}, idem("aws-budget-provider"), 201)
+			id := billingProviderID(provider)
+			scope := map[string]any{"payer_account_id": "111122223333", "bucket": "billing-report-bucket", "report_prefix": "billing/cur", "region": "us-east-1"}
+			credential := map[string]any{"auth_mode": "static", "access_key_id": "BILLINGKEY1234567890", "secret_access_key": "billing-secret-example"}
+			billingPut(h, owner, id, map[string]any{"scope": scope, "credential": credential}, provider["etag"].(string), 201)
+			importer := billingImporter(h, t)
+			importer.AWSClient = func(config aws.Config) *s3.Client {
+				return s3.NewFromConfig(config, func(o *s3.Options) { o.BaseEndpoint = aws.String(fake.server.URL); o.UsePathStyle = true })
+			}
+			if err := importer.Pass(t.Context()); err != nil {
+				t.Fatal(err)
+			}
+			fake.delivery(t, day, "over-budget", day.AddDate(0, 0, 1).Add(time.Hour), "0.7")
+			fake.mu.Lock()
+			for key, object := range fake.objects {
+				if !strings.Contains(key, "/over-budget/") || !strings.HasSuffix(key, "-Manifest.json") {
+					continue
+				}
+				var manifest map[string]any
+				if err := json.Unmarshal(object.body, &manifest); err != nil {
+					t.Fatal(err)
+				}
+				first := manifest["reportKeys"].([]any)[0].(string)
+				second := strings.TrimSuffix(first, ".csv.gz") + "-second.csv.gz"
+				var body bytes.Buffer
+				if limit == "compressed" {
+					body.Write(fake.objects[first].body)
+					header := []byte{0x1f, 0x8b, 8, 4, 0, 0, 0, 0, 0, 0xff, 0xff, 0xff}
+					padding := make([]byte, 65535)
+					footer := []byte{3, 0, 0, 0, 0, 0, 0, 0, 0, 0}
+					for range 520 {
+						body.Write(header)
+						body.Write(padding)
+						body.Write(footer)
+					}
+				} else {
+					writer := gzip.NewWriter(&body)
+					fmt.Fprintln(writer, "bill/PayerAccountId,lineItem/UsageAccountId,lineItem/ProductCode,lineItem/UsageStartDate,lineItem/LineItemType,lineItem/UsageType,lineItem/Operation,product/sku,lineItem/CurrencyCode,lineItem/UnblendedCost,unused")
+					row := "111122223333,444455556666,AmazonEC2," + day.Format("2006-01-02") + "T01:00:00Z,Usage,InputTokens,InvokeModel,sku,USD,0.1," + strings.Repeat("x", 256<<10) + "\n"
+					for range 1030 {
+						if _, err := io.WriteString(writer, row); err != nil {
+							t.Fatal(err)
+						}
+					}
+					if err := writer.Close(); err != nil {
+						t.Fatal(err)
+					}
+				}
+				fake.objects[first] = awsObject{body: body.Bytes(), modified: object.modified}
+				fake.objects[second] = awsObject{body: body.Bytes(), modified: object.modified}
+				manifest["reportKeys"] = []string{first, second}
+				encoded, err := json.Marshal(manifest)
+				if err != nil {
+					t.Fatal(err)
+				}
+				fake.objects[key] = awsObject{body: encoded, modified: object.modified}
+			}
+			fake.mu.Unlock()
+			path := "/api/v1/providers/" + id + "/billing-import"
+			headers := etagHeader(h.want(owner, "GET", path, nil, nil, 200))
+			headers["Idempotency-Key"] = uuid.NewString()
+			h.want(owner, "POST", path+"/run", nil, headers, 202)
+			if err := importer.Pass(t.Context()); err != nil {
+				t.Fatal(err)
+			}
+			status := h.want(owner, "GET", path, nil, nil, 200)["status"].(map[string]any)
+			if status["last_error_code"] != "response" || status["source_revision"] != "baseline" {
+				t.Fatalf("%s byte cap did not preserve the previous revision: %v", limit, status)
+			}
+		})
 	}
 }

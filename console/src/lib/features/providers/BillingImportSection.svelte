@@ -14,7 +14,8 @@
     getBillingImport,
     putBillingImport,
     runBillingImport,
-    type BillingImport
+    type BillingImport,
+    type PutBillingImportInput
   } from '$lib/features/providers/api/billing';
   import { providerKeys } from '$lib/features/providers/providerKeys';
   import type { Provider } from '$lib/features/providers/api/providers';
@@ -82,17 +83,13 @@
     const current = detail;
     if (current && !initialized) {
       scopeText = scopeLines(current);
-      if (kind === 'bedrock') {
-        const scope = current.scope as Record<string, string | string[]>;
-        payerAccount = String(scope.payer_account_id ?? '');
-        bucket = String(scope.bucket ?? '');
-        reportPrefix = String(scope.report_prefix ?? '');
-        region = String(scope.region ?? '');
-        linkedAccounts = (
-          Array.isArray(scope.linked_account_ids)
-            ? scope.linked_account_ids
-            : []
-        ).join('\n');
+      if (kind === 'bedrock' && 'payer_account_id' in current.scope) {
+        const scope = current.scope;
+        payerAccount = scope.payer_account_id;
+        bucket = scope.bucket;
+        reportPrefix = scope.report_prefix;
+        region = scope.region;
+        linkedAccounts = (scope.linked_account_ids ?? []).join('\n');
       }
       enabled = current.enabled;
       initialized = true;
@@ -100,7 +97,8 @@
   });
 
   function scopeLines(document: BillingImport): string {
-    const scope = document.scope as Record<string, string[]>;
+    const scope = document.scope;
+    if ('payer_account_id' in scope) return '';
     const entries = scope.project_ids ?? scope.workspace_ids ?? [];
     return entries.join('\n');
   }
@@ -124,31 +122,26 @@
     }
   }
 
-  function scopeBody(): Record<string, never> {
+  function scopeBody(): NonNullable<PutBillingImportInput['scope']> {
     if (kind === 'bedrock') {
       const ids = linkedAccounts
         .split('\n')
         .map((line) => line.trim())
         .filter(Boolean);
-      const scope: Record<string, string | string[]> = {
+      return {
         payer_account_id: payerAccount.trim(),
         bucket: bucket.trim(),
         report_prefix: reportPrefix.trim(),
         region: region.trim(),
         ...(ids.length ? { linked_account_ids: ids } : {})
       };
-      return scope as Record<string, never>;
     }
     const ids = scopeText
       .split('\n')
       .map((line) => line.trim())
       .filter(Boolean);
     if (!ids.length) return {};
-    // The contract types scope as an empty-object record; the runtime accepts
-    // the vendor's ID lists.
-    const scope: Record<string, string[]> =
-      kind === 'openai' ? { project_ids: ids } : { workspace_ids: ids };
-    return scope as Record<string, never>;
+    return kind === 'openai' ? { project_ids: ids } : { workspace_ids: ids };
   }
 
   function validateForm(): string {
