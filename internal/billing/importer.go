@@ -286,16 +286,9 @@ func (i *Importer) importOne(ctx context.Context, row *importRow) error {
 		if err != nil {
 			return err
 		}
-		periods, err := fetchAzure(ctx, client, i.Egress, endpoint, cloudScope, key, earliest, today, completed)
-		if err != nil {
-			return err
-		}
-		for _, period := range periods {
-			if err := i.storeDays(ctx, row, period.start, &period.revision, period.days); err != nil {
-				return err
-			}
-		}
-		return nil
+		return fetchAzure(ctx, client, i.Egress, endpoint, cloudScope, key, earliest, today, completed, row.ConsecutiveFailures, func(period azurePeriod) error {
+			return i.storeDays(ctx, row, period.start, &period.revision, period.days)
+		})
 	}
 	var scope Scope
 	if err := json.Unmarshal(row.Scope, &scope); err != nil {

@@ -1072,7 +1072,19 @@ func (s *Server) plan(ctx context.Context, q access.Queryer, doc *Document, bind
 			if _, supplied := bindings[ref]; supplied {
 				result.item("billing_import", ref, "bind", "")
 			} else if ok && existing.BillingImport != nil && existing.BillingImport.CredentialID != nil {
-				result.item("billing_import", ref, "reuse", "")
+				source, err := billing.SourceFor(p.Configuration.Kind)
+				if err != nil {
+					return nil, err
+				}
+				compatible, err := billing.ImportCredentialCompatible(ctx, q, s.Access.Keys, s.Access.Installation, source, existing.BillingImport.CredentialID)
+				if err != nil {
+					return nil, err
+				}
+				if compatible {
+					result.item("billing_import", ref, "reuse", "")
+				} else {
+					result.blocker("billing_import", ref, "secret_binding_required")
+				}
 			} else {
 				result.blocker("billing_import", ref, "secret_binding_required")
 			}

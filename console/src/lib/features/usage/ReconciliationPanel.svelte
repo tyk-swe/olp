@@ -91,6 +91,13 @@
     return `${(value * 100).toFixed(1)}%`;
   }
 
+  function invoice(item: ReconciliationItem, currency?: string): string {
+    if (item.invoiced_cost == null) return '—';
+    if (item.invoiced_currency?.includes(','))
+      return `Multiple currencies (${item.invoiced_currency.split(',').join(', ')})`;
+    return formatCost(item.invoiced_cost, item.invoiced_currency ?? currency);
+  }
+
   function reasonText(reason: string | null | undefined): string {
     switch (reason) {
       case 'not_imported':
@@ -160,14 +167,7 @@
                       item.attributed_cost,
                       report.data?.currency
                     )}</td
-                  ><td
-                    >{item.invoiced_cost == null
-                      ? '—'
-                      : formatCost(
-                          item.invoiced_cost,
-                          item.invoiced_currency ?? report.data?.currency
-                        )}</td
-                  ><td
+                  ><td>{invoice(item, report.data?.currency)}</td><td
                     >{item.capture_rate != null
                       ? percent(item.capture_rate)
                       : reasonText(item.capture_rate_unavailable_reason)}</td
@@ -188,12 +188,15 @@
                       report.data?.currency
                     )}</td
                   ><td
-                    >{group.totals.invoiced_cost == null
-                      ? '—'
-                      : formatCost(
-                          group.totals.invoiced_cost,
-                          report.data?.currency
-                        )}</td
+                    >{group.totals.capture_rate_unavailable_reason ===
+                    'currency_mismatch'
+                      ? 'Currency differs'
+                      : group.totals.invoiced_cost == null
+                        ? '—'
+                        : formatCost(
+                            group.totals.invoiced_cost,
+                            report.data?.currency
+                          )}</td
                   ><td>{percent(group.totals.capture_rate)}</td><td
                     >{percent(group.totals.unpriced_share)}</td
                   ><td></td></tr

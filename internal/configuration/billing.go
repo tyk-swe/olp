@@ -98,7 +98,11 @@ func (s *Server) applyBillingImport(ctx context.Context, tx pgx.Tx, providerID s
 			credentialID = &id
 		}
 	}
-	if credentialID == nil {
+	compatible, err := billing.ImportCredentialCompatible(ctx, tx, s.Access.Keys, s.Access.Installation, source, credentialID)
+	if err != nil {
+		return err
+	}
+	if !compatible {
 		return access.Invalid("secret_bindings", "Supply the provider's billing credential binding.")
 	}
 	return billing.ApplyImport(ctx, tx, providerID, source, entry.BillingImport.Enabled, entry.BillingImport.Scope, credentialID, createdBy)

@@ -143,10 +143,10 @@ func azureSDKError(err error) error {
 	return failFetch("network", errors.New("Azure storage request failed"))
 }
 
-func fetchAzure(ctx context.Context, client *http.Client, egressPolicy *egress.Policy, endpoint string, scope azureScope, key []byte, earliest, today time.Time, completed map[string]struct{}) ([]azurePeriod, error) {
+func fetchAzure(ctx context.Context, client *http.Client, egressPolicy *egress.Policy, endpoint string, scope azureScope, key []byte, earliest, today time.Time, completed map[string]struct{}, failures int, store func(azurePeriod) error) error {
 	var credential azureCredential
 	if err := json.Unmarshal(key, &credential); err != nil {
-		return nil, failFetch("credential", errors.New("invalid credential"))
+		return failFetch("credential", errors.New("invalid credential"))
 	}
 	secret, err := json.Marshal(struct {
 		TenantID     string `json:"tenant_id"`
@@ -154,10 +154,10 @@ func fetchAzure(ctx context.Context, client *http.Client, egressPolicy *egress.P
 		ClientSecret string `json:"client_secret"`
 	}{credential.TenantID, credential.ClientID, credential.ClientSecret})
 	if err != nil {
-		return nil, failFetch("credential", err)
+		return failFetch("credential", err)
 	}
 	defer clear(secret)
-	ctx, cancel := context.WithTimeout(ctx, azureImportTimeout)
+	fetchCtx, cancel := context.WithTimeout(ctx, azureImportTimeout)
 	defer cancel()
 	boundedClient := *client
 	boundedClient.Timeout = requestTimout
@@ -166,51 +166,73 @@ func fetchAzure(ctx context.Context, client *http.Client, egressPolicy *egress.P
 		Transport: transport, Retry: policy.RetryOptions{MaxRetries: -1},
 	}})
 	if err != nil {
-		return nil, failFetch("endpoint", errors.New("invalid Azure storage endpoint"))
+		return failFetch("endpoint", errors.New("invalid Azure storage endpoint"))
 	}
 	reader := azureReader{container: storage.ServiceClient().NewContainerClient(scope.Container), scope: scope}
-	names, err := reader.list(ctx, earliest, today, completed)
+	names, err := reader.list(fetchCtx, earliest, today, completed)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	if len(names) == 0 {
-		return nil, failFetch("response", errors.New("no Azure export manifests found"))
+		return failFetch("response", errors.New("no Azure export manifests found"))
 	}
-	runs := map[string][]azureRun{}
+	groups := map[string][]string{}
+	base := strings.Trim(strings.Join([]string{scope.Prefix, scope.ExportName}, "/"), "/") + "/"
 	for _, name := range names {
-		run, err := reader.manifest(ctx, name)
-		if err != nil {
-			return nil, err
-		}
-		period := run.start.Format(dayFormat)
-		runs[period] = append(runs[period], run)
+		period := strings.SplitN(strings.TrimPrefix(name, base), "/", 2)[0]
+		groups[period] = append(groups[period], name)
 	}
-	periods := make([]azurePeriod, 0, len(runs))
+	periods := slices.Sorted(maps.Keys(groups))
 	var totals azureTotals
 	var aggregates int
-	for _, period := range slices.Sorted(maps.Keys(runs)) {
-		candidates := runs[period]
+	var failure error
+	for index := range periods {
+		period := periods[(index+failures)%len(periods)]
+		var candidates []azureRun
+		valid := true
+		for _, name := range groups[period] {
+			run, err := reader.manifest(fetchCtx, name)
+			if err != nil {
+				if failure == nil {
+					failure = err
+				}
+				valid = false
+				break
+			}
+			candidates = append(candidates, run)
+		}
+		if !valid {
+			continue
+		}
 		slices.SortFunc(candidates, func(a, b azureRun) int { return b.submitted.Compare(a.submitted) })
 		for index, run := range candidates {
-			days, nextTotals, err := reader.readRun(ctx, run, totals, azureMaxAggregates-aggregates, earliest, today)
+			days, nextTotals, err := reader.readRun(fetchCtx, run, totals, azureMaxAggregates-aggregates, earliest, today)
 			totals = nextTotals
 			if errors.Is(err, azureMissing) && index+1 < len(candidates) {
 				continue
 			}
 			if err != nil {
-				return nil, err
+				if failure == nil {
+					failure = err
+				}
+				break
 			}
 			for _, lines := range days {
 				aggregates += len(lines)
 			}
 			if aggregates > azureMaxAggregates {
-				return nil, failFetch("response", errors.New("too many aggregates"))
+				if failure == nil {
+					failure = failFetch("response", errors.New("too many aggregates"))
+				}
+				break
 			}
-			periods = append(periods, azurePeriod{start: period, revision: sourceRevision{id: run.manifest.RunInfo.RunID, orderingAt: run.submitted}, days: days})
+			if err := store(azurePeriod{start: run.start.Format(dayFormat), revision: sourceRevision{id: run.manifest.RunInfo.RunID, orderingAt: run.submitted}, days: days}); err != nil {
+				return err
+			}
 			break
 		}
 	}
-	return periods, nil
+	return failure
 }
 
 func (a *azureReader) document(ctx context.Context, name string) (azureManifest, error) {
@@ -323,6 +345,9 @@ func (a *azureReader) manifest(ctx context.Context, name string) (azureRun, erro
 
 func (a *azureReader) readRun(ctx context.Context, run azureRun, initialTotals azureTotals, aggregateLimit int, earliest, today time.Time) (reportAccumulator, azureTotals, error) {
 	totals := initialTotals
+	if totals.files+run.manifest.BlobCount > azureMaxFiles || totals.compressed+run.manifest.ByteCount > azureMaxCompressed || totals.rows+run.manifest.DataRowCount > azureMaxRows {
+		return nil, totals, failFetch("response", errors.New("export exceeds remaining import limits"))
+	}
 	days := reportAccumulator{}
 	last := slices.MinFunc([]time.Time{run.end.Truncate(24 * time.Hour), today.AddDate(0, 0, -1), run.start.AddDate(0, 1, -1), run.submitted.Truncate(24*time.Hour).AddDate(0, 0, -1)}, time.Time.Compare)
 	start := slices.MaxFunc([]time.Time{run.start.Truncate(24 * time.Hour), earliest}, time.Time.Compare)

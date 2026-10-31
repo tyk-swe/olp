@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"path"
 	"slices"
 	"strings"
@@ -100,31 +101,34 @@ func (i *Importer) importAWS(ctx context.Context, row *importRow, cfg *providerC
 		return failFetch("status", errors.New("AWS report has no deliveries"))
 	}
 	budget := awsBudget{}
-	period := ""
-	complete := false
+	groups := map[string][]awsDelivery{}
 	for _, delivery := range deliveries {
-		if delivery.period != period {
-			if period != "" && !complete {
-				return failFetch("status", errAWSIncomplete)
+		groups[delivery.period] = append(groups[delivery.period], delivery)
+	}
+	periods := slices.Sorted(maps.Keys(groups))
+	var failure error
+	for index := range periods {
+		period := periods[(index+row.ConsecutiveFailures)%len(periods)]
+		complete := false
+		for _, delivery := range groups[period] {
+			err := i.importAWSDelivery(fetchCtx, row, client, scope, delivery, earliest, today, &budget)
+			if errors.Is(err, errAWSIncomplete) {
+				continue
 			}
-			period, complete = delivery.period, false
+			if err != nil {
+				if failure == nil {
+					failure = err
+				}
+				break
+			}
+			complete = true
+			break
 		}
-		if complete {
-			continue
+		if !complete && failure == nil {
+			failure = failFetch("status", errAWSIncomplete)
 		}
-		err := i.importAWSDelivery(fetchCtx, row, client, scope, delivery, earliest, today, &budget)
-		if errors.Is(err, errAWSIncomplete) {
-			continue
-		}
-		if err != nil {
-			return err
-		}
-		complete = true
 	}
-	if !complete {
-		return failFetch("status", errAWSIncomplete)
-	}
-	return nil
+	return failure
 }
 
 func (i *Importer) importAWSDelivery(ctx context.Context, row *importRow, client *s3.Client, scope awsScope, delivery awsDelivery, earliest, today time.Time, budget *awsBudget) error {

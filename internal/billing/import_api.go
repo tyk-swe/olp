@@ -197,6 +197,14 @@ func (s *Server) putImport(r *http.Request, _ access.Principal) (access.Reply, e
 		credentialID = &newID
 	case credentialID == nil:
 		return access.Reply{}, access.Invalid("credential", "credential is required to create a billing import")
+	default:
+		compatible, err := ImportCredentialCompatible(r.Context(), tx, s.Access.Keys, s.Access.Installation, source, credentialID)
+		if err != nil {
+			return access.Reply{}, err
+		}
+		if !compatible {
+			return access.Reply{}, access.Invalid("credential", "supply a credential compatible with the billing source")
+		}
 	}
 	newETag := access.NewID()
 	action := "provider.billing_import.create"

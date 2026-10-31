@@ -51,6 +51,26 @@ func ImportCredential(ctx context.Context, tx pgx.Tx, keys *secrets.KeyRing, ins
 	return id, nil
 }
 
+func ImportCredentialCompatible(ctx context.Context, q access.Queryer, keys *secrets.KeyRing, installation, source string, credentialID *string) (bool, error) {
+	if credentialID == nil {
+		return false, nil
+	}
+	current, err := keys.Read(ctx, q, installation, *credentialID, secrets.BillingCredential)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	defer clear(current)
+	key, err := decodeCredential(source, current)
+	if err != nil {
+		return false, nil
+	}
+	defer clear(key)
+	return true, nil
+}
+
 // ImportCredentialMatches reports whether the stored credential holds the
 // same material as the supplied secret.
 func ImportCredentialMatches(ctx context.Context, q access.Queryer, keys *secrets.KeyRing, installation, source string, credentialID *string, credential string) (bool, error) {

@@ -14,6 +14,12 @@ CREATE TABLE olp.provider_billing_days (
 
 CREATE INDEX provider_billing_days_day_idx ON olp.provider_billing_days (day);
 
+INSERT INTO olp.provider_billing_days (provider_id, day, source, scope, last_success_at)
+SELECT bi.provider_id, d.day::date, bi.source, bi.scope, bi.last_success_at
+FROM olp.provider_billing_imports bi
+CROSS JOIN LATERAL generate_series(bi.imported_from::timestamp, bi.imported_through::timestamp, interval '1 day') AS d(day)
+WHERE bi.source IN ('openai_costs', 'anthropic_cost_report');
+
 WITH spans AS (
     SELECT bc.provider_id, bc.source, bc.scope, r.covered_from AS first_day, r.covered_through AS last_day,
            COALESCE(bi.last_success_at, bc.last_success_at) AS last_success_at

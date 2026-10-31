@@ -1024,6 +1024,112 @@ func TestBillingImportAWSListsOnlyRetainedPeriods(t *testing.T) {
 	}
 }
 
+func TestBillingImportAWSBoundedPeriodsMakeProgress(t *testing.T) {
+	h := newAccessHarness(t)
+	owner := h.owner()
+	fake := newAWSBillingFake(t)
+	now := time.Now().UTC()
+	month := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC)
+	previous, current := month.AddDate(0, -1, 9), month.AddDate(0, 0, 9)
+	fake.delivery(t, previous, "previous", month.AddDate(0, 0, 1), "0.2")
+	fake.delivery(t, current, "current", month.AddDate(0, 0, 14), "0.3")
+	fake.mu.Lock()
+	for key, object := range fake.objects {
+		if !strings.HasSuffix(key, ".csv.gz") {
+			continue
+		}
+		var body bytes.Buffer
+		body.Write(object.body)
+		header := []byte{0x1f, 0x8b, 8, 4, 0, 0, 0, 0, 0, 0xff, 0xff, 0xff}
+		padding := make([]byte, 65535)
+		footer := []byte{3, 0, 0, 0, 0, 0, 0, 0, 0, 0}
+		for range 520 {
+			body.Write(header)
+			body.Write(padding)
+			body.Write(footer)
+		}
+		fake.objects[key] = awsObject{body: body.Bytes(), modified: object.modified}
+	}
+	fake.mu.Unlock()
+	provider := h.want(owner, "POST", "/api/v1/providers", map[string]any{"name": "AWS bounded periods", "configuration": map[string]any{"kind": "bedrock", "auth_mode": "static", "endpoint": "https://bedrock-runtime.us-east-1.amazonaws.com", "cloud_region": "us-east-1"}, "credential": `{"access_key_id":"BEDROCKKEY1234567890","secret_access_key":"bedrock-secret-123456789"}`, "model": "amazon.titan-text-express-v1"}, idem("aws-bounded-periods"), 201)
+	id := billingProviderID(provider)
+	scope := map[string]any{"payer_account_id": "111122223333", "bucket": "billing-report-bucket", "report_prefix": "billing/cur", "region": "us-east-1", "linked_account_ids": []string{"444455556666"}}
+	credential := map[string]any{"auth_mode": "static", "access_key_id": "BILLINGKEY1234567890", "secret_access_key": "billing-secret-example"}
+	billingPut(h, owner, id, map[string]any{"scope": scope, "credential": credential}, provider["etag"].(string), 201)
+	importer := billingImporter(h, t)
+	importer.Now = func() time.Time { return month.AddDate(0, 0, 20) }
+	importer.AWSClient = func(config aws.Config) *s3.Client {
+		return s3.NewFromConfig(config, func(o *s3.Options) { o.BaseEndpoint = aws.String(fake.server.URL); o.UsePathStyle = true })
+	}
+	if err := importer.Pass(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	path := "/api/v1/providers/" + id + "/billing-import"
+	query := fmt.Sprintf("/api/v1/providers/%s/invoiced-costs?start=%s&end=%s", id, previous.Format("2006-01-02"), current.AddDate(0, 0, 1).Format("2006-01-02"))
+	items := h.want(owner, "GET", query, nil, nil, 200)["items"].([]any)
+	if len(items) != 1 || items[0].(map[string]any)["amount"] != "0.40000000000000000001" {
+		t.Fatalf("the first bounded pass did not preserve its completed period: %v", items)
+	}
+	headers := etagHeader(h.want(owner, "GET", path, nil, nil, 200))
+	headers["Idempotency-Key"] = uuid.NewString()
+	h.want(owner, "POST", path+"/run", nil, headers, 202)
+	if err := importer.Pass(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	items = h.want(owner, "GET", query, nil, nil, 200)["items"].([]any)
+	if len(items) != 2 || items[0].(map[string]any)["amount"] != "0.40000000000000000001" || items[1].(map[string]any)["amount"] != "0.50000000000000000001" {
+		t.Fatalf("bounded passes did not eventually refresh both periods: %v", items)
+	}
+}
+
+func TestBillingImportAWSIncompletePeriodDoesNotBlockOtherPeriods(t *testing.T) {
+	h := newAccessHarness(t)
+	owner := h.owner()
+	fake := newAWSBillingFake(t)
+	now := time.Now().UTC()
+	month := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC)
+	previous, current := month.AddDate(0, -1, 9), month.AddDate(0, 0, 9)
+	fake.delivery(t, previous, "old", month.AddDate(0, 0, 1), "0.1")
+	fake.delivery(t, current, "initial", month.AddDate(0, 0, 14), "0.2")
+	provider := h.want(owner, "POST", "/api/v1/providers", map[string]any{"name": "AWS incomplete period", "configuration": map[string]any{"kind": "bedrock", "auth_mode": "static", "endpoint": "https://bedrock-runtime.us-east-1.amazonaws.com", "cloud_region": "us-east-1"}, "credential": `{"access_key_id":"BEDROCKKEY1234567890","secret_access_key":"bedrock-secret-123456789"}`, "model": "amazon.titan-text-express-v1"}, idem("aws-incomplete-period"), 201)
+	id := billingProviderID(provider)
+	scope := map[string]any{"payer_account_id": "111122223333", "bucket": "billing-report-bucket", "report_prefix": "billing/cur", "region": "us-east-1", "linked_account_ids": []string{"444455556666"}}
+	credential := map[string]any{"auth_mode": "static", "access_key_id": "BILLINGKEY1234567890", "secret_access_key": "billing-secret-example"}
+	billingPut(h, owner, id, map[string]any{"scope": scope, "credential": credential}, provider["etag"].(string), 201)
+	importer := billingImporter(h, t)
+	importer.Now = func() time.Time { return month.AddDate(0, 0, 20) }
+	importer.AWSClient = func(config aws.Config) *s3.Client {
+		return s3.NewFromConfig(config, func(o *s3.Options) { o.BaseEndpoint = aws.String(fake.server.URL); o.UsePathStyle = true })
+	}
+	if err := importer.Pass(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	fake.delivery(t, previous, "incomplete", month.AddDate(0, 0, 2), "0.5")
+	fake.delivery(t, current, "revised", month.AddDate(0, 0, 15), "0.7")
+	fake.mu.Lock()
+	for key := range fake.objects {
+		if (strings.Contains(key, "/old/") || strings.Contains(key, "/incomplete/")) && strings.HasSuffix(key, ".csv.gz") {
+			delete(fake.objects, key)
+		}
+	}
+	fake.mu.Unlock()
+	path := "/api/v1/providers/" + id + "/billing-import"
+	headers := etagHeader(h.want(owner, "GET", path, nil, nil, 200))
+	headers["Idempotency-Key"] = uuid.NewString()
+	h.want(owner, "POST", path+"/run", nil, headers, 202)
+	if err := importer.Pass(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	items := h.want(owner, "GET", fmt.Sprintf("/api/v1/providers/%s/invoiced-costs?start=%s&end=%s", id, previous.Format("2006-01-02"), current.AddDate(0, 0, 1).Format("2006-01-02")), nil, nil, 200)["items"].([]any)
+	if len(items) != 2 || items[0].(map[string]any)["amount"] != "0.30000000000000000001" || items[1].(map[string]any)["amount"] != "0.90000000000000000001" {
+		t.Fatalf("an incomplete period blocked a healthy period or changed existing costs: %v", items)
+	}
+	status := h.want(owner, "GET", path, nil, nil, 200)["status"].(map[string]any)
+	if status["last_error_code"] != "status" {
+		t.Fatalf("the failed period did not report a content-free error: %v", status)
+	}
+}
+
 func TestBillingImportAWSCumulativeByteBudgets(t *testing.T) {
 	for _, limit := range []string{"compressed", "expanded"} {
 		t.Run(limit, func(t *testing.T) {

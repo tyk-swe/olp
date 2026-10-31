@@ -1201,6 +1201,69 @@ func TestBillingImportCredentialCompatibilityAcrossKinds(t *testing.T) {
 	}
 }
 
+func TestBillingImportRejectsIncompatibleStoredCredential(t *testing.T) {
+	h := newAccessHarness(t)
+	owner := h.owner()
+	provider := billingProvider(h, owner, "Changed cloud", "openai", "https://api.openai.com/v1", nil)
+	id := billingProviderID(provider)
+	path := "/api/v1/providers/" + id
+	billingPut(h, owner, id, map[string]any{"credential": "sk-admin-" + strings.Repeat("k", 30)}, provider["etag"].(string), 201)
+	credentials := h.want(owner, "GET", path+"/credentials", nil, nil, 200)["items"].([]any)
+	headers := etagHeader(provider)
+	headers["Idempotency-Key"] = uuid.NewString()
+	h.want(owner, "POST", path+"/credentials/"+credentials[0].(map[string]any)["id"].(string)+"/revoke", nil, headers, 200)
+	provider = h.want(owner, "GET", path, nil, nil, 200)
+	h.want(owner, "PATCH", path, map[string]any{"name": "Changed cloud", "configuration": map[string]any{"kind": "bedrock", "auth_mode": "static", "endpoint": "https://bedrock-runtime.us-east-1.amazonaws.com", "cloud_region": "us-east-1"}}, etagHeader(provider), 200)
+	scope := map[string]any{"payer_account_id": "111122223333", "bucket": "billing-report-bucket", "report_prefix": "billing/cur", "region": "us-east-1"}
+	current := h.want(owner, "GET", path+"/billing-import", nil, nil, 200)
+	billingPut(h, owner, id, map[string]any{"scope": scope}, current["etag"].(string), 422)
+	credential := map[string]any{"auth_mode": "static", "access_key_id": "BILLINGKEY1234567890", "secret_access_key": "billing-secret-example"}
+	updated := billingPut(h, owner, id, map[string]any{"scope": scope, "credential": credential}, current["etag"].(string), 200)
+	if updated["source"] != "aws_cur" || updated["credential"] != nil {
+		t.Fatalf("replacement billing credential was not applied write-only: %v", updated)
+	}
+}
+
+func TestBillingImportPromotionRequiresCompatibleCredential(t *testing.T) {
+	h := newAccessHarness(t)
+	owner := h.owner()
+	provider := billingProvider(h, owner, "Changed promotion", "openai", "https://api.openai.com/v1", nil)
+	id := billingProviderID(provider)
+	path := "/api/v1/providers/" + id
+	billingPut(h, owner, id, map[string]any{"credential": "sk-admin-" + strings.Repeat("k", 30)}, provider["etag"].(string), 201)
+	credentials := h.want(owner, "GET", path+"/credentials", nil, nil, 200)["items"].([]any)
+	headers := etagHeader(provider)
+	headers["Idempotency-Key"] = uuid.NewString()
+	h.want(owner, "POST", path+"/credentials/"+credentials[0].(map[string]any)["id"].(string)+"/revoke", nil, headers, 200)
+	provider = h.want(owner, "GET", path, nil, nil, 200)
+	h.want(owner, "PATCH", path, map[string]any{"name": "Changed promotion", "configuration": map[string]any{"kind": "azure_openai", "auth_mode": "api_key", "endpoint": "https://example.openai.azure.com", "deployment": "model", "api_version": "2024-10-21"}}, etagHeader(provider), 200)
+	document := h.want(owner, "GET", "/api/v1/configuration/export", nil, nil, 200)["document"].(map[string]any)
+	for _, raw := range document["providers"].([]any) {
+		entry := raw.(map[string]any)
+		if entry["name"] == "Changed promotion" {
+			entry["billing_import"].(map[string]any)["scope"] = map[string]any{"billing_scope": "/providers/Microsoft.Billing/billingAccounts/1234567", "export_name": "costs", "storage_account": "billingaccount", "container": "exports"}
+		}
+	}
+	bindings := map[string]any{"Changed promotion/default": "inference-key"}
+	body := map[string]any{"document": document, "secret_bindings": bindings}
+	plan := h.want(owner, "POST", "/api/v1/configuration/plan", body, nil, 200)
+	blocked := false
+	for _, raw := range plan["blockers"].([]any) {
+		entry := raw.(map[string]any)
+		blocked = blocked || (entry["key"] == "Changed promotion/billing" && entry["detail"] == "secret_binding_required")
+	}
+	if !blocked {
+		t.Fatalf("promotion did not require a compatible billing binding: %v", plan)
+	}
+	h.want(owner, "POST", "/api/v1/configuration/apply", body, idem("incompatible-billing"), 409)
+	bindings["Changed promotion/billing"] = `{"auth_mode":"azure_default"}`
+	h.want(owner, "POST", "/api/v1/configuration/apply", body, idem("replacement-billing"), 200)
+	updated := h.want(owner, "GET", path+"/billing-import", nil, nil, 200)
+	if updated["source"] != "azure_cost_management" || updated["credential"] != nil {
+		t.Fatalf("promotion did not apply the replacement credential write-only: %v", updated)
+	}
+}
+
 func TestBillingImportMigrationPreservesHistory(t *testing.T) {
 	pool, dbURL := accessDatabase(t)
 	if _, err := pool.Exec(t.Context(), `CREATE SCHEMA olp; CREATE TABLE olp.migrations
@@ -1215,7 +1278,7 @@ func TestBillingImportMigrationPreservesHistory(t *testing.T) {
 		if !strings.HasSuffix(entry.Name(), ".sql") {
 			continue
 		}
-		if entry.Name() >= "0123_billing_currency_revision.sql" {
+		if entry.Name() >= "0127_billing_import_history.sql" {
 			break
 		}
 		data, err := os.ReadFile("../../internal/database/migrations/" + entry.Name())
@@ -1254,8 +1317,13 @@ func TestBillingImportMigrationPreservesHistory(t *testing.T) {
 		legacyProvider, uuid.NewString(), uuid.NewString(), userID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := pool.Exec(t.Context(), `INSERT INTO olp.provider_billing_imports(provider_id,source,etag,created_by,imported_from,imported_through,last_success_at)
-		VALUES($1::uuid,'openai_costs',$2::uuid,$3::uuid,$4::date,$5::date,now())`, legacyProvider, uuid.NewString(), userID, day1.AddDate(0, 0, -1), day2); err != nil {
+	legacyOldDay := day1.AddDate(0, 0, -45)
+	if _, err := pool.Exec(t.Context(), `INSERT INTO olp.provider_billing_imports(provider_id,source,scope,etag,created_by,imported_from,imported_through,last_success_at)
+		VALUES($1::uuid,'openai_costs','{"project_ids":["proj_legacy"]}',$2::uuid,$3::uuid,$4::date,$5::date,now())`, legacyProvider, uuid.NewString(), userID, legacyOldDay, day2); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(t.Context(), `INSERT INTO olp.provider_billing_contexts(provider_id,source,scope)
+		VALUES($1::uuid,'openai_costs','{"project_ids":["proj_legacy"]}')`, legacyProvider); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := pool.Exec(t.Context(), `INSERT INTO olp.provider_invoiced_costs(provider_id,day,line_item,currency,amount,source)
@@ -1272,12 +1340,17 @@ func TestBillingImportMigrationPreservesHistory(t *testing.T) {
 	billingFact(t, h, legacyProvider, uuid.NewString(), legacyDay, "billable", true, &legacyPrice, false, false, false)
 	legacyReport := h.want(owner, "GET", fmt.Sprintf("/api/v1/usage/reconciliation?start=%s&end=%s&provider_id=%s", legacyDay.Format("2006-01-02"), day1.Format("2006-01-02"), legacyProvider), nil, nil, 200)
 	legacyItem := legacyReport["items"].([]any)[0].(map[string]any)
-	if legacyItem["invoiced_cost"] != nil || legacyItem["capture_rate_unavailable_reason"] != "not_imported" {
-		t.Fatalf("migration invented coverage from a legacy range: %v", legacyReport)
+	if legacyItem["invoiced_cost"] != "0" || legacyItem["capture_rate_unavailable_reason"] != "zero_invoice" {
+		t.Fatalf("migration lost an empty covered day: %v", legacyReport)
 	}
 	legacyStatus := h.want(owner, "GET", "/api/v1/providers/"+legacyProvider+"/billing-import", nil, nil, 200)["status"].(map[string]any)
-	if legacyStatus["imported_from"] != nil || legacyStatus["imported_through"] != nil {
-		t.Fatalf("migration attributed unknown historical scope to the current import: %v", legacyStatus)
+	if legacyStatus["imported_from"] != legacyOldDay.Format("2006-01-02") || legacyStatus["imported_through"] != day2.Format("2006-01-02") {
+		t.Fatalf("migration lost the current import's covered range: %v", legacyStatus)
+	}
+	oldReport := h.want(owner, "GET", fmt.Sprintf("/api/v1/usage/reconciliation?start=%s&end=%s&provider_id=%s", legacyOldDay.Format("2006-01-02"), legacyOldDay.AddDate(0, 0, 1).Format("2006-01-02"), legacyProvider), nil, nil, 200)
+	oldItem := oldReport["items"].([]any)[0].(map[string]any)
+	if oldItem["invoiced_cost"] != "0" || oldItem["capture_rate_unavailable_reason"] != "zero_invoice" {
+		t.Fatalf("migration lost an old covered day: %v", oldReport)
 	}
 	path := fmt.Sprintf("/api/v1/providers/%s/invoiced-costs?start=%s&end=%s", providerID, day1.Format("2006-01-02"), day3.Format("2006-01-02"))
 	items := h.want(owner, "GET", path, nil, nil, 200)["items"].([]any)
@@ -1686,7 +1759,6 @@ func TestAzureBillingPartLimitAcrossPeriods(t *testing.T) {
 	}
 	path := "/api/v1/providers/" + id + "/billing-import"
 	query := fmt.Sprintf("/api/v1/providers/%s/invoiced-costs?start=%s&end=%s", id, previous.Format("2006-01-02"), current.AddDate(0, 0, 1).Format("2006-01-02"))
-	before := h.want(owner, "GET", query, nil, nil, 200)["items"]
 	expand := func(base string, count int) {
 		t.Helper()
 		fake.mu.Lock()
@@ -1723,10 +1795,52 @@ func TestAzureBillingPartLimitAcrossPeriods(t *testing.T) {
 	if err := importer.Pass(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	status = h.want(owner, "GET", path, nil, nil, 200)["status"].(map[string]any)
-	after := h.want(owner, "GET", query, nil, nil, 200)["items"]
-	if status["last_error_code"] != "response" || !reflect.DeepEqual(before, after) {
-		t.Fatalf("cumulative part limit did not preserve stored invoices: %v", status)
+	items := h.want(owner, "GET", query, nil, nil, 200)["items"].([]any)
+	if len(items) != 1 || items[0].(map[string]any)["amount"] != "20" {
+		t.Fatalf("the first bounded pass did not commit the complete previous period: %v", items)
+	}
+	headers = etagHeader(h.want(owner, "GET", path, nil, nil, 200))
+	headers["Idempotency-Key"] = uuid.NewString()
+	h.want(owner, "POST", path+"/run", nil, headers, 202)
+	if err := importer.Pass(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	items = h.want(owner, "GET", query, nil, nil, 200)["items"].([]any)
+	if len(items) != 2 || items[0].(map[string]any)["amount"] != "20" || items[1].(map[string]any)["amount"] != "30.3" {
+		t.Fatalf("bounded passes did not eventually refresh both periods: %v", items)
+	}
+}
+
+func TestAzureBillingCorruptPeriodDoesNotBlockOtherPeriods(t *testing.T) {
+	fake := newAzureBillingFake(t)
+	h, owner, id, importer := azureBillingTest(t, fake)
+	now := time.Now().UTC()
+	month := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC)
+	importer.Now = func() time.Time { return month.AddDate(0, 0, 20) }
+	previous, current := month.AddDate(0, -1, 9), month.AddDate(0, 0, 9)
+	fake.delivery(t, previous, "initial", month.AddDate(0, 0, 1), azureRow(previous, "Usage", "0.1"))
+	if err := importer.Pass(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	bad := fake.delivery(t, previous, "corrupt", month.AddDate(0, 0, 2), azureRow(previous, "Usage", "0.2"))
+	fake.delivery(t, current, "healthy", month.AddDate(0, 0, 14), azureRow(current, "Usage", "0.3"))
+	fake.mu.Lock()
+	fake.objects[bad+"part.csv"] = strings.Repeat("x", len(fake.objects[bad+"part.csv"]))
+	fake.mu.Unlock()
+	path := "/api/v1/providers/" + id + "/billing-import"
+	headers := etagHeader(h.want(owner, "GET", path, nil, nil, 200))
+	headers["Idempotency-Key"] = uuid.NewString()
+	h.want(owner, "POST", path+"/run", nil, headers, 202)
+	if err := importer.Pass(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	items := h.want(owner, "GET", fmt.Sprintf("/api/v1/providers/%s/invoiced-costs?start=%s&end=%s", id, previous.Format("2006-01-02"), current.AddDate(0, 0, 1).Format("2006-01-02")), nil, nil, 200)["items"].([]any)
+	if len(items) != 2 || items[0].(map[string]any)["amount"] != "0.1" || items[1].(map[string]any)["amount"] != "0.3" {
+		t.Fatalf("a corrupt period blocked a healthy period or changed existing costs: %v", items)
+	}
+	status := h.want(owner, "GET", path, nil, nil, 200)["status"].(map[string]any)
+	if status["last_error_code"] != "response" {
+		t.Fatalf("the failed period did not report a content-free error: %v", status)
 	}
 }
 
