@@ -25963,6 +25963,7 @@
               "openai_costs",
               "anthropic_cost_report",
               "aws_cur",
+              "google_bigquery",
               "azure_cost_management"
             ]
           },
@@ -26064,7 +26065,7 @@
             "$ref": "#/components/schemas/BillingScope"
           },
           "credential": {
-            "description": "Billing credential. Required on create, omitted retains the stored credential, and null is rejected. AWS and Azure credentials are source-shaped objects.",
+            "description": "Billing credential. Required on create, omitted retains the stored credential, and null is rejected. Cloud credentials are source-shaped objects.",
             "oneOf": [
               {
                 "type": "string",
@@ -26093,6 +26094,26 @@
                   },
                   "session_token": {
                     "type": "string"
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "auth_mode"
+                ],
+                "properties": {
+                  "auth_mode": {
+                    "type": "string",
+                    "enum": [
+                      "service_account",
+                      "adc"
+                    ]
+                  },
+                  "service_account": {
+                    "type": "object",
+                    "additionalProperties": true
                   }
                 }
               },
@@ -31844,13 +31865,16 @@
         }
       },
       "BillingScope": {
-        "description": "Source-shaped billing scope. Empty scope reads the whole organization for polling sources. AWS and Azure require their export locations.",
+        "description": "Source-shaped billing scope. Polling sources accept an empty scope. Cloud sources require their export details.",
         "oneOf": [
           {
             "$ref": "#/components/schemas/PollingBillingScope"
           },
           {
             "$ref": "#/components/schemas/AWSBillingScope"
+          },
+          {
+            "$ref": "#/components/schemas/GoogleBillingScope"
           },
           {
             "$ref": "#/components/schemas/AzureBillingScope"
@@ -31922,6 +31946,37 @@
             "items": {
               "type": "string",
               "pattern": "^[0-9]{12}$"
+            }
+          }
+        }
+      },
+      "GoogleBillingScope": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "billing_account_id",
+          "bigquery_project_id",
+          "dataset_id",
+          "table_id"
+        ],
+        "properties": {
+          "billing_account_id": {
+            "type": "string"
+          },
+          "bigquery_project_id": {
+            "type": "string"
+          },
+          "dataset_id": {
+            "type": "string"
+          },
+          "table_id": {
+            "type": "string"
+          },
+          "project_ids": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "type": "string"
             }
           }
         }

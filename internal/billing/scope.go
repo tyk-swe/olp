@@ -18,10 +18,11 @@ const (
 	SourceAnthropic           = "anthropic_cost_report"
 	SourceAzureCostManagement = "azure_cost_management"
 	SourceAWS                 = "aws_cur"
+	SourceGoogle              = "google_bigquery"
 )
 
 func revisionBacked(source string) bool {
-	return source != SourceOpenAI && source != SourceAnthropic
+	return source == SourceAWS || source == SourceAzureCostManagement
 }
 
 // SourceFor names the vendor cost endpoint a provider kind imports, or
@@ -36,6 +37,8 @@ func SourceFor(kind string) (string, error) {
 		return SourceAzureCostManagement, nil
 	case "bedrock":
 		return SourceAWS, nil
+	case "vertex_ai":
+		return SourceGoogle, nil
 	}
 	return "", access.Invalid("billing_import",
 		fmt.Sprintf("Billing imports are not supported for provider kind %q.", kind))
@@ -59,6 +62,9 @@ type Scope struct {
 func ValidateScope(source string, raw json.RawMessage) (json.RawMessage, error) {
 	if source == SourceAzureCostManagement {
 		return validateAzureScope(raw)
+	}
+	if source == SourceGoogle {
+		return validateGoogleScope(raw)
 	}
 	if source == SourceAWS {
 		return validateAWSScope(raw)

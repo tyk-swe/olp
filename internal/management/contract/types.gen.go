@@ -549,6 +549,7 @@ const (
 	AnthropicCostReport BillingImportSource = "anthropic_cost_report"
 	AwsCur              BillingImportSource = "aws_cur"
 	AzureCostManagement BillingImportSource = "azure_cost_management"
+	GoogleBigquery      BillingImportSource = "google_bigquery"
 	OpenaiCosts         BillingImportSource = "openai_costs"
 )
 
@@ -560,6 +561,8 @@ func (e BillingImportSource) Valid() bool {
 	case AwsCur:
 		return true
 	case AzureCostManagement:
+		return true
+	case GoogleBigquery:
 		return true
 	case OpenaiCosts:
 		return true
@@ -5556,16 +5559,34 @@ func (e PutBillingImportRequestCredential1AuthMode) Valid() bool {
 
 // Defines values for PutBillingImportRequestCredential2AuthMode.
 const (
-	PutBillingImportRequestCredential2AuthModeAzureClientSecret PutBillingImportRequestCredential2AuthMode = "azure_client_secret"
-	PutBillingImportRequestCredential2AuthModeAzureDefault      PutBillingImportRequestCredential2AuthMode = "azure_default"
+	PutBillingImportRequestCredential2AuthModeAdc            PutBillingImportRequestCredential2AuthMode = "adc"
+	PutBillingImportRequestCredential2AuthModeServiceAccount PutBillingImportRequestCredential2AuthMode = "service_account"
 )
 
 // Valid indicates whether the value is a known member of the PutBillingImportRequestCredential2AuthMode enum.
 func (e PutBillingImportRequestCredential2AuthMode) Valid() bool {
 	switch e {
-	case PutBillingImportRequestCredential2AuthModeAzureClientSecret:
+	case PutBillingImportRequestCredential2AuthModeAdc:
 		return true
-	case PutBillingImportRequestCredential2AuthModeAzureDefault:
+	case PutBillingImportRequestCredential2AuthModeServiceAccount:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for PutBillingImportRequestCredential3AuthMode.
+const (
+	PutBillingImportRequestCredential3AuthModeAzureClientSecret PutBillingImportRequestCredential3AuthMode = "azure_client_secret"
+	PutBillingImportRequestCredential3AuthModeAzureDefault      PutBillingImportRequestCredential3AuthMode = "azure_default"
+)
+
+// Valid indicates whether the value is a known member of the PutBillingImportRequestCredential3AuthMode enum.
+func (e PutBillingImportRequestCredential3AuthMode) Valid() bool {
+	switch e {
+	case PutBillingImportRequestCredential3AuthModeAzureClientSecret:
+		return true
+	case PutBillingImportRequestCredential3AuthModeAzureDefault:
 		return true
 	default:
 		return false
@@ -8154,7 +8175,7 @@ type BillingImport struct {
 	Etag                 string             `json:"etag"`
 	ProviderId           openapi_types.UUID `json:"provider_id"`
 
-	// Scope Source-shaped billing scope. Empty scope reads the whole organization for polling sources. AWS and Azure require their export locations.
+	// Scope Source-shaped billing scope. Polling sources accept an empty scope. Cloud sources require their export details.
 	Scope  BillingScope        `json:"scope"`
 	Source BillingImportSource `json:"source"`
 	Status struct {
@@ -8175,7 +8196,7 @@ type BillingImport struct {
 // BillingImportSource defines model for BillingImport.Source.
 type BillingImportSource string
 
-// BillingScope Source-shaped billing scope. Empty scope reads the whole organization for polling sources. AWS and Azure require their export locations.
+// BillingScope Source-shaped billing scope. Polling sources accept an empty scope. Cloud sources require their export details.
 type BillingScope struct {
 	union json.RawMessage
 }
@@ -9252,7 +9273,7 @@ type ConfigurationBillingImport struct {
 	CredentialRef string `json:"credential_ref"`
 	Enabled       bool   `json:"enabled"`
 
-	// Scope Source-shaped billing scope. Empty scope reads the whole organization for polling sources. AWS and Azure require their export locations.
+	// Scope Source-shaped billing scope. Polling sources accept an empty scope. Cloud sources require their export details.
 	Scope BillingScope `json:"scope"`
 }
 
@@ -10949,6 +10970,15 @@ type GatewayExecutionTool struct {
 
 // GatewayExecutionToolClassification Operator classification. An unclassified tool is reported as approval_required.
 type GatewayExecutionToolClassification string
+
+// GoogleBillingScope defines model for GoogleBillingScope.
+type GoogleBillingScope struct {
+	BigqueryProjectId string    `json:"bigquery_project_id"`
+	BillingAccountId  string    `json:"billing_account_id"`
+	DatasetId         string    `json:"dataset_id"`
+	ProjectIds        *[]string `json:"project_ids,omitempty"`
+	TableId           string    `json:"table_id"`
+}
 
 // GrantDeviceAuthorization A device authorization the operator approves upstream: they open the verification URL, on any device, enter the user code and approve, while status requests poll the enrollment.
 type GrantDeviceAuthorization struct {
@@ -14210,13 +14240,13 @@ type PublishPricingSourceRequest struct {
 
 // PutBillingImportRequest defines model for PutBillingImportRequest.
 type PutBillingImportRequest struct {
-	// Credential Billing credential. Required on create, omitted retains the stored credential, and null is rejected. AWS and Azure credentials are source-shaped objects.
+	// Credential Billing credential. Required on create, omitted retains the stored credential, and null is rejected. Cloud credentials are source-shaped objects.
 	Credential *PutBillingImportRequest_Credential `json:"credential,omitempty"`
 
 	// Enabled Defaults to true when omitted.
 	Enabled *bool `json:"enabled,omitempty"`
 
-	// Scope Source-shaped billing scope. Empty scope reads the whole organization for polling sources. AWS and Azure require their export locations.
+	// Scope Source-shaped billing scope. Polling sources accept an empty scope. Cloud sources require their export details.
 	Scope *BillingScope `json:"scope,omitempty"`
 }
 
@@ -14236,16 +14266,25 @@ type PutBillingImportRequestCredential1AuthMode string
 
 // PutBillingImportRequestCredential2 defines model for PutBillingImportRequest.Credential.2.
 type PutBillingImportRequestCredential2 struct {
-	AuthMode     PutBillingImportRequestCredential2AuthMode `json:"auth_mode"`
-	ClientId     *string                                    `json:"client_id,omitempty"`
-	ClientSecret *string                                    `json:"client_secret,omitempty"`
-	TenantId     *string                                    `json:"tenant_id,omitempty"`
+	AuthMode       PutBillingImportRequestCredential2AuthMode `json:"auth_mode"`
+	ServiceAccount *map[string]interface{}                    `json:"service_account,omitempty"`
 }
 
 // PutBillingImportRequestCredential2AuthMode defines model for PutBillingImportRequest.Credential.2.AuthMode.
 type PutBillingImportRequestCredential2AuthMode string
 
-// PutBillingImportRequest_Credential Billing credential. Required on create, omitted retains the stored credential, and null is rejected. AWS and Azure credentials are source-shaped objects.
+// PutBillingImportRequestCredential3 defines model for PutBillingImportRequest.Credential.3.
+type PutBillingImportRequestCredential3 struct {
+	AuthMode     PutBillingImportRequestCredential3AuthMode `json:"auth_mode"`
+	ClientId     *string                                    `json:"client_id,omitempty"`
+	ClientSecret *string                                    `json:"client_secret,omitempty"`
+	TenantId     *string                                    `json:"tenant_id,omitempty"`
+}
+
+// PutBillingImportRequestCredential3AuthMode defines model for PutBillingImportRequest.Credential.3.AuthMode.
+type PutBillingImportRequestCredential3AuthMode string
+
+// PutBillingImportRequest_Credential Billing credential. Required on create, omitted retains the stored credential, and null is rejected. Cloud credentials are source-shaped objects.
 type PutBillingImportRequest_Credential struct {
 	union json.RawMessage
 }
@@ -20200,6 +20239,32 @@ func (t *BillingScope) MergeAWSBillingScope(v AWSBillingScope) error {
 	return err
 }
 
+// AsGoogleBillingScope returns the union data inside the BillingScope as a GoogleBillingScope
+func (t BillingScope) AsGoogleBillingScope() (GoogleBillingScope, error) {
+	var body GoogleBillingScope
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromGoogleBillingScope overwrites any union data inside the BillingScope as the provided GoogleBillingScope
+func (t *BillingScope) FromGoogleBillingScope(v GoogleBillingScope) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeGoogleBillingScope performs a merge with any union data inside the BillingScope, using the provided GoogleBillingScope
+func (t *BillingScope) MergeGoogleBillingScope(v GoogleBillingScope) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
 // AsAzureBillingScope returns the union data inside the BillingScope as a AzureBillingScope
 func (t BillingScope) AsAzureBillingScope() (AzureBillingScope, error) {
 	var body AzureBillingScope
@@ -20454,6 +20519,32 @@ func (t *PutBillingImportRequest_Credential) FromPutBillingImportRequestCredenti
 
 // MergePutBillingImportRequestCredential2 performs a merge with any union data inside the PutBillingImportRequest_Credential, using the provided PutBillingImportRequestCredential2
 func (t *PutBillingImportRequest_Credential) MergePutBillingImportRequestCredential2(v PutBillingImportRequestCredential2) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsPutBillingImportRequestCredential3 returns the union data inside the PutBillingImportRequest_Credential as a PutBillingImportRequestCredential3
+func (t PutBillingImportRequest_Credential) AsPutBillingImportRequestCredential3() (PutBillingImportRequestCredential3, error) {
+	var body PutBillingImportRequestCredential3
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromPutBillingImportRequestCredential3 overwrites any union data inside the PutBillingImportRequest_Credential as the provided PutBillingImportRequestCredential3
+func (t *PutBillingImportRequest_Credential) FromPutBillingImportRequestCredential3(v PutBillingImportRequestCredential3) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergePutBillingImportRequestCredential3 performs a merge with any union data inside the PutBillingImportRequest_Credential, using the provided PutBillingImportRequestCredential3
+func (t *PutBillingImportRequest_Credential) MergePutBillingImportRequestCredential3(v PutBillingImportRequestCredential3) error {
 	b, err := json.Marshal(v)
 	if err != nil {
 		return err

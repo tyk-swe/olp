@@ -14,6 +14,12 @@ type credentialDocument struct {
 	Credential json.RawMessage `json:"credential,omitempty"`
 }
 
+func ValidateCredential(source, credential string) error {
+	document, err := encodeCredential(source, credential)
+	clear(document)
+	return err
+}
+
 func encodeCredential(source, key string) ([]byte, error) {
 	switch source {
 	case SourceOpenAI, SourceAnthropic:
@@ -26,18 +32,14 @@ func encodeCredential(source, key string) ([]byte, error) {
 			return nil, err
 		}
 		return json.MarshalIndent(credentialDocument{Source: source, Credential: credential}, "", "  ")
+	case SourceGoogle:
+		return encodeGoogleCredential(key)
 	case SourceAWS:
 		return encodeAWSCredential(key)
 	default:
 		return nil, access.Invalid("credential", "unknown billing source")
 	}
 	return json.MarshalIndent(credentialDocument{Source: source, APIKey: key}, "", "  ")
-}
-
-func ValidateSourceCredential(source, credential string) error {
-	document, err := encodeCredential(source, credential)
-	clear(document)
-	return err
 }
 
 var errIncompatibleCredential = errors.New("billing credential source does not match")
@@ -47,6 +49,9 @@ func pollingSource(source string) bool {
 }
 
 func decodeCredential(source string, data []byte) ([]byte, error) {
+	if source == SourceGoogle {
+		return decodeGoogleCredential(data)
+	}
 	if !bytes.ContainsRune(data, '\n') {
 		if !pollingSource(source) {
 			return nil, errIncompatibleCredential

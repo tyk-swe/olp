@@ -65,6 +65,14 @@ func ImportCredentialMatches(ctx context.Context, q access.Queryer, keys *secret
 		return false, err
 	}
 	defer clear(current)
+	if source == SourceGoogle {
+		expected, err := encodeGoogleCredential(credential)
+		if err != nil {
+			return false, err
+		}
+		defer clear(expected)
+		return sha256.Sum256(current) == sha256.Sum256(expected), nil
+	}
 	key, err := decodeCredential(source, current)
 	if errors.Is(err, errIncompatibleCredential) {
 		return false, nil

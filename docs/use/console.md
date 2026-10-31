@@ -55,7 +55,7 @@ The reconciliation panel compares attributed spend with imported provider
 invoices by UTC day. Its visible range is clamped to 93 days and shows
 attributed cost, invoiced cost, capture rate, unpriced share, provisional marks
 and any unavailable-data reason. It also gives covered-day totals for each
-provider. An OpenAI, Anthropic, Bedrock or Azure OpenAI provider detail page
+provider. An OpenAI, Anthropic, Bedrock, Vertex AI or Azure OpenAI provider detail page
 has a billing import section for its credential and scope, on-demand import
 and removal. Read-only
 roles can inspect import status but cannot change it. See

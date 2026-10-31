@@ -65,7 +65,7 @@ func (i *Importer) importAWS(ctx context.Context, row *importRow, cfg *providerC
 	awsConfig := *cfg
 	awsEndpoint := endpoint.URI.String()
 	awsConfig.Endpoint = &awsEndpoint
-	httpClient, err := i.client(fetchCtx, row.ProviderID, &awsConfig, &awsEndpoint, key)
+	httpClient, err := i.client(fetchCtx, row.ProviderID, &awsConfig, key, *awsConfig.Endpoint)
 	if err != nil {
 		return failFetch("endpoint", err)
 	}
