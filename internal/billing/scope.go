@@ -20,10 +20,6 @@ const (
 	SourceAWS       = "aws_cur"
 )
 
-func revisionBacked(source string) bool {
-	return source == SourceAWS
-}
-
 // SourceFor names the vendor cost endpoint a provider kind imports, or
 // refuses a kind that has none.
 func SourceFor(kind string) (string, error) {

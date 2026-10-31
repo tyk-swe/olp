@@ -1188,11 +1188,37 @@ func TestBillingImportMigrationPreservesHistory(t *testing.T) {
 		providerID, day1.Format("2006-01-02"), day2.Format("2006-01-02")); err != nil {
 		t.Fatal(err)
 	}
+	legacyProvider := uuid.NewString()
+	if _, err := pool.Exec(t.Context(), `INSERT INTO olp.providers(id,name,kind,state,configuration,etag,slots_etag,created_by)
+		VALUES($1::uuid,'Legacy range','openai','draft','{"kind":"openai","auth_mode":"api_key"}', $2::uuid,$3::uuid,$4::uuid)`,
+		legacyProvider, uuid.NewString(), uuid.NewString(), userID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(t.Context(), `INSERT INTO olp.provider_billing_imports(provider_id,source,etag,created_by,imported_from,imported_through,last_success_at)
+		VALUES($1::uuid,'openai_costs',$2::uuid,$3::uuid,$4::date,$5::date,now())`, legacyProvider, uuid.NewString(), userID, day1.AddDate(0, 0, -1), day2); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(t.Context(), `INSERT INTO olp.provider_invoiced_costs(provider_id,day,line_item,currency,amount,source)
+		VALUES($1::uuid,$2::date,'tokens','USD',1,'openai_costs')`, legacyProvider, day1); err != nil {
+		t.Fatal(err)
+	}
 	if err := database.Migrate(t.Context(), pool); err != nil {
 		t.Fatal(err)
 	}
 	h := newAccessHarnessOn(t, pool, dbURL)
 	owner := h.owner()
+	legacyDay := day1.AddDate(0, 0, -1)
+	legacyPrice := "0.15"
+	billingFact(t, h, legacyProvider, uuid.NewString(), legacyDay, "billable", true, &legacyPrice, false, false, false)
+	legacyReport := h.want(owner, "GET", fmt.Sprintf("/api/v1/usage/reconciliation?start=%s&end=%s&provider_id=%s", legacyDay.Format("2006-01-02"), day1.Format("2006-01-02"), legacyProvider), nil, nil, 200)
+	legacyItem := legacyReport["items"].([]any)[0].(map[string]any)
+	if legacyItem["invoiced_cost"] != nil || legacyItem["capture_rate_unavailable_reason"] != "not_imported" {
+		t.Fatalf("migration invented coverage from a legacy range: %v", legacyReport)
+	}
+	legacyStatus := h.want(owner, "GET", "/api/v1/providers/"+legacyProvider+"/billing-import", nil, nil, 200)["status"].(map[string]any)
+	if legacyStatus["imported_from"] != nil || legacyStatus["imported_through"] != nil {
+		t.Fatalf("migration attributed unknown historical scope to the current import: %v", legacyStatus)
+	}
 	path := fmt.Sprintf("/api/v1/providers/%s/invoiced-costs?start=%s&end=%s", providerID, day1.Format("2006-01-02"), day3.Format("2006-01-02"))
 	items := h.want(owner, "GET", path, nil, nil, 200)["items"].([]any)
 	expected := []map[string]string{
@@ -1213,6 +1239,19 @@ func TestBillingImportMigrationPreservesHistory(t *testing.T) {
 		expectedAmount, expectedErr := decimal.NewFromString(expectedItem["amount"])
 		if err != nil || expectedErr != nil || !amount.Equal(expectedAmount) {
 			t.Fatalf("invoice amount changed after migration: %v", item)
+		}
+	}
+	report := h.want(owner, "GET", fmt.Sprintf("/api/v1/usage/reconciliation?start=%s&end=%s&provider_id=%s", day1.Format("2006-01-02"), day3.Format("2006-01-02"), providerID), nil, nil, 200)
+	reconciled := report["items"].([]any)
+	if len(reconciled) != len(expected) {
+		t.Fatalf("invoice history was not reconcilable after migration: %v", report)
+	}
+	for index, want := range expected {
+		item := reconciled[index].(map[string]any)
+		amount, err := decimal.NewFromString(item["invoiced_cost"].(string))
+		expectedAmount, expectedErr := decimal.NewFromString(want["amount"])
+		if err != nil || expectedErr != nil || !amount.Equal(expectedAmount) {
+			t.Fatalf("reconciled amount changed after migration: %v", item)
 		}
 	}
 }
@@ -1314,10 +1353,64 @@ func TestBillingImportPollingReconciliationAfterDeletion(t *testing.T) {
 	current := h.want(owner, "GET", importPath, nil, nil, 200)
 	billingPut(h, owner, id, map[string]any{"scope": map[string]any{"project_ids": []string{"proj_another"}}}, current["etag"].(string), 200)
 	changed := h.want(owner, "GET", path, nil, nil, 200)
-	for _, value := range changed["items"].([]any) {
+	for index, value := range changed["items"].([]any) {
 		item := value.(map[string]any)
-		if item["invoiced_cost"] != nil || item["capture_rate_unavailable_reason"] != "not_imported" {
-			t.Fatalf("changed scope inherited historical coverage: %v", changed)
+		previous := retained["items"].([]any)[index].(map[string]any)
+		if item["invoiced_cost"] != previous["invoiced_cost"] || item["capture_rate_unavailable_reason"] != previous["capture_rate_unavailable_reason"] {
+			t.Fatalf("scope change altered historical reconciliation: before=%v after=%v", retained, changed)
 		}
+	}
+	status := h.want(owner, "GET", importPath, nil, nil, 200)["status"].(map[string]any)
+	if status["imported_from"] != nil || status["imported_through"] != nil {
+		t.Fatalf("changed scope inherited historical coverage: %v", status)
+	}
+}
+
+func TestBillingImportPollingDisjointRecreation(t *testing.T) {
+	h := newAccessHarness(t)
+	owner := h.owner()
+	today := time.Now().UTC().Truncate(24 * time.Hour)
+	old := today.AddDate(0, 0, -20)
+	recent := today.AddDate(0, 0, -3)
+	gap := today.AddDate(0, 0, -10)
+	shift := func(start time.Time) map[string]string {
+		return map[string]string{
+			"1759104000": fmt.Sprint(start.Unix()),
+			"1759190400": fmt.Sprint(start.AddDate(0, 0, 1).Unix()),
+			"1759276800": fmt.Sprint(start.AddDate(0, 0, 2).Unix()),
+		}
+	}
+	fake := newBillingFake(t, "/v1/organization/costs", map[string]string{"": "openai_costs_page1.json", "page-2-token": "openai_costs_page2.json"}, shift(old))
+	provider := billingProvider(h, owner, "Polling gap", "openai", fake.server.URL+"/v1", nil)
+	id := billingProviderID(provider)
+	credential := "sk-admin-" + strings.Repeat("k", 30)
+	path := "/api/v1/providers/" + id + "/billing-import"
+	billingPut(h, owner, id, map[string]any{"credential": credential}, provider["etag"].(string), 201)
+	importer := billingImporter(h, t)
+	if err := importer.Pass(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	current := h.want(owner, "GET", path, nil, nil, 200)
+	headers := etagHeader(current)
+	headers["Idempotency-Key"] = uuid.NewString()
+	h.want(owner, "DELETE", path, nil, headers, 204)
+	provider = h.want(owner, "GET", "/api/v1/providers/"+id, nil, nil, 200)
+	billingPut(h, owner, id, map[string]any{"credential": credential}, provider["etag"].(string), 201)
+	fake.mu.Lock()
+	fake.shift = shift(recent)
+	fake.mu.Unlock()
+	if err := importer.Pass(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	amount := "0.2"
+	billingFact(t, h, id, uuid.NewString(), gap.Add(time.Hour), "billable", true, &amount, false, false, false)
+	report := h.want(owner, "GET", fmt.Sprintf("/api/v1/usage/reconciliation?start=%s&end=%s&provider_id=%s", gap.Format("2006-01-02"), gap.AddDate(0, 0, 1).Format("2006-01-02"), id), nil, nil, 200)
+	items := report["items"].([]any)
+	if len(items) != 1 || items[0].(map[string]any)["capture_rate_unavailable_reason"] != "not_imported" || items[0].(map[string]any)["invoiced_cost"] != nil {
+		t.Fatalf("unfetched gap appeared covered: %v", report)
+	}
+	status := h.want(owner, "GET", path, nil, nil, 200)["status"].(map[string]any)
+	if status["imported_from"] != recent.Format("2006-01-02") || status["imported_through"] != recent.AddDate(0, 0, 2).Format("2006-01-02") {
+		t.Fatalf("status must report a contiguous fetched range: %v", status)
 	}
 }
