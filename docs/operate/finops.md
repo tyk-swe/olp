@@ -439,8 +439,8 @@ already lost in the source FLOAT.
 The importer queries retained billing periods and records the export watermark
 with each period. It revisits retained historical periods alongside the current
 and previous periods, and replaces a covered day only with an equal or newer
-watermark. The watermark scan starts at the beginning of the queried period and
-includes later arrivals. A day is covered only when the export contains activity
+watermark. The watermark covers the configured account and projects, starts at
+the beginning of the queried period and includes later arrivals. A day is covered only when the export contains activity
 for the configured account and projects on that UTC day, across any service,
 and the day closed before the watermark. An evidenced day with no Vertex charges
 is covered zero. Days without scope activity remain not imported. Google exports

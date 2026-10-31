@@ -99,8 +99,12 @@ func googleFixtureResults(t *testing.T, db *sql.DB, statement string, day time.T
 		for _, credit := range item.Credits {
 			credits = append(credits, fmt.Sprintf("STRUCT<type STRING, amount FLOAT64>(%s, %s)", strconv.Quote(credit.Type), credit.Amount.String()))
 		}
+		exportedAt := revision
+		if item.BillingAccountID != filters["billing_account_id"] || item.Project.ID != filters["project_ids"] {
+			exportedAt = revision.Add(48 * time.Hour)
+		}
 		insert := fmt.Sprintf("INSERT INTO `fixture-project.billing_export.gcp_billing_export_resource_v1_fixture` VALUES (TIMESTAMP %s, %s, STRUCT<id STRING>(%s), STRUCT<id STRING>(%s), STRUCT<id STRING>(%s), TIMESTAMP %s, %s, %s, %s, ARRAY<STRUCT<type STRING, amount FLOAT64>>[%s], STRUCT<id STRING>(%s), TIMESTAMP %s)",
-			strconv.Quote(revision.Format(time.RFC3339Nano)), strconv.Quote(item.BillingAccountID), strconv.Quote(item.Service.ID), strconv.Quote(item.SKU.ID), strconv.Quote(item.Project.ID), strconv.Quote(usage.Format(time.RFC3339Nano)), strconv.Quote(currency), item.Cost.String(), strconv.Quote(item.CostType), strings.Join(credits, ","), adjustment, strconv.Quote(revision.Format(time.RFC3339Nano)))
+			strconv.Quote(revision.Format(time.RFC3339Nano)), strconv.Quote(item.BillingAccountID), strconv.Quote(item.Service.ID), strconv.Quote(item.SKU.ID), strconv.Quote(item.Project.ID), strconv.Quote(usage.Format(time.RFC3339Nano)), strconv.Quote(currency), item.Cost.String(), strconv.Quote(item.CostType), strings.Join(credits, ","), adjustment, strconv.Quote(exportedAt.Format(time.RFC3339Nano)))
 		if _, err := db.Exec(insert); err != nil {
 			t.Fatalf("insert Google export fixture: %v", err)
 		}

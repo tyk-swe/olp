@@ -110,5 +110,21 @@
     "cost_type": "regular",
     "usage_start_time": "2025-01-20T10:00:00Z",
     "cost": 1
+  },
+  {
+    "billing_account_id": "FEDCBA-654321-FEDCBA",
+    "service": {
+      "id": "C7E2-9256-1C43"
+    },
+    "sku": {
+      "id": "UNRELATED-ACCOUNT"
+    },
+    "project": {
+      "id": "workload-project"
+    },
+    "currency": "USD",
+    "cost_type": "regular",
+    "usage_start_time": "2025-01-20T16:00:00Z",
+    "cost": 42
   }
 ]

@@ -136,7 +136,10 @@ for lane in "${lanes[@]}"; do
       ./tests/clients/run.sh
       ;;
     a-f) process_tests -run '^Test[A-F]' -skip '^TestCode' ;;
-    g-m) go test -race -tags=integration,oidctest,pythonsdk,codecli,google_sql -count=1 -timeout=30m -run '^Test[G-M]' ./tests/integration ;;
+    g-m)
+        process_tests -run '^Test[G-M]'
+        go test -tags=integration,oidctest,pythonsdk,codecli,google_sql -count=1 -timeout=5m -run '^TestGoogleBillingImportEndToEnd$' ./tests/integration
+        ;;
     n-r) process_tests -run '^Test[N-R]' ;;
     s-z)
       process_tests -run '^Test($|[^A-R])'

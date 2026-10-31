@@ -200,12 +200,13 @@ func fetchGoogle(ctx context.Context, client *http.Client, auth *connectors.Auth
 	statement := fmt.Sprintf(`WITH snapshot AS (
 		SELECT billing_account_id, service, sku, project, usage_start_time, currency, cost, cost_type, credits, adjustment_info, export_time
 		FROM %s WHERE _PARTITIONTIME >= TIMESTAMP(@start)
+	), billing_scope AS (
+		SELECT * FROM snapshot WHERE billing_account_id = @billing_account_id%s
 	), revision AS (
 		SELECT MAX(export_time) AS export_time,
-		COALESCE(FORMAT_TIMESTAMP('%%Y-%%m-%%dT%%H:%%M:%%E6SZ', MAX(export_time), 'UTC'), '') AS source_revision FROM snapshot
+		COALESCE(FORMAT_TIMESTAMP('%%Y-%%m-%%dT%%H:%%M:%%E6SZ', MAX(export_time), 'UTC'), '') AS source_revision FROM billing_scope
 	), scoped AS (
-		SELECT * FROM snapshot WHERE billing_account_id = @billing_account_id
-		AND usage_start_time >= TIMESTAMP(@start) AND usage_start_time < TIMESTAMP(@end)%s
+		SELECT * FROM billing_scope WHERE usage_start_time >= TIMESTAMP(@start) AND usage_start_time < TIMESTAMP(@end)
 	), evidence AS (
 		SELECT DISTINCT DATE(usage_start_time, 'UTC') AS usage_day FROM scoped
 		WHERE DATE(usage_start_time, 'UTC') < DATE((SELECT export_time FROM revision), 'UTC')
@@ -310,11 +311,7 @@ func addGoogleRow(result reportAccumulator, row googleInvoiceRow, start, end tim
 	if row.Kind != "cost" && row.Kind != "adjustment" && row.Kind != "rounding error" && !strings.HasPrefix(row.Kind, "credit/") {
 		return failFetch("response", errors.New("invalid Google query line kind"))
 	}
-	item := row.Service + "/" + row.SKU
-	if row.Kind != "cost" {
-		item += "/" + row.Kind
-	}
-	item = googleLineItem(item)
+	item := googleLineItem(row.Service, row.SKU, row.Kind)
 	result.add(row.Day, amount, row.Currency, &item)
 	return nil
 }
@@ -331,7 +328,14 @@ func validGoogleCurrency(currency string) bool {
 	return true
 }
 
-func googleLineItem(value string) string {
+func googleLineItem(service, sku, kind string) string {
+	if kind == "cost" {
+		return googleShortLineItem(service + "/" + sku)
+	}
+	return googleShortLineItem(service + "/" + sku + "/" + kind)
+}
+
+func googleShortLineItem(value string) string {
 	runes := []rune(value)
 	if len(runes) <= 256 {
 		return value
