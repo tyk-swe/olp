@@ -1585,3 +1585,394 @@ func TestBillingImportAWSScope(t *testing.T) {
 		t.Fatalf("billing import must have the AWS source and keep the credential write-only: %v", created)
 	}
 }
+
+type azureBillingFake struct {
+	mu      sync.Mutex
+	objects map[string]string
+	denied  bool
+	server  *httptest.Server
+}
+
+func newAzureBillingFake(t *testing.T) *azureBillingFake {
+	t.Helper()
+	fake := &azureBillingFake{objects: map[string]string{}}
+	fake.server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/token" {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = fmt.Fprintf(w, `{"access_token":"azure-fixture-token","expires_on":"%d","token_type":"Bearer","resource":"https://storage.azure.com/"}`, time.Now().Add(time.Hour).Unix())
+			return
+		}
+		fake.mu.Lock()
+		defer fake.mu.Unlock()
+		if fake.denied || !strings.HasPrefix(r.Header.Get("Authorization"), "Bearer ") {
+			http.Error(w, "fixture denied", http.StatusForbidden)
+			return
+		}
+		if r.URL.Query().Get("comp") == "list" {
+			_, _ = fmt.Fprint(w, "<EnumerationResults><Blobs>")
+			for key := range fake.objects {
+				if strings.HasPrefix(key, r.URL.Query().Get("prefix")) {
+					_, _ = fmt.Fprintf(w, "<Blob><Name>%s</Name></Blob>", key)
+				}
+			}
+			_, _ = fmt.Fprint(w, "</Blobs><NextMarker></NextMarker></EnumerationResults>")
+			return
+		}
+		object, ok := fake.objects[strings.TrimPrefix(r.URL.Path, "/exports/")]
+		if !ok {
+			http.NotFound(w, r)
+			return
+		}
+		_, _ = fmt.Fprint(w, object)
+	}))
+	t.Cleanup(fake.server.Close)
+	t.Setenv("IDENTITY_ENDPOINT", fake.server.URL+"/token")
+	t.Setenv("IDENTITY_HEADER", "fixture-identity")
+	t.Setenv("AZURE_TENANT_ID", "")
+	t.Setenv("AZURE_CLIENT_ID", "")
+	if err := os.Unsetenv("AZURE_CLIENT_ID"); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("AZURE_CLIENT_SECRET", "")
+	return fake
+}
+
+func (f *azureBillingFake) delivery(t *testing.T, day time.Time, run string, submitted time.Time, rows string) string {
+	t.Helper()
+	start := time.Date(day.Year(), day.Month(), 1, 0, 0, 0, 0, time.UTC)
+	base := "billing/costs/" + start.Format("20060102") + "-" + start.AddDate(0, 1, 0).Format("20060102") + "/" + run + "/"
+	part := "Date,SubscriptionId,MeterCategory,MeterSubCategory,MeterId,ChargeType,BillingCurrency,CostInBillingCurrency\n" + rows
+	// Manifest example: https://learn.microsoft.com/en-us/azure/cost-management-billing/costs/tutorial-improved-exports, accessed 2026-10-31.
+	manifest, err := json.Marshal(map[string]any{
+		"manifestVersion": "2024-04-01", "byteCount": len(part), "blobCount": 1, "dataRowCount": strings.Count(rows, "\n"),
+		"exportConfig":   map[string]any{"exportName": "costs", "resourceId": "/providers/Microsoft.Billing/billingAccounts/1234567/providers/Microsoft.CostManagement/exports/costs", "type": "AmortizedCost"},
+		"deliveryConfig": map[string]any{"fileFormat": "Csv", "compressionMode": "None"},
+		"runInfo":        map[string]any{"submittedTime": submitted.Format(time.RFC3339), "runId": run, "startDate": start.Format(time.RFC3339), "endDate": start.AddDate(0, 1, 0).Format(time.RFC3339)},
+		"blobs":          []map[string]any{{"blobName": base + "part.csv", "byteCount": len(part), "dataRowCount": strings.Count(rows, "\n")}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.objects[base+"_manifest.json"] = string(manifest)
+	f.objects[base+"part.csv"] = part
+	return base
+}
+
+func azureBillingTest(t *testing.T, fake *azureBillingFake) (*accessHarness, *browser, string, *billing.Importer) {
+	t.Helper()
+	h := newAccessHarness(t)
+	owner := h.owner()
+	provider := h.want(owner, "POST", "/api/v1/providers", map[string]any{
+		"name": "Azure restatements", "configuration": map[string]any{"kind": "azure_openai", "auth_mode": "api_key", "endpoint": "https://example.openai.azure.com", "deployment": "model", "api_version": "2024-10-21"}, "credential": "inference-key", "model": "model",
+	}, idem("azure-restatement-provider"), 201)
+	id := billingProviderID(provider)
+	billingPut(h, owner, id, map[string]any{"scope": map[string]any{"billing_scope": "/providers/Microsoft.Billing/billingAccounts/1234567", "export_name": "costs", "storage_account": "billingaccount", "container": "exports", "prefix": "billing"}, "credential": map[string]any{"auth_mode": "azure_default"}}, provider["etag"].(string), 201)
+	importer := billingImporter(h, t)
+	importer.AzureBlobEndpoint = func(string) string { return fake.server.URL }
+	return h, owner, id, importer
+}
+
+func azureRow(day time.Time, charge, amount string) string {
+	return fmt.Sprintf("%s,11111111-1111-4111-8111-111111111111,Cognitive Services,Azure Open AI,meter-123,%s,USD,%s\n", day.Format("2006-01-02"), charge, amount)
+}
+
+func TestAzureBillingRetentionAndMissingPeriodRetry(t *testing.T) {
+	fake := newAzureBillingFake(t)
+	h, owner, id, importer := azureBillingTest(t, fake)
+	setting := h.want(owner, "GET", "/api/v1/settings/retention.usage_days", nil, nil, 200)
+	h.want(owner, "PUT", "/api/v1/settings/retention.usage_days", map[string]any{"value": "180"}, etagHeader(setting), 200)
+	today := time.Now().UTC().Truncate(24 * time.Hour)
+	month := time.Date(today.Year(), today.Month(), 1, 0, 0, 0, 0, time.UTC)
+	oldDay, missingDay, recentDay := month.AddDate(0, -4, 14), month.AddDate(0, -2, 14), month.AddDate(0, -1, 14)
+	oldBase := fake.delivery(t, oldDay, "old", month.AddDate(0, -3, 1), azureRow(oldDay, "Usage", "0.1"))
+	fake.delivery(t, recentDay, "recent", month.AddDate(0, 0, 1), azureRow(recentDay, "Usage", "0.2"))
+	ancient := month.AddDate(0, -9, 0)
+	fake.mu.Lock()
+	fake.objects["billing/costs/"+ancient.Format("20060102")+"-"+ancient.AddDate(0, 1, 0).Format("20060102")+"/invalid/_manifest.json"] = "invalid"
+	fake.mu.Unlock()
+	path := "/api/v1/providers/" + id + "/billing-import"
+	if err := importer.Pass(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	status := h.want(owner, "GET", path, nil, nil, 200)["status"].(map[string]any)
+	if status["last_error_code"] != nil {
+		t.Fatalf("old export outside retention prevented backfill: %v", status)
+	}
+	priced := "0.15"
+	billingFact(t, h, id, uuid.NewString(), missingDay, "billable", true, &priced, false, false, false)
+	report := func() map[string]any {
+		t.Helper()
+		return h.want(owner, "GET", fmt.Sprintf("/api/v1/usage/reconciliation?start=%s&end=%s&provider_id=%s", missingDay.Format("2006-01-02"), missingDay.AddDate(0, 0, 1).Format("2006-01-02"), id), nil, nil, 200)["items"].([]any)[0].(map[string]any)
+	}
+	if item := report(); item["capture_rate_unavailable_reason"] != "not_imported" || item["invoiced_cost"] != nil {
+		t.Fatalf("missing period was treated as invoiced: %v", item)
+	}
+	missingBase := fake.delivery(t, missingDay, "recovered", month.AddDate(0, -1, 1), azureRow(missingDay, "Usage", "0.4"))
+	fake.mu.Lock()
+	missingPart := fake.objects[missingBase+"part.csv"]
+	delete(fake.objects, missingBase+"part.csv")
+	delete(fake.objects, oldBase+"part.csv")
+	fake.mu.Unlock()
+	run := func() map[string]any {
+		t.Helper()
+		current := h.want(owner, "GET", path, nil, nil, 200)
+		headers := etagHeader(current)
+		headers["Idempotency-Key"] = uuid.NewString()
+		h.want(owner, "POST", path+"/run", nil, headers, 202)
+		if err := importer.Pass(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+		return h.want(owner, "GET", path, nil, nil, 200)["status"].(map[string]any)
+	}
+	if status := run(); status["last_error_code"] != "status" || report()["capture_rate_unavailable_reason"] != "not_imported" {
+		t.Fatalf("incomplete missing period did not remain retryable: %v", status)
+	}
+	fake.mu.Lock()
+	fake.objects[missingBase+"part.csv"] = missingPart
+	fake.mu.Unlock()
+	if status := run(); status["last_error_code"] != nil {
+		t.Fatalf("completed historical period was unnecessarily fetched: %v", status)
+	}
+	if item := report(); item["capture_rate_unavailable_reason"] != nil || item["invoiced_cost"] != "0.4" {
+		t.Fatalf("missing period was not retried: %v", item)
+	}
+	recentMonth := time.Date(recentDay.Year(), recentDay.Month(), 1, 0, 0, 0, 0, time.UTC)
+	misplacedBase := "billing/costs/" + recentMonth.Format("20060102") + "-" + recentMonth.AddDate(0, 1, 0).Format("20060102") + "/misplaced/"
+	fake.mu.Lock()
+	fake.objects[misplacedBase+"_manifest.json"] = strings.ReplaceAll(fake.objects[oldBase+"_manifest.json"], oldBase, misplacedBase)
+	fake.objects[misplacedBase+"part.csv"] = "Date,SubscriptionId,MeterCategory,MeterSubCategory,MeterId,ChargeType,BillingCurrency,CostInBillingCurrency\n" + azureRow(oldDay, "Usage", "0.1")
+	fake.mu.Unlock()
+	if status := run(); status["last_error_code"] != "response" || report()["invoiced_cost"] != "0.4" {
+		t.Fatalf("manifest period did not match its delivery folder: %v", status)
+	}
+}
+
+func TestAzureBillingRestatements(t *testing.T) {
+	fake := newAzureBillingFake(t)
+	h, owner, id, importer := azureBillingTest(t, fake)
+	today := time.Now().UTC().Truncate(24 * time.Hour)
+	month := time.Date(today.Year(), today.Month(), 1, 0, 0, 0, 0, time.UTC)
+	day, empty := month.AddDate(0, -1, 14), month.AddDate(0, -1, 15)
+	firstRows := azureRow(day, "Usage", "0.300000000000000003") + azureRow(day, "Credit", "-0.03") + azureRow(day, "Adjustment", "-0.02") + strings.Replace(azureRow(day, "Usage", "0.5"), "meter-123", "retired-meter", 1) + azureRow(day, "Tax", "-1")
+	fake.delivery(t, day, "baseline", month.AddDate(0, 0, 1), firstRows)
+	path := "/api/v1/providers/" + id + "/billing-import"
+	status := func() map[string]any { return h.want(owner, "GET", path, nil, nil, 200)["status"].(map[string]any) }
+	run := func() {
+		t.Helper()
+		current := h.want(owner, "GET", path, nil, nil, 200)
+		headers := etagHeader(current)
+		headers["Idempotency-Key"] = uuid.NewString()
+		h.want(owner, "POST", path+"/run", nil, headers, 202)
+		if err := importer.Pass(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	amounts := func() map[string]string {
+		t.Helper()
+		items := h.want(owner, "GET", fmt.Sprintf("/api/v1/providers/%s/invoiced-costs?start=%s&end=%s", id, day.Format("2006-01-02"), day.AddDate(0, 0, 1).Format("2006-01-02")), nil, nil, 200)["items"].([]any)
+		values := map[string]string{}
+		for _, raw := range items {
+			item := raw.(map[string]any)
+			values[item["line_item"].(string)] = item["amount"].(string)
+		}
+		return values
+	}
+	if err := importer.Pass(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	first := amounts()
+	if len(first) != 4 || first["Azure OpenAI / retired-meter / Usage"] != "0.5" || first["Azure OpenAI / meter-123 / Usage"] != "0.300000000000000003" || first["Azure OpenAI / meter-123 / Credit"] != "-0.03" || first["Azure OpenAI / meter-123 / Adjustment"] != "-0.02" || status()["source_revision"] != "baseline" {
+		t.Fatalf("initial export did not preserve scoped charges: %v %v", first, status())
+	}
+	priced := "0.1"
+	billingFact(t, h, id, uuid.NewString(), empty, "billable", true, &priced, false, false, false)
+	emptyReport := h.want(owner, "GET", fmt.Sprintf("/api/v1/usage/reconciliation?start=%s&end=%s&provider_id=%s", empty.Format("2006-01-02"), empty.AddDate(0, 0, 1).Format("2006-01-02"), id), nil, nil, 200)["items"].([]any)[0].(map[string]any)
+	if emptyReport["invoiced_cost"] != "0" || emptyReport["capture_rate_unavailable_reason"] != "zero_invoice" {
+		t.Fatalf("empty covered day was not invoiced zero: %v", emptyReport)
+	}
+	run()
+	if !reflect.DeepEqual(first, amounts()) || status()["source_revision"] != "baseline" {
+		t.Fatalf("same revision was not idempotent: %v %v", amounts(), status())
+	}
+	newRows := azureRow(day, "Usage", "0.700000000000000007") + azureRow(day, "Credit", "-0.07") + azureRow(day, "Adjustment", "-0.04")
+	newBase := fake.delivery(t, day, "corrected", month.AddDate(0, 0, 2), newRows)
+	run()
+	corrected := amounts()
+	if len(corrected) != 3 || corrected["Azure OpenAI / meter-123 / Usage"] != "0.700000000000000007" || corrected["Azure OpenAI / meter-123 / Credit"] != "-0.07" || corrected["Azure OpenAI / meter-123 / Adjustment"] != "-0.04" || status()["source_revision"] != "corrected" {
+		t.Fatalf("corrected export did not replace its billing period: %v %v", corrected, status())
+	}
+	fake.mu.Lock()
+	delete(fake.objects, newBase+"_manifest.json")
+	fake.mu.Unlock()
+	run()
+	if !reflect.DeepEqual(corrected, amounts()) || status()["source_revision"] != "corrected" {
+		t.Fatalf("older export replaced a newer revision: %v %v", amounts(), status())
+	}
+	broken := fake.delivery(t, day, "broken", month.AddDate(0, 0, 3), newRows)
+	fake.mu.Lock()
+	fake.objects[broken+"part.csv"] = "truncated"
+	fake.mu.Unlock()
+	run()
+	failed := status()
+	if failed["last_error_code"] != "response" || failed["source_revision"] != "corrected" || failed["next_import_at"] == nil || !reflect.DeepEqual(corrected, amounts()) {
+		t.Fatalf("truncated export changed invoices or did not back off: %v %v", failed, amounts())
+	}
+	next, err := time.Parse(time.RFC3339, failed["next_import_at"].(string))
+	if err != nil || !next.After(time.Now().Add(4*time.Minute)) {
+		t.Fatalf("failure did not schedule a delayed retry: %v", failed)
+	}
+	fake.mu.Lock()
+	fake.denied = true
+	fake.mu.Unlock()
+	run()
+	if status()["last_error_code"] != "credential" || status()["source_revision"] != "corrected" || !reflect.DeepEqual(corrected, amounts()) {
+		t.Fatalf("revoked credential changed invoices: %v %v", status(), amounts())
+	}
+	metrics := importer.Metrics()
+	if metrics[[2]string{id, "success"}] < 3 || metrics[[2]string{id, "response"}] < 1 || metrics[[2]string{id, "credential"}] < 1 {
+		t.Fatalf("missing import outcome metrics: %v", metrics)
+	}
+}
+
+func TestAzureBillingRunCoverageStopsAtSubmission(t *testing.T) {
+	fake := newAzureBillingFake(t)
+	h, owner, id, importer := azureBillingTest(t, fake)
+	today := time.Now().UTC().Truncate(24 * time.Hour)
+	month := time.Date(today.Year(), today.Month(), 1, 0, 0, 0, 0, time.UTC)
+	period := month.AddDate(0, -1, 0)
+	charged, later := period.AddDate(0, 0, 6), period.AddDate(0, 0, 19)
+	fake.delivery(t, charged, "early", period.AddDate(0, 0, 9), azureRow(charged, "Usage", "0.2"))
+	if err := importer.Pass(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	priced := "0.1"
+	billingFact(t, h, id, uuid.NewString(), later, "billable", true, &priced, false, false, false)
+	query := fmt.Sprintf("/api/v1/usage/reconciliation?start=%s&end=%s&provider_id=%s", later.Format("2006-01-02"), later.AddDate(0, 0, 1).Format("2006-01-02"), id)
+	item := h.want(owner, "GET", query, nil, nil, 200)["items"].([]any)[0].(map[string]any)
+	if item["capture_rate_unavailable_reason"] != "not_imported" || item["invoiced_cost"] != nil {
+		t.Fatalf("run covered days after it was submitted: %v", item)
+	}
+	fake.delivery(t, charged, "complete", month.AddDate(0, 0, 1), azureRow(charged, "Usage", "0.2"))
+	path := "/api/v1/providers/" + id + "/billing-import"
+	current := h.want(owner, "GET", path, nil, nil, 200)
+	headers := etagHeader(current)
+	headers["Idempotency-Key"] = uuid.NewString()
+	h.want(owner, "POST", path+"/run", nil, headers, 202)
+	if err := importer.Pass(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	item = h.want(owner, "GET", query, nil, nil, 200)["items"].([]any)[0].(map[string]any)
+	if item["capture_rate_unavailable_reason"] != "zero_invoice" || item["invoiced_cost"] != "0" {
+		t.Fatalf("newer complete run did not cover the empty day: %v", item)
+	}
+}
+
+func TestAzureBillingRefreshesCurrentAndPreviousPeriods(t *testing.T) {
+	fake := newAzureBillingFake(t)
+	h, owner, id, importer := azureBillingTest(t, fake)
+	now := time.Now().UTC()
+	month := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC)
+	importer.Now = func() time.Time { return month.AddDate(0, 0, 20) }
+	current, previous := month.AddDate(0, 0, 9), month.AddDate(0, -1, 9)
+	fake.delivery(t, current, "current-first", month.AddDate(0, 0, 14), azureRow(current, "Usage", "0.1"))
+	fake.delivery(t, previous, "previous-first", month.AddDate(0, 0, 1), azureRow(previous, "Usage", "0.2"))
+	if err := importer.Pass(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	fake.delivery(t, current, "current-corrected", month.AddDate(0, 0, 16), azureRow(current, "Usage", "0.3"))
+	fake.delivery(t, previous, "previous-corrected", month.AddDate(0, 0, 2), azureRow(previous, "Usage", "0.4"))
+	path := "/api/v1/providers/" + id + "/billing-import"
+	status := h.want(owner, "GET", path, nil, nil, 200)
+	headers := etagHeader(status)
+	headers["Idempotency-Key"] = uuid.NewString()
+	h.want(owner, "POST", path+"/run", nil, headers, 202)
+	if err := importer.Pass(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	items := h.want(owner, "GET", fmt.Sprintf("/api/v1/providers/%s/invoiced-costs?start=%s&end=%s", id, previous.Format("2006-01-02"), current.AddDate(0, 0, 1).Format("2006-01-02")), nil, nil, 200)["items"].([]any)
+	values := map[string]string{}
+	for _, raw := range items {
+		item := raw.(map[string]any)
+		values[item["day"].(string)] = item["amount"].(string)
+	}
+	if len(values) != 2 || values[current.Format("2006-01-02")] != "0.3" || values[previous.Format("2006-01-02")] != "0.4" {
+		t.Fatalf("current and previous periods were not both refreshed: %v", values)
+	}
+}
+
+func TestAzureBillingLongRetentionListsEachRelevantMonth(t *testing.T) {
+	fake := newAzureBillingFake(t)
+	h, owner, id, importer := azureBillingTest(t, fake)
+	setting := h.want(owner, "GET", "/api/v1/settings/retention.usage_days", nil, nil, 200)
+	h.want(owner, "PUT", "/api/v1/settings/retention.usage_days", map[string]any{"value": "800"}, etagHeader(setting), 200)
+	now := time.Now().UTC()
+	month := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC)
+	day := month.AddDate(0, -1, 9)
+	fake.delivery(t, day, "recent", month.AddDate(0, 0, 1), azureRow(day, "Usage", "0.2"))
+	if err := importer.Pass(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	status := h.want(owner, "GET", "/api/v1/providers/"+id+"/billing-import", nil, nil, 200)["status"].(map[string]any)
+	if status["last_error_code"] != nil || status["source_revision"] != "recent" {
+		t.Fatalf("long retention exhausted a single global listing-page cap: %v", status)
+	}
+}
+
+func TestAzureBillingPartLimitAcrossPeriods(t *testing.T) {
+	fake := newAzureBillingFake(t)
+	h, owner, id, importer := azureBillingTest(t, fake)
+	now := time.Now().UTC()
+	month := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC)
+	importer.Now = func() time.Time { return month.AddDate(0, 0, 20) }
+	previous, current := month.AddDate(0, -1, 9), month.AddDate(0, 0, 9)
+	fake.delivery(t, previous, "initial", month.AddDate(0, 0, 1), azureRow(previous, "Usage", "0.1"))
+	if err := importer.Pass(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	path := "/api/v1/providers/" + id + "/billing-import"
+	query := fmt.Sprintf("/api/v1/providers/%s/invoiced-costs?start=%s&end=%s", id, previous.Format("2006-01-02"), current.AddDate(0, 0, 1).Format("2006-01-02"))
+	before := h.want(owner, "GET", query, nil, nil, 200)["items"]
+	expand := func(base string, count int) {
+		t.Helper()
+		fake.mu.Lock()
+		defer fake.mu.Unlock()
+		var manifest map[string]any
+		if err := json.Unmarshal([]byte(fake.objects[base+"_manifest.json"]), &manifest); err != nil {
+			t.Fatal(err)
+		}
+		part := fake.objects[base+"part.csv"]
+		blobs := make([]map[string]any, 0, count)
+		for n := range count {
+			name := fmt.Sprintf("%spart-%03d.csv", base, n)
+			fake.objects[name] = part
+			blobs = append(blobs, map[string]any{"blobName": name, "byteCount": len(part), "dataRowCount": 1})
+		}
+		manifest["blobs"] = blobs
+		manifest["blobCount"] = count
+		manifest["byteCount"] = count * len(part)
+		manifest["dataRowCount"] = count
+		data, err := json.Marshal(manifest)
+		if err != nil {
+			t.Fatal(err)
+		}
+		fake.objects[base+"_manifest.json"] = string(data)
+	}
+	old := fake.delivery(t, previous, "revised", month.AddDate(0, 0, 2), azureRow(previous, "Usage", "0.2"))
+	recent := fake.delivery(t, current, "recent", month.AddDate(0, 0, 14), azureRow(current, "Usage", "0.3"))
+	expand(old, 100)
+	expand(recent, 101)
+	status := h.want(owner, "GET", path, nil, nil, 200)
+	headers := etagHeader(status)
+	headers["Idempotency-Key"] = uuid.NewString()
+	h.want(owner, "POST", path+"/run", nil, headers, 202)
+	if err := importer.Pass(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	status = h.want(owner, "GET", path, nil, nil, 200)["status"].(map[string]any)
+	after := h.want(owner, "GET", query, nil, nil, 200)["items"]
+	if status["last_error_code"] != "response" || !reflect.DeepEqual(before, after) {
+		t.Fatalf("cumulative part limit did not preserve stored invoices: %v", status)
+	}
+}

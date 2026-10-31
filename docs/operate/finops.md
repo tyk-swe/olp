@@ -442,9 +442,15 @@ refresh the current and previous billing periods on later passes. Incomplete
 historical periods are retried until covered. A delivery covers only days closed
 before its manifest was written, and gaps remain unimported. AWS reads have a
 45-second deadline and cumulative compressed and expanded byte, row and
-aggregation limits. Azure streams up to 200 CSV parts, 128 MiB compressed and
-512 MiB expanded per pass, with two million rows, 100,000 aggregates and a
-one-minute import budget. Each day's returned line items are summed per
+aggregation limits. Azure searches retained billing periods on the first pass,
+then refreshes the current and previous periods and retries missing or incomplete
+historical periods. A run covers only days closed before it was submitted, and
+gaps remain unimported. Newer complete runs replace their period's totals;
+older runs cannot overwrite them. Azure keeps service-scoped credits and
+adjustments present in the export separate from usage and excludes taxes. Azure
+streams up to 200 CSV parts, 128 MiB compressed and 512 MiB expanded per pass,
+with two million rows, 100,000 aggregates and a one-minute import budget. Each
+day's returned line items are summed per
 `(day, line_item, currency)` and replace the stored rows. A returned bucket with
 no results records an invoiced zero. On success the import schedules one hour
 out; on failure `last_error_code` records `credential`, `status`, `network`,

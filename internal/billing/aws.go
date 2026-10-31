@@ -88,7 +88,7 @@ func (i *Importer) importAWS(ctx context.Context, row *importRow, cfg *providerC
 		return err
 	}
 	earliest := today.AddDate(0, 0, -retention)
-	completed, err := i.awsCompletedPeriods(fetchCtx, row, earliest, today)
+	completed, err := i.completedCloudPeriods(fetchCtx, row, earliest, today)
 	if err != nil {
 		return err
 	}
@@ -162,7 +162,7 @@ func (i *Importer) importAWSDelivery(ctx context.Context, row *importRow, client
 	return nil
 }
 
-func (i *Importer) awsCompletedPeriods(ctx context.Context, row *importRow, earliest, today time.Time) (map[string]struct{}, error) {
+func (i *Importer) completedCloudPeriods(ctx context.Context, row *importRow, earliest, today time.Time) (map[string]struct{}, error) {
 	digest, err := scopeDigest(row.Source, row.Scope)
 	if err != nil {
 		return nil, err

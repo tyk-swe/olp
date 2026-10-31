@@ -240,7 +240,17 @@ func (i *Importer) importOne(ctx context.Context, row *importRow) error {
 		return failFetch("endpoint", err)
 	}
 	if row.Source == SourceAzureCostManagement {
-		periods, err := fetchAzure(ctx, client, i.Egress, endpoint, cloudScope, key)
+		today := i.now().UTC().Truncate(24 * time.Hour)
+		var retention int
+		if err := i.Pool.QueryRow(ctx, `SELECT COALESCE((SELECT value::int FROM olp.settings WHERE key='retention.usage_days'),90)`).Scan(&retention); err != nil {
+			return err
+		}
+		earliest := today.AddDate(0, 0, -retention)
+		completed, err := i.completedCloudPeriods(ctx, row, earliest, today)
+		if err != nil {
+			return err
+		}
+		periods, err := fetchAzure(ctx, client, i.Egress, endpoint, cloudScope, key, earliest, today, completed)
 		if err != nil {
 			return err
 		}
