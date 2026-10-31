@@ -711,7 +711,7 @@ func TestGoogleBillingImportEndToEnd(t *testing.T) {
 	dayText := day.Format("2006-01-02")
 	setting := h.want(owner, "GET", "/api/v1/settings/retention.usage_days", nil, nil, 200)
 	h.want(owner, "PUT", "/api/v1/settings/retention.usage_days", map[string]any{"value": "180"}, etagHeader(setting), 200)
-	today := time.Now().UTC().Truncate(24 * time.Hour)
+	today := day.AddDate(0, 0, 3)
 	historicalMonth := time.Date(today.Year(), today.Month(), 1, 0, 0, 0, 0, time.UTC).AddDate(0, -2, 0)
 	historicalDay := historicalMonth.AddDate(0, 0, 5)
 	previousDay := time.Date(today.Year(), today.Month(), 10, 0, 0, 0, 0, time.UTC).AddDate(0, -1, 0)
