@@ -20,6 +20,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/secrets"
 	"github.com/tyk-swe/olp/internal/usage"
@@ -217,7 +218,14 @@ func (i *Importer) importOne(ctx context.Context, row *importRow) error {
 	if row.Source == SourceAWS {
 		return i.importAWS(ctx, row, cfg, key)
 	}
-	client, err := i.client(ctx, row.ProviderID, cfg, key)
+	endpoint := googleBigQueryEndpoint
+	if row.Source != SourceGoogle {
+		if cfg.Endpoint == nil || *cfg.Endpoint == "" {
+			return failFetch("endpoint", errors.New("the provider has no endpoint"))
+		}
+		endpoint = *cfg.Endpoint
+	}
+	client, err := i.client(ctx, row.ProviderID, cfg, key, endpoint)
 	if err != nil {
 		return failFetch("endpoint", err)
 	}
@@ -233,6 +241,16 @@ func (i *Importer) importOne(ctx context.Context, row *importRow) error {
 		days, err = fetchOpenAI(ctx, client, cfg.Endpoint, key, scope, start, end)
 	case SourceAnthropic:
 		days, err = fetchAnthropic(ctx, client, cfg.Endpoint, key, scope, start, end)
+	case SourceGoogle:
+		bounded := *client
+		bounded.Timeout = requestTimout
+		authClient, clientErr := i.googleAuthenticationClient(ctx, cfg)
+		if clientErr != nil {
+			return failFetch("endpoint", clientErr)
+		}
+		defer authClient.CloseIdleConnections()
+		auth := connectors.NewGoogleBillingAuth(i.Egress, authClient)
+		days, err = fetchGoogle(ctx, &bounded, auth, row.Scope, key, start, end)
 	default:
 		err = failFetch("response", errors.New("unsupported billing source"))
 	}
@@ -242,13 +260,22 @@ func (i *Importer) importOne(ctx context.Context, row *importRow) error {
 	return i.storeDays(ctx, row, "", nil, days)
 }
 
+func (i *Importer) googleAuthenticationClient(ctx context.Context, cfg *providerConfig) (*http.Client, error) {
+	var secret []byte
+	if options := cfg.Options.Network; options != nil && options.CredentialID != "" {
+		data, err := i.Keys.Read(ctx, i.Pool, i.Installation, options.CredentialID, secrets.ProviderCredential)
+		if err != nil {
+			return nil, errors.New("network credential could not be read")
+		}
+		secret = data
+	}
+	return i.Egress.PublicDestinationClient(cfg.Options.Network, secret, requestTimout)
+}
+
 // client builds the connection-scoped HTTP client the import's provider
 // configuration calls for, honoring its network options and credential.
-func (i *Importer) client(ctx context.Context, providerID string, cfg *providerConfig, credential []byte) (*http.Client, error) {
-	if cfg.Endpoint == nil || *cfg.Endpoint == "" {
-		return nil, errors.New("the provider has no endpoint")
-	}
-	if _, err := i.Egress.ValidateEndpoint(*cfg.Endpoint); err != nil {
+func (i *Importer) client(ctx context.Context, providerID string, cfg *providerConfig, credential []byte, endpoint string) (*http.Client, error) {
+	if _, err := i.Egress.ValidateEndpoint(endpoint); err != nil {
 		return nil, err
 	}
 	var secret []byte

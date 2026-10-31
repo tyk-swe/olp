@@ -3,7 +3,13 @@
 package integration_test
 
 import (
+	"context"
+	"crypto/rand"
+	"crypto/rsa"
 	"crypto/sha256"
+	"crypto/x509"
+	"encoding/json"
+	"encoding/pem"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -11,10 +17,13 @@ import (
 	"net/netip"
 	"net/url"
 	"os"
+	"path/filepath"
 	"reflect"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -27,8 +36,6 @@ import (
 	"github.com/tyk-swe/olp/internal/secrets"
 )
 
-// billingFake serves the documented-shape vendor fixtures as an admin cost
-// endpoint, recording the query of every request it answers.
 type billingFake struct {
 	mu                    sync.Mutex
 	path                  string
@@ -168,6 +175,355 @@ func billingFact(t *testing.T, h *accessHarness, providerID, requestID string, o
 }
 
 func billingProviderID(provider map[string]any) string { return provider["id"].(string) }
+
+func googleTestServiceAccount(t *testing.T) map[string]any {
+	t.Helper()
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	privateKey, err := x509.MarshalPKCS8PrivateKey(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return map[string]any{
+		"type": "service_account", "project_id": "fixture-project", "private_key_id": "fixture",
+		"private_key":  string(pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: privateKey})),
+		"client_email": "billing@fixture-project.iam.gserviceaccount.com", "token_uri": "https://oauth2.googleapis.com/token",
+	}
+}
+
+func TestGoogleBillingImportScopeAndCredential(t *testing.T) {
+	h := newAccessHarness(t)
+	owner := h.owner()
+	provider := h.want(owner, "POST", "/api/v1/providers", map[string]any{
+		"name": "Google billing",
+		"configuration": map[string]any{
+			"kind": "vertex_ai", "auth_mode": "adc", "cloud_project": "fixture-project", "cloud_region": "us-central1",
+			"endpoint": "https://us-central1-aiplatform.googleapis.com/v1/projects/fixture-project/locations/us-central1/publishers/google",
+		},
+		"model": "gemini-test",
+	}, idem("provider-google-billing"), 201)
+	id := billingProviderID(provider)
+	scope := map[string]any{
+		"billing_account_id": "123456-ABCDEF-123456", "bigquery_project_id": "example.com:fixture-project",
+		"dataset_id": "1_billing_export", "table_id": "billing export-é",
+		"project_ids": []string{"example.com:workload-project"},
+	}
+	credential := map[string]any{"auth_mode": "service_account", "service_account": googleTestServiceAccount(t)}
+	for _, invalid := range []map[string]any{
+		{"credential": credential},
+		{"scope": map[string]any{"billing_account_id": "bad", "bigquery_project_id": "fixture-project", "dataset_id": "billing_export", "table_id": "export"}, "credential": credential},
+		{"scope": map[string]any{"billing_account_id": "123456-ABCDEF-123456", "bigquery_project_id": "fixture-project", "dataset_id": "bad.dataset", "table_id": "export"}, "credential": credential},
+		{"scope": map[string]any{"billing_account_id": "123456-ABCDEF-123456", "bigquery_project_id": "fixture-project", "dataset_id": "billing_export", "table_id": "export", "workspace_ids": []string{"default"}}, "credential": credential},
+		{"scope": scope, "credential": map[string]any{"auth_mode": "service_account", "service_account": map[string]any{"type": "service_account", "private_key": "invalid", "client_email": "billing@fixture-project.iam.gserviceaccount.com", "token_uri": "https://oauth2.googleapis.com/token"}}},
+	} {
+		billingPut(h, owner, id, invalid, provider["etag"].(string), 422)
+	}
+	created := billingPut(h, owner, id, map[string]any{"scope": scope, "credential": credential}, provider["etag"].(string), 201)
+	if created["source"] != "google_bigquery" || strings.Contains(fmt.Sprint(created), "PRIVATE KEY") {
+		t.Fatalf("unexpected import response: %v", created)
+	}
+	export := h.want(owner, "GET", "/api/v1/configuration/export", nil, nil, 200)
+	if strings.Contains(fmt.Sprint(export), "PRIVATE KEY") {
+		t.Fatal("configuration export exposed the Google billing credential")
+	}
+	credentialJSON, err := json.Marshal(credential)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := map[string]any{"document": export["document"], "secret_bindings": map[string]any{"Google billing/billing": string(credentialJSON)}}
+	h.want(owner, "POST", "/api/v1/configuration/plan", body, nil, 200)
+	h.want(owner, "POST", "/api/v1/configuration/apply", body, idem("google-billing-configuration"), 200)
+}
+
+type googleExportFixture struct {
+	BillingAccountID string `json:"billing_account_id"`
+	Service          struct {
+		ID string `json:"id"`
+	} `json:"service"`
+	SKU struct {
+		ID string `json:"id"`
+	} `json:"sku"`
+	Project struct {
+		ID string `json:"id"`
+	} `json:"project"`
+	UsageStart time.Time   `json:"usage_start_time"`
+	Currency   string      `json:"currency"`
+	CostType   string      `json:"cost_type"`
+	Cost       json.Number `json:"cost"`
+}
+
+func googleFixtureResults(t *testing.T, day time.Time, filters map[string]string, invalidCurrency bool) []any {
+	t.Helper()
+	// Google detailed export schema, https://docs.cloud.google.com/billing/docs/how-to/export-data-bigquery-tables/detailed-usage, accessed 2026-10-31.
+	data, err := os.ReadFile("../../internal/billing/testdata/google_detailed_export.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var input []googleExportFixture
+	if err := json.Unmarshal(data, &input); err != nil {
+		t.Fatal(err)
+	}
+	start, err := time.Parse("2006-01-02", filters["start"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	end, err := time.Parse("2006-01-02", filters["end"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	type key struct{ day, service, sku, currency string }
+	groups := map[key]decimal.Decimal{}
+	shift := day.Sub(time.Date(2025, 1, 20, 0, 0, 0, 0, time.UTC))
+	for _, item := range input {
+		usage := item.UsageStart.Add(shift)
+		if item.BillingAccountID != filters["billing_account_id"] || item.Service.ID != filters["service_id"] || item.Project.ID != filters["project_ids"] || item.CostType != "regular" || usage.Before(start) || !usage.Before(end) {
+			continue
+		}
+		amount, err := decimal.NewFromString(item.Cost.String())
+		if err != nil {
+			t.Fatal(err)
+		}
+		currency := item.Currency
+		if invalidCurrency {
+			currency = "U1D"
+		}
+		k := key{usage.UTC().Format("2006-01-02"), item.Service.ID, item.SKU.ID, currency}
+		groups[k] = groups[k].Add(amount)
+	}
+	keys := make([]key, 0, len(groups))
+	for k := range groups {
+		keys = append(keys, k)
+	}
+	slices.SortFunc(keys, func(a, b key) int { return strings.Compare(a.sku, b.sku) })
+	result := make([]any, 0, len(keys))
+	for _, k := range keys {
+		result = append(result, map[string]any{"f": []any{map[string]any{"v": k.day}, map[string]any{"v": k.service}, map[string]any{"v": k.sku}, map[string]any{"v": k.currency}, map[string]any{"v": groups[k].String()}}})
+	}
+	return result
+}
+
+func TestGoogleBillingAuthRejectsPrivateDestination(t *testing.T) {
+	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) }))
+	defer proxy.Close()
+	policy := loopbackPolicy()
+	client, err := policy.PublicDestinationClient(&egress.ConnectionOptions{ProxyURL: proxy.URL}, nil, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.CloseIdleConnections()
+	request, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "https://127.0.0.1/token", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	response, err := client.Do(request)
+	if err == nil {
+		response.Body.Close()
+		t.Fatal("public-only authentication accepted a private token destination")
+	}
+}
+
+func TestGoogleBillingImportEndToEnd(t *testing.T) {
+	h := newAccessHarness(t)
+	owner := h.owner()
+	day, _, _ := billingDays()
+	dayText := day.Format("2006-01-02")
+	var invalidCurrency atomic.Bool
+	var blockQuery atomic.Bool
+	var tokenExchanges atomic.Int64
+	var queryParameters atomic.Value
+	// Google lists the Vertex billing service ID at https://docs.cloud.google.com/billing/docs/how-to/budgets-spend-caps, accessed 2026-10-31.
+	const fixtureService = "C7E2-9256-1C43"
+	queryWaiting := make(chan struct{}, 1)
+	jobCancelled := make(chan struct{}, 1)
+	peer := newFixedHostPeer(t, "oauth2.googleapis.com", "bigquery.googleapis.com")
+	peer.respond = func(w http.ResponseWriter, req *http.Request) {
+		if req.Method == http.MethodPost && req.URL.Path == "/token" {
+			tokenExchanges.Add(1)
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{"access_token": "test-token", "token_type": "Bearer", "expires_in": 3600})
+			return
+		}
+		if req.Header.Get("Authorization") != "Bearer test-token" {
+			http.Error(w, "bad query", http.StatusBadRequest)
+			return
+		}
+		if req.Method == http.MethodPost && strings.HasPrefix(req.URL.Path, "/bigquery/v2/projects/fixture-project/jobs/") && strings.HasSuffix(req.URL.Path, "/cancel") {
+			jobCancelled <- struct{}{}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{}`))
+			return
+		}
+		if req.Method == http.MethodPost && req.URL.Path == "/bigquery/v2/projects/fixture-project/jobs" {
+			var submission struct {
+				JobReference  map[string]any `json:"jobReference"`
+				Configuration struct {
+					JobTimeout string `json:"jobTimeoutMs"`
+					Query      struct {
+						Query              string `json:"query"`
+						UseLegacySQL       bool   `json:"useLegacySql"`
+						MaximumBytesBilled string `json:"maximumBytesBilled"`
+						QueryParameters    []struct {
+							Name           string `json:"name"`
+							ParameterValue struct {
+								Value       string `json:"value"`
+								ArrayValues []struct {
+									Value string `json:"value"`
+								} `json:"arrayValues"`
+							} `json:"parameterValue"`
+						} `json:"queryParameters"`
+					} `json:"query"`
+				} `json:"configuration"`
+			}
+			if json.NewDecoder(req.Body).Decode(&submission) != nil {
+				http.Error(w, "bad query", http.StatusBadRequest)
+				return
+			}
+			query := submission.Configuration.Query
+			values := map[string]string{}
+			for _, p := range query.QueryParameters {
+				values[p.Name] = p.ParameterValue.Value
+				if len(p.ParameterValue.ArrayValues) > 0 {
+					values[p.Name] = p.ParameterValue.ArrayValues[0].Value
+				}
+			}
+			maximumBytes, maximumErr := strconv.ParseUint(query.MaximumBytesBilled, 10, 64)
+			if query.UseLegacySQL || maximumErr != nil || maximumBytes == 0 || maximumBytes > 1<<30 || submission.Configuration.JobTimeout == "" || values["billing_account_id"] != "123456-ABCDEF-123456" || values["service_id"] != fixtureService || values["project_ids"] != "workload-project" {
+				http.Error(w, "bad query parameters", http.StatusBadRequest)
+				return
+			}
+			queryParameters.Store(values)
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(submission)
+			return
+		}
+		if req.Method != http.MethodGet || !strings.HasPrefix(req.URL.Path, "/bigquery/v2/projects/fixture-project/queries/") {
+			http.Error(w, "bad query results request", http.StatusBadRequest)
+			return
+		}
+		if blockQuery.Load() {
+			queryWaiting <- struct{}{}
+			<-req.Context().Done()
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		allRows := googleFixtureResults(t, day, queryParameters.Load().(map[string]string), invalidCurrency.Load())
+		rows := allRows[:1]
+		pageToken := "second-page"
+		if req.URL.Query().Get("pageToken") == "second-page" {
+			if req.URL.Query().Get("maxResults") != "100" {
+				t.Errorf("BigQuery result page was not bounded: %q", req.URL.Query().Get("maxResults"))
+			}
+			rows = allRows[1:]
+			pageToken = ""
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"jobComplete": true, "totalRows": "3",
+			"pageToken": pageToken,
+			"schema": map[string]any{"fields": []any{
+				map[string]any{"name": "usage_day", "type": "STRING"}, map[string]any{"name": "service_id", "type": "STRING"},
+				map[string]any{"name": "sku_id", "type": "STRING"}, map[string]any{"name": "currency", "type": "STRING"}, map[string]any{"name": "amount", "type": "STRING"},
+			}},
+			"rows": rows,
+		})
+	}
+	provider := h.want(owner, "POST", "/api/v1/providers", map[string]any{
+		"name":          "Google invoice",
+		"configuration": map[string]any{"kind": "vertex_ai", "auth_mode": "adc", "cloud_project": "fixture-project", "cloud_region": "us-central1", "endpoint": peer.proxy.URL, "options": map[string]any{"network": map[string]any{"proxy_url": peer.proxy.URL, "trust_roots_pem": peer.roots}}},
+		"model":         "gemini-test",
+	}, idem("provider-google-invoice"), 201)
+	id := billingProviderID(provider)
+	scope := map[string]any{"billing_account_id": "123456-ABCDEF-123456", "bigquery_project_id": "fixture-project", "dataset_id": "billing_export", "table_id": "gcp_billing_export_resource_v1_fixture", "project_ids": []string{"workload-project"}}
+	serviceAccount := googleTestServiceAccount(t)
+	billingPut(h, owner, id, map[string]any{"scope": scope, "credential": map[string]any{"auth_mode": "service_account", "service_account": serviceAccount}}, provider["etag"].(string), 201)
+	importer := billingImporter(h, t)
+	if err := importer.Pass(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if tokenExchanges.Load() == 0 {
+		t.Fatal("service account did not exchange a token through the configured proxy")
+	}
+	end := day.AddDate(0, 0, 1).Format("2006-01-02")
+	costs := h.want(owner, "GET", fmt.Sprintf("/api/v1/providers/%s/invoiced-costs?start=%s&end=%s", id, dayText, end), nil, nil, 200)
+	items := costs["items"].([]any)
+	if len(items) != 3 {
+		t.Fatalf("invoiced costs: %v", items)
+	}
+	amounts := map[string]string{}
+	for _, item := range items {
+		line := item.(map[string]any)
+		if line["currency"] != "USD" || len([]rune(line["line_item"].(string))) > 256 {
+			t.Fatalf("invalid Google invoice line: %v", line)
+		}
+		amounts[line["amount"].(string)] = line["line_item"].(string)
+	}
+	if amounts["0.300000000001"] != fixtureService+"/123456-ABCDEF-654321" || amounts["1.1"] == "" || amounts["2.2"] == "" || amounts["1.1"] == amounts["2.2"] {
+		t.Fatalf("Google invoice amounts and line identities: %v", amounts)
+	}
+	report := h.want(owner, "GET", fmt.Sprintf("/api/v1/usage/reconciliation?start=%s&end=%s&provider_id=%s", dayText, end, id), nil, nil, 200)
+	if len(report["items"].([]any)) != 1 || report["items"].([]any)[0].(map[string]any)["invoiced_cost"] != "3.600000000001" {
+		t.Fatalf("Google reconciliation: %v", report)
+	}
+	invalidCurrency.Store(true)
+	current := h.want(owner, "GET", "/api/v1/providers/"+id+"/billing-import", nil, nil, 200)
+	headers := etagHeader(current)
+	headers["Idempotency-Key"] = uuid.NewString()
+	h.want(owner, "POST", "/api/v1/providers/"+id+"/billing-import/run", nil, headers, 202)
+	if err := importer.Pass(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	after := h.want(owner, "GET", fmt.Sprintf("/api/v1/providers/%s/invoiced-costs?start=%s&end=%s", id, dayText, end), nil, nil, 200)["items"].([]any)
+	status := h.want(owner, "GET", "/api/v1/providers/"+id+"/billing-import", nil, nil, 200)["status"].(map[string]any)
+	if !reflect.DeepEqual(items, after) || status["last_error_code"] != "response" {
+		t.Fatalf("malformed currency changed invoiced costs or was accepted: %v %v", after, status)
+	}
+	blockQuery.Store(true)
+	current = h.want(owner, "GET", "/api/v1/providers/"+id+"/billing-import", nil, nil, 200)
+	headers = etagHeader(current)
+	headers["Idempotency-Key"] = uuid.NewString()
+	h.want(owner, "POST", "/api/v1/providers/"+id+"/billing-import/run", nil, headers, 202)
+	ctx, cancel := context.WithCancel(context.Background())
+	passDone := make(chan error, 1)
+	go func() { passDone <- importer.Pass(ctx) }()
+	select {
+	case <-queryWaiting:
+	case <-time.After(10 * time.Second):
+		cancel()
+		t.Fatal("Google query did not start")
+	}
+	cancel()
+	select {
+	case <-jobCancelled:
+	case <-time.After(10 * time.Second):
+		t.Fatal("Google query job was not cancelled")
+	}
+	<-passDone
+
+	blockQuery.Store(false)
+	invalidCurrency.Store(false)
+	data, err := json.Marshal(serviceAccount)
+	if err != nil {
+		t.Fatal(err)
+	}
+	credentialFile := filepath.Join(t.TempDir(), "application-default-credentials.json")
+	if err := os.WriteFile(credentialFile, data, 0600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GOOGLE_APPLICATION_CREDENTIALS", credentialFile)
+	current = h.want(owner, "GET", "/api/v1/providers/"+id+"/billing-import", nil, nil, 200)
+	updated := billingPut(h, owner, id, map[string]any{"scope": scope, "credential": map[string]any{"auth_mode": "adc"}}, current["etag"].(string), 200)
+	headers = etagHeader(updated)
+	headers["Idempotency-Key"] = uuid.NewString()
+	h.want(owner, "POST", "/api/v1/providers/"+id+"/billing-import/run", nil, headers, 202)
+	previousExchanges := tokenExchanges.Load()
+	if err := importer.Pass(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if tokenExchanges.Load() <= previousExchanges {
+		t.Fatal("ADC did not exchange a token through the configured proxy")
+	}
+}
 
 // The credential is required on create, must be a string, and null is
 // rejected rather than clearing the import.

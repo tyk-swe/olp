@@ -346,6 +346,40 @@ excludes commitment fees and negation lines. It uses the assembly manifest and
 its S3 modification time as the revision and ordering marker. Parquet exports
 and reports that overwrite previous versions are not supported.
 
+For Vertex AI, first enable the [detailed Cloud Billing export to BigQuery](https://cloud.google.com/billing/docs/how-to/export-data-bigquery-tables/detailed-usage).
+Grant the billing principal `bigquery.jobs.create` in the query project and
+`bigquery.tables.getData` on the export table. Set the required scope to the
+Cloud Billing account ID, BigQuery project ID, dataset ID and detailed export
+table ID. `project_ids` optionally limits the imported workloads. Keep scopes
+disjoint across providers using the same export because overlapping imports
+record the same matching costs more than once:
+
+```json
+{
+  "billing_account_id": "012345-ABCDEF-012345",
+  "bigquery_project_id": "billing-project",
+  "dataset_id": "billing_export",
+  "table_id": "gcp_billing_export_resource_v1_012345_ABCDEF_012345",
+  "project_ids": ["workload-project"]
+}
+```
+
+The credential is `{"auth_mode":"service_account","service_account":{...}}`
+with the complete service account key JSON, or `{"auth_mode":"adc"}` to
+explicitly use the worker's application default credentials. The credential is
+sealed and is never returned by the API. Configuration promotion passes the
+same JSON object serialized as the value of the billing credential's secret
+binding. Keep this binding out of the configuration document itself.
+
+The Google query selects the Vertex AI [billing service ID](https://cloud.google.com/billing/docs/how-to/budgets-spend-caps)
+`C7E2-9256-1C43` and sums regular costs by UTC usage day, service, SKU and
+currency. Credits and other adjustment types are not included yet. Google
+stores the detailed export's cost as FLOAT. The query casts each value to
+BIGNUMERIC before summing and the importer keeps
+the returned decimal without converting it through a Go float. Google export
+can begin after historical usage and may arrive late, so an empty result does
+not prove the export contained all historical costs.
+
 ### Importer
 
 The `billing_import` worker scans every 60 seconds for imports due, claims up
@@ -365,6 +399,13 @@ out; on failure `last_error_code` records `credential`, `status`, `network`,
 minutes to one hour. Rows older than `retention.usage_days` are purged in
 bounded batches and their coverage is cleared. If retention later increases,
 AWS imports retry the newly uncovered historical periods.
+
+Google uses the fixed BigQuery endpoint through the same connection egress
+policy, with a 1 GiB maximum bytes billed per query, a 45-second import budget
+and a maximum of 200,000 aggregate rows. A failed query or an incomplete result
+does not replace any invoice rows. Token exchanges use the configured connection
+proxy while validating the Google authentication destination with a public-only
+policy. Workload credentials are used only when ADC is explicitly selected.
 
 `GET /api/v1/providers/{id}/invoiced-costs?start=…&end=…` lists stored line
 items (`day`, `line_item`, `currency`, `amount`, `source`, `fetched_at`),
@@ -409,4 +450,4 @@ response shapes. The AWS fixture follows the documented [report versions](https:
 [identity columns](https://docs.aws.amazon.com/cur/latest/userguide/identity-columns.html)
 and [line item columns](https://docs.aws.amazon.com/cur/latest/userguide/Lineitem-columns.html),
 reviewed October 31, 2026. The fixtures have not been qualified against live billing accounts.
-Google Cloud billing export and Azure Cost Management imports remain planned.
+Azure Cost Management imports remain planned.

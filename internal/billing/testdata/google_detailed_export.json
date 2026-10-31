@@ -1,0 +1,98 @@
+[
+  {
+    "billing_account_id": "123456-ABCDEF-123456",
+    "service": {
+      "id": "C7E2-9256-1C43"
+    },
+    "sku": {
+      "id": "123456-ABCDEF-654321"
+    },
+    "project": {
+      "id": "workload-project"
+    },
+    "currency": "USD",
+    "cost_type": "regular",
+    "usage_start_time": "2025-01-19T20:15:00-07:00",
+    "cost": 0.1
+  },
+  {
+    "billing_account_id": "123456-ABCDEF-123456",
+    "service": {
+      "id": "C7E2-9256-1C43"
+    },
+    "sku": {
+      "id": "123456-ABCDEF-654321"
+    },
+    "project": {
+      "id": "workload-project"
+    },
+    "currency": "USD",
+    "cost_type": "regular",
+    "usage_start_time": "2025-01-20T22:45:00+02:00",
+    "cost": 0.200000000001
+  },
+  {
+    "billing_account_id": "123456-ABCDEF-123456",
+    "service": {
+      "id": "C7E2-9256-1C43"
+    },
+    "sku": {
+      "id": "SSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSa"
+    },
+    "project": {
+      "id": "workload-project"
+    },
+    "currency": "USD",
+    "cost_type": "regular",
+    "usage_start_time": "2025-01-20T12:00:00Z",
+    "cost": 1.1
+  },
+  {
+    "billing_account_id": "123456-ABCDEF-123456",
+    "service": {
+      "id": "C7E2-9256-1C43"
+    },
+    "sku": {
+      "id": "SSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSb"
+    },
+    "project": {
+      "id": "workload-project"
+    },
+    "currency": "USD",
+    "cost_type": "regular",
+    "usage_start_time": "2025-01-20T12:30:00Z",
+    "cost": 2.2
+  },
+  {
+    "billing_account_id": "123456-ABCDEF-123456",
+    "service": {
+      "id": "6F81-5844-456A"
+    },
+    "sku": {
+      "id": "123456-ABCDEF-654321"
+    },
+    "project": {
+      "id": "workload-project"
+    },
+    "currency": "USD",
+    "cost_type": "regular",
+    "usage_start_time": "2025-01-20T14:00:00Z",
+    "cost": 100
+  },
+  {
+    "billing_account_id": "123456-ABCDEF-123456",
+    "service": {
+      "id": "C7E2-9256-1C43"
+    },
+    "sku": {
+      "id": "123456-ABCDEF-654321"
+    },
+    "project": {
+      "id": "other-project"
+    },
+    "currency": "USD",
+    "cost_type": "regular",
+    "usage_start_time": "2025-01-20T15:00:00Z",
+    "cost": 200
+  }
+]

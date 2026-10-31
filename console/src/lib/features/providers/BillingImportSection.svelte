@@ -25,15 +25,24 @@
 
   const kind = $derived(provider.configuration.kind);
   const supported = $derived(
-    kind === 'openai' || kind === 'anthropic' || kind === 'bedrock'
+    kind === 'openai' ||
+      kind === 'anthropic' ||
+      kind === 'vertex_ai' ||
+      kind === 'bedrock'
   );
   const scopeLabel = $derived(
-    kind === 'openai' ? 'OpenAI project IDs' : 'Anthropic workspace IDs'
+    kind === 'vertex_ai'
+      ? 'Google project IDs'
+      : kind === 'openai'
+        ? 'OpenAI project IDs'
+        : 'Anthropic workspace IDs'
   );
   const scopePattern = $derived(
-    kind === 'openai'
-      ? /^proj_[A-Za-z0-9]{1,64}$/
-      : /^wrkspc_[A-Za-z0-9]{1,64}$/
+    kind === 'vertex_ai'
+      ? /^(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)+:)?[a-z][a-z0-9-]{4,28}[a-z0-9]$/
+      : kind === 'openai'
+        ? /^proj_[A-Za-z0-9]{1,64}$/
+        : /^wrkspc_[A-Za-z0-9]{1,64}$/
   );
 
   const intent = useMutationIntent();
@@ -56,6 +65,13 @@
   let sessionToken = $state('');
   let replaceCredential = $state(false);
   let scopeText = $state('');
+  let billingAccountID = $state('');
+  let bigQueryProjectID = $state('');
+  let datasetID = $state('');
+  let tableID = $state('');
+  let googleAuthMode = $state<'keep' | 'service_account' | 'adc'>(
+    'service_account'
+  );
   let enabled = $state(true);
   let busy = $state(false);
   let error = $state('');
@@ -69,6 +85,8 @@
     accessKeyId = secretAccessKey = sessionToken = '';
     replaceCredential = false;
     scopeText = '';
+    billingAccountID = bigQueryProjectID = datasetID = tableID = '';
+    googleAuthMode = 'service_account';
     enabled = true;
     busy = false;
     error = notice = '';
@@ -83,6 +101,14 @@
     const current = detail;
     if (current && !initialized) {
       scopeText = scopeLines(current);
+      if (kind === 'vertex_ai' && 'billing_account_id' in current.scope) {
+        const scope = current.scope;
+        billingAccountID = scope.billing_account_id ?? '';
+        bigQueryProjectID = scope.bigquery_project_id ?? '';
+        datasetID = scope.dataset_id ?? '';
+        tableID = scope.table_id ?? '';
+        googleAuthMode = 'keep';
+      }
       if (kind === 'bedrock' && 'payer_account_id' in current.scope) {
         const scope = current.scope;
         payerAccount = scope.payer_account_id;
@@ -99,7 +125,12 @@
   function scopeLines(document: BillingImport): string {
     const scope = document.scope;
     if ('payer_account_id' in scope) return '';
-    const entries = scope.project_ids ?? scope.workspace_ids ?? [];
+    const entries =
+      'project_ids' in scope
+        ? (scope.project_ids ?? [])
+        : 'workspace_ids' in scope
+          ? (scope.workspace_ids ?? [])
+          : [];
     return entries.join('\n');
   }
 
@@ -140,6 +171,15 @@
       .split('\n')
       .map((line) => line.trim())
       .filter(Boolean);
+    if (kind === 'vertex_ai') {
+      return {
+        billing_account_id: billingAccountID.trim(),
+        bigquery_project_id: bigQueryProjectID.trim(),
+        dataset_id: datasetID.trim(),
+        table_id: tableID.trim(),
+        ...(ids.length ? { project_ids: ids } : {})
+      };
+    }
     if (!ids.length) return {};
     return kind === 'openai' ? { project_ids: ids } : { workspace_ids: ids };
   }
@@ -172,11 +212,34 @@
     for (const id of ids) {
       if (kind === 'anthropic' && id === 'default') continue;
       if (!scopePattern.test(id))
-        return `${id} is not a valid ${kind === 'openai' ? 'project' : 'workspace'} ID.`;
+        return `${id} is not a valid ${kind === 'anthropic' ? 'workspace' : 'project'} ID.`;
     }
-    if (!editing && !adminKey.trim())
+    if (kind === 'vertex_ai') {
+      if (
+        !billingAccountID.trim() ||
+        !bigQueryProjectID.trim() ||
+        !datasetID.trim() ||
+        !tableID.trim()
+      )
+        return 'A billing account, BigQuery project, dataset and table are required.';
+      if (googleAuthMode === 'service_account' && !adminKey.trim())
+        return 'A service account key is required.';
+      if (googleAuthMode === 'service_account' && !serviceAccountKey())
+        return 'The service account key must be a JSON object.';
+    } else if (!editing && !adminKey.trim())
       return 'An admin key is required to create the import.';
     return '';
+  }
+
+  function serviceAccountKey(): Record<string, unknown> | undefined {
+    try {
+      const key: unknown = JSON.parse(adminKey);
+      if (!key || typeof key !== 'object' || Array.isArray(key))
+        return undefined;
+      return Object.fromEntries(Object.entries(key));
+    } catch {
+      return undefined;
+    }
   }
 
   async function save() {
@@ -187,6 +250,17 @@
       return;
     }
     const etag = detail?.etag ?? provider.etag;
+    const credential =
+      kind === 'vertex_ai'
+        ? googleAuthMode === 'keep'
+          ? undefined
+          : googleAuthMode === 'adc'
+            ? { auth_mode: 'adc' as const }
+            : {
+                auth_mode: 'service_account' as const,
+                service_account: serviceAccountKey()
+              }
+        : adminKey.trim() || undefined;
     const submission = intent.prepare<Parameters<typeof putBillingImport>[2]>({
       enabled,
       scope: scopeBody(),
@@ -206,8 +280,8 @@
                     }
             }
           : {}
-        : adminKey.trim()
-          ? { credential: adminKey.trim() }
+        : credential
+          ? { credential }
           : {})
     });
     const isCurrent = captureOwner();
@@ -223,6 +297,7 @@
       );
       if (!isCurrent()) return;
       adminKey = '';
+      if (kind === 'vertex_ai') googleAuthMode = 'keep';
       accessKeyId = secretAccessKey = sessionToken = '';
       replaceCredential = false;
       notice = 'Billing import saved.';
@@ -272,6 +347,8 @@
       if (!isCurrent()) return;
       adminKey = '';
       scopeText = '';
+      billingAccountID = bigQueryProjectID = datasetID = tableID = '';
+      googleAuthMode = 'service_account';
       enabled = true;
       notice = 'Billing import removed.';
       await queryClient.invalidateQueries({
@@ -294,9 +371,8 @@
   <section class="card billing-import" aria-labelledby="billing-import-heading">
     <h3 id="billing-import-heading">Billing import</h3>
     <p class="section-help">
-      Pull the vendor's invoiced costs to reconcile attributed usage against
-      billed amounts. Billing credentials are separate from inference
-      credentials
+      Pull invoiced costs to reconcile attributed usage against billed amounts.
+      Billing credentials are separate from inference credentials.
     </p>
     {#if error}<div class="inline-problem" role="alert">{error}</div>{/if}
     {#if notice}<p class="section-help" role="status">{notice}</p>{/if}
@@ -439,28 +515,84 @@
                 </p>
               {:else}
                 <div class="form-field">
-                  <label for="billing-admin-key">Admin key</label>
-                  <input
-                    id="billing-admin-key"
-                    type="password"
-                    autocomplete="off"
-                    bind:value={adminKey}
-                    placeholder={editing
-                      ? 'Blank keeps the stored key'
-                      : 'sk-admin-…'}
-                  />
+                  {#if kind === 'vertex_ai'}
+                    <label for="billing-auth-mode">Billing authentication</label
+                    >
+                    <select
+                      id="billing-auth-mode"
+                      bind:value={googleAuthMode}
+                      onchange={() => {
+                        adminKey = '';
+                      }}
+                    >
+                      {#if editing}<option value="keep"
+                          >Keep existing credential</option
+                        >{/if}
+                      <option value="service_account"
+                        >Service account key</option
+                      >
+                      <option value="adc">Workload identity</option>
+                    </select>
+                  {/if}
+                  {#if kind !== 'vertex_ai' || googleAuthMode === 'service_account'}
+                    <label for="billing-admin-key"
+                      >{kind === 'vertex_ai'
+                        ? 'Service account JSON'
+                        : 'Admin key'}</label
+                    >
+                    <input
+                      id="billing-admin-key"
+                      type="password"
+                      autocomplete="off"
+                      bind:value={adminKey}
+                      placeholder={kind === 'vertex_ai'
+                        ? 'Paste the service account JSON'
+                        : editing
+                          ? 'Blank keeps the stored key'
+                          : 'sk-admin-…'}
+                    />
+                  {/if}
                 </div>
+                {#if kind === 'vertex_ai'}
+                  <div class="form-field">
+                    <label for="billing-account">Billing account ID</label
+                    ><input
+                      id="billing-account"
+                      bind:value={billingAccountID}
+                    />
+                  </div>
+                  <div class="form-field">
+                    <label for="billing-project">BigQuery project ID</label
+                    ><input
+                      id="billing-project"
+                      bind:value={bigQueryProjectID}
+                    />
+                  </div>
+                  <div class="form-field">
+                    <label for="billing-dataset">Dataset ID</label><input
+                      id="billing-dataset"
+                      bind:value={datasetID}
+                    />
+                  </div>
+                  <div class="form-field">
+                    <label for="billing-table">Detailed export table ID</label
+                    ><input id="billing-table" bind:value={tableID} />
+                  </div>
+                {/if}
                 <div class="form-field">
                   <label for="billing-scope">{scopeLabel}</label>
                   <textarea
                     id="billing-scope"
                     rows="3"
                     bind:value={scopeText}
-                    placeholder={kind === 'openai'
-                      ? 'proj_…'
-                      : 'wrkspc_… or default'}></textarea>
+                    placeholder={kind === 'vertex_ai'
+                      ? 'workload-project'
+                      : kind === 'openai'
+                        ? 'proj_…'
+                        : 'wrkspc_… or default'}></textarea>
                   <small
-                    >One ID per line; empty imports the whole organization.</small
+                    >One ID per line. Leave empty to include all projects or
+                    workspaces.</small
                   >
                 </div>
               {/if}
