@@ -25,7 +25,7 @@ import (
 // corpus parity tests read, and expects the prompt tokens OpenAI reports to be
 // what the estimate counts: the text exactly, and the framing the cookbook
 // documents. A count the estimate does not claim is exact is reported and not
-// held to it. It logs the error over the corpus.
+// held to it. It logs the error over the corpus, which the roadmap records.
 func TestLiveOpenAIPromptTokensMatchTheEstimate(t *testing.T) {
 	if os.Getenv("OLP_LIVE_PROVIDER") != "openai" {
 		t.Skip("set OLP_LIVE_PROVIDER=openai; this test incurs provider charges")
