@@ -313,7 +313,9 @@ credential}`. The billing credential is sealed under purpose
 required on create, omitting it keeps the stored credential, and `null` is
 rejected. `GET` returns the import and its status, including the covered dates,
 last error and applied source revision. `POST …/run` reschedules it immediately.
-`DELETE` removes the import and sealed credential while keeping imported costs.
+`DELETE` removes the import and sealed credential while keeping imported costs and
+coverage available for historical reconciliation. Changing the source or scope
+clears coverage until the new import succeeds.
 
 For OpenAI and Anthropic, use a vendor admin key. Scope is
 `{"project_ids": ["proj_…"]}` for OpenAI or
@@ -361,7 +363,8 @@ replace the stored rows. A returned bucket with no results records an invoiced z
 out; on failure `last_error_code` records `credential`, `status`, `network`,
 `timeout`, `response` or `endpoint`, and the retry backs off from five
 minutes to one hour. Rows older than `retention.usage_days` are purged in
-bounded batches.
+bounded batches and their coverage is cleared. If retention later increases,
+AWS imports retry the newly uncovered historical periods.
 
 `GET /api/v1/providers/{id}/invoiced-costs?start=…&end=…` lists stored line
 items (`day`, `line_item`, `currency`, `amount`, `source`, `fetched_at`),
@@ -380,7 +383,7 @@ end-exclusive and at most 93 days.
 | `priced_attempts`, `unpriced_attempts`, `incomplete_attempts` | billable attempt counts; `unpriced_share` is `unpriced/(priced+unpriced)` |
 | `excluded_caller_attempts` | billable attempts excluded for caller-paid or budget-exempt status |
 | `provisional` | true within two days of today, or when the import has not succeeded since 30 hours after the day began |
-| `import` | the import's `last_success_at`/`last_error_code` |
+| `import` | the import's `last_success_at`/`last_error_code`, or null after deletion |
 
 Totals per provider add `attributed_cost` (whole range),
 `attributed_cost_covered` (covered days only, the numerator `capture_rate`

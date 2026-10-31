@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -38,20 +37,6 @@ var errImportMissing = access.Fail(404, "not_found", "The provider has no billin
 const importColumns = `provider_id::text,source,credential_id::text,scope,enabled,etag::text,
 	next_import_at,last_import_at,last_success_at,last_error_code,consecutive_failures,
 	imported_from::text,imported_through::text,source_revision`
-
-// qualifiedImportColumns binds every importColumns column to a table alias,
-// for queries that join another table sharing names such as etag.
-func qualifiedImportColumns(alias string) string {
-	parts := strings.Split(importColumns, ",")
-	for i, part := range parts {
-		column, cast, found := strings.Cut(strings.TrimSpace(part), "::")
-		parts[i] = alias + "." + column
-		if found {
-			parts[i] += "::" + cast
-		}
-	}
-	return strings.Join(parts, ",")
-}
 
 func scanImport(row pgx.Row) (*importRow, error) {
 	var r importRow
@@ -294,6 +279,9 @@ func (s *Server) deleteImport(r *http.Request, _ access.Principal) (access.Reply
 		return access.Reply{}, err
 	}
 	if err := access.Match(r, existing.ETag); err != nil {
+		return access.Reply{}, err
+	}
+	if err := rememberImportCoverage(r.Context(), tx, id); err != nil {
 		return access.Reply{}, err
 	}
 	if _, err := tx.Exec(r.Context(), `DELETE FROM olp.provider_billing_imports WHERE provider_id=$1::uuid`, id); err != nil {

@@ -2,6 +2,7 @@ package billing
 
 import (
 	"bytes"
+	"encoding/json"
 	"net/http"
 	"sort"
 	"strings"
@@ -42,28 +43,43 @@ func dayRange(r *http.Request) (time.Time, time.Time, error) {
 	return start.UTC(), end.UTC(), nil
 }
 
-// visibleImports lists the billing imports a principal may see: a
-// project-scoped principal sees only imports on providers in its projects.
-func (s *Server) visibleImports(r *http.Request, p access.Principal, providerID *string) ([]importRow, error) {
-	// importColumns are unqualified; the join with olp.providers needs each
-	// column bound to the import alias (etag exists on both tables).
-	query := `SELECT ` + qualifiedImportColumns("bi") + ` FROM olp.provider_billing_imports bi
-		JOIN olp.providers pr ON pr.id=bi.provider_id
-		WHERE ($1::text IS NULL OR bi.provider_id=$1::uuid)
-		  AND ($2 OR pr.project_id::text=ANY($3::text[]))`
-	rows, err := s.Access.Pool.Query(r.Context(), query+" ORDER BY bi.provider_id",
-		providerID, p.AllProjects, p.ProjectIDs())
+type reconciliationImport struct {
+	ProviderID      string
+	Source          string
+	Scope           json.RawMessage
+	ImportedFrom    *string
+	ImportedThrough *string
+	LastSuccessAt   *time.Time
+	LastErrorCode   *string
+	Active          bool
+}
+
+func (s *Server) visibleImports(r *http.Request, p access.Principal, providerID *string) ([]reconciliationImport, error) {
+	rows, err := s.Access.Pool.Query(r.Context(), `SELECT pr.id::text,COALESCE(bi.source,bc.source),
+		COALESCE(bi.scope,bc.scope),
+		(CASE WHEN bi.provider_id IS NOT NULL THEN bi.imported_from ELSE bc.imported_from END)::text,
+		(CASE WHEN bi.provider_id IS NOT NULL THEN bi.imported_through ELSE bc.imported_through END)::text,
+		CASE WHEN bi.provider_id IS NOT NULL THEN bi.last_success_at ELSE bc.last_success_at END,
+		bi.last_error_code,bi.provider_id IS NOT NULL
+		FROM olp.providers pr
+		LEFT JOIN olp.provider_billing_imports bi ON bi.provider_id=pr.id
+		LEFT JOIN olp.provider_billing_contexts bc ON bc.provider_id=pr.id
+		WHERE ($1::text IS NULL OR pr.id=$1::uuid)
+		  AND ($2 OR pr.project_id::text=ANY($3::text[]))
+		  AND (bi.provider_id IS NOT NULL OR bc.provider_id IS NOT NULL)
+		ORDER BY pr.id`, providerID, p.AllProjects, p.ProjectIDs())
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []importRow
+	var items []reconciliationImport
 	for rows.Next() {
-		row, err := scanImport(rows)
-		if err != nil {
+		var item reconciliationImport
+		if err := rows.Scan(&item.ProviderID, &item.Source, &item.Scope, &item.ImportedFrom, &item.ImportedThrough,
+			&item.LastSuccessAt, &item.LastErrorCode, &item.Active); err != nil {
 			return nil, err
 		}
-		items = append(items, *row)
+		items = append(items, item)
 	}
 	return items, rows.Err()
 }
@@ -94,7 +110,7 @@ func (s *Server) reconciliation(r *http.Request, p access.Principal) (access.Rep
 		return access.Reply{}, access.Fail(404, "not_found", "No billing import covers this provider.")
 	}
 	providerIDs := make([]string, 0, len(imports))
-	byProvider := map[string]*importRow{}
+	byProvider := map[string]*reconciliationImport{}
 	for i := range imports {
 		providerIDs = append(providerIDs, imports[i].ProviderID)
 		byProvider[imports[i].ProviderID] = &imports[i]
@@ -290,7 +306,7 @@ func (s *Server) reconciliation(r *http.Request, p access.Principal) (access.Rep
 			provisional := !dayTime.Before(twoDaysAgo) || imp == nil || imp.LastSuccessAt == nil ||
 				imp.LastSuccessAt.Before(dayTime.Add(30*time.Hour))
 			var importStatus map[string]any
-			if imp != nil {
+			if imp != nil && imp.Active {
 				importStatus = map[string]any{
 					"last_success_at": imp.LastSuccessAt,
 					"last_error_code": imp.LastErrorCode,

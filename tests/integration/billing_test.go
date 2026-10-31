@@ -883,3 +883,85 @@ func TestBillingImportAWSScope(t *testing.T) {
 		t.Fatalf("billing import must have the AWS source and keep the credential write-only: %v", created)
 	}
 }
+
+func TestBillingImportPollingReconciliationAfterDeletion(t *testing.T) {
+	h := newAccessHarness(t)
+	owner := h.owner()
+	day1, day2, day3 := billingDays()
+	fake := newBillingFake(t, "/v1/organization/costs", map[string]string{
+		"": "openai_costs_page1.json", "page-2-token": "openai_costs_page2.json",
+	}, map[string]string{"1759104000": fmt.Sprint(day1.Unix()), "1759190400": fmt.Sprint(day2.Unix()), "1759276800": fmt.Sprint(day3.Unix())})
+	provider := billingProvider(h, owner, "Polling history", "openai", fake.server.URL+"/v1", nil)
+	id := billingProviderID(provider)
+	billingPut(h, owner, id, map[string]any{"credential": "sk-admin-" + strings.Repeat("k", 30)}, provider["etag"].(string), 201)
+	price := "0.15"
+	for _, day := range []time.Time{day1.AddDate(0, 0, -1), day1, day2} {
+		billingFact(t, h, id, uuid.NewString(), day, "billable", true, &price, false, false, false)
+	}
+	if err := billingImporter(h, t).Pass(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	start, end := day1.AddDate(0, 0, -1).Format("2006-01-02"), day3.AddDate(0, 0, 1).Format("2006-01-02")
+	path := fmt.Sprintf("/api/v1/usage/reconciliation?start=%s&end=%s&provider_id=%s", start, end, id)
+	before := h.want(owner, "GET", path, nil, nil, 200)
+	importPath := "/api/v1/providers/" + id + "/billing-import"
+	h.want(owner, "DELETE", importPath, nil, etagHeader(h.want(owner, "GET", importPath, nil, nil, 200)), 204)
+	after := h.want(owner, "GET", path, nil, nil, 200)
+	check := func(report map[string]any) {
+		t.Helper()
+		for i := range before["items"].([]any) {
+			old := before["items"].([]any)[i].(map[string]any)
+			item := report["items"].([]any)[i].(map[string]any)
+			if item["invoiced_cost"] != old["invoiced_cost"] || item["capture_rate"] != old["capture_rate"] || item["capture_rate_unavailable_reason"] != old["capture_rate_unavailable_reason"] || item["provisional"] != old["provisional"] {
+				t.Fatalf("historical polling reconciliation lost coverage on day %d: before=%v after=%v", i, old, item)
+			}
+		}
+	}
+	check(after)
+	key := "sk-admin-" + strings.Repeat("k", 30)
+	recreate := func() {
+		t.Helper()
+		provider := h.want(owner, "GET", "/api/v1/providers/"+id, nil, nil, 200)
+		billingPut(h, owner, id, map[string]any{"credential": key}, provider["etag"].(string), 201)
+	}
+	recreate()
+	check(h.want(owner, "GET", path, nil, nil, 200))
+	export := h.want(owner, "GET", "/api/v1/configuration/export", nil, nil, 200)
+	document := export["document"].(map[string]any)
+	for _, value := range document["providers"].([]any) {
+		entry := value.(map[string]any)
+		if entry["name"] == "Polling history" {
+			delete(entry, "billing_import")
+		}
+	}
+	h.want(owner, "POST", "/api/v1/configuration/apply", map[string]any{"document": document, "secret_bindings": map[string]any{}}, idem("polling-history-remove"), 200)
+	h.want(owner, "GET", importPath, nil, nil, 404)
+	check(h.want(owner, "GET", path, nil, nil, 200))
+	setRetention := func(value string) {
+		t.Helper()
+		setting := h.want(owner, "GET", "/api/v1/settings/retention.usage_days", nil, nil, 200)
+		h.want(owner, "PUT", "/api/v1/settings/retention.usage_days", map[string]any{"value": value}, etagHeader(setting), 200)
+	}
+	setRetention("1")
+	if err := billingImporter(h, t).Pass(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	setRetention("90")
+	recreate()
+	retained := h.want(owner, "GET", path, nil, nil, 200)
+	for _, value := range retained["items"].([]any) {
+		item := value.(map[string]any)
+		if item["day"] == day1.Format("2006-01-02") && (item["invoiced_cost"] != nil || item["capture_rate_unavailable_reason"] != "not_imported") {
+			t.Fatalf("recreated polling import reported purged coverage: %v", item)
+		}
+	}
+	current := h.want(owner, "GET", importPath, nil, nil, 200)
+	billingPut(h, owner, id, map[string]any{"scope": map[string]any{"project_ids": []string{"proj_another"}}}, current["etag"].(string), 200)
+	changed := h.want(owner, "GET", path, nil, nil, 200)
+	for _, value := range changed["items"].([]any) {
+		item := value.(map[string]any)
+		if item["invoiced_cost"] != nil || item["capture_rate_unavailable_reason"] != "not_imported" {
+			t.Fatalf("changed scope inherited historical coverage: %v", changed)
+		}
+	}
+}
