@@ -14,6 +14,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -36,6 +38,8 @@ type Importer struct {
 	Log               *slog.Logger
 	PassBudget        time.Duration
 	AzureBlobEndpoint func(string) string
+	AWSClient         func(aws.Config) *s3.Client
+	Now               func() time.Time
 
 	mu       sync.Mutex
 	outcomes map[[2]string]int64
@@ -153,36 +157,23 @@ const claimSQL = `UPDATE olp.provider_billing_imports
 		SELECT provider_id FROM olp.provider_billing_imports
 		WHERE enabled AND next_import_at <= now()
 		ORDER BY next_import_at
-		LIMIT 10
+		LIMIT 1
 		FOR UPDATE SKIP LOCKED
 	)
 	RETURNING ` + importColumns
 
-// pass claims the due rows, runs each import, then purges expired invoice
-// rows. Claiming and each import commit separately so one slow vendor cannot
-// hold the batch.
 func (i *Importer) pass(ctx context.Context) (bool, error) {
-	var due []importRow
-	rows, err := i.Pool.Query(ctx, claimSQL)
-	if err != nil {
-		return false, err
-	}
-	for rows.Next() {
-		row, err := scanImport(rows)
-		if err != nil {
-			rows.Close()
-			return false, err
+	for n := 0; n < 10; n++ {
+		row, err := scanImport(i.Pool.QueryRow(ctx, claimSQL))
+		if errors.Is(err, errImportMissing) {
+			return n > 0, i.purge(ctx)
 		}
-		due = append(due, *row)
-	}
-	rows.Close()
-	if err := rows.Err(); err != nil {
-		return false, err
-	}
-	for _, row := range due {
-		if err := i.importOne(ctx, &row); err != nil {
+		if err != nil {
+			return n > 0, err
+		}
+		if err := i.importOne(ctx, row); err != nil {
 			code := fetchCode(err)
-			if err := i.recordFailure(ctx, &row, code); err != nil {
+			if err := i.recordFailure(ctx, row, code); err != nil {
 				return true, err
 			}
 			i.outcome(row.ProviderID, code)
@@ -191,7 +182,7 @@ func (i *Importer) pass(ctx context.Context) (bool, error) {
 			i.outcome(row.ProviderID, "success")
 		}
 	}
-	return len(due) > 0, i.purge(ctx)
+	return true, i.purge(ctx)
 }
 
 // window is the fetch range for one import: the first successful import looks
@@ -224,6 +215,9 @@ func (i *Importer) importOne(ctx context.Context, row *importRow) error {
 		return failFetch("credential", err)
 	}
 	defer clear(key)
+	if row.Source == SourceAWS {
+		return i.importAWS(ctx, row, cfg, key)
+	}
 	endpoint := cfg.Endpoint
 	var cloudScope azureScope
 	if row.Source == SourceAzureCostManagement {
@@ -402,7 +396,31 @@ func (i *Importer) storeDays(ctx context.Context, row *importRow, periodStart st
 		WHERE provider_id=$1::uuid`, row.ProviderID, minDay, maxDay, appliedRevision); err != nil {
 		return err
 	}
+	if revision != nil && appliedRevision != nil {
+		if err := refreshRevisionCoverage(ctx, tx, row.ProviderID, row.Source, row.Scope); err != nil {
+			return err
+		}
+	}
 	return tx.Commit(ctx)
+}
+
+func refreshRevisionCoverage(ctx context.Context, tx pgx.Tx, providerID, source string, scope json.RawMessage) error {
+	digest, err := scopeDigest(source, scope)
+	if err != nil {
+		return err
+	}
+	_, err = tx.Exec(ctx, `WITH spans AS (
+		SELECT unnest(range_agg(daterange(covered_from,covered_through,'[]'))) AS span
+		FROM olp.provider_billing_revisions
+		WHERE provider_id=$1::uuid AND source=$2 AND scope_digest=$3 AND covered_from IS NOT NULL
+	), latest AS (
+		SELECT lower(span) AS first_day,upper(span)-1 AS last_day
+		FROM spans ORDER BY upper(span) DESC LIMIT 1
+	)
+	UPDATE olp.provider_billing_imports SET
+		imported_from=(SELECT first_day FROM latest),imported_through=(SELECT last_day FROM latest)
+	WHERE provider_id=$1::uuid`, providerID, source, digest[:])
+	return err
 }
 
 // recordFailure marks one import failed with a content-free code and backs
@@ -484,11 +502,12 @@ func syncImportRevision(ctx context.Context, tx pgx.Tx, providerID, source strin
 			imported_from=NULL,imported_through=NULL,source_revision=NULL WHERE provider_id=$1::uuid`, providerID)
 		return err
 	}
+	if revisionBacked(source) {
+		if err := refreshRevisionCoverage(ctx, tx, providerID, source, scope); err != nil {
+			return err
+		}
+	}
 	_, err = tx.Exec(ctx, `UPDATE olp.provider_billing_imports SET
-		imported_from=LEAST(imported_from,(SELECT MIN(covered_from) FROM olp.provider_billing_revisions
-			WHERE provider_id=$1::uuid AND source=$2 AND scope_digest=$3)),
-		imported_through=GREATEST(imported_through,(SELECT MAX(covered_through) FROM olp.provider_billing_revisions
-			WHERE provider_id=$1::uuid AND source=$2 AND scope_digest=$3)),
 		source_revision=(SELECT source_revision FROM olp.provider_billing_revisions
 			WHERE provider_id=$1::uuid AND source=$2 AND scope_digest=$3 AND covered_from IS NOT NULL
 			ORDER BY ordering_at DESC,period_start DESC LIMIT 1)

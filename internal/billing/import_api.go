@@ -189,7 +189,7 @@ func (s *Server) putImport(r *http.Request, _ access.Principal) (access.Reply, e
 	var credential *string
 	if len(input.Credential) > 0 && !credentialNull {
 		var secret string
-		if source == SourceAzureCostManagement {
+		if source == SourceAzureCostManagement || source == SourceAWS {
 			secret = string(input.Credential)
 		} else if err := json.Unmarshal(input.Credential, &secret); err != nil {
 			return access.Reply{}, access.Invalid("credential", "credential must be a string")

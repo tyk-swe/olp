@@ -1181,3 +1181,26 @@ func TestBillingImportMigrationPreservesHistory(t *testing.T) {
 		}
 	}
 }
+
+func TestBillingImportAWSScope(t *testing.T) {
+	h := newAccessHarness(t)
+	owner := h.owner()
+	provider := h.want(owner, "POST", "/api/v1/providers", map[string]any{
+		"name":          "Bedrock billing",
+		"configuration": map[string]any{"kind": "bedrock", "auth_mode": "static", "endpoint": "https://bedrock-runtime.us-east-1.amazonaws.com", "cloud_region": "us-east-1"},
+		"credential":    `{"access_key_id":"BEDROCKKEY1234567890","secret_access_key":"bedrock-secret-123456789"}`,
+		"model":         "amazon.titan-text-express-v1",
+	}, idem("aws-billing-provider"), 201)
+	id := billingProviderID(provider)
+	scope := map[string]any{"payer_account_id": "111122223333", "bucket": "billing-report-bucket", "report_prefix": "billing/cur", "region": "us-east-1", "linked_account_ids": []string{"444455556666"}}
+	credential := map[string]any{"auth_mode": "static", "access_key_id": "BILLINGKEY1234567890", "secret_access_key": "billing-secret-example"}
+	billingPut(h, owner, id, map[string]any{"scope": map[string]any{"payer_account_id": "invalid", "bucket": "billing-report-bucket", "report_prefix": "billing/cur", "region": "us-east-1"}, "credential": credential}, provider["etag"].(string), 422)
+	billingPut(h, owner, id, map[string]any{"scope": map[string]any{"project_ids": []string{"proj_abc"}}, "credential": credential}, provider["etag"].(string), 422)
+	billingPut(h, owner, id, map[string]any{"credential": credential}, provider["etag"].(string), 422)
+	billingPut(h, owner, id, map[string]any{"scope": scope}, provider["etag"].(string), 422)
+	billingPut(h, owner, id, map[string]any{"scope": scope, "credential": nil}, provider["etag"].(string), 422)
+	created := billingPut(h, owner, id, map[string]any{"scope": scope, "credential": credential}, provider["etag"].(string), 201)
+	if created["source"] != "aws_cur" || created["credential"] != nil {
+		t.Fatalf("billing import must have the AWS source and keep the credential write-only: %v", created)
+	}
+}

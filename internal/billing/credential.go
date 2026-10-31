@@ -26,10 +26,18 @@ func encodeCredential(source, key string) ([]byte, error) {
 			return nil, err
 		}
 		return json.MarshalIndent(credentialDocument{Source: source, Credential: credential}, "", "  ")
+	case SourceAWS:
+		return encodeAWSCredential(key)
 	default:
 		return nil, access.Invalid("credential", "unknown billing source")
 	}
 	return json.MarshalIndent(credentialDocument{Source: source, APIKey: key}, "", "  ")
+}
+
+func ValidateSourceCredential(source, credential string) error {
+	document, err := encodeCredential(source, credential)
+	clear(document)
+	return err
 }
 
 var errIncompatibleCredential = errors.New("billing credential source does not match")
@@ -55,14 +63,11 @@ func decodeCredential(source string, data []byte) ([]byte, error) {
 	if source == SourceAzureCostManagement {
 		return validateAzureCredential(document.Credential)
 	}
+	if source == SourceAWS {
+		return decodeAWSCredential(data)
+	}
 	if ValidCredential(document.APIKey) != nil {
 		return nil, errors.New("invalid billing credential document")
 	}
 	return []byte(document.APIKey), nil
-}
-
-func ValidateSourceCredential(source, credential string) error {
-	encoded, err := encodeCredential(source, credential)
-	clear(encoded)
-	return err
 }

@@ -2693,7 +2693,7 @@
               "type": "boolean"
             },
             "scope": {
-              "$ref": "#/$defs/BillingImportScope"
+              "$ref": "#/$defs/BillingScope"
             },
             "credential_ref": {
               "type": "string",
@@ -2706,40 +2706,125 @@
             "credential_ref"
           ]
         },
-        "BillingImportScope": {
+        "BillingScope": {
+          "description": "Source-shaped billing scope. Empty scope reads the whole organization for polling sources. AWS and Azure require their export locations.",
+          "oneOf": [
+            {
+              "$ref": "#/$defs/PollingBillingScope"
+            },
+            {
+              "$ref": "#/$defs/AWSBillingScope"
+            },
+            {
+              "$ref": "#/$defs/AzureBillingScope"
+            }
+          ]
+        },
+        "PollingBillingScope": {
           "type": "object",
-          "description": "Source-specific billing scope. Azure requires billing_scope, export_name, storage_account and container.",
           "additionalProperties": false,
           "properties": {
             "project_ids": {
               "type": "array",
+              "maxItems": 100,
               "items": {
-                "type": "string"
+                "type": "string",
+                "pattern": "^proj_[A-Za-z0-9]{1,64}$"
               }
             },
             "workspace_ids": {
               "type": "array",
+              "maxItems": 100,
               "items": {
-                "type": "string"
+                "type": "string",
+                "pattern": "^(wrkspc_[A-Za-z0-9]{1,64}|default)$"
               }
+            }
+          },
+          "not": {
+            "required": [
+              "project_ids",
+              "workspace_ids"
+            ]
+          }
+        },
+        "AWSBillingScope": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "payer_account_id",
+            "bucket",
+            "report_prefix",
+            "region"
+          ],
+          "properties": {
+            "payer_account_id": {
+              "type": "string",
+              "pattern": "^[0-9]{12}$"
             },
+            "bucket": {
+              "type": "string",
+              "minLength": 3,
+              "maxLength": 63,
+              "pattern": "^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$"
+            },
+            "report_prefix": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 1024,
+              "description": "CUR report prefix including the report name"
+            },
+            "region": {
+              "type": "string",
+              "maxLength": 64,
+              "pattern": "^[a-z]{2}(-[a-z0-9]+)+-[0-9]+$"
+            },
+            "linked_account_ids": {
+              "type": "array",
+              "maxItems": 100,
+              "items": {
+                "type": "string",
+                "pattern": "^[0-9]{12}$"
+              }
+            }
+          }
+        },
+        "AzureBillingScope": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "billing_scope",
+            "export_name",
+            "storage_account",
+            "container"
+          ],
+          "properties": {
             "billing_scope": {
-              "type": "string"
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 1024
             },
             "export_name": {
-              "type": "string"
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 1024
             },
             "storage_account": {
-              "type": "string"
+              "type": "string",
+              "pattern": "^[a-z0-9]{3,24}$"
             },
             "container": {
-              "type": "string"
+              "type": "string",
+              "minLength": 3,
+              "maxLength": 63
             },
             "prefix": {
-              "type": "string"
+              "type": "string",
+              "maxLength": 1024
             },
             "subscription_ids": {
               "type": "array",
+              "maxItems": 100,
               "items": {
                 "type": "string",
                 "format": "uuid"
@@ -28088,7 +28173,7 @@
               "type": "boolean"
             },
             "scope": {
-              "$ref": "#/$defs/BillingImportScope"
+              "$ref": "#/$defs/BillingScope"
             },
             "credential_ref": {
               "type": "string",
@@ -28101,40 +28186,125 @@
             "credential_ref"
           ]
         },
-        "BillingImportScope": {
+        "BillingScope": {
+          "description": "Source-shaped billing scope. Empty scope reads the whole organization for polling sources. AWS and Azure require their export locations.",
+          "oneOf": [
+            {
+              "$ref": "#/$defs/PollingBillingScope"
+            },
+            {
+              "$ref": "#/$defs/AWSBillingScope"
+            },
+            {
+              "$ref": "#/$defs/AzureBillingScope"
+            }
+          ]
+        },
+        "PollingBillingScope": {
           "type": "object",
-          "description": "Source-specific billing scope. Azure requires billing_scope, export_name, storage_account and container.",
           "additionalProperties": false,
           "properties": {
             "project_ids": {
               "type": "array",
+              "maxItems": 100,
               "items": {
-                "type": "string"
+                "type": "string",
+                "pattern": "^proj_[A-Za-z0-9]{1,64}$"
               }
             },
             "workspace_ids": {
               "type": "array",
+              "maxItems": 100,
               "items": {
-                "type": "string"
+                "type": "string",
+                "pattern": "^(wrkspc_[A-Za-z0-9]{1,64}|default)$"
               }
+            }
+          },
+          "not": {
+            "required": [
+              "project_ids",
+              "workspace_ids"
+            ]
+          }
+        },
+        "AWSBillingScope": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "payer_account_id",
+            "bucket",
+            "report_prefix",
+            "region"
+          ],
+          "properties": {
+            "payer_account_id": {
+              "type": "string",
+              "pattern": "^[0-9]{12}$"
             },
+            "bucket": {
+              "type": "string",
+              "minLength": 3,
+              "maxLength": 63,
+              "pattern": "^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$"
+            },
+            "report_prefix": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 1024,
+              "description": "CUR report prefix including the report name"
+            },
+            "region": {
+              "type": "string",
+              "maxLength": 64,
+              "pattern": "^[a-z]{2}(-[a-z0-9]+)+-[0-9]+$"
+            },
+            "linked_account_ids": {
+              "type": "array",
+              "maxItems": 100,
+              "items": {
+                "type": "string",
+                "pattern": "^[0-9]{12}$"
+              }
+            }
+          }
+        },
+        "AzureBillingScope": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "billing_scope",
+            "export_name",
+            "storage_account",
+            "container"
+          ],
+          "properties": {
             "billing_scope": {
-              "type": "string"
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 1024
             },
             "export_name": {
-              "type": "string"
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 1024
             },
             "storage_account": {
-              "type": "string"
+              "type": "string",
+              "pattern": "^[a-z0-9]{3,24}$"
             },
             "container": {
-              "type": "string"
+              "type": "string",
+              "minLength": 3,
+              "maxLength": 63
             },
             "prefix": {
-              "type": "string"
+              "type": "string",
+              "maxLength": 1024
             },
             "subscription_ids": {
               "type": "array",
+              "maxItems": 100,
               "items": {
                 "type": "string",
                 "format": "uuid"
@@ -34163,10 +34333,10 @@
               "description": "Defaults to true when omitted."
             },
             "scope": {
-              "$ref": "#/$defs/BillingImportScope"
+              "$ref": "#/$defs/BillingScope"
             },
             "credential": {
-              "description": "Source credential sealed as a billing_credential secret. Required on create; omitted keeps the stored credential. Azure accepts an azure_default or azure_client_secret document.",
+              "description": "Billing credential. Required on create, omitted retains the stored credential, and null is rejected. AWS and Azure credentials are source-shaped objects.",
               "oneOf": [
                 {
                   "type": "string",
@@ -34176,6 +34346,34 @@
                 {
                   "type": "object",
                   "additionalProperties": false,
+                  "required": [
+                    "auth_mode"
+                  ],
+                  "properties": {
+                    "auth_mode": {
+                      "type": "string",
+                      "enum": [
+                        "static",
+                        "workload"
+                      ]
+                    },
+                    "access_key_id": {
+                      "type": "string"
+                    },
+                    "secret_access_key": {
+                      "type": "string"
+                    },
+                    "session_token": {
+                      "type": "string"
+                    }
+                  }
+                },
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "auth_mode"
+                  ],
                   "properties": {
                     "auth_mode": {
                       "type": "string",
@@ -34193,49 +34391,131 @@
                     "client_secret": {
                       "type": "string"
                     }
-                  },
-                  "required": [
-                    "auth_mode"
-                  ]
+                  }
                 }
               ]
             }
           }
         },
-        "BillingImportScope": {
+        "BillingScope": {
+          "description": "Source-shaped billing scope. Empty scope reads the whole organization for polling sources. AWS and Azure require their export locations.",
+          "oneOf": [
+            {
+              "$ref": "#/$defs/PollingBillingScope"
+            },
+            {
+              "$ref": "#/$defs/AWSBillingScope"
+            },
+            {
+              "$ref": "#/$defs/AzureBillingScope"
+            }
+          ]
+        },
+        "PollingBillingScope": {
           "type": "object",
-          "description": "Source-specific billing scope. Azure requires billing_scope, export_name, storage_account and container.",
           "additionalProperties": false,
           "properties": {
             "project_ids": {
               "type": "array",
+              "maxItems": 100,
               "items": {
-                "type": "string"
+                "type": "string",
+                "pattern": "^proj_[A-Za-z0-9]{1,64}$"
               }
             },
             "workspace_ids": {
               "type": "array",
+              "maxItems": 100,
               "items": {
-                "type": "string"
+                "type": "string",
+                "pattern": "^(wrkspc_[A-Za-z0-9]{1,64}|default)$"
               }
+            }
+          },
+          "not": {
+            "required": [
+              "project_ids",
+              "workspace_ids"
+            ]
+          }
+        },
+        "AWSBillingScope": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "payer_account_id",
+            "bucket",
+            "report_prefix",
+            "region"
+          ],
+          "properties": {
+            "payer_account_id": {
+              "type": "string",
+              "pattern": "^[0-9]{12}$"
             },
+            "bucket": {
+              "type": "string",
+              "minLength": 3,
+              "maxLength": 63,
+              "pattern": "^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$"
+            },
+            "report_prefix": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 1024,
+              "description": "CUR report prefix including the report name"
+            },
+            "region": {
+              "type": "string",
+              "maxLength": 64,
+              "pattern": "^[a-z]{2}(-[a-z0-9]+)+-[0-9]+$"
+            },
+            "linked_account_ids": {
+              "type": "array",
+              "maxItems": 100,
+              "items": {
+                "type": "string",
+                "pattern": "^[0-9]{12}$"
+              }
+            }
+          }
+        },
+        "AzureBillingScope": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "billing_scope",
+            "export_name",
+            "storage_account",
+            "container"
+          ],
+          "properties": {
             "billing_scope": {
-              "type": "string"
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 1024
             },
             "export_name": {
-              "type": "string"
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 1024
             },
             "storage_account": {
-              "type": "string"
+              "type": "string",
+              "pattern": "^[a-z0-9]{3,24}$"
             },
             "container": {
-              "type": "string"
+              "type": "string",
+              "minLength": 3,
+              "maxLength": 63
             },
             "prefix": {
-              "type": "string"
+              "type": "string",
+              "maxLength": 1024
             },
             "subscription_ids": {
               "type": "array",
+              "maxItems": 100,
               "items": {
                 "type": "string",
                 "format": "uuid"

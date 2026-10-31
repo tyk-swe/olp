@@ -853,7 +853,7 @@ func validateBindings(doc *Document, bindings bindingSet) error {
 			}
 			continue
 		}
-		if source := billingRefs[name]; source != "" {
+		if source, ok := billingRefs[name]; ok {
 			if secret.reference != nil {
 				return access.Invalid("external_credential_bindings", "Billing credentials require sealed secret bindings.")
 			}

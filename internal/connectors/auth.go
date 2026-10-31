@@ -604,6 +604,10 @@ func (a *Auth) newAzureCredential(mode string, secret []byte) (azcore.TokenCrede
 	return nil, ErrCredentialRejected
 }
 
+func (a *Auth) AWSWorkloadCredentials(ctx context.Context, region string) (aws.Credentials, error) {
+	return a.awsCredentials(ctx, Config{AuthMode: "default_chain", CloudRegion: region}, nil)
+}
+
 func (a *Auth) awsCredentials(ctx context.Context, c Config, secret []byte) (aws.Credentials, error) {
 	if c.AuthMode == "static" {
 		var v struct {
