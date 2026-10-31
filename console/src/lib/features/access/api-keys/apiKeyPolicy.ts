@@ -17,6 +17,7 @@ import type {
   UpdateApiKeyInput
 } from '$lib/features/access/api-keys/api';
 import { dateTimeLocalValue } from '$lib/format';
+import type { components } from '$lib/api/schema';
 
 export type ApiKeyPolicyInput = CreateApiKeyInput & UpdateApiKeyInput;
 
@@ -34,6 +35,7 @@ export type ApiKeyFormState = {
   requestsPerMinute: string;
   tokensPerMinute: string;
   maxConcurrency: string;
+  runLimits: components['schemas']['WorkflowRunLimits'] | null;
   dailyCostLimit: string;
   monthlyCostLimit: string;
   weeklyCostLimit: string;
@@ -78,6 +80,7 @@ export function createApiKeyFormState(
     requestsPerMinute: editing?.requests_per_minute?.toString() ?? '',
     tokensPerMinute: editing?.tokens_per_minute?.toString() ?? '',
     maxConcurrency: editing?.max_concurrency?.toString() ?? '',
+    runLimits: editing?.run_limits ?? null,
     dailyCostLimit: editing?.budget.daily.limit ?? '',
     monthlyCostLimit: editing?.budget.monthly.limit ?? '',
     weeklyCostLimit: editing?.budget.weekly?.limit ?? '',
@@ -153,6 +156,7 @@ export function buildApiKeyPolicyInput(
     requests_per_minute: optionalWholeNumber(state.requestsPerMinute),
     tokens_per_minute: optionalWholeNumber(state.tokensPerMinute),
     max_concurrency: optionalWholeNumber(state.maxConcurrency),
+    run_limits: state.runLimits,
     daily_cost_limit: optionalDecimal(state.dailyCostLimit),
     monthly_cost_limit: optionalDecimal(state.monthlyCostLimit),
     weekly_cost_limit: optionalDecimal(state.weeklyCostLimit),

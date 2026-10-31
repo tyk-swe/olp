@@ -1,20 +1,26 @@
 package billing
 
 import (
+	"cmp"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"log/slog"
+	"maps"
 	"net/http"
-	"sort"
+	"slices"
 	"sync"
 	"time"
 
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/secrets"
 	"github.com/tyk-swe/olp/internal/usage"
@@ -25,13 +31,16 @@ import (
 // paths, so it runs on any process that can reach both, independent of the
 // coordination store.
 type Importer struct {
-	Pool         *pgxpool.Pool
-	Keys         *secrets.KeyRing
-	Installation string
-	Egress       *egress.Policy
-	Connections  *egress.ConnectionClientCache
-	Log          *slog.Logger
-	PassBudget   time.Duration
+	Pool              *pgxpool.Pool
+	Keys              *secrets.KeyRing
+	Installation      string
+	Egress            *egress.Policy
+	Connections       *egress.ConnectionClientCache
+	Log               *slog.Logger
+	PassBudget        time.Duration
+	AzureBlobEndpoint func(string) string
+	AWSClient         func(aws.Config) *s3.Client
+	Now               func() time.Time
 
 	mu       sync.Mutex
 	outcomes map[[2]string]int64
@@ -149,45 +158,54 @@ const claimSQL = `UPDATE olp.provider_billing_imports
 		SELECT provider_id FROM olp.provider_billing_imports
 		WHERE enabled AND next_import_at <= now()
 		ORDER BY next_import_at
-		LIMIT 10
+		LIMIT 1
 		FOR UPDATE SKIP LOCKED
 	)
 	RETURNING ` + importColumns
 
-// pass claims the due rows, runs each import, then purges expired invoice
-// rows. Claiming and each import commit separately so one slow vendor cannot
-// hold the batch.
 func (i *Importer) pass(ctx context.Context) (bool, error) {
-	var due []importRow
-	rows, err := i.Pool.Query(ctx, claimSQL)
-	if err != nil {
-		return false, err
-	}
-	for rows.Next() {
-		row, err := scanImport(rows)
-		if err != nil {
-			rows.Close()
-			return false, err
+	for n := 0; n < 10; n++ {
+		row, err := scanImport(i.Pool.QueryRow(ctx, claimSQL))
+		if errors.Is(err, errImportMissing) {
+			return n > 0, i.purge(ctx)
 		}
-		due = append(due, *row)
-	}
-	rows.Close()
-	if err := rows.Err(); err != nil {
-		return false, err
-	}
-	for _, row := range due {
-		if err := i.importOne(ctx, &row); err != nil {
+		if err != nil {
+			return n > 0, err
+		}
+		err = i.importOne(ctx, row)
+		var continuation *cloudContinuation
+		if errors.As(err, &continuation) {
+			if err := i.recordContinuation(ctx, row, continuation); err != nil {
+				return true, err
+			}
+			i.outcome(row.ProviderID, "success")
+		} else if err != nil {
 			code := fetchCode(err)
-			if err := i.recordFailure(ctx, &row, code); err != nil {
+			if err := i.recordFailure(ctx, row, code); err != nil {
 				return true, err
 			}
 			i.outcome(row.ProviderID, code)
 			i.log().Warn("billing import failed", "provider", row.ProviderID, "code", code)
 		} else {
+			if row.CloudNextPeriod != nil {
+				if _, err := i.Pool.Exec(ctx, `UPDATE olp.provider_billing_imports SET cloud_next_period=NULL,cloud_periods_remaining=0
+					WHERE provider_id=$1::uuid AND etag=$2::uuid`, row.ProviderID, row.ETag); err != nil {
+					return true, err
+				}
+			}
 			i.outcome(row.ProviderID, "success")
 		}
 	}
-	return len(due) > 0, i.purge(ctx)
+	return true, i.purge(ctx)
+}
+
+func (i *Importer) recordContinuation(ctx context.Context, row *importRow, continuation *cloudContinuation) error {
+	_, err := i.Pool.Exec(ctx, `UPDATE olp.provider_billing_imports SET
+		cloud_next_period=$3,cloud_periods_remaining=$4,next_import_at=now()+$5::interval,
+		last_error_code=NULL,consecutive_failures=0,updated_at=now()
+		WHERE provider_id=$1::uuid AND etag=$2::uuid`, row.ProviderID, row.ETag,
+		continuation.next, continuation.remaining, ImportInterval.String())
+	return err
 }
 
 // window is the fetch range for one import: the first successful import looks
@@ -201,7 +219,33 @@ func window(through *string, today time.Time) (start, end time.Time) {
 	return end.AddDate(0, 0, -7), end
 }
 
-// importOne fetches one provider's window and commits its days.
+func (i *Importer) completedCloudPeriods(ctx context.Context, row *importRow, earliest, today time.Time) (map[string]struct{}, error) {
+	rows, err := i.Pool.Query(ctx, `SELECT period_start FROM (
+			SELECT date_trunc('month',day)::date AS period_start FROM olp.provider_billing_days
+			WHERE provider_id=$1::uuid AND source=$2 AND scope=$3::jsonb
+			AND day >= $4::date AND day < date_trunc('month', $5::date) - interval '1 month'
+		) days GROUP BY period_start
+		HAVING COUNT(*) = (period_start + interval '1 month')::date - GREATEST(period_start,$4::date)`,
+		row.ProviderID, row.Source, row.Scope, earliest.Format(dayFormat), today.Format(dayFormat))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	completed := map[string]struct{}{}
+	for rows.Next() {
+		var month time.Time
+		if err := rows.Scan(&month); err != nil {
+			return nil, err
+		}
+		period := month.Format("20060102") + "-" + month.AddDate(0, 1, 0).Format("20060102")
+		completed[period] = struct{}{}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return completed, nil
+}
+
 func (i *Importer) importOne(ctx context.Context, row *importRow) error {
 	cfg, err := loadProviderConfig(ctx, i.Pool, row.ProviderID)
 	if err != nil {
@@ -210,14 +254,68 @@ func (i *Importer) importOne(ctx context.Context, row *importRow) error {
 	if row.CredentialID == nil {
 		return failFetch("credential", errors.New("no billing credential is stored"))
 	}
-	key, err := i.Keys.Read(ctx, i.Pool, i.Installation, *row.CredentialID, secrets.BillingCredential)
+	stored, err := i.Keys.Read(ctx, i.Pool, i.Installation, *row.CredentialID, secrets.BillingCredential)
 	if err != nil {
 		return failFetch("credential", errors.New("billing credential could not be read"))
 	}
+	defer clear(stored)
+	key, err := decodeCredential(row.Source, stored)
+	if err != nil {
+		return failFetch("credential", err)
+	}
 	defer clear(key)
-	client, err := i.client(ctx, row.ProviderID, cfg, key)
+	if row.Source == SourceAWS {
+		return i.importAWS(ctx, row, cfg, key)
+	}
+	endpoint := googleBigQueryEndpoint
+	var cloudScope azureScope
+	if row.Source == SourceAzureCostManagement {
+		if err := json.Unmarshal(row.Scope, &cloudScope); err != nil {
+			return failFetch("response", err)
+		}
+		endpoint = "https://" + cloudScope.StorageAccount + ".blob.core.windows.net"
+		if i.AzureBlobEndpoint != nil {
+			endpoint = i.AzureBlobEndpoint(cloudScope.StorageAccount)
+		}
+	} else if row.Source != SourceGoogle {
+		if cfg.Endpoint == nil || *cfg.Endpoint == "" {
+			return failFetch("endpoint", errors.New("the provider has no endpoint"))
+		}
+		endpoint = *cfg.Endpoint
+	}
+	client, err := i.client(ctx, row.ProviderID, cfg, key, endpoint)
 	if err != nil {
 		return failFetch("endpoint", err)
+	}
+	if row.Source == SourceGoogle {
+		bounded := *client
+		bounded.Timeout = requestTimout
+		authClient, err := i.billingAuthenticationClient(ctx, cfg)
+		if err != nil {
+			return failFetch("endpoint", err)
+		}
+		defer authClient.CloseIdleConnections()
+		return i.importGoogle(ctx, row, &bounded, connectors.NewBillingAuth(i.Egress, authClient), key)
+	}
+	if row.Source == SourceAzureCostManagement {
+		authClient, err := i.billingAuthenticationClient(ctx, cfg)
+		if err != nil {
+			return failFetch("endpoint", err)
+		}
+		defer authClient.CloseIdleConnections()
+		today := i.now().UTC().Truncate(24 * time.Hour)
+		var retention int
+		if err := i.Pool.QueryRow(ctx, `SELECT COALESCE((SELECT value::int FROM olp.settings WHERE key='retention.usage_days'),90)`).Scan(&retention); err != nil {
+			return err
+		}
+		earliest := today.AddDate(0, 0, -retention)
+		completed, err := i.completedCloudPeriods(ctx, row, earliest, today)
+		if err != nil {
+			return err
+		}
+		return fetchAzure(ctx, client, connectors.NewBillingAuth(i.Egress, authClient), endpoint, cloudScope, key, earliest, today, completed, row, func(period azurePeriod) error {
+			return i.storeDays(ctx, row, period.start, &period.revision, period.days)
+		})
 	}
 	var scope Scope
 	if err := json.Unmarshal(row.Scope, &scope); err != nil {
@@ -225,7 +323,7 @@ func (i *Importer) importOne(ctx context.Context, row *importRow) error {
 	}
 	today := time.Now().UTC().Truncate(24 * time.Hour)
 	start, end := window(row.ImportedThrough, today)
-	var days map[string]map[string]lineSum
+	var days map[string]map[lineKey]lineSum
 	switch row.Source {
 	case SourceOpenAI:
 		days, err = fetchOpenAI(ctx, client, cfg.Endpoint, key, scope, start, end)
@@ -237,16 +335,25 @@ func (i *Importer) importOne(ctx context.Context, row *importRow) error {
 	if err != nil {
 		return err
 	}
-	return i.storeDays(ctx, row, days)
+	return i.storeDays(ctx, row, "", nil, days)
+}
+
+func (i *Importer) billingAuthenticationClient(ctx context.Context, cfg *providerConfig) (*http.Client, error) {
+	var secret []byte
+	if options := cfg.Options.Network; options != nil && options.CredentialID != "" {
+		data, err := i.Keys.Read(ctx, i.Pool, i.Installation, options.CredentialID, secrets.ProviderCredential)
+		if err != nil {
+			return nil, errors.New("network credential could not be read")
+		}
+		secret = data
+	}
+	return i.Egress.PublicDestinationClient(cfg.Options.Network, secret, requestTimout)
 }
 
 // client builds the connection-scoped HTTP client the import's provider
 // configuration calls for, honoring its network options and credential.
-func (i *Importer) client(ctx context.Context, providerID string, cfg *providerConfig, credential []byte) (*http.Client, error) {
-	if cfg.Endpoint == nil || *cfg.Endpoint == "" {
-		return nil, errors.New("the provider has no endpoint")
-	}
-	if _, err := i.Egress.ValidateEndpoint(*cfg.Endpoint); err != nil {
+func (i *Importer) client(ctx context.Context, providerID string, cfg *providerConfig, credential []byte, endpoint string) (*http.Client, error) {
+	if _, err := i.Egress.ValidateEndpoint(endpoint); err != nil {
 		return nil, err
 	}
 	var secret []byte
@@ -280,53 +387,118 @@ func loadProviderConfig(ctx context.Context, q access.Queryer, providerID string
 	return &cfg, nil
 }
 
-// storeDays commits one successful import: every bucket the vendor returned
-// replaces that day's stored invoice rows wholesale, including buckets with
-// no results, which leave the day with an explicit invoiced zero.
-func (i *Importer) storeDays(ctx context.Context, row *importRow, days map[string]map[string]lineSum) error {
+type sourceRevision struct {
+	id         string
+	orderingAt time.Time
+}
+
+func (i *Importer) storeDays(ctx context.Context, row *importRow, periodStart string, revision *sourceRevision, days map[string]map[lineKey]lineSum) error {
 	tx, err := i.Pool.Begin(ctx)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback(ctx)
-	daysList := make([]string, 0, len(days))
-	for day := range days {
-		daysList = append(daysList, day)
+	var providerExists int
+	if err := tx.QueryRow(ctx, `SELECT 1 FROM olp.providers WHERE id=$1::uuid FOR KEY SHARE`, row.ProviderID).Scan(&providerExists); errors.Is(err, pgx.ErrNoRows) {
+		return nil
+	} else if err != nil {
+		return err
 	}
-	sort.Strings(daysList)
+	var etag string
+	if err := tx.QueryRow(ctx, `SELECT etag FROM olp.provider_billing_imports WHERE provider_id=$1::uuid FOR UPDATE`, row.ProviderID).Scan(&etag); errors.Is(err, pgx.ErrNoRows) {
+		return nil
+	} else if err != nil {
+		return err
+	}
+	if etag != row.ETag {
+		return nil
+	}
+	daysList := slices.Sorted(maps.Keys(days))
+	var minDay, maxDay *string
+	if len(daysList) > 0 {
+		minDay, maxDay = &daysList[0], &daysList[len(daysList)-1]
+	}
+	var appliedRevision *string
+	if revision != nil {
+		digest, err := scopeDigest(row.Source, row.Scope)
+		if err != nil {
+			return err
+		}
+		tag, err := tx.Exec(ctx, `INSERT INTO olp.provider_billing_revisions
+			(provider_id,source,scope_digest,period_start,source_revision,ordering_at,covered_from,covered_through)
+			VALUES($1::uuid,$2,$3,$4::date,$5,$6,$7::date,$8::date)
+			ON CONFLICT (provider_id,source,scope_digest,period_start) DO UPDATE SET
+				source_revision=EXCLUDED.source_revision,
+				ordering_at=CASE WHEN olp.provider_billing_revisions.source_revision=EXCLUDED.source_revision
+					THEN olp.provider_billing_revisions.ordering_at ELSE EXCLUDED.ordering_at END,
+				covered_from=LEAST(olp.provider_billing_revisions.covered_from,EXCLUDED.covered_from),
+				covered_through=GREATEST(olp.provider_billing_revisions.covered_through,EXCLUDED.covered_through)
+			WHERE olp.provider_billing_revisions.source_revision=EXCLUDED.source_revision
+				OR olp.provider_billing_revisions.ordering_at < EXCLUDED.ordering_at`,
+			row.ProviderID, row.Source, digest[:], periodStart, revision.id, revision.orderingAt, minDay, maxDay)
+		if err != nil {
+			return err
+		}
+		if tag.RowsAffected() == 0 {
+			daysList = nil
+			minDay, maxDay = nil, nil
+		} else {
+			appliedRevision = &revision.id
+		}
+	}
 	for _, day := range daysList {
+		if _, err := tx.Exec(ctx, `INSERT INTO olp.provider_billing_days(provider_id,day,source,scope,last_success_at)
+			VALUES($1::uuid,$2::date,$3,$4::jsonb,now())
+			ON CONFLICT (provider_id,day) DO UPDATE SET source=EXCLUDED.source,scope=EXCLUDED.scope,last_success_at=EXCLUDED.last_success_at`,
+			row.ProviderID, day, row.Source, row.Scope); err != nil {
+			return err
+		}
 		if _, err := tx.Exec(ctx, `DELETE FROM olp.provider_invoiced_costs WHERE provider_id=$1::uuid AND day=$2::date`,
 			row.ProviderID, day); err != nil {
 			return err
 		}
 		items := days[day]
-		names := make([]string, 0, len(items))
-		for name := range items {
-			names = append(names, name)
-		}
-		sort.Strings(names)
-		for _, name := range names {
-			sum := items[name]
+		keys := slices.SortedFunc(maps.Keys(items), func(a, b lineKey) int {
+			if result := cmp.Compare(a.item, b.item); result != 0 {
+				return result
+			}
+			return cmp.Compare(a.currency, b.currency)
+		})
+		for _, key := range keys {
+			sum := items[key]
 			if _, err := tx.Exec(ctx, `INSERT INTO olp.provider_invoiced_costs
-				(provider_id,day,line_item,currency,amount,source) VALUES($1::uuid,$2::date,$3,$4,$5,$6)`,
-				row.ProviderID, day, name, sum.currency, sum.amount.String(), row.Source); err != nil {
+				(provider_id,day,line_item,currency,amount,source,source_revision) VALUES($1::uuid,$2::date,$3,$4,$5,$6,$7)`,
+				row.ProviderID, day, key.item, key.currency, sum.amount.String(), row.Source, appliedRevision); err != nil {
 				return err
 			}
 		}
 	}
-	var minDay, maxDay *string
-	if len(daysList) > 0 {
-		minDay, maxDay = &daysList[0], &daysList[len(daysList)-1]
-	}
 	if _, err := tx.Exec(ctx, `UPDATE olp.provider_billing_imports SET
 		last_import_at=now(),last_success_at=now(),last_error_code=NULL,
 		consecutive_failures=0,next_import_at=now()+interval '1 hour',updated_at=now(),
-		imported_from=LEAST(COALESCE(imported_from,$2::date),$2::date),
-		imported_through=GREATEST(COALESCE(imported_through,$3::date),$3::date)
-		WHERE provider_id=$1::uuid`, row.ProviderID, minDay, maxDay); err != nil {
+		source_revision=COALESCE($2,source_revision)
+		WHERE provider_id=$1::uuid`, row.ProviderID, appliedRevision); err != nil {
+		return err
+	}
+	if err := refreshImportCoverage(ctx, tx, row.ProviderID, row.Source, row.Scope); err != nil {
 		return err
 	}
 	return tx.Commit(ctx)
+}
+
+func refreshImportCoverage(ctx context.Context, tx pgx.Tx, providerID, source string, scope json.RawMessage) error {
+	_, err := tx.Exec(ctx, `WITH spans AS (
+		SELECT unnest(range_agg(daterange(day,day,'[]'))) AS span
+		FROM olp.provider_billing_days
+		WHERE provider_id=$1::uuid AND source=$2 AND scope=$3::jsonb
+	), latest AS (
+		SELECT lower(span) AS first_day,upper(span)-1 AS last_day
+		FROM spans ORDER BY upper(span) DESC LIMIT 1
+	)
+	UPDATE olp.provider_billing_imports SET
+		imported_from=(SELECT first_day FROM latest),imported_through=(SELECT last_day FROM latest)
+	WHERE provider_id=$1::uuid`, providerID, source, scope)
+	return err
 }
 
 // recordFailure marks one import failed with a content-free code and backs
@@ -341,9 +513,9 @@ func (i *Importer) recordFailure(ctx context.Context, row *importRow, code strin
 		delay = maxBackoff
 	}
 	_, err := i.Pool.Exec(ctx, `UPDATE olp.provider_billing_imports SET
-		last_import_at=now(),last_error_code=$2,consecutive_failures=$3,
+		last_import_at=now(),last_error_code=$2,consecutive_failures=$3,cloud_next_period=NULL,cloud_periods_remaining=0,
 		next_import_at=now()+$4::interval,updated_at=now()
-		WHERE provider_id=$1::uuid`, row.ProviderID, code, failures, delay.String())
+		WHERE provider_id=$1::uuid AND etag=$5`, row.ProviderID, code, failures, delay.String(), row.ETag)
 	return err
 }
 
@@ -355,7 +527,42 @@ func (i *Importer) purge(ctx context.Context) error {
 		return err
 	}
 	cutoff := time.Now().UTC().AddDate(0, 0, -days).Format(dayFormat)
-	for range 20 {
+	tx, err := i.Pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback(context.Background()) }()
+	for _, query := range []string{
+		`UPDATE olp.provider_billing_imports SET
+			imported_from=CASE WHEN imported_through < $1::date THEN NULL ELSE GREATEST(imported_from,$1::date) END,
+			imported_through=CASE WHEN imported_through < $1::date THEN NULL ELSE imported_through END
+			WHERE imported_from < $1::date`,
+		`UPDATE olp.provider_billing_contexts SET
+			imported_from=CASE WHEN imported_through < $1::date THEN NULL ELSE GREATEST(imported_from,$1::date) END,
+			imported_through=CASE WHEN imported_through < $1::date THEN NULL ELSE imported_through END
+			WHERE imported_from < $1::date`,
+		`DELETE FROM olp.provider_billing_days WHERE day < $1::date`,
+		`UPDATE olp.provider_billing_revisions SET
+			covered_from=CASE WHEN covered_through < $1::date THEN NULL ELSE GREATEST(covered_from,$1::date) END,
+			covered_through=CASE WHEN covered_through < $1::date THEN NULL ELSE covered_through END
+			WHERE covered_from < $1::date`,
+	} {
+		if _, err := tx.Exec(ctx, query, cutoff); err != nil {
+			return err
+		}
+	}
+	tag, err := tx.Exec(ctx, `DELETE FROM olp.provider_invoiced_costs WHERE ctid IN (
+		SELECT ctid FROM olp.provider_invoiced_costs WHERE day < $1::date LIMIT $2)`, cutoff, purgeBatch)
+	if err != nil {
+		return err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return err
+	}
+	if tag.RowsAffected() < purgeBatch {
+		return nil
+	}
+	for range 19 {
 		tag, err := i.Pool.Exec(ctx, `DELETE FROM olp.provider_invoiced_costs WHERE ctid IN (
 			SELECT ctid FROM olp.provider_invoiced_costs WHERE day < $1::date LIMIT $2)`, cutoff, purgeBatch)
 		if err != nil {
@@ -366,4 +573,68 @@ func (i *Importer) purge(ctx context.Context) error {
 		}
 	}
 	return nil
+}
+
+func scopeDigest(source string, scope json.RawMessage) ([32]byte, error) {
+	canonical, err := ValidateScope(source, scope)
+	if err != nil {
+		return [32]byte{}, err
+	}
+	return sha256.Sum256(canonical), nil
+}
+
+func syncImportRevision(ctx context.Context, tx pgx.Tx, providerID, source string, scope json.RawMessage) error {
+	digest, err := scopeDigest(source, scope)
+	if err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, `INSERT INTO olp.provider_billing_contexts(provider_id,source,scope)
+		VALUES($1::uuid,$2,$3::jsonb) ON CONFLICT (provider_id) DO NOTHING`, providerID, source, scope); err != nil {
+		return err
+	}
+	var previousSource string
+	var previousScope json.RawMessage
+	if err := tx.QueryRow(ctx, `SELECT source,scope FROM olp.provider_billing_contexts
+		WHERE provider_id=$1::uuid FOR UPDATE`, providerID).Scan(&previousSource, &previousScope); err != nil {
+		return err
+	}
+	previousDigest, err := scopeDigest(previousSource, previousScope)
+	if err != nil {
+		return err
+	}
+	if previousSource != source || previousDigest != digest {
+		if _, err := tx.Exec(ctx, `UPDATE olp.provider_billing_contexts SET source=$2,scope=$3::jsonb,
+			imported_from=NULL,imported_through=NULL,last_success_at=NULL WHERE provider_id=$1::uuid`, providerID, source, scope); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `UPDATE olp.provider_billing_revisions SET covered_from=NULL,covered_through=NULL
+			WHERE provider_id=$1::uuid`, providerID); err != nil {
+			return err
+		}
+		_, err := tx.Exec(ctx, `UPDATE olp.provider_billing_imports SET
+			imported_from=NULL,imported_through=NULL,source_revision=NULL,last_success_at=NULL,
+			cloud_next_period=NULL,cloud_periods_remaining=0 WHERE provider_id=$1::uuid`, providerID)
+		return err
+	}
+	if err := refreshImportCoverage(ctx, tx, providerID, source, scope); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, `UPDATE olp.provider_billing_imports bi SET
+		last_success_at=COALESCE(bi.last_success_at,bc.last_success_at)
+		FROM olp.provider_billing_contexts bc WHERE bi.provider_id=$1::uuid AND bc.provider_id=bi.provider_id`, providerID); err != nil {
+		return err
+	}
+	_, err = tx.Exec(ctx, `UPDATE olp.provider_billing_imports SET
+		source_revision=(SELECT source_revision FROM olp.provider_billing_revisions
+			WHERE provider_id=$1::uuid AND source=$2 AND scope_digest=$3 AND covered_from IS NOT NULL
+			ORDER BY ordering_at DESC,period_start DESC LIMIT 1)
+		WHERE provider_id=$1::uuid`, providerID, source, digest[:])
+	return err
+}
+
+func rememberImportCoverage(ctx context.Context, tx pgx.Tx, providerID string) error {
+	_, err := tx.Exec(ctx, `UPDATE olp.provider_billing_contexts bc SET
+		imported_from=bi.imported_from,imported_through=bi.imported_through,last_success_at=bi.last_success_at
+		FROM olp.provider_billing_imports bi WHERE bi.provider_id=$1::uuid AND bc.provider_id=bi.provider_id`, providerID)
+	return err
 }

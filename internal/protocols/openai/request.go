@@ -29,14 +29,34 @@ func invalid(param, message string) error {
 
 // Parse validates the gateway envelope of one request document.
 func Parse(family wire.Format, data []byte) (*wire.Request, error) {
+	return ParseForModel(family, data, "")
+}
+
+func ParseForModel(family wire.Format, data []byte, model string) (*wire.Request, error) {
+	doc, err := ParseSource(data)
+	if err != nil {
+		return nil, err
+	}
+	return ParseDocumentForModel(family, doc, model)
+}
+
+func ParseSource(data []byte) (oif.Document, error) {
 	if trimmed := bytes.TrimSpace(data); len(trimmed) == 0 || trimmed[0] != '{' {
-		return nil, &wire.RequestError{Code: "invalid_json", Message: "The request body must be one JSON object."}
+		return oif.Document{}, &wire.RequestError{Code: "invalid_json", Message: "The request body must be one JSON object."}
 	}
 	doc, err := oif.ParseJSON(data, oif.Limits{})
 	if err != nil {
-		return nil, &wire.RequestError{Code: "invalid_json", Message: "The request body must be one JSON object."}
+		return oif.Document{}, &wire.RequestError{Code: "invalid_json", Message: "The request body must be one JSON object."}
 	}
-	return parseDocument(family, doc)
+	return doc, nil
+}
+
+func ParseDocument(family wire.Format, doc oif.Document) (*wire.Request, error) {
+	return ParseDocumentForModel(family, doc, "")
+}
+
+func ParseDocumentForModel(family wire.Format, doc oif.Document, model string) (*wire.Request, error) {
+	return parseDocument(family, doc, model)
 }
 
 func parseFields(family wire.Format, fields map[string]json.RawMessage) (*wire.Request, error) {
@@ -48,9 +68,9 @@ func parseFields(family wire.Format, fields map[string]json.RawMessage) (*wire.R
 	if err != nil {
 		return nil, err
 	}
-	return parseDocument(family, doc)
+	return parseDocument(family, doc, "")
 }
-func parseDocument(family wire.Format, doc oif.Document) (*wire.Request, error) {
+func parseDocument(family wire.Format, doc oif.Document, expectedModel string) (*wire.Request, error) {
 	// The members that carry the conversation are read from the document, so
 	// they are not copied into the fields.
 	var read []string
@@ -68,7 +88,7 @@ func parseDocument(family wire.Format, doc oif.Document) (*wire.Request, error) 
 	if err != nil {
 		return nil, err
 	}
-	if err := validateFields(r, fields, doc.Root()); err != nil {
+	if err := validateFields(r, fields, doc.Root(), expectedModel); err != nil {
 		return nil, err
 	}
 
@@ -81,14 +101,14 @@ func parseDocument(family wire.Format, doc oif.Document) (*wire.Request, error) 
 // are read from in place of the copies in fields: they are the same text, and a
 // prompt of 400 KB is not scanned again for each level of the conversation it is
 // nested in. It is the zero value for fields that are not those of a document.
-func validateFields(r *wire.Request, fields map[string]json.RawMessage, doc oif.Value) error {
+func validateFields(r *wire.Request, fields map[string]json.RawMessage, doc oif.Value, expectedModel string) error {
 	family := r.Family
 	r.Stream, r.IncludeUsage = false, false
 	model, ok := stringField(fields, "model")
 	if !ok {
 		return &wire.RequestError{Code: "missing_required_parameter", Message: "model must name a published route.", Param: "model"}
 	}
-	if !RouteSlug.MatchString(model) {
+	if (expectedModel == "" && !RouteSlug.MatchString(model)) || (expectedModel != "" && model != expectedModel) {
 		return invalid("model", "model must name a published route slug; provider-qualified names are not accepted.")
 	}
 	r.Route = model
@@ -309,10 +329,7 @@ func validateResponseInput(raw json.RawMessage, path string) error {
 	}
 	kind, _ := stringField(item, "type")
 	_, hasID := item["id"]
-	// ItemReference permits type to be omitted or null. Inline messages can
-	// omit type when they have no ID; replayed items with IDs need a type
-	// so they cannot be interpreted as references by the provider.
-	if kind == "item_reference" || (kind == "" && hasID) {
+	if wire.IsResponsesItemReference(kind, hasID) {
 		return &wire.RequestError{Code: "unsupported_stateful_reference", Message: "Input item references are not supported; send the full item inline.", Param: path}
 	}
 	if err := validateResponseFileReference(item, path); err != nil {
@@ -378,7 +395,7 @@ func validateResponseInputValue(item oif.Value, path string) error {
 	}
 	kind := memberText(item, "type")
 	_, hasID := item.Lookup("id")
-	if kind == "item_reference" || (kind == "" && hasID) {
+	if wire.IsResponsesItemReference(kind, hasID) {
 		return &wire.RequestError{Code: "unsupported_stateful_reference", Message: "Input item references are not supported; send the full item inline.", Param: path}
 	}
 	if err := validateResponseFileReferenceValue(item, path); err != nil {
@@ -581,7 +598,7 @@ func encodeFields(r *wire.Request, upstreamModel string, defaults map[string]jso
 	// reuse that result. Constructors, overlays and defaults still validate.
 	if len(defaults) > 0 || !r.ValidatedBy("openai") {
 		validation := *r
-		if err := validateFields(&validation, out, oif.Value{}); err != nil {
+		if err := validateFields(&validation, out, oif.Value{}, ""); err != nil {
 			return nil, err
 		}
 	}

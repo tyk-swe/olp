@@ -13,7 +13,7 @@ import (
 // fetchAnthropic reads the Anthropic organization cost report for a day
 // window. Amounts arrive as decimal strings in the currency's lowest unit —
 // cents — and convert to the stored amount with an exact decimal shift.
-func fetchAnthropic(ctx context.Context, client *http.Client, endpoint *string, key []byte, scope Scope, start, end time.Time) (map[string]map[string]lineSum, error) {
+func fetchAnthropic(ctx context.Context, client *http.Client, endpoint *string, key []byte, scope Scope, start, end time.Time) (map[string]map[lineKey]lineSum, error) {
 	if endpoint == nil {
 		return nil, failFetch("endpoint", errors.New("the provider has no endpoint"))
 	}

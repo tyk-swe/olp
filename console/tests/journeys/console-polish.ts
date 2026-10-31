@@ -129,6 +129,26 @@ export async function verifyConsolePolish(page: Page, info: TestInfo) {
           fullPage: true
         });
       }
+      if (path === '/providers' && width === 1440) {
+        await page.setViewportSize({ width: 1024, height: 900 });
+        const gateway = page.getByRole('navigation', {
+          name: 'Gateway',
+          exact: true
+        });
+        const lastGatewayLink = gateway.getByRole('link', {
+          name: 'Code mode',
+          exact: true
+        });
+        await gateway
+          .getByRole('link', { name: 'Routes', exact: true })
+          .focus();
+        await page.keyboard.press('Tab');
+        await expect(lastGatewayLink).toBeFocused();
+        await expect(lastGatewayLink).toBeInViewport({ ratio: 1 });
+        await page.keyboard.press('Enter');
+        await expect(page).toHaveURL(/\/code-mode$/);
+        await page.setViewportSize({ width, height: 900 });
+      }
     }
   }
 }

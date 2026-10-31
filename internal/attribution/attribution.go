@@ -6,11 +6,12 @@ import (
 )
 
 const (
-	Header      = "X-OLP-Attribution"
-	HeaderBytes = 4096
-	MaxKeys     = 4
-	MaxBytes    = 1024
-	KeyMax      = 8
+	Header            = "X-OLP-Attribution"
+	HeaderBytes       = 4096
+	MaxKeys           = 4
+	MaxBytes          = 1024
+	KeyMax            = 8
+	DelegationPairKey = "delegation_pair"
 )
 
 var (
@@ -27,7 +28,7 @@ func Validate(attribution map[string]string) error {
 		return &Error{Reason: "too_many_keys"}
 	}
 	for key, value := range attribution {
-		if !KeyPattern.MatchString(key) {
+		if key == DelegationPairKey || !KeyPattern.MatchString(key) {
 			return &Error{Reason: "invalid_key"}
 		}
 		if !ValuePattern.MatchString(value) {

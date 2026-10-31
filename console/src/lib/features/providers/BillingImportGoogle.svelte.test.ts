@@ -1,0 +1,214 @@
+import { QueryClient } from '@tanstack/svelte-query';
+import { flushSync, mount, unmount } from 'svelte';
+import { expect, it, onTestFinished, vi } from 'vitest';
+import * as api from './api/billing';
+import { ApiProblem } from '$lib/api/http';
+import type { Provider } from './api/providers';
+import BillingImportProbe from './test/BillingImportProbe.svelte';
+
+vi.mock('./api/billing', () => ({
+  getBillingImport: vi.fn(),
+  putBillingImport: vi.fn(),
+  deleteBillingImport: vi.fn(),
+  runBillingImport: vi.fn()
+}));
+
+it('validates, creates, runs, updates and removes a Google billing import', async () => {
+  const provider: Provider = {
+    id: 'provider',
+    etag: 'provider-etag',
+    name: 'Vertex',
+    configuration: { kind: 'vertex_ai', auth_mode: 'adc' },
+    state: 'draft',
+    connector_ready: true,
+    pending_activation: false,
+    model_count: 0,
+    enabled_model_count: 0,
+    capability_count: 0,
+    certified_capability_count: 0,
+    project_id: null,
+    project_name: null,
+    created_at: new Date(0).toISOString(),
+    updated_at: new Date(0).toISOString()
+  };
+  let current: api.BillingImport | null = null;
+  vi.mocked(api.getBillingImport).mockImplementation(async () => current);
+  vi.mocked(api.putBillingImport).mockImplementation(
+    async (_id, _etag, input) => {
+      current = {
+        provider_id: provider.id,
+        source: 'google_bigquery',
+        enabled: input.enabled ?? true,
+        scope: input.scope!,
+        credential_configured: true,
+        etag: 'billing-etag',
+        status: {
+          next_import_at: null,
+          last_import_at: null,
+          last_success_at: null,
+          last_error_code: 'status',
+          imported_from: '2025-01-01',
+          imported_through: '2025-01-31',
+          source_revision: '2025-02-01T12:34:56Z'
+        }
+      };
+      return current;
+    }
+  );
+  vi.mocked(api.runBillingImport).mockImplementation(async () => current!);
+  vi.mocked(api.deleteBillingImport).mockImplementation(async () => {
+    current = null;
+  });
+  vi.stubGlobal('confirm', () => true);
+  const host = document.createElement('div');
+  document.body.append(host);
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false } }
+  });
+  const component = mount(BillingImportProbe, {
+    target: host,
+    props: { client, provider }
+  });
+  onTestFinished(async () => {
+    await unmount(component);
+    client.clear();
+    host.remove();
+    vi.unstubAllGlobals();
+  });
+  const fill = (id: string, value: string) => {
+    const field = host.querySelector<
+      HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement
+    >(`#${id}`)!;
+    field.value = value;
+    field.dispatchEvent(
+      new Event(field.tagName === 'SELECT' ? 'change' : 'input', {
+        bubbles: true
+      })
+    );
+    flushSync();
+  };
+  const submit = () =>
+    host
+      .querySelector('form')!
+      .dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+  const click = (label: string) =>
+    [...host.querySelectorAll('button')]
+      .find((button) => button.textContent?.trim() === label)!
+      .click();
+  await vi.waitFor(() => expect(host.textContent).toContain('Create import'));
+  for (const [id, value] of [
+    ['billing-account', '123456-ABCDEF-123456'],
+    ['billing-project', 'example.com:billing-project'],
+    ['billing-dataset', 'billing_export'],
+    ['billing-table', 'detailed_export'],
+    ['billing-scope', 'example.com:workload-project'],
+    [
+      'billing-admin-key',
+      '{"type":"service_account","private_key":"fixture-key"}'
+    ]
+  ])
+    fill(id, value);
+  submit();
+  await vi.waitFor(() => expect(host.textContent).toContain('Run now'));
+  expect(host.textContent).toContain('2025-02-01T12:34:56Z');
+  expect(host.textContent).toContain('the vendor returned an error');
+  expect(host.textContent).toContain('2025-01-01');
+  expect(host.textContent).toContain('2025-01-31');
+  expect(api.putBillingImport).toHaveBeenLastCalledWith(
+    'provider',
+    'provider-etag',
+    {
+      enabled: true,
+      scope: {
+        billing_account_id: '123456-ABCDEF-123456',
+        bigquery_project_id: 'example.com:billing-project',
+        dataset_id: 'billing_export',
+        table_id: 'detailed_export',
+        project_ids: ['example.com:workload-project']
+      },
+      credential: {
+        auth_mode: 'service_account',
+        service_account: { type: 'service_account', private_key: 'fixture-key' }
+      }
+    },
+    expect.any(String)
+  );
+  expect(host.querySelector('#billing-admin-key')).toBeNull();
+  fill('billing-dataset', 'updated_export');
+  submit();
+  await vi.waitFor(() => expect(api.putBillingImport).toHaveBeenCalledTimes(2));
+  expect(api.putBillingImport).toHaveBeenLastCalledWith(
+    'provider',
+    'billing-etag',
+    expect.objectContaining({
+      scope: expect.objectContaining({ dataset_id: 'updated_export' })
+    }),
+    expect.any(String)
+  );
+  const second = vi.mocked(api.putBillingImport).mock.calls[1][2];
+  expect(second.credential).toBeUndefined();
+  await vi.waitFor(() =>
+    expect(host.textContent).toContain('Billing import saved.')
+  );
+
+  fill('billing-dataset', 'local-dataset');
+  fill('billing-auth-mode', 'service_account');
+  fill('billing-admin-key', '{"private_key":"local-key"}');
+  const remote = {
+    ...current!,
+    enabled: false,
+    etag: 'remote-etag',
+    scope: {
+      billing_account_id: '654321-FEDCBA-654321',
+      bigquery_project_id: 'remote-project',
+      dataset_id: 'remote_dataset',
+      table_id: 'remote_table',
+      project_ids: ['remote-workload']
+    }
+  };
+  current = remote;
+  vi.mocked(api.putBillingImport).mockRejectedValueOnce(
+    new ApiProblem({
+      title: 'Changed elsewhere',
+      status: 412,
+      type: 'https://openllmproxy.dev/problems/etag_mismatch'
+    })
+  );
+  submit();
+  await vi.waitFor(() =>
+    expect(host.textContent).toContain('This item changed elsewhere.')
+  );
+  click('Reload');
+  await vi.waitFor(() =>
+    expect(host.textContent).not.toContain('This item changed elsewhere.')
+  );
+  expect(host.querySelector<HTMLInputElement>('#billing-dataset')?.value).toBe(
+    'remote_dataset'
+  );
+  expect(
+    host.querySelector<HTMLSelectElement>('#billing-auth-mode')?.value
+  ).toBe('keep');
+  fill('billing-auth-mode', 'service_account');
+  expect(
+    host.querySelector<HTMLInputElement>('#billing-admin-key')?.value
+  ).toBe('');
+  fill('billing-auth-mode', 'keep');
+  submit();
+  await vi.waitFor(() =>
+    expect(api.putBillingImport).toHaveBeenLastCalledWith(
+      'provider',
+      'remote-etag',
+      { enabled: false, scope: remote.scope },
+      expect.any(String)
+    )
+  );
+  await vi.waitFor(() =>
+    expect(host.textContent).toContain('Billing import saved.')
+  );
+  click('Remove');
+  await vi.waitFor(() => expect(host.textContent).toContain('Create import'));
+  expect(api.deleteBillingImport).toHaveBeenCalledWith(
+    'provider',
+    'billing-etag'
+  );
+});

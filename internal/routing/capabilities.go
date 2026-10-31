@@ -3,7 +3,26 @@ package routing
 import (
 	"encoding/json"
 	"slices"
+
+	"github.com/tyk-swe/olp/internal/limits"
 )
+
+type WorkflowCapabilityTool struct {
+	ToolsetID      string  `json:"toolset_id"`
+	RevisionID     string  `json:"revision_id"`
+	Alias          string  `json:"alias"`
+	Name           string  `json:"name"`
+	Classification string  `json:"classification"`
+	UnitPrice      *string `json:"unit_price"`
+}
+
+type WorkflowCapability struct {
+	Enabled                bool                     `json:"enabled"`
+	DefaultToolsetsAllowed bool                     `json:"default_toolsets_allowed"`
+	Limits                 limits.WorkflowBounds    `json:"limits"`
+	CertifiedModes         []string                 `json:"certified_modes"`
+	Tools                  []WorkflowCapabilityTool `json:"tools"`
+}
 
 type RouteCapabilities struct {
 	Operations          []string          `json:"operations"`

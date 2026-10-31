@@ -140,3 +140,18 @@ func TestResponseEventUsageOwnsLifecycleCompleteness(t *testing.T) {
 
 // ResponseCreatedEvent and other lifecycle envelopes contain the
 // SDK's generic Response, including initial or replayed snapshots.
+
+func TestIncompleteToolResponsesPreserveFinishReasonAndUsage(t *testing.T) {
+	for reason, finish := range map[string]string{"max_output_tokens": "length", "content_filter": "content_filter"} {
+		t.Run(reason, func(t *testing.T) {
+			body := []byte(`{"id":"limited-tool","status":"incomplete","incomplete_details":{"reason":"` + reason + `"},"output":[{"type":"function_call","call_id":"call-read","name":"read_file","arguments":"{}"}],"usage":{"input_tokens":3,"output_tokens":2,"total_tokens":5}}`)
+			completion, err := DecodeResponse(body, "route")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if completion.FinishReason != finish || len(completion.ToolCalls) != 1 || completion.ToolCalls[0].ID != "call-read" || completion.Usage == nil || completion.Usage.TotalTokens != 5 || !completion.UsageComplete {
+				t.Fatalf("incomplete tool reply %+v", completion)
+			}
+		})
+	}
+}

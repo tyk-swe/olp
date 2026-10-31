@@ -79,10 +79,10 @@ test('manages real project pools, draft routes and publications without inferenc
       input: `
 INSERT INTO olp.providers(id,name,kind,state,configuration,etag,slots_etag,created_by,project_id)
 VALUES(:'provider','Fixture coding subscription','plugin','draft',
-  '{"kind":"plugin","auth_mode":"grant","endpoint":"https://fixture.invalid"}',
+  '{"kind":"plugin","auth_mode":"grant","endpoint":"https://fixture.invalid","profile_id":"codex-subscription","profile_revision":"fixture-digest"}',
   :'etag',:'slots_etag',:'owner',:'project');
-INSERT INTO olp.provider_credentials(id,provider_id,version,plugin_digest,principal,grant_facts)
-VALUES(:'credential',:'provider',1,'fixture-digest','fixture-principal','{}');
+INSERT INTO olp.provider_credentials(id,provider_id,version,plugin_digest,profile_id,principal,grant_facts)
+VALUES(:'credential',:'provider',1,'fixture-digest','codex-subscription','fixture-principal','{}');
 INSERT INTO olp.provider_grants(credential_id) VALUES(:'credential');
 `,
       stdio: ['pipe', 'pipe', 'pipe']
@@ -128,11 +128,31 @@ INSERT INTO olp.provider_grants(credential_id) VALUES(:'credential');
   expect(assignedPool.status).toBe(200);
   await page.getByRole('button', { name: 'Routes', exact: true }).click();
   await page.getByRole('button', { name: 'Create route', exact: true }).click();
+  await expect(
+    page.getByLabel('Translate Chat through Antigravity')
+  ).not.toBeChecked();
+  await page.evaluate(() => window.scrollTo(0, 0));
+  await page.screenshot({
+    path: info.outputPath('code-route-before-policy.png'),
+    fullPage: true
+  });
+  await page.getByLabel('Translate Chat through Antigravity').check();
   await page.getByLabel('Route slug').fill(`code-${suffix}`);
   await page.getByLabel('Pool', { exact: true }).selectOption(pool.id);
   await page
     .getByLabel('Native models')
     .fill('fixture-native-model\nfixture-other-model');
+  await page
+    .getByLabel('Rewrite model identifiers using exact aliases')
+    .check();
+  await page
+    .getByLabel('Exact model aliases')
+    .fill('team-code=fixture-native-model');
+  await page.evaluate(() => window.scrollTo(0, 0));
+  await page.screenshot({
+    path: info.outputPath('code-route-after-policy.png'),
+    fullPage: true
+  });
   await page.getByRole('button', { name: 'Save', exact: true }).click();
   await expect(page.getByText('Not published', { exact: true })).toBeVisible();
   page.once('dialog', (dialog) => dialog.accept());
@@ -159,12 +179,21 @@ INSERT INTO olp.provider_grants(credential_id) VALUES(:'credential');
   const route = routes.body.items[0];
   expect(route.models).toEqual(['fixture-native-model', 'fixture-other-model']);
   expect(route.enabled).toBe(true);
+  expect(route.model_rewriting).toBe(true);
+  expect(route.chat_to_antigravity).toBe(true);
+  const revisions = await manage<{ items: { route: CodeRoute }[] }>(
+    page,
+    'GET',
+    `/api/v1/code/routes/${route.id}/revisions`
+  );
+  expect(revisions.body.items[0].route.chat_to_antigravity).toBe(true);
+  expect(route.aliases).toEqual({ 'team-code': 'fixture-native-model' });
   expect(route.revision).toBe(1);
-  await expect(page.getByLabel('Client native model')).toHaveValue(
+  await expect(page.getByLabel('Client model')).toHaveValue(
     'fixture-native-model'
   );
   const model = 'fixture-other-model';
-  await page.getByLabel('Client native model').focus();
+  await page.getByLabel('Client model').focus();
   await Promise.all([
     page.waitForResponse((response) => {
       const url = new URL(response.url());
@@ -173,7 +202,7 @@ INSERT INTO olp.provider_grants(credential_id) VALUES(:'credential');
         url.searchParams.get('model') === model
       );
     }),
-    page.getByLabel('Client native model').selectOption(model)
+    page.getByLabel('Client model').selectOption(model)
   ]);
   await expect(page.getByLabel('Generated configuration')).toHaveValue(
     new RegExp(`model = "${model}"`)
@@ -181,7 +210,7 @@ INSERT INTO olp.provider_grants(credential_id) VALUES(:'credential');
   await expect(page.getByLabel('Generated configuration')).toHaveValue(
     new RegExp(`"X-OLP-Code-Model" = "${model}"`)
   );
-  await expect(page.getByLabel('Client native model')).toBeFocused();
+  await expect(page.getByLabel('Client model')).toBeFocused();
   const gatewayURL = 'https://gateway.example';
   await Promise.all([
     page.waitForResponse((response) => {
@@ -203,15 +232,19 @@ INSERT INTO olp.provider_grants(credential_id) VALUES(:'credential');
   await expect(
     page.getByRole('heading', { name: 'Published route revisions' })
   ).toBeVisible();
-  await expect(page.getByLabel('Client native model')).toHaveValue(model);
+  await expect(page.getByLabel('Client model')).toHaveValue(model);
   expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
   await page.setViewportSize({ width: 390, height: 844 });
+  await page.evaluate(() => window.scrollTo(0, 0));
   await page.screenshot({
     path: info.outputPath('code-client-model-mobile.png'),
     fullPage: true
   });
   await page.setViewportSize({ width: 1280, height: 720 });
   await page.getByRole('button', { name: 'Edit draft' }).click();
+  await expect(
+    page.getByLabel('Translate Chat through Antigravity')
+  ).toBeChecked();
   await expect(page.getByLabel('Maximum request body (bytes)')).toBeVisible();
   await page.getByLabel('Native models').fill('unsaved-native-model');
   await page
@@ -220,9 +253,27 @@ INSERT INTO olp.provider_grants(credential_id) VALUES(:'credential');
   await expect(page.getByLabel('Native models')).toHaveValue(
     'unsaved-native-model'
   );
-  await expect(page.getByLabel('Client native model')).toHaveValue(model);
   await page.getByRole('button', { name: 'Save', exact: true }).click();
-  await expect(page.getByLabel('Client native model')).toHaveValue(model);
+  await expect(page.getByRole('alert')).toContainText(
+    'targeting a listed native model'
+  );
+  await page
+    .getByLabel('Exact model aliases')
+    .fill('team-code=unsaved-native-model');
+  await expect(page.getByLabel('Client model')).toHaveValue(model);
+  const [savedDraft] = await Promise.all([
+    page.waitForResponse(
+      (response) =>
+        response.request().method() === 'PUT' &&
+        new URL(response.url()).pathname.endsWith(`/code/routes/${route.id}`)
+    ),
+    page.getByRole('button', { name: 'Save', exact: true }).click()
+  ]);
+  expect(savedDraft.status()).toBe(200);
+  expect((await savedDraft.json()).aliases).toEqual({
+    'team-code': 'unsaved-native-model'
+  });
+  await expect(page.getByLabel('Client model')).toHaveValue(model);
   await expect(page.getByLabel('Generated configuration')).toHaveValue(
     new RegExp(`"X-OLP-Code-Model" = "${model}"`)
   );
@@ -242,7 +293,7 @@ INSERT INTO olp.provider_grants(credential_id) VALUES(:'credential');
   ]);
   expect(publication.status()).toBe(200);
   expect(configuration.status()).toBe(200);
-  await expect(page.getByLabel('Client native model')).toHaveValue(
+  await expect(page.getByLabel('Client model')).toHaveValue(
     'unsaved-native-model'
   );
   await expect(page.getByLabel('Generated configuration')).toHaveValue(
@@ -259,3 +310,30 @@ function uuidv7(): string {
   const hex = bytes.toString('hex');
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
+
+test('requires a new configuration plan after changing code destination bindings', async ({
+  page
+}) => {
+  await signInGatewayOwner(page);
+  await page.goto('/settings');
+  const promotion = page.getByRole('region', {
+    name: 'Configuration promotion'
+  });
+  await promotion
+    .getByLabel('Artifact', { exact: true })
+    .fill(
+      JSON.stringify({ api_version: 'openllmproxy.dev/config/v2', code: {} })
+    );
+  await promotion.getByRole('button', { name: 'Plan', exact: true }).click();
+  await expect(
+    promotion.getByRole('button', { name: 'Apply', exact: true })
+  ).toBeVisible();
+  await promotion.getByLabel('Code destination bindings').fill('{}');
+  await expect(
+    promotion.getByRole('button', { name: 'Apply', exact: true })
+  ).toHaveCount(0);
+  await promotion.getByRole('button', { name: 'Plan', exact: true }).click();
+  await expect(
+    promotion.getByRole('button', { name: 'Apply', exact: true })
+  ).toBeVisible();
+});

@@ -270,10 +270,18 @@ func (s *Server) simulateDraft(r *http.Request, p access.Principal) (access.Repl
 		}
 		targets = append(targets, map[string]any{"target_id": decision.TargetID, "provider_id": decision.ProviderID, "provider_name": name, "provider_model": decision.UpstreamModel, "priority": decision.Priority, "eligible": decision.Eligible, "attempt": decision.Attempt, "reason": decision.Reason, "decision": decision})
 	}
-	return access.OK(map[string]any{
-		"deterministic_seed": input.Seed, "operation": input.Operation, "surface": input.Surface, "mode": input.Mode, "targets": targets,
-		"selectors": named.Selectors, "affinity": named.Affinity, "legs": explained.Legs[1:], "fallbacks": explained.Fallbacks,
-	}), nil
+	return access.OK(struct {
+		Seed             string                      `json:"deterministic_seed"`
+		Operation        string                      `json:"operation"`
+		Surface          string                      `json:"surface"`
+		Mode             string                      `json:"mode"`
+		Targets          []map[string]any            `json:"targets"`
+		GatewayExecution *routing.WorkflowCapability `json:"gateway_execution,omitempty"`
+		Selectors        []routing.SelectorOutcome   `json:"selectors"`
+		Affinity         *simulatedAffinity          `json:"affinity"`
+		Legs             []simulatedLeg              `json:"legs"`
+		Fallbacks        []routing.FallbackStep      `json:"fallbacks"`
+	}{input.Seed, input.Operation, input.Surface, input.Mode, targets, named.GatewayExecution, named.Selectors, named.Affinity, explained.Legs[1:], explained.Fallbacks}), nil
 }
 
 func isNoRows(err error) bool { return errors.Is(err, pgx.ErrNoRows) }

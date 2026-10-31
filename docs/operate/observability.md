@@ -1,8 +1,13 @@
 # Observability
 
-Configure content-free exports, metrics, traces and notifications here. Use
-[Operations](operations.md) for incidents and recovery, [FinOps](finops.md) for
-FOCUS/metering/invoice formats, and [Console](../use/console.md) for the controls.
+Observability covers OLP's content-free exports, metrics, traces and
+notifications. Ordinary request facts and accounting records do not contain
+prompts, responses or credentials. Payload capture is a separate owner-enabled
+feature with the explicit storage contract described below.
+
+Use [Operations](operations.md) during incidents and recovery. Use
+[FinOps](finops.md) for FOCUS, metering and invoice formats, and
+[Console](../use/console.md) for the browser controls.
 
 | API | Purpose | Delivery |
 | --- | --- | --- |
@@ -287,11 +292,15 @@ to production traces or incident bundles.
 
 ## Notifications
 
-Manage destinations/rules/delivery metadata under `/api/v1/notifications`.
-Destination types: webhook, Slack, Teams, Discord, PagerDuty and SMTP email.
-Secrets are sealed/write-only; URL changes require explicit replacement/removal.
-Webhook timeout is five seconds, typed channels fifteen; PagerDuty needs 202.
-Email requires SMTPS/STARTTLS. Egress is checked at creation and every dial.
+Notification destinations, rules and delivery metadata are managed under the
+`/api/v1/notifications` endpoint family, including `destinations`, `rules` and
+`deliveries`. Supported destination types are webhook, Slack, Teams, Discord,
+PagerDuty and SMTP email.
+
+Destination secrets are sealed and write-only. A destination URL changes only
+through explicit replacement or removal. Webhooks time out after five seconds,
+typed channels after fifteen seconds, and PagerDuty must return 202. Email
+requires SMTPS or STARTTLS. Egress is checked at creation and on every dial.
 No channel follows redirects; refused redirects record `redirect`. Email is
 sent as quoted-printable text. SMTP replies record `smtp_4xx`/`smtp_5xx`.
 

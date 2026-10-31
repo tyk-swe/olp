@@ -132,6 +132,13 @@ func (v Value) Kind() Kind {
 	}
 	return v.data.nodes[v.index].kind
 }
+func (v Value) Bounds() (int, int) {
+	if v.data == nil {
+		return 0, 0
+	}
+	return v.data.nodes[v.index].start, v.data.nodes[v.index].end
+}
+
 func (v Value) Raw() string {
 	if v.data == nil {
 		return ""

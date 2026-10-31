@@ -1,11 +1,11 @@
 # Amazon SageMaker AI connector
 
-The `sagemaker` provider kind serves chat generation from SageMaker AI
-real-time endpoints through their
+The `sagemaker` provider kind serves chat generation from a SageMaker AI
+real-time endpoint through its
 [OpenAI-compatible path](https://docs.aws.amazon.com/sagemaker/latest/dg/realtime-endpoints-openai-compatible.html).
-The endpoint's container must serve `/v1/chat/completions` and stream it as
-server-sent events, as the SageMaker vLLM and SGLang containers and any custom
-container implementing that path and `/ping` do.
+The endpoint container must serve `/v1/chat/completions`, stream responses as
+server-sent events and answer `/ping`. SageMaker's vLLM and SGLang containers
+meet that contract, as can a custom container that implements the same paths.
 
 ## Models
 

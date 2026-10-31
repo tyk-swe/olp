@@ -1,8 +1,9 @@
 # Architecture and gateway execution
 
-The Go module owns production code under `internal/` and the public provider
-plugin SDK under `sdk/`; `cmd/olp` starts the CLI.
-The console mirrors feature ownership under `console/src/lib/features/`.
+This guide maps OLP's feature ownership and explains how a request moves through
+the gateway. Production Go code lives under `internal/`, the public provider
+plugin SDK lives under `sdk/`, and `cmd/olp` starts the binary. The console
+mirrors the same feature boundaries under `console/src/lib/features/`.
 PostgreSQL migrations live under `internal/database/migrations/`.
 
 | Area | Backend and console owner |
@@ -107,9 +108,14 @@ multipart writers and both duplex tasks before terminal accounting.
 ## Code-mode forwarding boundary
 
 [Code mode](../use/code-mode.md) forwards `/code/{slug}` native models/bodies
-without ordinary translation, rewriting or inference retries. `Snapshot.CodeRoutes`
-and `CodeConnection` freeze route/provider pairs; missing configuration refuses
-until republish, while pool/key/grant eligibility remains live.
+without ordinary translation, rewriting or inference retries by default. An
+explicit published initial recovery policy permits bounded additional attempts
+only after complete supported HTTP rejection and positive portable-state proof.
+`Snapshot.CodeRoutes` and `CodeConnection` freeze route/provider pairs. Missing
+configuration refuses until republish, while pool/key/grant eligibility remains
+live. `codewire.PortableInitialRequest` owns the shared complete-request proof
+for initial recovery. Unknown or account-owned state remains on its original
+account, and the native first dispatch remains unchanged.
 
 | Owner | Contract in | Invariant |
 | --- | --- | --- |
@@ -117,7 +123,7 @@ until republish, while pool/key/grant eligibility remains live.
 | `codeadapter`, fed by `codeplans` and `codexauth` | subscription profiles, client/upstream paths, operations, transports, conversation identity, credentials and observation rules | families sharing a client path agree on semantics, checked by `codeadapter.Validate` during snapshot validation |
 | `routing`, installed by `runtime` | endpoint and model eligibility compiled from the frozen revision | a failed compile leaves the previous release serving |
 | `codewire`, `codexwire` | native request classification and response observation on copies | parsing never reserializes the forwarded payload |
-| `gateway/code_attempt.go`, `resources.CodeStore`, `limits` | dispatch, durable conversation pinning, admission and settlement, hard token budgets | one `MarkDispatched`, no silent account switching, no replay after dispatch |
+| `gateway/code_attempt.go`, `resources.CodeStore`, `limits` | dispatch, durable conversation pinning, admission and settlement, hard token budgets | one `MarkDispatched` per attributed attempt, atomic initial rebinding only after proven nonexecution, no replay of accepted or ambiguous work |
 | `codeclient`, `routes`, `providers.CodeAuthorizer` | generated client configuration, project authority, upstream credential construction | generated configuration never contains an OLP or vendor key |
 
 `gateway/code_attempt.go` shares dispatch, observations, settlement and workload

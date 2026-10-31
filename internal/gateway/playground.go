@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/protocols/wire"
 	"github.com/tyk-swe/olp/internal/routing"
 
@@ -186,11 +187,51 @@ func (in *playgroundRequest) validate(streaming bool) error {
 	return nil
 }
 
-func (in *playgroundRequest) parse(operation, mode string) (*wire.Request, wire.Format, error) {
+func (in *playgroundRequest) parse(operation, mode string, p *Playground, x *call, principal access.Principal) (parsedRequest, error) {
 	if in.Request != nil {
+		family := protocols.WireFamily(in.surface(), "", wire.Chat)
+		if family == wire.Gemini && mode == "streaming" {
+			family = wire.GeminiStream
+		}
+		doc, err := protocols.ParseSource(family, in.Request)
+		if err != nil {
+			e := requestError(err)
+			return parsedRequest{}, access.Fail(e.Status, e.Code, e.Message)
+		}
+		if operation == "generation" {
+			if family == wire.Chat {
+				if _, _, _, found := promptReference(doc, wire.Chat); !found {
+					if _, _, _, found := promptReference(doc, wire.Responses); found {
+						family = wire.Responses
+					}
+				}
+			}
+			if _, _, _, found := promptReference(doc, family); found {
+				bindings := []oif.Change{}
+				if geminiPromptFamily(family) {
+					for _, name := range []string{"model", "stream"} {
+						if _, ok := doc.Root().Lookup(name); ok {
+							bindings = append(bindings, oif.Change{Pointer: "/" + name, Remove: true, Origin: oif.IdentityBinding, Reason: "playground route and mode binding"})
+						}
+					}
+				} else {
+					model, _ := json.Marshal(in.Model)
+					stream, _ := json.Marshal(mode == "streaming")
+					bindings = []oif.Change{
+						{Pointer: "/model", Value: string(model), Origin: oif.IdentityBinding, Reason: "playground route binding"},
+						{Pointer: "/stream", Value: string(stream), Origin: oif.TransportOption, Reason: "playground mode binding"},
+					}
+				}
+				parsed, e := p.Gateway.parsePromptDocument(x, family, doc, in.Model, p.authorize(principal), bindings)
+				if e != nil {
+					return parsedRequest{}, access.Fail(e.Status, e.Code, e.Message)
+				}
+				return parsed, nil
+			}
+		}
 		fields := map[string]json.RawMessage{}
 		if err := json.Unmarshal(in.Request, &fields); err != nil || fields == nil {
-			return nil, "", access.Invalid("request", "request must be a JSON object")
+			return parsedRequest{}, access.Invalid("request", "request must be a JSON object")
 		}
 		if in.surface() == "gemini" {
 			delete(fields, "model")
@@ -202,19 +243,18 @@ func (in *playgroundRequest) parse(operation, mode string) (*wire.Request, wire.
 		data, _ := json.Marshal(fields)
 		parsed, err := protocols.SimulationRequest(data, operation, in.surface(), mode, in.Model)
 		if err != nil {
-			return nil, "", access.Fail(http.StatusUnprocessableEntity, "validation_failed", err.Error())
+			return parsedRequest{}, access.Fail(http.StatusUnprocessableEntity, "validation_failed", err.Error())
 		}
-		return parsed, parsed.Family, nil
+		return parsedRequest{request: parsed, decoded: int64(len(data))}, nil
 	}
 	body, err := in.chatBody()
 	if err != nil {
-		return nil, "", access.Invalid("input", "the request could not be encoded")
+		return parsedRequest{}, access.Invalid("input", "the request could not be encoded")
 	}
 	parsed, err := openai.Parse(wire.Chat, body)
 	if err != nil {
-		return nil, "", access.Fail(http.StatusUnprocessableEntity, "validation_failed", err.Error())
+		return parsedRequest{}, access.Fail(http.StatusUnprocessableEntity, "validation_failed", err.Error())
 	}
-	family := wire.Chat
 	if in.Surface != nil && (*in.Surface == "anthropic" || *in.Surface == "gemini") {
 		kind := *in.Surface
 		if in.MaxOutputTokens == nil {
@@ -225,15 +265,14 @@ func (in *playgroundRequest) parse(operation, mode string) (*wire.Request, wire.
 		}
 		encoded, encodedWire, e := protocols.Encode(parsed, kind, kind, in.Model, nil)
 		if e != nil {
-			return nil, "", access.Invalid("input", e.Error())
+			return parsedRequest{}, access.Invalid("input", e.Error())
 		}
 		parsed, e = protocols.Parse(encodedWire, encoded, in.Model)
 		if e != nil {
-			return nil, "", access.Invalid("input", e.Error())
+			return parsedRequest{}, access.Invalid("input", e.Error())
 		}
-		family = encodedWire
 	}
-	return parsed, family, nil
+	return parsedRequest{request: parsed}, nil
 }
 
 func (p *Playground) call(r *http.Request, principal access.Principal, parsed *wire.Request, family wire.Format, preferences *routing.Preferences) *call {
@@ -270,12 +309,19 @@ func (p *Playground) handle(r *http.Request, principal access.Principal) (access
 	if err := in.validate(false); err != nil {
 		return access.Reply{}, err
 	}
-	parsed, family, err := in.parse(in.operation(), "unary")
+	s := p.Gateway
+	x := p.call(r, principal, nil, "", in.Routing)
+	if in.Request != nil {
+		x.request.body = &measuredBody{decoded: int64(len(in.Request))}
+	}
+	parsed, err := in.parse(in.operation(), "unary", p, x, principal)
 	if err != nil {
 		return access.Reply{}, err
 	}
-	s := p.Gateway
-	x := p.call(r, principal, parsed, family, in.Routing)
+	x.generation.parsed, x.family, x.prompt = parsed.request, parsed.request.Family, parsed.reference
+	if x.request.body != nil {
+		x.request.body.decoded = max(x.request.body.decoded, parsed.decoded)
+	}
 	if e := s.prepare(r.Context(), x, p.authorize(principal)); e != nil {
 		x.failure = e
 		s.finish(x, nil, e.Status)
@@ -412,12 +458,19 @@ func (p *Playground) stream(w http.ResponseWriter, r *http.Request, principal ac
 	if err := in.validate(true); err != nil {
 		return err
 	}
-	parsed, family, err := in.parse("generation", "streaming")
+	s := p.Gateway
+	x := p.call(r, principal, nil, "", in.Routing)
+	if in.Request != nil {
+		x.request.body = &measuredBody{decoded: int64(len(in.Request))}
+	}
+	parsed, err := in.parse("generation", "streaming", p, x, principal)
 	if err != nil {
 		return err
 	}
-	s := p.Gateway
-	x := p.call(r, principal, parsed, family, in.Routing)
+	x.generation.parsed, x.family, x.prompt = parsed.request, parsed.request.Family, parsed.reference
+	if x.request.body != nil {
+		x.request.body.decoded = max(x.request.body.decoded, parsed.decoded)
+	}
 	if e := s.prepare(r.Context(), x, p.authorize(principal)); e != nil {
 		x.failure = e
 		s.finish(x, nil, e.Status)

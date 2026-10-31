@@ -6,24 +6,24 @@ import (
 	"github.com/shopspring/decimal"
 )
 
-// lineSum accumulates one (day, line_item) across project/workspace groups
-// and across pages.
 type lineSum struct {
-	amount   decimal.Decimal
+	amount decimal.Decimal
+}
+
+type lineKey struct {
+	item     string
 	currency string
 }
 
-type reportAccumulator map[string]map[string]lineSum
+type reportAccumulator map[string]map[lineKey]lineSum
 
 // ensureDay retains empty buckets, including days whose rows are all filtered.
 func (r reportAccumulator) ensureDay(day string) {
 	if r[day] == nil {
-		r[day] = map[string]lineSum{}
+		r[day] = map[lineKey]lineSum{}
 	}
 }
 
-// add chooses the first nonempty vendor label and keeps the last nonempty
-// currency, preserving the report's order across pages.
 func (r reportAccumulator) add(day string, amount decimal.Decimal, currency string, labels ...*string) {
 	r.ensureDay(day)
 	lineItem := "unspecified"
@@ -33,12 +33,8 @@ func (r reportAccumulator) add(day string, amount decimal.Decimal, currency stri
 			break
 		}
 	}
-	sum := r[day][lineItem]
-	sum.amount = sum.amount.Add(amount)
-	if currency != "" {
-		sum.currency = upperCurrency(currency)
-	}
-	r[day][lineItem] = sum
+	key := lineKey{item: lineItem, currency: upperCurrency(currency)}
+	r[day][key] = lineSum{amount: r[day][key].amount.Add(amount)}
 }
 
 // truncateLineItem bounds a vendor label to the stored column's 256

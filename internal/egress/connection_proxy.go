@@ -20,7 +20,7 @@ import (
 )
 
 type connectionDialer struct {
-	policy                     Policy
+	policy, targetPolicy       Policy
 	connectTimeout, tlsTimeout time.Duration
 	proxy                      *url.URL
 	roots                      *x509.CertPool
@@ -40,7 +40,7 @@ func (d connectionDialer) DialContext(ctx context.Context, network, address stri
 	if err != nil {
 		return nil, errors.New("provider connection address is invalid")
 	}
-	addresses, err := d.policy.Resolve(ctx, host)
+	addresses, err := d.targetPolicy.Resolve(ctx, host)
 	if err != nil {
 		return nil, err
 	}

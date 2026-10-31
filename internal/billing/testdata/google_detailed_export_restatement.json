@@ -1,0 +1,101 @@
+[
+  {
+    "billing_account_id": "123456-ABCDEF-123456",
+    "service": {
+      "id": "C7E2-9256-1C43"
+    },
+    "sku": {
+      "id": "123456-ABCDEF-654321"
+    },
+    "project": {
+      "id": "workload-project"
+    },
+    "currency": "USD",
+    "cost_type": "regular",
+    "usage_start_time": "2025-01-20T12:00:00Z",
+    "invoice": {
+      "month": "202502"
+    },
+    "cost": -0.1,
+    "credits": [
+      {
+        "type": "DISCOUNT",
+        "amount": -0.05
+      },
+      {
+        "type": "PROMOTION",
+        "amount": -0.025
+      }
+    ],
+    "adjustment_info": {
+      "id": "sensitive-modification-id",
+      "type": "USAGE_CORRECTION",
+      "mode": "PARTIAL_CORRECTION"
+    }
+  },
+  {
+    "billing_account_id": "123456-ABCDEF-123456",
+    "service": {
+      "id": "6F81-5844-456A"
+    },
+    "sku": {
+      "id": "123456-ABCDEF-654321"
+    },
+    "project": {
+      "id": "workload-project"
+    },
+    "currency": "USD",
+    "cost_type": "adjustment",
+    "usage_start_time": "2025-01-20T12:00:00Z",
+    "invoice": {
+      "month": "202502"
+    },
+    "cost": -900,
+    "credits": [
+      {
+        "type": "DISCOUNT",
+        "amount": -800
+      }
+    ]
+  },
+  {
+    "billing_account_id": "123456-ABCDEF-123456",
+    "service": {
+      "id": "C7E2-9256-1C43"
+    },
+    "sku": {
+      "id": "PREVIOUS-MONTH"
+    },
+    "project": {
+      "id": "workload-project"
+    },
+    "currency": "USD",
+    "cost_type": "adjustment",
+    "usage_start_time": "2024-12-10T12:00:00Z",
+    "invoice": {
+      "month": "202502"
+    },
+    "cost": -0.2,
+    "credits": []
+  },
+  {
+    "billing_account_id": "123456-ABCDEF-123456",
+    "service": {
+      "id": "C7E2-9256-1C43"
+    },
+    "sku": {
+      "id": "HISTORICAL-CORRECTION"
+    },
+    "project": {
+      "id": "workload-project"
+    },
+    "currency": "USD",
+    "cost_type": "adjustment",
+    "usage_start_time": "2025-01-20T12:00:00Z",
+    "invoice": {
+      "month": "202502"
+    },
+    "cost": -0.3,
+    "credits": []
+  }
+]

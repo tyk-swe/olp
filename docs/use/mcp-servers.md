@@ -1,10 +1,14 @@
 # Upstream MCP server registration
 
-Register project-owned upstream servers through `/api/v1/mcp-servers`. This API
-is separate from the [generated management MCP endpoint](../operate/automation.md#management-mcp).
-Reads require management `read` and project visibility; mutations require
-`configure` and project-change authority. Installation-wide configuration
-promotion retains those checks. Up to 128 active registrations are permitted.
+Project-owned upstream MCP servers are registered through `/api/v1/mcp-servers`.
+This consumer tool registry is separate from the
+[generated management MCP endpoint](../operate/automation.md#management-mcp) that
+administers OLP itself.
+
+Reads require management `read` authority and project visibility. Mutations
+require `configure` authority and permission to change the project. The same
+checks apply during installation-wide configuration promotion. An installation
+can retain up to 128 active registrations.
 
 Create requires a project UUID, name, an explicit `streamable_http` or `sse`
 transport, endpoint and enabled flag. PUT replaces editable metadata with an
@@ -206,9 +210,11 @@ It is not the attempt identifier. The `attempt_id` in responses and the
 gateway management record for one dispatched attempt, while the caller call
 identifier is the retry key the caller picks and reuses. The identifier
 stays bound to the calling key, the pinned toolset revision, the tool and a
-keyed digest of the exact argument bytes for 24 hours, and only that digest
-is stored. Argument binding is byte exact, so the same JSON value written
-with different key order or spacing counts as a different call. Repeating
+keyed digest of the exact argument bytes for 24 hours. Delegated calls also
+bind the agent and its delegation pair, so a renewed credential for the same
+pair can retry the call without sharing another agent's result. Only the
+argument digest is stored. Argument binding is byte exact, so the same JSON
+value written with different key order or spacing counts as a different call. Repeating
 the same call with the same identifier never runs the tool again. A repeat
 returns the retained result while it is still held in gateway memory, and
 after that it answers `result_not_retained` with the original attempt and
@@ -263,10 +269,10 @@ carry the pinned `unit_price`, a `pricing_state` of `priced`, `free` or
 and `per_key_calls_per_minute` and `per_key_max_concurrency` bound each key
 against the server. Both pairs default to 60 calls per minute and 8
 concurrent calls and stay inside installation limits of 60000 calls per
-minute and 1024 concurrent calls. The effective per-key limit is the tighter
-of the server per-key value and the key's own request or concurrency limit,
-so a key limit can only tighten the per-key pair and never loosen it. Calls
-past either limit refuse with `tool_rate_limited` before anything is reserved
+minute and 1024 concurrent calls. The key's own request and concurrency limits
+also apply across all tool servers and inference, together with any applicable
+budget-group and delegated-agent limits. Calls past a limit refuse with
+`tool_rate_limited` before anything is reserved
 or dispatched, a call that never dispatches gives its rate allowance back,
 and only a dispatched call consumes it. Pricing and limits round trip through
 the management API, the console pricing form on the agent publications
@@ -304,7 +310,7 @@ The PKCE, device, refresh and isolation behavior is exercised against the reposi
 
 A server using personal OAuth can also require a delegated bearer for downstream calls. In Personal tool grants, configure the server's HTTPS issuer and intended audience, then supply a PKCS8 Ed25519 private key. The installation seals this key separately from grant tokens. The API accepts `delegation` metadata and a write-only `delegation_private_key`; later updates can omit the key to preserve it. Changing delegation creates a new server revision that must be published in the toolset.
 
-The shared consumer path first checks live publication authority and the caller's exact personal grant. It then signs a short-lived JWT for the configured audience. Its subject identifies the authenticated key or verified workload end user, with server and project claims. Header labels cannot choose another individual's subject. A different audience rejects the token. The upstream must trust the configured public key, issuer and audience. This is fixture-qualified delegated signing, not a general identity-provider discovery service.
+The shared consumer path first checks live publication authority and the caller's exact personal grant. It then signs a short-lived JWT for the configured audience. Its subject identifies the authenticated key, verified workload end user or delegated agent, with server and project claims. Delegated agents use `agent:<agent UUID>`, the signed token expires no later than their delegation, and the personal grant remains bound to the consenting key. Header labels cannot choose another subject. A different audience rejects the token. The upstream must trust the configured public key, issuer and audience. This is fixture-qualified delegated signing, not a general identity-provider discovery service.
 
 Tool calls show bounded decisions for registered-server security, personal-grant permission and delegated signing. They do not store signed tokens or their claims. Portable configuration includes issuer and audience but excludes signing material. Install the signing key locally before importing delegation metadata to another installation. Revoking the personal grant, revoking caller authority or disabling the registered server prevents new execution. An empty delegated issuer in the console disables signing, while existing execution history remains readable.
 

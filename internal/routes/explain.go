@@ -3,6 +3,7 @@ package routes
 import (
 	"cmp"
 	"context"
+	"encoding/json"
 	"errors"
 	"slices"
 	"sync"
@@ -11,7 +12,10 @@ import (
 	"github.com/tyk-swe/olp/internal/routing"
 
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/limits"
+	"github.com/tyk-swe/olp/internal/mcp"
 	"github.com/tyk-swe/olp/internal/media"
+	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/operationregistry"
 	"github.com/tyk-swe/olp/internal/operations/tokenization/estimate"
 	"github.com/tyk-swe/olp/internal/protocols"
@@ -49,11 +53,12 @@ type simulation struct {
 
 // simulatedLeg is one route the request plans on.
 type simulatedLeg struct {
-	Route     string                    `json:"route"`
-	Via       *string                   `json:"via"`
-	Selectors []routing.SelectorOutcome `json:"selectors"`
-	Affinity  *simulatedAffinity        `json:"affinity"`
-	Decisions []inspectedDecision       `json:"decisions"`
+	Route            string                      `json:"route"`
+	Via              *string                     `json:"via"`
+	Selectors        []routing.SelectorOutcome   `json:"selectors"`
+	Affinity         *simulatedAffinity          `json:"affinity"`
+	Decisions        []inspectedDecision         `json:"decisions"`
+	GatewayExecution *routing.WorkflowCapability `json:"gateway_execution,omitempty"`
 }
 
 // simulatedAffinity says whether the request carried the session key the route
@@ -137,13 +142,22 @@ func (s *Server) leg(m *simulation, slug, via string) (simulatedLeg, routing.Pla
 	if err != nil {
 		return simulatedLeg{}, routing.Plan{}, false, err
 	}
+	named := m.snapshot.Routes[cmp.Or(m.named, slug)]
+	workflowReason := s.workflowInspectionReason(m, named, route, key, parsed)
+	workflowCapability := s.workflowInspectionCapability(m, named, route, key, parsed)
 	if input.Operation == "generation" {
 		if err = inspectionClientContract(input.ClientContract, &semantic, s.Access.Keys != nil); err != nil {
 			return simulatedLeg{}, routing.Plan{}, false, err
 		}
 	}
+	workflow := input.Operation == "generation" && named.ToolExecution == "gateway"
+	inspectionRequest, err := workflowInspectionRequest(parsed, workflow)
+	if err != nil {
+		return simulatedLeg{}, routing.Plan{}, false, access.Invalid("request", "The workflow controls could not be processed.")
+	}
 	counted := newSimulatedDemand(parsed, input, m.demand)
-	accept, effective, inspections := inspectionAccept(route, parsed, semantic, counted, &m.inspectionBudget)
+	inspected, effective, inspections, effectiveRequests := inspectionAccept(route, inspectionRequest, semantic, counted, &m.inspectionBudget, workflow)
+	accept := workflowInspectionAccept(workflow, inspected, effectiveRequests, m, workflowCapability)
 	if unary != nil {
 		accept, effective, inspections = inspectionUnaryAccept(route, cmp.Or(m.named, slug), *unary, semantic, input.ClientContract, m.demand, &m.inspectionBudget)
 	}
@@ -259,9 +273,11 @@ func (s *Server) leg(m *simulation, slug, via string) (simulatedLeg, routing.Pla
 		return simulatedLeg{}, routing.Plan{}, false, err
 	}
 	applyInspectionKeyReason(plan.Decisions, key.reason)
+	applyInspectionKeyReason(plan.Decisions, workflowReason)
 	leg := simulatedLeg{
 		Route: slug, Selectors: plan.Selectors,
-		Decisions: inspectedDecisions(plan.Decisions, route, parsed != nil || unary != nil || mediaRequest != nil, inspections, counted.estimates),
+		GatewayExecution: workflowCapability,
+		Decisions:        inspectedDecisions(plan.Decisions, route, parsed != nil || unary != nil || mediaRequest != nil, inspections, counted.estimates, workflowCapability),
 	}
 	if leg.Selectors == nil {
 		leg.Selectors = []routing.SelectorOutcome{}
@@ -275,7 +291,124 @@ func (s *Server) leg(m *simulation, slug, via string) (simulatedLeg, routing.Pla
 			leg.Affinity.Label = &affinity.Label
 		}
 	}
-	return leg, plan, key.reason == "", nil
+	return leg, plan, key.reason == "" && workflowReason == "", nil
+}
+
+func workflowInspectionRequest(request *wire.Request, workflow bool) (*wire.Request, error) {
+	if !workflow || request == nil {
+		return request, nil
+	}
+	toolsets := oif.Change{Pointer: oif.Pointer("", "olp_toolsets"), Remove: true, Reason: "gateway toolset selection"}
+	limits := oif.Change{Pointer: oif.Pointer("", "olp_run_limits"), Remove: true, Reason: "gateway workflow bounds"}
+	switch {
+	case len(request.Field("olp_toolsets")) > 0 && len(request.Field("olp_run_limits")) > 0:
+		return request.WithResourceBindings(toolsets, limits)
+	case len(request.Field("olp_toolsets")) > 0:
+		return request.WithResourceBindings(toolsets)
+	case len(request.Field("olp_run_limits")) > 0:
+		return request.WithResourceBindings(limits)
+	default:
+		return request, nil
+	}
+}
+
+func workflowInspectionAccept(workflow bool, prior func(routing.Provider, routing.Target) error, requests map[string]*wire.Request, m *simulation, capability *routing.WorkflowCapability) func(routing.Provider, routing.Target) error {
+	if !workflow {
+		return prior
+	}
+	return func(provider routing.Provider, target routing.Target) error {
+		if !provider.SupportsToolCalls(target.ProviderModel, m.input.Surface, m.input.Mode) {
+			return &inspectionDiagnostic{"tool_execution_unsupported", "/tools", "certified_tool_calls", "The target is not certified for gateway tool execution."}
+		}
+		if prior != nil {
+			if err := prior(provider, target); err != nil {
+				return err
+			}
+		}
+		return workflowModelInspectionCost(m, provider, target, requests[target.ID], capability)
+	}
+}
+
+func (s *Server) workflowInspectionReason(m *simulation, route, serving routing.Route, key inspectionKeyContext, request *wire.Request) string {
+	if m.input.Operation != "generation" || route.ToolExecution != "gateway" || key.reason != "" {
+		return ""
+	}
+	if route.Fidelity.Strict() || serving.Fidelity.Strict() {
+		return "tool_execution_requires_transformed"
+	}
+	if key.id == "" || s.WorkflowTools == nil || s.WorkflowTools() == nil || s.WorkflowRelease == nil || s.WorkflowAvailable == nil || !s.WorkflowAvailable() {
+		return "tool_execution_unavailable"
+	}
+	if refusal := mcp.WorkflowRequestRefusal(request); refusal != "" {
+		return refusal
+	}
+	if _, valid := workflowCallerBounds(request); !valid {
+		return "invalid_run_limits"
+	}
+	var raw []byte
+	if request != nil {
+		raw = request.Field("olp_toolsets")
+	}
+	selected, err := mcp.SelectWorkflowToolsets(route.Toolsets, raw)
+	if err != nil {
+		return "toolset_not_permitted"
+	}
+	if _, err := s.WorkflowTools().Resolve(m.ctx, key.authority, s.WorkflowRelease(), selected); err != nil {
+		return "toolset_not_authorized"
+	}
+	return ""
+}
+
+func workflowCallerBounds(request *wire.Request) (*limits.WorkflowBounds, bool) {
+	if request == nil || len(request.Field("olp_run_limits")) == 0 {
+		return nil, true
+	}
+	bounds, valid := limits.ParseWorkflowBounds(request.Field("olp_run_limits"))
+	return &bounds, valid
+}
+
+func (s *Server) workflowInspectionCapability(m *simulation, named, serving routing.Route, key inspectionKeyContext, request *wire.Request) *routing.WorkflowCapability {
+	if m.input.Operation != "generation" || s.WorkflowTools == nil || s.WorkflowRelease == nil || s.WorkflowAvailable == nil {
+		return nil
+	}
+	caller, valid := workflowCallerBounds(request)
+	if !valid {
+		return nil
+	}
+	return mcp.DescribeWorkflow(m.ctx, s.WorkflowTools(), key.authority, s.WorkflowRelease(), named, serving, m.input.Surface, caller, s.WorkflowAvailable(), time.Now())
+}
+
+func workflowModelInspectionCost(m *simulation, provider routing.Provider, target routing.Target, request *wire.Request, capability *routing.WorkflowCapability) error {
+	if capability == nil || capability.Limits.MaxRunCost == nil {
+		return nil
+	}
+	limit, ok := usage.ParseCost(*capability.Limits.MaxRunCost)
+	if !ok || request == nil {
+		return workflowUnboundedInspection()
+	}
+	var metadata routing.ModelMetadata
+	if err := json.Unmarshal(provider.Models[target.ProviderModel], &metadata); err != nil || metadata.ContextLength == nil || *metadata.ContextLength < 1 {
+		return workflowUnboundedInspection()
+	}
+	output, _ := estimate.OutputBounds(request, nil)
+	if output == nil || *output < 1 {
+		return workflowUnboundedInspection()
+	}
+	now := time.Now()
+	price := m.inputs.Price(provider.Kind, provider.ID, provider.VendorID, target.ProviderModel, "generation", now)
+	discount := m.inputs.Discount(provider.Kind, provider.ID, provider.VendorID, now)
+	bound, priced := price.WorkflowModelCostBound(*metadata.ContextLength, *output, discount)
+	if !priced {
+		return workflowUnboundedInspection()
+	}
+	if bound.Cmp(limit) > 0 {
+		return &inspectionDiagnostic{"run_cost_limit", "/olp_run_limits/max_run_cost", "remaining_run_cost", "The model cost exceeds the run limit."}
+	}
+	return nil
+}
+
+func workflowUnboundedInspection() error {
+	return &inspectionDiagnostic{"run_cost_unbounded", "/olp_run_limits/max_run_cost", "bounded_model_cost", "The model cost cannot be bounded."}
 }
 
 // explain simulates the request from the named route on, following the same
@@ -351,7 +484,7 @@ func (w *walk) adopt(slug, via string) string {
 		w.delegators = nil
 	}
 	w.route, w.visited = &route, append(w.visited, slug)
-	leg, plan, _, err := w.s.leg(w.m, slug, via)
+	leg, plan, permitted, err := w.s.leg(w.m, slug, via)
 	if err != nil {
 		w.conditions = nil
 		var refusal *routing.SelectionError
@@ -361,6 +494,10 @@ func (w *walk) adopt(slug, via string) string {
 		return routing.NoEligibleTargets
 	}
 	w.out.Legs = append(w.out.Legs, leg)
+	if !permitted {
+		w.conditions = nil
+		return routing.NoEligibleTargets
+	}
 	return w.settle(plan)
 }
 

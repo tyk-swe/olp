@@ -1,10 +1,14 @@
 # Guardrail integrations
 
-Named integrations translate inspected text into the vendor's native request and
-translate its response into a guardrail finding. Configure them as immutable
-[guardrail definitions and policy entries](guardrails.md). The policy entry
-chooses `block`, `annotate`, `redact`, or `mask`; a vendor's advisory finding does
-not override that choice. `monitor: true` records findings without enforcement.
+A named guardrail integration sends inspected text to an external or local
+evaluation service in that service's native format and converts its response into
+an OLP guardrail finding. Configure integrations through immutable
+[guardrail definitions and policy entries](guardrails.md).
+
+The OLP policy entry decides whether a finding blocks, annotates, redacts or
+masks the inspected content. A vendor's advisory result does not override that
+local policy choice. Setting `monitor: true` records findings without enforcing
+them.
 
 ## Connection and credentials
 

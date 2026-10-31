@@ -8,6 +8,7 @@ import (
 	"github.com/tyk-swe/olp/internal/codemode"
 	"github.com/tyk-swe/olp/internal/codewire"
 	"github.com/tyk-swe/olp/internal/oif"
+	"github.com/tyk-swe/olp/internal/protocols/wire"
 )
 
 const MaxBody = codewire.MaxBody
@@ -19,12 +20,12 @@ func Decode(raw []byte, encoding string, limit int64) ([]byte, error) {
 }
 
 func Classify(body []byte, headers http.Header, path string, websocket bool) (Request, error) {
-	return ClassifyWith(body, path, websocket, func(root oif.Value) (codemode.Identity, error) { return Identity(headers, root) })
+	return ClassifyWith(body, path, websocket, func(root oif.Value) (codemode.Identity, error) { return Identity(headers, root) }, headers)
 }
 
 // ClassifyWith classifies a Responses body whose conversation identity comes
 // from identity, which reads the parsed body and its own request headers.
-func ClassifyWith(body []byte, path string, websocket bool, identity func(oif.Value) (codemode.Identity, error)) (Request, error) {
+func ClassifyWith(body []byte, path string, websocket bool, identity func(oif.Value) (codemode.Identity, error), headers http.Header) (Request, error) {
 	var request Request
 	document, err := oif.ParseJSON(body, oif.Limits{MaxBytes: MaxBody})
 	if err != nil || document.Root().Kind() != oif.Object {
@@ -39,7 +40,8 @@ func ClassifyWith(body []byte, path string, websocket bool, identity func(oif.Va
 	for _, item := range field(root, "input").Elements() {
 		kind, _ := field(item, "type").Text()
 		compact = compact || kind == "compaction_trigger"
-		if kind == "item_reference" {
+		_, hasID := item.Lookup("id")
+		if wire.IsResponsesItemReference(kind, hasID) {
 			return request, codemode.Refuse(409, "code_parent_unresolved")
 		}
 	}
@@ -88,6 +90,9 @@ func ClassifyWith(body []byte, path string, websocket bool, identity func(oif.Va
 			return request, codemode.Refuse(400, "code_reference_invalid")
 		}
 	}
+	if err := codewire.ValidateGenericRequest(root, headers, request); err != nil {
+		return request, err
+	}
 	// This is a rate estimate only; opaque and server-side context has no proven bound.
 	request.Estimate = max(1, int64(len(body))/4)
 	if cap, err := strconv.ParseInt(field(root, "max_output_tokens").Raw(), 10, 64); err == nil && cap > 0 && cap <= 1<<32 {
@@ -97,6 +102,9 @@ func ClassifyWith(body []byte, path string, websocket bool, identity func(oif.Va
 }
 
 func Identity(headers http.Header, root oif.Value) (codemode.Identity, error) {
+	if identity, generic, err := codewire.GenericIdentity(headers, root, codewire.CodexIdentity); generic || err != nil {
+		return identity, err
+	}
 	var result codemode.Identity
 	metadata := field(root, "client_metadata")
 	if metadata.Kind() != oif.Absent && metadata.Kind() != oif.Null && metadata.Kind() != oif.Object {
@@ -136,6 +144,9 @@ func Identity(headers http.Header, root oif.Value) (codemode.Identity, error) {
 	}
 	if subagent != "" && result.Parent == "" {
 		return result, codemode.Refuse(409, "code_parent_unresolved")
+	}
+	if result.Generic() || (codemode.Identity{Conversation: result.Parent}).Generic() {
+		return result, codemode.Refuse(400, "code_identity_ambiguous")
 	}
 	return result, result.Validate()
 }

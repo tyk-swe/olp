@@ -18,30 +18,33 @@ import (
 	"github.com/tyk-swe/olp/internal/resources"
 	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/runtime"
+	"github.com/tyk-swe/olp/internal/upstream"
 )
 
 const codeGenerationTimeout = 10 * time.Minute
 
 type codeAttempt struct {
-	server        *Server
-	permit        resources.CodePermit
-	config        routing.Configuration
-	auth          codemode.Authorization
-	lease         *limits.Lease
-	providerLease *limits.Lease
-	observer      codewire.Observer
-	endpoint      codeadapter.Endpoint
-	dispatched    bool
-	usage         codemode.Usage
-	terminal      bool
-	conflicting   bool
-	prewarm       bool
+	identityOriginator string
+	paid               *paidCodeAttempt
+	server             *Server
+	permit             resources.CodePermit
+	config             routing.Configuration
+	auth               codemode.Authorization
+	lease              *limits.Lease
+	providerLease      *limits.Lease
+	observer           codewire.Observer
+	endpoint           codeadapter.Endpoint
+	dispatched         bool
+	usage              codemode.Usage
+	terminal           bool
+	conflicting        bool
+	prewarm            bool
+	finished           bool
+	model              string
+	publicModel        string
 }
 
-// prepareCode admits a request on a client path to an account whose adapter
-// serves the path for the request's model, and authorizes it with that
-// adapter's credential.
-func (s *Server) prepareCode(r *http.Request, release *runtime.Release, route codemode.Route, observation codemode.Request, path string, protocol codemode.Protocol, transport codeadapter.Transport) (*codeAttempt, error) {
+func (s *Server) prepareCode(r *http.Request, release *runtime.Release, route codemode.Route, observation codemode.Request, ingress codeIngress, transport codeadapter.Transport, recovery *resources.CodeRecovery, body []byte) (*codeAttempt, error) {
 	authority, failure := s.authenticate(r, "inference")
 	if failure != nil {
 		return nil, codemode.Refuse(failure.Status, "code_authentication_refused")
@@ -49,10 +52,42 @@ func (s *Server) prepareCode(r *http.Request, release *runtime.Release, route co
 	if !authority.Allows("inference", route.Slug, &route.ProjectID, s.now()) {
 		return nil, codemode.Refuse(403, "code_permission_denied")
 	}
-	providers := release.Snapshot.CodeModelProviders(route, path, protocol, observation.Operation.Model, transport)
-	if len(providers) == 0 {
+	resolved, err := route.ResolveModel(observation.Operation)
+	if err != nil {
+		return nil, err
+	}
+	operation, err := func() (codemode.Operation, error) {
+		if recovery != nil || len(route.PaidTargets) == 0 || resolved.PublicModel() == resolved.Model {
+			return resolved, nil
+		}
+		ledger, supported := s.CodeLedger.(PaidCodeLedger)
+		if !supported {
+			return codemode.Operation{}, codemode.Refuse(503, "code_paid_authority_unavailable")
+		}
+		return ledger.ResolvePaidModel(r.Context(), resources.CodeAdmission{Route: route, APIKeyID: authority.ID, Operation: resolved, EndUserDigest: authority.EndUserDigest, PreviousResponse: observation.PreviousResponse}, authority)
+	}()
+	if err != nil {
+		return nil, err
+	}
+	if _, paid := route.PaidTargets[operation.Model]; paid && recovery == nil {
+		return s.preparePaidCode(r, release, route, observation, operation, ingress, transport, authority, body, nil, false)
+	}
+	if recovery == nil && len(route.PaidFallbackTargets) > 0 {
+		if ledger, ok := s.CodeLedger.(PaidCodeLedger); ok {
+			selected, err := ledger.ResolvePaidFallback(r.Context(), resources.CodeAdmission{Route: route, APIKeyID: authority.ID, Operation: operation, PreviousResponse: observation.PreviousResponse}, authority)
+			if err != nil {
+				return nil, err
+			}
+			if selected != nil {
+				return s.preparePaidCode(r, release, route, observation, *selected, ingress, transport, authority, body, nil, true)
+			}
+		}
+	}
+	providers := release.Snapshot.CodeModelProviders(route, ingress.path, operation.Model, transport)
+	if len(providers) == 0 && len(route.PaidFallbackTargets) == 0 && (!route.ModelRewriting || len(release.Snapshot.CodeProviders(route, ingress.path, transport)) == 0) {
 		return nil, codemode.Refuse(400, "code_operation_unsupported")
 	}
+
 	labels, failure := s.parseAttribution(r, authority)
 	if failure != nil {
 		return nil, codemode.Refuse(failure.Status, "code_"+failure.Code)
@@ -63,13 +98,32 @@ func (s *Server) prepareCode(r *http.Request, release *runtime.Release, route co
 	}
 	permit, err := s.CodeLedger.Admit(r.Context(), resources.CodeAdmission{
 		Attribution: labels, Route: route, APIKeyID: authority.ID, EndUserDigest: authority.EndUserDigest,
-		Operation: observation.Operation, Providers: providers, PreviousResponse: observation.PreviousResponse,
+		InitialRecovery: observation.Recoverable, Recovery: recovery, Operation: operation, Providers: providers, ModelSource: release.Snapshot, ModelPath: ingress.path, ModelTransport: transport, PreviousResponse: observation.PreviousResponse,
 	})
 	if err != nil {
 		settleKey(r.Context(), lease, false, nil, s.log)
+		if refusal, ok := errors.AsType[*codemode.Refusal](err); ok && refusal.Code == "code_account_unavailable" && (recovery == nil || recovery.AccountID == "") && transport == codeadapter.HTTP && observation.Recoverable && len(route.PaidFallbackTargets) > 0 {
+			ledger, supported := s.CodeLedger.(PaidCodeLedger)
+			if !supported {
+				return nil, codemode.Refuse(503, "code_paid_authority_unavailable")
+			}
+			selected, selectionErr := ledger.ResolvePaidFallback(r.Context(), resources.CodeAdmission{Route: route, APIKeyID: authority.ID, Operation: operation, InitialRecovery: observation.Recoverable, Recovery: recovery, PreviousResponse: observation.PreviousResponse}, authority)
+			if selectionErr != nil {
+				return nil, selectionErr
+			}
+			if selected != nil {
+				return s.preparePaidCode(r, release, route, observation, *selected, ingress, transport, authority, body, recovery, true)
+			}
+		}
 		return nil, err
 	}
-	a := &codeAttempt{server: s, permit: permit, lease: lease, prewarm: observation.Operation.Name == "prewarm"}
+	model := func() string {
+		if permit.Pin.TargetModel != "" {
+			return permit.Pin.TargetModel
+		}
+		return operation.Model
+	}()
+	a := &codeAttempt{model: model, publicModel: operation.PublicModel(), server: s, permit: permit, lease: lease, prewarm: observation.Operation.Name == "prewarm"}
 	ok := false
 	defer func() {
 		if !ok {
@@ -105,28 +159,28 @@ func (s *Server) prepareCode(r *http.Request, release *runtime.Release, route co
 	if permit.Pin.AccountID != permit.Account.ID || permit.Pin.Principal != permit.Account.Principal || permit.Authority.ID != authority.ID {
 		return nil, codemode.Refuse(503, "code_binding_invalid")
 	}
-	configuration, exists := release.Snapshot.CodeConnection(route, permit.Account.ProviderID)
-	if !exists {
-		return nil, codemode.Refuse(503, "code_connection_unpublished")
+	target, err := resolveCodeTarget(release.Snapshot, route, permit.Account.ProviderID, ingress, transport)
+	if err != nil {
+		return nil, err
 	}
-	// The account's frozen connection names the adapter that serves it.
-	vendor, known := codeadapter.ForConnection(configuration.Kind, configuration.AuthMode, configuration.ProfileID)
-	endpoint, served := vendor.Endpoint(path)
-	if !known || !served || endpoint.Protocol != protocol || !endpoint.Supports(transport) || !vendor.ServesModel(protocol, observation.Operation.Model) {
+	if !target.adapter.ServesModel(target.endpoint.Protocol, model) {
 		return nil, codemode.Refuse(503, "code_configuration_unsupported")
 	}
-	dispatch := codemode.Dispatch{Adapter: vendor.Adapter, Protocol: protocol, ClientPath: path}
-	a.config, a.endpoint, a.observer = configuration, endpoint, codeObserver(endpoint)
-	a.providerLease, failure = s.Admission.reserveCodeProvider(r.Context(), permit.Account.ProviderID, configuration, observation.Estimate, codeGenerationTimeout+time.Minute)
+	a.config, a.endpoint, a.observer = target.config, target.endpoint, codeObserver(target.endpoint)
+	a.identityOriginator = target.adapter.CompatibilityOriginator(route)
+	a.providerLease, failure = s.Admission.reserveCodeProvider(r.Context(), permit.Account.ProviderID, target.config, observation.Estimate, codeGenerationTimeout+time.Minute)
 	if failure != nil {
 		return nil, codemode.Refuse(failure.Status, "code_provider_rate_limited")
 	}
-	a.auth, err = s.CodeAuthorizer.AuthorizeCode(r.Context(), configuration, permit.Account, dispatch)
+	a.auth, err = s.CodeAuthorizer.AuthorizeCode(r.Context(), target.config, permit.Account, target.dispatchDescriptor())
 	if err != nil {
 		return nil, codemode.Refuse(503, "code_account_unavailable")
 	}
-	if err := vendor.ValidateAuthorization(endpoint, a.auth, permit.Pin.Principal); err != nil {
+	if err := target.adapter.ValidateAuthorization(target.endpoint, a.auth, permit.Pin.Principal); err != nil {
 		return nil, err
+	}
+	if recovery != nil && recovery.AccountID != "" && (a.auth.CredentialID != recovery.CredentialID || a.auth.GrantGeneration <= recovery.GrantGeneration) {
+		return nil, codemode.Refuse(409, "code_recovery_unsafe")
 	}
 	ok = true
 	return a, nil
@@ -147,7 +201,7 @@ func (a *codeAttempt) observe(o codemode.Observation) {
 		cancel()
 	}
 	if o.Status != 0 {
-		a.response(context.Background(), o.Status, nil)
+		a.response(context.Background(), o.Status, http.Header{"Retry-After": o.RetryAfter})
 	}
 	if o.Allowance != nil {
 		a.observeAllowance(context.Background(), *o.Allowance)
@@ -172,6 +226,10 @@ func (a *codeAttempt) observe(o codemode.Observation) {
 }
 
 func (a *codeAttempt) finish(ctx context.Context) {
+	if a.finished {
+		return
+	}
+	a.finished = true
 	if !a.dispatched {
 		a.outcome(ctx, codemode.Outcome{Origin: "gateway", Kind: "rejected"})
 	} else if !a.terminal {
@@ -194,6 +252,9 @@ func (a *codeAttempt) finish(ctx context.Context) {
 	}
 	if err != nil {
 		a.server.log.Warn("code accounting unavailable", "attempt_id", a.permit.Attempt.ID)
+	}
+	if a.paid != nil {
+		a.finishPaid(ctx)
 	}
 	settleKey(ctx, a.lease, a.dispatched, a.usage.Total, a.server.log)
 	settleKey(ctx, a.providerLease, a.dispatched, a.usage.Total, a.server.log)
@@ -236,18 +297,31 @@ func codeUnavailableClose(err error) bool {
 }
 
 func (a *codeAttempt) observeAllowance(ctx context.Context, allowance codemode.Allowance) {
+	if a.paid != nil {
+		return
+	}
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
 	defer cancel()
 	_ = a.server.CodeLedger.ObserveAllowance(ctx, a.permit.Account.ID, allowance)
 }
 
 func (a *codeAttempt) health(ctx context.Context, status string) {
+	a.observeHealth(ctx, codemode.HealthObservation{Status: status, ObservedAt: a.server.now().UTC()})
+}
+
+func (a *codeAttempt) observeHealth(ctx context.Context, observation codemode.HealthObservation) {
+	if a.paid != nil {
+		return
+	}
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
 	defer cancel()
-	_ = a.server.CodeLedger.ObserveHealth(ctx, a.permit.Account.ID, status)
+	_ = a.server.CodeLedger.ObserveHealth(ctx, a.permit.Account.ID, observation)
 }
 
 func (a *codeAttempt) response(ctx context.Context, status int, headers http.Header) {
+	if a.paid != nil {
+		a.paid.status = status
+	}
 	outcome := codemode.Outcome{Origin: "upstream", Kind: "headers", UpstreamStatus: &status}
 	if status >= 400 {
 		outcome.Kind = "rejected"
@@ -256,11 +330,27 @@ func (a *codeAttempt) response(ctx context.Context, status int, headers http.Hea
 	if status == http.StatusUnauthorized {
 		a.server.Runtime.CredentialRefused(a.auth.CredentialID, a.auth.GrantGeneration)
 	}
-	switch {
-	case status == 429:
-		a.health(ctx, "quota_limited")
-	case status == 401 || status == 403 || status >= 500:
-		a.health(ctx, "unavailable")
+	if status == 429 || status == 401 || status == 403 || status >= 500 {
+		health := func() string {
+			if status == 429 {
+				return "quota_limited"
+			}
+			return "unavailable"
+		}()
+		now := a.server.now().UTC()
+		retryAt := func() *time.Time {
+			values := headers.Values("Retry-After")
+			if len(values) != 1 {
+				return nil
+			}
+			delay, valid := upstream.ParseRetryAfter(values[0], now)
+			if !valid {
+				return nil
+			}
+			at := now.Add(delay)
+			return &at
+		}()
+		a.observeHealth(ctx, codemode.HealthObservation{Status: health, ObservedAt: now, RetryAt: retryAt})
 	}
 	if a.endpoint.Observation != codeadapter.ObserveCodex {
 		return

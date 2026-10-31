@@ -55,6 +55,30 @@
           route: 'GET /api/v1/toolsets'
         },
         {
+          label: 'Runs',
+          href: resolve('/runs'),
+          icon: 'route',
+          route: 'GET /api/v1/agent-runs'
+        },
+        {
+          label: 'Investigations',
+          href: resolve('/investigations'),
+          icon: 'route',
+          route: 'GET /api/v1/investigations'
+        },
+        {
+          label: 'A2A tasks',
+          href: resolve('/a2a-tasks'),
+          icon: 'route',
+          route: 'GET /api/v1/a2a-tasks'
+        },
+        {
+          label: 'Delegations',
+          href: resolve('/delegations'),
+          icon: 'route',
+          route: 'GET /api/v1/agent-delegations'
+        },
+        {
           label: 'Tool calls',
           href: resolve('/tool-calls'),
           icon: 'route',
@@ -309,6 +333,11 @@
               class:active={isActive(item.href)}
               href={item.href}
               aria-current={isActive(item.href) ? 'page' : undefined}
+              onfocus={(event) =>
+                event.currentTarget.scrollIntoView({
+                  block: 'nearest',
+                  inline: 'nearest'
+                })}
               onclick={onNavigate}>{item.label}</a
             >
           </li>
@@ -393,6 +422,10 @@
     text-transform: uppercase;
   }
 
+  .subnav a {
+    padding-inline: 0.4375rem;
+  }
+
   .bar a::after,
   .subnav a::after {
     content: '';
@@ -411,6 +444,7 @@
     display: flex;
     min-height: 3rem;
     align-items: center;
+    overflow-x: auto;
     border-top: 1px solid var(--border-hairline);
   }
 

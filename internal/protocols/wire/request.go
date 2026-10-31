@@ -7,6 +7,10 @@ import (
 	"github.com/tyk-swe/olp/internal/oif"
 )
 
+func IsResponsesItemReference(kind string, hasID bool) bool {
+	return kind == "item_reference" || kind == "" && hasID
+}
+
 // Request retains an immutable source and the envelope understood by routing.
 // A transformation returns a new request or an error and never damages its input.
 type Request struct {

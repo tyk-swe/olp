@@ -7,6 +7,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/tyk-swe/olp/internal/a2a"
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/agents"
 	"github.com/tyk-swe/olp/internal/billing"
@@ -32,6 +33,7 @@ import (
 	"github.com/tyk-swe/olp/internal/retrieval"
 	"github.com/tyk-swe/olp/internal/routes"
 	"github.com/tyk-swe/olp/internal/runtime"
+	"github.com/tyk-swe/olp/internal/secrets"
 	"github.com/tyk-swe/olp/internal/signing"
 	"github.com/tyk-swe/olp/internal/sinks"
 	"github.com/tyk-swe/olp/internal/usage"
@@ -71,6 +73,7 @@ func (m Management) Register(mux *http.ServeMux) {
 		return err
 	}
 	m.Access.Register(mux)
+	(&runtime.DelegationManagement{Access: m.Access, Manager: m.Runtime}).Register(mux)
 	(&gateway.CacheManagement{Access: m.Access, Gateway: m.Gateway}).Register(mux)
 	(&branding.Server{Access: m.Access}).Register(mux)
 	(&guardrails.Server{Access: m.Access, Publish: func(ctx context.Context, tx pgx.Tx, actor string) error {
@@ -79,7 +82,11 @@ func (m Management) Register(mux *http.ServeMux) {
 	}, Evaluate: func(r *http.Request, p access.Principal, in guardrails.ApplyInput) (guardrails.Result, error) {
 		return m.Gateway.EvaluateGuardrails(r, p, in)
 	}}).Register(mux)
-	(&agents.Server{Access: m.Access, Egress: m.Egress}).Register(mux)
+	validator := &a2a.Server{Egress: m.Egress, Ledger: &a2a.Ledger{Pool: m.Access.Pool}, Grants: &mcpgrants.Store{Egress: m.Egress, Pool: m.Access.Pool, Keys: m.Access.Keys, Auth: m.Access.Auth, Installation: m.Access.Installation}, Credentials: func(ctx context.Context, id string) ([]byte, error) {
+		return m.Access.Keys.Read(ctx, m.Access.Pool, m.Access.Installation, id, secrets.AgentCredential)
+	}}
+	(&a2a.Management{Access: m.Access, Server: validator}).Register(mux)
+	(&agents.Server{Access: m.Access, Egress: m.Egress, ValidateAgent: validator.ValidateCard}).Register(mux)
 	(&mcpservers.Server{Access: m.Access, Egress: m.Egress, Executables: &mcpservers.Executables{Tier: m.Unconfined, Query: m.Access.Pool}}).Register(mux)
 	(&mcp.Management{Access: m.Access}).Register(mux)
 	(&mcpgrants.Server{Access: m.Access}).Register(mux)
@@ -96,6 +103,16 @@ func (m Management) Register(mux *http.ServeMux) {
 	}
 	catalogue.Register(mux)
 	routeServer := routes.New(m.Access)
+	routeServer.WorkflowTools = func() mcp.WorkflowResolver {
+		if m.Gateway == nil {
+			return nil
+		}
+		return m.Gateway.WorkflowTools
+	}
+	routeServer.WorkflowRelease = m.Runtime.Release
+	routeServer.WorkflowAvailable = func() bool {
+		return m.Gateway != nil && m.Gateway.WorkflowRuns != nil && m.Gateway.WorkflowTools != nil && m.Gateway.Debits != nil
+	}
 	routeServer.Inputs = m.Runtime.RoutingInputs
 	if m.Runtime != nil {
 		routeServer.Region = m.Runtime.Region

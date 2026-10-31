@@ -1,12 +1,15 @@
 package gateway
 
 import (
+	"context"
 	"net/http"
 	"slices"
 	"strings"
 
+	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/protocols/wire"
 	"github.com/tyk-swe/olp/internal/routing"
+	"github.com/tyk-swe/olp/internal/runtime"
 
 	"github.com/tyk-swe/olp/internal/protocols"
 	"github.com/tyk-swe/olp/internal/surface"
@@ -88,8 +91,8 @@ func (s *Server) registerNative(mux *http.ServeMux) {
 		}
 	}
 }
-func nativeModel(snapshot *routing.Snapshot, route routing.Route, surface string) map[string]any {
-	capabilities := routing.EffectiveCapabilities(snapshot, route)
+func (s *Server) nativeModel(ctx context.Context, release *runtime.Release, authority access.Authority, route routing.Route, surface string) map[string]any {
+	capabilities := s.modelCapabilities(ctx, release, authority, route, surface)
 	if surface == "anthropic" {
 		return map[string]any{"id": route.Slug, "type": "model", "display_name": route.Slug, "created_at": route.PublishedAt.UTC().Format("2006-01-02T15:04:05Z"), "capabilities": capabilities}
 	}
@@ -116,13 +119,13 @@ func (s *Server) nativeModels(w http.ResponseWriter, r *http.Request) {
 			writeSurfaceError(w, modelNotFound(slug), surface)
 			return
 		}
-		writeJSON(w, nativeModel(req.release.Snapshot, route, surface))
+		writeJSON(w, s.nativeModel(r.Context(), req.release, authority, route, surface))
 		return
 	}
 	rows := []map[string]any{}
 	for _, slug := range slices.Sorted(mapsKeys(req.release.Snapshot.Routes)) {
 		if authority.Allows("models_read", slug, req.release.Snapshot.Routes[slug].ProjectID, s.now()) {
-			rows = append(rows, nativeModel(req.release.Snapshot, req.release.Snapshot.Routes[slug], surface))
+			rows = append(rows, s.nativeModel(r.Context(), req.release, authority, req.release.Snapshot.Routes[slug], surface))
 		}
 	}
 	if surface == "anthropic" {

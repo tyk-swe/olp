@@ -17,6 +17,28 @@ func TestRM6FormatsShareTheirAccountingOperation(t *testing.T) {
 	}
 }
 
+func TestWorkflowTranscriptFieldFollowsTheDialectFamily(t *testing.T) {
+	for _, format := range []Format{GeminiStream, GeminiCount, GeminiInteractions, GeminiLive, GeminiFile, GeminiBatch} {
+		if format.WorkflowTranscriptField() != Gemini.WorkflowTranscriptField() {
+			t.Fatalf("%s must read its workflow transcript from the Gemini field, got %q next to %q", format, format.WorkflowTranscriptField(), Gemini.WorkflowTranscriptField())
+		}
+	}
+	if Anthropic.WorkflowTranscriptField() != Chat.WorkflowTranscriptField() {
+		t.Fatalf("anthropic and chat transcripts must share a field, got %q next to %q", Anthropic.WorkflowTranscriptField(), Chat.WorkflowTranscriptField())
+	}
+	fields := map[string]Format{}
+	for _, format := range []Format{Chat, Responses, Gemini} {
+		field := format.WorkflowTranscriptField()
+		if field == "" {
+			t.Fatalf("%s has no workflow transcript field", format)
+		}
+		if other, clash := fields[field]; clash {
+			t.Fatalf("%s and %s must not share workflow transcript field %q", format, other, field)
+		}
+		fields[field] = format
+	}
+}
+
 func TestRM6FormatsSurfaceAsNativeDialects(t *testing.T) {
 	for _, format := range []Format{NativeDuplex, Passthrough} {
 		if format.Surface() != MistralFIM.Surface() || format.Surface() != CohereChat.Surface() {

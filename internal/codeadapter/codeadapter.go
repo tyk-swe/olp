@@ -12,6 +12,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/antigravityauth"
+	"github.com/tyk-swe/olp/internal/claudeauth"
 	"github.com/tyk-swe/olp/internal/codemode"
 	"github.com/tyk-swe/olp/internal/codeplans"
 	"github.com/tyk-swe/olp/internal/codexauth"
@@ -65,7 +67,16 @@ const (
 
 // Endpoint describes one native operation. Operation names the wire parser's
 // operation, independently of either the client or upstream URL.
+type Target string
+
+const TargetAntigravity Target = "antigravity"
+
+func (t Target) Enabled(route codemode.Route) bool {
+	return t == "" || t == TargetAntigravity && route.ChatToAntigravity
+}
+
 type Endpoint struct {
+	Target                   Target
 	ClientPath, UpstreamPath string
 	Protocol                 codemode.Protocol
 	Operation                string
@@ -125,6 +136,28 @@ var vendors = []Vendor{
 			"Hard token budgets require a separately proven operation/model bound; this authentication adapter supplies none.",
 			"ChatGPT cloud tasks, standalone web search, account management and FedRAMP accounts are outside this local code-mode configuration.",
 		},
+	},
+	{
+		Adapter: codemode.AdapterClaude, Name: "Claude", profiles: []string{claudeauth.ProfileID}, manifest: claudeauth.Manifest,
+		credential: claudeCredential, extra: []string{"Anthropic-Beta"},
+		endpoints: []Endpoint{{ClientPath: "v1/messages", UpstreamPath: "v1/messages", Protocol: codemode.ProtocolMessages, Operation: "messages", Identity: IdentityClient, CredentialHeader: "Authorization", Observation: ObserveUsage, transports: HTTP}},
+		clients:   []Client{{ID: ClientClaudeCode}},
+		enrollmentNotes: []string{
+			"Enrollment verifies the account and organization through the OAuth profile endpoint. It does not qualify inference, entitlement or allowance.",
+			"Claude subscription forwarding and native tool workflows are fixture-tested only. Live subscription inference is not qualified.",
+			"Hard token budgets require a separately proven operation/model bound; this authentication adapter supplies none.",
+		},
+	},
+	{
+		Adapter: codemode.AdapterAntigravity, Name: "Antigravity", profiles: []string{antigravityauth.ProfileID}, manifest: antigravityauth.Manifest,
+		credential: antigravityCredential, modelProtocol: antigravityModelProtocol,
+		endpoints: []Endpoint{{ClientPath: "v1/chat/completions", UpstreamPath: "v1internal:generateContent", Protocol: codemode.ProtocolChat, Operation: "chat/completions", Identity: IdentityClient, CredentialHeader: "Authorization", Observation: ObserveUsage, transports: HTTP, Target: TargetAntigravity}},
+		clients:   []Client{{ID: ClientOpenCode, Provider: "olp-antigravity", URLSuffix: "/v1", Protocol: codemode.ProtocolChat}},
+		enrollmentNotes: []string{
+			"Supply an authorized Google desktop OAuth client ID as the provider option. Complete masked enrollment with callback_url and client_secret JSON. Client secrets and refresh tokens remain encrypted.",
+			"Enrollment verifies the Google subject and an existing cloudcode project. It does not onboard accounts or establish live inference, entitlement, allowance or hard token bounds.",
+		},
+		notes: []string{"Explicit chat_to_antigravity policy enables controlled Gemini text and function tools over HTTP or SSE. Signed reasoning, media and server tools are unsupported. Client identity and prompt compatibility remain disabled. Live subscription and OpenCode workflow qualification remain pending."},
 	},
 	{
 		Adapter: codemode.AdapterOpenCodeGo, Name: "OpenCode Go", profiles: []string{codeplans.OpenCodeGoProfile}, manifest: codeplans.OpenCodeGoManifest, KeyGrant: true,
@@ -218,6 +251,9 @@ func validate(registry []Vendor) error {
 }
 
 func (e Endpoint) valid() bool {
+	if e.Target != "" && (e.Target != TargetAntigravity || e.Protocol != codemode.ProtocolChat || e.transports != HTTP) {
+		return false
+	}
 	if e.ClientPath == "" || e.UpstreamPath == "" || e.CredentialHeader == "" || e.transports == 0 || e.transports & ^(HTTP|WebSocket) != 0 {
 		return false
 	}
@@ -253,7 +289,14 @@ func ForPath(path string) (Endpoint, bool) {
 }
 
 func (v Vendor) Manifest() abi.Manifest { return v.manifest() }
-func (v Vendor) Endpoints() []Endpoint  { return slices.Clone(v.endpoints) }
+func (v Vendor) CompatibilityOriginator(route codemode.Route) string {
+	if v.Adapter != codemode.AdapterCodex || !route.CodexCLIIdentity {
+		return ""
+	}
+	return "codex_cli_rs"
+}
+
+func (v Vendor) Endpoints() []Endpoint { return slices.Clone(v.endpoints) }
 func (v Vendor) Endpoint(path string) (Endpoint, bool) {
 	for _, e := range v.endpoints {
 		if e.ClientPath == path {
@@ -418,4 +461,75 @@ func SQLAdapters(connections string) string {
 	}
 	return "(SELECT coalesce(jsonb_agg(adapter ORDER BY array_position(ARRAY[" + strings.Join(order, ",") + "],adapter)),'[]'::jsonb) FROM (SELECT DISTINCT " + SQL("c.value") +
 		" adapter FROM jsonb_each(" + connections + ") c) adapters WHERE adapter IS NOT NULL)"
+}
+
+func RouteEndpoint(route codemode.Route, adapter Vendor, path string) (Endpoint, bool) {
+	if endpoint, ok := adapter.Endpoint(path); ok {
+		return endpoint, endpoint.Target.Enabled(route)
+	}
+	if adapter.Adapter == codemode.AdapterCodex && (route.MessagesToCodex && path == "v1/messages" || route.ChatToCodex && path == "v1/chat/completions") {
+		return adapter.Endpoint("responses")
+	}
+	return Endpoint{}, false
+}
+
+func RouteClientProtocol(route codemode.Route, adapter Vendor, client, model string) (codemode.Protocol, bool) {
+	if protocol, ok := adapter.Protocol(client, model); ok {
+		return protocol, slices.ContainsFunc(adapter.endpoints, func(endpoint Endpoint) bool { return endpoint.Protocol == protocol && endpoint.Target.Enabled(route) })
+	}
+	if adapter.Adapter != codemode.AdapterCodex {
+		return "", false
+	}
+	if client == ClientClaudeCode && route.MessagesToCodex {
+		endpoint, ok := RouteEndpoint(route, adapter, "v1/messages")
+		return codemode.ProtocolMessages, ok && adapter.ServesModel(endpoint.Protocol, model)
+	}
+	if client == ClientOpenCode && route.ChatToCodex {
+		endpoint, ok := RouteEndpoint(route, adapter, "v1/chat/completions")
+		return codemode.ProtocolChat, ok && adapter.ServesModel(endpoint.Protocol, model)
+	}
+	return "", false
+}
+
+func RouteClient(route codemode.Route, adapter Vendor, client string) (Client, bool) {
+	if native, ok := adapter.Client(client); ok {
+		return native, true
+	}
+	if route.ChatToCodex && adapter.Adapter == codemode.AdapterCodex && client == ClientOpenCode {
+		return Client{ID: ClientOpenCode, Provider: "olp-codex", URLSuffix: "/v1", Protocol: codemode.ProtocolChat}, true
+	}
+	return Client{}, false
+}
+
+func RouteClients(route codemode.Route, adapter Vendor) []string {
+	return slices.Collect(func(yield func(string) bool) {
+		for _, client := range adapter.Clients() {
+			if !yield(client) {
+				return
+			}
+		}
+		if adapter.Adapter != codemode.AdapterCodex {
+			return
+		}
+		if route.MessagesToCodex && !yield(ClientClaudeCode) {
+			return
+		}
+		if route.ChatToCodex {
+			yield(ClientOpenCode)
+		}
+	})
+}
+
+func antigravityModelProtocol(model string) codemode.Protocol {
+	if strings.HasPrefix(model, "gemini-") {
+		return codemode.ProtocolChat
+	}
+	return ""
+}
+
+func (e Endpoint) Path(stream bool) string {
+	if e.Target == TargetAntigravity && stream {
+		return "v1internal:streamGenerateContent"
+	}
+	return e.UpstreamPath
 }

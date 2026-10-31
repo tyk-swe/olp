@@ -1,15 +1,19 @@
 # Configuration reference
 
-For remote administration, see the [management CLI and MCP](automation.md).
-These clients use `OLP_MANAGEMENT_URL` and `OLP_MANAGEMENT_TOKEN_FILE`, not the
-server configuration below.
+This reference covers configuration for the OLP server processes. Remote
+administration clients use `OLP_MANAGEMENT_URL` and
+`OLP_MANAGEMENT_TOKEN_FILE` instead, as described in
+[management automation](automation.md).
 
-Runtime settings come from environment variables or CLI flags; flags take
-precedence. Use `olp <subcommand> --help` and the source in
-[`internal/config/config.go`](../../internal/config/config.go) for accepted flags.
-Credential secrets use mounted files; database and Valkey URLs support either
-inline or file-based settings. Invalid configuration fails before listeners
-bind.
+Server settings come from environment variables or command-line flags, and flags
+take precedence. Run `olp <subcommand> --help` for the flags accepted by the
+installed binary. The implementation in
+[`internal/config/config.go`](../../internal/config/config.go) is the source for
+generated environment names and defaults.
+
+Credential secrets use mounted files. Database and Valkey URLs can be supplied
+inline or through their corresponding file variables. OLP validates the complete
+configuration before binding any listener.
 
 ## Runtime variables
 
@@ -410,8 +414,8 @@ Future effective times survive, past/current times rebase to apply.
 Top-level `discounts` carries every scope's in-force multiplier, multiplier-1
 scope endings included (`provider_kind`, optional `vendor_id`, `provider` by
 name). Apply publishes a new now-effective discount for each listed scope
-whose multiplier differs — listing `multiplier` "1" ends a discount — and
-leaves scopes the document omits untouched, like every other collection.
+whose multiplier differs. Listing `multiplier` "1" ends that scope's discount.
+Scopes omitted from the document remain untouched, as with every other collection.
 Top-level `rate_cards` carries each card's in-force revision, neutral ones
 included: `owner` (`kind` installation/organization/project, named like
 routes), `markup`, `prices` in the price-entry shape minus provider scope.
@@ -420,14 +424,18 @@ the listed revision differs; a listed card is neutralized by publishing
 `markup` "1" with no prices, and cards the document omits are untouched. Connection commitments ride provider `options` and each budget's `cost_basis`
 rides its `budget_policy`, so they promote with their owners. A provider's
 `billing_import` entry (`enabled`, `scope`, `credential_ref` as
-`<provider>/billing`) promotes the same way — the admin key binds via
-`secret_bindings` like other provider secrets, a missing binding blocks apply,
-and an entry's absence deletes the import and its sealed key. Feature-specific
-budget/group/calendar omission semantics are in [access](../use/access.md), not a
+`<provider>/billing`) promotes the same way. The source-specific billing
+credential binds through `secret_bindings` like other provider secrets, and a
+missing binding blocks apply. Apply can decrypt a stored credential to compare
+it internally with the supplied binding, while clients cannot read credentials.
+An entry's absence deletes the import and its sealed credential. See
+[FinOps](finops.md#billing-imports) for credential shapes.
+Feature-specific budget/group/calendar omission semantics are in
+[access](../use/access.md), not a
 global merge rule. `expected_digest` fences destination drift; remaining blockers return
 409 with plan body, successful staging records one digest-only audit event.
 
-Console **Settings → Configuration promotion** forgets secrets on artifact changes;
+The **Configuration promotion** page under Settings forgets secrets on artifact changes;
 CLI [reviewed promotion](automation.md#configuration-promotion),
 [GitHub Actions](automation.md#github-actions) and [Terraform](automation.md#terraform-and-opentofu) preserve
 review/atomicity boundaries.
@@ -451,3 +459,13 @@ apply, and publish in the immutable runtime snapshot. The cache deployment URL
 and credentials are environment bindings, not promotion artifacts. Restoring
 configuration into an empty installation restores policy, not cached content.
 See [response caching](../use/caching.md).
+
+### Coding configuration
+
+The optional `code` section carries subscription accounts, shared and personal pools, coding route drafts and latest publications, and local token budget policies. It preserves account weights, model aliases and model pools, compatibility choices, recovery policy, research tools, request limits and paid participation. A publication retains its frozen provider configuration and paid model and slot policy independently from the current provider revision. Historical revisions, conversations, allowance observations, credentials and budget usage stay on their installation.
+
+Enroll or configure the destination providers first. Supply `code_bindings` on plan and apply, or use `--code-bindings-file` with the CLI. Its `credentials`, `users` and `api_keys` objects map artifact references to explicitly authorized destination UUIDs. Subscription principals come from enrolled destination credentials. Paid credentials must match the destination provider slot's active published credential. Frozen paid slot key restrictions require explicit destination key bindings. Frozen paid provider and slot limits must match the destination's live limits or planning and apply return 422. Paid fallback keeps its separate model targets and explicit recovery limit. Runtime attempt links remain local. Personal owners must be active project members, and their assigned keys must belong to them.
+
+Code UUIDs identify references inside the artifact. Destination accounts match project, provider and credential principal. Pools and budgets first reuse same-project artifact references or a UUIDv5 destination identity derived from the destination project, resource kind and artifact reference. This preserves duplicate pool names and duplicate budget policies without a registry. A unique natural match can reuse a pool by project, name, kind and owner, or a budget by project, route, key and the presence of daily and monthly windows. Routes match project and slug. Unrelated ambiguous identities and unresolved or cross-project references are refused. Existing budget windows retain their usage. Rename route slugs when copying to another project in the same installation because slugs are globally unique.
+
+Plan and apply use the existing configuration endpoints, transactions and live management authorization. Reapplying an equivalent artifact produces `noop` actions. Changing a CLI binding file after planning requires a new plan. The console also clears its reviewed plan when code bindings change. Coding publication validates both the frozen policy and the destination's current provider eligibility without certification or inference.

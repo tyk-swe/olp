@@ -100,7 +100,10 @@ export function emptyBehavior(): RouteBehavior {
     affinity: null,
     budget: null,
     passthrough: null,
-    certification: 'certified'
+    certification: 'certified',
+    tool_execution: '',
+    toolsets: [],
+    responses_mcp_items: false
   };
 }
 
@@ -506,6 +509,11 @@ export function validateRouteBehavior(
   if (values.selectorsError) return values.selectorsError;
   const behavior = values.behavior;
   if (!behavior) return null;
+  if (
+    behavior.tool_execution === 'gateway' &&
+    values.fidelity.mode !== 'transformed'
+  )
+    return 'Gateway tool execution requires a transformed route.';
   const passthroughProblem = validatePassthroughConfig(behavior.passthrough);
   if (passthroughProblem) return passthroughProblem;
   if (behavior.passthrough) {
@@ -611,6 +619,10 @@ function behaviorFields(behavior: RouteBehavior | undefined) {
     budget: value.budget,
     cache: value.cache,
     prompt_cache: value.prompt_cache,
+    tool_execution: value.tool_execution,
+    toolsets: value.toolsets,
+    responses_mcp_items: value.responses_mcp_items,
+    run_limits: value.run_limits,
     passthrough: value.passthrough ?? null,
     ...(value.caller_cost_exempt !== undefined
       ? { caller_cost_exempt: value.caller_cost_exempt }

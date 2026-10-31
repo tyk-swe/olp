@@ -538,6 +538,9 @@
                 "$ref": "#/$defs/ExternalCredentialReference"
               },
               "description": "Destination bindings for logical credential references. Stored without resolved values; new versions must pass validation before activation. A name cannot also appear in secret_bindings. Introducing an external reference requires installation-wide settings authority in addition to configure authority."
+            },
+            "code_bindings": {
+              "$ref": "#/$defs/ConfigurationCodeBindings"
             }
           },
           "required": [
@@ -546,7 +549,7 @@
           "type": "object"
         },
         "ConfigurationDocument": {
-          "description": "Secret-free desired-state artifact identified by natural names, never UUIDs",
+          "description": "Secret-free desired-state artifact using natural destination identities. Code UUIDs are artifact-local references, never requested destination IDs.",
           "properties": {
             "api_version": {
               "enum": [
@@ -707,6 +710,9 @@
               "items": {
                 "$ref": "#/$defs/ConfigurationRetrievalBinding"
               }
+            },
+            "code": {
+              "$ref": "#/$defs/ConfigurationCode"
             }
           },
           "required": [
@@ -2687,7 +2693,7 @@
               "type": "boolean"
             },
             "scope": {
-              "type": "object"
+              "$ref": "#/$defs/BillingScope"
             },
             "credential_ref": {
               "type": "string",
@@ -2699,6 +2705,166 @@
             "scope",
             "credential_ref"
           ]
+        },
+        "BillingScope": {
+          "description": "Source-shaped billing scope. Polling sources accept an empty scope. Cloud sources require their export details.",
+          "oneOf": [
+            {
+              "$ref": "#/$defs/PollingBillingScope"
+            },
+            {
+              "$ref": "#/$defs/AWSBillingScope"
+            },
+            {
+              "$ref": "#/$defs/GoogleBillingScope"
+            },
+            {
+              "$ref": "#/$defs/AzureBillingScope"
+            }
+          ]
+        },
+        "PollingBillingScope": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "project_ids": {
+              "type": "array",
+              "maxItems": 100,
+              "items": {
+                "type": "string",
+                "pattern": "^proj_[A-Za-z0-9]{1,64}$"
+              }
+            },
+            "workspace_ids": {
+              "type": "array",
+              "maxItems": 100,
+              "items": {
+                "type": "string",
+                "pattern": "^(wrkspc_[A-Za-z0-9]{1,64}|default)$"
+              }
+            }
+          },
+          "not": {
+            "required": [
+              "project_ids",
+              "workspace_ids"
+            ]
+          }
+        },
+        "AWSBillingScope": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "payer_account_id",
+            "bucket",
+            "report_prefix",
+            "region"
+          ],
+          "properties": {
+            "payer_account_id": {
+              "type": "string",
+              "pattern": "^[0-9]{12}$"
+            },
+            "bucket": {
+              "type": "string",
+              "minLength": 3,
+              "maxLength": 63,
+              "pattern": "^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$"
+            },
+            "report_prefix": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 1024,
+              "description": "CUR report prefix including the report name"
+            },
+            "region": {
+              "type": "string",
+              "maxLength": 64,
+              "pattern": "^[a-z]{2}(-[a-z0-9]+)+-[0-9]+$"
+            },
+            "linked_account_ids": {
+              "type": "array",
+              "maxItems": 100,
+              "items": {
+                "type": "string",
+                "pattern": "^[0-9]{12}$"
+              }
+            }
+          }
+        },
+        "GoogleBillingScope": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "billing_account_id",
+            "bigquery_project_id",
+            "dataset_id",
+            "table_id"
+          ],
+          "properties": {
+            "billing_account_id": {
+              "type": "string"
+            },
+            "bigquery_project_id": {
+              "type": "string"
+            },
+            "dataset_id": {
+              "type": "string"
+            },
+            "table_id": {
+              "type": "string"
+            },
+            "project_ids": {
+              "type": "array",
+              "maxItems": 100,
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "AzureBillingScope": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "billing_scope",
+            "export_name",
+            "storage_account",
+            "container"
+          ],
+          "properties": {
+            "billing_scope": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 1024
+            },
+            "export_name": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 1024
+            },
+            "storage_account": {
+              "type": "string",
+              "pattern": "^[a-z0-9]{3,24}$"
+            },
+            "container": {
+              "type": "string",
+              "minLength": 3,
+              "maxLength": 63
+            },
+            "prefix": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "subscription_ids": {
+              "type": "array",
+              "maxItems": 100,
+              "items": {
+                "type": "string",
+                "format": "uuid"
+              }
+            }
+          }
         },
         "ConfigurationRouteEntry": {
           "properties": {
@@ -2852,6 +3018,37 @@
               "oneOf": [
                 {
                   "$ref": "#/$defs/PassthroughConfig"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "tool_execution": {
+              "type": "string",
+              "enum": [
+                "",
+                "gateway"
+              ],
+              "description": "When gateway, the gateway executes authorized read-only tools on transformed Chat Completions routes."
+            },
+            "toolsets": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "uniqueItems": true,
+              "description": "Published toolset IDs that gateway execution may use. Callers can select a subset."
+            },
+            "responses_mcp_items": {
+              "type": "boolean",
+              "description": "Operator declaration that Responses clients support gateway-generated MCP output items. Requires gateway tool execution on a transformed route. MCP items are emitted only when the run uses the certified built-in Responses contract; other contracts omit them."
+            },
+            "run_limits": {
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/WorkflowRunLimits"
                 },
                 {
                   "type": "null"
@@ -3507,6 +3704,40 @@
           ],
           "type": "object"
         },
+        "WorkflowRunLimits": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "max_iterations": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 1,
+              "maximum": 32
+            },
+            "max_tool_calls": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0,
+              "maximum": 128
+            },
+            "max_duration_seconds": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 1,
+              "maximum": 600
+            },
+            "max_concurrent_runs": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 1,
+              "maximum": 2147483647
+            },
+            "max_run_cost": {
+              "type": "string",
+              "pattern": "^[0-9]{1,12}(\\.[0-9]{1,12})?$"
+            }
+          }
+        },
         "ConfigurationOrganizationEntry": {
           "type": "object",
           "additionalProperties": false,
@@ -3713,6 +3944,10 @@
                 "format": "uuid"
               },
               "maxItems": 100
+            },
+            "agent_principal": {
+              "type": "boolean",
+              "description": "Allow this mapping to authenticate an agent principal. Exact subject and client claims are required."
             }
           },
           "description": "Owner-declared permissions, never project or template names chosen freely by the token. A registered subject stays bound to its first matching name/project."
@@ -3924,7 +4159,8 @@
                 "xecguard",
                 "zscaler_ai_guard",
                 "semantic_guard",
-                "decision_model"
+                "decision_model",
+                "typesafe"
               ]
             },
             "policy": {
@@ -3985,7 +4221,9 @@
                   "requests",
                   "attempts",
                   "guardrail_decisions",
-                  "audit"
+                  "audit",
+                  "runs",
+                  "trace_spans"
                 ]
               }
             },
@@ -4443,6 +4681,14 @@
             "alias": {
               "type": "string",
               "pattern": "^t_[a-f0-9]{32}_[a-f0-9]{32}$"
+            },
+            "classification": {
+              "type": "string",
+              "enum": [
+                "read_only",
+                "approval_required"
+              ],
+              "description": "Operator classification of a published tool. Unclassified tools require approval."
             }
           },
           "required": [
@@ -4470,11 +4716,15 @@
             },
             "card_digest": {
               "type": "string",
-              "pattern": "^[a-f0-9]{64}$"
+              "pattern": "^[a-f0-9]{64}$",
+              "description": "SHA-256 digest of the reviewed agent card. An OAuth agent's card must be publicly readable for publication and discovery. Task requests use the caller's grant."
             },
             "credential_id": {
               "type": "string",
               "format": "uuid"
+            },
+            "oauth": {
+              "$ref": "#/$defs/AgentOAuthConfiguration"
             },
             "toolset_revisions": {
               "type": "array",
@@ -4499,6 +4749,28 @@
             "max_cost": {
               "type": "string",
               "pattern": "^[0-9]{1,12}(\\.[0-9]{1,12})?$"
+            },
+            "message_price": {
+              "type": "string",
+              "pattern": "^[0-9]{1,12}(\\.[0-9]{1,12})?$"
+            },
+            "remote_work_bound_seconds": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 3600,
+              "description": "The agent's declared maximum duration for remote work on one task, in seconds. Required for budgeted calls and enforced by the agent."
+            },
+            "max_task_continuations": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 128,
+              "description": "Maximum observed continuations per task. Defaults to 32."
+            },
+            "task_deadline_seconds": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 3600,
+              "description": "Maximum gateway task duration in seconds. Defaults to 600."
             }
           },
           "required": [
@@ -4511,8 +4783,64 @@
             "max_cost"
           ]
         },
+        "AgentOAuthConfiguration": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "client_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "audience": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2048
+            },
+            "scopes": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 32,
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              }
+            },
+            "authorization_endpoint": {
+              "type": "string",
+              "format": "uri",
+              "maxLength": 2048,
+              "description": "Required for browser and device OAuth."
+            },
+            "token_endpoint": {
+              "type": "string",
+              "format": "uri",
+              "maxLength": 2048
+            },
+            "device_authorization_endpoint": {
+              "type": "string",
+              "format": "uri",
+              "maxLength": 2048
+            },
+            "entra_obo": {
+              "$ref": "#/$defs/MCPEntraOBO"
+            }
+          },
+          "required": [
+            "client_id",
+            "audience",
+            "scopes",
+            "token_endpoint"
+          ],
+          "description": "OAuth grants are bound to the approved agent endpoint and caller identity. Browser and device flows use personal enrollment. Entra OBO uses verified workload assertions and a sealed middle-tier client secret."
+        },
         "PromptDefinition": {
           "type": "object",
+          "description": "Use template and variables for a single user message, or messages and variable_schema for a structured prompt.",
           "additionalProperties": false,
           "properties": {
             "template": {
@@ -4520,18 +4848,127 @@
               "maxLength": 65536
             },
             "variables": {
-              "type": "array",
+              "type": [
+                "array",
+                "null"
+              ],
               "items": {
                 "type": "string",
                 "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
               },
               "maxItems": 256
+            },
+            "messages": {
+              "type": "array",
+              "maxItems": 256,
+              "items": {
+                "$ref": "#/$defs/PromptMessage"
+              }
+            },
+            "variable_schema": {
+              "$ref": "#/$defs/PromptVariableSchema"
+            },
+            "default_parameters": {
+              "$ref": "#/$defs/PromptDefaultParameters"
+            }
+          }
+        },
+        "PromptMessage": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "role": {
+              "type": "string",
+              "enum": [
+                "system",
+                "user",
+                "assistant"
+              ]
+            },
+            "content": {
+              "type": "string",
+              "maxLength": 65536
             }
           },
           "required": [
-            "template",
-            "variables"
+            "role",
+            "content"
           ]
+        },
+        "PromptVariableSchema": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "object"
+              ]
+            },
+            "properties": {
+              "type": "object",
+              "additionalProperties": {
+                "$ref": "#/$defs/PromptVariableProperty"
+              }
+            },
+            "required": {
+              "type": "array",
+              "maxItems": 256,
+              "items": {
+                "type": "string",
+                "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
+              },
+              "uniqueItems": true
+            },
+            "additionalProperties": {
+              "type": "boolean",
+              "enum": [
+                false
+              ]
+            }
+          },
+          "required": [
+            "type",
+            "properties",
+            "required",
+            "additionalProperties"
+          ]
+        },
+        "PromptVariableProperty": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "string"
+              ]
+            }
+          },
+          "required": [
+            "type"
+          ]
+        },
+        "PromptDefaultParameters": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "temperature": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 2
+            },
+            "top_p": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "max_output_tokens": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2147483647
+            }
+          }
         },
         "ConfigurationRetrievalBinding": {
           "type": "object",
@@ -4637,6 +5074,485 @@
             }
           }
         },
+        "ConfigurationCode": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "accounts": {
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "$ref": "#/$defs/ConfigurationCodeAccount"
+              }
+            },
+            "pools": {
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "$ref": "#/$defs/ConfigurationCodePool"
+              }
+            },
+            "routes": {
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "$ref": "#/$defs/ConfigurationCodeRoute"
+              }
+            },
+            "budgets": {
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "$ref": "#/$defs/ConfigurationCodeBudget"
+              }
+            }
+          },
+          "required": [],
+          "description": "Resource IDs are artifact-local references. Accounts resolve through explicitly bound current destination enrollments. Pools and budgets reuse validated same-project artifact IDs or standard UUIDv5 destination IDs derived from project, resource kind and artifact reference, with unique natural matches as fallback. This preserves duplicate names and exact duplicate budgets without a registry. Routes resolve through unique slug. Unrelated ambiguous identities are refused. Source credentials, health, usage windows, conversation bindings and historical revisions stay local. Destination projects and providers must be prepared and enrolled before planning. Rename globally unique slugs for same-installation cross-project promotion."
+        },
+        "ConfigurationCodeAccount": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "project": {
+              "type": "string"
+            },
+            "provider": {
+              "type": "string"
+            },
+            "credential_ref": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "enabled": {
+              "type": "boolean"
+            },
+            "models": {
+              "items": {
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
+              },
+              "maxItems": 100,
+              "minItems": 1,
+              "type": "array",
+              "uniqueItems": true
+            }
+          },
+          "required": [
+            "id",
+            "project",
+            "provider",
+            "credential_ref",
+            "name",
+            "enabled",
+            "models"
+          ]
+        },
+        "ConfigurationCodePool": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "project": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "kind": {
+              "type": "string",
+              "enum": [
+                "shared",
+                "personal"
+              ]
+            },
+            "owner_ref": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "accounts": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 2147483647
+              }
+            },
+            "api_key_refs": {
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "id",
+            "project",
+            "name",
+            "kind",
+            "owner_ref",
+            "accounts",
+            "api_key_refs"
+          ]
+        },
+        "ConfigurationCodeRoute": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "project": {
+              "type": "string"
+            },
+            "slug": {
+              "pattern": "^[a-z0-9][a-z0-9._-]{0,99}$",
+              "type": "string"
+            },
+            "draft": {
+              "$ref": "#/$defs/ConfigurationCodeRoutePolicy"
+            },
+            "published": {
+              "$ref": "#/$defs/ConfigurationCodePublication"
+            }
+          },
+          "required": [
+            "id",
+            "project",
+            "slug",
+            "draft"
+          ]
+        },
+        "ConfigurationCodeRoutePolicy": {
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "models": {
+              "items": {
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
+              },
+              "maxItems": 100,
+              "minItems": 1,
+              "type": "array",
+              "uniqueItems": true
+            },
+            "max_body_bytes": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 1,
+              "maximum": 1073741824,
+              "description": "Optional ingress limit in bytes. Null inherits installation limits; a route can only lower them. Checks both encoded and decoded JSON, the complete multipart body, and individual client WebSocket messages. Published revisions pin this policy."
+            },
+            "tools": {
+              "$ref": "#/$defs/CodeResearchTools"
+            },
+            "messages_to_codex": {
+              "type": "boolean",
+              "default": false,
+              "description": "Explicitly allow Messages text and tool requests to use Codex subscription accounts through protocol translation. Published revisions pin this policy. Native forwarding remains the default. Translation alone preserves client identity and prompts. Codex identity compatibility requires its separate codex_cli_identity opt-in. Model rewriting requires its separate opt-in. Explicit low, medium and high reasoning effort is supported. Signed thinking, numeric reasoning budgets, beta features and unsupported required semantics are refused before dispatch."
+            },
+            "aliases": {
+              "type": "object",
+              "maxProperties": 100,
+              "additionalProperties": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200
+              },
+              "propertyNames": {
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]{0,199}$"
+              },
+              "description": "Stable public model names mapped directly to one native identifier in models. Requires model_rewriting. Alias chains and native name collisions are rejected. Immutable publications pin these mappings. Repointing an alias affects new conversations. Existing conversations retain their stored exact target while it remains published and authorized."
+            },
+            "model_rewriting": {
+              "type": "boolean",
+              "default": false,
+              "description": "Explicitly enable model identifier rewriting through exact aliases or configured model_pools. Disabled by default. This policy does not rewrite client identity or prompts."
+            },
+            "initial_recovery_attempts": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 2,
+              "description": "Maximum additional attempts per request for a new or established single-pin root conversation after an adapter proves nonexecution and the complete input is portable. Zero disables recovery. Published revisions pin this policy. Existing children, socket ownership and unresolved attempts prevent migration. Exact models remain the default. Only explicit model_pools authorize model changes. Live authority remains required. Producing-account reference ownership is preserved. Accepted, partial, ambiguous and opaque work never replays."
+            },
+            "model_pools": {
+              "type": "object",
+              "maxProperties": 100,
+              "additionalProperties": {
+                "type": "array",
+                "minItems": 2,
+                "maxItems": 100,
+                "uniqueItems": true,
+                "items": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 200
+                }
+              },
+              "description": "Explicit subscription model recovery pools keyed by a published native name or exact alias. Requires model_rewriting. Each ordered list starts with that name's normal exact target and contains distinct native identifiers from models. Recovery prefers the pinned exact target, then these alternatives, within initial_recovery_attempts and positive nonexecution, portability, live authorization and budget checks. Omitted pools preserve exact selection. Publications freeze the policy. Existing conversations retain their exact target, including after alias changes, while it remains published and authorized. Paid fallback is separately governed."
+            },
+            "pool": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "paid_participation": {
+              "type": "boolean"
+            },
+            "paid_targets": {
+              "type": "object",
+              "maxProperties": 100,
+              "additionalProperties": {
+                "$ref": "#/$defs/ConfigurationCodePaidTarget"
+              }
+            },
+            "chat_to_antigravity": {
+              "type": "boolean",
+              "description": "Explicit opt-in for chat translation through the Antigravity adapter."
+            },
+            "paid_fallback_targets": {
+              "type": "object",
+              "maxProperties": 100,
+              "additionalProperties": {
+                "$ref": "#/$defs/ConfigurationCodePaidTarget"
+              },
+              "description": "Explicit recovery-only paid targets keyed by native model, using the same named destination provider, slot and credential bindings as direct paid targets. Requires paid participation and a positive initial recovery limit."
+            },
+            "codex_cli_identity": {
+              "type": "boolean",
+              "description": "Explicit route-administrator opt-in, disabled by default and independent of protocol translation. On Codex subscription HTTP and WebSocket requests only, fills Originator with codex_cli_rs when every supplied Originator value is absent or blank. Preserves explicit Originator values, User-Agent, all prompts, tools, reasoning, state and other headers. Does not enable translation or prompt changes. Publication freezes the policy. Using subscription accounts through this compatibility identity may violate provider terms and risk account suspension. Review this behavior and risk before enabling and publishing."
+            },
+            "chat_to_codex": {
+              "type": "boolean",
+              "description": "Explicit Chat text and function tool translation through Codex Responses, disabled by default and pinned by publication. Native forwarding remains the default. Low, medium and high reasoning effort is supported. Required signed reasoning, media, server-owned state and unsupported semantics are refused. Independent Codex identity and model rewriting policies remain separate. Current OpenCode client and live subscription acceptance remain unqualified."
+            }
+          },
+          "required": [
+            "models",
+            "enabled",
+            "pool"
+          ],
+          "type": "object"
+        },
+        "CodeResearchTools": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": false,
+          "description": "Research subscription binding, frozen at publication. Requires an eligible Z.ai global account in the same project and pool; independent of inference models. Null disables research.",
+          "properties": {
+            "account_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "services": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 3,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "enum": [
+                  "search",
+                  "reader",
+                  "zread"
+                ]
+              }
+            }
+          },
+          "required": [
+            "account_id",
+            "services"
+          ]
+        },
+        "ConfigurationCodePaidTarget": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "provider",
+            "slot",
+            "credential_ref"
+          ],
+          "properties": {
+            "provider": {
+              "type": "string"
+            },
+            "slot": {
+              "type": "string"
+            },
+            "credential_ref": {
+              "type": "string"
+            }
+          }
+        },
+        "ConfigurationCodePublication": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "policy": {
+              "$ref": "#/$defs/ConfigurationCodeRoutePolicy"
+            },
+            "connections": {
+              "type": "object",
+              "additionalProperties": {
+                "$ref": "#/$defs/ConfigurationCodeConnection"
+              }
+            },
+            "paid_connections": {
+              "type": "object",
+              "additionalProperties": {
+                "$ref": "#/$defs/ConfigurationCodePaidConnection"
+              }
+            }
+          },
+          "required": [
+            "policy",
+            "connections"
+          ]
+        },
+        "ConfigurationCodeConnection": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "configuration": {
+              "$ref": "#/$defs/ProviderConfiguration"
+            },
+            "network_credential_ref": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "configuration"
+          ]
+        },
+        "ConfigurationCodePaidConnection": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "provider",
+            "slot_key_refs"
+          ],
+          "properties": {
+            "provider": {
+              "$ref": "#/$defs/ConfigurationProviderEntry"
+            },
+            "slot_key_refs": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "ConfigurationCodeBudget": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "project": {
+              "type": "string"
+            },
+            "route": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "api_key_ref": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "daily_tokens": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "format": "int64",
+                  "minimum": 1,
+                  "maximum": 9007199254740991
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "monthly_tokens": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "format": "int64",
+                  "minimum": 1,
+                  "maximum": 9007199254740991
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "enabled": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "id",
+            "project",
+            "route",
+            "api_key_ref",
+            "daily_tokens",
+            "monthly_tokens",
+            "enabled"
+          ]
+        },
         "ExternalCredentialReference": {
           "type": "object",
           "additionalProperties": false,
@@ -4675,6 +5591,34 @@
             }
           },
           "description": "Immutable store version. Aliases such as latest/AWSCURRENT are refused. Authentication uses process workload identity; references contain no credential values."
+        },
+        "ConfigurationCodeBindings": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "credentials": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string",
+                "format": "uuid"
+              }
+            },
+            "users": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string",
+                "format": "uuid"
+              }
+            },
+            "api_keys": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string",
+                "format": "uuid"
+              }
+            }
+          },
+          "required": []
         }
       }
     }
@@ -4735,6 +5679,53 @@
       "required": [
         "path",
         "idempotency_key"
+      ]
+    }
+  },
+  {
+    "name": "cancel_a2a_task_remote",
+    "group": "a2a-tasks",
+    "method": "POST",
+    "read_only": false,
+    "path": "/api/v1/a2a-tasks/{task_id}/cancel",
+    "description": "Cancel the task on its pinned remote agent. Requires project change permission and uses the task’s original credential binding.",
+    "scopes": [
+      [
+        "configure"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "task_id",
+        "in": "path",
+        "required": true,
+        "type": "string"
+      }
+    ],
+    "response_headers": {
+      "ETag": "etag"
+    },
+    "body_required": false,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "object",
+          "properties": {
+            "task_id": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "task_id"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "path"
       ]
     }
   },
@@ -5017,6 +6008,13 @@
               "maxLength": 8192,
               "writeOnly": true,
               "description": "Bearer credential; absent preserves, null removes. Never returned."
+            },
+            "entra_client_secret": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 16384,
+              "writeOnly": true,
+              "description": "Replacement Entra OBO middle-tier client secret. Required when enabling Entra or changing the issuer, client ID, or token endpoint. Never returned."
             }
           },
           "required": [
@@ -5062,6 +6060,14 @@
             "alias": {
               "type": "string",
               "pattern": "^t_[a-f0-9]{32}_[a-f0-9]{32}$"
+            },
+            "classification": {
+              "type": "string",
+              "enum": [
+                "read_only",
+                "approval_required"
+              ],
+              "description": "Operator classification of a published tool. Unclassified tools require approval."
             }
           },
           "required": [
@@ -5089,11 +6095,15 @@
             },
             "card_digest": {
               "type": "string",
-              "pattern": "^[a-f0-9]{64}$"
+              "pattern": "^[a-f0-9]{64}$",
+              "description": "SHA-256 digest of the reviewed agent card. An OAuth agent's card must be publicly readable for publication and discovery. Task requests use the caller's grant."
             },
             "credential_id": {
               "type": "string",
               "format": "uuid"
+            },
+            "oauth": {
+              "$ref": "#/$defs/AgentOAuthConfiguration"
             },
             "toolset_revisions": {
               "type": "array",
@@ -5118,6 +6128,28 @@
             "max_cost": {
               "type": "string",
               "pattern": "^[0-9]{1,12}(\\.[0-9]{1,12})?$"
+            },
+            "message_price": {
+              "type": "string",
+              "pattern": "^[0-9]{1,12}(\\.[0-9]{1,12})?$"
+            },
+            "remote_work_bound_seconds": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 3600,
+              "description": "The agent's declared maximum duration for remote work on one task, in seconds. Required for budgeted calls and enforced by the agent."
+            },
+            "max_task_continuations": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 128,
+              "description": "Maximum observed continuations per task. Defaults to 32."
+            },
+            "task_deadline_seconds": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 3600,
+              "description": "Maximum gateway task duration in seconds. Defaults to 600."
             }
           },
           "required": [
@@ -5130,8 +6162,78 @@
             "max_cost"
           ]
         },
+        "AgentOAuthConfiguration": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "client_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "audience": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2048
+            },
+            "scopes": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 32,
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              }
+            },
+            "authorization_endpoint": {
+              "type": "string",
+              "format": "uri",
+              "maxLength": 2048,
+              "description": "Required for browser and device OAuth."
+            },
+            "token_endpoint": {
+              "type": "string",
+              "format": "uri",
+              "maxLength": 2048
+            },
+            "device_authorization_endpoint": {
+              "type": "string",
+              "format": "uri",
+              "maxLength": 2048
+            },
+            "entra_obo": {
+              "$ref": "#/$defs/MCPEntraOBO"
+            }
+          },
+          "required": [
+            "client_id",
+            "audience",
+            "scopes",
+            "token_endpoint"
+          ],
+          "description": "OAuth grants are bound to the approved agent endpoint and caller identity. Browser and device flows use personal enrollment. Entra OBO uses verified workload assertions and a sealed middle-tier client secret."
+        },
+        "MCPEntraOBO": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "issuer"
+          ],
+          "properties": {
+            "issuer": {
+              "type": "string",
+              "maxLength": 2048,
+              "description": "Exact registered workload issuer trusted for delegated user assertions."
+            }
+          }
+        },
         "PromptDefinition": {
           "type": "object",
+          "description": "Use template and variables for a single user message, or messages and variable_schema for a structured prompt.",
           "additionalProperties": false,
           "properties": {
             "template": {
@@ -5139,18 +6241,127 @@
               "maxLength": 65536
             },
             "variables": {
-              "type": "array",
+              "type": [
+                "array",
+                "null"
+              ],
               "items": {
                 "type": "string",
                 "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
               },
               "maxItems": 256
+            },
+            "messages": {
+              "type": "array",
+              "maxItems": 256,
+              "items": {
+                "$ref": "#/$defs/PromptMessage"
+              }
+            },
+            "variable_schema": {
+              "$ref": "#/$defs/PromptVariableSchema"
+            },
+            "default_parameters": {
+              "$ref": "#/$defs/PromptDefaultParameters"
+            }
+          }
+        },
+        "PromptMessage": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "role": {
+              "type": "string",
+              "enum": [
+                "system",
+                "user",
+                "assistant"
+              ]
+            },
+            "content": {
+              "type": "string",
+              "maxLength": 65536
             }
           },
           "required": [
-            "template",
-            "variables"
+            "role",
+            "content"
           ]
+        },
+        "PromptVariableSchema": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "object"
+              ]
+            },
+            "properties": {
+              "type": "object",
+              "additionalProperties": {
+                "$ref": "#/$defs/PromptVariableProperty"
+              }
+            },
+            "required": {
+              "type": "array",
+              "maxItems": 256,
+              "items": {
+                "type": "string",
+                "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
+              },
+              "uniqueItems": true
+            },
+            "additionalProperties": {
+              "type": "boolean",
+              "enum": [
+                false
+              ]
+            }
+          },
+          "required": [
+            "type",
+            "properties",
+            "required",
+            "additionalProperties"
+          ]
+        },
+        "PromptVariableProperty": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "string"
+              ]
+            }
+          },
+          "required": [
+            "type"
+          ]
+        },
+        "PromptDefaultParameters": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "temperature": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 2
+            },
+            "top_p": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "max_output_tokens": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2147483647
+            }
+          }
         }
       }
     }
@@ -5464,6 +6675,16 @@
                 "format": "uuid"
               },
               "maxItems": 100
+            },
+            "run_limits": {
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/WorkflowRunLimits"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             }
           },
           "required": [
@@ -5618,6 +6839,40 @@
               "format": "int64",
               "minimum": 1,
               "maximum": 2147483647
+            }
+          }
+        },
+        "WorkflowRunLimits": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "max_iterations": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 1,
+              "maximum": 32
+            },
+            "max_tool_calls": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0,
+              "maximum": 128
+            },
+            "max_duration_seconds": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 1,
+              "maximum": 600
+            },
+            "max_concurrent_runs": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 1,
+              "maximum": 2147483647
+            },
+            "max_run_cost": {
+              "type": "string",
+              "pattern": "^[0-9]{1,12}(\\.[0-9]{1,12})?$"
             }
           }
         }
@@ -6285,6 +7540,17 @@
             "project_id": {
               "format": "uuid",
               "type": "string"
+            },
+            "account_weights": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "integer",
+                "format": "int64",
+                "minimum": 1,
+                "maximum": 2147483647
+              },
+              "maxProperties": 100,
+              "description": "Relative weights keyed by assigned account ID. Omitted accounts use weight 1."
             }
           },
           "required": [
@@ -6382,6 +7648,83 @@
             },
             "tools": {
               "$ref": "#/$defs/CodeResearchTools"
+            },
+            "messages_to_codex": {
+              "type": "boolean",
+              "default": false,
+              "description": "Explicitly allow Messages text and tool requests to use Codex subscription accounts through protocol translation. Published revisions pin this policy. Native forwarding remains the default. Translation alone preserves client identity and prompts. Codex identity compatibility requires its separate codex_cli_identity opt-in. Model rewriting requires its separate opt-in. Explicit low, medium and high reasoning effort is supported. Signed thinking, numeric reasoning budgets, beta features and unsupported required semantics are refused before dispatch."
+            },
+            "aliases": {
+              "type": "object",
+              "maxProperties": 100,
+              "additionalProperties": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200
+              },
+              "propertyNames": {
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]{0,199}$"
+              },
+              "description": "Stable public model names mapped directly to one native identifier in models. Requires model_rewriting. Alias chains and native name collisions are rejected. Immutable publications pin these mappings. Repointing an alias affects new conversations. Existing conversations retain their stored exact target while it remains published and authorized."
+            },
+            "model_rewriting": {
+              "type": "boolean",
+              "default": false,
+              "description": "Explicitly enable model identifier rewriting through exact aliases or configured model_pools. Disabled by default. This policy does not rewrite client identity or prompts."
+            },
+            "initial_recovery_attempts": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 2,
+              "description": "Maximum additional attempts per request for a new or established single-pin root conversation after an adapter proves nonexecution and the complete input is portable. Zero disables recovery. Published revisions pin this policy. Existing children, socket ownership and unresolved attempts prevent migration. Exact models remain the default. Only explicit model_pools authorize model changes. Live authority remains required. Producing-account reference ownership is preserved. Accepted, partial, ambiguous and opaque work never replays."
+            },
+            "model_pools": {
+              "type": "object",
+              "maxProperties": 100,
+              "additionalProperties": {
+                "type": "array",
+                "minItems": 2,
+                "maxItems": 100,
+                "uniqueItems": true,
+                "items": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 200
+                }
+              },
+              "description": "Explicit subscription model recovery pools keyed by a published native name or exact alias. Requires model_rewriting. Each ordered list starts with that name's normal exact target and contains distinct native identifiers from models. Recovery prefers the pinned exact target, then these alternatives, within initial_recovery_attempts and positive nonexecution, portability, live authorization and budget checks. Omitted pools preserve exact selection. Publications freeze the policy. Existing conversations retain their exact target, including after alias changes, while it remains published and authorized. Paid fallback is separately governed."
+            },
+            "paid_targets": {
+              "type": "object",
+              "additionalProperties": {
+                "$ref": "#/$defs/CodePaidTarget"
+              },
+              "description": "Exact native model to directly selected published metered provider and credential slot. A mapped model takes precedence over subscription accounts."
+            },
+            "paid_participation": {
+              "type": "boolean",
+              "default": false,
+              "description": "Explicitly permit metered API targets. Direct selection and subscription-first fallback require their separate target maps."
+            },
+            "chat_to_antigravity": {
+              "type": "boolean",
+              "description": "Explicitly allow Chat Completions text and function tools through the internal Antigravity Gemini target over HTTP or SSE. Published revisions pin this policy. Native forwarding remains the default. Client identity and prompts are preserved. Signed thought state, reasoning controls, media and server tools are unsupported. Returned signature state is refused before actionable output rather than discarded. Controlled fixtures do not qualify any current model or live subscription workflow."
+            },
+            "paid_fallback_targets": {
+              "type": "object",
+              "maxProperties": 100,
+              "additionalProperties": {
+                "$ref": "#/$defs/CodePaidTarget"
+              },
+              "description": "Explicit native model to published metered provider and credential slot for subscription-first bounded recovery. Requires paid_participation and positive initial_recovery_attempts. Subscription candidates are preferred. Same-model fallback needs no model pool. Different models require model_rewriting and a model_pool. Proven nonexecution and complete-input portability are required. Direct paid_targets retain precedence and cannot overlap this map. Existing paid owners stay pinned. Unknown paid money remains held against applicable limits."
+            },
+            "codex_cli_identity": {
+              "type": "boolean",
+              "description": "Explicit route-administrator opt-in, disabled by default and independent of protocol translation. On Codex subscription HTTP and WebSocket requests only, fills Originator with codex_cli_rs when every supplied Originator value is absent or blank. Preserves explicit Originator values, User-Agent, all prompts, tools, reasoning, state and other headers. Does not enable translation or prompt changes. Publication freezes the policy. Using subscription accounts through this compatibility identity may violate provider terms and risk account suspension. Review this behavior and risk before enabling and publishing."
+            },
+            "chat_to_codex": {
+              "type": "boolean",
+              "description": "Explicit Chat text and function tool translation through Codex Responses, disabled by default and pinned by publication. Native forwarding remains the default. Low, medium and high reasoning effort is supported. Required signed reasoning, media, server-owned state and unsupported semantics are refused. Independent Codex identity and model rewriting policies remain separate. Current OpenCode client and live subscription acceptance remain unqualified."
             }
           },
           "required": [
@@ -6424,6 +7767,24 @@
             "account_id",
             "services"
           ]
+        },
+        "CodePaidTarget": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "provider_id",
+            "slot_id"
+          ],
+          "properties": {
+            "provider_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "slot_id": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
         }
       }
     }
@@ -6434,7 +7795,7 @@
     "method": "POST",
     "read_only": false,
     "path": "/api/v1/observability/sinks",
-    "description": "create export sink",
+    "description": "Create an observability sink. The observability.runs and observability.trace_spans webhooks describe the corresponding evidence envelopes.",
     "scopes": [
       [
         "keys"
@@ -6510,7 +7871,9 @@
                   "guardrail_decisions",
                   "audit",
                   "metering",
-                  "focus"
+                  "focus",
+                  "runs",
+                  "trace_spans"
                 ],
                 "type": "string"
               },
@@ -6703,7 +8066,8 @@
                 "xecguard",
                 "zscaler_ai_guard",
                 "semantic_guard",
-                "decision_model"
+                "decision_model",
+                "typesafe"
               ]
             },
             "project_id": {
@@ -7064,6 +8428,147 @@
             "phase",
             "action"
           ]
+        }
+      }
+    }
+  },
+  {
+    "name": "create_investigation",
+    "group": "agents",
+    "method": "POST",
+    "read_only": false,
+    "path": "/api/v1/investigations",
+    "description": "Save an investigation",
+    "scopes": [
+      [
+        "configure"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "Idempotency-Key",
+        "in": "header",
+        "required": true,
+        "type": "string"
+      }
+    ],
+    "response_headers": {
+      "ETag": "etag"
+    },
+    "body_required": true,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "idempotency_key": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Idempotency-Key"
+        },
+        "body": {
+          "$ref": "#/$defs/InvestigationWrite"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "idempotency_key",
+        "body"
+      ],
+      "$defs": {
+        "InvestigationWrite": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "project_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "filters": {
+              "$ref": "#/$defs/InvestigationFilters"
+            },
+            "evidence": {
+              "type": "array",
+              "maxItems": 100,
+              "items": {
+                "$ref": "#/$defs/InvestigationEvidence"
+              }
+            },
+            "summary": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096
+            }
+          },
+          "required": [
+            "project_id",
+            "filters",
+            "evidence",
+            "summary"
+          ],
+          "description": "Operator-authored filters, evidence references and summary. Do not submit source payloads."
+        },
+        "InvestigationFilters": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "from": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "to": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "run_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "min_duration_ms": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            },
+            "max_duration_ms": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            },
+            "error": {
+              "type": "boolean"
+            },
+            "tool": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            }
+          },
+          "required": [],
+          "description": "Typed filters used to investigate agent evidence."
+        },
+        "InvestigationEvidence": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "run",
+                "step",
+                "approval",
+                "span",
+                "task",
+                "delegation"
+              ]
+            },
+            "id": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "required": [
+            "kind",
+            "id"
+          ],
+          "description": "Reference to evidence in the investigation project. A retained reference can outlive its source evidence."
         }
       }
     }
@@ -8493,6 +9998,13 @@
               "maxLength": 8192,
               "writeOnly": true,
               "description": "Bearer credential; absent preserves, null removes. Never returned."
+            },
+            "entra_client_secret": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 16384,
+              "writeOnly": true,
+              "description": "Replacement Entra OBO middle-tier client secret. Required when enabling Entra or changing the issuer, client ID, or token endpoint. Never returned."
             }
           },
           "required": [
@@ -8538,6 +10050,14 @@
             "alias": {
               "type": "string",
               "pattern": "^t_[a-f0-9]{32}_[a-f0-9]{32}$"
+            },
+            "classification": {
+              "type": "string",
+              "enum": [
+                "read_only",
+                "approval_required"
+              ],
+              "description": "Operator classification of a published tool. Unclassified tools require approval."
             }
           },
           "required": [
@@ -8565,11 +10085,15 @@
             },
             "card_digest": {
               "type": "string",
-              "pattern": "^[a-f0-9]{64}$"
+              "pattern": "^[a-f0-9]{64}$",
+              "description": "SHA-256 digest of the reviewed agent card. An OAuth agent's card must be publicly readable for publication and discovery. Task requests use the caller's grant."
             },
             "credential_id": {
               "type": "string",
               "format": "uuid"
+            },
+            "oauth": {
+              "$ref": "#/$defs/AgentOAuthConfiguration"
             },
             "toolset_revisions": {
               "type": "array",
@@ -8594,6 +10118,28 @@
             "max_cost": {
               "type": "string",
               "pattern": "^[0-9]{1,12}(\\.[0-9]{1,12})?$"
+            },
+            "message_price": {
+              "type": "string",
+              "pattern": "^[0-9]{1,12}(\\.[0-9]{1,12})?$"
+            },
+            "remote_work_bound_seconds": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 3600,
+              "description": "The agent's declared maximum duration for remote work on one task, in seconds. Required for budgeted calls and enforced by the agent."
+            },
+            "max_task_continuations": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 128,
+              "description": "Maximum observed continuations per task. Defaults to 32."
+            },
+            "task_deadline_seconds": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 3600,
+              "description": "Maximum gateway task duration in seconds. Defaults to 600."
             }
           },
           "required": [
@@ -8606,8 +10152,78 @@
             "max_cost"
           ]
         },
+        "AgentOAuthConfiguration": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "client_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "audience": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2048
+            },
+            "scopes": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 32,
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              }
+            },
+            "authorization_endpoint": {
+              "type": "string",
+              "format": "uri",
+              "maxLength": 2048,
+              "description": "Required for browser and device OAuth."
+            },
+            "token_endpoint": {
+              "type": "string",
+              "format": "uri",
+              "maxLength": 2048
+            },
+            "device_authorization_endpoint": {
+              "type": "string",
+              "format": "uri",
+              "maxLength": 2048
+            },
+            "entra_obo": {
+              "$ref": "#/$defs/MCPEntraOBO"
+            }
+          },
+          "required": [
+            "client_id",
+            "audience",
+            "scopes",
+            "token_endpoint"
+          ],
+          "description": "OAuth grants are bound to the approved agent endpoint and caller identity. Browser and device flows use personal enrollment. Entra OBO uses verified workload assertions and a sealed middle-tier client secret."
+        },
+        "MCPEntraOBO": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "issuer"
+          ],
+          "properties": {
+            "issuer": {
+              "type": "string",
+              "maxLength": 2048,
+              "description": "Exact registered workload issuer trusted for delegated user assertions."
+            }
+          }
+        },
         "PromptDefinition": {
           "type": "object",
+          "description": "Use template and variables for a single user message, or messages and variable_schema for a structured prompt.",
           "additionalProperties": false,
           "properties": {
             "template": {
@@ -8615,18 +10231,127 @@
               "maxLength": 65536
             },
             "variables": {
-              "type": "array",
+              "type": [
+                "array",
+                "null"
+              ],
               "items": {
                 "type": "string",
                 "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
               },
               "maxItems": 256
+            },
+            "messages": {
+              "type": "array",
+              "maxItems": 256,
+              "items": {
+                "$ref": "#/$defs/PromptMessage"
+              }
+            },
+            "variable_schema": {
+              "$ref": "#/$defs/PromptVariableSchema"
+            },
+            "default_parameters": {
+              "$ref": "#/$defs/PromptDefaultParameters"
+            }
+          }
+        },
+        "PromptMessage": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "role": {
+              "type": "string",
+              "enum": [
+                "system",
+                "user",
+                "assistant"
+              ]
+            },
+            "content": {
+              "type": "string",
+              "maxLength": 65536
             }
           },
           "required": [
-            "template",
-            "variables"
+            "role",
+            "content"
           ]
+        },
+        "PromptVariableSchema": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "object"
+              ]
+            },
+            "properties": {
+              "type": "object",
+              "additionalProperties": {
+                "$ref": "#/$defs/PromptVariableProperty"
+              }
+            },
+            "required": {
+              "type": "array",
+              "maxItems": 256,
+              "items": {
+                "type": "string",
+                "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
+              },
+              "uniqueItems": true
+            },
+            "additionalProperties": {
+              "type": "boolean",
+              "enum": [
+                false
+              ]
+            }
+          },
+          "required": [
+            "type",
+            "properties",
+            "required",
+            "additionalProperties"
+          ]
+        },
+        "PromptVariableProperty": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "string"
+              ]
+            }
+          },
+          "required": [
+            "type"
+          ]
+        },
+        "PromptDefaultParameters": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "temperature": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 2
+            },
+            "top_p": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "max_output_tokens": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2147483647
+            }
+          }
         }
       }
     }
@@ -10388,6 +12113,37 @@
                   "type": "null"
                 }
               ]
+            },
+            "tool_execution": {
+              "type": "string",
+              "enum": [
+                "",
+                "gateway"
+              ],
+              "description": "When gateway, the gateway executes authorized read-only tools on transformed Chat Completions routes."
+            },
+            "toolsets": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "uniqueItems": true,
+              "description": "Published toolset IDs that gateway execution may use. Callers can select a subset."
+            },
+            "responses_mcp_items": {
+              "type": "boolean",
+              "description": "Operator declaration that Responses clients support gateway-generated MCP output items. Requires gateway tool execution on a transformed route. MCP items are emitted only when the run uses the certified built-in Responses contract; other contracts omit them."
+            },
+            "run_limits": {
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/WorkflowRunLimits"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             }
           },
           "required": [
@@ -11053,6 +12809,40 @@
             "acknowledge_opaque_unmetered"
           ],
           "type": "object"
+        },
+        "WorkflowRunLimits": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "max_iterations": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 1,
+              "maximum": 32
+            },
+            "max_tool_calls": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0,
+              "maximum": 128
+            },
+            "max_duration_seconds": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 1,
+              "maximum": 600
+            },
+            "max_concurrent_runs": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 1,
+              "maximum": 2147483647
+            },
+            "max_run_cost": {
+              "type": "string",
+              "pattern": "^[0-9]{1,12}(\\.[0-9]{1,12})?$"
+            }
+          }
         }
       }
     }
@@ -11242,6 +13032,37 @@
                   "type": "null"
                 }
               ]
+            },
+            "tool_execution": {
+              "type": "string",
+              "enum": [
+                "",
+                "gateway"
+              ],
+              "description": "When gateway, the gateway executes authorized read-only tools on transformed Chat Completions routes."
+            },
+            "toolsets": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "uniqueItems": true,
+              "description": "Published toolset IDs that gateway execution may use. Callers can select a subset."
+            },
+            "responses_mcp_items": {
+              "type": "boolean",
+              "description": "Operator declaration that Responses clients support gateway-generated MCP output items. Requires gateway tool execution on a transformed route. MCP items are emitted only when the run uses the certified built-in Responses contract; other contracts omit them."
+            },
+            "run_limits": {
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/WorkflowRunLimits"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             }
           },
           "required": [
@@ -11907,6 +13728,40 @@
             "acknowledge_opaque_unmetered"
           ],
           "type": "object"
+        },
+        "WorkflowRunLimits": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "max_iterations": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 1,
+              "maximum": 32
+            },
+            "max_tool_calls": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0,
+              "maximum": 128
+            },
+            "max_duration_seconds": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 1,
+              "maximum": 600
+            },
+            "max_concurrent_runs": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 1,
+              "maximum": 2147483647
+            },
+            "max_run_cost": {
+              "type": "string",
+              "pattern": "^[0-9]{1,12}(\\.[0-9]{1,12})?$"
+            }
+          }
         }
       }
     }
@@ -12450,7 +14305,9 @@
                   "requests",
                   "attempts",
                   "guardrail_decisions",
-                  "audit"
+                  "audit",
+                  "runs",
+                  "trace_spans"
                 ]
               }
             },
@@ -12565,6 +14422,13 @@
               "maxLength": 8192,
               "writeOnly": true,
               "description": "Bearer credential; absent preserves, null removes. Never returned."
+            },
+            "entra_client_secret": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 16384,
+              "writeOnly": true,
+              "description": "Replacement Entra OBO middle-tier client secret. Required when enabling Entra or changing the issuer, client ID, or token endpoint. Never returned."
             }
           },
           "required": [
@@ -12610,6 +14474,14 @@
             "alias": {
               "type": "string",
               "pattern": "^t_[a-f0-9]{32}_[a-f0-9]{32}$"
+            },
+            "classification": {
+              "type": "string",
+              "enum": [
+                "read_only",
+                "approval_required"
+              ],
+              "description": "Operator classification of a published tool. Unclassified tools require approval."
             }
           },
           "required": [
@@ -12637,11 +14509,15 @@
             },
             "card_digest": {
               "type": "string",
-              "pattern": "^[a-f0-9]{64}$"
+              "pattern": "^[a-f0-9]{64}$",
+              "description": "SHA-256 digest of the reviewed agent card. An OAuth agent's card must be publicly readable for publication and discovery. Task requests use the caller's grant."
             },
             "credential_id": {
               "type": "string",
               "format": "uuid"
+            },
+            "oauth": {
+              "$ref": "#/$defs/AgentOAuthConfiguration"
             },
             "toolset_revisions": {
               "type": "array",
@@ -12666,6 +14542,28 @@
             "max_cost": {
               "type": "string",
               "pattern": "^[0-9]{1,12}(\\.[0-9]{1,12})?$"
+            },
+            "message_price": {
+              "type": "string",
+              "pattern": "^[0-9]{1,12}(\\.[0-9]{1,12})?$"
+            },
+            "remote_work_bound_seconds": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 3600,
+              "description": "The agent's declared maximum duration for remote work on one task, in seconds. Required for budgeted calls and enforced by the agent."
+            },
+            "max_task_continuations": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 128,
+              "description": "Maximum observed continuations per task. Defaults to 32."
+            },
+            "task_deadline_seconds": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 3600,
+              "description": "Maximum gateway task duration in seconds. Defaults to 600."
             }
           },
           "required": [
@@ -12678,8 +14576,78 @@
             "max_cost"
           ]
         },
+        "AgentOAuthConfiguration": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "client_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "audience": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2048
+            },
+            "scopes": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 32,
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              }
+            },
+            "authorization_endpoint": {
+              "type": "string",
+              "format": "uri",
+              "maxLength": 2048,
+              "description": "Required for browser and device OAuth."
+            },
+            "token_endpoint": {
+              "type": "string",
+              "format": "uri",
+              "maxLength": 2048
+            },
+            "device_authorization_endpoint": {
+              "type": "string",
+              "format": "uri",
+              "maxLength": 2048
+            },
+            "entra_obo": {
+              "$ref": "#/$defs/MCPEntraOBO"
+            }
+          },
+          "required": [
+            "client_id",
+            "audience",
+            "scopes",
+            "token_endpoint"
+          ],
+          "description": "OAuth grants are bound to the approved agent endpoint and caller identity. Browser and device flows use personal enrollment. Entra OBO uses verified workload assertions and a sealed middle-tier client secret."
+        },
+        "MCPEntraOBO": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "issuer"
+          ],
+          "properties": {
+            "issuer": {
+              "type": "string",
+              "maxLength": 2048,
+              "description": "Exact registered workload issuer trusted for delegated user assertions."
+            }
+          }
+        },
         "PromptDefinition": {
           "type": "object",
+          "description": "Use template and variables for a single user message, or messages and variable_schema for a structured prompt.",
           "additionalProperties": false,
           "properties": {
             "template": {
@@ -12687,18 +14655,127 @@
               "maxLength": 65536
             },
             "variables": {
-              "type": "array",
+              "type": [
+                "array",
+                "null"
+              ],
               "items": {
                 "type": "string",
                 "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
               },
               "maxItems": 256
+            },
+            "messages": {
+              "type": "array",
+              "maxItems": 256,
+              "items": {
+                "$ref": "#/$defs/PromptMessage"
+              }
+            },
+            "variable_schema": {
+              "$ref": "#/$defs/PromptVariableSchema"
+            },
+            "default_parameters": {
+              "$ref": "#/$defs/PromptDefaultParameters"
+            }
+          }
+        },
+        "PromptMessage": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "role": {
+              "type": "string",
+              "enum": [
+                "system",
+                "user",
+                "assistant"
+              ]
+            },
+            "content": {
+              "type": "string",
+              "maxLength": 65536
             }
           },
           "required": [
-            "template",
-            "variables"
+            "role",
+            "content"
           ]
+        },
+        "PromptVariableSchema": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "object"
+              ]
+            },
+            "properties": {
+              "type": "object",
+              "additionalProperties": {
+                "$ref": "#/$defs/PromptVariableProperty"
+              }
+            },
+            "required": {
+              "type": "array",
+              "maxItems": 256,
+              "items": {
+                "type": "string",
+                "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
+              },
+              "uniqueItems": true
+            },
+            "additionalProperties": {
+              "type": "boolean",
+              "enum": [
+                false
+              ]
+            }
+          },
+          "required": [
+            "type",
+            "properties",
+            "required",
+            "additionalProperties"
+          ]
+        },
+        "PromptVariableProperty": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "string"
+              ]
+            }
+          },
+          "required": [
+            "type"
+          ]
+        },
+        "PromptDefaultParameters": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "temperature": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 2
+            },
+            "top_p": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "max_output_tokens": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2147483647
+            }
+          }
         }
       }
     }
@@ -15009,6 +17086,100 @@
     }
   },
   {
+    "name": "get_a2a_task",
+    "group": "agents",
+    "method": "GET",
+    "read_only": true,
+    "path": "/api/v1/a2a-tasks/{task_id}",
+    "description": "Get an A2A task",
+    "scopes": [
+      [
+        "read"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "task_id",
+        "in": "path",
+        "required": true,
+        "type": "string"
+      }
+    ],
+    "response_headers": {
+      "ETag": "etag"
+    },
+    "body_required": false,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "object",
+          "properties": {
+            "task_id": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "task_id"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "path"
+      ]
+    }
+  },
+  {
+    "name": "get_a2a_task_remote",
+    "group": "a2a-tasks",
+    "method": "GET",
+    "read_only": true,
+    "path": "/api/v1/a2a-tasks/{task_id}/remote",
+    "description": "Retrieve the task from its pinned remote agent. Requires project change permission and uses the task’s original credential binding.",
+    "scopes": [
+      [
+        "configure"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "task_id",
+        "in": "path",
+        "required": true,
+        "type": "string"
+      }
+    ],
+    "response_headers": {
+      "ETag": "etag"
+    },
+    "body_required": false,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "object",
+          "properties": {
+            "task_id": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "task_id"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "path"
+      ]
+    }
+  },
+  {
     "name": "get_agent",
     "group": "agents",
     "method": "GET",
@@ -15104,6 +17275,53 @@
           "required": [
             "publication_id",
             "revision_id"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "path"
+      ]
+    }
+  },
+  {
+    "name": "get_agent_run",
+    "group": "agents",
+    "method": "GET",
+    "read_only": true,
+    "path": "/api/v1/agent-runs/{run_id}",
+    "description": "Get a gateway run",
+    "scopes": [
+      [
+        "read"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "run_id",
+        "in": "path",
+        "required": true,
+        "type": "string"
+      }
+    ],
+    "response_headers": {
+      "ETag": "etag"
+    },
+    "body_required": false,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "object",
+          "properties": {
+            "run_id": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "run_id"
           ]
         }
       },
@@ -15419,6 +17637,12 @@
         "in": "query",
         "required": false,
         "type": "string"
+      },
+      {
+        "name": "platform",
+        "in": "query",
+        "required": false,
+        "type": "string"
       }
     ],
     "response_headers": {
@@ -15464,6 +17688,9 @@
             },
             "small_model": {
               "type": "string"
+            },
+            "platform": {
+              "$ref": "#/$defs/CodeClientPlatform"
             }
           },
           "additionalProperties": false,
@@ -15476,7 +17703,18 @@
       "required": [
         "path",
         "query"
-      ]
+      ],
+      "$defs": {
+        "CodeClientPlatform": {
+          "type": "string",
+          "enum": [
+            "linux",
+            "macos",
+            "windows"
+          ],
+          "description": "Developer platform for paths and shell syntax. Linux and macOS use POSIX shells, Windows uses PowerShell."
+        }
+      }
     }
   },
   {
@@ -15863,6 +18101,53 @@
       "type": "object",
       "properties": {},
       "additionalProperties": false
+    }
+  },
+  {
+    "name": "get_investigation",
+    "group": "agents",
+    "method": "GET",
+    "read_only": true,
+    "path": "/api/v1/investigations/{investigation_id}",
+    "description": "Get an investigation",
+    "scopes": [
+      [
+        "read"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "investigation_id",
+        "in": "path",
+        "required": true,
+        "type": "string"
+      }
+    ],
+    "response_headers": {
+      "ETag": "etag"
+    },
+    "body_required": false,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "object",
+          "properties": {
+            "investigation_id": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "investigation_id"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "path"
+      ]
     }
   },
   {
@@ -18012,6 +20297,541 @@
     }
   },
   {
+    "name": "importAntigravityCredentials",
+    "group": "providers",
+    "method": "POST",
+    "read_only": false,
+    "path": "/api/v1/providers/{provider_id}/antigravity-import",
+    "description": "Import Antigravity subscription credentials once",
+    "scopes": [
+      [
+        "configure"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "provider_id",
+        "in": "path",
+        "required": true,
+        "type": "string"
+      },
+      {
+        "name": "If-Match",
+        "in": "header",
+        "required": true,
+        "type": "string"
+      }
+    ],
+    "response_headers": {
+      "ETag": "etag"
+    },
+    "body_required": true,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "object",
+          "properties": {
+            "provider_id": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "provider_id"
+          ]
+        },
+        "if_match": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Current provider draft ETag"
+        },
+        "body": {
+          "$ref": "#/$defs/AntigravityCredentialImportRequest"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "if_match",
+        "body"
+      ],
+      "$defs": {
+        "AntigravityCredentialImportRequest": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "credentials"
+          ],
+          "properties": {
+            "credentials": {
+              "type": "string",
+              "maxLength": 65536,
+              "writeOnly": true,
+              "description": "One-time Antigravity migration JSON with type=antigravity, access_token, refresh_token, client_id and client_secret for the original authorized OAuth client. The client_id must match the provider option. Optional pinned export metadata is expired (RFC3339), expires_in, timestamp, email and project_id. Supplied expiry must be current and supplied project_id must agree with authenticated project evidence. Email never establishes identity. Unknown fields, ambiguous JSON, raw IDE stores, service accounts and credentials without original client authorization are unsupported. The original access token must authenticate fixed userinfo and project endpoints. Import refreshes and verifies the same subject and project before encrypted staging."
+            },
+            "slot_id": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Existing credential slot, defaults to the default slot"
+            }
+          }
+        }
+      }
+    }
+  },
+  {
+    "name": "importClaudeCredentials",
+    "group": "providers",
+    "method": "POST",
+    "read_only": false,
+    "path": "/api/v1/providers/{provider_id}/claude-import",
+    "description": "Import Claude subscription credentials once",
+    "scopes": [
+      [
+        "configure"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "provider_id",
+        "in": "path",
+        "required": true,
+        "type": "string"
+      },
+      {
+        "name": "If-Match",
+        "in": "header",
+        "required": true,
+        "type": "string"
+      }
+    ],
+    "response_headers": {
+      "ETag": "etag"
+    },
+    "body_required": true,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "object",
+          "properties": {
+            "provider_id": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "provider_id"
+          ]
+        },
+        "if_match": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Current provider draft ETag"
+        },
+        "body": {
+          "$ref": "#/$defs/ClaudeCredentialImportRequest"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "if_match",
+        "body"
+      ],
+      "$defs": {
+        "ClaudeCredentialImportRequest": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "credentials"
+          ],
+          "properties": {
+            "credentials": {
+              "type": "string",
+              "maxLength": 65536,
+              "writeOnly": true,
+              "description": "Claude Code .credentials.json JSON text containing only claudeAiOauth with accessToken, refreshToken, expiresAt in epoch milliseconds and scopes including user:profile and user:inference. Optional metadata fields are refreshTokenExpiresAt, subscriptionType, subscriptionTypeSource, subscriptionTypeVerifiedAt, rateLimitTier and clientId. A supplied clientId must match the supported official client. Other fields, alternative credential stores and ambiguous JSON are rejected. The original access token must still authenticate the fixed profile endpoint. Import verifies account and organization before and after refresh, without decoding token claims."
+            },
+            "slot_id": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Existing credential slot, defaults to the default slot"
+            }
+          }
+        }
+      }
+    }
+  },
+  {
+    "name": "importCodexCredentials",
+    "group": "providers",
+    "method": "POST",
+    "read_only": false,
+    "path": "/api/v1/providers/{provider_id}/codex-import",
+    "description": "Import Codex subscription credentials once",
+    "scopes": [
+      [
+        "configure"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "provider_id",
+        "in": "path",
+        "required": true,
+        "type": "string"
+      },
+      {
+        "name": "If-Match",
+        "in": "header",
+        "required": true,
+        "type": "string"
+      }
+    ],
+    "response_headers": {
+      "ETag": "etag"
+    },
+    "body_required": true,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "object",
+          "properties": {
+            "provider_id": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "provider_id"
+          ]
+        },
+        "if_match": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Current provider draft ETag"
+        },
+        "body": {
+          "$ref": "#/$defs/CodexCredentialImportRequest"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "if_match",
+        "body"
+      ],
+      "$defs": {
+        "CodexCredentialImportRequest": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "credentials"
+          ],
+          "properties": {
+            "credentials": {
+              "type": "string",
+              "maxLength": 65536,
+              "writeOnly": true,
+              "description": "Codex auth.json JSON text. Supports chatgpt auth_mode or its omission, absent or null OPENAI_API_KEY, tokens with access_token, id_token, refresh_token and account_id, and optional RFC3339 last_refresh. Other fields and ambiguous JSON are rejected. Expired local tokens may be imported if refresh verifies the same account and user."
+            },
+            "slot_id": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Existing credential slot, defaults to the default slot"
+            }
+          }
+        }
+      }
+    }
+  },
+  {
+    "name": "list_a2a_tasks",
+    "group": "agents",
+    "method": "GET",
+    "read_only": true,
+    "path": "/api/v1/a2a-tasks",
+    "description": "List A2A tasks",
+    "scopes": [
+      [
+        "read"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "cursor",
+        "in": "query",
+        "required": false,
+        "type": "string"
+      },
+      {
+        "name": "limit",
+        "in": "query",
+        "required": false,
+        "type": "integer"
+      },
+      {
+        "name": "project_id",
+        "in": "query",
+        "required": false,
+        "type": "string"
+      }
+    ],
+    "response_headers": {
+      "ETag": "etag"
+    },
+    "body_required": false,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "type": "object",
+          "properties": {
+            "cursor": {
+              "type": "string"
+            },
+            "limit": {
+              "format": "int32",
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
+            },
+            "project_id": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "list_agent_delegations",
+    "group": "agents",
+    "method": "GET",
+    "read_only": true,
+    "path": "/api/v1/agent-delegations",
+    "description": "List delegations",
+    "scopes": [
+      [
+        "read"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "cursor",
+        "in": "query",
+        "required": false,
+        "type": "string"
+      },
+      {
+        "name": "limit",
+        "in": "query",
+        "required": false,
+        "type": "integer"
+      },
+      {
+        "name": "project_id",
+        "in": "query",
+        "required": false,
+        "type": "string"
+      },
+      {
+        "name": "delegation_id",
+        "in": "query",
+        "required": false,
+        "type": "string"
+      }
+    ],
+    "response_headers": {
+      "ETag": "etag"
+    },
+    "body_required": false,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "type": "object",
+          "properties": {
+            "cursor": {
+              "type": "string"
+            },
+            "limit": {
+              "format": "int32",
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
+            },
+            "project_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "delegation_id": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "list_agent_run_spans",
+    "group": "agents",
+    "method": "GET",
+    "read_only": true,
+    "path": "/api/v1/agent-runs/{run_id}/spans",
+    "description": "List correlated run spans",
+    "scopes": [
+      [
+        "read"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "run_id",
+        "in": "path",
+        "required": true,
+        "type": "string"
+      },
+      {
+        "name": "span_id",
+        "in": "query",
+        "required": false,
+        "type": "string"
+      },
+      {
+        "name": "cursor",
+        "in": "query",
+        "required": false,
+        "type": "string"
+      },
+      {
+        "name": "limit",
+        "in": "query",
+        "required": false,
+        "type": "integer"
+      }
+    ],
+    "response_headers": {
+      "ETag": "etag"
+    },
+    "body_required": false,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "object",
+          "properties": {
+            "run_id": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "run_id"
+          ]
+        },
+        "query": {
+          "type": "object",
+          "properties": {
+            "span_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "cursor": {
+              "type": "string"
+            },
+            "limit": {
+              "format": "int32",
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "path"
+      ]
+    }
+  },
+  {
+    "name": "list_agent_runs",
+    "group": "agents",
+    "method": "GET",
+    "read_only": true,
+    "path": "/api/v1/agent-runs",
+    "description": "List gateway runs",
+    "scopes": [
+      [
+        "read"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "cursor",
+        "in": "query",
+        "required": false,
+        "type": "string"
+      },
+      {
+        "name": "limit",
+        "in": "query",
+        "required": false,
+        "type": "integer"
+      },
+      {
+        "name": "project_id",
+        "in": "query",
+        "required": false,
+        "type": "string"
+      }
+    ],
+    "response_headers": {
+      "ETag": "etag"
+    },
+    "body_required": false,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "type": "object",
+          "properties": {
+            "cursor": {
+              "type": "string"
+            },
+            "limit": {
+              "format": "int32",
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
+            },
+            "project_id": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  {
     "name": "list_agents",
     "group": "agents",
     "method": "GET",
@@ -18522,6 +21342,12 @@
         "in": "query",
         "required": false,
         "type": "string"
+      },
+      {
+        "name": "attempt_id",
+        "in": "query",
+        "required": false,
+        "type": "string"
       }
     ],
     "response_headers": {
@@ -18566,6 +21392,10 @@
             "end_user_digest": {
               "type": "string",
               "pattern": "^([0-9a-f]{64}|unidentified)$"
+            },
+            "attempt_id": {
+              "type": "string",
+              "format": "uuid"
             }
           },
           "additionalProperties": false
@@ -19442,6 +22272,68 @@
             "search": {
               "type": "string",
               "maxLength": 200
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "list_investigations",
+    "group": "agents",
+    "method": "GET",
+    "read_only": true,
+    "path": "/api/v1/investigations",
+    "description": "List investigations",
+    "scopes": [
+      [
+        "read"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "cursor",
+        "in": "query",
+        "required": false,
+        "type": "string"
+      },
+      {
+        "name": "limit",
+        "in": "query",
+        "required": false,
+        "type": "integer"
+      },
+      {
+        "name": "project_id",
+        "in": "query",
+        "required": false,
+        "type": "string"
+      }
+    ],
+    "response_headers": {
+      "ETag": "etag"
+    },
+    "body_required": false,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "type": "object",
+          "properties": {
+            "cursor": {
+              "type": "string"
+            },
+            "limit": {
+              "format": "int32",
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
+            },
+            "project_id": {
+              "type": "string",
+              "format": "uuid"
             }
           },
           "additionalProperties": false
@@ -23160,6 +26052,9 @@
                 "$ref": "#/$defs/ExternalCredentialReference"
               },
               "description": "Destination bindings for logical credential references. Stored without resolved values; new versions must pass validation before activation. A name cannot also appear in secret_bindings. Introducing an external reference requires installation-wide settings authority in addition to configure authority."
+            },
+            "code_bindings": {
+              "$ref": "#/$defs/ConfigurationCodeBindings"
             }
           },
           "required": [
@@ -23168,7 +26063,7 @@
           "type": "object"
         },
         "ConfigurationDocument": {
-          "description": "Secret-free desired-state artifact identified by natural names, never UUIDs",
+          "description": "Secret-free desired-state artifact using natural destination identities. Code UUIDs are artifact-local references, never requested destination IDs.",
           "properties": {
             "api_version": {
               "enum": [
@@ -23329,6 +26224,9 @@
               "items": {
                 "$ref": "#/$defs/ConfigurationRetrievalBinding"
               }
+            },
+            "code": {
+              "$ref": "#/$defs/ConfigurationCode"
             }
           },
           "required": [
@@ -25309,7 +28207,7 @@
               "type": "boolean"
             },
             "scope": {
-              "type": "object"
+              "$ref": "#/$defs/BillingScope"
             },
             "credential_ref": {
               "type": "string",
@@ -25321,6 +28219,166 @@
             "scope",
             "credential_ref"
           ]
+        },
+        "BillingScope": {
+          "description": "Source-shaped billing scope. Polling sources accept an empty scope. Cloud sources require their export details.",
+          "oneOf": [
+            {
+              "$ref": "#/$defs/PollingBillingScope"
+            },
+            {
+              "$ref": "#/$defs/AWSBillingScope"
+            },
+            {
+              "$ref": "#/$defs/GoogleBillingScope"
+            },
+            {
+              "$ref": "#/$defs/AzureBillingScope"
+            }
+          ]
+        },
+        "PollingBillingScope": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "project_ids": {
+              "type": "array",
+              "maxItems": 100,
+              "items": {
+                "type": "string",
+                "pattern": "^proj_[A-Za-z0-9]{1,64}$"
+              }
+            },
+            "workspace_ids": {
+              "type": "array",
+              "maxItems": 100,
+              "items": {
+                "type": "string",
+                "pattern": "^(wrkspc_[A-Za-z0-9]{1,64}|default)$"
+              }
+            }
+          },
+          "not": {
+            "required": [
+              "project_ids",
+              "workspace_ids"
+            ]
+          }
+        },
+        "AWSBillingScope": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "payer_account_id",
+            "bucket",
+            "report_prefix",
+            "region"
+          ],
+          "properties": {
+            "payer_account_id": {
+              "type": "string",
+              "pattern": "^[0-9]{12}$"
+            },
+            "bucket": {
+              "type": "string",
+              "minLength": 3,
+              "maxLength": 63,
+              "pattern": "^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$"
+            },
+            "report_prefix": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 1024,
+              "description": "CUR report prefix including the report name"
+            },
+            "region": {
+              "type": "string",
+              "maxLength": 64,
+              "pattern": "^[a-z]{2}(-[a-z0-9]+)+-[0-9]+$"
+            },
+            "linked_account_ids": {
+              "type": "array",
+              "maxItems": 100,
+              "items": {
+                "type": "string",
+                "pattern": "^[0-9]{12}$"
+              }
+            }
+          }
+        },
+        "GoogleBillingScope": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "billing_account_id",
+            "bigquery_project_id",
+            "dataset_id",
+            "table_id"
+          ],
+          "properties": {
+            "billing_account_id": {
+              "type": "string"
+            },
+            "bigquery_project_id": {
+              "type": "string"
+            },
+            "dataset_id": {
+              "type": "string"
+            },
+            "table_id": {
+              "type": "string"
+            },
+            "project_ids": {
+              "type": "array",
+              "maxItems": 100,
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "AzureBillingScope": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "billing_scope",
+            "export_name",
+            "storage_account",
+            "container"
+          ],
+          "properties": {
+            "billing_scope": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 1024
+            },
+            "export_name": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 1024
+            },
+            "storage_account": {
+              "type": "string",
+              "pattern": "^[a-z0-9]{3,24}$"
+            },
+            "container": {
+              "type": "string",
+              "minLength": 3,
+              "maxLength": 63
+            },
+            "prefix": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "subscription_ids": {
+              "type": "array",
+              "maxItems": 100,
+              "items": {
+                "type": "string",
+                "format": "uuid"
+              }
+            }
+          }
         },
         "ConfigurationRouteEntry": {
           "properties": {
@@ -25474,6 +28532,37 @@
               "oneOf": [
                 {
                   "$ref": "#/$defs/PassthroughConfig"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "tool_execution": {
+              "type": "string",
+              "enum": [
+                "",
+                "gateway"
+              ],
+              "description": "When gateway, the gateway executes authorized read-only tools on transformed Chat Completions routes."
+            },
+            "toolsets": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "uniqueItems": true,
+              "description": "Published toolset IDs that gateway execution may use. Callers can select a subset."
+            },
+            "responses_mcp_items": {
+              "type": "boolean",
+              "description": "Operator declaration that Responses clients support gateway-generated MCP output items. Requires gateway tool execution on a transformed route. MCP items are emitted only when the run uses the certified built-in Responses contract; other contracts omit them."
+            },
+            "run_limits": {
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/WorkflowRunLimits"
                 },
                 {
                   "type": "null"
@@ -26129,6 +29218,40 @@
           ],
           "type": "object"
         },
+        "WorkflowRunLimits": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "max_iterations": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 1,
+              "maximum": 32
+            },
+            "max_tool_calls": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0,
+              "maximum": 128
+            },
+            "max_duration_seconds": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 1,
+              "maximum": 600
+            },
+            "max_concurrent_runs": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 1,
+              "maximum": 2147483647
+            },
+            "max_run_cost": {
+              "type": "string",
+              "pattern": "^[0-9]{1,12}(\\.[0-9]{1,12})?$"
+            }
+          }
+        },
         "ConfigurationOrganizationEntry": {
           "type": "object",
           "additionalProperties": false,
@@ -26335,6 +29458,10 @@
                 "format": "uuid"
               },
               "maxItems": 100
+            },
+            "agent_principal": {
+              "type": "boolean",
+              "description": "Allow this mapping to authenticate an agent principal. Exact subject and client claims are required."
             }
           },
           "description": "Owner-declared permissions, never project or template names chosen freely by the token. A registered subject stays bound to its first matching name/project."
@@ -26546,7 +29673,8 @@
                 "xecguard",
                 "zscaler_ai_guard",
                 "semantic_guard",
-                "decision_model"
+                "decision_model",
+                "typesafe"
               ]
             },
             "policy": {
@@ -26607,7 +29735,9 @@
                   "requests",
                   "attempts",
                   "guardrail_decisions",
-                  "audit"
+                  "audit",
+                  "runs",
+                  "trace_spans"
                 ]
               }
             },
@@ -27065,6 +30195,14 @@
             "alias": {
               "type": "string",
               "pattern": "^t_[a-f0-9]{32}_[a-f0-9]{32}$"
+            },
+            "classification": {
+              "type": "string",
+              "enum": [
+                "read_only",
+                "approval_required"
+              ],
+              "description": "Operator classification of a published tool. Unclassified tools require approval."
             }
           },
           "required": [
@@ -27092,11 +30230,15 @@
             },
             "card_digest": {
               "type": "string",
-              "pattern": "^[a-f0-9]{64}$"
+              "pattern": "^[a-f0-9]{64}$",
+              "description": "SHA-256 digest of the reviewed agent card. An OAuth agent's card must be publicly readable for publication and discovery. Task requests use the caller's grant."
             },
             "credential_id": {
               "type": "string",
               "format": "uuid"
+            },
+            "oauth": {
+              "$ref": "#/$defs/AgentOAuthConfiguration"
             },
             "toolset_revisions": {
               "type": "array",
@@ -27121,6 +30263,28 @@
             "max_cost": {
               "type": "string",
               "pattern": "^[0-9]{1,12}(\\.[0-9]{1,12})?$"
+            },
+            "message_price": {
+              "type": "string",
+              "pattern": "^[0-9]{1,12}(\\.[0-9]{1,12})?$"
+            },
+            "remote_work_bound_seconds": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 3600,
+              "description": "The agent's declared maximum duration for remote work on one task, in seconds. Required for budgeted calls and enforced by the agent."
+            },
+            "max_task_continuations": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 128,
+              "description": "Maximum observed continuations per task. Defaults to 32."
+            },
+            "task_deadline_seconds": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 3600,
+              "description": "Maximum gateway task duration in seconds. Defaults to 600."
             }
           },
           "required": [
@@ -27133,8 +30297,64 @@
             "max_cost"
           ]
         },
+        "AgentOAuthConfiguration": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "client_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "audience": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2048
+            },
+            "scopes": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 32,
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              }
+            },
+            "authorization_endpoint": {
+              "type": "string",
+              "format": "uri",
+              "maxLength": 2048,
+              "description": "Required for browser and device OAuth."
+            },
+            "token_endpoint": {
+              "type": "string",
+              "format": "uri",
+              "maxLength": 2048
+            },
+            "device_authorization_endpoint": {
+              "type": "string",
+              "format": "uri",
+              "maxLength": 2048
+            },
+            "entra_obo": {
+              "$ref": "#/$defs/MCPEntraOBO"
+            }
+          },
+          "required": [
+            "client_id",
+            "audience",
+            "scopes",
+            "token_endpoint"
+          ],
+          "description": "OAuth grants are bound to the approved agent endpoint and caller identity. Browser and device flows use personal enrollment. Entra OBO uses verified workload assertions and a sealed middle-tier client secret."
+        },
         "PromptDefinition": {
           "type": "object",
+          "description": "Use template and variables for a single user message, or messages and variable_schema for a structured prompt.",
           "additionalProperties": false,
           "properties": {
             "template": {
@@ -27142,18 +30362,127 @@
               "maxLength": 65536
             },
             "variables": {
-              "type": "array",
+              "type": [
+                "array",
+                "null"
+              ],
               "items": {
                 "type": "string",
                 "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
               },
               "maxItems": 256
+            },
+            "messages": {
+              "type": "array",
+              "maxItems": 256,
+              "items": {
+                "$ref": "#/$defs/PromptMessage"
+              }
+            },
+            "variable_schema": {
+              "$ref": "#/$defs/PromptVariableSchema"
+            },
+            "default_parameters": {
+              "$ref": "#/$defs/PromptDefaultParameters"
+            }
+          }
+        },
+        "PromptMessage": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "role": {
+              "type": "string",
+              "enum": [
+                "system",
+                "user",
+                "assistant"
+              ]
+            },
+            "content": {
+              "type": "string",
+              "maxLength": 65536
             }
           },
           "required": [
-            "template",
-            "variables"
+            "role",
+            "content"
           ]
+        },
+        "PromptVariableSchema": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "object"
+              ]
+            },
+            "properties": {
+              "type": "object",
+              "additionalProperties": {
+                "$ref": "#/$defs/PromptVariableProperty"
+              }
+            },
+            "required": {
+              "type": "array",
+              "maxItems": 256,
+              "items": {
+                "type": "string",
+                "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
+              },
+              "uniqueItems": true
+            },
+            "additionalProperties": {
+              "type": "boolean",
+              "enum": [
+                false
+              ]
+            }
+          },
+          "required": [
+            "type",
+            "properties",
+            "required",
+            "additionalProperties"
+          ]
+        },
+        "PromptVariableProperty": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "string"
+              ]
+            }
+          },
+          "required": [
+            "type"
+          ]
+        },
+        "PromptDefaultParameters": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "temperature": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 2
+            },
+            "top_p": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "max_output_tokens": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2147483647
+            }
+          }
         },
         "ConfigurationRetrievalBinding": {
           "type": "object",
@@ -27259,6 +30588,485 @@
             }
           }
         },
+        "ConfigurationCode": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "accounts": {
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "$ref": "#/$defs/ConfigurationCodeAccount"
+              }
+            },
+            "pools": {
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "$ref": "#/$defs/ConfigurationCodePool"
+              }
+            },
+            "routes": {
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "$ref": "#/$defs/ConfigurationCodeRoute"
+              }
+            },
+            "budgets": {
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "$ref": "#/$defs/ConfigurationCodeBudget"
+              }
+            }
+          },
+          "required": [],
+          "description": "Resource IDs are artifact-local references. Accounts resolve through explicitly bound current destination enrollments. Pools and budgets reuse validated same-project artifact IDs or standard UUIDv5 destination IDs derived from project, resource kind and artifact reference, with unique natural matches as fallback. This preserves duplicate names and exact duplicate budgets without a registry. Routes resolve through unique slug. Unrelated ambiguous identities are refused. Source credentials, health, usage windows, conversation bindings and historical revisions stay local. Destination projects and providers must be prepared and enrolled before planning. Rename globally unique slugs for same-installation cross-project promotion."
+        },
+        "ConfigurationCodeAccount": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "project": {
+              "type": "string"
+            },
+            "provider": {
+              "type": "string"
+            },
+            "credential_ref": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "enabled": {
+              "type": "boolean"
+            },
+            "models": {
+              "items": {
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
+              },
+              "maxItems": 100,
+              "minItems": 1,
+              "type": "array",
+              "uniqueItems": true
+            }
+          },
+          "required": [
+            "id",
+            "project",
+            "provider",
+            "credential_ref",
+            "name",
+            "enabled",
+            "models"
+          ]
+        },
+        "ConfigurationCodePool": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "project": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "kind": {
+              "type": "string",
+              "enum": [
+                "shared",
+                "personal"
+              ]
+            },
+            "owner_ref": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "accounts": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 2147483647
+              }
+            },
+            "api_key_refs": {
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "id",
+            "project",
+            "name",
+            "kind",
+            "owner_ref",
+            "accounts",
+            "api_key_refs"
+          ]
+        },
+        "ConfigurationCodeRoute": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "project": {
+              "type": "string"
+            },
+            "slug": {
+              "pattern": "^[a-z0-9][a-z0-9._-]{0,99}$",
+              "type": "string"
+            },
+            "draft": {
+              "$ref": "#/$defs/ConfigurationCodeRoutePolicy"
+            },
+            "published": {
+              "$ref": "#/$defs/ConfigurationCodePublication"
+            }
+          },
+          "required": [
+            "id",
+            "project",
+            "slug",
+            "draft"
+          ]
+        },
+        "ConfigurationCodeRoutePolicy": {
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "models": {
+              "items": {
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
+              },
+              "maxItems": 100,
+              "minItems": 1,
+              "type": "array",
+              "uniqueItems": true
+            },
+            "max_body_bytes": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 1,
+              "maximum": 1073741824,
+              "description": "Optional ingress limit in bytes. Null inherits installation limits; a route can only lower them. Checks both encoded and decoded JSON, the complete multipart body, and individual client WebSocket messages. Published revisions pin this policy."
+            },
+            "tools": {
+              "$ref": "#/$defs/CodeResearchTools"
+            },
+            "messages_to_codex": {
+              "type": "boolean",
+              "default": false,
+              "description": "Explicitly allow Messages text and tool requests to use Codex subscription accounts through protocol translation. Published revisions pin this policy. Native forwarding remains the default. Translation alone preserves client identity and prompts. Codex identity compatibility requires its separate codex_cli_identity opt-in. Model rewriting requires its separate opt-in. Explicit low, medium and high reasoning effort is supported. Signed thinking, numeric reasoning budgets, beta features and unsupported required semantics are refused before dispatch."
+            },
+            "aliases": {
+              "type": "object",
+              "maxProperties": 100,
+              "additionalProperties": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200
+              },
+              "propertyNames": {
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]{0,199}$"
+              },
+              "description": "Stable public model names mapped directly to one native identifier in models. Requires model_rewriting. Alias chains and native name collisions are rejected. Immutable publications pin these mappings. Repointing an alias affects new conversations. Existing conversations retain their stored exact target while it remains published and authorized."
+            },
+            "model_rewriting": {
+              "type": "boolean",
+              "default": false,
+              "description": "Explicitly enable model identifier rewriting through exact aliases or configured model_pools. Disabled by default. This policy does not rewrite client identity or prompts."
+            },
+            "initial_recovery_attempts": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 2,
+              "description": "Maximum additional attempts per request for a new or established single-pin root conversation after an adapter proves nonexecution and the complete input is portable. Zero disables recovery. Published revisions pin this policy. Existing children, socket ownership and unresolved attempts prevent migration. Exact models remain the default. Only explicit model_pools authorize model changes. Live authority remains required. Producing-account reference ownership is preserved. Accepted, partial, ambiguous and opaque work never replays."
+            },
+            "model_pools": {
+              "type": "object",
+              "maxProperties": 100,
+              "additionalProperties": {
+                "type": "array",
+                "minItems": 2,
+                "maxItems": 100,
+                "uniqueItems": true,
+                "items": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 200
+                }
+              },
+              "description": "Explicit subscription model recovery pools keyed by a published native name or exact alias. Requires model_rewriting. Each ordered list starts with that name's normal exact target and contains distinct native identifiers from models. Recovery prefers the pinned exact target, then these alternatives, within initial_recovery_attempts and positive nonexecution, portability, live authorization and budget checks. Omitted pools preserve exact selection. Publications freeze the policy. Existing conversations retain their exact target, including after alias changes, while it remains published and authorized. Paid fallback is separately governed."
+            },
+            "pool": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "paid_participation": {
+              "type": "boolean"
+            },
+            "paid_targets": {
+              "type": "object",
+              "maxProperties": 100,
+              "additionalProperties": {
+                "$ref": "#/$defs/ConfigurationCodePaidTarget"
+              }
+            },
+            "chat_to_antigravity": {
+              "type": "boolean",
+              "description": "Explicit opt-in for chat translation through the Antigravity adapter."
+            },
+            "paid_fallback_targets": {
+              "type": "object",
+              "maxProperties": 100,
+              "additionalProperties": {
+                "$ref": "#/$defs/ConfigurationCodePaidTarget"
+              },
+              "description": "Explicit recovery-only paid targets keyed by native model, using the same named destination provider, slot and credential bindings as direct paid targets. Requires paid participation and a positive initial recovery limit."
+            },
+            "codex_cli_identity": {
+              "type": "boolean",
+              "description": "Explicit route-administrator opt-in, disabled by default and independent of protocol translation. On Codex subscription HTTP and WebSocket requests only, fills Originator with codex_cli_rs when every supplied Originator value is absent or blank. Preserves explicit Originator values, User-Agent, all prompts, tools, reasoning, state and other headers. Does not enable translation or prompt changes. Publication freezes the policy. Using subscription accounts through this compatibility identity may violate provider terms and risk account suspension. Review this behavior and risk before enabling and publishing."
+            },
+            "chat_to_codex": {
+              "type": "boolean",
+              "description": "Explicit Chat text and function tool translation through Codex Responses, disabled by default and pinned by publication. Native forwarding remains the default. Low, medium and high reasoning effort is supported. Required signed reasoning, media, server-owned state and unsupported semantics are refused. Independent Codex identity and model rewriting policies remain separate. Current OpenCode client and live subscription acceptance remain unqualified."
+            }
+          },
+          "required": [
+            "models",
+            "enabled",
+            "pool"
+          ],
+          "type": "object"
+        },
+        "CodeResearchTools": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": false,
+          "description": "Research subscription binding, frozen at publication. Requires an eligible Z.ai global account in the same project and pool; independent of inference models. Null disables research.",
+          "properties": {
+            "account_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "services": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 3,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "enum": [
+                  "search",
+                  "reader",
+                  "zread"
+                ]
+              }
+            }
+          },
+          "required": [
+            "account_id",
+            "services"
+          ]
+        },
+        "ConfigurationCodePaidTarget": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "provider",
+            "slot",
+            "credential_ref"
+          ],
+          "properties": {
+            "provider": {
+              "type": "string"
+            },
+            "slot": {
+              "type": "string"
+            },
+            "credential_ref": {
+              "type": "string"
+            }
+          }
+        },
+        "ConfigurationCodePublication": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "policy": {
+              "$ref": "#/$defs/ConfigurationCodeRoutePolicy"
+            },
+            "connections": {
+              "type": "object",
+              "additionalProperties": {
+                "$ref": "#/$defs/ConfigurationCodeConnection"
+              }
+            },
+            "paid_connections": {
+              "type": "object",
+              "additionalProperties": {
+                "$ref": "#/$defs/ConfigurationCodePaidConnection"
+              }
+            }
+          },
+          "required": [
+            "policy",
+            "connections"
+          ]
+        },
+        "ConfigurationCodeConnection": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "configuration": {
+              "$ref": "#/$defs/ProviderConfiguration"
+            },
+            "network_credential_ref": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "configuration"
+          ]
+        },
+        "ConfigurationCodePaidConnection": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "provider",
+            "slot_key_refs"
+          ],
+          "properties": {
+            "provider": {
+              "$ref": "#/$defs/ConfigurationProviderEntry"
+            },
+            "slot_key_refs": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "ConfigurationCodeBudget": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "project": {
+              "type": "string"
+            },
+            "route": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "api_key_ref": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "daily_tokens": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "format": "int64",
+                  "minimum": 1,
+                  "maximum": 9007199254740991
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "monthly_tokens": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "format": "int64",
+                  "minimum": 1,
+                  "maximum": 9007199254740991
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "enabled": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "id",
+            "project",
+            "route",
+            "api_key_ref",
+            "daily_tokens",
+            "monthly_tokens",
+            "enabled"
+          ]
+        },
         "ExternalCredentialReference": {
           "type": "object",
           "additionalProperties": false,
@@ -27297,6 +31105,34 @@
             }
           },
           "description": "Immutable store version. Aliases such as latest/AWSCURRENT are refused. Authentication uses process workload identity; references contain no credential values."
+        },
+        "ConfigurationCodeBindings": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "credentials": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string",
+                "format": "uuid"
+              }
+            },
+            "users": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string",
+                "format": "uuid"
+              }
+            },
+            "api_keys": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string",
+                "format": "uuid"
+              }
+            }
+          },
+          "required": []
         }
       }
     }
@@ -27582,6 +31418,10 @@
                 "format": "uuid"
               },
               "maxItems": 100
+            },
+            "agent_principal": {
+              "type": "boolean",
+              "description": "Allow this mapping to authenticate an agent principal. Exact subject and client claims are required."
             }
           },
           "description": "Owner-declared permissions, never project or template names chosen freely by the token. A registered subject stays bound to its first matching name/project."
@@ -30561,14 +34401,247 @@
               "description": "Defaults to true when omitted."
             },
             "scope": {
-              "type": "object",
-              "description": "openai_costs: {\"project_ids\":[\"proj_...\"]}; anthropic_cost_report: {\"workspace_ids\":[\"wrkspc_...\",\"default\"]}; {} reads the whole organization. Omitted keeps the stored scope."
+              "$ref": "#/$defs/BillingScope"
             },
             "credential": {
+              "description": "Billing credential. Required on create, omitted retains the stored credential, and null is rejected. Cloud credentials are source-shaped objects.",
+              "oneOf": [
+                {
+                  "type": "string",
+                  "minLength": 20,
+                  "maxLength": 512
+                },
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "auth_mode"
+                  ],
+                  "properties": {
+                    "auth_mode": {
+                      "type": "string",
+                      "enum": [
+                        "static",
+                        "workload"
+                      ]
+                    },
+                    "access_key_id": {
+                      "type": "string"
+                    },
+                    "secret_access_key": {
+                      "type": "string"
+                    },
+                    "session_token": {
+                      "type": "string"
+                    }
+                  }
+                },
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "auth_mode"
+                  ],
+                  "properties": {
+                    "auth_mode": {
+                      "type": "string",
+                      "enum": [
+                        "service_account",
+                        "adc"
+                      ]
+                    },
+                    "service_account": {
+                      "type": "object",
+                      "additionalProperties": true
+                    }
+                  }
+                },
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "auth_mode"
+                  ],
+                  "properties": {
+                    "auth_mode": {
+                      "type": "string",
+                      "enum": [
+                        "azure_default",
+                        "azure_client_secret"
+                      ]
+                    },
+                    "tenant_id": {
+                      "type": "string"
+                    },
+                    "client_id": {
+                      "type": "string"
+                    },
+                    "client_secret": {
+                      "type": "string"
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        },
+        "BillingScope": {
+          "description": "Source-shaped billing scope. Polling sources accept an empty scope. Cloud sources require their export details.",
+          "oneOf": [
+            {
+              "$ref": "#/$defs/PollingBillingScope"
+            },
+            {
+              "$ref": "#/$defs/AWSBillingScope"
+            },
+            {
+              "$ref": "#/$defs/GoogleBillingScope"
+            },
+            {
+              "$ref": "#/$defs/AzureBillingScope"
+            }
+          ]
+        },
+        "PollingBillingScope": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "project_ids": {
+              "type": "array",
+              "maxItems": 100,
+              "items": {
+                "type": "string",
+                "pattern": "^proj_[A-Za-z0-9]{1,64}$"
+              }
+            },
+            "workspace_ids": {
+              "type": "array",
+              "maxItems": 100,
+              "items": {
+                "type": "string",
+                "pattern": "^(wrkspc_[A-Za-z0-9]{1,64}|default)$"
+              }
+            }
+          },
+          "not": {
+            "required": [
+              "project_ids",
+              "workspace_ids"
+            ]
+          }
+        },
+        "AWSBillingScope": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "payer_account_id",
+            "bucket",
+            "report_prefix",
+            "region"
+          ],
+          "properties": {
+            "payer_account_id": {
               "type": "string",
-              "description": "Vendor admin credential, sealed as a billing_credential secret. Required on create; omitted keeps the stored credential; null is rejected - delete the import instead.",
-              "minLength": 20,
-              "maxLength": 512
+              "pattern": "^[0-9]{12}$"
+            },
+            "bucket": {
+              "type": "string",
+              "minLength": 3,
+              "maxLength": 63,
+              "pattern": "^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$"
+            },
+            "report_prefix": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 1024,
+              "description": "CUR report prefix including the report name"
+            },
+            "region": {
+              "type": "string",
+              "maxLength": 64,
+              "pattern": "^[a-z]{2}(-[a-z0-9]+)+-[0-9]+$"
+            },
+            "linked_account_ids": {
+              "type": "array",
+              "maxItems": 100,
+              "items": {
+                "type": "string",
+                "pattern": "^[0-9]{12}$"
+              }
+            }
+          }
+        },
+        "GoogleBillingScope": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "billing_account_id",
+            "bigquery_project_id",
+            "dataset_id",
+            "table_id"
+          ],
+          "properties": {
+            "billing_account_id": {
+              "type": "string"
+            },
+            "bigquery_project_id": {
+              "type": "string"
+            },
+            "dataset_id": {
+              "type": "string"
+            },
+            "table_id": {
+              "type": "string"
+            },
+            "project_ids": {
+              "type": "array",
+              "maxItems": 100,
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "AzureBillingScope": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "billing_scope",
+            "export_name",
+            "storage_account",
+            "container"
+          ],
+          "properties": {
+            "billing_scope": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 1024
+            },
+            "export_name": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 1024
+            },
+            "storage_account": {
+              "type": "string",
+              "pattern": "^[a-z0-9]{3,24}$"
+            },
+            "container": {
+              "type": "string",
+              "minLength": 3,
+              "maxLength": 63
+            },
+            "prefix": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "subscription_ids": {
+              "type": "array",
+              "maxItems": 100,
+              "items": {
+                "type": "string",
+                "format": "uuid"
+              }
             }
           }
         }
@@ -31431,6 +35504,10 @@
                 "format": "uuid"
               },
               "maxItems": 100
+            },
+            "agent_principal": {
+              "type": "boolean",
+              "description": "Allow this mapping to authenticate an agent principal. Exact subject and client claims are required."
             }
           },
           "description": "Owner-declared permissions, never project or template names chosen freely by the token. A registered subject stays bound to its first matching name/project."
@@ -31929,6 +36006,17 @@
             "project_id": {
               "format": "uuid",
               "type": "string"
+            },
+            "account_weights": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "integer",
+                "format": "int64",
+                "minimum": 1,
+                "maximum": 2147483647
+              },
+              "maxProperties": 100,
+              "description": "Relative weights keyed by assigned account ID. Omitted accounts use weight 1."
             }
           },
           "required": [
@@ -32046,6 +36134,83 @@
             },
             "tools": {
               "$ref": "#/$defs/CodeResearchTools"
+            },
+            "messages_to_codex": {
+              "type": "boolean",
+              "default": false,
+              "description": "Explicitly allow Messages text and tool requests to use Codex subscription accounts through protocol translation. Published revisions pin this policy. Native forwarding remains the default. Translation alone preserves client identity and prompts. Codex identity compatibility requires its separate codex_cli_identity opt-in. Model rewriting requires its separate opt-in. Explicit low, medium and high reasoning effort is supported. Signed thinking, numeric reasoning budgets, beta features and unsupported required semantics are refused before dispatch."
+            },
+            "aliases": {
+              "type": "object",
+              "maxProperties": 100,
+              "additionalProperties": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200
+              },
+              "propertyNames": {
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]{0,199}$"
+              },
+              "description": "Stable public model names mapped directly to one native identifier in models. Requires model_rewriting. Alias chains and native name collisions are rejected. Immutable publications pin these mappings. Repointing an alias affects new conversations. Existing conversations retain their stored exact target while it remains published and authorized."
+            },
+            "model_rewriting": {
+              "type": "boolean",
+              "default": false,
+              "description": "Explicitly enable model identifier rewriting through exact aliases or configured model_pools. Disabled by default. This policy does not rewrite client identity or prompts."
+            },
+            "initial_recovery_attempts": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 2,
+              "description": "Maximum additional attempts per request for a new or established single-pin root conversation after an adapter proves nonexecution and the complete input is portable. Zero disables recovery. Published revisions pin this policy. Existing children, socket ownership and unresolved attempts prevent migration. Exact models remain the default. Only explicit model_pools authorize model changes. Live authority remains required. Producing-account reference ownership is preserved. Accepted, partial, ambiguous and opaque work never replays."
+            },
+            "model_pools": {
+              "type": "object",
+              "maxProperties": 100,
+              "additionalProperties": {
+                "type": "array",
+                "minItems": 2,
+                "maxItems": 100,
+                "uniqueItems": true,
+                "items": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 200
+                }
+              },
+              "description": "Explicit subscription model recovery pools keyed by a published native name or exact alias. Requires model_rewriting. Each ordered list starts with that name's normal exact target and contains distinct native identifiers from models. Recovery prefers the pinned exact target, then these alternatives, within initial_recovery_attempts and positive nonexecution, portability, live authorization and budget checks. Omitted pools preserve exact selection. Publications freeze the policy. Existing conversations retain their exact target, including after alias changes, while it remains published and authorized. Paid fallback is separately governed."
+            },
+            "paid_targets": {
+              "type": "object",
+              "additionalProperties": {
+                "$ref": "#/$defs/CodePaidTarget"
+              },
+              "description": "Exact native model to directly selected published metered provider and credential slot. A mapped model takes precedence over subscription accounts."
+            },
+            "paid_participation": {
+              "type": "boolean",
+              "default": false,
+              "description": "Explicitly permit metered API targets. Direct selection and subscription-first fallback require their separate target maps."
+            },
+            "chat_to_antigravity": {
+              "type": "boolean",
+              "description": "Explicitly allow Chat Completions text and function tools through the internal Antigravity Gemini target over HTTP or SSE. Published revisions pin this policy. Native forwarding remains the default. Client identity and prompts are preserved. Signed thought state, reasoning controls, media and server tools are unsupported. Returned signature state is refused before actionable output rather than discarded. Controlled fixtures do not qualify any current model or live subscription workflow."
+            },
+            "paid_fallback_targets": {
+              "type": "object",
+              "maxProperties": 100,
+              "additionalProperties": {
+                "$ref": "#/$defs/CodePaidTarget"
+              },
+              "description": "Explicit native model to published metered provider and credential slot for subscription-first bounded recovery. Requires paid_participation and positive initial_recovery_attempts. Subscription candidates are preferred. Same-model fallback needs no model pool. Different models require model_rewriting and a model_pool. Proven nonexecution and complete-input portability are required. Direct paid_targets retain precedence and cannot overlap this map. Existing paid owners stay pinned. Unknown paid money remains held against applicable limits."
+            },
+            "codex_cli_identity": {
+              "type": "boolean",
+              "description": "Explicit route-administrator opt-in, disabled by default and independent of protocol translation. On Codex subscription HTTP and WebSocket requests only, fills Originator with codex_cli_rs when every supplied Originator value is absent or blank. Preserves explicit Originator values, User-Agent, all prompts, tools, reasoning, state and other headers. Does not enable translation or prompt changes. Publication freezes the policy. Using subscription accounts through this compatibility identity may violate provider terms and risk account suspension. Review this behavior and risk before enabling and publishing."
+            },
+            "chat_to_codex": {
+              "type": "boolean",
+              "description": "Explicit Chat text and function tool translation through Codex Responses, disabled by default and pinned by publication. Native forwarding remains the default. Low, medium and high reasoning effort is supported. Required signed reasoning, media, server-owned state and unsupported semantics are refused. Independent Codex identity and model rewriting policies remain separate. Current OpenCode client and live subscription acceptance remain unqualified."
             }
           },
           "required": [
@@ -32088,6 +36253,24 @@
             "account_id",
             "services"
           ]
+        },
+        "CodePaidTarget": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "provider_id",
+            "slot_id"
+          ],
+          "properties": {
+            "provider_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "slot_id": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
         }
       }
     }
@@ -32282,6 +36465,37 @@
               "oneOf": [
                 {
                   "$ref": "#/$defs/PassthroughConfig"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "tool_execution": {
+              "type": "string",
+              "enum": [
+                "",
+                "gateway"
+              ],
+              "description": "When gateway, the gateway executes authorized read-only tools on transformed Chat Completions routes."
+            },
+            "toolsets": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "uniqueItems": true,
+              "description": "Published toolset IDs that gateway execution may use. Callers can select a subset."
+            },
+            "responses_mcp_items": {
+              "type": "boolean",
+              "description": "Operator declaration that Responses clients support gateway-generated MCP output items. Requires gateway tool execution on a transformed route. MCP items are emitted only when the run uses the certified built-in Responses contract; other contracts omit them."
+            },
+            "run_limits": {
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/WorkflowRunLimits"
                 },
                 {
                   "type": "null"
@@ -32946,6 +37160,40 @@
             "acknowledge_opaque_unmetered"
           ],
           "type": "object"
+        },
+        "WorkflowRunLimits": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "max_iterations": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 1,
+              "maximum": 32
+            },
+            "max_tool_calls": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0,
+              "maximum": 128
+            },
+            "max_duration_seconds": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 1,
+              "maximum": 600
+            },
+            "max_concurrent_runs": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 1,
+              "maximum": 2147483647
+            },
+            "max_run_cost": {
+              "type": "string",
+              "pattern": "^[0-9]{1,12}(\\.[0-9]{1,12})?$"
+            }
+          }
         }
       }
     }
@@ -36974,7 +41222,7 @@
                 "null"
               ],
               "format": "uuid",
-              "description": "Optional current key authority, including provider-state permission. Provider-retained state is denied when no key is selected."
+              "description": "Select a current API key to evaluate its route and toolset authority, including provider-state permission. Provider-retained state and gateway tool execution are not eligible without a selected key. Simulation does not dispatch or reserve quota, so it does not guarantee admission."
             },
             "dialect": {
               "$ref": "#/$defs/SimulationDialect"
@@ -36990,7 +41238,7 @@
             "request": {
               "type": "object",
               "additionalProperties": true,
-              "description": "Optional native request. Omission retains tuple-only eligibility and reports not_inspected; no request or qualification is fabricated. A request is also counted for each target's model: unless estimated_input_tokens is supplied, every decision reports the input tokens that model counts, how they were counted and for which model family, and each target's context window is checked against them."
+              "description": "Optional native request. Omission retains tuple-only eligibility and reports not_inspected; no request or qualification is fabricated. A request is also counted for each target's model: unless estimated_input_tokens is supplied, every decision reports the input tokens that model counts, how they were counted and for which model family, and each target's context window is checked against them. For gateway tool execution, include olp_toolsets and olp_run_limits in the native request to inspect narrowed toolsets and run bounds."
             },
             "semantic_headers": {
               "$ref": "#/$defs/SimulationSemanticHeaders"
@@ -37319,7 +41567,8 @@
               "type": [
                 "string",
                 "null"
-              ]
+              ],
+              "description": "Select a current API key to evaluate its route and toolset authority, including provider-state permission. Provider-retained state and gateway tool execution are not eligible without a selected key. Simulation does not dispatch or reserve quota, so it does not guarantee admission."
             },
             "estimated_input_tokens": {
               "description": "Input tokens to weigh every target's context window by. When supplied it stands for every target, the request is not counted, and the decisions report no provenance for it.",
@@ -37423,7 +41672,7 @@
             "request": {
               "type": "object",
               "additionalProperties": true,
-              "description": "Native request for complete inspection. A route/model-only object selects tuple-only inspection and does not establish an interaction contract. A request is also counted for each target's model: unless estimated_input_tokens is supplied, every decision reports the input tokens that model counts, how they were counted and for which model family, and each target's context window is checked against them."
+              "description": "Native request for complete inspection. A route/model-only object selects tuple-only inspection and does not establish an interaction contract. A request is also counted for each target's model: unless estimated_input_tokens is supplied, every decision reports the input tokens that model counts, how they were counted and for which model family, and each target's context window is checked against them. For gateway tool execution, include olp_toolsets and olp_run_limits in the native request to inspect narrowed toolsets and run bounds."
             },
             "route": {
               "type": "string",
@@ -38019,6 +42268,13 @@
               "maxLength": 8192,
               "writeOnly": true,
               "description": "Bearer credential; absent preserves, null removes. Never returned."
+            },
+            "entra_client_secret": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 16384,
+              "writeOnly": true,
+              "description": "Replacement Entra OBO middle-tier client secret. Required when enabling Entra or changing the issuer, client ID, or token endpoint. Never returned."
             }
           },
           "required": [
@@ -38064,6 +42320,14 @@
             "alias": {
               "type": "string",
               "pattern": "^t_[a-f0-9]{32}_[a-f0-9]{32}$"
+            },
+            "classification": {
+              "type": "string",
+              "enum": [
+                "read_only",
+                "approval_required"
+              ],
+              "description": "Operator classification of a published tool. Unclassified tools require approval."
             }
           },
           "required": [
@@ -38091,11 +42355,15 @@
             },
             "card_digest": {
               "type": "string",
-              "pattern": "^[a-f0-9]{64}$"
+              "pattern": "^[a-f0-9]{64}$",
+              "description": "SHA-256 digest of the reviewed agent card. An OAuth agent's card must be publicly readable for publication and discovery. Task requests use the caller's grant."
             },
             "credential_id": {
               "type": "string",
               "format": "uuid"
+            },
+            "oauth": {
+              "$ref": "#/$defs/AgentOAuthConfiguration"
             },
             "toolset_revisions": {
               "type": "array",
@@ -38120,6 +42388,28 @@
             "max_cost": {
               "type": "string",
               "pattern": "^[0-9]{1,12}(\\.[0-9]{1,12})?$"
+            },
+            "message_price": {
+              "type": "string",
+              "pattern": "^[0-9]{1,12}(\\.[0-9]{1,12})?$"
+            },
+            "remote_work_bound_seconds": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 3600,
+              "description": "The agent's declared maximum duration for remote work on one task, in seconds. Required for budgeted calls and enforced by the agent."
+            },
+            "max_task_continuations": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 128,
+              "description": "Maximum observed continuations per task. Defaults to 32."
+            },
+            "task_deadline_seconds": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 3600,
+              "description": "Maximum gateway task duration in seconds. Defaults to 600."
             }
           },
           "required": [
@@ -38132,8 +42422,78 @@
             "max_cost"
           ]
         },
+        "AgentOAuthConfiguration": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "client_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "audience": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2048
+            },
+            "scopes": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 32,
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              }
+            },
+            "authorization_endpoint": {
+              "type": "string",
+              "format": "uri",
+              "maxLength": 2048,
+              "description": "Required for browser and device OAuth."
+            },
+            "token_endpoint": {
+              "type": "string",
+              "format": "uri",
+              "maxLength": 2048
+            },
+            "device_authorization_endpoint": {
+              "type": "string",
+              "format": "uri",
+              "maxLength": 2048
+            },
+            "entra_obo": {
+              "$ref": "#/$defs/MCPEntraOBO"
+            }
+          },
+          "required": [
+            "client_id",
+            "audience",
+            "scopes",
+            "token_endpoint"
+          ],
+          "description": "OAuth grants are bound to the approved agent endpoint and caller identity. Browser and device flows use personal enrollment. Entra OBO uses verified workload assertions and a sealed middle-tier client secret."
+        },
+        "MCPEntraOBO": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "issuer"
+          ],
+          "properties": {
+            "issuer": {
+              "type": "string",
+              "maxLength": 2048,
+              "description": "Exact registered workload issuer trusted for delegated user assertions."
+            }
+          }
+        },
         "PromptDefinition": {
           "type": "object",
+          "description": "Use template and variables for a single user message, or messages and variable_schema for a structured prompt.",
           "additionalProperties": false,
           "properties": {
             "template": {
@@ -38141,18 +42501,127 @@
               "maxLength": 65536
             },
             "variables": {
-              "type": "array",
+              "type": [
+                "array",
+                "null"
+              ],
               "items": {
                 "type": "string",
                 "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
               },
               "maxItems": 256
+            },
+            "messages": {
+              "type": "array",
+              "maxItems": 256,
+              "items": {
+                "$ref": "#/$defs/PromptMessage"
+              }
+            },
+            "variable_schema": {
+              "$ref": "#/$defs/PromptVariableSchema"
+            },
+            "default_parameters": {
+              "$ref": "#/$defs/PromptDefaultParameters"
+            }
+          }
+        },
+        "PromptMessage": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "role": {
+              "type": "string",
+              "enum": [
+                "system",
+                "user",
+                "assistant"
+              ]
+            },
+            "content": {
+              "type": "string",
+              "maxLength": 65536
             }
           },
           "required": [
-            "template",
-            "variables"
+            "role",
+            "content"
           ]
+        },
+        "PromptVariableSchema": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "object"
+              ]
+            },
+            "properties": {
+              "type": "object",
+              "additionalProperties": {
+                "$ref": "#/$defs/PromptVariableProperty"
+              }
+            },
+            "required": {
+              "type": "array",
+              "maxItems": 256,
+              "items": {
+                "type": "string",
+                "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
+              },
+              "uniqueItems": true
+            },
+            "additionalProperties": {
+              "type": "boolean",
+              "enum": [
+                false
+              ]
+            }
+          },
+          "required": [
+            "type",
+            "properties",
+            "required",
+            "additionalProperties"
+          ]
+        },
+        "PromptVariableProperty": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "string"
+              ]
+            }
+          },
+          "required": [
+            "type"
+          ]
+        },
+        "PromptDefaultParameters": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "temperature": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 2
+            },
+            "top_p": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "max_output_tokens": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2147483647
+            }
+          }
         }
       }
     }
@@ -38480,6 +42949,16 @@
                 "format": "uuid"
               },
               "maxItems": 100
+            },
+            "run_limits": {
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/WorkflowRunLimits"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             }
           },
           "type": "object"
@@ -38631,6 +43110,40 @@
               "format": "int64",
               "minimum": 1,
               "maximum": 2147483647
+            }
+          }
+        },
+        "WorkflowRunLimits": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "max_iterations": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 1,
+              "maximum": 32
+            },
+            "max_tool_calls": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0,
+              "maximum": 128
+            },
+            "max_duration_seconds": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 1,
+              "maximum": 600
+            },
+            "max_concurrent_runs": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 1,
+              "maximum": 2147483647
+            },
+            "max_run_cost": {
+              "type": "string",
+              "pattern": "^[0-9]{1,12}(\\.[0-9]{1,12})?$"
             }
           }
         }
@@ -40305,6 +44818,13 @@
               "maxLength": 8192,
               "writeOnly": true,
               "description": "Bearer credential; absent preserves, null removes. Never returned."
+            },
+            "entra_client_secret": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 16384,
+              "writeOnly": true,
+              "description": "Replacement Entra OBO middle-tier client secret. Required when enabling Entra or changing the issuer, client ID, or token endpoint. Never returned."
             }
           },
           "required": [
@@ -40350,6 +44870,14 @@
             "alias": {
               "type": "string",
               "pattern": "^t_[a-f0-9]{32}_[a-f0-9]{32}$"
+            },
+            "classification": {
+              "type": "string",
+              "enum": [
+                "read_only",
+                "approval_required"
+              ],
+              "description": "Operator classification of a published tool. Unclassified tools require approval."
             }
           },
           "required": [
@@ -40377,11 +44905,15 @@
             },
             "card_digest": {
               "type": "string",
-              "pattern": "^[a-f0-9]{64}$"
+              "pattern": "^[a-f0-9]{64}$",
+              "description": "SHA-256 digest of the reviewed agent card. An OAuth agent's card must be publicly readable for publication and discovery. Task requests use the caller's grant."
             },
             "credential_id": {
               "type": "string",
               "format": "uuid"
+            },
+            "oauth": {
+              "$ref": "#/$defs/AgentOAuthConfiguration"
             },
             "toolset_revisions": {
               "type": "array",
@@ -40406,6 +44938,28 @@
             "max_cost": {
               "type": "string",
               "pattern": "^[0-9]{1,12}(\\.[0-9]{1,12})?$"
+            },
+            "message_price": {
+              "type": "string",
+              "pattern": "^[0-9]{1,12}(\\.[0-9]{1,12})?$"
+            },
+            "remote_work_bound_seconds": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 3600,
+              "description": "The agent's declared maximum duration for remote work on one task, in seconds. Required for budgeted calls and enforced by the agent."
+            },
+            "max_task_continuations": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 128,
+              "description": "Maximum observed continuations per task. Defaults to 32."
+            },
+            "task_deadline_seconds": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 3600,
+              "description": "Maximum gateway task duration in seconds. Defaults to 600."
             }
           },
           "required": [
@@ -40418,8 +44972,78 @@
             "max_cost"
           ]
         },
+        "AgentOAuthConfiguration": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "client_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "audience": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2048
+            },
+            "scopes": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 32,
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              }
+            },
+            "authorization_endpoint": {
+              "type": "string",
+              "format": "uri",
+              "maxLength": 2048,
+              "description": "Required for browser and device OAuth."
+            },
+            "token_endpoint": {
+              "type": "string",
+              "format": "uri",
+              "maxLength": 2048
+            },
+            "device_authorization_endpoint": {
+              "type": "string",
+              "format": "uri",
+              "maxLength": 2048
+            },
+            "entra_obo": {
+              "$ref": "#/$defs/MCPEntraOBO"
+            }
+          },
+          "required": [
+            "client_id",
+            "audience",
+            "scopes",
+            "token_endpoint"
+          ],
+          "description": "OAuth grants are bound to the approved agent endpoint and caller identity. Browser and device flows use personal enrollment. Entra OBO uses verified workload assertions and a sealed middle-tier client secret."
+        },
+        "MCPEntraOBO": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "issuer"
+          ],
+          "properties": {
+            "issuer": {
+              "type": "string",
+              "maxLength": 2048,
+              "description": "Exact registered workload issuer trusted for delegated user assertions."
+            }
+          }
+        },
         "PromptDefinition": {
           "type": "object",
+          "description": "Use template and variables for a single user message, or messages and variable_schema for a structured prompt.",
           "additionalProperties": false,
           "properties": {
             "template": {
@@ -40427,18 +45051,127 @@
               "maxLength": 65536
             },
             "variables": {
-              "type": "array",
+              "type": [
+                "array",
+                "null"
+              ],
               "items": {
                 "type": "string",
                 "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
               },
               "maxItems": 256
+            },
+            "messages": {
+              "type": "array",
+              "maxItems": 256,
+              "items": {
+                "$ref": "#/$defs/PromptMessage"
+              }
+            },
+            "variable_schema": {
+              "$ref": "#/$defs/PromptVariableSchema"
+            },
+            "default_parameters": {
+              "$ref": "#/$defs/PromptDefaultParameters"
+            }
+          }
+        },
+        "PromptMessage": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "role": {
+              "type": "string",
+              "enum": [
+                "system",
+                "user",
+                "assistant"
+              ]
+            },
+            "content": {
+              "type": "string",
+              "maxLength": 65536
             }
           },
           "required": [
-            "template",
-            "variables"
+            "role",
+            "content"
           ]
+        },
+        "PromptVariableSchema": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "object"
+              ]
+            },
+            "properties": {
+              "type": "object",
+              "additionalProperties": {
+                "$ref": "#/$defs/PromptVariableProperty"
+              }
+            },
+            "required": {
+              "type": "array",
+              "maxItems": 256,
+              "items": {
+                "type": "string",
+                "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
+              },
+              "uniqueItems": true
+            },
+            "additionalProperties": {
+              "type": "boolean",
+              "enum": [
+                false
+              ]
+            }
+          },
+          "required": [
+            "type",
+            "properties",
+            "required",
+            "additionalProperties"
+          ]
+        },
+        "PromptVariableProperty": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "string"
+              ]
+            }
+          },
+          "required": [
+            "type"
+          ]
+        },
+        "PromptDefaultParameters": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "temperature": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 2
+            },
+            "top_p": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "max_output_tokens": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2147483647
+            }
+          }
         }
       }
     }
@@ -41542,6 +46275,37 @@
                   "type": "null"
                 }
               ]
+            },
+            "tool_execution": {
+              "type": "string",
+              "enum": [
+                "",
+                "gateway"
+              ],
+              "description": "When gateway, the gateway executes authorized read-only tools on transformed Chat Completions routes."
+            },
+            "toolsets": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "uniqueItems": true,
+              "description": "Published toolset IDs that gateway execution may use. Callers can select a subset."
+            },
+            "responses_mcp_items": {
+              "type": "boolean",
+              "description": "Operator declaration that Responses clients support gateway-generated MCP output items. Requires gateway tool execution on a transformed route. MCP items are emitted only when the run uses the certified built-in Responses contract; other contracts omit them."
+            },
+            "run_limits": {
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/WorkflowRunLimits"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             }
           },
           "required": [
@@ -42201,6 +46965,40 @@
             "acknowledge_opaque_unmetered"
           ],
           "type": "object"
+        },
+        "WorkflowRunLimits": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "max_iterations": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 1,
+              "maximum": 32
+            },
+            "max_tool_calls": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0,
+              "maximum": 128
+            },
+            "max_duration_seconds": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 1,
+              "maximum": 600
+            },
+            "max_concurrent_runs": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 1,
+              "maximum": 2147483647
+            },
+            "max_run_cost": {
+              "type": "string",
+              "pattern": "^[0-9]{1,12}(\\.[0-9]{1,12})?$"
+            }
+          }
         }
       }
     }
@@ -42512,7 +47310,9 @@
                   "requests",
                   "attempts",
                   "guardrail_decisions",
-                  "audit"
+                  "audit",
+                  "runs",
+                  "trace_spans"
                 ]
               }
             },
@@ -42642,6 +47442,13 @@
               "maxLength": 8192,
               "writeOnly": true,
               "description": "Bearer credential; absent preserves, null removes. Never returned."
+            },
+            "entra_client_secret": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 16384,
+              "writeOnly": true,
+              "description": "Replacement Entra OBO middle-tier client secret. Required when enabling Entra or changing the issuer, client ID, or token endpoint. Never returned."
             }
           },
           "required": [
@@ -42687,6 +47494,14 @@
             "alias": {
               "type": "string",
               "pattern": "^t_[a-f0-9]{32}_[a-f0-9]{32}$"
+            },
+            "classification": {
+              "type": "string",
+              "enum": [
+                "read_only",
+                "approval_required"
+              ],
+              "description": "Operator classification of a published tool. Unclassified tools require approval."
             }
           },
           "required": [
@@ -42714,11 +47529,15 @@
             },
             "card_digest": {
               "type": "string",
-              "pattern": "^[a-f0-9]{64}$"
+              "pattern": "^[a-f0-9]{64}$",
+              "description": "SHA-256 digest of the reviewed agent card. An OAuth agent's card must be publicly readable for publication and discovery. Task requests use the caller's grant."
             },
             "credential_id": {
               "type": "string",
               "format": "uuid"
+            },
+            "oauth": {
+              "$ref": "#/$defs/AgentOAuthConfiguration"
             },
             "toolset_revisions": {
               "type": "array",
@@ -42743,6 +47562,28 @@
             "max_cost": {
               "type": "string",
               "pattern": "^[0-9]{1,12}(\\.[0-9]{1,12})?$"
+            },
+            "message_price": {
+              "type": "string",
+              "pattern": "^[0-9]{1,12}(\\.[0-9]{1,12})?$"
+            },
+            "remote_work_bound_seconds": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 3600,
+              "description": "The agent's declared maximum duration for remote work on one task, in seconds. Required for budgeted calls and enforced by the agent."
+            },
+            "max_task_continuations": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 128,
+              "description": "Maximum observed continuations per task. Defaults to 32."
+            },
+            "task_deadline_seconds": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 3600,
+              "description": "Maximum gateway task duration in seconds. Defaults to 600."
             }
           },
           "required": [
@@ -42755,8 +47596,78 @@
             "max_cost"
           ]
         },
+        "AgentOAuthConfiguration": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "client_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "audience": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2048
+            },
+            "scopes": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 32,
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              }
+            },
+            "authorization_endpoint": {
+              "type": "string",
+              "format": "uri",
+              "maxLength": 2048,
+              "description": "Required for browser and device OAuth."
+            },
+            "token_endpoint": {
+              "type": "string",
+              "format": "uri",
+              "maxLength": 2048
+            },
+            "device_authorization_endpoint": {
+              "type": "string",
+              "format": "uri",
+              "maxLength": 2048
+            },
+            "entra_obo": {
+              "$ref": "#/$defs/MCPEntraOBO"
+            }
+          },
+          "required": [
+            "client_id",
+            "audience",
+            "scopes",
+            "token_endpoint"
+          ],
+          "description": "OAuth grants are bound to the approved agent endpoint and caller identity. Browser and device flows use personal enrollment. Entra OBO uses verified workload assertions and a sealed middle-tier client secret."
+        },
+        "MCPEntraOBO": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "issuer"
+          ],
+          "properties": {
+            "issuer": {
+              "type": "string",
+              "maxLength": 2048,
+              "description": "Exact registered workload issuer trusted for delegated user assertions."
+            }
+          }
+        },
         "PromptDefinition": {
           "type": "object",
+          "description": "Use template and variables for a single user message, or messages and variable_schema for a structured prompt.",
           "additionalProperties": false,
           "properties": {
             "template": {
@@ -42764,18 +47675,127 @@
               "maxLength": 65536
             },
             "variables": {
-              "type": "array",
+              "type": [
+                "array",
+                "null"
+              ],
               "items": {
                 "type": "string",
                 "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
               },
               "maxItems": 256
+            },
+            "messages": {
+              "type": "array",
+              "maxItems": 256,
+              "items": {
+                "$ref": "#/$defs/PromptMessage"
+              }
+            },
+            "variable_schema": {
+              "$ref": "#/$defs/PromptVariableSchema"
+            },
+            "default_parameters": {
+              "$ref": "#/$defs/PromptDefaultParameters"
+            }
+          }
+        },
+        "PromptMessage": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "role": {
+              "type": "string",
+              "enum": [
+                "system",
+                "user",
+                "assistant"
+              ]
+            },
+            "content": {
+              "type": "string",
+              "maxLength": 65536
             }
           },
           "required": [
-            "template",
-            "variables"
+            "role",
+            "content"
           ]
+        },
+        "PromptVariableSchema": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "object"
+              ]
+            },
+            "properties": {
+              "type": "object",
+              "additionalProperties": {
+                "$ref": "#/$defs/PromptVariableProperty"
+              }
+            },
+            "required": {
+              "type": "array",
+              "maxItems": 256,
+              "items": {
+                "type": "string",
+                "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
+              },
+              "uniqueItems": true
+            },
+            "additionalProperties": {
+              "type": "boolean",
+              "enum": [
+                false
+              ]
+            }
+          },
+          "required": [
+            "type",
+            "properties",
+            "required",
+            "additionalProperties"
+          ]
+        },
+        "PromptVariableProperty": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "string"
+              ]
+            }
+          },
+          "required": [
+            "type"
+          ]
+        },
+        "PromptDefaultParameters": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "temperature": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 2
+            },
+            "top_p": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "max_output_tokens": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2147483647
+            }
+          }
         }
       }
     }

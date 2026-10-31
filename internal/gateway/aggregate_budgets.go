@@ -13,7 +13,8 @@ import (
 )
 
 func (a *Admission) reserveAggregateBudgets(ctx context.Context, authority *access.Authority, ttl time.Duration, hold costReservation, costChecked *bool) (*limits.Lease, *Error) {
-	if !authority.OrganizationBudget.Limited() && !authority.InstallationBudget.Limited() && !authority.ProjectBudget.Limited() && !authority.ProjectAttributionBudgets.Matches(authority.Attribution) {
+	labels := authority.BudgetAttribution()
+	if !authority.OrganizationBudget.Limited() && !authority.InstallationBudget.Limited() && !authority.ProjectBudget.Limited() && !authority.ProjectAttributionBudgets.Matches(labels) {
 		return nil, nil
 	}
 	var chain *limits.Lease
@@ -45,8 +46,8 @@ func (a *Admission) reserveAggregateBudgets(ctx context.Context, authority *acce
 		lease.Attach(chain)
 		chain = lease
 	}
-	for _, key := range slices.Sorted(maps.Keys(authority.Attribution)) {
-		value := authority.Attribution[key]
+	for _, key := range slices.Sorted(maps.Keys(labels)) {
+		value := labels[key]
 		policy, ok := authority.ProjectAttributionBudgets[key][value]
 		if !ok || !policy.Limited() {
 			continue

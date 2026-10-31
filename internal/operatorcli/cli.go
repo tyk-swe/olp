@@ -193,7 +193,7 @@ func (runner Runner) help(group string) error {
 	fmt.Fprintln(runner.Out, "       [--body-file FILE] [--if-match ETAG] [--idempotency-key KEY] [--output FILE]")
 	fmt.Fprintln(runner.Out, "Contract-required mutation keys must be explicit; retry an uncertain write with the same key and payload.")
 	if group == "configuration" {
-		fmt.Fprintln(runner.Out, "config export [--output FILE]\nconfig plan --file DOCUMENT [--bindings-file FILE] [--output PLAN]\nconfig apply --plan-file PLAN [--bindings-file FILE] [--idempotency-key KEY]")
+		fmt.Fprintln(runner.Out, "config export [--output FILE]\nconfig plan --file DOCUMENT [--bindings-file FILE] [--code-bindings-file FILE] [--output PLAN]\nconfig apply --plan-file PLAN [--bindings-file FILE] [--code-bindings-file FILE] [--idempotency-key KEY]")
 	}
 	for _, op := range management.Operations() {
 		if group == "api" || op.Group == group {

@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -17,46 +16,35 @@ import (
 
 // importRow is one provider_billing_imports row.
 type importRow struct {
-	ProviderID          string
-	Source              string
-	CredentialID        *string
-	Scope               json.RawMessage
-	Enabled             bool
-	ETag                string
-	NextImportAt        *time.Time
-	LastImportAt        *time.Time
-	LastSuccessAt       *time.Time
-	LastErrorCode       *string
-	ConsecutiveFailures int
-	ImportedFrom        *string
-	ImportedThrough     *string
+	ProviderID            string
+	Source                string
+	CredentialID          *string
+	Scope                 json.RawMessage
+	Enabled               bool
+	ETag                  string
+	NextImportAt          *time.Time
+	LastImportAt          *time.Time
+	LastSuccessAt         *time.Time
+	LastErrorCode         *string
+	ConsecutiveFailures   int
+	ImportedFrom          *string
+	ImportedThrough       *string
+	SourceRevision        *string
+	CloudNextPeriod       *string
+	CloudPeriodsRemaining int
 }
 
 var errImportMissing = access.Fail(404, "not_found", "The provider has no billing import.")
 
 const importColumns = `provider_id::text,source,credential_id::text,scope,enabled,etag::text,
 	next_import_at,last_import_at,last_success_at,last_error_code,consecutive_failures,
-	imported_from::text,imported_through::text`
-
-// qualifiedImportColumns binds every importColumns column to a table alias,
-// for queries that join another table sharing names such as etag.
-func qualifiedImportColumns(alias string) string {
-	parts := strings.Split(importColumns, ",")
-	for i, part := range parts {
-		column, cast, found := strings.Cut(strings.TrimSpace(part), "::")
-		parts[i] = alias + "." + column
-		if found {
-			parts[i] += "::" + cast
-		}
-	}
-	return strings.Join(parts, ",")
-}
+	imported_from::text,imported_through::text,source_revision,cloud_next_period,cloud_periods_remaining`
 
 func scanImport(row pgx.Row) (*importRow, error) {
 	var r importRow
 	err := row.Scan(&r.ProviderID, &r.Source, &r.CredentialID, &r.Scope, &r.Enabled, &r.ETag,
 		&r.NextImportAt, &r.LastImportAt, &r.LastSuccessAt, &r.LastErrorCode, &r.ConsecutiveFailures,
-		&r.ImportedFrom, &r.ImportedThrough)
+		&r.ImportedFrom, &r.ImportedThrough, &r.SourceRevision, &r.CloudNextPeriod, &r.CloudPeriodsRemaining)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, errImportMissing
 	}
@@ -88,6 +76,7 @@ func importDocument(r *importRow) map[string]any {
 			"last_error_code":  r.LastErrorCode,
 			"imported_from":    r.ImportedFrom,
 			"imported_through": r.ImportedThrough,
+			"source_revision":  r.SourceRevision,
 		},
 	}
 }
@@ -187,7 +176,9 @@ func (s *Server) putImport(r *http.Request, _ access.Principal) (access.Reply, e
 	var credential *string
 	if len(input.Credential) > 0 && !credentialNull {
 		var secret string
-		if err := json.Unmarshal(input.Credential, &secret); err != nil {
+		if source == SourceAzureCostManagement || source == SourceAWS || (source == SourceGoogle && input.Credential[0] == '{') {
+			secret = string(input.Credential)
+		} else if err := json.Unmarshal(input.Credential, &secret); err != nil {
 			return access.Reply{}, access.Invalid("credential", "credential must be a string")
 		}
 		credential = &secret
@@ -196,16 +187,26 @@ func (s *Server) putImport(r *http.Request, _ access.Principal) (access.Reply, e
 	case credentialNull:
 		return access.Reply{}, access.Invalid("credential", "credential cannot be null; delete the billing import instead")
 	case credential != nil:
-		if err := ValidCredential(*credential); err != nil {
+		document, err := encodeCredential(source, *credential)
+		if err != nil {
 			return access.Reply{}, err
 		}
+		defer clear(document)
 		newID := access.NewID()
-		if err := s.Access.Keys.Store(r.Context(), tx, s.Access.Installation, newID, secrets.BillingCredential, []byte(*credential), nil); err != nil {
+		if err := s.Access.Keys.Store(r.Context(), tx, s.Access.Installation, newID, secrets.BillingCredential, document, nil); err != nil {
 			return access.Reply{}, err
 		}
 		credentialID = &newID
 	case credentialID == nil:
 		return access.Reply{}, access.Invalid("credential", "credential is required to create a billing import")
+	default:
+		compatible, err := ImportCredentialCompatible(r.Context(), tx, s.Access.Keys, s.Access.Installation, source, credentialID)
+		if err != nil {
+			return access.Reply{}, err
+		}
+		if !compatible {
+			return access.Reply{}, access.Invalid("credential", "supply a credential compatible with the billing source")
+		}
 	}
 	newETag := access.NewID()
 	action := "provider.billing_import.create"
@@ -224,6 +225,9 @@ func (s *Server) putImport(r *http.Request, _ access.Principal) (access.Reply, e
 			id, source, credentialID, scope, enabled, newETag)
 	}
 	if err != nil {
+		return access.Reply{}, err
+	}
+	if err := syncImportRevision(r.Context(), tx, id, source, scope); err != nil {
 		return access.Reply{}, err
 	}
 	// The row no longer references the replaced credential, so the old secret
@@ -282,6 +286,9 @@ func (s *Server) deleteImport(r *http.Request, _ access.Principal) (access.Reply
 		return access.Reply{}, err
 	}
 	if err := access.Match(r, existing.ETag); err != nil {
+		return access.Reply{}, err
+	}
+	if err := rememberImportCoverage(r.Context(), tx, id); err != nil {
 		return access.Reply{}, err
 	}
 	if _, err := tx.Exec(r.Context(), `DELETE FROM olp.provider_billing_imports WHERE provider_id=$1::uuid`, id); err != nil {
@@ -365,7 +372,7 @@ func (s *Server) invoicedCosts(r *http.Request, p access.Principal) (access.Repl
 	rows, err := s.Access.Pool.Query(r.Context(), `SELECT day::text,line_item,btrim(currency),amount::text,source,fetched_at
 		FROM olp.provider_invoiced_costs
 		WHERE provider_id=$1::uuid AND day>=$2::date AND day<$3::date
-		ORDER BY day,line_item`, id, start.Format(dayFormat), end.Format(dayFormat))
+		ORDER BY day,line_item,currency`, id, start.Format(dayFormat), end.Format(dayFormat))
 	if err != nil {
 		return access.Reply{}, err
 	}

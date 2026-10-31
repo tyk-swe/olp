@@ -10,7 +10,6 @@ import (
 
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/grants"
-	"github.com/tyk-swe/olp/internal/secrets"
 )
 
 type storedGrant struct {
@@ -30,8 +29,8 @@ func readGrant(ctx context.Context, q access.Queryer, bound Binding) (storedGran
 	return grant, err
 }
 
-func (s *Store) readAccess(ctx context.Context, q access.Queryer, grant storedGrant) ([]byte, error) {
-	token, err := s.Keys.Read(ctx, q, s.Installation, grant.AccessID, secrets.MCPGrantAccess)
+func (s *Store) readAccess(ctx context.Context, q access.Queryer, bound Binding, grant storedGrant) ([]byte, error) {
+	token, err := s.Keys.Read(ctx, q, s.Installation, grant.AccessID, bound.accessPurpose())
 	if err != nil {
 		return nil, err
 	}
@@ -41,13 +40,13 @@ func (s *Store) readAccess(ctx context.Context, q access.Queryer, grant storedGr
 	return token, nil
 }
 
-func (s *Store) resolveGrant(ctx context.Context, bound Binding) ([]byte, error) {
+func (s *Store) resolveGrant(ctx context.Context, bound Binding, revisionID string) ([]byte, error) {
 	current, err := readGrant(ctx, s.Pool, bound)
 	if err != nil {
 		return nil, err
 	}
 	if current.Expires.After(time.Now()) {
-		return s.readAccess(ctx, s.Pool, current)
+		return s.readAccess(ctx, s.Pool, bound, current)
 	}
 	if current.RefreshID == nil {
 		return nil, ErrRequired
@@ -58,10 +57,10 @@ func (s *Store) resolveGrant(ctx context.Context, bound Binding) ([]byte, error)
 	}
 	conn := resource.Hijack()
 	defer conn.Close(context.WithoutCancel(ctx))
-	return grants.WithRefreshLock(ctx, conn, "mcp:"+current.ID, true, func() ([]byte, error) { return s.refreshLocked(ctx, conn, bound, current.ID) })
+	return grants.WithRefreshLock(ctx, conn, "mcp:"+current.ID, true, func() ([]byte, error) { return s.refreshLocked(ctx, conn, bound, current.ID, revisionID) })
 }
 
-func (s *Store) refreshLocked(ctx context.Context, conn *pgx.Conn, bound Binding, lockedID string) ([]byte, error) {
+func (s *Store) refreshLocked(ctx context.Context, conn *pgx.Conn, bound Binding, lockedID, revisionID string) ([]byte, error) {
 	current, err := readGrant(ctx, conn, bound)
 	if err != nil {
 		return nil, err
@@ -70,7 +69,7 @@ func (s *Store) refreshLocked(ctx context.Context, conn *pgx.Conn, bound Binding
 		return nil, ErrRequired
 	}
 	if current.Expires.After(time.Now()) {
-		return s.readAccess(ctx, conn, current)
+		return s.readAccess(ctx, conn, bound, current)
 	}
 	if current.RefreshID == nil {
 		return nil, ErrRequired
@@ -78,24 +77,24 @@ func (s *Store) refreshLocked(ctx context.Context, conn *pgx.Conn, bound Binding
 	if current.AttemptID != nil {
 		return nil, errors.Join(ErrRequired, s.failRefresh(ctx, current.ID, *current.AttemptID))
 	}
-	refresh, readErr := s.Keys.Read(ctx, conn, s.Installation, *current.RefreshID, secrets.MCPGrantRefresh)
+	refresh, readErr := s.Keys.Read(ctx, conn, s.Installation, *current.RefreshID, bound.refreshPurpose())
 	if readErr != nil {
 		return nil, readErr
 	}
 	defer clear(refresh)
-	return s.replaceGrant(ctx, conn, bound, current, func(client oauthClient) (*oauth2.Token, error) {
+	return s.replaceGrant(ctx, conn, bound, current, revisionID, func(client oauthClient) (*oauth2.Token, error) {
 		return client.config.TokenSource(client.context(ctx), &oauth2.Token{RefreshToken: string(refresh)}).Token()
 	})
 }
 
-func (s *Store) replaceGrant(ctx context.Context, conn *pgx.Conn, bound Binding, current storedGrant, exchange func(oauthClient) (*oauth2.Token, error)) ([]byte, error) {
+func (s *Store) replaceGrant(ctx context.Context, conn *pgx.Conn, bound Binding, current storedGrant, revisionID string, exchange func(oauthClient) (*oauth2.Token, error)) ([]byte, error) {
 	if current.AttemptID != nil {
 		return nil, errors.Join(ErrRequired, s.failRefresh(ctx, current.ID, *current.AttemptID))
 	}
-	if _, err := liveBinding(ctx, conn, bound); err != nil {
+	if err := refreshBinding(ctx, conn, bound, revisionID); err != nil {
 		return nil, err
 	}
-	client, clientErr := s.oauthClient(ctx, bound, "")
+	client, clientErr := s.oauthClient(ctx, bound, "", revisionID)
 	if clientErr != nil {
 		return nil, clientErr
 	}
@@ -115,7 +114,7 @@ func (s *Store) replaceGrant(ctx context.Context, conn *pgx.Conn, bound Binding,
 	if err := validToken(token); err != nil {
 		return nil, errors.Join(ErrRequired, s.failRefresh(ctx, current.ID, attempt))
 	}
-	if err := s.saveRefresh(ctx, bound, current, attempt, token); err != nil {
+	if err := s.saveRefresh(ctx, bound, current, attempt, token, revisionID); err != nil {
 		return nil, err
 	}
 	return []byte(token.AccessToken), nil
@@ -128,7 +127,7 @@ func (s *Store) failRefresh(ctx context.Context, id, attempt string) error {
 	return err
 }
 
-func (s *Store) saveRefresh(ctx context.Context, bound Binding, current storedGrant, attempt string, token *oauth2.Token) error {
+func (s *Store) saveRefresh(ctx context.Context, bound Binding, current storedGrant, attempt string, token *oauth2.Token, revisionID string) error {
 	record, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 	defer cancel()
 	tx, err := s.Pool.Begin(record)
@@ -136,14 +135,14 @@ func (s *Store) saveRefresh(ctx context.Context, bound Binding, current storedGr
 		return err
 	}
 	defer tx.Rollback(record)
-	if _, err := liveBinding(record, tx, bound); err != nil {
+	if err := refreshBinding(record, tx, bound, revisionID); err != nil {
 		return err
 	}
 	accessID := access.NewID()
-	if err := s.Keys.Store(record, tx, s.Installation, accessID, secrets.MCPGrantAccess, []byte(token.AccessToken), nil); err != nil {
+	if err := s.Keys.Store(record, tx, s.Installation, accessID, bound.accessPurpose(), []byte(token.AccessToken), nil); err != nil {
 		return err
 	}
-	refreshID, refreshErr := s.storeRefresh(record, tx, token.RefreshToken)
+	refreshID, refreshErr := s.storeRefresh(record, tx, bound, token.RefreshToken)
 	if refreshErr != nil {
 		return refreshErr
 	}
@@ -158,6 +157,15 @@ func (s *Store) saveRefresh(ctx context.Context, bound Binding, current storedGr
 		return err
 	}
 	return tx.Commit(record)
+}
+
+func refreshBinding(ctx context.Context, q access.Queryer, bound Binding, revisionID string) error {
+	if revisionID != "" && bound.AgentID != "" {
+		_, err := revisionAgentBinding(ctx, q, bound, revisionID)
+		return err
+	}
+	_, err := liveBinding(ctx, q, bound)
+	return err
 }
 
 func replacedSecretIDs(current storedGrant) []string {

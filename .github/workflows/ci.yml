@@ -23,6 +23,13 @@ jobs:
     outputs:
       code: ${{ github.event_name != 'pull_request' || steps.filter.outputs.code == 'true' }}
       go: ${{ github.event_name != 'pull_request' || steps.filter.outputs.go == 'true' }}
+      console: ${{ github.event_name != 'pull_request' || steps.filter.outputs.console == 'true' }}
+      contracts: ${{ github.event_name != 'pull_request' || steps.filter.outputs.contracts == 'true' }}
+      helm: ${{ github.event_name != 'pull_request' || steps.filter.outputs.helm == 'true' }}
+      deps: ${{ github.event_name != 'pull_request' || steps.filter.outputs.deps == 'true' }}
+      scripts: ${{ github.event_name != 'pull_request' || steps.filter.outputs.scripts == 'true' }}
+      bench: ${{ github.event_name != 'pull_request' || steps.filter.outputs.bench == 'true' }}
+      lanes: ${{ steps.lanes.outputs.lanes }}
     steps:
       - if: github.event_name == 'pull_request'
         id: filter
@@ -47,92 +54,85 @@ jobs:
               - 'go.mod'
               - 'go.sum'
               - 'internal/**'
-              - 'openapi/**'
+              - 'cmd/**'
               - 'sdk/**'
-              - 'tests/fidelity/**'
-              - 'tests/fixtures/**'
-              - 'scripts/bench-gate.sh'
-              - 'scripts/check-benchstat.mjs'
+              - 'plugins/**'
+              - 'openapi/**'
+              - 'tests/**'
               - '.github/workflows/ci.yml'
               - '.github/actions/setup/**'
               - '!**/*.md'
-  check:
-    runs-on: ubuntu-26.04
-    timeout-minutes: 60
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: ./.github/actions/setup
-        with:
-          services: false
-          save-go-cache: true
-      - run: make check GO_TEST_ARGS='-race -count=1'
-      - run: ./scripts/check-contracts.sh --already-generated
-      - run: node scripts/check-release-version.mjs
-      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
-      - run: ./scripts/check-helm.sh
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: management-contract
-          path: openapi/management.json
-          if-no-files-found: error
-  ratchet:
-    needs: changes
-    if: github.event_name == 'pull_request' && needs.changes.outputs.code == 'true'
-    runs-on: ubuntu-26.04
-    timeout-minutes: 60
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0
-      - uses: ./.github/actions/setup
-        with:
-          services: false
-      - run: make test-ratchet RATCHET_BASE="origin/$BASE_REF"
+            console:
+              - 'console/**'
+              - 'pnpm-workspace.yaml'
+              - 'pnpm-lock.yaml'
+              - 'package.json'
+              - '.github/workflows/ci.yml'
+              - '.github/actions/setup/**'
+              - '!**/*.md'
+            contracts:
+              - 'openapi/**'
+              - 'internal/management/**'
+              - 'scripts/api.sh'
+              - 'scripts/generate-*.mjs'
+              - 'scripts/check-contracts.sh'
+              - 'console/scripts/generate-requirements.mjs'
+              - 'console/src/lib/api/**'
+              - 'sdk/**'
+              - 'package.json'
+              - '.github/workflows/ci.yml'
+              - '.github/actions/setup/**'
+              - '!**/*.md'
+            helm:
+              - 'deploy/helm/**'
+              - 'deploy/monitoring/**'
+              - 'scripts/check-helm.sh'
+              - 'scripts/check-helm-egress.sh'
+              - 'internal/**/*.go'
+              - '.github/workflows/ci.yml'
+            deps:
+              - 'go.mod'
+              - 'go.sum'
+              - '**/package.json'
+              - 'pnpm-lock.yaml'
+              - 'pnpm-workspace.yaml'
+              - 'scripts/check-dependencies.sh'
+              - 'scripts/native-sbom.py'
+              - 'deploy/Dockerfile'
+              - 'deploy/Dockerfile.*'
+              - '.github/workflows/ci.yml'
+              - '.github/actions/setup/**'
+            scripts:
+              - 'scripts/**'
+              - 'docs/**'
+              - '**/*.md'
+              - '.github/workflows/ci.yml'
+            bench:
+              - 'tests/bench/**'
+              - '.github/workflows/ci.yml'
+              - '.github/actions/setup/**'
+              - '!**/*.md'
+      - id: lanes
         env:
-          BASE_REF: ${{ github.base_ref }}
-      - run: make test-coverage-gate RATCHET_BASE="origin/$BASE_REF"
-        env:
-          BASE_REF: ${{ github.base_ref }}
-      - run: make api
-      - run: make test-mutation-go test-mutation-console RATCHET_BASE="origin/$BASE_REF"
-        env:
-          BASE_REF: ${{ github.base_ref }}
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        if: always()
-        with:
-          name: mutation-reports
-          path: .local/mutation-go/*.json
-          if-no-files-found: ignore
-  integration:
-    needs: changes
-    if: needs.changes.outputs.code == 'true'
-    strategy:
-      fail-fast: false
-      matrix:
-        lanes: [qualification, a-f, g-m, n-z, smoke browser]
-    # Ubuntu 26.04: its distribution bubblewrap carries the AppArmor profile the
-    # official Codex sandbox needs under the unprivileged-userns restriction;
-    # 24.04 lets the sandbox build its namespace but refuses it loopback.
-    runs-on: ubuntu-26.04
-    timeout-minutes: 60
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: ./.github/actions/setup
-        with:
-          browser: ${{ contains(matrix.lanes, 'browser') }}
-      - run: ./scripts/integration.sh ${{ matrix.lanes }}
-      - if: contains(matrix.lanes, 'smoke')
+          EVENT: ${{ github.event_name }}
+          GO: ${{ steps.filter.outputs.go }}
+          CONSOLE: ${{ steps.filter.outputs.console }}
+          CODE: ${{ steps.filter.outputs.code }}
         run: |
-          ./tests/sdk-smoke-python/run.sh
-          OLP_TEST_BINARY="$PWD/.local/bin/olp" ./tests/sdk-smoke/run.sh uv run --project tests/sdk-smoke-python --frozen python tests/sdk-smoke-python/client_env.py
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        if: always()
-        with:
-          name: coding-client-releases-${{ matrix.lanes }}
-          path: .local/codecli/evidence/
-          include-hidden-files: true
-          if-no-files-found: ignore
-  dependencies:
+          all='["codecli","clients","a-f","g-m","n-r","s-z","smoke","browser"]'
+          if [[ $EVENT != pull_request || $GO == true ]]; then
+            lanes=$all
+          elif [[ $CONSOLE == true ]]; then
+            lanes='["browser"]'
+          elif [[ $CODE == true ]]; then
+            lanes='["a-f","g-m","n-r","s-z","smoke","browser"]'
+          else
+            lanes='[]'
+          fi
+          echo "lanes=$lanes" >> "$GITHUB_OUTPUT"
+  check-go:
+    needs: changes
+    if: needs.changes.outputs.go == 'true'
     runs-on: ubuntu-26.04
     timeout-minutes: 20
     steps:
@@ -140,65 +140,159 @@ jobs:
       - uses: ./.github/actions/setup
         with:
           services: false
-      - run: ./scripts/check-dependencies.sh
-  bench:
+          node-modules: false
+      - run: make fmt-check
+      - run: make vet
+      - if: needs.changes.outputs.bench == 'true'
+        run: make vet-bench
+      - if: needs.changes.outputs.bench == 'true'
+        run: make lint
+      - if: needs.changes.outputs.bench != 'true'
+        run: make lint LINT_ARGS=--no-bench
+      - run: make test-go test-bench
+  check-console:
     needs: changes
-    if: github.event_name == 'pull_request' && needs.changes.outputs.go == 'true'
-    strategy:
-      fail-fast: false
-      matrix:
-        shard: [1, 2, 3]
+    if: needs.changes.outputs.console == 'true'
     runs-on: ubuntu-26.04
-    timeout-minutes: 60
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          version: '>=10.26.0'
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --dir console api:generate
+      - run: pnpm --dir console format:check
+      - run: pnpm --dir console check
+      - run: make test-console
+  check-scripts:
+    needs: changes
+    if: needs.changes.outputs.scripts == 'true'
+    runs-on: ubuntu-26.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+      - run: node --test scripts/*.test.mjs
+  contracts:
+    needs: changes
+    if: needs.changes.outputs.contracts == 'true'
+    runs-on: ubuntu-26.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/setup
+        with:
+          services: false
+      - run: ./scripts/check-contracts.sh
+      - run: node scripts/check-release-version.mjs
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: management-contract
+          path: openapi/management.json
+          if-no-files-found: error
+  helm:
+    needs: changes
+    if: needs.changes.outputs.helm == 'true'
+    runs-on: ubuntu-26.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+      - run: ./scripts/check-helm.sh
+  test-ratchet:
+    needs: changes
+    if: github.event_name == 'pull_request' && needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+      - run: node scripts/check-test-ratchet.mjs "origin/$BASE_REF"
+        env:
+          BASE_REF: ${{ github.base_ref }}
+  dependencies:
+    needs: changes
+    if: needs.changes.outputs.deps == 'true'
+    runs-on: ubuntu-26.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./.github/actions/setup
         with:
           services: false
-          node-modules: false
-      - run: ./scripts/bench-gate.sh "origin/$BASE_REF"
-        env:
-          BASE_REF: ${{ github.base_ref }}
-          BENCH_SHARD: ${{ matrix.shard }}/${{ strategy.job-total }}
-          # One sample of every benchmark takes about two minutes at the default
-          # benchtime and about 80 seconds at half a second, on an 8-vCPU
-          # machine. Each shard takes ten samples of about a third of them on
-          # each side, which is about 9 minutes at half a second before the
-          # trees are compiled and a regression is measured again at twice that.
-          BENCH_TIME: 500ms
-          # A pull request that means to remove or rename a benchmark says so.
-          BENCH_ALLOW_REMOVED: ${{ contains(github.event.pull_request.labels.*.name, 'allow-removed-benchmarks') && '1' || '0' }}
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        if: always()
-        with:
-          name: bench-gate-${{ matrix.shard }}
-          path: .local/bench/gate
-          if-no-files-found: ignore
-  native:
+      - run: ./scripts/check-dependencies.sh
+  build:
     needs: changes
-    if: needs.changes.outputs.code == 'true'
+    if: needs.changes.outputs.lanes != '[]'
+    runs-on: ubuntu-26.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/setup
+        with:
+          services: false
+      - run: make build
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: olp-build
+          path: |
+            .local/bin/olp
+            console/build
+            console/src/lib/api/schema.d.ts
+            console/src/lib/api/requirements.ts
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 1
+  integration:
+    needs: [changes, build]
+    if: needs.changes.outputs.lanes != '[]'
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - runner: ubuntu-24.04
-            arch: amd64
-          - runner: ubuntu-24.04-arm
-            arch: arm64
-    runs-on: ${{ matrix.runner }}
-    timeout-minutes: 40
+        lane: ${{ fromJson(needs.changes.outputs.lanes) }}
+    # Ubuntu 26.04: its distribution bubblewrap carries the AppArmor profile the
+    # official Codex sandbox needs under the unprivileged-userns restriction;
+    # 24.04 lets the sandbox build its namespace but refuses it loopback.
+    runs-on: ubuntu-26.04
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Build native candidate
+      - uses: ./.github/actions/setup
+        with:
+          browser: ${{ matrix.lane == 'browser' }}
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: olp-build
+      - run: chmod +x .local/bin/olp
+      - run: ./scripts/integration.sh ${{ matrix.lane }}
+        env:
+          OLP_TEST_SKIP_BUILD: "1"
+          OLP_TEST_PULL_POLICY: missing
+      - if: matrix.lane == 'smoke'
         run: |
-          mkdir -p .local/evidence
-          docker build --progress=plain --platform linux/${{ matrix.arch }} -f deploy/Dockerfile -t olp:candidate . 2>&1 | tee .local/evidence/build.log
-      - name: Qualify native candidate
-        run: ./scripts/smoke-image-services.sh olp:candidate ${{ matrix.arch }} 2>&1 | tee .local/evidence/smoke.log
+          ./tests/sdk-smoke-python/run.sh
+          OLP_TEST_BINARY="$PWD/.local/bin/olp" ./tests/sdk-smoke/run.sh uv run --project tests/sdk-smoke-python --frozen python tests/sdk-smoke-python/client_env.py
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
-          name: native-${{ matrix.arch }}
-          path: .local/evidence
+          name: coding-client-releases-${{ matrix.lane }}
+          path: .local/codecli/evidence/
+          include-hidden-files: true
+          if-no-files-found: ignore
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        if: always() && matrix.lane == 'browser'
+        with:
+          name: code-console-proof-${{ github.sha }}
+          path: console/test-results/access/**/*.png
+          if-no-files-found: warn

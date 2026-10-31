@@ -1,11 +1,10 @@
 # Writing a provider plugin
 
-A [provider plugin](../use/plugins.md) supplies a provider profile's authentication and
-hosting around one of OLP's built-in dialects. This guide covers writing one with
-the Go SDK, `github.com/tyk-swe/olp/sdk/plugin`, and documents the ABI the SDK
-implements. The reference plugin in
-[`sdk/plugin/reference`](../../sdk/plugin/reference/main.go) is a complete,
-minimal plugin to start from.
+A [provider plugin](../use/plugins.md) supplies authentication and hosting around
+one of OLP's built-in provider dialects. This guide explains how to write one
+with the Go SDK at `github.com/tyk-swe/olp/sdk/plugin` and documents the ABI that
+the SDK implements. Start from the complete reference plugin in
+[`sdk/plugin/reference`](../../sdk/plugin/reference/main.go).
 
 Plugins build with the Go version in OLP's `go.mod`. During 0.x the plugin ABI
 carries no compatibility promise: build a plugin with the SDK from the OLP

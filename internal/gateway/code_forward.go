@@ -12,14 +12,13 @@ import (
 	"github.com/tyk-swe/olp/internal/codeadapter"
 	"github.com/tyk-swe/olp/internal/codemode"
 	"github.com/tyk-swe/olp/internal/codewire"
+	"github.com/tyk-swe/olp/internal/resources"
+	"github.com/tyk-swe/olp/internal/runtime"
 )
 
-// RegisterCode mounts raw code-mode transport, which requires CodeLedger and
-// CodeAuthorizer. A route serves the paths of its accounts' adapters, and
-// each request goes to an account whose adapter serves its path. It never
-// invokes ordinary request preparation, credential failover, response
-// transformation or retries.
 func (s *Server) RegisterCode(mux *http.ServeMux) {
+	mux.HandleFunc("GET /code/{slug}/models", s.codeModels)
+	mux.HandleFunc("GET /code/{slug}/v1/models", s.codeModels)
 	mux.HandleFunc("/code/{slug}/mcp/{service}", s.serveCodeResearch)
 	mux.HandleFunc("/code/{slug}/{operation...}", s.serveCode)
 }
@@ -60,16 +59,16 @@ func (s *Server) serveCode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	adapters := release.Snapshot.CodeAdapters(route)
-	if len(adapters) == 0 {
+	if len(adapters) == 0 && len(route.PaidTargets)+len(route.PaidFallbackTargets) == 0 {
 		refuse(codemode.Refuse(503, "code_adapter_unavailable"))
 		return
 	}
-	if endpoint, ok := codeadapter.ForPath(path); ok && r.Method == http.MethodGet && strings.EqualFold(r.Header.Get("Upgrade"), "websocket") && len(release.Snapshot.CodeProviders(route, path, codeadapter.WebSocket)) != 0 {
-		s.codeWebSocket(w, r, release, route, authority, endpoint)
+	ingress, ok := codeIngressFor(path)
+	if ok && r.Method == http.MethodGet && strings.EqualFold(r.Header.Get("Upgrade"), "websocket") && len(release.Snapshot.CodeProviders(route, path, codeadapter.WebSocket)) != 0 {
+		s.codeWebSocket(w, r, release, route, authority, ingress)
 		return
 	}
-	ingress, ok := codeIngressFor(r.Method, path)
-	if !ok || len(release.Snapshot.CodeProviders(route, path, codeadapter.HTTP)) == 0 {
+	if r.Method != http.MethodPost || !ok || len(release.Snapshot.CodeProviders(route, path, codeadapter.HTTP)) == 0 && len(route.PaidTargets)+len(route.PaidFallbackTargets) == 0 {
 		if codeProbe(r.Method, path) && len(release.Snapshot.CodeProviders(route, "v1/messages", codeadapter.HTTP)) != 0 {
 			codeWriteError(w, r, codemode.Refuse(404, "code_operation_unsupported"))
 			return
@@ -101,31 +100,80 @@ func (s *Server) serveCode(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), codeGenerationTimeout)
 	defer cancel()
-	attempt, err := s.prepareCode(r.WithContext(ctx), release, route, observation, path, ingress.Protocol, codeadapter.HTTP)
+	observation.Recoverable = route.InitialRecoveryAttempts > 0 && codewire.PortableInitialRequest(body, r.Header, observation)
+	s.forwardCode(w, r.WithContext(ctx), release, route, observation, ingress, raw, body, nil, refuse)
+}
+
+func (s *Server) forwardCode(w http.ResponseWriter, r *http.Request, release *runtime.Release, route codemode.Route, observation codemode.Request, ingress codeIngress, raw, body []byte, recovery *resources.CodeRecovery, refuse func(error)) {
+	ctx := r.Context()
+	attempt, err := s.prepareCode(r, release, route, observation, ingress, codeadapter.HTTP, recovery, body)
 	if err != nil {
 		refuse(err)
 		return
 	}
 	defer attempt.finish(ctx)
-	client, err := s.codeClient(r.Context(), release, attempt.config, attempt.permit.Account.ProviderID)
+	payload, err := func() (codePayload, error) {
+		requestBody, rewriteErr := func() ([]byte, error) {
+			if attempt.model != attempt.publicModel {
+				return codewire.RewriteRequestModel(body, attempt.publicModel, attempt.model)
+			}
+			return body, nil
+		}()
+		if rewriteErr != nil {
+			return codePayload{}, rewriteErr
+		}
+		if attempt.endpoint.Target == codeadapter.TargetAntigravity {
+			return codeTranslateAntigravity(requestBody, r, attempt.model, attempt.auth.ProjectID)
+		}
+		if attempt.endpoint.Protocol == ingress.protocol {
+			if attempt.model != attempt.publicModel {
+				return codePayload{body: requestBody, query: r.URL.RawQuery}, nil
+			}
+			return codePayload{body: raw, query: r.URL.RawQuery}, nil
+		}
+		if ingress.protocol == codemode.ProtocolChat {
+			return codeTranslateChat(requestBody, r, attempt.model)
+		}
+		return codeTranslateMessages(requestBody, r, attempt.model)
+	}()
+	if err != nil {
+		refuse(err)
+		return
+	}
+
+	client, err := s.codeClient(r.Context(), release, attempt.config, attempt.providerID())
 	if err != nil {
 		refuse(err)
 		return
 	}
 	defer client.CloseIdleConnections()
-	target, err := s.codeEndpoint(attempt.config, attempt.endpoint.UpstreamPath, r.URL.RawQuery)
+	target, err := attempt.requestURL(payload.query, payload.stream)
 	if err != nil {
 		refuse(err)
 		return
 	}
-	request, err := http.NewRequestWithContext(ctx, http.MethodPost, target, &codeRequestBody{data: raw})
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, target, &codeRequestBody{data: payload.body})
 	if err != nil {
 		refuse(codemode.Refuse(502, "code_connection_invalid"))
 		return
 	}
-	request.ContentLength = int64(len(raw))
+	request.ContentLength = int64(len(payload.body))
 	request.Header = attempt.headers(r.Header)
-	request.Trailer = codewire.ForwardTrailers(r.Trailer, r.Header, true)
+	if attempt.model != attempt.publicModel {
+		request.Header.Del("Content-Encoding")
+		request.Header.Del("Content-Length")
+		request.Header.Set("Accept-Encoding", "identity")
+	}
+	if payload.translated || payload.target != "" {
+		request.Header.Del("Content-Encoding")
+		request.Header.Del("Content-Length")
+		request.Header.Del("Anthropic-Version")
+		request.Header.Del("Anthropic-Beta")
+		request.Header.Set("Accept-Encoding", "identity")
+		request.Header.Set("Content-Type", "application/json")
+	} else {
+		request.Trailer = codewire.ForwardTrailers(r.Trailer, r.Header, true)
+	}
 	if len(request.Trailer) != 0 {
 		request.ContentLength = -1
 		request.Header.Del("Content-Length")
@@ -133,24 +181,57 @@ func (s *Server) serveCode(w http.ResponseWriter, r *http.Request) {
 	// A non-rewindable body and a fresh HTTP/1 connection prevent net/http replay.
 	request.GetBody = nil
 	request.Close = true
+	if err := attempt.authorizePaid(request, payload.body); err != nil {
+		refuse(err)
+		return
+	}
 	if err := attempt.dispatch(ctx); err != nil {
 		refuse(err)
 		return
 	}
-	response, err := client.Do(request)
+	upstreamResponse, err := client.Do(request)
 	if err != nil {
 		attempt.transportFailed(ctx, err)
 		refuse(codemode.Refuse(502, "code_upstream_unavailable"))
 		return
 	}
+	defer upstreamResponse.Body.Close()
+	attempt.response(ctx, upstreamResponse.StatusCode, upstreamResponse.Header)
+	response, safetyErr := attempt.safePaidResponse(upstreamResponse)
+	if safetyErr != nil {
+		refuse(safetyErr)
+		return
+	}
 	defer response.Body.Close()
-	attempt.response(ctx, response.StatusCode, response.Header)
+	next, recoveryErr := attempt.recover(ctx, response, route, recovery)
+	if recoveryErr != nil {
+		refuse(recoveryErr)
+		return
+	}
+	if next != nil {
+		s.forwardCode(w, r, release, route, observation, ingress, raw, body, next, refuse)
+		return
+	}
+	if payload.target == codeadapter.TargetAntigravity {
+		attempt.antigravityResponse(ctx, w, r, response, observation.Operation.Model, payload)
+		return
+	}
+	if payload.translated {
+		attempt.translateResponse(ctx, w, r, response, observation.Operation.Model, payload.stream, codeFamily(ingress.protocol), payload.includeUsage)
+		return
+	}
 	maps.Copy(w.Header(), codewire.ForwardHeaders(response.Header, false))
+	if attempt.model != attempt.publicModel {
+		w.Header().Del("Content-Encoding")
+		w.Header().Del("Content-Length")
+	}
 	for name := range codewire.ForwardTrailers(response.Trailer, response.Header, false) {
 		w.Header().Add("Trailer", name)
 	}
 	w.WriteHeader(response.StatusCode)
-	attempt.copyResponse(ctx, w, response)
+	meteredResponse, finishUsage := attempt.meterPaidResponse(response)
+	defer finishUsage()
+	attempt.copyResponse(ctx, w, meteredResponse)
 	for name, values := range codewire.ForwardTrailers(response.Trailer, response.Header, false) {
 		w.Header()[http.TrailerPrefix+name] = values
 	}
@@ -180,6 +261,12 @@ func (b *codeRequestBody) Read(p []byte) (int, error) {
 func (b *codeRequestBody) Close() error { return nil }
 
 func (a *codeAttempt) copyResponse(ctx context.Context, w http.ResponseWriter, response *http.Response) {
+	if a.model != a.publicModel {
+		if err := a.copyModelResponse(ctx, w, response); err != nil {
+			a.transportFailed(ctx, err)
+		}
+		return
+	}
 	streaming := strings.HasPrefix(strings.ToLower(response.Header.Get("Content-Type")), "text/event-stream")
 	encoded := response.Header.Get("Content-Encoding")
 	events := codewire.NewEvents(codewire.MaxBody, func(data []byte) { a.observe(a.observer.Event(data)) })
@@ -221,17 +308,10 @@ func (a *codeAttempt) copyResponse(ctx context.Context, w http.ResponseWriter, r
 					}
 				}
 			}
-			if err == io.EOF && !a.terminal {
-				if o, ok := a.observer.Finish(); ok {
-					a.observe(o)
-				}
-			}
-			if !a.terminal && ctx.Err() == nil {
-				outcome := codemode.Outcome{Origin: "gateway", Kind: "transport_error"}
-				if err == io.EOF {
-					outcome.Origin, outcome.Kind = "upstream", "incomplete"
-				}
-				a.outcome(ctx, outcome)
+			if err == io.EOF {
+				a.finishCodeStream(ctx)
+			} else if !a.terminal && ctx.Err() == nil {
+				a.outcome(ctx, codemode.Outcome{Origin: "gateway", Kind: "transport_error"})
 			}
 			return
 		}

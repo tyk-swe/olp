@@ -1,15 +1,17 @@
 # FinOps export and invoice reconciliation
 
-Three workflows cover cost accounting outside OLP: the `metering` stream to
-CloudEvents consumers and Stripe Billing meters, FOCUS 1.4 cost-and-usage
-datasets on object storage, and provider invoice imports that reconcile
-attributed spend against billed spend. The export worker delivers metering
-records from a durable queue; a separate FOCUS worker generates and delivers
-datasets through the FOCUS ledger. The billing importer independently polls
-provider cost reports and stores daily invoice totals using PostgreSQL and
-provider egress, without the export queue or coordination store. All three
-are content-free. Export retries preserve event or dataset identity; invoice
-imports replace the stored totals for the fetched days.
+FinOps has three separate content-free workflows. The `metering` stream sends
+priced attempt records to CloudEvents consumers and Stripe Billing meters. FOCUS
+1.4 datasets publish cost and usage data to object storage. Provider invoice
+imports store daily billed totals so operators can reconcile them against OLP's
+attributed spend.
+
+The export worker delivers metering records from a durable queue. A separate
+FOCUS worker generates and delivers datasets through the FOCUS ledger. The
+billing importer polls provider cost reports independently and uses PostgreSQL
+and provider egress without the export queue or coordination store. Export
+retries preserve event or dataset identity, while a later invoice import replaces
+the stored totals for the days it fetched.
 
 ## Metering stream
 
@@ -76,8 +78,8 @@ with `Authorization: Bearer <key>`:
 The credential is `{"api_key": "sk_…|rk_…"}`, sealed as `sink_credential`; the
 server validates the key prefix and rejects `signing_secret`, `region`,
 `auth_mode` and `secret` in the document.
-Each event sends `identifier` — deterministic
-`olp-<sink id>-<attempt id>` — and repeats it as the `Idempotency-Key`, so a
+Each event sends the deterministic identifier `olp-<sink id>-<attempt id>` and
+repeats it as the `Idempotency-Key`, so a
 redelivery is the same event to Stripe. A `duplicate_meter_event` response
 counts as delivered. Stripe enforces identifier uniqueness for at least 24
 hours while OLP retries within minutes, and accepts event timestamps up to
@@ -95,7 +97,7 @@ An object-storage sink (`s3`, `gcs` or `azure_blob`) with format `csv_gzip` and
 stream `focus` produces a daily [FOCUS 1.4](https://focus.finops.org/) cost
 and usage dataset per UTC charge date. `settings.cost_basis` is `cost` or
 `charge` and is immutable after creation; `settings.start_date` bounds how far
-back generation reaches — at most 90 days before the day it is set, and never
+back generation reaches. It can reach at most 90 days before the day it is set and never
 before the usage-retention cutoff.
 
 ### Layout
@@ -163,11 +165,11 @@ ingestion gap overlaps the day. `metadata` follows FOCUS 1.4 §5:
 
 A day becomes eligible two hours after it ends. The worker (`focus_export`,
 a 60-second pass on PostgreSQL leases, independent of Valkey) processes at
-most four days per sink per pass, oldest first. A delivered day whose fact
-set changed — a late fact marks it dirty, as does every day of a committed
-fact's bucket — regenerates no sooner than one hour after the previous
-delivery, writes the next `revision=NNNN` keys, and bumps the manifest
-revision; restatement applies even after the day's billing month has closed.
+most four days per sink per pass, oldest first. A late fact marks its delivered
+day dirty, as does every day in a committed fact's bucket. A dirty day regenerates
+no sooner than one hour after the previous delivery, writes the next
+`revision=NNNN` keys and bumps the manifest revision. Restatement applies even
+after the day's billing month has closed.
 Days older than the usage-retention cutoff are never generated or restated,
 and their dirty markers are purged each pass. Failure records a content-free
 `last_error_code` (`endpoint`, `credential`, `authentication`, `status`,
@@ -187,13 +189,13 @@ revisions never gap.
 One usage row per (UTC day, consumer project, provider, upstream model,
 operation, route, API key, attribution set, committed flag, price-line
 component/tier/unit/list and contracted unit price). Facts store `cost_lines`
-and `charge_lines`: the exact decomposition `olp.price_usage_lines` produces —
-`quantity` in the line's unit (`1000000 Tokens`, `Requests`, `Calls`, `Units`),
+and `charge_lines` from the exact decomposition produced by
+`olp.price_usage_lines`. Each line has a `quantity` in its unit (`1000000 Tokens`, `Requests`, `Calls` or `Units`),
 a `list_unit_price` that already includes the window and batch multipliers,
-and a `contracted_unit_price` that also includes the discount. A fact with no
-stored lines — written before migration 0067, or where the line-total guard
-did not match the fact totals — falls back to a single `attempt` component
-line priced from the fact totals; the manifest counts such facts in
+and a `contracted_unit_price` that also includes the discount. A fact can have no
+stored lines when it was written before migration 0067 or when the line-total
+guard did not match the fact totals. It then falls back to a single `attempt`
+component line priced from the fact totals. The manifest counts such facts in
 `fallback_line_attempts`. Line amounts are exact, while accounting rounds each
 attempt to 12 decimal places, so `accounting_totals` can differ slightly from
 `totals`; the manifest reports both.
@@ -209,8 +211,8 @@ UTC month of `ChargePeriodStart`, which spans the charge day for usage rows;
 `ServiceCategory` is `AI and Machine Learning`, `ServiceSubcategory`
 `Generative AI`, `ServiceName` the vendor contract name (else the connection),
 and `ServiceProviderName`/`HostProviderName`/`InvoiceIssuerName` the contract
-maintainer (else name, else connection) — on the charge basis,
-`ServiceProviderName` and `InvoiceIssuerName` are the installation name.
+maintainer, falling back to name and then connection. On the charge basis,
+`ServiceProviderName` and `InvoiceIssuerName` instead use the installation name.
 `Tags` is the attribution object or null.
 
 | FOCUS column | Cost basis | Charge basis |
@@ -224,7 +226,7 @@ maintainer (else name, else connection) — on the charge basis,
 | `ConsumedQuantity`, `ConsumedUnit` | natural units (`Tokens`, `Requests`, `Calls`, `Units`) | same |
 | `SkuId` | `<vendor>/<model>/<operation>/<component>` | same |
 | `SkuPriceId` | `SkuId@<list unit price>` (`@above=<tier>` when tiered) | `SkuId@<charge unit price>` |
-| `SkuMeter` | component display name (for example `Input Tokens`, `Requests`, `Tool Calls (web_search)`; `attempt` → `Attempts`) | same |
+| `SkuMeter` | Component display name, such as `Input Tokens`, `Requests` or `Tool Calls (web_search)`. The `attempt` component displays as `Attempts` | same |
 | `SubAccountId`/`SubAccountName` | consumer project | consumer project |
 | `CommitmentDiscount*` | set on committed usage and Purchase rows | null |
 | `x_ApiKeyId`, `x_ConnectionId`, `x_ConnectionName`, `x_Model`, `x_Operation`, `x_PriceComponent`, `x_PriceTier`, `x_Route`, `x_Attempts` | row context and distinct attempt count | same |
@@ -304,33 +306,208 @@ rules, so the in-repo interpreter is the conformance authority.
 
 ### Billing imports
 
-An OpenAI or Anthropic connection gains a billing import at
-`PUT /api/v1/providers/{provider_id}/billing-import` — `{enabled, scope,
-credential}`. The credential is a vendor **admin key**, sealed under purpose
-`billing_credential` and never served inference; it is required on create,
-omitted keeps the stored key, and `null` is rejected — delete the import
-instead. Scope is source-shaped: `{"project_ids": ["proj_…"]}` for OpenAI
-(up to 100 entries) and `{"workspace_ids": ["wrkspc_…", "default"]}` for
-Anthropic; `{}` imports the whole organization. `GET` returns the import with
-its status (`next_import_at`, `last_import_at`, `last_success_at`,
-`last_error_code`, `imported_from`, `imported_through`), `POST …/run`
-reschedules it immediately, and `DELETE` removes it and the sealed key while
-keeping imported costs.
+An OpenAI, Anthropic, Bedrock, Vertex AI or Azure OpenAI connection gains a billing import at
+`PUT /api/v1/providers/{provider_id}/billing-import` with `{enabled, scope,
+credential}`. The billing credential is sealed under purpose
+`billing_credential` and is separate from the inference credential. It is
+required on create, omitting it keeps the stored credential, and `null` is
+rejected. `GET` returns the import and its status, including the latest
+contiguous covered date range, last error and applied source revision. Older
+covered days may remain outside that range. `POST …/run` reschedules it immediately.
+`DELETE` removes the import and sealed credential while keeping imported costs and
+coverage available for historical reconciliation. Changing the source or scope
+clears the current import's coverage status. Previously imported days remain
+available for reconciliation until a later import replaces them or retention
+purges them.
+
+Amounts retain the source currency, and reconciliation does not convert currencies.
+Imports from connections with overlapping account, project, workspace,
+linked-account or subscription scopes can count the same invoice costs twice.
+Choose non-overlapping scopes when combining connections.
+
+For OpenAI and Anthropic, use a vendor admin key. Scope is
+`{"project_ids": ["proj_…"]}` for OpenAI or
+`{"workspace_ids": ["wrkspc_…", "default"]}` for Anthropic. Each list can
+contain up to 100 entries and `{}` imports the whole organization. OpenAI
+amounts come from its organization costs endpoint, and Anthropic amounts come
+from its organization cost report.
+
+For Bedrock, configure a legacy AWS Cost and Usage Report with hourly time
+granularity, CSV format, GZIP or ZIP compression and **create new report
+versions** enabled. Include resource IDs and deliver the report to S3. Set
+`scope` to `{"payer_account_id":"123456789012", "bucket":"billing-bucket",
+"report_prefix":"prefix/report-name", "region":"us-east-1"}`. The prefix
+includes the report name and is relative to the bucket. Optionally provide
+`"linked_account_ids":["123456789013"]` to limit the import to up to 100 linked
+accounts. Without that list all linked accounts in the payer's report are
+included. Keep scopes disjoint when multiple providers use the same payer,
+since overlapping imports each record the same matching costs.
+
+Use a dedicated billing identity with `s3:ListBucket` on the bucket limited to
+the report prefix and `s3:GetObject` on objects under that prefix. Grant any
+KMS decrypt permission required by the bucket's encryption key. Supply
+`{"auth_mode":"static", "access_key_id":"…", "secret_access_key":"…"}`
+as the billing credential, adding `session_token` for temporary credentials,
+or `{"auth_mode":"workload"}` to use the workload's AWS credential chain.
+The workload chain uses the bounded AWS metadata transport; S3 access uses the
+connection's normal network and egress policy. The import reads only Bedrock
+service rows, uses effective costs for reserved and Savings Plan usage, and
+excludes commitment fees and negation lines. It uses the assembly manifest and
+its S3 modification time as the revision and ordering marker. Parquet exports
+and reports that overwrite previous versions are not supported.
+
+### Azure Cost Management setup
+
+Create a Cost Management export for cost and usage details (amortized), with CSV
+format and daily delivery of month-to-date costs to a Blob Storage container.
+Each delivery must start on the first day of its billing month. Partitioned and
+gzip exports are supported. Parquet, actual cost, usage-only and FOCUS exports use
+different schemas and are not accepted. Management group exports do not support
+amortized costs. The export must already exist and historical imports are
+limited to deliveries still present in the container. Azure can deliver prior
+month corrections during the first five days of the month
+([Microsoft export documentation](https://learn.microsoft.com/en-us/azure/cost-management-billing/costs/tutorial-improved-exports)).
+
+Grant the chosen identity Storage Blob Data Reader on the container or a
+narrower appropriate scope. The billing connection uses its own storage
+account endpoint and the provider connection's network and egress settings.
+Use `azure_default` for an explicitly selected workload identity, or supply a
+client secret for `azure_client_secret`. Both credentials are write-only. For
+example, create the import with the following scope and workload credential,
+replacing the values with your own:
+
+```json
+{
+  "enabled": true,
+  "scope": {
+    "billing_scope": "/providers/Microsoft.Billing/billingAccounts/1234567",
+    "export_name": "costs",
+    "storage_account": "billingaccount",
+    "container": "exports",
+    "prefix": "billing",
+    "subscription_ids": ["11111111-1111-4111-8111-111111111111"]
+  },
+  "credential": {"auth_mode": "azure_default"}
+}
+```
+
+The `billing_scope` must match the export resource scope. `prefix` is the
+export's storage directory and may be omitted. Omit `subscription_ids` to
+include all subscriptions in that scope. A client-secret credential is
+`{"auth_mode":"azure_client_secret","tenant_id":"...","client_id":"...","client_secret":"..."}`.
+Choose disjoint subscription scopes when multiple providers share an export,
+or their reported invoice totals overlap.
+
+Azure imports only the documented Cognitive Services meter subcategories
+Azure Open AI and Azure Open AI Reservation. Vendor meter names can change, so
+review the export if expected charges are missing. Amounts use
+`CostInBillingCurrency` from the amortized export. Non-tax credit and adjustment
+rows are retained when the export assigns them to those meters. Account-wide
+credits cannot be allocated to the meters. Tax and other Azure services are
+excluded, so these amounts do not necessarily equal the final invoice. The
+importer validates the export resource ID, manifest and part counts before
+storing closed UTC days. Blob manifests have no documented
+completion status, so a delivery that appears complete from its manifest can
+still be subject to later correction. If no manifests are found at the configured
+location, the import reports a response error and retries. See the
+[Cost Management overview](https://learn.microsoft.com/en-us/azure/cost-management-billing/cost-management-billing-overview).
+
+For Vertex AI, first enable the [detailed Cloud Billing export to BigQuery](https://cloud.google.com/billing/docs/how-to/export-data-bigquery-tables/detailed-usage).
+Grant the billing principal `bigquery.jobs.create` in the query project and
+`bigquery.tables.getData` on the export table. Set the required scope to the
+Cloud Billing account ID, BigQuery project ID, dataset ID and detailed export
+table ID. `project_ids` optionally limits the imported workloads. Keep scopes
+disjoint across providers using the same export because overlapping imports
+record the same matching costs more than once:
+
+```json
+{
+  "billing_account_id": "012345-ABCDEF-012345",
+  "bigquery_project_id": "billing-project",
+  "dataset_id": "billing_export",
+  "table_id": "gcp_billing_export_resource_v1_012345_ABCDEF_012345",
+  "project_ids": ["workload-project"]
+}
+```
+
+The credential is `{"auth_mode":"service_account","service_account":{...}}`
+with the complete service account key JSON, or `{"auth_mode":"adc"}` to
+explicitly use the worker's application default credentials. The credential is
+sealed and is never returned by the API. Configuration promotion passes the
+same JSON object serialized as the value of the billing credential's secret
+binding. Keep this binding out of the configuration document itself.
+
+The Google query selects the Vertex AI [billing service ID](https://cloud.google.com/billing/docs/how-to/budgets-spend-caps)
+`C7E2-9256-1C43` and sums costs by UTC usage day, service, SKU and
+currency. Regular charges, adjustments and credit types have separate line
+items. Corrections stay on the original usage day even when their invoice month
+is later. Google stores detailed export costs and credits as FLOAT. The query
+converts each value through its decimal string representation to BIGNUMERIC before
+summing and the importer keeps the returned decimal without converting it through
+a Go float. This cannot recover precision
+already lost in the source FLOAT.
+
+The importer queries retained billing periods and records the export watermark
+with each period. It revisits retained historical periods alongside the current
+and previous periods, and replaces a covered day only with an equal or newer
+watermark. The watermark covers the configured account and projects, starts at
+the beginning of the queried period and includes later arrivals. A day is covered
+only when the export contains activity for the configured account and projects
+on that UTC day, across any service,
+and the day closed before the watermark. An evidenced day with no Vertex charges
+is covered zero. Days without scope activity remain not imported. Google exports
+can begin after historical usage, contain gaps or arrive late. Activity and a
+watermark provide evidence of coverage, but do not guarantee that the export
+contained every historical cost.
 
 ### Importer
 
 The `billing_import` worker scans every 60 seconds for imports due, claims up
-to ten under a ten-minute lease, and fetches through the connection's
-egress-validated client (no redirects, 30 seconds per request, a 4 MiB
-response cap, at most 20 pages). Imports cover closed UTC days only: the first
-covers the 30 days before today, and later imports refresh the last 7 so
-vendor restatements land. Each day's returned line items are summed per
-`(day, line_item)` and replace the stored rows — a returned bucket with no
-results records an invoiced zero. On success the import schedules one hour
-out; on failure `last_error_code` records `credential`, `status`, `network`,
+to ten, one at a time under a ten-minute lease, and fetches through the connection's
+egress-validated client with redirects disabled and a 30-second request timeout.
+OpenAI and Anthropic imports cover closed UTC days only. The first covers the 30
+days before today, and later imports refresh the last 7 so vendor restatements
+land. AWS imports cover closed UTC days within retention on the first pass and
+refresh the current and previous billing periods on later passes. Incomplete
+historical periods are retried until covered. A delivery covers only days closed
+before its manifest was written, and gaps remain unimported. AWS uses unblended
+cost for ordinary and other included rows, reservation effective cost for
+`DiscountedUsage`, and Savings Plan effective cost for `SavingsPlanCoveredUsage`.
+It excludes tax, commitment fees and negations. AWS reads have a
+45-second deadline and cumulative compressed and expanded byte, row and
+aggregation limits. Azure searches retained billing periods on the first pass,
+then refreshes the current and previous periods and retries missing or incomplete
+historical periods. A run covers only days closed before it was submitted, and
+gaps remain unimported. Newer complete runs replace their period's totals;
+older runs cannot overwrite them. Azure keeps service-scoped credits and
+adjustments present in the export separate from usage and excludes taxes. Azure
+streams up to 200 CSV parts, 128 MiB compressed and 512 MiB expanded per pass,
+with two million rows, 100,000 aggregates and a one-minute import budget. Each
+day's returned line items are summed per
+`(day, line_item, currency)` and replace the stored rows. A returned bucket with
+no results records an invoiced zero. On success the import schedules one hour
+out. When AWS or Azure reaches the pass budget after completing a period, it
+continues the remaining periods on the next worker scan. An individual period
+that exceeds the limits still fails and backs off. Google schedules the next
+worker scan after a successful pass while retained
+historical periods have not yet been queried; it returns to hourly refresh once
+they have all been visited. On failure `last_error_code` records `credential`, `status`, `network`,
 `timeout`, `response` or `endpoint`, and the retry backs off from five
 minutes to one hour. Rows older than `retention.usage_days` are purged in
-bounded batches.
+bounded batches and their coverage is cleared. If retention later increases,
+AWS and Azure imports retry the newly uncovered historical periods. Google revisits
+retained billing periods in rotation, including newly retained periods and days
+without scope evidence.
+
+Google uses the fixed BigQuery endpoint through the same connection egress
+policy, with a 1 GiB maximum bytes billed per query, a 20-second job timeout, a
+45-second import budget and a maximum of 200,000 aggregate rows per query. A
+pass submits at most three queries, for a maximum of 3 GiB billed, and rotates
+their order so a slow period does not starve other periods. A failed query or an
+incomplete result does not replace that period's invoice rows. Token exchanges
+use the configured connection proxy while validating the Google authentication
+destination with a public-only policy. Workload credentials are used only when
+ADC is explicitly selected.
 
 `GET /api/v1/providers/{id}/invoiced-costs?start=…&end=…` lists stored line
 items (`day`, `line_item`, `currency`, `amount`, `source`, `fetched_at`),
@@ -344,19 +521,24 @@ end-exclusive and at most 93 days.
 | Field | Meaning |
 | --- | --- |
 | `attributed_cost` | `estimated_cost` plus allocated commitment for the day's billable attempts |
-| `invoiced_cost` | imported line-item total when the day is inside the imported range, else null; `0` for an empty imported bucket |
+| `invoiced_cost` | imported line-item total for a covered day, else null. A covered day with no costs has value `0` |
 | `capture_rate` | `attributed / invoiced` to six decimals, or null with `capture_rate_unavailable_reason` (`not_imported`, `zero_invoice`, `currency_mismatch`) |
 | `priced_attempts`, `unpriced_attempts`, `incomplete_attempts` | billable attempt counts; `unpriced_share` is `unpriced/(priced+unpriced)` |
 | `excluded_caller_attempts` | billable attempts excluded for caller-paid or budget-exempt status |
-| `provisional` | true within two days of today, or when the import has not succeeded since 30 hours after the day began |
-| `import` | the import's `last_success_at`/`last_error_code` |
+| `provisional` | true within two days of today, when no applicable import success exists, or when it was before 30 hours after the day began |
+| `import` | the import's `last_success_at`/`last_error_code`, or null after deletion |
+
+For a covered day, `provisional` uses that day's last successful import. For an
+uncovered day, it uses the import's latest success, if any. A non-provisional
+result does not establish coverage. Uncovered days have a null `invoiced_cost`
+and a `capture_rate_unavailable_reason` of `not_imported`.
 
 Totals per provider add `attributed_cost` (whole range),
 `attributed_cost_covered` (covered days only, the numerator `capture_rate`
 uses), `invoiced_cost`, `capture_rate` and `unpriced_share`. Caller-paid and
 budget-exempt attempts are excluded from attributed cost; hourly rollup rows
 only approximate priced/incomplete counts and cannot distinguish caller-paid
-usage, so their `budget_exempt` request count is counted as excluded — the
+usage, so their `budget_exempt` request count is counted as excluded. That
 limitation is documented in the code.
 
 Metrics: `olp_billing_imports_total{provider,outcome}` (process-local) and
@@ -367,7 +549,11 @@ Metrics: `olp_billing_imports_total{provider,outcome}` (process-local) and
 A provider entry in a configuration document carries `billing_import`
 `{enabled, scope, credential_ref}` with `credential_ref`
 `<provider name>/billing`; a missing `secret_bindings` entry blocks apply,
-reusing a matching binding keeps the stored key, and an entry's absence
-deletes the import. `internal/billing/testdata` fixtures follow the vendors'
-documented response shapes — there is no live-account qualification. AWS CUR,
-Google Cloud billing export and Azure Cost Management imports remain planned.
+reusing a matching binding keeps the stored credential, and an entry's absence
+deletes the import. The fixtures in `internal/billing/testdata` and the hand-built
+AWS CUR fixtures in `tests/integration/billing_aws_test.go` follow documented
+response shapes. The AWS fixture follows the documented [report versions](https://docs.aws.amazon.com/cur/latest/userguide/understanding-report-versions.html),
+[latest report locations](https://docs.aws.amazon.com/cur/latest/userguide/view-latest-cur.html),
+[identity columns](https://docs.aws.amazon.com/cur/latest/userguide/identity-columns.html)
+and [line item columns](https://docs.aws.amazon.com/cur/latest/userguide/Lineitem-columns.html),
+reviewed October 31, 2026. The fixtures have not been qualified against live billing accounts.

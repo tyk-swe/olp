@@ -1,10 +1,14 @@
 # External secrets and wrapped master keys
 
-OLP can unwrap its encryption keys at startup and resolve immutable provider
-credential versions from AWS, Google Cloud, Azure or Vault. The deployment's
-workload identity supplies access; provider credentials remain in their store.
-All service and identity exchanges use the provider egress policy, verified TLS,
-bounded deadlines and response sizes, and refuse redirects.
+An installation can keep its master keys wrapped by an external key service and
+resolve selected provider credentials from an external secret store at runtime.
+Supported stores cover AWS, Google Cloud, Azure and Vault. The deployment's
+workload identity supplies access, while provider credential values remain in
+their owning store.
+
+Every service and identity exchange follows the provider egress policy. Requests
+use verified TLS, bounded deadlines and response sizes, and redirects are
+refused.
 
 ## Wrapped key rings
 
