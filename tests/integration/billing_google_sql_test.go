@@ -318,7 +318,7 @@ func TestGoogleBillingImportEndToEnd(t *testing.T) {
 	}
 	lastAttempt, lastErr := time.Parse(time.RFC3339Nano, initialStatus["last_import_at"].(string))
 	nextAttempt, nextErr := time.Parse(time.RFC3339Nano, initialStatus["next_import_at"].(string))
-	if lastErr != nil || nextErr != nil || !nextAttempt.After(lastAttempt) || nextAttempt.Sub(lastAttempt) > time.Hour {
+	if lastErr != nil || nextErr != nil || nextAttempt.Sub(lastAttempt) < 5*time.Minute || nextAttempt.Sub(lastAttempt) > time.Hour {
 		t.Fatalf("failed historical period did not back off: %v", initialStatus)
 	}
 	historicalURL := fmt.Sprintf("/api/v1/usage/reconciliation?start=%s&end=%s&provider_id=%s", historicalDay.Format("2006-01-02"), historicalDay.AddDate(0, 0, 1).Format("2006-01-02"), id)
@@ -331,11 +331,28 @@ func TestGoogleBillingImportEndToEnd(t *testing.T) {
 		runHeaders := etagHeader(currentImport)
 		runHeaders["Idempotency-Key"] = uuid.NewString()
 		h.want(owner, "POST", "/api/v1/providers/"+id+"/billing-import/run", nil, runHeaders, 202)
+		beforeQueries := queryCount.Load()
 		if err := importer.Pass(t.Context()); err != nil {
 			t.Fatal(err)
 		}
-		if item := h.want(owner, "GET", historicalURL, nil, nil, 200)["items"].([]any)[0].(map[string]any); item["capture_rate_unavailable_reason"] != "not_imported" {
+		if queryCount.Load()-beforeQueries > 3 {
+			t.Fatal("Google backfill exceeded its three-query pass limit")
+		}
+		status := h.want(owner, "GET", "/api/v1/providers/"+id+"/billing-import", nil, nil, 200)["status"].(map[string]any)
+		last, lastErr := time.Parse(time.RFC3339Nano, status["last_success_at"].(string))
+		next, nextErr := time.Parse(time.RFC3339Nano, status["next_import_at"].(string))
+		if lastErr != nil || nextErr != nil {
+			t.Fatalf("invalid Google backfill schedule: %v", status)
+		}
+		item := h.want(owner, "GET", historicalURL, nil, nil, 200)["items"].([]any)[0].(map[string]any)
+		if item["capture_rate_unavailable_reason"] != "not_imported" {
+			if next.Sub(last) < 50*time.Minute {
+				t.Fatalf("completed Google backfill did not return to hourly refresh: %v", status)
+			}
 			break
+		}
+		if next.Sub(last) <= 0 || next.Sub(last) > 2*time.Minute {
+			t.Fatalf("unvisited Google billing periods were not scheduled promptly: %v", status)
 		}
 	}
 	recovered := h.want(owner, "GET", historicalURL, nil, nil, 200)["items"].([]any)[0].(map[string]any)

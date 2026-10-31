@@ -83,7 +83,26 @@ func (i *Importer) importGoogle(ctx context.Context, row *importRow, client *htt
 		return err
 	}
 	periods := googlePeriodOrder(historical, current, phase)
-	return i.importGooglePeriods(importCtx, row, client, auth, key, earliest, today, periods[:])
+	if err := i.importGooglePeriods(importCtx, row, client, auth, key, earliest, today, periods[:]); err != nil {
+		return err
+	}
+	return i.scheduleGoogleBackfill(importCtx, row, earliest, current)
+}
+
+func (i *Importer) scheduleGoogleBackfill(ctx context.Context, row *importRow, earliest, current time.Time) error {
+	digest, err := scopeDigest(row.Source, row.Scope)
+	if err != nil {
+		return err
+	}
+	if _, err := i.Pool.Exec(ctx, `UPDATE olp.provider_billing_imports SET next_import_at=LEAST(next_import_at,now()+interval '1 minute')
+		WHERE provider_id=$1::uuid AND etag=$2::uuid AND EXISTS (
+			SELECT 1 FROM generate_series(date_trunc('month',$5::date),$6::date - interval '2 months',interval '1 month') AS period(start)
+			WHERE NOT EXISTS (SELECT 1 FROM olp.provider_billing_revisions
+				WHERE provider_id=$1::uuid AND source=$3 AND scope_digest=$4 AND period_start=period.start::date)
+		)`, row.ProviderID, row.ETag, row.Source, digest[:], earliest.Format(dayFormat), current.Format(dayFormat)); err != nil {
+		return err
+	}
+	return nil
 }
 
 func (i *Importer) nextGoogleHistoricalPeriod(ctx context.Context, row *importRow, earliest, current time.Time) (time.Time, int, error) {

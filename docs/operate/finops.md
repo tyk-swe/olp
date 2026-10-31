@@ -440,8 +440,9 @@ The importer queries retained billing periods and records the export watermark
 with each period. It revisits retained historical periods alongside the current
 and previous periods, and replaces a covered day only with an equal or newer
 watermark. The watermark covers the configured account and projects, starts at
-the beginning of the queried period and includes later arrivals. A day is covered only when the export contains activity
-for the configured account and projects on that UTC day, across any service,
+the beginning of the queried period and includes later arrivals. A day is covered
+only when the export contains activity for the configured account and projects
+on that UTC day, across any service,
 and the day closed before the watermark. An evidenced day with no Vertex charges
 is covered zero. Days without scope activity remain not imported. Google exports
 can begin after historical usage, contain gaps or arrive late. Activity and a
@@ -471,7 +472,9 @@ with two million rows, 100,000 aggregates and a one-minute import budget. Each
 day's returned line items are summed per
 `(day, line_item, currency)` and replace the stored rows. A returned bucket with
 no results records an invoiced zero. On success the import schedules one hour
-out; on failure `last_error_code` records `credential`, `status`, `network`,
+out. Google schedules the next worker scan after a successful pass while retained
+historical periods have not yet been queried; it returns to hourly refresh once
+they have all been visited. On failure `last_error_code` records `credential`, `status`, `network`,
 `timeout`, `response` or `endpoint`, and the retry backs off from five
 minutes to one hour. Rows older than `retention.usage_days` are purged in
 bounded batches and their coverage is cleared. If retention later increases,
