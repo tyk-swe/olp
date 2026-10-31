@@ -23,7 +23,10 @@
     $props();
 
   const kind = $derived(provider.configuration.kind);
-  const supported = $derived(kind === 'openai' || kind === 'anthropic');
+  const azure = $derived(kind === 'azure_openai');
+  const supported = $derived(
+    kind === 'openai' || kind === 'anthropic' || azure
+  );
   const scopeLabel = $derived(
     kind === 'openai' ? 'OpenAI project IDs' : 'Anthropic workspace IDs'
   );
@@ -43,6 +46,15 @@
 
   let adminKey = $state('');
   let scopeText = $state('');
+  let billingScope = $state('');
+  let exportName = $state('');
+  let storageAccount = $state('');
+  let container = $state('');
+  let prefix = $state('');
+  let authMode = $state<'' | 'azure_default' | 'azure_client_secret'>('');
+  let tenantId = $state('');
+  let clientId = $state('');
+  let clientSecret = $state('');
   let enabled = $state(true);
   let busy = $state(false);
   let error = $state('');
@@ -53,6 +65,9 @@
   const captureOwner = usePrincipalLifetime(() => {
     adminKey = '';
     scopeText = '';
+    billingScope = exportName = storageAccount = container = prefix = '';
+    authMode = '';
+    tenantId = clientId = clientSecret = '';
     enabled = true;
     busy = false;
     error = notice = '';
@@ -67,6 +82,14 @@
     const current = detail;
     if (current && !initialized) {
       scopeText = scopeLines(current);
+      if (azure) {
+        const scope = current.scope as Record<string, unknown>;
+        billingScope = String(scope.billing_scope ?? '');
+        exportName = String(scope.export_name ?? '');
+        storageAccount = String(scope.storage_account ?? '');
+        container = String(scope.container ?? '');
+        prefix = String(scope.prefix ?? '');
+      }
       enabled = current.enabled;
       initialized = true;
     }
@@ -74,14 +97,17 @@
 
   function scopeLines(document: BillingImport): string {
     const scope = document.scope as Record<string, string[]>;
-    const entries = scope.project_ids ?? scope.workspace_ids ?? [];
+    const entries =
+      scope.project_ids ?? scope.workspace_ids ?? scope.subscription_ids ?? [];
     return entries.join('\n');
   }
 
   function errorPhrase(code: string): string {
     switch (code) {
       case 'credential':
-        return 'the vendor rejected the admin key';
+        return azure
+          ? 'Azure rejected the storage credential'
+          : 'the vendor rejected the admin key';
       case 'status':
         return 'the vendor returned an error';
       case 'network':
@@ -102,9 +128,17 @@
       .split('\n')
       .map((line) => line.trim())
       .filter(Boolean);
+    if (azure) {
+      return {
+        billing_scope: billingScope.trim(),
+        export_name: exportName.trim(),
+        storage_account: storageAccount.trim(),
+        container: container.trim(),
+        ...(prefix.trim() ? { prefix: prefix.trim() } : {}),
+        ...(ids.length ? { subscription_ids: ids } : {})
+      } as unknown as Record<string, never>;
+    }
     if (!ids.length) return {};
-    // The contract types scope as an empty-object record; the runtime accepts
-    // the vendor's ID lists.
     const scope: Record<string, string[]> =
       kind === 'openai' ? { project_ids: ids } : { workspace_ids: ids };
     return scope as Record<string, never>;
@@ -116,6 +150,31 @@
       .map((line) => line.trim())
       .filter(Boolean);
     if (ids.length > 100) return 'At most 100 scope IDs can be listed.';
+    if (azure) {
+      if (
+        !billingScope.trim() ||
+        !exportName.trim() ||
+        !storageAccount.trim() ||
+        !container.trim()
+      )
+        return 'Billing scope, export name, storage account, and container are required.';
+      if (
+        ids.some(
+          (id) =>
+            !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+              id
+            )
+        )
+      )
+        return 'Subscription IDs must be UUIDs.';
+      if (!editing && !authMode) return 'Choose an Azure credential mode.';
+      if (
+        authMode === 'azure_client_secret' &&
+        (!tenantId.trim() || !clientId.trim() || !clientSecret)
+      )
+        return 'Tenant ID, client ID, and client secret are required.';
+      return '';
+    }
     for (const id of ids) {
       if (kind === 'anthropic' && id === 'default') continue;
       if (!scopePattern.test(id))
@@ -137,7 +196,21 @@
     const submission = intent.prepare<Parameters<typeof putBillingImport>[2]>({
       enabled,
       scope: scopeBody(),
-      ...(adminKey.trim() ? { credential: adminKey.trim() } : {})
+      ...(azure && authMode
+        ? {
+            credential:
+              authMode === 'azure_default'
+                ? { auth_mode: authMode }
+                : {
+                    auth_mode: authMode,
+                    tenant_id: tenantId.trim(),
+                    client_id: clientId.trim(),
+                    client_secret: clientSecret
+                  }
+          }
+        : adminKey.trim()
+          ? { credential: adminKey.trim() }
+          : {})
     });
     const isCurrent = captureOwner();
     busy = true;
@@ -152,6 +225,8 @@
       );
       if (!isCurrent()) return;
       adminKey = '';
+      authMode = '';
+      tenantId = clientId = clientSecret = '';
       notice = 'Billing import saved.';
       await queryClient.invalidateQueries({
         queryKey: providerKeys.billingImport(provider.id)
@@ -199,6 +274,9 @@
       if (!isCurrent()) return;
       adminKey = '';
       scopeText = '';
+      billingScope = exportName = storageAccount = container = prefix = '';
+      authMode = '';
+      tenantId = clientId = clientSecret = '';
       enabled = true;
       notice = 'Billing import removed.';
       await queryClient.invalidateQueries({
@@ -222,8 +300,7 @@
     <h3 id="billing-import-heading">Billing import</h3>
     <p class="section-help">
       Pull the vendor's invoiced costs to reconcile attributed usage against
-      billed amounts. The credential must be an admin key — it never serves
-      inference.
+      billed amounts. Azure imports use a separate storage credential.
     </p>
     {#if error}<div class="inline-problem" role="alert">{error}</div>{/if}
     {#if notice}<p class="section-help" role="status">{notice}</p>{/if}
@@ -274,31 +351,109 @@
         >
           <fieldset class="submission-fields" disabled={busy}>
             <div class="form-grid">
-              <div class="form-field">
-                <label for="billing-admin-key">Admin key</label>
-                <input
-                  id="billing-admin-key"
-                  type="password"
-                  autocomplete="off"
-                  bind:value={adminKey}
-                  placeholder={editing
-                    ? 'Blank keeps the stored key'
-                    : 'sk-admin-…'}
-                />
-              </div>
-              <div class="form-field">
-                <label for="billing-scope">{scopeLabel}</label>
-                <textarea
-                  id="billing-scope"
-                  rows="3"
-                  bind:value={scopeText}
-                  placeholder={kind === 'openai'
-                    ? 'proj_…'
-                    : 'wrkspc_… or default'}></textarea>
-                <small
-                  >One ID per line; empty imports the whole organization.</small
-                >
-              </div>
+              {#if azure}
+                <div class="form-field">
+                  <label for="billing-azure-scope"
+                    >Billing scope resource ID</label
+                  ><input id="billing-azure-scope" bind:value={billingScope} />
+                </div>
+                <div class="form-field">
+                  <label for="billing-azure-export">Export name</label><input
+                    id="billing-azure-export"
+                    bind:value={exportName}
+                  />
+                </div>
+                <div class="form-field">
+                  <label for="billing-azure-account">Storage account</label
+                  ><input
+                    id="billing-azure-account"
+                    bind:value={storageAccount}
+                  />
+                </div>
+                <div class="form-field">
+                  <label for="billing-azure-container">Container</label><input
+                    id="billing-azure-container"
+                    bind:value={container}
+                  />
+                </div>
+                <div class="form-field">
+                  <label for="billing-azure-prefix"
+                    >Storage directory prefix</label
+                  ><input id="billing-azure-prefix" bind:value={prefix} />
+                </div>
+                <div class="form-field">
+                  <label for="billing-azure-subscriptions"
+                    >Subscription IDs</label
+                  ><textarea
+                    id="billing-azure-subscriptions"
+                    rows="3"
+                    bind:value={scopeText}></textarea><small
+                    >One ID per line. Empty includes all subscriptions in the
+                    export.</small
+                  >
+                </div>
+                <div class="form-field">
+                  <label for="billing-azure-auth">Azure credential</label>
+                  <select id="billing-azure-auth" bind:value={authMode}>
+                    <option value=""
+                      >{editing
+                        ? 'Keep stored credential'
+                        : 'Choose a credential'}</option
+                    >
+                    <option value="azure_default">Workload identity</option>
+                    <option value="azure_client_secret">Client secret</option>
+                  </select>
+                </div>
+                {#if authMode === 'azure_client_secret'}
+                  <div class="form-field">
+                    <label for="billing-azure-tenant">Tenant ID</label><input
+                      id="billing-azure-tenant"
+                      bind:value={tenantId}
+                    />
+                  </div>
+                  <div class="form-field">
+                    <label for="billing-azure-client">Client ID</label><input
+                      id="billing-azure-client"
+                      bind:value={clientId}
+                    />
+                  </div>
+                  <div class="form-field">
+                    <label for="billing-azure-secret">Client secret</label
+                    ><input
+                      id="billing-azure-secret"
+                      type="password"
+                      autocomplete="off"
+                      bind:value={clientSecret}
+                    />
+                  </div>
+                {/if}
+              {:else}
+                <div class="form-field">
+                  <label for="billing-admin-key">Admin key</label>
+                  <input
+                    id="billing-admin-key"
+                    type="password"
+                    autocomplete="off"
+                    bind:value={adminKey}
+                    placeholder={editing
+                      ? 'Blank keeps the stored key'
+                      : 'sk-admin-…'}
+                  />
+                </div>
+                <div class="form-field">
+                  <label for="billing-scope">{scopeLabel}</label>
+                  <textarea
+                    id="billing-scope"
+                    rows="3"
+                    bind:value={scopeText}
+                    placeholder={kind === 'openai'
+                      ? 'proj_…'
+                      : 'wrkspc_… or default'}></textarea>
+                  <small
+                    >One ID per line; empty imports the whole organization.</small
+                  >
+                </div>
+              {/if}
               <div class="form-field">
                 <label class="inline-check"
                   ><input

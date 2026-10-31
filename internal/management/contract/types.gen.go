@@ -547,6 +547,7 @@ func (e AuditEventResponseActorType) Valid() bool {
 // Defines values for BillingImportSource.
 const (
 	AnthropicCostReport BillingImportSource = "anthropic_cost_report"
+	AzureCostManagement BillingImportSource = "azure_cost_management"
 	OpenaiCosts         BillingImportSource = "openai_costs"
 )
 
@@ -554,6 +555,8 @@ const (
 func (e BillingImportSource) Valid() bool {
 	switch e {
 	case AnthropicCostReport:
+		return true
+	case AzureCostManagement:
 		return true
 	case OpenaiCosts:
 		return true
@@ -5530,6 +5533,24 @@ func (e ProvisionUserRequestRole) Valid() bool {
 	}
 }
 
+// Defines values for PutBillingImportRequestCredential1AuthMode.
+const (
+	PutBillingImportRequestCredential1AuthModeAzureClientSecret PutBillingImportRequestCredential1AuthMode = "azure_client_secret"
+	PutBillingImportRequestCredential1AuthModeAzureDefault      PutBillingImportRequestCredential1AuthMode = "azure_default"
+)
+
+// Valid indicates whether the value is a known member of the PutBillingImportRequestCredential1AuthMode enum.
+func (e PutBillingImportRequestCredential1AuthMode) Valid() bool {
+	switch e {
+	case PutBillingImportRequestCredential1AuthModeAzureClientSecret:
+		return true
+	case PutBillingImportRequestCredential1AuthModeAzureDefault:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for PutProjectMemberRequestRole.
 const (
 	PutProjectMemberRequestRoleManager PutProjectMemberRequestRole = "manager"
@@ -8091,7 +8112,7 @@ type BillingImport struct {
 	Etag                 string             `json:"etag"`
 	ProviderId           openapi_types.UUID `json:"provider_id"`
 
-	// Scope Source-shaped import scope; {} reads the whole organization.
+	// Scope Source-shaped import scope; {} reads the whole organization for OpenAI or Anthropic. Azure requires a billing scope and export storage location.
 	Scope  map[string]interface{} `json:"scope"`
 	Source BillingImportSource    `json:"source"`
 	Status struct {
@@ -14134,14 +14155,33 @@ type PublishPricingSourceRequest struct {
 
 // PutBillingImportRequest defines model for PutBillingImportRequest.
 type PutBillingImportRequest struct {
-	// Credential Vendor admin credential, sealed as a billing_credential secret. Required on create; omitted keeps the stored credential; null is rejected - delete the import instead.
-	Credential *string `json:"credential,omitempty"`
+	// Credential Source credential sealed as a billing_credential secret. Required on create; omitted keeps the stored credential. Azure accepts an azure_default or azure_client_secret document.
+	Credential *PutBillingImportRequest_Credential `json:"credential,omitempty"`
 
 	// Enabled Defaults to true when omitted.
 	Enabled *bool `json:"enabled,omitempty"`
 
-	// Scope openai_costs: {"project_ids":["proj_..."]}; anthropic_cost_report: {"workspace_ids":["wrkspc_...","default"]}; {} reads the whole organization. Omitted keeps the stored scope.
+	// Scope OpenAI and Anthropic accept project_ids and workspace_ids respectively. Azure requires billing_scope, export_name, storage_account, container, and optional prefix and subscription_ids. Omitted keeps the stored scope.
 	Scope *map[string]interface{} `json:"scope,omitempty"`
+}
+
+// PutBillingImportRequestCredential0 defines model for PutBillingImportRequest.Credential.0.
+type PutBillingImportRequestCredential0 = string
+
+// PutBillingImportRequestCredential1 defines model for PutBillingImportRequest.Credential.1.
+type PutBillingImportRequestCredential1 struct {
+	AuthMode     PutBillingImportRequestCredential1AuthMode `json:"auth_mode"`
+	ClientId     *string                                    `json:"client_id,omitempty"`
+	ClientSecret *string                                    `json:"client_secret,omitempty"`
+	TenantId     *string                                    `json:"tenant_id,omitempty"`
+}
+
+// PutBillingImportRequestCredential1AuthMode defines model for PutBillingImportRequest.Credential.1.AuthMode.
+type PutBillingImportRequestCredential1AuthMode string
+
+// PutBillingImportRequest_Credential Source credential sealed as a billing_credential secret. Required on create; omitted keeps the stored credential. Azure accepts an azure_default or azure_client_secret document.
+type PutBillingImportRequest_Credential struct {
+	union json.RawMessage
 }
 
 // PutProjectMemberRequest defines model for PutProjectMemberRequest.
@@ -20188,6 +20228,68 @@ func (t PlaygroundResponseFormat) MarshalJSON() ([]byte, error) {
 }
 
 func (t *PlaygroundResponseFormat) UnmarshalJSON(b []byte) error {
+	err := t.union.UnmarshalJSON(b)
+	return err
+}
+
+// AsPutBillingImportRequestCredential0 returns the union data inside the PutBillingImportRequest_Credential as a PutBillingImportRequestCredential0
+func (t PutBillingImportRequest_Credential) AsPutBillingImportRequestCredential0() (PutBillingImportRequestCredential0, error) {
+	var body PutBillingImportRequestCredential0
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromPutBillingImportRequestCredential0 overwrites any union data inside the PutBillingImportRequest_Credential as the provided PutBillingImportRequestCredential0
+func (t *PutBillingImportRequest_Credential) FromPutBillingImportRequestCredential0(v PutBillingImportRequestCredential0) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergePutBillingImportRequestCredential0 performs a merge with any union data inside the PutBillingImportRequest_Credential, using the provided PutBillingImportRequestCredential0
+func (t *PutBillingImportRequest_Credential) MergePutBillingImportRequestCredential0(v PutBillingImportRequestCredential0) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsPutBillingImportRequestCredential1 returns the union data inside the PutBillingImportRequest_Credential as a PutBillingImportRequestCredential1
+func (t PutBillingImportRequest_Credential) AsPutBillingImportRequestCredential1() (PutBillingImportRequestCredential1, error) {
+	var body PutBillingImportRequestCredential1
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromPutBillingImportRequestCredential1 overwrites any union data inside the PutBillingImportRequest_Credential as the provided PutBillingImportRequestCredential1
+func (t *PutBillingImportRequest_Credential) FromPutBillingImportRequestCredential1(v PutBillingImportRequestCredential1) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergePutBillingImportRequestCredential1 performs a merge with any union data inside the PutBillingImportRequest_Credential, using the provided PutBillingImportRequestCredential1
+func (t *PutBillingImportRequest_Credential) MergePutBillingImportRequestCredential1(v PutBillingImportRequestCredential1) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+func (t PutBillingImportRequest_Credential) MarshalJSON() ([]byte, error) {
+	b, err := t.union.MarshalJSON()
+	return b, err
+}
+
+func (t *PutBillingImportRequest_Credential) UnmarshalJSON(b []byte) error {
 	err := t.union.UnmarshalJSON(b)
 	return err
 }

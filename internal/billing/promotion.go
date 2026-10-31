@@ -73,7 +73,17 @@ func ImportCredentialMatches(ctx context.Context, q access.Queryer, keys *secret
 		return false, err
 	}
 	defer clear(key)
-	return sha256.Sum256(key) == sha256.Sum256([]byte(credential)), nil
+	encoded, err := encodeCredential(source, credential)
+	if err != nil {
+		return false, err
+	}
+	defer clear(encoded)
+	canonical, err := decodeCredential(source, encoded)
+	if err != nil {
+		return false, err
+	}
+	defer clear(canonical)
+	return sha256.Sum256(key) == sha256.Sum256(canonical), nil
 }
 
 // ApplyImport creates, replaces or deletes a provider's billing import to

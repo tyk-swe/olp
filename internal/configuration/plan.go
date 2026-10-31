@@ -804,14 +804,18 @@ func validateBindings(doc *Document, bindings bindingSet) error {
 			sinkRefs[*entry.CredentialRef] = true
 		}
 	}
-	billingRefs := map[string]bool{}
+	billingRefs := map[string]string{}
 	for _, p := range doc.Providers {
 		if p.NetworkCredentialRef != nil {
 			refs[*p.NetworkCredentialRef] = true
 		}
 		if p.BillingImport != nil {
 			refs[p.BillingImport.CredentialRef] = true
-			billingRefs[p.BillingImport.CredentialRef] = true
+			source, err := billing.SourceFor(p.Configuration.Kind)
+			if err != nil {
+				return err
+			}
+			billingRefs[p.BillingImport.CredentialRef] = source
 		}
 		for _, slot := range p.Slots {
 			if slot.CredentialRef != nil {
@@ -849,11 +853,11 @@ func validateBindings(doc *Document, bindings bindingSet) error {
 			}
 			continue
 		}
-		if billingRefs[name] {
+		if source := billingRefs[name]; source != "" {
 			if secret.reference != nil {
 				return access.Invalid("external_credential_bindings", "Billing credentials require sealed secret bindings.")
 			}
-			if err := billing.ValidCredential(secret.secret); err != nil {
+			if err := billing.ValidateSourceCredential(source, secret.secret); err != nil {
 				return err
 			}
 			continue

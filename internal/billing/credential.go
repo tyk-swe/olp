@@ -9,8 +9,9 @@ import (
 )
 
 type credentialDocument struct {
-	Source string `json:"source"`
-	APIKey string `json:"api_key"`
+	Source     string          `json:"source"`
+	APIKey     string          `json:"api_key,omitempty"`
+	Credential json.RawMessage `json:"credential,omitempty"`
 }
 
 func encodeCredential(source, key string) ([]byte, error) {
@@ -19,6 +20,12 @@ func encodeCredential(source, key string) ([]byte, error) {
 		if err := ValidCredential(key); err != nil {
 			return nil, err
 		}
+	case SourceAzureCostManagement:
+		credential, err := validateAzureCredential([]byte(key))
+		if err != nil {
+			return nil, err
+		}
+		return json.MarshalIndent(credentialDocument{Source: source, Credential: credential}, "", "  ")
 	default:
 		return nil, access.Invalid("credential", "unknown billing source")
 	}
@@ -45,8 +52,17 @@ func decodeCredential(source string, data []byte) ([]byte, error) {
 	if document.Source != source && !(pollingSource(document.Source) && pollingSource(source)) {
 		return nil, errIncompatibleCredential
 	}
+	if source == SourceAzureCostManagement {
+		return validateAzureCredential(document.Credential)
+	}
 	if ValidCredential(document.APIKey) != nil {
 		return nil, errors.New("invalid billing credential document")
 	}
 	return []byte(document.APIKey), nil
+}
+
+func ValidateSourceCredential(source, credential string) error {
+	encoded, err := encodeCredential(source, credential)
+	clear(encoded)
+	return err
 }

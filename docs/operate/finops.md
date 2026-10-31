@@ -306,9 +306,10 @@ rules, so the in-repo interpreter is the conformance authority.
 
 ### Billing imports
 
-An OpenAI or Anthropic connection gains a billing import at
+An OpenAI, Anthropic or Azure OpenAI connection gains a billing import at
 `PUT /api/v1/providers/{provider_id}/billing-import` with `{enabled, scope,
-credential}`. The credential is a vendor **admin key**, sealed under purpose
+credential}`. The credential is a vendor admin key for OpenAI or Anthropic, or
+an Azure credential document for Azure OpenAI. It is sealed under purpose
 `billing_credential` and never served inference; it is required on create,
 omitted keeps the stored key, and `null` is rejected. Delete the import to remove it. Scope is source-shaped: `{"project_ids": ["proj_…"]}` for OpenAI
 (up to 100 entries) and `{"workspace_ids": ["wrkspc_…", "default"]}` for
@@ -318,12 +319,66 @@ its status (`next_import_at`, `last_import_at`, `last_success_at`,
 reschedules it immediately, and `DELETE` removes it and the sealed key while
 keeping imported costs.
 
+### Azure Cost Management setup
+
+Create a Cost Management export for cost and usage details (amortized), with CSV
+format and daily delivery to a Blob Storage container. Partitioned and gzip
+exports are supported. Parquet, actual cost, usage-only and FOCUS exports use
+different schemas and are not accepted. Management group exports do not support
+amortized costs. The export must already exist and historical imports are
+limited to deliveries still present in the container. Azure can deliver prior
+month corrections during the first five days of the month
+([Microsoft export documentation](https://learn.microsoft.com/en-us/azure/cost-management-billing/costs/tutorial-improved-exports)).
+
+Grant the chosen identity Storage Blob Data Reader on the container or a
+narrower appropriate scope. The billing connection uses its own storage
+account endpoint and the provider connection's network and egress settings.
+Use `azure_default` for an explicitly selected workload identity, or supply a
+client secret for `azure_client_secret`. Both credentials are write-only. For
+example, create the import with the following scope and workload credential,
+replacing the values with your own:
+
+```json
+{
+  "enabled": true,
+  "scope": {
+    "billing_scope": "/providers/Microsoft.Billing/billingAccounts/1234567",
+    "export_name": "costs",
+    "storage_account": "billingaccount",
+    "container": "exports",
+    "prefix": "billing",
+    "subscription_ids": ["11111111-1111-4111-8111-111111111111"]
+  },
+  "credential": {"auth_mode": "azure_default"}
+}
+```
+
+The `billing_scope` must match the export resource scope. `prefix` is the
+export's storage directory and may be omitted. Omit `subscription_ids` to
+include all subscriptions in that scope. A client-secret credential is
+`{"auth_mode":"azure_client_secret","tenant_id":"...","client_id":"...","client_secret":"..."}`.
+Choose disjoint subscription scopes when multiple providers share an export,
+or their reported invoice totals overlap.
+
+Azure imports only the documented Cognitive Services meter subcategories
+Azure Open AI and Azure Open AI Reservation. Vendor meter names can change, so
+review the export if expected charges are missing. Amounts use amortized
+billing-currency costs, before credits and taxes, and do not necessarily equal
+the final invoice. The importer validates the export resource ID, manifest and
+part counts before storing closed UTC days. Blob manifests have no documented
+completion status, so a delivery that appears complete from its manifest can
+still be subject to later correction. See the
+[Cost Management overview](https://learn.microsoft.com/en-us/azure/cost-management-billing/cost-management-billing-overview).
+
 ### Importer
 
 The `billing_import` worker scans every 60 seconds for imports due, claims up
 to ten under a ten-minute lease, and fetches through the connection's
-egress-validated client (no redirects, 30 seconds per request, a 4 MiB
-response cap, at most 20 pages). Imports cover closed UTC days only: the first
+egress-validated client (no redirects and 30 seconds per request). Polling
+responses have a 4 MiB cap and at most 20 pages. Azure streams up to 200 CSV
+parts, 128 MiB compressed and 512 MiB expanded per pass, with two million rows,
+100,000 aggregates and a one-minute import budget. Imports cover closed UTC
+days only. For polling sources, the first
 covers the 30 days before today, and later imports refresh the last 7 so
 vendor restatements land. Each day's returned line items are summed per
 `(day, line_item)` and replace the stored rows. A returned bucket with no results
@@ -370,5 +425,4 @@ A provider entry in a configuration document carries `billing_import`
 `<provider name>/billing`; a missing `secret_bindings` entry blocks apply,
 reusing a matching binding keeps the stored key, and an entry's absence
 deletes the import. `internal/billing/testdata` fixtures follow the vendors'
-documented response shapes. There is no live-account qualification for them. AWS CUR,
-Google Cloud billing export and Azure Cost Management imports remain planned.
+documented response shapes. There is no live-account qualification for them. AWS CUR and Google Cloud billing export imports remain planned.

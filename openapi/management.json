@@ -25961,7 +25961,8 @@
             "type": "string",
             "enum": [
               "openai_costs",
-              "anthropic_cost_report"
+              "anthropic_cost_report",
+              "azure_cost_management"
             ]
           },
           "enabled": {
@@ -25969,7 +25970,7 @@
           },
           "scope": {
             "type": "object",
-            "description": "Source-shaped import scope; {} reads the whole organization."
+            "description": "Source-shaped import scope; {} reads the whole organization for OpenAI or Anthropic. Azure requires a billing scope and export storage location."
           },
           "credential_configured": {
             "type": "boolean"
@@ -26061,13 +26062,28 @@
           },
           "scope": {
             "type": "object",
-            "description": "openai_costs: {\"project_ids\":[\"proj_...\"]}; anthropic_cost_report: {\"workspace_ids\":[\"wrkspc_...\",\"default\"]}; {} reads the whole organization. Omitted keeps the stored scope."
+            "description": "OpenAI and Anthropic accept project_ids and workspace_ids respectively. Azure requires billing_scope, export_name, storage_account, container, and optional prefix and subscription_ids. Omitted keeps the stored scope."
           },
           "credential": {
-            "type": "string",
-            "description": "Vendor admin credential, sealed as a billing_credential secret. Required on create; omitted keeps the stored credential; null is rejected - delete the import instead.",
-            "minLength": 20,
-            "maxLength": 512
+            "description": "Source credential sealed as a billing_credential secret. Required on create; omitted keeps the stored credential. Azure accepts an azure_default or azure_client_secret document.",
+            "oneOf": [
+              {
+                "type": "string",
+                "minLength": 20,
+                "maxLength": 512
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "auth_mode": { "type": "string", "enum": ["azure_default", "azure_client_secret"] },
+                  "tenant_id": { "type": "string" },
+                  "client_id": { "type": "string" },
+                  "client_secret": { "type": "string" }
+                },
+                "required": ["auth_mode"]
+              }
+            ]
           }
         }
       },

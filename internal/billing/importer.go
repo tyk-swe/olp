@@ -28,13 +28,14 @@ import (
 // paths, so it runs on any process that can reach both, independent of the
 // coordination store.
 type Importer struct {
-	Pool         *pgxpool.Pool
-	Keys         *secrets.KeyRing
-	Installation string
-	Egress       *egress.Policy
-	Connections  *egress.ConnectionClientCache
-	Log          *slog.Logger
-	PassBudget   time.Duration
+	Pool              *pgxpool.Pool
+	Keys              *secrets.KeyRing
+	Installation      string
+	Egress            *egress.Policy
+	Connections       *egress.ConnectionClientCache
+	Log               *slog.Logger
+	PassBudget        time.Duration
+	AzureBlobEndpoint func(string) string
 
 	mu       sync.Mutex
 	outcomes map[[2]string]int64
@@ -223,9 +224,37 @@ func (i *Importer) importOne(ctx context.Context, row *importRow) error {
 		return failFetch("credential", err)
 	}
 	defer clear(key)
-	client, err := i.client(ctx, row.ProviderID, cfg, key)
+	endpoint := cfg.Endpoint
+	if row.Source == SourceAzureCostManagement {
+		var scope azureScope
+		if err := json.Unmarshal(row.Scope, &scope); err != nil {
+			return failFetch("response", err)
+		}
+		storageEndpoint := "https://" + scope.StorageAccount + ".blob.core.windows.net"
+		if i.AzureBlobEndpoint != nil {
+			storageEndpoint = i.AzureBlobEndpoint(scope.StorageAccount)
+		}
+		endpoint = &storageEndpoint
+	}
+	client, err := i.client(ctx, row.ProviderID, cfg, endpoint, key)
 	if err != nil {
 		return failFetch("endpoint", err)
+	}
+	if row.Source == SourceAzureCostManagement {
+		var scope azureScope
+		if err := json.Unmarshal(row.Scope, &scope); err != nil {
+			return failFetch("response", err)
+		}
+		periods, err := fetchAzure(ctx, client, i.Egress, *endpoint, scope, key)
+		if err != nil {
+			return err
+		}
+		for _, period := range periods {
+			if err := i.storeDays(ctx, row, period.start, &period.revision, period.days); err != nil {
+				return err
+			}
+		}
+		return nil
 	}
 	var scope Scope
 	if err := json.Unmarshal(row.Scope, &scope); err != nil {
@@ -250,11 +279,11 @@ func (i *Importer) importOne(ctx context.Context, row *importRow) error {
 
 // client builds the connection-scoped HTTP client the import's provider
 // configuration calls for, honoring its network options and credential.
-func (i *Importer) client(ctx context.Context, providerID string, cfg *providerConfig, credential []byte) (*http.Client, error) {
-	if cfg.Endpoint == nil || *cfg.Endpoint == "" {
+func (i *Importer) client(ctx context.Context, providerID string, cfg *providerConfig, endpoint *string, credential []byte) (*http.Client, error) {
+	if endpoint == nil || *endpoint == "" {
 		return nil, errors.New("the provider has no endpoint")
 	}
-	if _, err := i.Egress.ValidateEndpoint(*cfg.Endpoint); err != nil {
+	if _, err := i.Egress.ValidateEndpoint(*endpoint); err != nil {
 		return nil, err
 	}
 	var secret []byte

@@ -3,7 +3,10 @@
 package integration_test
 
 import (
+	"bytes"
+	"compress/gzip"
 	"crypto/sha256"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -168,6 +171,245 @@ func billingFact(t *testing.T, h *accessHarness, providerID, requestID string, o
 }
 
 func billingProviderID(provider map[string]any) string { return provider["id"].(string) }
+
+func TestAzureBillingScopeAndCredential(t *testing.T) {
+	h := newAccessHarness(t)
+	owner := h.owner()
+	provider := h.want(owner, "POST", "/api/v1/providers", map[string]any{
+		"name": "Azure billing",
+		"configuration": map[string]any{
+			"kind": "azure_openai", "auth_mode": "api_key", "endpoint": "https://example.openai.azure.com",
+			"deployment": "model", "api_version": "2024-10-21",
+		},
+		"credential": "inference-key", "model": "model",
+	}, idem("azure-billing-provider"), 201)
+	providerID := billingProviderID(provider)
+	credential := map[string]any{"auth_mode": "azure_default"}
+	scope := map[string]any{
+		"billing_scope": "/providers/Microsoft.Billing/billingAccounts/1234567",
+		"export_name":   "costs", "storage_account": "billingaccount", "container": "exports", "prefix": "billing",
+		"subscription_ids": []string{"11111111-1111-4111-8111-111111111111"},
+	}
+	billingPut(h, owner, providerID, map[string]any{"credential": credential}, provider["etag"].(string), 422)
+	billingPut(h, owner, providerID, map[string]any{"credential": credential, "scope": map[string]any{
+		"billing_scope": scope["billing_scope"], "export_name": "costs", "storage_account": "billingaccount", "container": "exports", "subscription_ids": []string{"bad"},
+	}}, provider["etag"].(string), 422)
+	billingPut(h, owner, providerID, map[string]any{"credential": credential, "scope": map[string]any{
+		"billing_scope": scope["billing_scope"], "export_name": "costs", "storage_account": "billingaccount", "container": "exports", "project_ids": []string{"proj_123"},
+	}}, provider["etag"].(string), 422)
+	created := billingPut(h, owner, providerID, map[string]any{"credential": credential, "scope": scope}, provider["etag"].(string), 201)
+	if created["source"] != "azure_cost_management" || created["credential_configured"] != true || created["credential"] != nil {
+		t.Fatalf("unexpected billing import %v", created)
+	}
+	read := h.want(owner, "GET", "/api/v1/providers/"+providerID+"/billing-import", nil, nil, 200)
+	if read["credential"] != nil || read["credential_configured"] != true {
+		t.Fatalf("credential returned in billing import %v", read)
+	}
+	export := h.want(owner, "GET", "/api/v1/configuration/export", nil, nil, 200)
+	body := map[string]any{"document": export["document"], "secret_bindings": map[string]any{
+		"Azure billing/billing": `{ "auth_mode" : "azure_default" }`, "Azure billing/default": "inference-key",
+	}}
+	h.want(owner, "POST", "/api/v1/configuration/plan", body, nil, 200)
+	invalidBody := map[string]any{"document": export["document"], "secret_bindings": map[string]any{
+		"Azure billing/billing": `{"auth_mode":"azure_default","auth_mode":"azure_default"}`, "Azure billing/default": "inference-key",
+	}}
+	h.want(owner, "POST", "/api/v1/configuration/plan", invalidBody, nil, 422)
+	h.want(owner, "POST", "/api/v1/configuration/apply", body, idem("azure-billing-promotion"), 200)
+	after := h.want(owner, "GET", "/api/v1/providers/"+providerID+"/billing-import", nil, nil, 200)
+	if after["credential"] != nil || after["credential_configured"] != true {
+		t.Fatalf("promotion did not preserve the credential: %v", after)
+	}
+}
+
+func TestAzureBillingImport(t *testing.T) {
+	h := newAccessHarness(t)
+	owner := h.owner()
+	provider := h.want(owner, "POST", "/api/v1/providers", map[string]any{
+		"name": "Azure export",
+		"configuration": map[string]any{
+			"kind": "azure_openai", "auth_mode": "api_key", "endpoint": "https://example.openai.azure.com",
+			"deployment": "model", "api_version": "2024-10-21",
+		},
+		"credential": "inference-key", "model": "model",
+	}, idem("azure-export-provider"), 201)
+	providerID := billingProviderID(provider)
+	subscription := "11111111-1111-4111-8111-111111111111"
+	billingPut(h, owner, providerID, map[string]any{
+		"credential": map[string]any{"auth_mode": "azure_default"},
+		"scope": map[string]any{"billing_scope": "/providers/Microsoft.Billing/billingAccounts/1234567",
+			"export_name": "costs", "storage_account": "billingaccount", "container": "exports", "prefix": "billing", "subscription_ids": []string{subscription}},
+	}, provider["etag"].(string), 201)
+	today := time.Now().UTC().Truncate(24 * time.Hour)
+	yesterday := today.AddDate(0, 0, -1)
+	period := time.Date(yesterday.Year(), yesterday.Month(), 1, 0, 0, 0, 0, time.UTC)
+	base := "billing/costs/" + period.Format("20060102") + "-" + period.AddDate(0, 1, 0).Format("20060102") + "/run/"
+	header := "Date,SubscriptionId,MeterCategory,MeterSubCategory,MeterId,ChargeType,BillingCurrency,CostInBillingCurrency\n"
+	row := func(day time.Time, sub, category, meter, amount string) string {
+		return fmt.Sprintf("%s,%s,%s,%s,meter-123,Usage,USD,%s\n", day.Format("2006-01-02"), sub, category, meter, amount)
+	}
+	part1 := header + row(yesterday, subscription, "Cognitive Services", "Azure Open AI", "0.100000000000000001") +
+		row(yesterday, subscription, "Cognitive Services", "Speech Services", "99") +
+		row(yesterday, "22222222-2222-4222-8222-222222222222", "Cognitive Services", "Azure Open AI", "99")
+	longMeter := strings.Repeat("m", 280)
+	longRow := func(suffix string) string {
+		return fmt.Sprintf("%s,%s,Cognitive Services,Azure Open AI,%s%s,Usage,USD,0\n", yesterday.Format("2006-01-02"), subscription, longMeter, suffix)
+	}
+	part2 := header + row(yesterday, subscription, "Cognitive Services", "Azure Open AI", "0.200000000000000002") +
+		row(today, subscription, "Cognitive Services", "Azure Open AI", "99") +
+		row(yesterday, subscription, "Storage", "Azure Open AI", "99") + longRow("a") + longRow("b")
+	compress := func(contents string) string {
+		t.Helper()
+		var compressed bytes.Buffer
+		writer := gzip.NewWriter(&compressed)
+		if _, err := writer.Write([]byte(contents)); err != nil {
+			t.Fatal(err)
+		}
+		if err := writer.Close(); err != nil {
+			t.Fatal(err)
+		}
+		return compressed.String()
+	}
+	compressed1, compressed2 := compress(part1), compress(part2)
+	manifest, err := json.Marshal(map[string]any{
+		"manifestVersion": "2024-04-01", "byteCount": len(compressed1) + len(compressed2), "blobCount": 2, "dataRowCount": 8,
+		"exportConfig":   map[string]any{"exportName": "costs", "resourceId": "/providers/Microsoft.Billing/billingAccounts/1234567/providers/Microsoft.CostManagement/exports/costs", "type": "AmortizedCost", "dataVersion": "2023-05-01"},
+		"deliveryConfig": map[string]any{"fileFormat": "Csv", "compressionMode": "Gzip"},
+		"runInfo":        map[string]any{"submittedTime": today.Format(time.RFC3339), "runId": "run", "startDate": period.Format("2006-01-02T15:04:05"), "endDate": today.Format(time.RFC3339)},
+		"blobs":          []map[string]any{{"blobName": base + "part0.csv", "byteCount": len(compressed1), "dataRowCount": 3}, {"blobName": base + "part1.csv", "byteCount": len(compressed2), "dataRowCount": 5}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	newerBase := strings.Replace(base, "/run/", "/newer/", 1)
+	newerManifest := strings.NewReplacer(base, newerBase, `"runId":"run"`, `"runId":"newer"`, today.Format(time.RFC3339), today.Add(time.Hour).Format(time.RFC3339)).Replace(string(manifest))
+	objects := map[string]string{base + "_manifest.json": string(manifest), newerBase + "_manifest.json": newerManifest, base + "part0.csv": compressed1, base + "part1.csv": compressed2}
+	requests := make(chan string, 100)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests <- r.URL.Path
+		if r.URL.Path == "/token" {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = fmt.Fprintf(w, `{"access_token":"test-azure-token","expires_on":"%d","token_type":"Bearer","resource":"https://storage.azure.com/"}`, time.Now().Add(time.Hour).Unix())
+			return
+		}
+		if r.Header.Get("Authorization") != "Bearer test-azure-token" {
+			http.Error(w, "missing token", http.StatusUnauthorized)
+			return
+		}
+		if r.URL.Query().Get("comp") == "list" {
+			if r.URL.Query().Get("marker") == "" {
+				_, _ = fmt.Fprintf(w, "<EnumerationResults><Blobs><Blob><Name>%s_manifest.json</Name></Blob></Blobs><NextMarker>next</NextMarker></EnumerationResults>", newerBase)
+				return
+			}
+			_, _ = fmt.Fprintf(w, "<EnumerationResults><Blobs><Blob><Name>%s_manifest.json</Name></Blob></Blobs><NextMarker></NextMarker></EnumerationResults>", base)
+			return
+		}
+		if object, ok := objects[strings.TrimPrefix(r.URL.Path, "/exports/")]; ok {
+			_, _ = fmt.Fprint(w, object)
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	t.Cleanup(server.Close)
+	t.Setenv("IDENTITY_ENDPOINT", server.URL+"/token")
+	t.Setenv("IDENTITY_HEADER", "test-identity")
+	t.Setenv("AZURE_TENANT_ID", "")
+	t.Setenv("AZURE_CLIENT_ID", "")
+	if err := os.Unsetenv("AZURE_CLIENT_ID"); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("AZURE_CLIENT_SECRET", "")
+	importer := billingImporter(h, t)
+	importer.AzureBlobEndpoint = func(string) string { return server.URL }
+	if err := importer.Pass(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	importStatus := h.want(owner, "GET", "/api/v1/providers/"+providerID+"/billing-import", nil, nil, 200)
+	if errorCode := importStatus["status"].(map[string]any)["last_error_code"]; errorCode != nil {
+		close(requests)
+		var paths []string
+		for request := range requests {
+			paths = append(paths, request)
+		}
+		t.Fatalf("import failed: %v, requests: %v", errorCode, paths)
+	}
+	start, end := yesterday.Format("2006-01-02"), today.AddDate(0, 0, 1).Format("2006-01-02")
+	result := h.want(owner, "GET", fmt.Sprintf("/api/v1/providers/%s/invoiced-costs?start=%s&end=%s", providerID, start, end), nil, nil, 200)
+	items := result["items"].([]any)
+	if len(items) != 3 {
+		t.Fatalf("unexpected invoice items %v", items)
+	}
+	longLabels := map[string]bool{}
+	var total decimal.Decimal
+	for _, raw := range items {
+		item := raw.(map[string]any)
+		amount, err := decimal.NewFromString(item["amount"].(string))
+		if err != nil || item["day"] != start || item["currency"] != "USD" {
+			t.Fatalf("unexpected invoice item %v", item)
+		}
+		total = total.Add(amount)
+		label := item["line_item"].(string)
+		if strings.Contains(label, strings.Repeat("m", 100)) {
+			if len([]rune(label)) != 256 {
+				t.Fatalf("long label not bounded: %d", len([]rune(label)))
+			}
+			longLabels[label] = true
+		}
+	}
+	if !total.Equal(decimal.RequireFromString("0.300000000000000003")) || len(longLabels) != 2 {
+		t.Fatalf("incorrect decimal sum or collapsed labels: %s %v", total, longLabels)
+	}
+	cost := "0.15"
+	billingFact(t, h, providerID, uuid.NewString(), yesterday, "billable", true, &cost, false, false, false)
+	billingFact(t, h, providerID, uuid.NewString(), yesterday, "billable", true, nil, true, false, false)
+	billingFact(t, h, providerID, uuid.NewString(), yesterday, "billable", false, nil, false, false, false)
+	billingFact(t, h, providerID, uuid.NewString(), yesterday, "billable", true, &cost, false, true, false)
+	report := h.want(owner, "GET", fmt.Sprintf("/api/v1/usage/reconciliation?start=%s&end=%s&provider_id=%s", start, today.Format("2006-01-02"), providerID), nil, nil, 200)
+	reconciled := report["items"].([]any)[0].(map[string]any)
+	if reconciled["priced_attempts"] != float64(1) || reconciled["unpriced_attempts"] != float64(1) ||
+		reconciled["incomplete_attempts"] != float64(1) || reconciled["excluded_caller_attempts"] != float64(1) || reconciled["capture_rate"] == nil {
+		t.Fatalf("unexpected reconciliation %v", reconciled)
+	}
+	objects[base+"part0.csv"] = compress(strings.Replace(part1, "USD", "U$D", 1))
+	var changed map[string]any
+	if err := json.Unmarshal(manifest, &changed); err != nil {
+		t.Fatal(err)
+	}
+	changed["byteCount"] = len(objects[base+"part0.csv"]) + len(compressed2)
+	changed["blobs"].([]any)[0].(map[string]any)["byteCount"] = len(objects[base+"part0.csv"])
+	changedManifest, err := json.Marshal(changed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	objects[base+"_manifest.json"] = string(changedManifest)
+	current := h.want(owner, "GET", "/api/v1/providers/"+providerID+"/billing-import", nil, nil, 200)
+	headers := etagHeader(current)
+	headers["Idempotency-Key"] = uuid.NewString()
+	h.want(owner, "POST", "/api/v1/providers/"+providerID+"/billing-import/run", nil, headers, 202)
+	if err := importer.Pass(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	failed := h.want(owner, "GET", "/api/v1/providers/"+providerID+"/billing-import", nil, nil, 200)
+	if failed["status"].(map[string]any)["last_error_code"] != "response" {
+		t.Fatalf("malformed currency was not rejected: %v", failed)
+	}
+	after := h.want(owner, "GET", fmt.Sprintf("/api/v1/providers/%s/invoiced-costs?start=%s&end=%s", providerID, start, end), nil, nil, 200)
+	if !reflect.DeepEqual(after["items"], items) {
+		t.Fatalf("failed import changed stored data: %v", after)
+	}
+	objects[base+"_manifest.json"] = strings.Replace(string(manifest), "billingAccounts/1234567", "billingAccounts/other", 1)
+	current = h.want(owner, "GET", "/api/v1/providers/"+providerID+"/billing-import", nil, nil, 200)
+	headers = etagHeader(current)
+	headers["Idempotency-Key"] = uuid.NewString()
+	h.want(owner, "POST", "/api/v1/providers/"+providerID+"/billing-import/run", nil, headers, 202)
+	if err := importer.Pass(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	failed = h.want(owner, "GET", "/api/v1/providers/"+providerID+"/billing-import", nil, nil, 200)
+	after = h.want(owner, "GET", fmt.Sprintf("/api/v1/providers/%s/invoiced-costs?start=%s&end=%s", providerID, start, end), nil, nil, 200)
+	if failed["status"].(map[string]any)["last_error_code"] != "response" || !reflect.DeepEqual(after["items"], items) {
+		t.Fatalf("different billing scope affected stored data: %v %v", failed, after)
+	}
+}
 
 // The credential is required on create, must be a string, and null is
 // rejected rather than clearing the import.
