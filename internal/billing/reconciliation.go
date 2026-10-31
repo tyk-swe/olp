@@ -3,6 +3,7 @@ package billing
 import (
 	"net/http"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -234,14 +235,14 @@ func (s *Server) reconciliation(r *http.Request, p access.Principal) (access.Rep
 				r := "not_imported"
 				reason = &r
 				total.unimported = true
-			case invoicedCurrency != nil && *invoicedCurrency != pricingCurrency:
-				r := "currency_mismatch"
-				reason = &r
-				total.currencyMismatch = true
-			case invoicedAmount.IsZero():
+			case invoicedAmount.IsZero() && (invoicedCurrency == nil || !strings.ContainsRune(*invoicedCurrency, ',')):
 				r := "zero_invoice"
 				reason = &r
 				total.zeroInvoice = true
+			case invoicedCurrency == nil || *invoicedCurrency != pricingCurrency:
+				r := "currency_mismatch"
+				reason = &r
+				total.currencyMismatch = true
 			default:
 				v := attributed.Div(*invoicedAmount).Round(6).String()
 				rate = &v

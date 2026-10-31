@@ -66,6 +66,9 @@ func ImportCredentialMatches(ctx context.Context, q access.Queryer, keys *secret
 	}
 	defer clear(current)
 	key, err := decodeCredential(source, current)
+	if errors.Is(err, errIncompatibleCredential) {
+		return false, nil
+	}
 	if err != nil {
 		return false, err
 	}
@@ -100,14 +103,14 @@ func ApplyImport(ctx context.Context, tx pgx.Tx, providerID, source string, enab
 			source=$2,credential_id=$3::uuid,scope=$4::jsonb,enabled=$5,etag=$6,updated_at=now()
 			WHERE provider_id=$1::uuid`,
 			providerID, source, credentialID, canonical, enabled, access.NewID())
-		if err == nil {
-			err = resetImportRevisions(ctx, tx, providerID, existing.Source, source, existing.Scope, canonical)
-		}
 		if err == nil && old != nil {
 			_, err = tx.Exec(ctx, `DELETE FROM olp.secrets WHERE id=$1::uuid AND purpose=$2`, *old, secrets.BillingCredential)
 		}
 	}
-	return err
+	if err != nil {
+		return err
+	}
+	return syncImportRevision(ctx, tx, providerID, source, canonical)
 }
 
 // RemoveImport deletes a provider's billing import and its sealed credential.

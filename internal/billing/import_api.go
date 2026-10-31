@@ -230,10 +230,8 @@ func (s *Server) putImport(r *http.Request, _ access.Principal) (access.Reply, e
 	if err != nil {
 		return access.Reply{}, err
 	}
-	if existing != nil {
-		if err := resetImportRevisions(r.Context(), tx, id, existing.Source, source, existing.Scope, scope); err != nil {
-			return access.Reply{}, err
-		}
+	if err := syncImportRevision(r.Context(), tx, id, source, scope); err != nil {
+		return access.Reply{}, err
 	}
 	// The row no longer references the replaced credential, so the old secret
 	// can go once the pointer moved.

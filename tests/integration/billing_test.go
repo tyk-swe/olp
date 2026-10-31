@@ -3,6 +3,7 @@
 package integration_test
 
 import (
+	"crypto/sha256"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -10,6 +11,8 @@ import (
 	"net/netip"
 	"net/url"
 	"os"
+	"reflect"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -34,6 +37,9 @@ type billingFake struct {
 	queries               []url.Values
 	fails                 int
 	expectedAuthorization string
+	expectedAPIKey        string
+	started               chan struct{}
+	release               <-chan struct{}
 	server                *httptest.Server
 }
 
@@ -49,9 +55,17 @@ func newBillingFake(t *testing.T, path string, pages map[string]string, shift ma
 	f := &billingFake{path: path, pages: pages, shift: shift}
 	f.server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		f.mu.Lock()
+		started, release := f.started, f.release
+		f.started, f.release = nil, nil
+		f.mu.Unlock()
+		if started != nil {
+			close(started)
+			<-release
+		}
+		f.mu.Lock()
 		defer f.mu.Unlock()
 		f.queries = append(f.queries, r.URL.Query())
-		if r.URL.Path != f.path || f.fails > 0 || (f.expectedAuthorization != "" && r.Header.Get("Authorization") != f.expectedAuthorization) {
+		if r.URL.Path != f.path || f.fails > 0 || (f.expectedAuthorization != "" && r.Header.Get("Authorization") != f.expectedAuthorization) || (f.expectedAPIKey != "" && r.Header.Get("x-api-key") != f.expectedAPIKey) {
 			f.fails--
 			w.WriteHeader(http.StatusUnauthorized)
 			return
@@ -437,6 +451,35 @@ func TestBillingImportPreservesCurrencies(t *testing.T) {
 	if totals["capture_rate"] != nil || totals["capture_rate_unavailable_reason"] != "currency_mismatch" {
 		t.Fatalf("multi-currency total must not have a capture rate: %v", totals)
 	}
+	fake.mu.Lock()
+	fake.shift = map[string]string{
+		"1759104000":                  fmt.Sprint(day1.Unix()),
+		"1759190400":                  fmt.Sprint(day2.Unix()),
+		"1759276800":                  fmt.Sprint(day3.Unix()),
+		"\"value\": 0.1,":             "\"value\": 0,",
+		"\"value\": 0.2,":             "\"value\": 0,",
+		"\"value\": 1234.5678901234,": "\"value\": 0,",
+		"\"value\": 5,":               "\"value\": 0,",
+		"\"currency\": \"usd\"":       "\"currency\": \"eur\"",
+	}
+	fake.mu.Unlock()
+	path := "/api/v1/providers/" + providerID + "/billing-import"
+	current := h.want(owner, "GET", path, nil, nil, 200)
+	headers := etagHeader(current)
+	headers["Idempotency-Key"] = uuid.NewString()
+	h.want(owner, "POST", path+"/run", nil, headers, 202)
+	if err := billingImporter(h, t).Pass(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	report = h.want(owner, "GET", fmt.Sprintf("/api/v1/usage/reconciliation?start=%s&end=%s&provider_id=%s", start, end, providerID), nil, nil, 200)
+	item = report["items"].([]any)[0].(map[string]any)
+	if item["capture_rate"] != nil || item["capture_rate_unavailable_reason"] != "zero_invoice" {
+		t.Fatalf("single-currency zero invoice must keep its reason: %v", item)
+	}
+	totals = report["totals"].([]any)[0].(map[string]any)
+	if totals["capture_rate"] != nil || totals["capture_rate_unavailable_reason"] != "zero_invoice" {
+		t.Fatalf("single-currency zero total must keep its reason: %v", totals)
+	}
 }
 
 func TestBillingImportPreservesPrecision(t *testing.T) {
@@ -569,58 +612,251 @@ func TestBillingImportCredentialCompatibility(t *testing.T) {
 	checkImport()
 }
 
-func TestBillingImportMigrationPreservesHistory(t *testing.T) {
+func TestBillingImportDiscardsChangedInFlightFetch(t *testing.T) {
 	h := newAccessHarness(t)
 	owner := h.owner()
 	day1, day2, day3 := billingDays()
 	fake := newBillingFake(t, "/v1/organization/costs", map[string]string{
 		"": "openai_costs_page1.json", "page-2-token": "openai_costs_page2.json",
-	}, map[string]string{
-		"1759104000": fmt.Sprint(day1.Unix()),
-		"1759190400": fmt.Sprint(day2.Unix()),
-		"1759276800": fmt.Sprint(day3.Unix()),
-	})
-	provider := billingProvider(h, owner, "Migration", "openai", fake.server.URL+"/v1", nil)
+	}, map[string]string{"1759104000": fmt.Sprint(day1.Unix()), "1759190400": fmt.Sprint(day2.Unix()), "1759276800": fmt.Sprint(day3.Unix())})
+	provider := billingProvider(h, owner, "Changing scope", "openai", fake.server.URL+"/v1", nil)
 	providerID := billingProviderID(provider)
-	billingPut(h, owner, providerID, map[string]any{"credential": "sk-admin-" + strings.Repeat("k", 30)}, provider["etag"].(string), 201)
+	path := "/api/v1/providers/" + providerID + "/billing-import"
+	key := "sk-admin-" + strings.Repeat("k", 30)
+	billingPut(h, owner, providerID, map[string]any{"credential": key, "scope": map[string]any{"project_ids": []string{"proj_aaa111"}}}, provider["etag"].(string), 201)
+	begin := func() (chan struct{}, <-chan error) {
+		t.Helper()
+		started, release, done := make(chan struct{}), make(chan struct{}, 1), make(chan error, 1)
+		fake.mu.Lock()
+		fake.started, fake.release = started, release
+		fake.mu.Unlock()
+		t.Cleanup(func() {
+			select {
+			case release <- struct{}{}:
+			default:
+			}
+		})
+		importer := billingImporter(h, t)
+		go func() { done <- importer.Pass(t.Context()) }()
+		select {
+		case <-started:
+		case <-time.After(10 * time.Second):
+			t.Fatal("billing fetch did not start")
+		}
+		return release, done
+	}
+	finish := func(release chan struct{}, done <-chan error) {
+		t.Helper()
+		release <- struct{}{}
+		if err := <-done; err != nil {
+			t.Fatal(err)
+		}
+	}
+	invoicePath := fmt.Sprintf("/api/v1/providers/%s/invoiced-costs?start=%s&end=%s", providerID, day1.Format("2006-01-02"), day3.AddDate(0, 0, 1).Format("2006-01-02"))
+	release, done := begin()
+	current := h.want(owner, "GET", path, nil, nil, 200)
+	billingPut(h, owner, providerID, map[string]any{"scope": map[string]any{"project_ids": []string{"proj_bbb222"}}}, current["etag"].(string), 200)
+	finish(release, done)
+	items := h.want(owner, "GET", invoicePath, nil, nil, 200)["items"].([]any)
+	current = h.want(owner, "GET", path, nil, nil, 200)
+	if len(items) != 0 || current["status"].(map[string]any)["last_success_at"] != nil {
+		t.Fatalf("old scope committed after a change: invoices=%v status=%v", items, current["status"])
+	}
+	headers := etagHeader(current)
+	headers["Idempotency-Key"] = uuid.NewString()
+	h.want(owner, "POST", path+"/run", nil, headers, 202)
 	if err := billingImporter(h, t).Pass(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	path := fmt.Sprintf("/api/v1/providers/%s/invoiced-costs?start=%s&end=%s", providerID, day1.Format("2006-01-02"), day3.AddDate(0, 0, 1).Format("2006-01-02"))
-	before := h.want(owner, "GET", path, nil, nil, 200)["items"].([]any)
-	if len(before) == 0 {
-		t.Fatal("invoice history was empty before migration")
+	items = h.want(owner, "GET", invoicePath, nil, nil, 200)["items"].([]any)
+	if len(items) == 0 {
+		t.Fatal("new scope did not import its rows")
 	}
-	if _, err := h.Pool.Exec(t.Context(), `
-		DROP TABLE olp.provider_billing_revisions;
-		ALTER TABLE olp.provider_billing_imports DROP COLUMN source_revision;
-		ALTER TABLE olp.provider_invoiced_costs
-			DROP COLUMN source_revision,
-			DROP CONSTRAINT provider_invoiced_costs_pkey,
-			ALTER COLUMN amount TYPE numeric(30,12),
-			ADD PRIMARY KEY (provider_id, day, line_item);
-		DELETE FROM olp.migrations WHERE version='0123_billing_currency_revision.sql';`); err != nil {
+	current = h.want(owner, "GET", path, nil, nil, 200)
+	billingPut(h, owner, providerID, map[string]any{"scope": map[string]any{"project_ids": []string{"proj_aaa111"}}}, current["etag"].(string), 200)
+	current = h.want(owner, "GET", path, nil, nil, 200)
+	status := current["status"].(map[string]any)
+	if status["imported_from"] != nil || status["imported_through"] != nil {
+		t.Fatalf("previous scope coverage was retained: %v", status)
+	}
+	retained := h.want(owner, "GET", invoicePath, nil, nil, 200)["items"].([]any)
+	if !reflect.DeepEqual(retained, items) {
+		t.Fatalf("scope change removed invoice history: %v", retained)
+	}
+	fake.mu.Lock()
+	queryIndex := len(fake.queries)
+	fake.mu.Unlock()
+	headers = etagHeader(current)
+	headers["Idempotency-Key"] = uuid.NewString()
+	h.want(owner, "POST", path+"/run", nil, headers, 202)
+	if err := billingImporter(h, t).Pass(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	if err := database.Migrate(t.Context(), h.Pool); err != nil {
+	query := fake.call(queryIndex)
+	start, startErr := strconv.ParseInt(query.Get("start_time"), 10, 64)
+	end, endErr := strconv.ParseInt(query.Get("end_time"), 10, 64)
+	if startErr != nil || endErr != nil || end-start != int64(30*24*time.Hour/time.Second) || query.Get("project_ids[]") != "proj_aaa111" {
+		t.Fatalf("returning to the prior scope did not use its first-import window: %v", query)
+	}
+	items = h.want(owner, "GET", invoicePath, nil, nil, 200)["items"].([]any)
+	fake.mu.Lock()
+	fake.shift[`"value": 0.2,`] = `"value": 9.9,`
+	fake.mu.Unlock()
+	current = h.want(owner, "GET", path, nil, nil, 200)
+	headers = etagHeader(current)
+	headers["Idempotency-Key"] = uuid.NewString()
+	h.want(owner, "POST", path+"/run", nil, headers, 202)
+	release, done = begin()
+	current = h.want(owner, "GET", path, nil, nil, 200)
+	h.want(owner, "DELETE", path, nil, etagHeader(current), 204)
+	finish(release, done)
+	afterDelete := h.want(owner, "GET", invoicePath, nil, nil, 200)["items"].([]any)
+	if !reflect.DeepEqual(afterDelete, items) {
+		t.Fatalf("fetch changed retained invoices after deletion: %v", afterDelete)
+	}
+}
+
+func TestBillingImportCredentialCompatibilityAcrossKinds(t *testing.T) {
+	h := newAccessHarness(t)
+	owner := h.owner()
+	day1, day2, day3 := billingDays()
+	openai := newBillingFake(t, "/v1/organization/costs", map[string]string{
+		"": "openai_costs_page1.json", "page-2-token": "openai_costs_page2.json",
+	}, map[string]string{"1759104000": fmt.Sprint(day1.Unix()), "1759190400": fmt.Sprint(day2.Unix()), "1759276800": fmt.Sprint(day3.Unix())})
+	anthropic := newBillingFake(t, "/v1/organizations/cost_report", map[string]string{
+		"": "anthropic_cost_report_page1.json", "page-2-token": "anthropic_cost_report_page2.json",
+	}, map[string]string{
+		`"starting_at": "2025-10-01T`: `"starting_at": "` + day1.Format("2006-01-02") + "T",
+		`"ending_at": "2025-10-02T`:   `"ending_at": "` + day2.Format("2006-01-02") + "T",
+		`"starting_at": "2025-10-02T`: `"starting_at": "` + day2.Format("2006-01-02") + "T",
+		`"ending_at": "2025-10-03T`:   `"ending_at": "` + day3.Format("2006-01-02") + "T",
+		`"starting_at": "2025-10-03T`: `"starting_at": "` + day3.Format("2006-01-02") + "T",
+		`"ending_at": "2025-10-04T`:   `"ending_at": "` + day3.AddDate(0, 0, 1).Format("2006-01-02") + "T",
+	})
+	oldKey := "sk-admin-" + strings.Repeat("o", 30)
+	anthropic.expectedAPIKey = oldKey
+	provider := billingProvider(h, owner, "Changed kind", "openai", openai.server.URL+"/v1", nil)
+	providerID := billingProviderID(provider)
+	path := "/api/v1/providers/" + providerID + "/billing-import"
+	billingPut(h, owner, providerID, map[string]any{"credential": oldKey}, provider["etag"].(string), 201)
+	providerPath := "/api/v1/providers/" + providerID
+	credentials := h.want(owner, "GET", providerPath+"/credentials", nil, nil, 200)["items"].([]any)
+	credentialID := credentials[0].(map[string]any)["id"].(string)
+	headers := etagHeader(provider)
+	headers["Idempotency-Key"] = uuid.NewString()
+	h.want(owner, "POST", providerPath+"/credentials/"+credentialID+"/revoke", nil, headers, 200)
+	provider = h.want(owner, "GET", providerPath, nil, nil, 200)
+	provider = h.want(owner, "PATCH", "/api/v1/providers/"+providerID, map[string]any{"name": "Changed kind", "configuration": map[string]any{
+		"kind": "anthropic", "auth_mode": "api_key", "endpoint": anthropic.server.URL + "/v1",
+	}}, etagHeader(provider), 200)
+	current := h.want(owner, "GET", path, nil, nil, 200)
+	billingPut(h, owner, providerID, map[string]any{}, current["etag"].(string), 200)
+	if err := billingImporter(h, t).Pass(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	after := h.want(owner, "GET", path, nil, nil, 200)["items"].([]any)
-	if len(after) != len(before) {
-		t.Fatalf("invoice history changed after migration: before=%v after=%v", before, after)
+	current = h.want(owner, "GET", path, nil, nil, 200)
+	status := current["status"].(map[string]any)
+	if status["last_success_at"] == nil || status["last_error_code"] != nil {
+		t.Fatalf("retained polling credential failed after changing kind: %v", status)
 	}
-	for index := range before {
-		oldItem := before[index].(map[string]any)
-		newItem := after[index].(map[string]any)
+	newAnthropicKey := "sk-ant-" + strings.Repeat("a", 30)
+	billingPut(h, owner, providerID, map[string]any{"credential": newAnthropicKey}, current["etag"].(string), 200)
+	h.want(owner, "PATCH", "/api/v1/providers/"+providerID, map[string]any{"name": "Changed kind", "configuration": map[string]any{
+		"kind": "openai", "auth_mode": "api_key", "endpoint": openai.server.URL + "/v1",
+	}}, etagHeader(provider), 200)
+	export := h.want(owner, "GET", "/api/v1/configuration/export", nil, nil, 200)
+	replacement := "sk-admin-" + strings.Repeat("n", 30)
+	body := map[string]any{"document": export["document"], "secret_bindings": map[string]any{"Changed kind/billing": replacement, "Changed kind/default": "sk-provider-" + strings.Repeat("n", 30)}}
+	h.want(owner, "POST", "/api/v1/configuration/apply", body, idem("changed-kind"), 200)
+	openai.mu.Lock()
+	openai.expectedAuthorization = "Bearer " + replacement
+	openai.mu.Unlock()
+	current = h.want(owner, "GET", path, nil, nil, 200)
+	headers = etagHeader(current)
+	headers["Idempotency-Key"] = uuid.NewString()
+	h.want(owner, "POST", path+"/run", nil, headers, 202)
+	if err := billingImporter(h, t).Pass(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	current = h.want(owner, "GET", path, nil, nil, 200)
+	status = current["status"].(map[string]any)
+	if status["last_success_at"] == nil || status["last_error_code"] != nil {
+		t.Fatalf("replacement credential failed after configuration apply: %v", status)
+	}
+}
+
+func TestBillingImportMigrationPreservesHistory(t *testing.T) {
+	pool, dbURL := accessDatabase(t)
+	if _, err := pool.Exec(t.Context(), `CREATE SCHEMA olp; CREATE TABLE olp.migrations
+		(version text PRIMARY KEY, checksum bytea NOT NULL, applied_at timestamptz NOT NULL DEFAULT now())`); err != nil {
+		t.Fatal(err)
+	}
+	entries, err := os.ReadDir("../../internal/database/migrations")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range entries {
+		if !strings.HasSuffix(entry.Name(), ".sql") {
+			continue
+		}
+		if entry.Name() >= "0123_billing_currency_revision.sql" {
+			break
+		}
+		data, err := os.ReadFile("../../internal/database/migrations/" + entry.Name())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := pool.Exec(t.Context(), string(data)); err != nil {
+			t.Fatalf("migration %s: %v", entry.Name(), err)
+		}
+		checksum := sha256.Sum256(data)
+		if _, err := pool.Exec(t.Context(), `INSERT INTO olp.migrations(version,checksum) VALUES($1,$2)`, entry.Name(), checksum[:]); err != nil {
+			t.Fatal(err)
+		}
+	}
+	userID, providerID := uuid.NewString(), uuid.NewString()
+	if _, err := pool.Exec(t.Context(), `INSERT INTO olp.users(id,email,display_name,role,etag)
+		VALUES($1::uuid,'history@example.test','History','viewer',$2::uuid)`, userID, uuid.NewString()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(t.Context(), `INSERT INTO olp.providers(id,name,kind,state,configuration,etag,slots_etag,created_by)
+		VALUES($1::uuid,'Migration','openai','draft','{"kind":"openai","auth_mode":"api_key"}', $2::uuid,$3::uuid,$4::uuid)`,
+		providerID, uuid.NewString(), uuid.NewString(), userID); err != nil {
+		t.Fatal(err)
+	}
+	day1, day2, day3 := billingDays()
+	if _, err := pool.Exec(t.Context(), `INSERT INTO olp.provider_invoiced_costs
+		(provider_id,day,line_item,currency,amount,source,fetched_at) VALUES
+		($1::uuid,$2::date,'tokens','USD',0.123456789012,'openai_costs','2025-01-01T12:00:00Z'),
+		($1::uuid,$3::date,'storage','EUR',12.34,'openai_costs','2025-01-02T12:00:00Z')`,
+		providerID, day1.Format("2006-01-02"), day2.Format("2006-01-02")); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.Migrate(t.Context(), pool); err != nil {
+		t.Fatal(err)
+	}
+	h := newAccessHarnessOn(t, pool, dbURL)
+	owner := h.owner()
+	path := fmt.Sprintf("/api/v1/providers/%s/invoiced-costs?start=%s&end=%s", providerID, day1.Format("2006-01-02"), day3.Format("2006-01-02"))
+	items := h.want(owner, "GET", path, nil, nil, 200)["items"].([]any)
+	expected := []map[string]string{
+		{"day": day1.Format("2006-01-02"), "line_item": "tokens", "currency": "USD", "amount": "0.123456789012", "source": "openai_costs", "fetched_at": "2025-01-01T12:00:00Z"},
+		{"day": day2.Format("2006-01-02"), "line_item": "storage", "currency": "EUR", "amount": "12.34", "source": "openai_costs", "fetched_at": "2025-01-02T12:00:00Z"},
+	}
+	if len(items) != len(expected) {
+		t.Fatalf("invoice history changed after migration: %v", items)
+	}
+	for index, expectedItem := range expected {
+		item := items[index].(map[string]any)
 		for _, field := range []string{"day", "line_item", "currency", "source", "fetched_at"} {
-			if oldItem[field] != newItem[field] {
-				t.Fatalf("invoice history changed after migration: before=%v after=%v", oldItem, newItem)
+			if item[field] != expectedItem[field] {
+				t.Fatalf("invoice history changed after migration: %v", item)
 			}
 		}
-		oldAmount, oldErr := decimal.NewFromString(oldItem["amount"].(string))
-		newAmount, newErr := decimal.NewFromString(newItem["amount"].(string))
-		if oldErr != nil || newErr != nil || !oldAmount.Equal(newAmount) {
-			t.Fatalf("invoice amount changed after migration: before=%v after=%v", oldItem, newItem)
+		amount, err := decimal.NewFromString(item["amount"].(string))
+		expectedAmount, expectedErr := decimal.NewFromString(expectedItem["amount"])
+		if err != nil || expectedErr != nil || !amount.Equal(expectedAmount) {
+			t.Fatalf("invoice amount changed after migration: %v", item)
 		}
 	}
 }

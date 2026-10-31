@@ -12,9 +12,22 @@ ALTER TABLE olp.provider_billing_imports
     ADD COLUMN source_revision text;
 
 CREATE TABLE olp.provider_billing_revisions (
-    provider_id uuid NOT NULL REFERENCES olp.provider_billing_imports ON DELETE CASCADE,
+    provider_id uuid NOT NULL REFERENCES olp.providers ON DELETE CASCADE,
+    source text NOT NULL,
+    scope_digest bytea NOT NULL,
     period_start date NOT NULL,
     source_revision text NOT NULL,
-    observed_at timestamptz NOT NULL,
-    PRIMARY KEY (provider_id, period_start)
+    ordering_at timestamptz NOT NULL,
+    covered_from date,
+    covered_through date,
+    PRIMARY KEY (provider_id, source, scope_digest, period_start)
 );
+
+CREATE TABLE olp.provider_billing_contexts (
+    provider_id uuid PRIMARY KEY REFERENCES olp.providers ON DELETE CASCADE,
+    source text NOT NULL,
+    scope jsonb NOT NULL
+);
+
+INSERT INTO olp.provider_billing_contexts(provider_id, source, scope)
+SELECT provider_id, source, scope FROM olp.provider_billing_imports;

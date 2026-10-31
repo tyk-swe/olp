@@ -1,7 +1,6 @@
 package billing
 
 import (
-	"bytes"
 	"cmp"
 	"context"
 	"crypto/sha256"
@@ -291,7 +290,7 @@ func loadProviderConfig(ctx context.Context, q access.Queryer, providerID string
 
 type sourceRevision struct {
 	id         string
-	observedAt time.Time
+	orderingAt time.Time
 }
 
 func (i *Importer) storeDays(ctx context.Context, row *importRow, periodStart string, revision *sourceRevision, days map[string]map[lineKey]lineSum) error {
@@ -300,25 +299,53 @@ func (i *Importer) storeDays(ctx context.Context, row *importRow, periodStart st
 		return err
 	}
 	defer tx.Rollback(ctx)
+	var providerExists int
+	if err := tx.QueryRow(ctx, `SELECT 1 FROM olp.providers WHERE id=$1::uuid FOR KEY SHARE`, row.ProviderID).Scan(&providerExists); errors.Is(err, pgx.ErrNoRows) {
+		return nil
+	} else if err != nil {
+		return err
+	}
+	var etag string
+	if err := tx.QueryRow(ctx, `SELECT etag FROM olp.provider_billing_imports WHERE provider_id=$1::uuid FOR UPDATE`, row.ProviderID).Scan(&etag); errors.Is(err, pgx.ErrNoRows) {
+		return nil
+	} else if err != nil {
+		return err
+	}
+	if etag != row.ETag {
+		return nil
+	}
+	daysList := slices.Sorted(maps.Keys(days))
+	var minDay, maxDay *string
+	if len(daysList) > 0 {
+		minDay, maxDay = &daysList[0], &daysList[len(daysList)-1]
+	}
 	var appliedRevision *string
 	if revision != nil {
-		tag, err := tx.Exec(ctx, `INSERT INTO olp.provider_billing_revisions
-			(provider_id,period_start,source_revision,observed_at) VALUES($1::uuid,$2::date,$3,$4)
-			ON CONFLICT (provider_id,period_start) DO UPDATE SET
-				source_revision=EXCLUDED.source_revision,observed_at=EXCLUDED.observed_at
-			WHERE olp.provider_billing_revisions.observed_at < EXCLUDED.observed_at
-				AND olp.provider_billing_revisions.source_revision <> EXCLUDED.source_revision`,
-			row.ProviderID, periodStart, revision.id, revision.observedAt)
+		digest, err := scopeDigest(row.Source, row.Scope)
 		if err != nil {
 			return err
 		}
-		if tag.RowsAffected() != 0 {
+		tag, err := tx.Exec(ctx, `INSERT INTO olp.provider_billing_revisions
+			(provider_id,source,scope_digest,period_start,source_revision,ordering_at,covered_from,covered_through)
+			VALUES($1::uuid,$2,$3,$4::date,$5,$6,$7::date,$8::date)
+			ON CONFLICT (provider_id,source,scope_digest,period_start) DO UPDATE SET
+				source_revision=EXCLUDED.source_revision,
+				ordering_at=CASE WHEN olp.provider_billing_revisions.source_revision=EXCLUDED.source_revision
+					THEN olp.provider_billing_revisions.ordering_at ELSE EXCLUDED.ordering_at END,
+				covered_from=LEAST(olp.provider_billing_revisions.covered_from,EXCLUDED.covered_from),
+				covered_through=GREATEST(olp.provider_billing_revisions.covered_through,EXCLUDED.covered_through)
+			WHERE olp.provider_billing_revisions.source_revision=EXCLUDED.source_revision
+				OR olp.provider_billing_revisions.ordering_at < EXCLUDED.ordering_at`,
+			row.ProviderID, row.Source, digest[:], periodStart, revision.id, revision.orderingAt, minDay, maxDay)
+		if err != nil {
+			return err
+		}
+		if tag.RowsAffected() == 0 {
+			daysList = nil
+			minDay, maxDay = nil, nil
+		} else {
 			appliedRevision = &revision.id
 		}
-	}
-	var daysList []string
-	if revision == nil || appliedRevision != nil {
-		daysList = slices.Sorted(maps.Keys(days))
 	}
 	for _, day := range daysList {
 		if _, err := tx.Exec(ctx, `DELETE FROM olp.provider_invoiced_costs WHERE provider_id=$1::uuid AND day=$2::date`,
@@ -340,10 +367,6 @@ func (i *Importer) storeDays(ctx context.Context, row *importRow, periodStart st
 				return err
 			}
 		}
-	}
-	var minDay, maxDay *string
-	if len(daysList) > 0 {
-		minDay, maxDay = &daysList[0], &daysList[len(daysList)-1]
 	}
 	if _, err := tx.Exec(ctx, `UPDATE olp.provider_billing_imports SET
 		last_import_at=now(),last_success_at=now(),last_error_code=NULL,
@@ -371,7 +394,7 @@ func (i *Importer) recordFailure(ctx context.Context, row *importRow, code strin
 	_, err := i.Pool.Exec(ctx, `UPDATE olp.provider_billing_imports SET
 		last_import_at=now(),last_error_code=$2,consecutive_failures=$3,
 		next_import_at=now()+$4::interval,updated_at=now()
-		WHERE provider_id=$1::uuid`, row.ProviderID, code, failures, delay.String())
+		WHERE provider_id=$1::uuid AND etag=$5`, row.ProviderID, code, failures, delay.String(), row.ETag)
 	return err
 }
 
@@ -396,17 +419,54 @@ func (i *Importer) purge(ctx context.Context) error {
 	return nil
 }
 
-func resetImportRevisions(ctx context.Context, tx pgx.Tx, providerID, previousSource, source string, previousScope, scope json.RawMessage) error {
-	canonical, err := ValidateScope(previousSource, previousScope)
+func scopeDigest(source string, scope json.RawMessage) ([32]byte, error) {
+	canonical, err := ValidateScope(source, scope)
+	if err != nil {
+		return [32]byte{}, err
+	}
+	return sha256.Sum256(canonical), nil
+}
+
+func syncImportRevision(ctx context.Context, tx pgx.Tx, providerID, source string, scope json.RawMessage) error {
+	digest, err := scopeDigest(source, scope)
 	if err != nil {
 		return err
 	}
-	if previousSource == source && bytes.Equal(canonical, scope) {
-		return nil
-	}
-	if _, err := tx.Exec(ctx, `DELETE FROM olp.provider_billing_revisions WHERE provider_id=$1::uuid`, providerID); err != nil {
+	if _, err := tx.Exec(ctx, `INSERT INTO olp.provider_billing_contexts(provider_id,source,scope)
+		VALUES($1::uuid,$2,$3::jsonb) ON CONFLICT (provider_id) DO NOTHING`, providerID, source, scope); err != nil {
 		return err
 	}
-	_, err = tx.Exec(ctx, `UPDATE olp.provider_billing_imports SET source_revision=NULL WHERE provider_id=$1::uuid`, providerID)
+	var previousSource string
+	var previousScope json.RawMessage
+	if err := tx.QueryRow(ctx, `SELECT source,scope FROM olp.provider_billing_contexts
+		WHERE provider_id=$1::uuid FOR UPDATE`, providerID).Scan(&previousSource, &previousScope); err != nil {
+		return err
+	}
+	previousDigest, err := scopeDigest(previousSource, previousScope)
+	if err != nil {
+		return err
+	}
+	if previousSource != source || previousDigest != digest {
+		if _, err := tx.Exec(ctx, `UPDATE olp.provider_billing_contexts SET source=$2,scope=$3::jsonb
+			WHERE provider_id=$1::uuid`, providerID, source, scope); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `UPDATE olp.provider_billing_revisions SET covered_from=NULL,covered_through=NULL
+			WHERE provider_id=$1::uuid`, providerID); err != nil {
+			return err
+		}
+		_, err := tx.Exec(ctx, `UPDATE olp.provider_billing_imports SET
+			imported_from=NULL,imported_through=NULL,source_revision=NULL WHERE provider_id=$1::uuid`, providerID)
+		return err
+	}
+	_, err = tx.Exec(ctx, `UPDATE olp.provider_billing_imports SET
+		imported_from=LEAST(imported_from,(SELECT MIN(covered_from) FROM olp.provider_billing_revisions
+			WHERE provider_id=$1::uuid AND source=$2 AND scope_digest=$3)),
+		imported_through=GREATEST(imported_through,(SELECT MAX(covered_through) FROM olp.provider_billing_revisions
+			WHERE provider_id=$1::uuid AND source=$2 AND scope_digest=$3)),
+		source_revision=(SELECT source_revision FROM olp.provider_billing_revisions
+			WHERE provider_id=$1::uuid AND source=$2 AND scope_digest=$3 AND covered_from IS NOT NULL
+			ORDER BY ordering_at DESC,period_start DESC LIMIT 1)
+		WHERE provider_id=$1::uuid`, providerID, source, digest[:])
 	return err
 }

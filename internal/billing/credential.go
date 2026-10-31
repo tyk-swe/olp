@@ -25,12 +25,27 @@ func encodeCredential(source, key string) ([]byte, error) {
 	return json.MarshalIndent(credentialDocument{Source: source, APIKey: key}, "", "  ")
 }
 
+var errIncompatibleCredential = errors.New("billing credential source does not match")
+
+func pollingSource(source string) bool {
+	return source == SourceOpenAI || source == SourceAnthropic
+}
+
 func decodeCredential(source string, data []byte) ([]byte, error) {
 	if !bytes.ContainsRune(data, '\n') {
+		if !pollingSource(source) {
+			return nil, errIncompatibleCredential
+		}
 		return data, nil
 	}
 	var document credentialDocument
-	if err := json.Unmarshal(data, &document); err != nil || document.Source != source || ValidCredential(document.APIKey) != nil {
+	if err := json.Unmarshal(data, &document); err != nil {
+		return nil, errors.New("invalid billing credential document")
+	}
+	if document.Source != source && !(pollingSource(document.Source) && pollingSource(source)) {
+		return nil, errIncompatibleCredential
+	}
+	if ValidCredential(document.APIKey) != nil {
 		return nil, errors.New("invalid billing credential document")
 	}
 	return []byte(document.APIKey), nil
