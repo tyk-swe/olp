@@ -315,7 +315,9 @@ rejected. `GET` returns the import and its status, including the covered dates,
 last error and applied source revision. `POST …/run` reschedules it immediately.
 `DELETE` removes the import and sealed credential while keeping imported costs and
 coverage available for historical reconciliation. Changing the source or scope
-clears coverage until the new import succeeds.
+clears the current import's coverage status. Previously imported days remain
+available for reconciliation until a later import replaces them or retention
+purges them.
 
 For OpenAI and Anthropic, use a vendor admin key. Scope is
 `{"project_ids": ["proj_…"]}` for OpenAI or
