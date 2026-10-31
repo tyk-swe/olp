@@ -306,10 +306,10 @@ rules, so the in-repo interpreter is the conformance authority.
 
 ### Billing imports
 
-An OpenAI or Anthropic connection gains a billing import at
+An OpenAI, Anthropic or Vertex AI connection gains a billing import at
 `PUT /api/v1/providers/{provider_id}/billing-import` with `{enabled, scope,
-credential}`. The credential is a vendor **admin key**, sealed under purpose
-`billing_credential` and never served inference; it is required on create,
+credential}`. OpenAI and Anthropic use a vendor **admin key**, sealed under purpose
+`billing_credential` and never served inference. It is required on create,
 omitted keeps the stored key, and `null` is rejected. Delete the import to remove it. Scope is source-shaped: `{"project_ids": ["proj_…"]}` for OpenAI
 (up to 100 entries) and `{"workspace_ids": ["wrkspc_…", "default"]}` for
 Anthropic; `{}` imports the whole organization. `GET` returns the import with
@@ -318,20 +318,60 @@ its status (`next_import_at`, `last_import_at`, `last_success_at`,
 reschedules it immediately, and `DELETE` removes it and the sealed key while
 keeping imported costs.
 
+For Vertex AI, first enable the [detailed Cloud Billing export to BigQuery](https://cloud.google.com/billing/docs/how-to/export-data-bigquery-tables/detailed-usage).
+Grant the billing principal `bigquery.jobs.create` in the query project and
+`bigquery.tables.getData` on the export table. Set the required scope to the
+Cloud Billing account ID, BigQuery project ID, dataset ID and detailed export
+table ID. `project_ids` optionally limits the imported workloads:
+
+```json
+{
+  "billing_account_id": "012345-ABCDEF-012345",
+  "bigquery_project_id": "billing-project",
+  "dataset_id": "billing_export",
+  "table_id": "gcp_billing_export_resource_v1_012345_ABCDEF_012345",
+  "project_ids": ["workload-project"]
+}
+```
+
+The credential is `{"auth_mode":"service_account","service_account":{...}}`
+with the complete service account key JSON, or `{"auth_mode":"adc"}` to
+explicitly use the worker's application default credentials. The credential is
+sealed and is never returned by the API. Configuration promotion passes the
+same JSON object serialized as the value of the billing credential's secret
+binding. Keep this binding out of the configuration document itself.
+
+The Google query selects the Vertex AI [billing service ID](https://cloud.google.com/billing/docs/how-to/budgets-spend-caps)
+`C7E2-9256-1C43` and sums regular costs by UTC usage day, service, SKU and
+currency. Credits and other adjustment types are not included yet. Google
+stores the detailed export's cost as FLOAT. The query casts each value to
+BIGNUMERIC before summing and the importer keeps
+the returned decimal without converting it through a Go float. Google export
+can begin after historical usage and may arrive late, so an empty result does
+not prove the export contained all historical costs.
+
 ### Importer
 
 The `billing_import` worker scans every 60 seconds for imports due, claims up
 to ten under a ten-minute lease, and fetches through the connection's
-egress-validated client (no redirects, 30 seconds per request, a 4 MiB
-response cap, at most 20 pages). Imports cover closed UTC days only: the first
-covers the 30 days before today, and later imports refresh the last 7 so
-vendor restatements land. Each day's returned line items are summed per
-`(day, line_item)` and replace the stored rows. A returned bucket with no results
+egress-validated client (no redirects, 30 seconds per request and a 4 MiB
+response cap). OpenAI and Anthropic imports read at most 20 pages. Imports cover
+closed UTC days only: the first covers the 30 days before today, and later
+imports refresh the last 7 so vendor restatements land. Each day's returned line
+items are summed per `(day, line_item, currency)` and replace the stored rows. A
+returned bucket with no results
 records an invoiced zero. On success the import schedules one hour
 out; on failure `last_error_code` records `credential`, `status`, `network`,
 `timeout`, `response` or `endpoint`, and the retry backs off from five
 minutes to one hour. Rows older than `retention.usage_days` are purged in
 bounded batches.
+
+Google uses the fixed BigQuery endpoint through the same connection egress
+policy, with a 1 GiB maximum bytes billed per query, a 45-second import budget
+and a maximum of 200,000 aggregate rows. A failed query or an incomplete result
+does not replace any invoice rows. Token exchanges use the public-only Google
+authentication client, and workload credentials are used only when ADC is
+explicitly selected.
 
 `GET /api/v1/providers/{id}/invoiced-costs?start=…&end=…` lists stored line
 items (`day`, `line_item`, `currency`, `amount`, `source`, `fetched_at`),
@@ -370,5 +410,5 @@ A provider entry in a configuration document carries `billing_import`
 `<provider name>/billing`; a missing `secret_bindings` entry blocks apply,
 reusing a matching binding keeps the stored key, and an entry's absence
 deletes the import. `internal/billing/testdata` fixtures follow the vendors'
-documented response shapes. There is no live-account qualification for them. AWS CUR,
-Google Cloud billing export and Azure Cost Management imports remain planned.
+documented response shapes. There is no live-account qualification for them. AWS CUR
+and Azure Cost Management imports remain planned.

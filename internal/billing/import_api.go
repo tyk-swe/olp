@@ -189,7 +189,9 @@ func (s *Server) putImport(r *http.Request, _ access.Principal) (access.Reply, e
 	var credential *string
 	if len(input.Credential) > 0 && !credentialNull {
 		var secret string
-		if err := json.Unmarshal(input.Credential, &secret); err != nil {
+		if source == SourceGoogle && len(input.Credential) > 0 && input.Credential[0] == '{' {
+			secret = string(input.Credential)
+		} else if err := json.Unmarshal(input.Credential, &secret); err != nil {
 			return access.Reply{}, access.Invalid("credential", "credential must be a string")
 		}
 		credential = &secret

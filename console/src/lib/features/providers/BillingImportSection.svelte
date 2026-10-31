@@ -23,14 +23,22 @@
     $props();
 
   const kind = $derived(provider.configuration.kind);
-  const supported = $derived(kind === 'openai' || kind === 'anthropic');
+  const supported = $derived(
+    kind === 'openai' || kind === 'anthropic' || kind === 'vertex_ai'
+  );
   const scopeLabel = $derived(
-    kind === 'openai' ? 'OpenAI project IDs' : 'Anthropic workspace IDs'
+    kind === 'vertex_ai'
+      ? 'Google project IDs'
+      : kind === 'openai'
+        ? 'OpenAI project IDs'
+        : 'Anthropic workspace IDs'
   );
   const scopePattern = $derived(
-    kind === 'openai'
-      ? /^proj_[A-Za-z0-9]{1,64}$/
-      : /^wrkspc_[A-Za-z0-9]{1,64}$/
+    kind === 'vertex_ai'
+      ? /^[a-z][a-z0-9-]{4,28}[a-z0-9]$/
+      : kind === 'openai'
+        ? /^proj_[A-Za-z0-9]{1,64}$/
+        : /^wrkspc_[A-Za-z0-9]{1,64}$/
   );
 
   const intent = useMutationIntent();
@@ -43,6 +51,13 @@
 
   let adminKey = $state('');
   let scopeText = $state('');
+  let billingAccountID = $state('');
+  let bigQueryProjectID = $state('');
+  let datasetID = $state('');
+  let tableID = $state('');
+  let googleAuthMode = $state<'keep' | 'service_account' | 'adc'>(
+    'service_account'
+  );
   let enabled = $state(true);
   let busy = $state(false);
   let error = $state('');
@@ -53,6 +68,8 @@
   const captureOwner = usePrincipalLifetime(() => {
     adminKey = '';
     scopeText = '';
+    billingAccountID = bigQueryProjectID = datasetID = tableID = '';
+    googleAuthMode = 'service_account';
     enabled = true;
     busy = false;
     error = notice = '';
@@ -67,6 +84,14 @@
     const current = detail;
     if (current && !initialized) {
       scopeText = scopeLines(current);
+      if (kind === 'vertex_ai') {
+        const scope = current.scope as unknown as Record<string, string>;
+        billingAccountID = scope.billing_account_id ?? '';
+        bigQueryProjectID = scope.bigquery_project_id ?? '';
+        datasetID = scope.dataset_id ?? '';
+        tableID = scope.table_id ?? '';
+        googleAuthMode = 'keep';
+      }
       enabled = current.enabled;
       initialized = true;
     }
@@ -81,7 +106,7 @@
   function errorPhrase(code: string): string {
     switch (code) {
       case 'credential':
-        return 'the vendor rejected the admin key';
+        return 'the vendor rejected the billing credential';
       case 'status':
         return 'the vendor returned an error';
       case 'network':
@@ -102,9 +127,16 @@
       .split('\n')
       .map((line) => line.trim())
       .filter(Boolean);
+    if (kind === 'vertex_ai') {
+      return {
+        billing_account_id: billingAccountID.trim(),
+        bigquery_project_id: bigQueryProjectID.trim(),
+        dataset_id: datasetID.trim(),
+        table_id: tableID.trim(),
+        ...(ids.length ? { project_ids: ids } : {})
+      } as unknown as Record<string, never>;
+    }
     if (!ids.length) return {};
-    // The contract types scope as an empty-object record; the runtime accepts
-    // the vendor's ID lists.
     const scope: Record<string, string[]> =
       kind === 'openai' ? { project_ids: ids } : { workspace_ids: ids };
     return scope as Record<string, never>;
@@ -119,9 +151,28 @@
     for (const id of ids) {
       if (kind === 'anthropic' && id === 'default') continue;
       if (!scopePattern.test(id))
-        return `${id} is not a valid ${kind === 'openai' ? 'project' : 'workspace'} ID.`;
+        return `${id} is not a valid ${kind === 'anthropic' ? 'workspace' : 'project'} ID.`;
     }
-    if (!editing && !adminKey.trim())
+    if (kind === 'vertex_ai') {
+      if (
+        !billingAccountID.trim() ||
+        !bigQueryProjectID.trim() ||
+        !datasetID.trim() ||
+        !tableID.trim()
+      )
+        return 'A billing account, BigQuery project, dataset and table are required.';
+      if (googleAuthMode === 'service_account' && !adminKey.trim())
+        return 'A service account key is required.';
+      if (googleAuthMode === 'service_account' && adminKey.trim()) {
+        try {
+          const key: unknown = JSON.parse(adminKey);
+          if (!key || typeof key !== 'object' || Array.isArray(key))
+            return 'The service account key must be a JSON object.';
+        } catch {
+          return 'The service account key must be a JSON object.';
+        }
+      }
+    } else if (!editing && !adminKey.trim())
       return 'An admin key is required to create the import.';
     return '';
   }
@@ -134,10 +185,21 @@
       return;
     }
     const etag = detail?.etag ?? provider.etag;
+    const credential =
+      kind === 'vertex_ai'
+        ? googleAuthMode === 'keep'
+          ? undefined
+          : googleAuthMode === 'adc'
+            ? { auth_mode: 'adc' as const }
+            : {
+                auth_mode: 'service_account' as const,
+                service_account: JSON.parse(adminKey) as Record<string, never>
+              }
+        : adminKey.trim() || undefined;
     const submission = intent.prepare<Parameters<typeof putBillingImport>[2]>({
       enabled,
       scope: scopeBody(),
-      ...(adminKey.trim() ? { credential: adminKey.trim() } : {})
+      ...(credential ? { credential } : {})
     });
     const isCurrent = captureOwner();
     busy = true;
@@ -152,6 +214,7 @@
       );
       if (!isCurrent()) return;
       adminKey = '';
+      if (kind === 'vertex_ai') googleAuthMode = 'keep';
       notice = 'Billing import saved.';
       await queryClient.invalidateQueries({
         queryKey: providerKeys.billingImport(provider.id)
@@ -199,6 +262,8 @@
       if (!isCurrent()) return;
       adminKey = '';
       scopeText = '';
+      billingAccountID = bigQueryProjectID = datasetID = tableID = '';
+      googleAuthMode = 'service_account';
       enabled = true;
       notice = 'Billing import removed.';
       await queryClient.invalidateQueries({
@@ -221,9 +286,8 @@
   <section class="card billing-import" aria-labelledby="billing-import-heading">
     <h3 id="billing-import-heading">Billing import</h3>
     <p class="section-help">
-      Pull the vendor's invoiced costs to reconcile attributed usage against
-      billed amounts. The credential must be an admin key — it never serves
-      inference.
+      Pull invoiced costs to reconcile attributed usage against billed amounts.
+      Billing credentials are separate from inference credentials.
     </p>
     {#if error}<div class="inline-problem" role="alert">{error}</div>{/if}
     {#if notice}<p class="section-help" role="status">{notice}</p>{/if}
@@ -275,28 +339,79 @@
           <fieldset class="submission-fields" disabled={busy}>
             <div class="form-grid">
               <div class="form-field">
-                <label for="billing-admin-key">Admin key</label>
-                <input
-                  id="billing-admin-key"
-                  type="password"
-                  autocomplete="off"
-                  bind:value={adminKey}
-                  placeholder={editing
-                    ? 'Blank keeps the stored key'
-                    : 'sk-admin-…'}
-                />
+                {#if kind === 'vertex_ai'}
+                  <label for="billing-auth-mode">Billing authentication</label>
+                  <select
+                    id="billing-auth-mode"
+                    bind:value={googleAuthMode}
+                    onchange={() => {
+                      adminKey = '';
+                    }}
+                  >
+                    {#if editing}<option value="keep"
+                        >Keep existing credential</option
+                      >{/if}
+                    <option value="service_account">Service account key</option>
+                    <option value="adc">Workload identity</option>
+                  </select>
+                {/if}
+                {#if kind !== 'vertex_ai' || googleAuthMode === 'service_account'}
+                  <label for="billing-admin-key"
+                    >{kind === 'vertex_ai'
+                      ? 'Service account JSON'
+                      : 'Admin key'}</label
+                  >
+                  <input
+                    id="billing-admin-key"
+                    type="password"
+                    autocomplete="off"
+                    bind:value={adminKey}
+                    placeholder={kind === 'vertex_ai'
+                      ? 'Paste the service account JSON'
+                      : editing
+                        ? 'Blank keeps the stored key'
+                        : 'sk-admin-…'}
+                  />
+                {/if}
               </div>
+              {#if kind === 'vertex_ai'}
+                <div class="form-field">
+                  <label for="billing-account">Billing account ID</label><input
+                    id="billing-account"
+                    bind:value={billingAccountID}
+                  />
+                </div>
+                <div class="form-field">
+                  <label for="billing-project">BigQuery project ID</label><input
+                    id="billing-project"
+                    bind:value={bigQueryProjectID}
+                  />
+                </div>
+                <div class="form-field">
+                  <label for="billing-dataset">Dataset ID</label><input
+                    id="billing-dataset"
+                    bind:value={datasetID}
+                  />
+                </div>
+                <div class="form-field">
+                  <label for="billing-table">Detailed export table ID</label
+                  ><input id="billing-table" bind:value={tableID} />
+                </div>
+              {/if}
               <div class="form-field">
                 <label for="billing-scope">{scopeLabel}</label>
                 <textarea
                   id="billing-scope"
                   rows="3"
                   bind:value={scopeText}
-                  placeholder={kind === 'openai'
-                    ? 'proj_…'
-                    : 'wrkspc_… or default'}></textarea>
+                  placeholder={kind === 'vertex_ai'
+                    ? 'workload-project'
+                    : kind === 'openai'
+                      ? 'proj_…'
+                      : 'wrkspc_… or default'}></textarea>
                 <small
-                  >One ID per line; empty imports the whole organization.</small
+                  >One ID per line. Leave empty to include all projects or
+                  workspaces.</small
                 >
               </div>
               <div class="form-field">

@@ -18,6 +18,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/secrets"
 	"github.com/tyk-swe/olp/internal/usage"
@@ -35,6 +36,8 @@ type Importer struct {
 	Connections  *egress.ConnectionClientCache
 	Log          *slog.Logger
 	PassBudget   time.Duration
+	GoogleClient *http.Client
+	GoogleAuth   GoogleBillingAuthorizer
 
 	mu       sync.Mutex
 	outcomes map[[2]string]int64
@@ -223,7 +226,14 @@ func (i *Importer) importOne(ctx context.Context, row *importRow) error {
 		return failFetch("credential", err)
 	}
 	defer clear(key)
-	client, err := i.client(ctx, row.ProviderID, cfg, key)
+	endpoint := googleBigQueryEndpoint
+	if row.Source != SourceGoogle {
+		if cfg.Endpoint == nil || *cfg.Endpoint == "" {
+			return failFetch("endpoint", errors.New("the provider has no endpoint"))
+		}
+		endpoint = *cfg.Endpoint
+	}
+	client, err := i.client(ctx, row.ProviderID, cfg, key, endpoint)
 	if err != nil {
 		return failFetch("endpoint", err)
 	}
@@ -239,6 +249,18 @@ func (i *Importer) importOne(ctx context.Context, row *importRow) error {
 		days, err = fetchOpenAI(ctx, client, cfg.Endpoint, key, scope, start, end)
 	case SourceAnthropic:
 		days, err = fetchAnthropic(ctx, client, cfg.Endpoint, key, scope, start, end)
+	case SourceGoogle:
+		if i.GoogleClient != nil {
+			client = i.GoogleClient
+		}
+		bounded := *client
+		bounded.Timeout = requestTimout
+		client = &bounded
+		auth := i.GoogleAuth
+		if auth == nil {
+			auth = connectors.NewAuth(i.Egress)
+		}
+		days, err = fetchGoogle(ctx, client, auth, row.Scope, key, start, end)
 	default:
 		err = failFetch("response", errors.New("unsupported billing source"))
 	}
@@ -250,11 +272,8 @@ func (i *Importer) importOne(ctx context.Context, row *importRow) error {
 
 // client builds the connection-scoped HTTP client the import's provider
 // configuration calls for, honoring its network options and credential.
-func (i *Importer) client(ctx context.Context, providerID string, cfg *providerConfig, credential []byte) (*http.Client, error) {
-	if cfg.Endpoint == nil || *cfg.Endpoint == "" {
-		return nil, errors.New("the provider has no endpoint")
-	}
-	if _, err := i.Egress.ValidateEndpoint(*cfg.Endpoint); err != nil {
+func (i *Importer) client(ctx context.Context, providerID string, cfg *providerConfig, credential []byte, endpoint string) (*http.Client, error) {
+	if _, err := i.Egress.ValidateEndpoint(endpoint); err != nil {
 		return nil, err
 	}
 	var secret []byte

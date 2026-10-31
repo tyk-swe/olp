@@ -13,12 +13,20 @@ type credentialDocument struct {
 	APIKey string `json:"api_key"`
 }
 
+func ValidateCredential(source, credential string) error {
+	document, err := encodeCredential(source, credential)
+	clear(document)
+	return err
+}
+
 func encodeCredential(source, key string) ([]byte, error) {
 	switch source {
 	case SourceOpenAI, SourceAnthropic:
 		if err := ValidCredential(key); err != nil {
 			return nil, err
 		}
+	case SourceGoogle:
+		return encodeGoogleCredential(key)
 	default:
 		return nil, access.Invalid("credential", "unknown billing source")
 	}
@@ -32,6 +40,9 @@ func pollingSource(source string) bool {
 }
 
 func decodeCredential(source string, data []byte) ([]byte, error) {
+	if source == SourceGoogle {
+		return decodeGoogleCredential(data)
+	}
 	if !bytes.ContainsRune(data, '\n') {
 		if !pollingSource(source) {
 			return nil, errIncompatibleCredential

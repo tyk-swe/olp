@@ -25961,7 +25961,8 @@
             "type": "string",
             "enum": [
               "openai_costs",
-              "anthropic_cost_report"
+              "anthropic_cost_report",
+              "google_bigquery"
             ]
           },
           "enabled": {
@@ -25969,7 +25970,7 @@
           },
           "scope": {
             "type": "object",
-            "description": "Source-shaped import scope; {} reads the whole organization."
+            "description": "Source-shaped import scope. Google requires billing_account_id, bigquery_project_id, dataset_id and table_id, with optional project_ids."
           },
           "credential_configured": {
             "type": "boolean"
@@ -26061,13 +26062,37 @@
           },
           "scope": {
             "type": "object",
-            "description": "openai_costs: {\"project_ids\":[\"proj_...\"]}; anthropic_cost_report: {\"workspace_ids\":[\"wrkspc_...\",\"default\"]}; {} reads the whole organization. Omitted keeps the stored scope."
+            "description": "Source-shaped import scope. Google requires billing_account_id, bigquery_project_id, dataset_id and table_id, with optional project_ids. Omitted keeps the stored scope."
           },
           "credential": {
-            "type": "string",
-            "description": "Vendor admin credential, sealed as a billing_credential secret. Required on create; omitted keeps the stored credential; null is rejected - delete the import instead.",
-            "minLength": 20,
-            "maxLength": 512
+            "description": "Write-only billing credential. OpenAI and Anthropic use an admin key string. Google uses an object with auth_mode service_account and a service_account key document, or auth_mode adc. Required on create; omitted keeps the stored credential; null is rejected.",
+            "oneOf": [
+              {
+                "type": "string",
+                "minLength": 20,
+                "maxLength": 512
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "auth_mode": {
+                    "type": "string",
+                    "enum": [
+                      "service_account",
+                      "adc"
+                    ]
+                  },
+                  "service_account": {
+                    "type": "object",
+                    "additionalProperties": true
+                  }
+                },
+                "required": [
+                  "auth_mode"
+                ]
+              }
+            ]
           }
         }
       },
