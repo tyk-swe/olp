@@ -212,10 +212,9 @@ first; the rest of this section says what each field means.
   cached spans: negligible over a full-rate run, and the reason a smoke run's
   figure is indicative. The figure is `null` beside a reason when a counter
   could not be read, which is the case for a binary built before the gateway
-  served them. The allocations per operation of the hot paths are reported and
-  gated by the `testing.B` benchmarks that sit beside the code (`make
-  bench-gate`; which paths they cover is in the
-  [performance guide](../../docs/develop/performance.md#regression-gate)). Goroutines are
+  served them. The allocations per operation of the hot paths are reported by
+  the `testing.B` benchmarks that sit beside the code (which paths they cover
+  is in the [performance guide](../../docs/develop/performance.md#microbenchmarks)). Goroutines are
   not observable from outside: the operating-system thread count is the nearest
   figure.
 - `error_rate` and the HTTP statuses and error kinds behind it. After a run with
