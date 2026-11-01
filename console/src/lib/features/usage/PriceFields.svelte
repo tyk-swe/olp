@@ -29,13 +29,13 @@
     trainingPrice = $bindable(''),
     storagePrice = $bindable(''),
     cacheStoragePrice = $bindable(''),
-    containerFees = $bindable<ContainerFeeRow[]>([]),
+    containerFees = $bindable([]),
     batchMultiplier = $bindable(''),
-    toolFees = $bindable<ToolFeeRow[]>([]),
-    tiers = $bindable<TierRow[]>([]),
+    toolFees = $bindable([]),
+    tiers = $bindable([]),
     windowZone = $bindable(''),
-    windowPeriods = $bindable<WindowPeriodRow[]>([])
-  } = $props<{
+    windowPeriods = $bindable([])
+  }: {
     idPrefix: string;
     canEdit?: boolean;
     inputPrice?: string;
@@ -61,7 +61,7 @@
     tiers?: TierRow[];
     windowZone?: string;
     windowPeriods?: WindowPeriodRow[];
-  }>();
+  } = $props();
 
   const weekDays = [
     ['1', 'Mon'],
