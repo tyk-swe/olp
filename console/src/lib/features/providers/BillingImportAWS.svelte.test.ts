@@ -2,6 +2,7 @@ import { QueryClient } from '@tanstack/svelte-query';
 import { flushSync, mount, unmount } from 'svelte';
 import { expect, it, onTestFinished, vi } from 'vitest';
 import * as api from './api/billing';
+import { ApiProblem } from '$lib/api/http';
 import type { Provider } from './api/providers';
 import BillingImportProbe from './test/BillingImportProbe.svelte';
 
@@ -159,6 +160,63 @@ it('validates, creates, runs, updates and removes a Bedrock billing import', asy
     'billing-etag',
     expect.objectContaining({ credential: { auth_mode: 'workload' } }),
     expect.any(String)
+  );
+  await vi.waitFor(() =>
+    expect(host.textContent).toContain('Billing import saved.')
+  );
+  fill('aws-bucket', 'local-bucket');
+  replace.click();
+  flushSync();
+  fill('aws-auth', 'static');
+  fill('aws-access', 'local-access');
+  fill('aws-secret', 'local-secret');
+  fill('aws-token', 'local-token');
+  const remote = {
+    ...current!,
+    enabled: false,
+    etag: 'remote-etag',
+    scope: {
+      payer_account_id: '999988887777',
+      bucket: 'remote-bucket',
+      report_prefix: 'remote/report',
+      region: 'remote-region',
+      linked_account_ids: ['222233334444']
+    }
+  };
+  current = remote;
+  vi.mocked(api.putBillingImport).mockRejectedValueOnce(
+    new ApiProblem({
+      title: 'Changed elsewhere',
+      status: 412,
+      type: 'https://openllmproxy.dev/problems/etag_mismatch'
+    })
+  );
+  submit();
+  await vi.waitFor(() =>
+    expect(host.textContent).toContain('This item changed elsewhere.')
+  );
+  click('Reload');
+  await vi.waitFor(() =>
+    expect(host.textContent).not.toContain('This item changed elsewhere.')
+  );
+  expect(host.querySelector<HTMLInputElement>('#aws-bucket')?.value).toBe(
+    'remote-bucket'
+  );
+  expect(replace.checked).toBe(false);
+  replace.click();
+  flushSync();
+  for (const id of ['aws-access', 'aws-secret', 'aws-token'])
+    expect(host.querySelector<HTMLInputElement>(`#${id}`)?.value).toBe('');
+  replace.click();
+  flushSync();
+  submit();
+  await vi.waitFor(() =>
+    expect(api.putBillingImport).toHaveBeenLastCalledWith(
+      'provider',
+      'remote-etag',
+      { enabled: false, scope: remote.scope },
+      expect.any(String)
+    )
   );
   await vi.waitFor(() =>
     expect(host.textContent).toContain('Billing import saved.')
