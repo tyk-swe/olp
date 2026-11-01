@@ -465,12 +465,24 @@ for (const editor of [
     save: 'Save policy draft'
   }
 ]) {
-  for (const destination of ['new', 'existing', 'new-from-new']) {
+  for (const destination of [
+    'new',
+    'existing',
+    'same',
+    'round-trip',
+    'new-from-new'
+  ]) {
     test(`late ${editor.tab} save preserves the ${destination} editor`, async ({
       page
     }) => {
-      const newDestination = destination !== 'existing';
       const newSource = destination === 'new-from-new';
+      const newDestination = destination === 'new' || newSource;
+      const sameDestination = destination === 'same' || destination === 'round-trip';
+      const existingId = sameDestination ? 'original' : 'other';
+      const existingName = sameDestination ? 'Original' : 'Other';
+      const existingEtag = sameDestination
+        ? '"original-saved-etag"'
+        : '"other-etag"';
       const { pending, release, writes } = await delayFirstGuardrailSave(
         page,
         editor.path,
@@ -496,15 +508,20 @@ for (const editor of [
         await name.fill('Original submitted');
         await save.click();
         await pending.promise;
+        if (destination === 'round-trip')
+          await page
+            .getByRole('button', { name: 'Other', exact: true })
+            .click();
         await page
           .getByRole('button', {
-            name: newDestination ? editor.create : 'Other',
+            name: newDestination ? editor.create : existingName,
             exact: true
           })
           .click();
         await name.fill('Current draft');
         release.resolve();
         await expect(save).toBeEnabled();
+        await expect(page.getByRole('status')).toHaveCount(0);
         await expect(name).toHaveValue('Current draft');
         await save.click();
         await expect(save).toBeEnabled();
@@ -517,15 +534,15 @@ for (const editor of [
           },
           {
             method: newDestination ? 'POST' : 'PUT',
-            path: `/api/v1/${editor.path}${newDestination ? '' : '/other'}`,
+            path: `/api/v1/${editor.path}${newDestination ? '' : `/${existingId}`}`,
             name: 'Current draft',
-            etag: newDestination ? undefined : '"other-etag"'
+            etag: newDestination ? undefined : existingEtag
           }
         ]);
         await name.fill('Current draft again');
         await save.click();
         await expect(save).toBeEnabled();
-        const id = newDestination ? 'created' : 'other';
+        const id = newDestination ? 'created' : existingId;
         expect(writes[2]).toEqual({
           method: 'PUT',
           path: `/api/v1/${editor.path}/${id}`,
