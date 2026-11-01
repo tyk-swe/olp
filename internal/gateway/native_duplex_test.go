@@ -338,10 +338,11 @@ func TestNativeDuplexBedrockCleanStreamEndSettlesObservedUsage(t *testing.T) {
 		return upstream, nil
 	}
 	conn, ctx := dialDuplex(t, h, fullKey, "/native/bedrock-realtime/sessions/"+routeSlug)
+	sessionEnd := `{"event":{"sessionEnd":{}}}`
 	for _, frame := range []string{
 		`{"event":{"sessionStart":{"inferenceConfig":{"maxTokens":1024}}}}`,
 		`{"event":{"promptEnd":{"promptName":"p1"}}}`,
-		`{"event":{"sessionEnd":{}}}`,
+		sessionEnd,
 	} {
 		if err := conn.Write(ctx, websocket.MessageText, []byte(frame)); err != nil {
 			t.Fatal(err)

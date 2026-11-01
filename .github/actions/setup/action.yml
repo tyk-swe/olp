@@ -10,9 +10,6 @@ inputs:
   node-modules:
     description: Install the pnpm workspace.
     default: "true"
-  save-go-cache:
-    description: Save the shared Go cache when the job succeeds on a push to main. Exactly one job sets this.
-    default: "false"
 runs:
   using: composite
   steps:
@@ -26,25 +23,13 @@ runs:
       env:
         GO_VERSION: ${{ steps.go.outputs.go-version }}
         GO_SUM: ${{ hashFiles('**/go.sum') }}
-        SAVE: ${{ inputs.save-go-cache == 'true' && github.event_name == 'push' && github.ref == 'refs/heads/main' }}
       run: |
         prefix="go-$ImageOS-$RUNNER_ARCH-$GO_VERSION-"
         {
           echo "prefix=$prefix"
           echo "key=$prefix$ImageVersion-$GO_SUM"
-          echo "save=$SAVE"
         } >> "$GITHUB_OUTPUT"
-    - if: steps.go-cache.outputs.save == 'true'
-      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-      with:
-        path: |
-          ~/go/pkg/mod
-          ~/.cache/go-build
-          ~/.cache/staticcheck
-        key: ${{ steps.go-cache.outputs.key }}
-        restore-keys: ${{ steps.go-cache.outputs.prefix }}
-    - if: steps.go-cache.outputs.save != 'true'
-      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+    - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: |
           ~/go/pkg/mod

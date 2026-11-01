@@ -13,6 +13,117 @@ import (
 	openapi_types "github.com/oapi-codegen/runtime/types"
 )
 
+// Defines values for A2ATaskState.
+const (
+	A2ATaskStateActive         A2ATaskState = "active"
+	A2ATaskStateCanceled       A2ATaskState = "canceled"
+	A2ATaskStateCompleted      A2ATaskState = "completed"
+	A2ATaskStateFailed         A2ATaskState = "failed"
+	A2ATaskStateOutcomeUnknown A2ATaskState = "outcome_unknown"
+)
+
+// Valid indicates whether the value is a known member of the A2ATaskState enum.
+func (e A2ATaskState) Valid() bool {
+	switch e {
+	case A2ATaskStateActive:
+		return true
+	case A2ATaskStateCanceled:
+		return true
+	case A2ATaskStateCompleted:
+		return true
+	case A2ATaskStateFailed:
+		return true
+	case A2ATaskStateOutcomeUnknown:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for A2ATaskDetailState.
+const (
+	A2ATaskDetailStateActive         A2ATaskDetailState = "active"
+	A2ATaskDetailStateCanceled       A2ATaskDetailState = "canceled"
+	A2ATaskDetailStateCompleted      A2ATaskDetailState = "completed"
+	A2ATaskDetailStateFailed         A2ATaskDetailState = "failed"
+	A2ATaskDetailStateOutcomeUnknown A2ATaskDetailState = "outcome_unknown"
+)
+
+// Valid indicates whether the value is a known member of the A2ATaskDetailState enum.
+func (e A2ATaskDetailState) Valid() bool {
+	switch e {
+	case A2ATaskDetailStateActive:
+		return true
+	case A2ATaskDetailStateCanceled:
+		return true
+	case A2ATaskDetailStateCompleted:
+		return true
+	case A2ATaskDetailStateFailed:
+		return true
+	case A2ATaskDetailStateOutcomeUnknown:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for A2ATaskModelCallbackState.
+const (
+	A2ATaskModelCallbackStateFree           A2ATaskModelCallbackState = "free"
+	A2ATaskModelCallbackStateNotBillable    A2ATaskModelCallbackState = "not_billable"
+	A2ATaskModelCallbackStateOutcomeUnknown A2ATaskModelCallbackState = "outcome_unknown"
+	A2ATaskModelCallbackStatePending        A2ATaskModelCallbackState = "pending"
+	A2ATaskModelCallbackStatePriced         A2ATaskModelCallbackState = "priced"
+	A2ATaskModelCallbackStateUncharged      A2ATaskModelCallbackState = "uncharged"
+	A2ATaskModelCallbackStateUnpriced       A2ATaskModelCallbackState = "unpriced"
+)
+
+// Valid indicates whether the value is a known member of the A2ATaskModelCallbackState enum.
+func (e A2ATaskModelCallbackState) Valid() bool {
+	switch e {
+	case A2ATaskModelCallbackStateFree:
+		return true
+	case A2ATaskModelCallbackStateNotBillable:
+		return true
+	case A2ATaskModelCallbackStateOutcomeUnknown:
+		return true
+	case A2ATaskModelCallbackStatePending:
+		return true
+	case A2ATaskModelCallbackStatePriced:
+		return true
+	case A2ATaskModelCallbackStateUncharged:
+		return true
+	case A2ATaskModelCallbackStateUnpriced:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for A2ATaskToolCallbackPricingState.
+const (
+	A2ATaskToolCallbackPricingStateFree     A2ATaskToolCallbackPricingState = "free"
+	A2ATaskToolCallbackPricingStatePriced   A2ATaskToolCallbackPricingState = "priced"
+	A2ATaskToolCallbackPricingStateUnknown  A2ATaskToolCallbackPricingState = "unknown"
+	A2ATaskToolCallbackPricingStateUnpriced A2ATaskToolCallbackPricingState = "unpriced"
+)
+
+// Valid indicates whether the value is a known member of the A2ATaskToolCallbackPricingState enum.
+func (e A2ATaskToolCallbackPricingState) Valid() bool {
+	switch e {
+	case A2ATaskToolCallbackPricingStateFree:
+		return true
+	case A2ATaskToolCallbackPricingStatePriced:
+		return true
+	case A2ATaskToolCallbackPricingStateUnknown:
+		return true
+	case A2ATaskToolCallbackPricingStateUnpriced:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for AdmissionPriority.
 const (
 	Critical AdmissionPriority = "critical"
@@ -130,6 +241,108 @@ func (e AgentPublicationSummaryKind) Valid() bool {
 	case AgentPublicationSummaryKindPrompt:
 		return true
 	case AgentPublicationSummaryKindToolset:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AgentRunStepKind.
+const (
+	AgentRunStepKindAgent AgentRunStepKind = "agent"
+	AgentRunStepKindApi   AgentRunStepKind = "api"
+	AgentRunStepKindModel AgentRunStepKind = "model"
+	AgentRunStepKindTool  AgentRunStepKind = "tool"
+)
+
+// Valid indicates whether the value is a known member of the AgentRunStepKind enum.
+func (e AgentRunStepKind) Valid() bool {
+	switch e {
+	case AgentRunStepKindAgent:
+		return true
+	case AgentRunStepKindApi:
+		return true
+	case AgentRunStepKindModel:
+		return true
+	case AgentRunStepKindTool:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AgentRunStepPricingState.
+const (
+	AgentRunStepPricingStateFree        AgentRunStepPricingState = "free"
+	AgentRunStepPricingStateLessThannil AgentRunStepPricingState = "<nil>"
+	AgentRunStepPricingStatePriced      AgentRunStepPricingState = "priced"
+	AgentRunStepPricingStateUnpriced    AgentRunStepPricingState = "unpriced"
+)
+
+// Valid indicates whether the value is a known member of the AgentRunStepPricingState enum.
+func (e AgentRunStepPricingState) Valid() bool {
+	switch e {
+	case AgentRunStepPricingStateFree:
+		return true
+	case AgentRunStepPricingStateLessThannil:
+		return true
+	case AgentRunStepPricingStatePriced:
+		return true
+	case AgentRunStepPricingStateUnpriced:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AgentRunStepState.
+const (
+	AgentRunStepStateConflict       AgentRunStepState = "conflict"
+	AgentRunStepStateDispatched     AgentRunStepState = "dispatched"
+	AgentRunStepStateNotAccepted    AgentRunStepState = "not_accepted"
+	AgentRunStepStateOutcomeUnknown AgentRunStepState = "outcome_unknown"
+	AgentRunStepStatePrepared       AgentRunStepState = "prepared"
+	AgentRunStepStateReady          AgentRunStepState = "ready"
+	AgentRunStepStateReleased       AgentRunStepState = "released"
+	AgentRunStepStateSettled        AgentRunStepState = "settled"
+)
+
+// Valid indicates whether the value is a known member of the AgentRunStepState enum.
+func (e AgentRunStepState) Valid() bool {
+	switch e {
+	case AgentRunStepStateConflict:
+		return true
+	case AgentRunStepStateDispatched:
+		return true
+	case AgentRunStepStateNotAccepted:
+		return true
+	case AgentRunStepStateOutcomeUnknown:
+		return true
+	case AgentRunStepStatePrepared:
+		return true
+	case AgentRunStepStateReady:
+		return true
+	case AgentRunStepStateReleased:
+		return true
+	case AgentRunStepStateSettled:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AgentToolPinClassification.
+const (
+	AgentToolPinClassificationApprovalRequired AgentToolPinClassification = "approval_required"
+	AgentToolPinClassificationReadOnly         AgentToolPinClassification = "read_only"
+)
+
+// Valid indicates whether the value is a known member of the AgentToolPinClassification enum.
+func (e AgentToolPinClassification) Valid() bool {
+	switch e {
+	case AgentToolPinClassificationApprovalRequired:
+		return true
+	case AgentToolPinClassificationReadOnly:
 		return true
 	default:
 		return false
@@ -334,6 +547,9 @@ func (e AuditEventResponseActorType) Valid() bool {
 // Defines values for BillingImportSource.
 const (
 	AnthropicCostReport BillingImportSource = "anthropic_cost_report"
+	AwsCur              BillingImportSource = "aws_cur"
+	AzureCostManagement BillingImportSource = "azure_cost_management"
+	GoogleBigquery      BillingImportSource = "google_bigquery"
 	OpenaiCosts         BillingImportSource = "openai_costs"
 )
 
@@ -341,6 +557,12 @@ const (
 func (e BillingImportSource) Valid() bool {
 	switch e {
 	case AnthropicCostReport:
+		return true
+	case AwsCur:
+		return true
+	case AzureCostManagement:
+		return true
+	case GoogleBigquery:
 		return true
 	case OpenaiCosts:
 		return true
@@ -657,6 +879,8 @@ func (e CatalogSampleSdk) Valid() bool {
 
 // Defines values for CodeAccountAdapter.
 const (
+	CodeAccountAdapterAntigravity   CodeAccountAdapter = "antigravity"
+	CodeAccountAdapterClaude        CodeAccountAdapter = "claude"
 	CodeAccountAdapterCodex         CodeAccountAdapter = "codex"
 	CodeAccountAdapterKimiCode      CodeAccountAdapter = "kimi_code"
 	CodeAccountAdapterLessThannil   CodeAccountAdapter = "<nil>"
@@ -669,6 +893,10 @@ const (
 // Valid indicates whether the value is a known member of the CodeAccountAdapter enum.
 func (e CodeAccountAdapter) Valid() bool {
 	switch e {
+	case CodeAccountAdapterAntigravity:
+		return true
+	case CodeAccountAdapterClaude:
+		return true
 	case CodeAccountAdapterCodex:
 		return true
 	case CodeAccountAdapterKimiCode:
@@ -838,6 +1066,54 @@ func (e CodeAttemptOutcomeOrigin) Valid() bool {
 	}
 }
 
+// Defines values for CodeAttemptPaidMonetaryState.
+const (
+	CodeAttemptPaidMonetaryStateLessThannil CodeAttemptPaidMonetaryState = "<nil>"
+	CodeAttemptPaidMonetaryStatePending     CodeAttemptPaidMonetaryState = "pending"
+	CodeAttemptPaidMonetaryStateReleased    CodeAttemptPaidMonetaryState = "released"
+	CodeAttemptPaidMonetaryStateSettled     CodeAttemptPaidMonetaryState = "settled"
+	CodeAttemptPaidMonetaryStateUnknown     CodeAttemptPaidMonetaryState = "unknown"
+)
+
+// Valid indicates whether the value is a known member of the CodeAttemptPaidMonetaryState enum.
+func (e CodeAttemptPaidMonetaryState) Valid() bool {
+	switch e {
+	case CodeAttemptPaidMonetaryStateLessThannil:
+		return true
+	case CodeAttemptPaidMonetaryStatePending:
+		return true
+	case CodeAttemptPaidMonetaryStateReleased:
+		return true
+	case CodeAttemptPaidMonetaryStateSettled:
+		return true
+	case CodeAttemptPaidMonetaryStateUnknown:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for CodeAttemptRecoveryReason.
+const (
+	CodeAttemptRecoveryReasonCredentialRejected CodeAttemptRecoveryReason = "credential_rejected"
+	CodeAttemptRecoveryReasonLessThannil        CodeAttemptRecoveryReason = "<nil>"
+	CodeAttemptRecoveryReasonQuotaRejected      CodeAttemptRecoveryReason = "quota_rejected"
+)
+
+// Valid indicates whether the value is a known member of the CodeAttemptRecoveryReason enum.
+func (e CodeAttemptRecoveryReason) Valid() bool {
+	switch e {
+	case CodeAttemptRecoveryReasonCredentialRejected:
+		return true
+	case CodeAttemptRecoveryReasonLessThannil:
+		return true
+	case CodeAttemptRecoveryReasonQuotaRejected:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for CodeAttemptState.
 const (
 	CodeAttemptStateAborted        CodeAttemptState = "aborted"
@@ -867,6 +1143,8 @@ func (e CodeAttemptState) Valid() bool {
 
 // Defines values for CodeClientConfigurationAdapters.
 const (
+	CodeClientConfigurationAdaptersAntigravity   CodeClientConfigurationAdapters = "antigravity"
+	CodeClientConfigurationAdaptersClaude        CodeClientConfigurationAdapters = "claude"
 	CodeClientConfigurationAdaptersCodex         CodeClientConfigurationAdapters = "codex"
 	CodeClientConfigurationAdaptersKimiCode      CodeClientConfigurationAdapters = "kimi_code"
 	CodeClientConfigurationAdaptersMinimaxPlan   CodeClientConfigurationAdapters = "minimax_plan"
@@ -878,6 +1156,10 @@ const (
 // Valid indicates whether the value is a known member of the CodeClientConfigurationAdapters enum.
 func (e CodeClientConfigurationAdapters) Valid() bool {
 	switch e {
+	case CodeClientConfigurationAdaptersAntigravity:
+		return true
+	case CodeClientConfigurationAdaptersClaude:
+		return true
 	case CodeClientConfigurationAdaptersCodex:
 		return true
 	case CodeClientConfigurationAdaptersKimiCode:
@@ -918,15 +1200,18 @@ func (e CodeClientConfigurationClient) Valid() bool {
 
 // Defines values for CodeClientConfigurationFormat.
 const (
-	CodeClientConfigurationFormatJson  CodeClientConfigurationFormat = "json"
-	CodeClientConfigurationFormatShell CodeClientConfigurationFormat = "shell"
-	CodeClientConfigurationFormatToml  CodeClientConfigurationFormat = "toml"
+	CodeClientConfigurationFormatJson       CodeClientConfigurationFormat = "json"
+	CodeClientConfigurationFormatPowershell CodeClientConfigurationFormat = "powershell"
+	CodeClientConfigurationFormatShell      CodeClientConfigurationFormat = "shell"
+	CodeClientConfigurationFormatToml       CodeClientConfigurationFormat = "toml"
 )
 
 // Valid indicates whether the value is a known member of the CodeClientConfigurationFormat enum.
 func (e CodeClientConfigurationFormat) Valid() bool {
 	switch e {
 	case CodeClientConfigurationFormatJson:
+		return true
+	case CodeClientConfigurationFormatPowershell:
 		return true
 	case CodeClientConfigurationFormatShell:
 		return true
@@ -958,6 +1243,27 @@ func (e CodeClientConfigurationSupportedClients) Valid() bool {
 	}
 }
 
+// Defines values for CodeClientPlatform.
+const (
+	Linux   CodeClientPlatform = "linux"
+	Macos   CodeClientPlatform = "macos"
+	Windows CodeClientPlatform = "windows"
+)
+
+// Valid indicates whether the value is a known member of the CodeClientPlatform enum.
+func (e CodeClientPlatform) Valid() bool {
+	switch e {
+	case Linux:
+		return true
+	case Macos:
+		return true
+	case Windows:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for CodeConfigurationFileFormat.
 const (
 	CodeConfigurationFileFormatJson  CodeConfigurationFileFormat = "json"
@@ -973,6 +1279,81 @@ func (e CodeConfigurationFileFormat) Valid() bool {
 	case CodeConfigurationFileFormatShell:
 		return true
 	case CodeConfigurationFileFormatToml:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for CodeModelClients.
+const (
+	CodeModelClientsClaudeCode CodeModelClients = "claude-code"
+	CodeModelClientsCodex      CodeModelClients = "codex"
+	CodeModelClientsOpencode   CodeModelClients = "opencode"
+)
+
+// Valid indicates whether the value is a known member of the CodeModelClients enum.
+func (e CodeModelClients) Valid() bool {
+	switch e {
+	case CodeModelClientsClaudeCode:
+		return true
+	case CodeModelClientsCodex:
+		return true
+	case CodeModelClientsOpencode:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for CodeModelObject.
+const (
+	CodeModelObjectModel CodeModelObject = "model"
+)
+
+// Valid indicates whether the value is a known member of the CodeModelObject enum.
+func (e CodeModelObject) Valid() bool {
+	switch e {
+	case CodeModelObjectModel:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for CodeModelCapabilityProtocol.
+const (
+	CodeModelCapabilityProtocolChat      CodeModelCapabilityProtocol = "chat"
+	CodeModelCapabilityProtocolMessages  CodeModelCapabilityProtocol = "messages"
+	CodeModelCapabilityProtocolResponses CodeModelCapabilityProtocol = "responses"
+)
+
+// Valid indicates whether the value is a known member of the CodeModelCapabilityProtocol enum.
+func (e CodeModelCapabilityProtocol) Valid() bool {
+	switch e {
+	case CodeModelCapabilityProtocolChat:
+		return true
+	case CodeModelCapabilityProtocolMessages:
+		return true
+	case CodeModelCapabilityProtocolResponses:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for CodeModelCapabilityTransports.
+const (
+	Http      CodeModelCapabilityTransports = "http"
+	Websocket CodeModelCapabilityTransports = "websocket"
+)
+
+// Valid indicates whether the value is a known member of the CodeModelCapabilityTransports enum.
+func (e CodeModelCapabilityTransports) Valid() bool {
+	switch e {
+	case Http:
+		return true
+	case Websocket:
 		return true
 	default:
 		return false
@@ -1038,6 +1419,8 @@ func (e CodeResearchToolsServices) Valid() bool {
 
 // Defines values for CodeRouteAdapters.
 const (
+	CodeRouteAdaptersAntigravity   CodeRouteAdapters = "antigravity"
+	CodeRouteAdaptersClaude        CodeRouteAdapters = "claude"
 	CodeRouteAdaptersCodex         CodeRouteAdapters = "codex"
 	CodeRouteAdaptersKimiCode      CodeRouteAdapters = "kimi_code"
 	CodeRouteAdaptersMinimaxPlan   CodeRouteAdapters = "minimax_plan"
@@ -1049,6 +1432,10 @@ const (
 // Valid indicates whether the value is a known member of the CodeRouteAdapters enum.
 func (e CodeRouteAdapters) Valid() bool {
 	switch e {
+	case CodeRouteAdaptersAntigravity:
+		return true
+	case CodeRouteAdaptersClaude:
+		return true
 	case CodeRouteAdaptersCodex:
 		return true
 	case CodeRouteAdaptersKimiCode:
@@ -1141,6 +1528,24 @@ func (e ConfigurationCapabilityEntryMode) Valid() bool {
 	case ConfigurationCapabilityEntryModeStreaming:
 		return true
 	case ConfigurationCapabilityEntryModeUnary:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ConfigurationCodePoolKind.
+const (
+	ConfigurationCodePoolKindPersonal ConfigurationCodePoolKind = "personal"
+	ConfigurationCodePoolKindShared   ConfigurationCodePoolKind = "shared"
+)
+
+// Valid indicates whether the value is a known member of the ConfigurationCodePoolKind enum.
+func (e ConfigurationCodePoolKind) Valid() bool {
+	switch e {
+	case ConfigurationCodePoolKindPersonal:
+		return true
+	case ConfigurationCodePoolKindShared:
 		return true
 	default:
 		return false
@@ -1241,6 +1646,7 @@ const (
 	ConfigurationGuardrailTypeSemanticGuard         ConfigurationGuardrailType = "semantic_guard"
 	ConfigurationGuardrailTypeSingulr               ConfigurationGuardrailType = "singulr"
 	ConfigurationGuardrailTypeStraiker              ConfigurationGuardrailType = "straiker"
+	ConfigurationGuardrailTypeTypesafe              ConfigurationGuardrailType = "typesafe"
 	ConfigurationGuardrailTypeVigilGuard            ConfigurationGuardrailType = "vigil_guard"
 	ConfigurationGuardrailTypeWebhook               ConfigurationGuardrailType = "webhook"
 	ConfigurationGuardrailTypeXecguard              ConfigurationGuardrailType = "xecguard"
@@ -1361,6 +1767,8 @@ func (e ConfigurationGuardrailType) Valid() bool {
 	case ConfigurationGuardrailTypeSingulr:
 		return true
 	case ConfigurationGuardrailTypeStraiker:
+		return true
+	case ConfigurationGuardrailTypeTypesafe:
 		return true
 	case ConfigurationGuardrailTypeVigilGuard:
 		return true
@@ -1530,6 +1938,10 @@ const (
 	ConfigurationPlanItemKindAgentPublication    ConfigurationPlanItemKind = "agent_publication"
 	ConfigurationPlanItemKindBillingImport       ConfigurationPlanItemKind = "billing_import"
 	ConfigurationPlanItemKindCatalogPublication  ConfigurationPlanItemKind = "catalog_publication"
+	ConfigurationPlanItemKindCodeAccount         ConfigurationPlanItemKind = "code_account"
+	ConfigurationPlanItemKindCodeBudget          ConfigurationPlanItemKind = "code_budget"
+	ConfigurationPlanItemKindCodePool            ConfigurationPlanItemKind = "code_pool"
+	ConfigurationPlanItemKindCodeRoute           ConfigurationPlanItemKind = "code_route"
 	ConfigurationPlanItemKindConfiguration       ConfigurationPlanItemKind = "configuration"
 	ConfigurationPlanItemKindCredential          ConfigurationPlanItemKind = "credential"
 	ConfigurationPlanItemKindDiscount            ConfigurationPlanItemKind = "discount"
@@ -1556,6 +1968,14 @@ func (e ConfigurationPlanItemKind) Valid() bool {
 	case ConfigurationPlanItemKindBillingImport:
 		return true
 	case ConfigurationPlanItemKindCatalogPublication:
+		return true
+	case ConfigurationPlanItemKindCodeAccount:
+		return true
+	case ConfigurationPlanItemKindCodeBudget:
+		return true
+	case ConfigurationPlanItemKindCodePool:
+		return true
+	case ConfigurationPlanItemKindCodeRoute:
 		return true
 	case ConfigurationPlanItemKindConfiguration:
 		return true
@@ -1609,6 +2029,24 @@ func (e ConfigurationRetrievalBindingBackend) Valid() bool {
 	case ConfigurationRetrievalBindingBackendBedrockKnowledgeBase:
 		return true
 	case ConfigurationRetrievalBindingBackendVertexRag:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ConfigurationRouteEntryToolExecution.
+const (
+	ConfigurationRouteEntryToolExecutionEmpty   ConfigurationRouteEntryToolExecution = ""
+	ConfigurationRouteEntryToolExecutionGateway ConfigurationRouteEntryToolExecution = "gateway"
+)
+
+// Valid indicates whether the value is a known member of the ConfigurationRouteEntryToolExecution enum.
+func (e ConfigurationRouteEntryToolExecution) Valid() bool {
+	switch e {
+	case ConfigurationRouteEntryToolExecutionEmpty:
+		return true
+	case ConfigurationRouteEntryToolExecutionGateway:
 		return true
 	default:
 		return false
@@ -1684,6 +2122,8 @@ const (
 	ConfigurationSinkStreamsAudit              ConfigurationSinkStreams = "audit"
 	ConfigurationSinkStreamsGuardrailDecisions ConfigurationSinkStreams = "guardrail_decisions"
 	ConfigurationSinkStreamsRequests           ConfigurationSinkStreams = "requests"
+	ConfigurationSinkStreamsRuns               ConfigurationSinkStreams = "runs"
+	ConfigurationSinkStreamsTraceSpans         ConfigurationSinkStreams = "trace_spans"
 )
 
 // Valid indicates whether the value is a known member of the ConfigurationSinkStreams enum.
@@ -1696,6 +2136,10 @@ func (e ConfigurationSinkStreams) Valid() bool {
 	case ConfigurationSinkStreamsGuardrailDecisions:
 		return true
 	case ConfigurationSinkStreamsRequests:
+		return true
+	case ConfigurationSinkStreamsRuns:
+		return true
+	case ConfigurationSinkStreamsTraceSpans:
 		return true
 	default:
 		return false
@@ -1965,6 +2409,8 @@ const (
 	CreateExportSinkRequestStreamsGuardrailDecisions CreateExportSinkRequestStreams = "guardrail_decisions"
 	CreateExportSinkRequestStreamsMetering           CreateExportSinkRequestStreams = "metering"
 	CreateExportSinkRequestStreamsRequests           CreateExportSinkRequestStreams = "requests"
+	CreateExportSinkRequestStreamsRuns               CreateExportSinkRequestStreams = "runs"
+	CreateExportSinkRequestStreamsTraceSpans         CreateExportSinkRequestStreams = "trace_spans"
 	CreateExportSinkRequestStreamsUsageRollups       CreateExportSinkRequestStreams = "usage_rollups"
 )
 
@@ -1982,6 +2428,10 @@ func (e CreateExportSinkRequestStreams) Valid() bool {
 	case CreateExportSinkRequestStreamsMetering:
 		return true
 	case CreateExportSinkRequestStreamsRequests:
+		return true
+	case CreateExportSinkRequestStreamsRuns:
+		return true
+	case CreateExportSinkRequestStreamsTraceSpans:
 		return true
 	case CreateExportSinkRequestStreamsUsageRollups:
 		return true
@@ -2096,6 +2546,7 @@ const (
 	CreateGuardrailRequestTypeSemanticGuard         CreateGuardrailRequestType = "semantic_guard"
 	CreateGuardrailRequestTypeSingulr               CreateGuardrailRequestType = "singulr"
 	CreateGuardrailRequestTypeStraiker              CreateGuardrailRequestType = "straiker"
+	CreateGuardrailRequestTypeTypesafe              CreateGuardrailRequestType = "typesafe"
 	CreateGuardrailRequestTypeVigilGuard            CreateGuardrailRequestType = "vigil_guard"
 	CreateGuardrailRequestTypeWebhook               CreateGuardrailRequestType = "webhook"
 	CreateGuardrailRequestTypeXecguard              CreateGuardrailRequestType = "xecguard"
@@ -2217,6 +2668,8 @@ func (e CreateGuardrailRequestType) Valid() bool {
 		return true
 	case CreateGuardrailRequestTypeStraiker:
 		return true
+	case CreateGuardrailRequestTypeTypesafe:
+		return true
 	case CreateGuardrailRequestTypeVigilGuard:
 		return true
 	case CreateGuardrailRequestTypeWebhook:
@@ -2281,12 +2734,32 @@ func (e CreateNotificationDestinationRequestType) Valid() bool {
 	}
 }
 
+// Defines values for CreateRouteDraftRequestToolExecution.
+const (
+	CreateRouteDraftRequestToolExecutionEmpty   CreateRouteDraftRequestToolExecution = ""
+	CreateRouteDraftRequestToolExecutionGateway CreateRouteDraftRequestToolExecution = "gateway"
+)
+
+// Valid indicates whether the value is a known member of the CreateRouteDraftRequestToolExecution enum.
+func (e CreateRouteDraftRequestToolExecution) Valid() bool {
+	switch e {
+	case CreateRouteDraftRequestToolExecutionEmpty:
+		return true
+	case CreateRouteDraftRequestToolExecutionGateway:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for CreateSinkRequestStreams.
 const (
 	CreateSinkRequestStreamsAttempts           CreateSinkRequestStreams = "attempts"
 	CreateSinkRequestStreamsAudit              CreateSinkRequestStreams = "audit"
 	CreateSinkRequestStreamsGuardrailDecisions CreateSinkRequestStreams = "guardrail_decisions"
 	CreateSinkRequestStreamsRequests           CreateSinkRequestStreams = "requests"
+	CreateSinkRequestStreamsRuns               CreateSinkRequestStreams = "runs"
+	CreateSinkRequestStreamsTraceSpans         CreateSinkRequestStreams = "trace_spans"
 )
 
 // Valid indicates whether the value is a known member of the CreateSinkRequestStreams enum.
@@ -2299,6 +2772,10 @@ func (e CreateSinkRequestStreams) Valid() bool {
 	case CreateSinkRequestStreamsGuardrailDecisions:
 		return true
 	case CreateSinkRequestStreamsRequests:
+		return true
+	case CreateSinkRequestStreamsRuns:
+		return true
+	case CreateSinkRequestStreamsTraceSpans:
 		return true
 	default:
 		return false
@@ -2335,6 +2812,27 @@ func (e CredentialRequirement) Valid() bool {
 	case CredentialRequirementGrant:
 		return true
 	case CredentialRequirementRequired:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for DelegationConsentRequestScopes.
+const (
+	DelegationConsentRequestScopesAgents    DelegationConsentRequestScopes = "agents"
+	DelegationConsentRequestScopesInference DelegationConsentRequestScopes = "inference"
+	DelegationConsentRequestScopesTools     DelegationConsentRequestScopes = "tools"
+)
+
+// Valid indicates whether the value is a known member of the DelegationConsentRequestScopes enum.
+func (e DelegationConsentRequestScopes) Valid() bool {
+	switch e {
+	case DelegationConsentRequestScopesAgents:
+		return true
+	case DelegationConsentRequestScopesInference:
+		return true
+	case DelegationConsentRequestScopesTools:
 		return true
 	default:
 		return false
@@ -2478,6 +2976,8 @@ const (
 	ExportSinkStreamsGuardrailDecisions ExportSinkStreams = "guardrail_decisions"
 	ExportSinkStreamsMetering           ExportSinkStreams = "metering"
 	ExportSinkStreamsRequests           ExportSinkStreams = "requests"
+	ExportSinkStreamsRuns               ExportSinkStreams = "runs"
+	ExportSinkStreamsTraceSpans         ExportSinkStreams = "trace_spans"
 	ExportSinkStreamsUsageRollups       ExportSinkStreams = "usage_rollups"
 )
 
@@ -2495,6 +2995,10 @@ func (e ExportSinkStreams) Valid() bool {
 	case ExportSinkStreamsMetering:
 		return true
 	case ExportSinkStreamsRequests:
+		return true
+	case ExportSinkStreamsRuns:
+		return true
+	case ExportSinkStreamsTraceSpans:
 		return true
 	case ExportSinkStreamsUsageRollups:
 		return true
@@ -2578,6 +3082,42 @@ func (e FallbackCondition) Valid() bool {
 	case Exhausted:
 		return true
 	case RateLimit:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for GatewayExecutionCapabilityCertifiedModes.
+const (
+	GatewayExecutionCapabilityCertifiedModesStreaming GatewayExecutionCapabilityCertifiedModes = "streaming"
+	GatewayExecutionCapabilityCertifiedModesUnary     GatewayExecutionCapabilityCertifiedModes = "unary"
+)
+
+// Valid indicates whether the value is a known member of the GatewayExecutionCapabilityCertifiedModes enum.
+func (e GatewayExecutionCapabilityCertifiedModes) Valid() bool {
+	switch e {
+	case GatewayExecutionCapabilityCertifiedModesStreaming:
+		return true
+	case GatewayExecutionCapabilityCertifiedModesUnary:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for GatewayExecutionToolClassification.
+const (
+	GatewayExecutionToolClassificationApprovalRequired GatewayExecutionToolClassification = "approval_required"
+	GatewayExecutionToolClassificationReadOnly         GatewayExecutionToolClassification = "read_only"
+)
+
+// Valid indicates whether the value is a known member of the GatewayExecutionToolClassification enum.
+func (e GatewayExecutionToolClassification) Valid() bool {
+	switch e {
+	case GatewayExecutionToolClassificationApprovalRequired:
+		return true
+	case GatewayExecutionToolClassificationReadOnly:
 		return true
 	default:
 		return false
@@ -2888,6 +3428,7 @@ const (
 	GuardrailResponseTypeSemanticGuard         GuardrailResponseType = "semantic_guard"
 	GuardrailResponseTypeSingulr               GuardrailResponseType = "singulr"
 	GuardrailResponseTypeStraiker              GuardrailResponseType = "straiker"
+	GuardrailResponseTypeTypesafe              GuardrailResponseType = "typesafe"
 	GuardrailResponseTypeVigilGuard            GuardrailResponseType = "vigil_guard"
 	GuardrailResponseTypeWebhook               GuardrailResponseType = "webhook"
 	GuardrailResponseTypeXecguard              GuardrailResponseType = "xecguard"
@@ -3008,6 +3549,8 @@ func (e GuardrailResponseType) Valid() bool {
 	case GuardrailResponseTypeSingulr:
 		return true
 	case GuardrailResponseTypeStraiker:
+		return true
+	case GuardrailResponseTypeTypesafe:
 		return true
 	case GuardrailResponseTypeVigilGuard:
 		return true
@@ -3250,6 +3793,66 @@ func (e InteractionInspectionStatus) Valid() bool {
 	case InteractionInspectionStatusNotInspected:
 		return true
 	case InteractionInspectionStatusTransformed:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for InvestigationEvidenceKind.
+const (
+	InvestigationEvidenceKindApproval   InvestigationEvidenceKind = "approval"
+	InvestigationEvidenceKindDelegation InvestigationEvidenceKind = "delegation"
+	InvestigationEvidenceKindRun        InvestigationEvidenceKind = "run"
+	InvestigationEvidenceKindSpan       InvestigationEvidenceKind = "span"
+	InvestigationEvidenceKindStep       InvestigationEvidenceKind = "step"
+	InvestigationEvidenceKindTask       InvestigationEvidenceKind = "task"
+)
+
+// Valid indicates whether the value is a known member of the InvestigationEvidenceKind enum.
+func (e InvestigationEvidenceKind) Valid() bool {
+	switch e {
+	case InvestigationEvidenceKindApproval:
+		return true
+	case InvestigationEvidenceKindDelegation:
+		return true
+	case InvestigationEvidenceKindRun:
+		return true
+	case InvestigationEvidenceKindSpan:
+		return true
+	case InvestigationEvidenceKindStep:
+		return true
+	case InvestigationEvidenceKindTask:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for InvestigationEvidenceViewKind.
+const (
+	InvestigationEvidenceViewKindApproval   InvestigationEvidenceViewKind = "approval"
+	InvestigationEvidenceViewKindDelegation InvestigationEvidenceViewKind = "delegation"
+	InvestigationEvidenceViewKindRun        InvestigationEvidenceViewKind = "run"
+	InvestigationEvidenceViewKindSpan       InvestigationEvidenceViewKind = "span"
+	InvestigationEvidenceViewKindStep       InvestigationEvidenceViewKind = "step"
+	InvestigationEvidenceViewKindTask       InvestigationEvidenceViewKind = "task"
+)
+
+// Valid indicates whether the value is a known member of the InvestigationEvidenceViewKind enum.
+func (e InvestigationEvidenceViewKind) Valid() bool {
+	switch e {
+	case InvestigationEvidenceViewKindApproval:
+		return true
+	case InvestigationEvidenceViewKindDelegation:
+		return true
+	case InvestigationEvidenceViewKindRun:
+		return true
+	case InvestigationEvidenceViewKindSpan:
+		return true
+	case InvestigationEvidenceViewKindStep:
+		return true
+	case InvestigationEvidenceViewKindTask:
 		return true
 	default:
 		return false
@@ -3534,19 +4137,19 @@ func (e MCPToolCallResponseDebitState) Valid() bool {
 
 // Defines values for MCPToolCallResponsePricingState.
 const (
-	Free     MCPToolCallResponsePricingState = "free"
-	Priced   MCPToolCallResponsePricingState = "priced"
-	Unpriced MCPToolCallResponsePricingState = "unpriced"
+	MCPToolCallResponsePricingStateFree     MCPToolCallResponsePricingState = "free"
+	MCPToolCallResponsePricingStatePriced   MCPToolCallResponsePricingState = "priced"
+	MCPToolCallResponsePricingStateUnpriced MCPToolCallResponsePricingState = "unpriced"
 )
 
 // Valid indicates whether the value is a known member of the MCPToolCallResponsePricingState enum.
 func (e MCPToolCallResponsePricingState) Valid() bool {
 	switch e {
-	case Free:
+	case MCPToolCallResponsePricingStateFree:
 		return true
-	case Priced:
+	case MCPToolCallResponsePricingStatePriced:
 		return true
-	case Unpriced:
+	case MCPToolCallResponsePricingStateUnpriced:
 		return true
 	default:
 		return false
@@ -3709,6 +4312,129 @@ func (e MFAVerificationRequestMethod) Valid() bool {
 	case MFAVerificationRequestMethodTotp:
 		return true
 	case MFAVerificationRequestMethodWebauthn:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ManagedRunEvidenceEvidenceOrigin.
+const (
+	ManagedRunEvidenceEvidenceOriginGatewayObserved ManagedRunEvidenceEvidenceOrigin = "gateway_observed"
+)
+
+// Valid indicates whether the value is a known member of the ManagedRunEvidenceEvidenceOrigin enum.
+func (e ManagedRunEvidenceEvidenceOrigin) Valid() bool {
+	switch e {
+	case ManagedRunEvidenceEvidenceOriginGatewayObserved:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ManagedRunEvidenceEventStream.
+const (
+	ManagedRunEvidenceEventStreamRuns ManagedRunEvidenceEventStream = "runs"
+)
+
+// Valid indicates whether the value is a known member of the ManagedRunEvidenceEventStream enum.
+func (e ManagedRunEvidenceEventStream) Valid() bool {
+	switch e {
+	case ManagedRunEvidenceEventStreamRuns:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ManagedRunEvidenceEventVersion.
+const (
+	ManagedRunEvidenceEventVersionN1 ManagedRunEvidenceEventVersion = 1
+)
+
+// Valid indicates whether the value is a known member of the ManagedRunEvidenceEventVersion enum.
+func (e ManagedRunEvidenceEventVersion) Valid() bool {
+	switch e {
+	case ManagedRunEvidenceEventVersionN1:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ManagedTraceSpanEvidenceCategory.
+const (
+	ManagedTraceSpanEvidenceCategoryChat           ManagedTraceSpanEvidenceCategory = "chat"
+	ManagedTraceSpanEvidenceCategoryCreateAgent    ManagedTraceSpanEvidenceCategory = "create_agent"
+	ManagedTraceSpanEvidenceCategoryEmbeddings     ManagedTraceSpanEvidenceCategory = "embeddings"
+	ManagedTraceSpanEvidenceCategoryExecuteTool    ManagedTraceSpanEvidenceCategory = "execute_tool"
+	ManagedTraceSpanEvidenceCategoryInvokeAgent    ManagedTraceSpanEvidenceCategory = "invoke_agent"
+	ManagedTraceSpanEvidenceCategoryOther          ManagedTraceSpanEvidenceCategory = "other"
+	ManagedTraceSpanEvidenceCategoryTextCompletion ManagedTraceSpanEvidenceCategory = "text_completion"
+)
+
+// Valid indicates whether the value is a known member of the ManagedTraceSpanEvidenceCategory enum.
+func (e ManagedTraceSpanEvidenceCategory) Valid() bool {
+	switch e {
+	case ManagedTraceSpanEvidenceCategoryChat:
+		return true
+	case ManagedTraceSpanEvidenceCategoryCreateAgent:
+		return true
+	case ManagedTraceSpanEvidenceCategoryEmbeddings:
+		return true
+	case ManagedTraceSpanEvidenceCategoryExecuteTool:
+		return true
+	case ManagedTraceSpanEvidenceCategoryInvokeAgent:
+		return true
+	case ManagedTraceSpanEvidenceCategoryOther:
+		return true
+	case ManagedTraceSpanEvidenceCategoryTextCompletion:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ManagedTraceSpanEvidenceEvidenceOrigin.
+const (
+	ManagedTraceSpanEvidenceEvidenceOriginClientAsserted ManagedTraceSpanEvidenceEvidenceOrigin = "client_asserted"
+)
+
+// Valid indicates whether the value is a known member of the ManagedTraceSpanEvidenceEvidenceOrigin enum.
+func (e ManagedTraceSpanEvidenceEvidenceOrigin) Valid() bool {
+	switch e {
+	case ManagedTraceSpanEvidenceEvidenceOriginClientAsserted:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ManagedTraceSpanEvidenceEventStream.
+const (
+	ManagedTraceSpanEvidenceEventStreamTraceSpans ManagedTraceSpanEvidenceEventStream = "trace_spans"
+)
+
+// Valid indicates whether the value is a known member of the ManagedTraceSpanEvidenceEventStream enum.
+func (e ManagedTraceSpanEvidenceEventStream) Valid() bool {
+	switch e {
+	case ManagedTraceSpanEvidenceEventStreamTraceSpans:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ManagedTraceSpanEvidenceEventVersion.
+const (
+	ManagedTraceSpanEvidenceEventVersionN1 ManagedTraceSpanEvidenceEventVersion = 1
+)
+
+// Valid indicates whether the value is a known member of the ManagedTraceSpanEvidenceEventVersion enum.
+func (e ManagedTraceSpanEvidenceEventVersion) Valid() bool {
+	switch e {
+	case ManagedTraceSpanEvidenceEventVersionN1:
 		return true
 	default:
 		return false
@@ -3934,6 +4660,129 @@ func (e NotificationEvent) Valid() bool {
 	case NotificationEventRuntimeInstallFailed:
 		return true
 	case NotificationEventWorkerStale:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ObservabilityRunEvidenceEvidenceOrigin.
+const (
+	ObservabilityRunEvidenceEvidenceOriginGatewayObserved ObservabilityRunEvidenceEvidenceOrigin = "gateway_observed"
+)
+
+// Valid indicates whether the value is a known member of the ObservabilityRunEvidenceEvidenceOrigin enum.
+func (e ObservabilityRunEvidenceEvidenceOrigin) Valid() bool {
+	switch e {
+	case ObservabilityRunEvidenceEvidenceOriginGatewayObserved:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ObservabilityRunEvidenceEventStream.
+const (
+	ObservabilityRunEvidenceEventStreamRuns ObservabilityRunEvidenceEventStream = "runs"
+)
+
+// Valid indicates whether the value is a known member of the ObservabilityRunEvidenceEventStream enum.
+func (e ObservabilityRunEvidenceEventStream) Valid() bool {
+	switch e {
+	case ObservabilityRunEvidenceEventStreamRuns:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ObservabilityRunEvidenceEventVersion.
+const (
+	ObservabilityRunEvidenceEventVersionN1 ObservabilityRunEvidenceEventVersion = 1
+)
+
+// Valid indicates whether the value is a known member of the ObservabilityRunEvidenceEventVersion enum.
+func (e ObservabilityRunEvidenceEventVersion) Valid() bool {
+	switch e {
+	case ObservabilityRunEvidenceEventVersionN1:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ObservabilityTraceSpanEvidenceCategory.
+const (
+	ObservabilityTraceSpanEvidenceCategoryChat           ObservabilityTraceSpanEvidenceCategory = "chat"
+	ObservabilityTraceSpanEvidenceCategoryCreateAgent    ObservabilityTraceSpanEvidenceCategory = "create_agent"
+	ObservabilityTraceSpanEvidenceCategoryEmbeddings     ObservabilityTraceSpanEvidenceCategory = "embeddings"
+	ObservabilityTraceSpanEvidenceCategoryExecuteTool    ObservabilityTraceSpanEvidenceCategory = "execute_tool"
+	ObservabilityTraceSpanEvidenceCategoryInvokeAgent    ObservabilityTraceSpanEvidenceCategory = "invoke_agent"
+	ObservabilityTraceSpanEvidenceCategoryOther          ObservabilityTraceSpanEvidenceCategory = "other"
+	ObservabilityTraceSpanEvidenceCategoryTextCompletion ObservabilityTraceSpanEvidenceCategory = "text_completion"
+)
+
+// Valid indicates whether the value is a known member of the ObservabilityTraceSpanEvidenceCategory enum.
+func (e ObservabilityTraceSpanEvidenceCategory) Valid() bool {
+	switch e {
+	case ObservabilityTraceSpanEvidenceCategoryChat:
+		return true
+	case ObservabilityTraceSpanEvidenceCategoryCreateAgent:
+		return true
+	case ObservabilityTraceSpanEvidenceCategoryEmbeddings:
+		return true
+	case ObservabilityTraceSpanEvidenceCategoryExecuteTool:
+		return true
+	case ObservabilityTraceSpanEvidenceCategoryInvokeAgent:
+		return true
+	case ObservabilityTraceSpanEvidenceCategoryOther:
+		return true
+	case ObservabilityTraceSpanEvidenceCategoryTextCompletion:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ObservabilityTraceSpanEvidenceEvidenceOrigin.
+const (
+	ObservabilityTraceSpanEvidenceEvidenceOriginClientAsserted ObservabilityTraceSpanEvidenceEvidenceOrigin = "client_asserted"
+)
+
+// Valid indicates whether the value is a known member of the ObservabilityTraceSpanEvidenceEvidenceOrigin enum.
+func (e ObservabilityTraceSpanEvidenceEvidenceOrigin) Valid() bool {
+	switch e {
+	case ObservabilityTraceSpanEvidenceEvidenceOriginClientAsserted:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ObservabilityTraceSpanEvidenceEventStream.
+const (
+	ObservabilityTraceSpanEvidenceEventStreamTraceSpans ObservabilityTraceSpanEvidenceEventStream = "trace_spans"
+)
+
+// Valid indicates whether the value is a known member of the ObservabilityTraceSpanEvidenceEventStream enum.
+func (e ObservabilityTraceSpanEvidenceEventStream) Valid() bool {
+	switch e {
+	case ObservabilityTraceSpanEvidenceEventStreamTraceSpans:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ObservabilityTraceSpanEvidenceEventVersion.
+const (
+	ObservabilityTraceSpanEvidenceEventVersionN1 ObservabilityTraceSpanEvidenceEventVersion = 1
+)
+
+// Valid indicates whether the value is a known member of the ObservabilityTraceSpanEvidenceEventVersion enum.
+func (e ObservabilityTraceSpanEvidenceEventVersion) Valid() bool {
+	switch e {
+	case ObservabilityTraceSpanEvidenceEventVersionN1:
 		return true
 	default:
 		return false
@@ -4249,6 +5098,72 @@ func (e PromptCachePolicyTtl) Valid() bool {
 	case N1h:
 		return true
 	case N5m:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for PromptMessageRole.
+const (
+	PromptMessageRoleAssistant PromptMessageRole = "assistant"
+	PromptMessageRoleSystem    PromptMessageRole = "system"
+	PromptMessageRoleUser      PromptMessageRole = "user"
+)
+
+// Valid indicates whether the value is a known member of the PromptMessageRole enum.
+func (e PromptMessageRole) Valid() bool {
+	switch e {
+	case PromptMessageRoleAssistant:
+		return true
+	case PromptMessageRoleSystem:
+		return true
+	case PromptMessageRoleUser:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for PromptVariablePropertyType.
+const (
+	PromptVariablePropertyTypeString PromptVariablePropertyType = "string"
+)
+
+// Valid indicates whether the value is a known member of the PromptVariablePropertyType enum.
+func (e PromptVariablePropertyType) Valid() bool {
+	switch e {
+	case PromptVariablePropertyTypeString:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for PromptVariableSchemaAdditionalProperties.
+const (
+	False PromptVariableSchemaAdditionalProperties = false
+)
+
+// Valid indicates whether the value is a known member of the PromptVariableSchemaAdditionalProperties enum.
+func (e PromptVariableSchemaAdditionalProperties) Valid() bool {
+	switch e {
+	case False:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for PromptVariableSchemaType.
+const (
+	PromptVariableSchemaTypeObject PromptVariableSchemaType = "object"
+)
+
+// Valid indicates whether the value is a known member of the PromptVariableSchemaType enum.
+func (e PromptVariableSchemaType) Valid() bool {
+	switch e {
+	case PromptVariableSchemaTypeObject:
 		return true
 	default:
 		return false
@@ -4624,6 +5539,60 @@ func (e ProvisionUserRequestRole) Valid() bool {
 	}
 }
 
+// Defines values for PutBillingImportRequestCredential1AuthMode.
+const (
+	PutBillingImportRequestCredential1AuthModeStatic   PutBillingImportRequestCredential1AuthMode = "static"
+	PutBillingImportRequestCredential1AuthModeWorkload PutBillingImportRequestCredential1AuthMode = "workload"
+)
+
+// Valid indicates whether the value is a known member of the PutBillingImportRequestCredential1AuthMode enum.
+func (e PutBillingImportRequestCredential1AuthMode) Valid() bool {
+	switch e {
+	case PutBillingImportRequestCredential1AuthModeStatic:
+		return true
+	case PutBillingImportRequestCredential1AuthModeWorkload:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for PutBillingImportRequestCredential2AuthMode.
+const (
+	PutBillingImportRequestCredential2AuthModeAdc            PutBillingImportRequestCredential2AuthMode = "adc"
+	PutBillingImportRequestCredential2AuthModeServiceAccount PutBillingImportRequestCredential2AuthMode = "service_account"
+)
+
+// Valid indicates whether the value is a known member of the PutBillingImportRequestCredential2AuthMode enum.
+func (e PutBillingImportRequestCredential2AuthMode) Valid() bool {
+	switch e {
+	case PutBillingImportRequestCredential2AuthModeAdc:
+		return true
+	case PutBillingImportRequestCredential2AuthModeServiceAccount:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for PutBillingImportRequestCredential3AuthMode.
+const (
+	PutBillingImportRequestCredential3AuthModeAzureClientSecret PutBillingImportRequestCredential3AuthMode = "azure_client_secret"
+	PutBillingImportRequestCredential3AuthModeAzureDefault      PutBillingImportRequestCredential3AuthMode = "azure_default"
+)
+
+// Valid indicates whether the value is a known member of the PutBillingImportRequestCredential3AuthMode enum.
+func (e PutBillingImportRequestCredential3AuthMode) Valid() bool {
+	switch e {
+	case PutBillingImportRequestCredential3AuthModeAzureClientSecret:
+		return true
+	case PutBillingImportRequestCredential3AuthModeAzureDefault:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for PutProjectMemberRequestRole.
 const (
 	PutProjectMemberRequestRoleManager PutProjectMemberRequestRole = "manager"
@@ -4702,6 +5671,24 @@ func (e ReconciliationReportItemsCaptureRateUnavailableReason) Valid() bool {
 	case ReconciliationReportItemsCaptureRateUnavailableReasonNotImported:
 		return true
 	case ReconciliationReportItemsCaptureRateUnavailableReasonZeroInvoice:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ReplaceRouteDraftRequestToolExecution.
+const (
+	ReplaceRouteDraftRequestToolExecutionEmpty   ReplaceRouteDraftRequestToolExecution = ""
+	ReplaceRouteDraftRequestToolExecutionGateway ReplaceRouteDraftRequestToolExecution = "gateway"
+)
+
+// Valid indicates whether the value is a known member of the ReplaceRouteDraftRequestToolExecution enum.
+func (e ReplaceRouteDraftRequestToolExecution) Valid() bool {
+	switch e {
+	case ReplaceRouteDraftRequestToolExecutionEmpty:
+		return true
+	case ReplaceRouteDraftRequestToolExecutionGateway:
 		return true
 	default:
 		return false
@@ -5113,6 +6100,24 @@ func (e RouteBehaviorCertification) Valid() bool {
 	}
 }
 
+// Defines values for RouteBehaviorToolExecution.
+const (
+	RouteBehaviorToolExecutionEmpty   RouteBehaviorToolExecution = ""
+	RouteBehaviorToolExecutionGateway RouteBehaviorToolExecution = "gateway"
+)
+
+// Valid indicates whether the value is a known member of the RouteBehaviorToolExecution enum.
+func (e RouteBehaviorToolExecution) Valid() bool {
+	switch e {
+	case RouteBehaviorToolExecutionEmpty:
+		return true
+	case RouteBehaviorToolExecutionGateway:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for RouteDetailResponseState.
 const (
 	RouteDetailResponseStateActive  RouteDetailResponseState = "active"
@@ -5143,6 +6148,24 @@ func (e RouteDraftDetailResponseCertification) Valid() bool {
 	case RouteDraftDetailResponseCertificationCertified:
 		return true
 	case RouteDraftDetailResponseCertificationUncertified:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for RouteDraftDetailResponseToolExecution.
+const (
+	RouteDraftDetailResponseToolExecutionEmpty   RouteDraftDetailResponseToolExecution = ""
+	RouteDraftDetailResponseToolExecutionGateway RouteDraftDetailResponseToolExecution = "gateway"
+)
+
+// Valid indicates whether the value is a known member of the RouteDraftDetailResponseToolExecution enum.
+func (e RouteDraftDetailResponseToolExecution) Valid() bool {
+	switch e {
+	case RouteDraftDetailResponseToolExecutionEmpty:
+		return true
+	case RouteDraftDetailResponseToolExecutionGateway:
 		return true
 	default:
 		return false
@@ -5197,6 +6220,24 @@ func (e RouteRevisionResponseCertification) Valid() bool {
 	case RouteRevisionResponseCertificationCertified:
 		return true
 	case RouteRevisionResponseCertificationUncertified:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for RouteRevisionResponseToolExecution.
+const (
+	RouteRevisionResponseToolExecutionEmpty   RouteRevisionResponseToolExecution = ""
+	RouteRevisionResponseToolExecutionGateway RouteRevisionResponseToolExecution = "gateway"
+)
+
+// Valid indicates whether the value is a known member of the RouteRevisionResponseToolExecution enum.
+func (e RouteRevisionResponseToolExecution) Valid() bool {
+	switch e {
+	case RouteRevisionResponseToolExecutionEmpty:
+		return true
+	case RouteRevisionResponseToolExecutionGateway:
 		return true
 	default:
 		return false
@@ -5593,6 +6634,8 @@ const (
 	SinkResponseStreamsAudit              SinkResponseStreams = "audit"
 	SinkResponseStreamsGuardrailDecisions SinkResponseStreams = "guardrail_decisions"
 	SinkResponseStreamsRequests           SinkResponseStreams = "requests"
+	SinkResponseStreamsRuns               SinkResponseStreams = "runs"
+	SinkResponseStreamsTraceSpans         SinkResponseStreams = "trace_spans"
 )
 
 // Valid indicates whether the value is a known member of the SinkResponseStreams enum.
@@ -5605,6 +6648,10 @@ func (e SinkResponseStreams) Valid() bool {
 	case SinkResponseStreamsGuardrailDecisions:
 		return true
 	case SinkResponseStreamsRequests:
+		return true
+	case SinkResponseStreamsRuns:
+		return true
+	case SinkResponseStreamsTraceSpans:
 		return true
 	default:
 		return false
@@ -5827,12 +6874,32 @@ func (e UpdateNotificationDestinationRequestType) Valid() bool {
 	}
 }
 
+// Defines values for UpdatePublishedRouteRequestToolExecution.
+const (
+	UpdatePublishedRouteRequestToolExecutionEmpty   UpdatePublishedRouteRequestToolExecution = ""
+	UpdatePublishedRouteRequestToolExecutionGateway UpdatePublishedRouteRequestToolExecution = "gateway"
+)
+
+// Valid indicates whether the value is a known member of the UpdatePublishedRouteRequestToolExecution enum.
+func (e UpdatePublishedRouteRequestToolExecution) Valid() bool {
+	switch e {
+	case UpdatePublishedRouteRequestToolExecutionEmpty:
+		return true
+	case UpdatePublishedRouteRequestToolExecutionGateway:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for UpdateSinkRequestStreams.
 const (
 	UpdateSinkRequestStreamsAttempts           UpdateSinkRequestStreams = "attempts"
 	UpdateSinkRequestStreamsAudit              UpdateSinkRequestStreams = "audit"
 	UpdateSinkRequestStreamsGuardrailDecisions UpdateSinkRequestStreams = "guardrail_decisions"
 	UpdateSinkRequestStreamsRequests           UpdateSinkRequestStreams = "requests"
+	UpdateSinkRequestStreamsRuns               UpdateSinkRequestStreams = "runs"
+	UpdateSinkRequestStreamsTraceSpans         UpdateSinkRequestStreams = "trace_spans"
 )
 
 // Valid indicates whether the value is a known member of the UpdateSinkRequestStreams enum.
@@ -5845,6 +6912,10 @@ func (e UpdateSinkRequestStreams) Valid() bool {
 	case UpdateSinkRequestStreamsGuardrailDecisions:
 		return true
 	case UpdateSinkRequestStreamsRequests:
+		return true
+	case UpdateSinkRequestStreamsRuns:
+		return true
+	case UpdateSinkRequestStreamsTraceSpans:
 		return true
 	default:
 		return false
@@ -6274,6 +7345,134 @@ func (e ExportUsageCsvParamsDimension) Valid() bool {
 	}
 }
 
+// A2ARemoteTask defines model for A2ARemoteTask.
+type A2ARemoteTask struct {
+	Artifacts *[]map[string]interface{} `json:"artifacts,omitempty"`
+
+	// ContextId OLP task context ID
+	ContextId openapi_types.UUID        `json:"contextId"`
+	History   *[]map[string]interface{} `json:"history,omitempty"`
+
+	// Id OLP task ID
+	Id       openapi_types.UUID      `json:"id"`
+	Metadata *map[string]interface{} `json:"metadata,omitempty"`
+	Status   struct {
+		Message   *map[string]interface{} `json:"message,omitempty"`
+		State     string                  `json:"state"`
+		Timestamp *time.Time              `json:"timestamp,omitempty"`
+	} `json:"status"`
+}
+
+// A2ATask Content-free remote task metadata.
+type A2ATask struct {
+	AgentPrincipalId nullable.Nullable[openapi_types.UUID] `json:"agent_principal_id"`
+	ApiKeyId         openapi_types.UUID                    `json:"api_key_id"`
+
+	// CallbackAttempts Admitted callbacks, or null for tasks created before callback counts were recorded.
+	CallbackAttempts nullable.Nullable[int] `json:"callback_attempts"`
+	CreatedAt        time.Time              `json:"created_at"`
+	DeadlineAt       time.Time              `json:"deadline_at"`
+
+	// DelegationPairId Stable, project-scoped pair identifier, or null for an undelegated task.
+	DelegationPairId  nullable.Nullable[string]             `json:"delegation_pair_id"`
+	Id                openapi_types.UUID                    `json:"id"`
+	MemberPrincipalId nullable.Nullable[openapi_types.UUID] `json:"member_principal_id"`
+	ProjectId         openapi_types.UUID                    `json:"project_id"`
+	PublicationId     openapi_types.UUID                    `json:"publication_id"`
+	RevisionId        openapi_types.UUID                    `json:"revision_id"`
+	State             A2ATaskState                          `json:"state"`
+}
+
+// A2ATaskState defines model for A2ATask.State.
+type A2ATaskState string
+
+// A2ATaskDetail Content-free task and associated remote message fees.
+type A2ATaskDetail struct {
+	AgentPrincipalId nullable.Nullable[openapi_types.UUID] `json:"agent_principal_id"`
+	ApiKeyId         openapi_types.UUID                    `json:"api_key_id"`
+
+	// CallbackAttempts Admitted callbacks, or null for tasks created before callback counts were recorded.
+	CallbackAttempts nullable.Nullable[int] `json:"callback_attempts"`
+	CallbackModels   []A2ATaskModelCallback `json:"callback_models"`
+	CallbackTools    []A2ATaskToolCallback  `json:"callback_tools"`
+	CreatedAt        time.Time              `json:"created_at"`
+	DeadlineAt       time.Time              `json:"deadline_at"`
+
+	// DelegationPairId Stable, project-scoped pair identifier, or null for an undelegated task.
+	DelegationPairId  nullable.Nullable[string]             `json:"delegation_pair_id"`
+	Id                openapi_types.UUID                    `json:"id"`
+	MemberPrincipalId nullable.Nullable[openapi_types.UUID] `json:"member_principal_id"`
+	ProjectId         openapi_types.UUID                    `json:"project_id"`
+	PublicationId     openapi_types.UUID                    `json:"publication_id"`
+	RemoteFees        []A2ATaskRemoteFee                    `json:"remote_fees"`
+	RevisionId        openapi_types.UUID                    `json:"revision_id"`
+	State             A2ATaskDetailState                    `json:"state"`
+}
+
+// A2ATaskDetailState defines model for A2ATaskDetail.State.
+type A2ATaskDetailState string
+
+// A2ATaskList defines model for A2ATaskList.
+type A2ATaskList struct {
+	Items      []A2ATask                 `json:"items"`
+	NextCursor nullable.Nullable[string] `json:"next_cursor"`
+}
+
+// A2ATaskModelCallback Content-free callback accounting; null amounts are unknown.
+type A2ATaskModelCallback struct {
+	AttemptId       nullable.Nullable[openapi_types.UUID] `json:"attempt_id"`
+	Currency        nullable.Nullable[string]             `json:"currency"`
+	ObservedCharge  nullable.Nullable[string]             `json:"observed_charge"`
+	ObservedCost    nullable.Nullable[string]             `json:"observed_cost"`
+	RemainingCharge nullable.Nullable[string]             `json:"remaining_charge"`
+	RemainingCost   nullable.Nullable[string]             `json:"remaining_cost"`
+	RequestId       openapi_types.UUID                    `json:"request_id"`
+	State           A2ATaskModelCallbackState             `json:"state"`
+}
+
+// A2ATaskModelCallbackState defines model for A2ATaskModelCallback.State.
+type A2ATaskModelCallbackState string
+
+// A2ATaskRemoteFee A remote message fee and its unresolved exposure.
+type A2ATaskRemoteFee struct {
+	CreatedAt       time.Time          `json:"created_at"`
+	Currency        string             `json:"currency"`
+	DispatchId      openapi_types.UUID `json:"dispatch_id"`
+	ObservedCharge  string             `json:"observed_charge"`
+	ObservedCost    string             `json:"observed_cost"`
+	RemainingCharge string             `json:"remaining_charge"`
+	RemainingCost   string             `json:"remaining_cost"`
+	RunId           openapi_types.UUID `json:"run_id"`
+	State           string             `json:"state"`
+}
+
+// A2ATaskToolCallback Content-free callback accounting; null amounts are unknown.
+type A2ATaskToolCallback struct {
+	Currency        string                          `json:"currency"`
+	DispatchId      openapi_types.UUID              `json:"dispatch_id"`
+	ObservedCharge  nullable.Nullable[string]       `json:"observed_charge"`
+	ObservedCost    nullable.Nullable[string]       `json:"observed_cost"`
+	PricingState    A2ATaskToolCallbackPricingState `json:"pricing_state"`
+	RemainingCharge nullable.Nullable[string]       `json:"remaining_charge"`
+	RemainingCost   nullable.Nullable[string]       `json:"remaining_cost"`
+	RunId           openapi_types.UUID              `json:"run_id"`
+	State           string                          `json:"state"`
+}
+
+// A2ATaskToolCallbackPricingState defines model for A2ATaskToolCallback.PricingState.
+type A2ATaskToolCallbackPricingState string
+
+// AWSBillingScope defines model for AWSBillingScope.
+type AWSBillingScope struct {
+	Bucket           string    `json:"bucket"`
+	LinkedAccountIds *[]string `json:"linked_account_ids,omitempty"`
+	PayerAccountId   string    `json:"payer_account_id"`
+	Region           string    `json:"region"`
+
+	// ReportPrefix CUR report prefix including the report name
+	ReportPrefix string `json:"report_prefix"`
+}
+
 // AcceptCatalogSuggestionsRequest defines model for AcceptCatalogSuggestionsRequest.
 type AcceptCatalogSuggestionsRequest struct {
 	// CatalogSha256 Digest of the catalog the suggestions were reviewed against; a different catalog answers 409.
@@ -6293,18 +7492,71 @@ type AdmissionPriority string
 
 // AgentDefinition defines model for AgentDefinition.
 type AgentDefinition struct {
-	CardDigest        string                  `json:"card_digest"`
-	CredentialId      *openapi_types.UUID     `json:"credential_id,omitempty"`
-	Endpoint          string                  `json:"endpoint"`
-	MaxCost           string                  `json:"max_cost"`
-	PricingRevisionId openapi_types.UUID      `json:"pricing_revision_id"`
-	Protocol          AgentDefinitionProtocol `json:"protocol"`
-	RouteRevisions    []openapi_types.UUID    `json:"route_revisions"`
-	ToolsetRevisions  []openapi_types.UUID    `json:"toolset_revisions"`
+	// CardDigest SHA-256 digest of the reviewed agent card. An OAuth agent's card must be publicly readable for publication and discovery. Task requests use the caller's grant.
+	CardDigest   string              `json:"card_digest"`
+	CredentialId *openapi_types.UUID `json:"credential_id,omitempty"`
+	Endpoint     string              `json:"endpoint"`
+	MaxCost      string              `json:"max_cost"`
+
+	// MaxTaskContinuations Maximum observed continuations per task. Defaults to 32.
+	MaxTaskContinuations *int    `json:"max_task_continuations,omitempty"`
+	MessagePrice         *string `json:"message_price,omitempty"`
+
+	// Oauth OAuth grants are bound to the approved agent endpoint and caller identity. Browser and device flows use personal enrollment. Entra OBO uses verified workload assertions and a sealed middle-tier client secret.
+	Oauth             nullable.Nullable[AgentOAuthConfiguration] `json:"oauth,omitempty"`
+	PricingRevisionId openapi_types.UUID                         `json:"pricing_revision_id"`
+	Protocol          AgentDefinitionProtocol                    `json:"protocol"`
+
+	// RemoteWorkBoundSeconds The agent's declared maximum duration for remote work on one task, in seconds. Required for budgeted calls and enforced by the agent.
+	RemoteWorkBoundSeconds *int                 `json:"remote_work_bound_seconds,omitempty"`
+	RouteRevisions         []openapi_types.UUID `json:"route_revisions"`
+
+	// TaskDeadlineSeconds Maximum gateway task duration in seconds. Defaults to 600.
+	TaskDeadlineSeconds *int                 `json:"task_deadline_seconds,omitempty"`
+	ToolsetRevisions    []openapi_types.UUID `json:"toolset_revisions"`
 }
 
 // AgentDefinitionProtocol defines model for AgentDefinition.Protocol.
 type AgentDefinitionProtocol string
+
+// AgentDelegation Content-free delegation principals, revocation and pair budget.
+type AgentDelegation struct {
+	AgentId         openapi_types.UUID              `json:"agent_id"`
+	AgentRevokedAt  nullable.Nullable[time.Time]    `json:"agent_revoked_at"`
+	ApiKeyId        openapi_types.UUID              `json:"api_key_id"`
+	ApiKeyRevokedAt nullable.Nullable[time.Time]    `json:"api_key_revoked_at"`
+	Budget          AggregateBudgetUsage            `json:"budget"`
+	BudgetPolicy    nullable.Nullable[BudgetPolicy] `json:"budget_policy"`
+	ConsentPending  bool                            `json:"consent_pending"`
+	ConsumedAt      nullable.Nullable[time.Time]    `json:"consumed_at"`
+	ExpiresAt       time.Time                       `json:"expires_at"`
+	Id              openapi_types.UUID              `json:"id"`
+
+	// MemberAuthorized Current authority of the consenting member, or null for key delegation.
+	MemberAuthorized nullable.Nullable[bool]               `json:"member_authorized"`
+	MemberId         nullable.Nullable[openapi_types.UUID] `json:"member_id"`
+	ProjectId        openapi_types.UUID                    `json:"project_id"`
+	RevokedAt        nullable.Nullable[time.Time]          `json:"revoked_at"`
+}
+
+// AgentDelegationList defines model for AgentDelegationList.
+type AgentDelegationList struct {
+	Items      []AgentDelegation         `json:"items"`
+	NextCursor nullable.Nullable[string] `json:"next_cursor"`
+}
+
+// AgentOAuthConfiguration OAuth grants are bound to the approved agent endpoint and caller identity. Browser and device flows use personal enrollment. Entra OBO uses verified workload assertions and a sealed middle-tier client secret.
+type AgentOAuthConfiguration struct {
+	Audience string `json:"audience"`
+
+	// AuthorizationEndpoint Required for browser and device OAuth.
+	AuthorizationEndpoint       *string      `json:"authorization_endpoint,omitempty"`
+	ClientId                    string       `json:"client_id"`
+	DeviceAuthorizationEndpoint *string      `json:"device_authorization_endpoint,omitempty"`
+	EntraObo                    *MCPEntraOBO `json:"entra_obo,omitempty"`
+	Scopes                      []string     `json:"scopes"`
+	TokenEndpoint               string       `json:"token_endpoint"`
+}
 
 // AgentPublication defines model for AgentPublication.
 type AgentPublication struct {
@@ -6328,8 +7580,10 @@ type AgentPublicationDraft struct {
 
 	// ProjectId Required owning UUID in management writes. Configuration promotion rebinds this field from its explicit project name.
 	ProjectId openapi_types.UUID `json:"project_id"`
-	Prompt    *PromptDefinition  `json:"prompt,omitempty"`
-	Toolset   *ToolsetDefinition `json:"toolset,omitempty"`
+
+	// Prompt Use template and variables for a single user message, or messages and variable_schema for a structured prompt.
+	Prompt  *PromptDefinition  `json:"prompt,omitempty"`
+	Toolset *ToolsetDefinition `json:"toolset,omitempty"`
 }
 
 // AgentPublicationList defines model for AgentPublicationList.
@@ -6376,20 +7630,126 @@ type AgentPublicationWrite struct {
 
 	// Credential Bearer credential; absent preserves, null removes. Never returned.
 	Credential nullable.Nullable[string] `json:"credential,omitempty"`
-	Name       string                    `json:"name"`
-	ProjectId  openapi_types.UUID        `json:"project_id"`
-	Prompt     *PromptDefinition         `json:"prompt,omitempty"`
-	Toolset    *ToolsetDefinition        `json:"toolset,omitempty"`
+
+	// EntraClientSecret Replacement Entra OBO middle-tier client secret. Required when enabling Entra or changing the issuer, client ID, or token endpoint. Never returned.
+	EntraClientSecret *string            `json:"entra_client_secret,omitempty"`
+	Name              string             `json:"name"`
+	ProjectId         openapi_types.UUID `json:"project_id"`
+
+	// Prompt Use template and variables for a single user message, or messages and variable_schema for a structured prompt.
+	Prompt  *PromptDefinition  `json:"prompt,omitempty"`
+	Toolset *ToolsetDefinition `json:"toolset,omitempty"`
 }
+
+// AgentRun Content-free gateway run metadata.
+type AgentRun struct {
+	ApiKeyId        openapi_types.UUID                    `json:"api_key_id"`
+	CreatedAt       time.Time                             `json:"created_at"`
+	Id              openapi_types.UUID                    `json:"id"`
+	ProjectId       openapi_types.UUID                    `json:"project_id"`
+	RevisionId      nullable.Nullable[openapi_types.UUID] `json:"revision_id"`
+	RouteRevisionId nullable.Nullable[openapi_types.UUID] `json:"route_revision_id"`
+}
+
+// AgentRunApproval Approval metadata without tokens or content.
+type AgentRunApproval struct {
+	ConsumedAt nullable.Nullable[time.Time]          `json:"consumed_at"`
+	DispatchId nullable.Nullable[openapi_types.UUID] `json:"dispatch_id"`
+	ExpiresAt  time.Time                             `json:"expires_at"`
+	Id         openapi_types.UUID                    `json:"id"`
+}
+
+// AgentRunDetail defines model for AgentRunDetail.
+type AgentRunDetail struct {
+	ApiKeyId        openapi_types.UUID                    `json:"api_key_id"`
+	Approvals       []AgentRunApproval                    `json:"approvals"`
+	CreatedAt       time.Time                             `json:"created_at"`
+	Id              openapi_types.UUID                    `json:"id"`
+	ProjectId       openapi_types.UUID                    `json:"project_id"`
+	RevisionId      nullable.Nullable[openapi_types.UUID] `json:"revision_id"`
+	RouteRevisionId nullable.Nullable[openapi_types.UUID] `json:"route_revision_id"`
+	Steps           []AgentRunStep                        `json:"steps"`
+}
+
+// AgentRunList defines model for AgentRunList.
+type AgentRunList struct {
+	Items      []AgentRun                `json:"items"`
+	NextCursor nullable.Nullable[string] `json:"next_cursor"`
+}
+
+// AgentRunSpan Correlated span metadata without messages, arguments, results or rendered prompts.
+type AgentRunSpan struct {
+	AttemptId    nullable.Nullable[openapi_types.UUID] `json:"attempt_id"`
+	Category     string                                `json:"category"`
+	EndedNanos   string                                `json:"ended_nanos"`
+	Id           openapi_types.UUID                    `json:"id"`
+	ParentSpanId nullable.Nullable[string]             `json:"parent_span_id"`
+	ReceivedAt   time.Time                             `json:"received_at"`
+	SpanId       string                                `json:"span_id"`
+	StartedNanos string                                `json:"started_nanos"`
+	Status       int                                   `json:"status"`
+	TraceId      string                                `json:"trace_id"`
+}
+
+// AgentRunSpanList Correlated spans, ordered by start time and ID from newest to oldest.
+type AgentRunSpanList struct {
+	Items      []AgentRunSpan            `json:"items"`
+	NextCursor nullable.Nullable[string] `json:"next_cursor"`
+}
+
+// AgentRunStep A step and its dispatch attempt. Remaining amounts are unresolved exposure, not charges.
+type AgentRunStep struct {
+	BoundViolation bool               `json:"bound_violation"`
+	ChargeBound    string             `json:"charge_bound"`
+	CostBound      string             `json:"cost_bound"`
+	CreatedAt      time.Time          `json:"created_at"`
+	Currency       string             `json:"currency"`
+	DispatchId     openapi_types.UUID `json:"dispatch_id"`
+	Id             openapi_types.UUID `json:"id"`
+	Kind           AgentRunStepKind   `json:"kind"`
+	ObservedCharge string             `json:"observed_charge"`
+	ObservedCost   string             `json:"observed_cost"`
+	Ordinal        int                `json:"ordinal"`
+
+	// PricingState Recorded tool pricing state; unpriced amounts are unknown.
+	PricingState    nullable.Nullable[AgentRunStepPricingState] `json:"pricing_state"`
+	RemainingCharge string                                      `json:"remaining_charge"`
+	RemainingCost   string                                      `json:"remaining_cost"`
+	State           AgentRunStepState                           `json:"state"`
+
+	// ToolAlias Recorded tool alias, if a tool call exists.
+	ToolAlias nullable.Nullable[string] `json:"tool_alias"`
+
+	// ToolIsError Whether the tool returned an error result.
+	ToolIsError nullable.Nullable[bool] `json:"tool_is_error"`
+
+	// ToolStatus Recorded tool call execution status.
+	ToolStatus nullable.Nullable[string] `json:"tool_status"`
+}
+
+// AgentRunStepKind defines model for AgentRunStep.Kind.
+type AgentRunStepKind string
+
+// AgentRunStepPricingState Recorded tool pricing state; unpriced amounts are unknown.
+type AgentRunStepPricingState string
+
+// AgentRunStepState defines model for AgentRunStep.State.
+type AgentRunStepState string
 
 // AgentToolPin defines model for AgentToolPin.
 type AgentToolPin struct {
-	Alias         string             `json:"alias"`
-	CatalogDigest string             `json:"catalog_digest"`
-	Name          string             `json:"name"`
-	RevisionId    openapi_types.UUID `json:"revision_id"`
-	ServerId      openapi_types.UUID `json:"server_id"`
+	Alias         string `json:"alias"`
+	CatalogDigest string `json:"catalog_digest"`
+
+	// Classification Operator classification of a published tool. Unclassified tools require approval.
+	Classification *AgentToolPinClassification `json:"classification,omitempty"`
+	Name           string                      `json:"name"`
+	RevisionId     openapi_types.UUID          `json:"revision_id"`
+	ServerId       openapi_types.UUID          `json:"server_id"`
 }
+
+// AgentToolPinClassification Operator classification of a published tool. Unclassified tools require approval.
+type AgentToolPinClassification string
 
 // AggregateBudget defines model for AggregateBudget.
 type AggregateBudget struct {
@@ -6422,6 +7782,15 @@ type AggregateBudgetUsage struct {
 
 // AggregateBudgetUsageCostBasis The measure accrued expresses.
 type AggregateBudgetUsageCostBasis string
+
+// AntigravityCredentialImportRequest defines model for AntigravityCredentialImportRequest.
+type AntigravityCredentialImportRequest struct {
+	// Credentials One-time Antigravity migration JSON with type=antigravity, access_token, refresh_token, client_id and client_secret for the original authorized OAuth client. The client_id must match the provider option. Optional pinned export metadata is expired (RFC3339), expires_in, timestamp, email and project_id. Supplied expiry must be current and supplied project_id must agree with authenticated project evidence. Email never establishes identity. Unknown fields, ambiguous JSON, raw IDE stores, service accounts and credentials without original client authorization are unsupported. The original access token must authenticate fixed userinfo and project endpoints. Import refreshes and verifies the same subject and project before encrypted staging.
+	Credentials *string `json:"credentials,omitempty"`
+
+	// SlotId Existing credential slot, defaults to the default slot
+	SlotId *openapi_types.UUID `json:"slot_id,omitempty"`
+}
 
 // ApiKeyBudgetResponse defines model for ApiKeyBudgetResponse.
 type ApiKeyBudgetResponse struct {
@@ -6540,6 +7909,7 @@ type ApiKeyDetailResponse struct {
 	// RotationIntervalDays Declared rotation reminder interval from creation or the last explicit rotation. Does not expire or automatically rotate the secret. Null disables rotation reminders.
 	RotationIntervalDays nullable.Nullable[int]               `json:"rotation_interval_days,omitempty"`
 	RouteLimits          nullable.Nullable[ApiKeyRouteLimits] `json:"route_limits,omitempty"`
+	RunLimits            nullable.Nullable[WorkflowRunLimits] `json:"run_limits,omitempty"`
 	Scopes               []string                             `json:"scopes"`
 	TokensPerMinute      nullable.Nullable[int64]             `json:"tokens_per_minute,omitempty"`
 
@@ -6701,6 +8071,7 @@ type AttemptRoutingMetadata struct {
 	Mode               nullable.Nullable[TransportMode]        `json:"mode,omitempty"`
 	Policy             nullable.Nullable[AppliedRoutingPolicy] `json:"policy,omitempty"`
 	PricingRevisionId  nullable.Nullable[openapi_types.UUID]   `json:"pricing_revision_id,omitempty"`
+	Prompt             *PromptAttemptReference                 `json:"prompt,omitempty"`
 	ProviderRevisionId openapi_types.UUID                      `json:"provider_revision_id"`
 
 	// Retry Same-target retry number of this attempt.
@@ -6781,6 +8152,16 @@ type AuthenticationCapabilities struct {
 	SemanticCacheVectorsUnsealed *bool `json:"semantic_cache_vectors_unsealed,omitempty"`
 }
 
+// AzureBillingScope defines model for AzureBillingScope.
+type AzureBillingScope struct {
+	BillingScope    string                `json:"billing_scope"`
+	Container       string                `json:"container"`
+	ExportName      string                `json:"export_name"`
+	Prefix          *string               `json:"prefix,omitempty"`
+	StorageAccount  string                `json:"storage_account"`
+	SubscriptionIds *[]openapi_types.UUID `json:"subscription_ids,omitempty"`
+}
+
 // BTreeMap defines model for BTreeMap.
 type BTreeMap map[string][]struct {
 	Code    string `json:"code"`
@@ -6794,9 +8175,9 @@ type BillingImport struct {
 	Etag                 string             `json:"etag"`
 	ProviderId           openapi_types.UUID `json:"provider_id"`
 
-	// Scope Source-shaped import scope; {} reads the whole organization.
-	Scope  map[string]interface{} `json:"scope"`
-	Source BillingImportSource    `json:"source"`
+	// Scope Source-shaped billing scope. Polling sources accept an empty scope. Cloud sources require their export details.
+	Scope  BillingScope        `json:"scope"`
+	Source BillingImportSource `json:"source"`
 	Status struct {
 		ImportedFrom    nullable.Nullable[openapi_types.Date] `json:"imported_from"`
 		ImportedThrough nullable.Nullable[openapi_types.Date] `json:"imported_through"`
@@ -6806,11 +8187,19 @@ type BillingImport struct {
 		LastImportAt  nullable.Nullable[time.Time] `json:"last_import_at"`
 		LastSuccessAt nullable.Nullable[time.Time] `json:"last_success_at"`
 		NextImportAt  nullable.Nullable[time.Time] `json:"next_import_at"`
+
+		// SourceRevision Identifier of the most recently applied source revision, if the source provides one.
+		SourceRevision nullable.Nullable[string] `json:"source_revision"`
 	} `json:"status"`
 }
 
 // BillingImportSource defines model for BillingImport.Source.
 type BillingImportSource string
+
+// BillingScope Source-shaped billing scope. Polling sources accept an empty scope. Cloud sources require their export details.
+type BillingScope struct {
+	union json.RawMessage
+}
 
 // BudgetGroupBudgetResponse defines model for BudgetGroupBudgetResponse.
 type BudgetGroupBudgetResponse struct {
@@ -7011,6 +8400,9 @@ type CapabilityCertificationItemResponse struct {
 	Operation string                    `json:"operation"`
 	Succeeded bool                      `json:"succeeded"`
 	Surface   string                    `json:"surface"`
+
+	// ToolCalls Whether a separate emitted tool-call probe succeeded.
+	ToolCalls *bool `json:"tool_calls,omitempty"`
 }
 
 // CapabilityCertificationResponse defines model for CapabilityCertificationResponse.
@@ -7038,6 +8430,9 @@ type CapabilityResponse struct {
 	Operation   string                       `json:"operation"`
 	Source      string                       `json:"source"`
 	Surface     string                       `json:"surface"`
+
+	// ToolCalls Whether an emitted tool call was certified for this model capability.
+	ToolCalls *bool `json:"tool_calls,omitempty"`
 }
 
 // CaptureConfiguration defines model for CaptureConfiguration.
@@ -7218,35 +8613,52 @@ type ClassifierPredicate struct {
 	TimeoutMs int64                      `json:"timeout_ms"`
 }
 
+// ClaudeCredentialImportRequest defines model for ClaudeCredentialImportRequest.
+type ClaudeCredentialImportRequest struct {
+	// Credentials Claude Code .credentials.json JSON text containing only claudeAiOauth with accessToken, refreshToken, expiresAt in epoch milliseconds and scopes including user:profile and user:inference. Optional metadata fields are refreshTokenExpiresAt, subscriptionType, subscriptionTypeSource, subscriptionTypeVerifiedAt, rateLimitTier and clientId. A supplied clientId must match the supported official client. Other fields, alternative credential stores and ambiguous JSON are rejected. The original access token must still authenticate the fixed profile endpoint. Import verifies account and organization before and after refresh, without decoding token claims.
+	Credentials *string `json:"credentials,omitempty"`
+
+	// SlotId Existing credential slot, defaults to the default slot
+	SlotId *openapi_types.UUID `json:"slot_id,omitempty"`
+}
+
 // CodeAccount defines model for CodeAccount.
 type CodeAccount struct {
-	// Adapter The subscription family of the account's provider profile: Codex, OpenCode Go, GLM Coding Plan, MiniMax M Plan, Kimi Code or Qwen Token Plan. Null for a profile no code-mode adapter serves. A pool may mix families; each request reaches an account whose family serves its path and model.
+	// Adapter The subscription family of the account's provider profile: Codex, Claude, OpenCode Go, GLM Coding Plan, MiniMax M Plan, Kimi Code or Qwen Token Plan. Null for a profile no code-mode adapter serves. A pool may mix families; each request reaches an account whose family serves its path and model.
 	Adapter      nullable.Nullable[CodeAccountAdapter] `json:"adapter"`
 	Allowance    nullable.Nullable[CodeAllowance]      `json:"allowance"`
 	CredentialId openapi_types.UUID                    `json:"credential_id"`
 	Eligible     bool                                  `json:"eligible"`
 	Enabled      bool                                  `json:"enabled"`
 	Etag         openapi_types.UUID                    `json:"etag"`
-	GrantState   CodeAccountGrantState                 `json:"grant_state"`
-	Health       CodeAccountHealth                     `json:"health"`
-	Id           openapi_types.UUID                    `json:"id"`
-	Models       []string                              `json:"models"`
-	Name         string                                `json:"name"`
-	Principal    string                                `json:"principal"`
-	ProjectId    openapi_types.UUID                    `json:"project_id"`
-	ProviderId   openapi_types.UUID                    `json:"provider_id"`
+
+	// GrantState Grant authority is independent of serving health and allowance. A rejected refresh lapses the grant and requires enrollment again.
+	GrantState CodeAccountGrantState `json:"grant_state"`
+	Health     CodeAccountHealth     `json:"health"`
+
+	// HealthObservedAt Time of the latest serving health observation. Enrollment and refresh do not qualify serving health.
+	HealthObservedAt nullable.Nullable[time.Time] `json:"health_observed_at,omitempty"`
+	Id               openapi_types.UUID           `json:"id"`
+	Models           []string                     `json:"models"`
+	Name             string                       `json:"name"`
+	Principal        string                       `json:"principal"`
+	ProjectId        openapi_types.UUID           `json:"project_id"`
+	ProviderId       openapi_types.UUID           `json:"provider_id"`
 
 	// ResearchEligible Current research enrollment eligibility, independent of inference health and allowance; route pool membership is also required.
 	ResearchEligible *bool `json:"research_eligible,omitempty"`
 
 	// ResearchServices Research services supported by the enrolled profile; also requires research eligibility and route pool membership.
 	ResearchServices *[]CodeAccountResearchServices `json:"research_services,omitempty"`
+
+	// UnavailableUntil End of the serving cooldown. Exhausted allowance and grant authority remain independent eligibility requirements.
+	UnavailableUntil nullable.Nullable[time.Time] `json:"unavailable_until,omitempty"`
 }
 
-// CodeAccountAdapter The subscription family of the account's provider profile: Codex, OpenCode Go, GLM Coding Plan, MiniMax M Plan, Kimi Code or Qwen Token Plan. Null for a profile no code-mode adapter serves. A pool may mix families; each request reaches an account whose family serves its path and model.
+// CodeAccountAdapter The subscription family of the account's provider profile: Codex, Claude, OpenCode Go, GLM Coding Plan, MiniMax M Plan, Kimi Code or Qwen Token Plan. Null for a profile no code-mode adapter serves. A pool may mix families; each request reaches an account whose family serves its path and model.
 type CodeAccountAdapter string
 
-// CodeAccountGrantState defines model for CodeAccount.GrantState.
+// CodeAccountGrantState Grant authority is independent of serving health and allowance. A rejected refresh lapses the grant and requires enrollment again.
 type CodeAccountGrantState string
 
 // CodeAccountHealth defines model for CodeAccount.Health.
@@ -7307,37 +8719,59 @@ type CodeAllowanceWindowWindow string
 
 // CodeAttempt Metadata only. No request or response body, tools, headers or secrets are retained. Reserved tokens are conservative bounds, not reported usage; unreported consumption remains uncertain indefinitely. Cached and reasoning tokens are subsets.
 type CodeAttempt struct {
-	AccountId     openapi_types.UUID        `json:"account_id"`
-	ApiKeyId      openapi_types.UUID        `json:"api_key_id"`
-	Attribution   *map[string]string        `json:"attribution,omitempty"`
-	BindingId     openapi_types.UUID        `json:"binding_id"`
-	BoundEvidence nullable.Nullable[string] `json:"bound_evidence"`
-	CachedTokens  nullable.Nullable[int64]  `json:"cached_tokens"`
-	CreatedAt     time.Time                 `json:"created_at"`
+	AccountId     nullable.Nullable[openapi_types.UUID] `json:"account_id"`
+	ApiKeyId      openapi_types.UUID                    `json:"api_key_id"`
+	Attribution   *map[string]string                    `json:"attribution,omitempty"`
+	BindingId     nullable.Nullable[openapi_types.UUID] `json:"binding_id"`
+	BoundEvidence nullable.Nullable[string]             `json:"bound_evidence"`
+	CachedTokens  nullable.Nullable[int64]              `json:"cached_tokens"`
+
+	// CodexCliIdentityEnabled Whether the frozen route revision enabled Codex CLI identity compatibility. This is route policy, not evidence that an Originator header changed or that this attempt used Codex. No client identity header values or prompt content are recorded.
+	CodexCliIdentityEnabled *bool     `json:"codex_cli_identity_enabled,omitempty"`
+	CreatedAt               time.Time `json:"created_at"`
 
 	// EndUserDigest Project-scoped end-user HMAC, or empty when identification was not configured. Raw identifiers are never retained.
 	EndUserDigest string                       `json:"end_user_digest"`
 	FinishedAt    nullable.Nullable[time.Time] `json:"finished_at"`
 	Id            openapi_types.UUID           `json:"id"`
-	InputTokens   nullable.Nullable[int64]     `json:"input_tokens"`
-	Model         string                       `json:"model"`
+
+	// InitialRecovery The portable initial input permitted recovery when admitted. False also includes historical attempts without that evidence. This does not establish account eligibility or permission to replay.
+	InitialRecovery bool                     `json:"initial_recovery"`
+	InputTokens     nullable.Nullable[int64] `json:"input_tokens"`
+	Model           string                   `json:"model"`
+
+	// Nonexecution A bounded upstream rejection was verified to prove this attempt did not execute. False means nonexecution was not proven.
+	Nonexecution bool `json:"nonexecution"`
 
 	// Operation The operation the request performed: `responses`, `compact` or `prewarm` on the Responses API, `messages` on Anthropic Messages, or `chat` on Chat Completions.
 	Operation string `json:"operation"`
 
 	// Outcome Bounded transport or generation result, independent of usage settlement and durable uncertainty.
-	Outcome           nullable.Nullable[CodeAttemptOutcome]       `json:"outcome"`
-	OutcomeObservedAt nullable.Nullable[time.Time]                `json:"outcome_observed_at"`
-	OutcomeOrigin     nullable.Nullable[CodeAttemptOutcomeOrigin] `json:"outcome_origin"`
-	OutputTokens      nullable.Nullable[int64]                    `json:"output_tokens"`
-	ProjectId         openapi_types.UUID                          `json:"project_id"`
-	ReasoningTokens   nullable.Nullable[int64]                    `json:"reasoning_tokens"`
-	Refusal           nullable.Nullable[string]                   `json:"refusal"`
-	ReportedTokens    nullable.Nullable[int64]                    `json:"reported_tokens"`
-	ReservedTokens    int64                                       `json:"reserved_tokens"`
-	RouteId           openapi_types.UUID                          `json:"route_id"`
-	RouteRevisionId   openapi_types.UUID                          `json:"route_revision_id"`
-	State             CodeAttemptState                            `json:"state"`
+	Outcome           nullable.Nullable[CodeAttemptOutcome]           `json:"outcome"`
+	OutcomeObservedAt nullable.Nullable[time.Time]                    `json:"outcome_observed_at"`
+	OutcomeOrigin     nullable.Nullable[CodeAttemptOutcomeOrigin]     `json:"outcome_origin"`
+	OutputTokens      nullable.Nullable[int64]                        `json:"output_tokens"`
+	PaidBindingId     nullable.Nullable[openapi_types.UUID]           `json:"paid_binding_id,omitempty"`
+	PaidMonetaryState nullable.Nullable[CodeAttemptPaidMonetaryState] `json:"paid_monetary_state,omitempty"`
+	PaidProviderId    nullable.Nullable[openapi_types.UUID]           `json:"paid_provider_id,omitempty"`
+	PaidSlotId        nullable.Nullable[openapi_types.UUID]           `json:"paid_slot_id,omitempty"`
+	ProjectId         openapi_types.UUID                              `json:"project_id"`
+	ReasoningTokens   nullable.Nullable[int64]                        `json:"reasoning_tokens"`
+
+	// RecoveryFrom Prior attempt this admission recovered from, within the same project, route and API key. Null when no visible recovery source was recorded.
+	RecoveryFrom nullable.Nullable[openapi_types.UUID] `json:"recovery_from"`
+
+	// RecoveryReason Reason from the recovery source that durably proved nonexecution. Null means historical evidence is unavailable or no recovery source exists. Never inferred from current account health.
+	RecoveryReason nullable.Nullable[CodeAttemptRecoveryReason] `json:"recovery_reason"`
+	Refusal        nullable.Nullable[string]                    `json:"refusal"`
+	ReportedTokens nullable.Nullable[int64]                     `json:"reported_tokens"`
+
+	// RequestedModel Public model requested before explicit alias resolution.
+	RequestedModel  nullable.Nullable[string] `json:"requested_model,omitempty"`
+	ReservedTokens  int64                     `json:"reserved_tokens"`
+	RouteId         openapi_types.UUID        `json:"route_id"`
+	RouteRevisionId openapi_types.UUID        `json:"route_revision_id"`
+	State           CodeAttemptState          `json:"state"`
 
 	// UpstreamStatus Observed upstream HTTP or WebSocket error status; null when not observed.
 	UpstreamStatus nullable.Nullable[int] `json:"upstream_status"`
@@ -7348,6 +8782,12 @@ type CodeAttemptOutcome string
 
 // CodeAttemptOutcomeOrigin defines model for CodeAttempt.OutcomeOrigin.
 type CodeAttemptOutcomeOrigin string
+
+// CodeAttemptPaidMonetaryState defines model for CodeAttempt.PaidMonetaryState.
+type CodeAttemptPaidMonetaryState string
+
+// CodeAttemptRecoveryReason Reason from the recovery source that durably proved nonexecution. Null means historical evidence is unavailable or no recovery source exists. Never inferred from current account health.
+type CodeAttemptRecoveryReason string
 
 // CodeAttemptState defines model for CodeAttempt.State.
 type CodeAttemptState string
@@ -7360,16 +8800,18 @@ type CodeAttemptList struct {
 
 // CodeBinding Persistent per-key conversation tree identity. Retiring any member retires the whole tree; retirement never permits re-binding to another account. Account and principal are the tree's first account, which later models prefer; pins name the account each model is served from.
 type CodeBinding struct {
-	AccountId    openapi_types.UUID                    `json:"account_id"`
-	ApiKeyId     openapi_types.UUID                    `json:"api_key_id"`
-	Conversation string                                `json:"conversation"`
-	CreatedAt    time.Time                             `json:"created_at"`
-	Id           openapi_types.UUID                    `json:"id"`
-	ParentId     nullable.Nullable[openapi_types.UUID] `json:"parent_id"`
+	AccountId      nullable.Nullable[openapi_types.UUID] `json:"account_id"`
+	ApiKeyId       openapi_types.UUID                    `json:"api_key_id"`
+	Conversation   string                                `json:"conversation"`
+	CreatedAt      time.Time                             `json:"created_at"`
+	Id             openapi_types.UUID                    `json:"id"`
+	PaidProviderId nullable.Nullable[openapi_types.UUID] `json:"paid_provider_id,omitempty"`
+	PaidSlotId     nullable.Nullable[openapi_types.UUID] `json:"paid_slot_id,omitempty"`
+	ParentId       nullable.Nullable[openapi_types.UUID] `json:"parent_id"`
 
 	// Pins The tree's pins, oldest first. A tree's first admission of a model pins an account to it, and the pin never moves.
 	Pins      []CodePin                    `json:"pins"`
-	Principal string                       `json:"principal"`
+	Principal nullable.Nullable[string]    `json:"principal"`
 	ProjectId openapi_types.UUID           `json:"project_id"`
 	RetiredAt nullable.Nullable[time.Time] `json:"retired_at"`
 	RootId    openapi_types.UUID           `json:"root_id"`
@@ -7412,7 +8854,7 @@ type CodeBudgetWrite struct {
 
 // CodeClientConfiguration defines model for CodeClientConfiguration.
 type CodeClientConfiguration struct {
-	// Adapters The subscription families whose accounts serve the client's native models, in display order. A mixed route's configuration draws each model from its own family.
+	// Adapters The subscription families whose accounts serve the client's published models and exact aliases, in display order. A mixed route's configuration draws each model from its own family. Empty for paid-only setup.
 	Adapters []CodeClientConfigurationAdapters `json:"adapters"`
 
 	// AdditionalFiles Companion configuration files required by this setup. Merge entries with existing client settings and MCP servers.
@@ -7424,24 +8866,34 @@ type CodeClientConfiguration struct {
 	ClientVersion string                        `json:"client_version"`
 	Configuration string                        `json:"configuration"`
 
-	// File Where to save the configuration, or null for a shell file to source.
+	// File Where to merge the configuration or save the shell setup. Follow instructions to preserve existing settings.
 	File nullable.Nullable[string] `json:"file"`
 
-	// Format The configuration's format: Codex TOML, a POSIX shell file to source, or OpenCode JSON.
+	// Format Codex TOML, a POSIX shell or PowerShell setup to source, or OpenCode JSON.
 	Format CodeClientConfigurationFormat `json:"format"`
 
-	// Model The native model the client uses for its main conversation.
+	// Instructions Platform-specific setup and merge instructions. Preserve unrelated client settings and retain environment references for credentials.
+	Instructions string `json:"instructions"`
+
+	// Model The published model or exact alias the client uses for its main conversation.
 	Model string `json:"model"`
 
+	// Models The same live route model and protocol catalog returned by the route models endpoint.
+	Models []CodeModel `json:"models"`
+
 	// NativeModels The route's models an adapter supporting the client serves, in route order.
-	NativeModels []string `json:"native_models"`
+	NativeModels []string  `json:"native_models"`
+	PaidModels   *[]string `json:"paid_models,omitempty"`
 
-	// PlanModel The native model for planning: Claude Code's plan mode through opusplan and OpenCode's plan agent. It equals model unless another was chosen. Null for Codex.
-	PlanModel         nullable.Nullable[string] `json:"plan_model"`
-	QualificationGaps []string                  `json:"qualification_gaps"`
-	RouteSlug         string                    `json:"route_slug"`
+	// PlanModel The published model or exact alias for planning: Claude Code's plan mode through opusplan and OpenCode's plan agent. It equals model unless another was chosen. Null for Codex.
+	PlanModel nullable.Nullable[string] `json:"plan_model"`
 
-	// SmallModel The native model for background requests: Claude Code's Haiku-class and OpenCode's small model. Null for Codex.
+	// Platform Developer platform for paths and shell syntax. Linux and macOS use POSIX shells, Windows uses PowerShell.
+	Platform          CodeClientPlatform `json:"platform"`
+	QualificationGaps []string           `json:"qualification_gaps"`
+	RouteSlug         string             `json:"route_slug"`
+
+	// SmallModel The published model or exact alias for background requests: Claude Code's Haiku-class and OpenCode's small model. Null for Codex.
 	SmallModel nullable.Nullable[string] `json:"small_model"`
 
 	// SupportedClients The clients the route's adapters have configurations for; the first, a client of the first model's adapter, is the default.
@@ -7454,11 +8906,14 @@ type CodeClientConfigurationAdapters string
 // CodeClientConfigurationClient The client the configuration is for.
 type CodeClientConfigurationClient string
 
-// CodeClientConfigurationFormat The configuration's format: Codex TOML, a POSIX shell file to source, or OpenCode JSON.
+// CodeClientConfigurationFormat Codex TOML, a POSIX shell or PowerShell setup to source, or OpenCode JSON.
 type CodeClientConfigurationFormat string
 
 // CodeClientConfigurationSupportedClients defines model for CodeClientConfiguration.SupportedClients.
 type CodeClientConfigurationSupportedClients string
+
+// CodeClientPlatform Developer platform for paths and shell syntax. Linux and macOS use POSIX shells, Windows uses PowerShell.
+type CodeClientPlatform string
 
 // CodeConfigurationFile defines model for CodeConfigurationFile.
 type CodeConfigurationFile struct {
@@ -7484,24 +8939,71 @@ type CodeCredits struct {
 	Unlimited  bool                      `json:"unlimited"`
 }
 
+// CodeModel A published model currently reachable through eligible accounts in the route pool.
+type CodeModel struct {
+	Capabilities []CodeModelCapability `json:"capabilities"`
+	Clients      []CodeModelClients    `json:"clients"`
+	Id           string                `json:"id"`
+
+	// ModelPool Configured ordered subscription recovery targets for this public model. This is policy metadata, not an availability or portability guarantee. Omitted for exact-model selection.
+	ModelPool *[]string       `json:"model_pool,omitempty"`
+	Object    CodeModelObject `json:"object"`
+
+	// Paid This model has an authorized metered API target, selected directly or through explicit fallback. Paid attempts require monetary admission.
+	Paid *bool `json:"paid,omitempty"`
+}
+
+// CodeModelClients defines model for CodeModel.Clients.
+type CodeModelClients string
+
+// CodeModelObject defines model for CodeModel.Object.
+type CodeModelObject string
+
+// CodeModelCapability defines model for CodeModelCapability.
+type CodeModelCapability struct {
+	Path       string                          `json:"path"`
+	Protocol   CodeModelCapabilityProtocol     `json:"protocol"`
+	Transports []CodeModelCapabilityTransports `json:"transports"`
+}
+
+// CodeModelCapabilityProtocol defines model for CodeModelCapability.Protocol.
+type CodeModelCapabilityProtocol string
+
+// CodeModelCapabilityTransports defines model for CodeModelCapability.Transports.
+type CodeModelCapabilityTransports string
+
+// CodePaidTarget defines model for CodePaidTarget.
+type CodePaidTarget struct {
+	ProviderId openapi_types.UUID `json:"provider_id"`
+	SlotId     openapi_types.UUID `json:"slot_id"`
+}
+
 // CodePin The account a conversation tree serves one model from.
 type CodePin struct {
-	AccountId openapi_types.UUID `json:"account_id"`
-	CreatedAt time.Time          `json:"created_at"`
-	Model     string             `json:"model"`
-	Principal string             `json:"principal"`
+	AccountId      nullable.Nullable[openapi_types.UUID] `json:"account_id"`
+	CreatedAt      time.Time                             `json:"created_at"`
+	Model          string                                `json:"model"`
+	PaidProviderId nullable.Nullable[openapi_types.UUID] `json:"paid_provider_id,omitempty"`
+	PaidSlotId     nullable.Nullable[openapi_types.UUID] `json:"paid_slot_id,omitempty"`
+	Principal      nullable.Nullable[string]             `json:"principal"`
+
+	// TargetModel Durably pinned native model identifier. Existing native pins use their model identifier.
+	TargetModel string `json:"target_model"`
 }
 
 // CodePool defines model for CodePool.
 type CodePool struct {
-	AccountIds  []openapi_types.UUID                  `json:"account_ids"`
-	ApiKeyIds   []openapi_types.UUID                  `json:"api_key_ids"`
-	Etag        openapi_types.UUID                    `json:"etag"`
-	Id          openapi_types.UUID                    `json:"id"`
-	Kind        CodePoolKind                          `json:"kind"`
-	Name        string                                `json:"name"`
-	OwnerUserId nullable.Nullable[openapi_types.UUID] `json:"owner_user_id"`
-	ProjectId   openapi_types.UUID                    `json:"project_id"`
+	AccountIds []openapi_types.UUID `json:"account_ids"`
+
+	// AccountWeights Relative weights keyed by assigned account ID. Omitted accounts use weight 1.
+	AccountWeights map[string]int64                      `json:"account_weights"`
+	ApiKeyIds      []openapi_types.UUID                  `json:"api_key_ids"`
+	Etag           openapi_types.UUID                    `json:"etag"`
+	Id             openapi_types.UUID                    `json:"id"`
+	Kind           CodePoolKind                          `json:"kind"`
+	Name           string                                `json:"name"`
+	OwnerUserId    nullable.Nullable[openapi_types.UUID] `json:"owner_user_id"`
+	ProjectId      openapi_types.UUID                    `json:"project_id"`
 }
 
 // CodePoolKind defines model for CodePool.Kind.
@@ -7515,12 +9017,15 @@ type CodePoolList struct {
 
 // CodePoolWrite defines model for CodePoolWrite.
 type CodePoolWrite struct {
-	AccountIds  []openapi_types.UUID                  `json:"account_ids"`
-	ApiKeyIds   []openapi_types.UUID                  `json:"api_key_ids"`
-	Kind        CodePoolWriteKind                     `json:"kind"`
-	Name        string                                `json:"name"`
-	OwnerUserId nullable.Nullable[openapi_types.UUID] `json:"owner_user_id"`
-	ProjectId   openapi_types.UUID                    `json:"project_id"`
+	AccountIds []openapi_types.UUID `json:"account_ids"`
+
+	// AccountWeights Relative weights keyed by assigned account ID. Omitted accounts use weight 1.
+	AccountWeights *map[string]int64                     `json:"account_weights,omitempty"`
+	ApiKeyIds      []openapi_types.UUID                  `json:"api_key_ids"`
+	Kind           CodePoolWriteKind                     `json:"kind"`
+	Name           string                                `json:"name"`
+	OwnerUserId    nullable.Nullable[openapi_types.UUID] `json:"owner_user_id"`
+	ProjectId      openapi_types.UUID                    `json:"project_id"`
 }
 
 // CodePoolWriteKind defines model for CodePoolWrite.Kind.
@@ -7558,7 +9063,7 @@ type CodeResearchToolsServices string
 type CodeRevision struct {
 	Id openapi_types.UUID `json:"id"`
 
-	// Route Dedicated coding contract. Base path is /code/{slug}; model identifiers remain native. Draft writes do not change the immutable runtime release. Publication does no inference. Enabled is independent of ordinary provider activation.
+	// Route Dedicated coding contract. Base path is /code/{slug}. Native model identifiers remain unchanged by default. Exact aliases require explicit model rewriting. Draft writes do not change the immutable runtime release. Publication does no inference. Enabled is independent of ordinary provider activation.
 	Route CodeRoute `json:"route"`
 }
 
@@ -7568,23 +9073,56 @@ type CodeRevisionList struct {
 	NextCursor nullable.Nullable[string] `json:"next_cursor"`
 }
 
-// CodeRoute Dedicated coding contract. Base path is /code/{slug}; model identifiers remain native. Draft writes do not change the immutable runtime release. Publication does no inference. Enabled is independent of ordinary provider activation.
+// CodeRoute Dedicated coding contract. Base path is /code/{slug}. Native model identifiers remain unchanged by default. Exact aliases require explicit model rewriting. Draft writes do not change the immutable runtime release. Publication does no inference. Enabled is independent of ordinary provider activation.
 type CodeRoute struct {
 	// Adapters The adapters the latest published revision serves, in display order, derived from the provider connections it froze. Together they select the route's ingress paths and supported clients: Codex serves `responses`; OpenCode Go serves `v1/chat/completions`, `v1/messages` and `v1/responses`; GLM Coding Plan, MiniMax M Plan, Kimi Code and Qwen Token Plan serve `v1/messages` and `v1/chat/completions`. Each request reaches an account whose adapter serves its path and that lists its model. Empty before publication or when the revision's accounts name no adapter.
 	Adapters []CodeRouteAdapters `json:"adapters"`
-	Enabled  bool                `json:"enabled"`
-	Etag     openapi_types.UUID  `json:"etag"`
-	Id       openapi_types.UUID  `json:"id"`
+
+	// Aliases Stable public model names mapped directly to one native identifier in models. Requires model_rewriting. Alias chains and native name collisions are rejected. Immutable publications pin these mappings. Repointing an alias affects new conversations. Existing conversations retain their stored exact target while it remains published and authorized.
+	Aliases *map[string]string `json:"aliases,omitempty"`
+
+	// ChatToAntigravity Explicitly allow Chat Completions text and function tools through the internal Antigravity Gemini target over HTTP or SSE. Published revisions pin this policy. Native forwarding remains the default. Client identity and prompts are preserved. Signed thought state, reasoning controls, media and server tools are unsupported. Returned signature state is refused before actionable output rather than discarded. Controlled fixtures do not qualify any current model or live subscription workflow.
+	ChatToAntigravity *bool `json:"chat_to_antigravity,omitempty"`
+
+	// ChatToCodex Explicit Chat text and function tool translation through Codex Responses, disabled by default and pinned by publication. Native forwarding remains the default. Low, medium and high reasoning effort is supported. Required signed reasoning, media, server-owned state and unsupported semantics are refused. Independent Codex identity and model rewriting policies remain separate. Current OpenCode client and live subscription acceptance remain unqualified.
+	ChatToCodex *bool `json:"chat_to_codex,omitempty"`
+
+	// CodexCliIdentity Explicit route-administrator opt-in, disabled by default and independent of protocol translation. On Codex subscription HTTP and WebSocket requests only, fills Originator with codex_cli_rs when every supplied Originator value is absent or blank. Preserves explicit Originator values, User-Agent, all prompts, tools, reasoning, state and other headers. Does not enable translation or prompt changes. Publication freezes the policy. Using subscription accounts through this compatibility identity may violate provider terms and risk account suspension. Review this behavior and risk before enabling and publishing.
+	CodexCliIdentity *bool              `json:"codex_cli_identity,omitempty"`
+	Enabled          bool               `json:"enabled"`
+	Etag             openapi_types.UUID `json:"etag"`
+	Id               openapi_types.UUID `json:"id"`
+
+	// InitialRecoveryAttempts Maximum additional attempts per request for a new or established single-pin root conversation after an adapter proves nonexecution and the complete input is portable. Zero disables recovery. Published revisions pin this policy. Existing children, socket ownership and unresolved attempts prevent migration. Exact models remain the default. Only explicit model_pools authorize model changes. Live authority remains required. Producing-account reference ownership is preserved. Accepted, partial, ambiguous and opaque work never replays.
+	InitialRecoveryAttempts *int `json:"initial_recovery_attempts,omitempty"`
 
 	// MaxBodyBytes Optional ingress limit in bytes. Null inherits installation limits; a route can only lower them. Checks both encoded and decoded JSON, the complete multipart body, and individual client WebSocket messages. Published revisions pin this policy.
-	MaxBodyBytes nullable.Nullable[int]       `json:"max_body_bytes,omitempty"`
-	Models       []string                     `json:"models"`
-	PoolId       openapi_types.UUID           `json:"pool_id"`
-	ProjectId    openapi_types.UUID           `json:"project_id"`
-	PublishedAt  nullable.Nullable[time.Time] `json:"published_at"`
-	Revision     int32                        `json:"revision"`
-	RevisionId   string                       `json:"revision_id"`
-	Slug         string                       `json:"slug"`
+	MaxBodyBytes nullable.Nullable[int] `json:"max_body_bytes,omitempty"`
+
+	// MessagesToCodex Explicitly allow Messages text and tool requests to use Codex subscription accounts through protocol translation. Published revisions pin this policy. Native forwarding remains the default. Translation alone preserves client identity and prompts. Codex identity compatibility requires its separate codex_cli_identity opt-in. Model rewriting requires its separate opt-in. Explicit low, medium and high reasoning effort is supported. Signed thinking, numeric reasoning budgets, beta features and unsupported required semantics are refused before dispatch.
+	MessagesToCodex *bool `json:"messages_to_codex,omitempty"`
+
+	// ModelPools Explicit subscription model recovery pools keyed by a published native name or exact alias. Requires model_rewriting. Each ordered list starts with that name's normal exact target and contains distinct native identifiers from models. Recovery prefers the pinned exact target, then these alternatives, within initial_recovery_attempts and positive nonexecution, portability, live authorization and budget checks. Omitted pools preserve exact selection. Publications freeze the policy. Existing conversations retain their exact target, including after alias changes, while it remains published and authorized. Paid fallback is separately governed.
+	ModelPools *map[string][]string `json:"model_pools,omitempty"`
+
+	// ModelRewriting Explicitly enable model identifier rewriting through exact aliases or configured model_pools. Disabled by default. This policy does not rewrite client identity or prompts.
+	ModelRewriting *bool    `json:"model_rewriting,omitempty"`
+	Models         []string `json:"models"`
+
+	// PaidFallbackTargets Explicit native model to published metered provider and credential slot for subscription-first bounded recovery. Requires paid_participation and positive initial_recovery_attempts. Subscription candidates are preferred. Same-model fallback needs no model pool. Different models require model_rewriting and a model_pool. Proven nonexecution and complete-input portability are required. Direct paid_targets retain precedence and cannot overlap this map. Existing paid owners stay pinned. Unknown paid money remains held against applicable limits.
+	PaidFallbackTargets *map[string]CodePaidTarget `json:"paid_fallback_targets,omitempty"`
+
+	// PaidParticipation Explicitly permit metered API targets. Direct selection and subscription-first fallback require their separate target maps.
+	PaidParticipation *bool `json:"paid_participation,omitempty"`
+
+	// PaidTargets Exact native model to directly selected published metered provider and credential slot. A mapped model takes precedence over subscription accounts.
+	PaidTargets *map[string]CodePaidTarget   `json:"paid_targets,omitempty"`
+	PoolId      openapi_types.UUID           `json:"pool_id"`
+	ProjectId   openapi_types.UUID           `json:"project_id"`
+	PublishedAt nullable.Nullable[time.Time] `json:"published_at"`
+	Revision    int32                        `json:"revision"`
+	RevisionId  string                       `json:"revision_id"`
+	Slug        string                       `json:"slug"`
 
 	// Tools Research subscription binding, frozen at publication. Requires an eligible Z.ai global account in the same project and pool; independent of inference models. Null disables research.
 	Tools nullable.Nullable[CodeResearchTools] `json:"tools,omitempty"`
@@ -7601,14 +9139,46 @@ type CodeRouteList struct {
 
 // CodeRouteWrite defines model for CodeRouteWrite.
 type CodeRouteWrite struct {
-	Enabled bool `json:"enabled"`
+	// Aliases Stable public model names mapped directly to one native identifier in models. Requires model_rewriting. Alias chains and native name collisions are rejected. Immutable publications pin these mappings. Repointing an alias affects new conversations. Existing conversations retain their stored exact target while it remains published and authorized.
+	Aliases *map[string]string `json:"aliases,omitempty"`
+
+	// ChatToAntigravity Explicitly allow Chat Completions text and function tools through the internal Antigravity Gemini target over HTTP or SSE. Published revisions pin this policy. Native forwarding remains the default. Client identity and prompts are preserved. Signed thought state, reasoning controls, media and server tools are unsupported. Returned signature state is refused before actionable output rather than discarded. Controlled fixtures do not qualify any current model or live subscription workflow.
+	ChatToAntigravity *bool `json:"chat_to_antigravity,omitempty"`
+
+	// ChatToCodex Explicit Chat text and function tool translation through Codex Responses, disabled by default and pinned by publication. Native forwarding remains the default. Low, medium and high reasoning effort is supported. Required signed reasoning, media, server-owned state and unsupported semantics are refused. Independent Codex identity and model rewriting policies remain separate. Current OpenCode client and live subscription acceptance remain unqualified.
+	ChatToCodex *bool `json:"chat_to_codex,omitempty"`
+
+	// CodexCliIdentity Explicit route-administrator opt-in, disabled by default and independent of protocol translation. On Codex subscription HTTP and WebSocket requests only, fills Originator with codex_cli_rs when every supplied Originator value is absent or blank. Preserves explicit Originator values, User-Agent, all prompts, tools, reasoning, state and other headers. Does not enable translation or prompt changes. Publication freezes the policy. Using subscription accounts through this compatibility identity may violate provider terms and risk account suspension. Review this behavior and risk before enabling and publishing.
+	CodexCliIdentity *bool `json:"codex_cli_identity,omitempty"`
+	Enabled          bool  `json:"enabled"`
+
+	// InitialRecoveryAttempts Maximum additional attempts per request for a new or established single-pin root conversation after an adapter proves nonexecution and the complete input is portable. Zero disables recovery. Published revisions pin this policy. Existing children, socket ownership and unresolved attempts prevent migration. Exact models remain the default. Only explicit model_pools authorize model changes. Live authority remains required. Producing-account reference ownership is preserved. Accepted, partial, ambiguous and opaque work never replays.
+	InitialRecoveryAttempts *int `json:"initial_recovery_attempts,omitempty"`
 
 	// MaxBodyBytes Optional ingress limit in bytes. Null inherits installation limits; a route can only lower them. Checks both encoded and decoded JSON, the complete multipart body, and individual client WebSocket messages. Published revisions pin this policy.
 	MaxBodyBytes nullable.Nullable[int] `json:"max_body_bytes,omitempty"`
-	Models       []string               `json:"models"`
-	PoolId       openapi_types.UUID     `json:"pool_id"`
-	ProjectId    openapi_types.UUID     `json:"project_id"`
-	Slug         string                 `json:"slug"`
+
+	// MessagesToCodex Explicitly allow Messages text and tool requests to use Codex subscription accounts through protocol translation. Published revisions pin this policy. Native forwarding remains the default. Translation alone preserves client identity and prompts. Codex identity compatibility requires its separate codex_cli_identity opt-in. Model rewriting requires its separate opt-in. Explicit low, medium and high reasoning effort is supported. Signed thinking, numeric reasoning budgets, beta features and unsupported required semantics are refused before dispatch.
+	MessagesToCodex *bool `json:"messages_to_codex,omitempty"`
+
+	// ModelPools Explicit subscription model recovery pools keyed by a published native name or exact alias. Requires model_rewriting. Each ordered list starts with that name's normal exact target and contains distinct native identifiers from models. Recovery prefers the pinned exact target, then these alternatives, within initial_recovery_attempts and positive nonexecution, portability, live authorization and budget checks. Omitted pools preserve exact selection. Publications freeze the policy. Existing conversations retain their exact target, including after alias changes, while it remains published and authorized. Paid fallback is separately governed.
+	ModelPools *map[string][]string `json:"model_pools,omitempty"`
+
+	// ModelRewriting Explicitly enable model identifier rewriting through exact aliases or configured model_pools. Disabled by default. This policy does not rewrite client identity or prompts.
+	ModelRewriting *bool    `json:"model_rewriting,omitempty"`
+	Models         []string `json:"models"`
+
+	// PaidFallbackTargets Explicit native model to published metered provider and credential slot for subscription-first bounded recovery. Requires paid_participation and positive initial_recovery_attempts. Subscription candidates are preferred. Same-model fallback needs no model pool. Different models require model_rewriting and a model_pool. Proven nonexecution and complete-input portability are required. Direct paid_targets retain precedence and cannot overlap this map. Existing paid owners stay pinned. Unknown paid money remains held against applicable limits.
+	PaidFallbackTargets *map[string]CodePaidTarget `json:"paid_fallback_targets,omitempty"`
+
+	// PaidParticipation Explicitly permit metered API targets. Direct selection and subscription-first fallback require their separate target maps.
+	PaidParticipation *bool `json:"paid_participation,omitempty"`
+
+	// PaidTargets Exact native model to directly selected published metered provider and credential slot. A mapped model takes precedence over subscription accounts.
+	PaidTargets *map[string]CodePaidTarget `json:"paid_targets,omitempty"`
+	PoolId      openapi_types.UUID         `json:"pool_id"`
+	ProjectId   openapi_types.UUID         `json:"project_id"`
+	Slug        string                     `json:"slug"`
 
 	// Tools Research subscription binding, frozen at publication. Requires an eligible Z.ai global account in the same project and pool; independent of inference models. Null disables research.
 	Tools nullable.Nullable[CodeResearchTools] `json:"tools,omitempty"`
@@ -7636,6 +9206,15 @@ type CodeTokenWindows struct {
 type CodeTokenWindowsList struct {
 	Items      []CodeTokenWindows        `json:"items"`
 	NextCursor nullable.Nullable[string] `json:"next_cursor"`
+}
+
+// CodexCredentialImportRequest defines model for CodexCredentialImportRequest.
+type CodexCredentialImportRequest struct {
+	// Credentials Codex auth.json JSON text. Supports chatgpt auth_mode or its omission, absent or null OPENAI_API_KEY, tokens with access_token, id_token, refresh_token and account_id, and optional RFC3339 last_refresh. Other fields and ambiguous JSON are rejected. Expired local tokens may be imported if refresh verifies the same account and user.
+	Credentials *string `json:"credentials,omitempty"`
+
+	// SlotId Existing credential slot, defaults to the default slot
+	SlotId *openapi_types.UUID `json:"slot_id,omitempty"`
 }
 
 // Commitment Provisioned capacity the connection pays for: attempts bill at zero marginal cost and share the amount across each UTC calendar period by list-cost weight.
@@ -7666,8 +9245,10 @@ type ConfigurationAgentDraft struct {
 
 	// ProjectId Optional source identity; promotion resolves the owning project by name.
 	ProjectId *openapi_types.UUID `json:"project_id,omitempty"`
-	Prompt    *PromptDefinition   `json:"prompt,omitempty"`
-	Toolset   *ToolsetDefinition  `json:"toolset,omitempty"`
+
+	// Prompt Use template and variables for a single user message, or messages and variable_schema for a structured prompt.
+	Prompt  *PromptDefinition  `json:"prompt,omitempty"`
+	Toolset *ToolsetDefinition `json:"toolset,omitempty"`
 }
 
 // ConfigurationAgentPublication defines model for ConfigurationAgentPublication.
@@ -7689,9 +9270,11 @@ type ConfigurationAgentPublicationKind string
 // ConfigurationBillingImport defines model for ConfigurationBillingImport.
 type ConfigurationBillingImport struct {
 	// CredentialRef Portable secret binding name, provider name followed by /billing; supply the credential through secret_bindings.
-	CredentialRef string                 `json:"credential_ref"`
-	Enabled       bool                   `json:"enabled"`
-	Scope         map[string]interface{} `json:"scope"`
+	CredentialRef string `json:"credential_ref"`
+	Enabled       bool   `json:"enabled"`
+
+	// Scope Source-shaped billing scope. Polling sources accept an empty scope. Cloud sources require their export details.
+	Scope BillingScope `json:"scope"`
 }
 
 // ConfigurationCapabilityEntry defines model for ConfigurationCapabilityEntry.
@@ -7704,13 +9287,143 @@ type ConfigurationCapabilityEntry struct {
 // ConfigurationCapabilityEntryMode defines model for ConfigurationCapabilityEntry.Mode.
 type ConfigurationCapabilityEntryMode string
 
-// ConfigurationDocument Secret-free desired-state artifact identified by natural names, never UUIDs
+// ConfigurationCode Resource IDs are artifact-local references. Accounts resolve through explicitly bound current destination enrollments. Pools and budgets reuse validated same-project artifact IDs or standard UUIDv5 destination IDs derived from project, resource kind and artifact reference, with unique natural matches as fallback. This preserves duplicate names and exact duplicate budgets without a registry. Routes resolve through unique slug. Unrelated ambiguous identities are refused. Source credentials, health, usage windows, conversation bindings and historical revisions stay local. Destination projects and providers must be prepared and enrolled before planning. Rename globally unique slugs for same-installation cross-project promotion.
+type ConfigurationCode struct {
+	Accounts nullable.Nullable[[]ConfigurationCodeAccount] `json:"accounts,omitempty"`
+	Budgets  nullable.Nullable[[]ConfigurationCodeBudget]  `json:"budgets,omitempty"`
+	Pools    nullable.Nullable[[]ConfigurationCodePool]    `json:"pools,omitempty"`
+	Routes   nullable.Nullable[[]ConfigurationCodeRoute]   `json:"routes,omitempty"`
+}
+
+// ConfigurationCodeAccount defines model for ConfigurationCodeAccount.
+type ConfigurationCodeAccount struct {
+	CredentialRef string             `json:"credential_ref"`
+	Enabled       bool               `json:"enabled"`
+	Id            openapi_types.UUID `json:"id"`
+	Models        []string           `json:"models"`
+	Name          string             `json:"name"`
+	Project       string             `json:"project"`
+	Provider      string             `json:"provider"`
+}
+
+// ConfigurationCodeBindings defines model for ConfigurationCodeBindings.
+type ConfigurationCodeBindings struct {
+	ApiKeys     *map[string]openapi_types.UUID `json:"api_keys,omitempty"`
+	Credentials *map[string]openapi_types.UUID `json:"credentials,omitempty"`
+	Users       *map[string]openapi_types.UUID `json:"users,omitempty"`
+}
+
+// ConfigurationCodeBudget defines model for ConfigurationCodeBudget.
+type ConfigurationCodeBudget struct {
+	ApiKeyRef     nullable.Nullable[string]             `json:"api_key_ref"`
+	DailyTokens   nullable.Nullable[int64]              `json:"daily_tokens"`
+	Enabled       bool                                  `json:"enabled"`
+	Id            openapi_types.UUID                    `json:"id"`
+	MonthlyTokens nullable.Nullable[int64]              `json:"monthly_tokens"`
+	Project       string                                `json:"project"`
+	Route         nullable.Nullable[openapi_types.UUID] `json:"route"`
+}
+
+// ConfigurationCodeConnection defines model for ConfigurationCodeConnection.
+type ConfigurationCodeConnection struct {
+	Configuration        ProviderConfiguration `json:"configuration"`
+	NetworkCredentialRef *string               `json:"network_credential_ref,omitempty"`
+}
+
+// ConfigurationCodePaidConnection defines model for ConfigurationCodePaidConnection.
+type ConfigurationCodePaidConnection struct {
+	Provider    ConfigurationProviderEntry `json:"provider"`
+	SlotKeyRefs map[string][]string        `json:"slot_key_refs"`
+}
+
+// ConfigurationCodePaidTarget defines model for ConfigurationCodePaidTarget.
+type ConfigurationCodePaidTarget struct {
+	CredentialRef string `json:"credential_ref"`
+	Provider      string `json:"provider"`
+	Slot          string `json:"slot"`
+}
+
+// ConfigurationCodePool defines model for ConfigurationCodePool.
+type ConfigurationCodePool struct {
+	Accounts   map[string]int              `json:"accounts"`
+	ApiKeyRefs nullable.Nullable[[]string] `json:"api_key_refs"`
+	Id         openapi_types.UUID          `json:"id"`
+	Kind       ConfigurationCodePoolKind   `json:"kind"`
+	Name       string                      `json:"name"`
+	OwnerRef   nullable.Nullable[string]   `json:"owner_ref"`
+	Project    string                      `json:"project"`
+}
+
+// ConfigurationCodePoolKind defines model for ConfigurationCodePool.Kind.
+type ConfigurationCodePoolKind string
+
+// ConfigurationCodePublication defines model for ConfigurationCodePublication.
+type ConfigurationCodePublication struct {
+	Connections     map[string]ConfigurationCodeConnection      `json:"connections"`
+	PaidConnections *map[string]ConfigurationCodePaidConnection `json:"paid_connections,omitempty"`
+	Policy          ConfigurationCodeRoutePolicy                `json:"policy"`
+}
+
+// ConfigurationCodeRoute defines model for ConfigurationCodeRoute.
+type ConfigurationCodeRoute struct {
+	Draft     ConfigurationCodeRoutePolicy  `json:"draft"`
+	Id        openapi_types.UUID            `json:"id"`
+	Project   string                        `json:"project"`
+	Published *ConfigurationCodePublication `json:"published,omitempty"`
+	Slug      string                        `json:"slug"`
+}
+
+// ConfigurationCodeRoutePolicy defines model for ConfigurationCodeRoutePolicy.
+type ConfigurationCodeRoutePolicy struct {
+	// Aliases Stable public model names mapped directly to one native identifier in models. Requires model_rewriting. Alias chains and native name collisions are rejected. Immutable publications pin these mappings. Repointing an alias affects new conversations. Existing conversations retain their stored exact target while it remains published and authorized.
+	Aliases *map[string]string `json:"aliases,omitempty"`
+
+	// ChatToAntigravity Explicit opt-in for chat translation through the Antigravity adapter.
+	ChatToAntigravity *bool `json:"chat_to_antigravity,omitempty"`
+
+	// ChatToCodex Explicit Chat text and function tool translation through Codex Responses, disabled by default and pinned by publication. Native forwarding remains the default. Low, medium and high reasoning effort is supported. Required signed reasoning, media, server-owned state and unsupported semantics are refused. Independent Codex identity and model rewriting policies remain separate. Current OpenCode client and live subscription acceptance remain unqualified.
+	ChatToCodex *bool `json:"chat_to_codex,omitempty"`
+
+	// CodexCliIdentity Explicit route-administrator opt-in, disabled by default and independent of protocol translation. On Codex subscription HTTP and WebSocket requests only, fills Originator with codex_cli_rs when every supplied Originator value is absent or blank. Preserves explicit Originator values, User-Agent, all prompts, tools, reasoning, state and other headers. Does not enable translation or prompt changes. Publication freezes the policy. Using subscription accounts through this compatibility identity may violate provider terms and risk account suspension. Review this behavior and risk before enabling and publishing.
+	CodexCliIdentity *bool `json:"codex_cli_identity,omitempty"`
+	Enabled          bool  `json:"enabled"`
+
+	// InitialRecoveryAttempts Maximum additional attempts per request for a new or established single-pin root conversation after an adapter proves nonexecution and the complete input is portable. Zero disables recovery. Published revisions pin this policy. Existing children, socket ownership and unresolved attempts prevent migration. Exact models remain the default. Only explicit model_pools authorize model changes. Live authority remains required. Producing-account reference ownership is preserved. Accepted, partial, ambiguous and opaque work never replays.
+	InitialRecoveryAttempts *int `json:"initial_recovery_attempts,omitempty"`
+
+	// MaxBodyBytes Optional ingress limit in bytes. Null inherits installation limits; a route can only lower them. Checks both encoded and decoded JSON, the complete multipart body, and individual client WebSocket messages. Published revisions pin this policy.
+	MaxBodyBytes nullable.Nullable[int] `json:"max_body_bytes,omitempty"`
+
+	// MessagesToCodex Explicitly allow Messages text and tool requests to use Codex subscription accounts through protocol translation. Published revisions pin this policy. Native forwarding remains the default. Translation alone preserves client identity and prompts. Codex identity compatibility requires its separate codex_cli_identity opt-in. Model rewriting requires its separate opt-in. Explicit low, medium and high reasoning effort is supported. Signed thinking, numeric reasoning budgets, beta features and unsupported required semantics are refused before dispatch.
+	MessagesToCodex *bool `json:"messages_to_codex,omitempty"`
+
+	// ModelPools Explicit subscription model recovery pools keyed by a published native name or exact alias. Requires model_rewriting. Each ordered list starts with that name's normal exact target and contains distinct native identifiers from models. Recovery prefers the pinned exact target, then these alternatives, within initial_recovery_attempts and positive nonexecution, portability, live authorization and budget checks. Omitted pools preserve exact selection. Publications freeze the policy. Existing conversations retain their exact target, including after alias changes, while it remains published and authorized. Paid fallback is separately governed.
+	ModelPools *map[string][]string `json:"model_pools,omitempty"`
+
+	// ModelRewriting Explicitly enable model identifier rewriting through exact aliases or configured model_pools. Disabled by default. This policy does not rewrite client identity or prompts.
+	ModelRewriting *bool    `json:"model_rewriting,omitempty"`
+	Models         []string `json:"models"`
+
+	// PaidFallbackTargets Explicit recovery-only paid targets keyed by native model, using the same named destination provider, slot and credential bindings as direct paid targets. Requires paid participation and a positive initial recovery limit.
+	PaidFallbackTargets *map[string]ConfigurationCodePaidTarget `json:"paid_fallback_targets,omitempty"`
+	PaidParticipation   *bool                                   `json:"paid_participation,omitempty"`
+	PaidTargets         *map[string]ConfigurationCodePaidTarget `json:"paid_targets,omitempty"`
+	Pool                openapi_types.UUID                      `json:"pool"`
+
+	// Tools Research subscription binding, frozen at publication. Requires an eligible Z.ai global account in the same project and pool; independent of inference models. Null disables research.
+	Tools nullable.Nullable[CodeResearchTools] `json:"tools,omitempty"`
+}
+
+// ConfigurationDocument Secret-free desired-state artifact using natural destination identities. Code UUIDs are artifact-local references, never requested destination IDs.
 type ConfigurationDocument struct {
 	AgentPublications *[]ConfigurationAgentPublication `json:"agent_publications,omitempty"`
 	ApiVersion        ConfigurationDocumentApiVersion  `json:"api_version"`
 
 	// BudgetTimeZone Requested IANA budget time zone. Export includes it. Omission/null preserves the destination. Changes require settings permission and activate independently at the next existing day/week/month boundary; current spend and calendar history remain intact.
 	BudgetTimeZone nullable.Nullable[string] `json:"budget_time_zone,omitempty"`
+
+	// Code Resource IDs are artifact-local references. Accounts resolve through explicitly bound current destination enrollments. Pools and budgets reuse validated same-project artifact IDs or standard UUIDv5 destination IDs derived from project, resource kind and artifact reference, with unique natural matches as fallback. This preserves duplicate names and exact duplicate budgets without a registry. Routes resolve through unique slug. Unrelated ambiguous identities are refused. Source credentials, health, usage windows, conversation bindings and historical revisions stay local. Destination projects and providers must be prepared and enrolled before planning. Rename globally unique slugs for same-installation cross-project promotion.
+	Code *ConfigurationCode `json:"code,omitempty"`
 
 	// ExportedAt Informational only; excluded from the artifact digest
 	ExportedAt           *time.Time                           `json:"exported_at,omitempty"`
@@ -7755,7 +9468,7 @@ type ConfigurationExportResponse struct {
 	// Digest SHA-256 lowercase hex of the canonical document
 	Digest string `json:"digest"`
 
-	// Document Secret-free desired-state artifact identified by natural names, never UUIDs
+	// Document Secret-free desired-state artifact using natural destination identities. Code UUIDs are artifact-local references, never requested destination IDs.
 	Document ConfigurationDocument `json:"document"`
 }
 
@@ -7992,7 +9705,9 @@ type ConfigurationProjectEntry struct {
 
 // ConfigurationPromotionRequest defines model for ConfigurationPromotionRequest.
 type ConfigurationPromotionRequest struct {
-	// Document Secret-free desired-state artifact identified by natural names, never UUIDs
+	CodeBindings *ConfigurationCodeBindings `json:"code_bindings,omitempty"`
+
+	// Document Secret-free desired-state artifact using natural destination identities. Code UUIDs are artifact-local references, never requested destination IDs.
 	Document ConfigurationDocument `json:"document"`
 
 	// ExpectedDigest Digest the destination must still export for the apply to proceed
@@ -8074,17 +9789,30 @@ type ConfigurationRouteEntry struct {
 
 	// ProviderFetchedDocuments Allow the bound provider to fetch https document URLs named by callers on this route (default false). The gateway never fetches document bytes itself.
 	ProviderFetchedDocuments *bool `json:"provider_fetched_documents,omitempty"`
-	Retired                  *bool `json:"retired,omitempty"`
+
+	// ResponsesMcpItems Operator declaration that Responses clients support gateway-generated MCP output items. Requires gateway tool execution on a transformed route. MCP items are emitted only when the run uses the certified built-in Responses contract; other contracts omit them.
+	ResponsesMcpItems *bool `json:"responses_mcp_items,omitempty"`
+	Retired           *bool `json:"retired,omitempty"`
 
 	// Retry Same-target retries per retryable failure class, with full-jitter exponential backoff. Retries consume the attempt budget and the overall deadline and never follow commitment or an ambiguous creation.
-	Retry         *RouteRetry                      `json:"retry,omitempty"`
-	RoutingPolicy nullable.Nullable[RoutingPolicy] `json:"routing_policy"`
+	Retry         *RouteRetry                          `json:"retry,omitempty"`
+	RoutingPolicy nullable.Nullable[RoutingPolicy]     `json:"routing_policy"`
+	RunLimits     nullable.Nullable[WorkflowRunLimits] `json:"run_limits,omitempty"`
 
 	// Selectors Ordered request selectors; the first match wins.
 	Selectors *[]RouteSelector           `json:"selectors,omitempty"`
 	Slug      string                     `json:"slug"`
 	Targets   []ConfigurationRouteTarget `json:"targets"`
+
+	// ToolExecution When gateway, the gateway executes authorized read-only tools on transformed Chat Completions routes.
+	ToolExecution *ConfigurationRouteEntryToolExecution `json:"tool_execution,omitempty"`
+
+	// Toolsets Published toolset IDs that gateway execution may use. Callers can select a subset.
+	Toolsets *[]openapi_types.UUID `json:"toolsets,omitempty"`
 }
+
+// ConfigurationRouteEntryToolExecution When gateway, the gateway executes authorized read-only tools on transformed Chat Completions routes.
+type ConfigurationRouteEntryToolExecution string
 
 // ConfigurationRouteTarget defines model for ConfigurationRouteTarget.
 type ConfigurationRouteTarget struct {
@@ -8222,6 +9950,8 @@ type ConfigurationWorkloadIssuerAlgorithms string
 
 // ConfigurationWorkloadMapping Owner-declared permissions, never project or template names chosen freely by the token. A registered subject stays bound to its first matching name/project.
 type ConfigurationWorkloadMapping struct {
+	// AgentPrincipal Allow this mapping to authenticate an agent principal. Exact subject and client claims are required.
+	AgentPrincipal     *bool                     `json:"agent_principal,omitempty"`
 	AllowProviderState *bool                     `json:"allow_provider_state,omitempty"`
 	AllowedAgents      *[]openapi_types.UUID     `json:"allowed_agents,omitempty"`
 	AllowedToolsets    *[]openapi_types.UUID     `json:"allowed_toolsets,omitempty"`
@@ -8390,6 +10120,7 @@ type CreateApiKeyRequest struct {
 	// RotationIntervalDays Declared rotation reminder interval from creation or the last explicit rotation. Does not expire or automatically rotate the secret. Null disables rotation reminders.
 	RotationIntervalDays nullable.Nullable[int]               `json:"rotation_interval_days,omitempty"`
 	RouteLimits          nullable.Nullable[ApiKeyRouteLimits] `json:"route_limits,omitempty"`
+	RunLimits            nullable.Nullable[WorkflowRunLimits] `json:"run_limits,omitempty"`
 	Scopes               *[]string                            `json:"scopes,omitempty"`
 	TokensPerMinute      nullable.Nullable[int64]             `json:"tokens_per_minute,omitempty"`
 
@@ -8760,14 +10491,27 @@ type CreateRouteDraftRequest struct {
 	// ProviderFetchedDocuments Allow the bound provider to fetch https document URLs named by callers on this route (default false). The gateway never fetches document bytes itself.
 	ProviderFetchedDocuments *bool `json:"provider_fetched_documents,omitempty"`
 
+	// ResponsesMcpItems Operator declaration that Responses clients support gateway-generated MCP output items. Requires gateway tool execution on a transformed route. MCP items are emitted only when the run uses the certified built-in Responses contract; other contracts omit them.
+	ResponsesMcpItems *bool `json:"responses_mcp_items,omitempty"`
+
 	// Retry Same-target retries per retryable failure class, with full-jitter exponential backoff. Retries consume the attempt budget and the overall deadline and never follow commitment or an ambiguous creation.
-	Retry *RouteRetry `json:"retry,omitempty"`
+	Retry     *RouteRetry                          `json:"retry,omitempty"`
+	RunLimits nullable.Nullable[WorkflowRunLimits] `json:"run_limits,omitempty"`
 
 	// Selectors Ordered request selectors; the first match wins.
 	Selectors *[]RouteSelector     `json:"selectors,omitempty"`
 	Slug      string               `json:"slug"`
 	Targets   []RouteTargetRequest `json:"targets"`
+
+	// ToolExecution When gateway, the gateway executes authorized read-only tools on transformed Chat Completions routes.
+	ToolExecution *CreateRouteDraftRequestToolExecution `json:"tool_execution,omitempty"`
+
+	// Toolsets Published toolset IDs that gateway execution may use. Callers can select a subset.
+	Toolsets *[]openapi_types.UUID `json:"toolsets,omitempty"`
 }
+
+// CreateRouteDraftRequestToolExecution When gateway, the gateway executes authorized read-only tools on transformed Chat Completions routes.
+type CreateRouteDraftRequestToolExecution string
 
 // CreateSinkRequest defines model for CreateSinkRequest.
 type CreateSinkRequest struct {
@@ -8888,6 +10632,48 @@ type CredentialSlotDetail struct {
 	SaturationPercent nullable.Nullable[int64] `json:"saturation_percent,omitempty"`
 	TokensPerMinute   nullable.Nullable[int64] `json:"tokens_per_minute,omitempty"`
 	Weight            *int32                   `json:"weight,omitempty"`
+}
+
+// DelegationConsent defines model for DelegationConsent.
+type DelegationConsent struct {
+	// Consent One-use consent code, shown only once and bound to the selected agent.
+	Consent string `json:"consent"`
+
+	// DelegationPairDigest Stable pair budget ID for this delegation.
+	DelegationPairDigest string    `json:"delegation_pair_digest"`
+	ExpiresAt            time.Time `json:"expires_at"`
+}
+
+// DelegationConsentRequest defines model for DelegationConsentRequest.
+type DelegationConsentRequest struct {
+	AgentId         openapi_types.UUID                `json:"agent_id"`
+	AllowedAgents   *[]openapi_types.UUID             `json:"allowed_agents,omitempty"`
+	AllowedRoutes   *[]string                         `json:"allowed_routes,omitempty"`
+	AllowedToolsets *[]openapi_types.UUID             `json:"allowed_toolsets,omitempty"`
+	ApiKeyId        openapi_types.UUID                `json:"api_key_id"`
+	Scopes          *[]DelegationConsentRequestScopes `json:"scopes,omitempty"`
+	TtlSeconds      *int                              `json:"ttl_seconds,omitempty"`
+}
+
+// DelegationConsentRequestScopes defines model for DelegationConsentRequest.Scopes.
+type DelegationConsentRequestScopes string
+
+// DelegationOption defines model for DelegationOption.
+type DelegationOption struct {
+	// AllowedAgents Published agents currently allowed by both the key and the workload.
+	AllowedAgents *[]openapi_types.UUID `json:"allowed_agents,omitempty"`
+
+	// AllowedRoutes Active inference routes currently allowed by both the key and the agent.
+	AllowedRoutes []string `json:"allowed_routes"`
+
+	// AllowedToolsets Published toolsets currently allowed by both the key and the agent.
+	AllowedToolsets *[]openapi_types.UUID `json:"allowed_toolsets,omitempty"`
+	Id              openapi_types.UUID    `json:"id"`
+}
+
+// DelegationOptions defines model for DelegationOptions.
+type DelegationOptions struct {
+	Agents []DelegationOption `json:"agents"`
 }
 
 // Discount defines model for Discount.
@@ -9142,6 +10928,56 @@ type FocusDataset struct {
 type FocusDatasetListResponse struct {
 	Items      []FocusDataset            `json:"items"`
 	NextCursor nullable.Nullable[string] `json:"next_cursor"`
+}
+
+// GatewayExecutionCapability Caller-specific gateway tool execution capability. This describes configured authority and certification, not a live quota reservation or guarantee of a successful run.
+type GatewayExecutionCapability struct {
+	// CertifiedModes Modes with an enabled non-shadow serving target certified for generation tool calls on the request surface.
+	CertifiedModes []GatewayExecutionCapabilityCertifiedModes `json:"certified_modes"`
+
+	// DefaultToolsetsAllowed Whether all default toolsets on the named route can be resolved together for the caller.
+	DefaultToolsetsAllowed bool `json:"default_toolsets_allowed"`
+
+	// Enabled Whether workflow accounting is available and an enabled non-shadow target is certified for generation tool calls on this surface.
+	Enabled bool `json:"enabled"`
+
+	// Limits Effective named-route, caller and request limits, including defaults. Delegated legs keep the named route workflow policy.
+	Limits WorkflowRunLimits `json:"limits"`
+
+	// Tools Tools from published toolsets on the named route that the caller may resolve, including their classification and pinned price.
+	Tools []GatewayExecutionTool `json:"tools"`
+}
+
+// GatewayExecutionCapabilityCertifiedModes defines model for GatewayExecutionCapability.CertifiedModes.
+type GatewayExecutionCapabilityCertifiedModes string
+
+// GatewayExecutionTool defines model for GatewayExecutionTool.
+type GatewayExecutionTool struct {
+	// Alias Name exposed to the model during gateway execution.
+	Alias string `json:"alias"`
+
+	// Classification Operator classification. An unclassified tool is reported as approval_required.
+	Classification GatewayExecutionToolClassification `json:"classification"`
+
+	// Name Name in the published toolset.
+	Name       string             `json:"name"`
+	RevisionId openapi_types.UUID `json:"revision_id"`
+	ToolsetId  openapi_types.UUID `json:"toolset_id"`
+
+	// UnitPrice Pinned price per dispatched call in the installation pricing currency. Null means unpriced, while zero means free.
+	UnitPrice nullable.Nullable[string] `json:"unit_price"`
+}
+
+// GatewayExecutionToolClassification Operator classification. An unclassified tool is reported as approval_required.
+type GatewayExecutionToolClassification string
+
+// GoogleBillingScope defines model for GoogleBillingScope.
+type GoogleBillingScope struct {
+	BigqueryProjectId string    `json:"bigquery_project_id"`
+	BillingAccountId  string    `json:"billing_account_id"`
+	DatasetId         string    `json:"dataset_id"`
+	ProjectIds        *[]string `json:"project_ids,omitempty"`
+	TableId           string    `json:"table_id"`
 }
 
 // GrantDeviceAuthorization A device authorization the operator approves upstream: they open the verification URL, on any device, enter the user code and approve, while status requests poll the enrollment.
@@ -9566,6 +11402,66 @@ type InteractionObligations struct {
 	Submission              string `json:"submission"`
 }
 
+// Investigation defines model for Investigation.
+type Investigation struct {
+	CreatedAt time.Time                   `json:"created_at"`
+	Evidence  []InvestigationEvidenceView `json:"evidence"`
+
+	// Filters Typed filters used to investigate agent evidence.
+	Filters   InvestigationFilters `json:"filters"`
+	Id        openapi_types.UUID   `json:"id"`
+	ProjectId openapi_types.UUID   `json:"project_id"`
+	Summary   string               `json:"summary"`
+}
+
+// InvestigationEvidence Reference to evidence in the investigation project. A retained reference can outlive its source evidence.
+type InvestigationEvidence struct {
+	Id   openapi_types.UUID        `json:"id"`
+	Kind InvestigationEvidenceKind `json:"kind"`
+}
+
+// InvestigationEvidenceKind defines model for InvestigationEvidence.Kind.
+type InvestigationEvidenceKind string
+
+// InvestigationEvidenceView Reference to evidence in the investigation project. A retained reference can outlive its source evidence; the associated run is resolved on detail reads.
+type InvestigationEvidenceView struct {
+	Id   openapi_types.UUID            `json:"id"`
+	Kind InvestigationEvidenceViewKind `json:"kind"`
+
+	// RunId The associated run, when this step, approval or span is still retained.
+	RunId *openapi_types.UUID `json:"run_id,omitempty"`
+}
+
+// InvestigationEvidenceViewKind defines model for InvestigationEvidenceView.Kind.
+type InvestigationEvidenceViewKind string
+
+// InvestigationFilters Typed filters used to investigate agent evidence.
+type InvestigationFilters struct {
+	Error         *bool               `json:"error,omitempty"`
+	From          *time.Time          `json:"from,omitempty"`
+	MaxDurationMs *int64              `json:"max_duration_ms,omitempty"`
+	MinDurationMs *int64              `json:"min_duration_ms,omitempty"`
+	RunId         *openapi_types.UUID `json:"run_id,omitempty"`
+	To            *time.Time          `json:"to,omitempty"`
+	Tool          *string             `json:"tool,omitempty"`
+}
+
+// InvestigationList defines model for InvestigationList.
+type InvestigationList struct {
+	Items      []Investigation           `json:"items"`
+	NextCursor nullable.Nullable[string] `json:"next_cursor"`
+}
+
+// InvestigationWrite Operator-authored filters, evidence references and summary. Do not submit source payloads.
+type InvestigationWrite struct {
+	Evidence []InvestigationEvidence `json:"evidence"`
+
+	// Filters Typed filters used to investigate agent evidence.
+	Filters   InvestigationFilters `json:"filters"`
+	ProjectId openapi_types.UUID   `json:"project_id"`
+	Summary   string               `json:"summary"`
+}
+
 // InvitationListResponse defines model for InvitationListResponse.
 type InvitationListResponse struct {
 	Items      []InvitationResponse      `json:"items"`
@@ -9685,13 +11581,17 @@ type MCPGrantAuthorizationRequestFlow string
 
 // MCPGrantBinding defines model for MCPGrantBinding.
 type MCPGrantBinding struct {
-	Endpoint string           `json:"endpoint"`
-	Identity MCPGrantIdentity `json:"identity"`
+	AgentId  *openapi_types.UUID `json:"agent_id,omitempty"`
+	Endpoint string              `json:"endpoint"`
+
+	// EntraCredentialId Non-secret identifier for the agent's bound Entra client credential.
+	EntraCredentialId *openapi_types.UUID `json:"entra_credential_id,omitempty"`
+	Identity          MCPGrantIdentity    `json:"identity"`
 
 	// Oauth Required personal OAuth. Every destination is operator-declared and egress-validated. A matching individual grant replaces static credentials. Omission preserves the configuration on update; null disables personal OAuth.
 	Oauth     nullable.Nullable[MCPOAuthConfiguration] `json:"oauth"`
 	ProjectId openapi_types.UUID                       `json:"project_id"`
-	ServerId  openapi_types.UUID                       `json:"server_id"`
+	ServerId  *openapi_types.UUID                      `json:"server_id,omitempty"`
 }
 
 // MCPGrantClaimResponse defines model for MCPGrantClaimResponse.
@@ -10087,6 +11987,79 @@ type MFAVerificationRequest struct {
 // MFAVerificationRequestMethod defines model for MFAVerificationRequest.Method.
 type MFAVerificationRequestMethod string
 
+// ManagedRunEvidence Gateway-observed run metadata exported by a managed sink.
+type ManagedRunEvidence struct {
+	ApiKeyId       openapi_types.UUID               `json:"api_key_id"`
+	CreatedAt      time.Time                        `json:"created_at"`
+	EvidenceOrigin ManagedRunEvidenceEvidenceOrigin `json:"evidence_origin"`
+	Id             openapi_types.UUID               `json:"id"`
+	ProjectId      openapi_types.UUID               `json:"project_id"`
+}
+
+// ManagedRunEvidenceEvidenceOrigin defines model for ManagedRunEvidence.EvidenceOrigin.
+type ManagedRunEvidenceEvidenceOrigin string
+
+// ManagedRunEvidenceEvent Managed sink evidence envelope.
+type ManagedRunEvidenceEvent struct {
+	// Data Gateway-observed run metadata exported by a managed sink.
+	Data       ManagedRunEvidence             `json:"data"`
+	Id         openapi_types.UUID             `json:"id"`
+	OccurredAt time.Time                      `json:"occurred_at"`
+	Stream     ManagedRunEvidenceEventStream  `json:"stream"`
+	Version    ManagedRunEvidenceEventVersion `json:"version"`
+}
+
+// ManagedRunEvidenceEventStream defines model for ManagedRunEvidenceEvent.Stream.
+type ManagedRunEvidenceEventStream string
+
+// ManagedRunEvidenceEventVersion defines model for ManagedRunEvidenceEvent.Version.
+type ManagedRunEvidenceEventVersion int
+
+// ManagedTraceSpanEvidence Client-asserted trace span metadata exported by a managed sink. Nanosecond timestamps are decimal strings.
+type ManagedTraceSpanEvidence struct {
+	ApiKeyId   openapi_types.UUID                    `json:"api_key_id"`
+	AttemptId  nullable.Nullable[openapi_types.UUID] `json:"attempt_id"`
+	Attributes struct {
+		GenAiUsageInputTokens  *int `json:"gen_ai.usage.input_tokens,omitempty"`
+		GenAiUsageOutputTokens *int `json:"gen_ai.usage.output_tokens,omitempty"`
+		HttpResponseStatusCode *int `json:"http.response.status_code,omitempty"`
+	} `json:"attributes"`
+	Category       ManagedTraceSpanEvidenceCategory       `json:"category"`
+	EndedNanos     string                                 `json:"ended_nanos"`
+	EvidenceOrigin ManagedTraceSpanEvidenceEvidenceOrigin `json:"evidence_origin"`
+	Id             openapi_types.UUID                     `json:"id"`
+	ParentSpanId   nullable.Nullable[string]              `json:"parent_span_id"`
+	ProjectId      openapi_types.UUID                     `json:"project_id"`
+	ReceivedAt     time.Time                              `json:"received_at"`
+	RunId          nullable.Nullable[openapi_types.UUID]  `json:"run_id"`
+	SpanId         string                                 `json:"span_id"`
+	StartedNanos   string                                 `json:"started_nanos"`
+	Status         int                                    `json:"status"`
+	TraceId        string                                 `json:"trace_id"`
+}
+
+// ManagedTraceSpanEvidenceCategory defines model for ManagedTraceSpanEvidence.Category.
+type ManagedTraceSpanEvidenceCategory string
+
+// ManagedTraceSpanEvidenceEvidenceOrigin defines model for ManagedTraceSpanEvidence.EvidenceOrigin.
+type ManagedTraceSpanEvidenceEvidenceOrigin string
+
+// ManagedTraceSpanEvidenceEvent Managed sink evidence envelope.
+type ManagedTraceSpanEvidenceEvent struct {
+	// Data Client-asserted trace span metadata exported by a managed sink. Nanosecond timestamps are decimal strings.
+	Data       ManagedTraceSpanEvidence             `json:"data"`
+	Id         openapi_types.UUID                   `json:"id"`
+	OccurredAt time.Time                            `json:"occurred_at"`
+	Stream     ManagedTraceSpanEvidenceEventStream  `json:"stream"`
+	Version    ManagedTraceSpanEvidenceEventVersion `json:"version"`
+}
+
+// ManagedTraceSpanEvidenceEventStream defines model for ManagedTraceSpanEvidenceEvent.Stream.
+type ManagedTraceSpanEvidenceEventStream string
+
+// ManagedTraceSpanEvidenceEventVersion defines model for ManagedTraceSpanEvidenceEvent.Version.
+type ManagedTraceSpanEvidenceEventVersion int
+
 // ManagementOperation A management operation the authorization policy decides. Security requirement scopes name these, and a session lists the ones its member may perform.
 type ManagementOperation string
 
@@ -10356,6 +12329,86 @@ type NotificationRuleListResponse struct {
 	Items      []NotificationRule        `json:"items"`
 	NextCursor nullable.Nullable[string] `json:"next_cursor,omitempty"`
 }
+
+// ObservabilityRunEvidence Gateway-observed run metadata exported by an observability sink.
+type ObservabilityRunEvidence struct {
+	AgentRevisionId nullable.Nullable[openapi_types.UUID]  `json:"agent_revision_id"`
+	CreatedAt       time.Time                              `json:"created_at"`
+	EvidenceOrigin  ObservabilityRunEvidenceEvidenceOrigin `json:"evidence_origin"`
+	ProjectId       openapi_types.UUID                     `json:"project_id"`
+	RouteRevisionId nullable.Nullable[openapi_types.UUID]  `json:"route_revision_id"`
+	RunId           openapi_types.UUID                     `json:"run_id"`
+}
+
+// ObservabilityRunEvidenceEvidenceOrigin defines model for ObservabilityRunEvidence.EvidenceOrigin.
+type ObservabilityRunEvidenceEvidenceOrigin string
+
+// ObservabilityRunEvidenceEvent Observability sink evidence envelope. The same object appears as a JSONL line or an OTLP log body.
+type ObservabilityRunEvidenceEvent struct {
+	// Data Gateway-observed run metadata exported by an observability sink.
+	Data       ObservabilityRunEvidence             `json:"data"`
+	EventId    openapi_types.UUID                   `json:"event_id"`
+	OccurredAt time.Time                            `json:"occurred_at"`
+	Outcome    string                               `json:"outcome"`
+	ProjectId  openapi_types.UUID                   `json:"project_id"`
+	Route      string                               `json:"route"`
+	SourceId   openapi_types.UUID                   `json:"source_id"`
+	Stream     ObservabilityRunEvidenceEventStream  `json:"stream"`
+	Version    ObservabilityRunEvidenceEventVersion `json:"version"`
+}
+
+// ObservabilityRunEvidenceEventStream defines model for ObservabilityRunEvidenceEvent.Stream.
+type ObservabilityRunEvidenceEventStream string
+
+// ObservabilityRunEvidenceEventVersion defines model for ObservabilityRunEvidenceEvent.Version.
+type ObservabilityRunEvidenceEventVersion int
+
+// ObservabilityTraceSpanEvidence Client-asserted trace span metadata exported by an observability sink.
+type ObservabilityTraceSpanEvidence struct {
+	AttemptId  nullable.Nullable[openapi_types.UUID] `json:"attempt_id"`
+	Attributes struct {
+		GenAiUsageInputTokens  *int `json:"gen_ai.usage.input_tokens,omitempty"`
+		GenAiUsageOutputTokens *int `json:"gen_ai.usage.output_tokens,omitempty"`
+		HttpResponseStatusCode *int `json:"http.response.status_code,omitempty"`
+	} `json:"attributes"`
+	Category       ObservabilityTraceSpanEvidenceCategory       `json:"category"`
+	EndedNanos     int                                          `json:"ended_nanos"`
+	EvidenceOrigin ObservabilityTraceSpanEvidenceEvidenceOrigin `json:"evidence_origin"`
+	Id             openapi_types.UUID                           `json:"id"`
+	ParentSpanId   nullable.Nullable[string]                    `json:"parent_span_id"`
+	ProjectId      openapi_types.UUID                           `json:"project_id"`
+	RunId          nullable.Nullable[openapi_types.UUID]        `json:"run_id"`
+	SpanId         string                                       `json:"span_id"`
+	StartedNanos   int                                          `json:"started_nanos"`
+	Status         int                                          `json:"status"`
+	TraceId        string                                       `json:"trace_id"`
+}
+
+// ObservabilityTraceSpanEvidenceCategory defines model for ObservabilityTraceSpanEvidence.Category.
+type ObservabilityTraceSpanEvidenceCategory string
+
+// ObservabilityTraceSpanEvidenceEvidenceOrigin defines model for ObservabilityTraceSpanEvidence.EvidenceOrigin.
+type ObservabilityTraceSpanEvidenceEvidenceOrigin string
+
+// ObservabilityTraceSpanEvidenceEvent Observability sink evidence envelope. The same object appears as a JSONL line or an OTLP log body.
+type ObservabilityTraceSpanEvidenceEvent struct {
+	// Data Client-asserted trace span metadata exported by an observability sink.
+	Data       ObservabilityTraceSpanEvidence             `json:"data"`
+	EventId    openapi_types.UUID                         `json:"event_id"`
+	OccurredAt time.Time                                  `json:"occurred_at"`
+	Outcome    string                                     `json:"outcome"`
+	ProjectId  openapi_types.UUID                         `json:"project_id"`
+	Route      string                                     `json:"route"`
+	SourceId   openapi_types.UUID                         `json:"source_id"`
+	Stream     ObservabilityTraceSpanEvidenceEventStream  `json:"stream"`
+	Version    ObservabilityTraceSpanEvidenceEventVersion `json:"version"`
+}
+
+// ObservabilityTraceSpanEvidenceEventStream defines model for ObservabilityTraceSpanEvidenceEvent.Stream.
+type ObservabilityTraceSpanEvidenceEventStream string
+
+// ObservabilityTraceSpanEvidenceEventVersion defines model for ObservabilityTraceSpanEvidenceEvent.Version.
+type ObservabilityTraceSpanEvidenceEventVersion int
 
 // OidcAuthorizationResponse defines model for OidcAuthorizationResponse.
 type OidcAuthorizationResponse struct {
@@ -10921,6 +12974,12 @@ type PolicyResponse struct {
 	Policy     RoutingPolicy      `json:"policy"`
 }
 
+// PollingBillingScope defines model for PollingBillingScope.
+type PollingBillingScope struct {
+	ProjectIds   *[]string `json:"project_ids,omitempty"`
+	WorkspaceIds *[]string `json:"workspace_ids,omitempty"`
+}
+
 // PriceCeiling defines model for PriceCeiling.
 type PriceCeiling struct {
 	InputPerMillion  nullable.Nullable[string] `json:"input_per_million,omitempty"`
@@ -11442,6 +13501,12 @@ type ProjectRouteGroups struct {
 	Groups RouteGroups `json:"groups"`
 }
 
+// PromptAttemptReference defines model for PromptAttemptReference.
+type PromptAttemptReference struct {
+	Id         openapi_types.UUID `json:"id"`
+	RevisionId openapi_types.UUID `json:"revision_id"`
+}
+
 // PromptCachePolicy defines model for PromptCachePolicy.
 type PromptCachePolicy struct {
 	KeySource    *PromptCachePolicyKeySource   `json:"key_source,omitempty"`
@@ -11459,16 +13524,57 @@ type PromptCachePolicyPositions string
 // PromptCachePolicyTtl defines model for PromptCachePolicy.Ttl.
 type PromptCachePolicyTtl string
 
-// PromptDefinition defines model for PromptDefinition.
+// PromptDefaultParameters defines model for PromptDefaultParameters.
+type PromptDefaultParameters struct {
+	MaxOutputTokens *int     `json:"max_output_tokens,omitempty"`
+	Temperature     *float32 `json:"temperature,omitempty"`
+	TopP            *float32 `json:"top_p,omitempty"`
+}
+
+// PromptDefinition Use template and variables for a single user message, or messages and variable_schema for a structured prompt.
 type PromptDefinition struct {
-	Template  string   `json:"template"`
-	Variables []string `json:"variables"`
+	DefaultParameters *PromptDefaultParameters    `json:"default_parameters,omitempty"`
+	Messages          *[]PromptMessage            `json:"messages,omitempty"`
+	Template          *string                     `json:"template,omitempty"`
+	VariableSchema    *PromptVariableSchema       `json:"variable_schema,omitempty"`
+	Variables         nullable.Nullable[[]string] `json:"variables,omitempty"`
 }
 
 // PromptLabelWrite defines model for PromptLabelWrite.
 type PromptLabelWrite struct {
 	RevisionId openapi_types.UUID `json:"revision_id"`
 }
+
+// PromptMessage defines model for PromptMessage.
+type PromptMessage struct {
+	Content string            `json:"content"`
+	Role    PromptMessageRole `json:"role"`
+}
+
+// PromptMessageRole defines model for PromptMessage.Role.
+type PromptMessageRole string
+
+// PromptVariableProperty defines model for PromptVariableProperty.
+type PromptVariableProperty struct {
+	Type PromptVariablePropertyType `json:"type"`
+}
+
+// PromptVariablePropertyType defines model for PromptVariableProperty.Type.
+type PromptVariablePropertyType string
+
+// PromptVariableSchema defines model for PromptVariableSchema.
+type PromptVariableSchema struct {
+	AdditionalProperties PromptVariableSchemaAdditionalProperties `json:"additionalProperties"`
+	Properties           map[string]PromptVariableProperty        `json:"properties"`
+	Required             []string                                 `json:"required"`
+	Type                 PromptVariableSchemaType                 `json:"type"`
+}
+
+// PromptVariableSchemaAdditionalProperties defines model for PromptVariableSchema.AdditionalProperties.
+type PromptVariableSchemaAdditionalProperties bool
+
+// PromptVariableSchemaType defines model for PromptVariableSchema.Type.
+type PromptVariableSchemaType string
 
 // ProviderActivationResponse defines model for ProviderActivationResponse.
 type ProviderActivationResponse struct {
@@ -12134,14 +14240,53 @@ type PublishPricingSourceRequest struct {
 
 // PutBillingImportRequest defines model for PutBillingImportRequest.
 type PutBillingImportRequest struct {
-	// Credential Vendor admin credential, sealed as a billing_credential secret. Required on create; omitted keeps the stored credential; null is rejected - delete the import instead.
-	Credential *string `json:"credential,omitempty"`
+	// Credential Billing credential. Required on create, omitted retains the stored credential, and null is rejected. Cloud credentials are source-shaped objects.
+	Credential *PutBillingImportRequest_Credential `json:"credential,omitempty"`
 
 	// Enabled Defaults to true when omitted.
 	Enabled *bool `json:"enabled,omitempty"`
 
-	// Scope openai_costs: {"project_ids":["proj_..."]}; anthropic_cost_report: {"workspace_ids":["wrkspc_...","default"]}; {} reads the whole organization. Omitted keeps the stored scope.
-	Scope *map[string]interface{} `json:"scope,omitempty"`
+	// Scope Source-shaped billing scope. Polling sources accept an empty scope. Cloud sources require their export details.
+	Scope *BillingScope `json:"scope,omitempty"`
+}
+
+// PutBillingImportRequestCredential0 defines model for PutBillingImportRequest.Credential.0.
+type PutBillingImportRequestCredential0 = string
+
+// PutBillingImportRequestCredential1 defines model for PutBillingImportRequest.Credential.1.
+type PutBillingImportRequestCredential1 struct {
+	AccessKeyId     *string                                    `json:"access_key_id,omitempty"`
+	AuthMode        PutBillingImportRequestCredential1AuthMode `json:"auth_mode"`
+	SecretAccessKey *string                                    `json:"secret_access_key,omitempty"`
+	SessionToken    *string                                    `json:"session_token,omitempty"`
+}
+
+// PutBillingImportRequestCredential1AuthMode defines model for PutBillingImportRequest.Credential.1.AuthMode.
+type PutBillingImportRequestCredential1AuthMode string
+
+// PutBillingImportRequestCredential2 defines model for PutBillingImportRequest.Credential.2.
+type PutBillingImportRequestCredential2 struct {
+	AuthMode       PutBillingImportRequestCredential2AuthMode `json:"auth_mode"`
+	ServiceAccount *map[string]interface{}                    `json:"service_account,omitempty"`
+}
+
+// PutBillingImportRequestCredential2AuthMode defines model for PutBillingImportRequest.Credential.2.AuthMode.
+type PutBillingImportRequestCredential2AuthMode string
+
+// PutBillingImportRequestCredential3 defines model for PutBillingImportRequest.Credential.3.
+type PutBillingImportRequestCredential3 struct {
+	AuthMode     PutBillingImportRequestCredential3AuthMode `json:"auth_mode"`
+	ClientId     *string                                    `json:"client_id,omitempty"`
+	ClientSecret *string                                    `json:"client_secret,omitempty"`
+	TenantId     *string                                    `json:"tenant_id,omitempty"`
+}
+
+// PutBillingImportRequestCredential3AuthMode defines model for PutBillingImportRequest.Credential.3.AuthMode.
+type PutBillingImportRequestCredential3AuthMode string
+
+// PutBillingImportRequest_Credential Billing credential. Required on create, omitted retains the stored credential, and null is rejected. Cloud credentials are source-shaped objects.
+type PutBillingImportRequest_Credential struct {
+	union json.RawMessage
 }
 
 // PutProjectMemberRequest defines model for PutProjectMemberRequest.
@@ -12311,7 +14456,7 @@ type RateCardsResponse struct {
 type RecentAuthenticationRequest struct {
 	CurrentPassword *string `json:"current_password,omitempty"`
 
-	// Purpose Exact security operation authorized by this one-time grant: password_enrollment, oidc_link, oidc_unlink or plugin_permit.
+	// Purpose Exact security operation authorized by this one-time grant, including agent_delegation for a consumer key.
 	Purpose    string                                `json:"purpose"`
 	ResourceId nullable.Nullable[openapi_types.UUID] `json:"resource_id,omitempty"`
 }
@@ -12417,14 +14562,27 @@ type ReplaceRouteDraftRequest struct {
 	// ProviderFetchedDocuments Allow the bound provider to fetch https document URLs named by callers on this route (default false). The gateway never fetches document bytes itself.
 	ProviderFetchedDocuments *bool `json:"provider_fetched_documents,omitempty"`
 
+	// ResponsesMcpItems Operator declaration that Responses clients support gateway-generated MCP output items. Requires gateway tool execution on a transformed route. MCP items are emitted only when the run uses the certified built-in Responses contract; other contracts omit them.
+	ResponsesMcpItems *bool `json:"responses_mcp_items,omitempty"`
+
 	// Retry Same-target retries per retryable failure class, with full-jitter exponential backoff. Retries consume the attempt budget and the overall deadline and never follow commitment or an ambiguous creation.
-	Retry *RouteRetry `json:"retry,omitempty"`
+	Retry     *RouteRetry                          `json:"retry,omitempty"`
+	RunLimits nullable.Nullable[WorkflowRunLimits] `json:"run_limits,omitempty"`
 
 	// Selectors Ordered request selectors; the first match wins.
 	Selectors *[]RouteSelector            `json:"selectors,omitempty"`
 	Slug      string                      `json:"slug"`
 	Targets   []ReplaceRouteTargetRequest `json:"targets"`
+
+	// ToolExecution When gateway, the gateway executes authorized read-only tools on transformed Chat Completions routes.
+	ToolExecution *ReplaceRouteDraftRequestToolExecution `json:"tool_execution,omitempty"`
+
+	// Toolsets Published toolset IDs that gateway execution may use. Callers can select a subset.
+	Toolsets *[]openapi_types.UUID `json:"toolsets,omitempty"`
 }
+
+// ReplaceRouteDraftRequestToolExecution When gateway, the gateway executes authorized read-only tools on transformed Chat Completions routes.
+type ReplaceRouteDraftRequestToolExecution string
 
 // ReplaceRouteTargetRequest defines model for ReplaceRouteTargetRequest.
 type ReplaceRouteTargetRequest struct {
@@ -12926,13 +15084,26 @@ type RouteBehavior struct {
 	// ProviderFetchedDocuments Allow the bound provider to fetch https document URLs named by callers on this route (default false). The gateway never fetches document bytes itself.
 	ProviderFetchedDocuments *bool `json:"provider_fetched_documents,omitempty"`
 
+	// ResponsesMcpItems Operator declaration that Responses clients support gateway-generated MCP output items. Requires gateway tool execution on a transformed route. MCP items are emitted only when the run uses the certified built-in Responses contract; other contracts omit them.
+	ResponsesMcpItems *bool `json:"responses_mcp_items,omitempty"`
+
 	// Retry Same-target retries per retryable failure class, with full-jitter exponential backoff. Retries consume the attempt budget and the overall deadline and never follow commitment or an ambiguous creation.
-	Retry     RouteRetry      `json:"retry"`
-	Selectors []RouteSelector `json:"selectors"`
+	Retry     RouteRetry                           `json:"retry"`
+	RunLimits nullable.Nullable[WorkflowRunLimits] `json:"run_limits,omitempty"`
+	Selectors []RouteSelector                      `json:"selectors"`
+
+	// ToolExecution When gateway, the gateway executes authorized read-only tools on transformed Chat Completions routes.
+	ToolExecution *RouteBehaviorToolExecution `json:"tool_execution,omitempty"`
+
+	// Toolsets Published toolset IDs that gateway execution may use. Callers can select a subset.
+	Toolsets *[]openapi_types.UUID `json:"toolsets,omitempty"`
 }
 
 // RouteBehaviorCertification Whether the route's serving tuples are certified. Pass-through routes always read uncertified.
 type RouteBehaviorCertification string
+
+// RouteBehaviorToolExecution When gateway, the gateway executes authorized read-only tools on transformed Chat Completions routes.
+type RouteBehaviorToolExecution string
 
 // RouteCatalogExposureResponse defines model for RouteCatalogExposureResponse.
 type RouteCatalogExposureResponse struct {
@@ -13013,17 +15184,30 @@ type RouteDraftDetailResponse struct {
 	// ProviderFetchedDocuments Allow the bound provider to fetch https document URLs named by callers on this route (default false). The gateway never fetches document bytes itself.
 	ProviderFetchedDocuments *bool `json:"provider_fetched_documents,omitempty"`
 
+	// ResponsesMcpItems Operator declaration that Responses clients support gateway-generated MCP output items. Requires gateway tool execution on a transformed route. MCP items are emitted only when the run uses the certified built-in Responses contract; other contracts omit them.
+	ResponsesMcpItems *bool `json:"responses_mcp_items,omitempty"`
+
 	// Retry Same-target retries per retryable failure class, with full-jitter exponential backoff. Retries consume the attempt budget and the overall deadline and never follow commitment or an ambiguous creation.
-	Retry     RouteRetry            `json:"retry"`
-	Selectors []RouteSelector       `json:"selectors"`
-	Slug      string                `json:"slug"`
-	State     string                `json:"state"`
-	Targets   []RouteTargetResponse `json:"targets"`
+	Retry     RouteRetry                           `json:"retry"`
+	RunLimits nullable.Nullable[WorkflowRunLimits] `json:"run_limits,omitempty"`
+	Selectors []RouteSelector                      `json:"selectors"`
+	Slug      string                               `json:"slug"`
+	State     string                               `json:"state"`
+	Targets   []RouteTargetResponse                `json:"targets"`
+
+	// ToolExecution When gateway, the gateway executes authorized read-only tools on transformed Chat Completions routes.
+	ToolExecution *RouteDraftDetailResponseToolExecution `json:"tool_execution,omitempty"`
+
+	// Toolsets Published toolset IDs that gateway execution may use. Callers can select a subset.
+	Toolsets  *[]openapi_types.UUID `json:"toolsets,omitempty"`
 	UpdatedAt time.Time             `json:"updated_at"`
 }
 
 // RouteDraftDetailResponseCertification Whether the route's serving tuples are certified. Pass-through routes always read uncertified.
 type RouteDraftDetailResponseCertification string
+
+// RouteDraftDetailResponseToolExecution When gateway, the gateway executes authorized read-only tools on transformed Chat Completions routes.
+type RouteDraftDetailResponseToolExecution string
 
 // RouteDraftListResponse defines model for RouteDraftListResponse.
 type RouteDraftListResponse struct {
@@ -13163,19 +15347,32 @@ type RouteRevisionResponse struct {
 	// ProviderFetchedDocuments Allow the bound provider to fetch https document URLs named by callers on this route (default false). The gateway never fetches document bytes itself.
 	ProviderFetchedDocuments *bool `json:"provider_fetched_documents,omitempty"`
 
+	// ResponsesMcpItems Operator declaration that Responses clients support gateway-generated MCP output items. Requires gateway tool execution on a transformed route. MCP items are emitted only when the run uses the certified built-in Responses contract; other contracts omit them.
+	ResponsesMcpItems *bool `json:"responses_mcp_items,omitempty"`
+
 	// Retry Same-target retries per retryable failure class, with full-jitter exponential backoff. Retries consume the attempt budget and the overall deadline and never follow commitment or an ambiguous creation.
-	Retry         RouteRetry            `json:"retry"`
-	Revision      int32                 `json:"revision"`
-	RouteId       openapi_types.UUID    `json:"route_id"`
-	RoutingPolicy RoutingPolicy         `json:"routing_policy"`
-	Selectors     []RouteSelector       `json:"selectors"`
-	Slug          string                `json:"slug"`
-	SourceDraftId openapi_types.UUID    `json:"source_draft_id"`
-	Targets       []RouteTargetResponse `json:"targets"`
+	Retry         RouteRetry                           `json:"retry"`
+	Revision      int32                                `json:"revision"`
+	RouteId       openapi_types.UUID                   `json:"route_id"`
+	RoutingPolicy RoutingPolicy                        `json:"routing_policy"`
+	RunLimits     nullable.Nullable[WorkflowRunLimits] `json:"run_limits,omitempty"`
+	Selectors     []RouteSelector                      `json:"selectors"`
+	Slug          string                               `json:"slug"`
+	SourceDraftId openapi_types.UUID                   `json:"source_draft_id"`
+	Targets       []RouteTargetResponse                `json:"targets"`
+
+	// ToolExecution When gateway, the gateway executes authorized read-only tools on transformed Chat Completions routes.
+	ToolExecution *RouteRevisionResponseToolExecution `json:"tool_execution,omitempty"`
+
+	// Toolsets Published toolset IDs that gateway execution may use. Callers can select a subset.
+	Toolsets *[]openapi_types.UUID `json:"toolsets,omitempty"`
 }
 
 // RouteRevisionResponseCertification Whether the route's serving tuples are certified. Pass-through routes always read uncertified.
 type RouteRevisionResponseCertification string
+
+// RouteRevisionResponseToolExecution When gateway, the gateway executes authorized read-only tools on transformed Chat Completions routes.
+type RouteRevisionResponseToolExecution string
 
 // RouteSelector The first selector whose predicate matches chooses the targets carrying any of its tags, or delegates the request to another route.
 type RouteSelector struct {
@@ -13197,6 +15394,9 @@ type RouteSimulationResponse struct {
 	// Fallbacks Fallbacks the request started at plan time, then the ones a failed attempt could still start
 	Fallbacks []FallbackStep `json:"fallbacks"`
 
+	// GatewayExecution Caller-specific gateway tool execution capability. This describes configured authority and certification, not a live quota reservation or guarantee of a successful run.
+	GatewayExecution *GatewayExecutionCapability `json:"gateway_execution,omitempty"`
+
 	// Legs Routes the request moved to after the named route, in order
 	Legs      []SimulatedRouteLeg `json:"legs"`
 	Mode      string              `json:"mode"`
@@ -13217,8 +15417,10 @@ type RouteSimulationTargetResponse struct {
 	ProviderId    openapi_types.UUID                 `json:"provider_id"`
 	ProviderModel string                             `json:"provider_model"`
 	ProviderName  string                             `json:"provider_name"`
-	Reason        nullable.Nullable[string]          `json:"reason,omitempty"`
-	TargetId      openapi_types.UUID                 `json:"target_id"`
+
+	// Reason Reason the target is ineligible, including workflow toolset authority, target certification and run cost checks when gateway execution applies. Null when no refusal applies.
+	Reason   nullable.Nullable[string] `json:"reason,omitempty"`
+	TargetId openapi_types.UUID        `json:"target_id"`
 }
 
 // RouteTargetRequest defines model for RouteTargetRequest.
@@ -13414,6 +15616,9 @@ type RoutingDecision struct {
 	// EstimatedInputTokens The request's input tokens as this target's model counts them, which is the estimate routing weighs the target's context window by, or the estimate the caller supplied. Null when neither exists.
 	EstimatedInputTokens nullable.Nullable[int64] `json:"estimated_input_tokens,omitempty"`
 
+	// GatewayExecution Caller-specific gateway tool execution capability. This describes configured authority and certification, not a live quota reservation or guarantee of a successful run.
+	GatewayExecution *GatewayExecutionCapability `json:"gateway_execution,omitempty"`
+
 	// Headroom Smallest remaining fraction of the best credential slot's request, token and concurrency quotas.
 	Headroom nullable.Nullable[float32] `json:"headroom,omitempty"`
 
@@ -13426,13 +15631,15 @@ type RoutingDecision struct {
 	MetadataObservedAt nullable.Nullable[time.Time] `json:"metadata_observed_at,omitempty"`
 
 	// ModelFamily The family of models that share the tokenizer estimated_input_tokens was counted with: openai-o200k, openai-cl100k, anthropic, gemini or other. Null when the caller supplied the estimate or no request was inspected.
-	ModelFamily           nullable.Nullable[string]       `json:"model_family,omitempty"`
-	Performance           nullable.Nullable[Measurement]  `json:"performance,omitempty"`
-	Price                 nullable.Nullable[RoutingPrice] `json:"price,omitempty"`
-	Priority              int32                           `json:"priority"`
-	ProviderId            openapi_types.UUID              `json:"provider_id"`
-	Reason                nullable.Nullable[string]       `json:"reason,omitempty"`
-	RequestedOutputTokens nullable.Nullable[int64]        `json:"requested_output_tokens,omitempty"`
+	ModelFamily nullable.Nullable[string]       `json:"model_family,omitempty"`
+	Performance nullable.Nullable[Measurement]  `json:"performance,omitempty"`
+	Price       nullable.Nullable[RoutingPrice] `json:"price,omitempty"`
+	Priority    int32                           `json:"priority"`
+	ProviderId  openapi_types.UUID              `json:"provider_id"`
+
+	// Reason Reason the target is ineligible, including workflow toolset authority, target certification and run cost checks when gateway execution applies. Null when no refusal applies.
+	Reason                nullable.Nullable[string] `json:"reason,omitempty"`
+	RequestedOutputTokens nullable.Nullable[int64]  `json:"requested_output_tokens,omitempty"`
 
 	// Selector The request selector that chose this target.
 	Selector nullable.Nullable[string] `json:"selector,omitempty"`
@@ -13960,7 +16167,7 @@ type ShadowTarget struct {
 
 // SimulateRouteRequest defines model for SimulateRouteRequest.
 type SimulateRouteRequest struct {
-	// ApiKeyId Optional current key authority, including provider-state permission. Provider-retained state is denied when no key is selected.
+	// ApiKeyId Select a current API key to evaluate its route and toolset authority, including provider-state permission. Provider-retained state and gateway tool execution are not eligible without a selected key. Simulation does not dispatch or reserve quota, so it does not guarantee admission.
 	ApiKeyId nullable.Nullable[openapi_types.UUID] `json:"api_key_id,omitempty"`
 
 	// Attribution Attribution labels the request would carry. They only matter to a route keeping sessions by a label.
@@ -13987,7 +16194,7 @@ type SimulateRouteRequest struct {
 	// QuerySettings Profile-owned semantic query settings. This performs no provider, token, proxy or metadata request. Values are always redacted in inspection output.
 	QuerySettings *SimulationQuerySettings `json:"query_settings,omitempty"`
 
-	// Request Optional native request. Omission retains tuple-only eligibility and reports not_inspected; no request or qualification is fabricated. A request is also counted for each target's model: unless estimated_input_tokens is supplied, every decision reports the input tokens that model counts, how they were counted and for which model family, and each target's context window is checked against them.
+	// Request Optional native request. Omission retains tuple-only eligibility and reports not_inspected; no request or qualification is fabricated. A request is also counted for each target's model: unless estimated_input_tokens is supplied, every decision reports the input tokens that model counts, how they were counted and for which model family, and each target's context window is checked against them. For gateway tool execution, include olp_toolsets and olp_run_limits in the native request to inspect narrowed toolsets and run bounds.
 	Request *map[string]interface{} `json:"request,omitempty"`
 	Seed    string                  `json:"seed"`
 
@@ -14008,11 +16215,14 @@ type SimulatedAffinitySource string
 
 // SimulatedRouteLeg A route the request moved to by selector delegation or fallback.
 type SimulatedRouteLeg struct {
-	Affinity  nullable.Nullable[SimulatedAffinity]    `json:"affinity"`
-	Decisions []RoutingDecision                       `json:"decisions"`
-	Route     string                                  `json:"route"`
-	Selectors []SelectorOutcome                       `json:"selectors"`
-	Via       nullable.Nullable[SimulatedRouteLegVia] `json:"via"`
+	Affinity  nullable.Nullable[SimulatedAffinity] `json:"affinity"`
+	Decisions []RoutingDecision                    `json:"decisions"`
+
+	// GatewayExecution Caller-specific gateway tool execution capability. This describes configured authority and certification, not a live quota reservation or guarantee of a successful run.
+	GatewayExecution *GatewayExecutionCapability             `json:"gateway_execution,omitempty"`
+	Route            string                                  `json:"route"`
+	Selectors        []SelectorOutcome                       `json:"selectors"`
+	Via              nullable.Nullable[SimulatedRouteLegVia] `json:"via"`
 }
 
 // SimulatedRouteLegVia defines model for SimulatedRouteLeg.Via.
@@ -14025,7 +16235,7 @@ type SimulationDialect string
 type SimulationOperation struct {
 	Operation *string `json:"operation,omitempty"`
 
-	// Request Native request for complete inspection. A route/model-only object selects tuple-only inspection and does not establish an interaction contract. A request is also counted for each target's model: unless estimated_input_tokens is supplied, every decision reports the input tokens that model counts, how they were counted and for which model family, and each target's context window is checked against them.
+	// Request Native request for complete inspection. A route/model-only object selects tuple-only inspection and does not establish an interaction contract. A request is also counted for each target's model: unless estimated_input_tokens is supplied, every decision reports the input tokens that model counts, how they were counted and for which model family, and each target's context window is checked against them. For gateway tool execution, include olp_toolsets and olp_run_limits in the native request to inspect narrowed toolsets and run bounds.
 	Request *map[string]interface{} `json:"request,omitempty"`
 
 	// Route Explicit route selector outside the native request, required for URL-bound dialect bodies that omit model. Existing request.model and tuple-only request.route selectors remain supported.
@@ -14037,6 +16247,7 @@ type SimulationQuerySettings map[string]string
 
 // SimulationRequest defines model for SimulationRequest.
 type SimulationRequest struct {
+	// ApiKeyId Select a current API key to evaluate its route and toolset authority, including provider-state permission. Provider-retained state and gateway tool execution are not eligible without a selected key. Simulation does not dispatch or reserve quota, so it does not guarantee admission.
 	ApiKeyId nullable.Nullable[openapi_types.UUID] `json:"api_key_id,omitempty"`
 
 	// Attribution Attribution labels the request would carry. They only matter to a route keeping sessions by a label.
@@ -14304,6 +16515,7 @@ type UpdateApiKeyRequest struct {
 	// RotationIntervalDays Declared rotation reminder interval from creation or the last explicit rotation. Does not expire or automatically rotate the secret. Null disables rotation reminders.
 	RotationIntervalDays nullable.Nullable[int]               `json:"rotation_interval_days,omitempty"`
 	RouteLimits          nullable.Nullable[ApiKeyRouteLimits] `json:"route_limits,omitempty"`
+	RunLimits            nullable.Nullable[WorkflowRunLimits] `json:"run_limits,omitempty"`
 	Scopes               *[]string                            `json:"scopes,omitempty"`
 	TokensPerMinute      nullable.Nullable[int64]             `json:"tokens_per_minute,omitempty"`
 
@@ -14547,8 +16759,12 @@ type UpdatePublishedRouteRequest struct {
 	// ProviderFetchedDocuments Allow the bound provider to fetch https document URLs named by callers on this route (default false). The gateway never fetches document bytes itself.
 	ProviderFetchedDocuments *bool `json:"provider_fetched_documents,omitempty"`
 
+	// ResponsesMcpItems Operator declaration that Responses clients support gateway-generated MCP output items. Requires gateway tool execution on a transformed route. MCP items are emitted only when the run uses the certified built-in Responses contract; other contracts omit them.
+	ResponsesMcpItems *bool `json:"responses_mcp_items,omitempty"`
+
 	// Retry Same-target retries per retryable failure class, with full-jitter exponential backoff. Retries consume the attempt budget and the overall deadline and never follow commitment or an ambiguous creation.
-	Retry *RouteRetry `json:"retry,omitempty"`
+	Retry     *RouteRetry                          `json:"retry,omitempty"`
+	RunLimits nullable.Nullable[WorkflowRunLimits] `json:"run_limits,omitempty"`
 
 	// Selectors Ordered request selectors; the first match wins.
 	Selectors *[]RouteSelector `json:"selectors,omitempty"`
@@ -14556,7 +16772,16 @@ type UpdatePublishedRouteRequest struct {
 	// Slug The published slug is immutable.
 	Slug    string                      `json:"slug"`
 	Targets []ReplaceRouteTargetRequest `json:"targets"`
+
+	// ToolExecution When gateway, the gateway executes authorized read-only tools on transformed Chat Completions routes.
+	ToolExecution *UpdatePublishedRouteRequestToolExecution `json:"tool_execution,omitempty"`
+
+	// Toolsets Published toolset IDs that gateway execution may use. Callers can select a subset.
+	Toolsets *[]openapi_types.UUID `json:"toolsets,omitempty"`
 }
+
+// UpdatePublishedRouteRequestToolExecution When gateway, the gateway executes authorized read-only tools on transformed Chat Completions routes.
+type UpdatePublishedRouteRequestToolExecution string
 
 // UpdateRouteCatalogExposureRequest defines model for UpdateRouteCatalogExposureRequest.
 type UpdateRouteCatalogExposureRequest struct {
@@ -14848,6 +17073,15 @@ type Vendor struct {
 	UnsupportedParameters []string `json:"unsupported_parameters"`
 }
 
+// WorkflowRunLimits defines model for WorkflowRunLimits.
+type WorkflowRunLimits struct {
+	MaxConcurrentRuns  *int64  `json:"max_concurrent_runs,omitempty"`
+	MaxDurationSeconds *int64  `json:"max_duration_seconds,omitempty"`
+	MaxIterations      *int64  `json:"max_iterations,omitempty"`
+	MaxRunCost         *string `json:"max_run_cost,omitempty"`
+	MaxToolCalls       *int64  `json:"max_tool_calls,omitempty"`
+}
+
 // WorkloadIssuer defines model for WorkloadIssuer.
 type WorkloadIssuer struct {
 	Algorithms         []WorkloadIssuerAlgorithms `json:"algorithms"`
@@ -14893,6 +17127,8 @@ type WorkloadIssuerWriteAlgorithms string
 
 // WorkloadMapping Owner-declared permissions, never project or template names chosen freely by the token. A registered subject stays bound to its first matching name/project.
 type WorkloadMapping struct {
+	// AgentPrincipal Allow this mapping to authenticate an agent principal. Exact subject and client claims are required.
+	AgentPrincipal     *bool                     `json:"agent_principal,omitempty"`
 	AllowProviderState *bool                     `json:"allow_provider_state,omitempty"`
 	AllowedAgents      *[]openapi_types.UUID     `json:"allowed_agents,omitempty"`
 	AllowedToolsets    *[]openapi_types.UUID     `json:"allowed_toolsets,omitempty"`
@@ -14909,6 +17145,49 @@ type WorkloadMapping struct {
 
 // WorkloadMappingScopes defines model for WorkloadMapping.Scopes.
 type WorkloadMappingScopes string
+
+// ListA2aTasksParams defines parameters for ListA2aTasks.
+type ListA2aTasksParams struct {
+	// Cursor Opaque cursor returned by the previous page.
+	Cursor *string `form:"cursor,omitempty" json:"cursor,omitempty"`
+
+	// Limit Page size, from 1 to 200. Defaults to 50.
+	Limit     *int32              `form:"limit,omitempty" json:"limit,omitempty"`
+	ProjectId *openapi_types.UUID `form:"project_id,omitempty" json:"project_id,omitempty"`
+}
+
+// ListAgentDelegationsParams defines parameters for ListAgentDelegations.
+type ListAgentDelegationsParams struct {
+	// Cursor Opaque cursor returned by the previous page.
+	Cursor *string `form:"cursor,omitempty" json:"cursor,omitempty"`
+
+	// Limit Page size, from 1 to 200. Defaults to 50.
+	Limit        *int32              `form:"limit,omitempty" json:"limit,omitempty"`
+	ProjectId    *openapi_types.UUID `form:"project_id,omitempty" json:"project_id,omitempty"`
+	DelegationId *openapi_types.UUID `form:"delegation_id,omitempty" json:"delegation_id,omitempty"`
+}
+
+// ListAgentRunsParams defines parameters for ListAgentRuns.
+type ListAgentRunsParams struct {
+	// Cursor Opaque cursor returned by the previous page.
+	Cursor *string `form:"cursor,omitempty" json:"cursor,omitempty"`
+
+	// Limit Page size, from 1 to 200. Defaults to 50.
+	Limit     *int32              `form:"limit,omitempty" json:"limit,omitempty"`
+	ProjectId *openapi_types.UUID `form:"project_id,omitempty" json:"project_id,omitempty"`
+}
+
+// ListAgentRunSpansParams defines parameters for ListAgentRunSpans.
+type ListAgentRunSpansParams struct {
+	// SpanId Return only the referenced internal span UUID within this run.
+	SpanId *openapi_types.UUID `form:"span_id,omitempty" json:"span_id,omitempty"`
+
+	// Cursor Opaque cursor returned by the previous page.
+	Cursor *string `form:"cursor,omitempty" json:"cursor,omitempty"`
+
+	// Limit Page size, from 1 to 200. Defaults to 50.
+	Limit *int32 `form:"limit,omitempty" json:"limit,omitempty"`
+}
 
 // ListAgentsParams defines parameters for ListAgents.
 type ListAgentsParams struct {
@@ -15112,6 +17391,9 @@ type ListCodeAttemptsParams struct {
 
 	// EndUserDigest Filter by a project-scoped digest, or unidentified for requests without one.
 	EndUserDigest *string `form:"end_user_digest,omitempty" json:"end_user_digest,omitempty"`
+
+	// AttemptId Select a single recorded attempt within current project visibility. Can resolve a recovery source across subscription and paid bindings. Other filters still apply.
+	AttemptId *openapi_types.UUID `form:"attempt_id,omitempty" json:"attempt_id,omitempty"`
 }
 
 // ListCodeBindingsParams defines parameters for ListCodeBindings.
@@ -15207,6 +17489,9 @@ type GetCodeClientConfigurationParams struct {
 
 	// SmallModel The native model for background requests; defaults to model. Codex takes none.
 	SmallModel *string `form:"small_model,omitempty" json:"small_model,omitempty"`
+
+	// Platform Developer platform, defaulting to linux for backward-compatible POSIX shell output.
+	Platform *CodeClientPlatform `form:"platform,omitempty" json:"platform,omitempty"`
 }
 
 // GetCodeClientConfigurationParamsClient defines parameters for GetCodeClientConfiguration.
@@ -15235,6 +17520,11 @@ type ListCodeTokenWindowsParams struct {
 type ApplyConfigurationParams struct {
 	// IdempotencyKey Unique mutation key
 	IdempotencyKey string `json:"Idempotency-Key"`
+}
+
+// GetDelegationOptionsParams defines parameters for GetDelegationOptions.
+type GetDelegationOptionsParams struct {
+	ApiKeyId openapi_types.UUID `form:"api_key_id" json:"api_key_id"`
 }
 
 // ListExecutionDebitsParams defines parameters for ListExecutionDebits.
@@ -15314,6 +17604,21 @@ type UpdateGuardrailParams struct {
 type ActivateGuardrailParams struct {
 	IdempotencyKey string `json:"Idempotency-Key"`
 	IfMatch        string `json:"If-Match"`
+}
+
+// ListInvestigationsParams defines parameters for ListInvestigations.
+type ListInvestigationsParams struct {
+	// Cursor Opaque cursor returned by the previous page.
+	Cursor *string `form:"cursor,omitempty" json:"cursor,omitempty"`
+
+	// Limit Page size, from 1 to 200. Defaults to 50.
+	Limit     *int32              `form:"limit,omitempty" json:"limit,omitempty"`
+	ProjectId *openapi_types.UUID `form:"project_id,omitempty" json:"project_id,omitempty"`
+}
+
+// CreateInvestigationParams defines parameters for CreateInvestigation.
+type CreateInvestigationParams struct {
+	IdempotencyKey string `json:"Idempotency-Key"`
 }
 
 // ListInvitationsParams defines parameters for ListInvitations.
@@ -16059,6 +18364,12 @@ type ActivateProviderParams struct {
 	IdempotencyKey string `json:"Idempotency-Key"`
 }
 
+// ImportAntigravityCredentialsParams defines parameters for ImportAntigravityCredentials.
+type ImportAntigravityCredentialsParams struct {
+	// IfMatch Current provider draft ETag
+	IfMatch string `json:"If-Match"`
+}
+
 // DeleteProviderBillingImportParams defines parameters for DeleteProviderBillingImport.
 type DeleteProviderBillingImportParams struct {
 	IfMatch string `json:"If-Match"`
@@ -16082,6 +18393,18 @@ type AcceptProviderCatalogSuggestionsParams struct {
 
 	// IdempotencyKey Unique acceptance key
 	IdempotencyKey string `json:"Idempotency-Key"`
+}
+
+// ImportClaudeCredentialsParams defines parameters for ImportClaudeCredentials.
+type ImportClaudeCredentialsParams struct {
+	// IfMatch Current provider draft ETag
+	IfMatch string `json:"If-Match"`
+}
+
+// ImportCodexCredentialsParams defines parameters for ImportCodexCredentials.
+type ImportCodexCredentialsParams struct {
+	// IfMatch Current provider draft ETag
+	IfMatch string `json:"If-Match"`
 }
 
 // DeleteCredentialSlotParams defines parameters for DeleteCredentialSlot.
@@ -16917,6 +19240,9 @@ type ProviderGrantLapsedWebhookParams struct {
 // CreateAgentJSONRequestBody defines body for CreateAgent for application/json ContentType.
 type CreateAgentJSONRequestBody = AgentPublicationWrite
 
+// StartAgentGrantEnrollmentJSONRequestBody defines body for StartAgentGrantEnrollment for application/json ContentType.
+type StartAgentGrantEnrollmentJSONRequestBody = StartMCPGrantEnrollmentRequest
+
 // UpdateAgentJSONRequestBody defines body for UpdateAgent for application/json ContentType.
 type UpdateAgentJSONRequestBody = AgentPublicationWrite
 
@@ -16986,6 +19312,9 @@ type ApplyConfigurationJSONRequestBody = ConfigurationPromotionRequest
 // PlanConfigurationJSONRequestBody defines body for PlanConfiguration for application/json ContentType.
 type PlanConfigurationJSONRequestBody = ConfigurationPromotionRequest
 
+// CreateDelegationConsentJSONRequestBody defines body for CreateDelegationConsent for application/json ContentType.
+type CreateDelegationConsentJSONRequestBody = DelegationConsentRequest
+
 // CreateGuardrailAttachmentJSONRequestBody defines body for CreateGuardrailAttachment for application/json ContentType.
 type CreateGuardrailAttachmentJSONRequestBody = GuardrailAttachment
 
@@ -17012,6 +19341,9 @@ type UpdateGuardrailJSONRequestBody = UpdateGuardrailRequest
 
 // ActivateGuardrailJSONRequestBody defines body for ActivateGuardrail for application/json ContentType.
 type ActivateGuardrailJSONRequestBody = GuardrailActivation
+
+// CreateInvestigationJSONRequestBody defines body for CreateInvestigation for application/json ContentType.
+type CreateInvestigationJSONRequestBody = InvestigationWrite
 
 // CreateInvitationJSONRequestBody defines body for CreateInvitation for application/json ContentType.
 type CreateInvitationJSONRequestBody = CreateInvitationRequest
@@ -17202,11 +19534,20 @@ type CreateProviderJSONRequestBody = CreateProviderRequest
 // UpdateProviderJSONRequestBody defines body for UpdateProvider for application/json ContentType.
 type UpdateProviderJSONRequestBody = UpdateProviderRequest
 
+// ImportAntigravityCredentialsJSONRequestBody defines body for ImportAntigravityCredentials for application/json ContentType.
+type ImportAntigravityCredentialsJSONRequestBody = AntigravityCredentialImportRequest
+
 // PutProviderBillingImportJSONRequestBody defines body for PutProviderBillingImport for application/json ContentType.
 type PutProviderBillingImportJSONRequestBody = PutBillingImportRequest
 
 // AcceptProviderCatalogSuggestionsJSONRequestBody defines body for AcceptProviderCatalogSuggestions for application/json ContentType.
 type AcceptProviderCatalogSuggestionsJSONRequestBody = AcceptCatalogSuggestionsRequest
+
+// ImportClaudeCredentialsJSONRequestBody defines body for ImportClaudeCredentials for application/json ContentType.
+type ImportClaudeCredentialsJSONRequestBody = ClaudeCredentialImportRequest
+
+// ImportCodexCredentialsJSONRequestBody defines body for ImportCodexCredentials for application/json ContentType.
+type ImportCodexCredentialsJSONRequestBody = CodexCredentialImportRequest
 
 // PutCredentialSlotJSONRequestBody defines body for PutCredentialSlot for application/json ContentType.
 type PutCredentialSlotJSONRequestBody = SlotWrite
@@ -17375,6 +19716,18 @@ type BudgetThresholdWebhookJSONRequestBody = BudgetThresholdEvent
 
 // KeyExpiringWebhookJSONRequestBody defines body for KeyExpiringWebhook for application/json ContentType.
 type KeyExpiringWebhookJSONRequestBody = KeyExpiringEvent
+
+// ManagedRunEvidenceWebhookJSONRequestBody defines body for ManagedRunEvidenceWebhook for application/json ContentType.
+type ManagedRunEvidenceWebhookJSONRequestBody = ManagedRunEvidenceEvent
+
+// ManagedTraceSpanEvidenceWebhookJSONRequestBody defines body for ManagedTraceSpanEvidenceWebhook for application/json ContentType.
+type ManagedTraceSpanEvidenceWebhookJSONRequestBody = ManagedTraceSpanEvidenceEvent
+
+// ObservabilityRunEvidenceWebhookJSONRequestBody defines body for ObservabilityRunEvidenceWebhook for application/json ContentType.
+type ObservabilityRunEvidenceWebhookJSONRequestBody = ObservabilityRunEvidenceEvent
+
+// ObservabilityTraceSpanEvidenceWebhookJSONRequestBody defines body for ObservabilityTraceSpanEvidenceWebhook for application/json ContentType.
+type ObservabilityTraceSpanEvidenceWebhookJSONRequestBody = ObservabilityTraceSpanEvidenceEvent
 
 // ProviderGrantLapsedWebhookJSONRequestBody defines body for ProviderGrantLapsedWebhook for application/json ContentType.
 type ProviderGrantLapsedWebhookJSONRequestBody = ProviderGrantLapsedEvent
@@ -17834,6 +20187,120 @@ func (a SCIMUser) MarshalJSON() ([]byte, error) {
 	return json.Marshal(object)
 }
 
+// AsPollingBillingScope returns the union data inside the BillingScope as a PollingBillingScope
+func (t BillingScope) AsPollingBillingScope() (PollingBillingScope, error) {
+	var body PollingBillingScope
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromPollingBillingScope overwrites any union data inside the BillingScope as the provided PollingBillingScope
+func (t *BillingScope) FromPollingBillingScope(v PollingBillingScope) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergePollingBillingScope performs a merge with any union data inside the BillingScope, using the provided PollingBillingScope
+func (t *BillingScope) MergePollingBillingScope(v PollingBillingScope) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsAWSBillingScope returns the union data inside the BillingScope as a AWSBillingScope
+func (t BillingScope) AsAWSBillingScope() (AWSBillingScope, error) {
+	var body AWSBillingScope
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromAWSBillingScope overwrites any union data inside the BillingScope as the provided AWSBillingScope
+func (t *BillingScope) FromAWSBillingScope(v AWSBillingScope) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeAWSBillingScope performs a merge with any union data inside the BillingScope, using the provided AWSBillingScope
+func (t *BillingScope) MergeAWSBillingScope(v AWSBillingScope) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsGoogleBillingScope returns the union data inside the BillingScope as a GoogleBillingScope
+func (t BillingScope) AsGoogleBillingScope() (GoogleBillingScope, error) {
+	var body GoogleBillingScope
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromGoogleBillingScope overwrites any union data inside the BillingScope as the provided GoogleBillingScope
+func (t *BillingScope) FromGoogleBillingScope(v GoogleBillingScope) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeGoogleBillingScope performs a merge with any union data inside the BillingScope, using the provided GoogleBillingScope
+func (t *BillingScope) MergeGoogleBillingScope(v GoogleBillingScope) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsAzureBillingScope returns the union data inside the BillingScope as a AzureBillingScope
+func (t BillingScope) AsAzureBillingScope() (AzureBillingScope, error) {
+	var body AzureBillingScope
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromAzureBillingScope overwrites any union data inside the BillingScope as the provided AzureBillingScope
+func (t *BillingScope) FromAzureBillingScope(v AzureBillingScope) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeAzureBillingScope performs a merge with any union data inside the BillingScope, using the provided AzureBillingScope
+func (t *BillingScope) MergeAzureBillingScope(v AzureBillingScope) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+func (t BillingScope) MarshalJSON() ([]byte, error) {
+	b, err := t.union.MarshalJSON()
+	return b, err
+}
+
+func (t *BillingScope) UnmarshalJSON(b []byte) error {
+	err := t.union.UnmarshalJSON(b)
+	return err
+}
+
 // AsCreateNotificationDestinationRequestSecret0 returns the union data inside the CreateNotificationDestinationRequest_Secret as a CreateNotificationDestinationRequestSecret0
 func (t CreateNotificationDestinationRequest_Secret) AsCreateNotificationDestinationRequestSecret0() (CreateNotificationDestinationRequestSecret0, error) {
 	var body CreateNotificationDestinationRequestSecret0
@@ -17980,6 +20447,120 @@ func (t PlaygroundResponseFormat) MarshalJSON() ([]byte, error) {
 }
 
 func (t *PlaygroundResponseFormat) UnmarshalJSON(b []byte) error {
+	err := t.union.UnmarshalJSON(b)
+	return err
+}
+
+// AsPutBillingImportRequestCredential0 returns the union data inside the PutBillingImportRequest_Credential as a PutBillingImportRequestCredential0
+func (t PutBillingImportRequest_Credential) AsPutBillingImportRequestCredential0() (PutBillingImportRequestCredential0, error) {
+	var body PutBillingImportRequestCredential0
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromPutBillingImportRequestCredential0 overwrites any union data inside the PutBillingImportRequest_Credential as the provided PutBillingImportRequestCredential0
+func (t *PutBillingImportRequest_Credential) FromPutBillingImportRequestCredential0(v PutBillingImportRequestCredential0) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergePutBillingImportRequestCredential0 performs a merge with any union data inside the PutBillingImportRequest_Credential, using the provided PutBillingImportRequestCredential0
+func (t *PutBillingImportRequest_Credential) MergePutBillingImportRequestCredential0(v PutBillingImportRequestCredential0) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsPutBillingImportRequestCredential1 returns the union data inside the PutBillingImportRequest_Credential as a PutBillingImportRequestCredential1
+func (t PutBillingImportRequest_Credential) AsPutBillingImportRequestCredential1() (PutBillingImportRequestCredential1, error) {
+	var body PutBillingImportRequestCredential1
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromPutBillingImportRequestCredential1 overwrites any union data inside the PutBillingImportRequest_Credential as the provided PutBillingImportRequestCredential1
+func (t *PutBillingImportRequest_Credential) FromPutBillingImportRequestCredential1(v PutBillingImportRequestCredential1) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergePutBillingImportRequestCredential1 performs a merge with any union data inside the PutBillingImportRequest_Credential, using the provided PutBillingImportRequestCredential1
+func (t *PutBillingImportRequest_Credential) MergePutBillingImportRequestCredential1(v PutBillingImportRequestCredential1) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsPutBillingImportRequestCredential2 returns the union data inside the PutBillingImportRequest_Credential as a PutBillingImportRequestCredential2
+func (t PutBillingImportRequest_Credential) AsPutBillingImportRequestCredential2() (PutBillingImportRequestCredential2, error) {
+	var body PutBillingImportRequestCredential2
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromPutBillingImportRequestCredential2 overwrites any union data inside the PutBillingImportRequest_Credential as the provided PutBillingImportRequestCredential2
+func (t *PutBillingImportRequest_Credential) FromPutBillingImportRequestCredential2(v PutBillingImportRequestCredential2) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergePutBillingImportRequestCredential2 performs a merge with any union data inside the PutBillingImportRequest_Credential, using the provided PutBillingImportRequestCredential2
+func (t *PutBillingImportRequest_Credential) MergePutBillingImportRequestCredential2(v PutBillingImportRequestCredential2) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsPutBillingImportRequestCredential3 returns the union data inside the PutBillingImportRequest_Credential as a PutBillingImportRequestCredential3
+func (t PutBillingImportRequest_Credential) AsPutBillingImportRequestCredential3() (PutBillingImportRequestCredential3, error) {
+	var body PutBillingImportRequestCredential3
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromPutBillingImportRequestCredential3 overwrites any union data inside the PutBillingImportRequest_Credential as the provided PutBillingImportRequestCredential3
+func (t *PutBillingImportRequest_Credential) FromPutBillingImportRequestCredential3(v PutBillingImportRequestCredential3) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergePutBillingImportRequestCredential3 performs a merge with any union data inside the PutBillingImportRequest_Credential, using the provided PutBillingImportRequestCredential3
+func (t *PutBillingImportRequest_Credential) MergePutBillingImportRequestCredential3(v PutBillingImportRequestCredential3) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+func (t PutBillingImportRequest_Credential) MarshalJSON() ([]byte, error) {
+	b, err := t.union.MarshalJSON()
+	return b, err
+}
+
+func (t *PutBillingImportRequest_Credential) UnmarshalJSON(b []byte) error {
 	err := t.union.UnmarshalJSON(b)
 	return err
 }

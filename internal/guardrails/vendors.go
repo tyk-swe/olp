@@ -18,7 +18,7 @@ type namedVendor struct {
 }
 
 func isModelGuardrail(kind string) bool {
-	return kind == "model" || kind == "semantic_guard" || kind == "decision_model"
+	return kind == "model" || kind == "semantic_guard" || kind == "decision_model" || kind == "typesafe"
 }
 
 func lookupNamedVendor(kind string) (namedVendor, bool) {

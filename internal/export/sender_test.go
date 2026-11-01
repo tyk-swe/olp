@@ -1,16 +1,21 @@
 package export
 
 import (
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
 	collogspb "go.opentelemetry.io/proto/otlp/collector/logs/v1"
+	commonpb "go.opentelemetry.io/proto/otlp/common/v1"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/tyk-swe/olp/internal/egress"
@@ -36,6 +41,159 @@ func TestHTTPSDeliveryRejectsWeakCredential(t *testing.T) {
 		if err == nil || DeliveryErrorCode(err) != "credential" {
 			t.Fatalf("%s: %v", name, err)
 		}
+	}
+}
+
+func TestHTTPSDeliversSignedWorkflowEvidence(t *testing.T) {
+	for _, tc := range []struct {
+		stream string
+		body   string
+	}{
+		{"runs", `{"stream":"runs","data":{"evidence_origin":"gateway_observed"}}`},
+		{"trace_spans", `{"stream":"trace_spans","data":{"evidence_origin":"client_asserted"}}`},
+	} {
+		t.Run(tc.stream, func(t *testing.T) {
+			type receivedRequest struct {
+				method string
+				header http.Header
+				body   []byte
+				err    error
+			}
+			received := make(chan receivedRequest, 1)
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				body, err := io.ReadAll(r.Body)
+				received <- receivedRequest{method: r.Method, header: r.Header.Clone(), body: body, err: err}
+				w.WriteHeader(http.StatusNoContent)
+			}))
+			defer server.Close()
+
+			secret := "workflow-signing-secret-0123456789"
+			credential, err := json.Marshal(map[string]string{"signing_secret": secret})
+			if err != nil {
+				t.Fatal(err)
+			}
+			record := Record{ID: "evidence-event", Stream: tc.stream, Data: json.RawMessage(tc.body)}
+			destination := Destination{Type: "https", URL: server.URL, Format: "json"}
+			if err := NewSender(testPolicy()).Send(t.Context(), destination, credential, record); err != nil {
+				t.Fatalf("deliver evidence: %v", err)
+			}
+
+			request := <-received
+			if request.err != nil {
+				t.Fatal(request.err)
+			}
+			if request.method != http.MethodPost || string(request.body) != tc.body {
+				t.Fatalf("unexpected request method or body: %s %s", request.method, request.body)
+			}
+			if request.header.Get("Content-Type") != "application/json" || request.header.Get("X-OLP-Event-ID") != record.ID {
+				t.Fatalf("unexpected evidence headers: %v", request.header)
+			}
+			signature := hmac.New(sha256.New, []byte(secret))
+			_, _ = signature.Write(request.body)
+			if request.header.Get("X-OLP-Signature") != "sha256="+hex.EncodeToString(signature.Sum(nil)) {
+				t.Fatal("signature does not cover the delivered evidence")
+			}
+			for _, values := range request.header {
+				for _, value := range values {
+					if strings.Contains(value, secret) {
+						t.Fatal("signing secret appeared in request headers")
+					}
+				}
+			}
+		})
+	}
+}
+
+func TestHTTPSRejectsUnsafeWorkflowEvidenceDestination(t *testing.T) {
+	received := make(chan struct{}, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		received <- struct{}{}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+	sender := NewSender(&egress.Policy{PlainHTTPHosts: []string{"127.0.0.1"}})
+	for _, tc := range []struct {
+		stream string
+		origin string
+	}{
+		{"runs", "gateway_observed"},
+		{"trace_spans", "client_asserted"},
+	} {
+		t.Run(tc.stream, func(t *testing.T) {
+			record := Record{ID: "evidence-event", Stream: tc.stream, Data: json.RawMessage(`{"data":{"evidence_origin":"` + tc.origin + `"}}`)}
+			err := sender.Send(t.Context(), Destination{Type: "https", URL: server.URL, Format: "json"}, []byte(`{"signing_secret":"workflow-signing-secret-0123456789"}`), record)
+			if err == nil || DeliveryErrorCode(err) != "endpoint" {
+				t.Fatalf("private destination was not rejected: %v", err)
+			}
+			select {
+			case <-received:
+				t.Fatal("evidence reached a disallowed destination")
+			default:
+			}
+		})
+	}
+}
+
+func TestOTLPDeliversWorkflowEvidence(t *testing.T) {
+	for _, tc := range []struct {
+		stream string
+		body   string
+	}{
+		{"runs", `{"stream":"runs","data":{"evidence_origin":"gateway_observed"}}`},
+		{"trace_spans", `{"stream":"trace_spans","data":{"evidence_origin":"client_asserted"}}`},
+	} {
+		t.Run(tc.stream, func(t *testing.T) {
+			type receivedRequest struct {
+				header http.Header
+				body   []byte
+				err    error
+			}
+			received := make(chan receivedRequest, 1)
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				body, err := io.ReadAll(r.Body)
+				received <- receivedRequest{header: r.Header.Clone(), body: body, err: err}
+				w.WriteHeader(http.StatusOK)
+			}))
+			defer server.Close()
+
+			sender := NewSender(testPolicy())
+			sender.Installation = "evidence-installation"
+			record := Record{ID: "evidence-event", Stream: tc.stream, At: time.Unix(1700000000, 0), Data: json.RawMessage(tc.body)}
+			destination := Destination{Type: "otlp_logs", URL: server.URL, Format: "otlp"}
+			credential := []byte(`{"headers":{"X-Collector-Key":"collector-secret"}}`)
+			if err := sender.Send(t.Context(), destination, credential, record); err != nil {
+				t.Fatalf("deliver evidence: %v", err)
+			}
+
+			request := <-received
+			if request.err != nil {
+				t.Fatal(request.err)
+			}
+			if request.header.Get("Content-Type") != "application/x-protobuf" || request.header.Get("X-Collector-Key") != "collector-secret" {
+				t.Fatalf("unexpected collector headers: %v", request.header)
+			}
+			var delivered collogspb.ExportLogsServiceRequest
+			if err := proto.Unmarshal(request.body, &delivered); err != nil {
+				t.Fatalf("decode evidence: %v", err)
+			}
+			resources := delivered.GetResourceLogs()
+			if len(resources) != 1 || len(resources[0].GetScopeLogs()) != 1 || len(resources[0].GetScopeLogs()[0].GetLogRecords()) != 1 {
+				t.Fatalf("unexpected delivered records: %v", &delivered)
+			}
+			hasAttribute := func(attributes []*commonpb.KeyValue, key, value string) bool {
+				return slices.ContainsFunc(attributes, func(attribute *commonpb.KeyValue) bool {
+					return attribute.GetKey() == key && attribute.GetValue().GetStringValue() == value
+				})
+			}
+			if !hasAttribute(resources[0].GetResource().GetAttributes(), "olp.installation_id", sender.Installation) {
+				t.Fatal("installation identity missing from evidence")
+			}
+			entry := resources[0].GetScopeLogs()[0].GetLogRecords()[0]
+			if entry.GetBody().GetStringValue() != tc.body || entry.GetTimeUnixNano() != uint64(record.At.UnixNano()) ||
+				!hasAttribute(entry.GetAttributes(), "olp.event_id", record.ID) || !hasAttribute(entry.GetAttributes(), "olp.stream", tc.stream) {
+				t.Fatalf("evidence identity, provenance or timestamp changed: %v", entry)
+			}
+		})
 	}
 }
 

@@ -1,20 +1,137 @@
 # Provider compatibility
 
-OpenLLMProxy accepts OpenAI, Anthropic, Gemini, and Bedrock client protocols. A
-route can select a provider using the same protocol or, when the route is
-[transformed](provider-routing.md#route-fidelity), translate to another
-supported protocol. The tables below show supported combinations; translation
-limits follow. See [concepts](../concepts.md) for routes and certification.
+OpenLLMProxy accepts OpenAI, Anthropic, Gemini and Bedrock client protocols. A
+route can use a provider that speaks the same protocol. A
+[transformed route](provider-routing.md#route-fidelity) can instead translate a
+request to another supported protocol. The tables in this guide state the
+supported combinations, and the sections after them define what translation
+preserves, drops or refuses. [Concepts](../concepts.md) explains routes,
+certification and fidelity before this reference goes into endpoint detail.
 
 Reviewed vendor contracts narrow the general connector matrix to the operations
-each vendor documents. See [provider routing](provider-routing.md#reviewed-vendor-contracts)
-for how contracts shape requests, and the [preset table](../operate/configuration.md#openai-compatible-provider-presets)
-for every reviewed vendor. Custom native endpoints require live certification; they do
-not inherit the official OpenAI media discovery contract.
+that each vendor documents. [Provider routing](provider-routing.md#reviewed-vendor-contracts)
+explains how those contracts shape requests. The
+[provider preset table](../operate/configuration.md#openai-compatible-provider-presets)
+lists every reviewed vendor. A custom native endpoint still requires live
+certification and does not inherit the official OpenAI media discovery contract.
 
 The [gateway](../develop/architecture.md) applies shared admission and response bounds to these
 surfaces. Current protocol, connector, SDK, and media tests are described in
 [tests/README.md](../../tests/README.md).
+
+## Published prompt compatibility
+
+Prompts have project-scoped drafts, immutable published revisions and
+`production` and `staging` labels. A request selects one label or exact
+revision for a prompt in the route's project. The gateway resolves the label
+once, substitutes declared string variables in `{{name}}` placeholders and
+applies the route's input limit and input guardrails to the rendered messages.
+Unknown or missing required variables are refused before dispatch. Strict routes
+do not support registry prompt rendering.
+
+Chat Completions, Anthropic Messages and Gemini generation accept an
+`olp_prompt` object in place of explicit messages:
+
+```json
+{"olp_prompt":{"id":"PROMPT_ID","label":"production","variables":{"name":"Ada"}}}
+```
+
+Responses uses the same selection inside `prompt`, with `id` prefixed by
+`olpp_`. Other Responses prompt IDs retain their provider behavior. An exact
+`revision_id` can be used instead of `label` on either form. The console
+playground and inference render on the server using the same published
+revision, including after configuration export and import. Variable values and
+rendered messages are transient rather than configuration data.
+
+Local gateway fixtures cover all four request formats in unary and streaming
+mode, and the packaged-console journey covers publication, label movement and
+accessible playground rendering.
+
+## Saved investigations
+
+The management API and console save project-scoped investigations with time,
+run, duration, error and tool filters, an operator-authored summary and up to
+100 references to run, step, approval, span, task or delegation evidence. The
+record contains no source payloads. Reading an investigation requires current
+project access; opening referenced evidence requires its own current access
+check. Retained step and span links identify the referenced record, including
+spans beyond the first page. Evidence follows its own retention policy and can
+expire before the investigation. The local HTTP regression and packaged-console
+journey exercise these boundaries.
+
+## Agent workflow evidence exports
+
+Observability and managed sinks can export `runs` and `trace_spans` for
+project-scoped or installation-wide configurations. Gateway-created runs carry
+`evidence_origin` set to `gateway_observed`. Ingested spans carry
+`evidence_origin` set to `client_asserted`, even if a client supplies a
+different value. Gateway request and attempt spans set the
+`olp.evidence_origin` attribute to `gateway_observed`. The existing request
+`origin` continues to describe the invocation source.
+
+Span exports retain the nullable `parent_span_id` as a hexadecimal identifier.
+The management [OpenAPI contract](../../openapi/management.json) describes
+the observability and managed `runs` and `trace_spans` webhook envelopes.
+
+Run and span exports contain metadata only. They do not include prompt, tool,
+message or artifact contents, and they do not change billing. Before delivery,
+the sink creator must still have access to the source project and the source
+must remain within request-history retention. These checks apply independently
+to each record sent through an installation-wide sink. Local gateway and export
+fixtures exercise origin, privacy, project isolation and retention.
+
+## Gateway-executed tool workflows
+
+On transformed routes with `tool_execution: gateway`, Chat Completions,
+Responses, Anthropic Messages and Gemini generation can execute published
+MCP tools as part of a bounded run. Only targets certified for model-emitted
+tool calls on the request surface and mode are eligible. The caller can narrow
+the route's toolsets with `olp_toolsets` and tighten its bounds with
+`olp_run_limits`. Read-only tools can execute without approval; other tools
+require approval. See [agent workflows](../develop/plans/agent-gateway.md#gateway-executed-tools)
+for the bounds, approval and accounting behavior.
+
+Model list and detail responses on the OpenAI, Anthropic and Gemini surfaces
+include `capabilities.gateway_execution` when the route and calling key permit
+inspection. It reports surface-specific certified modes for non-shadow targets,
+workflow accounting availability, the effective route and key limits, whether
+all default toolsets are usable together, and the
+caller's available tools with pinned revisions, classifications and unit prices.
+A null price is unpriced; zero is explicitly free. The capability describes
+current configuration and does not reserve a run or guarantee admission.
+
+To inspect a particular request, select the same API key in the published route
+or draft route simulation and supply the native request, including any narrowed
+toolsets and bounds. The simulation capability reports the effective request
+bounds and caller-authorized tools and prices; target decisions report workflow
+refusals alongside normal routing decisions. Delegated route legs use the named
+route's toolsets and bounds and their own serving targets. Simulation does not
+dispatch a model or tool, reserve budget, or guarantee live admission.
+
+The local gateway fixtures exercise unary and streaming workflows for Chat
+Completions, Responses, Anthropic and Gemini, including bounds, target
+certification, approval, authority changes, `typesafe` pruning and compression
+recovery. The caller-filtered discovery fixture is
+`TestGatewayWorkflowDiscoveryRespectsCallerAuthority`. The tests live in
+[`internal/gateway/tool_loop_test.go`](../../internal/gateway/tool_loop_test.go).
+`TestGatewayToolWorkflowSettlesOneRun` in
+[`tests/integration/gateway_test.go`](../../tests/integration/gateway_test.go)
+checks same-key simulation authorization and request bounds for draft and
+published routes, a run and its durable settlement, and rollback with local
+services.
+To stop new gateway execution, republish the transformed route without
+`tool_execution`, `toolsets`, `run_limits` and `responses_mcp_items`. The
+fixture verifies that pending approvals cannot resume, later requests do not
+dispatch gateway tools, caller-managed tool calls still return to the client,
+and authorized project viewers can read the retained run, steps and settlement.
+
+Responses MCP output additionally requires the route's
+`responses_mcp_items` declaration and the certified built-in `openai-responses`
+contract on every successful model step. Other or mixed contracts return the
+final output or an approval pause without MCP items. The pinned official OpenAI
+Go SDK decodes the generated stream in
+`TestGatewayToolExecutionResponsesOfficialSDKDecodesMCPItems`; fixtures also
+cover the final-only fallback for the tested dialect and target combinations.
 
 ## Consumer MCP qualification
 
@@ -44,6 +161,12 @@ modern/legacy session isolation and refusal when a replica lacks the live stream
 Legacy deployments require connection affinity between the SSE GET and its
 POSTs. Modern sessions never fall back to the legacy transport.
 
+`TestWorkloadAgentDelegatesKeyForTools` in
+`tests/integration/workload_identity_test.go` exercises a delegated agent through
+the shared tool path using a local workload issuer and signing fixture. It checks
+the downstream audience-bound agent signature, refusal at another audience,
+one-use credentials, consent, session isolation and shared budget accounting.
+
 Per-user OAuth is qualified separately. Experimental stdio is covered by a
 locally built, owner-permitted executable fixture through the shared consumer
 path. It preserves the unconfined native execution contract and does not provide
@@ -52,6 +175,16 @@ deployment, permission and lifecycle requirements.
 Standalone modern consumer event streams, sampling, elicitation, roots and
 arbitrary resource/prompt calls are not supported by this slice.
 See [MCP server use](mcp-servers.md) for supported calls and rollback behavior.
+
+## A2A evidence
+
+Local reference fixtures cover the pinned A2A 0.3 and 1.0 JSON-RPC adapters.
+`TestWorkloadAgentDelegatesKeyForA2A` in
+`tests/integration/workload_identity_test.go` exercises delegated sends,
+callbacks, caller/agent/pair accounting, consent, renewal, project operator
+access and revocation. `TestA2AOAuthGrantLifecycle` verifies that task actions
+use their original grant and endpoint after publication replacement and refuse
+revoked grants. OLP cannot observe or stop hidden remote iterations.
 
 ## Guardrail compatibility
 
@@ -68,8 +201,8 @@ enforcement; monitoring records the unavailable surface and continues.
 | Cell | Meaning |
 | --- | --- |
 | `native` | The provider speaks this surface's protocol. Protocol-specific fields are preserved subject to gateway validation and model rewriting. |
-| `translated` | The request is decoded into the canonical model and re-encoded for the provider; the route must be transformed. Some fields are dropped and some are refused — see the notes below. |
-| `—` | Refused. The tuple can never be certified, so it can never be activated on a route, and the gateway rejects the request. |
+| `translated` | The request is decoded into the canonical model and re-encoded for the provider, and the route must be transformed. Some fields are dropped and some are refused. See the notes below. |
+| `refused` | The tuple can never be certified, so it can never be activated on a route. The gateway rejects the request. |
 | `gateway` | Answered from visible published routes; model listing is not proxied upstream. |
 | `qualified` | Restricted to the provider, model family, or resource policy described below; exact capabilities still require certification. |
 | `reviewed` | Available only through the named compatible-vendor profiles and certified models. |
@@ -92,7 +225,7 @@ surfaces. Native traffic still undergoes gateway validation and rewriting.
 
 Cells combine transport modes. Generation supports unary and streaming; token
 counting is unary, video creation is asynchronous, and realtime uses WebSockets.
-`—` means no mode of that operation can be certified for the provider.
+`refused` means no mode of that operation can be certified for the provider.
 
 Endpoint registration lives in
 [`internal/gateway/server.go`](../../internal/gateway/server.go); certification
@@ -107,40 +240,40 @@ Use a base URL ending in `/v1` for native OpenAI SDK requests.
 
 | Endpoint | Operation | openai | anthropic | gemini | vertex_ai | bedrock | azure_openai | openai_compatible |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| `POST /v1/completions` | generation | qualified | — | — | — | — | translated | reviewed |
-| `POST /v1/decisions` | decision | qualified | — | — | — | — | — | qualified |
-| `POST /v1/systemone` | decision | — | — | — | — | — | — | qualified |
+| `POST /v1/completions` | generation | qualified | refused | refused | refused | refused | translated | reviewed |
+| `POST /v1/decisions` | decision | qualified | refused | refused | refused | refused | refused | qualified |
+| `POST /v1/systemone` | decision | refused | refused | refused | refused | refused | refused | qualified |
 | `POST /v1/chat/completions` | generation | native | translated | translated | translated | translated | native | native |
 | `POST /v1/responses` | generation | native | translated | translated | translated | translated | native | native |
 | `POST /v1/responses/input_tokens` | token_count | native | translated | translated | translated | translated | native | native |
-| `POST /v1/embeddings` | embeddings | native | — | translated | translated | translated | native | native |
-| `POST /v1/rerank` | rerank | — | — | — | — | qualified | — | reviewed |
-| `POST /v1/moderations` | moderation | native | — | — | — | — | native | native |
-| `POST /v1/files` | file | qualified | — | — | — | — | qualified | — |
-| `GET /v1/files` | file | qualified | — | — | — | — | qualified | — |
-| `GET /v1/files/{id}` | file | qualified | — | — | — | — | qualified | — |
-| `DELETE /v1/files/{id}` | file | qualified | — | — | — | — | qualified | — |
-| `GET /v1/files/{id}/content` | file | qualified | — | — | — | — | qualified | — |
-| `POST /v1/batches` | batch | qualified | — | — | — | — | qualified | — |
-| `GET /v1/batches` | batch | qualified | — | — | — | — | qualified | — |
-| `GET /v1/batches/{id}` | batch | qualified | — | — | — | — | qualified | — |
-| `POST /v1/batches/{id}/cancel` | batch | qualified | — | — | — | — | qualified | — |
-| `GET /v1/responses/{id}` | generation | qualified | — | — | — | — | qualified | — |
-| `DELETE /v1/responses/{id}` | generation | qualified | — | — | — | — | qualified | — |
-| `POST /v1/responses/{id}/cancel` | generation | qualified | — | — | — | — | qualified | — |
-| `GET /v1/responses/{id}/input_items` | generation | qualified | — | — | — | — | qualified | — |
-| `GET /v1/realtime` | realtime | qualified | — | — | — | — | qualified | — |
-| `POST /v1/images/generations` | image_generation | native | — | — | qualified | qualified | qualified | — |
-| `POST /v1/images/edits` | image_edit | native | — | — | — | — | — | — |
-| `POST /v1/images/variations` | image_variation | native | — | — | — | — | — | — |
-| `POST /v1/audio/speech` | speech | native | — | — | — | — | qualified | — |
-| `POST /v1/audio/transcriptions` | transcription | native | — | — | — | — | qualified | — |
-| `POST /v1/audio/translations` | translation | native | — | — | — | — | — | — |
-| `POST /v1/videos` | video_create | native | — | — | — | — | — | — |
-| `GET /v1/videos` | video_list | native | — | — | — | — | — | — |
-| `GET /v1/videos/{video_id}` | video_get | native | — | — | — | — | — | — |
-| `DELETE /v1/videos/{video_id}` | video_delete | native | — | — | — | — | — | — |
-| `GET /v1/videos/{video_id}/content` | video_content | native | — | — | — | — | — | — |
+| `POST /v1/embeddings` | embeddings | native | refused | translated | translated | translated | native | native |
+| `POST /v1/rerank` | rerank | refused | refused | refused | refused | qualified | refused | reviewed |
+| `POST /v1/moderations` | moderation | native | refused | refused | refused | refused | native | native |
+| `POST /v1/files` | file | qualified | refused | refused | refused | refused | qualified | refused |
+| `GET /v1/files` | file | qualified | refused | refused | refused | refused | qualified | refused |
+| `GET /v1/files/{id}` | file | qualified | refused | refused | refused | refused | qualified | refused |
+| `DELETE /v1/files/{id}` | file | qualified | refused | refused | refused | refused | qualified | refused |
+| `GET /v1/files/{id}/content` | file | qualified | refused | refused | refused | refused | qualified | refused |
+| `POST /v1/batches` | batch | qualified | refused | refused | refused | refused | qualified | refused |
+| `GET /v1/batches` | batch | qualified | refused | refused | refused | refused | qualified | refused |
+| `GET /v1/batches/{id}` | batch | qualified | refused | refused | refused | refused | qualified | refused |
+| `POST /v1/batches/{id}/cancel` | batch | qualified | refused | refused | refused | refused | qualified | refused |
+| `GET /v1/responses/{id}` | generation | qualified | refused | refused | refused | refused | qualified | refused |
+| `DELETE /v1/responses/{id}` | generation | qualified | refused | refused | refused | refused | qualified | refused |
+| `POST /v1/responses/{id}/cancel` | generation | qualified | refused | refused | refused | refused | qualified | refused |
+| `GET /v1/responses/{id}/input_items` | generation | qualified | refused | refused | refused | refused | qualified | refused |
+| `GET /v1/realtime` | realtime | qualified | refused | refused | refused | refused | qualified | refused |
+| `POST /v1/images/generations` | image_generation | native | refused | refused | qualified | qualified | qualified | refused |
+| `POST /v1/images/edits` | image_edit | native | refused | refused | refused | refused | refused | refused |
+| `POST /v1/images/variations` | image_variation | native | refused | refused | refused | refused | refused | refused |
+| `POST /v1/audio/speech` | speech | native | refused | refused | refused | refused | qualified | refused |
+| `POST /v1/audio/transcriptions` | transcription | native | refused | refused | refused | refused | qualified | refused |
+| `POST /v1/audio/translations` | translation | native | refused | refused | refused | refused | refused | refused |
+| `POST /v1/videos` | video_create | native | refused | refused | refused | refused | refused | refused |
+| `GET /v1/videos` | video_list | native | refused | refused | refused | refused | refused | refused |
+| `GET /v1/videos/{video_id}` | video_get | native | refused | refused | refused | refused | refused | refused |
+| `DELETE /v1/videos/{video_id}` | video_delete | native | refused | refused | refused | refused | refused | refused |
+| `GET /v1/videos/{video_id}/content` | video_content | native | refused | refused | refused | refused | refused | refused |
 | `GET /v1/models` | model_list | gateway | gateway | gateway | gateway | gateway | gateway | gateway |
 | `GET /v1/models/{id}` | model_get | gateway | gateway | gateway | gateway | gateway | gateway | gateway |
 
@@ -225,8 +358,8 @@ qualification remains required; this evidence does not qualify unimplemented API
 
 `ocr` and `search` are separate unary operations. `POST /v1/ocr` binds its
 route from the request body's `model`; `POST /v1/search` carries no model
-field and binds its route from the required `X-OLP-Route` header — a missing
-header is refused `400 missing_required_parameter` before dispatch. Both
+field and binds its route from the required `X-OLP-Route` header. A missing
+header is refused with `400 missing_required_parameter` before dispatch. Both
 operations also serve `/native/{dialect}/models/{route}` on strict routes, and
 serve transformed routes through their reviewed mappings. Neither operation
 uses the response cache.
@@ -452,8 +585,8 @@ settled stay in the usage history unchanged, debit records included.
 
 | Endpoint | Operation | openai | anthropic | gemini | vertex_ai | bedrock | azure_openai | openai_compatible |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| `POST /anthropic/v1/messages` | generation | translated | native | translated | translated | translated | translated | — |
-| `POST /anthropic/v1/messages/count_tokens` | token_count | translated | native | translated | translated | translated | translated | — |
+| `POST /anthropic/v1/messages` | generation | translated | native | translated | translated | translated | translated | refused |
+| `POST /anthropic/v1/messages/count_tokens` | token_count | translated | native | translated | translated | translated | translated | refused |
 | `GET /anthropic/v1/models` | model_list | gateway | gateway | gateway | gateway | gateway | gateway | gateway |
 | `GET /anthropic/v1/models/{id}` | model_get | gateway | gateway | gateway | gateway | gateway | gateway | gateway |
 
@@ -485,11 +618,11 @@ Replace `{version}` below with `v1` or `v1beta`.
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | `GET /gemini/{version}/models` | model_list | gateway | gateway | gateway | gateway | gateway | gateway | gateway |
 | `GET /gemini/{version}/models/{model}` | model_get | gateway | gateway | gateway | gateway | gateway | gateway | gateway |
-| `POST /gemini/{version}/models/{model}:generateContent` | generation | translated | translated | native | native | translated | translated | — |
-| `POST /gemini/{version}/models/{model}:streamGenerateContent` | generation | translated | translated | native | native | translated | translated | — |
-| `POST /gemini/{version}/models/{model}:countTokens` | token_count | translated | translated | native | native | translated | translated | — |
-| `POST /gemini/{version}/models/{model}:embedContent` | embeddings | — | — | qualified | — | — | — | — |
-| `POST /gemini/{version}/models/{model}:batchEmbedContents` | embeddings | — | — | qualified | — | — | — | — |
+| `POST /gemini/{version}/models/{model}:generateContent` | generation | translated | translated | native | native | translated | translated | refused |
+| `POST /gemini/{version}/models/{model}:streamGenerateContent` | generation | translated | translated | native | native | translated | translated | refused |
+| `POST /gemini/{version}/models/{model}:countTokens` | token_count | translated | translated | native | native | translated | translated | refused |
+| `POST /gemini/{version}/models/{model}:embedContent` | embeddings | refused | refused | qualified | refused | refused | refused | refused |
+| `POST /gemini/{version}/models/{model}:batchEmbedContents` | embeddings | refused | refused | qualified | refused | refused | refused | refused |
 
 The two Gemini embedding endpoints are served only on
 [strict routes](provider-routing.md#route-fidelity) whose targets hold the
@@ -513,17 +646,17 @@ gateway re-signs with the configured Bedrock credential.
 
 | Endpoint | Operation | openai | anthropic | gemini | vertex_ai | bedrock | azure_openai | openai_compatible |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| `POST /bedrock/model/{model}/converse` | generation | — | — | — | — | native | — | — |
-| `POST /bedrock/model/{model}/converse-stream` | generation | — | — | — | — | native | — | — |
-| `POST /bedrock/model/{model}/invoke` | bedrock_invoke | — | — | — | — | qualified | — | — |
-| `POST /bedrock/model/{model}/invoke-with-response-stream` | bedrock_invoke | — | — | — | — | qualified | — | — |
+| `POST /bedrock/model/{model}/converse` | generation | refused | refused | refused | refused | native | refused | refused |
+| `POST /bedrock/model/{model}/converse-stream` | generation | refused | refused | refused | refused | native | refused | refused |
+| `POST /bedrock/model/{model}/invoke` | bedrock_invoke | refused | refused | refused | refused | qualified | refused | refused |
+| `POST /bedrock/model/{model}/invoke-with-response-stream` | bedrock_invoke | refused | refused | refused | refused | qualified | refused | refused |
 
 Only native Bedrock targets holding the exact certified ingress mode qualify.
 Unary Converse responses are validated through the same decoder as translated
 traffic before their bytes are returned to the caller. InvokeModel requires a
-transformed route and supports only the model families OLP qualifies —
-Anthropic Claude generation, Titan embeddings, and Titan image generation — each
-with model-specific response validation; other model IDs fail with a clear
+transformed route and supports only the model families OLP qualifies. Those
+families are Anthropic Claude generation, Titan embeddings and Titan image
+generation, each with model-specific response validation. Other model IDs fail with a clear
 protocol error. Streaming responses validate AWS event-stream CRC and frame size
 and re-encode each frame; a malformed or oversized frame terminates the stream
 rather than forwarding unchecked bytes. Usage is normalized from Bedrock
@@ -555,9 +688,9 @@ change.
 
 ### Anthropic providers
 
-Translation to Anthropic maps a `json_schema` `response_format` — schema object
-required, `strict` honored only when set true — onto Anthropic's
-`output_config`, and treats `text` as no structured output. `json_object` and
+Translation to Anthropic maps a `json_schema` `response_format` onto Anthropic's
+`output_config`. The schema object is required, and `strict` is honored only when
+it is set to true. Translation treats `text` as no structured output. `json_object` and
 unknown formats are still refused, and whether a given model accepts the
 translated field is provider/model dependent: unsupported combinations fail
 clearly rather than silently degrading. The
@@ -580,7 +713,7 @@ counting unary and bind the selected transport mode.
 Gemini holds the shared contract with no exemptions. Translation refuses
 parallel tool-call selection, a participant `name`, a system message that
 appears after the conversation has started, a tool result whose content is not
-text, and — as with Anthropic — input audio, input file, and refusal parts, or
+text and, as with Anthropic, input audio, input file and refusal parts, or
 an image with an explicit detail level. An image without a MIME type is refused
 rather than guessed. These checks live in the
 [Gemini encoder](../../internal/protocols/canonical_gemini.go); the
@@ -617,8 +750,8 @@ requested input.
 ### Bedrock providers
 
 For translation into Bedrock, a `json_schema` `response_format` maps onto
-Converse `outputConfig` — the schema as compact JSON text plus the required
-schema name — for both Converse and ConverseStream, while `json_object` and
+Converse `outputConfig`, using the schema as compact JSON text plus the required
+schema name, for both Converse and ConverseStream. The `json_object` format and
 unknown formats remain refused. Whether a given model honors the field is
 provider/model dependent; unsupported combinations still fail clearly. Reported
 cache-read and cache-write input tokens are normalized into usage; canonical

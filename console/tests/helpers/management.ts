@@ -59,6 +59,7 @@ export async function provisionGenerationRoute(
     endpoint: string;
     model: string;
     credential: string;
+    projectId?: string;
     credentialSource?: 'operator' | 'caller';
   }
 ) {
@@ -85,6 +86,7 @@ export async function provisionGenerationRoute(
       idempotency: crypto.randomUUID(),
       body: {
         name: fixture.providerName,
+        ...(fixture.projectId ? { project_id: fixture.projectId } : {}),
         configuration: {
           kind: 'openai_compatible',
           endpoint: fixture.endpoint,
@@ -128,6 +130,7 @@ export async function provisionGenerationRoute(
       idempotency: crypto.randomUUID(),
       body: {
         slug: fixture.route,
+        ...(fixture.projectId ? { project_id: fixture.projectId } : {}),
         operations: ['generation'],
         fidelity: { mode: 'transformed' },
         overall_timeout_ms: 20_000,

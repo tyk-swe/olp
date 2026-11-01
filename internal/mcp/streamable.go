@@ -198,7 +198,7 @@ func (s *Server) requireSession(ctx context.Context, r *http.Request, authority 
 }
 
 func (s *Server) serveStreamableGET(w http.ResponseWriter, r *http.Request) {
-	if _, failure := s.authenticate(r); failure != nil {
+	if _, failure := s.reauthenticateSession(r); failure != nil {
 		writeRPCFailure(w, nil, failureRPC(failure.status, rpcServerError, failure))
 		return
 	}
@@ -207,7 +207,7 @@ func (s *Server) serveStreamableGET(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) serveStreamableDELETE(w http.ResponseWriter, r *http.Request) {
-	authority, failure := s.authenticate(r)
+	authority, failure := s.authenticateSession(r)
 	if failure != nil {
 		writeRPCFailure(w, nil, failureRPC(failure.status, rpcServerError, failure))
 		return
@@ -256,7 +256,7 @@ func (s *Server) serveSessionHTTP(w http.ResponseWriter, r *http.Request, transp
 		writeRPCFailure(w, nil, rpcFailure{status: http.StatusBadRequest, code: code, message: "Supply one JSON-RPC 2.0 message.", data: rpcErrorData{Code: "invalid_request"}})
 		return
 	}
-	authority, failure := s.authenticate(r)
+	authority, failure := s.authenticateSessionMessage(r, message, transport)
 	if failure != nil {
 		writeRPCFailure(w, message.id, failureRPC(failure.status, rpcServerError, failure))
 		return
@@ -290,6 +290,13 @@ func (s *Server) serveSessionHTTP(w http.ResponseWriter, r *http.Request, transp
 		return
 	}
 	s.serveSessionRequest(w, r, authority, record, message)
+}
+
+func (s *Server) authenticateSessionMessage(r *http.Request, message rpcMessage, transport sessionTransport) (access.Authority, *apiError) {
+	if transport == sessionStreamable && message.hasCall && message.method == "initialize" {
+		return s.authenticate(r)
+	}
+	return s.authenticateSession(r)
 }
 
 func (s *Server) sessionToolset(authority access.Authority, snapshot *routing.Snapshot, requested string) (resolvedToolset, *apiError) {

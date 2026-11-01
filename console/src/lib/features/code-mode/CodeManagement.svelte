@@ -24,10 +24,13 @@
   import { codeKeys } from './codeKeys';
   import {
     adapterLabel,
+    servingHealthLabel,
     mutationError,
     tokenCount,
     type CodeEditing
   } from './presentation';
+  import { listProviders } from '$lib/features/providers/api/providers';
+  import { listCredentialSlots } from '$lib/features/providers/api/credentials';
   import ResourceEditor from './ResourceEditor.svelte';
   import RouteRevisions from './RouteRevisions.svelte';
   import ClientConfiguration from './ClientConfiguration.svelte';
@@ -89,6 +92,27 @@
   const inventory = createQuery(() => ({
     queryKey: codeKeys.inventory(projectId, kind),
     queryFn: async ({ signal }) => ({
+      providers:
+        kind === 'routes'
+          ? await Promise.all(
+              (await listProviders(signal))
+                .filter(
+                  (provider) =>
+                    provider.project_id === projectId &&
+                    provider.state === 'active' &&
+                    provider.kind !== 'plugin'
+                )
+                .map(async (provider) => ({
+                  id: provider.id,
+                  name: provider.name,
+                  slots: (
+                    await listCredentialSlots(provider.id, signal)
+                  ).items.filter(
+                    (slot) => slot.enabled && slot.credential_version_id
+                  )
+                }))
+            )
+          : [],
       accounts:
         kind === 'pools' || kind === 'routes'
           ? await collectCursorPages((cursor) =>
@@ -131,7 +155,7 @@
       busy ||
       !allowed ||
       !confirm(
-        `Publish the current draft for ${route.slug}? Provider connections will be captured without an inference probe.`
+        `Publish the current draft for ${route.slug}? Provider connections will be captured without an inference probe.${route.codex_cli_identity ? ' Codex CLI identity compatibility will fill Originator=codex_cli_rs only when all supplied Originator values are absent or blank on Codex subscription HTTP and WebSocket requests. Explicit identity headers, User-Agent, prompts, tools, reasoning and state are preserved. This compatibility identity may violate provider terms and risk account suspension.' : ' Codex CLI identity compatibility is disabled. Identity headers and prompts are preserved.'}`
       )
     )
       return;
@@ -220,9 +244,12 @@
   {:else}
     {#if kind === 'accounts'}
       <p>
-        Eligibility reflects current grant authority. Unknown serving health
-        means no qualified observation; enrollment is not an inference test.
-        Provider allowance is separate from local budgets and reported usage.
+        Eligibility depends on grant authority, serving cooldowns and observed
+        allowance. Unknown serving health means no qualified observation.
+        Enrollment is not an inference test. A rejected refresh lapses the grant
+        and requires enrollment again. Passing a retry or reset time permits a
+        new attempt without changing the reported allowance. Provider allowance
+        is separate from local budgets and reported usage
       </p>
       {#each accounts.data?.items ?? [] as account (account.id)}
         <article class="card">
@@ -249,9 +276,24 @@
                 : 'disabled'}
             </dd>
             <dt>Grant state</dt>
-            <dd>{account.grant_state}</dd>
+            <dd>
+              {account.grant_state === 'lapsed'
+                ? 'Grant lapsed, enroll again'
+                : account.grant_state}
+            </dd>
             <dt>Serving health</dt>
-            <dd>{account.health}</dd>
+            <dd>
+              {servingHealthLabel(account.health)}
+              {#if account.health_observed_at}
+                · Observed {formatDate(account.health_observed_at)}
+              {/if}
+            </dd>
+            <dt>Serving retry time</dt>
+            <dd>
+              {account.unavailable_until
+                ? formatDate(account.unavailable_until)
+                : 'No serving cooldown reported'}
+            </dd>
             <dt>Native models</dt>
             <dd>{account.models.join(', ')}</dd>
             <dt>Provider / credential</dt>
@@ -375,14 +417,24 @@
                 <span class="badge">{adapterLabel(adapter)}</span>
               {:else}
                 {route.published_at
-                  ? 'No adapter: its accounts serve no supported client'
+                  ? 'No subscription adapter is published'
                   : 'Set at publication'}
               {/each}
+            </dd>
+            <dt>Paid native models</dt>
+            <dd>
+              {Object.keys(route.paid_targets ?? {}).join(', ') || 'None'}
             </dd>
             <dt>Draft models</dt>
             <dd>{route.models.join(', ')}</dd>
             <dt>Draft pool</dt>
             <dd>{route.pool_id}</dd>
+            <dt>Draft Codex CLI identity compatibility</dt>
+            <dd>
+              {route.codex_cli_identity
+                ? 'Enabled, requires publication'
+                : 'Disabled'}
+            </dd>
             <dt>Draft enabled</dt>
             <dd>{route.enabled ? 'Yes' : 'No'}</dd>
             <dt>Latest publication</dt>
@@ -414,8 +466,8 @@
       <p>
         Daily and monthly periods use UTC. These are token caps, never
         subscription allowance or billed spend. Existing key
-        request/rate/concurrency limits also apply. Code-mode does not enforce
-        monetary estimates.
+        request/rate/concurrency limits also apply. Paid API targets
+        additionally require known pricing and monetary admission.
       </p>
       {#each budgets.data?.items ?? [] as budget (budget.id)}
         <article class="card">

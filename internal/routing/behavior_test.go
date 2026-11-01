@@ -2,7 +2,35 @@ package routing
 
 import (
 	"testing"
+
+	"github.com/google/uuid"
 )
+
+func TestGatewayToolExecutionBehaviorValidatesAndRoundTrips(t *testing.T) {
+	toolsetID := uuid.NewString()
+	valid, err := DecodeBehavior([]byte(`{"tool_execution":"gateway","toolsets":["` + toolsetID + `"]}`))
+	if err != nil || valid.IsZero() || valid.ToolExecution != "gateway" || len(valid.Toolsets) != 1 || valid.Toolsets[0] != toolsetID {
+		t.Fatalf("workflow behavior was not retained: %+v, %v", valid, err)
+	}
+	if err := valid.Validate("route", func(string) bool { return false }); err != nil {
+		t.Fatalf("valid workflow behavior refused: %v", err)
+	}
+	for _, tc := range []struct {
+		name     string
+		behavior Behavior
+	}{
+		{"unknown execution mode", Behavior{ToolExecution: "other"}},
+		{"toolsets without gateway execution", Behavior{Toolsets: []string{toolsetID}}},
+		{"malformed toolset", Behavior{ToolExecution: "gateway", Toolsets: []string{"not-a-uuid"}}},
+		{"duplicate toolset", Behavior{ToolExecution: "gateway", Toolsets: []string{toolsetID, toolsetID}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := tc.behavior.Validate("route", func(string) bool { return false }); err == nil {
+				t.Fatal("invalid workflow behavior was accepted")
+			}
+		})
+	}
+}
 
 func TestBehaviorValidationRefusesMalformedDeclarations(t *testing.T) {
 	tagged := func(tag string) bool { return tag == "fast" }

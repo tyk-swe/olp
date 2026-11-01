@@ -8,6 +8,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/agentcontract"
 	"github.com/tyk-swe/olp/internal/mcpservers"
 	"github.com/tyk-swe/olp/internal/routing"
 )
@@ -57,8 +58,52 @@ func (s *Server) Register(mux *http.ServeMux) {
 	s.Access.Route(mux, "POST /api/v1/mcp-grant-enrollments/{enrollment_id}/complete", s.complete)
 	s.Access.Route(mux, "POST /api/v1/mcp-grant-enrollments/{enrollment_id}/poll", s.poll)
 	s.Access.Route(mux, "POST /api/v1/mcp-servers/{server_id}/grant-enrollments", s.start)
+	s.Access.Route(mux, "POST /api/v1/agents/{agent_id}/grant-enrollments", s.startAgent)
 	s.Access.Route(mux, "POST /api/v1/mcp-grant-enrollments/claim", s.claim)
 	s.Access.Route(mux, "DELETE /api/v1/mcp-user-grants/{grant_id}", s.revoke)
+}
+
+func (s *Server) startAgent(r *http.Request, p access.Principal) (access.Reply, error) {
+	if p.Kind != "user" {
+		return access.Reply{}, access.Forbidden()
+	}
+	id, err := access.IDParam(r, "agent_id")
+	if err != nil {
+		return access.Reply{}, err
+	}
+	var input startRequest
+	if err := access.Decode(r, &input); err != nil {
+		return access.Reply{}, err
+	}
+	keyUUID, err := uuid.Parse(input.KeyID)
+	if err != nil {
+		return access.Reply{}, access.Invalid("api_key_id", "Use an API key UUID.")
+	}
+	var project string
+	var draft agentcontract.Draft
+	if err := s.Access.Pool.QueryRow(r.Context(), `SELECT p.project_id::text,v.definition FROM olp.agent_publications p JOIN olp.agent_publication_revisions v ON v.id=p.latest_revision_id WHERE p.id=$1 AND p.kind='agent' AND NOT p.retired`, id).Scan(&project, &draft); err != nil {
+		return access.Reply{}, err
+	}
+	if err := p.Project(&project, access.Change); err != nil {
+		return access.Reply{}, err
+	}
+	var keyProject string
+	if err := s.Access.Pool.QueryRow(r.Context(), `SELECT project_id::text FROM olp.api_keys WHERE id=$1 AND revoked_at IS NULL`, keyUUID.String()).Scan(&keyProject); err != nil {
+		return access.Reply{}, err
+	}
+	if keyProject != project || draft.Agent == nil {
+		return access.Reply{}, access.Fail(404, "not_found", "The API key was not found.")
+	}
+	bound, err := BindAgent(access.Authority{ID: keyUUID.String(), ProjectID: &project}, id, *draft.Agent)
+	if err != nil {
+		return access.Reply{}, access.Invalid("agent_id", "Configure personal OAuth for this agent before enrollment.")
+	}
+	member := p.UserID()
+	handoff, err := s.store().Start(r.Context(), bound, &member)
+	if err != nil {
+		return access.Reply{}, grantProblem(err)
+	}
+	return access.Detail(handoff, ""), nil
 }
 
 func (s *Server) start(r *http.Request, p access.Principal) (access.Reply, error) {

@@ -4,9 +4,13 @@ package codemode
 
 import (
 	"fmt"
+	"github.com/google/uuid"
+	"maps"
 	"math"
 	"net/http"
 	"regexp"
+	"slices"
+	"strings"
 	"time"
 )
 
@@ -18,6 +22,8 @@ const BasePath = "/code/"
 type Adapter string
 
 const (
+	AdapterClaude        Adapter = "claude"
+	AdapterAntigravity   Adapter = "antigravity"
 	AdapterCodex         Adapter = "codex"
 	AdapterOpenCodeGo    Adapter = "opencode_go"
 	AdapterZAICoding     Adapter = "zai_coding"
@@ -49,6 +55,7 @@ type Authorization struct {
 	Principal       string
 	CredentialID    string
 	GrantGeneration int64
+	ProjectID       string
 }
 
 type Refusal struct {
@@ -60,19 +67,21 @@ func (r *Refusal) Error() string           { return r.Code }
 func Refuse(status int, code string) error { return &Refusal{Status: status, Code: code} }
 
 type Account struct {
-	ID           string     `json:"id"`
-	ProjectID    string     `json:"project_id"`
-	ProviderID   string     `json:"provider_id"`
-	CredentialID string     `json:"credential_id"`
-	Principal    string     `json:"principal"`
-	Name         string     `json:"name"`
-	Enabled      bool       `json:"enabled"`
-	Models       []string   `json:"models"`
-	ETag         string     `json:"etag"`
-	Health       string     `json:"health"`
-	Eligible     bool       `json:"eligible"`
-	GrantState   string     `json:"grant_state"`
-	Allowance    *Allowance `json:"allowance"`
+	ID               string     `json:"id"`
+	ProjectID        string     `json:"project_id"`
+	ProviderID       string     `json:"provider_id"`
+	CredentialID     string     `json:"credential_id"`
+	Principal        string     `json:"principal"`
+	Name             string     `json:"name"`
+	Enabled          bool       `json:"enabled"`
+	Models           []string   `json:"models"`
+	ETag             string     `json:"etag"`
+	Health           string     `json:"health"`
+	HealthObservedAt *time.Time `json:"health_observed_at"`
+	UnavailableUntil *time.Time `json:"unavailable_until"`
+	Eligible         bool       `json:"eligible"`
+	GrantState       string     `json:"grant_state"`
+	Allowance        *Allowance `json:"allowance"`
 }
 
 // Allowance is provider-reported subscription metadata, never a local budget.
@@ -112,12 +121,16 @@ func (a Allowance) Validate() error {
 // published route. Configuration is text in Format, saved as File, or sourced
 // in a shell when File is nil. It never contains an OLP key.
 type ClientConfiguration struct {
+	PaidModels        []string            `json:"paid_models,omitempty"`
+	Models            []Model             `json:"models"`
 	AdditionalFiles   []ConfigurationFile `json:"additional_files,omitempty"`
 	RouteSlug         string              `json:"route_slug"`
 	BaseURL           string              `json:"base_url"`
 	NativeModels      []string            `json:"native_models"`
 	Adapters          []Adapter           `json:"adapters"`
 	Client            string              `json:"client"`
+	Platform          string              `json:"platform"`
+	Instructions      string              `json:"instructions"`
 	SupportedClients  []string            `json:"supported_clients"`
 	ClientVersion     string              `json:"client_version"`
 	Model             string              `json:"model"`
@@ -129,30 +142,107 @@ type ClientConfiguration struct {
 	QualificationGaps []string            `json:"qualification_gaps"`
 }
 
+type Model struct {
+	ModelPool    []string          `json:"model_pool,omitempty"`
+	Paid         bool              `json:"paid"`
+	ID           string            `json:"id"`
+	Object       string            `json:"object"`
+	Capabilities []ModelCapability `json:"capabilities"`
+	Clients      []string          `json:"clients"`
+}
+
+type ModelCapability struct {
+	Protocol   Protocol `json:"protocol"`
+	Path       string   `json:"path"`
+	Transports []string `json:"transports"`
+}
+
 type Pool struct {
-	ID          string   `json:"id"`
-	ProjectID   string   `json:"project_id"`
-	Name        string   `json:"name"`
-	Kind        string   `json:"kind"`
-	OwnerUserID *string  `json:"owner_user_id"`
-	AccountIDs  []string `json:"account_ids"`
-	APIKeyIDs   []string `json:"api_key_ids"`
-	ETag        string   `json:"etag"`
+	ID             string           `json:"id"`
+	ProjectID      string           `json:"project_id"`
+	Name           string           `json:"name"`
+	Kind           string           `json:"kind"`
+	OwnerUserID    *string          `json:"owner_user_id"`
+	AccountIDs     []string         `json:"account_ids"`
+	AccountWeights map[string]int64 `json:"account_weights"`
+	APIKeyIDs      []string         `json:"api_key_ids"`
+	ETag           string           `json:"etag"`
+}
+
+type PaidTarget struct {
+	ProviderID string `json:"provider_id"`
+	SlotID     string `json:"slot_id"`
+}
+
+func (r Route) ValidatePaidTargets() error {
+	if len(r.PaidTargets)+len(r.PaidFallbackTargets) > 100 || (len(r.PaidTargets) > 0 || len(r.PaidFallbackTargets) > 0) && !r.PaidParticipation {
+		return Refuse(400, "code_paid_participation_disabled")
+	}
+	if len(r.PaidFallbackTargets) > 0 && r.InitialRecoveryAttempts < 1 {
+		return Refuse(400, "code_paid_fallback_recovery_required")
+	}
+	for model := range r.PaidFallbackTargets {
+		if _, direct := r.PaidTargets[model]; direct {
+			return Refuse(400, "code_paid_target_conflict")
+		}
+	}
+	for model, target := range r.AllPaidTargets() {
+		if !slices.Contains(r.Models, model) {
+			return Refuse(400, "code_paid_model_invalid")
+		}
+		for _, id := range []string{target.ProviderID, target.SlotID} {
+			parsed, err := uuid.Parse(id)
+			if err != nil || parsed == uuid.Nil || parsed.String() != id {
+				return Refuse(400, "code_paid_target_invalid")
+			}
+		}
+	}
+	return nil
+}
+
+func (r Route) PaidTarget(model string, fallback bool) PaidTarget {
+	if fallback {
+		return r.PaidFallbackTargets[model]
+	}
+	return r.PaidTargets[model]
+}
+
+func (r Route) AllPaidTargets() map[string]PaidTarget {
+	return maps.Collect(func(yield func(string, PaidTarget) bool) {
+		for _, targets := range []map[string]PaidTarget{r.PaidTargets, r.PaidFallbackTargets} {
+			for model, target := range targets {
+				if !yield(model, target) {
+					return
+				}
+			}
+		}
+	})
 }
 
 type Route struct {
-	Tools        *ResearchTools `json:"tools,omitempty"`
-	MaxBodyBytes *int64         `json:"max_body_bytes,omitempty"`
-	ID           string         `json:"id"`
-	ProjectID    string         `json:"project_id"`
-	Slug         string         `json:"slug"`
-	PoolID       string         `json:"pool_id"`
-	Models       []string       `json:"models"`
-	Enabled      bool           `json:"enabled"`
-	RevisionID   string         `json:"revision_id"`
-	Revision     int            `json:"revision"`
-	ETag         string         `json:"etag"`
-	PublishedAt  *time.Time     `json:"published_at"`
+	CodexCLIIdentity        bool                  `json:"codex_cli_identity,omitempty"`
+	PaidFallbackTargets     map[string]PaidTarget `json:"paid_fallback_targets,omitempty"`
+	ChatToAntigravity       bool                  `json:"chat_to_antigravity,omitempty"`
+	PaidParticipation       bool                  `json:"paid_participation,omitempty"`
+	PaidTargets             map[string]PaidTarget `json:"paid_targets,omitempty"`
+	ModelPools              map[string][]string   `json:"model_pools,omitempty"`
+	InitialRecoveryAttempts int                   `json:"initial_recovery_attempts,omitempty"`
+	ModelRewriting          bool                  `json:"model_rewriting,omitempty"`
+	Aliases                 map[string]string     `json:"aliases,omitempty"`
+	ChatToCodex             bool                  `json:"chat_to_codex,omitempty"`
+	MessagesToCodex         bool                  `json:"messages_to_codex,omitempty"`
+	Tools                   *ResearchTools        `json:"tools,omitempty"`
+	MaxBodyBytes            *int64                `json:"max_body_bytes,omitempty"`
+	ID                      string                `json:"id"`
+	ProjectID               string                `json:"project_id"`
+	Slug                    string                `json:"slug"`
+	PoolID                  string                `json:"pool_id"`
+	Models                  []string              `json:"models"`
+	Enabled                 bool                  `json:"enabled"`
+	RevisionID              string                `json:"revision_id"`
+	Revision                int                   `json:"revision"`
+	ETag                    string                `json:"etag"`
+	PublishedAt             *time.Time            `json:"published_at"`
 }
 
 func (r Route) BasePath() string { return BasePath + r.Slug }
@@ -171,13 +261,18 @@ func (i Identity) Validate() error {
 	return nil
 }
 
+func (i Identity) Generic() bool {
+	return strings.HasPrefix(i.Conversation, "olp:request/") || strings.HasPrefix(i.Conversation, "olp:affinity/")
+}
+
 // Pin is the account a conversation tree serves one model from. A tree's
 // first admission of a model pins it, and the pin never moves.
 type Pin struct {
-	Model     string    `json:"model"`
-	AccountID string    `json:"account_id"`
-	Principal string    `json:"principal"`
-	CreatedAt time.Time `json:"created_at"`
+	TargetModel string    `json:"target_model"`
+	Model       string    `json:"model"`
+	AccountID   string    `json:"account_id"`
+	Principal   string    `json:"principal"`
+	CreatedAt   time.Time `json:"created_at"`
 }
 
 type Binding struct {
@@ -195,13 +290,22 @@ type Binding struct {
 }
 
 type Operation struct {
-	Name     string
-	Model    string
-	Identity Identity
+	RequestedModel string
+	Name           string
+	Model          string
+	Identity       Identity
+}
+
+func (o Operation) PublicModel() string {
+	if o.RequestedModel != "" {
+		return o.RequestedModel
+	}
+	return o.Model
 }
 
 // Request is what OLP reads from a forwarded request body without rewriting it.
 type Request struct {
+	Recoverable      bool
 	Operation        Operation
 	PreviousResponse string
 	Estimate         int64
@@ -236,6 +340,11 @@ func (b *TokenBound) Validate() error {
 }
 
 type Attempt struct {
+	InitialRecovery   bool              `json:"initial_recovery"`
+	Nonexecution      bool              `json:"nonexecution"`
+	RecoveryFrom      *string           `json:"recovery_from"`
+	RecoveryReason    *string           `json:"recovery_reason"`
+	RequestedModel    *string           `json:"requested_model"`
 	Attribution       map[string]string `json:"attribution,omitempty"`
 	EndUserDigest     string            `json:"end_user_digest"`
 	UpstreamStatus    *int              `json:"upstream_status"`

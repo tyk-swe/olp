@@ -14,6 +14,31 @@ func decodeAnthropicGeneration(r *reader) error {
 	}
 	r.parameter("max_tokens", "max_output_tokens")
 	r.parameter("stop_sequences", "stop")
+	if v := r.take("output_config"); present(v) {
+		config, err := read(v, "/output_config", c)
+		if err != nil {
+			return err
+		}
+		if effort := config.take("effort"); present(effort) {
+			switch str(effort) {
+			case "low", "medium", "high":
+				c.Parameters["reasoning_effort"] = effort
+			default:
+				return unsupported("output_config.effort")
+			}
+		}
+		config.finish()
+	}
+	if v := r.take("thinking"); present(v) {
+		thinking, err := read(v, "/thinking", c)
+		if err != nil {
+			return err
+		}
+		if str(thinking.take("type")) != "adaptive" || !present(c.Parameters["reasoning_effort"]) {
+			return unsupported("thinking")
+		}
+		thinking.finish()
+	}
 	if v := r.take("system"); present(v) {
 		parts, e := decodeParts(v, "anthropic", "/system", c)
 		if e != nil {
@@ -45,6 +70,9 @@ func decodeAnthropicGeneration(r *reader) error {
 				case "tool_use":
 					base.Calls = append(base.Calls, wire.ToolCall{ID: str(f.take("id")), Name: str(f.take("name")), Arguments: string(f.take("input"))})
 				case "tool_result":
+					if value, present := f.f["is_error"]; present && string(value) == "false" {
+						f.take("is_error")
+					}
 					if len(base.Parts) > 0 || len(base.Calls) > 0 {
 						c.Messages = append(c.Messages, base)
 						base = Message{Role: role}

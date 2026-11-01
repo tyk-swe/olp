@@ -42,6 +42,115 @@ const server: MCPServer = {
 };
 
 describe('publication configuration', () => {
+  it('preserves Entra on-behalf-of settings without browser enrollment endpoints', () => {
+    const input = publicationInput('agents', {
+      ...publicationForm(),
+      project: id,
+      name: 'Agent',
+      endpoint: 'https://agent.example/rpc',
+      cardDigest: 'a'.repeat(64),
+      pricingRevision: id,
+      maxCost: '1',
+      oauthEnabled: true,
+      oauthEntra: true,
+      oauthEntraIssuer: 'https://identity.example/tenant',
+      oauthClientID: 'middle-tier',
+      oauthAudience: 'api://downstream',
+      oauthScopes: 'api://downstream/send',
+      oauthAuthorizationEndpoint: 'https://old.example/authorize',
+      oauthDeviceEndpoint: 'https://old.example/device',
+      oauthTokenEndpoint: 'https://identity.example/token'
+    });
+    expect(input.agent?.oauth).toEqual({
+      client_id: 'middle-tier',
+      audience: 'api://downstream',
+      scopes: ['api://downstream/send'],
+      token_endpoint: 'https://identity.example/token',
+      entra_obo: { issuer: 'https://identity.example/tenant' }
+    });
+    const current = { draft: input } as Parameters<typeof publicationForm>[0];
+    expect(publicationInput('agents', publicationForm(current))).toEqual(input);
+  });
+  it('retains OAuth settings when editing an agent and removes them only on request', () => {
+    const input = publicationInput('agents', {
+      ...publicationForm(),
+      project: id,
+      name: 'Agent',
+      endpoint: 'https://agent.example/rpc',
+      cardDigest: 'a'.repeat(64),
+      pricingRevision: id,
+      maxCost: '1',
+      oauthEnabled: true,
+      oauthClientID: 'client',
+      oauthAudience: 'audience',
+      oauthScopes: 'send read',
+      oauthAuthorizationEndpoint: 'https://auth.example/authorize',
+      oauthTokenEndpoint: 'https://auth.example/token',
+      oauthDeviceEndpoint: 'https://auth.example/device'
+    });
+    const current: Publication = {
+      id,
+      project_id: id,
+      kind: 'agent',
+      name: 'Agent',
+      etag: id,
+      revision_id: id,
+      retired: false,
+      draft: input
+    };
+    const form = publicationForm(current);
+    expect(publicationInput('agents', form)).toEqual(input);
+    expect(
+      publicationInput('agents', { ...form, oauthEnabled: false }).agent?.oauth
+    ).toBeUndefined();
+  });
+  it('round trips structured prompt messages, declared string variables and defaults', () => {
+    const input = publicationInput('prompts', {
+      ...publicationForm(),
+      project: id,
+      name: 'Greeting',
+      promptMode: 'messages',
+      messages: [
+        { role: 'system', content: 'Help {{name}}' },
+        { role: 'user', content: 'Hello {{name}}' }
+      ],
+      variables: 'name',
+      temperature: '0.2',
+      topP: '0.8',
+      maxOutputTokens: '128'
+    });
+    expect(input.prompt).toEqual({
+      messages: [
+        { role: 'system', content: 'Help {{name}}' },
+        { role: 'user', content: 'Hello {{name}}' }
+      ],
+      variable_schema: {
+        type: 'object',
+        properties: { name: { type: 'string' } },
+        required: ['name'],
+        additionalProperties: false
+      },
+      default_parameters: {
+        temperature: 0.2,
+        top_p: 0.8,
+        max_output_tokens: 128
+      }
+    });
+    const current: Publication = {
+      id,
+      project_id: id,
+      kind: 'prompt',
+      name: 'Greeting',
+      etag: id,
+      revision_id: id,
+      retired: false,
+      draft: input
+    };
+    expect(publicationInput('prompts', publicationForm(current))).toEqual(
+      input
+    );
+  });
+
   it('builds one typed definition without credential material', () => {
     const form = publicationForm();
     Object.assign(form, {
@@ -189,7 +298,7 @@ describe('publication configuration', () => {
 
 describe('publication editor boundaries', () => {
   it('starts a new editor with blank resource bindings and the supported default protocol', () => {
-    expect(publicationForm()).toEqual({
+    expect(publicationForm()).toMatchObject({
       project: '',
       name: '',
       tools: [],
@@ -200,6 +309,7 @@ describe('publication editor boundaries', () => {
       cardDigest: '',
       pricingRevision: '',
       maxCost: '',
+      messagePrice: '',
       toolsetRevisions: '',
       routeRevisions: ''
     });
@@ -217,6 +327,7 @@ describe('publication editor boundaries', () => {
           card_digest: 'catalog',
           pricing_revision_id: 'price-revision',
           max_cost: '12.34',
+          message_price: '1.50',
           toolset_revisions: ['tool-a', 'tool-b'],
           route_revisions: ['route-a', 'route-b']
         }
@@ -240,6 +351,7 @@ describe('publication editor boundaries', () => {
         cardDigest: ' new-catalog ',
         pricingRevision: ' new-pricing ',
         maxCost: ' 0.25 ',
+        messagePrice: ' 0 ',
         toolsetRevisions: ' tool-c,\ntool-d ',
         routeRevisions: ' route-c\t route-d '
       };
@@ -252,12 +364,55 @@ describe('publication editor boundaries', () => {
           card_digest: 'new-catalog',
           pricing_revision_id: 'new-pricing',
           max_cost: '0.25',
+          message_price: '0',
           toolset_revisions: ['tool-c', 'tool-d'],
           route_revisions: ['route-c', 'route-d']
         }
       });
     }
   );
+
+  it('keeps an omitted agent message price absent and includes a declared price for new agents', () => {
+    const form = publicationForm();
+    expect(publicationInput('agents', form).agent).not.toHaveProperty(
+      'message_price'
+    );
+    expect(
+      publicationInput('agents', { ...form, messagePrice: ' 0.35 ' }).agent
+        ?.message_price
+    ).toBe('0.35');
+  });
+
+  it('preserves an agent remote work duration when editing its publication', () => {
+    const form = publicationForm();
+    expect(publicationInput('agents', form).agent).not.toHaveProperty(
+      'remote_work_bound_seconds'
+    );
+    expect(
+      publicationInput('agents', { ...form, remoteWorkBoundSeconds: ' 120 ' })
+        .agent?.remote_work_bound_seconds
+    ).toBe(120);
+  });
+
+  it('preserves configurable task bounds when editing an agent publication', () => {
+    const form = publicationForm();
+    expect(publicationInput('agents', form).agent).not.toHaveProperty(
+      'max_task_continuations'
+    );
+    expect(publicationInput('agents', form).agent).not.toHaveProperty(
+      'task_deadline_seconds'
+    );
+    expect(
+      publicationInput('agents', {
+        ...form,
+        maxTaskContinuations: ' 64 ',
+        taskDeadlineSeconds: ' 900 '
+      }).agent
+    ).toMatchObject({
+      max_task_continuations: 64,
+      task_deadline_seconds: 900
+    });
+  });
 
   it('round trips prompt variables and removes empty separators from edited variables', () => {
     const draft: Publication['draft'] = {
@@ -286,6 +441,35 @@ describe('publication editor boundaries', () => {
         variables: ' , name,\n\tlanguage , '
       }).prompt?.variables
     ).toEqual(['name', 'language']);
+  });
+
+  it('preserves a legacy template when switching to structured messages', () => {
+    const current: Publication = {
+      id,
+      project_id: id,
+      kind: 'prompt',
+      name: 'Prompt',
+      etag: id,
+      revision_id: id,
+      retired: false,
+      draft: {
+        project_id: id,
+        name: 'Prompt',
+        prompt: {
+          template: 'Hello {{name}}',
+          variables: ['name'],
+          messages: []
+        }
+      }
+    };
+    const converted = publicationInput('prompts', {
+      ...publicationForm(current),
+      promptMode: 'messages'
+    });
+    expect(converted.prompt?.messages).toEqual([
+      { role: 'user', content: 'Hello {{name}}' }
+    ]);
+    expect(converted.prompt?.variable_schema?.required).toEqual(['name']);
   });
 
   it('allows a catalog member when other certified tools have different names', async () => {

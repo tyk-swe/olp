@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 
 	"github.com/tyk-swe/olp/internal/codemode"
@@ -15,7 +16,14 @@ import (
 func (a *codeAttempt) headers(source http.Header) http.Header {
 	h := codewire.ForwardHeaders(source, true)
 	for name, values := range a.auth.Headers {
+		if strings.EqualFold(name, "Anthropic-Beta") {
+			h[http.CanonicalHeaderKey(name)] = []string{strings.Join(slices.Concat(h.Values(name), values), ",")}
+			continue
+		}
 		h[http.CanonicalHeaderKey(name)] = append([]string(nil), values...)
+	}
+	if a.identityOriginator != "" && !slices.ContainsFunc(h.Values("Originator"), func(value string) bool { return strings.TrimSpace(value) != "" }) {
+		h.Set("Originator", a.identityOriginator)
 	}
 	if _, present := h["User-Agent"]; !present {
 		h["User-Agent"] = []string{""}

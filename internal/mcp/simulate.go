@@ -23,6 +23,13 @@ type toolCallLimits struct {
 	ResultBytes          int64 `json:"result_bytes"`
 }
 
+func tighterToolLimit(server int64, key *int64) *int64 {
+	if key != nil && *key < server {
+		return key
+	}
+	return &server
+}
+
 func describeTool(authority access.Authority, resolved resolvedToolset, tool routing.MCPToolsetTool) listedTool {
 	effective := routing.EffectiveToolLimits(tool.CallsPerMinute, tool.MaxConcurrency, tool.PerKeyCallsPerMinute, tool.PerKeyMaxConcurrency)
 	return listedTool{
