@@ -107,6 +107,7 @@
   let busy = $state(false);
   let error = $state('');
   let notice = $state('');
+  let definitionEditor = 0;
   let selected = $state<Definition | null>(null);
   let name = $state('');
   let project = $state('');
@@ -115,6 +116,7 @@
   let timeout = $state(1000);
   let onError = $state<'fail_closed' | 'fail_open'>('fail_closed');
   let egress = $state(false);
+  let policyEditor = 0;
   let selectedPolicy = $state<Policy | null>(null);
   let policyName = $state('');
   let entries = $state<Entry[]>([]);
@@ -158,6 +160,7 @@
     }
   }
   function edit(value: Definition | null) {
+    definitionEditor += 1;
     selected = value;
     name = value?.name ?? '';
     project = value?.project_id ?? project;
@@ -173,19 +176,23 @@
   }
   async function saveDefinition(event: SubmitEvent) {
     event.preventDefault();
+    const editor = definitionEditor;
     await run(async () => {
       const config = JSON.parse(configuration) as Record<string, unknown>;
       if (external) config.content_egress = egress;
-      selected = await saveDefinitionAPI(selected, project, type, {
+      const saved = await saveDefinitionAPI(selected, project, type, {
         name,
         configuration: config,
         timeout_ms: timeout,
         on_error: onError
       });
+      if (editor !== definitionEditor) return;
+      selected = saved;
       notice = 'Draft saved. Activate its revision when it is ready.';
     });
   }
   function editPolicy(value: Policy | null) {
+    policyEditor += 1;
     selectedPolicy = value;
     policyName = value?.name ?? '';
     project = value?.project_id ?? project;
@@ -193,11 +200,14 @@
   }
   async function savePolicy(event: SubmitEvent) {
     event.preventDefault();
+    const editor = policyEditor;
     await run(async () => {
-      selectedPolicy = await savePolicyAPI(selectedPolicy, project, {
+      const saved = await savePolicyAPI(selectedPolicy, project, {
         name: policyName,
         entries
       });
+      if (editor !== policyEditor) return;
+      selectedPolicy = saved;
       notice = 'Policy draft saved with its ordered, pinned revisions.';
     });
   }

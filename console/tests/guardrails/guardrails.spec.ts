@@ -1,5 +1,5 @@
 import AxeBuilder from '@axe-core/playwright';
-import { test, expect } from '../playwright';
+import { test, expect, type Page } from '../playwright';
 
 test('creates a TypeSafe guardrail without endpoint egress acknowledgement', async ({
   page
@@ -359,4 +359,182 @@ for (const inventory of ['guardrails', 'guardrail-policies', 'projects']) {
       release.resolve();
     }
   });
+}
+
+async function delayFirstGuardrailSave(
+  page: Page,
+  resourcePath: string,
+  newDestination: boolean
+) {
+  const pending = Promise.withResolvers<void>();
+  const release = Promise.withResolvers<void>();
+  const original = {
+    id: 'original',
+    policy_id: 'original',
+    name: 'Original',
+    project_id: 'project',
+    type: 'builtin.keywords',
+    configuration: { words: ['restricted'] },
+    timeout_ms: 1000,
+    on_error: 'fail_closed',
+    entries: [],
+    revision: 1,
+    revision_id: 'original-revision',
+    etag: 'original-etag'
+  };
+  const other = {
+    ...original,
+    id: 'other',
+    policy_id: 'other',
+    name: 'Other',
+    etag: 'other-etag'
+  };
+  const writes: {
+    method: string;
+    path: string;
+    name: string;
+    etag: string | undefined;
+  }[] = [];
+  await page.route('**/api/v1/**', async (route) => {
+    const request = route.request();
+    const path = new URL(request.url()).pathname;
+    const operations = ['read', 'configure', 'playground', 'keys', 'settings'];
+    let body: unknown = { items: [], next_cursor: null };
+    if (path === '/api/v1/sessions/current')
+      body = {
+        user: {
+          id: 'owner',
+          email: 'owner@example.test',
+          display_name: 'Owner',
+          role: 'owner',
+          access_scope: 'global',
+          operations
+        },
+        csrf_token: 'test-csrf',
+        operations,
+        installation_name: 'Guardrail test'
+      };
+    if (path === '/api/v1/projects')
+      body = { items: [{ id: 'project', name: 'Project' }] };
+    if (path === `/api/v1/${resourcePath}`) body = { items: [original, other] };
+    if (['POST', 'PUT'].includes(request.method())) {
+      const submitted = request.postDataJSON();
+      writes.push({
+        method: request.method(),
+        path,
+        name: submitted.name,
+        etag: request.headers()['if-match']
+      });
+      if (writes.length === 1) {
+        pending.resolve();
+        await release.promise;
+      }
+      const id = path.endsWith('/original')
+        ? 'original'
+        : newDestination
+          ? 'created'
+          : 'other';
+      body = {
+        ...original,
+        ...submitted,
+        id,
+        policy_id: id,
+        etag: `${id}-saved-etag`,
+        revision: 2
+      };
+    }
+    await route.fulfill({
+      json: body,
+      headers: { 'Cache-Control': 'no-store' }
+    });
+  });
+  return { pending, release, writes };
+}
+
+for (const editor of [
+  {
+    tab: 'Definitions',
+    path: 'guardrails',
+    create: 'New definition',
+    save: 'Save draft'
+  },
+  {
+    tab: 'Policies',
+    path: 'guardrail-policies',
+    create: 'New policy',
+    save: 'Save policy draft'
+  }
+]) {
+  for (const destination of ['new', 'existing', 'new-from-new']) {
+    test(`late ${editor.tab} save preserves the ${destination} editor`, async ({
+      page
+    }) => {
+      const newDestination = destination !== 'existing';
+      const newSource = destination === 'new-from-new';
+      const { pending, release, writes } = await delayFirstGuardrailSave(
+        page,
+        editor.path,
+        newDestination
+      );
+      try {
+        await page.goto('/guardrails');
+        await page
+          .getByRole('button', { name: editor.tab, exact: true })
+          .click();
+        await page
+          .getByRole('button', { name: 'Original', exact: true })
+          .click();
+        if (newSource)
+          await page
+            .getByRole('button', { name: editor.create, exact: true })
+            .click();
+        const name = page.getByRole('textbox', { name: 'Name', exact: true });
+        const save = page.getByRole('button', {
+          name: editor.save,
+          exact: true
+        });
+        await name.fill('Original submitted');
+        await save.click();
+        await pending.promise;
+        await page
+          .getByRole('button', {
+            name: newDestination ? editor.create : 'Other',
+            exact: true
+          })
+          .click();
+        await name.fill('Current draft');
+        release.resolve();
+        await expect(save).toBeEnabled();
+        await expect(name).toHaveValue('Current draft');
+        await save.click();
+        await expect(save).toBeEnabled();
+        expect(writes).toEqual([
+          {
+            method: newSource ? 'POST' : 'PUT',
+            path: `/api/v1/${editor.path}${newSource ? '' : '/original'}`,
+            name: 'Original submitted',
+            etag: newSource ? undefined : '"original-etag"'
+          },
+          {
+            method: newDestination ? 'POST' : 'PUT',
+            path: `/api/v1/${editor.path}${newDestination ? '' : '/other'}`,
+            name: 'Current draft',
+            etag: newDestination ? undefined : '"other-etag"'
+          }
+        ]);
+        await name.fill('Current draft again');
+        await save.click();
+        await expect(save).toBeEnabled();
+        const id = newDestination ? 'created' : 'other';
+        expect(writes[2]).toEqual({
+          method: 'PUT',
+          path: `/api/v1/${editor.path}/${id}`,
+          name: 'Current draft again',
+          etag: `"${id}-saved-etag"`
+        });
+      } finally {
+        release.resolve();
+      }
+    });
+  }
 }
