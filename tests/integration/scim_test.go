@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -322,5 +323,101 @@ func TestSCIMSDKConditionalWriteRoundTrip(t *testing.T) {
 	var problem *management.APIError
 	if !errors.As(stale, &problem) || problem.Status != http.StatusPreconditionFailed {
 		t.Fatalf("stale version accepted: %v", stale)
+	}
+}
+
+func TestSCIMCoreSchemaPaths(t *testing.T) {
+	h := newAccessHarness(t)
+	token := scimToken(h, h.owner(), []string{"access"})
+	user := scimCall(t, h, token, "POST", "/scim/v2/Users", scimUser("schema-paths"), "", 201)
+	group := scimCall(t, h, token, "POST", "/scim/v2/Groups", map[string]any{"schemas": []string{scim.GroupSchema}, "displayName": "schema-paths", "externalId": "group-paths", "members": []any{map[string]any{"value": user["id"]}}}, "", 201)
+	for _, tc := range []struct {
+		kind     string
+		schema   string
+		wrong    string
+		resource map[string]any
+		array    string
+	}{
+		{"Users", scim.UserSchema, scim.GroupSchema, user, "emails"},
+		{"Groups", scim.GroupSchema, scim.UserSchema, group, "members"},
+	} {
+		t.Run(tc.kind, func(t *testing.T) {
+			path := "/scim/v2/" + tc.kind
+			detailPath := path + "/" + tc.resource["id"].(string)
+			for _, method := range []string{"GET", "POST"} {
+				search := func(parameters map[string]string, status int) map[string]any {
+					query := url.Values{}
+					body := map[string]any{"schemas": []string{scim.SearchSchema}}
+					for key, value := range parameters {
+						query.Set(key, value)
+						body[key] = value
+					}
+					if method == "POST" {
+						return scimCall(t, h, token, method, path+"/.search", body, "", status)
+					}
+					return scimCall(t, h, token, method, path+"?"+query.Encode(), nil, "", status)
+				}
+				for _, invalid := range []struct {
+					parameters map[string]string
+					problem    string
+				}{
+					{map[string]string{"filter": tc.wrong + `:displayName eq "schema-paths"`}, "invalidFilter"},
+					{map[string]string{"filter": tc.wrong + `:displayName pr`}, "invalidFilter"},
+					{map[string]string{"filter": tc.array + "[" + tc.wrong + ":value pr]"}, "invalidFilter"},
+					{map[string]string{"sortBy": tc.wrong + ":displayName"}, "invalidPath"},
+					{map[string]string{"attributes": tc.wrong + ":displayName"}, "invalidPath"},
+					{map[string]string{"excludedAttributes": tc.wrong + ":displayName"}, "invalidPath"},
+					{map[string]string{"attributes": tc.wrong + ":displayName", "count": "0"}, "invalidPath"},
+					{map[string]string{"excludedAttributes": tc.wrong + ":displayName", "filter": `id eq "absent"`}, "invalidPath"},
+				} {
+					if result := search(invalid.parameters, 400); result["scimType"] != invalid.problem {
+						t.Fatalf("%s %v: %v", method, invalid.parameters, result)
+					}
+				}
+				for _, prefix := range []string{"", tc.schema + ":", strings.ToUpper(tc.schema) + ":"} {
+					result := search(map[string]string{"filter": fmt.Sprintf(`id eq "%s" and %sdisplayName eq "schema-paths"`, tc.resource["id"], prefix), "sortBy": prefix + "displayName", "attributes": prefix + "displayName"}, 200)
+					resources := result["Resources"].([]any)
+					if result["totalResults"] != float64(1) || len(resources) != 1 {
+						t.Fatalf("valid qualified search did not find the resource: %v", result)
+					}
+					selected := resources[0].(map[string]any)
+					if selected["id"] != tc.resource["id"] || selected["displayName"] != "schema-paths" || selected["externalId"] != nil {
+						t.Fatalf("incorrect qualified projection: %v", selected)
+					}
+				}
+			}
+			for _, parameter := range []string{"attributes", "excludedAttributes"} {
+				if result := scimCall(t, h, token, "GET", detailPath+"?"+parameter+"="+url.QueryEscape(tc.wrong+":displayName"), nil, "", 400); result["scimType"] != "invalidPath" {
+					t.Fatal(result)
+				}
+			}
+			selected := scimCall(t, h, token, "GET", detailPath+"?excludedAttributes="+url.QueryEscape(tc.schema+":displayName"), nil, "", 200)
+			if selected["displayName"] != nil || selected["externalId"] != tc.resource["externalId"] {
+				t.Fatalf("incorrect excluded attributes: %v", selected)
+			}
+			before := scimCall(t, h, token, "GET", detailPath, nil, "", 200)
+			for _, invalid := range []struct {
+				path    string
+				problem string
+			}{
+				{tc.wrong + ":displayName", "invalidPath"},
+				{tc.wrong + ":" + tc.array + "[value pr]", "invalidPath"},
+				{tc.array + "[" + tc.wrong + ":value pr]", "invalidFilter"},
+				{tc.array + "[value eq null]", "noTarget"},
+			} {
+				body := scimPatch(map[string]any{"op": "replace", "path": "displayName", "value": "must rollback"}, map[string]any{"op": "remove", "path": invalid.path})
+				if result := scimCall(t, h, token, "PATCH", detailPath, body, "", 400); result["scimType"] != invalid.problem {
+					t.Fatal(result)
+				}
+			}
+			after := scimCall(t, h, token, "GET", detailPath, nil, "", 200)
+			if !reflect.DeepEqual(before, after) {
+				t.Fatalf("rejected PATCH changed the resource: before=%v after=%v", before, after)
+			}
+			changed := scimCall(t, h, token, "PATCH", detailPath, scimPatch(map[string]any{"op": "remove", "path": tc.schema + ":" + tc.array + "[" + tc.schema + ":value ne null]"}), "", 200)
+			if len(changed[tc.array].([]any)) != 0 {
+				t.Fatalf("qualified PATCH did not remove the selected values: %v", changed)
+			}
+		})
 	}
 }
