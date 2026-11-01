@@ -21,9 +21,7 @@ Code mode management, its durable ledger and raw transports are implemented. The
 official Codex CLI, Claude Code and OpenCode are resolved from npm latest in CI
 and qualified against controlled fixtures. Fixture qualification is not a release
 claim for a real ChatGPT, OpenCode Go or other coding-plan subscription. Review
-the [support matrix and release gates](../develop/qualification.md) before rollout,
-and keep the [coding-client baseline and roadmap](../develop/plans/code-mode-parity.md)
-separate from the implemented behavior documented here.
+the [support matrix and release gates](../develop/qualification.md) before rollout.
 
 ## Adapters and clients
 

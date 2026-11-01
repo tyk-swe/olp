@@ -37,13 +37,13 @@ produced them.
   at the relevant boundary. Follow [Testing](../../tests/README.md) and the
   [console design system](../../console/README.md#design-system).
 - Use forward-only migrations; update Helm values/schema/templates together.
-  Check readiness, metrics, recovery and runbooks. Update the canonical guide,
-  remaining roadmap outcomes and any focused plan in the same change.
+  Check readiness, metrics, recovery and runbooks. Update the canonical guide
+  in the same change.
 - Run normal check/integration/race/build/Helm and applicable performance gates
   on the same candidate before a release claim. Fix failures or explicitly
   revise supported scope; historical or narrower tests cannot close them.
 
-## RM5 retained APIs and retrieval
+## Retained APIs and retrieval
 
 The implementation includes fine-tuning, native vector stores, query-only cloud
 retrieval, native Conversations/compaction, container lifecycle/files, Evals,
@@ -206,7 +206,7 @@ maximum overshoot or ingestion-lag bound.
 ## API surfaces
 
 Protocol/resource maintainers use the [endpoint ledger](../../tests/clients/m9-endpoints.json)
-and [API plan](plans/api-surface.md), keeping pending methods disabled.
+keeping pending methods disabled.
 
 | Slice | Local evidence boundary | Remaining acceptance |
 | --- | --- | --- |
@@ -214,10 +214,9 @@ and [API plan](plans/api-surface.md), keeping pending methods disabled.
 | Text Decisions | Native and one-way mapping, labels/order/usage/pricing, caller-paid budget and inspection fixtures | Console/browser, configuration promotion, each provider live |
 | OCR/search | Codecs (including the Brave GET-query transport), raw-HTTP process fixtures (including the Azure Document Intelligence 202/poll submit-once, cancellation and missing-units cases), route inspection and Chromium journey; no locked official SDK exists for these APIs | Full `make integration`, live tuples (including the exact Brave tuple) and release performance; provider wizard cannot choose nondefault operation profiles, so use management/configuration apply |
 | Files/batches | Native files, resumable uploads, managed/cloud jobs and content-free settlement fixtures | Full batch/provider integration, database-backed official SDKs (the client fixture has no DB), console/Chromium, live providers and release performance |
-| Native duplex (RM6.5) | Compiled-profile contract tests, gateway WebSocket relay fixtures in process, a fake Bedrock stream behind the SDK opener seam, per-vendor frame fixtures, and the endpoint ledger rows for xAI, Vertex AI Live and Bedrock Nova Sonic | Live sessions per exact tuple with real xAI, Google Cloud and AWS accounts, including the 8-minute Nova Sonic stream bound and Vertex setup acknowledgement against the aiplatform endpoint |
-| Governed pass-through (RM6.6) | Adversarial routing normalization and publication refusals, gateway credential isolation, redirect and bound fixtures, configuration plan refusals and console editor units; no locked SDK covers the bound-native namespace, so raw HTTP fixtures are the evidence | Live tuple per bound connection and endpoint family, full `make integration`, release performance |
-| Governed WebRTC (RM6.4) | Gateway session-control fixtures against a mock calls/control/hangup provider, compiled contract, distinct `webrtc` capability tuple, certification probe, ledger rows and a Chromium journey spec with mock provider | Full `make integration` browser run, live OpenAI tuple, durable debit-intent settlement with restart recovery (the slice settles on the realtime lease path and claims no durable settlement), Azure tuple under its own contract |
-| Unbuilt families | Planned contracts only | Implementation plus every slice-specific gate; shared provisional ledger and live control/settlement prerequisites |
+| Native duplex | Compiled-profile contract tests, gateway WebSocket relay fixtures in process, a fake Bedrock stream behind the SDK opener seam, per-vendor frame fixtures, and the endpoint ledger rows for xAI, Vertex AI Live and Bedrock Nova Sonic | Live sessions per exact tuple with real xAI, Google Cloud and AWS accounts, including the 8-minute Nova Sonic stream bound and Vertex setup acknowledgement against the aiplatform endpoint |
+| Governed pass-through | Adversarial routing normalization and publication refusals, gateway credential isolation, redirect and bound fixtures, configuration plan refusals and console editor units; no locked SDK covers the bound-native namespace, so raw HTTP fixtures are the evidence | Live tuple per bound connection and endpoint family, full `make integration`, release performance |
+| Governed WebRTC | Gateway session-control fixtures against a mock calls/control/hangup provider, compiled contract, distinct `webrtc` capability tuple, certification probe, ledger rows and a Chromium journey spec with mock provider | Full `make integration` browser run, live OpenAI tuple, durable debit-intent settlement with restart recovery (the slice settles on the realtime lease path and claims no durable settlement), Azure tuple under its own contract |
 
 Run `CLIENTS=m9-go tests/clients/run.sh` for locked OpenAI Go completions and
 Decisions plus raw-HTTP OCR/search fixtures, including required route headers,
@@ -237,7 +236,7 @@ The governed WebRTC journey is
 `console/tests/gateway/realtime-webrtc.spec.ts` against
 `console/tests/gateway/mock-realtime-webrtc.mjs`. It is integration-gated and
 has not run outside `make integration` yet.
-Vertex document processing (RM6.3) local evidence covers the Document AI
+Vertex document processing local evidence covers the Document AI
 dialect and Mistral mapping, plan-level processor addressing and page
 projection, document-location prefix refusals at the gateway, and route
 simulation. Its exact live tuple stays unqualified until an opt-in run of
@@ -251,7 +250,7 @@ usage-completeness and pricing evidence before its claim advances.
 
 ## Guardrail and capture qualification
 
-The [guardrail plan](plans/guardrails.md) owns vendor coverage and exit criteria.
+The [vendor inventory](../use/guardrail-integrations.md#vendor-inventory) records vendor coverage.
 Focused capture unit/component tests exist; the original integration command
 used `-run '^$'` and executed **zero service tests**. Execute the following with
 the documented disposable PostgreSQL/Valkey environment; explicitly selected

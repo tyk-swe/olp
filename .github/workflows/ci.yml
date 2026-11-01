@@ -50,6 +50,8 @@ jobs:
               - '!.github/ISSUE_TEMPLATE/**'
               - '!.github/dependabot.yml'
             go:
+              - 'scripts/check-lint.sh'
+              - 'staticcheck.conf'
               - '**/*.go'
               - 'go.mod'
               - 'go.sum'
@@ -108,6 +110,8 @@ jobs:
               - '**/*.md'
               - '.github/workflows/ci.yml'
             bench:
+              - 'scripts/check-lint.sh'
+              - 'staticcheck.conf'
               - 'tests/bench/**'
               - '.github/workflows/ci.yml'
               - '.github/actions/setup/**'

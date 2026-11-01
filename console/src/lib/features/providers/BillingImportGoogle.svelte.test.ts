@@ -2,6 +2,7 @@ import { QueryClient } from '@tanstack/svelte-query';
 import { flushSync, mount, unmount } from 'svelte';
 import { expect, it, onTestFinished, vi } from 'vitest';
 import * as api from './api/billing';
+import { ApiProblem } from '$lib/api/http';
 import type { Provider } from './api/providers';
 import BillingImportProbe from './test/BillingImportProbe.svelte';
 
@@ -150,6 +151,60 @@ it('validates, creates, runs, updates and removes a Google billing import', asyn
     expect(host.textContent).toContain('Billing import saved.')
   );
 
+  fill('billing-dataset', 'local-dataset');
+  fill('billing-auth-mode', 'service_account');
+  fill('billing-admin-key', '{"private_key":"local-key"}');
+  const remote = {
+    ...current!,
+    enabled: false,
+    etag: 'remote-etag',
+    scope: {
+      billing_account_id: '654321-FEDCBA-654321',
+      bigquery_project_id: 'remote-project',
+      dataset_id: 'remote_dataset',
+      table_id: 'remote_table',
+      project_ids: ['remote-workload']
+    }
+  };
+  current = remote;
+  vi.mocked(api.putBillingImport).mockRejectedValueOnce(
+    new ApiProblem({
+      title: 'Changed elsewhere',
+      status: 412,
+      type: 'https://openllmproxy.dev/problems/etag_mismatch'
+    })
+  );
+  submit();
+  await vi.waitFor(() =>
+    expect(host.textContent).toContain('This item changed elsewhere.')
+  );
+  click('Reload');
+  await vi.waitFor(() =>
+    expect(host.textContent).not.toContain('This item changed elsewhere.')
+  );
+  expect(host.querySelector<HTMLInputElement>('#billing-dataset')?.value).toBe(
+    'remote_dataset'
+  );
+  expect(
+    host.querySelector<HTMLSelectElement>('#billing-auth-mode')?.value
+  ).toBe('keep');
+  fill('billing-auth-mode', 'service_account');
+  expect(
+    host.querySelector<HTMLInputElement>('#billing-admin-key')?.value
+  ).toBe('');
+  fill('billing-auth-mode', 'keep');
+  submit();
+  await vi.waitFor(() =>
+    expect(api.putBillingImport).toHaveBeenLastCalledWith(
+      'provider',
+      'remote-etag',
+      { enabled: false, scope: remote.scope },
+      expect.any(String)
+    )
+  );
+  await vi.waitFor(() =>
+    expect(host.textContent).toContain('Billing import saved.')
+  );
   click('Remove');
   await vi.waitFor(() => expect(host.textContent).toContain('Create import'));
   expect(api.deleteBillingImport).toHaveBeenCalledWith(

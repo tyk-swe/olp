@@ -44,8 +44,18 @@ func (s *Server) scimGet(r *http.Request, _ Principal, group bool) (Reply, error
 	if err != nil {
 		return Reply{}, err
 	}
-	d, err = scim.Project(d, r.URL.Query().Get("attributes"), r.URL.Query().Get("excludedAttributes"))
-	return Detail(d, etag), err
+	projection, err := scim.ParseProjection(r.URL.Query().Get("attributes"), r.URL.Query().Get("excludedAttributes"), scimResourceSchema(group))
+	if err != nil {
+		return Reply{}, err
+	}
+	return Detail(projection.Apply(d), etag), nil
+}
+
+func scimResourceSchema(group bool) string {
+	if group {
+		return scim.GroupSchema
+	}
+	return scim.UserSchema
 }
 
 func (s *Server) scimList(r *http.Request, _ Principal, group bool) (Reply, error) {
@@ -108,12 +118,11 @@ func (s *Server) scimList(r *http.Request, _ Principal, group bool) (Reply, erro
 	if start > 10000000 {
 		return Reply{}, scim.Invalid("startIndex exceeds the supported offset.")
 	}
-	schema := func() string {
-		if group {
-			return scim.GroupSchema
-		}
-		return scim.UserSchema
-	}()
+	schema := scimResourceSchema(group)
+	projection, err := scim.ParseProjection(values.Get("attributes"), values.Get("excludedAttributes"), schema)
+	if err != nil {
+		return Reply{}, err
+	}
 	compiled := scim.SQLFilter{Schema: schema}
 	where, err := compiled.Compile(values.Get("filter"), "resource")
 	if err != nil {
@@ -149,10 +158,7 @@ func (s *Server) scimList(r *http.Request, _ Principal, group bool) (Reply, erro
 		return Reply{}, err
 	}
 	for i, d := range resources {
-		resources[i], err = scim.Project(d, values.Get("attributes"), values.Get("excludedAttributes"))
-		if err != nil {
-			return Reply{}, err
-		}
+		resources[i] = projection.Apply(d)
 	}
 	return OK(map[string]any{"schemas": []string{scim.ListSchema}, "totalResults": total, "startIndex": start, "itemsPerPage": len(resources), "Resources": resources}), nil
 }

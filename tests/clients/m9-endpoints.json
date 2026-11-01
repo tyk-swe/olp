@@ -1,6 +1,5 @@
 {
   "schema_version": 1,
-  "baseline": "docs/develop/plans/api-surface.md",
   "description": "M9 method/provider scope and local evidence. Pending rows are a work ledger, not a support promise. Existing baseline support is distinct from M9 acceptance. Exact provider/model/profile certification and separate live qualification are required.",
   "sdk_locks": {
     "openai": {
@@ -9480,7 +9479,7 @@
         "upstream redirects",
         "more than one target or attempt"
       ],
-      "reference_revision": "RM6.6 governed pass-through in docs/develop/plans/api-surface.md; no locked SDK covers the bound-native namespace",
+      "reference_revision": "Governed pass-through; no locked SDK covers the bound-native namespace",
       "admission_contract": "execution-foundations-1"
     },
     {
@@ -9529,7 +9528,7 @@
         "upstream redirects",
         "more than one target or attempt"
       ],
-      "reference_revision": "RM6.6 governed pass-through in docs/develop/plans/api-surface.md; no locked SDK covers the bound-native namespace",
+      "reference_revision": "Governed pass-through; no locked SDK covers the bound-native namespace",
       "admission_contract": "execution-foundations-1"
     },
     {
@@ -9578,7 +9577,7 @@
         "upstream redirects",
         "more than one target or attempt"
       ],
-      "reference_revision": "RM6.6 governed pass-through in docs/develop/plans/api-surface.md; no locked SDK covers the bound-native namespace",
+      "reference_revision": "Governed pass-through; no locked SDK covers the bound-native namespace",
       "admission_contract": "execution-foundations-1"
     },
     {
@@ -9627,7 +9626,7 @@
         "upstream redirects",
         "more than one target or attempt"
       ],
-      "reference_revision": "RM6.6 governed pass-through in docs/develop/plans/api-surface.md; no locked SDK covers the bound-native namespace",
+      "reference_revision": "Governed pass-through; no locked SDK covers the bound-native namespace",
       "admission_contract": "execution-foundations-1"
     },
     {
@@ -9676,7 +9675,7 @@
         "upstream redirects",
         "more than one target or attempt"
       ],
-      "reference_revision": "RM6.6 governed pass-through in docs/develop/plans/api-surface.md; no locked SDK covers the bound-native namespace",
+      "reference_revision": "Governed pass-through; no locked SDK covers the bound-native namespace",
       "admission_contract": "execution-foundations-1"
     },
     {
@@ -9725,7 +9724,7 @@
         "upstream redirects",
         "more than one target or attempt"
       ],
-      "reference_revision": "RM6.6 governed pass-through in docs/develop/plans/api-surface.md; no locked SDK covers the bound-native namespace",
+      "reference_revision": "Governed pass-through; no locked SDK covers the bound-native namespace",
       "admission_contract": "execution-foundations-1"
     },
     {
