@@ -58,7 +58,7 @@ semantic versioning and take their source from root `package.json`. The
   transformed input, and enforce admission for standalone evaluations. Preserve
   streaming redaction across Unicode and word boundaries, independent candidates,
   completion snapshots and exact tool-argument numbers.
-- Billing-import admin keys are sealed under the dedicated `billing_credential`
+- Billing credentials are sealed under the dedicated `billing_credential`
   purpose, readable only by the import worker and never used for inference.
   Stripe meter keys are sealed as `sink_credential` and validated to `sk_`/`rk_`.
 - Preserve native credential destinations and trust settings across provider
@@ -192,7 +192,8 @@ Code-mode diagnostics now represent paid API ownership separately. Paid attempts
   [finops](docs/operate/finops.md).
 - Per-attempt price lines (`cost_lines`, `charge_lines`) recording each
   billed component's quantity, unit and unit prices.
-- OpenAI and Anthropic billing imports and a usage reconciliation report
+- OpenAI, Anthropic, Bedrock, Vertex AI and Azure OpenAI billing imports and a
+  usage reconciliation report
   (`/api/v1/usage/reconciliation`) comparing attributed and invoiced spend by
   UTC day with capture rate, unpriced share and provisional marking.
 - Console surfaces: the observability sink forms and FOCUS datasets view, the
