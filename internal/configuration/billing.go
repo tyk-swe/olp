@@ -86,19 +86,23 @@ func (s *Server) applyBillingImport(ctx context.Context, tx pgx.Tx, providerID s
 		if binding.reference != nil {
 			return access.Invalid("secret_bindings", "Billing imports take a plaintext secret binding; external references cannot feed a billing credential.")
 		}
-		same, err := billing.ImportCredentialMatches(ctx, tx, s.Access.Keys, s.Access.Installation, credentialID, binding.secret)
+		same, err := billing.ImportCredentialMatches(ctx, tx, s.Access.Keys, s.Access.Installation, source, credentialID, binding.secret)
 		if err != nil {
 			return err
 		}
 		if !same {
-			id, err := billing.ImportCredential(ctx, tx, s.Access.Keys, s.Access.Installation, binding.secret)
+			id, err := billing.ImportCredential(ctx, tx, s.Access.Keys, s.Access.Installation, source, binding.secret)
 			if err != nil {
 				return err
 			}
 			credentialID = &id
 		}
 	}
-	if credentialID == nil {
+	compatible, err := billing.ImportCredentialCompatible(ctx, tx, s.Access.Keys, s.Access.Installation, source, credentialID)
+	if err != nil {
+		return err
+	}
+	if !compatible {
 		return access.Invalid("secret_bindings", "Supply the provider's billing credential binding.")
 	}
 	return billing.ApplyImport(ctx, tx, providerID, source, entry.BillingImport.Enabled, entry.BillingImport.Scope, credentialID, createdBy)

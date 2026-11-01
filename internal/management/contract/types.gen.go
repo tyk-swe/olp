@@ -547,6 +547,9 @@ func (e AuditEventResponseActorType) Valid() bool {
 // Defines values for BillingImportSource.
 const (
 	AnthropicCostReport BillingImportSource = "anthropic_cost_report"
+	AwsCur              BillingImportSource = "aws_cur"
+	AzureCostManagement BillingImportSource = "azure_cost_management"
+	GoogleBigquery      BillingImportSource = "google_bigquery"
 	OpenaiCosts         BillingImportSource = "openai_costs"
 )
 
@@ -554,6 +557,12 @@ const (
 func (e BillingImportSource) Valid() bool {
 	switch e {
 	case AnthropicCostReport:
+		return true
+	case AwsCur:
+		return true
+	case AzureCostManagement:
+		return true
+	case GoogleBigquery:
 		return true
 	case OpenaiCosts:
 		return true
@@ -5530,6 +5539,60 @@ func (e ProvisionUserRequestRole) Valid() bool {
 	}
 }
 
+// Defines values for PutBillingImportRequestCredential1AuthMode.
+const (
+	PutBillingImportRequestCredential1AuthModeStatic   PutBillingImportRequestCredential1AuthMode = "static"
+	PutBillingImportRequestCredential1AuthModeWorkload PutBillingImportRequestCredential1AuthMode = "workload"
+)
+
+// Valid indicates whether the value is a known member of the PutBillingImportRequestCredential1AuthMode enum.
+func (e PutBillingImportRequestCredential1AuthMode) Valid() bool {
+	switch e {
+	case PutBillingImportRequestCredential1AuthModeStatic:
+		return true
+	case PutBillingImportRequestCredential1AuthModeWorkload:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for PutBillingImportRequestCredential2AuthMode.
+const (
+	PutBillingImportRequestCredential2AuthModeAdc            PutBillingImportRequestCredential2AuthMode = "adc"
+	PutBillingImportRequestCredential2AuthModeServiceAccount PutBillingImportRequestCredential2AuthMode = "service_account"
+)
+
+// Valid indicates whether the value is a known member of the PutBillingImportRequestCredential2AuthMode enum.
+func (e PutBillingImportRequestCredential2AuthMode) Valid() bool {
+	switch e {
+	case PutBillingImportRequestCredential2AuthModeAdc:
+		return true
+	case PutBillingImportRequestCredential2AuthModeServiceAccount:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for PutBillingImportRequestCredential3AuthMode.
+const (
+	PutBillingImportRequestCredential3AuthModeAzureClientSecret PutBillingImportRequestCredential3AuthMode = "azure_client_secret"
+	PutBillingImportRequestCredential3AuthModeAzureDefault      PutBillingImportRequestCredential3AuthMode = "azure_default"
+)
+
+// Valid indicates whether the value is a known member of the PutBillingImportRequestCredential3AuthMode enum.
+func (e PutBillingImportRequestCredential3AuthMode) Valid() bool {
+	switch e {
+	case PutBillingImportRequestCredential3AuthModeAzureClientSecret:
+		return true
+	case PutBillingImportRequestCredential3AuthModeAzureDefault:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for PutProjectMemberRequestRole.
 const (
 	PutProjectMemberRequestRoleManager PutProjectMemberRequestRole = "manager"
@@ -7399,6 +7462,17 @@ type A2ATaskToolCallback struct {
 // A2ATaskToolCallbackPricingState defines model for A2ATaskToolCallback.PricingState.
 type A2ATaskToolCallbackPricingState string
 
+// AWSBillingScope defines model for AWSBillingScope.
+type AWSBillingScope struct {
+	Bucket           string    `json:"bucket"`
+	LinkedAccountIds *[]string `json:"linked_account_ids,omitempty"`
+	PayerAccountId   string    `json:"payer_account_id"`
+	Region           string    `json:"region"`
+
+	// ReportPrefix CUR report prefix including the report name
+	ReportPrefix string `json:"report_prefix"`
+}
+
 // AcceptCatalogSuggestionsRequest defines model for AcceptCatalogSuggestionsRequest.
 type AcceptCatalogSuggestionsRequest struct {
 	// CatalogSha256 Digest of the catalog the suggestions were reviewed against; a different catalog answers 409.
@@ -8078,6 +8152,16 @@ type AuthenticationCapabilities struct {
 	SemanticCacheVectorsUnsealed *bool `json:"semantic_cache_vectors_unsealed,omitempty"`
 }
 
+// AzureBillingScope defines model for AzureBillingScope.
+type AzureBillingScope struct {
+	BillingScope    string                `json:"billing_scope"`
+	Container       string                `json:"container"`
+	ExportName      string                `json:"export_name"`
+	Prefix          *string               `json:"prefix,omitempty"`
+	StorageAccount  string                `json:"storage_account"`
+	SubscriptionIds *[]openapi_types.UUID `json:"subscription_ids,omitempty"`
+}
+
 // BTreeMap defines model for BTreeMap.
 type BTreeMap map[string][]struct {
 	Code    string `json:"code"`
@@ -8091,9 +8175,9 @@ type BillingImport struct {
 	Etag                 string             `json:"etag"`
 	ProviderId           openapi_types.UUID `json:"provider_id"`
 
-	// Scope Source-shaped import scope; {} reads the whole organization.
-	Scope  map[string]interface{} `json:"scope"`
-	Source BillingImportSource    `json:"source"`
+	// Scope Source-shaped billing scope. Polling sources accept an empty scope. Cloud sources require their export details.
+	Scope  BillingScope        `json:"scope"`
+	Source BillingImportSource `json:"source"`
 	Status struct {
 		ImportedFrom    nullable.Nullable[openapi_types.Date] `json:"imported_from"`
 		ImportedThrough nullable.Nullable[openapi_types.Date] `json:"imported_through"`
@@ -8103,11 +8187,19 @@ type BillingImport struct {
 		LastImportAt  nullable.Nullable[time.Time] `json:"last_import_at"`
 		LastSuccessAt nullable.Nullable[time.Time] `json:"last_success_at"`
 		NextImportAt  nullable.Nullable[time.Time] `json:"next_import_at"`
+
+		// SourceRevision Identifier of the most recently applied source revision, if the source provides one.
+		SourceRevision nullable.Nullable[string] `json:"source_revision"`
 	} `json:"status"`
 }
 
 // BillingImportSource defines model for BillingImport.Source.
 type BillingImportSource string
+
+// BillingScope Source-shaped billing scope. Polling sources accept an empty scope. Cloud sources require their export details.
+type BillingScope struct {
+	union json.RawMessage
+}
 
 // BudgetGroupBudgetResponse defines model for BudgetGroupBudgetResponse.
 type BudgetGroupBudgetResponse struct {
@@ -9178,9 +9270,11 @@ type ConfigurationAgentPublicationKind string
 // ConfigurationBillingImport defines model for ConfigurationBillingImport.
 type ConfigurationBillingImport struct {
 	// CredentialRef Portable secret binding name, provider name followed by /billing; supply the credential through secret_bindings.
-	CredentialRef string                 `json:"credential_ref"`
-	Enabled       bool                   `json:"enabled"`
-	Scope         map[string]interface{} `json:"scope"`
+	CredentialRef string `json:"credential_ref"`
+	Enabled       bool   `json:"enabled"`
+
+	// Scope Source-shaped billing scope. Polling sources accept an empty scope. Cloud sources require their export details.
+	Scope BillingScope `json:"scope"`
 }
 
 // ConfigurationCapabilityEntry defines model for ConfigurationCapabilityEntry.
@@ -10876,6 +10970,15 @@ type GatewayExecutionTool struct {
 
 // GatewayExecutionToolClassification Operator classification. An unclassified tool is reported as approval_required.
 type GatewayExecutionToolClassification string
+
+// GoogleBillingScope defines model for GoogleBillingScope.
+type GoogleBillingScope struct {
+	BigqueryProjectId string    `json:"bigquery_project_id"`
+	BillingAccountId  string    `json:"billing_account_id"`
+	DatasetId         string    `json:"dataset_id"`
+	ProjectIds        *[]string `json:"project_ids,omitempty"`
+	TableId           string    `json:"table_id"`
+}
 
 // GrantDeviceAuthorization A device authorization the operator approves upstream: they open the verification URL, on any device, enter the user code and approve, while status requests poll the enrollment.
 type GrantDeviceAuthorization struct {
@@ -12871,6 +12974,12 @@ type PolicyResponse struct {
 	Policy     RoutingPolicy      `json:"policy"`
 }
 
+// PollingBillingScope defines model for PollingBillingScope.
+type PollingBillingScope struct {
+	ProjectIds   *[]string `json:"project_ids,omitempty"`
+	WorkspaceIds *[]string `json:"workspace_ids,omitempty"`
+}
+
 // PriceCeiling defines model for PriceCeiling.
 type PriceCeiling struct {
 	InputPerMillion  nullable.Nullable[string] `json:"input_per_million,omitempty"`
@@ -14131,14 +14240,53 @@ type PublishPricingSourceRequest struct {
 
 // PutBillingImportRequest defines model for PutBillingImportRequest.
 type PutBillingImportRequest struct {
-	// Credential Vendor admin credential, sealed as a billing_credential secret. Required on create; omitted keeps the stored credential; null is rejected - delete the import instead.
-	Credential *string `json:"credential,omitempty"`
+	// Credential Billing credential. Required on create, omitted retains the stored credential, and null is rejected. Cloud credentials are source-shaped objects.
+	Credential *PutBillingImportRequest_Credential `json:"credential,omitempty"`
 
 	// Enabled Defaults to true when omitted.
 	Enabled *bool `json:"enabled,omitempty"`
 
-	// Scope openai_costs: {"project_ids":["proj_..."]}; anthropic_cost_report: {"workspace_ids":["wrkspc_...","default"]}; {} reads the whole organization. Omitted keeps the stored scope.
-	Scope *map[string]interface{} `json:"scope,omitempty"`
+	// Scope Source-shaped billing scope. Polling sources accept an empty scope. Cloud sources require their export details.
+	Scope *BillingScope `json:"scope,omitempty"`
+}
+
+// PutBillingImportRequestCredential0 defines model for PutBillingImportRequest.Credential.0.
+type PutBillingImportRequestCredential0 = string
+
+// PutBillingImportRequestCredential1 defines model for PutBillingImportRequest.Credential.1.
+type PutBillingImportRequestCredential1 struct {
+	AccessKeyId     *string                                    `json:"access_key_id,omitempty"`
+	AuthMode        PutBillingImportRequestCredential1AuthMode `json:"auth_mode"`
+	SecretAccessKey *string                                    `json:"secret_access_key,omitempty"`
+	SessionToken    *string                                    `json:"session_token,omitempty"`
+}
+
+// PutBillingImportRequestCredential1AuthMode defines model for PutBillingImportRequest.Credential.1.AuthMode.
+type PutBillingImportRequestCredential1AuthMode string
+
+// PutBillingImportRequestCredential2 defines model for PutBillingImportRequest.Credential.2.
+type PutBillingImportRequestCredential2 struct {
+	AuthMode       PutBillingImportRequestCredential2AuthMode `json:"auth_mode"`
+	ServiceAccount *map[string]interface{}                    `json:"service_account,omitempty"`
+}
+
+// PutBillingImportRequestCredential2AuthMode defines model for PutBillingImportRequest.Credential.2.AuthMode.
+type PutBillingImportRequestCredential2AuthMode string
+
+// PutBillingImportRequestCredential3 defines model for PutBillingImportRequest.Credential.3.
+type PutBillingImportRequestCredential3 struct {
+	AuthMode     PutBillingImportRequestCredential3AuthMode `json:"auth_mode"`
+	ClientId     *string                                    `json:"client_id,omitempty"`
+	ClientSecret *string                                    `json:"client_secret,omitempty"`
+	TenantId     *string                                    `json:"tenant_id,omitempty"`
+}
+
+// PutBillingImportRequestCredential3AuthMode defines model for PutBillingImportRequest.Credential.3.AuthMode.
+type PutBillingImportRequestCredential3AuthMode string
+
+// PutBillingImportRequest_Credential Billing credential. Required on create, omitted retains the stored credential, and null is rejected. Cloud credentials are source-shaped objects.
+type PutBillingImportRequest_Credential struct {
+	union json.RawMessage
 }
 
 // PutProjectMemberRequest defines model for PutProjectMemberRequest.
@@ -20039,6 +20187,120 @@ func (a SCIMUser) MarshalJSON() ([]byte, error) {
 	return json.Marshal(object)
 }
 
+// AsPollingBillingScope returns the union data inside the BillingScope as a PollingBillingScope
+func (t BillingScope) AsPollingBillingScope() (PollingBillingScope, error) {
+	var body PollingBillingScope
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromPollingBillingScope overwrites any union data inside the BillingScope as the provided PollingBillingScope
+func (t *BillingScope) FromPollingBillingScope(v PollingBillingScope) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergePollingBillingScope performs a merge with any union data inside the BillingScope, using the provided PollingBillingScope
+func (t *BillingScope) MergePollingBillingScope(v PollingBillingScope) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsAWSBillingScope returns the union data inside the BillingScope as a AWSBillingScope
+func (t BillingScope) AsAWSBillingScope() (AWSBillingScope, error) {
+	var body AWSBillingScope
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromAWSBillingScope overwrites any union data inside the BillingScope as the provided AWSBillingScope
+func (t *BillingScope) FromAWSBillingScope(v AWSBillingScope) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeAWSBillingScope performs a merge with any union data inside the BillingScope, using the provided AWSBillingScope
+func (t *BillingScope) MergeAWSBillingScope(v AWSBillingScope) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsGoogleBillingScope returns the union data inside the BillingScope as a GoogleBillingScope
+func (t BillingScope) AsGoogleBillingScope() (GoogleBillingScope, error) {
+	var body GoogleBillingScope
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromGoogleBillingScope overwrites any union data inside the BillingScope as the provided GoogleBillingScope
+func (t *BillingScope) FromGoogleBillingScope(v GoogleBillingScope) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeGoogleBillingScope performs a merge with any union data inside the BillingScope, using the provided GoogleBillingScope
+func (t *BillingScope) MergeGoogleBillingScope(v GoogleBillingScope) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsAzureBillingScope returns the union data inside the BillingScope as a AzureBillingScope
+func (t BillingScope) AsAzureBillingScope() (AzureBillingScope, error) {
+	var body AzureBillingScope
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromAzureBillingScope overwrites any union data inside the BillingScope as the provided AzureBillingScope
+func (t *BillingScope) FromAzureBillingScope(v AzureBillingScope) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeAzureBillingScope performs a merge with any union data inside the BillingScope, using the provided AzureBillingScope
+func (t *BillingScope) MergeAzureBillingScope(v AzureBillingScope) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+func (t BillingScope) MarshalJSON() ([]byte, error) {
+	b, err := t.union.MarshalJSON()
+	return b, err
+}
+
+func (t *BillingScope) UnmarshalJSON(b []byte) error {
+	err := t.union.UnmarshalJSON(b)
+	return err
+}
+
 // AsCreateNotificationDestinationRequestSecret0 returns the union data inside the CreateNotificationDestinationRequest_Secret as a CreateNotificationDestinationRequestSecret0
 func (t CreateNotificationDestinationRequest_Secret) AsCreateNotificationDestinationRequestSecret0() (CreateNotificationDestinationRequestSecret0, error) {
 	var body CreateNotificationDestinationRequestSecret0
@@ -20185,6 +20447,120 @@ func (t PlaygroundResponseFormat) MarshalJSON() ([]byte, error) {
 }
 
 func (t *PlaygroundResponseFormat) UnmarshalJSON(b []byte) error {
+	err := t.union.UnmarshalJSON(b)
+	return err
+}
+
+// AsPutBillingImportRequestCredential0 returns the union data inside the PutBillingImportRequest_Credential as a PutBillingImportRequestCredential0
+func (t PutBillingImportRequest_Credential) AsPutBillingImportRequestCredential0() (PutBillingImportRequestCredential0, error) {
+	var body PutBillingImportRequestCredential0
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromPutBillingImportRequestCredential0 overwrites any union data inside the PutBillingImportRequest_Credential as the provided PutBillingImportRequestCredential0
+func (t *PutBillingImportRequest_Credential) FromPutBillingImportRequestCredential0(v PutBillingImportRequestCredential0) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergePutBillingImportRequestCredential0 performs a merge with any union data inside the PutBillingImportRequest_Credential, using the provided PutBillingImportRequestCredential0
+func (t *PutBillingImportRequest_Credential) MergePutBillingImportRequestCredential0(v PutBillingImportRequestCredential0) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsPutBillingImportRequestCredential1 returns the union data inside the PutBillingImportRequest_Credential as a PutBillingImportRequestCredential1
+func (t PutBillingImportRequest_Credential) AsPutBillingImportRequestCredential1() (PutBillingImportRequestCredential1, error) {
+	var body PutBillingImportRequestCredential1
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromPutBillingImportRequestCredential1 overwrites any union data inside the PutBillingImportRequest_Credential as the provided PutBillingImportRequestCredential1
+func (t *PutBillingImportRequest_Credential) FromPutBillingImportRequestCredential1(v PutBillingImportRequestCredential1) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergePutBillingImportRequestCredential1 performs a merge with any union data inside the PutBillingImportRequest_Credential, using the provided PutBillingImportRequestCredential1
+func (t *PutBillingImportRequest_Credential) MergePutBillingImportRequestCredential1(v PutBillingImportRequestCredential1) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsPutBillingImportRequestCredential2 returns the union data inside the PutBillingImportRequest_Credential as a PutBillingImportRequestCredential2
+func (t PutBillingImportRequest_Credential) AsPutBillingImportRequestCredential2() (PutBillingImportRequestCredential2, error) {
+	var body PutBillingImportRequestCredential2
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromPutBillingImportRequestCredential2 overwrites any union data inside the PutBillingImportRequest_Credential as the provided PutBillingImportRequestCredential2
+func (t *PutBillingImportRequest_Credential) FromPutBillingImportRequestCredential2(v PutBillingImportRequestCredential2) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergePutBillingImportRequestCredential2 performs a merge with any union data inside the PutBillingImportRequest_Credential, using the provided PutBillingImportRequestCredential2
+func (t *PutBillingImportRequest_Credential) MergePutBillingImportRequestCredential2(v PutBillingImportRequestCredential2) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsPutBillingImportRequestCredential3 returns the union data inside the PutBillingImportRequest_Credential as a PutBillingImportRequestCredential3
+func (t PutBillingImportRequest_Credential) AsPutBillingImportRequestCredential3() (PutBillingImportRequestCredential3, error) {
+	var body PutBillingImportRequestCredential3
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromPutBillingImportRequestCredential3 overwrites any union data inside the PutBillingImportRequest_Credential as the provided PutBillingImportRequestCredential3
+func (t *PutBillingImportRequest_Credential) FromPutBillingImportRequestCredential3(v PutBillingImportRequestCredential3) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergePutBillingImportRequestCredential3 performs a merge with any union data inside the PutBillingImportRequest_Credential, using the provided PutBillingImportRequestCredential3
+func (t *PutBillingImportRequest_Credential) MergePutBillingImportRequestCredential3(v PutBillingImportRequestCredential3) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+func (t PutBillingImportRequest_Credential) MarshalJSON() ([]byte, error) {
+	b, err := t.union.MarshalJSON()
+	return b, err
+}
+
+func (t *PutBillingImportRequest_Credential) UnmarshalJSON(b []byte) error {
 	err := t.union.UnmarshalJSON(b)
 	return err
 }

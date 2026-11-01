@@ -15,21 +15,18 @@ unqualified.
 | `make setup` | Download modules, install the pnpm workspace, generate contracts |
 | `make dev` | Start PostgreSQL, Valkey, Go on 8082/private 9092, and Vite on 5173 |
 | `make check` | Generate contracts; check formatting, vet, Go lint, ESLint, types, and local tests |
+| `make check-fast` | Check formatting, vet, Go lint, and cached local tests without regenerating contracts |
 | `make lint` | Pinned Go static analysis gate (see `staticcheck.conf`) |
 | `make test` | Go, benchmark harness, console unit/component, and script suites without containers |
 | `make test-go` | Go unit and protocol suites |
 | `make test-bench` | The benchmark harness's own tests, which need no services |
 | `make test-console` | Console unit and component suites |
 | `make test-scripts` | Automation script tests |
-| `make test-race` | Uncached Go tests with race detection, also required in CI |
+| `make test-race` | Uncached Go tests with race detection (CI race runs live in the integration lanes) |
 | `make test-ratchet` | Mechanical test rules on the test files a change touches |
-| `make test-coverage-gate` | Coverage comparison for changed Go unit packages against the merge base |
-| `make test-mutation-go` | Mutation gate on changed Go code against the merge base |
-| `make test-mutation-console` | Mutation gate on changed console modules |
 | `make integration` | Disposable services, race/process/recovery/SDK/Chromium suites |
 | `make bench` | Gateway benchmark scenarios against a mock upstream, in [docs/develop/performance.md](docs/develop/performance.md) |
 | `make bench-compare` | The same scenarios against OLP and the pinned LiteLLM release |
-| `make bench-gate` | Hot-path `testing.B` benchmarks against the merge base, as the CI `bench` job runs them |
 | `make api` | Generate Go and TypeScript types without building the gateway |
 | `make build` | Versioned `.local/bin/olp` plus separate `console/build` assets |
 | `make build-go` | Build the native Go binary from generated contracts |
@@ -37,8 +34,9 @@ unqualified.
 | `make catalog-sign` | Sign the reference catalog and plugin index with the development key |
 | `make fmt` | Format Go and console source |
 
-Required CI includes `check`, `integration`, `dependencies`, and both native
-image jobs. Contract generation is reproducible; `openapi/management.json` is
+Required CI includes `check-go`, `check-console`, `check-scripts`,
+`contracts`, `helm`, `test-ratchet`, `dependencies`, and the `integration`
+lanes, each gated on the paths a change touches. Contract generation is reproducible; `openapi/management.json` is
 the checked-in source of truth. Update it alongside handlers and regenerate with
 `make api`. Never edit generated Go or TypeScript files by hand.
 
@@ -84,9 +82,7 @@ Use Vitest `*.test.ts`/`*.svelte.test.ts` and Playwright `*.spec.ts` for the con
 Cover changed behavior and preserve protocol fixtures. Tests follow the strict
 rules in [testing](tests/README.md#test-rules), meaning behavior assertions
 only, no pinned outside facts without a cited source and date, and one focused
-regression test per bug fix in the existing mapped test file. Coverage on
-changed packages must not drop against the merge base, the comparison in the
-[test baseline](tests/baseline.md) lanes, so the floor ratchets with every merge.
+regression test per bug fix in the existing mapped test file.
 Run `make integration` for service or browser behavior changes.
 
 Documentation changes also run `node scripts/check-docs.mjs`. The same scoped

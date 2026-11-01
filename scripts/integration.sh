@@ -2,20 +2,37 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 usage() {
-  echo 'usage: integration.sh [all|shell|code|LANE...], where LANE is qualification, a-f, g-m, n-z, smoke or browser' >&2
+  echo 'usage: integration.sh [all|shell|code|LANE...], where LANE is codecli, clients, a-f, g-m, n-r, s-z, smoke or browser' >&2
   exit 2
 }
 lanes=("$@")
 case "${lanes[*]:-all}" in
-  all) lanes=(qualification a-f g-m n-z smoke browser) ;;
-  shell) lanes=(qualification a-f g-m n-z smoke) ;;
+  all) lanes=(codecli clients a-f g-m n-r s-z smoke browser) ;;
+  shell) lanes=(codecli clients a-f g-m n-r s-z smoke) ;;
   code) ;;
   *)
     for lane in "${lanes[@]}"; do
-      case "$lane" in qualification|a-f|g-m|n-z|smoke|browser) ;; *) usage ;; esac
+      case "$lane" in qualification|codecli|clients|a-f|g-m|n-z|n-r|s-z|smoke|browser) ;; *) usage ;; esac
     done
     ;;
 esac
+expanded=()
+for lane in "${lanes[@]}"; do
+  case "$lane" in
+    qualification) expanded+=(codecli clients) ;;
+    n-z) expanded+=(n-r s-z) ;;
+    *) expanded+=("$lane") ;;
+  esac
+done
+lanes=("${expanded[@]}")
+need_replica=false
+need_regional=false
+for lane in "${lanes[@]}"; do
+  case "$lane" in
+    g-m) need_replica=true ;;
+    n-r) need_regional=true ;;
+  esac
+done
 scratch=$(mktemp -d)
 export OLP_TEST_TLS_DIR="$scratch/tls"
 mkdir -p "$OLP_TEST_TLS_DIR"
@@ -62,57 +79,74 @@ export OLP_TEST_VALKEY_URL="redis://:olp-local@$valkey/0"
 export OLP_TEST_VALKEY_TLS_URL="rediss://:olp-local@$valkey_tls/0"
 export OLP_TEST_CA_FILE="$OLP_TEST_TLS_DIR/ca.crt"
 export OLP_TEST_BINARY="$PWD/.local/bin/olp"
-make build
+if [[ ${OLP_TEST_SKIP_BUILD:-0} == 1 ]]; then
+  test -x "$OLP_TEST_BINARY"
+  test -d console/build
+else
+  make build
+fi
 source scripts/secrets.sh "$scratch/secrets"
 OLP_DATABASE_URL="$OLP_TEST_DATABASE_URL" "$OLP_TEST_BINARY" migrate
-# The physical standby uses the disposable installation's authenticated TLS
-# connection. Explicitly qualify lag instead of treating successful reads as
-# evidence that revocations have reached a regional gateway.
-"${compose[@]}" exec -T -u postgres postgres bash -ec 'printf "hostssl replication olp all scram-sha-256\n" >> "$PGDATA/pg_hba.conf"; psql -U olp -d olp -c "SELECT pg_reload_conf()" >/dev/null'
-"${compose[@]}" up -d --wait --wait-timeout 90 postgres-replica
-replica=$("${compose[@]}" port postgres-replica 5432)
-export OLP_TEST_DATABASE_READ_URL="postgres://olp:olp-local@$replica/olp?sslmode=disable"
-"${compose[@]}" up -d --wait --wait-timeout 90 valkey-region
-regional=$("${compose[@]}" port valkey-region 6380)
-export OLP_TEST_VALKEY_REGIONAL_URL="rediss://:olp-local@$regional/0"
+if [[ $need_replica == true ]]; then
+  # The physical standby uses the disposable installation's authenticated TLS
+  # connection. Explicitly qualify lag instead of treating successful reads as
+  # evidence that revocations have reached a regional gateway.
+  "${compose[@]}" exec -T -u postgres postgres bash -ec 'printf "hostssl replication olp all scram-sha-256\n" >> "$PGDATA/pg_hba.conf"; psql -U olp -d olp -c "SELECT pg_reload_conf()" >/dev/null'
+  "${compose[@]}" up -d --wait --wait-timeout 90 postgres-replica
+  replica=$("${compose[@]}" port postgres-replica 5432)
+  export OLP_TEST_DATABASE_READ_URL="postgres://olp:olp-local@$replica/olp?sslmode=disable"
+fi
+if [[ $need_regional == true ]]; then
+  "${compose[@]}" up -d --wait --wait-timeout 90 valkey-region
+  regional=$("${compose[@]}" port valkey-region 6380)
+  export OLP_TEST_VALKEY_REGIONAL_URL="rediss://:olp-local@$regional/0"
+fi
 if [[ -z ${OLP_CODECLI_ENV:-} ]]; then
   OLP_CODECLI_ENV=$(./scripts/code-mode-qualification.sh resolve)
 fi
 source "$OLP_CODECLI_ENV"
 if [[ ${lanes[*]} == code ]]; then
-  go test -mod=readonly -race -tags=integration,codecli -count=1 -timeout=25m -v -run '^TestCode' ./tests/integration
+  go test -mod=readonly -race -tags=integration,codecli -count=1 -timeout=25m -run '^TestCode' ./tests/integration
   ./scripts/code-mode-qualification.sh cli
   exit
 fi
-# Recovery tests use a separately provisioned Valkey, never a logical database
-# within the original service.
-restore_valkey="${project}-restore-valkey"
-docker run --detach --rm --name "$restore_valkey" -p 127.0.0.1::6379 valkey/valkey:9-alpine valkey-server --requirepass olp-local >/dev/null
-OLP_TEST_RESTORE_VALKEY_URL="redis://:olp-local@$(docker port "$restore_valkey" 6379/tcp)/0"
-export OLP_TEST_RESTORE_VALKEY_URL
+if [[ $need_regional == true ]]; then
+  # Recovery tests use a separately provisioned Valkey, never a logical database
+  # within the original service.
+  restore_valkey="${project}-restore-valkey"
+  docker run --detach --rm --name "$restore_valkey" -p 127.0.0.1::6379 valkey/valkey:9-alpine valkey-server --requirepass olp-local >/dev/null
+  OLP_TEST_RESTORE_VALKEY_URL="redis://:olp-local@$(docker port "$restore_valkey" 6379/tcp)/0"
+  export OLP_TEST_RESTORE_VALKEY_URL
+fi
 # Each selection keeps the deliberate recovery/enrollment waits inside the
-# package deadline. The four selections of ./tests/integration across the
-# qualification, a-f, g-m and n-z lanes are disjoint and exhaustive.
+# package deadline. The selections of ./tests/integration across the codecli,
+# a-f, g-m, n-r and s-z lanes are disjoint and exhaustive.
 process_tests() {
-  go test -race -tags=integration,oidctest,pythonsdk,codecli -count=1 -timeout=30m -v "$@" ./tests/integration
+  go test -race -tags=integration,oidctest,pythonsdk,codecli -count=1 -timeout=30m "$@" ./tests/integration
 }
 for lane in "${lanes[@]}"; do
   case "$lane" in
-    qualification)
-      process_tests -run '^TestCodeQualification'
+    codecli)
+      process_tests -run '^TestCode'
       ./scripts/code-mode-qualification.sh cli
+      ;;
+    clients)
       # Latest coding agents and pinned agent SDKs/frameworks against a scripted
       # upstream. It starts its own gateway and uses none of the services above.
       ./tests/clients/run.sh
       ;;
-    a-f) process_tests -run '^Test[A-F]' -skip '^TestCodeQualification' ;;
-    g-m) process_tests -run '^Test[G-M]' ;;
-    n-z)
-      process_tests -run '^Test($|[^A-M])'
-      go test -race -tags=integration,oidctest -count=1 -timeout=30m -v -run '^TestIntegration' ./internal/database ./internal/export ./internal/gateway ./internal/providers ./internal/media ./internal/usage ./internal/process ./internal/runtime ./internal/cache
+    a-f) process_tests -run '^Test[A-F]' -skip '^TestCode' ;;
+    g-m)
+        process_tests -run '^Test[G-M]'
+        go test -tags=integration,oidctest,pythonsdk,codecli,google_sql -count=1 -timeout=5m -run '^TestGoogleBillingImportEndToEnd$' ./tests/integration
+        ;;
+    n-r) process_tests -run '^Test[N-R]' ;;
+    s-z)
+      process_tests -run '^Test($|[^A-R])'
+      go test -race -tags=integration,oidctest -count=1 -timeout=30m -run '^TestIntegration' ./internal/database ./internal/export ./internal/gateway ./internal/providers ./internal/media ./internal/usage ./internal/process ./internal/runtime ./internal/cache
       # Test-only trusted registry additions run in their own process, so dynamic
       # fixture profiles cannot change the normal suite's fixed catalogue inventory.
-      go test -race -tags=integration,extension -count=1 -timeout=5m -v -run '^TestRegisteredExtensionsPublic$' ./tests/integration
+      go test -race -tags=integration,extension -count=1 -timeout=5m -run '^TestRegisteredExtensionsPublic$' ./tests/integration
       ;;
     smoke) OLP_SDK_SMOKE_SURFACES=openai,anthropic,gemini ./tests/sdk-smoke/run.sh ;;
     browser) (
