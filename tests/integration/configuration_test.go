@@ -822,7 +822,11 @@ func codeConfigurationPaidFrozenPolicyRoundTrip(t *testing.T, fallback bool) {
 	if err := json.NewDecoder(response.Body).Decode(&catalog); err != nil {
 		t.Fatal(err)
 	}
-	if response.StatusCode != 200 || !slices.ContainsFunc(catalog.Data, func(model codemode.Model) bool { return model.ID == account.Models[0] && model.Paid != fallback }) {
+	if response.StatusCode != 200 || !slices.ContainsFunc(catalog.Data, func(model codemode.Model) bool {
+		return model.ID == account.Models[0] && model.Paid && slices.ContainsFunc(model.Capabilities, func(capability codemode.ModelCapability) bool {
+			return capability.Protocol == codemode.ProtocolResponses && capability.Path == "v1/responses" && slices.Contains(capability.Transports, "http")
+		})
+	}) {
 		t.Fatalf("restored paid model disappeared from public discovery %d %+v", response.StatusCode, catalog.Data)
 	}
 

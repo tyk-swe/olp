@@ -2486,13 +2486,23 @@ func TestWorkloadAgentDelegatesKeyForA2A(t *testing.T) {
 		groupPair = issued.Pair
 		return issued.Token
 	}
+	groupFirstGrant := groupGrant()
+	groupFirstPair := groupPair
+	groupSecondGrant := groupGrant()
+	if groupPair != groupFirstPair {
+		t.Fatalf("group delegation pair changed between grants: %s != %s", groupPair, groupFirstPair)
+	}
 	skipCallback.Store(true)
-	groupFirst, groupFirstBody := h.do(nil, http.MethodPost, "/a2a/"+target, request, map[string]string{"Authorization": "Bearer " + groupGrant(), "X-OLP-Agent-Identity": assertion, "A2A-Version": "1.0"})
+	groupMinute := limSettleInMinute(t, client, 10*time.Second) / 60_000
+	groupFirst, groupFirstBody := h.do(nil, http.MethodPost, "/a2a/"+target, request, map[string]string{"Authorization": "Bearer " + groupFirstGrant, "X-OLP-Agent-Identity": assertion, "A2A-Version": "1.0"})
 	if groupFirst.StatusCode != http.StatusOK || !bytes.Contains(groupFirstBody, []byte("TASK_STATE_INPUT_REQUIRED")) {
 		t.Fatalf("first group request failed: %d %s", groupFirst.StatusCode, groupFirstBody)
 	}
 	callsBeforeGroupLimit := upstreamCalls.Load()
-	_, groupDenied := h.do(nil, http.MethodPost, "/a2a/"+target, request, map[string]string{"Authorization": "Bearer " + groupGrant(), "X-OLP-Agent-Identity": assertion, "A2A-Version": "1.0"})
+	_, groupDenied := h.do(nil, http.MethodPost, "/a2a/"+target, request, map[string]string{"Authorization": "Bearer " + groupSecondGrant, "X-OLP-Agent-Identity": assertion, "A2A-Version": "1.0"})
+	if after := limServerTimeMS(t, client) / 60_000; after != groupMinute {
+		t.Fatalf("group RPM scenario crossed Valkey minute boundary: %d -> %d", groupMinute, after)
+	}
 	if !bytes.Contains(groupDenied, []byte("Agent send rate exceeded")) || upstreamCalls.Load() != callsBeforeGroupLimit {
 		t.Fatalf("group request limit did not stop the upstream send: %s", groupDenied)
 	}
