@@ -9,9 +9,7 @@
     beginIdentityReauthentication
   } from '../profile/api';
   import { listSAMLIdentities, beginSAMLLink, unlinkSAML } from './api';
-  let {
-    hasLocalPassword = false
-  }: { hasLocalPassword?: boolean } = $props();
+  let { hasLocalPassword = false }: { hasLocalPassword?: boolean } = $props();
   const client = useQueryClient();
   const identities = createQuery(() => ({
     queryKey: profileKeys.saml(),
