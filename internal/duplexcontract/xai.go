@@ -225,6 +225,7 @@ func billableTextItem(root oif.Value) bool {
 }
 
 func (o *xaiObserver) usageValue() *wire.Usage { return o.usage }
+func (o *xaiObserver) pendingResponse() bool   { return o.pending > 0 }
 func (o *xaiObserver) complete() bool {
 	return o.usage != nil && o.pending == 0 && o.requested == 0 && o.inputSeq == o.coveredSeq && !o.durationBilled && !o.durationUncovered && !o.incomplete
 }

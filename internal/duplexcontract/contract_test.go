@@ -300,3 +300,45 @@ func TestXAIObserverDefaultVADStaysUncertain(t *testing.T) {
 		t.Fatal("default server_vad session settled complete without usage covering its duration")
 	}
 }
+
+func TestObserverPendingResponseIsIndependentOfUsage(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		config duplexcontract.Config
+		start  string
+		end    string
+	}{
+		{"bedrock", bedrockConfig(t), `{"event":{"completionStart":{"completionId":"c1"}}}`, `{"event":{"completionEnd":{"completionId":"c1"}}}`},
+		{"xai", xaiConfig(), `{"type":"response.created","response":{"id":"r1"}}`, `{"type":"response.done","response":{"id":"r1"}}`},
+		{"vertex", vertexConfig(), `{"serverContent":{"modelTurn":{"parts":[{"text":"hello"}]}}}`, `{"serverContent":{"turnComplete":true}}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			template, err := duplexcontract.Compile(tc.config)
+			if err != nil {
+				t.Fatal(err)
+			}
+			observer := template.Observer(1024)
+			if observer.PendingResponse() {
+				t.Fatal("idle session owes a response")
+			}
+			if _, err := observer.ServerFrame([]byte(tc.start)); err != nil {
+				t.Fatal(err)
+			}
+			if !observer.PendingResponse() {
+				t.Fatal("started response lost its terminal obligation")
+			}
+			if _, err := observer.ServerFrame([]byte(tc.end)); err != nil {
+				t.Fatal(err)
+			}
+			if observer.PendingResponse() || observer.Complete() || observer.Usage() != nil {
+				t.Fatal("response completion without usage did not retain separate terminal and metering evidence")
+			}
+			if _, err := observer.ServerFrame([]byte(tc.start)); err != nil {
+				t.Fatal(err)
+			}
+			if !observer.PendingResponse() {
+				t.Fatal("previous completion discharged a later response")
+			}
+		})
+	}
+}

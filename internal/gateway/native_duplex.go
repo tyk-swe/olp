@@ -28,6 +28,8 @@ var (
 	errDuplexProtocol       = errors.New("native duplex provider protocol violation")
 	errDuplexClientProtocol = errors.New("native duplex client protocol violation")
 	errDuplexAuthority      = errors.New("native duplex authority revoked")
+	errDuplexClientClosed   = errors.New("native duplex client closed with work in flight")
+	errDuplexIncomplete     = errors.New("native duplex provider closed with work in flight")
 )
 
 // Native duplex sessions are connection scoped. The gateway mints no session
@@ -257,7 +259,7 @@ func (s *Server) nativeDuplex(w http.ResponseWriter, r *http.Request) {
 		x.facts[len(x.facts)-1].Interaction.UpstreamState = usage.UpstreamAccepted
 		x.facts[len(x.facts)-1].Interaction.ClientState = usage.ClientPartial
 	}
-	usageRecord, usageComplete, relayErr := s.relayNativeDuplex(ctx, x, p, client, upstream, token, observer, int(limit))
+	usageRecord, usageComplete, relayErr := s.relayNativeDuplex(ctx, x, p, client, upstream, token, observer, template.Transport(), int(limit))
 	class := classProtocol
 	cancelled := false
 	if x.strict() && relayErr != nil {
@@ -269,7 +271,7 @@ func (s *Server) nativeDuplex(w http.ResponseWriter, r *http.Request) {
 			class = classProtocol
 		case errors.Is(relayErr, errDuplexAuthority):
 			class = classCredential
-		case errors.Is(relayErr, context.Canceled):
+		case errors.Is(relayErr, errDuplexClientClosed), errors.Is(relayErr, context.Canceled):
 			class, cancelled = classCancelled, true
 		case errors.Is(relayErr, context.DeadlineExceeded):
 			class = classTimeout
@@ -359,19 +361,20 @@ func (s *Server) duplexDial(ctx context.Context, x *call, p *pin, template *dupl
 	return nil, serverError(http.StatusBadGateway, "upstream_error", "The duplex transport is unavailable.")
 }
 
-func (s *Server) relayNativeDuplex(ctx context.Context, x *call, p *pin, client, upstream duplexPeer, token string, observer *duplexcontract.Observer, maxBytes int) (*wire.Usage, bool, error) {
+func (s *Server) relayNativeDuplex(ctx context.Context, x *call, p *pin, client, upstream duplexPeer, token string, observer *duplexcontract.Observer, transport duplexcontract.Transport, maxBytes int) (*wire.Usage, bool, error) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	type relayEnd struct {
-		err          error
-		fromProvider bool
+		err            error
+		client         bool
+		deliveryFailed bool
 	}
 	forward := func(dst, src duplexPeer, fromProvider bool) relayEnd {
-		end := func(err error) relayEnd { return relayEnd{err: err, fromProvider: fromProvider} }
+		end := func(err error) relayEnd { return relayEnd{err: err} }
 		for {
 			kind, payload, err := src.Read(ctx)
 			if err != nil {
-				return end(err)
+				return relayEnd{err: err, client: !fromProvider}
 			}
 			if kind != websocket.MessageText {
 				if fromProvider {
@@ -401,7 +404,7 @@ func (s *Server) relayNativeDuplex(ctx context.Context, x *call, p *pin, client,
 				return end(fmt.Errorf("%w: %v", errDuplexClientProtocol, err))
 			}
 			if err := writeGeminiLiveFrame(ctx, dst, kind, payload); err != nil {
-				return end(err)
+				return relayEnd{err: err, client: fromProvider, deliveryFailed: fromProvider}
 			}
 			if fromProvider {
 				x.delivered(s.now())
@@ -447,6 +450,7 @@ loop:
 			first.err = upstream.Ping(pingCtx)
 			if first.err == nil {
 				first.err = client.Ping(pingCtx)
+				first.client = first.err != nil
 			}
 			pingCancel()
 			if first.err != nil {
@@ -459,6 +463,10 @@ loop:
 	}
 	cancel()
 	code := websocket.CloseStatus(first.err)
+	if transport == duplexcontract.TransportBedrockBidi && !first.client && observer.PendingResponse() && (code == websocket.StatusNormalClosure || code == websocket.StatusGoingAway) {
+		first.err = fmt.Errorf("%w: %v", errDuplexIncomplete, first.err)
+		code = websocket.StatusInternalError
+	}
 	if errors.Is(first.err, errDuplexProviderError) {
 		code = websocket.StatusInternalError
 	}
@@ -472,8 +480,13 @@ loop:
 		upstream.CloseNow()
 		client.CloseNow()
 	}
+	deliveryFailed := first.deliveryFailed
 	for ; remaining > 0; remaining-- {
-		<-done
+		end := <-done
+		deliveryFailed = deliveryFailed || end.deliveryFailed
+	}
+	if transport == duplexcontract.TransportBedrockBidi && first.client && !errors.Is(first.err, context.Canceled) && !errors.Is(first.err, context.DeadlineExceeded) && (observer.PendingResponse() || deliveryFailed) {
+		return observer.Usage(), false, fmt.Errorf("%w: %v", errDuplexClientClosed, first.err)
 	}
 	if code == websocket.StatusNormalClosure || code == websocket.StatusGoingAway {
 		return observer.Usage(), observer.Complete(), nil
