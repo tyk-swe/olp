@@ -105,14 +105,37 @@ func consumerFailure(failure *consumerauth.Failure) *Error {
 }
 
 func (s *Server) authenticateRequest(r *http.Request, token, scope string) (access.Authority, *Error) {
-	authority, failure := consumerauth.Authenticate(s.Runtime, r, token, scope, s.cfg.TrustedProxies, s.now())
+	authority, failure := s.authenticateKey(r, token, scope)
 	if failure != nil {
-		return access.Authority{}, consumerFailure(failure)
+		return access.Authority{}, failure
+	}
+	if authority.TaskCapability != nil && !taskCapabilityEndpoint(r) {
+		return access.Authority{}, permissionError("permission_denied", "This task capability cannot use this endpoint.")
 	}
 	if scope != "inference" {
 		return authority, nil
 	}
 	return s.identifyEndUser(r, authority)
+}
+
+func taskCapabilityEndpoint(r *http.Request) bool {
+	if r.Method != http.MethodPost {
+		return false
+	}
+	switch r.URL.Path {
+	case "/v1/chat/completions", "/v1/responses", "/anthropic/v1/messages":
+		return true
+	}
+	model, ok := strings.CutPrefix(r.URL.Path, "/gemini/v1beta/models/")
+	if !ok || strings.Contains(model, "/") {
+		return false
+	}
+	for _, suffix := range []string{":generateContent", ":streamGenerateContent"} {
+		if name, found := strings.CutSuffix(model, suffix); found && name != "" {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *Server) checkKeyAddress(r *http.Request, authority access.Authority) *Error {
@@ -149,4 +172,12 @@ func (x *call) dropQueryKey() *Error {
 	}
 	delete(x.semanticQuery, "key")
 	return nil
+}
+
+func (s *Server) authenticateKey(r *http.Request, token, scope string) (access.Authority, *Error) {
+	authority, failure := consumerauth.Authenticate(s.Runtime, r, token, scope, s.cfg.TrustedProxies, s.now())
+	if failure != nil {
+		return access.Authority{}, consumerFailure(failure)
+	}
+	return authority, nil
 }

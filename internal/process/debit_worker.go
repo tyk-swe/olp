@@ -13,6 +13,7 @@ import (
 
 func runDebitReconciliation(ctx context.Context, pool *pgxpool.Pool, limiter *limits.Limiter, log *slog.Logger) {
 	store := &limits.DebitStore{Pool: pool, Limiter: limiter}
+	go recoverWorkflowModels(ctx, store, log)
 	toolLedger := &mcp.DurableLedger{Pool: pool, Store: store}
 	timer := time.NewTicker(time.Minute)
 	defer timer.Stop()
@@ -45,6 +46,24 @@ func runDebitReconciliation(ctx context.Context, pool *pgxpool.Pool, limiter *li
 		case <-ctx.Done():
 			return
 		case <-timer.C:
+		}
+	}
+}
+
+func recoverWorkflowModels(ctx context.Context, store *limits.DebitStore, log *slog.Logger) {
+	ticker := time.NewTicker(5 * time.Second)
+	defer ticker.Stop()
+	for {
+		pass, cancel := context.WithTimeout(ctx, 4*time.Second)
+		_, err := store.RecoverOrphanedWorkflowModels(pass, 256)
+		cancel()
+		if err != nil && ctx.Err() == nil {
+			log.Warn("workflow model recovery failed", "error", err)
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
 		}
 	}
 }

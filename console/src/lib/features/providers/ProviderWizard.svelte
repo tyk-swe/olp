@@ -105,6 +105,7 @@
           }}
         />
         {#if wizard.grantEnrollment}<GrantEnrollmentPanel
+            profileId={wizard.wizardProvider?.configuration.profile_id}
             enrollment={wizard.grantEnrollment}
             bind:input={wizard.grantInput}
             busy={wizard.busy}

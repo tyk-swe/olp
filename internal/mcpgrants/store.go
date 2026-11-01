@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/agentcontract"
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/secrets"
@@ -39,6 +40,9 @@ type Handoff struct {
 }
 
 func liveBinding(ctx context.Context, q access.Queryer, expected Binding) (Binding, error) {
+	if expected.AgentID != "" {
+		return liveAgentBinding(ctx, q, expected)
+	}
 	var project, endpoint string
 	var config *routing.MCPOAuth
 	err := q.QueryRow(ctx, `SELECT s.project_id::text,v.endpoint,v.oauth FROM olp.mcp_servers s JOIN olp.mcp_server_revisions v ON v.id=s.latest_revision_id WHERE s.id=$1 AND s.enabled AND s.retired_at IS NULL`, expected.ServerID).Scan(&project, &endpoint, &config)
@@ -55,6 +59,40 @@ func liveBinding(ctx context.Context, q access.Queryer, expected Binding) (Bindi
 	return current, nil
 }
 
+func liveAgentBinding(ctx context.Context, q access.Queryer, expected Binding) (Binding, error) {
+	var project string
+	var draft agentcontract.Draft
+	err := q.QueryRow(ctx, `SELECT p.project_id::text,v.definition FROM olp.agent_publications p JOIN olp.agent_publication_revisions v ON v.id=p.latest_revision_id WHERE p.id=$1 AND p.kind='agent' AND NOT p.retired`, expected.AgentID).Scan(&project, &draft)
+	if err != nil || draft.Agent == nil || draft.Agent.OAuth == nil || !draft.Agent.OAuth.Valid() {
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return Binding{}, err
+		}
+		return Binding{}, ErrRequired
+	}
+	current := agentBinding(expected.AgentID, project, *draft.Agent, expected.Identity)
+	if current.Digest() != expected.Digest() {
+		return Binding{}, ErrRequired
+	}
+	return current, nil
+}
+
+func revisionAgentBinding(ctx context.Context, q access.Queryer, expected Binding, revisionID string) (Binding, error) {
+	var project string
+	var draft agentcontract.Draft
+	err := q.QueryRow(ctx, `SELECT p.project_id::text,v.definition FROM olp.agent_publications p JOIN olp.agent_publication_revisions v ON v.publication_id=p.id WHERE p.id=$1 AND p.kind='agent' AND v.id=$2`, expected.AgentID, revisionID).Scan(&project, &draft)
+	if err != nil || draft.Agent == nil || draft.Agent.OAuth == nil || !draft.Agent.OAuth.Valid() {
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return Binding{}, err
+		}
+		return Binding{}, ErrRequired
+	}
+	current := agentBinding(expected.AgentID, project, *draft.Agent, expected.Identity)
+	if current.Digest() != expected.Digest() {
+		return Binding{}, ErrRequired
+	}
+	return current, nil
+}
+
 func (s *Store) Resolve(ctx context.Context, authority access.Authority, tool routing.MCPToolsetTool) ([]byte, error) {
 	expected, bindErr := Bind(authority, tool)
 	if bindErr != nil {
@@ -63,8 +101,54 @@ func (s *Store) Resolve(ctx context.Context, authority access.Authority, tool ro
 	if _, err := liveBinding(ctx, s.Pool, expected); err != nil {
 		return nil, err
 	}
-	return s.resolveGrant(ctx, expected)
+	return s.resolveGrant(ctx, expected, "")
 
+}
+
+func (s *Store) AgentBinding(authority access.Authority, publicationID string, agent agentcontract.Definition) (string, error) {
+	expected, err := BindAgent(authority, publicationID, agent)
+	if err != nil {
+		return "", err
+	}
+	return expected.Digest(), nil
+}
+
+func (s *Store) StartAgent(ctx context.Context, authority access.Authority, publicationID string, agent agentcontract.Definition) (Handoff, error) {
+	expected, err := BindAgent(authority, publicationID, agent)
+	if err != nil {
+		return Handoff{}, err
+	}
+	return s.Start(ctx, expected, nil)
+}
+
+func (s *Store) ResolveAgent(ctx context.Context, authority access.Authority, publicationID string, agent agentcontract.Definition) ([]byte, string, error) {
+	expected, err := BindAgent(authority, publicationID, agent)
+	if err != nil {
+		return nil, "", err
+	}
+	if _, err := liveBinding(ctx, s.Pool, expected); err != nil {
+		return nil, "", err
+	}
+	token, err := s.resolveGrant(ctx, expected, "")
+	return token, expected.Digest(), err
+}
+
+func (s *Store) ResolveAgentTask(ctx context.Context, digest, publicationID, projectID, revisionID string, agent agentcontract.Definition) ([]byte, error) {
+	if digest == "" || revisionID == "" || agent.OAuth == nil || !agent.OAuth.Valid() {
+		return nil, ErrRequired
+	}
+	var stored Binding
+	if err := s.Pool.QueryRow(ctx, `SELECT binding FROM olp.mcp_user_grants WHERE binding_digest=$1 AND agent_id=$2 AND project_id=$3`, digest, publicationID, projectID).Scan(&stored); err != nil {
+		return nil, ErrRequired
+	}
+	expected := agentBinding(publicationID, projectID, agent, stored.Identity)
+	if expected.Digest() != digest || stored.Digest() != digest {
+		return nil, ErrRequired
+	}
+	if _, err := revisionAgentBinding(ctx, s.Pool, expected, revisionID); err != nil {
+		return nil, err
+	}
+	return s.resolveGrant(ctx, expected, revisionID)
 }
 
 func (s *Store) Start(ctx context.Context, expected Binding, startedBy *string) (Handoff, error) {
@@ -76,7 +160,7 @@ func (s *Store) Start(ctx context.Context, expected Binding, startedBy *string) 
 	}
 	id, token := access.NewID(), rand.Text()
 	expires := time.Now().UTC().Add(10 * time.Minute)
-	_, err := s.Pool.Exec(ctx, `INSERT INTO olp.mcp_grant_enrollments(id,server_id,project_id,binding,binding_digest,handoff_digest,started_by,expires_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8)`, id, expected.ServerID, expected.ProjectID, expected, expected.Digest(), s.Auth.Digest(secrets.MCPEnrollmentDigest, token), startedBy, expires)
+	_, err := s.Pool.Exec(ctx, `INSERT INTO olp.mcp_grant_enrollments(id,server_id,agent_id,project_id,binding,binding_digest,handoff_digest,started_by,expires_at) VALUES($1,NULLIF($2,'')::uuid,NULLIF($3,'')::uuid,$4,$5,$6,$7,$8,$9)`, id, expected.ServerID, expected.AgentID, expected.ProjectID, expected, expected.Digest(), s.Auth.Digest(secrets.MCPEnrollmentDigest, token), startedBy, expires)
 	if err != nil {
 		return Handoff{}, err
 	}

@@ -1,13 +1,17 @@
 # Pricing
 
-A pricing revision is an immutable list of price entries that takes effect at
-one instant. Accounting considers every revision in force at an attempt's time
-and picks the most specific matching entry: a provider-scoped entry beats a
-vendor-scoped one, which beats a provider-kind one; among equally specific
-entries the newest `effective_at` wins, then the newest revision number.
-Entries are scoped by `provider_kind`, optional `vendor_id`, optional
-`provider_id`, `model` (the upstream model the provider was asked for) and
-`operation`, and carry one `currency`.
+Pricing begins with immutable pricing revisions. Each revision contains price
+entries that take effect at one instant and never change after creation.
+Accounting considers every revision in force at an attempt's observed time and
+selects the most specific matching entry. Provider scope wins over vendor scope,
+and vendor scope wins over provider-kind scope. Among equally specific entries,
+the newest `effective_at` wins, followed by the newest revision number.
+
+An entry is scoped by `provider_kind`, optional `vendor_id`, optional
+`provider_id`, the upstream `model` and the `operation`. It carries one
+`currency`. This guide then defines the price components, commitment and discount
+rules, consumer rate cards and the difference between provider cost and consumer
+charge.
 
 Revisions are created through `POST /api/v1/pricing/revisions`, published from
 [pricing sources](operations.md#accounting-delivery-and-shutdown), or applied as
@@ -85,8 +89,8 @@ unpriced under such tariffs; a sum of invocation inputs cannot choose a tier.
   exclusive, and must be later.
 - Periods never overlap on a shared day.
 
-The attempt's start instant is evaluated in the named zone — which must be a
-valid IANA name the database can resolve — and the matching period's multiplier
+The attempt's start instant is evaluated in the named zone, which must be a valid
+IANA name that the database can resolve. The matching period's multiplier then
 applies to the whole usage charge. No matching period means a multiplier of
 one.
 
@@ -127,7 +131,7 @@ Retained quantities stay exact until the final monetary rounding. Deferred
 facts do not repeat their submission request fee. Eval generation and grader
 facts use verified `invocation_count` with each model's generation price.
 Amounts are then scaled by window × batch. Amounts are stored `numeric(24,12)`, rounded half away from zero at
-the twelfth decimal — the same figure the gateway's Go mirror computes for
+the twelfth decimal. The gateway's Go mirror computes the same figure for
 admission reservations and settlement.
 
 ## Completeness and unpriced attempts
@@ -137,8 +141,8 @@ a rate: an input total needs at least one input-side rate (input, audio input
 or image input) with every nonzero share resolvable through its chain, an
 output total likewise, media units need a unit price, positive tool counts need
 their fees, and batch usage needs a batch multiplier. Anything else is
-recorded *unpriced* — no estimated cost — and *incomplete* when the usage
-itself is unsettled. Absent usage is not zero usage.
+recorded *unpriced*, meaning it has no estimated cost. It is also *incomplete*
+when the usage itself is unsettled. Absent usage is not zero usage.
 
 ## What an attempt records
 
@@ -149,9 +153,9 @@ rate actually charged with a nonzero quantity after fallback (for example
 per charged tool, and `tiers`, `windows`, `batch_multiplier` and `per_request`
 when they applied. It also keeps the money decomposition: `list_cost`
 (list-price equivalent before any discount), `contracted_cost`, `cost_lines`
-and `charge_lines` — the per-component quantity/unit/list and contracted unit
-prices FOCUS and the calculator read — and `caller_credential` marking
-attempts the caller paid. When the stored lines' totals do not match the
+and `charge_lines`. FOCUS and the calculator read those lines for each
+component's quantity, unit, list price and contracted unit price. The attempt
+also records `caller_credential` for attempts the caller paid. When the stored lines' totals do not match the
 fact's cost and charge, accounting discards them and records the attempt
 unpriced rather than persist inconsistent lines.
 
@@ -165,19 +169,19 @@ and the attempt settles *incomplete* rather than being billed at text rates.
 
 | Provider | Mapping |
 | --- | --- |
-| OpenAI chat and text completions | `prompt_tokens_details.cached_tokens` → cached input; `prompt_tokens_details.cache_write_tokens` → cache-write input (a count above the prompt tokens not already cached is a protocol error); `prompt_tokens_details.audio_tokens` → audio input; `completion_tokens_details.audio_tokens` → audio output. Text completions also require `total_tokens`, when present, to equal prompt plus completion tokens |
-| OpenAI realtime (`response.done`) | `input_token_details.audio_tokens`/`image_tokens` → audio/image input; `input_token_details.cached_tokens_details.audio_tokens`/`image_tokens` → cached audio/image input; `output_token_details.audio_tokens` → audio output |
-| OpenAI images (generation, edit, variation) | `input_tokens_details.image_tokens` → image input; `output_tokens_details.image_tokens` → image output, or every output token when no output breakdown is reported |
-| OpenAI speech | every output token → audio output |
-| OpenAI transcription | `input_token_details.audio_tokens` → audio input |
-| OpenAI responses | completed `web_search_call` items → `web_search`; completed `file_search_call` items → `file_search` |
-| Anthropic messages | `usage.server_tool_use.web_search_requests` → `web_search`; `web_fetch_requests` → `web_fetch`; other server-tool counters are ignored |
-| Mistral OCR | `usage_info.pages_processed` → media units × `unit_price`; other usage fields are ignored |
+| OpenAI chat and text completions | `prompt_tokens_details.cached_tokens` -> cached input; `prompt_tokens_details.cache_write_tokens` -> cache-write input (a count above the prompt tokens not already cached is a protocol error); `prompt_tokens_details.audio_tokens` -> audio input; `completion_tokens_details.audio_tokens` -> audio output. Text completions also require `total_tokens`, when present, to equal prompt plus completion tokens |
+| OpenAI realtime (`response.done`) | `input_token_details.audio_tokens`/`image_tokens` -> audio/image input; `input_token_details.cached_tokens_details.audio_tokens`/`image_tokens` -> cached audio/image input; `output_token_details.audio_tokens` -> audio output |
+| OpenAI images (generation, edit, variation) | `input_tokens_details.image_tokens` -> image input; `output_tokens_details.image_tokens` -> image output, or every output token when no output breakdown is reported |
+| OpenAI speech | every output token -> audio output |
+| OpenAI transcription | `input_token_details.audio_tokens` -> audio input |
+| OpenAI responses | completed `web_search_call` items -> `web_search`; completed `file_search_call` items -> `file_search` |
+| Anthropic messages | `usage.server_tool_use.web_search_requests` -> `web_search`; `web_fetch_requests` -> `web_fetch`; other server-tool counters are ignored |
+| Mistral OCR | `usage_info.pages_processed` -> media units × `unit_price`; other usage fields are ignored |
 | Search (Perplexity, Tavily, Exa, Parallel, Brave) | no provider usage; one successful request -> `per_request`. Provider-reported credits or `costDollars` are not used for accounting |
-| Gemini generateContent / streaming / Live / interactions | `promptTokensDetails` modality `AUDIO`/`IMAGE`/`VIDEO` → audio/image input; `cacheTokensDetails` likewise → cached audio/image input; `candidatesTokensDetails` (Live: `responseTokensDetails`) `AUDIO`/`IMAGE` → audio/image output; `TEXT` and `DOCUMENT` stay in the text share; grounding `webSearchQueries` across candidates → `google_search_query` per query plus `google_search_prompt` once per grounded prompt |
+| Gemini generateContent / streaming / Live / interactions | `promptTokensDetails` modality `AUDIO`/`IMAGE`/`VIDEO` -> audio/image input; `cacheTokensDetails` likewise -> cached audio/image input; `candidatesTokensDetails` (Live: `responseTokensDetails`) `AUDIO`/`IMAGE` -> audio/image output; `TEXT` and `DOCUMENT` stay in the text share; grounding `webSearchQueries` across candidates -> `google_search_query` per query plus `google_search_prompt` once per grounded prompt |
 
-A price must carry a fee for every tool name a route's provider can meter —
-possibly `"0"` — or the attempt bills as unpriced. Gemini Interactions usage
+A price must carry a fee for every tool name a route's provider can meter. The
+fee may be `"0"`, but a missing fee makes the attempt bill as unpriced. Gemini Interactions usage
 carries modality shares but its grounding is not metered; only
 generateContent, streaming and Live grounding counts.
 
@@ -196,8 +200,8 @@ configuration, so it travels with provider revisions and configuration export.
 A committed attempt's marginal cost is zero: the admission bound reserves
 nothing, the settled cost and the `X-OLP-Cost` response header report zero,
 and the business cost metric records zero. The attempt still prices against
-the list price — its list cost becomes `commitment_weight`, the share of the
-commitment it consumed — and `commitment` joins its `pricing_components`. An
+the list price. Its list cost becomes `commitment_weight`, the share of the
+commitment it consumed, and `commitment` joins its `pricing_components`. An
 attempt whose usage cannot be priced is unpriced as usual and gets no weight.
 
 Publication establishes a durable installation obligation. First activation
@@ -234,8 +238,9 @@ provider). `multiplier` obeys the price decimal rule and `effective_at`
 defaults to now. Nothing is updated or deleted: ending a scope means
 publishing a new discount at `1`.
 
-At an attempt's observed time, the most specific scope in force wins —
-provider over vendor over kind-only — then the newest effective time, newest
+At an attempt's observed time, the most specific scope in force wins, with
+provider scope over vendor scope and vendor scope over kind-only scope. The next
+tie-breakers are the newest effective time, newest
 creation time and greatest id. The vendor derives exactly as prices do. A
 discount scales the whole usage charge inside the same rounding as window and
 batch multipliers, so `cost = round(charge × window × batch × discount, 12)`
@@ -246,15 +251,15 @@ keeps `discount_id`. Baseline (selector savings) pricing selects a discount
 for the baseline provider the same way.
 
 The gateway pins the discount on each planned attempt: the routing policy
-records `discount_pinned` and `discount_id`, which may be null — a pinned
-null prices at one, not "resolve later". Without a pin, accounting selects at
+records `discount_pinned` and `discount_id`, which may be null. A pinned null
+prices at one rather than asking accounting to resolve a discount later. Without a pin, accounting selects at
 the observed time.
 
 ## Rate cards and charge
 
 *Cost* is what the provider bills; *charge* is what the consumer owes. A rate
-card belongs to the installation, one organization or one project — at most
-one card per owner — and publishes immutable revisions, each a whole revision
+card belongs to the installation, one organization or one project, with at most
+one card per owner. It publishes immutable revisions, each a whole revision
 with `markup` (a multiplier on cost) and optional explicit prices in the
 price-entry shape scoped by `provider_kind`, optional `vendor_id`, `model`
 and `operation`, never `provider_id`. Every component is allowed; the
@@ -262,20 +267,21 @@ currency is the installation's.
 
 An attempt's consumer is the aggregate-ownership project: the API key's
 project, else the provider's, else the route's. The card resolved is the
-most specific card with a revision in force — the project's card, then its
-organization's, then the installation's — taking the newest revision in force
+most specific card with a revision in force. Resolution checks the project's
+card, then its organization card, then the installation card, taking the newest
+revision in force
 at the observed time, and a card whose revisions all start in the future
 falls through to the next scope; revisions never layer.
 
 | Case | Charge |
 | --- | --- |
-| Card's explicit price matches (vendor-scoped first) | price_usage on the card price at discount 1 — commitments and discounts never apply |
+| Card's explicit price matches (vendor-scoped first) | `price_usage` on the card price at discount 1. Commitments and discounts never apply |
 | No explicit match, card markup | `round(cost × markup, 12)`, NULL when cost is NULL |
 | No card | cost itself, `rate_card_revision_id` NULL |
 | Not billable | NULL |
 
 So a card can charge what the provider could not price (explicit price, NULL
-cost), and a markup card over an unpriced cost leaves the charge NULL — such
+cost), and a markup card over an unpriced cost leaves the charge NULL. Such
 billable attempts count toward `uncharged_attempt_count` in usage reports and
 CSV. A committed attempt has zero cost but still charges through the card:
 explicit rates price its usage normally. Facts store `charge` and
@@ -283,15 +289,16 @@ explicit rates price its usage normally. Facts store `charge` and
 and hourly rollups carry them.
 
 The gateway resolves the card for requests with an authority project at
-admission and pins `rate_card_pinned` and `rate_card_revision_id` — null
-included — on every attempt; keyless origins stay unpinned and accounting
+admission and pins `rate_card_pinned` and `rate_card_revision_id`, including a
+null revision, on every attempt. Keyless origins stay unpinned and accounting
 resolves the card itself.
 
 ## Budget basis
 
-Every consumer budget — API-key, budget-group, installation, organization,
-project, key-route, attribution and end-user — chooses `cost_basis`:
-`cost` (the default) enforces provider cost and `charge` enforces the charge a
+Every consumer budget chooses a `cost_basis`. The budget owners are API key,
+budget group, installation, organization, project, key-route, attribution and
+end user. The default `cost` basis enforces provider cost. The `charge` basis
+enforces the charge a
 rate card produces. A billable attempt whose charge is NULL counts as an
 uncharged attempt and adds zero; supply-side caps always measure provider
 cost. See [access](../use/access.md#installation-and-project-budgets) for where each
@@ -315,8 +322,8 @@ remains unpriced and billing-uncertain. The observed token totals are retained.
 
 Simulation decisions carry `estimated_cost` per target: `minimum` prices the
 input estimate at the cheapest input-side rate of the selected tier plus the
-per-request fee, and `maximum` is the bound the gateway would reserve — the
-highest input-side rate for the estimate, the declared or default reply
+per-request fee. The `maximum` value is the bound the gateway would reserve. It
+uses the highest input-side rate for the estimate, the declared or default reply
 allowance for generation, the per-request fee, the window multiplier at the
 instant, and the attempt's pinned discount. A committed provider reports zero
 for both. The pair is null when the target has no price, the price cannot bound
@@ -324,8 +331,8 @@ the request, or no token demand is known; server-side tool fees and batch
 multipliers are excluded from both figures.
 
 `POST /api/v1/pricing/quote` prices one attempt's usage document exactly as
-accounting records it — the same price selection, discount, commitment and
-rate-card charge — in a read-only transaction that writes and audits nothing.
+accounting records it. It uses the same price selection, discount, commitment and
+rate-card charge in a read-only transaction that writes and audits nothing.
 It takes `provider_id`, `model`, `operation`, the usage dimensions, and
 optionally `started_at` (default now), `successful` (default true) and
 `project_id` naming the consumer whose card prices the charge; absent, the

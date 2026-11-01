@@ -1,6 +1,7 @@
 package scim
 
 import (
+	"errors"
 	"slices"
 	"strings"
 	"testing"
@@ -115,6 +116,30 @@ func TestSchemaFiltersPreserveValuesAndRejectInvalidNullComparisons(t *testing.T
 		for _, operator := range []string{"gt", "ge", "lt", "le", "co", "sw", "ew"} {
 			if _, err := (&SQLFilter{Schema: schema}).Compile("externalId "+operator+" null", "document"); err == nil {
 				t.Fatalf("accepted invalid null comparison %s", operator)
+			}
+		}
+	}
+}
+
+func TestValuePathCoreSchemaQualification(t *testing.T) {
+	for _, tc := range []struct {
+		schema string
+		path   string
+		wrong  string
+	}{
+		{UserSchema, "emails", GroupSchema},
+		{GroupSchema, "members", UserSchema},
+	} {
+		for _, predicate := range []string{`type eq null`, `type ne null`, `type eq "work"`, `type pr`} {
+			for _, prefix := range []string{"", tc.schema + ":", strings.ToUpper(tc.schema) + ":"} {
+				if _, err := (&SQLFilter{Schema: tc.schema}).Compile(prefix+tc.path+"["+predicate+"]", "document"); err != nil {
+					t.Fatalf("valid value path rejected: %v", err)
+				}
+			}
+			_, err := (&SQLFilter{Schema: tc.schema}).Compile(tc.wrong+":"+tc.path+"["+predicate+"]", "document")
+			var failure *Error
+			if !errors.As(err, &failure) || failure.Status != 400 || failure.Type != "invalidFilter" {
+				t.Fatalf("wrong core schema for %s: got %v, want invalidFilter", tc.schema, err)
 			}
 		}
 	}

@@ -8,6 +8,10 @@
   import { projectKeys } from '$lib/features/access/projects/projectKeys';
   import { listRoutes, simulateRouting } from '$lib/features/routes/api';
   import { routeKeys } from '$lib/features/routes/routeKeys';
+  import {
+    decisionRows,
+    type ExplanationRow
+  } from '$lib/features/routes/routingExplanation';
   import { operationKinds } from '$lib/features/usage/history/api';
   import { quoteUsage, type PricingQuote } from '$lib/features/usage/api/quote';
 
@@ -19,17 +23,7 @@
   let route = $state('');
   let routeInput = $state('');
   let routeOutput = $state('');
-  let routeResult = $state<
-    | {
-        target: string;
-        eligible: boolean;
-        reason: string | null;
-        minimum: string;
-        maximum: string;
-        currency: string;
-      }[]
-    | null
-  >(null);
+  let routeResult = $state<ExplanationRow[] | null>(null);
   let routeError = $state('');
   let routeBusy = $state(false);
 
@@ -98,14 +92,12 @@
         estimatedInputTokens: routeInput.trim() ? Number(routeInput) : null,
         maxOutputTokensOverride: routeOutput.trim() ? Number(routeOutput) : null
       });
-      routeResult = decisions.map((decision) => ({
-        target: decision.upstream_model,
-        eligible: decision.eligible,
-        reason: decision.reason ?? null,
-        minimum: decision.estimated_cost?.minimum ?? '',
-        maximum: decision.estimated_cost?.maximum ?? '',
-        currency: decision.estimated_cost?.currency ?? ''
-      }));
+      routeResult = decisionRows(
+        decisions,
+        new Map(
+          (providers.data ?? []).map((provider) => [provider.id, provider.name])
+        )
+      );
     } catch (failure) {
       routeError = errorMessage(failure);
     } finally {
@@ -255,15 +247,24 @@
               ></thead
             >
             <tbody
-              >{#each routeResult as row (row.target)}<tr
-                  ><td>{row.target}</td><td
+              >{#each routeResult as row (row.key)}<tr
+                  ><td
+                    >{row.title}<small
+                      >{row.credentialSlotId ??
+                        'Connection authentication'}</small
+                    ></td
+                  ><td
                     >{row.eligible
                       ? 'Yes'
                       : (row.reason?.replaceAll('_', ' ') ?? 'No')}</td
                   ><td
-                    >{row.minimum ? `${row.minimum} ${row.currency}` : '—'}</td
+                    >{row.estimatedCost
+                      ? `${row.estimatedCost.minimum} ${row.estimatedCost.currency}`
+                      : '—'}</td
                   ><td
-                    >{row.maximum ? `${row.maximum} ${row.currency}` : '—'}</td
+                    >{row.estimatedCost
+                      ? `${row.estimatedCost.maximum} ${row.estimatedCost.currency}`
+                      : '—'}</td
                   ></tr
                 >{/each}</tbody
             >
@@ -472,6 +473,9 @@
   }
   .table-wrap {
     overflow-x: auto;
+  }
+  td small {
+    display: block;
   }
   .more-usage {
     grid-column: 1 / -1;

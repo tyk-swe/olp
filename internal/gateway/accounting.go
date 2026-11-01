@@ -127,7 +127,7 @@ func accountingEvent(e Envelope) (*usage.Event, error) {
 	if len(e.Attempts) > 0 && e.Attempts[len(e.Attempts)-1].GenerationUsageDeferred {
 		return nil, nil
 	}
-	eventID, err := uuidNewV7()
+	eventID, err := accountingEventID(e)
 	if err != nil {
 		return nil, fmt.Errorf("generate usage event ID: %w", err)
 	}
@@ -139,6 +139,9 @@ func accountingEvent(e Envelope) (*usage.Event, error) {
 		RequestID:            e.AccountingID,
 		RuntimeGenerationID:  e.RuntimeGenerationID,
 		APIKeyID:             e.KeyID,
+		AgentPrincipalID:     e.AgentPrincipalID,
+		MemberPrincipalID:    e.MemberPrincipalID,
+		DelegationPairDigest: e.DelegationPairDigest,
 		Origin:               e.Origin,
 		ParentRequestID:      optionalText(e.ParentRequestID),
 		Attribution:          e.Attribution,
@@ -210,7 +213,7 @@ type attemptPolicy struct {
 func accountingAttempt(e Envelope, index int) (usage.Attempt, error) {
 	fact := &e.Attempts[index]
 	evidence := attemptUsage(fact, e.Operation)
-	attemptID, err := uuidNewV7()
+	attemptID, err := accountingAttemptID(e, index)
 	if err != nil {
 		return usage.Attempt{}, fmt.Errorf("generate usage attempt ID: %w", err)
 	}
@@ -230,6 +233,7 @@ func accountingAttempt(e Envelope, index int) (usage.Attempt, error) {
 		FirstByteMS:   optionalMilliseconds(fact.FirstByte),
 		Usage:         &evidence,
 		Routing: &usage.Routing{
+			Prompt:           fact.Prompt,
 			Cache:            fact.Cache,
 			Interaction:      fact.Interaction,
 			Mode:             optionalText(fact.Mode),

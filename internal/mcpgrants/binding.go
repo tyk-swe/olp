@@ -8,7 +8,9 @@ import (
 	"slices"
 
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/agentcontract"
 	"github.com/tyk-swe/olp/internal/routing"
+	"github.com/tyk-swe/olp/internal/secrets"
 )
 
 type IdentityKind string
@@ -27,11 +29,49 @@ type Identity struct {
 }
 
 type Binding struct {
-	ServerID  string           `json:"server_id"`
-	ProjectID string           `json:"project_id"`
-	Endpoint  string           `json:"endpoint"`
-	OAuth     routing.MCPOAuth `json:"oauth"`
-	Identity  Identity         `json:"identity"`
+	ServerID          string           `json:"server_id,omitempty"`
+	AgentID           string           `json:"agent_id,omitempty"`
+	EntraCredentialID string           `json:"entra_credential_id,omitempty"`
+	ProjectID         string           `json:"project_id"`
+	Endpoint          string           `json:"endpoint"`
+	OAuth             routing.MCPOAuth `json:"oauth"`
+	Identity          Identity         `json:"identity"`
+}
+
+func BindAgent(authority access.Authority, publicationID string, agent agentcontract.Definition) (Binding, error) {
+	if authority.ProjectID == nil || publicationID == "" || agent.OAuth == nil || !agent.OAuth.Valid() || (agent.OAuth.EntraOBO == nil && agent.CredentialID != nil) || (agent.OAuth.EntraOBO != nil && agent.CredentialID == nil) {
+		return Binding{}, ErrRequired
+	}
+	identity, err := identityOf(authority)
+	if err != nil {
+		return Binding{}, err
+	}
+	return agentBinding(publicationID, *authority.ProjectID, agent, identity), nil
+}
+
+func agentBinding(publicationID, projectID string, agent agentcontract.Definition, identity Identity) Binding {
+	bound := binding("", projectID, agent.Endpoint, *agent.OAuth, identity)
+	credential := func() string {
+		if agent.OAuth.EntraOBO == nil || agent.CredentialID == nil {
+			return ""
+		}
+		return *agent.CredentialID
+	}()
+	return Binding{ServerID: bound.ServerID, AgentID: publicationID, EntraCredentialID: credential, ProjectID: bound.ProjectID, Endpoint: bound.Endpoint, OAuth: bound.OAuth, Identity: bound.Identity}
+}
+
+func (b Binding) accessPurpose() secrets.SealPurpose {
+	if b.AgentID != "" {
+		return secrets.AgentCredential
+	}
+	return secrets.MCPGrantAccess
+}
+
+func (b Binding) refreshPurpose() secrets.SealPurpose {
+	if b.AgentID != "" {
+		return secrets.AgentCredential
+	}
+	return secrets.MCPGrantRefresh
 }
 
 func identityOf(authority access.Authority) (Identity, error) {

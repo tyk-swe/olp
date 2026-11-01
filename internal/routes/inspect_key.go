@@ -37,7 +37,7 @@ LEFT JOIN olp.organizations o ON o.id=p.organization_id WHERE i.singleton`, rout
 	if err != nil {
 		return key, access.Invalid("api_key_id", "Use an API key identifier.")
 	}
-	var authority access.Authority
+	authority := access.Authority{ID: key.id}
 	var raw []byte
 	var groups access.RouteGroups
 	var templates access.LimitTemplates

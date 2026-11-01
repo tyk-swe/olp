@@ -8,6 +8,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/antigravityauth"
+	"github.com/tyk-swe/olp/internal/claudeauth"
 	"github.com/tyk-swe/olp/internal/codemode"
 	"github.com/tyk-swe/olp/internal/codeplans"
 	"github.com/tyk-swe/olp/internal/codexauth"
@@ -85,4 +87,28 @@ func keyCredential(secret []byte, profileID, principal string, endpoint Endpoint
 		value = "Bearer " + value
 	}
 	return codemode.Authorization{Principal: principal, Headers: http.Header{http.CanonicalHeaderKey(header): {value}}}, nil
+}
+
+func claudeCredential(secret []byte, _ string, principal string, _ Endpoint, _ time.Time) (codemode.Authorization, error) {
+	var credential connectors.GrantCredential
+	if len(secret) > 64<<10 || json.Unmarshal(secret, &credential) != nil || !claudeauth.ValidAccessToken(credential.AccessToken) {
+		return codemode.Authorization{}, codemode.Refuse(503, "code_credential_unavailable")
+	}
+	verified := claudeauth.Principal(credential.Facts)
+	if verified == "" || verified != principal {
+		return codemode.Authorization{}, codemode.Refuse(503, "code_principal_mismatch")
+	}
+	return codemode.Authorization{Principal: verified, Headers: http.Header{"Authorization": {"Bearer " + credential.AccessToken}, "Anthropic-Beta": {claudeauth.OAuthBeta}}}, nil
+}
+
+func antigravityCredential(secret []byte, _ string, principal string, _ Endpoint, _ time.Time) (codemode.Authorization, error) {
+	var credential connectors.GrantCredential
+	if len(secret) > 64<<10 || json.Unmarshal(secret, &credential) != nil || credential.AccessToken == "" || strings.ContainsAny(credential.AccessToken, "\r\n\x00") {
+		return codemode.Authorization{}, codemode.Refuse(503, "code_credential_unavailable")
+	}
+	observed := antigravityauth.Principal(credential.Facts["subject"], credential.Facts["project_id"])
+	if observed == "" || observed != principal || len(credential.Facts) != 2 {
+		return codemode.Authorization{}, codemode.Refuse(503, "code_principal_mismatch")
+	}
+	return codemode.Authorization{Principal: observed, ProjectID: credential.Facts["project_id"], Headers: http.Header{"Authorization": {"Bearer " + credential.AccessToken}}}, nil
 }

@@ -38,11 +38,14 @@ func classify(body []byte, headers http.Header, operation string, caps ...string
 	if !ok || codemode.ValidateModels([]string{model}) != nil {
 		return request, codemode.Refuse(400, "code_model_invalid")
 	}
-	identity, err := ClientIdentity(headers)
+	identity, err := RequestIdentity(headers, root)
 	if err != nil {
 		return request, err
 	}
 	request.Operation = codemode.Operation{Name: operation, Model: model, Identity: identity}
+	if err := ValidateGenericRequest(root, headers, request); err != nil {
+		return request, err
+	}
 	// This is a rate estimate only; prompt tokens have no proven bound.
 	request.Estimate = max(1, int64(len(body))/4)
 	for _, name := range caps {

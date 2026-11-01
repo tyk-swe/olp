@@ -95,6 +95,8 @@ func TestLoadBoundsDecoderAllocations(t *testing.T) {
 		"exports":         wasmSection(7, count),
 		"elements":        wasmSection(9, count),
 		"data":            wasmSection(11, count),
+		"data over limit": wasmSection(11, append(wasmLEB(maxDataSegments+1), bytes.Repeat([]byte{1, 0}, maxDataSegments+1)...)),
+		"truncated data":  wasmSection(11, append(wasmLEB(maxDataSegments), []byte{1, 0}...)),
 		"export name":     wasmSection(7, append([]byte{1}, wasmLEB(32<<20)...)),
 		"custom name":     wasmSection(0, wasmLEB(32<<20)),
 		"function names":  wasmSection(0, append(wasmName("name"), wasmSection(1, count)...)),
