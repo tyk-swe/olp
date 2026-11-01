@@ -1,6 +1,6 @@
 import type { components } from '$lib/api/schema';
 import { apiClient } from '$lib/api/client';
-import { ensureOk, unwrap, unwrapPage } from '$lib/api/http';
+import { ensureOk, unwrap, unwrapPage, type CursorPage } from '$lib/api/http';
 import { collectCursorPages } from '$lib/api/pagination';
 
 type Schemas = components['schemas'];
@@ -103,19 +103,20 @@ async function listExportSinkGapPage(
 
 export async function listExportSinkFocusDatasets(
   sinkId: string,
+  cursor?: string,
   signal?: AbortSignal
-): Promise<FocusDataset[]> {
+): Promise<CursorPage<FocusDataset>> {
   const response = await apiClient.GET(
     '/api/v1/observability/sinks/{export_sink_id}/focus-datasets',
     {
       params: {
         path: { export_sink_id: sinkId },
-        query: { limit: 50 }
+        query: { limit: 50, cursor }
       },
       signal
     }
   );
-  return unwrapPage(response).items;
+  return unwrapPage(response);
 }
 
 export async function getCaptureConfiguration(
