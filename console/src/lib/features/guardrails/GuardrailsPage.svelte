@@ -207,7 +207,10 @@
         name: policyName,
         entries
       });
-      if (editor !== policyEditor && selectedPolicy?.policy_id !== saved.policy_id)
+      if (
+        editor !== policyEditor &&
+        selectedPolicy?.policy_id !== saved.policy_id
+      )
         return;
       selectedPolicy = saved;
       if (editor !== policyEditor) return;

@@ -477,9 +477,11 @@ for (const editor of [
     }) => {
       const newSource = destination === 'new-from-new';
       const newDestination = destination === 'new' || newSource;
-      const sameDestination = destination === 'same' || destination === 'round-trip';
+      const sameDestination =
+        destination === 'same' || destination === 'round-trip';
       const existingId = sameDestination ? 'original' : 'other';
       const existingName = sameDestination ? 'Original' : 'Other';
+      const destinationPath = newDestination ? '' : `/${existingId}`;
       const existingEtag = sameDestination
         ? '"original-saved-etag"'
         : '"other-etag"';
@@ -534,7 +536,7 @@ for (const editor of [
           },
           {
             method: newDestination ? 'POST' : 'PUT',
-            path: `/api/v1/${editor.path}${newDestination ? '' : `/${existingId}`}`,
+            path: `/api/v1/${editor.path}${destinationPath}`,
             name: 'Current draft',
             etag: newDestination ? undefined : existingEtag
           }
