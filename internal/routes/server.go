@@ -20,17 +20,23 @@ import (
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/catalog"
 	"github.com/tyk-swe/olp/internal/contentpolicy"
+	"github.com/tyk-swe/olp/internal/limits"
+	"github.com/tyk-swe/olp/internal/mcp"
 	"github.com/tyk-swe/olp/internal/operationregistry"
 	"github.com/tyk-swe/olp/internal/retainedapi"
+	"github.com/tyk-swe/olp/internal/runtime"
 	"github.com/tyk-swe/olp/internal/usage"
 	"github.com/tyk-swe/olp/internal/vendors"
 )
 
 // Server serves the route management surface.
 type Server struct {
-	Region string
-	Access *access.Server
-	Inputs func() *usage.RoutingInputs
+	Region            string
+	Access            *access.Server
+	Inputs            func() *usage.RoutingInputs
+	WorkflowTools     func() mcp.WorkflowResolver
+	WorkflowRelease   func() *runtime.Release
+	WorkflowAvailable func() bool
 	// Catalog is the reference catalog this release ships, whose documented
 	// retirements targets carry.
 	Catalog *catalog.Signed
@@ -220,6 +226,9 @@ func behaviorJSON(out map[string]any, raw []byte) map[string]any {
 	out["provider_fetched_documents"] = behavior.ProviderFetchedDocuments
 	out["cache"], out["prompt_cache"] = behavior.Cache, behavior.PromptCache
 	out["passthrough"] = behavior.Passthrough
+	out["tool_execution"], out["toolsets"] = behavior.ToolExecution, orEmpty(behavior.Toolsets)
+	out["responses_mcp_items"] = behavior.ResponsesMCPItems
+	out["run_limits"] = behavior.RunLimits
 	certification := "certified"
 	if behavior.Passthrough != nil {
 		certification = "uncertified"
@@ -271,6 +280,10 @@ type TargetInput struct {
 }
 
 type DraftInput struct {
+	RunLimits                *limits.WorkflowBounds     `json:"run_limits,omitempty"`
+	ToolExecution            string                     `json:"tool_execution,omitempty"`
+	Toolsets                 []string                   `json:"toolsets,omitempty"`
+	ResponsesMCPItems        bool                       `json:"responses_mcp_items,omitempty"`
 	Cache                    *cache.Policy              `json:"cache,omitempty"`
 	PromptCache              *cache.PromptPolicy        `json:"prompt_cache,omitempty"`
 	CallerCostExempt         bool                       `json:"caller_cost_exempt,omitempty"`
@@ -295,7 +308,7 @@ type DraftInput struct {
 }
 
 func (in *DraftInput) behavior() routing.Behavior {
-	return routing.Behavior{Cache: in.Cache, PromptCache: in.PromptCache, CallerCostExempt: in.CallerCostExempt, ProviderFetchedDocuments: in.ProviderFetchedDocuments, MaxBodyBytes: in.MaxBodyBytes, Fallbacks: in.Fallbacks, Selectors: in.Selectors, Retry: in.Retry, Affinity: in.Affinity, Budget: in.Budget, Passthrough: in.Passthrough}
+	return routing.Behavior{RunLimits: in.RunLimits, ToolExecution: in.ToolExecution, Toolsets: in.Toolsets, ResponsesMCPItems: in.ResponsesMCPItems, Cache: in.Cache, PromptCache: in.PromptCache, CallerCostExempt: in.CallerCostExempt, ProviderFetchedDocuments: in.ProviderFetchedDocuments, MaxBodyBytes: in.MaxBodyBytes, Fallbacks: in.Fallbacks, Selectors: in.Selectors, Retry: in.Retry, Affinity: in.Affinity, Budget: in.Budget, Passthrough: in.Passthrough}
 }
 
 func sameProject(a, b *string) bool {
@@ -416,6 +429,9 @@ func ValidateDraftInput(ctx context.Context, q access.Queryer, in *DraftInput, p
 	}
 	if err := behavior.Validate(in.Slug, tagged); err != nil {
 		return nil, err
+	}
+	if behavior.ResponsesMCPItems && fidelity.Strict() {
+		return nil, access.Invalid("responses_mcp_items", "Responses MCP items require transformed fidelity.")
 	}
 	route := routing.Route{Slug: in.Slug, Operations: in.Operations, OverallTimeout: int64(in.OverallTimeoutMS), MaxAttempts: in.MaxAttempts, Fidelity: fidelity, Behavior: behavior}
 	for _, t := range targets {

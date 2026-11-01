@@ -10,6 +10,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/attribution"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/usage"
@@ -26,6 +27,11 @@ type SessionDebitLedger interface {
 }
 
 type durableSessionDebits struct{ store *limits.DebitStore }
+
+type workflowModelLeases interface {
+	MarkWorkflowModelDispatched(context.Context, string, string) error
+	RenewWorkflowModelLease(context.Context, string, string) error
+}
 
 func DurableSessionDebits(store *limits.DebitStore) SessionDebitLedger {
 	if store == nil || store.Pool == nil {
@@ -46,12 +52,43 @@ func (d durableSessionDebits) MarkDispatched(ctx context.Context, id, claim stri
 	return d.store.MarkDispatched(ctx, id, claim)
 }
 
+func (d durableSessionDebits) MarkWorkflowModelDispatched(ctx context.Context, id, claim string) error {
+	return d.store.MarkWorkflowModelDispatched(ctx, id, claim)
+}
+
+func (d durableSessionDebits) RenewWorkflowModelLease(ctx context.Context, id, claim string) error {
+	return d.store.RenewWorkflowModelLease(ctx, id, claim)
+}
+
 func (d durableSessionDebits) MarkUnknown(ctx context.Context, id, claim string) error {
 	return d.store.MarkUnknown(ctx, id, claim)
 }
 
 func (d durableSessionDebits) ReleaseUndispatched(ctx context.Context, id, claim string) error {
 	return d.store.ReleaseUndispatched(ctx, id, claim)
+}
+
+func (d durableSessionDebits) MarkNotSent(ctx context.Context, id, claim string) error {
+	return d.store.MarkNotSent(ctx, id, claim)
+}
+
+func (d durableSessionDebits) SettleRecovery(ctx context.Context, result limits.DebitResult) error {
+	tx, err := d.store.Pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(context.WithoutCancel(ctx))
+	if err := limits.SettleToolDebitTx(ctx, tx, result); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+func (d durableSessionDebits) PreviousRecovery(ctx context.Context, runID, keyID string, ids []string) (bool, bool, error) {
+	var settled, pending bool
+	err := d.store.Pool.QueryRow(ctx, `SELECT COALESCE(bool_or(state='settled'),false), COALESCE(bool_or(state IN ('prepared','ready','dispatched','outcome_unknown')),false)
+		FROM olp.execution_debits WHERE run_id=$1 AND api_key_id=$2 AND kind='tool' AND id=ANY($3::uuid[])`, runID, keyID, ids).Scan(&settled, &pending)
+	return settled, pending, err
 }
 
 func (d durableSessionDebits) HasUnknownExposure(ctx context.Context, keyID string, maxDispatch time.Duration) (bool, error) {
@@ -67,16 +104,77 @@ func (d durableSessionDebits) Currency(ctx context.Context) (string, error) {
 type sessionDebit struct {
 	id              string
 	claim           string
+	runID           string
+	stepID          string
 	targetID        string
 	routeRevisionID string
 	dispatched      bool
+	leaseStarted    chan struct{}
 }
 
 func (d *sessionDebit) reference() *usage.ExecutionReference {
 	if d == nil {
 		return nil
 	}
-	return &usage.ExecutionReference{DispatchID: d.id, TargetID: d.targetID, RouteRevisionID: d.routeRevisionID}
+	return &usage.ExecutionReference{DispatchID: d.id, RunID: d.runID, StepID: d.stepID, TargetID: d.targetID, RouteRevisionID: d.routeRevisionID}
+}
+
+func (s *Server) monitorWorkflowModelLease(ctx context.Context, debit *sessionDebit) (context.Context, func() *Error) {
+	callCtx, cancel := context.WithCancel(ctx)
+	result := make(chan *Error, 1)
+	done := make(chan struct{})
+	ledger, ok := s.Debits.(workflowModelLeases)
+	if !ok || debit == nil {
+		close(done)
+		return callCtx, func() *Error { cancel(); return nil }
+	}
+	go func() {
+		defer close(done)
+		select {
+		case <-callCtx.Done():
+			return
+		case <-debit.leaseStarted:
+		}
+		ticker := time.NewTicker(limits.WorkflowModelLeaseDuration / 3)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-callCtx.Done():
+				return
+			case <-ticker.C:
+				checkCtx, stop := context.WithTimeout(callCtx, time.Second)
+				err := ledger.RenewWorkflowModelLease(checkCtx, debit.id, debit.claim)
+				stop()
+				if err != nil {
+					if callCtx.Err() != nil {
+						return
+					}
+					result <- serverError(http.StatusServiceUnavailable, "workflow_owner_lost", "The workflow step owner could not be verified.")
+					cancel()
+					return
+				}
+			}
+		}
+	}()
+	return callCtx, func() *Error {
+		cancel()
+		<-done
+		select {
+		case problem := <-result:
+			return problem
+		default:
+		}
+		select {
+		case <-debit.leaseStarted:
+			checkCtx, stop := context.WithTimeout(context.WithoutCancel(ctx), time.Second)
+			defer stop()
+			if err := ledger.RenewWorkflowModelLease(checkCtx, debit.id, debit.claim); err != nil {
+				return serverError(http.StatusServiceUnavailable, "workflow_owner_lost", "The workflow step owner could not be verified.")
+			}
+		default:
+		}
+		return nil
+	}
 }
 
 func canonicalSessionID(id string) string {
@@ -109,8 +207,11 @@ func (s *Server) sessionExposureHeld(ctx context.Context, keyID string) (bool, *
 	return held, nil
 }
 
-func (s *Server) reserveSessionDebit(ctx context.Context, x *call, authority access.Authority, attempt routing.Attempt) *Error {
-	if s.Debits == nil || x.callerCostExempt() {
+func (s *Server) reserveSessionDebit(ctx context.Context, x *call, authority access.Authority, attempt routing.Attempt, supply []cappedOwner) *Error {
+	if e := x.workflowModelCost(attempt); e != nil {
+		return e
+	}
+	if s.Debits == nil || x.callerCostExempt() && x.workflow == nil {
 		return nil
 	}
 	snapshot := x.snapshot()
@@ -151,7 +252,7 @@ func (s *Server) reserveSessionDebit(ctx context.Context, x *call, authority acc
 	if authority.ProjectID != nil {
 		projectID = *authority.ProjectID
 	}
-	debit := &sessionDebit{id: dispatchID, claim: claimID, targetID: canonicalSessionID(attempt.TargetID), routeRevisionID: routeRevisionID}
+	debit := &sessionDebit{id: dispatchID, claim: claimID, targetID: canonicalSessionID(attempt.TargetID), routeRevisionID: routeRevisionID, leaseStarted: make(chan struct{})}
 	intent := limits.DebitIntent{
 		ID: dispatchID, APIKeyID: authority.ID, ProjectID: projectID, Kind: "api", ClaimID: claimID,
 		Currency: currency, CostBound: bound.String(), ChargeBound: charge.String(),
@@ -162,13 +263,36 @@ func (s *Server) reserveSessionDebit(ctx context.Context, x *call, authority acc
 			TargetID: debit.targetID,
 		},
 	}
+	if x.workflow != nil {
+		stepID, err := newSessionDebitID()
+		if err != nil {
+			return limitsUnavailable()
+		}
+		debit.runID, debit.stepID = x.workflow.runID, stepID
+		intent.Kind, intent.RunID, intent.StepID = "model", debit.runID, debit.stepID
+	}
 	owners, requests, ok := sessionDebitBoundaries(x, authority)
 	if !ok {
 		return limitsUnavailable()
 	}
-	state, err := s.Debits.Prepare(ctx, intent, owners)
+	for _, owner := range supply {
+		if owner.limits == nil {
+			continue
+		}
+		owners = append(owners, limits.DebitOwner{ID: owner.id, Kind: "supply", Basis: limits.BasisCost})
+		requests = append(requests, limits.Request{LookupID: owner.lookup, CostOwnerID: owner.id, CostBasis: limits.BasisCost, DailyCostLimit: owner.limits.DailyCostLimit, MonthlyCostLimit: owner.limits.MonthlyCostLimit, LeaseTTL: time.Hour})
+	}
+	var state limits.DebitState
+	if x.workflow != nil {
+		state, err = s.WorkflowRuns.Prepare(ctx, authority, intent, x.workflow.ordinal, owners)
+	} else {
+		state, err = s.Debits.Prepare(ctx, intent, owners)
+	}
 	if err != nil || state != limits.DebitPrepared {
 		return limitsUnavailable()
+	}
+	if x.workflow != nil {
+		x.workflow.ordinal++
 	}
 	if err := s.Debits.Admit(ctx, dispatchID, claimID, requests); err != nil {
 		releaseCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), webrtcCloseTimeout)
@@ -195,6 +319,9 @@ func sessionDebitBoundaries(x *call, authority access.Authority) ([]limits.Debit
 	add := func(owner limits.DebitOwner, request limits.Request) {
 		owners = append(owners, owner)
 		requests = append(requests, request)
+	}
+	if agent := admission.DelegationAgentLimits.CostDebitBoundary(time.Hour, admission.BudgetIncreases); agent != nil {
+		add(agent.Owner, agent.Request)
 	}
 	if admission.BudgetGroupID != nil && admission.GroupLimits().CostBudgeted() {
 		if group := groupRequest(&admission, time.Hour); group != nil {
@@ -235,8 +362,9 @@ func sessionDebitBoundaries(x *call, authority access.Authority) ([]limits.Debit
 			LeaseTTL: time.Hour, CostBasis: boundary.policy.Basis(),
 		})
 	}
-	for _, key := range slices.Sorted(maps.Keys(admission.Attribution)) {
-		value := admission.Attribution[key]
+	labels := admission.BudgetAttribution()
+	for _, key := range slices.Sorted(maps.Keys(labels)) {
+		value := labels[key]
 		policy, ok := admission.ProjectAttributionBudgets[key][value]
 		if !ok || !policy.Limited() {
 			continue
@@ -249,6 +377,16 @@ func sessionDebitBoundaries(x *call, authority access.Authority) ([]limits.Debit
 			CostOwnerID: owner, CostIncreases: admission.BudgetIncreases[owner], LookupID: limits.AggregateBudgetLookup(owner),
 			DailyCostLimit: policy.DailyCostLimit, WeeklyCostLimit: policy.WeeklyCostLimit, MonthlyCostLimit: policy.MonthlyCostLimit,
 			LeaseTTL: time.Hour, CostBasis: policy.Basis(),
+		})
+	}
+	pairPolicy, hasPairPolicy := admission.ProjectAttributionBudgets[attribution.DelegationPairKey][admission.DelegationPairDigest]
+	if admission.DelegationPairDigest != "" && (!hasPairPolicy || !pairPolicy.Limited()) {
+		if admission.ProjectID == nil {
+			return nil, nil, false
+		}
+		owner := limits.AttributionBudgetID(*admission.ProjectID, attribution.DelegationPairKey, admission.DelegationPairDigest)
+		add(limits.DebitOwner{ID: owner, Kind: "aggregate", Basis: limits.BasisCost}, limits.Request{
+			CostOwnerID: owner, CostBasis: limits.BasisCost, LookupID: limits.AggregateBudgetLookup(owner), LeaseTTL: time.Hour,
 		})
 	}
 	if admission.EndUserDigest != "" {
@@ -285,10 +423,23 @@ func (s *Server) markSessionDispatched(ctx context.Context, x *call) *Error {
 	if x.sessionDebit == nil || s.Debits == nil {
 		return nil
 	}
-	if err := s.Debits.MarkDispatched(ctx, x.sessionDebit.id, x.sessionDebit.claim); err != nil {
+	err := func() error {
+		if x.workflow == nil {
+			return s.Debits.MarkDispatched(ctx, x.sessionDebit.id, x.sessionDebit.claim)
+		}
+		ledger, ok := s.Debits.(workflowModelLeases)
+		if !ok {
+			return limits.ErrDebitAuthority
+		}
+		return ledger.MarkWorkflowModelDispatched(ctx, x.sessionDebit.id, x.sessionDebit.claim)
+	}()
+	if err != nil {
 		return serverError(http.StatusInternalServerError, "debit_ledger_unavailable", "The durable debit could not be dispatched, so the provider session was not created.")
 	}
 	x.sessionDebit.dispatched = true
+	if x.workflow != nil {
+		close(x.sessionDebit.leaseStarted)
+	}
 	return nil
 }
 

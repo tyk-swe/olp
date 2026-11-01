@@ -66,17 +66,29 @@ func (l *DurableLedger) Reserve(ctx context.Context, in ReserveInput) (ReserveRe
 		return ReserveResult{}, limits.ErrDebitAuthority
 	}
 	reservation := &Reservation{
+		Approval: in.Approval, Authority: in.Authority,
 		DispatchID: ids[0], ClaimID: ids[1], RunID: ids[2], StepID: ids[3], AttemptID: ids[4],
 		APIKeyID: in.Authority.ID, ProjectID: *in.Authority.ProjectID,
 		ToolsetID: in.ToolsetID, ToolsetRevisionID: in.ToolsetRevisionID,
 		ToolAlias: in.ToolAlias, InputDigest: in.InputDigest, CallDigest: in.CallDigest,
+		AgentPrincipalID: in.Authority.DelegationAgentID, MemberPrincipalID: in.Authority.DelegationMemberID, DelegationPairDigest: in.Authority.DelegationPairDigest,
 		UnitPrice: cloneUnitPrice(in.UnitPrice), Currency: currency,
+	}
+	if in.RunID != "" {
+		if !canonicalUUID(in.RunID) || in.Ordinal < 0 {
+			return ReserveResult{}, limits.ErrDebitAuthority
+		}
+		reservation.RunID = in.RunID
 	}
 	intent := limits.DebitIntent{
 		ID: reservation.DispatchID, APIKeyID: in.Authority.ID, ProjectID: reservation.ProjectID,
 		RunID: reservation.RunID, StepID: reservation.StepID, Kind: "tool", ClaimID: reservation.ClaimID,
 		Currency: currency, CostBound: bound, ChargeBound: bound, PreparedUntil: time.Now().Add(90 * time.Second),
 		Affinity: limits.ExecutionAffinity{ReleaseID: in.ReleaseID, RevisionID: in.ToolsetRevisionID, ToolAlias: in.ToolAlias, InputDigest: in.InputDigest},
+	}
+	if in.Approval != nil {
+		intent.Affinity.RouteRevisionID = in.Approval.Binding.RouteRevisionID
+		intent.Affinity.TranscriptDigest = in.Approval.Binding.TranscriptDigest
 	}
 	if in.UnitPrice == nil && boundaries.CostBudgeted {
 		if err = l.recordRefusedUnpriced(ctx, in, reservation, intent, boundaries); err != nil {
@@ -89,13 +101,15 @@ func (l *DurableLedger) Reserve(ctx context.Context, in ReserveInput) (ReserveRe
 		return ReserveResult{}, err
 	}
 	defer tx.Rollback(ctx)
-	if err = agents.StartRunTx(ctx, tx, l.Auth, in.Authority, reservation.RunID, "tools", in.ToolsetID, in.ToolsetRevisionID); err != nil {
+	if in.RunID == "" {
+		if err = agents.StartRunTx(ctx, tx, l.Auth, in.Authority, reservation.RunID, "tools", in.ToolsetID, in.ToolsetRevisionID); err != nil {
+			return ReserveResult{}, err
+		}
+	}
+	if err = agents.EnsureBoundaryAccountsTx(ctx, tx, in.Authority, boundaries); err != nil {
 		return ReserveResult{}, err
 	}
-	if err = ensureBoundaryAccountsTx(ctx, tx, in, boundaries); err != nil {
-		return ReserveResult{}, err
-	}
-	state, err := agents.PrepareStepTx(ctx, tx, l.Store, in.Authority, intent, 0, owners)
+	state, err := agents.PrepareStepTx(ctx, tx, l.Store, in.Authority, intent, in.Ordinal, owners)
 	if err != nil {
 		return ReserveResult{}, err
 	}
@@ -137,40 +151,21 @@ func reservationCurrency(reservation *Reservation) *string {
 	return &currency
 }
 
-func ensureBoundaryAccountsTx(ctx context.Context, tx pgx.Tx, in ReserveInput, boundaries access.ToolDebitBoundariesResult) error {
-	if in.Authority.EndUserDigest != "" {
-		if err := limits.EnsureEndUserAccounts(ctx, tx, in.Authority.ID, in.Authority.ProjectID, in.Authority.EndUserDigest); err != nil {
-			return err
-		}
-	}
-	for _, boundary := range boundaries.Boundaries {
-		switch {
-		case boundary.AggregateLevel == "attribution":
-			if err := limits.EnsureAttributionBudget(ctx, tx, *in.Authority.ProjectID, boundary.AggregateKey, boundary.AggregateValue); err != nil {
-				return err
-			}
-		case boundary.AggregateLevel != "":
-			if err := limits.EnsureAggregateBudget(ctx, tx, boundary.AggregateLevel, boundary.AggregateKey); err != nil {
-				return err
-			}
-		}
-	}
-	return nil
-}
-
 func (l *DurableLedger) recordRefusedUnpriced(ctx context.Context, in ReserveInput, reservation *Reservation, intent limits.DebitIntent, boundaries access.ToolDebitBoundariesResult) error {
 	tx, err := l.Pool.Begin(ctx)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback(ctx)
-	if err = agents.StartRunTx(ctx, tx, l.Auth, in.Authority, reservation.RunID, "tools", in.ToolsetID, in.ToolsetRevisionID); err != nil {
+	if in.RunID == "" {
+		if err = agents.StartRunTx(ctx, tx, l.Auth, in.Authority, reservation.RunID, "tools", in.ToolsetID, in.ToolsetRevisionID); err != nil {
+			return err
+		}
+	}
+	if err = agents.EnsureBoundaryAccountsTx(ctx, tx, in.Authority, boundaries); err != nil {
 		return err
 	}
-	if err = ensureBoundaryAccountsTx(ctx, tx, in, boundaries); err != nil {
-		return err
-	}
-	state, err := agents.PrepareStepTx(ctx, tx, l.Store, in.Authority, intent, 0, boundaries.Owners())
+	state, err := agents.PrepareStepTx(ctx, tx, l.Store, in.Authority, intent, in.Ordinal, boundaries.Owners())
 	if err != nil {
 		return err
 	}
@@ -178,11 +173,11 @@ func (l *DurableLedger) recordRefusedUnpriced(ctx context.Context, in ReserveInp
 		return limits.ErrDebitState
 	}
 	now := time.Now().UTC()
-	if _, err = tx.Exec(ctx, `INSERT INTO olp.mcp_tool_calls(id,dispatch_id,api_key_id,project_id,toolset_id,toolset_revision_id,server_id,server_revision_id,tool_alias,input_digest,call_digest,result_digest,status,is_error,started_at,completed_at,unit_price,pricing_state,currency) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,NULL,'refused_unpriced',false,$12,$12,NULL,'unpriced',$13)`,
+	if _, err = tx.Exec(ctx, `INSERT INTO olp.mcp_tool_calls(id,dispatch_id,api_key_id,project_id,toolset_id,toolset_revision_id,server_id,server_revision_id,tool_alias,input_digest,call_digest,result_digest,status,is_error,started_at,completed_at,unit_price,pricing_state,currency,agent_principal_id,member_principal_id,delegation_pair_digest) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,NULL,'refused_unpriced',false,$12,$12,NULL,'unpriced',$13,NULLIF($14,'')::uuid,NULLIF($15,'')::uuid,NULLIF($16,''))`,
 		reservation.AttemptID, reservation.DispatchID, reservation.APIKeyID, reservation.ProjectID,
 		reservation.ToolsetID, reservation.ToolsetRevisionID, in.ServerID, in.ServerRevisionID,
 		reservation.ToolAlias, reservation.InputDigest, reservation.CallDigest, now,
-		reservationCurrency(reservation)); err != nil {
+		reservationCurrency(reservation), reservation.AgentPrincipalID, reservation.MemberPrincipalID, reservation.DelegationPairDigest); err != nil {
 		return err
 	}
 	if err = tx.Commit(ctx); err != nil {
@@ -221,7 +216,7 @@ WHERE i.api_key_id=$1 AND i.call_digest=$2 FOR UPDATE OF i`, reservation.APIKeyI
 	if err != nil {
 		return nil, err
 	}
-	if existing.expired || existing.state == limits.DebitReleased && existing.status == "" {
+	if existing.expired || existing.state == limits.DebitReleased && (existing.status == "" || in.RunID != "" && existing.status == StatusGuardrailBlocked) {
 		_, err = tx.Exec(ctx, `UPDATE olp.mcp_call_identities SET project_id=$3,dispatch_id=$4,attempt_id=$5,toolset_id=$6,toolset_revision_id=$7,tool_alias=$8,input_digest=$9,created_at=clock_timestamp(),expires_at=clock_timestamp()+make_interval(secs=>$10) WHERE api_key_id=$1 AND call_digest=$2`,
 			reservation.APIKeyID, in.CallDigest, reservation.ProjectID, reservation.DispatchID, reservation.AttemptID,
 			in.ToolsetID, in.ToolsetRevisionID, in.ToolAlias, in.InputDigest, callIdentityBinding.Seconds())
@@ -253,14 +248,19 @@ func (l *DurableLedger) MarkDispatched(ctx context.Context, reservation *Reserva
 		return err
 	}
 	defer tx.Rollback(ctx)
+	if reservation.Approval != nil {
+		if err := agents.ConsumeApprovalTx(ctx, tx, l.Auth, reservation.Authority, reservation.Approval.ID, reservation.DispatchID, reservation.Approval.Binding); err != nil {
+			return err
+		}
+	}
 	if err = limits.MarkDispatchedTx(ctx, tx, reservation.DispatchID, reservation.ClaimID); err != nil {
 		return err
 	}
-	if _, err = tx.Exec(ctx, `INSERT INTO olp.mcp_tool_calls(id,dispatch_id,api_key_id,project_id,toolset_id,toolset_revision_id,server_id,server_revision_id,tool_alias,input_digest,call_digest,result_digest,status,is_error,started_at,completed_at,unit_price,pricing_state,currency) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,NULL,'dispatched',false,$12,NULL,$13::numeric,$14,$15) ON CONFLICT(dispatch_id) DO NOTHING`,
+	if _, err = tx.Exec(ctx, `INSERT INTO olp.mcp_tool_calls(id,dispatch_id,api_key_id,project_id,toolset_id,toolset_revision_id,server_id,server_revision_id,tool_alias,input_digest,call_digest,result_digest,status,is_error,started_at,completed_at,unit_price,pricing_state,currency,agent_principal_id,member_principal_id,delegation_pair_digest) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,NULL,'dispatched',false,$12,NULL,$13::numeric,$14,$15,NULLIF($16,'')::uuid,NULLIF($17,'')::uuid,NULLIF($18,'')) ON CONFLICT(dispatch_id) DO NOTHING`,
 		reservation.AttemptID, reservation.DispatchID, reservation.APIKeyID, reservation.ProjectID,
 		reservation.ToolsetID, reservation.ToolsetRevisionID, evidence.ServerID, evidence.ServerRevisionID,
 		reservation.ToolAlias, reservation.InputDigest, reservation.CallDigest, evidence.StartedAt,
-		reservationPrice(reservation), pricingStateFor(reservation.UnitPrice), reservationCurrency(reservation)); err != nil {
+		reservationPrice(reservation), pricingStateFor(reservation.UnitPrice), reservationCurrency(reservation), reservation.AgentPrincipalID, reservation.MemberPrincipalID, reservation.DelegationPairDigest); err != nil {
 		return err
 	}
 	return tx.Commit(ctx)
@@ -338,11 +338,11 @@ func (l *DurableLedger) RefuseUndispatched(ctx context.Context, reservation *Res
 		return err
 	}
 	defer tx.Rollback(ctx)
-	if _, err = tx.Exec(ctx, `INSERT INTO olp.mcp_tool_calls(id,dispatch_id,api_key_id,project_id,toolset_id,toolset_revision_id,server_id,server_revision_id,tool_alias,input_digest,call_digest,result_digest,status,is_error,started_at,completed_at,unit_price,pricing_state,currency,guardrail_decisions,identity_decisions) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,NULL,'guardrail_blocked',false,$12,$13,$14::numeric,$15,$16,$17,$18)`,
+	if _, err = tx.Exec(ctx, `INSERT INTO olp.mcp_tool_calls(id,dispatch_id,api_key_id,project_id,toolset_id,toolset_revision_id,server_id,server_revision_id,tool_alias,input_digest,call_digest,result_digest,status,is_error,started_at,completed_at,unit_price,pricing_state,currency,guardrail_decisions,identity_decisions,agent_principal_id,member_principal_id,delegation_pair_digest) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,NULL,'guardrail_blocked',false,$12,$13,$14::numeric,$15,$16,$17,$18,NULLIF($19,'')::uuid,NULLIF($20,'')::uuid,NULLIF($21,''))`,
 		reservation.AttemptID, reservation.DispatchID, reservation.APIKeyID, reservation.ProjectID,
 		reservation.ToolsetID, reservation.ToolsetRevisionID, evidence.ServerID, evidence.ServerRevisionID,
 		reservation.ToolAlias, reservation.InputDigest, reservation.CallDigest, evidence.StartedAt, evidence.CompletedAt,
-		reservationPrice(reservation), pricingStateFor(reservation.UnitPrice), reservationCurrency(reservation), evidenceDecisions(evidence), identityEvidence(evidence.IdentityDecisions)); err != nil {
+		reservationPrice(reservation), pricingStateFor(reservation.UnitPrice), reservationCurrency(reservation), evidenceDecisions(evidence), identityEvidence(evidence.IdentityDecisions), reservation.AgentPrincipalID, reservation.MemberPrincipalID, reservation.DelegationPairDigest); err != nil {
 		return err
 	}
 	if err = tx.Commit(ctx); err != nil {
@@ -354,12 +354,12 @@ func (l *DurableLedger) RefuseUndispatched(ctx context.Context, reservation *Res
 }
 
 func insertAttemptTx(ctx context.Context, tx pgx.Tx, reservation *Reservation, evidence AttemptEvidence) error {
-	_, err := tx.Exec(ctx, `INSERT INTO olp.mcp_tool_calls(id,dispatch_id,api_key_id,project_id,toolset_id,toolset_revision_id,server_id,server_revision_id,tool_alias,input_digest,call_digest,result_digest,status,is_error,started_at,completed_at,unit_price,pricing_state,currency,guardrail_decisions,identity_decisions) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17::numeric,$18,$19,$20,$21) ON CONFLICT(dispatch_id) DO UPDATE SET result_digest=EXCLUDED.result_digest,status=EXCLUDED.status,is_error=EXCLUDED.is_error,completed_at=EXCLUDED.completed_at,guardrail_decisions=EXCLUDED.guardrail_decisions,identity_decisions=CASE WHEN jsonb_array_length(EXCLUDED.identity_decisions)=0 THEN mcp_tool_calls.identity_decisions ELSE EXCLUDED.identity_decisions END WHERE mcp_tool_calls.status='dispatched'`,
+	_, err := tx.Exec(ctx, `INSERT INTO olp.mcp_tool_calls(id,dispatch_id,api_key_id,project_id,toolset_id,toolset_revision_id,server_id,server_revision_id,tool_alias,input_digest,call_digest,result_digest,status,is_error,started_at,completed_at,unit_price,pricing_state,currency,guardrail_decisions,identity_decisions,agent_principal_id,member_principal_id,delegation_pair_digest) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17::numeric,$18,$19,$20,$21,NULLIF($22,'')::uuid,NULLIF($23,'')::uuid,NULLIF($24,'')) ON CONFLICT(dispatch_id) DO UPDATE SET result_digest=EXCLUDED.result_digest,status=EXCLUDED.status,is_error=EXCLUDED.is_error,completed_at=EXCLUDED.completed_at,guardrail_decisions=EXCLUDED.guardrail_decisions,identity_decisions=CASE WHEN jsonb_array_length(EXCLUDED.identity_decisions)=0 THEN mcp_tool_calls.identity_decisions ELSE EXCLUDED.identity_decisions END WHERE mcp_tool_calls.status='dispatched'`,
 		reservation.AttemptID, reservation.DispatchID, reservation.APIKeyID, reservation.ProjectID,
 		reservation.ToolsetID, reservation.ToolsetRevisionID, evidence.ServerID, evidence.ServerRevisionID,
 		reservation.ToolAlias, reservation.InputDigest, reservation.CallDigest, evidence.ResultDigest, string(evidence.Status), evidence.IsError,
 		evidence.StartedAt, evidence.CompletedAt,
-		reservationPrice(reservation), pricingStateFor(reservation.UnitPrice), reservationCurrency(reservation), evidenceDecisions(evidence), identityEvidence(evidence.IdentityDecisions))
+		reservationPrice(reservation), pricingStateFor(reservation.UnitPrice), reservationCurrency(reservation), evidenceDecisions(evidence), identityEvidence(evidence.IdentityDecisions), reservation.AgentPrincipalID, reservation.MemberPrincipalID, reservation.DelegationPairDigest)
 	return err
 }
 

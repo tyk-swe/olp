@@ -128,12 +128,13 @@ export async function declareProviderModels(
         header: { 'If-Match': provider.etag }
       },
       body: {
-        models: modelNames.map((model) => ({
-          upstream_model: model,
-          display_name: model,
-          enabled: false,
-          capabilities: []
-        }))
+        models: modelNames.map(
+          (model) =>
+            ({
+              upstream_model: model,
+              display_name: model
+            }) satisfies Schemas['DiscoveredModelRequest']
+        )
       }
     }
   );

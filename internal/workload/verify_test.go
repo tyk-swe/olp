@@ -52,6 +52,87 @@ func TestMappingRouteScopesRequireExplicitGroups(t *testing.T) {
 		t.Fatalf("resource scopes required unrelated route grants: %v", err)
 	}
 }
+
+func agentIssuerConfig(match map[string]string) Config {
+	return Config{
+		Name: "agents", Issuer: "https://issuer.example", JWKSURL: "https://issuer.example/keys", Enabled: true,
+		DisabledKeyIDs: []string{}, Audiences: []string{"gateway"}, Algorithms: []string{"EdDSA"}, MaxLifetimeSeconds: 600,
+		Mappings: []Mapping{{
+			Name: "worker", AgentPrincipal: true, Match: match,
+			ProjectID: "00000000-0000-4000-8000-000000000001", LimitTemplate: "agent",
+			RouteGroups: []string{"generation"}, Scopes: []string{"inference"},
+		}},
+	}
+}
+
+func TestAgentMappingRequiresSubjectAndClient(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		match   map[string]string
+		allowed bool
+	}{
+		{name: "unbound", match: map[string]string{}},
+		{name: "subject only", match: map[string]string{"/sub": "worker"}},
+		{name: "client only", match: map[string]string{"/client_id": "client"}},
+		{name: "subject and client", match: map[string]string{"/sub": "worker", "/client_id": "client"}, allowed: true},
+		{name: "subject and authorized party", match: map[string]string{"/sub": "worker", "/azp": "client"}, allowed: true},
+		{name: "subject and application", match: map[string]string{"/sub": "worker", "/appid": "client"}, allowed: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			err := agentIssuerConfig(test.match).Validate()
+			if (err == nil) != test.allowed {
+				t.Fatalf("mapping allowed = %t, want %t: %v", err == nil, test.allowed, err)
+			}
+		})
+	}
+}
+
+func TestAgentMappingVerifiesBothSignedClaims(t *testing.T) {
+	public, private, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	config := agentIssuerConfig(map[string]string{"/sub": "worker", "/client_id": "client"})
+	if err := config.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	keys := map[string]jose.JSONWebKey{"agent": {Key: public, KeyID: "agent", Algorithm: string(jose.EdDSA)}}
+	now := time.Now()
+	for _, test := range []struct {
+		name    string
+		subject string
+		client  string
+		allowed bool
+	}{
+		{name: "bound identity", subject: "worker", client: "client", allowed: true},
+		{name: "different subject", subject: "other", client: "client"},
+		{name: "different client", subject: "worker", client: "other"},
+		{name: "missing client", subject: "worker"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			claims := struct {
+				Issuer   string   `json:"iss"`
+				Subject  string   `json:"sub"`
+				ClientID string   `json:"client_id,omitempty"`
+				Audience []string `json:"aud"`
+				Issued   int64    `json:"iat"`
+				Expires  int64    `json:"exp"`
+			}{config.Issuer, test.subject, test.client, config.Audiences, now.Unix() - 1, now.Unix() + 120}
+			token, err := Parse(sign(t, jose.EdDSA, private, "agent", claims))
+			if err != nil {
+				t.Fatal(err)
+			}
+			identity, err := token.Verify(config, keys, now)
+			if (err == nil) != test.allowed {
+				t.Fatalf("identity allowed = %t, want %t: %v", err == nil, test.allowed, err)
+			}
+			if test.allowed && (identity.Subject != test.subject || !identity.Mapping.AgentPrincipal) {
+				t.Fatalf("verified identity lost the agent binding: %+v", identity)
+			}
+		})
+	}
+}
+
 func fixtureClaims(now time.Time) map[string]any {
 	return map[string]any{"iss": "https://issuer.example", "sub": "private-service-account", "aud": []string{"gateway"}, "iat": now.Unix() - 1, "exp": now.Unix() + 120, "nbf": now.Unix() - 1, "repository": "example/repo", "customer": "customer-1"}
 }

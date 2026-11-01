@@ -55,6 +55,17 @@ type dispatchHold struct {
 // gateAttempt adds request spend caps to the shared slot admission boundary.
 // Its hold carries the owners that accounting and settlement must charge.
 func (s *Server) gateAttempt(ctx context.Context, x *call, attempt routing.Attempt, provider *routing.Provider, slot *routing.Slot, estimate int64, deadline time.Time) gateResult {
+	if x.workflow != nil {
+		gate := s.gateSlot(ctx, provider, slot, estimate, deadline, x.priority)
+		if gate.hold != nil && !(x.callerCostExempt() && provider.CredentialSource == "caller") {
+			for _, owner := range attemptCaps(x.route, provider, slot) {
+				if owner.limits != nil {
+					gate.hold.budgets = append(gate.hold.budgets, owner.id)
+				}
+			}
+		}
+		return gate
+	}
 	caps := s.holdCaps(ctx, x, attempt, provider, slot, deadline)
 	if caps.quota != "" {
 		if caps.refusal != nil {

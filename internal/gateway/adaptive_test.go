@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"maps"
 	"net/http"
 	"net/http/httptest"
@@ -18,9 +19,11 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/observability"
 	"github.com/tyk-swe/olp/internal/runtime"
+	"github.com/tyk-swe/olp/internal/usage"
 )
 
 const backupSlug = "team-backup"
@@ -59,6 +62,44 @@ func (h *harness) republish(edit func(s *routing.Snapshot, a, b routing.Provider
 	h.rt.mu.Unlock()
 }
 
+func TestWorkflowPricesPreparedOutputLimits(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		path    string
+		request string
+	}{
+		{name: "profile default", path: "/v1/chat/completions", request: `{"model":"` + routeSlug + `","messages":[{"role":"user","content":"hello"}],"olp_toolsets":[],"olp_run_limits":{"max_run_cost":%q}}`},
+		{name: "translated Responses", path: "/v1/responses", request: `{"model":"` + routeSlug + `","input":"hello","max_output_tokens":1000,"olp_toolsets":[],"olp_run_limits":{"max_run_cost":%q}}`},
+	} {
+		for _, limit := range []string{"0.5", "2"} {
+			t.Run(tc.name+"/"+limit, func(t *testing.T) {
+				projectID, toolsetID := uuid.NewString(), uuid.NewString()
+				fixture := &workflowFixture{runID: uuid.NewString(), tool: WorkflowTool{ToolsetID: toolsetID}}
+				h := nativeWorkflowHarnessWithProviders(t, projectID, "openai", "compatible-chat", "unary", routing.FidelityTransformed, []string{toolsetID}, true, fixture, func(provider routing.Provider) routing.Provider {
+					provider.Kind = "openai_compatible"
+					provider.Models = map[string]json.RawMessage{modelA: json.RawMessage(`{"context_length":10000}`), modelB: json.RawMessage(`{"context_length":10000}`)}
+					provider.OperationDefaults = map[string]connectors.DefaultSet{"generation": {Dialect: "openai-chat", Values: map[string]json.RawMessage{"max_tokens": json.RawMessage(`1000`)}}}
+					return provider
+				})
+				h.rt.inputs = &usage.RoutingInputs{RefreshedAt: time.Now(), Prices: []usage.RoutingPrice{{Price: usage.Price{ProviderKind: "openai_compatible", Model: modelA, Operation: "generation", InputPerMillion: new("0"), OutputPerMillion: new("1000")}, EffectiveAt: time.Now().Add(-time.Minute)}}}
+				response := h.do(t.Context(), http.MethodPost, tc.path, fullKey, []byte(fmt.Sprintf(tc.request, limit)), nil)
+				defer response.Body.Close()
+				body, err := io.ReadAll(response.Body)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if limit == "0.5" {
+					if response.StatusCode != http.StatusBadRequest || !strings.Contains(string(body), "run_cost_limit") || h.mock.count("a") != 0 {
+						t.Fatalf("prepared output cost was not enforced: status=%d body=%s calls=%d", response.StatusCode, body, h.mock.count("a"))
+					}
+				} else if response.StatusCode != http.StatusOK || h.mock.count("a") != 1 {
+					t.Fatalf("bounded workflow was not admitted: status=%d body=%s calls=%d", response.StatusCode, body, h.mock.count("a"))
+				}
+			})
+		}
+	}
+}
+
 // splitRoutes leaves the harness route serving only provider a and adds a
 // backup route that serves only provider b.
 func splitRoutes(s *routing.Snapshot, b routing.Provider, behavior routing.Behavior) {
@@ -70,6 +111,89 @@ func splitRoutes(s *routing.Snapshot, b routing.Provider, behavior routing.Behav
 	backup.ID, backup.RoutingID, backup.RevisionID, backup.Slug = backupID, backupID, uuid.NewString(), backupSlug
 	backup.Targets = []routing.Target{{ID: uuid.NewString(), ProviderID: b.ID, ProviderModel: modelB, Weight: 1, Timeout: 2000, RoutingID: uuid.NewString()}}
 	s.Routes[routeSlug], s.Routes[backupSlug] = primary, backup
+}
+
+func TestWorkflowKeepsNamedRoutePolicyAcrossServingRoutes(t *testing.T) {
+	for _, tc := range []struct {
+		name            string
+		fallback        bool
+		namedWorkflow   bool
+		servingWorkflow bool
+		strictServing   bool
+		denyServing     bool
+	}{
+		{name: "selector keeps workflow", namedWorkflow: true},
+		{name: "fallback keeps workflow", fallback: true, namedWorkflow: true},
+		{name: "selector keeps ordinary request", servingWorkflow: true},
+		{name: "fallback keeps ordinary request", fallback: true, servingWorkflow: true},
+		{name: "selector rejects strict serving route", namedWorkflow: true, strictServing: true},
+		{name: "fallback rejects strict serving route", fallback: true, namedWorkflow: true, strictServing: true},
+		{name: "fallback respects route authorization", fallback: true, namedWorkflow: true, denyServing: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			projectID, toolsetID := uuid.NewString(), uuid.NewString()
+			alias := "t_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+			fixture := &workflowFixture{runID: uuid.NewString(), tool: WorkflowTool{ToolsetID: toolsetID, RevisionID: uuid.NewString(), Definition: routing.MCPToolsetTool{Alias: alias, Classification: "read_only", InputSchema: json.RawMessage(`{"type":"object"}`)}}}
+			h := nativeWorkflowHarness(t, projectID, "openai", "openai-chat", "unary", routing.FidelityTransformed, []string{toolsetID}, true, fixture)
+			if tc.denyServing {
+				authority := h.rt.keys[fullKey]
+				authority.Policy.AllowedRoutes = []string{routeSlug}
+				h.rt.keys[fullKey] = authority
+			}
+			h.republish(func(snapshot *routing.Snapshot, a, b routing.Provider) {
+				behavior := routing.Behavior{}
+				if tc.namedWorkflow {
+					behavior.ToolExecution, behavior.Toolsets = "gateway", []string{toolsetID}
+				}
+				if tc.fallback {
+					behavior.Fallbacks = []routing.Fallback{{Route: backupSlug, On: []string{routing.FallbackContextWindow}}}
+					a.Models = map[string]json.RawMessage{modelA: json.RawMessage(`{"context_length":1}`)}
+					snapshot.Providers[a.ID] = a
+				} else {
+					behavior.Selectors = []routing.Selector{{ID: "delegate", Route: backupSlug}}
+				}
+				splitRoutes(snapshot, b, behavior)
+				backup := snapshot.Routes[backupSlug]
+				backup.ToolExecution, backup.Toolsets = "", nil
+				if tc.servingWorkflow {
+					backup.ToolExecution, backup.Toolsets = "gateway", []string{toolsetID}
+				}
+				if tc.strictServing {
+					backup.Fidelity.Mode = routing.FidelityStrict
+				}
+				snapshot.Routes[backupSlug] = backup
+			})
+			h.mock.set("b", func(w http.ResponseWriter, r *http.Request) {
+				body, err := io.ReadAll(r.Body)
+				if err != nil {
+					t.Error(err)
+					return
+				}
+				if strings.Contains(string(body), `"role":"tool"`) {
+					completion(modelB, "workflow finished")(w, r)
+					return
+				}
+				fmt.Fprintf(w, `{"id":"first","object":"chat.completion","model":"%s","choices":[{"index":0,"message":{"role":"assistant","content":null,"tool_calls":[{"id":"call-one","type":"function","function":{"name":%q,"arguments":"{}"}}]},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":2,"completion_tokens":3,"total_tokens":5}}`, modelB, alias)
+			})
+			response, body := h.chat(fullKey, nil, `,"max_tokens":20`)
+			if tc.strictServing || tc.denyServing {
+				if response.StatusCode < 400 || h.mock.count("b") != 0 || len(fixture.calls) != 0 {
+					t.Fatalf("serving route admitted a refused workflow: status=%d body=%v", response.StatusCode, body)
+				}
+				return
+			}
+			if response.StatusCode != http.StatusOK {
+				t.Fatalf("request failed: status=%d body=%v", response.StatusCode, body)
+			}
+			if tc.namedWorkflow {
+				if h.mock.count("b") != 2 || len(fixture.calls) != 1 || !strings.Contains(fmt.Sprint(body), "workflow finished") {
+					t.Fatalf("named workflow was lost: body=%v model_calls=%d tool_calls=%d", body, h.mock.count("b"), len(fixture.calls))
+				}
+			} else if h.mock.count("b") != 1 || len(fixture.calls) != 0 || !strings.Contains(fmt.Sprint(body), "tool_calls") {
+				t.Fatalf("serving route enabled a workflow: body=%v model_calls=%d tool_calls=%d", body, h.mock.count("b"), len(fixture.calls))
+			}
+		})
+	}
 }
 
 func TestContentFilterRefusalFallsBackWithoutTouchingHealth(t *testing.T) {

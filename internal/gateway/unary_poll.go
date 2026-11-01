@@ -76,6 +76,11 @@ func (e *unaryExchange) do(method, target string, body []byte) (*http.Response, 
 		}
 		return nil, &unaryFailure{class: classCredential}
 	}
+	if e.x.workflow != nil && e.x.sessionDebit != nil && !e.x.sessionDebit.dispatched {
+		if failure := e.server.markSessionDispatched(e.ctx, e.x); failure != nil {
+			return nil, &unaryFailure{class: classConnect, failure: &attemptFailure{contractCode: failure.Code, noRetry: true}}
+		}
+	}
 	response, err := e.client.Do(req)
 	if err != nil {
 		return nil, &unaryFailure{class: e.state.classify(err, false)}

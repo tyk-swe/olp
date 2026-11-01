@@ -195,8 +195,6 @@ type InvalidRequestError struct{ Reason string }
 
 func (e *InvalidRequestError) Error() string { return e.Reason }
 
-// Request describes one admission decision. A nil limit means that dimension is
-// unlimited and no state is created for it.
 type Request struct {
 	// CostOwnerID identifies the cost budget owner. Provider connections and slots
 	// pass their own identifier: cost keys are only used when a cost limit is set.
@@ -210,6 +208,7 @@ type Request struct {
 	RequestsPerMinute *int64
 	TokensPerMinute   *int64
 	MaxConcurrency    *int64
+	TrackConcurrency  bool
 	// DailyCostLimit and MonthlyCostLimit are canonical decimal strings.
 	DailyCostLimit   *string
 	MonthlyCostLimit *string
@@ -319,11 +318,8 @@ func (r Request) HasCostBudget() bool {
 	return r.DailyCostLimit != nil || r.MonthlyCostLimit != nil || r.WeeklyCostLimit != nil
 }
 
-// HasRateLimits reports whether a request, token or concurrency limit applies,
-// which is what makes the reservation touch the rate script. A request bound
-// only by a cost budget never does.
 func (r Request) HasRateLimits() bool {
-	return r.RequestsPerMinute != nil || r.TokensPerMinute != nil || r.MaxConcurrency != nil
+	return r.RequestsPerMinute != nil || r.TokensPerMinute != nil || r.MaxConcurrency != nil || r.TrackConcurrency
 }
 
 // reportsRate reports whether the rate script is asked for the allowance: the
@@ -689,6 +685,9 @@ func (l *Limiter) reserveRate(ctx context.Context, r Request, scriptKeys keys, l
 		args = append(args, r.Share.Class, strconv.FormatInt(r.Share.Percent, 10),
 			strconv.FormatInt(r.Share.SaturationPercent, 10))
 	}
+	if r.TrackConcurrency {
+		args = append(args, "1")
+	}
 	value, err := l.eval(ctx, reserveLimitsScript, []string{scriptKeys.rate, scriptKeys.concurrency}, args...)
 	if err != nil {
 		return scriptResult{}, err
@@ -708,7 +707,7 @@ func (l *Limiter) reserveRate(ctx context.Context, r Request, scriptKeys keys, l
 	case resultGranted:
 		// A concurrency lease is reported exactly when one was requested. Any
 		// other pairing means the reply does not describe this request.
-		if (r.MaxConcurrency != nil) != (result.leaseExpiresAtMS > 0) {
+		if (r.MaxConcurrency != nil || r.TrackConcurrency) != (result.leaseExpiresAtMS > 0) {
 			return scriptResult{}, ErrUnexpectedResponse
 		}
 		return result, nil
