@@ -63,8 +63,11 @@ func (x *call) cacheHeaders(h http.Header) {
 }
 
 func (s *Server) initializeCache(x *call) *Error {
+	if x.workflow != nil {
+		return nil
+	}
 	// New endpoint contracts require explicit cache qualification.
-	if x.family == wire.Completions || operationregistry.TransformedServing(x.operationName()) {
+	if x.prompt != nil || x.family == wire.Completions || operationregistry.TransformedServing(x.operationName()) {
 		return nil
 	}
 	if x.route.Cache == nil && x.request.cacheDirectives == "" {
@@ -75,7 +78,7 @@ func (s *Server) initializeCache(x *call) *Error {
 		return invalidRequest("invalid_cache_control", err.Error(), nil)
 	}
 	x.cache = &responseCacheCall{controls: c, result: "bypass"}
-	if x.route.Cache == nil || s.Cache == nil || x.origin != "" || x.authority.Policy.ForbidResponseCache || x.request.callerCredential != nil || x.providerState || x.generation.resources != nil || x.generation.continuation != nil {
+	if x.route.Cache == nil || s.Cache == nil || x.origin != "" || x.authority.Policy.ForbidResponseCache || x.authority.TaskCapability != nil || x.request.callerCredential != nil || x.providerState || x.generation.resources != nil || x.generation.continuation != nil {
 		return nil
 	}
 	p := x.route.Cache.Effective()
@@ -217,6 +220,9 @@ func cacheAuthority(a access.Authority, rates, tokens, budgets bool) access.Auth
 			p.MonthlyCostLimit = nil
 		}
 		return p
+	}
+	if a.DelegationAgentLimits != nil {
+		a.DelegationAgentLimits = &access.DelegationAgentLimits{ID: a.DelegationAgentLimits.ID, LookupID: a.DelegationAgentLimits.LookupID, Limits: filter(a.DelegationAgentLimits.Limits)}
 	}
 	if !rates {
 		a.Policy.RequestsPerMinute = nil

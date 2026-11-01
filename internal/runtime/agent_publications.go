@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"maps"
+	"slices"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -64,6 +65,9 @@ func loadAgentResourceAuthority(ctx context.Context, tx pgx.Tx) (map[string]agen
 // authority. Long-running callers must invoke it before each outbound step and
 // at least every PollInterval; stale authority is never accepted.
 func (m *Manager) AuthorizeAgentResource(a access.Authority, scope, id, revision, project string) error {
+	if a.TaskCapability != nil && (scope != "tools" || !slices.Contains(a.TaskCapability.ToolsetRevisions, revision)) {
+		return access.Forbidden()
+	}
 	now := time.Now()
 	if !a.AllowsResource(scope, id, project, now) {
 		return access.Forbidden()
@@ -108,8 +112,13 @@ func (state authorityState) currentAgentPrincipal(a access.Authority, scope, id,
 	if !ok || current.ID != a.ID || !current.AllowsResource(scope, id, project, now) {
 		return false
 	}
-
-	return true
+	if a.DelegationAgentID == "" {
+		return true
+	}
+	if a.DelegationAgentLimits == nil || a.DelegationAgentLimits.ID != a.DelegationAgentID || a.DelegationAgentLimits.WorkloadDigest == "" {
+		return false
+	}
+	return state.currentAgentPrincipal(access.Authority{ID: a.DelegationAgentID, WorkloadIssuerID: a.DelegationAgentLimits.WorkloadIssuerID, WorkloadDigest: a.DelegationAgentLimits.WorkloadDigest, WorkloadRevision: a.DelegationAgentLimits.WorkloadRevision, WorkloadMapping: a.DelegationAgentLimits.WorkloadMapping}, scope, id, project, now)
 }
 
 type mcpToolAuthority struct {
@@ -147,6 +156,9 @@ func loadMCPToolAuthority(ctx context.Context, tx pgx.Tx) (map[string]mcpToolAut
 	}), nil
 }
 func (m *Manager) AuthorizeMCPTool(a access.Authority, id, revision, project, server, serverRevision string) error {
+	if a.TaskCapability != nil && !slices.Contains(a.TaskCapability.ToolsetRevisions, revision) {
+		return access.Forbidden()
+	}
 	now := time.Now()
 	if !a.AllowsResource("tools", id, project, now) {
 		return access.Forbidden()

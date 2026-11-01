@@ -370,3 +370,99 @@ func TestDecodeAcceptsRetainedOperations(t *testing.T) {
 		}
 	}
 }
+
+func TestDelegatedAttributionRoundTripAndValidation(t *testing.T) {
+	base, encodeErr := Encode(metadataEvent())
+	if encodeErr != nil {
+		t.Fatal(encodeErr)
+	}
+	agentID := uuid.NewString()
+	memberID := uuid.NewString()
+	digest := strings.Repeat("a", 64)
+	payload := func(fields string) []byte { return []byte("{" + fields + string(base[1:])) }
+	valid := payload(`"agent_principal_id":"` + agentID + `","member_principal_id":"` + memberID + `","delegation_pair_digest":"` + digest + `",`)
+	decoded, decodeErr := Decode(valid)
+	if decodeErr != nil {
+		t.Fatal(decodeErr)
+	}
+	if decoded.AgentPrincipalID != agentID || decoded.MemberPrincipalID != memberID || decoded.DelegationPairDigest != digest {
+		t.Fatalf("delegated attribution did not survive decoding: %+v", decoded)
+	}
+	if _, err := Validate(decoded); err != nil {
+		t.Fatalf("valid delegated event rejected: %v", err)
+	}
+	encoded, reencodeErr := Encode(decoded)
+	if reencodeErr != nil {
+		t.Fatal(reencodeErr)
+	}
+	roundTrip, roundTripErr := Decode(encoded)
+	if roundTripErr != nil || roundTrip.AgentPrincipalID != agentID || roundTrip.MemberPrincipalID != memberID || roundTrip.DelegationPairDigest != digest {
+		t.Fatalf("delegated attribution did not survive round trip: %+v, %v", roundTrip, roundTripErr)
+	}
+	for name, fields := range map[string]string{
+		"missing agent":  `"delegation_pair_digest":"` + digest + `",`,
+		"invalid agent":  `"agent_principal_id":"bad","delegation_pair_digest":"` + digest + `",`,
+		"missing digest": `"agent_principal_id":"` + agentID + `",`,
+		"invalid digest": `"agent_principal_id":"` + agentID + `","delegation_pair_digest":"` + strings.Repeat("A", 64) + `",`,
+		"invalid member": `"agent_principal_id":"` + agentID + `","member_principal_id":"bad","delegation_pair_digest":"` + digest + `",`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := Decode(payload(fields)); err == nil {
+				t.Fatal("invalid delegated attribution accepted")
+			}
+		})
+	}
+}
+
+func TestPromptAttributionOnAttempts(t *testing.T) {
+	base, encodeErr := Encode(metadataEvent())
+	if encodeErr != nil {
+		t.Fatal(encodeErr)
+	}
+	promptID, revisionID, providerRevisionID := uuid.NewString(), uuid.NewString(), uuid.NewString()
+	payload := func(prompt string) []byte {
+		routing := `"attempts":[{"routing":{"provider_revision_id":"` + providerRevisionID + `","prompt":` + prompt + `},`
+		return []byte(strings.Replace(string(base), `"attempts":[{`, routing, 1))
+	}
+	decoded, decodeErr := Decode(payload(`{"id":"` + promptID + `","revision_id":"` + revisionID + `"}`))
+	if decodeErr != nil {
+		t.Fatal(decodeErr)
+	}
+	if _, err := Validate(decoded); err != nil {
+		t.Fatal(err)
+	}
+	prompt := decoded.Attempts[0].Routing.Prompt
+	if prompt.ID != promptID || prompt.RevisionID != revisionID {
+		t.Fatalf("prompt attribution did not survive decoding: %+v", prompt)
+	}
+	for name, invalid := range map[string]string{
+		"invalid prompt":   `{"id":"bad","revision_id":"` + revisionID + `"}`,
+		"invalid revision": `{"id":"` + promptID + `","revision_id":"bad"}`,
+		"missing revision": `{"id":"` + promptID + `"}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := Decode(payload(invalid)); err == nil {
+				t.Fatal("invalid prompt attribution accepted")
+			}
+		})
+	}
+}
+
+func TestValidateRejectsUnboundDelegationAttribution(t *testing.T) {
+	agent, key := uuid.NewString(), uuid.NewString()
+	digest := strings.Repeat("a", 64)
+	cases := map[string]*Event{
+		"invalid agent":  {RouteSlug: "test", APIKeyID: key, AgentPrincipalID: "bad", DelegationPairDigest: digest},
+		"invalid member": {RouteSlug: "test", APIKeyID: key, AgentPrincipalID: agent, MemberPrincipalID: "bad", DelegationPairDigest: digest},
+		"missing pair":   {RouteSlug: "test", APIKeyID: key, AgentPrincipalID: agent},
+		"missing key":    {RouteSlug: "test", AgentPrincipalID: agent, DelegationPairDigest: digest},
+		"keyless origin": {RouteSlug: "test", Origin: OriginShadow, AgentPrincipalID: agent, DelegationPairDigest: digest},
+	}
+	for name, event := range cases {
+		t.Run(name, func(t *testing.T) {
+			if _, err := Validate(event); err == nil || !strings.Contains(err.Error(), "delegation") {
+				t.Fatalf("invalid delegation accepted or misidentified: %v", err)
+			}
+		})
+	}
+}

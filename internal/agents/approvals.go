@@ -53,7 +53,7 @@ func approvalDigest(key *secrets.AuthKey, b ApprovalBinding) ([]byte, error) {
 	if b.RouteRevisionID != "" && !validApprovalID(b.RouteRevisionID) {
 		return nil, ErrApproval
 	}
-	if key == nil || !regexp.MustCompile(`^t_[a-f0-9]{32}_[a-f0-9]{32}$`).MatchString(b.ToolAlias) || !limits.ValidCostLimit(b.MaxCost) || !regexp.MustCompile(`^[A-Z]{3}$`).MatchString(b.Currency) {
+	if key == nil || !regexp.MustCompile(`^t_[a-f0-9]{32}_[a-f0-9]{32}$`).MatchString(b.ToolAlias) || b.MaxCost != "0" && !limits.ValidCostLimit(b.MaxCost) || !regexp.MustCompile(`^[A-Z]{3}$`).MatchString(b.Currency) {
 		return nil, ErrApproval
 	}
 	data, _ := json.Marshal(b)
@@ -76,7 +76,7 @@ func CreateApprovalTx(ctx context.Context, tx pgx.Tx, key *secrets.AuthKey, a ac
 		return "", err
 	}
 	id := access.NewID()
-	_, err = tx.Exec(ctx, `INSERT INTO olp.agent_approvals(id,api_key_id,project_id,run_id,binding_digest,expires_at) SELECT $1,$2,$3,r.id,$5,$6 FROM olp.agent_runs r JOIN olp.agent_publications p ON p.id=$7 AND p.project_id=r.project_id AND NOT p.retired JOIN olp.live_agent_publication_revisions v ON v.id=$8 AND v.publication_id=p.id WHERE r.id=$4 AND r.api_key_id=$2 AND r.project_id=$3 AND encode(r.principal_digest,'hex')=$9 AND EXISTS(SELECT 1 FROM jsonb_array_elements(v.definition->'toolset'->'tools') t WHERE t->>'alias'=$10)`, id, a.ID, *a.ProjectID, b.RunID, digest, expires, b.ToolsetID, b.ToolsetRevisionID, b.PrincipalDigest, b.ToolAlias)
+	_, err = tx.Exec(ctx, `INSERT INTO olp.agent_approvals(id,api_key_id,project_id,run_id,binding_digest,expires_at) SELECT $1,$2,$3,r.id,$5,$6 FROM olp.agent_runs r JOIN olp.agent_publications p ON p.id=$7 AND p.project_id=r.project_id AND NOT p.retired JOIN olp.live_agent_publication_revisions v ON v.id=$8 AND v.publication_id=p.id AND p.latest_revision_id=v.id WHERE r.id=$4 AND r.api_key_id=$2 AND r.project_id=$3 AND encode(r.principal_digest,'hex')=$9 AND EXISTS(SELECT 1 FROM jsonb_array_elements(v.definition->'toolset'->'tools') t WHERE t->>'alias'=$10) AND ($11='' OR EXISTS(SELECT 1 FROM olp.route_revisions rr JOIN olp.routes route ON route.id=rr.route_id WHERE rr.id=r.route_revision_id AND rr.id::text=$11 AND route.latest_revision_id=rr.id AND route.state='active'))`, id, a.ID, *a.ProjectID, b.RunID, digest, expires, b.ToolsetID, b.ToolsetRevisionID, b.PrincipalDigest, b.ToolAlias, b.RouteRevisionID)
 	if err != nil {
 		return "", err
 	}
@@ -101,7 +101,7 @@ func ConsumeApprovalTx(ctx context.Context, tx pgx.Tx, key *secrets.AuthKey, a a
 	if err != nil {
 		return err
 	}
-	tag, err := tx.Exec(ctx, `UPDATE olp.agent_approvals x SET consumed_at=clock_timestamp(),dispatch_id=$2 FROM olp.api_keys k,olp.agent_publications p,olp.live_agent_publication_revisions v,olp.execution_debits d WHERE x.id=$1 AND d.id=$2 AND x.api_key_id=$3 AND x.project_id=$4 AND x.binding_digest=$5 AND x.consumed_at IS NULL AND x.expires_at>clock_timestamp() AND k.id=x.api_key_id AND k.revoked_at IS NULL AND (k.expires_at IS NULL OR k.expires_at>clock_timestamp()) AND p.id=$6 AND v.publication_id=p.id AND v.id=$9 AND NOT p.retired AND p.project_id=x.project_id AND d.api_key_id=x.api_key_id AND d.run_id=x.run_id AND d.state='ready' AND d.kind='tool' AND d.cost_bound<=$7::numeric AND d.currency=$8 AND d.affinity->>'revision_id'=$9::text AND COALESCE(d.affinity->>'route_revision_id','')=$10 AND d.affinity->>'tool_alias'=$11 AND d.affinity->>'input_digest'=$12 AND d.affinity->>'transcript_digest'=$13`, id, dispatch, a.ID, *a.ProjectID, digest, b.ToolsetID, b.MaxCost, b.Currency, b.ToolsetRevisionID, b.RouteRevisionID, b.ToolAlias, b.ArgumentDigest, b.TranscriptDigest)
+	tag, err := tx.Exec(ctx, `UPDATE olp.agent_approvals x SET consumed_at=clock_timestamp(),dispatch_id=$2 FROM olp.api_keys k,olp.agent_publications p,olp.live_agent_publication_revisions v,olp.execution_debits d WHERE x.id=$1 AND d.id=$2 AND x.api_key_id=$3 AND x.project_id=$4 AND x.binding_digest=$5 AND x.consumed_at IS NULL AND x.expires_at>clock_timestamp() AND k.id=x.api_key_id AND k.revoked_at IS NULL AND (k.expires_at IS NULL OR k.expires_at>clock_timestamp()) AND p.id=$6 AND v.publication_id=p.id AND v.id=$9 AND p.latest_revision_id=v.id AND NOT p.retired AND p.project_id=x.project_id AND d.api_key_id=x.api_key_id AND d.run_id=x.run_id AND d.state='ready' AND d.kind='tool' AND d.cost_bound<=$7::numeric AND d.currency=$8 AND d.affinity->>'revision_id'=$9::text AND COALESCE(d.affinity->>'route_revision_id','')=$10 AND d.affinity->>'tool_alias'=$11 AND d.affinity->>'input_digest'=$12 AND d.affinity->>'transcript_digest'=$13 AND ($10='' OR EXISTS(SELECT 1 FROM olp.agent_runs r JOIN olp.route_revisions rr ON rr.id=r.route_revision_id JOIN olp.routes route ON route.id=rr.route_id WHERE r.id=x.run_id AND rr.id::text=$10 AND route.latest_revision_id=rr.id AND route.state='active'))`, id, dispatch, a.ID, *a.ProjectID, digest, b.ToolsetID, b.MaxCost, b.Currency, b.ToolsetRevisionID, b.RouteRevisionID, b.ToolAlias, b.ArgumentDigest, b.TranscriptDigest)
 	if err != nil {
 		return err
 	}

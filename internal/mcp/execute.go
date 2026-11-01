@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/agents"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/mcpservers"
 	"github.com/tyk-swe/olp/internal/routing"
@@ -28,28 +29,13 @@ func toolPerServerLookup(serverID string) string {
 	return "ts_" + strings.ReplaceAll(serverID, "-", "")
 }
 
-func tighterToolLimit(server int64, key *int64) *int64 {
-	value := server
-	if key != nil && *key < value {
-		value = *key
-	}
-	return &value
-}
-
-func (s *Server) reserveToolRate(ctx context.Context, in executeInput) ([]*limits.Lease, *apiError, time.Duration) {
-	limiter := s.Limiter
-	if concrete, ok := limiter.(*limits.Limiter); ok && concrete == nil {
-		limiter = nil
-	}
-	if limiter == nil {
-		return nil, fail(http.StatusServiceUnavailable, "limits_unavailable", "api_error", "Tool call limits are unavailable, so the call was not dispatched."), 0
-	}
+func toolRateRequests(in executeInput) []limits.Request {
 	effective := routing.EffectiveToolLimits(in.tool.CallsPerMinute, in.tool.MaxConcurrency, in.tool.PerKeyCallsPerMinute, in.tool.PerKeyMaxConcurrency)
 	requests := []limits.Request{
 		{
 			CostOwnerID: in.authority.ID, LookupID: toolPerKeyLookup(in.authority, in.tool.ServerID),
-			RequestsPerMinute: tighterToolLimit(effective.PerKeyCallsPerMinute, in.authority.Policy.RequestsPerMinute),
-			MaxConcurrency:    tighterToolLimit(effective.PerKeyMaxConcurrency, in.authority.Policy.MaxConcurrency),
+			RequestsPerMinute: &effective.PerKeyCallsPerMinute,
+			MaxConcurrency:    &effective.PerKeyMaxConcurrency,
 			LeaseTTL:          toolRateLeaseTTL,
 		},
 		{
@@ -60,8 +46,48 @@ func (s *Server) reserveToolRate(ctx context.Context, in executeInput) ([]*limit
 			LeaseTTL:          toolRateLeaseTTL,
 		},
 	}
+	if in.runID != "" {
+		return requests
+	}
+	return append(requests, toolCallerRate(in.authority), toolGroupRate(in.authority), toolAgentRate(in.authority))
+}
+
+func toolCallerRate(authority access.Authority) limits.Request {
+	if authority.Policy.RequestsPerMinute == nil && authority.Policy.MaxConcurrency == nil {
+		return limits.Request{}
+	}
+	return limits.Request{CostOwnerID: authority.ID, LookupID: authority.LimitsLookup(), RequestsPerMinute: authority.Policy.RequestsPerMinute, MaxConcurrency: authority.Policy.MaxConcurrency, LeaseTTL: toolRateLeaseTTL}
+}
+
+func toolGroupRate(authority access.Authority) limits.Request {
+	if authority.BudgetGroupID == nil || (authority.BudgetGroupRPM == nil && authority.BudgetGroupConcurrency == nil) {
+		return limits.Request{}
+	}
+	return limits.Request{CostOwnerID: *authority.BudgetGroupID, LookupID: limits.BudgetGroupLookup(*authority.BudgetGroupID), RequestsPerMinute: authority.BudgetGroupRPM, MaxConcurrency: authority.BudgetGroupConcurrency, LeaseTTL: toolRateLeaseTTL}
+}
+
+func toolAgentRate(authority access.Authority) limits.Request {
+	if authority.DelegationAgentLimits == nil || (authority.DelegationAgentLimits.Limits.RequestsPerMinute == nil && authority.DelegationAgentLimits.Limits.MaxConcurrency == nil) {
+		return limits.Request{}
+	}
+	agent := authority.DelegationAgentLimits
+	return limits.Request{CostOwnerID: agent.ID, LookupID: agent.LookupID, RequestsPerMinute: agent.Limits.RequestsPerMinute, MaxConcurrency: agent.Limits.MaxConcurrency, LeaseTTL: toolRateLeaseTTL}
+}
+
+func (s *Server) reserveToolRate(ctx context.Context, in executeInput) ([]*limits.Lease, *apiError, time.Duration) {
+	limiter := s.Limiter
+	if concrete, ok := limiter.(*limits.Limiter); ok && concrete == nil {
+		limiter = nil
+	}
+	if limiter == nil {
+		return nil, fail(http.StatusServiceUnavailable, "limits_unavailable", "api_error", "Tool call limits are unavailable, so the call was not dispatched."), 0
+	}
+	requests := toolRateRequests(in)
 	leases := make([]*limits.Lease, 0, len(requests))
 	for _, request := range requests {
+		if !request.HasRateLimits() {
+			continue
+		}
 		lease, err := limiter.Reserve(ctx, request)
 		if err != nil {
 			s.finishLeases(ctx, leases, false)
@@ -80,6 +106,9 @@ func (s *Server) reserveToolRate(ctx context.Context, in executeInput) ([]*limit
 
 type executeInput struct {
 	authority access.Authority
+	approval  *agents.WorkflowApproval
+	runID     string
+	ordinal   int
 	resolved  resolvedToolset
 	tool      routing.MCPToolsetTool
 	arguments json.RawMessage
@@ -141,7 +170,7 @@ func (s *Server) loadOriginalCredential(ctx context.Context, authority access.Au
 
 func (s *Server) reserveToolCall(ctx context.Context, in executeInput) (*Reservation, execution) {
 	reservedResult, err := s.Ledger.Reserve(ctx, ReserveInput{
-		Authority: in.authority, ToolsetID: in.resolved.id, ToolsetRevisionID: in.resolved.revisionID,
+		Authority: in.authority, Approval: in.approval, RunID: in.runID, Ordinal: in.ordinal, ToolsetID: in.resolved.id, ToolsetRevisionID: in.resolved.revisionID,
 		ReleaseID: in.releaseID, ToolAlias: in.tool.Alias, InputDigest: s.toolInputDigest(in.arguments),
 		CallDigest: s.callDigest(in.authority, in.callID), UnitPrice: cloneUnitPrice(in.tool.UnitPrice),
 		ServerID: in.tool.ServerID, ServerRevisionID: in.tool.ServerRevisionID,
@@ -199,6 +228,20 @@ func (s *Server) dispatchToolCall(ctx context.Context, in executeInput, credenti
 		}
 		if err := s.Grants.CheckGrant(ctx, in.authority, tool); err != nil {
 			return dispatchResult{failure: s.refuseToolIdentity(ctx, in, reservation, fail(http.StatusForbidden, "user_grant_required", "permission_error", "Enroll a usable personal grant before calling this tool."))}
+		}
+	}
+	if in.authority.TaskCapability != nil {
+		admitter, ok := s.Runtime.(interface {
+			AdmitTaskCapabilityAttempt(context.Context, access.Authority, string, string, string, *string, string) error
+		})
+		if !ok {
+			return dispatchResult{failure: s.refuseToolIdentity(ctx, in, reservation, errLedger)}
+		}
+		if err := admitter.AdmitTaskCapabilityAttempt(ctx, in.authority, "tools", in.resolved.id, in.resolved.revisionID, in.authority.ProjectID, reservation.DispatchID); err != nil {
+			if errors.Is(err, runtime.ErrTaskAttemptLimit) {
+				return dispatchResult{failure: s.refuseToolIdentity(ctx, in, reservation, fail(http.StatusTooManyRequests, "task_limit_exceeded", "rate_limit_error", "The task attempt limit was exceeded."))}
+			}
+			return dispatchResult{failure: s.refuseToolIdentity(ctx, in, reservation, errPermissionDenied)}
 		}
 	}
 	started := time.Now()

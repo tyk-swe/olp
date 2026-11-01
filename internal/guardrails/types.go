@@ -77,13 +77,14 @@ type Attachment struct {
 type Boundary struct{ OrganizationID, ProjectID, RouteID, ToolsetID, KeyID string }
 
 type Segment struct {
-	ID        string `json:"id"`
-	Role      string `json:"role,omitempty"`
-	Text      string `json:"text"`
-	Kind      string `json:"kind,omitempty"`
-	ToolName  string `json:"tool_name,omitempty"`
-	Untrusted bool   `json:"untrusted,omitempty"`
-	toolJSON  *JSONSurface
+	ID         string `json:"id"`
+	Role       string `json:"role,omitempty"`
+	Text       string `json:"text"`
+	Kind       string `json:"kind,omitempty"`
+	ToolName   string `json:"tool_name,omitempty"`
+	ToolCallID string `json:"-"`
+	Untrusted  bool   `json:"untrusted,omitempty"`
+	toolJSON   *JSONSurface
 }
 
 func (s Segment) Restore(masks *Masking) Segment {
@@ -91,14 +92,16 @@ func (s Segment) Restore(masks *Masking) Segment {
 }
 
 func (s Segment) withText(text string) Segment {
-	return Segment{ID: s.ID, Role: s.Role, Text: text, Kind: s.Kind, ToolName: s.ToolName, Untrusted: s.Untrusted, toolJSON: s.toolJSON}
+	return Segment{ID: s.ID, Role: s.Role, Text: text, Kind: s.Kind, ToolName: s.ToolName, ToolCallID: s.ToolCallID, Untrusted: s.Untrusted, toolJSON: s.toolJSON}
 }
 
 type Evaluation struct {
-	RequestID string    `json:"request_id"`
-	Route     string    `json:"route,omitempty"`
-	Phase     string    `json:"phase"`
-	Segments  []Segment `json:"segments"`
+	RequestID            string    `json:"request_id"`
+	Route                string    `json:"route,omitempty"`
+	Phase                string    `json:"phase"`
+	Segments             []Segment `json:"segments"`
+	CompressionExemptIDs []string  `json:"-"`
+	WorkflowRecovery     bool      `json:"-"`
 	// LegacyInput is the strict native scalar view used only by migrated
 	// blocking input rules. It never changes the writable native surface.
 	LegacyInput []Segment `json:"-"`
@@ -139,6 +142,7 @@ type Result struct {
 	Decisions []Evidence `json:"decisions"`
 	Blocked   bool       `json:"blocked"`
 	Changed   bool       `json:"-"`
+	Recovery  []Segment  `json:"-"`
 }
 
 type Error struct {

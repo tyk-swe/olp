@@ -1,9 +1,10 @@
 # Provider profiles and connection configuration
 
-A versioned provider profile selects an API dialect, hosting wrapper,
-authentication combination and operation schemas. It is separate from a model
-binding and credential slot. Profile selection does not certify an entire model
-interaction or establish quality parity.
+A versioned provider profile selects the API dialect, hosting wrapper,
+authentication combination and operation schemas for a provider connection. The
+profile is separate from both the model binding and the credential slot. Selecting
+a profile declares the intended contract, but it does not certify a model
+interaction or establish quality parity with another provider.
 
 A provider that omits `profile_id` and `profile_revision` is an Automatic
 provider: its endpoints follow from its provider kind, including the

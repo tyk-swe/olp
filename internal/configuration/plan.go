@@ -366,6 +366,11 @@ func normalizeDocument(doc *Document) {
 // plugin profiles its plugin providers name. It returns the plugins this
 // installation can't use yet, by digest, with why: they block the plan.
 func (s *Server) validateDocument(ctx context.Context, q access.Queryer, doc *Document) (map[string]string, error) {
+	if doc.Code != nil {
+		if err := doc.Code.Validate(); err != nil {
+			return nil, err
+		}
+	}
 	if doc.APIVersion != APIVersion && doc.APIVersion != LegacyAPIVersion {
 		return nil, access.Fail(422, "unsupported_api_version", "The artifact declares an unsupported api_version.")
 	}
@@ -475,6 +480,12 @@ func (s *Server) validateDocument(ctx context.Context, q access.Queryer, doc *Do
 	seen = map[string]bool{}
 	refs := map[string]bool{}
 	unavailable := map[string]string{}
+	preparedCode, err := s.prepareCode(ctx, q, doc.Code)
+	if err != nil {
+		return nil, err
+	}
+	doc.Code = preparedCode
+
 	totalModels := 0
 	for i := range doc.Providers {
 		// Applying stores the entry's configuration, so a plugin provider
@@ -793,14 +804,18 @@ func validateBindings(doc *Document, bindings bindingSet) error {
 			sinkRefs[*entry.CredentialRef] = true
 		}
 	}
-	billingRefs := map[string]bool{}
+	billingRefs := map[string]string{}
 	for _, p := range doc.Providers {
 		if p.NetworkCredentialRef != nil {
 			refs[*p.NetworkCredentialRef] = true
 		}
 		if p.BillingImport != nil {
 			refs[p.BillingImport.CredentialRef] = true
-			billingRefs[p.BillingImport.CredentialRef] = true
+			source, err := billing.SourceFor(p.Configuration.Kind)
+			if err != nil {
+				return err
+			}
+			billingRefs[p.BillingImport.CredentialRef] = source
 		}
 		for _, slot := range p.Slots {
 			if slot.CredentialRef != nil {
@@ -838,11 +853,11 @@ func validateBindings(doc *Document, bindings bindingSet) error {
 			}
 			continue
 		}
-		if billingRefs[name] {
+		if source := billingRefs[name]; source != "" {
 			if secret.reference != nil {
 				return access.Invalid("external_credential_bindings", "Billing credentials require sealed secret bindings.")
 			}
-			if err := billing.ValidCredential(secret.secret); err != nil {
+			if err := billing.ValidateCredential(source, secret.secret); err != nil {
 				return err
 			}
 			continue
@@ -895,6 +910,9 @@ func (s *Server) plan(ctx context.Context, q access.Queryer, doc *Document, bind
 		return nil, err
 	}
 	result := &planResult{Digest: digest, Actions: []planItem{}, Conflicts: []planItem{}, Blockers: []planItem{}}
+	if err := planCode(ctx, q, doc, result); err != nil {
+		return nil, err
+	}
 	if err = planCatalogPolicies(ctx, q, doc, result); err != nil {
 		return nil, err
 	}
@@ -1054,7 +1072,19 @@ func (s *Server) plan(ctx context.Context, q access.Queryer, doc *Document, bind
 			if _, supplied := bindings[ref]; supplied {
 				result.item("billing_import", ref, "bind", "")
 			} else if ok && existing.BillingImport != nil && existing.BillingImport.CredentialID != nil {
-				result.item("billing_import", ref, "reuse", "")
+				source, err := billing.SourceFor(p.Configuration.Kind)
+				if err != nil {
+					return nil, err
+				}
+				compatible, err := billing.ImportCredentialCompatible(ctx, q, s.Access.Keys, s.Access.Installation, source, existing.BillingImport.CredentialID)
+				if err != nil {
+					return nil, err
+				}
+				if compatible {
+					result.item("billing_import", ref, "reuse", "")
+				} else {
+					result.blocker("billing_import", ref, "secret_binding_required")
+				}
 			} else {
 				result.blocker("billing_import", ref, "secret_binding_required")
 			}
@@ -1393,7 +1423,10 @@ func bindingFingerprint(doc *Document, digest string, bindings bindingSet, expec
 		clear(value)
 		sealed = append(sealed, map[string]string{"ref": name, "sha256": hex.EncodeToString(sum[:])})
 	}
-	return map[string]any{"document_digest": digest, "expected_digest": expected, "secret_bindings": sealed}
+	if len(doc.codeBindings.Credentials)+len(doc.codeBindings.Users)+len(doc.codeBindings.APIKeys) == 0 {
+		return map[string]any{"document_digest": digest, "expected_digest": expected, "secret_bindings": sealed}
+	}
+	return map[string]any{"document_digest": digest, "expected_digest": expected, "secret_bindings": sealed, "code_bindings": doc.codeBindings}
 }
 
 func templateNamed(templates []TemplateEntry, name string) *TemplateEntry {

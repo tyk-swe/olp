@@ -1,24 +1,37 @@
 # OpenLLMProxy
 
-OpenLLMProxy is a self-hosted AI gateway and control plane built with Go,
-SvelteKit, PostgreSQL and Valkey. Connect providers, certify model capabilities,
-publish stable routes and manage access, budgets and attempt accounting across
-OpenAI, Anthropic, Gemini and Bedrock client interfaces.
+OpenLLMProxy, or OLP, is a self-hosted AI gateway and control plane. It lets a
+team connect model providers, certify the exact capabilities it will serve,
+publish stable route names and manage access, budgets and attempt-level
+accounting from one installation.
 
-**[Read the handbook](docs/README.md)** or **[install and make your first request](docs/getting-started.md)**.
-For supported operations and translation limits, see
-[Compatibility](docs/use/compatibility.md). Persisted telemetry stays content-free;
-provider-retained state, response caching and opt-in external capture have
-explicit storage contracts.
+The gateway serves OpenAI, Anthropic, Gemini and Bedrock client interfaces. Its
+persisted request history and telemetry are content-free by default.
+Provider-retained resources, response caching and optional external capture each
+have a separate and explicit storage contract.
 
-OpenLLMProxy 0.1.0 is a work in progress. During 0.x it makes no compatibility,
-upgrade, mixed-version or rollback promises: releases may change the management
-API, configuration and storage. [Roadmap](docs/roadmap.md) tracks implementation
-work and milestones.
+## Start here
 
-For local development, follow [Contributing](CONTRIBUTING.md); suite selection is
-in [Testing](tests/README.md). Production operators should start with
-[Deployment](docs/operate/deployment.md) and [Operations](docs/operate/operations.md).
+Read the [handbook](docs/README.md) for the task guides. To install OLP and make
+a first request, follow [Getting Started](docs/getting-started.md). The
+[Compatibility](docs/use/compatibility.md) guide states which operations are
+supported and where protocol translation changes or refuses a request.
 
-Licensed under AGPL-3.0-only. Report vulnerabilities through the
-[security policy](SECURITY.md); participation follows the [Code of Conduct](CODE_OF_CONDUCT.md).
+Production operators should continue with
+[Deployment](docs/operate/deployment.md) and
+[Operations](docs/operate/operations.md). Contributors should start with
+[Contributing](CONTRIBUTING.md). Test suite selection is covered in
+[Testing](tests/README.md).
+
+## Project status
+
+OpenLLMProxy 0.1.0 is still a work in progress. During 0.x, releases may change
+the management API, configuration and storage formats. OLP therefore makes no
+compatibility, upgrade, mixed-version or rollback promises. Implementation work
+and milestones are tracked in the [Roadmap](docs/roadmap.md).
+
+## License and participation
+
+OpenLLMProxy is licensed under AGPL-3.0-only. Report vulnerabilities privately
+under the [security policy](SECURITY.md). Participation follows the
+[Code of Conduct](CODE_OF_CONDUCT.md).

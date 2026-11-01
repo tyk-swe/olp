@@ -12,6 +12,29 @@ export type MCPServerUpdate = components['schemas']['UpdateMCPServerRequest'];
 export type Revision = components['schemas']['AgentPublicationRevision'];
 export type Exposure = components['schemas']['ExecutionDebit'];
 export type ToolCall = components['schemas']['MCPToolCallResponse'];
+export type DelegationConsentRequest =
+  components['schemas']['DelegationConsentRequest'];
+export type DelegationConsent = components['schemas']['DelegationConsent'];
+
+export async function getDelegationOptions(
+  keyID: string,
+  signal?: AbortSignal
+) {
+  return unwrap(
+    await apiClient.GET('/api/v1/delegation-options', {
+      params: { query: { api_key_id: keyID } },
+      signal
+    })
+  );
+}
+
+export async function createDelegationConsent(
+  input: DelegationConsentRequest
+): Promise<DelegationConsent> {
+  return unwrap(
+    await apiClient.POST('/api/v1/delegation-consents', { body: input })
+  );
+}
 
 const collections = {
   toolsets: '/api/v1/toolsets',
@@ -94,6 +117,95 @@ export async function saveServer(
     })
   );
 }
+export const listRuns = async (project?: string, cursor?: string) =>
+  unwrapPage(
+    await apiClient.GET('/api/v1/agent-runs', {
+      params: { query: { project_id: project || undefined, cursor, limit: 50 } }
+    })
+  );
+
+export const getRun = async (runID: string) =>
+  unwrap(
+    await apiClient.GET('/api/v1/agent-runs/{run_id}', {
+      params: { path: { run_id: runID } }
+    })
+  );
+
+export const listTasks = async (project?: string, cursor?: string) =>
+  unwrapPage(
+    await apiClient.GET('/api/v1/a2a-tasks', {
+      params: { query: { project_id: project || undefined, cursor, limit: 50 } }
+    })
+  );
+
+export const getTask = async (taskID: string) =>
+  unwrap(
+    await apiClient.GET('/api/v1/a2a-tasks/{task_id}', {
+      params: { path: { task_id: taskID } }
+    })
+  );
+
+export const listDelegations = async (
+  project?: string,
+  cursor?: string,
+  delegationID?: string
+) =>
+  unwrapPage(
+    await apiClient.GET('/api/v1/agent-delegations', {
+      params: {
+        query: {
+          project_id: project || undefined,
+          delegation_id: delegationID || undefined,
+          cursor,
+          limit: 50
+        }
+      }
+    })
+  );
+
+export const listRunSpans = async (
+  runID: string,
+  cursor?: string,
+  spanID?: string
+) =>
+  unwrapPage(
+    await apiClient.GET('/api/v1/agent-runs/{run_id}/spans', {
+      params: {
+        path: { run_id: runID },
+        query: { cursor, limit: 50, span_id: spanID }
+      }
+    })
+  );
+
+export type InvestigationWrite = components['schemas']['InvestigationWrite'];
+export type InvestigationEvidence =
+  components['schemas']['InvestigationEvidence'];
+
+export const listInvestigations = async (project?: string, cursor?: string) =>
+  unwrapPage(
+    await apiClient.GET('/api/v1/investigations', {
+      params: { query: { project_id: project || undefined, cursor, limit: 50 } }
+    })
+  );
+
+export const getInvestigation = async (id: string) =>
+  unwrap(
+    await apiClient.GET('/api/v1/investigations/{investigation_id}', {
+      params: { path: { investigation_id: id } }
+    })
+  );
+
+export const createInvestigation = async (
+  input: InvestigationWrite,
+  requestId: string
+) =>
+  unwrap(
+    await apiClient.POST('/api/v1/investigations', {
+      params: { header: { 'Idempotency-Key': requestId } },
+      body: input
+    })
+  );
+
 export const listExposures = async (key?: string, cursor?: string) =>
   unwrapPage(
     await apiClient.GET('/api/v1/execution-debits', {
@@ -212,6 +324,13 @@ export const startMCPGrant = async (serverID: string, keyID: string) =>
   unwrap(
     await apiClient.POST('/api/v1/mcp-servers/{server_id}/grant-enrollments', {
       params: { path: { server_id: serverID } },
+      body: { api_key_id: keyID }
+    })
+  );
+export const startAgentGrant = async (agentID: string, keyID: string) =>
+  unwrap(
+    await apiClient.POST('/api/v1/agents/{agent_id}/grant-enrollments', {
+      params: { path: { agent_id: agentID } },
       body: { api_key_id: keyID }
     })
   );

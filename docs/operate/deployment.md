@@ -1,9 +1,9 @@
 # Production deployment
 
-The bundled Helm chart deploys one immutable image in gateway, control, worker,
-and migration modes. This guide covers production topology;
-[`operations.md`](operations.md) covers monitoring, recovery, versions, and
-incidents.
+The bundled Helm chart runs one immutable OLP image in gateway, control, worker
+and migration modes. This guide covers the production topology, installation
+inputs and verification steps. Day-two monitoring, recovery, version handling and
+incident procedures belong in the [Operations runbook](operations.md).
 
 ## Prerequisites and secrets
 
@@ -255,8 +255,8 @@ unchanged.
 ## Network policy
 
 `networkPolicy.enabled: true` renders one NetworkPolicy per enabled component.
-Rules target the container ports — 8080 for the public listener and 9090 for
-observability — not `gateway.service.port`, so changing a Service port does not
+Rules target the container ports, 8080 for the public listener and 9090 for
+observability, rather than `gateway.service.port`. Changing a Service port therefore does not
 change what the policy admits. The chart refuses to render without at least one
 edge peer, because an empty peer list would silently deny all traffic to the
 gateway.
@@ -283,11 +283,12 @@ leaving both `prometheus` maps empty denies every scrape of 9090. Workers expose
 only private health/metrics on 9090; the Prometheus peer may reach that port.
 Migration pods have no listener and deny ingress.
 
-Egress defaults to allow-all. Provider endpoints are arbitrary public HTTPS
-hosts, and the chart never sees the PostgreSQL or Valkey addresses —
-`config.databaseSecretName` and `config.valkeySecretName` hold opaque connection
-URLs — so a restrictive default would break every installation. Harden it once
-those addresses are known:
+Egress defaults to allow-all because provider endpoints can be arbitrary public
+HTTPS hosts. The chart also never receives the PostgreSQL or Valkey addresses
+directly. Its `config.databaseSecretName` and `config.valkeySecretName` values
+name Secrets that hold opaque connection URLs. A restrictive default could
+therefore break an installation before the operator supplies its real topology.
+Harden egress once those addresses are known.
 
 ```yaml
 networkPolicy:
@@ -417,8 +418,8 @@ Templates still impose ceilings; overrides cannot define USD limits. Adding or
 losing regions does not divide limits automatically.
 
 Durable spend is global. One leader **per region** reconciles global facts every
-minute into local snapshots/holds, providing eventual—not synchronous global—
-enforcement. Overshoot exposure counts all cost admitted against stale snapshots,
+minute into local snapshots and holds. Enforcement is eventual across regions,
+not synchronous and global at admission time. Overshoot exposure counts all cost admitted against stale snapshots,
 not just unfinished requests: two regions admitting $0.60 each against a $1
 budget can reach $1.20 before reconciliation. The envelope assumes bounded
 estimates and timely accounting; outages increase it. Use conservative estimates,

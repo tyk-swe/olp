@@ -147,6 +147,8 @@ func compileDetector(d Revision, external Evaluator) (detector, error) {
 			t.schemas[name] = schema
 		}
 		return t, nil
+	case "typesafe":
+		return compileTypeSafe(d.Configuration)
 	case "webhook", "bedrock", "azure.content_safety", "azure.prompt_shields", "model_armor", "lakera", "presidio", "model", "semantic_guard", "decision_model", "plugin":
 		if err := ValidateExternal(d); err != nil {
 			return nil, err

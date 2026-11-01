@@ -358,16 +358,10 @@ func (s *Server) responseCall(w http.ResponseWriter, r *http.Request, use retain
 	ctx, cancel := s.stateDeadline(r.Context(), route)
 	defer cancel()
 	defer s.resourceSettle(ctx, x, p)
-	if e := s.reserveState(ctx, x, authority, time.Duration(route.OverallTimeout)*time.Millisecond); e != nil {
+	if e := s.reserveStateAndSlot(ctx, x, authority, p); e != nil {
 		s.stateFail(x, w, e, x.family)
 		return
 	}
-	gate := s.gateSlot(ctx, &p.provider, &p.slot, resourceEstimate, s.now().Add(time.Duration(route.OverallTimeout)*time.Millisecond), "")
-	if gate.verdict != gateAdmitted {
-		s.stateFail(x, w, gateError(gate), x.family)
-		return
-	}
-	p.hold = gate.hold
 	if e := op(ctx, x, authority, res, p, route); e != nil {
 		s.stateFail(x, w, e, x.family)
 	}

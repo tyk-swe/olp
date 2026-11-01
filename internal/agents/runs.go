@@ -11,6 +11,11 @@ import (
 	"github.com/tyk-swe/olp/internal/secrets"
 )
 
+func PrincipalDigest(key *secrets.AuthKey, a access.Authority) []byte {
+	principal, _ := json.Marshal(struct{ Key, Project, Workload string }{a.ID, *a.ProjectID, a.WorkloadDigest})
+	return key.Digest(secrets.AgentPrincipalDigest, string(principal))
+}
+
 // StartRunTx deduplicates a correlation record. It grants no permission to
 // resend a step and does not itself reserve or charge money.
 func StartRunTx(ctx context.Context, tx pgx.Tx, key *secrets.AuthKey, a access.Authority, id, scope, resource, revision string) error {
@@ -23,8 +28,7 @@ func StartRunTx(ctx context.Context, tx pgx.Tx, key *secrets.AuthKey, a access.A
 	} else if scope != "tools" {
 		return limits.ErrDebitAuthority
 	}
-	principal, _ := json.Marshal(struct{ Key, Project, Workload string }{a.ID, *a.ProjectID, a.WorkloadDigest})
-	digest := key.Digest(secrets.AgentPrincipalDigest, string(principal))
+	digest := PrincipalDigest(key, a)
 	var allowed bool
 	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM olp.agent_publications p JOIN olp.agent_publication_revisions v ON v.publication_id=p.id JOIN olp.api_keys k ON k.id=$4 WHERE p.id=$1 AND v.id=$2 AND p.project_id=$3 AND p.kind=$5 AND k.project_id=$3 AND NOT p.retired AND k.revoked_at IS NULL AND (k.expires_at IS NULL OR k.expires_at>clock_timestamp()))`, resource, revision, *a.ProjectID, a.ID, kind).Scan(&allowed); err != nil {
 		return err
@@ -52,7 +56,7 @@ func PrepareStepTx(ctx context.Context, tx pgx.Tx, store *limits.DebitStore, a a
 		return "", limits.ErrDebitAuthority
 	}
 	var allowed bool
-	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM olp.agent_runs r JOIN olp.agent_publication_revisions v ON v.id=r.revision_id JOIN olp.agent_publications p ON p.id=v.publication_id WHERE r.id=$1 AND r.api_key_id=$2 AND r.project_id=$3 AND NOT p.retired)`, intent.RunID, a.ID, *a.ProjectID).Scan(&allowed); err != nil {
+	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM olp.agent_runs r WHERE r.id=$1 AND r.api_key_id=$2 AND r.project_id=$3 AND (EXISTS(SELECT 1 FROM olp.agent_publication_revisions v JOIN olp.agent_publications p ON p.id=v.publication_id WHERE v.id=r.revision_id AND NOT p.retired) OR EXISTS(SELECT 1 FROM olp.route_revisions v JOIN olp.routes route ON route.id=v.route_id WHERE v.id=r.route_revision_id AND route.retired_at IS NULL AND (route.project_id IS NULL OR route.project_id=r.project_id))))`, intent.RunID, a.ID, *a.ProjectID).Scan(&allowed); err != nil {
 		return "", err
 	}
 	if !allowed {
@@ -73,4 +77,25 @@ func PrepareStepTx(ctx context.Context, tx pgx.Tx, store *limits.DebitStore, a a
 		return "", limits.ErrDebitConflict
 	}
 	return state, nil
+}
+
+func EnsureBoundaryAccountsTx(ctx context.Context, tx pgx.Tx, authority access.Authority, boundaries access.ToolDebitBoundariesResult) error {
+	if authority.EndUserDigest != "" {
+		if err := limits.EnsureEndUserAccounts(ctx, tx, authority.ID, authority.ProjectID, authority.EndUserDigest); err != nil {
+			return err
+		}
+	}
+	for _, boundary := range boundaries.Boundaries {
+		switch {
+		case boundary.AggregateLevel == "attribution":
+			if err := limits.EnsureAttributionBudget(ctx, tx, *authority.ProjectID, boundary.AggregateKey, boundary.AggregateValue); err != nil {
+				return err
+			}
+		case boundary.AggregateLevel != "":
+			if err := limits.EnsureAggregateBudget(ctx, tx, boundary.AggregateLevel, boundary.AggregateKey); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
