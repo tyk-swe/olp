@@ -4,7 +4,7 @@
   "sdk_locks": {
     "openai": {
       "module": "github.com/openai/openai-go/v3",
-      "version": "3.85.1"
+      "version": "3.86.0"
     },
     "anthropic": {
       "module": "github.com/anthropics/anthropic-sdk-go",
@@ -12,7 +12,7 @@
     },
     "gemini": {
       "module": "google.golang.org/genai",
-      "version": "1.75.0"
+      "version": "1.76.0"
     }
   },
   "exclusions": [

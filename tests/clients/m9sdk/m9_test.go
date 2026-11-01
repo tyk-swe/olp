@@ -77,7 +77,7 @@ func TestM9PinnedCompletions(t *testing.T) {
 func TestM9PinnedDecisions(t *testing.T) {
 	c, ctx := client(t)
 	for _, model := range []string{env(t, "OLP_CLIENTS_MODEL_OPENAI_DECISIONS"), env(t, "OLP_CLIENTS_MODEL_SYSTEMONE")} {
-		p := openai.DecisionNewParams{Model: model, Input: openai.DecisionNewParamsInputUnion{OfString: openai.String("A refund request.")}, Questions: []openai.DecisionNewParamsQuestionUnion{{OfPredicate: &openai.DecisionNewParamsQuestionPredicate{Name: openai.String("refund"), Instructions: "Is this about a refund?"}}}}
+		p := openai.DecisionNewParams{Model: model, Input: openai.DecisionNewParamsInputUnion{OfString: openai.String("A refund request.")}, Questions: []openai.DecisionNewParamsQuestionUnion{{OfPredicate: &openai.DecisionNewParamsQuestionPredicate{Name: openai.String("refund"), Instructions: openai.DecisionNewParamsQuestionPredicateInstructionsUnion{OfString: openai.String("Is this about a refund?")}}}}}
 		response, err := c.Decisions.New(ctx, p)
 		if err != nil {
 			t.Fatal(err)
@@ -159,7 +159,7 @@ func requestCount(t *testing.T, ctx context.Context) int {
 }
 func TestM9PinnedDecisionRefusal(t *testing.T) {
 	c, ctx := client(t)
-	response, err := c.Decisions.New(ctx, openai.DecisionNewParams{Model: env(t, "OLP_CLIENTS_MODEL_OPENAI_DECISIONS"), Input: openai.DecisionNewParamsInputUnion{OfString: openai.String("refuse")}, Questions: []openai.DecisionNewParamsQuestionUnion{{OfPredicate: &openai.DecisionNewParamsQuestionPredicate{Name: openai.String("q"), Instructions: "Answer this question."}}}})
+	response, err := c.Decisions.New(ctx, openai.DecisionNewParams{Model: env(t, "OLP_CLIENTS_MODEL_OPENAI_DECISIONS"), Input: openai.DecisionNewParamsInputUnion{OfString: openai.String("refuse")}, Questions: []openai.DecisionNewParamsQuestionUnion{{OfPredicate: &openai.DecisionNewParamsQuestionPredicate{Name: openai.String("q"), Instructions: openai.DecisionNewParamsQuestionPredicateInstructionsUnion{OfString: openai.String("Answer this question.")}}}}})
 	if err != nil {
 		t.Fatal(err)
 	}
