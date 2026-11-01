@@ -1,19 +1,41 @@
 import { apiClient } from '$lib/api/client';
 import type { components } from '$lib/api/schema';
-import { ensureOk, unwrap } from '$lib/api/http';
+import { ensureOk, unwrap, unwrapPage } from '$lib/api/http';
+import { collectCursorPages } from '$lib/api/pagination';
 
 export type Definition = components['schemas']['GuardrailResponse'];
 export type Policy = components['schemas']['GuardrailPolicy'];
 export type Entry = components['schemas']['GuardrailPolicyEntry'];
 export type Result = components['schemas']['GuardrailApplyResult'];
-export const listDefinitions = async () =>
-  unwrap(await apiClient.GET('/api/v1/guardrails'));
-export const listPolicies = async () =>
-  unwrap(await apiClient.GET('/api/v1/guardrail-policies'));
+export const listDefinitions = async () => ({
+  items: await collectCursorPages(async (cursor) =>
+    unwrapPage(
+      await apiClient.GET('/api/v1/guardrails', {
+        params: { query: { cursor } }
+      })
+    )
+  )
+});
+export const listPolicies = async () => ({
+  items: await collectCursorPages(async (cursor) =>
+    unwrapPage(
+      await apiClient.GET('/api/v1/guardrail-policies', {
+        params: { query: { cursor } }
+      })
+    )
+  )
+});
 export const listAttachments = async () =>
   unwrap(await apiClient.GET('/api/v1/guardrail-attachments'));
-export const listProjects = async () =>
-  unwrap(await apiClient.GET('/api/v1/projects'));
+export const listProjects = async () => ({
+  items: await collectCursorPages(async (cursor) =>
+    unwrapPage(
+      await apiClient.GET('/api/v1/projects', {
+        params: { query: { cursor } }
+      })
+    )
+  )
+});
 export async function saveDefinition(
   current: Definition | null,
   project: string,
