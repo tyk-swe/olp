@@ -186,7 +186,22 @@ func (s *DebitStore) Admit(ctx context.Context, id, claim string, requests []Req
 		seen[key] = true
 		if r.HasCostBudget() {
 			if err = s.syncOwnerTx(ctx, tx, r.CostOwnerID); err != nil {
-				return err
+				if !errors.Is(err, ErrUninitializedCost) {
+					return err
+				}
+				kind := ""
+				for _, owner := range owners {
+					if owner.ID == r.CostOwnerID {
+						kind = owner.Kind
+						break
+					}
+				}
+				if err = s.initializeFreshOwnerTx(ctx, tx, DebitOwner{ID: r.CostOwnerID, Kind: kind}); err != nil {
+					return err
+				}
+				if err = s.syncOwnerTx(ctx, tx, r.CostOwnerID); err != nil {
+					return err
+				}
 			}
 			if err = s.Limiter.verifyDurableCost(ctx, r); err != nil {
 				return err
@@ -235,7 +250,7 @@ func (s *DebitStore) HasUnknownDebit(ctx context.Context, apiKeyID string, maxDi
 		maxDispatch = time.Hour
 	}
 	var held bool
-	err := s.Pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM olp.execution_debits d WHERE d.api_key_id=$1 AND (d.state='outcome_unknown' OR (d.state='dispatched' AND d.dispatched_at<clock_timestamp()-make_interval(secs=>$2))) AND d.closed_at IS NULL AND NOT EXISTS(SELECT 1 FROM olp.execution_debit_results r WHERE r.dispatch_id=d.id AND r.final AND EXISTS(SELECT 1 FROM olp.attempt_usage_facts f WHERE f.event_id=r.event_id) AND NOT EXISTS(SELECT 1 FROM olp.attempt_usage_facts f WHERE f.event_id=r.event_id AND NOT f.usage_complete)))`, apiKeyID, maxDispatch.Seconds()).Scan(&held)
+	err := s.Pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM olp.execution_debits d WHERE d.api_key_id=$1 AND (d.state='outcome_unknown' OR (d.state='dispatched' AND d.dispatched_at<clock_timestamp()-make_interval(secs=>$2))) AND d.closed_at IS NULL AND NOT EXISTS(SELECT 1 FROM olp.execution_debit_results r WHERE r.dispatch_id=d.id AND r.final AND (d.kind<>'model' OR r.complete) AND EXISTS(SELECT 1 FROM olp.attempt_usage_facts f WHERE f.event_id=r.event_id AND (d.kind<>'model' OR f.attempt_id=d.id)) AND NOT EXISTS(SELECT 1 FROM olp.attempt_usage_facts f WHERE f.event_id=r.event_id AND (d.kind<>'model' OR f.attempt_id=d.id) AND NOT f.usage_complete)))`, apiKeyID, maxDispatch.Seconds()).Scan(&held)
 	return held, err
 }
 
@@ -281,6 +296,52 @@ func (s *DebitStore) ReleaseUndispatched(ctx context.Context, id, claim string) 
 	return tx.Commit(ctx)
 }
 
+func (s *DebitStore) MarkNotSent(ctx context.Context, id, claim string) error {
+	tx, err := s.Pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	var state DebitState
+	if err := tx.QueryRow(ctx, `SELECT state FROM olp.execution_debits WHERE id=$1 AND claim_id=$2 FOR UPDATE`, id, claim).Scan(&state); err != nil {
+		return ErrDebitState
+	}
+	if state == DebitNotAccepted {
+		return tx.Commit(ctx)
+	}
+	if state == DebitUnknown {
+		proof, err := tx.Exec(ctx, `INSERT INTO olp.workflow_model_nonacceptance_proofs(dispatch_id,claim_id,source)
+			SELECT d.id,d.claim_id,'transport_not_sent' FROM olp.execution_debits d
+			JOIN olp.workflow_model_leases l ON l.dispatch_id=d.id AND l.claim_id=d.claim_id
+			WHERE d.id=$1 AND d.claim_id=$2 AND d.kind='model' AND d.run_id IS NOT NULL
+			  AND d.observed_cost=0 AND d.observed_charge=0
+			  AND NOT EXISTS(SELECT 1 FROM olp.execution_debit_results r
+			    WHERE r.dispatch_id=d.id AND (r.cost<>0 OR r.charge<>0 OR r.complete))`, id, claim)
+		if err != nil {
+			return err
+		}
+		if proof.RowsAffected() != 1 {
+			return ErrDebitState
+		}
+	} else if state != DebitDispatched {
+		return ErrDebitState
+	}
+	owners, ownersErr := debitOwnersTx(ctx, tx, id)
+	if ownersErr != nil {
+		return ownersErr
+	}
+	if err := lockDebitOwners(ctx, tx, owners); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, `UPDATE olp.execution_debits SET state='not_accepted',closed_at=clock_timestamp() WHERE id=$1`, id); err != nil {
+		return err
+	}
+	if err := bumpDebitOwners(ctx, tx, owners); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
 // DebitResult is content-free evidence already checked by the lifecycle owner.
 // ResultDigest identifies one result independently of the evidence digest.
 type DebitResult struct {
@@ -289,6 +350,8 @@ type DebitResult struct {
 	EventID                      string
 	Cost, Charge                 string
 	Final, Complete              bool
+	Unpriced                     bool
+	ObservedAt                   time.Time
 	// ResolvesResultDigests links later verified evidence to incomplete receipts.
 	// Its event contains only newly observed accounting deltas; prior charges
 	// are never replayed. Lifecycle owners verify native evidence before calling.
@@ -310,7 +373,7 @@ func DebitResultReplayTx(ctx context.Context, tx pgx.Tx, r DebitResult) (bool, e
 	var final, complete bool
 	err = tx.QueryRow(ctx, `SELECT evidence_digest,resolution_digest,event_id::text,cost::text,charge::text,final,complete FROM olp.execution_debit_results WHERE dispatch_id=$1 AND result_digest=$2`, r.DispatchID, r.ResultDigest).Scan(&evidence, &resolutions, &event, &cost, &charge, &final, &complete)
 	if err == nil {
-		if !bytes.Equal(evidence, r.EvidenceDigest) || !bytes.Equal(resolutions, resolutionDigest) || event != r.EventID || !equalDebitAmount(cost, r.Cost) || !equalDebitAmount(charge, r.Charge) || final != r.Final || complete != r.Complete {
+		if !debitResultMatches(r, resolutionDigest, evidence, resolutions, event, cost, charge, final, complete) {
 			return false, ErrDebitConflict
 		}
 		return true, nil
@@ -321,24 +384,52 @@ func DebitResultReplayTx(ctx context.Context, tx pgx.Tx, r DebitResult) (bool, e
 	return false, nil
 }
 
+func debitResultMatches(r DebitResult, resolutionDigest, evidence, resolutions []byte, event, cost, charge string, final, complete bool) bool {
+	return bytes.Equal(evidence, r.EvidenceDigest) && bytes.Equal(resolutions, resolutionDigest) && event == r.EventID && equalDebitAmount(cost, r.Cost) && equalDebitAmount(charge, r.Charge) && final == r.Final && complete == r.Complete
+}
+
+type debitSettleHead struct {
+	state          DebitState
+	kind           string
+	costBound      string
+	chargeBound    string
+	observedCost   string
+	observedCharge string
+}
+
+func beginDebitSettleTx(ctx context.Context, tx pgx.Tx, r DebitResult) (debitSettleHead, bool, error) {
+	var head debitSettleHead
+	if err := tx.QueryRow(ctx, `SELECT state,kind,cost_bound::text,charge_bound::text,observed_cost::text,observed_charge::text FROM olp.execution_debits WHERE id=$1 FOR UPDATE`, r.DispatchID).Scan(&head.state, &head.kind, &head.costBound, &head.chargeBound, &head.observedCost, &head.observedCharge); err != nil {
+		return head, false, err
+	}
+	duplicate, err := DebitResultReplayTx(ctx, tx, r)
+	return head, duplicate, err
+}
+
+func appendDebitResultTx(ctx context.Context, tx pgx.Tx, r DebitResult, owners []DebitOwner, resolutionDigest []byte) error {
+	if err := lockDebitOwners(ctx, tx, owners); err != nil {
+		return err
+	}
+	_, err := tx.Exec(ctx, `INSERT INTO olp.execution_debit_results(dispatch_id,result_digest,evidence_digest,event_id,cost,charge,final,complete,resolution_digest) VALUES($1,$2,$3,$4,$5::numeric,$6::numeric,$7,$8,$9)`, r.DispatchID, r.ResultDigest, r.EvidenceDigest, r.EventID, r.Cost, r.Charge, r.Final, r.Complete, resolutionDigest)
+	return err
+}
+
 // SettleDebitTx shares the usage persistence transaction. Accounting contains
 // the balances returned by that event's persistence, covering every owner.
 func SettleDebitTx(ctx context.Context, tx pgx.Tx, r DebitResult, accounting []CostSnapshot) error {
-	var state DebitState
-	if err := tx.QueryRow(ctx, `SELECT state FROM olp.execution_debits WHERE id=$1 FOR UPDATE`, r.DispatchID).Scan(&state); err != nil {
+	head, duplicate, err := beginDebitSettleTx(ctx, tx, r)
+	if err != nil {
 		return err
 	}
-	if duplicate, err := DebitResultReplayTx(ctx, tx, r); err != nil {
-		return err
-	} else if duplicate {
+	if duplicate {
 		return nil
 	}
 	resolutionDigest, _ := debitResolutionDigest(r.ResolvesResultDigests)
-	if state != DebitDispatched && state != DebitUnknown {
+	if head.state != DebitDispatched && head.state != DebitUnknown {
 		return ErrDebitState
 	}
 	var persisted bool
-	if err := tx.QueryRow(ctx, `SELECT COALESCE((SELECT count(*)>0 AND sum(COALESCE(f.estimated_cost,0))=$3::numeric AND sum(COALESCE(f.charge,0))=$4::numeric AND bool_and(f.charge_status='not_billable' OR f.currency=d.currency OR (f.estimated_cost=0 AND f.charge=0) OR (NOT $5 AND f.currency IS NULL)) AND bool_and((d.affinity->>'pricing_revision_id' IS NULL OR f.pricing_revision_id::text=d.affinity->>'pricing_revision_id') AND (d.affinity->>'rate_card_revision_id' IS NULL OR f.rate_card_revision_id::text=d.affinity->>'rate_card_revision_id')) AND (NOT $5 OR bool_and(f.charge_status='not_billable' OR (f.usage_complete AND NOT f.unpriced AND f.estimated_cost IS NOT NULL AND f.charge IS NOT NULL))) FROM olp.attempt_usage_facts f JOIN olp.execution_debits d ON d.id=$2 WHERE f.event_id=$1 AND f.api_key_id=d.api_key_id),false)`, r.EventID, r.DispatchID, r.Cost, r.Charge, r.Complete).Scan(&persisted); err != nil {
+	if err := tx.QueryRow(ctx, `SELECT COALESCE((SELECT count(*)>0 AND sum(COALESCE(f.estimated_cost,0))=$3::numeric AND sum(COALESCE(f.charge,0))=$4::numeric AND bool_and(f.charge_status='not_billable' OR f.currency=d.currency OR (f.estimated_cost=0 AND f.charge=0) OR (NOT $5 AND f.currency IS NULL)) AND bool_and((d.affinity->>'pricing_revision_id' IS NULL OR f.pricing_revision_id::text=d.affinity->>'pricing_revision_id') AND (d.affinity->>'rate_card_revision_id' IS NULL OR f.rate_card_revision_id::text=d.affinity->>'rate_card_revision_id')) AND (NOT $5 OR bool_and(f.charge_status='not_billable' OR (f.usage_complete AND NOT f.unpriced AND f.estimated_cost IS NOT NULL AND f.charge IS NOT NULL))) FROM olp.attempt_usage_facts f JOIN olp.execution_debits d ON d.id=$2 WHERE f.event_id=$1 AND f.api_key_id=d.api_key_id AND (d.kind<>'model' OR f.attempt_id=d.id)),false)`, r.EventID, r.DispatchID, r.Cost, r.Charge, r.Complete).Scan(&persisted); err != nil {
 		return err
 	}
 	if !persisted {
@@ -351,10 +442,7 @@ func SettleDebitTx(ctx context.Context, tx pgx.Tx, r DebitResult, accounting []C
 	if !debitOwnersAccounted(owners, accounting) {
 		return ErrDebitState
 	}
-	if err = lockDebitOwners(ctx, tx, owners); err != nil {
-		return err
-	}
-	if _, err = tx.Exec(ctx, `INSERT INTO olp.execution_debit_results(dispatch_id,result_digest,evidence_digest,event_id,cost,charge,final,complete,resolution_digest) VALUES($1,$2,$3,$4,$5::numeric,$6::numeric,$7,$8,$9)`, r.DispatchID, r.ResultDigest, r.EvidenceDigest, r.EventID, r.Cost, r.Charge, r.Final, r.Complete, resolutionDigest); err != nil {
+	if err = appendDebitResultTx(ctx, tx, r, owners, resolutionDigest); err != nil {
 		return err
 	}
 	for _, resolved := range r.ResolvesResultDigests {

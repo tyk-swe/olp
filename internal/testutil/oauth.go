@@ -89,6 +89,12 @@ type oauthDevice struct {
 // operator@reference.example with account acct-reference.
 func NewOAuthServer(t testing.TB) *OAuthServer {
 	t.Helper()
+	s := StartOAuthServer()
+	t.Cleanup(s.Close)
+	return s
+}
+
+func StartOAuthServer() *OAuthServer {
 	s := &OAuthServer{
 		signIn:   OAuthIdentity{Subject: "operator@reference.example", Account: "acct-reference"},
 		lifetime: 3600,
@@ -102,7 +108,6 @@ func NewOAuthServer(t testing.TB) *OAuthServer {
 	mux.HandleFunc("POST /token", s.token)
 	mux.HandleFunc("GET /userinfo", s.userinfo)
 	s.Server = httptest.NewServer(mux)
-	t.Cleanup(s.Close)
 	return s
 }
 

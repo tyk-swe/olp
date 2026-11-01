@@ -53,6 +53,9 @@ func spanAttrs(t *testing.T, exporter *tracetest.InMemoryExporter, name string) 
 func checkGenAISpans(t *testing.T, exporter *tracetest.InMemoryExporter, responseModel string, finishReason string, input, output int64) {
 	t.Helper()
 	attempt := spanAttrs(t, exporter, "attempt")
+	if got := attempt["olp.evidence_origin"].AsString(); got != "gateway_observed" {
+		t.Fatalf("attempt evidence origin %q", got)
+	}
 	if got := attempt["gen_ai.provider.name"].AsString(); got != "openai_compatible" {
 		t.Fatalf("attempt provider %q", got)
 	}
@@ -81,6 +84,9 @@ func checkGenAISpans(t *testing.T, exporter *tracetest.InMemoryExporter, respons
 		t.Fatalf("attempt olp input tokens %d", got)
 	}
 	request := spanAttrs(t, exporter, "request")
+	if got := request["olp.evidence_origin"].AsString(); got != "gateway_observed" {
+		t.Fatalf("request evidence origin %q", got)
+	}
 	if got := request["gen_ai.operation.name"].AsString(); got != "chat" {
 		t.Fatalf("request operation %q", got)
 	}

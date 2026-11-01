@@ -6,7 +6,9 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"maps"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -34,12 +36,11 @@ const (
 // window is a Commander that keeps one minute of request and token counters per
 // rate key the way the reserve_limits script does, and answers in the reply it
 // gives, so that the headers a gateway writes can be read against a real limiter
-// without a Valkey. It tells the commands apart by their size: the reservation
-// takes twelve arguments, a refund nine, a reconciliation seven and a release five.
-// Like the script, it states the allowance only to a reservation that asks for it.
+// without a Valkey.
 type window struct {
 	mu         sync.Mutex
 	counters   map[string]*counters
+	leases     map[string]map[string]int64
 	reserved   []int64           // what each reservation asked for, in order
 	asked      map[string][]bool // whether each reservation of a rate key asked for the allowance
 	reconciled int               // reconciliations applied
@@ -73,25 +74,35 @@ func (w *window) Do(_ context.Context, args ...string) (any, error) {
 		return value
 	}
 	switch len(args) {
-	case 12:
+	case 12, 13:
 		if w.asked == nil {
 			w.asked = map[string][]bool{}
 		}
+		if w.leases == nil {
+			w.leases = map[string]map[string]int64{}
+		}
+		if w.leases[args[4]] == nil {
+			w.leases[args[4]] = map[string]int64{}
+		}
 		stated := args[11] == "1"
 		w.asked[args[3]] = append(w.asked[args[3]], stated)
-		return w.reserve(w.of(args[3]), number(5), number(6), number(7), number(8), stated), nil
+		return w.reserve(w.of(args[3]), w.leases[args[4]], number(5), number(6), number(7), number(8), args[9], number(10), len(args) == 13 && args[12] == "1", stated), nil
 	case 9: // refund_limits: window, requests, tokens, lease
 		held := w.of(args[3])
 		held.requests -= number(6)
 		held.tokens -= number(7)
+		delete(w.leases[args[4]], args[8])
 	case 7: // reconcile_limits: window, adjustment, lease
 		w.of(args[3]).tokens += number(5)
 		w.reconciled++
+	case 5:
+		delete(w.leases[args[3]], args[4])
 	}
 	return []any{int64(1)}, nil
 }
 
-func (w *window) reserve(held *counters, rpm, tpm, tokens, concurrency int64, stated bool) []any {
+func (w *window) reserve(held *counters, leases map[string]int64, rpm, tpm, tokens, concurrency int64, leaseID string, ttl int64, tracking, stated bool) []any {
+	now := minute*60_000 + 60_000 - int64(minuteReset/time.Millisecond)
 	remaining := func(limit, used int64) int64 {
 		if limit == 0 {
 			return 0
@@ -114,6 +125,8 @@ func (w *window) reserve(held *counters, rpm, tpm, tokens, concurrency int64, st
 		return reply(0, "rpm", reset, 0)
 	case tpm > 0 && held.tokens+tokens > tpm:
 		return reply(0, "tpm", reset, 0)
+	case concurrency > 0 && int64(len(leases)) >= concurrency:
+		return reply(0, "concurrency", slices.Min(slices.Collect(maps.Values(leases)))-now, 0)
 	}
 	if rpm > 0 {
 		held.requests++
@@ -122,11 +135,12 @@ func (w *window) reserve(held *counters, rpm, tpm, tokens, concurrency int64, st
 		held.tokens += tokens
 	}
 	w.reserved = append(w.reserved, tokens)
-	expiry := int64(0)
-	if concurrency > 0 {
-		expiry = 1_789_383_605_000
+	if concurrency > 0 || tracking {
+		expiry := now + ttl
+		leases[leaseID] = expiry
+		return reply(1, "ok", 0, expiry)
 	}
-	return reply(1, "ok", 0, expiry)
+	return reply(1, "ok", 0, 0)
 }
 
 // admitThrough puts a limiter over a fresh window in front of the gateway.

@@ -45,6 +45,7 @@ type Capability struct {
 	Operation string `json:"operation"`
 	Surface   string `json:"surface"`
 	Mode      string `json:"mode"`
+	ToolCalls bool   `json:"tool_calls,omitempty"`
 }
 
 // Slot is a credential slot pinned to an exact credential version.
@@ -68,10 +69,14 @@ type Slot struct {
 // Allows applies the published slot restrictions shared by live requests and
 // simulation. Credential authority and transient health are checked by callers.
 func (s *Slot) Allows(model, route, keyID string) bool {
+	return s.AllowsModelRoute(model, route) &&
+		(len(s.AllowedAPIKeys) == 0 || (keyID != "" && slices.Contains(s.AllowedAPIKeys, keyID)))
+}
+
+func (s *Slot) AllowsModelRoute(model, route string) bool {
 	return s.Enabled &&
 		(len(s.AllowedModels) == 0 || slices.Contains(s.AllowedModels, model)) &&
-		(len(s.AllowedRoutes) == 0 || slices.Contains(s.AllowedRoutes, route)) &&
-		(len(s.AllowedAPIKeys) == 0 || (keyID != "" && slices.Contains(s.AllowedAPIKeys, keyID)))
+		(len(s.AllowedRoutes) == 0 || slices.Contains(s.AllowedRoutes, route))
 }
 
 // Limits is the connection-level quota published for one provider. A nil
@@ -195,26 +200,30 @@ type Route struct {
 
 // Snapshot is the complete immutable serving configuration.
 type Snapshot struct {
-	AgentPublications  []agentcontract.Revision `json:"agent_publications,omitempty"`
-	Commitments        map[string][]Commitment  `json:"commitments,omitempty"`
-	Guardrails         *guardrails.Registry     `json:"guardrails,omitempty"`
-	guardrailEngines   map[string]*guardrails.Engine
-	hasBodyLimits      bool
-	CodeRoutes         map[string]codemode.Route `json:"code_routes,omitempty"`
-	CodeConnections    map[string]Configuration  `json:"code_connections,omitempty"`
-	codeRevisions      map[string]codeRevision
-	interactions       map[string]map[string]*interaction.Template
-	operations         map[string]map[string]*operationplan.Template
-	media              map[string]map[string]*mediacontract.Template
-	durable            map[string]map[string]*durablecontract.Template
-	realtime           map[string]map[string]*realtimecontract.Template
-	webrtc             map[string]map[string]*realtimecontract.Template
-	duplex             map[string]map[string]*duplexcontract.Template
-	Generation         Generation          `json:"generation"`
-	Providers          map[string]Provider `json:"providers"`
-	Routes             map[string]Route    `json:"routes"`
-	InstallationPolicy *Policy             `json:"installation_policy,omitempty"`
-	KeyPolicies        map[string]*Policy  `json:"key_policies,omitempty"`
+	AgentPublications    []agentcontract.Revision `json:"agent_publications,omitempty"`
+	MCPServers           []MCPServer              `json:"mcp_servers,omitempty"`
+	mcpTools             map[string]MCPToolsetResolution
+	Commitments          map[string][]Commitment `json:"commitments,omitempty"`
+	Guardrails           *guardrails.Registry    `json:"guardrails,omitempty"`
+	guardrailEngines     map[string]*guardrails.Engine
+	toolGuardrailEngines map[string]*guardrails.Engine
+	hasBodyLimits        bool
+	CodeRoutes           map[string]codemode.Route `json:"code_routes,omitempty"`
+	CodePaidConnections  map[string]Provider       `json:"code_paid_connections,omitempty"`
+	CodeConnections      map[string]Configuration  `json:"code_connections,omitempty"`
+	codeRevisions        map[string]codeRevision
+	interactions         map[string]map[string]*interaction.Template
+	operations           map[string]map[string]*operationplan.Template
+	media                map[string]map[string]*mediacontract.Template
+	durable              map[string]map[string]*durablecontract.Template
+	realtime             map[string]map[string]*realtimecontract.Template
+	webrtc               map[string]map[string]*realtimecontract.Template
+	duplex               map[string]map[string]*duplexcontract.Template
+	Generation           Generation          `json:"generation"`
+	Providers            map[string]Provider `json:"providers"`
+	Routes               map[string]Route    `json:"routes"`
+	InstallationPolicy   *Policy             `json:"installation_policy,omitempty"`
+	KeyPolicies          map[string]*Policy  `json:"key_policies,omitempty"`
 }
 
 // Digest returns the SHA-256 of the canonical JSON encoding of the serving
@@ -222,16 +231,18 @@ type Snapshot struct {
 // configuration yields the same digest.
 func (s *Snapshot) Digest() (string, error) {
 	encoded, err := json.Marshal(struct {
-		AgentPublications  []agentcontract.Revision  `json:"agent_publications,omitempty"`
-		Commitments        map[string][]Commitment   `json:"commitments,omitempty"`
-		Guardrails         *guardrails.Registry      `json:"guardrails,omitempty"`
-		CodeRoutes         map[string]codemode.Route `json:"code_routes,omitempty"`
-		CodeConnections    map[string]Configuration  `json:"code_connections,omitempty"`
-		Providers          map[string]Provider       `json:"providers"`
-		Routes             map[string]Route          `json:"routes"`
-		InstallationPolicy *Policy                   `json:"installation_policy,omitempty"`
-		KeyPolicies        map[string]*Policy        `json:"key_policies,omitempty"`
-	}{s.AgentPublications, s.Commitments, s.Guardrails, s.CodeRoutes, s.CodeConnections, s.Providers, s.Routes, s.InstallationPolicy, s.KeyPolicies})
+		AgentPublications   []agentcontract.Revision  `json:"agent_publications,omitempty"`
+		MCPServers          []MCPServer               `json:"mcp_servers,omitempty"`
+		Commitments         map[string][]Commitment   `json:"commitments,omitempty"`
+		Guardrails          *guardrails.Registry      `json:"guardrails,omitempty"`
+		CodeRoutes          map[string]codemode.Route `json:"code_routes,omitempty"`
+		CodePaidConnections map[string]Provider       `json:"code_paid_connections,omitempty"`
+		CodeConnections     map[string]Configuration  `json:"code_connections,omitempty"`
+		Providers           map[string]Provider       `json:"providers"`
+		Routes              map[string]Route          `json:"routes"`
+		InstallationPolicy  *Policy                   `json:"installation_policy,omitempty"`
+		KeyPolicies         map[string]*Policy        `json:"key_policies,omitempty"`
+	}{s.AgentPublications, s.MCPServers, s.Commitments, s.Guardrails, s.CodeRoutes, s.CodePaidConnections, s.CodeConnections, s.Providers, s.Routes, s.InstallationPolicy, s.KeyPolicies})
 	if err != nil {
 		return "", err
 	}
@@ -249,10 +260,19 @@ func (p *Provider) Supports(model, operation, surface, mode string) bool {
 	return false
 }
 
+func (p *Provider) SupportsToolCalls(model, surface, mode string) bool {
+	return slices.ContainsFunc(p.Capabilities, func(c Capability) bool {
+		return c.Model == model && c.Operation == "generation" && c.Surface == surface && c.Mode == mode && c.ToolCalls
+	})
+}
+
 // validate rejects snapshots that could not serve safely: dangling references,
 // non-positive budgets, malformed identifiers.
 func (s *Snapshot) validate() error {
 	if err := agentcontract.ValidateRevisions(s.AgentPublications); err != nil {
+		return err
+	}
+	if err := s.validateMCPServers(); err != nil {
 		return err
 	}
 	if err := s.Guardrails.Validate(); err != nil {
@@ -350,6 +370,7 @@ func (s *Snapshot) Compile() error {
 	if err := next.compileCodeMode(); err != nil {
 		return err
 	}
+	next.compileMCP()
 	next.hasBodyLimits = false
 	for _, route := range next.Routes {
 		if route.MaxBodyBytes != nil {

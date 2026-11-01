@@ -158,3 +158,33 @@ func TestAPIKeyBudgetAndTokenLimitContract(t *testing.T) {
 // A key stored before the policy existed reads as opted out.
 
 // An omitted field keeps the stored choice.
+
+func TestAPIKeyWorkflowLimitsRoundTripAndValidation(t *testing.T) {
+	h := newAccessHarness(t)
+	owner := h.owner()
+	bounds := map[string]any{"max_iterations": 6, "max_tool_calls": 0, "max_duration_seconds": 30, "max_concurrent_runs": 2, "max_run_cost": "0"}
+	created := h.want(owner, http.MethodPost, "/api/v1/api-keys", map[string]any{"name": "workflow bounds", "run_limits": bounds}, idem("workflow-key"), http.StatusCreated)
+	path := "/api/v1/api-keys/" + created["id"].(string)
+	read := h.want(owner, http.MethodGet, path, nil, nil, http.StatusOK)
+	encoded, err := json.Marshal(read["run_limits"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got limits.WorkflowBounds
+	if err := json.Unmarshal(encoded, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.MaxIterations == nil || *got.MaxIterations != 6 || got.MaxToolCalls == nil || *got.MaxToolCalls != 0 || got.MaxDurationSeconds == nil || *got.MaxDurationSeconds != 30 || got.MaxConcurrentRuns == nil || *got.MaxConcurrentRuns != 2 || got.MaxRunCost == nil || *got.MaxRunCost != "0" {
+		t.Fatalf("workflow bounds changed on read: %+v", got)
+	}
+	h.want(owner, http.MethodPatch, path, map[string]any{"run_limits": map[string]any{"max_iterations": 33}}, etagHeader(read), http.StatusUnprocessableEntity)
+	unchanged := h.want(owner, http.MethodGet, path, nil, nil, http.StatusOK)
+	if unchanged["etag"] != read["etag"] {
+		t.Fatal("invalid workflow bounds changed the key")
+	}
+	h.want(owner, http.MethodPatch, path, map[string]any{"run_limits": nil}, etagHeader(unchanged), http.StatusOK)
+	cleared := h.want(owner, http.MethodGet, path, nil, nil, http.StatusOK)
+	if cleared["run_limits"] != nil {
+		t.Fatalf("workflow bounds were not cleared: %v", cleared["run_limits"])
+	}
+}

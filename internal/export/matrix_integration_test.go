@@ -3,6 +3,7 @@
 package export
 
 import (
+	"bytes"
 	"context"
 	"crypto/hmac"
 	"crypto/sha256"
@@ -17,6 +18,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -452,5 +454,127 @@ func TestIntegrationExportSinkMatrix(t *testing.T) {
 		if got := len(store.received()); got != 5 {
 			t.Fatalf("%s redelivered: %d puts", name, got)
 		}
+	}
+}
+
+func TestIntegrationOTLPResponseDeliveryAccounting(t *testing.T) {
+	pool := matrixPool(t)
+	ring := matrixRing(t)
+	const installation = "otlp-outcome-installation"
+	owner := uuid.NewString()
+	if _, err := pool.Exec(t.Context(), `INSERT INTO olp.users(id,email,display_name,role,etag) VALUES($1,$2,'Owner','owner',$3)`, owner, owner+"@example.test", uuid.NewString()); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name      string
+		body      []byte
+		delivered int
+		pending   int
+		rejected  bool
+	}{
+		{"empty-success", nil, 1, 0, false},
+		{"warning", []byte{0x0a, 0x03, 0x12, 0x01, 'x'}, 1, 0, false},
+		{"rejected", []byte{0x0a, 0x02, 0x08, 0x01}, 0, 0, true},
+		{"malformed", []byte{0xff}, 0, 1, false},
+		{"oversized", []byte(strings.Repeat("x", maxDeliveryResponseBytes+1)), 0, 1, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := pool.Exec(t.Context(), `UPDATE olp.export_sinks SET enabled=false`); err != nil {
+				t.Fatal(err)
+			}
+			var calls atomic.Int64
+			receiver := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				calls.Add(1)
+				w.Header().Set("Content-Type", "application/x-protobuf")
+				w.Write(tc.body)
+			}))
+			defer receiver.Close()
+			secretID, sinkID := uuid.NewString(), uuid.NewString()
+			sealed, err := ring.Seal(installation, secrets.SinkCredential, secretID, []byte(`{}`))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := pool.Exec(t.Context(), `INSERT INTO olp.secrets(id,purpose,key_version,ciphertext) VALUES($1,'sink_credential',1,$2)`, secretID, sealed); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := pool.Exec(t.Context(), `INSERT INTO olp.export_sinks(id,name,type,destination,credential_id,streams,format,etag,created_by) VALUES($1,$2,'otlp_logs',$3,$4,ARRAY['requests'],'otlp',$5,$6)`, sinkID, tc.name, receiver.URL, secretID, uuid.NewString(), owner); err != nil {
+				t.Fatal(err)
+			}
+			var previousPending int
+			if err := pool.QueryRow(t.Context(), exportPendingMetricsSQL).Scan(&previousPending); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := pool.Exec(t.Context(), `SELECT olp.enqueue_export('requests',$1::uuid,NULL,'otlp','success',now(),'{}'::jsonb)`, uuid.NewString()); err != nil {
+				t.Fatal(err)
+			}
+			var logs bytes.Buffer
+			worker := &Worker{Pool: pool, Keys: ring, Installation: installation, Sender: NewSender(matrixPolicy()), Log: slog.New(slog.NewTextHandler(&logs, nil))}
+			if err := worker.Pass(t.Context()); err != nil {
+				t.Fatal(err)
+			}
+			attempts, delivered, failed := worker.Metrics()
+			if attempts != 1 || delivered != int64(tc.delivered) || failed != int64(1-tc.delivered) {
+				t.Fatalf("process accounting attempts=%d delivered=%d failed=%d", attempts, delivered, failed)
+			}
+			var status json.RawMessage
+			if err := pool.QueryRow(t.Context(), sinkStatusSQL, sinkID).Scan(&status); err != nil {
+				t.Fatal(err)
+			}
+			var state struct {
+				Pending   int `json:"pending"`
+				Delivered int `json:"delivered_total"`
+				Failed    int `json:"failures_total"`
+			}
+			if err := json.Unmarshal(status, &state); err != nil {
+				t.Fatal(err)
+			}
+			if state.Pending != tc.pending || state.Delivered != tc.delivered || state.Failed != 1-tc.delivered {
+				t.Fatalf("sink accounting %s", status)
+			}
+			if tc.rejected && !strings.Contains(logs.String(), "otlp_rejected") {
+				t.Fatalf("missing bounded rejection diagnostic: %s", logs.String())
+			}
+			var metrics strings.Builder
+			WriteMetrics(t.Context(), pool, worker, nil, nil, &metrics)
+			for _, expected := range []string{
+				fmt.Sprintf(`olp_export_deliveries_total{sink=%q,outcome="delivered"} %d`, sinkID, tc.delivered),
+				fmt.Sprintf(`olp_export_deliveries_total{sink=%q,outcome="failed"} %d`, sinkID, 1-tc.delivered),
+				fmt.Sprintf("\nolp_export_pending %d\n", previousPending+tc.pending),
+			} {
+				if !strings.Contains(metrics.String(), expected) {
+					t.Fatalf("missing metric %q in %s", expected, metrics.String())
+				}
+			}
+			if tc.pending == 0 {
+				if _, err := pool.Exec(t.Context(), `UPDATE olp.export_records SET occurred_at=now()-interval '400 days' WHERE id IN (SELECT record_id FROM olp.export_pending WHERE sink_id=$1)`, sinkID); err != nil {
+					t.Fatal(err)
+				}
+			}
+			restarted := &Worker{Pool: pool, Keys: ring, Installation: installation, Sender: worker.Sender, Log: worker.Log}
+			if err := restarted.Pass(t.Context()); err != nil {
+				t.Fatal(err)
+			}
+			if calls.Load() != 1 {
+				t.Fatalf("resolved or backed-off record was resent: %d", calls.Load())
+			}
+			var gaps int
+			if err := pool.QueryRow(t.Context(), `SELECT count(*) FROM olp.export_gaps WHERE sink_id=$1`, sinkID).Scan(&gaps); err != nil {
+				t.Fatal(err)
+			}
+			if gaps != 0 {
+				t.Fatalf("resolved record became a retention gap: %d", gaps)
+			}
+			if tc.pending == 1 {
+				if _, err := pool.Exec(t.Context(), `UPDATE olp.export_pending SET next_attempt_at=now()-interval '1 second' WHERE sink_id=$1`, sinkID); err != nil {
+					t.Fatal(err)
+				}
+				if err := restarted.Pass(t.Context()); err != nil {
+					t.Fatal(err)
+				}
+				if calls.Load() != 2 {
+					t.Fatalf("invalid response was not retried: %d", calls.Load())
+				}
+			}
+		})
 	}
 }

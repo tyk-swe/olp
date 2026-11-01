@@ -8,7 +8,9 @@ import (
 	"slices"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/routing"
+	"github.com/tyk-swe/olp/internal/runtime"
 )
 
 // attemptAdapter supplies the operation-specific estimate of an attempt and one
@@ -18,6 +20,33 @@ import (
 type attemptAdapter[Result any] struct {
 	estimate func(routing.Attempt, *routing.Provider) int64
 	dispatch func(context.Context, routing.Attempt, *routing.Provider, routing.Slot, AttemptFact) (AttemptFact, Result, *attemptFailure)
+}
+
+func (a attemptAdapter[Result]) dispatchWithAuthority(ctx context.Context, s *Server, x *call, attempt routing.Attempt, provider *routing.Provider, slot routing.Slot, fact AttemptFact) (AttemptFact, Result, *attemptFailure, *Error) {
+	if x.authority.TaskCapability != nil {
+		admitter, ok := s.Runtime.(interface {
+			AdmitTaskCapabilityAttempt(context.Context, access.Authority, string, string, string, *string, string) error
+		})
+		var err error
+		if ok {
+			err = admitter.AdmitTaskCapabilityAttempt(ctx, x.authority, "inference", x.route.Slug, x.route.RevisionID, x.route.ProjectID, x.request.accountingID())
+		}
+		if !ok || err != nil {
+			var result Result
+			failure := &attemptFailure{class: classLimitsUnavailable, noRetry: true}
+			if errors.Is(err, runtime.ErrTaskAttemptLimit) {
+				return fact, result, failure, &Error{Status: http.StatusTooManyRequests, Type: "rate_limit_error", Code: "task_limit_exceeded", Message: "The task attempt limit was exceeded."}
+			}
+			return fact, result, failure, permissionError("permission_denied", "The task capability is no longer authorized.")
+		}
+	}
+	if x.workflow == nil {
+		completed, result, failure := a.dispatch(ctx, attempt, provider, slot, fact)
+		return completed, result, failure, nil
+	}
+	dispatchCtx, finish := s.monitorWorkflowAuthority(ctx, x, "")
+	completed, result, failure := a.dispatch(dispatchCtx, attempt, provider, slot, fact)
+	return completed, result, failure, finish()
 }
 
 // attemptOutcome keeps the successful payload typed without coupling shared
@@ -124,6 +153,22 @@ route:
 					s.releaseHold(ctx, gate.hold)
 					continue
 				}
+				if x.workflow != nil {
+					authority, authorityErr := s.workflowAuthority(ctx, x, x.route, "")
+					if authorityErr != nil {
+						s.releaseHold(ctx, gate.hold)
+						return attemptOutcome[Result]{err: authorityErr}, nil
+					}
+					x.sessionDebit = nil
+					caps := attemptCaps(x.route, &provider, &slot)
+					if x.callerCostExempt() && provider.CredentialSource == "caller" {
+						caps = [3]cappedOwner{}
+					}
+					if e := s.reserveSessionDebit(ctx, x, *authority, attempt, caps[:]); e != nil {
+						s.releaseHold(ctx, gate.hold)
+						return attemptOutcome[Result]{err: e}, nil
+					}
+				}
 				x.spent++
 				x.activatePreparation(&provider, attempt.TargetID, attempt.UpstreamModel)
 				x.grantGeneration = 0
@@ -133,7 +178,13 @@ route:
 				if x.guardrailEngine != nil {
 					x.startGuardrailAttempt(fact.GuardrailDecisions)
 				}
-				fact, result, failure := adapter.dispatch(ctx, attempt, &provider, slot, fact)
+				dispatchCtx, finishLease := func() (context.Context, func() *Error) {
+					if x.workflow == nil {
+						return ctx, func() *Error { return nil }
+					}
+					return s.monitorWorkflowModelLease(ctx, x.sessionDebit)
+				}()
+				fact, result, failure, authorityErr := adapter.dispatchWithAuthority(dispatchCtx, s, x, attempt, &provider, slot, fact)
 				if x.guardrailEngine != nil {
 					fact.GuardrailDecisions = x.finishGuardrailAttempt()
 				}
@@ -141,13 +192,47 @@ route:
 				// reservation. Local failures remain refundable.
 				dispatched := failure == nil || failure.dispatched
 				x.dispatched = x.dispatched || dispatched
+				x.stepDispatched = x.stepDispatched || dispatched
 				gate.hold.settle(ctx, dispatched, settledAttemptTokens(&fact, estimate))
 				if dispatched {
 					x.spendCaps(gate.hold.budgets, attempt)
 				}
 				x.facts = append(x.facts, fact)
-				// Recording the attempt also releases its half-open probe.
 				s.health.record(provider.ID, fact)
+				if x.workflow != nil && failure == nil {
+					settlementErr := s.settleWorkflowModelAttempt(ctx, x, fact)
+					leaseErr := finishLease()
+					if e := settlementErr; e != nil {
+						return attemptOutcome[Result]{err: e}, nil
+					}
+					if leaseErr != nil {
+						return attemptOutcome[Result]{err: leaseErr}, nil
+					}
+				}
+				if x.workflow != nil && failure != nil {
+					var releaseErr *Error
+					if failure.dispatched {
+						s.markSessionUnknown(ctx, x)
+					} else {
+						releaseErr = s.abandonWorkflowDebit(ctx, x)
+					}
+					leaseErr := finishLease()
+					if releaseErr != nil {
+						return attemptOutcome[Result]{err: releaseErr}, nil
+					}
+					if leaseErr != nil {
+						return attemptOutcome[Result]{err: leaseErr}, nil
+					}
+					if authorityErr != nil {
+						return attemptOutcome[Result]{err: authorityErr}, nil
+					}
+					if failure.dispatched {
+						return attemptOutcome[Result]{err: failure.toError(), cancelled: failure.class == classCancelled}, nil
+					}
+				}
+				if authorityErr != nil {
+					return attemptOutcome[Result]{err: authorityErr}, nil
+				}
 				if failure == nil {
 					return attemptOutcome[Result]{result: result, committed: fact.Committed}, nil
 				}

@@ -1,16 +1,18 @@
 # Provider plugins
 
-A provider plugin is an operator-installed extension that supplies a provider
-profile's authentication and hosting around a built-in dialect. It never
-defines a dialect: codecs and interaction contracts stay first-party. Plugins
-are confined: OLP runs their code on [wazero](https://wazero.io) and grants
-every capability they have, unless a deployment enables the experimental
-[unconfined tier](#unconfined-plugins-experimental).
-The [authoring guide](../develop/plugin-authoring.md) covers writing one.
+A provider plugin is an operator-installed extension that supplies provider
+authentication and hosting around a built-in dialect. It never defines a dialect
+of its own. Codecs and interaction contracts remain first-party OLP code.
 
-This page covers installing, reviewing and approving plugins, creating
-providers from their profiles, enrolling grants, promoting plugin providers
-between installations, permitting unconfined plugins, and uninstalling them.
+Plugins are confined by default. OLP runs their code on
+[wazero](https://wazero.io) and explicitly grants each capability they can use.
+The exception is the experimental
+[unconfined tier](#unconfined-plugins-experimental), which a deployment must
+deliberately enable.
+
+This guide covers installation, review and approval, provider creation, grant
+enrollment and refresh, configuration promotion and removal. The
+[plugin authoring guide](../develop/plugin-authoring.md) covers how to build a plugin.
 
 ## Upstream terms of use
 
@@ -82,7 +84,7 @@ WebAssembly module's SHA-256 digest, ABI version, size, the origins and
 profiles its manifest declares, the source commit the digest builds from and
 when it was reviewed.
 
-**Plugins → Plugin index** shows the index beside what is installed, with
+The **Plugin index** page under Plugins shows the index beside what is installed, with
 each release marked not installed, installed or approved, and each installed
 plugin says whether its digest is listed. `GET /api/v1/plugin-index` returns
 the same. Browsing installs nothing: an owner still uploads the module,

@@ -17,7 +17,28 @@ func (s *Snapshot) Clone() *Snapshot {
 	if s == nil {
 		return nil
 	}
-	out := &Snapshot{Commitments: maps.Clone(s.Commitments), Generation: s.Generation, Providers: maps.Clone(s.Providers), Routes: maps.Clone(s.Routes), CodeRoutes: maps.Clone(s.CodeRoutes), CodeConnections: maps.Clone(s.CodeConnections), InstallationPolicy: s.InstallationPolicy.Clone(), KeyPolicies: maps.Clone(s.KeyPolicies)}
+	out := &Snapshot{Commitments: maps.Clone(s.Commitments), Generation: s.Generation, Providers: maps.Clone(s.Providers), Routes: maps.Clone(s.Routes), CodeRoutes: maps.Clone(s.CodeRoutes), CodeConnections: maps.Clone(s.CodeConnections), CodePaidConnections: maps.Clone(s.CodePaidConnections), InstallationPolicy: s.InstallationPolicy.Clone(), KeyPolicies: maps.Clone(s.KeyPolicies)}
+	out.MCPServers = slices.Collect(func(yield func(MCPServer) bool) {
+		for _, server := range s.MCPServers {
+			if !yield(MCPServer{
+				ID: server.ID, ProjectID: server.ProjectID, RevisionID: server.RevisionID, Endpoint: server.Endpoint,
+				Transport: server.Transport, Protocol: server.Protocol, Digest: server.Digest,
+				CredentialID: copyPointer(server.CredentialID), UnitPrice: copyPointer(server.UnitPrice), ToolPrices: maps.Clone(server.ToolPrices),
+				OAuth: server.OAuth.Clone(), Delegation: server.Delegation.Clone(), Stdio: server.Stdio.Clone(),
+				CallsPerMinute: server.CallsPerMinute, MaxConcurrency: server.MaxConcurrency,
+				PerKeyCallsPerMinute: server.PerKeyCallsPerMinute, PerKeyMaxConcurrency: server.PerKeyMaxConcurrency,
+				Tools: slices.Collect(func(yieldTool func(MCPTool) bool) {
+					for _, tool := range server.Tools {
+						if !yieldTool(MCPTool{Name: tool.Name, Description: tool.Description, InputSchema: slices.Clone(tool.InputSchema)}) {
+							return
+						}
+					}
+				}),
+			}) {
+				return
+			}
+		}
+	})
 	out.AgentPublications = slices.Clone(s.AgentPublications)
 	for i, v := range out.AgentPublications {
 		out.AgentPublications[i] = agentcontract.CloneRevision(v)
@@ -41,6 +62,9 @@ func (s *Snapshot) Clone() *Snapshot {
 	}
 	for id, r := range out.CodeRoutes {
 		out.CodeRoutes[id] = cloneCodeRoute(r)
+	}
+	for id, p := range out.CodePaidConnections {
+		out.CodePaidConnections[id] = cloneProvider(p)
 	}
 	for id, c := range out.CodeConnections {
 		out.CodeConnections[id] = cloneConfiguration(c)
@@ -227,16 +251,27 @@ func clonePredicate(p Predicate) Predicate {
 	}
 	return p
 }
-func cloneCodeRoute(r codemode.Route) codemode.Route {
-	if r.Tools != nil {
-		tools := *r.Tools
-		tools.Services = slices.Clone(tools.Services)
-		r.Tools = &tools
+func cloneCodeRoute(route codemode.Route) codemode.Route {
+	return codemode.Route{
+		ID: route.ID, ProjectID: route.ProjectID, Slug: route.Slug, PoolID: route.PoolID, PaidParticipation: route.PaidParticipation, PaidTargets: maps.Clone(route.PaidTargets), PaidFallbackTargets: maps.Clone(route.PaidFallbackTargets),
+		ModelPools: maps.Collect(func(yield func(string, []string) bool) {
+			for public, targets := range route.ModelPools {
+				if !yield(public, slices.Clone(targets)) {
+					return
+				}
+			}
+		}),
+		Models: slices.Clone(route.Models), Aliases: maps.Clone(route.Aliases), ModelRewriting: route.ModelRewriting,
+		CodexCLIIdentity: route.CodexCLIIdentity, ChatToCodex: route.ChatToCodex, MessagesToCodex: route.MessagesToCodex, ChatToAntigravity: route.ChatToAntigravity, InitialRecoveryAttempts: route.InitialRecoveryAttempts,
+		Tools: func() *codemode.ResearchTools {
+			if route.Tools == nil {
+				return nil
+			}
+			return &codemode.ResearchTools{AccountID: route.Tools.AccountID, Services: slices.Clone(route.Tools.Services)}
+		}(),
+		MaxBodyBytes: copyPointer(route.MaxBodyBytes), Enabled: route.Enabled, ETag: route.ETag,
+		RevisionID: route.RevisionID, Revision: route.Revision, PublishedAt: copyPointer(route.PublishedAt),
 	}
-	r.MaxBodyBytes = copyPointer(r.MaxBodyBytes)
-	r.Models = slices.Clone(r.Models)
-	r.PublishedAt = copyPointer(r.PublishedAt)
-	return r
 }
 func cloneConfiguration(c Configuration) Configuration {
 	cfg := connectors.Config{Network: c.Options.Network, BatchStorage: c.BatchStorage, TuningDatasetURIPrefixes: c.Options.TuningDatasetURIPrefixes, DocumentURIPrefixes: c.Options.DocumentURIPrefixes, SemanticHeaders: c.Options.SemanticHeaders, QuerySettings: c.Options.QuerySettings, OperationDefaults: c.Options.OperationDefaults, Bindings: c.Options.Bindings, Models: c.Options.Models, CredentialHeaders: c.Options.CredentialHeaders, PluginOptions: c.Options.PluginOptions}.Clone()

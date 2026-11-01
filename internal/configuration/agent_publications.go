@@ -218,7 +218,15 @@ func publishedDefinition(ctx context.Context, q access.Queryer, p *agents.Public
 	return &v.Definition, nil
 }
 func reusableAgentCredential(old, next *agentcontract.Draft) bool {
-	return old != nil && next != nil && old.Agent != nil && next.Agent != nil && old.Agent.Endpoint == next.Agent.Endpoint && old.Agent.CredentialID != nil
+	if old == nil || next == nil || old.Agent == nil || next.Agent == nil || old.Agent.Endpoint != next.Agent.Endpoint || old.Agent.CredentialID == nil {
+		return false
+	}
+	oldEntra := old.Agent.OAuth != nil && old.Agent.OAuth.EntraOBO != nil
+	nextEntra := next.Agent.OAuth != nil && next.Agent.OAuth.EntraOBO != nil
+	if oldEntra != nextEntra {
+		return false
+	}
+	return !oldEntra || (old.Agent.OAuth.ClientID == next.Agent.OAuth.ClientID && old.Agent.OAuth.TokenEndpoint == next.Agent.OAuth.TokenEndpoint && old.Agent.OAuth.EntraOBO.Issuer == next.Agent.OAuth.EntraOBO.Issuer)
 }
 
 type publicationCredentialResolver struct {
@@ -257,7 +265,12 @@ func (r *publicationCredentialResolver) bind(ctx context.Context, d agentcontrac
 				return d, nil
 			}
 		}
-		id, err := agents.StoreCredential(ctx, r.tx, r.server.Access.Keys, r.server.Access.Installation, r.project, material)
+		id, err := func() (string, error) {
+			if d.Agent.OAuth != nil && d.Agent.OAuth.EntraOBO != nil {
+				return agents.StoreEntraCredential(ctx, r.tx, r.server.Access.Keys, r.server.Access.Installation, r.project, material)
+			}
+			return agents.StoreCredential(ctx, r.tx, r.server.Access.Keys, r.server.Access.Installation, r.project, material)
+		}()
 		if err != nil {
 			return d, err
 		}

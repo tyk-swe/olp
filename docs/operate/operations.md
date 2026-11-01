@@ -1,8 +1,10 @@
 # Operations runbook
 
-Availability, monitoring, recovery, version, incident, and key-rotation
-procedures for production OpenLLMProxy. Keep this runbook with the deployed
-release; deployment topology is in [`deployment.md`](deployment.md).
+This runbook covers production availability, monitoring, recovery, version
+changes, incidents and key rotation. Keep the runbook version with the deployed
+release because recovery details can depend on the storage and runtime contract
+in that release. Installation topology and first deployment belong in
+[Deployment](deployment.md).
 
 ## Commitment accounting recovery
 
@@ -49,11 +51,14 @@ A FOCUS day with `last_error_code` remains in `focus_datasets` with a future
 the same revision, manifest last. Do not edit the row. `current: false` marks a
 dirty day awaiting restatement.
 
-For billing-import errors, `credential` means a missing/invalid sealed admin key;
-`status`/`response` are upstream answers and `endpoint` means a missing provider
-or egress refusal. Imported costs expire at `retention.usage_days`. Restricted
-egress deployments need `api.stripe.com`, `api.openai.com` and
-`api.anthropic.com` for the corresponding meter/import APIs.
+For billing-import errors, `credential` means a missing, invalid or unreadable
+sealed billing credential, or an upstream authentication or authorization
+failure. `status` and `response` indicate upstream or export errors, and
+`endpoint` means a missing provider or egress refusal. Imported costs expire at
+`retention.usage_days`. Restricted egress deployments need
+`api.stripe.com`, `api.openai.com` and `api.anthropic.com` for the corresponding
+meter or import APIs. Cloud export and authentication access depend on the
+selected source and credential. See [FinOps](finops.md#billing-imports).
 
 Capture failures drop records without changing inference. Review
 `olp_capture_dropped_total` and `olp_capture_redaction_failed_total`; a queued
@@ -78,7 +83,7 @@ or `all`; configured capability flags do not establish live worker health.
 | Cost reconciliation | 60-second region-scoped leader pass |
 | Notifications | 60-second claims, durable attempt evidence, up to five retries with exponential minute backoff |
 | FOCUS dataset export | 60-second pass; PostgreSQL leases, no Valkey; at most four due days per sink |
-| Billing import | 60-second scan; each due import runs hourly after success, five-minute geometric backoff on failure |
+| Billing import | The scan runs every 60 seconds. Imports run hourly after success, with Google backfill eligible after one minute. Failures use five-minute geometric backoff |
 | Batch settlement | 5-second durable claim scan for submission reconciliation, polling and result settlement |
 
 Media/grant/consumer/epoch/batch settlement checkpoints stale at 20 seconds; maintenance/cost/
@@ -107,10 +112,11 @@ state returns 503; known exhaustion returns 429. New budgets normally wait for
 next minute's pass. Never insert zero, remove policy or reset a valid counter to
 bypass initialization. Supply caps skip targets while unknown/exhausted.
 
-Accounting installs every owner's spend on both bases — `accrued`/
-`unpriced_attempts` from `estimated_cost`, `charged`/`uncharged_attempts` from
-`charge` — so a `cost_basis` change takes effect on the next admission and
-reconciliation installs both bases for every owner it reconciles.
+Accounting installs every owner's spend on both bases. It derives `accrued` and
+`unpriced_attempts` from `estimated_cost`, and `charged` and
+`uncharged_attempts` from `charge`. A `cost_basis` change therefore takes effect
+on the next admission. Reconciliation likewise installs both bases for every
+owner it reconciles.
 
 Each region has one dedicated PostgreSQL leader session, never returned while
 locked. Failure/cancellation/120-second pass deadline closes it; followers cannot
@@ -173,8 +179,8 @@ Attribution filters and end-user digest breakdowns preserve raw-ID privacy.
 Estimate error compares only attempts with both estimated/reported input;
 model family/provenance breakdowns distinguish unestimated and historical unknown.
 Committed connections report zero marginal cost; `allocated_commitment`
-apportions each commitment amount across the period's list-cost weight —
-see [pricing](pricing.md#commitments).
+apportions each commitment amount across the period's list-cost weight. See
+[Pricing](pricing.md#commitments) for the allocation contract.
 
 Pricing entries and every component's exact billing semantics are covered in
 [pricing](pricing.md). Managed pricing sources refresh bounded, egress-checked immutable snapshots and
@@ -605,7 +611,8 @@ scanning content. [Configuration, controls and accounting](../use/caching.md).
 ## Batch settlement recovery
 
 The `batch_settlement` worker claims due work on its 5-second pass. Normal
-transitions are `submitting → active → settling → settled`; ambiguous creates
+transitions move from `submitting` to `active`, then `settling`, then `settled`.
+Ambiguous creates
 remain `submission_unknown` until provider-specific reconciliation proves one
 job. Conflicting evidence closes as `conflict`; missing or incomplete result
 evidence closes as `uncertain`, never as zero cost. Monitor its health task,

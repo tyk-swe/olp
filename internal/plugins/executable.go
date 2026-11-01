@@ -221,23 +221,11 @@ type pending struct {
 // waits for it to announce its ABI version. It runs a sealed copy of the
 // executable, whose digest it checks, in a process group of its own.
 func (u *Unconfined) start(ctx context.Context, name, digest string) (*process, error) {
-	path, _, err := u.lookup(name)
-	if isCode(err, CodeExecutableUnknown) {
-		return nil, refuse(CodeExecutableChanged, "The unconfined plugin directory no longer holds the plugin's executable.")
-	}
-	if err != nil {
-		return nil, err
-	}
-	copied, copiedDigest, err := sealed(path)
+	cmd, copied, err := u.sealedCommand(name, digest)
 	if err != nil {
 		return nil, err
 	}
 	defer copied.Close()
-	if copiedDigest != digest {
-		return nil, refuse(CodeExecutableChanged, "The executable no longer has the plugin's digest. An owner permits each build of an unconfined plugin.")
-	}
-	cmd := command(copied, name)
-	cmd.Dir, cmd.Env = u.dir, []string{}
 	// Every pipe end is closed on each early return; exec.Cmd would close
 	// pipes it made only in Start or Wait.
 	stdinReader, stdin, err := os.Pipe()

@@ -68,3 +68,45 @@ func TestPricingQuoteMatchesAccounting(t *testing.T) {
 // enough to plan but will fail in dispatch.
 
 // Cheap on the primary, expensive on the fallback target.
+
+func TestRateCardSummariesTrackBillingOrder(t *testing.T) {
+	for _, tc := range []struct {
+		name            string
+		firstOffset     time.Duration
+		secondOffset    time.Duration
+		currentRevision int
+		count           int
+	}{
+		{"effective-order", -time.Hour, -2 * time.Hour, 1, 2},
+		{"effective-tie", -time.Hour, -time.Hour, 2, 1},
+		{"future-only", time.Hour, 2 * time.Hour, 0, 1},
+		{"latest-is-current", -2 * time.Hour, -time.Hour, 2, 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := repHarness(t)
+			owner := h.owner()
+			card := h.want(owner, "POST", "/api/v1/rate-cards", map[string]any{"owner": map[string]any{"kind": "installation"}}, idem("summary-card"), 201)
+			cardID := card["id"].(string)
+			first := h.want(owner, "POST", "/api/v1/rate-cards/"+cardID+"/revisions", map[string]any{"markup": "2"}, idem("summary-first"), 201)
+			second := h.want(owner, "POST", "/api/v1/rate-cards/"+cardID+"/revisions", map[string]any{"markup": "3"}, idem("summary-second"), 201)
+			base := time.Now().UTC()
+			if _, err := h.Pool.Exec(t.Context(), `UPDATE olp.rate_card_revisions SET effective_at=CASE WHEN revision=1 THEN $2::timestamptz ELSE $3::timestamptz END WHERE rate_card_id=$1::uuid`, cardID, base.Add(tc.firstOffset), base.Add(tc.secondOffset)); err != nil {
+				t.Fatal(err)
+			}
+			detail := h.want(owner, "GET", "/api/v1/rate-cards/"+cardID, nil, nil, 200)
+			listed := h.want(owner, "GET", "/api/v1/rate-cards", nil, nil, 200)
+			for _, summary := range []map[string]any{detail, listed["items"].([]any)[0].(map[string]any)} {
+				revisions := summary["revisions"].([]any)
+				if len(revisions) != tc.count {
+					t.Fatalf("%s revisions=%v", tc.name, revisions)
+				}
+				if revisions[0].(map[string]any)["id"] != second["id"] {
+					t.Fatalf("latest revision missing: %v", revisions)
+				}
+				if tc.currentRevision == 1 && revisions[1].(map[string]any)["id"] != first["id"] {
+					t.Fatalf("active revision missing: %v", revisions)
+				}
+			}
+		})
+	}
+}

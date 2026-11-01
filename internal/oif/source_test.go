@@ -106,3 +106,20 @@ func TestParseJSONRejectsDuplicateKeysAtAnyObjectSize(t *testing.T) {
 }
 
 // Left out of a copy, and not out of the document.
+
+func TestValueBoundsSelectTheRequestedNativeLexeme(t *testing.T) {
+	body := []byte("{ \"other\":\"same\", \"ne\\u0073ted\": { \"mo\\u0064el\":\"same\" }, \"number\":1.2300 }")
+	document, err := oif.ParseJSON(body, oif.Limits{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	value, ok := document.Lookup("/nested/model")
+	if !ok {
+		t.Fatal("missing model")
+	}
+	start, end := value.Bounds()
+	patched := string(body[:start]) + `"selected"` + string(body[end:])
+	if patched != "{ \"other\":\"same\", \"ne\\u0073ted\": { \"mo\\u0064el\":\"selected\" }, \"number\":1.2300 }" {
+		t.Fatalf("range changed unrelated bytes %s", patched)
+	}
+}

@@ -1,10 +1,12 @@
 # Client compatibility
 
-OLP keeps compatibility with real clients as a tested property. The
+Client compatibility is a tested product contract rather than a list of
+unverified configuration examples. The
 [client qualification suite](../../tests/clients/README.md) runs coding agents,
-agent SDKs and frameworks headless against a gateway with a deterministic
-scripted upstream. Each suite checks the client's outcome and what the upstream
-received, so bypasses and damaged requests fail qualification.
+agent SDKs and frameworks headlessly against an OLP gateway backed by a
+deterministic scripted upstream. Each run checks both the client-visible outcome
+and the request the upstream received, so a bypass or damaged request fails
+qualification.
 
 Codex, Claude Code and OpenCode resolve the publisher's npm `latest` channel
 anew for every CI job. Code-mode qualification and ordinary-route client suites
@@ -35,10 +37,10 @@ The three coding clients use `latest`; other versions below remain exact pins.
 | Vercel AI SDK Anthropic provider | `@ai-sdk/anthropic` | 4.0.70 | Messages, prompt caching, extended thinking replayed with its signature |
 | Vercel AI SDK Google provider | `@ai-sdk/google` | 4.0.87 | `generateContent`, `streamGenerateContent` and native embeddings on a strict route |
 | LangChain | `langchain` | 1.5.14 | `createAgent` tool loops over each chat model below |
-| LangChain core | `@langchain/core` | 1.2.13 | Messages, tools, tool-call chunk assembly and `withStructuredOutput` |
-| LangChain OpenAI provider | `@langchain/openai` | 1.6.0 | `ChatOpenAI` over Chat Completions and Responses, and `OpenAIEmbeddings` |
-| LangChain Anthropic provider | `@langchain/anthropic` | 1.5.11 | `ChatAnthropic`, prompt caching, extended thinking replayed with its signature |
-| LangChain Google provider | `@langchain/google-genai` | 2.3.2 | `ChatGoogleGenerativeAI` and `GoogleGenerativeAIEmbeddings` on a strict route |
+| LangChain core | `@langchain/core` | 1.2.20 | Messages, tools, tool-call chunk assembly and `withStructuredOutput` |
+| LangChain OpenAI provider | `@langchain/openai` | 1.6.3 | `ChatOpenAI` over Chat Completions and Responses, and `OpenAIEmbeddings` |
+| LangChain Anthropic provider | `@langchain/anthropic` | 1.5.13 | `ChatAnthropic`, prompt caching, extended thinking replayed with its signature |
+| LangChain Google provider | `@langchain/google-genai` | 2.3.4 | `ChatGoogleGenerativeAI` and `GoogleGenerativeAIEmbeddings` on a strict route |
 | LlamaIndex.TS | `llamaindex` | 0.12.1 | Tool definitions and message helpers |
 | LlamaIndex.TS core | `@llamaindex/core` | 0.6.23 | Message and tool types, pinned to one copy by a pnpm override |
 | LlamaIndex.TS environment | `@llamaindex/env` | 0.1.31 | Runtime support; sends no requests |
@@ -53,8 +55,8 @@ of the gateway's module and runtime inventory.
 
 | SDK | Module | Pinned version | Qualification |
 | --- | --- | --- | --- |
-| OpenAI Go | `github.com/openai/openai-go/v3` | v3.74.0 | Chat Completions and Responses, unary and streaming, tool loops, structured output, embeddings, model listing, typed errors |
-| Anthropic Go | `github.com/anthropics/anthropic-sdk-go` | v1.79.1 | Messages, unary and streaming, tool use loops with signed thinking, `count_tokens`, prompt caching, beta features, model listing, typed errors |
+| OpenAI Go | `github.com/openai/openai-go/v3` | v3.85.1 | Chat Completions and Responses, unary and streaming, tool loops, structured output, embeddings, model listing, typed errors |
+| Anthropic Go | `github.com/anthropics/anthropic-sdk-go` | v1.84.0 | Messages, unary and streaming, tool use loops with signed thinking, `count_tokens`, prompt caching, beta features, model listing, typed errors |
 | Google Gen AI Go | `google.golang.org/genai` | v1.73.0 | `generateContent`, unary and streaming, function calling, thoughts, structured output, `countTokens`, native batch embeddings, model listing, typed errors |
 
 ## Gemini managed-agent resources

@@ -194,7 +194,7 @@ func (s *Server) nativeDuplex(w http.ResponseWriter, r *http.Request) {
 		x.failure, status = e, e.Status
 		return
 	}
-	if e := s.reserveSessionDebit(ctx, x, x.authority, p.attempt); e != nil {
+	if e := s.reserveSessionDebit(ctx, x, x.authority, p.attempt, nil); e != nil {
 		client.Close(websocket.StatusPolicyViolation, "admission refused")
 		x.failure, status = e, e.Status
 		return
@@ -427,7 +427,7 @@ loop:
 			remaining--
 			break loop
 		case <-reauth.C:
-			authority, err := s.Runtime.Authenticate(token)
+			authority, err := s.reauthenticateSession(ctx, x, token)
 			if err != nil || authority.ID != x.keyID || !authority.Allows("inference", x.route.Slug, x.route.ProjectID, s.now()) || !authority.AllowsEndUser(x.endUserDigest) || (authority.WorkloadIssuerID != nil && authority.EndUserDigest != x.endUserDigest) || !authority.AllowsAttribution(x.attribution) || !authority.AllowsClientIP(x.request.clientIP) || s.pinEligibility(p) != routing.Eligible {
 				first.err = errDuplexAuthority
 				upstream.CloseNow()

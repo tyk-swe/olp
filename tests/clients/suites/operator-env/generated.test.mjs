@@ -35,9 +35,11 @@ for (const framework of ['openai-agents', 'vercel', 'langchain', 'llamaindex', '
         const route =
           framework === 'openai-agents'
             ? models.openaiStrict
-            : surface === 'openai'
-              ? models.openai
-              : namedModels[surface];
+            : framework === 'sdk' && surface === 'anthropic'
+              ? models.anthropicStrict
+              : surface === 'openai'
+                ? models.openai
+                : namedModels[surface];
         const client = framework === 'sdk' ? surface : framework;
         const source = execFileSync(
           process.env.OLP_CLIENTS_OPERATOR_BINARY,

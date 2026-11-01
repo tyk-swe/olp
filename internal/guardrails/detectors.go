@@ -147,6 +147,8 @@ func compileDetector(d Revision, external Evaluator) (detector, error) {
 			t.schemas[name] = schema
 		}
 		return t, nil
+	case "typesafe":
+		return compileTypeSafe(d.Configuration)
 	case "webhook", "bedrock", "azure.content_safety", "azure.prompt_shields", "model_armor", "lakera", "presidio", "model", "semantic_guard", "decision_model", "plugin":
 		if err := ValidateExternal(d); err != nil {
 			return nil, err
@@ -477,10 +479,14 @@ type schemaDetector struct{ schema *jsonschema.Schema }
 
 func (*schemaDetector) width() int { return 0 }
 func (d *schemaDetector) detect(ctx context.Context, e Evaluation) (Verdict, error) {
-	if len(e.Segments) == 0 {
+	segments, projectionErr := jsonToolSegments(e.Segments)
+	if projectionErr != nil {
+		return Verdict{}, projectionErr
+	}
+	if len(segments) == 0 {
 		return Verdict{Action: Block, Categories: []string{"schema.invalid"}}, nil
 	}
-	for _, s := range e.Segments {
+	for _, s := range segments {
 		if err := ctx.Err(); err != nil {
 			return Verdict{}, err
 		}
@@ -507,13 +513,17 @@ func globsMatch(patterns []string, value string) bool {
 	return false
 }
 func (d *toolsDetector) detect(ctx context.Context, e Evaluation) (Verdict, error) {
+	segments, projectionErr := jsonToolSegments(e.Segments)
+	if projectionErr != nil {
+		return Verdict{}, projectionErr
+	}
 	untrusted := false
-	for _, s := range e.Segments {
+	for _, s := range segments {
 		if s.Kind == "tool_result" && (s.Untrusted || globsMatch(d.config.Untrusted, s.ToolName)) {
 			untrusted = true
 		}
 	}
-	for _, s := range e.Segments {
+	for _, s := range segments {
 		if err := ctx.Err(); err != nil {
 			return Verdict{}, err
 		}

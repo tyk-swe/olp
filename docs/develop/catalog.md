@@ -1,8 +1,9 @@
 # Reference catalog
 
-The reference catalog is a signed document of model facts and list prices by
-vendor, transcribed from each vendor's own documentation. Every release embeds
-it in the `olp` binary and publishes it beside the release. It is advisory:
+The reference catalog is a signed document containing model facts and list prices
+transcribed from vendor documentation. Every release embeds it in the `olp`
+binary and publishes it beside the release. The catalog is advisory input to
+three workflows.
 
 - **Pricing** reads it only through a [catalog pricing source](../operate/operations.md#accounting-delivery-and-shutdown),
   whose snapshots an operator reviews and publishes. Accounting prices only
@@ -29,7 +30,7 @@ catalog is refused by older releases as an unsupported version.
 | `vendors[].id` | An OLP vendor identifier, as `GET /api/v1/provider-vendors` lists. |
 | `vendors[].models[]` | The model identifier the vendor's API is sent, its aliases, an `organization/model` canonical identity, context and output limits, input and output modalities, documented capability hints, and documented deprecation and retirement dates. |
 | `prices[]` | One price per operation in every component OLP prices, exactly as a [pricing revision](../operate/pricing.md#price-components) declares them: the twelve per-million token rates (input, cached input, the three cache writes, output, audio and image input/output with their cached shares), a `unit_price` per image, second of audio or video, character of speech input, or search unit, `per_request`, `tool_calls` fees, input-token `tiers`, time-of-day `windows`, and `batch_multiplier`. |
-| `unrepresentable[]` | Every component the vendor charges that OLP cannot yet price, in the vendor's own terms — a closed vocabulary, and never a component a price can carry. |
+| `unrepresentable[]` | Every vendor charge component that OLP cannot yet price, named in the vendor's own terms. The vocabulary is closed and never names a component that a price can carry. |
 | `provenance` | On every model, price, lifecycle and factor: the HTTPS page it was transcribed from and when it was observed. |
 
 `unrepresentable[].component` names one of:
@@ -61,8 +62,8 @@ threshold, window periods do not overlap on any shared day, identifiers and
 aliases are unique within a vendor, and nothing was observed after publication.
 
 Vendor documents write thresholds inconsistently. A `K` a vendor writes is
-read as 1,024 for Alibaba Cloud (DashScope), BytePlus and MiniMax — whose exact
-figures, and their resellers', use binary multiples — and as 1,000 elsewhere.
+read as 1,024 for Alibaba Cloud (DashScope), BytePlus and MiniMax, whose exact
+figures and reseller figures use binary multiples. It is read as 1,000 elsewhere.
 "Reaches" or "at least" thresholds transcribe as one less than the stated
 count, because a tier applies above its threshold.
 

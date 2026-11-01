@@ -40,12 +40,14 @@ with tempfile.TemporaryDirectory() as directory:
             )
             assert result.choices[0].message.content
         elif surface == "anthropic":
-            result = client.messages.create(
-                model=model,
-                messages=[{"role": "user", "content": "Say hello."}],
-                max_tokens=64,
+            reference = json.loads(
+                (Path(__file__).resolve().parents[1] / "fixtures/fidelity/v1/anthropic-tool-next-request.json").read_text()
             )
-            assert result.content[0].text
+            controls = {key: value for key, value in reference.items() if key not in ("model", "messages")}
+            with client.messages.stream(
+                model=metadata["native_tool_route"], messages=[reference["messages"][0]], **controls
+            ) as stream:
+                assert stream.get_final_message().stop_reason == "tool_use"
         else:
             result = client.models.generate_content(
                 model=model,

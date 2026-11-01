@@ -152,8 +152,7 @@ func (m *Manager) authenticateWorkload(raw string) (*access.Authority, error) {
 	if e != nil {
 		return nil, ErrInvalidKey
 	}
-	pair, _ := json.Marshal([2]string{issuer.Config.Issuer, identity.Subject})
-	digest := hex.EncodeToString(m.auth.Digest(secrets.WorkloadDigest, string(pair)))
+	digest := workloadIdentityDigest(m.auth, issuer.Config.Issuer, identity)
 	base, ok := issuer.bindings[identity.Mapping.Name]
 	if !ok {
 		return nil, ErrInvalidKey
@@ -178,6 +177,8 @@ func (m *Manager) authenticateWorkload(raw string) (*access.Authority, error) {
 	base.WorkloadDigest = digest
 	base.WorkloadMapping = identity.Mapping.Name
 	base.WorkloadRevision = issuer.Revision
+	base.SnapshotID = state.id
+	base.AgentPrincipal = identity.Mapping.AgentPrincipal
 	base.ExpiresAt = &identity.ExpiresAt
 	if identity.Mapping.EndUserClaim != nil {
 		if !access.ValidEndUserIdentifier(identity.EndUser) {
@@ -235,4 +236,13 @@ func (m *Manager) registerWorkload(ctx context.Context, state *authorityState, i
 	}
 	m.mu.Unlock()
 	return a, nil
+}
+
+func workloadIdentityDigest(auth *secrets.AuthKey, issuer string, identity workload.Identity) string {
+	if identity.Mapping.AgentPrincipal {
+		claims, _ := json.Marshal([5]string{issuer, identity.Subject, identity.Mapping.Match["/client_id"], identity.Mapping.Match["/azp"], identity.Mapping.Match["/appid"]})
+		return hex.EncodeToString(auth.Digest(secrets.WorkloadAgentDigest, string(claims)))
+	}
+	claims, _ := json.Marshal([2]string{issuer, identity.Subject})
+	return hex.EncodeToString(auth.Digest(secrets.WorkloadDigest, string(claims)))
 }

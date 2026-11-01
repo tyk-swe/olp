@@ -133,3 +133,78 @@ func TestClientEnvironmentKeepsKeyValuesOutOfOutputAndQuotesPaths(t *testing.T) 
 		}
 	}
 }
+
+func TestGeneratedSCIMCommandPreservesWeakETag(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/scim/v2/Users/user" || r.Header.Get("If-Match") != `W/"current"` {
+			w.WriteHeader(http.StatusPreconditionFailed)
+			w.Write([]byte(`{"type":"https://openllmproxy.dev/problems/invalid_version"}`))
+			return
+		}
+		w.Write([]byte(`{"id":"user"}`))
+	}))
+	defer server.Close()
+	runner, _ := testRunner(t, server)
+	body := filepath.Join(t.TempDir(), "patch.json")
+	if err := os.WriteFile(body, []byte(`{"schemas":["urn:ietf:params:scim:api:messages:2.0:PatchOp"],"Operations":[{"op":"replace","path":"displayName","value":"Updated"}]}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := runner.Run(t.Context(), []string{"api", "scim_users_patch", "user", "--body-file", body, "--if-match", `W/"current"`}); err != nil {
+		t.Fatalf("SCIM conditional patch: %v", err)
+	}
+}
+
+func TestSavedCodeConfigurationPlanPinsDestinationBindings(t *testing.T) {
+	const first = "0192cf87-d4ab-7f2e-a8b1-c2d3e4f50601"
+	const second = "0192cf87-d4ab-7f2e-a8b1-c2d3e4f50602"
+	applied := false
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/configuration/export" {
+			w.Write([]byte(`{"digest":"destination","document":{}}`))
+			return
+		}
+		var body struct {
+			CodeBindings struct {
+				Credentials map[string]string `json:"credentials"`
+			} `json:"code_bindings"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Error(err)
+		}
+		if body.CodeBindings.Credentials["enrollment"] != first {
+			t.Error("destination enrollment binding missing or changed")
+		}
+		if r.URL.Path == "/api/v1/configuration/apply" {
+			applied = true
+		}
+		w.Write([]byte(`{"digest":"desired","actions":[],"conflicts":[],"blockers":[]}`))
+	}))
+	defer server.Close()
+	runner, _ := testRunner(t, server)
+	dir := t.TempDir()
+	document := filepath.Join(dir, "document.json")
+	bindings := filepath.Join(dir, "code.json")
+	plan := filepath.Join(dir, "plan.json")
+	if err := os.WriteFile(document, []byte(`{"api_version":"openllmproxy.dev/config/v2"}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	writeBinding := func(id string) {
+		t.Helper()
+		if err := os.WriteFile(bindings, []byte(`{"credentials":{"enrollment":"`+id+`"}}`), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeBinding(first)
+	if err := runner.Run(t.Context(), []string{"config", "plan", "--file", document, "--code-bindings-file", bindings, "--output", plan}); err != nil {
+		t.Fatal(err)
+	}
+	writeBinding(second)
+	args := []string{"config", "apply", "--plan-file", plan, "--code-bindings-file", bindings, "--idempotency-key", "apply-code"}
+	if err := runner.Run(t.Context(), args); err == nil || applied {
+		t.Fatal("changed destination binding applied")
+	}
+	writeBinding(first)
+	if err := runner.Run(t.Context(), args); err != nil || !applied {
+		t.Fatal("reviewed destination binding was not applied", err)
+	}
+}

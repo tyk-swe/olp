@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { CodeAccount, CodePool, CodeRoute } from '$lib/api/code-mode';
-  import type { CodeEditing } from './presentation';
+  import type { PaidTargetOption, CodeEditing } from './presentation';
   import AccountEditor from './AccountEditor.svelte';
   import PoolEditor from './PoolEditor.svelte';
   import RouteEditor from './RouteEditor.svelte';
@@ -11,6 +11,7 @@
     projectId,
     accounts,
     pools,
+    providers,
     routes,
     allowed,
     onDraftChange,
@@ -21,6 +22,7 @@
     projectId: string;
     accounts: CodeAccount[];
     pools: CodePool[];
+    providers: PaidTargetOption[];
     routes: CodeRoute[];
     allowed: boolean;
     onDraftChange: (dirty: boolean) => void;
@@ -42,7 +44,13 @@
 {:else if editing.kind === 'pools'}
   <PoolEditor current={editing.current} {accounts} {...shared} />
 {:else if editing.kind === 'routes'}
-  <RouteEditor current={editing.current} {pools} {accounts} {...shared} />
+  <RouteEditor
+    current={editing.current}
+    {pools}
+    {accounts}
+    {providers}
+    {...shared}
+  />
 {:else}
   <BudgetEditor current={editing.current} {routes} {...shared} />
 {/if}

@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 )
 
 // TestConfigurationChargePromotion exports discounts and rate cards, applies
@@ -83,6 +84,9 @@ func TestConfigurationChargePromotion(t *testing.T) {
 		applyBody = map[string]any{"document": document, "secret_bindings": map[string]any{bindingKey: vendorSecret}}
 	}
 	destination.want(destinationOwner, http.MethodPost, "/api/v1/configuration/apply", applyBody, idem("charge-apply"), 200)
+	foreign := map[string]any{"provider_kind": "openai_compatible", "model": "promoted-model", "operation": "generation", "currency": "EUR", "input_per_million": "1", "output_per_million": "1"}
+	usageWant(destination, destinationUsage, destinationOwner, http.MethodPost, "/api/v1/pricing/revisions",
+		map[string]any{"effective_at": time.Now().UTC().Format(time.RFC3339Nano), "prices": []any{foreign}}, idem("charge-import-currency-conflict"), 422)
 
 	listed := usageWant(destination, destinationUsage, destinationOwner, http.MethodGet,
 		"/api/v1/pricing/discounts", nil, nil, 200)

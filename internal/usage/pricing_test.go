@@ -1,8 +1,13 @@
 package usage
 
 import (
+	"context"
 	"errors"
 	"testing"
+	"time"
+
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/tyk-swe/olp/internal/access"
 )
@@ -61,6 +66,57 @@ func TestPriceValidationRejectsUnusableEntries(t *testing.T) {
 			}
 			if problem := usageProblem(t, err); problem.Status != 422 {
 				t.Fatalf("status = %d, want 422", problem.Status)
+			}
+		})
+	}
+}
+
+type cardRevisionTx struct {
+	pgx.Tx
+	execError error
+	row       pgx.Row
+}
+
+func (tx cardRevisionTx) Exec(context.Context, string, ...any) (pgconn.CommandTag, error) {
+	return pgconn.CommandTag{}, tx.execError
+}
+
+func (tx cardRevisionTx) QueryRow(context.Context, string, ...any) pgx.Row { return tx.row }
+
+type pricingFailureRow struct{ err error }
+
+func (row pricingFailureRow) Scan(...any) error { return row.err }
+
+func TestCardRevisionRespectsCurrencyFailures(t *testing.T) {
+	lockFailure := errors.New("currency lock unavailable")
+	readFailure := errors.New("currency state unavailable")
+	for _, tc := range []struct {
+		name     string
+		explicit bool
+		tx       cardRevisionTx
+		want     error
+	}{
+		{"lock failure", true, cardRevisionTx{execError: lockFailure, row: pricingFailureRow{readFailure}}, lockFailure},
+		{"currency read failure", true, cardRevisionTx{row: pricingFailureRow{readFailure}}, readFailure},
+		{"markup-only bypasses currency", false, cardRevisionTx{execError: lockFailure, row: pricingFailureRow{readFailure}}, readFailure},
+		{"conflicting currency", true, cardRevisionTx{row: signalTestRow{"EUR"}}, nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			prices := func() []Price {
+				if tc.explicit {
+					return []Price{samplePriceEntry()}
+				}
+				return nil
+			}()
+			_, err := CreateCardRevision(t.Context(), tc.tx, access.NewID(), access.NewID(), "1", time.Now().UTC(), prices, "USD", sampleVendorKind)
+			if tc.want != nil {
+				if !errors.Is(err, tc.want) {
+					t.Fatalf("currency failure = %v, want %v", err, tc.want)
+				}
+				return
+			}
+			if problem := usageProblem(t, err); problem.Status != 422 {
+				t.Fatalf("currency conflict = %v", problem)
 			}
 		})
 	}
