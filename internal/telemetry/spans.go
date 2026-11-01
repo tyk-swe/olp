@@ -14,12 +14,15 @@ import (
 const (
 	GenAISemconvVersion = "1.41.0"
 	SchemaURL           = "https://opentelemetry.io/schemas/" + GenAISemconvVersion
+	EvidenceOriginKey   = "olp.evidence_origin"
+	GatewayObserved     = "gateway_observed"
 )
 
 // Span attribute allowlists. Every recorded attribute is metadata: no prompts,
 // no file names, no provider payloads, and no header values ever appear on a
 // span.
 var RequestAttributeKeys = []string{
+	EvidenceOriginKey,
 	"olp.request_id",
 	"olp.surface",
 	"olp.operation",
@@ -43,6 +46,7 @@ var RequestAttributeKeys = []string{
 }
 
 var AttemptAttributeKeys = []string{
+	EvidenceOriginKey,
 	"olp.provider_kind",
 	"olp.provider_revision",
 	"olp.model",
@@ -253,6 +257,7 @@ func (t *RequestTrace) Attempt(ctx context.Context, providerKind, providerRevisi
 		parent = trace.ContextWithSpan(ctx, t.span)
 	}
 	attrs := []attribute.KeyValue{
+		attribute.String(EvidenceOriginKey, GatewayObserved),
 		attribute.String("olp.provider_kind", providerKind),
 		attribute.String("olp.provider_revision", providerRevision),
 		attribute.String("olp.model", model),

@@ -1,0 +1,3053 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "OLP inference extensions",
+    "version": "1.0.0",
+    "description": "OLP-specific extensions to the consumer inference API. Provider-native fields retain their provider contracts."
+  },
+  "paths": {
+      "/v1/models": {
+        "get": {
+          "operationId": "listOpenAIModels",
+          "summary": "List visible published routes as models",
+          "description": "Requires models_read scope. Gateway execution details are filtered for the caller and describe the surface of this endpoint.",
+          "security": [
+            {
+              "BearerAuth": []
+            }
+          ],
+          "responses": {
+            "200": {
+              "description": "Visible published models",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/OpenAIModelList"
+                  }
+                }
+              }
+            },
+            "401": {
+              "description": "Invalid, expired or revoked credential",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/InferenceError"
+                  }
+                }
+              }
+            },
+            "403": {
+              "description": "Caller lacks models_read scope",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/InferenceError"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "/v1/models/{model}": {
+        "get": {
+          "operationId": "getOpenAIModel",
+          "summary": "Get a published route as a model",
+          "description": "Requires models_read scope. Gateway execution details are filtered for the caller and describe the surface of this endpoint.",
+          "security": [
+            {
+              "BearerAuth": []
+            }
+          ],
+          "parameters": [
+            {
+              "name": "model",
+              "in": "path",
+              "required": true,
+              "description": "Published route slug",
+              "schema": {
+                "type": "string"
+              }
+            }
+          ],
+          "responses": {
+            "200": {
+              "description": "Published model",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/OpenAIModel"
+                  }
+                }
+              }
+            },
+            "401": {
+              "description": "Invalid, expired or revoked credential",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/InferenceError"
+                  }
+                }
+              }
+            },
+            "403": {
+              "description": "Caller lacks models_read scope",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/InferenceError"
+                  }
+                }
+              }
+            },
+            "404": {
+              "description": "Route is unavailable to the caller",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/InferenceError"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "/anthropic/v1/models": {
+        "get": {
+          "operationId": "listAnthropicModels",
+          "summary": "List visible published routes as models",
+          "description": "Requires models_read scope. Gateway execution details are filtered for the caller and describe the surface of this endpoint.",
+          "security": [
+            {
+              "BearerAuth": []
+            },
+            {
+              "AnthropicAPIKey": []
+            }
+          ],
+          "responses": {
+            "200": {
+              "description": "Visible published models",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/AnthropicModelList"
+                  }
+                }
+              }
+            },
+            "401": {
+              "description": "Invalid, expired or revoked credential",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/AnthropicInferenceError"
+                  }
+                }
+              }
+            },
+            "403": {
+              "description": "Caller lacks models_read scope",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/AnthropicInferenceError"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "/anthropic/v1/models/{model}": {
+        "get": {
+          "operationId": "getAnthropicModel",
+          "summary": "Get a published route as a model",
+          "description": "Requires models_read scope. Gateway execution details are filtered for the caller and describe the surface of this endpoint.",
+          "security": [
+            {
+              "BearerAuth": []
+            },
+            {
+              "AnthropicAPIKey": []
+            }
+          ],
+          "parameters": [
+            {
+              "name": "model",
+              "in": "path",
+              "required": true,
+              "description": "Published route slug",
+              "schema": {
+                "type": "string"
+              }
+            }
+          ],
+          "responses": {
+            "200": {
+              "description": "Published model",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/AnthropicModel"
+                  }
+                }
+              }
+            },
+            "401": {
+              "description": "Invalid, expired or revoked credential",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/AnthropicInferenceError"
+                  }
+                }
+              }
+            },
+            "403": {
+              "description": "Caller lacks models_read scope",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/AnthropicInferenceError"
+                  }
+                }
+              }
+            },
+            "404": {
+              "description": "Route is unavailable to the caller",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/AnthropicInferenceError"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "/gemini/v1/models": {
+        "get": {
+          "operationId": "listGeminiModels",
+          "summary": "List visible published routes as models",
+          "description": "Requires models_read scope. Gateway execution details are filtered for the caller and describe the surface of this endpoint.",
+          "security": [
+            {
+              "BearerAuth": []
+            },
+            {
+              "GeminiAPIKey": []
+            },
+            {
+              "GeminiQueryKey": []
+            }
+          ],
+          "responses": {
+            "200": {
+              "description": "Visible published models",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/GeminiModelList"
+                  }
+                }
+              }
+            },
+            "401": {
+              "description": "Invalid, expired or revoked credential",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/GeminiInferenceError"
+                  }
+                }
+              }
+            },
+            "403": {
+              "description": "Caller lacks models_read scope",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/GeminiInferenceError"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "/gemini/v1/models/{model}": {
+        "get": {
+          "operationId": "getGeminiModel",
+          "summary": "Get a published route as a model",
+          "description": "Requires models_read scope. Gateway execution details are filtered for the caller and describe the surface of this endpoint.",
+          "security": [
+            {
+              "BearerAuth": []
+            },
+            {
+              "GeminiAPIKey": []
+            },
+            {
+              "GeminiQueryKey": []
+            }
+          ],
+          "parameters": [
+            {
+              "name": "model",
+              "in": "path",
+              "required": true,
+              "description": "Published route slug",
+              "schema": {
+                "type": "string"
+              }
+            }
+          ],
+          "responses": {
+            "200": {
+              "description": "Published model",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/GeminiModel"
+                  }
+                }
+              }
+            },
+            "401": {
+              "description": "Invalid, expired or revoked credential",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/GeminiInferenceError"
+                  }
+                }
+              }
+            },
+            "403": {
+              "description": "Caller lacks models_read scope",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/GeminiInferenceError"
+                  }
+                }
+              }
+            },
+            "404": {
+              "description": "Route is unavailable to the caller",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/GeminiInferenceError"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "/gemini/v1beta/models": {
+        "get": {
+          "operationId": "listGeminiBetaModels",
+          "summary": "List visible published routes as models",
+          "description": "Requires models_read scope. Gateway execution details are filtered for the caller and describe the surface of this endpoint.",
+          "security": [
+            {
+              "BearerAuth": []
+            },
+            {
+              "GeminiAPIKey": []
+            },
+            {
+              "GeminiQueryKey": []
+            }
+          ],
+          "responses": {
+            "200": {
+              "description": "Visible published models",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/GeminiModelList"
+                  }
+                }
+              }
+            },
+            "401": {
+              "description": "Invalid, expired or revoked credential",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/GeminiInferenceError"
+                  }
+                }
+              }
+            },
+            "403": {
+              "description": "Caller lacks models_read scope",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/GeminiInferenceError"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "/gemini/v1beta/models/{model}": {
+        "get": {
+          "operationId": "getGeminiBetaModel",
+          "summary": "Get a published route as a model",
+          "description": "Requires models_read scope. Gateway execution details are filtered for the caller and describe the surface of this endpoint.",
+          "security": [
+            {
+              "BearerAuth": []
+            },
+            {
+              "GeminiAPIKey": []
+            },
+            {
+              "GeminiQueryKey": []
+            }
+          ],
+          "parameters": [
+            {
+              "name": "model",
+              "in": "path",
+              "required": true,
+              "description": "Published route slug",
+              "schema": {
+                "type": "string"
+              }
+            }
+          ],
+          "responses": {
+            "200": {
+              "description": "Published model",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/GeminiModel"
+                  }
+                }
+              }
+            },
+            "401": {
+              "description": "Invalid, expired or revoked credential",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/GeminiInferenceError"
+                  }
+                }
+              }
+            },
+            "403": {
+              "description": "Caller lacks models_read scope",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/GeminiInferenceError"
+                  }
+                }
+              }
+            },
+            "404": {
+              "description": "Route is unavailable to the caller",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/GeminiInferenceError"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+    "/v1/traces": {
+      "post": {
+        "operationId": "exportTraces",
+        "summary": "Export OTLP traces",
+        "description": "Accept an OTLP/HTTP protobuf trace batch for the authenticated project. The key requires traces_write scope. Batches are limited to one MiB after decompression and 256 spans, with at most 32 allowlisted attributes per span and 60 batches per minute per key. Identity and gzip encodings are supported. Failures contain a protobuf google.rpc.Status. Content, events, links and unknown fields are discarded. Run and attempt correlations are retained only when owned by the authenticated principal.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "Content-Encoding",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "identity",
+                "gzip"
+              ]
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/x-protobuf": {
+              "schema": {
+                "type": "string",
+                "format": "binary"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Trace batch accepted",
+            "content": {
+              "application/x-protobuf": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid protobuf, span or batch size",
+            "content": {
+              "application/x-protobuf": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The credential is invalid, expired or revoked",
+            "content": {
+              "application/x-protobuf": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The caller lacks trace scope or project access",
+            "content": {
+              "application/x-protobuf": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "The trace batch exceeds one MiB",
+            "content": {
+              "application/x-protobuf": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "The content type or encoding is unsupported",
+            "content": {
+              "application/x-protobuf": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "The trace or caller rate limit is exceeded",
+            "content": {
+              "application/x-protobuf": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Trace storage or limits are unavailable",
+            "content": {
+              "application/x-protobuf": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/chat/completions": {
+      "post": {
+        "operationId": "createChatCompletionWithPrompt",
+        "summary": "Create a chat completion with OLP extensions",
+        "description": "For transformed routes, a published prompt replaces explicit messages and gateway tool execution may be narrowed to selected published toolsets. Other chat fields use the provider contract.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "oneOf": [
+                  {
+                    "$ref": "#/components/schemas/ChatPromptRequest"
+                  },
+                  {
+                    "$ref": "#/components/schemas/ChatToolWorkflowRequest"
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Provider completion or WorkflowApprovalPause requiring explicit client approval. A streamed pause carries the pause object in the chat.completion.chunk olp_approval field before [DONE].",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              },
+              "text/event-stream": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request or prompt reference is invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InferenceError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The credential, delegation, task capability, or agent assertion is invalid, expired, revoked, or already used",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InferenceError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The caller is not permitted to use the requested resource",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InferenceError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The route is unavailable to the caller",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InferenceError"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "The original or rendered request exceeds an input limit",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InferenceError"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "The caller or agent has reached an admission limit. Task capabilities return task_limit_exceeded when the task attempt limit is reached.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InferenceError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The gateway or authority service is unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InferenceError"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "X-OLP-Agent-Identity",
+            "in": "header",
+            "required": false,
+            "description": "The current workload assertion is required when Authorization contains a one-use delegation token.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/a2a/{agent}/grant-enrollments": {
+      "post": {
+        "operationId": "startA2AAgentGrantEnrollment",
+        "summary": "Start a personal OAuth grant for an A2A agent",
+        "description": "Requires an authorized workload identity with a verified end user. The one-use handoff URL lets that user claim and complete enrollment in the console. The grant is bound to this agent, its approved endpoint and OAuth configuration, and the verified individual.",
+        "parameters": [
+          {
+            "name": "agent",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "format": "uuid" },
+            "description": "Published agent identifier"
+          }
+        ],
+        "security": [{ "BearerAuth": [] }],
+        "responses": {
+          "201": {
+            "description": "One-use enrollment handoff",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["enrollment_id", "enrollment_url", "expires_at"],
+                  "properties": {
+                    "enrollment_id": { "type": "string", "format": "uuid" },
+                    "enrollment_url": { "type": "string" },
+                    "expires_at": { "type": "string", "format": "date-time" }
+                  }
+                }
+              }
+            }
+          },
+          "400": { "description": "The agent has no OAuth configuration" },
+          "401": { "description": "The bearer credential is invalid" },
+          "403": { "description": "A verified end user is required" },
+          "404": { "description": "The agent is unavailable to this principal" },
+          "409": { "description": "The agent binding changed" },
+          "503": { "description": "The authority or grant store is unavailable" }
+        }
+      }
+    },
+    "/a2a/{agent}/.well-known/agent-card.json": {
+      "get": {
+        "operationId": "getA2AAgentCard",
+        "summary": "Discover a published A2A agent",
+        "description": "Requires the agents scope and an explicit allowlist entry for the published agent. The returned card advertises the gateway endpoint and OLP bearer authentication.",
+        "parameters": [
+          {
+            "name": "agent",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Published agent identifier"
+          }
+        ],
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Gateway agent card",
+            "content": {
+              "application/a2a+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/A2AAgentCard"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The bearer credential is invalid"
+          },
+          "404": {
+            "description": "The agent is unavailable to this principal"
+          },
+          "502": {
+            "description": "The agent card or upstream request failed"
+          }
+        }
+      }
+    },
+    "/a2a/{agent}": {
+      "post": {
+        "operationId": "callA2AAgent",
+        "summary": "Send a message to or read, cancel, and subscribe to a task from a published A2A agent",
+        "description": "Supports A2A 0.3 and 1.0 JSON-RPC send, streaming send, task read, cancellation, and subscription methods. The published protocol determines the accepted methods and response format. Requires the agents scope and an explicit allowlist entry. OLP task IDs are bound to the initiating key and project, and OAuth tasks also to the caller's grant identity. Streaming methods return events as they arrive, with a one MiB maximum per event. For each outbound agent send, OLP supplies an olpt_ capability in the X-OLP-Task-Capability request header to the remote agent. The agent can present it as a bearer token on supported model and MCP callbacks. Callback attempts count toward the task limit and are accounted separately from the remote agent fee. Disconnecting does not immediately cancel the upstream task. Disconnected tasks remain subject to deadline and authorization checks; OLP requests cancellation when those checks fail but cannot guarantee that a remote agent stops.",
+        "parameters": [
+          {
+            "name": "agent",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Published agent identifier"
+          },
+          {
+            "name": "A2A-Version",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "0.3",
+                "0.3.0",
+                "1.0",
+                "1.0.0"
+              ]
+            },
+            "description": "Selects the published agent or pinned task protocol. Header and query values must agree when both are present. Omission selects A2A 0.3 for legacy clients."
+          },
+          {
+            "name": "A2A-Version",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "0.3",
+                "0.3.0",
+                "1.0",
+                "1.0.0"
+              ]
+            },
+            "description": "Alternative to the A2A-Version header. If both are present they must select the same protocol."
+          }
+        ],
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/A2ARequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "A2A result, JSON-RPC error, or stream of JSON-RPC event frames",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/A2AResponse"
+                }
+              },
+              "text/event-stream": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Server-sent A2A JSON-RPC events, in upstream order. Oversized events and revoked authorization produce an error frame."
+              }
+            }
+          },
+          "400": {
+            "description": "The A2A version does not match the published protocol or the request is invalid"
+          },
+          "401": {
+            "description": "The bearer credential is invalid"
+          },
+          "404": {
+            "description": "The agent is unavailable to this principal"
+          },
+          "415": {
+            "description": "The requested binding is not JSON-RPC over HTTP"
+          },
+          "502": {
+            "description": "The agent card or upstream request failed"
+          }
+        }
+      }
+    },
+    "/v1/delegations": {
+      "post": {
+        "operationId": "createDelegation",
+        "summary": "Delegate a key to an authenticated workload agent",
+        "description": "Exchange an authenticated agent assertion and exactly one delegating API key or member consent code for a one-use inference token. Both principals, the consent and every requested route must authorize the request.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "X-OLP-Delegating-Key",
+            "in": "header",
+            "required": false,
+            "description": "The API key that owns the delegated inference and has the delegate scope.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-OLP-Delegation-Consent",
+            "in": "header",
+            "required": false,
+            "description": "A one-use member consent code bound to the authenticated agent, key, project, routes and expiry. Provide either this header or X-OLP-Delegating-Key.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DelegationRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "A short-lived, one-use delegation token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DelegationGrant"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The scope, route, or lifetime bounds are invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InferenceError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The workload assertion or delegating key is invalid, expired, or revoked",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InferenceError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The principal, project, delegate scope, or requested route is not authorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InferenceError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The gateway or authority service is unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InferenceError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/responses": {
+      "post": {
+        "operationId": "createResponseWithPrompt",
+        "summary": "Create a response using a published OLP prompt",
+        "description": "An olpp_ prompt ID selects a project-owned registry publication. Other prompt IDs retain native provider behavior. Registry prompts cannot be combined with explicit input.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "oneOf": [
+                  {
+                    "$ref": "#/components/schemas/ResponsesPromptRequest"
+                  },
+                  {
+                    "$ref": "#/components/schemas/ResponsesToolWorkflowRequest"
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Provider completion or WorkflowApprovalPause. Certified Responses contracts can include MCP approval-request items. Other streamed pauses carry the pause object in response.olp_approval on response.incomplete with an empty output array.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResponsesWorkflowResponse"
+                }
+              },
+              "text/event-stream": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request or prompt reference is invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InferenceError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The credential, delegation, task capability, or agent assertion is invalid, expired, revoked, or already used",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InferenceError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The caller is not permitted to use the requested resource",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InferenceError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The route is unavailable to the caller",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InferenceError"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "The original or rendered request exceeds an input limit",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InferenceError"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "The caller or agent has reached an admission limit. Task capabilities return task_limit_exceeded when the task attempt limit is reached.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InferenceError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The gateway or authority service is unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InferenceError"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "X-OLP-Agent-Identity",
+            "in": "header",
+            "required": false,
+            "description": "The current workload assertion is required when Authorization contains a one-use delegation token.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/anthropic/v1/messages": {
+      "post": {
+        "operationId": "createAnthropicMessageWithPrompt",
+        "summary": "Create an Anthropic message using a published OLP prompt",
+        "description": "For transformed routes, a published prompt replaces explicit messages. Gateway tool execution can select a subset of the route's published toolsets.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "oneOf": [
+                  {
+                    "$ref": "#/components/schemas/AnthropicPromptRequest"
+                  },
+                  {
+                    "$ref": "#/components/schemas/AnthropicToolWorkflowRequest"
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Provider completion or WorkflowApprovalPause requiring explicit client approval. A streamed pause carries the pause object in the message_delta olp_approval field before message_stop.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              },
+              "text/event-stream": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request or prompt reference is invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AnthropicInferenceError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The credential, delegation, task capability, or agent assertion is invalid, expired, revoked, or already used",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AnthropicInferenceError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The caller is not permitted to use the requested resource",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AnthropicInferenceError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The route is unavailable to the caller",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AnthropicInferenceError"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "The original or rendered request exceeds an input limit",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AnthropicInferenceError"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "The caller or agent has reached an admission limit. Task capabilities return task_limit_exceeded when the task attempt limit is reached.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AnthropicInferenceError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The gateway or authority service is unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AnthropicInferenceError"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "X-OLP-Agent-Identity",
+            "in": "header",
+            "required": false,
+            "description": "The current workload assertion is required when Authorization contains a one-use delegation token.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/gemini/v1beta/models/{model}:generateContent": {
+      "post": {
+        "operationId": "createGeminiContentWithPrompt",
+        "summary": "Generate Gemini content using a published OLP prompt",
+        "description": "For transformed routes, a published prompt replaces explicit contents. Gateway tool execution can select a subset of the route's published toolsets.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "oneOf": [
+                  {
+                    "$ref": "#/components/schemas/GeminiPromptRequest"
+                  },
+                  {
+                    "$ref": "#/components/schemas/GeminiToolWorkflowRequest"
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Provider completion or WorkflowApprovalPause requiring explicit client approval.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              },
+              "text/event-stream": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request or prompt reference is invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GeminiInferenceError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The credential, delegation, task capability, or agent assertion is invalid, expired, revoked, or already used",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GeminiInferenceError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The caller is not permitted to use the requested resource",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GeminiInferenceError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The route is unavailable to the caller",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GeminiInferenceError"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "The original or rendered request exceeds an input limit",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GeminiInferenceError"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "The caller or agent has reached an admission limit. Task capabilities return task_limit_exceeded when the task attempt limit is reached.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GeminiInferenceError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The gateway or authority service is unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GeminiInferenceError"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "model",
+            "in": "path",
+            "required": true,
+            "description": "Published route slug",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-OLP-Agent-Identity",
+            "in": "header",
+            "required": false,
+            "description": "The current workload assertion is required when Authorization contains a one-use delegation token.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/gemini/v1beta/models/{model}:streamGenerateContent": {
+      "post": {
+        "operationId": "streamGeminiContentWithPrompt",
+        "summary": "Stream Gemini content using a published OLP prompt",
+        "description": "For transformed routes, a published prompt replaces explicit contents. Gateway tool execution can select a subset of the route's published toolsets.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "oneOf": [
+                  {
+                    "$ref": "#/components/schemas/GeminiPromptRequest"
+                  },
+                  {
+                    "$ref": "#/components/schemas/GeminiToolWorkflowRequest"
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Provider stream or WorkflowApprovalPause requiring explicit client approval. A streamed pause carries the pause object in the top-level olp_approval field.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              },
+              "text/event-stream": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request or prompt reference is invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GeminiInferenceError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The credential, delegation, task capability, or agent assertion is invalid, expired, revoked, or already used",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GeminiInferenceError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The caller is not permitted to use the requested resource",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GeminiInferenceError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The route is unavailable to the caller",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GeminiInferenceError"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "The original or rendered request exceeds an input limit",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GeminiInferenceError"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "The caller or agent has reached an admission limit. Task capabilities return task_limit_exceeded when the task attempt limit is reached.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GeminiInferenceError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The gateway or authority service is unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GeminiInferenceError"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "model",
+            "in": "path",
+            "required": true,
+            "description": "Published route slug",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-OLP-Agent-Identity",
+            "in": "header",
+            "required": false,
+            "description": "The current workload assertion is required when Authorization contains a one-use delegation token.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+        "AnthropicAPIKey": {
+          "type": "apiKey",
+          "in": "header",
+          "name": "X-Api-Key",
+          "description": "API key with models_read scope."
+        },
+        "GeminiAPIKey": {
+          "type": "apiKey",
+          "in": "header",
+          "name": "X-Goog-Api-Key",
+          "description": "API key with models_read scope."
+        },
+        "GeminiQueryKey": {
+          "type": "apiKey",
+          "in": "query",
+          "name": "key",
+          "description": "API key with models_read scope."
+        },
+      "BearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "Use an API key, a one-use delegation token, or an olpt_ task capability as a bearer token. Task capabilities apply only to chat completions, Responses, Anthropic Messages, Gemini generation and MCP tool calls, within the original task owner’s current authority, pinned resources and task lifetime. Delegated inference also requires the current workload assertion in X-OLP-Agent-Identity."
+      }
+    },
+    "schemas": {
+        "ModelCapabilities": {
+          "type": "object",
+          "required": [
+            "operations",
+            "operation_support",
+            "input_modalities",
+            "output_modalities",
+            "context_length",
+            "max_output_tokens",
+            "supported_parameters",
+            "unknown"
+          ],
+          "properties": {
+            "operations": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "operation_support": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            },
+            "input_modalities": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "output_modalities": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "context_length": {
+              "type": "integer",
+              "format": "int64",
+              "nullable": true
+            },
+            "max_output_tokens": {
+              "type": "integer",
+              "format": "int64",
+              "nullable": true
+            },
+            "supported_parameters": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "nullable": true
+            },
+            "unknown": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "gateway_execution": {
+              "$ref": "#/components/schemas/GatewayExecutionCapability"
+            }
+          }
+        },
+        "GatewayExecutionCapability": {
+          "type": "object",
+          "description": "Caller-specific gateway tool execution capability. Omitted when the route does not offer gateway execution to this caller. This describes configured rights and certification, not a live quota reservation or a guarantee of a successful run.",
+          "required": [
+            "enabled",
+            "default_toolsets_allowed",
+            "limits",
+            "certified_modes",
+            "tools"
+          ],
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "description": "Whether workflow accounting is available and an enabled non-shadow target is certified for generation tool calls on this discovery surface."
+            },
+            "default_toolsets_allowed": {
+              "type": "boolean",
+              "description": "Whether all default route toolsets can be resolved together for the caller. A request can select a permitted subset with olp_toolsets."
+            },
+            "limits": {
+              "allOf": [
+                {
+                  "$ref": "#/components/schemas/WorkflowRunLimits"
+                }
+              ],
+              "description": "Effective configured route and caller limits, including defaults. Request limits can only narrow these bounds."
+            },
+            "certified_modes": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "enum": [
+                  "unary",
+                  "streaming"
+                ]
+              },
+              "description": "Modes with an enabled non-shadow target certified for generation tool calls on the discovery surface. Target selection and admission are still evaluated for each request."
+            },
+            "tools": {
+              "type": "array",
+              "items": {
+                "$ref": "#/components/schemas/GatewayExecutionTool"
+              },
+              "description": "Tools from published route toolsets that the caller may resolve. Toolsets the caller cannot resolve are omitted."
+            }
+          }
+        },
+        "GatewayExecutionTool": {
+          "type": "object",
+          "required": [
+            "toolset_id",
+            "revision_id",
+            "alias",
+            "name",
+            "classification",
+            "unit_price"
+          ],
+          "properties": {
+            "toolset_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "revision_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "alias": {
+              "type": "string",
+              "description": "Name exposed to the model during gateway execution."
+            },
+            "name": {
+              "type": "string",
+              "description": "Name in the published toolset."
+            },
+            "classification": {
+              "type": "string",
+              "enum": [
+                "read_only",
+                "approval_required"
+              ],
+              "description": "Operator classification. An unclassified tool is reported as approval_required."
+            },
+            "unit_price": {
+              "type": "string",
+              "nullable": true,
+              "description": "Pinned price per dispatched call in the installation pricing currency. Null means unpriced, while zero means free."
+            }
+          }
+        },
+        "OpenAIModel": {
+          "type": "object",
+          "required": [
+            "id",
+            "object",
+            "created",
+            "owned_by",
+            "capabilities"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "object": {
+              "type": "string",
+              "enum": [
+                "model"
+              ]
+            },
+            "created": {
+              "type": "integer",
+              "format": "int64"
+            },
+            "owned_by": {
+              "type": "string"
+            },
+            "capabilities": {
+              "$ref": "#/components/schemas/ModelCapabilities"
+            }
+          }
+        },
+        "OpenAIModelList": {
+          "type": "object",
+          "required": [
+            "object",
+            "data"
+          ],
+          "properties": {
+            "object": {
+              "type": "string",
+              "enum": [
+                "list"
+              ]
+            },
+            "data": {
+              "type": "array",
+              "items": {
+                "$ref": "#/components/schemas/OpenAIModel"
+              }
+            }
+          }
+        },
+        "AnthropicModel": {
+          "type": "object",
+          "required": [
+            "id",
+            "type",
+            "display_name",
+            "created_at",
+            "capabilities"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "enum": [
+                "model"
+              ]
+            },
+            "display_name": {
+              "type": "string"
+            },
+            "created_at": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "capabilities": {
+              "$ref": "#/components/schemas/ModelCapabilities"
+            }
+          }
+        },
+        "AnthropicModelList": {
+          "type": "object",
+          "required": [
+            "data",
+            "has_more",
+            "first_id",
+            "last_id"
+          ],
+          "properties": {
+            "data": {
+              "type": "array",
+              "items": {
+                "$ref": "#/components/schemas/AnthropicModel"
+              }
+            },
+            "has_more": {
+              "type": "boolean"
+            },
+            "first_id": {
+              "type": "string",
+              "nullable": true
+            },
+            "last_id": {
+              "type": "string",
+              "nullable": true
+            }
+          }
+        },
+        "GeminiModel": {
+          "type": "object",
+          "required": [
+            "name",
+            "displayName",
+            "supportedGenerationMethods",
+            "capabilities"
+          ],
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "displayName": {
+              "type": "string"
+            },
+            "supportedGenerationMethods": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "capabilities": {
+              "$ref": "#/components/schemas/ModelCapabilities"
+            }
+          }
+        },
+        "GeminiModelList": {
+          "type": "object",
+          "required": [
+            "models"
+          ],
+          "properties": {
+            "models": {
+              "type": "array",
+              "items": {
+                "$ref": "#/components/schemas/GeminiModel"
+              }
+            }
+          }
+        },
+      "ChatPromptRequest": {
+        "type": "object",
+        "required": [
+          "model",
+          "olp_prompt"
+        ],
+        "properties": {
+          "model": {
+            "type": "string"
+          },
+          "olp_prompt": {
+            "$ref": "#/components/schemas/PublishedPromptReference"
+          },
+          "olp_toolsets": {
+            "$ref": "#/components/schemas/ChatToolsetSelection"
+          },
+          "olp_approval": {
+            "$ref": "#/components/schemas/WorkflowApprovalSubmission"
+          },
+          "olp_run_limits": {
+            "$ref": "#/components/schemas/WorkflowRunLimits"
+          }
+        },
+        "additionalProperties": true,
+        "not": {
+          "required": [
+            "messages"
+          ]
+        }
+      },
+      "ChatToolWorkflowRequest": {
+        "type": "object",
+        "required": [
+          "model",
+          "messages"
+        ],
+        "properties": {
+          "model": {
+            "type": "string"
+          },
+          "messages": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          },
+          "olp_toolsets": {
+            "$ref": "#/components/schemas/ChatToolsetSelection"
+          },
+          "olp_approval": {
+            "$ref": "#/components/schemas/WorkflowApprovalSubmission"
+          },
+          "olp_run_limits": {
+            "$ref": "#/components/schemas/WorkflowRunLimits"
+          }
+        },
+        "additionalProperties": true,
+        "not": {
+          "required": [
+            "olp_prompt"
+          ]
+        }
+      },
+      "WorkflowApprovalSubmission": {
+        "type": "object",
+        "required": [
+          "continuation_token",
+          "approved",
+          "arguments"
+        ],
+        "description": "After obtaining a human's approval, resubmit the original transcript and tool arguments. The token expires within five minutes and can be used only once.",
+        "properties": {
+          "continuation_token": {
+            "type": "string",
+            "pattern": "^olpa_"
+          },
+          "approved": {
+            "type": "boolean",
+            "description": "The client must explicitly set this to true after obtaining human approval."
+          },
+          "arguments": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "object",
+              "additionalProperties": true
+            },
+            "description": "The original JSON arguments indexed by the paused call ID."
+          }
+        },
+        "additionalProperties": false
+      },
+      "WorkflowApprovalCall": {
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "arguments"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "server_label": {
+            "type": "string"
+          },
+          "arguments": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        }
+      },
+      "WorkflowApprovalPause": {
+        "type": "object",
+        "required": [
+          "type",
+          "continuation_token",
+          "calls"
+        ],
+        "description": "The workflow paused before an approval-required tool. The client obtains human approval and resubmits the original transcript and arguments.",
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "tool_approval_required"
+            ]
+          },
+          "continuation_token": {
+            "type": "string",
+            "pattern": "^olpa_"
+          },
+          "calls": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/WorkflowApprovalCall"
+            }
+          }
+        },
+        "additionalProperties": true
+      },
+      "ChatToolsetSelection": {
+        "type": "array",
+        "description": "Select a subset of the published toolsets allowed by the route. An empty array selects no toolsets.",
+        "items": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "uniqueItems": true
+      },
+      "PublishedPromptReference": {
+        "description": "Specify exactly one published label or immutable revision ID.",
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/PromptLabelReference"
+          },
+          {
+            "$ref": "#/components/schemas/PromptRevisionReference"
+          }
+        ]
+      },
+      "PromptLabelReference": {
+        "type": "object",
+        "required": [
+          "id",
+          "label",
+          "variables"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Project-owned prompt publication ID"
+          },
+          "variables": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "label": {
+            "type": "string",
+            "enum": [
+              "production",
+              "staging"
+            ]
+          }
+        },
+        "additionalProperties": false
+      },
+      "PromptRevisionReference": {
+        "type": "object",
+        "required": [
+          "id",
+          "revision_id",
+          "variables"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Project-owned prompt publication ID"
+          },
+          "variables": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "revision_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Exact immutable prompt revision ID"
+          }
+        },
+        "additionalProperties": false
+      },
+      "A2ARequest": {
+        "type": "object",
+        "required": [
+          "jsonrpc",
+          "id",
+          "method",
+          "params"
+        ],
+        "properties": {
+          "jsonrpc": {
+            "type": "string",
+            "enum": [
+              "2.0"
+            ]
+          },
+          "id": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "number"
+              }
+            ]
+          },
+          "method": {
+            "type": "string",
+            "enum": [
+              "SendMessage",
+              "SendStreamingMessage",
+              "GetTask",
+              "CancelTask",
+              "SubscribeToTask",
+              "message/send",
+              "message/stream",
+              "tasks/get",
+              "tasks/cancel",
+              "tasks/resubscribe"
+            ]
+          },
+          "params": {
+            "type": "object",
+            "additionalProperties": true,
+            "description": "Parameters for the selected A2A version and method. Task references must use an OLP task ID; push notifications and tenant selection are not supported."
+          }
+        }
+      },
+      "A2AResponse": {
+        "type": "object",
+        "required": [
+          "jsonrpc",
+          "id"
+        ],
+        "properties": {
+          "jsonrpc": {
+            "type": "string",
+            "enum": [
+              "2.0"
+            ]
+          },
+          "id": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "number"
+              }
+            ],
+            "nullable": true
+          },
+          "result": {
+            "type": "object",
+            "additionalProperties": true,
+            "description": "A task or message result in the published A2A version with OLP task IDs."
+          },
+          "error": {
+            "type": "object",
+            "required": [
+              "code",
+              "message"
+            ],
+            "properties": {
+              "code": {
+                "type": "integer"
+              },
+              "message": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      },
+      "A2AAgentCard": {
+        "type": "object",
+        "required": [
+          "name",
+          "version",
+          "supportedInterfaces",
+          "capabilities",
+          "securitySchemes",
+          "securityRequirements"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "version": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "supportedInterfaces": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "url",
+                "protocolBinding",
+                "protocolVersion"
+              ],
+              "properties": {
+                "url": {
+                  "type": "string",
+                  "format": "uri"
+                },
+                "protocolBinding": {
+                  "type": "string",
+                  "enum": [
+                    "JSONRPC"
+                  ],
+                  "x-enum-varnames": [
+                    "JSONRPC"
+                  ]
+                },
+                "protocolVersion": {
+                  "type": "string",
+                  "enum": [
+                    "1.0",
+                    "0.3"
+                  ],
+                  "x-enum-varnames": [
+                    "N10",
+                    "N03"
+                  ]
+                }
+              }
+            }
+          },
+          "capabilities": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "securitySchemes": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "securityRequirements": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          },
+          "defaultInputModes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "defaultOutputModes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "skills": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          },
+          "url": {
+            "type": "string",
+            "format": "uri",
+            "description": "Preferred JSON-RPC endpoint for A2A 0.3 clients"
+          },
+          "preferredTransport": {
+            "type": "string",
+            "enum": [
+              "JSONRPC"
+            ],
+            "x-enum-varnames": [
+              "LegacyJSONRPC"
+            ],
+            "description": "Preferred binding for A2A 0.3 clients"
+          },
+          "protocolVersion": {
+            "type": "string",
+            "enum": [
+              "0.3",
+              "0.3.0"
+            ],
+            "x-enum-varnames": [
+              "Legacy03",
+              "Legacy030"
+            ],
+            "description": "Protocol version for A2A 0.3 clients"
+          },
+          "security": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            },
+            "description": "Bearer authentication requirements for A2A 0.3 clients"
+          }
+        }
+      },
+      "DelegationRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "scopes"
+        ],
+        "properties": {
+          "scopes": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 3,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "enum": [
+                "inference",
+                "tools",
+                "agents"
+              ]
+            }
+          },
+          "allowed_routes": {
+            "type": "array",
+            "maxItems": 100,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "pattern": "^[a-z0-9][a-z0-9._-]{0,99}$"
+            }
+          },
+          "allowed_toolsets": {
+            "type": "array",
+            "maxItems": 100,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "allowed_agents": {
+            "type": "array",
+            "maxItems": 100,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "ttl_seconds": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0,
+            "maximum": 900,
+            "default": 300,
+            "description": "Grant lifetime in seconds. Omit or use 0 for the 300-second default. Principal expiry can shorten the lifetime."
+          }
+        }
+      },
+      "DelegationGrant": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "token",
+          "expires_at",
+          "delegation_pair_digest"
+        ],
+        "properties": {
+          "token": {
+            "type": "string",
+            "description": "One-use OLP delegation bearer token."
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "delegation_pair_digest": {
+            "type": "string",
+            "description": "Stable pair budget ID for this delegation."
+          }
+        }
+      },
+      "InferenceError": {
+        "type": "object",
+        "required": [
+          "error"
+        ],
+        "properties": {
+          "error": {
+            "type": "object",
+            "required": [
+              "message",
+              "type",
+              "param",
+              "code"
+            ],
+            "properties": {
+              "message": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string"
+              },
+              "param": {
+                "type": "string",
+                "nullable": true
+              },
+              "code": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      },
+      "ResponsesPromptLabelReference": {
+        "type": "object",
+        "required": [
+          "id",
+          "label",
+          "variables"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^olpp_[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$",
+            "description": "Project-owned prompt publication ID prefixed with olpp_"
+          },
+          "variables": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "label": {
+            "type": "string",
+            "enum": [
+              "production",
+              "staging"
+            ]
+          }
+        },
+        "additionalProperties": false
+      },
+      "ResponsesPromptRevisionReference": {
+        "type": "object",
+        "required": [
+          "id",
+          "revision_id",
+          "variables"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^olpp_[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$",
+            "description": "Project-owned prompt publication ID prefixed with olpp_"
+          },
+          "variables": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "revision_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Exact immutable prompt revision ID"
+          }
+        },
+        "additionalProperties": false
+      },
+      "ResponsesPublishedPromptReference": {
+        "description": "A registry prompt has an olpp_ ID and exactly one label or revision ID. Other prompt IDs retain the provider contract.",
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/ResponsesPromptLabelReference"
+          },
+          {
+            "$ref": "#/components/schemas/ResponsesPromptRevisionReference"
+          }
+        ]
+      },
+      "ResponsesPromptRequest": {
+        "description": "An OLP registry prompt excludes input. Provider-native prompt references retain the provider contract.",
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/OLPResponsesPromptRequest"
+          },
+          {
+            "$ref": "#/components/schemas/NativeResponsesPromptRequest"
+          }
+        ]
+      },
+      "AnthropicPromptRequest": {
+        "type": "object",
+        "required": [
+          "model",
+          "max_tokens",
+          "olp_prompt"
+        ],
+        "properties": {
+          "model": {
+            "type": "string"
+          },
+          "max_tokens": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "olp_prompt": {
+            "$ref": "#/components/schemas/PublishedPromptReference"
+          },
+          "olp_toolsets": {
+            "$ref": "#/components/schemas/ChatToolsetSelection"
+          },
+          "olp_approval": {
+            "$ref": "#/components/schemas/WorkflowApprovalSubmission"
+          },
+          "olp_run_limits": {
+            "$ref": "#/components/schemas/WorkflowRunLimits"
+          }
+        },
+        "additionalProperties": true,
+        "not": {
+          "anyOf": [
+            {
+              "required": [
+                "messages"
+              ]
+            },
+            {
+              "required": [
+                "system"
+              ]
+            }
+          ]
+        }
+      },
+      "GeminiPromptRequest": {
+        "type": "object",
+        "required": [
+          "olp_prompt"
+        ],
+        "properties": {
+          "olp_prompt": {
+            "$ref": "#/components/schemas/PublishedPromptReference"
+          },
+          "olp_toolsets": {
+            "$ref": "#/components/schemas/ChatToolsetSelection"
+          },
+          "olp_approval": {
+            "$ref": "#/components/schemas/WorkflowApprovalSubmission"
+          },
+          "olp_run_limits": {
+            "$ref": "#/components/schemas/WorkflowRunLimits"
+          }
+        },
+        "additionalProperties": true,
+        "not": {
+          "anyOf": [
+            {
+              "required": [
+                "contents"
+              ]
+            },
+            {
+              "required": [
+                "systemInstruction"
+              ]
+            },
+            {
+              "required": [
+                "system_instruction"
+              ]
+            }
+          ]
+        }
+      },
+      "AnthropicToolWorkflowRequest": {
+        "type": "object",
+        "required": [
+          "model",
+          "max_tokens",
+          "messages"
+        ],
+        "properties": {
+          "model": {
+            "type": "string"
+          },
+          "max_tokens": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "messages": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          },
+          "olp_toolsets": {
+            "$ref": "#/components/schemas/ChatToolsetSelection"
+          },
+          "olp_approval": {
+            "$ref": "#/components/schemas/WorkflowApprovalSubmission"
+          },
+          "olp_run_limits": {
+            "$ref": "#/components/schemas/WorkflowRunLimits"
+          }
+        },
+        "additionalProperties": true,
+        "not": {
+          "required": [
+            "olp_prompt"
+          ]
+        }
+      },
+      "GeminiToolWorkflowRequest": {
+        "type": "object",
+        "required": [
+          "contents"
+        ],
+        "properties": {
+          "contents": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          },
+          "olp_toolsets": {
+            "$ref": "#/components/schemas/ChatToolsetSelection"
+          },
+          "olp_approval": {
+            "$ref": "#/components/schemas/WorkflowApprovalSubmission"
+          },
+          "olp_run_limits": {
+            "$ref": "#/components/schemas/WorkflowRunLimits"
+          }
+        },
+        "additionalProperties": true,
+        "not": {
+          "required": [
+            "olp_prompt"
+          ]
+        }
+      },
+      "AnthropicInferenceError": {
+        "type": "object",
+        "required": [
+          "type",
+          "error"
+        ],
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "error"
+            ]
+          },
+          "error": {
+            "type": "object",
+            "required": [
+              "message",
+              "type",
+              "param",
+              "code"
+            ],
+            "properties": {
+              "message": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string"
+              },
+              "param": {
+                "type": "string",
+                "nullable": true
+              },
+              "code": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      },
+      "GeminiInferenceError": {
+        "type": "object",
+        "required": [
+          "error"
+        ],
+        "properties": {
+          "error": {
+            "type": "object",
+            "required": [
+              "code",
+              "message",
+              "status",
+              "details"
+            ],
+            "properties": {
+              "code": {
+                "type": "integer"
+              },
+              "message": {
+                "type": "string"
+              },
+              "status": {
+                "type": "string"
+              },
+              "details": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "@type",
+                    "reason",
+                    "domain",
+                    "metadata"
+                  ],
+                  "properties": {
+                    "@type": {
+                      "type": "string"
+                    },
+                    "reason": {
+                      "type": "string"
+                    },
+                    "domain": {
+                      "type": "string"
+                    },
+                    "metadata": {
+                      "type": "object",
+                      "required": [
+                        "field"
+                      ],
+                      "properties": {
+                        "field": {
+                          "type": "string",
+                          "nullable": true
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "OLPResponsesPromptRequest": {
+        "type": "object",
+        "required": [
+          "model",
+          "prompt"
+        ],
+        "properties": {
+          "model": {
+            "type": "string"
+          },
+          "prompt": {
+            "$ref": "#/components/schemas/ResponsesPublishedPromptReference"
+          },
+          "olp_run_limits": {
+            "$ref": "#/components/schemas/WorkflowRunLimits"
+          }
+        },
+        "additionalProperties": true,
+        "not": {
+          "anyOf": [
+            {
+              "required": [
+                "input"
+              ]
+            },
+            {
+              "required": [
+                "instructions"
+              ]
+            }
+          ]
+        }
+      },
+      "NativeResponsesPromptReference": {
+        "type": "object",
+        "required": [
+          "id"
+        ],
+        "description": "A provider-owned prompt reference. Fields and variables follow the provider contract.",
+        "properties": {
+          "id": {
+            "type": "string",
+            "not": {
+              "pattern": "^olpp_"
+            }
+          }
+        },
+        "additionalProperties": true
+      },
+      "NativeResponsesPromptRequest": {
+        "type": "object",
+        "required": [
+          "model",
+          "prompt"
+        ],
+        "properties": {
+          "model": {
+            "type": "string"
+          },
+          "prompt": {
+            "$ref": "#/components/schemas/NativeResponsesPromptReference"
+          }
+        },
+        "additionalProperties": true
+      },
+      "ResponsesToolWorkflowRequest": {
+        "type": "object",
+        "required": [
+          "model",
+          "input"
+        ],
+        "properties": {
+          "model": {
+            "type": "string"
+          },
+          "input": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            ]
+          },
+          "olp_toolsets": {
+            "$ref": "#/components/schemas/ChatToolsetSelection"
+          },
+          "olp_approval": {
+            "$ref": "#/components/schemas/WorkflowApprovalSubmission"
+          },
+          "olp_run_limits": {
+            "$ref": "#/components/schemas/WorkflowRunLimits"
+          }
+        },
+        "additionalProperties": true,
+        "not": {
+          "required": [
+            "prompt"
+          ]
+        }
+      },
+      "ResponsesMCPTool": {
+        "type": "object",
+        "required": [
+          "name",
+          "input_schema"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "input_schema": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        }
+      },
+      "ResponsesMCPListTools": {
+        "type": "object",
+        "required": [
+          "type",
+          "id",
+          "server_label",
+          "tools"
+        ],
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "mcp_list_tools"
+            ]
+          },
+          "id": {
+            "type": "string"
+          },
+          "server_label": {
+            "type": "string"
+          },
+          "tools": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ResponsesMCPTool"
+            }
+          }
+        }
+      },
+      "ResponsesMCPApprovalRequest": {
+        "type": "object",
+        "required": [
+          "type",
+          "id",
+          "server_label",
+          "name",
+          "arguments"
+        ],
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "mcp_approval_request"
+            ]
+          },
+          "id": {
+            "type": "string"
+          },
+          "server_label": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "arguments": {
+            "type": "string"
+          }
+        }
+      },
+      "ResponsesMCPCall": {
+        "type": "object",
+        "required": [
+          "type",
+          "id",
+          "server_label",
+          "name",
+          "arguments"
+        ],
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "mcp_call"
+            ]
+          },
+          "id": {
+            "type": "string"
+          },
+          "server_label": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "arguments": {
+            "type": "string"
+          },
+          "output": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "error": {
+            "type": "object",
+            "required": [
+              "type",
+              "content"
+            ],
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "mcp_tool_execution_error"
+                ]
+              },
+              "content": {}
+            }
+          }
+        }
+      },
+      "ResponsesWorkflowResponse": {
+        "type": "object",
+        "properties": {
+          "output": {
+            "type": "array",
+            "items": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/ResponsesMCPListTools"
+                },
+                {
+                  "$ref": "#/components/schemas/ResponsesMCPCall"
+                },
+                {
+                  "$ref": "#/components/schemas/ResponsesMCPApprovalRequest"
+                },
+                {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              ]
+            }
+          }
+        },
+        "additionalProperties": true
+      },
+      "WorkflowRunLimits": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "max_iterations": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 1,
+            "maximum": 32
+          },
+          "max_tool_calls": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0,
+            "maximum": 128
+          },
+          "max_duration_seconds": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 1,
+            "maximum": 600
+          },
+          "max_concurrent_runs": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 1,
+            "maximum": 2147483647
+          },
+          "max_run_cost": {
+            "type": "string",
+            "pattern": "^[0-9]{1,12}(\\.[0-9]{1,12})?$"
+          }
+        }
+      }
+    }
+  }
+}

@@ -9,7 +9,12 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/egress"
+	"github.com/tyk-swe/olp/internal/secrets"
 )
 
 func TestDeploymentCertificationKeepsBodyAndPathOnTheSameSingleMapping(t *testing.T) {
@@ -48,5 +53,47 @@ func TestDeploymentCertificationKeepsBodyAndPathOnTheSameSingleMapping(t *testin
 	defer mu.Unlock()
 	if len(paths) != 2 || paths[0] != "/openai/deployments/wire-b/chat/completions" || paths[1] != "/openai/deployments/wire-b/responses" {
 		t.Fatalf("both native endpoints must certify the same deployment: %v", paths)
+	}
+}
+
+func TestCertificationFailsClosedWhenAuthenticationStorageIsUnavailable(t *testing.T) {
+	pool, err := pgxpool.New(t.Context(), "postgres://127.0.0.1:1/olp?sslmode=disable")
+	if err != nil {
+		t.Fatal(err)
+	}
+	pool.Close()
+	mux := http.NewServeMux()
+	New(&access.Server{Pool: pool, Auth: secrets.NewAuthKey(make([]byte, 32), "test")}, &egress.Policy{}, nil).Register(mux)
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	providerID, modelID := uuid.NewString(), uuid.NewString()
+	for _, tc := range []struct {
+		name       string
+		providerID string
+		modelID    string
+		token      string
+		status     int
+	}{
+		{"valid identifiers", providerID, modelID, "olpm_" + uuid.NewString() + "_token", http.StatusServiceUnavailable},
+		{"invalid provider identifier", "invalid", modelID, "olpm_" + uuid.NewString() + "_token", http.StatusServiceUnavailable},
+		{"invalid model identifier", providerID, "invalid", "olpm_" + uuid.NewString() + "_token", http.StatusServiceUnavailable},
+		{"malformed credential", providerID, modelID, "olpm_invalid", http.StatusUnauthorized},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			request, err := http.NewRequestWithContext(t.Context(), http.MethodPost, server.URL+"/api/v1/providers/"+tc.providerID+"/models/"+tc.modelID+"/certify", nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			request.Header.Set("Authorization", "Bearer "+tc.token)
+			response, err := server.Client().Do(request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer response.Body.Close()
+			if response.StatusCode != tc.status {
+				t.Fatalf("certification returned %d, want %d", response.StatusCode, tc.status)
+			}
+		})
 	}
 }

@@ -75,9 +75,10 @@
   <header>
     <h1>Code mode</h1>
     <p>
-      Use qualified coding subscriptions through an OLP route and OLP API key.
-      Requests retain native models; conversation trees stay on one upstream
-      account.
+      Use coding subscriptions or explicitly selected paid API targets through
+      an OLP route and OLP API key. Requests retain native models and
+      conversation ownership. Paid targets require pricing and spend
+      authorization.
     </p>
   </header>
   {#if !readable}<p role="status">

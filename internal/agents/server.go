@@ -1,21 +1,33 @@
 package agents
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
 
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/agentcontract"
 	"github.com/tyk-swe/olp/internal/egress"
 )
 
 type Server struct {
-	Access *access.Server
-	Egress *egress.Policy
+	Access        *access.Server
+	Egress        *egress.Policy
+	ValidateAgent func(context.Context, agentcontract.Definition) error
 }
 
 func (s *Server) Register(mux *http.ServeMux) {
+	s.Access.Route(mux, "GET /api/v1/investigations", s.listInvestigations)
+	s.Access.Route(mux, "POST /api/v1/investigations", s.createInvestigation, access.MaxBody(32<<10))
+	s.Access.Route(mux, "GET /api/v1/investigations/{investigation_id}", s.getInvestigation)
+	s.Access.Route(mux, "GET /api/v1/agent-runs", s.listRuns)
+	s.Access.Route(mux, "GET /api/v1/agent-runs/{run_id}", s.getRun)
+	s.Access.Route(mux, "GET /api/v1/agent-runs/{run_id}/spans", s.listRunSpans)
+	s.Access.Route(mux, "GET /api/v1/a2a-tasks", s.listTasks)
+	s.Access.Route(mux, "GET /api/v1/a2a-tasks/{task_id}", s.getTask)
+	s.Access.Route(mux, "GET /api/v1/agent-delegations", s.listDelegations)
 	for _, kind := range []string{"toolset", "agent", "prompt"} {
 		root := "/api/v1/" + kind + "s"
 		s.Access.Route(mux, "GET "+root, func(r *http.Request, p access.Principal) (access.Reply, error) { return s.list(r, p, kind) })
@@ -93,7 +105,8 @@ func (s *Server) revision(r *http.Request, p access.Principal, kind string) (acc
 func (s *Server) write(r *http.Request, kind, action string) (access.Reply, error) {
 	var request struct {
 		Draft
-		Credential json.RawMessage `json:"credential,omitempty"`
+		Credential        json.RawMessage `json:"credential,omitempty"`
+		EntraClientSecret *string         `json:"entra_client_secret,omitempty"`
 	}
 	var draft Draft
 	var label struct {
@@ -159,16 +172,21 @@ func (s *Server) write(r *http.Request, kind, action string) (access.Reply, erro
 	next := current
 	switch action {
 	case "create", "update":
-		if err = s.credential(r.Context(), tx, current, &draft, request.Credential); err != nil {
+		credentialID, credentialErr := s.credential(r.Context(), tx, current, draft, request.Credential, request.EntraClientSecret)
+		if credentialErr != nil {
+			return access.Reply{}, credentialErr
+		}
+		credentialDraft := draftWithCredential(draft, credentialID)
+		if err = AuthorizeTrustChange(p, current, credentialDraft); err != nil {
 			return access.Reply{}, err
 		}
-		if err = AuthorizeTrustChange(p, current, draft); err != nil {
-			return access.Reply{}, err
-		}
-		next = &Publication{Kind: kind, Draft: draft}
+		next = &Publication{Kind: kind, Draft: credentialDraft}
 		err = SaveDraft(r.Context(), tx, p.UserID(), current, next, s.Egress)
 	case "publish":
 		err = Publish(r.Context(), tx, p.UserID(), current)
+		if err == nil && current.Kind == "agent" && (s.ValidateAgent == nil || s.ValidateAgent(r.Context(), *current.Draft.Agent) != nil) {
+			return access.Reply{}, access.Invalid("agent", "The pinned agent card must declare the configured protocol and JSON-RPC endpoint.")
+		}
 	case "retire":
 		next.ETag = access.NewID()
 		next.Retired = true

@@ -27,8 +27,11 @@ type Envelope struct {
 	Actor        string
 	// KeyID is the API key the request is accounted to; it is empty for the
 	// gateway's keyless requests, whose Origin says why they were made.
-	KeyID         string
-	EndUserDigest string
+	KeyID                string
+	AgentPrincipalID     string
+	MemberPrincipalID    string
+	DelegationPairDigest string
+	EndUserDigest        string
 	// Origin is empty for a caller request. ParentRequestID is the accounting
 	// identity of the caller request a shadow or classifier request serves.
 	Origin          string
@@ -75,6 +78,7 @@ type Envelope struct {
 
 // AttemptFact records one credential attempt against one target.
 type AttemptFact struct {
+	Prompt             *usage.PromptReference
 	Commitment         *routing.Commitment
 	CommitmentPinned   bool
 	Cache              *usage.CacheEvidence
@@ -197,6 +201,7 @@ func (l LogSink) Terminal(e Envelope) {
 	for _, a := range e.Attempts {
 		attempts = append(attempts, map[string]any{
 			"ordinal":              a.Ordinal,
+			"prompt":               a.Prompt,
 			"provider_id":          a.ProviderID,
 			"provider_revision_id": a.ProviderRevisionID,
 			"upstream_model":       a.UpstreamModel,

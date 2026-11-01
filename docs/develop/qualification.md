@@ -1,13 +1,17 @@
 # Qualification
 
-Use this guide to qualify a change or release and to track evidence still owed.
+Qualification turns a claim about behavior into scoped, reviewable evidence.
+This guide states what evidence is required for a change or release and records
+the gates that remain open.
+
 A fixture, compile-only run, reduced-rate benchmark or historical green suite
-covers only its stated scope and revision. **Implemented** means code and focused
-checks exist; **Shipped** additionally requires the applicable candidate gates.
-Record commit/image digest, tool/provider versions, environment, commands,
-artifacts, skips and unsupported combinations. Missing credentials or hardware
-leave a gate open. This documentation consolidation does not rerun the historical
-campaigns below.
+covers only its stated scope and revision. **Implemented** means the code and
+focused checks exist. **Shipped** also requires the applicable candidate gates.
+Each result must record its commit or image digest, tool and provider versions,
+environment, commands, artifacts, skips and unsupported combinations. Missing
+credentials or hardware leave the gate open rather than converting it into a
+pass. Historical campaigns retain the evidence and limits of the runs that
+produced them.
 
 ## Change acceptance
 
@@ -130,6 +134,56 @@ commitment boundaries, pending edits, disablement, empty/excluded-only periods,
 exact allocation, scoped APIs, late facts, retained history and backup/restore.
 FOCUS static checks and explicit unused/period reconciliation assertions do not
 qualify every Dynamic rule or physical capacity utilization.
+
+### Cloud billing fixture evidence
+
+The following fixture runs used Go 1.27.3 on Linux amd64 and a private
+PostgreSQL 18.6 test database (Debian 18.6-1.pgdg13+2) on October 31, 2026.
+They used simulated cloud endpoints, with no real billing account. Raw test logs
+and per-test skip status were not recorded, so the successful commands do not
+establish that every selected test ran. These results apply to the named
+revisions and do not replace candidate gates.
+
+At `0ab835c0d84838c890d288d133769c9d06d45b23`, the following command passed in
+32.789 seconds.
+
+```bash
+go test -mod=readonly -vet=off -tags=integration,oidctest -timeout=5m ./tests/integration -run '^(TestAzureBilling|TestGoogleBilling|TestBillingImportAWS|TestBillingImportHistory)' -count=1
+```
+
+For AWS, `tests/integration/billing_aws_test.go` exercises an S3 peer with
+versioned CUR manifests and compressed CSV parts. Its fixtures cover scoped
+Bedrock costs, revisions, restatements, retention, coverage and bounded reads.
+The documented CUR sources are linked from [FinOps](../operate/finops.md#promotion-and-fixtures).
+
+For Azure, `tests/integration/billing_test.go` exercises simulated authentication
+and Blob Storage with month-to-date amortized CSV exports and manifests. Its
+fixtures cover scoped OpenAI meters, credits and adjustments, revisions,
+retention, coverage and bounds. The manifest fixture cites the
+[Cost Management export documentation](https://learn.microsoft.com/en-us/azure/cost-management-billing/costs/tutorial-improved-exports),
+reviewed October 31, 2026.
+
+At `232fb6cb0b312f1df92996d0cb5dc93f447ae68e`, the following Google fixture
+command passed.
+
+```bash
+go test -mod=readonly -tags integration,oidctest,google_sql -timeout=5m ./tests/integration -run '^TestGoogleBillingImportEndToEnd$' -count=1
+```
+
+The Google fixture in `tests/integration/billing_google_sql_test.go` uses the
+documented detailed export rows in `internal/billing/testdata` and executes the
+submitted query with GoogleSQLite 0.3.1 against a simulated BigQuery peer. It
+covers scoping, corrections, credits, revisions, coverage and bounded failures.
+The test substitutes a fixture column for `_PARTITIONTIME`. It does not qualify
+BigQuery's partition pruning, production query behavior or export completeness.
+The export schema and service references are recorded in the
+[fixture README](../../internal/billing/testdata/README.md).
+
+Live qualification remains open separately for AWS CUR, Google detailed billing
+exports and Azure Cost Management exports. For each claimed source, record the
+candidate revision, account and export scope, authentication, observed coverage,
+restatements and failures. Fixture results do not establish live account access
+or complete invoice coverage.
 
 ## Operator ecosystem
 
@@ -312,7 +366,7 @@ web search disabled, and the selected WebSocket setting.
 | Optional hard budgets | Unbounded operation succeeds without matching budget and returns 422 with one; durable ledger overlap/reservation/uncertainty tests | No proven native operation bound |
 | Console | Typed API loader, role/project gating, component/unit/type checks and Chromium lifecycle journeys | Controlled only; run the browser suite separately from shell qualification |
 | Real subscription account | No credential supplied or used | Unqualified |
-| Client retries and transport recovery | Default retries, interrupted SSE/WS, WS→HTTP after 426, 503 account quarantine; pool/account/key/project/retirement refusal across alternating gateways | Controlled only |
+| Client retries and transport recovery | Default retries, interrupted SSE/WS, WS-to-HTTP fallback after 426, 503 account quarantine; pool/account/key/project/retirement refusal across alternating gateways | Controlled only |
 | Local files/search | Official `exec_command` writes a file, enumerates files, searches and reads it; tool outputs continue over both transports | Controlled only; no hosted search claim |
 | Fresh review | Root WS handshake before review child, including upstream-426 HTTP fallback; HTTP-only unresolved child refuses | Controlled only |
 | Review after a parent task | Official app-server `thread/start`, `turn/start`, then inline `review/start`; shared root/account on both transports | Controlled only |
@@ -415,6 +469,7 @@ mode's classifier needs a real model.
 | Surface | Evidence | Qualification |
 | --- | --- | --- |
 | Pasted-key enrollment | Production WASM plugins through public APIs and the console: key page at an approved origin, masked input, NULL expiry and refresh, fingerprint principal, no plaintext key in secrets or responses, ordinary probe and activation fenced, a different key refused as a rotation | Controlled only |
+| Claude subscription OAuth | Direct PKCE and verified-profile fixtures, stable refresh and refusal checks, native bearer plus OAuth beta, generated setup and a two-turn Messages tool exchange. Management/WASM lifecycle fixture authored and compiled | Fixture only. Service fixture execution, native-client startup and live subscription inference remain unqualified |
 | OLP-key-only configuration | Generated Claude Code shell and OpenCode JSON run unmodified; decoy credentials overridden; no `auth.json` | Controlled only |
 | Claude Code on GLM Coding Plan and OpenCode Go | Tool loop (`Read`), subagent (`Agent`) bound beneath its session, `--continue`; every model variable on the route | Controlled only; OpenCode Go only for Messages models |
 | OpenCode on GLM Coding Plan and OpenCode Go | Tool loop (`read`), child session (`task`) bound beneath its parent, `--continue`; Chat Completions with `include_usage`, and Messages for OpenCode Go | Controlled only |

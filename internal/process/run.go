@@ -15,7 +15,9 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/tyk-swe/olp/internal/a2a"
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/agents"
 	"github.com/tyk-swe/olp/internal/batches"
 	"github.com/tyk-swe/olp/internal/billing"
 	"github.com/tyk-swe/olp/internal/cache"
@@ -209,6 +211,7 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 	var gatewayInstance string
 	var rt *runtime.Manager
 	var gw *gateway.Server
+	var agentMonitor *a2a.TaskMonitor
 	var mediaService *media.Service
 	var mediaSpool *media.Spool
 	var pluginHost *plugins.Host
@@ -314,6 +317,7 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 				Carrier:            pluginHost,
 				UnconfinedPlugins:  unconfined != nil,
 			}, log)
+			gw.Traces = &gateway.TraceDeps{Pool: pool, Limiter: limiter, Auth: auth}
 			gw.Batches = batches.NewStore(pool)
 			gw.Cache = responseCache
 			gw.Business = business
@@ -381,6 +385,11 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 				gw.Resolver = resources.NewResolver(pool)
 			}
 			gw.Register(public)
+			agentServer := &a2a.Server{Grants: &mcpgrants.Store{Egress: &policy, Pool: pool, Keys: keys, Auth: auth, Installation: installation}, Runtime: rt, Egress: &policy, Ledger: &a2a.Ledger{Pool: pool, Store: &limits.DebitStore{Pool: pool, Limiter: limiter}, Auth: auth}, TrustedProxies: c.TrustedProxyCIDRs, PublicOrigin: c.PublicOrigin, Credentials: func(ctx context.Context, id string) ([]byte, error) {
+				return keys.Read(ctx, pool, installation, id, secrets.AgentCredential)
+			}}
+			agentServer.Register(public)
+			agentMonitor = &a2a.TaskMonitor{Server: agentServer, Log: log}
 			var toolLedger mcp.Ledger
 			if limiter != nil {
 				toolLedger = &mcp.DurableLedger{Pool: pool, Store: &limits.DebitStore{Pool: pool, Limiter: limiter}, Auth: auth}
@@ -399,6 +408,8 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 			}}
 			if limiter != nil {
 				toolServer.Limiter = limiter
+				gw.WorkflowRuns = &agents.WorkflowStore{Pool: pool, Auth: auth, Keys: keys, Installation: installation, Debits: &limits.DebitStore{Pool: pool, Limiter: limiter}}
+				gw.WorkflowTools = toolServer
 			}
 			toolServer.Register(public)
 		}
@@ -531,6 +542,9 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 		// Authority must stay fresh while accepted requests drain, so
 		// polling outlives the listeners and stops once handlers finish.
 		rt.Start(context.WithoutCancel(ctx))
+	}
+	if agentMonitor != nil {
+		background.Go(func() { agentMonitor.Run(auxiliary) })
 	}
 	// The observability collectors probe only what this process composes: an
 	// unconfigured dependency is reported as absent, never as failed.

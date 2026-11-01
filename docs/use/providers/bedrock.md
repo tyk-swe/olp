@@ -1,21 +1,21 @@
 # Amazon Bedrock connector
 
-The Bedrock provider uses AWS SDK for Go v2 credential providers, SigV4 signing,
-partition-aware endpoint resolution and event-stream decoding. Native
-`Converse`, `ConverseStream`, `CountTokens` and foundation-model discovery use
-OLP's bounded HTTP transport. Model IDs and supported ARNs pass through
-unchanged.
+The Bedrock connector reaches Amazon Bedrock through AWS SDK for Go v2
+credential providers and SigV4 signing. Endpoint resolution is partition-aware,
+streaming responses use bounded event-stream decoding, and native `Converse`,
+`ConverseStream`, `CountTokens` and foundation-model discovery use OLP's bounded
+HTTP transport. Model IDs and supported ARNs pass through unchanged.
 
-Beyond Converse, two InvokeModel families qualify by model prefix:
-`amazon.titan-embed-text-*` models serve single-input embeddings and
-`amazon.titan-image-generator-*` models serve `image_generation` with the
-`TEXT_IMAGE` task. The Stability text-to-image models `stability.sd3-5-large-*`,
-`stability.stable-image-core-*` and `stability.stable-image-ultra-*` serve
-`image_generation` too: one image per request, with the `1024x1024`,
-`1536x1024` and `1024x1536` sizes sent as aspect ratios and `output_format`
-as `png`, `jpeg` or `webp`. A request Stability's filter refuses fails with
-`content_filter`. Both normalize to the OpenAI surface and are described in
-[the compatibility matrix](../compatibility.md).
+Two InvokeModel families also qualify by model prefix. Models matching
+`amazon.titan-embed-text-*` serve single-input embeddings, and models matching
+`amazon.titan-image-generator-*` serve `image_generation` with the `TEXT_IMAGE`
+task. Stability text-to-image models matching `stability.sd3-5-large-*`,
+`stability.stable-image-core-*` or `stability.stable-image-ultra-*` also serve
+`image_generation`. They return one image per request. The `1024x1024`,
+`1536x1024` and `1024x1536` sizes become aspect ratios, and `output_format` can be
+`png`, `jpeg` or `webp`. A request refused by a Stability filter fails with
+`content_filter`. Both families normalize to the OpenAI surface described in the
+[compatibility matrix](../compatibility.md).
 
 Rerank models, such as `amazon.rerank-v1:0` and `cohere.rerank-v3-5:0`, serve
 `/v1/rerank` through the Bedrock Agent Runtime's

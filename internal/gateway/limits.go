@@ -219,13 +219,48 @@ func (a *Admission) reserveKey(ctx context.Context, authority access.Authority, 
 // leases for one settlement. Every refusal refunds earlier reservations. The
 // optional route identifies the ingress route for per-key route policy.
 func (a *Admission) reserveKeyCosted(ctx context.Context, authority *access.Authority, surface string, estimate int64, ttl time.Duration, hold costReservation, route ...string) (*limits.Lease, *Error) {
+	if authority.DelegationAgentLimits == nil && keyBoundariesOnly(authority) && authority.BudgetGroupID == nil && !keyHasHardLimits(&authority.Policy) {
+		return nil, nil
+	}
+	return a.reserveKeyWithLimits(ctx, authority, surface, estimate, ttl, hold, route...)
+}
+
+func (a *Admission) reserveKeyWithLimits(ctx context.Context, authority *access.Authority, surface string, estimate int64, ttl time.Duration, hold costReservation, route ...string) (*limits.Lease, *Error) {
+	if authority.DelegationAgentLimits == nil {
+		return a.reserveCallerLimits(ctx, authority, surface, estimate, ttl, hold, route...)
+	}
+	agent := authority.DelegationAgentLimits
+	principal := access.Authority{ID: agent.ID, LookupID: agent.LookupID, BudgetIncreases: authority.BudgetIncreases, Policy: access.KeyPolicy{
+		RequestsPerMinute: agent.Limits.RequestsPerMinute,
+		TokensPerMinute:   agent.Limits.TokensPerMinute,
+		MaxConcurrency:    agent.Limits.MaxConcurrency,
+		DailyCostLimit:    agent.Limits.DailyCostLimit,
+		WeeklyCostLimit:   agent.Limits.WeeklyCostLimit,
+		MonthlyCostLimit:  agent.Limits.MonthlyCostLimit,
+		CostBasis:         agent.Limits.CostBasis,
+	}}
+	checked := false
+	agentLease, failure := a.reserveKeyAndGroup(ctx, &principal, "", estimate, ttl, hold, &checked)
+	if failure != nil {
+		return nil, failure
+	}
+	lease, failure := a.reserveCallerLimits(ctx, authority, surface, estimate, ttl, hold, route...)
+	if failure != nil {
+		settleKey(ctx, agentLease, false, nil, a.logger())
+		return nil, failure
+	}
+	if lease == nil {
+		return agentLease, nil
+	}
+	lease.Attach(agentLease)
+	return lease, nil
+}
+
+func (a *Admission) reserveCallerLimits(ctx context.Context, authority *access.Authority, surface string, estimate int64, ttl time.Duration, hold costReservation, route ...string) (*limits.Lease, *Error) {
 	// Every cost boundary checks shared accounting evidence just before it
 	// spends against it, once per request, so keys without budgets stay free.
 	costChecked := false
 	if keyBoundariesOnly(authority) {
-		if authority.BudgetGroupID == nil && !keyHasHardLimits(&authority.Policy) {
-			return nil, nil
-		}
 		return a.reserveKeyAndGroup(ctx, authority, surface, estimate, ttl, hold, &costChecked)
 	}
 	aggregate, err := a.reserveAggregateBudgets(ctx, authority, ttl, hold, &costChecked)
@@ -662,18 +697,22 @@ func keyReservationEstimate(perAttempt int64, attempts int) int64 {
 // settledTokens accounts for every attempted provider, not just the last one.
 // Uncertain attempts retain an estimate rather than refunding unknown work.
 func (x *call) settledTokens() *int64 {
+	return x.settledTokensFor(x.facts, x.estimate)
+}
+
+func (x *call) settledTokensFor(facts []AttemptFact, estimate int64) *int64 {
 	var total int64
-	for index := range x.facts {
-		fact := &x.facts[index]
+	for index := range facts {
+		fact := &facts[index]
 		if fact.Cache != nil && x.cache != nil && !slices.Contains(x.cache.policy.CountHitsAgainst, "tokens") {
 			continue
 		}
-		actual := settledAttemptTokens(fact, x.estimate)
+		actual := settledAttemptTokens(fact, estimate)
 		switch {
 		case actual != nil:
 			total = addBounded(total, *actual)
 		case fact.BillingUncertain || fact.UsageObserved:
-			total = addBounded(total, x.estimate)
+			total = addBounded(total, estimate)
 		}
 	}
 	return &total

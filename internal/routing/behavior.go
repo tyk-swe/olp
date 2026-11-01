@@ -15,10 +15,12 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/tyk-swe/olp/internal/protocols/wire"
 
 	"github.com/tyk-swe/olp/internal/bodylimit"
 	"github.com/tyk-swe/olp/internal/cache"
+	"github.com/tyk-swe/olp/internal/limits"
 )
 
 // Conditions that start a fallback to another route.
@@ -77,17 +79,21 @@ var (
 // steered to, how a failed attempt is retried, which requests stay together
 // and how much the route may spend. The zero value adds nothing to a route.
 type Behavior struct {
-	Cache                    *cache.Policy       `json:"cache,omitempty"`
-	PromptCache              *cache.PromptPolicy `json:"prompt_cache,omitempty"`
-	CallerCostExempt         bool                `json:"caller_cost_exempt,omitempty"`
-	ProviderFetchedDocuments bool                `json:"provider_fetched_documents,omitempty"`
-	MaxBodyBytes             *int64              `json:"max_body_bytes,omitempty"`
-	Fallbacks                []Fallback          `json:"fallbacks,omitempty"`
-	Selectors                []Selector          `json:"selectors,omitempty"`
-	Retry                    Retry               `json:"retry,omitempty"`
-	Affinity                 *Affinity           `json:"affinity,omitempty"`
-	Budget                   *CostLimits         `json:"budget,omitempty"`
-	Passthrough              *PassthroughConfig  `json:"passthrough,omitempty"`
+	RunLimits                *limits.WorkflowBounds `json:"run_limits,omitempty"`
+	ToolExecution            string                 `json:"tool_execution,omitempty"`
+	Toolsets                 []string               `json:"toolsets,omitempty"`
+	ResponsesMCPItems        bool                   `json:"responses_mcp_items,omitempty"`
+	Cache                    *cache.Policy          `json:"cache,omitempty"`
+	PromptCache              *cache.PromptPolicy    `json:"prompt_cache,omitempty"`
+	CallerCostExempt         bool                   `json:"caller_cost_exempt,omitempty"`
+	ProviderFetchedDocuments bool                   `json:"provider_fetched_documents,omitempty"`
+	MaxBodyBytes             *int64                 `json:"max_body_bytes,omitempty"`
+	Fallbacks                []Fallback             `json:"fallbacks,omitempty"`
+	Selectors                []Selector             `json:"selectors,omitempty"`
+	Retry                    Retry                  `json:"retry,omitempty"`
+	Affinity                 *Affinity              `json:"affinity,omitempty"`
+	Budget                   *CostLimits            `json:"budget,omitempty"`
+	Passthrough              *PassthroughConfig     `json:"passthrough,omitempty"`
 }
 
 // Fallback names another route that serves the request when this one ends
@@ -279,12 +285,32 @@ func DecodeBehavior(raw []byte) (Behavior, error) {
 
 // IsZero reports whether the behavior declares nothing.
 func (b Behavior) IsZero() bool {
-	return b.Cache == nil && b.PromptCache == nil && !b.CallerCostExempt && !b.ProviderFetchedDocuments && len(b.Fallbacks) == 0 && len(b.Selectors) == 0 && len(b.Retry) == 0 && b.Affinity == nil && b.Budget == nil && b.MaxBodyBytes == nil && b.Passthrough == nil
+
+	return b.RunLimits == nil && b.ToolExecution == "" && len(b.Toolsets) == 0 && !b.ResponsesMCPItems && b.Cache == nil && b.PromptCache == nil && !b.CallerCostExempt && !b.ProviderFetchedDocuments && len(b.Fallbacks) == 0 && len(b.Selectors) == 0 && len(b.Retry) == 0 && b.Affinity == nil && b.Budget == nil && b.MaxBodyBytes == nil && b.Passthrough == nil
+
 }
 
 // Validate checks the behavior's own shape. tagged reports whether a primary
 // target of the route carries a tag, so a selector cannot steer to nothing.
 func (b Behavior) Validate(slug string, tagged func(string) bool) error {
+	if b.RunLimits != nil && (!b.RunLimits.Valid() || b.ToolExecution != "gateway") {
+		return invalidValue("run_limits", "Use valid workflow limits on a gateway tool route.")
+	}
+	if b.ToolExecution != "" && b.ToolExecution != "gateway" {
+		return invalidValue("tool_execution", "Use gateway or omit tool execution.")
+	}
+	if len(b.Toolsets) > 0 && b.ToolExecution != "gateway" {
+		return invalidValue("toolsets", "Toolsets require gateway tool execution.")
+	}
+	if b.ResponsesMCPItems && b.ToolExecution != "gateway" {
+		return invalidValue("responses_mcp_items", "Responses MCP items require gateway tool execution.")
+	}
+	for index, id := range b.Toolsets {
+		parsed, err := uuid.Parse(id)
+		if err != nil || parsed.String() != id || slices.Index(b.Toolsets, id) != index {
+			return invalidValue("toolsets", "Use distinct canonical toolset IDs.")
+		}
+	}
 	if err := b.Cache.Validate(); err != nil {
 		return invalidValue("cache", err.Error())
 	}

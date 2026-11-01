@@ -521,8 +521,6 @@ func responseSummaryWithUsage(fields map[string]json.RawMessage, usage *wire.Usa
 	c.OutputText = text.String()
 	status, _ := stringField(fields, "status")
 	switch {
-	case len(c.ToolCalls) > 0:
-		c.FinishReason = "tool_calls"
 	case status == "incomplete":
 		c.FinishReason = "length"
 		if raw, present := fields["incomplete_details"]; present {
@@ -532,6 +530,8 @@ func responseSummaryWithUsage(fields map[string]json.RawMessage, usage *wire.Usa
 				}
 			}
 		}
+	case len(c.ToolCalls) > 0:
+		c.FinishReason = "tool_calls"
 	case status == "completed" || status == "":
 		c.FinishReason = "stop"
 	default:

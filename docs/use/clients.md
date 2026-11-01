@@ -1,10 +1,12 @@
 # Client compatibility
 
-OLP keeps compatibility with real clients as a tested property. The
+Client compatibility is a tested product contract rather than a list of
+unverified configuration examples. The
 [client qualification suite](../../tests/clients/README.md) runs coding agents,
-agent SDKs and frameworks headless against a gateway with a deterministic
-scripted upstream. Each suite checks the client's outcome and what the upstream
-received, so bypasses and damaged requests fail qualification.
+agent SDKs and frameworks headlessly against an OLP gateway backed by a
+deterministic scripted upstream. Each run checks both the client-visible outcome
+and the request the upstream received, so a bypass or damaged request fails
+qualification.
 
 Codex, Claude Code and OpenCode resolve the publisher's npm `latest` channel
 anew for every CI job. Code-mode qualification and ordinary-route client suites
