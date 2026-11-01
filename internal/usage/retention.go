@@ -85,6 +85,9 @@ func RunMaintenance(ctx context.Context, pool *pgxpool.Pool, now time.Time) (Mai
 	if report.RequestRows, err = purgeExpiredRequests(ctx, conn, windows.request); err != nil {
 		return MaintenanceReport{}, err
 	}
+	if _, err = drainInBatches(ctx, conn, purgeTraceSpansSQL, windows.request, int64(retentionBatch)); err != nil {
+		return MaintenanceReport{}, err
+	}
 	if report.RollupRows, report.UsageRows, err = rollUpAttemptUsage(ctx, conn, windows.usage); err != nil {
 		return MaintenanceReport{}, err
 	}
@@ -180,6 +183,10 @@ const purgeRequestsSQL = `WITH expired AS (
     DELETE FROM olp.requests request USING expired
      WHERE request.id = expired.id AND request.started_at = expired.started_at`
 
+const purgeTraceSpansSQL = `WITH expired AS (
+ SELECT id FROM olp.trace_spans WHERE received_at < $1 ORDER BY received_at LIMIT $2 FOR UPDATE SKIP LOCKED
+) DELETE FROM olp.trace_spans span USING expired WHERE span.id = expired.id`
+
 func purgeExpiredRequests(ctx context.Context, conn *pgx.Conn, cutoff time.Time) (int64, error) {
 	return drainInBatches(ctx, conn, purgeRequestsSQL, cutoff, int64(retentionBatch))
 }
@@ -205,13 +212,13 @@ const rollupSQL = `WITH candidates AS (
                 target_request_counted, request_unpriced_counted, provider_unpriced_counted,
                 model_unpriced_counted, target_unpriced_counted, request_incomplete_counted,
                 provider_incomplete_counted, model_incomplete_counted, target_incomplete_counted,
-                attribution, end_user_digest, budget_exempt, usage_observed, estimated_input_tokens, estimate_provenance, model_family,
+                attribution, end_user_digest, budget_exempt, agent_principal_id, delegation_pair_digest, usage_observed, estimated_input_tokens, estimate_provenance, model_family,
                 commitment_weight, commitment_amount, commitment_period, charge,
                 list_cost, contracted_cost, cache_budget_cost, cache_budget_charge, response_cache,training_tokens,storage_byte_seconds,cache_token_seconds,container_sessions
     ), rolled AS (
       INSERT INTO olp.attempt_usage_hourly
         (bucket, budget_bucket, route_slug, provider_id, upstream_model, operation, surface, api_key_id,
-         budget_group_id, attribution, end_user_digest, budget_exempt,
+         budget_group_id, attribution, end_user_digest, budget_exempt, agent_principal_id, delegation_pair_digest,
          request_count, provider_request_count, model_request_count, target_request_count,
          input_tokens, output_tokens, cached_input_tokens,
          cache_write_input_tokens, cache_write_5m_input_tokens, cache_write_1h_input_tokens,
@@ -227,7 +234,7 @@ const rollupSQL = `WITH candidates AS (
          list_cost, contracted_cost, cache_budget_cost, cache_budget_charge, provider_cache_hit_count,training_tokens,storage_byte_seconds,cache_token_seconds,container_sessions)
       SELECT date_trunc('hour', observed_at AT TIME ZONE 'UTC') AT TIME ZONE 'UTC',olp.budget_bucket(observed_at),
              route_slug, provider_id, upstream_model, operation, surface, api_key_id,
-             budget_group_id, attribution, end_user_digest, budget_exempt,
+             budget_group_id, attribution, end_user_digest, budget_exempt, agent_principal_id, COALESCE(delegation_pair_digest,''),
              COUNT(*) FILTER (WHERE request_counted),
              COUNT(*) FILTER (WHERE provider_request_counted),
              COUNT(*) FILTER (WHERE model_request_counted),
@@ -269,7 +276,7 @@ const rollupSQL = `WITH candidates AS (
        GROUP BY date_trunc('hour', observed_at AT TIME ZONE 'UTC') AT TIME ZONE 'UTC',olp.budget_bucket(observed_at),
                 route_slug, provider_id, upstream_model, operation, surface, api_key_id,
                 budget_group_id, attribution, end_user_digest, budget_exempt, model_family, estimate_provenance,
-                commitment_amount, commitment_period
+                commitment_amount, commitment_period, agent_principal_id, COALESCE(delegation_pair_digest,'')
       ON CONFLICT ON CONSTRAINT attempt_usage_hourly_dimensions_key DO UPDATE SET
         request_count = attempt_usage_hourly.request_count + EXCLUDED.request_count,
         provider_request_count = attempt_usage_hourly.provider_request_count + EXCLUDED.provider_request_count,

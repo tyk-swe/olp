@@ -64,27 +64,11 @@ mapped test yet, and follow the naming convention of the directory.
 | console browser | `*.spec.ts` under a feature directory in console/tests | tests/gateway/openai-route.spec.ts |
 | scripts | `<tool>.test.mjs`, node:test, run by `make test-scripts` | scripts/test-baseline.test.mjs |
 
-Coverage and mutation form the ratchet. Coverage on a changed Go unit package
-under internal, sdk, cmd, or plugins must not drop against the merge base in
-the same container-free lane the [baseline](baseline.md) measured, so the merge
-base itself is the floor and it ratchets with every merge. Mutation testing
-measures whether tests
-can fail at all, and changed code must reach the kill rate configured for its
-surface on the way to over 90 percent, as recorded with the gate. Run
-`make test-ratchet` for the mechanical test rules on a diff,
-`make test-coverage-gate` for the coverage comparison, and
-`make test-mutation-go` or `make test-mutation-console` for the mutation gates
-on changed code. A package new at head has no base coverage to drop from, so
-the coverage comparison starts with its next change, and a package with no
-killable mutants reports that nothing was assessed instead of passing quietly.
-A weekly scheduled workflow mutation-tests every Go unit package under
-internal and sdk plus the in-scope console modules (TypeScript under
-console/src/lib) and uploads the reports
-for triage as test bugs. It reports rather than gates, and the changed-code
-gates above stay the merge requirement. A shallow test that cannot fail gets
-rewritten as a behavior
-test or deleted. No signal beats false signal, and no threshold ever moves
-down to make a failure pass.
+The test ratchet is mechanical only. Run `make test-ratchet` for the rules on
+a diff, meaning no focused or skipped tests, no snapshot assertions, and no
+new golden files without a cited source. Test quality beyond that is a review
+concern. A shallow test that cannot fail gets rewritten as a behavior test or
+deleted. No signal beats false signal.
 
 ## Focused runs
 
@@ -181,14 +165,20 @@ Vite runs shell hydration and focused setup/login, cookie, CSRF mutation,
 protected deep-link and unary/streaming inference proxy checks. Failure-path
 restores assert that the destination stays empty.
 Each test installation has an independent database and installation namespace.
-Code-mode process tests run with a separate 25-minute suite deadline. The
-remaining process tests retain their 30-minute deadline in three disjoint groups:
-names starting `TestA` through `TestF`, `TestG` through `TestM`, and every other
-test name. All exclude `TestCode`, which runs in the first phase. The four
-selections cover the complete package, with the same build tags and race
-detection. Separating the two alphabetic cohorts leaves room for intentional
-recovery, enrollment and certification waits without extending operation or
-package deadlines.
+Process tests run in four disjoint selections, each with a 30-minute deadline:
+names starting `TestCodeQualification`, the other names starting `TestA` through
+`TestF`, `TestG` through `TestM`, and every other test name. The four selections
+cover the complete package, with the same build tags and race detection.
+Separating the cohorts leaves room for intentional recovery, enrollment and
+certification waits without extending operation or package deadlines.
+
+The runner groups its suites into lanes. `qualification`, `a-f`, `g-m` and
+`n-z` hold the four process selections along with direct CLI qualification,
+client qualification, internal service tests and the extension test, `smoke`
+holds the JavaScript SDK smoke and `browser` the Chromium journeys and
+replacement recovery. `./scripts/integration.sh LANE...` provisions the services
+once and runs only those lanes, and `shell` runs every lane except `browser`. CI
+runs the lanes as parallel jobs.
 
 Service-dependent Go tests live in `tests/integration/` or beside feature code
 and require the `integration` build tag. Internal service tests use the
@@ -234,8 +224,7 @@ process, and writes one result per scenario to `.local/bench/`. The suites under
 `tests/bench/` carry the `bench` build tag, so `make test-go` and
 `make integration` do not run them. The harness's own tests, which need no
 services, are what `make test-bench` runs; `make test` and `make check` include
-it, so CI runs them with `-race`, and only the scenarios are left to
-`make bench`. Like the integration suites, the scenarios fail, rather than skip,
+it, and only the scenarios are left to `make bench`. Like the integration suites, the scenarios fail, rather than skip,
 when the services they need are not configured. Use `BENCH_SCENARIOS=S1,S2` and
 `OLP_BENCH_SCALE=0.05` for a smoke run; its numbers are not reference numbers.
 The [benchmark guide](bench/README.md) has the scenarios, the settings and how
@@ -243,9 +232,9 @@ to read a result, and `scripts/bench-compare.sh` runs the same scenarios against
 LiteLLM; see the [performance guide](../docs/develop/performance.md).
 
 The hot paths have `testing.B` benchmarks beside the code, in the packages the
-[microbenchmark table](#microbenchmarks) lists, which `make bench-gate` compares
-with the merge base and CI runs on every pull request. They are ordinary test
-files, so `make test-go` compiles them and runs none of them.
+[microbenchmark table](#microbenchmarks) lists. They are ordinary test
+files, so `make test-go` compiles them and runs none of them. Run them by hand
+with `go test -bench` when a change touches a hot path.
 
 ## Suite ownership
 

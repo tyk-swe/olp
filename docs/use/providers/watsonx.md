@@ -9,7 +9,7 @@ and serves watsonx on transformed routes:
 | Chat Completions | watsonx chat API |
 | --- | --- |
 | `model` | `model_id` |
-| — | `project_id`, from the provider's project |
+| No client field | `project_id`, taken from the provider's project |
 | `stream: true` | `POST /ml/v1/text/chat_stream` instead of `/ml/v1/text/chat` |
 | `tool_choice: "auto"` and the other modes | `tool_choice_option` |
 | `[DONE]` | the usage chunk that ends every stream |

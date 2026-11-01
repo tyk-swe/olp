@@ -25,6 +25,7 @@ import (
 	"github.com/tyk-swe/olp/internal/protocols/wire"
 	"github.com/tyk-swe/olp/internal/resources"
 	"github.com/tyk-swe/olp/internal/routing"
+	"github.com/tyk-swe/olp/internal/runtime"
 	"github.com/tyk-swe/olp/internal/usage"
 	"github.com/tyk-swe/olp/sdk/plugin/abi"
 )
@@ -214,6 +215,10 @@ func (x *call) guardrailEvidence() []guardrails.Evidence {
 	return slices.Clone(x.guardrailDecisions)
 }
 func (x *call) inspectGuardrailInput(document oif.Document) (oif.Document, []guardrails.Segment, error) {
+	return x.inspectGuardrailInputWithRecovery(x.guardrailCtx, document, true)
+}
+
+func (x *call) inspectGuardrailInputWithRecovery(ctx context.Context, document oif.Document, recoverable bool) (oif.Document, []guardrails.Segment, error) {
 	// Effective provider defaults may enable an unsupported stream surface.
 	if err := x.guardrailStreamSurface(document); err != nil {
 		return document, nil, err
@@ -224,7 +229,14 @@ func (x *call) inspectGuardrailInput(document oif.Document) (oif.Document, []gua
 		x.recordGuardrails(result.Decisions)
 		return document, nil, e
 	}
-	evaluation := guardrails.Evaluation{RequestID: x.request.accountingID(), Route: x.route.Slug, Phase: guardrails.Input, Segments: surface.Segments, InternalModel: x.internalGuardrail}
+	evaluation := guardrails.Evaluation{RequestID: x.request.accountingID(), Route: x.route.Slug, Phase: guardrails.Input, Segments: surface.Segments, InternalModel: x.internalGuardrail, WorkflowRecovery: recoverable && x.workflow != nil}
+	evaluation.CompressionExemptIDs = slices.Collect(func(yield func(string) bool) {
+		for _, segment := range surface.Segments {
+			if segment.Kind == "tool_result" && slices.Contains(x.workflowRecoveryCalls, segment.ToolCallID) && !yield(segment.ID) {
+				return
+			}
+		}
+	})
 	if x.strict() && x.guardrailEngine.HasLegacyInput() {
 		texts := contentpolicy.InputTexts(document)
 		evaluation.LegacyInput = make([]guardrails.Segment, len(texts))
@@ -232,7 +244,10 @@ func (x *call) inspectGuardrailInput(document oif.Document) (oif.Document, []gua
 			evaluation.LegacyInput[i] = guardrails.Segment{ID: "legacy_" + strconv.Itoa(i), Text: text}
 		}
 	}
-	result, err := x.guardrailEngine.Evaluate(x.guardrailCtx, evaluation, x.guardrailMasks)
+	result, err := x.guardrailEngine.Evaluate(ctx, evaluation, x.guardrailMasks)
+	if recoverable && x.workflow != nil && len(result.Recovery) > 0 {
+		x.workflowRecovery = result.Recovery
+	}
 	x.recordGuardrails(result.Decisions)
 	err = x.legacyGuardrailError(result, err)
 	if err != nil {
@@ -422,6 +437,24 @@ func (s *Server) applyGuardrails(w http.ResponseWriter, r *http.Request) {
 	s.settleAdmission(context.WithoutCancel(r.Context()), x)
 	s.finish(x, out, status)
 }
+func (s *Server) EvaluateToolGuardrails(ctx context.Context, authority access.Authority, release *runtime.Release, engine *guardrails.Engine, requestID, phase string, segments []guardrails.Segment, masks *guardrails.Masking) (guardrails.Result, error) {
+	if s == nil || release == nil || release.Snapshot == nil {
+		return guardrails.Result{Segments: segments}, guardrails.ErrSurface
+	}
+	parent := &call{
+		request:       request{id: requestID, minted: true, startedAt: s.now(), release: release},
+		actor:         "api_key",
+		keyID:         authority.ID,
+		budgetGroupID: authority.BudgetGroupID,
+		authority:     authority,
+		attribution:   authority.Attribution,
+		endUserDigest: authority.EndUserDigest,
+		family:        wire.Chat,
+	}
+	evaluation := guardrails.Evaluation{RequestID: parent.request.accountingID(), Phase: phase, Segments: segments}
+	return engine.WithEvaluator(s.GuardrailEvaluator).Evaluate(context.WithValue(ctx, guardrailCallerKey{}, parent), evaluation, masks)
+}
+
 func (s *Server) EvaluateGuardrails(r *http.Request, p access.Principal, in guardrails.ApplyInput) (guardrails.Result, error) {
 	if s == nil || s.Runtime == nil {
 		return guardrails.Result{}, access.Fail(503, "guardrails_unavailable", "The evaluator is unavailable.")

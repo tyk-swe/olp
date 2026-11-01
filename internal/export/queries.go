@@ -51,15 +51,16 @@ const focusDatasetsSQL = `SELECT jsonb_build_object('charge_date',fd.charge_date
 
 const activeSinksSQL = `SELECT id::text,type,destination,credential_id::text,streams,format FROM olp.export_sinks WHERE enabled ORDER BY id LIMIT 1001`
 const lockStreamSQL = `SELECT pg_try_advisory_xact_lock(hashtextextended($1,501))`
-const readDestinationSQL = `SELECT type,destination,credential_id::text,format,id::text,settings FROM olp.export_sinks WHERE id=$1 AND enabled AND $2=ANY(streams) FOR SHARE`
+const readDestinationSQL = `SELECT type,destination,credential_id::text,format,id::text,settings,created_by::text FROM olp.export_sinks WHERE id=$1 AND enabled AND $2=ANY(streams) FOR SHARE`
 const pendingRecordsSQL = `SELECT r.id::text,r.stream,r.occurred_at,r.queued_at,
  jsonb_build_object('version',1,'event_id',r.id,'stream',r.stream,'source_id',r.source_id,'project_id',r.project_id,
- 'route',r.route,'outcome',r.outcome,'occurred_at',r.occurred_at,'data',r.payload),p.attempts
+ 'route',r.route,'outcome',r.outcome,'occurred_at',r.occurred_at,'data',r.payload),p.attempts,r.source_id::text,r.project_id::text
  FROM olp.export_pending p JOIN olp.export_records r ON r.id=p.record_id
  WHERE p.sink_id=$1 AND r.stream=$2 AND p.delivered_at IS NULL AND p.rejected_at IS NULL AND p.next_attempt_at<=now()
  ORDER BY r.queued_at,r.id LIMIT $3`
 const claimRecordSQL = `UPDATE olp.export_pending SET attempts=LEAST(attempts+1,2147483647),
  last_attempt_at=now(),next_attempt_at=now()+interval '2 minutes' WHERE sink_id=$1 AND record_id=$2 AND delivered_at IS NULL AND rejected_at IS NULL AND attempts=$3`
+const rejectEvidenceSQL = `UPDATE olp.export_pending SET rejected_at=now(),last_error_code='evidence_unavailable' WHERE sink_id=$1 AND record_id=$2 AND delivered_at IS NULL AND rejected_at IS NULL`
 const finishRecordSQL = `UPDATE olp.export_pending SET delivered_at=CASE WHEN $3 THEN now() ELSE NULL END,
  rejected_at=CASE WHEN $6 THEN now() ELSE NULL END,
  last_error_code=$4,next_attempt_at=now()+make_interval(secs=>$5)

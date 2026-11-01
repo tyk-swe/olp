@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/evidence"
 	"github.com/tyk-swe/olp/internal/secrets"
 	"github.com/tyk-swe/olp/internal/usage"
 )
@@ -184,7 +185,8 @@ func (w *Worker) deliverOne(ctx context.Context, sinkID, stream string) (bool, e
 	}
 	var destination Destination
 	var credentialID *string
-	if err = tx.QueryRow(claimCtx, readDestinationSQL, sinkID, stream).Scan(&destination.Type, &destination.URL, &credentialID, &destination.Format, &destination.ID, &destination.Settings); err != nil {
+	var creatorID string
+	if err = tx.QueryRow(claimCtx, readDestinationSQL, sinkID, stream).Scan(&destination.Type, &destination.URL, &credentialID, &destination.Format, &destination.ID, &destination.Settings, &creatorID); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return true, nil
 		}
@@ -198,15 +200,35 @@ func (w *Worker) deliverOne(ctx context.Context, sinkID, stream string) (bool, e
 		}
 	}
 	var id, recStream string
+	var sourceID string
+	var projectID *string
 	var occurredAt, queuedAt time.Time
 	var data []byte
 	var attempts int
-	err = tx.QueryRow(claimCtx, pendingRecordsSQL, sinkID, stream, 1).Scan(&id, &recStream, &occurredAt, &queuedAt, &data, &attempts)
+	err = tx.QueryRow(claimCtx, pendingRecordsSQL, sinkID, stream, 1).Scan(&id, &recStream, &occurredAt, &queuedAt, &data, &attempts, &sourceID, &projectID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return true, nil
 		}
 		return true, err
+	}
+	if stream == string(evidence.Runs) || stream == string(evidence.TraceSpans) {
+		if projectID == nil {
+			if _, err := tx.Exec(claimCtx, rejectEvidenceSQL, sinkID, id); err != nil {
+				return true, err
+			}
+			return false, tx.Commit(claimCtx)
+		}
+		eligible, err := evidence.Eligible(claimCtx, tx, evidence.Stream(stream), sourceID, *projectID, creatorID)
+		if err != nil {
+			return true, err
+		}
+		if !eligible {
+			if _, err := tx.Exec(claimCtx, rejectEvidenceSQL, sinkID, id); err != nil {
+				return true, err
+			}
+			return false, tx.Commit(claimCtx)
+		}
 	}
 	tag, err := tx.Exec(claimCtx, claimRecordSQL, sinkID, id, attempts)
 	if err != nil {

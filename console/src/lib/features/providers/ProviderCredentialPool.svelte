@@ -288,6 +288,7 @@
     {/each}
   </ul>
   {#if enrollment}<GrantEnrollmentPanel
+      profileId={provider.configuration.profile_id}
       {enrollment}
       bind:input={grantState.input}
       {busy}

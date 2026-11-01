@@ -69,7 +69,7 @@ func clientCode(client, format, surface, origin, keyFile, model string) (string,
 			config = "export const client = new OpenAI({ apiKey, baseURL: " + base + ", maxRetries: 0 });\n"
 		case "anthropic":
 			imports = "import Anthropic from '@anthropic-ai/sdk';\n"
-			config = "export const client = new Anthropic({ apiKey, baseURL: " + base + ", maxRetries: 0 });\n"
+			config = "export const client = new Anthropic({ apiKey, baseURL: " + base + ", maxRetries: 0, defaultHeaders: { 'anthropic-version': '2023-06-01' } });\n"
 		case "gemini":
 			imports = "import { GoogleGenAI } from '@google/genai';\n"
 			config = "export const client = new GoogleGenAI({ apiKey, httpOptions: { baseUrl: " + base + ", apiVersion: 'v1beta' } });\n"
@@ -78,7 +78,7 @@ func clientCode(client, format, surface, origin, keyFile, model string) (string,
 	case "python":
 		imports, config := "from openai import OpenAI\n", "client = OpenAI(api_key=api_key, base_url="+base+", max_retries=0)\n"
 		if surface == "anthropic" {
-			imports, config = "from anthropic import Anthropic\n", "client = Anthropic(api_key=api_key, base_url="+base+", max_retries=0)\n"
+			imports, config = "from anthropic import Anthropic\n", "client = Anthropic(api_key=api_key, base_url="+base+", max_retries=0, default_headers={'anthropic-version': '2023-06-01'})\n"
 		}
 		if surface == "gemini" {
 			imports, config = "from google import genai\n", "client = genai.Client(api_key=api_key, http_options={'base_url': "+base+", 'api_version': 'v1beta'})\n"

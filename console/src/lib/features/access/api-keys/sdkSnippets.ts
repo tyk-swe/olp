@@ -11,7 +11,7 @@ export function sdkSnippet(
   const model = JSON.stringify(routeSlug);
   const origin = endpoint.replace(/\/+$/, '');
   if (sdk === 'anthropic') {
-    return `import Anthropic from "@anthropic-ai/sdk";\n\nconst client = new Anthropic({\n  apiKey: ${key},\n  baseURL: ${JSON.stringify(`${origin}/anthropic`)},\n  maxRetries: 0,\n});\n\nconst message = await client.messages.create({\n  model: ${model},\n  max_tokens: 512,\n  messages: [{ role: "user", content: "Hello" }],\n});`;
+    return `import Anthropic from "@anthropic-ai/sdk";\n\nconst client = new Anthropic({\n  apiKey: ${key},\n  baseURL: ${JSON.stringify(`${origin}/anthropic`)},\n  defaultHeaders: { "anthropic-version": "2023-06-01" },\n  maxRetries: 0,\n});\n\nconst message = await client.messages.create({\n  model: ${model},\n  max_tokens: 512,\n  messages: [{ role: "user", content: "Hello" }],\n});`;
   }
   if (sdk === 'gemini') {
     return `import { GoogleGenAI } from '@google/genai';\n\nconst ai = new GoogleGenAI({\n  apiKey: ${key},\n  httpOptions: {\n    baseUrl: ${JSON.stringify(`${origin}/gemini`)},\n    apiVersion: "v1beta",\n  },\n});\n\nconst response = await ai.models.generateContent({\n  model: ${model},\n  contents: "Hello",\n});`;

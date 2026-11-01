@@ -150,3 +150,45 @@ export async function getPluginIndex(
   );
   return unwrap({ data, error, response });
 }
+
+export type MCPExecutablePermission =
+  components['schemas']['MCPExecutablePermission'];
+
+export async function listMCPExecutables(signal?: AbortSignal) {
+  return unwrap(await apiClient.GET('/api/v1/mcp-executables', { signal }))
+    .items;
+}
+
+export async function reviewMCPExecutable(
+  name: string
+): Promise<MCPExecutablePermission> {
+  return unwrap(
+    await apiClient.POST('/api/v1/mcp-executables/{executable}/review', {
+      params: { path: { executable: name } }
+    })
+  );
+}
+
+export async function permitMCPExecutable(
+  review: MCPExecutablePermission
+): Promise<MCPExecutablePermission> {
+  return unwrap(
+    await apiClient.POST('/api/v1/mcp-executables/{executable}/permit', {
+      params: { path: { executable: review.name } },
+      body: { digest: review.digest, acknowledge_risk: true }
+    })
+  );
+}
+
+export async function revokeMCPExecutable(
+  review: MCPExecutablePermission
+): Promise<void> {
+  ensureOk(
+    await apiClient.DELETE(
+      '/api/v1/mcp-executables/{executable}/permissions/{digest}',
+      {
+        params: { path: { executable: review.name, digest: review.digest } }
+      }
+    )
+  );
+}

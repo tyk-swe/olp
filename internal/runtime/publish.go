@@ -169,6 +169,9 @@ func ReadSnapshot(ctx context.Context, tx pgx.Tx) (*routing.Snapshot, error) {
 	if snapshot.AgentPublications, err = readAgentPublications(ctx, tx); err != nil {
 		return nil, err
 	}
+	if snapshot.MCPServers, err = readMCPServers(ctx, tx); err != nil {
+		return nil, err
+	}
 	snapshot.Guardrails, err = guardrails.ReadRegistry(ctx, tx)
 	if err != nil {
 		return nil, err

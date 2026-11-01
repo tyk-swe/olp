@@ -79,7 +79,8 @@
     'xecguard',
     'zscaler_ai_guard',
     'semantic_guard',
-    'decision_model'
+    'decision_model',
+    'typesafe'
   ] as const satisfies readonly Definition['type'][];
   const access = useRole();
   const client = useQueryClient();
@@ -119,7 +120,12 @@
   let entries = $state<Entry[]>([]);
   let attachPolicy = $state('');
   let scope = $state<
-    'installation' | 'organization' | 'project' | 'route' | 'api-key'
+    | 'installation'
+    | 'organization'
+    | 'project'
+    | 'route'
+    | 'toolset'
+    | 'api-key'
   >('project');
   let scopeID = $state('');
   let order = $state(0);
@@ -130,7 +136,13 @@
   let result = $state<Result | null>(null);
   const external = $derived(
     !type.startsWith('builtin.') &&
-      !['model', 'semantic_guard', 'decision_model', 'plugin'].includes(type)
+      ![
+        'model',
+        'semantic_guard',
+        'decision_model',
+        'typesafe',
+        'plugin'
+      ].includes(type)
   );
   const canEdit = $derived(access.allows('POST /api/v1/guardrails'));
   async function run(action: () => Promise<void>) {
@@ -437,9 +449,9 @@
   <section class="panel">
     <h2>Inherited safeguards</h2>
     <p>
-      Policies run in this order: installation, organization, project, route,
-      then key. Each attachment adds safeguards; narrower scopes cannot remove
-      an inherited policy.
+      Policies run in installation, organization, project, route or toolset, and
+      key order. Each attachment adds safeguards, and narrower scopes cannot
+      remove an inherited policy
     </p>
     <ul>
       {#each attachments.data?.items ?? [] as value (value.id)}<li>
@@ -459,7 +471,7 @@
         >
         <label
           >Scope<select bind:value={scope}
-            >{#each ['installation', 'organization', 'project', 'route', 'api-key'] as value (value)}<option
+            >{#each ['installation', 'organization', 'project', 'route', 'toolset', 'api-key'] as value (value)}<option
                 {value}>{value}</option
               >{/each}</select
           ></label

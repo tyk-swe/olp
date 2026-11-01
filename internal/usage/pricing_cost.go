@@ -2,6 +2,7 @@ package usage
 
 import (
 	"math/big"
+	"slices"
 	"strings"
 	"time"
 )
@@ -40,6 +41,14 @@ type Cost struct{ units *big.Int }
 
 // MaxCost is the largest amount a cost column holds.
 func MaxCost() Cost { return Cost{new(big.Int).Set(maxCostUnits)} }
+
+func ParseCost(text string) (Cost, bool) {
+	units, ok := scaledDecimal(text, costDigits)
+	if !ok || units.Cmp(maxCostUnits) > 0 {
+		return Cost{}, false
+	}
+	return Cost{units}, true
+}
 
 // IsZero reports whether the amount is nothing.
 func (c Cost) IsZero() bool { return c.units == nil || c.units.Sign() == 0 }
@@ -691,6 +700,28 @@ func (p *RoutingPrice) CostBound(input, output int64, generation bool, at time.T
 	if p == nil {
 		return Cost{}, false
 	}
+	return p.costBound(input, output, generation, discount, p.parsed().windowAt(at))
+}
+
+func (p *RoutingPrice) MaximumWindowCostBound(input, output int64, generation bool, discount *RoutingDiscount) (Cost, bool) {
+	if p == nil {
+		return Cost{}, false
+	}
+	return p.costBound(input, output, generation, discount, p.parsed().maximumWindow())
+}
+
+func (r *priceRates) maximumWindow() *big.Int {
+	if !r.valid || len(r.windows) == 0 {
+		return nil
+	}
+	window := slices.MaxFunc(r.windows, func(a, b parsedWindow) int { return a.multiplier.Cmp(b.multiplier) }).multiplier
+	if window.Cmp(costUnit) <= 0 {
+		return nil
+	}
+	return window
+}
+
+func (p *RoutingPrice) costBound(input, output int64, generation bool, discount *RoutingDiscount, window *big.Int) (Cost, bool) {
 	r := p.parsed()
 	if !r.valid {
 		return Cost{}, false
@@ -710,7 +741,7 @@ func (p *RoutingPrice) CostBound(input, output int64, generation bool, at time.T
 	if r.perRequest != nil {
 		bound.Add(bound, r.perRequest)
 	}
-	if window := r.windowAt(at); window != nil {
+	if window != nil {
 		// The product carries twelve places of the multiplier's scale; round
 		// the bound up to a whole unit so it never under-covers the request.
 		bound.Mul(bound, window)
@@ -830,4 +861,38 @@ func (r *RoutingCardRevision) ChargeBound(input, output int64, generation bool, 
 	total.Add(total, new(big.Int).Sub(costUnit, big.NewInt(1)))
 	total.Quo(total, costUnit)
 	return clampCost(total), true
+}
+
+func (p *RoutingPrice) WorkflowModelCostBound(input, output int64, discount *RoutingDiscount) (Cost, bool) {
+	if p == nil || input < 1 || output < 1 {
+		return Cost{}, false
+	}
+	for _, fee := range p.ToolCalls {
+		cost, ok := ParseCost(fee)
+		if !ok || !cost.IsZero() {
+			return Cost{}, false
+		}
+	}
+	return workflowModelCostThroughTiers(p, discount, input, output, p.Tiers)
+}
+
+func workflowModelCostThroughTiers(price *RoutingPrice, discount *RoutingDiscount, input, output int64, tiers []PriceTier) (Cost, bool) {
+	if len(tiers) == 0 {
+		return price.MaximumWindowCostBound(input, output, true, discount)
+	}
+	bound, ok := workflowModelCostThroughTiers(price, discount, input, output, tiers[1:])
+	if !ok {
+		return Cost{}, false
+	}
+	if tiers[0].AboveInputTokens >= input {
+		return bound, true
+	}
+	prior, ok := price.MaximumWindowCostBound(tiers[0].AboveInputTokens, output, true, discount)
+	if !ok {
+		return Cost{}, false
+	}
+	if prior.Cmp(bound) > 0 {
+		return prior, true
+	}
+	return bound, true
 }

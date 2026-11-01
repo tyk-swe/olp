@@ -1,6 +1,6 @@
 //go:build integration
 
-package providers
+package providers_test
 
 import (
 	"bytes"
@@ -19,6 +19,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/database"
+	"github.com/tyk-swe/olp/internal/providers"
 	"github.com/tyk-swe/olp/internal/routes"
 	"github.com/tyk-swe/olp/internal/secrets"
 )
@@ -73,7 +74,7 @@ func TestIntegrationMediaManagementSetupPublishesUsableRoutes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	provider := nativeMediaProbeServer(t)
+	provider, capabilities := providers.NativeMediaProbeServer(t)
 	provider.Access = a
 	mux := http.NewServeMux()
 	a.Register(mux)
@@ -137,8 +138,8 @@ func TestIntegrationMediaManagementSetupPublishesUsableRoutes(t *testing.T) {
 	providerPath := "/api/v1/providers/" + created["id"].(string)
 	models := call("GET", providerPath+"/models", nil, "", 200)
 	modelID := models["items"].([]any)[0].(map[string]any)["id"].(string)
-	var tuples []CapabilityInput
-	for _, tuple := range capabilitiesFor(KindOpenAI, KindOpenAI) {
+	var tuples []providers.CapabilityInput
+	for _, tuple := range capabilities {
 		switch tuple.Operation {
 		case "generation", "token_count", "embeddings", "moderation":
 		default:

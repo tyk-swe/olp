@@ -16,6 +16,7 @@
     publish,
     retire,
     savePublication,
+    saveServer,
     setLabel,
     type Draft,
     type Kind,
@@ -23,7 +24,14 @@
     type Publication,
     type Revision
   } from './api';
-  import { publicationForm, publicationInput, toolPin } from './form';
+  import {
+    publicationForm,
+    publicationInput,
+    serverPricingForm,
+    serverPricingInput,
+    toolPin,
+    type ServerPricingForm
+  } from './form';
 
   const access = useRole();
   const client = useQueryClient();
@@ -36,9 +44,11 @@
   let error = $state('');
   let notice = $state('');
   let credential = $state('');
+  let entraClientSecret = $state('');
   let removeCredential = $state(false);
   let serverID = $state('');
   let server = $state<MCPServer | null>(null);
+  let pricing = $state<ServerPricingForm | null>(null);
   let revisionID = $state('');
   let inspected = $state<Revision | null>(null);
   let confirmRetire = $state(false);
@@ -46,11 +56,13 @@
   const captureOwner = usePrincipalLifetime(() => {
     epoch += 1;
     credential = '';
+    entraClientSecret = '';
     removeCredential = false;
     current = null;
     form = publicationForm();
     inspected = null;
     server = null;
+    pricing = null;
     editor = false;
     busy = false;
     error = '';
@@ -70,6 +82,9 @@
     enabled: kind === 'toolsets'
   }));
   const canManage = $derived(access.allows('POST /api/v1/toolsets'));
+  const canPrice = $derived(
+    access.allows('PUT /api/v1/mcp-servers/{server_id}')
+  );
   const canTrust = $derived(
     access.user?.operations.includes('access') && access.globalScope
   );
@@ -83,11 +98,13 @@
     epoch += 1;
     intent.reset();
     credential = '';
+    entraClientSecret = '';
     removeCredential = false;
     editor = false;
     current = null;
     inspected = null;
     server = null;
+    pricing = null;
     serverID = '';
     error = '';
     confirmRetire = false;
@@ -114,16 +131,61 @@
   }
   async function chooseServer() {
     server = null;
+    pricing = null;
     const selected = serverID;
     const version = epoch;
     const isCurrent = captureOwner();
     if (!selected) return;
     try {
       const value = await getServer(selected);
-      if (isCurrent() && version === epoch && selected === serverID)
+      if (isCurrent() && version === epoch && selected === serverID) {
         server = value;
+        pricing = serverPricingForm(value);
+      }
     } catch (cause) {
       if (isCurrent() && version === epoch) error = errorMessage(cause);
+    }
+  }
+  async function savePricing() {
+    if (!server || !pricing) return;
+    const version = epoch;
+    const isCurrent = captureOwner();
+    const observed = server;
+    const draft = pricing;
+    busy = true;
+    error = '';
+    notice = '';
+    try {
+      const pricingResult = serverPricingInput(observed, draft);
+      if (!pricingResult.ok) {
+        error = pricingResult.message;
+        return;
+      }
+      const input = pricingResult.input;
+      const result = await intent.submit(
+        { action: 'server-pricing', observed, input },
+        async (submission, requestId) =>
+          saveServer(submission.observed, submission.input, requestId)
+      );
+      if (!isCurrent() || version !== epoch) return;
+      server = result;
+      pricing = serverPricingForm(result);
+      serverID = result.id;
+      notice =
+        'Server pricing and limits saved. Republish toolsets to pin new prices, and limits apply to the server now.';
+      try {
+        await client.invalidateQueries(
+          { queryKey: ['agent-publications', 'servers'] },
+          { throwOnError: true }
+        );
+      } catch (cause) {
+        if (isCurrent() && version === epoch)
+          error = `Write saved, but refreshing failed. ${errorMessage(cause)}`;
+      }
+    } catch (cause) {
+      if (isCurrent() && version === epoch) error = errorMessage(cause);
+    } finally {
+      if (isCurrent() && version === epoch) busy = false;
     }
   }
   async function addTool(name: string) {
@@ -131,7 +193,12 @@
     const version = epoch;
     const isCurrent = captureOwner();
     try {
-      const pin = await toolPin(server, name);
+      const pinned = await toolPin(server, name);
+      if (!pinned.ok) {
+        if (isCurrent() && version === epoch) error = pinned.message;
+        return;
+      }
+      const pin = pinned.pin;
       if (
         isCurrent() &&
         version === epoch &&
@@ -141,6 +208,15 @@
     } catch (cause) {
       if (isCurrent() && version === epoch) error = errorMessage(cause);
     }
+  }
+  function classifyTool(alias: string, value: string) {
+    const classification =
+      value === 'read_only' || value === 'approval_required'
+        ? value
+        : undefined;
+    form.tools = form.tools.map((tool) =>
+      tool.alias === alias ? { ...tool, classification } : tool
+    );
   }
   async function inspect() {
     if (!current) return;
@@ -165,8 +241,10 @@
     const selectedKind = kind;
     const input: Draft = publicationInput(kind, form);
     if (kind === 'agents') {
-      if (removeCredential) input.credential = null;
+      if (form.oauthEnabled || removeCredential) input.credential = null;
       else if (credential) input.credential = credential;
+      if (form.oauthEnabled && form.oauthEntra && entraClientSecret)
+        input.entra_client_secret = entraClientSecret;
     }
     busy = true;
     error = '';
@@ -199,6 +277,7 @@
       );
       if (!isCurrent() || version !== epoch) return;
       credential = '';
+      entraClientSecret = '';
       removeCredential = false;
       current = result;
       inspected = null;
@@ -233,8 +312,8 @@
   <p class="eyebrow">Execution foundations</p>
   <h1>Agent publications</h1>
   <p>
-    Review project-owned toolsets, agent contracts, and prompts. These
-    publications do not enable tool calls or agent execution.
+    Publish toolsets for authorized tool calls, and review project-owned agent
+    contracts and prompts.
   </p>
 </header>
 <nav aria-label="Publication kind">
@@ -304,6 +383,7 @@
             disabled={!!current}
             onchange={() => {
               server = null;
+              pricing = null;
               serverID = '';
               form.tools = [];
             }}
@@ -326,7 +406,11 @@
                 >{/each}</select
             ></label
           >
-          {#if server}<p>Catalog <code>{server.catalog.digest}</code></p>
+          {#if server}<p>
+              Transport <code>{server.transport}</code>, MCP
+              <code>{server.catalog.protocol_version}</code>
+            </p>
+            <p>Catalog <code>{server.catalog.digest}</code></p>
             {#each server.catalog.tools as tool (tool.name)}<button
                 type="button"
                 onclick={() => addTool(tool.name)}
@@ -338,7 +422,20 @@
               >{/each}{/if}
           <ul>
             {#each form.tools as tool (tool.alias)}<li>
-                {tool.name} <code>{tool.revision_id}</code><button
+                {tool.name} <code>{tool.revision_id}</code>
+                <label>
+                  Execution classification
+                  <select
+                    aria-label={`Execution classification for ${tool.name}`}
+                    value={tool.classification ?? ''}
+                    onchange={(event) =>
+                      classifyTool(tool.alias, event.currentTarget.value)}
+                  >
+                    <option value="">Unclassified</option>
+                    <option value="read_only">Read-only</option>
+                    <option value="approval_required">Approval required</option>
+                  </select>
+                </label><button
                   type="button"
                   onclick={() =>
                     (form.tools = form.tools.filter(
@@ -349,22 +446,142 @@
           </ul>
           <p>
             Each selected tool pins its certified server revision; catalog drift
-            revokes its live authority.
+            revokes its live authority. Only tools explicitly marked read-only
+            can run automatically in a gateway workflow.
           </p>
+          {#if server && pricing}
+            <fieldset>
+              <legend>Tool pricing and limits</legend>
+              <label
+                >Server unit price (blank unpriced, 0 free) <input
+                  bind:value={pricing.unitPrice}
+                  inputmode="decimal"
+                /></label
+              >
+              {#each server.catalog.tools as tool (tool.name)}
+                <label
+                  >{tool.name} unit price
+                  <input
+                    bind:value={pricing.toolPrices[tool.name]}
+                    inputmode="decimal"
+                  /></label
+                >
+              {/each}
+              <label
+                >Server calls per minute <input
+                  bind:value={pricing.callsPerMinute}
+                  inputmode="numeric"
+                /></label
+              ><label
+                >Server max concurrency <input
+                  bind:value={pricing.maxConcurrency}
+                  inputmode="numeric"
+                /></label
+              ><label
+                >Per-key calls per minute <input
+                  bind:value={pricing.perKeyCallsPerMinute}
+                  inputmode="numeric"
+                /></label
+              ><label
+                >Per-key max concurrency <input
+                  bind:value={pricing.perKeyMaxConcurrency}
+                  inputmode="numeric"
+                /></label
+              >
+              <button
+                type="button"
+                disabled={busy || !canPrice}
+                onclick={() => void savePricing()}>Save pricing</button
+              >
+              <p>
+                Prices are in the installation pricing currency and pin with the
+                certified server revision. Saving recertifies the server, so
+                republish toolsets to pin the new revision.
+              </p>
+            </fieldset>
+          {/if}
         {:else if kind === 'prompts'}
           <label
-            >Template <textarea
-              bind:value={form.template}
-              maxlength="65536"
-              rows="10"></textarea></label
-          ><label
+            >Prompt format <select bind:value={form.promptMode}>
+              <option value="template">Single template</option>
+              <option value="messages">Role-structured messages</option>
+            </select></label
+          >
+          {#if form.promptMode === 'template'}
+            <label
+              >Template <textarea
+                bind:value={form.template}
+                maxlength="65536"
+                rows="10"></textarea></label
+            >
+          {:else}
+            {#each form.messages as message, index (index)}
+              <fieldset>
+                <legend>Message {index + 1}</legend>
+                <label
+                  >Role <select bind:value={message.role}>
+                    <option value="system">System</option>
+                    <option value="user">User</option>
+                    <option value="assistant">Assistant</option>
+                  </select></label
+                >
+                <label
+                  >Content <textarea
+                    bind:value={message.content}
+                    maxlength="65536"
+                    rows="4"></textarea></label
+                >
+                <button
+                  type="button"
+                  disabled={form.messages.length <= 1}
+                  onclick={() =>
+                    (form.messages = form.messages.filter(
+                      (_, i) => i !== index
+                    ))}>Remove message</button
+                >
+              </fieldset>
+            {/each}
+            <button
+              type="button"
+              disabled={form.messages.length >= 256}
+              onclick={() =>
+                (form.messages = [
+                  ...form.messages,
+                  { role: 'user', content: '' }
+                ])}>Add message</button
+            >
+          {/if}
+          <label
             >String variables (comma separated) <input
               bind:value={form.variables}
             /></label
           >
+          <fieldset>
+            <legend>Default generation parameters</legend>
+            <label
+              >Temperature <input
+                inputmode="decimal"
+                pattern="([01](\.[0-9]+)?|2(\.0+)?)"
+                bind:value={form.temperature}
+              /></label
+            ><label
+              >Top P <input
+                inputmode="decimal"
+                pattern="(0(\.[0-9]+)?|1(\.0+)?)"
+                bind:value={form.topP}
+              /></label
+            ><label
+              >Maximum output tokens <input
+                inputmode="numeric"
+                pattern="[1-9][0-9]*"
+                bind:value={form.maxOutputTokens}
+              /></label
+            >
+          </fieldset>
           <p>
             Use simple {'{{name}}'} variables only. Rendered prompts and variable
-            values are not stored here.
+            values are not stored here. Defaults apply only when the request does
+            not set a value.
           </p>
         {:else}
           <label
@@ -397,6 +614,43 @@
               required
             /></label
           ><label
+            >Price per message <input
+              inputmode="decimal"
+              bind:value={form.messagePrice}
+            /></label
+          >
+          <p>Leave blank to disable sending, or enter 0 for free messages.</p>
+          <label
+            >Declared maximum remote work duration in seconds <input
+              inputmode="numeric"
+              pattern="[0-9]+"
+              bind:value={form.remoteWorkBoundSeconds}
+            /></label
+          >
+          <p>
+            The agent must enforce this bound on its own work. Budgeted calls
+            require a bound.
+          </p>
+          <label
+            >Maximum task continuations <input
+              inputmode="numeric"
+              pattern="[0-9]+"
+              bind:value={form.maxTaskContinuations}
+              placeholder="32"
+            /></label
+          >
+          <label
+            >Task deadline in seconds <input
+              inputmode="numeric"
+              pattern="[0-9]+"
+              bind:value={form.taskDeadlineSeconds}
+              placeholder="600"
+            /></label
+          >
+          <p>
+            Continuations are limited to 128 and the deadline to 3600 seconds.
+          </p>
+          <label
             >Pinned toolset revision UUIDs <textarea
               bind:value={form.toolsetRevisions}></textarea></label
           ><label
@@ -407,15 +661,92 @@
               type="password"
               autocomplete="new-password"
               bind:value={credential}
-              disabled={!canTrust}
+              disabled={!canTrust || form.oauthEnabled}
             /></label
           ><label
             ><input
               type="checkbox"
               bind:checked={removeCredential}
-              disabled={!canTrust}
+              disabled={!canTrust || form.oauthEnabled}
             /> Remove credential</label
           >
+          <fieldset disabled={!canTrust}>
+            <legend>Personal OAuth authorization</legend>
+            <label
+              ><input type="checkbox" bind:checked={form.oauthEnabled} /> Use OAuth
+              grants</label
+            >
+            {#if form.oauthEnabled}
+              <p>
+                OAuth replaces any saved bearer credential. Publishing requires
+                a publicly readable agent card for publication and discovery.
+                Task requests use the caller's grant.
+              </p>
+              <label
+                ><input type="checkbox" bind:checked={form.oauthEntra} /> Use Entra
+                on-behalf-of</label
+              >
+              {#if form.oauthEntra}
+                <label
+                  >Workload issuer <input
+                    type="url"
+                    bind:value={form.oauthEntraIssuer}
+                    required
+                  /></label
+                >
+                <label
+                  >Replacement Entra client secret <input
+                    type="password"
+                    autocomplete="new-password"
+                    bind:value={entraClientSecret}
+                  /></label
+                >
+                <p>
+                  Supply the client secret when enabling Entra or changing its
+                  issuer, client ID, or token endpoint.
+                </p>
+              {/if}
+              <label
+                >Client ID <input
+                  bind:value={form.oauthClientID}
+                  required
+                /></label
+              >
+              <label
+                >Audience <input
+                  bind:value={form.oauthAudience}
+                  required
+                /></label
+              >
+              <label
+                >Scopes <input bind:value={form.oauthScopes} required /></label
+              >
+              {#if !form.oauthEntra}<label
+                  >Authorization endpoint <input
+                    type="url"
+                    bind:value={form.oauthAuthorizationEndpoint}
+                    required
+                  /></label
+                >{/if}
+              <label
+                >Token endpoint <input
+                  type="url"
+                  bind:value={form.oauthTokenEndpoint}
+                  required
+                /></label
+              >
+              {#if !form.oauthEntra}<label
+                  >Device authorization endpoint <input
+                    type="url"
+                    bind:value={form.oauthDeviceEndpoint}
+                  /></label
+                >{/if}
+              <p>
+                To change the agent endpoint, remove OAuth and publish the new
+                endpoint and card first. Then configure OAuth again.
+              </p>
+            {/if}
+          </fieldset>
           <p>
             Destination, card, and credential trust changes require installation
             access. Existing credentials are never displayed.
@@ -432,6 +763,7 @@
           !canManage ||
           unsaved ||
           !!credential ||
+          !!entraClientSecret ||
           removeCredential}
         onclick={() => write('publish')}>Publish saved draft</button
       >{#if unsaved}<p>Save edits before publishing.</p>{/if}

@@ -108,6 +108,8 @@ func exportGuardrailPlatform(ctx context.Context, q access.Queryer, doc *Documen
 			err = q.QueryRow(ctx, "SELECT name FROM olp.organizations WHERE id=$1", a.ScopeID).Scan(&entry.Name)
 		case "route":
 			err = q.QueryRow(ctx, "SELECT slug FROM olp.routes WHERE id=$1", a.ScopeID).Scan(&entry.Name)
+		case "toolset":
+			err = q.QueryRow(ctx, "SELECT name FROM olp.agent_publications WHERE id=$1 AND kind='toolset'", a.ScopeID).Scan(&entry.Name)
 		case "api-key":
 			var project string
 			err = q.QueryRow(ctx, "SELECT name,COALESCE(project_id::text,'installation') FROM olp.api_keys WHERE id=$1", a.ScopeID).Scan(&entry.Name, &project)

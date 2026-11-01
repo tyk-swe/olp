@@ -446,7 +446,7 @@ func (s *Server) realtimeCallsCreate(w http.ResponseWriter, r *http.Request) {
 		fail(e)
 		return
 	}
-	if e := s.reserveSessionDebit(bg, x, authority, p.attempt); e != nil {
+	if e := s.reserveSessionDebit(bg, x, authority, p.attempt, nil); e != nil {
 		settleKey(r.Context(), x.lease, false, nil, s.log)
 		releasePin()
 		cancel()

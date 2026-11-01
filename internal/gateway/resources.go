@@ -360,6 +360,19 @@ func (s *Server) reserveState(ctx context.Context, x *call, authority access.Aut
 	return e
 }
 
+func (s *Server) reserveStateAndSlot(ctx context.Context, x *call, authority access.Authority, p *pin) *Error {
+	overall := time.Duration(x.route.OverallTimeout) * time.Millisecond
+	if e := s.reserveState(ctx, x, authority, overall); e != nil {
+		return e
+	}
+	gate := s.gateSlot(ctx, &p.provider, &p.slot, resourceEstimate, s.now().Add(overall), "")
+	if gate.verdict != gateAdmitted {
+		return gateError(gate)
+	}
+	p.hold = gate.hold
+	return nil
+}
+
 func (s *Server) resourceSettle(ctx context.Context, x *call, p *pin) {
 	if p != nil {
 		s.settlePinHold(ctx, x, p.hold, nil)
@@ -1480,16 +1493,10 @@ func (s *Server) fileCall(w http.ResponseWriter, r *http.Request, use retainedUs
 	ctx, cancel := s.stateDeadline(r.Context(), route)
 	defer cancel()
 	defer s.resourceSettle(ctx, x, p)
-	if e := s.reserveState(ctx, x, authority, time.Duration(route.OverallTimeout)*time.Millisecond); e != nil {
+	if e := s.reserveStateAndSlot(ctx, x, authority, p); e != nil {
 		s.stateFail(x, w, e, x.family)
 		return
 	}
-	gate := s.gateSlot(ctx, &p.provider, &p.slot, resourceEstimate, s.now().Add(time.Duration(route.OverallTimeout)*time.Millisecond), "")
-	if gate.verdict != gateAdmitted {
-		s.stateFail(x, w, gateError(gate), x.family)
-		return
-	}
-	p.hold = gate.hold
 	if e := op(ctx, x, authority, res, p, route); e != nil {
 		s.stateFail(x, w, e, x.family)
 	}
@@ -1739,16 +1746,10 @@ func (s *Server) createBatch(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := s.stateDeadline(r.Context(), route)
 	defer cancel()
 	defer s.resourceSettle(ctx, x, p)
-	if e := s.reserveState(ctx, x, authority, time.Duration(route.OverallTimeout)*time.Millisecond); e != nil {
+	if e := s.reserveStateAndSlot(ctx, x, authority, p); e != nil {
 		s.stateFail(x, w, e, x.family)
 		return
 	}
-	gate := s.gateSlot(ctx, &p.provider, &p.slot, resourceEstimate, s.now().Add(time.Duration(route.OverallTimeout)*time.Millisecond), "")
-	if gate.verdict != gateAdmitted {
-		s.stateFail(x, w, gateError(gate), x.family)
-		return
-	}
-	p.hold = gate.hold
 	upstreamFile, _ := json.Marshal(file.UpstreamID)
 	var upstream []byte
 	var strictServing oif.ServingIdentity
@@ -2030,16 +2031,10 @@ func (s *Server) batchCall(w http.ResponseWriter, r *http.Request, use retainedU
 	ctx, cancel := s.stateDeadline(r.Context(), route)
 	defer cancel()
 	defer s.resourceSettle(ctx, x, p)
-	if e := s.reserveState(ctx, x, authority, time.Duration(route.OverallTimeout)*time.Millisecond); e != nil {
+	if e := s.reserveStateAndSlot(ctx, x, authority, p); e != nil {
 		s.stateFail(x, w, e, x.family)
 		return
 	}
-	gate := s.gateSlot(ctx, &p.provider, &p.slot, resourceEstimate, s.now().Add(time.Duration(route.OverallTimeout)*time.Millisecond), "")
-	if gate.verdict != gateAdmitted {
-		s.stateFail(x, w, gateError(gate), x.family)
-		return
-	}
-	p.hold = gate.hold
 	if e := op(ctx, x, authority, res, p, route); e != nil {
 		s.stateFail(x, w, e, x.family)
 	}

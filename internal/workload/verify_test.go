@@ -8,8 +8,10 @@ import (
 	"crypto/rand"
 	"crypto/rsa"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -50,6 +52,87 @@ func TestMappingRouteScopesRequireExplicitGroups(t *testing.T) {
 		t.Fatalf("resource scopes required unrelated route grants: %v", err)
 	}
 }
+
+func agentIssuerConfig(match map[string]string) Config {
+	return Config{
+		Name: "agents", Issuer: "https://issuer.example", JWKSURL: "https://issuer.example/keys", Enabled: true,
+		DisabledKeyIDs: []string{}, Audiences: []string{"gateway"}, Algorithms: []string{"EdDSA"}, MaxLifetimeSeconds: 600,
+		Mappings: []Mapping{{
+			Name: "worker", AgentPrincipal: true, Match: match,
+			ProjectID: "00000000-0000-4000-8000-000000000001", LimitTemplate: "agent",
+			RouteGroups: []string{"generation"}, Scopes: []string{"inference"},
+		}},
+	}
+}
+
+func TestAgentMappingRequiresSubjectAndClient(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		match   map[string]string
+		allowed bool
+	}{
+		{name: "unbound", match: map[string]string{}},
+		{name: "subject only", match: map[string]string{"/sub": "worker"}},
+		{name: "client only", match: map[string]string{"/client_id": "client"}},
+		{name: "subject and client", match: map[string]string{"/sub": "worker", "/client_id": "client"}, allowed: true},
+		{name: "subject and authorized party", match: map[string]string{"/sub": "worker", "/azp": "client"}, allowed: true},
+		{name: "subject and application", match: map[string]string{"/sub": "worker", "/appid": "client"}, allowed: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			err := agentIssuerConfig(test.match).Validate()
+			if (err == nil) != test.allowed {
+				t.Fatalf("mapping allowed = %t, want %t: %v", err == nil, test.allowed, err)
+			}
+		})
+	}
+}
+
+func TestAgentMappingVerifiesBothSignedClaims(t *testing.T) {
+	public, private, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	config := agentIssuerConfig(map[string]string{"/sub": "worker", "/client_id": "client"})
+	if err := config.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	keys := map[string]jose.JSONWebKey{"agent": {Key: public, KeyID: "agent", Algorithm: string(jose.EdDSA)}}
+	now := time.Now()
+	for _, test := range []struct {
+		name    string
+		subject string
+		client  string
+		allowed bool
+	}{
+		{name: "bound identity", subject: "worker", client: "client", allowed: true},
+		{name: "different subject", subject: "other", client: "client"},
+		{name: "different client", subject: "worker", client: "other"},
+		{name: "missing client", subject: "worker"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			claims := struct {
+				Issuer   string   `json:"iss"`
+				Subject  string   `json:"sub"`
+				ClientID string   `json:"client_id,omitempty"`
+				Audience []string `json:"aud"`
+				Issued   int64    `json:"iat"`
+				Expires  int64    `json:"exp"`
+			}{config.Issuer, test.subject, test.client, config.Audiences, now.Unix() - 1, now.Unix() + 120}
+			token, err := Parse(sign(t, jose.EdDSA, private, "agent", claims))
+			if err != nil {
+				t.Fatal(err)
+			}
+			identity, err := token.Verify(config, keys, now)
+			if (err == nil) != test.allowed {
+				t.Fatalf("identity allowed = %t, want %t: %v", err == nil, test.allowed, err)
+			}
+			if test.allowed && (identity.Subject != test.subject || !identity.Mapping.AgentPrincipal) {
+				t.Fatalf("verified identity lost the agent binding: %+v", identity)
+			}
+		})
+	}
+}
+
 func fixtureClaims(now time.Time) map[string]any {
 	return map[string]any{"iss": "https://issuer.example", "sub": "private-service-account", "aud": []string{"gateway"}, "iat": now.Unix() - 1, "exp": now.Unix() + 120, "nbf": now.Unix() - 1, "repository": "example/repo", "customer": "customer-1"}
 }
@@ -186,3 +269,83 @@ func TestCachedKeyRotationAndBoundedOutage(t *testing.T) {
 
 // The caller that starts a due refresh answers from the cache while the
 // issuer stalls, and the refresh still lands once the issuer answers.
+
+type entraUserClaims struct {
+	Issuer       string          `json:"iss"`
+	Subject      string          `json:"sub"`
+	Audience     string          `json:"aud"`
+	IssuedAt     int64           `json:"iat"`
+	Expires      int64           `json:"exp"`
+	Repository   string          `json:"repository"`
+	EndUser      string          `json:"customer"`
+	Scopes       json.RawMessage `json:"scp,omitempty"`
+	IdentityType json.RawMessage `json:"idtyp,omitempty"`
+}
+
+func TestEntraUserRequiresDelegatedClaimsOnVerifiedToken(t *testing.T) {
+	public, private, keyErr := ed25519.GenerateKey(rand.Reader)
+	if keyErr != nil {
+		t.Fatal(keyErr)
+	}
+	config := fixtureConfig()
+	keys := map[string]jose.JSONWebKey{"entra": {Key: public, KeyID: "entra", Algorithm: string(jose.EdDSA), Use: "sig"}}
+	now := time.Now()
+	for _, test := range []struct {
+		name         string
+		issuer       string
+		audience     string
+		scopes       json.RawMessage
+		identityType json.RawMessage
+		expires      time.Duration
+		accepted     bool
+	}{
+		{"delegated-user", config.Issuer, "gateway", json.RawMessage(`"tools.read tools.write"`), json.RawMessage(`"user"`), time.Minute, true},
+		{"delegated-without-type", config.Issuer, "gateway", json.RawMessage(`"tools.read"`), nil, time.Minute, true},
+		{"wrong-issuer", config.Issuer + "/other", "gateway", json.RawMessage(`"tools.read"`), nil, time.Minute, false},
+		{"wrong-audience", config.Issuer, "other", json.RawMessage(`"tools.read"`), nil, time.Minute, false},
+		{"missing-scopes", config.Issuer, "gateway", nil, nil, time.Minute, false},
+		{"blank-scopes", config.Issuer, "gateway", json.RawMessage(`"   "`), nil, time.Minute, false},
+		{"wrong-scope-type", config.Issuer, "gateway", json.RawMessage(`["tools.read"]`), nil, time.Minute, false},
+		{"bounded-scopes", config.Issuer, "gateway", json.RawMessage(`"` + strings.Repeat("x", 4097) + `"`), nil, time.Minute, false},
+		{"application", config.Issuer, "gateway", json.RawMessage(`"tools.read"`), json.RawMessage(`"app"`), time.Minute, false},
+		{"wrong-identity-type", config.Issuer, "gateway", json.RawMessage(`"tools.read"`), json.RawMessage(`true`), time.Minute, false},
+		{"expired", config.Issuer, "gateway", json.RawMessage(`"tools.read"`), nil, -time.Second, false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			claims := entraUserClaims{Issuer: config.Issuer, Subject: "private-subject", Audience: "gateway", IssuedAt: now.Add(-time.Minute).Unix(), Expires: now.Add(test.expires).Unix(), Repository: "example/repo", EndUser: "private-end-user", Scopes: test.scopes, IdentityType: test.identityType}
+			raw := sign(t, jose.EdDSA, private, "entra", claims)
+			token, parseErr := Parse(raw)
+			if parseErr != nil {
+				t.Fatal(parseErr)
+			}
+			if _, verifyErr := token.Verify(config, keys, now.Add(-2*time.Second)); verifyErr != nil {
+				t.Fatal(verifyErr)
+			}
+			assertion, err := token.EntraUser(test.issuer, test.audience)
+			if !test.accepted {
+				if err == nil {
+					t.Fatal("nondelegated or mismatched identity became a user assertion")
+				}
+				return
+			}
+			if err != nil || assertion.Token() != raw || !assertion.ExpiresAt().Equal(time.Unix(claims.Expires, 0)) {
+				t.Fatal("verified delegated assertion lost its token or expiry")
+			}
+			if strings.Contains(fmt.Sprint(assertion), raw) || strings.Contains(fmt.Sprint(assertion), claims.Subject) {
+				t.Fatal("formatted assertion leaked private identity")
+			}
+		})
+	}
+}
+
+func TestRequestAssertionStaysInItsRequestContext(t *testing.T) {
+	base := context.Background()
+	first := WithAssertion(base, "first-private-assertion")
+	second := WithAssertion(base, "second-private-assertion")
+	if RequestAssertion(base) != "" || RequestAssertion(first) != "first-private-assertion" || RequestAssertion(second) != "second-private-assertion" {
+		t.Fatal("request assertion crossed context boundaries")
+	}
+	if RequestAssertion(context.WithValue(first, struct{}{}, true)) != "first-private-assertion" {
+		t.Fatal("nested request context lost its assertion")
+	}
+}

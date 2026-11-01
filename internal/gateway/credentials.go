@@ -1,22 +1,17 @@
 package gateway
 
 import (
-	"errors"
 	"net/http"
-	"slices"
 	"strings"
 
 	"github.com/tyk-swe/olp/internal/access"
-	"github.com/tyk-swe/olp/internal/runtime"
+	"github.com/tyk-swe/olp/internal/consumerauth"
 )
 
 // bearer returns the token of an Authorization header that uses the Bearer
 // scheme, which clients spell in any case.
 func bearer(header string) (string, bool) {
-	if len(header) < 7 || !strings.EqualFold(header[:7], "Bearer ") {
-		return "", false
-	}
-	return strings.TrimSpace(header[7:]), true
+	return consumerauth.Bearer(header)
 }
 
 // bearerToken is the bearer token a request's Authorization header carries.
@@ -95,42 +90,56 @@ func (s *Server) bedrockAuthenticate(r *http.Request) (access.Authority, *Error)
 	return s.authenticateRequest(r, token, "inference")
 }
 
-func (s *Server) authenticateRequest(r *http.Request, token, scope string) (access.Authority, *Error) {
-	authority, e := s.authorizeKey(token, scope)
-	if e != nil {
-		return authority, e
+func consumerFailure(failure *consumerauth.Failure) *Error {
+	if failure == nil {
+		return nil
 	}
-	if e = s.checkKeyAddress(r, authority); e != nil || scope != "inference" {
-		return authority, e
+	switch failure.Status {
+	case http.StatusUnauthorized:
+		return authenticationError(failure.Code, failure.Message)
+	case http.StatusForbidden:
+		return permissionError(failure.Code, failure.Message)
+	default:
+		return serverError(failure.Status, failure.Code, failure.Message)
+	}
+}
+
+func (s *Server) authenticateRequest(r *http.Request, token, scope string) (access.Authority, *Error) {
+	authority, failure := s.authenticateKey(r, token, scope)
+	if failure != nil {
+		return access.Authority{}, failure
+	}
+	if authority.TaskCapability != nil && !taskCapabilityEndpoint(r) {
+		return access.Authority{}, permissionError("permission_denied", "This task capability cannot use this endpoint.")
+	}
+	if scope != "inference" {
+		return authority, nil
 	}
 	return s.identifyEndUser(r, authority)
 }
 
-func (s *Server) checkKeyAddress(r *http.Request, authority access.Authority) *Error {
-	if len(authority.Policy.AllowedCIDRs) != 0 && !authority.AllowsClientIP(ClientIP(r, s.cfg.TrustedProxies)) {
-		return permissionError("ip_not_allowed", "This API key does not allow the client address.")
+func taskCapabilityEndpoint(r *http.Request) bool {
+	if r.Method != http.MethodPost {
+		return false
 	}
-	return nil
+	switch r.URL.Path {
+	case "/v1/chat/completions", "/v1/responses", "/anthropic/v1/messages":
+		return true
+	}
+	model, ok := strings.CutPrefix(r.URL.Path, "/gemini/v1beta/models/")
+	if !ok || strings.Contains(model, "/") {
+		return false
+	}
+	for _, suffix := range []string{":generateContent", ":streamGenerateContent"} {
+		if name, found := strings.CutSuffix(model, suffix); found && name != "" {
+			return true
+		}
+	}
+	return false
 }
 
-// authorizeKey resolves a presented key against the pinned key authority,
-// which fails closed while it is stale, and checks that the key is live and
-// carries scope.
-func (s *Server) authorizeKey(token, scope string) (access.Authority, *Error) {
-	authority, err := s.Runtime.Authenticate(token)
-	switch {
-	case errors.Is(err, runtime.ErrStaleAuthority):
-		return access.Authority{}, serverError(http.StatusServiceUnavailable, "authority_unavailable", "Key authority is unavailable; retry shortly.")
-	case err != nil:
-		return access.Authority{}, authenticationError("invalid_api_key", "Incorrect API key provided.")
-	case authority.RevokedAt != nil:
-		return access.Authority{}, authenticationError("invalid_api_key", "This API key has been revoked.")
-	case authority.ExpiresAt != nil && !authority.ExpiresAt.After(s.now()):
-		return access.Authority{}, authenticationError("invalid_api_key", "This API key has expired.")
-	case !slices.Contains(authority.Policy.Scopes, scope):
-		return access.Authority{}, permissionError("permission_denied", "This API key does not have the "+scope+" scope.")
-	}
-	return *authority, nil
+func (s *Server) checkKeyAddress(r *http.Request, authority access.Authority) *Error {
+	return consumerFailure(consumerauth.CheckAddress(authority, r, s.cfg.TrustedProxies))
 }
 
 // dropIngressQuery removes the query parameters a client surface sends that
@@ -163,4 +172,12 @@ func (x *call) dropQueryKey() *Error {
 	}
 	delete(x.semanticQuery, "key")
 	return nil
+}
+
+func (s *Server) authenticateKey(r *http.Request, token, scope string) (access.Authority, *Error) {
+	authority, failure := consumerauth.Authenticate(s.Runtime, r, token, scope, s.cfg.TrustedProxies, s.now())
+	if failure != nil {
+		return access.Authority{}, consumerFailure(failure)
+	}
+	return authority, nil
 }

@@ -1,3 +1,9 @@
+import type { CredentialSlot } from '$lib/features/providers/api/credentials';
+export type PaidTargetOption = {
+  id: string;
+  name: string;
+  slots: CredentialSlot[];
+};
 import type {
   CodeAccount,
   CodeAttempt,
@@ -17,6 +23,7 @@ export type CodeEditing =
 
 const adapterLabels: Record<string, string> = {
   codex: 'Codex',
+  antigravity: 'Antigravity',
   opencode_go: 'OpenCode Go',
   zai_coding: 'GLM Coding Plan',
   minimax_plan: 'MiniMax M Plan',
@@ -27,6 +34,17 @@ const adapterLabels: Record<string, string> = {
 /** The subscription family an account or a published route serves. */
 export function adapterLabel(adapter: string | null | undefined): string {
   return adapter ? (adapterLabels[adapter] ?? adapter) : 'No adapter';
+}
+
+const servingHealthLabels: Record<CodeAccount['health'], string> = {
+  unknown: 'Unknown',
+  healthy: 'Healthy',
+  unavailable: 'Temporary upstream failure',
+  quota_limited: 'Provider rate or quota limit'
+};
+
+export function servingHealthLabel(health: CodeAccount['health']): string {
+  return servingHealthLabels[health];
 }
 
 const clientLabels: Record<string, string> = {
@@ -97,6 +115,23 @@ export function reservationLabel(attempt: CodeAttempt): string {
   if (attempt.state === 'bound_violation')
     return 'Bound violated — budgeted admission blocked';
   return 'Original reservation';
+}
+
+export function usageCertaintyLabel(attempt: CodeAttempt): string {
+  if (attempt.state === 'prepared') return 'Awaiting dispatch';
+  if (attempt.state === 'aborted') return 'Not dispatched';
+  if (attempt.nonexecution && attempt.reported_tokens === 0)
+    return 'Confirmed zero consumption';
+  if (attempt.reported_tokens !== null) return 'Reported total';
+  return 'Unknown consumption';
+}
+
+export function recoveryReasonLabel(attempt: CodeAttempt): string {
+  if (attempt.recovery_reason === 'credential_rejected')
+    return 'Credential rejection, proven not executed';
+  if (attempt.recovery_reason === 'quota_rejected')
+    return 'Quota rejection, proven not executed';
+  return 'Recovery reason not recorded';
 }
 
 export function refusalAdvice(code: string): string {

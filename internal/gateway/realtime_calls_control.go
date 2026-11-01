@@ -94,7 +94,7 @@ func (s *Server) runWebRTCControl(sess *webrtcSession) {
 
 func (s *Server) webrtcAuthority(sess *webrtcSession) *Error {
 	x := sess.x
-	authority, err := s.Runtime.Authenticate(sess.token)
+	authority, err := s.reauthenticateSession(sess.ctx, x, sess.token)
 	if err != nil || authority == nil || authority.ID != sess.keyID || !authority.Allows("inference", x.route.Slug, x.route.ProjectID, s.now()) || !authority.AllowsEndUser(x.endUserDigest) || (authority.WorkloadIssuerID != nil && authority.EndUserDigest != x.endUserDigest) || !authority.AllowsAttribution(x.attribution) || !authority.AllowsClientIP(x.request.clientIP) {
 		return permissionError("key_revoked", "The realtime session no longer has route authority.")
 	}

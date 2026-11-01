@@ -1,11 +1,37 @@
 package process
 
 import (
+	"context"
+	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/jackc/pgx/v5/pgxpool"
 )
+
+func TestDebitReconciliationStopsAfterCancellationWithUnavailableLedger(t *testing.T) {
+	pool, err := pgxpool.New(t.Context(), "postgres://olp:olp@127.0.0.1:1/olp?sslmode=disable")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pool.Close()
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	done := make(chan struct{})
+	go func() {
+		runDebitReconciliation(ctx, pool, nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("cancelled debit worker waited for the unavailable ledger or next reconciliation interval")
+	}
+}
 
 func passwordFixture(t *testing.T, content []byte, perm os.FileMode) string {
 	t.Helper()

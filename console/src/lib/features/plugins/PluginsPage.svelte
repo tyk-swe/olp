@@ -6,6 +6,7 @@
   import { useRole } from '$lib/features/access/session/useRole.svelte';
   import { pluginKeys } from '$lib/features/plugins/pluginKeys';
   import UnconfinedPlugins from '$lib/features/plugins/UnconfinedPlugins.svelte';
+  import MCPExecutables from '$lib/features/plugins/MCPExecutables.svelte';
   import PluginIndexSection from '$lib/features/plugins/PluginIndex.svelte';
   import { indexEntryForDigest } from '$lib/features/plugins/pluginIndex';
   import {
@@ -364,6 +365,10 @@
     enabled={plugins.data.unconfined_plugins_enabled}
     {canManage}
     onPermitted={refreshPlugins}
+  />
+  <MCPExecutables
+    enabled={plugins.data.unconfined_plugins_enabled}
+    {canManage}
   />
 {/if}
 

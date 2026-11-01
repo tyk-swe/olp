@@ -190,7 +190,7 @@ func validateGuardrailPolicies(doc *Document) error {
 		policies[key] = p
 	}
 	for _, a := range doc.GuardrailAttachments {
-		if _, ok := policies[portableKey(a.PolicyProject, a.Policy)]; !ok || a.Order < 0 || !slices.Contains([]string{"installation", "organization", "project", "route", "api-key"}, a.Scope) {
+		if _, ok := policies[portableKey(a.PolicyProject, a.Policy)]; !ok || a.Order < 0 || !slices.Contains([]string{"installation", "organization", "project", "route", "toolset", "api-key"}, a.Scope) {
 			return access.Invalid("guardrail_attachments", "Choose a declared policy and a valid additive attachment.")
 		}
 	}
@@ -246,6 +246,9 @@ func planGuardrailPolicies(ctx context.Context, q access.Queryer, doc *Document,
 		action := "create"
 		for _, old := range current.GuardrailAttachments {
 			if old.Scope != a.Scope || !strings.EqualFold(old.Name, a.Name) || !strings.EqualFold(old.Project, a.Project) || old.Order != a.Order {
+				continue
+			}
+			if a.Scope == "toolset" && !strings.EqualFold(old.PolicyProject, a.PolicyProject) {
 				continue
 			}
 			if portableKey(old.PolicyProject, old.Policy) == portableKey(a.PolicyProject, a.Policy) {
@@ -331,104 +334,133 @@ func applyGuardrailPolicies(ctx context.Context, tx pgx.Tx, p access.Principal, 
 		}
 	}
 	for _, a := range doc.GuardrailAttachments {
-		project, err := projectIDByName(ctx, tx, a.PolicyProject)
-		if err != nil {
-			return err
-		}
-		var rid string
-		if err = tx.QueryRow(ctx, "SELECT active_revision_id::text FROM olp.guardrail_policies WHERE project_id IS NOT DISTINCT FROM $1::uuid AND lower(name)=lower($2) AND retired_at IS NULL", project, a.Policy).Scan(&rid); err != nil {
-			return err
-		}
-		var scopeID *string
-		draftAttachment := false
-		switch a.Scope {
-		case "installation":
-			if !p.AllProjects {
-				return access.Forbidden()
-			}
-		case "organization":
-			var id string
-			if err = tx.QueryRow(ctx, "SELECT id::text FROM olp.organizations WHERE lower(name)=lower($1)", a.Name).Scan(&id); err != nil {
-				return err
-			}
-			if err = p.Organization(id, access.Change); err != nil {
-				return err
-			}
-			scopeID = &id
-		case "project":
-			scopeID, err = projectIDByName(ctx, tx, a.Name)
-		case "route":
-			var id string
-			var owner *string
-			err = tx.QueryRow(ctx, "SELECT id::text,project_id::text FROM olp.route_drafts WHERE slug=$1 AND project_id IS NOT DISTINCT FROM $2::uuid ORDER BY updated_at DESC LIMIT 1", a.Name, project).Scan(&id, &owner)
-			if err == nil {
-				draftAttachment = true
-			} else if errors.Is(err, pgx.ErrNoRows) {
-				err = tx.QueryRow(ctx, "SELECT id::text,project_id::text FROM olp.routes WHERE slug=$1", a.Name).Scan(&id, &owner)
-			}
-			if err == nil && !reflect.DeepEqual(owner, project) {
-				return access.Invalid("guardrail_attachments", "Route and policy must belong to the same project.")
-			}
-			scopeID = &id
-		case "api-key":
-			var id string
-			keyProject, e := projectIDByName(ctx, tx, a.Project)
-			if e != nil {
-				return e
-			}
-			rows, e := tx.Query(ctx, "SELECT id::text FROM olp.api_keys WHERE project_id IS NOT DISTINCT FROM $1::uuid AND name=$2 AND revoked_at IS NULL", keyProject, a.Name)
-			if e != nil {
-				return e
-			}
-			ids, e := pgx.CollectRows(rows, pgx.RowTo[string])
-			if e != nil {
-				return e
-			}
-			if len(ids) != 1 || !reflect.DeepEqual(keyProject, project) {
-				return access.Invalid("guardrail_attachments", "API key name must resolve uniquely in the policy project.")
-			}
-			id = ids[0]
-			scopeID = &id
-		}
-		if err != nil {
-			return err
-		}
-		if err = p.Project(project, access.Change); err != nil {
-			return err
-		}
-		if draftAttachment {
-			if err = stageGuardrailAttachment(ctx, tx, *scopeID, rid, a.Order, p.UserID()); err != nil {
-				return err
-			}
+		if a.Scope == "toolset" {
 			continue
 		}
-		if err = guardrails.AuthorizeAttachment(ctx, tx, p, guardrails.Attachment{Scope: a.Scope, ScopeID: stringValue(scopeID)}, access.Change); err != nil {
+		if err := applyGuardrailAttachment(ctx, tx, p, a); err != nil {
 			return err
 		}
-		var current string
-		err = tx.QueryRow(ctx, "SELECT policy_revision_id::text FROM olp.guardrail_attachments WHERE scope=$1 AND scope_id IS NOT DISTINCT FROM $2::uuid AND position=$3", a.Scope, scopeID, a.Order).Scan(&current)
-		if err == nil && current == rid {
+	}
+	return nil
+}
+
+func applyToolsetGuardrailAttachments(ctx context.Context, tx pgx.Tx, p access.Principal, doc *Document) error {
+	for _, a := range doc.GuardrailAttachments {
+		if a.Scope != "toolset" {
 			continue
 		}
+		if err := applyGuardrailAttachment(ctx, tx, p, a); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func applyGuardrailAttachment(ctx context.Context, tx pgx.Tx, p access.Principal, a GuardrailAttachmentEntry) error {
+	project, err := projectIDByName(ctx, tx, a.PolicyProject)
+	if err != nil {
+		return err
+	}
+	var rid string
+	if err = tx.QueryRow(ctx, "SELECT active_revision_id::text FROM olp.guardrail_policies WHERE project_id IS NOT DISTINCT FROM $1::uuid AND lower(name)=lower($2) AND retired_at IS NULL", project, a.Policy).Scan(&rid); err != nil {
+		return err
+	}
+	var scopeID *string
+	draftAttachment := false
+	switch a.Scope {
+	case "installation":
+		if !p.AllProjects {
+			return access.Forbidden()
+		}
+	case "organization":
+		var id string
+		if err = tx.QueryRow(ctx, "SELECT id::text FROM olp.organizations WHERE lower(name)=lower($1)", a.Name).Scan(&id); err != nil {
+			return err
+		}
+		if err = p.Organization(id, access.Change); err != nil {
+			return err
+		}
+		scopeID = &id
+	case "project":
+		scopeID, err = projectIDByName(ctx, tx, a.Name)
+	case "toolset":
+		var id string
+		err = tx.QueryRow(ctx, "SELECT id::text FROM olp.agent_publications WHERE project_id IS NOT DISTINCT FROM $1::uuid AND kind='toolset' AND lower(name)=lower($2) AND NOT retired", project, a.Name).Scan(&id)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return access.Invalid("guardrail_attachments", "Toolset and policy must belong to the same project.")
+		}
+		scopeID = &id
+	case "route":
+		var id string
+		var owner *string
+		err = tx.QueryRow(ctx, "SELECT id::text,project_id::text FROM olp.route_drafts WHERE slug=$1 AND project_id IS NOT DISTINCT FROM $2::uuid ORDER BY updated_at DESC LIMIT 1", a.Name, project).Scan(&id, &owner)
 		if err == nil {
-			var same bool
-			if err = tx.QueryRow(ctx, "SELECT a.policy_id=b.policy_id FROM olp.guardrail_policy_revisions a,olp.guardrail_policy_revisions b WHERE a.id=$1 AND b.id=$2", current, rid).Scan(&same); err != nil {
-				return err
-			}
-			if !same {
-				return access.Invalid("guardrail_attachments", "An additive attachment cannot replace a different policy at this position.")
-			}
-			if _, err = tx.Exec(ctx, "UPDATE olp.guardrail_attachments SET policy_revision_id=$4,etag=$5 WHERE scope=$1 AND scope_id IS NOT DISTINCT FROM $2::uuid AND position=$3", a.Scope, scopeID, a.Order, rid, access.NewID()); err != nil {
-				return err
-			}
-			continue
+			draftAttachment = true
+		} else if errors.Is(err, pgx.ErrNoRows) {
+			err = tx.QueryRow(ctx, "SELECT id::text,project_id::text FROM olp.routes WHERE slug=$1", a.Name).Scan(&id, &owner)
 		}
-		if !errors.Is(err, pgx.ErrNoRows) {
+		if err == nil && !reflect.DeepEqual(owner, project) {
+			return access.Invalid("guardrail_attachments", "Route and policy must belong to the same project.")
+		}
+		scopeID = &id
+	case "api-key":
+		var id string
+		keyProject, e := projectIDByName(ctx, tx, a.Project)
+		if e != nil {
+			return e
+		}
+		rows, e := tx.Query(ctx, "SELECT id::text FROM olp.api_keys WHERE project_id IS NOT DISTINCT FROM $1::uuid AND name=$2 AND revoked_at IS NULL", keyProject, a.Name)
+		if e != nil {
+			return e
+		}
+		ids, e := pgx.CollectRows(rows, pgx.RowTo[string])
+		if e != nil {
+			return e
+		}
+		if len(ids) != 1 || !reflect.DeepEqual(keyProject, project) {
+			return access.Invalid("guardrail_attachments", "API key name must resolve uniquely in the policy project.")
+		}
+		id = ids[0]
+		scopeID = &id
+	}
+	if err != nil {
+		return err
+	}
+	if err = p.Project(project, access.Change); err != nil {
+		return err
+	}
+	if draftAttachment {
+		if err = stageGuardrailAttachment(ctx, tx, *scopeID, rid, a.Order, p.UserID()); err != nil {
 			return err
 		}
-		if _, err = tx.Exec(ctx, "INSERT INTO olp.guardrail_attachments(id,scope,scope_id,policy_revision_id,position,etag,created_by) VALUES($1,$2,$3,$4,$5,$6,$7)", access.NewID(), a.Scope, scopeID, rid, a.Order, access.NewID(), p.UserID()); err != nil {
+		return nil
+	}
+	if err = guardrails.AuthorizeAttachment(ctx, tx, p, guardrails.Attachment{Scope: a.Scope, ScopeID: stringValue(scopeID)}, access.Change); err != nil {
+		return err
+	}
+	var current string
+	err = tx.QueryRow(ctx, "SELECT policy_revision_id::text FROM olp.guardrail_attachments WHERE scope=$1 AND scope_id IS NOT DISTINCT FROM $2::uuid AND position=$3", a.Scope, scopeID, a.Order).Scan(&current)
+	if err == nil && current == rid {
+		return nil
+	}
+	if err == nil {
+		var same bool
+		if err = tx.QueryRow(ctx, "SELECT a.policy_id=b.policy_id FROM olp.guardrail_policy_revisions a,olp.guardrail_policy_revisions b WHERE a.id=$1 AND b.id=$2", current, rid).Scan(&same); err != nil {
 			return err
 		}
+		if !same {
+			return access.Invalid("guardrail_attachments", "An additive attachment cannot replace a different policy at this position.")
+		}
+		if _, err = tx.Exec(ctx, "UPDATE olp.guardrail_attachments SET policy_revision_id=$4,etag=$5 WHERE scope=$1 AND scope_id IS NOT DISTINCT FROM $2::uuid AND position=$3", a.Scope, scopeID, a.Order, rid, access.NewID()); err != nil {
+			return err
+		}
+		return nil
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return err
+	}
+	if _, err = tx.Exec(ctx, "INSERT INTO olp.guardrail_attachments(id,scope,scope_id,policy_revision_id,position,etag,created_by) VALUES($1,$2,$3,$4,$5,$6,$7)", access.NewID(), a.Scope, scopeID, rid, a.Order, access.NewID(), p.UserID()); err != nil {
+		return err
 	}
 	return nil
 }

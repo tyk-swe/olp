@@ -545,15 +545,9 @@ func (s *Server) cloudBatchCall(w http.ResponseWriter, r *http.Request, cancel b
 	ctx, stop := s.stateDeadline(r.Context(), route)
 	defer stop()
 	defer s.resourceSettle(ctx, x, p)
-	if err := s.reserveState(ctx, x, authority, time.Duration(route.OverallTimeout)*time.Millisecond); err != nil {
+	if err := s.reserveStateAndSlot(ctx, x, authority, p); err != nil {
 		s.cloudBatchFail(x, w, err)
 		return
-	}
-	if gate := s.gateSlot(ctx, &p.provider, &p.slot, resourceEstimate, s.now().Add(time.Duration(route.OverallTimeout)*time.Millisecond), ""); gate.verdict != gateAdmitted {
-		s.cloudBatchFail(x, w, gateError(gate))
-		return
-	} else {
-		p.hold = gate.hold
 	}
 	if cancel {
 		action := "cancel"

@@ -1,6 +1,76 @@
 import AxeBuilder from '@axe-core/playwright';
 import { test, expect } from '../playwright';
 
+test('creates a TypeSafe guardrail without endpoint egress acknowledgement', async ({
+  page
+}) => {
+  const operations = ['read', 'configure', 'playground', 'keys', 'settings'];
+  await page.route('**/api/v1/**', async (route) => {
+    const request = route.request();
+    const path = new URL(request.url()).pathname;
+    let body: unknown = { items: [] };
+    if (path === '/api/v1/sessions/current') {
+      body = {
+        user: {
+          id: 'owner',
+          email: 'owner@example.test',
+          display_name: 'Owner',
+          role: 'owner',
+          access_scope: 'global',
+          operations
+        },
+        csrf_token: 'test-csrf',
+        operations,
+        installation_name: 'Guardrail test'
+      };
+    }
+    if (path === '/api/v1/projects')
+      body = { items: [{ id: 'project', name: 'Project' }] };
+    if (path === '/api/v1/guardrails' && request.method() === 'POST') {
+      const definition = request.postDataJSON();
+      expect(definition).toMatchObject({
+        name: 'Relevance pruning',
+        project_id: 'project',
+        type: 'typesafe',
+        configuration: { route: 'relevance-route' }
+      });
+      expect(definition.configuration).not.toHaveProperty('content_egress');
+      body = {
+        ...definition,
+        id: 'typesafe',
+        revision_id: 'revision',
+        revision: 1,
+        etag: 'etag'
+      };
+    }
+    await route.fulfill({
+      json: body,
+      headers: { 'Cache-Control': 'no-store' }
+    });
+  });
+  await page.goto('/guardrails');
+  const form = page
+    .locator('section.panel')
+    .filter({ has: page.getByRole('heading', { name: 'Definitions' }) })
+    .locator('form');
+  await form.getByLabel('Name', { exact: true }).fill('Relevance pruning');
+  await form.getByRole('combobox', { name: 'Project' }).selectOption('project');
+  await form.getByRole('combobox', { name: 'Type' }).selectOption('typesafe');
+  await form
+    .getByLabel('Configuration (JSON)')
+    .fill('{"route":"relevance-route"}');
+  await expect(
+    form.getByText(
+      'I acknowledge that this guardrail sends inspected content',
+      { exact: false }
+    )
+  ).toHaveCount(0);
+  await form.getByRole('button', { name: 'Save draft' }).click();
+  await expect(
+    page.getByText('Draft saved. Activate its revision when it is ready.')
+  ).toBeVisible();
+});
+
 test('guardrail editors and playground support keyboard access without storing content', async ({
   page
 }) => {

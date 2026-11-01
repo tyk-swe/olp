@@ -39,18 +39,26 @@ func TestGuardrailTypesCanBePersisted(t *testing.T) {
 	}
 	var api struct {
 		Components struct {
-			Schemas map[string]struct {
-				Properties map[string]struct {
-					Enum []string `json:"enum"`
-				} `json:"properties"`
-			} `json:"schemas"`
+			Schemas map[string]json.RawMessage `json:"schemas"`
 		} `json:"components"`
 	}
 	if err := json.Unmarshal(raw, &api); err != nil {
 		t.Fatal(err)
 	}
 	for _, name := range []string{"CreateGuardrailRequest", "GuardrailResponse", "ConfigurationGuardrail"} {
-		kinds := api.Components.Schemas[name].Properties["type"].Enum
+		var schema struct {
+			Properties map[string]json.RawMessage `json:"properties"`
+		}
+		if err := json.Unmarshal(api.Components.Schemas[name], &schema); err != nil {
+			t.Fatal(err)
+		}
+		var property struct {
+			Enum []string `json:"enum"`
+		}
+		if err := json.Unmarshal(schema.Properties["type"], &property); err != nil {
+			t.Fatal(err)
+		}
+		kinds := property.Enum
 		if len(kinds) == 0 {
 			t.Fatalf("%s type contract is missing", name)
 		}

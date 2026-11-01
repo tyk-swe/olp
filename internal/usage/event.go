@@ -47,6 +47,21 @@ func Keyless(origin string) bool {
 	return origin == OriginShadow || origin == OriginProbe || origin == OriginPlayground
 }
 
+func validateDelegation(event *Event) error {
+	if event.AgentPrincipalID == "" && event.MemberPrincipalID == "" && event.DelegationPairDigest == "" {
+		return nil
+	}
+	if _, err := uuid.Parse(event.AgentPrincipalID); err != nil || !endUserDigestPattern.MatchString(event.DelegationPairDigest) || Keyless(event.Origin) || event.APIKeyID == "" {
+		return errors.New("request metadata delegation attribution is invalid")
+	}
+	if event.MemberPrincipalID != "" {
+		if _, err := uuid.Parse(event.MemberPrincipalID); err != nil {
+			return errors.New("request metadata delegation member is invalid")
+		}
+	}
+	return nil
+}
+
 // Event is one request's content-free metadata. Every optional field is
 // serialized explicitly, so a reader can tell "absent" from "not yet known".
 type Event struct {
@@ -65,8 +80,11 @@ type Event struct {
 	// EndUserDigest contains a project-scoped digest, never a caller identifier.
 	EndUserDigest string `json:"end_user_digest,omitempty"`
 	// APIKeyID is empty exactly when the origin is keyless.
-	APIKeyID    string            `json:"api_key_id"`
-	Attribution map[string]string `json:"attribution,omitempty"`
+	APIKeyID             string            `json:"api_key_id"`
+	AgentPrincipalID     string            `json:"agent_principal_id,omitempty"`
+	MemberPrincipalID    string            `json:"member_principal_id,omitempty"`
+	DelegationPairDigest string            `json:"delegation_pair_digest,omitempty"`
+	Attribution          map[string]string `json:"attribution,omitempty"`
 	// Origin is empty for a caller request. ParentRequestID names the caller
 	// request a shadow, classifier, cache embedding or batch settlement derives from.
 	Origin          string  `json:"origin,omitempty"`
@@ -238,11 +256,30 @@ type AttemptUsage struct {
 	Batch     bool             `json:"batch,omitempty"`
 }
 
+type PromptReference struct {
+	ID         string `json:"id"`
+	RevisionID string `json:"revision_id"`
+}
+
+func (p *PromptReference) validate() error {
+	if p == nil {
+		return nil
+	}
+	if _, err := uuid.Parse(p.ID); err != nil {
+		return errors.New("routing.prompt.id is invalid")
+	}
+	if _, err := uuid.Parse(p.RevisionID); err != nil {
+		return errors.New("routing.prompt.revision_id is invalid")
+	}
+	return nil
+}
+
 // Routing is the provenance of one attempt: which policy chose it, which
 // credential served it, and which revisions were in force. It is stored beside
 // the attempt so a request can be explained months later, when the revisions
 // that produced it have long been superseded.
 type Routing struct {
+	Prompt               *PromptReference     `json:"prompt,omitempty"`
 	Cache                *CacheEvidence       `json:"cache,omitempty"`
 	BudgetExempt         bool                 `json:"budget_exempt,omitempty"`
 	CredentialSource     string               `json:"credential_source,omitempty"`
@@ -356,6 +393,9 @@ type wireEvent struct {
 	RuntimeGenerationID     *string               `json:"runtime_generation_id"`
 	EndUserDigest           *string               `json:"end_user_digest"`
 	APIKeyID                *string               `json:"api_key_id"`
+	AgentPrincipalID        *string               `json:"agent_principal_id"`
+	MemberPrincipalID       *string               `json:"member_principal_id"`
+	DelegationPairDigest    *string               `json:"delegation_pair_digest"`
 	Attribution             *map[string]string    `json:"attribution"`
 	Origin                  *string               `json:"origin"`
 	ParentRequestID         *string               `json:"parent_request_id"`
@@ -457,6 +497,7 @@ type wireDecision struct {
 }
 
 type wireRouting struct {
+	Prompt               *PromptReference     `json:"prompt,omitempty"`
 	Cache                *CacheEvidence       `json:"cache,omitempty"`
 	BudgetExempt         bool                 `json:"budget_exempt,omitempty"`
 	CredentialSource     string               `json:"credential_source,omitempty"`
@@ -520,6 +561,18 @@ func (w wireEvent) decode() (*Event, error) {
 			return nil, fmt.Errorf("request metadata field api_key_id must be empty for %s requests", event.Origin)
 		}
 	} else if event.APIKeyID, err = requiredUUID("api_key_id", w.APIKeyID); err != nil {
+		return nil, err
+	}
+	if w.AgentPrincipalID != nil {
+		event.AgentPrincipalID = *w.AgentPrincipalID
+	}
+	if w.MemberPrincipalID != nil {
+		event.MemberPrincipalID = *w.MemberPrincipalID
+	}
+	if w.DelegationPairDigest != nil {
+		event.DelegationPairDigest = *w.DelegationPairDigest
+	}
+	if err := validateDelegation(event); err != nil {
 		return nil, err
 	}
 	if event.ParentRequestID, err = optionalUUID("parent_request_id", w.ParentRequestID); err != nil {
@@ -759,7 +812,10 @@ func (r *Routing) validateCredentialSource() error {
 }
 
 func (w wireRouting) decode() (*Routing, error) {
-	routing := &Routing{Policy: w.Policy, Mode: w.Mode, Interaction: w.Interaction}
+	routing := &Routing{Policy: w.Policy, Mode: w.Mode, Interaction: w.Interaction, Prompt: w.Prompt}
+	if err := routing.Prompt.validate(); err != nil {
+		return nil, err
+	}
 	if err := routing.Interaction.validate(); err != nil {
 		return nil, err
 	}
@@ -1042,6 +1098,9 @@ func Validate(e *Event) (*Validated, error) {
 	if e.EndUserDigest != "" && (!endUserDigestPattern.MatchString(e.EndUserDigest) || Keyless(e.Origin)) {
 		return nil, fmt.Errorf("%w: invalid end-user digest", ErrInvalidEvent)
 	}
+	if err := validateDelegation(e); err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrInvalidEvent, err)
+	}
 	if err := ValidateAttribution(e.Attribution); err != nil {
 		return nil, fmt.Errorf("%w: attribution %w", ErrInvalidEvent, err)
 	}
@@ -1089,6 +1148,9 @@ func validateAttempt(attempt *Attempt, index int) (*ValidatedAttempt, error) {
 		return nil, fmt.Errorf("%w: %w", ErrInvalidEvent, err)
 	}
 	if attempt.Routing != nil {
+		if err := attempt.Routing.Prompt.validate(); err != nil {
+			return nil, fmt.Errorf("%w: attempt %d %w", ErrInvalidEvent, index, err)
+		}
 		if err := attempt.Routing.validateCredentialSource(); err != nil {
 			return nil, fmt.Errorf("%w: attempt %d %w", ErrInvalidEvent, index, err)
 		}

@@ -2,6 +2,7 @@ package codemode
 
 import (
 	"fmt"
+	"iter"
 	"math"
 	"regexp"
 	"slices"
@@ -13,6 +14,108 @@ const MaxAllowanceWindows = 128
 
 var limitID = regexp.MustCompile(`^[a-z0-9][a-z0-9_.]{0,99}$`)
 var creditBalance = regexp.MustCompile(`^-?[0-9]{1,20}(\.[0-9]{1,12})?$`)
+
+type HealthObservation struct {
+	Status     string
+	ObservedAt time.Time
+	RetryAt    *time.Time
+}
+
+func (o HealthObservation) Validate() error {
+	if !slices.Contains([]string{"healthy", "unavailable", "quota_limited"}, o.Status) || o.ObservedAt.IsZero() || o.RetryAt != nil && (o.Status == "healthy" || o.RetryAt.Year() < 1 || o.RetryAt.Year() > 9999) {
+		return Refuse(400, "code_health_invalid")
+	}
+	return nil
+}
+
+func (a Allowance) Merge(incoming Allowance) Allowance {
+	tokens, tokenObservation := mergeAllowanceCount(a.RemainingTokens, allowanceCountObservation(a.RemainingTokens, a.TokenObservation, a), incoming.RemainingTokens, allowanceCountObservation(incoming.RemainingTokens, incoming.TokenObservation, incoming))
+	requests, requestObservation := mergeAllowanceCount(a.RemainingRequests, allowanceCountObservation(a.RemainingRequests, a.RequestObservation, a), incoming.RemainingRequests, allowanceCountObservation(incoming.RemainingRequests, incoming.RequestObservation, incoming))
+	windows := slices.SortedFunc(mergedAllowanceWindows(allowanceWindows(a), allowanceWindows(incoming)), func(x, y AllowanceWindow) int { return strings.Compare(x.LimitID+":"+x.Window, y.LimitID+":"+y.Window) })
+	observedAt := func() time.Time {
+		if incoming.ObservedAt.After(a.ObservedAt) {
+			return incoming.ObservedAt
+		}
+		return a.ObservedAt
+	}()
+	credits := func() *Credits {
+		if incoming.Credits != nil && (a.Credits == nil || incoming.Credits.ObservedAt.After(a.Credits.ObservedAt)) {
+			return incoming.Credits
+		}
+		return a.Credits
+	}()
+	primary := slices.IndexFunc(windows, func(w AllowanceWindow) bool { return w.LimitID == "codex" && w.Window == "primary" })
+	percent, reset := func() (*float64, *time.Time) {
+		if primary >= 0 {
+			return &windows[primary].RemainingPercent, windows[primary].ResetsAt
+		}
+		return a.RemainingPercent, a.ResetsAt
+	}()
+	return Allowance{RemainingTokens: tokens, RemainingRequests: requests, TokenObservation: tokenObservation, RequestObservation: requestObservation, Windows: windows, Credits: credits, RemainingPercent: percent, ResetsAt: reset, ObservedAt: observedAt}
+}
+
+func allowanceWindows(a Allowance) []AllowanceWindow {
+	if len(a.Windows) == 0 && a.RemainingPercent != nil {
+		return []AllowanceWindow{{LimitID: "codex", Window: "primary", UsedPercent: 100 - *a.RemainingPercent, RemainingPercent: *a.RemainingPercent, ResetsAt: a.ResetsAt, ObservedAt: a.ObservedAt}}
+	}
+	return a.Windows
+}
+
+func mergedAllowanceWindows(current, incoming []AllowanceWindow) iter.Seq[AllowanceWindow] {
+	return func(yield func(AllowanceWindow) bool) {
+		for _, old := range current {
+			index := slices.IndexFunc(incoming, func(w AllowanceWindow) bool { return old.LimitID == w.LimitID && old.Window == w.Window })
+			if index < 0 || !incoming[index].ObservedAt.After(old.ObservedAt) {
+				if !yield(old) {
+					return
+				}
+				continue
+			}
+			next := incoming[index]
+			if !yield(AllowanceWindow{LimitID: next.LimitID, Window: next.Window, UsedPercent: next.UsedPercent, RemainingPercent: next.RemainingPercent, WindowMinutes: next.WindowMinutes, ObservedAt: next.ObservedAt, ResetsAt: mergeAllowanceReset(old.ResetsAt, next.ResetsAt, next.ObservedAt)}) {
+				return
+			}
+		}
+		for _, next := range incoming {
+			if slices.ContainsFunc(current, func(old AllowanceWindow) bool { return old.LimitID == next.LimitID && old.Window == next.Window }) {
+				continue
+			}
+			if !yield(next) {
+				return
+			}
+		}
+	}
+}
+
+func allowanceCountObservation(value *int64, observation *CountObservation, allowance Allowance) *CountObservation {
+	if observation != nil || value == nil {
+		return observation
+	}
+	return &CountObservation{ResetsAt: allowance.ResetsAt, ObservedAt: allowance.ObservedAt}
+}
+
+func mergeAllowanceCount(current *int64, observation *CountObservation, incoming *int64, incomingObservation *CountObservation) (*int64, *CountObservation) {
+	if incoming == nil || observation != nil && !incomingObservation.ObservedAt.After(observation.ObservedAt) {
+		return current, observation
+	}
+	reset := func() *time.Time {
+		if observation != nil {
+			return observation.ResetsAt
+		}
+		return nil
+	}()
+	return incoming, &CountObservation{ObservedAt: incomingObservation.ObservedAt, ResetsAt: mergeAllowanceReset(reset, incomingObservation.ResetsAt, incomingObservation.ObservedAt)}
+}
+
+func mergeAllowanceReset(current, incoming *time.Time, observedAt time.Time) *time.Time {
+	if incoming != nil {
+		return incoming
+	}
+	if current != nil && current.After(observedAt) {
+		return current
+	}
+	return nil
+}
 
 type CountObservation struct {
 	ResetsAt   *time.Time `json:"resets_at"`
@@ -101,6 +204,7 @@ type Observation struct {
 	Usage      Usage
 	ResponseID string
 	Status     int
+	RetryAfter []string
 	Allowance  *Allowance
 }
 

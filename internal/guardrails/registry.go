@@ -82,7 +82,7 @@ func (r *Registry) Validate() error {
 			if a.ScopeID != p.ProjectID {
 				return errors.New("project attachment crosses a project boundary")
 			}
-		case "route", "api-key":
+		case "route", "toolset", "api-key":
 			if !identifier.MatchString(a.ScopeID) {
 				return errors.New("invalid attachment scope identity")
 			}
@@ -101,7 +101,7 @@ func scopeRank(scope string) int {
 		return 1
 	case "project":
 		return 2
-	case "route":
+	case "route", "toolset":
 		return 3
 	case "api-key":
 		return 4
@@ -117,7 +117,7 @@ func (r *Registry) Entries(b Boundary) ([]Entry, error) {
 	}
 	attachments := []Attachment{}
 	for _, a := range r.Attachments {
-		matches := a.Scope == "installation" || (a.Scope == "organization" && a.ScopeID == b.OrganizationID) || (a.Scope == "project" && a.ScopeID == b.ProjectID) || (a.Scope == "route" && a.ScopeID == b.RouteID) || (a.Scope == "api-key" && a.ScopeID == b.KeyID)
+		matches := a.Scope == "installation" || (a.Scope == "organization" && a.ScopeID == b.OrganizationID) || (a.Scope == "project" && a.ScopeID == b.ProjectID) || (a.Scope == "route" && a.ScopeID == b.RouteID) || (a.Scope == "toolset" && a.ScopeID == b.ToolsetID) || (a.Scope == "api-key" && a.ScopeID == b.KeyID)
 		if matches {
 			attachments = append(attachments, a)
 		}

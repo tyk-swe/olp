@@ -132,6 +132,9 @@ func (s *SQLFilter) expression(e filter.Expression, base string, depth int, scop
 		a, err := s.expression(x.Expression, base, depth+1, scope)
 		return "(NOT (" + a + "))", err
 	case *filter.ValuePath:
+		if s.Schema != "" && !s.matchesCoreSchema(x.AttributePath) {
+			return "", Fail(400, "invalidFilter", "The value path belongs to a different resource schema.")
+		}
 		s.sequence++
 		alias := fmt.Sprintf("scim_value_%d", s.sequence)
 		source := "jsonb_path_query(" + base + "," + s.bind(jsonPath(x.AttributePath)) + "::jsonpath) " + alias + "(value)"
@@ -162,8 +165,14 @@ func (s *SQLFilter) expression(e filter.Expression, base string, depth int, scop
 	return "", Fail(400, "invalidFilter", "Unsupported filter expression.")
 }
 
+func (s *SQLFilter) matchesCoreSchema(path filter.AttributePath) bool {
+	return path.URIPrefix == nil ||
+		(!strings.EqualFold(*path.URIPrefix, UserSchema) && !strings.EqualFold(*path.URIPrefix, GroupSchema)) ||
+		strings.EqualFold(*path.URIPrefix, s.Schema)
+}
+
 func (s *SQLFilter) definedAttribute(path filter.AttributePath, scope []string) bool {
-	if path.URIPrefix != nil && (strings.EqualFold(*path.URIPrefix, UserSchema) || strings.EqualFold(*path.URIPrefix, GroupSchema)) && !strings.EqualFold(*path.URIPrefix, s.Schema) {
+	if !s.matchesCoreSchema(path) {
 		return false
 	}
 	parts := slices.Concat(scope, pathParts(path))

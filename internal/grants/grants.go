@@ -103,13 +103,17 @@ func validate(declared *abi.GrantAuthentication, grant *abi.Grant) error {
 // validateTokens checks that OLP can hold a grant's tokens and place its
 // access token in a header.
 func validateTokens(grant abi.Grant) error {
+	return ValidateTokenMaterial(grant.AccessToken, grant.RefreshToken, grant.ExpiresIn)
+}
+
+func ValidateTokenMaterial(accessToken, refreshToken string, expiresIn int64) error {
 	switch {
-	case grant.AccessToken == "" || len(grant.AccessToken) > maxToken || strings.ContainsAny(grant.AccessToken, "\r\n\x00"):
-		return fmt.Errorf("its access token is empty, exceeds 16 KiB or can't be sent in a header")
-	case len(grant.RefreshToken) > maxToken:
-		return fmt.Errorf("its refresh token exceeds 16 KiB")
-	case grant.ExpiresIn < 0 || grant.ExpiresIn > maxExpiresIn:
-		return fmt.Errorf("its expiry is not a number of seconds up to ten years")
+	case accessToken == "" || len(accessToken) > maxToken || strings.ContainsAny(accessToken, "\r\n\x00"):
+		return fmt.Errorf("access token is empty, exceeds 16 KiB or cannot be sent in a header")
+	case len(refreshToken) > maxToken:
+		return fmt.Errorf("refresh token exceeds 16 KiB")
+	case expiresIn < 0 || expiresIn > maxExpiresIn:
+		return fmt.Errorf("expiry must be within ten years")
 	}
 	return nil
 }

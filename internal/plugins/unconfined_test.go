@@ -1,10 +1,12 @@
 package plugins
 
 import (
+	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 // Other files are not executables OLP lists.
@@ -50,3 +52,23 @@ func script(t *testing.T, u *Unconfined, name, body string) ExecutableFile {
 
 // Both record costs are divisible by three, so no concurrent order
 // can exactly exhaust the power-of-two budget without a warning.
+
+func TestNativeProcessKeepsFlushedOutputAfterExit(t *testing.T) {
+	tier := NewUnconfined(t.TempDir(), DefaultLimits, slog.New(slog.DiscardHandler))
+	payload := `{"jsonrpc":"2.0","id":1,"result":{"content":[{"type":"text","text":"finished"}]}}`
+	executable := script(t, tier, "final-reply", "echo '"+payload+"'")
+	process, startErr := tier.StartNative(t.Context(), executable.Name, executable.Digest, time.Second)
+	if startErr != nil {
+		t.Fatal(startErr)
+	}
+	defer process.Close()
+	select {
+	case <-process.done:
+	case <-time.After(time.Second):
+		t.Fatal("fixture did not exit")
+	}
+	output, readErr := io.ReadAll(process.Stdout)
+	if readErr != nil || string(output) != payload+"\n" {
+		t.Fatalf("flushed final response was lost after process exit: %q, %v", output, readErr)
+	}
+}

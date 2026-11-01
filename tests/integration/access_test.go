@@ -24,6 +24,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/tyk-swe/olp/internal/a2a"
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/batches"
 	"github.com/tyk-swe/olp/internal/catalog"
@@ -31,6 +32,7 @@ import (
 	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/gateway"
+	"github.com/tyk-swe/olp/internal/mcpgrants"
 	"github.com/tyk-swe/olp/internal/media"
 	"github.com/tyk-swe/olp/internal/observability"
 	"github.com/tyk-swe/olp/internal/pluginindex"
@@ -91,6 +93,7 @@ type accessHarness struct {
 	AuthHex   string
 	Runtime   *runtime.Manager
 	Gateway   *gateway.Server
+	A2A       *a2a.Server
 	Media     *media.Service
 	AuthKey   *secrets.AuthKey
 	Policy    egress.Policy
@@ -203,10 +206,15 @@ func newAccessHarnessAtInstallation(t *testing.T, pool *pgxpool.Pool, dbURL, ins
 	}
 	process.Management{Access: server, Egress: &policy, Runtime: rt, Gateway: gw, Media: mediaJobs, Health: observability.NewCache(), Log: log, PluginRuntime: pluginRuntime, PluginHost: pluginHost, Unconfined: unconfined, Catalog: referenceCatalog, PluginIndex: pluginIndex}.Register(mux)
 	gw.Register(mux)
+	agentServer := &a2a.Server{Grants: &mcpgrants.Store{Egress: &policy, Pool: pool, Keys: ring, Auth: digestKey, Installation: installation}, Runtime: rt, Egress: &policy, Credentials: func(ctx context.Context, id string) ([]byte, error) {
+		return ring.Read(ctx, pool, installation, id, secrets.AgentCredential)
+	}}
+	agentServer.Register(mux)
 	httpServer := httptest.NewServer(mux)
+	agentServer.PublicOrigin = httpServer.URL
 	t.Cleanup(httpServer.Close)
 	return &accessHarness{
-		t: t, Pool: pool, DBURL: dbURL, Server: server, HTTP: httpServer,
+		t: t, Pool: pool, DBURL: dbURL, Server: server, HTTP: httpServer, A2A: agentServer,
 		Bootstrap: bootstrap, Ring: ringJSON, AuthHex: authHex, Runtime: rt,
 		Gateway: gw, Media: mediaJobs, AuthKey: digestKey, Policy: policy,
 		UnconfinedDir: unconfinedDir,
