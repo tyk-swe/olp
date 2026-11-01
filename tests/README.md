@@ -8,9 +8,9 @@ replies, malformed input, cancellation, timeouts, failover, egress, media and
 pricing.
 
 `make check` generates contracts, checks formatting, vet, console types and
-lint, then runs these same suites once. CI uses
-`make check GO_TEST_ARGS='-race -count=1'` so container-free Go tests run once
-with race detection. `make test-race` remains available for local runs. Normal
+lint, then runs these same suites once. CI runs the checks separately and uses
+`make test-go test-bench` for container-free Go tests. Race detection runs in the
+integration lanes. `make test-race` remains available for local runs. Normal
 Go runs retain caching.
 Neither `make test` nor `make check` installs dependencies or starts services.
 Go-only targets need Go and its native prerequisites, without Node or pnpm; see
@@ -147,8 +147,8 @@ a security change, then regenerate the tables deliberately with
 
 `GO_TEST_PACKAGES` defaults to `./...`, `GO_TEST_TIMEOUT` to `5m` per package,
 and `GO_TEST_ARGS` and `CONSOLE_TEST_ARGS` to empty. Go tests use
-`-mod=readonly`. Coverage is gated by the ratchet in [Test rules](#test-rules),
-which compares changed packages against the merge base in this lane.
+`-mod=readonly`. The ratchet enforces the mechanical [Test rules](#test-rules),
+not coverage or mutation thresholds.
 
 ## Integration
 
@@ -165,20 +165,23 @@ Vite runs shell hydration and focused setup/login, cookie, CSRF mutation,
 protected deep-link and unary/streaming inference proxy checks. Failure-path
 restores assert that the destination stays empty.
 Each test installation has an independent database and installation namespace.
-Process tests run in four disjoint selections, each with a 30-minute deadline:
-names starting `TestCodeQualification`, the other names starting `TestA` through
-`TestF`, `TestG` through `TestM`, and every other test name. The four selections
-cover the complete package, with the same build tags and race detection.
+Process tests run in five disjoint selections, each with a 30-minute deadline:
+names starting `TestCode`, the other names starting `TestA` through `TestF`,
+`TestG` through `TestM`, `TestN` through `TestR`, and every remaining test name.
+The five selections cover the complete package, with the same build tags and
+race detection.
 Separating the cohorts leaves room for intentional recovery, enrollment and
 certification waits without extending operation or package deadlines.
 
-The runner groups its suites into lanes. `qualification`, `a-f`, `g-m` and
-`n-z` hold the four process selections along with direct CLI qualification,
-client qualification, internal service tests and the extension test, `smoke`
-holds the JavaScript SDK smoke and `browser` the Chromium journeys and
-replacement recovery. `./scripts/integration.sh LANE...` provisions the services
-once and runs only those lanes, and `shell` runs every lane except `browser`. CI
-runs the lanes as parallel jobs.
+The runner groups its suites into eight lanes. `codecli` runs the code process
+selection and direct CLI qualification. `clients` runs client qualification.
+`a-f`, `g-m`, `n-r` and `s-z` run the other process selections, with internal
+service tests and the extension test also in `s-z`. `smoke` runs JavaScript SDK
+smoke tests and `browser` runs Chromium journeys and replacement recovery.
+`./scripts/integration.sh LANE...` provisions the services once and runs only
+those lanes, and `shell` runs every lane except `browser`. The `qualification`
+alias selects `codecli` and `clients`, and `n-z` selects `n-r` and `s-z`. CI runs
+the selected lanes as parallel jobs.
 
 Service-dependent Go tests live in `tests/integration/` or beside feature code
 and require the `integration` build tag. Internal service tests use the
@@ -249,8 +252,8 @@ URL/query adaptation/cancellation. Mounted components, protected layouts and
 browser deep links own routing behavior; do not replace them with source-import
 assertions.
 
-Run `./scripts/check-contracts.sh` standalone or with `--already-generated` after
-`make check` to verify deterministic regeneration and checked-in Go artifacts.
+Run `./scripts/check-contracts.sh` without arguments to verify deterministic
+regeneration and checked-in Go artifacts.
 Historical repair evidence is [recorded separately](../docs/develop/qualification.md#historical-qualification);
 timing diaries are not current suite budgets.
 
@@ -428,4 +431,4 @@ go test -tags=integration ./internal/gateway -run '^$' \
 Run latency comparisons without other builds or load generators competing for
 CPU. The output includes `p95-ns/op`; the cache budget allows at most 1 ms of
 additional p95 latency. The ordinary `BenchmarkGatewayResponseCache` uses an
-in-memory backing store and is included in the regression gate.
+in-memory backing store and can be run locally for regression comparisons.
