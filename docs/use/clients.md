@@ -55,13 +55,13 @@ of the gateway's module and runtime inventory.
 
 | SDK | Module | Pinned version | Qualification |
 | --- | --- | --- | --- |
-| OpenAI Go | `github.com/openai/openai-go/v3` | v3.85.1 | Chat Completions and Responses, unary and streaming, tool loops, structured output, embeddings, model listing, typed errors |
+| OpenAI Go | `github.com/openai/openai-go/v3` | v3.86.0 | Chat Completions and Responses, unary and streaming, tool loops, structured output, embeddings, model listing, typed errors |
 | Anthropic Go | `github.com/anthropics/anthropic-sdk-go` | v1.84.0 | Messages, unary and streaming, tool use loops with signed thinking, `count_tokens`, prompt caching, beta features, model listing, typed errors |
-| Google Gen AI Go | `google.golang.org/genai` | v1.73.0 | `generateContent`, unary and streaming, function calling, thoughts, structured output, `countTokens`, native batch embeddings, model listing, typed errors |
+| Google Gen AI Go | `google.golang.org/genai` | v1.76.0 | `generateContent`, unary and streaming, function calling, thoughts, structured output, `countTokens`, native batch embeddings, model listing, typed errors |
 
 ## Gemini managed-agent resources
 
-The pinned `google.golang.org/genai@v1.75.0` contract exposes agents under its
+The pinned `google.golang.org/genai@v1.76.0` contract exposes agents under its
 nested interactions client. The gateway supports create/list/get/delete at
 `/gemini/v1beta/agents`; PATCH is excluded. Use a published `agent_resource`
 route and an inference key with provider-state permission. SDK retry attempts
