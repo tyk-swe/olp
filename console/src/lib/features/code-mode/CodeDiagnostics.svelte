@@ -4,6 +4,7 @@
   import {
     listCodeBindings,
     listCodeAttempts,
+    listCodeAccounts,
     listCodeRefusals,
     listCodeTokenWindows,
     retireCodeBinding,
@@ -11,6 +12,7 @@
     type CodeFilters
   } from '$lib/api/code-mode';
   import { errorMessage } from '$lib/api/http';
+  import { collectCursorPages } from '$lib/api/pagination';
   import {
     emptyCursorHistory,
     cursorPaginationProps,
@@ -24,7 +26,10 @@
     mutationError,
     refusalAdvice,
     reservationLabel,
+    recoveryReasonLabel,
+    servingHealthLabel,
     tokenCount,
+    usageCertaintyLabel,
     utcWindowStart
   } from './presentation';
   import { diagnosticSections, type CodeDiagnosticsKind } from './sections';
@@ -42,6 +47,7 @@
   } = $props();
   const section = $derived(diagnosticSections[kind]);
   const emptyFilterForm = {
+    attempt: '',
     route: '',
     key: '',
     account: '',
@@ -70,6 +76,17 @@
     queryFn: ({ signal }) => listCodeAttempts(filters, signal),
     enabled: kind === 'attempts'
   }));
+  const accounts = createQuery(() => ({
+    queryKey: codeKeys.inventory(projectId, 'attempt-eligibility'),
+    queryFn: ({ signal }) =>
+      collectCursorPages((cursor) =>
+        listCodeAccounts({ project_id: projectId, cursor }, signal)
+      ),
+    enabled:
+      kind === 'attempts' &&
+      attempts.data?.items.some((attempt) => attempt.account_id !== null) ===
+        true
+  }));
   const refusals = createQuery(() => ({
     queryKey: codeKeys.collection('refusals', filters),
     queryFn: ({ signal }) => listCodeRefusals(filters, signal),
@@ -92,6 +109,9 @@
   function apply(event: SubmitEvent) {
     event.preventDefault();
     applied = {
+      ...(kind === 'attempts'
+        ? { attempt_id: filterForm.attempt.trim() || undefined }
+        : {}),
       ...(section.filters.endUser
         ? { end_user_digest: filterForm.endUser.trim() || undefined }
         : {}),
@@ -114,6 +134,28 @@
     filterForm = { ...emptyFilterForm };
     applied = {};
     resetCursor(paging);
+  }
+
+  function showConversation(bindingId: string) {
+    filterForm = { ...emptyFilterForm, binding: bindingId };
+    applied = { binding_id: bindingId };
+    paging = emptyCursorHistory();
+  }
+
+  function showSource(attemptId: string) {
+    filterForm = { ...emptyFilterForm, attempt: attemptId };
+    applied = { attempt_id: attemptId };
+    paging = emptyCursorHistory();
+  }
+
+  async function refresh() {
+    await Promise.all([
+      selected.refetch(),
+      ...(kind === 'attempts' &&
+      attempts.data?.items.some((attempt) => attempt.account_id !== null)
+        ? [accounts.refetch()]
+        : [])
+    ]);
   }
   async function retire(item: CodeBinding) {
     if (
@@ -155,17 +197,26 @@
     <button
       type="button"
       class="button button-secondary"
-      disabled={selected.isFetching || !!busy}
-      onclick={() => selected.refetch()}>Refresh</button
+      disabled={selected.isFetching || accounts.isFetching || !!busy}
+      onclick={refresh}>Refresh</button
     >
   </div>
   <p>
     Metadata only: no prompts, outputs, tool payloads, raw headers or
-    credentials. OLP never automatically switches a pinned tree's account or
-    replays inference.
+    credentials. Account recovery requires proven nonexecution and a safe
+    continuation. Accepted work and uncertain consumption are never replayed
   </p>
   {#if section.filters.route || section.filters.key}
     <form class="filters form-field" onsubmit={apply}>
+      {#if kind === 'attempts'}
+        <div>
+          <label for="code-filter-attempt">Attempt ID</label><input
+            id="code-filter-attempt"
+            bind:value={filterForm.attempt}
+            placeholder="All attempts"
+          />
+        </div>
+      {/if}
       {#if section.filters.route}<div>
           <label for="code-filter-route">Route ID</label><input
             id="code-filter-route"
@@ -228,14 +279,18 @@
     />
   {:else if !selected.data?.items.length}<p>
       No matching {section.empty}.
+      {#if kind === 'attempts' && applied.attempt_id}
+        The source may be unavailable under your current project access
+      {/if}
     </p>
   {:else if kind === 'bindings'}
     <p>
       A tree pins an account to each model at its first use and holds at most
       one account of each subscription. Parents, children, resumes, reconnects
-      and compaction stay on that model's account, which never changes. Revoked
-      permissions still refuse access. Retirement is permanent for the entire
-      tree.
+      and compaction stay on that model's account. Recovery can change the
+      account only after proven nonexecution and safe continuation checks.
+      Revoked permissions still refuse access. Retirement is permanent for the
+      entire tree
     </p>
     {#each bindings.data?.items ?? [] as item (item.id)}
       <article class="card">
@@ -249,12 +304,19 @@
           <dd>{item.id} / {item.root_id}</dd>
           <dt>Parent binding</dt>
           <dd>{item.parent_id ?? 'Root conversation'}</dd>
-          <dt>First account / principal</dt>
-          <dd>{item.account_id} / {item.principal}</dd>
+          <dt>First target</dt>
+          <dd>
+            {item.paid_provider_id
+              ? 'Paid API ' + item.paid_provider_id + ' / ' + item.paid_slot_id
+              : item.account_id + ' / ' + item.principal}
+          </dd>
           <dt>Model pins</dt>
           <dd>
             {item.pins
-              .map((pin) => `${pin.model} → ${pin.account_id}`)
+              .map(
+                (pin) =>
+                  `${pin.model} -> ${pin.paid_provider_id ?? pin.account_id}`
+              )
               .join(', ') || 'No model served yet'}
           </dd>
           <dt>Route / key</dt>
@@ -282,9 +344,16 @@
       are not billed tokens or provider allowance.
     </p>
     {#each attempts.data?.items ?? [] as attempt (attempt.id)}
+      {@const currentAccount = accounts.data?.find(
+        (account) => account.id === attempt.account_id
+      )}
       <article class="card">
         <h3>{attempt.operation} · {attempt.model}</h3>
         <dl>
+          <dt>Requested model</dt>
+          <dd>{attempt.requested_model ?? 'Unknown for historical attempt'}</dd>
+          <dt>Selected model</dt>
+          <dd>{attempt.model}</dd>
           <dt>Attempt / state</dt>
           <dd>{attempt.id} / {attempt.state}</dd>
           <dt>Upstream status</dt>
@@ -302,8 +371,74 @@
           </dd>
           <dt>Route / revision</dt>
           <dd>{attempt.route_id} / {attempt.route_revision_id}</dd>
+          <dt>Published Codex CLI identity policy</dt>
+          <dd>
+            {attempt.codex_cli_identity_enabled ? 'Enabled' : 'Disabled'}. Route
+            policy does not prove a header changed or the attempt used Codex.
+            Client identity header values and prompts are not recorded.
+          </dd>
           <dt>Key / account</dt>
-          <dd>{attempt.api_key_id} / {attempt.account_id}</dd>
+          <dd>
+            {attempt.api_key_id} / {attempt.paid_provider_id
+              ? 'Paid API ' +
+                attempt.paid_provider_id +
+                ' / ' +
+                attempt.paid_slot_id
+              : attempt.account_id}
+          </dd>
+          <dt>Current account eligibility</dt>
+          <dd>
+            {#if attempt.paid_provider_id}
+              Paid target, subscription eligibility does not apply
+            {:else if currentAccount}
+              {currentAccount.eligible
+                ? 'Currently eligible'
+                : 'Currently ineligible'}
+              · {currentAccount.enabled
+                ? 'Account enabled'
+                : 'Account disabled'}
+              · {servingHealthLabel(currentAccount.health)} · grant {currentAccount.grant_state}
+            {:else}
+              {accounts.isPending ? 'Loading current account' : 'Unknown'}
+            {/if}
+            <p>
+              Admission-time eligibility was not retained. Current eligibility
+              does not explain historical selection or grant permission to retry
+            </p>
+          </dd>
+          <dt>Recorded recovery evidence</dt>
+          <dd>
+            {attempt.nonexecution
+              ? 'Proven not executed'
+              : 'Nonexecution not proven'}
+            · {attempt.initial_recovery
+              ? 'Portable initial input recorded'
+              : 'Portable initial input not recorded'}
+          </dd>
+          <dt>Recovery source</dt>
+          <dd>
+            {#if attempt.recovery_from}
+              {recoveryReasonLabel(attempt)} ·
+              <button
+                type="button"
+                class="button button-secondary"
+                onclick={() => showSource(attempt.recovery_from!)}
+                >{attempt.recovery_from}</button
+              >
+            {:else}
+              No recovery source recorded
+            {/if}
+            {#if attempt.paid_binding_id ?? attempt.binding_id}
+              <button
+                type="button"
+                class="button button-secondary"
+                onclick={() =>
+                  showConversation(
+                    (attempt.paid_binding_id ?? attempt.binding_id)!
+                  )}>Show conversation attempts</button
+              >
+            {/if}
+          </dd>
           <dt>End user</dt>
           <dd>{attempt.end_user_digest || 'Unidentified'}</dd>
           {#if Object.keys(attempt.attribution ?? {}).length}
@@ -315,11 +450,17 @@
             </dd>
           {/if}
           <dt>Binding</dt>
-          <dd>{attempt.binding_id}</dd>
+          <dd>{attempt.paid_binding_id ?? attempt.binding_id}</dd>
           <dt>{reservationLabel(attempt)}</dt>
           <dd>{tokenCount(attempt.reserved_tokens)} tokens</dd>
           <dt>Measured tokens</dt>
           <dd>{tokenCount(attempt.reported_tokens)}</dd>
+          <dt>Usage certainty</dt>
+          <dd>{usageCertaintyLabel(attempt)}</dd>
+          {#if attempt.paid_binding_id}
+            <dt>Paid accounting</dt>
+            <dd>{attempt.paid_monetary_state ?? 'unknown'}</dd>
+          {/if}
           <dt>Input / output</dt>
           <dd>
             {tokenCount(attempt.input_tokens)} / {tokenCount(

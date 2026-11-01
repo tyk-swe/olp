@@ -16,7 +16,7 @@ func AuthorizeTrustChange(p access.Principal, current *Publication, next Draft) 
 	}
 	old := current.Draft.Agent
 	value := next.Agent
-	if old.Endpoint != value.Endpoint || old.Protocol != value.Protocol || old.CardDigest != value.CardDigest || !reflect.DeepEqual(old.CredentialID, value.CredentialID) {
+	if old.Endpoint != value.Endpoint || old.Protocol != value.Protocol || old.CardDigest != value.CardDigest || !reflect.DeepEqual(old.CredentialID, value.CredentialID) || !reflect.DeepEqual(old.OAuth, value.OAuth) {
 		return p.Authorize(access.Access)
 	}
 	return nil

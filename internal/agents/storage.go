@@ -67,6 +67,9 @@ func SaveDraft(ctx context.Context, tx pgx.Tx, actor string, current *Publicatio
 	if current.Draft.Agent != nil && next.Draft.Agent != nil && current.Draft.Agent.Endpoint != next.Draft.Agent.Endpoint && current.Draft.Agent.CredentialID != nil && next.Draft.Agent.CredentialID != nil && *current.Draft.Agent.CredentialID == *next.Draft.Agent.CredentialID {
 		return access.Invalid("credential_id", "Replace or remove the credential when changing the endpoint.")
 	}
+	if current.Draft.Agent != nil && next.Draft.Agent != nil && current.Draft.Agent.Endpoint != next.Draft.Agent.Endpoint && current.Draft.Agent.OAuth != nil && next.Draft.Agent.OAuth != nil {
+		return access.Invalid("oauth", "Remove the OAuth credential before changing the endpoint, then enroll a new grant.")
+	}
 	next.ID, next.RevisionID = current.ID, current.RevisionID
 	_, err := tx.Exec(ctx, `UPDATE olp.agent_publications SET name=$2,draft=$3,etag=$4 WHERE id=$1`, next.ID, next.Name, next.Draft, next.ETag)
 	return err
@@ -125,7 +128,7 @@ func ValidateReferences(ctx context.Context, tx access.Queryer, kind string, d D
 			return access.Invalid("pricing_revision_id", "Use an installed immutable pricing revision.")
 		}
 		if d.Agent.CredentialID != nil {
-			if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM olp.secrets s JOIN olp.agent_credentials c ON c.id=s.id WHERE s.id=$1 AND s.purpose=$2 AND c.project_id=$3)`, *d.Agent.CredentialID, secrets.AgentCredential, d.ProjectID).Scan(&exists); err != nil {
+			if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM olp.secrets s JOIN olp.agent_credentials c ON c.id=s.id WHERE s.id=$1 AND s.purpose=$2 AND c.project_id=$3 AND c.entra_client=$4)`, *d.Agent.CredentialID, secrets.AgentCredential, d.ProjectID, d.Agent.OAuth != nil && d.Agent.OAuth.EntraOBO != nil).Scan(&exists); err != nil {
 				return err
 			}
 			if !exists {
@@ -140,6 +143,9 @@ func Publish(ctx context.Context, tx pgx.Tx, actor string, p *Publication) error
 	p.Draft = agentcontract.NormalizeDraft(p.Draft)
 	if p.Retired {
 		return access.Fail(409, "publication_retired", "Retired publications cannot be promoted.")
+	}
+	if p.Draft.Agent != nil && p.Draft.Agent.OAuth != nil && p.Draft.Agent.OAuth.EntraOBO != nil && p.Draft.Agent.CredentialID == nil {
+		return access.Invalid("entra_client_secret", "Supply the Entra client secret before publishing.")
 	}
 	if err := ValidateReferences(ctx, tx, p.Kind, p.Draft); err != nil {
 		return err

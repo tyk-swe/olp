@@ -13,6 +13,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/protocols/wire"
 	"github.com/tyk-swe/olp/internal/routing"
 
@@ -100,6 +101,7 @@ func (x *call) delivered(at time.Time) {
 // outcome is the terminal result of the attempt loop.
 type outcome struct {
 	completion *wire.Completion
+	approval   *workflowPause
 	err        *Error
 	committed  bool
 	cancelled  bool
@@ -301,6 +303,53 @@ func forwardable(status int) bool {
 	return false
 }
 
+// A call owns mutexes, pinned authority, and request-wide accounting, so model steps update it in place.
+func (s *Server) executeModelStep(ctx context.Context, x *call, source *wire.Request, current access.Authority) *outcome {
+	if x.generation.firstStep == nil {
+		x.generation.parsed = source
+		out := s.execute(ctx, x)
+		x.generation.firstStep = &modelStepAccounting{factEnd: len(x.facts), estimate: x.estimate}
+		return out
+	}
+	if source.Route != x.named().Slug || source.Family != x.generation.parsed.Family || x.cache != nil && x.cache.result != "bypass" {
+		return &outcome{err: invalidRequest("invalid_request", "The model step must use the original route and format without response caching.", nil)}
+	}
+	stepCtx, cancel := x.routeContext(ctx)
+	defer cancel()
+	first := x.generation.firstStep
+	actual := x.settledTokensFor(x.facts[:first.factEnd], first.estimate)
+	if err := x.lease.Reconcile(stepCtx, *actual); err != nil {
+		if e := s.Admission.outage(x.authority.ID, false, err); e != nil {
+			return &outcome{err: e}
+		}
+	}
+	x.generation.parsed = source
+	x.routeLeg = routeLeg{affinity: x.seed}
+	x.allowance = 0
+	x.frames = nil
+	x.delegators = nil
+	x.classified = nil
+	if e := s.prepare(stepCtx, x, x.authorize); e != nil {
+		return &outcome{err: e}
+	}
+	x.estimate = requestEstimate(x)
+	authority := cacheAuthority(x.admissionAuthority(current), false, true, false)
+	reservation := keyReservationEstimate(x.estimate, s.dispatchableAttempts(x))
+	lease, e := s.Admission.reserveKeyCosted(stepCtx, &authority, x.clientSurface(), reservation, time.Duration(x.named().OverallTimeout)*time.Millisecond, costReservation{}, x.limitRoute())
+	if e != nil {
+		return &outcome{err: e}
+	}
+	if e := s.reserveFallbackCost(stepCtx, x); e != nil {
+		settleKey(ctx, lease, false, nil, s.log)
+		return &outcome{err: e}
+	}
+	start := len(x.facts)
+	x.stepDispatched = false
+	out := s.execute(stepCtx, x)
+	settleKey(ctx, lease, x.stepDispatched, x.settledTokensFor(x.facts[start:], x.estimate), s.log)
+	return out
+}
+
 // execute adapts canonical inference to shared attempt execution. The
 // canonical transport retains its first-byte and streaming idle deadlines.
 func (s *Server) execute(ctx context.Context, x *call) *outcome {
@@ -367,15 +416,19 @@ type attemptState struct {
 	classifier        upstream.Classifier
 	reason            atomic.Int32 // 1 first-byte deadline, 2 idle deadline, 3 stream cap
 	dispatched        atomic.Bool  // request bytes may have reached the upstream
-	status            int          // the unsuccessful status the upstream answered with
-	accepted          bool         // the upstream answered with success
-	settled           bool         // the upstream's complete result arrived
-	credentialRefused bool         // classification before unresolved work becomes ambiguous
+	connected         atomic.Bool
+	notSent           atomic.Bool
+	status            int  // the unsuccessful status the upstream answered with
+	accepted          bool // the upstream answered with success
+	settled           bool // the upstream's complete result arrived
+	credentialRefused bool // classification before unresolved work becomes ambiguous
 }
 
 // trace supplies the dispatch evidence of a net/http request.
 func (st *attemptState) trace() *httptrace.ClientTrace {
-	return upstream.Trace(&st.dispatched)
+	trace := upstream.Trace(&st.dispatched)
+	trace.GotConn = func(httptrace.GotConnInfo) { st.connected.Store(true) }
+	return trace
 }
 
 // evidence is what the attempt has established about its upstream exchange.
@@ -434,6 +487,7 @@ func endpointPath(family wire.Format) string {
 // newFact opens the record of one attempt against one credential slot.
 func (s *Server) newFact(x *call, a routing.Attempt, slot routing.Slot, ordinal int, pinned ...*routing.Provider) AttemptFact {
 	fact := AttemptFact{
+		Prompt:   x.prompt,
 		Strategy: a.Strategy, PolicyDigest: a.PolicyDigest, VendorID: a.VendorID, Price: a.Price,
 		Discount: a.Discount, CardPinned: x.cardPinned, CardRevisionID: x.cardRevisionID,
 		Ordinal:            ordinal,
@@ -574,7 +628,7 @@ func (s *Server) attempt(ctx context.Context, x *call, a routing.Attempt, provid
 				f.overall = true
 			}
 		}
-		f.dispatched = st.dispatched.Load()
+		f.dispatched = st.dispatched.Load() || (x.workflow != nil && st.connected.Load() && !st.notSent.Load())
 		f.credentialRefused = st.credentialRefused
 		f.acceptance = st.evidence().Acceptance()
 		f.accepted = st.accepted
@@ -706,11 +760,17 @@ func (s *Server) attempt(ctx context.Context, x *call, a routing.Attempt, provid
 	if parallel != nil {
 		defer parallel.cancel()
 	}
+	if x.workflow != nil {
+		if e := s.markSessionDispatched(actx, x); e != nil {
+			return fail(classConnect, &attemptFailure{contractCode: e.Code, noRetry: true})
+		}
+	}
 	resp, err := client.Do(req)
 	if cfg.CarriedByPlugin() {
 		// The plugin reports whether it sent a request it failed; any other
 		// failure may have reached the upstream.
 		st.dispatched.Store(!errors.Is(err, connectors.ErrNotSent))
+		st.notSent.Store(errors.Is(err, connectors.ErrNotSent))
 	}
 	if err != nil {
 		return fail(st.classify(err, false), nil)
@@ -1140,6 +1200,9 @@ func (s *Server) finish(x *call, out *outcome, status int) {
 			ClientIP:             x.request.clientIP,
 			Actor:                x.actor,
 			KeyID:                x.keyID,
+			AgentPrincipalID:     x.authority.DelegationAgentID,
+			MemberPrincipalID:    x.authority.DelegationMemberID,
+			DelegationPairDigest: x.authority.DelegationPairDigest,
 			EndUserDigest:        x.endUserDigest,
 			BudgetGroupID:        x.budgetGroupID,
 			Attribution:          x.attribution,
@@ -1172,6 +1235,9 @@ func (s *Server) finish(x *call, out *outcome, status int) {
 			if usage.Keyless(x.origin) {
 				env.KeyID = ""
 				env.EndUserDigest = ""
+				env.AgentPrincipalID = ""
+				env.MemberPrincipalID = ""
+				env.DelegationPairDigest = ""
 			}
 		}
 		if x.cache != nil {

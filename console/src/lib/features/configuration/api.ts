@@ -2,6 +2,24 @@ import type { components } from '$lib/api/schema';
 import { apiClient } from '$lib/api/client';
 import { unwrap } from '$lib/api/http';
 
+export type CodeBindings = components['schemas']['ConfigurationCodeBindings'];
+
+export function isCodeBindings(value: unknown): value is CodeBindings {
+  return (
+    !!value &&
+    typeof value === 'object' &&
+    !Array.isArray(value) &&
+    Object.entries(value).every(
+      ([name, bindings]: [string, unknown]) =>
+        ['credentials', 'users', 'api_keys'].includes(name) &&
+        !!bindings &&
+        typeof bindings === 'object' &&
+        !Array.isArray(bindings) &&
+        Object.values(bindings).every((id: unknown) => typeof id === 'string')
+    )
+  );
+}
+
 export type ConfigurationDocument =
   components['schemas']['ConfigurationDocument'];
 export type ConfigurationPlan =
@@ -27,7 +45,8 @@ export async function planConfiguration(
   document: ConfigurationDocument,
   secretBindings: Record<string, string>,
   signal?: AbortSignal,
-  externalBindings?: Record<string, ExternalCredentialReference>
+  externalBindings?: Record<string, ExternalCredentialReference>,
+  codeBindings?: CodeBindings
 ): Promise<ConfigurationPlan> {
   const { data, error, response } = await apiClient.POST(
     '/api/v1/configuration/plan',
@@ -35,7 +54,8 @@ export async function planConfiguration(
       body: {
         document,
         secret_bindings: secretBindings,
-        external_credential_bindings: externalBindings
+        external_credential_bindings: externalBindings,
+        code_bindings: codeBindings
       },
       signal
     }
@@ -48,7 +68,8 @@ export async function applyConfiguration(
   secretBindings: Record<string, string>,
   requestId: string,
   signal?: AbortSignal,
-  externalBindings?: Record<string, ExternalCredentialReference>
+  externalBindings?: Record<string, ExternalCredentialReference>,
+  codeBindings?: CodeBindings
 ): Promise<ConfigurationPlan> {
   const { data, error, response } = await apiClient.POST(
     '/api/v1/configuration/apply',
@@ -57,7 +78,8 @@ export async function applyConfiguration(
       body: {
         document,
         secret_bindings: secretBindings,
-        external_credential_bindings: externalBindings
+        external_credential_bindings: externalBindings,
+        code_bindings: codeBindings
       },
       signal
     }

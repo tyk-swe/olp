@@ -8,6 +8,8 @@ import (
 	"errors"
 	"strings"
 	"time"
+
+	"github.com/tyk-swe/olp/internal/oif"
 )
 
 var errToken = errors.New("Codex authorization lacks usable account identity or expiry")
@@ -40,6 +42,14 @@ type claims struct {
 // TokenIdentity observes tokens obtained directly from the fixed TLS issuer,
 // or their encrypted stored versions. It does not authenticate client JWTs.
 func TokenIdentity(token string, now time.Time) (Identity, error) {
+	identity, err := tokenIdentity(token)
+	if err != nil || !identity.ExpiresAt.After(now) || identity.ExpiresAt.After(now.AddDate(10, 0, 0)) {
+		return Identity{}, errToken
+	}
+	return identity, nil
+}
+
+func tokenIdentity(token string) (Identity, error) {
 	var zero Identity
 	if len(token) > 16<<10 || strings.ContainsAny(token, "\r\n\x00") {
 		return zero, errToken
@@ -52,6 +62,9 @@ func TokenIdentity(token string, now time.Time) (Identity, error) {
 	if err != nil {
 		return zero, errToken
 	}
+	if _, err := oif.ParseJSON(payload, oif.Limits{MaxBytes: 16 << 10, MaxDepth: 16, MaxNodes: 1024}); err != nil {
+		return zero, errToken
+	}
 	var c claims
 	if err = json.Unmarshal(payload, &c); err != nil {
 		return zero, errToken
@@ -61,7 +74,7 @@ func TokenIdentity(token string, now time.Time) (Identity, error) {
 	} else if c.Auth.UserID != "" && c.Auth.UserID != c.Auth.User {
 		return zero, errToken
 	}
-	if !identifier(c.Auth.Account) || !identifier(c.Auth.User) || c.Auth.FedRAMP || c.Expiry <= now.Unix() || c.Expiry > now.AddDate(10, 0, 0).Unix() {
+	if !identifier(c.Auth.Account) || !identifier(c.Auth.User) || c.Auth.FedRAMP || c.Expiry <= 0 {
 		return zero, errToken
 	}
 	return Identity{Account: c.Auth.Account, User: c.Auth.User, ExpiresAt: time.Unix(c.Expiry, 0)}, nil

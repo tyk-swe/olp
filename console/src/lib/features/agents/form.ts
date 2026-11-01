@@ -116,11 +116,29 @@ export type PublicationForm = {
   tools: ToolPin[];
   template: string;
   variables: string;
+  promptMode: 'template' | 'messages';
+  messages: { role: 'system' | 'user' | 'assistant'; content: string }[];
+  temperature: string;
+  topP: string;
+  maxOutputTokens: string;
   protocol: 'a2a-0.3.0' | 'a2a-1.0.0';
   endpoint: string;
   cardDigest: string;
+  oauthEnabled: boolean;
+  oauthEntra: boolean;
+  oauthEntraIssuer: string;
+  oauthClientID: string;
+  oauthAudience: string;
+  oauthScopes: string;
+  oauthAuthorizationEndpoint: string;
+  oauthTokenEndpoint: string;
+  oauthDeviceEndpoint: string;
   pricingRevision: string;
   maxCost: string;
+  messagePrice: string;
+  remoteWorkBoundSeconds: string;
+  maxTaskContinuations: string;
+  taskDeadlineSeconds: string;
   toolsetRevisions: string;
   routeRevisions: string;
 };
@@ -134,12 +152,46 @@ export function publicationForm(
     name: d?.name ?? '',
     tools: (d?.toolset?.tools ?? []).map((tool) => ({ ...tool })),
     template: d?.prompt?.template ?? '',
-    variables: d?.prompt?.variables.join(', ') ?? '',
+    variables: (
+      d?.prompt?.variable_schema?.required ??
+      d?.prompt?.variables ??
+      []
+    ).join(', '),
+    promptMode: d?.prompt?.messages?.length ? 'messages' : 'template',
+    messages: d?.prompt?.messages?.length
+      ? d.prompt.messages.map((message) => ({ ...message }))
+      : [{ role: 'user', content: d?.prompt?.template ?? '' }],
+    temperature: d?.prompt?.default_parameters?.temperature?.toString() ?? '',
+    topP: d?.prompt?.default_parameters?.top_p?.toString() ?? '',
+    maxOutputTokens:
+      d?.prompt?.default_parameters?.max_output_tokens?.toString() ?? '',
     protocol: d?.agent?.protocol ?? 'a2a-1.0.0',
     endpoint: d?.agent?.endpoint ?? '',
     cardDigest: d?.agent?.card_digest ?? '',
+    oauthEnabled: !!d?.agent?.oauth,
+    oauthEntra: !!d?.agent?.oauth?.entra_obo,
+    oauthEntraIssuer: d?.agent?.oauth?.entra_obo?.issuer ?? '',
+    oauthClientID: d?.agent?.oauth?.client_id ?? '',
+    oauthAudience: d?.agent?.oauth?.audience ?? '',
+    oauthScopes: d?.agent?.oauth?.scopes.join(' ') ?? '',
+    oauthAuthorizationEndpoint: d?.agent?.oauth?.authorization_endpoint ?? '',
+    oauthTokenEndpoint: d?.agent?.oauth?.token_endpoint ?? '',
+    oauthDeviceEndpoint: d?.agent?.oauth?.device_authorization_endpoint ?? '',
     pricingRevision: d?.agent?.pricing_revision_id ?? '',
     maxCost: d?.agent?.max_cost ?? '',
+    messagePrice: d?.agent?.message_price ?? '',
+    remoteWorkBoundSeconds:
+      d?.agent?.remote_work_bound_seconds === undefined
+        ? ''
+        : String(d.agent.remote_work_bound_seconds),
+    maxTaskContinuations:
+      d?.agent?.max_task_continuations === undefined
+        ? ''
+        : String(d.agent.max_task_continuations),
+    taskDeadlineSeconds:
+      d?.agent?.task_deadline_seconds === undefined
+        ? ''
+        : String(d.agent.task_deadline_seconds),
     toolsetRevisions: d?.agent?.toolset_revisions.join('\n') ?? '',
     routeRevisions: d?.agent?.route_revisions.join('\n') ?? ''
   };
@@ -148,18 +200,86 @@ export function publicationInput(kind: Kind, form: PublicationForm): Draft {
   const d: Draft = { project_id: form.project, name: form.name.trim() };
   if (kind === 'toolsets')
     d.toolset = { tools: form.tools.map((tool) => ({ ...tool })) };
-  if (kind === 'prompts')
-    d.prompt = {
-      template: form.template,
-      variables: resourceIDs(form.variables)
+  if (kind === 'prompts') {
+    const names = resourceIDs(form.variables);
+    const defaults = {
+      ...(form.temperature.trim() !== ''
+        ? { temperature: Number(form.temperature) }
+        : {}),
+      ...(form.topP.trim() !== '' ? { top_p: Number(form.topP) } : {}),
+      ...(form.maxOutputTokens.trim() !== ''
+        ? { max_output_tokens: Number(form.maxOutputTokens) }
+        : {})
     };
+    d.prompt =
+      form.promptMode === 'messages'
+        ? {
+            messages: form.messages.map((message) => ({ ...message })),
+            variable_schema: {
+              type: 'object',
+              properties: Object.fromEntries(
+                names.map((name) => [name, { type: 'string' as const }])
+              ),
+              required: names,
+              additionalProperties: false
+            },
+            ...(Object.keys(defaults).length
+              ? { default_parameters: defaults }
+              : {})
+          }
+        : {
+            template: form.template,
+            variables: names,
+            ...(Object.keys(defaults).length
+              ? { default_parameters: defaults }
+              : {})
+          };
+  }
   if (kind === 'agents')
     d.agent = {
       protocol: form.protocol,
       endpoint: form.endpoint.trim(),
       card_digest: form.cardDigest.trim(),
+      ...(form.oauthEnabled
+        ? {
+            oauth: {
+              client_id: form.oauthClientID.trim(),
+              audience: form.oauthAudience.trim(),
+              scopes: resourceIDs(form.oauthScopes),
+              ...(form.oauthEntra
+                ? { entra_obo: { issuer: form.oauthEntraIssuer.trim() } }
+                : {
+                    authorization_endpoint:
+                      form.oauthAuthorizationEndpoint.trim()
+                  }),
+              token_endpoint: form.oauthTokenEndpoint.trim(),
+              ...(!form.oauthEntra && form.oauthDeviceEndpoint.trim()
+                ? {
+                    device_authorization_endpoint:
+                      form.oauthDeviceEndpoint.trim()
+                  }
+                : {})
+            }
+          }
+        : {}),
       pricing_revision_id: form.pricingRevision.trim(),
       max_cost: form.maxCost.trim(),
+      ...(form.messagePrice.trim() !== ''
+        ? { message_price: form.messagePrice.trim() }
+        : {}),
+      ...(form.remoteWorkBoundSeconds.trim() !== ''
+        ? {
+            remote_work_bound_seconds: Number(
+              form.remoteWorkBoundSeconds.trim()
+            )
+          }
+        : {}),
+      ...(form.maxTaskContinuations.trim() !== ''
+        ? { max_task_continuations: Number(form.maxTaskContinuations.trim()) }
+        : {}),
+      ...(form.taskDeadlineSeconds.trim() !== ''
+        ? { task_deadline_seconds: Number(form.taskDeadlineSeconds.trim()) }
+        : {}),
       toolset_revisions: resourceIDs(form.toolsetRevisions),
       route_revisions: resourceIDs(form.routeRevisions)
     };

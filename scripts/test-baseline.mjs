@@ -94,7 +94,6 @@ const excludedDirs = new Set([
   '.git',
   '.local',
   '.muse',
-  '.stryker-tmp',
   '.svelte-kit',
   'build',
   'coverage',

@@ -18,6 +18,7 @@ type WorkloadIssuerEntry struct {
 	Mappings []WorkloadMappingEntry `json:"mappings"`
 }
 type WorkloadMappingEntry struct {
+	AgentPrincipal     bool              `json:"agent_principal,omitempty"`
 	Name               string            `json:"name"`
 	Match              map[string]string `json:"match"`
 	Project            string            `json:"project"`
@@ -38,7 +39,7 @@ func (e WorkloadIssuerEntry) config(projects map[string]string) (workload.Config
 		if !ok {
 			return c, access.Invalid("workload_issuers", "Every mapping must reference a declared or existing project.")
 		}
-		c.Mappings = append(c.Mappings, workload.Mapping{Name: m.Name, Match: m.Match, ProjectID: id, LimitTemplate: m.LimitTemplate, RouteGroups: m.RouteGroups, AllowedToolsets: m.AllowedToolsets, AllowedAgents: m.AllowedAgents, Scopes: m.Scopes, EndUserClaim: m.EndUserClaim, AllowProviderState: m.AllowProviderState})
+		c.Mappings = append(c.Mappings, workload.Mapping{AgentPrincipal: m.AgentPrincipal, Name: m.Name, Match: m.Match, ProjectID: id, LimitTemplate: m.LimitTemplate, RouteGroups: m.RouteGroups, AllowedToolsets: m.AllowedToolsets, AllowedAgents: m.AllowedAgents, Scopes: m.Scopes, EndUserClaim: m.EndUserClaim, AllowProviderState: m.AllowProviderState})
 	}
 	return c, access.ValidateWorkloadConfig(c)
 }
@@ -99,7 +100,7 @@ func exportWorkloadIssuers(ctx context.Context, q access.Queryer) ([]WorkloadIss
 			if !ok {
 				return nil, access.Invalid("workload_issuers", "A workload mapping project is no longer available.")
 			}
-			e.Mappings = append(e.Mappings, WorkloadMappingEntry{Name: m.Name, Match: m.Match, Project: project, LimitTemplate: m.LimitTemplate, RouteGroups: m.RouteGroups, AllowedToolsets: m.AllowedToolsets, AllowedAgents: m.AllowedAgents, Scopes: m.Scopes, EndUserClaim: m.EndUserClaim, AllowProviderState: m.AllowProviderState})
+			e.Mappings = append(e.Mappings, WorkloadMappingEntry{AgentPrincipal: m.AgentPrincipal, Name: m.Name, Match: m.Match, Project: project, LimitTemplate: m.LimitTemplate, RouteGroups: m.RouteGroups, AllowedToolsets: m.AllowedToolsets, AllowedAgents: m.AllowedAgents, Scopes: m.Scopes, EndUserClaim: m.EndUserClaim, AllowProviderState: m.AllowProviderState})
 		}
 		result = append(result, e)
 	}

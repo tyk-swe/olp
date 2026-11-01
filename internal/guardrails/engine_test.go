@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"hash/crc32"
+	"slices"
 	"strings"
 	"testing"
 
@@ -53,6 +54,203 @@ func TestToolJSONGuardrailsInspectDecodedValuesAndPreserveOtherContent(t *testin
 				t.Fatalf("unmodified evaluation changed source bytes: %v", unchangedErr)
 			}
 		})
+	}
+}
+
+func TestTypeSafeWorkflowPolicies(t *testing.T) {
+	for _, tc := range []struct {
+		name, configuration string
+		valid               bool
+	}{
+		{"route", `{"route":"relevance-route"}`, true},
+		{"missing route", `{}`, false},
+		{"invalid route", `{"route":"bad route"}`, false},
+		{"unknown field", `{"route":"relevance-route","extra":true}`, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			definition := Revision{Type: "typesafe", Configuration: json.RawMessage(tc.configuration), TimeoutMS: 1000, OnError: FailClosed}
+			if err := ValidateDefinition(definition); (err == nil) != tc.valid {
+				t.Fatalf("valid=%t, error=%v", tc.valid, err)
+			}
+		})
+	}
+
+	definitions := map[string]Revision{
+		"active":  {ID: "active", GuardrailID: "active", Type: "typesafe", Configuration: json.RawMessage(`{"route":"relevance-route"}`), TimeoutMS: 1000, OnError: FailOpen},
+		"monitor": {ID: "monitor", GuardrailID: "monitor", Type: "typesafe", Configuration: json.RawMessage(`{"route":"monitor-route"}`), TimeoutMS: 1000, OnError: FailClosed},
+		"output":  {ID: "output", GuardrailID: "output", Type: "typesafe", Configuration: json.RawMessage(`{"route":"output-route"}`), TimeoutMS: 1000, OnError: FailClosed},
+		"keyword": {ID: "keyword", GuardrailID: "keyword", Type: "builtin.keywords", Configuration: json.RawMessage(`{"words":["secret"]}`), TimeoutMS: 1000, OnError: FailClosed},
+	}
+	entries := []Entry{
+		{GuardrailID: "active", RevisionID: "active", Phase: Input, Action: Block},
+		{GuardrailID: "monitor", RevisionID: "monitor", Phase: Input, Action: Block, Monitor: true},
+		{GuardrailID: "output", RevisionID: "output", Phase: Output, Action: Block},
+		{GuardrailID: "keyword", RevisionID: "keyword", Phase: Input, Action: Block},
+	}
+	engine, err := Compile(entries, definitions, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	policies := engine.TypeSafePolicies()
+	if len(policies) != 1 || policies[0].Config.Route != "relevance-route" || policies[0].Entry.RevisionID != "active" || policies[0].Revision.OnError != FailOpen {
+		t.Fatalf("unexpected effective policies: %+v", policies)
+	}
+	if engine.OnlyTypeSafe() || engine.WithoutModelGuardrails() == nil {
+		t.Fatal("mixed policy lost its local guardrail")
+	}
+	if _, err := evaluateText(t, engine.WithoutModelGuardrails(), "secret", Input, nil); !errors.Is(err, ErrBlocked) {
+		t.Fatalf("local input policy did not remain effective: %v", err)
+	}
+	only := testEngine(t, "typesafe", `{"route":"relevance-route"}`, Input, Block, false, nil)
+	if !only.OnlyTypeSafe() || only.WithoutModelGuardrails() != nil {
+		t.Fatal("TypeSafe was not isolated from recursive model evaluations")
+	}
+	result, err := only.Evaluate(t.Context(), Evaluation{Phase: Input, Segments: []Segment{{ID: "user", Text: "request"}}, InternalModel: true}, nil)
+	if err != nil || result.Blocked || len(result.Decisions) != 1 || result.Decisions[0].Outcome != "skipped" {
+		t.Fatalf("internal model unexpectedly evaluated TypeSafe: %+v, %v", result, err)
+	}
+}
+
+func TestCompressionWorkflowRecoveryRespectsRedactionAndExemptions(t *testing.T) {
+	definitions := map[string]Revision{
+		"redact": {ID: "redact", GuardrailID: "redact", Type: "builtin.keywords", Configuration: json.RawMessage(`{"words":["private"]}`), TimeoutMS: 1000, OnError: FailClosed},
+		"first":  {ID: "first", GuardrailID: "first", Type: "headroom", Configuration: json.RawMessage(`{"endpoint":"https://guardrail.example/scan","credential_ref":"credential","content_egress":true}`), TimeoutMS: 1000, OnError: FailClosed},
+		"second": {ID: "second", GuardrailID: "second", Type: "compresr", Configuration: json.RawMessage(`{"endpoint":"https://guardrail.example/scan","credential_ref":"credential","content_egress":true,"parameters":{"query":"task"}}`), TimeoutMS: 1000, OnError: FailClosed},
+	}
+	entries := []Entry{
+		{GuardrailID: "redact", RevisionID: "redact", Phase: Input, Action: Redact},
+		{GuardrailID: "first", RevisionID: "first", Phase: Input, Action: Redact},
+		{GuardrailID: "second", RevisionID: "second", Phase: Input, Action: Redact},
+	}
+	evaluator := EvaluatorFunc(func(_ context.Context, definition Revision, evaluation Evaluation) (Verdict, error) {
+		for _, segment := range evaluation.Segments {
+			if segment.ID == "recovered" || strings.Contains(segment.Text, "private") {
+				t.Errorf("compression received protected content: %+v", segment)
+			}
+		}
+		index := slices.IndexFunc(evaluation.Segments, func(segment Segment) bool { return segment.ID == definition.ID })
+		if index < 0 {
+			return Verdict{Action: "pass"}, nil
+		}
+		segment := evaluation.Segments[index]
+		return Verdict{Action: Redact, Redactions: []Redaction{{Segment: segment.ID, Start: 0, End: len(segment.Text), Replacement: definition.ID + " summary"}}}, nil
+	})
+	engine, err := Compile(entries, definitions, evaluator)
+	if err != nil || !engine.HasCompression() {
+		t.Fatalf("compression policy was not available: %v", err)
+	}
+	segments := []Segment{
+		{ID: "first", Role: "user", Text: "first private details"},
+		{ID: "recovered", Kind: "tool_result", ToolCallID: "recover-call", Text: "recovered private details"},
+		{ID: "second", Role: "user", Text: "second private details"},
+	}
+	for _, tc := range []struct {
+		name              string
+		recovery          bool
+		first, second     string
+		wantRecoveryCount int
+	}{
+		{"workflow", true, "first summary\n[recovery id: 0]", "second summary\n[recovery id: 1]", 2},
+		{"ordinary request", false, "first summary", "second summary", 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			result, err := engine.Evaluate(t.Context(), Evaluation{Phase: Input, Segments: segments, CompressionExemptIDs: []string{"recovered"}, WorkflowRecovery: tc.recovery}, nil)
+			if err != nil || result.Blocked || !result.Changed || len(result.Segments) != 3 {
+				t.Fatalf("evaluation failed: %+v, %v", result, err)
+			}
+			if result.Segments[0].Text != tc.first || result.Segments[1].Text != "recovered [REDACTED] details" || result.Segments[2].Text != tc.second {
+				t.Fatalf("unexpected transformed content: %+v", result.Segments)
+			}
+			if len(result.Recovery) != tc.wantRecoveryCount {
+				t.Fatalf("unexpected recovery content: %+v", result.Recovery)
+			}
+			if tc.recovery && (result.Recovery[0].Text != "first [REDACTED] details" || result.Recovery[1].Text != "second [REDACTED] details") {
+				t.Fatalf("recovery did not retain redacted originals: %+v", result.Recovery)
+			}
+			encoded, err := json.Marshal(result)
+			if err != nil || strings.Contains(string(encoded), "first [REDACTED] details") || strings.Contains(string(encoded), "second [REDACTED] details") || strings.Contains(string(encoded), "recover-call") {
+				t.Fatalf("private recovery data was serialized: %s, %v", encoded, err)
+			}
+		})
+	}
+	if !slices.Equal(segments, []Segment{{ID: "first", Role: "user", Text: "first private details"}, {ID: "recovered", Kind: "tool_result", ToolCallID: "recover-call", Text: "recovered private details"}, {ID: "second", Role: "user", Text: "second private details"}}) {
+		t.Fatal("evaluation changed the input segments")
+	}
+}
+
+func TestCompressionSkipsExemptContent(t *testing.T) {
+	config := `{"endpoint":"https://guardrail.example/scan","credential_ref":"credential","content_egress":true}`
+	evaluator := EvaluatorFunc(func(context.Context, Revision, Evaluation) (Verdict, error) {
+		t.Error("exempt content was sent for compression")
+		return Verdict{Action: "pass"}, nil
+	})
+	engine := testEngine(t, "headroom", config, Input, Redact, false, evaluator)
+	result, err := engine.Evaluate(t.Context(), Evaluation{
+		Phase: Input, Segments: []Segment{{ID: "recovered", Text: "original"}},
+		CompressionExemptIDs: []string{"recovered"}, WorkflowRecovery: true,
+	}, nil)
+	if err != nil || result.Changed || len(result.Recovery) != 0 || len(result.Segments) != 1 || result.Segments[0].Text != "original" || len(result.Decisions) != 1 || result.Decisions[0].Outcome != "skipped" {
+		t.Fatalf("exempt content was changed: %+v, %v", result, err)
+	}
+	if testEngine(t, "headroom", config, Input, Redact, true, evaluator).HasCompression() {
+		t.Fatal("monitoring compression should not enable recovery")
+	}
+}
+
+func TestNativeToolResultsKeepRecoveryIdentity(t *testing.T) {
+	for _, tc := range []struct {
+		name, document, pointer, contentPointer, idPointer, callID string
+	}{
+		{"chat", `{"messages":[{"role":"tool","tool_call_id":"chat-call","content":"original"}]}`, "/messages/0", "/messages/0/content", "/messages/0/tool_call_id", "chat-call"},
+		{"responses", `{"input":[{"type":"function_call_output","call_id":"responses-call","output":"original"}]}`, "/input/0", "/input/0/output", "/input/0/call_id", "responses-call"},
+		{"anthropic", `{"messages":[{"role":"user","content":[{"type":"tool_result","tool_use_id":"anthropic-call","content":[{"type":"text","text":"original"}]}]}]}`, "/messages/0/content/0", "/messages/0/content/0/content/0/text", "/messages/0/content/0/tool_use_id", "anthropic-call"},
+		{"gemini", `{"contents":[{"role":"user","parts":[{"functionResponse":{"id":"gemini-call","name":"read","response":{"nested":{"text":"original"}}},"thoughtSignature":"signed"}]}]}`, "/contents/0/parts/0", "/contents/0/parts/0/functionResponse/response/nested/text", "/contents/0/parts/0/functionResponse/id", "gemini-call"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			document, err := oif.ParseJSON([]byte(tc.document), oif.Limits{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			surface, err := NativeSurface(document, false)
+			if err != nil || len(surface.Segments) != 1 || surface.Segments[0].Kind != "tool_result" || surface.Segments[0].ToolCallID != tc.callID || !slices.Equal(surface.TextAt(tc.pointer), []string{"original"}) {
+				t.Fatalf("tool result could not be identified: %+v, %v", surface, err)
+			}
+			changed := []Segment{{ID: surface.Segments[0].ID, Text: surface.Replacement(0, "[protected]")}}
+			updated, err := surface.Apply(changed)
+			if err != nil {
+				t.Fatal(err)
+			}
+			content, found := updated.Lookup(tc.contentPointer)
+			text, isText := content.Text()
+			id, foundID := updated.Lookup(tc.idPointer)
+			idText, isID := id.Text()
+			if !found || !isText || text != "[protected]" || !foundID || !isID || idText != tc.callID || document.Raw() != tc.document {
+				t.Fatalf("transformation lost content identity: %s", updated.Raw())
+			}
+		})
+	}
+}
+
+func TestNativeToolArgumentReplacementPreservesSignedContent(t *testing.T) {
+	const original = `{"contents":[{"role":"model","parts":[{"functionCall":{"name":"read","args":{"secret":"original"}},"thoughtSignature":"signed"}]}]}`
+	document, err := oif.ParseJSON([]byte(original), oif.Limits{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	surface, err := NativeSurface(document, false)
+	if err != nil || len(surface.Segments) != 1 || surface.Segments[0].Kind != "tool_call" || !slices.Equal(surface.TextAt("/contents/0/parts/0"), []string{`{"secret":"original"}`}) {
+		t.Fatalf("unexpected inspectable tool input: %+v, %v", surface, err)
+	}
+	updated, err := surface.Apply([]Segment{{ID: surface.Segments[0].ID, Text: surface.Replacement(0, "[protected]")}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	args, found := updated.Lookup("/contents/0/parts/0/functionCall/args")
+	text, isText := args.Text()
+	signature, foundSignature := updated.Lookup("/contents/0/parts/0/thoughtSignature")
+	signatureText, isSignature := signature.Text()
+	if !found || !isText || text != "[protected]" || !foundSignature || !isSignature || signatureText != "signed" || document.Raw() != original {
+		t.Fatalf("replacement damaged native content: %s", updated.Raw())
 	}
 }
 

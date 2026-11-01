@@ -10,6 +10,7 @@ import (
 	"golang.org/x/oauth2"
 
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/agentcontract"
 	"github.com/tyk-swe/olp/internal/grants"
 	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/secrets"
@@ -24,7 +25,7 @@ type oauthClient struct {
 	client *http.Client
 }
 
-func (s *Store) oauthClient(ctx context.Context, bound Binding, redirect string) (oauthClient, error) {
+func (s *Store) oauthClient(ctx context.Context, bound Binding, redirect, revisionID string) (oauthClient, error) {
 	if s.Egress == nil {
 		return oauthClient{}, errOAuth
 	}
@@ -36,7 +37,7 @@ func (s *Store) oauthClient(ctx context.Context, bound Binding, redirect string)
 			return oauthClient{}, errOAuth
 		}
 	}
-	secret, secretErr := s.entraClientSecret(ctx, bound)
+	secret, secretErr := s.entraClientSecret(ctx, bound, revisionID)
 	if secretErr != nil {
 		return oauthClient{}, secretErr
 	}
@@ -82,9 +83,29 @@ func oauthProblem(err error) error {
 	return grantProblem(err)
 }
 
-func (s *Store) entraClientSecret(ctx context.Context, bound Binding) (string, error) {
+func (s *Store) entraClientSecret(ctx context.Context, bound Binding, revisionID string) (string, error) {
 	if bound.OAuth.EntraOBO == nil {
 		return "", nil
+	}
+	if bound.AgentID != "" {
+		var draft agentcontract.Draft
+		var project string
+		if err := s.Pool.QueryRow(ctx, `SELECT p.project_id::text,v.definition FROM olp.agent_publications p JOIN olp.agent_publication_revisions v ON v.publication_id=p.id AND v.id=COALESCE(NULLIF($2,'')::uuid,p.latest_revision_id) WHERE p.id=$1 AND p.kind='agent'`, bound.AgentID, revisionID).Scan(&project, &draft); err != nil || draft.Agent == nil || draft.Agent.OAuth == nil || draft.Agent.CredentialID == nil {
+			return "", ErrRequired
+		}
+		if agentBinding(bound.AgentID, project, *draft.Agent, bound.Identity).Digest() != bound.Digest() {
+			return "", ErrRequired
+		}
+		var allowed bool
+		if err := s.Pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM olp.agent_credentials WHERE id=$1 AND project_id=$2 AND entra_client)`, *draft.Agent.CredentialID, project).Scan(&allowed); err != nil || !allowed {
+			return "", ErrRequired
+		}
+		material, err := s.Keys.Read(ctx, s.Pool, s.Installation, *draft.Agent.CredentialID, secrets.AgentCredential)
+		if err != nil {
+			return "", ErrRequired
+		}
+		defer clear(material)
+		return string(material), nil
 	}
 	var id string
 	var config routing.MCPOAuth

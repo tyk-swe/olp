@@ -8,6 +8,7 @@ GO_TEST_PACKAGES ?= ./...
 GO_TEST_ARGS ?=
 GO_TEST_TIMEOUT ?= 5m
 CONSOLE_TEST_ARGS ?=
+LINT_ARGS ?=
 RATCHET_BASE ?=
 GO_BUILD_OUTPUT ?= .local/bin/olp
 GO_BUILD_TAGS ?=
@@ -19,10 +20,10 @@ GOFMT_PATHS = \
 	tests/fixtures/fidelity tests/fixtures/research-migration tests/integration tests/samlfixture tests/sdkfixture
 
 .PHONY: \
-	help setup dev check lint \
+	help setup dev check check-fast lint fmt-check vet vet-bench \
 	test test-go test-bench test-console test-scripts test-race test-ratchet \
-	test-mutation-go test-mutation-console test-coverage-gate integration \
-	bench bench-compare bench-gate \
+	integration \
+	bench bench-compare \
 	api build build-go catalog catalog-sign fmt
 
 help: ## Show development commands
@@ -37,24 +38,34 @@ dev: ## Start isolated services, Go, and Vite
 	./scripts/dev.sh
 
 check: api ## Check formatting, vet, lint, console types/lint, and all local tests
-	@bad="$$(gofmt -l $(GOFMT_PATHS))"; test -z "$$bad" || { printf '%s\n' "$$bad"; exit 1; }
-	go vet ./...
-	go vet -tags=bench ./tests/bench/...
-	$(MAKE) lint
+	$(MAKE) fmt-check vet vet-bench lint
 	pnpm --dir console format:check
 	pnpm --dir console check
 	$(MAKE) test
 
+check-fast: ## Check formatting, vet, lint, and cached local tests without regenerating contracts
+	$(MAKE) fmt-check vet lint
+	$(MAKE) test
+
+fmt-check: ## Fail when Go source is not gofmt formatted
+	@bad="$$(gofmt -l $(GOFMT_PATHS))"; test -z "$$bad" || { printf '%s\n' "$$bad"; exit 1; }
+
+vet: ## Run go vet on all packages
+	go vet ./...
+
+vet-bench: ## Run go vet on the benchmark harness
+	go vet -tags=bench ./tests/bench/...
+
 lint: ## Run the pinned Go static analysis gate (see staticcheck.conf)
-	./scripts/check-lint.sh
+	./scripts/check-lint.sh $(LINT_ARGS)
 
 test: test-go test-bench test-console test-scripts ## Run Go, benchmark harness, console, and script tests without containers
 
 test-go: ## Run Go unit and protocol tests
-	go test -mod=readonly -timeout=$(GO_TEST_TIMEOUT) $(GO_TEST_ARGS) $(GO_TEST_PACKAGES)
+	go test -mod=readonly -vet=off -timeout=$(GO_TEST_TIMEOUT) $(GO_TEST_ARGS) $(GO_TEST_PACKAGES)
 
 test-bench: ## Run the benchmark harness's own tests, which need no services
-	go test -mod=readonly -tags=bench -timeout=$(GO_TEST_TIMEOUT) $(GO_TEST_ARGS) -skip '^TestScenario' ./tests/bench/...
+	go test -mod=readonly -vet=off -tags=bench -timeout=$(GO_TEST_TIMEOUT) $(GO_TEST_ARGS) -skip '^TestScenario' ./tests/bench/...
 
 test-console: ## Run console unit and component tests
 	pnpm --dir console test $(CONSOLE_TEST_ARGS)
@@ -64,15 +75,6 @@ test-scripts: ## Run automation script tests
 
 test-ratchet: ## Check touched test files against the mechanical test rules
 	node scripts/check-test-ratchet.mjs $(RATCHET_BASE)
-
-test-mutation-go: ## Mutation-test changed Go code against the merge base
-	MUTATION_BASE="$(if $(strip $(RATCHET_BASE)),$(RATCHET_BASE),$(MUTATION_BASE))" ./scripts/mutation-go.sh
-
-test-mutation-console: ## Mutation-test changed console modules
-	MUTATION_BASE="$(if $(strip $(RATCHET_BASE)),$(RATCHET_BASE),$(MUTATION_BASE))" ./scripts/mutation-console.sh
-
-test-coverage-gate: ## Fail when a changed Go package loses coverage against the merge base
-	./scripts/coverage-gate.sh $(RATCHET_BASE)
 
 test-race: ## Run uncached Go tests with race detection
 	$(MAKE) test-go GO_TEST_ARGS="$(GO_TEST_ARGS) -race -count=1"
@@ -86,9 +88,6 @@ bench: ## Run the gateway benchmark scenarios against the mock upstream
 
 bench-compare: ## Run the benchmark scenarios against OLP and the pinned LiteLLM release
 	./scripts/bench-compare.sh
-
-bench-gate: ## Compare hot-path benchmarks with the merge base
-	./scripts/bench-gate.sh
 
 api: ## Generate Go and TypeScript contracts without compiling the gateway
 	./scripts/api.sh

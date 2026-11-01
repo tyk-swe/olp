@@ -8,6 +8,7 @@ import (
 	"github.com/tyk-swe/olp/internal/routing"
 
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/usage"
 )
 
@@ -63,7 +64,12 @@ func (s *Server) planNamed(ctx context.Context, x *call) *Error {
 // other dynamic planning. Admission, dispatch and fallback share what remains.
 func (x *call) routeContext(ctx context.Context) (context.Context, context.CancelFunc) {
 	if x.deadline.IsZero() {
-		x.deadline = time.Now().Add(time.Duration(x.named().OverallTimeout) * time.Millisecond)
+		timeout := time.Duration(x.named().OverallTimeout) * time.Millisecond
+		if x.named().ToolExecution == "gateway" {
+			seconds := limits.MinWorkflowInteger(120, x.generation.runLimits.MaxDurationSeconds)
+			timeout = min(timeout, time.Duration(seconds)*time.Second)
+		}
+		x.deadline = time.Now().Add(timeout)
 	}
 	return context.WithDeadline(ctx, x.deadline)
 }
@@ -86,10 +92,14 @@ func (s *Server) replan(ctx context.Context, x *call) *Error {
 // adoptPlan takes the plan of the route the request is on. The primary
 // route's attempt budget bounds the request, so a later route receives what
 // remains of it.
-func (x *call) adoptPlan(plan routing.Plan) {
+func (x *call) initAllowance(budget int) {
 	if x.allowance == 0 {
-		x.allowance = plan.Budget
+		x.allowance = x.spent + budget
 	}
+}
+
+func (x *call) adoptPlan(plan routing.Plan) {
+	x.initAllowance(plan.Budget)
 	x.decisions, x.policy, x.attempts, x.shadows = plan.Decisions, plan.Policy, plan.Attempts, plan.Shadows
 	x.finishPreparationPlanning()
 	x.budget = x.spent + min(plan.Budget, x.allowance-x.spent)
@@ -105,9 +115,7 @@ func (x *call) adoptPlan(plan routing.Plan) {
 // delegate moves the request to the route its matched selector names. The
 // planner has already checked that the route exists and the key may use it.
 func (s *Server) delegate(ctx context.Context, x *call, plan routing.Plan) *Error {
-	if x.allowance == 0 {
-		x.allowance = plan.Budget
-	}
+	x.initAllowance(plan.Budget)
 	selector := plan.Selected()
 	outcome, e := s.adopt(ctx, x, plan.Delegate, usage.ViaSelector)
 	if e != nil {
@@ -240,6 +248,9 @@ func (x *call) mayLeaveRoute() bool {
 // keyAuthorizer allows the routes an API key may use for inference.
 func (s *Server) keyAuthorizer(authority access.Authority) func(*routing.Route) *Error {
 	return func(route *routing.Route) *Error {
+		if authority.TaskCapability != nil && !slices.Contains(authority.TaskCapability.RouteRevisions, route.RevisionID) {
+			return permissionError("route_forbidden", "This task is not allowed to use the model `"+route.Slug+"`.")
+		}
 		if !authority.Allows("inference", route.Slug, route.ProjectID, s.now()) {
 			return permissionError("route_forbidden", "This API key is not allowed to use the model `"+route.Slug+"`.")
 		}

@@ -56,3 +56,55 @@ func TestPublicationRevisionIsolation(t *testing.T) {
 		t.Fatal("accepted corrupted published definition")
 	}
 }
+
+func TestAgentMessagePriceCannotExceedPublishedBound(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		price   string
+		bound   string
+		allowed bool
+	}{
+		{name: "unspecified", bound: "1", allowed: true},
+		{name: "free", price: "0", bound: "1", allowed: true},
+		{name: "below bound", price: "0.75", bound: "1", allowed: true},
+		{name: "equal bound", price: "1.00", bound: "1", allowed: true},
+		{name: "above bound", price: "1.000000000001", bound: "1"},
+		{name: "negative", price: "-0.01", bound: "1"},
+		{name: "invalid", price: "not-a-price", bound: "1"},
+		{name: "zero bound", price: "0", bound: "0"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			draft := Draft{ProjectID: contractID, Name: "agent", Agent: &Definition{
+				Protocol: "a2a-1.0.0", CardDigest: strings.Repeat("a", 64), PricingRevisionID: contractID,
+				MaxCost: test.bound, MessagePrice: test.price,
+			}}
+			err := draft.Validate("agent")
+			if (err == nil) != test.allowed {
+				t.Fatalf("price %q with bound %q allowed = %t, want %t: %v", test.price, test.bound, err == nil, test.allowed, err)
+			}
+		})
+	}
+}
+
+func TestToolPublicationRequiresSupportedClassification(t *testing.T) {
+	for _, test := range []struct {
+		classification string
+		allowed        bool
+	}{
+		{classification: "", allowed: true},
+		{classification: "read_only", allowed: true},
+		{classification: "approval_required", allowed: true},
+		{classification: "implicitly_safe"},
+	} {
+		t.Run(test.classification, func(t *testing.T) {
+			draft := Draft{ProjectID: contractID, Name: "tools", Toolset: &Toolset{Tools: []Tool{{
+				ServerID: contractID, RevisionID: contractID, CatalogDigest: strings.Repeat("a", 64),
+				Name: "lookup", Alias: ToolAlias(contractID, "lookup"), Classification: test.classification,
+			}}}}
+			err := draft.Validate("toolset")
+			if (err == nil) != test.allowed {
+				t.Fatalf("classification %q allowed = %t, want %t: %v", test.classification, err == nil, test.allowed, err)
+			}
+		})
+	}
+}

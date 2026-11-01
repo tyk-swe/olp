@@ -372,6 +372,11 @@ func testAuthority(scopes []string, toolsets []string) *access.Authority {
 	return &access.Authority{ID: testKeyID, InstallationID: "test-installation", ProjectID: &project, Policy: access.KeyPolicy{Scopes: scopes, AllowedToolsets: toolsets}}
 }
 
+func testDelegatedAuthority(keyID string, agent *access.DelegationAgentLimits, tokenDigest string) *access.Authority {
+	project := testProject
+	return &access.Authority{ID: keyID, InstallationID: "test-installation", ProjectID: &project, Policy: access.KeyPolicy{Scopes: []string{"tools"}, AllowedToolsets: []string{testToolset}}, DelegationAgentID: agent.ID, DelegationAgentLimits: agent, DelegationTokenDigest: tokenDigest}
+}
+
 func testAuthKey() *secrets.AuthKey {
 	return secrets.NewAuthKey(bytes.Repeat([]byte{9}, 32), "test-installation")
 }
@@ -527,6 +532,18 @@ func (f *fakeRateLimiter) Reserve(_ context.Context, request limits.Request) (*l
 	return nil, nil
 }
 
+type countingRateLimiter struct {
+	counts map[string]int64
+}
+
+func (f *countingRateLimiter) Reserve(_ context.Context, request limits.Request) (*limits.Lease, error) {
+	if request.RequestsPerMinute != nil && f.counts[request.LookupID] >= *request.RequestsPerMinute {
+		return nil, &limits.ExceededError{Dimension: limits.DimensionRequests, RetryAfter: time.Minute}
+	}
+	f.counts[request.LookupID]++
+	return nil, nil
+}
+
 func priceTestSnapshot(t *testing.T, rt *fakeRuntime, serverPrice *string, toolPrices map[string]string) {
 	t.Helper()
 	snapshot := rt.release.Snapshot
@@ -559,13 +576,13 @@ func TestCallToolReservesPinnedPriceAndRateLimits(t *testing.T) {
 	if len(ledger.reserved) != 1 || ledger.reserved[0].UnitPrice == nil || *ledger.reserved[0].UnitPrice != "0.25" {
 		t.Fatalf("reservation did not carry the pinned per-tool price: %+v", ledger.reserved)
 	}
-	if len(limiter.requests) != 2 {
-		t.Fatalf("call did not reserve per-key and per-server rate limits: %+v", limiter.requests)
+	if len(limiter.requests) != 3 {
+		t.Fatalf("call did not reserve server and caller rate limits: %+v", limiter.requests)
 	}
-	perKey, perServer := limiter.requests[0], limiter.requests[1]
-	if perKey.CostOwnerID != testKeyID || perKey.RequestsPerMinute == nil || *perKey.RequestsPerMinute != keyRate ||
+	perKey, perServer, caller := limiter.requests[0], limiter.requests[1], limiter.requests[2]
+	if perKey.CostOwnerID != testKeyID || perKey.RequestsPerMinute == nil || *perKey.RequestsPerMinute != 30 ||
 		perKey.MaxConcurrency == nil || *perKey.MaxConcurrency != 2 {
-		t.Fatalf("per-key reservation did not take the tighter of key and server limits: %+v", perKey)
+		t.Fatalf("per-server key limits missing: %+v", perKey)
 	}
 	if perServer.CostOwnerID != testServerID || perServer.RequestsPerMinute == nil || *perServer.RequestsPerMinute != 120 ||
 		perServer.MaxConcurrency == nil || *perServer.MaxConcurrency != 4 {
@@ -573,6 +590,9 @@ func TestCallToolReservesPinnedPriceAndRateLimits(t *testing.T) {
 	}
 	if perKey.LookupID == perServer.LookupID || perKey.LookupID == "" || perServer.LookupID == "" {
 		t.Fatalf("rate counters are not separated per scope: %q %q", perKey.LookupID, perServer.LookupID)
+	}
+	if caller.LookupID != authority.LimitsLookup() || caller.RequestsPerMinute == nil || *caller.RequestsPerMinute != keyRate || caller.MaxConcurrency == nil || *caller.MaxConcurrency != keyConcurrency {
+		t.Fatalf("global caller limits missing: %+v", caller)
 	}
 }
 
@@ -593,6 +613,33 @@ func TestCallToolRateLimitRefusalReservesAndDispatchesNothing(t *testing.T) {
 		`{"toolset_id":"`+testToolset+`","name":"`+alias()+`","call_id":"limited-json-2","arguments":{"query":"x"}}`)
 	if status != http.StatusTooManyRequests || fx.calls.Load() != 0 || len(ledger.reserved) != 0 {
 		t.Fatalf("concurrency limited call dispatched: status=%d calls=%d reserved=%d", status, fx.calls.Load(), len(ledger.reserved))
+	}
+}
+
+func TestDelegatedToolCallsShareAgentRateLimitAcrossKeys(t *testing.T) {
+	agentRate := int64(1)
+	agent := &access.DelegationAgentLimits{ID: testOtherRv, LookupID: "agent-lookup", Limits: access.AdmissionLimits{RequestsPerMinute: &agentRate}}
+	first := testDelegatedAuthority(testKeyID, agent, "")
+	second := testDelegatedAuthority(testOtherTS, agent, "")
+	server, upstream, _, _, runtime := newTestServer(t, first, "")
+	runtime.otherAuthority = second
+	server.Limiter = &countingRateLimiter{counts: map[string]int64{}}
+	mux := http.NewServeMux()
+	server.Register(mux)
+	call := func(token, callID string) int {
+		t.Helper()
+		body := `{"toolset_id":"` + testToolset + `","name":"` + alias() + `","call_id":"` + callID + `","arguments":{"query":"x"}}`
+		request := httptest.NewRequest(http.MethodPost, "/v1/mcp/tools/call", strings.NewReader(body))
+		request.Header.Set("Authorization", "Bearer "+token)
+		response := httptest.NewRecorder()
+		mux.ServeHTTP(response, request)
+		return response.Code
+	}
+	if status := call("test-key", "first"); status != http.StatusOK {
+		t.Fatalf("first delegated tool call: %d", status)
+	}
+	if status := call("other-key", "second"); status != http.StatusTooManyRequests || upstream.calls.Load() != 1 {
+		t.Fatalf("agent rate limit did not stop second key: status=%d upstream=%d", status, upstream.calls.Load())
 	}
 }
 
@@ -1790,5 +1837,75 @@ func TestToolCallIdentifiersPreserveSupportedBytesAndRejectControls(t *testing.T
 				t.Fatal("invalid identifier reserved or dispatched a call")
 			}
 		})
+	}
+}
+
+func TestWorkflowResolvesAndRunsOnlyAuthorizedReadOnlyTools(t *testing.T) {
+	authority := testAuthority([]string{"tools"}, []string{testToolset})
+	server, upstream, _, _, installed := newTestServer(t, authority, "")
+	source := installed.release.Snapshot
+	published := source.AgentPublications[0]
+	original := published.Definition.Toolset.Tools[0]
+	releaseFor := func(classification string) *runtime.Release {
+		t.Helper()
+		tool := agentcontract.Tool{
+			ServerID: original.ServerID, RevisionID: original.RevisionID, CatalogDigest: original.CatalogDigest,
+			Name: original.Name, Alias: original.Alias, Classification: classification,
+		}
+		definition := agentcontract.Draft{ProjectID: testProject, Name: "tools", Toolset: &agentcontract.Toolset{Tools: []agentcontract.Tool{tool}}}
+		snapshot := &routing.Snapshot{
+			Generation: source.Generation, Providers: source.Providers, Routes: source.Routes, MCPServers: source.MCPServers,
+			AgentPublications: []agentcontract.Revision{{ID: testRevision, PublicationID: testToolset, ProjectID: testProject, Kind: "toolset", Digest: agentcontract.DraftDigest(definition), Definition: definition, Current: true}},
+		}
+		if err := snapshot.Compile(); err != nil {
+			t.Fatal(err)
+		}
+		return &runtime.Release{ID: testGenID, Snapshot: snapshot}
+	}
+	unclassified := releaseFor("")
+	unclassifiedTools, resolveErr := server.Resolve(t.Context(), *authority, unclassified, []string{testToolset})
+	if resolveErr != nil || len(unclassifiedTools) != 1 {
+		t.Fatalf("resolve published tool: %v %v", unclassifiedTools, resolveErr)
+	}
+	_, approvalErr := server.Call(t.Context(), *authority, unclassified, unclassifiedTools[0], testGenID, 0, "unclassified", json.RawMessage(`{"query":"q"}`))
+	approval, isApproval := errors.AsType[*WorkflowError](approvalErr)
+	if !isApproval || approval.Code != "tool_approval_required" {
+		t.Fatalf("unclassified tool was not refused: %v", approvalErr)
+	}
+	if upstream.calls.Load() != 0 {
+		t.Fatal("unclassified tool reached upstream")
+	}
+	readOnly := releaseFor("read_only")
+	tools, toolsErr := server.Resolve(t.Context(), *authority, readOnly, []string{testToolset})
+	if toolsErr != nil || len(tools) != 1 {
+		t.Fatalf("resolve read-only tool: %v %v", tools, toolsErr)
+	}
+	_, argumentsErr := server.Call(t.Context(), *authority, readOnly, tools[0], testGenID, 0, "bad-arguments", json.RawMessage(`{"query":42}`))
+	invalid, isInvalid := errors.AsType[*WorkflowError](argumentsErr)
+	if !isInvalid || invalid.Code != "invalid_tool_arguments" || upstream.calls.Load() != 0 {
+		t.Fatalf("invalid arguments reached upstream: %v", argumentsErr)
+	}
+	result, callErr := server.Call(t.Context(), *authority, readOnly, tools[0], testGenID, 1, "valid-call", json.RawMessage(`{"query":"q"}`))
+	if callErr != nil || !bytes.Contains(result, []byte("answer for lookup")) {
+		t.Fatalf("read-only call failed: %s %v", result, callErr)
+	}
+	if upstream.calls.Load() != 1 {
+		t.Fatalf("read-only call count: %d", upstream.calls.Load())
+	}
+	agentRate := int64(1)
+	delegated := testDelegatedAuthority(testKeyID, &access.DelegationAgentLimits{ID: testOtherRv, LookupID: "agent-lookup", Limits: access.AdmissionLimits{RequestsPerMinute: &agentRate}}, "")
+	server.Limiter = &countingRateLimiter{counts: map[string]int64{"agent-lookup": 1}}
+	if _, err := server.Call(t.Context(), *delegated, readOnly, tools[0], testGenID, 2, "delegated-workflow", json.RawMessage(`{"query":"q"}`)); err != nil || upstream.calls.Load() != 2 {
+		t.Fatalf("delegated workflow could not use its parent admission: %v", err)
+	}
+	if _, err := server.Resolve(t.Context(), *testAuthority([]string{"tools"}, nil), readOnly, []string{testToolset}); err == nil {
+		t.Fatal("unauthorized toolset resolved")
+	}
+	if _, err := server.Resolve(t.Context(), *authority, readOnly, []string{testToolset, testToolset}); err == nil {
+		t.Fatal("duplicate tool aliases resolved")
+	}
+	stale := WorkflowTool{ToolsetID: tools[0].ToolsetID, RevisionID: testOtherRv, Definition: tools[0].Definition}
+	if _, err := server.Call(t.Context(), *authority, readOnly, stale, testGenID, 2, "stale", json.RawMessage(`{"query":"q"}`)); err == nil {
+		t.Fatal("stale tool revision executed")
 	}
 }

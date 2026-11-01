@@ -18,6 +18,7 @@ type SavedPlan struct {
 	Version                int                                `json:"version"`
 	Destination            string                             `json:"destination"`
 	DestinationDigest      string                             `json:"destination_digest"`
+	CodeBindingsDigest     string                             `json:"code_bindings_digest"`
 	ExternalBindingsDigest string                             `json:"external_bindings_digest"`
 	IntentDigest           string                             `json:"intent_digest"`
 	Document               json.RawMessage                    `json:"document"`
@@ -32,7 +33,7 @@ func (runner Runner) configuration(ctx context.Context, args []string) error {
 	if len(positional) != 0 {
 		return errors.New("configuration commands take named file options")
 	}
-	if err = checkOptions(opts, "file", "plan-file", "bindings-file", "external-bindings-file", "output", "idempotency-key"); err != nil {
+	if err = checkOptions(opts, "file", "plan-file", "bindings-file", "external-bindings-file", "code-bindings-file", "output", "idempotency-key"); err != nil {
 		return err
 	}
 	client, err := runner.client()
@@ -145,7 +146,23 @@ func (runner Runner) configuration(ctx context.Context, args []string) error {
 	} else if saved.ExternalBindingsDigest != bindingsDigest {
 		return errors.New("external credential bindings changed since planning; compute a new plan")
 	}
-	request := map[string]any{"document": saved.Document, "expected_digest": saved.DestinationDigest, "secret_bindings": bindings, "external_credential_bindings": externalBindings}
+	codeBindings, err := readCodeBindings(opts.one("code-bindings-file"))
+	if err != nil {
+		return err
+	}
+	encodedCode, err := json.Marshal(codeBindings)
+	if err != nil {
+		return err
+	}
+	codeHash := sha256.Sum256(encodedCode)
+	codeDigest := hex.EncodeToString(codeHash[:])
+	if args[0] == "plan" {
+		saved.CodeBindingsDigest = codeDigest
+	} else if saved.CodeBindingsDigest != codeDigest {
+		return errors.New("code destination bindings changed since planning, compute a new plan")
+	}
+
+	request := map[string]any{"document": saved.Document, "expected_digest": saved.DestinationDigest, "secret_bindings": bindings, "external_credential_bindings": externalBindings, "code_bindings": codeBindings}
 	if args[0] == "apply" {
 		// The server checks current authority, exact replay and destination
 		// preconditions in that order. Replanning here would block recovery of
@@ -201,4 +218,21 @@ func savedIntentDigest(saved SavedPlan) (string, error) {
 	}
 	digest := sha256.Sum256(encoded)
 	return hex.EncodeToString(digest[:]), nil
+}
+
+func readCodeBindings(path string) (contract.ConfigurationCodeBindings, error) {
+	if path == "" {
+		return contract.ConfigurationCodeBindings{}, nil
+	}
+	data, err := readJSON(path)
+	if err != nil {
+		return contract.ConfigurationCodeBindings{}, err
+	}
+	var bindings contract.ConfigurationCodeBindings
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&bindings); err != nil {
+		return contract.ConfigurationCodeBindings{}, errors.New("code bindings must map credentials, users and api_keys to destination UUIDs")
+	}
+	return bindings, nil
 }

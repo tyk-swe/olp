@@ -24,6 +24,7 @@ type RevisionCapability struct {
 	Surface     string     `json:"surface"`
 	Mode        string     `json:"mode"`
 	Source      string     `json:"source"`
+	ToolCalls   bool       `json:"tool_calls,omitempty"`
 	CertifiedAt *time.Time `json:"certified_at,omitempty"`
 }
 
@@ -135,7 +136,7 @@ func DecodeProviderRevision(revision ProviderRevision) (Provider, error) {
 	for _, model := range models {
 		for _, capability := range model.Capabilities {
 			if capability.Source == "certified" {
-				provider.Capabilities = append(provider.Capabilities, Capability{Model: model.UpstreamModel, Operation: capability.Operation, Surface: capability.Surface, Mode: capability.Mode})
+				provider.Capabilities = append(provider.Capabilities, Capability{Model: model.UpstreamModel, Operation: capability.Operation, Surface: capability.Surface, Mode: capability.Mode, ToolCalls: capability.ToolCalls})
 			}
 		}
 	}

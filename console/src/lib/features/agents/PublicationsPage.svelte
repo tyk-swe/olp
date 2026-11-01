@@ -44,6 +44,7 @@
   let error = $state('');
   let notice = $state('');
   let credential = $state('');
+  let entraClientSecret = $state('');
   let removeCredential = $state(false);
   let serverID = $state('');
   let server = $state<MCPServer | null>(null);
@@ -55,6 +56,7 @@
   const captureOwner = usePrincipalLifetime(() => {
     epoch += 1;
     credential = '';
+    entraClientSecret = '';
     removeCredential = false;
     current = null;
     form = publicationForm();
@@ -96,6 +98,7 @@
     epoch += 1;
     intent.reset();
     credential = '';
+    entraClientSecret = '';
     removeCredential = false;
     editor = false;
     current = null;
@@ -206,6 +209,15 @@
       if (isCurrent() && version === epoch) error = errorMessage(cause);
     }
   }
+  function classifyTool(alias: string, value: string) {
+    const classification =
+      value === 'read_only' || value === 'approval_required'
+        ? value
+        : undefined;
+    form.tools = form.tools.map((tool) =>
+      tool.alias === alias ? { ...tool, classification } : tool
+    );
+  }
   async function inspect() {
     if (!current) return;
     const version = epoch;
@@ -229,8 +241,10 @@
     const selectedKind = kind;
     const input: Draft = publicationInput(kind, form);
     if (kind === 'agents') {
-      if (removeCredential) input.credential = null;
+      if (form.oauthEnabled || removeCredential) input.credential = null;
       else if (credential) input.credential = credential;
+      if (form.oauthEnabled && form.oauthEntra && entraClientSecret)
+        input.entra_client_secret = entraClientSecret;
     }
     busy = true;
     error = '';
@@ -263,6 +277,7 @@
       );
       if (!isCurrent() || version !== epoch) return;
       credential = '';
+      entraClientSecret = '';
       removeCredential = false;
       current = result;
       inspected = null;
@@ -407,7 +422,20 @@
               >{/each}{/if}
           <ul>
             {#each form.tools as tool (tool.alias)}<li>
-                {tool.name} <code>{tool.revision_id}</code><button
+                {tool.name} <code>{tool.revision_id}</code>
+                <label>
+                  Execution classification
+                  <select
+                    aria-label={`Execution classification for ${tool.name}`}
+                    value={tool.classification ?? ''}
+                    onchange={(event) =>
+                      classifyTool(tool.alias, event.currentTarget.value)}
+                  >
+                    <option value="">Unclassified</option>
+                    <option value="read_only">Read-only</option>
+                    <option value="approval_required">Approval required</option>
+                  </select>
+                </label><button
                   type="button"
                   onclick={() =>
                     (form.tools = form.tools.filter(
@@ -418,7 +446,8 @@
           </ul>
           <p>
             Each selected tool pins its certified server revision; catalog drift
-            revokes its live authority.
+            revokes its live authority. Only tools explicitly marked read-only
+            can run automatically in a gateway workflow.
           </p>
           {#if server && pricing}
             <fieldset>
@@ -473,18 +502,86 @@
           {/if}
         {:else if kind === 'prompts'}
           <label
-            >Template <textarea
-              bind:value={form.template}
-              maxlength="65536"
-              rows="10"></textarea></label
-          ><label
+            >Prompt format <select bind:value={form.promptMode}>
+              <option value="template">Single template</option>
+              <option value="messages">Role-structured messages</option>
+            </select></label
+          >
+          {#if form.promptMode === 'template'}
+            <label
+              >Template <textarea
+                bind:value={form.template}
+                maxlength="65536"
+                rows="10"></textarea></label
+            >
+          {:else}
+            {#each form.messages as message, index (index)}
+              <fieldset>
+                <legend>Message {index + 1}</legend>
+                <label
+                  >Role <select bind:value={message.role}>
+                    <option value="system">System</option>
+                    <option value="user">User</option>
+                    <option value="assistant">Assistant</option>
+                  </select></label
+                >
+                <label
+                  >Content <textarea
+                    bind:value={message.content}
+                    maxlength="65536"
+                    rows="4"></textarea></label
+                >
+                <button
+                  type="button"
+                  disabled={form.messages.length <= 1}
+                  onclick={() =>
+                    (form.messages = form.messages.filter(
+                      (_, i) => i !== index
+                    ))}>Remove message</button
+                >
+              </fieldset>
+            {/each}
+            <button
+              type="button"
+              disabled={form.messages.length >= 256}
+              onclick={() =>
+                (form.messages = [
+                  ...form.messages,
+                  { role: 'user', content: '' }
+                ])}>Add message</button
+            >
+          {/if}
+          <label
             >String variables (comma separated) <input
               bind:value={form.variables}
             /></label
           >
+          <fieldset>
+            <legend>Default generation parameters</legend>
+            <label
+              >Temperature <input
+                inputmode="decimal"
+                pattern="([01](\.[0-9]+)?|2(\.0+)?)"
+                bind:value={form.temperature}
+              /></label
+            ><label
+              >Top P <input
+                inputmode="decimal"
+                pattern="(0(\.[0-9]+)?|1(\.0+)?)"
+                bind:value={form.topP}
+              /></label
+            ><label
+              >Maximum output tokens <input
+                inputmode="numeric"
+                pattern="[1-9][0-9]*"
+                bind:value={form.maxOutputTokens}
+              /></label
+            >
+          </fieldset>
           <p>
             Use simple {'{{name}}'} variables only. Rendered prompts and variable
-            values are not stored here.
+            values are not stored here. Defaults apply only when the request does
+            not set a value.
           </p>
         {:else}
           <label
@@ -517,6 +614,43 @@
               required
             /></label
           ><label
+            >Price per message <input
+              inputmode="decimal"
+              bind:value={form.messagePrice}
+            /></label
+          >
+          <p>Leave blank to disable sending, or enter 0 for free messages.</p>
+          <label
+            >Declared maximum remote work duration in seconds <input
+              inputmode="numeric"
+              pattern="[0-9]+"
+              bind:value={form.remoteWorkBoundSeconds}
+            /></label
+          >
+          <p>
+            The agent must enforce this bound on its own work. Budgeted calls
+            require a bound.
+          </p>
+          <label
+            >Maximum task continuations <input
+              inputmode="numeric"
+              pattern="[0-9]+"
+              bind:value={form.maxTaskContinuations}
+              placeholder="32"
+            /></label
+          >
+          <label
+            >Task deadline in seconds <input
+              inputmode="numeric"
+              pattern="[0-9]+"
+              bind:value={form.taskDeadlineSeconds}
+              placeholder="600"
+            /></label
+          >
+          <p>
+            Continuations are limited to 128 and the deadline to 3600 seconds.
+          </p>
+          <label
             >Pinned toolset revision UUIDs <textarea
               bind:value={form.toolsetRevisions}></textarea></label
           ><label
@@ -527,15 +661,92 @@
               type="password"
               autocomplete="new-password"
               bind:value={credential}
-              disabled={!canTrust}
+              disabled={!canTrust || form.oauthEnabled}
             /></label
           ><label
             ><input
               type="checkbox"
               bind:checked={removeCredential}
-              disabled={!canTrust}
+              disabled={!canTrust || form.oauthEnabled}
             /> Remove credential</label
           >
+          <fieldset disabled={!canTrust}>
+            <legend>Personal OAuth authorization</legend>
+            <label
+              ><input type="checkbox" bind:checked={form.oauthEnabled} /> Use OAuth
+              grants</label
+            >
+            {#if form.oauthEnabled}
+              <p>
+                OAuth replaces any saved bearer credential. Publishing requires
+                a publicly readable agent card for publication and discovery.
+                Task requests use the caller's grant.
+              </p>
+              <label
+                ><input type="checkbox" bind:checked={form.oauthEntra} /> Use Entra
+                on-behalf-of</label
+              >
+              {#if form.oauthEntra}
+                <label
+                  >Workload issuer <input
+                    type="url"
+                    bind:value={form.oauthEntraIssuer}
+                    required
+                  /></label
+                >
+                <label
+                  >Replacement Entra client secret <input
+                    type="password"
+                    autocomplete="new-password"
+                    bind:value={entraClientSecret}
+                  /></label
+                >
+                <p>
+                  Supply the client secret when enabling Entra or changing its
+                  issuer, client ID, or token endpoint.
+                </p>
+              {/if}
+              <label
+                >Client ID <input
+                  bind:value={form.oauthClientID}
+                  required
+                /></label
+              >
+              <label
+                >Audience <input
+                  bind:value={form.oauthAudience}
+                  required
+                /></label
+              >
+              <label
+                >Scopes <input bind:value={form.oauthScopes} required /></label
+              >
+              {#if !form.oauthEntra}<label
+                  >Authorization endpoint <input
+                    type="url"
+                    bind:value={form.oauthAuthorizationEndpoint}
+                    required
+                  /></label
+                >{/if}
+              <label
+                >Token endpoint <input
+                  type="url"
+                  bind:value={form.oauthTokenEndpoint}
+                  required
+                /></label
+              >
+              {#if !form.oauthEntra}<label
+                  >Device authorization endpoint <input
+                    type="url"
+                    bind:value={form.oauthDeviceEndpoint}
+                  /></label
+                >{/if}
+              <p>
+                To change the agent endpoint, remove OAuth and publish the new
+                endpoint and card first. Then configure OAuth again.
+              </p>
+            {/if}
+          </fieldset>
           <p>
             Destination, card, and credential trust changes require installation
             access. Existing credentials are never displayed.
@@ -552,6 +763,7 @@
           !canManage ||
           unsaved ||
           !!credential ||
+          !!entraClientSecret ||
           removeCredential}
         onclick={() => write('publish')}>Publish saved draft</button
       >{#if unsaved}<p>Save edits before publishing.</p>{/if}

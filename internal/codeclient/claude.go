@@ -1,36 +1,66 @@
 package codeclient
 
 import (
-	"fmt"
+	"slices"
 	"strings"
-
-	"github.com/tyk-swe/olp/internal/codeadapter"
 )
 
-// claudeCodeConfiguration sets every model variable to a native model the
-// route admits, so background, subagent and auto-mode requests stay on it. A
-// separate planning model selects opusplan, which plans with the Opus model
-// and does everything else with the Sonnet model.
-func claudeCodeConfiguration(slug, plans, baseURL, model, plan, small string) string {
-	selected := model
-	if plan != model {
-		selected = "opusplan"
-	}
-	return fmt.Sprintf(`# Claude Code %s for OLP code-mode route %s (%s).
-# Source this file in a POSIX shell, such as bash or zsh, before starting claude.
-# Set OLP_API_KEY to your OLP inference key first. No Anthropic login or vendor
-# key belongs on this machine. To select other models, regenerate this file.
-unset ANTHROPIC_API_KEY ANTHROPIC_SMALL_FAST_MODEL CLAUDE_CODE_USE_BEDROCK CLAUDE_CODE_USE_VERTEX CLAUDE_CODE_USE_FOUNDRY
-export ANTHROPIC_BASE_URL=%s
-export ANTHROPIC_AUTH_TOKEN="${OLP_API_KEY:?Set OLP_API_KEY to your OLP inference key}"
-export ANTHROPIC_MODEL=%s
-export ANTHROPIC_DEFAULT_OPUS_MODEL=%s
-export ANTHROPIC_DEFAULT_SONNET_MODEL=%s
-export ANTHROPIC_DEFAULT_HAIKU_MODEL=%s
-export CLAUDE_CODE_SUBAGENT_MODEL=%s
-export CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
-`, codeadapter.ClaudeCodeVersion, slug, plans, shellQuote(baseURL), shellQuote(selected), shellQuote(plan), shellQuote(model), shellQuote(small), shellQuote(model))
+const claudeCredentialVariables = "ANTHROPIC_API_KEY ANTHROPIC_SMALL_FAST_MODEL CLAUDE_CODE_USE_BEDROCK CLAUDE_CODE_USE_VERTEX CLAUDE_CODE_USE_FOUNDRY"
+
+type claudeSetting struct {
+	name, value string
 }
 
-// shellQuote quotes s for a POSIX shell.
+func claudeSettings(baseURL, model, plan, small string) []claudeSetting {
+	return []claudeSetting{
+		{"ANTHROPIC_BASE_URL", baseURL},
+		{"ANTHROPIC_MODEL", claudeModel(model, plan)},
+		{"ANTHROPIC_DEFAULT_OPUS_MODEL", plan},
+		{"ANTHROPIC_DEFAULT_SONNET_MODEL", model},
+		{"ANTHROPIC_DEFAULT_HAIKU_MODEL", small},
+		{"CLAUDE_CODE_SUBAGENT_MODEL", model},
+		{"CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC", "1"},
+	}
+}
+
+func claudeCodeConfiguration(baseURL, model, plan, small string) string {
+	settings := slices.Collect(func(yield func(string) bool) {
+		for _, setting := range claudeSettings(baseURL, model, plan, small) {
+			if !yield("export " + setting.name + "=" + shellQuote(setting.value)) {
+				return
+			}
+		}
+	})
+	return `: "${OLP_API_KEY:?Set OLP_API_KEY to your OLP inference key}"
+` + "unset " + claudeCredentialVariables + `
+export ANTHROPIC_AUTH_TOKEN="${OLP_API_KEY:?Set OLP_API_KEY to your OLP inference key}"
+` + strings.Join(settings, "\n") + "\n"
+}
+
+func claudeCodePowerShellConfiguration(baseURL, model, plan, small string) string {
+	settings := slices.Collect(func(yield func(string) bool) {
+		for _, setting := range claudeSettings(baseURL, model, plan, small) {
+			if !yield("$env:" + setting.name + " = " + powerShellQuote(setting.value)) {
+				return
+			}
+		}
+	})
+	return `if ([string]::IsNullOrWhiteSpace($env:OLP_API_KEY)) {
+    Write-Error 'Set OLP_API_KEY to your OLP inference key'
+    return
+}
+` + "Remove-Item Env:" + strings.ReplaceAll(claudeCredentialVariables, " ", ", Env:") + ` -ErrorAction SilentlyContinue
+$env:ANTHROPIC_AUTH_TOKEN = $env:OLP_API_KEY
+` + strings.Join(settings, "\n") + "\n"
+}
+
+func powerShellQuote(s string) string { return "'" + strings.ReplaceAll(s, "'", "''") + "'" }
+
 func shellQuote(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'" }
+
+func claudeModel(model, plan string) string {
+	if plan != model {
+		return "opusplan"
+	}
+	return model
+}

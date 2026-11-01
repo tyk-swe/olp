@@ -14,6 +14,7 @@ import (
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/attribution"
 	"github.com/tyk-swe/olp/internal/contentpolicy"
+	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/providers"
 	"github.com/tyk-swe/olp/internal/routes"
 	"github.com/tyk-swe/olp/internal/usage"
@@ -23,6 +24,8 @@ const APIVersion = "openllmproxy.dev/config/v2"
 const LegacyAPIVersion = "openllmproxy.dev/config/v1"
 
 type Document struct {
+	Code                 *CodeConfiguration `json:"code,omitempty"`
+	codeBindings         CodeBindings
 	AgentPublications    []PublicationEntry         `json:"agent_publications,omitempty"`
 	GuardrailPolicies    []GuardrailPolicyEntry     `json:"guardrail_policies,omitempty"`
 	GuardrailAttachments []GuardrailAttachmentEntry `json:"guardrail_attachments,omitempty"`
@@ -111,6 +114,10 @@ func targetEntry(t routing.PublishedTarget) TargetEntry {
 }
 
 type RouteEntry struct {
+	RunLimits                *limits.WorkflowBounds     `json:"run_limits,omitempty"`
+	ResponsesMCPItems        bool                       `json:"responses_mcp_items,omitempty"`
+	ToolExecution            string                     `json:"tool_execution,omitempty"`
+	Toolsets                 []string                   `json:"toolsets,omitempty"`
 	Cache                    *cache.Policy              `json:"cache,omitempty"`
 	PromptCache              *cache.PromptPolicy        `json:"prompt_cache,omitempty"`
 	ExposeUpstreamModels     bool                       `json:"expose_upstream_models,omitempty"`
@@ -170,7 +177,7 @@ func (t *TemplateEntry) normalize() error {
 }
 
 func (r *RouteEntry) behavior() routing.Behavior {
-	return routing.Behavior{Cache: r.Cache, PromptCache: r.PromptCache, CallerCostExempt: r.CallerCostExempt, ProviderFetchedDocuments: r.ProviderFetchedDocuments, MaxBodyBytes: r.MaxBodyBytes, Fallbacks: r.Fallbacks, Selectors: r.Selectors, Retry: r.Retry, Affinity: r.Affinity, Budget: r.Budget, Passthrough: r.Passthrough}
+	return routing.Behavior{RunLimits: r.RunLimits, ResponsesMCPItems: r.ResponsesMCPItems, ToolExecution: r.ToolExecution, Toolsets: r.Toolsets, Cache: r.Cache, PromptCache: r.PromptCache, CallerCostExempt: r.CallerCostExempt, ProviderFetchedDocuments: r.ProviderFetchedDocuments, MaxBodyBytes: r.MaxBodyBytes, Fallbacks: r.Fallbacks, Selectors: r.Selectors, Retry: r.Retry, Affinity: r.Affinity, Budget: r.Budget, Passthrough: r.Passthrough}
 }
 
 func (r *RouteEntry) setBehavior(raw []byte) error {
@@ -184,6 +191,8 @@ func (r *RouteEntry) setBehavior(raw []byte) error {
 	r.Cache, r.PromptCache = behavior.Cache, behavior.PromptCache
 	r.Fallbacks, r.Selectors, r.Retry, r.Affinity, r.Budget = behavior.Fallbacks, behavior.Selectors, behavior.Retry, behavior.Affinity, behavior.Budget
 	r.Passthrough = behavior.Passthrough
+	r.ToolExecution, r.Toolsets = behavior.ToolExecution, behavior.Toolsets
+	r.RunLimits, r.ResponsesMCPItems = behavior.RunLimits, behavior.ResponsesMCPItems
 	return nil
 }
 
@@ -399,6 +408,7 @@ func sortCapabilities(c []CapabilityEntry) {
 }
 
 func (d *Document) canonicalize() {
+	d.Code = canonicalCode(d.Code)
 	slices.SortFunc(d.RetrievalBindings, func(a, b RetrievalBindingEntry) int { return strings.Compare(retrievalKey(a), retrievalKey(b)) })
 	slices.SortFunc(d.AgentPublications, func(a, b PublicationEntry) int { return strings.Compare(publicationKey(a), publicationKey(b)) })
 	slices.SortFunc(d.MCPServers, func(a, b MCPServerEntry) int {

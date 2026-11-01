@@ -30,6 +30,7 @@ const (
 	// maxVectorEntries bounds other decoded vectors, including nested
 	// element and name vectors.
 	maxVectorEntries = 1 << 16
+	maxDataSegments  = 100_000
 	// maxModuleEntries bounds the entries of all of a module's decoded
 	// vectors together, whichever limit bounds each.
 	maxModuleEntries = 1 << 20
@@ -425,7 +426,7 @@ func (r *reader) elements() {
 }
 
 func (r *reader) segments() {
-	n := r.vector(maxVectorEntries)
+	n := r.vector(maxDataSegments)
 	for i := uint32(0); i < n && r.err == nil; i++ {
 		switch r.u32() {
 		case 0:

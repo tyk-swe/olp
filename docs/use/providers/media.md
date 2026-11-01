@@ -1,12 +1,14 @@
 # Vendor media
 
-OpenAI clients reach the image, speech and transcription APIs of reviewed
-vendors through the OpenAI media endpoints, `/v1/images/generations`,
-`/v1/audio/speech`, `/v1/audio/transcriptions` and `/v1/audio/translations`, on
-transformed routes. Each vendor's [contract](../../../internal/vendors/catalog.go)
-lists the media operations it serves. A vendor whose API differs from OpenAI's
-names the wire its [media codec](../../../internal/media/vendor.go) translates;
-the others speak OpenAI's media wire as it is.
+Reviewed media vendors can serve OpenAI clients through the gateway's image,
+speech and transcription endpoints on transformed routes. Those endpoints are
+`/v1/images/generations`, `/v1/audio/speech`, `/v1/audio/transcriptions` and
+`/v1/audio/translations`.
+
+Each vendor [contract](../../../internal/vendors/catalog.go) lists the media
+operations it serves. When a vendor API differs from OpenAI's media wire, its
+[media codec](../../../internal/media/vendor.go) performs the translation. Other
+reviewed vendors serve the OpenAI media wire directly.
 
 ## Certification
 

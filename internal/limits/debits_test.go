@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -270,5 +271,35 @@ func TestDurableGlobalNamespaceAndUnresolvedOverrun(t *testing.T) {
 	r := Request{CostOwnerID: debitTestID, DailyCostLimit: &cap}
 	if _, err = limiter.reserveCost(t.Context(), r, limiter.keysFor(r)); !errors.Is(err, ErrUninitializedCost) {
 		t.Fatalf("zero remaining bound admitted unresolved overrun: %v", err)
+	}
+}
+
+func TestMarkNotSentRefusesUnavailableLedger(t *testing.T) {
+	pool, err := pgxpool.New(t.Context(), "postgres://localhost:1/no_database?connect_timeout=1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	pool.Close()
+	store := &DebitStore{Pool: pool}
+	if err := store.MarkNotSent(t.Context(), debitTestID, debitTestID); err == nil {
+		t.Fatal("closed ledger accepted a not-sent debit")
+	}
+}
+
+type unavailableAggregateTransaction struct {
+	pgx.Tx
+	err error
+}
+
+func (tx unavailableAggregateTransaction) Query(context.Context, string, ...any) (pgx.Rows, error) {
+	return nil, tx.err
+}
+
+func TestAggregateAttemptRefusesUnavailableAccounting(t *testing.T) {
+	unavailable := errors.New("ledger unavailable")
+	tx := unavailableAggregateTransaction{err: unavailable}
+	snapshots, err := AddAggregateAttemptCostDelta(t.Context(), tx, debitTestID, debitTestID, nil, "test", nil, time.Now(), debitTestID)
+	if !errors.Is(err, unavailable) || len(snapshots) != 0 {
+		t.Fatalf("unavailable attempt accounting was accepted: %v %v", snapshots, err)
 	}
 }

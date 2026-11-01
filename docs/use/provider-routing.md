@@ -1,14 +1,14 @@
 # Provider connections and routing
 
-OLP keeps published route names as the public model API. A vendor identifies an
-upstream organization; a connection (the existing provider ID) identifies an
-endpoint, account, region, or deployment. Several connections can use the same
-vendor and different credentials. A connector identifies the wire protocol and
-authentication mechanism.
+Published route names form OLP's public model API. A vendor identifies an upstream
+organization. A provider connection identifies one endpoint, account, region or
+deployment and keeps the existing provider ID. Several connections can belong to
+the same vendor while using different credentials. A connector defines the wire
+protocol and authentication mechanism used to reach that connection.
 
 ## Connect and qualify models
 
-1. Choose a vendor in **Providers → Add provider**. Review the connector,
+1. Choose **Add provider** under Providers and select a vendor. Review the connector,
    endpoint, authentication, and optional seed model. Vendor identity remains
    in `configuration.options.vendor_id` when an endpoint is customized.
 2. Test the connection, discover models or enter exact upstream identifiers,
@@ -25,7 +25,7 @@ authentication mechanism.
 4. Review the completed draft, test it, and activate. Discovery and model
    changes remain drafts until activation. Operator model facts are stored
    separately from discovered identifiers and survive discovery refreshes.
-5. In **Models → Compare models and create routes**, select models and review
+5. In **Compare models and create routes** under Models, select models and review
    route slugs. An explicitly assigned canonical model identity can group
    connections automatically. Other models start with distinct connection
    suffixes; assigning the same slug explicitly creates multiple targets.
@@ -506,15 +506,15 @@ policy defaults also narrow eligibility. They do not grant additional access.
 the bound the gateway would reserve (highest input-side rate for the estimate,
 the declared or default reply allowance, the per-request fee, the window
 multiplier, and the attempt's pinned discount). Every scope that sets it
-narrows it — the effective ceiling is the smallest. A candidate whose worst
+narrows it, so the effective ceiling is the smallest value. A candidate whose worst
 case exceeds the ceiling, or that cannot be bounded at all, is ineligible with
 the `cost_limit_exceeded` reason; a committed provider bounds zero and always
 passes. When no non-shadow target remains eligible for that reason the request
 fails `400` with `cost_limit_exceeded` before anything is dispatched, without
 triggering fallback; fallback legs that do run apply the same ceiling.
 
-Ordering and strategy preferences use request → key → route → installation
-precedence. A policy can restrict `allowed_strategies`. `order` precedes the
+Ordering and strategy preferences use request, key, route and installation
+precedence in that order. A policy can restrict `allowed_strategies`. `order` precedes the
 strategy inside an operator priority tier. With `allow_fallbacks: false`, an
 explicit order restricts attempts to that list; without an order, only the first
 eligible attempt is selected. Requests cannot add published targets, raise

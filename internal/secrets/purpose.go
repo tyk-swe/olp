@@ -18,12 +18,14 @@ var (
 	MFAChallengeDigest       = DigestPurpose{"mfa_challenge"}
 	MFARecoveryDigest        = DigestPurpose{"mfa_recovery"}
 	WorkloadDigest           = DigestPurpose{"workload_identity"}
+	WorkloadAgentDigest      = DigestPurpose{"workload_agent_identity"}
 	CacheKeyDigest           = DigestPurpose{"cache_key"}
 	APIKeyDigest             = DigestPurpose{"api_key"}
 	EndUserDigest            = DigestPurpose{"end_user"}
 	ManagementTokenDigest    = DigestPurpose{"management_token"}
 	SessionDigest            = DigestPurpose{"session"}
 	RecentAuthDigest         = DigestPurpose{"recent_auth"}
+	DelegationConsentDigest  = DigestPurpose{"delegation_consent"}
 	CSRFDigest               = DigestPurpose{"csrf"}
 	OIDCStateDigest          = DigestPurpose{"oidc_state"}
 	OIDCCookieDigest         = DigestPurpose{"oidc_cookie"}
@@ -35,6 +37,9 @@ var (
 	RetainedSubmissionDigest = DigestPurpose{"retained_submission"}
 	ApprovalDigest           = DigestPurpose{"agent_approval"}
 	AgentPrincipalDigest     = DigestPurpose{"agent_principal"}
+	DelegationTokenDigest    = DigestPurpose{"delegation_token"}
+	DelegationPairDigest     = DigestPurpose{"delegation_pair"}
+	TaskCapabilityDigest     = DigestPurpose{"a2a_task_capability"}
 	BatchLineDigest          = DigestPurpose{"batch_line"}
 	ToolInputDigest          = DigestPurpose{"tool_input"}
 	ToolCallDigest           = DigestPurpose{"tool_call"}
@@ -43,8 +48,8 @@ var (
 
 // DigestPurposes lists every digest purpose.
 func DigestPurposes() []DigestPurpose {
-	return []DigestPurpose{CacheKeyDigest, SAMLStateDigest, SAMLCookieDigest, SAMLAssertionDigest, MFAChallengeDigest, MFARecoveryDigest, APIKeyDigest, WorkloadDigest, EndUserDigest, ManagementTokenDigest, SessionDigest, RecentAuthDigest, CSRFDigest,
-		OIDCStateDigest, OIDCCookieDigest, InvitationDigest, AdmissionDigest, MutationDigest, InstallationDigest, BatchSubmissionDigest, BatchLineDigest, ApprovalDigest, AgentPrincipalDigest, RetainedSubmissionDigest, ToolInputDigest, ToolCallDigest, MCPEnrollmentDigest}
+	return []DigestPurpose{CacheKeyDigest, SAMLStateDigest, SAMLCookieDigest, SAMLAssertionDigest, MFAChallengeDigest, MFARecoveryDigest, APIKeyDigest, WorkloadDigest, WorkloadAgentDigest, EndUserDigest, ManagementTokenDigest, SessionDigest, RecentAuthDigest, CSRFDigest,
+		OIDCStateDigest, OIDCCookieDigest, InvitationDigest, AdmissionDigest, MutationDigest, InstallationDigest, BatchSubmissionDigest, BatchLineDigest, ApprovalDigest, AgentPrincipalDigest, DelegationTokenDigest, DelegationConsentDigest, DelegationPairDigest, TaskCapabilityDigest, RetainedSubmissionDigest, ToolInputDigest, ToolCallDigest, MCPEnrollmentDigest}
 }
 
 // SealPurpose binds an encrypted secret to what it is for: a ciphertext sealed
@@ -93,12 +98,13 @@ var (
 	GuardrailCredential   = SealPurpose{"guardrail_credential"}
 	ResponseCache         = SealPurpose{"response_cache"}
 	ProviderUploadSession = SealPurpose{"provider_upload_session"}
+	WorkflowContinuation  = SealPurpose{"workflow_continuation"}
 )
 
 // SealPurposes lists every seal purpose.
 func SealPurposes() []SealPurpose {
 	return []SealPurpose{SAMLKey, SAMLFlow, MFATOTP, MFAWebAuthn, ProviderCredential, ProviderContinuation, NotificationSecret, MutationReplay,
-		OIDCClientSecret, OIDCFlow, MediaJobSource, ProviderGrantRefresh, GrantEnrollment, SinkCredential, MCPCredential, MCPGrantAccess, MCPGrantRefresh, MCPGrantEnrollment, MCPEntraClient, MCPDelegationSigning, BillingCredential, GuardrailCredential, ResponseCache, ProviderUploadSession, AgentCredential}
+		OIDCClientSecret, OIDCFlow, MediaJobSource, ProviderGrantRefresh, GrantEnrollment, SinkCredential, MCPCredential, MCPGrantAccess, MCPGrantRefresh, MCPGrantEnrollment, MCPEntraClient, MCPDelegationSigning, BillingCredential, GuardrailCredential, ResponseCache, ProviderUploadSession, AgentCredential, WorkflowContinuation}
 }
 
 // ParseSealPurpose returns the seal purpose a stored record names.

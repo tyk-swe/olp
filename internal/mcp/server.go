@@ -16,6 +16,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/agents"
 	"github.com/tyk-swe/olp/internal/consumerauth"
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/guardrails"
@@ -85,6 +86,9 @@ type Runtime interface {
 
 type ReserveInput struct {
 	Authority         access.Authority
+	Approval          *agents.WorkflowApproval
+	RunID             string
+	Ordinal           int
 	ToolsetID         string
 	ToolsetRevisionID string
 	ReleaseID         string
@@ -97,20 +101,25 @@ type ReserveInput struct {
 }
 
 type Reservation struct {
-	DispatchID        string
-	ClaimID           string
-	RunID             string
-	StepID            string
-	AttemptID         string
-	APIKeyID          string
-	ProjectID         string
-	ToolsetID         string
-	ToolsetRevisionID string
-	ToolAlias         string
-	InputDigest       string
-	CallDigest        string
-	UnitPrice         *string
-	Currency          string
+	Approval             *agents.WorkflowApproval
+	Authority            access.Authority
+	DispatchID           string
+	ClaimID              string
+	RunID                string
+	StepID               string
+	AttemptID            string
+	APIKeyID             string
+	ProjectID            string
+	ToolsetID            string
+	ToolsetRevisionID    string
+	ToolAlias            string
+	InputDigest          string
+	CallDigest           string
+	AgentPrincipalID     string
+	MemberPrincipalID    string
+	DelegationPairDigest string
+	UnitPrice            *string
+	Currency             string
 }
 
 func (r *Reservation) amount() string {
@@ -339,9 +348,47 @@ func canonicalUUID(raw string) bool {
 	return err == nil && id != uuid.Nil && id.String() == raw
 }
 
+type delegatedSessionAuthenticator struct{ Runtime }
+
+func (a delegatedSessionAuthenticator) AuthenticateTaskCapability(ctx context.Context, token string) (*access.Authority, error) {
+	auth, ok := a.Runtime.(consumerauth.TaskCapabilityAuthenticator)
+	if !ok {
+		return nil, runtime.ErrInvalidKey
+	}
+	return auth.AuthenticateTaskCapability(ctx, token)
+}
+
+func (a delegatedSessionAuthenticator) AuthenticateDelegation(ctx context.Context, token, assertion string) (*access.Authority, error) {
+	auth, ok := a.Runtime.(interface {
+		ReauthenticateDelegation(context.Context, string, string) (*access.Authority, error)
+	})
+	if !ok {
+		return nil, runtime.ErrInvalidKey
+	}
+	return auth.ReauthenticateDelegation(ctx, token, assertion)
+}
+
 func (s *Server) authenticate(r *http.Request) (access.Authority, *apiError) {
+	return s.authenticateWith(r, s.Runtime)
+}
+
+func (s *Server) authenticateSession(r *http.Request) (access.Authority, *apiError) {
+	if s.Runtime == nil || (r.Header.Get("Mcp-Session-Id") == "" && r.URL.Query().Get("session_id") == "") {
+		return s.authenticate(r)
+	}
+	return s.reauthenticateSession(r)
+}
+
+func (s *Server) reauthenticateSession(r *http.Request) (access.Authority, *apiError) {
+	if s.Runtime == nil {
+		return s.authenticate(r)
+	}
+	return s.authenticateWith(r, delegatedSessionAuthenticator{s.Runtime})
+}
+
+func (s *Server) authenticateWith(r *http.Request, auth consumerauth.Authenticator) (access.Authority, *apiError) {
 	token, _ := consumerauth.Bearer(r.Header.Get("Authorization"))
-	authority, failure := consumerauth.Authenticate(s.Runtime, r, token, "tools", s.TrustedProxies, s.now())
+	authority, failure := consumerauth.Authenticate(auth, r, token, "tools", s.TrustedProxies, s.now())
 	if failure != nil {
 		kind := "api_error"
 		switch failure.Status {
@@ -359,7 +406,7 @@ func (s *Server) authenticate(r *http.Request) (access.Authority, *apiError) {
 }
 
 func (s *Server) identifyEndUser(r *http.Request, authority access.Authority) (access.Authority, *apiError) {
-	if authority.WorkloadIssuerID != nil && authority.EndUserDigest != "" {
+	if authority.TaskCapability != nil || authority.WorkloadIssuerID != nil && authority.EndUserDigest != "" {
 		return authority, nil
 	}
 	if authority.Policy.EndUserSource == nil {
@@ -368,20 +415,14 @@ func (s *Server) identifyEndUser(r *http.Request, authority access.Authority) (a
 		}
 		return authority, nil
 	}
-	identifier := ""
-	if *authority.Policy.EndUserSource == "header" {
-		if values := r.Header.Values("X-OLP-End-User"); len(values) == 1 {
-			identifier = values[0]
+	digest, failure := consumerauth.HeaderEndUserDigest(s.Runtime, r, authority)
+	if failure != nil {
+		if failure.Status == http.StatusBadRequest {
+			return access.Authority{}, fail(failure.Status, failure.Code, "invalid_request_error", failure.Message)
 		}
+		return access.Authority{}, fail(failure.Status, failure.Code, "api_error", failure.Message)
 	}
-	if !access.ValidEndUserIdentifier(identifier) {
-		return access.Authority{}, fail(http.StatusBadRequest, "invalid_end_user", "invalid_request_error", "Provide an end-user machine token of 1-128 characters in the key's configured source.")
-	}
-	digester, ok := s.Runtime.(interface{ EndUserDigest(*string, string) string })
-	if !ok {
-		return access.Authority{}, fail(http.StatusServiceUnavailable, "authority_unavailable", "api_error", "End-user identity is unavailable.")
-	}
-	authority.EndUserDigest = digester.EndUserDigest(authority.ProjectID, identifier)
+	authority.EndUserDigest = digest
 	return authority, nil
 }
 
