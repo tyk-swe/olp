@@ -1,9 +1,13 @@
 # Management automation
 
-The `olp` binary includes management clients as well as the server. Client
-commands use the public management API; they do not load the server's database
-URLs, bootstrap token or encryption keys. Commands and MCP tool schemas are
-generated from `openapi/management.json` by `make api`.
+The `olp` binary contains both the server and its management clients. Client
+commands administer an installation through the public management API with a
+scoped management token. They do not load the server's database URLs, bootstrap
+token or encryption keys.
+
+CLI commands and management MCP tool schemas are generated from
+`openapi/management.json` by `make api`, so automation follows the same contract
+as the console and other API clients.
 
 ## Connect the CLI
 

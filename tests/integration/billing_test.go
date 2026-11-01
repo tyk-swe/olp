@@ -3,6 +3,15 @@
 package integration_test
 
 import (
+	"bytes"
+	"compress/gzip"
+	"context"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/sha256"
+	"crypto/x509"
+	"encoding/json"
+	"encoding/pem"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -10,27 +19,35 @@ import (
 	"net/netip"
 	"net/url"
 	"os"
+	"reflect"
+	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/shopspring/decimal"
 
 	"github.com/tyk-swe/olp/internal/billing"
+	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/egress"
+	"github.com/tyk-swe/olp/internal/secrets"
 )
 
-// billingFake serves the documented-shape vendor fixtures as an admin cost
-// endpoint, recording the query of every request it answers.
 type billingFake struct {
-	mu      sync.Mutex
-	path    string
-	pages   map[string]string // page token -> fixture name; "" is page 1
-	shift   map[string]string // fixture text rewrites (dates near today)
-	queries []url.Values
-	fails   int
-	server  *httptest.Server
+	mu                    sync.Mutex
+	path                  string
+	pages                 map[string]string // page token -> fixture name; "" is page 1
+	shift                 map[string]string // fixture text rewrites (dates near today)
+	queries               []url.Values
+	fails                 int
+	expectedAuthorization string
+	expectedAPIKey        string
+	started               chan struct{}
+	release               <-chan struct{}
+	server                *httptest.Server
 }
 
 // billingDays are the three consecutive UTC days the shifted fixtures cover,
@@ -45,9 +62,17 @@ func newBillingFake(t *testing.T, path string, pages map[string]string, shift ma
 	f := &billingFake{path: path, pages: pages, shift: shift}
 	f.server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		f.mu.Lock()
+		started, release := f.started, f.release
+		f.started, f.release = nil, nil
+		f.mu.Unlock()
+		if started != nil {
+			close(started)
+			<-release
+		}
+		f.mu.Lock()
 		defer f.mu.Unlock()
 		f.queries = append(f.queries, r.URL.Query())
-		if r.URL.Path != f.path || f.fails > 0 {
+		if r.URL.Path != f.path || f.fails > 0 || (f.expectedAuthorization != "" && r.Header.Get("Authorization") != f.expectedAuthorization) || (f.expectedAPIKey != "" && r.Header.Get("x-api-key") != f.expectedAPIKey) {
 			f.fails--
 			w.WriteHeader(http.StatusUnauthorized)
 			return
@@ -151,22 +176,431 @@ func billingFact(t *testing.T, h *accessHarness, providerID, requestID string, o
 
 func billingProviderID(provider map[string]any) string { return provider["id"].(string) }
 
-// The credential is required on create, must be a string, and null is
-// rejected rather than clearing the import.
+func TestAzureBillingScopeAndCredential(t *testing.T) {
+	h := newAccessHarness(t)
+	owner := h.owner()
+	provider := h.want(owner, "POST", "/api/v1/providers", map[string]any{
+		"name": "Azure billing",
+		"configuration": map[string]any{
+			"kind": "azure_openai", "auth_mode": "api_key", "endpoint": "https://example.openai.azure.com",
+			"deployment": "model", "api_version": "2024-10-21",
+		},
+		"credential": "inference-key", "model": "model",
+	}, idem("azure-billing-provider"), 201)
+	providerID := billingProviderID(provider)
+	credential := map[string]any{"auth_mode": "azure_default"}
+	scope := map[string]any{
+		"billing_scope": "/providers/Microsoft.Billing/billingAccounts/1234567",
+		"export_name":   "costs", "storage_account": "billingaccount", "container": "exports", "prefix": "billing",
+		"subscription_ids": []string{"11111111-1111-4111-8111-111111111111"},
+	}
+	billingPut(h, owner, providerID, map[string]any{"credential": credential}, provider["etag"].(string), 422)
+	billingPut(h, owner, providerID, map[string]any{"credential": credential, "scope": map[string]any{
+		"billing_scope": scope["billing_scope"], "export_name": "costs", "storage_account": "billingaccount", "container": "exports", "subscription_ids": []string{"bad"},
+	}}, provider["etag"].(string), 422)
+	billingPut(h, owner, providerID, map[string]any{"credential": credential, "scope": map[string]any{
+		"billing_scope": scope["billing_scope"], "export_name": "costs", "storage_account": "billingaccount", "container": "exports", "project_ids": []string{"proj_123"},
+	}}, provider["etag"].(string), 422)
+	for _, invalid := range []string{
+		"/providers/Microsoft.Billing/billingAccounts/1234567/garbage/anything",
+		"/providers/Microsoft.Billing/billingAccounts/1234567/billingProfiles/profile/garbage/anything",
+		"/subscriptions/11111111-1111-4111-8111-111111111111/resourceGroups/",
+	} {
+		billingPut(h, owner, providerID, map[string]any{"credential": credential, "scope": map[string]any{
+			"billing_scope": invalid, "export_name": "costs", "storage_account": "billingaccount", "container": "exports",
+		}}, provider["etag"].(string), 422)
+	}
+	created := billingPut(h, owner, providerID, map[string]any{"credential": credential, "scope": scope}, provider["etag"].(string), 201)
+	if created["source"] != "azure_cost_management" || created["credential_configured"] != true || created["credential"] != nil {
+		t.Fatalf("unexpected billing import %v", created)
+	}
+	groupScope := map[string]any{"billing_scope": "/subscriptions/11111111-1111-4111-8111-111111111111/resourceGroups/example-group",
+		"export_name": "costs", "storage_account": "billingaccount", "container": "exports"}
+	updated := billingPut(h, owner, providerID, map[string]any{"scope": groupScope}, created["etag"].(string), 200)
+	if updated["scope"].(map[string]any)["billing_scope"] != groupScope["billing_scope"] {
+		t.Fatalf("resource group scope was not preserved: %v", updated)
+	}
+	billingPut(h, owner, providerID, map[string]any{"scope": scope}, updated["etag"].(string), 200)
+	read := h.want(owner, "GET", "/api/v1/providers/"+providerID+"/billing-import", nil, nil, 200)
+	if read["credential"] != nil || read["credential_configured"] != true {
+		t.Fatalf("credential returned in billing import %v", read)
+	}
+	export := h.want(owner, "GET", "/api/v1/configuration/export", nil, nil, 200)
+	body := map[string]any{"document": export["document"], "secret_bindings": map[string]any{
+		"Azure billing/billing": `{ "auth_mode" : "azure_default" }`, "Azure billing/default": "inference-key",
+	}}
+	h.want(owner, "POST", "/api/v1/configuration/plan", body, nil, 200)
+	invalidBody := map[string]any{"document": export["document"], "secret_bindings": map[string]any{
+		"Azure billing/billing": `{"auth_mode":"azure_default","auth_mode":"azure_default"}`, "Azure billing/default": "inference-key",
+	}}
+	h.want(owner, "POST", "/api/v1/configuration/plan", invalidBody, nil, 422)
+	h.want(owner, "POST", "/api/v1/configuration/apply", body, idem("azure-billing-promotion"), 200)
+	after := h.want(owner, "GET", "/api/v1/providers/"+providerID+"/billing-import", nil, nil, 200)
+	if after["credential"] != nil || after["credential_configured"] != true {
+		t.Fatalf("promotion did not preserve the credential: %v", after)
+	}
+}
 
-// Idempotent replay returns the stored reply.
+func TestAzureBillingImport(t *testing.T) {
+	h := newAccessHarness(t)
+	owner := h.owner()
+	provider := h.want(owner, "POST", "/api/v1/providers", map[string]any{
+		"name": "Azure export",
+		"configuration": map[string]any{
+			"kind": "azure_openai", "auth_mode": "api_key", "endpoint": "https://example.openai.azure.com",
+			"deployment": "model", "api_version": "2024-10-21",
+		},
+		"credential": "inference-key", "model": "model",
+	}, idem("azure-export-provider"), 201)
+	providerID := billingProviderID(provider)
+	subscription := "11111111-1111-4111-8111-111111111111"
+	billingPut(h, owner, providerID, map[string]any{
+		"credential": map[string]any{"auth_mode": "azure_default"},
+		"scope": map[string]any{"billing_scope": "/providers/Microsoft.Billing/billingAccounts/1234567",
+			"export_name": "costs", "storage_account": "billingaccount", "container": "exports", "prefix": "billing", "subscription_ids": []string{subscription}},
+	}, provider["etag"].(string), 201)
+	today := time.Now().UTC().Truncate(24 * time.Hour)
+	yesterday := today.AddDate(0, 0, -1)
+	period := time.Date(yesterday.Year(), yesterday.Month(), 1, 0, 0, 0, 0, time.UTC)
+	base := "billing/costs/" + period.Format("20060102") + "-" + period.AddDate(0, 1, 0).Format("20060102") + "/run/"
+	header := "Date,SubscriptionId,MeterCategory,MeterSubCategory,MeterId,ChargeType,BillingCurrencyCode,CostInBillingCurrency\n"
+	row := func(day time.Time, sub, category, meter, amount string) string {
+		return fmt.Sprintf("%s,%s,%s,%s,meter-123,Usage,USD,%s\n", day.Format("01/02/2006"), sub, category, meter, amount)
+	}
+	part1 := header + row(yesterday, subscription, "Cognitive Services", "Azure Open AI", "0.100000000000000001") +
+		row(yesterday, subscription, "Cognitive Services", "Speech Services", "99") +
+		row(yesterday, "22222222-2222-4222-8222-222222222222", "Cognitive Services", "Azure Open AI", "99")
+	longMeter := strings.Repeat("m", 280)
+	longRow := func(suffix string) string {
+		return fmt.Sprintf("%s,%s,Cognitive Services,Azure Open AI,%s%s,Usage,USD,0\n", yesterday.Format("01/02/2006"), subscription, longMeter, suffix)
+	}
+	part2 := header + row(yesterday, subscription, "Cognitive Services", "Azure Open AI", "0.200000000000000002") +
+		row(today, subscription, "Cognitive Services", "Azure Open AI", "99") +
+		row(yesterday, subscription, "Storage", "Azure Open AI", "99") + longRow("a") + longRow("b")
+	compress := func(contents string) string {
+		t.Helper()
+		var compressed bytes.Buffer
+		writer := gzip.NewWriter(&compressed)
+		if _, err := writer.Write([]byte(contents)); err != nil {
+			t.Fatal(err)
+		}
+		if err := writer.Close(); err != nil {
+			t.Fatal(err)
+		}
+		return compressed.String()
+	}
+	compressed1, compressed2 := compress(part1), compress(part2)
+	// Manifest example: https://learn.microsoft.com/en-us/azure/cost-management-billing/costs/tutorial-improved-exports, accessed 2026-10-31.
+	manifest, err := json.Marshal(map[string]any{
+		"manifestVersion": "2024-04-01", "byteCount": len(compressed1) + len(compressed2), "blobCount": 2, "dataRowCount": 8,
+		"exportConfig":   map[string]any{"exportName": "costs", "resourceId": "/providers/Microsoft.Billing/billingAccounts/1234567/providers/Microsoft.CostManagement/exports/costs", "type": "AmortizedCost", "dataVersion": "2023-05-01"},
+		"deliveryConfig": map[string]any{"fileFormat": "Csv", "compressionMode": "Gzip"},
+		"runInfo":        map[string]any{"submittedTime": today.Format(time.RFC3339), "runId": "run", "startDate": period.Format("2006-01-02T15:04:05"), "endDate": today.Format(time.RFC3339)},
+		"blobs":          []map[string]any{{"blobName": base + "part0.csv", "byteCount": len(compressed1), "dataRowCount": 3}, {"blobName": base + "part1.csv", "byteCount": len(compressed2), "dataRowCount": 5}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	newerBase := strings.Replace(base, "/run/", "/newer/", 1)
+	newerManifest := strings.NewReplacer(base, newerBase, `"runId":"run"`, `"runId":"newer"`, today.Format(time.RFC3339), today.Add(time.Hour).Format(time.RFC3339)).Replace(string(manifest))
+	objects := map[string]string{base + "_manifest.json": string(manifest), newerBase + "_manifest.json": newerManifest, base + "part0.csv": compressed1, base + "part1.csv": compressed2}
+	oldPeriod := period.AddDate(0, -2, 0)
+	oldDay := oldPeriod.AddDate(0, 0, 14)
+	missingDay := period.AddDate(0, -1, 14)
+	oldBase := "billing/costs/" + oldPeriod.Format("20060102") + "-" + oldPeriod.AddDate(0, 1, 0).Format("20060102") + "/old/"
+	oldPart := compress(header + row(oldDay, subscription, "Cognitive Services", "Azure Open AI", "0.5"))
+	oldManifest, err := json.Marshal(map[string]any{
+		"manifestVersion": "2024-04-01", "byteCount": len(oldPart), "blobCount": 1, "dataRowCount": 1,
+		"exportConfig":   map[string]any{"exportName": "costs", "resourceId": "/providers/Microsoft.Billing/billingAccounts/1234567/providers/Microsoft.CostManagement/exports/costs", "type": "AmortizedCost", "dataVersion": "2023-05-01"},
+		"deliveryConfig": map[string]any{"fileFormat": "Csv", "compressionMode": "Gzip"},
+		"runInfo":        map[string]any{"submittedTime": oldPeriod.AddDate(0, 1, 1).Format(time.RFC3339), "runId": "old", "startDate": oldPeriod.Format("2006-01-02T15:04:05"), "endDate": oldPeriod.AddDate(0, 1, 0).Format(time.RFC3339)},
+		"blobs":          []map[string]any{{"blobName": oldBase + "part0.csv", "byteCount": len(oldPart), "dataRowCount": 1}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	objects[oldBase+"_manifest.json"] = string(oldManifest)
+	objects[oldBase+"part0.csv"] = oldPart
+	requests := make(chan string, 100)
+	var emptyListing atomic.Bool
+	var stallPart atomic.Bool
+	emptyListing.Store(true)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests <- r.URL.Path
+		if r.URL.Path == "/token" {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = fmt.Fprintf(w, `{"access_token":"test-azure-token","expires_on":"%d","token_type":"Bearer","resource":"https://storage.azure.com/"}`, time.Now().Add(time.Hour).Unix())
+			return
+		}
+		if r.Header.Get("Authorization") != "Bearer test-azure-token" {
+			http.Error(w, "missing token", http.StatusUnauthorized)
+			return
+		}
+		if r.URL.Query().Get("comp") == "list" {
+			if emptyListing.Load() {
+				_, _ = fmt.Fprint(w, "<EnumerationResults><Blobs></Blobs><NextMarker></NextMarker></EnumerationResults>")
+				return
+			}
+			if r.URL.Query().Get("marker") == "" {
+				_, _ = fmt.Fprintf(w, "<EnumerationResults><Blobs><Blob><Name>%s_manifest.json</Name></Blob></Blobs><NextMarker>next</NextMarker></EnumerationResults>", newerBase)
+				return
+			}
+			_, _ = fmt.Fprintf(w, "<EnumerationResults><Blobs><Blob><Name>%s_manifest.json</Name></Blob><Blob><Name>%s_manifest.json</Name></Blob></Blobs><NextMarker></NextMarker></EnumerationResults>", base, oldBase)
+			return
+		}
+		if object, ok := objects[strings.TrimPrefix(r.URL.Path, "/exports/")]; ok {
+			_, _ = fmt.Fprint(w, object)
+			if stallPart.Load() && r.URL.Path == "/exports/"+base+"part0.csv" {
+				w.(http.Flusher).Flush()
+				<-r.Context().Done()
+			}
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	t.Cleanup(server.Close)
+	t.Setenv("IDENTITY_ENDPOINT", server.URL+"/token")
+	t.Setenv("IDENTITY_HEADER", "test-identity")
+	t.Setenv("AZURE_TENANT_ID", "")
+	t.Setenv("AZURE_CLIENT_ID", "")
+	if err := os.Unsetenv("AZURE_CLIENT_ID"); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("AZURE_CLIENT_SECRET", "")
+	importer := billingImporter(h, t)
+	importer.AzureBlobEndpoint = func(string) string { return server.URL }
+	if err := importer.Pass(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	importStatus := h.want(owner, "GET", "/api/v1/providers/"+providerID+"/billing-import", nil, nil, 200)
+	status := importStatus["status"].(map[string]any)
+	if status["last_error_code"] != "response" || status["last_success_at"] != nil {
+		t.Fatalf("empty export was not reported as a failure: %v", status)
+	}
+	emptyListing.Store(false)
+	headers := etagHeader(importStatus)
+	headers["Idempotency-Key"] = uuid.NewString()
+	h.want(owner, "POST", "/api/v1/providers/"+providerID+"/billing-import/run", nil, headers, 202)
+	if err := importer.Pass(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	importStatus = h.want(owner, "GET", "/api/v1/providers/"+providerID+"/billing-import", nil, nil, 200)
+	if errorCode := importStatus["status"].(map[string]any)["last_error_code"]; errorCode != nil {
+		close(requests)
+		var paths []string
+		for request := range requests {
+			paths = append(paths, request)
+		}
+		t.Fatalf("import failed: %v, requests: %v", errorCode, paths)
+	}
+	start, end := yesterday.Format("2006-01-02"), today.AddDate(0, 0, 1).Format("2006-01-02")
+	result := h.want(owner, "GET", fmt.Sprintf("/api/v1/providers/%s/invoiced-costs?start=%s&end=%s", providerID, start, end), nil, nil, 200)
+	items := result["items"].([]any)
+	if len(items) != 3 {
+		t.Fatalf("unexpected invoice items %v", items)
+	}
+	longLabels := map[string]bool{}
+	var total decimal.Decimal
+	for _, raw := range items {
+		item := raw.(map[string]any)
+		amount, err := decimal.NewFromString(item["amount"].(string))
+		if err != nil || item["day"] != start || item["currency"] != "USD" {
+			t.Fatalf("unexpected invoice item %v", item)
+		}
+		total = total.Add(amount)
+		label := item["line_item"].(string)
+		if strings.Contains(label, strings.Repeat("m", 100)) {
+			if len([]rune(label)) > 256 {
+				t.Fatalf("long label not bounded: %d", len([]rune(label)))
+			}
+			longLabels[label] = true
+		}
+	}
+	if !total.Equal(decimal.RequireFromString("0.300000000000000003")) || len(longLabels) != 2 {
+		t.Fatalf("incorrect decimal sum or collapsed labels: %s %v", total, longLabels)
+	}
+	cost := "0.15"
+	for _, day := range []time.Time{oldDay, missingDay} {
+		billingFact(t, h, providerID, uuid.NewString(), day, "billable", true, &cost, false, false, false)
+		dayReport := h.want(owner, "GET", fmt.Sprintf("/api/v1/usage/reconciliation?start=%s&end=%s&provider_id=%s", day.Format("2006-01-02"), day.AddDate(0, 0, 1).Format("2006-01-02"), providerID), nil, nil, 200)
+		item := dayReport["items"].([]any)[0].(map[string]any)
+		if day.Equal(oldDay) && (item["invoiced_cost"] != "0.5" || item["capture_rate_unavailable_reason"] != nil) {
+			t.Fatalf("previously imported period was not covered: %v", item)
+		}
+		if day.Equal(missingDay) && (item["invoiced_cost"] != nil || item["capture_rate_unavailable_reason"] != "not_imported") {
+			t.Fatalf("missing period was treated as invoiced: %v", item)
+		}
+	}
+	billingFact(t, h, providerID, uuid.NewString(), yesterday, "billable", true, &cost, false, false, false)
+	billingFact(t, h, providerID, uuid.NewString(), yesterday, "billable", true, nil, true, false, false)
+	billingFact(t, h, providerID, uuid.NewString(), yesterday, "billable", false, nil, false, false, false)
+	billingFact(t, h, providerID, uuid.NewString(), yesterday, "billable", true, &cost, false, true, false)
+	report := h.want(owner, "GET", fmt.Sprintf("/api/v1/usage/reconciliation?start=%s&end=%s&provider_id=%s", start, today.Format("2006-01-02"), providerID), nil, nil, 200)
+	reconciled := report["items"].([]any)[0].(map[string]any)
+	if reconciled["priced_attempts"] != float64(1) || reconciled["unpriced_attempts"] != float64(1) ||
+		reconciled["incomplete_attempts"] != float64(1) || reconciled["excluded_caller_attempts"] != float64(1) || reconciled["capture_rate"] == nil {
+		t.Fatalf("unexpected reconciliation %v", reconciled)
+	}
+	objects[base+"part0.csv"] = compress(strings.Replace(part1, "USD", "U$D", 1))
+	var changed map[string]any
+	if err := json.Unmarshal(manifest, &changed); err != nil {
+		t.Fatal(err)
+	}
+	changed["byteCount"] = len(objects[base+"part0.csv"]) + len(compressed2)
+	changed["blobs"].([]any)[0].(map[string]any)["byteCount"] = len(objects[base+"part0.csv"])
+	changedManifest, err := json.Marshal(changed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	objects[base+"_manifest.json"] = string(changedManifest)
+	current := h.want(owner, "GET", "/api/v1/providers/"+providerID+"/billing-import", nil, nil, 200)
+	headers = etagHeader(current)
+	headers["Idempotency-Key"] = uuid.NewString()
+	h.want(owner, "POST", "/api/v1/providers/"+providerID+"/billing-import/run", nil, headers, 202)
+	if err := importer.Pass(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	failed := h.want(owner, "GET", "/api/v1/providers/"+providerID+"/billing-import", nil, nil, 200)
+	if failed["status"].(map[string]any)["last_error_code"] != "response" {
+		t.Fatalf("malformed currency was not rejected: %v", failed)
+	}
+	after := h.want(owner, "GET", fmt.Sprintf("/api/v1/providers/%s/invoiced-costs?start=%s&end=%s", providerID, start, end), nil, nil, 200)
+	if !reflect.DeepEqual(after["items"], items) {
+		t.Fatalf("failed import changed stored data: %v", after)
+	}
+	objects[base+"_manifest.json"] = strings.Replace(string(manifest), "billingAccounts/1234567", "billingAccounts/other", 1)
+	current = h.want(owner, "GET", "/api/v1/providers/"+providerID+"/billing-import", nil, nil, 200)
+	headers = etagHeader(current)
+	headers["Idempotency-Key"] = uuid.NewString()
+	h.want(owner, "POST", "/api/v1/providers/"+providerID+"/billing-import/run", nil, headers, 202)
+	if err := importer.Pass(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	failed = h.want(owner, "GET", "/api/v1/providers/"+providerID+"/billing-import", nil, nil, 200)
+	after = h.want(owner, "GET", fmt.Sprintf("/api/v1/providers/%s/invoiced-costs?start=%s&end=%s", providerID, start, end), nil, nil, 200)
+	if failed["status"].(map[string]any)["last_error_code"] != "response" || !reflect.DeepEqual(after["items"], items) {
+		t.Fatalf("different billing scope affected stored data: %v %v", failed, after)
+	}
+	var oversized strings.Builder
+	oversized.WriteString(header)
+	rowCount := 0
+	for i := 0; i <= 100_000; i++ {
+		fmt.Fprintf(&oversized, "%s,%s,Cognitive Services,Azure Open AI,meter-%d,Usage,USD,1\n", start, subscription, i)
+		rowCount++
+		if (i+1)%999 == 0 {
+			oversized.WriteString(row(yesterday, subscription, "Storage", "Azure Open AI", "1"))
+			rowCount++
+		}
+	}
+	objects[base+"part0.csv"] = oversized.String()
+	changed["byteCount"] = len(objects[base+"part0.csv"])
+	changed["blobCount"] = 1
+	changed["dataRowCount"] = rowCount
+	changed["deliveryConfig"].(map[string]any)["compressionMode"] = "None"
+	changed["blobs"] = []map[string]any{{"blobName": base + "part0.csv", "byteCount": len(objects[base+"part0.csv"]), "dataRowCount": rowCount}}
+	changedManifest, err = json.Marshal(changed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	objects[base+"_manifest.json"] = string(changedManifest)
+	stallPart.Store(true)
+	current = h.want(owner, "GET", "/api/v1/providers/"+providerID+"/billing-import", nil, nil, 200)
+	headers = etagHeader(current)
+	headers["Idempotency-Key"] = uuid.NewString()
+	h.want(owner, "POST", "/api/v1/providers/"+providerID+"/billing-import/run", nil, headers, 202)
+	bounded, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+	if err := importer.Pass(bounded); err != nil {
+		t.Fatal(err)
+	}
+	failed = h.want(owner, "GET", "/api/v1/providers/"+providerID+"/billing-import", nil, nil, 200)
+	after = h.want(owner, "GET", fmt.Sprintf("/api/v1/providers/%s/invoiced-costs?start=%s&end=%s", providerID, start, end), nil, nil, 200)
+	if failed["status"].(map[string]any)["last_error_code"] != "response" || !reflect.DeepEqual(after["items"], items) {
+		t.Fatalf("oversized export was not rejected without changing stored data: %v %v", failed, after)
+	}
+}
 
-// An update that omits the credential keeps it.
+func googleTestServiceAccount(t *testing.T) map[string]any {
+	t.Helper()
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	privateKey, err := x509.MarshalPKCS8PrivateKey(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return map[string]any{
+		"type": "service_account", "project_id": "fixture-project", "private_key_id": "fixture",
+		"private_key":  string(pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: privateKey})),
+		"client_email": "billing@fixture-project.iam.gserviceaccount.com", "token_uri": "https://oauth2.googleapis.com/token",
+	}
+}
 
-// If-Match gates mutations.
+func TestGoogleBillingImportScopeAndCredential(t *testing.T) {
+	h := newAccessHarness(t)
+	owner := h.owner()
+	provider := h.want(owner, "POST", "/api/v1/providers", map[string]any{
+		"name": "Google billing",
+		"configuration": map[string]any{
+			"kind": "vertex_ai", "auth_mode": "adc", "cloud_project": "fixture-project", "cloud_region": "us-central1",
+			"endpoint": "https://us-central1-aiplatform.googleapis.com/v1/projects/fixture-project/locations/us-central1/publishers/google",
+		},
+		"model": "gemini-test",
+	}, idem("provider-google-billing"), 201)
+	id := billingProviderID(provider)
+	scope := map[string]any{
+		"billing_account_id": "123456-ABCDEF-123456", "bigquery_project_id": "example.com:fixture-project",
+		"dataset_id": "1_billing_export", "table_id": "billing export-é",
+		"project_ids": []string{"example.com:workload-project"},
+	}
+	credential := map[string]any{"auth_mode": "service_account", "service_account": googleTestServiceAccount(t)}
+	for _, invalid := range []map[string]any{
+		{"credential": credential},
+		{"scope": map[string]any{"billing_account_id": "bad", "bigquery_project_id": "fixture-project", "dataset_id": "billing_export", "table_id": "export"}, "credential": credential},
+		{"scope": map[string]any{"billing_account_id": "123456-ABCDEF-123456", "bigquery_project_id": "fixture-project", "dataset_id": "bad.dataset", "table_id": "export"}, "credential": credential},
+		{"scope": map[string]any{"billing_account_id": "123456-ABCDEF-123456", "bigquery_project_id": "fixture-project", "dataset_id": "billing_export", "table_id": "export", "workspace_ids": []string{"default"}}, "credential": credential},
+		{"scope": scope, "credential": map[string]any{"auth_mode": "service_account", "service_account": map[string]any{"type": "service_account", "private_key": "invalid", "client_email": "billing@fixture-project.iam.gserviceaccount.com", "token_uri": "https://oauth2.googleapis.com/token"}}},
+	} {
+		billingPut(h, owner, id, invalid, provider["etag"].(string), 422)
+	}
+	created := billingPut(h, owner, id, map[string]any{"scope": scope, "credential": credential}, provider["etag"].(string), 201)
+	if created["source"] != "google_bigquery" || strings.Contains(fmt.Sprint(created), "PRIVATE KEY") {
+		t.Fatalf("unexpected import response: %v", created)
+	}
+	export := h.want(owner, "GET", "/api/v1/configuration/export", nil, nil, 200)
+	if strings.Contains(fmt.Sprint(export), "PRIVATE KEY") {
+		t.Fatal("configuration export exposed the Google billing credential")
+	}
+	credentialJSON, err := json.Marshal(credential)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := map[string]any{"document": export["document"], "secret_bindings": map[string]any{"Google billing/billing": string(credentialJSON)}}
+	h.want(owner, "POST", "/api/v1/configuration/plan", body, nil, 200)
+	h.want(owner, "POST", "/api/v1/configuration/apply", body, idem("google-billing-configuration"), 200)
+}
 
-// A non-openai/anthropic kind is refused.
+func TestGoogleBillingAuthRejectsPrivateDestination(t *testing.T) {
+	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) }))
+	defer proxy.Close()
+	policy := loopbackPolicy()
+	client, err := policy.PublicDestinationClient(&egress.ConnectionOptions{ProxyURL: proxy.URL}, nil, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.CloseIdleConnections()
+	request, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "https://127.0.0.1/token", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	response, err := client.Do(request)
+	if err == nil {
+		response.Body.Close()
+		t.Fatal("public-only authentication accepted a private token destination")
+	}
+}
 
-// Scoping: a manager of another project gets 404; a viewer of the
-// provider's project reads it.
-
-// TestBillingImportEndToEnd runs the importer against the fake vendors and
-// checks the stored invoiced costs and the reconciliation report.
 func TestBillingImportEndToEnd(t *testing.T) {
 	h := newAccessHarness(t)
 	owner := h.owner()
@@ -381,3 +815,1355 @@ func TestBillingImportEndToEnd(t *testing.T) {
 // slot another.
 
 // Dropping billing_import from the entry deletes the import on apply.
+
+func TestBillingImportPreservesCurrencies(t *testing.T) {
+	h := newAccessHarness(t)
+	owner := h.owner()
+	day1, day2, day3 := billingDays()
+	fake := newBillingFake(t, "/v1/organization/costs", map[string]string{
+		"": "openai_costs_page1.json", "page-2-token": "openai_costs_page2.json",
+	}, map[string]string{
+		"1759104000": fmt.Sprint(day1.Unix()),
+		"1759190400": fmt.Sprint(day2.Unix()),
+		"1759276800": fmt.Sprint(day3.Unix()),
+		"\"value\": 0.2,\n            \"currency\": \"usd\"": "\"value\": -0.1,\n            \"currency\": \"eur\"",
+		"\"value\": 1234.5678901234,":                        "\"value\": 0,",
+		"\"value\": 5,":                                      "\"value\": 0,",
+	})
+	provider := billingProvider(h, owner, "Currencies", "openai", fake.server.URL+"/v1", nil)
+	providerID := billingProviderID(provider)
+	billingPut(h, owner, providerID, map[string]any{"credential": "sk-admin-" + strings.Repeat("k", 30)}, provider["etag"].(string), 201)
+	if err := billingImporter(h, t).Pass(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	start := day1.Format("2006-01-02")
+	end := day1.AddDate(0, 0, 1).Format("2006-01-02")
+	costs := h.want(owner, "GET", fmt.Sprintf("/api/v1/providers/%s/invoiced-costs?start=%s&end=%s", providerID, start, end), nil, nil, 200)
+	amounts := map[string]decimal.Decimal{}
+	for _, raw := range costs["items"].([]any) {
+		item := raw.(map[string]any)
+		if item["line_item"] != "gpt-4o, input_tokens" {
+			continue
+		}
+		amount, err := decimal.NewFromString(item["amount"].(string))
+		if err != nil {
+			t.Fatal(err)
+		}
+		amounts[item["currency"].(string)] = amount
+	}
+	if len(amounts) != 2 || !amounts["USD"].Equal(decimal.RequireFromString("0.1")) || !amounts["EUR"].Equal(decimal.RequireFromString("-0.1")) {
+		t.Fatalf("same line item must preserve its amounts by currency: %v", amounts)
+	}
+	report := h.want(owner, "GET", fmt.Sprintf("/api/v1/usage/reconciliation?start=%s&end=%s&provider_id=%s", start, end, providerID), nil, nil, 200)
+	items := report["items"].([]any)
+	if len(items) != 1 {
+		t.Fatalf("reconciliation items: %v", items)
+	}
+	item := items[0].(map[string]any)
+	if item["capture_rate"] != nil || item["capture_rate_unavailable_reason"] != "currency_mismatch" {
+		t.Fatalf("multi-currency day must not have a capture rate: %v", item)
+	}
+	totals := report["totals"].([]any)[0].(map[string]any)
+	if totals["capture_rate"] != nil || totals["capture_rate_unavailable_reason"] != "currency_mismatch" {
+		t.Fatalf("multi-currency total must not have a capture rate: %v", totals)
+	}
+	fake.mu.Lock()
+	fake.shift = map[string]string{
+		"1759104000":                  fmt.Sprint(day1.Unix()),
+		"1759190400":                  fmt.Sprint(day2.Unix()),
+		"1759276800":                  fmt.Sprint(day3.Unix()),
+		"\"value\": 0.1,":             "\"value\": 0,",
+		"\"value\": 0.2,":             "\"value\": 0,",
+		"\"value\": 1234.5678901234,": "\"value\": 0,",
+		"\"value\": 5,":               "\"value\": 0,",
+		"\"currency\": \"usd\"":       "\"currency\": \"eur\"",
+	}
+	fake.mu.Unlock()
+	path := "/api/v1/providers/" + providerID + "/billing-import"
+	current := h.want(owner, "GET", path, nil, nil, 200)
+	headers := etagHeader(current)
+	headers["Idempotency-Key"] = uuid.NewString()
+	h.want(owner, "POST", path+"/run", nil, headers, 202)
+	if err := billingImporter(h, t).Pass(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	report = h.want(owner, "GET", fmt.Sprintf("/api/v1/usage/reconciliation?start=%s&end=%s&provider_id=%s", start, end, providerID), nil, nil, 200)
+	item = report["items"].([]any)[0].(map[string]any)
+	if item["capture_rate"] != nil || item["capture_rate_unavailable_reason"] != "zero_invoice" {
+		t.Fatalf("single-currency zero invoice must keep its reason: %v", item)
+	}
+	totals = report["totals"].([]any)[0].(map[string]any)
+	if totals["capture_rate"] != nil || totals["capture_rate_unavailable_reason"] != "zero_invoice" {
+		t.Fatalf("single-currency zero total must keep its reason: %v", totals)
+	}
+}
+
+func TestBillingImportPreservesPrecision(t *testing.T) {
+	h := newAccessHarness(t)
+	owner := h.owner()
+	day1, day2, day3 := billingDays()
+	fake := newBillingFake(t, "/v1/organization/costs", map[string]string{
+		"": "openai_costs_page1.json", "page-2-token": "openai_costs_page2.json",
+	}, map[string]string{
+		"1759104000":      fmt.Sprint(day1.Unix()),
+		"1759190400":      fmt.Sprint(day2.Unix()),
+		"1759276800":      fmt.Sprint(day3.Unix()),
+		"\"value\": 0.1,": "\"value\": 0.00000000000000000001,",
+	})
+	provider := billingProvider(h, owner, "Precision", "openai", fake.server.URL+"/v1", nil)
+	providerID := billingProviderID(provider)
+	billingPut(h, owner, providerID, map[string]any{"credential": "sk-admin-" + strings.Repeat("k", 30)}, provider["etag"].(string), 201)
+	if err := billingImporter(h, t).Pass(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	start := day1.Format("2006-01-02")
+	end := day1.AddDate(0, 0, 1).Format("2006-01-02")
+	costs := h.want(owner, "GET", fmt.Sprintf("/api/v1/providers/%s/invoiced-costs?start=%s&end=%s", providerID, start, end), nil, nil, 200)
+	for _, raw := range costs["items"].([]any) {
+		item := raw.(map[string]any)
+		if item["line_item"] != "gpt-4o, input_tokens" {
+			continue
+		}
+		amount, err := decimal.NewFromString(item["amount"].(string))
+		if err != nil || !amount.Equal(decimal.RequireFromString("0.20000000000000000001")) {
+			t.Fatalf("invoice amount lost precision: %v, %v", item, err)
+		}
+		return
+	}
+	t.Fatalf("invoice line item missing: %v", costs)
+}
+
+func TestBillingImportCredentialCompatibility(t *testing.T) {
+	h := newAccessHarness(t)
+	owner := h.owner()
+	day1, day2, day3 := billingDays()
+	fake := newBillingFake(t, "/v1/organization/costs", map[string]string{
+		"": "openai_costs_page1.json", "page-2-token": "openai_costs_page2.json",
+	}, map[string]string{
+		"1759104000": fmt.Sprint(day1.Unix()),
+		"1759190400": fmt.Sprint(day2.Unix()),
+		"1759276800": fmt.Sprint(day3.Unix()),
+	})
+	provider := billingProvider(h, owner, "Compatibility", "openai", fake.server.URL+"/v1", nil)
+	providerID := billingProviderID(provider)
+	path := "/api/v1/providers/" + providerID + "/billing-import"
+	billingPut(h, owner, providerID, map[string]any{}, provider["etag"].(string), 422)
+	billingPut(h, owner, providerID, map[string]any{"credential": nil}, provider["etag"].(string), 422)
+	key := `{"source":"openai_costs","api_key":"` + strings.Repeat("k", 30) + `"}`
+	fake.expectedAuthorization = "Bearer " + key
+	created := billingPut(h, owner, providerID, map[string]any{"credential": key}, provider["etag"].(string), 201)
+	if strings.Contains(fmt.Sprint(created), key) {
+		t.Fatal("create response exposed the billing credential")
+	}
+	importer := billingImporter(h, t)
+	checkImport := func() {
+		t.Helper()
+		if err := importer.Pass(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+		result := h.want(owner, "GET", path, nil, nil, 200)
+		status := result["status"].(map[string]any)
+		if _, ok := status["source_revision"]; !ok {
+			t.Fatal("billing import status did not include the source revision")
+		}
+		if status["last_success_at"] == nil || status["last_error_code"] != nil {
+			t.Fatalf("billing credential did not authenticate: %v", status)
+		}
+		if strings.Contains(fmt.Sprint(result), key) {
+			t.Fatal("import response exposed the billing credential")
+		}
+	}
+	schedule := func() {
+		t.Helper()
+		current := h.want(owner, "GET", path, nil, nil, 200)
+		headers := etagHeader(current)
+		headers["Idempotency-Key"] = uuid.NewString()
+		h.want(owner, "POST", path+"/run", nil, headers, 202)
+	}
+	checkImport()
+	current := h.want(owner, "GET", path, nil, nil, 200)
+	billingPut(h, owner, providerID, map[string]any{}, current["etag"].(string), 200)
+	schedule()
+	checkImport()
+	var credentialID string
+	if err := h.Pool.QueryRow(t.Context(), `SELECT credential_id::text FROM olp.provider_billing_imports WHERE provider_id=$1::uuid`, providerID).Scan(&credentialID); err != nil {
+		t.Fatal(err)
+	}
+	tx, err := h.Pool.Begin(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(t.Context())
+	if err := h.Ring2().Store(t.Context(), tx, h.Server.Installation, credentialID, secrets.BillingCredential, []byte(key), nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Commit(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	schedule()
+	checkImport()
+	export := h.want(owner, "GET", "/api/v1/configuration/export", nil, nil, 200)
+	if strings.Contains(fmt.Sprint(export), key) {
+		t.Fatal("configuration export exposed the billing credential")
+	}
+	body := map[string]any{"document": export["document"], "secret_bindings": map[string]any{"Compatibility/billing": key}}
+	h.want(owner, "POST", "/api/v1/configuration/plan", body, nil, 200)
+	h.want(owner, "POST", "/api/v1/configuration/apply", body, idem("billing-compatibility"), 200)
+	schedule()
+	checkImport()
+	rotated := "sk-admin-" + strings.Repeat("r", 30)
+	rotatedBody := map[string]any{"document": export["document"], "secret_bindings": map[string]any{"Compatibility/billing": rotated}}
+	h.want(owner, "POST", "/api/v1/configuration/apply", rotatedBody, idem("billing-rotate"), 200)
+	fake.mu.Lock()
+	fake.expectedAuthorization = "Bearer " + rotated
+	fake.mu.Unlock()
+	schedule()
+	checkImport()
+	rotatedExport := h.want(owner, "GET", "/api/v1/configuration/export", nil, nil, 200)
+	if strings.Contains(fmt.Sprint(rotatedExport), rotated) {
+		t.Fatal("configuration export exposed the rotated billing credential")
+	}
+	h.want(owner, "POST", "/api/v1/configuration/apply", rotatedBody, idem("billing-unchanged"), 200)
+	schedule()
+	checkImport()
+}
+
+func TestBillingImportDiscardsChangedInFlightFetch(t *testing.T) {
+	h := newAccessHarness(t)
+	owner := h.owner()
+	day1, day2, day3 := billingDays()
+	fake := newBillingFake(t, "/v1/organization/costs", map[string]string{
+		"": "openai_costs_page1.json", "page-2-token": "openai_costs_page2.json",
+	}, map[string]string{"1759104000": fmt.Sprint(day1.Unix()), "1759190400": fmt.Sprint(day2.Unix()), "1759276800": fmt.Sprint(day3.Unix())})
+	provider := billingProvider(h, owner, "Changing scope", "openai", fake.server.URL+"/v1", nil)
+	providerID := billingProviderID(provider)
+	path := "/api/v1/providers/" + providerID + "/billing-import"
+	key := "sk-admin-" + strings.Repeat("k", 30)
+	billingPut(h, owner, providerID, map[string]any{"credential": key, "scope": map[string]any{"project_ids": []string{"proj_aaa111"}}}, provider["etag"].(string), 201)
+	begin := func() (chan struct{}, <-chan error) {
+		t.Helper()
+		started, release, done := make(chan struct{}), make(chan struct{}, 1), make(chan error, 1)
+		fake.mu.Lock()
+		fake.started, fake.release = started, release
+		fake.mu.Unlock()
+		t.Cleanup(func() {
+			select {
+			case release <- struct{}{}:
+			default:
+			}
+		})
+		importer := billingImporter(h, t)
+		go func() { done <- importer.Pass(t.Context()) }()
+		select {
+		case <-started:
+		case <-time.After(10 * time.Second):
+			t.Fatal("billing fetch did not start")
+		}
+		return release, done
+	}
+	finish := func(release chan struct{}, done <-chan error) {
+		t.Helper()
+		release <- struct{}{}
+		if err := <-done; err != nil {
+			t.Fatal(err)
+		}
+	}
+	invoicePath := fmt.Sprintf("/api/v1/providers/%s/invoiced-costs?start=%s&end=%s", providerID, day1.Format("2006-01-02"), day3.AddDate(0, 0, 1).Format("2006-01-02"))
+	release, done := begin()
+	current := h.want(owner, "GET", path, nil, nil, 200)
+	billingPut(h, owner, providerID, map[string]any{"scope": map[string]any{"project_ids": []string{"proj_bbb222"}}}, current["etag"].(string), 200)
+	finish(release, done)
+	items := h.want(owner, "GET", invoicePath, nil, nil, 200)["items"].([]any)
+	current = h.want(owner, "GET", path, nil, nil, 200)
+	if len(items) != 0 || current["status"].(map[string]any)["last_success_at"] != nil {
+		t.Fatalf("old scope committed after a change: invoices=%v status=%v", items, current["status"])
+	}
+	headers := etagHeader(current)
+	headers["Idempotency-Key"] = uuid.NewString()
+	h.want(owner, "POST", path+"/run", nil, headers, 202)
+	if err := billingImporter(h, t).Pass(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	items = h.want(owner, "GET", invoicePath, nil, nil, 200)["items"].([]any)
+	if len(items) == 0 {
+		t.Fatal("new scope did not import its rows")
+	}
+	current = h.want(owner, "GET", path, nil, nil, 200)
+	billingPut(h, owner, providerID, map[string]any{"scope": map[string]any{"project_ids": []string{"proj_aaa111"}}}, current["etag"].(string), 200)
+	current = h.want(owner, "GET", path, nil, nil, 200)
+	status := current["status"].(map[string]any)
+	if status["imported_from"] != nil || status["imported_through"] != nil {
+		t.Fatalf("previous scope coverage was retained: %v", status)
+	}
+	retained := h.want(owner, "GET", invoicePath, nil, nil, 200)["items"].([]any)
+	if !reflect.DeepEqual(retained, items) {
+		t.Fatalf("scope change removed invoice history: %v", retained)
+	}
+	fake.mu.Lock()
+	queryIndex := len(fake.queries)
+	fake.mu.Unlock()
+	headers = etagHeader(current)
+	headers["Idempotency-Key"] = uuid.NewString()
+	h.want(owner, "POST", path+"/run", nil, headers, 202)
+	if err := billingImporter(h, t).Pass(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	query := fake.call(queryIndex)
+	start, startErr := strconv.ParseInt(query.Get("start_time"), 10, 64)
+	end, endErr := strconv.ParseInt(query.Get("end_time"), 10, 64)
+	if startErr != nil || endErr != nil || end-start != int64(30*24*time.Hour/time.Second) || query.Get("project_ids[]") != "proj_aaa111" {
+		t.Fatalf("returning to the prior scope did not use its first-import window: %v", query)
+	}
+	items = h.want(owner, "GET", invoicePath, nil, nil, 200)["items"].([]any)
+	fake.mu.Lock()
+	fake.shift[`"value": 0.2,`] = `"value": 9.9,`
+	fake.mu.Unlock()
+	current = h.want(owner, "GET", path, nil, nil, 200)
+	headers = etagHeader(current)
+	headers["Idempotency-Key"] = uuid.NewString()
+	h.want(owner, "POST", path+"/run", nil, headers, 202)
+	release, done = begin()
+	current = h.want(owner, "GET", path, nil, nil, 200)
+	h.want(owner, "DELETE", path, nil, etagHeader(current), 204)
+	finish(release, done)
+	afterDelete := h.want(owner, "GET", invoicePath, nil, nil, 200)["items"].([]any)
+	if !reflect.DeepEqual(afterDelete, items) {
+		t.Fatalf("fetch changed retained invoices after deletion: %v", afterDelete)
+	}
+}
+
+func TestBillingImportCredentialCompatibilityAcrossKinds(t *testing.T) {
+	h := newAccessHarness(t)
+	owner := h.owner()
+	day1, day2, day3 := billingDays()
+	openai := newBillingFake(t, "/v1/organization/costs", map[string]string{
+		"": "openai_costs_page1.json", "page-2-token": "openai_costs_page2.json",
+	}, map[string]string{"1759104000": fmt.Sprint(day1.Unix()), "1759190400": fmt.Sprint(day2.Unix()), "1759276800": fmt.Sprint(day3.Unix())})
+	anthropic := newBillingFake(t, "/v1/organizations/cost_report", map[string]string{
+		"": "anthropic_cost_report_page1.json", "page-2-token": "anthropic_cost_report_page2.json",
+	}, map[string]string{
+		`"starting_at": "2025-10-01T`: `"starting_at": "` + day1.Format("2006-01-02") + "T",
+		`"ending_at": "2025-10-02T`:   `"ending_at": "` + day2.Format("2006-01-02") + "T",
+		`"starting_at": "2025-10-02T`: `"starting_at": "` + day2.Format("2006-01-02") + "T",
+		`"ending_at": "2025-10-03T`:   `"ending_at": "` + day3.Format("2006-01-02") + "T",
+		`"starting_at": "2025-10-03T`: `"starting_at": "` + day3.Format("2006-01-02") + "T",
+		`"ending_at": "2025-10-04T`:   `"ending_at": "` + day3.AddDate(0, 0, 1).Format("2006-01-02") + "T",
+	})
+	oldKey := "sk-admin-" + strings.Repeat("o", 30)
+	anthropic.expectedAPIKey = oldKey
+	provider := billingProvider(h, owner, "Changed kind", "openai", openai.server.URL+"/v1", nil)
+	providerID := billingProviderID(provider)
+	path := "/api/v1/providers/" + providerID + "/billing-import"
+	billingPut(h, owner, providerID, map[string]any{"credential": oldKey}, provider["etag"].(string), 201)
+	providerPath := "/api/v1/providers/" + providerID
+	credentials := h.want(owner, "GET", providerPath+"/credentials", nil, nil, 200)["items"].([]any)
+	credentialID := credentials[0].(map[string]any)["id"].(string)
+	headers := etagHeader(provider)
+	headers["Idempotency-Key"] = uuid.NewString()
+	h.want(owner, "POST", providerPath+"/credentials/"+credentialID+"/revoke", nil, headers, 200)
+	provider = h.want(owner, "GET", providerPath, nil, nil, 200)
+	provider = h.want(owner, "PATCH", "/api/v1/providers/"+providerID, map[string]any{"name": "Changed kind", "configuration": map[string]any{
+		"kind": "anthropic", "auth_mode": "api_key", "endpoint": anthropic.server.URL + "/v1",
+	}}, etagHeader(provider), 200)
+	current := h.want(owner, "GET", path, nil, nil, 200)
+	billingPut(h, owner, providerID, map[string]any{}, current["etag"].(string), 200)
+	if err := billingImporter(h, t).Pass(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	current = h.want(owner, "GET", path, nil, nil, 200)
+	status := current["status"].(map[string]any)
+	if status["last_success_at"] == nil || status["last_error_code"] != nil {
+		t.Fatalf("retained polling credential failed after changing kind: %v", status)
+	}
+	newAnthropicKey := "sk-ant-" + strings.Repeat("a", 30)
+	billingPut(h, owner, providerID, map[string]any{"credential": newAnthropicKey}, current["etag"].(string), 200)
+	h.want(owner, "PATCH", "/api/v1/providers/"+providerID, map[string]any{"name": "Changed kind", "configuration": map[string]any{
+		"kind": "openai", "auth_mode": "api_key", "endpoint": openai.server.URL + "/v1",
+	}}, etagHeader(provider), 200)
+	export := h.want(owner, "GET", "/api/v1/configuration/export", nil, nil, 200)
+	replacement := "sk-admin-" + strings.Repeat("n", 30)
+	body := map[string]any{"document": export["document"], "secret_bindings": map[string]any{"Changed kind/billing": replacement, "Changed kind/default": "sk-provider-" + strings.Repeat("n", 30)}}
+	h.want(owner, "POST", "/api/v1/configuration/apply", body, idem("changed-kind"), 200)
+	openai.mu.Lock()
+	openai.expectedAuthorization = "Bearer " + replacement
+	openai.mu.Unlock()
+	current = h.want(owner, "GET", path, nil, nil, 200)
+	headers = etagHeader(current)
+	headers["Idempotency-Key"] = uuid.NewString()
+	h.want(owner, "POST", path+"/run", nil, headers, 202)
+	if err := billingImporter(h, t).Pass(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	current = h.want(owner, "GET", path, nil, nil, 200)
+	status = current["status"].(map[string]any)
+	if status["last_success_at"] == nil || status["last_error_code"] != nil {
+		t.Fatalf("replacement credential failed after configuration apply: %v", status)
+	}
+}
+
+func TestBillingImportRejectsIncompatibleStoredCredential(t *testing.T) {
+	h := newAccessHarness(t)
+	owner := h.owner()
+	provider := billingProvider(h, owner, "Changed cloud", "openai", "https://api.openai.com/v1", nil)
+	id := billingProviderID(provider)
+	path := "/api/v1/providers/" + id
+	billingPut(h, owner, id, map[string]any{"credential": "sk-admin-" + strings.Repeat("k", 30)}, provider["etag"].(string), 201)
+	credentials := h.want(owner, "GET", path+"/credentials", nil, nil, 200)["items"].([]any)
+	headers := etagHeader(provider)
+	headers["Idempotency-Key"] = uuid.NewString()
+	h.want(owner, "POST", path+"/credentials/"+credentials[0].(map[string]any)["id"].(string)+"/revoke", nil, headers, 200)
+	provider = h.want(owner, "GET", path, nil, nil, 200)
+	h.want(owner, "PATCH", path, map[string]any{"name": "Changed cloud", "configuration": map[string]any{"kind": "bedrock", "auth_mode": "static", "endpoint": "https://bedrock-runtime.us-east-1.amazonaws.com", "cloud_region": "us-east-1"}}, etagHeader(provider), 200)
+	scope := map[string]any{"payer_account_id": "111122223333", "bucket": "billing-report-bucket", "report_prefix": "billing/cur", "region": "us-east-1"}
+	current := h.want(owner, "GET", path+"/billing-import", nil, nil, 200)
+	billingPut(h, owner, id, map[string]any{"scope": scope}, current["etag"].(string), 422)
+	credential := map[string]any{"auth_mode": "static", "access_key_id": "BILLINGKEY1234567890", "secret_access_key": "billing-secret-example"}
+	updated := billingPut(h, owner, id, map[string]any{"scope": scope, "credential": credential}, current["etag"].(string), 200)
+	if updated["source"] != "aws_cur" || updated["credential"] != nil {
+		t.Fatalf("replacement billing credential was not applied write-only: %v", updated)
+	}
+}
+
+func TestBillingImportPromotionRequiresCompatibleCredential(t *testing.T) {
+	h := newAccessHarness(t)
+	owner := h.owner()
+	provider := billingProvider(h, owner, "Changed promotion", "openai", "https://api.openai.com/v1", nil)
+	id := billingProviderID(provider)
+	path := "/api/v1/providers/" + id
+	billingPut(h, owner, id, map[string]any{"credential": "sk-admin-" + strings.Repeat("k", 30)}, provider["etag"].(string), 201)
+	credentials := h.want(owner, "GET", path+"/credentials", nil, nil, 200)["items"].([]any)
+	headers := etagHeader(provider)
+	headers["Idempotency-Key"] = uuid.NewString()
+	h.want(owner, "POST", path+"/credentials/"+credentials[0].(map[string]any)["id"].(string)+"/revoke", nil, headers, 200)
+	provider = h.want(owner, "GET", path, nil, nil, 200)
+	h.want(owner, "PATCH", path, map[string]any{"name": "Changed promotion", "configuration": map[string]any{"kind": "azure_openai", "auth_mode": "api_key", "endpoint": "https://example.openai.azure.com", "deployment": "model", "api_version": "2024-10-21"}}, etagHeader(provider), 200)
+	document := h.want(owner, "GET", "/api/v1/configuration/export", nil, nil, 200)["document"].(map[string]any)
+	for _, raw := range document["providers"].([]any) {
+		entry := raw.(map[string]any)
+		if entry["name"] == "Changed promotion" {
+			entry["billing_import"].(map[string]any)["scope"] = map[string]any{"billing_scope": "/providers/Microsoft.Billing/billingAccounts/1234567", "export_name": "costs", "storage_account": "billingaccount", "container": "exports"}
+		}
+	}
+	bindings := map[string]any{"Changed promotion/default": "inference-key"}
+	body := map[string]any{"document": document, "secret_bindings": bindings}
+	plan := h.want(owner, "POST", "/api/v1/configuration/plan", body, nil, 200)
+	blocked := false
+	for _, raw := range plan["blockers"].([]any) {
+		entry := raw.(map[string]any)
+		blocked = blocked || (entry["key"] == "Changed promotion/billing" && entry["detail"] == "secret_binding_required")
+	}
+	if !blocked {
+		t.Fatalf("promotion did not require a compatible billing binding: %v", plan)
+	}
+	h.want(owner, "POST", "/api/v1/configuration/apply", body, idem("incompatible-billing"), 409)
+	bindings["Changed promotion/billing"] = `{"auth_mode":"azure_default"}`
+	h.want(owner, "POST", "/api/v1/configuration/apply", body, idem("replacement-billing"), 200)
+	updated := h.want(owner, "GET", path+"/billing-import", nil, nil, 200)
+	if updated["source"] != "azure_cost_management" || updated["credential"] != nil {
+		t.Fatalf("promotion did not apply the replacement credential write-only: %v", updated)
+	}
+}
+
+func TestBillingImportMigrationPreservesHistory(t *testing.T) {
+	pool, dbURL := accessDatabase(t)
+	if _, err := pool.Exec(t.Context(), `CREATE SCHEMA olp; CREATE TABLE olp.migrations
+		(version text PRIMARY KEY, checksum bytea NOT NULL, applied_at timestamptz NOT NULL DEFAULT now())`); err != nil {
+		t.Fatal(err)
+	}
+	entries, err := os.ReadDir("../../internal/database/migrations")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range entries {
+		if !strings.HasSuffix(entry.Name(), ".sql") {
+			continue
+		}
+		if entry.Name() >= "0127_billing_import_history.sql" {
+			break
+		}
+		data, err := os.ReadFile("../../internal/database/migrations/" + entry.Name())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := pool.Exec(t.Context(), string(data)); err != nil {
+			t.Fatalf("migration %s: %v", entry.Name(), err)
+		}
+		checksum := sha256.Sum256(data)
+		if _, err := pool.Exec(t.Context(), `INSERT INTO olp.migrations(version,checksum) VALUES($1,$2)`, entry.Name(), checksum[:]); err != nil {
+			t.Fatal(err)
+		}
+	}
+	userID, providerID := uuid.NewString(), uuid.NewString()
+	if _, err := pool.Exec(t.Context(), `INSERT INTO olp.users(id,email,display_name,role,etag)
+		VALUES($1::uuid,'history@example.test','History','viewer',$2::uuid)`, userID, uuid.NewString()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(t.Context(), `INSERT INTO olp.providers(id,name,kind,state,configuration,etag,slots_etag,created_by)
+		VALUES($1::uuid,'Migration','openai','draft','{"kind":"openai","auth_mode":"api_key"}', $2::uuid,$3::uuid,$4::uuid)`,
+		providerID, uuid.NewString(), uuid.NewString(), userID); err != nil {
+		t.Fatal(err)
+	}
+	day1, day2, day3 := billingDays()
+	if _, err := pool.Exec(t.Context(), `INSERT INTO olp.provider_invoiced_costs
+		(provider_id,day,line_item,currency,amount,source,fetched_at) VALUES
+		($1::uuid,$2::date,'tokens','USD',0.123456789012,'openai_costs','2025-01-01T12:00:00Z'),
+		($1::uuid,$3::date,'storage','EUR',12.34,'openai_costs','2025-01-02T12:00:00Z')`,
+		providerID, day1.Format("2006-01-02"), day2.Format("2006-01-02")); err != nil {
+		t.Fatal(err)
+	}
+	legacyProvider := uuid.NewString()
+	if _, err := pool.Exec(t.Context(), `INSERT INTO olp.providers(id,name,kind,state,configuration,etag,slots_etag,created_by)
+		VALUES($1::uuid,'Legacy range','openai','draft','{"kind":"openai","auth_mode":"api_key"}', $2::uuid,$3::uuid,$4::uuid)`,
+		legacyProvider, uuid.NewString(), uuid.NewString(), userID); err != nil {
+		t.Fatal(err)
+	}
+	legacyOldDay := day1.AddDate(0, 0, -45)
+	if _, err := pool.Exec(t.Context(), `INSERT INTO olp.provider_billing_imports(provider_id,source,scope,etag,created_by,imported_from,imported_through,last_success_at)
+		VALUES($1::uuid,'openai_costs','{"project_ids":["proj_zlegacy","proj_alegacy"]}',$2::uuid,$3::uuid,$4::date,$5::date,now())`, legacyProvider, uuid.NewString(), userID, legacyOldDay, day2); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(t.Context(), `INSERT INTO olp.provider_billing_contexts(provider_id,source,scope)
+		VALUES($1::uuid,'openai_costs','{"project_ids":["proj_zlegacy","proj_alegacy"]}')`, legacyProvider); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(t.Context(), `INSERT INTO olp.provider_invoiced_costs(provider_id,day,line_item,currency,amount,source)
+		VALUES($1::uuid,$2::date,'tokens','USD',1,'openai_costs')`, legacyProvider, day1); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.Migrate(t.Context(), pool); err != nil {
+		t.Fatal(err)
+	}
+	h := newAccessHarnessOn(t, pool, dbURL)
+	owner := h.owner()
+	legacyDay := day1.AddDate(0, 0, -1)
+	legacyPrice := "0.15"
+	billingFact(t, h, legacyProvider, uuid.NewString(), legacyDay, "billable", true, &legacyPrice, false, false, false)
+	legacyReport := h.want(owner, "GET", fmt.Sprintf("/api/v1/usage/reconciliation?start=%s&end=%s&provider_id=%s", legacyDay.Format("2006-01-02"), day1.Format("2006-01-02"), legacyProvider), nil, nil, 200)
+	legacyItem := legacyReport["items"].([]any)[0].(map[string]any)
+	if legacyItem["invoiced_cost"] != "0" || legacyItem["capture_rate_unavailable_reason"] != "zero_invoice" {
+		t.Fatalf("migration lost an empty covered day: %v", legacyReport)
+	}
+	legacyImport := h.want(owner, "GET", "/api/v1/providers/"+legacyProvider+"/billing-import", nil, nil, 200)
+	legacyStatus := legacyImport["status"].(map[string]any)
+	if legacyStatus["imported_from"] != legacyOldDay.Format("2006-01-02") || legacyStatus["imported_through"] != day2.Format("2006-01-02") {
+		t.Fatalf("migration lost the current import's covered range: %v", legacyStatus)
+	}
+	updatedImport := billingPut(h, owner, legacyProvider, map[string]any{
+		"scope": map[string]any{"project_ids": []string{"proj_zlegacy", "proj_alegacy"}}, "credential": "sk-admin-" + strings.Repeat("x", 24),
+	}, legacyImport["etag"].(string), 200)
+	updatedStatus := updatedImport["status"].(map[string]any)
+	if updatedStatus["imported_from"] != legacyStatus["imported_from"] || updatedStatus["imported_through"] != legacyStatus["imported_through"] {
+		t.Fatalf("unchanged scope lost migrated coverage: %v", updatedStatus)
+	}
+	oldReport := h.want(owner, "GET", fmt.Sprintf("/api/v1/usage/reconciliation?start=%s&end=%s&provider_id=%s", legacyOldDay.Format("2006-01-02"), legacyOldDay.AddDate(0, 0, 1).Format("2006-01-02"), legacyProvider), nil, nil, 200)
+	oldItem := oldReport["items"].([]any)[0].(map[string]any)
+	if oldItem["invoiced_cost"] != "0" || oldItem["capture_rate_unavailable_reason"] != "zero_invoice" {
+		t.Fatalf("migration lost an old covered day: %v", oldReport)
+	}
+	path := fmt.Sprintf("/api/v1/providers/%s/invoiced-costs?start=%s&end=%s", providerID, day1.Format("2006-01-02"), day3.Format("2006-01-02"))
+	items := h.want(owner, "GET", path, nil, nil, 200)["items"].([]any)
+	expected := []map[string]string{
+		{"day": day1.Format("2006-01-02"), "line_item": "tokens", "currency": "USD", "amount": "0.123456789012", "source": "openai_costs", "fetched_at": "2025-01-01T12:00:00Z"},
+		{"day": day2.Format("2006-01-02"), "line_item": "storage", "currency": "EUR", "amount": "12.34", "source": "openai_costs", "fetched_at": "2025-01-02T12:00:00Z"},
+	}
+	if len(items) != len(expected) {
+		t.Fatalf("invoice history changed after migration: %v", items)
+	}
+	for index, expectedItem := range expected {
+		item := items[index].(map[string]any)
+		for _, field := range []string{"day", "line_item", "currency", "source", "fetched_at"} {
+			if item[field] != expectedItem[field] {
+				t.Fatalf("invoice history changed after migration: %v", item)
+			}
+		}
+		amount, err := decimal.NewFromString(item["amount"].(string))
+		expectedAmount, expectedErr := decimal.NewFromString(expectedItem["amount"])
+		if err != nil || expectedErr != nil || !amount.Equal(expectedAmount) {
+			t.Fatalf("invoice amount changed after migration: %v", item)
+		}
+	}
+	report := h.want(owner, "GET", fmt.Sprintf("/api/v1/usage/reconciliation?start=%s&end=%s&provider_id=%s", day1.Format("2006-01-02"), day3.Format("2006-01-02"), providerID), nil, nil, 200)
+	reconciled := report["items"].([]any)
+	if len(reconciled) != len(expected) {
+		t.Fatalf("invoice history was not reconcilable after migration: %v", report)
+	}
+	for index, want := range expected {
+		item := reconciled[index].(map[string]any)
+		amount, err := decimal.NewFromString(item["invoiced_cost"].(string))
+		expectedAmount, expectedErr := decimal.NewFromString(want["amount"])
+		if err != nil || expectedErr != nil || !amount.Equal(expectedAmount) {
+			t.Fatalf("reconciled amount changed after migration: %v", item)
+		}
+	}
+}
+
+func TestBillingImportAWSScope(t *testing.T) {
+	h := newAccessHarness(t)
+	owner := h.owner()
+	provider := h.want(owner, "POST", "/api/v1/providers", map[string]any{
+		"name":          "Bedrock billing",
+		"configuration": map[string]any{"kind": "bedrock", "auth_mode": "static", "endpoint": "https://bedrock-runtime.us-east-1.amazonaws.com", "cloud_region": "us-east-1"},
+		"credential":    `{"access_key_id":"BEDROCKKEY1234567890","secret_access_key":"bedrock-secret-123456789"}`,
+		"model":         "amazon.titan-text-express-v1",
+	}, idem("aws-billing-provider"), 201)
+	id := billingProviderID(provider)
+	scope := map[string]any{"payer_account_id": "111122223333", "bucket": "billing-report-bucket", "report_prefix": "billing/cur", "region": "us-east-1", "linked_account_ids": []string{"444455556666"}}
+	credential := map[string]any{"auth_mode": "static", "access_key_id": "BILLINGKEY1234567890", "secret_access_key": "billing-secret-example"}
+	billingPut(h, owner, id, map[string]any{"scope": map[string]any{"payer_account_id": "invalid", "bucket": "billing-report-bucket", "report_prefix": "billing/cur", "region": "us-east-1"}, "credential": credential}, provider["etag"].(string), 422)
+	billingPut(h, owner, id, map[string]any{"scope": map[string]any{"project_ids": []string{"proj_abc"}}, "credential": credential}, provider["etag"].(string), 422)
+	billingPut(h, owner, id, map[string]any{"credential": credential}, provider["etag"].(string), 422)
+	billingPut(h, owner, id, map[string]any{"scope": scope}, provider["etag"].(string), 422)
+	billingPut(h, owner, id, map[string]any{"scope": scope, "credential": nil}, provider["etag"].(string), 422)
+	created := billingPut(h, owner, id, map[string]any{"scope": scope, "credential": credential}, provider["etag"].(string), 201)
+	if created["source"] != "aws_cur" || created["credential"] != nil {
+		t.Fatalf("billing import must have the AWS source and keep the credential write-only: %v", created)
+	}
+}
+
+type azureBillingFake struct {
+	mu      sync.Mutex
+	objects map[string]string
+	denied  bool
+	server  *httptest.Server
+}
+
+func newAzureBillingFake(t *testing.T) *azureBillingFake {
+	t.Helper()
+	fake := &azureBillingFake{objects: map[string]string{}}
+	fake.server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/token" {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = fmt.Fprintf(w, `{"access_token":"azure-fixture-token","expires_on":"%d","token_type":"Bearer","resource":"https://storage.azure.com/"}`, time.Now().Add(time.Hour).Unix())
+			return
+		}
+		fake.mu.Lock()
+		defer fake.mu.Unlock()
+		if fake.denied || !strings.HasPrefix(r.Header.Get("Authorization"), "Bearer ") {
+			http.Error(w, "fixture denied", http.StatusForbidden)
+			return
+		}
+		if r.URL.Query().Get("comp") == "list" {
+			_, _ = fmt.Fprint(w, "<EnumerationResults><Blobs>")
+			for key := range fake.objects {
+				if strings.HasPrefix(key, r.URL.Query().Get("prefix")) {
+					_, _ = fmt.Fprintf(w, "<Blob><Name>%s</Name></Blob>", key)
+				}
+			}
+			_, _ = fmt.Fprint(w, "</Blobs><NextMarker></NextMarker></EnumerationResults>")
+			return
+		}
+		object, ok := fake.objects[strings.TrimPrefix(r.URL.Path, "/exports/")]
+		if !ok {
+			http.NotFound(w, r)
+			return
+		}
+		_, _ = fmt.Fprint(w, object)
+	}))
+	t.Cleanup(fake.server.Close)
+	t.Setenv("IDENTITY_ENDPOINT", fake.server.URL+"/token")
+	t.Setenv("IDENTITY_HEADER", "fixture-identity")
+	t.Setenv("AZURE_TENANT_ID", "")
+	t.Setenv("AZURE_CLIENT_ID", "")
+	if err := os.Unsetenv("AZURE_CLIENT_ID"); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("AZURE_CLIENT_SECRET", "")
+	return fake
+}
+
+func (f *azureBillingFake) delivery(t *testing.T, day time.Time, run string, submitted time.Time, rows string) string {
+	t.Helper()
+	start := time.Date(day.Year(), day.Month(), 1, 0, 0, 0, 0, time.UTC)
+	base := "billing/costs/" + start.Format("20060102") + "-" + start.AddDate(0, 1, 0).Format("20060102") + "/" + run + "/"
+	part := "Date,SubscriptionId,MeterCategory,MeterSubCategory,MeterId,ChargeType,BillingCurrency,CostInBillingCurrency\n" + rows
+	// Manifest example: https://learn.microsoft.com/en-us/azure/cost-management-billing/costs/tutorial-improved-exports, accessed 2026-10-31.
+	manifest, err := json.Marshal(map[string]any{
+		"manifestVersion": "2024-04-01", "byteCount": len(part), "blobCount": 1, "dataRowCount": strings.Count(rows, "\n"),
+		"exportConfig":   map[string]any{"exportName": "costs", "resourceId": "/providers/Microsoft.Billing/billingAccounts/1234567/providers/Microsoft.CostManagement/exports/costs", "type": "AmortizedCost"},
+		"deliveryConfig": map[string]any{"fileFormat": "Csv", "compressionMode": "None"},
+		"runInfo":        map[string]any{"submittedTime": submitted.Format(time.RFC3339), "runId": run, "startDate": start.Format(time.RFC3339), "endDate": start.AddDate(0, 1, 0).Format(time.RFC3339)},
+		"blobs":          []map[string]any{{"blobName": base + "part.csv", "byteCount": len(part), "dataRowCount": strings.Count(rows, "\n")}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.objects[base+"_manifest.json"] = string(manifest)
+	f.objects[base+"part.csv"] = part
+	return base
+}
+
+func azureBillingTest(t *testing.T, fake *azureBillingFake) (*accessHarness, *browser, string, *billing.Importer) {
+	t.Helper()
+	h := newAccessHarness(t)
+	owner := h.owner()
+	provider := h.want(owner, "POST", "/api/v1/providers", map[string]any{
+		"name": "Azure restatements", "configuration": map[string]any{"kind": "azure_openai", "auth_mode": "api_key", "endpoint": "https://example.openai.azure.com", "deployment": "model", "api_version": "2024-10-21"}, "credential": "inference-key", "model": "model",
+	}, idem("azure-restatement-provider"), 201)
+	id := billingProviderID(provider)
+	billingPut(h, owner, id, map[string]any{"scope": map[string]any{"billing_scope": "/providers/Microsoft.Billing/billingAccounts/1234567", "export_name": "costs", "storage_account": "billingaccount", "container": "exports", "prefix": "billing"}, "credential": map[string]any{"auth_mode": "azure_default"}}, provider["etag"].(string), 201)
+	importer := billingImporter(h, t)
+	importer.AzureBlobEndpoint = func(string) string { return fake.server.URL }
+	return h, owner, id, importer
+}
+
+func azureRow(day time.Time, charge, amount string) string {
+	return fmt.Sprintf("%s,11111111-1111-4111-8111-111111111111,Cognitive Services,Azure Open AI,meter-123,%s,USD,%s\n", day.Format("2006-01-02"), charge, amount)
+}
+
+func TestAzureBillingClientSecretProxy(t *testing.T) {
+	fake := newAzureBillingFake(t)
+	peer := newFixedHostPeer(t, "login.microsoftonline.com")
+	tenant, clientID, clientSecret := uuid.NewString(), uuid.NewString(), "fixture-client-secret"
+	authority := "https://login.microsoftonline.com/" + tenant
+	peer.respond = func(w http.ResponseWriter, r *http.Request) {
+		if r.Host != "login.microsoftonline.com" {
+			fake.server.Config.Handler.ServeHTTP(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/token"):
+			if r.FormValue("client_id") != clientID || r.FormValue("client_secret") != clientSecret {
+				http.Error(w, "invalid fixture credential", http.StatusUnauthorized)
+				return
+			}
+			_, _ = fmt.Fprint(w, `{"access_token":"azure-proxy-token","expires_in":3600,"token_type":"Bearer"}`)
+		case strings.HasSuffix(r.URL.Path, "/discovery/instance"):
+			_, _ = fmt.Fprintf(w, `{"tenant_discovery_endpoint":%q,"metadata":[{"preferred_network":"login.microsoftonline.com","preferred_cache":"login.microsoftonline.com","aliases":["login.microsoftonline.com"]}]}`, authority+"/v2.0/.well-known/openid-configuration")
+		default:
+			_, _ = fmt.Fprintf(w, `{"token_endpoint":%q,"authorization_endpoint":%q,"issuer":%q}`, authority+"/oauth2/v2.0/token", authority+"/oauth2/v2.0/authorize", authority+"/v2.0")
+		}
+	}
+	h := newAccessHarness(t)
+	owner := h.owner()
+	provider := h.want(owner, "POST", "/api/v1/providers", map[string]any{
+		"name": "Azure billing proxy", "configuration": map[string]any{
+			"kind": "azure_openai", "auth_mode": "api_key", "endpoint": "https://example.openai.azure.com", "deployment": "model", "api_version": "2024-10-21",
+			"options": map[string]any{"network": map[string]any{"proxy_url": peer.proxy.URL, "trust_roots_pem": peer.roots}},
+		}, "credential": "inference-key", "model": "model",
+	}, idem("azure-billing-proxy"), 201)
+	id := billingProviderID(provider)
+	billingPut(h, owner, id, map[string]any{
+		"scope":      map[string]any{"billing_scope": "/providers/Microsoft.Billing/billingAccounts/1234567", "export_name": "costs", "storage_account": "billingaccount", "container": "exports", "prefix": "billing"},
+		"credential": map[string]any{"auth_mode": "azure_client_secret", "tenant_id": tenant, "client_id": clientID, "client_secret": clientSecret},
+	}, provider["etag"].(string), 201)
+	today := time.Now().UTC().Truncate(24 * time.Hour)
+	day := today.AddDate(0, 0, -1)
+	fake.delivery(t, day, "proxy-run", today, azureRow(day, "Usage", "0.75"))
+	importer := billingImporter(h, t)
+	importer.AzureBlobEndpoint = func(string) string { return "https://127.0.0.1" }
+	if err := importer.Pass(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	result := h.want(owner, "GET", fmt.Sprintf("/api/v1/providers/%s/invoiced-costs?start=%s&end=%s", id, day.Format("2006-01-02"), today.Format("2006-01-02")), nil, nil, 200)
+	items := result["items"].([]any)
+	if len(items) != 1 || items[0].(map[string]any)["amount"] != "0.75" {
+		t.Fatalf("client-secret import through the configured proxy failed: %v", result)
+	}
+}
+
+func TestAzureBillingRetentionAndMissingPeriodRetry(t *testing.T) {
+	fake := newAzureBillingFake(t)
+	h, owner, id, importer := azureBillingTest(t, fake)
+	setting := h.want(owner, "GET", "/api/v1/settings/retention.usage_days", nil, nil, 200)
+	h.want(owner, "PUT", "/api/v1/settings/retention.usage_days", map[string]any{"value": "180"}, etagHeader(setting), 200)
+	today := time.Now().UTC().Truncate(24 * time.Hour)
+	month := time.Date(today.Year(), today.Month(), 1, 0, 0, 0, 0, time.UTC)
+	oldDay, missingDay, recentDay := month.AddDate(0, -4, 14), month.AddDate(0, -2, 14), month.AddDate(0, -1, 14)
+	oldBase := fake.delivery(t, oldDay, "old", month.AddDate(0, -3, 1), azureRow(oldDay, "Usage", "0.1"))
+	fake.delivery(t, recentDay, "recent", month.AddDate(0, 0, 1), azureRow(recentDay, "Usage", "0.2"))
+	ancient := month.AddDate(0, -9, 0)
+	fake.mu.Lock()
+	fake.objects["billing/costs/"+ancient.Format("20060102")+"-"+ancient.AddDate(0, 1, 0).Format("20060102")+"/invalid/_manifest.json"] = "invalid"
+	fake.mu.Unlock()
+	path := "/api/v1/providers/" + id + "/billing-import"
+	if err := importer.Pass(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	status := h.want(owner, "GET", path, nil, nil, 200)["status"].(map[string]any)
+	if status["last_error_code"] != nil {
+		t.Fatalf("old export outside retention prevented backfill: %v", status)
+	}
+	priced := "0.15"
+	billingFact(t, h, id, uuid.NewString(), missingDay, "billable", true, &priced, false, false, false)
+	report := func() map[string]any {
+		t.Helper()
+		return h.want(owner, "GET", fmt.Sprintf("/api/v1/usage/reconciliation?start=%s&end=%s&provider_id=%s", missingDay.Format("2006-01-02"), missingDay.AddDate(0, 0, 1).Format("2006-01-02"), id), nil, nil, 200)["items"].([]any)[0].(map[string]any)
+	}
+	if item := report(); item["capture_rate_unavailable_reason"] != "not_imported" || item["invoiced_cost"] != nil {
+		t.Fatalf("missing period was treated as invoiced: %v", item)
+	}
+	missingBase := fake.delivery(t, missingDay, "recovered", month.AddDate(0, -1, 1), azureRow(missingDay, "Usage", "0.4"))
+	fake.mu.Lock()
+	missingPart := fake.objects[missingBase+"part.csv"]
+	delete(fake.objects, missingBase+"part.csv")
+	delete(fake.objects, oldBase+"part.csv")
+	fake.mu.Unlock()
+	run := func() map[string]any {
+		t.Helper()
+		current := h.want(owner, "GET", path, nil, nil, 200)
+		headers := etagHeader(current)
+		headers["Idempotency-Key"] = uuid.NewString()
+		h.want(owner, "POST", path+"/run", nil, headers, 202)
+		if err := importer.Pass(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+		return h.want(owner, "GET", path, nil, nil, 200)["status"].(map[string]any)
+	}
+	if status := run(); status["last_error_code"] != "status" || report()["capture_rate_unavailable_reason"] != "not_imported" {
+		t.Fatalf("incomplete missing period did not remain retryable: %v", status)
+	}
+	fake.mu.Lock()
+	fake.objects[missingBase+"part.csv"] = missingPart
+	fake.mu.Unlock()
+	if status := run(); status["last_error_code"] != nil {
+		t.Fatalf("completed historical period was unnecessarily fetched: %v", status)
+	}
+	if item := report(); item["capture_rate_unavailable_reason"] != nil || item["invoiced_cost"] != "0.4" {
+		t.Fatalf("missing period was not retried: %v", item)
+	}
+	recentMonth := time.Date(recentDay.Year(), recentDay.Month(), 1, 0, 0, 0, 0, time.UTC)
+	misplacedBase := "billing/costs/" + recentMonth.Format("20060102") + "-" + recentMonth.AddDate(0, 1, 0).Format("20060102") + "/misplaced/"
+	fake.mu.Lock()
+	fake.objects[misplacedBase+"_manifest.json"] = strings.ReplaceAll(fake.objects[oldBase+"_manifest.json"], oldBase, misplacedBase)
+	fake.objects[misplacedBase+"part.csv"] = "Date,SubscriptionId,MeterCategory,MeterSubCategory,MeterId,ChargeType,BillingCurrency,CostInBillingCurrency\n" + azureRow(oldDay, "Usage", "0.1")
+	fake.mu.Unlock()
+	if status := run(); status["last_error_code"] != "response" || report()["invoiced_cost"] != "0.4" {
+		t.Fatalf("manifest period did not match its delivery folder: %v", status)
+	}
+}
+
+func TestAzureBillingRestatements(t *testing.T) {
+	fake := newAzureBillingFake(t)
+	h, owner, id, importer := azureBillingTest(t, fake)
+	today := time.Now().UTC().Truncate(24 * time.Hour)
+	month := time.Date(today.Year(), today.Month(), 1, 0, 0, 0, 0, time.UTC)
+	day, empty := month.AddDate(0, -1, 14), month.AddDate(0, -1, 15)
+	firstRows := azureRow(day, "Usage", "0.300000000000000003") + azureRow(day, "Credit", "-0.03") + azureRow(day, "Adjustment", "-0.02") + strings.Replace(azureRow(day, "Usage", "0.5"), "meter-123", "retired-meter", 1) + azureRow(day, "Tax", "-1")
+	fake.delivery(t, day, "baseline", month.AddDate(0, 0, 1), firstRows)
+	path := "/api/v1/providers/" + id + "/billing-import"
+	status := func() map[string]any { return h.want(owner, "GET", path, nil, nil, 200)["status"].(map[string]any) }
+	run := func() {
+		t.Helper()
+		current := h.want(owner, "GET", path, nil, nil, 200)
+		headers := etagHeader(current)
+		headers["Idempotency-Key"] = uuid.NewString()
+		h.want(owner, "POST", path+"/run", nil, headers, 202)
+		if err := importer.Pass(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	amounts := func() map[string]string {
+		t.Helper()
+		items := h.want(owner, "GET", fmt.Sprintf("/api/v1/providers/%s/invoiced-costs?start=%s&end=%s", id, day.Format("2006-01-02"), day.AddDate(0, 0, 1).Format("2006-01-02")), nil, nil, 200)["items"].([]any)
+		values := map[string]string{}
+		for _, raw := range items {
+			item := raw.(map[string]any)
+			values[item["line_item"].(string)] = item["amount"].(string)
+		}
+		return values
+	}
+	if err := importer.Pass(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	first := amounts()
+	if len(first) != 4 || first["Azure OpenAI / retired-meter / Usage"] != "0.5" || first["Azure OpenAI / meter-123 / Usage"] != "0.300000000000000003" || first["Azure OpenAI / meter-123 / Credit"] != "-0.03" || first["Azure OpenAI / meter-123 / Adjustment"] != "-0.02" || status()["source_revision"] != "baseline" {
+		t.Fatalf("initial export did not preserve scoped charges: %v %v", first, status())
+	}
+	priced := "0.1"
+	billingFact(t, h, id, uuid.NewString(), empty, "billable", true, &priced, false, false, false)
+	emptyReport := h.want(owner, "GET", fmt.Sprintf("/api/v1/usage/reconciliation?start=%s&end=%s&provider_id=%s", empty.Format("2006-01-02"), empty.AddDate(0, 0, 1).Format("2006-01-02"), id), nil, nil, 200)["items"].([]any)[0].(map[string]any)
+	if emptyReport["invoiced_cost"] != "0" || emptyReport["capture_rate_unavailable_reason"] != "zero_invoice" {
+		t.Fatalf("empty covered day was not invoiced zero: %v", emptyReport)
+	}
+	run()
+	if !reflect.DeepEqual(first, amounts()) || status()["source_revision"] != "baseline" {
+		t.Fatalf("same revision was not idempotent: %v %v", amounts(), status())
+	}
+	newRows := azureRow(day, "Usage", "0.700000000000000007") + azureRow(day, "Credit", "-0.07") + azureRow(day, "Adjustment", "-0.04")
+	newBase := fake.delivery(t, day, "corrected", month.AddDate(0, 0, 2), newRows)
+	run()
+	corrected := amounts()
+	if len(corrected) != 3 || corrected["Azure OpenAI / meter-123 / Usage"] != "0.700000000000000007" || corrected["Azure OpenAI / meter-123 / Credit"] != "-0.07" || corrected["Azure OpenAI / meter-123 / Adjustment"] != "-0.04" || status()["source_revision"] != "corrected" {
+		t.Fatalf("corrected export did not replace its billing period: %v %v", corrected, status())
+	}
+	fake.mu.Lock()
+	delete(fake.objects, newBase+"_manifest.json")
+	fake.mu.Unlock()
+	run()
+	if !reflect.DeepEqual(corrected, amounts()) || status()["source_revision"] != "corrected" {
+		t.Fatalf("older export replaced a newer revision: %v %v", amounts(), status())
+	}
+	broken := fake.delivery(t, day, "broken", month.AddDate(0, 0, 3), newRows)
+	fake.mu.Lock()
+	fake.objects[broken+"part.csv"] = "truncated"
+	fake.mu.Unlock()
+	run()
+	failed := status()
+	if failed["last_error_code"] != "response" || failed["source_revision"] != "corrected" || failed["next_import_at"] == nil || !reflect.DeepEqual(corrected, amounts()) {
+		t.Fatalf("truncated export changed invoices or did not back off: %v %v", failed, amounts())
+	}
+	next, err := time.Parse(time.RFC3339, failed["next_import_at"].(string))
+	if err != nil || !next.After(time.Now().Add(4*time.Minute)) {
+		t.Fatalf("failure did not schedule a delayed retry: %v", failed)
+	}
+	fake.mu.Lock()
+	fake.denied = true
+	fake.mu.Unlock()
+	run()
+	if status()["last_error_code"] != "credential" || status()["source_revision"] != "corrected" || !reflect.DeepEqual(corrected, amounts()) {
+		t.Fatalf("revoked credential changed invoices: %v %v", status(), amounts())
+	}
+	metrics := importer.Metrics()
+	if metrics[[2]string{id, "success"}] < 3 || metrics[[2]string{id, "response"}] < 1 || metrics[[2]string{id, "credential"}] < 1 {
+		t.Fatalf("missing import outcome metrics: %v", metrics)
+	}
+}
+
+func TestAzureBillingRunCoverageStopsAtSubmission(t *testing.T) {
+	fake := newAzureBillingFake(t)
+	h, owner, id, importer := azureBillingTest(t, fake)
+	today := time.Now().UTC().Truncate(24 * time.Hour)
+	month := time.Date(today.Year(), today.Month(), 1, 0, 0, 0, 0, time.UTC)
+	period := month.AddDate(0, -1, 0)
+	charged, later := period.AddDate(0, 0, 6), period.AddDate(0, 0, 19)
+	fake.delivery(t, charged, "early", period.AddDate(0, 0, 9), azureRow(charged, "Usage", "0.2"))
+	if err := importer.Pass(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	priced := "0.1"
+	billingFact(t, h, id, uuid.NewString(), later, "billable", true, &priced, false, false, false)
+	query := fmt.Sprintf("/api/v1/usage/reconciliation?start=%s&end=%s&provider_id=%s", later.Format("2006-01-02"), later.AddDate(0, 0, 1).Format("2006-01-02"), id)
+	item := h.want(owner, "GET", query, nil, nil, 200)["items"].([]any)[0].(map[string]any)
+	if item["capture_rate_unavailable_reason"] != "not_imported" || item["invoiced_cost"] != nil {
+		t.Fatalf("run covered days after it was submitted: %v", item)
+	}
+	fake.delivery(t, charged, "complete", month.AddDate(0, 0, 1), azureRow(charged, "Usage", "0.2"))
+	path := "/api/v1/providers/" + id + "/billing-import"
+	current := h.want(owner, "GET", path, nil, nil, 200)
+	headers := etagHeader(current)
+	headers["Idempotency-Key"] = uuid.NewString()
+	h.want(owner, "POST", path+"/run", nil, headers, 202)
+	if err := importer.Pass(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	item = h.want(owner, "GET", query, nil, nil, 200)["items"].([]any)[0].(map[string]any)
+	if item["capture_rate_unavailable_reason"] != "zero_invoice" || item["invoiced_cost"] != "0" {
+		t.Fatalf("newer complete run did not cover the empty day: %v", item)
+	}
+}
+
+func TestAzureBillingRefreshesCurrentAndPreviousPeriods(t *testing.T) {
+	fake := newAzureBillingFake(t)
+	h, owner, id, importer := azureBillingTest(t, fake)
+	now := time.Now().UTC()
+	month := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC)
+	importer.Now = func() time.Time { return month.AddDate(0, 0, 20) }
+	current, previous := month.AddDate(0, 0, 9), month.AddDate(0, -1, 9)
+	fake.delivery(t, current, "current-first", month.AddDate(0, 0, 14), azureRow(current, "Usage", "0.1"))
+	fake.delivery(t, previous, "previous-first", month.AddDate(0, 0, 1), azureRow(previous, "Usage", "0.2"))
+	if err := importer.Pass(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	fake.delivery(t, current, "current-corrected", month.AddDate(0, 0, 16), azureRow(current, "Usage", "0.3"))
+	fake.delivery(t, previous, "previous-corrected", month.AddDate(0, 0, 2), azureRow(previous, "Usage", "0.4"))
+	path := "/api/v1/providers/" + id + "/billing-import"
+	status := h.want(owner, "GET", path, nil, nil, 200)
+	headers := etagHeader(status)
+	headers["Idempotency-Key"] = uuid.NewString()
+	h.want(owner, "POST", path+"/run", nil, headers, 202)
+	if err := importer.Pass(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	items := h.want(owner, "GET", fmt.Sprintf("/api/v1/providers/%s/invoiced-costs?start=%s&end=%s", id, previous.Format("2006-01-02"), current.AddDate(0, 0, 1).Format("2006-01-02")), nil, nil, 200)["items"].([]any)
+	values := map[string]string{}
+	for _, raw := range items {
+		item := raw.(map[string]any)
+		values[item["day"].(string)] = item["amount"].(string)
+	}
+	if len(values) != 2 || values[current.Format("2006-01-02")] != "0.3" || values[previous.Format("2006-01-02")] != "0.4" {
+		t.Fatalf("current and previous periods were not both refreshed: %v", values)
+	}
+}
+
+func TestAzureBillingLongRetentionListsEachRelevantMonth(t *testing.T) {
+	fake := newAzureBillingFake(t)
+	h, owner, id, importer := azureBillingTest(t, fake)
+	setting := h.want(owner, "GET", "/api/v1/settings/retention.usage_days", nil, nil, 200)
+	h.want(owner, "PUT", "/api/v1/settings/retention.usage_days", map[string]any{"value": "800"}, etagHeader(setting), 200)
+	now := time.Now().UTC()
+	month := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC)
+	day := month.AddDate(0, -1, 9)
+	fake.delivery(t, day, "recent", month.AddDate(0, 0, 1), azureRow(day, "Usage", "0.2"))
+	if err := importer.Pass(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	status := h.want(owner, "GET", "/api/v1/providers/"+id+"/billing-import", nil, nil, 200)["status"].(map[string]any)
+	if status["last_error_code"] != nil || status["source_revision"] != "recent" {
+		t.Fatalf("long retention exhausted a single global listing-page cap: %v", status)
+	}
+}
+
+func assertBillingSchedule(t *testing.T, status map[string]any, errorCode any, minDelay, maxDelay time.Duration) {
+	t.Helper()
+	if status["last_error_code"] != errorCode {
+		t.Fatalf("unexpected import error: %v", status)
+	}
+	next, err := time.Parse(time.RFC3339Nano, status["next_import_at"].(string))
+	if err != nil || time.Until(next) < minDelay || time.Until(next) > maxDelay {
+		t.Fatalf("unexpected next import time: %v", status)
+	}
+}
+
+func TestAzureBillingPartLimitAcrossPeriods(t *testing.T) {
+	fake := newAzureBillingFake(t)
+	h, owner, id, importer := azureBillingTest(t, fake)
+	now := time.Now().UTC()
+	month := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC)
+	importer.Now = func() time.Time { return month.AddDate(0, 0, 20) }
+	previous, current := month.AddDate(0, -1, 9), month.AddDate(0, 0, 9)
+	fake.delivery(t, previous, "initial", month.AddDate(0, 0, 1), azureRow(previous, "Usage", "0.1"))
+	if err := importer.Pass(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	path := "/api/v1/providers/" + id + "/billing-import"
+	query := fmt.Sprintf("/api/v1/providers/%s/invoiced-costs?start=%s&end=%s", id, previous.Format("2006-01-02"), current.AddDate(0, 0, 1).Format("2006-01-02"))
+	expand := func(base string, count int) {
+		t.Helper()
+		fake.mu.Lock()
+		defer fake.mu.Unlock()
+		var manifest map[string]any
+		if err := json.Unmarshal([]byte(fake.objects[base+"_manifest.json"]), &manifest); err != nil {
+			t.Fatal(err)
+		}
+		part := fake.objects[base+"part.csv"]
+		blobs := make([]map[string]any, 0, count)
+		for n := range count {
+			name := fmt.Sprintf("%spart-%03d.csv", base, n)
+			fake.objects[name] = part
+			blobs = append(blobs, map[string]any{"blobName": name, "byteCount": len(part), "dataRowCount": 1})
+		}
+		manifest["blobs"] = blobs
+		manifest["blobCount"] = count
+		manifest["byteCount"] = count * len(part)
+		manifest["dataRowCount"] = count
+		data, err := json.Marshal(manifest)
+		if err != nil {
+			t.Fatal(err)
+		}
+		fake.objects[base+"_manifest.json"] = string(data)
+	}
+	old := fake.delivery(t, previous, "revised", month.AddDate(0, 0, 2), azureRow(previous, "Usage", "0.2"))
+	recent := fake.delivery(t, current, "recent", month.AddDate(0, 0, 14), azureRow(current, "Usage", "0.3"))
+	expand(old, 100)
+	expand(recent, 101)
+	status := h.want(owner, "GET", path, nil, nil, 200)
+	headers := etagHeader(status)
+	headers["Idempotency-Key"] = uuid.NewString()
+	h.want(owner, "POST", path+"/run", nil, headers, 202)
+	if err := importer.Pass(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	items := h.want(owner, "GET", query, nil, nil, 200)["items"].([]any)
+	if len(items) != 1 || items[0].(map[string]any)["amount"] != "20" {
+		t.Fatalf("the first bounded pass did not commit the complete previous period: %v", items)
+	}
+	assertBillingSchedule(t, h.want(owner, "GET", path, nil, nil, 200)["status"].(map[string]any), nil, -time.Minute, 2*time.Minute)
+	headers = etagHeader(h.want(owner, "GET", path, nil, nil, 200))
+	headers["Idempotency-Key"] = uuid.NewString()
+	h.want(owner, "POST", path+"/run", nil, headers, 202)
+	resumed := billingImporter(h, t)
+	resumed.Now = func() time.Time { return month.AddDate(0, 0, 20) }
+	resumed.AzureBlobEndpoint = func(string) string { return fake.server.URL }
+	if err := resumed.Pass(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	items = h.want(owner, "GET", query, nil, nil, 200)["items"].([]any)
+	if len(items) != 2 || items[0].(map[string]any)["amount"] != "20" || items[1].(map[string]any)["amount"] != "30.3" {
+		t.Fatalf("bounded passes did not eventually refresh both periods: %v", items)
+	}
+	assertBillingSchedule(t, h.want(owner, "GET", path, nil, nil, 200)["status"].(map[string]any), nil, 50*time.Minute, 61*time.Minute)
+
+	setting := h.want(owner, "GET", "/api/v1/settings/retention.usage_days", nil, nil, 200)
+	h.want(owner, "PUT", "/api/v1/settings/retention.usage_days", map[string]any{"value": "180"}, etagHeader(setting), 200)
+	historical := month.AddDate(0, -2, 9)
+	historicalRun := fake.delivery(t, historical, "historical", month.AddDate(0, -1, 1), azureRow(historical, "Usage", "0.5"))
+	expand(historicalRun, 101)
+	for index, revision := range []string{"historical", "revised", "recent"} {
+		headers := etagHeader(h.want(owner, "GET", path, nil, nil, 200))
+		headers["Idempotency-Key"] = uuid.NewString()
+		h.want(owner, "POST", path+"/run", nil, headers, 202)
+		worker := billingImporter(h, t)
+		worker.Now = func() time.Time { return month.AddDate(0, 0, 20) }
+		worker.AzureBlobEndpoint = func(string) string { return fake.server.URL }
+		if err := worker.Pass(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+		status := h.want(owner, "GET", path, nil, nil, 200)["status"].(map[string]any)
+		if status["source_revision"] != revision {
+			t.Fatalf("continuation %d processed the wrong period: %v", index, status)
+		}
+		if index < 2 {
+			assertBillingSchedule(t, status, nil, -time.Minute, 2*time.Minute)
+		} else {
+			assertBillingSchedule(t, status, nil, 50*time.Minute, 61*time.Minute)
+		}
+	}
+
+	oversized := fake.delivery(t, current, "oversized", month.AddDate(0, 0, 15), azureRow(current, "Usage", "0.4"))
+	expand(oversized, 201)
+	headers = etagHeader(h.want(owner, "GET", path, nil, nil, 200))
+	headers["Idempotency-Key"] = uuid.NewString()
+	h.want(owner, "POST", path+"/run", nil, headers, 202)
+	if err := resumed.Pass(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	assertBillingSchedule(t, h.want(owner, "GET", path, nil, nil, 200)["status"].(map[string]any), "response", 4*time.Minute, 6*time.Minute)
+	items = h.want(owner, "GET", query, nil, nil, 200)["items"].([]any)
+	if len(items) != 2 || items[1].(map[string]any)["amount"] != "30.3" {
+		t.Fatalf("an individually oversized export changed the previous costs: %v", items)
+	}
+}
+
+func TestAzureBillingCorruptPeriodDoesNotBlockOtherPeriods(t *testing.T) {
+	fake := newAzureBillingFake(t)
+	h, owner, id, importer := azureBillingTest(t, fake)
+	now := time.Now().UTC()
+	month := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC)
+	importer.Now = func() time.Time { return month.AddDate(0, 0, 20) }
+	previous, current := month.AddDate(0, -1, 9), month.AddDate(0, 0, 9)
+	fake.delivery(t, previous, "initial", month.AddDate(0, 0, 1), azureRow(previous, "Usage", "0.1"))
+	if err := importer.Pass(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	bad := fake.delivery(t, previous, "corrupt", month.AddDate(0, 0, 2), azureRow(previous, "Usage", "0.2"))
+	fake.delivery(t, current, "healthy", month.AddDate(0, 0, 14), azureRow(current, "Usage", "0.3"))
+	fake.mu.Lock()
+	fake.objects[bad+"part.csv"] = strings.Repeat("x", len(fake.objects[bad+"part.csv"]))
+	fake.mu.Unlock()
+	path := "/api/v1/providers/" + id + "/billing-import"
+	headers := etagHeader(h.want(owner, "GET", path, nil, nil, 200))
+	headers["Idempotency-Key"] = uuid.NewString()
+	h.want(owner, "POST", path+"/run", nil, headers, 202)
+	if err := importer.Pass(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	items := h.want(owner, "GET", fmt.Sprintf("/api/v1/providers/%s/invoiced-costs?start=%s&end=%s", id, previous.Format("2006-01-02"), current.AddDate(0, 0, 1).Format("2006-01-02")), nil, nil, 200)["items"].([]any)
+	if len(items) != 2 || items[0].(map[string]any)["amount"] != "0.1" || items[1].(map[string]any)["amount"] != "0.3" {
+		t.Fatalf("a corrupt period blocked a healthy period or changed existing costs: %v", items)
+	}
+	status := h.want(owner, "GET", path, nil, nil, 200)["status"].(map[string]any)
+	if status["last_error_code"] != "response" {
+		t.Fatalf("the failed period did not report a content-free error: %v", status)
+	}
+}
+
+func TestBillingImportPollingReconciliationAfterDeletion(t *testing.T) {
+	h := newAccessHarness(t)
+	owner := h.owner()
+	day1, day2, day3 := billingDays()
+	fake := newBillingFake(t, "/v1/organization/costs", map[string]string{
+		"": "openai_costs_page1.json", "page-2-token": "openai_costs_page2.json",
+	}, map[string]string{"1759104000": fmt.Sprint(day1.Unix()), "1759190400": fmt.Sprint(day2.Unix()), "1759276800": fmt.Sprint(day3.Unix())})
+	provider := billingProvider(h, owner, "Polling history", "openai", fake.server.URL+"/v1", nil)
+	id := billingProviderID(provider)
+	billingPut(h, owner, id, map[string]any{"credential": "sk-admin-" + strings.Repeat("k", 30)}, provider["etag"].(string), 201)
+	price := "0.15"
+	for _, day := range []time.Time{day1.AddDate(0, 0, -1), day1, day2} {
+		billingFact(t, h, id, uuid.NewString(), day, "billable", true, &price, false, false, false)
+	}
+	if err := billingImporter(h, t).Pass(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	start, end := day1.AddDate(0, 0, -1).Format("2006-01-02"), day3.AddDate(0, 0, 1).Format("2006-01-02")
+	path := fmt.Sprintf("/api/v1/usage/reconciliation?start=%s&end=%s&provider_id=%s", start, end, id)
+	before := h.want(owner, "GET", path, nil, nil, 200)
+	importPath := "/api/v1/providers/" + id + "/billing-import"
+	h.want(owner, "DELETE", importPath, nil, etagHeader(h.want(owner, "GET", importPath, nil, nil, 200)), 204)
+	after := h.want(owner, "GET", path, nil, nil, 200)
+	check := func(report map[string]any) {
+		t.Helper()
+		for i := range before["items"].([]any) {
+			old := before["items"].([]any)[i].(map[string]any)
+			item := report["items"].([]any)[i].(map[string]any)
+			if item["invoiced_cost"] != old["invoiced_cost"] || item["capture_rate"] != old["capture_rate"] || item["capture_rate_unavailable_reason"] != old["capture_rate_unavailable_reason"] || item["provisional"] != old["provisional"] {
+				t.Fatalf("historical polling reconciliation lost coverage on day %d: before=%v after=%v", i, old, item)
+			}
+		}
+	}
+	check(after)
+	key := "sk-admin-" + strings.Repeat("k", 30)
+	recreate := func() {
+		t.Helper()
+		provider := h.want(owner, "GET", "/api/v1/providers/"+id, nil, nil, 200)
+		billingPut(h, owner, id, map[string]any{"credential": key}, provider["etag"].(string), 201)
+	}
+	recreate()
+	check(h.want(owner, "GET", path, nil, nil, 200))
+	export := h.want(owner, "GET", "/api/v1/configuration/export", nil, nil, 200)
+	document := export["document"].(map[string]any)
+	for _, value := range document["providers"].([]any) {
+		entry := value.(map[string]any)
+		if entry["name"] == "Polling history" {
+			delete(entry, "billing_import")
+		}
+	}
+	h.want(owner, "POST", "/api/v1/configuration/apply", map[string]any{"document": document, "secret_bindings": map[string]any{}}, idem("polling-history-remove"), 200)
+	h.want(owner, "GET", importPath, nil, nil, 404)
+	check(h.want(owner, "GET", path, nil, nil, 200))
+	setRetention := func(value string) {
+		t.Helper()
+		setting := h.want(owner, "GET", "/api/v1/settings/retention.usage_days", nil, nil, 200)
+		h.want(owner, "PUT", "/api/v1/settings/retention.usage_days", map[string]any{"value": value}, etagHeader(setting), 200)
+	}
+	setRetention("1")
+	if err := billingImporter(h, t).Pass(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	setRetention("90")
+	recreate()
+	retained := h.want(owner, "GET", path, nil, nil, 200)
+	for _, value := range retained["items"].([]any) {
+		item := value.(map[string]any)
+		if item["day"] == day1.Format("2006-01-02") && (item["invoiced_cost"] != nil || item["capture_rate_unavailable_reason"] != "not_imported") {
+			t.Fatalf("recreated polling import reported purged coverage: %v", item)
+		}
+	}
+	current := h.want(owner, "GET", importPath, nil, nil, 200)
+	billingPut(h, owner, id, map[string]any{"scope": map[string]any{"project_ids": []string{"proj_another"}}}, current["etag"].(string), 200)
+	changed := h.want(owner, "GET", path, nil, nil, 200)
+	for index, value := range changed["items"].([]any) {
+		item := value.(map[string]any)
+		previous := retained["items"].([]any)[index].(map[string]any)
+		if item["invoiced_cost"] != previous["invoiced_cost"] || item["capture_rate_unavailable_reason"] != previous["capture_rate_unavailable_reason"] {
+			t.Fatalf("scope change altered historical reconciliation: before=%v after=%v", retained, changed)
+		}
+	}
+	status := h.want(owner, "GET", importPath, nil, nil, 200)["status"].(map[string]any)
+	if status["imported_from"] != nil || status["imported_through"] != nil {
+		t.Fatalf("changed scope inherited historical coverage: %v", status)
+	}
+}
+
+func TestBillingImportPollingDisjointRecreation(t *testing.T) {
+	h := newAccessHarness(t)
+	owner := h.owner()
+	today := time.Now().UTC().Truncate(24 * time.Hour)
+	old := today.AddDate(0, 0, -20)
+	recent := today.AddDate(0, 0, -3)
+	gap := today.AddDate(0, 0, -10)
+	shift := func(start time.Time) map[string]string {
+		return map[string]string{
+			"1759104000": fmt.Sprint(start.Unix()),
+			"1759190400": fmt.Sprint(start.AddDate(0, 0, 1).Unix()),
+			"1759276800": fmt.Sprint(start.AddDate(0, 0, 2).Unix()),
+		}
+	}
+	fake := newBillingFake(t, "/v1/organization/costs", map[string]string{"": "openai_costs_page1.json", "page-2-token": "openai_costs_page2.json"}, shift(old))
+	provider := billingProvider(h, owner, "Polling gap", "openai", fake.server.URL+"/v1", nil)
+	id := billingProviderID(provider)
+	credential := "sk-admin-" + strings.Repeat("k", 30)
+	path := "/api/v1/providers/" + id + "/billing-import"
+	billingPut(h, owner, id, map[string]any{"credential": credential}, provider["etag"].(string), 201)
+	importer := billingImporter(h, t)
+	if err := importer.Pass(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	current := h.want(owner, "GET", path, nil, nil, 200)
+	headers := etagHeader(current)
+	headers["Idempotency-Key"] = uuid.NewString()
+	h.want(owner, "DELETE", path, nil, headers, 204)
+	provider = h.want(owner, "GET", "/api/v1/providers/"+id, nil, nil, 200)
+	billingPut(h, owner, id, map[string]any{"credential": credential}, provider["etag"].(string), 201)
+	fake.mu.Lock()
+	fake.shift = shift(recent)
+	fake.mu.Unlock()
+	if err := importer.Pass(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	amount := "0.2"
+	billingFact(t, h, id, uuid.NewString(), gap.Add(time.Hour), "billable", true, &amount, false, false, false)
+	report := h.want(owner, "GET", fmt.Sprintf("/api/v1/usage/reconciliation?start=%s&end=%s&provider_id=%s", gap.Format("2006-01-02"), gap.AddDate(0, 0, 1).Format("2006-01-02"), id), nil, nil, 200)
+	items := report["items"].([]any)
+	if len(items) != 1 || items[0].(map[string]any)["capture_rate_unavailable_reason"] != "not_imported" || items[0].(map[string]any)["invoiced_cost"] != nil {
+		t.Fatalf("unfetched gap appeared covered: %v", report)
+	}
+	status := h.want(owner, "GET", path, nil, nil, 200)["status"].(map[string]any)
+	if status["imported_from"] != recent.Format("2006-01-02") || status["imported_through"] != recent.AddDate(0, 0, 2).Format("2006-01-02") {
+		t.Fatalf("status must report a contiguous fetched range: %v", status)
+	}
+}
+
+func TestAzureBillingRetentionExpansionRetriesGappedPeriod(t *testing.T) {
+	fake := newAzureBillingFake(t)
+	h, owner, id, importer := azureBillingTest(t, fake)
+	today := time.Now().UTC().Truncate(24 * time.Hour)
+	month := time.Date(today.Year(), today.Month(), 1, 0, 0, 0, 0, time.UTC)
+	period := month.AddDate(0, -4, 0)
+	early, gap, late := period.AddDate(0, 0, 5), period.AddDate(0, 0, 11), period.AddDate(0, 0, 19)
+	setRetention := func(first time.Time) {
+		t.Helper()
+		setting := h.want(owner, "GET", "/api/v1/settings/retention.usage_days", nil, nil, 200)
+		days := int(today.Sub(first).Hours() / 24)
+		h.want(owner, "PUT", "/api/v1/settings/retention.usage_days", map[string]any{"value": fmt.Sprint(days)}, etagHeader(setting), 200)
+	}
+	setRetention(period.AddDate(0, 0, 14))
+	fake.delivery(t, late, "later-days", period.AddDate(0, 1, 5), azureRow(late, "Usage", "0.2"))
+	fake.delivery(t, month.AddDate(0, -1, 14), "recent", month.AddDate(0, 0, 1), "")
+	price := "0.1"
+	for _, day := range []time.Time{early, gap, late} {
+		billingFact(t, h, id, uuid.NewString(), day, "billable", true, &price, false, false, false)
+	}
+	if err := importer.Pass(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	report := func(day time.Time) map[string]any {
+		t.Helper()
+		query := fmt.Sprintf("/api/v1/usage/reconciliation?start=%s&end=%s&provider_id=%s", day.Format("2006-01-02"), day.AddDate(0, 0, 1).Format("2006-01-02"), id)
+		return h.want(owner, "GET", query, nil, nil, 200)["items"].([]any)[0].(map[string]any)
+	}
+	if item := report(late); item["invoiced_cost"] != "0.2" {
+		t.Fatalf("initial retained days not imported: %v", item)
+	}
+	setRetention(period)
+	partial := fake.delivery(t, early, "earlier-days", period.AddDate(0, 1, 6), azureRow(early, "Usage", "0.3"))
+	fake.mu.Lock()
+	var manifest map[string]any
+	if err := json.Unmarshal([]byte(fake.objects[partial+"_manifest.json"]), &manifest); err != nil {
+		fake.mu.Unlock()
+		t.Fatal(err)
+	}
+	manifest["runInfo"].(map[string]any)["endDate"] = period.AddDate(0, 0, 9).Format(time.RFC3339)
+	data, err := json.Marshal(manifest)
+	if err != nil {
+		fake.mu.Unlock()
+		t.Fatal(err)
+	}
+	fake.objects[partial+"_manifest.json"] = string(data)
+	fake.mu.Unlock()
+	path := "/api/v1/providers/" + id + "/billing-import"
+	run := func() {
+		t.Helper()
+		current := h.want(owner, "GET", path, nil, nil, 200)
+		headers := etagHeader(current)
+		headers["Idempotency-Key"] = uuid.NewString()
+		h.want(owner, "POST", path+"/run", nil, headers, 202)
+		if err := importer.Pass(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+		if status := h.want(owner, "GET", path, nil, nil, 200)["status"].(map[string]any); status["last_error_code"] != nil {
+			t.Fatalf("import failed: %v", status)
+		}
+	}
+	run()
+	if first, middle, last := report(early), report(gap), report(late); first["invoiced_cost"] != "0.3" || middle["capture_rate_unavailable_reason"] != "not_imported" || last["invoiced_cost"] != "0.2" {
+		t.Fatalf("partial expansion did not preserve the coverage gap: %v %v %v", first, middle, last)
+	}
+	fake.delivery(t, gap, "full-period", period.AddDate(0, 1, 7), azureRow(early, "Usage", "0.5")+azureRow(gap, "Usage", "0.4")+azureRow(late, "Usage", "0.6"))
+	run()
+	if first, middle, last := report(early), report(gap), report(late); first["invoiced_cost"] != "0.5" || middle["invoiced_cost"] != "0.4" || last["invoiced_cost"] != "0.6" {
+		t.Fatalf("expanded retention did not retry the uncovered days: %v %v %v", first, middle, last)
+	}
+}

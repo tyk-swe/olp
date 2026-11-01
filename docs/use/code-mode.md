@@ -1,25 +1,29 @@
 # Code mode
 
-Code mode forwards coding clients through authorized subscription accounts or explicitly selected metered API targets.
-It uses a route-specific URL such as `https://olp.example/code/team-coding` and
-keeps the native model in the request by default. Ordinary inference routes continue to
-use OLP route slugs as model names.
+Code mode lets authorized coding clients use enrolled subscription accounts, or
+a metered API target that a route explicitly selects, behind OLP access controls.
+Each code route has a URL such as `https://olp.example/code/team-coding`.
+Requests keep the client's native model name by default, unlike ordinary
+inference routes where the published route slug is the model name.
 
-A route can mix subscriptions. One OpenCode or Claude Code session can plan on
-an OpenCode Go model and implement on a GLM Coding Plan model, each request
-reaching its own subscription unchanged; see
-[Mixing subscriptions](#mixing-subscriptions).
+One code route can also mix subscription families. An OpenCode or Claude Code
+session might plan with an OpenCode Go model and implement with a GLM Coding Plan
+model while each request reaches its own account. See
+[Mixing subscriptions](#mixing-subscriptions) for the account and conversation
+rules.
 
-**Qualification status:** management, durable ledger and raw transports are wired
-into OLP. The official Codex CLI, Claude Code and OpenCode resolve npm latest in CI and have
-controlled-fixture qualification. This is not yet a release claim for a real
-ChatGPT, OpenCode Go or coding-plan subscription. See the
-[support matrix and release gates](../develop/qualification.md) before rollout.
+Native forwarding is the default because coding clients depend on exact protocol
+fields and stream ordering. A published route policy can explicitly enable the
+Messages and Chat translations described in this guide. Compatibility behavior
+never turns on silently.
 
-The [coding-client baseline and roadmap](../develop/plans/code-mode-parity.md)
-records broader compatibility and recovery work. Native forwarding is the
-default. Explicitly published route policies can enable the Messages and Chat
-translations described below.
+Code mode management, its durable ledger and raw transports are implemented. The
+official Codex CLI, Claude Code and OpenCode are resolved from npm latest in CI
+and qualified against controlled fixtures. Fixture qualification is not a release
+claim for a real ChatGPT, OpenCode Go or other coding-plan subscription. Review
+the [support matrix and release gates](../develop/qualification.md) before rollout,
+and keep the [coding-client baseline and roadmap](../develop/plans/code-mode-parity.md)
+separate from the implemented behavior documented here.
 
 ## Adapters and clients
 

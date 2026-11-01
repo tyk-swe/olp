@@ -1,10 +1,11 @@
 # Response caching
 
-Routes can opt into an exact response cache or semantic matching. Cache entries
-contain response content, so they are an explicit exception to OLP's otherwise
-content-free storage. Entries are encrypted with the installation key ring and
-expire in a separate Valkey instance. PostgreSQL retains configuration and
-accounting metadata, never cached response bodies.
+A route can opt into exact response caching or semantic response matching. This
+is an explicit content-storage choice rather than part of OLP's normal
+content-free request history. Cached response bodies are encrypted with the
+installation key ring and expire in a separate Valkey instance. PostgreSQL
+retains cache configuration and accounting metadata, but never cached response
+bodies.
 
 ## Configure a route
 

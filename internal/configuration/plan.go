@@ -804,14 +804,18 @@ func validateBindings(doc *Document, bindings bindingSet) error {
 			sinkRefs[*entry.CredentialRef] = true
 		}
 	}
-	billingRefs := map[string]bool{}
+	billingRefs := map[string]string{}
 	for _, p := range doc.Providers {
 		if p.NetworkCredentialRef != nil {
 			refs[*p.NetworkCredentialRef] = true
 		}
 		if p.BillingImport != nil {
 			refs[p.BillingImport.CredentialRef] = true
-			billingRefs[p.BillingImport.CredentialRef] = true
+			source, err := billing.SourceFor(p.Configuration.Kind)
+			if err != nil {
+				return err
+			}
+			billingRefs[p.BillingImport.CredentialRef] = source
 		}
 		for _, slot := range p.Slots {
 			if slot.CredentialRef != nil {
@@ -849,11 +853,11 @@ func validateBindings(doc *Document, bindings bindingSet) error {
 			}
 			continue
 		}
-		if billingRefs[name] {
+		if source := billingRefs[name]; source != "" {
 			if secret.reference != nil {
 				return access.Invalid("external_credential_bindings", "Billing credentials require sealed secret bindings.")
 			}
-			if err := billing.ValidCredential(secret.secret); err != nil {
+			if err := billing.ValidateCredential(source, secret.secret); err != nil {
 				return err
 			}
 			continue
@@ -1068,7 +1072,19 @@ func (s *Server) plan(ctx context.Context, q access.Queryer, doc *Document, bind
 			if _, supplied := bindings[ref]; supplied {
 				result.item("billing_import", ref, "bind", "")
 			} else if ok && existing.BillingImport != nil && existing.BillingImport.CredentialID != nil {
-				result.item("billing_import", ref, "reuse", "")
+				source, err := billing.SourceFor(p.Configuration.Kind)
+				if err != nil {
+					return nil, err
+				}
+				compatible, err := billing.ImportCredentialCompatible(ctx, q, s.Access.Keys, s.Access.Installation, source, existing.BillingImport.CredentialID)
+				if err != nil {
+					return nil, err
+				}
+				if compatible {
+					result.item("billing_import", ref, "reuse", "")
+				} else {
+					result.blocker("billing_import", ref, "secret_binding_required")
+				}
 			} else {
 				result.blocker("billing_import", ref, "secret_binding_required")
 			}

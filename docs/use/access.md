@@ -1,11 +1,14 @@
 # Access control
 
-The control plane manages installation setup, identity, projects, API keys,
-management tokens, provisioning, settings, and metadata-only audit records.
-Administrators belong to one trusted installation. See
-[deployment](../operate/deployment.md) for installation,
-[configuration](../operate/configuration.md#file-based-secrets) for secret files, and
-[operations](../operate/operations.md#master-key-rotation-and-recovery) for master-key rotation.
+Access control covers the people, projects, keys and delegated identities that
+can use or administer one trusted OLP installation. This guide defines the
+management API and policy behavior for identity, projects, API keys, management
+tokens, provisioning, settings and metadata-only audit records.
+
+Initial installation belongs in [Deployment](../operate/deployment.md). File-backed
+secrets are covered in [Configuration](../operate/configuration.md#file-based-secrets),
+and master-key rotation and recovery belong in
+[Operations](../operate/operations.md#master-key-rotation-and-recovery).
 
 ## Attribution requirements and pinned labels
 
@@ -282,7 +285,7 @@ role/scope and up to 100 project manager/viewer grants. Highest role/global gran
 and unioned project memberships apply; removing a group removes only inherited
 grants. Reconciliation revokes affected sessions and protects the last usable owner.
 
-Access → SCIM and `/api/v1/scim/groups/{scim_id}/mapping` edit policy under ETag.
+The SCIM page under Access and `/api/v1/scim/groups/{scim_id}/mapping` edit policy under ETag.
 Directory PUT omission preserves mappings; an explicit extension replaces them.
 Portable `scim_group_mappings` use names and destination project IDs. Missing
 groups are created empty; membership/IDs stay local. Omission preserves policy;
@@ -435,8 +438,8 @@ manager authority. Writes use ETag and explicit `policy`/null, with exact-decima
 which is `cost` (default, what the provider bills) or `charge` (what the
 consumer owes under its rate card; see [pricing](../operate/pricing.md#rate-cards-and-charge)).
 Reports show live/retained spend and monthly unpriced attempts on the enforced
-basis. Supply-side caps — spend caps, connection limits and slot limits —
-always measure provider cost and take no basis.
+basis. Supply-side caps, including spend caps, connection limits and slot limits,
+always measure provider cost and do not take a consumer charge basis.
 
 Every boundary reserves before dispatch and refunds on later refusal. Exhaustion
 returns `429 budget_exhausted`; unknown balances return 503 until reconstruction.

@@ -1,8 +1,9 @@
 # Performance
 
-How OLP measures what it adds to a request, how to reproduce the measurements
-against LiteLLM, and the gates that keep hot-path performance from slipping. The
-[scenarios and targets](#scenarios-and-targets) below are the benchmark contract;
+This guide defines how OLP measures gateway overhead, how to reproduce the
+measurements and how the comparison with LiteLLM is run. It also records the
+gates that protect hot-path performance. The
+[scenarios and targets](#scenarios-and-targets) form the benchmark contract, and
 the harness lives in [`tests/bench/`](../../tests/bench/README.md).
 
 ## Status of the numbers
@@ -323,14 +324,12 @@ cannot hold the offered load on the hardware, its run is invalid and the targets
 that compare the two are not checked; give the pair more CPUs, or read the
 success rate beside it.
 
-## Regression gate
+## Microbenchmarks
 
-`make bench-gate` alternates merge-base/working-tree samples, compares pinned
-benchstat time/allocations and fails reproducible statistically significant >10%
-regressions. Bytes/op report without gating. Flagged names remeasure with twice
-samples before failure. Each side's test binaries are built once and every sample
-runs them. CI splits the packages across three shards with `BENCH_SHARD` and
-retains each shard's samples/report as `bench-gate-<shard>`.
+Hot-path `testing.B` benchmarks sit beside the code and run by hand. There is
+no automated regression gate, so a change to a hot path runs the affected
+benchmarks before and after with enough samples to tell a real change from
+noise, and reports the numbers with the change.
 
 | Path | Benchmark | What an iteration does |
 | --- | --- | --- |
@@ -346,36 +345,18 @@ retains each shard's samples/report as `bench-gate-<shard>`.
 | Plugin signing | `internal/plugins` `BenchmarkSign` | Runs a plugin's signing hook, interpreted and compiled |
 | Request parsing | `internal/oif` `BenchmarkPlainEnd` | Finds the end of the plain run of a 405,000-byte JSON string, as the parser reads a prompt, eight bytes at a time and, beside it, one byte at a time |
 
-| Variable | Meaning |
-| --- | --- |
-| `BENCH_BASE` | Base ref (default `origin/main`, then `main`) |
-| `BENCH_COUNT` | Samples per side, at least 6 (10); a regression is measured again with twice as many |
-| `BENCH_THRESHOLD` | Regression percentage that fails (10) |
-| `BENCH_ALLOW_REMOVED` | `1` lets benchmarks of the base be absent from the head (0) |
-| `BENCH_SHARD` | `INDEX/TOTAL` compares one of `TOTAL` disjoint package shards, balanced by benchmark count (`1/1`) |
-| `BENCH_TIME`, `BENCH_RUN`, `BENCH_FILTER` | `-benchtime`, the `-bench` pattern and a package filter |
-| `BENCH_OUT` | Output directory (`.local/bench/gate`) |
-
 Encoder stress benchmarks `BenchmarkLoad`, `BenchmarkCount`,
-`BenchmarkUnbrokenPieces` and `BenchmarkMeterWorstCase` are skipped through
-`BENCH_SKIP`: artificial worst cases do not represent request cost. Whole network/
-Valkey/accounting pipeline cost belongs to scenarios, not these in-memory paths.
-`TestUnconfiguredFeaturesAddNoAllocations` separately holds zero-cost disabled
-admission behavior.
-
-New names are reported, not comparable until a later base includes them. Missing
-head names fail unless reviewed `BENCH_ALLOW_REMOVED=1` (CI's
-`allow-removed-benchmarks` label). Empty output/no shared names fails; only a base
-with no benchmarks is explicitly exempt. Do not raise thresholds to clear noise.
-Use at least six samples and confirm flags. CI uses 500 ms samples and a one-hour
-job per shard; lower duration/count within these bounds rather than extending
-deadlines.
+`BenchmarkUnbrokenPieces` and `BenchmarkMeterWorstCase` are artificial worst
+cases and do not represent request cost, so skip them when measuring a change.
+Whole network/Valkey/accounting pipeline cost belongs to scenarios, not these
+in-memory paths. `TestUnconfiguredFeaturesAddNoAllocations` separately holds
+zero-cost disabled admission behavior.
 
 ## Performance budget
 
 - A feature that is not configured adds no allocations and no Valkey or
   PostgreSQL round trips to a request. Where a path is benchmarked, a change that
-  makes it allocate shows as an allocations-per-operation regression in the gate,
+  makes it allocate shows in its allocations per operation,
   so a change to a hot path adds or extends the benchmark for it. Admission is
   held to this directly: a test asserts that admitting a key with no limits and a
   target with no quotas allocates nothing and, with no limiter at all, reaches
