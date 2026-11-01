@@ -1,6 +1,6 @@
 import type { components } from '$lib/api/schema';
 import { apiClient } from '$lib/api/client';
-import { ensureOk, unwrap, unwrapPage } from '$lib/api/http';
+import { ensureOk, unwrap, unwrapPage, type CursorPage } from '$lib/api/http';
 import { collectCursorPages } from '$lib/api/pagination';
 
 type Schemas = components['schemas'];
@@ -105,7 +105,7 @@ export async function listExportSinkFocusDatasets(
   sinkId: string,
   cursor?: string,
   signal?: AbortSignal
-): Promise<import('$lib/api/http').CursorPage<FocusDataset>> {
+): Promise<CursorPage<FocusDataset>> {
   const response = await apiClient.GET(
     '/api/v1/observability/sinks/{export_sink_id}/focus-datasets',
     {
