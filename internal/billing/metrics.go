@@ -65,7 +65,7 @@ func captureRates(ctx context.Context, q access.Queryer) (map[string]string, err
 		return nil, err
 	}
 	var pricingCurrency string
-	if err := q.QueryRow(ctx, `SELECT btrim(currency) FROM olp.pricing_currency WHERE singleton`).Scan(&pricingCurrency); err != nil {
+	if err := q.QueryRow(ctx, `SELECT COALESCE((SELECT btrim(currency) FROM olp.pricing_currency WHERE singleton), 'USD')`).Scan(&pricingCurrency); err != nil {
 		return nil, err
 	}
 	// The window is covered: the import bound contains it entirely.

@@ -255,16 +255,20 @@ func connectionCount(value *int, fallback int) int {
 // Trust roots augment system roots on both TLS legs; a client certificate is
 // offered only to the provider, never to an HTTPS proxy.
 func (p Policy) ConnectionClient(options *ConnectionOptions, secret []byte, defaultResponseHeaderTimeout time.Duration) (*http.Client, error) {
-	return p.connectionClient(options, secret, defaultResponseHeaderTimeout, false)
+	return p.connectionClient(options, secret, defaultResponseHeaderTimeout, false, p)
 }
 
 // RawConnectionClient preserves encoded bytes and uses a fresh HTTP/1 connection
 // per dispatch. Callers must also supply non-rewindable bodies.
 func (p Policy) RawConnectionClient(options *ConnectionOptions, secret []byte, timeout time.Duration) (*http.Client, error) {
-	return p.connectionClient(options, secret, timeout, true)
+	return p.connectionClient(options, secret, timeout, true, p)
 }
 
-func (p Policy) connectionClient(options *ConnectionOptions, secret []byte, defaultResponseHeaderTimeout time.Duration, raw bool) (*http.Client, error) {
+func (p Policy) PublicDestinationClient(options *ConnectionOptions, secret []byte, timeout time.Duration) (*http.Client, error) {
+	return p.connectionClient(options, secret, timeout, false, Policy{})
+}
+
+func (p Policy) connectionClient(options *ConnectionOptions, secret []byte, defaultResponseHeaderTimeout time.Duration, raw bool, destination Policy) (*http.Client, error) {
 	if err := p.ValidateConnection(options); err != nil {
 		return nil, err
 	}
@@ -300,7 +304,8 @@ func (p Policy) connectionClient(options *ConnectionOptions, secret []byte, defa
 	connectTimeout := milliseconds(options.ConnectTimeoutMS, 5*time.Second)
 	tlsTimeout := milliseconds(options.TLSHandshakeTimeoutMS, 5*time.Second)
 	policy := Policy{AllowedNetworks: append([]netip.Prefix(nil), p.AllowedNetworks...), PlainHTTPHosts: append([]string(nil), p.PlainHTTPHosts...)}
-	dial := connectionDialer{policy: policy, connectTimeout: connectTimeout, tlsTimeout: tlsTimeout, roots: roots, credentials: credentials, targetTLS: tlsConfig}
+	target := Policy{AllowedNetworks: append([]netip.Prefix(nil), destination.AllowedNetworks...), PlainHTTPHosts: append([]string(nil), destination.PlainHTTPHosts...)}
+	dial := connectionDialer{policy: policy, targetPolicy: target, connectTimeout: connectTimeout, tlsTimeout: tlsTimeout, roots: roots, credentials: credentials, targetTLS: tlsConfig}
 	if options.ProxyURL != "" {
 		dial.proxy, err = policy.connectionProxy(options.ProxyURL)
 		if err != nil {
@@ -325,7 +330,7 @@ func (p Policy) connectionClient(options *ConnectionOptions, secret []byte, defa
 		transport.TLSNextProto = map[string]func(string, *tls.Conn) http.RoundTripper{}
 		redirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 	}
-	return &http.Client{Transport: &connectionTransport{policy: policy, transport: transport, raw: raw}, CheckRedirect: redirect}, nil
+	return &http.Client{Transport: &connectionTransport{policy: target, transport: transport, raw: raw}, CheckRedirect: redirect}, nil
 }
 
 type connectionTransport struct {
