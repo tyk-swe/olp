@@ -302,7 +302,8 @@ func TestAzureBillingImport(t *testing.T) {
 		t.Fatal(err)
 	}
 	newerBase := strings.Replace(base, "/run/", "/newer/", 1)
-	newerManifest := strings.NewReplacer(base, newerBase, `"runId":"run"`, `"runId":"newer"`, today.Format(time.RFC3339), today.Add(time.Hour).Format(time.RFC3339)).Replace(string(manifest))
+	submitted := func(at time.Time) string { return `"submittedTime":"` + at.Format(time.RFC3339) + `"` }
+	newerManifest := strings.NewReplacer(base, newerBase, `"runId":"run"`, `"runId":"newer"`, submitted(today), submitted(today.Add(time.Hour))).Replace(string(manifest))
 	objects := map[string]string{base + "_manifest.json": string(manifest), newerBase + "_manifest.json": newerManifest, base + "part0.csv": compressed1, base + "part1.csv": compressed2}
 	oldPeriod := period.AddDate(0, -2, 0)
 	oldDay := oldPeriod.AddDate(0, 0, 14)

@@ -441,7 +441,7 @@ func TestLimitsRetryHintWaitsForEveryRefusingWindow(t *testing.T) {
 	// The day is held by in-flight work while the month could never fit the
 	// request: waiting a second admits nothing, so the hint is the month's.
 	limReserve(t, f.limiter, request("1", "10", "50"))
-	_, err = f.limiter.Reserve(t.Context(), request("3", "2.5", "2"))
+	_, err = f.limiter.Reserve(t.Context(), request("3", "3.5", "2"))
 	if retry := limExceeded(t, err, limits.DimensionMonthlyCost); retry <= time.Minute {
 		t.Fatalf("retry = %v, want the window the request can never fit in", retry)
 	}
