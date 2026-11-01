@@ -88,8 +88,25 @@ MCP tools as part of a bounded run. Only targets certified for model-emitted
 tool calls on the request surface and mode are eligible. The caller can narrow
 the route's toolsets with `olp_toolsets` and tighten its bounds with
 `olp_run_limits`. Read-only tools can execute without approval; other tools
-require approval. See [agent workflows](../develop/plans/agent-gateway.md#gateway-executed-tools)
-for the bounds, approval and accounting behavior.
+require approval.
+
+Default bounds are eight model iterations, 32 tool calls and 120 seconds per
+run, with hard ceilings of 32 iterations, 128 tool calls and 600 seconds. The
+effective bound is the smallest of the route, key and caller limits. A distinct
+optional `max_run_cost` bounds the whole run, and every next step must fit the
+remaining worst-case allowance in the installation pricing currency, so an
+unbounded output model or unpriced tool cannot satisfy a finite run ceiling.
+The existing `max_cost` stays a per-attempt candidate filter and applies
+independently to each model step. Operators classify each published tool as
+`read_only` or `approval_required`, and an unclassified tool requires
+approval. Upstream tool annotations do not change the classification, and a
+guardrail deny overrides approval. An approval expires after five minutes and
+binds the principal, project, run, tool and route revisions, argument and
+transcript digests, deadline and cost allowance. The caller resubmits the
+transcript and arguments to resume, and resuming reauthorizes and verifies the
+exact digests. Expiry, changed input, replay or revoked authority refuses.
+Response caching is disabled for gateway-executed runs, so a cache hit cannot
+bypass tool effects, approvals or accounting.
 
 Model list and detail responses on the OpenAI, Anthropic and Gemini surfaces
 include `capabilities.gateway_execution` when the route and calling key permit
@@ -403,8 +420,8 @@ provider to fetch only on a route whose revision sets
 request before dispatch, and inline `data:` documents are always admitted
 on their own contract terms. Routes that served `https:` documents before
 this gate existed must set the flag when they next publish, which is a
-deliberate breaking change recorded with the RM6 review fix so that the
-choice belongs to the operator and not to whichever caller sends a URL.
+deliberate breaking change so that the choice belongs to the operator and
+not to whichever caller sends a URL.
 The gateway never fetches document bytes itself.
 `table_format` is refused because [the upstream returns HTML tables](https://learn.microsoft.com/en-us/azure/ai-services/document-intelligence/concept/markdown-elements#table) that do not map to the frozen table contract.
 The image-extraction and header/footer controls accept only explicit `false`, and `document_name`, the
@@ -576,10 +593,11 @@ seconds, Vertex AI Live from per-turn usage metadata, and Nova Sonic from
 the cumulative token totals its usage events carry. A session whose stream
 ends without that terminal evidence settles as billing-uncertain and never
 as zero cost.
-Rolling any RM6 family back is an ordinary publication change, for example
-retiring its routes or disabling its providers in a new release. New work
-then refuses at admission with nothing dispatched, and sessions that already
-settled stay in the usage history unchanged, debit records included.
+Rolling any OCR/search transport, realtime profile or pass-through family
+back is an ordinary publication change, for example retiring its routes or
+disabling its providers in a new release. New work then refuses at admission
+with nothing dispatched, and sessions that already settled stay in the usage
+history unchanged, debit records included.
 
 ### Anthropic surface
 
