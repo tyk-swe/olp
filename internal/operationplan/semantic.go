@@ -31,7 +31,7 @@ func (t *Template) bindSemantic(context Context, native bool) (connectors.Config
 		if name == "Idempotency-Key" || name == "X-Idempotency-Key" {
 			return connectors.Config{}, nil, fail("target_capability", "/headers", "upstream_idempotency", "The caller requested an upstream idempotency contract that this profile has not qualified.")
 		}
-		if slices.Contains([]string{"Openai-Organization", "Openai-Project", "X-Goog-User-Project", "X-Goog-Request-Params", "X-Ms-Region", "X-Ms-Routing-Name"}, name) {
+		if connectors.IsServingIdentityHeader(name) {
 			return connectors.Config{}, nil, fail("resource_affinity", "/headers", "serving_header", "Caller serving or tenant headers cannot override the published serving identity.")
 		}
 		if name == "Openai-Version" || name == "Api-Version" || strings.HasPrefix(name, "X-Amzn-Bedrock-") {
