@@ -405,7 +405,7 @@ func (s *Server) validateDocument(ctx context.Context, q access.Queryer, doc *Do
 			return nil, err
 		}
 	}
-	if err := validateWorkloadEntries(doc); err != nil {
+	if err := validateAndNormalizeWorkloadEntries(doc); err != nil {
 		return nil, err
 	}
 	if err := validateOrganizations(ctx, q, doc); err != nil {

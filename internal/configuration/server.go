@@ -127,7 +127,7 @@ func (s *Server) applyEndpoint(r *http.Request, _ access.Principal) (access.Repl
 	// Normalize the same local metadata used by network preparation before
 	// computing its replay fingerprint. Completed writes do not depend on the
 	// current availability or catalog of an upstream service.
-	if err := validateWorkloadEntries(input.Document); err != nil {
+	if err := validateAndNormalizeWorkloadEntries(input.Document); err != nil {
 		return access.Reply{}, err
 	}
 	if err := s.validateAgentPublications(input.Document); err != nil {
