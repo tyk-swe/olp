@@ -15,6 +15,7 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"io"
+	"maps"
 	"math/big"
 	"mime/quotedprintable"
 	"net"
@@ -22,6 +23,7 @@ import (
 	"net/http/httptest"
 	"net/netip"
 	"net/url"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -239,11 +241,7 @@ func (f *smtpFake) handle(conn net.Conn, cert *tls.Certificate) {
 }
 
 func TestSendEveryEventToAllChannels(t *testing.T) {
-	events := []string{
-		"budget.threshold", "provider.grant.lapsed", "key.expiring", "budget.exhausted",
-		"provider.circuit.open", "provider.circuit.closed", "provider.error_rate", "route.latency",
-		"provider.credential.failing", "model.retirement", "runtime.install_failed", "worker.stale", "report.spend",
-	}
+	events := slices.Sorted(maps.Keys(rulePolicies))
 	policy := testPolicy()
 	posts := map[string][][]byte{}
 	var mu sync.Mutex
