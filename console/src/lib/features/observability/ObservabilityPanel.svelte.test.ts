@@ -125,8 +125,8 @@ it.each([89, 120])(
       export_sink_id: 'sink',
       name: 'FOCUS sink',
       project_id: null,
-      type: 'https',
-      destination: 'https://collector.example.test/focus',
+      type: 's3',
+      destination: 's3://focus-bucket/exports',
       streams: ['focus'],
       format: 'csv_gzip',
       filter: null,
@@ -156,6 +156,11 @@ it.each([89, 120])(
     await vi.waitFor(() => expect(host.textContent).toContain(sink.name));
     button(host, 'Edit').click();
     flushSync();
+    await vi.waitFor(() => {
+      expect(
+        host.querySelector<HTMLInputElement>('#sink-focus-start')?.value
+      ).toBe(startDate);
+    });
     button(host, 'Save sink').click();
     await vi.waitFor(() => {
       expect(api.updateExportSink).toHaveBeenCalledWith(
