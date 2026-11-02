@@ -2,9 +2,26 @@ package media
 
 import (
 	"encoding/json"
+	"fmt"
 	"testing"
 	"time"
+
+	"github.com/tyk-swe/olp/internal/oif"
 )
+
+func TestStrictVideoPollingAcceptsDurableStatuses(t *testing.T) {
+	for _, status := range []string{"queued", "in_progress", "completed", "failed", "unknown"} {
+		body := fmt.Appendf(nil, `{"id":"job","model":"model","object":"video","status":%q}`, status)
+		doc, err := oif.ParseJSON(body, oif.Limits{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, durable := VideoState(status)
+		if accepted := ValidStrictVideoJobSource(doc, "job", "model"); accepted != durable {
+			t.Errorf("status %q: polling accepts %t, durable state accepts %t", status, accepted, durable)
+		}
+	}
+}
 
 func TestRunwayTasksReadAsOpenAIVideos(t *testing.T) {
 	size, seconds := "720x1280", "8"
