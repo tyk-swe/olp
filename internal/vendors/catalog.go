@@ -9,8 +9,6 @@ import (
 	"strings"
 )
 
-// generationParameters are the generation request parameters the catalogue
-// lists for a vendor that documents the OpenAI generation dialects.
 var generationParameters = []string{"temperature", "top_p", "max_tokens", "max_completion_tokens", "max_output_tokens", "stop", "tools", "tool_choice", "response_format", "seed", "presence_penalty", "frequency_penalty", "logit_bias", "n", "user", "reasoning", "reasoning_effort"}
 
 var (
