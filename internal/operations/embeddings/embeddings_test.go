@@ -28,6 +28,29 @@ func TestPublishedTEIEmbeddingDirectionsAreAccepted(t *testing.T) {
 	}
 }
 
+func TestPublishedBedrockEmbeddingTypesAreAccepted(t *testing.T) {
+	d := codec(t, "bedrock-embeddings")
+	var schema struct {
+		Items struct {
+			Enum []string `json:"enum"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal(d.Defaults["embeddingTypes"].Schema, &schema); err != nil || len(schema.Items.Enum) == 0 {
+		t.Fatalf("missing embedding types: %v", err)
+	}
+	for _, embeddingType := range schema.Items.Enum {
+		body, err := json.Marshal(map[string]any{"inputText": "text", "embeddingTypes": []string{embeddingType}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		r := request(t, d, string(body))
+		value, _ := r.Document().Root().Lookup("embeddingTypes")
+		if err := d.Defaults["embeddingTypes"].Validate(value); err != nil {
+			t.Errorf("published embedding type %q was rejected as a default: %v", embeddingType, err)
+		}
+	}
+}
+
 func codec(t *testing.T, id string) operations.Dialect {
 	t.Helper()
 	for _, d := range embeddings.Definitions() {

@@ -1,6 +1,7 @@
 package embeddings
 
 import (
+	"slices"
 	"strconv"
 	"strings"
 
@@ -10,6 +11,10 @@ import (
 
 func teiTruncationDirections() []string {
 	return []string{"left", "right", "Left", "Right"}
+}
+
+func bedrockEmbeddingTypes() []string {
+	return []string{"float", "binary"}
 }
 
 func defaults(id string) map[string]operations.Field {
@@ -74,12 +79,12 @@ func defaults(id string) map[string]operations.Field {
 	case "bedrock-embeddings":
 		fields["dimensions"] = positive
 		fields["normalize"] = boolean
-		fields["embeddingTypes"] = operations.FieldSchema(map[string]any{"type": "array", "minItems": 1, "items": map[string]any{"enum": []string{"float", "binary"}}}, func(v oif.Value) error {
+		fields["embeddingTypes"] = operations.FieldSchema(map[string]any{"type": "array", "minItems": 1, "items": map[string]any{"enum": bedrockEmbeddingTypes()}}, func(v oif.Value) error {
 			if v.Kind() != oif.Array || len(v.Elements()) == 0 {
 				return operations.Invalid("embeddingTypes", "Use native embedding types.")
 			}
 			for _, e := range v.Elements() {
-				if operations.String(e) != "float" && operations.String(e) != "binary" {
+				if !slices.Contains(bedrockEmbeddingTypes(), operations.String(e)) {
 					return operations.Invalid("embeddingTypes", "Use float or binary.")
 				}
 			}

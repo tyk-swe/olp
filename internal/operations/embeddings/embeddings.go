@@ -284,7 +284,7 @@ func liftRequest(source oif.Request, id string) (Request, error) {
 				return r, operations.Invalid("embeddingTypes", "Use native float or binary embedding types.")
 			}
 			for _, v := range types.Elements() {
-				if operations.String(v) != "float" && operations.String(v) != "binary" {
+				if !slices.Contains(bedrockEmbeddingTypes(), operations.String(v)) {
 					return r, operations.Invalid("embeddingTypes", "The requested Titan representation is unavailable.")
 				}
 			}
