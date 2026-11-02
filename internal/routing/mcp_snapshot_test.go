@@ -64,7 +64,7 @@ func TestAmountSyntaxAcrossToolAgentRoutingCacheAndBudgets(t *testing.T) {
 			budgetAmount := tc.amount
 			budget := access.AdmissionLimits{DailyCostLimit: &budgetAmount}
 			agentErr, preferenceErr, cacheErr := draft.Validate("agent"), preference.Validate("preferences"), cache.Validate()
-			budgetErr := budget.Validate()
+			budgetErr := budget.ValidateAndNormalize()
 			if ValidToolPrice(tc.amount) != tc.valid || (agentErr == nil) != tc.valid || (preferenceErr == nil) != tc.valid || (cacheErr == nil) != tc.valid {
 				t.Errorf("valid %t, agent %v, routing %v, cache %v", tc.valid, agentErr, preferenceErr, cacheErr)
 			}

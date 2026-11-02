@@ -19,7 +19,7 @@ func TestAllowedAttributionKeysAgreeWithRequestLabels(t *testing.T) {
 	} {
 		t.Run(tc.key, func(t *testing.T) {
 			key := keyInput{Name: "key", KeyPolicy: KeyPolicy{Scopes: []string{"inference"}, AllowedRoutes: []string{}, AllowedAttributionKeys: []string{tc.key}}}
-			keyErr := validateKey(key, false)
+			keyErr := validateAndNormalizeKey(key, false)
 			labelErr := attribution.Validate(map[string]string{tc.key: "value"})
 			if (keyErr == nil) != tc.valid || (labelErr == nil) != tc.valid {
 				t.Errorf("valid %t, key error %v, label error %v", tc.valid, keyErr, labelErr)
@@ -115,7 +115,7 @@ func TestConsumerScopesWorkForKeysAndWorkloadMappings(t *testing.T) {
 					ProjectID: "00000000-0000-4000-8000-000000000001", LimitTemplate: "build",
 					RouteGroups: []string{"generation"}, Scopes: tc.scopes}},
 			}
-			if err := validateKey(key, false); (err == nil) != tc.valid {
+			if err := validateAndNormalizeKey(key, false); (err == nil) != tc.valid {
 				t.Fatalf("key validation = %v, valid = %t", err, tc.valid)
 			}
 			if err := issuer.Validate(); (err == nil) != tc.valid {

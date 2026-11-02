@@ -32,7 +32,7 @@ func (p *BudgetPolicy) Validate() error {
 	if p == nil {
 		return nil
 	}
-	return (AdmissionLimits{DailyCostLimit: p.DailyCostLimit, MonthlyCostLimit: p.MonthlyCostLimit, WeeklyCostLimit: p.WeeklyCostLimit, CostBasis: p.CostBasis}).Validate()
+	return (AdmissionLimits{DailyCostLimit: p.DailyCostLimit, MonthlyCostLimit: p.MonthlyCostLimit, WeeklyCostLimit: p.WeeklyCostLimit, CostBasis: p.CostBasis}).ValidateAndNormalize()
 }
 
 func (s *Server) projectBudget(r *http.Request, p Principal) (Reply, error) {

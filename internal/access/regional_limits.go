@@ -41,7 +41,7 @@ func (regions RegionalLimits) Validate() error {
 		if !routeidentity.ValidSlug(region) {
 			return Invalid("regional_limits", "Use valid region names.")
 		}
-		if err := (AdmissionLimits{RequestsPerMinute: policy.RequestsPerMinute, TokensPerMinute: policy.TokensPerMinute, MaxConcurrency: policy.MaxConcurrency}).Validate(); err != nil {
+		if err := (AdmissionLimits{RequestsPerMinute: policy.RequestsPerMinute, TokensPerMinute: policy.TokensPerMinute, MaxConcurrency: policy.MaxConcurrency}).ValidateAndNormalize(); err != nil {
 			return err
 		}
 	}

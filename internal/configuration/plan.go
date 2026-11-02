@@ -462,7 +462,7 @@ func (s *Server) validateDocument(ctx context.Context, q access.Queryer, doc *Do
 			}
 		}
 		if p.EndUserDefaults != nil {
-			if err := p.EndUserDefaults.Validate(); err != nil {
+			if err := p.EndUserDefaults.ValidateAndNormalize(); err != nil {
 				return nil, err
 			}
 		}

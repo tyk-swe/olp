@@ -79,7 +79,7 @@ func validatedTemplateLimits(l AdmissionLimits) (AdmissionLimits, error) {
 		value := *l.WeeklyCostLimit
 		l.WeeklyCostLimit = &value
 	}
-	return l, l.Validate()
+	return l, l.ValidateAndNormalize()
 }
 
 func intersectLimits(a, b AdmissionLimits) AdmissionLimits {

@@ -25,7 +25,7 @@ func TestProviderAndAccessQuotaBoundariesAgree(t *testing.T) {
 		{"tokens", limits.MaxCounter, func(v *int64) Limits { return Limits{TokensPerMinute: v} }, func(v *int64) access.AdmissionLimits { return access.AdmissionLimits{TokensPerMinute: v} }},
 	} {
 		t.Run(dimension.name, func(t *testing.T) {
-			if !ValidQuota(dimension.provider(nil)) || dimension.admission(nil).Validate() != nil {
+			if !ValidQuota(dimension.provider(nil)) || dimension.admission(nil).ValidateAndNormalize() != nil {
 				t.Fatal("absent limit was rejected")
 			}
 			for _, tc := range []struct {
@@ -33,7 +33,7 @@ func TestProviderAndAccessQuotaBoundariesAgree(t *testing.T) {
 				valid bool
 			}{{0, false}, {1, true}, {dimension.maximum, true}, {dimension.maximum + 1, false}} {
 				providerValid := ValidQuota(dimension.provider(&tc.value))
-				accessErr := dimension.admission(&tc.value).Validate()
+				accessErr := dimension.admission(&tc.value).ValidateAndNormalize()
 				if providerValid != tc.valid || (accessErr == nil) != tc.valid {
 					t.Errorf("limit %d, expected %t, provider %t, access %v", tc.value, tc.valid, providerValid, accessErr)
 				}

@@ -18,7 +18,7 @@ func (policies RouteLimits) Validate() error {
 		if !routeidentity.ValidSlug(route) {
 			return Invalid("route_limits", "Each entry must name a route slug.")
 		}
-		if err := policy.Validate(); err != nil {
+		if err := policy.ValidateAndNormalize(); err != nil {
 			return err
 		}
 	}

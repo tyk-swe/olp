@@ -80,7 +80,7 @@ type keyInput struct {
 
 const maxAttributionKeys = 8
 
-func validateKey(input keyInput, expirationChanged bool) error {
+func validateAndNormalizeKey(input keyInput, expirationChanged bool) error {
 	if days := input.RotationIntervalDays; days != nil && (*days < 1 || *days > 3650) {
 		return Invalid("rotation_interval_days", "Use a rotation interval of 1–3650 days, or null.")
 	}
@@ -166,7 +166,7 @@ func validateKey(input keyInput, expirationChanged bool) error {
 		}
 		seen[key] = true
 	}
-	if err := input.KeyPolicy.AdmissionLimits().Validate(); err != nil {
+	if err := input.KeyPolicy.AdmissionLimits().ValidateAndNormalize(); err != nil {
 		return err
 	}
 	for field, value := range map[string]*string{"priority": input.Priority, "max_priority": input.MaxPriority} {
@@ -305,7 +305,7 @@ func (s *Server) createAPIKey(r *http.Request, _ Principal) (Reply, error) {
 		return Commit(r, tx, *replayed)
 	}
 	// A replay returns the original result even if its key has since expired.
-	if err := validateKey(input, true); err != nil {
+	if err := validateAndNormalizeKey(input, true); err != nil {
 		return Reply{}, err
 	}
 	if err = s.RequireProject(r.Context(), tx, p, input.ProjectID); err != nil {
@@ -432,7 +432,7 @@ func (s *Server) updateAPIKey(r *http.Request, _ Principal) (Reply, error) {
 		return Reply{}, Invalid("policy", "Invalid policy value.")
 	}
 	_, changed := patch["expires_at"]
-	if err = validateKey(input, changed); err != nil {
+	if err = validateAndNormalizeKey(input, changed); err != nil {
 		return Reply{}, err
 	}
 	if raw, ok := patch["budget_group_id"]; ok {
@@ -606,7 +606,7 @@ func (s *Server) transitionKey(r *http.Request, rotate bool) (Reply, error) {
 		if err = json.Unmarshal(data, &normalized); err != nil {
 			return Reply{}, Invalid("policy", "Invalid cost budget.")
 		}
-		if err = validateKey(keyInput{Name: name, KeyPolicy: normalized}, false); err != nil {
+		if err = validateAndNormalizeKey(keyInput{Name: name, KeyPolicy: normalized}, false); err != nil {
 			return Reply{}, err
 		}
 		data, err = json.Marshal(normalized)

@@ -40,7 +40,7 @@ func validateBudgetGroup(input *budgetGroupInput) error {
 		MonthlyCostLimit:  input.MonthlyCostLimit,
 		WeeklyCostLimit:   input.WeeklyCostLimit,
 		CostBasis:         input.CostBasis,
-	}).Validate(); err != nil {
+	}).ValidateAndNormalize(); err != nil {
 		return err
 	}
 	if input.CostBasis == "" {

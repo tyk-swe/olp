@@ -70,7 +70,7 @@ func (a Authority) AllowsEndUser(digest string) bool {
 	return digest != "" && !a.Policy.EndUserPolicy.Blocks(digest) && !a.ProjectEndUserPolicy.Blocks(digest)
 }
 
-func (policy AdmissionLimits) Validate() error {
+func (policy AdmissionLimits) ValidateAndNormalize() error {
 	for field, value := range map[string]*int64{"requests_per_minute": policy.RequestsPerMinute, "max_concurrency": policy.MaxConcurrency} {
 		if !limits.ValidRequestLimit(value) {
 			return Invalid(field, "Use a positive integer of at most 2147483647.")
@@ -105,14 +105,14 @@ func (p *EndUserPolicy) validate() error {
 		return Invalid("end_user_policy", "At most 256 overrides and 256 blocked digests are supported.")
 	}
 
-	if err := p.Defaults.Validate(); err != nil {
+	if err := p.Defaults.ValidateAndNormalize(); err != nil {
 		return err
 	}
 	for digest, policy := range p.Overrides {
 		if !endUserDigest.MatchString(digest) {
 			return Invalid("end_user_policy.overrides", "Use project-scoped SHA-256 digests as override keys.")
 		}
-		if err := policy.Validate(); err != nil {
+		if err := policy.ValidateAndNormalize(); err != nil {
 			return err
 		}
 	}
