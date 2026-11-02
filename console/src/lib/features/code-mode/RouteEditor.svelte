@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { validRouteSlug } from '$lib/routeIdentity';
   import { untrack } from 'svelte';
   import {
     saveCodeRoute,
@@ -202,7 +203,7 @@
     onSaved: () => onSaved(),
     onCancel: () => onCancel(),
     build: (): CodeRouteWrite => {
-      if (!/^[a-z0-9][a-z0-9._-]{0,99}$/.test(slug))
+      if (!validRouteSlug(slug))
         throw new Error(
           'Use a route slug of 1–100 lowercase letters, numbers, dots, underscores or hyphens, starting with a letter or number.'
         );

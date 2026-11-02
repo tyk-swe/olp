@@ -1,3 +1,4 @@
+import { validRouteSlug } from '$lib/routeIdentity';
 import type { components } from '$lib/api/schema';
 import {
   limitForm,
@@ -24,7 +25,7 @@ export function routeLimitsError(form: RouteLimitForm): string {
   if (form.length > 100) return 'Use at most 100 routes.';
   const names = form.map((row) => row.route.trim());
   if (
-    names.some((name) => !/^[a-z0-9][a-z0-9._-]{0,99}$/.test(name)) ||
+    names.some((name) => !validRouteSlug(name)) ||
     new Set(names).size !== names.length
   )
     return 'Enter a unique route slug for every entry.';

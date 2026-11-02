@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
+import { limitForm } from '$lib/features/access/budgets/limitForm';
+import { policyError, policyForm } from '$lib/features/access/end-users/policy';
+import { templateError } from '$lib/features/access/limit-templates/policy';
+import { groupError } from '$lib/features/access/route-groups/policy';
+import { routeLimitsError } from '$lib/features/access/route-limits/policy';
+
 import {
   buildCreateRouteDraftInput,
   buildContentPolicy,
@@ -164,6 +170,32 @@ describe('route validation and serialization', () => {
     fidelity: { mode: 'transformed' },
     behavior: emptyBehavior()
   };
+
+  it.each([
+    { slug: 'route', valid: true },
+    { slug: 'route.name_1-test', valid: true },
+    { slug: 'a'.repeat(100), valid: true },
+    { slug: '', valid: false },
+    { slug: 'Bad', valid: false },
+    { slug: 'bad/route', valid: false },
+    { slug: 'a'.repeat(101), valid: false }
+  ])('validates route and policy names consistently', ({ slug, valid }) => {
+    expect(validateRouteEditor({ ...route, slug }) === null).toBe(valid);
+    expect(groupError([{ id: 'row', name: slug, routes: 'route' }]) === '').toBe(
+      valid
+    );
+    expect(
+      templateError([{ id: 'row', name: slug, limits: limitForm() }]) === ''
+    ).toBe(valid);
+    expect(
+      routeLimitsError([{ id: 'row', route: slug, limits: limitForm() }]) === ''
+    ).toBe(valid);
+    if (slug)
+      expect(
+        policyError({ ...policyForm(), enabled: true, limitTemplate: slug }) ===
+          ''
+      ).toBe(valid);
+  });
 
   it('accepts a bounded serving route and refuses invalid basic inputs', () => {
     expect(validateRouteEditor(route)).toBeNull();

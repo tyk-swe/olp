@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { validRouteSlug } from '$lib/routeIdentity';
   import RunLimits from '$lib/features/workflows/RunLimits.svelte';
   import { currentBudgetLimit } from './budgetPresentation';
   import RouteLimitFields from '../route-limits/RouteLimitFields.svelte';
@@ -170,8 +171,7 @@
         'Choose an identifier source before enabling end-user limits.';
     if (
       form.limitTemplate &&
-      (!formProject ||
-        !/^[a-z0-9][a-z0-9._-]{0,99}$/.test(form.limitTemplate.trim()))
+      (!formProject || !validRouteSlug(form.limitTemplate.trim()))
     )
       formError = 'Choose a project and a valid limit template name.';
     if (formError) {

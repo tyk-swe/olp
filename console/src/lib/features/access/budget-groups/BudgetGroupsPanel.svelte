@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { validRouteSlug } from '$lib/routeIdentity';
   import { currentBudgetLimit } from '../api-keys/budgetPresentation';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import { errorMessage } from '$lib/api/http';
@@ -130,8 +131,7 @@
         monthly_cost_limit: createMonthly
       }) ||
       (createTemplate &&
-      (!createProjectId ||
-        !/^[a-z0-9][a-z0-9._-]{0,99}$/.test(createTemplate.trim()))
+      (!createProjectId || !validRouteSlug(createTemplate.trim()))
         ? 'Choose a project and a valid template name.'
         : '');
     if (validation) {
@@ -210,8 +210,7 @@
         monthly_cost_limit: editMonthly
       }) ||
       (editTemplate &&
-      (!group.project_id ||
-        !/^[a-z0-9][a-z0-9._-]{0,99}$/.test(editTemplate.trim()))
+      (!group.project_id || !validRouteSlug(editTemplate.trim()))
         ? 'Use a template from this group’s project.'
         : '');
     if (validation) {
