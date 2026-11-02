@@ -1,6 +1,25 @@
 import { QueryClient } from '@tanstack/svelte-query';
-import { expect, it } from 'vitest';
+import { expect, it, vi } from 'vitest';
 import { agentKeys } from './agentKeys';
+
+it('refreshes shared publication data after a publication update', async () => {
+  const client = new QueryClient();
+  const fetchAgents = vi
+    .fn()
+    .mockResolvedValueOnce('old')
+    .mockResolvedValueOnce('new');
+  const options = {
+    queryKey: agentKeys.publication('agents'),
+    queryFn: fetchAgents,
+    staleTime: Infinity
+  };
+
+  expect(await client.fetchQuery(options)).toBe('old');
+  expect(client.getQueryData(agentKeys.agents())).toBe('old');
+  await client.invalidateQueries({ queryKey: agentKeys.publications });
+  expect(await client.fetchQuery(options)).toBe('new');
+  expect(client.getQueryData(agentKeys.agents())).toBe('new');
+});
 
 it('isolates execution history by project, key and cursor without invalidating grant or server data', async () => {
   const client = new QueryClient();
