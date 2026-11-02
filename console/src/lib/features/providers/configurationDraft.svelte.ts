@@ -15,6 +15,12 @@ import {
 
 type Configuration = components['schemas']['ProviderConfiguration'];
 
+export const networkCredentialPath = [
+  'options',
+  'network',
+  'credential_id'
+] as const;
+
 export const profileScopedSettings = [
   'semantic_headers',
   'query_settings',
