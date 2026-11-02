@@ -906,7 +906,7 @@ func (s *Server) plan(ctx context.Context, q access.Queryer, doc *Document, bind
 		return nil, err
 	}
 	doc.canonicalize()
-	digest, err := Digest(doc)
+	digest, err := CanonicalizeAndDigest(doc)
 	if err != nil {
 		return nil, err
 	}
@@ -966,7 +966,7 @@ func (s *Server) plan(ctx context.Context, q access.Queryer, doc *Document, bind
 		if err != nil {
 			return nil, err
 		}
-		currentDigest, err := Digest(current)
+		currentDigest, err := CanonicalizeAndDigest(current)
 		if err != nil {
 			return nil, err
 		}

@@ -44,7 +44,7 @@ func (s *Server) export(r *http.Request, p access.Principal) (access.Reply, erro
 			return access.Reply{}, err
 		}
 	}
-	digest, err := Digest(doc)
+	digest, err := CanonicalizeAndDigest(doc)
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -145,7 +145,7 @@ func (s *Server) applyEndpoint(r *http.Request, _ access.Principal) (access.Repl
 	}
 	doc := input.Document
 	doc.canonicalize()
-	digest, err := Digest(doc)
+	digest, err := CanonicalizeAndDigest(doc)
 	if err != nil {
 		return access.Reply{}, err
 	}

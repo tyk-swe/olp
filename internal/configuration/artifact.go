@@ -545,7 +545,7 @@ func sortPriceEntries(prices []PriceEntry) {
 	})
 }
 
-func Digest(d *Document) (string, error) {
+func CanonicalizeAndDigest(d *Document) (string, error) {
 	d.canonicalize()
 	data, err := json.Marshal(d)
 	if err != nil {
