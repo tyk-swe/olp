@@ -1,15 +1,57 @@
 package routing
 
 import (
+	"context"
 	"encoding/json"
+	"net/http"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/tyk-swe/olp/internal/protocols/wire"
+	"github.com/tyk-swe/olp/internal/upstream"
 	"github.com/tyk-swe/olp/internal/usage"
 )
+
+func TestRetryClassesAgreeWithUpstreamFailures(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		evidence  upstream.Evidence
+		retryable bool
+	}{
+		{"connection", upstream.Evidence{}, true},
+		{"timeout", upstream.Evidence{Interrupted: context.DeadlineExceeded}, true},
+		{"rate limit", upstream.Evidence{Status: http.StatusTooManyRequests}, true},
+		{"server error", upstream.Evidence{Status: http.StatusInternalServerError}, true},
+		{"client error", upstream.Evidence{Status: http.StatusBadRequest}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			class := upstream.Classifier{}.Classify(tc.evidence).Class
+			behavior := Behavior{Retry: Retry{string(class): {MaxRetries: 1, BaseBackoffMS: 1, MaxBackoffMS: 1}}}
+			if err := behavior.Validate("source", nil); (err == nil) != tc.retryable {
+				t.Fatalf("retry for %q validation error = %v, retryable = %t", class, err, tc.retryable)
+			}
+		})
+	}
+}
+
+func TestFallbackConditionsAcceptApplicableUpstreamFailures(t *testing.T) {
+	for _, tc := range []struct {
+		class upstream.Class
+		valid bool
+	}{
+		{upstream.ContextWindow, true}, {upstream.ContentFilter, true}, {upstream.RateLimit, true},
+		{upstream.ServerError, false},
+	} {
+		t.Run(string(tc.class), func(t *testing.T) {
+			behavior := Behavior{Fallbacks: []Fallback{{Route: "backup", On: []string{string(tc.class)}}}}
+			if err := behavior.Validate("source", nil); (err == nil) != tc.valid {
+				t.Fatalf("fallback for %q validation error = %v, valid = %t", tc.class, err, tc.valid)
+			}
+		})
+	}
+}
 
 func TestSelectorIdentifiersAgreeWithAccounting(t *testing.T) {
 	for _, tc := range []struct {

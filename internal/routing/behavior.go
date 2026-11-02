@@ -23,6 +23,7 @@ import (
 	"github.com/tyk-swe/olp/internal/cache"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/routeidentity"
+	"github.com/tyk-swe/olp/internal/upstream"
 )
 
 // Conditions that start a fallback to another route.
@@ -30,22 +31,13 @@ const (
 	// FallbackExhausted means every attempt the route made failed with a class
 	// that may move to another target, and none remained.
 	FallbackExhausted     = "exhausted"
-	FallbackContextWindow = "context_window"
-	FallbackContentFilter = "content_filter"
-	FallbackRateLimit     = "rate_limit"
+	FallbackContextWindow = string(upstream.ContextWindow)
+	FallbackContentFilter = string(upstream.ContentFilter)
+	FallbackRateLimit     = string(upstream.RateLimit)
 	// FallbackBudget means a supply-side cost cap removed the route or every
 	// target it could have used.
 	FallbackBudget = "budget"
 )
-
-// FallbackConditions lists every condition a fallback may name, in the order
-// documentation and validation present them.
-var FallbackConditions = []string{FallbackExhausted, FallbackContextWindow, FallbackContentFilter, FallbackRateLimit, FallbackBudget}
-
-// RetryClasses are the failure classes a route may retry on the same target.
-// Each is retryable before commitment; a credential or context-window failure
-// would only fail again.
-var RetryClasses = []string{"connect", "timeout", "rate_limit", "upstream_server"}
 
 // Session affinity sources.
 const (
@@ -322,6 +314,9 @@ func (b Behavior) Validate(slug string, tagged func(string) bool) error {
 	if len(b.Fallbacks) > maxFallbacks {
 		return invalidValue("fallbacks", "A route declares at most "+strconv.Itoa(maxFallbacks)+" fallbacks")
 	}
+	fallbackConditions := []string{
+		FallbackExhausted, FallbackContextWindow, FallbackContentFilter, FallbackRateLimit, FallbackBudget,
+	}
 	seen := map[string]bool{}
 	for _, f := range b.Fallbacks {
 		if !routeidentity.ValidSlug(f.Route) || f.Route == slug {
@@ -331,16 +326,21 @@ func (b Behavior) Validate(slug string, tagged func(string) bool) error {
 			return invalidValue("fallbacks", "Each fallback route appears once")
 		}
 		seen[f.Route] = true
-		if len(f.On) == 0 || !distinctMembers(f.On, FallbackConditions) {
-			return invalidValue("fallbacks", "Each fallback names distinct conditions among exhausted, context_window, content_filter, rate_limit and budget")
+		if len(f.On) == 0 || !distinctMembers(f.On, fallbackConditions) {
+			return invalidValue("fallbacks", "Each fallback names distinct conditions among "+
+				strings.Join(fallbackConditions[:len(fallbackConditions)-1], ", ")+" and "+fallbackConditions[len(fallbackConditions)-1])
 		}
 	}
 	if err := b.validateSelectors(slug, tagged); err != nil {
 		return err
 	}
+	retryClasses := []string{
+		string(upstream.Connect), string(upstream.Timeout), string(upstream.RateLimit), string(upstream.ServerError),
+	}
 	for class, rule := range b.Retry {
-		if !slices.Contains(RetryClasses, class) {
-			return invalidValue("retry", "Retries apply to connect, timeout, rate_limit and upstream_server failures")
+		if !slices.Contains(retryClasses, class) {
+			return invalidValue("retry", "Retries apply to "+
+				strings.Join(retryClasses[:len(retryClasses)-1], ", ")+" and "+retryClasses[len(retryClasses)-1]+" failures")
 		}
 		if rule.MaxRetries < 1 || rule.MaxRetries > maxRetries || rule.BaseBackoffMS < 1 || rule.MaxBackoffMS < rule.BaseBackoffMS || rule.MaxBackoffMS > maxBackoffMS {
 			return invalidValue("retry", "Each retry rule allows 1 to 10 retries with a base backoff no larger than its maximum of at most 60000 ms")
