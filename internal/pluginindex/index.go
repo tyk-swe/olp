@@ -19,6 +19,7 @@ import (
 	"sync"
 	"time"
 
+	pluginidentity "github.com/tyk-swe/olp/internal/plugins/identity"
 	"github.com/tyk-swe/olp/internal/signing"
 )
 
@@ -68,7 +69,6 @@ type Release struct {
 
 var (
 	pluginName = regexp.MustCompile(`^[a-z][a-z0-9-]{0,63}$`)
-	digestHex  = regexp.MustCompile(`^[0-9a-f]{64}$`)
 	commitHex  = regexp.MustCompile(`^[0-9a-f]{40}$`)
 	version    = regexp.MustCompile(`^[0-9A-Za-z][0-9A-Za-z.+-]{0,63}$`)
 )
@@ -102,7 +102,7 @@ func (x *Index) Validate() error {
 			return fmt.Errorf("plugin %s has no reviewed release", p.Name)
 		}
 		for _, r := range p.Releases {
-			if !version.MatchString(r.Version) || !digestHex.MatchString(r.Digest) || digests[r.Digest] || r.ABIVersion < 1 || r.SizeBytes < 1 || !commitHex.MatchString(r.Commit) || r.ReviewedAt.IsZero() || r.ReviewedAt.After(x.PublishedAt) {
+			if !version.MatchString(r.Version) || !pluginidentity.ValidDigest(r.Digest) || digests[r.Digest] || r.ABIVersion < 1 || r.SizeBytes < 1 || !commitHex.MatchString(r.Commit) || r.ReviewedAt.IsZero() || r.ReviewedAt.After(x.PublishedAt) {
 				return fmt.Errorf("plugin %s release %q is malformed or repeats a digest", p.Name, r.Version)
 			}
 			digests[r.Digest] = true

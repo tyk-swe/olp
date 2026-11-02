@@ -22,6 +22,7 @@ import (
 	"github.com/tyk-swe/olp/internal/bodylimit"
 	"github.com/tyk-swe/olp/internal/cache"
 	"github.com/tyk-swe/olp/internal/limits"
+	pluginidentity "github.com/tyk-swe/olp/internal/plugins/identity"
 	"github.com/tyk-swe/olp/internal/routeidentity"
 	"github.com/tyk-swe/olp/internal/upstream"
 )
@@ -60,9 +61,8 @@ const (
 )
 
 var (
-	pluginDigest = regexp.MustCompile(`^[0-9a-f]{64}$`)
-	targetTag    = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,31}$`)
-	effortName   = regexp.MustCompile(`^[a-z]{1,16}$`)
+	targetTag  = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,31}$`)
+	effortName = regexp.MustCompile(`^[a-z]{1,16}$`)
 )
 
 // Behavior is the adaptive routing a route revision declares beyond its
@@ -442,7 +442,7 @@ func (p Predicate) validate(slug string, invalid func(string) error) error {
 			return invalid("the classifier timeout is 1 to 30000 ms")
 		}
 	}
-	if p.Plugin != nil && !pluginDigest.MatchString(p.Plugin.Digest) {
+	if p.Plugin != nil && !pluginidentity.ValidDigest(p.Plugin.Digest) {
 		return invalid("the plugin is named by its lowercase SHA-256 digest")
 	}
 	return nil

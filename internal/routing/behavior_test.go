@@ -2,6 +2,8 @@ package routing
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"net/http"
 	"strings"
@@ -9,10 +11,44 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/tyk-swe/olp/internal/guardrails"
+	"github.com/tyk-swe/olp/internal/pluginindex"
+	"github.com/tyk-swe/olp/internal/plugins"
 	"github.com/tyk-swe/olp/internal/protocols/wire"
 	"github.com/tyk-swe/olp/internal/upstream"
 	"github.com/tyk-swe/olp/internal/usage"
 )
+
+func TestPluginDigestAgreesAcrossIndexAndConsumers(t *testing.T) {
+	hash := sha256.Sum256([]byte("example module"))
+	validDigest := hex.EncodeToString(hash[:])
+	for _, tc := range []struct {
+		digest string
+		valid  bool
+	}{
+		{validDigest, true}, {strings.Repeat("0", 64), true}, {strings.ToUpper(validDigest), false},
+		{validDigest[:63], false}, {validDigest + "0", false}, {strings.Repeat("g", 64), false}, {"", false},
+	} {
+		t.Run(tc.digest, func(t *testing.T) {
+			publishedAt := time.Unix(1, 0).UTC()
+			index := pluginindex.Index{APIVersion: pluginindex.APIVersion, PublishedAt: publishedAt, Plugins: []pluginindex.Plugin{{
+				Name: "sample", Description: "sample", Maintainer: "sample", DocumentationURL: "https://example.test/docs", Repository: "https://example.test/repo", Path: "sample",
+				Releases: []pluginindex.Release{{Version: "1.0.0", Digest: tc.digest, ABIVersion: 1, SizeBytes: 1, Commit: strings.Repeat("a", 40), ReviewedAt: publishedAt, Origins: []string{"https://example.test"}, Profiles: []string{"sample"}}},
+			}}}
+			configuration, err := json.Marshal(guardrails.ExternalConfig{PluginID: "sample", PluginVersion: tc.digest})
+			if err != nil {
+				t.Fatal(err)
+			}
+			guardrailErr := guardrails.ValidateExternal(guardrails.Revision{Type: "plugin", Configuration: configuration})
+			behavior := Behavior{Selectors: []Selector{{ID: "selector", Route: "other", When: Predicate{Plugin: &PluginPredicate{Digest: tc.digest}}}}}
+			routeErr := behavior.Validate("route", nil)
+			indexErr := index.Validate()
+			if (indexErr == nil) != tc.valid || plugins.ValidDigest(tc.digest) != tc.valid || (guardrailErr == nil) != tc.valid || (routeErr == nil) != tc.valid {
+				t.Errorf("digest %q: valid %t, index %v, guardrail %v, route %v", tc.digest, tc.valid, indexErr, guardrailErr, routeErr)
+			}
+		})
+	}
+}
 
 func TestRetryClassesAgreeWithUpstreamFailures(t *testing.T) {
 	for _, tc := range []struct {
