@@ -11,14 +11,27 @@ import (
 )
 
 func TestFilterBindsEveryCallerValueAndBoundsComplexity(t *testing.T) {
-	for _, raw := range []string{`userName eq "O'Reilly"`, `emails[type eq "work" and value co "x' OR true --"]`, `not (active eq false)`, `meta.created gt "2026-01-01T00:00:00Z"`} {
+	for _, tc := range []struct {
+		filter        string
+		callerText    string
+		expectedBound string
+	}{
+		{`userName eq "O'Reilly"`, "O'Reilly", "O'Reilly"},
+		{`emails[type eq "work" and value co "x' OR true --"]`, "OR true --", ""},
+		{`members.$ref eq "https://example.test/Users/a"`, "https://example.test/Users/a", "https://example.test/Users/a"},
+		{`not (active eq false)`, "", ""},
+		{`meta.created gt "2026-01-01T00:00:00Z"`, "", ""},
+	} {
 		compiler := SQLFilter{}
-		sql, err := compiler.Compile(raw, "document")
+		sql, err := compiler.Compile(tc.filter, "document")
 		if err != nil {
-			t.Fatalf("%s: %v", raw, err)
+			t.Fatalf("%s: %v", tc.filter, err)
 		}
-		if strings.Contains(sql, "O'Reilly") || strings.Contains(sql, "OR true --") || len(compiler.Args) == 0 {
-			t.Fatal("caller text reached SQL", sql)
+		if len(compiler.Args) == 0 || tc.callerText != "" && strings.Contains(sql, tc.callerText) {
+			t.Fatalf("caller value was not bound for %s", tc.filter)
+		}
+		if tc.expectedBound != "" && !slices.Contains(compiler.Args, any(tc.expectedBound)) {
+			t.Fatalf("caller value was not bound for %s", tc.filter)
 		}
 	}
 	for _, raw := range []string{strings.Repeat("(", 17) + `active pr` + strings.Repeat(")", 17), strings.Repeat("x", 4097), `emails[` + strings.Repeat(`type eq "work" or `, 32) + `value pr]`, `active gt true`, `userName =~ "x"`} {

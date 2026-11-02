@@ -9,7 +9,7 @@ import (
 )
 
 func scimAttribute(name, typ string, multi, required bool) map[string]any {
-	return map[string]any{"name": name, "type": typ, "multiValued": multi, "required": required, "caseExact": name == "externalId" || name == "id", "mutability": "readWrite", "returned": "default", "uniqueness": "none"}
+	return map[string]any{"name": name, "type": typ, "multiValued": multi, "required": required, "caseExact": scim.CaseExactAttribute(name), "mutability": "readWrite", "returned": "default", "uniqueness": "none"}
 }
 
 func scimSchemas() []map[string]any {

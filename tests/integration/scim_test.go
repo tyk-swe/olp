@@ -107,6 +107,13 @@ func TestSCIMFiltersAndSortsMultivaluedEmails(t *testing.T) {
 			}
 		}
 	})
+	secondName := maps.Collect(func(yield func(string, any) bool) {
+		for field := range nameValues {
+			if !yield(field, "second-"+field) {
+				return
+			}
+		}
+	})
 	create := func(name, alternate string, personName map[string]any) map[string]any {
 		body := map[string]any{
 			"schemas":  []string{scim.UserSchema},
@@ -121,16 +128,31 @@ func TestSCIMFiltersAndSortsMultivaluedEmails(t *testing.T) {
 	}
 	firstUser := create("alice", "zebra", inputName)
 	first := firstUser["id"].(string)
-	second := create("bob", "aardvark", nil)["id"].(string)
+	second := create("bob", "aardvark", secondName)["id"].(string)
 	if !reflect.DeepEqual(firstUser["name"], nameValues) {
 		t.Fatalf("created name=%v, want %v", firstUser["name"], nameValues)
 	}
 	for field, value := range nameValues {
-		query := url.Values{"filter": {fmt.Sprintf("name.%s eq %q", field, value)}, "sortBy": {"name." + field}}
+		path := "NAME." + strings.ToUpper(field)
+		query := url.Values{"filter": {fmt.Sprintf("%s eq %q", path, value)}, "sortBy": {path}}
 		result := scimCall(t, h, token, "GET", "/scim/v2/Users?"+query.Encode(), nil, "", 200)
 		users := result["Resources"].([]any)
 		if len(users) != 1 || users[0].(map[string]any)["id"] != first {
 			t.Fatalf("filtered name.%s=%v", field, users)
+		}
+		for _, tc := range []struct {
+			order  string
+			first  string
+			second string
+		}{
+			{"ascending", first, second},
+			{"descending", second, first},
+		} {
+			sortQuery := url.Values{"sortBy": {path}, "sortOrder": {tc.order}}
+			sorted := scimCall(t, h, token, "GET", "/scim/v2/Users?"+sortQuery.Encode(), nil, "", 200)["Resources"].([]any)
+			if len(sorted) != 2 || sorted[0].(map[string]any)["id"] != tc.first || sorted[1].(map[string]any)["id"] != tc.second {
+				t.Fatalf("sorted name.%s %s=%v", field, tc.order, sorted)
+			}
 		}
 	}
 	query := url.Values{"filter": {`emails.value co "@example.com"`}, "sortBy": {"emails.value"}}
@@ -138,6 +160,44 @@ func TestSCIMFiltersAndSortsMultivaluedEmails(t *testing.T) {
 	users := result["Resources"].([]any)
 	if len(users) != 2 || users[0].(map[string]any)["id"] != first || users[1].(map[string]any)["id"] != second {
 		t.Fatalf("filtered and sorted users=%v", users)
+	}
+}
+
+func TestSCIMSortHonorsPublishedCaseSensitivity(t *testing.T) {
+	h := newAccessHarness(t)
+	token := scimToken(h, h.owner(), []string{"access"})
+	schema := scimCall(t, h, token, "GET", "/scim/v2/Schemas/"+scim.UserSchema, nil, "", 200)
+	index := slices.IndexFunc(schema["attributes"].([]any), func(value any) bool {
+		return value.(map[string]any)["name"] == "externalId"
+	})
+	if index < 0 {
+		t.Fatalf("externalId schema=%v", schema)
+	}
+	caseExact := schema["attributes"].([]any)[index].(map[string]any)["caseExact"].(bool)
+	first := scimCall(t, h, token, "POST", "/scim/v2/Users", scimUser("case-a"), "", 201)["id"].(string)
+	second := scimCall(t, h, token, "POST", "/scim/v2/Users", scimUser("case-b"), "", 201)["id"].(string)
+	setExternalID := func(id, value string) {
+		scimCall(t, h, token, "PATCH", "/scim/v2/Users/"+id, scimPatch(map[string]any{"op": "replace", "path": "externalId", "value": value}), "", 200)
+	}
+	sortedIDs := func() []string {
+		result := scimCall(t, h, token, "GET", "/scim/v2/Users?sortBy=externalId", nil, "", 200)
+		return slices.Collect(func(yield func(string) bool) {
+			for _, user := range result["Resources"].([]any) {
+				if !yield(user.(map[string]any)["id"].(string)) {
+					return
+				}
+			}
+		})
+	}
+	setExternalID(first, "case-value")
+	setExternalID(second, "CASE-VALUE")
+	before := sortedIDs()
+	setExternalID(first, "temporary-value")
+	setExternalID(second, "case-value")
+	setExternalID(first, "CASE-VALUE")
+	after := sortedIDs()
+	if len(before) != 2 || len(after) != 2 || (slices.Equal(before, after) == caseExact) {
+		t.Fatalf("sort before=%v after=%v caseExact=%v", before, after, caseExact)
 	}
 }
 
@@ -159,6 +219,37 @@ func TestSCIMUsersGroupsAndInheritedGrants(t *testing.T) {
 	scimCall(t, h, token, "POST", "/scim/v2/Users", scimUser("alice"), "", 409)
 	project := h.want(owner, "POST", "/api/v1/projects", map[string]any{"name": "SCIM project"}, idem("scim-project"), 201)["id"].(string)
 	group := scimCall(t, h, token, "POST", "/scim/v2/Groups", map[string]any{"schemas": []string{scim.GroupSchema}, "displayName": "Developers", "externalId": "developers", "members": []any{map[string]any{"value": uid}}, scim.GroupExtension: map[string]any{"role": "developer", "projects": []any{map[string]any{"value": project, "role": "manager"}}}}, "", 201)
+	groupSchema := scimCall(t, h, token, "GET", "/scim/v2/Schemas/"+scim.GroupSchema, nil, "", 200)
+	membersIndex := slices.IndexFunc(groupSchema["attributes"].([]any), func(value any) bool {
+		return value.(map[string]any)["name"] == "members"
+	})
+	if membersIndex < 0 {
+		t.Fatalf("members schema=%v", groupSchema)
+	}
+	memberFields := groupSchema["attributes"].([]any)[membersIndex].(map[string]any)["subAttributes"].([]any)
+	refIndex := slices.IndexFunc(memberFields, func(value any) bool {
+		return value.(map[string]any)["name"] == "$ref"
+	})
+	if refIndex < 0 {
+		t.Fatalf("reference schema=%v", memberFields)
+	}
+	caseExact := memberFields[refIndex].(map[string]any)["caseExact"].(bool)
+	reference := group["members"].([]any)[0].(map[string]any)["$ref"].(string)
+	for _, operator := range []string{"eq", "sw"} {
+		for _, tc := range []struct {
+			value string
+			want  int
+		}{
+			{reference, 1},
+			{strings.ToUpper(reference), map[bool]int{true: 0, false: 1}[caseExact]},
+		} {
+			query := url.Values{"filter": {fmt.Sprintf("members.$ref %s %q", operator, tc.value)}}
+			result := scimCall(t, h, token, "GET", "/scim/v2/Groups?"+query.Encode(), nil, "", 200)
+			if groups := result["Resources"].([]any); len(groups) != tc.want {
+				t.Fatalf("filter %s %q returned %v, caseExact=%v", operator, tc.value, groups, caseExact)
+			}
+		}
+	}
 	gpath := "/scim/v2/Groups/" + group["id"].(string)
 	scimCall(t, h, token, "PATCH", upath, scimPatch(map[string]any{"op": "replace", "path": "displayName", "value": "Alice Updated"}), "", 200)
 	changedGroup := scimCall(t, h, token, "GET", gpath, nil, "", 200)
@@ -171,7 +262,7 @@ func TestSCIMUsersGroupsAndInheritedGrants(t *testing.T) {
 	if e := h.Pool.QueryRow(t.Context(), "SELECT u.role,u.access_scope,m.role FROM olp.users u JOIN olp.effective_project_members m ON m.user_id=u.id WHERE u.id=$1 AND m.project_id=$2", uid, project).Scan(&role, &scope, &projectRole); e != nil || role != "developer" || scope != "assigned" || projectRole != "manager" {
 		t.Fatalf("role=%s scope=%s project=%s err=%v", role, scope, projectRole, e)
 	}
-	for _, filter := range []string{`userName eq "ALICE@example.com"`, `emails[type eq "work" and value co "@example.com"]`, `name.givenName sw "ali" and not (active eq false)`, `externalId pr and userName ew "example.com"`, `meta.created le "2100-01-01T00:00:00Z"`} {
+	for _, filter := range []string{`userName eq "ALICE@example.com"`, `emails[type eq "work" and value co "@example.com"]`, `name.givenName sw "ali" and not (active eq false)`, `externalId pr and userName ew "example.com"`, fmt.Sprintf("meta.created le %q", user["meta"].(map[string]any)["created"])} {
 		listed := scimCall(t, h, token, "GET", "/scim/v2/Users?filter="+url.QueryEscape(filter), nil, "", 200)
 		if listed["totalResults"] != float64(1) {
 			t.Fatalf("filter %s: %v", filter, listed)

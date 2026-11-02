@@ -182,6 +182,10 @@ func matchesCoreSchema(path filter.AttributePath, schema string) bool {
 		strings.EqualFold(*path.URIPrefix, schema)
 }
 
+func CaseExactAttribute(name string) bool {
+	return name == "id" || name == "externalId" || name == "$ref"
+}
+
 func (s *SQLFilter) definedAttribute(path filter.AttributePath, scope []string) bool {
 	if !matchesCoreSchema(path, s.Schema) {
 		return false
@@ -238,7 +242,7 @@ func (s *SQLFilter) compare(e *filter.AttributeExpression, v string) (string, er
 		if op != "" {
 			expected = s.bind(value)
 		}
-		if last != "id" && last != "externalId" && last != "$ref" {
+		if !CaseExactAttribute(last) {
 			actual = "lower(" + actual + ")"
 			expected = "lower(" + expected + "::text)"
 		}
@@ -256,7 +260,7 @@ func (s *SQLFilter) compare(e *filter.AttributeExpression, v string) (string, er
 			return "", Fail(400, "invalidFilter", "Unsupported comparison.")
 		}
 		operator := " ~* "
-		if last == "id" || last == "externalId" || last == "$ref" {
+		if CaseExactAttribute(last) {
 			operator = " ~ "
 		}
 		return "jsonb_typeof(" + v + ")='string' AND " + text + operator + s.bind(pattern), nil
@@ -306,6 +310,9 @@ func (s *SQLFilter) Sort(raw, base string) (string, error) {
 	first := "jsonb_path_query_first(" + base + "," + s.bind(path) + "::jsonpath)"
 	if multi {
 		first = "COALESCE(jsonb_path_query_first(" + base + "," + s.bind(primary) + "::jsonpath)," + first + ")"
+	}
+	if CaseExactAttribute(last) {
+		return "(" + first + ") #>> '{}'", nil
 	}
 	return "lower((" + first + ") #>> '{}')", nil
 }
