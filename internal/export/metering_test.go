@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -278,7 +279,7 @@ func TestCloudEventGolden(t *testing.T) {
 		w.WriteHeader(200)
 	}))
 	defer server.Close()
-	sender := NewSender(testPolicy())
+	sender := NewSender(testPolicy(), os.Getenv)
 	sender.Installation = "inst-1"
 	credential, _ := json.Marshal(map[string]any{"signing_secret": "0123456789abcdef0123456789abcdef"})
 	record := Record{
@@ -386,7 +387,7 @@ func TestStripeStatusMapping(t *testing.T) {
 	for status, code := range map[int]string{400: "status", 409: "status", 500: "status", 429: "status"} {
 		fake := &fakeStripe{status: status}
 		server := httptest.NewServer(fake.handler())
-		sender := NewSender(testPolicy())
+		sender := NewSender(testPolicy(), os.Getenv)
 		destination, credential := stripeDestination(server, project)
 		err := sender.Send(t.Context(), destination, credential, meteringRecord(project, "0.003"))
 		if DeliveryErrorCode(err) != code {
@@ -406,7 +407,7 @@ func TestStripeStatusMapping(t *testing.T) {
 		_, _ = w.Write([]byte(`{"error":{"code":"other_failure","message":"reject rk_test_0123456789"}}`))
 	}))
 	defer server.Close()
-	sender := NewSender(testPolicy())
+	sender := NewSender(testPolicy(), os.Getenv)
 	destination, credential := stripeDestination(server, project)
 	err := sender.Send(t.Context(), destination, credential, meteringRecord(project, "0.003"))
 	if DeliveryErrorCode(err) != "status" {

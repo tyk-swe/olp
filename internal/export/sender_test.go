@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
+	"os"
 	"slices"
 	"strings"
 	"testing"
@@ -28,7 +29,7 @@ func testPolicy() *egress.Policy {
 func TestHTTPSDeliveryRejectsWeakCredential(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { t.Error("request reached receiver") }))
 	defer server.Close()
-	sender := NewSender(testPolicy())
+	sender := NewSender(testPolicy(), os.Getenv)
 	record := Record{ID: "id", Stream: "requests", Data: json.RawMessage(`{}`)}
 	for name, credential := range map[string]string{
 		"short secret":     `{"signing_secret":"short"}`,
@@ -74,7 +75,7 @@ func TestHTTPSDeliversSignedWorkflowEvidence(t *testing.T) {
 			}
 			record := Record{ID: "evidence-event", Stream: tc.stream, Data: json.RawMessage(tc.body)}
 			destination := Destination{Type: "https", URL: server.URL, Format: "json"}
-			if err := NewSender(testPolicy()).Send(t.Context(), destination, credential, record); err != nil {
+			if err := NewSender(testPolicy(), os.Getenv).Send(t.Context(), destination, credential, record); err != nil {
 				t.Fatalf("deliver evidence: %v", err)
 			}
 
@@ -111,7 +112,7 @@ func TestHTTPSRejectsUnsafeWorkflowEvidenceDestination(t *testing.T) {
 		w.WriteHeader(http.StatusNoContent)
 	}))
 	defer server.Close()
-	sender := NewSender(&egress.Policy{PlainHTTPHosts: []string{"127.0.0.1"}})
+	sender := NewSender(&egress.Policy{PlainHTTPHosts: []string{"127.0.0.1"}}, os.Getenv)
 	for _, tc := range []struct {
 		stream string
 		origin string
@@ -156,7 +157,7 @@ func TestOTLPDeliversWorkflowEvidence(t *testing.T) {
 			}))
 			defer server.Close()
 
-			sender := NewSender(testPolicy())
+			sender := NewSender(testPolicy(), os.Getenv)
 			sender.Installation = "evidence-installation"
 			record := Record{ID: "evidence-event", Stream: tc.stream, At: time.Unix(1700000000, 0), Data: json.RawMessage(tc.body)}
 			destination := Destination{Type: "otlp_logs", URL: server.URL, Format: "otlp"}
@@ -206,7 +207,7 @@ func TestS3ObjectPUTUsesStableKeyAndJSONL(t *testing.T) {
 		w.WriteHeader(200)
 	}))
 	defer server.Close()
-	sender := NewSender(testPolicy())
+	sender := NewSender(testPolicy(), os.Getenv)
 	credential, _ := json.Marshal(map[string]any{"region": "us-east-1", "auth_mode": "static", "secret": map[string]string{"access_key_id": "AKIAIOSFODNN7EXAMPLE", "secret_access_key": "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"}})
 	record := Record{ID: "rec1", Stream: "usage_rollups", At: time.Date(2026, 3, 4, 5, 6, 7, 0, time.UTC), Data: json.RawMessage(`{"stream":"usage_rollups","data":{"v":1}}`)}
 	if err := sender.Send(t.Context(), Destination{Type: "s3", URL: server.URL + "/bucket/prefix", Format: "jsonl"}, credential, record); err != nil {
@@ -217,6 +218,44 @@ func TestS3ObjectPUTUsesStableKeyAndJSONL(t *testing.T) {
 	}
 	if gotType != "application/x-ndjson" || !strings.HasSuffix(string(gotBody), "\n") {
 		t.Fatalf("jsonl body content-type=%q body=%q", gotType, gotBody)
+	}
+}
+
+func TestS3ObjectRegionUsesProvidedEnvironment(t *testing.T) {
+	t.Setenv("AWS_REGION", "ambient-region")
+	t.Setenv("AWS_DEFAULT_REGION", "ambient-default-region")
+	for _, tc := range []struct {
+		name   string
+		env    map[string]string
+		region string
+	}{
+		{name: "primary", env: map[string]string{"AWS_REGION": "primary-region", "AWS_DEFAULT_REGION": "default-region"}, region: "primary-region"},
+		{name: "default", env: map[string]string{"AWS_DEFAULT_REGION": "default-region"}, region: "default-region"},
+		{name: "missing"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			authorization := make(chan string, 1)
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				authorization <- r.Header.Get("Authorization")
+				w.WriteHeader(http.StatusOK)
+			}))
+			defer server.Close()
+			sender := NewSender(testPolicy(), func(name string) string { return tc.env[name] })
+			credential := []byte(`{"auth_mode":"static","secret":{"access_key_id":"test-access-key-1234","secret_access_key":"test-secret-key-1234"}}`)
+			err := sender.Send(t.Context(), Destination{Type: "s3", URL: server.URL + "/bucket", Format: "jsonl"}, credential, Record{ID: "record", Stream: "usage", Data: json.RawMessage(`{}`)})
+			if tc.region == "" {
+				if err == nil || DeliveryErrorCode(err) != "credential" {
+					t.Fatalf("missing region: %v", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if signed := <-authorization; !strings.Contains(signed, "/"+tc.region+"/s3/") {
+				t.Fatalf("authorization %q does not use region %q", signed, tc.region)
+			}
+		})
 	}
 }
 
@@ -250,7 +289,7 @@ func TestOTLPCollectorOutcomes(t *testing.T) {
 				w.Write(tc.body)
 			}))
 			defer server.Close()
-			sender := NewSender(testPolicy())
+			sender := NewSender(testPolicy(), os.Getenv)
 			err := sender.Send(t.Context(), Destination{Type: "otlp_logs", URL: server.URL, Format: "otlp"}, []byte(`{}`), Record{ID: "event", Stream: "requests", At: time.Now(), Data: json.RawMessage(`{}`)})
 			if tc.code == "" {
 				if err != nil {

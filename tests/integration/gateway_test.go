@@ -14,6 +14,7 @@ import (
 	"math/big"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"reflect"
 	"slices"
 	"strconv"
@@ -1126,7 +1127,7 @@ func TestGatewayToolWorkflowSettlesOneRun(t *testing.T) {
 	if steps != 3 || models != 2 || tools != 1 || settled != 3 || distinctRuns != 1 {
 		t.Fatalf("workflow did not settle distinct steps under one run: steps=%d models=%d tools=%d settled=%d runs=%d", steps, models, tools, settled, distinctRuns)
 	}
-	runExport := &export.Worker{Pool: h.Pool, Keys: h.Ring2(), Installation: h.Server.Installation, Sender: export.NewSender(loopbackPolicy()), Log: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	runExport := &export.Worker{Pool: h.Pool, Keys: h.Ring2(), Installation: h.Server.Installation, Sender: export.NewSender(loopbackPolicy(), os.Getenv), Log: slog.New(slog.NewTextHandler(io.Discard, nil))}
 	if err := runExport.Pass(t.Context()); err != nil {
 		t.Fatal(err)
 	}
@@ -1808,7 +1809,7 @@ func TestGatewayToolWorkflowSettlesOneRun(t *testing.T) {
 	for _, captureRoute := range []string{controlSlug, projectedSlug, finalOnlySlug, slug} {
 		h.want(owner, http.MethodPost, "/api/v1/observability/capture-policies", map[string]any{"route_slug": captureRoute, "sink": captureSink["export_sink_id"], "sample_ratio": "1", "include": []string{"input", "output", "tool_calls"}, "max_bytes": 65536}, idem(uuid.NewString()), http.StatusCreated)
 	}
-	manager := &export.Manager{Pool: h.Pool, Keys: h.Ring2(), Installation: h.Server.Installation, Sender: export.NewSender(loopbackPolicy()), Log: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	manager := &export.Manager{Pool: h.Pool, Keys: h.Ring2(), Installation: h.Server.Installation, Sender: export.NewSender(loopbackPolicy(), os.Getenv), Log: slog.New(slog.NewTextHandler(io.Discard, nil))}
 	h.Gateway.Capture = manager
 	var workflowReceipts sync.Map
 	h.Gateway.Sink = &gateway.PersistingSink{Persist: func(ctx context.Context, event *usage.Event, payload []byte) error {
@@ -3329,7 +3330,7 @@ func TestPlaygroundRendersPublishedPromptLikeInference(t *testing.T) {
 		receiver, exportServer := newExportReceiver(t, "", http.StatusNoContent)
 		sink := h.want(owner, http.MethodPost, "/api/v1/observability/sinks", map[string]any{"name": "prompt-privacy", "type": "https", "destination": exportServer.URL, "streams": []string{"requests"}, "format": "json"}, idem(uuid.NewString()), http.StatusCreated)
 		h.want(owner, http.MethodPost, "/api/v1/observability/capture-policies", map[string]any{"route_slug": route, "sink": sink["export_sink_id"], "sample_ratio": "1", "include": []string{"input", "output"}, "max_bytes": 65536}, idem(uuid.NewString()), http.StatusCreated)
-		manager := &export.Manager{Pool: h.Pool, Keys: h.Ring2(), Installation: h.Server.Installation, Sender: export.NewSender(loopbackPolicy()), Log: slog.New(slog.NewTextHandler(io.Discard, nil))}
+		manager := &export.Manager{Pool: h.Pool, Keys: h.Ring2(), Installation: h.Server.Installation, Sender: export.NewSender(loopbackPolicy(), os.Getenv), Log: slog.New(slog.NewTextHandler(io.Discard, nil))}
 		h.Gateway.Capture = manager
 		var receipts sync.Map
 		h.Gateway.Sink = &gateway.PersistingSink{Persist: func(ctx context.Context, event *usage.Event, payload []byte) error {
@@ -3404,7 +3405,7 @@ func TestPlaygroundRendersPublishedPromptLikeInference(t *testing.T) {
 				t.Fatalf("private prompt content reached %s: count=%d error=%v", table, leaks, err)
 			}
 		}
-		worker := &export.Worker{Pool: h.Pool, Keys: h.Ring2(), Installation: h.Server.Installation, Sender: export.NewSender(loopbackPolicy()), Log: slog.New(slog.NewTextHandler(io.Discard, nil))}
+		worker := &export.Worker{Pool: h.Pool, Keys: h.Ring2(), Installation: h.Server.Installation, Sender: export.NewSender(loopbackPolicy(), os.Getenv), Log: slog.New(slog.NewTextHandler(io.Discard, nil))}
 		if err := worker.Pass(t.Context()); err != nil {
 			t.Fatal(err)
 		}
@@ -3585,7 +3586,7 @@ func TestRunEvidenceDeliveryRechecksCreatorAndSource(t *testing.T) {
 		}
 		return id
 	}
-	observabilityWorker := &export.Worker{Pool: h.Pool, Keys: h.Ring2(), Installation: h.Server.Installation, Sender: export.NewSender(loopbackPolicy()), Log: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	observabilityWorker := &export.Worker{Pool: h.Pool, Keys: h.Ring2(), Installation: h.Server.Installation, Sender: export.NewSender(loopbackPolicy(), os.Getenv), Log: slog.New(slog.NewTextHandler(io.Discard, nil))}
 	managedWorker := &sinks.Worker{Pool: h.Pool, Egress: loopbackPolicy()}
 	deliver := func(t *testing.T) {
 		t.Helper()

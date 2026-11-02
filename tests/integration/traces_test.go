@@ -9,6 +9,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"os"
 	"slices"
 	"strings"
 	"testing"
@@ -115,7 +116,7 @@ func TestGlobalEvidenceSinksRecheckEachSourceProject(t *testing.T) {
 	if status, body := postTrace(h, mcpExecString(t, foreignKey, "secret"), tracePayload(t, traceBatch(span(2)))); status != http.StatusOK {
 		t.Fatalf("foreign trace upload: %d %s", status, body)
 	}
-	observabilityWorker := &export.Worker{Pool: h.Pool, Keys: h.Ring2(), Installation: h.Server.Installation, Sender: export.NewSender(loopbackPolicy()), Log: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	observabilityWorker := &export.Worker{Pool: h.Pool, Keys: h.Ring2(), Installation: h.Server.Installation, Sender: export.NewSender(loopbackPolicy(), os.Getenv), Log: slog.New(slog.NewTextHandler(io.Discard, nil))}
 	managedWorker := &sinks.Worker{Pool: h.Pool, Egress: loopbackPolicy()}
 	if err := observabilityWorker.Pass(t.Context()); err != nil {
 		t.Fatal(err)
@@ -176,7 +177,7 @@ func TestTraceEvidenceExportPreservesOriginProjectAndPrivacy(t *testing.T) {
 			t.Fatalf("trace upload status %d: %s", status, body)
 		}
 	}
-	worker := &export.Worker{Pool: h.Pool, Keys: h.Ring2(), Installation: h.Server.Installation, Sender: export.NewSender(loopbackPolicy()), Log: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	worker := &export.Worker{Pool: h.Pool, Keys: h.Ring2(), Installation: h.Server.Installation, Sender: export.NewSender(loopbackPolicy(), os.Getenv), Log: slog.New(slog.NewTextHandler(io.Discard, nil))}
 	if err := worker.Pass(t.Context()); err != nil {
 		t.Fatal(err)
 	}
@@ -250,7 +251,7 @@ func TestTraceEvidenceExportStopsAfterProjectAccessIsRevoked(t *testing.T) {
 		t.Fatalf("trace upload status %d: %s", status, body)
 	}
 	h.want(owner, http.MethodDelete, "/api/v1/projects/"+project+"/members/"+managerID, nil, projectEtag(h, owner, project), http.StatusNoContent)
-	worker := &export.Worker{Pool: h.Pool, Keys: h.Ring2(), Installation: h.Server.Installation, Sender: export.NewSender(loopbackPolicy()), Log: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	worker := &export.Worker{Pool: h.Pool, Keys: h.Ring2(), Installation: h.Server.Installation, Sender: export.NewSender(loopbackPolicy(), os.Getenv), Log: slog.New(slog.NewTextHandler(io.Discard, nil))}
 	if err := worker.Pass(t.Context()); err != nil {
 		t.Fatal(err)
 	}

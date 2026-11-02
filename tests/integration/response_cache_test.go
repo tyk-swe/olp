@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -50,7 +51,7 @@ func TestResponseCacheStreamCapture(t *testing.T) {
 		"sink": sink["export_sink_id"], "sample_ratio": "1", "include": []string{"output", "tool_calls"},
 		"max_bytes": 1048576, "route_slug": slug,
 	}, idem(uuid.NewString()), 201)
-	manager := &export.Manager{Pool: h.Pool, Keys: h.Ring2(), Installation: h.Server.Installation, Sender: export.NewSender(loopbackPolicy()), Log: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	manager := &export.Manager{Pool: h.Pool, Keys: h.Ring2(), Installation: h.Server.Installation, Sender: export.NewSender(loopbackPolicy(), os.Getenv), Log: slog.New(slog.NewTextHandler(io.Discard, nil))}
 	h.Gateway.Capture = manager
 	ctx, cancel := context.WithCancel(t.Context())
 	done := make(chan struct{})

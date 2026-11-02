@@ -259,7 +259,7 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 			responseCache = &cache.Store{Client: remote, Keys: keys, Auth: auth, Installation: installation}
 		}
 
-		sender := export.NewSender(&policy)
+		sender := export.NewSender(&policy, os.Getenv)
 		sender.Installation = installation
 		exporter = &export.Worker{Pool: pool, Keys: keys, Installation: installation, Sender: sender, Log: log}
 		export.FocusGeneratorVersion = Version

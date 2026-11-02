@@ -125,7 +125,7 @@ func TestCaptureRedactedGatewayReadback(t *testing.T) {
 	receiver, server := newExportReceiver(t, "", 204)
 	sink := h.want(owner, "POST", "/api/v1/observability/sinks", map[string]any{"name": "redacted-target", "type": "https", "destination": server.URL, "streams": []string{"requests"}, "format": "json"}, idem(uuid.NewString()), 201)
 	h.want(owner, "POST", "/api/v1/observability/capture-policies", map[string]any{"route_slug": slug, "sink": sink["export_sink_id"], "sample_ratio": "1", "include": []string{"input", "output", "tool_calls"}, "redact": []string{"private"}, "max_bytes": 65536}, idem(uuid.NewString()), 201)
-	manager := &export.Manager{Pool: h.Pool, Keys: h.Ring2(), Installation: h.Server.Installation, Sender: export.NewSender(loopbackPolicy()), Log: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	manager := &export.Manager{Pool: h.Pool, Keys: h.Ring2(), Installation: h.Server.Installation, Sender: export.NewSender(loopbackPolicy(), os.Getenv), Log: slog.New(slog.NewTextHandler(io.Discard, nil))}
 	h.Gateway.Capture = manager
 	ctx, cancel := context.WithCancel(t.Context())
 	done := make(chan struct{})
@@ -190,7 +190,7 @@ func TestPublishedPromptDoesNotLeakThroughEnabledCapture(t *testing.T) {
 	receiver, server := newExportReceiver(t, "", http.StatusNoContent)
 	sink := h.want(owner, http.MethodPost, "/api/v1/observability/sinks", map[string]any{"name": "prompt-capture", "type": "https", "destination": server.URL, "streams": []string{"requests"}, "format": "json"}, idem(uuid.NewString()), http.StatusCreated)
 	h.want(owner, http.MethodPost, "/api/v1/observability/capture-policies", map[string]any{"route_slug": slug, "sink": sink["export_sink_id"], "sample_ratio": "1", "include": []string{"input", "output", "tool_calls"}, "max_bytes": 65536}, idem(uuid.NewString()), http.StatusCreated)
-	manager := &export.Manager{Pool: h.Pool, Keys: h.Ring2(), Installation: h.Server.Installation, Sender: export.NewSender(loopbackPolicy()), Log: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	manager := &export.Manager{Pool: h.Pool, Keys: h.Ring2(), Installation: h.Server.Installation, Sender: export.NewSender(loopbackPolicy(), os.Getenv), Log: slog.New(slog.NewTextHandler(io.Discard, nil))}
 	h.Gateway.Capture = manager
 	ctx, cancel := context.WithCancel(t.Context())
 	done := make(chan struct{})
