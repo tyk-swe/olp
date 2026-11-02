@@ -47,7 +47,7 @@ func geminiManagedBatchMetadata(body []byte, model, localInput string, manifest 
 		var prior map[string]json.RawMessage
 		if json.Unmarshal(old, &prior) == nil {
 			metadata["client_metadata"] = prior["client_metadata"]
-			for _, field := range []string{"endpoint", "line_operation", "line_count", "manifest_digest", "completion_window", batchLocalInputKey} {
+			for _, field := range append(batchManifestFields(), "completion_window", batchLocalInputKey) {
 				if value := prior[field]; len(value) > 0 {
 					metadata[field] = value
 				}
@@ -138,7 +138,7 @@ func (s *Server) mapGeminiManagedResultFiles(ctx context.Context, owner *resourc
 			"upstream_model": resourceModel(owner), "adapter": "gemini_managed", "role": role,
 			"gemini_responses_file": fileName, "provider_file": map[string]any{"filename": fileID + ".jsonl", "purpose": "batch"},
 		}
-		for _, field := range []string{"endpoint", "line_operation", "line_count", "manifest_digest", "completion_window"} {
+		for _, field := range append(batchManifestFields(), "completion_window") {
 			if raw, ok := ownerMetadata[field]; ok {
 				metadata[field] = raw
 			}

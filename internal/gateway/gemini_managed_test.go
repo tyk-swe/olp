@@ -93,6 +93,16 @@ func TestGeminiManagedStatusAndCounts(t *testing.T) {
 	if json.Unmarshal(fields["request_counts"], &counts) != nil || counts["total"] != 4 || counts["completed"] != 3 || counts["failed"] != 1 {
 		t.Fatalf("Gemini request counts=%s", fields["request_counts"])
 	}
+	refreshed, _, err := geminiManagedBatchMetadata(body, "target-model", "", batchManifest{}, metadata, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, saved := range [][]byte{refreshed, managedFileMetadata(refreshed, []byte(`{}`), "gemini_managed", batchManifest{}, "output")} {
+		var got batchManifest
+		if err := json.Unmarshal(saved, &got); err != nil || got != manifest {
+			t.Fatalf("batch manifest changed after refresh or file projection: got=%+v want=%+v err=%v", got, manifest, err)
+		}
+	}
 	for _, state := range []string{"JOB_STATE_FAILED", "BATCH_STATE_CANCELLED", "JOB_STATE_EXPIRED"} {
 		object := []byte(`{"name":"batches/fixture","metadata":{"state":"` + state + `"}}`)
 		if _, _, err := geminiManagedBatchMetadata(object, "target", "", manifest, nil, nil); err != nil {
