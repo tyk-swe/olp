@@ -62,3 +62,28 @@ func TestTranscriptionDefaultsValidateTimestampGranularities(t *testing.T) {
 		})
 	}
 }
+
+func TestTranslationFormatsAgreeBetweenRequestsAndDefaults(t *testing.T) {
+	for _, test := range []struct {
+		format string
+		valid  bool
+	}{
+		{"json", true}, {"text", true}, {"srt", true}, {"vtt", true}, {"verbose_json", true}, {"unsupported", false},
+	} {
+		t.Run(test.format, func(t *testing.T) {
+			raw, err := json.Marshal(test.format)
+			if err != nil {
+				t.Fatal(err)
+			}
+			cfg := mediaDefaultsConfig(t, OpTranslation, map[string]json.RawMessage{"response_format": raw}, nil)
+			form := &Form{
+				text:  map[string][]string{"model": {"route"}, "response_format": {test.format}},
+				files: map[string][]Part{"file": {{}}},
+			}
+			_, failure := DecodeTranslation(form)
+			if acceptedDefault, acceptedRequest := cfg.ValidateProfile() == nil, failure == nil; acceptedDefault != test.valid || acceptedRequest != test.valid {
+				t.Fatalf("format %q accepted by default = %t, request = %t, want %t", test.format, acceptedDefault, acceptedRequest, test.valid)
+			}
+		})
+	}
+}

@@ -1,6 +1,15 @@
 // Package wire owns shared request and result envelopes. Dialect codecs own validation and encoding.
 package wire
 
+func ValidTranslationResponseFormat(format string) bool {
+	switch format {
+	case "json", "text", "srt", "vtt", "verbose_json":
+		return true
+	default:
+		return false
+	}
+}
+
 // OperationGeneration is the gateway operation both codecs map to.
 const OperationGeneration = "generation"
 
