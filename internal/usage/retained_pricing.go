@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/pricingpolicy"
 )
 
 func stringJSON(value any) string {
@@ -44,11 +45,11 @@ func validateRetainedUsage(u AttemptUsage) error {
 			return errors.New("invalid retained quantity")
 		}
 	}
-	if len(u.ContainerSessions) > 16 {
+	if len(u.ContainerSessions) > pricingpolicy.MaxContainerTiers {
 		return errors.New("too many memory tiers")
 	}
 	for tier, count := range u.ContainerSessions {
-		if !memoryTierPattern.MatchString(tier) || count < 0 {
+		if !pricingpolicy.ValidContainerTier(tier) || count < 0 {
 			return errors.New("invalid container memory tier or count")
 		}
 	}
@@ -116,14 +117,12 @@ func (r *priceRates) retainedCost(base *big.Int, u AttemptUsage, at time.Time, d
 	return clampCost(new(big.Int).Quo(total.Num(), total.Denom())), true
 }
 
-var memoryTierPattern = regexp.MustCompile(`^[1-9][0-9]{0,4}g$`)
-
 func normalizeContainerRates(rates map[string]string) error {
-	if len(rates) > 16 {
+	if len(rates) > pricingpolicy.MaxContainerTiers {
 		return access.Invalid("container_per_session", "At most sixteen memory tiers may be priced.")
 	}
 	for tier, fee := range rates {
-		if !memoryTierPattern.MatchString(tier) {
+		if !pricingpolicy.ValidContainerTier(tier) {
 			return access.Invalid("container_per_session", "Use a native memory tier such as 1g or 4g.")
 		}
 		normalized, err := normalizePriceAmount(fee)

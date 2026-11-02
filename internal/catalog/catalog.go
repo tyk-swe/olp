@@ -337,11 +337,11 @@ func (c *Catalog) validatePrice(p Price) error {
 		}
 		priced = true
 	}
-	if len(p.ContainerPerSession) > 16 {
+	if len(p.ContainerPerSession) > pricingpolicy.MaxContainerTiers {
 		return errors.New("too many container tiers")
 	}
 	for tier, fee := range p.ContainerPerSession {
-		if !regexp.MustCompile(`^[1-9][0-9]{0,4}g$`).MatchString(tier) || !fee.Valid() {
+		if !pricingpolicy.ValidContainerTier(tier) || !fee.Valid() {
 			return errors.New("invalid container tier rate")
 		}
 		priced = true

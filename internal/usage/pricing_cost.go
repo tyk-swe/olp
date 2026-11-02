@@ -253,7 +253,7 @@ func parseRates(p *Price) *priceRates {
 		}
 	}
 	for tier, fee := range p.ContainerPerSession {
-		if !memoryTierPattern.MatchString(tier) {
+		if !pricingpolicy.ValidContainerTier(tier) {
 			return fail()
 		}
 		if _, ok := scaledDecimal(fee, costDigits); !ok {

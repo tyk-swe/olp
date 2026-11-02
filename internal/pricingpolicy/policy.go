@@ -1,11 +1,21 @@
 package pricingpolicy
 
-import "strings"
+import (
+	"regexp"
+	"strings"
+)
 
 const (
-	MaxTiers         = 8
-	MaxWindowPeriods = 32
+	MaxTiers          = 8
+	MaxWindowPeriods  = 32
+	MaxContainerTiers = 16
 )
+
+var containerTier = regexp.MustCompile(`^[1-9][0-9]{0,4}g$`)
+
+func ValidContainerTier(value string) bool {
+	return containerTier.MatchString(value)
+}
 
 func ValidCurrency(value string) bool {
 	return len(value) == 3 && value[0] >= 'A' && value[0] <= 'Z' &&

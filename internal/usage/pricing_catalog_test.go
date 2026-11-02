@@ -6,10 +6,12 @@ import (
 	"crypto/rand"
 	"encoding/json"
 	"errors"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -52,6 +54,57 @@ func TestEmbeddedCatalogMapsToValidPrices(t *testing.T) {
 	}
 	if len(doc.Prices) != names {
 		t.Fatalf("mapped %d prices for %d priced names", len(doc.Prices), names)
+	}
+}
+
+func TestContainerTiersAgreeAcrossCatalogPricingAndUsage(t *testing.T) {
+	document, _, _, _ := signedCatalog(t, time.Date(2025, 1, 15, 0, 0, 0, 0, time.UTC))
+	for _, tc := range []struct {
+		tier  string
+		valid bool
+	}{
+		{"1g", true}, {"42g", true}, {"99999g", true},
+		{"", false}, {"0g", false}, {"01g", false}, {"100000g", false}, {"1G", false}, {"1gb", false},
+	} {
+		fixture, err := catalog.Decode(document)
+		if err != nil {
+			t.Fatal(err)
+		}
+		fixture.Vendors[0].Models[0].Prices[0].ContainerPerSession = map[string]catalog.Decimal{tc.tier: "1"}
+		catalogErr, pricingErr := catalogPriceValidation(t, fixture)
+		usageValid := ConsistentUsage(&AttemptUsage{ContainerSessions: map[string]int64{tc.tier: 1}})
+		if (catalogErr == nil) != tc.valid || (pricingErr == nil) != tc.valid || usageValid != tc.valid {
+			t.Errorf("tier %q, catalog error %v, pricing error %v, usage valid %v, want valid %v", tc.tier, catalogErr, pricingErr, usageValid, tc.valid)
+		}
+	}
+	for _, tc := range []struct {
+		count int
+		valid bool
+	}{{16, true}, {17, false}} {
+		fixture, err := catalog.Decode(document)
+		if err != nil {
+			t.Fatal(err)
+		}
+		rates := maps.Collect(func(yield func(string, catalog.Decimal) bool) {
+			for i := range tc.count {
+				if !yield(strconv.Itoa(i+1)+"g", "1") {
+					return
+				}
+			}
+		})
+		sessions := maps.Collect(func(yield func(string, int64) bool) {
+			for tier := range rates {
+				if !yield(tier, 1) {
+					return
+				}
+			}
+		})
+		fixture.Vendors[0].Models[0].Prices[0].ContainerPerSession = rates
+		catalogErr, pricingErr := catalogPriceValidation(t, fixture)
+		usageValid := ConsistentUsage(&AttemptUsage{ContainerSessions: sessions})
+		if (catalogErr == nil) != tc.valid || (pricingErr == nil) != tc.valid || usageValid != tc.valid {
+			t.Errorf("%d tiers, catalog error %v, pricing error %v, usage valid %v, want valid %v", tc.count, catalogErr, pricingErr, usageValid, tc.valid)
+		}
 	}
 }
 
