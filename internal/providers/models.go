@@ -52,7 +52,7 @@ func (s *Server) prepare(r *http.Request, p access.Principal, id string) (*recor
 	if err = access.Match(r, current.ETag); err != nil {
 		return nil, nil, err
 	}
-	if err = current.Configuration.Validate(s.Egress); err != nil {
+	if err = current.Configuration.ValidateAndNormalize(s.Egress); err != nil {
 		return nil, nil, err
 	}
 	credential, _, err := s.credentialFor(r.Context(), tx, current)

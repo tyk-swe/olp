@@ -176,7 +176,7 @@ func TestDiscoveredFactsNeverInvalidateConfiguration(t *testing.T) {
 	if err := json.Unmarshal(cfg.Options.Models["d"], &d); err != nil || string(d["context_length"]) != "8192" || string(d["max_output_tokens"]) != "512" {
 		t.Fatalf("merged facts: %s %v", cfg.Options.Models["d"], err)
 	}
-	if err := cfg.Validate(&egress.Policy{}); err != nil {
+	if err := cfg.ValidateAndNormalize(&egress.Policy{}); err != nil {
 		t.Fatalf("configuration invalid after discovery: %v", err)
 	}
 
@@ -190,7 +190,7 @@ func TestDiscoveredFactsNeverInvalidateConfiguration(t *testing.T) {
 	if len(full.Options.Models) != 2000 {
 		t.Fatalf("metadata entries = %d", len(full.Options.Models))
 	}
-	if err := full.Validate(&egress.Policy{}); err != nil {
+	if err := full.ValidateAndNormalize(&egress.Policy{}); err != nil {
 		t.Fatalf("configuration invalid after discovery: %v", err)
 	}
 }

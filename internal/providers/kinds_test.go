@@ -55,12 +55,12 @@ func TestCommitmentValidation(t *testing.T) {
 	cfg := Configuration{Kind: KindOpenAI, AuthMode: "api_key"}
 	cfg.Normalize()
 	cfg.Options.Commitment = &routing.Commitment{Amount: "300.50", Period: "day"}
-	if err := cfg.Validate(&egress.Policy{}); err != nil {
+	if err := cfg.ValidateAndNormalize(&egress.Policy{}); err != nil {
 		t.Fatal(err)
 	}
 	small := cfg
 	small.Options.Commitment = &routing.Commitment{Amount: "0.000000000001", Period: "day"}
-	if err := small.Validate(&egress.Policy{}); err != nil {
+	if err := small.ValidateAndNormalize(&egress.Policy{}); err != nil {
 		t.Fatal(err)
 	}
 	for _, tc := range []struct {
@@ -77,7 +77,7 @@ func TestCommitmentValidation(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			invalid := cfg
 			invalid.Options.Commitment = &routing.Commitment{Amount: tc.amount, Period: tc.period}
-			if problem, ok := errors.AsType[*access.Problem](invalid.Validate(&egress.Policy{})); !ok || problem.Field != tc.field {
+			if problem, ok := errors.AsType[*access.Problem](invalid.ValidateAndNormalize(&egress.Policy{})); !ok || problem.Field != tc.field {
 				t.Fatalf("%+v of %q/%q passed validation", problem, tc.amount, tc.period)
 			}
 		})
@@ -114,7 +114,7 @@ func TestConfigurationNormalizationPreservesSource(t *testing.T) {
 		start, end := time.Unix(100, 0).UTC(), time.Unix(200, 0).UTC()
 		original.Options.Commitment = &routing.Commitment{ID: "commitment", EffectiveAt: &start, EndsAt: &end, Amount: " 1.25 ", Period: "day"}
 		normalized := original
-		if err := normalized.Validate(&egress.Policy{}); err != nil {
+		if err := normalized.ValidateAndNormalize(&egress.Policy{}); err != nil {
 			t.Fatal(err)
 		}
 		if original.Options.Commitment.Amount != " 1.25 " || normalized.Options.Commitment.Amount != "1.25" {
@@ -140,7 +140,7 @@ func TestCommitmentAndPriceAgreeOnDecimalPrecision(t *testing.T) {
 			cfg.Normalize()
 			cfg.Options.Commitment = &routing.Commitment{Amount: test.amount, Period: "day"}
 			normalized, validAmount := pricingpolicy.NormalizeAmount(test.amount)
-			cfgErr := cfg.Validate(&egress.Policy{})
+			cfgErr := cfg.ValidateAndNormalize(&egress.Policy{})
 			if (cfgErr == nil) != (validAmount && !test.zero) {
 				t.Fatalf("commitment error = %v, amount valid = %v", cfgErr, validAmount)
 			}

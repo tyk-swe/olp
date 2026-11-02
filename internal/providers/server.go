@@ -214,7 +214,7 @@ func (s *Server) scanDetail(row pgx.Row) (*detail, error) {
 	d.DraftCredentialID, d.DraftCredentialVersion = draft.ID, draft.Version
 	d.LastProbeAt, d.LastProbeStatus, d.LastProbeDetail = p.LastProbeAt, p.LastProbeStatus, p.LastProbeDetail
 	d.CreatedAt, d.UpdatedAt = p.CreatedAt.UTC(), p.UpdatedAt.UTC()
-	d.ConnectorReady = p.Configuration.Validate(s.Egress) == nil && (!p.Configuration.CredentialRequired() || usableCredential)
+	d.ConnectorReady = p.Configuration.ValidateAndNormalize(s.Egress) == nil && (!p.Configuration.CredentialRequired() || usableCredential)
 	return &d, nil
 }
 

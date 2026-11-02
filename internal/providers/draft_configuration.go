@@ -27,7 +27,7 @@ func StoreDraftConfiguration(ctx context.Context, tx pgx.Tx, id, name string, ne
 	}
 	previous.Normalize()
 	next.Normalize()
-	if err := next.Validate(policy); err != nil {
+	if err := next.ValidateAndNormalize(policy); err != nil {
 		return err
 	}
 	if err := PreserveCredentialBoundary(ctx, tx, id, &previous, next); err != nil {

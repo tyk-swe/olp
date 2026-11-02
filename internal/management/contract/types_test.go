@@ -47,7 +47,7 @@ func TestCommitmentPeriodsAgreeWithManagementContract(t *testing.T) {
 			cfg := providers.Configuration{Kind: providers.KindOpenAI, AuthMode: "api_key"}
 			cfg.Normalize()
 			cfg.Options.Commitment = &routing.Commitment{Amount: "1", Period: period}
-			if accepted, published := cfg.Validate(&egress.Policy{}) == nil, slices.Contains(periods, period); accepted != published {
+			if accepted, published := cfg.ValidateAndNormalize(&egress.Policy{}) == nil, slices.Contains(periods, period); accepted != published {
 				t.Errorf("period %q accepted = %v, published = %v", period, accepted, published)
 			}
 		})

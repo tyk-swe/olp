@@ -121,7 +121,7 @@ func (s *Server) rotate(r *http.Request, _ access.Principal) (access.Reply, erro
 	if current.Configuration.Grant() {
 		return access.Reply{}, access.Fail(422, "credential_forbidden", grantEnrollmentOnly)
 	}
-	if err = current.Configuration.Validate(s.Egress); err != nil {
+	if err = current.Configuration.ValidateAndNormalize(s.Egress); err != nil {
 		return access.Reply{}, err
 	}
 	models, err := loadModels(r.Context(), tx, id, true)
@@ -687,7 +687,7 @@ func (s *Server) validateSlot(r *http.Request, p access.Principal) (access.Reply
 		}
 		defer clear(credential)
 	}
-	if err = current.Configuration.Validate(s.Egress); err != nil {
+	if err = current.Configuration.ValidateAndNormalize(s.Egress); err != nil {
 		return access.Reply{}, err
 	}
 	probeErr := s.validateModelAccess(r.Context(), &current.Configuration, credential, slot, models)

@@ -182,7 +182,7 @@ func (c *Configuration) VendorMissing() bool {
 }
 
 // validate rejects configurations this gateway cannot serve.
-func (c *Configuration) Validate(policy *egress.Policy) error {
+func (c *Configuration) ValidateAndNormalize(policy *egress.Policy) error {
 	if err := connectors.ValidateCredentialSource(c.CredentialSource, c.Kind, c.AuthMode); err != nil {
 		return access.Invalid("configuration.credential_source", err.Error())
 	}
