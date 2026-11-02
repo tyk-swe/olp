@@ -39,7 +39,7 @@ func sinkReference(entry SinkEntry) string {
 	sum := sha256.Sum256(encoded)
 	return "sink/" + hex.EncodeToString(sum[:])
 }
-func (s *Server) validateSinks(doc *Document) error {
+func (s *Server) validateAndNormalizeSinks(doc *Document) error {
 	if len(doc.Sinks) > 64 {
 		return access.Invalid("sinks", "Declare at most 64 export sinks.")
 	}

@@ -388,7 +388,7 @@ func (s *Server) validateDocument(ctx context.Context, q access.Queryer, doc *Do
 	if err := validateAndNormalizeRetrievalBindings(doc); err != nil {
 		return nil, err
 	}
-	if err := s.validateSinks(doc); err != nil {
+	if err := s.validateAndNormalizeSinks(doc); err != nil {
 		return nil, err
 	}
 	if err := validateGuardrails(doc); err != nil {
