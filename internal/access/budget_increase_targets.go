@@ -21,9 +21,7 @@ type BudgetTarget struct {
 }
 
 func (t *BudgetTarget) validate() error {
-	switch t.Kind {
-	case "installation", "organization", "project", "api_key", "budget_group", "key_route", "key_end_user", "project_end_user", "attribution":
-	default:
+	if !limits.ValidBudgetBoundary(t.Kind) {
 		return Invalid("target.kind", "Choose a supported budget boundary.")
 	}
 	if t.Kind != "installation" {
