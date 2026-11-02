@@ -49,7 +49,7 @@ func geminiLifecycleFields(body []byte) map[string]json.RawMessage {
 			fields[key] = raw
 		}
 	}
-	for _, key := range []string{"metadata", "batchStats", "inputConfig", "input_config", "output", "response", "error"} {
+	for _, key := range append([]string{"metadata", "batchStats", "inputConfig", "input_config", "error"}, GeminiOutputFields()...) {
 		if raw, ok := source[key]; ok {
 			fields[key], _ = json.Marshal(geminiLifecycleFields(raw))
 		}
@@ -159,7 +159,7 @@ func parseGeminiBatchSnapshot(body []byte) (BatchSnapshot, error) {
 	} else if present {
 		snapshot.Expected = &count
 	}
-	if file := batchGeminiOutputFile(body); file != "" {
+	if file := GeminiOutputFile(body); file != "" {
 		snapshot.OutputFileID = file
 	} else if batchGeminiInlineResponses(body) != nil {
 		snapshot.OutputFileID = "inline:" + id
@@ -516,13 +516,17 @@ func batchGeminiInputName(body []byte) string {
 	return ""
 }
 
-func batchGeminiOutputFile(body []byte) string {
+func GeminiOutputFields() []string {
+	return []string{"output", "response"}
+}
+
+func GeminiOutputFile(body []byte) string {
 	var object map[string]json.RawMessage
 	_ = json.Unmarshal(body, &object)
 	var metadata map[string]json.RawMessage
 	_ = json.Unmarshal(object["metadata"], &metadata)
 	for _, parent := range []map[string]json.RawMessage{metadata, object} {
-		for _, field := range []string{"output", "response"} {
+		for _, field := range GeminiOutputFields() {
 			var output map[string]json.RawMessage
 			if json.Unmarshal(parent[field], &output) != nil {
 				continue
@@ -542,7 +546,7 @@ func batchGeminiInlineResponses(body []byte) json.RawMessage {
 	var metadata map[string]json.RawMessage
 	_ = json.Unmarshal(object["metadata"], &metadata)
 	for _, parent := range []map[string]json.RawMessage{metadata, object} {
-		for _, field := range []string{"output", "response"} {
+		for _, field := range GeminiOutputFields() {
 			var output map[string]json.RawMessage
 			if json.Unmarshal(parent[field], &output) != nil {
 				continue

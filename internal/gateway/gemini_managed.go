@@ -125,26 +125,6 @@ func geminiManagedRequestCounts(body []byte) map[string]int64 {
 	return counts
 }
 
-func geminiManagedResponsesFile(body []byte) string {
-	var root map[string]json.RawMessage
-	_ = json.Unmarshal(body, &root)
-	var metadata map[string]json.RawMessage
-	_ = json.Unmarshal(root["metadata"], &metadata)
-	for _, parent := range []map[string]json.RawMessage{metadata, root} {
-		for _, field := range []string{"output", "response"} {
-			var output map[string]json.RawMessage
-			if json.Unmarshal(parent[field], &output) != nil {
-				continue
-			}
-			var name string
-			if json.Unmarshal(output["responsesFile"], &name) == nil && name != "" {
-				return name
-			}
-		}
-	}
-	return ""
-}
-
 func (s *Server) mapGeminiManagedResultFiles(ctx context.Context, owner *resources.Resource, fileName string) (*resources.Resource, *resources.Resource, error) {
 	fileID, err := geminiFileID(fileName)
 	if err != nil {
@@ -225,7 +205,7 @@ func (s *Server) geminiManagedBatchObject(ctx context.Context, resource *resourc
 		object["metadata"] = clientMetadata
 	}
 	if wire.BatchStageOf(status) == wire.BatchTerminal {
-		if responsesFile := geminiManagedResponsesFile(providerBatch); responsesFile != "" {
+		if responsesFile := batches.GeminiOutputFile(providerBatch); responsesFile != "" {
 			outputFile, errorFile, err := s.mapGeminiManagedResultFiles(ctx, resource, responsesFile)
 			if err != nil {
 				return nil, err
