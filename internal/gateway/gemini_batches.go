@@ -377,7 +377,7 @@ func geminiBatchResponseFiles(body []byte) ([]string, error) {
 	}
 	var files []string
 	for _, parent := range []map[string]json.RawMessage{root, metadata} {
-		for _, field := range []string{"output", "response"} {
+		for _, field := range batches.GeminiOutputFields() {
 			raw, ok := parent[field]
 			if !ok {
 				continue
@@ -488,7 +488,7 @@ func projectGeminiBatchFiles(object map[string]json.RawMessage, localInputFile, 
 			object[field], _ = json.Marshal(config)
 		}
 	}
-	for _, outputField := range []string{"output", "response"} {
+	for _, outputField := range batches.GeminiOutputFields() {
 		if raw, ok := object[outputField]; ok {
 			var destination map[string]json.RawMessage
 			if json.Unmarshal(raw, &destination) != nil || destination == nil {

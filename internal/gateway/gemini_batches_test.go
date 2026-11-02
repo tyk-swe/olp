@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
+	"github.com/tyk-swe/olp/internal/batches"
 	"github.com/tyk-swe/olp/internal/resources"
 )
 
@@ -73,6 +74,29 @@ func TestProjectGeminiBatchObjectAndRejectUnmappedIdentifiers(t *testing.T) {
 	unmapped := []byte(`{"name":"batches/upstream","metadata":{"name":"batches/upstream"},"response":{"responsesFile":"files/secret"}}`)
 	if _, err := projectGeminiBatchObject(unmapped, "local", "route", "", "", nil); err == nil {
 		t.Fatal("passed through an unmapped Gemini file identifier")
+	}
+}
+
+func TestGeminiBatchOutputFilesRemainBoundAcrossResponseShapes(t *testing.T) {
+	for _, body := range []string{
+		`{"name":"batches/upstream","output":{"responsesFile":"files/upstream"}}`,
+		`{"name":"batches/upstream","response":{"responsesFile":"files/upstream"}}`,
+		`{"name":"batches/upstream","metadata":{"output":{"responsesFile":"files/upstream"}}}`,
+		`{"name":"batches/upstream","metadata":{"response":{"responsesFile":"files/upstream"}}}`,
+	} {
+		if file := batches.GeminiOutputFile([]byte(body)); file != "files/upstream" {
+			t.Fatalf("provider output file=%q for %s", file, body)
+		}
+		if file := batches.GeminiOutputFile(batches.GeminiMetadata([]byte(body), "target", "", "")); file != "files/upstream" {
+			t.Fatalf("stored output file=%q for %s", file, body)
+		}
+		projected, err := projectGeminiBatchObject([]byte(body), "local", "route", "", "", map[string]string{"files/upstream": "files/gemini_file_output"})
+		if err != nil {
+			t.Fatalf("project %s: %v", body, err)
+		}
+		if file := batches.GeminiOutputFile(projected); file != "files/gemini_file_output" {
+			t.Fatalf("projected output file=%q for %s", file, projected)
+		}
 	}
 }
 
