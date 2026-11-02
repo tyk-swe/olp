@@ -13,6 +13,7 @@ import (
 	jose "github.com/go-jose/go-jose/v4"
 	"github.com/google/uuid"
 	"github.com/tyk-swe/olp/internal/consumerscope"
+	"github.com/tyk-swe/olp/internal/routeidentity"
 )
 
 const MaxTokenBytes = 32768
@@ -74,7 +75,7 @@ func (c Config) Validate() error {
 	}
 	names := map[string]bool{}
 	for _, m := range c.Mappings {
-		if !name.MatchString(m.Name) || names[m.Name] || !name.MatchString(m.LimitTemplate) || m.Match == nil || len(m.Match) > 16 {
+		if !name.MatchString(m.Name) || names[m.Name] || !routeidentity.ValidSlug(m.LimitTemplate) || m.Match == nil || len(m.Match) > 16 {
 			return bad
 		}
 		if m.AgentPrincipal && (m.Match["/sub"] == "" || (m.Match["/client_id"] == "" && m.Match["/azp"] == "" && m.Match["/appid"] == "")) {
@@ -91,7 +92,7 @@ func (c Config) Validate() error {
 			return bad
 		}
 		for _, group := range m.RouteGroups {
-			if !name.MatchString(group) {
+			if !routeidentity.ValidSlug(group) {
 				return bad
 			}
 		}
