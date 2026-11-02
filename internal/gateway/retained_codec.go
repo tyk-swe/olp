@@ -685,7 +685,7 @@ func (s *Server) projectRetainedGeneric(ctx context.Context, resource *resources
 			var submission []uuid.UUID
 			if kind == "eval_run" {
 				metadata, _ := nativeItems[id].Lookup("metadata")
-				if marker, present := metadata.Lookup("olp_submission_id"); present && marker.Kind() != oif.Null {
+				if marker, present := metadata.Lookup(resources.RetainedSubmissionMarkerField); present && marker.Kind() != oif.Null {
 					text, valid := marker.Text()
 					original, err := uuid.Parse(text)
 					if !valid || err != nil || original == uuid.Nil || original.String() != text {

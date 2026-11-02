@@ -19,7 +19,10 @@ func RetainedFileMetadataFields() []string {
 	return []string{"object", "purpose", "filename", "bytes", "status", "status_details", "expires_at", "created_at"}
 }
 
-const DefaultRetainedContainerMemoryTier = "1g"
+const (
+	DefaultRetainedContainerMemoryTier = "1g"
+	RetainedSubmissionMarkerField      = "olp_submission_id"
+)
 
 func ValidRetainedContainerMemoryTier(tier string) bool {
 	switch tier {
