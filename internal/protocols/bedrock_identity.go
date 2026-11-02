@@ -6,7 +6,7 @@ import (
 	"github.com/tyk-swe/olp/internal/protocols/wire"
 
 	"github.com/tyk-swe/olp/internal/oif"
-	"github.com/tyk-swe/olp/internal/protocols/openai"
+	"github.com/tyk-swe/olp/internal/routeidentity"
 )
 
 // ParseBedrockRequest retains the native Converse document. Its model and
@@ -19,7 +19,7 @@ func ParseBedrockRequest(body []byte, model string, stream bool) (*wire.Request,
 	if err != nil || doc.Root().Kind() != oif.Object {
 		return nil, &wire.RequestError{Code: "invalid_json", Message: "The request body must be unambiguous valid JSON."}
 	}
-	if !openai.RouteSlug.MatchString(model) {
+	if !routeidentity.ValidSlug(model) {
 		return nil, &wire.RequestError{Code: "invalid_value", Param: "model", Message: "The model must name a published route."}
 	}
 	for _, name := range []string{"model", "stream"} {

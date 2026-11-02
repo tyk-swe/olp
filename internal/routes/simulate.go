@@ -18,6 +18,7 @@ import (
 	"github.com/tyk-swe/olp/internal/contentpolicy"
 	"github.com/tyk-swe/olp/internal/operationregistry"
 	"github.com/tyk-swe/olp/internal/operations/tokenization/estimate"
+	"github.com/tyk-swe/olp/internal/routeidentity"
 	"github.com/tyk-swe/olp/internal/runtime"
 	"github.com/tyk-swe/olp/internal/usage"
 )
@@ -346,7 +347,7 @@ func (s *Server) simulateRouting(r *http.Request, p access.Principal) (access.Re
 	if slug == "" {
 		slug = request.Model
 	}
-	if !access.RouteSlug.MatchString(slug) {
+	if !routeidentity.ValidSlug(slug) {
 		return access.Reply{}, access.Invalid("operation.request.route", "Name the route to simulate.")
 	}
 	tx, err := s.Access.Pool.Begin(r.Context())

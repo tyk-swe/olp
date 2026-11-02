@@ -22,6 +22,7 @@ import (
 	"github.com/tyk-swe/olp/internal/bodylimit"
 	"github.com/tyk-swe/olp/internal/cache"
 	"github.com/tyk-swe/olp/internal/limits"
+	"github.com/tyk-swe/olp/internal/routeidentity"
 )
 
 // Conditions that start a fallback to another route.
@@ -68,7 +69,6 @@ const (
 
 var (
 	pluginDigest = regexp.MustCompile(`^[0-9a-f]{64}$`)
-	selectorID   = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,62}$`)
 	targetTag    = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,31}$`)
 	effortName   = regexp.MustCompile(`^[a-z]{1,16}$`)
 )
@@ -324,7 +324,7 @@ func (b Behavior) Validate(slug string, tagged func(string) bool) error {
 	}
 	seen := map[string]bool{}
 	for _, f := range b.Fallbacks {
-		if !RouteSlug.MatchString(f.Route) || f.Route == slug {
+		if !routeidentity.ValidSlug(f.Route) || f.Route == slug {
 			return invalidValue("fallbacks", "Each fallback names another route by slug")
 		}
 		if seen[f.Route] {
@@ -371,7 +371,7 @@ func (b Behavior) validateSelectors(slug string, tagged func(string) bool) error
 	ids := map[string]bool{}
 	for _, s := range b.Selectors {
 		invalid := func(message string) error { return invalidValue("selectors", "Selector `"+s.ID+"`: "+message) }
-		if !selectorID.MatchString(s.ID) || ids[s.ID] {
+		if !routeidentity.ValidSelectorID(s.ID) || ids[s.ID] {
 			return invalidValue("selectors", "Each selector has a distinct lowercase identifier")
 		}
 		ids[s.ID] = true
@@ -386,7 +386,7 @@ func (b Behavior) validateSelectors(slug string, tagged func(string) bool) error
 				}
 			}
 		case len(s.Tags) == 0 && s.Route != "":
-			if !RouteSlug.MatchString(s.Route) || s.Route == slug {
+			if !routeidentity.ValidSlug(s.Route) || s.Route == slug {
 				return invalid("delegate to another route by slug")
 			}
 		default:
@@ -424,7 +424,7 @@ func (p Predicate) validate(slug string, invalid func(string) error) error {
 		}
 	}
 	if c := p.Classifier; c != nil {
-		if !RouteSlug.MatchString(c.Route) || c.Route == slug {
+		if !routeidentity.ValidSlug(c.Route) || c.Route == slug {
 			return invalid("the classifier is another route")
 		}
 		if len(c.Labels) == 0 || len(c.Labels) > maxPredicateList || !distinct(c.Labels) {

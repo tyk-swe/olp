@@ -14,6 +14,7 @@ import (
 	"github.com/tyk-swe/olp/internal/codeadapter"
 	"github.com/tyk-swe/olp/internal/codemode"
 	"github.com/tyk-swe/olp/internal/codexauth"
+	"github.com/tyk-swe/olp/internal/routeidentity"
 )
 
 // Request selects the configuration Generate produces. Empty
@@ -25,7 +26,7 @@ type Request struct {
 
 func Generate(route codemode.Route, offers Offers, in Request) (codemode.ClientConfiguration, error) {
 	empty := codemode.ClientConfiguration{}
-	if !route.Enabled || route.RevisionID == "" || !access.RouteSlug.MatchString(route.Slug) {
+	if !route.Enabled || route.RevisionID == "" || !routeidentity.ValidSlug(route.Slug) {
 		return empty, access.Fail(409, "code_route_unpublished", "Publish an enabled code-mode route first.")
 	}
 	platform := cmp.Or(in.Platform, "linux")

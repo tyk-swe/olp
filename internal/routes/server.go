@@ -24,6 +24,7 @@ import (
 	"github.com/tyk-swe/olp/internal/mcp"
 	"github.com/tyk-swe/olp/internal/operationregistry"
 	"github.com/tyk-swe/olp/internal/retainedapi"
+	"github.com/tyk-swe/olp/internal/routeidentity"
 	"github.com/tyk-swe/olp/internal/runtime"
 	"github.com/tyk-swe/olp/internal/usage"
 	"github.com/tyk-swe/olp/internal/vendors"
@@ -319,7 +320,7 @@ func sameProject(a, b *string) bool {
 }
 
 func ValidateDraftInput(ctx context.Context, q access.Queryer, in *DraftInput, projectID *string, existing []routing.PublishedTarget) ([]routing.PublishedTarget, error) {
-	if !access.RouteSlug.MatchString(in.Slug) {
+	if !routeidentity.ValidSlug(in.Slug) {
 		return nil, access.Invalid("slug", "Use 1–100 lowercase letters, digits, dots, underscores, or hyphens, starting with a letter or digit.")
 	}
 	if len(in.Operations) == 0 {

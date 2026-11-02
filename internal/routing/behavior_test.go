@@ -2,11 +2,48 @@ package routing
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/tyk-swe/olp/internal/protocols/wire"
+	"github.com/tyk-swe/olp/internal/usage"
 )
+
+func TestSelectorIdentifiersAgreeWithAccounting(t *testing.T) {
+	for _, tc := range []struct {
+		id    string
+		valid bool
+	}{
+		{"selector", true}, {"selector-1", true}, {"UPPER", false}, {"with_underscore", false},
+		{"", false}, {strings.Repeat("a", 63), true}, {strings.Repeat("a", 64), false},
+	} {
+		t.Run(tc.id, func(t *testing.T) {
+			behavior := Behavior{Selectors: []Selector{{ID: tc.id, Route: "destination"}}}
+			behaviorErr := behavior.Validate("source", nil)
+			now := time.Now().UTC()
+			event := &usage.Event{
+				Version: usage.WireVersion, EventID: uuid.NewString(), RequestID: uuid.NewString(),
+				RuntimeGenerationID: uuid.NewString(), APIKeyID: uuid.NewString(), RouteSlug: "source",
+				Operation: "generation", Surface: "openai", RequestStartedAt: now, RequestCompletedAt: now, ObservedAt: now,
+				Attempts: []usage.Attempt{{
+					ID: uuid.NewString(), Ordinal: 1, ProviderID: uuid.NewString(), UpstreamModel: "model",
+					StartedAt: now, CompletedAt: now,
+					Routing: &usage.Routing{ProviderRevisionID: uuid.NewString(), Selector: &tc.id},
+				}},
+			}
+			payload, err := usage.Encode(event)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, accountingErr := usage.Decode(payload)
+			if (behaviorErr == nil) != tc.valid || (accountingErr == nil) != tc.valid {
+				t.Fatalf("routing error = %v, accounting error = %v", behaviorErr, accountingErr)
+			}
+		})
+	}
+}
 
 func TestGatewayToolExecutionBehaviorValidatesAndRoundTrips(t *testing.T) {
 	toolsetID := uuid.NewString()

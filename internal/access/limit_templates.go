@@ -6,6 +6,8 @@ import (
 	"maps"
 	"math/big"
 	"net/http"
+
+	"github.com/tyk-swe/olp/internal/routeidentity"
 )
 
 // LimitTemplates supplies independent ceilings at each referencing boundary.
@@ -17,7 +19,7 @@ func (t LimitTemplates) Validate() error {
 		return Invalid("templates", "Use at most 64 project limit templates.")
 	}
 	for name, limits := range t {
-		if !RouteSlug.MatchString(name) {
+		if !routeidentity.ValidSlug(name) {
 			return Invalid("templates", "Use valid route-style names for templates.")
 		}
 		normalized, err := validatedTemplateLimits(limits)
@@ -38,7 +40,7 @@ func (t LimitTemplates) JSON() []byte {
 }
 
 func validTemplateName(name *string) error {
-	if name != nil && !RouteSlug.MatchString(*name) {
+	if name != nil && !routeidentity.ValidSlug(*name) {
 		return Invalid("limit_template", "Use a valid template name or null.")
 	}
 	return nil

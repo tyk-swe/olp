@@ -5,6 +5,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/limits"
+	"github.com/tyk-swe/olp/internal/routeidentity"
 )
 
 type RouteLimits map[string]AdmissionLimits
@@ -14,7 +15,7 @@ func (policies RouteLimits) Validate() error {
 		return Invalid("route_limits", "Use at most 100 routes.")
 	}
 	for route, policy := range policies {
-		if !RouteSlug.MatchString(route) {
+		if !routeidentity.ValidSlug(route) {
 			return Invalid("route_limits", "Each entry must name a route slug.")
 		}
 		if err := policy.Validate(); err != nil {

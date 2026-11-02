@@ -15,6 +15,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/routeidentity"
 	"github.com/tyk-swe/olp/internal/runtime"
 	"github.com/tyk-swe/olp/internal/vendors"
 )
@@ -90,13 +91,13 @@ func validSlugPattern(pattern string) bool {
 	if !strings.Contains(pattern, "{model}") || len(pattern) > 100 {
 		return false
 	}
-	return routing.RouteSlug.MatchString(slugPlaceholders.Replace(pattern))
+	return routeidentity.ValidSlug(slugPlaceholders.Replace(pattern))
 }
 
 // expandSlug fills a slug pattern from a canonical model identity and vendor.
 func expandSlug(pattern, identity, vendor string) (string, bool) {
 	slug := strings.NewReplacer("{model}", slugPart(identity), "{vendor}", slugPart(vendor)).Replace(pattern)
-	return slug, routing.RouteSlug.MatchString(slug)
+	return slug, routeidentity.ValidSlug(slug)
 }
 
 // slugPart lowercases s and turns every character a slug cannot carry into a

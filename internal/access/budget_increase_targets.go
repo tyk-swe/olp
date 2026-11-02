@@ -7,6 +7,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/attribution"
 	"github.com/tyk-swe/olp/internal/limits"
+	"github.com/tyk-swe/olp/internal/routeidentity"
 )
 
 // BudgetTarget identifies a single accounting boundary, never a template shared
@@ -33,7 +34,7 @@ func (t *BudgetTarget) validate() error {
 	} else if t.ID != "" {
 		return Invalid("target.id", "Installation targets have no resource ID.")
 	}
-	if (t.Kind == "key_route" && !RouteSlug.MatchString(t.Route)) || (t.Kind != "key_route" && t.Route != "") {
+	if (t.Kind == "key_route" && !routeidentity.ValidSlug(t.Route)) || (t.Kind != "key_route" && t.Route != "") {
 		return Invalid("target.route", "Supply a route only for a key-route budget.")
 	}
 	identified := t.Kind == "key_end_user" || t.Kind == "project_end_user"

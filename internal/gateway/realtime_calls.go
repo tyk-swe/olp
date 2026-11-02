@@ -22,8 +22,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/tyk-swe/olp/internal/bodylimit"
 	"github.com/tyk-swe/olp/internal/observability"
-	"github.com/tyk-swe/olp/internal/protocols/openai"
 	"github.com/tyk-swe/olp/internal/protocols/wire"
+	"github.com/tyk-swe/olp/internal/routeidentity"
 	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/upstream"
 	"github.com/tyk-swe/olp/internal/usage"
@@ -268,7 +268,7 @@ func webrtcSessionSlug(raw json.RawMessage, querySlug string) (string, *Error) {
 			slug = model
 		}
 	}
-	if !openai.RouteSlug.MatchString(slug) {
+	if !routeidentity.ValidSlug(slug) {
 		return "", invalidRequest("invalid_value", "model must name a published route slug.", strPtr("model"))
 	}
 	return slug, nil

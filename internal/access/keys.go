@@ -16,6 +16,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/attribution"
 	"github.com/tyk-swe/olp/internal/limits"
+	"github.com/tyk-swe/olp/internal/routeidentity"
 	"github.com/tyk-swe/olp/internal/secrets"
 )
 
@@ -78,7 +79,6 @@ type keyInput struct {
 	KeyPolicy
 }
 
-var RouteSlug = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,99}$`)
 var decimal = regexp.MustCompile(`^[0-9]{1,12}(\.[0-9]{1,12})?$`)
 var attributionKey = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_.-]{0,31}$`)
 
@@ -93,7 +93,7 @@ func validateKey(input keyInput, expirationChanged bool) error {
 	}
 	groupNames := map[string]bool{}
 	for _, name := range input.AllowedRouteGroups {
-		if !RouteSlug.MatchString(name) || groupNames[name] {
+		if !routeidentity.ValidSlug(name) || groupNames[name] {
 			return Invalid("allowed_route_groups", "Use unique valid group names.")
 		}
 		groupNames[name] = true
@@ -152,7 +152,7 @@ func validateKey(input keyInput, expirationChanged bool) error {
 	}
 	seen = map[string]bool{}
 	for _, route := range input.AllowedRoutes {
-		if !RouteSlug.MatchString(route) || seen[route] {
+		if !routeidentity.ValidSlug(route) || seen[route] {
 			return Invalid("allowed_routes", "Use unique valid route slugs.")
 		}
 		seen[route] = true

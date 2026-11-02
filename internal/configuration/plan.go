@@ -24,6 +24,7 @@ import (
 	"github.com/tyk-swe/olp/internal/guardrails"
 	"github.com/tyk-swe/olp/internal/mcpservers"
 	"github.com/tyk-swe/olp/internal/providers"
+	"github.com/tyk-swe/olp/internal/routeidentity"
 	"github.com/tyk-swe/olp/internal/routes"
 	"github.com/tyk-swe/olp/internal/secrets"
 	"github.com/tyk-swe/olp/internal/secretstore"
@@ -434,7 +435,7 @@ func (s *Server) validateDocument(ctx context.Context, q access.Queryer, doc *Do
 				return nil, err
 			}
 		}
-		if p.EndUserLimitTemplate != nil && !access.RouteSlug.MatchString(*p.EndUserLimitTemplate) {
+		if p.EndUserLimitTemplate != nil && !routeidentity.ValidSlug(*p.EndUserLimitTemplate) {
 			return nil, access.Invalid("end_user_limit_template", "Use a valid template name.")
 		}
 		if err := p.RouteGroups.Validate(); err != nil {
@@ -599,7 +600,7 @@ func (s *Server) validateDocument(ctx context.Context, q access.Queryer, doc *Do
 				return nil, access.Invalid(sfield, "Use at most 100 routes and 2000 models per slot.")
 			}
 			for _, route := range slot.Restrictions.AllowedRoutes {
-				if !access.RouteSlug.MatchString(route) {
+				if !routeidentity.ValidSlug(route) {
 					return nil, access.Invalid(sfield+".allowed_routes", "Use route slugs.")
 				}
 			}
@@ -670,7 +671,7 @@ func (s *Server) validateDocument(ctx context.Context, q access.Queryer, doc *Do
 			return nil, access.Invalid(prefix+".slug", "Route slugs must be unique.")
 		}
 		routeSeen[rt.Slug] = true
-		if !access.RouteSlug.MatchString(rt.Slug) {
+		if !routeidentity.ValidSlug(rt.Slug) {
 			return nil, access.Invalid(prefix+".slug", "Use 1-100 lowercase letters, digits, dots, underscores, or hyphens, starting with a letter or digit.")
 		}
 		if len(rt.Targets) > maxTargets {

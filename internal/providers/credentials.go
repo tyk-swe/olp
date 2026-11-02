@@ -15,6 +15,7 @@ import (
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/grants"
 	"github.com/tyk-swe/olp/internal/limits"
+	"github.com/tyk-swe/olp/internal/routeidentity"
 	"github.com/tyk-swe/olp/internal/runtime"
 	"github.com/tyk-swe/olp/internal/secretstore"
 )
@@ -454,7 +455,7 @@ func validSlot(in *slotInput, slotID string) error {
 		in.AllowedAPIKeys[i] = id
 	}
 	for _, route := range in.AllowedRoutes {
-		if !access.RouteSlug.MatchString(route) {
+		if !routeidentity.ValidSlug(route) {
 			return access.Invalid("slot.allowed_routes", "Use route slugs.")
 		}
 	}

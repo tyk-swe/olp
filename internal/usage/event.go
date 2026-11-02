@@ -14,6 +14,7 @@ import (
 	"github.com/tyk-swe/olp/internal/contentpolicy"
 	"github.com/tyk-swe/olp/internal/guardrails"
 	"github.com/tyk-swe/olp/internal/limits"
+	"github.com/tyk-swe/olp/internal/routeidentity"
 )
 
 // WireVersion is the envelope version this build writes and accepts. Every
@@ -843,7 +844,7 @@ func (w wireRouting) decode() (*Routing, error) {
 		return nil, err
 	}
 	if leg := w.Leg; leg != nil {
-		if !routeSlug.MatchString(leg.Route) || (leg.Via != ViaSelector && leg.Via != ViaFallback) {
+		if !routeidentity.ValidSlug(leg.Route) || (leg.Via != ViaSelector && leg.Via != ViaFallback) {
 			return nil, errors.New("routing.leg is malformed")
 		}
 		if _, err = requiredUUID("routing.leg.revision_id", &leg.RevisionID); err != nil {
@@ -851,7 +852,7 @@ func (w wireRouting) decode() (*Routing, error) {
 		}
 		routing.Leg = leg
 	}
-	if w.Selector != nil && !selectorID.MatchString(*w.Selector) {
+	if w.Selector != nil && !routeidentity.ValidSelectorID(*w.Selector) {
 		return nil, errors.New("routing.selector is malformed")
 	}
 	if w.Retry != nil && *w.Retry < 1 {
@@ -880,13 +881,6 @@ func (w wireRouting) decode() (*Routing, error) {
 	}
 	return routing, nil
 }
-
-// routeSlug and selectorID mirror the route model's identifiers, which
-// accounting cannot import.
-var (
-	routeSlug  = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,99}$`)
-	selectorID = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,62}$`)
-)
 
 func missingField(field string) error {
 	return fmt.Errorf("request metadata field %s is missing", field)

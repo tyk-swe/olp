@@ -10,6 +10,7 @@ import (
 	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
 	"github.com/tyk-swe/olp/internal/protocols/sse"
+	"github.com/tyk-swe/olp/internal/routeidentity"
 )
 
 // Native generation dialects are vendor generation APIs a client speaks as
@@ -44,7 +45,7 @@ func parseNativeGeneration(family wire.Format, doc oif.Document, route string) (
 	if f == nil {
 		return nil, requestError("", "expected a JSON object")
 	}
-	if !openai.RouteSlug.MatchString(route) {
+	if !routeidentity.ValidSlug(route) {
 		return nil, requestError("model", "model must name a published route slug")
 	}
 	if present(f["model"]) && str(f["model"]) != route {
