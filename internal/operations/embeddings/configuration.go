@@ -17,6 +17,10 @@ func bedrockEmbeddingTypes() []string {
 	return []string{"float", "binary"}
 }
 
+func voyageInputTypes() []string {
+	return []string{"query", "document"}
+}
+
 func defaults(id string) map[string]operations.Field {
 	fields := map[string]operations.Field{}
 	boolean := operations.FieldSchema(map[string]any{"type": "boolean"}, func(v oif.Value) error {
@@ -51,8 +55,16 @@ func defaults(id string) map[string]operations.Field {
 		fields["output_dimension"] = positive
 		fields["truncation"] = boolean
 		fields["output_dtype"] = enum("float", "int8", "uint8", "binary", "ubinary")
-		fields["input_type"] = operations.FieldSchema(map[string]any{"type": []string{"string", "null"}, "enum": []any{"query", "document", nil}}, func(v oif.Value) error {
-			if v.Kind() == oif.Null || operations.String(v) == "query" || operations.String(v) == "document" {
+		inputTypeOptions := slices.Collect(func(yield func(any) bool) {
+			for _, inputType := range voyageInputTypes() {
+				if !yield(inputType) {
+					return
+				}
+			}
+			yield(nil)
+		})
+		fields["input_type"] = operations.FieldSchema(map[string]any{"type": []string{"string", "null"}, "enum": inputTypeOptions}, func(v oif.Value) error {
+			if v.Kind() == oif.Null || slices.Contains(voyageInputTypes(), operations.String(v)) {
 				return nil
 			}
 			return operations.Invalid("input_type", "Use query, document or native null.")
