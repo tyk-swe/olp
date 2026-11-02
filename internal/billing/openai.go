@@ -10,6 +10,20 @@ import (
 	"time"
 )
 
+func openAICostSource() costSource {
+	return costSource{
+		name:             SourceOpenAI,
+		kind:             "openai",
+		validateScope:    validateOpenAIScope,
+		encodeCredential: func(key string) ([]byte, error) { return encodeAPIKeyCredential(SourceOpenAI, key) },
+		decodeCredential: decodePollingCredential,
+		credentialInput:  stringCredentialInput,
+		fetch: func(ctx context.Context, in *fetchInput, emit func(periodDays) error) error {
+			return fetchPolling(ctx, in, emit, fetchOpenAI)
+		},
+	}
+}
+
 // fetchOpenAI reads the OpenAI organization costs report for a day window.
 // Query array encoding follows openai-go v3.74.0
 // AdminOrganizationUsageCostsParams (adminorganizationusage.go), which uses

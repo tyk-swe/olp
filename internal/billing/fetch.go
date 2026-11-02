@@ -65,6 +65,27 @@ func get(ctx context.Context, client *http.Client, endpoint string, setHeaders f
 	return nil
 }
 
+func fetchPolling(ctx context.Context, in *fetchInput, emit func(periodDays) error, report func(context.Context, *http.Client, *string, []byte, Scope, time.Time, time.Time) (map[string]map[lineKey]lineSum, error)) error {
+	if in.cfg.Endpoint == nil || *in.cfg.Endpoint == "" {
+		return failFetch("endpoint", errors.New("the provider has no endpoint"))
+	}
+	client, err := in.importer.client(ctx, in.row.ProviderID, in.cfg, in.key, *in.cfg.Endpoint)
+	if err != nil {
+		return failFetch("endpoint", err)
+	}
+	var scope Scope
+	if err := json.Unmarshal(in.row.Scope, &scope); err != nil {
+		return failFetch("response", err)
+	}
+	today := time.Now().UTC().Truncate(24 * time.Hour)
+	start, end := window(in.row.ImportedThrough, today)
+	days, err := report(ctx, client, in.cfg.Endpoint, in.key, scope, start, end)
+	if err != nil {
+		return err
+	}
+	return emit(periodDays{days: days})
+}
+
 // decimalValue parses an exact decimal from a JSON raw message holding either
 // a number or a quoted number; it never passes through a float.
 func decimalValue(raw json.RawMessage) (decimal.Decimal, error) {
