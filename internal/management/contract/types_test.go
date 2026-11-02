@@ -8,12 +8,51 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/management/contract"
+	"github.com/tyk-swe/olp/internal/providers"
 	"github.com/tyk-swe/olp/internal/routeidentity"
 	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/upstream"
 	"github.com/tyk-swe/olp/internal/usage"
 )
+
+func TestCommitmentPeriodsAgreeWithManagementContract(t *testing.T) {
+	raw, err := os.ReadFile("../../../openapi/management.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var document struct {
+		Components struct {
+			Schemas map[string]json.RawMessage `json:"schemas"`
+		} `json:"components"`
+	}
+	if err := json.Unmarshal(raw, &document); err != nil {
+		t.Fatal(err)
+	}
+	var commitment struct {
+		Properties map[string]struct {
+			Enum []string `json:"enum"`
+		} `json:"properties"`
+	}
+	if err := json.Unmarshal(document.Components.Schemas["Commitment"], &commitment); err != nil {
+		t.Fatal(err)
+	}
+	periods := commitment.Properties["period"].Enum
+	if len(periods) == 0 {
+		t.Fatal("contract declares no commitment periods")
+	}
+	for _, period := range append(slices.Clone(periods), "week", "") {
+		t.Run(period, func(t *testing.T) {
+			cfg := providers.Configuration{Kind: providers.KindOpenAI, AuthMode: "api_key"}
+			cfg.Normalize()
+			cfg.Options.Commitment = &routing.Commitment{Amount: "1", Period: period}
+			if accepted, published := cfg.Validate(&egress.Policy{}) == nil, slices.Contains(periods, period); accepted != published {
+				t.Errorf("period %q accepted = %v, published = %v", period, accepted, published)
+			}
+		})
+	}
+}
 
 func TestRoutingStrategiesAgreeWithManagementContract(t *testing.T) {
 	choices := openAPIEnum(t, "RoutingStrategy")

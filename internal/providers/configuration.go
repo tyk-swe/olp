@@ -284,7 +284,7 @@ func (c *Configuration) Validate(policy *egress.Policy) error {
 				"A commitment amount is a positive decimal with at most 12 integer and 12 fractional digits.")
 		}
 		c.Options.Commitment.Amount = amount
-		if !routing.CommitmentPeriods[c.Options.Commitment.Period] {
+		if !routing.ValidCommitmentPeriod(c.Options.Commitment.Period) {
 			return access.Invalid("configuration.options.commitment.period",
 				`A commitment period is "hour", "day" or "month".`)
 		}

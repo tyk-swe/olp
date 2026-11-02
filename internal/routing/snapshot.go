@@ -88,8 +88,9 @@ type Limits struct {
 	Supply
 }
 
-// CommitmentPeriods are the UTC calendar periods a commitment can bill on.
-var CommitmentPeriods = map[string]bool{"hour": true, "day": true, "month": true}
+func ValidCommitmentPeriod(period string) bool {
+	return period == "hour" || period == "day" || period == "month"
+}
 
 // Commitment is a provider's provisioned-capacity agreement: an amount owed
 // each UTC calendar period, allocated across priced attempts in proportion to
