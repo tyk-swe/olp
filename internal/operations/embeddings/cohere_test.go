@@ -1,10 +1,57 @@
 package embeddings_test
 
 import (
+	"encoding/json"
 	"testing"
 
+	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/operations/embeddings"
 )
+
+func TestCoherePublishedControlsAreAccepted(t *testing.T) {
+	d := codec(t, "cohere-embed-v2")
+	var schema struct {
+		Properties struct {
+			InputType struct {
+				Enum []string `json:"enum"`
+			} `json:"input_type"`
+			Truncate struct {
+				Enum []string `json:"enum"`
+			} `json:"truncate"`
+			OutputDimension struct {
+				Enum []int64 `json:"enum"`
+			} `json:"output_dimension"`
+		} `json:"properties"`
+	}
+	if err := json.Unmarshal(d.RequestSchema, &schema); err != nil {
+		t.Fatal(err)
+	}
+	if len(schema.Properties.InputType.Enum) == 0 || len(schema.Properties.Truncate.Enum) == 0 || len(schema.Properties.OutputDimension.Enum) == 0 {
+		t.Fatal("published controls have no options")
+	}
+	for _, mode := range schema.Properties.Truncate.Enum {
+		for _, dimension := range schema.Properties.OutputDimension.Enum {
+			body, err := json.Marshal(map[string]any{
+				"model": "m", "input_type": schema.Properties.InputType.Enum[0], "texts": []string{"one"},
+				"truncate": mode, "output_dimension": dimension,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			request(t, d, string(body))
+			document, err := oif.ParseJSON(body, oif.Limits{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, field := range []string{"truncate", "output_dimension"} {
+				value, _ := document.Root().Lookup(field)
+				if err := d.Defaults[field].Validate(value); err != nil {
+					t.Errorf("published %s option was rejected as a default: %v", field, err)
+				}
+			}
+		}
+	}
+}
 
 func TestCohereDocumentedNativeStorageGroupsShareLogicalDimensions(t *testing.T) {
 	d := codec(t, "cohere-embed-v2")
