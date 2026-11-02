@@ -94,7 +94,7 @@ func (policy AdmissionLimits) ValidateAndNormalize() error {
 	return nil
 }
 
-func (p *EndUserPolicy) validate() error {
+func (p *EndUserPolicy) validateAndNormalize() error {
 	if p == nil {
 		return nil
 	}
@@ -162,7 +162,7 @@ func (s *Server) putProjectEndUserPolicy(r *http.Request, _ Principal) (Reply, e
 	if err = decoder.Decode(&input.Policy); err != nil {
 		return Reply{}, Invalid("policy", "The end-user policy is invalid.")
 	}
-	if err = input.Policy.validate(); err != nil {
+	if err = input.Policy.validateAndNormalize(); err != nil {
 		return Reply{}, err
 	}
 	tx, err := s.Begin(r)

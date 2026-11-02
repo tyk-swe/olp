@@ -10,7 +10,7 @@ import (
 
 type RouteLimits map[string]AdmissionLimits
 
-func (policies RouteLimits) Validate() error {
+func (policies RouteLimits) ValidateAndNormalize() error {
 	if len(policies) > 100 {
 		return Invalid("route_limits", "Use at most 100 routes.")
 	}

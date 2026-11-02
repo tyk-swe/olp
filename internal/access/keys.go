@@ -101,7 +101,7 @@ func validateAndNormalizeKey(input keyInput, expirationChanged bool) error {
 	if err := validTemplateName(input.LimitTemplate); err != nil {
 		return err
 	}
-	if err := input.RouteLimits.Validate(); err != nil {
+	if err := input.RouteLimits.ValidateAndNormalize(); err != nil {
 		return err
 	}
 	if err := input.RegionalLimits.Validate(); err != nil {
@@ -116,7 +116,7 @@ func validateAndNormalizeKey(input keyInput, expirationChanged bool) error {
 	if input.EndUserPolicy != nil && input.EndUserSource == nil {
 		return Invalid("end_user_source", "An end-user policy requires an identifier source.")
 	}
-	if err := input.EndUserPolicy.validate(); err != nil {
+	if err := input.EndUserPolicy.validateAndNormalize(); err != nil {
 		return err
 	}
 	if input.EndUserSource != nil && *input.EndUserSource != "header" && *input.EndUserSource != "native" {

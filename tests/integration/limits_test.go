@@ -634,7 +634,7 @@ func TestLimitsDurableSpendReconcilesIntoValkey(t *testing.T) {
 				}
 				defer caseTx.Rollback(t.Context())
 				budgetErr := limits.EnsureKeyRouteBudget(t.Context(), caseTx, spender, route)
-				policyErr := (access.RouteLimits{route: {DailyCostLimit: limPointer("1")}}).Validate()
+				policyErr := (access.RouteLimits{route: {DailyCostLimit: limPointer("1")}}).ValidateAndNormalize()
 				if budgetErr != nil {
 					pgErr, ok := errors.AsType[*pgconn.PgError](budgetErr)
 					if policyErr == nil || !ok || pgErr.Code != "23514" {

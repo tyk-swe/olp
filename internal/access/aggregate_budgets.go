@@ -28,7 +28,7 @@ func (p *BudgetPolicy) Basis() limits.Basis {
 func (p *BudgetPolicy) Limited() bool {
 	return p != nil && (p.DailyCostLimit != nil || p.MonthlyCostLimit != nil || p.WeeklyCostLimit != nil)
 }
-func (p *BudgetPolicy) Validate() error {
+func (p *BudgetPolicy) ValidateAndNormalize() error {
 	if p == nil {
 		return nil
 	}
@@ -105,7 +105,7 @@ func (s *Server) writeAggregateBudget(r *http.Request, _ Principal, project bool
 	if err := d.Decode(&policy); err != nil {
 		return Reply{}, Invalid("policy", "The budget policy is invalid.")
 	}
-	if err := policy.Validate(); err != nil {
+	if err := policy.ValidateAndNormalize(); err != nil {
 		return Reply{}, err
 	}
 	if !policy.Limited() {

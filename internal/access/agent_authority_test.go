@@ -42,7 +42,7 @@ func TestWorkloadReferencesAgreeWithProjectNames(t *testing.T) {
 	for _, name := range []string{"name", "name-a.b_c", "UPPER", "name/path", "", strings.Repeat("a", 100), strings.Repeat("a", 101)} {
 		t.Run(name, func(t *testing.T) {
 			groupErr := (RouteGroups{name: []string{"route"}}).Validate()
-			templateErr := (LimitTemplates{name: AdmissionLimits{}}).Validate()
+			templateErr := (LimitTemplates{name: AdmissionLimits{}}).ValidateAndNormalize()
 			workloadGroupErr := issuer("template", name).Validate()
 			workloadTemplateErr := issuer(name, "group").Validate()
 			if (groupErr == nil) != (workloadGroupErr == nil) || (templateErr == nil) != (workloadTemplateErr == nil) {

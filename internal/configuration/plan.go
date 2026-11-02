@@ -416,7 +416,7 @@ func (s *Server) validateDocument(ctx context.Context, q access.Queryer, doc *Do
 			return nil, access.Invalid("budget_time_zone", "Use a supported IANA time zone.")
 		}
 	}
-	if err := doc.InstallationBudget.Validate(); err != nil {
+	if err := doc.InstallationBudget.ValidateAndNormalize(); err != nil {
 		return nil, err
 	}
 	if len(doc.Projects) > maxProjects {
@@ -424,14 +424,14 @@ func (s *Server) validateDocument(ctx context.Context, q access.Queryer, doc *Do
 	}
 	seen := map[string]bool{}
 	for i, p := range doc.Projects {
-		if err := p.Budget.Validate(); err != nil {
+		if err := p.Budget.ValidateAndNormalize(); err != nil {
 			return nil, err
 		}
-		if err := p.AttributionBudgets.Validate(); err != nil {
+		if err := p.AttributionBudgets.ValidateAndNormalize(); err != nil {
 			return nil, err
 		}
 		if p.LimitTemplates != nil {
-			if err := p.LimitTemplates.Validate(); err != nil {
+			if err := p.LimitTemplates.ValidateAndNormalize(); err != nil {
 				return nil, err
 			}
 		}

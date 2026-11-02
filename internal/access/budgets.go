@@ -24,7 +24,7 @@ type budgetGroupInput struct {
 	CostBasis         string  `json:"cost_basis,omitempty"`
 }
 
-func validateBudgetGroup(input *budgetGroupInput) error {
+func validateAndNormalizeBudgetGroup(input *budgetGroupInput) error {
 	if err := ValidText("name", input.Name, 100); err != nil {
 		return err
 	}
@@ -125,7 +125,7 @@ func (s *Server) createBudgetGroup(r *http.Request, _ Principal) (Reply, error) 
 		}
 		return Commit(r, tx, *replayed)
 	}
-	if err := validateBudgetGroup(&input); err != nil {
+	if err := validateAndNormalizeBudgetGroup(&input); err != nil {
 		return Reply{}, err
 	}
 	if err = s.RequireProject(r.Context(), tx, p, input.ProjectID); err != nil {
@@ -203,7 +203,7 @@ func (s *Server) updateBudgetGroup(r *http.Request, _ Principal) (Reply, error) 
 	if err = json.Unmarshal(data, &input); err != nil {
 		return Reply{}, Invalid("budget_group", "Invalid budget group value.")
 	}
-	if err = validateBudgetGroup(&input); err != nil {
+	if err = validateAndNormalizeBudgetGroup(&input); err != nil {
 		return Reply{}, err
 	}
 	if err = checkLimitTemplates(r.Context(), tx, projectID, input.LimitTemplate); err != nil {

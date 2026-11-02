@@ -34,6 +34,27 @@ func TestKeyValidationNormalizesCostLimits(t *testing.T) {
 	}
 }
 
+func TestBudgetAndTemplateValidationNormalizeCostLimits(t *testing.T) {
+	budgetAmount, templateAmount := " 4.50 ", " 5.75 "
+	budgets := AttributionBudgets{"team": {"app": {DailyCostLimit: &budgetAmount}}}
+	templates := LimitTemplates{"template": {MonthlyCostLimit: &templateAmount}}
+	if err := budgets.ValidateAndNormalize(); err != nil {
+		t.Fatal(err)
+	}
+	if err := templates.ValidateAndNormalize(); err != nil {
+		t.Fatal(err)
+	}
+	if got := *budgets["team"]["app"].DailyCostLimit; got != "4.50" {
+		t.Errorf("attribution budget = %q", got)
+	}
+	if got := *templates["template"].MonthlyCostLimit; got != "5.75" {
+		t.Errorf("template limit = %q", got)
+	}
+	if templateAmount != " 5.75 " {
+		t.Errorf("template source amount = %q", templateAmount)
+	}
+}
+
 func TestTaskAuthorityKeepsOwnerIdentityAndBindingLimits(t *testing.T) {
 	project, issuer := "project", "issuer"
 	daily := "7"

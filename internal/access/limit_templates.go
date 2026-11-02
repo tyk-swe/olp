@@ -14,7 +14,7 @@ import (
 // Templates share policy, not counters. Inline settings may only tighten them.
 type LimitTemplates map[string]AdmissionLimits
 
-func (t LimitTemplates) Validate() error {
+func (t LimitTemplates) ValidateAndNormalize() error {
 	if len(t) > 64 {
 		return Invalid("templates", "Use at most 64 project limit templates.")
 	}
@@ -254,7 +254,7 @@ func (s *Server) putProjectLimitTemplates(r *http.Request, _ Principal) (Reply, 
 	if input.Templates == nil {
 		return Reply{}, Invalid("templates", "Provide the template map, including an empty object to clear unused templates.")
 	}
-	if err = input.Templates.Validate(); err != nil {
+	if err = input.Templates.ValidateAndNormalize(); err != nil {
 		return Reply{}, err
 	}
 	tx, err := s.Begin(r)
