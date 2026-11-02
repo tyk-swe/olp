@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"mime"
 	"mime/multipart"
@@ -61,6 +62,42 @@ func TestRetainedContainerDefaultTierSurvivesObservation(t *testing.T) {
 	if err := json.Unmarshal(resource.Metadata, &observed); err != nil || observed.MemoryTier != tier {
 		t.Fatalf("observed tier %q does not match admitted tier %q: %v", observed.MemoryTier, tier, err)
 	}
+}
+
+func TestRetainedFileFieldsSurviveCreationAndRefresh(t *testing.T) {
+	created := []byte(`{"object":"file","purpose":"batch","filename":"before.jsonl","bytes":12,"status":"uploaded","status_details":"initial","expires_at":200,"created_at":100,"private_content":"hidden"}`)
+	refreshed := []byte(`{"object":"file","purpose":"batch","filename":"after.jsonl","bytes":15,"status":"processed","status_details":"ready","expires_at":300,"created_at":100,"private_content":"hidden"}`)
+	metadata, state, expires := fileMetadata(created, "")
+	resource := &resources.Resource{ID: "file-local", Kind: resources.KindFile, State: state, Metadata: metadata, ExpiresAt: expires}
+	assertProjection := func(source []byte) {
+		t.Helper()
+		body, err := (&Server{}).fileObject(context.Background(), resource)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var expected, actual map[string]json.RawMessage
+		if json.Unmarshal(source, &expected) != nil || json.Unmarshal(body, &actual) != nil {
+			t.Fatal("file source or projection is not JSON")
+		}
+		for _, field := range []string{"object", "purpose", "filename", "bytes", "status", "status_details", "expires_at", "created_at"} {
+			if !bytes.Equal(actual[field], expected[field]) {
+				t.Errorf("field %s = %s, want %s", field, actual[field], expected[field])
+			}
+		}
+		if _, exposed := actual["private_content"]; exposed {
+			t.Fatal("file projection exposed private content")
+		}
+	}
+	assertProjection(created)
+	document, err := oif.ParseJSON(refreshed, oif.Limits{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	endpoint := retainedapi.Endpoint{Family: retainedapi.Family{Kind: resources.KindFile}, Action: "get"}
+	if err := resources.EnrichRetained(resource, endpoint, document, time.Unix(1000, 0)); err != nil {
+		t.Fatal(err)
+	}
+	assertProjection(refreshed)
 }
 
 func TestRetainedPinnedEvalFixtures(t *testing.T) {
