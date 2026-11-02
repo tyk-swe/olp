@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"maps"
 	"net/http"
 	"slices"
 	"strings"
@@ -70,7 +71,14 @@ func normalizeInput(in Input) (Input, error) {
 		TargetID:  in.TargetID,
 		Backend:   in.Backend,
 		Resource:  in.Resource,
-		Fields:    in.Fields,
+		Fields: Fields{
+			Text:     in.Fields.Text,
+			ID:       in.Fields.ID,
+			Title:    in.Fields.Title,
+			URL:      in.Fields.URL,
+			Search:   slices.Clone(in.Fields.Search),
+			Metadata: maps.Clone(in.Fields.Metadata),
+		},
 		KeyGrants: append([]string{}, slices.Compact(slices.Sorted(slices.Values(in.KeyGrants)))...),
 		Enabled:   in.Enabled,
 	}, nil

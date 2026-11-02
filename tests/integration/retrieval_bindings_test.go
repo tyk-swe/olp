@@ -43,7 +43,7 @@ func TestRetrievalBindingsKeepExplicitGrantsAndImmutableHistory(t *testing.T) {
 		defer tx.Rollback(t.Context())
 		keyID := key["id"].(string)
 		grants := []string{keyID, keyID}
-		binding := retrieval.Input{ProjectID: project, Name: "  copy check  ", Route: "  " + route + "  ", TargetID: target, Backend: retrieval.Azure, Resource: "documents", Fields: retrieval.Fields{Text: "content", ID: "key"}, KeyGrants: grants, Enabled: true}
+		binding := retrieval.Input{ProjectID: project, Name: "  copy check  ", Route: "  " + route + "  ", TargetID: target, Backend: retrieval.Azure, Resource: "documents", Fields: retrieval.Fields{Text: "content", ID: "key", Search: []string{"summary"}, Metadata: map[string]string{"author": "creator"}}, KeyGrants: grants, Enabled: true}
 		saved, err := retrieval.Save(t.Context(), tx, actor, nil, binding)
 		if err != nil {
 			t.Fatal(err)
@@ -53,6 +53,12 @@ func TestRetrievalBindingsKeepExplicitGrantsAndImmutableHistory(t *testing.T) {
 		}
 		if saved.Name != "copy check" || saved.Route != route || !slices.Equal(saved.KeyGrants, []string{keyID}) {
 			t.Fatalf("saved binding was not normalized: %+v", saved)
+		}
+		saved.Fields.Search[0] = "changed"
+		saved.Fields.Metadata["author"] = "changed"
+		saved.KeyGrants[0] = uuid.NewString()
+		if binding.Fields.Search[0] != "summary" || binding.Fields.Metadata["author"] != "creator" || !slices.Equal(grants, []string{keyID, keyID}) {
+			t.Fatalf("changing the saved binding changed caller input: %+v", binding)
 		}
 	})
 	input := map[string]any{"project_id": project, "name": "  documents  ", "route": "  " + route + "  ", "target_id": target, "backend": "azure_ai_search", "backend_resource": "documents", "fields": map[string]any{"text": "content", "id": "key"}, "key_grants": []string{foreign["id"].(string)}, "enabled": true}
