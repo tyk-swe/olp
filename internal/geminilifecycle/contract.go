@@ -97,7 +97,7 @@ func ParseInteractionResponse(body []byte, maxBytes int) (InteractionResponse, e
 		return InteractionResponse{}, errors.New("interaction result has no bounded ID")
 	}
 	status, ok := stringField(doc.Root(), "status")
-	if !ok || !validInteractionStatus(status) {
+	if !ok || !ValidInteractionStatus(status) {
 		return InteractionResponse{}, errors.New("interaction result has no valid status")
 	}
 	if status == "completed" {
@@ -145,12 +145,12 @@ func InteractionTurnFinished(status string) bool {
 	}
 }
 
-func validInteractionStatus(status string) bool {
+func ValidInteractionStatus(status string) bool {
 	switch status {
-	case "pending", "queued", "in_progress", "requires_action", "completed", "failed", "cancelled", "incomplete":
+	case "pending", "queued", "in_progress":
 		return true
 	}
-	return false
+	return InteractionTurnFinished(status)
 }
 
 type InteractionEvent struct {
