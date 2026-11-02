@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
+	"os"
 	"testing"
 
 	"github.com/tyk-swe/olp/internal/egress"
@@ -36,7 +37,7 @@ func TestRetainedCapabilitiesAreValidAndCertifiable(t *testing.T) {
 	cfg := Configuration{ProviderID: "provider", Kind: KindOpenAI, AuthMode: AuthAPIKey, Endpoint: new(server.URL + "/v1")}
 	cfg.Normalize()
 	policy := &egress.Policy{AllowedNetworks: []netip.Prefix{netip.MustParsePrefix("127.0.0.0/8")}, PlainHTTPHosts: []string{"127.0.0.1"}}
-	if err := New(nil, policy, nil).certifyTuple(context.Background(), &cfg, []byte("secret"), "model", CapabilityInput{"vector_store", "openai", "unary"}, 4096); err != nil {
+	if err := New(nil, policy, nil, os.Getenv).certifyTuple(context.Background(), &cfg, []byte("secret"), "model", CapabilityInput{"vector_store", "openai", "unary"}, 4096); err != nil {
 		t.Fatalf("retained certification: %v", err)
 	}
 	// An unrelated 200 object does not prove an OpenAI collection exists.
@@ -44,7 +45,7 @@ func TestRetainedCapabilitiesAreValidAndCertifiable(t *testing.T) {
 	defer empty.Close()
 	cfg.Endpoint = new(empty.URL + "/v1")
 	cfg.Normalize()
-	if err := New(nil, policy, nil).certifyTuple(context.Background(), &cfg, []byte("secret"), "model", CapabilityInput{"vector_store", "openai", "unary"}, 4096); err == nil {
+	if err := New(nil, policy, nil, os.Getenv).certifyTuple(context.Background(), &cfg, []byte("secret"), "model", CapabilityInput{"vector_store", "openai", "unary"}, 4096); err == nil {
 		t.Fatal("missing collection certified")
 	}
 }
@@ -73,7 +74,7 @@ func TestRetainedAgentCertificationDoesNotCreateResources(t *testing.T) {
 			cfg := Configuration{ProviderID: "provider", Kind: KindGemini, ProfileID: "gemini-agents", ProfileRevision: "1", AuthMode: AuthAPIKey, Endpoint: new(server.URL + "/v1beta")}
 			cfg.Normalize()
 			policy := &egress.Policy{AllowedNetworks: []netip.Prefix{netip.MustParsePrefix("127.0.0.0/8")}, PlainHTTPHosts: []string{"127.0.0.1"}}
-			err := New(nil, policy, nil).certifyAgentResources(context.Background(), &cfg, []byte("secret"), "model")
+			err := New(nil, policy, nil, os.Getenv).certifyAgentResources(context.Background(), &cfg, []byte("secret"), "model")
 			if (err == nil) != tc.valid {
 				t.Fatalf("valid=%t err=%v", tc.valid, err)
 			}

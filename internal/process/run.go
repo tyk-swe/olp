@@ -266,7 +266,7 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 		rt = runtime.NewManager(pool, installation, auth, keys, log, c.Hostname)
 		rt.ReadPool = readPool
 		rt.Region = c.Region
-		rt.ExternalSecrets = secretstore.New(policy)
+		rt.ExternalSecrets = secretstore.New(policy, os.Getenv)
 		if c.ConnectorConfigFile != "" {
 			rt.Mounted, err = providers.LoadMounted(c.ConnectorConfigFile, &policy)
 			if err != nil {
@@ -457,7 +457,7 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 				return err
 			}
 			defer closeDependency(&shutdownDeadline, c.ShutdownTimeout, log, "management plugin runtime", pluginRuntime.Close)
-			Management{Access: control, Egress: &policy, Limiter: limiter, Runtime: rt, Gateway: gw, Media: mediaService, Health: obsCache, Log: log, PluginRuntime: pluginRuntime, PluginHost: pluginHost, Unconfined: unconfined, Catalog: referenceCatalog, PluginIndex: pluginIndex}.Register(public)
+			Management{Getenv: os.Getenv, Access: control, Egress: &policy, Limiter: limiter, Runtime: rt, Gateway: gw, Media: mediaService, Health: obsCache, Log: log, PluginRuntime: pluginRuntime, PluginHost: pluginHost, Unconfined: unconfined, Catalog: referenceCatalog, PluginIndex: pluginIndex}.Register(public)
 		}
 	}
 	if err := startup.Err(); err != nil {
@@ -690,7 +690,7 @@ func loadSecrets(ctx context.Context, pool *pgxpool.Pool, c config.Config, insta
 	}
 	var keys *secrets.KeyRing
 	if c.MasterKeyFile != "" {
-		keys, err = secrets.LoadRingWithUnwrapper(ctx, c.MasterKeyFile, secretstore.New(egress.Policy{AllowedNetworks: c.ProviderEgressAllowCIDRs, PlainHTTPHosts: c.ProviderEgressAllowHTTPHosts}))
+		keys, err = secrets.LoadRingWithUnwrapper(ctx, c.MasterKeyFile, secretstore.New(egress.Policy{AllowedNetworks: c.ProviderEgressAllowCIDRs, PlainHTTPHosts: c.ProviderEgressAllowHTTPHosts}, os.Getenv))
 		if err != nil {
 			return nil, nil, "", err
 		}

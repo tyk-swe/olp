@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
+	"os"
 	"testing"
 
 	"github.com/tyk-swe/olp/internal/egress"
@@ -24,7 +25,7 @@ func TestRetrievalMetadataCertificationIsReadOnlyAndIdentityBound(t *testing.T) 
 			cfg := Configuration{ProviderID: "provider", Kind: KindAzureAISearch, ProfileID: "azure-ai-search", ProfileRevision: "1", AuthMode: "api_key", Endpoint: new(server.URL), APIVersion: new("2025-09-01")}
 			cfg.Normalize()
 			policy := &egress.Policy{AllowedNetworks: []netip.Prefix{netip.MustParsePrefix("127.0.0.0/8")}, PlainHTTPHosts: []string{"127.0.0.1"}}
-			err := New(nil, policy, nil).certifyTuple(context.Background(), &cfg, []byte("key"), "documents", CapabilityInput{"retrieval", "openai", "unary"}, 4096)
+			err := New(nil, policy, nil, os.Getenv).certifyTuple(context.Background(), &cfg, []byte("key"), "documents", CapabilityInput{"retrieval", "openai", "unary"}, 4096)
 			if (err == nil) != (name == "documents") {
 				t.Fatalf("identity %s: %v", name, err)
 			}

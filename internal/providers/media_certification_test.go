@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"io"
 	"net/http"
+	"os"
 	"strings"
 	"testing"
 
@@ -23,7 +24,7 @@ func (probeSocket) Close() error                { return nil }
 
 func NativeMediaProbeServer(t *testing.T) (*Server, []CapabilityInput) {
 	t.Helper()
-	s := New(nil, &egress.Policy{}, nil)
+	s := New(nil, &egress.Policy{}, nil, os.Getenv)
 	s.client.Transport = mediaProbeTransport(func(r *http.Request) (*http.Response, error) {
 		if r.Header.Get("Authorization") != "Bearer test-credential" {
 			t.Errorf("unexpected certification request: %s %s", r.Method, r.URL)
@@ -94,7 +95,7 @@ func TestNativeMediaCapabilitiesCanBeDeclaredAndCertified(t *testing.T) {
 func TestAzureMediaCertifiesThroughTheDeployment(t *testing.T) {
 	cfg := Configuration{Kind: KindAzure, AuthMode: AuthAPIKey, Endpoint: new("https://example.openai.azure.com"), Deployment: new("media"), APIVersion: new("2025-04-01-preview")}
 	cfg.Normalize()
-	s := New(nil, &egress.Policy{}, nil)
+	s := New(nil, &egress.Policy{}, nil, os.Getenv)
 	seen := map[string]string{}
 	s.client.Transport = mediaProbeTransport(func(r *http.Request) (*http.Response, error) {
 		body, _ := io.ReadAll(r.Body)

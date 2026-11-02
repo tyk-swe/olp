@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
+	"os"
 	"strings"
 	"testing"
 
@@ -58,7 +59,7 @@ func TestPluginDiscoveryRefusesBrokenContinuations(t *testing.T) {
 			defer server.Close()
 			pagination := &abi.Pagination{Parameter: "page", Cursor: "next", More: tc.more}
 			cfg := pluginConfiguration(t, server, abi.Hosting{Discovery: &abi.Discovery{Path: "/models", Models: "items", ID: "slug", Pagination: pagination}})
-			_, err := New(nil, loopbackPolicy(), nil).listModelFacts(context.Background(), cfg, []byte("secret"))
+			_, err := New(nil, loopbackPolicy(), nil, os.Getenv).listModelFacts(context.Background(), cfg, []byte("secret"))
 			if refusal, ok := errors.AsType[*probeError](err); !ok || refusal.Code != "provider_protocol_error" {
 				t.Fatalf("listed through %s: %v", name, err)
 			}

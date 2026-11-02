@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -18,7 +20,33 @@ import (
 	"github.com/coder/websocket"
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/operations/ocr"
+	"github.com/tyk-swe/olp/internal/secretstore"
 )
+
+func TestProviderResolvesExternalCredentialsUsingProvidedEnvironment(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v1/auth/jwt/login" {
+			fmt.Fprint(w, `{"auth":{"client_token":"fixture-token"}}`)
+			return
+		}
+		if r.URL.Path != "/v1/secret/data/credential" || r.URL.Query().Get("version") != "1" || r.Header.Get("X-Vault-Token") != "fixture-token" {
+			t.Errorf("unexpected secret request: %s", r.URL)
+		}
+		fmt.Fprint(w, `{"data":{"data":{"key":"fixture-value"},"metadata":{"version":1}}}`)
+	}))
+	defer upstream.Close()
+	jwtFile := filepath.Join(t.TempDir(), "workload.jwt")
+	if err := os.WriteFile(jwtFile, []byte("fixture.jwt"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("OLP_VAULT_ADDR", "https://ambient.invalid")
+	lookup := map[string]string{"OLP_VAULT_ADDR": upstream.URL, "OLP_VAULT_ROLE": "fixture", "OLP_VAULT_JWT_FILE": jwtFile}
+	server := New(nil, loopbackPolicy(), nil, func(name string) string { return lookup[name] })
+	value, err := server.ExternalSecrets.Resolve(t.Context(), secretstore.Reference{Store: "vault", SecretID: upstream.URL + "/v1/secret/data/credential", Version: "1", Field: "key"})
+	if err != nil || string(value) != "fixture-value" {
+		t.Fatalf("resolve external credential: %v", err)
+	}
+}
 
 func TestOperationProfileWithoutDiscoveryProbesItsOwnOperation(t *testing.T) {
 	for _, tc := range []struct {
@@ -44,7 +72,7 @@ func TestOperationProfileWithoutDiscoveryProbesItsOwnOperation(t *testing.T) {
 			if tuple := defaultProbeTuple(&cfg); tuple != (CapabilityInput{Operation: tc.operation, Surface: "native", Mode: ModeUnary}) {
 				t.Fatalf("probe tuple = %+v", tuple)
 			}
-			models, err := New(nil, policy, nil).listModelFacts(context.Background(), &cfg, []byte("secret"))
+			models, err := New(nil, policy, nil, os.Getenv).listModelFacts(context.Background(), &cfg, []byte("secret"))
 			if err != nil || len(models) != 1 || models[0].Name != "cohere-model" || calls != 1 {
 				t.Fatalf("probe: %+v %v calls=%d", models, err, calls)
 			}
@@ -73,7 +101,7 @@ func TestNativeDuplexProfileCertifiesOverItsWebSocket(t *testing.T) {
 	cfg := Configuration{ProviderID: "provider", Kind: KindOpenAICompatible, ProfileID: "xai-realtime", ProfileRevision: "1", AuthMode: AuthAPIKey, Endpoint: new(server.URL + "/v1"), Options: Options{VendorID: new("xai")}}
 	cfg.Normalize()
 	tuple := CapabilityInput{Operation: "realtime", Surface: "native", Mode: "realtime"}
-	if err := New(nil, policy, nil).certifyTuple(t.Context(), &cfg, []byte("secret"), "grok-voice", tuple, 4096); err != nil {
+	if err := New(nil, policy, nil, os.Getenv).certifyTuple(t.Context(), &cfg, []byte("secret"), "grok-voice", tuple, 4096); err != nil {
 		t.Fatalf("native duplex certification: %v", err)
 	}
 	if dials != 1 {
@@ -118,7 +146,7 @@ func TestBraveProfileProbesOverGetQuery(t *testing.T) {
 	if tuple := defaultProbeTuple(&cfg); tuple != (CapabilityInput{Operation: "search", Surface: "openai", Mode: ModeUnary}) {
 		t.Fatalf("probe tuple = %+v", tuple)
 	}
-	models, err := New(nil, policy, nil).listModelFacts(context.Background(), &cfg, []byte("secret"))
+	models, err := New(nil, policy, nil, os.Getenv).listModelFacts(context.Background(), &cfg, []byte("secret"))
 	if err != nil || len(models) != 1 || models[0].Name != "brave-model" || calls != 1 {
 		t.Fatalf("probe: %+v %v calls=%d", models, err, calls)
 	}
@@ -195,7 +223,7 @@ func TestAzureOperationProbePolls(t *testing.T) {
 	policy := &egress.Policy{AllowedNetworks: []netip.Prefix{netip.MustParsePrefix("127.0.0.0/8")}, PlainHTTPHosts: []string{"127.0.0.1"}}
 	cfg := Configuration{ProviderID: "provider", Kind: KindOpenAICompatible, ProfileID: "azure-document-intelligence-ocr", ProfileRevision: "1", AuthMode: AuthAPIKey, Endpoint: new(server.URL), Options: Options{VendorID: new("azure-document-intelligence")}, ProbeModels: []string{"prebuilt-layout"}}
 	cfg.Normalize()
-	models, err := New(nil, policy, nil).listModelFacts(context.Background(), &cfg, []byte("secret"))
+	models, err := New(nil, policy, nil, os.Getenv).listModelFacts(context.Background(), &cfg, []byte("secret"))
 	if err != nil || len(models) != 1 || models[0].Name != "prebuilt-layout" || submits != 1 || polls != 1 {
 		t.Fatalf("probe: %+v %v submits=%d polls=%d", models, err, submits, polls)
 	}
@@ -289,7 +317,7 @@ func TestWebRTCProbeHangsUpWhenControlDialFails(t *testing.T) {
 	policy := &egress.Policy{AllowedNetworks: []netip.Prefix{netip.MustParsePrefix("127.0.0.0/8")}, PlainHTTPHosts: []string{"127.0.0.1"}}
 	cfg := Configuration{ProviderID: "provider", Kind: KindOpenAI, AuthMode: AuthAPIKey, Endpoint: new(server.URL + "/v1"), ProfileID: "openai-responses", ProfileRevision: connectors.ProfileRevision, Options: Options{VendorID: new("openai")}}
 	cfg.Normalize()
-	err := New(nil, policy, nil).certifyTuple(t.Context(), &cfg, []byte("secret"), "fixture-model", CapabilityInput{Operation: "realtime", Surface: "openai", Mode: "webrtc"}, 4096)
+	err := New(nil, policy, nil, os.Getenv).certifyTuple(t.Context(), &cfg, []byte("secret"), "fixture-model", CapabilityInput{Operation: "realtime", Surface: "openai", Mode: "webrtc"}, 4096)
 	if err == nil || hangups.Load() != 1 {
 		t.Fatalf("control failure left the probe call open: hangups=%d err=%v", hangups.Load(), err)
 	}

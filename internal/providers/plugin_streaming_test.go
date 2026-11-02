@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -47,7 +48,7 @@ func TestForcedStreamingCertifiesNonStreamingTuplesFromTheStream(t *testing.T) {
 		Hosting: abi.Hosting{Address: upstream.URL + "/v1", Headers: map[string]string{"Authorization": "Token {credential}"}, ForceStreaming: true},
 	})
 	for _, mode := range []string{ModeUnary, ModeStreaming} {
-		if err := New(nil, loopbackPolicy(), nil).certifyTuple(t.Context(), &cfg, []byte("fixture-secret"), "acme-large", CapabilityInput{Operation: OperationGeneration, Surface: "openai", Mode: mode}, 4096); err != nil {
+		if err := New(nil, loopbackPolicy(), nil, os.Getenv).certifyTuple(t.Context(), &cfg, []byte("fixture-secret"), "acme-large", CapabilityInput{Operation: OperationGeneration, Surface: "openai", Mode: mode}, 4096); err != nil {
 			t.Fatalf("%s certification: %v", mode, err)
 		}
 	}

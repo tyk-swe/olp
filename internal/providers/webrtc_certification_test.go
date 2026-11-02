@@ -1,6 +1,7 @@
 package providers
 
 import (
+	"os"
 	"testing"
 
 	"github.com/tyk-swe/olp/internal/egress"
@@ -22,7 +23,7 @@ func TestWebRTCCapabilityIsOpenAIOnly(t *testing.T) {
 	}
 	azure := Configuration{Kind: KindAzure, AuthMode: AuthAPIKey, Endpoint: new("https://example.openai.azure.com")}
 	azure.Normalize()
-	if err := New(nil, &egress.Policy{}, nil).certifyTuple(t.Context(), &azure, []byte("secret"), "model", tuple, 4096); err == nil {
+	if err := New(nil, &egress.Policy{}, nil, os.Getenv).certifyTuple(t.Context(), &azure, []byte("secret"), "model", tuple, 4096); err == nil {
 		t.Fatal("azure webrtc certified")
 	}
 	found := false

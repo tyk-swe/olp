@@ -6,6 +6,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"os"
 	"testing"
 	"time"
 
@@ -93,7 +94,7 @@ func TestManagementListenerFailsClosedWhenDelegationAuthenticationIsUnavailable(
 	}
 	pool.Close()
 	mux := http.NewServeMux()
-	Management{Access: &access.Server{Pool: pool, Auth: secrets.NewAuthKey(make([]byte, 32), "test")}, Runtime: &runtime.Manager{}, Egress: &egress.Policy{}}.Register(mux)
+	Management{Getenv: os.Getenv, Access: &access.Server{Pool: pool, Auth: secrets.NewAuthKey(make([]byte, 32), "test")}, Runtime: &runtime.Manager{}, Egress: &egress.Policy{}}.Register(mux)
 	_, address := serveListener(t, mux, time.Minute, time.Second, 4)
 	for _, request := range []struct{ method, path string }{
 		{http.MethodPost, "/api/v1/delegation-consents"},

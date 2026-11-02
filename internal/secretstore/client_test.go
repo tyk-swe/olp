@@ -46,19 +46,21 @@ func response(body any) *http.Response {
 
 func resolverFixture(t *testing.T, transport roundTripFunc) *Resolver {
 	t.Helper()
-	r := New(egress.Policy{})
+	jwtFile := filepath.Join(t.TempDir(), "workload.jwt")
+	if err := os.WriteFile(jwtFile, []byte("fixture.workload.jwt"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("OLP_VAULT_ADDR", "https://ambient.invalid")
+	t.Setenv("OLP_VAULT_ROLE", "ambient")
+	t.Setenv("OLP_VAULT_JWT_FILE", filepath.Join(t.TempDir(), "missing.jwt"))
+	r := New(egress.Policy{}, func(name string) string {
+		return map[string]string{"OLP_VAULT_ADDR": "https://vault.example", "OLP_VAULT_ROLE": "operator", "OLP_VAULT_JWT_FILE": jwtFile}[name]
+	})
 	r.client.Transport = transport
 	r.azure = azureIdentity{}
 	r.google = make(chan credentialResult, 1)
 	r.google <- credentialResult{credential: cloudauth.NewCredentials(&cloudauth.CredentialsOptions{TokenProvider: googleIdentity{}})}
 	r.aws["us-east-1"] = aws.Config{Region: "us-east-1", Credentials: aws.NewCredentialsCache(credentials.NewStaticCredentialsProvider("fixture-identity", "fixture-signing-key", "fixture-session")), HTTPClient: r.client, RetryMaxAttempts: 1}
-	jwtFile := filepath.Join(t.TempDir(), "workload.jwt")
-	if err := os.WriteFile(jwtFile, []byte("fixture.workload.jwt"), 0600); err != nil {
-		t.Fatal(err)
-	}
-	r.getenv = func(name string) string {
-		return map[string]string{"OLP_VAULT_ADDR": "https://vault.example", "OLP_VAULT_ROLE": "operator", "OLP_VAULT_JWT_FILE": jwtFile}[name]
-	}
 	return r
 }
 
