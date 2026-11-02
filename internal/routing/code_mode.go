@@ -28,17 +28,18 @@ type codeCapability struct {
 	transport codeadapter.Transport
 }
 
-// CodeAdapters returns the adapters of a published route's frozen
-// connections in table order. A route's pool may mix them.
-func (s *Snapshot) CodeAdapters(route codemode.Route) []codemode.Adapter {
-	return s.codeRevisions[route.RevisionID].adapters
+func (s *Snapshot) HasCodeAdapters(route codemode.Route) bool {
+	return len(s.codeRevisions[route.RevisionID].adapters) != 0
 }
 
 // CodeProviders returns the providers of a published route's frozen
 // connections whose adapter serves a client path over transport, ordered by ID.
-// The returned slice is shared and must not be modified.
 func (s *Snapshot) CodeProviders(route codemode.Route, path string, transport codeadapter.Transport) []string {
-	return s.codeRevisions[route.RevisionID].providers[codeCapability{path, transport}]
+	return slices.Clone(s.codeRevisions[route.RevisionID].providers[codeCapability{path, transport}])
+}
+
+func (s *Snapshot) HasCodeProviders(route codemode.Route, path string, transport codeadapter.Transport) bool {
+	return len(s.codeRevisions[route.RevisionID].providers[codeCapability{path, transport}]) != 0
 }
 
 func (s *Snapshot) codeProvidersWithTranslation(route codemode.Route, path string) []string {
@@ -64,7 +65,7 @@ func (s *Snapshot) CodeModelProviders(route codemode.Route, path string, model s
 	}
 	revision := s.codeRevisions[route.RevisionID]
 	providers := s.CodeProviders(route, path, transport)
-	return slices.DeleteFunc(slices.Clone(providers), func(provider string) bool {
+	return slices.DeleteFunc(providers, func(provider string) bool {
 		adapter := revision.vendors[provider]
 		endpoint, ok := codeadapter.RouteEndpoint(route, adapter, path)
 		return !ok || !adapter.ServesModel(endpoint.Protocol, resolved.Model)
