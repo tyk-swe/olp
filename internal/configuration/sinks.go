@@ -63,8 +63,7 @@ func (s *Server) validateAndNormalizeSinks(doc *Document) error {
 		if err := sinks.ValidateAndNormalizeDefinition(&d, s.Egress); err != nil {
 			return err
 		}
-		e.Name, e.Destination, e.Streams = d.Name, d.Destination, d.Streams
-		slices.Sort(e.Streams)
+		e.Name, e.Destination, e.Streams = d.Name, d.Destination, slices.Sorted(slices.Values(d.Streams))
 		if e.CredentialRef != nil && *e.CredentialRef != sinkReference(*e) {
 			return access.Invalid("sinks.credential_ref", "Use the deterministic exported signing-credential reference.")
 		}

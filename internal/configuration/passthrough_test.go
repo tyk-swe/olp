@@ -5,8 +5,24 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/routing"
 )
+
+func TestSinkNormalizationPreservesSourceStreams(t *testing.T) {
+	source := []string{"requests", "attempts"}
+	doc := Document{Sinks: []SinkEntry{{Name: "sink", Type: "https", Destination: "https://example.test/export", Streams: source}}}
+	server := &Server{Egress: &egress.Policy{}}
+	if err := server.validateAndNormalizeSinks(&doc); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(source, []string{"requests", "attempts"}) {
+		t.Fatalf("normalization changed the source streams: %v", source)
+	}
+	if !reflect.DeepEqual(doc.Sinks[0].Streams, []string{"attempts", "requests"}) {
+		t.Fatalf("streams were not normalized: %v", doc.Sinks[0].Streams)
+	}
+}
 
 func passthroughEntry() *RouteEntry {
 	return &RouteEntry{
