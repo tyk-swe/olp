@@ -87,25 +87,6 @@ func TestBatchCompletionWindow(t *testing.T) {
 }
 
 func TestManagedBatchProjection(t *testing.T) {
-	for adapter, statuses := range managedBatchStatusProjection {
-		for source, want := range statuses {
-			body := map[string]any{"id": "job-status", "status": source, "endpoint": "/v1/chat/completions", "created_at": 1792497600}
-			if adapter == "together" {
-				body["input_file_id"] = "file-in"
-			} else {
-				body["input_files"] = []string{"file-in"}
-			}
-			encoded, _ := json.Marshal(body)
-			projected, _, err := projectManagedBatch(encoded, adapter, "24h")
-			if err != nil {
-				t.Fatalf("%s status %s: %v", adapter, source, err)
-			}
-			var value map[string]any
-			if json.Unmarshal(projected, &value) != nil || value["status"] != want {
-				t.Fatalf("%s status %s projected as %v", adapter, source, value)
-			}
-		}
-	}
 	tests := []struct {
 		name    string
 		adapter string

@@ -99,6 +99,11 @@ func TestGeminiManagedStatusAndCounts(t *testing.T) {
 			t.Fatalf("known state %s rejected: %v", state, err)
 		}
 	}
+	_, batchCancelling, batchErr := geminiManagedBatchMetadata([]byte(`{"name":"batches/fixture","metadata":{"state":"BATCH_STATE_CANCELLING"}}`), "target", "", manifest, nil, nil)
+	_, jobCancelling, jobErr := geminiManagedBatchMetadata([]byte(`{"name":"batches/fixture","metadata":{"state":"JOB_STATE_CANCELLING"}}`), "target", "", manifest, nil, nil)
+	if batchErr != nil || jobErr != nil || batchCancelling != jobCancelling {
+		t.Fatalf("cancelling states disagree: batch=%q (%v), job=%q (%v)", batchCancelling, batchErr, jobCancelling, jobErr)
+	}
 	unknown := []byte(`{"name":"batches/fixture","metadata":{"state":"JOB_STATE_UNKNOWN"}}`)
 	if _, _, err := geminiManagedBatchMetadata(unknown, "target", "", manifest, nil, nil); err == nil {
 		t.Fatal("accepted unknown Gemini managed state")

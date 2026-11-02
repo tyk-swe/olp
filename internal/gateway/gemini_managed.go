@@ -27,7 +27,7 @@ func geminiManagedBatchMetadata(body []byte, model, localInput string, manifest 
 	if json.Unmarshal(body, &provider) != nil || provider == nil {
 		return nil, "", errors.New("Gemini batch object is malformed")
 	}
-	status, ok := managedBatchStatusProjection["gemini_managed"][geminiBatchState(body)]
+	status, ok := batches.ManagedStatus("gemini_managed", geminiBatchState(body))
 	if !ok {
 		return nil, "", errGeminiManagedBatchState
 	}
