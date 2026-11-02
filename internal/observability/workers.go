@@ -11,41 +11,15 @@ import (
 	"github.com/tyk-swe/olp/internal/usage"
 )
 
-// WorkerTask is one fixed worker responsibility that checkpoints its liveness
-// into olp.worker_task_health.
-type WorkerTask struct {
-	Name       string
-	StaleAfter int64 // seconds since last success before the task is stale
-}
-
-// WorkerTasks is every fixed responsibility a worker replica may checkpoint.
-// RequestMetadataConsumer, CostReconciliation and HealthProbes exist only when
-// shared state is configured; the rest run on any worker replica.
-var WorkerTasks = []WorkerTask{
-	{Name: string(usage.TaskRequestMetadataConsumer), StaleAfter: 20},
-	{Name: string(usage.TaskEpochDetection), StaleAfter: 20},
-	{Name: string(usage.TaskMediaReconciliation), StaleAfter: 20},
-	{Name: string(usage.TaskBatchSettlement), StaleAfter: 180},
-	{Name: string(usage.TaskRetainedSettlement), StaleAfter: 180},
-	{Name: string(usage.TaskMaintenance), StaleAfter: 180},
-	{Name: string(usage.TaskCostReconciliation), StaleAfter: 180},
-	{Name: string(usage.TaskExecutionDebits), StaleAfter: 180},
-	{Name: string(usage.TaskNotificationDelivery), StaleAfter: 180},
-	{Name: string(usage.TaskManagedExportDelivery), StaleAfter: 180},
-	{Name: string(usage.TaskGrantRefresh), StaleAfter: 20},
-	{Name: string(usage.TaskHealthProbes), StaleAfter: 180},
-	{Name: string(usage.TaskExportDelivery), StaleAfter: 30},
-	{Name: string(usage.TaskBillingImport), StaleAfter: 180},
-	{Name: string(usage.TaskFocusExport), StaleAfter: 180},
-}
+type WorkerTask = usage.WorkerTask
 
 // ValkeyWorkerTasks are the responsibilities expected only when a limiter is
 // configured.
 var ValkeyWorkerTasks = func() []string {
 	var names []string
-	for _, task := range WorkerTasks {
-		if usage.RegionalTask(usage.Task(task.Name)) {
-			names = append(names, task.Name)
+	for _, task := range usage.WorkerTasks() {
+		if usage.RegionalTask(task.Name) {
+			names = append(names, string(task.Name))
 		}
 	}
 	return names
@@ -80,7 +54,7 @@ type WorkerTaskHealth struct {
 // CurrentFor reports whether every expected task has a current success.
 func (w *WorkerTaskHealth) CurrentFor(expected []WorkerTask) bool {
 	for _, task := range expected {
-		if w.status(task.Name).State != TaskStateHealthy {
+		if w.status(string(task.Name)).State != TaskStateHealthy {
 			return false
 		}
 	}
@@ -91,7 +65,7 @@ func (w *WorkerTaskHealth) CurrentFor(expected []WorkerTask) bool {
 func (w *WorkerTaskHealth) StaleFor(expected []WorkerTask) int64 {
 	var count int64
 	for _, task := range expected {
-		if w.status(task.Name).State == TaskStateStale {
+		if w.status(string(task.Name)).State == TaskStateStale {
 			count++
 		}
 	}
@@ -102,7 +76,7 @@ func (w *WorkerTaskHealth) StaleFor(expected []WorkerTask) int64 {
 func (w *WorkerTaskHealth) UnknownFor(expected []WorkerTask) int64 {
 	var count int64
 	for _, task := range expected {
-		if w.status(task.Name).State == TaskStateUnknown {
+		if w.status(string(task.Name)).State == TaskStateUnknown {
 			count++
 		}
 	}
@@ -113,7 +87,7 @@ func (w *WorkerTaskHealth) UnknownFor(expected []WorkerTask) int64 {
 func (w *WorkerTaskHealth) LastProgressFor(expected []WorkerTask) *time.Time {
 	var last *time.Time
 	for _, task := range expected {
-		if at := w.status(task.Name).LastProgressAt; at != nil && (last == nil || at.After(*last)) {
+		if at := w.status(string(task.Name)).LastProgressAt; at != nil && (last == nil || at.After(*last)) {
 			last = at
 		}
 	}
@@ -174,20 +148,13 @@ func ReadRegionalWorkerTaskHealth(ctx context.Context, q access.Queryer, region 
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
-	summary := &WorkerTaskHealth{Tasks: make([]WorkerTaskStatus, 0, len(WorkerTasks))}
-	for _, task := range WorkerTasks {
-		row, ok := byTask[task.Name]
+	tasks := usage.WorkerTasks()
+	summary := &WorkerTaskHealth{Tasks: make([]WorkerTaskStatus, 0, len(tasks))}
+	for _, task := range tasks {
+		row, ok := byTask[string(task.Name)]
 		if !ok {
-			summary.Tasks = append(summary.Tasks, WorkerTaskStatus{Task: task.Name, State: TaskStateUnknown})
+			summary.Tasks = append(summary.Tasks, WorkerTaskStatus{Task: string(task.Name), State: TaskStateUnknown})
 			continue
-		}
-		switch task.Name {
-		case string(usage.TaskRequestMetadataConsumer), string(usage.TaskEpochDetection),
-			string(usage.TaskMediaReconciliation), string(usage.TaskBatchSettlement), string(usage.TaskRetainedSettlement), string(usage.TaskMaintenance),
-			string(usage.TaskCostReconciliation), string(usage.TaskExecutionDebits), string(usage.TaskNotificationDelivery), string(usage.TaskExportDelivery), string(usage.TaskManagedExportDelivery),
-			string(usage.TaskGrantRefresh), string(usage.TaskHealthProbes), string(usage.TaskBillingImport), string(usage.TaskFocusExport):
-		default:
-			return nil, fmt.Errorf("stored worker task %q is invalid", task.Name)
 		}
 		row.State = TaskStateStale
 		if row.LastSuccessAgeSeconds != nil && *row.LastSuccessAgeSeconds <= task.StaleAfter {
