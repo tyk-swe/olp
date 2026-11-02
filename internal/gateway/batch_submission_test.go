@@ -344,9 +344,10 @@ func TestStrictAndFireworksBatchRefusals(t *testing.T) {
 }
 
 func TestManagedFileProjectionDoesNotInventFields(t *testing.T) {
+	provider := []byte(`{"bytes":12,"created_at":1792497600,"filename":"batch.jsonl","purpose":"batch-api","status":"processed"}`)
 	resource := &resources.Resource{
 		UUID: uuid.New(), Kind: resources.KindFile,
-		Metadata: managedFileMetadata([]byte(`{}`), []byte(`{"bytes":12,"created_at":1792497600,"filename":"batch.jsonl","purpose":"batch-api","status":"processed"}`), "together", batchManifest{}, "input"),
+		Metadata: managedFileMetadata([]byte(`{}`), provider, "together", batchManifest{}, "input"),
 	}
 	body, err := (&Server{}).fileObject(context.Background(), resource)
 	if err != nil {
@@ -358,6 +359,15 @@ func TestManagedFileProjectionDoesNotInventFields(t *testing.T) {
 	}
 	if string(fields["purpose"]) != `"batch"` || string(fields["object"]) != `"file"` {
 		t.Fatalf("managed file projection = %s", body)
+	}
+	var providerFields map[string]json.RawMessage
+	if err := json.Unmarshal(provider, &providerFields); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"bytes", "created_at", "filename"} {
+		if string(fields[name]) != string(providerFields[name]) {
+			t.Fatalf("managed file %s = %s, want %s", name, fields[name], providerFields[name])
+		}
 	}
 	if _, fabricated := fields["status"]; fabricated {
 		t.Fatalf("managed file projection fabricated a status: %s", body)
