@@ -2,6 +2,7 @@ package access
 
 import (
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -31,6 +32,31 @@ func TestKeyValidationNormalizesCostLimits(t *testing.T) {
 		if tc.got != tc.want {
 			t.Errorf("%s cost limit = %q, want %q", tc.name, tc.got, tc.want)
 		}
+	}
+}
+
+func TestKeyRejectsInvalidEndUserLimits(t *testing.T) {
+	invalid := "invalid"
+	source := "header"
+	digest := strings.Repeat("a", 64)
+	for _, tc := range []struct {
+		name   string
+		policy EndUserPolicy
+	}{
+		{name: "defaults", policy: EndUserPolicy{Defaults: AdmissionLimits{DailyCostLimit: &invalid}}},
+		{name: "override digest", policy: EndUserPolicy{Overrides: map[string]AdmissionLimits{"invalid": {}}}},
+		{name: "override limit", policy: EndUserPolicy{Overrides: map[string]AdmissionLimits{digest: {WeeklyCostLimit: &invalid}}}},
+		{name: "blocked digest", policy: EndUserPolicy{Blocked: []string{"invalid"}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			input := keyInput{Name: "key", KeyPolicy: KeyPolicy{
+				Scopes: []string{"inference"}, AllowedRoutes: []string{},
+				EndUserSource: &source, EndUserPolicy: &tc.policy,
+			}}
+			if err := validateAndNormalizeKey(input, false); err == nil {
+				t.Fatal("invalid end-user policy was accepted")
+			}
+		})
 	}
 }
 
