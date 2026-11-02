@@ -20,46 +20,46 @@ func (c Config) SupportsRetainedResponses() bool {
 // SupportsFilesBatches identifies provider configurations with qualified
 // owner-scoped file and batch lifecycle endpoints.
 func (c Config) SupportsFilesBatches() bool {
-	switch c.Kind {
-	case "azure_openai":
-		return true
-	case "openai":
-		return c.SupportsRetainedResponses()
-	case "openai_compatible":
-		if c.ProfileRevision != ProfileRevision {
-			return false
-		}
-		switch c.ProfileID {
-		case "groq-files-batches":
-			return c.VendorID == "groq"
-		case "together-files-batches":
-			return c.VendorID == "together"
-		case "mistral-files-batches":
-			return c.VendorID == "mistral"
-		}
-	case "gemini":
-		if c.ProfileID == "" {
-			return c.ProfileRevision == "" && c.Hosting() == ""
-		}
-		return c.ProfileID == "gemini-generation" && c.ProfileRevision == ProfileRevision && c.Hosting() == "direct-gemini"
-	}
-	return false
+	return c.FilesBatchesAdapter() != ""
 }
 
 // FilesBatchesAdapter names the reviewed resource lifecycle implementation.
 func (c Config) FilesBatchesAdapter() string {
-	if !c.SupportsFilesBatches() {
-		return ""
-	}
-	if c.Kind == "gemini" {
-		return "gemini_managed"
-	}
-	switch c.ProfileID {
-	case "together-files-batches":
-		return "together"
-	case "mistral-files-batches":
-		return "mistral"
-	default:
+	switch c.Kind {
+	case "azure_openai":
 		return "openai"
+	case "openai":
+		if c.SupportsRetainedResponses() {
+			return "openai"
+		}
+	case "openai_compatible":
+		if c.ProfileRevision != ProfileRevision {
+			return ""
+		}
+		switch c.ProfileID {
+		case "groq-files-batches":
+			if c.VendorID == "groq" {
+				return "openai"
+			}
+		case "together-files-batches":
+			if c.VendorID == "together" {
+				return "together"
+			}
+		case "mistral-files-batches":
+			if c.VendorID == "mistral" {
+				return "mistral"
+			}
+		}
+	case "gemini":
+		if c.ProfileID == "" {
+			if c.ProfileRevision == "" && c.Hosting() == "" {
+				return "gemini_managed"
+			}
+			return ""
+		}
+		if c.ProfileID == "gemini-generation" && c.ProfileRevision == ProfileRevision && c.Hosting() == "direct-gemini" {
+			return "gemini_managed"
+		}
 	}
+	return ""
 }
