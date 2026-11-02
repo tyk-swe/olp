@@ -32,7 +32,7 @@ func basePrice() Price {
 func TestPriceRateAgreesWithDecimalNormalization(t *testing.T) {
 	for _, value := range []string{"0", "1", "0.000000000001", "12.50", " 1 ", "1000000000000", "1.0000000000001", "-1", "1.2.3", "", "1e3", ".1"} {
 		t.Run(value, func(t *testing.T) {
-			normalized, amountErr := NormalizePriceAmount(value)
+			normalized, amountErr := normalizePriceAmount(value)
 			price := basePrice()
 			price.InputPerMillion = &value
 			actual, priceErr := normalizePrice(price, nil)

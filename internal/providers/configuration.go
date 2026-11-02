@@ -19,8 +19,8 @@ import (
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/plugins"
+	"github.com/tyk-swe/olp/internal/pricingpolicy"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
-	"github.com/tyk-swe/olp/internal/usage"
 	"github.com/tyk-swe/olp/internal/vendors"
 )
 
@@ -278,8 +278,8 @@ func (c *Configuration) Validate(policy *egress.Policy) error {
 		return access.Invalid("configuration.options.parameter_defaults", err.Error())
 	}
 	if c.Options.Commitment != nil {
-		amount, err := usage.NormalizePriceAmount(c.Options.Commitment.Amount)
-		if err != nil || strings.Trim(amount, "0.") == "" {
+		amount, valid := pricingpolicy.NormalizeAmount(c.Options.Commitment.Amount)
+		if !valid || strings.Trim(amount, "0.") == "" {
 			return access.Invalid("configuration.options.commitment.amount",
 				"A commitment amount is a positive decimal with at most 12 integer and 12 fractional digits.")
 		}

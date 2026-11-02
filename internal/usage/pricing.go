@@ -475,7 +475,7 @@ func normalizePrice(price Price, vendorKind func(vendor string) (string, bool)) 
 		if amount == nil {
 			continue
 		}
-		value, err := NormalizePriceAmount(*amount)
+		value, err := normalizePriceAmount(*amount)
 		if err != nil {
 			return Price{}, err
 		}
@@ -506,7 +506,7 @@ func normalizeToolCallFees(calls map[string]string) error {
 		if !toolNamePattern.MatchString(tool) {
 			return access.Invalid("prices", "A tool call fee name is malformed.")
 		}
-		value, err := NormalizePriceAmount(fee)
+		value, err := normalizePriceAmount(fee)
 		if err != nil {
 			return err
 		}
@@ -564,7 +564,7 @@ func normalizeTiers(tiers []PriceTier, entry *Price) error {
 			if *pair[1] == nil {
 				continue
 			}
-			value, err := NormalizePriceAmount(**pair[1])
+			value, err := normalizePriceAmount(**pair[1])
 			if err != nil {
 				return err
 			}
@@ -603,7 +603,7 @@ func normalizeWindows(windows *PriceWindows) error {
 		if end <= start {
 			return access.Invalid("prices", "A pricing window end must fall after its start.")
 		}
-		multiplier, err := NormalizePriceAmount(period.Multiplier)
+		multiplier, err := normalizePriceAmount(period.Multiplier)
 		if err != nil {
 			return err
 		}
@@ -637,27 +637,12 @@ func currencyLetters(value string) bool {
 	return value != ""
 }
 
-func NormalizePriceAmount(value string) (string, error) {
-	invalid := access.Invalid("prices",
+func normalizePriceAmount(value string) (string, error) {
+	if normalized, ok := pricingpolicy.NormalizeAmount(value); ok {
+		return normalized, nil
+	}
+	return "", access.Invalid("prices",
 		"Rates must be non-negative decimals with at most 12 integer and 12 fractional digits.")
-	trimmed := strings.TrimSpace(value)
-	integer, fraction, hasFraction := strings.Cut(trimmed, ".")
-	if trimmed == "" || len(integer) < 1 || len(integer) > 12 || !priceDigits(integer) {
-		return "", invalid
-	}
-	if hasFraction && (len(fraction) < 1 || len(fraction) > 12 || !priceDigits(fraction)) {
-		return "", invalid
-	}
-	return trimmed, nil
-}
-
-func priceDigits(value string) bool {
-	for _, r := range value {
-		if r < '0' || r > '9' {
-			return false
-		}
-	}
-	return true
 }
 
 const revisionColumns = `SELECT r.id::text, r.revision, r.effective_at, r.created_by::text,

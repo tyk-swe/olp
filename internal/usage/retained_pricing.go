@@ -126,7 +126,7 @@ func normalizeContainerRates(rates map[string]string) error {
 		if !memoryTierPattern.MatchString(tier) {
 			return access.Invalid("container_per_session", "Use a native memory tier such as 1g or 4g.")
 		}
-		normalized, err := NormalizePriceAmount(fee)
+		normalized, err := normalizePriceAmount(fee)
 		if err != nil {
 			return err
 		}

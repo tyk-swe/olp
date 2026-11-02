@@ -4,11 +4,10 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/tyk-swe/olp/internal/routing"
-
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/egress"
-	"github.com/tyk-swe/olp/internal/usage"
+	"github.com/tyk-swe/olp/internal/pricingpolicy"
+	"github.com/tyk-swe/olp/internal/routing"
 )
 
 // A grant's credential versions come from grant enrollment rather
@@ -27,6 +26,11 @@ func TestCommitmentValidation(t *testing.T) {
 	if err := cfg.Validate(&egress.Policy{}); err != nil {
 		t.Fatal(err)
 	}
+	small := cfg
+	small.Options.Commitment = &routing.Commitment{Amount: "0.000000000001", Period: "day"}
+	if err := small.Validate(&egress.Policy{}); err != nil {
+		t.Fatal(err)
+	}
 	for _, tc := range []struct {
 		name, field, amount, period string
 	}{
@@ -35,6 +39,7 @@ func TestCommitmentValidation(t *testing.T) {
 		{"malformed", "configuration.options.commitment.amount", "1.2.3", "day"},
 		{"empty amount", "configuration.options.commitment.amount", "", "day"},
 		{"long", "configuration.options.commitment.amount", "1234567890123", "day"},
+		{"long fraction", "configuration.options.commitment.amount", "0.0000000000001", "day"},
 		{"unknown period", "configuration.options.commitment.period", "100", "week"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -60,10 +65,10 @@ func TestCommitmentAndPriceAgreeOnDecimalPrecision(t *testing.T) {
 			cfg := Configuration{Kind: KindOpenAI, AuthMode: "api_key"}
 			cfg.Normalize()
 			cfg.Options.Commitment = &routing.Commitment{Amount: test.amount, Period: "day"}
-			normalized, priceErr := usage.NormalizePriceAmount(test.amount)
+			normalized, validAmount := pricingpolicy.NormalizeAmount(test.amount)
 			cfgErr := cfg.Validate(&egress.Policy{})
-			if (cfgErr == nil) != (priceErr == nil && !test.zero) {
-				t.Fatalf("commitment error = %v, price error = %v", cfgErr, priceErr)
+			if (cfgErr == nil) != (validAmount && !test.zero) {
+				t.Fatalf("commitment error = %v, amount valid = %v", cfgErr, validAmount)
 			}
 			if cfgErr == nil && cfg.Options.Commitment.Amount != normalized {
 				t.Fatalf("commitment amount = %q, price amount = %q", cfg.Options.Commitment.Amount, normalized)
