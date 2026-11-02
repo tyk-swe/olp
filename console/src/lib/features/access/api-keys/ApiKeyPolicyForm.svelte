@@ -25,9 +25,11 @@
     budgetWindowState
   } from '$lib/features/access/api-keys/budgetPresentation';
   import { guardUnsavedChanges } from '$lib/forms/unsavedChanges';
-  import { validateApiKey } from '$lib/features/access/api-keys/keyValidation';
   import {
     admissionPriorities,
+    validateApiKey
+  } from '$lib/features/access/api-keys/keyValidation';
+  import {
     buildApiKeyPolicyInput,
     createApiKeyFormState,
     expiryUnchanged,
