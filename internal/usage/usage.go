@@ -98,6 +98,40 @@ const (
 	TaskFocusExport Task = "focus_export"
 )
 
+type WorkerTask struct {
+	Name       Task
+	StaleAfter int64
+}
+
+func WorkerTasks() []WorkerTask {
+	return []WorkerTask{
+		{Name: TaskRequestMetadataConsumer, StaleAfter: 20},
+		{Name: TaskEpochDetection, StaleAfter: 20},
+		{Name: TaskMediaReconciliation, StaleAfter: 20},
+		{Name: TaskBatchSettlement, StaleAfter: 180},
+		{Name: TaskRetainedSettlement, StaleAfter: 180},
+		{Name: TaskMaintenance, StaleAfter: 180},
+		{Name: TaskCostReconciliation, StaleAfter: 180},
+		{Name: TaskExecutionDebits, StaleAfter: 180},
+		{Name: TaskNotificationDelivery, StaleAfter: 180},
+		{Name: TaskManagedExportDelivery, StaleAfter: 180},
+		{Name: TaskGrantRefresh, StaleAfter: 20},
+		{Name: TaskHealthProbes, StaleAfter: 180},
+		{Name: TaskExportDelivery, StaleAfter: 30},
+		{Name: TaskBillingImport, StaleAfter: 180},
+		{Name: TaskFocusExport, StaleAfter: 180},
+	}
+}
+
+func WorkerStaleAfter(task Task) int64 {
+	for _, worker := range WorkerTasks() {
+		if worker.Name == task {
+			return worker.StaleAfter
+		}
+	}
+	return 0
+}
+
 // Outcome is what one worker pass achieved.
 type Outcome int
 

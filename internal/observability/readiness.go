@@ -213,8 +213,8 @@ func probeStore(ctx context.Context, s *State, now time.Time, hasGeneration bool
 		// A gateway holding a pinned runtime can keep serving from the last
 		// known good snapshot; anything else is simply unready.
 		if s.ServesGateway && hasGeneration {
-			for _, task := range WorkerTasks {
-				probe.tasks.Tasks = append(probe.tasks.Tasks, WorkerTaskStatus{Task: task.Name, State: TaskStateUnknown})
+			for _, task := range usage.WorkerTasks() {
+				probe.tasks.Tasks = append(probe.tasks.Tasks, WorkerTaskStatus{Task: string(task.Name), State: TaskStateUnknown})
 			}
 			return probe, nil
 		}
@@ -251,14 +251,15 @@ func probeStore(ctx context.Context, s *State, now time.Time, hasGeneration bool
 
 // expectedTasks lists the worker responsibilities this process must see live.
 func expectedTasks(limiterConfigured bool) []WorkerTask {
+	tasks := usage.WorkerTasks()
 	if limiterConfigured {
-		return WorkerTasks
+		return tasks
 	}
-	out := make([]WorkerTask, 0, len(WorkerTasks)-len(ValkeyWorkerTasks))
-	for _, task := range WorkerTasks {
+	out := make([]WorkerTask, 0, len(tasks)-len(ValkeyWorkerTasks))
+	for _, task := range tasks {
 		valkey := false
 		for _, name := range ValkeyWorkerTasks {
-			if task.Name == name {
+			if string(task.Name) == name {
 				valkey = true
 			}
 		}
@@ -275,7 +276,7 @@ func expectedTasks(limiterConfigured bool) []WorkerTask {
 func asynchronousPlaneFlags(tasks *WorkerTaskHealth, expected []WorkerTask, consumer usage.ConsumerStatus) (current, drained bool) {
 	expectsConsumer := false
 	for _, task := range expected {
-		if task.Name == string(usage.TaskRequestMetadataConsumer) {
+		if task.Name == usage.TaskRequestMetadataConsumer {
 			expectsConsumer = true
 		}
 	}

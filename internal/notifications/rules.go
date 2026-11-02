@@ -19,19 +19,6 @@ var Events = []string{
 	"provider.credential.failing", "model.retirement", "runtime.install_failed", "worker.stale", "report.spend",
 }
 
-func WorkerStaleAfter(task string) int64 {
-	switch task {
-	case "request_metadata_consumer", "request_metadata_gateway_epoch_detection", "media_reconciliation", "grant_refresh":
-		return 20
-	case "maintenance", "cost_reconciliation", "notification_delivery", "health_probes", "managed_export_delivery",
-		"billing_import", "focus_export", "batch_settlement", "retained_settlement", "execution_debits":
-		return 180
-	case "export_delivery":
-		return 30
-	}
-	return 0
-}
-
 type RuleConfiguration struct {
 	WindowSeconds     int    `json:"window_seconds,omitempty"`
 	MinimumSamples    int    `json:"minimum_samples,omitempty"`

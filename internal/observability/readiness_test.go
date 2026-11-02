@@ -5,7 +5,6 @@ import (
 	"time"
 
 	"github.com/tyk-swe/olp/internal/media"
-	"github.com/tyk-swe/olp/internal/notifications"
 	"github.com/tyk-swe/olp/internal/usage"
 )
 
@@ -41,15 +40,12 @@ func TestReadinessDetectsStaleFinancialWorkers(t *testing.T) {
 	for _, stopped := range []usage.Task{usage.TaskBatchSettlement, usage.TaskRetainedSettlement, usage.TaskExecutionDebits} {
 		t.Run(string(stopped), func(t *testing.T) {
 			health := &WorkerTaskHealth{}
-			for _, task := range WorkerTasks {
+			for _, task := range usage.WorkerTasks() {
 				state := TaskStateHealthy
-				if task.Name == string(stopped) {
+				if task.Name == stopped {
 					state = TaskStateStale
-					if notifications.WorkerStaleAfter(task.Name) != task.StaleAfter {
-						t.Fatal("worker staleness notification threshold differs from readiness")
-					}
 				}
-				health.Tasks = append(health.Tasks, WorkerTaskStatus{Task: task.Name, State: state})
+				health.Tasks = append(health.Tasks, WorkerTaskStatus{Task: string(task.Name), State: state})
 			}
 			for _, configured := range []bool{false, true} {
 				if health.CurrentFor(expectedTasks(configured)) || health.StaleFor(expectedTasks(configured)) != 1 {

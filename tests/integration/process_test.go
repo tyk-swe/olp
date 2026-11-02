@@ -17,8 +17,8 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/tyk-swe/olp/internal/observability"
 	"github.com/tyk-swe/olp/internal/testutil"
+	"github.com/tyk-swe/olp/internal/usage"
 	"github.com/tyk-swe/olp/openapi"
 )
 
@@ -185,8 +185,8 @@ func awaitWorkerPlane(t *testing.T, since time.Time) {
 	}
 	defer pool.Close()
 	var wanted []string
-	for _, task := range observability.WorkerTasks {
-		wanted = append(wanted, task.Name)
+	for _, task := range usage.WorkerTasks() {
+		wanted = append(wanted, string(task.Name))
 	}
 	slices.Sort(wanted)
 	deadline := time.Now().Add(20 * time.Second)

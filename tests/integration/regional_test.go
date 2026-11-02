@@ -202,7 +202,7 @@ func TestRegionalRateAndConcurrencyLimitsWithGlobalBudgetReconciliation(t *testi
 	if err = usage.CheckpointTask(usage.WithWorkerRegion(t.Context(), "west"), h.Pool, usage.TaskCostReconciliation, usage.OutcomeSuccess, true); err != nil {
 		t.Fatal(err)
 	}
-	expected := []observability.WorkerTask{{Name: string(usage.TaskCostReconciliation)}}
+	expected := []observability.WorkerTask{{Name: usage.TaskCostReconciliation}}
 	for _, region := range []string{"west", "east"} {
 		health, err := observability.ReadRegionalWorkerTaskHealth(t.Context(), h.Pool, region)
 		if err != nil {
