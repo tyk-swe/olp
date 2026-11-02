@@ -14,7 +14,7 @@ func TestSinkValidationBoundsScopeAndDoesNotWeakenEgress(t *testing.T) {
 	enabled := true
 	policy := &egress.Policy{AllowedNetworks: []netip.Prefix{netip.MustParsePrefix("127.0.0.0/8")}, PlainHTTPHosts: []string{"127.0.0.1"}}
 	base := input{Name: " sink ", Destination: "http://127.0.0.1/export", Streams: []string{"requests", "attempts"}, Enabled: &enabled}
-	if err := validate(&base, policy, nil); err != nil || base.Name != "sink" || !slices.Equal(base.Streams, []string{"requests", "attempts"}) {
+	if err := validateAndNormalize(&base, policy, nil); err != nil || base.Name != "sink" || !slices.Equal(base.Streams, []string{"requests", "attempts"}) {
 		t.Fatalf("valid sink: %v", err)
 	}
 	for _, test := range []struct {
@@ -30,16 +30,16 @@ func TestSinkValidationBoundsScopeAndDoesNotWeakenEgress(t *testing.T) {
 		in := base
 		in.Streams = test.streams
 		in.Destination = test.destination
-		if validate(&in, policy, test.project) == nil {
+		if validateAndNormalize(&in, policy, test.project) == nil {
 			t.Fatalf("accepted unsafe sink: %v", test)
 		}
 	}
-	if validate(&base, &egress.Policy{}, nil) == nil {
+	if validateAndNormalize(&base, &egress.Policy{}, nil) == nil {
 		t.Fatal("private HTTP destination bypassed default egress")
 	}
 }
 
-func TestValidateDefinitionWorkflowEvidence(t *testing.T) {
+func TestValidateAndNormalizeDefinitionWorkflowEvidence(t *testing.T) {
 	policy := &egress.Policy{}
 	project := "project"
 	for _, tc := range []struct {
@@ -56,7 +56,7 @@ func TestValidateDefinitionWorkflowEvidence(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			definition := Definition{ProjectID: tc.project, Name: " evidence ", Type: "https", Destination: "https://EXAMPLE.test/export/", Streams: tc.streams}
-			if err := ValidateDefinition(&definition, policy); err != nil {
+			if err := ValidateAndNormalizeDefinition(&definition, policy); err != nil {
 				t.Fatalf("valid evidence sink rejected: %v", err)
 			}
 			if definition.Name != "evidence" || definition.Destination != "https://example.test/export" || !slices.Equal(definition.Streams, tc.streams) {
@@ -86,7 +86,7 @@ func TestValidateDefinitionWorkflowEvidence(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			definition := Definition{ProjectID: tc.project, Name: "evidence", Type: tc.typ, Destination: tc.destination, Streams: tc.streams}
-			err := ValidateDefinition(&definition, tc.policy)
+			err := ValidateAndNormalizeDefinition(&definition, tc.policy)
 			var problem *access.Problem
 			if !errors.As(err, &problem) || problem.Status != tc.status || problem.Field != tc.field {
 				t.Fatalf("expected status %d for %q, got %v", tc.status, tc.field, err)

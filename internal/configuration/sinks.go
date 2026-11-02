@@ -60,7 +60,7 @@ func (s *Server) validateSinks(doc *Document) error {
 		}
 		seen[key] = true
 		d := sinks.Definition{Name: e.Name, ProjectID: e.Project, Type: e.Type, Destination: e.Destination, Streams: e.Streams, Enabled: e.Enabled}
-		if err := sinks.ValidateDefinition(&d, s.Egress); err != nil {
+		if err := sinks.ValidateAndNormalizeDefinition(&d, s.Egress); err != nil {
 			return err
 		}
 		e.Name, e.Destination, e.Streams = d.Name, d.Destination, d.Streams
