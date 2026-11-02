@@ -1,6 +1,7 @@
 package interaction
 
 import (
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/url"
@@ -67,6 +68,24 @@ func assertReason(t *testing.T, err error, reason string) {
 	var failure *oif.Incompatibility
 	if !errors.As(err, &failure) || failure.Code != reason {
 		t.Fatalf("reason: got %v, want %s", err, reason)
+	}
+}
+
+func TestNativeGenerationDefaultsPreserveUnrelatedExtension(t *testing.T) {
+	config := configuration(t, "compatible-chat")
+	config.Provider.OperationDefaults = map[string]connectors.DefaultSet{
+		"generation": {
+			Dialect:       "openai-chat",
+			NativeOptions: map[string]json.RawMessage{"timestamp_granularities": json.RawMessage(`"fixture-extension"`)},
+		},
+	}
+	plan := bind(t, template(t, config), request(t, wire.Chat, `{"model":"route","messages":[{"role":"user","content":"hello"}]}`), Context{})
+	var payload map[string]json.RawMessage
+	if err := json.Unmarshal(plan.Body(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if string(payload["timestamp_granularities"]) != `"fixture-extension"` {
+		t.Fatalf("native extension was not preserved: %s", plan.Body())
 	}
 }
 

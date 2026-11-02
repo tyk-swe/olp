@@ -700,7 +700,7 @@ func DecodeTranscription(form *Form) (*Request, *Error) {
 	if !wire.ValidTranscriptionResponseFormat(format) {
 		return nil, invalidMedia("The transcription response_format is not supported.")
 	}
-	if len(granularities) > 0 && (format != "verbose_json" || !allOf(granularities, "word", "segment")) {
+	if len(granularities) > 0 && (format != "verbose_json" || !wire.ValidTranscriptionTimestampGranularities(granularities)) {
 		return nil, invalidMedia("The timestamp_granularities field requires verbose_json with word or segment values.")
 	}
 	if len(include) > 0 && (format != "json" || !allOf(include, "logprobs")) {

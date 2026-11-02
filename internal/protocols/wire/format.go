@@ -14,6 +14,15 @@ func ValidTranscriptionResponseFormat(format string) bool {
 	return format == "diarized_json" || ValidTranslationResponseFormat(format)
 }
 
+func ValidTranscriptionTimestampGranularities(values []string) bool {
+	for _, value := range values {
+		if value != "word" && value != "segment" {
+			return false
+		}
+	}
+	return true
+}
+
 // OperationGeneration is the gateway operation both codecs map to.
 const OperationGeneration = "generation"
 

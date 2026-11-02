@@ -182,6 +182,9 @@ func defaultControlKind(operation, name string) string {
 	if name == "response_format" && operation != "generation" {
 		return "string"
 	}
+	if name == "timestamp_granularities" && operation == "transcription" {
+		return "array"
+	}
 	switch name {
 	case "temperature", "top_p", "frequency_penalty", "presence_penalty", "speed":
 		return "number"
@@ -189,7 +192,7 @@ func defaultControlKind(operation, name string) string {
 		return "integer"
 	case "parallel_tool_calls", "logprobs", "return_documents", "autoTruncate", "normalize":
 		return "boolean"
-	case "tools", "safetySettings", "stop_sequences", "embeddingTypes", "additionalModelResponseFieldPaths", "timestamp_granularities":
+	case "tools", "safetySettings", "stop_sequences", "embeddingTypes", "additionalModelResponseFieldPaths":
 		return "array"
 	case "response_format", "reasoning", "text", "thinking", "output_config", "generationConfig", "toolConfig", "inferenceConfig", "additionalModelRequestFields", "parameters", "stream_options":
 		return "object"
@@ -222,6 +225,9 @@ func validateDefaultValue(operation, name string, raw json.RawMessage) error {
 		if operation == "translation" && !wire.ValidTranslationResponseFormat(format) {
 			return errors.New("audio translation response_format is not supported")
 		}
+		return nil
+	}
+	if name == "timestamp_granularities" && operation == "transcription" {
 		return nil
 	}
 	switch defaultControlKind(operation, name) {

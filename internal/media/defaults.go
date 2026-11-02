@@ -386,7 +386,7 @@ func validateConfiguredResponse(r *Request) *Error {
 		if r.Temperature != nil && (*r.Temperature < 0 || *r.Temperature > 1) {
 			return configuredFailure("temperature", "must be between 0 and 1")
 		}
-		if len(r.TimestampGranularities) > 0 && (format != "verbose_json" || !allOf(r.TimestampGranularities, "word", "segment")) {
+		if len(r.TimestampGranularities) > 0 && (format != "verbose_json" || !wire.ValidTranscriptionTimestampGranularities(r.TimestampGranularities)) {
 			return configuredFailure("timestamp_granularities", "requires verbose_json and word or segment values")
 		}
 		if len(r.Include) > 0 && (format != "json" || !allOf(r.Include, "logprobs")) {
