@@ -14,10 +14,12 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/tyk-swe/olp/internal/coordination"
 	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/limits"
+	"github.com/tyk-swe/olp/internal/routeidentity"
 )
 
 // limNilUUID is the API key identity used by tests that exercise rate limits
@@ -614,6 +616,44 @@ func TestLimitsDurableSpendReconcilesIntoValkey(t *testing.T) {
 	spender := limSeedKey(t, pool, owner, false)
 	idle := limSeedKey(t, pool, owner, false)
 	revoked := limSeedKey(t, pool, owner, true)
+
+	t.Run("route budget names match route validation", func(t *testing.T) {
+		tx, err := pool.Begin(t.Context())
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer tx.Rollback(t.Context())
+		for _, route := range []string{
+			"route", "0-route", "a.b_c-1", strings.Repeat("a", 100),
+			"", "Route", "a/b", "a\n", "é", strings.Repeat("a", 101),
+		} {
+			t.Run(strconv.Quote(route), func(t *testing.T) {
+				caseTx, err := tx.Begin(t.Context())
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer caseTx.Rollback(t.Context())
+				budgetErr := limits.EnsureKeyRouteBudget(t.Context(), caseTx, spender, route)
+				valid := routeidentity.ValidSlug(route)
+				if budgetErr != nil {
+					pgErr, ok := errors.AsType[*pgconn.PgError](budgetErr)
+					if valid || !ok || pgErr.Code != "23514" {
+						t.Fatalf("budget rejected route %q, valid = %v, error = %v", route, valid, budgetErr)
+					}
+					return
+				}
+				if !valid {
+					t.Fatalf("budget accepted invalid route %q", route)
+				}
+				var exists bool
+				if err := caseTx.QueryRow(t.Context(), `SELECT EXISTS (
+					SELECT 1 FROM olp.aggregate_budget_accounts WHERE api_key_id=$1 AND route_slug=$2
+				)`, spender, route).Scan(&exists); err != nil || !exists {
+					t.Fatalf("budget for route %q exists = %v, error = %v", route, exists, err)
+				}
+			})
+		}
+	})
 
 	// Two attempts inside today, one earlier in the month, and two outside the
 	// month entirely, plus the rolled up form of an hour that has aged out.
