@@ -24,6 +24,7 @@ import (
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/container"
 	"github.com/shopspring/decimal"
 	"github.com/tyk-swe/olp/internal/connectors"
+	"github.com/tyk-swe/olp/internal/usage"
 )
 
 const (
@@ -168,7 +169,7 @@ func fetchAzureSource(ctx context.Context, in *fetchInput, emit func(periodDays)
 	defer authClient.CloseIdleConnections()
 	today := in.importer.now().UTC().Truncate(24 * time.Hour)
 	var retention int
-	if err := in.importer.Pool.QueryRow(ctx, `SELECT COALESCE((SELECT value::int FROM olp.settings WHERE key='retention.usage_days'),90)`).Scan(&retention); err != nil {
+	if err := in.importer.Pool.QueryRow(ctx, `SELECT COALESCE((SELECT value::int FROM olp.settings WHERE key=$1),90)`, usage.RetentionUsageDaysKey).Scan(&retention); err != nil {
 		return err
 	}
 	earliest := today.AddDate(0, 0, -retention)

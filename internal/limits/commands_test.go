@@ -241,3 +241,33 @@ func TestReleasingAnEstimateOutlastsASlowServer(t *testing.T) {
 		}
 	}
 }
+
+func TestRateResetCountsDownOnTheLimiterClock(t *testing.T) {
+	t.Parallel()
+	current := time.Date(2026, 11, 2, 12, 0, 0, 0, time.UTC)
+	answers := map[string][2]any{
+		"reserve_cost": {costGranted, nil},
+		"reserve_limits": {rateReply(1, "ok", 0, testWindow, 0, allowance{
+			requestLimit: 10, requestRemaining: 9, resetMS: 30_000,
+		}), nil},
+	}
+	inner := &scripted{answer: answering(t, answers)}
+	limiter := &Limiter{client: inner, namespace: "olp:test", Now: func() time.Time { return current }}
+	request := costRequest(true)
+	request.ReportRate = true
+	lease, err := limiter.Reserve(t.Context(), request)
+	if err != nil {
+		t.Fatalf("Reserve: %v", err)
+	}
+	if got := lease.RateReset(); got != 30*time.Second {
+		t.Fatalf("RateReset at reservation = %v, want 30s", got)
+	}
+	current = current.Add(12 * time.Second)
+	if got := lease.RateReset(); got != 18*time.Second {
+		t.Fatalf("RateReset after 12s on the limiter clock = %v, want 18s", got)
+	}
+	current = current.Add(30 * time.Second)
+	if got := lease.RateReset(); got != 0 {
+		t.Fatalf("RateReset after the minute = %v, want 0", got)
+	}
+}

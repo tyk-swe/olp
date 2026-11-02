@@ -90,12 +90,12 @@ func (r *GeminiReader) Poll(ctx context.Context, settlement Settlement, target *
 	fields := url.Values{"fields": {"name,done,error,metadata(state,createTime,inputConfig(fileName),batchStats)"}}
 	body, err := reader.getJSON(ctx, target, path, fields, 1<<20)
 	if err != nil {
-		if !strings.Contains(err.Error(), "exceeds the limit") {
+		if !errors.Is(err, errResponseOverLimit) {
 			return BatchSnapshot{}, err
 		}
 		body, err = reader.getJSON(ctx, target, path, nil, MaxBatchBytes)
 		if err != nil {
-			if strings.Contains(err.Error(), "exceeds the limit") {
+			if errors.Is(err, errResponseOverLimit) {
 				return BatchSnapshot{}, ErrBatchTooLarge
 			}
 			return BatchSnapshot{}, err
@@ -123,7 +123,7 @@ func (r *GeminiReader) Poll(ctx context.Context, settlement Settlement, target *
 	}
 	terminal, err := reader.getJSON(ctx, target, path, nil, MaxBatchBytes)
 	if err != nil {
-		if strings.Contains(err.Error(), "exceeds the limit") {
+		if errors.Is(err, errResponseOverLimit) {
 			return BatchSnapshot{}, ErrBatchTooLarge
 		}
 		return BatchSnapshot{}, err

@@ -17,6 +17,13 @@ type DelegationManagement struct {
 	Manager *Manager
 }
 
+func (s *DelegationManagement) now() time.Time {
+	if s.Manager != nil {
+		return s.Manager.now()
+	}
+	return time.Now()
+}
+
 type delegationOption struct {
 	ID              string   `json:"id"`
 	AllowedRoutes   []string `json:"allowed_routes"`
@@ -97,14 +104,14 @@ func (s *DelegationManagement) options(r *http.Request, _ access.Principal) (acc
 	s.Manager.mu.RLock()
 	defer s.Manager.mu.RUnlock()
 	state := s.Manager.authority
-	if !state.loaded || state.id != current || time.Since(state.readAt) > AuthorityStaleAfter {
+	if !state.loaded || state.id != current || s.now().Sub(state.readAt) > AuthorityStaleAfter {
 		return access.Reply{}, access.Fail(http.StatusServiceUnavailable, "authority_unavailable", "Delegation is unavailable.")
 	}
 	key, ok := state.agentPrincipals[keyID]
 	if !ok || key.WorkloadIssuerID != nil || key.ProjectID == nil || *key.ProjectID != *projectID || !slices.Contains(key.Policy.Scopes, "delegate") {
 		return access.Reply{}, access.Forbidden()
 	}
-	now := time.Now()
+	now := s.now()
 	options := slices.SortedFunc(func(yield func(delegationOption) bool) {
 		for _, registered := range state.workloadPrincipals {
 			if registered.ProjectID == nil || *registered.ProjectID != *projectID {
@@ -181,11 +188,12 @@ func (s *DelegationManagement) create(r *http.Request, _ access.Principal) (acce
 	if err := principal.Project(target.key.ProjectID, access.Change); err != nil {
 		return access.Reply{}, err
 	}
-	if target.key.ProjectID == nil || target.agent.ProjectID == nil || *target.key.ProjectID != *target.agent.ProjectID || !slices.Contains(target.key.Policy.Scopes, "delegate") || !delegationResourcesAllowed(target.agent, target.key, bounds.AllowedRoutes, bounds.AllowedToolsets, bounds.AllowedAgents, time.Now()) {
+	now := s.now()
+	if target.key.ProjectID == nil || target.agent.ProjectID == nil || *target.key.ProjectID != *target.agent.ProjectID || !slices.Contains(target.key.Policy.Scopes, "delegate") || !delegationResourcesAllowed(target.agent, target.key, bounds.AllowedRoutes, bounds.AllowedToolsets, bounds.AllowedAgents, now) {
 		return access.Reply{}, access.Forbidden()
 	}
 	code := "olpc_" + secrets.Token()
-	expires := boundDelegationExpiry(time.Now().Add(delegationTTL(bounds.TTLSeconds)), target.key.ExpiresAt)
+	expires := boundDelegationExpiry(now.Add(delegationTTL(bounds.TTLSeconds)), target.key.ExpiresAt)
 	if _, err := tx.Exec(r.Context(), `INSERT INTO olp.agent_delegations(token_digest,consent_digest,consenting_user_id,project_id,api_key_id,agent_id,issuer_revision,scopes,allowed_routes,allowed_toolsets,expires_at,allowed_agents) VALUES($1,$2,$3,$4,$5,$6,$7,$8,COALESCE($9,ARRAY[]::text[]),COALESCE($10,ARRAY[]::text[]),$11,COALESCE($12,ARRAY[]::text[]))`, s.Manager.auth.Digest(secrets.DelegationTokenDigest, "unissued:"+code), s.Manager.auth.Digest(secrets.DelegationConsentDigest, code), principal.ID, *target.key.ProjectID, keyID, agentID, target.revision, bounds.Scopes, bounds.AllowedRoutes, bounds.AllowedToolsets, expires, bounds.AllowedAgents); err != nil {
 		return access.Reply{}, err
 	}
@@ -217,7 +225,7 @@ func (m *Manager) memberConsentTarget(ctx context.Context, tx pgx.Tx, agentID, k
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	state := m.authority
-	if !state.loaded || state.id != current || time.Since(state.readAt) > AuthorityStaleAfter {
+	if !state.loaded || state.id != current || m.now().Sub(state.readAt) > AuthorityStaleAfter {
 		return memberConsentTarget{}, access.Fail(http.StatusServiceUnavailable, "authority_unavailable", "Delegation is unavailable.")
 	}
 	key, ok := state.agentPrincipals[keyID]

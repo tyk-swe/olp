@@ -1,12 +1,11 @@
 package access
 
 import (
-	"errors"
 	"net/http"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgconn"
 
+	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/secrets"
 )
 
@@ -85,8 +84,7 @@ func (s *Server) deleteResource(r *http.Request, _ Principal, spec deletableReso
 		_, err = tx.Exec(r.Context(), "DELETE FROM "+table+" WHERE id=$1", id)
 	}
 	if err != nil {
-		var constraint *pgconn.PgError
-		if errors.As(err, &constraint) && constraint.Code == "23503" {
+		if database.IsForeignKeyViolation(err) {
 			return Reply{}, Fail(409, spec.kind+"_in_use", "The resource still has dependent resources or retained history.")
 		}
 		return Reply{}, err

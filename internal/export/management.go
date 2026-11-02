@@ -15,9 +15,9 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/secrets"
 )
@@ -467,8 +467,7 @@ func (m *Management) deleteSink(r *http.Request, _ access.Principal) (access.Rep
 		return access.Reply{}, err
 	}
 	if _, err := tx.Exec(r.Context(), deleteSinkSQL, current.ID); err != nil {
-		var constraint *pgconn.PgError
-		if errors.As(err, &constraint) && constraint.Code == "23503" {
+		if database.IsForeignKeyViolation(err) {
 			return access.Reply{}, access.Fail(409, "sink_in_use", "Remove or repoint capture policies before deleting this sink.")
 		}
 		return access.Reply{}, err
@@ -621,7 +620,7 @@ func (m *Management) validateSink(sink *Sink) error {
 	}
 	u, err := url.Parse(sink.Destination)
 	plainHTTP := err == nil && u != nil && m.Egress != nil && slices.Contains(m.Egress.PlainHTTPHosts, u.Hostname())
-	if err != nil || u == nil || u.Scheme != "https" && !(plainHTTP && u.Scheme == "http") || u.Hostname() == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
+	if err != nil || u == nil || u.Scheme != "https" && (!plainHTTP || u.Scheme != "http") || u.Hostname() == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
 		return access.Invalid("destination", "destination must be an HTTPS URL without credentials, query or fragment")
 	}
 	if _, err := m.Egress.ValidateEndpoint(sink.Destination); err != nil {

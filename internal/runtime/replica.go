@@ -77,7 +77,7 @@ func (m *Manager) runtimeReadPool() *pgxpool.Pool {
 // that snapshot includes at least the proven replay position. Monitoring costs
 // two constant-size queries per poll, never a query on the admission path.
 func (m *Manager) authorityReadTime(ctx context.Context) (time.Time, error) {
-	at := time.Now()
+	at := m.now()
 	if m.ReadPool == nil {
 		return at, nil
 	}

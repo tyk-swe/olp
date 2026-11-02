@@ -1,10 +1,9 @@
 package access
 
 import (
-	"errors"
 	"net/http"
 
-	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/tyk-swe/olp/internal/database"
 )
 
 // Deletion removes an empty project boundary. PostgreSQL foreign keys retain
@@ -48,8 +47,7 @@ func (s *Server) deleteProject(r *http.Request, _ Principal) (Reply, error) {
 		return Reply{}, Fail(http.StatusConflict, "project_in_use", "Project still has resources or retained accounting history.")
 	}
 	if _, err = tx.Exec(r.Context(), "DELETE FROM olp.projects WHERE id=$1", id); err != nil {
-		var constraint *pgconn.PgError
-		if errors.As(err, &constraint) && constraint.Code == "23503" {
+		if database.IsForeignKeyViolation(err) {
 			return Reply{}, Fail(http.StatusConflict, "project_in_use", "Project still has resources or retained accounting history.")
 		}
 		return Reply{}, err

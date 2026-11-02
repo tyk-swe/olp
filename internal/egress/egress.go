@@ -23,6 +23,11 @@ var ErrUnsafeDestination = errors.New("destination address is not allowed for pr
 // gateway never follows one because the target was validated ahead of time.
 var ErrRedirect = errors.New("upstream redirects are refused")
 
+func IsRedirect(err error) bool {
+	return errors.Is(err, ErrRedirect) ||
+		err != nil && strings.Contains(err.Error(), ErrRedirect.Error())
+}
+
 var pinnedDialer = &net.Dialer{Timeout: 5 * time.Second, KeepAlive: 30 * time.Second}
 
 // Policy holds the operator exceptions applied to every provider destination.
@@ -88,7 +93,7 @@ func validHostname(host string) bool {
 			return false
 		}
 		for _, c := range label {
-			if !(c >= 'a' && c <= 'z' || c >= '0' && c <= '9' || c == '-') {
+			if (c < 'a' || c > 'z') && (c < '0' || c > '9') && c != '-' {
 				return false
 			}
 		}

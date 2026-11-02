@@ -317,7 +317,8 @@ func (s *Server) rewriteRetainedRequest(ctx context.Context, x *call, a access.A
 		}
 		var bound *resources.Resource
 		var err error
-		if kind == resources.KindResponse {
+		switch kind {
+		case resources.KindResponse:
 			var contract *storedResponseContract
 			bound, contract, err = s.readResponseResource(ctx, x.keyID, id)
 			if err == nil {
@@ -326,7 +327,7 @@ func (s *Server) rewriteRetainedRequest(ctx context.Context, x *call, a access.A
 					err = resources.ErrNotFound
 				}
 			}
-		} else if kind == resources.KindFile {
+		case resources.KindFile:
 			// A file handle may name either the transformed or the
 			// strict durable kind; resolve it through the durable
 			// contract so strict handles keep their checks.
@@ -343,7 +344,7 @@ func (s *Server) rewriteRetainedRequest(ctx context.Context, x *call, a access.A
 					err = resources.ErrNotFound
 				}
 			}
-		} else {
+		default:
 			local := id
 			if kind == resources.KindGeminiFile {
 				local, err = retainedGeminiFileID(id)

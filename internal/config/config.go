@@ -36,6 +36,7 @@ type Config struct {
 	DatabaseURL               string
 	DatabaseReadURL           string
 	Region                    string
+	Hostname                  string
 	DatabaseMaxConnections    int
 	ValkeyURL                 string
 	ValkeyCAFile              string
@@ -263,6 +264,7 @@ func Parse(args []string, getenv func(string) string, output io.Writer) (Config,
 	if c.LogLevel != slog.LevelDebug && c.LogLevel != slog.LevelInfo && c.LogLevel != slog.LevelWarn && c.LogLevel != slog.LevelError {
 		return c, errors.New("OLP_LOG_LEVEL must be debug, info, warn, or error")
 	}
+	c.Hostname = getenv("HOSTNAME")
 	return c, c.Validate()
 }
 

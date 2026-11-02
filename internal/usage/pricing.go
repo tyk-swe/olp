@@ -175,7 +175,7 @@ type Revision struct {
 // event; this owns the numbering, the installation currency, and every rule
 // that makes a stored rate meaningful.
 func CreateRevision(ctx context.Context, tx pgx.Tx, actor string, effectiveAt time.Time,
-	prices []Price, vendorKind func(vendor string) (string, bool)) (Revision, error) {
+	now time.Time, prices []Price, vendorKind func(vendor string) (string, bool)) (Revision, error) {
 	normalized, currency, err := validatePrices(prices, vendorKind)
 	if err != nil {
 		return Revision{}, err
@@ -196,7 +196,7 @@ func CreateRevision(ctx context.Context, tx pgx.Tx, actor string, effectiveAt ti
 		Revision:    number,
 		EffectiveAt: effectiveAt.UTC(),
 		CreatedBy:   actor,
-		CreatedAt:   time.Now().UTC(),
+		CreatedAt:   now.UTC(),
 		Prices:      normalized,
 	}
 	if _, err = tx.Exec(ctx, `INSERT INTO olp.pricing_revisions

@@ -28,6 +28,7 @@ import (
 )
 
 const stateRouteHeader = "X-OLP-Route"
+const resourceIDHeader = "X-OLP-Resource-ID"
 
 func (s *Server) registerState(mux *http.ServeMux) {
 	if s.Resources == nil {
@@ -1809,9 +1810,10 @@ func (s *Server) createBatch(w http.ResponseWriter, r *http.Request) {
 		upstream = effective.Bytes()
 	}
 	batchPath := "batches"
-	if adapter == "mistral" {
+	switch adapter {
+	case "mistral":
 		batchPath = "batch/jobs"
-	} else if adapter == "gemini_managed" {
+	case "gemini_managed":
 		batchPath = "models/" + url.PathEscape(p.provider.Connector().Model(p.model)) + ":batchGenerateContent"
 	}
 	endpoint, err := resourceURL(p.provider.Connector(), p.model, batchPath, nil)
@@ -2175,7 +2177,8 @@ func (s *Server) batchRefresh(ctx context.Context, x *call, res *resources.Resou
 		}
 	}
 	metadata, state := batchMetadata(result, resourceModel(res), batchLocalInput(res))
-	if adapter == "gemini_managed" {
+	switch adapter {
+	case "gemini_managed":
 		var clientMetadata json.RawMessage
 		var previous map[string]json.RawMessage
 		_ = json.Unmarshal(res.Metadata, &previous)
@@ -2188,7 +2191,7 @@ func (s *Server) batchRefresh(ctx context.Context, x *call, res *resources.Resou
 		if err != nil {
 			return serverError(http.StatusBadGateway, "fidelity_protocol_violation", "The provider returned a malformed Gemini batch object.")
 		}
-	} else if adapter == "together" || adapter == "mistral" {
+	case "together", "mistral":
 		metadata, state = managedBatchMetadata(result, resourceModel(res), batchLocalInput(res), adapter)
 	}
 	commitCtx := ctx

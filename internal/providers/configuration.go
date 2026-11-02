@@ -305,7 +305,7 @@ func ValidLimits(field string, q Limits) error {
 	if !ValidQuota(q) {
 		return access.Invalid(field, "Use positive limits: requests and concurrency at most 2147483647, tokens at most 9007199254740991.")
 	}
-	if err := q.Supply.Validate(field); err != nil {
+	if err := q.Validate(field); err != nil {
 		return err
 	}
 	if q.Shared() && q.RequestsPerMinute == nil && q.TokensPerMinute == nil && q.MaxConcurrency == nil {

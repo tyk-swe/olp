@@ -21,8 +21,8 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/secrets"
 )
@@ -52,6 +52,7 @@ type Server struct {
 	ManagementNetworkRestricted bool
 	// ClientIP is wired to the shared trusted-proxy resolver by the process.
 	ClientIP func(*http.Request) string
+	Now      func() time.Time
 	// RetentionEnforced is true where this installation is configured with the
 	// shared coordination state (OLP_VALKEY_URL) the worker plane requires, so
 	// retention and aggregation run in its worker and all processes. A control
@@ -70,7 +71,7 @@ type Server struct {
 }
 
 func New(ctx context.Context, pool *pgxpool.Pool, installation, origin string, auth *secrets.AuthKey, keys *secrets.KeyRing, bootstrap string) (*Server, error) {
-	s := &Server{Pool: pool, Installation: installation, Origin: strings.TrimSuffix(origin, "/"), Auth: auth, Keys: keys, Bootstrap: bootstrap, passwordSlots: make(chan struct{}, 4), dummyPassword: secrets.HashPassword(secrets.Token()), OIDCClient: oidcHTTPClient()}
+	s := &Server{Pool: pool, Installation: installation, Origin: strings.TrimSuffix(origin, "/"), Auth: auth, Keys: keys, Bootstrap: bootstrap, Now: time.Now, passwordSlots: make(chan struct{}, 4), dummyPassword: secrets.HashPassword(secrets.Token()), OIDCClient: oidcHTTPClient()}
 	tx, err := pool.Begin(ctx)
 	if err != nil {
 		return nil, err
@@ -100,6 +101,13 @@ func New(ctx context.Context, pool *pgxpool.Pool, installation, origin string, a
 		return nil, err
 	}
 	return s, nil
+}
+
+func (s *Server) now() time.Time {
+	if s.Now != nil {
+		return s.Now()
+	}
+	return time.Now()
 }
 
 type Problem struct {
@@ -255,7 +263,6 @@ func (w *streamWriter) Unwrap() http.ResponseWriter {
 
 func WriteProblem(w http.ResponseWriter, err error) {
 	p := &Problem{Status: 503, Code: "service_unavailable", Detail: "The operation could not be completed. Retry shortly."}
-	var pg *pgconn.PgError
 	if known, ok := errors.AsType[*Problem](err); ok {
 		p = known
 	} else if contract := ContractProblem(err); contract != nil {
@@ -274,14 +281,14 @@ func WriteProblem(w http.ResponseWriter, err error) {
 		p = &Problem{Status: 422, Code: "validation_failed", Detail: message, Field: field}
 	} else if errors.Is(err, pgx.ErrNoRows) {
 		p = &Problem{Status: 404, Code: "not_found", Detail: "The resource was not found."}
-	} else if errors.As(err, &pg) && pg.Code == "23505" {
+	} else if database.IsUniqueViolation(err) {
 		p = &Problem{Status: 409, Code: "already_exists", Detail: "This record already exists."}
 	} else {
 		// Driver and wrapped errors can contain SQL values or credentials.
 		// Log the category, never the error text.
 		args := []any{"error_type", fmt.Sprintf("%T", err)}
-		if pg != nil {
-			args = append(args, "sqlstate", pg.Code)
+		if code := database.SQLState(err); code != "" {
+			args = append(args, "sqlstate", code)
 		}
 		slog.Error("management request failed", args...)
 	}

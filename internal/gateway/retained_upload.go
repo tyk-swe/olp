@@ -94,7 +94,7 @@ func (s *Server) uploadRetainedFile(w http.ResponseWriter, r *http.Request, x *c
 		return
 	}
 	if lookupErr == nil {
-		w.Header().Set("X-OLP-Resource-ID", prior.ID)
+		w.Header().Set(resourceIDHeader, prior.ID)
 		fail(serverError(409, "submission_exists", "This upload already exists; inspect X-OLP-Resource-ID instead of recreating it."))
 		return
 	}
@@ -126,7 +126,7 @@ func (s *Server) uploadRetainedFile(w http.ResponseWriter, r *http.Request, x *c
 		fail(serverError(503, "provider_state_unavailable", "The file submission could not be committed."))
 		return
 	}
-	w.Header().Set("X-OLP-Resource-ID", resource.ID)
+	w.Header().Set(resourceIDHeader, resource.ID)
 	if !fresh {
 		fail(serverError(409, "submission_exists", "This upload already exists; inspect X-OLP-Resource-ID instead of recreating it."))
 		return

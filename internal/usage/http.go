@@ -21,6 +21,7 @@ import (
 // key.
 type Server struct {
 	Access *access.Server
+	Now    func() time.Time
 	// VendorKind resolves a vendor catalogue identifier to its connector kind.
 	// Pricing takes it as a function so accounting never depends on the
 	// provider package.
@@ -33,6 +34,16 @@ type Server struct {
 	Catalog *catalog.Signed
 	// CatalogKeys verify catalogs a pricing source fetches.
 	CatalogKeys signing.Keyring
+}
+
+func (s *Server) now() time.Time {
+	if s.Now != nil {
+		return s.Now()
+	}
+	if s.Access != nil && s.Access.Now != nil {
+		return s.Access.Now()
+	}
+	return time.Now()
 }
 
 // Register mounts the accounting routes. The patterns are more specific than
@@ -86,7 +97,7 @@ func (s *Server) usageSummary(r *http.Request, p access.Principal) (access.Reply
 	if err != nil {
 		return access.Reply{}, err
 	}
-	summary, err := ReadSummary(r.Context(), s.Access.Pool, filters, time.Now())
+	summary, err := ReadSummary(r.Context(), s.Access.Pool, filters, s.now())
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -98,7 +109,7 @@ func (s *Server) usageCompleteness(r *http.Request, p access.Principal) (access.
 	if err != nil {
 		return access.Reply{}, err
 	}
-	report, err := ReadCompleteness(r.Context(), s.Access.Pool, filters, time.Now())
+	report, err := ReadCompleteness(r.Context(), s.Access.Pool, filters, s.now())
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -287,7 +298,7 @@ func (s *Server) createPricingRevision(r *http.Request, _ access.Principal) (acc
 		return access.Commit(r, tx, *replayed)
 	}
 	revision, err := CreateRevision(r.Context(), tx, principal.UserID(), *input.EffectiveAt,
-		input.Prices, s.VendorKind)
+		s.now(), input.Prices, s.VendorKind)
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -335,7 +346,7 @@ func (s *Server) acknowledgeGatewayEpoch(r *http.Request, _ access.Principal) (a
 	if err != nil {
 		return access.Reply{}, err
 	}
-	acknowledgement, err := AcknowledgeGatewayEpoch(r.Context(), tx, epoch, principal.UserID())
+	acknowledgement, err := AcknowledgeGatewayEpoch(r.Context(), tx, epoch, principal.UserID(), s.now())
 	if err != nil {
 		return access.Reply{}, err
 	}

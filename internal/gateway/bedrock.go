@@ -53,7 +53,7 @@ func (s *Server) preparedBedrockConverse(w http.ResponseWriter, r *http.Request)
 		return false
 	}
 	r = r.Clone(r.Context())
-	if token := strings.TrimSpace(r.Header.Get("X-OLP-API-Key")); token != "" {
+	if token := strings.TrimSpace(r.Header.Get(apiKeyHeader)); token != "" {
 		r.Header.Set("Authorization", "Bearer "+token)
 	}
 	s.inference(wire.Bedrock)(w, r)

@@ -5,7 +5,6 @@ import (
 	"errors"
 	"net/http"
 	"strings"
-	"time"
 
 	"github.com/go-webauthn/webauthn/protocol"
 	"github.com/go-webauthn/webauthn/webauthn"
@@ -37,7 +36,7 @@ func (s *Server) verifyMFAProof(r *http.Request, tx pgx.Tx, f mfaFlow, input mfa
 		if err != nil {
 			return false, err
 		}
-		counter, valid := mfa.Counter(string(secret), input.Code, time.Now(), last)
+		counter, valid := mfa.Counter(string(secret), input.Code, s.now(), last)
 		clear(secret)
 		if !valid {
 			return false, nil
@@ -130,7 +129,7 @@ func (s *Server) mfaVerify(r *http.Request) (Reply, error) {
 			var secret []byte
 			secret, err = s.Keys.Read(r.Context(), tx, s.Installation, *f.SecretID, secrets.MFATOTP)
 			if err == nil {
-				counter, valid = mfa.Counter(string(secret), input.Code, time.Now(), -1)
+				counter, valid = mfa.Counter(string(secret), input.Code, s.now(), -1)
 				clear(secret)
 			}
 		}

@@ -54,9 +54,10 @@ func (j *Journey) Reply(ctx context.Context, headers http.Header, body []byte) [
 			item = `{"type":"function_call","call_id":"call-journey","name":"exec_command","arguments":"{\"cmd\":\"printf OLP_CONTROLLED_TOOL\",\"max_output_tokens\":100}"}`
 		}
 	case "files":
-		if turn == 1 {
+		switch turn {
+		case 1:
 			item = `{"type":"function_call","call_id":"write-journey","name":"exec_command","arguments":"{\"cmd\":\"printf 'OLP_CONTROLLED_FILE\\n' > qualified.txt && printf OLP_FILE_WRITTEN\",\"max_output_tokens\":100}"}`
-		} else if turn == 2 {
+		case 2:
 			item = `{"type":"function_call","call_id":"search-journey","name":"exec_command","arguments":"{\"cmd\":\"rg --files && rg -n OLP_CONTROLLED_FILE qualified.txt && cat qualified.txt\",\"max_output_tokens\":200}"}`
 		}
 	case "children":

@@ -116,6 +116,19 @@ func (e *CommandError) Error() string {
 }
 func (e *CommandError) Unwrap() error { return e.Cause }
 
+func HasServerErrorCode(err error, code string) bool {
+	var command *CommandError
+	if errors.As(err, &command) && command.Cause != nil {
+		err = command.Cause
+	}
+	if err == nil {
+		return false
+	}
+	return slices.ContainsFunc(strings.Fields(err.Error()), func(field string) bool {
+		return strings.TrimSuffix(field, ":") == code
+	})
+}
+
 func (c *Client) Do(ctx context.Context, args ...string) (any, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, &CommandError{Cause: err}

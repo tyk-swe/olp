@@ -363,7 +363,7 @@ func TestPluginProfileWithAStaticCredentialServesAStrictRoute(t *testing.T) {
 			t.Fatal(err)
 		}
 		log := slog.New(slog.NewTextHandler(io.Discard, nil))
-		manager := runtime.NewManager(h.Pool, installation, secrets.NewAuthKey(auth, installation), nil, log)
+		manager := runtime.NewManager(h.Pool, runtime.ManagerConfig{Installation: installation, InstanceID: "plugin-instance", Auth: secrets.NewAuthKey(auth, installation), Log: log})
 		manager.Mounted = mounted
 		if err = manager.Refresh(t.Context()); err != nil {
 			t.Fatal(err)

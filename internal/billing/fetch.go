@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/shopspring/decimal"
+	"github.com/tyk-swe/olp/internal/egress"
 )
 
 // get fetches one page and decodes it into out. Request bodies, response
@@ -33,7 +34,7 @@ func get(ctx context.Context, client *http.Client, endpoint string, setHeaders f
 		if errors.As(err, &netErr) && netErr.Timeout() {
 			return failFetch("timeout", err)
 		}
-		if strings.Contains(err.Error(), "redirect") {
+		if egress.IsRedirect(err) {
 			return failFetch("endpoint", err)
 		}
 		return failFetch("network", err)

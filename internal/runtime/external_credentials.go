@@ -31,6 +31,14 @@ type externalCredentials struct {
 	mu        sync.Mutex
 	entries   map[string]*externalCredential
 	populated atomic.Bool
+	now       func() time.Time
+}
+
+func (c *externalCredentials) clock() time.Time {
+	if c.now != nil {
+		return c.now()
+	}
+	return time.Now()
 }
 
 func (c *externalCredentials) available(id string) (known, available bool) {
@@ -42,7 +50,7 @@ func (c *externalCredentials) available(id string) (known, available bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	entry, known := c.entries[id]
-	return known, known && len(entry.value) > 0 && time.Now().Before(entry.expires)
+	return known, known && len(entry.value) > 0 && c.clock().Before(entry.expires)
 }
 
 func (c *externalCredentials) read(ctx context.Context, resolver ExternalSecrets, id string, reference secretstore.Reference) ([]byte, error) {
@@ -57,13 +65,14 @@ func (c *externalCredentials) read(ctx context.Context, resolver ExternalSecrets
 				c.mu.Unlock()
 				return nil, ErrCredentialUnavailable
 			}
-			entry.lastUsed = time.Now()
-			if len(entry.value) > 0 && time.Now().Before(entry.expires) {
+			now := c.clock()
+			entry.lastUsed = now
+			if len(entry.value) > 0 && now.Before(entry.expires) {
 				value := append([]byte(nil), entry.value...)
 				c.mu.Unlock()
 				return value, nil
 			}
-			if len(entry.value) == 0 && time.Now().Before(entry.expires) {
+			if len(entry.value) == 0 && now.Before(entry.expires) {
 				c.mu.Unlock()
 				return nil, ErrCredentialUnavailable
 			}
@@ -95,7 +104,7 @@ func (c *externalCredentials) read(ctx context.Context, resolver ExternalSecrets
 				clear(c.entries[oldestID].value)
 				delete(c.entries, oldestID)
 			}
-			entry = &externalCredential{reference: reference, lastUsed: time.Now()}
+			entry = &externalCredential{reference: reference, lastUsed: c.clock()}
 			c.entries[id] = entry
 			c.populated.Store(true)
 		}
@@ -114,9 +123,9 @@ func (c *externalCredentials) read(ctx context.Context, resolver ExternalSecrets
 		c.mu.Lock()
 		if err == nil {
 			entry.value = append([]byte(nil), value...)
-			entry.expires = time.Now().Add(externalCredentialTTL)
+			entry.expires = c.clock().Add(externalCredentialTTL)
 		} else {
-			entry.expires = time.Now().Add(PollInterval)
+			entry.expires = c.clock().Add(PollInterval)
 		}
 		close(entry.loading)
 		entry.loading = nil

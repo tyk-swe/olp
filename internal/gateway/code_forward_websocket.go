@@ -73,11 +73,11 @@ func (s *Server) prepareCodeWebSocket(r *http.Request, release *runtime.Release,
 		return handshake, err
 	}
 	handshake.identity = identity
-	models := r.Header.Values("X-OLP-Code-Model")
+	models := r.Header.Values(codemode.ModelHeader)
 	if len(models) > 1 || len(models) == 1 && strings.TrimSpace(models[0]) == "" {
 		return handshake, codemode.Refuse(400, "code_model_invalid")
 	}
-	if model := r.Header.Get("X-OLP-Code-Model"); model != "" {
+	if model := r.Header.Get(codemode.ModelHeader); model != "" {
 		resolved, err := route.ResolveModel(codemode.Operation{Model: model})
 		if err != nil {
 			return handshake, err
@@ -86,7 +86,7 @@ func (s *Server) prepareCodeWebSocket(r *http.Request, release *runtime.Release,
 			return handshake, codemode.Refuse(400, "code_paid_operation_unsupported")
 		}
 	}
-	permit, err := s.CodeLedger.BindConnection(r.Context(), route, authority.ID, identity, r.Header.Get("X-OLP-Code-Model"), release.Snapshot.CodeProviders(route, ingress.path, codeadapter.WebSocket))
+	permit, err := s.CodeLedger.BindConnection(r.Context(), route, authority.ID, identity, r.Header.Get(codemode.ModelHeader), release.Snapshot.CodeProviders(route, ingress.path, codeadapter.WebSocket))
 	if err != nil {
 		return handshake, err
 	}

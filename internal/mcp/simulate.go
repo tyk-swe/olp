@@ -74,7 +74,7 @@ func decodeCall(w http.ResponseWriter, r *http.Request) (callRequest, *apiError)
 		}
 		return callRequest{}, fail(http.StatusBadRequest, "invalid_request", "invalid_request_error", "Supply a tool call JSON object.")
 	}
-	if request.executionSelection.supplied() {
+	if request.supplied() {
 		return callRequest{}, fail(http.StatusBadRequest, "invalid_request", "invalid_request_error", "The registered server determines transport and executable settings.")
 	}
 	return request, nil

@@ -23,6 +23,7 @@ import (
 	"github.com/shopspring/decimal"
 
 	"github.com/tyk-swe/olp/internal/connectors"
+	"github.com/tyk-swe/olp/internal/usage"
 )
 
 const (
@@ -105,7 +106,7 @@ func (i *Importer) importAWS(ctx context.Context, row *importRow, cfg *providerC
 	}
 	today := i.now().UTC().Truncate(24 * time.Hour)
 	var retention int
-	if err := i.Pool.QueryRow(fetchCtx, `SELECT COALESCE((SELECT value::int FROM olp.settings WHERE key='retention.usage_days'),90)`).Scan(&retention); err != nil {
+	if err := i.Pool.QueryRow(fetchCtx, `SELECT COALESCE((SELECT value::int FROM olp.settings WHERE key=$1),90)`, usage.RetentionUsageDaysKey).Scan(&retention); err != nil {
 		return err
 	}
 	earliest := today.AddDate(0, 0, -retention)
@@ -264,7 +265,7 @@ func awsReadManifest(ctx context.Context, client *s3.Client, scope awsScope, del
 		return manifest, failFetch("response", errors.New("AWS assembly does not match manifest"))
 	}
 	for _, key := range manifest.ReportKeys {
-		if !strings.HasPrefix(key, dir) || strings.Contains(strings.TrimPrefix(key, dir), "/") || !(strings.HasSuffix(key, ".csv.gz") || strings.HasSuffix(key, ".csv.zip")) {
+		if !strings.HasPrefix(key, dir) || strings.Contains(strings.TrimPrefix(key, dir), "/") || (!strings.HasSuffix(key, ".csv.gz") && !strings.HasSuffix(key, ".csv.zip")) {
 			return manifest, failFetch("response", errors.New("AWS delivery must use compressed CSV"))
 		}
 	}

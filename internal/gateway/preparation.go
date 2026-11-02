@@ -42,7 +42,7 @@ func (x *call) prepareSource() {
 	} else if x.generation.parsed != nil {
 		source = x.generation.parsed.OIF().Document()
 	}
-	if x.requestPreparation.source != source || x.requestPreparation.route != x.route {
+	if x.source != source || x.requestPreparation.route != x.route {
 		x.requestPreparation = requestPreparation{source: source, route: x.route}
 	}
 }

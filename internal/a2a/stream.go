@@ -17,6 +17,8 @@ import (
 	"github.com/tyk-swe/olp/internal/runtime"
 )
 
+const taskCapabilityHeader = "X-OLP-Task-Capability"
+
 var errStreamEventSize = errors.New("stream event exceeds one MiB")
 
 // Event framing must persist across reads because network chunks can split SSE lines.
@@ -152,7 +154,7 @@ func (s *Server) sendStream(w http.ResponseWriter, r *http.Request, authority ac
 		return
 	}
 	dispatched = true
-	headers["X-OLP-Task-Capability"] = []string{capability}
+	headers[taskCapabilityHeader] = []string{capability}
 	next, stop := iter.Pull2(transport.SendStreamingMessage(ctx, headers, &prepared.Params))
 	defer stop()
 	first, eventErr, ok := next()

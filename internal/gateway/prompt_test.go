@@ -38,7 +38,7 @@ func publishedPromptHarnessFor(t *testing.T, cfg Config, prompt prompts.Definiti
 	revisionID := uuid.NewString()
 	route := h.rt.release.Snapshot.Routes[routeSlug]
 	route.ProjectID = &projectID
-	route.Behavior.MaxBodyBytes = routeLimit
+	route.MaxBodyBytes = routeLimit
 	h.rt.release.Snapshot.Routes[routeSlug] = route
 	key := h.rt.keys[fullKey]
 	key.ProjectID = &projectID

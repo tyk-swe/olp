@@ -21,7 +21,7 @@ func oidcURL(raw string) error {
 	if err != nil || u.Host == "" || u.User != nil || u.Fragment != "" || len(raw) > 2048 {
 		return errors.New("invalid OIDC URL")
 	}
-	if u.Scheme != "https" && !(oidcTestBuild && u.Scheme == "http" && (u.Hostname() == "localhost" || net.ParseIP(u.Hostname()).IsLoopback())) {
+	if u.Scheme != "https" && (!oidcTestBuild || u.Scheme != "http" || u.Hostname() != "localhost" && !net.ParseIP(u.Hostname()).IsLoopback()) {
 		return errors.New("OIDC endpoints must use HTTPS; insecure loopback requires an oidctest build")
 	}
 	return nil

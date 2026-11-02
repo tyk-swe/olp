@@ -287,7 +287,7 @@ func (s *Server) applyDocument(ctx context.Context, tx pgx.Tx, p access.Principa
 				}
 				prices = append(prices, price)
 			}
-			if _, err = usage.CreateRevision(ctx, tx, p.UserID(), effective, prices, s.VendorKind); err != nil {
+			if _, err = usage.CreateRevision(ctx, tx, p.UserID(), effective, s.now(), prices, s.VendorKind); err != nil {
 				return err
 			}
 			if _, err = runtime.Publish(ctx, tx, p.UserID()); err != nil {

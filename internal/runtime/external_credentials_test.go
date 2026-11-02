@@ -59,3 +59,30 @@ func TestExternalCredentialFailuresBecomePlanIneligibilityWithoutStaleFallback(t
 		t.Fatal("external cache bypassed stale authority")
 	}
 }
+
+func TestExternalCredentialCacheExpiresOnItsClock(t *testing.T) {
+	current := time.Date(2026, 11, 2, 12, 0, 0, 0, time.UTC)
+	cache := &externalCredentials{now: func() time.Time { return current }}
+	var calls atomic.Int64
+	resolver := externalResolveFunc(func(context.Context, secretstore.Reference) ([]byte, error) {
+		if calls.Add(1) == 1 {
+			return []byte("first"), nil
+		}
+		return []byte("second"), nil
+	})
+	reference := externalReference("1")
+	value, err := cache.read(t.Context(), resolver, "credential", reference)
+	if err != nil || string(value) != "first" {
+		t.Fatalf("first read = %q, %v", value, err)
+	}
+	current = current.Add(externalCredentialTTL - time.Second)
+	value, err = cache.read(t.Context(), resolver, "credential", reference)
+	if err != nil || string(value) != "first" || calls.Load() != 1 {
+		t.Fatalf("read inside the TTL = %q, %v, calls %d, want the cached value", value, err, calls.Load())
+	}
+	current = current.Add(2 * time.Second)
+	value, err = cache.read(t.Context(), resolver, "credential", reference)
+	if err != nil || string(value) != "second" || calls.Load() != 2 {
+		t.Fatalf("read after the TTL = %q, %v, calls %d, want a fresh resolution", value, err, calls.Load())
+	}
+}

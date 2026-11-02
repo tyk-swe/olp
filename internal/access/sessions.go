@@ -47,7 +47,7 @@ func (s *Server) newSession(r *http.Request, tx pgx.Tx, userID string, auth ...s
 	if _, err := tx.Exec(r.Context(), "DELETE FROM olp.sessions WHERE id IN(SELECT id FROM olp.sessions WHERE user_id=$1 ORDER BY created_at DESC OFFSET 19)", userID); err != nil {
 		return Reply{}, err
 	}
-	if _, err := tx.Exec(r.Context(), "INSERT INTO olp.sessions(id,user_id,digest,expires_at,browser_hint,auth_method,mfa_verified) VALUES($1,$2,$3,$4,$5,$6,$7)", id, userID, s.Auth.Digest(secrets.SessionDigest, token), time.Now().Add(sessionTTL), browserHint(r.UserAgent()), strength.Method, strength.MFA); err != nil {
+	if _, err := tx.Exec(r.Context(), "INSERT INTO olp.sessions(id,user_id,digest,expires_at,browser_hint,auth_method,mfa_verified) VALUES($1,$2,$3,$4,$5,$6,$7)", id, userID, s.Auth.Digest(secrets.SessionDigest, token), s.now().Add(sessionTTL), browserHint(r.UserAgent()), strength.Method, strength.MFA); err != nil {
 		return Reply{}, err
 	}
 	u, err := scanUser(tx.QueryRow(r.Context(), "SELECT "+userColumns+" FROM olp.users u WHERE id=$1", userID))

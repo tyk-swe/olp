@@ -305,7 +305,7 @@ func readinessResponse(s *State, now time.Time, generation *int64, probe *storeP
 	counters := probe.counters
 	summary := probe.media
 	status := "ok"
-	if degradedLimits || degradedMedia || !metadataComplete || !(current && drained) {
+	if degradedLimits || degradedMedia || !metadataComplete || (!current || !drained) {
 		status = "degraded"
 	}
 	limits := "not_configured"

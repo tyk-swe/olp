@@ -21,9 +21,20 @@ import (
 type DebitStore struct {
 	Pool    *pgxpool.Pool
 	Limiter *Limiter
+	Now     func() time.Time
 
 	reconcileMu    sync.Mutex
 	reconcileAfter string
+}
+
+func (s *DebitStore) now() time.Time {
+	if s.Now != nil {
+		return s.Now()
+	}
+	if s.Limiter != nil {
+		return s.Limiter.now()
+	}
+	return time.Now()
 }
 
 func lockDebitOwners(ctx context.Context, tx pgx.Tx, owners []DebitOwner) error {
@@ -81,7 +92,8 @@ func (s *DebitStore) PrepareTx(ctx context.Context, tx pgx.Tx, i DebitIntent, ow
 	if !slices.ContainsFunc(owners, func(o DebitOwner) bool { return o.Kind == "key" && o.ID == i.APIKeyID }) {
 		return "", ErrDebitConflict
 	}
-	if !i.PreparedUntil.After(time.Now()) || i.PreparedUntil.After(time.Now().Add(2*time.Minute)) {
+	now := s.now()
+	if !i.PreparedUntil.After(now) || i.PreparedUntil.After(now.Add(2*time.Minute)) {
 		return "", ErrDebitConflict
 	}
 	var authorized bool
@@ -112,7 +124,7 @@ func (s *DebitStore) PrepareTx(ctx context.Context, tx pgx.Tx, i DebitIntent, ow
 	if err = lockDebitOwners(ctx, tx, owners); err != nil {
 		return "", err
 	}
-	w, err := CurrentBudgetWindows(ctx, tx, time.Now())
+	w, err := CurrentBudgetWindows(ctx, tx, s.now())
 	if err != nil {
 		return "", err
 	}

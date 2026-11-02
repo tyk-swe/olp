@@ -18,7 +18,7 @@ type managementTokenInput struct {
 	ProjectIDs *[]string  `json:"project_ids"`
 }
 
-func validManagementToken(input managementTokenInput) error {
+func validManagementToken(input managementTokenInput, now time.Time) error {
 	if err := ValidText("name", input.Name, 100); err != nil {
 		return err
 	}
@@ -51,7 +51,6 @@ func validManagementToken(input managementTokenInput) error {
 	if input.ExpiresAt == nil {
 		return Invalid("expires_at", "Choose an expiry.")
 	}
-	now := time.Now()
 	if !input.ExpiresAt.After(now) || input.ExpiresAt.After(now.Add(366*24*time.Hour)) {
 		return Invalid("expires_at", "Choose a future expiry no more than 366 days ahead.")
 	}
@@ -106,7 +105,7 @@ func (s *Server) createManagementToken(r *http.Request, _ Principal) (Reply, err
 	if replayed != nil {
 		return Commit(r, tx, *replayed)
 	}
-	if err = validManagementToken(input); err != nil {
+	if err = validManagementToken(input, s.now()); err != nil {
 		return Reply{}, err
 	}
 	projectIDs := []string{}

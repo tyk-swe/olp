@@ -223,9 +223,9 @@ func ReportConsumerActivity(ctx context.Context, pool *pgxpool.Pool, a Activity)
 // the host and pid so an operator can find the owner of a pending delivery, and
 // a per-process epoch so a restarted process never reclaims its own name (its
 // abandoned entries stay pending for another consumer to claim).
-func ConsumerName() string {
+func ConsumerName(hostname string) string {
 	epoch := uuid.Must(uuid.NewV7())
-	return consumerName(os.Getenv("HOSTNAME"), os.Getpid(), epoch)
+	return consumerName(hostname, os.Getpid(), epoch)
 }
 
 func consumerName(host string, pid int, epoch uuid.UUID) string {
@@ -260,8 +260,8 @@ func sanitizeConsumerHost(host string) string {
 
 // GatewayInstance distinguishes live processes even when they share a host
 // or have no HOSTNAME. Restarts leave their old epochs for stale detection.
-func GatewayInstance() string {
-	return consumerName(gatewayInstanceLabel(os.Getenv("HOSTNAME")), os.Getpid(), uuid.Must(uuid.NewV7()))
+func GatewayInstance(hostname string) string {
+	return consumerName(gatewayInstanceLabel(hostname), os.Getpid(), uuid.Must(uuid.NewV7()))
 }
 
 func gatewayInstanceLabel(host string) string {

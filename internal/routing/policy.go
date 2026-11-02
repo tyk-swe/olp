@@ -257,7 +257,7 @@ func selectorProblem(selector string) string {
 		}
 	case "vendor":
 		for _, ch := range value {
-			if !(ch >= 'a' && ch <= 'z' || ch >= '0' && ch <= '9' || ch == '-' || ch == '_') {
+			if (ch < 'a' || ch > 'z') && (ch < '0' || ch > '9') && ch != '-' && ch != '_' {
 				return "Invalid vendor selector"
 			}
 		}

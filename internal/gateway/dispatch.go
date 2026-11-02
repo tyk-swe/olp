@@ -57,7 +57,7 @@ type dispatchHold struct {
 func (s *Server) gateAttempt(ctx context.Context, x *call, attempt routing.Attempt, provider *routing.Provider, slot *routing.Slot, estimate int64, deadline time.Time) gateResult {
 	if x.workflow != nil {
 		gate := s.gateSlot(ctx, provider, slot, estimate, deadline, x.priority)
-		if gate.hold != nil && !(x.callerCostExempt() && provider.CredentialSource == "caller") {
+		if gate.hold != nil && (!x.callerCostExempt() || provider.CredentialSource != "caller") {
 			for _, owner := range attemptCaps(x.route, provider, slot) {
 				if owner.limits != nil {
 					gate.hold.budgets = append(gate.hold.budgets, owner.id)

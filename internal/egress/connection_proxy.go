@@ -147,7 +147,7 @@ func (d connectionDialer) tunnel(ctx context.Context, dialer *net.Dialer, target
 	// The context owns this phase deadline as well as cancellation. Its
 	// callback closes the socket after Err is set. A second socket deadline
 	// can fire first, making a timed-out CONNECT look like a malformed reply.
-	var connection net.Conn = raw
+	var connection = raw
 	if d.proxy.Scheme == "https" {
 		secured := tls.Client(raw, &tls.Config{MinVersion: tls.VersionTLS12, RootCAs: d.roots, ServerName: d.proxy.Hostname()})
 		tlsCtx, cancel := context.WithTimeout(ctx, d.tlsTimeout)

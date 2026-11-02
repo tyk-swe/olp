@@ -309,7 +309,7 @@ func TestCallerPaidOCRExemptsCostCaps(t *testing.T) {
 			p.Kind, p.VendorID, p.ProfileID, p.CredentialSource = "openai_compatible", "mistral", "mistral-ocr", "caller"
 			p.Capabilities = []routing.Capability{{Model: p.Capabilities[0].Model, Operation: "ocr", Surface: "openai", Mode: "unary"}}
 			p.Limits = &routing.Limits{Supply: routing.Supply{DailyCostLimit: new("1")}}
-			p.Slots[0].Supply.DailyCostLimit = new("1")
+			p.Slots[0].DailyCostLimit = new("1")
 			s.Providers[id] = p
 		}
 	})

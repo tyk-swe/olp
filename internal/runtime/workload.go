@@ -139,16 +139,17 @@ func (m *Manager) authenticateWorkload(raw string) (*access.Authority, error) {
 		return nil, ErrInvalidKey
 	}
 	// Reject disabled algorithms/key IDs before any refresh request.
-	if !token.Allowed(issuer.Config, time.Now()) {
+	now := m.now()
+	if !token.Allowed(issuer.Config, now) {
 		return nil, ErrInvalidKey
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
 	defer cancel()
-	keys, e := m.workloadKeys.Keys(ctx, issuer.ID, issuer.Config.JWKSURL, token.KeyID(), time.Now())
+	keys, e := m.workloadKeys.Keys(ctx, issuer.ID, issuer.Config.JWKSURL, token.KeyID(), now)
 	if e != nil {
 		return nil, ErrStaleAuthority
 	}
-	identity, e := token.Verify(issuer.Config, keys, time.Now())
+	identity, e := token.Verify(issuer.Config, keys, m.now())
 	if e != nil {
 		return nil, ErrInvalidKey
 	}
@@ -190,7 +191,7 @@ func (m *Manager) authenticateWorkload(raw string) (*access.Authority, error) {
 		return nil, ErrInvalidKey
 	}
 	m.mu.RLock()
-	current := m.authority.id == state.id && time.Since(m.authority.readAt) <= AuthorityStaleAfter
+	current := m.authority.id == state.id && m.now().Sub(m.authority.readAt) <= AuthorityStaleAfter
 	m.mu.RUnlock()
 	if !current {
 		return nil, ErrStaleAuthority

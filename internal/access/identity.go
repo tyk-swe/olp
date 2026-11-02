@@ -529,7 +529,7 @@ func (s *Server) createInvitation(r *http.Request, _ Principal) (Reply, error) {
 	if _, err = tx.Exec(r.Context(), "UPDATE olp.invitations SET revoked_at=now(),revoked_by=$2 WHERE email=$1 AND accepted_at IS NULL AND revoked_at IS NULL", address, p.UserID()); err != nil {
 		return Reply{}, err
 	}
-	if _, err = tx.Exec(r.Context(), "INSERT INTO olp.invitations(id,email,role,digest,invited_by,expires_at) VALUES($1,$2,$3,$4,$5,$6)", id, address, input.Role, s.Auth.Digest(secrets.InvitationDigest, token), p.UserID(), time.Now().Add(time.Duration(hours)*time.Hour)); err != nil {
+	if _, err = tx.Exec(r.Context(), "INSERT INTO olp.invitations(id,email,role,digest,invited_by,expires_at) VALUES($1,$2,$3,$4,$5,$6)", id, address, input.Role, s.Auth.Digest(secrets.InvitationDigest, token), p.UserID(), s.now().Add(time.Duration(hours)*time.Hour)); err != nil {
 		return Reply{}, err
 	}
 	body, err := invitation(r, tx, id)

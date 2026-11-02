@@ -88,7 +88,7 @@ func TestCallerPaidDecisionExemptsCostsButKeepsTokenCaps(t *testing.T) {
 					p.Kind, p.VendorID, p.ProfileID, p.CredentialSource = "openai", "openai", "openai-decisions", "caller"
 					p.Capabilities = []routing.Capability{{Model: p.Capabilities[0].Model, Operation: "decision", Surface: "openai", Mode: "unary"}}
 					p.Limits = &routing.Limits{Supply: routing.Supply{DailyCostLimit: new("1")}}
-					p.Slots[0].Supply.DailyCostLimit = new("1")
+					p.Slots[0].DailyCostLimit = new("1")
 					if scope == "provider_tokens" {
 						p.Limits.TokensPerMinute = new(int64(1000))
 					}

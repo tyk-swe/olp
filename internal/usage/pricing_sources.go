@@ -863,15 +863,16 @@ func (s *Server) publishPricingSourceSnapshot(r *http.Request, _ access.Principa
 		return access.Reply{}, access.Fail(422, "invalid_price_set",
 			"The merged price set must keep the source currency.")
 	}
-	effectiveAt := time.Now()
+	now := s.now()
+	effectiveAt := now
 	if input.EffectiveAt != nil {
 		effectiveAt = input.EffectiveAt.UTC()
-		if effectiveAt.Before(time.Now()) {
+		if effectiveAt.Before(now) {
 			return access.Reply{}, access.Invalid("effective_at",
 				"Choose an effective time now or in the future.")
 		}
 	}
-	revision, err := CreateRevision(r.Context(), tx, principal.UserID(), effectiveAt, merged, s.VendorKind)
+	revision, err := CreateRevision(r.Context(), tx, principal.UserID(), effectiveAt, now, merged, s.VendorKind)
 	if err != nil {
 		return access.Reply{}, err
 	}

@@ -466,6 +466,8 @@ type Commander interface {
 
 // Limiter reserves shared budgets through one Valkey connection.
 type Limiter struct {
+	Now func() time.Time
+
 	debitVersionMu sync.Mutex
 	debitVersions  map[string]int64
 	syncDurable    func(context.Context, string) error
@@ -492,7 +494,14 @@ func New(client Commander, namespace string) (*Limiter, error) {
 			return nil, errors.New("limits: namespace may only contain ASCII letters, digits, ':', '_' and '-'")
 		}
 	}
-	return &Limiter{client: client, namespace: namespace}, nil
+	return &Limiter{Now: time.Now, client: client, namespace: namespace}, nil
+}
+
+func (l *Limiter) now() time.Time {
+	if l.Now != nil {
+		return l.Now()
+	}
+	return time.Now()
 }
 
 // keys holds the keys one request can touch. The rate and concurrency keys share
@@ -668,7 +677,7 @@ func (l *Limiter) Reserve(ctx context.Context, r Request) (*Lease, error) {
 	lease.windowID = granted.windowID
 	lease.concurrencyExpiresAtMS = granted.leaseExpiresAtMS
 	if r.reportsRate() {
-		lease.rate = &rateAnswer{state: granted.rate, at: time.Now()}
+		lease.rate = &rateAnswer{state: granted.rate, at: l.now()}
 	}
 	return lease, nil
 }
@@ -988,7 +997,11 @@ func (le *Lease) RateReset() time.Duration {
 	if le == nil || le.rate == nil || !le.rate.state.Limited() {
 		return 0
 	}
-	left := le.rate.state.ResetAfter - time.Since(le.rate.at)
+	now := time.Now()
+	if le.limiter != nil {
+		now = le.limiter.now()
+	}
+	left := le.rate.state.ResetAfter - now.Sub(le.rate.at)
 	if left <= 0 {
 		return 0
 	}

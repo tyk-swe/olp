@@ -114,6 +114,14 @@ type consumerRun struct {
 	// groupLost records that a stream command found no consumer group, which
 	// no amount of retrying repairs. Only the loop that owns it reads it.
 	groupLost bool
+	now       func() time.Time
+}
+
+func (r *consumerRun) clock() time.Time {
+	if r.now != nil {
+		return r.now()
+	}
+	return time.Now()
 }
 
 func runConsumer(ctx context.Context, pool *pgxpool.Pool, client *coordination.Client,
@@ -122,10 +130,10 @@ func runConsumer(ctx context.Context, pool *pgxpool.Pool, client *coordination.C
 		return err
 	}
 	run := &consumerRun{pool: pool, client: client, stream: stream, consumer: consumer,
-		limiter: limiter, log: log, policy: policy}
+		limiter: limiter, log: log, policy: policy, now: time.Now}
 
 	ownPendingStart, staleStart := "0-0", "0-0"
-	now := time.Now()
+	now := run.clock()
 	ownPendingDue, staleDue, healthDue := now, now, now
 	retryDelay := consumerRetryFloor
 	created := false
@@ -158,21 +166,21 @@ func runConsumer(ctx context.Context, pool *pgxpool.Pool, client *coordination.C
 		// recovery page shortens, but never removes, that block, so neither
 		// source can starve the other.
 		recoveryActive, cycleRetry := false, false
-		if !time.Now().Before(ownPendingDue) {
+		if !run.clock().Before(ownPendingDue) {
 			more, retry, stopped := run.drainOwnPending(ctx, &ownPendingStart, &ownPendingDue)
 			if stopped {
 				return nil
 			}
 			recoveryActive, cycleRetry = recoveryActive || more, cycleRetry || retry
 		}
-		if !time.Now().Before(staleDue) {
+		if !run.clock().Before(staleDue) {
 			more, retry, stopped := run.reclaimStale(ctx, &staleStart, &staleDue)
 			if stopped {
 				return nil
 			}
 			recoveryActive, cycleRetry = recoveryActive || more, cycleRetry || retry
 		}
-		if !time.Now().Before(healthDue) {
+		if !run.clock().Before(healthDue) {
 			if err := run.checkpointHealth(ctx); err != nil {
 				if ctx.Err() != nil {
 					return nil
@@ -180,7 +188,7 @@ func runConsumer(ctx context.Context, pool *pgxpool.Pool, client *coordination.C
 				run.log.Warn("request metadata consumer health was not recorded", "error", err)
 				cycleRetry = true
 			}
-			healthDue = time.Now().Add(run.policy.healthInterval)
+			healthDue = run.clock().Add(run.policy.healthInterval)
 		}
 		if cycleRetry {
 			if waitForRetry(ctx, retryDelay) {
@@ -235,22 +243,8 @@ func (r *consumerRun) createGroup(ctx context.Context) error {
 	return nil
 }
 
-// serverAnswer is the server's own text for a failed command. The transport
-// keeps that text out of its message so logs cannot leak command arguments, so
-// the cause is read instead.
-func serverAnswer(err error) string {
-	var command *coordination.CommandError
-	if errors.As(err, &command) && command.Cause != nil {
-		err = command.Cause
-	}
-	if err == nil {
-		return ""
-	}
-	return err.Error()
-}
-
 // isBusyGroup reports the "group already exists" answer, which is success.
-func isBusyGroup(err error) bool { return strings.Contains(serverAnswer(err), "BUSYGROUP") }
+func isBusyGroup(err error) bool { return coordination.HasServerErrorCode(err, "BUSYGROUP") }
 
 // noteGroupLoss records a stream command that found no consumer group and
 // returns the error unchanged, so every caller keeps reporting it as before.
@@ -258,7 +252,7 @@ func isBusyGroup(err error) bool { return strings.Contains(serverAnswer(err), "B
 // including after a later write recreates the key without the group, so the
 // loop has to create it again rather than retry the read forever.
 func (r *consumerRun) noteGroupLoss(err error) error {
-	if strings.Contains(serverAnswer(err), "NOGROUP") {
+	if coordination.HasServerErrorCode(err, "NOGROUP") {
 		r.groupLost = true
 	}
 	return err
@@ -282,7 +276,7 @@ func (r *consumerRun) drainOwnPending(ctx context.Context, start *string, due *t
 			return false, false, true
 		}
 		r.log.Warn("request metadata pending replay failed", "error", err)
-		*due = time.Now().Add(r.policy.ownPendingInterval)
+		*due = r.clock().Add(r.policy.ownPendingInterval)
 		return false, true, false
 	}
 	fullBatch := len(entries) == r.policy.batchSize
@@ -302,7 +296,7 @@ func (r *consumerRun) drainOwnPending(ctx context.Context, start *string, due *t
 	if fullBatch {
 		*start, idle = next, 0
 	}
-	*due = time.Now().Add(idle)
+	*due = r.clock().Add(idle)
 	return fullBatch, summary.retry, false
 }
 
@@ -314,7 +308,7 @@ func (r *consumerRun) reclaimStale(ctx context.Context, start *string, due *time
 			return false, false, true
 		}
 		r.log.Warn("request metadata reclaim failed", "error", err)
-		*due = time.Now().Add(r.policy.recoveryInterval)
+		*due = r.clock().Add(r.policy.recoveryInterval)
 		return false, true, false
 	}
 	// The scan has already destroyed the evidence for the identifiers it
@@ -326,7 +320,7 @@ func (r *consumerRun) reclaimStale(ctx context.Context, start *string, due *time
 			return false, false, true
 		}
 		r.log.Warn("missing request metadata deliveries were not recorded", "error", err)
-		*due = time.Now().Add(r.policy.recoveryInterval)
+		*due = r.clock().Add(r.policy.recoveryInterval)
 		return false, true, false
 	}
 	if len(page.Entries) > 0 {
@@ -346,7 +340,7 @@ func (r *consumerRun) reclaimStale(ctx context.Context, start *string, due *time
 		idle = 0
 	}
 	*start = page.NextStart
-	*due = time.Now().Add(idle)
+	*due = r.clock().Add(idle)
 	return more, summary.retry, false
 }
 
@@ -375,7 +369,7 @@ func (r *consumerRun) settleNew(ctx context.Context, ownPendingStart *string,
 		// own pending list from the start after the backoff, because the entry
 		// that failed is now the oldest unfinished work it has.
 		*ownPendingStart = "0-0"
-		*ownPendingDue = time.Now().Add(*retryDelay)
+		*ownPendingDue = r.clock().Add(*retryDelay)
 		if waitForRetry(ctx, *retryDelay) {
 			return true
 		}
@@ -560,7 +554,7 @@ func (r *consumerRun) settle(ctx context.Context, streamID string, result Persis
 // the gap cannot be written the delivery stays pending: an unrecorded loss must
 // never be acknowledged away.
 func (r *consumerRun) finishGap(ctx context.Context, streamID, reason, dedupeKey string) (bool, bool, bool) {
-	now := time.Now().UTC()
+	now := r.clock().UTC()
 	gap := Gap{GatewayInstance: r.consumer, EventCount: 1, Reason: reason,
 		FirstObservedAt: now, LastObservedAt: now}
 	if _, err := ReportGapOnce(ctx, r.pool, gap, dedupeKey); err != nil {
@@ -580,7 +574,7 @@ func (r *consumerRun) finishGap(ctx context.Context, streamID, reason, dedupeKey
 
 func (r *consumerRun) reportDeletedPending(ctx context.Context, ids []string) error {
 	for _, id := range ids {
-		now := time.Now().UTC()
+		now := r.clock().UTC()
 		gap := Gap{GatewayInstance: r.consumer, EventCount: 1, Reason: "missing_stream_event",
 			FirstObservedAt: now, LastObservedAt: now}
 		if _, err := ReportGapOnce(ctx, r.pool, gap, "request-metadata-stream:"+id+":missing"); err != nil {
@@ -656,7 +650,7 @@ func (r *consumerRun) checkpointHealth(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	return ReportConsumerHealth(ctx, r.pool, pending, lag, oldest, oldestLagged, time.Now().UTC())
+	return ReportConsumerHealth(ctx, r.pool, pending, lag, oldest, oldestLagged, r.clock().UTC())
 }
 
 func (r *consumerRun) pendingSummary(ctx context.Context) (int64, *time.Time, error) {

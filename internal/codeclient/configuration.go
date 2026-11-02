@@ -109,7 +109,7 @@ func Generate(route codemode.Route, offers Offers, in Request) (codemode.ClientC
 	if ip := net.ParseIP(base.Hostname()); ip != nil {
 		local = ip.IsLoopback()
 	}
-	if base.Scheme != "https" && !(base.Scheme == "http" && local) {
+	if base.Scheme != "https" && (base.Scheme != "http" || !local) {
 		return empty, access.Invalid("gateway_url", "Use HTTPS, or HTTP on loopback for local development.")
 	}
 	base.Path = strings.TrimRight(base.Path, "/") + route.BasePath()

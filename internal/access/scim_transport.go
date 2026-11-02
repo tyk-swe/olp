@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/scim"
 )
 
@@ -91,14 +91,10 @@ func WriteSCIMError(w http.ResponseWriter, err error) {
 		}
 	} else if errors.Is(err, pgx.ErrNoRows) {
 		status, detail = 404, "The resource was not found."
-	} else if e, ok := errors.AsType[*pgconn.PgError](err); ok && e.Code == "23505" {
+	} else if database.IsUniqueViolation(err) {
 		status, typ, detail = 409, "uniqueness", "An identity or group already uses this value."
 	} else {
-		code := ""
-		if pg, ok := errors.AsType[*pgconn.PgError](err); ok {
-			code = pg.Code
-		}
-		slog.Error("SCIM request failed", "error_type", fmt.Sprintf("%T", err), "sqlstate", code)
+		slog.Error("SCIM request failed", "error_type", fmt.Sprintf("%T", err), "sqlstate", database.SQLState(err))
 	}
 	body := map[string]any{"schemas": []string{scim.ErrorSchema}, "status": strconv.Itoa(status), "detail": detail}
 	if typ != "" {

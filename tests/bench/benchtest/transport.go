@@ -104,7 +104,7 @@ func (b body) Read(p []byte) (int, error) {
 
 func (b body) Close() error {
 	b.stop()
-	return b.PipeReader.CloseWithError(io.ErrClosedPipe)
+	return b.CloseWithError(io.ErrClosedPipe)
 }
 
 // responseWriter is the server side of the pipe. Headers are fixed, and the

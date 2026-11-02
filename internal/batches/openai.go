@@ -34,6 +34,8 @@ const (
 
 var ErrProviderConflict = errors.New("provider batch identity changed")
 
+var errResponseOverLimit = errors.New("provider batch response exceeds the limit")
+
 type PinnedTarget struct {
 	Config connectors.Config
 	Model  string
@@ -365,7 +367,7 @@ func (r *OpenAIReader) getJSON(ctx context.Context, target *PinnedTarget, path s
 	}
 	body, err := io.ReadAll(io.LimitReader(response.Body, limit+1))
 	if err != nil || int64(len(body)) > limit {
-		return nil, errors.New("provider batch response exceeds the limit")
+		return nil, errResponseOverLimit
 	}
 	return body, nil
 }

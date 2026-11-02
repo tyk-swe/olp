@@ -7,7 +7,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"net/http"
 	"strings"
 	"time"
@@ -15,9 +14,9 @@ import (
 	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/contentpolicy"
+	"github.com/tyk-swe/olp/internal/database"
 )
 
 type Server struct {
@@ -271,8 +270,7 @@ func (s *Server) write(r *http.Request, id string, retire bool) (access.Reply, e
 		id, etag = next.ID, next.ETag
 	}
 	if err != nil {
-		var pg *pgconn.PgError
-		if errors.As(err, &pg) && pg.Code == "23505" {
+		if database.IsUniqueViolation(err) {
 			return access.Reply{}, access.Fail(409, "guardrail_exists", "Choose an unused guardrail name in this project.")
 		}
 		return access.Reply{}, err

@@ -125,7 +125,7 @@ func (s *Server) retainedLifecycle(w http.ResponseWriter, r *http.Request, e ret
 		if lookupErr == nil {
 			// Recovery reveals only an already-owned identity and starts no work.
 			x.route = &routing.Route{Slug: prior.RouteSlug, RevisionID: prior.RouteRevisionID}
-			w.Header().Set("X-OLP-Resource-ID", prior.ID)
+			w.Header().Set(resourceIDHeader, prior.ID)
 			fail(serverError(409, "submission_exists", "This submission already exists; inspect X-OLP-Resource-ID instead of recreating it."))
 			return
 		}
@@ -260,7 +260,7 @@ func (s *Server) retainedLifecycle(w http.ResponseWriter, r *http.Request, e ret
 			fail(serverError(503, "provider_state_unavailable", "The submission could not be persisted."))
 			return
 		}
-		w.Header().Set("X-OLP-Resource-ID", resource.ID)
+		w.Header().Set(resourceIDHeader, resource.ID)
 		if !fresh {
 			fail(serverError(409, "submission_exists", "This submission already exists; inspect X-OLP-Resource-ID instead of recreating it."))
 			return

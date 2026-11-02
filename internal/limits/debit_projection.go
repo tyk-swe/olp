@@ -43,7 +43,7 @@ func (s *DebitStore) SyncOwner(ctx context.Context, owner string) error {
 }
 
 func (s *DebitStore) initializeFreshOwnerTx(ctx context.Context, tx pgx.Tx, owner DebitOwner) error {
-	now := time.Now()
+	now := s.now()
 	switch owner.Kind {
 	case "aggregate":
 		if _, err := scanSnapshots(tx.QueryRow(ctx, aggregateSnapshotsSQL, now, owner.ID)); err != nil {
@@ -124,7 +124,7 @@ func (s *DebitStore) initializeFreshOwnerTx(ctx context.Context, tx pgx.Tx, owne
 }
 
 func (s *DebitStore) syncOwnerTx(ctx context.Context, tx pgx.Tx, owner string) error {
-	w, err := CurrentBudgetWindows(ctx, tx, time.Now())
+	w, err := CurrentBudgetWindows(ctx, tx, s.now())
 	if err != nil {
 		return err
 	}

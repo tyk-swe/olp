@@ -24,7 +24,7 @@ func supplyBudgets(s *routing.Snapshot) []limits.SupplyBudget {
 			add(provider.ID, "connection", provider.Limits.Costs())
 		}
 		for _, slot := range provider.Slots {
-			add(slot.ID, "slot", slot.Supply.Costs())
+			add(slot.ID, "slot", slot.Costs())
 		}
 	}
 	for _, slug := range slices.Sorted(maps.Keys(s.Routes)) {

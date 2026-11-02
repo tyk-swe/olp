@@ -101,7 +101,7 @@ func (s *Store) CommitRetainedPoll(ctx context.Context, c RetainedClaim, r *Reso
 	}
 	if len(observation.Lines) > 0 || observation.RemoteTerminated {
 		key := retainedEvidenceKey(observation)
-		if _, err = s.ApplyRetainedEvidenceTx(ctx, tx, r.UUID, key, retainedObservationDigest(observation), "provider_verified", "", observation, &c.ClaimID); err != nil && !(errors.Is(err, ErrEvidenceConflict) && observation.RemoteTerminated) {
+		if _, err = s.ApplyRetainedEvidenceTx(ctx, tx, r.UUID, key, retainedObservationDigest(observation), "provider_verified", "", observation, &c.ClaimID); err != nil && (!errors.Is(err, ErrEvidenceConflict) || !observation.RemoteTerminated) {
 			return err
 		}
 	}

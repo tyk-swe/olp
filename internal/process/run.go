@@ -259,23 +259,31 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 			responseCache = &cache.Store{Client: remote, Keys: keys, Auth: auth, Installation: installation}
 		}
 
-		sender := export.NewSender(&policy)
+		sender := export.NewSender(&policy, os.Getenv)
 		sender.Installation = installation
 		exporter = &export.Worker{Pool: pool, Keys: keys, Installation: installation, Sender: sender, Log: log}
 		export.FocusGeneratorVersion = Version
 		focusWorker = &export.FocusWorker{Pool: pool, Keys: keys, Installation: installation, Sender: sender, Log: log}
 		capturer = &export.Manager{Pool: pool, Keys: keys, Installation: installation, Sender: sender, Log: log}
 		importer = &billing.Importer{Pool: pool, Keys: keys, Installation: installation, Egress: &policy, Log: log}
-		rt = runtime.NewManager(pool, installation, auth, keys, log)
-		rt.ReadPool = readPool
-		rt.Region = c.Region
-		rt.ExternalSecrets = secretstore.New(policy)
+		var mounted map[string]runtime.MountedProvider
 		if c.ConnectorConfigFile != "" {
-			rt.Mounted, err = providers.LoadMounted(c.ConnectorConfigFile, &policy)
+			mounted, err = providers.LoadMounted(c.ConnectorConfigFile, &policy)
 			if err != nil {
 				return err
 			}
 		}
+		rt = runtime.NewManager(pool, runtime.ManagerConfig{
+			Installation:    installation,
+			InstanceID:      usage.GatewayInstance(c.Hostname),
+			Auth:            auth,
+			Keys:            keys,
+			Log:             log,
+			ReadPool:        readPool,
+			Region:          c.Region,
+			ExternalSecrets: secretstore.New(policy),
+			Mounted:         mounted,
+		})
 		var unconfined *plugins.Unconfined
 		if c.UnconfinedPluginDir != "" {
 			unconfined = plugins.NewUnconfined(c.UnconfinedPluginDir, plugins.DefaultLimits, log)
@@ -419,7 +427,7 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 		// Without shared state, hard limits are refused and metadata stays logged.
 		if limiter != nil {
 			emitter = usage.NewEmitter(metadataBuffer)
-			gatewayInstance = usage.GatewayInstance()
+			gatewayInstance = usage.GatewayInstance(c.Hostname)
 			for _, server := range []*gateway.Server{gw, prober} {
 				if server == nil {
 					continue
@@ -608,7 +616,7 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 		// provider egress client, so the plane runs even when no shared state
 		// backend is configured. It is started exactly once, inside the single
 		// worker plane.
-		workersStopped = startWorkers(workers, pool, reader, limiter, workerStream, mediaService, pluginHost, keys, auth, installation, c.Region, &policy, log, exporter, focusWorker, importer, referenceCatalog)
+		workersStopped = startWorkers(workers, pool, reader, limiter, workerStream, mediaService, pluginHost, keys, auth, installation, c.Region, c.Hostname, &policy, log, exporter, focusWorker, importer, referenceCatalog)
 	}
 	// Probes produce accounting events, so they stop before delivery closes;
 	// the consumer and recovery workers remain alive until delivery drains.

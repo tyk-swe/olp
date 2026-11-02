@@ -30,7 +30,7 @@ func (s *Server) usableSAMLOwner(r *http.Request, q Queryer) (bool, error) {
 	if !c.Enabled {
 		return false, nil
 	}
-	if _, err = validateSAML(c); err != nil {
+	if _, err = validateSAML(c, s.now()); err != nil {
 		return false, nil
 	}
 	rows, err := q.Query(r.Context(), "SELECT u.role_management,i.role_claims FROM olp.users u JOIN olp.saml_identities i ON i.user_id=u.id WHERE u.active AND u.oidc_authorized AND u.role='owner' AND u.access_scope='global' AND i.issuer=$1", c.EntityID)
@@ -60,7 +60,7 @@ func (s *Server) samlIdentities(r *http.Request, p Principal) (Reply, error) {
 	if err != nil {
 		return Reply{}, err
 	}
-	usable, err := usableSAMLIdentities(r, s.Pool, p)
+	usable, err := s.usableSAMLIdentities(r, s.Pool, p)
 	if err != nil {
 		return Reply{}, err
 	}
@@ -171,7 +171,7 @@ func (s *Server) unlinkSAML(r *http.Request, p Principal) (Reply, error) {
 	return Commit(r, tx, session)
 }
 
-func usableSAMLIdentities(r *http.Request, q Queryer, p Principal) ([]string, error) {
+func (s *Server) usableSAMLIdentities(r *http.Request, q Queryer, p Principal) ([]string, error) {
 	c, err := loadSAML(r, q)
 	if errors.Is(err, pgx.ErrNoRows) || err == nil && !c.Enabled {
 		return nil, nil
@@ -179,7 +179,7 @@ func usableSAMLIdentities(r *http.Request, q Queryer, p Principal) ([]string, er
 	if err != nil {
 		return nil, err
 	}
-	if _, err = validateSAML(c); err != nil {
+	if _, err = validateSAML(c, s.now()); err != nil {
 		return nil, nil
 	}
 	var management string

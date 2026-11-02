@@ -16,6 +16,8 @@ import (
 
 const BasePath = "/code/"
 
+const ModelHeader = "X-OLP-Code-Model"
+
 // Adapter names the subscription family a published route forwards to. It is
 // derived from the plugin profiles of the revision's frozen connections and
 // selects the ingress paths, upstream authorization and supported clients.

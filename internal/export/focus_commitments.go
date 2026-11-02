@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/tyk-swe/olp/internal/usage"
 )
 
 // CommitmentTotals describes the complete periods touching a dataset. Amounts
@@ -26,7 +27,7 @@ func readCommitmentTotals(ctx context.Context, tx pgx.Tx, sink focusSink, day, n
 		first = *sink.startDate
 	}
 	var days int
-	if err := tx.QueryRow(ctx, `SELECT COALESCE((SELECT value::integer FROM olp.settings WHERE key='retention.usage_days'),90)`).Scan(&days); err != nil {
+	if err := tx.QueryRow(ctx, `SELECT COALESCE((SELECT value::integer FROM olp.settings WHERE key=$1),90)`, usage.RetentionUsageDaysKey).Scan(&days); err != nil {
 		return nil, err
 	}
 	cutoff := now.UTC().AddDate(0, 0, -days).Truncate(24*time.Hour).AddDate(0, 0, 1)

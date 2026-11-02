@@ -12,7 +12,6 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"os"
 	"strings"
 	"time"
 
@@ -31,6 +30,11 @@ const DeliveryTimeout = 15 * time.Second
 
 const maxCredentialBytes = 65536
 const maxDeliveryResponseBytes = 65536
+
+const (
+	eventIDHeader   = "X-OLP-Event-ID"
+	signatureHeader = "X-OLP-Signature"
+)
 
 type Destination struct {
 	ID           string
@@ -66,12 +70,17 @@ type Sender struct {
 	policy       *egress.Policy
 	auth         senderAuth
 	client       *http.Client
+	getenv       func(string) string
 }
 
-func NewSender(policy *egress.Policy) *Sender {
+func NewSender(policy *egress.Policy, getenvs ...func(string) string) *Sender {
 	client := policy.Client(DeliveryTimeout)
 	client.Timeout = DeliveryTimeout
-	return &Sender{policy: policy, auth: connectors.NewAuth(policy), client: client}
+	getenv := func(string) string { return "" }
+	if len(getenvs) > 0 && getenvs[0] != nil {
+		getenv = getenvs[0]
+	}
+	return &Sender{policy: policy, auth: connectors.NewAuth(policy), client: client, getenv: getenv}
 }
 
 type SendError struct {
@@ -188,7 +197,7 @@ var reservedCredentialHeaders = map[string]bool{
 	"connection": true, "keep-alive": true, "proxy-authenticate": true,
 	"proxy-authorization": true, "te": true, "trailer": true, "trailers": true,
 	"transfer-encoding": true, "upgrade": true, "host": true,
-	"content-length": true, "x-olp-signature": true, "x-olp-event-id": true,
+	"content-length": true, strings.ToLower(signatureHeader): true, strings.ToLower(eventIDHeader): true,
 }
 
 func applyCredentialHeaders(header http.Header, headers map[string]string) error {
@@ -217,7 +226,7 @@ func applySignature(header http.Header, secret string, body []byte) error {
 	}
 	sum := hmac.New(sha256.New, []byte(secret))
 	sum.Write(body)
-	header.Set("X-OLP-Signature", "sha256="+hex.EncodeToString(sum.Sum(nil)))
+	header.Set(signatureHeader, "sha256="+hex.EncodeToString(sum.Sum(nil)))
 	return nil
 }
 
@@ -231,7 +240,7 @@ func (s *Sender) sendHTTPS(ctx context.Context, endpoint *url.URL, credential []
 		return sendError("network", err)
 	}
 	request.Header.Set("Content-Type", "application/json")
-	request.Header.Set("X-OLP-Event-ID", record.ID)
+	request.Header.Set(eventIDHeader, record.ID)
 	if err := applySignature(request.Header, credentialDoc.SigningSecret, record.Data); err != nil {
 		return sendError("credential", err)
 	}
@@ -327,10 +336,10 @@ func (s *Sender) putObject(ctx context.Context, endpoint *url.URL, destination D
 			region = s3EndpointRegion(endpoint)
 		}
 		if region == "" {
-			region = os.Getenv("AWS_REGION")
+			region = s.getenv("AWS_REGION")
 		}
 		if region == "" {
-			region = os.Getenv("AWS_DEFAULT_REGION")
+			region = s.getenv("AWS_DEFAULT_REGION")
 		}
 		if region == "" {
 			return sendError("credential", errors.New("s3 requires a region in the credential, the endpoint or the workload environment"))

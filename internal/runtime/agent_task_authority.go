@@ -7,7 +7,7 @@ import (
 )
 
 func (m *Manager) AuthorizeAgentTask(keyID, projectID, publicationID, revisionID, workloadRevision string, callerExpiresAt *time.Time) error {
-	now := time.Now()
+	now := m.now()
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	if !m.authority.loaded || now.Sub(m.authority.readAt) > AuthorityStaleAfter {

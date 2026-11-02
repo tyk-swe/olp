@@ -606,7 +606,7 @@ func (s *Server) sessionCallTool(w http.ResponseWriter, r *http.Request, authori
 		writeRPCFailure(w, message.id, rpcFailure{status: http.StatusOK, code: rpcInvalidParams, message: "Supply the tool name to call.", data: rpcErrorData{Code: "invalid_params"}})
 		return
 	}
-	if params.executionSelection.supplied() {
+	if params.supplied() {
 		writeRPCFailure(w, message.id, rpcFailure{status: http.StatusOK, code: rpcInvalidParams, message: "The registered server determines transport and executable settings.", data: rpcErrorData{Code: "invalid_params"}})
 		return
 	}

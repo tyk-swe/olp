@@ -169,7 +169,7 @@ func (s *Store) ApplyRetainedEvidence(ctx context.Context, id uuid.UUID, key, di
 	}
 	defer tx.Rollback(context.WithoutCancel(ctx))
 	result, err := s.ApplyRetainedEvidenceTx(ctx, tx, id, key, digest, provenance, actor, observation, claim)
-	if err != nil && !(errors.Is(err, ErrEvidenceConflict) && provenance == "provider_verified" && observation.RemoteTerminated) {
+	if err != nil && (!errors.Is(err, ErrEvidenceConflict) || provenance != "provider_verified" || !observation.RemoteTerminated) {
 		return result, err
 	}
 	if commitErr := tx.Commit(ctx); commitErr != nil {
@@ -370,7 +370,7 @@ func (s *Store) applyRetainedEvidenceTx(ctx context.Context, tx pgx.Tx, id uuid.
 	}
 	// Coverage is checked server-side. A terminal indicator alone is insufficient.
 	closed := false
-	if terminated && terminalAt != nil && !(pendingMutation && provenance == "provider_verified") {
+	if terminated && terminalAt != nil && (!pendingMutation || provenance != "provider_verified") {
 		var complete bool
 		err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM olp.retained_usage_evidence WHERE resource_id=$1 AND document @> '{"coverage_complete":true}'::jsonb)`, id).Scan(&complete)
 		if err != nil {

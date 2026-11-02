@@ -103,7 +103,7 @@ func attemptCaps(route *routing.Route, provider *routing.Provider, slot *routing
 	owners := [3]cappedOwner{
 		{route.ID, limits.RouteLookup(route.ID), quotaRoute, route.Budget},
 		{provider.ID, limits.ConnectionLookup(provider.ID), quotaConnection, nil},
-		{slot.ID, limits.SlotLookup(slot.ID), quotaSlot, slot.Supply.Costs()},
+		{slot.ID, limits.SlotLookup(slot.ID), quotaSlot, slot.Costs()},
 	}
 	if provider.Limits != nil {
 		owners[1].limits = provider.Limits.Costs()

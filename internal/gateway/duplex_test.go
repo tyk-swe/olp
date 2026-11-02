@@ -74,11 +74,12 @@ func TestDuplexCancellationJoinsProviderObservationBeforeReturning(t *testing.T)
 			go func() {
 				var u *wire.Usage
 				var err error
-				if protocol == "realtime" {
+				switch protocol {
+				case "realtime":
 					u, _, err = s.relayRealtime(ctx, x, &pin{}, client, provider, "", "")
-				} else if protocol == "gemini_live" {
+				case "gemini_live":
 					u, _, err = s.relayGeminiLive(ctx, x, &pin{}, client, provider, "", 1024)
-				} else {
+				default:
 					u, _, err = s.relayNativeDuplex(ctx, x, &pin{}, client, provider, "", native.Observer(1024), native.Transport(), 1024)
 				}
 				returned <- result{u, err}

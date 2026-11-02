@@ -274,7 +274,7 @@ slots:
 	resp, err := client.Do(req)
 	if err != nil {
 		factP.Duration = s.now().Sub(factP.StartedAt)
-		if resp != nil && resp.StatusCode >= 300 && resp.StatusCode < 400 || errors.Is(err, egress.ErrRedirect) || strings.Contains(err.Error(), egress.ErrRedirect.Error()) {
+		if resp != nil && resp.StatusCode >= 300 && resp.StatusCode < 400 || egress.IsRedirect(err) {
 			if resp != nil {
 				factP.Status = resp.StatusCode
 			}

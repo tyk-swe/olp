@@ -57,9 +57,10 @@ func inspectStructure(root oif.Value) ([]inspectedTurn, int) {
 				}
 				kind := inspectedBlockKind(block)
 				callID := ""
-				if kind == "tool_call" {
+				switch kind {
+				case "tool_call":
 					callID = inspectionString(block, "id")
-				} else if kind == "tool_result" {
+				case "tool_result":
 					callID = inspectionString(block, "tool_use_id")
 					if callID == "" {
 						callID = inspectionString(block, "call_id")

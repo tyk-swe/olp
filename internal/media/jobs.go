@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/routing"
 
 	"github.com/google/uuid"
@@ -20,6 +21,8 @@ import (
 // job. The claim query, the staleness summary, and the poll write all bind
 // this same gate.
 const PollGateSeconds = 5
+
+const upstreamUniqueIndex = "media_jobs_upstream_unique_idx"
 
 // Querier is the database surface shared by pool and transaction calls.
 type Querier interface {
@@ -602,8 +605,7 @@ func AttachUpstream(ctx context.Context, q Querier, id, upstreamJobID string, up
 		return row, nil
 	}
 	if !errors.Is(err, pgx.ErrNoRows) {
-		var pgErr *pgconn.PgError
-		if errors.As(err, &pgErr) && pgErr.ConstraintName == "media_jobs_upstream_unique_idx" {
+		if database.UniqueViolationOn(err, upstreamUniqueIndex) {
 			return JobRecord{}, &JobError{Kind: JobErrorUpstreamIdentityConflict}
 		}
 		return JobRecord{}, dbError(err)

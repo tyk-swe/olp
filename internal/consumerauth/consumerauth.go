@@ -14,6 +14,11 @@ import (
 	"github.com/tyk-swe/olp/internal/runtime"
 )
 
+const (
+	endUserHeader       = "X-OLP-End-User"
+	agentIdentityHeader = "X-OLP-Agent-Identity"
+)
+
 type Authenticator interface {
 	Authenticate(secret string) (*access.Authority, error)
 }
@@ -35,7 +40,7 @@ type Failure struct {
 func (f *Failure) Error() string { return f.Code + ": " + f.Message }
 
 func HeaderEndUserDigest(auth any, r *http.Request, authority access.Authority) (string, *Failure) {
-	values := r.Header.Values("X-OLP-End-User")
+	values := r.Header.Values(endUserHeader)
 	if authority.Policy.EndUserSource == nil || *authority.Policy.EndUserSource != "header" || len(values) != 1 || !access.ValidEndUserIdentifier(values[0]) {
 		return "", &Failure{Status: http.StatusBadRequest, Code: "invalid_end_user", Message: "Provide an end-user machine token of 1-128 characters in the key's configured source."}
 	}
@@ -127,5 +132,5 @@ func authenticate(auth Authenticator, r *http.Request, token, scope string) (*ac
 	if !ok || (scope != "inference" && scope != "tools" && scope != "agents") {
 		return nil, runtime.ErrInvalidKey
 	}
-	return delegation.AuthenticateDelegation(r.Context(), token, strings.TrimSpace(r.Header.Get("X-OLP-Agent-Identity")))
+	return delegation.AuthenticateDelegation(r.Context(), token, strings.TrimSpace(r.Header.Get(agentIdentityHeader)))
 }

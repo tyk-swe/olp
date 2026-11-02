@@ -30,6 +30,12 @@ const (
 	defaultAuditDays   = 365
 )
 
+const (
+	RetentionRequestsDaysKey = "retention.requests_days"
+	RetentionUsageDaysKey    = "retention.usage_days"
+	RetentionAuditDaysKey    = "retention.audit_days"
+)
+
 // MaintenanceReport counts what one pass reclaimed. A pass that did not get the
 // lock reports LockAcquired false and nothing else; it is a skip, not a failure.
 type MaintenanceReport struct {
@@ -107,8 +113,8 @@ func RunMaintenance(ctx context.Context, pool *pgxpool.Pool, now time.Time) (Mai
 // accepted range is an error rather than a default: silently substituting 30
 // days for an unreadable setting would delete data the operator kept on purpose.
 func retentionCutoffs(ctx context.Context, conn *pgx.Conn, now time.Time) (cutoffs, error) {
-	rows, err := conn.Query(ctx, `SELECT key, value FROM olp.settings WHERE key IN
-        ('retention.requests_days', 'retention.usage_days', 'retention.audit_days')`)
+	rows, err := conn.Query(ctx, `SELECT key, value FROM olp.settings WHERE key IN ($1, $2, $3)`,
+		RetentionRequestsDaysKey, RetentionUsageDaysKey, RetentionAuditDaysKey)
 	if err != nil {
 		return cutoffs{}, fmt.Errorf("read retention settings: %w", err)
 	}
@@ -124,11 +130,11 @@ func retentionCutoffs(ctx context.Context, conn *pgx.Conn, now time.Time) (cutof
 			return cutoffs{}, fmt.Errorf("retention setting %s is invalid", key)
 		}
 		switch key {
-		case "retention.requests_days":
+		case RetentionRequestsDaysKey:
 			requests = days
-		case "retention.usage_days":
+		case RetentionUsageDaysKey:
 			usage = days
-		case "retention.audit_days":
+		case RetentionAuditDaysKey:
 			audit = days
 		}
 	}

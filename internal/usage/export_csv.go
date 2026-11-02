@@ -3,7 +3,6 @@ package usage
 import (
 	"net/http"
 	"strings"
-	"time"
 
 	"github.com/jackc/pgx/v5"
 
@@ -55,7 +54,7 @@ func (s *Server) exportUsageCSV(w http.ResponseWriter, r *http.Request, p access
 	if err != nil {
 		return err
 	}
-	summary, err := ReadSummary(r.Context(), tx, filters, time.Now())
+	summary, err := ReadSummary(r.Context(), tx, filters, s.now())
 	if err != nil {
 		tx.Rollback(r.Context())
 		return err

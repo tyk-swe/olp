@@ -227,7 +227,7 @@ func (s *Server) applyDiscounts(ctx context.Context, tx pgx.Tx, p access.Princip
 func (s *Server) storeDiscount(ctx context.Context, tx pgx.Tx, p access.Principal, d usage.Discount) (usage.Discount, error) {
 	input := usage.DiscountInput{ProviderKind: d.ProviderKind, VendorID: d.VendorID,
 		ProviderID: d.ProviderID, Multiplier: &d.Multiplier}
-	normalized, err := usage.NormalizeDiscount(ctx, tx, input, s.VendorKind)
+	normalized, err := usage.NormalizeDiscount(ctx, tx, input, s.VendorKind, s.now())
 	if err != nil {
 		return usage.Discount{}, err
 	}

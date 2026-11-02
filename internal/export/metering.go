@@ -109,7 +109,7 @@ func (s *Sender) sendCloudEvent(ctx context.Context, endpoint *url.URL, destinat
 		return sendError("network", err)
 	}
 	request.Header.Set("Content-Type", "application/cloudevents+json")
-	request.Header.Set("X-OLP-Event-ID", record.ID)
+	request.Header.Set(eventIDHeader, record.ID)
 	if err := applySignature(request.Header, credentialDoc.SigningSecret, body); err != nil {
 		return sendError("credential", err)
 	}

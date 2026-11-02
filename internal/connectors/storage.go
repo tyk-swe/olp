@@ -34,7 +34,7 @@ func storageDestination(endpoint *url.URL, kind string) bool {
 			return false
 		}
 		for _, c := range account {
-			if !(c >= 'a' && c <= 'z' || c >= '0' && c <= '9') {
+			if (c < 'a' || c > 'z') && (c < '0' || c > '9') {
 				return false
 			}
 		}

@@ -78,7 +78,7 @@ func (s *Server) CompleteReplay(r *http.Request, tx pgx.Tx, c ReplayClaim, resul
 	// (such as a 64-slot credential pool) can exceed a single request's byte limit
 	// and must remain replayable in full for an otherwise valid write to commit.
 	id := NewID()
-	expires := time.Now().Add(24 * time.Hour)
+	expires := s.now().Add(24 * time.Hour)
 	if err = s.Keys.Store(r.Context(), tx, s.Installation, id, secrets.MutationReplay, data, &expires); err != nil {
 		return err
 	}

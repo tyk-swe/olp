@@ -65,42 +65,44 @@ const anthropicMessagesRevision = "2023-06-01"
 
 var profileMu sync.RWMutex
 
-var profileRegistry = []Profile{
-	{ID: "bedrock-knowledge-bases", Label: "Bedrock Knowledge Bases retrieval", Kind: "bedrock", Dialect: "bedrock-knowledge-bases", DialectRevision: "2023-09-30", Hosting: "bedrock-knowledge-bases"},
-	{ID: "vertex-rag-engine", Label: "Vertex RAG Engine retrieval", Kind: "vertex_ai", Dialect: "vertex-rag-engine", DialectRevision: "v1", Hosting: "vertex-rag-engine"},
-	{ID: "azure-ai-search", Label: "Azure AI Search retrieval", Kind: KindAzureAISearch, Dialect: "azure-ai-search", DialectRevision: "2025-09-01", Hosting: "azure-ai-search"},
-	{ID: "openai-chat", Label: "OpenAI Chat Completions", Kind: "openai", Dialect: "openai-chat", Hosting: "direct-openai"},
-	{ID: "openai-responses", Label: "OpenAI Responses", Kind: "openai", Dialect: "openai-responses", Hosting: "direct-openai"},
-	{ID: "compatible-chat", Label: "Compatible Chat Completions", Kind: "openai_compatible", Dialect: "openai-chat", Hosting: "direct-compatible"},
-	{ID: "compatible-responses", Label: "Compatible Responses", Kind: "openai_compatible", Dialect: "openai-responses", Hosting: "direct-compatible"},
-	{ID: "anthropic-messages", Label: "Anthropic Messages", Kind: "anthropic", Dialect: "anthropic-messages", DialectRevision: anthropicMessagesRevision, Hosting: "direct-anthropic"},
-	{ID: "gemini-generation", Label: "Gemini GenerateContent", Kind: "gemini", Dialect: "gemini-generate-content", DialectRevision: "v1beta", Hosting: "direct-gemini"},
-	{ID: "gemini-interactions", Label: "Gemini Interactions", Kind: "gemini", Dialect: "gemini-interactions", DialectRevision: "v1beta", Hosting: "direct-gemini-interactions"},
-	{ID: "gemini-agents", Label: "Gemini managed agents", Kind: "gemini", Dialect: "gemini-agents", DialectRevision: "v1beta", Hosting: "direct-gemini-interactions"},
-	{ID: "gemini-live", Label: "Gemini Live", Kind: "gemini", Dialect: "gemini-live", DialectRevision: "v1beta", Hosting: "direct-gemini-live"},
-	{ID: "xai-realtime", Label: "xAI Realtime", Kind: "openai_compatible", Dialect: "xai-realtime", DialectRevision: "1", Hosting: "xai-realtime"},
-	{ID: "vertex-realtime", Label: "Vertex AI Live", Kind: "vertex_ai", Dialect: "vertex-realtime", DialectRevision: "v1", Hosting: "vertex-live"},
-	{ID: "bedrock-realtime", Label: "Bedrock Nova Sonic", Kind: "bedrock", Dialect: "bedrock-realtime", DialectRevision: "v1", Hosting: "bedrock-nova-sonic"},
-	{ID: "azure-legacy-chat", Label: "Azure deployment Chat Completions", Kind: "azure_openai", Dialect: "openai-chat", Hosting: "azure-deployment"},
-	{ID: "azure-legacy-responses", Label: "Azure legacy Responses", Kind: "azure_openai", Dialect: "openai-responses", Hosting: "azure-responses-legacy"},
-	{ID: "azure-v1-chat", Label: "Azure v1 Chat Completions", Kind: "azure_openai", Dialect: "openai-chat", DialectRevision: "v1", Hosting: "azure-v1"},
-	{ID: "azure-v1-responses", Label: "Azure v1 Responses", Kind: "azure_openai", Dialect: "openai-responses", DialectRevision: "v1", Hosting: "azure-v1"},
-	{ID: "vertex-gemini", Label: "Vertex Google publisher", Kind: "vertex_ai", Dialect: "gemini-generate-content", DialectRevision: "v1", Hosting: "vertex-google"},
-	{ID: "vertex-batch-prediction", Label: "Vertex batch prediction", Kind: "vertex_ai", Dialect: "vertex-batch-prediction", DialectRevision: "v1", Hosting: "vertex-google"},
-	{ID: "vertex-document-processing-ocr", Label: "Google Cloud Document AI document processing", Kind: "vertex_ai", Dialect: "vertex-document-processing-ocr", DialectRevision: "v1", Hosting: "google-document-ai"},
-	{ID: "bedrock-batch-inference", Label: "Bedrock batch inference", Kind: "bedrock", Dialect: "bedrock-batch-inference", DialectRevision: "v1", Hosting: "bedrock-batch-inference"},
-	{ID: "vertex-anthropic", Label: "Vertex Anthropic publisher", Kind: "vertex_ai", Dialect: "anthropic-messages", DialectRevision: "vertex-2023-10-16", Hosting: "vertex-anthropic"},
-	{ID: "vertex-openai", Label: "Vertex OpenAI-compatible Chat Completions", Kind: "vertex_ai", Dialect: "openai-chat", DialectRevision: "v1", Hosting: "vertex-openai"},
-	{ID: "bedrock-converse", Label: "Bedrock Converse", Kind: "bedrock", Dialect: "bedrock-converse", Hosting: "bedrock-converse"},
-	{ID: "bedrock-anthropic-invoke", Label: "Bedrock Anthropic Invoke", Kind: "bedrock", Dialect: "anthropic-messages", DialectRevision: "bedrock-2023-05-31", Hosting: "bedrock-anthropic-invoke"},
-	{ID: "bedrock-invoke", Label: "Bedrock model-specific Invoke", Kind: "bedrock", Dialect: "bedrock-invoke", Hosting: "bedrock-invoke"},
-	{ID: "mistral-fim", Label: "Mistral fill-in-the-middle", Kind: "openai_compatible", Dialect: "mistral-fim", DialectRevision: "v1", Hosting: "direct-compatible"},
-	{ID: "sagemaker-openai-chat", Label: "SageMaker OpenAI-compatible Chat Completions", Kind: KindSageMaker, Dialect: "openai-chat", DialectRevision: "v1", Hosting: "sagemaker-openai"},
-}
+var profileRegistry = builtinProfiles()
 
-func init() {
-	for i := range profileRegistry {
-		p := &profileRegistry[i]
+func builtinProfiles() []Profile {
+	registry := []Profile{
+		{ID: "bedrock-knowledge-bases", Label: "Bedrock Knowledge Bases retrieval", Kind: "bedrock", Dialect: "bedrock-knowledge-bases", DialectRevision: "2023-09-30", Hosting: "bedrock-knowledge-bases"},
+		{ID: "vertex-rag-engine", Label: "Vertex RAG Engine retrieval", Kind: "vertex_ai", Dialect: "vertex-rag-engine", DialectRevision: "v1", Hosting: "vertex-rag-engine"},
+		{ID: "azure-ai-search", Label: "Azure AI Search retrieval", Kind: KindAzureAISearch, Dialect: "azure-ai-search", DialectRevision: "2025-09-01", Hosting: "azure-ai-search"},
+		{ID: "openai-chat", Label: "OpenAI Chat Completions", Kind: "openai", Dialect: "openai-chat", Hosting: "direct-openai"},
+		{ID: "openai-responses", Label: "OpenAI Responses", Kind: "openai", Dialect: "openai-responses", Hosting: "direct-openai"},
+		{ID: "compatible-chat", Label: "Compatible Chat Completions", Kind: "openai_compatible", Dialect: "openai-chat", Hosting: "direct-compatible"},
+		{ID: "compatible-responses", Label: "Compatible Responses", Kind: "openai_compatible", Dialect: "openai-responses", Hosting: "direct-compatible"},
+		{ID: "anthropic-messages", Label: "Anthropic Messages", Kind: "anthropic", Dialect: "anthropic-messages", DialectRevision: anthropicMessagesRevision, Hosting: "direct-anthropic"},
+		{ID: "gemini-generation", Label: "Gemini GenerateContent", Kind: "gemini", Dialect: "gemini-generate-content", DialectRevision: "v1beta", Hosting: "direct-gemini"},
+		{ID: "gemini-interactions", Label: "Gemini Interactions", Kind: "gemini", Dialect: "gemini-interactions", DialectRevision: "v1beta", Hosting: "direct-gemini-interactions"},
+		{ID: "gemini-agents", Label: "Gemini managed agents", Kind: "gemini", Dialect: "gemini-agents", DialectRevision: "v1beta", Hosting: "direct-gemini-interactions"},
+		{ID: "gemini-live", Label: "Gemini Live", Kind: "gemini", Dialect: "gemini-live", DialectRevision: "v1beta", Hosting: "direct-gemini-live"},
+		{ID: "xai-realtime", Label: "xAI Realtime", Kind: "openai_compatible", Dialect: "xai-realtime", DialectRevision: "1", Hosting: "xai-realtime"},
+		{ID: "vertex-realtime", Label: "Vertex AI Live", Kind: "vertex_ai", Dialect: "vertex-realtime", DialectRevision: "v1", Hosting: "vertex-live"},
+		{ID: "bedrock-realtime", Label: "Bedrock Nova Sonic", Kind: "bedrock", Dialect: "bedrock-realtime", DialectRevision: "v1", Hosting: "bedrock-nova-sonic"},
+		{ID: "azure-legacy-chat", Label: "Azure deployment Chat Completions", Kind: "azure_openai", Dialect: "openai-chat", Hosting: "azure-deployment"},
+		{ID: "azure-legacy-responses", Label: "Azure legacy Responses", Kind: "azure_openai", Dialect: "openai-responses", Hosting: "azure-responses-legacy"},
+		{ID: "azure-v1-chat", Label: "Azure v1 Chat Completions", Kind: "azure_openai", Dialect: "openai-chat", DialectRevision: "v1", Hosting: "azure-v1"},
+		{ID: "azure-v1-responses", Label: "Azure v1 Responses", Kind: "azure_openai", Dialect: "openai-responses", DialectRevision: "v1", Hosting: "azure-v1"},
+		{ID: "vertex-gemini", Label: "Vertex Google publisher", Kind: "vertex_ai", Dialect: "gemini-generate-content", DialectRevision: "v1", Hosting: "vertex-google"},
+		{ID: "vertex-batch-prediction", Label: "Vertex batch prediction", Kind: "vertex_ai", Dialect: "vertex-batch-prediction", DialectRevision: "v1", Hosting: "vertex-google"},
+		{ID: "vertex-document-processing-ocr", Label: "Google Cloud Document AI document processing", Kind: "vertex_ai", Dialect: "vertex-document-processing-ocr", DialectRevision: "v1", Hosting: "google-document-ai"},
+		{ID: "bedrock-batch-inference", Label: "Bedrock batch inference", Kind: "bedrock", Dialect: "bedrock-batch-inference", DialectRevision: "v1", Hosting: "bedrock-batch-inference"},
+		{ID: "vertex-anthropic", Label: "Vertex Anthropic publisher", Kind: "vertex_ai", Dialect: "anthropic-messages", DialectRevision: "vertex-2023-10-16", Hosting: "vertex-anthropic"},
+		{ID: "vertex-openai", Label: "Vertex OpenAI-compatible Chat Completions", Kind: "vertex_ai", Dialect: "openai-chat", DialectRevision: "v1", Hosting: "vertex-openai"},
+		{ID: "bedrock-converse", Label: "Bedrock Converse", Kind: "bedrock", Dialect: "bedrock-converse", Hosting: "bedrock-converse"},
+		{ID: "bedrock-anthropic-invoke", Label: "Bedrock Anthropic Invoke", Kind: "bedrock", Dialect: "anthropic-messages", DialectRevision: "bedrock-2023-05-31", Hosting: "bedrock-anthropic-invoke"},
+		{ID: "bedrock-invoke", Label: "Bedrock model-specific Invoke", Kind: "bedrock", Dialect: "bedrock-invoke", Hosting: "bedrock-invoke"},
+		{ID: "mistral-fim", Label: "Mistral fill-in-the-middle", Kind: "openai_compatible", Dialect: "mistral-fim", DialectRevision: "v1", Hosting: "direct-compatible"},
+		{ID: "sagemaker-openai-chat", Label: "SageMaker OpenAI-compatible Chat Completions", Kind: KindSageMaker, Dialect: "openai-chat", DialectRevision: "v1", Hosting: "sagemaker-openai"},
+	}
+
+	for i := range registry {
+		p := &registry[i]
 		p.Revision, p.Transport, p.Strict = ProfileRevision, "http", true
 		p.Authentication = []string{"api_key", "headers", "none"}
 		p.Operations = []string{"generation", "token_count"}
@@ -264,9 +266,10 @@ func init() {
 		}
 		completeProfileMetadata(p)
 	}
-	registerUnaryProfiles()
-	registerCompletionProfiles()
-	registerFilesBatchesProfiles()
+	registry = append(registry, unaryProfiles()...)
+	registry = append(registry, completionProfiles()...)
+	registry = append(registry, filesBatchesProfiles()...)
+	return registry
 }
 
 // Profiles returns detached catalogue metadata; registering a new hosting profile
@@ -894,74 +897,6 @@ func completeProfileMetadata(p *Profile) {
 			"dialect": map[string]any{"const": dialect}, "values": map[string]any{"type": "object", "additionalProperties": false, "properties": fields}, "native_options": map[string]any{"type": "object", "description": "Operation payload extensions; routing, credentials and resource references are reserved."},
 		}})
 	}
-}
-
-// RegisterProfile extends an existing trusted component composition at startup.
-// A new provider using an existing dialect needs a profile, bindings and fixtures,
-// not a provider case in the operation kernel. This is not a runtime plugin API.
-func RegisterProfile(p Profile) error {
-	if p.ID == "" || len(p.ID) > 128 || p.Revision == "" || p.Label == "" {
-		return errors.New("profile identity, revision and label are required")
-	}
-	profileMu.Lock()
-	defer profileMu.Unlock()
-	var template *Profile
-	for i := range profileRegistry {
-		existing := &profileRegistry[i]
-		if existing.ID == p.ID && existing.Revision == p.Revision {
-			return errors.New("profile revision already registered")
-		}
-	}
-	template = profileTemplateForRegistration(p)
-	if template == nil || len(profileRegistry) >= 4096 {
-		return errors.New("profile components do not form an existing registered composition")
-	}
-	for _, auth := range p.Authentication {
-		if !slices.Contains(template.Authentication, auth) {
-			return errors.New("profile authentication is incompatible")
-		}
-	}
-	for _, operation := range p.Operations {
-		if !slices.Contains(template.Operations, operation) {
-			return errors.New("profile operation is incompatible")
-		}
-	}
-	for _, header := range p.SemanticHeaders {
-		if !slices.Contains(template.SemanticHeaders, header) {
-			return errors.New("profile semantic header is incompatible")
-		}
-	}
-	for _, query := range p.QuerySettings {
-		if !slices.Contains(template.QuerySettings, query) {
-			return errors.New("profile query setting is incompatible")
-		}
-	}
-	if p.Transport != template.Transport || len(p.Authentication) == 0 || len(p.Operations) == 0 {
-		return errors.New("profile transport and capabilities are required")
-	}
-	p.Plugin, p.ModelDiscovery, p.Strict = nil, false, template.Strict
-	completeProfileMetadata(&p)
-	profileRegistry = append(profileRegistry, cloneProfile(p))
-	return nil
-}
-
-func profileTemplateForRegistration(p Profile) *Profile {
-	var template *Profile
-	for i := range profileRegistry {
-		existing := &profileRegistry[i]
-		if existing.Kind == p.Kind && existing.Dialect == p.Dialect && existing.Hosting == p.Hosting && existing.DialectRevision == p.DialectRevision {
-			if vendorBatchProfile(*existing) {
-				continue
-			}
-			template = existing
-		}
-	}
-	return template
-}
-
-func vendorBatchProfile(profile Profile) bool {
-	return profile.Kind == "openai_compatible" && slices.Contains(profile.Operations, "batch") &&
-		strings.HasSuffix(profile.ID, "-files-batches")
 }
 
 func defaultControlSchema(dialect, operation, name string) map[string]any {

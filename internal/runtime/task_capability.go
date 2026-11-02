@@ -129,10 +129,11 @@ func (m *Manager) AdmitTaskCapabilityAttempt(ctx context.Context, authority acce
 	if current.ID != authority.ID || project == nil {
 		return access.Forbidden()
 	}
-	if scope == "inference" && (!current.Allows(scope, resource, project, time.Now()) || !slices.Contains(current.TaskCapability.RouteRevisions, revision)) {
+	now := m.now()
+	if scope == "inference" && (!current.Allows(scope, resource, project, now) || !slices.Contains(current.TaskCapability.RouteRevisions, revision)) {
 		return access.Forbidden()
 	}
-	if scope == "tools" && (!current.AllowsResource(scope, resource, *project, time.Now()) || !slices.Contains(current.TaskCapability.ToolsetRevisions, revision)) {
+	if scope == "tools" && (!current.AllowsResource(scope, resource, *project, now) || !slices.Contains(current.TaskCapability.ToolsetRevisions, revision)) {
 		return access.Forbidden()
 	}
 	if scope != "inference" && scope != "tools" {

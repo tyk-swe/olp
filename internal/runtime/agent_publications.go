@@ -68,7 +68,7 @@ func (m *Manager) AuthorizeAgentResource(a access.Authority, scope, id, revision
 	if a.TaskCapability != nil && (scope != "tools" || !slices.Contains(a.TaskCapability.ToolsetRevisions, revision)) {
 		return access.Forbidden()
 	}
-	now := time.Now()
+	now := m.now()
 	if !a.AllowsResource(scope, id, project, now) {
 		return access.Forbidden()
 	}
@@ -159,7 +159,7 @@ func (m *Manager) AuthorizeMCPTool(a access.Authority, id, revision, project, se
 	if a.TaskCapability != nil && !slices.Contains(a.TaskCapability.ToolsetRevisions, revision) {
 		return access.Forbidden()
 	}
-	now := time.Now()
+	now := m.now()
 	if !a.AllowsResource("tools", id, project, now) {
 		return access.Forbidden()
 	}

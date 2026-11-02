@@ -797,7 +797,7 @@ func (s *Server) attempt(ctx context.Context, x *call, a routing.Attempt, provid
 	actionable := false
 	if x.generation.parsed.Stream {
 		mediaType, _, _ := mime.ParseMediaType(resp.Header.Get("Content-Type"))
-		if mediaType != "text/event-stream" && !((encodedWire == "bedrock" || cfg.EventStream()) && mediaType == "application/vnd.amazon.eventstream") {
+		if mediaType != "text/event-stream" && (encodedWire != "bedrock" && !cfg.EventStream() || mediaType != "application/vnd.amazon.eventstream") {
 			return fail(classProtocol, &attemptFailure{status: resp.StatusCode})
 		}
 		streamCap := time.AfterFunc(maxStreamDuration, func() { st.reason.CompareAndSwap(0, 3); cancel() })

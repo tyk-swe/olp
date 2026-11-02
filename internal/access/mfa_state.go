@@ -118,7 +118,7 @@ func (s *Server) storeMFAFlow(r *http.Request, tx pgx.Tx, f mfaFlow) (string, ti
 		return "", time.Time{}, err
 	}
 	token := secrets.Token()
-	until := time.Now().Add(mfaTTL)
+	until := s.now().Add(mfaTTL)
 	data, _ := json.Marshal(f.Data)
 	_, err = tx.Exec(r.Context(), `INSERT INTO olp.mfa_challenges(id,digest,user_id,user_etag,mfa_revision,session_id,purpose,data,secret_id,expires_at) SELECT $1,$2,u.id,u.etag,u.mfa_revision,$4,$5,$6,$7,$8 FROM olp.users u WHERE u.id=$3 AND active AND oidc_authorized`, f.ID, s.Auth.Digest(secrets.MFAChallengeDigest, token), f.UserID, f.SessionID, f.Purpose, data, f.SecretID, until)
 	return token, until, err
@@ -177,7 +177,7 @@ func (s *Server) mfaChallenge(r *http.Request, tx pgx.Tx, userID, purpose string
 		if err != nil {
 			return Reply{}, err
 		}
-		challenge.Expires = time.Now().Add(mfaTTL)
+		challenge.Expires = s.now().Add(mfaTTL)
 		data.WebAuthn = challenge
 		options = creation
 		methods = append(methods, "webauthn")

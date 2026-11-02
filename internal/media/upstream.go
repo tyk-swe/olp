@@ -264,7 +264,7 @@ func (t *Transport) Do(ctx context.Context, target Target, call *UpstreamCall, r
 			Ambiguous: call.Ambiguous && outcome.Acceptance.Unresolved(), Detail: "upstream transport failed"}
 	}
 	firstByte := t.now().Sub(started)
-	if resp.StatusCode != http.StatusOK && !(call.Kind == ResponseVideoJob && resp.StatusCode == http.StatusCreated) && !(call.NoContent && resp.StatusCode == http.StatusNoContent) {
+	if resp.StatusCode != http.StatusOK && (call.Kind != ResponseVideoJob || resp.StatusCode != http.StatusCreated) && (!call.NoContent || resp.StatusCode != http.StatusNoContent) {
 		// A provider can reject headers before reading the upload. Stop the
 		// producer and preserve the definitive HTTP rejection in that case.
 		if pipe != nil {

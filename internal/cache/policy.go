@@ -119,7 +119,7 @@ func validName(s string) bool {
 		return false
 	}
 	for i, c := range s {
-		if !(c >= 'a' && c <= 'z' || c >= '0' && c <= '9' || i > 0 && strings.ContainsRune("._-", c)) {
+		if (c < 'a' || c > 'z') && (c < '0' || c > '9') && (i <= 0 || !strings.ContainsRune("._-", c)) {
 			return false
 		}
 	}

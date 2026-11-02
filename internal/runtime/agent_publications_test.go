@@ -17,7 +17,7 @@ import (
 )
 
 func TestConsumerKeyAuthenticationRequiresCurrentExactCredential(t *testing.T) {
-	now := time.Now()
+	now := time.Unix(0, 0)
 	expired, active := now.Add(-time.Minute), now.Add(time.Minute)
 	issuer := "workload-issuer"
 	auth := secrets.NewAuthKey(make([]byte, 32), "installation")
@@ -44,7 +44,7 @@ func TestConsumerKeyAuthenticationRequiresCurrentExactCredential(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			captured := access.Authority{ID: principal.ID, LookupID: principal.LookupID, Policy: principal.Policy, WorkloadIssuerID: test.issuerID}
-			manager := Manager{auth: auth, authority: authorityState{
+			manager := Manager{Now: func() time.Time { return now }, auth: auth, authority: authorityState{
 				loaded: test.loaded, readAt: test.readAt,
 				keys: map[string]*keyRecord{"lookup": {authority: captured, digest: auth.Digest(secrets.APIKeyDigest, secret), expiresAt: test.expiresAt}},
 			}}

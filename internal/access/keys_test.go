@@ -204,3 +204,23 @@ func TestDelegatedToolDebitEnforcesAgentPairAndAttributionBudgets(t *testing.T) 
 		t.Fatal("tracking an uncapped delegated pair must not create a cost limit")
 	}
 }
+
+func TestValidateKeyExpiryUsesTheGivenClock(t *testing.T) {
+	now := time.Date(2026, 11, 2, 12, 0, 0, 0, time.UTC)
+	past := now.Add(-time.Minute)
+	future := now.Add(time.Hour)
+	input := func(expires *time.Time) keyInput {
+		return keyInput{Name: "test key", KeyPolicy: KeyPolicy{
+			Scopes: []string{"inference"}, AllowedRoutes: []string{}, ExpiresAt: expires,
+		}}
+	}
+	if err := validateKey(input(&past), true, now); err == nil {
+		t.Fatal("a changed expiry in the past was accepted")
+	}
+	if err := validateKey(input(&future), true, now); err != nil {
+		t.Fatalf("a changed expiry in the future was refused: %v", err)
+	}
+	if err := validateKey(input(&past), false, now); err != nil {
+		t.Fatalf("an unchanged past expiry was revalidated: %v", err)
+	}
+}

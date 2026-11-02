@@ -435,10 +435,10 @@ func ReadSummary(ctx context.Context, q access.Queryer, f Filters, now time.Time
 	f.usageRows(&query, scopeFor(f))
 	query.push(" SELECT " + totalsColumns + " FROM report_rows")
 	var summary Summary
-	if err := q.QueryRow(ctx, query.sql(), query.args...).Scan(summary.Totals.scanTargets()...); err != nil {
+	if err := q.QueryRow(ctx, query.sql(), query.args...).Scan(summary.scanTargets()...); err != nil {
 		return Summary{}, fmt.Errorf("read usage summary: %w", err)
 	}
-	if !summary.Totals.valid() {
+	if !summary.valid() {
 		return Summary{}, errInvalidUsageCount
 	}
 	gapEvents, uncertain, err := readGapEvidence(ctx, q, f)
@@ -571,10 +571,10 @@ func readBreakdown(ctx context.Context, q access.Queryer, f Filters, dimension s
 	report := Breakdown{Items: []BreakdownItem{}}
 	for rows.Next() {
 		var item BreakdownItem
-		if err = rows.Scan(append([]any{&item.Dimension}, item.Totals.scanTargets()...)...); err != nil {
+		if err = rows.Scan(append([]any{&item.Dimension}, item.scanTargets()...)...); err != nil {
 			return Breakdown{}, fmt.Errorf("read usage breakdown: %w", err)
 		}
-		if !item.Totals.valid() {
+		if !item.valid() {
 			return Breakdown{}, errInvalidUsageCount
 		}
 		report.Items = append(report.Items, item)
@@ -615,10 +615,10 @@ func ReadSeries(ctx context.Context, q access.Queryer, f Filters, granularity st
 	report := Series{Items: []Point{}}
 	for rows.Next() {
 		var point Point
-		if err = rows.Scan(append([]any{&point.Bucket}, point.Totals.scanTargets()...)...); err != nil {
+		if err = rows.Scan(append([]any{&point.Bucket}, point.scanTargets()...)...); err != nil {
 			return Series{}, fmt.Errorf("read usage series: %w", err)
 		}
-		if !point.Totals.valid() {
+		if !point.valid() {
 			return Series{}, errInvalidUsageCount
 		}
 		point.Bucket = point.Bucket.UTC()

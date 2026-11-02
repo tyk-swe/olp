@@ -4,15 +4,14 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"net/http"
 	"reflect"
 	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/secrets"
@@ -610,8 +609,7 @@ func (s *Server) write(r *http.Request, _ access.Principal, id string, retire bo
 			}
 		}
 		if err = Save(r.Context(), tx, p.UserID(), current, next); err != nil {
-			var pg *pgconn.PgError
-			if errors.As(err, &pg) && pg.Code == "23505" {
+			if database.IsUniqueViolation(err) {
 				return access.Reply{}, access.Fail(409, "mcp_server_exists", "Choose an unused MCP name in this project.")
 			}
 			return access.Reply{}, err

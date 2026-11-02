@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/tyk-swe/olp/internal/database"
 )
 
 const projectFields = `'organization_id',p.organization_id,'id',p.id,'name',p.name,'etag',p.etag,'created_by',p.created_by,'created_by_email',u.email,'created_at',p.created_at,'updated_at',p.updated_at,'member_count',(SELECT count(*) FROM olp.project_members m WHERE m.project_id=p.id)`
@@ -43,9 +43,10 @@ func (s *Server) project(r *http.Request, principal Principal) (Reply, error) {
 	return Detail(json.RawMessage(data), etag), err
 }
 
+const projectsNameUnique = "projects_name"
+
 func duplicateName(err error) bool {
-	var pg *pgconn.PgError
-	return errors.As(err, &pg) && pg.Code == "23505" && pg.ConstraintName == "projects_name"
+	return database.UniqueViolationOn(err, projectsNameUnique)
 }
 
 func (s *Server) createProject(r *http.Request, _ Principal) (Reply, error) {

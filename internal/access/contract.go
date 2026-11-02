@@ -33,7 +33,7 @@ type Alternative struct {
 
 // Admits reports whether p satisfies the requirement.
 func (req Requirement) Admits(p Principal) error {
-	var refusal error = Forbidden()
+	var refusal = Forbidden()
 	for _, alternative := range req.Alternatives {
 		if alternative.Kind != p.Kind {
 			continue

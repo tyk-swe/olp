@@ -19,6 +19,7 @@ import (
 	"google.golang.org/api/option"
 
 	"github.com/tyk-swe/olp/internal/connectors"
+	"github.com/tyk-swe/olp/internal/usage"
 )
 
 const (
@@ -100,7 +101,7 @@ func (i *Importer) importGoogle(ctx context.Context, row *importRow, client *htt
 	defer cancel()
 	today := i.now().UTC().Truncate(24 * time.Hour)
 	var retention int
-	if err := i.Pool.QueryRow(importCtx, `SELECT COALESCE((SELECT value::int FROM olp.settings WHERE key='retention.usage_days'),90)`).Scan(&retention); err != nil {
+	if err := i.Pool.QueryRow(importCtx, `SELECT COALESCE((SELECT value::int FROM olp.settings WHERE key=$1),90)`, usage.RetentionUsageDaysKey).Scan(&retention); err != nil {
 		return err
 	}
 	earliest := today.AddDate(0, 0, -retention)

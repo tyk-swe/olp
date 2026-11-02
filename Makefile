@@ -21,7 +21,7 @@ GOFMT_PATHS = \
 
 .PHONY: \
 	help setup dev check check-fast lint fmt-check vet vet-bench \
-	test test-go test-bench test-console test-scripts test-race test-ratchet \
+	test test-go test-bench test-console test-scripts test-race test-ratchet test-coupling \
 	integration \
 	bench bench-compare \
 	api build build-go catalog catalog-sign fmt
@@ -59,7 +59,7 @@ vet-bench: ## Run go vet on the benchmark harness
 lint: ## Run the pinned Go static analysis gate (see staticcheck.conf)
 	./scripts/check-lint.sh $(LINT_ARGS)
 
-test: test-go test-bench test-console test-scripts ## Run Go, benchmark harness, console, and script tests without containers
+test: test-go test-bench test-console test-scripts test-coupling ## Run Go, benchmark harness, console, and script tests without containers
 
 test-go: ## Run Go unit and protocol tests
 	go test -mod=readonly -vet=off -timeout=$(GO_TEST_TIMEOUT) $(GO_TEST_ARGS) $(GO_TEST_PACKAGES)
@@ -75,6 +75,9 @@ test-scripts: ## Run automation script tests
 
 test-ratchet: ## Check touched test files against the mechanical test rules
 	node scripts/check-test-ratchet.mjs $(RATCHET_BASE)
+
+test-coupling: ## Fail when implicit coupling counts rise above the recorded baseline
+	node scripts/check-coupling.mjs
 
 test-race: ## Run uncached Go tests with race detection
 	$(MAKE) test-go GO_TEST_ARGS="$(GO_TEST_ARGS) -race -count=1"

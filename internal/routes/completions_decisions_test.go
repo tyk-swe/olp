@@ -172,7 +172,7 @@ func TestCallerPaidDecisionInspectionPreservesTokenCaps(t *testing.T) {
 			p.Kind, p.VendorID, p.ProfileID, p.ProfileRevision, p.CredentialSource = "openai", "openai", "openai-decisions", "1", "caller"
 			p.Capabilities = []routing.Capability{{Model: "model", Operation: "decision", Surface: "openai", Mode: "unary"}}
 			p.Limits = &routing.Limits{Supply: routing.Supply{DailyCostLimit: new("1")}}
-			p.Slots[0].Supply.DailyCostLimit = new("1")
+			p.Slots[0].DailyCostLimit = new("1")
 			if tokenCap {
 				p.Limits.TokensPerMinute = new(int64(1000))
 			}

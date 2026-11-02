@@ -102,9 +102,10 @@ func TestResponseNativeWriterFailureKeepsRetainedRetryFence(t *testing.T) {
 					t.Fatalf("native client failure changed actual delivery outcome: failure=%+v fact=%+v", failure, fact)
 				}
 				wantAcceptance, wantClass := upstream.Terminal, classSuccess
-				if phase == "failed" {
+				switch phase {
+				case "failed":
 					wantClass = classUpstreamServer
-				} else if phase == "partial" {
+				case "partial":
 					wantAcceptance, wantClass = upstream.Accepted, classCancelled
 				}
 				if failure.acceptance != wantAcceptance || fact.Class != wantClass {

@@ -276,7 +276,7 @@ func (s *Server) send(w http.ResponseWriter, r *http.Request, authority access.A
 		return
 	}
 	dispatched = true
-	headers["X-OLP-Task-Capability"] = []string{capability}
+	headers[taskCapabilityHeader] = []string{capability}
 	upstream, err := transport.SendMessage(ctx, headers, &prepared.Params)
 	if err != nil {
 		s.Ledger.unknown(r.Context(), res)

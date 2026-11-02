@@ -3210,7 +3210,7 @@ func TestCodePaidFallbackSubstitutionRequiresExplicitModelPool(t *testing.T) {
 				h.rt.release.Snapshot.CodePaidConnections[key] = provider
 			}
 			price := h.rt.inputs.Prices[0]
-			price.Price.Model = modelB
+			price.Model = modelB
 			h.rt.inputs.Prices = append(h.rt.inputs.Prices, price)
 			var paid atomic.Bool
 			h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {

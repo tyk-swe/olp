@@ -53,7 +53,7 @@ func scanDiscount(row interface{ Scan(...any) error }) (Discount, error) {
 // connector kind, a vendor that matches it, a provider of the declared kind,
 // and plugin providers priced only at their own scope.
 func NormalizeDiscount(ctx context.Context, tx pgx.Tx, input DiscountInput,
-	vendorKind func(vendor string) (string, bool)) (Discount, error) {
+	vendorKind func(vendor string) (string, bool), now time.Time) (Discount, error) {
 	var d Discount
 	d.ProviderKind = strings.TrimSpace(input.ProviderKind)
 	if !validProviderKind(d.ProviderKind) {
@@ -97,10 +97,10 @@ func NormalizeDiscount(ctx context.Context, tx pgx.Tx, input DiscountInput,
 		return d, access.Invalid("multiplier", "Use a non-negative decimal.")
 	}
 	d.Multiplier = multiplier
-	d.EffectiveAt = time.Now().UTC()
+	d.EffectiveAt = now.UTC()
 	if input.EffectiveAt != nil {
 		d.EffectiveAt = input.EffectiveAt.UTC()
-		if d.EffectiveAt.Before(time.Now()) {
+		if d.EffectiveAt.Before(now) {
 			return d, access.Invalid("effective_at",
 				"Choose an effective time now or in the future.")
 		}
@@ -172,7 +172,7 @@ func (s *Server) createPricingDiscount(r *http.Request, _ access.Principal) (acc
 	if replayed != nil {
 		return access.Commit(r, tx, *replayed)
 	}
-	discount, err := NormalizeDiscount(r.Context(), tx, input, s.VendorKind)
+	discount, err := NormalizeDiscount(r.Context(), tx, input, s.VendorKind, s.now())
 	if err != nil {
 		return access.Reply{}, err
 	}

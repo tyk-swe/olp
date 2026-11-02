@@ -364,7 +364,7 @@ func (s *Server) beginOIDC(r *http.Request, kind string) (Reply, error) {
 		flow.ReturnTo = "/settings/profile"
 	}
 	id, cookieToken := NewID(), secrets.Token()
-	expires := time.Now().Add(10 * time.Minute)
+	expires := s.now().Add(10 * time.Minute)
 	data, err := json.Marshal(flow)
 	if err != nil {
 		return Reply{}, err
@@ -518,7 +518,8 @@ func (s *Server) oidcCallback(r *http.Request) (reply Reply, callbackErr error) 
 	if flow.Kind == "reauthenticate" {
 		var authTime int64
 		json.Unmarshal(claims["auth_time"], &authTime)
-		if authTime < time.Now().Add(-5*time.Minute).Unix() || authTime > time.Now().Add(time.Minute).Unix() {
+		now := s.now()
+		if authTime < now.Add(-5*time.Minute).Unix() || authTime > now.Add(time.Minute).Unix() {
 			return Reply{}, Fail(403, "oidc_recent_auth_required", "The provider must confirm a recent authentication.")
 		}
 	}
@@ -769,7 +770,7 @@ func (s *Server) oidcIdentities(r *http.Request, p Principal) (Reply, error) {
 	if err != nil {
 		return Reply{}, err
 	}
-	samlUsable, err := usableSAMLIdentities(r, s.Pool, p)
+	samlUsable, err := s.usableSAMLIdentities(r, s.Pool, p)
 	if err != nil {
 		return Reply{}, err
 	}
@@ -822,7 +823,7 @@ func (s *Server) unlinkOIDCIdentity(r *http.Request, _ Principal) (Reply, error)
 		// may outlive the identity through which the IdP can revoke its role.
 		var samlUsable []string
 		if locallyManaged {
-			if samlUsable, err = usableSAMLIdentities(r, tx, p); err != nil {
+			if samlUsable, err = s.usableSAMLIdentities(r, tx, p); err != nil {
 				return Reply{}, err
 			}
 		}

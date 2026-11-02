@@ -114,7 +114,7 @@ func (s *Server) beginSAML(r *http.Request, kind string) (Reply, error) {
 	if current.ETag != c.ETag || !current.Enabled {
 		return Reply{}, Fail(409, "saml_configuration_changed", "SAML configuration changed. Start again.")
 	}
-	flow := samlFlow{ID: NewID(), Kind: kind, ReturnTo: input.ReturnTo, Purpose: input.Purpose, Resource: input.Resource, RequestID: request.ID, ETag: c.ETag, Expires: time.Now().Add(samlFlowTTL)}
+	flow := samlFlow{ID: NewID(), Kind: kind, ReturnTo: input.ReturnTo, Purpose: input.Purpose, Resource: input.Resource, RequestID: request.ID, ETag: c.ETag, Expires: s.now().Add(samlFlowTTL)}
 	if kind != "login" {
 		p, e := s.Reauthorize(r, tx)
 		if e != nil {
@@ -197,12 +197,13 @@ func (s *Server) samlACS(r *http.Request) (Reply, error) {
 	if err != nil {
 		return Reply{}, Fail(403, "saml_assertion_invalid", "The SAML response could not be verified.")
 	}
-	assertion, err := samlidentity.Verify(sp, m, raw, flow.RequestID, time.Now())
+	now := s.now()
+	assertion, err := samlidentity.Verify(sp, m, raw, flow.RequestID, now)
 	clear(raw)
 	if err != nil {
 		return Reply{}, Fail(403, "saml_assertion_invalid", "The SAML response could not be verified.")
 	}
-	if flow.Kind != "login" && (assertion.AuthnStatements[0].AuthnInstant.Before(flow.Expires.Add(-samlFlowTTL-samlidentity.Skew)) || assertion.AuthnStatements[0].AuthnInstant.After(time.Now().Add(samlidentity.Skew))) {
+	if flow.Kind != "login" && (assertion.AuthnStatements[0].AuthnInstant.Before(flow.Expires.Add(-samlFlowTTL-samlidentity.Skew)) || assertion.AuthnStatements[0].AuthnInstant.After(now.Add(samlidentity.Skew))) {
 		return Reply{}, Fail(403, "saml_authentication_not_recent", "Authenticate again at the identity provider.")
 	}
 	attrs, err := samlidentity.Attributes(assertion)

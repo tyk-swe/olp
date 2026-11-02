@@ -3,7 +3,6 @@ package retrieval
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"net/http"
 	"slices"
 	"strings"
@@ -11,8 +10,8 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/database"
 )
 
 type Input struct {
@@ -336,8 +335,7 @@ func (s *Server) write(r *http.Request, _ access.Principal) (access.Reply, error
 		}
 	}
 	if err != nil {
-		var pg *pgconn.PgError
-		if errors.As(err, &pg) && pg.Code == "23505" {
+		if database.IsUniqueViolation(err) {
 			return access.Reply{}, access.Fail(409, "retrieval_binding_exists", "Choose an unused binding name in this project.")
 		}
 		return access.Reply{}, err

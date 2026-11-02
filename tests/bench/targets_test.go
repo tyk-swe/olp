@@ -73,10 +73,10 @@ func comparative(r *result) []targetResult {
 // primaryAdded is the added latency that stands for the scenario: the mode it
 // exercises, or all successful requests when it mixes them.
 func primaryAdded(r *result) *percentiles {
-	switch {
-	case r.Plan.StreamShare == 0:
+	switch r.Plan.StreamShare {
+	case 0:
 		return r.AddedLatency.Unary
-	case r.Plan.StreamShare == 1:
+	case 1:
 		return r.AddedLatency.Stream
 	}
 	return r.AddedLatency.All

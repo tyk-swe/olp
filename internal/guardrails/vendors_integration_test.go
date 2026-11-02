@@ -56,9 +56,10 @@ func TestVendorInterventionWithoutReplacement(t *testing.T) {
 						io.WriteString(w, `{"action":"GUARDRAIL_INTERVENED","texts":["unchanged"]}`)
 					})
 					parameters := json.RawMessage(`{}`)
-					if kind == "deepkeep" {
+					switch kind {
+					case "deepkeep":
 						parameters = json.RawMessage(`{"firewall_id":"firewall"}`)
-					} else if kind == "ovalix" {
+					case "ovalix":
 						parameters = json.RawMessage(`{"application_id":"app","checkpoint_id":"checkpoint","actor":"caller"}`)
 					}
 					config, _ := json.Marshal(ExternalConfig{Endpoint: endpoint, ContentEgress: true, CredentialRef: "credential", Parameters: parameters})

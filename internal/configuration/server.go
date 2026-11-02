@@ -28,6 +28,13 @@ type Server struct {
 	StoreCredential        func(ctx context.Context, tx pgx.Tx, providerID, secret string) (string, error)
 }
 
+func (s *Server) now() time.Time {
+	if s.Access != nil && s.Access.Now != nil {
+		return s.Access.Now()
+	}
+	return time.Now()
+}
+
 func (s *Server) Register(mux *http.ServeMux) {
 	s.Access.Route(mux, "GET /api/v1/configuration/export", s.export)
 	s.Access.Route(mux, "POST /api/v1/configuration/plan", s.planEndpoint, access.MaxBody(4<<20))

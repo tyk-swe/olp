@@ -231,7 +231,7 @@ func liftRequest(source oif.Request, id string) (Request, error) {
 					r.format.DType = "float32"
 					r.format.BitsPerDimension = 32
 				}
-			} else if !(id == "voyage-embeddings" && encoding.Kind() == oif.Null || id == "openai-embeddings" && value == "float") {
+			} else if (id != "voyage-embeddings" || encoding.Kind() != oif.Null) && (id != "openai-embeddings" || value != "float") {
 				return r, operations.Invalid("encoding_format", "This encoding format has no native representation in the selected dialect.")
 			}
 		}

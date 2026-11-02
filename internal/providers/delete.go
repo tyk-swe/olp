@@ -1,13 +1,12 @@
 package providers
 
 import (
-	"errors"
 	"net/http"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/secrets"
 )
 
@@ -68,8 +67,7 @@ func (s *Server) deleteProvider(r *http.Request, _ access.Principal) (access.Rep
 		return access.Reply{}, err
 	}
 	if _, err = tx.Exec(r.Context(), "DELETE FROM olp.providers WHERE id=$1", id); err != nil {
-		var constraint *pgconn.PgError
-		if errors.As(err, &constraint) && constraint.Code == "23503" {
+		if database.IsForeignKeyViolation(err) {
 			return access.Reply{}, access.Fail(409, "provider_in_use", "The provider has dependent resources or retained history.")
 		}
 		return access.Reply{}, err

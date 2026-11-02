@@ -140,6 +140,7 @@ type authorityState struct {
 // Manager installs releases and refreshes key authority for one gateway.
 type Manager struct {
 	PrepareGuardrailPlugin func(context.Context, string) (func(), error)
+	Now                    func() time.Time
 	workloadKeys           *workload.Cache
 	workloadRegistration   sync.Mutex
 	pool                   *pgxpool.Pool
@@ -193,25 +194,55 @@ type Manager struct {
 	stopped    chan struct{}
 }
 
+type ManagerConfig struct {
+	Installation    string
+	InstanceID      string
+	Auth            *secrets.AuthKey
+	Keys            *secrets.KeyRing
+	Log             *slog.Logger
+	ReadPool        *pgxpool.Pool
+	Region          string
+	ExternalSecrets ExternalSecrets
+	Mounted         map[string]MountedProvider
+	Now             func() time.Time
+}
+
 // NewManager prepares a manager that serves the empty snapshot until the
 // first release installs and rejects admissions until authority loads.
-func NewManager(pool *pgxpool.Pool, installation string, auth *secrets.AuthKey, keys *secrets.KeyRing, log *slog.Logger) *Manager {
+func NewManager(pool *pgxpool.Pool, cfg ManagerConfig) *Manager {
+	now := cfg.Now
+	if now == nil {
+		now = time.Now
+	}
 	tasks, cancel := context.WithCancel(context.Background())
-	return &Manager{workloadKeys: workload.NewCache(access.IdentityHTTPClient()),
-		pool:         pool,
-		installation: installation,
-		auth:         auth,
-		keys:         keys,
-		log:          log,
-		release:      emptyRelease(),
-		stop:         make(chan struct{}),
-		taskCtx:      tasks,
-		cancelTask:   cancel,
-		stopped:      make(chan struct{}),
-		InstanceID:   usage.GatewayInstance(),
+	m := &Manager{Now: now, workloadKeys: workload.NewCache(access.IdentityHTTPClient()),
+		pool:            pool,
+		installation:    cfg.Installation,
+		auth:            cfg.Auth,
+		keys:            cfg.Keys,
+		log:             cfg.Log,
+		ReadPool:        cfg.ReadPool,
+		Region:          cfg.Region,
+		ExternalSecrets: cfg.ExternalSecrets,
+		Mounted:         cfg.Mounted,
+		release:         emptyRelease(),
+		stop:            make(chan struct{}),
+		taskCtx:         tasks,
+		cancelTask:      cancel,
+		stopped:         make(chan struct{}),
+		InstanceID:      cfg.InstanceID,
 
 		refreshRequested: map[string]int64{},
 	}
+	m.external.now = m.now
+	return m
+}
+
+func (m *Manager) now() time.Time {
+	if m.Now != nil {
+		return m.Now()
+	}
+	return time.Now()
 }
 
 func emptyRelease() *Release {
@@ -581,7 +612,7 @@ func (m *Manager) install(ctx context.Context, id string, sequence int64, digest
 	if !hmac.Equal([]byte(computed), []byte(digest)) {
 		return nil, errors.New("snapshot digest mismatch")
 	}
-	release := &Release{ID: id, Sequence: sequence, Digest: digest, Snapshot: snapshot, InstalledAt: time.Now(), credentials: map[string][]byte{}}
+	release := &Release{ID: id, Sequence: sequence, Digest: digest, Snapshot: snapshot, InstalledAt: m.now(), credentials: map[string][]byte{}}
 	m.mu.RLock()
 	candidate := &releaseCandidate{release: release, baseSequence: m.release.Sequence}
 	knownGrants := m.grants
@@ -776,7 +807,7 @@ func (m *Manager) Authenticate(secret string) (*access.Authority, error) {
 	m.mu.RLock()
 	loaded, readAt, keys := m.authority.loaded, m.authority.readAt, m.authority.keys
 	m.mu.RUnlock()
-	if !loaded || time.Since(readAt) > AuthorityStaleAfter {
+	if !loaded || m.now().Sub(readAt) > AuthorityStaleAfter {
 		return nil, ErrStaleAuthority
 	}
 	if !strings.HasPrefix(secret, "olp_") {
@@ -792,7 +823,7 @@ func (m *Manager) Authenticate(secret string) (*access.Authority, error) {
 		return nil, ErrInvalidKey
 	}
 	// Only a known lookup needs its secret suffix inspected and authenticated.
-	if strings.IndexByte(presented[separator+1:], '_') >= 0 || record.authority.WorkloadIssuerID != nil || record.expiresAt != nil && !time.Now().Before(*record.expiresAt) || !hmac.Equal(record.digest, m.auth.Digest(secrets.APIKeyDigest, secret)) {
+	if strings.IndexByte(presented[separator+1:], '_') >= 0 || record.authority.WorkloadIssuerID != nil || record.expiresAt != nil && !m.now().Before(*record.expiresAt) || !hmac.Equal(record.digest, m.auth.Digest(secrets.APIKeyDigest, secret)) {
 		return nil, ErrInvalidKey
 	}
 	return &record.authority, nil
@@ -803,7 +834,7 @@ func (m *Manager) Authority() AuthorityStatus {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	a := m.authority
-	return AuthorityStatus{Loaded: a.loaded, ID: a.id, Sequence: a.sequence, ReadAt: a.readAt, Stale: !a.loaded || time.Since(a.readAt) > AuthorityStaleAfter}
+	return AuthorityStatus{Loaded: a.loaded, ID: a.id, Sequence: a.sequence, ReadAt: a.readAt, Stale: !a.loaded || m.now().Sub(a.readAt) > AuthorityStaleAfter}
 }
 
 // DesiredGeneration is the newest release ordinal observed in storage; it
@@ -864,7 +895,7 @@ func (m *Manager) RoutingInputs() *usage.RoutingInputs {
 	return m.inputs
 }
 func (m *Manager) refreshInputs(ctx context.Context) error {
-	now := time.Now()
+	now := m.now()
 	current := m.RoutingInputs()
 	if current != nil && now.Sub(current.RefreshedAt) < usage.RoutingRefreshInterval {
 		return nil
@@ -916,7 +947,7 @@ func (m *Manager) loadKeyOverlaps(ctx context.Context, tx pgx.Tx, state *authori
 func (m *Manager) BudgetAuthority(project *string) (access.Authority, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	if !m.authority.loaded || time.Since(m.authority.readAt) > AuthorityStaleAfter {
+	if !m.authority.loaded || m.now().Sub(m.authority.readAt) > AuthorityStaleAfter {
 		return access.Authority{}, ErrStaleAuthority
 	}
 	a := access.Authority{BudgetIncreases: m.authority.budgetIncreases, InstallationID: m.installation, ProjectID: project, InstallationBudget: m.authority.installationBudget}

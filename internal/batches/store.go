@@ -10,8 +10,8 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/secrets"
 	"github.com/tyk-swe/olp/internal/usage"
@@ -23,8 +23,9 @@ var (
 )
 
 const (
-	claimLease = 2 * time.Minute
-	purgeLimit = 50000
+	claimLease               = 2 * time.Minute
+	purgeLimit               = 50000
+	submissionIdentityUnique = "batch_settlements_submission_identity"
 )
 
 type Store struct {
@@ -78,8 +79,7 @@ func (s *Store) BeginSubmission(ctx context.Context, settlement *Settlement) err
 		settlement.SubmissionDigest, settlement.LineOperation, template, settlement.State,
 		settlement.ExpectedResults, cursor, settlement.CloseAfter)
 	if err != nil {
-		var pgErr *pgconn.PgError
-		if errors.As(err, &pgErr) && pgErr.Code == "23505" && pgErr.ConstraintName == "batch_settlements_submission_identity" {
+		if database.UniqueViolationOn(err, submissionIdentityUnique) {
 			return ErrSubmissionInFlight
 		}
 		return fmt.Errorf("insert batch submission intent: %w", err)

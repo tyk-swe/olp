@@ -53,7 +53,7 @@ func TestRegionalRateAndConcurrencyLimitsWithGlobalBudgetReconciliation(t *testi
 		limiter *limits.Limiter
 		rpm     int64
 	}{{"west", westLimiter, 1}, {"east", eastLimiter, 2}} {
-		manager := runtime.NewManager(h.Pool, h.Server.Installation, h.Server.Auth, h.Server.Keys, slog.New(slog.DiscardHandler))
+		manager := runtime.NewManager(h.Pool, runtime.ManagerConfig{Installation: h.Server.Installation, InstanceID: "regional-instance", Auth: h.Server.Auth, Keys: h.Server.Keys, Log: slog.New(slog.DiscardHandler)})
 		manager.Region = region.name
 		if err := manager.Refresh(t.Context()); err != nil {
 			t.Fatal(err)

@@ -12,7 +12,8 @@ import (
 	"github.com/tyk-swe/olp/internal/operations"
 )
 
-func registerUnaryProfiles() {
+func unaryProfiles() []Profile {
+	var profiles []Profile
 	for _, d := range operationregistry.Default.Dialects() {
 		// These are hosting compositions, not operation-kernel provider cases.
 		kind, hosting, auth := "openai_compatible", "direct-compatible", []string{"api_key", "headers", "none"}
@@ -31,7 +32,7 @@ func registerUnaryProfiles() {
 			profile.DialectRevision = "v2"
 		}
 		completeProfileMetadata(&profile)
-		profileRegistry = append(profileRegistry, profile)
+		profiles = append(profiles, profile)
 	}
 	// Cohere's native v2 API serves chat, embed and rerank on one hosting, so
 	// one profile carries the three dialects and one provider serves them.
@@ -39,7 +40,7 @@ func registerUnaryProfiles() {
 		Authentication: []string{"api_key"}, Transport: "http", Operations: []string{"embeddings", "rerank", "generation"}, OperationDialects: map[string]string{"embeddings": "cohere-embed-v2", "rerank": "cohere-rerank-v2", "generation": "cohere-chat-v2"},
 		SemanticHeaders: []string{}, QuerySettings: []string{}, Documentation: "https://docs.cohere.com/reference/embed", Strict: true}
 	completeProfileMetadata(&cohere)
-	profileRegistry = append(profileRegistry, cohere)
+	return append(profiles, cohere)
 }
 
 // RegisterOperationProfile composes a trusted registered unary codec with an
@@ -141,7 +142,7 @@ func validPathModel(model string) bool {
 		return false
 	}
 	for _, r := range model {
-		if !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '.' || r == '_' || r == '~' || r == '-') {
+		if (r < 'a' || r > 'z') && (r < 'A' || r > 'Z') && (r < '0' || r > '9') && r != '.' && r != '_' && r != '~' && r != '-' {
 			return false
 		}
 	}

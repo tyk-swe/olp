@@ -2,7 +2,6 @@ package usage
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -10,9 +9,9 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/database"
 )
 
 // RateCardOwner identifies who a card charges: the installation, one
@@ -59,6 +58,8 @@ type cardRevisionInput struct {
 	Markup      *string    `json:"markup"`
 	Prices      []Price    `json:"prices"`
 }
+
+const rateCardsOwnerUnique = "rate_cards_owner_key"
 
 // cardColumns joins each card to its owner names for display.
 const cardColumns = `SELECT c.id::text, c.organization_id::text, o.name, c.project_id::text, p.name, c.created_at
@@ -418,8 +419,7 @@ func (s *Server) createRateCard(r *http.Request, _ access.Principal) (access.Rep
 	if _, err = tx.Exec(r.Context(), `INSERT INTO olp.rate_cards
         (id, organization_id, project_id, created_by) VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid)`,
 		id, organizationID, projectID, principal.UserID()); err != nil {
-		var pgErr *pgconn.PgError
-		if errors.As(err, &pgErr) && pgErr.Code == "23505" || strings.Contains(err.Error(), "rate_cards_owner_key") {
+		if database.IsUniqueViolation(err) || strings.Contains(err.Error(), rateCardsOwnerUnique) {
 			return access.Reply{}, access.Fail(http.StatusConflict, "rate_card_exists",
 				"The owner already has a rate card.")
 		}
@@ -553,10 +553,11 @@ func (s *Server) createRateCardRevision(r *http.Request, _ access.Principal) (ac
 	if !exists {
 		return access.Reply{}, access.Fail(http.StatusNotFound, "rate_card_not_found", "No such rate card.")
 	}
-	effectiveAt := time.Now().UTC()
+	now := s.now()
+	effectiveAt := now.UTC()
 	if input.EffectiveAt != nil {
 		effectiveAt = input.EffectiveAt.UTC()
-		if effectiveAt.Before(time.Now()) {
+		if effectiveAt.Before(now) {
 			return access.Reply{}, access.Invalid("effective_at",
 				"Choose an effective time now or in the future.")
 		}

@@ -203,7 +203,7 @@ func (s *Server) retainedGeneric(w http.ResponseWriter, r *http.Request, e retai
 		}
 		if lookupErr == nil {
 			x.route = &routing.Route{Slug: prior.RouteSlug, RevisionID: prior.RouteRevisionID}
-			w.Header().Set("X-OLP-Resource-ID", prior.ID)
+			w.Header().Set(resourceIDHeader, prior.ID)
 			fail(serverError(409, "submission_exists", "This submission already exists; inspect X-OLP-Resource-ID instead of recreating it."))
 			return
 		}
@@ -326,7 +326,7 @@ func (s *Server) retainedGeneric(w http.ResponseWriter, r *http.Request, e retai
 			fail(serverError(503, "provider_state_unavailable", "The submission could not be persisted."))
 			return
 		}
-		w.Header().Set("X-OLP-Resource-ID", resource.ID)
+		w.Header().Set(resourceIDHeader, resource.ID)
 		if !fresh {
 			fail(serverError(409, "submission_exists", "This submission already exists; inspect X-OLP-Resource-ID instead of recreating it."))
 			return
@@ -562,7 +562,7 @@ func (s *Server) retainedDispatch(w http.ResponseWriter, r *http.Request, x *cal
 		fail(serverError(502, "provider_protocol_error", "The provider returned an invalid resource object."))
 		return 502
 	}
-	if !isCreate && e.Action != "list" && e.Action != "delete" && !(e.Action == "cancel" && e.Surface == "native") {
+	if !isCreate && e.Action != "list" && e.Action != "delete" && (e.Action != "cancel" || e.Surface != "native") {
 		identity, _ := parsed.Root().Lookup(e.Identity)
 		if id, ok := identity.Text(); !ok || id != resource.UpstreamID {
 			fail(serverError(502, "provider_protocol_error", "The provider returned a different resource identity."))
@@ -638,7 +638,7 @@ func (s *Server) listRetainedGeneric(w http.ResponseWriter, r *http.Request, x *
 		if name == "beta" && e.Operation == "skill" && len(values) == 1 && values[0] == "true" {
 			continue
 		}
-		if (name != pageSizeParam && name != cursorParam && !(name == "order" && e.Surface == "openai")) || len(values) != 1 {
+		if (name != pageSizeParam && name != cursorParam && (name != "order" || e.Surface != "openai")) || len(values) != 1 {
 			fail(invalidRequest("invalid_parameter", "Unsupported or repeated list parameter.", &name))
 			return 400
 		}
@@ -801,10 +801,7 @@ func (s *Server) listRetainedGeneric(w http.ResponseWriter, r *http.Request, x *
 	var lastItem *resources.Resource
 	// Reads refill after tombstones so a page never returns empty
 	// with a continuation while live bindings remain.
-	for {
-		if len(items) >= limit || readIdx >= len(ready) && exhausted {
-			break
-		}
+	for len(items) < limit && (readIdx < len(ready) || !exhausted) {
 		if readIdx >= len(ready) {
 			if status := fill(ctx, len(ready)); status != 0 {
 				return status
@@ -836,7 +833,7 @@ func (s *Server) listRetainedGeneric(w http.ResponseWriter, r *http.Request, x *
 			fail(costErr)
 			return costErr.Status
 		}
-		if lease := routeLeases[route.Slug]; lease != nil && !(bound.IsZero() && charge.IsZero()) {
+		if lease := routeLeases[route.Slug]; lease != nil && (!bound.IsZero() || !charge.IsZero()) {
 			total := routeReserved[route.Slug].Add(bound)
 			totalCharge := routeReservedCharge[route.Slug].Add(charge)
 			if costErr := s.growCost(ctx, lease, total.String(), totalCharge.String(), x.request.accountingID(), time.Duration(route.OverallTimeout)*time.Millisecond); costErr != nil {

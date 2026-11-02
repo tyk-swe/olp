@@ -302,9 +302,10 @@ func (s *Server) lookupCache(ctx context.Context, x *call) *Error {
 	c.target = a.TargetID
 	project := x.captureProject()
 	scope := x.keyID
-	if c.policy.Scope == "project" {
+	switch c.policy.Scope {
+	case "project":
 		scope = project
-	} else if c.policy.Scope == "route" {
+	case "route":
 		scope = x.route.ID
 	}
 	var entries any

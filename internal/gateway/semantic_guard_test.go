@@ -92,9 +92,10 @@ func TestSemanticGuardAccountedEmbedding(t *testing.T) {
 							var evaluator, parent *Envelope
 							for i := range events {
 								event := &events[i]
-								if event.Origin == usage.OriginClassifier {
+								switch event.Origin {
+								case usage.OriginClassifier:
 									evaluator = event
-								} else if event.Origin == "" {
+								case "":
 									parent = event
 								}
 							}

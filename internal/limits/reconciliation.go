@@ -165,7 +165,7 @@ func RunCostReconciliation(ctx context.Context, pool *pgxpool.Pool, connect func
 // RunRegionalCostReconciliation installs global durable spend into this
 // region's Valkey without another region holding its worker out of leadership.
 func RunRegionalCostReconciliation(ctx context.Context, pool *pgxpool.Pool, region string, connect func(context.Context) (*Limiter, error), checkpoint func(context.Context, Outcome, bool) error, log *slog.Logger) {
-	runner := &reconciliationRunner{pool: pool, region: region, connect: connect, log: log}
+	runner := &reconciliationRunner{pool: pool, region: region, connect: connect, log: log, now: time.Now}
 	defer runner.release(ctx)
 	ticker := time.NewTicker(reconciliationInterval)
 	defer ticker.Stop()
@@ -193,6 +193,14 @@ type reconciliationRunner struct {
 	connect func(context.Context) (*Limiter, error)
 	log     *slog.Logger
 	leader  *Leader
+	now     func() time.Time
+}
+
+func (r *reconciliationRunner) clock() time.Time {
+	if r.now != nil {
+		return r.now()
+	}
+	return time.Now()
 }
 
 // pass runs one bounded reconciliation and reports the outcome to checkpoint.
@@ -215,7 +223,7 @@ func (r *reconciliationRunner) pass(ctx context.Context) (Outcome, bool) {
 		r.drop(ctx, "cost reconciliation could not reach Valkey", err)
 		return OutcomeFailure, false
 	}
-	report, err := r.leader.Reconcile(passCtx, limiter, time.Now())
+	report, err := r.leader.Reconcile(passCtx, limiter, r.clock())
 	if err != nil {
 		r.drop(ctx, "cost reconciliation pass failed", err)
 		return OutcomeFailure, false

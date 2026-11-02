@@ -159,7 +159,7 @@ func (e *GatewayEpoch) normalize() {
 // epoch can be acknowledged, and acknowledging twice returns the first
 // acknowledgement rather than restamping it. A nil result means there is no such
 // unclean epoch, which the HTTP layer renders as a 404.
-func AcknowledgeGatewayEpoch(ctx context.Context, tx pgx.Tx, processEpoch, actor string) (*Acknowledgement, error) {
+func AcknowledgeGatewayEpoch(ctx context.Context, tx pgx.Tx, processEpoch, actor string, now time.Time) (*Acknowledgement, error) {
 	var instance string
 	var acknowledgedAt *time.Time
 	var acknowledgedBy *string
@@ -184,7 +184,7 @@ func AcknowledgeGatewayEpoch(ctx context.Context, tx pgx.Tx, processEpoch, actor
             SET acknowledged_at = GREATEST($1, stale_detected_at), acknowledged_by = $2
             WHERE process_epoch = $3 AND acknowledged_at IS NULL
             RETURNING acknowledged_at, acknowledged_by::text`,
-		time.Now().UTC(), actor, processEpoch).Scan(&stamped, &acknowledgedBy); err != nil {
+		now.UTC(), actor, processEpoch).Scan(&stamped, &acknowledgedBy); err != nil {
 		return nil, fmt.Errorf("acknowledge gateway epoch: %w", err)
 	}
 	return &Acknowledgement{ProcessEpoch: processEpoch, GatewayInstance: instance,

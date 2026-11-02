@@ -133,7 +133,7 @@ func TestPassthroughPlanningAdmitsBoundConnection(t *testing.T) {
 		t.Fatalf("bound passthrough connection not planned: %+v %v", plan, e)
 	}
 	plain := route
-	plain.Behavior.Passthrough = nil
+	plain.Passthrough = nil
 	s.Routes[route.Slug] = plain
 	plan, e = Select(&s, route.Slug, PassthroughOperation, "native", "unary", []byte("seed"), Options{Now: time.Now()})
 	if e != nil || len(plan.Attempts) != 0 {

@@ -67,9 +67,10 @@ func TestCaptureUnaryRequiresCompleteNativeOutput(t *testing.T) {
 					t.Fatal(err)
 				}
 				target := body
-				if tc.family == wire.Chat || tc.family == wire.MistralFIM {
+				switch tc.family {
+				case wire.Chat, wire.MistralFIM:
 					target = body["choices"].([]any)[0].(map[string]any)
-				} else if tc.family == wire.Gemini {
+				case wire.Gemini:
 					target = body["candidates"].([]any)[0].(map[string]any)
 				}
 				if reason != nil {

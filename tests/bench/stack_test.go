@@ -387,7 +387,7 @@ func startGateway(t *testing.T, s settings, in *installation, limits gatewayLimi
 	env["HOSTNAME"] = g.Instance
 
 	g.Process = testutil.StartProcess(t, launcher(t, "olp", s.GatewayBinary, s.GatewayCPUs), "all", env)
-	g.pid, g.public, g.private = g.Process.Pid(), g.PublicOrigin, g.PrivateOrigin
+	g.pid, g.public, g.private = g.Pid(), g.PublicOrigin, g.PrivateOrigin
 	status, err := readProcStatus(g.pid)
 	if err != nil {
 		t.Fatalf("read the gateway's /proc status: %v", err)

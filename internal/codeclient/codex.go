@@ -3,6 +3,8 @@ package codeclient
 import (
 	"fmt"
 	"strconv"
+
+	"github.com/tyk-swe/olp/internal/codemode"
 )
 
 func codexConfiguration(baseURL, model string, websockets bool) string {
@@ -16,6 +18,6 @@ env_key = "OLP_API_KEY"
 wire_api = "responses"
 requires_openai_auth = false
 supports_websockets = %t
-http_headers = { "X-OLP-Code-Model" = %s }
-`, strconv.Quote(model), strconv.Quote(baseURL), websockets, strconv.Quote(model))
+http_headers = { %s = %s }
+`, strconv.Quote(model), strconv.Quote(baseURL), websockets, strconv.Quote(codemode.ModelHeader), strconv.Quote(model))
 }

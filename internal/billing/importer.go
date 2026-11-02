@@ -467,7 +467,7 @@ func (i *Importer) recordFailure(ctx context.Context, row *importRow, code strin
 // batches, so the store stays within the same horizon as the spend data.
 func (i *Importer) purge(ctx context.Context) error {
 	var days int
-	if err := i.Pool.QueryRow(ctx, `SELECT COALESCE((SELECT value::int FROM olp.settings WHERE key='retention.usage_days'),90)`).Scan(&days); err != nil {
+	if err := i.Pool.QueryRow(ctx, `SELECT COALESCE((SELECT value::int FROM olp.settings WHERE key=$1),90)`, usage.RetentionUsageDaysKey).Scan(&days); err != nil {
 		return err
 	}
 	cutoff := time.Now().UTC().AddDate(0, 0, -days).Format(dayFormat)

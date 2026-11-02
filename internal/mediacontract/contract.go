@@ -186,7 +186,7 @@ func (t *Template) descriptor(mode string) oif.Descriptor {
 // only the registered model identity and absent-only defaults may differ.
 func (t *Template) Bind(in Input) (Bound, error) {
 	d := t.descriptor(in.Mode)
-	if in.Mode != "unary" && in.Mode != "streaming" && !(t.op == "video_create" && in.Mode == "async") {
+	if in.Mode != "unary" && in.Mode != "streaming" && (t.op != "video_create" || in.Mode != "async") {
 		return Bound{}, reject("target_capability", "/mode", "media_delivery", "The media delivery mode has no native contract.")
 	}
 	if t.op == "video_create" && in.Mode != "async" {

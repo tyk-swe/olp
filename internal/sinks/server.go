@@ -10,8 +10,8 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/secrets"
 )
@@ -254,7 +254,7 @@ func (s *Server) write(r *http.Request, id string, retire bool) (access.Reply, e
 		_, err = tx.Exec(r.Context(), "UPDATE olp.managed_export_sinks SET name=$2,destination=$3,streams=$4,enabled=$5,etag=$6 WHERE id=$1", id, in.Name, in.Destination, in.Streams, *in.Enabled, etag)
 	}
 	if err != nil {
-		if problem, ok := err.(*pgconn.PgError); ok && problem.Code == "23505" {
+		if database.IsUniqueViolation(err) {
 			return access.Reply{}, access.Fail(409, "sink_name_exists", "Use a unique active sink name inside its scope.")
 		}
 		return access.Reply{}, err

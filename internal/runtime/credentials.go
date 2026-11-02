@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"time"
 
 	"github.com/jackc/pgx/v5"
 
@@ -41,7 +40,7 @@ type Credentials interface {
 // authority read.
 func (m *Manager) Eligibility(credentialID string) routing.Eligibility {
 	m.mu.RLock()
-	if !m.authority.loaded || time.Since(m.authority.readAt) > AuthorityStaleAfter {
+	if !m.authority.loaded || m.now().Sub(m.authority.readAt) > AuthorityStaleAfter {
 		m.mu.RUnlock()
 		return routing.StaleAuthority
 	}

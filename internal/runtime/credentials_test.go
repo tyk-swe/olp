@@ -21,7 +21,7 @@ func credentialManager(t *testing.T, readAt time.Time, revoked ...string) *Manag
 }
 
 func authorityManager(readAt time.Time, ineligible map[string]routing.Eligibility) *Manager {
-	m := NewManager(nil, uuid.NewString(), nil, nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	m := NewManager(nil, ManagerConfig{Installation: uuid.NewString(), InstanceID: "test-instance", Log: slog.New(slog.NewTextHandler(io.Discard, nil))})
 	m.authority = authorityState{loaded: true, readAt: readAt, ineligible: ineligible}
 	return m
 }

@@ -331,7 +331,7 @@ func (s *Server) compensateCreate(ctx context.Context, x *call, reserved media.J
 		target.Secret, target.CallerCredential = secret, true
 	}
 
-	call, failure := media.EncodeJob(&media.Request{Op: media.OpVideoDelete, JobID: upstreamID, Route: reserved.RouteSlug}, target.Target.Config, target.Model)
+	call, failure := media.EncodeJob(&media.Request{Op: media.OpVideoDelete, JobID: upstreamID, Route: reserved.RouteSlug}, target.Config, target.Model)
 	if failure != nil {
 		return false
 	}

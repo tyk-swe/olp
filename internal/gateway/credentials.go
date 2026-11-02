@@ -8,6 +8,8 @@ import (
 	"github.com/tyk-swe/olp/internal/consumerauth"
 )
 
+const apiKeyHeader = "X-OLP-API-Key"
+
 // bearer returns the token of an Authorization header that uses the Bearer
 // scheme, which clients spell in any case.
 func bearer(header string) (string, bool) {
@@ -51,7 +53,7 @@ func presentedKey(r *http.Request) (string, *Error) {
 // SDKs sign Authorization with SigV4, which OLP never verifies, so the key
 // travels in X-OLP-API-Key or, from other clients, as a bearer token.
 func bedrockPresentedKey(r *http.Request) (string, *Error) {
-	token := strings.TrimSpace(r.Header.Get("X-OLP-API-Key"))
+	token := strings.TrimSpace(r.Header.Get(apiKeyHeader))
 	if header := r.Header.Get("Authorization"); token == "" && !strings.Contains(header, "AWS4-HMAC-SHA256") {
 		token, _ = bearer(header)
 	}

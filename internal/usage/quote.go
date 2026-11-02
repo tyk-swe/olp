@@ -52,10 +52,11 @@ func (s *Server) quotePricing(r *http.Request, _ access.Principal) (access.Reply
 	if _, err := validateUsage(&usage, 0); err != nil {
 		return access.Reply{}, access.Invalid("usage", errors.Unwrap(err).Error())
 	}
-	startedAt := time.Now().UTC()
+	now := s.now()
+	startedAt := now.UTC()
 	if input.StartedAt != nil {
 		startedAt = input.StartedAt.UTC()
-		if startedAt.After(time.Now()) {
+		if startedAt.After(now) {
 			return access.Reply{}, access.Invalid("started_at", "Use a past or present time.")
 		}
 	}

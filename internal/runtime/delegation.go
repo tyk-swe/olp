@@ -41,7 +41,7 @@ func (m *Manager) CreateDelegation(ctx context.Context, agent, key access.Author
 	if !validDelegationBounds(bounds) {
 		return DelegationGrant{}, ErrDelegationBounds
 	}
-	now := time.Now()
+	now := m.now()
 	if !delegationResourcesAllowed(agent, key, bounds.AllowedRoutes, bounds.AllowedToolsets, bounds.AllowedAgents, now) {
 		return DelegationGrant{}, access.Forbidden()
 	}
@@ -102,7 +102,7 @@ func (m *Manager) ExchangeMemberConsent(ctx context.Context, agent access.Author
 	if !validDelegationBounds(bounds) {
 		return DelegationGrant{}, ErrDelegationBounds
 	}
-	if !agent.AgentPrincipal || agent.WorkloadIssuerID == nil || agent.ProjectID == nil || agent.RevokedAt != nil || agent.ExpiresAt == nil || !agent.ExpiresAt.After(time.Now()) {
+	if !agent.AgentPrincipal || agent.WorkloadIssuerID == nil || agent.ProjectID == nil || agent.RevokedAt != nil || agent.ExpiresAt == nil || !agent.ExpiresAt.After(m.now()) {
 		return DelegationGrant{}, ErrInvalidKey
 	}
 	tx, err := m.delegationTransaction(ctx, agent.SnapshotID)
@@ -150,11 +150,12 @@ func (m *Manager) ExchangeMemberConsent(ctx context.Context, agent access.Author
 	m.mu.RLock()
 	key, exists := m.authority.agentPrincipals[keyID]
 	m.mu.RUnlock()
-	if !exists || key.WorkloadIssuerID != nil || key.ProjectID == nil || *key.ProjectID != project || !slices.Contains(key.Policy.Scopes, "delegate") || !delegationResourcesAllowed(agent, key, bounds.AllowedRoutes, bounds.AllowedToolsets, bounds.AllowedAgents, time.Now()) {
+	now := m.now()
+	if !exists || key.WorkloadIssuerID != nil || key.ProjectID == nil || *key.ProjectID != project || !slices.Contains(key.Policy.Scopes, "delegate") || !delegationResourcesAllowed(agent, key, bounds.AllowedRoutes, bounds.AllowedToolsets, bounds.AllowedAgents, now) {
 		return DelegationGrant{}, ErrInvalidKey
 	}
 	token := "olpd_" + secrets.Token()
-	expires := boundDelegationExpiry(boundDelegationExpiry(time.Now().Add(delegationTTL(bounds.TTLSeconds)), &expiry), agent.ExpiresAt)
+	expires := boundDelegationExpiry(boundDelegationExpiry(now.Add(delegationTTL(bounds.TTLSeconds)), &expiry), agent.ExpiresAt)
 	if _, err := tx.Exec(ctx, `UPDATE olp.agent_delegations SET token_digest=$1,consent_digest=NULL,allowed_routes=COALESCE($2,'{}'::text[]),expires_at=$3,scopes=$5,allowed_toolsets=COALESCE($6,'{}'::text[]),allowed_agents=COALESCE($7,'{}'::text[]) WHERE consent_digest=$4`, m.auth.Digest(secrets.DelegationTokenDigest, token), bounds.AllowedRoutes, expires, m.auth.Digest(secrets.DelegationConsentDigest, consent), bounds.Scopes, bounds.AllowedToolsets, bounds.AllowedAgents); err != nil {
 		return DelegationGrant{}, ErrStaleAuthority
 	}
@@ -174,7 +175,7 @@ func (m *Manager) authenticateDelegation(ctx context.Context, token, assertion s
 	if err != nil {
 		return nil, err
 	}
-	if agent == nil || !agent.AgentPrincipal || agent.WorkloadIssuerID == nil || agent.ProjectID == nil || agent.RevokedAt != nil || agent.ExpiresAt == nil || !agent.ExpiresAt.After(time.Now()) {
+	if agent == nil || !agent.AgentPrincipal || agent.WorkloadIssuerID == nil || agent.ProjectID == nil || agent.RevokedAt != nil || agent.ExpiresAt == nil || !agent.ExpiresAt.After(m.now()) {
 		return nil, ErrInvalidKey
 	}
 	tx, err := m.delegationTransaction(ctx, agent.SnapshotID)
@@ -205,7 +206,7 @@ func (m *Manager) authenticateDelegation(ctx context.Context, token, assertion s
 	if !exists || key.WorkloadIssuerID != nil || key.ProjectID == nil || *key.ProjectID != project || !slices.Contains(key.Policy.Scopes, "delegate") {
 		return nil, ErrInvalidKey
 	}
-	now := time.Now()
+	now := m.now()
 	if !delegationResourcesAllowed(*agent, key, routes, toolsets, agents, now) {
 		return nil, ErrInvalidKey
 	}
@@ -262,9 +263,10 @@ func (m *Manager) authorizeDelegatedTask(ctx context.Context, digest []byte, exp
 	owner, ownerExists := m.authority.agentPrincipals[expectedKey]
 	policy, principal, currentSnapshot, _, agentExists := m.authority.taskCapabilityPrincipal(agentID, revision, &expires)
 	agent := policy.TaskAuthority(principal, currentSnapshot, revision, &expires, "", nil)
-	current := agentExists && m.authority.currentAgentPrincipal(agent, "agents", publication, project, time.Now())
+	now := m.now()
+	current := agentExists && m.authority.currentAgentPrincipal(agent, "agents", publication, project, now)
 	m.mu.RUnlock()
-	if !keyExists || key.WorkloadIssuerID != nil || key.ProjectID == nil || *key.ProjectID != project || !slices.Contains(key.Policy.Scopes, "delegate") || !ownerExists || owner.WorkloadIssuerID != nil || owner.ProjectID == nil || *owner.ProjectID != project || !slices.Contains(owner.Policy.Scopes, "delegate") || !current || !delegationResourcesAllowed(agent, key, routes, toolsets, agents, time.Now()) || !delegationResourcesAllowed(agent, owner, routes, toolsets, agents, time.Now()) {
+	if !keyExists || key.WorkloadIssuerID != nil || key.ProjectID == nil || *key.ProjectID != project || !slices.Contains(key.Policy.Scopes, "delegate") || !ownerExists || owner.WorkloadIssuerID != nil || owner.ProjectID == nil || *owner.ProjectID != project || !slices.Contains(owner.Policy.Scopes, "delegate") || !current || !delegationResourcesAllowed(agent, key, routes, toolsets, agents, now) || !delegationResourcesAllowed(agent, owner, routes, toolsets, agents, now) {
 		return nil, ErrInvalidKey
 	}
 	if err := tx.Commit(ctx); err != nil {
@@ -321,7 +323,7 @@ func (m *Manager) delegationTransactionWithLock(ctx context.Context, expected st
 	m.mu.RLock()
 	status := m.authority
 	m.mu.RUnlock()
-	if !status.loaded || status.id != expected || time.Since(status.readAt) > AuthorityStaleAfter {
+	if !status.loaded || status.id != expected || m.now().Sub(status.readAt) > AuthorityStaleAfter {
 		return nil, ErrStaleAuthority
 	}
 	tx, err := m.pool.Begin(ctx)

@@ -14,9 +14,9 @@ import (
 	"github.com/tyk-swe/olp/internal/operations/tokenization"
 )
 
-var Default = builtins()
+var Default = New()
 
-func builtins() *operations.Registry {
+func New() *operations.Registry {
 	r := operations.NewRegistry()
 	for _, definitions := range [][]operations.Dialect{embeddings.Definitions(), rerank.Definitions(), classification.Definitions(), tokenization.Definitions(), decision.Definitions(), ocr.Definitions(), search.Definitions()} {
 		for _, d := range definitions {

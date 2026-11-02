@@ -84,7 +84,7 @@ var attributionKey = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_.-]{0,31}$`)
 
 const maxAttributionKeys = 8
 
-func validateKey(input keyInput, expirationChanged bool) error {
+func validateKey(input keyInput, expirationChanged bool, now time.Time) error {
 	if days := input.RotationIntervalDays; days != nil && (*days < 1 || *days > 3650) {
 		return Invalid("rotation_interval_days", "Use a rotation interval of 1–3650 days, or null.")
 	}
@@ -98,7 +98,7 @@ func validateKey(input keyInput, expirationChanged bool) error {
 		}
 		groupNames[name] = true
 	}
-	policy := input.KeyPolicy.AttributionPolicy()
+	policy := input.AttributionPolicy()
 	if err := validateAttributionPolicy(&policy); err != nil {
 		return err
 	}
@@ -181,7 +181,7 @@ func validateKey(input keyInput, expirationChanged bool) error {
 	if priority.Rank(input.DefaultPriority()) < priority.Rank(input.PriorityCeiling()) {
 		return Invalid("priority", "The default priority cannot exceed max_priority.")
 	}
-	if expirationChanged && input.ExpiresAt != nil && !input.ExpiresAt.After(time.Now()) {
+	if expirationChanged && input.ExpiresAt != nil && !input.ExpiresAt.After(now) {
 		return Invalid("expires_at", "Choose a future expiry.")
 	}
 	return nil
@@ -309,7 +309,7 @@ func (s *Server) createAPIKey(r *http.Request, _ Principal) (Reply, error) {
 		return Commit(r, tx, *replayed)
 	}
 	// A replay returns the original result even if its key has since expired.
-	if err := validateKey(input, true); err != nil {
+	if err := validateKey(input, true, s.now()); err != nil {
 		return Reply{}, err
 	}
 	if err = s.RequireProject(r.Context(), tx, p, input.ProjectID); err != nil {
@@ -436,7 +436,7 @@ func (s *Server) updateAPIKey(r *http.Request, _ Principal) (Reply, error) {
 		return Reply{}, Invalid("policy", "Invalid policy value.")
 	}
 	_, changed := patch["expires_at"]
-	if err = validateKey(input, changed); err != nil {
+	if err = validateKey(input, changed, s.now()); err != nil {
 		return Reply{}, err
 	}
 	if raw, ok := patch["budget_group_id"]; ok {
@@ -610,7 +610,7 @@ func (s *Server) transitionKey(r *http.Request, rotate bool) (Reply, error) {
 		if err = json.Unmarshal(data, &normalized); err != nil {
 			return Reply{}, Invalid("policy", "Invalid cost budget.")
 		}
-		if err = validateKey(keyInput{Name: name, KeyPolicy: normalized}, false); err != nil {
+		if err = validateKey(keyInput{Name: name, KeyPolicy: normalized}, false, s.now()); err != nil {
 			return Reply{}, err
 		}
 		data, err = json.Marshal(normalized)

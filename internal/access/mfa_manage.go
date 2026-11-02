@@ -5,7 +5,6 @@ import (
 	"encoding/base64"
 	"image/png"
 	"net/http"
-	"time"
 
 	"github.com/go-webauthn/webauthn/protocol"
 	"github.com/go-webauthn/webauthn/webauthn"
@@ -137,7 +136,7 @@ func (s *Server) beginMFAEnrollment(r *http.Request, bootstrap bool) (Reply, err
 		}
 		id := NewID()
 		f.SecretID = &id
-		expires := time.Now().Add(mfaTTL)
+		expires := s.now().Add(mfaTTL)
 		if err = s.Keys.Store(r.Context(), tx, s.Installation, id, secrets.MFATOTP, []byte(key.Secret()), &expires); err != nil {
 			return Reply{}, err
 		}
@@ -165,7 +164,7 @@ func (s *Server) beginMFAEnrollment(r *http.Request, bootstrap bool) (Reply, err
 		if e != nil {
 			return Reply{}, e
 		}
-		session.Expires = time.Now().Add(mfaTTL)
+		session.Expires = s.now().Add(mfaTTL)
 		f.Data.WebAuthn = session
 		response["public_key"] = options
 	}

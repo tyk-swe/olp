@@ -352,11 +352,11 @@ const attemptColumns = `SELECT a.routing, a.id::text, a.ordinal::int, a.provider
 func GetRequest(ctx context.Context, q access.Queryer, id string) (RequestDetail, error) {
 	var detail RequestDetail
 	err := q.QueryRow(ctx, requestColumns+" WHERE r.id = $1 ORDER BY r.started_at DESC LIMIT 1", id).
-		Scan(detail.RequestSummary.scanTargets()...)
+		Scan(detail.scanTargets()...)
 	if err != nil {
 		return RequestDetail{}, err
 	}
-	detail.RequestSummary.normalize()
+	detail.normalize()
 	rows, err := q.Query(ctx, attemptColumns, detail.ID, detail.StartedAt)
 	if err != nil {
 		return RequestDetail{}, fmt.Errorf("read request attempts: %w", err)

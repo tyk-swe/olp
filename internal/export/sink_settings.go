@@ -17,6 +17,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/usage"
 )
 
 // sinkSettings is every field any sink format's settings accept; a format
@@ -227,7 +228,7 @@ func (m *Management) resolveSettings(ctx context.Context, q access.Queryer, sink
 // 90 days and an unreadable one as an error.
 func sinkUsageDays(ctx context.Context, q access.Queryer) (int, error) {
 	var value string
-	if err := q.QueryRow(ctx, `SELECT COALESCE((SELECT value FROM olp.settings WHERE key='retention.usage_days'),'90')`).Scan(&value); err != nil {
+	if err := q.QueryRow(ctx, `SELECT COALESCE((SELECT value FROM olp.settings WHERE key=$1),'90')`, usage.RetentionUsageDaysKey).Scan(&value); err != nil {
 		return 0, err
 	}
 	days, err := strconv.Atoi(value)

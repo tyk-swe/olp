@@ -70,9 +70,10 @@ func batchCompletionWindow(source oif.Document, vendor string) (time.Duration, *
 		hours *= 24
 	}
 	minimum, maximum := 24, 24
-	if vendor == "groq" {
+	switch vendor {
+	case "groq":
 		maximum = 168
-	} else if vendor == "mistral" {
+	case "mistral":
 		minimum, maximum = 1, 168
 	}
 	if hours < minimum || hours > maximum {

@@ -1,6 +1,7 @@
 package connectors
 
-func registerFilesBatchesProfiles() {
+func filesBatchesProfiles() []Profile {
+	var profiles []Profile
 	for _, item := range []struct {
 		vendor        string
 		operations    []string
@@ -19,6 +20,7 @@ func registerFilesBatchesProfiles() {
 			Documentation: item.documentation,
 		}
 		completeProfileMetadata(&profile)
-		profileRegistry = append(profileRegistry, profile)
+		profiles = append(profiles, profile)
 	}
+	return profiles
 }

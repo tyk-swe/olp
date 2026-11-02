@@ -29,7 +29,7 @@ func (v Vendor) InitialRejection(endpoint Endpoint, status int, body []byte, hea
 	errorCode, _ := document.Lookup("/error/code")
 	typeName, _ := errorType.Text()
 	code, _ := errorCode.Text()
-	if !(status == 401 && typeName == "authentication_error" && code == "invalid_api_key" || status == 429 && typeName == "usage_limit_reached") {
+	if (status != 401 || typeName != "authentication_error" || code != "invalid_api_key") && (status != 429 || typeName != "usage_limit_reached") {
 		return Rejection{}, false
 	}
 	outcome := (upstream.Classifier{AtMostOnce: true}).Classify(upstream.Evidence{Reached: true, Status: status, Error: &wire.UpstreamError{Type: typeName, Code: code}})

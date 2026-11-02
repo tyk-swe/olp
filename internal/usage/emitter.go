@@ -34,6 +34,7 @@ type Emitter struct {
 
 	processEpoch string
 	startedAt    time.Time
+	now          func() time.Time
 
 	accepted    atomic.Int64
 	persisted   atomic.Int64
@@ -56,6 +57,7 @@ func NewEmitter(capacity int) *Emitter {
 		events:       make(chan Event, capacity),
 		processEpoch: uuid.Must(uuid.NewV7()).String(),
 		startedAt:    time.Now().UTC(),
+		now:          time.Now,
 	}
 }
 
@@ -156,12 +158,19 @@ func (e *Emitter) Snapshot() Snapshot {
 	}
 }
 
+func (e *Emitter) clock() time.Time {
+	if e.now != nil {
+		return e.now()
+	}
+	return time.Now()
+}
+
 func (e *Emitter) recordLoss(counter *atomic.Int64, count int64) {
 	counter.Add(count)
 	if count <= 0 {
 		return
 	}
-	now := time.Now().UnixMilli()
+	now := e.clock().UnixMilli()
 	e.firstLossMS.CompareAndSwap(0, now)
 	e.lastLossMS.Store(now)
 }

@@ -46,7 +46,7 @@ type samlConfiguration struct {
 }
 
 func ValidateSAMLDefinition(d SAMLDefinition) error {
-	_, err := validateSAML(samlConfiguration{SAMLDefinition: d})
+	_, err := validateSAML(samlConfiguration{SAMLDefinition: d}, time.Now())
 	return err
 }
 
@@ -66,16 +66,15 @@ func (s *Server) samlConfiguration(r *http.Request, _ Principal) (Reply, error) 
 	return Detail(c, c.ETag), e
 }
 
-func validateSAML(c samlConfiguration) (samlidentity.Metadata, error) {
+func validateSAML(c samlConfiguration, now time.Time) (samlidentity.Metadata, error) {
 	m, err := samlidentity.ParseMetadata([]byte(c.Metadata))
 	if err != nil {
 		return m, Invalid("metadata_xml", "Import one SAML 2.0 IdP descriptor with signing certificates and an HTTP-Redirect sign-in endpoint.")
 	}
-	if c.Enabled && !m.Entity.ValidUntil.IsZero() && !m.Entity.ValidUntil.After(time.Now()) {
+	if c.Enabled && !m.Entity.ValidUntil.IsZero() && !m.Entity.ValidUntil.After(now) {
 		return m, Invalid("metadata_xml", "The imported identity metadata has expired.")
 	}
 	if c.Enabled && !slices.ContainsFunc(m.Certificates, func(cert *x509.Certificate) bool {
-		now := time.Now()
 		return !now.Before(cert.NotBefore) && !now.After(cert.NotAfter)
 	}) {
 		return m, Invalid("metadata_xml", "The identity metadata needs a currently valid signing certificate.")
@@ -113,7 +112,7 @@ func samlMappedRole(c samlConfiguration, email string, groups []string) string {
 	return mappedRole(oidcConfiguration{DefaultRole: c.DefaultRole, EmailMappings: c.EmailMappings, GroupMappings: c.GroupMappings}, email, groups)
 }
 
-func newSAMLSigningKey() (samlSigningKey, error) {
+func newSAMLSigningKey(now time.Time) (samlSigningKey, error) {
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
 		return samlSigningKey{}, err
@@ -122,7 +121,6 @@ func newSAMLSigningKey() (samlSigningKey, error) {
 	if err != nil {
 		return samlSigningKey{}, err
 	}
-	now := time.Now()
 	cert := &x509.Certificate{SerialNumber: serial, Subject: pkix.Name{CommonName: "OpenLLMProxy SAML signing"}, NotBefore: now.Add(-time.Minute), NotAfter: now.AddDate(10, 0, 0), KeyUsage: x509.KeyUsageDigitalSignature, BasicConstraintsValid: true}
 	der, err := x509.CreateCertificate(rand.Reader, cert, cert, &key.PublicKey, key)
 	if err != nil {
@@ -133,7 +131,7 @@ func newSAMLSigningKey() (samlSigningKey, error) {
 }
 
 func (s *Server) samlProvider(r *http.Request, q Queryer, c samlConfiguration) (*saml.ServiceProvider, samlidentity.Metadata, error) {
-	m, err := validateSAML(c)
+	m, err := validateSAML(c, s.now())
 	if err != nil {
 		return nil, m, err
 	}
@@ -210,7 +208,7 @@ func (s *Server) StoreSAMLDefinition(r *http.Request, tx pgx.Tx, p Principal, d 
 	if err := p.Authorize(Access); err != nil {
 		return c, err
 	}
-	metadata, err := validateSAML(c)
+	metadata, err := validateSAML(c, s.now())
 	if err != nil {
 		return c, err
 	}
@@ -226,7 +224,7 @@ func (s *Server) StoreSAMLDefinition(r *http.Request, tx pgx.Tx, p Principal, d 
 	c.ETag = NewID()
 	c.Certificate = old.Certificate
 	if old.ID == "" || rotate {
-		key, e := newSAMLSigningKey()
+		key, e := newSAMLSigningKey(s.now())
 		if e != nil {
 			return c, e
 		}

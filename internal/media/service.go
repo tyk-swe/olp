@@ -424,7 +424,7 @@ func (s *Service) executeReconciliation(ctx context.Context, record *JobRecord, 
 	}
 	callCtx, cancel := context.WithTimeout(ctx, routeTimeout+ReconciliationLeaseSlack)
 	defer cancel()
-	call, failure := EncodeJob(&Request{Op: op, JobID: upstreamID, Route: record.RouteSlug}, target.Target.Config, record.UpstreamModel)
+	call, failure := EncodeJob(&Request{Op: op, JobID: upstreamID, Route: record.RouteSlug}, target.Config, record.UpstreamModel)
 	if failure != nil {
 		return reconciliationError("media_job_operation_invalid")
 	}
@@ -591,7 +591,7 @@ func (s *Service) JobContent(ctx context.Context, record *JobRecord, variant str
 	if target == nil {
 		return nil, ErrContentUnavailable
 	}
-	call, failure := EncodeJob(&Request{Op: OpVideoContent, JobID: *record.UpstreamJobID, Variant: variant, Route: record.RouteSlug}, target.Target.Config, record.UpstreamModel)
+	call, failure := EncodeJob(&Request{Op: OpVideoContent, JobID: *record.UpstreamJobID, Variant: variant, Route: record.RouteSlug}, target.Config, record.UpstreamModel)
 	if failure != nil {
 		return nil, ErrContentUnavailable
 	}

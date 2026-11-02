@@ -3,12 +3,11 @@ package agents
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"net/http"
 
-	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/agentcontract"
+	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/egress"
 )
 
@@ -199,8 +198,7 @@ func (s *Server) write(r *http.Request, kind, action string) (access.Reply, erro
 		}
 	}
 	if err != nil {
-		var pg *pgconn.PgError
-		if errors.As(err, &pg) && pg.Code == "23505" {
+		if database.IsUniqueViolation(err) {
 			err = access.Fail(409, "publication_exists", "Choose an unused name in this project.")
 		}
 		return access.Reply{}, err
