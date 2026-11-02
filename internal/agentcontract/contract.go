@@ -19,6 +19,7 @@ import (
 	grantconfig "github.com/tyk-swe/olp/internal/grants/config"
 	"github.com/tyk-swe/olp/internal/pricingpolicy"
 	"github.com/tyk-swe/olp/internal/prompts"
+	"github.com/tyk-swe/olp/internal/toolidentity"
 )
 
 type Tool struct {
@@ -73,8 +74,7 @@ func validID(raw string) bool {
 }
 
 func ToolAlias(server, name string) string {
-	digest := sha256.Sum256([]byte(name))
-	return "t_" + strings.ReplaceAll(server, "-", "") + "_" + hex.EncodeToString(digest[:16])
+	return toolidentity.Alias(server, name)
 }
 
 func (d Draft) Validate(kind string) error {

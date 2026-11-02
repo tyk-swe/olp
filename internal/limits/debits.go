@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/tyk-swe/olp/internal/toolidentity"
 )
 
 var (
@@ -102,7 +103,7 @@ func (i DebitIntent) validate() error {
 			}
 		}
 	}
-	if i.Affinity.ToolAlias != "" && !regexp.MustCompile(`^t_[a-f0-9]{32}_[a-f0-9]{32}$`).MatchString(i.Affinity.ToolAlias) {
+	if i.Affinity.ToolAlias != "" && !toolidentity.ValidAlias(i.Affinity.ToolAlias) {
 		return ErrDebitConflict
 	}
 	return nil
