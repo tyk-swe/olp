@@ -11,6 +11,7 @@ import (
 	"github.com/santhosh-tekuri/jsonschema/v6"
 	grantconfig "github.com/tyk-swe/olp/internal/grants/config"
 	"github.com/tyk-swe/olp/internal/oif"
+	pluginidentity "github.com/tyk-swe/olp/internal/plugins/identity"
 	"github.com/tyk-swe/olp/internal/pricingpolicy"
 )
 
@@ -63,10 +64,8 @@ func (b *MCPStdioBinding) Clone() *MCPStdioBinding {
 	return &copied
 }
 func (b *MCPStdioBinding) Valid() bool {
-	return b != nil && mcpExecutable.MatchString(b.Executable) && mcpDigest.MatchString(b.Digest)
+	return b != nil && pluginidentity.ValidExecutable(b.Executable) && pluginidentity.ValidDigest(b.Digest)
 }
-
-var mcpExecutable = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$`)
 
 type MCPServer struct {
 	Delegation           *MCPDelegation    `json:"delegation,omitempty"`

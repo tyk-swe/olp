@@ -3,6 +3,8 @@ package routing
 import (
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -10,8 +12,35 @@ import (
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/agentcontract"
 	"github.com/tyk-swe/olp/internal/guardrails"
+	"github.com/tyk-swe/olp/internal/plugins"
 	"github.com/tyk-swe/olp/internal/usage"
 )
+
+func TestNativeMCPExecutableNamesAgreeWithDiscovery(t *testing.T) {
+	dir := t.TempDir()
+	tier := plugins.NewUnconfined(dir, plugins.DefaultLimits, nil)
+	for _, tc := range []struct {
+		name  string
+		valid bool
+	}{
+		{"tool", true}, {"Tool-1._", true}, {strings.Repeat("a", 128), true},
+		{"", false}, {".hidden", false}, {"tool name", false}, {"dir/tool", false}, {strings.Repeat("a", 129), false},
+	} {
+		if tc.name != "" && !strings.Contains(tc.name, "/") {
+			if err := os.WriteFile(filepath.Join(dir, tc.name), []byte("fixture"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+		}
+		file, err := tier.Describe(tc.name)
+		binding := MCPStdioBinding{Executable: tc.name, Digest: strings.Repeat("a", 64)}
+		if (err == nil) != tc.valid || binding.Valid() != tc.valid {
+			t.Errorf("executable %q, discovery error %v, binding valid %t", tc.name, err, binding.Valid())
+		}
+		if tc.valid && !(&MCPStdioBinding{Executable: file.Name, Digest: file.Digest}).Valid() {
+			t.Errorf("discovered executable %q cannot be bound", tc.name)
+		}
+	}
+}
 
 func TestAmountSyntaxAcrossToolAgentRoutingCacheAndBudgets(t *testing.T) {
 	for _, tc := range []struct {
