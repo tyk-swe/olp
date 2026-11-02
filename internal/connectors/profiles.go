@@ -965,22 +965,7 @@ func vendorBatchProfile(profile Profile) bool {
 }
 
 func defaultControlSchema(dialect, operation, name string) map[string]any {
-	kind := "string"
-	switch name {
-	case "temperature", "top_p", "frequency_penalty", "presence_penalty", "speed":
-		kind = "number"
-	case "max_tokens", "max_completion_tokens", "max_output_tokens", "dimensions", "output_dimension", "n", "top_n", "top_k":
-		kind = "integer"
-	case "parallel_tool_calls", "logprobs", "return_documents", "autoTruncate", "normalize":
-		kind = "boolean"
-	case "tools", "safetySettings", "stop_sequences", "embeddingTypes", "additionalModelResponseFieldPaths", "timestamp_granularities":
-		kind = "array"
-	case "response_format", "reasoning", "text", "thinking", "output_config", "generationConfig", "toolConfig", "inferenceConfig", "additionalModelRequestFields", "parameters", "stream_options":
-		kind = "object"
-	}
-	if name == "response_format" && operation != "generation" {
-		kind = "string"
-	}
+	kind := defaultControlKind(operation, name)
 	schema := map[string]any{"title": name, "type": []string{kind, "null"}}
 	if operation == "translation" {
 		if name == "response_format" {

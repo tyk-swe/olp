@@ -41,3 +41,24 @@ func TestConfiguredMediaRejectsUnrepresentableDefaultsAndCollisions(t *testing.T
 		})
 	}
 }
+
+func TestTranscriptionDefaultsValidateTimestampGranularities(t *testing.T) {
+	for _, test := range []struct {
+		value string
+		valid bool
+	}{
+		{`["word"]`, true},
+		{`null`, true},
+		{`"word"`, false},
+		{`{"word":true}`, false},
+	} {
+		t.Run(test.value, func(t *testing.T) {
+			cfg := mediaDefaultsConfig(t, OpTranscription, map[string]json.RawMessage{
+				"timestamp_granularities": json.RawMessage(test.value),
+			}, nil)
+			if err := cfg.ValidateProfile(); (err == nil) != test.valid {
+				t.Fatalf("timestamp_granularities %s validation = %v", test.value, err)
+			}
+		})
+	}
+}
