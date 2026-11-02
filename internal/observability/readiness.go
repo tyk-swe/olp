@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -251,23 +252,16 @@ func probeStore(ctx context.Context, s *State, now time.Time, hasGeneration bool
 
 // expectedTasks lists the worker responsibilities this process must see live.
 func expectedTasks(limiterConfigured bool) []WorkerTask {
-	tasks := usage.WorkerTasks()
 	if limiterConfigured {
-		return tasks
+		return usage.WorkerTasks()
 	}
-	out := make([]WorkerTask, 0, len(tasks)-len(ValkeyWorkerTasks))
-	for _, task := range tasks {
-		valkey := false
-		for _, name := range ValkeyWorkerTasks {
-			if string(task.Name) == name {
-				valkey = true
+	return slices.Collect(func(yield func(WorkerTask) bool) {
+		for _, task := range usage.WorkerTasks() {
+			if !task.Regional && !yield(task) {
+				return
 			}
 		}
-		if !valkey {
-			out = append(out, task)
-		}
-	}
-	return out
+	})
 }
 
 // asynchronousPlaneFlags classifies the replicated worker plane's freshness

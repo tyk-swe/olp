@@ -1,6 +1,7 @@
 package observability
 
 import (
+	"slices"
 	"testing"
 	"time"
 
@@ -51,6 +52,34 @@ func TestReadinessDetectsStaleFinancialWorkers(t *testing.T) {
 				if health.CurrentFor(expectedTasks(configured)) || health.StaleFor(expectedTasks(configured)) != 1 {
 					t.Fatal("stopped financial worker was considered healthy")
 				}
+			}
+		})
+	}
+}
+
+func TestReadinessOnlyRequiresRegionalWorkersWithLimiter(t *testing.T) {
+	for _, tc := range []struct {
+		task                   usage.Task
+		requiredWithoutLimiter bool
+	}{
+		{usage.TaskRequestMetadataConsumer, false},
+		{usage.TaskCostReconciliation, false},
+		{usage.TaskHealthProbes, false},
+		{usage.TaskEpochDetection, true},
+	} {
+		t.Run(string(tc.task), func(t *testing.T) {
+			health := &WorkerTaskHealth{Tasks: slices.Collect(func(yield func(WorkerTaskStatus) bool) {
+				for _, task := range usage.WorkerTasks() {
+					if task.Name != tc.task && !yield(WorkerTaskStatus{Task: string(task.Name), State: TaskStateHealthy}) {
+						return
+					}
+				}
+			})}
+			if health.CurrentFor(expectedTasks(true)) {
+				t.Fatal("readiness accepted a missing worker with a limiter")
+			}
+			if got, want := health.CurrentFor(expectedTasks(false)), !tc.requiredWithoutLimiter; got != want {
+				t.Fatalf("readiness without a limiter = %t, want %t", got, want)
 			}
 		})
 	}

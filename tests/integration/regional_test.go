@@ -199,24 +199,31 @@ func TestRegionalRateAndConcurrencyLimitsWithGlobalBudgetReconciliation(t *testi
 			t.Fatalf("global reconciliation failed in region: %v", err)
 		}
 	}
-	if err = usage.CheckpointTask(usage.WithWorkerRegion(t.Context(), "west"), h.Pool, usage.TaskCostReconciliation, usage.OutcomeSuccess, true); err != nil {
-		t.Fatal(err)
-	}
-	expected := []observability.WorkerTask{{Name: usage.TaskCostReconciliation}}
-	for _, region := range []string{"west", "east"} {
-		health, err := observability.ReadRegionalWorkerTaskHealth(t.Context(), h.Pool, region)
-		if err != nil {
+	for _, task := range []usage.Task{usage.TaskRequestMetadataConsumer, usage.TaskCostReconciliation, usage.TaskHealthProbes} {
+		if err := usage.CheckpointTask(usage.WithWorkerRegion(t.Context(), "west"), h.Pool, task, usage.OutcomeSuccess, true); err != nil {
 			t.Fatal(err)
 		}
-		if health.CurrentFor(expected) != (region == "west") {
-			t.Fatalf("%s readiness borrowed another region's success", region)
+		expected := []observability.WorkerTask{{Name: task}}
+		for _, region := range []string{"west", "east"} {
+			health, err := observability.ReadRegionalWorkerTaskHealth(t.Context(), h.Pool, region)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if health.CurrentFor(expected) != (region == "west") {
+				t.Fatalf("%s readiness borrowed another region's success for %s", region, task)
+			}
+		}
+		if err := usage.CheckpointTask(usage.WithWorkerRegion(t.Context(), "east"), h.Pool, task, usage.OutcomeFailure, false); err != nil {
+			t.Fatal(err)
+		}
+		if health, err := observability.ReadRegionalWorkerTaskHealth(t.Context(), h.Pool, "west"); err != nil || !health.CurrentFor(expected) {
+			t.Fatalf("east failure changed west health for %s: %v", task, err)
 		}
 	}
-	if err = usage.CheckpointTask(usage.WithWorkerRegion(t.Context(), "east"), h.Pool, usage.TaskCostReconciliation, usage.OutcomeFailure, false); err != nil {
+	if err := usage.CheckpointTask(usage.WithWorkerRegion(t.Context(), "west"), h.Pool, usage.TaskEpochDetection, usage.OutcomeSuccess, true); err != nil {
 		t.Fatal(err)
 	}
-	health, err := observability.ReadRegionalWorkerTaskHealth(t.Context(), h.Pool, "west")
-	if err != nil || !health.CurrentFor(expected) {
-		t.Fatalf("east failure changed west health: %v", err)
+	if health, err := observability.ReadRegionalWorkerTaskHealth(t.Context(), h.Pool, "east"); err != nil || !health.CurrentFor([]observability.WorkerTask{{Name: usage.TaskEpochDetection}}) {
+		t.Fatalf("global task health was not shared across regions: %v", err)
 	}
 }

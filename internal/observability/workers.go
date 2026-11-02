@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -13,17 +14,15 @@ import (
 
 type WorkerTask = usage.WorkerTask
 
-// ValkeyWorkerTasks are the responsibilities expected only when a limiter is
-// configured.
-var ValkeyWorkerTasks = func() []string {
-	var names []string
-	for _, task := range usage.WorkerTasks() {
-		if usage.RegionalTask(task.Name) {
-			names = append(names, string(task.Name))
+func regionalWorkerTaskNames() []string {
+	return slices.Collect(func(yield func(string) bool) {
+		for _, task := range usage.WorkerTasks() {
+			if task.Regional && !yield(string(task.Name)) {
+				return
+			}
 		}
-	}
-	return names
-}()
+	})
+}
 
 const (
 	TaskStateUnknown = "unknown"
@@ -125,7 +124,7 @@ func ReadRegionalWorkerTaskHealth(ctx context.Context, q access.Queryer, region 
 			UNION ALL
 			SELECT task,checked_at,last_success_at,last_progress_at,successes_total,failures_total,skipped_total
 			FROM olp.regional_worker_task_health WHERE region=$1 AND task=ANY($2::text[])
-		) health ORDER BY task`, region, ValkeyWorkerTasks)
+		) health ORDER BY task`, region, regionalWorkerTaskNames())
 	if err != nil {
 		return nil, fmt.Errorf("read worker task health: %w", err)
 	}
