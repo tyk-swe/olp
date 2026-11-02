@@ -136,7 +136,7 @@ func (s *Server) applyEndpoint(r *http.Request, _ access.Principal) (access.Repl
 	if err := s.validateMCPServers(input.Document); err != nil {
 		return access.Reply{}, err
 	}
-	if err := validateRetrievalBindings(input.Document); err != nil {
+	if err := validateAndNormalizeRetrievalBindings(input.Document); err != nil {
 		return access.Reply{}, err
 	}
 	input.Document.codeBindings = input.CodeBindings

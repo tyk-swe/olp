@@ -385,7 +385,7 @@ func (s *Server) validateDocument(ctx context.Context, q access.Queryer, doc *Do
 	if err := s.validateMCPServers(doc); err != nil {
 		return nil, err
 	}
-	if err := validateRetrievalBindings(doc); err != nil {
+	if err := validateAndNormalizeRetrievalBindings(doc); err != nil {
 		return nil, err
 	}
 	if err := s.validateSinks(doc); err != nil {
