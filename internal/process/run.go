@@ -50,9 +50,6 @@ import (
 	"github.com/tyk-swe/olp/internal/usage"
 )
 
-// mediaUpstreamHeaderTimeout mirrors the gateway's upstream header wait bound.
-const mediaUpstreamHeaderTimeout = 5 * time.Minute
-
 // metadataBuffer is how many request metadata events one producer replica may
 // hold while the stream writer catches up. Beyond it events are dropped and
 // counted as loss, so a slow or unreachable stream costs completeness rather
@@ -363,7 +360,7 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 				Installation: installation,
 				Gaps:         &mediaGapsTotal,
 				Transport: &media.Transport{
-					Client:           policy.Client(mediaUpstreamHeaderTimeout),
+					Client:           policy.Client(gateway.UpstreamHeaderTimeout),
 					Auth:             connectors.NewAuth(&policy),
 					Egress:           &policy,
 					Spool:            spool,

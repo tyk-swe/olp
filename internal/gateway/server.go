@@ -154,9 +154,7 @@ type Server struct {
 	bedrockStream   func(ctx context.Context, x *call, p *pin) (duplexPeer, error)
 }
 
-// upstreamHeaderTimeout caps the wait for upstream response headers; the
-// per-attempt deadline is normally tighter.
-const upstreamHeaderTimeout = 5 * time.Minute
+const UpstreamHeaderTimeout = 5 * time.Minute
 
 func New(rt Runtime, policy *egress.Policy, cfg Config, log *slog.Logger) *Server {
 	if cfg.WebRTCBound <= 0 {
@@ -195,7 +193,7 @@ func New(rt Runtime, policy *egress.Policy, cfg Config, log *slog.Logger) *Serve
 		log:         log,
 		cfg:         cfg,
 		egress:      policy,
-		client:      policy.Client(upstreamHeaderTimeout),
+		client:      policy.Client(UpstreamHeaderTimeout),
 		connections: egress.NewConnectionClientCache(128),
 		auth:        auth,
 		admission:   pool,

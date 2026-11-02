@@ -54,7 +54,7 @@ func (s *Server) codeClient(ctx context.Context, release *runtime.Release, cfg r
 			return nil, codemode.Refuse(503, "code_network_credential_unavailable")
 		}
 	}
-	client, err := s.egress.RawConnectionClient(cfg.Options.Network, secret, upstreamHeaderTimeout)
+	client, err := s.egress.RawConnectionClient(cfg.Options.Network, secret, UpstreamHeaderTimeout)
 	if err != nil {
 		return nil, codemode.Refuse(502, "code_connection_invalid")
 	}
