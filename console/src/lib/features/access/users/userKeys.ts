@@ -1,8 +1,11 @@
+const root = ['users'] as const;
+const sessionsRoot = [...root, 'sessions'] as const;
+
 export const userKeys = {
-  root: ['users'] as const,
-  page: (cursor?: string) => ['users', 'page', cursor ?? 'first'] as const,
-  roster: ['users', 'roster'] as const,
-  sessionsRoot: ['users', 'sessions'] as const,
+  root,
+  page: (cursor?: string) => [...root, 'page', cursor ?? 'first'] as const,
+  roster: [...root, 'roster'] as const,
+  sessionsRoot,
   sessions: (userId: string, cursor?: string) =>
-    ['users', 'sessions', userId, cursor ?? 'first'] as const
+    [...sessionsRoot, userId, cursor ?? 'first'] as const
 };

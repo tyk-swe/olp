@@ -1,4 +1,6 @@
+const root = ['budget-groups'] as const;
+
 export const budgetGroupKeys = {
-  root: ['budget-groups'] as const,
-  list: () => ['budget-groups', 'list'] as const
+  root,
+  list: () => [...root, 'list'] as const
 };
