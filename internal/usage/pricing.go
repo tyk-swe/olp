@@ -445,7 +445,7 @@ func normalizePrice(price Price, vendorKind func(vendor string) (string, bool)) 
 		// upstream on any terms; the operator prices each one.
 		return Price{}, access.Invalid("prices", "Scope a plugin provider's price to that provider.")
 	}
-	if entry.Model == "" || len(entry.Currency) != 3 || !currencyLetters(entry.Currency) {
+	if entry.Model == "" || !pricingpolicy.ValidCurrency(entry.Currency) {
 		return Price{}, access.Invalid("prices",
 			"Pricing entries require a model and a three-letter ISO currency.")
 	}
@@ -626,15 +626,6 @@ func normalizeWindows(windows *PriceWindows) error {
 		}
 	}
 	return nil
-}
-
-func currencyLetters(value string) bool {
-	for _, r := range value {
-		if r < 'A' || r > 'Z' {
-			return false
-		}
-	}
-	return value != ""
 }
 
 func normalizePriceAmount(value string) (string, error) {

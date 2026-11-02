@@ -7,6 +7,11 @@ const (
 	MaxWindowPeriods = 32
 )
 
+func ValidCurrency(value string) bool {
+	return len(value) == 3 && value[0] >= 'A' && value[0] <= 'Z' &&
+		value[1] >= 'A' && value[1] <= 'Z' && value[2] >= 'A' && value[2] <= 'Z'
+}
+
 func NormalizeAmount(value string) (string, bool) {
 	trimmed := strings.TrimSpace(value)
 	if !ValidAmount(trimmed) {

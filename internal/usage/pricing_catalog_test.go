@@ -55,6 +55,34 @@ func TestEmbeddedCatalogMapsToValidPrices(t *testing.T) {
 	}
 }
 
+func TestCatalogCurrencyAgreesWithPriceRevisions(t *testing.T) {
+	document, _, _, _ := signedCatalog(t, time.Date(2025, 1, 15, 0, 0, 0, 0, time.UTC))
+	for _, tc := range []struct {
+		currency     string
+		catalogValid bool
+		pricingValid bool
+	}{
+		{"ABC", true, true},
+		{"abc", false, true},
+		{" ABC ", false, true},
+		{"", false, false},
+		{"AB", false, false},
+		{"ABCD", false, false},
+		{"AB1", false, false},
+		{"ÄBC", false, false},
+	} {
+		fixture, err := catalog.Decode(document)
+		if err != nil {
+			t.Fatal(err)
+		}
+		fixture.Currency = tc.currency
+		catalogErr, pricingErr := catalogPriceValidation(t, fixture)
+		if (catalogErr == nil) != tc.catalogValid || (pricingErr == nil) != tc.pricingValid {
+			t.Errorf("currency %q, catalog error %v, pricing error %v", tc.currency, catalogErr, pricingErr)
+		}
+	}
+}
+
 func TestCatalogWindowsAgreeWithPriceRevisions(t *testing.T) {
 	published := time.Date(2025, 1, 15, 0, 0, 0, 0, time.UTC)
 	document, _, _, _ := signedCatalog(t, published)

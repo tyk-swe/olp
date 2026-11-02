@@ -9,6 +9,21 @@ import (
 	"github.com/tyk-swe/olp/internal/secrets"
 )
 
+func TestApprovalCurrencySyntax(t *testing.T) {
+	id := "0192cf87-d4ab-7f2e-a8b1-c2d3e4f50607"
+	key := secrets.NewAuthKey(bytes.Repeat([]byte{1}, 32), id)
+	for _, tc := range []struct {
+		currency string
+		valid    bool
+	}{{"ABC", true}, {"", false}, {"AB", false}, {"ABCD", false}, {"abc", false}, {"AB1", false}} {
+		binding := ApprovalBinding{RunID: id, ToolsetID: id, ToolsetRevisionID: id, ToolAlias: agentcontract.ToolAlias(id, "lookup"), PrincipalDigest: strings.Repeat("a", 64), ArgumentDigest: strings.Repeat("b", 64), TranscriptDigest: strings.Repeat("c", 64), MaxCost: "1.25", Currency: tc.currency}
+		_, err := approvalDigest(key, binding)
+		if (err == nil) != tc.valid {
+			t.Errorf("currency %q, valid %t, error %v", tc.currency, tc.valid, err)
+		}
+	}
+}
+
 func TestApprovalAcceptsPublishedToolAliases(t *testing.T) {
 	id := "0192cf87-d4ab-7f2e-a8b1-c2d3e4f50607"
 	key := secrets.NewAuthKey(bytes.Repeat([]byte{1}, 32), id)

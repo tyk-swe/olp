@@ -22,6 +22,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/catalog"
+	"github.com/tyk-swe/olp/internal/pricingpolicy"
 	"github.com/tyk-swe/olp/internal/signing"
 )
 
@@ -418,7 +419,7 @@ func (s *Server) fetchPriceDocument(ctx context.Context, rawURL string) (fetched
 			"The pricing source document is not a valid pricing catalogue.")
 	}
 	doc.Currency = strings.ToUpper(strings.TrimSpace(doc.Currency))
-	if len(doc.Currency) != 3 || !currencyLetters(doc.Currency) {
+	if !pricingpolicy.ValidCurrency(doc.Currency) {
 		return fetchedSource{}, access.Fail(422, "invalid_source_document",
 			"The pricing source document does not declare a valid currency.")
 	}

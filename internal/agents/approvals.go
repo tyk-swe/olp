@@ -5,13 +5,13 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"regexp"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/limits"
+	"github.com/tyk-swe/olp/internal/pricingpolicy"
 	"github.com/tyk-swe/olp/internal/secrets"
 	"github.com/tyk-swe/olp/internal/toolidentity"
 )
@@ -54,7 +54,7 @@ func approvalDigest(key *secrets.AuthKey, b ApprovalBinding) ([]byte, error) {
 	if b.RouteRevisionID != "" && !validApprovalID(b.RouteRevisionID) {
 		return nil, ErrApproval
 	}
-	if key == nil || !toolidentity.ValidAlias(b.ToolAlias) || b.MaxCost != "0" && !limits.ValidCostLimit(b.MaxCost) || !regexp.MustCompile(`^[A-Z]{3}$`).MatchString(b.Currency) {
+	if key == nil || !toolidentity.ValidAlias(b.ToolAlias) || b.MaxCost != "0" && !limits.ValidCostLimit(b.MaxCost) || !pricingpolicy.ValidCurrency(b.Currency) {
 		return nil, ErrApproval
 	}
 	data, _ := json.Marshal(b)

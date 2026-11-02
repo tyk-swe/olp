@@ -175,7 +175,6 @@ var (
 	modelID     = regexp.MustCompile(`^[A-Za-z0-9@][A-Za-z0-9._:/@+-]{0,255}$`)
 	canonical   = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,63}/[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$`)
 	snakeName   = regexp.MustCompile(`^[a-z][a-z0-9_]{0,63}$`)
-	currency    = regexp.MustCompile(`^[A-Z]{3}$`)
 	modalities  = []string{"audio", "embeddings", "file", "image", "text", "video"}
 	familyNames = []string{"anthropic", "gemini", "other"}
 )
@@ -193,7 +192,7 @@ func Decode(document []byte) (*Catalog, error) {
 // Validate checks every rule the schema states and the ones it cannot:
 // uniqueness, ordering of dates, and provenance no later than publication.
 func (c *Catalog) Validate() error {
-	if c.APIVersion != APIVersion || !currency.MatchString(c.Currency) || c.PublishedAt.IsZero() {
+	if c.APIVersion != APIVersion || !pricingpolicy.ValidCurrency(c.Currency) || c.PublishedAt.IsZero() {
 		return errors.New("the catalog needs its format version, a currency and a publication time")
 	}
 	families := map[string]bool{}
