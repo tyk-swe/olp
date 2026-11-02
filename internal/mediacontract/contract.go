@@ -398,8 +398,12 @@ func (t *Template) bindMultipart(d oif.Descriptor, in Input) (Bound, error) {
 	return bound, nil
 }
 
+func RepeatedMultipartDefault(name string) bool {
+	return slices.Contains([]string{"include", "timestamp_granularities", "known_speaker_names", "known_speaker_references"}, name)
+}
+
 func multipartDefaultParts(name string, raw json.RawMessage) []Part {
-	if slices.Contains([]string{"include", "timestamp_granularities", "known_speaker_names", "known_speaker_references"}, name) {
+	if RepeatedMultipartDefault(name) {
 		var values []string
 		if json.Unmarshal(raw, &values) != nil {
 			return nil

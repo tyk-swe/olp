@@ -11,6 +11,7 @@ import (
 	"mime"
 	"mime/multipart"
 	"net/http"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -271,7 +272,7 @@ func TestStrictMediaPublicNativeSourcesAndAssets(t *testing.T) {
 	t.Run("transcription timestamps and file bytes", func(t *testing.T) {
 		result := `{"text":"hello","duration":1.0000001,"segments":[{"start":-0,"end":1.0000001,"text":"hello","native_counter":9007199254740993}]}`
 		fixture := newOperationFixture(t, "/v1/audio/transcriptions", result)
-		slug, key := publishStrictMediaFixture(t, h, owner, fixture, "transcription", "unary")
+		slug, key := publishStrictMediaFixture(t, h, owner, fixture, "transcription", "unary", map[string]any{"timestamp_granularities": []string{"word", "segment"}})
 		var body bytes.Buffer
 		writer := multipart.NewWriter(&body)
 		writer.WriteField("model", slug)
@@ -289,6 +290,18 @@ func TestStrictMediaPublicNativeSourcesAndAssets(t *testing.T) {
 		calls := fixture.snapshot()
 		if len(calls) != 1 || !bytes.Contains(calls[0].body, []byte{0, 1, 2, 3}) {
 			t.Fatalf("transcription file lost: %+v", calls)
+		}
+		_, params, err := mime.ParseMediaType(calls[0].headers.Get("Content-Type"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		form, err := multipart.NewReader(bytes.NewReader(calls[0].body), params["boundary"]).ReadForm(1 << 20)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = form.RemoveAll() })
+		if got := form.Value["timestamp_granularities[]"]; !slices.Equal(got, []string{"word", "segment"}) {
+			t.Fatalf("transcription timestamp defaults=%v", got)
 		}
 	})
 	t.Run("speech binary", func(t *testing.T) {

@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/tyk-swe/olp/internal/connectors"
+	"github.com/tyk-swe/olp/internal/mediacontract"
 	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/vendors"
 )
@@ -343,7 +344,7 @@ func applyConfiguredField(r *Request, name string, raw json.RawMessage) *Error {
 }
 
 func configuredMultipartFields(name string, raw json.RawMessage) ([]Field, *Error) {
-	if slices.Contains([]string{"include", "timestamp_granularities", "known_speaker_names", "known_speaker_references"}, name) {
+	if mediacontract.RepeatedMultipartDefault(name) {
 		var values []string
 		if json.Unmarshal(raw, &values) != nil || len(values) == 0 {
 			return nil, configuredFailure(name, "requires a nonempty array of strings in multipart")
