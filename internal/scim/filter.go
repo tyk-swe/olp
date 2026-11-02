@@ -72,7 +72,7 @@ func pathParts(p filter.AttributePath) []string {
 	return parts
 }
 
-func multiValuedAttribute(name string) bool {
+func MultiValuedComplexAttribute(name string) bool {
 	switch name {
 	case "emails", "roles", "groups", "members", "projects":
 		return true
@@ -86,7 +86,7 @@ func jsonPath(p filter.AttributePath) string {
 	for _, part := range pathParts(p) {
 		b, _ := json.Marshal(part)
 		path += "." + string(b)
-		if multiValuedAttribute(part) {
+		if MultiValuedComplexAttribute(part) {
 			path += "[*]"
 		}
 	}
@@ -284,7 +284,7 @@ func (s *SQLFilter) Sort(raw, base string) (string, error) {
 		return "", err
 	}
 	last := parts[len(parts)-1]
-	if last == "name" || last == "meta" || multiValuedAttribute(last) {
+	if last == "name" || last == "meta" || MultiValuedComplexAttribute(last) {
 		return "", Fail(400, "invalidPath", "Choose a scalar subattribute for sorting.")
 	}
 	path, primary := "$", "$"
@@ -294,7 +294,7 @@ func (s *SQLFilter) Sort(raw, base string) (string, error) {
 		step := "." + string(encoded)
 		path += step
 		primary += step
-		if multiValuedAttribute(part) {
+		if MultiValuedComplexAttribute(part) {
 			path += "[*]"
 			primary += "[*] ? (@.primary == true)"
 			multi = true

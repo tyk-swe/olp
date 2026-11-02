@@ -74,6 +74,13 @@ func scimPatch(operations ...any) map[string]any {
 func TestSCIMFiltersAndSortsMultivaluedEmails(t *testing.T) {
 	h := newAccessHarness(t)
 	token := scimToken(h, h.owner(), []string{"access"})
+	schema := scimCall(t, h, token, "GET", "/scim/v2/Schemas/"+scim.UserSchema, nil, "", 200)
+	if !slices.ContainsFunc(schema["attributes"].([]any), func(value any) bool {
+		attribute := value.(map[string]any)
+		return attribute["name"] == "emails" && attribute["multiValued"] == true
+	}) {
+		t.Fatalf("email schema=%v", schema)
+	}
 	create := func(name, alternate string) string {
 		body := map[string]any{
 			"schemas":  []string{scim.UserSchema},
