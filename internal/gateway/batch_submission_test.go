@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	openaisdk "github.com/openai/openai-go/v3"
 	"github.com/tyk-swe/olp/internal/batches"
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/egress"
@@ -135,6 +136,40 @@ func TestManagedBatchProjection(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestStrictBatchFinalizingRemainsInProgress(t *testing.T) {
+	body, err := json.Marshal(map[string]string{
+		"id": "job", "status": string(openaisdk.BatchStatusFinalizing),
+		"endpoint": "/v1/chat/completions", "input_file_id": "file",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write(body)
+	}))
+	defer server.Close()
+	policy := egress.Policy{AllowedNetworks: []netip.Prefix{netip.MustParsePrefix("127.0.0.0/8")}}
+	reader := batches.OpenAIReader{Auth: connectors.NewAuth(&policy), Egress: &policy}
+	settlement := batches.Settlement{
+		UpstreamID: new("job"), LineOperation: "generation",
+		Cursor: []byte(`{"submission":{"input_file_id":"file","endpoint":"/v1/chat/completions"}}`),
+	}
+	target := batches.PinnedTarget{
+		Config: connectors.Config{Kind: "openai_compatible", AuthMode: "none", Endpoint: server.URL},
+		Client: server.Client(),
+	}
+	snapshot, err := reader.Poll(t.Context(), settlement, &target)
+	if err != nil {
+		t.Fatalf("settlement rejected a finalizing batch: %v", err)
+	}
+	if snapshot.Status != string(openaisdk.BatchStatusFinalizing) || snapshot.Terminal {
+		t.Fatalf("settlement treated a finalizing batch as finished: %+v", snapshot)
+	}
+	if _, _, err := strictBatchResult(body, "job"); err != nil {
+		t.Fatalf("gateway rejected a finalizing batch: %v", err)
 	}
 }
 
