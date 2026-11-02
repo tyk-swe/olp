@@ -175,7 +175,14 @@ func TestSupportedSignaturesAndEverySecurityClaim(t *testing.T) {
 	}{{jose.RS256, rsaKey, &rsaKey.PublicKey}, {jose.ES256, ecKey, &ecKey.PublicKey}, {jose.EdDSA, edKey, pub}} {
 		t.Run(string(key.alg), func(t *testing.T) {
 			now := time.Now()
-			keys := map[string]jose.JSONWebKey{"one": {Key: key.public, KeyID: "one", Algorithm: string(key.alg), Use: "sig"}}
+			keySet, err := json.Marshal(jose.JSONWebKeySet{Keys: []jose.JSONWebKey{{Key: key.public, KeyID: "one", Algorithm: string(key.alg), Use: "sig"}}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			keys, err := ParseKeys(keySet)
+			if err != nil {
+				t.Fatal(err)
+			}
 			c := fixtureConfig()
 			if e = c.Validate(); e != nil {
 				t.Fatal(e)

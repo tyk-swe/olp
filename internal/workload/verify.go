@@ -199,6 +199,7 @@ func ParseKeys(data []byte) (map[string]jose.JSONWebKey, error) {
 		return nil, ErrKeys
 	}
 	keys := map[string]jose.JSONWebKey{}
+	algorithms := supportedAlgorithms()
 	for _, key := range set.Keys {
 		if key.KeyID == "" || len(key.KeyID) > 128 || !key.Valid() || !key.IsPublic() || key.Use != "" && key.Use != "sig" {
 			return nil, ErrKeys
@@ -222,7 +223,7 @@ func ParseKeys(data []byte) (map[string]jose.JSONWebKey, error) {
 		default:
 			return nil, ErrKeys
 		}
-		if key.Algorithm != "" && !slices.Contains([]string{"RS256", "ES256", "EdDSA"}, key.Algorithm) {
+		if key.Algorithm != "" && !slices.Contains(algorithms, key.Algorithm) {
 			return nil, ErrKeys
 		}
 		keys[key.KeyID] = key
