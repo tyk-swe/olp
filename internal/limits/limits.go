@@ -26,6 +26,7 @@ import (
 	_ "embed"
 	"encoding/hex"
 	"errors"
+	"math"
 	"strconv"
 	"strings"
 	"sync"
@@ -123,6 +124,14 @@ const (
 	// every other release.
 	settleTimeout = 100 * time.Millisecond
 )
+
+func ValidRequestLimit(value *int64) bool {
+	return value == nil || *value > 0 && *value <= math.MaxInt32
+}
+
+func ValidTokenLimit(value *int64) bool {
+	return value == nil || *value > 0 && *value <= MaxCounter
+}
 
 // Dimension names the budget that rejected a reservation.
 type Dimension string

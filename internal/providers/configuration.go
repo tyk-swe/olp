@@ -315,18 +315,8 @@ func ValidLimits(field string, q Limits) error {
 	return nil
 }
 
-// validQuota uses the same integer bounds as the shared limiter and reference
-// contract. Absence, not zero, disables a dimension.
 func ValidQuota(q Limits) bool {
-	for _, bound := range []struct {
-		value *int64
-		max   int64
-	}{{q.RequestsPerMinute, 2147483647}, {q.MaxConcurrency, 2147483647}, {q.TokensPerMinute, limits.MaxCounter}} {
-		if bound.value != nil && (*bound.value < 1 || *bound.value > bound.max) {
-			return false
-		}
-	}
-	return true
+	return limits.ValidRequestLimit(q.RequestsPerMinute) && limits.ValidRequestLimit(q.MaxConcurrency) && limits.ValidTokenLimit(q.TokensPerMinute)
 }
 
 // credentialRequired reports whether the auth mode needs a secret.

@@ -72,11 +72,11 @@ func (a Authority) AllowsEndUser(digest string) bool {
 
 func (policy AdmissionLimits) Validate() error {
 	for field, value := range map[string]*int64{"requests_per_minute": policy.RequestsPerMinute, "max_concurrency": policy.MaxConcurrency} {
-		if value != nil && (*value < 1 || *value > 2147483647) {
+		if !limits.ValidRequestLimit(value) {
 			return Invalid(field, "Use a positive integer of at most 2147483647.")
 		}
 	}
-	if policy.TokensPerMinute != nil && (*policy.TokensPerMinute < 1 || *policy.TokensPerMinute > limits.MaxCounter) {
+	if !limits.ValidTokenLimit(policy.TokensPerMinute) {
 		return Invalid("tokens_per_minute", "Use a positive integer of at most 9007199254740991.")
 	}
 	if policy.CostBasis != "" && policy.CostBasis != "cost" && policy.CostBasis != "charge" {

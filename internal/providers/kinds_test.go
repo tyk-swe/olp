@@ -2,13 +2,44 @@ package providers
 
 import (
 	"errors"
+	"math"
 	"testing"
 
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/egress"
+	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/pricingpolicy"
 	"github.com/tyk-swe/olp/internal/routing"
 )
+
+func TestProviderAndAccessQuotaBoundariesAgree(t *testing.T) {
+	for _, dimension := range []struct {
+		name      string
+		maximum   int64
+		provider  func(*int64) Limits
+		admission func(*int64) access.AdmissionLimits
+	}{
+		{"requests", math.MaxInt32, func(v *int64) Limits { return Limits{RequestsPerMinute: v} }, func(v *int64) access.AdmissionLimits { return access.AdmissionLimits{RequestsPerMinute: v} }},
+		{"concurrency", math.MaxInt32, func(v *int64) Limits { return Limits{MaxConcurrency: v} }, func(v *int64) access.AdmissionLimits { return access.AdmissionLimits{MaxConcurrency: v} }},
+		{"tokens", limits.MaxCounter, func(v *int64) Limits { return Limits{TokensPerMinute: v} }, func(v *int64) access.AdmissionLimits { return access.AdmissionLimits{TokensPerMinute: v} }},
+	} {
+		t.Run(dimension.name, func(t *testing.T) {
+			if !ValidQuota(dimension.provider(nil)) || dimension.admission(nil).Validate() != nil {
+				t.Fatal("absent limit was rejected")
+			}
+			for _, tc := range []struct {
+				value int64
+				valid bool
+			}{{0, false}, {1, true}, {dimension.maximum, true}, {dimension.maximum + 1, false}} {
+				providerValid := ValidQuota(dimension.provider(&tc.value))
+				accessErr := dimension.admission(&tc.value).Validate()
+				if providerValid != tc.valid || (accessErr == nil) != tc.valid {
+					t.Errorf("limit %d, expected %t, provider %t, access %v", tc.value, tc.valid, providerValid, accessErr)
+				}
+			}
+		})
+	}
+}
 
 // A grant's credential versions come from grant enrollment rather
 // than a pasted secret, but it authorizes with one all the same.
