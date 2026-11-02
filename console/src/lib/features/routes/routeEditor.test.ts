@@ -197,6 +197,39 @@ describe('route validation and serialization', () => {
       ).toBe(valid);
   });
 
+  it('validates each referenced route and template without rejecting trimmed names', () => {
+    expect(
+      groupError([{ id: 'group', name: 'group', routes: 'valid, Bad/route' }])
+    ).not.toBe('');
+    expect(
+      templateError([
+        { id: 'first', name: 'valid', limits: limitForm() },
+        { id: 'second', name: 'Bad/template', limits: limitForm() }
+      ])
+    ).not.toBe('');
+    expect(
+      policyError({ ...policyForm(), enabled: true, limitTemplate: ' valid ' })
+    ).toBe('');
+    expect(
+      validateRouteBehavior({
+        ...route,
+        behavior: {
+          ...emptyBehavior(),
+          fallbacks: [{ route: 'backup', on: ['exhausted'] }]
+        }
+      })
+    ).toBeNull();
+    expect(
+      validateRouteBehavior({
+        ...route,
+        behavior: {
+          ...emptyBehavior(),
+          fallbacks: [{ route: 'Bad/route', on: ['exhausted'] }]
+        }
+      })
+    ).not.toBeNull();
+  });
+
   it('accepts a bounded serving route and refuses invalid basic inputs', () => {
     expect(validateRouteEditor(route)).toBeNull();
     const invalid = [
