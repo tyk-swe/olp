@@ -10,6 +10,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/cache"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
 	"github.com/tyk-swe/olp/internal/protocols/wire"
 )
@@ -230,13 +231,14 @@ func TestValidateRejectsMalformedEnvelopesAndAttempts(t *testing.T) {
 	}
 }
 
-func TestRouteSlugsAgreeAcrossRequestsAccessAndAccounting(t *testing.T) {
+func TestRouteSlugsAgreeAcrossRequestsAccessAccountingAndCache(t *testing.T) {
 	for _, tc := range []struct {
 		slug  string
 		valid bool
 	}{
-		{"route", true}, {"route-a.b_c", true}, {"UPPER", false}, {"route/path", false},
-		{"", false}, {strings.Repeat("a", 100), true}, {strings.Repeat("a", 101), false},
+		{"route", true}, {"route-a.b_c", true}, {"0route", true}, {"UPPER", false}, {"route/path", false},
+		{"-route", false}, {"route\n", false}, {"røute", false}, {"", false},
+		{strings.Repeat("a", 100), true}, {strings.Repeat("a", 101), false},
 	} {
 		t.Run(tc.slug, func(t *testing.T) {
 			event := metadataEvent()
@@ -255,8 +257,9 @@ func TestRouteSlugsAgreeAcrossRequestsAccessAndAccounting(t *testing.T) {
 			}
 			_, requestErr := openai.Parse(wire.Chat, request)
 			accessErr := (access.RouteGroups{"group": []string{tc.slug}}).Validate()
-			if (accountingErr == nil) != tc.valid || (requestErr == nil) != tc.valid || (accessErr == nil) != tc.valid {
-				t.Fatalf("accounting error = %v, request error = %v, access error = %v", accountingErr, requestErr, accessErr)
+			cacheErr := (&cache.Policy{Mode: "semantic", EmbeddingRoute: tc.slug, AllowUnsealedVectors: true}).Validate()
+			if (accountingErr == nil) != tc.valid || (requestErr == nil) != tc.valid || (accessErr == nil) != tc.valid || (cacheErr == nil) != tc.valid {
+				t.Fatalf("accounting error = %v, request error = %v, access error = %v, cache error = %v", accountingErr, requestErr, accessErr, cacheErr)
 			}
 		})
 	}
