@@ -7,7 +7,11 @@ import (
 )
 
 func TestBusinessMetricsCountsKnownUsageAndBoundsActualSeries(t *testing.T) {
-	m := NewBusinessMetrics(30, []string{"project", "key", "end_user"})
+	tenants, err := ParseMetricsTenantLabels("end_user, key, project")
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := NewBusinessMetrics(30, tenants)
 	l := BusinessLabels{Route: "chat", ProviderKind: "openai", Project: "project", Key: "key", EndUser: "digest"}
 	input, output := int64(100), int64(20)
 	m.Tokens(l, &input, &output)
@@ -32,6 +36,14 @@ func TestBusinessMetricsCountsKnownUsageAndBoundsActualSeries(t *testing.T) {
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("missing %s in %s", want, body)
+		}
+	}
+}
+
+func TestBusinessMetricsRejectsInvalidTenantLabels(t *testing.T) {
+	for _, configured := range []string{"unknown", "project, project"} {
+		if _, err := ParseMetricsTenantLabels(configured); err == nil {
+			t.Errorf("accepted invalid tenant labels %q", configured)
 		}
 	}
 }

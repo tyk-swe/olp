@@ -20,6 +20,23 @@ type BusinessLabels struct {
 	EndUser      string
 }
 
+func tenantLabelValues(labels BusinessLabels) [3]struct{ name, value string } {
+	return [3]struct{ name, value string }{
+		{"project", labels.Project},
+		{"key", labels.Key},
+		{"end_user", labels.EndUser},
+	}
+}
+
+func tenantLabelValue(name string, labels BusinessLabels) (string, bool) {
+	for _, label := range tenantLabelValues(labels) {
+		if label.name == name {
+			return label.value, true
+		}
+	}
+	return "", false
+}
+
 type businessSeries struct {
 	name   string
 	labels string
@@ -45,7 +62,7 @@ func ParseMetricsTenantLabels(raw string) ([]string, error) {
 	seen := map[string]bool{}
 	for _, label := range strings.Split(raw, ",") {
 		label = strings.TrimSpace(label)
-		if label != "project" && label != "key" && label != "end_user" {
+		if _, valid := tenantLabelValue(label, BusinessLabels{}); !valid {
 			return nil, fmt.Errorf("OLP_METRICS_TENANT_LABELS accepts project, key and end_user")
 		}
 		if seen[label] {
@@ -54,9 +71,9 @@ func ParseMetricsTenantLabels(raw string) ([]string, error) {
 		seen[label] = true
 	}
 	labels := make([]string, 0, len(seen))
-	for _, label := range []string{"project", "key", "end_user"} {
-		if seen[label] {
-			labels = append(labels, label)
+	for _, label := range tenantLabelValues(BusinessLabels{}) {
+		if seen[label.name] {
+			labels = append(labels, label.name)
 		}
 	}
 	return labels, nil
@@ -80,15 +97,7 @@ func (m *BusinessMetrics) labels(l BusinessLabels, extra ...string) string {
 	labels := []string{"route=" + metricQuoted(l.Route)}
 	labels = append(labels, extra...)
 	for _, tenant := range m.tenants {
-		value := ""
-		switch tenant {
-		case "project":
-			value = l.Project
-		case "key":
-			value = l.Key
-		case "end_user":
-			value = l.EndUser
-		}
+		value, _ := tenantLabelValue(tenant, l)
 		labels = append(labels, tenant+"="+metricQuoted(value))
 	}
 	return strings.Join(labels, ",")
