@@ -38,6 +38,10 @@ type batchManifest struct {
 	ManifestDigest string `json:"manifest_digest"`
 }
 
+func batchManifestFields() []string {
+	return []string{"endpoint", "line_operation", "line_count", "manifest_digest"}
+}
+
 type managedBatchLine struct {
 	CustomID string          `json:"custom_id"`
 	Method   string          `json:"method"`
@@ -112,7 +116,7 @@ func managedFileMetadata(existing, response []byte, adapter string, manifest bat
 		meta["line_count"], _ = json.Marshal(manifest.LineCount)
 		meta["manifest_digest"], _ = json.Marshal(manifest.ManifestDigest)
 	} else {
-		for _, name := range []string{"endpoint", "line_operation", "line_count", "manifest_digest", "gemini_responses_file"} {
+		for _, name := range append(batchManifestFields(), "gemini_responses_file") {
 			if value, ok := prior[name]; ok {
 				meta[name] = value
 			}
