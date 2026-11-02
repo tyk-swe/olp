@@ -15,6 +15,13 @@ import {
 
 type Configuration = components['schemas']['ProviderConfiguration'];
 
+export const profileScopedSettings = [
+  'semantic_headers',
+  'query_settings',
+  'operation_defaults',
+  'bindings'
+] as const;
+
 /** One immutable JSON tree is authoritative for both forms and advanced JSON.
  * Partially typed JSON stays in that tree and blocks every save/activation. */
 export class ConfigurationDraft {
@@ -57,6 +64,12 @@ export class ConfigurationDraft {
       (options === undefined || nativeObject(options))
     );
   }
+  get hasProfileScopedSettings(): boolean {
+    return profileScopedSettings.some((name) => {
+      const value = this.at(['options', name]);
+      return nativeObject(value) && Object.keys(value).length > 0;
+    });
+  }
   get issue(): string | null {
     const issue = nativeIssue(this.root);
     if (issue) return issue;
@@ -96,18 +109,7 @@ export class ConfigurationDraft {
       Object.keys(parameterDefaults).length
     )
       return 'Parameter defaults belong to Automatic providers; move or explicitly remove them before selecting a profile.';
-    if (
-      !profile &&
-      [
-        'semantic_headers',
-        'query_settings',
-        'operation_defaults',
-        'bindings'
-      ].some((name) => {
-        const value = this.at(['options', name]);
-        return nativeObject(value) && Object.keys(value).length;
-      })
-    )
+    if (!profile && this.hasProfileScopedSettings)
       return 'Profile-scoped settings require an explicit versioned profile.';
     return null;
   }
