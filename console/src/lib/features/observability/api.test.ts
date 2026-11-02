@@ -20,6 +20,29 @@ const dataset: FocusDataset = {
 
 afterEach(() => vi.unstubAllGlobals());
 
+it('keeps capture views separate and invalidates them with observability data', async () => {
+  const client = new QueryClient();
+  const views = [
+    { key: observabilityKeys.capture(), data: 'capture' },
+    { key: observabilityKeys.capturePolicies(), data: 'policies' },
+    { key: observabilityKeys.captureSinks(), data: 'capture sinks' },
+    { key: observabilityKeys.sinks(), data: 'export sinks' }
+  ];
+  try {
+    for (const view of views) client.setQueryData(view.key, view.data);
+    client.setQueryData(['unrelated'], 'untouched');
+    for (const view of views)
+      expect(client.getQueryData(view.key)).toBe(view.data);
+
+    await client.invalidateQueries({ queryKey: observabilityKeys.root });
+    for (const view of views)
+      expect(client.getQueryState(view.key)?.isInvalidated).toBe(true);
+    expect(client.getQueryState(['unrelated'])?.isInvalidated).toBe(false);
+  } finally {
+    client.clear();
+  }
+});
+
 it.each([
   { parent: observabilityKeys.root },
   { parent: observabilityKeys.sinks() }
