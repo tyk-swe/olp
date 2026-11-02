@@ -18,7 +18,7 @@ type WorkerTask = usage.WorkerTask
 var ValkeyWorkerTasks = func() []string {
 	var names []string
 	for _, task := range usage.WorkerTasks() {
-		if usage.RegionalTask(task.Name) {
+		if task.Regional {
 			names = append(names, string(task.Name))
 		}
 	}
