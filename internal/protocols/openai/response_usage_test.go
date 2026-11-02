@@ -103,6 +103,7 @@ func TestResponseEventUsageOwnsLifecycleCompleteness(t *testing.T) {
 		`{"type":"response.created","response":{"status":"unknown","usage":{"input_tokens":0,"output_tokens":0}}}`,
 		`{"type":"response.queued","response":{"status":1,"usage":{"input_tokens":0,"output_tokens":0}}}`,
 		`{"type":"response.in_progress","response":{"status":false,"usage":{"input_tokens":0,"output_tokens":0}}}`,
+		`{"type":"response.in_progress","response":{"status":"cancelling","usage":{"input_tokens":0,"output_tokens":0}}}`,
 		`{"type":"response.completed","response":{"status":"in_progress","usage":{"input_tokens":0,"output_tokens":0}}}`,
 		`{"type":"response.completed","response":{"status":null,"usage":{"input_tokens":0,"output_tokens":0}}}`,
 		`{"type":"response.completed"}`,
@@ -134,6 +135,19 @@ func TestResponseEventUsageOwnsLifecycleCompleteness(t *testing.T) {
 			if err != nil || !known || observed.Usage != nil || observed.Complete {
 				t.Errorf("sparse nonterminal changed: kind=%s observed=%+v known=%t err=%v", kind, observed, known, err)
 			}
+		}
+	}
+}
+
+func TestResponseUsageRequiresTerminalStatusForCompleteness(t *testing.T) {
+	for status, complete := range map[string]bool{
+		"queued": false, "in_progress": false, "cancelling": false,
+		"completed": true, "incomplete": true, "failed": true, "cancelled": true,
+	} {
+		body := []byte(`{"status":"` + status + `","usage":{"input_tokens":2,"output_tokens":1}}`)
+		observed, err := ObserveResponseUsage(body)
+		if err != nil || observed.Usage == nil || observed.Complete != complete {
+			t.Errorf("%s: observed=%+v error=%v", status, observed, err)
 		}
 	}
 }

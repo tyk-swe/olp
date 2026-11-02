@@ -4,11 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"slices"
 	"strings"
 	"time"
 
 	"github.com/tyk-swe/olp/internal/oif"
+	"github.com/tyk-swe/olp/internal/protocols/wire"
 	"github.com/tyk-swe/olp/internal/resources"
 )
 
@@ -54,7 +54,7 @@ func validateNativeResponse(source oif.Document, pointer, expectedID string) (na
 	}
 	if state, present := value.Lookup("status"); present {
 		status, valid := state.Text()
-		if !valid || !slices.Contains([]string{"queued", "in_progress", "completed", "failed", "incomplete", "cancelled", "cancelling"}, status) {
+		if !valid || !wire.ValidResponseStatus(status) {
 			return nativeResponse{}, resources.ErrContract
 		}
 		if status == "completed" {
