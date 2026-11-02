@@ -208,11 +208,11 @@ func retainedInputMetadata(p *pin, route *routing.Route, owner string, e retaine
 		if _, present := source.Root().Lookup("metadata"); present {
 			return nil, errors.New("the pinned container API does not accept metadata")
 		}
-		tier := "1g"
+		tier := resources.DefaultRetainedContainerMemoryTier
 		if value, present := source.Root().Lookup("memory_limit"); present {
 			var ok bool
 			tier, ok = value.Text()
-			if !ok || !slices.Contains([]string{"1g", "4g", "16g", "64g"}, tier) {
+			if !ok || !resources.ValidRetainedContainerMemoryTier(tier) {
 				return nil, errors.New("unsupported container memory tier")
 			}
 		}

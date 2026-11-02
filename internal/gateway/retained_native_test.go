@@ -21,6 +21,48 @@ import (
 	"github.com/tyk-swe/olp/internal/routing"
 )
 
+func TestRetainedContainerDefaultTierSurvivesObservation(t *testing.T) {
+	endpoint := retainedapi.Endpoint{Family: retainedapi.Family{Kind: "container"}, Action: "create"}
+	request, err := oif.ParseJSON([]byte(`{}`), oif.Limits{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	metadata, err := retainedInputMetadata(&pin{}, nil, "key", endpoint, request, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tier, ok := metadata["memory_tier"].(string)
+	if !ok || tier == "" {
+		t.Fatal("container admission did not record a default memory tier")
+	}
+	responseBody, err := json.Marshal(map[string]string{"memory_limit": tier})
+	if err != nil {
+		t.Fatal(err)
+	}
+	response, err := oif.ParseJSON(responseBody, oif.Limits{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	explicitMetadata, err := retainedInputMetadata(&pin{}, nil, "key", endpoint, response, nil)
+	if err != nil || explicitMetadata["memory_tier"] != tier {
+		t.Fatalf("explicit tier %q rejected or changed: %v", tier, err)
+	}
+	storedMetadata, err := json.Marshal(metadata)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resource := &resources.Resource{Kind: "container", Metadata: storedMetadata}
+	if err := resources.EnrichRetained(resource, endpoint, response, time.Unix(1000, 0)); err != nil {
+		t.Fatalf("admitted memory tier %q rejected during observation: %v", tier, err)
+	}
+	var observed struct {
+		MemoryTier string `json:"memory_tier"`
+	}
+	if err := json.Unmarshal(resource.Metadata, &observed); err != nil || observed.MemoryTier != tier {
+		t.Fatalf("observed tier %q does not match admitted tier %q: %v", observed.MemoryTier, tier, err)
+	}
+}
+
 func TestRetainedPinnedEvalFixtures(t *testing.T) {
 	for _, tc := range []struct{ file, kind string }{{"openai-eval-definition", "eval"}, {"openai-eval-output", "eval_output_item"}} {
 		body, err := os.ReadFile("../resources/testdata/retained/" + tc.file + ".json")
