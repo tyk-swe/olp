@@ -19,6 +19,17 @@ func RetainedFileMetadataFields() []string {
 	return []string{"object", "purpose", "filename", "bytes", "status", "status_details", "expires_at", "created_at"}
 }
 
+const DefaultRetainedContainerMemoryTier = "1g"
+
+func ValidRetainedContainerMemoryTier(tier string) bool {
+	switch tier {
+	case DefaultRetainedContainerMemoryTier, "4g", "16g", "64g":
+		return true
+	default:
+		return false
+	}
+}
+
 // EnrichRetained records only billing and lifecycle facts. Native content,
 // evaluation samples, training examples and conversation history remain remote.
 func EnrichRetained(r *Resource, e retainedapi.Endpoint, source oif.Document, now time.Time) error {
@@ -132,7 +143,7 @@ func EnrichRetained(r *Resource, e retainedapi.Endpoint, source oif.Document, no
 	}
 	if r.Kind == "container" {
 		if tier, present := retainedText(root, "memory_limit"); present {
-			if !slices.Contains([]string{"1g", "4g", "16g", "64g"}, tier) {
+			if !ValidRetainedContainerMemoryTier(tier) {
 				return ErrContract
 			}
 			if old, present := meta["memory_tier"]; present {
