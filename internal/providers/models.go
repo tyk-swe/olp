@@ -328,7 +328,7 @@ func ValidCapabilities(inputs []CapabilityInput) ([]CapabilityInput, error) {
 	seen := map[CapabilityInput]bool{}
 	for _, c := range inputs {
 		supported := operationregistry.Default.Supports(c.Operation, c.Surface, c.Mode)
-		for _, option := range CapabilityOptions {
+		for _, option := range capabilityVocabulary {
 			supported = supported || option == c
 		}
 		if !supported {
