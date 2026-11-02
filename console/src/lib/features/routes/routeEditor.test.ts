@@ -181,9 +181,9 @@ describe('route validation and serialization', () => {
     { slug: 'a'.repeat(101), valid: false }
   ])('validates route and policy names consistently', ({ slug, valid }) => {
     expect(validateRouteEditor({ ...route, slug }) === null).toBe(valid);
-    expect(groupError([{ id: 'row', name: slug, routes: 'route' }]) === '').toBe(
-      valid
-    );
+    expect(
+      groupError([{ id: 'row', name: slug, routes: 'route' }]) === ''
+    ).toBe(valid);
     expect(
       templateError([{ id: 'row', name: slug, limits: limitForm() }]) === ''
     ).toBe(valid);
