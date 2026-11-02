@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/tyk-swe/olp/internal/database"
+	"github.com/tyk-swe/olp/internal/routeidentity"
 	"github.com/tyk-swe/olp/internal/usage"
 )
 
@@ -393,6 +394,40 @@ func TestAccountingPersistsPricedAttemptsAndIsReplaySafe(t *testing.T) {
 	if _, err := acctPersistErr(t, fixture, conflicting); !errors.Is(err, usage.ErrInvalidEvent) {
 		t.Fatalf("conflicting event error = %v, want ErrInvalidEvent", err)
 	}
+
+	t.Run("selector validation matches stored facts", func(t *testing.T) {
+		tx, err := fixture.Pool.Begin(t.Context())
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer tx.Rollback(t.Context())
+		for _, selector := range []string{
+			"selector", "a-1", strings.Repeat("a", 63), "", "Selector",
+			"a_b", "a/1", "a\n", strings.Repeat("a", 64),
+		} {
+			t.Run(selector, func(t *testing.T) {
+				valid := routeidentity.ValidSelectorID(selector)
+				if _, err := tx.Exec(t.Context(), "SAVEPOINT selector_case"); err != nil {
+					t.Fatal(err)
+				}
+				tag, updateErr := tx.Exec(t.Context(), `UPDATE olp.attempt_usage_facts
+					SET selector = $1 WHERE request_id = $2::uuid AND attempt_ordinal = 1`, selector, event.RequestID)
+				if _, err := tx.Exec(t.Context(), "ROLLBACK TO SAVEPOINT selector_case"); err != nil {
+					t.Fatal(err)
+				}
+				if updateErr == nil {
+					if !valid || tag.RowsAffected() != 1 {
+						t.Fatalf("database accepted selector, rows = %d, valid = %v", tag.RowsAffected(), valid)
+					}
+					return
+				}
+				pgErr, ok := errors.AsType[*pgconn.PgError](updateErr)
+				if valid || !ok || pgErr.Code != "23514" {
+					t.Fatalf("database rejected selector, valid = %v, error = %v", valid, updateErr)
+				}
+			})
+		}
+	})
 }
 
 // The rejection is admitted as a gap of unknown size rather than
