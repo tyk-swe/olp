@@ -17,6 +17,7 @@ import (
 
 	"github.com/google/uuid"
 	grantconfig "github.com/tyk-swe/olp/internal/grants/config"
+	"github.com/tyk-swe/olp/internal/pricingpolicy"
 	"github.com/tyk-swe/olp/internal/prompts"
 )
 
@@ -115,7 +116,7 @@ func (d Draft) Validate(kind string) error {
 		if !slices.Contains([]string{"a2a-0.3.0", "a2a-1.0.0"}, a.Protocol) || !hexDigest.MatchString(a.CardDigest) || !validID(a.PricingRevisionID) || !validCost(a.MaxCost) {
 			return invalid("agent", "Supply pinned protocol, card, pricing and a finite positive cost bound.")
 		}
-		if a.MessagePrice != "" && (!validAmount(a.MessagePrice) || !priceWithinBound(a.MessagePrice, a.MaxCost)) {
+		if a.MessagePrice != "" && (!pricingpolicy.ValidAmount(a.MessagePrice) || !priceWithinBound(a.MessagePrice, a.MaxCost)) {
 			return invalid("message_price", "Supply a nonnegative price within the cost bound.")
 		}
 		if a.RemoteWorkBoundSeconds != nil && (*a.RemoteWorkBoundSeconds < 1 || *a.RemoteWorkBoundSeconds > 3600) {
@@ -185,10 +186,7 @@ func validName(v string) error {
 	return nil
 }
 func validCost(v string) bool {
-	return validAmount(v) && strings.Trim(v, "0.") != ""
-}
-func validAmount(v string) bool {
-	return regexp.MustCompile(`^[0-9]{1,12}(\.[0-9]{1,12})?$`).MatchString(v)
+	return pricingpolicy.ValidAmount(v) && strings.Trim(v, "0.") != ""
 }
 func priceWithinBound(price, bound string) bool {
 	p, priceOK := new(big.Rat).SetString(price)

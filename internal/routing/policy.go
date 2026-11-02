@@ -10,9 +10,9 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/tyk-swe/olp/internal/priority"
-
 	"github.com/google/uuid"
+	"github.com/tyk-swe/olp/internal/pricingpolicy"
+	"github.com/tyk-swe/olp/internal/priority"
 )
 
 type Preferences struct {
@@ -98,7 +98,7 @@ func (p *Preferences) Validate(field string) error {
 			}
 		}
 	}
-	if p.MaxCost != nil && !decimal(*p.MaxCost) {
+	if p.MaxCost != nil && !pricingpolicy.ValidAmount(*p.MaxCost) {
 		return invalid("The maximum cost must be a non-negative decimal string")
 	}
 	if len(p.MaxPrice) > 0 && string(p.MaxPrice) != "null" {
@@ -109,24 +109,12 @@ func (p *Preferences) Validate(field string) error {
 			return invalid("Invalid price ceiling")
 		}
 		for _, amount := range []*string{c.Input, c.Output, c.Unit} {
-			if amount != nil && !decimal(*amount) {
+			if amount != nil && !pricingpolicy.ValidAmount(*amount) {
 				return invalid("Price ceilings must be non-negative decimal strings")
 			}
 		}
 	}
 	return nil
-}
-func decimal(s string) bool {
-	whole, fraction, has := strings.Cut(s, ".")
-	if len(whole) < 1 || len(whole) > 12 || has && (len(fraction) < 1 || len(fraction) > 12) {
-		return false
-	}
-	for _, c := range whole + fraction {
-		if c < '0' || c > '9' {
-			return false
-		}
-	}
-	return true
 }
 func (p *Preferences) Budget(published int) int {
 	if p == nil {

@@ -11,6 +11,7 @@ import (
 	"github.com/santhosh-tekuri/jsonschema/v6"
 	grantconfig "github.com/tyk-swe/olp/internal/grants/config"
 	"github.com/tyk-swe/olp/internal/oif"
+	"github.com/tyk-swe/olp/internal/pricingpolicy"
 )
 
 type MCPTool struct {
@@ -111,10 +112,8 @@ type MCPToolsetTool struct {
 	schema               *jsonschema.Schema
 }
 
-var toolPricePattern = regexp.MustCompile(`^[0-9]{1,12}(\.[0-9]{1,12})?$`)
-
 func ValidToolPrice(value string) bool {
-	return toolPricePattern.MatchString(value)
+	return pricingpolicy.ValidAmount(value)
 }
 
 func validToolLimit(value, ceiling int64) bool {

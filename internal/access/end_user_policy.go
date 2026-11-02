@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/tyk-swe/olp/internal/limits"
+	"github.com/tyk-swe/olp/internal/pricingpolicy"
 )
 
 // AdmissionLimits is a complete limit set. Nil dimensions are unlimited.
@@ -84,7 +85,7 @@ func (policy AdmissionLimits) Validate() error {
 	for field, value := range map[string]*string{"daily_cost_limit": policy.DailyCostLimit, "monthly_cost_limit": policy.MonthlyCostLimit, "weekly_cost_limit": policy.WeeklyCostLimit} {
 		if value != nil {
 			amount := strings.TrimSpace(*value)
-			if !decimal.MatchString(amount) || !strings.ContainsAny(amount, "123456789") {
+			if !pricingpolicy.ValidAmount(amount) || !strings.ContainsAny(amount, "123456789") {
 				return Invalid(field, "Use a positive decimal amount with at most 12 integer and 12 fractional digits.")
 			}
 			*value = amount

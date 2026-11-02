@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"maps"
 	"net/http"
-	"regexp"
 	"slices"
 	"strings"
 	"time"
@@ -78,8 +77,6 @@ type keyInput struct {
 	BudgetGroupID *string `json:"budget_group_id"`
 	KeyPolicy
 }
-
-var decimal = regexp.MustCompile(`^[0-9]{1,12}(\.[0-9]{1,12})?$`)
 
 const maxAttributionKeys = 8
 

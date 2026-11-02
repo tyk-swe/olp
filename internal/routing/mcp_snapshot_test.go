@@ -7,9 +7,42 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/agentcontract"
 	"github.com/tyk-swe/olp/internal/guardrails"
+	"github.com/tyk-swe/olp/internal/usage"
 )
+
+func TestAmountSyntaxAcrossToolAgentRoutingCacheAndBudgets(t *testing.T) {
+	for _, tc := range []struct {
+		amount      string
+		valid       bool
+		budgetValid bool
+	}{
+		{"0", true, false}, {"1.25", true, true}, {"123456789012.123456789012", true, true},
+		{"1234567890123", false, false}, {"0.1234567890123", false, false},
+		{" 1 ", false, true}, {"1.", false, false}, {".1", false, false}, {"-1", false, false}, {"1e2", false, false},
+	} {
+		t.Run(tc.amount, func(t *testing.T) {
+			draft := agentcontract.Draft{ProjectID: mcpProject, Name: "agent", Agent: &agentcontract.Definition{
+				Protocol: "a2a-1.0.0", CardDigest: strings.Repeat("a", 64), PricingRevisionID: mcpRevision,
+				MaxCost: "999999999999.999999999999", MessagePrice: tc.amount,
+			}}
+			preference := Preferences{MaxCost: &tc.amount}
+			cache := usage.CacheEvidence{Result: "hit", AvoidedCost: tc.amount}
+			budgetAmount := tc.amount
+			budget := access.AdmissionLimits{DailyCostLimit: &budgetAmount}
+			agentErr, preferenceErr, cacheErr := draft.Validate("agent"), preference.Validate("preferences"), cache.Validate()
+			budgetErr := budget.Validate()
+			if ValidToolPrice(tc.amount) != tc.valid || (agentErr == nil) != tc.valid || (preferenceErr == nil) != tc.valid || (cacheErr == nil) != tc.valid {
+				t.Errorf("valid %t, agent %v, routing %v, cache %v", tc.valid, agentErr, preferenceErr, cacheErr)
+			}
+			if (budgetErr == nil) != tc.budgetValid || tc.budgetValid && budgetAmount != strings.TrimSpace(tc.amount) {
+				t.Errorf("budget valid %t, amount %q, error %v", tc.budgetValid, budgetAmount, budgetErr)
+			}
+		})
+	}
+}
 
 const (
 	mcpProject  = "0192cf87-d4ab-7f2e-a8b1-c2d3e4f50611"

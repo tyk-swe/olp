@@ -24,6 +24,7 @@ import (
 	"github.com/tyk-swe/olp/internal/cache"
 	"github.com/tyk-swe/olp/internal/limits"
 	pluginidentity "github.com/tyk-swe/olp/internal/plugins/identity"
+	"github.com/tyk-swe/olp/internal/pricingpolicy"
 	"github.com/tyk-swe/olp/internal/routeidentity"
 	"github.com/tyk-swe/olp/internal/upstream"
 )
@@ -450,7 +451,7 @@ func (p Predicate) validate(slug string, invalid func(string) error) error {
 // Validate checks spend caps as positive exact decimals.
 func (c CostLimits) Validate(field string) error {
 	for _, limit := range []*string{c.DailyCostLimit, c.MonthlyCostLimit} {
-		if limit != nil && (!decimal(*limit) || strings.Trim(*limit, "0.") == "") {
+		if limit != nil && (!pricingpolicy.ValidAmount(*limit) || strings.Trim(*limit, "0.") == "") {
 			return invalidValue(field, "Cost limits are positive decimals with at most 12 fractional digits")
 		}
 	}

@@ -9,14 +9,21 @@ const (
 
 func NormalizeAmount(value string) (string, bool) {
 	trimmed := strings.TrimSpace(value)
-	integer, fraction, hasFraction := strings.Cut(trimmed, ".")
-	if trimmed == "" || len(integer) < 1 || len(integer) > 12 || !decimalDigits(integer) {
-		return "", false
-	}
-	if hasFraction && (len(fraction) < 1 || len(fraction) > 12 || !decimalDigits(fraction)) {
+	if !ValidAmount(trimmed) {
 		return "", false
 	}
 	return trimmed, true
+}
+
+func ValidAmount(value string) bool {
+	integer, fraction, hasFraction := strings.Cut(value, ".")
+	if len(integer) < 1 || len(integer) > 12 || !decimalDigits(integer) {
+		return false
+	}
+	if hasFraction && (len(fraction) < 1 || len(fraction) > 12 || !decimalDigits(fraction)) {
+		return false
+	}
+	return true
 }
 
 func decimalDigits(value string) bool {
