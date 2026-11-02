@@ -47,9 +47,17 @@ func TestCloudBatchValidationAndProjection(t *testing.T) {
 		t.Fatal(err)
 	}
 	var projected map[string]any
-	if json.Unmarshal(response, &projected) != nil || projected["status"] != "succeeded" || projected["model"] != "route-model" ||
+	if json.Unmarshal(response, &projected) != nil || projected["status"] != "succeeded" || projected["completed_at"] == nil || projected["model"] != "route-model" ||
 		projected["input_uri"] != request.InputURI {
 		t.Fatalf("cloud batch projection=%s", response)
+	}
+	response, err = projectCloudBatchJob([]byte(`{"jobArn":"arn:example","status":"InProgress","lastModifiedTime":"2026-10-21T13:00:00Z"}`),
+		"cloud_batch_0123456789abcdef0123456789abcdef", "bedrock-batch-inference", "route-model", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if json.Unmarshal(response, &projected) != nil || projected["status"] != "running" || projected["completed_at"] != nil {
+		t.Fatalf("running cloud batch projection=%s", response)
 	}
 	if _, err := projectCloudBatchJob([]byte(`{"name":"projects/p/locations/us/batchPredictionJobs/id","state":"JOB_STATE_UNKNOWN"}`),
 		"cloud_batch_0123456789abcdef0123456789abcdef", "vertex-batch-prediction", "route", "", ""); err == nil {

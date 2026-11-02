@@ -33,23 +33,51 @@ type BedrockReader struct {
 	Egress *egress.Policy
 }
 
-func cloudState(dialect, state string) (string, bool) {
-	vertex := map[string]string{
-		"JOB_STATE_QUEUED": "queued", "JOB_STATE_PENDING": "queued", "JOB_STATE_RUNNING": "running",
-		"JOB_STATE_SUCCEEDED": "succeeded", "JOB_STATE_PARTIALLY_SUCCEEDED": "partially_succeeded",
-		"JOB_STATE_FAILED": "failed", "JOB_STATE_CANCELLING": "cancelling", "JOB_STATE_CANCELLED": "cancelled",
-		"JOB_STATE_EXPIRED": "expired", "JOB_STATE_PAUSED": "running", "JOB_STATE_UPDATING": "running",
-	}
-	bedrock := map[string]string{"Submitted": "queued", "Validating": "queued", "Scheduled": "queued", "InProgress": "running",
-		"Completed": "succeeded", "PartiallyCompleted": "partially_succeeded", "Failed": "failed", "Stopping": "cancelling", "Stopped": "cancelled", "Expired": "expired"}
+func CloudBatchStatus(dialect, state string) (string, bool) {
 	if dialect == "vertex-batch-prediction" {
-		v, ok := vertex[state]
-		return v, ok
+		switch state {
+		case "JOB_STATE_QUEUED", "JOB_STATE_PENDING":
+			return "queued", true
+		case "JOB_STATE_RUNNING", "JOB_STATE_PAUSED", "JOB_STATE_UPDATING":
+			return "running", true
+		case "JOB_STATE_SUCCEEDED":
+			return "succeeded", true
+		case "JOB_STATE_PARTIALLY_SUCCEEDED":
+			return "partially_succeeded", true
+		case "JOB_STATE_FAILED":
+			return "failed", true
+		case "JOB_STATE_CANCELLING":
+			return "cancelling", true
+		case "JOB_STATE_CANCELLED":
+			return "cancelled", true
+		case "JOB_STATE_EXPIRED":
+			return "expired", true
+		default:
+			return "", false
+		}
 	}
-	v, ok := bedrock[state]
-	return v, ok
+	switch state {
+	case "Submitted", "Validating", "Scheduled":
+		return "queued", true
+	case "InProgress":
+		return "running", true
+	case "Completed":
+		return "succeeded", true
+	case "PartiallyCompleted":
+		return "partially_succeeded", true
+	case "Failed":
+		return "failed", true
+	case "Stopping":
+		return "cancelling", true
+	case "Stopped":
+		return "cancelled", true
+	case "Expired":
+		return "expired", true
+	default:
+		return "", false
+	}
 }
-func cloudIsTerminal(status string) bool {
+func CloudBatchTerminal(status string) bool {
 	return status == "succeeded" || status == "partially_succeeded" || status == "failed" || status == "cancelled" || status == "expired"
 }
 
@@ -121,7 +149,7 @@ func cloudAdoptMetadata(settlement Settlement, snapshot BatchSnapshot) (json.Raw
 	} else {
 		_ = json.Unmarshal(root["status"], &rawState)
 	}
-	status, ok := cloudState(dialect, rawState)
+	status, ok := CloudBatchStatus(dialect, rawState)
 	if !ok {
 		return nil, "", ErrProviderConflict
 	}
@@ -254,12 +282,12 @@ func (r *VertexReader) Reconcile(ctx context.Context, settlement Settlement, tar
 			continue
 		}
 		id := name[strings.LastIndex(name, "/")+1:]
-		status, known := cloudState("vertex-batch-prediction", state)
+		status, known := CloudBatchStatus("vertex-batch-prediction", state)
 		if !known {
 			return Reconciliation{}, ErrProviderConflict
 		}
 		if id != "" {
-			snapshot := BatchSnapshot{ID: id, Status: state, Body: raw, Terminal: cloudIsTerminal(status)}
+			snapshot := BatchSnapshot{ID: id, Status: state, Body: raw, Terminal: CloudBatchTerminal(status)}
 			if stats := vertexCounts(job); stats != nil && snapshot.Terminal {
 				total := stats["successful"] + stats["failed"] + stats["incomplete"]
 				snapshot.Expected = &total
@@ -532,12 +560,12 @@ func (r *BedrockReader) Poll(ctx context.Context, settlement Settlement, target 
 	var arn, state string
 	_ = json.Unmarshal(job["jobArn"], &arn)
 	_ = json.Unmarshal(job["status"], &state)
-	projected, known := cloudState("bedrock-batch-inference", state)
+	projected, known := CloudBatchStatus("bedrock-batch-inference", state)
 	if !known || arn != *settlement.UpstreamID {
 		return BatchSnapshot{}, ErrProviderConflict
 	}
 	expected := int64(1)
-	snapshot := BatchSnapshot{ID: arn, Status: state, Body: body, Terminal: cloudIsTerminal(projected), Expected: &expected}
+	snapshot := BatchSnapshot{ID: arn, Status: state, Body: body, Terminal: CloudBatchTerminal(projected), Expected: &expected}
 	if snapshot.Terminal {
 		snapshot.OutputFileID = "manifest.json.out"
 	}
@@ -750,8 +778,8 @@ func vertexCounts(job map[string]json.RawMessage) map[string]int64 {
 	return out
 }
 
-func cloudKnown(dialect, state string) bool { _, ok := cloudState(dialect, state); return ok }
+func cloudKnown(dialect, state string) bool { _, ok := CloudBatchStatus(dialect, state); return ok }
 func cloudTerminal(dialect, state string) bool {
-	s, ok := cloudState(dialect, state)
-	return ok && cloudIsTerminal(s)
+	s, ok := CloudBatchStatus(dialect, state)
+	return ok && CloudBatchTerminal(s)
 }
