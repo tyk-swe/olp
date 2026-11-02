@@ -537,6 +537,8 @@ func (s *Server) validateDocument(ctx context.Context, q access.Queryer, doc *Do
 			unavailable[p.Configuration.ProfileRevision] = refusal
 		} else if err := p.Configuration.ValidateAndNormalize(s.Egress); err != nil {
 			return nil, err
+		} else {
+			doc.Providers[i].Configuration.Options.Commitment = p.Configuration.Options.Commitment
 		}
 		totalModels += len(p.Models)
 		if totalModels > maxModels {

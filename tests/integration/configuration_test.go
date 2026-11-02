@@ -131,6 +131,7 @@ func TestConfigurationPromotion(t *testing.T) {
 		}
 	}
 	document["pricing"].(map[string]any)["effective_at"] = time.Now().Add(-time.Minute).UTC().Format(time.RFC3339)
+	document["providers"].([]any)[0].(map[string]any)["configuration"].(map[string]any)["options"].(map[string]any)["commitment"] = map[string]any{"amount": " 300.50 ", "period": "day"}
 
 	destination := newAccessHarness(t)
 	destinationOwner := destination.owner()
@@ -148,6 +149,21 @@ func TestConfigurationPromotion(t *testing.T) {
 
 	planBody := map[string]any{"document": document}
 	planned := destination.want(destinationOwner, "POST", "/api/v1/configuration/plan", planBody, nil, 200)
+	canonical := map[string]any{}
+	canonicalJSON, marshalErr := json.Marshal(document)
+	if marshalErr != nil {
+		t.Fatal(marshalErr)
+	}
+	if err := json.Unmarshal(canonicalJSON, &canonical); err != nil {
+		t.Fatal(err)
+	}
+	canonical["providers"].([]any)[0].(map[string]any)["configuration"].(map[string]any)["options"].(map[string]any)["commitment"].(map[string]any)["amount"] = "300.50"
+	canonicalPlan := destination.want(destinationOwner, "POST", "/api/v1/configuration/plan", map[string]any{"document": canonical}, nil, 200)
+	plannedDigest, plannedOK := planned["digest"].(string)
+	canonicalDigest, canonicalOK := canonicalPlan["digest"].(string)
+	if !plannedOK || !canonicalOK || plannedDigest == "" || plannedDigest != canonicalDigest {
+		t.Fatal("equivalent commitment amounts must produce the same configuration digest", planned["digest"], canonicalPlan["digest"])
+	}
 	var bindingKey string
 	for _, item := range planned["blockers"].([]any) {
 		entry := item.(map[string]any)
@@ -207,6 +223,22 @@ func TestConfigurationPromotion(t *testing.T) {
 		t.Fatal("provider must be staged as a draft", providers)
 	}
 	providerID := promotedProvider["id"].(string)
+	promotedDocument := destination.want(destinationOwner, "GET", "/api/v1/configuration/export", nil, nil, 200)["document"].(map[string]any)
+	promotedOptions := promotedDocument["providers"].([]any)[0].(map[string]any)["configuration"].(map[string]any)["options"].(map[string]any)
+	if amount := promotedOptions["commitment"].(map[string]any)["amount"]; amount != "300.50" {
+		t.Fatal("promoted commitment must retain the normalized amount", amount)
+	}
+	if _, err := destination.Pool.Exec(t.Context(), `UPDATE olp.providers SET configuration=jsonb_set(configuration::jsonb, '{options,commitment,amount}', to_jsonb($2::text))::json WHERE id=$1`, providerID, " 300.50 "); err != nil {
+		t.Fatal(err)
+	}
+	providerDetail := destination.want(destinationOwner, "GET", "/api/v1/providers/"+providerID, nil, nil, 200)
+	detailOptions := providerDetail["configuration"].(map[string]any)["options"].(map[string]any)
+	if amount := detailOptions["commitment"].(map[string]any)["amount"]; amount != "300.50" {
+		t.Fatal("provider detail must normalize a stored commitment amount", amount)
+	}
+	if _, err := destination.Pool.Exec(t.Context(), `UPDATE olp.providers SET configuration=jsonb_set(configuration::jsonb, '{options,commitment,amount}', to_jsonb($2::text))::json WHERE id=$1`, providerID, "300.50"); err != nil {
+		t.Fatal(err)
+	}
 	models := destination.want(destinationOwner, "GET", "/api/v1/providers/"+providerID+"/models", nil, nil, 200)["items"].([]any)
 	if len(models) == 0 {
 		t.Fatal("staged provider must declare models", models)
