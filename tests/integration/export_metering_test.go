@@ -3,12 +3,20 @@
 package integration_test
 
 import (
+	"database/sql"
+	"encoding/json"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/shopspring/decimal"
+
+	"github.com/tyk-swe/olp/internal/export"
 )
 
 // postSink is the create-sink request idiom for this file.
@@ -153,6 +161,96 @@ func TestMeteringSinkManagement(t *testing.T) {
 	// A weak replacement credential is refused too.
 	h.want(owner, "PATCH", "/api/v1/observability/sinks/"+stripeID,
 		map[string]any{"credential": map[string]any{"api_key": "pk_live_weak"}}, etagHeader(stripe), 422)
+
+	t.Run("metering values match delivery", func(t *testing.T) {
+		assertMeteringValuesMatchDelivery(t, h, project)
+	})
+}
+
+func assertMeteringValuesMatchDelivery(t *testing.T, h *accessHarness, project string) {
+	t.Helper()
+	delivered := make(chan string, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := r.ParseForm(); err != nil {
+			t.Error(err)
+		}
+		delivered <- r.FormValue("payload[value]")
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+	sender := export.NewSender(loopbackPolicy(), os.Getenv)
+	credential := []byte(`{"api_key":"rk_test_0123456789"}`)
+	cases := []struct {
+		name    string
+		kind    string
+		payload json.RawMessage
+	}{
+		{name: "default charge", payload: json.RawMessage(`{"charge":"3.25"}`)},
+		{name: "cost", kind: "cost", payload: json.RawMessage(`{"cost":"1.125"}`)},
+		{name: "input tokens", kind: "input_tokens", payload: json.RawMessage(`{"input_tokens":12}`)},
+		{name: "output tokens", kind: "output_tokens", payload: json.RawMessage(`{"output_tokens":7}`)},
+		{name: "total tokens", kind: "total_tokens", payload: json.RawMessage(`{"input_tokens":12,"output_tokens":7}`)},
+		{name: "partial total", kind: "total_tokens", payload: json.RawMessage(`{"output_tokens":7}`)},
+		{name: "missing total", kind: "total_tokens", payload: json.RawMessage(`{}`)},
+		{name: "zero charge", kind: "charge", payload: json.RawMessage(`{"charge":"0"}`)},
+		{name: "requests", kind: "requests", payload: json.RawMessage(`{}`)},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			settings, settingsErr := json.Marshal(struct {
+				EventName string            `json:"event_name"`
+				Value     string            `json:"value,omitempty"`
+				Customers map[string]string `json:"customers"`
+			}{EventName: "olp.attempt", Value: tc.kind, Customers: map[string]string{project: "cus_test"}})
+			if settingsErr != nil {
+				t.Fatal(settingsErr)
+			}
+			var expected sql.NullString
+			if err := h.Pool.QueryRow(t.Context(), `SELECT olp.metering_value($1::jsonb, $2::jsonb)::text`, string(settings), string(tc.payload)).Scan(&expected); err != nil {
+				t.Fatal(err)
+			}
+			data, dataErr := json.Marshal(struct {
+				SourceID   string          `json:"source_id"`
+				ProjectID  string          `json:"project_id"`
+				OccurredAt time.Time       `json:"occurred_at"`
+				Data       json.RawMessage `json:"data"`
+			}{SourceID: uuid.NewString(), ProjectID: project, OccurredAt: time.Now().UTC(), Data: tc.payload})
+			if dataErr != nil {
+				t.Fatal(dataErr)
+			}
+			destination := export.Destination{ID: uuid.NewString(), Type: "stripe_meter", URL: server.URL, Format: "stripe", Settings: settings}
+			record := export.Record{ID: uuid.NewString(), Stream: "metering", At: time.Now().UTC(), Data: data}
+			deliveryErr := sender.Send(t.Context(), destination, credential, record)
+			if !expected.Valid {
+				if export.DeliveryErrorCode(deliveryErr) != "unmapped" {
+					t.Fatalf("missing SQL value, delivery error %v", deliveryErr)
+				}
+				return
+			}
+			amount, amountErr := decimal.NewFromString(expected.String)
+			if amountErr != nil {
+				t.Fatal(amountErr)
+			}
+			if !amount.IsPositive() {
+				if export.DeliveryErrorCode(deliveryErr) != "unmapped" {
+					t.Fatalf("SQL value %s, delivery error %v", amount, deliveryErr)
+				}
+				return
+			}
+			if deliveryErr != nil {
+				t.Fatal(deliveryErr)
+			}
+			select {
+			case value := <-delivered:
+				actual, actualErr := decimal.NewFromString(value)
+				if actualErr != nil || !actual.Equal(amount) {
+					t.Fatalf("delivered %s, SQL value %s, error %v", actual, amount, actualErr)
+				}
+			default:
+				t.Fatal("delivery succeeded without a metering request")
+			}
+		})
+	}
 }
 
 // Metering formats exist but never carry payloads, so capture cannot
