@@ -210,7 +210,7 @@ func liftRequest(source oif.Request, id string) (Request, error) {
 					return r, operations.Invalid("output_dtype", "The native vector dtype is not supported by this dialect.")
 				}
 			}
-			if v, present := root.Lookup("input_type"); present && !operations.Optional(v) && !slices.Contains([]string{"query", "document"}, operations.String(v)) {
+			if v, present := root.Lookup("input_type"); present && !operations.Optional(v) && !slices.Contains(voyageInputTypes(), operations.String(v)) {
 				return r, operations.Invalid("input_type", "Use query, document or native null.")
 			}
 			if v, present := root.Lookup("truncation"); present && v.Kind() != oif.Boolean {
