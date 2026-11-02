@@ -10,6 +10,7 @@ import (
 	"github.com/tyk-swe/olp/internal/codemode"
 	"github.com/tyk-swe/olp/internal/codewire"
 	"github.com/tyk-swe/olp/internal/oif"
+	"github.com/tyk-swe/olp/internal/protocols/wire"
 )
 
 type Observation = codemode.Observation
@@ -48,7 +49,7 @@ func Observe(body []byte, unary bool) Observation {
 		}
 		return Observation{Terminal: true, Status: status, RetryAfter: headers.Values("Retry-After"), Outcome: outcome, Allowance: Allowance(headers, now)}
 	}
-	terminal := kind == "response.completed" || kind == "response.incomplete" || kind == "response.failed"
+	terminal := wire.IsTerminalResponseEvent(kind)
 	successful := kind == "response.completed"
 	outcomeKind := strings.TrimPrefix(kind, "response.")
 	if terminal {
@@ -56,7 +57,7 @@ func Observe(body []byte, unary bool) Observation {
 	}
 	if unary {
 		status, _ := field(root, "status").Text()
-		terminal = status == "completed" || status == "incomplete" || status == "failed"
+		terminal = wire.IsTerminalResponseEvent("response." + status)
 		successful = status == "completed"
 		outcomeKind = status
 		object, _ := field(root, "object").Text()

@@ -98,3 +98,15 @@ func TestObserveReadsTerminalUsageAsSubsets(t *testing.T) {
 		t.Fatal("non-terminal event settled as terminal")
 	}
 }
+
+func TestObserveAgreesAcrossUnaryAndStreamResponses(t *testing.T) {
+	for _, status := range []string{"completed", "incomplete", "failed", "cancelled", "in_progress"} {
+		t.Run(status, func(t *testing.T) {
+			unary := Observe([]byte(`{"status":"`+status+`","id":"resp-1"}`), true)
+			stream := Observe([]byte(`{"type":"response.`+status+`","response":{"id":"resp-1"}}`), false)
+			if unary.Terminal != stream.Terminal || unary.Successful != stream.Successful || unary.ResponseID != stream.ResponseID {
+				t.Fatalf("unary and stream observations differ: unary=%+v stream=%+v", unary, stream)
+			}
+		})
+	}
+}
