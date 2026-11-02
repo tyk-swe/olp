@@ -15,6 +15,10 @@ import (
 	"github.com/tyk-swe/olp/internal/routing"
 )
 
+func retainedSubmissionFields() [2]string {
+	return [2]string{resources.RetainedSubmissionMarkerField, "olp_submission_digest"}
+}
+
 func retainedGeminiFileID(raw string) (string, error) {
 	if validGeminiFileID(raw) {
 		return raw, nil
@@ -82,7 +86,7 @@ func retainedInputMetadata(p *pin, route *routing.Route, owner string, e retaine
 		if metadata.Kind() != oif.Object {
 			return nil, errors.New("metadata must be an object")
 		}
-		for _, field := range []string{"olp_submission_id", "olp_submission_digest"} {
+		for _, field := range retainedSubmissionFields() {
 			if _, reserved := metadata.Lookup(field); reserved {
 				return nil, errors.New("gateway submission metadata is reserved for resource correlation")
 			}
@@ -103,7 +107,7 @@ func retainedInputMetadata(p *pin, route *routing.Route, owner string, e retaine
 			if labels.Kind() != oif.Object {
 				return nil, resources.ErrContract
 			}
-			for _, name := range []string{"olp_submission_id", "olp_submission_digest"} {
+			for _, name := range retainedSubmissionFields() {
 				if _, reserved := labels.Lookup(name); reserved {
 					return nil, errors.New("gateway submission labels are reserved")
 				}
@@ -383,10 +387,10 @@ func retainedCorrelationBody(e retainedapi.Endpoint, r *resources.Resource, body
 			return nil, err
 		}
 		labels, present := source.Root().Lookup("labels")
-		change := oif.Change{Pointer: "/labels/olp_submission_id", Value: strconv.Quote(r.UUID.String()), Origin: oif.ResourceBinding, Reason: "durable Vertex tuning correlation"}
+		change := oif.Change{Pointer: "/labels/" + resources.RetainedSubmissionMarkerField, Value: strconv.Quote(r.UUID.String()), Origin: oif.ResourceBinding, Reason: "durable Vertex tuning correlation"}
 		if !present || labels.Kind() == oif.Null {
 			change.Pointer = "/labels"
-			change.Value = `{"olp_submission_id":` + strconv.Quote(r.UUID.String()) + `}`
+			change.Value = `{` + strconv.Quote(resources.RetainedSubmissionMarkerField) + `:` + strconv.Quote(r.UUID.String()) + `}`
 		} else if labels.Kind() != oif.Object {
 			return nil, resources.ErrContract
 		}
@@ -404,14 +408,14 @@ func retainedCorrelationBody(e retainedapi.Endpoint, r *resources.Resource, body
 	if err != nil {
 		return nil, err
 	}
-	marker := oif.Change{Pointer: "/metadata/olp_submission_id", Value: strconv.Quote(r.UUID.String()), Origin: oif.ResourceBinding, Reason: "durable retained submission correlation"}
+	marker := oif.Change{Pointer: "/metadata/" + resources.RetainedSubmissionMarkerField, Value: strconv.Quote(r.UUID.String()), Origin: oif.ResourceBinding, Reason: "durable retained submission correlation"}
 	metadata, present := source.Root().Lookup("metadata")
 	if e.Action == "update" && !present {
 		return body, nil
 	}
 	if !present || metadata.Kind() == oif.Null {
 		marker.Pointer = "/metadata"
-		marker.Value = `{"olp_submission_id":` + strconv.Quote(r.UUID.String()) + `}`
+		marker.Value = `{` + strconv.Quote(resources.RetainedSubmissionMarkerField) + `:` + strconv.Quote(r.UUID.String()) + `}`
 	} else if metadata.Kind() != oif.Object {
 		return nil, resources.ErrContract
 	}

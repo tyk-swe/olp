@@ -447,6 +447,22 @@ func TestRetainedCorrelationCannotBeSuppliedOrReplaced(t *testing.T) {
 		if err != nil || !strings.Contains(string(body), r.UUID.String()) || !strings.Contains(string(body), `"user":"value"`) {
 			t.Fatalf("correlation=%s %v", body, err)
 		}
+		var object struct {
+			Metadata map[string]string `json:"metadata"`
+		}
+		if err := json.Unmarshal(body, &object); err != nil || object.Metadata["olp_submission_id"] != r.UUID.String() {
+			t.Fatalf("correlation marker missing from metadata: %s %v", body, err)
+		}
+	}
+	body, err := retainedCorrelationBody(retainedapi.Endpoint{Family: e.Family, Action: "create"}, r, []byte(`{}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var object struct {
+		Metadata map[string]string `json:"metadata"`
+	}
+	if err := json.Unmarshal(body, &object); err != nil || object.Metadata["olp_submission_id"] != r.UUID.String() {
+		t.Fatalf("correlation marker missing from new metadata: %s %v", body, err)
 	}
 }
 
@@ -484,22 +500,24 @@ func TestRetainedNativeMethodRefusals(t *testing.T) {
 func TestRetainedVertexUsesNativeLabelsForCorrelation(t *testing.T) {
 	r := &resources.Resource{UUID: uuid.New()}
 	e := retainedapi.Endpoint{Family: retainedapi.Family{Kind: "vertex_tuning_job", Operation: "fine_tuning"}, Action: "create"}
-	body, err := retainedCorrelationBody(e, r, []byte(`{"baseModel":"m","labels":{"tenant_id":"customer"}}`))
-	if err != nil {
-		t.Fatal(err)
-	}
-	document, _ := oif.ParseJSON(body, oif.Limits{})
-	labels, _ := document.Root().Lookup("labels")
-	marker, _ := labels.Lookup("olp_submission_id")
-	id, _ := marker.Text()
-	if id != r.UUID.String() {
-		t.Fatalf("missing native label: %s", body)
-	}
-	if _, err = retainedapi.Rewrite(document, nil, func(string, string) (string, error) {
-		t.Fatal("literal labels became resource authority")
-		return "", nil
-	}); err != nil {
-		t.Fatal(err)
+	for _, input := range []string{`{"baseModel":"m"}`, `{"baseModel":"m","labels":{"tenant_id":"customer"}}`} {
+		body, err := retainedCorrelationBody(e, r, []byte(input))
+		if err != nil {
+			t.Fatal(err)
+		}
+		document, _ := oif.ParseJSON(body, oif.Limits{})
+		labels, _ := document.Root().Lookup("labels")
+		marker, _ := labels.Lookup("olp_submission_id")
+		id, _ := marker.Text()
+		if id != r.UUID.String() {
+			t.Fatalf("missing native label: %s", body)
+		}
+		if _, err = retainedapi.Rewrite(document, nil, func(string, string) (string, error) {
+			t.Fatal("literal labels became resource authority")
+			return "", nil
+		}); err != nil {
+			t.Fatal(err)
+		}
 	}
 }
 

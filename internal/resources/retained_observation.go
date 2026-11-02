@@ -15,7 +15,10 @@ import (
 	"github.com/tyk-swe/olp/internal/usage"
 )
 
-const DefaultRetainedContainerMemoryTier = "1g"
+const (
+	DefaultRetainedContainerMemoryTier = "1g"
+	RetainedSubmissionMarkerField      = "olp_submission_id"
+)
 
 func ValidRetainedContainerMemoryTier(tier string) bool {
 	switch tier {
