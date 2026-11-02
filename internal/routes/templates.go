@@ -378,7 +378,7 @@ func (s *Server) generate(ctx context.Context, tx pgx.Tx, t *template, m certifi
 		Slug: result.RouteSlug, Operations: m.operations, OverallTimeoutMS: t.OverallTimeoutMS, MaxAttempts: t.MaxAttempts,
 		Targets: []TargetInput{{ProviderModelID: &m.id, Weight: 1, TimeoutMS: t.OverallTimeoutMS}}, Fidelity: t.Fidelity, ProjectID: t.ProjectID,
 	}
-	targets, err := ValidateDraftInput(ctx, tx, &input, t.ProjectID, nil)
+	targets, err := ValidateAndNormalizeDraftInput(ctx, tx, &input, t.ProjectID, nil)
 	if refusal, ok := refusalCode(err); ok {
 		return result.skip(refusal), nil
 	}
@@ -440,7 +440,7 @@ func (s *Server) join(ctx context.Context, tx pgx.Tx, draftID string, m certifie
 		Slug: d.Slug, Operations: d.Operations, OverallTimeoutMS: d.OverallTimeoutMS, MaxAttempts: d.MaxAttempts,
 		Targets: []TargetInput{{ProviderModelID: &m.id, Weight: 1, TimeoutMS: d.OverallTimeoutMS}}, Fidelity: d.Fidelity,
 	}
-	added, err := ValidateDraftInput(ctx, tx, &input, d.ProjectID, nil)
+	added, err := ValidateAndNormalizeDraftInput(ctx, tx, &input, d.ProjectID, nil)
 	if refusal, ok := refusalCode(err); ok {
 		return result.skip(refusal), nil
 	}

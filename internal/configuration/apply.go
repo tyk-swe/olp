@@ -233,7 +233,7 @@ func (s *Server) applyDocument(ctx context.Context, tx pgx.Tx, p access.Principa
 			providerID := providerIDs[strings.ToLower(t.Provider)]
 			input.Targets = append(input.Targets, routes.TargetInput{ProviderID: &providerID, ProviderModel: &t.ProviderModel, Priority: t.Priority, Weight: t.Weight, TimeoutMS: t.TimeoutMS, Tags: t.Tags, Shadow: t.Shadow})
 		}
-		targets, err := routes.ValidateDraftInput(ctx, tx, &input, projectID, nil)
+		targets, err := routes.ValidateAndNormalizeDraftInput(ctx, tx, &input, projectID, nil)
 		if err != nil {
 			return err
 		}
