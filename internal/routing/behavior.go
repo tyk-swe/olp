@@ -340,7 +340,7 @@ func (b Behavior) Validate(slug string, tagged func(string) bool) error {
 	}
 	for class, rule := range b.Retry {
 		if !slices.Contains(RetryClasses, class) {
-			return invalidValue("retry", "Retries apply to connect, timeout, rate_limit and upstream_server failures")
+			return invalidValue("retry", "Retries apply to "+strings.Join(RetryClasses, ", ")+" failures")
 		}
 		if rule.MaxRetries < 1 || rule.MaxRetries > maxRetries || rule.BaseBackoffMS < 1 || rule.MaxBackoffMS < rule.BaseBackoffMS || rule.MaxBackoffMS > maxBackoffMS {
 			return invalidValue("retry", "Each retry rule allows 1 to 10 retries with a base backoff no larger than its maximum of at most 60000 ms")
@@ -412,8 +412,9 @@ func (p Predicate) validate(slug string, invalid func(string) error) error {
 	if len(p.Operations) > maxPredicateList || !distinct(p.Operations) {
 		return invalid("operations are distinct")
 	}
-	if len(p.Modalities) > 0 && !distinctMembers(p.Modalities, protocols.RequestModalities()) {
-		return invalid("modalities are distinct among text, image, audio, video and file")
+	modalities := protocols.RequestModalities()
+	if len(p.Modalities) > 0 && !distinctMembers(p.Modalities, modalities) {
+		return invalid("modalities must be distinct and one of " + strings.Join(modalities, ", "))
 	}
 	if len(p.ReasoningEffort) > maxPredicateList || !distinct(p.ReasoningEffort) {
 		return invalid("reasoning efforts are distinct")
