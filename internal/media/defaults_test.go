@@ -2,6 +2,7 @@ package media
 
 import (
 	"encoding/json"
+	"slices"
 	"testing"
 
 	"github.com/tyk-swe/olp/internal/connectors"
@@ -39,6 +40,62 @@ func TestConfiguredMediaRejectsUnrepresentableDefaultsAndCollisions(t *testing.T
 				t.Fatalf("unresolved default admitted: %+v", call)
 			}
 		})
+	}
+}
+
+func TestPublishedDefaultTypesMatchAcceptedValues(t *testing.T) {
+	profile, err := connectors.LookupProfile("openai-chat", "1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, test := range []struct {
+		operation, name, kind, valid, invalid string
+	}{
+		{"generation", "temperature", "number", `0.5`, `true`},
+		{"generation", "max_tokens", "integer", `8`, `"wrong"`},
+		{"generation", "parallel_tool_calls", "boolean", `true`, `1`},
+		{"generation", "tools", "array", `[]`, `{}`},
+		{"generation", "response_format", "object", `{}`, `[]`},
+		{OpSpeech, "response_format", "string", `"text"`, `{}`},
+		{OpTranscription, "timestamp_granularities", "array", `["word"]`, ""},
+	} {
+		t.Run(test.operation+"/"+test.name, func(t *testing.T) {
+			var schema struct {
+				Properties struct {
+					Values struct {
+						Properties map[string]struct {
+							Type []string `json:"type"`
+						} `json:"properties"`
+					} `json:"values"`
+				} `json:"properties"`
+			}
+			if err := json.Unmarshal(profile.DefaultSchemas[test.operation], &schema); err != nil {
+				t.Fatal(err)
+			}
+			if types := schema.Properties.Values.Properties[test.name].Type; !slices.Contains(types, test.kind) {
+				t.Fatalf("schema types %v do not include %s for accepted value %s", types, test.kind, test.valid)
+			}
+			cfg := mediaDefaultsConfig(t, test.operation, map[string]json.RawMessage{test.name: json.RawMessage(test.valid)}, nil)
+			if err := cfg.ValidateProfile(); err != nil {
+				t.Fatalf("schema-compatible default rejected: %v", err)
+			}
+			if test.invalid == "" {
+				return
+			}
+			invalidCfg := mediaDefaultsConfig(t, test.operation, map[string]json.RawMessage{test.name: json.RawMessage(test.invalid)}, nil)
+			if err := invalidCfg.ValidateProfile(); err == nil {
+				t.Fatalf("default with incompatible type accepted: %s", test.invalid)
+			}
+		})
+	}
+}
+
+func TestNativeDefaultsPreserveUnrelatedControlNames(t *testing.T) {
+	cfg := mediaDefaultsConfig(t, "generation", nil, map[string]json.RawMessage{
+		"timestamp_granularities": json.RawMessage(`{"native_extension":true}`),
+	})
+	if err := cfg.ValidateProfile(); err != nil {
+		t.Fatalf("native extension rejected: %v", err)
 	}
 }
 
