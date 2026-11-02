@@ -10,8 +10,60 @@ import (
 
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/routeidentity"
+	"github.com/tyk-swe/olp/internal/routing"
+	"github.com/tyk-swe/olp/internal/upstream"
 	"github.com/tyk-swe/olp/internal/usage"
 )
+
+func TestRouteFailurePoliciesAgreeWithManagementContract(t *testing.T) {
+	raw, err := os.ReadFile("../../../openapi/management.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var document struct {
+		Components struct {
+			Schemas map[string]struct {
+				PropertyNames struct {
+					Enum []string `json:"enum"`
+				} `json:"propertyNames"`
+			} `json:"schemas"`
+		} `json:"components"`
+	}
+	if err := json.Unmarshal(raw, &document); err != nil {
+		t.Fatal(err)
+	}
+	retries := document.Components.Schemas["RouteRetry"].PropertyNames.Enum
+	if len(retries) == 0 {
+		t.Fatal("contract declares no retry classes")
+	}
+	fallbacks := openAPIEnum(t, "FallbackCondition")
+	classes := []string{
+		string(upstream.Connect), string(upstream.Timeout), string(upstream.RateLimit), string(upstream.ServerError),
+		string(upstream.ClientError), string(upstream.Credential), string(upstream.Protocol), string(upstream.Cancelled),
+		string(upstream.ContextWindow), string(upstream.ContentFilter), string(upstream.Ambiguous),
+		routing.FallbackExhausted, routing.FallbackBudget, "unknown",
+	}
+	for _, tc := range []struct {
+		name     string
+		declared []string
+		validate func(string) error
+	}{
+		{"retry", retries, func(value string) error {
+			return (routing.Behavior{Retry: routing.Retry{value: {MaxRetries: 1, BaseBackoffMS: 1, MaxBackoffMS: 1}}}).Validate("source", nil)
+		}},
+		{"fallback", fallbacks, func(value string) error {
+			return (routing.Behavior{Fallbacks: []routing.Fallback{{Route: "backup", On: []string{value}}}}).Validate("source", nil)
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			for _, value := range append(slices.Clone(tc.declared), classes...) {
+				if err := tc.validate(value); (err == nil) != slices.Contains(tc.declared, value) {
+					t.Errorf("contract and route validation disagree for %q: %v", value, err)
+				}
+			}
+		})
+	}
+}
 
 func TestRouteNamesAgreeWithManagementContract(t *testing.T) {
 	raw, err := os.ReadFile("../../../openapi/management.json")
