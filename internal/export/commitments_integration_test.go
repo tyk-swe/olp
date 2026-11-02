@@ -21,7 +21,7 @@ func commitmentRows(t *testing.T, r *dayResult) []map[string]string {
 			continue
 		}
 		data := mustGunzip(t, obj.body)
-		report, err := focusspec.Validate(bytes.NewReader(data), FocusCriteria)
+		report, err := focusspec.Validate(bytes.NewReader(data), focusCriteria())
 		if err != nil || !report.OK() {
 			t.Fatalf("FOCUS validation: %v %+v", err, report)
 		}
