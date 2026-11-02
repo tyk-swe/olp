@@ -20,7 +20,7 @@ import (
 
 func TestNativeMCPExecutableNamesAgreeWithDiscovery(t *testing.T) {
 	dir := t.TempDir()
-	tier := plugins.NewUnconfined(dir, plugins.DefaultLimits, nil)
+	tier := plugins.NewUnconfined(dir, plugins.DefaultLimits(), nil)
 	for _, tc := range []struct {
 		name  string
 		valid bool

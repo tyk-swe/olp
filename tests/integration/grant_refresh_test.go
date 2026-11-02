@@ -34,14 +34,14 @@ import (
 func grantRefresher(t *testing.T, h *accessHarness) *grants.Refresher {
 	t.Helper()
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
-	pluginRuntime, err := plugins.NewRuntime(t.Context(), plugins.Interpreted, plugins.DefaultLimits, log)
+	pluginRuntime, err := plugins.NewRuntime(t.Context(), plugins.Interpreted, plugins.DefaultLimits(), log)
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { pluginRuntime.Close(context.Background()) })
 	var unconfined *plugins.Unconfined
 	if h.UnconfinedDir != "" {
-		unconfined = plugins.NewUnconfined(h.UnconfinedDir, plugins.DefaultLimits, log)
+		unconfined = plugins.NewUnconfined(h.UnconfinedDir, plugins.DefaultLimits(), log)
 	}
 	host := plugins.NewHost(pluginRuntime, unconfined, h.Pool)
 	t.Cleanup(func() { host.Close(context.Background()) })

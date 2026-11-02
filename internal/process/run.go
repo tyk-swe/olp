@@ -275,7 +275,7 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 		}
 		var unconfined *plugins.Unconfined
 		if c.UnconfinedPluginDir != "" {
-			unconfined = plugins.NewUnconfined(c.UnconfinedPluginDir, plugins.DefaultLimits, log)
+			unconfined = plugins.NewUnconfined(c.UnconfinedPluginDir, plugins.DefaultLimits(), log)
 		}
 		// Gateways and control's probes run signing hooks per upstream
 		// request, and unconfined plugins may carry the requests themselves,
@@ -286,7 +286,7 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 		if c.Mode == config.Worker {
 			engine = plugins.Interpreted
 		}
-		hostRuntime, err := plugins.NewRuntime(startup, engine, plugins.DefaultLimits, log)
+		hostRuntime, err := plugins.NewRuntime(startup, engine, plugins.DefaultLimits(), log)
 		if err != nil {
 			return err
 		}
@@ -452,7 +452,7 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 			control.NotificationsActive = true
 			// Installing reads a module's manifest once, which the
 			// interpreter is ready to do several times sooner.
-			pluginRuntime, err := plugins.NewRuntime(startup, plugins.Interpreted, plugins.DefaultLimits, log)
+			pluginRuntime, err := plugins.NewRuntime(startup, plugins.Interpreted, plugins.DefaultLimits(), log)
 			if err != nil {
 				return err
 			}
