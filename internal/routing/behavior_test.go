@@ -1,9 +1,11 @@
 package routing
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/google/uuid"
+	"github.com/tyk-swe/olp/internal/protocols/wire"
 )
 
 func TestGatewayToolExecutionBehaviorValidatesAndRoundTrips(t *testing.T) {
@@ -98,6 +100,28 @@ func TestBehaviorValidationRefusesMalformedDeclarations(t *testing.T) {
 	}
 	if b, err := DecodeBehavior([]byte(`{}`)); err != nil || !b.IsZero() {
 		t.Fatalf("empty behavior: %+v %v", b, err)
+	}
+}
+
+func TestModalitySelectorsAcceptAndMatchRequestFeatures(t *testing.T) {
+	request, err := wire.FromFields(wire.Gemini, "route", false, map[string]json.RawMessage{
+		"contents": json.RawMessage(`[{"role":"user","parts":[{"text":"hello"},{"inlineData":{"mimeType":"image/png","data":"YQ=="}},{"inlineData":{"mimeType":"audio/wav","data":"YQ=="}},{"inlineData":{"mimeType":"video/mp4","data":"YQ=="}},{"inlineData":{"mimeType":"application/pdf","data":"YQ=="}}]}]`),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	features := DescribeRequest("generation", request, nil)
+	for _, modality := range []string{"text", "image", "audio", "video", "file"} {
+		t.Run(modality, func(t *testing.T) {
+			predicate := Predicate{Modalities: []string{modality}}
+			behavior := Behavior{Selectors: []Selector{{ID: "media", When: predicate, Route: "media-route"}}}
+			if err := behavior.Validate("route", func(string) bool { return false }); err != nil {
+				t.Fatalf("selector rejected: %v", err)
+			}
+			if !predicate.Matches(*features) {
+				t.Fatalf("selector did not match request features %+v", features)
+			}
+		})
 	}
 }
 

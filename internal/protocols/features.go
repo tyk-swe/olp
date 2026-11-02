@@ -20,12 +20,15 @@ type Features struct {
 	ReasoningEffort string
 }
 
-var modalities = []string{"text", "image", "audio", "video", "file"}
+func RequestModalities() []string {
+	return []string{"text", "image", "audio", "video", "file"}
+}
 
 // RequestFeatures reads the features of a generation request. A request the
 // canonical form cannot represent reports what its raw fields show.
 func RequestFeatures(r *wire.Request) Features {
 	var f Features
+	modalities := RequestModalities()
 	fields := r.Document()
 	f.Tools = len(arr(fields["tools"])) > 0 || len(arr(fields["functions"])) > 0
 	f.StructuredOutput = structured(fields["response_format"])

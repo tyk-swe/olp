@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/tyk-swe/olp/internal/protocols"
 	"github.com/tyk-swe/olp/internal/protocols/wire"
 
 	"github.com/tyk-swe/olp/internal/bodylimit"
@@ -70,8 +71,6 @@ var (
 	selectorID   = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,62}$`)
 	targetTag    = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,31}$`)
 	effortName   = regexp.MustCompile(`^[a-z]{1,16}$`)
-	// Modalities are the kinds of input a request can carry.
-	Modalities = []string{"text", "image", "audio", "video", "file"}
 )
 
 // Behavior is the adaptive routing a route revision declares beyond its
@@ -413,7 +412,7 @@ func (p Predicate) validate(slug string, invalid func(string) error) error {
 	if len(p.Operations) > maxPredicateList || !distinct(p.Operations) {
 		return invalid("operations are distinct")
 	}
-	if len(p.Modalities) > 0 && !distinctMembers(p.Modalities, Modalities) {
+	if len(p.Modalities) > 0 && !distinctMembers(p.Modalities, protocols.RequestModalities()) {
 		return invalid("modalities are distinct among text, image, audio, video and file")
 	}
 	if len(p.ReasoningEffort) > maxPredicateList || !distinct(p.ReasoningEffort) {
