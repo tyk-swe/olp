@@ -8,26 +8,18 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/tyk-swe/olp/internal/priority"
 )
 
-// Admission priority classes, highest first. Dequeueing is weighted fair
-// across them, 8:4:2:1, so load slows a lower class but never starves it.
 const (
-	ClassCritical = iota
-	ClassHigh
-	ClassNormal
-	ClassLow
-	classCount
+	ClassNormal = priority.Normal
+	classCount  = priority.Count
 )
-
-// ClassNames names the priority classes in order.
-var ClassNames = [classCount]string{"critical", "high", "normal", "low"}
-
-var classWeights = [classCount]int{8, 4, 2, 1}
 
 // ClassOf returns the class a priority names; any other name is normal.
 func ClassOf(name string) int {
-	if class := slices.Index(ClassNames[:], name); class >= 0 {
+	if class := priority.Rank(name); class >= 0 {
 		return class
 	}
 	return ClassNormal
@@ -165,12 +157,13 @@ func (q *queue) handoff() bool {
 // every line is empty. Callers hold mu.
 func (q *queue) next() int {
 	best, total := -1, 0
+	classes := priority.Classes()
 	for class := range classCount {
 		if len(q.lines[class]) == 0 {
 			continue
 		}
-		q.credit[class] += classWeights[class]
-		total += classWeights[class]
+		q.credit[class] += classes[class].Weight
+		total += classes[class].Weight
 		if best < 0 || q.credit[class] > q.credit[best] {
 			best = class
 		}
@@ -218,16 +211,16 @@ func (q *queue) metrics(body *strings.Builder) {
 	}
 	q.mu.Unlock()
 	body.WriteString("# HELP olp_admission_queue_depth Inference requests waiting in the admission queue.\n# TYPE olp_admission_queue_depth gauge\n")
-	for class, name := range ClassNames {
-		fmt.Fprintf(body, "olp_admission_queue_depth{class=%q} %d\n", name, depth[class])
+	for class, priorityClass := range priority.Classes() {
+		fmt.Fprintf(body, "olp_admission_queue_depth{class=%q} %d\n", priorityClass.Name, depth[class])
 	}
 	body.WriteString("# HELP olp_admission_queue_wait_seconds Time admitted requests spent in the admission queue.\n# TYPE olp_admission_queue_wait_seconds summary\n")
-	for class, name := range ClassNames {
+	for class, priorityClass := range priority.Classes() {
 		fmt.Fprintf(body, "olp_admission_queue_wait_seconds_sum{class=%q} %g\nolp_admission_queue_wait_seconds_count{class=%q} %d\n",
-			name, time.Duration(q.waitNS[class].Load()).Seconds(), name, q.waits[class].Load())
+			priorityClass.Name, time.Duration(q.waitNS[class].Load()).Seconds(), priorityClass.Name, q.waits[class].Load())
 	}
 	body.WriteString("# HELP olp_admission_queue_rejections_total Queued inference requests refused when their queue timeout or route deadline passed.\n# TYPE olp_admission_queue_rejections_total counter\n")
-	for class, name := range ClassNames {
-		fmt.Fprintf(body, "olp_admission_queue_rejections_total{class=%q} %d\n", name, q.expired[class].Load())
+	for class, priorityClass := range priority.Classes() {
+		fmt.Fprintf(body, "olp_admission_queue_rejections_total{class=%q} %d\n", priorityClass.Name, q.expired[class].Load())
 	}
 }
