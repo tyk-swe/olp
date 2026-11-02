@@ -32,15 +32,11 @@ func batchLineOperation(source oif.Document) (string, *Error) {
 		param := "endpoint"
 		return "", invalidRequest("unsupported_parameter", "The batch endpoint must be a supported operation.", &param)
 	}
-	switch wire.CanonicalBatchEndpoint(endpoint) {
-	case "/v1/chat/completions", "/v1/responses", "/v1/completions":
-		return "generation", nil
-	case "/v1/embeddings":
-		return "embeddings", nil
-	default:
-		param := "endpoint"
-		return "", invalidRequest("unsupported_parameter", "The batch endpoint must be a supported operation.", &param)
+	if operation := wire.BatchLineOperation(endpoint); operation != "" {
+		return operation, nil
 	}
+	param := "endpoint"
+	return "", invalidRequest("unsupported_parameter", "The batch endpoint must be a supported operation.", &param)
 }
 
 func batchCompletionWindow(source oif.Document, vendor string) (time.Duration, *Error) {
