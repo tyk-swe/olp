@@ -97,7 +97,7 @@ func Allowance(headers http.Header, now time.Time) *codemode.Allowance {
 	prefixes := map[string]bool{"x-codex": true}
 	for name := range headers {
 		name = strings.ToLower(name)
-		for _, window := range []string{"primary", "secondary"} {
+		for _, window := range codemode.AllowanceWindowNames() {
 			if strings.HasPrefix(name, "x-") && strings.HasSuffix(name, "-"+window+"-used-percent") {
 				prefixes[strings.TrimSuffix(name, "-"+window+"-used-percent")] = true
 			}
@@ -105,7 +105,7 @@ func Allowance(headers http.Header, now time.Time) *codemode.Allowance {
 	}
 	for prefix := range prefixes {
 		id := normalizeLimit(strings.TrimPrefix(prefix, "x-"))
-		for _, kind := range []string{"primary", "secondary"} {
+		for _, kind := range codemode.AllowanceWindowNames() {
 			base := prefix + "-" + kind
 			if w := allowanceWindow(id, kind, headerValue(headers, base+"-used-percent"), headerValue(headers, base+"-window-minutes"), headerValue(headers, base+"-reset-at"), now); w != nil && (w.UsedPercent != 0 || w.WindowMinutes != nil && *w.WindowMinutes != 0 || w.ResetsAt != nil) {
 				result.Windows = append(result.Windows, *w)
@@ -185,7 +185,7 @@ func eventAllowance(root oif.Value, now time.Time) *codemode.Allowance {
 		id = "codex"
 	}
 	result := &codemode.Allowance{ObservedAt: now}
-	for _, kind := range []string{"primary", "secondary"} {
+	for _, kind := range codemode.AllowanceWindowNames() {
 		value := field(field(root, "rate_limits"), kind)
 		if w := allowanceWindow(normalizeLimit(id), kind, field(value, "used_percent").Raw(), field(value, "window_minutes").Raw(), field(value, "reset_at").Raw(), now); w != nil {
 			result.Windows = append(result.Windows, *w)
