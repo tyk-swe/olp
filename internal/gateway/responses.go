@@ -182,6 +182,10 @@ func responseStoreRequested(parsed *wire.Request) bool {
 	return json.Unmarshal(raw, &store) == nil && store
 }
 
+func responseMetadataFields() [5]string {
+	return [5]string{"object", "status", "status_details", "created_at", "expires_at"}
+}
+
 func (s *Server) mapStoredResponse(ctx context.Context, x *call, authority access.Authority, body []byte) ([]byte, *Error) {
 	if s.Resources == nil || len(x.facts) == 0 || !responseStoreRequested(x.generation.parsed) {
 		return body, nil
@@ -202,7 +206,7 @@ func (s *Server) mapStoredResponse(ctx context.Context, x *call, authority acces
 	metadata := map[string]json.RawMessage{}
 	var obj map[string]json.RawMessage
 	if json.Unmarshal(body, &obj) == nil {
-		for _, name := range []string{"object", "status", "status_details", "created_at", "expires_at"} {
+		for _, name := range responseMetadataFields() {
 			if raw, present := obj[name]; present {
 				metadata[name] = raw
 			}
@@ -756,7 +760,7 @@ func (s *Server) mapStreamResponseFrame(ctx context.Context, x *call, fact *Atte
 
 func (s *Server) putStreamResponse(ctx context.Context, x *call, fact *AttemptFact, upstreamID, state string, response oif.Value) (*resources.Resource, error) {
 	metadata := map[string]json.RawMessage{}
-	for _, name := range []string{"object", "status", "status_details", "created_at", "expires_at"} {
+	for _, name := range responseMetadataFields() {
 		if value, present := response.Lookup(name); present {
 			metadata[name] = value.Bytes()
 		}
