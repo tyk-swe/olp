@@ -499,7 +499,7 @@ func (a *azureReader) csv(input io.Reader, days reportAccumulator, start, end ti
 			continue
 		}
 		meter, currency := row[fields["meterid"]], row[fields["billingcurrency"]]
-		if meter == "" || !validAzureCurrency(currency) {
+		if meter == "" || !validCloudCurrency(currency) {
 			return count, errors.New("invalid Azure meter or currency")
 		}
 		amount, err := decimal.NewFromString(row[fields["costinbillingcurrency"]])
@@ -517,18 +517,6 @@ func (a *azureReader) csv(input io.Reader, days reportAccumulator, start, end ti
 		}
 		days.add(dayKey, amount, currency, &label)
 	}
-}
-
-func validAzureCurrency(currency string) bool {
-	if len(currency) != 3 {
-		return false
-	}
-	for _, c := range currency {
-		if (c < 'A' || c > 'Z') && (c < 'a' || c > 'z') {
-			return false
-		}
-	}
-	return true
 }
 
 func azureLabel(value string) string {

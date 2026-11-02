@@ -7,7 +7,9 @@ import (
 	"net/http/httptest"
 	"net/netip"
 	"os"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/shopspring/decimal"
 	"github.com/tyk-swe/olp/internal/egress"
@@ -101,6 +103,46 @@ func TestAnthropicFetchEmitsDays(t *testing.T) {
 	}
 	wantAmount(t, days, "2025-10-03", "code execution tool calls", "0.001")
 	wantAmount(t, days, "2025-10-03", "unspecified", "0.01")
+}
+
+func TestCloudBillingSourcesAgreeOnCurrencyCodes(t *testing.T) {
+	day := time.Date(2030, 1, 2, 0, 0, 0, 0, time.UTC)
+	cases := []struct {
+		currency string
+		valid    bool
+	}{
+		{"ABC", true}, {"abc", true}, {"aBc", true},
+		{"", false}, {"AB", false}, {"ABCD", false}, {"A1C", false}, {" A ", false}, {"ıab", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.currency, func(t *testing.T) {
+			azureDays := reportAccumulator{}
+			data := "Date,SubscriptionId,MeterCategory,MeterSubCategory,MeterId,ChargeType,BillingCurrencyCode,CostInBillingCurrency\n" +
+				day.Format(dayFormat) + ",subscription,Cognitive Services,Azure Open AI,meter,usage," + tc.currency + ",1\n"
+			_, azureErr := new(azureReader).csv(strings.NewReader(data), azureDays, day, day, 2, 2)
+			googleDays := reportAccumulator{}
+			googleErr := addGoogleRow(googleDays, googleInvoiceRow{
+				Day: day.Format(dayFormat), Service: googleVertexServiceID, SKU: "sku", Currency: tc.currency, Amount: "1", Kind: "cost",
+			}, day, day.AddDate(0, 0, 1))
+			if (azureErr == nil) != tc.valid || (googleErr == nil) != tc.valid {
+				t.Fatalf("Azure error = %v, Google error = %v", azureErr, googleErr)
+			}
+			if !tc.valid {
+				return
+			}
+			for _, days := range []reportAccumulator{azureDays, googleDays} {
+				lines := days[day.Format(dayFormat)]
+				if len(lines) != 1 {
+					t.Fatalf("got %d lines, want one", len(lines))
+				}
+				for key, value := range lines {
+					if key.currency != strings.ToUpper(tc.currency) || !value.amount.Equal(decimal.NewFromInt(1)) {
+						t.Fatalf("unexpected normalized line %v: %v", key, value)
+					}
+				}
+			}
+		})
+	}
 }
 
 func TestPollingFetchRejectsCredential(t *testing.T) {

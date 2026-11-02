@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"github.com/shopspring/decimal"
+	"github.com/tyk-swe/olp/internal/pricingpolicy"
 )
 
 type lineSum struct {
@@ -16,6 +17,10 @@ type lineKey struct {
 }
 
 type reportAccumulator map[string]map[lineKey]lineSum
+
+func validCloudCurrency(currency string) bool {
+	return len(currency) == 3 && pricingpolicy.ValidCurrency(strings.ToUpper(currency))
+}
 
 // ensureDay retains empty buckets, including days whose rows are all filtered.
 func (r reportAccumulator) ensureDay(day string) {
