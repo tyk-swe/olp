@@ -265,7 +265,7 @@ func TestGoogleBillingImportEndToEnd(t *testing.T) {
 			_, _ = w.Write([]byte(`{"jobComplete":true,"totalRows":"1","schema":{"fields":[{"name":"private-schema-detail","type":"STRING"}]},"rows":[{"f":[{"v":"private-schema-detail"}]}]}`))
 			return
 		}
-		revision := day.AddDate(0, 0, 1).Add(time.Duration(revisionOffset.Load()) * time.Second)
+		revision := today.Add(time.Duration(revisionOffset.Load()) * time.Second)
 		allRows := googleFixtureResults(t, db, queryStatement.Load().(string), day, queryParameters.Load().(map[string]string), invalidCurrency.Load(), restated.Load(), empty.Load(), emptyExport.Load(), revision)
 		rows := allRows[:1]
 		pageToken := ""
@@ -365,7 +365,7 @@ func TestGoogleBillingImportEndToEnd(t *testing.T) {
 		t.Fatalf("day without scope evidence appeared covered: %v", gap)
 	}
 	initialStatus = h.want(owner, "GET", "/api/v1/providers/"+id+"/billing-import", nil, nil, 200)["status"].(map[string]any)
-	if initialStatus["last_error_code"] != nil || initialStatus["imported_from"] != dayText || initialStatus["imported_through"] != dayText || initialStatus["source_revision"] != day.AddDate(0, 0, 1).Format(time.RFC3339Nano) {
+	if initialStatus["last_error_code"] != nil || initialStatus["imported_from"] != dayText || initialStatus["imported_through"] != dayText || initialStatus["source_revision"] != today.Format(time.RFC3339Nano) {
 		t.Fatalf("Google export revision was not applied: %v", initialStatus)
 	}
 	end := day.AddDate(0, 0, 1).Format("2006-01-02")
@@ -463,7 +463,7 @@ func TestGoogleBillingImportEndToEnd(t *testing.T) {
 		t.Fatalf("older revision replaced previous period: %v", previous)
 	}
 	newerStatus := h.want(owner, "GET", "/api/v1/providers/"+id+"/billing-import", nil, nil, 200)["status"].(map[string]any)
-	if newerStatus["source_revision"] != day.AddDate(0, 0, 1).Add(time.Second).Format(time.RFC3339Nano) {
+	if newerStatus["source_revision"] != today.Add(time.Second).Format(time.RFC3339Nano) {
 		t.Fatalf("older revision regressed status: %v", newerStatus)
 	}
 	empty.Store(true)
