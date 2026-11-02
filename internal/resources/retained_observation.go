@@ -15,6 +15,10 @@ import (
 	"github.com/tyk-swe/olp/internal/usage"
 )
 
+func RetainedFileMetadataFields() []string {
+	return []string{"object", "purpose", "filename", "bytes", "status", "status_details", "expires_at", "created_at"}
+}
+
 // EnrichRetained records only billing and lifecycle facts. Native content,
 // evaluation samples, training examples and conversation history remain remote.
 func EnrichRetained(r *Resource, e retainedapi.Endpoint, source oif.Document, now time.Time) error {
@@ -48,7 +52,7 @@ func EnrichRetained(r *Resource, e retainedapi.Endpoint, source oif.Document, no
 		}
 	}
 	if r.Kind == KindFile {
-		for _, name := range []string{"object", "purpose", "filename", "bytes", "status", "status_details", "expires_at", "created_at"} {
+		for _, name := range RetainedFileMetadataFields() {
 			if value, present := root.Lookup(name); present {
 				meta[name] = json.RawMessage(value.Raw())
 			}

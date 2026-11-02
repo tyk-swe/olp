@@ -483,7 +483,7 @@ func (s *Server) fileObject(ctx context.Context, res *resources.Resource) ([]byt
 		return json.Marshal(obj)
 	}
 	obj := map[string]json.RawMessage{}
-	for _, name := range []string{"object", "purpose", "filename", "bytes", "status", "status_details", "expires_at", "created_at"} {
+	for _, name := range resources.RetainedFileMetadataFields() {
 		if raw, ok := meta[name]; ok {
 			obj[name] = raw
 		}
@@ -678,7 +678,7 @@ func fileMetadata(body []byte, model string) (json.RawMessage, string, *time.Tim
 	meta := map[string]json.RawMessage{}
 	var obj map[string]json.RawMessage
 	if json.Unmarshal(body, &obj) == nil {
-		for _, name := range []string{"object", "purpose", "filename", "bytes", "status", "status_details", "expires_at", "created_at"} {
+		for _, name := range resources.RetainedFileMetadataFields() {
 			if raw, ok := obj[name]; ok {
 				meta[name] = raw
 			}
