@@ -15,6 +15,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/tyk-swe/olp/internal/oif"
+	"github.com/tyk-swe/olp/internal/protocols/wire"
 )
 
 // Operation tags match the runtime selection registry.
@@ -696,9 +697,7 @@ func DecodeTranscription(form *Form) (*Request, *Error) {
 	if responseFormat != nil {
 		format = *responseFormat
 	}
-	switch format {
-	case "json", "text", "srt", "verbose_json", "vtt", "diarized_json":
-	default:
+	if !wire.ValidTranscriptionResponseFormat(format) {
 		return nil, invalidMedia("The transcription response_format is not supported.")
 	}
 	if len(granularities) > 0 && (format != "verbose_json" || !allOf(granularities, "word", "segment")) {

@@ -12,6 +12,7 @@ import (
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/mediacontract"
 	"github.com/tyk-swe/olp/internal/oif"
+	"github.com/tyk-swe/olp/internal/protocols/wire"
 	"github.com/tyk-swe/olp/internal/vendors"
 )
 
@@ -379,7 +380,7 @@ func validateConfiguredResponse(r *Request) *Error {
 		if r.Format != nil {
 			format = *r.Format
 		}
-		if !slices.Contains([]string{"json", "text", "srt", "verbose_json", "vtt", "diarized_json"}, format) || r.Op == OpTranslation && format == "diarized_json" {
+		if r.Op == OpTranslation && !wire.ValidTranslationResponseFormat(format) || r.Op == OpTranscription && !wire.ValidTranscriptionResponseFormat(format) {
 			return configuredFailure("response_format", "is not supported")
 		}
 		if r.Temperature != nil && (*r.Temperature < 0 || *r.Temperature > 1) {
