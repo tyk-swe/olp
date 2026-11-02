@@ -11,6 +11,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/google/uuid"
+	"github.com/tyk-swe/olp/internal/consumerscope"
 )
 
 const MaxTokenBytes = 32768
@@ -47,6 +48,7 @@ type Config struct {
 
 func (c Config) Validate() error {
 	bad := errors.New("invalid workload issuer configuration")
+	scopes := consumerscope.All()
 	if strings.TrimSpace(c.Name) == "" || len(c.Name) > 100 || !utf8.ValidString(c.Name) || c.MaxLifetimeSeconds < 60 || c.MaxLifetimeSeconds > 86400 {
 		return bad
 	}
@@ -76,7 +78,7 @@ func (c Config) Validate() error {
 		if id, e := uuid.Parse(m.ProjectID); e != nil || id.String() != m.ProjectID {
 			return bad
 		}
-		if !unique(m.RouteGroups, 0, 64, 100) || !unique(m.Scopes, 1, 7, 32) {
+		if !unique(m.RouteGroups, 0, 64, 100) || !unique(m.Scopes, 1, len(scopes), 32) {
 			return bad
 		}
 		if len(m.RouteGroups) == 0 && (slices.Contains(m.Scopes, "inference") || slices.Contains(m.Scopes, "models_read")) {
@@ -88,7 +90,7 @@ func (c Config) Validate() error {
 			}
 		}
 		for _, scope := range m.Scopes {
-			if !slices.Contains([]string{"inference", "models_read", "guardrails", "tools", "agents", "traces_write", "delegate"}, scope) {
+			if !slices.Contains(scopes, scope) {
 				return bad
 			}
 		}
