@@ -68,7 +68,7 @@ func qualifyCollector(t *testing.T, collector qualificationCollector, streaming 
 	handle, err := telemetry.Install(telemetry.Config{
 		Endpoint: collector.endpoint, HeadersFile: headersPath, SampleRatio: 1,
 		Mode: "gateway", Version: "qualification",
-	})
+	}, os.LookupEnv)
 	if err != nil {
 		t.Fatalf("install exporter: %v", err)
 	}

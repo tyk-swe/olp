@@ -92,7 +92,7 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 		AcceptInbound:     c.TraceAcceptInbound,
 		Mode:              string(c.Mode),
 		Version:           Version,
-	})
+	}, os.LookupEnv)
 	if err != nil {
 		return err
 	}
