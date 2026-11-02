@@ -1,12 +1,37 @@
 package rerank_test
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/operations"
 	"github.com/tyk-swe/olp/internal/operations/rerank"
 )
+
+func TestPublishedRerankDirectionsAreAccepted(t *testing.T) {
+	d := definition(t, "tei-rerank")
+	var schema struct {
+		Enum []string `json:"enum"`
+	}
+	if err := json.Unmarshal(d.Defaults["truncation_direction"].Schema, &schema); err != nil || len(schema.Enum) == 0 {
+		t.Fatalf("missing truncation directions: %v", err)
+	}
+	for _, direction := range schema.Enum {
+		body, err := json.Marshal(map[string]any{"query": "query", "texts": []string{"text"}, "truncation_direction": direction})
+		if err != nil {
+			t.Fatal(err)
+		}
+		r := request(t, d, string(body))
+		if _, err := d.Request(r); err != nil {
+			t.Errorf("published direction %q was rejected: %v", direction, err)
+		}
+		value, _ := r.Document().Root().Lookup("truncation_direction")
+		if err := d.Defaults["truncation_direction"].Validate(value); err != nil {
+			t.Errorf("published direction %q was rejected as a default: %v", direction, err)
+		}
+	}
+}
 
 func definition(t *testing.T, id string) operations.Dialect {
 	t.Helper()

@@ -1,6 +1,7 @@
 package classification_test
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -8,6 +9,29 @@ import (
 	"github.com/tyk-swe/olp/internal/operations"
 	"github.com/tyk-swe/olp/internal/operations/classification"
 )
+
+func TestPublishedClassificationDirectionsAreAccepted(t *testing.T) {
+	d := definition(t, "tei-classification")
+	var schema struct {
+		Properties struct {
+			Direction struct {
+				Enum []string `json:"enum"`
+			} `json:"truncation_direction"`
+		} `json:"properties"`
+	}
+	if err := json.Unmarshal(d.RequestSchema, &schema); err != nil || len(schema.Properties.Direction.Enum) == 0 {
+		t.Fatalf("missing truncation directions: %v", err)
+	}
+	for _, direction := range schema.Properties.Direction.Enum {
+		body, err := json.Marshal(map[string]string{"inputs": "text", "truncation_direction": direction})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := d.Request(request(t, d, string(body))); err != nil {
+			t.Errorf("published direction %q was rejected: %v", direction, err)
+		}
+	}
+}
 
 func definition(t *testing.T, id string) operations.Dialect {
 	t.Helper()
