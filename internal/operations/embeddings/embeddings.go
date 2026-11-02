@@ -318,7 +318,7 @@ func liftRequest(source oif.Request, id string) (Request, error) {
 		if v, present := root.Lookup("prompt_name"); present && !operations.Optional(v) && v.Kind() != oif.String {
 			return r, operations.Invalid("prompt_name", "Use a prompt name or native null.")
 		}
-		if v, present := root.Lookup("truncation_direction"); present && !slices.Contains([]string{"left", "Left", "right", "Right"}, operations.String(v)) {
+		if v, present := root.Lookup("truncation_direction"); present && !slices.Contains(teiTruncationDirections(), operations.String(v)) {
 			return r, operations.Invalid("truncation_direction", "Use the native left or right direction.")
 		}
 	}

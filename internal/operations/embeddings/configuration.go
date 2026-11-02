@@ -8,6 +8,10 @@ import (
 	"github.com/tyk-swe/olp/internal/operations"
 )
 
+func teiTruncationDirections() []string {
+	return []string{"left", "right", "Left", "Right"}
+}
+
 func defaults(id string) map[string]operations.Field {
 	fields := map[string]operations.Field{}
 	boolean := operations.FieldSchema(map[string]any{"type": "boolean"}, func(v oif.Value) error {
@@ -83,7 +87,7 @@ func defaults(id string) map[string]operations.Field {
 		})
 	default:
 		fields["truncate"] = nullableBoolean
-		fields["truncation_direction"] = enum("left", "right", "Left", "Right")
+		fields["truncation_direction"] = enum(teiTruncationDirections()...)
 		fields["prompt_name"] = text
 		if id == "tei-embeddings" {
 			fields["normalize"] = boolean

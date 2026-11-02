@@ -1,12 +1,32 @@
 package embeddings_test
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/operations"
 	"github.com/tyk-swe/olp/internal/operations/embeddings"
 )
+
+func TestPublishedTEIEmbeddingDirectionsAreAccepted(t *testing.T) {
+	for _, id := range []string{"tei-embeddings", "tei-sparse-embeddings", "tei-multivector-embeddings"} {
+		d := codec(t, id)
+		var schema struct {
+			Enum []string `json:"enum"`
+		}
+		if err := json.Unmarshal(d.Defaults["truncation_direction"].Schema, &schema); err != nil || len(schema.Enum) == 0 {
+			t.Fatalf("%s has no truncation directions: %v", id, err)
+		}
+		for _, direction := range schema.Enum {
+			body, err := json.Marshal(map[string]string{"inputs": "text", "truncation_direction": direction})
+			if err != nil {
+				t.Fatal(err)
+			}
+			request(t, d, string(body))
+		}
+	}
+}
 
 func codec(t *testing.T, id string) operations.Dialect {
 	t.Helper()
