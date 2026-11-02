@@ -120,7 +120,7 @@ func Definitions() []operations.Dialect {
 	moderation.ResultSchema = operations.ObjectSchema(map[string]any{"id": map[string]any{"type": "string"}, "model": map[string]any{"type": "string"}, "results": map[string]any{"type": "array", "minItems": 1, "items": map[string]any{"type": "object", "required": []string{"flagged", "categories", "category_scores"}}}}, "id", "model", "results")
 	predict := operations.Dialect{Identity: identity("tei-classification"), Operation: identity("classification"), Surface: "native", Label: "TEI native classification", Address: operations.Address{RelativePath: "predict"}, Documentation: teiDocs, Evidence: "tei-predict-pair-batch-scores/1", Request: predictRequest, Result: predictResult, InputText: predictText, OutputText: outputText, Probe: func(string) []byte { return []byte(`{"inputs":"A neutral classification probe.","raw_scores":true}`) }}
 	predict.Defaults = map[string]operations.Field{"truncate": nullableBool(), "raw_scores": boolean(), "truncation_direction": direction()}
-	predict.RequestSchema = operations.ObjectSchema(map[string]any{"inputs": map[string]any{"description": "Scalar, one/two-string single sequence, or nonempty nested batch of one/two-string sequences.", "type": []string{"string", "array"}}, "truncate": map[string]any{"type": []string{"boolean", "null"}}, "raw_scores": map[string]any{"type": "boolean"}, "truncation_direction": map[string]any{"enum": []string{"Left", "left", "Right", "right"}}}, "inputs")
+	predict.RequestSchema = operations.ObjectSchema(map[string]any{"inputs": map[string]any{"description": "Scalar, one/two-string single sequence, or nonempty nested batch of one/two-string sequences.", "type": []string{"string", "array"}}, "truncate": map[string]any{"type": []string{"boolean", "null"}}, "raw_scores": map[string]any{"type": "boolean"}, "truncation_direction": map[string]any{"enum": truncationDirections()}}, "inputs")
 	predict.ResultSchema = operations.Raw(map[string]any{"type": "array", "description": "Prediction records for a single sequence, or one prediction-record array per batch input; exact native scores and ordered labels."})
 	scoring := operations.Dialect{Identity: identity("tei-scoring"), Operation: identity("scoring"), Surface: "native", Label: "TEI native similarity", Address: operations.Address{RelativePath: "similarity"}, Documentation: teiDocs, Evidence: "tei-similarity-set-scores/1", Request: scoringRequest, Result: scoringResult, InputText: scoringText, OutputText: outputText, Probe: func(string) []byte {
 		return []byte(`{"inputs":{"source_sentence":"source","sentences":["first","second"]}}`)
@@ -163,9 +163,14 @@ func boolean() operations.Field {
 func nullableBool() operations.Field {
 	return operations.FieldSchema(map[string]any{"type": []string{"boolean", "null"}}, operations.NullableBool)
 }
+func truncationDirections() []string {
+	return []string{"Left", "left", "Right", "right"}
+}
+
 func direction() operations.Field {
-	return operations.FieldSchema(map[string]any{"type": "string", "enum": []string{"Left", "left", "Right", "right"}}, func(v oif.Value) error {
-		if !slices.Contains([]string{"Left", "left", "Right", "right"}, operations.String(v)) {
+	directions := truncationDirections()
+	return operations.FieldSchema(map[string]any{"type": "string", "enum": directions}, func(v oif.Value) error {
+		if !slices.Contains(directions, operations.String(v)) {
 			return operations.Invalid("truncation_direction", "Use a documented native truncation direction.")
 		}
 		return nil

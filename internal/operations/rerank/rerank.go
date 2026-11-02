@@ -273,8 +273,9 @@ func defaults(id string) map[string]operations.Field {
 		fields["raw_scores"] = boolean
 		fields["return_text"] = boolean
 		fields["truncate"] = operations.FieldSchema(map[string]any{"type": []string{"boolean", "null"}}, operations.NullableBool)
-		fields["truncation_direction"] = operations.FieldSchema(map[string]any{"enum": []string{"left", "right", "Left", "Right"}}, func(v oif.Value) error {
-			if !slices.Contains([]string{"left", "right", "Left", "Right"}, operations.String(v)) {
+		directions := []string{"left", "right", "Left", "Right"}
+		fields["truncation_direction"] = operations.FieldSchema(map[string]any{"enum": directions}, func(v oif.Value) error {
+			if !slices.Contains(directions, operations.String(v)) {
 				return operations.Invalid("truncation_direction", "Use a native direction.")
 			}
 			return nil
