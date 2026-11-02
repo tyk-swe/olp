@@ -5,12 +5,17 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"net/http"
+	"net/http/httptest"
+	"net/netip"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/tyk-swe/olp/internal/batches"
+	"github.com/tyk-swe/olp/internal/connectors"
+	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/protocols/wire"
 	"github.com/tyk-swe/olp/internal/resources"
@@ -92,25 +97,6 @@ func TestBatchCompletionWindow(t *testing.T) {
 }
 
 func TestManagedBatchProjection(t *testing.T) {
-	for adapter, statuses := range managedBatchStatusProjection {
-		for source, want := range statuses {
-			body := map[string]any{"id": "job-status", "status": source, "endpoint": "/v1/chat/completions", "created_at": 1792497600}
-			if adapter == "together" {
-				body["input_file_id"] = "file-in"
-			} else {
-				body["input_files"] = []string{"file-in"}
-			}
-			encoded, _ := json.Marshal(body)
-			projected, _, err := projectManagedBatch(encoded, adapter, "24h")
-			if err != nil {
-				t.Fatalf("%s status %s: %v", adapter, source, err)
-			}
-			var value map[string]any
-			if json.Unmarshal(projected, &value) != nil || value["status"] != want {
-				t.Fatalf("%s status %s projected as %v", adapter, source, value)
-			}
-		}
-	}
 	tests := []struct {
 		name    string
 		adapter string
@@ -149,6 +135,56 @@ func TestManagedBatchProjection(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestManagedBatchProjectionAgreesWithSettlement(t *testing.T) {
+	for _, adapter := range []string{"together", "mistral"} {
+		for _, status := range []string{"VALIDATING", "IN_PROGRESS", "COMPLETED", "FAILED", "EXPIRED", "CANCELLING", "CANCELLED", "QUEUED", "RUNNING", "SUCCESS", "TIMEOUT_EXCEEDED", "CANCELLATION_REQUESTED", "UNKNOWN"} {
+			t.Run(adapter+"/"+status, func(t *testing.T) {
+				body, err := json.Marshal(map[string]string{
+					"id": "job", "status": status, "endpoint": "/v1/chat/completions", "input_file_id": "file",
+				})
+				if err != nil {
+					t.Fatal(err)
+				}
+				server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					_, _ = w.Write(body)
+				}))
+				defer server.Close()
+				policy := egress.Policy{AllowedNetworks: []netip.Prefix{netip.MustParsePrefix("127.0.0.0/8")}}
+				auth := connectors.NewAuth(&policy)
+				readers := map[string]batches.Reader{
+					"together": batches.NewTogetherReader(auth, &policy),
+					"mistral":  batches.NewMistralReader(auth, &policy),
+				}
+				settlement := batches.Settlement{
+					UpstreamID: new("job"), LineOperation: "generation",
+					Cursor: []byte(`{"submission":{"input_file_id":"file","endpoint":"/v1/chat/completions"}}`),
+				}
+				target := batches.PinnedTarget{
+					Config: connectors.Config{Kind: "openai_compatible", AuthMode: "none", Endpoint: server.URL},
+					Client: server.Client(),
+				}
+				snapshot, pollErr := readers[adapter].Poll(t.Context(), settlement, &target)
+				projected, _, projectionErr := projectManagedBatch(body, adapter, "24h")
+				if (pollErr == nil) != (projectionErr == nil) {
+					t.Fatalf("settlement error %v, projection error %v", pollErr, projectionErr)
+				}
+				if pollErr != nil {
+					return
+				}
+				var value struct {
+					Status string `json:"status"`
+				}
+				if err := json.Unmarshal(projected, &value); err != nil {
+					t.Fatal(err)
+				}
+				if snapshot.Status != value.Status {
+					t.Fatalf("settlement status %q, projected status %q", snapshot.Status, value.Status)
+				}
+			})
+		}
 	}
 }
 

@@ -115,8 +115,8 @@ func parseManagedSnapshot(body []byte, adapter string) (BatchSnapshot, error) {
 		job = raw
 	}
 	status := jsonText(job["status"])
-	mapped := managedBatchStatuses[adapter][status]
-	if mapped == "" {
+	mapped, ok := ManagedStatus(adapter, status)
+	if !ok {
 		return BatchSnapshot{}, errors.New("provider batch status is unknown")
 	}
 	id := jsonText(job["id"])
@@ -233,4 +233,9 @@ func jsonInt64(raw json.RawMessage) (int64, bool) {
 var managedBatchStatuses = map[string]map[string]string{
 	"together": {"VALIDATING": "validating", "IN_PROGRESS": "in_progress", "COMPLETED": "completed", "FAILED": "failed", "EXPIRED": "expired", "CANCELLING": "cancelling", "CANCELLED": "cancelled"},
 	"mistral":  {"QUEUED": "validating", "RUNNING": "in_progress", "SUCCESS": "completed", "FAILED": "failed", "TIMEOUT_EXCEEDED": "expired", "CANCELLATION_REQUESTED": "cancelling", "CANCELLED": "cancelled"},
+}
+
+func ManagedStatus(adapter, status string) (string, bool) {
+	mapped, ok := managedBatchStatuses[adapter][status]
+	return mapped, ok
 }

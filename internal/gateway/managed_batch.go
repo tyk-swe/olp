@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/batches"
 	"github.com/tyk-swe/olp/internal/media"
 	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/protocols"
@@ -29,17 +30,21 @@ const (
 	managedBatchLines     = 50000
 )
 
-var managedBatchStatusProjection = map[string]map[string]string{
-	"together": {"VALIDATING": "validating", "IN_PROGRESS": "in_progress", "COMPLETED": "completed", "FAILED": "failed", "EXPIRED": "expired", "CANCELLING": "cancelling", "CANCELLED": "cancelled"},
-	"mistral":  {"QUEUED": "validating", "RUNNING": "in_progress", "SUCCESS": "completed", "FAILED": "failed", "TIMEOUT_EXCEEDED": "expired", "CANCELLATION_REQUESTED": "cancelling", "CANCELLED": "cancelled"},
-	"gemini_managed": {
-		"BATCH_STATE_PENDING": "validating", "JOB_STATE_PENDING": "validating", "JOB_STATE_QUEUED": "validating",
-		"BATCH_STATE_RUNNING": "in_progress", "JOB_STATE_RUNNING": "in_progress", "JOB_STATE_CANCELLING": "cancelling",
-		"BATCH_STATE_SUCCEEDED": "completed", "JOB_STATE_SUCCEEDED": "completed",
-		"BATCH_STATE_FAILED": "failed", "JOB_STATE_FAILED": "failed",
-		"BATCH_STATE_CANCELLED": "cancelled", "JOB_STATE_CANCELLED": "cancelled",
-		"BATCH_STATE_EXPIRED": "expired", "JOB_STATE_EXPIRED": "expired",
-	},
+var geminiManagedStatusProjection = map[string]string{
+	"BATCH_STATE_PENDING": "validating", "JOB_STATE_PENDING": "validating", "JOB_STATE_QUEUED": "validating",
+	"BATCH_STATE_RUNNING": "in_progress", "JOB_STATE_RUNNING": "in_progress", "JOB_STATE_CANCELLING": "cancelling",
+	"BATCH_STATE_SUCCEEDED": "completed", "JOB_STATE_SUCCEEDED": "completed",
+	"BATCH_STATE_FAILED": "failed", "JOB_STATE_FAILED": "failed",
+	"BATCH_STATE_CANCELLED": "cancelled", "JOB_STATE_CANCELLED": "cancelled",
+	"BATCH_STATE_EXPIRED": "expired", "JOB_STATE_EXPIRED": "expired",
+}
+
+func managedBatchStatus(adapter, status string) (string, bool) {
+	if adapter == "gemini_managed" {
+		mapped, ok := geminiManagedStatusProjection[status]
+		return mapped, ok
+	}
+	return batches.ManagedStatus(adapter, status)
 }
 
 type batchManifest struct {
@@ -465,7 +470,7 @@ func projectManagedBatch(body []byte, adapter, requestedWindow string) ([]byte, 
 	if json.Unmarshal(jobBytes, &job) != nil || job.ID == "" {
 		return nil, "", errors.New("provider batch identity is missing")
 	}
-	state, ok := managedBatchStatusProjection[adapter][job.Status]
+	state, ok := managedBatchStatus(adapter, job.Status)
 	if !ok {
 		return nil, "", errors.New("provider batch status is unknown")
 	}
