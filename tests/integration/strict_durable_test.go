@@ -253,6 +253,10 @@ func TestStrictBatchSourcePartialFilesAndLifecycle(t *testing.T) {
 		}
 	}
 	raw = first
+	inputID, ok := jsonStringField(raw, "input_file_id")
+	if !ok || inputID != fileID {
+		t.Fatalf("input file identity: %s", raw)
+	}
 	outputID, ok := jsonStringField(raw, "output_file_id")
 	if !ok || !strings.HasPrefix(outputID, "strict_file_") {
 		t.Fatalf("output file identity: %s", raw)

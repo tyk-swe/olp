@@ -539,7 +539,7 @@ func (s *Server) batchObject(ctx context.Context, res *resources.Resource) ([]by
 			return nil, resources.ErrContract
 		}
 		files := map[string]string{}
-		for _, name := range []string{"input_file_id", "output_file_id", "error_file_id"} {
+		for _, name := range batchFileFields() {
 			field, present := doc.Root().Lookup(name)
 			if !present || field.Kind() == oif.Null {
 				continue
@@ -579,7 +579,7 @@ func (s *Server) batchObject(ctx context.Context, res *resources.Resource) ([]by
 	// Stored provider fields are upstream identifiers, whatever their
 	// spelling. Output and error files are first seen here, so they get a
 	// mapping on demand.
-	for _, name := range []string{"input_file_id", "output_file_id", "error_file_id"} {
+	for _, name := range batchFileFields() {
 		if name == "input_file_id" && batchLocalInput(res) != "" {
 			continue
 		}

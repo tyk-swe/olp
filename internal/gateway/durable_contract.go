@@ -169,6 +169,10 @@ func strictResult(body []byte, expectedID string) (oif.Document, string, error) 
 	return doc, value, nil
 }
 
+func batchFileFields() [3]string {
+	return [3]string{"input_file_id", "output_file_id", "error_file_id"}
+}
+
 func strictBatchResult(body []byte, expectedID string) (oif.Document, string, error) {
 	doc, id, err := strictResult(body, expectedID)
 	if err != nil {
@@ -179,7 +183,7 @@ func strictBatchResult(body []byte, expectedID string) (oif.Document, string, er
 	if !ok || !valid || wire.BatchStageOf(state) == wire.BatchUnknown {
 		return oif.Document{}, "", resources.ErrContract
 	}
-	for _, name := range []string{"input_file_id", "output_file_id", "error_file_id"} {
+	for _, name := range batchFileFields() {
 		field, present := doc.Root().Lookup(name)
 		if !present || field.Kind() == oif.Null {
 			continue
