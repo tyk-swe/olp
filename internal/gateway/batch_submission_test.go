@@ -31,8 +31,13 @@ func TestBatchLineOperation(t *testing.T) {
 		"/embeddings":          "embeddings",
 	} {
 		source := parseBatchTestObject(t, `{"endpoint":"`+endpoint+`"}`)
-		if got, err := batchLineOperation(source); err != nil || got != want {
+		got, err := batchLineOperation(source)
+		if err != nil || got != want {
 			t.Errorf("%s operation = %q, %v; want %q", endpoint, got, err, want)
+		}
+		managed, _, ok := managedBatchEndpoint("openai", wire.CanonicalBatchEndpoint(endpoint))
+		if !ok || managed != got {
+			t.Errorf("%s managed operation = %q, %v; want %q", endpoint, managed, ok, got)
 		}
 	}
 	for _, body := range []string{`{}`, `{"endpoint":"/v1/moderations"}`, `{"endpoint":7}`} {

@@ -38,3 +38,14 @@ func CanonicalBatchEndpoint(endpoint string) string {
 		return endpoint
 	}
 }
+
+func BatchLineOperation(endpoint string) string {
+	switch CanonicalBatchEndpoint(endpoint) {
+	case "/v1/embeddings":
+		return "embeddings"
+	case "/v1/chat/completions", "/v1/responses", "/v1/completions":
+		return "generation"
+	default:
+		return ""
+	}
+}

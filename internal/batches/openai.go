@@ -88,8 +88,8 @@ func (r *OpenAIReader) Poll(ctx context.Context, settlement Settlement, target *
 	if snapshot.ID != *settlement.UpstreamID {
 		return BatchSnapshot{}, ErrProviderConflict
 	}
-	if snapshot.Endpoint != "" && (lineOperation(snapshot.Endpoint) == "" ||
-		lineOperation(snapshot.Endpoint) != settlement.LineOperation) {
+	if operation := wire.BatchLineOperation(snapshot.Endpoint); snapshot.Endpoint != "" &&
+		(operation == "" || operation != settlement.LineOperation) {
 		return BatchSnapshot{}, ErrProviderConflict
 	}
 	inputFileID, _, endpoint, err := submissionFiles(settlement.Cursor)
@@ -521,7 +521,7 @@ func ParseLine(line []byte, endpoint string, errorFile bool) (Result, error) {
 					return Result{}, usageErr
 				}
 			} else if observed != nil {
-				result.Usage = usage.ObservedAttemptUsage(observed, complete, lineOperation(endpoint))
+				result.Usage = usage.ObservedAttemptUsage(observed, complete, wire.BatchLineOperation(endpoint))
 			}
 			if status >= 200 && status < 300 && errorCode == "" && !errorFile {
 				result.Kind = ResultSucceeded
@@ -572,16 +572,6 @@ func decodeLineUsage(body json.RawMessage, endpoint string) (*wire.Usage, bool, 
 		return nil, false, errors.New("provider batch response usage is malformed")
 	}
 	return completion.Usage, completion.UsageComplete || completion.Usage != nil, nil
-}
-
-func lineOperation(endpoint string) string {
-	switch wire.CanonicalBatchEndpoint(endpoint) {
-	case "/v1/embeddings":
-		return "embeddings"
-	case "/v1/chat/completions", "/v1/responses", "/v1/completions":
-		return "generation"
-	}
-	return ""
 }
 
 func canonicalJSON(raw []byte) ([]byte, error) {

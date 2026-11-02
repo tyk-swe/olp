@@ -313,7 +313,7 @@ func translateManagedBatchLines(writer *io.PipeWriter, input io.Reader, digest f
 		return fail(invalidRequest("unsupported_parameter", "The batch file must contain at least one request.", &param))
 	}
 	manifest.Endpoint = endpoint
-	manifest.LineOperation = endpointOperation(endpoint)
+	manifest.LineOperation = wire.BatchLineOperation(endpoint)
 	manifest.ManifestDigest = hex.EncodeToString(manifestHash.Sum(nil))
 	return nil
 }
@@ -326,15 +326,19 @@ func managedCustomIDLimit(adapter string) int {
 }
 
 func managedBatchEndpoint(adapter, endpoint string) (string, wire.Format, bool) {
+	operation := wire.BatchLineOperation(endpoint)
+	if operation == "" {
+		return "", "", false
+	}
 	switch endpoint {
 	case "/v1/chat/completions":
-		return "generation", wire.Chat, adapter == "openai" || adapter == "together" || adapter == "mistral" || adapter == "gemini_managed"
+		return operation, wire.Chat, adapter == "openai" || adapter == "together" || adapter == "mistral" || adapter == "gemini_managed"
 	case "/v1/embeddings":
-		return "embeddings", wire.Embeddings, adapter == "openai" || adapter == "mistral"
+		return operation, wire.Embeddings, adapter == "openai" || adapter == "mistral"
 	case "/v1/responses":
-		return "generation", wire.Responses, adapter == "openai"
+		return operation, wire.Responses, adapter == "openai"
 	case "/v1/completions":
-		return "generation", wire.Completions, adapter == "openai"
+		return operation, wire.Completions, adapter == "openai"
 	default:
 		return "", "", false
 	}
@@ -348,13 +352,6 @@ func (s *Server) batchLineDigest(customID string) ([]byte, bool) {
 		return nil, false
 	}
 	return digester.Digest(secrets.BatchLineDigest, customID), true
-}
-
-func endpointOperation(endpoint string) string {
-	if wire.CanonicalBatchEndpoint(endpoint) == "/v1/embeddings" {
-		return "embeddings"
-	}
-	return "generation"
 }
 
 func managedBatchRequestBody(source oif.Document, adapter, upstreamFileID, model string, manifest batchManifest) ([]byte, *int64, *Error) {

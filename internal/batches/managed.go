@@ -40,7 +40,7 @@ func (r *managedReader) Poll(ctx context.Context, settlement Settlement, target 
 		}
 		inputFileID, _, endpoint, parseErr := submissionFiles(settlement.Cursor)
 		if parseErr != nil || endpoint != snapshot.Endpoint || inputFileID != "" && snapshot.InputFileID != inputFileID ||
-			lineOperation(snapshot.Endpoint) != settlement.LineOperation {
+			wire.BatchLineOperation(snapshot.Endpoint) != settlement.LineOperation {
 			return BatchSnapshot{}, ErrProviderConflict
 		}
 		snapshot.Expected = settlement.ExpectedResults
