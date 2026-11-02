@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"io"
+	"maps"
 	"slices"
 	"strings"
 
@@ -36,17 +37,17 @@ func Invalid(detail string) error { return Fail(400, "invalidValue", detail) }
 
 type Document map[string]any
 
-var names = map[string]string{}
-
 func NameSubattributes() []string {
 	return []string{"formatted", "familyName", "givenName", "middleName", "honorificPrefix", "honorificSuffix"}
 }
 
-func init() {
+var names = maps.Collect(func(yield func(string, string) bool) {
 	for _, n := range slices.Concat([]string{"schemas", "id", "externalId", "userName", "displayName", "display", "active", "name", "emails", "value", "type", "primary", "roles", "groups", "members", "$ref", "meta", "resourceType", "created", "lastModified", "location", "version", "password", "role", "accessScope", "projects", "operations", "op", "path", "filter", "startIndex", "count", "attributes", "excludedAttributes", "sortBy", "sortOrder", UserExtension, GroupExtension}, NameSubattributes()) {
-		names[strings.ToLower(n)] = n
+		if !yield(strings.ToLower(n), n) {
+			return
+		}
 	}
-}
+})
 
 func Canonical(name string) string {
 	if n, ok := names[strings.ToLower(name)]; ok {
