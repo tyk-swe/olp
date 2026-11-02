@@ -250,7 +250,7 @@ func (s *Server) applyEndpoint(r *http.Request, _ access.Principal) (access.Repl
 		return access.Reply{}, err
 	}
 
-	if err = access.Audit(r.Context(), tx, r, p.Actor(), "configuration.apply", "configuration", digest, "success"); err != nil {
+	if err = access.Audit(r.Context(), tx, r, p.Actor(), "configuration.apply", "configuration", result.Digest, "success"); err != nil {
 		return access.Reply{}, err
 	}
 	reply := access.OK(result)
