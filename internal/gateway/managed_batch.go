@@ -45,6 +45,10 @@ type managedBatchLine struct {
 	Body     json.RawMessage `json:"body"`
 }
 
+func managedFileFields() [4]string {
+	return [4]string{"bytes", "created_at", "filename", "purpose"}
+}
+
 func managedFileMetadata(existing, response []byte, adapter string, manifest batchManifest, role string) []byte {
 	var prior map[string]json.RawMessage
 	_ = json.Unmarshal(existing, &prior)
@@ -87,7 +91,7 @@ func managedFileMetadata(existing, response []byte, adapter string, manifest bat
 			}
 		}
 	} else {
-		for _, name := range []string{"bytes", "created_at", "filename", "purpose"} {
+		for _, name := range managedFileFields() {
 			if value, ok := provider[name]; ok {
 				fields[name] = value
 			}

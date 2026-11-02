@@ -474,7 +474,7 @@ func (s *Server) fileObject(ctx context.Context, res *resources.Resource) ([]byt
 		var fields map[string]json.RawMessage
 		_ = json.Unmarshal(meta["provider_file"], &fields)
 		obj := map[string]json.RawMessage{"object": json.RawMessage(`"file"`)}
-		for _, name := range []string{"bytes", "created_at", "filename", "purpose"} {
+		for _, name := range managedFileFields() {
 			if value, ok := fields[name]; ok {
 				obj[name] = value
 			}
