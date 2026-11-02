@@ -4,6 +4,7 @@ import (
 	"errors"
 	"math"
 	"testing"
+	"time"
 
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/egress"
@@ -81,6 +82,48 @@ func TestCommitmentValidation(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestConfigurationNormalizationPreservesSource(t *testing.T) {
+	t.Run("empty values", func(t *testing.T) {
+		normalized := Configuration{}
+		normalized.Normalize()
+		if normalized.Options.CredentialHeaders == nil || normalized.Options.PluginOptions != nil {
+			t.Fatalf("empty headers and options = %v, %v", normalized.Options.CredentialHeaders, normalized.Options.PluginOptions)
+		}
+	})
+	t.Run("headers", func(t *testing.T) {
+		original := Configuration{Options: Options{CredentialHeaders: []string{" x-api-key ", "x-tenant"}}}
+		normalized := original
+		normalized.Normalize()
+		if original.Options.CredentialHeaders[0] != " x-api-key " || normalized.Options.CredentialHeaders[0] != "X-Api-Key" || normalized.Options.CredentialHeaders[1] != "X-Tenant" {
+			t.Fatalf("source and normalized headers = %v, %v", original.Options.CredentialHeaders, normalized.Options.CredentialHeaders)
+		}
+	})
+	t.Run("plugin options", func(t *testing.T) {
+		original := Configuration{Options: Options{PluginOptions: map[string]string{"unset": "", "kept": "value"}}}
+		normalized := original
+		normalized.Normalize()
+		if _, ok := original.Options.PluginOptions["unset"]; !ok || len(normalized.Options.PluginOptions) != 1 || normalized.Options.PluginOptions["kept"] != "value" {
+			t.Fatalf("source and normalized options = %v, %v", original.Options.PluginOptions, normalized.Options.PluginOptions)
+		}
+	})
+	t.Run("commitment", func(t *testing.T) {
+		original := Configuration{Kind: KindOpenAI, AuthMode: "api_key"}
+		original.Normalize()
+		start, end := time.Unix(100, 0).UTC(), time.Unix(200, 0).UTC()
+		original.Options.Commitment = &routing.Commitment{ID: "commitment", EffectiveAt: &start, EndsAt: &end, Amount: " 1.25 ", Period: "day"}
+		normalized := original
+		if err := normalized.Validate(&egress.Policy{}); err != nil {
+			t.Fatal(err)
+		}
+		if original.Options.Commitment.Amount != " 1.25 " || normalized.Options.Commitment.Amount != "1.25" {
+			t.Fatalf("source and normalized commitments = %q, %q", original.Options.Commitment.Amount, normalized.Options.Commitment.Amount)
+		}
+		if normalized.Options.Commitment.ID != original.Options.Commitment.ID || normalized.Options.Commitment.Period != original.Options.Commitment.Period || normalized.Options.Commitment.EffectiveAt == nil || !normalized.Options.Commitment.EffectiveAt.Equal(start) || normalized.Options.Commitment.EndsAt == nil || !normalized.Options.Commitment.EndsAt.Equal(end) {
+			t.Fatalf("normalized commitment lost fields: %+v", normalized.Options.Commitment)
+		}
+	})
 }
 
 func TestCommitmentAndPriceAgreeOnDecimalPrecision(t *testing.T) {

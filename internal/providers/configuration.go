@@ -8,6 +8,7 @@ import (
 	"errors"
 	"maps"
 	"net/textproto"
+	"slices"
 	"strings"
 
 	"github.com/tyk-swe/olp/internal/routing"
@@ -88,11 +89,15 @@ func (c *Configuration) Normalize() {
 			c.Endpoint = new(endpoint)
 		}
 	}
+	c.Options.CredentialHeaders = slices.Collect(func(yield func(string) bool) {
+		for _, h := range c.Options.CredentialHeaders {
+			if !yield(textproto.CanonicalMIMEHeaderKey(strings.TrimSpace(h))) {
+				return
+			}
+		}
+	})
 	if c.Options.CredentialHeaders == nil {
 		c.Options.CredentialHeaders = []string{}
-	}
-	for i, h := range c.Options.CredentialHeaders {
-		c.Options.CredentialHeaders[i] = textproto.CanonicalMIMEHeaderKey(strings.TrimSpace(h))
 	}
 	if c.Options.Models == nil {
 		c.Options.Models = map[string]json.RawMessage{}
@@ -101,7 +106,15 @@ func (c *Configuration) Normalize() {
 		c.Options.ParameterDefaults = map[string]json.RawMessage{}
 	}
 	// An option left empty is unset.
-	maps.DeleteFunc(c.Options.PluginOptions, func(_, value string) bool { return value == "" })
+	if c.Options.PluginOptions != nil {
+		c.Options.PluginOptions = maps.Collect(func(yield func(string, string) bool) {
+			for key, value := range c.Options.PluginOptions {
+				if value != "" && !yield(key, value) {
+					return
+				}
+			}
+		})
+	}
 	switch {
 	case c.Kind == KindPlugin:
 		// No vendor list price applies to a plugin provider.
@@ -283,7 +296,10 @@ func (c *Configuration) Validate(policy *egress.Policy) error {
 			return access.Invalid("configuration.options.commitment.amount",
 				"A commitment amount is a positive decimal with at most 12 integer and 12 fractional digits.")
 		}
-		c.Options.Commitment.Amount = amount
+		c.Options.Commitment = &routing.Commitment{
+			ID: c.Options.Commitment.ID, EffectiveAt: c.Options.Commitment.EffectiveAt, EndsAt: c.Options.Commitment.EndsAt,
+			Amount: amount, Period: c.Options.Commitment.Period,
+		}
 		if !routing.ValidCommitmentPeriod(c.Options.Commitment.Period) {
 			return access.Invalid("configuration.options.commitment.period",
 				`A commitment period is "hour", "day" or "month".`)
