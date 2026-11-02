@@ -13,6 +13,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/contentpolicy"
 	"github.com/tyk-swe/olp/internal/guardrails"
+	"github.com/tyk-swe/olp/internal/limits"
 )
 
 // WireVersion is the envelope version this build writes and accepts. Every
@@ -1363,9 +1364,5 @@ func validBudgetBoundary(boundary string, code *string) bool {
 	if code == nil || *code != "budget_exhausted" {
 		return false
 	}
-	switch boundary {
-	case "api_key", "budget_group", "key_route", "key_end_user", "project_end_user", "attribution", "project", "organization", "installation":
-		return true
-	}
-	return false
+	return limits.ValidBudgetBoundary(boundary)
 }

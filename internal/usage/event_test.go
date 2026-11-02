@@ -233,6 +233,13 @@ func TestDecodeRejectsMalformedFields(t *testing.T) {
 		{"unknown surface", func(m map[string]json.RawMessage) {
 			m["surface"] = json.RawMessage(`"vertex"`)
 		}},
+		{"unknown budget boundary", func(m map[string]json.RawMessage) {
+			m["error_class"] = json.RawMessage(`"budget_exhausted"`)
+			m["budget_boundary"] = json.RawMessage(`"unknown"`)
+		}},
+		{"budget boundary without budget refusal", func(m map[string]json.RawMessage) {
+			m["budget_boundary"] = json.RawMessage(`"api_key"`)
+		}},
 		{"negative latency", func(m map[string]json.RawMessage) {
 			m["latency_ms"] = json.RawMessage(`-1`)
 		}},
@@ -308,6 +315,36 @@ func TestDecodeRejectsMalformedFields(t *testing.T) {
 			}
 			if errors.Is(err, ErrInvalidEvent) {
 				t.Error("a malformed payload must not read as an invalid event")
+			}
+		})
+	}
+}
+
+func TestBudgetBoundarySurvivesUsageEvent(t *testing.T) {
+	now := time.Now().UTC()
+	status := 429
+	code := "budget_exhausted"
+	for _, boundary := range []string{"api_key", "budget_group", "key_route", "key_end_user", "project_end_user", "attribution", "project", "organization", "installation"} {
+		t.Run(boundary, func(t *testing.T) {
+			event := &Event{
+				EventID: uuid.NewString(), RequestID: uuid.NewString(), RuntimeGenerationID: uuid.NewString(), APIKeyID: uuid.NewString(),
+				RouteSlug: "primary", Operation: "generation", Surface: "openai",
+				RequestStartedAt: now, RequestCompletedAt: now, ObservedAt: now,
+				StatusCode: &status, ErrorClass: &code, BudgetBoundary: boundary,
+			}
+			payload, err := Encode(event)
+			if err != nil {
+				t.Fatalf("encode: %v", err)
+			}
+			decoded, err := Decode(payload)
+			if err != nil {
+				t.Fatalf("decode: %v", err)
+			}
+			if _, err := Validate(decoded); err != nil {
+				t.Fatalf("validate: %v", err)
+			}
+			if decoded.BudgetBoundary != boundary {
+				t.Fatalf("budget boundary = %q, want %q", decoded.BudgetBoundary, boundary)
 			}
 		})
 	}
