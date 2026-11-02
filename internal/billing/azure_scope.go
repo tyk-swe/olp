@@ -92,6 +92,28 @@ func validateAzureCredential(raw []byte) ([]byte, error) {
 	return json.Marshal(credential)
 }
 
+func encodeAzureStoredCredential(key string) ([]byte, error) {
+	credential, err := validateAzureCredential([]byte(key))
+	if err != nil {
+		return nil, err
+	}
+	return json.MarshalIndent(credentialDocument{Source: SourceAzureCostManagement, Credential: credential}, "", "  ")
+}
+
+func decodeAzureStoredCredential(data []byte) ([]byte, error) {
+	if !bytes.ContainsRune(data, '\n') {
+		return nil, errIncompatibleCredential
+	}
+	document, err := parseCredentialDocument(data)
+	if err != nil {
+		return nil, err
+	}
+	if document.Source != SourceAzureCostManagement {
+		return nil, errIncompatibleCredential
+	}
+	return validateAzureCredential(document.Credential)
+}
+
 func azureCredentialPart(value string, max int) bool {
 	return len(value) > 0 && len(value) <= max && !strings.ContainsAny(value, "\x00\r\n")
 }

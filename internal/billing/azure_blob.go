@@ -73,12 +73,6 @@ type azureRun struct {
 	submitted time.Time
 }
 
-type azurePeriod struct {
-	start    string
-	revision sourceRevision
-	days     reportAccumulator
-}
-
 type azureTotals struct {
 	files      int
 	rows       int64
@@ -142,7 +136,50 @@ func azureSDKError(err error) error {
 	return failFetch("network", errors.New("Azure storage request failed"))
 }
 
-func fetchAzure(ctx context.Context, client *http.Client, auth *connectors.Auth, endpoint string, scope azureScope, key []byte, earliest, today time.Time, completed map[string]struct{}, row *importRow, store func(azurePeriod) error) error {
+func azureCostSource() costSource {
+	return costSource{
+		name:             SourceAzureCostManagement,
+		kind:             "azure_openai",
+		validateScope:    validateAzureScope,
+		encodeCredential: encodeAzureStoredCredential,
+		decodeCredential: decodeAzureStoredCredential,
+		credentialInput:  rawCredentialInput,
+		fetch:            fetchAzureSource,
+	}
+}
+
+func fetchAzureSource(ctx context.Context, in *fetchInput, emit func(periodDays) error) error {
+	var scope azureScope
+	if err := json.Unmarshal(in.row.Scope, &scope); err != nil {
+		return failFetch("response", err)
+	}
+	endpoint := "https://" + scope.StorageAccount + ".blob.core.windows.net"
+	if in.importer.AzureBlobEndpoint != nil {
+		endpoint = in.importer.AzureBlobEndpoint(scope.StorageAccount)
+	}
+	client, err := in.importer.client(ctx, in.row.ProviderID, in.cfg, in.key, endpoint)
+	if err != nil {
+		return failFetch("endpoint", err)
+	}
+	authClient, err := in.importer.billingAuthenticationClient(ctx, in.cfg)
+	if err != nil {
+		return failFetch("endpoint", err)
+	}
+	defer authClient.CloseIdleConnections()
+	today := in.importer.now().UTC().Truncate(24 * time.Hour)
+	var retention int
+	if err := in.importer.Pool.QueryRow(ctx, `SELECT COALESCE((SELECT value::int FROM olp.settings WHERE key='retention.usage_days'),90)`).Scan(&retention); err != nil {
+		return err
+	}
+	earliest := today.AddDate(0, 0, -retention)
+	completed, err := in.importer.completedCloudPeriods(ctx, in.row, earliest, today)
+	if err != nil {
+		return err
+	}
+	return fetchAzure(ctx, client, connectors.NewBillingAuth(in.importer.Egress, authClient), endpoint, scope, in.key, earliest, today, completed, in.row, emit)
+}
+
+func fetchAzure(ctx context.Context, client *http.Client, auth *connectors.Auth, endpoint string, scope azureScope, key []byte, earliest, today time.Time, completed map[string]struct{}, row *importRow, store func(periodDays) error) error {
 	var credential azureCredential
 	if err := json.Unmarshal(key, &credential); err != nil {
 		return failFetch("credential", errors.New("invalid credential"))
@@ -228,7 +265,7 @@ func fetchAzure(ctx context.Context, client *http.Client, auth *connectors.Auth,
 				}
 				break
 			}
-			if err := store(azurePeriod{start: run.start.Format(dayFormat), revision: sourceRevision{id: run.manifest.RunInfo.RunID, orderingAt: run.submitted}, days: days}); err != nil {
+			if err := store(periodDays{start: run.start.Format(dayFormat), revision: &sourceRevision{id: run.manifest.RunInfo.RunID, orderingAt: run.submitted}, days: days}); err != nil {
 				return err
 			}
 			completedCount++

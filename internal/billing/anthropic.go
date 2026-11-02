@@ -10,6 +10,20 @@ import (
 	"time"
 )
 
+func anthropicCostSource() costSource {
+	return costSource{
+		name:             SourceAnthropic,
+		kind:             "anthropic",
+		validateScope:    validateAnthropicScope,
+		encodeCredential: func(key string) ([]byte, error) { return encodeAPIKeyCredential(SourceAnthropic, key) },
+		decodeCredential: decodePollingCredential,
+		credentialInput:  stringCredentialInput,
+		fetch: func(ctx context.Context, in *fetchInput, emit func(periodDays) error) error {
+			return fetchPolling(ctx, in, emit, fetchAnthropic)
+		},
+	}
+}
+
 // fetchAnthropic reads the Anthropic organization cost report for a day
 // window. Amounts arrive as decimal strings in the currency's lowest unit —
 // cents — and convert to the stored amount with an exact decimal shift.
