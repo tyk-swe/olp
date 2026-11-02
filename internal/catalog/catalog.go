@@ -378,8 +378,8 @@ func validateTiers(p *Price) error {
 	if len(p.Tiers) == 0 {
 		return nil
 	}
-	if len(p.Tiers) > 8 {
-		return errors.New("tiers take at most 8 thresholds")
+	if len(p.Tiers) > pricingpolicy.MaxTiers {
+		return fmt.Errorf("tiers take at most %d thresholds", pricingpolicy.MaxTiers)
 	}
 	entry := priceRates(p)
 	previous := int64(0)

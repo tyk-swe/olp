@@ -537,9 +537,6 @@ func perMillionRates(p *Price, t *PriceTier) [][2]**string {
 	}
 }
 
-// maxTiers bounds the thresholds one price may carry.
-const maxTiers = 8
-
 // normalizeTiers checks the thresholds are positive and strictly increasing,
 // normalizes every rate, and holds each tier to the per-million rate set its
 // entry carries: a tier replaces that set, so it must name exactly it.
@@ -547,9 +544,9 @@ func normalizeTiers(tiers []PriceTier, entry *Price) error {
 	if tiers == nil {
 		return nil
 	}
-	if len(tiers) < 1 || len(tiers) > maxTiers {
+	if len(tiers) < 1 || len(tiers) > pricingpolicy.MaxTiers {
 		return access.Invalid("prices",
-			"Pricing tiers name 1–"+strconv.Itoa(maxTiers)+" thresholds.")
+			"Pricing tiers name 1–"+strconv.Itoa(pricingpolicy.MaxTiers)+" thresholds.")
 	}
 	previous := int64(0)
 	for i := range tiers {

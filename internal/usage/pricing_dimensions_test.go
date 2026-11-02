@@ -3,6 +3,8 @@ package usage
 import (
 	"testing"
 	"time"
+
+	"github.com/tyk-swe/olp/internal/pricingpolicy"
 )
 
 // priceOf normalizes one entry as CreateRevision would, failing the test on refusal.
@@ -133,7 +135,7 @@ func TestPriceValidationComponents(t *testing.T) {
 		}},
 		{"too many tiers", func() Price {
 			p := basePrice()
-			for index := range maxTiers + 1 {
+			for index := range pricingpolicy.MaxTiers + 1 {
 				p.Tiers = append(p.Tiers, PriceTier{AboveInputTokens: int64(index + 1),
 					InputPerMillion: rate("2"), OutputPerMillion: rate("4")})
 			}

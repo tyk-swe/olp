@@ -1,6 +1,9 @@
 package pricingpolicy
 
-const MaxWindowPeriods = 32
+const (
+	MaxTiers         = 8
+	MaxWindowPeriods = 32
+)
 
 func WindowMinutes(value string, allowEndOfDay bool) (int, bool) {
 	if len(value) != 5 || value[2] != ':' || value[0] < '0' || value[0] > '9' ||

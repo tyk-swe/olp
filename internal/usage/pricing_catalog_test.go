@@ -94,17 +94,65 @@ func TestCatalogWindowsAgreeWithPriceRevisions(t *testing.T) {
 				t.Fatal(err)
 			}
 			fixture.Vendors[0].Models[0].Prices[0].Windows = &catalog.Windows{TimeZone: time.UTC.String(), Periods: tc.periods}
-			catalogErr := fixture.Validate()
-			doc, skipped := catalogDocument(fixture, vendors.Kind)
-			if len(skipped) != 0 {
-				t.Fatalf("unexpected skipped catalog price: %+v", skipped)
-			}
-			_, _, pricingErr := validatePrices(doc.Prices, vendors.Kind)
+			catalogErr, pricingErr := catalogPriceValidation(t, fixture)
 			if (catalogErr == nil) != tc.valid || (pricingErr == nil) != tc.valid {
 				t.Fatalf("catalog error = %v, pricing error = %v", catalogErr, pricingErr)
 			}
 		})
 	}
+}
+
+func TestCatalogTiersAgreeWithPriceRevisions(t *testing.T) {
+	document, _, _, _ := signedCatalog(t, time.Date(2025, 1, 15, 0, 0, 0, 0, time.UTC))
+	rate := catalog.Decimal("2")
+	tier := func(threshold int64) catalog.Tier {
+		return catalog.Tier{AboveInputTokens: threshold, InputPerMillion: &rate, OutputPerMillion: &rate}
+	}
+	tiers := func(count int) []catalog.Tier {
+		return slices.Collect(func(yield func(catalog.Tier) bool) {
+			for index := range count {
+				if !yield(tier(int64(index + 1))) {
+					return
+				}
+			}
+		})
+	}
+	for _, tc := range []struct {
+		name  string
+		tiers []catalog.Tier
+		valid bool
+	}{
+		{"no tiers", nil, true},
+		{"one tier", []catalog.Tier{tier(1)}, true},
+		{"tier limit", tiers(8), true},
+		{"too many tiers", tiers(9), false},
+		{"zero threshold", []catalog.Tier{tier(0)}, false},
+		{"unordered", []catalog.Tier{tier(2), tier(1)}, false},
+		{"missing rate", []catalog.Tier{{AboveInputTokens: 1, InputPerMillion: &rate}}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fixture, err := catalog.Decode(document)
+			if err != nil {
+				t.Fatal(err)
+			}
+			fixture.Vendors[0].Models[0].Prices[0].Tiers = tc.tiers
+			catalogErr, pricingErr := catalogPriceValidation(t, fixture)
+			if (catalogErr == nil) != tc.valid || (pricingErr == nil) != tc.valid {
+				t.Fatalf("catalog error = %v, pricing error = %v", catalogErr, pricingErr)
+			}
+		})
+	}
+}
+
+func catalogPriceValidation(t *testing.T, fixture *catalog.Catalog) (error, error) {
+	t.Helper()
+	catalogErr := fixture.Validate()
+	doc, skipped := catalogDocument(fixture, vendors.Kind)
+	if len(skipped) != 0 {
+		t.Fatalf("unexpected skipped catalog price: %+v", skipped)
+	}
+	_, _, pricingErr := validatePrices(doc.Prices, vendors.Kind)
+	return catalogErr, pricingErr
 }
 
 // catalogUpstream serves a signed catalog and its signature the way a static
