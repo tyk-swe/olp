@@ -37,38 +37,43 @@ type Binding struct {
 }
 type Server struct{ Access *access.Server }
 
-func Validate(in *Input) error {
-	in.Name = strings.TrimSpace(in.Name)
-	in.Route = strings.TrimSpace(in.Route)
-	if err := access.ValidText("name", in.Name, 100); err != nil {
-		return err
+func normalizeInput(in Input) (Input, error) {
+	name := strings.TrimSpace(in.Name)
+	route := strings.TrimSpace(in.Route)
+	if err := access.ValidText("name", name, 100); err != nil {
+		return Input{}, err
 	}
 	if _, err := uuid.Parse(in.ProjectID); err != nil {
-		return access.Invalid("project_id", "Choose an owning project.")
+		return Input{}, access.Invalid("project_id", "Choose an owning project.")
 	}
 	if _, err := uuid.Parse(in.TargetID); err != nil {
-		return access.Invalid("target_id", "Choose one route target.")
+		return Input{}, access.Invalid("target_id", "Choose one route target.")
 	}
-	if in.Route == "" || len(in.Route) > 128 || !ResourceValid(in.Backend, in.Resource) {
-		return access.Invalid("backend_resource", "Choose a supported backend, route and native resource.")
+	if route == "" || len(route) > 128 || !ResourceValid(in.Backend, in.Resource) {
+		return Input{}, access.Invalid("backend_resource", "Choose a supported backend, route and native resource.")
 	}
 	if err := ValidateFields(in.Backend, in.Fields); err != nil {
-		return access.Invalid("fields", err.Error())
+		return Input{}, access.Invalid("fields", err.Error())
 	}
 	if len(in.KeyGrants) > 2000 {
-		return access.Invalid("key_grants", "Use at most 2000 explicit API-key grants.")
-	}
-	if in.KeyGrants == nil {
-		in.KeyGrants = []string{}
+		return Input{}, access.Invalid("key_grants", "Use at most 2000 explicit API-key grants.")
 	}
 	for _, key := range in.KeyGrants {
 		if parsed, err := uuid.Parse(key); err != nil || parsed.String() != key {
-			return access.Invalid("key_grants", "Use canonical API-key UUIDs.")
+			return Input{}, access.Invalid("key_grants", "Use canonical API-key UUIDs.")
 		}
 	}
-	slices.Sort(in.KeyGrants)
-	in.KeyGrants = slices.Compact(in.KeyGrants)
-	return nil
+	return Input{
+		ProjectID: in.ProjectID,
+		Name:      name,
+		Route:     route,
+		TargetID:  in.TargetID,
+		Backend:   in.Backend,
+		Resource:  in.Resource,
+		Fields:    in.Fields,
+		KeyGrants: append([]string{}, slices.Compact(slices.Sorted(slices.Values(in.KeyGrants)))...),
+		Enabled:   in.Enabled,
+	}, nil
 }
 
 const bindingColumns = "b.id::text,b.project_id::text,b.name,b.etag::text,b.retired_at,v.id::text,v.revision,v.definition"
@@ -154,39 +159,54 @@ func ValidateAuthority(ctx context.Context, q access.Queryer, in Input) (string,
 	}
 	return providers[0], nil
 }
-func Save(ctx context.Context, tx pgx.Tx, actor string, current, next *Binding) error {
-	if err := Validate(&next.Input); err != nil {
-		return err
-	}
-	provider, err := ValidateAuthority(ctx, tx, next.Input)
+func Save(ctx context.Context, tx pgx.Tx, actor string, current *Binding, in Input) (Binding, error) {
+	normalized, err := normalizeInput(in)
 	if err != nil {
-		return err
+		return Binding{}, err
 	}
-	next.ProviderID = provider
-	next.ID, next.RevisionID, next.ETag, next.Revision = access.NewID(), access.NewID(), access.NewID(), 1
-	if current != nil {
-		if current.RetiredAt != nil || current.ProjectID != next.ProjectID {
-			return access.Invalid("project_id", "The binding project is immutable and retired bindings cannot change.")
-		}
-		next.ID, next.Revision = current.ID, current.Revision+1
+	provider, err := ValidateAuthority(ctx, tx, normalized)
+	if err != nil {
+		return Binding{}, err
+	}
+	if current != nil && (current.RetiredAt != nil || current.ProjectID != normalized.ProjectID) {
+		return Binding{}, access.Invalid("project_id", "The binding project is immutable and retired bindings cannot change.")
+	}
+	id, revision := nextBindingIdentity(current)
+	next := Binding{
+		Input:      normalized,
+		ProviderID: provider,
+		ID:         id,
+		RevisionID: access.NewID(),
+		Revision:   revision,
+		ETag:       access.NewID(),
 	}
 	raw, err := json.Marshal(struct {
 		Input
 		ProviderID string `json:"provider_id"`
 	}{next.Input, next.ProviderID})
 	if err != nil {
-		return err
+		return Binding{}, err
 	}
 	if current == nil {
-		_, err = tx.Exec(ctx, "INSERT INTO olp.retrieval_bindings(id,project_id,name,latest_revision_id,etag,created_by) VALUES($1,$2,$3,$4,$5,$6)", next.ID, next.ProjectID, next.Name, next.RevisionID, next.ETag, actor)
+		if _, err := tx.Exec(ctx, "INSERT INTO olp.retrieval_bindings(id,project_id,name,latest_revision_id,etag,created_by) VALUES($1,$2,$3,$4,$5,$6)", next.ID, next.ProjectID, next.Name, next.RevisionID, next.ETag, actor); err != nil {
+			return Binding{}, err
+		}
 	} else {
-		_, err = tx.Exec(ctx, "UPDATE olp.retrieval_bindings SET name=$2,latest_revision_id=$3,etag=$4 WHERE id=$1", next.ID, next.Name, next.RevisionID, next.ETag)
+		if _, err := tx.Exec(ctx, "UPDATE olp.retrieval_bindings SET name=$2,latest_revision_id=$3,etag=$4 WHERE id=$1", next.ID, next.Name, next.RevisionID, next.ETag); err != nil {
+			return Binding{}, err
+		}
 	}
-	if err != nil {
-		return err
+	if _, err := tx.Exec(ctx, "INSERT INTO olp.retrieval_binding_revisions(id,binding_id,revision,definition,created_by) VALUES($1,$2,$3,$4,$5)", next.RevisionID, next.ID, next.Revision, raw, actor); err != nil {
+		return Binding{}, err
 	}
-	_, err = tx.Exec(ctx, "INSERT INTO olp.retrieval_binding_revisions(id,binding_id,revision,definition,created_by) VALUES($1,$2,$3,$4,$5)", next.RevisionID, next.ID, next.Revision, raw, actor)
-	return err
+	return next, nil
+}
+
+func nextBindingIdentity(current *Binding) (string, int64) {
+	if current != nil {
+		return current.ID, current.Revision + 1
+	}
+	return access.NewID(), 1
 }
 func (s *Server) Register(mux *http.ServeMux) {
 	s.Access.Route(mux, "GET /api/v1/retrieval-bindings", s.list)
@@ -261,16 +281,22 @@ func (s *Server) revision(r *http.Request, p access.Principal) (access.Reply, er
 	}
 	return access.Detail(map[string]any{"id": version, "binding_id": id, "revision": n, "definition": definition}, version), nil
 }
+func readBindingInput(r *http.Request) (Input, error) {
+	if r.Method == http.MethodDelete {
+		return Input{}, nil
+	}
+	var in Input
+	if err := access.DecodeUnique(r, &in, 64<<10); err != nil {
+		return Input{}, err
+	}
+	return normalizeInput(in)
+}
+
 func (s *Server) write(r *http.Request, _ access.Principal) (access.Reply, error) {
 	retire := r.Method == http.MethodDelete
-	var in Input
-	if !retire {
-		if err := access.DecodeUnique(r, &in, 64<<10); err != nil {
-			return access.Reply{}, err
-		}
-		if err := Validate(&in); err != nil {
-			return access.Reply{}, err
-		}
+	in, err := readBindingInput(r)
+	if err != nil {
+		return access.Reply{}, err
 	}
 	tx, err := s.Access.Begin(r)
 	if err != nil {
@@ -323,8 +349,8 @@ func (s *Server) write(r *http.Request, _ access.Principal) (access.Reply, error
 		_, err = tx.Exec(r.Context(), "UPDATE olp.retrieval_bindings SET retired_at=now(),etag=$2 WHERE id=$1", id, access.NewID())
 		action = "retrieval_binding.retire"
 	} else {
-		next := &Binding{Input: in}
-		err = Save(r.Context(), tx, p.UserID(), current, next)
+		var next Binding
+		next, err = Save(r.Context(), tx, p.UserID(), current, in)
 		if err == nil {
 			id = next.ID
 			reply = access.Detail(next, next.ETag)

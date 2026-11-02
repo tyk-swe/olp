@@ -256,8 +256,7 @@ func (s *Server) applyRetrievalBindings(ctx context.Context, tx pgx.Tx, p access
 				continue
 			}
 		}
-		next := &retrieval.Binding{Input: in}
-		if err = retrieval.Save(ctx, tx, p.UserID(), current, next); err != nil {
+		if _, err := retrieval.Save(ctx, tx, p.UserID(), current, in); err != nil {
 			return err
 		}
 	}
