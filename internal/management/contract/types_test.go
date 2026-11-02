@@ -15,6 +15,23 @@ import (
 	"github.com/tyk-swe/olp/internal/usage"
 )
 
+func TestRoutingStrategiesAgreeWithManagementContract(t *testing.T) {
+	choices := openAPIEnum(t, "RoutingStrategy")
+	for _, choice := range append(slices.Clone(choices), "unknown") {
+		t.Run(choice, func(t *testing.T) {
+			want := slices.Contains(choices, choice)
+			preferences := routing.Preferences{Strategy: &choice}
+			policy := routing.Policy{AllowedStrategies: []string{choice}}
+			if got := preferences.Validate("preferences") == nil; got != want {
+				t.Errorf("request strategy acceptance = %t, contract acceptance = %t", got, want)
+			}
+			if got := policy.Validate() == nil; got != want {
+				t.Errorf("allowed strategy acceptance = %t, contract acceptance = %t", got, want)
+			}
+		})
+	}
+}
+
 func TestRouteFailurePoliciesAgreeWithManagementContract(t *testing.T) {
 	raw, err := os.ReadFile("../../../openapi/management.json")
 	if err != nil {

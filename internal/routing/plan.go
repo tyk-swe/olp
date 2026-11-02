@@ -238,7 +238,7 @@ func Select(s *Snapshot, slug, operation, surface, mode string, affinity []byte,
 	if e != nil {
 		return plan, e
 	}
-	capacity := policy.Strategy == "capacity"
+	capacity := policy.Strategy == strategyCapacity
 	if query := supplyQuery(route, rows, s, capacity && options.CheckSlots); !query.empty() {
 		var state *SupplyState
 		if options.Supply != nil {
@@ -452,10 +452,10 @@ func evaluateCandidates(s *Snapshot, route Route, operation, surface, mode strin
 		}
 		row.attempt = Attempt{TargetID: target.ID, ProviderID: target.ProviderID, ProviderRevisionID: provider.RevisionID, ProviderKind: provider.Kind, UpstreamModel: target.ProviderModel, Timeout: time.Duration(target.Timeout) * time.Millisecond, Priority: target.Priority, Score: Score(routeID, targetID, target.Weight, operation, surface, mode, affinity), Strategy: policy.Strategy, PolicyDigest: policy.Digest, Price: row.decision.Price, Discount: row.attempt.Discount, Performance: row.decision.Performance, VendorID: provider.VendorID}
 		perf := row.decision.Performance
-		if policy.Strategy == "latency" && policy.Preferences.PreferredMaxLatencyMS != nil && (perf == nil || perf.LatencyMS > float64(*policy.Preferences.PreferredMaxLatencyMS)) {
+		if policy.Strategy == strategyLatency && policy.Preferences.PreferredMaxLatencyMS != nil && (perf == nil || perf.LatencyMS > float64(*policy.Preferences.PreferredMaxLatencyMS)) {
 			row.preference = 1
 		}
-		if policy.Strategy == "throughput" && policy.Preferences.PreferredMinThroughput != nil && (perf == nil || perf.Throughput == nil || *perf.Throughput < float64(*policy.Preferences.PreferredMinThroughput)) {
+		if policy.Strategy == strategyThroughput && policy.Preferences.PreferredMinThroughput != nil && (perf == nil || perf.Throughput == nil || *perf.Throughput < float64(*policy.Preferences.PreferredMinThroughput)) {
 			row.preference = 1
 		}
 		rows = append(rows, row)
@@ -490,12 +490,12 @@ func orderCandidates(rows []rankedCandidate, strategy, operation string) {
 			return order
 		}
 		switch strategy {
-		case "capacity":
+		case strategyCapacity:
 			ah, bh := a.decision.Headroom, b.decision.Headroom
 			if order := compareKnown(deref(ah), ah != nil, deref(bh), bh != nil); order != 0 {
 				return order
 			}
-		case "price":
+		case strategyPrice:
 			ap, bp := a.decision.Price.Scalar(operation), b.decision.Price.Scalar(operation)
 			if (ap == nil) != (bp == nil) {
 				if ap != nil {
@@ -506,9 +506,9 @@ func orderCandidates(rows []rankedCandidate, strategy, operation string) {
 			if ap != nil && ap.Cmp(bp) != 0 {
 				return ap.Cmp(bp)
 			}
-		case "latency", "throughput":
+		case strategyLatency, strategyThroughput:
 			ap, bp := a.decision.Performance, b.decision.Performance
-			if strategy == "throughput" {
+			if strategy == strategyThroughput {
 				if ap != nil && ap.Throughput == nil {
 					ap = nil
 				}
@@ -523,10 +523,10 @@ func orderCandidates(rows []rankedCandidate, strategy, operation string) {
 				return 1
 			}
 			if ap != nil {
-				if strategy == "latency" && ap.LatencyMS != bp.LatencyMS {
+				if strategy == strategyLatency && ap.LatencyMS != bp.LatencyMS {
 					return cmp.Compare(ap.LatencyMS, bp.LatencyMS)
 				}
-				if strategy == "throughput" && *ap.Throughput != *bp.Throughput {
+				if strategy == strategyThroughput && *ap.Throughput != *bp.Throughput {
 					return cmp.Compare(*bp.Throughput, *ap.Throughput)
 				}
 			}

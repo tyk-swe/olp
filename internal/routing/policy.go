@@ -38,7 +38,17 @@ type Preferences struct {
 	Priority *string `json:"priority,omitempty"`
 }
 
-var Strategies = []string{"weighted", "price", "latency", "throughput", "capacity"}
+const (
+	strategyWeighted   = "weighted"
+	strategyPrice      = "price"
+	strategyLatency    = "latency"
+	strategyThroughput = "throughput"
+	strategyCapacity   = "capacity"
+)
+
+func strategies() []string {
+	return []string{strategyWeighted, strategyPrice, strategyLatency, strategyThroughput, strategyCapacity}
+}
 
 type Policy struct {
 	AllowedStrategies []string    `json:"allowed_strategies"`
@@ -56,7 +66,7 @@ func (p *Preferences) Validate(field string) error {
 		return nil
 	}
 	invalid := func(message string) error { return invalidValue(field, message) }
-	if p.Strategy != nil && !slices.Contains(Strategies, *p.Strategy) {
+	if p.Strategy != nil && !slices.Contains(strategies(), *p.Strategy) {
 		return invalid("Unknown routing strategy")
 	}
 	if p.PreferredMaxLatencyMS != nil && *p.PreferredMaxLatencyMS < 0 || p.PreferredMinThroughput != nil && (*p.PreferredMinThroughput < 0) {
@@ -136,7 +146,7 @@ func (p *Policy) Validate() error {
 		return nil
 	}
 	for _, s := range p.AllowedStrategies {
-		if !slices.Contains(Strategies, s) {
+		if !slices.Contains(strategies(), s) {
 			return invalidValue("allowed_strategies", "Unknown routing strategy")
 		}
 	}
@@ -179,7 +189,7 @@ type EffectivePolicy struct {
 }
 
 func ResolvePolicy(installation, route, key *Policy, requested *Preferences) (EffectivePolicy, error) {
-	e := EffectivePolicy{Strategy: "weighted", Allowed: slices.Clone(Strategies)}
+	e := EffectivePolicy{Strategy: strategyWeighted, Allowed: strategies()}
 	narrow := func(maxCost *string) {
 		if maxCost == nil {
 			return
