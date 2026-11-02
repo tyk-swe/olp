@@ -4,6 +4,8 @@ import (
 	"math"
 	"slices"
 	"strings"
+
+	"github.com/tyk-swe/olp/internal/protocols/wire"
 )
 
 // DecodeTranslation retains the native audio translation form. Unlike
@@ -36,7 +38,7 @@ func DecodeTranslation(form *Form) (*Request, *Error) {
 	if file == nil || !validRouteSlug(model) {
 		return nil, invalidMedia("Audio translation requires a file and a model naming a route.")
 	}
-	if format != nil && !slices.Contains([]string{"json", "text", "srt", "vtt", "verbose_json"}, *format) {
+	if format != nil && !wire.ValidTranslationResponseFormat(*format) {
 		return nil, invalidMedia("The translation response_format is not supported.")
 	}
 	if temperature != nil && (math.IsNaN(*temperature) || *temperature < 0 || *temperature > 1) {

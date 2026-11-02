@@ -199,7 +199,7 @@ func validateDefaultValue(operation, name string, raw json.RawMessage) error {
 		if json.Unmarshal(raw, &format) != nil {
 			return errors.New("media response_format must be a string or native null")
 		}
-		if operation == "translation" && !slices.Contains([]string{"json", "text", "srt", "vtt", "verbose_json"}, format) {
+		if operation == "translation" && !wire.ValidTranslationResponseFormat(format) {
 			return errors.New("audio translation response_format is not supported")
 		}
 		return nil

@@ -984,7 +984,14 @@ func defaultControlSchema(dialect, operation, name string) map[string]any {
 	schema := map[string]any{"title": name, "type": []string{kind, "null"}}
 	if operation == "translation" {
 		if name == "response_format" {
-			schema["enum"] = []any{"json", "text", "srt", "vtt", "verbose_json", nil}
+			schema["enum"] = slices.Collect(func(yield func(any) bool) {
+				for _, format := range wire.TranslationResponseFormats() {
+					if !yield(format) {
+						return
+					}
+				}
+				yield(nil)
+			})
 		}
 		if name == "temperature" {
 			schema["minimum"], schema["maximum"] = 0, 1

@@ -41,3 +41,50 @@ func TestConfiguredMediaRejectsUnrepresentableDefaultsAndCollisions(t *testing.T
 		})
 	}
 }
+
+func TestTranslationPublishedFormatsAreAccepted(t *testing.T) {
+	profile, err := connectors.LookupProfile("openai-chat", "1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var schema struct {
+		Properties struct {
+			Values struct {
+				Properties struct {
+					ResponseFormat struct {
+						Enum []*string `json:"enum"`
+					} `json:"response_format"`
+				} `json:"properties"`
+			} `json:"values"`
+		} `json:"properties"`
+	}
+	if err := json.Unmarshal(profile.DefaultSchemas[OpTranslation], &schema); err != nil {
+		t.Fatal(err)
+	}
+	formats := schema.Properties.Values.Properties.ResponseFormat.Enum
+	if len(formats) < 2 {
+		t.Fatal("translation schema must publish response formats")
+	}
+	for _, format := range formats {
+		if format == nil {
+			continue
+		}
+		t.Run(*format, func(t *testing.T) {
+			raw, err := json.Marshal(*format)
+			if err != nil {
+				t.Fatal(err)
+			}
+			cfg := mediaDefaultsConfig(t, OpTranslation, map[string]json.RawMessage{"response_format": raw}, nil)
+			form := &Form{
+				text:  map[string][]string{"model": {"route"}, "response_format": {*format}},
+				files: map[string][]Part{"file": {{}}},
+			}
+			if _, failure := DecodeTranslation(form); failure != nil {
+				t.Fatalf("published format rejected in request: %v", failure)
+			}
+			if err := cfg.ValidateProfile(); err != nil {
+				t.Fatalf("published format rejected in defaults: %v", err)
+			}
+		})
+	}
+}
