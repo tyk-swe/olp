@@ -11,6 +11,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/egress"
+	"github.com/tyk-swe/olp/internal/protocols/wire"
 )
 
 type managedReader struct {
@@ -158,7 +159,7 @@ func parseManagedSnapshot(body []byte, adapter string) (BatchSnapshot, error) {
 	return BatchSnapshot{
 		ID: id, Status: mapped, Endpoint: endpoint, InputFileID: input, OutputFileID: output,
 		ErrorFileID: errorID, Expected: expected, CreatedAt: time.Unix(created, 0),
-		Body: bodyNormalized, Terminal: terminalStatus(mapped),
+		Body: bodyNormalized, Terminal: wire.BatchStageOf(mapped) == wire.BatchTerminal,
 	}, nil
 }
 

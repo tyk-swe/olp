@@ -432,14 +432,14 @@ func parseBatchSnapshot(body []byte) (BatchSnapshot, error) {
 		} `json:"request_counts"`
 	}
 	if err := json.Unmarshal(body, &object); err != nil || object.ID == "" || len(object.ID) > 512 || object.Status == "" ||
-		!validBatchStatus(object.Status) || len(object.InputFileID) > 512 ||
+		wire.BatchStageOf(object.Status) == wire.BatchUnknown || len(object.InputFileID) > 512 ||
 		len(object.OutputFileID) > 512 || len(object.ErrorFileID) > 512 {
 		return BatchSnapshot{}, errors.New("provider batch object is malformed")
 	}
 	snapshot := BatchSnapshot{
 		ID: object.ID, Status: object.Status, Endpoint: object.Endpoint, InputFileID: object.InputFileID,
 		OutputFileID: object.OutputFileID, ErrorFileID: object.ErrorFileID, Body: append([]byte(nil), body...),
-		Terminal: terminalStatus(object.Status),
+		Terminal: wire.BatchStageOf(object.Status) == wire.BatchTerminal,
 	}
 	if object.RequestCounts != nil && object.RequestCounts.Total != nil {
 		if *object.RequestCounts.Total < 0 {
@@ -465,22 +465,6 @@ func parseBatchSnapshot(body []byte) (BatchSnapshot, error) {
 		}
 	}
 	return snapshot, nil
-}
-
-func validBatchStatus(status string) bool {
-	switch status {
-	case "validating", "failed", "in_progress", "finalizing", "completed", "expired", "cancelling", "cancelled":
-		return true
-	}
-	return false
-}
-
-func terminalStatus(status string) bool {
-	switch status {
-	case "completed", "failed", "expired", "cancelled":
-		return true
-	}
-	return false
 }
 
 func ParseLine(line []byte, endpoint string, errorFile bool) (Result, error) {

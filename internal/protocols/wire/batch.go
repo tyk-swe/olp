@@ -1,5 +1,33 @@
 package wire
 
+type BatchStage uint8
+
+const (
+	BatchUnknown BatchStage = iota
+	BatchValidating
+	BatchInProgress
+	BatchFinalizing
+	BatchCancelling
+	BatchTerminal
+)
+
+func BatchStageOf(status string) BatchStage {
+	switch status {
+	case "validating":
+		return BatchValidating
+	case "in_progress":
+		return BatchInProgress
+	case "finalizing":
+		return BatchFinalizing
+	case "cancelling":
+		return BatchCancelling
+	case "completed", "failed", "expired", "cancelled":
+		return BatchTerminal
+	default:
+		return BatchUnknown
+	}
+}
+
 // CanonicalBatchEndpoint selects the result dialect without changing the
 // endpoint spelling sent to providers such as legacy Azure deployments.
 func CanonicalBatchEndpoint(endpoint string) string {
