@@ -20,6 +20,30 @@ const dataset: FocusDataset = {
 
 afterEach(() => vi.unstubAllGlobals());
 
+it.each([
+  { parent: observabilityKeys.root },
+  { parent: observabilityKeys.sinks() }
+])(
+  'refreshes cached dataset pages after invalidating their parent',
+  async ({ parent }) => {
+    const client = new QueryClient();
+    const fetchPage = vi
+      .fn()
+      .mockResolvedValueOnce('old')
+      .mockResolvedValueOnce('new');
+    const options = {
+      queryKey: observabilityKeys.focusDatasets('sink', 'cursor'),
+      queryFn: fetchPage,
+      staleTime: Infinity
+    };
+
+    expect(await client.fetchQuery(options)).toBe('old');
+    await client.invalidateQueries({ queryKey: parent });
+    expect(await client.fetchQuery(options)).toBe('new');
+    expect(fetchPage).toHaveBeenCalledTimes(2);
+  }
+);
+
 it('loads one bounded dataset page and preserves its continuation', async () => {
   const cursor = 'older-date';
   const fetch = vi.fn(async (request: Request) => {
