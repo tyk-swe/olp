@@ -73,6 +73,32 @@ func metadataEvent() *Event {
 	}
 }
 
+func TestEndUserDigestsAgreeWithAccessPolicy(t *testing.T) {
+	for _, tc := range []struct {
+		digest string
+		valid  bool
+	}{
+		{strings.Repeat("a", 64), true}, {strings.Repeat("0", 64), true},
+		{strings.Repeat("A", 64), false}, {strings.Repeat("a", 63), false},
+		{strings.Repeat("a", 65), false}, {strings.Repeat("g", 64), false},
+	} {
+		event := metadataEvent()
+		event.EndUserDigest = tc.digest
+		_, validationErr := Validate(event)
+		payload, err := Encode(event)
+		if err != nil {
+			t.Fatal(err)
+		}
+		decoded, decodeErr := Decode(payload)
+		if access.ValidEndUserDigest(tc.digest) != tc.valid || (validationErr == nil) != tc.valid || (decodeErr == nil) != tc.valid {
+			t.Errorf("digest %q, access valid %v, validation error %v, decode error %v", tc.digest, access.ValidEndUserDigest(tc.digest), validationErr, decodeErr)
+		}
+		if decodeErr == nil && decoded.EndUserDigest != tc.digest {
+			t.Errorf("digest %q decoded as %q", tc.digest, decoded.EndUserDigest)
+		}
+	}
+}
+
 func TestValidateRejectsMalformedEnvelopesAndAttempts(t *testing.T) {
 	negative := "-0.000001"
 	cases := []struct {

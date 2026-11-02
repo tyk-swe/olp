@@ -11,6 +11,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/contentpolicy"
 	"github.com/tyk-swe/olp/internal/guardrails"
 	"github.com/tyk-swe/olp/internal/limits"
@@ -52,7 +53,7 @@ func validateDelegation(event *Event) error {
 	if event.AgentPrincipalID == "" && event.MemberPrincipalID == "" && event.DelegationPairDigest == "" {
 		return nil
 	}
-	if _, err := uuid.Parse(event.AgentPrincipalID); err != nil || !endUserDigestPattern.MatchString(event.DelegationPairDigest) || Keyless(event.Origin) || event.APIKeyID == "" {
+	if _, err := uuid.Parse(event.AgentPrincipalID); err != nil || !delegationDigestPattern.MatchString(event.DelegationPairDigest) || Keyless(event.Origin) || event.APIKeyID == "" {
 		return errors.New("request metadata delegation attribution is invalid")
 	}
 	if event.MemberPrincipalID != "" {
@@ -186,7 +187,7 @@ var knownEstimateProvenances = map[string]struct{}{
 	EstimateTokenizer: {}, EstimateCalibrated: {}, EstimateHeuristic: {},
 }
 
-var endUserDigestPattern = regexp.MustCompile(`^[0-9a-f]{64}$`)
+var delegationDigestPattern = regexp.MustCompile(`^[0-9a-f]{64}$`)
 
 // modelFamilyPattern bounds a model family label. The set of families grows
 // with the reference catalogue, so the label is checked for shape here and the
@@ -575,7 +576,7 @@ func (w wireEvent) decode() (*Event, error) {
 	}
 	if w.EndUserDigest != nil {
 		event.EndUserDigest = *w.EndUserDigest
-		if event.EndUserDigest != "" && (!endUserDigestPattern.MatchString(event.EndUserDigest) || Keyless(event.Origin)) {
+		if event.EndUserDigest != "" && (!access.ValidEndUserDigest(event.EndUserDigest) || Keyless(event.Origin)) {
 			return nil, errors.New("request metadata field end_user_digest is invalid")
 		}
 	}
@@ -1078,7 +1079,7 @@ func Validate(e *Event) (*Validated, error) {
 	case !emptyAttemptMetadataIsValid:
 		return nil, fmt.Errorf("%w: target metadata without an attempt", ErrInvalidEvent)
 	}
-	if e.EndUserDigest != "" && (!endUserDigestPattern.MatchString(e.EndUserDigest) || Keyless(e.Origin)) {
+	if e.EndUserDigest != "" && (!access.ValidEndUserDigest(e.EndUserDigest) || Keyless(e.Origin)) {
 		return nil, fmt.Errorf("%w: invalid end-user digest", ErrInvalidEvent)
 	}
 	if err := validateDelegation(e); err != nil {
