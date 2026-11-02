@@ -9,8 +9,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tyk-swe/olp/internal/operationregistry"
-
 	"github.com/google/uuid"
 
 	"github.com/tyk-swe/olp/internal/contentpolicy"
@@ -517,18 +515,6 @@ type wireRouting struct {
 	Baseline             *Baseline            `json:"baseline"`
 }
 
-// knownOperations, knownSurfaces and knownOrigins are the canonical labels; an event outside them would
-// be rejected by the fact table's constraints long after the delivery was
-// acknowledged, so it is rejected here instead.
-var knownOperations = map[string]struct{}{
-	"generation": {}, "embeddings": {}, "token_count": {}, "image_generation": {},
-	"image_edit": {}, "image_variation": {}, "speech": {}, "transcription": {}, "translation": {},
-	"video_create": {}, "video_list": {}, "video_get": {}, "video_content": {},
-	"video_delete": {}, "moderation": {}, "model_list": {}, "model_get": {}, "rerank": {},
-	"file": {}, "batch": {}, "realtime": {}, "bedrock_invoke": {}, "guardrail": {}, "agent_resource": {}, "passthrough": {},
-	"fine_tuning": {}, "vector_store": {}, "retrieval": {}, "conversation": {}, "container": {}, "eval": {}, "skill": {}, "context_cache": {},
-}
-
 var knownSurfaces = map[string]struct{}{
 	"openai": {}, "anthropic": {}, "gemini": {}, "bedrock": {}, "native": {}, "unknown": {},
 }
@@ -623,10 +609,11 @@ func (w wireEvent) decode() (*Event, error) {
 		return nil, err
 	}
 	event.UpstreamModel = w.UpstreamModel
-	if w.Operation != nil && operationregistry.Default.HasOperation(*w.Operation) {
-		event.Operation = *w.Operation
-	} else if event.Operation, err = requiredLabel("operation", w.Operation, knownOperations); err != nil {
+	if event.Operation, err = requiredField("operation", w.Operation); err != nil {
 		return nil, err
+	}
+	if event.Operation != "file" && event.Operation != "guardrail" && !validOperation(event.Operation) {
+		return nil, errors.New("request metadata field operation has unknown value")
 	}
 	if event.Surface, err = requiredLabel("surface", w.Surface, knownSurfaces); err != nil {
 		return nil, err

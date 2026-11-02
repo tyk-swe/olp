@@ -371,6 +371,28 @@ func TestDecodeAcceptsRetainedOperations(t *testing.T) {
 	}
 }
 
+func TestDecodeAcceptsUnpricedOperations(t *testing.T) {
+	for _, operation := range []string{"file", "guardrail"} {
+		t.Run(operation, func(t *testing.T) {
+			event := metadataEvent()
+			event.Operation = operation
+			payload, err := Encode(event)
+			if err != nil {
+				t.Fatal(err)
+			}
+			decoded, err := Decode(payload)
+			if err != nil || decoded.Operation != operation {
+				t.Fatalf("decode %s: event=%v err=%v", operation, decoded, err)
+			}
+			entry := samplePriceEntry()
+			entry.Operation = operation
+			if _, _, err := validatePrices([]Price{entry}, sampleVendorKind); err == nil {
+				t.Fatalf("accepted a price for %s", operation)
+			}
+		})
+	}
+}
+
 func TestDelegatedAttributionRoundTripAndValidation(t *testing.T) {
 	base, encodeErr := Encode(metadataEvent())
 	if encodeErr != nil {
