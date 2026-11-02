@@ -106,7 +106,7 @@ func TestNativeSemanticHeadersAndServingHintsNeverDisappear(t *testing.T) {
 		_, err := compiled.Bind(source, Context{Headers: headers})
 		assertReason(t, err, "target_capability")
 	}
-	for _, name := range []string{"OpenAI-Organization", "OpenAI-Project", "X-Goog-User-Project", "X-Goog-Request-Params", "X-Ms-Region"} {
+	for _, name := range []string{"OpenAI-Organization", "OpenAI-Project", "X-Goog-User-Project", "X-Goog-Request-Params", "X-Ms-Region", "X-Ms-Routing-Name"} {
 		_, err := compiled.Bind(source, Context{Headers: http.Header{name: {"caller-scope"}}})
 		assertReason(t, err, "resource_affinity")
 	}

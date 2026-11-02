@@ -2,9 +2,12 @@ package operationplan_test
 
 import (
 	"encoding/json"
+	"errors"
+	"net/http"
 	"testing"
 
 	"github.com/tyk-swe/olp/internal/connectors"
+	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/operationplan"
 	"github.com/tyk-swe/olp/internal/operations"
 )
@@ -35,5 +38,30 @@ func TestNativeDefaultsPreserveSourcePresenceAndRequireClient(t *testing.T) {
 	_ = json.Unmarshal(plan.Body(), &fields)
 	if string(fields["truncation"]) != "false" || string(fields["encoding_format"]) != "null" || string(fields["native"]) != `{"zero":-0}` {
 		t.Fatalf("source rewritten %s", plan.Body())
+	}
+}
+
+func TestOperationRefusesCallerServingIdentityHeaders(t *testing.T) {
+	template, err := operationplan.Compile(config("voyage-embeddings", "embeddings"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	source, err := operationplan.Parse("voyage-embeddings", []byte(`{"model":"route","input":"a"}`), 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	context := operationplan.Context{Route: "route", ClientContract: operations.RawVectorClient}
+	if _, err := template.Bind(source, context); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"OpenAI-Organization", "OpenAI-Project", "X-Goog-User-Project", "X-Goog-Request-Params", "X-Ms-Region", "X-Ms-Routing-Name"} {
+		t.Run(name, func(t *testing.T) {
+			context := operationplan.Context{Route: "route", ClientContract: operations.RawVectorClient, Headers: http.Header{name: {"caller-scope"}}}
+			_, err := template.Bind(source, context)
+			var failure *oif.Incompatibility
+			if !errors.As(err, &failure) || failure.Code != "resource_affinity" {
+				t.Fatalf("caller serving header accepted or refused for the wrong reason: %v", err)
+			}
+		})
 	}
 }

@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/protocols/wire"
 	"github.com/tyk-swe/olp/internal/routing"
@@ -343,8 +344,12 @@ func continuationSemanticHeaders(input http.Header) http.Header {
 	out := http.Header{}
 	for name, values := range input {
 		canonical := http.CanonicalHeaderKey(name)
+		if connectors.IsServingIdentityHeader(canonical) {
+			out[canonical] = append(out[canonical], values...)
+			continue
+		}
 		switch canonical {
-		case "Anthropic-Version", "Anthropic-Beta", "Openai-Beta", "Openai-Version", "Api-Version", "Idempotency-Key", "X-Idempotency-Key", "Openai-Organization", "Openai-Project", "X-Goog-User-Project", "X-Goog-Request-Params", "X-Ms-Region", "X-Ms-Routing-Name":
+		case "Anthropic-Version", "Anthropic-Beta", "Openai-Beta", "Openai-Version", "Api-Version", "Idempotency-Key", "X-Idempotency-Key":
 			out[canonical] = append(out[canonical], values...)
 		default:
 			if strings.HasPrefix(canonical, "X-Amzn-Bedrock-") {
