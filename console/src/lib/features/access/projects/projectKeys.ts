@@ -1,14 +1,15 @@
 const root = ['projects'] as const;
+const membersRoot = [...root, 'members'] as const;
 
 export const projectKeys = {
   root,
   page: (cursor?: string) => [...root, 'page', cursor ?? ''] as const,
   all: [...root, 'all'] as const,
-  membersRoot: [...root, 'members'] as const,
+  membersRoot,
   members: (projectId: string, cursor?: string) =>
-    [...root, 'members', projectId, cursor ?? ''] as const,
+    [...membersRoot, projectId, cursor ?? ''] as const,
   allMembers: (projectId: string) =>
-    [...root, 'members', projectId, 'all'] as const,
+    [...membersRoot, projectId, 'all'] as const,
   memberships: [...root, 'memberships'] as const,
   attributionPolicy: (projectId: string) =>
     [...root, 'attribution-policy', projectId] as const,
