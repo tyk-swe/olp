@@ -43,6 +43,29 @@ func TestChatGeminiMultipleCandidatesSurviveUnaryAndStreaming(t *testing.T) {
 	}
 }
 
+func TestGeminiFinishReasonAgreesAcrossUnaryAndStreaming(t *testing.T) {
+	for _, reason := range []string{"STOP", "MAX_TOKENS", "SAFETY", "RECITATION", "BLOCKLIST", "PROHIBITED_CONTENT", "SPII"} {
+		t.Run(reason, func(t *testing.T) {
+			body := fmt.Sprintf(`{"candidates":[{"index":0,"content":{"parts":[{"text":"hello"}]},"finishReason":%q}]}`, reason)
+			unary, err := Decode(wire.Gemini, wire.Chat, []byte(body), "team-model", "")
+			if err != nil {
+				t.Fatal(err)
+			}
+			var streamed bytes.Buffer
+			_, err = Stream(wire.Gemini, wire.Chat, strings.NewReader("data: "+body+"\n\n"), 8192, "team-model", true, func(frame []byte) error {
+				_, err := streamed.Write(frame)
+				return err
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(streamed.String(), fmt.Sprintf(`"finish_reason":%q`, unary.FinishReason)) {
+				t.Fatalf("unary finish reason %q differs from stream %s", unary.FinishReason, streamed.String())
+			}
+		})
+	}
+}
+
 func TestCountingKeepsBedrockToolsAndInvalidGeneratedArgumentsRefuseTranslation(t *testing.T) {
 	request, err := Parse(wire.InputTokens, []byte(`{"model":"team-model","input":"hello","tools":[{"type":"function","name":"weather","parameters":{"type":"object","properties":{}}}]}`), "team-model")
 	if err != nil {
