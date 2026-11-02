@@ -25,6 +25,34 @@ it('refreshes shared publication data after a publication update', async () => {
   }
 });
 
+it('keeps publication types separate when reading and invalidating cached data', async () => {
+  const client = new QueryClient();
+  const publications = [
+    { kind: 'projects', key: agentKeys.projects },
+    { kind: 'servers', key: agentKeys.servers },
+    { kind: 'agents', key: agentKeys.agents },
+    { kind: 'toolsets', key: agentKeys.toolsets }
+  ] as const;
+
+  try {
+    for (const publication of publications)
+      client.setQueryData(
+        agentKeys.publication(publication.kind),
+        publication.kind
+      );
+    for (const publication of publications)
+      expect(client.getQueryData(publication.key())).toBe(publication.kind);
+
+    await client.invalidateQueries({ queryKey: agentKeys.servers() });
+    for (const publication of publications)
+      expect(client.getQueryState(publication.key())?.isInvalidated).toBe(
+        publication.kind === 'servers'
+      );
+  } finally {
+    client.clear();
+  }
+});
+
 it('isolates execution history by project, key and cursor without invalidating grant or server data', async () => {
   const client = new QueryClient();
   const entries = [
