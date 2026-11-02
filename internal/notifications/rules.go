@@ -60,6 +60,11 @@ var intFields = []struct {
 	{"lead_days", 1, 366, 30, func(c *RuleConfiguration) *int { return &c.LeadDays }},
 }
 
+func SupportsEvent(event string) bool {
+	_, ok := rulePolicies[event]
+	return ok
+}
+
 func ParseRuleConfiguration(event string, raw json.RawMessage) (RuleConfiguration, error) {
 	var c RuleConfiguration
 	policy, ok := rulePolicies[event]
