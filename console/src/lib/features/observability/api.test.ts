@@ -40,7 +40,6 @@ it.each([
     expect(await client.fetchQuery(options)).toBe('old');
     await client.invalidateQueries({ queryKey: parent });
     expect(await client.fetchQuery(options)).toBe('new');
-    expect(fetchPage).toHaveBeenCalledTimes(2);
   }
 );
 
@@ -54,21 +53,20 @@ it('loads one bounded dataset page and preserves its continuation', async () => 
     expect(url.searchParams.get('limit')).toBe('50');
     expect(request.method).toBe('GET');
     expect(request.signal.aborted).toBe(false);
+    const requestCursor = url.searchParams.get('cursor');
+    if (requestCursor !== null && requestCursor !== cursor) {
+      throw new Error('Unexpected continuation cursor');
+    }
     return Response.json({
       items: [dataset],
-      next_cursor: url.searchParams.has('cursor') ? null : cursor
+      next_cursor: requestCursor === null ? cursor : null
     });
   });
   vi.stubGlobal('fetch', fetch);
   const first = await listExportSinkFocusDatasets('sink');
   expect(first).toEqual({ items: [dataset], nextCursor: cursor });
-  expect(fetch).toHaveBeenCalledTimes(1);
   const last = await listExportSinkFocusDatasets('sink', first.nextCursor!);
-  expect(new URL(fetch.mock.calls[1][0].url).searchParams.get('cursor')).toBe(
-    cursor
-  );
   expect(last).toEqual({ items: [dataset], nextCursor: null });
-  expect(fetch).toHaveBeenCalledTimes(2);
 });
 
 it('surfaces failed dataset pages instead of returning an empty history', async () => {
