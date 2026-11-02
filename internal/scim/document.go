@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"io"
+	"slices"
 	"strings"
 
 	"github.com/tyk-swe/olp/internal/oif"
@@ -37,8 +38,12 @@ type Document map[string]any
 
 var names = map[string]string{}
 
+func NameSubattributes() []string {
+	return []string{"formatted", "familyName", "givenName", "middleName", "honorificPrefix", "honorificSuffix"}
+}
+
 func init() {
-	for _, n := range []string{"schemas", "id", "externalId", "userName", "displayName", "display", "active", "name", "formatted", "familyName", "givenName", "middleName", "honorificPrefix", "honorificSuffix", "emails", "value", "type", "primary", "roles", "groups", "members", "$ref", "meta", "resourceType", "created", "lastModified", "location", "version", "password", "role", "accessScope", "projects", "operations", "op", "path", "filter", "startIndex", "count", "attributes", "excludedAttributes", "sortBy", "sortOrder", UserExtension, GroupExtension} {
+	for _, n := range slices.Concat([]string{"schemas", "id", "externalId", "userName", "displayName", "display", "active", "name", "emails", "value", "type", "primary", "roles", "groups", "members", "$ref", "meta", "resourceType", "created", "lastModified", "location", "version", "password", "role", "accessScope", "projects", "operations", "op", "path", "filter", "startIndex", "count", "attributes", "excludedAttributes", "sortBy", "sortOrder", UserExtension, GroupExtension}, NameSubattributes()) {
 		names[strings.ToLower(n)] = n
 	}
 }

@@ -2,6 +2,7 @@ package access
 
 import (
 	"net/http"
+	"slices"
 	"strings"
 
 	"github.com/tyk-swe/olp/internal/scim"
@@ -17,7 +18,13 @@ func scimSchemas() []map[string]any {
 		return scimAttribute(name, "complex", scim.MultiValuedComplexAttribute(name), false)
 	}
 	name := complexAttribute("name")
-	name["subAttributes"] = []any{text("formatted", false), text("familyName", false), text("givenName", false), text("middleName", false), text("honorificPrefix", false), text("honorificSuffix", false)}
+	name["subAttributes"] = slices.Collect(func(yield func(any) bool) {
+		for _, field := range scim.NameSubattributes() {
+			if !yield(text(field, false)) {
+				return
+			}
+		}
+	})
 	email := complexAttribute("emails")
 	email["subAttributes"] = []any{text("value", true), text("type", false), scimAttribute("primary", "boolean", false, false)}
 	groups := complexAttribute("groups")
