@@ -16,10 +16,10 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/coordination"
 	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/limits"
-	"github.com/tyk-swe/olp/internal/routeidentity"
 )
 
 // limNilUUID is the API key identity used by tests that exercise rate limits
@@ -634,16 +634,16 @@ func TestLimitsDurableSpendReconcilesIntoValkey(t *testing.T) {
 				}
 				defer caseTx.Rollback(t.Context())
 				budgetErr := limits.EnsureKeyRouteBudget(t.Context(), caseTx, spender, route)
-				valid := routeidentity.ValidSlug(route)
+				policyErr := (access.RouteLimits{route: {DailyCostLimit: limPointer("1")}}).Validate()
 				if budgetErr != nil {
 					pgErr, ok := errors.AsType[*pgconn.PgError](budgetErr)
-					if valid || !ok || pgErr.Code != "23514" {
-						t.Fatalf("budget rejected route %q, valid = %v, error = %v", route, valid, budgetErr)
+					if policyErr == nil || !ok || pgErr.Code != "23514" {
+						t.Fatalf("budget rejected route %q, policy error = %v, storage error = %v", route, policyErr, budgetErr)
 					}
 					return
 				}
-				if !valid {
-					t.Fatalf("budget accepted invalid route %q", route)
+				if policyErr != nil {
+					t.Fatalf("budget accepted route %q rejected by policy: %v", route, policyErr)
 				}
 				var exists bool
 				if err := caseTx.QueryRow(t.Context(), `SELECT EXISTS (
