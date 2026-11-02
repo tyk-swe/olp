@@ -212,9 +212,5 @@ func (s *Store) DeleteInteractionContract(ctx context.Context, owner, localID st
 }
 
 func interactionState(status string) bool {
-	switch status {
-	case "created", "pending", "queued", "in_progress", "requires_action", "completed", "failed", "cancelled", "incomplete", StateDeleted:
-		return true
-	}
-	return false
+	return status == "created" || status == StateDeleted || geminilifecycle.ValidInteractionStatus(status)
 }
