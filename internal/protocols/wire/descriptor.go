@@ -17,11 +17,15 @@ var wireDialects = map[Format]string{
 	MistralFIM: "mistral-fim", CohereChat: "cohere-chat-v2",
 }
 
-func Descriptor(family Format, stream bool) oif.Descriptor {
+func Dialect(family Format) string {
 	dialect := wireDialects[family]
 	if dialect == "" {
-		dialect = string(family)
+		return string(family)
 	}
+	return dialect
+}
+
+func Descriptor(family Format, stream bool) oif.Descriptor {
 	delivery := "unary"
 	if stream {
 		delivery = "incremental"
@@ -30,5 +34,5 @@ func Descriptor(family Format, stream bool) oif.Descriptor {
 	if family == "bedrock_count" {
 		operation = "token_count"
 	}
-	return oif.Descriptor{Operation: oif.Identity{ID: operation, Revision: "1"}, Dialect: oif.Identity{ID: dialect, Revision: "wire-v1"}, Profile: oif.Identity{ID: "transformed", Revision: "1"}, Execution: oif.Execution{Delivery: delivery, Lifetime: "request", Submission: "immediate", Effects: []string{"inference"}}}
+	return oif.Descriptor{Operation: oif.Identity{ID: operation, Revision: "1"}, Dialect: oif.Identity{ID: Dialect(family), Revision: "wire-v1"}, Profile: oif.Identity{ID: "transformed", Revision: "1"}, Execution: oif.Execution{Delivery: delivery, Lifetime: "request", Submission: "immediate", Effects: []string{"inference"}}}
 }
