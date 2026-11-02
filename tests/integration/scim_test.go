@@ -70,6 +70,31 @@ func scimUser(name string) map[string]any {
 func scimPatch(operations ...any) map[string]any {
 	return map[string]any{"schemas": []string{scim.PatchSchema}, "Operations": operations}
 }
+
+func TestSCIMFiltersAndSortsMultivaluedEmails(t *testing.T) {
+	h := newAccessHarness(t)
+	token := scimToken(h, h.owner(), []string{"access"})
+	create := func(name, alternate string) string {
+		body := map[string]any{
+			"schemas":  []string{scim.UserSchema},
+			"userName": name + "@example.com",
+			"emails": []any{
+				map[string]any{"value": alternate + "@example.com"},
+				map[string]any{"value": name + "@example.com", "primary": true},
+			},
+		}
+		return scimCall(t, h, token, "POST", "/scim/v2/Users", body, "", 201)["id"].(string)
+	}
+	first := create("alice", "zebra")
+	second := create("bob", "aardvark")
+	query := url.Values{"filter": {`emails.value co "@example.com"`}, "sortBy": {"emails.value"}}
+	result := scimCall(t, h, token, "GET", "/scim/v2/Users?"+query.Encode(), nil, "", 200)
+	users := result["Resources"].([]any)
+	if len(users) != 2 || users[0].(map[string]any)["id"] != first || users[1].(map[string]any)["id"] != second {
+		t.Fatalf("filtered and sorted users=%v", users)
+	}
+}
+
 func TestSCIMUsersGroupsAndInheritedGrants(t *testing.T) {
 	h := newAccessHarness(t)
 	owner := h.owner()
