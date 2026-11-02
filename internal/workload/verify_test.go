@@ -233,6 +233,27 @@ func TestSupportedSignaturesAndEverySecurityClaim(t *testing.T) {
 	}
 }
 
+func TestKeyAlgorithmsAgreeWithIssuerConfiguration(t *testing.T) {
+	public, _, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, algorithm := range []string{string(jose.EdDSA), "not-a-supported-algorithm"} {
+		t.Run(algorithm, func(t *testing.T) {
+			config := fixtureConfig()
+			config.Algorithms = []string{algorithm}
+			keySet, err := json.Marshal(jose.JSONWebKeySet{Keys: []jose.JSONWebKey{{Key: public, KeyID: "one", Algorithm: algorithm}}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, keyErr := ParseKeys(keySet)
+			if configErr := config.Validate(); (configErr == nil) != (keyErr == nil) {
+				t.Fatalf("issuer validation = %v, key parsing = %v", configErr, keyErr)
+			}
+		})
+	}
+}
+
 func TestCachedKeyRotationAndBoundedOutage(t *testing.T) {
 	pub, _, _ := ed25519.GenerateKey(rand.Reader)
 	var generation atomic.Int64
