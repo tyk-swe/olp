@@ -204,6 +204,11 @@ func TestStrictBatchSourcePartialFilesAndLifecycle(t *testing.T) {
 	if status != http.StatusBadGateway || !bytes.Contains(raw, []byte(`"code":"fidelity_protocol_violation"`)) {
 		t.Fatalf("provider changed accepted batch input identity: %d %s", status, raw)
 	}
+	fixture.batchFetchRaw.Store(`{"id":"batch-up-1","status":"unrecognized-status","input_file_id":"file-up-1"}`)
+	status, raw, _ = h.gatewayRaw(http.MethodGet, "/v1/batches/"+batchID, key, nil, nil)
+	if status != http.StatusBadGateway || !bytes.Contains(raw, []byte(`"code":"fidelity_protocol_violation"`)) {
+		t.Fatalf("unrecognized batch status accepted: %d %s", status, raw)
+	}
 	fixture.batchFetchRaw.Store(validResult)
 	status, raw, _ = h.gatewayRaw(http.MethodPost, "/v1/batches/"+batchID+"/cancel", key, nil, nil)
 	if status != http.StatusOK || !bytes.Contains(raw, []byte(`"status":"cancelling"`)) {
@@ -263,6 +268,12 @@ func TestStrictBatchSourcePartialFilesAndLifecycle(t *testing.T) {
 			t.Fatalf("partial item bytes/digest: %d %s", status, body)
 		}
 	}
+	fixture.batchFetchRaw.Store(`{"id":"batch-up-1","status":"validating","input_file_id":"file-up-1"}`)
+	status, raw, _ = h.gatewayRaw(http.MethodGet, "/v1/batches/"+batchID, key, nil, nil)
+	if status != http.StatusOK || !bytes.Equal(raw, first) {
+		t.Fatalf("stale poll changed a terminal batch: %d %s", status, raw)
+	}
+	fixture.batchFetchRaw.Store(validResult)
 	status, raw, _ = h.gatewayRaw(http.MethodGet, "/v1/batches", key, nil, nil)
 	if status != http.StatusOK || !bytes.Contains(raw, []byte(batchID)) || bytes.Contains(raw, []byte("batch-up-1")) {
 		t.Fatalf("batch list: %d %s", status, raw)

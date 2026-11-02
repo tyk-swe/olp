@@ -2110,10 +2110,10 @@ func (s *Server) cancelBatch(w http.ResponseWriter, r *http.Request) {
 			return s.batchRefresh(ctx, x, res, p, http.MethodGet, managedBatchPath(res, false), nil, w)
 		}
 		if res.Kind == resources.KindStrictBatch {
-			switch res.State {
-			case "completed", "failed", "expired", "cancelled":
+			switch wire.BatchStageOf(res.State) {
+			case wire.BatchTerminal:
 				return serverError(http.StatusConflict, "resource_transition", "This batch has already reached a terminal state.")
-			case "cancelling":
+			case wire.BatchCancelling:
 				out, err := s.batchObject(ctx, res)
 				if err != nil {
 					return serverError(http.StatusServiceUnavailable, "provider_resource_unavailable", "The accepted cancellation could not be projected.")

@@ -176,7 +176,7 @@ func strictBatchResult(body []byte, expectedID string) (oif.Document, string, er
 	}
 	status, ok := doc.Root().Lookup("status")
 	state, valid := status.Text()
-	if !ok || !valid || !slices.Contains([]string{"validating", "in_progress", "finalizing", "completed", "failed", "expired", "cancelling", "cancelled"}, state) {
+	if !ok || !valid || wire.BatchStageOf(state) == wire.BatchUnknown {
 		return oif.Document{}, "", resources.ErrContract
 	}
 	for _, name := range []string{"input_file_id", "output_file_id", "error_file_id"} {
