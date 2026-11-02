@@ -36,10 +36,21 @@ func TestRunwayTasksReadAsOpenAIVideos(t *testing.T) {
 	if call.Path != "image_to_video" || sent["promptImage"] != "data:image/png;base64,cG5n" || sent["duration"] != float64(4) || sent["ratio"] != "1280:720" {
 		t.Fatalf("image to video = %s %s", call.Path, body)
 	}
-	for status, want := range map[string]string{"PENDING": "queued", "THROTTLED": "queued", "RUNNING": "in_progress", "SUCCEEDED": "completed", "FAILED": "failed", "CANCELLED": "failed"} {
+	for status, want := range map[string]struct{ native, job string }{
+		"PENDING":   {"queued", "queued"},
+		"THROTTLED": {"queued", "queued"},
+		"RUNNING":   {"in_progress", "running"},
+		"SUCCEEDED": {"completed", "succeeded"},
+		"FAILED":    {"failed", "failed"},
+		"CANCELLED": {"failed", "failed"},
+	} {
 		video, failure := runwayTaskObject([]byte(`{"id":"t","status":"` + status + `","progress":0.25,"createdAt":"2026-10-05T12:00:00Z","failureCode":"SAFETY.INPUT.TEXT"}`))
-		if failure != nil || video.Status != want || *video.Progress != 25 || *video.CreatedAt != time.Date(2026, 10, 5, 12, 0, 0, 0, time.UTC).Unix() {
+		if failure != nil || video.Status != want.native || *video.Progress != 25 || *video.CreatedAt != time.Date(2026, 10, 5, 12, 0, 0, 0, time.UTC).Unix() {
 			t.Fatalf("%s = %+v %v", status, video, failure)
+		}
+		state, valid := VideoState(video.Status)
+		if !valid || string(state) != want.job {
+			t.Fatalf("%s job state = %s, valid = %t", status, state, valid)
 		}
 	}
 	if _, failure := encodeRunwayGet(&Request{JobID: "../organization"}, "gen4.5"); failure == nil {
