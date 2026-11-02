@@ -1,8 +1,32 @@
 package priority
 
-import "slices"
+const (
+	Critical = iota
+	High
+	Normal
+	Low
+	Count
+)
 
-// Names lists admission classes in order of urgency.
-var Names = []string{"critical", "high", "normal", "low"}
+type Class struct {
+	Name   string
+	Weight int
+}
 
-func Rank(name string) int { return slices.Index(Names, name) }
+func Classes() [Count]Class {
+	return [Count]Class{
+		Critical: {Name: "critical", Weight: 8},
+		High:     {Name: "high", Weight: 4},
+		Normal:   {Name: "normal", Weight: 2},
+		Low:      {Name: "low", Weight: 1},
+	}
+}
+
+func Rank(name string) int {
+	for rank, class := range Classes() {
+		if class.Name == name {
+			return rank
+		}
+	}
+	return -1
+}
