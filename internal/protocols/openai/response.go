@@ -70,8 +70,7 @@ func observeResponseUsage(fields map[string]json.RawMessage) (ResponseUsageObser
 	if observation.Usage != nil {
 		observation.Usage.ToolCalls = responseToolCalls(fields["output"])
 	}
-	switch observation.Status {
-	case "completed", "incomplete", "failed", "cancelled":
+	if wire.ResponseStatusFinished(observation.Status) {
 		observation.Complete = observation.Usage != nil
 	}
 	return observation, nil
@@ -133,9 +132,7 @@ func observeResponseEventUsage(event oif.Event, fields map[string]json.RawMessag
 		return observed, err
 	}
 	status := observed.usage.Status
-	switch status {
-	case "", "queued", "in_progress", "completed", "incomplete", "failed", "cancelled":
-	default:
+	if status != "" && (status == "cancelling" || !wire.ValidResponseStatus(status)) {
 		return observed, &wire.ProtocolError{Detail: "lifecycle event has an invalid response status"}
 	}
 	switch kind {

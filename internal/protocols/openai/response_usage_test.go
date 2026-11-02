@@ -103,6 +103,7 @@ func TestResponseEventUsageOwnsLifecycleCompleteness(t *testing.T) {
 		`{"type":"response.created","response":{"status":"unknown","usage":{"input_tokens":0,"output_tokens":0}}}`,
 		`{"type":"response.queued","response":{"status":1,"usage":{"input_tokens":0,"output_tokens":0}}}`,
 		`{"type":"response.in_progress","response":{"status":false,"usage":{"input_tokens":0,"output_tokens":0}}}`,
+		`{"type":"response.in_progress","response":{"status":"cancelling","usage":{"input_tokens":0,"output_tokens":0}}}`,
 		`{"type":"response.completed","response":{"status":"in_progress","usage":{"input_tokens":0,"output_tokens":0}}}`,
 		`{"type":"response.completed","response":{"status":null,"usage":{"input_tokens":0,"output_tokens":0}}}`,
 		`{"type":"response.completed"}`,
@@ -135,6 +136,29 @@ func TestResponseEventUsageOwnsLifecycleCompleteness(t *testing.T) {
 				t.Errorf("sparse nonterminal changed: kind=%s observed=%+v known=%t err=%v", kind, observed, known, err)
 			}
 		}
+	}
+}
+
+func TestResponseUsageCompletenessAgreesAcrossResultsAndEvents(t *testing.T) {
+	for _, status := range []string{"completed", "incomplete", "failed"} {
+		t.Run(status, func(t *testing.T) {
+			for _, usage := range []string{"", `,"usage":{"input_tokens":2,"output_tokens":1}`} {
+				response := `{"status":"` + status + `"` + usage + `}`
+				result, err := ObserveResponseUsage([]byte(response))
+				if err != nil {
+					t.Fatal(err)
+				}
+				kind := "response." + status
+				event, err := LiftEvent(wire.Responses, `{"type":"`+kind+`","response":`+response+`}`, kind, 0, 4096)
+				if err != nil {
+					t.Fatal(err)
+				}
+				streamed, known, err := ObserveResponseEventUsage(event)
+				if err != nil || !known || streamed.Complete != result.Complete {
+					t.Fatalf("result=%+v event=%+v known=%t err=%v", result, streamed, known, err)
+				}
+			}
+		})
 	}
 }
 
