@@ -16,17 +16,14 @@ import (
 // they are, at /native/{dialect}/models/{route}. OLP validates their envelope,
 // binds the route's model, meters the result and forwards it unchanged; it
 // never translates them to or from another dialect.
-var nativeGenerationFamilies = map[string]wire.Format{
-	// https://docs.mistral.ai/api/endpoint/fim
-	"mistral-fim": wire.MistralFIM,
-	// https://docs.cohere.com/reference/chat
-	"cohere-chat-v2": wire.CohereChat,
-}
-
 // NativeGenerationFamily is the generation family of a native dialect.
 func NativeGenerationFamily(dialect string) (wire.Format, bool) {
-	family, ok := nativeGenerationFamilies[dialect]
-	return family, ok
+	for _, family := range [...]wire.Format{wire.MistralFIM, wire.CohereChat} {
+		if wire.Dialect(family) == dialect {
+			return family, true
+		}
+	}
+	return "", false
 }
 
 // NativeGenerationProbe is the smallest request of a native dialect that
