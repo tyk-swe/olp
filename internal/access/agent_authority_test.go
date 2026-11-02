@@ -3,6 +3,8 @@ package access
 import (
 	"testing"
 	"time"
+
+	"github.com/tyk-swe/olp/internal/workload"
 )
 
 func TestConsumerResourceDenyMatrix(t *testing.T) {
@@ -46,5 +48,34 @@ func TestConsumerResourceDenyMatrix(t *testing.T) {
 	copy[0] = "mutated"
 	if ConsumerScopes()[0] != "inference" {
 		t.Fatal("scope registry is mutable")
+	}
+}
+
+func TestConsumerScopesWorkForKeysAndWorkloadMappings(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		scopes []string
+		valid  bool
+	}{
+		{name: "all consumer scopes", scopes: ConsumerScopes(), valid: true},
+		{name: "unknown scope", scopes: []string{"unknown"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			key := keyInput{Name: "key", KeyPolicy: KeyPolicy{Scopes: tc.scopes, AllowedRoutes: []string{}}}
+			issuer := workload.Config{
+				Name: "workload", Issuer: "https://issuer.example", JWKSURL: "https://issuer.example/keys",
+				Audiences: []string{"gateway"}, Algorithms: []string{"RS256"}, MaxLifetimeSeconds: 600,
+				DisabledKeyIDs: []string{},
+				Mappings: []workload.Mapping{{Name: "mapping", Match: map[string]string{"/sub": "workload"},
+					ProjectID: "00000000-0000-4000-8000-000000000001", LimitTemplate: "build",
+					RouteGroups: []string{"generation"}, Scopes: tc.scopes}},
+			}
+			if err := validateKey(key, false); (err == nil) != tc.valid {
+				t.Fatalf("key validation = %v, valid = %t", err, tc.valid)
+			}
+			if err := issuer.Validate(); (err == nil) != tc.valid {
+				t.Fatalf("workload validation = %v, valid = %t", err, tc.valid)
+			}
+		})
 	}
 }
