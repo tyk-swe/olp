@@ -245,7 +245,7 @@ func (s *Server) revision(r *http.Request, p access.Principal) (access.Reply, er
 	}
 	return access.Detail(revisionResponse{Delegation: delegation, Stdio: stdio, OAuth: oauth, ID: revision, ServerID: id, Revision: version, Endpoint: endpoint, Catalog: catalog, CertifiedAt: certified, UnitPrice: unitPrice, ToolPrices: toolPrices, CallsPerMinute: d.CallsPerMinute, MaxConcurrency: d.MaxConcurrency, PerKeyCallsPerMinute: d.PerKeyCallsPerMinute, PerKeyMaxConcurrency: d.PerKeyMaxConcurrency}, revision), nil
 }
-func Validate(in *Input, policy *egress.Policy) error {
+func ValidateAndNormalize(in *Input, policy *egress.Policy) error {
 	if err := validateEntra(in); err != nil {
 		return err
 	}
@@ -486,7 +486,7 @@ func (s *Server) write(r *http.Request, _ access.Principal, id string, retire bo
 		return decoded
 	}()
 	if !retire {
-		if err := Validate(&in, s.Egress); err != nil {
+		if err := ValidateAndNormalize(&in, s.Egress); err != nil {
 			return access.Reply{}, err
 		}
 	}
