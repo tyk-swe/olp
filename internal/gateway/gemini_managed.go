@@ -9,7 +9,6 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"slices"
 	"strconv"
 	"time"
 
@@ -225,7 +224,7 @@ func (s *Server) geminiManagedBatchObject(ctx context.Context, resource *resourc
 		}
 		object["metadata"] = clientMetadata
 	}
-	if slices.Contains([]string{"completed", "failed", "cancelled", "expired"}, status) {
+	if wire.BatchStageOf(status) == wire.BatchTerminal {
 		if responsesFile := geminiManagedResponsesFile(providerBatch); responsesFile != "" {
 			outputFile, errorFile, err := s.mapGeminiManagedResultFiles(ctx, resource, responsesFile)
 			if err != nil {
