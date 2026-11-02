@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/bodylimit"
 	"github.com/tyk-swe/olp/internal/secrets"
 	"github.com/tyk-swe/olp/internal/telemetry"
 )
@@ -402,7 +403,7 @@ func (c Config) Validate() error {
 	if c.MediaSpoolCapacityBytes < 256<<20 {
 		return errors.New("OLP_MEDIA_SPOOL_CAPACITY_BYTES must be at least 256 MiB")
 	}
-	if c.MaxMediaBodyBytes < 1<<20 || c.MaxMediaBodyBytes > 1024<<20 {
+	if c.MaxMediaBodyBytes < 1<<20 || c.MaxMediaBodyBytes > bodylimit.Maximum {
 		return errors.New("OLP_HTTP_MAX_MEDIA_BODY_BYTES must be between 1 MiB and 1 GiB")
 	}
 	if c.MaxMediaBodyBytes > c.MediaSpoolCapacityBytes/2 {

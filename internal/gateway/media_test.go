@@ -3,15 +3,34 @@ package gateway
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
+	"io"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
-	"github.com/tyk-swe/olp/internal/routing"
-
+	"github.com/tyk-swe/olp/internal/bodylimit"
+	"github.com/tyk-swe/olp/internal/config"
 	"github.com/tyk-swe/olp/internal/media"
+	"github.com/tyk-swe/olp/internal/routing"
 )
+
+func TestMediaRouteLimitAgreesWithInstallationLimit(t *testing.T) {
+	env := map[string]string{"OLP_DATABASE_URL": "postgres://localhost/test"}
+	for _, limit := range []int64{bodylimit.Maximum - 1, bodylimit.Maximum, bodylimit.Maximum + 1} {
+		t.Run(fmt.Sprint(limit), func(t *testing.T) {
+			_, err := config.Parse([]string{
+				"control",
+				fmt.Sprintf("-http-max-media-body-bytes=%d", limit),
+				fmt.Sprintf("-media-spool-capacity-bytes=%d", 2*(bodylimit.Maximum+1)),
+			}, func(name string) string { return env[name] }, io.Discard)
+			if (err == nil) != bodylimit.Valid(&limit) {
+				t.Fatalf("installation error = %v, route limit valid = %v", err, bodylimit.Valid(&limit))
+			}
+		})
+	}
+}
 
 func newMediaHarness(t *testing.T) *harness {
 	t.Helper()
