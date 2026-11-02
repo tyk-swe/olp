@@ -2,8 +2,34 @@ package billing
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
+
+	"github.com/tyk-swe/olp/internal/connectors"
 )
+
+func TestS3BucketNamesAgreeAcrossBillingAndBatchStorage(t *testing.T) {
+	for _, bucket := range []string{
+		"billing-bucket", "a.b", strings.Repeat("a", 63),
+		"ab", strings.Repeat("a", 64), "UPPERCASE", "-bucket", "a..b", "192.0.2.1",
+	} {
+		scope, err := json.Marshal(map[string]string{
+			"payer_account_id": "123456789012", "bucket": bucket,
+			"report_prefix": "report", "region": "us-east-1",
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, scopeErr := ValidateScope(SourceAWS, scope)
+		_, batchErr := connectors.NormalizeBatchStorage("bedrock", "bedrock-batch-inference", &connectors.BatchStorage{
+			InputURIPrefix: "s3://" + bucket + "/input", OutputURIPrefix: "s3://" + bucket + "/output",
+			RoleARN: "arn:aws:iam::123456789012:role/test",
+		})
+		if (scopeErr == nil) != (batchErr == nil) {
+			t.Errorf("bucket %q, billing error %v, batch error %v", bucket, scopeErr, batchErr)
+		}
+	}
+}
 
 func TestSourceForKinds(t *testing.T) {
 	for kind, want := range map[string]string{
