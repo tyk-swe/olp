@@ -20,15 +20,14 @@ import (
 // https://elevenlabs.io/docs/api-reference/speech-to-text/convert
 // https://developers.deepgram.com/reference/text-to-speech/speak-request
 // https://developers.deepgram.com/reference/speech-to-text/listen-pre-recorded
-func init() {
-	registerCodec("elevenlabs", codec{
-		OpSpeech:        modelOnly(encodeElevenLabsSpeech),
-		OpTranscription: modelOnly(encodeElevenLabsTranscription),
-	})
-	registerCodec("deepgram", codec{
-		OpSpeech:        modelOnly(encodeDeepgramSpeech),
-		OpTranscription: modelOnly(encodeDeepgramTranscription),
-	})
+var elevenLabsCodec = codec{
+	OpSpeech:        modelOnly(encodeElevenLabsSpeech),
+	OpTranscription: modelOnly(encodeElevenLabsTranscription),
+}
+
+var deepgramCodec = codec{
+	OpSpeech:        modelOnly(encodeDeepgramSpeech),
+	OpTranscription: modelOnly(encodeDeepgramTranscription),
 }
 
 // speechFormat is the OpenAI response format a speech request asks for.
@@ -250,10 +249,8 @@ func encodeDeepgramTranscription(r *Request, model string) (*UpstreamCall, *Erro
 // Polly. The model is the Polly engine and the voice a Polly voice ID.
 //
 // https://docs.aws.amazon.com/polly/latest/dg/API_SynthesizeSpeech.html
-func init() {
-	registerCodec("polly", codec{
-		OpSpeech: encodePollySpeech,
-	})
+var pollyCodec = codec{
+	OpSpeech: encodePollySpeech,
 }
 
 // pollyFormats are Polly's output formats for the OpenAI ones it serves:
@@ -293,10 +290,8 @@ func encodePollySpeech(r *Request, cfg connectors.Config, model string) (*Upstre
 // its words.
 //
 // https://www.assemblyai.com/docs/pre-recorded-audio/api-reference/transcripts/submit
-func init() {
-	registerCodec("assemblyai", codec{
-		OpTranscription: encodeAssemblyAI,
-	})
+var assemblyAICodec = codec{
+	OpTranscription: encodeAssemblyAI,
 }
 
 // assemblyAIPoll is how long a transcript waits between polls.

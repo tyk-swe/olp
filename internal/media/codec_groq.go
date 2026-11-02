@@ -8,11 +8,9 @@ import "slices"
 // the json client asked for.
 //
 // https://console.groq.com/docs/speech-to-text
-func init() {
-	registerCodec("groq-audio", codec{
-		OpTranscription: modelOnly(encodeGroqAudio),
-		OpTranslation:   modelOnly(encodeGroqAudio),
-	})
+var groqAudioCodec = codec{
+	OpTranscription: modelOnly(encodeGroqAudio),
+	OpTranslation:   modelOnly(encodeGroqAudio),
 }
 
 func encodeGroqAudio(r *Request, model string) (*UpstreamCall, *Error) {
