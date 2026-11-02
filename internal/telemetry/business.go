@@ -9,8 +9,8 @@ import (
 	"sync"
 )
 
-var BusinessLatencyBuckets = []float64{0.01, 0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10, 30}
-var BusinessThroughputBuckets = []float64{1, 5, 10, 25, 50, 100, 250, 500, 1000}
+var businessLatencyBuckets = []float64{0.01, 0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10, 30}
+var businessThroughputBuckets = []float64{1, 5, 10, 25, 50, 100, 250, 500, 1000}
 
 type BusinessLabels struct {
 	Route        string
@@ -157,13 +157,13 @@ func (m *BusinessMetrics) Cost(l BusinessLabels, currency string, amount float64
 
 func (m *BusinessMetrics) FirstToken(l BusinessLabels, seconds float64) {
 	if m != nil && l.Route != "" {
-		m.add("olp_time_to_first_token_seconds", m.labels(l), seconds, BusinessLatencyBuckets)
+		m.add("olp_time_to_first_token_seconds", m.labels(l), seconds, businessLatencyBuckets)
 	}
 }
 
 func (m *BusinessMetrics) OutputRate(l BusinessLabels, tokens int64, seconds float64) {
 	if m != nil && l.Route != "" && tokens >= 0 && seconds > 0 {
-		m.add("olp_output_tokens_per_second", m.labels(l), float64(tokens)/seconds, BusinessThroughputBuckets)
+		m.add("olp_output_tokens_per_second", m.labels(l), float64(tokens)/seconds, businessThroughputBuckets)
 	}
 }
 
@@ -205,7 +205,7 @@ func (m *BusinessMetrics) Guardrail(labels BusinessLabels, phase, action, outcom
 	}
 	extra := m.labels(labels, "phase="+metricQuoted(phase), "action="+metricQuoted(action), "outcome="+metricQuoted(outcome))
 	m.add("olp_guardrail_decisions_total", extra, 1, nil)
-	m.add("olp_guardrail_duration_seconds", extra, float64(latencyMS)/1000, BusinessLatencyBuckets)
+	m.add("olp_guardrail_duration_seconds", extra, float64(latencyMS)/1000, businessLatencyBuckets)
 }
 
 // Cache records bounded, content-free cache outcome metrics.
