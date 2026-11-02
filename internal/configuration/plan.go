@@ -538,7 +538,7 @@ func (s *Server) validateDocument(ctx context.Context, q access.Queryer, doc *Do
 		} else if err := p.Configuration.ValidateAndNormalize(s.Egress); err != nil {
 			return nil, err
 		} else {
-			doc.Providers[i].Configuration.Options.Commitment = p.Configuration.Options.Commitment
+			doc.Providers[i].Configuration = p.Configuration
 		}
 		totalModels += len(p.Models)
 		if totalModels > maxModels {
