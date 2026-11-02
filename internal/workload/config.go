@@ -10,6 +10,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	jose "github.com/go-jose/go-jose/v4"
 	"github.com/google/uuid"
 	"github.com/tyk-swe/olp/internal/consumerscope"
 )
@@ -19,6 +20,10 @@ const MaxTokenBytes = 32768
 var ErrToken = errors.New("workload token is invalid")
 var ErrKeys = errors.New("workload verification keys are unavailable")
 var name = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,99}$`)
+
+func supportedAlgorithms() []string {
+	return []string{string(jose.RS256), string(jose.ES256), string(jose.EdDSA)}
+}
 
 type Mapping struct {
 	AgentPrincipal     bool              `json:"agent_principal,omitempty"`
@@ -49,6 +54,7 @@ type Config struct {
 func (c Config) Validate() error {
 	bad := errors.New("invalid workload issuer configuration")
 	scopes := consumerscope.All()
+	algorithms := supportedAlgorithms()
 	if strings.TrimSpace(c.Name) == "" || len(c.Name) > 100 || !utf8.ValidString(c.Name) || c.MaxLifetimeSeconds < 60 || c.MaxLifetimeSeconds > 86400 {
 		return bad
 	}
@@ -58,11 +64,11 @@ func (c Config) Validate() error {
 			return bad
 		}
 	}
-	if !unique(c.Audiences, 1, 32, 256) || !unique(c.Algorithms, 1, 3, 16) || c.DisabledKeyIDs == nil || !unique(c.DisabledKeyIDs, 0, 64, 128) || len(c.Mappings) < 1 || len(c.Mappings) > 32 {
+	if !unique(c.Audiences, 1, 32, 256) || !unique(c.Algorithms, 1, len(algorithms), 16) || c.DisabledKeyIDs == nil || !unique(c.DisabledKeyIDs, 0, 64, 128) || len(c.Mappings) < 1 || len(c.Mappings) > 32 {
 		return bad
 	}
 	for _, alg := range c.Algorithms {
-		if !slices.Contains([]string{"RS256", "ES256", "EdDSA"}, alg) {
+		if !slices.Contains(algorithms, alg) {
 			return bad
 		}
 	}
