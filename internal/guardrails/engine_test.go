@@ -9,8 +9,33 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/tyk-swe/olp/internal/contentpolicy"
 	"github.com/tyk-swe/olp/internal/oif"
 )
+
+func TestRuleIdentifiersAgreeWithContentPolicy(t *testing.T) {
+	for _, tc := range []struct {
+		id    string
+		valid bool
+	}{
+		{"rule", true},
+		{"Rule_1-example", true},
+		{strings.Repeat("a", 64), true},
+		{strings.Repeat("a", 65), false},
+		{"", false},
+		{"1rule", false},
+		{"rule.name", false},
+	} {
+		t.Run(tc.id, func(t *testing.T) {
+			policy := &contentpolicy.Policy{Rules: []contentpolicy.Rule{{ID: tc.id, Phase: contentpolicy.PhaseInput, Pattern: "sample", Action: contentpolicy.ActionBlock}}}
+			policyErr := contentpolicy.Validate(policy)
+			_, detectorErr := compilePatterns([]Pattern{{ID: tc.id, Pattern: "sample"}}, "sample", "")
+			if (policyErr == nil) != tc.valid || (detectorErr == nil) != tc.valid {
+				t.Errorf("id %q valid=%t, policy error=%v, detector error=%v", tc.id, tc.valid, policyErr, detectorErr)
+			}
+		})
+	}
+}
 
 func TestToolJSONGuardrailsInspectDecodedValuesAndPreserveOtherContent(t *testing.T) {
 	const original = ` {"a/b~c":[{"sensitive":"forbid\u0064en","safe":"k\u0065ep"}],"count":3,"empty":{},"none":null} `
