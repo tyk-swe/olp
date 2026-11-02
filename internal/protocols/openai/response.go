@@ -98,19 +98,18 @@ type responseEventUsage struct {
 
 func observeResponseEventUsage(event oif.Event, fields map[string]json.RawMessage, kind string) (responseEventUsage, error) {
 	observed := responseEventUsage{}
-	switch kind {
-	case "response.created", "response.queued", "response.in_progress", "response.completed", "response.incomplete", "response.failed":
-		observed.lifecycle = true
-	default:
+	if !wire.IsResponseLifecycleEvent(kind) {
 		return observed, nil
 	}
+	observed.lifecycle = true
 	if event.Name() != "" && event.Name() != kind {
 		return observed, &wire.ProtocolError{Detail: "event name disagrees with type"}
 	}
 	if raw, present := fields["response"]; !present || isNull(raw) {
-		switch kind {
-		case "response.completed", "response.incomplete", "response.failed":
+		if wire.IsTerminalResponseEvent(kind) {
 			return observed, &wire.ProtocolError{Detail: "terminal event has no response object"}
+		}
+		switch kind {
 		case "response.created":
 			observed.usage.Status = "in_progress"
 		case "response.queued", "response.in_progress":
@@ -122,8 +121,7 @@ func observeResponseEventUsage(event oif.Event, fields map[string]json.RawMessag
 	if observed.response, err = object(fields["response"]); err != nil {
 		return observed, &wire.ProtocolError{Detail: "lifecycle event has no response object"}
 	}
-	switch kind {
-	case "response.completed", "response.incomplete", "response.failed":
+	if wire.IsTerminalResponseEvent(kind) {
 		if raw, present := observed.response["status"]; present && isNull(raw) {
 			return observed, &wire.ProtocolError{Detail: "terminal response has an invalid status"}
 		}
