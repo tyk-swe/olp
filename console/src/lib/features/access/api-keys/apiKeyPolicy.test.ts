@@ -1,6 +1,22 @@
 import { expect, it } from 'vitest';
 import type { ApiKey } from './api';
 import { buildApiKeyPolicyInput, createApiKeyFormState } from './apiKeyPolicy';
+import { validateApiKey } from './keyValidation';
+
+it('checks the default priority against the highest permitted priority', () => {
+  expect(
+    validateApiKey({ name: 'key', priority: 'critical', maxPriority: 'high' })
+  ).toHaveProperty('priority');
+  expect(validateApiKey({ name: 'key', maxPriority: 'low' })).toHaveProperty(
+    'priority'
+  );
+  expect(
+    validateApiKey({ name: 'key', priority: 'low', maxPriority: 'high' })
+  ).not.toHaveProperty('priority');
+  expect(
+    validateApiKey({ name: 'key', priority: 'high', maxPriority: 'high' })
+  ).not.toHaveProperty('priority');
+});
 
 it('includes workflow run limits in a key policy', () => {
   const form = {
