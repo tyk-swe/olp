@@ -66,12 +66,8 @@ func geminiManagedAdoptMetadata(cursor []byte, snapshot BatchSnapshot) (json.Raw
 	if json.Unmarshal(cursor, &saved) != nil || saved.Submission.Metadata == nil {
 		return nil, "", ErrProviderConflict
 	}
-	state := map[string]string{
-		"PENDING": "validating", "QUEUED": "validating", "RUNNING": "in_progress",
-		"SUCCEEDED": "completed", "FAILED": "failed", "CANCELLED": "cancelled",
-		"EXPIRED": "expired", "CANCELLING": "cancelling",
-	}[strings.TrimPrefix(strings.TrimPrefix(batchGeminiState(snapshot.Body), "BATCH_STATE_"), "JOB_STATE_")]
-	if state == "" {
+	state, ok := ManagedStatus("gemini_managed", batchGeminiState(snapshot.Body))
+	if !ok {
 		return nil, "", ErrProviderConflict
 	}
 	fields := saved.Submission.Metadata
@@ -172,18 +168,8 @@ func parseGeminiBatchSnapshot(body []byte) (BatchSnapshot, error) {
 }
 
 func geminiBatchTerminal(state string) (bool, bool) {
-	switch state {
-	case "BATCH_STATE_SUCCEEDED", "JOB_STATE_SUCCEEDED",
-		"BATCH_STATE_FAILED", "JOB_STATE_FAILED",
-		"BATCH_STATE_CANCELLED", "JOB_STATE_CANCELLED",
-		"BATCH_STATE_EXPIRED", "JOB_STATE_EXPIRED":
-		return true, true
-	case "BATCH_STATE_PENDING", "JOB_STATE_PENDING", "JOB_STATE_QUEUED",
-		"BATCH_STATE_RUNNING", "JOB_STATE_RUNNING", "BATCH_STATE_CANCELLING", "JOB_STATE_CANCELLING":
-		return false, true
-	default:
-		return false, false
-	}
+	mapped, ok := ManagedStatus("gemini_managed", state)
+	return wire.BatchStageOf(mapped) == wire.BatchTerminal, ok
 }
 
 func geminiBatchCreatedAt(body []byte) time.Time {

@@ -5,10 +5,17 @@ import (
 	"encoding/json"
 	"io"
 	"log/slog"
+	"net/http"
+	"net/http/httptest"
+	"net/netip"
 	"strings"
 	"testing"
 
+	"github.com/tyk-swe/olp/internal/batches"
+	"github.com/tyk-swe/olp/internal/connectors"
+	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/media"
+	"github.com/tyk-swe/olp/internal/protocols/wire"
 	"github.com/tyk-swe/olp/internal/routing"
 )
 
@@ -115,6 +122,42 @@ func TestGeminiManagedStatusAndCounts(t *testing.T) {
 	}
 	if got := geminiManagedRequestCounts([]byte(`{"metadata":{"batchStats":{"requestCount":"8"}}}`)); got["total"] != 8 || len(got) != 1 {
 		t.Fatalf("request-count presence rules: %v", got)
+	}
+}
+
+func TestGeminiManagedStatusAgreesWithSettlement(t *testing.T) {
+	for _, status := range []string{
+		"BATCH_STATE_PENDING", "JOB_STATE_QUEUED", "BATCH_STATE_RUNNING", "JOB_STATE_RUNNING",
+		"BATCH_STATE_CANCELLING", "JOB_STATE_CANCELLING", "BATCH_STATE_SUCCEEDED", "JOB_STATE_FAILED",
+		"BATCH_STATE_CANCELLED", "JOB_STATE_EXPIRED", "JOB_STATE_UNKNOWN",
+	} {
+		t.Run(status, func(t *testing.T) {
+			body, err := json.Marshal(map[string]any{"name": "batches/job", "metadata": map[string]string{"state": status}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				_, _ = w.Write(body)
+			}))
+			defer server.Close()
+			policy := egress.Policy{AllowedNetworks: []netip.Prefix{netip.MustParsePrefix("127.0.0.0/8")}}
+			reader := batches.GeminiReader{Auth: connectors.NewAuth(&policy), Egress: &policy}
+			target := batches.PinnedTarget{
+				Config: connectors.Config{Kind: "openai_compatible", AuthMode: "none", Endpoint: server.URL},
+				Client: server.Client(),
+			}
+			snapshot, pollErr := reader.Poll(t.Context(), batches.Settlement{UpstreamID: new("job")}, &target)
+			_, state, projectionErr := geminiManagedBatchMetadata(body, "model", "", batchManifest{}, nil, nil)
+			if status == "BATCH_STATE_CANCELLING" && (pollErr != nil || projectionErr != nil || state != "cancelling" || snapshot.Terminal) {
+				t.Fatalf("cancelling batch: settlement=%+v error=%v, projected state=%q error=%v", snapshot, pollErr, state, projectionErr)
+			}
+			if (pollErr == nil) != (projectionErr == nil) {
+				t.Fatalf("settlement error %v, projection error %v", pollErr, projectionErr)
+			}
+			if pollErr == nil && snapshot.Terminal != (wire.BatchStageOf(state) == wire.BatchTerminal) {
+				t.Fatalf("settlement terminal %v, projected status %q", snapshot.Terminal, state)
+			}
+		})
 	}
 }
 

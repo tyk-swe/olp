@@ -233,6 +233,15 @@ func jsonInt64(raw json.RawMessage) (int64, bool) {
 var managedBatchStatuses = map[string]map[string]string{
 	"together": {"VALIDATING": "validating", "IN_PROGRESS": "in_progress", "COMPLETED": "completed", "FAILED": "failed", "EXPIRED": "expired", "CANCELLING": "cancelling", "CANCELLED": "cancelled"},
 	"mistral":  {"QUEUED": "validating", "RUNNING": "in_progress", "SUCCESS": "completed", "FAILED": "failed", "TIMEOUT_EXCEEDED": "expired", "CANCELLATION_REQUESTED": "cancelling", "CANCELLED": "cancelled"},
+	"gemini_managed": {
+		"BATCH_STATE_PENDING": "validating", "JOB_STATE_PENDING": "validating", "JOB_STATE_QUEUED": "validating",
+		"BATCH_STATE_RUNNING": "in_progress", "JOB_STATE_RUNNING": "in_progress",
+		"BATCH_STATE_CANCELLING": "cancelling", "JOB_STATE_CANCELLING": "cancelling",
+		"BATCH_STATE_SUCCEEDED": "completed", "JOB_STATE_SUCCEEDED": "completed",
+		"BATCH_STATE_FAILED": "failed", "JOB_STATE_FAILED": "failed",
+		"BATCH_STATE_CANCELLED": "cancelled", "JOB_STATE_CANCELLED": "cancelled",
+		"BATCH_STATE_EXPIRED": "expired", "JOB_STATE_EXPIRED": "expired",
+	},
 }
 
 func ManagedStatus(adapter, status string) (string, bool) {
