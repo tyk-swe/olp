@@ -15,6 +15,7 @@ import (
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/operationregistry"
 	"github.com/tyk-swe/olp/internal/pricingpolicy"
+	"github.com/tyk-swe/olp/internal/toolidentity"
 )
 
 // pricingLockID serialises pricing revision creation across replicas ("OLP_PR").
@@ -503,7 +504,7 @@ func normalizeToolCallFees(calls map[string]string) error {
 			"Tool call fees name 1–"+strconv.Itoa(maxToolCalls)+" tools.")
 	}
 	for tool, fee := range calls {
-		if !toolNamePattern.MatchString(tool) {
+		if !toolidentity.ValidMeteredName(tool) {
 			return access.Invalid("prices", "A tool call fee name is malformed.")
 		}
 		value, err := normalizePriceAmount(fee)

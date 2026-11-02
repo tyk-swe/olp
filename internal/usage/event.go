@@ -15,6 +15,7 @@ import (
 	"github.com/tyk-swe/olp/internal/guardrails"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/routeidentity"
+	"github.com/tyk-swe/olp/internal/toolidentity"
 )
 
 // WireVersion is the envelope version this build writes and accepts. Every
@@ -1276,9 +1277,6 @@ func validateUsageDimensions(input, output, read, write, write5m, write1h,
 	return nil
 }
 
-// toolNamePattern bounds a metered tool name, in prices and in usage.
-var toolNamePattern = regexp.MustCompile(`^[a-z][a-z0-9_]{0,63}$`)
-
 // ConsistentUsage reports whether one attempt's counters satisfy the share
 // invariants accounting stores. The gateway checks provider-reported usage
 // against it before billing evidence leaves the process.
@@ -1311,7 +1309,7 @@ func validateToolCalls(calls map[string]int64) error {
 		return errors.New("too many tool call counters")
 	}
 	for name, count := range calls {
-		if !toolNamePattern.MatchString(name) {
+		if !toolidentity.ValidMeteredName(name) {
 			return errors.New("a tool call name is malformed")
 		}
 		if count < 0 {

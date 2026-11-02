@@ -19,6 +19,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/pricingpolicy"
 	"github.com/tyk-swe/olp/internal/signing"
+	"github.com/tyk-swe/olp/internal/toolidentity"
 )
 
 // APIVersion identifies the catalog document format.
@@ -327,7 +328,7 @@ func (c *Catalog) validatePrice(p Price) error {
 			return errors.New("tool_calls takes at most 16 tool fees")
 		}
 		for tool, fee := range p.ToolCalls {
-			if !snakeName.MatchString(tool) {
+			if !toolidentity.ValidMeteredName(tool) {
 				return fmt.Errorf("tool name %q is malformed", tool)
 			}
 			if !fee.Valid() {

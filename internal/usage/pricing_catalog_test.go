@@ -55,6 +55,28 @@ func TestEmbeddedCatalogMapsToValidPrices(t *testing.T) {
 	}
 }
 
+func TestMeteredToolNamesAgreeAcrossCatalogPricingAndUsage(t *testing.T) {
+	document, _, _, _ := signedCatalog(t, time.Date(2025, 1, 15, 0, 0, 0, 0, time.UTC))
+	for _, tc := range []struct {
+		name  string
+		valid bool
+	}{
+		{"tool", true}, {"tool_2", true}, {strings.Repeat("a", 64), true},
+		{"", false}, {"Tool", false}, {"2tool", false}, {"tool-name", false}, {strings.Repeat("a", 65), false},
+	} {
+		fixture, err := catalog.Decode(document)
+		if err != nil {
+			t.Fatal(err)
+		}
+		fixture.Vendors[0].Models[0].Prices[0].ToolCalls = map[string]catalog.Decimal{tc.name: "1"}
+		catalogErr, pricingErr := catalogPriceValidation(t, fixture)
+		usageValid := ConsistentUsage(&AttemptUsage{ToolCalls: map[string]int64{tc.name: 1}})
+		if (catalogErr == nil) != tc.valid || (pricingErr == nil) != tc.valid || usageValid != tc.valid {
+			t.Errorf("tool %q, catalog error %v, pricing error %v, usage valid %t", tc.name, catalogErr, pricingErr, usageValid)
+		}
+	}
+}
+
 func TestCatalogCurrencyAgreesWithPriceRevisions(t *testing.T) {
 	document, _, _, _ := signedCatalog(t, time.Date(2025, 1, 15, 0, 0, 0, 0, time.UTC))
 	for _, tc := range []struct {
