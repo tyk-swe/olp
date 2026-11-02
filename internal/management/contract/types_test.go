@@ -3,12 +3,58 @@ package contract_test
 import (
 	"encoding/json"
 	"os"
+	"regexp"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/tyk-swe/olp/internal/management/contract"
+	"github.com/tyk-swe/olp/internal/routeidentity"
 	"github.com/tyk-swe/olp/internal/usage"
 )
+
+func TestRouteNamesAgreeWithManagementContract(t *testing.T) {
+	raw, err := os.ReadFile("../../../openapi/management.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var document struct {
+		Components struct {
+			Schemas map[string]struct {
+				Properties map[string]struct {
+					Pattern string `json:"pattern"`
+				} `json:"properties"`
+			} `json:"schemas"`
+		} `json:"components"`
+	}
+	if err := json.Unmarshal(raw, &document); err != nil {
+		t.Fatal(err)
+	}
+	for _, field := range []struct{ schema, property string }{
+		{"CodeRouteWrite", "slug"},
+		{"ConfigurationCodeRoute", "slug"},
+		{"RouteFallback", "route"},
+		{"RouteSelector", "route"},
+		{"WorkloadMapping", "limit_template"},
+		{"ConfigurationWorkloadMapping", "limit_template"},
+	} {
+		t.Run(field.schema+"/"+field.property, func(t *testing.T) {
+			pattern := document.Components.Schemas[field.schema].Properties[field.property].Pattern
+			if pattern == "" {
+				t.Fatal("contract does not constrain the identifier")
+			}
+			expression, err := regexp.Compile(pattern)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, value := range []string{"route", "route.name", "route-2", "_route", "route/name", "", strings.Repeat("a", 100), strings.Repeat("a", 101)} {
+				if expression.MatchString(value) != routeidentity.ValidSlug(value) {
+					t.Errorf("contract and route validation disagree for %q", value)
+				}
+			}
+		})
+	}
+}
 
 func openAPIEnum(t *testing.T, schema string) []string {
 	t.Helper()
