@@ -1,10 +1,13 @@
+const discounts = ['pricing-discounts'] as const;
+const rateCards = ['rate-cards'] as const;
+
 export const discountKeys = {
-  all: ['pricing-discounts'] as const,
-  page: (cursor?: string) => ['pricing-discounts', cursor ?? ''] as const
+  all: discounts,
+  page: (cursor?: string) => [...discounts, cursor ?? ''] as const
 };
 export const rateCardKeys = {
-  all: ['rate-cards'] as const,
-  page: (cursor?: string) => ['rate-cards', cursor ?? ''] as const,
+  all: rateCards,
+  page: (cursor?: string) => [...rateCards, cursor ?? ''] as const,
   revisions: (cardId: string, cursor?: string) =>
     ['rate-card-revisions', cardId, cursor ?? ''] as const
 };
