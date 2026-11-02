@@ -193,8 +193,11 @@ func (s *SQLFilter) definedAttribute(path filter.AttributePath, scope []string) 
 		return true
 	}
 	if s.Schema == UserSchema {
+		if len(parts) == 2 && parts[0] == "name" && slices.Contains(NameSubattributes(), parts[1]) {
+			return true
+		}
 		switch name {
-		case "userName", "displayName", "active", "name", "name.formatted", "name.familyName", "name.givenName", "name.middleName", "name.honorificPrefix", "name.honorificSuffix",
+		case "userName", "displayName", "active", "name",
 			"emails", "emails.value", "emails.type", "emails.primary", "groups", "groups.value", "groups.display", "groups.type", "groups.$ref", "roles", "roles.value", "roles.primary",
 			UserExtension + ".role", UserExtension + ".accessScope":
 			return true

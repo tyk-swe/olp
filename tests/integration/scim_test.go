@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"net/url"
 	"os"
@@ -81,19 +82,57 @@ func TestSCIMFiltersAndSortsMultivaluedEmails(t *testing.T) {
 	}) {
 		t.Fatalf("email schema=%v", schema)
 	}
-	create := func(name, alternate string) string {
+	nameIndex := slices.IndexFunc(schema["attributes"].([]any), func(value any) bool {
+		return value.(map[string]any)["name"] == "name"
+	})
+	if nameIndex < 0 {
+		t.Fatalf("name schema=%v", schema)
+	}
+	nameFields := schema["attributes"].([]any)[nameIndex].(map[string]any)["subAttributes"].([]any)
+	if len(nameFields) == 0 {
+		t.Fatalf("name schema=%v", schema)
+	}
+	nameValues := maps.Collect(func(yield func(string, any) bool) {
+		for _, raw := range nameFields {
+			field := raw.(map[string]any)["name"].(string)
+			if !yield(field, "first-"+field) {
+				return
+			}
+		}
+	})
+	inputName := maps.Collect(func(yield func(string, any) bool) {
+		for field, value := range nameValues {
+			if !yield(strings.ToUpper(field), value) {
+				return
+			}
+		}
+	})
+	create := func(name, alternate string, personName map[string]any) map[string]any {
 		body := map[string]any{
 			"schemas":  []string{scim.UserSchema},
 			"userName": name + "@example.com",
+			"name":     personName,
 			"emails": []any{
 				map[string]any{"value": alternate + "@example.com"},
 				map[string]any{"value": name + "@example.com", "primary": true},
 			},
 		}
-		return scimCall(t, h, token, "POST", "/scim/v2/Users", body, "", 201)["id"].(string)
+		return scimCall(t, h, token, "POST", "/scim/v2/Users", body, "", 201)
 	}
-	first := create("alice", "zebra")
-	second := create("bob", "aardvark")
+	firstUser := create("alice", "zebra", inputName)
+	first := firstUser["id"].(string)
+	second := create("bob", "aardvark", nil)["id"].(string)
+	if !reflect.DeepEqual(firstUser["name"], nameValues) {
+		t.Fatalf("created name=%v, want %v", firstUser["name"], nameValues)
+	}
+	for field, value := range nameValues {
+		query := url.Values{"filter": {fmt.Sprintf("name.%s eq %q", field, value)}, "sortBy": {"name." + field}}
+		result := scimCall(t, h, token, "GET", "/scim/v2/Users?"+query.Encode(), nil, "", 200)
+		users := result["Resources"].([]any)
+		if len(users) != 1 || users[0].(map[string]any)["id"] != first {
+			t.Fatalf("filtered name.%s=%v", field, users)
+		}
+	}
 	query := url.Values{"filter": {`emails.value co "@example.com"`}, "sortBy": {"emails.value"}}
 	result := scimCall(t, h, token, "GET", "/scim/v2/Users?"+query.Encode(), nil, "", 200)
 	users := result["Resources"].([]any)
