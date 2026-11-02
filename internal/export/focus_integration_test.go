@@ -411,7 +411,7 @@ func TestIntegrationFocusExport(t *testing.T) {
 		if !strings.HasSuffix(hit.path, ".csv.gz") {
 			continue
 		}
-		report, err := focusspec.Validate(bytes.NewReader(mustGunzip(t, hit.body)), FocusCriteria)
+		report, err := focusspec.Validate(bytes.NewReader(mustGunzip(t, hit.body)), focusCriteria())
 		if err != nil {
 			t.Fatalf("validate %s: %v", hit.path, err)
 		}
