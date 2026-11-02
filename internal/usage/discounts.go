@@ -92,7 +92,7 @@ func NormalizeDiscount(ctx context.Context, tx pgx.Tx, input DiscountInput,
 	if input.Multiplier == nil {
 		return d, access.Invalid("multiplier", "A discount needs a multiplier.")
 	}
-	multiplier, err := normalizeDecimal(*input.Multiplier)
+	multiplier, err := NormalizePriceAmount(*input.Multiplier)
 	if err != nil {
 		return d, access.Invalid("multiplier", "Use a non-negative decimal.")
 	}

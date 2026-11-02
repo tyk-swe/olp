@@ -20,6 +20,7 @@ import (
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/plugins"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
+	"github.com/tyk-swe/olp/internal/usage"
 	"github.com/tyk-swe/olp/internal/vendors"
 )
 
@@ -277,8 +278,8 @@ func (c *Configuration) Validate(policy *egress.Policy) error {
 		return access.Invalid("configuration.options.parameter_defaults", err.Error())
 	}
 	if c.Options.Commitment != nil {
-		amount := strings.TrimSpace(c.Options.Commitment.Amount)
-		if !decimalAmount(amount) || strings.Trim(amount, "0.") == "" {
+		amount, err := usage.NormalizePriceAmount(c.Options.Commitment.Amount)
+		if err != nil || strings.Trim(amount, "0.") == "" {
 			return access.Invalid("configuration.options.commitment.amount",
 				"A commitment amount is a positive decimal with at most 12 integer and 12 fractional digits.")
 		}
@@ -376,21 +377,6 @@ func (c *Configuration) transportFingerprint() string {
 	encoded, _ := json.Marshal(parts)
 	h.Write(encoded)
 	return hex.EncodeToString(h.Sum(nil))[:32]
-}
-
-// decimalAmount applies the same rate decimal rule the pricing contract uses:
-// a non-negative decimal with at most 12 integer and 12 fractional digits.
-func decimalAmount(s string) bool {
-	whole, fraction, has := strings.Cut(s, ".")
-	if len(whole) < 1 || len(whole) > 12 || has && (len(fraction) < 1 || len(fraction) > 12) {
-		return false
-	}
-	for _, c := range whole + fraction {
-		if c < '0' || c > '9' {
-			return false
-		}
-	}
-	return true
 }
 
 func value(v *string) string {
