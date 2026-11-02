@@ -12,6 +12,10 @@ func ValidTranslationResponseFormat(format string) bool {
 	return slices.Contains(formats[:], format)
 }
 
+func ValidTranscriptionResponseFormat(format string) bool {
+	return format == "diarized_json" || ValidTranslationResponseFormat(format)
+}
+
 // OperationGeneration is the gateway operation both codecs map to.
 const OperationGeneration = "generation"
 

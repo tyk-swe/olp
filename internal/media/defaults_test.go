@@ -88,3 +88,24 @@ func TestTranslationPublishedFormatsAreAccepted(t *testing.T) {
 		})
 	}
 }
+
+func TestTranscriptionFormatsAgreeBetweenRequestsAndDefaults(t *testing.T) {
+	for _, format := range []string{"json", "text", "srt", "vtt", "verbose_json", "diarized_json", "unsupported"} {
+		t.Run(format, func(t *testing.T) {
+			raw, err := json.Marshal(format)
+			if err != nil {
+				t.Fatal(err)
+			}
+			cfg := mediaDefaultsConfig(t, OpTranscription, map[string]json.RawMessage{"response_format": raw}, nil)
+			form := &Form{
+				text:  map[string][]string{"model": {"route"}, "response_format": {format}},
+				files: map[string][]Part{"file": {{}}},
+			}
+			_, failure := DecodeTranscription(form)
+			_, _, configuredFailure := EncodeConfigured(&Request{Op: OpTranscription, Route: "route", File: &Part{}}, cfg, "model")
+			if acceptedDefault, acceptedRequest := configuredFailure == nil, failure == nil; acceptedDefault != acceptedRequest {
+				t.Fatalf("format %q accepted by default = %t, request = %t", format, acceptedDefault, acceptedRequest)
+			}
+		})
+	}
+}
