@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 )
 
@@ -14,6 +15,26 @@ func TestEmbeddedCatalogIsCanonical(t *testing.T) {
 	}
 	if !bytes.Equal(canonical, document) {
 		t.Fatal("catalog.json is not canonical; run make catalog")
+	}
+}
+
+func TestEncodeSortsTiersWithoutChangingCatalog(t *testing.T) {
+	tiers := []Tier{{AboveInputTokens: 30}, {AboveInputTokens: 10}, {AboveInputTokens: 20}}
+	catalog := &Catalog{APIVersion: APIVersion, Vendors: []Vendor{{Models: []Model{{Prices: []Price{{Tiers: slices.Clone(tiers)}}}}}}}
+
+	document, err := Encode(catalog)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := catalog.Vendors[0].Models[0].Prices[0].Tiers; !slices.Equal(got, tiers) {
+		t.Fatalf("encoding changed input tiers: got %v, want %v", got, tiers)
+	}
+	encoded, err := Decode(document)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := encoded.Vendors[0].Models[0].Prices[0].Tiers, []Tier{tiers[1], tiers[2], tiers[0]}; !slices.Equal(got, want) {
+		t.Fatalf("encoded tiers are not sorted: got %v, want %v", got, want)
 	}
 }
 
