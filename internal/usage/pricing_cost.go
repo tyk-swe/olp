@@ -5,6 +5,8 @@ import (
 	"slices"
 	"strings"
 	"time"
+
+	"github.com/tyk-swe/olp/internal/pricingpolicy"
 )
 
 // This file prices an attempt in Go exactly as priceAttemptSQL does in
@@ -308,10 +310,10 @@ func parseRates(p *Price) *priceRates {
 		}
 		r.location = location
 		for _, period := range p.Windows.Periods {
-			start, errStart := windowMinutes(period.Start, false)
-			end, errEnd := windowMinutes(period.End, true)
+			start, validStart := pricingpolicy.WindowMinutes(period.Start, false)
+			end, validEnd := pricingpolicy.WindowMinutes(period.End, true)
 			multiplier, ok := scaledDecimal(period.Multiplier, costDigits)
-			if errStart != nil || errEnd != nil || !ok {
+			if !validStart || !validEnd || !ok {
 				return fail()
 			}
 			window := parsedWindow{start: start, end: end, multiplier: multiplier}

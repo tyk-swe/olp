@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -51,6 +52,58 @@ func TestEmbeddedCatalogMapsToValidPrices(t *testing.T) {
 	}
 	if len(doc.Prices) != names {
 		t.Fatalf("mapped %d prices for %d priced names", len(doc.Prices), names)
+	}
+}
+
+func TestCatalogWindowsAgreeWithPriceRevisions(t *testing.T) {
+	published := time.Date(2025, 1, 15, 0, 0, 0, 0, time.UTC)
+	document, _, _, _ := signedCatalog(t, published)
+	period := func(start, end string, days ...int) catalog.WindowPeriod {
+		return catalog.WindowPeriod{Start: start, End: end, Days: days, Multiplier: "1"}
+	}
+	periods := func(count int) []catalog.WindowPeriod {
+		return slices.Collect(func(yield func(catalog.WindowPeriod) bool) {
+			for index := range count {
+				start := published.Add(time.Duration(index) * 30 * time.Minute)
+				if !yield(period(start.Format("15:04"), start.Add(30*time.Minute).Format("15:04"), 1)) {
+					return
+				}
+			}
+		})
+	}
+	for _, tc := range []struct {
+		name    string
+		periods []catalog.WindowPeriod
+		valid   bool
+	}{
+		{"full day", []catalog.WindowPeriod{period("00:00", "24:00", 1)}, true},
+		{"adjacent", []catalog.WindowPeriod{period("09:00", "12:00", 1), period("12:00", "15:00", 1)}, true},
+		{"different days", []catalog.WindowPeriod{period("09:00", "12:00", 1), period("09:00", "12:00", 2)}, true},
+		{"overlap", []catalog.WindowPeriod{period("09:00", "12:00", 1), period("11:00", "15:00", 1)}, false},
+		{"midnight start", []catalog.WindowPeriod{period("24:00", "24:00", 1)}, false},
+		{"late end", []catalog.WindowPeriod{period("09:00", "24:01", 1)}, false},
+		{"short hour", []catalog.WindowPeriod{period("9:00", "12:00", 1)}, false},
+		{"duplicate day", []catalog.WindowPeriod{period("09:00", "12:00", 1, 1)}, false},
+		{"no periods", []catalog.WindowPeriod{}, false},
+		{"period limit", periods(32), true},
+		{"too many periods", periods(33), false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fixture, err := catalog.Decode(document)
+			if err != nil {
+				t.Fatal(err)
+			}
+			fixture.Vendors[0].Models[0].Prices[0].Windows = &catalog.Windows{TimeZone: time.UTC.String(), Periods: tc.periods}
+			catalogErr := fixture.Validate()
+			doc, skipped := catalogDocument(fixture, vendors.Kind)
+			if len(skipped) != 0 {
+				t.Fatalf("unexpected skipped catalog price: %+v", skipped)
+			}
+			_, _, pricingErr := validatePrices(doc.Prices, vendors.Kind)
+			if (catalogErr == nil) != tc.valid || (pricingErr == nil) != tc.valid {
+				t.Fatalf("catalog error = %v, pricing error = %v", catalogErr, pricingErr)
+			}
+		})
 	}
 }
 

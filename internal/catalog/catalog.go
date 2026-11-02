@@ -17,6 +17,7 @@ import (
 	"slices"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/pricingpolicy"
 	"github.com/tyk-swe/olp/internal/signing"
 )
 
@@ -308,8 +309,6 @@ var unrepresentableComponents = map[string]bool{
 	"unpublished_rates": true, "video_input": true,
 }
 
-var dayTime = regexp.MustCompile(`^([01][0-9]|2[0-3]):[0-5][0-9]$|^24:00$`)
-
 func (c *Catalog) validatePrice(p Price) error {
 	priced := false
 	for _, rate := range append(priceRates(&p), p.UnitPrice, p.PerRequest, p.BatchMultiplier, p.TrainingPerMillion, p.StoragePerGiBDay, p.CacheStoragePerMillionTokenHour) {
@@ -415,8 +414,8 @@ func validateWindows(windows *Windows) error {
 	if _, err := time.LoadLocation(windows.TimeZone); err != nil {
 		return fmt.Errorf("time zone %q is unknown", windows.TimeZone)
 	}
-	if len(windows.Periods) == 0 || len(windows.Periods) > 32 {
-		return errors.New("windows take 1–32 periods")
+	if len(windows.Periods) == 0 || len(windows.Periods) > pricingpolicy.MaxWindowPeriods {
+		return fmt.Errorf("windows take 1–%d periods", pricingpolicy.MaxWindowPeriods)
 	}
 	periods := make([]WindowPeriod, 0, len(windows.Periods))
 	for index, period := range windows.Periods {
@@ -433,8 +432,9 @@ func validateWindows(windows *Windows) error {
 			}
 			seen[day] = true
 		}
-		if !dayTime.MatchString(period.Start) || period.Start == "24:00" ||
-			!dayTime.MatchString(period.End) {
+		_, validStart := pricingpolicy.WindowMinutes(period.Start, false)
+		_, validEnd := pricingpolicy.WindowMinutes(period.End, true)
+		if !validStart || !validEnd {
 			return fmt.Errorf("period %d times are HH:MM (end may be 24:00)", index)
 		}
 		if period.End != "24:00" && period.End <= period.Start {

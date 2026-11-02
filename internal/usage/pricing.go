@@ -14,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/operationregistry"
+	"github.com/tyk-swe/olp/internal/pricingpolicy"
 )
 
 // pricingLockID serialises pricing revision creation across replicas ("OLP_PR").
@@ -576,9 +577,6 @@ func normalizeTiers(tiers []PriceTier, entry *Price) error {
 	return nil
 }
 
-// maxWindowPeriods bounds the periods one price may carry.
-const maxWindowPeriods = 32
-
 // normalizeWindows checks one window set: a zone the clock can resolve,
 // well-formed periods, and no two periods covering the same time on a shared
 // day.
@@ -589,20 +587,20 @@ func normalizeWindows(windows *PriceWindows) error {
 	if _, err := time.LoadLocation(windows.TimeZone); err != nil {
 		return access.Invalid("prices", "The pricing window time zone is unknown.")
 	}
-	if len(windows.Periods) < 1 || len(windows.Periods) > maxWindowPeriods {
+	if len(windows.Periods) < 1 || len(windows.Periods) > pricingpolicy.MaxWindowPeriods {
 		return access.Invalid("prices",
-			"Pricing windows name 1–"+strconv.Itoa(maxWindowPeriods)+" periods.")
+			"Pricing windows name 1–"+strconv.Itoa(pricingpolicy.MaxWindowPeriods)+" periods.")
 	}
 	type span struct{ start, end int }
 	days := map[int][]span{}
 	for i := range windows.Periods {
 		period := &windows.Periods[i]
-		start, err := windowMinutes(period.Start, false)
-		if err != nil {
+		start, validStart := pricingpolicy.WindowMinutes(period.Start, false)
+		if !validStart {
 			return access.Invalid("prices", "A pricing window start must be a time between 00:00 and 23:59.")
 		}
-		end, err := windowMinutes(period.End, true)
-		if err != nil {
+		end, validEnd := pricingpolicy.WindowMinutes(period.End, true)
+		if !validEnd {
 			return access.Invalid("prices", "A pricing window end must be a time between 00:01 and 24:00.")
 		}
 		if end <= start {
@@ -631,24 +629,6 @@ func normalizeWindows(windows *PriceWindows) error {
 		}
 	}
 	return nil
-}
-
-// windowMinutes parses an "HH:MM" wall time into minutes of day. allowEndOfDay
-// accepts "24:00" for a period end, which starts are denied.
-func windowMinutes(value string, allowEndOfDay bool) (int, error) {
-	hours, minutes, found := strings.Cut(value, ":")
-	if !found || len(hours) != 2 || len(minutes) != 2 || !priceDigits(hours) || !priceDigits(minutes) {
-		return 0, errors.New("malformed window time")
-	}
-	h, _ := strconv.Atoi(hours)
-	m, _ := strconv.Atoi(minutes)
-	if allowEndOfDay && h == 24 && m == 0 {
-		return 24 * 60, nil
-	}
-	if h > 23 || m > 59 {
-		return 0, errors.New("window time out of range")
-	}
-	return h*60 + m, nil
 }
 
 func currencyLetters(value string) bool {
