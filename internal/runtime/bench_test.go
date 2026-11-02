@@ -30,7 +30,7 @@ func BenchmarkAuthenticate(b *testing.B) {
 		b.Fatal(err)
 	}
 	auth := secrets.NewAuthKey(key, uuid.NewString())
-	m := NewManager(nil, uuid.NewString(), auth, nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	m := NewManager(nil, uuid.NewString(), auth, nil, slog.New(slog.NewTextHandler(io.Discard, nil)), "test-host")
 	// An authority read in the future never goes stale however long the run is.
 	state := authorityState{loaded: true, readAt: time.Now().Add(24 * time.Hour), keys: map[string]*keyRecord{}}
 	var presented string

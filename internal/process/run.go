@@ -266,7 +266,7 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 		focusWorker = &export.FocusWorker{Pool: pool, Keys: keys, Installation: installation, Sender: sender, Log: log}
 		capturer = &export.Manager{Pool: pool, Keys: keys, Installation: installation, Sender: sender, Log: log}
 		importer = &billing.Importer{Pool: pool, Keys: keys, Installation: installation, Egress: &policy, Log: log}
-		rt = runtime.NewManager(pool, installation, auth, keys, log)
+		rt = runtime.NewManager(pool, installation, auth, keys, log, c.Hostname)
 		rt.ReadPool = readPool
 		rt.Region = c.Region
 		rt.ExternalSecrets = secretstore.New(policy)
@@ -419,7 +419,7 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 		// Without shared state, hard limits are refused and metadata stays logged.
 		if limiter != nil {
 			emitter = usage.NewEmitter(metadataBuffer)
-			gatewayInstance = usage.GatewayInstance()
+			gatewayInstance = usage.GatewayInstance(c.Hostname)
 			for _, server := range []*gateway.Server{gw, prober} {
 				if server == nil {
 					continue
@@ -608,7 +608,7 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 		// provider egress client, so the plane runs even when no shared state
 		// backend is configured. It is started exactly once, inside the single
 		// worker plane.
-		workersStopped = startWorkers(workers, pool, reader, limiter, workerStream, mediaService, pluginHost, keys, auth, installation, c.Region, &policy, log, exporter, focusWorker, importer, referenceCatalog)
+		workersStopped = startWorkers(workers, pool, reader, limiter, workerStream, mediaService, pluginHost, keys, auth, installation, c.Region, c.Hostname, &policy, log, exporter, focusWorker, importer, referenceCatalog)
 	}
 	// Probes produce accounting events, so they stop before delivery closes;
 	// the consumer and recovery workers remain alive until delivery drains.

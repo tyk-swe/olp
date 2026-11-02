@@ -60,7 +60,7 @@ func TestMountedDefaultsServeWithoutMasterKeyAndKeepPublishedOwnership(t *testin
 		t.Fatal(err)
 	}
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
-	manager := runtime.NewManager(h.Pool, installation, secrets.NewAuthKey(auth, installation), nil, log)
+	manager := runtime.NewManager(h.Pool, installation, secrets.NewAuthKey(auth, installation), nil, log, "test-host")
 	manager.Mounted = mounted
 	if err = manager.Refresh(t.Context()); err != nil {
 		t.Fatal(err)

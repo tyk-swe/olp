@@ -33,6 +33,7 @@ func (m Mode) Inference() bool  { return m == All || m == Gateway }
 
 type Config struct {
 	Mode                      Mode
+	Hostname                  string
 	DatabaseURL               string
 	DatabaseReadURL           string
 	Region                    string
@@ -108,6 +109,7 @@ func Parse(args []string, getenv func(string) string, output io.Writer) (Config,
 	default:
 		return c, fmt.Errorf("unknown process mode %q", args[0])
 	}
+	c.Hostname = getenv("HOSTNAME")
 	f := flag.NewFlagSet("olp "+args[0], flag.ContinueOnError)
 	f.SetOutput(output)
 	var databaseFile, databaseReadFile, valkeyFile, cacheValkeyFile, level string

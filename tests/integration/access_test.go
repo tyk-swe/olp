@@ -157,7 +157,7 @@ func newAccessHarnessAtInstallation(t *testing.T, pool *pgxpool.Pool, dbURL, ins
 	if len(loggers) > 0 {
 		log = loggers[0]
 	}
-	rt := runtime.NewManager(pool, installation, digestKey, ring, log)
+	rt := runtime.NewManager(pool, installation, digestKey, ring, log, "test-host")
 	// The race detector slows wazero's compiler tenfold, so the harness
 	// interprets plugins, for installing and for signing alike.
 	pluginRuntime, err := plugins.NewRuntime(t.Context(), plugins.Interpreted, plugins.DefaultLimits, log)
