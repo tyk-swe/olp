@@ -19,12 +19,12 @@ type AttributionBudgets map[string]map[string]BudgetPolicy
 func (b AttributionBudgets) Validate() error {
 	count := 0
 	for key, values := range b {
-		if !attribution.KeyPattern.MatchString(key) || len(values) == 0 {
+		if !attribution.ValidKey(key) || len(values) == 0 {
 			return Invalid("budgets", "Use valid label keys with at least one budgeted value.")
 		}
 		for value, policy := range values {
 			count++
-			if !attribution.ValuePattern.MatchString(value) || !policy.Limited() {
+			if !attribution.ValidValue(value) || !policy.Limited() {
 				return Invalid("budgets", "Use machine-token values with at least one positive cost cap.")
 			}
 			if err := policy.Validate(); err != nil {

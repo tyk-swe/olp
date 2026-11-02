@@ -19,6 +19,7 @@ import (
 	"github.com/tyk-swe/olp/internal/protocols"
 	"github.com/tyk-swe/olp/internal/protocols/wire"
 
+	"github.com/tyk-swe/olp/internal/attribution"
 	"github.com/tyk-swe/olp/internal/bodylimit"
 	"github.com/tyk-swe/olp/internal/cache"
 	"github.com/tyk-swe/olp/internal/limits"
@@ -348,7 +349,7 @@ func (b Behavior) Validate(slug string, tagged func(string) bool) error {
 	}
 	if a := b.Affinity; a != nil {
 		switch {
-		case a.Source == AffinityLabel && attributionLabel.MatchString(a.Label):
+		case a.Source == AffinityLabel && attribution.ValidKey(a.Label):
 		case a.Source == AffinityCacheKey && a.Label == "":
 		default:
 			return invalidValue("affinity", "Affinity reads an attribution label or the dialect's cache key")
@@ -361,8 +362,6 @@ func (b Behavior) Validate(slug string, tagged func(string) bool) error {
 	}
 	return nil
 }
-
-var attributionLabel = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_.-]{0,31}$`)
 
 func (b Behavior) validateSelectors(slug string, tagged func(string) bool) error {
 	if len(b.Selectors) > maxSelectors {

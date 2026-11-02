@@ -42,7 +42,7 @@ func (t *BudgetTarget) validate() error {
 		return Invalid("target.end_user_digest", "Supply a digest only for an end-user budget.")
 	}
 	if t.Kind == "attribution" {
-		if !attribution.KeyPattern.MatchString(t.Label) || !attribution.ValuePattern.MatchString(t.Value) {
+		if !attribution.ValidKey(t.Label) || !attribution.ValidValue(t.Value) {
 			return Invalid("target", "Supply a valid attribution label and value.")
 		}
 	} else if t.Label != "" || t.Value != "" {

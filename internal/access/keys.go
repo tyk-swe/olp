@@ -80,7 +80,6 @@ type keyInput struct {
 }
 
 var decimal = regexp.MustCompile(`^[0-9]{1,12}(\.[0-9]{1,12})?$`)
-var attributionKey = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_.-]{0,31}$`)
 
 const maxAttributionKeys = 8
 
@@ -165,7 +164,7 @@ func validateKey(input keyInput, expirationChanged bool) error {
 	}
 	seen = map[string]bool{}
 	for _, key := range input.AllowedAttributionKeys {
-		if !attributionKey.MatchString(key) || seen[key] {
+		if !attribution.ValidKey(key) || seen[key] {
 			return Invalid("allowed_attribution_keys", "Use unique valid attribution keys.")
 		}
 		seen[key] = true

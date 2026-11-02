@@ -10,11 +10,6 @@ const (
 	AttributionKeyMax      = attribution.KeyMax
 )
 
-var (
-	AttributionKeyPattern   = attribution.KeyPattern
-	AttributionValuePattern = attribution.ValuePattern
-)
-
 type AttributionError = attribution.Error
 
 func ValidateAttribution(labels map[string]string) error { return attribution.Validate(labels) }

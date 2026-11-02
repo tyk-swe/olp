@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/tyk-swe/olp/internal/attribution"
 	"github.com/tyk-swe/olp/internal/guardrails"
 	"github.com/tyk-swe/olp/internal/pluginindex"
 	"github.com/tyk-swe/olp/internal/plugins"
@@ -18,6 +19,25 @@ import (
 	"github.com/tyk-swe/olp/internal/upstream"
 	"github.com/tyk-swe/olp/internal/usage"
 )
+
+func TestAffinityLabelsAgreeWithRequestAttribution(t *testing.T) {
+	for _, tc := range []struct {
+		key   string
+		valid bool
+	}{
+		{"team", true}, {"Team_2.name", true}, {strings.Repeat("a", 32), true},
+		{"", false}, {"2team", false}, {"team/name", false}, {strings.Repeat("a", 33), false},
+	} {
+		t.Run(tc.key, func(t *testing.T) {
+			behavior := Behavior{Affinity: &Affinity{Source: AffinityLabel, Label: tc.key}}
+			routeErr := behavior.Validate("route", nil)
+			labelErr := attribution.Validate(map[string]string{tc.key: "value"})
+			if (routeErr == nil) != tc.valid || (labelErr == nil) != tc.valid {
+				t.Errorf("valid %t, route error %v, label error %v", tc.valid, routeErr, labelErr)
+			}
+		})
+	}
+}
 
 func TestPluginDigestAgreesAcrossIndexAndConsumers(t *testing.T) {
 	hash := sha256.Sum256([]byte("example module"))

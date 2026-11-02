@@ -5,8 +5,28 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/attribution"
 	"github.com/tyk-swe/olp/internal/workload"
 )
+
+func TestAllowedAttributionKeysAgreeWithRequestLabels(t *testing.T) {
+	for _, tc := range []struct {
+		key   string
+		valid bool
+	}{
+		{"team", true}, {"Team_2.name", true}, {strings.Repeat("a", 32), true},
+		{"", false}, {"2team", false}, {"team/name", false}, {strings.Repeat("a", 33), false},
+	} {
+		t.Run(tc.key, func(t *testing.T) {
+			key := keyInput{Name: "key", KeyPolicy: KeyPolicy{Scopes: []string{"inference"}, AllowedRoutes: []string{}, AllowedAttributionKeys: []string{tc.key}}}
+			keyErr := validateKey(key, false)
+			labelErr := attribution.Validate(map[string]string{tc.key: "value"})
+			if (keyErr == nil) != tc.valid || (labelErr == nil) != tc.valid {
+				t.Errorf("valid %t, key error %v, label error %v", tc.valid, keyErr, labelErr)
+			}
+		})
+	}
+}
 
 func TestWorkloadReferencesAgreeWithProjectNames(t *testing.T) {
 	issuer := func(template, group string) workload.Config {

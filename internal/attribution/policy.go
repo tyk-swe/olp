@@ -15,7 +15,7 @@ func (p Policy) Validate() error {
 	}
 	seen := make(map[string]bool, len(p.Required))
 	for _, key := range p.Required {
-		if !KeyPattern.MatchString(key) || seen[key] {
+		if !ValidKey(key) || seen[key] {
 			return &Error{Reason: "invalid_required_keys"}
 		}
 		seen[key] = true
