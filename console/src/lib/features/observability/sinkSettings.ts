@@ -48,19 +48,10 @@ export function buildSinkSettings(
   return null;
 }
 
-// validateSinkSettings mirrors the server's settings rules so a bad form
-// stops at the browser rather than the API.
 export function validateSinkSettings(
   draft: SinkSettingsDraft,
-  credential: { editing: boolean; stripeKey: string },
-  now = Date.now()
+  credential: { editing: boolean; stripeKey: string }
 ): string {
-  if (draft.format === 'csv_gzip' && draft.focusStartDate) {
-    const start = Date.parse(draft.focusStartDate + 'T00:00:00Z');
-    const earliest = now - 89 * 24 * 60 * 60 * 1000;
-    if (!Number.isFinite(start) || start < earliest)
-      return 'Start date must be within the last 90 days.';
-  }
   if (draft.format === 'stripe') {
     if (!credential.editing && !credential.stripeKey.trim())
       return 'An enabled Stripe sink needs a restricted API key.';
