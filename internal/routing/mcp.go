@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"regexp"
 	"slices"
 
 	"github.com/santhosh-tekuri/jsonschema/v6"
@@ -13,6 +12,7 @@ import (
 	"github.com/tyk-swe/olp/internal/oif"
 	pluginidentity "github.com/tyk-swe/olp/internal/plugins/identity"
 	"github.com/tyk-swe/olp/internal/pricingpolicy"
+	"github.com/tyk-swe/olp/internal/toolidentity"
 )
 
 type MCPTool struct {
@@ -170,8 +170,6 @@ type MCPToolsetResolution struct {
 	Missing []MCPDriftedTool
 }
 
-var mcpDigest = regexp.MustCompile(`^[a-f0-9]{64}$`)
-
 type mcpNoNetwork struct{}
 
 func (mcpNoNetwork) Load(string) (any, error) {
@@ -230,7 +228,7 @@ func (s *Snapshot) validateMCPServers() error {
 		if server.OAuth != nil && !server.OAuth.Valid() {
 			return fmt.Errorf("MCP server has invalid OAuth configuration")
 		}
-		if !validUUID(server.ID) || !validUUID(server.ProjectID) || !validUUID(server.RevisionID) || (server.Transport != MCPStdio && server.Endpoint == "") || len(server.Endpoint) > 2048 || server.Protocol == "" || !mcpDigest.MatchString(server.Digest) || seen[server.ID] || len(server.Tools) > 128 {
+		if !validUUID(server.ID) || !validUUID(server.ProjectID) || !validUUID(server.RevisionID) || (server.Transport != MCPStdio && server.Endpoint == "") || len(server.Endpoint) > 2048 || server.Protocol == "" || !toolidentity.ValidCatalogDigest(server.Digest) || seen[server.ID] || len(server.Tools) > 128 {
 			return fmt.Errorf("MCP server %q is malformed", server.ID)
 		}
 		if server.CredentialID != nil && !validUUID(*server.CredentialID) {

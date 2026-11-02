@@ -1,6 +1,8 @@
 package routing
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -83,6 +85,20 @@ const (
 )
 
 var mcpSchema = json.RawMessage(`{"type":"object","properties":{"query":{"type":"string"}},"required":["query"],"additionalProperties":false}`)
+
+func TestMCPServerAndToolPinAgreeOnCatalogDigest(t *testing.T) {
+	checksum := sha256.Sum256([]byte("catalog"))
+	validDigest := hex.EncodeToString(checksum[:])
+	for _, digest := range []string{validDigest, strings.ToUpper(validDigest), "", strings.Repeat("a", 63), strings.Repeat("a", 65), strings.Repeat("g", 64)} {
+		snapshot := mcpSnapshot(t, digest)
+		draftErr := snapshot.AgentPublications[0].Definition.Validate("toolset")
+		serverSnapshot := Snapshot{Generation: snapshot.Generation, MCPServers: snapshot.MCPServers}
+		snapshotErr := serverSnapshot.Compile()
+		if (draftErr == nil) != (snapshotErr == nil) || digest == validDigest && draftErr != nil {
+			t.Errorf("digest %q, tool pin error %v, server error %v", digest, draftErr, snapshotErr)
+		}
+	}
+}
 
 func mcpSnapshot(t *testing.T, digest string) Snapshot {
 	t.Helper()

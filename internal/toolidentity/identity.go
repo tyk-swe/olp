@@ -10,6 +10,7 @@ import (
 var (
 	aliasPattern   = regexp.MustCompile(`^t_[a-f0-9]{32}_[a-f0-9]{32}$`)
 	meteredPattern = regexp.MustCompile(`^[a-z][a-z0-9_]{0,63}$`)
+	catalogDigest  = regexp.MustCompile(`^[a-f0-9]{64}$`)
 )
 
 func Alias(server, name string) string {
@@ -19,6 +20,10 @@ func Alias(server, name string) string {
 
 func ValidAlias(value string) bool {
 	return aliasPattern.MatchString(value)
+}
+
+func ValidCatalogDigest(value string) bool {
+	return catalogDigest.MatchString(value)
 }
 
 func ValidMeteredName(value string) bool {

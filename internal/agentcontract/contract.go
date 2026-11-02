@@ -103,7 +103,7 @@ func (d Draft) Validate(kind string) error {
 			if t.Classification != "" && t.Classification != "read_only" && t.Classification != "approval_required" {
 				return invalid("toolset", "Use a supported operator classification for each tool.")
 			}
-			if !validID(t.ServerID) || !validID(t.RevisionID) || !hexDigest.MatchString(t.CatalogDigest) || len(t.Name) == 0 || len(t.Name) > 256 || t.Alias != ToolAlias(t.ServerID, t.Name) || seen[t.Alias] {
+			if !validID(t.ServerID) || !validID(t.RevisionID) || !toolidentity.ValidCatalogDigest(t.CatalogDigest) || len(t.Name) == 0 || len(t.Name) > 256 || t.Alias != ToolAlias(t.ServerID, t.Name) || seen[t.Alias] {
 				return invalid("toolset", "Use unique aliases and exact certified server revisions.")
 			}
 			seen[t.Alias] = true
