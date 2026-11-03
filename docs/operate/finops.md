@@ -550,9 +550,8 @@ A provider entry in a configuration document carries `billing_import`
 `{enabled, scope, credential_ref}` with `credential_ref`
 `<provider name>/billing`; a missing `secret_bindings` entry blocks apply,
 reusing a matching binding keeps the stored credential, and an entry's absence
-deletes the import. The fixtures in `internal/billing/testdata` and the hand-built
-AWS CUR fixtures in `tests/integration/billing_aws_test.go` follow documented
-response shapes. The AWS fixture follows the documented [report versions](https://docs.aws.amazon.com/cur/latest/userguide/understanding-report-versions.html),
+deletes the import. The fixtures in `internal/billing/testdata` follow documented response
+shapes, including the documented AWS shapes from [report versions](https://docs.aws.amazon.com/cur/latest/userguide/understanding-report-versions.html),
 [latest report locations](https://docs.aws.amazon.com/cur/latest/userguide/view-latest-cur.html),
 [identity columns](https://docs.aws.amazon.com/cur/latest/userguide/identity-columns.html)
 and [line item columns](https://docs.aws.amazon.com/cur/latest/userguide/Lineitem-columns.html),

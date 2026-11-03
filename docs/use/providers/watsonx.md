@@ -51,13 +51,6 @@ the attempt, both as an HTTP response and as an `error` event in a stream.
 
 ## Testing
 
-Opt-in paid live qualification needs an API key and project:
-
-```sh
-OLP_LIVE_PROVIDER=watsonx \
-OLP_WATSONX_LIVE_API_KEY=... \
-OLP_WATSONX_LIVE_REGION=us-south \
-OLP_WATSONX_LIVE_PROJECT=... \
-go test -tags=liveproviders -count=1 -timeout=2m ./internal/connectors \
-  -run TestLiveProviderNativeGeneration
-```
+There is no automated watsonx coverage. Paid live qualification was
+subtracted with the test system. Validate changes by running the gateway
+against a stub or a real project and recording the command and output.

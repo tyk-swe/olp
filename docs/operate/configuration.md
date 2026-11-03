@@ -312,29 +312,24 @@ non-empty. Transports refuse redirects, use TLS 1.2 or
 newer, bound dial and handshake timeouts, and cap response headers at 32 KiB.
 Probes and inference use the same normalized endpoint and egress policy. The
 allowlists never relax OIDC issuer or Vertex token endpoint checks.
-These exceptions are installation-wide administrative trust decisions;
-they do not provide origin-specific tenant isolation. See the
-[egress](../../internal/egress) and [OIDC](../../tests/integration/oidc_test.go) tests
-for boundary coverage.
+These exceptions are installation-wide administrative trust decisions.
+They do not provide origin-specific tenant isolation. See the
+[egress](../../internal/egress) policy for the boundary rules.
 
-## Test and harness variables
+## Operations script variables
 
-Loopback OIDC is available only in an explicitly compiled `-tags=oidctest` test
-binary; release binaries have no environment variable that relaxes OIDC
-transport checks.
+No environment variable relaxes OIDC transport checks. OIDC endpoints must
+use HTTPS, and loopback issuers are never admitted.
 
-The e2e and console integration harnesses point providers at loopback mock
-upstreams through the ordinary egress allowlists
+For local manual checks, point providers at loopback mock upstreams through
+the ordinary egress allowlists
 (`OLP_PROVIDER_EGRESS_ALLOW_CIDRS=127.0.0.0/8,::1/128` and
 `OLP_PROVIDER_EGRESS_ALLOW_HTTP_HOSTS=127.0.0.1,localhost`) rather than a
 compiled-in escape hatch.
 
-Script and harness families are intentionally not runtime settings:
-`OLP_TEST_DATABASE_*`, optional `OLP_VALKEY_URL`, and `OLP_CONSOLE_E2E_*`
-support local suites; `OLP_BACKUP_*`, `OLP_RESTORE_*`, and `OLP_PSQL` support
-operations scripts; `OLP_SDK_SMOKE_*` supports SDK smoke; and `OLP_LIVE_*`,
-`OLP_VERTEX_LIVE_*`, `OLP_AZURE_OPENAI_LIVE_*`, and `OLP_BEDROCK_LIVE_*` opt
-into live-provider tests. See [`CONTRIBUTING.md`](../../CONTRIBUTING.md) and
+Operations script families are intentionally not runtime settings.
+`OLP_BACKUP_*`, `OLP_RESTORE_*`, and `OLP_PSQL` support operations scripts.
+See [`CONTRIBUTING.md`](../../CONTRIBUTING.md) and
 [Operations](operations.md) for command-specific requirements.
 
 ## Mounted connectors

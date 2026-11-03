@@ -6,8 +6,8 @@
 
 - [ ] `make check` passes
 - [ ] New or changed tests assert behavior only, pin no outside fact without a cited source and date, and bug fixes carry a regression test in the existing mapped test file
-- [ ] `make test-ratchet` passes, coverage on changed packages did not drop, and changed code meets the mutation bars
-- [ ] Ran `make integration` for service or browser behavior changes
+- [ ] `make test-fast` passes inside its budget, and any new test is in the allowlist or displaces a weaker one
+- [ ] Ran the affected service or browser behavior directly and recorded the command and output
 - [ ] Regenerated affected API contracts with `make api`
 - [ ] Included screenshots for visible console changes
 - [ ] New migrations are forward-only and sequential

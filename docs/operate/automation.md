@@ -165,8 +165,8 @@ and `codex`. The shell reads the key file when sourced. Claude Code's background
 models use the requested route. Codex setup defines `olp_codex`, a wrapper that
 selects the custom Responses provider and disables hosted tools unsupported
 on strict routes; run `olp_codex exec "Hello"`. It does not change sandbox or
-permission settings. See [qualified clients](../use/clients.md) for release policy
-and qualification boundaries.
+permission settings. See [client compatibility](../use/clients.md) for release records and
+compatibility boundaries.
 
 Qualified framework setup supports `openai-agents`, `vercel`, `langchain` and
 `llamaindex`. These names default to JavaScript modules, with `--surface openai`,
@@ -175,7 +175,7 @@ Responses surface with tracing disabled and `store: false`; choose a route that
 supports those settings. Vercel uses Chat Completions for its OpenAI model. Native
 Anthropic/Google clients receive their required versioned endpoints. Frameworks
 that recognize model names require a compatible route name, as described in the
-[client qualification guide](../use/clients.md).
+[client compatibility guide](../use/clients.md).
 
 ```sh
 olp client-env langchain --surface anthropic --url https://olp.example.com \

@@ -247,11 +247,12 @@ and `olp_capture_redaction_failed_total` alongside delivery counters.
 
 ### Qualification
 
-Focused unit and component checks cover the implementation. The new service
-fixtures were compiled but their execution remains open: publication isolation,
-forward migration, redacted sink readback, unchanged inference and absence of
-payloads from durable metadata. See [capture qualification](../develop/qualification.md#guardrail-and-capture-qualification)
-for commands and acceptance conditions. Release qualification remains open.
+Service-level capture behavior has no automated coverage. Publication
+isolation, forward migration, redacted sink readback, unchanged inference,
+and absence of payloads from durable metadata were former service-fixture
+concerns. See [capture qualification](../develop/qualification.md#guardrail-and-capture-qualification)
+for current status. Validate capture changes by running the affected flow
+directly.
 
 ## Distributed tracing
 

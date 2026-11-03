@@ -57,12 +57,6 @@ type webrtcSession struct {
 	responses  realtimeResponseState
 }
 
-func (s *Server) webrtcSessionCount() int {
-	s.webrtcMu.Lock()
-	defer s.webrtcMu.Unlock()
-	return len(s.webrtcSessions)
-}
-
 func (s *Server) registerWebRTCSession(sess *webrtcSession) {
 	s.webrtcMu.Lock()
 	defer s.webrtcMu.Unlock()

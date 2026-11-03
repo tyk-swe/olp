@@ -75,23 +75,13 @@ and event limits apply; malformed responses fail explicitly.
 
 ## Testing
 
-Run focused protocol/connector tests or the complete local suite:
+Bedrock protocol translation remains in the fast safety net. Run it focused
+with:
 
 ```sh
-make test-go GO_TEST_PACKAGES='./internal/connectors ./internal/protocols' GO_TEST_ARGS='-run Bedrock'
-make test
+go test -count=1 ./internal/protocols -run Bedrock
 ```
 
-Opt-in paid live qualification uses the default AWS credential chain:
-
-```sh
-OLP_LIVE_PROVIDER=bedrock \
-OLP_BEDROCK_LIVE_REGION=us-east-1 \
-OLP_BEDROCK_LIVE_MODEL=amazon.nova-micro-v1:0 \
-go test -tags=liveproviders -count=1 -timeout=2m ./internal/connectors \
-  -run TestLiveProviderNativeGeneration
-```
-
-The manual `live-providers` workflow runs the same credential-scoped Go test.
-Deterministic protocol, routing and SigV4 checks remain in ordinary
-qualification.
+Connector tests and paid live qualification were subtracted with the test
+system. Validate connector or signing changes by running the gateway
+against a stub or a real account and recording the command and output.

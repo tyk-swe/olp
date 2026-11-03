@@ -11,7 +11,7 @@ import (
 
 // Storage tokens authorize only the cloud service's HTTPS endpoints. Check
 // before acquiring credentials, even when the general egress policy admits
-// other hosts. Loopback identity fixtures exist only in oidctest builds.
+// other hosts.
 func storageDestination(endpoint *url.URL, kind string) bool {
 	if endpoint == nil {
 		return false

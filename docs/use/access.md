@@ -179,8 +179,8 @@ Single-use browser-bound flows pin configuration ETag, state, nonce, PKCE and
 initiating session. ID tokens require verified email, signature, issuer, audience,
 expiry and nonce. Collisions need explicit linking after recent authentication.
 Five-minute purpose/resource proofs are consumed once; authentication-method
-changes rotate the session and revoke predecessors. Only the `oidctest` build
-tag permits loopback HTTP issuers; release images exclude it.
+changes rotate the session and revoke predecessors. Loopback HTTP issuers
+are never permitted. OIDC endpoints must use HTTPS.
 
 ## Projects and budget groups
 

@@ -277,8 +277,8 @@ secret values are not exported. Repeated unchanged promotion reuses revisions.
 Migration retains historical route and definition revisions and makes one
 immutable conversion for each historical route policy. Existing copied policies
 keep their rule order, bounds and literal replacements. See the
-[guardrail and capture qualification](../develop/qualification.md#guardrail-and-capture-qualification) for the
-remaining release gates, including reference-hardware and live-vendor checks.
+[guardrail and capture qualification](../develop/qualification.md#guardrail-and-capture-qualification) for
+what still runs. Reference-hardware and live-vendor checks no longer run.
 
 ## Capture and vendor qualification
 

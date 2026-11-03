@@ -261,16 +261,6 @@ func kindByName(name string) *kindCapability {
 	return &kinds[i]
 }
 
-func capabilitiesFor(kind, vendor string) []CapabilityInput {
-	out := []CapabilityInput{}
-	for _, c := range capabilityVocabulary {
-		if certifiable(kind, vendor, c) {
-			out = append(out, c)
-		}
-	}
-	return out
-}
-
 // Kind options include tuples available through an explicit profile, even
 // when the kind's Automatic connector cannot serve them.
 func capabilityOptionsForKind(kind string) []CapabilityInput {

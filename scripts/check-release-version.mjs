@@ -5,12 +5,6 @@ const json = (text) => JSON.parse(text);
 // Every copy of the release version, read from the file that carries it.
 export const versionCopies = [
   ['console/package.json', (text) => json(text).version],
-  ['tests/sdk-smoke/package.json', (text) => json(text).version],
-  ['tests/sdk-smoke-python/pyproject.toml', (text) => /^version = "([^"]+)"$/m.exec(text)?.[1]],
-  [
-    'tests/sdk-smoke-python/uv.lock',
-    (text) => /^name = "openllmproxy-sdk-smoke-python"\nversion = "([^"]+)"$/m.exec(text)?.[1]
-  ],
   ['deploy/helm/Chart.yaml', (text) => /^version:\s*["']?([^"'\s]+)/m.exec(text)?.[1]],
   ['deploy/helm/Chart.yaml', (text) => /^appVersion:\s*["']?([^"'\s]+)/m.exec(text)?.[1]],
   ['deploy/helm/Chart.yaml', (text) => /image: ghcr\.io\/tyk-swe\/olp:(\S+)/.exec(text)?.[1]],

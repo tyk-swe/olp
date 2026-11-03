@@ -14,19 +14,10 @@ unqualified.
 | --- | --- |
 | `make setup` | Download modules, install the pnpm workspace, generate contracts |
 | `make dev` | Start PostgreSQL, Valkey, Go on 8082/private 9092, and Vite on 5173 |
-| `make check` | Generate contracts; check formatting, vet, Go lint, ESLint, types, and local tests |
-| `make check-fast` | Check formatting, vet, Go lint, and cached local tests without regenerating contracts |
+| `make check` | Generate contracts; check formatting, vet, Go lint, ESLint, types, and the fast safety net |
+| `make check-fast` | Check formatting, vet, Go lint, and the fast safety net without regenerating contracts |
 | `make lint` | Pinned Go static analysis gate (see `staticcheck.conf`) |
-| `make test` | Go, benchmark harness, console unit/component, and script suites without containers |
-| `make test-go` | Go unit and protocol suites |
-| `make test-bench` | The benchmark harness's own tests, which need no services |
-| `make test-console` | Console unit and component suites |
-| `make test-scripts` | Automation script tests |
-| `make test-race` | Uncached Go tests with race detection (CI race runs live in the integration lanes) |
-| `make test-ratchet` | Mechanical test rules on the test files a change touches |
-| `make integration` | Disposable services, race/process/recovery/SDK/Chromium suites |
-| `make bench` | Gateway benchmark scenarios against a mock upstream, in [docs/develop/performance.md](docs/develop/performance.md) |
-| `make bench-compare` | The same scenarios against OLP and the pinned LiteLLM release |
+| `make test-fast` | Fast safety net inside its 60 second budget, in [tests/README.md](tests/README.md) |
 | `make api` | Generate Go and TypeScript types without building the gateway |
 | `make build` | Versioned `.local/bin/olp` plus separate `console/build` assets |
 | `make build-go` | Build the native Go binary from generated contracts |
@@ -34,9 +25,9 @@ unqualified.
 | `make catalog-sign` | Sign the reference catalog and plugin index with the development key |
 | `make fmt` | Format Go and console source |
 
-Required CI includes `check-go`, `check-console`, `check-scripts`,
-`contracts`, `helm`, `test-ratchet`, `dependencies`, and the `integration`
-lanes, each gated on the paths a change touches. Contract generation is reproducible; `openapi/management.json` is
+Required CI includes `check-go`, `check-console`, `test-fast`,
+`contracts`, `helm`, `dependencies`, and `build`,
+each gated on the paths a change touches. Contract generation is reproducible; `openapi/management.json` is
 the checked-in source of truth. Update it alongside handlers and regenerate with
 `make api`. Never edit generated Go or TypeScript files by hand.
 
@@ -70,23 +61,23 @@ make dev
 
 Keep feature types, validation, SQL, handlers and workflows together. The
 [architecture map](docs/develop/architecture.md) identifies backend and console owners;
-[testing](tests/README.md) covers focused runs, timeouts and qualification.
+[testing](tests/README.md) covers the safety net, its budget and admission rule.
 
 Use `gofmt`, `go vet`, and `make lint` for Go; console source uses Prettier, two spaces,
 single quotes, no trailing commas, `camelCase` helpers and `PascalCase.svelte` components. Keep
 Svelte route components thin and use the [console design system](console/README.md#design-system).
 
-Place Go unit tests beside their feature as `*_test.go`. Service tests use the
-`integration` build tag and fail when explicitly selected without prerequisites.
-Use Vitest `*.test.ts`/`*.svelte.test.ts` and Playwright `*.spec.ts` for the console.
-Cover changed behavior and preserve protocol fixtures. Tests follow the strict
+Place allowlisted Go tests beside their feature as `*_test.go` and allowlisted
+console tests as Vitest `*.test.ts` in the `unit` project.
+Cover changed behavior inside the allowlist and preserve protocol fixtures. Tests follow the strict
 rules in [testing](tests/README.md#test-rules), meaning behavior assertions
 only, no pinned outside facts without a cited source and date, and one focused
 regression test per bug fix in the existing mapped test file.
-Run `make integration` for service or browser behavior changes.
+Service and browser behavior has no automated suite. Validate it by running
+the affected functionality directly and record the command and output.
 
 Documentation changes also run `node scripts/check-docs.mjs`. The same scoped
-link, anchor and handbook-index contract runs through `make test-scripts`.
+link, anchor and handbook-index contract runs through `make test-fast`.
 
 Use conventional commit subjects and name agent-created branches `tyk-{name}`.
 Follow the [PR template](.github/PULL_REQUEST_TEMPLATE.md) and describe the problem,

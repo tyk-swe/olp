@@ -33,6 +33,18 @@ func alloc(size uint32) uint32 {
 	return ptr
 }
 
+// serve answers one request message OLP passes a WASI reactor, which serves
+// one call at a time.
+func serve(message []byte) []byte {
+	var request abi.Request
+	response := answer(nil, &abi.Error{Code: abi.CodeInvalidRequest, Message: "The request is not a JSON call."})
+	if json.Unmarshal(message, &request) == nil {
+		response = handle(context.Background(), request)
+	}
+	data, _ := json.Marshal(response)
+	return data
+}
+
 //go:wasmexport olp_call
 func call(ptr, size uint32) uint64 {
 	reply = serve(reclaim(ptr, size))
