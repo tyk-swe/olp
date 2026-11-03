@@ -4,7 +4,7 @@ import globals from 'globals';
 import tseslint from 'typescript-eslint';
 
 const tsFiles = ['**/*.{ts,tsx}'];
-const svelteFiles = ['src/**/*.svelte'];
+const svelteFiles = ['src/**/*.svelte', 'tests/**/*.svelte'];
 // `<script lang="ts">` blocks are held to the same recommended rules as the
 // .ts modules; without this, unused imports and locals in components are
 // invisible to the linter.

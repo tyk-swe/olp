@@ -33,9 +33,12 @@ export function budgetInput(form: BudgetForm): Budgets {
     const entries = groups.get(label) ?? [];
     entries.push([
       row.value.trim(),
-      Object.fromEntries(
-        costFields.map(({ key }) => [key, row.limits[key].trim() || null])
-      )
+      {
+        ...Object.fromEntries(
+          costFields.map(({ key }) => [key, row.limits[key].trim() || null])
+        ),
+        cost_basis: row.limits.cost_basis === 'charge' ? 'charge' : 'cost'
+      }
     ]);
     groups.set(label, entries);
   }
