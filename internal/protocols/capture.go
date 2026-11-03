@@ -69,9 +69,7 @@ func CaptureResponse(family wire.Format, body []byte, output, tools bool) (strin
 				err = errCaptureStream
 			}
 			if tools {
-				for _, call := range r.array(m["tool_calls"]) {
-					calls = append(calls, call)
-				}
+				calls = append(calls, r.array(m["tool_calls"])...)
 				if present(m["function_call"]) {
 					calls = append(calls, rawJSONFunction(m["function_call"]))
 				}

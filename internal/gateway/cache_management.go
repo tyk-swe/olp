@@ -17,7 +17,7 @@ func (s *CacheManagement) Register(mux *http.ServeMux) {
 	s.Access.Route(mux, "POST /api/v1/cache/purge", s.purge)
 	s.Access.Route(mux, "GET /api/v1/cache/statistics", s.statistics)
 }
-func (s *CacheManagement) purge(r *http.Request, p access.Principal) (access.Reply, error) {
+func (s *CacheManagement) purge(r *http.Request, _ access.Principal) (access.Reply, error) {
 	var in struct {
 		RouteID   *string `json:"route_id"`
 		ProjectID *string `json:"project_id"`
@@ -36,7 +36,7 @@ func (s *CacheManagement) purge(r *http.Request, p access.Principal) (access.Rep
 		return access.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err = s.Access.Reauthorize(r, tx)
+	p, err := s.Access.Reauthorize(r, tx)
 	if err != nil {
 		return access.Reply{}, err
 	}

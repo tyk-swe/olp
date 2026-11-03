@@ -769,10 +769,7 @@ func (s *Server) geminiBatchCall(w http.ResponseWriter, r *http.Request, use ret
 		return
 	}
 	defer s.release(r.Context())
-	localID := r.PathValue("name")
-	if strings.HasPrefix(localID, "batches/") {
-		localID = strings.TrimPrefix(localID, "batches/")
-	}
+	localID := strings.TrimPrefix(r.PathValue("name"), "batches/")
 	resource, err := s.Resources.Get(r.Context(), resources.KindGeminiBatch, authority.ID, localID)
 	if errors.Is(err, resources.ErrNotFound) {
 		s.stateFail(x, w, notFoundError("not_found", "No Gemini batch with this name exists for this key."), "gemini")

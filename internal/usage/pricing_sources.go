@@ -522,7 +522,7 @@ func readBounded(body io.Reader, limit int64) ([]byte, error) {
 	return data, nil
 }
 
-func (s *Server) refreshPricingSource(r *http.Request, principal access.Principal) (access.Reply, error) {
+func (s *Server) refreshPricingSource(r *http.Request, _ access.Principal) (access.Reply, error) {
 	id, err := access.IDParam(r, "pricing_source_id")
 	if err != nil {
 		return access.Reply{}, err
@@ -548,7 +548,7 @@ func (s *Server) refreshPricingSource(r *http.Request, principal access.Principa
 	defer tx.Rollback(context.WithoutCancel(r.Context()))
 	// The fetch ran without the installation lock, so authority is decided
 	// again under it before the snapshot and audit record are written.
-	principal, err = s.Access.Reauthorize(r, tx)
+	principal, err := s.Access.Reauthorize(r, tx)
 	if err != nil {
 		return access.Reply{}, err
 	}

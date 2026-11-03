@@ -44,8 +44,7 @@ func inspectStructure(root oif.Value) ([]inspectedTurn, int) {
 		}
 		turn.Parts = append(turn.Parts, part)
 	}
-	var appendContent func(*inspectedTurn, oif.Value)
-	appendContent = func(turn *inspectedTurn, content oif.Value) {
+	appendContent := func(turn *inspectedTurn, content oif.Value) {
 		switch content.Kind() {
 		case oif.String:
 			appendPart(turn, "text", "", false)

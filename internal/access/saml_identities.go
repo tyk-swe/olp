@@ -71,7 +71,7 @@ func (s *Server) samlIdentities(r *http.Request, p Principal) (Reply, error) {
 	return OK(map[string]any{"items": items, "linking_available": err == nil && c.Enabled, "reauthentication_available": len(usable) > 0}), nil
 }
 
-func (s *Server) unlinkSAML(r *http.Request, p Principal) (Reply, error) {
+func (s *Server) unlinkSAML(r *http.Request, _ Principal) (Reply, error) {
 	id, err := IDParam(r, "identity_id")
 	if err != nil {
 		return Reply{}, err
@@ -81,7 +81,7 @@ func (s *Server) unlinkSAML(r *http.Request, p Principal) (Reply, error) {
 		return Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err = s.Reauthorize(r, tx)
+	p, err := s.Reauthorize(r, tx)
 	if err != nil {
 		return Reply{}, err
 	}

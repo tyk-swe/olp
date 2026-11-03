@@ -786,10 +786,7 @@ func (s *Server) geminiFileCall(w http.ResponseWriter, r *http.Request, use reta
 		return
 	}
 	defer s.release(r.Context())
-	localID := r.PathValue("name")
-	if strings.HasPrefix(localID, "files/") {
-		localID = strings.TrimPrefix(localID, "files/")
-	}
+	localID := strings.TrimPrefix(r.PathValue("name"), "files/")
 	res, err := s.Resources.Get(r.Context(), resources.KindGeminiFile, authority.ID, localID)
 	if errors.Is(err, resources.ErrNotFound) {
 		s.stateFail(x, w, notFoundError("not_found", "No Gemini file with this name exists for this key."), "gemini")

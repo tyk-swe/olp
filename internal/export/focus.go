@@ -238,7 +238,7 @@ func (r *focusRow) render(ctx *focusContext) []string {
 	} else if r.committed && (r.allocatedCost != nil || r.latestAmount != nil && r.periodWeight != nil && !r.periodWeight.IsZero()) {
 		// Committed rows bill nothing at list; their effective cost is the
 		// group's ListCost share of the bucket's amount.
-		allocated := decimal.Zero
+		var allocated decimal.Decimal
 		if r.allocatedCost != nil {
 			allocated = *r.allocatedCost
 		} else {
