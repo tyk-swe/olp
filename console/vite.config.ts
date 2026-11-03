@@ -44,7 +44,17 @@ export default defineConfig({
         extends: true,
         test: {
           name: 'unit',
-          include: ['src/**/*.test.ts', 'tests/unit/**/*.test.ts']
+          include: ['src/**/*.test.ts', 'tests/unit/**/*.test.ts'],
+          exclude: ['src/**/*.svelte.test.ts']
+        }
+      },
+      {
+        extends: true,
+        resolve: { conditions: ['browser'] },
+        test: {
+          name: 'svelte',
+          environment: 'jsdom',
+          include: ['src/**/*.svelte.test.ts']
         }
       }
     ]

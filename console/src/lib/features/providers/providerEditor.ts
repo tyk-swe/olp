@@ -1,4 +1,5 @@
 import { ConfigurationDraft } from './configurationDraft.svelte';
+import { parseExternalReference } from './externalReference';
 import { nativeObject, type NativeValue } from '$lib/json/nativeJson';
 import type { Provider, ProviderVendor } from './api/providers';
 import type {
@@ -468,8 +469,17 @@ export function validateProviderDraft(
     // provider that has never been created must supply one here.
     missing.push('credential');
   }
-  if (!missing.length) return null;
-  return `${spec.label} requires ${missing.join(', ')}.`;
+  if (missing.length) return `${spec.label} requires ${missing.join(', ')}.`;
+  if (draft.useExternalCredential && requiresCredential(spec, draft.authMode)) {
+    try {
+      parseExternalReference(draft.externalCredentialReference ?? '');
+    } catch (error) {
+      return error instanceof Error
+        ? error.message
+        : 'Enter a valid external credential reference.';
+    }
+  }
+  return null;
 }
 
 function buildConnectionFields(
@@ -703,4 +713,3 @@ export type RunProviderAction = (
   label: string,
   action: (isCurrent: () => boolean) => Promise<void>
 ) => Promise<boolean>;
-import { parseExternalReference } from './externalReference';
