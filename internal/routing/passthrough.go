@@ -10,7 +10,9 @@ import (
 
 const PassthroughOperation = "passthrough"
 
-var PassthroughMethods = []string{"GET", "HEAD", "POST", "PUT", "PATCH", "DELETE"}
+func PassthroughMethods() [6]string {
+	return [6]string{"GET", "HEAD", "POST", "PUT", "PATCH", "DELETE"}
+}
 
 var passthroughDialect = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,63}$`)
 
@@ -48,7 +50,8 @@ func (c *PassthroughConfig) Validate() error {
 	if !passthroughDialect.MatchString(c.Dialect) {
 		return invalidValue("passthrough.dialect", "Use a lowercase dialect name of letters, digits and hyphens for the pass-through namespace.")
 	}
-	if len(c.Methods) == 0 || len(c.Methods) > len(PassthroughMethods) || !distinctMembers(c.Methods, PassthroughMethods) {
+	methods := PassthroughMethods()
+	if len(c.Methods) == 0 || len(c.Methods) > len(methods) || !distinctMembers(c.Methods, methods[:]) {
 		return invalidValue("passthrough.methods", "Name distinct pass-through methods among GET, HEAD, POST, PUT, PATCH and DELETE.")
 	}
 	if len(c.Paths) == 0 || len(c.Paths) > 32 || !distinct(c.Paths) {

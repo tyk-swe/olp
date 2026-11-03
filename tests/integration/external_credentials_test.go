@@ -66,7 +66,7 @@ func TestExternalCredentialAndWrappedMasterKeyRotationKeepPublishedVersionsPinne
 	t.Setenv("OLP_VAULT_ROLE", "olp")
 	t.Setenv("OLP_VAULT_JWT_FILE", jwtFile)
 	t.Setenv("OLP_VAULT_ADDR", vault.URL)
-	resolver := secretstore.New(*h.Server.Egress)
+	resolver := secretstore.New(*h.Server.Egress, os.Getenv)
 	h.Runtime.ExternalSecrets = resolver
 	upstream := newVendor(t)
 	upstream.accept(vendorRotated)

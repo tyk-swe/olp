@@ -21,7 +21,7 @@ import (
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/geminilifecycle"
 	"github.com/tyk-swe/olp/internal/oif"
-	"github.com/tyk-swe/olp/internal/protocols/openai"
+	"github.com/tyk-swe/olp/internal/routeidentity"
 	"github.com/tyk-swe/olp/internal/usage"
 )
 
@@ -152,7 +152,7 @@ func (s *Server) geminiLive(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	setup, err := geminilifecycle.ParseLiveSetup(initial, int(limit))
-	if err != nil || !openai.RouteSlug.MatchString(setup.Model) {
+	if err != nil || !routeidentity.ValidSlug(setup.Model) {
 		client.Close(websocket.StatusPolicyViolation, "invalid setup")
 		x.failure, status = invalidRequest("invalid_live_setup", "Gemini Live setup is malformed.", nil), http.StatusBadRequest
 		return

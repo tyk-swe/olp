@@ -117,7 +117,7 @@ func TestLoadBoundsDecoderAllocations(t *testing.T) {
 		sections[fmt.Sprintf("data form %d", flags)] = wasmSection(11, append(append([]byte{1}, prefix...), wasmLEB(32<<20)...))
 	}
 	// No parallel tests: TotalAlloc measures this process.
-	r := newTestRuntime(t, DefaultLimits, nil)
+	r := newTestRuntime(t, DefaultLimits(), nil)
 	for name, section := range sections {
 		t.Run(name, func(t *testing.T) {
 			module := append([]byte(wasmHeader), section...)
@@ -160,7 +160,7 @@ func TestInstallRefusesModulesDeclaringMoreThanOLPBounds(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
-			_, err := newTestRuntime(t, DefaultLimits, nil).Inspect(t.Context(), tc.module.module())
+			_, err := newTestRuntime(t, DefaultLimits(), nil).Inspect(t.Context(), tc.module.module())
 			wantError(t, err, CodeModuleInvalid, "")
 			if !strings.Contains(err.Error(), tc.detail) {
 				t.Fatalf("want a refusal naming %q, got %v", tc.detail, err)

@@ -1,7 +1,6 @@
 package media
 
 import (
-	"fmt"
 	"maps"
 	"slices"
 
@@ -26,14 +25,18 @@ func modelOnly(encode func(r *Request, model string) (*UpstreamCall, *Error)) fu
 	return func(r *Request, _ connectors.Config, model string) (*UpstreamCall, *Error) { return encode(r, model) }
 }
 
-var codecs = map[string]codec{}
-
-// registerCodec adds a vendor wire's codec; each codec file registers its own.
-func registerCodec(wire string, c codec) {
-	if _, duplicate := codecs[wire]; duplicate || len(c) == 0 {
-		panic(fmt.Sprintf("media codec %q is registered twice or serves nothing", wire))
-	}
-	codecs[wire] = c
+var codecs = map[string]codec{
+	"assemblyai": assemblyAICodec,
+	"bfl":        bflCodec,
+	"deepgram":   deepgramCodec,
+	"elevenlabs": elevenLabsCodec,
+	"gemini":     geminiMediaCodec,
+	"groq-audio": groqAudioCodec,
+	"polly":      pollyCodec,
+	"recraft":    recraftCodec,
+	"runway":     runwayCodec,
+	"stability":  stabilityCodec,
+	"xai-images": xaiImagesCodec,
 }
 
 // Wires are the registered vendor wires and the operations each serves.

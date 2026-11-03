@@ -1,7 +1,10 @@
+const root = ['pricing'] as const;
+const pages = () => [...root, 'page'] as const;
+
 export const pricingKeys = {
-  root: ['pricing'] as const,
-  pages: () => ['pricing', 'page'] as const,
-  page: (cursor?: string) => ['pricing', 'page', cursor ?? 'first'] as const,
-  sources: () => ['pricing', 'sources'] as const,
-  referenceCatalog: () => ['pricing', 'reference-catalog'] as const
+  root,
+  pages,
+  page: (cursor?: string) => [...pages(), cursor ?? 'first'] as const,
+  sources: () => [...root, 'sources'] as const,
+  referenceCatalog: () => [...root, 'reference-catalog'] as const
 };

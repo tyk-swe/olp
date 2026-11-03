@@ -49,7 +49,7 @@ func geminiLifecycleFields(body []byte) map[string]json.RawMessage {
 			fields[key] = raw
 		}
 	}
-	for _, key := range []string{"metadata", "batchStats", "inputConfig", "input_config", "output", "response", "error"} {
+	for _, key := range append([]string{"metadata", "batchStats", "inputConfig", "input_config", "error"}, GeminiOutputFields()...) {
 		if raw, ok := source[key]; ok {
 			fields[key], _ = json.Marshal(geminiLifecycleFields(raw))
 		}
@@ -66,12 +66,8 @@ func geminiManagedAdoptMetadata(cursor []byte, snapshot BatchSnapshot) (json.Raw
 	if json.Unmarshal(cursor, &saved) != nil || saved.Submission.Metadata == nil {
 		return nil, "", ErrProviderConflict
 	}
-	state := map[string]string{
-		"PENDING": "validating", "QUEUED": "validating", "RUNNING": "in_progress",
-		"SUCCEEDED": "completed", "FAILED": "failed", "CANCELLED": "cancelled",
-		"EXPIRED": "expired", "CANCELLING": "cancelling",
-	}[strings.TrimPrefix(strings.TrimPrefix(batchGeminiState(snapshot.Body), "BATCH_STATE_"), "JOB_STATE_")]
-	if state == "" {
+	state, ok := ManagedStatus("gemini_managed", batchGeminiState(snapshot.Body))
+	if !ok {
 		return nil, "", ErrProviderConflict
 	}
 	fields := saved.Submission.Metadata
@@ -163,7 +159,7 @@ func parseGeminiBatchSnapshot(body []byte) (BatchSnapshot, error) {
 	} else if present {
 		snapshot.Expected = &count
 	}
-	if file := batchGeminiOutputFile(body); file != "" {
+	if file := GeminiOutputFile(body); file != "" {
 		snapshot.OutputFileID = file
 	} else if batchGeminiInlineResponses(body) != nil {
 		snapshot.OutputFileID = "inline:" + id
@@ -172,18 +168,8 @@ func parseGeminiBatchSnapshot(body []byte) (BatchSnapshot, error) {
 }
 
 func geminiBatchTerminal(state string) (bool, bool) {
-	switch state {
-	case "BATCH_STATE_SUCCEEDED", "JOB_STATE_SUCCEEDED",
-		"BATCH_STATE_FAILED", "JOB_STATE_FAILED",
-		"BATCH_STATE_CANCELLED", "JOB_STATE_CANCELLED",
-		"BATCH_STATE_EXPIRED", "JOB_STATE_EXPIRED":
-		return true, true
-	case "BATCH_STATE_PENDING", "JOB_STATE_PENDING", "JOB_STATE_QUEUED",
-		"BATCH_STATE_RUNNING", "JOB_STATE_RUNNING", "BATCH_STATE_CANCELLING", "JOB_STATE_CANCELLING":
-		return false, true
-	default:
-		return false, false
-	}
+	mapped, ok := ManagedStatus("gemini_managed", state)
+	return wire.BatchStageOf(mapped) == wire.BatchTerminal, ok
 }
 
 func geminiBatchCreatedAt(body []byte) time.Time {
@@ -535,13 +521,17 @@ func batchGeminiInputName(body []byte) string {
 	return ""
 }
 
-func batchGeminiOutputFile(body []byte) string {
+func GeminiOutputFields() []string {
+	return []string{"output", "response"}
+}
+
+func GeminiOutputFile(body []byte) string {
 	var object map[string]json.RawMessage
 	_ = json.Unmarshal(body, &object)
 	var metadata map[string]json.RawMessage
 	_ = json.Unmarshal(object["metadata"], &metadata)
 	for _, parent := range []map[string]json.RawMessage{metadata, object} {
-		for _, field := range []string{"output", "response"} {
+		for _, field := range GeminiOutputFields() {
 			var output map[string]json.RawMessage
 			if json.Unmarshal(parent[field], &output) != nil {
 				continue
@@ -561,7 +551,7 @@ func batchGeminiInlineResponses(body []byte) json.RawMessage {
 	var metadata map[string]json.RawMessage
 	_ = json.Unmarshal(object["metadata"], &metadata)
 	for _, parent := range []map[string]json.RawMessage{metadata, object} {
-		for _, field := range []string{"output", "response"} {
+		for _, field := range GeminiOutputFields() {
 			var output map[string]json.RawMessage
 			if json.Unmarshal(parent[field], &output) != nil {
 				continue

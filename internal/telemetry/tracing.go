@@ -12,7 +12,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
-	"os"
 	"sync/atomic"
 	"time"
 
@@ -85,7 +84,7 @@ type Handle struct {
 
 // Install validates the configuration and, when an endpoint is set, builds the
 // exporter and provider. An unset endpoint installs no exporter at all.
-func Install(cfg Config) (*Handle, error) {
+func Install(cfg Config, lookupEnv func(string) (string, bool)) (*Handle, error) {
 	if cfg.SampleRatio < 0 || cfg.SampleRatio > 1 {
 		return nil, errors.New("OLP_TRACE_SAMPLE_RATIO must be between 0.0 and 1.0")
 	}
@@ -99,7 +98,7 @@ func Install(cfg Config) (*Handle, error) {
 	if err := ValidateEndpoint(cfg.Endpoint); err != nil {
 		return nil, err
 	}
-	if err := RejectAmbientHeaders(func(name string) bool { _, ok := os.LookupEnv(name); return ok }); err != nil {
+	if err := RejectAmbientHeaders(func(name string) bool { _, ok := lookupEnv(name); return ok }); err != nil {
 		return nil, err
 	}
 	headers, err := LoadHeaders(cfg.HeadersFile)

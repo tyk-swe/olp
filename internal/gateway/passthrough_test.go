@@ -87,6 +87,11 @@ func TestPassthroughDeliveryFailureRetainsCompletedUpstream(t *testing.T) {
 
 func passthroughHarness(t *testing.T) *harness {
 	t.Helper()
+	return passthroughHarnessWithMethods(t, []string{"GET", "POST", "HEAD"})
+}
+
+func passthroughHarnessWithMethods(t *testing.T, methods []string) *harness {
+	t.Helper()
 	h := strictHarness(t, func(s *routing.Snapshot) {
 		route := s.Routes[routeSlug]
 		route.Operations = []string{"passthrough"}
@@ -94,7 +99,7 @@ func passthroughHarness(t *testing.T) *harness {
 		route.Targets = route.Targets[:1]
 		route.Passthrough = &routing.PassthroughConfig{
 			Dialect:                    "bound-native",
-			Methods:                    []string{"GET", "POST", "HEAD"},
+			Methods:                    methods,
 			Paths:                      []string{"/v1/widgets/*", "/v1/status"},
 			Query:                      []string{"limit"},
 			Headers:                    []string{"X-Widget-Mode", "If-None-Match"},
@@ -553,10 +558,19 @@ func TestPassthroughDeliversChunksBeforeProviderCompletion(t *testing.T) {
 	}
 }
 
-func TestPassthroughPreflightPermitsPublishedMethods(t *testing.T) {
-	h := passthroughHarness(t)
+func TestPassthroughPublishedMethodsReachProvider(t *testing.T) {
+	methods := routing.PassthroughMethods()
+	config := &routing.PassthroughConfig{Dialect: "bound-native", Methods: methods[:], Paths: []string{"/v1/widgets/*"}, AcknowledgeOpaqueUnmetered: true}
+	if err := config.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	h := passthroughHarnessWithMethods(t, methods[:])
 	h.gateway.cfg.CORSAllowedOrigins = []string{"https://app.example"}
-	for _, method := range routing.PassthroughMethods {
+	h.mock.set("a", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Test-Method", r.Method)
+		w.WriteHeader(http.StatusNoContent)
+	})
+	for _, method := range methods {
 		resp := h.do(t.Context(), http.MethodOptions, passthroughURL, "", nil, map[string]string{
 			"Origin": "https://app.example", "Access-Control-Request-Method": method,
 		})
@@ -564,6 +578,11 @@ func TestPassthroughPreflightPermitsPublishedMethods(t *testing.T) {
 		allowed := strings.FieldsFunc(resp.Header.Get("Access-Control-Allow-Methods"), func(r rune) bool { return r == ',' || r == ' ' })
 		if resp.StatusCode != http.StatusNoContent || !slices.Contains(allowed, method) || resp.Header.Get("Access-Control-Allow-Origin") != "https://app.example" {
 			t.Fatalf("preflight refused supported %s requests: status=%d headers=%v", method, resp.StatusCode, resp.Header)
+		}
+		result := h.do(t.Context(), method, passthroughURL, fullKey, nil, nil)
+		result.Body.Close()
+		if result.StatusCode != http.StatusNoContent || result.Header.Get("X-Test-Method") != method {
+			t.Fatalf("%s request: status=%d headers=%v", method, result.StatusCode, result.Header)
 		}
 	}
 }

@@ -12,6 +12,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strconv"
 	"strings"
 	"testing"
@@ -354,7 +355,7 @@ func TestIntegrationFocusExport(t *testing.T) {
 	chargeSink := insertSink(t, pool, "focus-charge", "s3", "csv_gzip", chargeServer.URL+"/bucket",
 		[]string{"focus"}, fmt.Sprintf(`{"cost_basis":"charge","start_date":%q}`, day.Format("2006-01-02")), sealCredential(), &f.projectA)
 
-	sender := NewSender(matrixPolicy())
+	sender := NewSender(matrixPolicy(), os.Getenv)
 	workerNow := day.Add(27 * time.Hour) // the day is well past D+1d+2h
 	worker := &FocusWorker{Pool: pool, Keys: ring, Installation: installation, Sender: sender,
 		Log: slog.New(slog.DiscardHandler), Now: func() time.Time { return workerNow }}
@@ -410,7 +411,7 @@ func TestIntegrationFocusExport(t *testing.T) {
 		if !strings.HasSuffix(hit.path, ".csv.gz") {
 			continue
 		}
-		report, err := focusspec.Validate(bytes.NewReader(mustGunzip(t, hit.body)), FocusCriteria)
+		report, err := focusspec.Validate(bytes.NewReader(mustGunzip(t, hit.body)), focusCriteria())
 		if err != nil {
 			t.Fatalf("validate %s: %v", hit.path, err)
 		}
@@ -642,7 +643,7 @@ func TestIntegrationFocusLifecycle(t *testing.T) {
 		[]string{"focus"}, fmt.Sprintf(`{"cost_basis":"cost","start_date":%q}`, day.Format("2006-01-02")), sealTestCredential(t, pool, ring, installation), nil)
 
 	workerNow := day.Add(27 * time.Hour)
-	worker := &FocusWorker{Pool: pool, Keys: ring, Installation: installation, Sender: NewSender(matrixPolicy()),
+	worker := &FocusWorker{Pool: pool, Keys: ring, Installation: installation, Sender: NewSender(matrixPolicy(), os.Getenv),
 		Log: slog.New(slog.DiscardHandler), Now: func() time.Time { return workerNow }}
 
 	// First pass: the manifest PUT fails → the day stays undelivered, parts are

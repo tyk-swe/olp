@@ -1,13 +1,13 @@
+import { validRouteSlug } from '$lib/routeIdentity';
 import type { components } from '$lib/api/schema';
 export type RouteGroups = components['schemas']['RouteGroups'];
 export type GroupForm = { id: string; name: string; routes: string }[];
 export const groupNames = (value: string) =>
   value.split(/[\s,]+/).filter(Boolean);
-const slug = /^[a-z0-9][a-z0-9._-]{0,99}$/;
 export function groupNamesError(names: string[]): string {
   return names.length > 64 ||
     new Set(names).size !== names.length ||
-    names.some((name) => !slug.test(name))
+    names.some((name) => !validRouteSlug(name))
     ? 'Use at most 64 unique group names with lowercase letters, numbers, dots, underscores or hyphens.'
     : '';
 }
@@ -26,7 +26,7 @@ export function groupError(form: GroupForm): string {
     if (
       routes.length > 100 ||
       new Set(routes).size !== routes.length ||
-      routes.some((route) => !slug.test(route))
+      routes.some((route) => !validRouteSlug(route))
     )
       return 'Each group accepts at most 100 unique valid route slugs.';
   }

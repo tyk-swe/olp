@@ -9,7 +9,6 @@ import (
 	"errors"
 	"fmt"
 	"maps"
-	"regexp"
 	"slices"
 	"time"
 
@@ -27,10 +26,8 @@ import (
 	"github.com/tyk-swe/olp/internal/mediacontract"
 	"github.com/tyk-swe/olp/internal/operationplan"
 	"github.com/tyk-swe/olp/internal/realtimecontract"
+	"github.com/tyk-swe/olp/internal/routeidentity"
 )
-
-// RouteSlug is the published-route identifier carried in model fields.
-var RouteSlug = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,99}$`)
 
 // Generation identifies one published runtime configuration.
 type Generation struct {
@@ -91,8 +88,9 @@ type Limits struct {
 	Supply
 }
 
-// CommitmentPeriods are the UTC calendar periods a commitment can bill on.
-var CommitmentPeriods = map[string]bool{"hour": true, "day": true, "month": true}
+func ValidCommitmentPeriod(period string) bool {
+	return period == "hour" || period == "day" || period == "month"
+}
 
 // Commitment is a provider's provisioned-capacity agreement: an amount owed
 // each UTC calendar period, allocated across priced attempts in proportion to
@@ -312,7 +310,7 @@ func (s *Snapshot) validate() error {
 		}
 	}
 	for slug, r := range s.Routes {
-		if slug != r.Slug || !RouteSlug.MatchString(slug) || !validUUID(r.ID) || !validUUID(r.RoutingID) {
+		if slug != r.Slug || !routeidentity.ValidSlug(slug) || !validUUID(r.ID) || !validUUID(r.RoutingID) {
 			return fmt.Errorf("route %q is malformed", slug)
 		}
 		if r.OverallTimeout < 1 || r.MaxAttempts < 1 || len(r.Operations) == 0 || len(r.Targets) == 0 {

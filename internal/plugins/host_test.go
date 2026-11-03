@@ -90,7 +90,7 @@ func BenchmarkSign(b *testing.B) {
 		name   string
 		engine Engine
 	}{{"interpreted", Interpreted}, {"compiled", Compiled}} {
-		host, _ := newTestHost(b, engine.engine, DefaultLimits, nil, module)
+		host, _ := newTestHost(b, engine.engine, DefaultLimits(), nil, module)
 		start := time.Now()
 		if _, err := host.Sign(b.Context(), "reference", referenceProvider, abi.SignRequest{Profile: "reference-signed-chat", URL: "https://api.example.com/v1"}, nil); err != nil {
 			b.Fatal(err)

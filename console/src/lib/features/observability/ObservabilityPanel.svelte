@@ -157,13 +157,6 @@
     { value: 'total_tokens', label: 'Total tokens' },
     { value: 'requests', label: 'Requests' }
   ];
-  const isoDay = (offset: number) =>
-    new Date(Date.now() - offset * 24 * 60 * 60 * 1000)
-      .toISOString()
-      .slice(0, 10);
-  const focusStartMin = isoDay(89);
-  const focusStartMax = isoDay(0);
-
   let editingSink = $state<ExportSink | null>(null);
   let sinkName = $state('');
   let sinkType = $state<ExportSink['type']>('https');
@@ -848,9 +841,9 @@
                 id="sink-focus-start"
                 type="date"
                 bind:value={sinkFocusStartDate}
-                min={focusStartMin}
-                max={focusStartMax}
-              /><small>Optional — earlier than 90 days ago is rejected.</small>
+              /><small
+                >Optional, new dates must be within the retained usage window.</small
+              >
             </div>
           {:else if sinkFormat === 'cloudevents'}
             <div class="form-field">

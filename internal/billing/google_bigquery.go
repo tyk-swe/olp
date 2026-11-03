@@ -347,7 +347,7 @@ func fetchGoogle(ctx context.Context, client *http.Client, auth *connectors.Auth
 
 func addGoogleRow(result reportAccumulator, row googleInvoiceRow, start, end time.Time) error {
 	parsedDay, err := time.Parse(dayFormat, row.Day)
-	if err != nil || parsedDay.Before(start) || !parsedDay.Before(end) || row.Service != googleVertexServiceID || row.SKU == "" || !validGoogleCurrency(row.Currency) {
+	if err != nil || parsedDay.Before(start) || !parsedDay.Before(end) || row.Service != googleVertexServiceID || row.SKU == "" || !validCloudCurrency(row.Currency) {
 		return failFetch("response", errors.New("invalid Google query dimensions"))
 	}
 	amount, err := decimal.NewFromString(row.Amount)
@@ -360,18 +360,6 @@ func addGoogleRow(result reportAccumulator, row googleInvoiceRow, start, end tim
 	item := googleLineItem(row.Service, row.SKU, row.Kind)
 	result.add(row.Day, amount, row.Currency, &item)
 	return nil
-}
-
-func validGoogleCurrency(currency string) bool {
-	if len(currency) != 3 {
-		return false
-	}
-	for _, char := range currency {
-		if (char < 'A' || char > 'Z') && (char < 'a' || char > 'z') {
-			return false
-		}
-	}
-	return true
 }
 
 func googleLineItem(service, sku, kind string) string {

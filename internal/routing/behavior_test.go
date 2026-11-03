@@ -1,10 +1,147 @@
 package routing
 
 import (
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"net/http"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
+	"github.com/tyk-swe/olp/internal/attribution"
+	"github.com/tyk-swe/olp/internal/guardrails"
+	"github.com/tyk-swe/olp/internal/pluginindex"
+	"github.com/tyk-swe/olp/internal/plugins"
+	"github.com/tyk-swe/olp/internal/protocols/wire"
+	"github.com/tyk-swe/olp/internal/upstream"
+	"github.com/tyk-swe/olp/internal/usage"
 )
+
+func TestAffinityLabelsAgreeWithRequestAttribution(t *testing.T) {
+	for _, tc := range []struct {
+		key   string
+		valid bool
+	}{
+		{"team", true}, {"Team_2.name", true}, {strings.Repeat("a", 32), true},
+		{"", false}, {"2team", false}, {"team/name", false}, {strings.Repeat("a", 33), false},
+	} {
+		t.Run(tc.key, func(t *testing.T) {
+			behavior := Behavior{Affinity: &Affinity{Source: AffinityLabel, Label: tc.key}}
+			routeErr := behavior.Validate("route", nil)
+			labelErr := attribution.Validate(map[string]string{tc.key: "value"})
+			if (routeErr == nil) != tc.valid || (labelErr == nil) != tc.valid {
+				t.Errorf("valid %t, route error %v, label error %v", tc.valid, routeErr, labelErr)
+			}
+		})
+	}
+}
+
+func TestPluginDigestAgreesAcrossIndexAndConsumers(t *testing.T) {
+	hash := sha256.Sum256([]byte("example module"))
+	validDigest := hex.EncodeToString(hash[:])
+	for _, tc := range []struct {
+		digest string
+		valid  bool
+	}{
+		{validDigest, true}, {strings.Repeat("0", 64), true}, {strings.ToUpper(validDigest), false},
+		{validDigest[:63], false}, {validDigest + "0", false}, {strings.Repeat("g", 64), false}, {"", false},
+	} {
+		t.Run(tc.digest, func(t *testing.T) {
+			publishedAt := time.Unix(1, 0).UTC()
+			index := pluginindex.Index{APIVersion: pluginindex.APIVersion, PublishedAt: publishedAt, Plugins: []pluginindex.Plugin{{
+				Name: "sample", Description: "sample", Maintainer: "sample", DocumentationURL: "https://example.test/docs", Repository: "https://example.test/repo", Path: "sample",
+				Releases: []pluginindex.Release{{Version: "1.0.0", Digest: tc.digest, ABIVersion: 1, SizeBytes: 1, Commit: strings.Repeat("a", 40), ReviewedAt: publishedAt, Origins: []string{"https://example.test"}, Profiles: []string{"sample"}}},
+			}}}
+			configuration, err := json.Marshal(guardrails.ExternalConfig{PluginID: "sample", PluginVersion: tc.digest})
+			if err != nil {
+				t.Fatal(err)
+			}
+			guardrailErr := guardrails.ValidateExternal(guardrails.Revision{Type: "plugin", Configuration: configuration})
+			behavior := Behavior{Selectors: []Selector{{ID: "selector", Route: "other", When: Predicate{Plugin: &PluginPredicate{Digest: tc.digest}}}}}
+			routeErr := behavior.Validate("route", nil)
+			indexErr := index.Validate()
+			if (indexErr == nil) != tc.valid || plugins.ValidDigest(tc.digest) != tc.valid || (guardrailErr == nil) != tc.valid || (routeErr == nil) != tc.valid {
+				t.Errorf("digest %q: valid %t, index %v, guardrail %v, route %v", tc.digest, tc.valid, indexErr, guardrailErr, routeErr)
+			}
+		})
+	}
+}
+
+func TestRetryClassesAgreeWithUpstreamFailures(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		evidence  upstream.Evidence
+		retryable bool
+	}{
+		{"connection", upstream.Evidence{}, true},
+		{"timeout", upstream.Evidence{Interrupted: context.DeadlineExceeded}, true},
+		{"rate limit", upstream.Evidence{Status: http.StatusTooManyRequests}, true},
+		{"server error", upstream.Evidence{Status: http.StatusInternalServerError}, true},
+		{"client error", upstream.Evidence{Status: http.StatusBadRequest}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			class := upstream.Classifier{}.Classify(tc.evidence).Class
+			behavior := Behavior{Retry: Retry{string(class): {MaxRetries: 1, BaseBackoffMS: 1, MaxBackoffMS: 1}}}
+			if err := behavior.Validate("source", nil); (err == nil) != tc.retryable {
+				t.Fatalf("retry for %q validation error = %v, retryable = %t", class, err, tc.retryable)
+			}
+		})
+	}
+}
+
+func TestFallbackConditionsAcceptApplicableUpstreamFailures(t *testing.T) {
+	for _, tc := range []struct {
+		class upstream.Class
+		valid bool
+	}{
+		{upstream.ContextWindow, true}, {upstream.ContentFilter, true}, {upstream.RateLimit, true},
+		{upstream.ServerError, false},
+	} {
+		t.Run(string(tc.class), func(t *testing.T) {
+			behavior := Behavior{Fallbacks: []Fallback{{Route: "backup", On: []string{string(tc.class)}}}}
+			if err := behavior.Validate("source", nil); (err == nil) != tc.valid {
+				t.Fatalf("fallback for %q validation error = %v, valid = %t", tc.class, err, tc.valid)
+			}
+		})
+	}
+}
+
+func TestSelectorIdentifiersAgreeWithAccounting(t *testing.T) {
+	for _, tc := range []struct {
+		id    string
+		valid bool
+	}{
+		{"selector", true}, {"selector-1", true}, {"UPPER", false}, {"with_underscore", false},
+		{"", false}, {strings.Repeat("a", 63), true}, {strings.Repeat("a", 64), false},
+	} {
+		t.Run(tc.id, func(t *testing.T) {
+			behavior := Behavior{Selectors: []Selector{{ID: tc.id, Route: "destination"}}}
+			behaviorErr := behavior.Validate("source", nil)
+			now := time.Now().UTC()
+			event := &usage.Event{
+				Version: usage.WireVersion, EventID: uuid.NewString(), RequestID: uuid.NewString(),
+				RuntimeGenerationID: uuid.NewString(), APIKeyID: uuid.NewString(), RouteSlug: "source",
+				Operation: "generation", Surface: "openai", RequestStartedAt: now, RequestCompletedAt: now, ObservedAt: now,
+				Attempts: []usage.Attempt{{
+					ID: uuid.NewString(), Ordinal: 1, ProviderID: uuid.NewString(), UpstreamModel: "model",
+					StartedAt: now, CompletedAt: now,
+					Routing: &usage.Routing{ProviderRevisionID: uuid.NewString(), Selector: &tc.id},
+				}},
+			}
+			payload, err := usage.Encode(event)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, accountingErr := usage.Decode(payload)
+			if (behaviorErr == nil) != tc.valid || (accountingErr == nil) != tc.valid {
+				t.Fatalf("routing error = %v, accounting error = %v", behaviorErr, accountingErr)
+			}
+		})
+	}
+}
 
 func TestGatewayToolExecutionBehaviorValidatesAndRoundTrips(t *testing.T) {
 	toolsetID := uuid.NewString()
@@ -98,6 +235,28 @@ func TestBehaviorValidationRefusesMalformedDeclarations(t *testing.T) {
 	}
 	if b, err := DecodeBehavior([]byte(`{}`)); err != nil || !b.IsZero() {
 		t.Fatalf("empty behavior: %+v %v", b, err)
+	}
+}
+
+func TestModalitySelectorsAcceptAndMatchRequestFeatures(t *testing.T) {
+	request, err := wire.FromFields(wire.Gemini, "route", false, map[string]json.RawMessage{
+		"contents": json.RawMessage(`[{"role":"user","parts":[{"text":"hello"},{"inlineData":{"mimeType":"image/png","data":"YQ=="}},{"inlineData":{"mimeType":"audio/wav","data":"YQ=="}},{"inlineData":{"mimeType":"video/mp4","data":"YQ=="}},{"inlineData":{"mimeType":"application/pdf","data":"YQ=="}}]}]`),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	features := DescribeRequest("generation", request, nil)
+	for _, modality := range []string{"text", "image", "audio", "video", "file"} {
+		t.Run(modality, func(t *testing.T) {
+			predicate := Predicate{Modalities: []string{modality}}
+			behavior := Behavior{Selectors: []Selector{{ID: "media", When: predicate, Route: "media-route"}}}
+			if err := behavior.Validate("route", func(string) bool { return false }); err != nil {
+				t.Fatalf("selector rejected: %v", err)
+			}
+			if !predicate.Matches(*features) {
+				t.Fatalf("selector did not match request features %+v", features)
+			}
+		})
 	}
 }
 

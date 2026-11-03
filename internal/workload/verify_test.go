@@ -175,7 +175,14 @@ func TestSupportedSignaturesAndEverySecurityClaim(t *testing.T) {
 	}{{jose.RS256, rsaKey, &rsaKey.PublicKey}, {jose.ES256, ecKey, &ecKey.PublicKey}, {jose.EdDSA, edKey, pub}} {
 		t.Run(string(key.alg), func(t *testing.T) {
 			now := time.Now()
-			keys := map[string]jose.JSONWebKey{"one": {Key: key.public, KeyID: "one", Algorithm: string(key.alg), Use: "sig"}}
+			keySet, err := json.Marshal(jose.JSONWebKeySet{Keys: []jose.JSONWebKey{{Key: key.public, KeyID: "one", Algorithm: string(key.alg), Use: "sig"}}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			keys, err := ParseKeys(keySet)
+			if err != nil {
+				t.Fatal(err)
+			}
 			c := fixtureConfig()
 			if e = c.Validate(); e != nil {
 				t.Fatal(e)
@@ -221,6 +228,27 @@ func TestSupportedSignaturesAndEverySecurityClaim(t *testing.T) {
 			c.Enabled = false
 			if _, e = token.Verify(c, keys, now); e == nil {
 				t.Fatal("disabled issuer accepted")
+			}
+		})
+	}
+}
+
+func TestKeyAlgorithmsAgreeWithIssuerConfiguration(t *testing.T) {
+	public, _, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, algorithm := range []string{string(jose.EdDSA), "not-a-supported-algorithm"} {
+		t.Run(algorithm, func(t *testing.T) {
+			config := fixtureConfig()
+			config.Algorithms = []string{algorithm}
+			keySet, err := json.Marshal(jose.JSONWebKeySet{Keys: []jose.JSONWebKey{{Key: public, KeyID: "one", Algorithm: algorithm}}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, keyErr := ParseKeys(keySet)
+			if configErr := config.Validate(); (configErr == nil) != (keyErr == nil) {
+				t.Fatalf("issuer validation = %v, key parsing = %v", configErr, keyErr)
 			}
 		})
 	}

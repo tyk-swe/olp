@@ -14,6 +14,7 @@ import (
 	"github.com/tyk-swe/olp/internal/contentpolicy"
 	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/operations"
+	"github.com/tyk-swe/olp/internal/protocols/wire"
 	"github.com/tyk-swe/olp/internal/vendors"
 )
 
@@ -397,8 +398,12 @@ func (t *Template) bindMultipart(d oif.Descriptor, in Input) (Bound, error) {
 	return bound, nil
 }
 
+func RepeatedMultipartDefault(name string) bool {
+	return slices.Contains([]string{"include", "timestamp_granularities", "known_speaker_names", "known_speaker_references"}, name)
+}
+
 func multipartDefaultParts(name string, raw json.RawMessage) []Part {
-	if slices.Contains([]string{"include", "timestamp_granularities", "known_speaker_names", "known_speaker_references"}, name) {
+	if RepeatedMultipartDefault(name) {
 		var values []string
 		if json.Unmarshal(raw, &values) != nil {
 			return nil
@@ -473,9 +478,10 @@ func (t *Template) JSONResult(d oif.Descriptor, source oif.Document) (oif.Result
 		modelName, modelText := model.Text()
 		objectName, kindText := kind.Text()
 		state, statusText := status.Text()
+		_, validStatus := wire.VideoJobStateOf(state)
 		if !idOK || !idText || upstreamID == "" || !modelOK || !modelText || modelName != t.model ||
 			!kindOK || !kindText || objectName != "video" || !statusOK || !statusText ||
-			!slices.Contains([]string{"queued", "in_progress", "completed", "failed"}, state) {
+			!validStatus {
 			return oif.Result{}, reject("protocol_violation", "/result", "video_job_identity", "The native video job identity or status is invalid.")
 		}
 	}

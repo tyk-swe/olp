@@ -3,6 +3,8 @@ package usage
 import (
 	"testing"
 	"time"
+
+	"github.com/tyk-swe/olp/internal/pricingpolicy"
 )
 
 // priceOf normalizes one entry as CreateRevision would, failing the test on refusal.
@@ -25,6 +27,23 @@ func priceRefused(t *testing.T, p Price) {
 func basePrice() Price {
 	return Price{ProviderKind: "openai", Model: "m", Operation: "generation",
 		InputPerMillion: rate("1"), OutputPerMillion: rate("2"), Currency: "USD"}
+}
+
+func TestPriceRateAgreesWithDecimalNormalization(t *testing.T) {
+	for _, value := range []string{"0", "1", "0.000000000001", "12.50", " 1 ", "1000000000000", "1.0000000000001", "-1", "1.2.3", "", "1e3", ".1"} {
+		t.Run(value, func(t *testing.T) {
+			normalized, amountErr := normalizePriceAmount(value)
+			price := basePrice()
+			price.InputPerMillion = &value
+			actual, priceErr := normalizePrice(price, nil)
+			if (priceErr == nil) != (amountErr == nil) {
+				t.Fatalf("price error = %v, amount error = %v", priceErr, amountErr)
+			}
+			if priceErr == nil && *actual.InputPerMillion != normalized {
+				t.Fatalf("price rate = %q, normalized amount = %q", *actual.InputPerMillion, normalized)
+			}
+		})
+	}
 }
 
 func TestPriceValidationComponents(t *testing.T) {
@@ -116,7 +135,7 @@ func TestPriceValidationComponents(t *testing.T) {
 		}},
 		{"too many tiers", func() Price {
 			p := basePrice()
-			for index := range maxTiers + 1 {
+			for index := range pricingpolicy.MaxTiers + 1 {
 				p.Tiers = append(p.Tiers, PriceTier{AboveInputTokens: int64(index + 1),
 					InputPerMillion: rate("2"), OutputPerMillion: rate("4")})
 			}

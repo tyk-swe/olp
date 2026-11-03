@@ -151,7 +151,7 @@ func newStdioFixture(t *testing.T) stdioFixture {
 	if sessionErr != nil {
 		t.Fatal(sessionErr)
 	}
-	tier := plugins.NewUnconfined(directory, plugins.DefaultLimits, nil)
+	tier := plugins.NewUnconfined(directory, plugins.DefaultLimits(), nil)
 	server := &mcp.Server{Runtime: h.Runtime, Egress: &h.Policy, Auth: h.AuthKey, Sessions: sessions, Limiter: limiter, Executables: &mcpservers.Executables{Tier: tier, Query: h.Pool}, Ledger: &mcp.DurableLedger{Pool: h.Pool, Store: &limits.DebitStore{Pool: h.Pool, Limiter: limiter}, Auth: h.AuthKey}}
 	mux := http.NewServeMux()
 	server.Register(mux)

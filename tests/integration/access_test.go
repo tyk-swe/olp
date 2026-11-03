@@ -157,17 +157,17 @@ func newAccessHarnessAtInstallation(t *testing.T, pool *pgxpool.Pool, dbURL, ins
 	if len(loggers) > 0 {
 		log = loggers[0]
 	}
-	rt := runtime.NewManager(pool, installation, digestKey, ring, log)
+	rt := runtime.NewManager(pool, installation, digestKey, ring, log, "test-host")
 	// The race detector slows wazero's compiler tenfold, so the harness
 	// interprets plugins, for installing and for signing alike.
-	pluginRuntime, err := plugins.NewRuntime(t.Context(), plugins.Interpreted, plugins.DefaultLimits, log)
+	pluginRuntime, err := plugins.NewRuntime(t.Context(), plugins.Interpreted, plugins.DefaultLimits(), log)
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { pluginRuntime.Close(context.Background()) })
 	var unconfined *plugins.Unconfined
 	if unconfinedDir != "" {
-		unconfined = plugins.NewUnconfined(unconfinedDir, plugins.DefaultLimits, log)
+		unconfined = plugins.NewUnconfined(unconfinedDir, plugins.DefaultLimits(), log)
 	}
 	pluginHost := plugins.NewHost(pluginRuntime, unconfined, pool)
 	t.Cleanup(func() { pluginHost.Close(context.Background()) })
@@ -204,7 +204,7 @@ func newAccessHarnessAtInstallation(t *testing.T, pool *pgxpool.Pool, dbURL, ins
 	if err != nil {
 		t.Fatal(err)
 	}
-	process.Management{Access: server, Egress: &policy, Runtime: rt, Gateway: gw, Media: mediaJobs, Health: observability.NewCache(), Log: log, PluginRuntime: pluginRuntime, PluginHost: pluginHost, Unconfined: unconfined, Catalog: referenceCatalog, PluginIndex: pluginIndex}.Register(mux)
+	process.Management{Getenv: os.Getenv, Access: server, Egress: &policy, Runtime: rt, Gateway: gw, Media: mediaJobs, Health: observability.NewCache(), Log: log, PluginRuntime: pluginRuntime, PluginHost: pluginHost, Unconfined: unconfined, Catalog: referenceCatalog, PluginIndex: pluginIndex}.Register(mux)
 	gw.Register(mux)
 	agentServer := &a2a.Server{Grants: &mcpgrants.Store{Egress: &policy, Pool: pool, Keys: ring, Auth: digestKey, Installation: installation}, Runtime: rt, Egress: &policy, Credentials: func(ctx context.Context, id string) ([]byte, error) {
 		return ring.Read(ctx, pool, installation, id, secrets.AgentCredential)

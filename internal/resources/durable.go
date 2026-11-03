@@ -8,6 +8,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
+	"github.com/tyk-swe/olp/internal/protocols/wire"
 	"github.com/tyk-swe/olp/internal/secrets"
 )
 
@@ -88,7 +89,7 @@ func (s *Store) putDurableContractTx(ctx context.Context, tx pgx.Tx, r *Resource
 	if err := s.validateDurable(r, payload); err != nil {
 		return nil, err
 	}
-	if r.TargetID == "" || r.Kind == KindStrictBatch && batchStateRank(r.State) == 0 {
+	if r.TargetID == "" || r.Kind == KindStrictBatch && wire.BatchStageOf(r.State) == wire.BatchUnknown {
 		return nil, ErrContract
 	}
 	if r.UUID == uuid.Nil {
@@ -187,35 +188,11 @@ func (s *Store) ReadDurableContract(ctx context.Context, kind, owner, localID st
 	return r, payload, nil
 }
 
-func terminalBatch(state string) bool {
-	switch state {
-	case "completed", "failed", "expired", "cancelled":
-		return true
-	}
-	return false
-}
-
-func batchStateRank(state string) int {
-	switch state {
-	case "validating":
-		return 1
-	case "in_progress":
-		return 2
-	case "finalizing":
-		return 3
-	case "cancelling":
-		return 4
-	case "completed", "failed", "expired", "cancelled":
-		return 5
-	}
-	return 0
-}
-
 // UpdateDurableContract commits the latest native result with the status in
 // one transaction. Once a batch reaches a terminal result, a delayed poll or
 // cancellation response cannot replace it with an earlier state.
 func (s *Store) UpdateDurableContract(ctx context.Context, kind, owner, localID, state string, payload []byte) (*Resource, []byte, error) {
-	if !s.Encrypted() || !durableKind(kind) || state == "" || kind == KindStrictBatch && batchStateRank(state) == 0 || len(payload) == 0 || len(payload) > MaxContinuationBytes {
+	if !s.Encrypted() || !durableKind(kind) || state == "" || kind == KindStrictBatch && wire.BatchStageOf(state) == wire.BatchUnknown || len(payload) == 0 || len(payload) > MaxContinuationBytes {
 		return nil, nil, ErrContract
 	}
 	id, err := parseLocal(localID)
@@ -241,7 +218,7 @@ func (s *Store) UpdateDurableContract(ctx context.Context, kind, owner, localID,
 	if r.ContractVersion == nil || *r.ContractVersion != DurableContractVersion {
 		return nil, nil, ErrContract
 	}
-	if kind == KindStrictBatch && (terminalBatch(r.State) || batchStateRank(state) < batchStateRank(r.State)) {
+	if kind == KindStrictBatch && (wire.BatchStageOf(r.State) == wire.BatchTerminal || wire.BatchStageOf(state) < wire.BatchStageOf(r.State)) {
 		current, err := s.keys.Read(ctx, tx, s.installation, id.String(), secrets.ProviderContinuation)
 		if err != nil || len(current) == 0 || len(current) > MaxContinuationBytes {
 			return nil, nil, ErrContract

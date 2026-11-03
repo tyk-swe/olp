@@ -19,7 +19,10 @@ func speechRequest(voice, format string, speed *float64) *Request {
 
 func TestPollySpeechIsSignedForPolly(t *testing.T) {
 	cfg := connectors.Config{Kind: "bedrock", AuthMode: "static", CloudRegion: "eu-west-1", VendorID: "amazon-bedrock"}
-	call, failure := encodePollySpeech(speechRequest("Joanna", "opus", nil), cfg, "neural")
+	call, translated, failure := encodeVendor(speechRequest("Joanna", "opus", nil), cfg, "neural")
+	if !translated {
+		t.Fatal("speech request was not translated")
+	}
 	if failure != nil {
 		t.Fatal(failure.Message)
 	}

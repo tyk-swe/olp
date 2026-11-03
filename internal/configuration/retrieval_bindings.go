@@ -30,7 +30,7 @@ type RetrievalBindingEntry struct {
 func retrievalKey(e RetrievalBindingEntry) string {
 	return strings.ToLower(e.Project) + "\x00" + strings.ToLower(e.Name)
 }
-func validateRetrievalBindings(doc *Document) error {
+func validateAndNormalizeRetrievalBindings(doc *Document) error {
 	if len(doc.RetrievalBindings) > 512 {
 		return access.Invalid("retrieval_bindings", "Declare at most 512 retrieval bindings.")
 	}
@@ -54,8 +54,9 @@ func validateRetrievalBindings(doc *Document) error {
 				return access.Invalid("retrieval_bindings.key_grants", "Use nonempty exact project-local API-key names.")
 			}
 		}
-		slices.Sort(e.KeyGrants)
-		e.KeyGrants = slices.Compact(e.KeyGrants)
+		if len(e.KeyGrants) > 0 {
+			e.KeyGrants = slices.Compact(slices.Sorted(slices.Values(e.KeyGrants)))
+		}
 	}
 	return nil
 }
@@ -256,8 +257,7 @@ func (s *Server) applyRetrievalBindings(ctx context.Context, tx pgx.Tx, p access
 				continue
 			}
 		}
-		next := &retrieval.Binding{Input: in}
-		if err = retrieval.Save(ctx, tx, p.UserID(), current, next); err != nil {
+		if _, err := retrieval.Save(ctx, tx, p.UserID(), current, in); err != nil {
 			return err
 		}
 	}

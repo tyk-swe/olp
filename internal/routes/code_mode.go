@@ -15,6 +15,7 @@ import (
 	"github.com/tyk-swe/olp/internal/codemode"
 	"github.com/tyk-swe/olp/internal/providers"
 	"github.com/tyk-swe/olp/internal/resources"
+	"github.com/tyk-swe/olp/internal/routeidentity"
 	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/runtime"
 )
@@ -251,7 +252,7 @@ func (in CodeRouteInput) validate() error {
 	if !bodylimit.Valid(in.MaxBodyBytes) {
 		return access.Invalid("max_body_bytes", "Use 1 to 1073741824 bytes, or null to inherit the installation limit.")
 	}
-	if !access.RouteSlug.MatchString(in.Slug) {
+	if !routeidentity.ValidSlug(in.Slug) {
 		return access.Invalid("slug", "Use a route slug.")
 	}
 	if err := codemode.ValidateModels(in.Models); err != nil {

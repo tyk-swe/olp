@@ -230,8 +230,8 @@ func TestIntegrationExportSinkMatrix(t *testing.T) {
 		credential map[string]any
 		sender     *Sender
 	}
-	s3Sender := NewSender(matrixPolicy())
-	cloudSender := NewSender(matrixPolicy())
+	s3Sender := NewSender(matrixPolicy(), os.Getenv)
+	cloudSender := NewSender(matrixPolicy(), os.Getenv)
 	cloudSender.auth = &fakeCloudAuth{t}
 	fixtures := []fixture{
 		{typ: "https", dest: receiver.URL + "/json", credential: map[string]any{"signing_secret": "0123456789abcdef0123456789abcdef"}, sender: cloudSender},
@@ -508,7 +508,7 @@ func TestIntegrationOTLPResponseDeliveryAccounting(t *testing.T) {
 				t.Fatal(err)
 			}
 			var logs bytes.Buffer
-			worker := &Worker{Pool: pool, Keys: ring, Installation: installation, Sender: NewSender(matrixPolicy()), Log: slog.New(slog.NewTextHandler(&logs, nil))}
+			worker := &Worker{Pool: pool, Keys: ring, Installation: installation, Sender: NewSender(matrixPolicy(), os.Getenv), Log: slog.New(slog.NewTextHandler(&logs, nil))}
 			if err := worker.Pass(t.Context()); err != nil {
 				t.Fatal(err)
 			}

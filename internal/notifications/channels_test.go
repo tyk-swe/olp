@@ -239,6 +239,11 @@ func (f *smtpFake) handle(conn net.Conn, cert *tls.Certificate) {
 }
 
 func TestSendEveryEventToAllChannels(t *testing.T) {
+	events := []string{
+		"budget.threshold", "provider.grant.lapsed", "key.expiring", "budget.exhausted",
+		"provider.circuit.open", "provider.circuit.closed", "provider.error_rate", "route.latency",
+		"provider.credential.failing", "model.retirement", "runtime.install_failed", "worker.stale", "report.spend",
+	}
 	policy := testPolicy()
 	posts := map[string][][]byte{}
 	var mu sync.Mutex
@@ -294,7 +299,7 @@ func TestSendEveryEventToAllChannels(t *testing.T) {
 		if err := ValidateDestination(policy, channel.destination, channel.secret); err != nil {
 			t.Fatalf("%s validate: %v", name, err)
 		}
-		for _, event := range Events {
+		for _, event := range events {
 			body := []byte(`{"event":"` + event + `","rule_id":"r1","rule_name":"Alert","subject":"notification_delivery","incident":1,"incident_key":"inc:` + name + `","delivery_id":"d1"}`)
 			if err := sender.Send(t.Context(), channel.destination, channel.secret, body); err != nil {
 				t.Fatalf("%s %s: %v", name, event, err)
@@ -325,10 +330,10 @@ func TestSendEveryEventToAllChannels(t *testing.T) {
 		mu.Lock()
 		got := append([][]byte(nil), posts[name]...)
 		mu.Unlock()
-		if len(got) != len(Events) {
-			t.Fatalf("%s posts = %d, want %d", name, len(got), len(Events))
+		if len(got) != len(events) {
+			t.Fatalf("%s posts = %d, want %d", name, len(got), len(events))
 		}
-		for i, event := range Events {
+		for i, event := range events {
 			if !strings.Contains(string(got[i]), event) {
 				t.Fatalf("%s post %d missing %s", name, i, event)
 			}
@@ -336,10 +341,10 @@ func TestSendEveryEventToAllChannels(t *testing.T) {
 	}
 	mu.Lock()
 	defer mu.Unlock()
-	if len(pdReceived) != len(Events) {
-		t.Fatalf("pagerduty posts = %d, want %d", len(pdReceived), len(Events))
+	if len(pdReceived) != len(events) {
+		t.Fatalf("pagerduty posts = %d, want %d", len(pdReceived), len(events))
 	}
-	for i, event := range Events {
+	for i, event := range events {
 		var decoded map[string]any
 		if err := json.Unmarshal(pdReceived[i], &decoded); err != nil {
 			t.Fatal(err)

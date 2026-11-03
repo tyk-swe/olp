@@ -172,7 +172,7 @@ func focusManifest(w *FocusWorker, sink focusSink, fc *focusContext, revision in
 		InstallationID:        fc.installationID,
 		SinkID:                sink.ID,
 		Currency:              currency,
-		ApplicabilityCriteria: FocusCriteria,
+		ApplicabilityCriteria: focusCriteria(),
 		CorrectionHandling:    focusCorrectionHandling,
 		Parts:                 parts,
 		Totals: focusTotals{

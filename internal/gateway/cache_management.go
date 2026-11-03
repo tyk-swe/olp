@@ -5,6 +5,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/routeidentity"
 )
 
 type CacheManagement struct {
@@ -75,7 +76,7 @@ func (s *CacheManagement) purge(r *http.Request, p access.Principal) (access.Rep
 
 func (s *CacheManagement) statistics(r *http.Request, p access.Principal) (access.Reply, error) {
 	route := r.URL.Query().Get("route")
-	if route != "" && !access.RouteSlug.MatchString(route) {
+	if route != "" && !routeidentity.ValidSlug(route) {
 		return access.Reply{}, access.Invalid("route", "Use a route slug.")
 	}
 	var requests, hits, misses, bypasses int64

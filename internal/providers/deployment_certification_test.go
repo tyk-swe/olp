@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
+	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -45,7 +46,7 @@ func TestDeploymentCertificationKeepsBodyAndPathOnTheSameSingleMapping(t *testin
 	deployment, version := "fallback", "2024-10-21"
 	cfg := Configuration{Kind: KindAzure, AuthMode: AuthAPIKey, Endpoint: &upstream.URL, Deployment: &deployment, APIVersion: &version, Options: Options{Models: map[string]json.RawMessage{"logical-a": json.RawMessage(`{"deployment":"wire-b"}`), "wire-b": json.RawMessage(`{"deployment":"wire-c"}`)}}}
 	cfg.Normalize()
-	err := New(nil, policy, nil).certifyTuple(t.Context(), &cfg, []byte("fixture-secret"), "logical-a", CapabilityInput{Operation: "generation", Surface: "openai", Mode: ModeUnary}, 4096)
+	err := New(nil, policy, nil, os.Getenv).certifyTuple(t.Context(), &cfg, []byte("fixture-secret"), "logical-a", CapabilityInput{Operation: "generation", Surface: "openai", Mode: ModeUnary}, 4096)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -63,7 +64,7 @@ func TestCertificationFailsClosedWhenAuthenticationStorageIsUnavailable(t *testi
 	}
 	pool.Close()
 	mux := http.NewServeMux()
-	New(&access.Server{Pool: pool, Auth: secrets.NewAuthKey(make([]byte, 32), "test")}, &egress.Policy{}, nil).Register(mux)
+	New(&access.Server{Pool: pool, Auth: secrets.NewAuthKey(make([]byte, 32), "test")}, &egress.Policy{}, nil, os.Getenv).Register(mux)
 	server := httptest.NewServer(mux)
 	defer server.Close()
 

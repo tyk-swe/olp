@@ -13,25 +13,6 @@ import (
 	"github.com/shopspring/decimal"
 )
 
-var Events = []string{
-	"budget.threshold", "provider.grant.lapsed", "key.expiring", "budget.exhausted",
-	"provider.circuit.open", "provider.circuit.closed", "provider.error_rate", "route.latency",
-	"provider.credential.failing", "model.retirement", "runtime.install_failed", "worker.stale", "report.spend",
-}
-
-func WorkerStaleAfter(task string) int64 {
-	switch task {
-	case "request_metadata_consumer", "request_metadata_gateway_epoch_detection", "media_reconciliation", "grant_refresh":
-		return 20
-	case "maintenance", "cost_reconciliation", "notification_delivery", "health_probes", "managed_export_delivery",
-		"billing_import", "focus_export", "batch_settlement", "retained_settlement", "execution_debits":
-		return 180
-	case "export_delivery":
-		return 30
-	}
-	return 0
-}
-
 type RuleConfiguration struct {
 	WindowSeconds     int    `json:"window_seconds,omitempty"`
 	MinimumSamples    int    `json:"minimum_samples,omitempty"`
@@ -46,18 +27,25 @@ type RuleConfiguration struct {
 
 var signalFields = []string{"window_seconds", "minimum_samples", "threshold", "recovery_threshold", "cooldown_seconds"}
 
-var ruleFields = map[string][]string{
-	"provider.error_rate":         signalFields,
-	"provider.credential.failing": signalFields,
-	"route.latency":               {"window_seconds", "minimum_samples", "threshold", "recovery_threshold", "cooldown_seconds", "metric"},
-	"key.expiring":                {"lead_time_seconds"},
-	"model.retirement":            {"lead_days", "cooldown_seconds"},
-	"report.spend":                {"period"},
-	"budget.exhausted":            {"cooldown_seconds"},
-	"provider.circuit.open":       {"cooldown_seconds"},
-	"provider.circuit.closed":     {"cooldown_seconds"},
-	"runtime.install_failed":      {"cooldown_seconds"},
-	"worker.stale":                {"cooldown_seconds"},
+type rulePolicy struct {
+	fields              []string
+	threshold, recovery string
+}
+
+var rulePolicies = map[string]rulePolicy{
+	"budget.threshold":            {},
+	"provider.grant.lapsed":       {},
+	"provider.error_rate":         {fields: signalFields, threshold: "0.1", recovery: "0.05"},
+	"provider.credential.failing": {fields: signalFields, threshold: "3", recovery: "0"},
+	"route.latency":               {fields: []string{"window_seconds", "minimum_samples", "threshold", "recovery_threshold", "cooldown_seconds", "metric"}, threshold: "1000", recovery: "800"},
+	"key.expiring":                {fields: []string{"lead_time_seconds"}},
+	"model.retirement":            {fields: []string{"lead_days", "cooldown_seconds"}},
+	"report.spend":                {fields: []string{"period"}},
+	"budget.exhausted":            {fields: []string{"cooldown_seconds"}},
+	"provider.circuit.open":       {fields: []string{"cooldown_seconds"}},
+	"provider.circuit.closed":     {fields: []string{"cooldown_seconds"}},
+	"runtime.install_failed":      {fields: []string{"cooldown_seconds"}},
+	"worker.stale":                {fields: []string{"cooldown_seconds"}},
 }
 
 var intFields = []struct {
@@ -72,15 +60,15 @@ var intFields = []struct {
 	{"lead_days", 1, 366, 30, func(c *RuleConfiguration) *int { return &c.LeadDays }},
 }
 
-var thresholdDefaults = map[string]struct{ threshold, recovery string }{
-	"provider.error_rate":         {"0.1", "0.05"},
-	"route.latency":               {"1000", "800"},
-	"provider.credential.failing": {"3", "0"},
+func SupportsEvent(event string) bool {
+	_, ok := rulePolicies[event]
+	return ok
 }
 
 func ParseRuleConfiguration(event string, raw json.RawMessage) (RuleConfiguration, error) {
 	var c RuleConfiguration
-	if !slices.Contains(Events, event) {
+	policy, ok := rulePolicies[event]
+	if !ok {
 		return c, errors.New("unsupported notification event")
 	}
 	if len(raw) == 0 {
@@ -90,7 +78,7 @@ func ParseRuleConfiguration(event string, raw json.RawMessage) (RuleConfiguratio
 	if err := json.Unmarshal(raw, &fields); err != nil || fields == nil {
 		return c, errors.New("configuration must be an object")
 	}
-	allowed := ruleFields[event]
+	allowed := policy.fields
 	for _, field := range slices.Sorted(maps.Keys(fields)) {
 		if !slices.Contains(allowed, field) {
 			return c, fmt.Errorf("configuration.%s is not supported for %s", field, event)
@@ -121,9 +109,9 @@ func ParseRuleConfiguration(event string, raw json.RawMessage) (RuleConfiguratio
 		}
 		*field.field(&c) = value
 	}
-	if defaults, ok := thresholdDefaults[event]; ok {
+	if policy.threshold != "" {
 		if !provided("threshold") {
-			c.Threshold = defaults.threshold
+			c.Threshold = policy.threshold
 		}
 		threshold, err := boundedThreshold(event, c.Threshold)
 		if err != nil {
@@ -133,7 +121,7 @@ func ParseRuleConfiguration(event string, raw json.RawMessage) (RuleConfiguratio
 			if provided("threshold") {
 				c.RecoveryThreshold = threshold.Mul(decimal.New(8, -1)).String()
 			} else {
-				c.RecoveryThreshold = defaults.recovery
+				c.RecoveryThreshold = policy.recovery
 			}
 		}
 		recovery, err := decimal.NewFromString(c.RecoveryThreshold)

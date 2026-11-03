@@ -9,8 +9,8 @@ import (
 	"sync"
 )
 
-var BusinessLatencyBuckets = []float64{0.01, 0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10, 30}
-var BusinessThroughputBuckets = []float64{1, 5, 10, 25, 50, 100, 250, 500, 1000}
+var businessLatencyBuckets = []float64{0.01, 0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10, 30}
+var businessThroughputBuckets = []float64{1, 5, 10, 25, 50, 100, 250, 500, 1000}
 
 type BusinessLabels struct {
 	Route        string
@@ -18,6 +18,23 @@ type BusinessLabels struct {
 	Project      string
 	Key          string
 	EndUser      string
+}
+
+func tenantLabelValues(labels BusinessLabels) [3]struct{ name, value string } {
+	return [3]struct{ name, value string }{
+		{"project", labels.Project},
+		{"key", labels.Key},
+		{"end_user", labels.EndUser},
+	}
+}
+
+func tenantLabelValue(name string, labels BusinessLabels) (string, bool) {
+	for _, label := range tenantLabelValues(labels) {
+		if label.name == name {
+			return label.value, true
+		}
+	}
+	return "", false
 }
 
 type businessSeries struct {
@@ -45,7 +62,7 @@ func ParseMetricsTenantLabels(raw string) ([]string, error) {
 	seen := map[string]bool{}
 	for _, label := range strings.Split(raw, ",") {
 		label = strings.TrimSpace(label)
-		if label != "project" && label != "key" && label != "end_user" {
+		if _, valid := tenantLabelValue(label, BusinessLabels{}); !valid {
 			return nil, fmt.Errorf("OLP_METRICS_TENANT_LABELS accepts project, key and end_user")
 		}
 		if seen[label] {
@@ -54,9 +71,9 @@ func ParseMetricsTenantLabels(raw string) ([]string, error) {
 		seen[label] = true
 	}
 	labels := make([]string, 0, len(seen))
-	for _, label := range []string{"project", "key", "end_user"} {
-		if seen[label] {
-			labels = append(labels, label)
+	for _, label := range tenantLabelValues(BusinessLabels{}) {
+		if seen[label.name] {
+			labels = append(labels, label.name)
 		}
 	}
 	return labels, nil
@@ -80,15 +97,7 @@ func (m *BusinessMetrics) labels(l BusinessLabels, extra ...string) string {
 	labels := []string{"route=" + metricQuoted(l.Route)}
 	labels = append(labels, extra...)
 	for _, tenant := range m.tenants {
-		value := ""
-		switch tenant {
-		case "project":
-			value = l.Project
-		case "key":
-			value = l.Key
-		case "end_user":
-			value = l.EndUser
-		}
+		value, _ := tenantLabelValue(tenant, l)
 		labels = append(labels, tenant+"="+metricQuoted(value))
 	}
 	return strings.Join(labels, ",")
@@ -148,13 +157,13 @@ func (m *BusinessMetrics) Cost(l BusinessLabels, currency string, amount float64
 
 func (m *BusinessMetrics) FirstToken(l BusinessLabels, seconds float64) {
 	if m != nil && l.Route != "" {
-		m.add("olp_time_to_first_token_seconds", m.labels(l), seconds, BusinessLatencyBuckets)
+		m.add("olp_time_to_first_token_seconds", m.labels(l), seconds, businessLatencyBuckets)
 	}
 }
 
 func (m *BusinessMetrics) OutputRate(l BusinessLabels, tokens int64, seconds float64) {
 	if m != nil && l.Route != "" && tokens >= 0 && seconds > 0 {
-		m.add("olp_output_tokens_per_second", m.labels(l), float64(tokens)/seconds, BusinessThroughputBuckets)
+		m.add("olp_output_tokens_per_second", m.labels(l), float64(tokens)/seconds, businessThroughputBuckets)
 	}
 }
 
@@ -196,7 +205,7 @@ func (m *BusinessMetrics) Guardrail(labels BusinessLabels, phase, action, outcom
 	}
 	extra := m.labels(labels, "phase="+metricQuoted(phase), "action="+metricQuoted(action), "outcome="+metricQuoted(outcome))
 	m.add("olp_guardrail_decisions_total", extra, 1, nil)
-	m.add("olp_guardrail_duration_seconds", extra, float64(latencyMS)/1000, BusinessLatencyBuckets)
+	m.add("olp_guardrail_duration_seconds", extra, float64(latencyMS)/1000, businessLatencyBuckets)
 }
 
 // Cache records bounded, content-free cache outcome metrics.

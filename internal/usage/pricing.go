@@ -14,6 +14,8 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/operationregistry"
+	"github.com/tyk-swe/olp/internal/pricingpolicy"
+	"github.com/tyk-swe/olp/internal/toolidentity"
 )
 
 // pricingLockID serialises pricing revision creation across replicas ("OLP_PR").
@@ -444,7 +446,7 @@ func normalizePrice(price Price, vendorKind func(vendor string) (string, bool)) 
 		// upstream on any terms; the operator prices each one.
 		return Price{}, access.Invalid("prices", "Scope a plugin provider's price to that provider.")
 	}
-	if entry.Model == "" || len(entry.Currency) != 3 || !currencyLetters(entry.Currency) {
+	if entry.Model == "" || !pricingpolicy.ValidCurrency(entry.Currency) {
 		return Price{}, access.Invalid("prices",
 			"Pricing entries require a model and a three-letter ISO currency.")
 	}
@@ -474,7 +476,7 @@ func normalizePrice(price Price, vendorKind func(vendor string) (string, bool)) 
 		if amount == nil {
 			continue
 		}
-		value, err := normalizeDecimal(*amount)
+		value, err := normalizePriceAmount(*amount)
 		if err != nil {
 			return Price{}, err
 		}
@@ -502,10 +504,10 @@ func normalizeToolCallFees(calls map[string]string) error {
 			"Tool call fees name 1–"+strconv.Itoa(maxToolCalls)+" tools.")
 	}
 	for tool, fee := range calls {
-		if !toolNamePattern.MatchString(tool) {
+		if !toolidentity.ValidMeteredName(tool) {
 			return access.Invalid("prices", "A tool call fee name is malformed.")
 		}
-		value, err := normalizeDecimal(fee)
+		value, err := normalizePriceAmount(fee)
 		if err != nil {
 			return err
 		}
@@ -536,9 +538,6 @@ func perMillionRates(p *Price, t *PriceTier) [][2]**string {
 	}
 }
 
-// maxTiers bounds the thresholds one price may carry.
-const maxTiers = 8
-
 // normalizeTiers checks the thresholds are positive and strictly increasing,
 // normalizes every rate, and holds each tier to the per-million rate set its
 // entry carries: a tier replaces that set, so it must name exactly it.
@@ -546,9 +545,9 @@ func normalizeTiers(tiers []PriceTier, entry *Price) error {
 	if tiers == nil {
 		return nil
 	}
-	if len(tiers) < 1 || len(tiers) > maxTiers {
+	if len(tiers) < 1 || len(tiers) > pricingpolicy.MaxTiers {
 		return access.Invalid("prices",
-			"Pricing tiers name 1–"+strconv.Itoa(maxTiers)+" thresholds.")
+			"Pricing tiers name 1–"+strconv.Itoa(pricingpolicy.MaxTiers)+" thresholds.")
 	}
 	previous := int64(0)
 	for i := range tiers {
@@ -566,7 +565,7 @@ func normalizeTiers(tiers []PriceTier, entry *Price) error {
 			if *pair[1] == nil {
 				continue
 			}
-			value, err := normalizeDecimal(**pair[1])
+			value, err := normalizePriceAmount(**pair[1])
 			if err != nil {
 				return err
 			}
@@ -575,9 +574,6 @@ func normalizeTiers(tiers []PriceTier, entry *Price) error {
 	}
 	return nil
 }
-
-// maxWindowPeriods bounds the periods one price may carry.
-const maxWindowPeriods = 32
 
 // normalizeWindows checks one window set: a zone the clock can resolve,
 // well-formed periods, and no two periods covering the same time on a shared
@@ -589,26 +585,26 @@ func normalizeWindows(windows *PriceWindows) error {
 	if _, err := time.LoadLocation(windows.TimeZone); err != nil {
 		return access.Invalid("prices", "The pricing window time zone is unknown.")
 	}
-	if len(windows.Periods) < 1 || len(windows.Periods) > maxWindowPeriods {
+	if len(windows.Periods) < 1 || len(windows.Periods) > pricingpolicy.MaxWindowPeriods {
 		return access.Invalid("prices",
-			"Pricing windows name 1–"+strconv.Itoa(maxWindowPeriods)+" periods.")
+			"Pricing windows name 1–"+strconv.Itoa(pricingpolicy.MaxWindowPeriods)+" periods.")
 	}
 	type span struct{ start, end int }
 	days := map[int][]span{}
 	for i := range windows.Periods {
 		period := &windows.Periods[i]
-		start, err := windowMinutes(period.Start, false)
-		if err != nil {
+		start, validStart := pricingpolicy.WindowMinutes(period.Start, false)
+		if !validStart {
 			return access.Invalid("prices", "A pricing window start must be a time between 00:00 and 23:59.")
 		}
-		end, err := windowMinutes(period.End, true)
-		if err != nil {
+		end, validEnd := pricingpolicy.WindowMinutes(period.End, true)
+		if !validEnd {
 			return access.Invalid("prices", "A pricing window end must be a time between 00:01 and 24:00.")
 		}
 		if end <= start {
 			return access.Invalid("prices", "A pricing window end must fall after its start.")
 		}
-		multiplier, err := normalizeDecimal(period.Multiplier)
+		multiplier, err := normalizePriceAmount(period.Multiplier)
 		if err != nil {
 			return err
 		}
@@ -633,57 +629,12 @@ func normalizeWindows(windows *PriceWindows) error {
 	return nil
 }
 
-// windowMinutes parses an "HH:MM" wall time into minutes of day. allowEndOfDay
-// accepts "24:00" for a period end, which starts are denied.
-func windowMinutes(value string, allowEndOfDay bool) (int, error) {
-	hours, minutes, found := strings.Cut(value, ":")
-	if !found || len(hours) != 2 || len(minutes) != 2 || !priceDigits(hours) || !priceDigits(minutes) {
-		return 0, errors.New("malformed window time")
+func normalizePriceAmount(value string) (string, error) {
+	if normalized, ok := pricingpolicy.NormalizeAmount(value); ok {
+		return normalized, nil
 	}
-	h, _ := strconv.Atoi(hours)
-	m, _ := strconv.Atoi(minutes)
-	if allowEndOfDay && h == 24 && m == 0 {
-		return 24 * 60, nil
-	}
-	if h > 23 || m > 59 {
-		return 0, errors.New("window time out of range")
-	}
-	return h*60 + m, nil
-}
-
-func currencyLetters(value string) bool {
-	for _, r := range value {
-		if r < 'A' || r > 'Z' {
-			return false
-		}
-	}
-	return value != ""
-}
-
-// normalizeDecimal accepts a non-negative decimal with at most 12 integer and
-// 12 fractional digits, which is exactly what the numeric(24,12) columns hold.
-// Anything else is refused rather than rounded.
-func normalizeDecimal(value string) (string, error) {
-	invalid := access.Invalid("prices",
+	return "", access.Invalid("prices",
 		"Rates must be non-negative decimals with at most 12 integer and 12 fractional digits.")
-	trimmed := strings.TrimSpace(value)
-	integer, fraction, hasFraction := strings.Cut(trimmed, ".")
-	if trimmed == "" || len(integer) < 1 || len(integer) > 12 || !priceDigits(integer) {
-		return "", invalid
-	}
-	if hasFraction && (len(fraction) < 1 || len(fraction) > 12 || !priceDigits(fraction)) {
-		return "", invalid
-	}
-	return trimmed, nil
-}
-
-func priceDigits(value string) bool {
-	for _, r := range value {
-		if r < '0' || r > '9' {
-			return false
-		}
-	}
-	return true
 }
 
 const revisionColumns = `SELECT r.id::text, r.revision, r.effective_at, r.created_by::text,

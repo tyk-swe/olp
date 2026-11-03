@@ -9,6 +9,10 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/cache"
+	"github.com/tyk-swe/olp/internal/protocols/openai"
+	"github.com/tyk-swe/olp/internal/protocols/wire"
 )
 
 func metadataAttempt(ordinal int, providerID string, model string, committed bool) Attempt {
@@ -67,6 +71,32 @@ func metadataEvent() *Event {
 			metadataAttempt(1, firstProvider, "model-a", false),
 			metadataAttempt(2, finalProvider, "model-b", true),
 		},
+	}
+}
+
+func TestEndUserDigestsAgreeWithAccessPolicy(t *testing.T) {
+	for _, tc := range []struct {
+		digest string
+		valid  bool
+	}{
+		{strings.Repeat("a", 64), true}, {strings.Repeat("0", 64), true},
+		{strings.Repeat("A", 64), false}, {strings.Repeat("a", 63), false},
+		{strings.Repeat("a", 65), false}, {strings.Repeat("g", 64), false},
+	} {
+		event := metadataEvent()
+		event.EndUserDigest = tc.digest
+		_, validationErr := Validate(event)
+		payload, err := Encode(event)
+		if err != nil {
+			t.Fatal(err)
+		}
+		decoded, decodeErr := Decode(payload)
+		if access.ValidEndUserDigest(tc.digest) != tc.valid || (validationErr == nil) != tc.valid || (decodeErr == nil) != tc.valid {
+			t.Errorf("digest %q, access valid %v, validation error %v, decode error %v", tc.digest, access.ValidEndUserDigest(tc.digest), validationErr, decodeErr)
+		}
+		if decodeErr == nil && decoded.EndUserDigest != tc.digest {
+			t.Errorf("digest %q decoded as %q", tc.digest, decoded.EndUserDigest)
+		}
 	}
 }
 
@@ -201,6 +231,40 @@ func TestValidateRejectsMalformedEnvelopesAndAttempts(t *testing.T) {
 	}
 }
 
+func TestRouteSlugsAgreeAcrossRequestsAccessAccountingAndCache(t *testing.T) {
+	for _, tc := range []struct {
+		slug  string
+		valid bool
+	}{
+		{"route", true}, {"route-a.b_c", true}, {"0route", true}, {"UPPER", false}, {"route/path", false},
+		{"-route", false}, {"route\n", false}, {"røute", false}, {"", false},
+		{strings.Repeat("a", 100), true}, {strings.Repeat("a", 101), false},
+	} {
+		t.Run(tc.slug, func(t *testing.T) {
+			event := metadataEvent()
+			event.Attempts[0].Routing = &Routing{
+				ProviderRevisionID: uuid.NewString(),
+				Leg:                &RouteLeg{Route: tc.slug, RevisionID: uuid.NewString(), Via: ViaSelector},
+			}
+			payload, err := Encode(event)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, accountingErr := Decode(payload)
+			request, err := json.Marshal(map[string]any{"model": tc.slug, "messages": []map[string]string{{"role": "user", "content": "hello"}}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, requestErr := openai.Parse(wire.Chat, request)
+			accessErr := (access.RouteGroups{"group": []string{tc.slug}}).Validate()
+			cacheErr := (&cache.Policy{Mode: "semantic", EmbeddingRoute: tc.slug, AllowUnsealedVectors: true}).Validate()
+			if (accountingErr == nil) != tc.valid || (requestErr == nil) != tc.valid || (accessErr == nil) != tc.valid || (cacheErr == nil) != tc.valid {
+				t.Fatalf("accounting error = %v, request error = %v, access error = %v, cache error = %v", accountingErr, requestErr, accessErr, cacheErr)
+			}
+		})
+	}
+}
+
 // The first attempt never carried routing or usage evidence, so neither key
 // is written at all.
 
@@ -232,6 +296,13 @@ func TestDecodeRejectsMalformedFields(t *testing.T) {
 		}},
 		{"unknown surface", func(m map[string]json.RawMessage) {
 			m["surface"] = json.RawMessage(`"vertex"`)
+		}},
+		{"unknown budget boundary", func(m map[string]json.RawMessage) {
+			m["error_class"] = json.RawMessage(`"budget_exhausted"`)
+			m["budget_boundary"] = json.RawMessage(`"unknown"`)
+		}},
+		{"budget boundary without budget refusal", func(m map[string]json.RawMessage) {
+			m["budget_boundary"] = json.RawMessage(`"api_key"`)
 		}},
 		{"negative latency", func(m map[string]json.RawMessage) {
 			m["latency_ms"] = json.RawMessage(`-1`)
@@ -313,6 +384,36 @@ func TestDecodeRejectsMalformedFields(t *testing.T) {
 	}
 }
 
+func TestBudgetBoundarySurvivesUsageEvent(t *testing.T) {
+	now := time.Now().UTC()
+	status := 429
+	code := "budget_exhausted"
+	for _, boundary := range []string{"api_key", "budget_group", "key_route", "key_end_user", "project_end_user", "attribution", "project", "organization", "installation"} {
+		t.Run(boundary, func(t *testing.T) {
+			event := &Event{
+				EventID: uuid.NewString(), RequestID: uuid.NewString(), RuntimeGenerationID: uuid.NewString(), APIKeyID: uuid.NewString(),
+				RouteSlug: "primary", Operation: "generation", Surface: "openai",
+				RequestStartedAt: now, RequestCompletedAt: now, ObservedAt: now,
+				StatusCode: &status, ErrorClass: &code, BudgetBoundary: boundary,
+			}
+			payload, err := Encode(event)
+			if err != nil {
+				t.Fatalf("encode: %v", err)
+			}
+			decoded, err := Decode(payload)
+			if err != nil {
+				t.Fatalf("decode: %v", err)
+			}
+			if _, err := Validate(decoded); err != nil {
+				t.Fatalf("validate: %v", err)
+			}
+			if decoded.BudgetBoundary != boundary {
+				t.Fatalf("budget boundary = %q, want %q", decoded.BudgetBoundary, boundary)
+			}
+		})
+	}
+}
+
 // withAttemptFields sets raw JSON fields on the first attempt of an envelope.
 func withAttemptFields(t *testing.T, fields map[string]string) func(map[string]json.RawMessage) {
 	t.Helper()
@@ -368,6 +469,28 @@ func TestDecodeAcceptsRetainedOperations(t *testing.T) {
 		if !validOperation(operation) {
 			t.Fatalf("pricing vocabulary rejects %s", operation)
 		}
+	}
+}
+
+func TestDecodeAcceptsUnpricedOperations(t *testing.T) {
+	for _, operation := range []string{"file", "guardrail"} {
+		t.Run(operation, func(t *testing.T) {
+			event := metadataEvent()
+			event.Operation = operation
+			payload, err := Encode(event)
+			if err != nil {
+				t.Fatal(err)
+			}
+			decoded, err := Decode(payload)
+			if err != nil || decoded.Operation != operation {
+				t.Fatalf("decode %s: event=%v err=%v", operation, decoded, err)
+			}
+			entry := samplePriceEntry()
+			entry.Operation = operation
+			if _, _, err := validatePrices([]Price{entry}, sampleVendorKind); err == nil {
+				t.Fatalf("accepted a price for %s", operation)
+			}
+		})
 	}
 }
 

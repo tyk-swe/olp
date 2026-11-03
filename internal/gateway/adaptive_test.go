@@ -234,7 +234,7 @@ func TestContentFilterRefusalFallsBackWithoutTouchingHealth(t *testing.T) {
 // A shadow's failure never reaches the caller.
 
 func TestSaturatedGatewayQueuesRequestsByPriority(t *testing.T) {
-	pool := observability.NewPool(1).Queue(2, 5*time.Second)
+	pool := observability.NewPool(1).Queue(4, 5*time.Second)
 	h := newHarness(t, Config{MaxInFlight: 1, MaxBodyBytes: 64 * 1024, MaxResponseBytes: 1 << 20, MaxEventBytes: 4096, AdmissionPool: pool})
 	authority := h.rt.keys[fullKey]
 	authority.Policy.MaxPriority = new("critical")
@@ -301,19 +301,23 @@ func TestSaturatedGatewayQueuesRequestsByPriority(t *testing.T) {
 	}
 	low := send("low", "low")
 	queued("low", 1)
+	normal := send("normal", "normal")
+	queued("normal", 1)
 	critical := send("critical", "critical")
 	queued("critical", 1)
+	high := send("high", "high")
+	queued("high", 1)
 	// The queue is full: a further request is refused as before.
 	if status := <-send("excess", "critical"); status != http.StatusServiceUnavailable {
 		t.Fatalf("a request beyond the queue depth got %d, want 503", status)
 	}
 	close(hold)
-	for _, statuses := range []<-chan int{first, critical, low} {
+	for _, statuses := range []<-chan int{first, critical, high, normal, low} {
 		if status := <-statuses; status != http.StatusOK {
 			t.Fatalf("a queued request got %d", status)
 		}
 	}
-	if want := []string{"first", "critical", "low"}; !slices.Equal(served, want) {
+	if want := []string{"first", "critical", "high", "normal", "low"}; !slices.Equal(served, want) {
 		t.Fatalf("served %v, want %v", served, want)
 	}
 }

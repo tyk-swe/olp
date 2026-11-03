@@ -3,6 +3,7 @@
   import { nativeEntries, nativeObject } from '$lib/json/nativeJson';
   import type { Provider } from './api/providers';
   import type { ProviderEditValues, RunProviderAction } from './providerEditor';
+  import { profileScopedSettings } from './configurationDraft.svelte';
   import {
     getConfigurationSchemas,
     listProviderProfiles
@@ -83,18 +84,8 @@
       nativeEntries(parameterDefaults).length
     )
   );
-  const scopedSettings = [
-    'semantic_headers',
-    'query_settings',
-    'operation_defaults',
-    'bindings'
-  ];
   const conflictingScoped = $derived(
-    !values.profileId &&
-      scopedSettings.some((name) => {
-        const value = draft?.at(['options', name]);
-        return nativeObject(value) && nativeEntries(value).length > 0;
-      })
+    !values.profileId && draft?.hasProfileScopedSettings
   );
   const networkFields = $derived(
     Object.entries(
@@ -200,7 +191,7 @@
           type="button"
           disabled={editDisabled}
           onclick={() => {
-            for (const name of scopedSettings)
+            for (const name of profileScopedSettings)
               draft.set(['options', name], undefined);
             onChange();
           }}>Remove profile-scoped settings</button

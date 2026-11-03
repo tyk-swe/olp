@@ -12,6 +12,7 @@ import (
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/attribution"
 	"github.com/tyk-swe/olp/internal/limits"
+	"github.com/tyk-swe/olp/internal/routeidentity"
 	"github.com/tyk-swe/olp/internal/secrets"
 )
 
@@ -75,7 +76,7 @@ func validDelegationBounds(bounds DelegationBounds) bool {
 		return false
 	}
 	for index, route := range bounds.AllowedRoutes {
-		if !access.RouteSlug.MatchString(route) || slices.Contains(bounds.AllowedRoutes[:index], route) {
+		if !routeidentity.ValidSlug(route) || slices.Contains(bounds.AllowedRoutes[:index], route) {
 			return false
 		}
 	}

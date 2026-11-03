@@ -82,6 +82,12 @@
     'decision_model',
     'typesafe'
   ] as const satisfies readonly Definition['type'][];
+  const phases = [
+    'input',
+    'input_parallel',
+    'output',
+    'output_stream'
+  ] as const satisfies readonly Entry['phase'][];
   const access = useRole();
   const client = useQueryClient();
   const definitions = createQuery(() => ({
@@ -388,8 +394,8 @@
               >
               <label
                 >Phase<select bind:value={entry.phase}
-                  >{#each ['input', 'input_parallel', 'output', 'output_stream'] as value (value)}<option
-                      {value}>{value}</option
+                  >{#each phases as value (value)}<option {value}
+                      >{value}</option
                     >{/each}</select
                 ></label
               >
@@ -511,8 +517,7 @@
       >
       <label
         >Phase<select bind:value={phase}
-          >{#each ['input', 'input_parallel', 'output', 'output_stream'] as value (value)}<option
-              {value}>{value}</option
+          >{#each phases as value (value)}<option {value}>{value}</option
             >{/each}</select
         ></label
       >

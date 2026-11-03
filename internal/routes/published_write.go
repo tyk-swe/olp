@@ -83,7 +83,7 @@ func (s *Server) writePublished(r *http.Request, id string) (access.Reply, error
 			return access.Reply{}, access.Fail(409, "route_exists", "Import the existing route before changing its published configuration.")
 		}
 	}
-	targets, err = ValidateDraftInput(r.Context(), tx, &input, input.ProjectID, targets)
+	targets, err = ValidateAndNormalizeDraftInput(r.Context(), tx, &input, input.ProjectID, targets)
 	if err != nil {
 		return access.Reply{}, err
 	}

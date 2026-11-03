@@ -1,4 +1,5 @@
 import { snapshotNativeJSON, stringifyNativeJSON } from '$lib/json/nativeJson';
+import { networkCredentialPath } from './configurationDraft.svelte';
 import { overviewKeys } from '$lib/features/overview/overviewKeys';
 import { providerKeys } from '$lib/features/providers/providerKeys';
 import { createQuery, skipToken, useQueryClient } from '@tanstack/svelte-query';
@@ -784,14 +785,8 @@ export class ProviderWizardState {
           duplicate.name = `${source.name} copy`;
           duplicate.credential = '';
           // Network credentials are provider-owned and cannot be reused by a copy.
-          if (
-            duplicate.document?.at(['options', 'network', 'credential_id']) !==
-            undefined
-          ) {
-            duplicate.document.set(
-              ['options', 'network', 'credential_id'],
-              undefined
-            );
+          if (duplicate.document?.at(networkCredentialPath) !== undefined) {
+            duplicate.document.set(networkCredentialPath, undefined);
             this.notice =
               'The copied connection needs its own network credential. The source credential reference was removed.';
           }

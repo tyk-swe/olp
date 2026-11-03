@@ -19,11 +19,11 @@ func TestCodeConfigurationDigestRetainsPublishedAndDraftPolicies(t *testing.T) {
 	}
 	original := decode(`{"api_version":"openllmproxy.dev/config/v2","code":{"routes":[{"id":"0192cf87-d4ab-7f2e-a8b1-c2d3e4f50607","project":"team","slug":"coding","draft":{"pool":"pool","models":["next"],"enabled":true},"published":{"policy":{"pool":"pool","models":["native"],"enabled":true,"model_rewriting":true,"aliases":{"stable":"native"},"initial_recovery_attempts":2,"messages_to_codex":true},"connections":{}}}]}}`)
 	changed := decode(`{"api_version":"openllmproxy.dev/config/v2","code":{"routes":[{"id":"0192cf87-d4ab-7f2e-a8b1-c2d3e4f50607","project":"team","slug":"coding","draft":{"pool":"pool","models":["next"],"enabled":true},"published":{"policy":{"pool":"pool","models":["native"],"enabled":true,"model_rewriting":true,"aliases":{"stable":"native"},"initial_recovery_attempts":0,"messages_to_codex":true},"connections":{}}}]}}`)
-	before, err := configuration.Digest(original)
+	before, err := configuration.CanonicalizeAndDigest(original)
 	if err != nil {
 		t.Fatal(err)
 	}
-	after, err := configuration.Digest(changed)
+	after, err := configuration.CanonicalizeAndDigest(changed)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -34,7 +34,7 @@ func TestCodeConfigurationDigestRetainsPublishedAndDraftPolicies(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	roundtrip, err := configuration.Digest(decode(string(encoded)))
+	roundtrip, err := configuration.CanonicalizeAndDigest(decode(string(encoded)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -48,7 +48,7 @@ func TestCodeConfigurationDigestRetainsIndependentCodexIdentityPolicy(t *testing
 		return configuration.Document{APIVersion: configuration.APIVersion, Code: &configuration.CodeConfiguration{Routes: []configuration.CodeRouteEntry{{ID: "route", Draft: configuration.CodeRoutePolicy{CodexCLIIdentity: draft, ChatToCodex: true, MessagesToCodex: true}, Published: &configuration.CodePublication{Policy: configuration.CodeRoutePolicy{CodexCLIIdentity: published, ChatToCodex: true, MessagesToCodex: true}}}}}}
 	}
 	digest := func(value configuration.Document) string {
-		digest, err := configuration.Digest(&value)
+		digest, err := configuration.CanonicalizeAndDigest(&value)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -105,7 +105,7 @@ func TestCodeConfigurationDigestRetainsPaidAuthorization(t *testing.T) {
 		if err := json.Unmarshal([]byte(raw), &doc); err != nil {
 			t.Fatal(err)
 		}
-		value, err := configuration.Digest(&doc)
+		value, err := configuration.CanonicalizeAndDigest(&doc)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -130,7 +130,7 @@ func TestCodeConfigurationDigestRetainsChatCompatibility(t *testing.T) {
 		if err := json.Unmarshal([]byte(fmt.Sprintf(`{"api_version":"openllmproxy.dev/config/v2","code":{"routes":[{"id":"0192cf87-d4ab-7f2e-a8b1-c2d3e4f50601","project":"team","slug":"coding","draft":{"pool":"0192cf87-d4ab-7f2e-a8b1-c2d3e4f50602","models":["native"],"enabled":true,"chat_to_antigravity":%t}}]}}`, enabled)), &document); err != nil {
 			t.Fatal(err)
 		}
-		value, err := configuration.Digest(&document)
+		value, err := configuration.CanonicalizeAndDigest(&document)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -149,11 +149,11 @@ func TestCodeConfigurationDigestRetainsPaidFallbackAuthorization(t *testing.T) {
 		}
 		return document
 	}
-	first, firstError := configuration.Digest(new(artifact("first")))
+	first, firstError := configuration.CanonicalizeAndDigest(new(artifact("first")))
 	if firstError != nil {
 		t.Fatal(firstError)
 	}
-	second, secondError := configuration.Digest(new(artifact("second")))
+	second, secondError := configuration.CanonicalizeAndDigest(new(artifact("second")))
 	if secondError != nil {
 		t.Fatal(secondError)
 	}
@@ -180,12 +180,12 @@ func TestCodeConfigurationDigestRetainsChatToCodexPolicy(t *testing.T) {
 	document := func(draft, published bool) *configuration.Document {
 		return &configuration.Document{APIVersion: configuration.APIVersion, Code: &configuration.CodeConfiguration{Routes: []configuration.CodeRouteEntry{{ID: "route", Draft: configuration.CodeRoutePolicy{ChatToCodex: draft}, Published: &configuration.CodePublication{Policy: configuration.CodeRoutePolicy{ChatToCodex: published}}}}}}
 	}
-	before, err := configuration.Digest(document(false, true))
+	before, err := configuration.CanonicalizeAndDigest(document(false, true))
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, changed := range []*configuration.Document{document(true, true), document(false, false)} {
-		after, err := configuration.Digest(changed)
+		after, err := configuration.CanonicalizeAndDigest(changed)
 		if err != nil || after == before {
 			t.Fatal("draft or publication lost the explicit Chat policy", err)
 		}
@@ -198,7 +198,7 @@ func TestCodeConfigurationDigestRetainsChatToCodexPolicy(t *testing.T) {
 	if err := json.Unmarshal(encoded, &decoded); err != nil {
 		t.Fatal(err)
 	}
-	after, err := configuration.Digest(&decoded)
+	after, err := configuration.CanonicalizeAndDigest(&decoded)
 	if err != nil || before != after || decoded.Code.Routes[0].Draft.ChatToCodex || !decoded.Code.Routes[0].Published.Policy.ChatToCodex {
 		t.Fatal("configuration lost independent draft/published Chat policy", err)
 	}

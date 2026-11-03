@@ -15,10 +15,14 @@ type BatchStorage struct {
 }
 
 var (
-	batchStorageBucket = regexp.MustCompile(`^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$`)
-	gcsStorageBucket   = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{1,220}[a-z0-9]$`)
-	batchStorageRole   = regexp.MustCompile(`^arn:aws[a-z-]*:iam::[0-9]{12}:role/[\w+=,.@/-]{1,512}$`)
+	s3BucketPattern  = regexp.MustCompile(`^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$`)
+	gcsStorageBucket = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{1,220}[a-z0-9]$`)
+	batchStorageRole = regexp.MustCompile(`^arn:aws[a-z-]*:iam::[0-9]{12}:role/[\w+=,.@/-]{1,512}$`)
 )
+
+func ValidS3Bucket(bucket string) bool {
+	return s3BucketPattern.MatchString(bucket) && !strings.Contains(bucket, "..") && net.ParseIP(bucket) == nil
+}
 
 func NormalizeBatchStorage(kind, profile string, storage *BatchStorage) (*BatchStorage, error) {
 	vertex := kind == "vertex_ai" && profile == "vertex-batch-prediction"
@@ -88,15 +92,18 @@ func parseBatchStorageURI(uri string) (scheme, bucket, object string, ok bool) {
 	if !found {
 		object = ""
 	}
-	validBucket := batchStorageBucket.MatchString(bucket)
-	if scheme == "gs" {
-		validBucket = gcsStorageBucket.MatchString(bucket)
-		for _, component := range strings.Split(bucket, ".") {
-			validBucket = validBucket && len(component) <= 63
-		}
-	}
-	if !validBucket || strings.Contains(bucket, "..") || net.ParseIP(bucket) != nil {
+	if scheme == "s3" && !ValidS3Bucket(bucket) {
 		return "", "", "", false
+	}
+	if scheme == "gs" {
+		if !gcsStorageBucket.MatchString(bucket) || strings.Contains(bucket, "..") || net.ParseIP(bucket) != nil {
+			return "", "", "", false
+		}
+		for _, component := range strings.Split(bucket, ".") {
+			if len(component) > 63 {
+				return "", "", "", false
+			}
+		}
 	}
 	if object == "" {
 		return scheme, bucket, "", true

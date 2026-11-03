@@ -78,7 +78,7 @@ func (s *Server) providerClient(ctx context.Context, release *runtime.Release, p
 		if err != nil {
 			return nil, err
 		}
-		return s.egress.EphemeralClient(provider.Network, secret, upstreamHeaderTimeout)
+		return s.egress.EphemeralClient(provider.Network, secret, UpstreamHeaderTimeout)
 	}
 	if provider.Network == nil && provider.ProfileID == "" {
 		return s.client, nil
@@ -87,5 +87,5 @@ func (s *Server) providerClient(ctx context.Context, release *runtime.Release, p
 	if err != nil {
 		return nil, err
 	}
-	return s.connections.ClientScoped(providerConnectionScope(provider, slot), *s.egress, provider.Network, secret, upstreamHeaderTimeout)
+	return s.connections.ClientScoped(providerConnectionScope(provider, slot), *s.egress, provider.Network, secret, UpstreamHeaderTimeout)
 }

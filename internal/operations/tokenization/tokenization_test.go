@@ -1,6 +1,7 @@
 package tokenization_test
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -8,6 +9,25 @@ import (
 	"github.com/tyk-swe/olp/internal/operations"
 	"github.com/tyk-swe/olp/internal/operations/tokenization"
 )
+
+func TestPublishedTokenCountTruncationModesAreAccepted(t *testing.T) {
+	d := definition(t, "openai-input-tokens")
+	var schema struct {
+		Enum []string `json:"enum"`
+	}
+	if err := json.Unmarshal(d.Defaults["truncation"].Schema, &schema); err != nil || len(schema.Enum) == 0 {
+		t.Fatalf("missing truncation modes: %v", err)
+	}
+	for _, mode := range schema.Enum {
+		body, err := json.Marshal(map[string]string{"input": "text", "truncation": mode})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := d.Request(request(t, d, string(body))); err != nil {
+			t.Errorf("published truncation mode %q was rejected: %v", mode, err)
+		}
+	}
+}
 
 func definition(t *testing.T, id string) operations.Dialect {
 	t.Helper()

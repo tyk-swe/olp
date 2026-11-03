@@ -1,12 +1,115 @@
 package embeddings_test
 
 import (
+	"bytes"
+	"encoding/json"
 	"testing"
+
+	"github.com/santhosh-tekuri/jsonschema/v6"
 
 	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/operations"
 	"github.com/tyk-swe/olp/internal/operations/embeddings"
 )
+
+func TestPublishedTEIEmbeddingDirectionsAreAccepted(t *testing.T) {
+	for _, id := range []string{"tei-embeddings", "tei-sparse-embeddings", "tei-multivector-embeddings"} {
+		d := codec(t, id)
+		var schema struct {
+			Enum []string `json:"enum"`
+		}
+		if err := json.Unmarshal(d.Defaults["truncation_direction"].Schema, &schema); err != nil || len(schema.Enum) == 0 {
+			t.Fatalf("%s has no truncation directions: %v", id, err)
+		}
+		for _, direction := range schema.Enum {
+			body, err := json.Marshal(map[string]string{"inputs": "text", "truncation_direction": direction})
+			if err != nil {
+				t.Fatal(err)
+			}
+			request(t, d, string(body))
+		}
+	}
+}
+
+func TestPublishedBedrockEmbeddingTypesAreAccepted(t *testing.T) {
+	d := codec(t, "bedrock-embeddings")
+	var schema struct {
+		Items struct {
+			Enum []string `json:"enum"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal(d.Defaults["embeddingTypes"].Schema, &schema); err != nil || len(schema.Items.Enum) == 0 {
+		t.Fatalf("missing embedding types: %v", err)
+	}
+	for _, embeddingType := range schema.Items.Enum {
+		body, err := json.Marshal(map[string]any{"inputText": "text", "embeddingTypes": []string{embeddingType}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		r := request(t, d, string(body))
+		value, _ := r.Document().Root().Lookup("embeddingTypes")
+		if err := d.Defaults["embeddingTypes"].Validate(value); err != nil {
+			t.Errorf("published embedding type %q was rejected as a default: %v", embeddingType, err)
+		}
+	}
+}
+
+func TestPublishedVoyageInputTypesAreAccepted(t *testing.T) {
+	d := codec(t, "voyage-embeddings")
+	var schema struct {
+		Enum []*string `json:"enum"`
+	}
+	if err := json.Unmarshal(d.Defaults["input_type"].Schema, &schema); err != nil || len(schema.Enum) == 0 {
+		t.Fatalf("missing input types: %v", err)
+	}
+	document, err := jsonschema.UnmarshalJSON(bytes.NewReader(d.Defaults["input_type"].Schema))
+	if err != nil {
+		t.Fatal(err)
+	}
+	compiler := jsonschema.NewCompiler()
+	if err := compiler.AddResource("https://contract.test/input-type", document); err != nil {
+		t.Fatal(err)
+	}
+	validator, err := compiler.Compile("https://contract.test/input-type")
+	if err != nil {
+		t.Fatal(err)
+	}
+	validate := func(inputType *string) (error, error, error) {
+		schemaErr := func() error {
+			if inputType == nil {
+				return validator.Validate(nil)
+			}
+			return validator.Validate(*inputType)
+		}()
+		body, err := json.Marshal(map[string]any{"model": "model", "input": "text", "input_type": inputType})
+		if err != nil {
+			t.Fatal(err)
+		}
+		document, err := oif.ParseJSON(body, oif.Limits{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		r, err := oif.NewRequest(oif.Descriptor{Operation: d.Operation, Dialect: d.Identity}, document)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, requestErr := d.Request(r)
+		value, _ := document.Root().Lookup("input_type")
+		return schemaErr, requestErr, d.Defaults["input_type"].Validate(value)
+	}
+	for _, inputType := range schema.Enum {
+		if schemaErr, requestErr, defaultErr := validate(inputType); schemaErr != nil || requestErr != nil || defaultErr != nil {
+			t.Errorf("published input type %v was rejected: schema=%v, request=%v, default=%v", inputType, schemaErr, requestErr, defaultErr)
+		}
+	}
+	unknown := "an unlisted input type"
+	for _, inputType := range []*string{nil, &unknown} {
+		schemaErr, requestErr, defaultErr := validate(inputType)
+		if (schemaErr == nil) != (requestErr == nil) || (schemaErr == nil) != (defaultErr == nil) {
+			t.Fatalf("input type %v disagrees with schema: schema=%v, request=%v, default=%v", inputType, schemaErr, requestErr, defaultErr)
+		}
+	}
+}
 
 func codec(t *testing.T, id string) operations.Dialect {
 	t.Helper()

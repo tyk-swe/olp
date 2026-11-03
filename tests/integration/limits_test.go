@@ -14,7 +14,9 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/coordination"
 	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/limits"
@@ -614,6 +616,44 @@ func TestLimitsDurableSpendReconcilesIntoValkey(t *testing.T) {
 	spender := limSeedKey(t, pool, owner, false)
 	idle := limSeedKey(t, pool, owner, false)
 	revoked := limSeedKey(t, pool, owner, true)
+
+	t.Run("route budget names match route validation", func(t *testing.T) {
+		tx, err := pool.Begin(t.Context())
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer tx.Rollback(t.Context())
+		for _, route := range []string{
+			"route", "0-route", "a.b_c-1", strings.Repeat("a", 100),
+			"", "Route", "a/b", "a\n", "é", strings.Repeat("a", 101),
+		} {
+			t.Run(strconv.Quote(route), func(t *testing.T) {
+				caseTx, err := tx.Begin(t.Context())
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer caseTx.Rollback(t.Context())
+				budgetErr := limits.EnsureKeyRouteBudget(t.Context(), caseTx, spender, route)
+				policyErr := (access.RouteLimits{route: {DailyCostLimit: limPointer("1")}}).ValidateAndNormalize()
+				if budgetErr != nil {
+					pgErr, ok := errors.AsType[*pgconn.PgError](budgetErr)
+					if policyErr == nil || !ok || pgErr.Code != "23514" {
+						t.Fatalf("budget rejected route %q, policy error = %v, storage error = %v", route, policyErr, budgetErr)
+					}
+					return
+				}
+				if policyErr != nil {
+					t.Fatalf("budget accepted route %q rejected by policy: %v", route, policyErr)
+				}
+				var exists bool
+				if err := caseTx.QueryRow(t.Context(), `SELECT EXISTS (
+					SELECT 1 FROM olp.aggregate_budget_accounts WHERE api_key_id=$1 AND route_slug=$2
+				)`, spender, route).Scan(&exists); err != nil || !exists {
+					t.Fatalf("budget for route %q exists = %v, error = %v", route, exists, err)
+				}
+			})
+		}
+	})
 
 	// Two attempts inside today, one earlier in the month, and two outside the
 	// month entirely, plus the rolled up form of an hour that has aged out.

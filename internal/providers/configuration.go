@@ -8,6 +8,7 @@ import (
 	"errors"
 	"maps"
 	"net/textproto"
+	"slices"
 	"strings"
 
 	"github.com/tyk-swe/olp/internal/routing"
@@ -19,6 +20,7 @@ import (
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/plugins"
+	"github.com/tyk-swe/olp/internal/pricingpolicy"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
 	"github.com/tyk-swe/olp/internal/vendors"
 )
@@ -87,11 +89,15 @@ func (c *Configuration) Normalize() {
 			c.Endpoint = new(endpoint)
 		}
 	}
+	c.Options.CredentialHeaders = slices.Collect(func(yield func(string) bool) {
+		for _, h := range c.Options.CredentialHeaders {
+			if !yield(textproto.CanonicalMIMEHeaderKey(strings.TrimSpace(h))) {
+				return
+			}
+		}
+	})
 	if c.Options.CredentialHeaders == nil {
 		c.Options.CredentialHeaders = []string{}
-	}
-	for i, h := range c.Options.CredentialHeaders {
-		c.Options.CredentialHeaders[i] = textproto.CanonicalMIMEHeaderKey(strings.TrimSpace(h))
 	}
 	if c.Options.Models == nil {
 		c.Options.Models = map[string]json.RawMessage{}
@@ -100,7 +106,15 @@ func (c *Configuration) Normalize() {
 		c.Options.ParameterDefaults = map[string]json.RawMessage{}
 	}
 	// An option left empty is unset.
-	maps.DeleteFunc(c.Options.PluginOptions, func(_, value string) bool { return value == "" })
+	if c.Options.PluginOptions != nil {
+		c.Options.PluginOptions = maps.Collect(func(yield func(string, string) bool) {
+			for key, value := range c.Options.PluginOptions {
+				if value != "" && !yield(key, value) {
+					return
+				}
+			}
+		})
+	}
 	switch {
 	case c.Kind == KindPlugin:
 		// No vendor list price applies to a plugin provider.
@@ -167,8 +181,7 @@ func (c *Configuration) VendorMissing() bool {
 	return c.Options.VendorID == nil || *c.Options.VendorID == ""
 }
 
-// validate rejects configurations this gateway cannot serve.
-func (c *Configuration) Validate(policy *egress.Policy) error {
+func (c *Configuration) ValidateAndNormalize(policy *egress.Policy) error {
 	if err := connectors.ValidateCredentialSource(c.CredentialSource, c.Kind, c.AuthMode); err != nil {
 		return access.Invalid("configuration.credential_source", err.Error())
 	}
@@ -277,13 +290,16 @@ func (c *Configuration) Validate(policy *egress.Policy) error {
 		return access.Invalid("configuration.options.parameter_defaults", err.Error())
 	}
 	if c.Options.Commitment != nil {
-		amount := strings.TrimSpace(c.Options.Commitment.Amount)
-		if !decimalAmount(amount) || strings.Trim(amount, "0.") == "" {
+		amount, valid := pricingpolicy.NormalizeAmount(c.Options.Commitment.Amount)
+		if !valid || strings.Trim(amount, "0.") == "" {
 			return access.Invalid("configuration.options.commitment.amount",
 				"A commitment amount is a positive decimal with at most 12 integer and 12 fractional digits.")
 		}
-		c.Options.Commitment.Amount = amount
-		if !routing.CommitmentPeriods[c.Options.Commitment.Period] {
+		c.Options.Commitment = &routing.Commitment{
+			ID: c.Options.Commitment.ID, EffectiveAt: c.Options.Commitment.EffectiveAt, EndsAt: c.Options.Commitment.EndsAt,
+			Amount: amount, Period: c.Options.Commitment.Period,
+		}
+		if !routing.ValidCommitmentPeriod(c.Options.Commitment.Period) {
 			return access.Invalid("configuration.options.commitment.period",
 				`A commitment period is "hour", "day" or "month".`)
 		}
@@ -314,18 +330,8 @@ func ValidLimits(field string, q Limits) error {
 	return nil
 }
 
-// validQuota uses the same integer bounds as the shared limiter and reference
-// contract. Absence, not zero, disables a dimension.
 func ValidQuota(q Limits) bool {
-	for _, bound := range []struct {
-		value *int64
-		max   int64
-	}{{q.RequestsPerMinute, 2147483647}, {q.MaxConcurrency, 2147483647}, {q.TokensPerMinute, limits.MaxCounter}} {
-		if bound.value != nil && (*bound.value < 1 || *bound.value > bound.max) {
-			return false
-		}
-	}
-	return true
+	return limits.ValidRequestLimit(q.RequestsPerMinute) && limits.ValidRequestLimit(q.MaxConcurrency) && limits.ValidTokenLimit(q.TokensPerMinute)
 }
 
 // credentialRequired reports whether the auth mode needs a secret.
@@ -376,21 +382,6 @@ func (c *Configuration) transportFingerprint() string {
 	encoded, _ := json.Marshal(parts)
 	h.Write(encoded)
 	return hex.EncodeToString(h.Sum(nil))[:32]
-}
-
-// decimalAmount applies the same rate decimal rule the pricing contract uses:
-// a non-negative decimal with at most 12 integer and 12 fractional digits.
-func decimalAmount(s string) bool {
-	whole, fraction, has := strings.Cut(s, ".")
-	if len(whole) < 1 || len(whole) > 12 || has && (len(fraction) < 1 || len(fraction) > 12) {
-		return false
-	}
-	for _, c := range whole + fraction {
-		if c < '0' || c > '9' {
-			return false
-		}
-	}
-	return true
 }
 
 func value(v *string) string {

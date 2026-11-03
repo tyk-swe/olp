@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/tyk-swe/olp/internal/limits"
+	"github.com/tyk-swe/olp/internal/pricingpolicy"
 )
 
 // AdmissionLimits is a complete limit set. Nil dimensions are unlimited.
@@ -69,13 +70,13 @@ func (a Authority) AllowsEndUser(digest string) bool {
 	return digest != "" && !a.Policy.EndUserPolicy.Blocks(digest) && !a.ProjectEndUserPolicy.Blocks(digest)
 }
 
-func (policy AdmissionLimits) Validate() error {
+func (policy AdmissionLimits) ValidateAndNormalize() error {
 	for field, value := range map[string]*int64{"requests_per_minute": policy.RequestsPerMinute, "max_concurrency": policy.MaxConcurrency} {
-		if value != nil && (*value < 1 || *value > 2147483647) {
+		if !limits.ValidRequestLimit(value) {
 			return Invalid(field, "Use a positive integer of at most 2147483647.")
 		}
 	}
-	if policy.TokensPerMinute != nil && (*policy.TokensPerMinute < 1 || *policy.TokensPerMinute > limits.MaxCounter) {
+	if !limits.ValidTokenLimit(policy.TokensPerMinute) {
 		return Invalid("tokens_per_minute", "Use a positive integer of at most 9007199254740991.")
 	}
 	if policy.CostBasis != "" && policy.CostBasis != "cost" && policy.CostBasis != "charge" {
@@ -84,7 +85,7 @@ func (policy AdmissionLimits) Validate() error {
 	for field, value := range map[string]*string{"daily_cost_limit": policy.DailyCostLimit, "monthly_cost_limit": policy.MonthlyCostLimit, "weekly_cost_limit": policy.WeeklyCostLimit} {
 		if value != nil {
 			amount := strings.TrimSpace(*value)
-			if !decimal.MatchString(amount) || !strings.ContainsAny(amount, "123456789") {
+			if !pricingpolicy.ValidAmount(amount) || !strings.ContainsAny(amount, "123456789") {
 				return Invalid(field, "Use a positive decimal amount with at most 12 integer and 12 fractional digits.")
 			}
 			*value = amount
@@ -93,7 +94,7 @@ func (policy AdmissionLimits) Validate() error {
 	return nil
 }
 
-func (p *EndUserPolicy) validate() error {
+func (p *EndUserPolicy) validateAndNormalize() error {
 	if p == nil {
 		return nil
 	}
@@ -104,14 +105,14 @@ func (p *EndUserPolicy) validate() error {
 		return Invalid("end_user_policy", "At most 256 overrides and 256 blocked digests are supported.")
 	}
 
-	if err := p.Defaults.Validate(); err != nil {
+	if err := p.Defaults.ValidateAndNormalize(); err != nil {
 		return err
 	}
 	for digest, policy := range p.Overrides {
 		if !endUserDigest.MatchString(digest) {
 			return Invalid("end_user_policy.overrides", "Use project-scoped SHA-256 digests as override keys.")
 		}
-		if err := policy.Validate(); err != nil {
+		if err := policy.ValidateAndNormalize(); err != nil {
 			return err
 		}
 	}
@@ -161,7 +162,7 @@ func (s *Server) putProjectEndUserPolicy(r *http.Request, _ Principal) (Reply, e
 	if err = decoder.Decode(&input.Policy); err != nil {
 		return Reply{}, Invalid("policy", "The end-user policy is invalid.")
 	}
-	if err = input.Policy.validate(); err != nil {
+	if err = input.Policy.validateAndNormalize(); err != nil {
 		return Reply{}, err
 	}
 	tx, err := s.Begin(r)

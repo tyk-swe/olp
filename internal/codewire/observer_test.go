@@ -139,6 +139,14 @@ func TestModelRewritingChangesOnlyProtocolModelFields(t *testing.T) {
 }
 
 func TestEventModelRewritingUsesOnlyKnownProtocolEnvelopes(t *testing.T) {
+	for _, kind := range []string{"response.created", "response.queued", "response.in_progress", "response.completed", "response.failed", "response.incomplete"} {
+		body := `{"type":"` + kind + `","response":{"model":"native"}}`
+		expected := `{"type":"` + kind + `","response":{"model":"alias"}}`
+		actual, err := RewriteEventModel([]byte(body), codemode.ProtocolResponses, "native", "alias")
+		if err != nil || string(actual) != expected {
+			t.Fatalf("%s model rewrite = %s, %v", kind, actual, err)
+		}
+	}
 	for _, test := range []struct {
 		protocol        codemode.Protocol
 		input, expected string

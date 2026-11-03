@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net/http"
 	"testing"
+	"time"
 
 	"github.com/tyk-swe/olp/internal/codemode"
 	"github.com/tyk-swe/olp/internal/codewire"
@@ -96,5 +97,34 @@ func TestObserveReadsTerminalUsageAsSubsets(t *testing.T) {
 	incomplete := Observe([]byte(`{"type":"response.created","response":{"id":"resp-2"}}`), false)
 	if incomplete.Terminal {
 		t.Fatal("non-terminal event settled as terminal")
+	}
+}
+
+func TestObserveAgreesAcrossUnaryAndStreamResponses(t *testing.T) {
+	for _, status := range []string{"completed", "incomplete", "failed", "cancelled", "in_progress"} {
+		t.Run(status, func(t *testing.T) {
+			unary := Observe([]byte(`{"status":"`+status+`","id":"resp-1"}`), true)
+			stream := Observe([]byte(`{"type":"response.`+status+`","response":{"id":"resp-1"}}`), false)
+			if unary.Terminal != stream.Terminal || unary.Successful != stream.Successful || unary.ResponseID != stream.ResponseID {
+				t.Fatalf("unary and stream observations differ: unary=%+v stream=%+v", unary, stream)
+			}
+		})
+	}
+}
+
+func TestAllowanceWindowsAgreeAcrossHeadersAndEvents(t *testing.T) {
+	for _, name := range codemode.AllowanceWindowNames() {
+		t.Run(name, func(t *testing.T) {
+			headers := http.Header{http.CanonicalHeaderKey("x-codex-" + name + "-used-percent"): {"25"}}
+			fromHeaders := Allowance(headers, time.Now())
+			fromEvent := Observe([]byte(`{"type":"codex.rate_limits","rate_limits":{"`+name+`":{"used_percent":25}}}`), false).Allowance
+			if fromHeaders == nil || fromEvent == nil || len(fromHeaders.Windows) != 1 || len(fromEvent.Windows) != 1 {
+				t.Fatalf("missing allowance window: headers=%+v event=%+v", fromHeaders, fromEvent)
+			}
+			headerWindow, eventWindow := fromHeaders.Windows[0], fromEvent.Windows[0]
+			if headerWindow.Window != name || eventWindow.Window != name || headerWindow.LimitID != eventWindow.LimitID || headerWindow.UsedPercent != eventWindow.UsedPercent || headerWindow.RemainingPercent != eventWindow.RemainingPercent {
+				t.Fatalf("allowance windows differ: headers=%+v event=%+v", headerWindow, eventWindow)
+			}
+		})
 	}
 }

@@ -1,8 +1,10 @@
 import type { MediaJobQuery } from '$lib/features/media/mediaJobListState';
 
+const root = ['media-jobs'] as const;
+
 export const mediaJobKeys = {
-  all: ['media-jobs'] as const,
+  all: root,
   page: (applied: MediaJobQuery, cursor?: string) =>
-    ['media-jobs', 'page', applied, cursor ?? 'first'] as const,
-  detail: (id: string) => ['media-jobs', 'detail', id] as const
+    [...root, 'page', applied, cursor ?? 'first'] as const,
+  detail: (id: string) => [...root, 'detail', id] as const
 };

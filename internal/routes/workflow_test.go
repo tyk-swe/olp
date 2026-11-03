@@ -202,6 +202,24 @@ func (q workflowDraftQuery) QueryRow(_ context.Context, query string, _ ...any) 
 	return inspectionKeyRow{false}
 }
 
+func TestDraftOperationNormalizationPreservesSource(t *testing.T) {
+	modelID, providerID := uuid.NewString(), uuid.NewString()
+	operations := []string{"generation", "embeddings", "generation"}
+	input := DraftInput{
+		Slug: "route", Operations: operations, OverallTimeoutMS: 1000, MaxAttempts: 1,
+		Targets: []TargetInput{{ProviderModelID: &modelID, Weight: 1, TimeoutMS: 1000}},
+	}
+	if _, err := ValidateAndNormalizeDraftInput(t.Context(), workflowDraftQuery{providerID: providerID}, &input, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(operations, []string{"generation", "embeddings", "generation"}) {
+		t.Fatalf("validation changed source operations: %v", operations)
+	}
+	if !reflect.DeepEqual(input.Operations, []string{"embeddings", "generation"}) {
+		t.Fatalf("draft operations were not normalized: %v", input.Operations)
+	}
+}
+
 func TestValidateWorkflowDraftPreservesToolsetPolicy(t *testing.T) {
 	modelID, providerID, toolsetID := uuid.NewString(), uuid.NewString(), uuid.NewString()
 	query := workflowDraftQuery{providerID: providerID}
@@ -231,7 +249,7 @@ func TestValidateWorkflowDraftPreservesToolsetPolicy(t *testing.T) {
 				ToolExecution: tc.execution, Toolsets: tc.toolsets, Fidelity: tc.fidelity, ResponsesMCPItems: tc.mcpItems, RunLimits: tc.runLimits,
 				Targets: []TargetInput{{ProviderModelID: &modelID, Weight: 1, TimeoutMS: 1000}},
 			}
-			_, err := ValidateDraftInput(t.Context(), query, &input, nil, nil)
+			_, err := ValidateAndNormalizeDraftInput(t.Context(), query, &input, nil, nil)
 			if !tc.valid {
 				if err == nil {
 					t.Fatal("invalid workflow configuration was accepted")

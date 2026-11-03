@@ -1,11 +1,11 @@
 package observability
 
 import (
+	"slices"
 	"testing"
 	"time"
 
 	"github.com/tyk-swe/olp/internal/media"
-	"github.com/tyk-swe/olp/internal/notifications"
 	"github.com/tyk-swe/olp/internal/usage"
 )
 
@@ -41,20 +41,45 @@ func TestReadinessDetectsStaleFinancialWorkers(t *testing.T) {
 	for _, stopped := range []usage.Task{usage.TaskBatchSettlement, usage.TaskRetainedSettlement, usage.TaskExecutionDebits} {
 		t.Run(string(stopped), func(t *testing.T) {
 			health := &WorkerTaskHealth{}
-			for _, task := range WorkerTasks {
+			for _, task := range usage.WorkerTasks() {
 				state := TaskStateHealthy
-				if task.Name == string(stopped) {
+				if task.Name == stopped {
 					state = TaskStateStale
-					if notifications.WorkerStaleAfter(task.Name) != task.StaleAfter {
-						t.Fatal("worker staleness notification threshold differs from readiness")
-					}
 				}
-				health.Tasks = append(health.Tasks, WorkerTaskStatus{Task: task.Name, State: state})
+				health.Tasks = append(health.Tasks, WorkerTaskStatus{Task: string(task.Name), State: state})
 			}
 			for _, configured := range []bool{false, true} {
 				if health.CurrentFor(expectedTasks(configured)) || health.StaleFor(expectedTasks(configured)) != 1 {
 					t.Fatal("stopped financial worker was considered healthy")
 				}
+			}
+		})
+	}
+}
+
+func TestReadinessOnlyRequiresRegionalWorkersWithLimiter(t *testing.T) {
+	for _, tc := range []struct {
+		task                   usage.Task
+		requiredWithoutLimiter bool
+	}{
+		{usage.TaskRequestMetadataConsumer, false},
+		{usage.TaskCostReconciliation, false},
+		{usage.TaskHealthProbes, false},
+		{usage.TaskEpochDetection, true},
+	} {
+		t.Run(string(tc.task), func(t *testing.T) {
+			health := &WorkerTaskHealth{Tasks: slices.Collect(func(yield func(WorkerTaskStatus) bool) {
+				for _, task := range usage.WorkerTasks() {
+					if task.Name != tc.task && !yield(WorkerTaskStatus{Task: string(task.Name), State: TaskStateHealthy}) {
+						return
+					}
+				}
+			})}
+			if health.CurrentFor(expectedTasks(true)) {
+				t.Fatal("readiness accepted a missing worker with a limiter")
+			}
+			if got, want := health.CurrentFor(expectedTasks(false)), !tc.requiredWithoutLimiter; got != want {
+				t.Fatalf("readiness without a limiter = %t, want %t", got, want)
 			}
 		})
 	}

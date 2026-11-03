@@ -9,12 +9,14 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tyk-swe/olp/internal/operationregistry"
-
 	"github.com/google/uuid"
 
+	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/contentpolicy"
 	"github.com/tyk-swe/olp/internal/guardrails"
+	"github.com/tyk-swe/olp/internal/limits"
+	"github.com/tyk-swe/olp/internal/routeidentity"
+	"github.com/tyk-swe/olp/internal/toolidentity"
 )
 
 // WireVersion is the envelope version this build writes and accepts. Every
@@ -51,7 +53,7 @@ func validateDelegation(event *Event) error {
 	if event.AgentPrincipalID == "" && event.MemberPrincipalID == "" && event.DelegationPairDigest == "" {
 		return nil
 	}
-	if _, err := uuid.Parse(event.AgentPrincipalID); err != nil || !endUserDigestPattern.MatchString(event.DelegationPairDigest) || Keyless(event.Origin) || event.APIKeyID == "" {
+	if _, err := uuid.Parse(event.AgentPrincipalID); err != nil || !delegationDigestPattern.MatchString(event.DelegationPairDigest) || Keyless(event.Origin) || event.APIKeyID == "" {
 		return errors.New("request metadata delegation attribution is invalid")
 	}
 	if event.MemberPrincipalID != "" {
@@ -185,7 +187,7 @@ var knownEstimateProvenances = map[string]struct{}{
 	EstimateTokenizer: {}, EstimateCalibrated: {}, EstimateHeuristic: {},
 }
 
-var endUserDigestPattern = regexp.MustCompile(`^[0-9a-f]{64}$`)
+var delegationDigestPattern = regexp.MustCompile(`^[0-9a-f]{64}$`)
 
 // modelFamilyPattern bounds a model family label. The set of families grows
 // with the reference catalogue, so the label is checked for shape here and the
@@ -517,18 +519,6 @@ type wireRouting struct {
 	Baseline             *Baseline            `json:"baseline"`
 }
 
-// knownOperations, knownSurfaces and knownOrigins are the canonical labels; an event outside them would
-// be rejected by the fact table's constraints long after the delivery was
-// acknowledged, so it is rejected here instead.
-var knownOperations = map[string]struct{}{
-	"generation": {}, "embeddings": {}, "token_count": {}, "image_generation": {},
-	"image_edit": {}, "image_variation": {}, "speech": {}, "transcription": {}, "translation": {},
-	"video_create": {}, "video_list": {}, "video_get": {}, "video_content": {},
-	"video_delete": {}, "moderation": {}, "model_list": {}, "model_get": {}, "rerank": {},
-	"file": {}, "batch": {}, "realtime": {}, "bedrock_invoke": {}, "guardrail": {}, "agent_resource": {}, "passthrough": {},
-	"fine_tuning": {}, "vector_store": {}, "retrieval": {}, "conversation": {}, "container": {}, "eval": {}, "skill": {}, "context_cache": {},
-}
-
 var knownSurfaces = map[string]struct{}{
 	"openai": {}, "anthropic": {}, "gemini": {}, "bedrock": {}, "native": {}, "unknown": {},
 }
@@ -586,7 +576,7 @@ func (w wireEvent) decode() (*Event, error) {
 	}
 	if w.EndUserDigest != nil {
 		event.EndUserDigest = *w.EndUserDigest
-		if event.EndUserDigest != "" && (!endUserDigestPattern.MatchString(event.EndUserDigest) || Keyless(event.Origin)) {
+		if event.EndUserDigest != "" && (!access.ValidEndUserDigest(event.EndUserDigest) || Keyless(event.Origin)) {
 			return nil, errors.New("request metadata field end_user_digest is invalid")
 		}
 	}
@@ -623,10 +613,11 @@ func (w wireEvent) decode() (*Event, error) {
 		return nil, err
 	}
 	event.UpstreamModel = w.UpstreamModel
-	if w.Operation != nil && operationregistry.Default.HasOperation(*w.Operation) {
-		event.Operation = *w.Operation
-	} else if event.Operation, err = requiredLabel("operation", w.Operation, knownOperations); err != nil {
+	if event.Operation, err = requiredField("operation", w.Operation); err != nil {
 		return nil, err
+	}
+	if event.Operation != "file" && event.Operation != "guardrail" && !validOperation(event.Operation) {
+		return nil, errors.New("request metadata field operation has unknown value")
 	}
 	if event.Surface, err = requiredLabel("surface", w.Surface, knownSurfaces); err != nil {
 		return nil, err
@@ -855,7 +846,7 @@ func (w wireRouting) decode() (*Routing, error) {
 		return nil, err
 	}
 	if leg := w.Leg; leg != nil {
-		if !routeSlug.MatchString(leg.Route) || (leg.Via != ViaSelector && leg.Via != ViaFallback) {
+		if !routeidentity.ValidSlug(leg.Route) || (leg.Via != ViaSelector && leg.Via != ViaFallback) {
 			return nil, errors.New("routing.leg is malformed")
 		}
 		if _, err = requiredUUID("routing.leg.revision_id", &leg.RevisionID); err != nil {
@@ -863,7 +854,7 @@ func (w wireRouting) decode() (*Routing, error) {
 		}
 		routing.Leg = leg
 	}
-	if w.Selector != nil && !selectorID.MatchString(*w.Selector) {
+	if w.Selector != nil && !routeidentity.ValidSelectorID(*w.Selector) {
 		return nil, errors.New("routing.selector is malformed")
 	}
 	if w.Retry != nil && *w.Retry < 1 {
@@ -892,13 +883,6 @@ func (w wireRouting) decode() (*Routing, error) {
 	}
 	return routing, nil
 }
-
-// routeSlug and selectorID mirror the route model's identifiers, which
-// accounting cannot import.
-var (
-	routeSlug  = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,99}$`)
-	selectorID = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,62}$`)
-)
 
 func missingField(field string) error {
 	return fmt.Errorf("request metadata field %s is missing", field)
@@ -1095,7 +1079,7 @@ func Validate(e *Event) (*Validated, error) {
 	case !emptyAttemptMetadataIsValid:
 		return nil, fmt.Errorf("%w: target metadata without an attempt", ErrInvalidEvent)
 	}
-	if e.EndUserDigest != "" && (!endUserDigestPattern.MatchString(e.EndUserDigest) || Keyless(e.Origin)) {
+	if e.EndUserDigest != "" && (!access.ValidEndUserDigest(e.EndUserDigest) || Keyless(e.Origin)) {
 		return nil, fmt.Errorf("%w: invalid end-user digest", ErrInvalidEvent)
 	}
 	if err := validateDelegation(e); err != nil {
@@ -1294,9 +1278,6 @@ func validateUsageDimensions(input, output, read, write, write5m, write1h,
 	return nil
 }
 
-// toolNamePattern bounds a metered tool name, in prices and in usage.
-var toolNamePattern = regexp.MustCompile(`^[a-z][a-z0-9_]{0,63}$`)
-
 // ConsistentUsage reports whether one attempt's counters satisfy the share
 // invariants accounting stores. The gateway checks provider-reported usage
 // against it before billing evidence leaves the process.
@@ -1329,7 +1310,7 @@ func validateToolCalls(calls map[string]int64) error {
 		return errors.New("too many tool call counters")
 	}
 	for name, count := range calls {
-		if !toolNamePattern.MatchString(name) {
+		if !toolidentity.ValidMeteredName(name) {
 			return errors.New("a tool call name is malformed")
 		}
 		if count < 0 {
@@ -1376,9 +1357,5 @@ func validBudgetBoundary(boundary string, code *string) bool {
 	if code == nil || *code != "budget_exhausted" {
 		return false
 	}
-	switch boundary {
-	case "api_key", "budget_group", "key_route", "key_end_user", "project_end_user", "attribution", "project", "organization", "installation":
-		return true
-	}
-	return false
+	return limits.ValidBudgetBoundary(boundary)
 }

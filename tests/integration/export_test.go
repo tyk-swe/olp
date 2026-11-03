@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
+	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -165,7 +166,7 @@ func testCaptureStalePolicyDropsQueuedRecord(t *testing.T, redacted bool) {
 	policy := h.want(owner, "POST", "/api/v1/observability/capture-policies", map[string]any{
 		"sink": sink["export_sink_id"], "sample_ratio": "1", "include": []string{"output"}, "max_bytes": 1048576, "route_slug": "team-chat", "redact": redactors,
 	}, map[string]string{"Idempotency-Key": uuid.NewString()}, 201)
-	manager := &export.Manager{Pool: h.Pool, Keys: h.Ring2(), Installation: h.Server.Installation, Sender: export.NewSender(loopbackPolicy()), Log: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	manager := &export.Manager{Pool: h.Pool, Keys: h.Ring2(), Installation: h.Server.Installation, Sender: export.NewSender(loopbackPolicy(), os.Getenv), Log: slog.New(slog.NewTextHandler(io.Discard, nil))}
 	block := make(chan struct{})
 	receiver.mu.Lock()
 	receiver.block = block
@@ -260,7 +261,7 @@ func TestCaptureGatewayDeliversUnaryAndStreamToOwnedSink(t *testing.T) {
 		"max_bytes": 1048576, "route_slug": slug,
 	}, map[string]string{"Idempotency-Key": uuid.NewString()}, 201)
 
-	manager := &export.Manager{Pool: h.Pool, Keys: h.Ring2(), Installation: h.Server.Installation, Sender: export.NewSender(loopbackPolicy()), Log: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	manager := &export.Manager{Pool: h.Pool, Keys: h.Ring2(), Installation: h.Server.Installation, Sender: export.NewSender(loopbackPolicy(), os.Getenv), Log: slog.New(slog.NewTextHandler(io.Discard, nil))}
 	h.Gateway.Capture = manager
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()

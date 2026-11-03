@@ -25,6 +25,18 @@ func invalidField(t *testing.T, err error) string {
 	return problem.Field
 }
 
+func TestServerValidationNormalizesNameAndEndpoint(t *testing.T) {
+	in := pricingInput()
+	in.Name = " Priced tools "
+	in.Endpoint = "http://127.0.0.1:8080/mcp/"
+	if err := ValidateAndNormalize(&in, fixturePolicy()); err != nil {
+		t.Fatal(err)
+	}
+	if in.Name != "Priced tools" || in.Endpoint != "http://127.0.0.1:8080/mcp" {
+		t.Fatalf("server identity was not normalized: name=%q endpoint=%q", in.Name, in.Endpoint)
+	}
+}
+
 func TestValidateAcceptsPricedFreeAndUnpricedServers(t *testing.T) {
 	price, free := "0.25", "0"
 	rate, concurrency := int64(120), int64(4)
@@ -42,7 +54,7 @@ func TestValidateAcceptsPricedFreeAndUnpricedServers(t *testing.T) {
 	} {
 		in := pricingInput()
 		mutate(&in)
-		if err := Validate(&in, fixturePolicy()); err != nil {
+		if err := ValidateAndNormalize(&in, fixturePolicy()); err != nil {
 			t.Fatalf("%s server refused: %v", name, err)
 		}
 	}
@@ -68,7 +80,7 @@ func TestValidateRefusesMalformedToolPricingAndLimits(t *testing.T) {
 	} {
 		in := pricingInput()
 		tc.mutate(&in)
-		err := Validate(&in, fixturePolicy())
+		err := ValidateAndNormalize(&in, fixturePolicy())
 		if err == nil || invalidField(t, err) != tc.field {
 			t.Fatalf("%s reported %v, want field %s", name, err, tc.field)
 		}
@@ -198,7 +210,7 @@ func TestValidateRefusesUnapprovedOAuthDestinations(t *testing.T) {
 	enabled := true
 	for _, endpoint := range []string{"http://metadata.invalid/token", "http://127.0.0.1:8080/token#fragment", "http://user:password@127.0.0.1:8080/token"} {
 		in := Input{Name: "Personal tools", Transport: "streamable_http", Endpoint: "http://127.0.0.1:8080/mcp", Enabled: &enabled, OAuth: &routing.MCPOAuth{ClientID: "tool-client", Audience: "tool-api", Scopes: []string{"tools.read"}, AuthorizationEndpoint: "http://127.0.0.1:8080/authorize", TokenEndpoint: endpoint}}
-		if err := Validate(&in, fixturePolicy()); err == nil || invalidField(t, err) != "oauth" {
+		if err := ValidateAndNormalize(&in, fixturePolicy()); err == nil || invalidField(t, err) != "oauth" {
 			t.Fatalf("unapproved OAuth destination accepted: %s %v", endpoint, err)
 		}
 	}

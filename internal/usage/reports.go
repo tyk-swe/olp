@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/attribution"
 )
 
 // errInvalidUsageCount reports an aggregate the database cannot legitimately
@@ -235,10 +236,10 @@ func validateAttributionFilter(key, value *string) error {
 		return access.Fail(400, "invalid_filter",
 			"The attribution_value filter requires attribution_key.")
 	}
-	if key != nil && !AttributionKeyPattern.MatchString(*key) {
+	if key != nil && !attribution.ValidKey(*key) {
 		return access.Fail(400, "invalid_filter", "The attribution_key filter is invalid.")
 	}
-	if value != nil && !AttributionValuePattern.MatchString(*value) {
+	if value != nil && !attribution.ValidValue(*value) {
 		return access.Fail(400, "invalid_filter", "The attribution_value filter is invalid.")
 	}
 	return nil

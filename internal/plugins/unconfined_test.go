@@ -15,7 +15,7 @@ import (
 // version of it, is refused when the owner reviews it.
 func TestUnconfinedTierRefusesExecutablesThatDontSpeakItsABI(t *testing.T) {
 	t.Parallel()
-	u := NewUnconfined(t.TempDir(), DefaultLimits, slog.New(slog.DiscardHandler))
+	u := NewUnconfined(t.TempDir(), DefaultLimits(), slog.New(slog.DiscardHandler))
 	for name, tc := range map[string]struct{ body, code string }{
 		"otherabi": {`echo '{"abi_version":2}'; cat >/dev/null`, CodeABIUnsupported},
 		"silent":   {`exit 0`, CodeExecutableInvalid},
@@ -54,7 +54,7 @@ func script(t *testing.T, u *Unconfined, name, body string) ExecutableFile {
 // can exactly exhaust the power-of-two budget without a warning.
 
 func TestNativeProcessKeepsFlushedOutputAfterExit(t *testing.T) {
-	tier := NewUnconfined(t.TempDir(), DefaultLimits, slog.New(slog.DiscardHandler))
+	tier := NewUnconfined(t.TempDir(), DefaultLimits(), slog.New(slog.DiscardHandler))
 	payload := `{"jsonrpc":"2.0","id":1,"result":{"content":[{"type":"text","text":"finished"}]}}`
 	executable := script(t, tier, "final-reply", "echo '"+payload+"'")
 	process, startErr := tier.StartNative(t.Context(), executable.Name, executable.Digest, time.Second)

@@ -7,6 +7,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/tyk-swe/olp/internal/protocols/wire"
 	"github.com/tyk-swe/olp/internal/usage"
 )
 
@@ -34,8 +35,8 @@ func (s *Store) ObserveResponseUsage(ctx context.Context, localID, status string
 	if err != nil {
 		return usage.Persisted{}, err
 	}
-	terminal := responseStateFinished(status)
-	currentTerminal := responseStateFinished(current)
+	terminal := wire.ResponseStatusFinished(status)
+	currentTerminal := wire.ResponseStatusFinished(current)
 	if currentTerminal || status == "" {
 		// A later GET or replayed stream cannot reopen already finished work,
 		// including foreground work with no deferred accounting owner. An
@@ -76,14 +77,6 @@ func (s *Store) ObserveResponseUsage(ctx context.Context, localID, status string
 		return usage.Persisted{}, err
 	}
 	return result, nil
-}
-
-func responseStateFinished(status string) bool {
-	switch status {
-	case "completed", "cancelled", "failed", "incomplete":
-		return true
-	}
-	return false
 }
 
 // The template contains only accounting metadata. Every owner removes it in

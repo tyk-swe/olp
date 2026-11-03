@@ -57,10 +57,10 @@ type Server struct {
 // New prepares the provider surface with a bounded upstream client and at
 // most four concurrent probes. signer runs the signing hooks of plugin
 // profiles.
-func New(a *access.Server, policy *egress.Policy, signer connectors.Signer) *Server {
+func New(a *access.Server, policy *egress.Policy, signer connectors.Signer, getenv func(string) string) *Server {
 	auth := connectors.NewAuth(policy)
 	auth.Signer = signer
-	return &Server{connections: egress.NewConnectionClientCache(128), Access: a, Egress: policy, ExternalSecrets: secretstore.New(*policy), client: policy.Client(probeTimeout), auth: auth, probes: make(chan struct{}, 4)}
+	return &Server{connections: egress.NewConnectionClientCache(128), Access: a, Egress: policy, ExternalSecrets: secretstore.New(*policy, getenv), client: policy.Client(probeTimeout), auth: auth, probes: make(chan struct{}, 4)}
 }
 
 type record struct {
@@ -214,7 +214,9 @@ func (s *Server) scanDetail(row pgx.Row) (*detail, error) {
 	d.DraftCredentialID, d.DraftCredentialVersion = draft.ID, draft.Version
 	d.LastProbeAt, d.LastProbeStatus, d.LastProbeDetail = p.LastProbeAt, p.LastProbeStatus, p.LastProbeDetail
 	d.CreatedAt, d.UpdatedAt = p.CreatedAt.UTC(), p.UpdatedAt.UTC()
-	d.ConnectorReady = p.Configuration.Validate(s.Egress) == nil && (!p.Configuration.CredentialRequired() || usableCredential)
+	configurationErr := p.Configuration.ValidateAndNormalize(s.Egress)
+	d.Configuration.Options.Commitment = p.Configuration.Options.Commitment
+	d.ConnectorReady = configurationErr == nil && (!p.Configuration.CredentialRequired() || usableCredential)
 	return &d, nil
 }
 

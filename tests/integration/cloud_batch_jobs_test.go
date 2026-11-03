@@ -202,6 +202,9 @@ func TestCloudBatchCreateRefreshCancelFixturesCompile(t *testing.T) {
 		if status != http.StatusOK {
 			t.Fatalf("%s cloud batch get: status=%d response=%s", tc.profile, status, response)
 		}
+		if json.Unmarshal(response, &job) != nil || job["status"] != "running" {
+			t.Fatalf("%s cloud batch status after refresh: %s", tc.profile, response)
+		}
 		var routeID string
 		if err := h.Pool.QueryRow(t.Context(), `SELECT id::text FROM olp.routes WHERE slug=$1`, slug).Scan(&routeID); err != nil {
 			t.Fatal(err)

@@ -1,12 +1,25 @@
 package embeddings
 
 import (
+	"slices"
 	"strconv"
 	"strings"
 
 	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/operations"
 )
+
+func teiTruncationDirections() []string {
+	return []string{"left", "right", "Left", "Right"}
+}
+
+func bedrockEmbeddingTypes() []string {
+	return []string{"float", "binary"}
+}
+
+func voyageInputTypes() []string {
+	return []string{"query", "document"}
+}
 
 func defaults(id string) map[string]operations.Field {
 	fields := map[string]operations.Field{}
@@ -42,8 +55,16 @@ func defaults(id string) map[string]operations.Field {
 		fields["output_dimension"] = positive
 		fields["truncation"] = boolean
 		fields["output_dtype"] = enum("float", "int8", "uint8", "binary", "ubinary")
-		fields["input_type"] = operations.FieldSchema(map[string]any{"type": []string{"string", "null"}, "enum": []any{"query", "document", nil}}, func(v oif.Value) error {
-			if v.Kind() == oif.Null || operations.String(v) == "query" || operations.String(v) == "document" {
+		inputTypeOptions := slices.Collect(func(yield func(any) bool) {
+			for _, inputType := range voyageInputTypes() {
+				if !yield(inputType) {
+					return
+				}
+			}
+			yield(nil)
+		})
+		fields["input_type"] = operations.FieldSchema(map[string]any{"type": []string{"string", "null"}, "enum": inputTypeOptions}, func(v oif.Value) error {
+			if v.Kind() == oif.Null || slices.Contains(voyageInputTypes(), operations.String(v)) {
 				return nil
 			}
 			return operations.Invalid("input_type", "Use query, document or native null.")
@@ -70,12 +91,12 @@ func defaults(id string) map[string]operations.Field {
 	case "bedrock-embeddings":
 		fields["dimensions"] = positive
 		fields["normalize"] = boolean
-		fields["embeddingTypes"] = operations.FieldSchema(map[string]any{"type": "array", "minItems": 1, "items": map[string]any{"enum": []string{"float", "binary"}}}, func(v oif.Value) error {
+		fields["embeddingTypes"] = operations.FieldSchema(map[string]any{"type": "array", "minItems": 1, "items": map[string]any{"enum": bedrockEmbeddingTypes()}}, func(v oif.Value) error {
 			if v.Kind() != oif.Array || len(v.Elements()) == 0 {
 				return operations.Invalid("embeddingTypes", "Use native embedding types.")
 			}
 			for _, e := range v.Elements() {
-				if operations.String(e) != "float" && operations.String(e) != "binary" {
+				if !slices.Contains(bedrockEmbeddingTypes(), operations.String(e)) {
 					return operations.Invalid("embeddingTypes", "Use float or binary.")
 				}
 			}
@@ -83,7 +104,7 @@ func defaults(id string) map[string]operations.Field {
 		})
 	default:
 		fields["truncate"] = nullableBoolean
-		fields["truncation_direction"] = enum("left", "right", "Left", "Right")
+		fields["truncation_direction"] = enum(teiTruncationDirections()...)
 		fields["prompt_name"] = text
 		if id == "tei-embeddings" {
 			fields["normalize"] = boolean

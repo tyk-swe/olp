@@ -5,6 +5,7 @@ package integration_test
 import (
 	"encoding/json"
 	"net/http"
+	"slices"
 	"testing"
 
 	"github.com/google/uuid"
@@ -34,9 +35,35 @@ func TestRetrievalBindingsKeepExplicitGrantsAndImmutableHistory(t *testing.T) {
 	if _, err := h.Pool.Exec(t.Context(), `INSERT INTO olp.route_drafts(id,slug,state,operations,overall_timeout_ms,max_attempts,targets,etag,created_by,project_id,fidelity) VALUES($1,$2,'draft','["retrieval"]',2000,1,$3,$4,$5,$6,'{"mode":"transformed"}')`, uuid.NewString(), route, targets, uuid.NewString(), actor, project); err != nil {
 		t.Fatal(err)
 	}
-	input := map[string]any{"project_id": project, "name": "documents", "route": route, "target_id": target, "backend": "azure_ai_search", "backend_resource": "documents", "fields": map[string]any{"text": "content", "id": "key"}, "key_grants": []string{foreign["id"].(string)}, "enabled": true}
+	t.Run("saving preserves caller input", func(t *testing.T) {
+		tx, err := h.Pool.Begin(t.Context())
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer tx.Rollback(t.Context())
+		keyID := key["id"].(string)
+		grants := []string{keyID, keyID}
+		binding := retrieval.Input{ProjectID: project, Name: "  copy check  ", Route: "  " + route + "  ", TargetID: target, Backend: retrieval.Azure, Resource: "documents", Fields: retrieval.Fields{Text: "content", ID: "key", Search: []string{"summary"}, Metadata: map[string]string{"author": "creator"}}, KeyGrants: grants, Enabled: true}
+		saved, err := retrieval.Save(t.Context(), tx, actor, nil, binding)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if binding.Name != "  copy check  " || binding.Route != "  "+route+"  " || !slices.Equal(grants, []string{keyID, keyID}) {
+			t.Fatalf("saving changed caller input: %+v", binding)
+		}
+		if saved.Name != "copy check" || saved.Route != route || !slices.Equal(saved.KeyGrants, []string{keyID}) {
+			t.Fatalf("saved binding was not normalized: %+v", saved)
+		}
+		saved.Fields.Search[0] = "changed"
+		saved.Fields.Metadata["author"] = "changed"
+		saved.KeyGrants[0] = uuid.NewString()
+		if binding.Fields.Search[0] != "summary" || binding.Fields.Metadata["author"] != "creator" || !slices.Equal(grants, []string{keyID, keyID}) {
+			t.Fatalf("changing the saved binding changed caller input: %+v", binding)
+		}
+	})
+	input := map[string]any{"project_id": project, "name": "  documents  ", "route": "  " + route + "  ", "target_id": target, "backend": "azure_ai_search", "backend_resource": "documents", "fields": map[string]any{"text": "content", "id": "key"}, "key_grants": []string{foreign["id"].(string)}, "enabled": true}
 	h.want(owner, http.MethodPost, "/api/v1/retrieval-bindings", input, idem(uuid.NewString()), 422)
-	input["key_grants"] = []string{key["id"].(string)}
+	input["key_grants"] = []string{key["id"].(string), key["id"].(string)}
 	if _, err := h.Pool.Exec(t.Context(), `UPDATE olp.api_keys SET expires_at=now()-interval '1 hour' WHERE id=$1`, key["id"].(string)); err != nil {
 		t.Fatal(err)
 	}
@@ -44,10 +71,18 @@ func TestRetrievalBindingsKeepExplicitGrantsAndImmutableHistory(t *testing.T) {
 	if _, err := h.Pool.Exec(t.Context(), `UPDATE olp.api_keys SET expires_at=NULL WHERE id=$1`, key["id"].(string)); err != nil {
 		t.Fatal(err)
 	}
-	created := h.want(owner, http.MethodPost, "/api/v1/retrieval-bindings", input, idem(uuid.NewString()), 201)
+	idempotencyKey := uuid.NewString()
+	created := h.want(owner, http.MethodPost, "/api/v1/retrieval-bindings", input, idem(idempotencyKey), 201)
 	id := created["id"].(string)
 	if created["provider_id"] != provider {
 		t.Fatal("connection identity was not derived from the target")
+	}
+	if created["name"] != "documents" || created["route"] != route {
+		t.Fatalf("binding input was not normalized: %v", created)
+	}
+	replay := map[string]any{"project_id": project, "name": "documents", "route": route, "target_id": target, "backend": "azure_ai_search", "backend_resource": "documents", "fields": map[string]any{"text": "content", "id": "key"}, "key_grants": []string{key["id"].(string)}, "enabled": true}
+	if replayed := h.want(owner, http.MethodPost, "/api/v1/retrieval-bindings", replay, idem(idempotencyKey), 201); replayed["id"] != id {
+		t.Fatalf("normalized retry created a different binding: %v", replayed)
 	}
 	input["enabled"] = false
 	updated := h.want(owner, http.MethodPut, "/api/v1/retrieval-bindings/"+id, input, withMatch(created, idem(uuid.NewString())), 200)

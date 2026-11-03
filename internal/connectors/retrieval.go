@@ -3,11 +3,12 @@ package connectors
 import (
 	"errors"
 	"net/url"
-	"regexp"
 	"strings"
+
+	"github.com/tyk-swe/olp/internal/retrieval/identity"
 )
 
-const KindAzureAISearch = "azure_ai_search"
+const KindAzureAISearch = identity.Azure
 
 func (c Config) RetrievalBackend() string {
 	if c.ProfileRevision != ProfileRevision {
@@ -16,11 +17,11 @@ func (c Config) RetrievalBackend() string {
 	switch c.ProfileID {
 	case "bedrock-knowledge-bases":
 		if c.Kind == "bedrock" {
-			return "bedrock_knowledge_base"
+			return identity.Bedrock
 		}
 	case "vertex-rag-engine":
 		if c.Kind == "vertex_ai" {
-			return "vertex_rag"
+			return identity.Vertex
 		}
 	case "azure-ai-search":
 		if c.Kind == KindAzureAISearch {
@@ -30,15 +31,11 @@ func (c Config) RetrievalBackend() string {
 	return ""
 }
 func (c Config) retrievalModelValid(model string) bool {
-	switch c.RetrievalBackend() {
-	case "bedrock_knowledge_base":
-		return regexp.MustCompile(`^[A-Za-z0-9]{10}$`).MatchString(model)
-	case "vertex_rag":
-		return strings.HasPrefix(model, "projects/"+c.CloudProject+"/locations/"+c.CloudRegion+"/ragCorpora/") && regexp.MustCompile(`^projects/[A-Za-z0-9_-]+/locations/[a-z0-9-]+/ragCorpora/[A-Za-z0-9_-]+$`).MatchString(model)
-	case KindAzureAISearch:
-		return regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,127}$`).MatchString(model)
+	backend := c.RetrievalBackend()
+	if !identity.ValidResource(backend, model) {
+		return false
 	}
-	return false
+	return backend != identity.Vertex || strings.HasPrefix(model, "projects/"+c.CloudProject+"/locations/"+c.CloudRegion+"/ragCorpora/")
 }
 
 func (c Config) RetrievalURL(resource string) (string, error) {
@@ -47,9 +44,9 @@ func (c Config) RetrievalURL(resource string) (string, error) {
 	}
 	base := strings.TrimRight(c.Endpoint, "/")
 	switch c.RetrievalBackend() {
-	case "bedrock_knowledge_base":
+	case identity.Bedrock:
 		return base + "/knowledgebases/" + url.PathEscape(resource) + "/retrieve", nil
-	case "vertex_rag":
+	case identity.Vertex:
 		return base + ":retrieveContexts", nil
 	case KindAzureAISearch:
 		return base + "/indexes/" + url.PathEscape(resource) + "/docs/search?api-version=" + url.QueryEscape(c.APIVersion), nil
@@ -65,14 +62,14 @@ func (c Config) RetrievalProbeURL(resource string) (string, error) {
 	}
 	base := strings.TrimRight(c.Endpoint, "/")
 	switch c.RetrievalBackend() {
-	case "bedrock_knowledge_base":
+	case identity.Bedrock:
 		want, _ := BedrockEndpoint(c.CloudRegion, false)
 		want = strings.Replace(want, "://bedrock-runtime.", "://bedrock-agent-runtime.", 1)
 		if base != want {
 			return "", errors.New("metadata certification requires the default regional Knowledge Bases endpoint")
 		}
 		return strings.Replace(base, "://bedrock-agent-runtime.", "://bedrock-agent.", 1) + "/knowledgebases/" + url.PathEscape(resource), nil
-	case "vertex_rag":
+	case identity.Vertex:
 		return base + "/ragCorpora/" + url.PathEscape(resource[strings.LastIndex(resource, "/")+1:]), nil
 	case KindAzureAISearch:
 		return base + "/indexes/" + url.PathEscape(resource) + "?api-version=" + url.QueryEscape(c.APIVersion), nil

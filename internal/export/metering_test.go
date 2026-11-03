@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -178,6 +179,46 @@ func TestFocusSettings(t *testing.T) {
 	}
 }
 
+func TestFocusStartDateRespectsRetentionAndPreservesExisting(t *testing.T) {
+	today := time.Now().UTC()
+	date := func(daysAgo int) string {
+		return today.AddDate(0, 0, -daysAgo).Format("2006-01-02")
+	}
+	previous := json.RawMessage(fmt.Sprintf(`{"start_date":%q}`, date(120)))
+	for _, tc := range []struct {
+		name      string
+		retention string
+		daysAgo   int
+		previous  json.RawMessage
+		accepted  bool
+	}{
+		{name: "within short retention", retention: "30", daysAgo: 10, accepted: true},
+		{name: "outside short retention", retention: "30", daysAgo: 60},
+		{name: "within long retention", retention: "90", daysAgo: 60, accepted: true},
+		{name: "unchanged expired date", retention: "30", daysAgo: 120, previous: previous, accepted: true},
+		{name: "changed expired date", retention: "30", daysAgo: 119, previous: previous},
+		{name: "future date", retention: "90", daysAgo: -2},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			start := date(tc.daysAgo)
+			sink := &Sink{Format: "csv_gzip", Settings: json.RawMessage(fmt.Sprintf(`{"start_date":%q}`, start))}
+			canonical, err := testManagement().resolveSettings(t.Context(), stubQueryer{usageDays: tc.retention}, sink, tc.previous)
+			if (err == nil) != tc.accepted {
+				t.Fatalf("start date %q accepted = %t, want %t: %v", start, err == nil, tc.accepted, err)
+			}
+			if !tc.accepted {
+				return
+			}
+			var settings struct {
+				StartDate string `json:"start_date"`
+			}
+			if err := json.Unmarshal(canonical, &settings); err != nil || settings.StartDate != start {
+				t.Fatalf("stored settings = %s, want start date %q: %v", canonical, start, err)
+			}
+		})
+	}
+}
+
 func TestStripeSettings(t *testing.T) {
 	m := testManagement()
 	project, other := uuid.NewString(), uuid.NewString()
@@ -278,7 +319,7 @@ func TestCloudEventGolden(t *testing.T) {
 		w.WriteHeader(200)
 	}))
 	defer server.Close()
-	sender := NewSender(testPolicy())
+	sender := NewSender(testPolicy(), os.Getenv)
 	sender.Installation = "inst-1"
 	credential, _ := json.Marshal(map[string]any{"signing_secret": "0123456789abcdef0123456789abcdef"})
 	record := Record{
@@ -386,7 +427,7 @@ func TestStripeStatusMapping(t *testing.T) {
 	for status, code := range map[int]string{400: "status", 409: "status", 500: "status", 429: "status"} {
 		fake := &fakeStripe{status: status}
 		server := httptest.NewServer(fake.handler())
-		sender := NewSender(testPolicy())
+		sender := NewSender(testPolicy(), os.Getenv)
 		destination, credential := stripeDestination(server, project)
 		err := sender.Send(t.Context(), destination, credential, meteringRecord(project, "0.003"))
 		if DeliveryErrorCode(err) != code {
@@ -406,7 +447,7 @@ func TestStripeStatusMapping(t *testing.T) {
 		_, _ = w.Write([]byte(`{"error":{"code":"other_failure","message":"reject rk_test_0123456789"}}`))
 	}))
 	defer server.Close()
-	sender := NewSender(testPolicy())
+	sender := NewSender(testPolicy(), os.Getenv)
 	destination, credential := stripeDestination(server, project)
 	err := sender.Send(t.Context(), destination, credential, meteringRecord(project, "0.003"))
 	if DeliveryErrorCode(err) != "status" {

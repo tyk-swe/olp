@@ -2,6 +2,18 @@ package surface
 
 import "testing"
 
+func TestManagementClassificationAgreesForReservedAndFallbackPaths(t *testing.T) {
+	fallback := Of("/console/home")
+	if fallback.Name != "management" || fallback.Inference {
+		t.Fatalf("console path classified as %+v", fallback)
+	}
+	for _, path := range []string{"/api/v1/mcp", "/scim/Users", "/v1beta/example", "/health/live", "/metrics"} {
+		if got := Of(path); got != fallback {
+			t.Errorf("%s classified as %+v, fallback is %+v", path, got, fallback)
+		}
+	}
+}
+
 func TestMCPConsumerEndpointIsInferenceNotConsole(t *testing.T) {
 	for _, path := range []string{"/mcp", "/mcp/"} {
 		if got := Of(path); !got.Inference {

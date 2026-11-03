@@ -9,7 +9,40 @@ import (
 
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/retainedapi"
+	"github.com/tyk-swe/olp/internal/retrieval"
 )
+
+func TestRetrievalResourceAcceptanceAgreesWithConnectorAddressing(t *testing.T) {
+	tests := []struct {
+		config    Config
+		resources []string
+		fields    retrieval.Fields
+	}{
+		{Config{Kind: "bedrock", ProfileID: "bedrock-knowledge-bases", ProfileRevision: ProfileRevision}, []string{"ABCDEFGHIJ", "0123456789", "ABCDEFGHI", "ABCDEFGHIJK", "../unbound", ""}, retrieval.Fields{}},
+		{Config{Kind: "vertex_ai", ProfileID: "vertex-rag-engine", ProfileRevision: ProfileRevision, CloudProject: "project", CloudRegion: "region"}, []string{"projects/project/locations/region/ragCorpora/123", "projects/project/locations/region/ragCorpora/", "projects/project/locations/region/ragCorpora/../other", "../unbound", ""}, retrieval.Fields{}},
+		{Config{Kind: KindAzureAISearch, ProfileID: "azure-ai-search", ProfileRevision: ProfileRevision}, []string{"docs", "a-b_c", "UPPER", "../unbound", ""}, retrieval.Fields{Text: "text", ID: "id"}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.config.ProfileID, func(t *testing.T) {
+			for _, resource := range tc.resources {
+				_, addressErr := tc.config.RetrievalURL(resource)
+				_, encodeErr := retrieval.Encode(tc.config.RetrievalBackend(), resource, tc.fields, []byte(`{"query":"test"}`))
+				if (addressErr == nil) != (encodeErr == nil) {
+					t.Errorf("resource %q, address error %v, encode error %v", resource, addressErr, encodeErr)
+				}
+			}
+		})
+	}
+	vertex := tests[1].config
+	for _, resource := range []string{"projects/other/locations/region/ragCorpora/123", "projects/project/locations/other/ragCorpora/123"} {
+		if _, err := retrieval.Encode(vertex.RetrievalBackend(), resource, retrieval.Fields{}, []byte(`{"query":"test"}`)); err != nil {
+			t.Fatalf("resource %q should be valid for another connector: %v", resource, err)
+		}
+		if _, err := vertex.RetrievalURL(resource); err == nil {
+			t.Errorf("connector admitted resource outside its project or region: %q", resource)
+		}
+	}
+}
 
 func TestRetrievalDedicatedProfilesAndAddressing(t *testing.T) {
 	tests := []struct{ kind, profile, region, project, endpoint, resource, want string }{

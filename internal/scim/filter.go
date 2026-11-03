@@ -72,13 +72,21 @@ func pathParts(p filter.AttributePath) []string {
 	return parts
 }
 
+func MultiValuedComplexAttribute(name string) bool {
+	switch name {
+	case "emails", "roles", "groups", "members", "projects":
+		return true
+	default:
+		return false
+	}
+}
+
 func jsonPath(p filter.AttributePath) string {
 	path := "$"
 	for _, part := range pathParts(p) {
 		b, _ := json.Marshal(part)
 		path += "." + string(b)
-		switch part {
-		case "emails", "roles", "groups", "members", "projects":
+		if MultiValuedComplexAttribute(part) {
 			path += "[*]"
 		}
 	}
@@ -185,8 +193,11 @@ func (s *SQLFilter) definedAttribute(path filter.AttributePath, scope []string) 
 		return true
 	}
 	if s.Schema == UserSchema {
+		if len(parts) == 2 && parts[0] == "name" && slices.Contains(NameSubattributes(), parts[1]) {
+			return true
+		}
 		switch name {
-		case "userName", "displayName", "active", "name", "name.formatted", "name.familyName", "name.givenName", "name.middleName", "name.honorificPrefix", "name.honorificSuffix",
+		case "userName", "displayName", "active", "name",
 			"emails", "emails.value", "emails.type", "emails.primary", "groups", "groups.value", "groups.display", "groups.type", "groups.$ref", "roles", "roles.value", "roles.primary",
 			UserExtension + ".role", UserExtension + ".accessScope":
 			return true
@@ -276,8 +287,7 @@ func (s *SQLFilter) Sort(raw, base string) (string, error) {
 		return "", err
 	}
 	last := parts[len(parts)-1]
-	switch last {
-	case "name", "meta", "emails", "members", "roles", "groups", "projects":
+	if last == "name" || last == "meta" || MultiValuedComplexAttribute(last) {
 		return "", Fail(400, "invalidPath", "Choose a scalar subattribute for sorting.")
 	}
 	path, primary := "$", "$"
@@ -287,8 +297,7 @@ func (s *SQLFilter) Sort(raw, base string) (string, error) {
 		step := "." + string(encoded)
 		path += step
 		primary += step
-		switch part {
-		case "emails", "roles", "groups", "members", "projects":
+		if MultiValuedComplexAttribute(part) {
 			path += "[*]"
 			primary += "[*] ? (@.primary == true)"
 			multi = true

@@ -1,9 +1,14 @@
-const summaries = ['providers', 'summary'] as const;
-const modelCatalog = ['providers', 'models', 'catalog'] as const;
+const root = ['providers'] as const;
+const summaries = [...root, 'summary'] as const;
+const modelCatalog = [...root, 'models', 'catalog'] as const;
 const page = (cursor?: string) =>
   [...summaries, 'page', cursor ?? 'first'] as const;
 const modelInventory = (cursor?: string) =>
   [...modelCatalog, 'inventory', cursor ?? 'first'] as const;
+const revisionsOf = (id: string) => [...root, 'revisions', id] as const;
+const revision = (id: string, revisionId: string) =>
+  [...revisionsOf(id), 'detail', revisionId] as const;
+const modelsOf = (id: string) => [...root, 'models', 'of', id] as const;
 
 export const providerKeys = {
   /** Every provider summary: the full list and each cursor page. */
@@ -12,27 +17,18 @@ export const providerKeys = {
   page,
   filteredPage: (cursor: string | undefined, applied: string) =>
     [...page(cursor), applied] as const,
-  detail: (id: string) => ['providers', 'detail', id] as const,
-  kinds: () => ['providers', 'kinds'] as const,
+  detail: (id: string) => [...root, 'detail', id] as const,
+  kinds: () => [...root, 'kinds'] as const,
   profiles: () => ['provider-profiles'] as const,
   capabilityOptions: (kind: string) =>
-    ['providers', 'capability-options', kind] as const,
-  credentials: (id: string) => ['providers', 'credentials', id] as const,
-  revisionsOf: (id: string) => ['providers', 'revisions', id] as const,
+    [...root, 'capability-options', kind] as const,
+  credentials: (id: string) => [...root, 'credentials', id] as const,
+  revisionsOf,
   revisions: (id: string, cursor?: string) =>
-    ['providers', 'revisions', id, 'page', cursor ?? 'first'] as const,
-  revision: (id: string, revisionId: string) =>
-    ['providers', 'revisions', id, 'detail', revisionId] as const,
+    [...revisionsOf(id), 'page', cursor ?? 'first'] as const,
+  revision,
   revisionModels: (id: string, revisionId: string, cursor?: string) =>
-    [
-      'providers',
-      'revisions',
-      id,
-      'detail',
-      revisionId,
-      'models',
-      cursor ?? 'first'
-    ] as const,
+    [...revision(id, revisionId), 'models', cursor ?? 'first'] as const,
   /** Model views that change whenever any provider's models change. */
   modelCatalog,
   modelInventory,
@@ -43,18 +39,18 @@ export const providerKeys = {
     eligibility: string
   ) => [...modelInventory(cursor), search, surface, eligibility] as const,
   enabledModels: () => [...modelCatalog, 'enabled'] as const,
-  modelsOf: (id: string) => ['providers', 'models', 'of', id] as const,
+  modelsOf,
   models: (id: string, cursor?: string) =>
-    ['providers', 'models', 'of', id, cursor ?? 'first'] as const,
+    [...modelsOf(id), cursor ?? 'first'] as const,
   vendors: () => ['provider-vendors'] as const,
   catalogSuggestions: (id: string, etag: string) =>
-    ['providers', 'catalog-suggestions', id, etag] as const,
+    [...root, 'catalog-suggestions', id, etag] as const,
   configurationSchemas: () => ['provider-configuration-schemas'] as const,
   slots: (id: string, etag: string) => ['provider-slots', id, etag] as const,
   bulkModels: (id: string, etag: string) =>
     ['bulk-provider-models', id, etag] as const,
   networkCredentials: (id: string) =>
-    ['providers', 'network-credentials', id] as const,
+    [...root, 'network-credentials', id] as const,
   bulkRoutePreview: () => ['provider-bulk-route-preview'] as const,
-  billingImport: (id: string) => ['providers', 'billing-import', id] as const
+  billingImport: (id: string) => [...root, 'billing-import', id] as const
 };

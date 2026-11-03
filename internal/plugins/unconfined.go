@@ -10,8 +10,8 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
-	"regexp"
 
+	pluginidentity "github.com/tyk-swe/olp/internal/plugins/identity"
 	"github.com/tyk-swe/olp/sdk/plugin/abi"
 )
 
@@ -32,9 +32,6 @@ type Unconfined struct {
 func NewUnconfined(dir string, limits Limits, log *slog.Logger) *Unconfined {
 	return &Unconfined{dir: dir, limits: limits, log: log}
 }
-
-// executableName is the form of the executables' file names OLP lists.
-var executableName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$`)
 
 // An ExecutableFile is an executable in the unconfined plugin directory.
 type ExecutableFile struct {
@@ -85,7 +82,7 @@ func (u *Unconfined) executable(name string) (ExecutableFile, error) {
 // lists.
 func (u *Unconfined) lookup(name string) (string, fs.FileInfo, error) {
 	unknown := refuse(CodeExecutableUnknown, "The unconfined plugin directory holds no executable with this name.")
-	if !executableName.MatchString(name) {
+	if !pluginidentity.ValidExecutable(name) {
 		return "", nil, unknown
 	}
 	path := filepath.Join(u.dir, name)

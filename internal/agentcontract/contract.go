@@ -17,7 +17,9 @@ import (
 
 	"github.com/google/uuid"
 	grantconfig "github.com/tyk-swe/olp/internal/grants/config"
+	"github.com/tyk-swe/olp/internal/pricingpolicy"
 	"github.com/tyk-swe/olp/internal/prompts"
+	"github.com/tyk-swe/olp/internal/toolidentity"
 )
 
 type Tool struct {
@@ -72,8 +74,7 @@ func validID(raw string) bool {
 }
 
 func ToolAlias(server, name string) string {
-	digest := sha256.Sum256([]byte(name))
-	return "t_" + strings.ReplaceAll(server, "-", "") + "_" + hex.EncodeToString(digest[:16])
+	return toolidentity.Alias(server, name)
 }
 
 func (d Draft) Validate(kind string) error {
@@ -102,7 +103,7 @@ func (d Draft) Validate(kind string) error {
 			if t.Classification != "" && t.Classification != "read_only" && t.Classification != "approval_required" {
 				return invalid("toolset", "Use a supported operator classification for each tool.")
 			}
-			if !validID(t.ServerID) || !validID(t.RevisionID) || !hexDigest.MatchString(t.CatalogDigest) || len(t.Name) == 0 || len(t.Name) > 256 || t.Alias != ToolAlias(t.ServerID, t.Name) || seen[t.Alias] {
+			if !validID(t.ServerID) || !validID(t.RevisionID) || !toolidentity.ValidCatalogDigest(t.CatalogDigest) || len(t.Name) == 0 || len(t.Name) > 256 || t.Alias != ToolAlias(t.ServerID, t.Name) || seen[t.Alias] {
 				return invalid("toolset", "Use unique aliases and exact certified server revisions.")
 			}
 			seen[t.Alias] = true
@@ -115,7 +116,7 @@ func (d Draft) Validate(kind string) error {
 		if !slices.Contains([]string{"a2a-0.3.0", "a2a-1.0.0"}, a.Protocol) || !hexDigest.MatchString(a.CardDigest) || !validID(a.PricingRevisionID) || !validCost(a.MaxCost) {
 			return invalid("agent", "Supply pinned protocol, card, pricing and a finite positive cost bound.")
 		}
-		if a.MessagePrice != "" && (!validAmount(a.MessagePrice) || !priceWithinBound(a.MessagePrice, a.MaxCost)) {
+		if a.MessagePrice != "" && (!pricingpolicy.ValidAmount(a.MessagePrice) || !priceWithinBound(a.MessagePrice, a.MaxCost)) {
 			return invalid("message_price", "Supply a nonnegative price within the cost bound.")
 		}
 		if a.RemoteWorkBoundSeconds != nil && (*a.RemoteWorkBoundSeconds < 1 || *a.RemoteWorkBoundSeconds > 3600) {
@@ -185,10 +186,7 @@ func validName(v string) error {
 	return nil
 }
 func validCost(v string) bool {
-	return validAmount(v) && strings.Trim(v, "0.") != ""
-}
-func validAmount(v string) bool {
-	return regexp.MustCompile(`^[0-9]{1,12}(\.[0-9]{1,12})?$`).MatchString(v)
+	return pricingpolicy.ValidAmount(v) && strings.Trim(v, "0.") != ""
 }
 func priceWithinBound(price, bound string) bool {
 	p, priceOK := new(big.Rat).SetString(price)

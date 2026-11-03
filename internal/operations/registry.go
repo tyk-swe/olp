@@ -18,7 +18,9 @@ const (
 	RawVectorClient = "raw-vector-storage/1"
 )
 
-var Label = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,95}$`)
+var label = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,95}$`)
+
+func ValidLabel(value string) bool { return label.MatchString(value) }
 
 // Usage is observed provider consumption, not a tokenization result or estimate.
 // Each result's complete native categories remain in its immutable source.
@@ -123,7 +125,7 @@ func NewRegistry() *Registry {
 }
 
 func (r *Registry) Register(d Dialect) error {
-	if !Label.MatchString(d.Identity.ID) || d.Identity.Revision == "" || !Label.MatchString(d.Operation.ID) || d.Operation.Revision == "" || d.Request == nil || d.Result == nil || d.Probe == nil || d.Evidence == "" || d.Label == "" {
+	if !ValidLabel(d.Identity.ID) || d.Identity.Revision == "" || !ValidLabel(d.Operation.ID) || d.Operation.Revision == "" || d.Request == nil || d.Result == nil || d.Probe == nil || d.Evidence == "" || d.Label == "" {
 		return errors.New("unary dialect requires bounded identities, codecs, probe and evidence")
 	}
 	if d.Address.FamilyPath == "" && d.Address.RelativePath == "" || d.Address.FamilyPath != "" && d.Address.RelativePath != "" {

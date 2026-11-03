@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"maps"
 	"net/http"
-	"regexp"
 	"slices"
 	"strings"
 	"time"
@@ -16,6 +15,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/attribution"
 	"github.com/tyk-swe/olp/internal/limits"
+	"github.com/tyk-swe/olp/internal/routeidentity"
 	"github.com/tyk-swe/olp/internal/secrets"
 )
 
@@ -78,13 +78,9 @@ type keyInput struct {
 	KeyPolicy
 }
 
-var RouteSlug = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,99}$`)
-var decimal = regexp.MustCompile(`^[0-9]{1,12}(\.[0-9]{1,12})?$`)
-var attributionKey = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_.-]{0,31}$`)
-
 const maxAttributionKeys = 8
 
-func validateKey(input keyInput, expirationChanged bool) error {
+func validateAndNormalizeKey(input keyInput, expirationChanged bool) error {
 	if days := input.RotationIntervalDays; days != nil && (*days < 1 || *days > 3650) {
 		return Invalid("rotation_interval_days", "Use a rotation interval of 1–3650 days, or null.")
 	}
@@ -93,7 +89,7 @@ func validateKey(input keyInput, expirationChanged bool) error {
 	}
 	groupNames := map[string]bool{}
 	for _, name := range input.AllowedRouteGroups {
-		if !RouteSlug.MatchString(name) || groupNames[name] {
+		if !routeidentity.ValidSlug(name) || groupNames[name] {
 			return Invalid("allowed_route_groups", "Use unique valid group names.")
 		}
 		groupNames[name] = true
@@ -105,7 +101,7 @@ func validateKey(input keyInput, expirationChanged bool) error {
 	if err := validTemplateName(input.LimitTemplate); err != nil {
 		return err
 	}
-	if err := input.RouteLimits.Validate(); err != nil {
+	if err := input.RouteLimits.ValidateAndNormalize(); err != nil {
 		return err
 	}
 	if err := input.RegionalLimits.Validate(); err != nil {
@@ -120,7 +116,7 @@ func validateKey(input keyInput, expirationChanged bool) error {
 	if input.EndUserPolicy != nil && input.EndUserSource == nil {
 		return Invalid("end_user_source", "An end-user policy requires an identifier source.")
 	}
-	if err := input.EndUserPolicy.validate(); err != nil {
+	if err := input.EndUserPolicy.validateAndNormalize(); err != nil {
 		return err
 	}
 	if input.EndUserSource != nil && *input.EndUserSource != "header" && *input.EndUserSource != "native" {
@@ -152,25 +148,22 @@ func validateKey(input keyInput, expirationChanged bool) error {
 	}
 	seen = map[string]bool{}
 	for _, route := range input.AllowedRoutes {
-		if !RouteSlug.MatchString(route) || seen[route] {
+		if !routeidentity.ValidSlug(route) || seen[route] {
 			return Invalid("allowed_routes", "Use unique valid route slugs.")
 		}
 		seen[route] = true
-	}
-	if input.AllowedAttributionKeys == nil {
-		input.AllowedAttributionKeys = []string{}
 	}
 	if len(input.AllowedAttributionKeys) > maxAttributionKeys {
 		return Invalid("allowed_attribution_keys", "Use at most 8 attribution keys.")
 	}
 	seen = map[string]bool{}
 	for _, key := range input.AllowedAttributionKeys {
-		if !attributionKey.MatchString(key) || seen[key] {
+		if !attribution.ValidKey(key) || seen[key] {
 			return Invalid("allowed_attribution_keys", "Use unique valid attribution keys.")
 		}
 		seen[key] = true
 	}
-	if err := input.KeyPolicy.AdmissionLimits().Validate(); err != nil {
+	if err := input.KeyPolicy.AdmissionLimits().ValidateAndNormalize(); err != nil {
 		return err
 	}
 	for field, value := range map[string]*string{"priority": input.Priority, "max_priority": input.MaxPriority} {
@@ -223,7 +216,7 @@ const keyFields = `'run_limits',k.policy->'run_limits','allowed_toolsets',COALES
  'rotation_due_at',CASE WHEN k.policy->>'rotation_interval_days' IS NOT NULL THEN COALESCE(k.rotated_at,k.created_at)+make_interval(secs=>86400.0*(k.policy->>'rotation_interval_days')::int) END,
  'active_overlaps',COALESCE((SELECT jsonb_agg(jsonb_build_object('lookup_id',o.lookup_id,'expires_at',LEAST(o.expires_at,k.expires_at)) ORDER BY o.expires_at) FROM olp.api_key_overlaps o WHERE o.api_key_id=k.id AND LEAST(o.expires_at,k.expires_at)>now() AND k.revoked_at IS NULL),'[]'::jsonb),
  'id',k.id,'lookup_id',k.lookup_id,'name',k.name,'project_id',k.project_id,'project_name',pr.name,'budget_group_id',k.budget_group_id,'created_by',k.created_by,'created_by_email',u.email,'etag',k.etag,'created_at',k.created_at,'expires_at',k.expires_at,'revoked_at',k.revoked_at,'rotated_at',k.rotated_at,'scopes',k.policy->'scopes','allowed_routes',k.policy->'allowed_routes',
- 'regional_limits',COALESCE(NULLIF(k.policy->'regional_limits','null'::jsonb),'{}'::jsonb),'limit_template',k.policy->'limit_template','route_limits',COALESCE(NULLIF(k.policy->'route_limits','null'::jsonb),'{}'::jsonb),'allowed_route_groups',COALESCE(NULLIF(k.policy->'allowed_route_groups','null'::jsonb),'[]'::jsonb),'allowed_cidrs',COALESCE(NULLIF(k.policy->'allowed_cidrs','null'::jsonb),'[]'::jsonb),'requests_per_minute',k.policy->'requests_per_minute','tokens_per_minute',k.policy->'tokens_per_minute','max_concurrency',k.policy->'max_concurrency','allowed_attribution_keys',COALESCE(k.policy->'allowed_attribution_keys','[]'::jsonb),'allow_provider_state',COALESCE(k.policy->'allow_provider_state','false'::jsonb),'forbid_response_cache',COALESCE(k.policy->'forbid_response_cache','false'::jsonb),'response_metadata',COALESCE(k.policy->'response_metadata','false'::jsonb),'required_attribution_keys',COALESCE(NULLIF(k.policy->'required_attribution_keys','null'::jsonb),'[]'::jsonb),'attribution_defaults',COALESCE(NULLIF(k.policy->'attribution_defaults','null'::jsonb),'{}'::jsonb),'end_user_policy',k.policy->'end_user_policy','end_user_source',k.policy->'end_user_source','priority',k.policy->'priority','max_priority',k.policy->'max_priority','effective_limits',k.effective_limits,'cost_basis',COALESCE(k.policy->>'cost_basis','cost')`
+ 'regional_limits',COALESCE(NULLIF(k.policy->'regional_limits','null'::jsonb),'{}'::jsonb),'limit_template',k.policy->'limit_template','route_limits',COALESCE(NULLIF(k.policy->'route_limits','null'::jsonb),'{}'::jsonb),'allowed_route_groups',COALESCE(NULLIF(k.policy->'allowed_route_groups','null'::jsonb),'[]'::jsonb),'allowed_cidrs',COALESCE(NULLIF(k.policy->'allowed_cidrs','null'::jsonb),'[]'::jsonb),'requests_per_minute',k.policy->'requests_per_minute','tokens_per_minute',k.policy->'tokens_per_minute','max_concurrency',k.policy->'max_concurrency','allowed_attribution_keys',COALESCE(NULLIF(k.policy->'allowed_attribution_keys','null'::jsonb),'[]'::jsonb),'allow_provider_state',COALESCE(k.policy->'allow_provider_state','false'::jsonb),'forbid_response_cache',COALESCE(k.policy->'forbid_response_cache','false'::jsonb),'response_metadata',COALESCE(k.policy->'response_metadata','false'::jsonb),'required_attribution_keys',COALESCE(NULLIF(k.policy->'required_attribution_keys','null'::jsonb),'[]'::jsonb),'attribution_defaults',COALESCE(NULLIF(k.policy->'attribution_defaults','null'::jsonb),'{}'::jsonb),'end_user_policy',k.policy->'end_user_policy','end_user_source',k.policy->'end_user_source','priority',k.policy->'priority','max_priority',k.policy->'max_priority','effective_limits',k.effective_limits,'cost_basis',COALESCE(k.policy->>'cost_basis','cost')`
 const keyFrom = " FROM olp.api_keys_with_limits k JOIN olp.users u ON u.id=k.created_by LEFT JOIN olp.projects pr ON pr.id=k.project_id"
 
 // keyJSON renders one API key row, whose alias must be k, as the management
@@ -309,7 +302,7 @@ func (s *Server) createAPIKey(r *http.Request, _ Principal) (Reply, error) {
 		return Commit(r, tx, *replayed)
 	}
 	// A replay returns the original result even if its key has since expired.
-	if err := validateKey(input, true); err != nil {
+	if err := validateAndNormalizeKey(input, true); err != nil {
 		return Reply{}, err
 	}
 	if err = s.RequireProject(r.Context(), tx, p, input.ProjectID); err != nil {
@@ -436,7 +429,7 @@ func (s *Server) updateAPIKey(r *http.Request, _ Principal) (Reply, error) {
 		return Reply{}, Invalid("policy", "Invalid policy value.")
 	}
 	_, changed := patch["expires_at"]
-	if err = validateKey(input, changed); err != nil {
+	if err = validateAndNormalizeKey(input, changed); err != nil {
 		return Reply{}, err
 	}
 	if raw, ok := patch["budget_group_id"]; ok {
@@ -610,7 +603,7 @@ func (s *Server) transitionKey(r *http.Request, rotate bool) (Reply, error) {
 		if err = json.Unmarshal(data, &normalized); err != nil {
 			return Reply{}, Invalid("policy", "Invalid cost budget.")
 		}
-		if err = validateKey(keyInput{Name: name, KeyPolicy: normalized}, false); err != nil {
+		if err = validateAndNormalizeKey(keyInput{Name: name, KeyPolicy: normalized}, false); err != nil {
 			return Reply{}, err
 		}
 		data, err = json.Marshal(normalized)

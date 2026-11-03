@@ -29,23 +29,21 @@ var focusColumns = []string{
 	"x_Route",
 }
 
-// FocusCriteria is the applicability-criteria set the FOCUS datasets declare.
-// The manifest carries it and tests pass it to focusspec.Validate.
-var FocusCriteria = []string{
-	"ACCOUNT_NAMING_SUPPORTED",
-	"COMMITMENT_DISCOUNT_SUPPORTED",
-	"MULTIPLE_PRICING_CATEGORIES_SUPPORTED",
-	"NEGOTIATED_PRICING_SUPPORTED",
-	"PUBLIC_PRICE_LIST_SUPPORTED",
-	"SUB_ACCOUNT_SUPPORTED",
-	"TAGGING_SUPPORTED",
-	"UNIT_PRICING_SUPPORTED",
-	"USAGE_MEASUREMENT_SUPPORTED",
+func focusCriteria() []string {
+	return []string{
+		"ACCOUNT_NAMING_SUPPORTED",
+		"COMMITMENT_DISCOUNT_SUPPORTED",
+		"MULTIPLE_PRICING_CATEGORIES_SUPPORTED",
+		"NEGOTIATED_PRICING_SUPPORTED",
+		"PUBLIC_PRICE_LIST_SUPPORTED",
+		"SUB_ACCOUNT_SUPPORTED",
+		"TAGGING_SUPPORTED",
+		"UNIT_PRICING_SUPPORTED",
+		"USAGE_MEASUREMENT_SUPPORTED",
+	}
 }
 
-// FocusPartRowLimit caps one CSV part's data rows. It is a var so tests can
-// exercise part rotation without generating fifty thousand rows.
-var FocusPartRowLimit = 50000
+const FocusPartRowLimit = 50000
 
 // The correction-handling declaration the manifest repeats: late facts
 // restate the day as a new revision replacing the previous one.

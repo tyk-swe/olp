@@ -22,6 +22,21 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
+func TestInstallRejectsHeadersFromProvidedEnvironment(t *testing.T) {
+	for _, name := range ambientOTLPHeaderVariables {
+		t.Setenv(name, "ambient")
+	}
+	for _, name := range ambientOTLPHeaderVariables {
+		t.Run(name, func(t *testing.T) {
+			lookupEnv := func(key string) (string, bool) { return "secret", key == name }
+			h, err := Install(Config{Endpoint: "https://collector.example/collect"}, lookupEnv)
+			if err == nil || !strings.Contains(err.Error(), name) || h != nil {
+				t.Fatalf("install with %s set: handle=%v, error=%v", name, h, err)
+			}
+		})
+	}
+}
+
 func TestOTLPExportsMetadataAndPreservesTraceParentWithoutSecrets(t *testing.T) {
 	payloads := make(chan []byte, 8)
 	collector := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -40,7 +55,7 @@ func TestOTLPExportsMetadataAndPreservesTraceParentWithoutSecrets(t *testing.T) 
 	if err := os.WriteFile(file, []byte(`{"Authorization":"Bearer collector-secret"}`), 0600); err != nil {
 		t.Fatal(err)
 	}
-	h, err := Install(Config{Endpoint: collector.URL + "/collect", HeadersFile: file, SampleRatio: 1, AcceptInbound: true, PropagateUpstream: true, Mode: "gateway", Version: "0.1.0"})
+	h, err := Install(Config{Endpoint: collector.URL + "/collect", HeadersFile: file, SampleRatio: 1, AcceptInbound: true, PropagateUpstream: true, Mode: "gateway", Version: "0.1.0"}, os.LookupEnv)
 	if err != nil {
 		t.Fatal(err)
 	}

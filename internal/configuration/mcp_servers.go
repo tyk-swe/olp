@@ -108,7 +108,7 @@ func (s *Server) validateMCPServers(doc *Document) error {
 			CallsPerMinute: e.CallsPerMinute, MaxConcurrency: e.MaxConcurrency,
 			PerKeyCallsPerMinute: e.PerKeyCallsPerMinute, PerKeyMaxConcurrency: e.PerKeyMaxConcurrency,
 		}
-		if err = mcpservers.Validate(&in, s.Egress); err != nil {
+		if err = mcpservers.ValidateAndNormalize(&in, s.Egress); err != nil {
 			return err
 		}
 		e.Name, e.Endpoint = in.Name, in.Endpoint

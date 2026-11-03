@@ -1,9 +1,11 @@
+const root = ['profile'] as const;
+const sessionsRoot = [...root, 'sessions'] as const;
+
 export const profileKeys = {
-  current: () => ['profile'] as const,
-  sessionsRoot: ['profile', 'sessions'] as const,
-  sessions: (cursor?: string) =>
-    ['profile', 'sessions', cursor ?? 'first'] as const,
-  oidcIdentities: () => ['profile', 'oidc-identities'] as const,
-  saml: () => ['profile', 'saml'] as const,
-  mfa: () => ['profile', 'mfa'] as const
+  current: () => root,
+  sessionsRoot,
+  sessions: (cursor?: string) => [...sessionsRoot, cursor ?? 'first'] as const,
+  oidcIdentities: () => [...root, 'oidc-identities'] as const,
+  saml: () => [...root, 'saml'] as const,
+  mfa: () => [...root, 'mfa'] as const
 };

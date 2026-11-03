@@ -17,6 +17,8 @@ import (
 	"github.com/tyk-swe/olp/internal/codemode"
 	"github.com/tyk-swe/olp/internal/codeplans"
 	"github.com/tyk-swe/olp/internal/configuration"
+	"github.com/tyk-swe/olp/internal/connectors"
+	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/providers"
 	"github.com/tyk-swe/olp/internal/routes"
 	"github.com/tyk-swe/olp/internal/routing"
@@ -131,6 +133,7 @@ func TestConfigurationPromotion(t *testing.T) {
 		}
 	}
 	document["pricing"].(map[string]any)["effective_at"] = time.Now().Add(-time.Minute).UTC().Format(time.RFC3339)
+	document["providers"].([]any)[0].(map[string]any)["configuration"].(map[string]any)["options"].(map[string]any)["commitment"] = map[string]any{"amount": " 300.50 ", "period": "day"}
 
 	destination := newAccessHarness(t)
 	destinationOwner := destination.owner()
@@ -148,6 +151,21 @@ func TestConfigurationPromotion(t *testing.T) {
 
 	planBody := map[string]any{"document": document}
 	planned := destination.want(destinationOwner, "POST", "/api/v1/configuration/plan", planBody, nil, 200)
+	canonical := map[string]any{}
+	canonicalJSON, marshalErr := json.Marshal(document)
+	if marshalErr != nil {
+		t.Fatal(marshalErr)
+	}
+	if err := json.Unmarshal(canonicalJSON, &canonical); err != nil {
+		t.Fatal(err)
+	}
+	canonical["providers"].([]any)[0].(map[string]any)["configuration"].(map[string]any)["options"].(map[string]any)["commitment"].(map[string]any)["amount"] = "300.50"
+	canonicalPlan := destination.want(destinationOwner, "POST", "/api/v1/configuration/plan", map[string]any{"document": canonical}, nil, 200)
+	plannedDigest, plannedOK := planned["digest"].(string)
+	canonicalDigest, canonicalOK := canonicalPlan["digest"].(string)
+	if !plannedOK || !canonicalOK || plannedDigest == "" || plannedDigest != canonicalDigest {
+		t.Fatal("equivalent commitment amounts must produce the same configuration digest", planned["digest"], canonicalPlan["digest"])
+	}
 	var bindingKey string
 	for _, item := range planned["blockers"].([]any) {
 		entry := item.(map[string]any)
@@ -195,18 +213,34 @@ func TestConfigurationPromotion(t *testing.T) {
 		t.Fatal("project must be created", projects)
 	}
 
-	providers := destination.want(destinationOwner, "GET", "/api/v1/providers", nil, nil, 200)["items"].([]any)
+	providerItems := destination.want(destinationOwner, "GET", "/api/v1/providers", nil, nil, 200)["items"].([]any)
 	var promotedProvider map[string]any
-	for _, item := range providers {
+	for _, item := range providerItems {
 		entry := item.(map[string]any)
 		if entry["name"] == "Promoted vendor" {
 			promotedProvider = entry
 		}
 	}
 	if promotedProvider == nil || promotedProvider["state"] != "draft" {
-		t.Fatal("provider must be staged as a draft", providers)
+		t.Fatal("provider must be staged as a draft", providerItems)
 	}
 	providerID := promotedProvider["id"].(string)
+	promotedDocument := destination.want(destinationOwner, "GET", "/api/v1/configuration/export", nil, nil, 200)["document"].(map[string]any)
+	promotedOptions := promotedDocument["providers"].([]any)[0].(map[string]any)["configuration"].(map[string]any)["options"].(map[string]any)
+	if amount := promotedOptions["commitment"].(map[string]any)["amount"]; amount != "300.50" {
+		t.Fatal("promoted commitment must retain the normalized amount", amount)
+	}
+	if _, err := destination.Pool.Exec(t.Context(), `UPDATE olp.providers SET configuration=jsonb_set(configuration::jsonb, '{options,commitment,amount}', to_jsonb($2::text))::json WHERE id=$1`, providerID, " 300.50 "); err != nil {
+		t.Fatal(err)
+	}
+	providerDetail := destination.want(destinationOwner, "GET", "/api/v1/providers/"+providerID, nil, nil, 200)
+	detailOptions := providerDetail["configuration"].(map[string]any)["options"].(map[string]any)
+	if amount := detailOptions["commitment"].(map[string]any)["amount"]; amount != "300.50" {
+		t.Fatal("provider detail must normalize a stored commitment amount", amount)
+	}
+	if _, err := destination.Pool.Exec(t.Context(), `UPDATE olp.providers SET configuration=jsonb_set(configuration::jsonb, '{options,commitment,amount}', to_jsonb($2::text))::json WHERE id=$1`, providerID, "300.50"); err != nil {
+		t.Fatal(err)
+	}
 	models := destination.want(destinationOwner, "GET", "/api/v1/providers/"+providerID+"/models", nil, nil, 200)["items"].([]any)
 	if len(models) == 0 {
 		t.Fatal("staged provider must declare models", models)
@@ -514,6 +548,59 @@ func TestConfigurationPromotion(t *testing.T) {
 	if freshProject == "" || freshProject != otherProject {
 		t.Fatal("apply must stage the provider in the destination project", freshProject, otherProject)
 	}
+
+	t.Run("provider storage prefixes stay normalized", func(t *testing.T) {
+		provider := providers.Configuration{
+			Kind: providers.KindVertex, ProfileID: "vertex-batch-prediction", ProfileRevision: connectors.ProfileRevision,
+			AuthMode: "adc", CloudProject: new("example"), CloudRegion: new("us-central1"),
+			BatchStorage: &connectors.BatchStorage{InputURIPrefix: "gs://example-bucket/input", OutputURIPrefix: "gs://example-bucket/output"},
+			Options: providers.Options{
+				DocumentURIPrefixes:      []string{"gs://example-bucket/docs", "gs://example-bucket/docs/"},
+				TuningDatasetURIPrefixes: []string{"gs://example-bucket/data", "gs://example-bucket/data/"},
+			},
+		}
+		normalized := provider
+		normalized.Normalize()
+		if err := normalized.ValidateAndNormalize(&egress.Policy{}); err != nil {
+			t.Fatal(err)
+		}
+		if reflect.DeepEqual(provider.BatchStorage, normalized.BatchStorage) ||
+			reflect.DeepEqual(provider.Options.DocumentURIPrefixes, normalized.Options.DocumentURIPrefixes) ||
+			reflect.DeepEqual(provider.Options.TuningDatasetURIPrefixes, normalized.Options.TuningDatasetURIPrefixes) {
+			t.Fatal("fixture must exercise every normalized storage field")
+		}
+		document := configuration.Document{
+			APIVersion: configuration.APIVersion,
+			Providers: []configuration.ProviderEntry{{Name: "Storage provider", Configuration: provider,
+				Slots: []configuration.SlotEntry{{Name: "default", IsDefault: true, Enabled: true, Weight: 1}}}},
+		}
+		normalizedDocument := configuration.Document{
+			APIVersion: configuration.APIVersion,
+			Providers: []configuration.ProviderEntry{{Name: "Storage provider", Configuration: normalized,
+				Slots: []configuration.SlotEntry{{Name: "default", IsDefault: true, Enabled: true, Weight: 1}}}},
+		}
+		plan := destination.want(destinationOwner, "POST", "/api/v1/configuration/plan", map[string]any{"document": document}, nil, 200)
+		normalizedPlan := destination.want(destinationOwner, "POST", "/api/v1/configuration/plan", map[string]any{"document": normalizedDocument}, nil, 200)
+		digest, digestOK := plan["digest"].(string)
+		normalizedDigest, normalizedDigestOK := normalizedPlan["digest"].(string)
+		if !digestOK || !normalizedDigestOK || digest == "" || digest != normalizedDigest {
+			t.Fatalf("equivalent storage prefixes produced different plan digests: %v, %v", plan["digest"], normalizedPlan["digest"])
+		}
+		destination.want(destinationOwner, "POST", "/api/v1/configuration/apply", map[string]any{"document": document}, idem("storage-prefixes"), 200)
+		var stored []byte
+		if err := destination.Pool.QueryRow(t.Context(), "SELECT configuration FROM olp.providers WHERE name=$1", "Storage provider").Scan(&stored); err != nil {
+			t.Fatal(err)
+		}
+		var actual providers.Configuration
+		if err := json.Unmarshal(stored, &actual); err != nil {
+			t.Fatal(err)
+		}
+		if !reflect.DeepEqual(actual.BatchStorage, normalized.BatchStorage) ||
+			!reflect.DeepEqual(actual.Options.DocumentURIPrefixes, normalized.Options.DocumentURIPrefixes) ||
+			!reflect.DeepEqual(actual.Options.TuningDatasetURIPrefixes, normalized.Options.TuningDatasetURIPrefixes) {
+			t.Fatalf("stored prefixes differ from normalized configuration: %+v", actual)
+		}
+	})
 }
 
 // An imported project starts with its creator as manager, as one created

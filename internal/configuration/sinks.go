@@ -39,7 +39,7 @@ func sinkReference(entry SinkEntry) string {
 	sum := sha256.Sum256(encoded)
 	return "sink/" + hex.EncodeToString(sum[:])
 }
-func (s *Server) validateSinks(doc *Document) error {
+func (s *Server) validateAndNormalizeSinks(doc *Document) error {
 	if len(doc.Sinks) > 64 {
 		return access.Invalid("sinks", "Declare at most 64 export sinks.")
 	}
@@ -60,11 +60,10 @@ func (s *Server) validateSinks(doc *Document) error {
 		}
 		seen[key] = true
 		d := sinks.Definition{Name: e.Name, ProjectID: e.Project, Type: e.Type, Destination: e.Destination, Streams: e.Streams, Enabled: e.Enabled}
-		if err := sinks.ValidateDefinition(&d, s.Egress); err != nil {
+		if err := sinks.ValidateAndNormalizeDefinition(&d, s.Egress); err != nil {
 			return err
 		}
-		e.Name, e.Destination, e.Streams = d.Name, d.Destination, d.Streams
-		slices.Sort(e.Streams)
+		e.Name, e.Destination, e.Streams = d.Name, d.Destination, slices.Sorted(slices.Values(d.Streams))
 		if e.CredentialRef != nil && *e.CredentialRef != sinkReference(*e) {
 			return access.Invalid("sinks.credential_ref", "Use the deterministic exported signing-credential reference.")
 		}

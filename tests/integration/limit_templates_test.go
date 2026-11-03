@@ -3,12 +3,16 @@
 package integration_test
 
 import (
+	"encoding/json"
 	"log/slog"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/shopspring/decimal"
+	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/gateway"
+	"github.com/tyk-swe/olp/internal/limits"
 )
 
 func TestLimitTemplatesPropagateToKeysUsersAndGroups(t *testing.T) {
@@ -16,6 +20,102 @@ func TestLimitTemplatesPropagateToKeysUsersAndGroups(t *testing.T) {
 	owner := h.owner()
 	project := h.want(owner, "POST", "/api/v1/projects", map[string]any{"name": "Templates"}, idem("template-project"), 201)
 	id := project["id"].(string)
+	t.Run("effective limits agree with reporting", func(t *testing.T) {
+		intPointer := func(value int64) *int64 { return &value }
+		amountPointer := func(value string) *string { return &value }
+		cases := []struct {
+			name     string
+			local    access.AdmissionLimits
+			template access.AdmissionLimits
+		}{
+			{name: "unlimited"},
+			{name: "local", local: access.AdmissionLimits{
+				RequestsPerMinute: intPointer(3), TokensPerMinute: intPointer(4), MaxConcurrency: intPointer(5),
+				DailyCostLimit: amountPointer("6.25"), WeeklyCostLimit: amountPointer("7.5"), MonthlyCostLimit: amountPointer("8"), CostBasis: "charge",
+			}},
+			{name: "template", template: access.AdmissionLimits{
+				RequestsPerMinute: intPointer(3), TokensPerMinute: intPointer(4), MaxConcurrency: intPointer(5),
+				DailyCostLimit: amountPointer("6.25"), WeeklyCostLimit: amountPointer("7.5"), MonthlyCostLimit: amountPointer("8"), CostBasis: "charge",
+			}},
+			{name: "intersect", local: access.AdmissionLimits{
+				RequestsPerMinute: intPointer(2), TokensPerMinute: intPointer(5), MaxConcurrency: intPointer(7),
+				DailyCostLimit: amountPointer("2.5"), WeeklyCostLimit: amountPointer("6"), MonthlyCostLimit: amountPointer("9.01"), CostBasis: "cost",
+			}, template: access.AdmissionLimits{
+				RequestsPerMinute: intPointer(3), TokensPerMinute: intPointer(4), MaxConcurrency: intPointer(7),
+				DailyCostLimit: amountPointer("3"), WeeklyCostLimit: amountPointer("4.25"), MonthlyCostLimit: amountPointer("9.010"), CostBasis: "charge",
+			}},
+		}
+		for _, tc := range cases {
+			t.Run(tc.name, func(t *testing.T) {
+				name := "template"
+				authority := access.Authority{ProjectID: &id, Policy: access.KeyPolicy{
+					LimitTemplate: &name, RequestsPerMinute: tc.local.RequestsPerMinute, TokensPerMinute: tc.local.TokensPerMinute,
+					MaxConcurrency: tc.local.MaxConcurrency, DailyCostLimit: tc.local.DailyCostLimit,
+					WeeklyCostLimit: tc.local.WeeklyCostLimit, MonthlyCostLimit: tc.local.MonthlyCostLimit, CostBasis: tc.local.CostBasis,
+				}}
+				if err := authority.BindLimitTemplates(access.LimitTemplates{name: tc.template}); err != nil {
+					t.Fatal(err)
+				}
+				localJSON, err := json.Marshal(tc.local)
+				if err != nil {
+					t.Fatal(err)
+				}
+				templateJSON, err := json.Marshal(tc.template)
+				if err != nil {
+					t.Fatal(err)
+				}
+				var result []byte
+				if err := h.Pool.QueryRow(t.Context(), "SELECT olp.effective_limits($1::jsonb, $2::jsonb)", string(localJSON), string(templateJSON)).Scan(&result); err != nil {
+					t.Fatal(err)
+				}
+				var reported access.AdmissionLimits
+				if err := json.Unmarshal(result, &reported); err != nil {
+					t.Fatal(err)
+				}
+				effective := authority.Policy.AdmissionLimits()
+				for _, field := range []struct {
+					name               string
+					admitted, reported *int64
+				}{
+					{"requests", effective.RequestsPerMinute, reported.RequestsPerMinute},
+					{"tokens", effective.TokensPerMinute, reported.TokensPerMinute},
+					{"concurrency", effective.MaxConcurrency, reported.MaxConcurrency},
+				} {
+					if (field.admitted == nil) != (field.reported == nil) {
+						t.Errorf("%s limit is present in only one path", field.name)
+						continue
+					}
+					if field.admitted != nil && *field.admitted != *field.reported {
+						t.Errorf("%s admission = %d, reporting = %d", field.name, *field.admitted, *field.reported)
+					}
+				}
+				for _, field := range []struct {
+					name               string
+					admitted, reported *string
+				}{
+					{"daily", effective.DailyCostLimit, reported.DailyCostLimit},
+					{"weekly", effective.WeeklyCostLimit, reported.WeeklyCostLimit},
+					{"monthly", effective.MonthlyCostLimit, reported.MonthlyCostLimit},
+				} {
+					if (field.admitted == nil) != (field.reported == nil) {
+						t.Errorf("%s limit is present in only one path", field.name)
+						continue
+					}
+					if field.admitted == nil {
+						continue
+					}
+					admittedAmount, admittedErr := decimal.NewFromString(*field.admitted)
+					reportedAmount, reportedErr := decimal.NewFromString(*field.reported)
+					if admittedErr != nil || reportedErr != nil || !admittedAmount.Equal(reportedAmount) {
+						t.Errorf("%s admission = %q, reporting = %q", field.name, *field.admitted, *field.reported)
+					}
+				}
+				if limits.Basis(effective.CostBasis).Pick("cost", "charge") != limits.Basis(reported.CostBasis).Pick("cost", "charge") {
+					t.Errorf("basis admission = %q, reporting = %q", effective.CostBasis, reported.CostBasis)
+				}
+			})
+		}
+	})
 	path := "/api/v1/projects/" + id + "/limit-templates"
 	templates := map[string]any{"key": map[string]any{"requests_per_minute": 2}, "customer": map[string]any{"requests_per_minute": 1}, "group": map[string]any{"requests_per_minute": 2}}
 	put := func(want int) {

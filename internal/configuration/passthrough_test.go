@@ -2,10 +2,27 @@ package configuration
 
 import (
 	"encoding/json"
+	"reflect"
 	"testing"
 
+	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/routing"
 )
+
+func TestSinkNormalizationPreservesSourceStreams(t *testing.T) {
+	source := []string{"requests", "attempts"}
+	doc := Document{Sinks: []SinkEntry{{Name: "sink", Type: "https", Destination: "https://example.test/export", Streams: source}}}
+	server := &Server{Egress: &egress.Policy{}}
+	if err := server.validateAndNormalizeSinks(&doc); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(source, []string{"requests", "attempts"}) {
+		t.Fatalf("normalization changed the source streams: %v", source)
+	}
+	if !reflect.DeepEqual(doc.Sinks[0].Streams, []string{"attempts", "requests"}) {
+		t.Fatalf("streams were not normalized: %v", doc.Sinks[0].Streams)
+	}
+}
 
 func passthroughEntry() *RouteEntry {
 	return &RouteEntry{
@@ -48,4 +65,68 @@ func TestRouteEntryPassthroughBehaviorRoundTrip(t *testing.T) {
 	if out.Passthrough == nil || out.Passthrough.Dialect != "bound-native" || !out.Passthrough.AcknowledgeOpaqueUnmetered {
 		t.Fatalf("passthrough lost in round trip: %+v", out.Passthrough)
 	}
+}
+
+func TestPlanComparisonsPreserveInputs(t *testing.T) {
+	t.Run("provider", func(t *testing.T) {
+		entry := func() ProviderEntry {
+			return ProviderEntry{
+				Name: "provider",
+				Models: []ModelEntry{
+					{UpstreamModel: "second", Capabilities: []CapabilityEntry{{Operation: "embeddings"}, {Operation: "generation"}}},
+					{UpstreamModel: "first"},
+				},
+				Slots: []SlotEntry{
+					{Name: "second", Position: 2, Restrictions: Restrictions{
+						AllowedAPIKeys: []string{"first", "second"}, AllowedModels: []string{"first", "second"}, AllowedRoutes: []string{"first", "second"},
+					}},
+					{Name: "first", Position: 1},
+				},
+			}
+		}
+		other := func() ProviderEntry {
+			return ProviderEntry{
+				Name: "provider",
+				Models: []ModelEntry{
+					{UpstreamModel: "first"},
+					{UpstreamModel: "second", Capabilities: []CapabilityEntry{{Operation: "generation"}, {Operation: "embeddings"}}},
+				},
+				Slots: []SlotEntry{
+					{Name: "first", Position: 1},
+					{Name: "second", Position: 2, Restrictions: Restrictions{
+						AllowedAPIKeys: []string{"second", "first"}, AllowedModels: []string{"second", "first"}, AllowedRoutes: []string{"second", "first"},
+					}},
+				},
+			}
+		}
+		left, right := entry(), other()
+		if !canonicalEqualProvider(&left, &right) {
+			t.Fatal("matching providers compared unequal")
+		}
+		if !reflect.DeepEqual(left, entry()) || !reflect.DeepEqual(right, other()) {
+			t.Fatal("provider comparison changed its inputs")
+		}
+	})
+
+	t.Run("route", func(t *testing.T) {
+		entry := func() RouteEntry {
+			return RouteEntry{
+				Slug: "route", Operations: []string{"generation", "embeddings"},
+				Targets: []TargetEntry{{Provider: "second", Tags: []string{"second", "first"}}, {Provider: "first"}},
+			}
+		}
+		other := func() RouteEntry {
+			return RouteEntry{
+				Slug: "route", Operations: []string{"embeddings", "generation"},
+				Targets: []TargetEntry{{Provider: "first"}, {Provider: "second", Tags: []string{"first", "second"}}},
+			}
+		}
+		left, right := entry(), other()
+		if !canonicalEqualRoute(&left, &right) {
+			t.Fatal("matching routes compared unequal")
+		}
+		if !reflect.DeepEqual(left, entry()) || !reflect.DeepEqual(right, other()) {
+			t.Fatal("route comparison changed its inputs")
+		}
+	})
 }

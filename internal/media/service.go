@@ -8,6 +8,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/protocols/wire"
 	"github.com/tyk-swe/olp/internal/routing"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -488,17 +489,8 @@ func (s *Service) confirmDeletion(ctx context.Context, record *JobRecord, claimI
 
 // VideoState maps an upstream status onto the durable job state.
 func VideoState(status string) (State, bool) {
-	switch status {
-	case "queued":
-		return StateQueued, true
-	case "in_progress":
-		return StateRunning, true
-	case "completed":
-		return StateSucceeded, true
-	case "failed":
-		return StateFailed, true
-	}
-	return "", false
+	state, ok := wire.VideoJobStateOf(status)
+	return State(state), ok
 }
 
 // failureClassCode reduces a transport failure to a bounded error class for

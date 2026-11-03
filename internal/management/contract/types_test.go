@@ -3,12 +3,166 @@ package contract_test
 import (
 	"encoding/json"
 	"os"
+	"regexp"
 	"slices"
+	"strings"
 	"testing"
 
+	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/management/contract"
+	"github.com/tyk-swe/olp/internal/providers"
+	"github.com/tyk-swe/olp/internal/routeidentity"
+	"github.com/tyk-swe/olp/internal/routing"
+	"github.com/tyk-swe/olp/internal/upstream"
 	"github.com/tyk-swe/olp/internal/usage"
 )
+
+func TestCommitmentPeriodsAgreeWithManagementContract(t *testing.T) {
+	raw, err := os.ReadFile("../../../openapi/management.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var document struct {
+		Components struct {
+			Schemas map[string]json.RawMessage `json:"schemas"`
+		} `json:"components"`
+	}
+	if err := json.Unmarshal(raw, &document); err != nil {
+		t.Fatal(err)
+	}
+	var commitment struct {
+		Properties map[string]struct {
+			Enum []string `json:"enum"`
+		} `json:"properties"`
+	}
+	if err := json.Unmarshal(document.Components.Schemas["Commitment"], &commitment); err != nil {
+		t.Fatal(err)
+	}
+	periods := commitment.Properties["period"].Enum
+	if len(periods) == 0 {
+		t.Fatal("contract declares no commitment periods")
+	}
+	for _, period := range append(slices.Clone(periods), "week", "") {
+		t.Run(period, func(t *testing.T) {
+			cfg := providers.Configuration{Kind: providers.KindOpenAI, AuthMode: "api_key"}
+			cfg.Normalize()
+			cfg.Options.Commitment = &routing.Commitment{Amount: "1", Period: period}
+			if accepted, published := cfg.ValidateAndNormalize(&egress.Policy{}) == nil, slices.Contains(periods, period); accepted != published {
+				t.Errorf("period %q accepted = %v, published = %v", period, accepted, published)
+			}
+		})
+	}
+}
+
+func TestRoutingStrategiesAgreeWithManagementContract(t *testing.T) {
+	choices := openAPIEnum(t, "RoutingStrategy")
+	for _, choice := range append(slices.Clone(choices), "unknown") {
+		t.Run(choice, func(t *testing.T) {
+			want := slices.Contains(choices, choice)
+			preferences := routing.Preferences{Strategy: &choice}
+			policy := routing.Policy{AllowedStrategies: []string{choice}}
+			if got := preferences.Validate("preferences") == nil; got != want {
+				t.Errorf("request strategy acceptance = %t, contract acceptance = %t", got, want)
+			}
+			if got := policy.Validate() == nil; got != want {
+				t.Errorf("allowed strategy acceptance = %t, contract acceptance = %t", got, want)
+			}
+		})
+	}
+}
+
+func TestRouteFailurePoliciesAgreeWithManagementContract(t *testing.T) {
+	raw, err := os.ReadFile("../../../openapi/management.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var document struct {
+		Components struct {
+			Schemas map[string]struct {
+				PropertyNames struct {
+					Enum []string `json:"enum"`
+				} `json:"propertyNames"`
+			} `json:"schemas"`
+		} `json:"components"`
+	}
+	if err := json.Unmarshal(raw, &document); err != nil {
+		t.Fatal(err)
+	}
+	retries := document.Components.Schemas["RouteRetry"].PropertyNames.Enum
+	if len(retries) == 0 {
+		t.Fatal("contract declares no retry classes")
+	}
+	fallbacks := openAPIEnum(t, "FallbackCondition")
+	classes := []string{
+		string(upstream.Connect), string(upstream.Timeout), string(upstream.RateLimit), string(upstream.ServerError),
+		string(upstream.ClientError), string(upstream.Credential), string(upstream.Protocol), string(upstream.Cancelled),
+		string(upstream.ContextWindow), string(upstream.ContentFilter), string(upstream.Ambiguous),
+		routing.FallbackExhausted, routing.FallbackBudget, "unknown",
+	}
+	for _, tc := range []struct {
+		name     string
+		declared []string
+		validate func(string) error
+	}{
+		{"retry", retries, func(value string) error {
+			return (routing.Behavior{Retry: routing.Retry{value: {MaxRetries: 1, BaseBackoffMS: 1, MaxBackoffMS: 1}}}).Validate("source", nil)
+		}},
+		{"fallback", fallbacks, func(value string) error {
+			return (routing.Behavior{Fallbacks: []routing.Fallback{{Route: "backup", On: []string{value}}}}).Validate("source", nil)
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			for _, value := range append(slices.Clone(tc.declared), classes...) {
+				if err := tc.validate(value); (err == nil) != slices.Contains(tc.declared, value) {
+					t.Errorf("contract and route validation disagree for %q: %v", value, err)
+				}
+			}
+		})
+	}
+}
+
+func TestRouteNamesAgreeWithManagementContract(t *testing.T) {
+	raw, err := os.ReadFile("../../../openapi/management.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var document struct {
+		Components struct {
+			Schemas map[string]struct {
+				Properties map[string]struct {
+					Pattern string `json:"pattern"`
+				} `json:"properties"`
+			} `json:"schemas"`
+		} `json:"components"`
+	}
+	if err := json.Unmarshal(raw, &document); err != nil {
+		t.Fatal(err)
+	}
+	for _, field := range []struct{ schema, property string }{
+		{"CodeRouteWrite", "slug"},
+		{"ConfigurationCodeRoute", "slug"},
+		{"RouteFallback", "route"},
+		{"RouteSelector", "route"},
+		{"WorkloadMapping", "limit_template"},
+		{"ConfigurationWorkloadMapping", "limit_template"},
+	} {
+		t.Run(field.schema+"/"+field.property, func(t *testing.T) {
+			pattern := document.Components.Schemas[field.schema].Properties[field.property].Pattern
+			if pattern == "" {
+				t.Fatal("contract does not constrain the identifier")
+			}
+			expression, err := regexp.Compile(pattern)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, value := range []string{"route", "route.name", "route-2", "_route", "route/name", "", strings.Repeat("a", 100), strings.Repeat("a", 101)} {
+				if expression.MatchString(value) != routeidentity.ValidSlug(value) {
+					t.Errorf("contract and route validation disagree for %q", value)
+				}
+			}
+		})
+	}
+}
 
 func openAPIEnum(t *testing.T, schema string) []string {
 	t.Helper()

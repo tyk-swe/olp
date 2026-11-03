@@ -112,7 +112,7 @@ func TestFocusConformance(t *testing.T) {
 		}
 		_, parts := buildFocusParts(focusSink{Destination: Destination{ID: "s"}, costBasis: basis}, fc.day, 1, rows)
 		for _, part := range parts {
-			report, err := focusspec.Validate(bytes.NewReader(gunzip(t, part.body)), FocusCriteria)
+			report, err := focusspec.Validate(bytes.NewReader(gunzip(t, part.body)), focusCriteria())
 			if err != nil {
 				t.Fatalf("%s: validate: %v", basis, err)
 			}
@@ -163,7 +163,7 @@ func TestFocusManifest(t *testing.T) {
 		t.Fatalf("manifest dates: %v", doc)
 	}
 	criteria := doc["applicability_criteria"].([]any)
-	if len(criteria) != len(FocusCriteria) {
+	if len(criteria) != len(focusCriteria()) {
 		t.Fatalf("criteria %v", criteria)
 	}
 	meta := doc["metadata"].(map[string]any)
@@ -216,7 +216,7 @@ func TestUnusedCommitmentConformance(t *testing.T) {
 	_ = writer.Write(purchase)
 	_ = writer.Write(unused)
 	writer.Flush()
-	report, err := focusspec.Validate(bytes.NewReader(csvData.Bytes()), FocusCriteria)
+	report, err := focusspec.Validate(bytes.NewReader(csvData.Bytes()), focusCriteria())
 	if err != nil {
 		t.Fatal(err)
 	}

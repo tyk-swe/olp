@@ -7,11 +7,38 @@ import (
 	"math"
 	"net/http"
 	"net/url"
+	"reflect"
 	"testing"
 
 	"github.com/google/uuid"
 	"github.com/tyk-swe/olp/internal/limits"
 )
+
+func TestAPIKeyAttributionKeysRoundTrip(t *testing.T) {
+	h := newAccessHarness(t)
+	owner := h.owner()
+	created := h.want(owner, "POST", "/api/v1/api-keys", map[string]any{
+		"name": "attribution policy", "allowed_attribution_keys": nil,
+	}, map[string]string{"Idempotency-Key": uuid.NewString()}, 201)
+	path := "/api/v1/api-keys/" + created["id"].(string)
+	assertKeys := func(want []any) map[string]any {
+		t.Helper()
+		record := h.want(owner, "GET", path, nil, nil, 200)
+		if got := record["allowed_attribution_keys"]; !reflect.DeepEqual(got, want) {
+			t.Fatalf("allowed attribution keys = %#v, want %#v", got, want)
+		}
+		return record
+	}
+	createdRecord := assertKeys([]any{})
+	h.want(owner, "PATCH", path, map[string]any{"allowed_attribution_keys": []string{"team"}}, etagHeader(createdRecord), 200)
+	configured := assertKeys([]any{"team"})
+	h.want(owner, "PATCH", path, map[string]any{"allowed_attribution_keys": nil}, etagHeader(configured), 200)
+	cleared := assertKeys([]any{})
+	h.want(owner, "POST", path+"/rotate", nil, map[string]string{
+		"If-Match": etagHeader(cleared)["If-Match"], "Idempotency-Key": uuid.NewString(),
+	}, 200)
+	assertKeys([]any{})
+}
 
 func TestAPIKeyListingsPreserveIntegerPrecision(t *testing.T) {
 	h := newAccessHarness(t)

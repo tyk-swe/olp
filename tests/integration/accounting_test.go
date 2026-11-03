@@ -5,12 +5,15 @@ package integration_test
 import (
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/tyk-swe/olp/internal/database"
+	"github.com/tyk-swe/olp/internal/routeidentity"
 	"github.com/tyk-swe/olp/internal/usage"
 )
 
@@ -391,6 +394,40 @@ func TestAccountingPersistsPricedAttemptsAndIsReplaySafe(t *testing.T) {
 	if _, err := acctPersistErr(t, fixture, conflicting); !errors.Is(err, usage.ErrInvalidEvent) {
 		t.Fatalf("conflicting event error = %v, want ErrInvalidEvent", err)
 	}
+
+	t.Run("selector validation matches stored facts", func(t *testing.T) {
+		tx, err := fixture.Pool.Begin(t.Context())
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer tx.Rollback(t.Context())
+		for _, selector := range []string{
+			"selector", "a-1", strings.Repeat("a", 63), "", "Selector",
+			"a_b", "a/1", "a\n", strings.Repeat("a", 64),
+		} {
+			t.Run(selector, func(t *testing.T) {
+				valid := routeidentity.ValidSelectorID(selector)
+				if _, err := tx.Exec(t.Context(), "SAVEPOINT selector_case"); err != nil {
+					t.Fatal(err)
+				}
+				tag, updateErr := tx.Exec(t.Context(), `UPDATE olp.attempt_usage_facts
+					SET selector = $1 WHERE request_id = $2::uuid AND attempt_ordinal = 1`, selector, event.RequestID)
+				if _, err := tx.Exec(t.Context(), "ROLLBACK TO SAVEPOINT selector_case"); err != nil {
+					t.Fatal(err)
+				}
+				if updateErr == nil {
+					if !valid || tag.RowsAffected() != 1 {
+						t.Fatalf("database accepted selector, rows = %d, valid = %v", tag.RowsAffected(), valid)
+					}
+					return
+				}
+				pgErr, ok := errors.AsType[*pgconn.PgError](updateErr)
+				if valid || !ok || pgErr.Code != "23514" {
+					t.Fatalf("database rejected selector, valid = %v, error = %v", valid, updateErr)
+				}
+			})
+		}
+	})
 }
 
 // The rejection is admitted as a gap of unknown size rather than
@@ -637,4 +674,55 @@ func TestAccountingRecordsTheInputEstimateOfEachAttempt(t *testing.T) {
 	if estimate != nil || provenance != "" || family != "" {
 		t.Fatalf("an unestimated attempt recorded %v %q %q", estimate, provenance, family)
 	}
+	t.Run("estimate validation matches stored facts", func(t *testing.T) {
+		tx, err := fixture.Pool.Begin(t.Context())
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer tx.Rollback(t.Context())
+		cases := []struct {
+			name       string
+			tokens     *int64
+			provenance string
+			family     string
+			valid      bool
+		}{
+			{name: "unestimated", valid: true},
+			{name: "zero estimate", tokens: acctPtr(int64(0)), provenance: usage.EstimateTokenizer, family: "family", valid: true},
+			{name: "calibrated estimate", tokens: acctPtr(int64(1)), provenance: usage.EstimateCalibrated, family: "family-1_name", valid: true},
+			{name: "heuristic estimate", tokens: acctPtr(int64(42)), provenance: usage.EstimateHeuristic, family: strings.Repeat("a", 64), valid: true},
+			{name: "negative estimate", tokens: acctPtr(int64(-1)), provenance: usage.EstimateTokenizer},
+			{name: "missing provenance", tokens: acctPtr(int64(1))},
+			{name: "missing estimate", provenance: usage.EstimateTokenizer},
+			{name: "unknown provenance", tokens: acctPtr(int64(1)), provenance: "unknown"},
+			{name: "invalid family", family: "Family"},
+			{name: "long family", family: strings.Repeat("a", 65)},
+		}
+		for _, tc := range cases {
+			t.Run(tc.name, func(t *testing.T) {
+				if got := usage.ValidEstimate(tc.tokens, tc.provenance, tc.family); got != tc.valid {
+					t.Fatalf("estimate validation = %v, want %v", got, tc.valid)
+				}
+				if _, err := tx.Exec(t.Context(), "SAVEPOINT estimate_case"); err != nil {
+					t.Fatal(err)
+				}
+				tag, updateErr := tx.Exec(t.Context(), `UPDATE olp.attempt_usage_facts
+					SET estimated_input_tokens = $1, estimate_provenance = $2, model_family = $3
+					WHERE request_id = $4::uuid`, tc.tokens, tc.provenance, tc.family, legacy.RequestID)
+				if _, err := tx.Exec(t.Context(), "ROLLBACK TO SAVEPOINT estimate_case"); err != nil {
+					t.Fatal(err)
+				}
+				if updateErr == nil {
+					if !tc.valid || tag.RowsAffected() != 1 {
+						t.Fatalf("database accepted estimate, rows = %d, valid = %v", tag.RowsAffected(), tc.valid)
+					}
+					return
+				}
+				pgErr, ok := errors.AsType[*pgconn.PgError](updateErr)
+				if tc.valid || !ok || pgErr.Code != "23514" {
+					t.Fatalf("database rejected estimate, valid = %v, error = %v", tc.valid, updateErr)
+				}
+			})
+		}
+	})
 }

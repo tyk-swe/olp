@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/protocols/wire"
 	"github.com/tyk-swe/olp/internal/routing"
 
 	"github.com/google/uuid"
@@ -102,10 +103,10 @@ func (l Lifecycle) NeedsReconciliation() bool {
 type State string
 
 const (
-	StateQueued    State = "queued"
-	StateRunning   State = "running"
-	StateSucceeded State = "succeeded"
-	StateFailed    State = "failed"
+	StateQueued    State = State(wire.VideoJobQueued)
+	StateRunning   State = State(wire.VideoJobRunning)
+	StateSucceeded State = State(wire.VideoJobSucceeded)
+	StateFailed    State = State(wire.VideoJobFailed)
 	StateCancelled State = "cancelled"
 )
 

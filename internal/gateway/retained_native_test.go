@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"mime"
 	"mime/multipart"
@@ -20,6 +21,84 @@ import (
 	"github.com/tyk-swe/olp/internal/retainedapi"
 	"github.com/tyk-swe/olp/internal/routing"
 )
+
+func TestRetainedContainerDefaultTierSurvivesObservation(t *testing.T) {
+	endpoint := retainedapi.Endpoint{Family: retainedapi.Family{Kind: "container"}, Action: "create"}
+	request, err := oif.ParseJSON([]byte(`{}`), oif.Limits{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	metadata, err := retainedInputMetadata(&pin{}, nil, "key", endpoint, request, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tier, ok := metadata["memory_tier"].(string)
+	if !ok || tier == "" {
+		t.Fatal("container admission did not record a default memory tier")
+	}
+	responseBody, err := json.Marshal(map[string]string{"memory_limit": tier})
+	if err != nil {
+		t.Fatal(err)
+	}
+	response, err := oif.ParseJSON(responseBody, oif.Limits{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	explicitMetadata, err := retainedInputMetadata(&pin{}, nil, "key", endpoint, response, nil)
+	if err != nil || explicitMetadata["memory_tier"] != tier {
+		t.Fatalf("explicit tier %q rejected or changed: %v", tier, err)
+	}
+	storedMetadata, err := json.Marshal(metadata)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resource := &resources.Resource{Kind: "container", Metadata: storedMetadata}
+	if err := resources.EnrichRetained(resource, endpoint, response, time.Unix(1000, 0)); err != nil {
+		t.Fatalf("admitted memory tier %q rejected during observation: %v", tier, err)
+	}
+	var observed struct {
+		MemoryTier string `json:"memory_tier"`
+	}
+	if err := json.Unmarshal(resource.Metadata, &observed); err != nil || observed.MemoryTier != tier {
+		t.Fatalf("observed tier %q does not match admitted tier %q: %v", observed.MemoryTier, tier, err)
+	}
+}
+
+func TestRetainedFileFieldsSurviveCreationAndRefresh(t *testing.T) {
+	created := []byte(`{"object":"file","purpose":"batch","filename":"before.jsonl","bytes":12,"status":"uploaded","status_details":"initial","expires_at":200,"created_at":100,"private_content":"hidden"}`)
+	refreshed := []byte(`{"object":"file","purpose":"batch","filename":"after.jsonl","bytes":15,"status":"processed","status_details":"ready","expires_at":300,"created_at":100,"private_content":"hidden"}`)
+	metadata, state, expires := fileMetadata(created, "")
+	resource := &resources.Resource{ID: "file-local", Kind: resources.KindFile, State: state, Metadata: metadata, ExpiresAt: expires}
+	assertProjection := func(source []byte) {
+		t.Helper()
+		body, err := (&Server{}).fileObject(context.Background(), resource)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var expected, actual map[string]json.RawMessage
+		if json.Unmarshal(source, &expected) != nil || json.Unmarshal(body, &actual) != nil {
+			t.Fatal("file source or projection is not JSON")
+		}
+		for _, field := range []string{"object", "purpose", "filename", "bytes", "status", "status_details", "expires_at", "created_at"} {
+			if !bytes.Equal(actual[field], expected[field]) {
+				t.Errorf("field %s = %s, want %s", field, actual[field], expected[field])
+			}
+		}
+		if _, exposed := actual["private_content"]; exposed {
+			t.Fatal("file projection exposed private content")
+		}
+	}
+	assertProjection(created)
+	document, err := oif.ParseJSON(refreshed, oif.Limits{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	endpoint := retainedapi.Endpoint{Family: retainedapi.Family{Kind: resources.KindFile}, Action: "get"}
+	if err := resources.EnrichRetained(resource, endpoint, document, time.Unix(1000, 0)); err != nil {
+		t.Fatal(err)
+	}
+	assertProjection(refreshed)
+}
 
 func TestRetainedPinnedEvalFixtures(t *testing.T) {
 	for _, tc := range []struct{ file, kind string }{{"openai-eval-definition", "eval"}, {"openai-eval-output", "eval_output_item"}} {
@@ -368,6 +447,22 @@ func TestRetainedCorrelationCannotBeSuppliedOrReplaced(t *testing.T) {
 		if err != nil || !strings.Contains(string(body), r.UUID.String()) || !strings.Contains(string(body), `"user":"value"`) {
 			t.Fatalf("correlation=%s %v", body, err)
 		}
+		var object struct {
+			Metadata map[string]string `json:"metadata"`
+		}
+		if err := json.Unmarshal(body, &object); err != nil || object.Metadata["olp_submission_id"] != r.UUID.String() {
+			t.Fatalf("correlation marker missing from metadata: %s %v", body, err)
+		}
+	}
+	body, err := retainedCorrelationBody(retainedapi.Endpoint{Family: e.Family, Action: "create"}, r, []byte(`{}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var object struct {
+		Metadata map[string]string `json:"metadata"`
+	}
+	if err := json.Unmarshal(body, &object); err != nil || object.Metadata["olp_submission_id"] != r.UUID.String() {
+		t.Fatalf("correlation marker missing from new metadata: %s %v", body, err)
 	}
 }
 
@@ -405,22 +500,24 @@ func TestRetainedNativeMethodRefusals(t *testing.T) {
 func TestRetainedVertexUsesNativeLabelsForCorrelation(t *testing.T) {
 	r := &resources.Resource{UUID: uuid.New()}
 	e := retainedapi.Endpoint{Family: retainedapi.Family{Kind: "vertex_tuning_job", Operation: "fine_tuning"}, Action: "create"}
-	body, err := retainedCorrelationBody(e, r, []byte(`{"baseModel":"m","labels":{"tenant_id":"customer"}}`))
-	if err != nil {
-		t.Fatal(err)
-	}
-	document, _ := oif.ParseJSON(body, oif.Limits{})
-	labels, _ := document.Root().Lookup("labels")
-	marker, _ := labels.Lookup("olp_submission_id")
-	id, _ := marker.Text()
-	if id != r.UUID.String() {
-		t.Fatalf("missing native label: %s", body)
-	}
-	if _, err = retainedapi.Rewrite(document, nil, func(string, string) (string, error) {
-		t.Fatal("literal labels became resource authority")
-		return "", nil
-	}); err != nil {
-		t.Fatal(err)
+	for _, input := range []string{`{"baseModel":"m"}`, `{"baseModel":"m","labels":{"tenant_id":"customer"}}`} {
+		body, err := retainedCorrelationBody(e, r, []byte(input))
+		if err != nil {
+			t.Fatal(err)
+		}
+		document, _ := oif.ParseJSON(body, oif.Limits{})
+		labels, _ := document.Root().Lookup("labels")
+		marker, _ := labels.Lookup("olp_submission_id")
+		id, _ := marker.Text()
+		if id != r.UUID.String() {
+			t.Fatalf("missing native label: %s", body)
+		}
+		if _, err = retainedapi.Rewrite(document, nil, func(string, string) (string, error) {
+			t.Fatal("literal labels became resource authority")
+			return "", nil
+		}); err != nil {
+			t.Fatal(err)
+		}
 	}
 }
 

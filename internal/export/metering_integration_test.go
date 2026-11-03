@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -126,7 +127,7 @@ func pendingFor(t *testing.T, pool *pgxpool.Pool, sink string) int64 {
 
 func runWorker(t *testing.T, pool *pgxpool.Pool, installation string, ring *secrets.KeyRing) *Worker {
 	t.Helper()
-	sender := NewSender(matrixPolicy())
+	sender := NewSender(matrixPolicy(), os.Getenv)
 	sender.Installation = installation
 	w := &Worker{Pool: pool, Keys: ring, Installation: installation, Sender: sender,
 		Log: slog.New(slog.NewTextHandler(io.Discard, nil))}

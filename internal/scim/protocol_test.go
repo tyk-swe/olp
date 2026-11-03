@@ -107,6 +107,21 @@ func TestNullAttributeMembershipRespectsResourceSchema(t *testing.T) {
 	}
 }
 
+func TestNameSubattributesDecodeAndFilterIgnoringCase(t *testing.T) {
+	for _, field := range NameSubattributes() {
+		document, err := Decode(strings.NewReader(`{"name":{"` + strings.ToUpper(field) + `":"sample"}}`))
+		if err != nil {
+			t.Fatalf("decode %s: %v", field, err)
+		}
+		if got := document["name"].(map[string]any)[field]; got != "sample" {
+			t.Fatalf("decoded %s=%v", field, got)
+		}
+		if _, err := (&SQLFilter{Schema: UserSchema}).Compile(`name.`+strings.ToUpper(field)+` eq "sample"`, "document"); err != nil {
+			t.Fatalf("filter %s: %v", field, err)
+		}
+	}
+}
+
 func TestSchemaFiltersPreserveValuesAndRejectInvalidNullComparisons(t *testing.T) {
 	for _, schema := range []string{"", UserSchema} {
 		for _, value := range []string{"O'Reilly", "x' OR true --"} {

@@ -9,6 +9,7 @@ vi.mock('./api', async (original) => ({
   ...(await original<typeof import('./api')>()),
   listExportSinks: vi.fn(),
   createExportSink: vi.fn(),
+  updateExportSink: vi.fn(),
   getCaptureConfiguration: vi.fn(),
   listCapturePolicies: vi.fn(),
   listCaptureSinkOptions: vi.fn(),
@@ -110,6 +111,67 @@ it.each([
     expect(checkbox(host, 'Trace spans (client asserted)').checked).toBe(true);
   });
 });
+
+it.each([89, 120])(
+  'allows an existing FOCUS start date %i days ago',
+  async (days) => {
+    const now = Date.UTC(2035, 7, 20, 12);
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(now);
+    onTestFinished(() => clock.mockRestore());
+    const startDate = new Date(now - days * 24 * 60 * 60 * 1000)
+      .toISOString()
+      .slice(0, 10);
+    const sink: api.ExportSink = {
+      export_sink_id: 'sink',
+      name: 'FOCUS sink',
+      project_id: null,
+      type: 's3',
+      destination: 's3://focus-bucket/exports',
+      streams: ['focus'],
+      format: 'csv_gzip',
+      filter: null,
+      enabled: true,
+      credential_configured: false,
+      etag: 'etag',
+      status: [],
+      settings: { cost_basis: 'cost', start_date: startDate }
+    };
+    vi.mocked(api.listExportSinks).mockResolvedValue([sink]);
+    vi.mocked(api.updateExportSink).mockResolvedValue(sink);
+    const host = document.createElement('div');
+    document.body.append(host);
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false } }
+    });
+    const component = mount(ObservabilityProbe, {
+      target: host,
+      props: { client }
+    });
+    onTestFinished(async () => {
+      await unmount(component);
+      client.clear();
+      host.remove();
+    });
+
+    await vi.waitFor(() => expect(host.textContent).toContain(sink.name));
+    button(host, 'Edit').click();
+    flushSync();
+    await vi.waitFor(() => {
+      expect(
+        host.querySelector<HTMLInputElement>('#sink-focus-start')?.value
+      ).toBe(startDate);
+    });
+    button(host, 'Save sink').click();
+    await vi.waitFor(() => {
+      expect(api.updateExportSink).toHaveBeenCalledWith(
+        sink,
+        expect.objectContaining({
+          settings: { cost_basis: 'cost', start_date: startDate }
+        })
+      );
+    });
+  }
+);
 
 function fill(host: HTMLElement, label: string, value: string) {
   const labelElement = [...host.querySelectorAll('label')].find(

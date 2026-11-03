@@ -13,6 +13,7 @@ import (
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/limits"
+	"github.com/tyk-swe/olp/internal/protocols/wire"
 	"github.com/tyk-swe/olp/internal/resources"
 	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/runtime"
@@ -545,22 +546,13 @@ func strictAdoptionMatches(result, effective []byte, inputFileID string) bool {
 		InputFileID string `json:"input_file_id"`
 	}
 	if json.Unmarshal(result, &batch) != nil || batch.ID == "" || batch.InputFileID != inputFileID ||
-		batchStateRank(batch.Status) == 0 {
+		wire.BatchStageOf(batch.Status) == wire.BatchUnknown {
 		return false
 	}
 	var request struct {
 		InputFileID string `json:"input_file_id"`
 	}
 	return json.Unmarshal(effective, &request) == nil && request.InputFileID == inputFileID
-}
-
-func batchStateRank(state string) int {
-	switch state {
-	case "validating", "in_progress", "finalizing", "cancelling",
-		"completed", "failed", "expired", "cancelled":
-		return 1
-	}
-	return 0
 }
 
 func resourceModel(template *usage.Event) string {

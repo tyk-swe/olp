@@ -1,10 +1,45 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import { gatewayFetch } from '$lib/api/gateway';
+import { translateAudio } from './audioTranslation';
 import { runNativeOperation } from './nativeOperation';
 
 vi.mock('$lib/api/gateway', () => ({ gatewayFetch: vi.fn() }));
 
 afterEach(() => vi.clearAllMocks());
+
+it('enforces the published route length for native and audio requests', async () => {
+  const route = 'a'.repeat(101);
+  const validRoute = 'a'.repeat(100);
+  const file = new File(['audio'], 'audio.wav', { type: 'audio/wav' });
+  await expect(
+    runNativeOperation(
+      'ocr',
+      'azure-document-intelligence-ocr',
+      route,
+      'olp_test',
+      '{"model":"","base64Source":"QUJD"}'
+    )
+  ).rejects.toThrow('Choose an active published route slug.');
+  await expect(
+    translateAudio(route, 'olp_test', file, '', '', 'json')
+  ).rejects.toThrow('Choose an active published route slug.');
+  expect(gatewayFetch).not.toHaveBeenCalled();
+  vi.mocked(gatewayFetch)
+    .mockResolvedValueOnce(new Response('{}'))
+    .mockResolvedValueOnce(new Response('{}'));
+  const native = await runNativeOperation(
+    'ocr',
+    'azure-document-intelligence-ocr',
+    validRoute,
+    'olp_test',
+    '{"model":"","base64Source":"QUJD"}'
+  );
+  expect(native.request).toMatchObject({ model: validRoute });
+  await expect(
+    translateAudio(validRoute, 'olp_test', file, '', '', 'json')
+  ).resolves.toBe('{}');
+  expect(gatewayFetch).toHaveBeenCalledTimes(2);
+});
 
 it.each([
   'perplexity-search',

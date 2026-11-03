@@ -9,9 +9,6 @@ import (
 // certification. Generic endpoints never acquire native cross-surface
 // privileges by declaring a tuple or impersonating an official vendor. A
 // vendor with a reviewed contract is limited to the operations it lists.
-// Media tuples mirror the reviewed matrix: image, audio, and video
-// operations exist only on the OpenAI surface of the OpenAI connector
-// families; no other connector may serve them.
 func Supports(kind, vendor, operation, surface, mode string) bool {
 	if retainedapi.Operation(operation) {
 		if operation == "agent_resource" {

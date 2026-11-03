@@ -133,7 +133,7 @@ func (s *Server) createProvider(r *http.Request, _ access.Principal) (access.Rep
 	if err = input.Configuration.Pin(r.Context(), tx, s.Unconfined); err != nil {
 		return access.Reply{}, err
 	}
-	if err = input.Configuration.Validate(s.Egress); err != nil {
+	if err = input.Configuration.ValidateAndNormalize(s.Egress); err != nil {
 		return access.Reply{}, err
 	}
 	switch cfg := &input.Configuration; {
@@ -542,7 +542,7 @@ func (s *Server) activateProvider(r *http.Request, _ access.Principal) (access.R
 		if err := current.Configuration.Pin(ctx, tx, s.Unconfined); err != nil {
 			return access.Reply{}, err
 		}
-		if err := current.Configuration.Validate(s.Egress); err != nil {
+		if err := current.Configuration.ValidateAndNormalize(s.Egress); err != nil {
 			return access.Reply{}, err
 		}
 		if err := validateNetworkReference(ctx, tx, current.ID, &current.Configuration); err != nil {
