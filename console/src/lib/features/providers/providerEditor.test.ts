@@ -102,6 +102,28 @@ describe('provider editing', () => {
     });
   });
 
+  it.each([
+    [
+      'not JSON',
+      'Enter a JSON object with store, secret_id and immutable version.'
+    ],
+    [
+      '{"store":"vault","secret_id":"service-key","version":""}',
+      'Choose a supported store, secret ID and immutable version.'
+    ]
+  ])(
+    'rejects an invalid external credential reference before submission',
+    (reference, issue) => {
+      const draft = createProviderDraft(spec);
+      draft.name = 'Service';
+      draft.endpoint = 'https://example.test/v1';
+      draft.useExternalCredential = true;
+      draft.externalCredentialReference = reference;
+
+      expect(validateProviderDraft(draft, spec)).toBe(issue);
+    }
+  );
+
   it('clears connection details and credentials when switching kind', () => {
     const draft = createProviderDraft(spec);
     draft.name = 'Service';
