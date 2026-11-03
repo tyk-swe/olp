@@ -15,7 +15,7 @@ const key: ApiKey = {
   id: 'key-id',
   lookup_id: 'lookup-id',
   name: 'Service',
-  etag: 'key-version',
+  etag: '018f1234-5678-7abc-8def-0123456789ab',
   project_id: null,
   project_name: null,
   budget_group_id: null,

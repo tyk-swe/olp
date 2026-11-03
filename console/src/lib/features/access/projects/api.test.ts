@@ -25,7 +25,7 @@ import {
 const project: Project = {
   id: 'project-id',
   name: 'Project',
-  etag: 'project-version',
+  etag: '018f1234-5678-7abc-8def-0123456789ab',
   created_at: '2026-01-01T00:00:00Z',
   updated_at: '2026-01-01T00:00:00Z',
   created_by: 'owner-id',
@@ -190,7 +190,7 @@ describe('project API', () => {
             : 'DELETE',
         path
       );
-      expect(request.headers.get('If-Match')).toBe('"project-version"');
+      expect(request.headers.get('If-Match')).toBe(`"${project.etag}"`);
       if (request.method === 'PATCH') {
         expect(await request.json()).toEqual({ name: 'Renamed' });
         return json({ ...project, name: 'Renamed' });
