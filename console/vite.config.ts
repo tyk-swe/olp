@@ -49,12 +49,10 @@ export default defineConfig({
         }
       },
       {
-        // Runes and component lifecycles only exist in Svelte's client build,
-        // which needs both a DOM and the browser export conditions.
         extends: true,
         resolve: { conditions: ['browser'] },
         test: {
-          name: 'client',
+          name: 'svelte',
           environment: 'jsdom',
           include: ['src/**/*.svelte.test.ts']
         }

@@ -80,24 +80,12 @@ func Supports(kind, operation, surface, mode string) bool {
 	if mode != "unary" {
 		return false
 	}
-	openAI := (kind == "openai" || kind == "azure_openai") && surface == "openai"
-	switch operation {
-	case "agent_resource":
-		return kind == "gemini" && surface == "gemini"
-	case "context_cache":
-		return kind == "gemini" && surface == "gemini"
-	case "skill":
-		return kind == "anthropic" && surface == "anthropic"
-	case "fine_tuning":
-		return openAI || kind == "vertex_ai" && surface == "native"
-	case "vector_store", "container":
-		return openAI
-	case "conversation", "eval":
-		return kind == "openai" && surface == "openai"
-	case "retrieval":
-		return openAI || surface == "openai" && slices.Contains([]string{"bedrock", "vertex_ai", "azure_ai_search"}, kind)
+	if operation == "retrieval" {
+		return surface == "openai" && slices.Contains([]string{"openai", "azure_openai", "bedrock", "vertex_ai", "azure_ai_search"}, kind)
 	}
-	return false
+	return slices.ContainsFunc(families, func(f Family) bool {
+		return f.Operation == operation && f.Surface == surface && slices.Contains(f.Providers, kind)
+	})
 }
 
 func Kinds() []string {

@@ -62,15 +62,6 @@ is a client error and its 503 a server error that may fail over.
 
 ## Testing
 
-Opt-in paid live qualification uses the default AWS credential chain:
-
-```sh
-OLP_LIVE_PROVIDER=sagemaker \
-OLP_SAGEMAKER_LIVE_REGION=us-west-2 \
-OLP_SAGEMAKER_LIVE_MODEL=my-endpoint \
-go test -tags=liveproviders -count=1 -timeout=2m ./internal/connectors \
-  -run TestLiveProviderNativeGeneration
-```
-
-The bearer token is checked in ordinary tests against tokens botocore produces
-for the same credentials, region and signing time.
+There is no automated SageMaker coverage. Paid live qualification was
+subtracted with the test system. Validate changes by running the gateway
+against a stub or a real endpoint and recording the command and output.

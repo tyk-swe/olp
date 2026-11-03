@@ -35,7 +35,7 @@
     tiers = $bindable<TierRow[]>([]),
     windowZone = $bindable(''),
     windowPeriods = $bindable<WindowPeriodRow[]>([])
-  } = $props<{
+  }: {
     idPrefix: string;
     canEdit?: boolean;
     inputPrice?: string;
@@ -61,7 +61,7 @@
     tiers?: TierRow[];
     windowZone?: string;
     windowPeriods?: WindowPeriodRow[];
-  }>();
+  } = $props();
 
   const weekDays = [
     ['1', 'Mon'],

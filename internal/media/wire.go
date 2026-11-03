@@ -15,6 +15,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/tyk-swe/olp/internal/oif"
+	"github.com/tyk-swe/olp/internal/protocols/wire"
 )
 
 // Operation tags match the runtime selection registry.
@@ -696,9 +697,7 @@ func DecodeTranscription(form *Form) (*Request, *Error) {
 	if responseFormat != nil {
 		format = *responseFormat
 	}
-	switch format {
-	case "json", "text", "srt", "verbose_json", "vtt", "diarized_json":
-	default:
+	if !wire.ValidTranscriptionResponseFormat(format) {
 		return nil, invalidMedia("The transcription response_format is not supported.")
 	}
 	if len(granularities) > 0 && (format != "verbose_json" || !allOf(granularities, "word", "segment")) {
@@ -1477,12 +1476,6 @@ func DecodeVideoObject(body []byte) (*VideoJobResult, *Error) {
 	if encodedWire.Object != "video" {
 		return nil, protocolError("The provider returned an unexpected video object type.")
 	}
-	switch encodedWire.Status {
-	case "queued", "in_progress", "completed", "failed":
-	default:
-		// Unknown provider statuses stay observable through the object but do
-		// not map onto a client-visible lifecycle state.
-	}
 	result := &VideoJobResult{
 		ID: encodedWire.ID, Status: encodedWire.Status, Progress: encodedWire.Progress,
 		CreatedAt: encodedWire.CreatedAt, CompletedAt: encodedWire.Completed, ExpiresAt: encodedWire.Expires,
@@ -1587,9 +1580,10 @@ func ValidStrictVideoJobSource(source oif.Document, upstreamID, model string) bo
 	gotModel, modelText := modelValue.Text()
 	gotObject, objectText := object.Text()
 	gotStatus, statusText := status.Text()
+	_, validStatus := VideoState(gotStatus)
 	return idOK && idText && gotID == upstreamID && modelOK && modelText && gotModel == model &&
 		objectOK && objectText && gotObject == "video" && statusOK && statusText &&
-		slices.Contains([]string{"queued", "in_progress", "completed", "failed"}, gotStatus)
+		validStatus
 }
 
 // DecodeVideoListResponse parses a provider list document.

@@ -10,6 +10,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/tyk-swe/olp/internal/agentcontract"
 )
 
 func TestDurableResolutionEvidenceIdentity(t *testing.T) {
@@ -32,6 +33,31 @@ func TestDurableResolutionEvidenceIdentity(t *testing.T) {
 }
 
 const debitTestID = "0192cf87-d4ab-7f2e-a8b1-c2d3e4f50607"
+
+func TestDurableDebitCurrencySyntax(t *testing.T) {
+	for _, tc := range []struct {
+		currency string
+		valid    bool
+	}{{"ABC", true}, {"", false}, {"AB", false}, {"ABCD", false}, {"abc", false}, {"AB1", false}} {
+		intent := DebitIntent{ID: debitTestID, APIKeyID: debitTestID, ProjectID: debitTestID, ClaimID: debitTestID, Kind: "tool", Currency: tc.currency, CostBound: "1", ChargeBound: "1", PreparedUntil: time.Now().Add(time.Minute), Affinity: ExecutionAffinity{ReleaseID: debitTestID, RevisionID: debitTestID}}
+		if err := intent.validate(); (err == nil) != tc.valid {
+			t.Errorf("currency %q, valid %t, error %v", tc.currency, tc.valid, err)
+		}
+	}
+}
+
+func TestDurableDebitAcceptsPublishedToolAliases(t *testing.T) {
+	alias := agentcontract.ToolAlias(debitTestID, "lookup")
+	for _, tc := range []struct {
+		alias string
+		valid bool
+	}{{alias, true}, {"", true}, {strings.ToUpper(alias), false}, {alias[:len(alias)-1], false}, {"invalid_" + alias, false}} {
+		intent := DebitIntent{ID: debitTestID, APIKeyID: debitTestID, ProjectID: debitTestID, ClaimID: debitTestID, Kind: "tool", Currency: "USD", CostBound: "1", ChargeBound: "1", PreparedUntil: time.Now().Add(time.Minute), Affinity: ExecutionAffinity{ReleaseID: debitTestID, RevisionID: debitTestID, ToolAlias: tc.alias}}
+		if err := intent.validate(); (err == nil) != tc.valid {
+			t.Errorf("alias %q, valid %t, error %v", tc.alias, tc.valid, err)
+		}
+	}
+}
 
 func TestDurableVerificationRefusesUnknownAccountingState(t *testing.T) {
 	for _, test := range []struct {

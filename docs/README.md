@@ -42,7 +42,7 @@ documentation unless a guide links to them for that purpose.
 ## Develop and qualify changes
 
 [Contributing](../CONTRIBUTING.md) covers local setup and the normal change
-workflow. [Testing](../tests/README.md) explains how to select a suite. The
+workflow. [Testing](../tests/README.md) explains the safety net and its budget. The
 remaining guides cover the implementation contracts behind a change.
 
 | Task | Guide |
@@ -51,9 +51,9 @@ remaining guides cover the implementation contracts behind a change.
 | Review trust, authorization, secret and data boundaries | [Security](develop/security.md) |
 | Author a provider or guardrail plugin | [Plugin authoring](develop/plugin-authoring.md) |
 | Maintain signed model facts, prices and calibration data | [Catalog maintenance](develop/catalog.md) |
-| Reproduce benchmarks and assess performance budgets | [Performance](develop/performance.md) |
-| Qualify a candidate and identify outstanding external checks | [Qualification](develop/qualification.md) |
+| Review performance measurement status | [Performance](develop/performance.md) |
+| Review qualification status and outstanding external checks | [Qualification](develop/qualification.md) |
 
 The seven retained console screenshots live in [assets](assets/). The provider,
 console and external-secrets guides link to the screenshot that belongs to each
-workflow. Browser test screenshots use their existing output locations.
+workflow.

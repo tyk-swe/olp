@@ -3,10 +3,9 @@ package usage
 import (
 	"errors"
 	"math"
-	"regexp"
-)
 
-var cacheAmount = regexp.MustCompile(`^[0-9]{1,12}(\.[0-9]{1,12})?$`)
+	"github.com/tyk-swe/olp/internal/pricingpolicy"
+)
 
 // CacheEvidence contains no content; budget debits remain separate from billing.
 type CacheEvidence struct {
@@ -33,7 +32,7 @@ func (e *CacheEvidence) Validate() error {
 		if v == "" {
 			continue
 		}
-		if !cacheAmount.MatchString(v) {
+		if !pricingpolicy.ValidAmount(v) {
 			return errors.New("invalid cache amount")
 		}
 	}

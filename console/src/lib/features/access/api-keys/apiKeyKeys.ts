@@ -1,6 +1,8 @@
+const root = ['api-keys'] as const;
+
 export const apiKeyKeys = {
-  root: ['api-keys'] as const,
-  list: () => ['api-keys', 'list'] as const,
+  root,
+  list: () => [...root, 'list'] as const,
   page: (cursor?: string, createdBy?: string) =>
-    ['api-keys', 'page', createdBy ?? 'all', cursor ?? 'first'] as const
+    [...root, 'page', createdBy ?? 'all', cursor ?? 'first'] as const
 };

@@ -18,7 +18,14 @@ export type ApiKeyFormValue = {
   now?: Date;
 };
 
-const priorityRank = ['critical', 'high', 'normal', 'low'];
+export const admissionPriorities = [
+  'critical',
+  'high',
+  'normal',
+  'low'
+] as const;
+
+const priorityRank: readonly string[] = admissionPriorities;
 
 export function validateApiKey(value: ApiKeyFormValue): Record<string, string> {
   const errors: Record<string, string> = {};

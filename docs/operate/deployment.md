@@ -200,13 +200,13 @@ not measured memory or disk-reliability guarantees, and the node-local spool
 does not replace durable provider job references. Keep analytics in control
 processes and ingestion in workers, with database CPU/I/O headroom for both.
 
-Successful mock suites qualify their tested behavior, not a production SLO,
-live-provider certification, invoice accuracy, or disaster-recovery RPO.
-Validate capacity and failure behavior on the actual deployment; use the
-[testing guide](../../tests/README.md) for qualification scope,
-[performance](../develop/performance.md) for how added latency and CPU per request are
-measured, and [backup and restore](operations.md#backup-and-restore) for
-recovery requirements.
+The fast safety net does not establish a production SLO, live-provider
+certification, invoice accuracy, or disaster-recovery RPO. Validate
+capacity and failure behavior on the actual deployment. Use the
+[testing guide](../../tests/README.md) for net scope,
+[performance](../develop/performance.md) for measurement status, and
+[backup and restore](operations.md#backup-and-restore) for recovery
+requirements.
 
 ### Provider connection capacity
 
@@ -218,9 +218,9 @@ own for each credential slot, capped by default at 64 connections to the host, 1
 idle and 128 idle in all, and a request past the cap waits in the pool without an
 error or a rejection. Size `max_conns_per_host` and `max_idle_conns_per_host`
 (each at most 4,096) for the concurrent requests one credential slot of a provider
-should carry, or spread them over more slots or providers; S2 of the
-[benchmark](../develop/performance.md) holds about 1,300 streams at its full rate, which a
-default pool would queue. The pool settings are in the
+should carry, or spread them over more slots or providers; Historical benchmark scenario S2 held about 1,300 streams at its full
+rate, which a default pool would queue. See
+[performance](../develop/performance.md). The pool settings are in the
 [provider guide](../use/provider-profiles.md#secure-connection-options).
 
 ### Tracing
@@ -429,8 +429,7 @@ Regional readiness/checkpoints cannot be satisfied by another region; PostgreSQL
 only tasks and control summaries stay shared. Hard constraints/priority precede
 matching provider/model-region locality; unknown region has no preference.
 
-`TestRegionalRateAndConcurrencyLimitsWithGlobalBudgetReconciliation` qualifies
-count overrides, local concurrency/leaders and reconciliation refusal with two
-Valkeys/one database. `make integration` provisions those and a physical standby;
-explicit selections need `OLP_TEST_VALKEY_REGIONAL_URL` and
-`OLP_TEST_DATABASE_READ_URL`.
+A former process test qualified count overrides, local concurrency and
+leaders, and reconciliation refusal with two Valkeys and one database,
+provisioned with a physical standby. That lane was subtracted. Validate
+regional changes against staging services before rollout.

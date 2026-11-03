@@ -43,7 +43,7 @@ func run(args []string, stdout io.Writer) error {
 		return errors.New("usage: pluginindex entry DIR... | check OUT_DIR")
 	}
 	ctx := context.Background()
-	runtime, err := plugins.NewRuntime(ctx, plugins.Compiled, plugins.DefaultLimits, slog.New(slog.DiscardHandler))
+	runtime, err := plugins.NewRuntime(ctx, plugins.Compiled, plugins.DefaultLimits(), slog.New(slog.DiscardHandler))
 	if err != nil {
 		return err
 	}

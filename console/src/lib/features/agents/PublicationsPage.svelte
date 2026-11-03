@@ -24,6 +24,7 @@
     type Publication,
     type Revision
   } from './api';
+  import { agentKeys } from './agentKeys';
   import {
     publicationForm,
     publicationInput,
@@ -69,15 +70,15 @@
     notice = '';
   });
   const items = createQuery(() => ({
-    queryKey: ['agent-publications', kind],
+    queryKey: agentKeys.publication(kind),
     queryFn: () => listPublications(kind)
   }));
   const projects = createQuery(() => ({
-    queryKey: ['agent-publications', 'projects'],
+    queryKey: agentKeys.projects(),
     queryFn: listProjects
   }));
   const servers = createQuery(() => ({
-    queryKey: ['agent-publications', 'servers'],
+    queryKey: agentKeys.servers(),
     queryFn: listServers,
     enabled: kind === 'toolsets'
   }));
@@ -175,7 +176,7 @@
         'Server pricing and limits saved. Republish toolsets to pin new prices, and limits apply to the server now.';
       try {
         await client.invalidateQueries(
-          { queryKey: ['agent-publications', 'servers'] },
+          { queryKey: agentKeys.servers() },
           { throwOnError: true }
         );
       } catch (cause) {
@@ -292,7 +293,7 @@
           : 'Publication configuration updated.';
       try {
         await client.invalidateQueries(
-          { queryKey: ['agent-publications'] },
+          { queryKey: agentKeys.publications },
           { throwOnError: true }
         );
       } catch (cause) {

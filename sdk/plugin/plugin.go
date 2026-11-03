@@ -251,18 +251,6 @@ func Register(p Plugin) {
 	registered = p
 }
 
-// serve answers one request message OLP passes a WASI reactor, which serves
-// one call at a time.
-func serve(message []byte) []byte {
-	var request abi.Request
-	response := answer(nil, &abi.Error{Code: abi.CodeInvalidRequest, Message: "The request is not a JSON call."})
-	if json.Unmarshal(message, &request) == nil {
-		response = handle(context.Background(), request)
-	}
-	data, _ := json.Marshal(response)
-	return data
-}
-
 // handle answers one request from OLP in the context of its call. It never
 // panics: a panicking plugin reports an internal error instead of stopping.
 func handle(ctx context.Context, request abi.Request) (response abi.Response) {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -213,8 +214,8 @@ func probeStore(ctx context.Context, s *State, now time.Time, hasGeneration bool
 		// A gateway holding a pinned runtime can keep serving from the last
 		// known good snapshot; anything else is simply unready.
 		if s.ServesGateway && hasGeneration {
-			for _, task := range WorkerTasks {
-				probe.tasks.Tasks = append(probe.tasks.Tasks, WorkerTaskStatus{Task: task.Name, State: TaskStateUnknown})
+			for _, task := range usage.WorkerTasks() {
+				probe.tasks.Tasks = append(probe.tasks.Tasks, WorkerTaskStatus{Task: string(task.Name), State: TaskStateUnknown})
 			}
 			return probe, nil
 		}
@@ -252,21 +253,15 @@ func probeStore(ctx context.Context, s *State, now time.Time, hasGeneration bool
 // expectedTasks lists the worker responsibilities this process must see live.
 func expectedTasks(limiterConfigured bool) []WorkerTask {
 	if limiterConfigured {
-		return WorkerTasks
+		return usage.WorkerTasks()
 	}
-	out := make([]WorkerTask, 0, len(WorkerTasks)-len(ValkeyWorkerTasks))
-	for _, task := range WorkerTasks {
-		valkey := false
-		for _, name := range ValkeyWorkerTasks {
-			if task.Name == name {
-				valkey = true
+	return slices.Collect(func(yield func(WorkerTask) bool) {
+		for _, task := range usage.WorkerTasks() {
+			if !task.Regional && !yield(task) {
+				return
 			}
 		}
-		if !valkey {
-			out = append(out, task)
-		}
-	}
-	return out
+	})
 }
 
 // asynchronousPlaneFlags classifies the replicated worker plane's freshness
@@ -275,7 +270,7 @@ func expectedTasks(limiterConfigured bool) []WorkerTask {
 func asynchronousPlaneFlags(tasks *WorkerTaskHealth, expected []WorkerTask, consumer usage.ConsumerStatus) (current, drained bool) {
 	expectsConsumer := false
 	for _, task := range expected {
-		if task.Name == string(usage.TaskRequestMetadataConsumer) {
+		if task.Name == usage.TaskRequestMetadataConsumer {
 			expectsConsumer = true
 		}
 	}

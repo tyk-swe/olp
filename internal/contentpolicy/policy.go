@@ -30,7 +30,9 @@ const (
 	MaxDecisions         = 64
 )
 
-var RuleID = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_-]{0,63}$`)
+var ruleID = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_-]{0,63}$`)
+
+func ValidRuleID(value string) bool { return ruleID.MatchString(value) }
 
 type Rule struct {
 	ID          string `json:"id"`
@@ -95,8 +97,8 @@ func validateRules(encodedWire []ruleWire) (*Policy, error) {
 	patternBytes := 0
 	rules := make([]Rule, 0, len(encodedWire))
 	for i, w := range encodedWire {
-		if w.ID == nil || !RuleID.MatchString(*w.ID) {
-			return nil, fmt.Errorf("content_policy rule %d id must match %s", i, RuleID.String())
+		if w.ID == nil || !ValidRuleID(*w.ID) {
+			return nil, fmt.Errorf("content_policy rule %d id must match %s", i, ruleID.String())
 		}
 		if seen[*w.ID] {
 			return nil, fmt.Errorf("content_policy rule id %q is not unique", *w.ID)
@@ -202,7 +204,7 @@ func ValidateDecisions(decisions []Decision) error {
 		return fmt.Errorf("policy_decisions allows at most %d entries", MaxDecisions)
 	}
 	for i, d := range decisions {
-		if !RuleID.MatchString(d.RuleID) {
+		if !ValidRuleID(d.RuleID) {
 			return fmt.Errorf("policy_decisions %d rule_id is malformed", i)
 		}
 		if d.Phase != PhaseInput && d.Phase != PhaseOutput {

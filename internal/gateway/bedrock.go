@@ -19,6 +19,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/protocols"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
+	"github.com/tyk-swe/olp/internal/routeidentity"
 )
 
 func bedrockQualified(p *routing.Provider, model, operation, mode string) bool {
@@ -92,7 +93,7 @@ func (s *Server) bedrockServe(w http.ResponseWriter, r *http.Request, family wir
 		return
 	}
 	slug := r.PathValue("model")
-	if !openai.RouteSlug.MatchString(slug) {
+	if !routeidentity.ValidSlug(slug) {
 		fail(invalidRequest("invalid_value", "model must name a published route slug.", nil))
 		return
 	}

@@ -34,7 +34,6 @@ WORKDIR /src
 RUN npm install --global 'pnpm@>=10.26.0'
 COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
 COPY console/package.json ./console/package.json
-COPY tests/sdk-smoke/package.json ./tests/sdk-smoke/package.json
 RUN pnpm install --frozen-lockfile --store-dir /pnpm/store
 COPY console ./console
 COPY openapi/management.json ./openapi/management.json

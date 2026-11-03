@@ -24,6 +24,7 @@ import (
 	"github.com/tyk-swe/olp/internal/mcp"
 	"github.com/tyk-swe/olp/internal/operationregistry"
 	"github.com/tyk-swe/olp/internal/retainedapi"
+	"github.com/tyk-swe/olp/internal/routeidentity"
 	"github.com/tyk-swe/olp/internal/runtime"
 	"github.com/tyk-swe/olp/internal/usage"
 	"github.com/tyk-swe/olp/internal/vendors"
@@ -318,8 +319,8 @@ func sameProject(a, b *string) bool {
 	return *a == *b
 }
 
-func ValidateDraftInput(ctx context.Context, q access.Queryer, in *DraftInput, projectID *string, existing []routing.PublishedTarget) ([]routing.PublishedTarget, error) {
-	if !access.RouteSlug.MatchString(in.Slug) {
+func ValidateAndNormalizeDraftInput(ctx context.Context, q access.Queryer, in *DraftInput, projectID *string, existing []routing.PublishedTarget) ([]routing.PublishedTarget, error) {
+	if !routeidentity.ValidSlug(in.Slug) {
 		return nil, access.Invalid("slug", "Use 1–100 lowercase letters, digits, dots, underscores, or hyphens, starting with a letter or digit.")
 	}
 	if len(in.Operations) == 0 {
@@ -330,8 +331,7 @@ func ValidateDraftInput(ctx context.Context, q access.Queryer, in *DraftInput, p
 			return nil, access.Fail(422, "operation_unavailable", "The "+op+" operation is not available in this release.")
 		}
 	}
-	slices.Sort(in.Operations)
-	in.Operations = slices.Compact(in.Operations)
+	in.Operations = slices.Compact(slices.Sorted(slices.Values(in.Operations)))
 	if in.OverallTimeoutMS < 1 || in.OverallTimeoutMS > maxTimeoutMS {
 		return nil, access.Invalid("overall_timeout_ms", "Use a timeout from 1 to 3600000 milliseconds.")
 	}
@@ -552,7 +552,7 @@ func (s *Server) createDraft(r *http.Request, _ access.Principal) (access.Reply,
 	if err = a.RequireProject(r.Context(), tx, p, input.ProjectID); err != nil {
 		return access.Reply{}, err
 	}
-	targets, err := ValidateDraftInput(r.Context(), tx, &input, input.ProjectID, nil)
+	targets, err := ValidateAndNormalizeDraftInput(r.Context(), tx, &input, input.ProjectID, nil)
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -604,7 +604,7 @@ func (s *Server) replaceDraft(r *http.Request, _ access.Principal) (access.Reply
 	if input.ProjectID != nil && !sameProject(input.ProjectID, current.ProjectID) {
 		return access.Reply{}, access.Invalid("project_id", "The draft's project is set at creation and cannot change.")
 	}
-	targets, err := ValidateDraftInput(r.Context(), tx, &input, current.ProjectID, current.Targets)
+	targets, err := ValidateAndNormalizeDraftInput(r.Context(), tx, &input, current.ProjectID, current.Targets)
 	if err != nil {
 		return access.Reply{}, err
 	}

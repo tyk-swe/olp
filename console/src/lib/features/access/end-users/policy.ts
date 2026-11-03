@@ -1,3 +1,4 @@
+import { validRouteSlug } from '$lib/routeIdentity';
 import {
   limitForm,
   limitsInput,
@@ -33,10 +34,7 @@ export function policyForm(policy?: EndUserPolicy | null): PolicyForm {
 
 export function policyError(form: PolicyForm): string {
   if (!form.enabled) return '';
-  if (
-    form.limitTemplate &&
-    !/^[a-z0-9][a-z0-9._-]{0,99}$/.test(form.limitTemplate.trim())
-  )
+  if (form.limitTemplate && !validRouteSlug(form.limitTemplate.trim()))
     return 'Enter a valid template name.';
   const digests = form.overrides.map(({ digest }) => digest.trim());
   const blocked = form.blocked.split(/\s+/).filter(Boolean);

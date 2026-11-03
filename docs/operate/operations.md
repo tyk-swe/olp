@@ -330,12 +330,12 @@ installation identity/keyring, and use isolated Valkey. Reconcile external
 provider/media outcomes and database/queue time skew before reopening budgeted
 traffic; see [queue durability](#queue-durability).
 
-`make integration` performs a logical restore, authenticates, decrypts a retained
-provider credential by making a request, and verifies historical accounting was
-preserved and new accounting added. It does not simulate storage power loss or
-certify a managed service's PITR implementation. See the
-[recovery journey](../../console/tests/journeys/recovery.spec.ts) and
-[process suites](../../tests/integration).
+Former process suites performed a logical restore, authenticated,
+decrypted a retained provider credential by making a request, and verified
+that historical accounting was preserved and new accounting added. Those
+suites were subtracted, and they never simulated storage power loss or
+certified a managed service PITR implementation. Rehearse restores against
+an isolated replacement before relying on them.
 
 ## Master-key rotation and recovery
 
@@ -377,7 +377,8 @@ resuming admission. There is no rollback: a binary refuses a database whose
 schema is newer than its own, and migrations never run in reverse. Never edit
 migration history or checksums. The runner requires a sequential history prefix
 with matching checksums and rolls back failed migration transactions;
-[integration tests](../../tests/integration) interrupt DDL to verify recovery.
+Former integration tests interrupted DDL to verify recovery. Nothing
+checks that automatically today.
 
 ## Database deadlines and privileges
 

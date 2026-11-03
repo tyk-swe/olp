@@ -631,13 +631,7 @@ func decodeGemini(body []byte, route string, partial bool) (*wire.Completion, er
 			}
 		}
 		if reason != "" {
-			c.FinishReason = "stop"
-			switch reason {
-			case "MAX_TOKENS":
-				c.FinishReason = "length"
-			case "SAFETY", "RECITATION", "BLOCKLIST", "PROHIBITED_CONTENT", "SPII":
-				c.FinishReason = "content_filter"
-			}
+			c.FinishReason = geminiFinish(reason)
 			if c.FinishReason == "stop" && len(c.ToolCalls) > 0 {
 				c.FinishReason = "tool_calls"
 			}

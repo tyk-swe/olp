@@ -17,7 +17,9 @@ import (
 	"slices"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/pricingpolicy"
 	"github.com/tyk-swe/olp/internal/signing"
+	"github.com/tyk-swe/olp/internal/toolidentity"
 )
 
 // APIVersion identifies the catalog document format.
@@ -174,7 +176,6 @@ var (
 	modelID     = regexp.MustCompile(`^[A-Za-z0-9@][A-Za-z0-9._:/@+-]{0,255}$`)
 	canonical   = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,63}/[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$`)
 	snakeName   = regexp.MustCompile(`^[a-z][a-z0-9_]{0,63}$`)
-	currency    = regexp.MustCompile(`^[A-Z]{3}$`)
 	modalities  = []string{"audio", "embeddings", "file", "image", "text", "video"}
 	familyNames = []string{"anthropic", "gemini", "other"}
 )
@@ -192,7 +193,7 @@ func Decode(document []byte) (*Catalog, error) {
 // Validate checks every rule the schema states and the ones it cannot:
 // uniqueness, ordering of dates, and provenance no later than publication.
 func (c *Catalog) Validate() error {
-	if c.APIVersion != APIVersion || !currency.MatchString(c.Currency) || c.PublishedAt.IsZero() {
+	if c.APIVersion != APIVersion || !pricingpolicy.ValidCurrency(c.Currency) || c.PublishedAt.IsZero() {
 		return errors.New("the catalog needs its format version, a currency and a publication time")
 	}
 	families := map[string]bool{}
@@ -308,8 +309,6 @@ var unrepresentableComponents = map[string]bool{
 	"unpublished_rates": true, "video_input": true,
 }
 
-var dayTime = regexp.MustCompile(`^([01][0-9]|2[0-3]):[0-5][0-9]$|^24:00$`)
-
 func (c *Catalog) validatePrice(p Price) error {
 	priced := false
 	for _, rate := range append(priceRates(&p), p.UnitPrice, p.PerRequest, p.BatchMultiplier, p.TrainingPerMillion, p.StoragePerGiBDay, p.CacheStoragePerMillionTokenHour) {
@@ -329,7 +328,7 @@ func (c *Catalog) validatePrice(p Price) error {
 			return errors.New("tool_calls takes at most 16 tool fees")
 		}
 		for tool, fee := range p.ToolCalls {
-			if !snakeName.MatchString(tool) {
+			if !toolidentity.ValidMeteredName(tool) {
 				return fmt.Errorf("tool name %q is malformed", tool)
 			}
 			if !fee.Valid() {
@@ -338,11 +337,11 @@ func (c *Catalog) validatePrice(p Price) error {
 		}
 		priced = true
 	}
-	if len(p.ContainerPerSession) > 16 {
+	if len(p.ContainerPerSession) > pricingpolicy.MaxContainerTiers {
 		return errors.New("too many container tiers")
 	}
 	for tier, fee := range p.ContainerPerSession {
-		if !regexp.MustCompile(`^[1-9][0-9]{0,4}g$`).MatchString(tier) || !fee.Valid() {
+		if !pricingpolicy.ValidContainerTier(tier) || !fee.Valid() {
 			return errors.New("invalid container tier rate")
 		}
 		priced = true
@@ -379,8 +378,8 @@ func validateTiers(p *Price) error {
 	if len(p.Tiers) == 0 {
 		return nil
 	}
-	if len(p.Tiers) > 8 {
-		return errors.New("tiers take at most 8 thresholds")
+	if len(p.Tiers) > pricingpolicy.MaxTiers {
+		return fmt.Errorf("tiers take at most %d thresholds", pricingpolicy.MaxTiers)
 	}
 	entry := priceRates(p)
 	previous := int64(0)
@@ -415,8 +414,8 @@ func validateWindows(windows *Windows) error {
 	if _, err := time.LoadLocation(windows.TimeZone); err != nil {
 		return fmt.Errorf("time zone %q is unknown", windows.TimeZone)
 	}
-	if len(windows.Periods) == 0 || len(windows.Periods) > 32 {
-		return errors.New("windows take 1–32 periods")
+	if len(windows.Periods) == 0 || len(windows.Periods) > pricingpolicy.MaxWindowPeriods {
+		return fmt.Errorf("windows take 1–%d periods", pricingpolicy.MaxWindowPeriods)
 	}
 	periods := make([]WindowPeriod, 0, len(windows.Periods))
 	for index, period := range windows.Periods {
@@ -433,8 +432,9 @@ func validateWindows(windows *Windows) error {
 			}
 			seen[day] = true
 		}
-		if !dayTime.MatchString(period.Start) || period.Start == "24:00" ||
-			!dayTime.MatchString(period.End) {
+		_, validStart := pricingpolicy.WindowMinutes(period.Start, false)
+		_, validEnd := pricingpolicy.WindowMinutes(period.End, true)
+		if !validStart || !validEnd {
 			return fmt.Errorf("period %d times are HH:MM (end may be 24:00)", index)
 		}
 		if period.End != "24:00" && period.End <= period.Start {

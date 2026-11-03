@@ -1,31 +1,21 @@
 # Client compatibility
 
-Client compatibility is a tested product contract rather than a list of
-unverified configuration examples. The
-[client qualification suite](../../tests/clients/README.md) runs coding agents,
-agent SDKs and frameworks headlessly against an OLP gateway backed by a
-deterministic scripted upstream. Each run checks both the client-visible outcome
-and the request the upstream received, so a bypass or damaged request fails
-qualification.
-
-Codex, Claude Code and OpenCode resolve the publisher's npm `latest` channel
-anew for every CI job. Code-mode qualification and ordinary-route client suites
-share the resolved binaries. Metadata failures and compatibility regressions fail
-the job. Package URLs, SHA-512 integrity and exact binary versions are retained
-in the `coding-client-releases` artifact, including failed runs. Historical
-fixture references do not select releases. See
-[code-mode qualification](../develop/qualification.md#latest-official-clients).
-
-SDKs, frameworks and Gemini CLI retain exact pins under the
-[dependency policy](../../CONTRIBUTING.md#dependency-policy). Their source of truth
-is `tests/clients/package.json` and `go.mod`. To run the suites, see
-[Running the suites](#running-the-suites).
+The configurations on this page were written against the client releases
+listed below and were formerly qualified by headless suites that ran each
+client against a gateway backed by a scripted upstream. Those suites were
+subtracted with the test system, so compatibility is no longer continuously
+qualified. Treat the release tables as the record of what was covered when
+last qualified, and verify a client by running it against your gateway
+before relying on it. See
+[code-mode qualification](../develop/qualification.md#latest-official-clients)
+for the current status.
 
 ## Client releases
 
-The three coding clients use `latest`; other versions below remain exact pins.
+The three coding clients tracked `latest` when last qualified. Other
+versions below are the exact pins from that record.
 
-| Client | Package | Pinned version | Qualification |
+| Client | Package | Pinned version | Coverage when last qualified |
 | --- | --- | --- | --- |
 | Claude Code | `@anthropic-ai/claude-code` | latest | `claude -p` on a strict and on a transformed route: streaming, tool-use loops, parallel tool calls, prompt caching, `count_tokens` through `/context`, the paired `anthropic-beta` headers and request fields including the auto-mode `safeguards` field, session resume, API-key and bearer credentials, typed errors |
 | Codex CLI | `@openai/codex` | latest | `codex exec` on a transformed route with the stock tools and on a strict route with the hosted tools off: Responses streaming, reasoning items replayed with their encrypted content, shell tool calls (parallel too), `exec resume` history replay, typed errors |
@@ -50,10 +40,11 @@ The three coding clients use `latest`; other versions below remain exact pins.
 | LlamaIndex.TS workflow | `@llamaindex/workflow` | 1.1.24 | The `agent` that runs tool loops |
 | Zod, required by the AI SDK and the Agents SDK | `zod` | 4.6.5 | Not a client |
 
-The official Go SDKs run in a separate Go module, so their dependencies stay out
-of the gateway's module and runtime inventory.
+The official Go SDKs were qualified from a separate Go module, so their
+dependencies stayed out of the gateway module and runtime inventory. That
+module was subtracted with the suites.
 
-| SDK | Module | Pinned version | Qualification |
+| SDK | Module | Pinned version | Coverage when last qualified |
 | --- | --- | --- | --- |
 | OpenAI Go | `github.com/openai/openai-go/v3` | v3.86.0 | Chat Completions and Responses, unary and streaming, tool loops, structured output, embeddings, model listing, typed errors |
 | Anthropic Go | `github.com/anthropics/anthropic-sdk-go` | v1.84.0 | Messages, unary and streaming, tool use loops with signed thinking, `count_tokens`, prompt caching, beta features, model listing, typed errors |
@@ -86,17 +77,15 @@ are not accepted. Listing returns only resources created by this key. See the
 before retrying an ambiguous creation. This API manages resources; it does not
 execute agents.
 
-## What the suites assert
+## Compatibility status
 
-Every suite checks the client's result **and** recorded upstream requests:
-path/model rewrite, provider credential (never caller key), tools/schemas/reasoning,
-usage and typed errors. Clients run with empty environment/private home, telemetry
-off and loopback-only egress; a bypass fails.
-
-Fixtures model native operations deterministically, not model quality, actual
-account permission or every upstream rule. Configuration and limitations below
-remain part of qualification. See the
-[harness contract](../../tests/clients/README.md#the-harness-contract).
+No client suite runs today. When they ran, the suites checked the client
+result and the recorded upstream requests, covering path and model rewrite,
+provider credentials, tools, reasoning, usage, and typed errors against
+deterministic fixtures. Fixture success never established model quality,
+account permission, or live provider acceptance. To check a client now,
+run it against a local gateway with a stub or real upstream and inspect
+both the client outcome and the request the upstream received.
 
 ## Tested configuration
 
@@ -112,13 +101,12 @@ and a subscription account behind the route. Codex, Claude Code and OpenCode
 take the configuration its management API generates for routes over Codex,
 OpenCode Go and coding-plan accounts, which one route may mix; see
 [code mode](code-mode.md#client-configuration).
-The shared resolution policy and evidence for that are in the
+The former shared resolution policy and its evidence are summarized in
 [code-mode qualification](../develop/qualification.md), not in the tables below.
 
 Generate mounted-key setup with [`olp client-env`](../operate/automation.md#configure-qualified-clients).
 It supports Codex, Claude Code and Gemini CLI, all four framework families and explicit
-JavaScript, Python and Go constructors for the official SDKs. Generated
-configuration runs against the same pinned libraries in client qualification.
+JavaScript, Python and Go constructors for the official SDKs.
 
 ### Claude Code
 
@@ -141,9 +129,9 @@ export CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
 claude -p "Hello" --model assistant
 ```
 
-The suite runs `claude -p` with `--output-format json` and
+For scripted checks, run `claude -p` with `--output-format json` and
 `--permission-mode default`, because this release's own default is auto mode,
-whose classifier makes requests of its own that no test scripts.
+whose classifier makes requests of its own.
 
 ### Codex CLI
 
@@ -177,10 +165,10 @@ export OLP_API_KEY=olp_...
 codex exec "Hello"
 ```
 
-The suite writes the configuration above to a private `CODEX_HOME`, together
-with `approval_policy = "never"`, `sandbox_mode = "read-only"` and the
-`[analytics]` and `[feedback]` tables switched off. It starts `codex exec --json`
-with `--strict-config`, so a key a release no longer knows fails the run.
+For isolated checks, write the configuration above to a private `CODEX_HOME`,
+together with `approval_policy = "never"`, `sandbox_mode = "read-only"` and the
+`[analytics]` and `[feedback]` tables switched off. Start `codex exec --json`
+with `--strict-config`, so a key a release no longer knows fails fast.
 
 ### Gemini CLI
 
@@ -202,8 +190,8 @@ export GEMINI_API_KEY=olp_...
 gemini --skip-trust --model assistant -p "Hello"
 ```
 
-The suite also turns off telemetry, usage statistics and update checks in the
-same settings file.
+Turn off telemetry, usage statistics and update checks in the same settings
+file for reproducible checks.
 
 ### OpenAI Agents SDK
 
@@ -338,11 +326,11 @@ the vendor documents: `*openai.Error` carries the `type`, `code` and `param` of
 the OpenAI envelope, `*anthropic.Error` the `type` of the Anthropic envelope
 (`authentication_error`, `permission_error`, `not_found_error`, `rate_limit_error`
 and the rest), and `genai.APIError` the `status` string and the `ErrorInfo`
-detail, whose `reason` is the gateway's code. The suites assert this for an
+detail, whose `reason` is the gateway's code. Expect the same mapping for an
 unknown key, a key not allowed on the route, an unknown route, a malformed
 request, a request the upstream rejects, an upstream rate limit and an upstream
 failure, unary and streaming. The OpenAI and Anthropic SDKs retry a `429` after
-the `Retry-After` the gateway relays, which the suites assert too.
+the `Retry-After` the gateway relays.
 
 ## Gateway behavior that shapes client configuration
 
@@ -372,19 +360,19 @@ See [compatibility](compatibility.md) for supported/refused mappings and
 
 ## Open items
 
-- Coding agents qualify against their own dialects, not cross-vendor routes.
+- Coding agents were qualified against their own dialects, not cross-vendor routes.
   Claude cache/thinking/context/output/safeguards, Codex retained/reasoning/include
   and Gemini topK/thinking controls can refuse translation. Semantic dropping is
-  a product decision, not a suite workaround.
+  a product decision, not a client workaround.
 - Ordinary-route Codex continuation is history replay. Database-backed retained
-  continuation/key-limit typed 429 need service lanes; static fixtures qualify
-  upstream 429. [Code mode](code-mode.md) separately qualifies pinned
-  native Codex HTTP/WebSocket/compact continuation against controlled fixtures.
-- Anthropic auto-mode classifier results are not simulated: safeguards/beta request
-  relay is asserted, server safeguard-results relay is not. Slow Claude 401 retries
-  are outside this lane; route-denied 403 is the qualified refusal.
-- Framework lanes omit voice/realtime/sandbox, post-first-event stream failures and
-  image URLs. Pre-first-byte failures are covered.
+  continuation and key-limit typed 429 behavior were covered only by the deleted
+  service suites. [Code mode](code-mode.md) continuation was qualified against
+  controlled fixtures, not live subscriptions.
+- Anthropic auto-mode classifier results were not simulated. Safeguards and beta
+  request relay were covered. Server safeguard-results relay was not. Slow Claude
+  401 retries were out of scope. Route-denied 403 was the covered refusal.
+- Framework coverage omitted voice, realtime, sandbox, post-first-event stream
+  failures and image URLs. Pre-first-byte failures were covered.
 - LlamaIndex OpenAIResponses is unary-only: its streaming repeats text deltas.
   Unconditional store fields refuse translation. Gemini needs `safetySettings: []`
   for translated routes and retains the example's model-naming constraints.
@@ -392,56 +380,19 @@ See [compatibility](compatibility.md) for supported/refused mappings and
   to Gemini. Deprecated LlamaIndex leaf packages retain final registry releases
   (no named successor); umbrella/workflow are separate.
 
-Fixture success is not live-provider or subscription qualification.
+Fixture success was never live-provider or subscription qualification.
 
-## Running the suites
+## Verifying a client by hand
 
-```sh
-pnpm install --frozen-lockfile                       # the npm clients, once, from the repository root
-tests/clients/run.sh                                 # every suite, in table order
-CLIENTS=claude-code,codex tests/clients/run.sh       # only these
-tests/clients/run.sh --list                          # the suite names
-```
+The suites were subtracted with the test system and remain in git history
+before commit `99234cb0`. To verify a client today, install it outside the
+repository, point it at a local gateway with the configuration above, and
+run a unary call, a streaming call, a tool loop where the client supports
+one, and one refused request. Inspect the client result and the request
+the upstream received. Record the client version, platform, route, and
+outcome with the change that relies on the result.
 
-The suites are `harness` (the harness's own tests), `ai-sdk`, `go-sdks`,
-`claude-code`, `codex`, `gemini-cli`, `openai-agents`, `langchain` and
-`llamaindex`; `CLIENTS` takes a comma-separated list of them and rejects any
-other name. The script builds and starts the gateway host and the scripted
-upstream, runs the selected suites one at a time, prints `passed`, `failed` or
-`skipped` for each, and exits nonzero when one fails. A suite whose client is an
-open item is a row of the table in `tests/clients/run.sh` with a stated reason
-and prints as `skipped`.
-
-It needs Go, Node.js 26, `jq` and `curl`, and uses no containers, database or
-Valkey. The npm clients come from `pnpm install`, and the Go SDK module
-downloads its dependencies once before the suites run, so a run needs the network
-only to fill those caches. Two environment needs follow from what the suites
-prove:
-
-- The egress tests bind a listener on an address the proxy trap does not exempt:
-  `127.0.0.2` or, if that cannot be bound, a non-loopback IPv4 address of the
-  host. A host with neither fails them.
-- The Codex suite runs its shell tool in Codex's own read-only sandbox, so the
-  environment must allow that sandbox. One that does not fails the suite
-  instead of skipping it. CI's integration job uses Ubuntu 26.04 for its
-  distribution-provided bubblewrap support; qualification does not disable the
-  sandbox or change host security policy.
-
-`OLP_CLIENTS_READY_TIMEOUT_SECONDS` (60), `OLP_CLIENTS_SUITE_TIMEOUT_SECONDS`
-(900) and `OLP_CLIENTS_TEST_TIMEOUT_SECONDS` (180) bound the gateway start, a
-suite and a test of a Node suite. The Go SDK suite is one package, which the Go
-toolchain bounds as a whole, so the suite timeout bounds it, and each SDK call in
-it has a deadline of its own, 30 seconds. A signal to the script, such as an
-interrupt, stops the running suite and the clients it started at once. The full
-run takes about two minutes. `make integration` runs
-the same script after the SDK smoke suites, which is how CI runs it. The
-[client qualification guide](../../tests/clients/README.md) describes the harness
-contract and how to add a client, and the
-[testing guide](../../tests/README.md#client-and-agent-qualification) places the
-suites among the others.
-
-To advance a pin, change it with the package manager in `tests/clients` (`pnpm`
-for the npm clients, `go get` for the Go SDKs), update the table under
-[Pinned releases](#client-releases), and run the suites. A release that breaks
-compatibility shows up here as a failing suite, to be fixed in the gateway if
-the gateway is wrong, or recorded as an open item if the client is.
+To advance a pin in the tables above, verify the new release by hand as
+described, then update the version and coverage text to match what ran.
+Fix incompatibility in the gateway when the gateway is wrong. Record it as
+an open item when the client is.

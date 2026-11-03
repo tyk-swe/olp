@@ -8,7 +8,6 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
-	"os"
 	"strings"
 	"sync"
 	"time"
@@ -43,11 +42,11 @@ type Resolver struct {
 	getenv func(string) string
 }
 
-func New(p egress.Policy) *Resolver {
+func New(p egress.Policy, getenv func(string) string) *Resolver {
 	client := p.Client(timeout)
 	client.Transport = boundedTransport{client.Transport}
 	client.Timeout = timeout
-	return &Resolver{client: client, getenv: os.Getenv, aws: map[string]aws.Config{}}
+	return &Resolver{client: client, getenv: getenv, aws: map[string]aws.Config{}}
 }
 
 // Limit SDK responses as well as the REST adapters. Cloud SDK unmarshalling

@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"reflect"
-	"slices"
 	"strings"
 
 	"github.com/jackc/pgx/v5"
@@ -190,7 +189,7 @@ func validateGuardrailPolicies(doc *Document) error {
 		policies[key] = p
 	}
 	for _, a := range doc.GuardrailAttachments {
-		if _, ok := policies[portableKey(a.PolicyProject, a.Policy)]; !ok || a.Order < 0 || !slices.Contains([]string{"installation", "organization", "project", "route", "toolset", "api-key"}, a.Scope) {
+		if _, ok := policies[portableKey(a.PolicyProject, a.Policy)]; !ok || a.Order < 0 || !guardrails.ValidAttachmentScope(a.Scope) {
 			return access.Invalid("guardrail_attachments", "Choose a declared policy and a valid additive attachment.")
 		}
 	}

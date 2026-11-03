@@ -63,7 +63,7 @@ func normalizeModels(models []Model) []Model {
 		m.Prices = slices.Clone(m.Prices)
 		for j := range m.Prices {
 			p := &m.Prices[j]
-			slices.SortFunc(p.Tiers, func(a, b Tier) int {
+			p.Tiers = slices.SortedFunc(slices.Values(p.Tiers), func(a, b Tier) int {
 				return cmp.Compare(a.AboveInputTokens, b.AboveInputTokens)
 			})
 			if p.Windows != nil {

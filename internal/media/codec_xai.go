@@ -9,10 +9,8 @@ import (
 // ratio in place of a size and returns OpenAI's image result.
 //
 // https://docs.x.ai/developers/rest-api-reference/inference/images
-func init() {
-	registerCodec("xai-images", codec{
-		OpImageGeneration: modelOnly(encodeXAIImage),
-	})
+var xaiImagesCodec = codec{
+	OpImageGeneration: modelOnly(encodeXAIImage),
 }
 
 // imageAspectRatios are the aspect ratios of OpenAI's image sizes.

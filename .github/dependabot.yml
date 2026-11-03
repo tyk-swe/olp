@@ -21,20 +21,6 @@ updates:
     groups:
       minor-and-patch:
         update-types: [minor, patch]
-  - package-ecosystem: gomod
-    directory: /tests/clients
-    schedule:
-      interval: weekly
-    groups:
-      minor-and-patch:
-        update-types: [minor, patch]
-  - package-ecosystem: uv
-    directory: /tests/sdk-smoke-python
-    schedule:
-      interval: weekly
-    groups:
-      minor-and-patch:
-        update-types: [minor, patch]
   - package-ecosystem: uv
     directory: /tests/fixtures/tokens
     schedule:

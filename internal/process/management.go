@@ -43,6 +43,7 @@ import (
 // and integration tests mount it the same way, so neither can drift from the
 // routes the contract declares.
 type Management struct {
+	Getenv        func(string) string
 	Access        *access.Server
 	Egress        *egress.Policy
 	Limiter       *limits.Limiter
@@ -93,7 +94,7 @@ func (m Management) Register(mux *http.ServeMux) {
 	(&retrieval.Server{Access: m.Access}).Register(mux)
 	(&sinks.Server{Access: m.Access, Egress: m.Egress}).Register(mux)
 	(&modelcatalog.Server{Access: m.Access, Runtime: m.Runtime, Gateway: m.Gateway, Origin: m.Access.Origin}).Register(mux)
-	catalogue := providers.New(m.Access, m.Egress, m.PluginHost)
+	catalogue := providers.New(m.Access, m.Egress, m.PluginHost, m.Getenv)
 	catalogue.Unconfined = m.Unconfined
 	catalogue.Log = m.Log
 	catalogue.Plugins = m.PluginHost

@@ -15,6 +15,7 @@ import (
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/grants"
 	"github.com/tyk-swe/olp/internal/limits"
+	"github.com/tyk-swe/olp/internal/routeidentity"
 	"github.com/tyk-swe/olp/internal/runtime"
 	"github.com/tyk-swe/olp/internal/secretstore"
 )
@@ -120,7 +121,7 @@ func (s *Server) rotate(r *http.Request, _ access.Principal) (access.Reply, erro
 	if current.Configuration.Grant() {
 		return access.Reply{}, access.Fail(422, "credential_forbidden", grantEnrollmentOnly)
 	}
-	if err = current.Configuration.Validate(s.Egress); err != nil {
+	if err = current.Configuration.ValidateAndNormalize(s.Egress); err != nil {
 		return access.Reply{}, err
 	}
 	models, err := loadModels(r.Context(), tx, id, true)
@@ -454,7 +455,7 @@ func validSlot(in *slotInput, slotID string) error {
 		in.AllowedAPIKeys[i] = id
 	}
 	for _, route := range in.AllowedRoutes {
-		if !access.RouteSlug.MatchString(route) {
+		if !routeidentity.ValidSlug(route) {
 			return access.Invalid("slot.allowed_routes", "Use route slugs.")
 		}
 	}
@@ -686,7 +687,7 @@ func (s *Server) validateSlot(r *http.Request, p access.Principal) (access.Reply
 		}
 		defer clear(credential)
 	}
-	if err = current.Configuration.Validate(s.Egress); err != nil {
+	if err = current.Configuration.ValidateAndNormalize(s.Egress); err != nil {
 		return access.Reply{}, err
 	}
 	probeErr := s.validateModelAccess(r.Context(), &current.Configuration, credential, slot, models)

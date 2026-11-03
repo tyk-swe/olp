@@ -10,7 +10,6 @@ import (
 	"fmt"
 	"io"
 	"maps"
-	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -18,10 +17,8 @@ import (
 	"github.com/tyk-swe/olp/internal/protocols/wire"
 
 	"github.com/tyk-swe/olp/internal/oif"
+	"github.com/tyk-swe/olp/internal/routeidentity"
 )
-
-// RouteSlug is the published-route identifier carried in the model field.
-var RouteSlug = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,99}$`)
 
 func invalid(param, message string) error {
 	return &wire.RequestError{Code: "invalid_value", Message: message, Param: param}
@@ -108,7 +105,7 @@ func validateFields(r *wire.Request, fields map[string]json.RawMessage, doc oif.
 	if !ok {
 		return &wire.RequestError{Code: "missing_required_parameter", Message: "model must name a published route.", Param: "model"}
 	}
-	if (expectedModel == "" && !RouteSlug.MatchString(model)) || (expectedModel != "" && model != expectedModel) {
+	if (expectedModel == "" && !routeidentity.ValidSlug(model)) || (expectedModel != "" && model != expectedModel) {
 		return invalid("model", "model must name a published route slug; provider-qualified names are not accepted.")
 	}
 	r.Route = model

@@ -12,6 +12,12 @@ import (
 
 const MaxAllowanceWindows = 128
 
+const allowancePrimary = "primary"
+
+func AllowanceWindowNames() [2]string {
+	return [2]string{allowancePrimary, "secondary"}
+}
+
 var limitID = regexp.MustCompile(`^[a-z0-9][a-z0-9_.]{0,99}$`)
 var creditBalance = regexp.MustCompile(`^-?[0-9]{1,20}(\.[0-9]{1,12})?$`)
 
@@ -44,7 +50,7 @@ func (a Allowance) Merge(incoming Allowance) Allowance {
 		}
 		return a.Credits
 	}()
-	primary := slices.IndexFunc(windows, func(w AllowanceWindow) bool { return w.LimitID == "codex" && w.Window == "primary" })
+	primary := slices.IndexFunc(windows, func(w AllowanceWindow) bool { return w.LimitID == "codex" && w.Window == allowancePrimary })
 	percent, reset := func() (*float64, *time.Time) {
 		if primary >= 0 {
 			return &windows[primary].RemainingPercent, windows[primary].ResetsAt
@@ -56,7 +62,7 @@ func (a Allowance) Merge(incoming Allowance) Allowance {
 
 func allowanceWindows(a Allowance) []AllowanceWindow {
 	if len(a.Windows) == 0 && a.RemainingPercent != nil {
-		return []AllowanceWindow{{LimitID: "codex", Window: "primary", UsedPercent: 100 - *a.RemainingPercent, RemainingPercent: *a.RemainingPercent, ResetsAt: a.ResetsAt, ObservedAt: a.ObservedAt}}
+		return []AllowanceWindow{{LimitID: "codex", Window: allowancePrimary, UsedPercent: 100 - *a.RemainingPercent, RemainingPercent: *a.RemainingPercent, ResetsAt: a.ResetsAt, ObservedAt: a.ObservedAt}}
 	}
 	return a.Windows
 }
@@ -140,7 +146,8 @@ type Credits struct {
 }
 
 func (w AllowanceWindow) Validate() error {
-	if !limitID.MatchString(w.LimitID) || w.Window != "primary" && w.Window != "secondary" ||
+	names := AllowanceWindowNames()
+	if !limitID.MatchString(w.LimitID) || !slices.Contains(names[:], w.Window) ||
 		math.IsNaN(w.UsedPercent) || math.IsInf(w.UsedPercent, 0) || w.UsedPercent < 0 || w.UsedPercent > 1<<53-1 ||
 		w.RemainingPercent != max(0, 100-w.UsedPercent) || w.ObservedAt.IsZero() ||
 		w.WindowMinutes != nil && (*w.WindowMinutes < 0 || *w.WindowMinutes > 1<<53-1) ||
@@ -164,7 +171,7 @@ func (a *Allowance) Normalize() {
 		return strings.Compare(x.LimitID+":"+x.Window, y.LimitID+":"+y.Window)
 	})
 	for _, w := range a.Windows {
-		if w.LimitID == "codex" && w.Window == "primary" {
+		if w.LimitID == "codex" && w.Window == allowancePrimary {
 			remaining := w.RemainingPercent
 			a.RemainingPercent, a.ResetsAt = &remaining, w.ResetsAt
 		}

@@ -16,18 +16,18 @@ import (
 // Callers may choose unpinned labels; such caps are allocation controls, not identity.
 type AttributionBudgets map[string]map[string]BudgetPolicy
 
-func (b AttributionBudgets) Validate() error {
+func (b AttributionBudgets) ValidateAndNormalize() error {
 	count := 0
 	for key, values := range b {
-		if !attribution.KeyPattern.MatchString(key) || len(values) == 0 {
+		if !attribution.ValidKey(key) || len(values) == 0 {
 			return Invalid("budgets", "Use valid label keys with at least one budgeted value.")
 		}
 		for value, policy := range values {
 			count++
-			if !attribution.ValuePattern.MatchString(value) || !policy.Limited() {
+			if !attribution.ValidValue(value) || !policy.Limited() {
 				return Invalid("budgets", "Use machine-token values with at least one positive cost cap.")
 			}
-			if err := policy.Validate(); err != nil {
+			if err := policy.ValidateAndNormalize(); err != nil {
 				return err
 			}
 		}
@@ -93,7 +93,7 @@ func (s *Server) putProjectAttributionBudgets(r *http.Request, _ Principal) (Rep
 	if input.Budgets == nil {
 		return Reply{}, Invalid("budgets", "Supply a budget map; an empty object clears caps without resetting spend.")
 	}
-	if err = input.Budgets.Validate(); err != nil {
+	if err = input.Budgets.ValidateAndNormalize(); err != nil {
 		return Reply{}, err
 	}
 	tx, err := s.Begin(r)

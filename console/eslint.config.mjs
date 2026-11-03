@@ -4,7 +4,7 @@ import globals from 'globals';
 import tseslint from 'typescript-eslint';
 
 const tsFiles = ['**/*.{ts,tsx}'];
-const svelteFiles = ['src/**/*.svelte'];
+const svelteFiles = ['src/**/*.svelte', 'tests/**/*.svelte'];
 // `<script lang="ts">` blocks are held to the same recommended rules as the
 // .ts modules; without this, unused imports and locals in components are
 // invisible to the linter.
@@ -17,12 +17,8 @@ export default [
   {
     ignores: [
       '.svelte-kit/**',
-      '.stryker-tmp/**',
-      'reports/**',
       'build/**',
       'node_modules/**',
-      'playwright-report/**',
-      'test-results/**',
       'src/lib/api/schema.d.ts',
       'src/lib/api/requirements.ts'
     ]
@@ -90,23 +86,6 @@ export default [
         {
           name: 'fetch',
           message: 'Use a feature api module or $lib/api/gateway gatewayFetch.'
-        }
-      ]
-    }
-  },
-  {
-    files: ['tests/journeys/**/*.ts'],
-    rules: {
-      'no-restricted-imports': [
-        'error',
-        {
-          paths: [
-            {
-              name: '@playwright/test',
-              message:
-                'Import from ../playwright so browser runtime failures fail the test.'
-            }
-          ]
         }
       ]
     }

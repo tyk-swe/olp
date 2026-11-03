@@ -13,6 +13,15 @@ import (
 	"github.com/tyk-swe/olp/internal/budgetcalendar"
 )
 
+func ValidBudgetBoundary(boundary string) bool {
+	switch boundary {
+	case "api_key", "budget_group", "key_route", "key_end_user", "project_end_user", "attribution", "project", "organization", "installation":
+		return true
+	default:
+		return false
+	}
+}
+
 // budgetOwnership keeps raw and retained facts on the same subject boundary.
 // These predicates are built only from reviewed SQL expressions, never input.
 type budgetOwnership struct{ raw, hourly, tool string }

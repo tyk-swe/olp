@@ -4,7 +4,8 @@ import (
 	"bytes"
 	"encoding/json"
 	"math/big"
-	"strings"
+
+	"github.com/tyk-swe/olp/internal/pricingpolicy"
 )
 
 type WorkflowBounds struct {
@@ -33,16 +34,7 @@ func (b WorkflowBounds) Valid() bool {
 		validWorkflowInteger(b.MaxToolCalls, 0, 128) &&
 		validWorkflowInteger(b.MaxDurationSeconds, 1, 600) &&
 		validWorkflowInteger(b.MaxConcurrentRuns, 1, 2147483647) &&
-		(b.MaxRunCost == nil || validWorkflowCost(*b.MaxRunCost))
-}
-
-func validWorkflowCost(value string) bool {
-	if ValidCostLimit(value) {
-		return true
-	}
-	integer, fraction, decimal := strings.Cut(value, ".")
-	return len(integer) > 0 && len(integer) <= 12 && strings.Trim(integer, "0") == "" &&
-		(!decimal || (len(fraction) > 0 && len(fraction) <= 12 && strings.Trim(fraction, "0") == ""))
+		(b.MaxRunCost == nil || pricingpolicy.ValidAmount(*b.MaxRunCost))
 }
 
 func validWorkflowInteger(value *int64, minimum, maximum int64) bool {

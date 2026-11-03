@@ -49,7 +49,21 @@ type awsDelivery struct {
 	period   string
 }
 
-func (i *Importer) importAWS(ctx context.Context, row *importRow, cfg *providerConfig, key []byte) error {
+func awsCostSource() costSource {
+	return costSource{
+		name:             SourceAWS,
+		kind:             "bedrock",
+		validateScope:    validateAWSScope,
+		encodeCredential: encodeAWSCredential,
+		decodeCredential: decodeAWSStoredCredential,
+		credentialInput:  rawCredentialInput,
+		fetch: func(ctx context.Context, in *fetchInput, emit func(periodDays) error) error {
+			return in.importer.importAWS(ctx, in.row, in.cfg, in.key, emit)
+		},
+	}
+}
+
+func (i *Importer) importAWS(ctx context.Context, row *importRow, cfg *providerConfig, key []byte, emit func(periodDays) error) error {
 	fetchCtx, cancel := context.WithTimeout(ctx, 45*time.Second)
 	defer cancel()
 	scope, err := parseAWSScope(row.Scope)
@@ -117,7 +131,7 @@ func (i *Importer) importAWS(ctx context.Context, row *importRow, cfg *providerC
 	for index, period := range periods {
 		complete := false
 		for _, delivery := range groups[period] {
-			err := i.importAWSDelivery(fetchCtx, row, client, scope, delivery, earliest, today, &budget)
+			err := i.importAWSDelivery(fetchCtx, row, client, scope, delivery, earliest, today, &budget, emit)
 			if errors.Is(err, errAWSIncomplete) {
 				continue
 			}
@@ -141,7 +155,7 @@ func (i *Importer) importAWS(ctx context.Context, row *importRow, cfg *providerC
 	return failure
 }
 
-func (i *Importer) importAWSDelivery(ctx context.Context, row *importRow, client *s3.Client, scope awsScope, delivery awsDelivery, earliest, today time.Time, budget *awsBudget) error {
+func (i *Importer) importAWSDelivery(ctx context.Context, row *importRow, client *s3.Client, scope awsScope, delivery awsDelivery, earliest, today time.Time, budget *awsBudget, emit func(periodDays) error) error {
 	manifest, err := awsReadManifest(ctx, client, scope, delivery, budget)
 	if err != nil {
 		return err
@@ -170,7 +184,7 @@ func (i *Importer) importAWSDelivery(ctx context.Context, row *importRow, client
 			return err
 		}
 	}
-	if err := i.storeDays(ctx, row, start.UTC().Format(dayFormat), &sourceRevision{id: manifest.AssemblyID, orderingAt: delivery.modified}, days); err != nil {
+	if err := emit(periodDays{start: start.UTC().Format(dayFormat), revision: &sourceRevision{id: manifest.AssemblyID, orderingAt: delivery.modified}, days: days}); err != nil {
 		return err
 	}
 	return nil
@@ -497,11 +511,4 @@ func awsReadCSV(input io.Reader, scope awsScope, days reportAccumulator, state *
 		return failFetch("response", errCloudBudget)
 	}
 	return nil
-}
-
-func (i *Importer) now() time.Time {
-	if i.Now != nil {
-		return i.Now()
-	}
-	return time.Now()
 }

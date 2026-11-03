@@ -1,6 +1,8 @@
+const root = ['notifications'] as const;
+
 export const notificationKeys = {
-  root: ['notifications'] as const,
-  destinations: () => ['notifications', 'destinations'] as const,
-  rules: () => ['notifications', 'rules'] as const,
-  deliveries: () => ['notifications', 'deliveries'] as const
+  root,
+  destinations: () => [...root, 'destinations'] as const,
+  rules: () => [...root, 'rules'] as const,
+  deliveries: () => [...root, 'deliveries'] as const
 };

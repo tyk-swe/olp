@@ -11,7 +11,6 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -22,6 +21,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/aws/signer/v4"
 	"github.com/tyk-swe/olp/internal/egress"
+	pluginidentity "github.com/tyk-swe/olp/internal/plugins/identity"
 )
 
 type ExternalConfig struct {
@@ -70,7 +70,7 @@ func ValidateExternal(d Revision) error {
 		return err
 	}
 	if d.Type == "plugin" {
-		if !identifier.MatchString(c.PluginID) || !regexp.MustCompile(`^[0-9a-f]{64}$`).MatchString(c.PluginVersion) {
+		if !identifier.MatchString(c.PluginID) || !pluginidentity.ValidDigest(c.PluginVersion) {
 			return errors.New("pin an approved plugin version")
 		}
 		return nil

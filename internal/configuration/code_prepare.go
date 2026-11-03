@@ -42,7 +42,7 @@ func (s *Server) prepareCode(ctx context.Context, q access.Queryer, code *CodeCo
 				return connection{}, access.Invalid("code.connections", "Install and approve the pinned frozen provider profile before promotion.")
 			}
 			cfg.Normalize()
-			if err := cfg.Validate(s.Egress); err != nil {
+			if err := cfg.ValidateAndNormalize(s.Egress); err != nil {
 				return connection{}, err
 			}
 			return connection{Name: name, Entry: CodeConnectionEntry{Configuration: cfg, NetworkCredentialRef: entry.NetworkCredentialRef}}, nil

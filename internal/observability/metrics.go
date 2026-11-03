@@ -224,7 +224,7 @@ func CollectMetrics(ctx context.Context, s *State) (string, error) {
 		expected := expectedTasks(limiterConfigured)
 		current, drained := asynchronousPlaneFlags(tasks, expected, consumer)
 		var lastProgress int64
-		if at := tasks.LastProgressFor(WorkerTasks); at != nil {
+		if at := tasks.LastProgressFor(usage.WorkerTasks()); at != nil {
 			lastProgress = at.Unix()
 		}
 		body.WriteString("# HELP olp_async_plane_current Whether every replicated worker responsibility has a current successful checkpoint.\n" +

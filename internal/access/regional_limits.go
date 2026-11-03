@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+
+	"github.com/tyk-swe/olp/internal/routeidentity"
 )
 
 // RegionalRateLimits override the key's default rate and concurrency limits.
@@ -36,10 +38,10 @@ func (regions RegionalLimits) Validate() error {
 		return Invalid("regional_limits", "Use at most 64 regions.")
 	}
 	for region, policy := range regions {
-		if !RouteSlug.MatchString(region) {
+		if !routeidentity.ValidSlug(region) {
 			return Invalid("regional_limits", "Use valid region names.")
 		}
-		if err := (AdmissionLimits{RequestsPerMinute: policy.RequestsPerMinute, TokensPerMinute: policy.TokensPerMinute, MaxConcurrency: policy.MaxConcurrency}).Validate(); err != nil {
+		if err := (AdmissionLimits{RequestsPerMinute: policy.RequestsPerMinute, TokensPerMinute: policy.TokensPerMinute, MaxConcurrency: policy.MaxConcurrency}).ValidateAndNormalize(); err != nil {
 			return err
 		}
 	}

@@ -116,7 +116,7 @@ func (s *Server) get(r *http.Request, p access.Principal) (access.Reply, error) 
 	}
 	return access.Detail(d, d.ETag), nil
 }
-func validate(in *input, policy *egress.Policy, project *string) error {
+func validateAndNormalize(in *input, policy *egress.Policy, project *string) error {
 	in.Name = strings.TrimSpace(in.Name)
 	if err := access.ValidText("name", in.Name, 100); err != nil {
 		return err
@@ -143,14 +143,12 @@ func validate(in *input, policy *egress.Policy, project *string) error {
 	return nil
 }
 
-// ValidateDefinition shares endpoint, stream, and name validation with
-// configuration promotion without accepting secret material.
-func ValidateDefinition(d *Definition, policy *egress.Policy) error {
+func ValidateAndNormalizeDefinition(d *Definition, policy *egress.Policy) error {
 	if d.Type != "https" {
 		return access.Invalid("type", "Use the HTTPS JSON sink type.")
 	}
 	in := input{Name: d.Name, Destination: d.Destination, Streams: d.Streams, Enabled: &d.Enabled}
-	if err := validate(&in, policy, d.ProjectID); err != nil {
+	if err := validateAndNormalize(&in, policy, d.ProjectID); err != nil {
 		return err
 	}
 	d.Name, d.Destination, d.Streams = in.Name, in.Destination, in.Streams
@@ -209,7 +207,7 @@ func (s *Server) write(r *http.Request, id string, retire bool) (access.Reply, e
 		}
 	}
 	if !retire {
-		if err = validate(&in, s.Egress, project); err != nil {
+		if err = validateAndNormalize(&in, s.Egress, project); err != nil {
 			return access.Reply{}, err
 		}
 	}

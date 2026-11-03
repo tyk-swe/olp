@@ -178,6 +178,26 @@ func validateDialectDefaultValue(dialect, operation, name string, raw json.RawMe
 	return validateDefaultValue(operation, name, raw)
 }
 
+func defaultControlKind(operation, name string) string {
+	if name == "response_format" && operation != "generation" {
+		return "string"
+	}
+	switch name {
+	case "temperature", "top_p", "frequency_penalty", "presence_penalty", "speed":
+		return "number"
+	case "max_tokens", "max_completion_tokens", "max_output_tokens", "dimensions", "output_dimension", "n", "top_n", "top_k":
+		return "integer"
+	case "parallel_tool_calls", "logprobs", "return_documents", "autoTruncate", "normalize":
+		return "boolean"
+	case "tools", "safetySettings", "stop_sequences", "embeddingTypes", "additionalModelResponseFieldPaths", "timestamp_granularities":
+		return "array"
+	case "response_format", "reasoning", "text", "thinking", "output_config", "generationConfig", "toolConfig", "inferenceConfig", "additionalModelRequestFields", "parameters", "stream_options":
+		return "object"
+	default:
+		return "string"
+	}
+}
+
 func validateDefaultValue(operation, name string, raw json.RawMessage) error {
 	if reservedOption(operation, name) || len(raw) == 0 || len(raw) > 256<<10 {
 		return fmt.Errorf("default %s is reserved, malformed or exceeds 256 KiB", name)
@@ -199,13 +219,16 @@ func validateDefaultValue(operation, name string, raw json.RawMessage) error {
 		if json.Unmarshal(raw, &format) != nil {
 			return errors.New("media response_format must be a string or native null")
 		}
-		if operation == "translation" && !slices.Contains([]string{"json", "text", "srt", "vtt", "verbose_json"}, format) {
+		if operation == "translation" && !wire.ValidTranslationResponseFormat(format) {
 			return errors.New("audio translation response_format is not supported")
 		}
 		return nil
 	}
-	switch name {
-	case "temperature", "top_p", "frequency_penalty", "presence_penalty", "speed":
+	if name == "timestamp_granularities" {
+		return nil
+	}
+	switch defaultControlKind(operation, name) {
+	case "number":
 		var number json.Number
 		first := bytes.TrimSpace(raw)[0]
 		if (first < '0' || first > '9') && first != '-' || json.Unmarshal(raw, &number) != nil {
@@ -217,22 +240,22 @@ func validateDefaultValue(operation, name string, raw json.RawMessage) error {
 				return errors.New("audio translation temperature must be between 0 and 1")
 			}
 		}
-	case "max_tokens", "max_completion_tokens", "max_output_tokens", "dimensions", "output_dimension", "n", "top_n", "top_k":
+	case "integer":
 		var number int64
 		if json.Unmarshal(raw, &number) != nil || number < 1 {
 			return fmt.Errorf("default %s must be a positive integer or native null", name)
 		}
-	case "parallel_tool_calls", "logprobs", "return_documents", "autoTruncate", "normalize":
+	case "boolean":
 		var boolean bool
 		if json.Unmarshal(raw, &boolean) != nil {
 			return fmt.Errorf("default %s must be a boolean or native null", name)
 		}
-	case "tools", "safetySettings", "stop_sequences", "embeddingTypes", "additionalModelResponseFieldPaths":
+	case "array":
 		var array []json.RawMessage
 		if json.Unmarshal(raw, &array) != nil || array == nil {
 			return fmt.Errorf("default %s must be an atomic array", name)
 		}
-	case "response_format", "reasoning", "text", "thinking", "output_config", "generationConfig", "toolConfig", "inferenceConfig", "additionalModelRequestFields", "parameters", "stream_options":
+	case "object":
 		var object map[string]json.RawMessage
 		if json.Unmarshal(raw, &object) != nil || object == nil {
 			return fmt.Errorf("default %s must be an atomic object", name)

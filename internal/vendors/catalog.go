@@ -9,9 +9,7 @@ import (
 	"strings"
 )
 
-// GenerationParameters are the generation request parameters the catalogue
-// lists for a vendor that documents the OpenAI generation dialects.
-var GenerationParameters = []string{"temperature", "top_p", "max_tokens", "max_completion_tokens", "max_output_tokens", "stop", "tools", "tool_choice", "response_format", "seed", "presence_penalty", "frequency_penalty", "logit_bias", "n", "user", "reasoning", "reasoning_effort"}
+var generationParameters = []string{"temperature", "top_p", "max_tokens", "max_completion_tokens", "max_output_tokens", "stop", "tools", "tool_choice", "response_format", "seed", "presence_penalty", "frequency_penalty", "logit_bias", "n", "user", "reasoning", "reasoning_effort"}
 
 var (
 	openAIDialects = []string{"openai-chat", "openai-responses"}
@@ -38,7 +36,7 @@ var (
 func compatiblePreset(id, name, maintainer, description, endpoint string, docs Link, c Contract, profile *ProfileRef) Contract {
 	c.ID, c.Name, c.Maintainer, c.Description, c.Connector, c.Endpoint, c.Documentation = id, name, maintainer, description, "openai_compatible", endpoint, docs
 	if c.Parameters == nil {
-		c.Parameters = GenerationParameters
+		c.Parameters = generationParameters
 	}
 	c.Preset = &Preset{AuthMode: "api_key", Profile: profile}
 	return c
@@ -70,21 +68,21 @@ func selfHostedPreset(id, name, description, endpoint string, docs Link, c Contr
 // each connector kind's presets in onboarding order.
 var contracts = []Contract{
 	compatiblePreset("typesafe-jev", "TypeSafe Jev", "TypeSafe", "Text-only System One decisions.", "https://api.typesafe.ai/v1", Link{"System One API", "https://api.typesafe.ai/redoc"}, Contract{Operations: []string{"decision"}, ProbeOperation: "decision", Dialects: []string{"systemone"}, Parameters: []string{}}, &ProfileRef{ID: "systemone", Revision: "1"}),
-	{ID: "openai", Name: "OpenAI", Maintainer: "OpenAI", Connector: "openai", KindDefault: true, Endpoint: "https://api.openai.com/v1", Documentation: Link{"OpenAI API reference", "https://platform.openai.com/docs/api-reference"}, Discovery: true, Operations: openAIOperations, Dialects: openAIDialects, Parameters: GenerationParameters},
-	{ID: "openai_compatible", Name: "OpenAI-compatible", Connector: "openai_compatible", KindDefault: true, Documentation: Link{"OpenAI Chat Completions", "https://platform.openai.com/docs/api-reference/chat"}, Discovery: true, Operations: compatibleOperations, Dialects: openAIDialects, Parameters: GenerationParameters},
-	{ID: "anthropic", Name: "Anthropic", Maintainer: "Anthropic", Connector: "anthropic", KindDefault: true, Endpoint: "https://api.anthropic.com/v1", Documentation: Link{"Anthropic API", "https://docs.anthropic.com"}, Discovery: true, Operations: []string{"generation", "token_count", "batch"}, Dialects: []string{"anthropic-messages"}, Parameters: GenerationParameters},
-	{ID: "google", Name: "Google Gemini", Maintainer: "Google", Connector: "gemini", KindDefault: true, Endpoint: "https://generativelanguage.googleapis.com/v1beta", Documentation: Link{"Gemini API", "https://ai.google.dev"}, Discovery: true, Operations: []string{"generation", "token_count", "embeddings", "image_generation", "speech", "transcription", "batch"}, Dialects: []string{"gemini-generate-content"}, Parameters: GenerationParameters,
+	{ID: "openai", Name: "OpenAI", Maintainer: "OpenAI", Connector: "openai", KindDefault: true, Endpoint: "https://api.openai.com/v1", Documentation: Link{"OpenAI API reference", "https://platform.openai.com/docs/api-reference"}, Discovery: true, Operations: openAIOperations, Dialects: openAIDialects, Parameters: generationParameters},
+	{ID: "openai_compatible", Name: "OpenAI-compatible", Connector: "openai_compatible", KindDefault: true, Documentation: Link{"OpenAI Chat Completions", "https://platform.openai.com/docs/api-reference/chat"}, Discovery: true, Operations: compatibleOperations, Dialects: openAIDialects, Parameters: generationParameters},
+	{ID: "anthropic", Name: "Anthropic", Maintainer: "Anthropic", Connector: "anthropic", KindDefault: true, Endpoint: "https://api.anthropic.com/v1", Documentation: Link{"Anthropic API", "https://docs.anthropic.com"}, Discovery: true, Operations: []string{"generation", "token_count", "batch"}, Dialects: []string{"anthropic-messages"}, Parameters: generationParameters},
+	{ID: "google", Name: "Google Gemini", Maintainer: "Google", Connector: "gemini", KindDefault: true, Endpoint: "https://generativelanguage.googleapis.com/v1beta", Documentation: Link{"Gemini API", "https://ai.google.dev"}, Discovery: true, Operations: []string{"generation", "token_count", "embeddings", "image_generation", "speech", "transcription", "batch"}, Dialects: []string{"gemini-generate-content"}, Parameters: generationParameters,
 		MediaWires: map[string]string{"image_generation": "gemini", "speech": "gemini", "transcription": "gemini"}},
-	{ID: "google-vertex", Name: "Google Vertex AI", Maintainer: "Google", Connector: "vertex_ai", KindDefault: true, Documentation: Link{"Vertex AI", "https://cloud.google.com/vertex-ai"}, Operations: []string{"generation", "token_count", "embeddings", "image_generation", "speech", "transcription", "realtime", "ocr"}, Dialects: []string{"gemini-generate-content", "anthropic-messages", "openai-chat", "vertex-realtime", "vertex-document-processing-ocr"}, Parameters: GenerationParameters,
+	{ID: "google-vertex", Name: "Google Vertex AI", Maintainer: "Google", Connector: "vertex_ai", KindDefault: true, Documentation: Link{"Vertex AI", "https://cloud.google.com/vertex-ai"}, Operations: []string{"generation", "token_count", "embeddings", "image_generation", "speech", "transcription", "realtime", "ocr"}, Dialects: []string{"gemini-generate-content", "anthropic-messages", "openai-chat", "vertex-realtime", "vertex-document-processing-ocr"}, Parameters: generationParameters,
 		MediaWires: map[string]string{"image_generation": "gemini", "speech": "gemini", "transcription": "gemini"}},
-	{ID: "amazon-bedrock", Name: "Amazon Bedrock", Maintainer: "Amazon Web Services", Connector: "bedrock", KindDefault: true, Documentation: Link{"Amazon Bedrock", "https://docs.aws.amazon.com/bedrock"}, Discovery: true, Operations: []string{"generation", "token_count", "embeddings", "bedrock_invoke", "image_generation", "rerank", "speech", "realtime"}, Dialects: []string{"bedrock-converse", "anthropic-messages", "bedrock-realtime"}, Parameters: GenerationParameters,
+	{ID: "amazon-bedrock", Name: "Amazon Bedrock", Maintainer: "Amazon Web Services", Connector: "bedrock", KindDefault: true, Documentation: Link{"Amazon Bedrock", "https://docs.aws.amazon.com/bedrock"}, Discovery: true, Operations: []string{"generation", "token_count", "embeddings", "bedrock_invoke", "image_generation", "rerank", "speech", "realtime"}, Dialects: []string{"bedrock-converse", "anthropic-messages", "bedrock-realtime"}, Parameters: generationParameters,
 		Requests: map[string]RequestShape{"rerank": {Unsupported: []string{"truncation"}}}, MediaWires: map[string]string{"speech": "polly"}},
-	{ID: "amazon-sagemaker", Name: "Amazon SageMaker AI", Maintainer: "Amazon Web Services", Connector: "sagemaker", KindDefault: true, Documentation: Link{"SageMaker AI OpenAI-compatible endpoints", "https://docs.aws.amazon.com/sagemaker/latest/dg/realtime-endpoints-openai-compatible.html"}, Operations: []string{"generation"}, Dialects: []string{"openai-chat"}, Parameters: GenerationParameters},
+	{ID: "amazon-sagemaker", Name: "Amazon SageMaker AI", Maintainer: "Amazon Web Services", Connector: "sagemaker", KindDefault: true, Documentation: Link{"SageMaker AI OpenAI-compatible endpoints", "https://docs.aws.amazon.com/sagemaker/latest/dg/realtime-endpoints-openai-compatible.html"}, Operations: []string{"generation"}, Dialects: []string{"openai-chat"}, Parameters: generationParameters},
 	{ID: "ibm-watsonx", Name: "IBM watsonx.ai", Maintainer: "IBM", Connector: "watsonx", KindDefault: true, Documentation: Link{"watsonx.ai chat API", "https://dataplatform.cloud.ibm.com/docs/content/wsj/analyze-data/fm-api-chat.html?context=wx"}, Discovery: true,
 		Operations: []string{"generation"}, Dialects: []string{"openai-chat"},
 		Parameters:  []string{"temperature", "top_p", "max_tokens", "max_completion_tokens", "stop", "tools", "tool_choice", "response_format", "seed", "presence_penalty", "frequency_penalty", "n", "reasoning_effort"},
 		Unsupported: []string{"logit_bias", "user", "parallel_tool_calls", "store", "metadata", "service_tier", "prediction", "modalities", "audio", "web_search_options"}},
-	{ID: "azure", Name: "Azure OpenAI", Maintainer: "Microsoft", Connector: "azure_openai", KindDefault: true, Documentation: Link{"Azure OpenAI", "https://learn.microsoft.com/azure/ai-services/openai"}, Discovery: true, Operations: openAIOperations, Dialects: openAIDialects, Parameters: GenerationParameters},
+	{ID: "azure", Name: "Azure OpenAI", Maintainer: "Microsoft", Connector: "azure_openai", KindDefault: true, Documentation: Link{"Azure OpenAI", "https://learn.microsoft.com/azure/ai-services/openai"}, Discovery: true, Operations: openAIOperations, Dialects: openAIDialects, Parameters: generationParameters},
 	{ID: "azure-ai-search", Name: "Azure AI Search", Maintainer: "Microsoft", Connector: "azure_ai_search", KindDefault: true, Documentation: Link{"Azure AI Search", "https://learn.microsoft.com/en-us/rest/api/searchservice/documents/search-post?view=rest-searchservice-2025-09-01"}, Operations: []string{"retrieval"}, Dialects: []string{"azure-ai-search"}, ProbeOperation: "retrieval", Parameters: []string{"query", "max_num_results", "filters"}},
 
 	// OpenAI-compatible presets, each reviewed against the documentation it

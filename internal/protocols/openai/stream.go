@@ -342,8 +342,7 @@ func (s *responsesStream) frame(f sse.Frame, event oif.Event) error {
 		if present && valid && upstreamID != "" {
 			s.upstreamID = upstreamID
 		}
-		switch kind {
-		case "response.completed", "response.incomplete", "response.failed":
+		if wire.IsTerminalResponseEvent(kind) {
 			completion, err := responseSummaryWithUsage(response, observed.usage.Usage)
 			if err != nil {
 				return err
@@ -370,16 +369,14 @@ func (s *responsesStream) frame(f sse.Frame, event oif.Event) error {
 			s.c = completion
 			s.terminalErr = terminalErr
 			s.done = true
-		default:
-			if observed.usage.Usage != nil {
-				if s.c == nil {
-					s.c = &wire.Completion{}
-				}
-				if !s.c.UsageComplete {
-					s.c.Usage = observed.usage.Usage
-					s.c.UpstreamID, _ = stringField(response, "id")
-					s.c.ProviderModel, _ = stringField(response, "model")
-				}
+		} else if observed.usage.Usage != nil {
+			if s.c == nil {
+				s.c = &wire.Completion{}
+			}
+			if !s.c.UsageComplete {
+				s.c.Usage = observed.usage.Usage
+				s.c.UpstreamID, _ = stringField(response, "id")
+				s.c.ProviderModel, _ = stringField(response, "model")
 			}
 		}
 		if _, present := source.Lookup("/response/model"); present {

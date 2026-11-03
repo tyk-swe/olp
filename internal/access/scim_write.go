@@ -230,7 +230,7 @@ func (s *Server) writeSCIMUser(r *http.Request, tx pgx.Tx, id string, d scim.Doc
 		if !ok {
 			return "", scim.Invalid("name must be an object.")
 		}
-		for _, key := range []string{"formatted", "familyName", "givenName", "middleName", "honorificPrefix", "honorificSuffix"} {
+		for _, key := range scim.NameSubattributes() {
 			if value, exists := fields[key]; exists {
 				v, e := boundedSCIMText(value, 100, false)
 				if e != nil {

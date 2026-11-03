@@ -14,12 +14,13 @@ import (
 	"strings"
 
 	"github.com/tyk-swe/olp/internal/oif"
+	"github.com/tyk-swe/olp/internal/retrieval/identity"
 )
 
 const (
-	Bedrock = "bedrock_knowledge_base"
-	Vertex  = "vertex_rag"
-	Azure   = "azure_ai_search"
+	Bedrock = identity.Bedrock
+	Vertex  = identity.Vertex
+	Azure   = identity.Azure
 )
 
 type Fields struct {
@@ -53,20 +54,9 @@ type Result struct {
 }
 
 var fieldName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*(/[A-Za-z_][A-Za-z0-9_]*)*$`)
-var kbID = regexp.MustCompile(`^[A-Za-z0-9]{10}$`)
-var indexName = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,127}$`)
-var corpusName = regexp.MustCompile(`^projects/[A-Za-z0-9_-]+/locations/[a-z0-9-]+/ragCorpora/[A-Za-z0-9_-]+$`)
 
 func ResourceValid(backend, resource string) bool {
-	switch backend {
-	case Bedrock:
-		return kbID.MatchString(resource)
-	case Vertex:
-		return corpusName.MatchString(resource)
-	case Azure:
-		return indexName.MatchString(resource)
-	}
-	return false
+	return identity.ValidResource(backend, resource)
 }
 func ProviderKind(backend string) string {
 	switch backend {

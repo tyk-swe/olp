@@ -12,7 +12,6 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"os"
 	"strings"
 	"time"
 
@@ -66,12 +65,13 @@ type Sender struct {
 	policy       *egress.Policy
 	auth         senderAuth
 	client       *http.Client
+	getenv       func(string) string
 }
 
-func NewSender(policy *egress.Policy) *Sender {
+func NewSender(policy *egress.Policy, getenv func(string) string) *Sender {
 	client := policy.Client(DeliveryTimeout)
 	client.Timeout = DeliveryTimeout
-	return &Sender{policy: policy, auth: connectors.NewAuth(policy), client: client}
+	return &Sender{policy: policy, auth: connectors.NewAuth(policy), client: client, getenv: getenv}
 }
 
 type SendError struct {
@@ -327,10 +327,10 @@ func (s *Sender) putObject(ctx context.Context, endpoint *url.URL, destination D
 			region = s3EndpointRegion(endpoint)
 		}
 		if region == "" {
-			region = os.Getenv("AWS_REGION")
+			region = s.getenv("AWS_REGION")
 		}
 		if region == "" {
-			region = os.Getenv("AWS_DEFAULT_REGION")
+			region = s.getenv("AWS_DEFAULT_REGION")
 		}
 		if region == "" {
 			return sendError("credential", errors.New("s3 requires a region in the credential, the endpoint or the workload environment"))

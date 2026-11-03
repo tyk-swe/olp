@@ -15,6 +15,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/routeidentity"
 	"github.com/tyk-swe/olp/internal/runtime"
 	"github.com/tyk-swe/olp/internal/vendors"
 )
@@ -90,13 +91,13 @@ func validSlugPattern(pattern string) bool {
 	if !strings.Contains(pattern, "{model}") || len(pattern) > 100 {
 		return false
 	}
-	return routing.RouteSlug.MatchString(slugPlaceholders.Replace(pattern))
+	return routeidentity.ValidSlug(slugPlaceholders.Replace(pattern))
 }
 
 // expandSlug fills a slug pattern from a canonical model identity and vendor.
 func expandSlug(pattern, identity, vendor string) (string, bool) {
 	slug := strings.NewReplacer("{model}", slugPart(identity), "{vendor}", slugPart(vendor)).Replace(pattern)
-	return slug, routing.RouteSlug.MatchString(slug)
+	return slug, routeidentity.ValidSlug(slug)
 }
 
 // slugPart lowercases s and turns every character a slug cannot carry into a
@@ -377,7 +378,7 @@ func (s *Server) generate(ctx context.Context, tx pgx.Tx, t *template, m certifi
 		Slug: result.RouteSlug, Operations: m.operations, OverallTimeoutMS: t.OverallTimeoutMS, MaxAttempts: t.MaxAttempts,
 		Targets: []TargetInput{{ProviderModelID: &m.id, Weight: 1, TimeoutMS: t.OverallTimeoutMS}}, Fidelity: t.Fidelity, ProjectID: t.ProjectID,
 	}
-	targets, err := ValidateDraftInput(ctx, tx, &input, t.ProjectID, nil)
+	targets, err := ValidateAndNormalizeDraftInput(ctx, tx, &input, t.ProjectID, nil)
 	if refusal, ok := refusalCode(err); ok {
 		return result.skip(refusal), nil
 	}
@@ -439,7 +440,7 @@ func (s *Server) join(ctx context.Context, tx pgx.Tx, draftID string, m certifie
 		Slug: d.Slug, Operations: d.Operations, OverallTimeoutMS: d.OverallTimeoutMS, MaxAttempts: d.MaxAttempts,
 		Targets: []TargetInput{{ProviderModelID: &m.id, Weight: 1, TimeoutMS: d.OverallTimeoutMS}}, Fidelity: d.Fidelity,
 	}
-	added, err := ValidateDraftInput(ctx, tx, &input, d.ProjectID, nil)
+	added, err := ValidateAndNormalizeDraftInput(ctx, tx, &input, d.ProjectID, nil)
 	if refusal, ok := refusalCode(err); ok {
 		return result.skip(refusal), nil
 	}

@@ -10,9 +10,9 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/tyk-swe/olp/internal/priority"
-
 	"github.com/google/uuid"
+	"github.com/tyk-swe/olp/internal/pricingpolicy"
+	"github.com/tyk-swe/olp/internal/priority"
 )
 
 type Preferences struct {
@@ -38,7 +38,17 @@ type Preferences struct {
 	Priority *string `json:"priority,omitempty"`
 }
 
-var Strategies = []string{"weighted", "price", "latency", "throughput", "capacity"}
+const (
+	strategyWeighted   = "weighted"
+	strategyPrice      = "price"
+	strategyLatency    = "latency"
+	strategyThroughput = "throughput"
+	strategyCapacity   = "capacity"
+)
+
+func strategies() []string {
+	return []string{strategyWeighted, strategyPrice, strategyLatency, strategyThroughput, strategyCapacity}
+}
 
 type Policy struct {
 	AllowedStrategies []string    `json:"allowed_strategies"`
@@ -56,7 +66,7 @@ func (p *Preferences) Validate(field string) error {
 		return nil
 	}
 	invalid := func(message string) error { return invalidValue(field, message) }
-	if p.Strategy != nil && !slices.Contains(Strategies, *p.Strategy) {
+	if p.Strategy != nil && !slices.Contains(strategies(), *p.Strategy) {
 		return invalid("Unknown routing strategy")
 	}
 	if p.PreferredMaxLatencyMS != nil && *p.PreferredMaxLatencyMS < 0 || p.PreferredMinThroughput != nil && (*p.PreferredMinThroughput < 0) {
@@ -88,7 +98,7 @@ func (p *Preferences) Validate(field string) error {
 			}
 		}
 	}
-	if p.MaxCost != nil && !decimal(*p.MaxCost) {
+	if p.MaxCost != nil && !pricingpolicy.ValidAmount(*p.MaxCost) {
 		return invalid("The maximum cost must be a non-negative decimal string")
 	}
 	if len(p.MaxPrice) > 0 && string(p.MaxPrice) != "null" {
@@ -99,24 +109,12 @@ func (p *Preferences) Validate(field string) error {
 			return invalid("Invalid price ceiling")
 		}
 		for _, amount := range []*string{c.Input, c.Output, c.Unit} {
-			if amount != nil && !decimal(*amount) {
+			if amount != nil && !pricingpolicy.ValidAmount(*amount) {
 				return invalid("Price ceilings must be non-negative decimal strings")
 			}
 		}
 	}
 	return nil
-}
-func decimal(s string) bool {
-	whole, fraction, has := strings.Cut(s, ".")
-	if len(whole) < 1 || len(whole) > 12 || has && (len(fraction) < 1 || len(fraction) > 12) {
-		return false
-	}
-	for _, c := range whole + fraction {
-		if c < '0' || c > '9' {
-			return false
-		}
-	}
-	return true
 }
 func (p *Preferences) Budget(published int) int {
 	if p == nil {
@@ -136,7 +134,7 @@ func (p *Policy) Validate() error {
 		return nil
 	}
 	for _, s := range p.AllowedStrategies {
-		if !slices.Contains(Strategies, s) {
+		if !slices.Contains(strategies(), s) {
 			return invalidValue("allowed_strategies", "Unknown routing strategy")
 		}
 	}
@@ -179,7 +177,7 @@ type EffectivePolicy struct {
 }
 
 func ResolvePolicy(installation, route, key *Policy, requested *Preferences) (EffectivePolicy, error) {
-	e := EffectivePolicy{Strategy: "weighted", Allowed: slices.Clone(Strategies)}
+	e := EffectivePolicy{Strategy: strategyWeighted, Allowed: strategies()}
 	narrow := func(maxCost *string) {
 		if maxCost == nil {
 			return

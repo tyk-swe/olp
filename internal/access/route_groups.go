@@ -6,6 +6,8 @@ import (
 	"maps"
 	"net/http"
 	"slices"
+
+	"github.com/tyk-swe/olp/internal/routeidentity"
 )
 
 // RouteGroups are project-local named sets of ordinary or subscription slugs.
@@ -17,12 +19,12 @@ func (g RouteGroups) Validate() error {
 		return Invalid("groups", "Use at most 64 route groups per project.")
 	}
 	for name, routes := range g {
-		if !RouteSlug.MatchString(name) || routes == nil || len(routes) > 100 {
+		if !routeidentity.ValidSlug(name) || routes == nil || len(routes) > 100 {
 			return Invalid("groups", "Use group names and route slugs of 1–100 lowercase letters, numbers, dots, underscores or hyphens, and at most 100 routes per group.")
 		}
 		seen := map[string]bool{}
 		for _, route := range routes {
-			if !RouteSlug.MatchString(route) || seen[route] {
+			if !routeidentity.ValidSlug(route) || seen[route] {
 				return Invalid("groups", "Each group must contain unique valid route slugs.")
 			}
 			seen[route] = true

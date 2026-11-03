@@ -10,6 +10,7 @@ import {
   type AttributionForm
 } from '../attribution/policy';
 import { keyCIDRs } from './keyNetwork';
+import type { admissionPriorities } from './keyValidation';
 import { policyForm, policyInput, type PolicyForm } from '../end-users/policy';
 import type {
   ApiKey,
@@ -55,12 +56,6 @@ export type ApiKeyFormState = {
   maxPriority: string;
 };
 
-export const admissionPriorities = [
-  'critical',
-  'high',
-  'normal',
-  'low'
-] as const;
 type AdmissionPriority = (typeof admissionPriorities)[number];
 
 export function createApiKeyFormState(

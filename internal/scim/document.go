@@ -5,6 +5,8 @@ import (
 	"bytes"
 	"encoding/json"
 	"io"
+	"maps"
+	"slices"
 	"strings"
 
 	"github.com/tyk-swe/olp/internal/oif"
@@ -35,13 +37,17 @@ func Invalid(detail string) error { return Fail(400, "invalidValue", detail) }
 
 type Document map[string]any
 
-var names = map[string]string{}
-
-func init() {
-	for _, n := range []string{"schemas", "id", "externalId", "userName", "displayName", "display", "active", "name", "formatted", "familyName", "givenName", "middleName", "honorificPrefix", "honorificSuffix", "emails", "value", "type", "primary", "roles", "groups", "members", "$ref", "meta", "resourceType", "created", "lastModified", "location", "version", "password", "role", "accessScope", "projects", "operations", "op", "path", "filter", "startIndex", "count", "attributes", "excludedAttributes", "sortBy", "sortOrder", UserExtension, GroupExtension} {
-		names[strings.ToLower(n)] = n
-	}
+func NameSubattributes() []string {
+	return []string{"formatted", "familyName", "givenName", "middleName", "honorificPrefix", "honorificSuffix"}
 }
+
+var names = maps.Collect(func(yield func(string, string) bool) {
+	for _, n := range slices.Concat([]string{"schemas", "id", "externalId", "userName", "displayName", "display", "active", "name", "emails", "value", "type", "primary", "roles", "groups", "members", "$ref", "meta", "resourceType", "created", "lastModified", "location", "version", "password", "role", "accessScope", "projects", "operations", "op", "path", "filter", "startIndex", "count", "attributes", "excludedAttributes", "sortBy", "sortOrder", UserExtension, GroupExtension}, NameSubattributes()) {
+		if !yield(strings.ToLower(n), n) {
+			return
+		}
+	}
+})
 
 func Canonical(name string) string {
 	if n, ok := names[strings.ToLower(name)]; ok {

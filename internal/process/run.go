@@ -50,9 +50,6 @@ import (
 	"github.com/tyk-swe/olp/internal/usage"
 )
 
-// mediaUpstreamHeaderTimeout mirrors the gateway's upstream header wait bound.
-const mediaUpstreamHeaderTimeout = 5 * time.Minute
-
 // metadataBuffer is how many request metadata events one producer replica may
 // hold while the stream writer catches up. Beyond it events are dropped and
 // counted as loss, so a slow or unreachable stream costs completeness rather
@@ -92,7 +89,7 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 		AcceptInbound:     c.TraceAcceptInbound,
 		Mode:              string(c.Mode),
 		Version:           Version,
-	})
+	}, os.LookupEnv)
 	if err != nil {
 		return err
 	}
@@ -259,17 +256,17 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 			responseCache = &cache.Store{Client: remote, Keys: keys, Auth: auth, Installation: installation}
 		}
 
-		sender := export.NewSender(&policy)
+		sender := export.NewSender(&policy, os.Getenv)
 		sender.Installation = installation
 		exporter = &export.Worker{Pool: pool, Keys: keys, Installation: installation, Sender: sender, Log: log}
 		export.FocusGeneratorVersion = Version
 		focusWorker = &export.FocusWorker{Pool: pool, Keys: keys, Installation: installation, Sender: sender, Log: log}
 		capturer = &export.Manager{Pool: pool, Keys: keys, Installation: installation, Sender: sender, Log: log}
 		importer = &billing.Importer{Pool: pool, Keys: keys, Installation: installation, Egress: &policy, Log: log}
-		rt = runtime.NewManager(pool, installation, auth, keys, log)
+		rt = runtime.NewManager(pool, installation, auth, keys, log, c.Hostname)
 		rt.ReadPool = readPool
 		rt.Region = c.Region
-		rt.ExternalSecrets = secretstore.New(policy)
+		rt.ExternalSecrets = secretstore.New(policy, os.Getenv)
 		if c.ConnectorConfigFile != "" {
 			rt.Mounted, err = providers.LoadMounted(c.ConnectorConfigFile, &policy)
 			if err != nil {
@@ -278,7 +275,7 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 		}
 		var unconfined *plugins.Unconfined
 		if c.UnconfinedPluginDir != "" {
-			unconfined = plugins.NewUnconfined(c.UnconfinedPluginDir, plugins.DefaultLimits, log)
+			unconfined = plugins.NewUnconfined(c.UnconfinedPluginDir, plugins.DefaultLimits(), log)
 		}
 		// Gateways and control's probes run signing hooks per upstream
 		// request, and unconfined plugins may carry the requests themselves,
@@ -289,7 +286,7 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 		if c.Mode == config.Worker {
 			engine = plugins.Interpreted
 		}
-		hostRuntime, err := plugins.NewRuntime(startup, engine, plugins.DefaultLimits, log)
+		hostRuntime, err := plugins.NewRuntime(startup, engine, plugins.DefaultLimits(), log)
 		if err != nil {
 			return err
 		}
@@ -363,7 +360,7 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 				Installation: installation,
 				Gaps:         &mediaGapsTotal,
 				Transport: &media.Transport{
-					Client:           policy.Client(mediaUpstreamHeaderTimeout),
+					Client:           policy.Client(gateway.UpstreamHeaderTimeout),
 					Auth:             connectors.NewAuth(&policy),
 					Egress:           &policy,
 					Spool:            spool,
@@ -419,7 +416,7 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 		// Without shared state, hard limits are refused and metadata stays logged.
 		if limiter != nil {
 			emitter = usage.NewEmitter(metadataBuffer)
-			gatewayInstance = usage.GatewayInstance()
+			gatewayInstance = usage.GatewayInstance(c.Hostname)
 			for _, server := range []*gateway.Server{gw, prober} {
 				if server == nil {
 					continue
@@ -455,12 +452,12 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 			control.NotificationsActive = true
 			// Installing reads a module's manifest once, which the
 			// interpreter is ready to do several times sooner.
-			pluginRuntime, err := plugins.NewRuntime(startup, plugins.Interpreted, plugins.DefaultLimits, log)
+			pluginRuntime, err := plugins.NewRuntime(startup, plugins.Interpreted, plugins.DefaultLimits(), log)
 			if err != nil {
 				return err
 			}
 			defer closeDependency(&shutdownDeadline, c.ShutdownTimeout, log, "management plugin runtime", pluginRuntime.Close)
-			Management{Access: control, Egress: &policy, Limiter: limiter, Runtime: rt, Gateway: gw, Media: mediaService, Health: obsCache, Log: log, PluginRuntime: pluginRuntime, PluginHost: pluginHost, Unconfined: unconfined, Catalog: referenceCatalog, PluginIndex: pluginIndex}.Register(public)
+			Management{Getenv: os.Getenv, Access: control, Egress: &policy, Limiter: limiter, Runtime: rt, Gateway: gw, Media: mediaService, Health: obsCache, Log: log, PluginRuntime: pluginRuntime, PluginHost: pluginHost, Unconfined: unconfined, Catalog: referenceCatalog, PluginIndex: pluginIndex}.Register(public)
 		}
 	}
 	if err := startup.Err(); err != nil {
@@ -608,7 +605,7 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 		// provider egress client, so the plane runs even when no shared state
 		// backend is configured. It is started exactly once, inside the single
 		// worker plane.
-		workersStopped = startWorkers(workers, pool, reader, limiter, workerStream, mediaService, pluginHost, keys, auth, installation, c.Region, &policy, log, exporter, focusWorker, importer, referenceCatalog)
+		workersStopped = startWorkers(workers, pool, reader, limiter, workerStream, mediaService, pluginHost, keys, auth, installation, c.Region, c.Hostname, &policy, log, exporter, focusWorker, importer, referenceCatalog)
 	}
 	// Probes produce accounting events, so they stop before delivery closes;
 	// the consumer and recovery workers remain alive until delivery drains.
@@ -693,7 +690,7 @@ func loadSecrets(ctx context.Context, pool *pgxpool.Pool, c config.Config, insta
 	}
 	var keys *secrets.KeyRing
 	if c.MasterKeyFile != "" {
-		keys, err = secrets.LoadRingWithUnwrapper(ctx, c.MasterKeyFile, secretstore.New(egress.Policy{AllowedNetworks: c.ProviderEgressAllowCIDRs, PlainHTTPHosts: c.ProviderEgressAllowHTTPHosts}))
+		keys, err = secrets.LoadRingWithUnwrapper(ctx, c.MasterKeyFile, secretstore.New(egress.Policy{AllowedNetworks: c.ProviderEgressAllowCIDRs, PlainHTTPHosts: c.ProviderEgressAllowHTTPHosts}, os.Getenv))
 		if err != nil {
 			return nil, nil, "", err
 		}

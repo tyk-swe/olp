@@ -144,6 +144,14 @@ func TestPublishedMessagesPolicySelectsEligibleFrozenProviders(t *testing.T) {
 	if got := published.CodeProviders(published.CodeRoutes["translated"], "v1/messages", codeadapter.HTTP); !slices.Equal(got, []string{"a-native", "b-codex"}) {
 		t.Fatalf("model filtering changed published path eligibility, got %v", got)
 	}
+	t.Run("returned-providers-cannot-change-published-routing", func(t *testing.T) {
+		route := published.CodeRoutes["translated"]
+		providers := published.CodeProviders(route, "v1/messages", codeadapter.HTTP)
+		providers[1] = "replacement"
+		if got := published.CodeModelProviders(route, "v1/messages", "client-stable", codeadapter.HTTP); !slices.Equal(got, []string{"b-codex"}) {
+			t.Fatalf("returned providers changed published routing: %v", got)
+		}
+	})
 }
 
 func TestExactAliasSnapshotFreezesPublishedModelMapping(t *testing.T) {

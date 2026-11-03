@@ -162,9 +162,10 @@ family for profiles in the same subscription system. New protocols require a
 native parser/observer, not translation; new clients need `codeclient` renderers.
 Extend `codemode.Adapter` and public `CodeAccount.adapter`, `CodeRoute.adapters`
 and `CodeClientConfiguration.adapters` enums, then regenerate contracts and console
-types. Preserve controlled latest-client continuation, refusals, usage, subagents,
-model selection and mixed-subscription tests; separately qualify live entitlement,
-allowance, cross-vendor history and any hard bound. See
+types. Preserve controlled latest-client continuation, refusals, usage,
+subagents, model selection and mixed-subscription behavior. Verify live
+entitlement, allowance, cross-vendor history and any hard bound separately
+by hand. See
 [Qualification](qualification.md#code-mode-qualification).
 
 ## Process modes

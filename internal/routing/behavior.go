@@ -16,11 +16,17 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/tyk-swe/olp/internal/protocols"
 	"github.com/tyk-swe/olp/internal/protocols/wire"
 
+	"github.com/tyk-swe/olp/internal/attribution"
 	"github.com/tyk-swe/olp/internal/bodylimit"
 	"github.com/tyk-swe/olp/internal/cache"
 	"github.com/tyk-swe/olp/internal/limits"
+	pluginidentity "github.com/tyk-swe/olp/internal/plugins/identity"
+	"github.com/tyk-swe/olp/internal/pricingpolicy"
+	"github.com/tyk-swe/olp/internal/routeidentity"
+	"github.com/tyk-swe/olp/internal/upstream"
 )
 
 // Conditions that start a fallback to another route.
@@ -28,22 +34,13 @@ const (
 	// FallbackExhausted means every attempt the route made failed with a class
 	// that may move to another target, and none remained.
 	FallbackExhausted     = "exhausted"
-	FallbackContextWindow = "context_window"
-	FallbackContentFilter = "content_filter"
-	FallbackRateLimit     = "rate_limit"
+	FallbackContextWindow = string(upstream.ContextWindow)
+	FallbackContentFilter = string(upstream.ContentFilter)
+	FallbackRateLimit     = string(upstream.RateLimit)
 	// FallbackBudget means a supply-side cost cap removed the route or every
 	// target it could have used.
 	FallbackBudget = "budget"
 )
-
-// FallbackConditions lists every condition a fallback may name, in the order
-// documentation and validation present them.
-var FallbackConditions = []string{FallbackExhausted, FallbackContextWindow, FallbackContentFilter, FallbackRateLimit, FallbackBudget}
-
-// RetryClasses are the failure classes a route may retry on the same target.
-// Each is retryable before commitment; a credential or context-window failure
-// would only fail again.
-var RetryClasses = []string{"connect", "timeout", "rate_limit", "upstream_server"}
 
 // Session affinity sources.
 const (
@@ -66,12 +63,8 @@ const (
 )
 
 var (
-	pluginDigest = regexp.MustCompile(`^[0-9a-f]{64}$`)
-	selectorID   = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,62}$`)
-	targetTag    = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,31}$`)
-	effortName   = regexp.MustCompile(`^[a-z]{1,16}$`)
-	// Modalities are the kinds of input a request can carry.
-	Modalities = []string{"text", "image", "audio", "video", "file"}
+	targetTag  = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,31}$`)
+	effortName = regexp.MustCompile(`^[a-z]{1,16}$`)
 )
 
 // Behavior is the adaptive routing a route revision declares beyond its
@@ -323,25 +316,33 @@ func (b Behavior) Validate(slug string, tagged func(string) bool) error {
 	if len(b.Fallbacks) > maxFallbacks {
 		return invalidValue("fallbacks", "A route declares at most "+strconv.Itoa(maxFallbacks)+" fallbacks")
 	}
+	fallbackConditions := []string{
+		FallbackExhausted, FallbackContextWindow, FallbackContentFilter, FallbackRateLimit, FallbackBudget,
+	}
 	seen := map[string]bool{}
 	for _, f := range b.Fallbacks {
-		if !RouteSlug.MatchString(f.Route) || f.Route == slug {
+		if !routeidentity.ValidSlug(f.Route) || f.Route == slug {
 			return invalidValue("fallbacks", "Each fallback names another route by slug")
 		}
 		if seen[f.Route] {
 			return invalidValue("fallbacks", "Each fallback route appears once")
 		}
 		seen[f.Route] = true
-		if len(f.On) == 0 || !distinctMembers(f.On, FallbackConditions) {
-			return invalidValue("fallbacks", "Each fallback names distinct conditions among exhausted, context_window, content_filter, rate_limit and budget")
+		if len(f.On) == 0 || !distinctMembers(f.On, fallbackConditions) {
+			return invalidValue("fallbacks", "Each fallback names distinct conditions among "+
+				strings.Join(fallbackConditions[:len(fallbackConditions)-1], ", ")+" and "+fallbackConditions[len(fallbackConditions)-1])
 		}
 	}
 	if err := b.validateSelectors(slug, tagged); err != nil {
 		return err
 	}
+	retryClasses := []string{
+		string(upstream.Connect), string(upstream.Timeout), string(upstream.RateLimit), string(upstream.ServerError),
+	}
 	for class, rule := range b.Retry {
-		if !slices.Contains(RetryClasses, class) {
-			return invalidValue("retry", "Retries apply to connect, timeout, rate_limit and upstream_server failures")
+		if !slices.Contains(retryClasses, class) {
+			return invalidValue("retry", "Retries apply to "+
+				strings.Join(retryClasses[:len(retryClasses)-1], ", ")+" and "+retryClasses[len(retryClasses)-1]+" failures")
 		}
 		if rule.MaxRetries < 1 || rule.MaxRetries > maxRetries || rule.BaseBackoffMS < 1 || rule.MaxBackoffMS < rule.BaseBackoffMS || rule.MaxBackoffMS > maxBackoffMS {
 			return invalidValue("retry", "Each retry rule allows 1 to 10 retries with a base backoff no larger than its maximum of at most 60000 ms")
@@ -349,7 +350,7 @@ func (b Behavior) Validate(slug string, tagged func(string) bool) error {
 	}
 	if a := b.Affinity; a != nil {
 		switch {
-		case a.Source == AffinityLabel && attributionLabel.MatchString(a.Label):
+		case a.Source == AffinityLabel && attribution.ValidKey(a.Label):
 		case a.Source == AffinityCacheKey && a.Label == "":
 		default:
 			return invalidValue("affinity", "Affinity reads an attribution label or the dialect's cache key")
@@ -363,8 +364,6 @@ func (b Behavior) Validate(slug string, tagged func(string) bool) error {
 	return nil
 }
 
-var attributionLabel = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_.-]{0,31}$`)
-
 func (b Behavior) validateSelectors(slug string, tagged func(string) bool) error {
 	if len(b.Selectors) > maxSelectors {
 		return invalidValue("selectors", "A route declares at most "+strconv.Itoa(maxSelectors)+" selectors")
@@ -372,7 +371,7 @@ func (b Behavior) validateSelectors(slug string, tagged func(string) bool) error
 	ids := map[string]bool{}
 	for _, s := range b.Selectors {
 		invalid := func(message string) error { return invalidValue("selectors", "Selector `"+s.ID+"`: "+message) }
-		if !selectorID.MatchString(s.ID) || ids[s.ID] {
+		if !routeidentity.ValidSelectorID(s.ID) || ids[s.ID] {
 			return invalidValue("selectors", "Each selector has a distinct lowercase identifier")
 		}
 		ids[s.ID] = true
@@ -387,7 +386,7 @@ func (b Behavior) validateSelectors(slug string, tagged func(string) bool) error
 				}
 			}
 		case len(s.Tags) == 0 && s.Route != "":
-			if !RouteSlug.MatchString(s.Route) || s.Route == slug {
+			if !routeidentity.ValidSlug(s.Route) || s.Route == slug {
 				return invalid("delegate to another route by slug")
 			}
 		default:
@@ -413,7 +412,7 @@ func (p Predicate) validate(slug string, invalid func(string) error) error {
 	if len(p.Operations) > maxPredicateList || !distinct(p.Operations) {
 		return invalid("operations are distinct")
 	}
-	if len(p.Modalities) > 0 && !distinctMembers(p.Modalities, Modalities) {
+	if len(p.Modalities) > 0 && !distinctMembers(p.Modalities, protocols.RequestModalities()) {
 		return invalid("modalities are distinct among text, image, audio, video and file")
 	}
 	if len(p.ReasoningEffort) > maxPredicateList || !distinct(p.ReasoningEffort) {
@@ -425,7 +424,7 @@ func (p Predicate) validate(slug string, invalid func(string) error) error {
 		}
 	}
 	if c := p.Classifier; c != nil {
-		if !RouteSlug.MatchString(c.Route) || c.Route == slug {
+		if !routeidentity.ValidSlug(c.Route) || c.Route == slug {
 			return invalid("the classifier is another route")
 		}
 		if len(c.Labels) == 0 || len(c.Labels) > maxPredicateList || !distinct(c.Labels) {
@@ -443,7 +442,7 @@ func (p Predicate) validate(slug string, invalid func(string) error) error {
 			return invalid("the classifier timeout is 1 to 30000 ms")
 		}
 	}
-	if p.Plugin != nil && !pluginDigest.MatchString(p.Plugin.Digest) {
+	if p.Plugin != nil && !pluginidentity.ValidDigest(p.Plugin.Digest) {
 		return invalid("the plugin is named by its lowercase SHA-256 digest")
 	}
 	return nil
@@ -452,7 +451,7 @@ func (p Predicate) validate(slug string, invalid func(string) error) error {
 // Validate checks spend caps as positive exact decimals.
 func (c CostLimits) Validate(field string) error {
 	for _, limit := range []*string{c.DailyCostLimit, c.MonthlyCostLimit} {
-		if limit != nil && (!decimal(*limit) || strings.Trim(*limit, "0.") == "") {
+		if limit != nil && (!pricingpolicy.ValidAmount(*limit) || strings.Trim(*limit, "0.") == "") {
 			return invalidValue(field, "Cost limits are positive decimals with at most 12 fractional digits")
 		}
 	}

@@ -1,0 +1,188 @@
+import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
+import { flushSync, mount, unmount } from 'svelte';
+import { ApiProblem } from '$lib/api/http';
+import StateHarness from '../../../../tests/unit/support/StateHarness.svelte';
+import { useResourceSubmission } from './resourceSubmission.svelte';
+
+vi.mock('$app/navigation', () => ({ beforeNavigate: vi.fn() }));
+
+type Input = { name: string };
+type Options = Parameters<typeof useResourceSubmission<Input>>[0];
+
+function renderSubmission(overrides: Partial<Options> = {}) {
+  const persist = vi.fn<Options['persist']>(async () => undefined);
+  const onDraftChange = vi.fn<Options['onDraftChange']>();
+  const onSaved = vi.fn<Options['onSaved']>(async () => undefined);
+  const onCancel = vi.fn<Options['onCancel']>();
+  const options: Options = {
+    allowed: () => true,
+    creating: () => true,
+    build: () => ({ name: 'Example' }),
+    persist,
+    onDraftChange,
+    onSaved,
+    onCancel,
+    ...overrides
+  };
+  const ready = vi.fn(
+    (state: ReturnType<typeof useResourceSubmission<Input>>) => state
+  );
+  const component = mount(StateHarness, {
+    target: document.createElement('div'),
+    props: { setup: () => ready(useResourceSubmission(options)) }
+  });
+  onTestFinished(() => unmount(component));
+  flushSync();
+  return {
+    state: ready.mock.results[0].value,
+    persist,
+    onDraftChange,
+    onSaved,
+    onCancel
+  };
+}
+
+function submit(): SubmitEvent {
+  return new SubmitEvent('submit', { cancelable: true });
+}
+
+afterEach(() => vi.unstubAllGlobals());
+
+describe('resource submissions', () => {
+  it.each([{ allowed: () => false }, { blocked: () => true }])(
+    'does not submit when permission or another operation blocks it',
+    async (options) => {
+      const { state, persist } = renderSubmission(options);
+      const event = submit();
+
+      await state.save(event);
+
+      expect(event.defaultPrevented).toBe(true);
+      expect(persist).not.toHaveBeenCalled();
+    }
+  );
+
+  it('saves only once while a request is in flight and clears the draft after success', async () => {
+    const pending = Promise.withResolvers<void>();
+    const persist = vi.fn<Options['persist']>(() => pending.promise);
+    const { state, onDraftChange, onSaved } = renderSubmission({ persist });
+    state.markDirty();
+    flushSync();
+    expect(onDraftChange).toHaveBeenLastCalledWith(true);
+
+    const saving = state.save(submit());
+    expect(state.busy).toBe(true);
+    await state.save(submit());
+    expect(persist).toHaveBeenCalledOnce();
+    pending.resolve();
+    await saving;
+    flushSync();
+
+    expect(state.busy).toBe(false);
+    expect(onSaved).toHaveBeenCalledOnce();
+    expect(onDraftChange).toHaveBeenLastCalledWith(false);
+  });
+
+  it('retries an unanswered create with the same request identity', async () => {
+    const persist = vi.fn<Options['persist']>(async () => undefined);
+    persist.mockRejectedValueOnce(new TypeError('Network error'));
+    const { state, onSaved } = renderSubmission({ persist });
+
+    await state.save(submit());
+    expect(state.submitted).toBe(true);
+    expect(state.error).toBeTruthy();
+    expect(onSaved).not.toHaveBeenCalled();
+    await state.save(submit());
+
+    expect(persist).toHaveBeenCalledTimes(2);
+    expect(persist.mock.calls[1]).toEqual(persist.mock.calls[0]);
+    expect(state.submitted).toBe(false);
+    expect(state.error).toBe('');
+    expect(onSaved).toHaveBeenCalledOnce();
+  });
+
+  it('shows a definite rejection without locking the create request', async () => {
+    const persist = vi.fn<Options['persist']>(async () => undefined);
+    persist.mockRejectedValueOnce(
+      new ApiProblem({ title: 'Invalid resource', status: 400 })
+    );
+    const { state, onSaved } = renderSubmission({ persist });
+
+    await state.save(submit());
+
+    expect(state.error).toBe('Invalid resource');
+    expect(state.submitted).toBe(false);
+    expect(onSaved).not.toHaveBeenCalled();
+  });
+
+  it('asks before discarding edits and keeps them when the user declines', () => {
+    const confirm = vi
+      .fn()
+      .mockReturnValueOnce(false)
+      .mockReturnValueOnce(true);
+    vi.stubGlobal('confirm', confirm);
+    const { state, onCancel } = renderSubmission();
+    state.markDirty();
+
+    state.cancel();
+    expect(onCancel).not.toHaveBeenCalled();
+    state.cancel();
+    expect(onCancel).toHaveBeenCalledOnce();
+    expect(confirm).toHaveBeenCalledTimes(2);
+  });
+
+  it('starts a different request only after confirming an uncertain submission', async () => {
+    const persist = vi.fn<Options['persist']>(async () => undefined);
+    persist.mockRejectedValueOnce(new TypeError('Network error'));
+    const confirm = vi
+      .fn()
+      .mockReturnValueOnce(false)
+      .mockReturnValueOnce(true);
+    vi.stubGlobal('confirm', confirm);
+    const { state } = renderSubmission({ persist });
+    await state.save(submit());
+
+    state.editRequest();
+    expect(state.submitted).toBe(true);
+    state.editRequest();
+    expect(state.submitted).toBe(false);
+    expect(state.error).toBe('');
+    await state.save(submit());
+
+    expect(persist.mock.calls[1][1]).not.toBe(persist.mock.calls[0][1]);
+  });
+
+  it('ignores a completed request after the editor is closed', async () => {
+    const pending = Promise.withResolvers<void>();
+    const onSaved = vi.fn<Options['onSaved']>(async () => undefined);
+    const onDraftChange = vi.fn<Options['onDraftChange']>();
+    const ready = vi.fn(
+      (state: ReturnType<typeof useResourceSubmission<Input>>) => state
+    );
+    const component = mount(StateHarness, {
+      target: document.createElement('div'),
+      props: {
+        setup: () =>
+          ready(
+            useResourceSubmission({
+              allowed: () => true,
+              creating: () => true,
+              build: () => ({ name: 'Example' }),
+              persist: () => pending.promise,
+              onDraftChange,
+              onSaved,
+              onCancel: () => undefined
+            })
+          )
+      }
+    });
+    flushSync();
+    const saving = ready.mock.results[0].value.save(submit());
+    await unmount(component);
+    pending.resolve();
+    await saving;
+
+    expect(onSaved).not.toHaveBeenCalled();
+    expect(onDraftChange).toHaveBeenLastCalledWith(false);
+  });
+});

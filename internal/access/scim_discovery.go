@@ -2,6 +2,7 @@ package access
 
 import (
 	"net/http"
+	"slices"
 	"strings"
 
 	"github.com/tyk-swe/olp/internal/scim"
@@ -13,21 +14,30 @@ func scimAttribute(name, typ string, multi, required bool) map[string]any {
 
 func scimSchemas() []map[string]any {
 	text := func(name string, required bool) map[string]any { return scimAttribute(name, "string", false, required) }
-	name := scimAttribute("name", "complex", false, false)
-	name["subAttributes"] = []any{text("formatted", false), text("familyName", false), text("givenName", false), text("middleName", false), text("honorificPrefix", false), text("honorificSuffix", false)}
-	email := scimAttribute("emails", "complex", true, false)
+	complexAttribute := func(name string) map[string]any {
+		return scimAttribute(name, "complex", scim.MultiValuedComplexAttribute(name), false)
+	}
+	name := complexAttribute("name")
+	name["subAttributes"] = slices.Collect(func(yield func(any) bool) {
+		for _, field := range scim.NameSubattributes() {
+			if !yield(text(field, false)) {
+				return
+			}
+		}
+	})
+	email := complexAttribute("emails")
 	email["subAttributes"] = []any{text("value", true), text("type", false), scimAttribute("primary", "boolean", false, false)}
-	groups := scimAttribute("groups", "complex", true, false)
+	groups := complexAttribute("groups")
 	groups["mutability"] = "readOnly"
 	groups["subAttributes"] = []any{text("value", true), text("display", false), text("type", false), scimAttribute("$ref", "reference", false, false)}
-	members := scimAttribute("members", "complex", true, false)
+	members := complexAttribute("members")
 	members["subAttributes"] = []any{text("value", true), text("display", false), text("type", false), scimAttribute("$ref", "reference", false, false)}
-	roles := scimAttribute("roles", "complex", true, false)
+	roles := complexAttribute("roles")
 	roles["mutability"] = "readOnly"
 	roles["subAttributes"] = []any{text("value", true), scimAttribute("primary", "boolean", false, false)}
 	username := text("userName", true)
 	username["uniqueness"] = "server"
-	projects := scimAttribute("projects", "complex", true, false)
+	projects := complexAttribute("projects")
 	projects["subAttributes"] = []any{text("value", true), text("role", true)}
 	return []map[string]any{
 		{"id": scim.UserSchema, "name": "User", "description": "Federated users; userName is a unique email address. Local passwords cannot be provisioned.", "attributes": []any{username, text("externalId", false), text("displayName", false), scimAttribute("active", "boolean", false, false), name, email, groups, roles}},

@@ -20,9 +20,9 @@ Don't assume that the existing code is correct or the right way of doing things 
 
 In descending order of importance
 
-When adding new features, add meaningful tests. Don't add tests that don't check anything substantial and is there just to make the code coverage pass. Yes, code coverage is important, but I'd rather have no signal whether the code is working than tests that don't fail when code is broken. The goal is to have tests that would fail before the feature was added/if the code was mutated in a way that breaks the feature and succeed only when the feature is fully working. I should run mutation testing and see > 90% kill rate
+Pre-merge tests are one fast safety net run with `make test-fast` inside a 60 second budget. The allowlist lives in `scripts/test-fast.sh` and the full rules live in `tests/README.md`. When adding new features inside the allowlist, add meaningful tests there. Don't add tests that don't check anything substantial. I'd rather have no signal whether the code is working than tests that don't fail when code is broken. A kept test would fail before the feature was added and succeed only when the feature is fully working. There is no coverage or mutation gate, and speed comes from keeping the net small rather than from tuning a large suite
 
-Same thing for bug fixes. The tests should make it so that this specific bug can never happen again without failing tests (i.e., regression)
+Same thing for bug fixes inside the allowlist. The tests should make it so that this specific bug can never happen again without failing tests (i.e., regression). Work outside the allowlist gets no new test file by default. A test enters the net only when the whole net still fits the budget with headroom, or when it displaces a weaker test, and the change states the timed result. A test file outside the allowlist is a defect because nothing runs it
 
 Never test structure or implementation details of code, only function of it. A test should catch a change that breaks behavior by accident. If the only way it can fail is someone deliberately undoing the change, don't write it
 
@@ -112,7 +112,7 @@ Before implementing:
 
 Ask yourself: "Would a senior engineer say this is overcomplicated?" If yes, simplify
 
-Before requesting maintainer review, verify the current PR tip passes required CI and code coverage and has acceptable reviews from any review bots configured for the PR. Inspect warnings and findings, fix actionable issues, and rerun the affected checks and reviewers after changes. Record evidence for any false positive or unavailable review. Never treat a pending or missing bot result as a pass. Do not lower coverage thresholds or relax lint or type-checking limits to satisfy a check
+Before requesting maintainer review, verify the current PR tip passes required CI and has acceptable reviews from any review bots configured for the PR. Inspect warnings and findings, fix actionable issues, and rerun the affected checks and reviewers after changes. Record evidence for any false positive or unavailable review. Never treat a pending or missing bot result as a pass. Do not raise the safety-net budget or relax lint or type-checking limits to satisfy a check
 
 <!--
 Adapted from https://github.com/BerriAI/litellm/blob/main/AGENTS.md

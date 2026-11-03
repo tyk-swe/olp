@@ -7,6 +7,7 @@ import (
 	"github.com/tyk-swe/olp/internal/codemode"
 	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/protocols/sse"
+	"github.com/tyk-swe/olp/internal/protocols/wire"
 )
 
 func RewriteRequestModel(body []byte, from, to string) ([]byte, error) {
@@ -30,8 +31,7 @@ func eventModelPointer(document oif.Document, protocol codemode.Protocol) string
 			return "/message/model"
 		}
 	case codemode.ProtocolResponses:
-		switch name {
-		case "response.created", "response.queued", "response.in_progress", "response.completed", "response.failed", "response.incomplete":
+		if wire.IsResponseLifecycleEvent(name) {
 			return "/response/model"
 		}
 	case codemode.ProtocolChat:

@@ -18,9 +18,7 @@ type Surface struct {
 	Inference bool
 }
 
-// Management is every public request that is not inference: the management
-// API, the console, and paths nothing serves.
-var Management = Surface{Name: "management"}
+func managementSurface() Surface { return Surface{Name: "management"} }
 
 // Prefix is a public path prefix the console must never answer.
 type Prefix struct {
@@ -44,12 +42,12 @@ var prefixes = []Prefix{
 	// Gemini Live clients connect to the root WebSocket path.
 	{Path: "/ws/", Surface: Surface{Name: "gemini", Inference: true}},
 	{Path: "/bedrock/", Surface: Surface{Name: "bedrock", Inference: true}, GatewayCatchAll: true},
-	{Path: "/api/", Surface: Management},
-	{Path: "/scim/", Surface: Management, ManagementCatchAll: true},
-	{Path: "/v1beta/", Surface: Management},
-	{Path: "/openai/", Surface: Management},
-	{Path: "/health/", Surface: Management},
-	{Path: "/metrics", Surface: Management},
+	{Path: "/api/", Surface: managementSurface()},
+	{Path: "/scim/", Surface: managementSurface(), ManagementCatchAll: true},
+	{Path: "/v1beta/", Surface: managementSurface()},
+	{Path: "/openai/", Surface: managementSurface()},
+	{Path: "/health/", Surface: managementSurface()},
+	{Path: "/metrics", Surface: managementSurface()},
 }
 
 // Of classifies a request path. A code route's Anthropic Messages paths speak
@@ -65,7 +63,7 @@ func Of(path string) Surface {
 			return prefix.Surface
 		}
 	}
-	return Management
+	return managementSurface()
 }
 
 // Reserved lists every prefix the console must never answer.

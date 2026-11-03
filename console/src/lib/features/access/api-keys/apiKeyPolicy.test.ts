@@ -1,6 +1,22 @@
 import { expect, it } from 'vitest';
 import type { ApiKey } from './api';
 import { buildApiKeyPolicyInput, createApiKeyFormState } from './apiKeyPolicy';
+import { validateApiKey } from './keyValidation';
+
+it('checks the default priority against the highest permitted priority', () => {
+  expect(
+    validateApiKey({ name: 'key', priority: 'critical', maxPriority: 'high' })
+  ).toHaveProperty('priority');
+  expect(validateApiKey({ name: 'key', maxPriority: 'low' })).toHaveProperty(
+    'priority'
+  );
+  expect(
+    validateApiKey({ name: 'key', priority: 'low', maxPriority: 'high' })
+  ).not.toHaveProperty('priority');
+  expect(
+    validateApiKey({ name: 'key', priority: 'high', maxPriority: 'high' })
+  ).not.toHaveProperty('priority');
+});
 
 it('includes workflow run limits in a key policy', () => {
   const form = {
@@ -215,4 +231,87 @@ it('opens an older key without optional limits or allowlists for editing', () =>
       attribution_defaults: {}
     }
   );
+});
+
+it('requires a name and limits its length after trimming', () => {
+  expect(validateApiKey({ name: '  ' })).toHaveProperty(
+    'name',
+    'Enter a name.'
+  );
+  expect(validateApiKey({ name: 'x'.repeat(101) })).toHaveProperty(
+    'name',
+    'Use 100 characters or fewer.'
+  );
+  expect(validateApiKey({ name: ` ${'x'.repeat(100)} ` })).toEqual({});
+});
+
+it.each(['requestsPerMinute', 'tokensPerMinute', 'maxConcurrency'] as const)(
+  'requires a positive whole number for %s when provided',
+  (field) => {
+    for (const value of [0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY]) {
+      expect(validateApiKey({ name: 'key', [field]: value })).toHaveProperty(
+        field,
+        'Use a positive whole number.'
+      );
+    }
+    expect(validateApiKey({ name: 'key', [field]: 1 })).toEqual({});
+  }
+);
+
+it.each(['dailyCostLimit', 'weeklyCostLimit', 'monthlyCostLimit'] as const)(
+  'validates the precision and positivity of %s',
+  (field) => {
+    for (const value of [
+      '0',
+      '0.000',
+      '-1',
+      '.1',
+      '1.',
+      '1e3',
+      '1234567890123',
+      '0.1234567890123'
+    ]) {
+      expect(validateApiKey({ name: 'key', [field]: value })).toHaveProperty(
+        field
+      );
+    }
+    for (const value of [
+      '',
+      '  ',
+      ' 0.000000000001 ',
+      '123456789012.123456789012'
+    ]) {
+      expect(validateApiKey({ name: 'key', [field]: value })).toEqual({});
+    }
+  }
+);
+
+it('requires a valid future expiry relative to the supplied clock', () => {
+  const now = new Date('2030-01-02T12:00');
+  expect(
+    validateApiKey({ name: 'key', now, expiresAt: 'invalid' })
+  ).toHaveProperty('expiresAt', 'Enter a valid expiry date and time.');
+  for (const expiresAt of ['2030-01-01T12:00', '2030-01-02T12:00']) {
+    expect(validateApiKey({ name: 'key', now, expiresAt })).toHaveProperty(
+      'expiresAt',
+      'Choose an expiry in the future.'
+    );
+  }
+  expect(
+    validateApiKey({ name: 'key', now, expiresAt: '2030-01-03T12:00' })
+  ).toEqual({});
+});
+
+it('reports network and limit errors together so the form can correct them', () => {
+  expect(
+    validateApiKey({
+      name: '',
+      allowedCIDRs: '192.0.2.1/33',
+      requestsPerMinute: 0
+    })
+  ).toMatchObject({
+    name: 'Enter a name.',
+    allowedCIDRs: expect.stringContaining('Use IPv4 or IPv6 CIDR ranges'),
+    requestsPerMinute: 'Use a positive whole number.'
+  });
 });
