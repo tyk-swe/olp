@@ -124,6 +124,21 @@ describe('authentication lifecycle', () => {
     expect(getCsrfToken()).toBe(bob.csrf_token);
   });
 
+  it('does not replace a newer session when an earlier login finishes late', async () => {
+    const lifecycle = new AuthenticationLifecycle();
+    const pending = Promise.withResolvers<AuthenticatedSession>();
+    const firstLogin = vi.fn(() => pending.promise);
+    const first = lifecycle.authenticate(firstLogin);
+    await vi.waitFor(() => expect(firstLogin).toHaveBeenCalledOnce());
+
+    await lifecycle.authenticate(async () => bob);
+    pending.resolve(alice);
+
+    await expect(first).rejects.toMatchObject({ name: 'AbortError' });
+    expect(lifecycle.snapshot().user).toEqual(bob.user);
+    expect(getCsrfToken()).toBe(bob.csrf_token);
+  });
+
   it('retains the current session when validation has a temporary error', async () => {
     const lifecycle = new AuthenticationLifecycle();
     const service = boundary();
@@ -248,6 +263,66 @@ describe('authentication lifecycle', () => {
       phase: 'authenticated',
       user: bob.user
     });
+  });
+
+  it('gates and clears the previous account when another tab changes the session', async () => {
+    const lifecycle = new AuthenticationLifecycle();
+    const service = boundary(bob);
+    const client = new QueryClient();
+    lifecycle.registerBoundary(service);
+    lifecycle.attachQueryClient(client);
+    lifecycle.establishSession(alice);
+    client.setQueryData(['providers'], ['alice-only']);
+    const previous = await lifecycle.prepareRequest(
+      request('/api/v1/providers')
+    );
+    const disconnect = lifecycle.connectTabs();
+    const otherTab = new BroadcastChannel('olp-authentication');
+    try {
+      otherTab.postMessage('changed');
+      await vi.waitFor(() =>
+        expect(lifecycle.snapshot().user).toEqual(bob.user)
+      );
+      expect(previous.signal.aborted).toBe(true);
+      expect(client.getQueryData(['providers'])).toBeUndefined();
+      expect(getCsrfToken()).toBe(bob.csrf_token);
+      expect(service.loadSession).toHaveBeenCalledOnce();
+    } finally {
+      otherTab.close();
+      disconnect();
+      client.clear();
+    }
+  });
+
+  it('refreshes a token rotated in another tab and ignores older responses', async () => {
+    const lifecycle = new AuthenticationLifecycle();
+    const service = boundary({
+      ...alice,
+      csrf_token: 'rotated-in-another-tab'
+    });
+    lifecycle.registerBoundary(service);
+    lifecycle.establishSession(alice);
+    const previous = await lifecycle.prepareRequest(
+      request('/api/v1/providers')
+    );
+    const disconnect = lifecycle.connectTabs();
+    const otherTab = new BroadcastChannel('olp-authentication');
+    try {
+      otherTab.postMessage('rotated');
+      await vi.waitFor(() =>
+        expect(getCsrfToken()).toBe('rotated-in-another-tab')
+      );
+      await lifecycle.handleResponse(
+        previous,
+        new Response(null, { headers: { 'x-csrf-token': 'stale' } })
+      );
+      expect(getCsrfToken()).toBe('rotated-in-another-tab');
+      expect(lifecycle.snapshot().user).toEqual(alice.user);
+      expect(service.loadSession).toHaveBeenCalledOnce();
+    } finally {
+      otherTab.close();
+      disconnect();
+    }
   });
 
   it('clears protected state and navigates after sign-out', async () => {
