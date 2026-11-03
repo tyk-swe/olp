@@ -65,6 +65,31 @@ func Save(ctx context.Context, tx pgx.Tx, actor string, current, next *Definitio
 	return err
 }
 
+const columns = "s.id::text,s.project_id::text,s.name,s.transport,s.endpoint,s.enabled,s.credential_id,s.etag::text,s.retired_at,v.id::text,v.revision,v.protocol_version,v.tools,v.digest,v.certified_at,v.unit_price::text,v.tool_prices,s.calls_per_minute,s.max_concurrency,s.per_key_calls_per_minute,s.per_key_max_concurrency,v.oauth,v.stdio,v.delegation,s.delegation_key_id::text,s.entra_client_secret_id::text"
+const joined = " FROM olp.mcp_servers s JOIN olp.mcp_server_revisions v ON v.id=s.latest_revision_id"
+
+func scan(row pgx.Row) (*Definition, error) {
+	d := &Definition{Catalog: &Catalog{}}
+	err := row.Scan(&d.ID, &d.ProjectID, &d.Name, &d.Transport, &d.Endpoint, &d.Enabled, &d.CredentialID, &d.ETag, &d.RetiredAt, &d.RevisionID, &d.Revision, &d.Catalog.Protocol, &d.Catalog.Tools, &d.Catalog.Digest, &d.CertifiedAt, &d.UnitPrice, &d.ToolPrices, &d.CallsPerMinute, &d.MaxConcurrency, &d.PerKeyCallsPerMinute, &d.PerKeyMaxConcurrency, &d.OAuth, &d.Stdio, &d.Delegation, &d.DelegationKeyID, &d.EntraClientSecretID)
+	d.HasCredential = d.CredentialID != nil
+	if d.ToolPrices == nil {
+		d.ToolPrices = map[string]string{}
+	}
+	return d, err
+}
+
+func Load(ctx context.Context, q access.Queryer, id string, lock bool) (*Definition, error) {
+	query := "SELECT " + columns + joined + " WHERE s.id=$1"
+	if lock {
+		query += " FOR UPDATE OF s"
+	}
+	return scan(q.QueryRow(ctx, query, id))
+}
+
+func FindActive(ctx context.Context, q access.Queryer, project, name string) (*Definition, error) {
+	return scan(q.QueryRow(ctx, "SELECT "+columns+joined+" WHERE s.project_id=$1 AND lower(s.name)=lower($2) AND s.retired_at IS NULL", project, name))
+}
+
 func UpdateLimits(ctx context.Context, tx pgx.Tx, id string, limits routing.ToolLimits, etag string) error {
 	if !limits.WithinInstallation() {
 		return access.Invalid("calls_per_minute", "Stay inside the installation tool call limits.")

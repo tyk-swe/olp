@@ -19,6 +19,8 @@ type Management struct {
 	Access *access.Server
 }
 
+func NewManagement(a *access.Server) *Management { return &Management{Access: a} }
+
 type ToolCall struct {
 	IdentityDecisions  []IdentityDecision    `json:"identity_decisions"`
 	ID                 string                `json:"id"`

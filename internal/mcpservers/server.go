@@ -1,8 +1,6 @@
 package mcpservers
 
 import (
-	"bytes"
-	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -10,7 +8,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/egress"
@@ -23,6 +20,11 @@ type Server struct {
 	Access      *access.Server
 	Egress      *egress.Policy
 }
+
+func New(a *access.Server, policy *egress.Policy, executables *Executables) *Server {
+	return &Server{Executables: executables, Access: a, Egress: policy}
+}
+
 type Definition struct {
 	EntraClientSecretID  *string                  `json:"-"`
 	Delegation           *routing.MCPDelegation   `json:"delegation"`
@@ -69,19 +71,6 @@ type Input struct {
 	MaxConcurrency       *int64                   `json:"max_concurrency"`
 	PerKeyCallsPerMinute *int64                   `json:"per_key_calls_per_minute"`
 	PerKeyMaxConcurrency *int64                   `json:"per_key_max_concurrency"`
-}
-
-const columns = "s.id::text,s.project_id::text,s.name,s.transport,s.endpoint,s.enabled,s.credential_id,s.etag::text,s.retired_at,v.id::text,v.revision,v.protocol_version,v.tools,v.digest,v.certified_at,v.unit_price::text,v.tool_prices,s.calls_per_minute,s.max_concurrency,s.per_key_calls_per_minute,s.per_key_max_concurrency,v.oauth,v.stdio,v.delegation,s.delegation_key_id::text,s.entra_client_secret_id::text"
-const joined = " FROM olp.mcp_servers s JOIN olp.mcp_server_revisions v ON v.id=s.latest_revision_id"
-
-func scan(row pgx.Row) (*Definition, error) {
-	d := &Definition{Catalog: &Catalog{}}
-	err := row.Scan(&d.ID, &d.ProjectID, &d.Name, &d.Transport, &d.Endpoint, &d.Enabled, &d.CredentialID, &d.ETag, &d.RetiredAt, &d.RevisionID, &d.Revision, &d.Catalog.Protocol, &d.Catalog.Tools, &d.Catalog.Digest, &d.CertifiedAt, &d.UnitPrice, &d.ToolPrices, &d.CallsPerMinute, &d.MaxConcurrency, &d.PerKeyCallsPerMinute, &d.PerKeyMaxConcurrency, &d.OAuth, &d.Stdio, &d.Delegation, &d.DelegationKeyID, &d.EntraClientSecretID)
-	d.HasCredential = d.CredentialID != nil
-	if d.ToolPrices == nil {
-		d.ToolPrices = map[string]string{}
-	}
-	return d, err
 }
 
 func (in *Input) UnmarshalJSON(data []byte) error {
@@ -131,16 +120,6 @@ func definitionFromInput(in Input, catalog *Catalog, signingKeyID, entraSecretID
 		PerKeyCallsPerMinute: routing.ToolLimitOr(in.PerKeyCallsPerMinute, routing.DefaultToolCallsPerMinute),
 		PerKeyMaxConcurrency: routing.ToolLimitOr(in.PerKeyMaxConcurrency, routing.DefaultToolMaxConcurrency),
 	}
-}
-func Load(ctx context.Context, q access.Queryer, id string, lock bool) (*Definition, error) {
-	query := "SELECT " + columns + joined + " WHERE s.id=$1"
-	if lock {
-		query += " FOR UPDATE OF s"
-	}
-	return scan(q.QueryRow(ctx, query, id))
-}
-func FindActive(ctx context.Context, q access.Queryer, project, name string) (*Definition, error) {
-	return scan(q.QueryRow(ctx, "SELECT "+columns+joined+" WHERE s.project_id=$1 AND lower(s.name)=lower($2) AND s.retired_at IS NULL", project, name))
 }
 func (s *Server) Register(mux *http.ServeMux) {
 	s.registerExecutables(mux)
@@ -244,80 +223,6 @@ func (s *Server) revision(r *http.Request, p access.Principal) (access.Reply, er
 		toolPrices = map[string]string{}
 	}
 	return access.Detail(revisionResponse{Delegation: delegation, Stdio: stdio, OAuth: oauth, ID: revision, ServerID: id, Revision: version, Endpoint: endpoint, Catalog: catalog, CertifiedAt: certified, UnitPrice: unitPrice, ToolPrices: toolPrices, CallsPerMinute: d.CallsPerMinute, MaxConcurrency: d.MaxConcurrency, PerKeyCallsPerMinute: d.PerKeyCallsPerMinute, PerKeyMaxConcurrency: d.PerKeyMaxConcurrency}, revision), nil
-}
-func ValidateAndNormalize(in *Input, policy *egress.Policy) error {
-	if err := validateEntra(in); err != nil {
-		return err
-	}
-	if err := validateDelegation(in); err != nil {
-		return err
-	}
-	in.Name = strings.TrimSpace(in.Name)
-	if err := access.ValidText("name", in.Name, 100); err != nil {
-		return err
-	}
-	if in.Enabled == nil {
-		return access.Invalid("enabled", "Supply an explicit enabled flag.")
-	}
-	if policy == nil {
-		return access.Fail(503, "egress_policy_unavailable", "Certification requires provider egress policy.")
-	}
-	if in.Transport != "" && !routing.MCPTransport(in.Transport).Valid() {
-		return access.Invalid("transport", "Use streamable_http, sse or stdio.")
-	}
-	if in.Stdio != nil || in.Transport == string(routing.MCPStdio) {
-		if !in.Stdio.Valid() || in.Endpoint != "" || in.OAuth != nil || len(in.Credential) != 0 {
-			return access.Invalid("stdio", "Pin an installed executable and digest without HTTP credentials or endpoint.")
-		}
-		if in.Transport != "" && in.Transport != string(routing.MCPStdio) {
-			return access.Invalid("transport", "A stdio binding requires stdio transport.")
-		}
-	} else if in.Endpoint != "" || in.Transport != "" {
-		u, err := policy.ValidateEndpoint(in.Endpoint)
-		if err != nil {
-			return access.Invalid("endpoint", "The MCP endpoint is not permitted by provider egress policy.")
-		}
-		in.Endpoint = u.String()
-	}
-	if err := validateOAuth(in.OAuth, policy); err != nil {
-		return err
-	}
-	if in.UnitPrice != nil && !routing.ValidToolPrice(*in.UnitPrice) {
-		return access.Invalid("unit_price", "Use a non-negative decimal price with at most 12 integer and 12 fractional digits, or null for no price.")
-	}
-	if len(in.ToolPrices) > 128 {
-		return access.Invalid("tool_prices", "Price at most 128 tools.")
-	}
-	for name, price := range in.ToolPrices {
-		if name == "" || len(name) > 128 || !routing.ValidToolPrice(price) {
-			return access.Invalid("tool_prices", "Use certified tool names with non-negative decimal prices.")
-		}
-	}
-	for _, limit := range [...]struct {
-		field   string
-		value   *int64
-		ceiling int64
-	}{
-		{"calls_per_minute", in.CallsPerMinute, routing.MaxToolCallsPerMinute},
-		{"per_key_calls_per_minute", in.PerKeyCallsPerMinute, routing.MaxToolCallsPerMinute},
-		{"max_concurrency", in.MaxConcurrency, routing.MaxToolConcurrency},
-		{"per_key_max_concurrency", in.PerKeyMaxConcurrency, routing.MaxToolConcurrency},
-	} {
-		if limit.value != nil && (*limit.value < 1 || *limit.value > limit.ceiling) {
-			return access.Invalid(limit.field, "Stay inside the installation tool call limits.")
-		}
-	}
-	return nil
-}
-func Credential(raw json.RawMessage) ([]byte, error) {
-	if len(raw) == 0 || bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
-		return nil, nil
-	}
-	var value string
-	if json.Unmarshal(raw, &value) != nil || len(value) < 1 || len(value) > 4096 || strings.ContainsAny(value, "\r\n\x00") {
-		return nil, access.Invalid("credential", "Supply bounded bearer material, or null to remove it.")
-	}
-	return []byte(value), nil
 }
 func (s *Server) create(r *http.Request, p access.Principal) (access.Reply, error) {
 	return s.write(r, p, "", false)

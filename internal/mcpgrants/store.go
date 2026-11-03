@@ -24,6 +24,10 @@ type Store struct {
 	Installation string
 }
 
+func NewStore(pool *pgxpool.Pool, installation string, auth *secrets.AuthKey, keys *secrets.KeyRing, policy *egress.Policy) *Store {
+	return &Store{Egress: policy, Pool: pool, Keys: keys, Auth: auth, Installation: installation}
+}
+
 type Enrollment struct {
 	ID        string     `json:"id"`
 	Binding   Binding    `json:"binding"`

@@ -16,7 +16,6 @@ import (
 
 	"github.com/santhosh-tekuri/jsonschema/v6"
 	"github.com/tyk-swe/olp/internal/egress"
-	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/routing"
 )
 
@@ -33,9 +32,6 @@ type Catalog struct {
 	Tools    []Tool `json:"tools"`
 	Digest   string `json:"digest"`
 }
-type noSchemaNetwork struct{}
-
-func (noSchemaNetwork) Load(string) (any, error) { return nil, ErrCertification }
 
 // Certify negotiates a bounded Streamable HTTP session and captures a stable,
 // validated tool catalog. It never invokes tools or runs schema network loaders.
@@ -55,17 +51,17 @@ func CertifyOptions(ctx context.Context, policy *egress.Policy, endpoint string,
 		return nil, ErrCertification
 	}
 	defer c.Close(ctx)
-	return c.CertifyCatalog(ctx)
+	return CertifyCatalog(ctx, c, credential)
 }
 
-func (c *Transport) CertifyCatalog(ctx context.Context) (*Catalog, error) {
-	credential := []byte(c.token)
-	result := &Catalog{Protocol: c.Protocol(), Tools: []Tool{}}
+func CertifyCatalog(ctx context.Context, upstream Upstream, credential []byte) (*Catalog, error) {
+	token := string(credential)
+	result := &Catalog{Protocol: upstream.Protocol(), Tools: []Tool{}}
 	seen := map[string]bool{}
 	cursors := map[string]bool{}
 	cursor := ""
 	for page := 0; page < 16; page++ {
-		listing, listErr := c.ListTools(ctx, cursor)
+		listing, listErr := upstream.ListTools(ctx, cursor)
 		if listErr != nil || listing.Tools == nil {
 			return nil, ErrCertification
 		}
@@ -75,14 +71,14 @@ func (c *Transport) CertifyCatalog(ctx context.Context) (*Catalog, error) {
 			}
 			// Static authentication is never retained in upstream descriptions or
 			// schema defaults, even when a hostile server reflects its bearer value.
-			if c.token != "" && (strings.Contains(t.Name, c.token) || strings.Contains(t.Description, c.token) || bytes.Contains(t.InputSchema, credential)) {
+			if token != "" && (strings.Contains(t.Name, token) || strings.Contains(t.Description, token) || bytes.Contains(t.InputSchema, credential)) {
 				return nil, ErrCertification
 			}
 			if err := validateSchema(t.InputSchema); err != nil {
 				return nil, ErrCertification
 			}
 			schema, _ := jsonschema.UnmarshalJSON(bytes.NewReader(t.InputSchema))
-			if c.token != "" && reflectsCredential(schema, c.token) {
+			if token != "" && reflectsCredential(schema, token) {
 				return nil, ErrCertification
 			}
 			input, _ := json.Marshal(schema)
@@ -108,24 +104,7 @@ func (c *Transport) CertifyCatalog(ctx context.Context) (*Catalog, error) {
 	return nil, ErrCertification
 }
 func validateSchema(raw json.RawMessage) error {
-	if _, err := oif.ParseJSON(raw, oif.Limits{MaxBytes: 64 << 10, MaxDepth: 32, MaxNodes: 4096}); err != nil {
-		return ErrCertification
-	}
-	doc, err := jsonschema.UnmarshalJSON(bytes.NewReader(raw))
-	if err != nil {
-		return ErrCertification
-	}
-	obj, ok := doc.(map[string]any)
-	if !ok || obj["type"] != "object" {
-		return ErrCertification
-	}
-	c := jsonschema.NewCompiler()
-	c.UseLoader(noSchemaNetwork{})
-	if c.AddResource("https://olp.invalid/tool-schema", doc) != nil {
-		return ErrCertification
-	}
-	_, err = c.Compile("https://olp.invalid/tool-schema")
-	if err != nil {
+	if err := routing.ValidateToolSchema(raw); err != nil {
 		return ErrCertification
 	}
 	return nil

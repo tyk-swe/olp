@@ -18,6 +18,7 @@ PostgreSQL migrations live under `internal/database/migrations/`.
 | Preparation and failure evidence | `internal/providerinvoke/`, `internal/upstream/` |
 | Accounting, pricing, billing and exports | `internal/usage/`, `internal/billing/`, `internal/export/`; console usage/observability |
 | Plugins and guardrails | `internal/plugins/`, `sdk/plugin/`, `internal/guardrails/`, `internal/contentpolicy/`; matching console features |
+| MCP registration, tool execution and personal grants | `internal/mcpservers/`, `internal/mcp/`, `internal/mcpgrants/`; console `plugins/`, `agents/` |
 | Promotion and process lifetime | `internal/configuration/`, `internal/config/`, `internal/process/`, `internal/database/` |
 | Egress, secrets and telemetry | `internal/egress/`, `internal/secrets/`, `internal/observability/`, `internal/telemetry/` |
 
@@ -42,6 +43,19 @@ validation. Direct and promoted provider edits share credential-boundary,
 certification-invalidation and staged-inventory operations. Unchanged slots retain
 enrollment lifetime; parent/collection ETags advance coherently. Installation
 serialization protects reauthorization, replay, publication and atomic audit.
+
+MCP registration, execution and personal grants follow the same feature
+ownership. `mcpservers` owns registration validation, storage and catalog
+certification as package-level operations shared by its HTTP handlers and
+configuration promotion; certification consumes upstream servers through the
+`Upstream` interface and compiles tool schemas with the same compiler
+`routing` applies at publication. `mcp` owns one execute path (authority,
+guardrails, durable debit reservation, dispatch and settlement) that the JSON,
+streamable HTTP, legacy SSE and workflow surfaces adapt to their transports.
+`mcpgrants` owns call-time personal OAuth, Entra exchange, refresh and
+delegated signing, while registration-time validation of that configuration
+stays in `mcpservers` over the shared types in `internal/grants/config`. See
+[ADR 0003](../adr/0003-mcp-module-seams.md).
 
 ## Runtime and immutable sources
 

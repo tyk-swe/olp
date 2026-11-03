@@ -211,7 +211,7 @@ func (s *Server) dispatchToolCall(ctx context.Context, in executeInput, credenti
 		return dispatchResult{certification: certificationInvalid, failure: fail(http.StatusBadGateway, "upstream_unavailable", "api_error", "The upstream MCP server could not be reached, so the tool was not called.")}
 	}
 	defer transport.Close(context.WithoutCancel(ctx))
-	switch state := certifyTransport(ctx, transport, tool.CatalogDigest); state {
+	switch state := certifyTransport(ctx, transport, credential, tool.CatalogDigest); state {
 	case certificationInvalid:
 		s.release(reservation)
 		return dispatchResult{certification: state, failure: fail(http.StatusBadGateway, "upstream_unavailable", "api_error", "The upstream MCP server catalog could not be verified, so the tool was not called.")}

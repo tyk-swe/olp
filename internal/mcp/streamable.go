@@ -624,19 +624,16 @@ func (s *Server) sessionCallTool(w http.ResponseWriter, r *http.Request, authori
 		return
 	}
 	tool, found := resolved.lookup(params.Name)
-	switch found {
-	case toolFound:
-	case toolDrifted:
-		writeRPCFailure(w, message.id, failureRPC(http.StatusOK, rpcServerError, errToolDefinitionChanged))
-		return
-	case toolInvalidSchema:
-		writeRPCFailure(w, message.id, failureRPC(http.StatusOK, rpcServerError, errToolSchemaInvalid))
-		return
-	case toolServerMissing:
+	if found == toolServerMissing {
 		s.writeSessionFailure(w, r, current, message.id, errToolsetNotFound)
 		return
-	default:
-		writeRPCFailure(w, message.id, failureRPC(http.StatusOK, rpcInvalidParams, errToolNotFound))
+	}
+	if failure := toolLookupFailure(found); failure != nil {
+		code := rpcInvalidParams
+		if found == toolDrifted || found == toolInvalidSchema {
+			code = rpcServerError
+		}
+		writeRPCFailure(w, message.id, failureRPC(http.StatusOK, code, failure))
 		return
 	}
 	certification := current.certification(tool.ServerID)
@@ -644,10 +641,7 @@ func (s *Server) sessionCallTool(w http.ResponseWriter, r *http.Request, authori
 		writeRPCFailure(w, message.id, failureRPC(http.StatusOK, rpcServerError, errToolDefinitionChanged))
 		return
 	}
-	arguments := params.Arguments
-	if len(arguments) == 0 || string(arguments) == "null" {
-		arguments = json.RawMessage(`{}`)
-	}
+	arguments := normalizedArguments(params.Arguments)
 	if err := tool.ValidateArguments(arguments); err != nil {
 		writeRPCFailure(w, message.id, rpcFailure{status: http.StatusOK, code: rpcInvalidParams, message: "The arguments do not match the pinned tool schema.", data: rpcErrorData{Code: "invalid_tool_arguments"}})
 		return

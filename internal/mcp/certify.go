@@ -15,8 +15,8 @@ const (
 	maxConcurrentCertifies   = 4
 )
 
-func certifyTransport(ctx context.Context, transport *mcpservers.Transport, pinnedDigest string) certificationState {
-	catalog, err := transport.CertifyCatalog(ctx)
+func certifyTransport(ctx context.Context, upstream mcpservers.Upstream, credential []byte, pinnedDigest string) certificationState {
+	catalog, err := mcpservers.CertifyCatalog(ctx, upstream, credential)
 	if err != nil || catalog == nil {
 		return certificationInvalid
 	}
@@ -80,5 +80,5 @@ func (s *Server) certifyServer(ctx context.Context, authority access.Authority, 
 		return certificationInvalid
 	}
 	defer transport.Close(context.WithoutCancel(ctx))
-	return certifyTransport(ctx, transport, tool.CatalogDigest)
+	return certifyTransport(ctx, transport, credential, tool.CatalogDigest)
 }

@@ -14,7 +14,7 @@ import (
 func runDebitReconciliation(ctx context.Context, pool *pgxpool.Pool, limiter *limits.Limiter, log *slog.Logger) {
 	store := &limits.DebitStore{Pool: pool, Limiter: limiter}
 	go recoverWorkflowModels(ctx, store, log)
-	toolLedger := &mcp.DurableLedger{Pool: pool, Store: store}
+	toolLedger := mcp.NewDurableLedger(pool, store, nil)
 	timer := time.NewTicker(time.Minute)
 	defer timer.Stop()
 	for {

@@ -325,7 +325,7 @@ func (s *Server) prepareMCPServers(ctx context.Context, p access.Principal, doc 
 				return nil, access.Invalid("secret_bindings", "Supply the destination MCP bearer binding.")
 			}
 		}
-		catalog, err := mcpservers.CertifyOptions(ctx, s.Egress, e.Endpoint, material, mcpservers.TransportOptions{Transport: routing.MCPTransport(e.Transport), Stdio: e.Stdio.Clone(), Executables: &mcpservers.Executables{Tier: s.Unconfined, Query: s.Access.Pool}})
+		catalog, err := mcpservers.CertifyOptions(ctx, s.Egress, e.Endpoint, material, mcpservers.TransportOptions{Transport: routing.MCPTransport(e.Transport), Stdio: e.Stdio.Clone(), Executables: mcpservers.NewExecutables(s.Unconfined, s.Access.Pool)})
 		clear(material)
 		if err != nil || catalog.Digest != e.CatalogDigest {
 			return nil, access.Fail(422, "mcp_catalog_changed", "Certification must match the artifact's reviewed tool catalog digest.")

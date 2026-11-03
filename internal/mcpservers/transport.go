@@ -77,6 +77,16 @@ type initializeParams struct {
 	ClientInfo      clientInfo `json:"clientInfo"`
 }
 
+type Upstream interface {
+	Protocol() string
+	ListTools(ctx context.Context, cursor string) (ToolList, error)
+	CallTool(ctx context.Context, name string, arguments json.RawMessage) (ToolResult, error)
+	ListChanged() bool
+	Close(ctx context.Context)
+}
+
+var _ Upstream = (*Transport)(nil)
+
 type Transport struct {
 	client                             *http.Client
 	endpoint, token, session, protocol string

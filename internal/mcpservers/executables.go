@@ -13,6 +13,10 @@ type Executables struct {
 	Query access.Queryer
 }
 
+func NewExecutables(tier *plugins.Unconfined, query access.Queryer) *Executables {
+	return &Executables{Tier: tier, Query: query}
+}
+
 type executablePermission struct {
 	plugins.ExecutableFile
 	Permitted bool `json:"permitted"`

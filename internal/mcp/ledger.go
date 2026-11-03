@@ -23,6 +23,10 @@ type DurableLedger struct {
 	Auth  *secrets.AuthKey
 }
 
+func NewDurableLedger(pool *pgxpool.Pool, store *limits.DebitStore, auth *secrets.AuthKey) *DurableLedger {
+	return &DurableLedger{Pool: pool, Store: store, Auth: auth}
+}
+
 func newID() (string, error) {
 	id, err := uuid.NewV7()
 	if err != nil {

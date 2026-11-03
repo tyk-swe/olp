@@ -382,14 +382,15 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 				gw.Resolver = resources.NewResolver(pool)
 			}
 			gw.Register(public)
-			agentServer := &a2a.Server{Grants: &mcpgrants.Store{Egress: &policy, Pool: pool, Keys: keys, Auth: auth, Installation: installation}, Runtime: rt, Egress: &policy, Ledger: &a2a.Ledger{Pool: pool, Store: &limits.DebitStore{Pool: pool, Limiter: limiter}, Auth: auth}, TrustedProxies: c.TrustedProxyCIDRs, PublicOrigin: c.PublicOrigin, Credentials: func(ctx context.Context, id string) ([]byte, error) {
+			grantStore := mcpgrants.NewStore(pool, installation, auth, keys, &policy)
+			agentServer := &a2a.Server{Grants: grantStore, Runtime: rt, Egress: &policy, Ledger: &a2a.Ledger{Pool: pool, Store: &limits.DebitStore{Pool: pool, Limiter: limiter}, Auth: auth}, TrustedProxies: c.TrustedProxyCIDRs, PublicOrigin: c.PublicOrigin, Credentials: func(ctx context.Context, id string) ([]byte, error) {
 				return keys.Read(ctx, pool, installation, id, secrets.AgentCredential)
 			}}
 			agentServer.Register(public)
 			agentMonitor = &a2a.TaskMonitor{Server: agentServer, Log: log}
 			var toolLedger mcp.Ledger
 			if limiter != nil {
-				toolLedger = &mcp.DurableLedger{Pool: pool, Store: &limits.DebitStore{Pool: pool, Limiter: limiter}, Auth: auth}
+				toolLedger = mcp.NewDurableLedger(pool, &limits.DebitStore{Pool: pool, Limiter: limiter}, auth)
 			}
 			var sessionStore *mcp.SessionStore
 			if vk != nil {
@@ -398,11 +399,19 @@ func Run(ctx context.Context, c config.Config, log *slog.Logger) error {
 					return err
 				}
 			}
-			toolServer := &mcp.Server{Executables: &mcpservers.Executables{Tier: unconfined, Query: pool}, Grants: &mcpgrants.Store{Egress: &policy, Pool: pool, Keys: keys, Auth: auth, Installation: installation}, Log: log, Runtime: rt, Egress: &policy, Ledger: toolLedger, Auth: auth, Sessions: sessionStore, TrustedProxies: c.TrustedProxyCIDRs, Credentials: func(ctx context.Context, credentialID string) ([]byte, error) {
+			toolServer := mcp.New(rt, &policy, log)
+			toolServer.Executables = mcpservers.NewExecutables(unconfined, pool)
+			toolServer.Grants = grantStore
+			toolServer.Ledger = toolLedger
+			toolServer.Auth = auth
+			toolServer.Sessions = sessionStore
+			toolServer.TrustedProxies = c.TrustedProxyCIDRs
+			toolServer.Credentials = func(ctx context.Context, credentialID string) ([]byte, error) {
 				return keys.Read(ctx, pool, installation, credentialID, secrets.MCPCredential)
-			}, Guardrails: func(ctx context.Context, in mcp.GuardrailEvaluation) (guardrails.Result, error) {
+			}
+			toolServer.Guardrails = func(ctx context.Context, in mcp.GuardrailEvaluation) (guardrails.Result, error) {
 				return gw.EvaluateToolGuardrails(ctx, in.Authority, in.Release, in.Engine, in.RequestID, in.Phase, in.Segments, in.Masks)
-			}}
+			}
 			if limiter != nil {
 				toolServer.Limiter = limiter
 				gw.WorkflowRuns = &agents.WorkflowStore{Pool: pool, Auth: auth, Keys: keys, Installation: installation, Debits: &limits.DebitStore{Pool: pool, Limiter: limiter}}

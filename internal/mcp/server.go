@@ -181,6 +181,10 @@ type Server struct {
 	results   map[string]retainedResult
 }
 
+func New(rt Runtime, policy *egress.Policy, log *slog.Logger) *Server {
+	return &Server{Log: log, Runtime: rt, Egress: policy, results: make(map[string]retainedResult)}
+}
+
 func (s *Server) log() *slog.Logger {
 	if s.Log != nil {
 		return s.Log
@@ -451,6 +455,19 @@ const (
 	toolServerMissing
 	toolMissing
 )
+
+func toolLookupFailure(found toolLookup) *apiError {
+	switch found {
+	case toolFound:
+		return nil
+	case toolDrifted:
+		return errToolDefinitionChanged
+	case toolInvalidSchema:
+		return errToolSchemaInvalid
+	default:
+		return errToolNotFound
+	}
+}
 
 func (r resolvedToolset) lookup(alias string) (routing.MCPToolsetTool, toolLookup) {
 	if index := slices.IndexFunc(r.tools, func(tool routing.MCPToolsetTool) bool { return tool.Alias == alias }); index >= 0 {

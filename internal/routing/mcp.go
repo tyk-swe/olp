@@ -196,6 +196,11 @@ func compileMCPSchema(raw json.RawMessage) (*jsonschema.Schema, error) {
 	return compiler.Compile("https://olp.invalid/tool-schema")
 }
 
+func ValidateToolSchema(raw json.RawMessage) error {
+	_, err := compileMCPSchema(raw)
+	return err
+}
+
 func (t MCPToolsetTool) ValidateArguments(raw json.RawMessage) error {
 	if t.schema == nil {
 		return errors.New("tool schema is not compiled")

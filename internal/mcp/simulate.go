@@ -93,14 +93,8 @@ func (s *Server) prepareCall(authority access.Authority, snapshot *routing.Snaps
 		return preparedCall{}, failure
 	}
 	tool, found := resolved.lookup(request.Name)
-	switch found {
-	case toolDrifted:
-		return preparedCall{}, errToolDefinitionChanged
-	case toolInvalidSchema:
-		return preparedCall{}, errToolSchemaInvalid
-	case toolFound:
-	default:
-		return preparedCall{}, errToolNotFound
+	if failure := toolLookupFailure(found); failure != nil {
+		return preparedCall{}, failure
 	}
 	arguments := normalizedArguments(request.Arguments)
 	if err := tool.ValidateArguments(arguments); err != nil {

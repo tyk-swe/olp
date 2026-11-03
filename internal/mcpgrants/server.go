@@ -15,6 +15,8 @@ import (
 
 type Server struct{ Access *access.Server }
 
+func New(a *access.Server) *Server { return &Server{Access: a} }
+
 type StandingState string
 
 const (
@@ -49,7 +51,7 @@ type claimResponse struct {
 }
 
 func (s *Server) store() *Store {
-	return &Store{Pool: s.Access.Pool, Keys: s.Access.Keys, Auth: s.Access.Auth, Installation: s.Access.Installation, Egress: s.Access.Egress}
+	return NewStore(s.Access.Pool, s.Access.Installation, s.Access.Auth, s.Access.Keys, s.Access.Egress)
 }
 
 func (s *Server) Register(mux *http.ServeMux) {
