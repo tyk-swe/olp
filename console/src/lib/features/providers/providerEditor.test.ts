@@ -1,6 +1,18 @@
 import { describe, expect, it } from 'vitest';
 import type { ProviderKindCapability, ProviderPreset } from './api/models';
 import {
+  activationReady,
+  capabilitiesCertified,
+  capabilityLimitReached,
+  certificationPrerequisiteReady,
+  disableNotice,
+  MAX_REVIEWED_CAPABILITIES,
+  parseManualModelNames,
+  probeReady,
+  probeSummary,
+  providerStatus,
+  providerStatusTone,
+  type ProviderReadiness,
   buildCreateProviderInput,
   buildUpdateProviderInput,
   createProviderDraft,
@@ -245,5 +257,175 @@ describe('provider editing', () => {
     expect(draft.document?.configuration().options?.plugin_options).toEqual({
       keep: 'value'
     });
+  });
+});
+
+const ready: ProviderReadiness = {
+  state: 'draft',
+  connector_ready: true,
+  enabled_model_count: 1,
+  capability_count: 2,
+  certified_capability_count: 2,
+  last_probe_at: '2026-01-02T00:00:00Z',
+  last_probe_status: 'succeeded',
+  updated_at: '2026-01-01T00:00:00Z'
+};
+
+describe('provider activation readiness', () => {
+  it('requires a successful probe no older than the configuration', () => {
+    expect(probeReady(ready)).toBe(true);
+    expect(probeReady({ ...ready, last_probe_at: ready.updated_at })).toBe(
+      true
+    );
+    expect(probeReady({ ...ready, last_probe_at: null })).toBe(false);
+    expect(probeReady({ ...ready, last_probe_status: 'failed' })).toBe(false);
+    expect(
+      probeReady({ ...ready, last_probe_at: '2025-12-31T00:00:00Z' })
+    ).toBe(false);
+    expect(probeReady(null)).toBe(false);
+  });
+
+  it('allows compatible providers to certify without a probe but requires it for other kinds', () => {
+    const unprobed = { ...ready, last_probe_at: null };
+    expect(
+      certificationPrerequisiteReady({
+        ...unprobed,
+        configuration: { kind: 'openai_compatible' }
+      })
+    ).toBe(true);
+    expect(
+      certificationPrerequisiteReady({
+        ...unprobed,
+        configuration: { kind: 'anthropic' }
+      })
+    ).toBe(false);
+    expect(
+      certificationPrerequisiteReady({
+        ...ready,
+        configuration: { kind: 'anthropic' }
+      })
+    ).toBe(true);
+    expect(certificationPrerequisiteReady(null)).toBe(false);
+  });
+
+  it('requires enabled models and every capability to be certified', () => {
+    expect(capabilitiesCertified(ready)).toBe(true);
+    expect(capabilitiesCertified({ ...ready, enabled_model_count: 0 })).toBe(
+      false
+    );
+    expect(
+      capabilitiesCertified({
+        ...ready,
+        capability_count: 0,
+        certified_capability_count: 0
+      })
+    ).toBe(false);
+    expect(
+      capabilitiesCertified({ ...ready, certified_capability_count: 1 })
+    ).toBe(false);
+    expect(capabilitiesCertified(null)).toBe(false);
+  });
+
+  it('permits activation only for a ready draft or active provider with pending changes', () => {
+    expect(activationReady(ready)).toBe(true);
+    expect(
+      activationReady({ ...ready, state: 'active', pending_activation: true })
+    ).toBe(true);
+    expect(
+      activationReady({ ...ready, state: 'active', pending_activation: false })
+    ).toBe(false);
+    expect(activationReady({ ...ready, state: 'disabled' })).toBe(false);
+    expect(activationReady({ ...ready, connector_ready: false })).toBe(false);
+    expect(activationReady({ ...ready, certified_capability_count: 1 })).toBe(
+      false
+    );
+    expect(activationReady({ ...ready, last_probe_status: 'failed' })).toBe(
+      false
+    );
+    expect(activationReady(null)).toBe(false);
+  });
+
+  it('describes disabled, active and pending revisions with matching tones', () => {
+    expect(
+      providerStatus({
+        state: 'disabled',
+        active_revision: 2,
+        pending_activation: true
+      })
+    ).toBe('disabled · not serving');
+    expect(
+      providerStatusTone({
+        state: 'disabled',
+        active_revision: 2,
+        pending_activation: true
+      })
+    ).toBe('danger');
+    expect(
+      providerStatus({
+        state: 'active',
+        active_revision: 2,
+        pending_activation: true
+      })
+    ).toBe('revision 2 live · changes pending');
+    expect(
+      providerStatusTone({
+        state: 'active',
+        active_revision: 2,
+        pending_activation: true
+      })
+    ).toBe('warning');
+    expect(
+      providerStatus({
+        state: 'active',
+        active_revision: 2,
+        pending_activation: false
+      })
+    ).toBe('revision 2 active');
+    expect(
+      providerStatusTone({
+        state: 'active',
+        active_revision: 2,
+        pending_activation: false
+      })
+    ).toBe('success');
+    expect(providerStatus({ state: 'draft', pending_activation: false })).toBe(
+      'draft'
+    );
+    expect(
+      providerStatusTone({ state: 'draft', pending_activation: false })
+    ).toBe('warning');
+  });
+
+  it('reports disable generations, probe details and the review limit', () => {
+    expect(disableNotice(null)).toContain('No revision is serving traffic');
+    expect(disableNotice(7)).toContain('generation 7');
+    expect(
+      probeSummary({
+        detail: 'Connected',
+        probe_type: 'discovery',
+        discovered_models: 1
+      })
+    ).toBe('Connected · discovery probe · 1 model seen');
+    expect(
+      probeSummary({
+        detail: 'Connected',
+        probe_type: 'discovery',
+        discovered_models: 2
+      })
+    ).toBe('Connected · discovery probe · 2 models seen');
+    expect(
+      probeSummary({
+        detail: 'Connected',
+        probe_type: 'discovery',
+        discovered_models: null
+      })
+    ).toBe('Connected · discovery probe');
+    expect(capabilityLimitReached(MAX_REVIEWED_CAPABILITIES - 1)).toBe(false);
+    expect(capabilityLimitReached(MAX_REVIEWED_CAPABILITIES)).toBe(true);
+    expect(parseManualModelNames(' model-a, model-b\n\n model-c ')).toEqual([
+      'model-a',
+      'model-b',
+      'model-c'
+    ]);
   });
 });
