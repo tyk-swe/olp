@@ -54,7 +54,10 @@ function probeResponse(succeeded: boolean): Response {
   });
 }
 
-function serveWizard(probe = vi.fn(() => probeResponse(true))) {
+function serveWizard(
+  probe = vi.fn(() => probeResponse(true)),
+  override?: (request: Request) => Response | Promise<Response> | undefined
+) {
   const create = vi.fn(async (request: Request) => {
     route(request, 'POST', '/api/v1/providers');
     expect(request.headers.get('Idempotency-Key')).toBeTruthy();
@@ -70,6 +73,8 @@ function serveWizard(probe = vi.fn(() => probeResponse(true))) {
     return json({ id: provider.id });
   });
   const handler = vi.fn((request: Request) => {
+    const response = override?.(request);
+    if (response) return response;
     const path = new URL(request.url).pathname;
     if (path === '/api/v1/provider-kinds') return json({ items: [spec] });
     if (path === '/api/v1/providers' && request.method === 'POST')
@@ -260,5 +265,89 @@ describe('provider wizard', () => {
     expect(state.wizardStep).toBe(1);
     expect(state.probe).toBeNull();
     await vi.waitFor(() => expect(state.draft?.name).toBe(''));
+  });
+
+  it('offers manual model declaration when discovery returns no models', async () => {
+    const payload = vi.fn<(body: unknown) => void>();
+    const discovery = vi.fn(async (request: Request) => {
+      route(request, 'POST', `/api/v1/providers/${provider.id}/discovery`);
+      payload(await request.json());
+      return json({
+        ...provider,
+        model_count: payload.mock.calls.length === 1 ? 0 : 2
+      });
+    });
+    serveWizard(undefined, (request) =>
+      new URL(request.url).pathname.endsWith('/discovery')
+        ? discovery(request)
+        : undefined
+    );
+    const state = await wizard();
+    const draft = state.draft;
+    expect(draft).not.toBeNull();
+    if (!draft) return;
+    draft.name = 'Service';
+    draft.endpoint = 'https://example.test/v1';
+    draft.credential = 'secret';
+    await state.createDraft(new SubmitEvent('submit', { cancelable: true }));
+    await vi.waitFor(() => expect(state.wizardProvider?.id).toBe(provider.id));
+
+    await state.discoverWizardProvider();
+    expect(state.errorMessage).toContain('Use the manual identifier fallback');
+    state.manualModelNames = 'model-a\nmodel-b';
+    await state.declareWizardModels();
+
+    expect(discovery).toHaveBeenCalledTimes(2);
+    expect(payload).toHaveBeenNthCalledWith(1, { models: [] });
+    expect(payload).toHaveBeenNthCalledWith(2, {
+      models: [
+        { upstream_model: 'model-a', display_name: 'model-a' },
+        { upstream_model: 'model-b', display_name: 'model-b' }
+      ]
+    });
+    expect(state.errorMessage).toBe('');
+    expect(state.manualModelNames).toBe('');
+    expect(state.wizardStep).toBe(2);
+  });
+
+  it('retries an uncertain activation before allowing connection changes', async () => {
+    const activate = vi
+      .fn((request: Request) => {
+        route(request, 'POST', `/api/v1/providers/${provider.id}/activate`);
+        return json({ runtime_generation: { sequence: 42 } });
+      })
+      .mockReturnValueOnce(json({ title: 'Unavailable', status: 503 }, 503));
+    serveWizard(undefined, (request) =>
+      new URL(request.url).pathname.endsWith('/activate')
+        ? activate(request)
+        : undefined
+    );
+    const state = await wizard();
+    const draft = state.draft;
+    expect(draft).not.toBeNull();
+    if (!draft) return;
+    draft.name = 'Service';
+    draft.endpoint = 'https://example.test/v1';
+    draft.credential = 'secret';
+    await state.createDraft(new SubmitEvent('submit', { cancelable: true }));
+    await vi.waitFor(() => expect(state.wizardProvider?.id).toBe(provider.id));
+
+    await state.activateWizardProvider();
+    expect(state.errorMessage).toBe('Unavailable');
+    state.goBack();
+    expect(state.errorMessage).toContain(
+      'Activation may already have committed'
+    );
+    expect(state.wizardStep).toBe(2);
+    await state.activateWizardProvider();
+
+    expect(activate).toHaveBeenCalledTimes(2);
+    const firstId = activate.mock.calls[0][0].headers.get('Idempotency-Key');
+    expect(firstId).toBeTruthy();
+    expect(activate.mock.calls[1][0].headers.get('Idempotency-Key')).toBe(
+      firstId
+    );
+    expect(state.wizardStep).toBe(3);
+    expect(state.notice).toContain('runtime generation 42');
   });
 });
