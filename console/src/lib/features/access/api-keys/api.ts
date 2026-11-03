@@ -62,7 +62,10 @@ export async function rotateApiKey(
     {
       params: {
         path: { api_key_id: key.id },
-        header: { 'If-Match': key.etag, 'Idempotency-Key': idempotencyKey }
+        header: {
+          'If-Match': `"${key.etag}"`,
+          'Idempotency-Key': idempotencyKey
+        }
       },
       body: { overlap_seconds: overlapSeconds }
     }
@@ -77,7 +80,7 @@ export async function updateApiKey(
   const response = await apiClient.PATCH('/api/v1/api-keys/{api_key_id}', {
     params: {
       path: { api_key_id: key.id },
-      header: { 'If-Match': key.etag }
+      header: { 'If-Match': `"${key.etag}"` }
     },
     body: input
   });
@@ -93,7 +96,7 @@ export async function revokeApiKey(
     {
       params: {
         path: { api_key_id: key.id },
-        header: { 'If-Match': key.etag, 'Idempotency-Key': requestId }
+        header: { 'If-Match': `"${key.etag}"`, 'Idempotency-Key': requestId }
       }
     }
   );
