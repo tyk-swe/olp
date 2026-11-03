@@ -20,7 +20,7 @@ go test -mod=readonly -vet=off -count=1 -timeout=60s \
   ./internal/guardrails \
   ./internal/signing \
   ./internal/gateway
-pnpm --dir console test --project unit
+pnpm --dir console test --project unit --project svelte
 node --test scripts/check-docs.test.mjs scripts/check-release-version.test.mjs
 elapsed=$(( $(date +%s) - start ))
 printf 'test-fast: %ss (budget %ss)\n' "$elapsed" "$budget"
