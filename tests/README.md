@@ -26,7 +26,7 @@ The gateway slice is the files `gateway_test.go`,
 `cost_reservation_test.go`, `credential_redaction_test.go`, and
 `guardrails_test.go` in `internal/gateway`, with shared helpers kept in
 `gateway_test.go` and `cache_test.go`. The console allowlist is the Vitest
-`unit` project. The script allowlist is the documentation contract and the
+`unit` and `svelte` projects. The script allowlist is the documentation contract and the
 release version checks.
 
 Everything else was subtracted for speed, including the service and process

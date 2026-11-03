@@ -1,23 +1,17 @@
 import { apiClient } from '$lib/api/client';
-import { ensureOk, unwrap } from '$lib/api/http';
+import { ensureOk, unwrap, unwrapPage } from '$lib/api/http';
+import { collectCursorPages } from '$lib/api/pagination';
 import type { components } from '$lib/api/schema';
 export type Organization = components['schemas']['Organization'];
-type OrganizationMember = components['schemas']['OrganizationMember'];
-type ProjectMember = components['schemas']['ProjectMemberResponse'];
 export async function listOrganizations(signal?: AbortSignal) {
-  const items: Organization[] = [];
-  let cursor: string | undefined;
-  do {
-    const page = unwrap(
+  return collectCursorPages(async (cursor) =>
+    unwrapPage(
       await apiClient.GET('/api/v1/organizations', {
         params: { query: { cursor } },
         signal
       })
-    );
-    items.push(...page.items);
-    cursor = page.next_cursor ?? undefined;
-  } while (cursor);
-  return items;
+    )
+  );
 }
 export async function createOrganization(name: string, requestId: string) {
   return unwrap(
@@ -46,19 +40,14 @@ export async function organizationMembers(
   organization_id: string,
   signal?: AbortSignal
 ) {
-  const items: OrganizationMember[] = [];
-  let cursor: string | undefined;
-  do {
-    const page = unwrap(
+  return collectCursorPages(async (cursor) =>
+    unwrapPage(
       await apiClient.GET('/api/v1/organizations/{organization_id}/members', {
         params: { path: { organization_id }, query: { cursor } },
         signal
       })
-    );
-    items.push(...page.items);
-    cursor = page.next_cursor ?? undefined;
-  } while (cursor);
-  return items;
+    )
+  );
 }
 export async function putOrganizationMember(
   organization_id: string,
@@ -100,19 +89,14 @@ export async function organizationProjects(
   organization_id: string,
   signal?: AbortSignal
 ) {
-  const items: components['schemas']['ProjectDetailResponse'][] = [];
-  let cursor: string | undefined;
-  do {
-    const page = unwrap(
+  return collectCursorPages(async (cursor) =>
+    unwrapPage(
       await apiClient.GET('/api/v1/organizations/{organization_id}/projects', {
         params: { path: { organization_id }, query: { cursor } },
         signal
       })
-    );
-    items.push(...page.items);
-    cursor = page.next_cursor ?? undefined;
-  } while (cursor);
-  return items;
+    )
+  );
 }
 export async function createOrganizationProject(
   organization_id: string,
@@ -134,10 +118,8 @@ export async function projectMembers(
   project_id: string,
   signal?: AbortSignal
 ) {
-  const items: ProjectMember[] = [];
-  let cursor: string | undefined;
-  do {
-    const page = unwrap(
+  return collectCursorPages(async (cursor) =>
+    unwrapPage(
       await apiClient.GET(
         '/api/v1/organizations/{organization_id}/projects/{project_id}/members',
         {
@@ -145,11 +127,8 @@ export async function projectMembers(
           signal
         }
       )
-    );
-    items.push(...page.items);
-    cursor = page.next_cursor ?? undefined;
-  } while (cursor);
-  return items;
+    )
+  );
 }
 export async function putProjectMember(
   organization_id: string,

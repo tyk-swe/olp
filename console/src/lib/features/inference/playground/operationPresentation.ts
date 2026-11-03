@@ -120,6 +120,7 @@ export function vectorRows(response: unknown, request?: unknown): VectorRow[] {
     const inputIndex = field(item, 'index');
     const sparse =
       Array.isArray(observed) &&
+      observed.length > 0 &&
       observed.every(
         (entry) => nativeObject(entry) && Object.hasOwn(entry, 'index')
       );

@@ -67,8 +67,9 @@ Use `gofmt`, `go vet`, and `make lint` for Go; console source uses Prettier, two
 single quotes, no trailing commas, `camelCase` helpers and `PascalCase.svelte` components. Keep
 Svelte route components thin and use the [console design system](console/README.md#design-system).
 
-Place allowlisted Go tests beside their feature as `*_test.go` and allowlisted
-console tests as Vitest `*.test.ts` in the `unit` project.
+Place allowlisted Go tests beside their feature as `*_test.go`, allowlisted
+console tests as Vitest `*.test.ts` in the `unit` project, and reactive
+Svelte tests as `*.svelte.test.ts` in the `svelte` project.
 Cover changed behavior inside the allowlist and preserve protocol fixtures. Tests follow the strict
 rules in [testing](tests/README.md#test-rules), meaning behavior assertions
 only, no pinned outside facts without a cited source and date, and one focused

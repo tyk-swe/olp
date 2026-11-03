@@ -4,6 +4,16 @@ inputs:
   node-modules:
     description: Install the pnpm workspace.
     default: "true"
+  go-cache-suffix:
+    description: Distinguish jobs that build different Go artifacts.
+    default: ""
+outputs:
+  go-cache-key:
+    description: The Go build cache key for this toolchain and runner image.
+    value: ${{ steps.go-cache.outputs.key }}
+  go-cache-hit:
+    description: Whether the exact Go cache key was restored.
+    value: ${{ steps.go-build-cache.outputs.cache-hit }}
 runs:
   using: composite
   steps:
@@ -17,13 +27,15 @@ runs:
       env:
         GO_VERSION: ${{ steps.go.outputs.go-version }}
         GO_SUM: ${{ hashFiles('**/go.sum') }}
+        GO_CACHE_SUFFIX: ${{ inputs.go-cache-suffix }}
       run: |
         prefix="go-$ImageOS-$RUNNER_ARCH-$GO_VERSION-"
         {
           echo "prefix=$prefix"
-          echo "key=$prefix$ImageVersion-$GO_SUM"
+          echo "key=$prefix$ImageVersion-$GO_SUM$GO_CACHE_SUFFIX"
         } >> "$GITHUB_OUTPUT"
-    - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+    - id: go-build-cache
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: |
           ~/go/pkg/mod
