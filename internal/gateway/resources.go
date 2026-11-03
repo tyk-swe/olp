@@ -1251,19 +1251,19 @@ func (s *Server) getFile(w http.ResponseWriter, r *http.Request) {
 				return serverError(http.StatusBadGateway, "fidelity_protocol_violation", "The provider returned an invalid native file result.")
 			}
 			x.completeFileControl()
-			_, contract, err := s.readDurable(ctx, res.Kind, authority.ID, res.ID)
-			if err != nil {
-				return durableError(err)
+			_, contract, readErr := s.readDurable(ctx, res.Kind, authority.ID, res.ID)
+			if readErr != nil {
+				return durableError(readErr)
 			}
 			contract.Result = body
-			payload, err := json.Marshal(contract)
-			if err != nil {
-				return durableError(err)
+			payload, marshalErr := json.Marshal(contract)
+			if marshalErr != nil {
+				return durableError(marshalErr)
 			}
 			commitCtx, stopCommit := resourceCommitContext(ctx)
 			defer stopCommit()
-			if _, _, err = s.Resources.UpdateDurableContract(commitCtx, res.Kind, authority.ID, res.ID, state, payload); err != nil {
-				return durableError(err)
+			if _, _, commitErr := s.Resources.UpdateDurableContract(commitCtx, res.Kind, authority.ID, res.ID, state, payload); commitErr != nil {
+				return durableError(commitErr)
 			}
 			out, err = durableProjection(body, res.ID, nil)
 		} else {
