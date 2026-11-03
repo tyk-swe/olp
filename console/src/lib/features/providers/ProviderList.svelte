@@ -133,7 +133,7 @@
   {#if providers.isPlaceholderData}
     <p class="updating" role="status">Updating…</p>
   {/if}
-  <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+  <!-- svelte-ignore a11y_no_noninteractive_tabindex (Keyboard focus enables scrolling the table.) -->
   <div
     class="table-shell provider-table"
     tabindex="0"

@@ -449,7 +449,7 @@
       >
         <p>No media jobs match these filters.</p>
       </section>
-    {:else}<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+    {:else}<!-- svelte-ignore a11y_no_noninteractive_tabindex (Keyboard focus enables scrolling the table.) -->
       <div
         class="table-shell job-table-shell"
         tabindex="0"

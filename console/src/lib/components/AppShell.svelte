@@ -139,8 +139,7 @@
           bind:this={accountMenu}
           bind:open={accountMenuOpen}
         >
-          <!-- Chromium's accessibility tree does not consistently expose the native summary role. -->
-          <!-- svelte-ignore a11y_no_redundant_roles -->
+          <!-- svelte-ignore a11y_no_redundant_roles (Chromium's accessibility tree does not consistently expose the native summary role.) -->
           <summary role="button" aria-expanded={accountMenuOpen}>
             <span class="sr-only">Open account menu:</span>
             <span class="avatar" aria-hidden="true"

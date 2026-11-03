@@ -177,7 +177,7 @@
         role="tabpanel"
         aria-labelledby={`sdk-tab-${sdk}`}
       >
-        <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+        <!-- svelte-ignore a11y_no_noninteractive_tabindex (Keyboard focus enables scrolling the complete snippet.) -->
         <pre tabindex="0"><code>{snippet}</code></pre>
       </div>
       {#if testMessage}<div

@@ -135,7 +135,7 @@
     </div>
     <details>
       <summary>View chart data</summary>
-      <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+      <!-- svelte-ignore a11y_no_noninteractive_tabindex (Keyboard focus enables scrolling the table.) -->
       <div
         class="table-shell"
         tabindex="0"
