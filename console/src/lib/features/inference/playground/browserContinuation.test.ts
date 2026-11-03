@@ -5,7 +5,9 @@ import {
   continuationVersion,
   nativeChatRequest,
   nextTurn,
-  streamTurn
+  recoverTurn,
+  streamTurn,
+  unaryTurn
 } from './browserContinuation';
 
 vi.mock('$lib/api/gateway', () => ({ gatewayFetch: vi.fn() }));
@@ -202,5 +204,166 @@ describe('streamed continuation', () => {
     await expect(
       streamTurn('olp_test', nativeChatRequest(source, 'weather'), submission)
     ).rejects.toThrow('Public inference request failed (502).');
+  });
+});
+
+describe('follow-up and recovery', () => {
+  const assistant = { role: 'assistant', content: 'It is raining.' };
+  const delivery = {
+    olp: {
+      version: continuationVersion,
+      ready: true,
+      handle,
+      observations: [{ index: 0, type: 'text', phase: 'end' }],
+      native_usage: { output_tokens: 12 }
+    },
+    choices: [{ message: assistant, finish_reason: 'stop' }]
+  };
+  const recovery = {
+    version: continuationVersion,
+    state: 'ready',
+    handle,
+    assistant,
+    delivery: { stream: false, body: delivery }
+  };
+
+  it('sends a follow-up under its parent handle and returns the committed result', async () => {
+    const request = nativeChatRequest(source, 'weather');
+    const signal = new AbortController().signal;
+    vi.mocked(gatewayFetch).mockResolvedValueOnce(
+      new Response(JSON.stringify(delivery))
+    );
+
+    const turn = await unaryTurn(
+      'olp_test',
+      request,
+      submission,
+      handle,
+      signal
+    );
+
+    expect(turn).toEqual({
+      submission,
+      handle,
+      request,
+      assistant,
+      observations: [{ index: 0, type: 'text', phase: 'end' }],
+      finish: 'stop',
+      nativeUsageRaw: '{"output_tokens":12}'
+    });
+    const [path, options] = vi.mocked(gatewayFetch).mock.calls[0] ?? [];
+    expect(path).toBe('/v1/chat/completions');
+    expect(options?.method).toBe('POST');
+    expect(options?.signal).toBe(signal);
+    expect(options?.body).toBe(stringifyNativeJSON(request));
+    const headers = new Headers(options?.headers);
+    expect(headers.get('X-OLP-Continuation-Handle')).toBe(handle);
+    expect(headers.get('X-OLP-Submission-ID')).toBe(submission);
+  });
+
+  it('recovers an existing unary delivery without starting a new inference', async () => {
+    const request = nativeChatRequest(source, 'weather');
+    vi.mocked(gatewayFetch).mockResolvedValueOnce(
+      new Response(JSON.stringify(recovery))
+    );
+
+    const turn = await recoverTurn('olp_test', submission, request);
+
+    expect(turn).toEqual({
+      submission,
+      handle,
+      request,
+      assistant,
+      observations: [{ index: 0, type: 'text', phase: 'end' }],
+      finish: 'stop',
+      nativeUsageRaw: '{"output_tokens":12}'
+    });
+    const [path, options] = vi.mocked(gatewayFetch).mock.calls[0] ?? [];
+    expect(path).toBe(`/v1/continuation-submissions/${submission}`);
+    expect(options?.method).toBe('GET');
+    expect(options?.body).toBeUndefined();
+    expect(gatewayFetch).toHaveBeenCalledOnce();
+  });
+
+  it('recovers a committed streamed delivery', async () => {
+    const request = nativeChatRequest(source, 'weather');
+    const streamed = {
+      ...recovery,
+      delivery: {
+        stream: true,
+        frames: [
+          {
+            olp: { version: continuationVersion, ready: true, handle },
+            choices: [
+              { delta: { content: assistant.content }, finish_reason: 'stop' }
+            ]
+          }
+        ]
+      }
+    };
+    vi.mocked(gatewayFetch).mockResolvedValueOnce(
+      new Response(JSON.stringify(streamed))
+    );
+
+    await expect(recoverTurn('olp_test', submission, request)).resolves.toEqual(
+      {
+        submission,
+        handle,
+        request,
+        assistant,
+        observations: [],
+        finish: 'stop',
+        nativeUsageRaw: undefined
+      }
+    );
+  });
+
+  it.each([
+    {
+      saved: { ...recovery, state: 'pending' },
+      reason: 'no ready delivery'
+    },
+    {
+      saved: { ...recovery, assistant: { ...assistant, content: 'different' } },
+      reason: 'assistant does not match'
+    },
+    {
+      saved: { ...recovery, handle: `continuation_${'b'.repeat(32)}` },
+      reason: 'handle does not match'
+    }
+  ])(
+    'rejects a recovery that does not match committed work',
+    async ({ saved, reason }) => {
+      vi.mocked(gatewayFetch).mockResolvedValueOnce(
+        new Response(JSON.stringify(saved))
+      );
+
+      await expect(
+        recoverTurn(
+          'olp_test',
+          submission,
+          nativeChatRequest(source, 'weather')
+        )
+      ).rejects.toThrow(reason);
+      expect(vi.mocked(gatewayFetch).mock.calls[0]?.[1]?.method).toBe('GET');
+    }
+  );
+
+  it('reports a key policy refusal without exposing the upstream body', async () => {
+    vi.mocked(gatewayFetch).mockResolvedValueOnce(
+      new Response(
+        '{"error":{"code":"policy_conflict","message":"secret credential"}}',
+        { status: 403 }
+      )
+    );
+
+    await expect(
+      unaryTurn(
+        'olp_test',
+        nativeChatRequest(source, 'weather'),
+        submission,
+        handle
+      )
+    ).rejects.toThrow('This key needs provider-state permission.');
   });
 });
