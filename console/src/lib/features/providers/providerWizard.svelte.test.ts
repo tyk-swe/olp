@@ -171,4 +171,94 @@ describe('provider wizard', () => {
     expect(state.errorMessage).toBe('');
     expect(state.wizardStep).toBe(2);
   });
+  it('retries an uncertain save with the original values and request identity', async () => {
+    const { create } = serveWizard();
+    create.mockResolvedValueOnce(
+      json({ title: 'Unavailable', status: 503 }, 503)
+    );
+    const state = await wizard();
+    const draft = state.draft;
+    expect(draft).not.toBeNull();
+    if (!draft) return;
+    draft.name = 'Service';
+    draft.endpoint = 'https://example.test/v1';
+    draft.credential = 'secret';
+
+    await state.createDraft(new SubmitEvent('submit', { cancelable: true }));
+    expect(state.errorMessage).toBe('Unavailable');
+    draft.name = 'Edited';
+    await state.createDraft(new SubmitEvent('submit', { cancelable: true }));
+    expect(state.errorMessage).toContain('Retry its original fields');
+    expect(create).toHaveBeenCalledOnce();
+
+    draft.name = 'Service';
+    await state.createDraft(new SubmitEvent('submit', { cancelable: true }));
+    expect(create).toHaveBeenCalledTimes(2);
+    expect(create.mock.calls[0][0].headers.get('Idempotency-Key')).toBeTruthy();
+    expect(create.mock.calls[1][0].headers.get('Idempotency-Key')).toBe(
+      create.mock.calls[0][0].headers.get('Idempotency-Key')
+    );
+    expect(state.wizardStep).toBe(2);
+  });
+
+  it('lets a rejected save be corrected with a fresh request identity', async () => {
+    const { create } = serveWizard();
+    create.mockResolvedValueOnce(
+      json({ title: 'Invalid credential', status: 400 }, 400)
+    );
+    const state = await wizard();
+    const draft = state.draft;
+    expect(draft).not.toBeNull();
+    if (!draft) return;
+    draft.name = 'Service';
+    draft.endpoint = 'https://example.test/v1';
+    draft.credential = 'invalid';
+
+    await state.createDraft(new SubmitEvent('submit', { cancelable: true }));
+    expect(state.errorMessage).toBe('Invalid credential');
+    draft.credential = 'secret';
+    await state.createDraft(new SubmitEvent('submit', { cancelable: true }));
+
+    expect(create).toHaveBeenCalledTimes(2);
+    expect(create.mock.calls[0][0].headers.get('Idempotency-Key')).toBeTruthy();
+    expect(create.mock.calls[1][0].headers.get('Idempotency-Key')).not.toBe(
+      create.mock.calls[0][0].headers.get('Idempotency-Key')
+    );
+    expect(state.wizardStep).toBe(2);
+  });
+
+  it('restores the saved connection when going back and clears secrets on reset', async () => {
+    serveWizard();
+    const state = await wizard();
+    const draft = state.draft;
+    expect(draft).not.toBeNull();
+    if (!draft) return;
+    draft.name = 'Service';
+    draft.endpoint = 'https://example.test/v1';
+    draft.credential = 'secret';
+    await state.createDraft(new SubmitEvent('submit', { cancelable: true }));
+    flushSync();
+
+    state.goBack();
+    expect(state.wizardStep).toBe(1);
+    expect(state.draft).toMatchObject({
+      name: 'Service',
+      endpoint: 'https://example.test/v1',
+      credential: ''
+    });
+    const previous = state.draft;
+    expect(previous).not.toBeNull();
+    if (!previous) return;
+    previous.credential = 'replacement';
+    previous.externalCredentialReference = 'reference';
+    state.startAnother();
+    flushSync();
+
+    expect(previous.credential).toBe('');
+    expect(previous.externalCredentialReference).toBe('');
+    expect(state.providerId).toBe('');
+    expect(state.wizardStep).toBe(1);
+    expect(state.probe).toBeNull();
+    await vi.waitFor(() => expect(state.draft?.name).toBe(''));
+  });
 });
