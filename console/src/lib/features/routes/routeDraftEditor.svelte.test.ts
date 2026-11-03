@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 import { json, route, serve } from '$lib/api/test/transport';
 import StateHarness from '../../../../tests/unit/support/StateHarness.svelte';
-import type { RouteDraft, RouteSimulation } from './api';
+import type { RouteActivation, RouteDraft, RouteSimulation } from './api';
 import { routeKeys } from './routeKeys';
 import { RouteDraftEditorState } from './routeDraftEditor.svelte';
 
@@ -60,6 +60,14 @@ const preview: RouteSimulation = {
   fallbacks: []
 };
 
+const activation: RouteActivation = {
+  draft_etag: 'version-2',
+  revision: 3,
+  revision_id: 'revision-id',
+  route_id: 'route-id',
+  runtime_generation: { id: 'generation-id', sequence: 4 }
+};
+
 function serveEditor() {
   const load = vi.fn(() => json(draft));
   const replace = vi.fn(async (request: Request) => {
@@ -71,6 +79,13 @@ function serveEditor() {
       targets: [{ provider_model_id: 'model-id' }]
     });
     return json({ ...draft, slug: 'updated', etag: 'version-2' });
+  });
+  const activate = vi.fn((request: Request) => {
+    route(request, 'POST', `/api/v1/route-drafts/${draft.id}/activate`);
+    expect(request.headers.get('If-Match')).toBe(draft.etag);
+    expect(request.headers.get('Idempotency-Key')).toBeTruthy();
+    load.mockReturnValue(json({ ...draft, etag: activation.draft_etag }));
+    return json(activation);
   });
   const simulate = vi.fn(async (request: Request) => {
     route(request, 'POST', `/api/v1/route-drafts/${draft.id}/simulate`);
@@ -87,6 +102,8 @@ function serveEditor() {
     (request) => {
       const path = new URL(request.url).pathname;
       if (path === '/api/v1/provider-models') return json({ items: [] });
+      if (path === `/api/v1/route-drafts/${draft.id}/activate`)
+        return activate(request);
       if (path === `/api/v1/route-drafts/${draft.id}/simulate`)
         return simulate(request);
       if (path === `/api/v1/route-drafts/${draft.id}`) {
@@ -100,7 +117,7 @@ function serveEditor() {
     },
     ['read', 'configure']
   );
-  return { load, replace, simulate };
+  return { load, replace, simulate, activate };
 }
 
 async function editor(): Promise<RouteDraftEditorState> {
@@ -159,6 +176,84 @@ describe('route draft editor', () => {
     expect(state.hasUnsavedChanges).toBe(false);
     expect(state.sync.snapshotEtag).toBe('version-2');
     expect(state.notice).toContain('Draft saved');
+  });
+
+  it('preserves edits made while a save is in flight', async () => {
+    const { replace } = serveEditor();
+    const state = await editor();
+    const pending = Promise.withResolvers<Response>();
+    replace.mockImplementationOnce(() => pending.promise);
+    state.slug = 'first-edit';
+    state.touch();
+    const saving = state.save(draft);
+    await vi.waitFor(() => expect(replace).toHaveBeenCalledOnce());
+
+    state.slug = 'later-edit';
+    state.touch();
+    pending.resolve(json({ ...draft, slug: 'first-edit', etag: 'version-2' }));
+    await saving;
+    flushSync();
+
+    expect(state.slug).toBe('later-edit');
+    expect(state.hasUnsavedChanges).toBe(true);
+    expect(state.notice).toBe(
+      'Draft saved. You have additional unsaved changes.'
+    );
+    expect(state.sync.snapshotEtag).toBe('version-2');
+  });
+
+  it('retains local edits and reports a conflict when the saved version is stale', async () => {
+    const { replace } = serveEditor();
+    const state = await editor();
+    replace.mockImplementationOnce(() =>
+      Promise.resolve(
+        json(
+          {
+            type: 'https://openllmproxy.dev/problems/etag_mismatch',
+            title: 'The draft changed',
+            status: 412
+          },
+          412
+        )
+      )
+    );
+    state.slug = 'local';
+    state.touch();
+
+    await state.save(draft);
+    flushSync();
+
+    expect(state.slug).toBe('local');
+    expect(state.hasUnsavedChanges).toBe(true);
+    expect(state.concurrentNotice).toBe('conflict');
+  });
+
+  it('activates only a saved draft and reports its published revision', async () => {
+    const { activate } = serveEditor();
+    const state = await editor();
+    await state.activate(draft);
+    flushSync();
+    expect(activate).toHaveBeenCalledOnce();
+    expect(state.activation).toEqual(activation);
+    expect(state.notice).toBe(
+      'Route activated as revision 3 in runtime generation 4.'
+    );
+
+    state.touch();
+    flushSync();
+    await state.activate({ ...draft, etag: activation.draft_etag });
+    expect(activate).toHaveBeenCalledOnce();
+  });
+
+  it('rejects a non-object simulation request before sending it', async () => {
+    const { simulate } = serveEditor();
+    const state = await editor();
+    state.simulationRequestJson = '[]';
+    await state.simulate(draft);
+    expect(simulate).not.toHaveBeenCalled();
+    expect(state.errorMessage).toBe(
+      'The native request must be a JSON object.'
+    );
   });
 
   it('keeps local edits when a newer draft arrives and reloads on request', async () => {
