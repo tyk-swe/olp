@@ -58,7 +58,7 @@ export async function renameProject(
     await apiClient.PATCH('/api/v1/projects/{project_id}', {
       params: {
         path: { project_id: project.id },
-        header: { 'If-Match': project.etag }
+        header: { 'If-Match': `"${project.etag}"` }
       },
       body: { name }
     })
@@ -97,7 +97,7 @@ export async function putProjectMember(
     await apiClient.PUT('/api/v1/projects/{project_id}/members/{user_id}', {
       params: {
         path: { project_id: project.id, user_id: userId },
-        header: { 'If-Match': project.etag }
+        header: { 'If-Match': `"${project.etag}"` }
       },
       body: { role }
     })
@@ -112,7 +112,7 @@ export async function removeProjectMember(
     await apiClient.DELETE('/api/v1/projects/{project_id}/members/{user_id}', {
       params: {
         path: { project_id: project.id, user_id: userId },
-        header: { 'If-Match': project.etag }
+        header: { 'If-Match': `"${project.etag}"` }
       }
     })
   );
