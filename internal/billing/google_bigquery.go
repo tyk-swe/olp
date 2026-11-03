@@ -68,7 +68,34 @@ func googleProjectFilter(ids []string) (string, []bigquery.QueryParameter) {
 	return " AND project.id IN UNNEST(@project_ids)", []bigquery.QueryParameter{{Name: "project_ids", Value: ids}}
 }
 
-func (i *Importer) importGoogle(ctx context.Context, row *importRow, client *http.Client, auth *connectors.Auth, key []byte) error {
+func googleCostSource() costSource {
+	return costSource{
+		name:             SourceGoogle,
+		kind:             "vertex_ai",
+		validateScope:    validateGoogleScope,
+		encodeCredential: encodeGoogleCredential,
+		decodeCredential: decodeGoogleCredential,
+		credentialInput:  googleCredentialInput,
+		fetch:            fetchGoogleSource,
+	}
+}
+
+func fetchGoogleSource(ctx context.Context, in *fetchInput, emit func(periodDays) error) error {
+	client, err := in.importer.client(ctx, in.row.ProviderID, in.cfg, in.key, googleBigQueryEndpoint)
+	if err != nil {
+		return failFetch("endpoint", err)
+	}
+	bounded := *client
+	bounded.Timeout = requestTimout
+	authClient, err := in.importer.billingAuthenticationClient(ctx, in.cfg)
+	if err != nil {
+		return failFetch("endpoint", err)
+	}
+	defer authClient.CloseIdleConnections()
+	return in.importer.importGoogle(ctx, in.row, &bounded, connectors.NewBillingAuth(in.importer.Egress, authClient), in.key, emit)
+}
+
+func (i *Importer) importGoogle(ctx context.Context, row *importRow, client *http.Client, auth *connectors.Auth, key []byte, emit func(periodDays) error) error {
 	importCtx, cancel := context.WithTimeout(ctx, googleImportTimeout)
 	defer cancel()
 	today := i.now().UTC().Truncate(24 * time.Hour)
@@ -83,7 +110,7 @@ func (i *Importer) importGoogle(ctx context.Context, row *importRow, client *htt
 		return err
 	}
 	periods := googlePeriodOrder(historical, current, phase)
-	if err := i.importGooglePeriods(importCtx, row, client, auth, key, earliest, today, periods[:]); err != nil {
+	if err := i.importGooglePeriods(importCtx, row, client, auth, key, earliest, today, periods[:], emit); err != nil {
 		return err
 	}
 	return i.scheduleGoogleBackfill(importCtx, row, earliest, current)
@@ -144,13 +171,13 @@ func googlePeriodOrder(historical, current time.Time, phase int) [3]time.Time {
 	}
 }
 
-func (i *Importer) importGooglePeriods(ctx context.Context, row *importRow, client *http.Client, auth *connectors.Auth, key []byte, earliest, today time.Time, periods []time.Time) error {
+func (i *Importer) importGooglePeriods(ctx context.Context, row *importRow, client *http.Client, auth *connectors.Auth, key []byte, earliest, today time.Time, periods []time.Time, emit func(periodDays) error) error {
 	if len(periods) == 0 {
 		return nil
 	}
 	return errors.Join(
-		i.importGooglePeriod(ctx, row, client, auth, key, earliest, today, periods[0]),
-		i.importGooglePeriods(ctx, row, client, auth, key, earliest, today, periods[1:]),
+		i.importGooglePeriod(ctx, row, client, auth, key, earliest, today, periods[0], emit),
+		i.importGooglePeriods(ctx, row, client, auth, key, earliest, today, periods[1:], emit),
 	)
 }
 
@@ -178,7 +205,7 @@ func googlePeriodBounds(month, earliest, today time.Time) (time.Time, time.Time)
 	return month, end
 }
 
-func (i *Importer) importGooglePeriod(ctx context.Context, row *importRow, client *http.Client, auth *connectors.Auth, key []byte, earliest, today, month time.Time) error {
+func (i *Importer) importGooglePeriod(ctx context.Context, row *importRow, client *http.Client, auth *connectors.Auth, key []byte, earliest, today, month time.Time, emit func(periodDays) error) error {
 	if month.IsZero() {
 		return nil
 	}
@@ -190,7 +217,7 @@ func (i *Importer) importGooglePeriod(ctx context.Context, row *importRow, clien
 	if err != nil {
 		return err
 	}
-	return i.storeDays(ctx, row, month.Format(dayFormat), revision, days)
+	return emit(periodDays{start: month.Format(dayFormat), revision: revision, days: days})
 }
 
 func fetchGoogle(ctx context.Context, client *http.Client, auth *connectors.Auth, rawScope json.RawMessage, rawCredential []byte, start, end time.Time) (map[string]map[lineKey]lineSum, *sourceRevision, error) {
@@ -320,7 +347,7 @@ func fetchGoogle(ctx context.Context, client *http.Client, auth *connectors.Auth
 
 func addGoogleRow(result reportAccumulator, row googleInvoiceRow, start, end time.Time) error {
 	parsedDay, err := time.Parse(dayFormat, row.Day)
-	if err != nil || parsedDay.Before(start) || !parsedDay.Before(end) || row.Service != googleVertexServiceID || row.SKU == "" || !validGoogleCurrency(row.Currency) {
+	if err != nil || parsedDay.Before(start) || !parsedDay.Before(end) || row.Service != googleVertexServiceID || row.SKU == "" || !validCloudCurrency(row.Currency) {
 		return failFetch("response", errors.New("invalid Google query dimensions"))
 	}
 	amount, err := decimal.NewFromString(row.Amount)
@@ -333,18 +360,6 @@ func addGoogleRow(result reportAccumulator, row googleInvoiceRow, start, end tim
 	item := googleLineItem(row.Service, row.SKU, row.Kind)
 	result.add(row.Day, amount, row.Currency, &item)
 	return nil
-}
-
-func validGoogleCurrency(currency string) bool {
-	if len(currency) != 3 {
-		return false
-	}
-	for _, char := range currency {
-		if (char < 'A' || char > 'Z') && (char < 'a' || char > 'z') {
-			return false
-		}
-	}
-	return true
 }
 
 func googleLineItem(service, sku, kind string) string {

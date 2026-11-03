@@ -20,7 +20,6 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/tyk-swe/olp/internal/access"
-	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/secrets"
 	"github.com/tyk-swe/olp/internal/usage"
@@ -145,6 +144,13 @@ func (i *Importer) Pass(ctx context.Context) error {
 	return err
 }
 
+func (i *Importer) now() time.Time {
+	if i.Now != nil {
+		return i.Now()
+	}
+	return time.Now()
+}
+
 func (i *Importer) log() *slog.Logger {
 	if i.Log != nil {
 		return i.Log
@@ -247,6 +253,10 @@ func (i *Importer) completedCloudPeriods(ctx context.Context, row *importRow, ea
 }
 
 func (i *Importer) importOne(ctx context.Context, row *importRow) error {
+	source, ok := lookupSource(row.Source)
+	if !ok {
+		return failFetch("response", errors.New("unsupported billing source"))
+	}
 	cfg, err := loadProviderConfig(ctx, i.Pool, row.ProviderID)
 	if err != nil {
 		return failFetch("endpoint", err)
@@ -259,93 +269,31 @@ func (i *Importer) importOne(ctx context.Context, row *importRow) error {
 		return failFetch("credential", errors.New("billing credential could not be read"))
 	}
 	defer clear(stored)
-	key, err := decodeCredential(row.Source, stored)
+	key, err := source.decodeCredential(stored)
 	if err != nil {
 		return failFetch("credential", err)
 	}
 	defer clear(key)
-	if row.Source == SourceAWS {
-		return i.importAWS(ctx, row, cfg, key)
-	}
-	endpoint := googleBigQueryEndpoint
-	var cloudScope azureScope
-	if row.Source == SourceAzureCostManagement {
-		if err := json.Unmarshal(row.Scope, &cloudScope); err != nil {
-			return failFetch("response", err)
-		}
-		endpoint = "https://" + cloudScope.StorageAccount + ".blob.core.windows.net"
-		if i.AzureBlobEndpoint != nil {
-			endpoint = i.AzureBlobEndpoint(cloudScope.StorageAccount)
-		}
-	} else if row.Source != SourceGoogle {
-		if cfg.Endpoint == nil || *cfg.Endpoint == "" {
-			return failFetch("endpoint", errors.New("the provider has no endpoint"))
-		}
-		endpoint = *cfg.Endpoint
-	}
-	client, err := i.client(ctx, row.ProviderID, cfg, key, endpoint)
-	if err != nil {
-		return failFetch("endpoint", err)
-	}
-	if row.Source == SourceGoogle {
-		bounded := *client
-		bounded.Timeout = requestTimout
-		authClient, err := i.billingAuthenticationClient(ctx, cfg)
-		if err != nil {
-			return failFetch("endpoint", err)
-		}
-		defer authClient.CloseIdleConnections()
-		return i.importGoogle(ctx, row, &bounded, connectors.NewBillingAuth(i.Egress, authClient), key)
-	}
-	if row.Source == SourceAzureCostManagement {
-		authClient, err := i.billingAuthenticationClient(ctx, cfg)
-		if err != nil {
-			return failFetch("endpoint", err)
-		}
-		defer authClient.CloseIdleConnections()
-		today := i.now().UTC().Truncate(24 * time.Hour)
-		var retention int
-		if err := i.Pool.QueryRow(ctx, `SELECT COALESCE((SELECT value::int FROM olp.settings WHERE key='retention.usage_days'),90)`).Scan(&retention); err != nil {
-			return err
-		}
-		earliest := today.AddDate(0, 0, -retention)
-		completed, err := i.completedCloudPeriods(ctx, row, earliest, today)
-		if err != nil {
-			return err
-		}
-		return fetchAzure(ctx, client, connectors.NewBillingAuth(i.Egress, authClient), endpoint, cloudScope, key, earliest, today, completed, row, func(period azurePeriod) error {
-			return i.storeDays(ctx, row, period.start, &period.revision, period.days)
-		})
-	}
-	var scope Scope
-	if err := json.Unmarshal(row.Scope, &scope); err != nil {
-		return failFetch("response", err)
-	}
-	today := time.Now().UTC().Truncate(24 * time.Hour)
-	start, end := window(row.ImportedThrough, today)
-	var days map[string]map[lineKey]lineSum
-	switch row.Source {
-	case SourceOpenAI:
-		days, err = fetchOpenAI(ctx, client, cfg.Endpoint, key, scope, start, end)
-	case SourceAnthropic:
-		days, err = fetchAnthropic(ctx, client, cfg.Endpoint, key, scope, start, end)
-	default:
-		err = failFetch("response", errors.New("unsupported billing source"))
-	}
-	if err != nil {
-		return err
-	}
-	return i.storeDays(ctx, row, "", nil, days)
+	return source.fetch(ctx, &fetchInput{importer: i, row: row, cfg: cfg, key: key}, func(period periodDays) error {
+		return i.storeDays(ctx, row, period.start, period.revision, period.days)
+	})
 }
 
-func (i *Importer) billingAuthenticationClient(ctx context.Context, cfg *providerConfig) (*http.Client, error) {
-	var secret []byte
+func (i *Importer) networkSecret(ctx context.Context, cfg *providerConfig) ([]byte, error) {
 	if options := cfg.Options.Network; options != nil && options.CredentialID != "" {
 		data, err := i.Keys.Read(ctx, i.Pool, i.Installation, options.CredentialID, secrets.ProviderCredential)
 		if err != nil {
 			return nil, errors.New("network credential could not be read")
 		}
-		secret = data
+		return data, nil
+	}
+	return nil, nil
+}
+
+func (i *Importer) billingAuthenticationClient(ctx context.Context, cfg *providerConfig) (*http.Client, error) {
+	secret, err := i.networkSecret(ctx, cfg)
+	if err != nil {
+		return nil, err
 	}
 	return i.Egress.PublicDestinationClient(cfg.Options.Network, secret, requestTimout)
 }
@@ -356,13 +304,9 @@ func (i *Importer) client(ctx context.Context, providerID string, cfg *providerC
 	if _, err := i.Egress.ValidateEndpoint(endpoint); err != nil {
 		return nil, err
 	}
-	var secret []byte
-	if options := cfg.Options.Network; options != nil && options.CredentialID != "" {
-		data, err := i.Keys.Read(ctx, i.Pool, i.Installation, options.CredentialID, secrets.ProviderCredential)
-		if err != nil {
-			return nil, errors.New("network credential could not be read")
-		}
-		secret = data
+	secret, err := i.networkSecret(ctx, cfg)
+	if err != nil {
+		return nil, err
 	}
 	digest := sha256.Sum256(credential)
 	scope := "billing/" + providerID + "/" + hex.EncodeToString(digest[:8])

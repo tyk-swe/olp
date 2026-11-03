@@ -55,15 +55,15 @@ server hooks or `lib/server/`. See the [architecture map](../docs/develop/archit
 The console is dark-only: black canvas, carbon surfaces and electric blue as the
 brand accent. Use semantic tokens from `src/app.css`, never raw colors;
 `.card-light` remaps tokens for the paper hero card. Blue means active/primary,
-green success, amber warning and red danger. Text must meet WCAG AA; browser
-suites enforce it with axe.
+green success, amber warning and red danger. Text must meet WCAG AA.
+No browser suite enforces that today, so check contrast when changing color.
 
 Use CSS motion on `transform` and `opacity`, with shared keyframes and
 `--ease-out`/`--dur-*` tokens. Disable hover/entrance effects under
-`prefers-reduced-motion`; both Playwright configurations use reduced motion.
+`prefers-reduced-motion`.
 Keep text readable on hover, preserve its wording and avoid gradients behind copy.
 
 ## Testing
 
-See the [testing guide](../tests/README.md) for Vitest configuration, focused
-runs, and Chromium service setup.
+See the [testing guide](../tests/README.md) for the console unit project
+and focused runs.

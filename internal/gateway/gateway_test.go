@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
@@ -21,6 +22,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/runtime"
 	"github.com/tyk-swe/olp/internal/usage"
@@ -127,14 +129,6 @@ func (c *capture) last(t *testing.T) Envelope {
 	t.Helper()
 	envs := c.await(t, 1)
 	return envs[len(envs)-1]
-}
-
-// nth returns the nth terminal event. A test that sends several requests
-// names the one it checks, since the newest event recorded can still be an
-// earlier request's.
-func (c *capture) nth(t *testing.T, n int) Envelope {
-	t.Helper()
-	return c.await(t, n)[n-1]
 }
 
 func (c *capture) await(t *testing.T, n int) []Envelope {
@@ -281,6 +275,115 @@ func newHarnessWrapped(t *testing.T, cfg Config, wrap func(http.Handler) http.Ha
 	server := httptest.NewServer(wrap(mux))
 	t.Cleanup(server.Close)
 	return &harness{t: t, rt: rt, mock: m, sink: sink, gateway: gw, server: server, keyID: keyID, slotA: slotA, credA: credA, upstream: upstream}
+}
+
+// admissionAuthority builds a key with the limits a case needs.
+func admissionAuthority(policy access.KeyPolicy) access.Authority {
+	return access.Authority{ID: uuid.Must(uuid.NewV7()).String(), LookupID: "lookupid0123", Policy: policy}
+}
+
+// reissue publishes a release in which the harness's first provider is
+// edited, with credential as its secret unless that is nil.
+func (h *harness) reissue(edit func(*routing.Provider), credential []byte) {
+	h.t.Helper()
+	secrets := map[string][]byte{}
+	for id, provider := range h.rt.release.Snapshot.Providers {
+		for _, slot := range provider.Slots {
+			secrets[*slot.CredentialID], _ = h.rt.release.Credential(*slot.CredentialID)
+		}
+		if provider.Slots[0].ID == h.slotA {
+			edit(&provider)
+			h.rt.release.Snapshot.Providers[id] = provider
+		}
+	}
+	if credential != nil {
+		secrets[h.credA] = credential
+	}
+	release, err := runtime.NewRelease(uuid.NewString(), 7, h.rt.release.Snapshot, secrets)
+	if err != nil {
+		h.t.Fatal(err)
+	}
+	h.rt.release = release
+}
+
+func strictHarness(t *testing.T, configure func(*routing.Snapshot)) *harness {
+	t.Helper()
+	return strictHarnessCfg(t, Config{}, configure)
+}
+
+func strictHarnessCfg(t *testing.T, cfg Config, configure func(*routing.Snapshot)) *harness {
+	t.Helper()
+	return strictRelease(t, newHarness(t, cfg), configure)
+}
+
+func strictRelease(t *testing.T, h *harness, configure func(*routing.Snapshot)) *harness {
+	t.Helper()
+	release := h.rt.release
+	snapshot := release.Snapshot
+	credentials := map[string][]byte{}
+	for id, provider := range snapshot.Providers {
+		provider.ProfileID, provider.ProfileRevision = "compatible-chat", connectors.ProfileRevision
+		snapshot.Providers[id] = provider
+		for _, slot := range provider.Slots {
+			credentials[*slot.CredentialID], _ = release.Credential(*slot.CredentialID)
+		}
+	}
+	route := snapshot.Routes[routeSlug]
+	route.Fidelity = routing.RouteFidelity{Mode: routing.FidelityStrict}
+	snapshot.Routes[routeSlug] = route
+	if configure != nil {
+		configure(snapshot)
+	}
+	var err error
+	h.rt.release, err = runtime.NewRelease(release.ID, release.Sequence, snapshot, credentials)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return h
+}
+
+func strictEmbeddings(snapshot *routing.Snapshot) {
+	for id, provider := range snapshot.Providers {
+		provider.Capabilities = []routing.Capability{{Model: provider.Capabilities[0].Model, Operation: "embeddings", Surface: "openai", Mode: "unary"}}
+		snapshot.Providers[id] = provider
+	}
+	route := snapshot.Routes[routeSlug]
+	route.Operations = []string{"embeddings"}
+	snapshot.Routes[routeSlug] = route
+}
+
+// republish installs a release whose snapshot edit has changed. The harness
+// route serves provider a first and b second; edit may reshape it and add
+// routes of its own.
+func (h *harness) republish(edit func(s *routing.Snapshot, a, b routing.Provider)) {
+	h.t.Helper()
+	old := h.rt.Release()
+	snapshot := &routing.Snapshot{
+		Generation: routing.Generation{ID: uuid.NewString(), Ordinal: old.Snapshot.Generation.Ordinal + 1, ActivatedAt: old.Snapshot.Generation.ActivatedAt},
+		Providers:  maps.Clone(old.Snapshot.Providers),
+		Routes:     maps.Clone(old.Snapshot.Routes),
+	}
+	var a, b routing.Provider
+	credentials := map[string][]byte{}
+	for _, provider := range snapshot.Providers {
+		switch provider.Name {
+		case "a":
+			a = provider
+		case "b":
+			b = provider
+		}
+		if secret, ok := old.Credential(*provider.ActiveCredential); ok {
+			credentials[*provider.ActiveCredential] = secret
+		}
+	}
+	edit(snapshot, a, b)
+	release, err := runtime.NewRelease(uuid.NewString(), old.Sequence+1, snapshot, credentials)
+	if err != nil {
+		h.t.Fatal(err)
+	}
+	h.rt.mu.Lock()
+	h.rt.release = release
+	h.rt.mu.Unlock()
 }
 
 func (h *harness) do(ctx context.Context, method, path, key string, body []byte, headers map[string]string) *http.Response {

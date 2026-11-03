@@ -195,7 +195,7 @@ type Manager struct {
 
 // NewManager prepares a manager that serves the empty snapshot until the
 // first release installs and rejects admissions until authority loads.
-func NewManager(pool *pgxpool.Pool, installation string, auth *secrets.AuthKey, keys *secrets.KeyRing, log *slog.Logger) *Manager {
+func NewManager(pool *pgxpool.Pool, installation string, auth *secrets.AuthKey, keys *secrets.KeyRing, log *slog.Logger, hostname string) *Manager {
 	tasks, cancel := context.WithCancel(context.Background())
 	return &Manager{workloadKeys: workload.NewCache(access.IdentityHTTPClient()),
 		pool:         pool,
@@ -208,7 +208,7 @@ func NewManager(pool *pgxpool.Pool, installation string, auth *secrets.AuthKey, 
 		taskCtx:      tasks,
 		cancelTask:   cancel,
 		stopped:      make(chan struct{}),
-		InstanceID:   usage.GatewayInstance(),
+		InstanceID:   usage.GatewayInstance(hostname),
 
 		refreshRequested: map[string]int64{},
 	}

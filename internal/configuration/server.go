@@ -44,7 +44,7 @@ func (s *Server) export(r *http.Request, p access.Principal) (access.Reply, erro
 			return access.Reply{}, err
 		}
 	}
-	digest, err := Digest(doc)
+	digest, err := CanonicalizeAndDigest(doc)
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -127,7 +127,7 @@ func (s *Server) applyEndpoint(r *http.Request, _ access.Principal) (access.Repl
 	// Normalize the same local metadata used by network preparation before
 	// computing its replay fingerprint. Completed writes do not depend on the
 	// current availability or catalog of an upstream service.
-	if err := validateWorkloadEntries(input.Document); err != nil {
+	if err := validateAndNormalizeWorkloadEntries(input.Document); err != nil {
 		return access.Reply{}, err
 	}
 	if err := s.validateAgentPublications(input.Document); err != nil {
@@ -136,7 +136,7 @@ func (s *Server) applyEndpoint(r *http.Request, _ access.Principal) (access.Repl
 	if err := s.validateMCPServers(input.Document); err != nil {
 		return access.Reply{}, err
 	}
-	if err := validateRetrievalBindings(input.Document); err != nil {
+	if err := validateAndNormalizeRetrievalBindings(input.Document); err != nil {
 		return access.Reply{}, err
 	}
 	input.Document.codeBindings = input.CodeBindings
@@ -145,7 +145,7 @@ func (s *Server) applyEndpoint(r *http.Request, _ access.Principal) (access.Repl
 	}
 	doc := input.Document
 	doc.canonicalize()
-	digest, err := Digest(doc)
+	digest, err := CanonicalizeAndDigest(doc)
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -250,7 +250,7 @@ func (s *Server) applyEndpoint(r *http.Request, _ access.Principal) (access.Repl
 		return access.Reply{}, err
 	}
 
-	if err = access.Audit(r.Context(), tx, r, p.Actor(), "configuration.apply", "configuration", digest, "success"); err != nil {
+	if err = access.Audit(r.Context(), tx, r, p.Actor(), "configuration.apply", "configuration", result.Digest, "success"); err != nil {
 		return access.Reply{}, err
 	}
 	reply := access.OK(result)

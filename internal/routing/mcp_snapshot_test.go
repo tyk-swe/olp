@@ -1,15 +1,79 @@
 package routing
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
 
+	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/agentcontract"
 	"github.com/tyk-swe/olp/internal/guardrails"
+	"github.com/tyk-swe/olp/internal/plugins"
+	"github.com/tyk-swe/olp/internal/usage"
 )
+
+func TestNativeMCPExecutableNamesAgreeWithDiscovery(t *testing.T) {
+	dir := t.TempDir()
+	tier := plugins.NewUnconfined(dir, plugins.DefaultLimits(), nil)
+	for _, tc := range []struct {
+		name  string
+		valid bool
+	}{
+		{"tool", true}, {"Tool-1._", true}, {strings.Repeat("a", 128), true},
+		{"", false}, {".hidden", false}, {"tool name", false}, {"dir/tool", false}, {strings.Repeat("a", 129), false},
+	} {
+		if tc.name != "" && !strings.Contains(tc.name, "/") {
+			if err := os.WriteFile(filepath.Join(dir, tc.name), []byte("fixture"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+		}
+		file, err := tier.Describe(tc.name)
+		binding := MCPStdioBinding{Executable: tc.name, Digest: strings.Repeat("a", 64)}
+		if (err == nil) != tc.valid || binding.Valid() != tc.valid {
+			t.Errorf("executable %q, discovery error %v, binding valid %t", tc.name, err, binding.Valid())
+		}
+		if tc.valid && !(&MCPStdioBinding{Executable: file.Name, Digest: file.Digest}).Valid() {
+			t.Errorf("discovered executable %q cannot be bound", tc.name)
+		}
+	}
+}
+
+func TestAmountSyntaxAcrossToolAgentRoutingCacheAndBudgets(t *testing.T) {
+	for _, tc := range []struct {
+		amount      string
+		valid       bool
+		budgetValid bool
+	}{
+		{"0", true, false}, {"1.25", true, true}, {"123456789012.123456789012", true, true},
+		{"1234567890123", false, false}, {"0.1234567890123", false, false},
+		{" 1 ", false, true}, {"1.", false, false}, {".1", false, false}, {"-1", false, false}, {"1e2", false, false},
+	} {
+		t.Run(tc.amount, func(t *testing.T) {
+			draft := agentcontract.Draft{ProjectID: mcpProject, Name: "agent", Agent: &agentcontract.Definition{
+				Protocol: "a2a-1.0.0", CardDigest: strings.Repeat("a", 64), PricingRevisionID: mcpRevision,
+				MaxCost: "999999999999.999999999999", MessagePrice: tc.amount,
+			}}
+			preference := Preferences{MaxCost: &tc.amount}
+			cache := usage.CacheEvidence{Result: "hit", AvoidedCost: tc.amount}
+			budgetAmount := tc.amount
+			budget := access.AdmissionLimits{DailyCostLimit: &budgetAmount}
+			agentErr, preferenceErr, cacheErr := draft.Validate("agent"), preference.Validate("preferences"), cache.Validate()
+			budgetErr := budget.ValidateAndNormalize()
+			if ValidToolPrice(tc.amount) != tc.valid || (agentErr == nil) != tc.valid || (preferenceErr == nil) != tc.valid || (cacheErr == nil) != tc.valid {
+				t.Errorf("valid %t, agent %v, routing %v, cache %v", tc.valid, agentErr, preferenceErr, cacheErr)
+			}
+			if (budgetErr == nil) != tc.budgetValid || tc.budgetValid && budgetAmount != strings.TrimSpace(tc.amount) {
+				t.Errorf("budget valid %t, amount %q, error %v", tc.budgetValid, budgetAmount, budgetErr)
+			}
+		})
+	}
+}
 
 const (
 	mcpProject  = "0192cf87-d4ab-7f2e-a8b1-c2d3e4f50611"
@@ -21,6 +85,20 @@ const (
 )
 
 var mcpSchema = json.RawMessage(`{"type":"object","properties":{"query":{"type":"string"}},"required":["query"],"additionalProperties":false}`)
+
+func TestMCPServerAndToolPinAgreeOnCatalogDigest(t *testing.T) {
+	checksum := sha256.Sum256([]byte("catalog"))
+	validDigest := hex.EncodeToString(checksum[:])
+	for _, digest := range []string{validDigest, strings.ToUpper(validDigest), "", strings.Repeat("a", 63), strings.Repeat("a", 65), strings.Repeat("g", 64)} {
+		snapshot := mcpSnapshot(t, digest)
+		draftErr := snapshot.AgentPublications[0].Definition.Validate("toolset")
+		serverSnapshot := Snapshot{Generation: snapshot.Generation, MCPServers: snapshot.MCPServers}
+		snapshotErr := serverSnapshot.Compile()
+		if (draftErr == nil) != (snapshotErr == nil) || digest == validDigest && draftErr != nil {
+			t.Errorf("digest %q, tool pin error %v, server error %v", digest, draftErr, snapshotErr)
+		}
+	}
+}
 
 func mcpSnapshot(t *testing.T, digest string) Snapshot {
 	t.Helper()

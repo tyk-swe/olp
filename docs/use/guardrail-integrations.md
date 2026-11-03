@@ -228,8 +228,8 @@ Evidence keys:
 - **B**: [`engine_test.go`](../../internal/guardrails/engine_test.go) and
   [`registry_test.go`](../../internal/guardrails/registry_test.go), bounded built-in
   detector and engine fixtures. These are semantic analogues, not vendor adapters.
-- **M**: [`guardrails_evaluator_regression_test.go`](../../internal/gateway/guardrails_evaluator_regression_test.go)
-  and [`guardrail_platform_test.go`](../../tests/integration/guardrail_platform_test.go),
+- **M**: `guardrails_evaluator_regression_test.go`
+  and `guardrail_platform_test.go`,
   operator-configured model evaluator routing/accounting; no dedicated vendor proof.
 - **W**: [`external.go`](../../internal/guardrails/external.go), inspected shared
   webhook implementation; [`guardrails_test.go`](../../internal/gateway/guardrails_test.go)
@@ -358,5 +358,5 @@ record candidate-specific inventory review and attach artifacts. Implementation
 coverage is complete within these explicit boundaries; live qualification
 remains pending. The adapter tables above list endpoints, credentials,
 parameters and phase/action restrictions.
-[Qualification](../develop/qualification.md#guardrail-and-capture-qualification) tracks
-commands and outstanding acceptance.
+[Qualification](../develop/qualification.md#guardrail-and-capture-qualification) records
+current status.

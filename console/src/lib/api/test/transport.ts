@@ -1,8 +1,10 @@
 import { expect, vi } from 'vitest';
+import type { ManagementOperation } from '$lib/api/requirements';
 import { authLifecycle } from '$lib/features/access/session/lifecycle';
 
 export function serve(
-  handler: (request: Request) => Response | Promise<Response>
+  handler: (request: Request) => Response | Promise<Response>,
+  operations: readonly ManagementOperation[] = []
 ) {
   authLifecycle.establishSession({
     user: {
@@ -11,7 +13,7 @@ export function serve(
       display_name: 'Owner',
       role: 'owner',
       access_scope: 'global',
-      operations: []
+      operations
     },
     csrf_token: 'fixture-csrf'
   });

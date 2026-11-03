@@ -18,54 +18,6 @@ const (
 	GatewayObserved     = "gateway_observed"
 )
 
-// Span attribute allowlists. Every recorded attribute is metadata: no prompts,
-// no file names, no provider payloads, and no header values ever appear on a
-// span.
-var RequestAttributeKeys = []string{
-	EvidenceOriginKey,
-	"olp.request_id",
-	"olp.surface",
-	"olp.operation",
-	"olp.route_slug",
-	"olp.key_id",
-	"olp.installation_id",
-	"olp.generation",
-	"olp.status",
-	"olp.error_class",
-	"olp.attempt_count",
-	"olp.time_to_first_byte_ms",
-	"olp.total_duration_ms",
-	"olp.cancelled",
-	"gen_ai.operation.name",
-	"gen_ai.provider.name",
-	"gen_ai.request.model",
-	"gen_ai.response.model",
-	"gen_ai.response.finish_reasons",
-	"gen_ai.usage.input_tokens",
-	"gen_ai.usage.output_tokens",
-}
-
-var AttemptAttributeKeys = []string{
-	EvidenceOriginKey,
-	"olp.provider_kind",
-	"olp.provider_revision",
-	"olp.model",
-	"olp.outcome_class",
-	"olp.upstream_status_class",
-	"olp.usage.input_tokens",
-	"olp.usage.output_tokens",
-	"olp.usage.cached_input_tokens",
-	"olp.usage.media_units",
-	"olp.pricing_provenance",
-	"gen_ai.operation.name",
-	"gen_ai.provider.name",
-	"gen_ai.request.model",
-	"gen_ai.response.model",
-	"gen_ai.response.finish_reasons",
-	"gen_ai.usage.input_tokens",
-	"gen_ai.usage.output_tokens",
-}
-
 // ErrorClassClientCancelled is the error class a span records when the client
 // went away before the response finished.
 const ErrorClassClientCancelled = "client_cancelled"

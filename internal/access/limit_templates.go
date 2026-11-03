@@ -6,18 +6,20 @@ import (
 	"maps"
 	"math/big"
 	"net/http"
+
+	"github.com/tyk-swe/olp/internal/routeidentity"
 )
 
 // LimitTemplates supplies independent ceilings at each referencing boundary.
 // Templates share policy, not counters. Inline settings may only tighten them.
 type LimitTemplates map[string]AdmissionLimits
 
-func (t LimitTemplates) Validate() error {
+func (t LimitTemplates) ValidateAndNormalize() error {
 	if len(t) > 64 {
 		return Invalid("templates", "Use at most 64 project limit templates.")
 	}
 	for name, limits := range t {
-		if !RouteSlug.MatchString(name) {
+		if !routeidentity.ValidSlug(name) {
 			return Invalid("templates", "Use valid route-style names for templates.")
 		}
 		normalized, err := validatedTemplateLimits(limits)
@@ -38,7 +40,7 @@ func (t LimitTemplates) JSON() []byte {
 }
 
 func validTemplateName(name *string) error {
-	if name != nil && !RouteSlug.MatchString(*name) {
+	if name != nil && !routeidentity.ValidSlug(*name) {
 		return Invalid("limit_template", "Use a valid template name or null.")
 	}
 	return nil
@@ -77,7 +79,7 @@ func validatedTemplateLimits(l AdmissionLimits) (AdmissionLimits, error) {
 		value := *l.WeeklyCostLimit
 		l.WeeklyCostLimit = &value
 	}
-	return l, l.Validate()
+	return l, l.ValidateAndNormalize()
 }
 
 func intersectLimits(a, b AdmissionLimits) AdmissionLimits {
@@ -252,7 +254,7 @@ func (s *Server) putProjectLimitTemplates(r *http.Request, _ Principal) (Reply, 
 	if input.Templates == nil {
 		return Reply{}, Invalid("templates", "Provide the template map, including an empty object to clear unused templates.")
 	}
-	if err = input.Templates.Validate(); err != nil {
+	if err = input.Templates.ValidateAndNormalize(); err != nil {
 		return Reply{}, err
 	}
 	tx, err := s.Begin(r)

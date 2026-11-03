@@ -34,7 +34,7 @@ func validateOrganizations(ctx context.Context, q access.Queryer, doc *Document)
 			return access.Invalid("organizations", "Organization names must be unique.")
 		}
 		names[k] = true
-		if err := o.Budget.Validate(); err != nil {
+		if err := o.Budget.ValidateAndNormalize(); err != nil {
 			return err
 		}
 		o.Budget = normalizedBudget(o.Budget)

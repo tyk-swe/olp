@@ -35,6 +35,36 @@ func TestWorkflowBoundsValidateAllLimits(t *testing.T) {
 	}
 }
 
+func TestWorkflowAndBudgetCostLimitsAgreeOnAmountSyntax(t *testing.T) {
+	for _, test := range []struct {
+		value    string
+		workflow bool
+		budget   bool
+	}{
+		{value: "0", workflow: true},
+		{value: "000.000", workflow: true},
+		{value: "0.000000000001", workflow: true, budget: true},
+		{value: "123456789012.123456789012", workflow: true, budget: true},
+		{value: "1234567890123"},
+		{value: "0.0000000000001"},
+		{value: ""},
+		{value: "1."},
+		{value: ".1"},
+		{value: "-1"},
+		{value: " 1"},
+		{value: "1e1"},
+	} {
+		t.Run(test.value, func(t *testing.T) {
+			if got := (WorkflowBounds{MaxRunCost: workflowCost(test.value)}).Valid(); got != test.workflow {
+				t.Errorf("workflow cost %q accepted = %v, want %v", test.value, got, test.workflow)
+			}
+			if got := ValidCostLimit(test.value); got != test.budget {
+				t.Errorf("budget cost %q accepted = %v, want %v", test.value, got, test.budget)
+			}
+		})
+	}
+}
+
 func TestWorkflowLimitsSelectTheMostRestrictiveConfiguredValue(t *testing.T) {
 	if got := MinWorkflowInteger(8, nil, nil); got != 8 {
 		t.Fatalf("unspecified iterations = %d, want default 8", got)

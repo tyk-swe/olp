@@ -11,8 +11,6 @@ import (
 	"github.com/tyk-swe/olp/internal/oif"
 )
 
-const endUserHeader = "X-OLP-End-User"
-
 type endUserIdentityKey struct{}
 
 // A second authorization check on the same request must not reread a body

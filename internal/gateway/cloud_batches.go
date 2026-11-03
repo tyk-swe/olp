@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/tyk-swe/olp/internal/batches"
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/protocols/wire"
@@ -79,25 +80,6 @@ func validateCloudBatchRequest(raw []byte, dialect string, storage *connectors.B
 	return input, nil
 }
 
-func cloudBatchStatus(dialect, state string) (string, bool) {
-	vertex := map[string]string{
-		"JOB_STATE_QUEUED": "queued", "JOB_STATE_PENDING": "queued", "JOB_STATE_RUNNING": "running",
-		"JOB_STATE_SUCCEEDED": "succeeded", "JOB_STATE_PARTIALLY_SUCCEEDED": "partially_succeeded",
-		"JOB_STATE_FAILED": "failed", "JOB_STATE_CANCELLING": "cancelling", "JOB_STATE_CANCELLED": "cancelled",
-		"JOB_STATE_EXPIRED": "expired", "JOB_STATE_PAUSED": "running", "JOB_STATE_UPDATING": "running",
-	}
-	bedrock := map[string]string{
-		"Submitted": "queued", "Validating": "queued", "Scheduled": "queued", "InProgress": "running",
-		"Completed": "succeeded", "PartiallyCompleted": "partially_succeeded", "Failed": "failed",
-		"Stopping": "cancelling", "Stopped": "cancelled", "Expired": "expired",
-	}
-	status := vertex[state]
-	if dialect == "bedrock-batch-inference" {
-		status = bedrock[state]
-	}
-	return status, status != ""
-}
-
 func projectCloudBatchJob(body []byte, localID, dialect, model, inputURI, outputPrefix string) ([]byte, error) {
 	if _, err := cloudBatchJobIdentity(body, dialect); err != nil {
 		return nil, err
@@ -112,7 +94,7 @@ func projectCloudBatchJob(body []byte, localID, dialect, model, inputURI, output
 			break
 		}
 	}
-	status, ok := cloudBatchStatus(dialect, state)
+	status, ok := batches.CloudBatchStatus(dialect, state)
 	if !ok {
 		return nil, errors.New("unknown cloud batch status")
 	}
@@ -123,7 +105,7 @@ func projectCloudBatchJob(body []byte, localID, dialect, model, inputURI, output
 	createdAt, _ := cloudBatchTime(created)
 	var completed *int64
 	for _, key := range []string{"endTime", "lastModifiedTime"} {
-		if value, ok := cloudBatchTime(job[key]); ok && isCloudBatchTerminal(status) {
+		if value, ok := cloudBatchTime(job[key]); ok && batches.CloudBatchTerminal(status) {
 			completed = &value
 			break
 		}
@@ -172,10 +154,6 @@ func cloudBatchTime(raw json.RawMessage) (int64, bool) {
 		return 0, false
 	}
 	return int64(seconds), true
-}
-
-func isCloudBatchTerminal(status string) bool {
-	return status == "succeeded" || status == "partially_succeeded" || status == "failed" || status == "cancelled" || status == "expired"
 }
 
 func cloudBatchCounts(job map[string]json.RawMessage, dialect string) map[string]int64 {

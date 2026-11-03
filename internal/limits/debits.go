@@ -5,12 +5,13 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"regexp"
 	"slices"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/tyk-swe/olp/internal/pricingpolicy"
+	"github.com/tyk-swe/olp/internal/toolidentity"
 )
 
 var (
@@ -91,7 +92,7 @@ func (i DebitIntent) validate() error {
 			return ErrDebitConflict
 		}
 	}
-	if !slices.Contains([]string{"api", "model", "tool", "agent"}, i.Kind) || !regexp.MustCompile(`^[A-Z]{3}$`).MatchString(i.Currency) || !validDebitAmount(i.CostBound) || !validDebitAmount(i.ChargeBound) || i.PreparedUntil.IsZero() {
+	if !slices.Contains([]string{"api", "model", "tool", "agent"}, i.Kind) || !pricingpolicy.ValidCurrency(i.Currency) || !validDebitAmount(i.CostBound) || !validDebitAmount(i.ChargeBound) || i.PreparedUntil.IsZero() {
 		return ErrDebitConflict
 	}
 	for _, digest := range []string{i.Affinity.InputDigest, i.Affinity.TranscriptDigest} {
@@ -102,7 +103,7 @@ func (i DebitIntent) validate() error {
 			}
 		}
 	}
-	if i.Affinity.ToolAlias != "" && !regexp.MustCompile(`^t_[a-f0-9]{32}_[a-f0-9]{32}$`).MatchString(i.Affinity.ToolAlias) {
+	if i.Affinity.ToolAlias != "" && !toolidentity.ValidAlias(i.Affinity.ToolAlias) {
 		return ErrDebitConflict
 	}
 	return nil

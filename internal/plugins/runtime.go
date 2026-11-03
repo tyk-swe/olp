@@ -47,8 +47,9 @@ type Limits struct {
 	Instances int
 }
 
-// DefaultLimits are the limits OLP runs plugins within.
-var DefaultLimits = Limits{Memory: 64 << 20, Time: 10 * time.Second, Stack: 8 << 20, Instances: 4}
+func DefaultLimits() Limits {
+	return Limits{Memory: 64 << 20, Time: 10 * time.Second, Stack: 8 << 20, Instances: 4}
+}
 
 // maxMessage bounds every message a plugin returns or sends OLP. OLP's own
 // requests carry what they must, such as the body a sign request signs.

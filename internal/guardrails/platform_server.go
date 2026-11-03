@@ -455,9 +455,7 @@ func (s *Server) writeAttachment(r *http.Request, remove bool) (access.Reply, er
 		if in.ID != "" || in.Order < 0 {
 			return access.Reply{}, access.Invalid("attachment", "The server assigns identities; position must be nonnegative.")
 		}
-		switch in.Scope {
-		case "installation", "organization", "project", "route", "toolset", "api-key":
-		default:
+		if !ValidAttachmentScope(in.Scope) {
 			return access.Reply{}, access.Invalid("scope", "Choose installation, organization, project, route, toolset or api-key.")
 		}
 	}

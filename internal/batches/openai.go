@@ -88,8 +88,8 @@ func (r *OpenAIReader) Poll(ctx context.Context, settlement Settlement, target *
 	if snapshot.ID != *settlement.UpstreamID {
 		return BatchSnapshot{}, ErrProviderConflict
 	}
-	if snapshot.Endpoint != "" && (lineOperation(snapshot.Endpoint) == "" ||
-		lineOperation(snapshot.Endpoint) != settlement.LineOperation) {
+	if operation := wire.BatchLineOperation(snapshot.Endpoint); snapshot.Endpoint != "" &&
+		(operation == "" || operation != settlement.LineOperation) {
 		return BatchSnapshot{}, ErrProviderConflict
 	}
 	inputFileID, _, endpoint, err := submissionFiles(settlement.Cursor)
@@ -432,14 +432,14 @@ func parseBatchSnapshot(body []byte) (BatchSnapshot, error) {
 		} `json:"request_counts"`
 	}
 	if err := json.Unmarshal(body, &object); err != nil || object.ID == "" || len(object.ID) > 512 || object.Status == "" ||
-		!validBatchStatus(object.Status) || len(object.InputFileID) > 512 ||
+		wire.BatchStageOf(object.Status) == wire.BatchUnknown || len(object.InputFileID) > 512 ||
 		len(object.OutputFileID) > 512 || len(object.ErrorFileID) > 512 {
 		return BatchSnapshot{}, errors.New("provider batch object is malformed")
 	}
 	snapshot := BatchSnapshot{
 		ID: object.ID, Status: object.Status, Endpoint: object.Endpoint, InputFileID: object.InputFileID,
 		OutputFileID: object.OutputFileID, ErrorFileID: object.ErrorFileID, Body: append([]byte(nil), body...),
-		Terminal: terminalStatus(object.Status),
+		Terminal: wire.BatchStageOf(object.Status) == wire.BatchTerminal,
 	}
 	if object.RequestCounts != nil && object.RequestCounts.Total != nil {
 		if *object.RequestCounts.Total < 0 {
@@ -465,22 +465,6 @@ func parseBatchSnapshot(body []byte) (BatchSnapshot, error) {
 		}
 	}
 	return snapshot, nil
-}
-
-func validBatchStatus(status string) bool {
-	switch status {
-	case "validating", "failed", "in_progress", "finalizing", "completed", "expired", "cancelling", "cancelled":
-		return true
-	}
-	return false
-}
-
-func terminalStatus(status string) bool {
-	switch status {
-	case "completed", "failed", "expired", "cancelled":
-		return true
-	}
-	return false
 }
 
 func ParseLine(line []byte, endpoint string, errorFile bool) (Result, error) {
@@ -537,7 +521,7 @@ func ParseLine(line []byte, endpoint string, errorFile bool) (Result, error) {
 					return Result{}, usageErr
 				}
 			} else if observed != nil {
-				result.Usage = usage.ObservedAttemptUsage(observed, complete, lineOperation(endpoint))
+				result.Usage = usage.ObservedAttemptUsage(observed, complete, wire.BatchLineOperation(endpoint))
 			}
 			if status >= 200 && status < 300 && errorCode == "" && !errorFile {
 				result.Kind = ResultSucceeded
@@ -588,16 +572,6 @@ func decodeLineUsage(body json.RawMessage, endpoint string) (*wire.Usage, bool, 
 		return nil, false, errors.New("provider batch response usage is malformed")
 	}
 	return completion.Usage, completion.UsageComplete || completion.Usage != nil, nil
-}
-
-func lineOperation(endpoint string) string {
-	switch wire.CanonicalBatchEndpoint(endpoint) {
-	case "/v1/embeddings":
-		return "embeddings"
-	case "/v1/chat/completions", "/v1/responses", "/v1/completions":
-		return "generation"
-	}
-	return ""
 }
 
 func canonicalJSON(raw []byte) ([]byte, error) {

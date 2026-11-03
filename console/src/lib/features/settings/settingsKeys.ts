@@ -1,4 +1,6 @@
+const root = ['settings'] as const;
+
 export const settingsKeys = {
-  all: () => ['settings'] as const,
-  branding: ['settings', 'branding'] as const
+  all: () => root,
+  branding: [...root, 'branding'] as const
 };

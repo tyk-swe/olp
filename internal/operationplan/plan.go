@@ -301,7 +301,7 @@ func validateQuery(values url.Values) error {
 		return fail("target_capability", "/transport", "bounded_query", "The lowered query parameters exceed their declared bounds.")
 	}
 	for name, list := range values {
-		if !operations.Label.MatchString(name) || len(list) == 0 || len(list) > 8 {
+		if !operations.ValidLabel(name) || len(list) == 0 || len(list) > 8 {
 			return fail("target_capability", "/transport", "bounded_query", "The lowered query parameters exceed their declared bounds.")
 		}
 		for _, value := range list {

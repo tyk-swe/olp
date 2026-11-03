@@ -21,8 +21,8 @@ func oidcURL(raw string) error {
 	if err != nil || u.Host == "" || u.User != nil || u.Fragment != "" || len(raw) > 2048 {
 		return errors.New("invalid OIDC URL")
 	}
-	if u.Scheme != "https" && !(oidcTestBuild && u.Scheme == "http" && (u.Hostname() == "localhost" || net.ParseIP(u.Hostname()).IsLoopback())) {
-		return errors.New("OIDC endpoints must use HTTPS; insecure loopback requires an oidctest build")
+	if u.Scheme != "https" {
+		return errors.New("OIDC endpoints must use HTTPS")
 	}
 	return nil
 }
@@ -30,8 +30,8 @@ func oidcURL(raw string) error {
 // identityEgress decides which addresses identity-provider calls may reach. It
 // is the provider egress denylist with no operator exceptions and is never
 // built from the provider policy, so provider egress settings cannot widen
-// it. Only an oidctest build admits loopback issuers.
-var identityEgress = egress.Policy{AllowedNetworks: oidcTestNetworks}
+// it. Loopback issuers are never admitted.
+var identityEgress = egress.Policy{}
 
 // oidcAddresses resolves host to the addresses identity egress may dial; one
 // disallowed answer rejects the host.
@@ -140,7 +140,3 @@ func safeReturn(value string) bool {
 	destination := base.ResolveReference(path)
 	return destination.Scheme == base.Scheme && destination.Host == base.Host && destination.User == nil
 }
-
-// OIDCTestBuild is false in ordinary and release binaries. Provider egress
-// flags never affect this separately constructed identity HTTP client.
-func OIDCTestBuild() bool { return oidcTestBuild }

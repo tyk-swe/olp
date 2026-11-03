@@ -7,6 +7,7 @@ import (
 
 	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
+	"github.com/tyk-swe/olp/internal/routeidentity"
 )
 
 // legacyParse is Parse as it read the conversation of an Anthropic or Gemini
@@ -91,7 +92,7 @@ func legacyParse(family wire.Format, data []byte, model string) (*wire.Request, 
 			}
 		}
 	}
-	if !openai.RouteSlug.MatchString(model) {
+	if !routeidentity.ValidSlug(model) {
 		return nil, requestError("model", "model must name a published route slug")
 	}
 	if family.Operation() != "generation" && stream {

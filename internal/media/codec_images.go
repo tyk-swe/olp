@@ -15,14 +15,13 @@ import (
 //
 // https://platform.stability.ai/docs/api-reference
 // https://www.recraft.ai/docs/api-reference/endpoints
-func init() {
-	registerCodec("stability", codec{
-		OpImageGeneration: modelOnly(encodeStabilityImage),
-		OpImageEdit:       modelOnly(encodeStabilityEdit),
-	})
-	registerCodec("recraft", codec{
-		OpImageGeneration: modelOnly(encodeRecraftImage),
-	})
+var stabilityCodec = codec{
+	OpImageGeneration: modelOnly(encodeStabilityImage),
+	OpImageEdit:       modelOnly(encodeStabilityEdit),
+}
+
+var recraftCodec = codec{
+	OpImageGeneration: modelOnly(encodeRecraftImage),
 }
 
 // refuseImageControls refuses the OpenAI image controls a vendor has no
@@ -178,10 +177,8 @@ func encodeRecraftImage(r *Request, model string) (*UpstreamCall, *Error) {
 // minutes and takes no credential.
 //
 // https://docs.bfl.ai/api_integration/integration_guidelines
-func init() {
-	registerCodec("bfl", codec{
-		OpImageGeneration: modelOnly(encodeBFLImage),
-	})
+var bflCodec = codec{
+	OpImageGeneration: modelOnly(encodeBFLImage),
 }
 
 // bflPoll is how long the work waits between polls.

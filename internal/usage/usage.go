@@ -98,6 +98,41 @@ const (
 	TaskFocusExport Task = "focus_export"
 )
 
+type WorkerTask struct {
+	Name       Task
+	StaleAfter int64
+	Regional   bool
+}
+
+func WorkerTasks() []WorkerTask {
+	return []WorkerTask{
+		{Name: TaskRequestMetadataConsumer, StaleAfter: 20, Regional: true},
+		{Name: TaskEpochDetection, StaleAfter: 20},
+		{Name: TaskMediaReconciliation, StaleAfter: 20},
+		{Name: TaskBatchSettlement, StaleAfter: 180},
+		{Name: TaskRetainedSettlement, StaleAfter: 180},
+		{Name: TaskMaintenance, StaleAfter: 180},
+		{Name: TaskCostReconciliation, StaleAfter: 180, Regional: true},
+		{Name: TaskExecutionDebits, StaleAfter: 180},
+		{Name: TaskNotificationDelivery, StaleAfter: 180},
+		{Name: TaskManagedExportDelivery, StaleAfter: 180},
+		{Name: TaskGrantRefresh, StaleAfter: 20},
+		{Name: TaskHealthProbes, StaleAfter: 180, Regional: true},
+		{Name: TaskExportDelivery, StaleAfter: 30},
+		{Name: TaskBillingImport, StaleAfter: 180},
+		{Name: TaskFocusExport, StaleAfter: 180},
+	}
+}
+
+func WorkerStaleAfter(task Task) int64 {
+	for _, worker := range WorkerTasks() {
+		if worker.Name == task {
+			return worker.StaleAfter
+		}
+	}
+	return 0
+}
+
 // Outcome is what one worker pass achieved.
 type Outcome int
 
@@ -223,9 +258,9 @@ func ReportConsumerActivity(ctx context.Context, pool *pgxpool.Pool, a Activity)
 // the host and pid so an operator can find the owner of a pending delivery, and
 // a per-process epoch so a restarted process never reclaims its own name (its
 // abandoned entries stay pending for another consumer to claim).
-func ConsumerName() string {
+func ConsumerName(hostname string) string {
 	epoch := uuid.Must(uuid.NewV7())
-	return consumerName(os.Getenv("HOSTNAME"), os.Getpid(), epoch)
+	return consumerName(hostname, os.Getpid(), epoch)
 }
 
 func consumerName(host string, pid int, epoch uuid.UUID) string {
@@ -260,8 +295,8 @@ func sanitizeConsumerHost(host string) string {
 
 // GatewayInstance distinguishes live processes even when they share a host
 // or have no HOSTNAME. Restarts leave their old epochs for stale detection.
-func GatewayInstance() string {
-	return consumerName(gatewayInstanceLabel(os.Getenv("HOSTNAME")), os.Getpid(), uuid.Must(uuid.NewV7()))
+func GatewayInstance(hostname string) string {
+	return consumerName(gatewayInstanceLabel(hostname), os.Getpid(), uuid.Must(uuid.NewV7()))
 }
 
 func gatewayInstanceLabel(host string) string {

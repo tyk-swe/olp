@@ -163,8 +163,7 @@ var kinds = withPresets([]kindCapability{
 // contract, authenticated as its connector kind allows.
 var vendorCatalogue = publishedVendors()
 
-// CapabilityOptions is the capability tuple vocabulary, in catalogue order.
-var CapabilityOptions = capabilityOptions()
+var capabilityVocabulary = capabilityOptions()
 
 func withPresets(catalogue []kindCapability) []kindCapability {
 	for i := range catalogue {
@@ -262,16 +261,6 @@ func kindByName(name string) *kindCapability {
 	return &kinds[i]
 }
 
-func capabilitiesFor(kind, vendor string) []CapabilityInput {
-	out := []CapabilityInput{}
-	for _, c := range CapabilityOptions {
-		if certifiable(kind, vendor, c) {
-			out = append(out, c)
-		}
-	}
-	return out
-}
-
 // Kind options include tuples available through an explicit profile, even
 // when the kind's Automatic connector cannot serve them.
 func capabilityOptionsForKind(kind string) []CapabilityInput {
@@ -287,7 +276,7 @@ func capabilityOptionsForKind(kind string) []CapabilityInput {
 		}
 	}
 	out := []CapabilityInput{}
-	for _, tuple := range CapabilityOptions {
+	for _, tuple := range capabilityVocabulary {
 		profiled := slices.ContainsFunc(profiles, func(cfg Configuration) bool {
 			return configurationCertifiable(&cfg, tuple) && cfg.transport().Supports(tuple.Operation, tuple.Surface, tuple.Mode)
 		})

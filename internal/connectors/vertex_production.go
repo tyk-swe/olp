@@ -1,5 +1,3 @@
-//go:build !oidctest
-
 package connectors
 
 import "net/url"

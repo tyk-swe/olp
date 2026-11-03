@@ -321,6 +321,7 @@ func (e PriceEntry) usagePrice() usage.Price {
 
 func canonicalProvider(p *ProviderEntry) {
 	p.Configuration.Normalize()
+	p.Models = slices.Clone(p.Models)
 	if p.Models == nil {
 		p.Models = []ModelEntry{}
 	}
@@ -331,19 +332,21 @@ func canonicalProvider(p *ProviderEntry) {
 		if p.Models[j].DisplayName == "" {
 			p.Models[j].DisplayName = p.Models[j].UpstreamModel
 		}
+		p.Models[j].Capabilities = slices.Clone(p.Models[j].Capabilities)
 		if p.Models[j].Capabilities == nil {
 			p.Models[j].Capabilities = []CapabilityEntry{}
 		}
 		sortCapabilities(p.Models[j].Capabilities)
 	}
+	p.Slots = slices.Clone(p.Slots)
 	if p.Slots == nil {
 		p.Slots = []SlotEntry{}
 	}
 	for j := range p.Slots {
 		s := &p.Slots[j]
-		s.Restrictions.AllowedAPIKeys = orEmpty(s.Restrictions.AllowedAPIKeys)
-		s.Restrictions.AllowedModels = orEmpty(s.Restrictions.AllowedModels)
-		s.Restrictions.AllowedRoutes = orEmpty(s.Restrictions.AllowedRoutes)
+		s.Restrictions.AllowedAPIKeys = orEmpty(slices.Clone(s.Restrictions.AllowedAPIKeys))
+		s.Restrictions.AllowedModels = orEmpty(slices.Clone(s.Restrictions.AllowedModels))
+		s.Restrictions.AllowedRoutes = orEmpty(slices.Clone(s.Restrictions.AllowedRoutes))
 		for _, list := range [][]string{s.Restrictions.AllowedAPIKeys, s.Restrictions.AllowedModels, s.Restrictions.AllowedRoutes} {
 			slices.Sort(list)
 		}
@@ -361,14 +364,17 @@ func canonicalRoute(r *RouteEntry) {
 	if fidelity, err := routing.DecodeFidelity(r.Fidelity); err == nil {
 		r.Fidelity, _ = json.Marshal(fidelity)
 	}
+	r.Operations = slices.Clone(r.Operations)
 	if r.Operations == nil {
 		r.Operations = []string{}
 	}
 	slices.Sort(r.Operations)
+	r.Targets = slices.Clone(r.Targets)
 	if r.Targets == nil {
 		r.Targets = []TargetEntry{}
 	}
 	for i := range r.Targets {
+		r.Targets[i].Tags = slices.Clone(r.Targets[i].Tags)
 		if len(r.Targets[i].Tags) == 0 {
 			r.Targets[i].Tags = nil
 		}
@@ -545,7 +551,7 @@ func sortPriceEntries(prices []PriceEntry) {
 	})
 }
 
-func Digest(d *Document) (string, error) {
+func CanonicalizeAndDigest(d *Document) (string, error) {
 	d.canonicalize()
 	data, err := json.Marshal(d)
 	if err != nil {

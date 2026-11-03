@@ -15,9 +15,12 @@ const (
 )
 
 var (
-	KeyPattern   = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_.-]{0,31}$`)
-	ValuePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$`)
+	keyPattern   = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_.-]{0,31}$`)
+	valuePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$`)
 )
+
+func ValidKey(key string) bool     { return keyPattern.MatchString(key) }
+func ValidValue(value string) bool { return valuePattern.MatchString(value) }
 
 type Error struct{ Reason string }
 
@@ -28,10 +31,10 @@ func Validate(attribution map[string]string) error {
 		return &Error{Reason: "too_many_keys"}
 	}
 	for key, value := range attribution {
-		if key == DelegationPairKey || !KeyPattern.MatchString(key) {
+		if key == DelegationPairKey || !ValidKey(key) {
 			return &Error{Reason: "invalid_key"}
 		}
-		if !ValuePattern.MatchString(value) {
+		if !ValidValue(value) {
 			return &Error{Reason: "invalid_value"}
 		}
 	}

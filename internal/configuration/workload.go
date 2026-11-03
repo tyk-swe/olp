@@ -106,7 +106,7 @@ func exportWorkloadIssuers(ctx context.Context, q access.Queryer) ([]WorkloadIss
 	}
 	return result, nil
 }
-func validateWorkloadEntries(doc *Document) error {
+func validateAndNormalizeWorkloadEntries(doc *Document) error {
 	if len(doc.WorkloadIssuers) > 64 {
 		return access.Invalid("workload_issuers", "Use at most 64 issuers.")
 	}
@@ -201,7 +201,7 @@ func (s *Server) prepareWorkloadIssuers(ctx context.Context, p access.Principal,
 	if err := p.Authorize(access.Access); err != nil {
 		return err
 	}
-	if err := validateWorkloadEntries(doc); err != nil {
+	if err := validateAndNormalizeWorkloadEntries(doc); err != nil {
 		return err
 	}
 	doc.preparedWorkloads = map[string]string{}

@@ -139,7 +139,7 @@ func (s *Server) Register(mux *http.ServeMux) {
 	// Each advertised capability, or each declared model of a provider without
 	// discovery, can consume a full probe budget; reserve another management
 	// budget for preparation, queueing, and persistence.
-	certifyTimeout := time.Duration(len(CapabilityOptions)+1) * probeTimeout
+	certifyTimeout := time.Duration(len(capabilityVocabulary)+1) * probeTimeout
 	s.Access.Route(mux, "POST /api/v1/providers/{provider_id}/probe", s.probe, access.Deadline(certifyTimeout))
 	s.Access.Route(mux, "POST /api/v1/providers/{provider_id}/discovery", s.discover, access.MaxBody(1<<20), access.Deadline(certifyTimeout))
 	s.Access.Route(mux, "GET /api/v1/providers/{provider_id}/catalog-suggestions", s.catalogSuggestions)

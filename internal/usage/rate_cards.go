@@ -229,7 +229,7 @@ func LoadCardPricesByRevisions(ctx context.Context, q access.Queryer, revisionID
 func CreateCardRevision(ctx context.Context, tx pgx.Tx, actor, cardID, markup string,
 	effectiveAt time.Time, prices []Price, currency string,
 	vendorKind func(vendor string) (string, bool)) (CardRevision, error) {
-	normalizedMarkup, err := normalizeDecimal(markup)
+	normalizedMarkup, err := normalizePriceAmount(markup)
 	if err != nil {
 		return CardRevision{}, access.Invalid("markup", "Use a non-negative decimal.")
 	}

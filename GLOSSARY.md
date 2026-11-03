@@ -26,6 +26,9 @@ The estimated amount a provider bills the installation for an attempt.
 **Charge**:
 The amount a consumer owes for an attempt under the applicable rate card.
 
+**Cost source**:
+The vendor cost endpoint a billing import reads invoiced costs from.
+
 ### Code mode
 
 These definitions include accepted target contracts.

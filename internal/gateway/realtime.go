@@ -28,6 +28,7 @@ import (
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/protocols/openai"
+	"github.com/tyk-swe/olp/internal/routeidentity"
 	"github.com/tyk-swe/olp/internal/upstream"
 	"github.com/tyk-swe/olp/internal/usage"
 )
@@ -604,7 +605,7 @@ func (s *Server) realtime(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	slug := r.URL.Query().Get("model")
-	if !openai.RouteSlug.MatchString(slug) {
+	if !routeidentity.ValidSlug(slug) {
 		fail(invalidRequest("invalid_value", "model must name a published route slug.", strPtr("model")))
 		return
 	}

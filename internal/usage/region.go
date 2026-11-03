@@ -13,5 +13,10 @@ func WithWorkerRegion(ctx context.Context, region string) context.Context {
 // RegionalTask reports whether one region's success cannot vouch for another
 // region's independent coordination store.
 func RegionalTask(task Task) bool {
-	return task == TaskRequestMetadataConsumer || task == TaskCostReconciliation || task == TaskHealthProbes
+	for _, worker := range WorkerTasks() {
+		if worker.Name == task {
+			return worker.Regional
+		}
+	}
+	return false
 }

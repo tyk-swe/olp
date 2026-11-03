@@ -477,13 +477,6 @@ func (st *attemptState) interrupted(err error) error {
 	return nil
 }
 
-func endpointPath(family wire.Format) string {
-	if family == wire.Responses {
-		return "/responses"
-	}
-	return "/chat/completions"
-}
-
 // newFact opens the record of one attempt against one credential slot.
 func (s *Server) newFact(x *call, a routing.Attempt, slot routing.Slot, ordinal int, pinned ...*routing.Provider) AttemptFact {
 	fact := AttemptFact{

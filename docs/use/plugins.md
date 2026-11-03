@@ -278,7 +278,7 @@ leaves nothing behind; the OLP process is unaffected.
 Installing reads a manifest once, on wazero's interpreter, which is ready
 soonest, and a worker process refreshes grants on it too. Signing hooks run on
 modules compiled to machine code, which take longer to prepare but then sign
-about ten times faster; `BenchmarkSign` in `internal/plugins` measures both.
+much faster when last measured.
 
 The runtime grants a plugin a clock, randomness and logging, and nothing else:
 no filesystem, environment or arguments. Grant enrollment steps and grant

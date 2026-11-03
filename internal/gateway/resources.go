@@ -474,7 +474,7 @@ func (s *Server) fileObject(ctx context.Context, res *resources.Resource) ([]byt
 		var fields map[string]json.RawMessage
 		_ = json.Unmarshal(meta["provider_file"], &fields)
 		obj := map[string]json.RawMessage{"object": json.RawMessage(`"file"`)}
-		for _, name := range []string{"bytes", "created_at", "filename", "purpose"} {
+		for _, name := range managedFileFields() {
 			if value, ok := fields[name]; ok {
 				obj[name] = value
 			}
@@ -483,7 +483,7 @@ func (s *Server) fileObject(ctx context.Context, res *resources.Resource) ([]byt
 		return json.Marshal(obj)
 	}
 	obj := map[string]json.RawMessage{}
-	for _, name := range []string{"object", "purpose", "filename", "bytes", "status", "status_details", "expires_at", "created_at"} {
+	for _, name := range resources.RetainedFileMetadataFields() {
 		if raw, ok := meta[name]; ok {
 			obj[name] = raw
 		}
@@ -539,7 +539,7 @@ func (s *Server) batchObject(ctx context.Context, res *resources.Resource) ([]by
 			return nil, resources.ErrContract
 		}
 		files := map[string]string{}
-		for _, name := range []string{"input_file_id", "output_file_id", "error_file_id"} {
+		for _, name := range batchFileFields() {
 			field, present := doc.Root().Lookup(name)
 			if !present || field.Kind() == oif.Null {
 				continue
@@ -579,7 +579,7 @@ func (s *Server) batchObject(ctx context.Context, res *resources.Resource) ([]by
 	// Stored provider fields are upstream identifiers, whatever their
 	// spelling. Output and error files are first seen here, so they get a
 	// mapping on demand.
-	for _, name := range []string{"input_file_id", "output_file_id", "error_file_id"} {
+	for _, name := range batchFileFields() {
 		if name == "input_file_id" && batchLocalInput(res) != "" {
 			continue
 		}
@@ -678,7 +678,7 @@ func fileMetadata(body []byte, model string) (json.RawMessage, string, *time.Tim
 	meta := map[string]json.RawMessage{}
 	var obj map[string]json.RawMessage
 	if json.Unmarshal(body, &obj) == nil {
-		for _, name := range []string{"object", "purpose", "filename", "bytes", "status", "status_details", "expires_at", "created_at"} {
+		for _, name := range resources.RetainedFileMetadataFields() {
 			if raw, ok := obj[name]; ok {
 				meta[name] = raw
 			}
@@ -2110,10 +2110,10 @@ func (s *Server) cancelBatch(w http.ResponseWriter, r *http.Request) {
 			return s.batchRefresh(ctx, x, res, p, http.MethodGet, managedBatchPath(res, false), nil, w)
 		}
 		if res.Kind == resources.KindStrictBatch {
-			switch res.State {
-			case "completed", "failed", "expired", "cancelled":
+			switch wire.BatchStageOf(res.State) {
+			case wire.BatchTerminal:
 				return serverError(http.StatusConflict, "resource_transition", "This batch has already reached a terminal state.")
-			case "cancelling":
+			case wire.BatchCancelling:
 				out, err := s.batchObject(ctx, res)
 				if err != nil {
 					return serverError(http.StatusServiceUnavailable, "provider_resource_unavailable", "The accepted cancellation could not be projected.")

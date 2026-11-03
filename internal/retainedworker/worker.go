@@ -241,9 +241,9 @@ func (w *Worker) poll(ctx context.Context, c resources.RetainedClaim) string {
 		if json.Unmarshal(data, &native) != nil {
 			return "uncorrelated_resource"
 		}
-		marker := native.Metadata["olp_submission_id"]
+		marker := native.Metadata[resources.RetainedSubmissionMarkerField]
 		if r.Kind == "vertex_tuning_job" {
-			marker = native.Labels["olp_submission_id"]
+			marker = native.Labels[resources.RetainedSubmissionMarkerField]
 		}
 		if marker != r.UUID.String() {
 			return "uncorrelated_resource"

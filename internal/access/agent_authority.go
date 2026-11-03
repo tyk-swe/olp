@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/tyk-swe/olp/internal/consumerscope"
 )
 
 func addedKeyAgentResources(policy, previous KeyPolicy) KeyPolicy {
@@ -40,7 +41,7 @@ func checkKeyAgentResources(ctx context.Context, q Queryer, policy KeyPolicy, pr
 // ConsumerScopes returns a copy so configuration consumers cannot mutate the
 // authoritative scope vocabulary. Scopes never imply access to a resource.
 func ConsumerScopes() []string {
-	return []string{"inference", "models_read", "guardrails", "tools", "agents", "traces_write", "delegate"}
+	return consumerscope.All()
 }
 
 func validateResourceAllowlist(field string, ids []string) error {

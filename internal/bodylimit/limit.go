@@ -1,7 +1,6 @@
 // Package bodylimit defines the operator's optional per-route ingress bound.
 package bodylimit
 
-// Maximum matches the largest supported installation media-body limit.
 const Maximum int64 = 1 << 30
 
 // Valid accepts an inherited limit or a positive supported byte count.

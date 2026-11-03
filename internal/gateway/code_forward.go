@@ -58,18 +58,17 @@ func (s *Server) serveCode(w http.ResponseWriter, r *http.Request) {
 		refuse(codemode.Refuse(400, "code_operation_unsupported"))
 		return
 	}
-	adapters := release.Snapshot.CodeAdapters(route)
-	if len(adapters) == 0 && len(route.PaidTargets)+len(route.PaidFallbackTargets) == 0 {
+	if !release.Snapshot.HasCodeAdapters(route) && len(route.PaidTargets)+len(route.PaidFallbackTargets) == 0 {
 		refuse(codemode.Refuse(503, "code_adapter_unavailable"))
 		return
 	}
 	ingress, ok := codeIngressFor(path)
-	if ok && r.Method == http.MethodGet && strings.EqualFold(r.Header.Get("Upgrade"), "websocket") && len(release.Snapshot.CodeProviders(route, path, codeadapter.WebSocket)) != 0 {
+	if ok && r.Method == http.MethodGet && strings.EqualFold(r.Header.Get("Upgrade"), "websocket") && release.Snapshot.HasCodeProviders(route, path, codeadapter.WebSocket) {
 		s.codeWebSocket(w, r, release, route, authority, ingress)
 		return
 	}
-	if r.Method != http.MethodPost || !ok || len(release.Snapshot.CodeProviders(route, path, codeadapter.HTTP)) == 0 && len(route.PaidTargets)+len(route.PaidFallbackTargets) == 0 {
-		if codeProbe(r.Method, path) && len(release.Snapshot.CodeProviders(route, "v1/messages", codeadapter.HTTP)) != 0 {
+	if r.Method != http.MethodPost || !ok || !release.Snapshot.HasCodeProviders(route, path, codeadapter.HTTP) && len(route.PaidTargets)+len(route.PaidFallbackTargets) == 0 {
+		if codeProbe(r.Method, path) && release.Snapshot.HasCodeProviders(route, "v1/messages", codeadapter.HTTP) {
 			codeWriteError(w, r, codemode.Refuse(404, "code_operation_unsupported"))
 			return
 		}

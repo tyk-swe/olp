@@ -75,3 +75,17 @@ func decodeAWSCredential(data []byte) ([]byte, error) {
 	}
 	return encoded, nil
 }
+
+func decodeAWSStoredCredential(data []byte) ([]byte, error) {
+	if !bytes.ContainsRune(data, '\n') {
+		return nil, errIncompatibleCredential
+	}
+	document, err := parseCredentialDocument(data)
+	if err != nil {
+		return nil, err
+	}
+	if document.Source != SourceAWS {
+		return nil, errIncompatibleCredential
+	}
+	return decodeAWSCredential(data)
+}

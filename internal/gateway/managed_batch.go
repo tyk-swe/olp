@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/batches"
 	"github.com/tyk-swe/olp/internal/media"
 	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/protocols"
@@ -29,19 +30,6 @@ const (
 	managedBatchLines     = 50000
 )
 
-var managedBatchStatusProjection = map[string]map[string]string{
-	"together": {"VALIDATING": "validating", "IN_PROGRESS": "in_progress", "COMPLETED": "completed", "FAILED": "failed", "EXPIRED": "expired", "CANCELLING": "cancelling", "CANCELLED": "cancelled"},
-	"mistral":  {"QUEUED": "validating", "RUNNING": "in_progress", "SUCCESS": "completed", "FAILED": "failed", "TIMEOUT_EXCEEDED": "expired", "CANCELLATION_REQUESTED": "cancelling", "CANCELLED": "cancelled"},
-	"gemini_managed": {
-		"BATCH_STATE_PENDING": "validating", "JOB_STATE_PENDING": "validating", "JOB_STATE_QUEUED": "validating",
-		"BATCH_STATE_RUNNING": "in_progress", "JOB_STATE_RUNNING": "in_progress", "JOB_STATE_CANCELLING": "cancelling",
-		"BATCH_STATE_SUCCEEDED": "completed", "JOB_STATE_SUCCEEDED": "completed",
-		"BATCH_STATE_FAILED": "failed", "JOB_STATE_FAILED": "failed",
-		"BATCH_STATE_CANCELLED": "cancelled", "JOB_STATE_CANCELLED": "cancelled",
-		"BATCH_STATE_EXPIRED": "expired", "JOB_STATE_EXPIRED": "expired",
-	},
-}
-
 type batchManifest struct {
 	Adapter        string `json:"adapter"`
 	Endpoint       string `json:"endpoint"`
@@ -50,11 +38,19 @@ type batchManifest struct {
 	ManifestDigest string `json:"manifest_digest"`
 }
 
+func batchManifestFields() []string {
+	return []string{"endpoint", "line_operation", "line_count", "manifest_digest"}
+}
+
 type managedBatchLine struct {
 	CustomID string          `json:"custom_id"`
 	Method   string          `json:"method"`
 	URL      string          `json:"url"`
 	Body     json.RawMessage `json:"body"`
+}
+
+func managedFileFields() [4]string {
+	return [4]string{"bytes", "created_at", "filename", "purpose"}
 }
 
 func managedFileMetadata(existing, response []byte, adapter string, manifest batchManifest, role string) []byte {
@@ -99,7 +95,7 @@ func managedFileMetadata(existing, response []byte, adapter string, manifest bat
 			}
 		}
 	} else {
-		for _, name := range []string{"bytes", "created_at", "filename", "purpose"} {
+		for _, name := range managedFileFields() {
 			if value, ok := provider[name]; ok {
 				fields[name] = value
 			}
@@ -120,7 +116,7 @@ func managedFileMetadata(existing, response []byte, adapter string, manifest bat
 		meta["line_count"], _ = json.Marshal(manifest.LineCount)
 		meta["manifest_digest"], _ = json.Marshal(manifest.ManifestDigest)
 	} else {
-		for _, name := range []string{"endpoint", "line_operation", "line_count", "manifest_digest", "gemini_responses_file"} {
+		for _, name := range append(batchManifestFields(), "gemini_responses_file") {
 			if value, ok := prior[name]; ok {
 				meta[name] = value
 			}
@@ -313,7 +309,7 @@ func translateManagedBatchLines(writer *io.PipeWriter, input io.Reader, digest f
 		return fail(invalidRequest("unsupported_parameter", "The batch file must contain at least one request.", &param))
 	}
 	manifest.Endpoint = endpoint
-	manifest.LineOperation = endpointOperation(endpoint)
+	manifest.LineOperation = wire.BatchLineOperation(endpoint)
 	manifest.ManifestDigest = hex.EncodeToString(manifestHash.Sum(nil))
 	return nil
 }
@@ -326,15 +322,19 @@ func managedCustomIDLimit(adapter string) int {
 }
 
 func managedBatchEndpoint(adapter, endpoint string) (string, wire.Format, bool) {
+	operation := wire.BatchLineOperation(endpoint)
+	if operation == "" {
+		return "", "", false
+	}
 	switch endpoint {
 	case "/v1/chat/completions":
-		return "generation", wire.Chat, adapter == "openai" || adapter == "together" || adapter == "mistral" || adapter == "gemini_managed"
+		return operation, wire.Chat, adapter == "openai" || adapter == "together" || adapter == "mistral" || adapter == "gemini_managed"
 	case "/v1/embeddings":
-		return "embeddings", wire.Embeddings, adapter == "openai" || adapter == "mistral"
+		return operation, wire.Embeddings, adapter == "openai" || adapter == "mistral"
 	case "/v1/responses":
-		return "generation", wire.Responses, adapter == "openai"
+		return operation, wire.Responses, adapter == "openai"
 	case "/v1/completions":
-		return "generation", wire.Completions, adapter == "openai"
+		return operation, wire.Completions, adapter == "openai"
 	default:
 		return "", "", false
 	}
@@ -348,13 +348,6 @@ func (s *Server) batchLineDigest(customID string) ([]byte, bool) {
 		return nil, false
 	}
 	return digester.Digest(secrets.BatchLineDigest, customID), true
-}
-
-func endpointOperation(endpoint string) string {
-	if wire.CanonicalBatchEndpoint(endpoint) == "/v1/embeddings" {
-		return "embeddings"
-	}
-	return "generation"
 }
 
 func managedBatchRequestBody(source oif.Document, adapter, upstreamFileID, model string, manifest batchManifest) ([]byte, *int64, *Error) {
@@ -460,7 +453,7 @@ func projectManagedBatch(body []byte, adapter, requestedWindow string) ([]byte, 
 	if json.Unmarshal(jobBytes, &job) != nil || job.ID == "" {
 		return nil, "", errors.New("provider batch identity is missing")
 	}
-	state, ok := managedBatchStatusProjection[adapter][job.Status]
+	state, ok := batches.ManagedStatus(adapter, job.Status)
 	if !ok {
 		return nil, "", errors.New("provider batch status is unknown")
 	}

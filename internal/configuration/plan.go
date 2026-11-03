@@ -24,6 +24,7 @@ import (
 	"github.com/tyk-swe/olp/internal/guardrails"
 	"github.com/tyk-swe/olp/internal/mcpservers"
 	"github.com/tyk-swe/olp/internal/providers"
+	"github.com/tyk-swe/olp/internal/routeidentity"
 	"github.com/tyk-swe/olp/internal/routes"
 	"github.com/tyk-swe/olp/internal/secrets"
 	"github.com/tyk-swe/olp/internal/secretstore"
@@ -384,10 +385,10 @@ func (s *Server) validateDocument(ctx context.Context, q access.Queryer, doc *Do
 	if err := s.validateMCPServers(doc); err != nil {
 		return nil, err
 	}
-	if err := validateRetrievalBindings(doc); err != nil {
+	if err := validateAndNormalizeRetrievalBindings(doc); err != nil {
 		return nil, err
 	}
-	if err := s.validateSinks(doc); err != nil {
+	if err := s.validateAndNormalizeSinks(doc); err != nil {
 		return nil, err
 	}
 	if err := validateGuardrails(doc); err != nil {
@@ -404,7 +405,7 @@ func (s *Server) validateDocument(ctx context.Context, q access.Queryer, doc *Do
 			return nil, err
 		}
 	}
-	if err := validateWorkloadEntries(doc); err != nil {
+	if err := validateAndNormalizeWorkloadEntries(doc); err != nil {
 		return nil, err
 	}
 	if err := validateOrganizations(ctx, q, doc); err != nil {
@@ -415,7 +416,7 @@ func (s *Server) validateDocument(ctx context.Context, q access.Queryer, doc *Do
 			return nil, access.Invalid("budget_time_zone", "Use a supported IANA time zone.")
 		}
 	}
-	if err := doc.InstallationBudget.Validate(); err != nil {
+	if err := doc.InstallationBudget.ValidateAndNormalize(); err != nil {
 		return nil, err
 	}
 	if len(doc.Projects) > maxProjects {
@@ -423,18 +424,18 @@ func (s *Server) validateDocument(ctx context.Context, q access.Queryer, doc *Do
 	}
 	seen := map[string]bool{}
 	for i, p := range doc.Projects {
-		if err := p.Budget.Validate(); err != nil {
+		if err := p.Budget.ValidateAndNormalize(); err != nil {
 			return nil, err
 		}
-		if err := p.AttributionBudgets.Validate(); err != nil {
+		if err := p.AttributionBudgets.ValidateAndNormalize(); err != nil {
 			return nil, err
 		}
 		if p.LimitTemplates != nil {
-			if err := p.LimitTemplates.Validate(); err != nil {
+			if err := p.LimitTemplates.ValidateAndNormalize(); err != nil {
 				return nil, err
 			}
 		}
-		if p.EndUserLimitTemplate != nil && !access.RouteSlug.MatchString(*p.EndUserLimitTemplate) {
+		if p.EndUserLimitTemplate != nil && !routeidentity.ValidSlug(*p.EndUserLimitTemplate) {
 			return nil, access.Invalid("end_user_limit_template", "Use a valid template name.")
 		}
 		if err := p.RouteGroups.Validate(); err != nil {
@@ -461,7 +462,7 @@ func (s *Server) validateDocument(ctx context.Context, q access.Queryer, doc *Do
 			}
 		}
 		if p.EndUserDefaults != nil {
-			if err := p.EndUserDefaults.Validate(); err != nil {
+			if err := p.EndUserDefaults.ValidateAndNormalize(); err != nil {
 				return nil, err
 			}
 		}
@@ -534,8 +535,10 @@ func (s *Server) validateDocument(ctx context.Context, q access.Queryer, doc *Do
 		}
 		if refusal != "" {
 			unavailable[p.Configuration.ProfileRevision] = refusal
-		} else if err := p.Configuration.Validate(s.Egress); err != nil {
+		} else if err := p.Configuration.ValidateAndNormalize(s.Egress); err != nil {
 			return nil, err
+		} else {
+			doc.Providers[i].Configuration = p.Configuration
 		}
 		totalModels += len(p.Models)
 		if totalModels > maxModels {
@@ -599,7 +602,7 @@ func (s *Server) validateDocument(ctx context.Context, q access.Queryer, doc *Do
 				return nil, access.Invalid(sfield, "Use at most 100 routes and 2000 models per slot.")
 			}
 			for _, route := range slot.Restrictions.AllowedRoutes {
-				if !access.RouteSlug.MatchString(route) {
+				if !routeidentity.ValidSlug(route) {
 					return nil, access.Invalid(sfield+".allowed_routes", "Use route slugs.")
 				}
 			}
@@ -670,7 +673,7 @@ func (s *Server) validateDocument(ctx context.Context, q access.Queryer, doc *Do
 			return nil, access.Invalid(prefix+".slug", "Route slugs must be unique.")
 		}
 		routeSeen[rt.Slug] = true
-		if !access.RouteSlug.MatchString(rt.Slug) {
+		if !routeidentity.ValidSlug(rt.Slug) {
 			return nil, access.Invalid(prefix+".slug", "Use 1-100 lowercase letters, digits, dots, underscores, or hyphens, starting with a letter or digit.")
 		}
 		if len(rt.Targets) > maxTargets {
@@ -905,7 +908,7 @@ func (s *Server) plan(ctx context.Context, q access.Queryer, doc *Document, bind
 		return nil, err
 	}
 	doc.canonicalize()
-	digest, err := Digest(doc)
+	digest, err := CanonicalizeAndDigest(doc)
 	if err != nil {
 		return nil, err
 	}
@@ -965,7 +968,7 @@ func (s *Server) plan(ctx context.Context, q access.Queryer, doc *Document, bind
 		if err != nil {
 			return nil, err
 		}
-		currentDigest, err := Digest(current)
+		currentDigest, err := CanonicalizeAndDigest(current)
 		if err != nil {
 			return nil, err
 		}

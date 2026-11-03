@@ -122,5 +122,46 @@ func TestDecisionPriceStrategyUsesTokenRates(t *testing.T) {
 	}
 }
 
+func TestThroughputStrategyOrdersProvidersByMeasuredThroughput(t *testing.T) {
+	snapshot, slug, ids := planningFixture()
+	now := time.Now()
+	inputs := &usage.RoutingInputs{
+		RefreshedAt: now,
+		Performance: map[string]usage.Performance{
+			usage.PerformanceKey(ids[0], "wire-model", "generation", "unary"): {SampleCount: 20, LatencyMS: 5, Throughput: ptr(10.0), ObservedAt: now},
+			usage.PerformanceKey(ids[1], "wire-model", "generation", "unary"): {SampleCount: 20, LatencyMS: 5, Throughput: ptr(20.0), ObservedAt: now},
+		},
+	}
+	plan, err := Select(&snapshot, slug, "generation", "openai", "unary", []byte("seed"), Options{
+		Inputs: inputs, Now: now, Preferences: &Preferences{Strategy: ptr("throughput")},
+	})
+	if err != nil || len(plan.Attempts) != 3 || plan.Attempts[0].ProviderID != ids[1] || plan.Attempts[1].ProviderID != ids[0] || plan.Attempts[2].ProviderID != ids[2] {
+		t.Fatalf("throughput order: %+v %v", plan, err)
+	}
+}
+
+func TestLatencyStrategyOrdersProvidersByMeasuredLatency(t *testing.T) {
+	snapshot, slug, _ := planningFixture()
+	now := time.Now()
+	weighted, err := Select(&snapshot, slug, "generation", "openai", "unary", []byte("seed"), Options{Now: now})
+	if err != nil || len(weighted.Attempts) != 3 {
+		t.Fatalf("weighted plan: %+v %v", weighted, err)
+	}
+	slow, fast, unknown := weighted.Attempts[0].ProviderID, weighted.Attempts[1].ProviderID, weighted.Attempts[2].ProviderID
+	inputs := &usage.RoutingInputs{
+		RefreshedAt: now,
+		Performance: map[string]usage.Performance{
+			usage.PerformanceKey(slow, "wire-model", "generation", "unary"): {SampleCount: 20, LatencyMS: 10, ObservedAt: now},
+			usage.PerformanceKey(fast, "wire-model", "generation", "unary"): {SampleCount: 20, LatencyMS: 5, ObservedAt: now},
+		},
+	}
+	plan, err := Select(&snapshot, slug, "generation", "openai", "unary", []byte("seed"), Options{
+		Inputs: inputs, Now: now, Preferences: &Preferences{Strategy: ptr("latency")},
+	})
+	if err != nil || len(plan.Attempts) != 3 || plan.Attempts[0].ProviderID != fast || plan.Attempts[1].ProviderID != slow || plan.Attempts[2].ProviderID != unknown {
+		t.Fatalf("latency order: %+v %v", plan, err)
+	}
+}
+
 // plan answers each decision's outcome by credential slot, or by provider
 // for a target with no slot to try: its attempt, or its reason.

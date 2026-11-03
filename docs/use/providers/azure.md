@@ -45,10 +45,7 @@ for Azure.
 
 ## Testing
 
-```sh
-make test-go GO_TEST_PACKAGES=./internal/connectors GO_TEST_ARGS='-run Azure'
-```
-
-Stub credential coverage exercises bearer injection, token caching, and failure
-classification without Azure credentials. Live qualification follows the shared
-`live-providers` workflow with an Entra identity available.
+There is no automated Azure coverage. The connector tests and the paid
+live qualification lane were subtracted with the test system. Validate
+changes by running the gateway against a stub or a real deployment and
+recording the command and output.

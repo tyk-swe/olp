@@ -12,7 +12,6 @@ import (
 
 	"github.com/tyk-swe/olp/internal/catalog"
 	"github.com/tyk-swe/olp/internal/limits"
-	"github.com/tyk-swe/olp/internal/notifications"
 	"github.com/tyk-swe/olp/internal/vendors"
 )
 
@@ -144,7 +143,7 @@ func scanRuleSignal(row pgx.Row, rule signalRule, now time.Time, circuits map[st
 		if err != nil || seconds.IsNegative() {
 			return signal, errors.New("invalid worker age signal")
 		}
-		staleAfter := notifications.WorkerStaleAfter(task)
+		staleAfter := WorkerStaleAfter(Task(task))
 		signal.subject, signal.known = task, staleAfter > 0
 		signal.active = seconds.Cmp(decimal.NewFromInt(staleAfter)) > 0
 		signal.evidence = map[string]any{"task": task, "age_seconds": age, "stale_after_seconds": staleAfter}

@@ -16,6 +16,7 @@ import (
 	"github.com/tyk-swe/olp/internal/protocols/wire"
 
 	"github.com/tyk-swe/olp/internal/protocols/openai"
+	"github.com/tyk-swe/olp/internal/routeidentity"
 	"github.com/tyk-swe/olp/internal/vendors"
 )
 
@@ -188,7 +189,7 @@ func parseDocument(family wire.Format, doc oif.Document, model, expectedModel st
 			}
 		}
 	}
-	if (expectedModel == "" && !openai.RouteSlug.MatchString(model)) || (expectedModel != "" && model != expectedModel) {
+	if (expectedModel == "" && !routeidentity.ValidSlug(model)) || (expectedModel != "" && model != expectedModel) {
 		return nil, requestError("model", "model must name a published route slug")
 	}
 	if family.Operation() != "generation" && stream {

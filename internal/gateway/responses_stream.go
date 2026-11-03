@@ -282,8 +282,7 @@ func (s *Server) streamStoredResponse(ctx context.Context, w http.ResponseWriter
 		if status == "failed" {
 			nativeTerminalFailure = true
 		}
-		switch status {
-		case "completed", "failed", "incomplete", "cancelled":
+		if wire.ResponseStatusFinished(status) {
 			x.completePinned()
 		}
 		commitCtx, stopCommit := resourceCommitContext(ctx)

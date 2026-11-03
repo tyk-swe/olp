@@ -183,7 +183,7 @@ func compilePatterns(rules []Pattern, category, replacement string) (*patternDet
 	}
 	for _, r := range rules {
 		total += len(r.Pattern)
-		if !contentpolicy.RuleID.MatchString(r.ID) || seen[r.ID] || len(r.Pattern) < 1 || len(r.Pattern) > contentpolicy.MaxPatternBytes || total > contentpolicy.MaxTotalPatternBytes || (r.Replacement != nil && (!utf8.ValidString(*r.Replacement) || utf8.RuneCountInString(*r.Replacement) > contentpolicy.MaxReplacementChars)) {
+		if !contentpolicy.ValidRuleID(r.ID) || seen[r.ID] || len(r.Pattern) < 1 || len(r.Pattern) > contentpolicy.MaxPatternBytes || total > contentpolicy.MaxTotalPatternBytes || (r.Replacement != nil && (!utf8.ValidString(*r.Replacement) || utf8.RuneCountInString(*r.Replacement) > contentpolicy.MaxReplacementChars)) {
 			return nil, errors.New("invalid bounded entity pattern")
 		}
 		seen[r.ID] = true

@@ -19,12 +19,10 @@ import (
 // https://ai.google.dev/gemini-api/docs/image-generation
 // https://ai.google.dev/gemini-api/docs/speech-generation
 // https://ai.google.dev/gemini-api/docs/audio
-func init() {
-	registerCodec("gemini", codec{
-		OpImageGeneration: modelOnly(encodeGeminiImage),
-		OpSpeech:          modelOnly(encodeGeminiSpeech),
-		OpTranscription:   modelOnly(encodeGeminiTranscription),
-	})
+var geminiMediaCodec = codec{
+	OpImageGeneration: modelOnly(encodeGeminiImage),
+	OpSpeech:          modelOnly(encodeGeminiSpeech),
+	OpTranscription:   modelOnly(encodeGeminiTranscription),
 }
 
 // geminiTranscriptPrompt asks a model for the transcript of the audio it hears.

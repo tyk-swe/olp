@@ -7,6 +7,8 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+
+	"github.com/tyk-swe/olp/internal/routeidentity"
 )
 
 const (
@@ -89,7 +91,7 @@ func (p *Policy) Validate() error {
 		return errors.New("cache.count_hits_against must contain requests and may include tokens and budgets")
 	}
 	if e.Mode == "semantic" {
-		if !e.AllowUnsealedVectors || !validName(e.EmbeddingRoute) {
+		if !e.AllowUnsealedVectors || !routeidentity.ValidSlug(e.EmbeddingRoute) {
 			return errors.New("semantic caching requires an embedding route and allow_unsealed_vectors acknowledgement")
 		}
 		if !(e.SimilarityThreshold > 0 && e.SimilarityThreshold <= 1) || e.MaxCandidates < 1 || e.MaxCandidates > maxCandidateCount {
@@ -113,17 +115,6 @@ func uniqueMembers(values, allowed []string) bool {
 		}
 	}
 	return len(values) > 0
-}
-func validName(s string) bool {
-	if len(s) == 0 || len(s) > 100 {
-		return false
-	}
-	for i, c := range s {
-		if !(c >= 'a' && c <= 'z' || c >= '0' && c <= '9' || i > 0 && strings.ContainsRune("._-", c)) {
-			return false
-		}
-	}
-	return true
 }
 
 type PromptPolicy struct {

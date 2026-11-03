@@ -1,3 +1,4 @@
+import { validRouteSlug } from '$lib/routeIdentity';
 import type { components } from '$lib/api/schema';
 import type {
   CreateRouteDraftInput,
@@ -438,7 +439,7 @@ export function buildContentPolicy(
 
 export function validateRouteEditor(values: RouteEditorValues): string | null {
   // Matches the server's route slug format.
-  if (!/^[a-z0-9][a-z0-9._-]{0,99}$/.test(values.slug)) {
+  if (!validRouteSlug(values.slug)) {
     return 'Use 1–100 lowercase letters, digits, dots, underscores, or hyphens, starting with a letter or digit.';
   }
   if (!values.operations.length)
@@ -476,7 +477,6 @@ export function validateRouteEditor(values: RouteEditorValues): string | null {
 }
 
 const targetTag = /^[a-z0-9][a-z0-9_-]{0,31}$/;
-const routeSlug = /^[a-z0-9][a-z0-9._-]{0,99}$/;
 const attributionLabel = /^[A-Za-z][A-Za-z0-9_.-]{0,31}$/;
 const costLimit = /^(0|[1-9][0-9]{0,11})(\.[0-9]{1,12})?$/;
 
@@ -548,7 +548,7 @@ export function validateRouteBehavior(
   if (behavior.fallbacks.length > 4)
     return 'Declare at most 4 fallback routes.';
   for (const fallback of behavior.fallbacks) {
-    if (!routeSlug.test(fallback.route) || fallback.route === values.slug)
+    if (!validRouteSlug(fallback.route) || fallback.route === values.slug)
       return 'Every fallback names another route by its slug.';
     if (!fallback.on.length)
       return `Fallback “${fallback.route}” needs at least one condition.`;

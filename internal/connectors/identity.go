@@ -1,6 +1,19 @@
 package connectors
 
-import "github.com/tyk-swe/olp/internal/oif"
+import (
+	"net/http"
+
+	"github.com/tyk-swe/olp/internal/oif"
+)
+
+func IsServingIdentityHeader(name string) bool {
+	switch http.CanonicalHeaderKey(name) {
+	case "Openai-Organization", "Openai-Project", "X-Goog-User-Project", "X-Goog-Request-Params", "X-Ms-Region", "X-Ms-Routing-Name":
+		return true
+	default:
+		return false
+	}
+}
 
 // ServingIdentity identifies the configured model and its pinned environment.
 func (c Config) ServingIdentity(providerID, revisionID, model string) oif.ServingIdentity {

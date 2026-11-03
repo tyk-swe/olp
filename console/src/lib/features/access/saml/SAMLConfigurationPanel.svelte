@@ -1,10 +1,12 @@
 <script lang="ts">
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import { errorMessage } from '$lib/api/http';
+  import { FIXED_ROLES } from '../session/authorization';
   import { useRole } from '../session/useRole.svelte';
   import { getSAML, saveSAML, importSAML, type SAMLWrite } from './api';
   import { samlKeys } from './samlKeys';
   const access = useRole();
+  const roles = FIXED_ROLES.toReversed();
   const client = useQueryClient();
   const query = createQuery(() => ({
     queryKey: samlKeys.configuration(),
@@ -161,8 +163,7 @@
             id="saml-default-role"
             bind:value={defaultRole}
             ><option value="">Deny unless explicitly mapped</option
-            >{#each ['viewer', 'developer', 'operator', 'owner'] as role (role)}<option
-                value={role}>{role}</option
+            >{#each roles as role (role)}<option value={role}>{role}</option
               >{/each}</select
           >
         </div>

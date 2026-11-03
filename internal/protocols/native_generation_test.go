@@ -34,6 +34,9 @@ func TestNativeGenerationRequestsAreValidatedForTheirRoute(t *testing.T) {
 	if family, ok := NativeGenerationFamily("mistral-fim"); !ok || family != wire.MistralFIM {
 		t.Fatal("mistral-fim is not a native generation dialect")
 	}
+	if family, ok := NativeGenerationFamily("cohere-chat-v2"); !ok || family != wire.CohereChat {
+		t.Fatal("cohere-chat-v2 is not a native generation dialect")
+	}
 	if _, ok := NativeGenerationFamily("cohere-embed-v2"); ok {
 		t.Fatal("an operation dialect was taken for generation")
 	}

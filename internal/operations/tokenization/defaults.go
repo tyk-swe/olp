@@ -18,7 +18,8 @@ func countDefaults(id string) map[string]operations.Field {
 		}
 		fields["tools"] = field(map[string]any{"type": []string{"array", "null"}}, nullableArray)
 		fields["tool_choice"] = field(map[string]any{"type": []string{"string", "object", "null"}}, func(v oif.Value) bool { return nullableString(v) || v.Kind() == oif.Object })
-		fields["truncation"] = field(map[string]any{"enum": []string{"auto", "disabled"}}, func(v oif.Value) bool { return slices.Contains([]string{"auto", "disabled"}, operations.String(v)) })
+		truncationModes := []string{"auto", "disabled"}
+		fields["truncation"] = field(map[string]any{"enum": truncationModes}, func(v oif.Value) bool { return slices.Contains(truncationModes, operations.String(v)) })
 	case "anthropic-count-tokens":
 		fields["system"] = field(map[string]any{"type": []string{"string", "array"}}, func(v oif.Value) bool { return v.Kind() == oif.String || v.Kind() == oif.Array })
 		fields["tools"] = field(map[string]any{"type": "array"}, func(v oif.Value) bool { return v.Kind() == oif.Array })

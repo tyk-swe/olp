@@ -1,8 +1,17 @@
+import type { Kind } from './api';
+
+const publications = ['agent-publications'] as const;
+const publication = <T extends Kind | 'projects' | 'servers'>(kind: T) =>
+  [...publications, kind] as const;
+
 export const agentKeys = {
   grants: () => ['mcp-grants'] as const,
-  servers: () => ['agent-publications', 'servers'] as const,
-  agents: () => ['agent-publications', 'agents'] as const,
-  toolsets: () => ['agent-publications', 'toolsets'] as const,
+  publications,
+  publication,
+  projects: () => publication('projects'),
+  servers: () => publication('servers'),
+  agents: () => publication('agents'),
+  toolsets: () => publication('toolsets'),
   delegationOptions: (keyID: string) =>
     ['agent-delegation-options', keyID] as const,
   runs: (project: string, cursor?: string) =>

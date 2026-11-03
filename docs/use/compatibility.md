@@ -125,15 +125,13 @@ refusals alongside normal routing decisions. Delegated route legs use the named
 route's toolsets and bounds and their own serving targets. Simulation does not
 dispatch a model or tool, reserve budget, or guarantee live admission.
 
-The local gateway fixtures exercise unary and streaming workflows for Chat
+Former local gateway fixtures exercised unary and streaming workflows for Chat
 Completions, Responses, Anthropic and Gemini, including bounds, target
 certification, approval, authority changes, `typesafe` pruning and compression
 recovery. The caller-filtered discovery fixture is
 `TestGatewayWorkflowDiscoveryRespectsCallerAuthority`. The tests live in
-[`internal/gateway/tool_loop_test.go`](../../internal/gateway/tool_loop_test.go).
-`TestGatewayToolWorkflowSettlesOneRun` in
-[`tests/integration/gateway_test.go`](../../tests/integration/gateway_test.go)
-checks same-key simulation authorization and request bounds for draft and
+`internal/gateway/tool_loop_test.go`.
+A former process test checked same-key simulation authorization and request bounds for draft and
 published routes, a run and its durable settlement, and rollback with local
 services.
 To stop new gateway execution, republish the transformed route without
@@ -160,32 +158,31 @@ unknown outcomes and call-identifier replay. The console exposes content-free
 attempt history, and capability/simulation responses use the same publication,
 price and effective-limit inputs as execution.
 
-The minimal reference check uses the official
+The former minimal reference check used the official
 [Go MCP SDK v1.8.0](https://github.com/modelcontextprotocol/go-sdk/tree/v1.8.0),
 pinned in `go.mod`, as both a Streamable HTTP server and client with the
-protocol explicitly pinned to 2025-11-25. `TestMCPReferenceServerRoundTrip` in
-`tests/integration/mcp_execution_test.go` registers and certifies that server,
-publishes its tool, lists it through the consumer boundary, invokes it with
-the reference client and checks the settled record. This is local fixture
-qualification, not a claim about every third-party MCP deployment.
+protocol explicitly pinned to 2025-11-25. It registered and certified that server, published its tool, listed it
+through the consumer boundary, invoked it with the reference client, and
+checked the settled record. That was local fixture qualification, not a
+claim about every third-party MCP deployment, and it no longer runs.
 
-Explicit legacy HTTP+SSE is also qualified at MCP 2024-11-05 using the same
-SDK pin. `TestMCPLegacyReferenceServerRoundTrip` registers and recertifies a legacy
-server, round-trips its portable configuration, publishes the tool and calls it
-through a legacy reference client. It checks the resulting durable settlement.
-Public-handler fixtures cover exact argument-byte identity, authority revocation,
-modern/legacy session isolation and refusal when a replica lacks the live stream.
+Explicit legacy HTTP+SSE was also qualified at MCP 2024-11-05 using the
+same SDK pin. A former fixture registered and recertified a legacy server,
+round-tripped its portable configuration, published the tool, and called it
+through a legacy reference client. It checked the resulting durable
+settlement. Public-handler fixtures covered exact argument-byte identity,
+authority revocation, modern and legacy session isolation, and refusal when
+a replica lacked the live stream.
 Legacy deployments require connection affinity between the SSE GET and its
 POSTs. Modern sessions never fall back to the legacy transport.
 
-`TestWorkloadAgentDelegatesKeyForTools` in
-`tests/integration/workload_identity_test.go` exercises a delegated agent through
-the shared tool path using a local workload issuer and signing fixture. It checks
+A former process test exercised a delegated agent through the shared tool
+path using a local workload issuer and signing fixture. It checked
 the downstream audience-bound agent signature, refusal at another audience,
 one-use credentials, consent, session isolation and shared budget accounting.
 
-Per-user OAuth is qualified separately. Experimental stdio is covered by a
-locally built, owner-permitted executable fixture through the shared consumer
+Per-user OAuth was qualified separately. Experimental stdio was covered by
+a locally built, owner-permitted executable fixture through the shared consumer
 path. It preserves the unconfined native execution contract and does not provide
 a sandbox. See [MCP servers](mcp-servers.md#experimental-stdio-executables) for
 deployment, permission and lifecycle requirements.
@@ -195,11 +192,10 @@ See [MCP server use](mcp-servers.md) for supported calls and rollback behavior.
 
 ## A2A evidence
 
-Local reference fixtures cover the pinned A2A 0.3 and 1.0 JSON-RPC adapters.
-`TestWorkloadAgentDelegatesKeyForA2A` in
-`tests/integration/workload_identity_test.go` exercises delegated sends,
-callbacks, caller/agent/pair accounting, consent, renewal, project operator
-access and revocation. `TestA2AOAuthGrantLifecycle` verifies that task actions
+Former local reference fixtures covered the pinned A2A 0.3 and 1.0
+JSON-RPC adapters. A former process test exercised delegated sends,
+callbacks, caller, agent and pair accounting, consent, renewal, project
+operator access, and revocation. Another verified that task actions
 use their original grant and endpoint after publication replacement and refuse
 revoked grants. OLP cannot observe or stop hidden remote iterations.
 
@@ -367,9 +363,9 @@ including inherited hierarchy budgets and named-route limits. Observed usage is
 still priced from the target's input/output token prices, including for the
 `price` routing strategy, and accounted on unlimited calls.
 
-Local evidence is the [endpoint ledger](../../tests/clients/m9-endpoints.json)
-and the focused `CLIENTS=m9-go tests/clients/run.sh` suite. Live-provider
-qualification remains required; this evidence does not qualify unimplemented API families.
+Former local evidence came from an endpoint ledger and a focused client
+suite, both subtracted. No local or live qualification runs today, and that
+historical evidence does not qualify unimplemented API families.
 
 ### OCR and Web search
 
@@ -484,10 +480,10 @@ Only the wire to Brave is a query. Offset pagination is native-only because
 the frozen source contract has no offset field, so transformed Brave calls
 always read the first page.
 
-Local evidence is the [endpoint ledger](../../tests/clients/m9-endpoints.json),
-the focused `CLIENTS=m9-go tests/clients/run.sh` suite and
-`tests/gateway/ocr-search.spec.ts`. Live-provider qualification remains
-required; this evidence does not qualify unimplemented API families. Google's
+Former local evidence came from an endpoint ledger, a focused client
+suite, and a browser journey, all subtracted. No local or live
+qualification runs today, and that historical evidence does not qualify
+unimplemented API families. Google's
 Custom Search JSON API is excluded because the provider discontinued new
 enrollment and the API sunsets on 2027-01-01.
 
@@ -912,13 +908,10 @@ evidence retries only within retention; no guessed job or blind resubmission.
 
 ## SDK and live-provider checks
 
-The deterministic JavaScript smoke suite pins its OpenAI, Anthropic and Google
-GenAI SDK versions in `tests/sdk-smoke/package.json`. These
-are mock protocol checks, not a claim that every upstream model or every SDK
-version has live certification. Live-provider checks are dispatched separately
-with selected-provider credentials; use their result for the actual provider,
-model and capability revision. Nothing is certified live when that workflow has
-not run.
+JavaScript SDK smoke suites and dispatched live-provider checks were
+subtracted with the test system. Nothing in this section is certified live.
+Validate an SDK or provider change by running it against a gateway and
+recording the exact SDK, provider, model, and capability revision used.
 
 Provider-owned response/conversation/file IDs are not universally portable.
 Referencing a resource across independently selected providers is unsupported
@@ -930,18 +923,17 @@ tables above and the endpoint registry are the maintained support records;
 update them with the conformance fixtures when semantics change, rather than
 introducing a second independently maintained matrix.
 
-The ordinary console SDK examples are executed verbatim by the pinned official
-JavaScript and Python SDK smoke harness, including typed authentication refusal
-and disabled automatic retries. This qualifies controlled gateway fixture
-behavior; the browser's separate connection check and these fixtures do not
+The ordinary console SDK examples were formerly executed verbatim by a
+pinned SDK smoke harness. That harness was subtracted, so treat the
+examples as starting points to verify against your gateway. They do not
 establish live-provider or production-performance qualification.
 
 ## Provider qualification and support boundaries
 
 | Tier | What it adds | Evidence required |
 | --- | --- | --- |
-| Reviewed preset | A catalog entry over an existing dialect and hosting composition | A vendor contract test pinning documented endpoints, unsupported parameters, usage shape, stream terminal events and error envelopes |
-| First-party profile or codec | A new profile, hosting composition, authentication mode or dialect codec in `internal/connectors`, `internal/protocols` or `internal/operations` | Conformance fixtures, connector composition tests, a live-provider test behind `liveproviders`, and pricing coverage |
+| Reviewed preset | A catalog entry over an existing dialect and hosting composition | Vendor contract fixtures in the safety net where the package is allowlisted, pinning documented endpoints, unsupported parameters, usage shape, stream terminal events and error envelopes |
+| First-party profile or codec | A new profile, hosting composition, authentication mode or dialect codec in `internal/connectors`, `internal/protocols` or `internal/operations` | Conformance fixtures in the safety net where the package is allowlisted, pricing coverage, and a recorded manual run against a stub or real provider |
 | Plugin | Authentication and hosting around a built-in dialect, supplied by an operator ([plugins](plugins.md)) | The plugin's own manifest review and origin approval |
 
 No tier certifies a model: certification stays a live, exact-tuple probe run by

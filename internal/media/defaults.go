@@ -10,7 +10,9 @@ import (
 	"strings"
 
 	"github.com/tyk-swe/olp/internal/connectors"
+	"github.com/tyk-swe/olp/internal/mediacontract"
 	"github.com/tyk-swe/olp/internal/oif"
+	"github.com/tyk-swe/olp/internal/protocols/wire"
 	"github.com/tyk-swe/olp/internal/vendors"
 )
 
@@ -343,7 +345,7 @@ func applyConfiguredField(r *Request, name string, raw json.RawMessage) *Error {
 }
 
 func configuredMultipartFields(name string, raw json.RawMessage) ([]Field, *Error) {
-	if slices.Contains([]string{"include", "timestamp_granularities", "known_speaker_names", "known_speaker_references"}, name) {
+	if mediacontract.RepeatedMultipartDefault(name) {
 		var values []string
 		if json.Unmarshal(raw, &values) != nil || len(values) == 0 {
 			return nil, configuredFailure(name, "requires a nonempty array of strings in multipart")
@@ -378,7 +380,7 @@ func validateConfiguredResponse(r *Request) *Error {
 		if r.Format != nil {
 			format = *r.Format
 		}
-		if !slices.Contains([]string{"json", "text", "srt", "verbose_json", "vtt", "diarized_json"}, format) || r.Op == OpTranslation && format == "diarized_json" {
+		if r.Op == OpTranslation && !wire.ValidTranslationResponseFormat(format) || r.Op == OpTranscription && !wire.ValidTranscriptionResponseFormat(format) {
 			return configuredFailure("response_format", "is not supported")
 		}
 		if r.Temperature != nil && (*r.Temperature < 0 || *r.Temperature > 1) {

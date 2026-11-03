@@ -1,4 +1,5 @@
 import { gatewayFetch } from '$lib/api/gateway';
+import { validRouteSlug } from '$lib/routeIdentity';
 import {
   nativeObject,
   parseNativeJSON,
@@ -129,7 +130,7 @@ export async function runNativeOperation(
 ): Promise<NativeOperationResult> {
   if (!nativeDialects(operation).includes(dialect))
     throw new Error('Choose a registered native dialect for this operation.');
-  if (!/^[a-z0-9][a-z0-9._-]{0,127}$/.test(route))
+  if (!validRouteSlug(route))
     throw new Error('Choose an active published route slug.');
   if (!key.startsWith('olp_') || key.length > 512)
     throw new Error('Enter an inference API key for this route.');

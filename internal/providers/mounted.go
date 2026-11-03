@@ -56,7 +56,7 @@ func LoadMounted(path string, policy *egress.Policy) (map[string]runtime.Mounted
 		// revision pins, and the gateway requires this configuration to match
 		// that revision: only the credential is mounted.
 		if entry.Configuration.Kind != KindPlugin {
-			if err = entry.Configuration.Validate(policy); err != nil {
+			if err = entry.Configuration.ValidateAndNormalize(policy); err != nil {
 				return nil, err
 			}
 		}

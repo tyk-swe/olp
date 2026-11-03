@@ -3,7 +3,9 @@ package gateway
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -20,6 +22,25 @@ import (
 	"github.com/tyk-swe/olp/internal/secrets"
 	"github.com/tyk-swe/olp/tests/fixtures"
 )
+
+// streamedItem is the output item the streaming-only upstream completes.
+func streamedItem(text string) string {
+	return `{"id":"msg_1","type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","text":` + fmt.Sprintf("%q", text) + `,"annotations":[]}]}`
+}
+
+// streamedEvents is a Responses stream that delivers its output item only in
+// response.output_item.done and leaves the terminal response's output empty.
+func streamedEvents(text string) []string {
+	return []string{
+		`{"type":"response.created","sequence_number":0,"response":{"id":"resp_1","object":"response","status":"in_progress","model":"` + modelA + `","output":[]}}`,
+		`{"type":"response.output_item.added","sequence_number":1,"output_index":0,"item":{"id":"msg_1","type":"message","role":"assistant","status":"in_progress","content":[]}}`,
+		`{"type":"response.output_text.delta","sequence_number":2,"item_id":"msg_1","output_index":0,"content_index":0,"delta":` + fmt.Sprintf("%q", text) + `}`,
+		`{"type":"response.output_item.done","sequence_number":3,"output_index":0,"item":` + streamedItem(text) + `}`,
+		`{"type":"response.completed","sequence_number":4,"response":{"id":"resp_1","object":"response","status":"completed","model":"` + modelA + `","output":[],"usage":{"input_tokens":4,"output_tokens":6,"total_tokens":10}}}`,
+	}
+}
+
+const benchChat = `{"id":"chatcmpl-bench","object":"chat.completion","created":1800000000,"model":"gpt-bench","choices":[{"index":0,"message":{"role":"assistant","content":"The capital of France is Paris, a city on the Seine known for its museums, its cafes and the tower that carries the name of its engineer."},"finish_reason":"stop"}],"usage":{"prompt_tokens":24,"completion_tokens":31,"total_tokens":55}}`
 
 type cacheMemory struct {
 	mu       sync.Mutex
@@ -245,6 +266,25 @@ func TestResponseCacheClientSurfaces(t *testing.T) {
 			}
 		})
 	}
+}
+
+func bedrockEvent(t *testing.T, kind string, payload any) *eventstream.Message {
+	t.Helper()
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := eventstream.Headers{}
+	h.Set(":message-type", eventstream.StringValue("event"))
+	h.Set(":event-type", eventstream.StringValue(kind))
+	return &eventstream.Message{Headers: h, Payload: raw}
+}
+
+func bedrockMetadata(payload string) *eventstream.Message {
+	h := eventstream.Headers{}
+	h.Set(":message-type", eventstream.StringValue("event"))
+	h.Set(":event-type", eventstream.StringValue("metadata"))
+	return &eventstream.Message{Headers: h, Payload: []byte(payload)}
 }
 
 func cacheBedrockStream(t *testing.T) []byte {

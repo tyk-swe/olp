@@ -10,7 +10,6 @@ import (
 	"io"
 	"mime"
 	"net/http"
-	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -21,6 +20,7 @@ import (
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/management/contract"
 	"github.com/tyk-swe/olp/internal/pluginindex"
+	pluginidentity "github.com/tyk-swe/olp/internal/plugins/identity"
 	"github.com/tyk-swe/olp/internal/secrets"
 	"github.com/tyk-swe/olp/sdk/plugin/abi"
 )
@@ -31,11 +31,9 @@ const maxModuleBytes = 32 << 20
 // maxInstalled bounds how many plugin digests an installation holds.
 const maxInstalled = 64
 
-var digestPattern = regexp.MustCompile(`^[0-9a-f]{64}$`)
-
 // ValidDigest reports whether digest is the lowercase hexadecimal SHA-256
 // digest that identifies a plugin.
-func ValidDigest(digest string) bool { return digestPattern.MatchString(digest) }
+func ValidDigest(digest string) bool { return pluginidentity.ValidDigest(digest) }
 
 // Management serves provider plugin administration on the management API.
 // Only an owner with a user session installs, approves, permits and

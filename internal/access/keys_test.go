@@ -2,12 +2,84 @@ package access
 
 import (
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/tyk-swe/olp/internal/attribution"
 	"github.com/tyk-swe/olp/internal/limits"
 )
+
+func TestKeyValidationNormalizesCostLimits(t *testing.T) {
+	keyAmount, routeAmount, userAmount := " 1.25 ", " 2.50 ", " 3.75 "
+	source := "header"
+	input := keyInput{Name: "key", KeyPolicy: KeyPolicy{
+		Scopes: []string{"inference"}, AllowedRoutes: []string{}, DailyCostLimit: &keyAmount,
+		RouteLimits:   RouteLimits{"route": {MonthlyCostLimit: &routeAmount}},
+		EndUserSource: &source,
+		EndUserPolicy: &EndUserPolicy{Defaults: AdmissionLimits{WeeklyCostLimit: &userAmount}},
+	}}
+	if err := validateAndNormalizeKey(input, false); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name, got, want string
+	}{
+		{"key", *input.DailyCostLimit, "1.25"},
+		{"route", *input.RouteLimits["route"].MonthlyCostLimit, "2.50"},
+		{"end user", *input.EndUserPolicy.Defaults.WeeklyCostLimit, "3.75"},
+	} {
+		if tc.got != tc.want {
+			t.Errorf("%s cost limit = %q, want %q", tc.name, tc.got, tc.want)
+		}
+	}
+}
+
+func TestKeyRejectsInvalidEndUserLimits(t *testing.T) {
+	invalid := "invalid"
+	source := "header"
+	digest := strings.Repeat("a", 64)
+	for _, tc := range []struct {
+		name   string
+		policy EndUserPolicy
+	}{
+		{name: "defaults", policy: EndUserPolicy{Defaults: AdmissionLimits{DailyCostLimit: &invalid}}},
+		{name: "override digest", policy: EndUserPolicy{Overrides: map[string]AdmissionLimits{"invalid": {}}}},
+		{name: "override limit", policy: EndUserPolicy{Overrides: map[string]AdmissionLimits{digest: {WeeklyCostLimit: &invalid}}}},
+		{name: "blocked digest", policy: EndUserPolicy{Blocked: []string{"invalid"}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			input := keyInput{Name: "key", KeyPolicy: KeyPolicy{
+				Scopes: []string{"inference"}, AllowedRoutes: []string{},
+				EndUserSource: &source, EndUserPolicy: &tc.policy,
+			}}
+			if err := validateAndNormalizeKey(input, false); err == nil {
+				t.Fatal("invalid end-user policy was accepted")
+			}
+		})
+	}
+}
+
+func TestBudgetAndTemplateValidationNormalizeCostLimits(t *testing.T) {
+	budgetAmount, templateAmount := " 4.50 ", " 5.75 "
+	budgets := AttributionBudgets{"team": {"app": {DailyCostLimit: &budgetAmount}}}
+	templates := LimitTemplates{"template": {MonthlyCostLimit: &templateAmount}}
+	if err := budgets.ValidateAndNormalize(); err != nil {
+		t.Fatal(err)
+	}
+	if err := templates.ValidateAndNormalize(); err != nil {
+		t.Fatal(err)
+	}
+	if got := *budgets["team"]["app"].DailyCostLimit; got != "4.50" {
+		t.Errorf("attribution budget = %q", got)
+	}
+	if got := *templates["template"].MonthlyCostLimit; got != "5.75" {
+		t.Errorf("template limit = %q", got)
+	}
+	if templateAmount != " 5.75 " {
+		t.Errorf("template source amount = %q", templateAmount)
+	}
+}
 
 func TestTaskAuthorityKeepsOwnerIdentityAndBindingLimits(t *testing.T) {
 	project, issuer := "project", "issuer"

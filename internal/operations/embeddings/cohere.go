@@ -15,6 +15,14 @@ import (
 var cohereInputTypes = []string{"search_document", "search_query", "classification", "clustering", "image"}
 var cohereEmbeddingTypes = []string{"float", "int8", "uint8", "binary", "ubinary", "base64"}
 
+func cohereOutputDimensions() []int64 {
+	return []int64{256, 512, 1024, 1536}
+}
+
+func cohereTruncationModes() []string {
+	return []string{"NONE", "START", "END"}
+}
+
 func cohereRequestSchema() []byte {
 	return operations.Raw(map[string]any{
 		"type": "object", "required": []string{"model", "input_type"},
@@ -30,8 +38,8 @@ func cohereRequestSchema() []byte {
 			"images":           map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
 			"inputs":           map[string]any{"type": "array", "items": map[string]any{"type": "object"}},
 			"embedding_types":  map[string]any{"type": "array", "items": map[string]any{"type": "string", "enum": cohereEmbeddingTypes}},
-			"output_dimension": map[string]any{"type": "integer", "enum": []int{256, 512, 1024, 1536}},
-			"truncate":         map[string]any{"type": "string", "enum": []string{"NONE", "START", "END"}},
+			"output_dimension": map[string]any{"type": "integer", "enum": cohereOutputDimensions()},
+			"truncate":         map[string]any{"type": "string", "enum": cohereTruncationModes()},
 		},
 	})
 }
@@ -45,14 +53,14 @@ func cohereDefaults() map[string]operations.Field {
 			return nil
 		})
 	}
-	positive := func(name string, values []int) operations.Field {
+	positive := func(name string, values []int64) operations.Field {
 		schema := map[string]any{"type": "integer", "minimum": 1}
 		if values != nil {
 			schema["enum"] = values
 		}
 		return operations.FieldSchema(schema, func(v oif.Value) error {
 			n, ok := operations.Int(v)
-			if !ok || n < 1 || values != nil && !slices.Contains(values, int(n)) {
+			if !ok || n < 1 || values != nil && !slices.Contains(values, n) {
 				return operations.Invalid(name, "Use a supported positive native Cohere v2 value.")
 			}
 			return nil
@@ -60,8 +68,8 @@ func cohereDefaults() map[string]operations.Field {
 	}
 	return map[string]operations.Field{
 		"input_type":       enum("input_type", cohereInputTypes),
-		"truncate":         enum("truncate", []string{"NONE", "START", "END"}),
-		"output_dimension": positive("output_dimension", []int{256, 512, 1024, 1536}),
+		"truncate":         enum("truncate", cohereTruncationModes()),
+		"output_dimension": positive("output_dimension", cohereOutputDimensions()),
 		"max_tokens":       positive("max_tokens", nil),
 		"embedding_types": operations.FieldSchema(map[string]any{"type": "array", "minItems": 1, "items": map[string]any{"type": "string", "enum": cohereEmbeddingTypes}}, func(v oif.Value) error {
 			_, err := requestedCohereTypes(v)
@@ -165,7 +173,7 @@ func liftCohereRequest(source oif.Request) (Request, error) {
 	}
 	if dimension := operations.Member(root, "output_dimension"); dimension.Kind() != oif.Absent {
 		n, ok := operations.Int(dimension)
-		if !ok || !slices.Contains([]int64{256, 512, 1024, 1536}, n) {
+		if !ok || !slices.Contains(cohereOutputDimensions(), n) {
 			return r, operations.Invalid("output_dimension", "Use a supported Embed v4 native output dimension.")
 		}
 		r.format.LogicalDimensions, r.format.DimensionsKnown = n, true

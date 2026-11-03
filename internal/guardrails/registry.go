@@ -93,20 +93,25 @@ func (r *Registry) Validate() error {
 	return nil
 }
 
-func scopeRank(scope string) int {
+func ValidAttachmentScope(scope string) bool {
+	_, valid := attachmentScopeRank(scope)
+	return valid
+}
+
+func attachmentScopeRank(scope string) (int, bool) {
 	switch scope {
 	case "installation":
-		return 0
+		return 0, true
 	case "organization":
-		return 1
+		return 1, true
 	case "project":
-		return 2
+		return 2, true
 	case "route", "toolset":
-		return 3
+		return 3, true
 	case "api-key":
-		return 4
+		return 4, true
 	}
-	return 5
+	return 5, false
 }
 
 // Entries only adds policies. There is deliberately no overriding or exclusion
@@ -124,8 +129,10 @@ func (r *Registry) Entries(b Boundary) ([]Entry, error) {
 	}
 	sort.SliceStable(attachments, func(i, j int) bool {
 		x, y := attachments[i], attachments[j]
-		if scopeRank(x.Scope) != scopeRank(y.Scope) {
-			return scopeRank(x.Scope) < scopeRank(y.Scope)
+		xRank, _ := attachmentScopeRank(x.Scope)
+		yRank, _ := attachmentScopeRank(y.Scope)
+		if xRank != yRank {
+			return xRank < yRank
 		}
 		xLegacy := x.Scope == "route" && r.MigratedRoutes[x.ScopeID] && r.Policies[x.PolicyRevisionID].PolicyID == x.ID
 		yLegacy := y.Scope == "route" && r.MigratedRoutes[y.ScopeID] && r.Policies[y.PolicyRevisionID].PolicyID == y.ID

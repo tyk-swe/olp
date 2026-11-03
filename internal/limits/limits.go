@@ -26,6 +26,7 @@ import (
 	_ "embed"
 	"encoding/hex"
 	"errors"
+	"math"
 	"strconv"
 	"strings"
 	"sync"
@@ -33,6 +34,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/tyk-swe/olp/internal/coordination"
+	"github.com/tyk-swe/olp/internal/pricingpolicy"
 )
 
 //go:embed scripts/reserve_limits.lua
@@ -123,6 +125,14 @@ const (
 	// every other release.
 	settleTimeout = 100 * time.Millisecond
 )
+
+func ValidRequestLimit(value *int64) bool {
+	return value == nil || *value > 0 && *value <= math.MaxInt32
+}
+
+func ValidTokenLimit(value *int64) bool {
+	return value == nil || *value > 0 && *value <= MaxCounter
+}
 
 // Dimension names the budget that rejected a reservation.
 type Dimension string
@@ -419,26 +429,7 @@ func (r Request) Validate() error {
 // exactly: at most twelve integer and twelve fractional digits, no sign and no
 // exponent.
 func ValidCostLimit(value string) bool {
-	integer, fraction := value, ""
-	if before, after, ok := strings.Cut(value, "."); ok {
-		integer, fraction = before, after
-		if len(fraction) < 1 || len(fraction) > 12 {
-			return false
-		}
-	}
-	if len(integer) < 1 || len(integer) > 12 {
-		return false
-	}
-	nonzero := false
-	for _, part := range [...]string{integer, fraction} {
-		for index := 0; index < len(part); index++ {
-			if part[index] < '0' || part[index] > '9' {
-				return false
-			}
-			nonzero = nonzero || part[index] != '0'
-		}
-	}
-	return nonzero
+	return pricingpolicy.ValidAmount(value) && strings.Trim(value, "0.") != ""
 }
 
 // validLookup mirrors the character set that keeps a lookup safe inside a

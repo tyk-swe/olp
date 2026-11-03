@@ -20,9 +20,9 @@ import (
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/geminilifecycle"
 	"github.com/tyk-swe/olp/internal/oif"
-	"github.com/tyk-swe/olp/internal/protocols/openai"
 	"github.com/tyk-swe/olp/internal/protocols/sse"
 	"github.com/tyk-swe/olp/internal/resources"
+	"github.com/tyk-swe/olp/internal/routeidentity"
 	"github.com/tyk-swe/olp/internal/usage"
 )
 
@@ -104,7 +104,7 @@ func (s *Server) geminiInteractionCreate(w http.ResponseWriter, r *http.Request)
 		maxBody = len(body)
 	}
 	input, err := geminilifecycle.ParseInteractionRequest(body, maxBody)
-	if err != nil || !openai.RouteSlug.MatchString(input.Model) {
+	if err != nil || !routeidentity.ValidSlug(input.Model) {
 		fail(invalidRequest("invalid_interaction_request", "The Gemini Interaction request is malformed.", nil))
 		return
 	}

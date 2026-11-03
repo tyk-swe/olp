@@ -6,7 +6,10 @@
   import { createQuery } from '@tanstack/svelte-query';
   import type { Provider } from './api/providers';
   import { providerKeys } from './providerKeys';
-  import type { ConfigurationDraft } from './configurationDraft.svelte';
+  import {
+    networkCredentialPath,
+    type ConfigurationDraft
+  } from './configurationDraft.svelte';
   import type { RunProviderAction } from './providerEditor';
   import {
     createNetworkCredential,
@@ -51,9 +54,7 @@
     queryKey: providerKeys.networkCredentials(provider.id),
     queryFn: ({ signal }) => listNetworkCredentials(provider.id, signal)
   }));
-  const selected = $derived(
-    draft.text(['options', 'network', 'credential_id'])
-  );
+  const selected = $derived(draft.text(networkCredentialPath));
   const missing = $derived(
     selected &&
       !credentials.data?.some((credential) => credential.id === selected)
@@ -74,7 +75,7 @@
       if (!isCurrent()) return;
       createNetworkCredentialIntent.reset();
       secret = '';
-      draft.set(['options', 'network', 'credential_id'], created.credential_id);
+      draft.set(networkCredentialPath, created.credential_id);
       onChange();
       pendingMutation = {
         previousEtag: submission.input[1],
@@ -142,7 +143,7 @@
       disabled={editingDisabled}
       onchange={(event) => {
         draft.set(
-          ['options', 'network', 'credential_id'],
+          networkCredentialPath,
           event.currentTarget.value || undefined
         );
         onChange();

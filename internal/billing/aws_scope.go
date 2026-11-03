@@ -4,12 +4,12 @@ import (
 	"bytes"
 	"encoding/json"
 	"io"
-	"net/netip"
 	"regexp"
 	"slices"
 	"strings"
 
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/connectors"
 )
 
 type awsScope struct {
@@ -21,7 +21,6 @@ type awsScope struct {
 }
 
 var awsAccountPattern = regexp.MustCompile(`^[0-9]{12}$`)
-var awsBucketPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$`)
 var awsRegionPattern = regexp.MustCompile(`^[a-z]{2}(-[a-z0-9]+)+-[0-9]+$`)
 
 func parseAWSScope(raw json.RawMessage) (awsScope, error) {
@@ -38,10 +37,7 @@ func parseAWSScope(raw json.RawMessage) (awsScope, error) {
 	if !awsAccountPattern.MatchString(scope.PayerAccountID) {
 		return awsScope{}, access.Invalid("scope.payer_account_id", "payer account ID must contain 12 digits")
 	}
-	if !awsBucketPattern.MatchString(scope.Bucket) || strings.Contains(scope.Bucket, "..") {
-		return awsScope{}, access.Invalid("scope.bucket", "bucket must be a valid S3 bucket name")
-	}
-	if _, err := netip.ParseAddr(scope.Bucket); err == nil {
+	if !connectors.ValidS3Bucket(scope.Bucket) {
 		return awsScope{}, access.Invalid("scope.bucket", "bucket must be a valid S3 bucket name")
 	}
 	if len(scope.ReportPrefix) < 1 || len(scope.ReportPrefix) > 1024 || strings.HasPrefix(scope.ReportPrefix, "/") || strings.HasSuffix(scope.ReportPrefix, "/") || strings.Contains(scope.ReportPrefix, "..") || strings.ContainsAny(scope.ReportPrefix, "\r\n\x00") {

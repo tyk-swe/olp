@@ -549,7 +549,7 @@ func (s *Server) validateRule(r *http.Request, tx pgx.Tx, input *ruleInput) erro
 	if err := ValidText("name", input.Name, 100); err != nil {
 		return err
 	}
-	if !slices.Contains(notifications.Events, input.Event) {
+	if !notifications.SupportsEvent(input.Event) {
 		return Invalid("event", "Use a supported notification event.")
 	}
 	switch input.Event {

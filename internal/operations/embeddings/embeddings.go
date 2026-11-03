@@ -210,7 +210,7 @@ func liftRequest(source oif.Request, id string) (Request, error) {
 					return r, operations.Invalid("output_dtype", "The native vector dtype is not supported by this dialect.")
 				}
 			}
-			if v, present := root.Lookup("input_type"); present && !operations.Optional(v) && !slices.Contains([]string{"query", "document"}, operations.String(v)) {
+			if v, present := root.Lookup("input_type"); present && !operations.Optional(v) && !slices.Contains(voyageInputTypes(), operations.String(v)) {
 				return r, operations.Invalid("input_type", "Use query, document or native null.")
 			}
 			if v, present := root.Lookup("truncation"); present && v.Kind() != oif.Boolean {
@@ -284,7 +284,7 @@ func liftRequest(source oif.Request, id string) (Request, error) {
 				return r, operations.Invalid("embeddingTypes", "Use native float or binary embedding types.")
 			}
 			for _, v := range types.Elements() {
-				if operations.String(v) != "float" && operations.String(v) != "binary" {
+				if !slices.Contains(bedrockEmbeddingTypes(), operations.String(v)) {
 					return r, operations.Invalid("embeddingTypes", "The requested Titan representation is unavailable.")
 				}
 			}
@@ -318,7 +318,7 @@ func liftRequest(source oif.Request, id string) (Request, error) {
 		if v, present := root.Lookup("prompt_name"); present && !operations.Optional(v) && v.Kind() != oif.String {
 			return r, operations.Invalid("prompt_name", "Use a prompt name or native null.")
 		}
-		if v, present := root.Lookup("truncation_direction"); present && !slices.Contains([]string{"left", "Left", "right", "Right"}, operations.String(v)) {
+		if v, present := root.Lookup("truncation_direction"); present && !slices.Contains(teiTruncationDirections(), operations.String(v)) {
 			return r, operations.Invalid("truncation_direction", "Use the native left or right direction.")
 		}
 	}
