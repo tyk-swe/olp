@@ -48,7 +48,10 @@ describe('usage estimate presentation', () => {
   it('reports a match when the difference rounds to zero', () => {
     expect(
       presentEstimate({ ...totals, estimated_input_tokens: '100.001' })
-    ).toMatchObject({ error: '0.0%', note: 'Estimates matched reported input.' });
+    ).toMatchObject({
+      error: '0.0%',
+      note: 'Estimates matched reported input.'
+    });
   });
 
   it('distinguishes no comparable attempts from attempts with no reported tokens', () => {
