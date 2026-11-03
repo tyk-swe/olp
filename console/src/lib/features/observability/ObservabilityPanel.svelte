@@ -34,8 +34,12 @@
     focusDatasetStatus,
     lagSeconds,
     sinkSettingsSummary,
+    sinkStreamOptions,
+    sinkTypeFormats,
+    sinkTypeLabels,
     streamState,
-    streamStatuses
+    streamStatuses,
+    stripeMeterValues
   } from '$lib/features/observability/presentation';
   import { observabilityKeys } from '$lib/features/observability/observabilityKeys';
 
@@ -110,53 +114,6 @@
   let error = $state('');
   let notice = $state('');
 
-  const typeFormats: Record<string, { value: string; label: string }[]> = {
-    https: [
-      { value: 'json', label: 'JSON' },
-      { value: 'cloudevents', label: 'CloudEvents' }
-    ],
-    otlp_logs: [{ value: 'otlp', label: 'OTLP logs' }],
-    s3: [
-      { value: 'jsonl', label: 'JSON Lines' },
-      { value: 'csv_gzip', label: 'FOCUS 1.4 (gzip CSV)' }
-    ],
-    gcs: [
-      { value: 'jsonl', label: 'JSON Lines' },
-      { value: 'csv_gzip', label: 'FOCUS 1.4 (gzip CSV)' }
-    ],
-    azure_blob: [
-      { value: 'jsonl', label: 'JSON Lines' },
-      { value: 'csv_gzip', label: 'FOCUS 1.4 (gzip CSV)' }
-    ],
-    stripe_meter: [{ value: 'stripe', label: 'Stripe meter events' }]
-  };
-  const typeLabels: Record<string, string> = {
-    https: 'HTTPS',
-    otlp_logs: 'OTLP logs',
-    s3: 'S3',
-    gcs: 'GCS',
-    azure_blob: 'Azure Blob',
-    stripe_meter: 'Stripe meter'
-  };
-  const streamOptions = [
-    { value: 'requests', label: 'Requests' },
-    { value: 'attempts', label: 'Attempts' },
-    { value: 'usage_rollups', label: 'Usage rollups' },
-    { value: 'guardrail_decisions', label: 'Guardrail decisions' },
-    { value: 'audit', label: 'Audit' },
-    { value: 'metering', label: 'Metering' },
-    { value: 'runs', label: 'Runs (gateway observed)' },
-    { value: 'trace_spans', label: 'Trace spans (client asserted)' },
-    { value: 'focus', label: 'FOCUS' }
-  ];
-  const stripeMeterValues = [
-    { value: 'charge', label: 'Charge' },
-    { value: 'cost', label: 'Cost' },
-    { value: 'input_tokens', label: 'Input tokens' },
-    { value: 'output_tokens', label: 'Output tokens' },
-    { value: 'total_tokens', label: 'Total tokens' },
-    { value: 'requests', label: 'Requests' }
-  ];
   let editingSink = $state<ExportSink | null>(null);
   let sinkName = $state('');
   let sinkType = $state<ExportSink['type']>('https');
@@ -196,7 +153,7 @@
   const outcomeVisible = $derived(sinkFormat !== 'csv_gzip');
 
   $effect(() => {
-    const formats = typeFormats[sinkType] ?? typeFormats.https;
+    const formats = sinkTypeFormats[sinkType] ?? sinkTypeFormats.https;
     if (!formats.some((f) => f.value === sinkFormat))
       sinkFormat = formats[0].value;
   });
@@ -724,8 +681,8 @@
               id="sink-type"
               bind:value={sinkType}
               disabled={!!editingSink}
-              >{#each Object.keys(typeFormats) as type (type)}<option
-                  value={type}>{typeLabels[type] ?? type}</option
+              >{#each Object.keys(sinkTypeFormats) as type (type)}<option
+                  value={type}>{sinkTypeLabels[type] ?? type}</option
                 >{/each}</select
             >
           </div>
@@ -748,14 +705,14 @@
               id="sink-format"
               bind:value={sinkFormat}
               disabled={!!editingSink}
-              >{#each typeFormats[sinkType] ?? [] as option (option.value)}<option
+              >{#each sinkTypeFormats[sinkType] ?? [] as option (option.value)}<option
                   value={option.value}>{option.label}</option
                 >{/each}</select
             >
           </div>
           <fieldset class="form-field">
             <legend>Streams</legend>
-            {#each streamOptions as stream (stream.value)}
+            {#each sinkStreamOptions as stream (stream.value)}
               {#if stream.value !== 'focus' || focusVisible}
                 <label class="inline-check"
                   ><input

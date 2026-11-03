@@ -60,3 +60,54 @@ export function sinkSettingsSummary(sink: ExportSink): string {
   }
   return parts.join(' · ');
 }
+
+export const sinkTypeFormats: Record<
+  string,
+  { value: string; label: string }[]
+> = {
+  https: [
+    { value: 'json', label: 'JSON' },
+    { value: 'cloudevents', label: 'CloudEvents' }
+  ],
+  otlp_logs: [{ value: 'otlp', label: 'OTLP logs' }],
+  s3: [
+    { value: 'jsonl', label: 'JSON Lines' },
+    { value: 'csv_gzip', label: 'FOCUS 1.4 (gzip CSV)' }
+  ],
+  gcs: [
+    { value: 'jsonl', label: 'JSON Lines' },
+    { value: 'csv_gzip', label: 'FOCUS 1.4 (gzip CSV)' }
+  ],
+  azure_blob: [
+    { value: 'jsonl', label: 'JSON Lines' },
+    { value: 'csv_gzip', label: 'FOCUS 1.4 (gzip CSV)' }
+  ],
+  stripe_meter: [{ value: 'stripe', label: 'Stripe meter events' }]
+};
+export const sinkTypeLabels: Record<string, string> = {
+  https: 'HTTPS',
+  otlp_logs: 'OTLP logs',
+  s3: 'S3',
+  gcs: 'GCS',
+  azure_blob: 'Azure Blob',
+  stripe_meter: 'Stripe meter'
+};
+export const sinkStreamOptions = [
+  { value: 'requests', label: 'Requests' },
+  { value: 'attempts', label: 'Attempts' },
+  { value: 'usage_rollups', label: 'Usage rollups' },
+  { value: 'guardrail_decisions', label: 'Guardrail decisions' },
+  { value: 'audit', label: 'Audit' },
+  { value: 'metering', label: 'Metering' },
+  { value: 'runs', label: 'Runs (gateway observed)' },
+  { value: 'trace_spans', label: 'Trace spans (client asserted)' },
+  { value: 'focus', label: 'FOCUS' }
+];
+export const stripeMeterValues = [
+  { value: 'charge', label: 'Charge' },
+  { value: 'cost', label: 'Cost' },
+  { value: 'input_tokens', label: 'Input tokens' },
+  { value: 'output_tokens', label: 'Output tokens' },
+  { value: 'total_tokens', label: 'Total tokens' },
+  { value: 'requests', label: 'Requests' }
+];
