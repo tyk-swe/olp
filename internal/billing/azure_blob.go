@@ -36,7 +36,7 @@ const (
 	azureImportTimeout = time.Minute
 )
 
-var azureMissing = errors.New("blob missing")
+var errAzureMissing = errors.New("blob missing")
 
 type azureManifest struct {
 	ByteCount    int64 `json:"byteCount"`
@@ -123,7 +123,7 @@ func azureSDKError(err error) error {
 	if errors.As(err, &response) {
 		switch response.StatusCode {
 		case http.StatusNotFound:
-			return failFetch("status", azureMissing)
+			return failFetch("status", errAzureMissing)
 		case http.StatusUnauthorized, http.StatusForbidden:
 			return failFetch("credential", errors.New("Azure storage rejected the credential"))
 		default:
@@ -244,7 +244,7 @@ func fetchAzure(ctx context.Context, client *http.Client, auth *connectors.Auth,
 		for index, run := range candidates {
 			days, nextTotals, err := reader.readRun(fetchCtx, run, totals, azureMaxAggregates-aggregates, earliest, today)
 			totals = nextTotals
-			if errors.Is(err, azureMissing) && index+1 < len(candidates) {
+			if errors.Is(err, errAzureMissing) && index+1 < len(candidates) {
 				continue
 			}
 			if err != nil {

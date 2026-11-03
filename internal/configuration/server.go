@@ -199,8 +199,8 @@ func (s *Server) applyEndpoint(r *http.Request, _ access.Principal) (access.Repl
 	if len(result.Conflicts) > 0 || len(result.Blockers) > 0 {
 		body := map[string]any{
 			"type":      "https://openllmproxy.dev/problems/configuration_not_applicable",
-			"title":     http.StatusText(409),
-			"status":    409,
+			"title":     http.StatusText(http.StatusConflict),
+			"status":    http.StatusConflict,
 			"detail":    "The artifact cannot be applied while conflicts or blockers remain.",
 			"digest":    result.Digest,
 			"actions":   result.Actions,

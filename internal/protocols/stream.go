@@ -16,7 +16,7 @@ import (
 	"github.com/tyk-swe/olp/internal/protocols/sse"
 )
 
-var streamDone = errors.New("terminal native event")
+var errStreamDone = errors.New("terminal native event")
 
 // Stream keeps the existing executor's backpressure and commitment boundary.
 // Native streams retain extensions. Translators retain at most maxEvent bytes
@@ -136,7 +136,7 @@ func emitObservedEvent(event oif.Event, observe func(oif.Event) error, parsed er
 			return err
 		}
 	}
-	if parsed != nil && !errors.Is(parsed, streamDone) {
+	if parsed != nil && !errors.Is(parsed, errStreamDone) {
 		return parsed
 	}
 	if frame != nil {
@@ -321,11 +321,11 @@ func streamAnthropicEvents(r io.Reader, limit int, route string, emit wire.Emit,
 		}
 		encoded = eventFrame(kind, f)
 		if done {
-			return streamDone
+			return errStreamDone
 		}
 		return nil
 	})
-	if err != nil && !errors.Is(err, streamDone) {
+	if err != nil && !errors.Is(err, errStreamDone) {
 		return c, streamError(err)
 	}
 	if !done {

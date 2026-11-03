@@ -156,7 +156,7 @@ func (s *Server) putImport(r *http.Request, _ access.Principal) (access.Reply, e
 	if input.Enabled != nil {
 		enabled = *input.Enabled
 	}
-	var scope json.RawMessage = json.RawMessage(`{}`)
+	scope := json.RawMessage(`{}`)
 	if existing != nil {
 		scope = existing.Scope
 	}
