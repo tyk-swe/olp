@@ -125,9 +125,11 @@ func ApplyImport(ctx context.Context, tx pgx.Tx, providerID, source string, enab
 	if err != nil {
 		return err
 	}
-	if existing, err := ReadImportState(ctx, tx, providerID); err != nil {
+	existing, err := ReadImportState(ctx, tx, providerID)
+	if err != nil {
 		return err
-	} else if existing == nil {
+	}
+	if existing == nil {
 		_, err = tx.Exec(ctx, `INSERT INTO olp.provider_billing_imports
 			(provider_id,source,credential_id,scope,enabled,etag,created_by,next_import_at)
 			VALUES($1::uuid,$2,$3::uuid,$4::jsonb,$5,$6,$7::uuid,now())`,
