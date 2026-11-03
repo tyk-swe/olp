@@ -1,7 +1,6 @@
 import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 import { json, route, serve } from '$lib/api/test/transport';
-import { authLifecycle } from '$lib/features/access/session/lifecycle';
 import type { ProviderKindCapability } from './api/models';
 import type { Provider, ProviderProbe } from './api/providers';
 import StateHarness from '../../../../tests/unit/support/StateHarness.svelte';
@@ -86,18 +85,7 @@ function serveWizard(probe = vi.fn(() => probeResponse(true))) {
       return json({ provider_kind: spec.kind, capabilities: [] });
     return json({ title: `Unexpected request ${request.method} ${path}` }, 404);
   });
-  serve(handler);
-  authLifecycle.establishSession({
-    user: {
-      id: 'owner',
-      email: 'owner@example.test',
-      display_name: 'Owner',
-      role: 'owner',
-      access_scope: 'global',
-      operations: ['read', 'configure']
-    },
-    csrf_token: 'fixture-csrf'
-  });
+  serve(handler, ['read', 'configure']);
   return { create, handler, probe };
 }
 
