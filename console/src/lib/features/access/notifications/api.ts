@@ -57,7 +57,7 @@ export async function updateNotificationDestination(
     {
       params: {
         path: { notification_destination_id: destination.id },
-        header: { 'If-Match': destination.etag }
+        header: { 'If-Match': `"${destination.etag}"` }
       },
       body: input
     }
@@ -104,7 +104,7 @@ export async function updateNotificationRule(
     {
       params: {
         path: { notification_rule_id: rule.id },
-        header: { 'If-Match': rule.etag }
+        header: { 'If-Match': `"${rule.etag}"` }
       },
       body: input
     }
