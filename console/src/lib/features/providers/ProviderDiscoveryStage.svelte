@@ -3,9 +3,9 @@
   import type {
     Provider,
     ProviderProbe
-  } from '$lib/features/providers/api/providers';
+  } from '$lib/features/providers/providers';
   import { declaresModels } from '$lib/features/providers/profiles';
-  import { listProviderProfiles } from '$lib/features/providers/api/profiles';
+  import { listProviderProfiles } from '$lib/features/providers/providerProfiles';
   import { probeSummary } from '$lib/features/providers/providerEditor';
   import { providerKeys } from '$lib/features/providers/providerKeys';
 

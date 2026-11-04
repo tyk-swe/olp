@@ -4,9 +4,9 @@
     nativeEntries,
     nativeObject,
     type NativePath
-  } from '$lib/json/nativeJson';
+  } from '$lib/nativeJson';
   import type { ConfigurationDraft } from './configurationDraft.svelte';
-  import type { FieldSchema } from './api/profiles';
+  import type { FieldSchema } from './providerProfiles';
   import NativeValueField from './NativeValueField.svelte';
   let {
     draft,

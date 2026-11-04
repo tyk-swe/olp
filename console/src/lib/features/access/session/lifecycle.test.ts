@@ -1,6 +1,6 @@
 import { QueryClient } from '@tanstack/svelte-query';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { ApiProblem } from '$lib/api/http';
+import { ApiProblem } from '$lib/management/http';
 import { clearCsrfToken, getCsrfToken } from './csrf';
 import { AuthenticationLifecycle } from './lifecycle';
 import type { AuthenticatedSession } from './state';

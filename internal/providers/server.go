@@ -15,7 +15,7 @@ import (
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/plugins"
-	"github.com/tyk-swe/olp/internal/runtime"
+	"github.com/tyk-swe/olp/internal/release"
 	"github.com/tyk-swe/olp/internal/secretstore"
 )
 
@@ -32,7 +32,7 @@ type QuotaSource interface {
 type Server struct {
 	Access          *access.Server
 	Egress          *egress.Policy
-	ExternalSecrets runtime.ExternalSecrets
+	ExternalSecrets release.ExternalSecrets
 	// Unconfined is the deployment's unconfined plugin tier, or nil where it
 	// enables none: providers may pin unconfined plugins only where it does.
 	Unconfined *plugins.Unconfined

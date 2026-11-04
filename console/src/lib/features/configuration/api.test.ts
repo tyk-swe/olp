@@ -13,7 +13,7 @@ import {
   type ConfigurationPlan,
   type ExternalCredentialReference
 } from './api';
-import type { ProblemDetails } from '$lib/api/http';
+import type { ProblemDetails } from '$lib/management/http';
 
 vi.mock('$lib/features/access/session/authMiddleware', () => ({
   createAuthMiddleware: () => ({

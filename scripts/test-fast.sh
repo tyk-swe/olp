@@ -4,6 +4,7 @@ cd "$(dirname "$0")/.."
 budget=60
 start=$(date +%s)
 go test -mod=readonly -vet=off -count=1 -timeout=60s \
+  ./cmd/olp \
   ./internal/secrets \
   ./internal/access \
   ./internal/billing \
@@ -15,7 +16,7 @@ go test -mod=readonly -vet=off -count=1 -timeout=60s \
   ./internal/operations/tokenization/estimate \
   ./internal/catalog \
   ./internal/limits \
-  ./internal/runtime \
+  ./internal/release \
   ./internal/routing \
   ./internal/guardrails \
   ./internal/signing \
@@ -24,7 +25,7 @@ go test -mod=readonly -vet=off -count=1 -timeout=60s \
   ./internal/mcpgrants \
   ./internal/gateway
 pnpm --dir console test --project unit --project svelte
-node --test scripts/check-docs.test.mjs scripts/check-release-version.test.mjs
+node --test scripts/check-docs.test.mjs scripts/check-release-version.test.mjs scripts/check-structure.test.mjs
 elapsed=$(( $(date +%s) - start ))
 printf 'test-fast: %ss (budget %ss)\n' "$elapsed" "$budget"
 if [ "$elapsed" -gt "$budget" ]; then

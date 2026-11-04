@@ -1,4 +1,4 @@
-import { gatewayFetch } from '$lib/api/gateway';
+import { gatewayFetch } from '$lib/management/gateway';
 
 import type { ApiKeySdk } from './sdkSnippets';
 export { SDK_OPTIONS, sdkSnippet } from './sdkSnippets';

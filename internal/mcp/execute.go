@@ -14,8 +14,8 @@ import (
 	"github.com/tyk-swe/olp/internal/agents"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/mcpservers"
+	"github.com/tyk-swe/olp/internal/release"
 	"github.com/tyk-swe/olp/internal/routing"
-	"github.com/tyk-swe/olp/internal/runtime"
 )
 
 const toolRateLeaseTTL = 150 * time.Second
@@ -114,7 +114,7 @@ type executeInput struct {
 	arguments json.RawMessage
 	releaseID string
 	callID    string
-	release   *runtime.Release
+	release   *release.Release
 	snapshot  *routing.Snapshot
 }
 
@@ -238,7 +238,7 @@ func (s *Server) dispatchToolCall(ctx context.Context, in executeInput, credenti
 			return dispatchResult{failure: s.refuseToolIdentity(ctx, in, reservation, errLedger)}
 		}
 		if err := admitter.AdmitTaskCapabilityAttempt(ctx, in.authority, "tools", in.resolved.id, in.resolved.revisionID, in.authority.ProjectID, reservation.DispatchID); err != nil {
-			if errors.Is(err, runtime.ErrTaskAttemptLimit) {
+			if errors.Is(err, release.ErrTaskAttemptLimit) {
 				return dispatchResult{failure: s.refuseToolIdentity(ctx, in, reservation, fail(http.StatusTooManyRequests, "task_limit_exceeded", "rate_limit_error", "The task attempt limit was exceeded."))}
 			}
 			return dispatchResult{failure: s.refuseToolIdentity(ctx, in, reservation, errPermissionDenied)}

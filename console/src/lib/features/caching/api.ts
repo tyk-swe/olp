@@ -1,5 +1,5 @@
-import { apiClient } from '$lib/api/client';
-import { unwrap } from '$lib/api/http';
+import { apiClient } from '$lib/management/client';
+import { unwrap } from '$lib/management/http';
 
 export async function cacheStatistics(route: string, signal?: AbortSignal) {
   return unwrap(

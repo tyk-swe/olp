@@ -14,7 +14,7 @@ import (
 	"sync/atomic"
 	"unicode/utf8"
 
-	"github.com/tyk-swe/olp/sdk/plugin/abi"
+	"github.com/tyk-swe/olp/plugin/abi"
 )
 
 // Bounds on what one plugin call or an unconfined process may log.

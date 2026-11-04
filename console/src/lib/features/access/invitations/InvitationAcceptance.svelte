@@ -10,9 +10,9 @@
     ApiProblem,
     applyServerFieldErrors,
     errorMessage
-  } from '$lib/api/http';
+  } from '$lib/management/http';
   import { authLifecycle } from '$lib/features/access/session/lifecycle';
-  import SetupFrame from '$lib/components/SetupFrame.svelte';
+  import SetupFrame from '$lib/shell/SetupFrame.svelte';
   import {
     PASSWORD_MAX_LENGTH,
     PASSWORD_MIN_LENGTH,

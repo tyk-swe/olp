@@ -5,7 +5,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/tyk-swe/olp/sdk/plugin/abi"
+	"github.com/tyk-swe/olp/plugin/abi"
 )
 
 // listingPath is a path of one or more segments under the address.

@@ -1,8 +1,8 @@
 <script lang="ts">
   import { createQuery } from '@tanstack/svelte-query';
-  import { errorMessage } from '$lib/api/http';
+  import { errorMessage } from '$lib/management/http';
   import { useServiceCapabilities } from '$lib/features/access/session/serviceCapabilities.svelte';
-  import { listProviders } from '$lib/features/providers/api/providers';
+  import { listProviders } from '$lib/features/providers/providers';
   import { providerKeys } from '$lib/features/providers/providerKeys';
   import { listProjects } from '$lib/features/access/projects/api';
   import { projectKeys } from '$lib/features/access/projects/projectKeys';
@@ -13,7 +13,7 @@
     type ExplanationRow
   } from '$lib/features/routes/routingExplanation';
   import { operationKinds } from '$lib/features/usage/history/api';
-  import { quoteUsage, type PricingQuote } from '$lib/features/usage/api/quote';
+  import { quoteUsage, type PricingQuote } from '$lib/features/usage/quote';
 
   const services = useServiceCapabilities();
 

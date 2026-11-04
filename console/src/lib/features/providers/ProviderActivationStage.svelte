@@ -1,7 +1,7 @@
 <script lang="ts">
   import { resolve } from '$app/paths';
-  import type { Provider } from '$lib/features/providers/api/providers';
-  import NavIcon from '$lib/components/NavIcon.svelte';
+  import type { Provider } from '$lib/features/providers/providers';
+  import NavIcon from '$lib/shell/NavIcon.svelte';
   import {
     activationReady,
     capabilitiesCertified,

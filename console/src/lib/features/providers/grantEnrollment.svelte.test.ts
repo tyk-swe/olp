@@ -1,9 +1,9 @@
 import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
-import { json, route, serve } from '$lib/api/test/transport';
+import { json, route, serve } from '$lib/management/test/transport';
 import { authLifecycle } from '$lib/features/access/session/lifecycle';
 import StateHarness from '../../../../tests/unit/support/StateHarness.svelte';
-import type { GrantEnrollment, GrantEnrollmentCompletion } from './api/grants';
+import type { GrantEnrollment, GrantEnrollmentCompletion } from './grants';
 import { GrantEnrollmentState } from './grantEnrollment.svelte';
 
 const provider = { id: 'provider-id', etag: 'provider-version' };

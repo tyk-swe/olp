@@ -2,7 +2,7 @@
   import { onDestroy } from 'svelte';
   import { copyText } from '$lib/clipboard';
   import { formatDate } from '$lib/format';
-  import type { GrantEnrollment } from './api/grants';
+  import type { GrantEnrollment } from './grants';
 
   let {
     enrollment,

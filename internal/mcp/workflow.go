@@ -9,8 +9,8 @@ import (
 
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/agents"
+	"github.com/tyk-swe/olp/internal/release"
 	"github.com/tyk-swe/olp/internal/routing"
-	"github.com/tyk-swe/olp/internal/runtime"
 )
 
 type WorkflowTool struct {
@@ -31,7 +31,7 @@ func workflowFailure(failure *apiError) error {
 	return &WorkflowError{Status: failure.status, Code: failure.code, Message: failure.msg}
 }
 
-func (s *Server) Resolve(_ context.Context, authority access.Authority, release *runtime.Release, toolsets []string) ([]WorkflowTool, error) {
+func (s *Server) Resolve(_ context.Context, authority access.Authority, release *release.Release, toolsets []string) ([]WorkflowTool, error) {
 	if s == nil || s.Runtime == nil || authority.ProjectID == nil || release == nil || release.Snapshot == nil {
 		return nil, workflowFailure(errToolsetNotFound)
 	}
@@ -68,15 +68,15 @@ func (s *Server) AuthorizeWorkflowTool(authority access.Authority, tool Workflow
 	return nil
 }
 
-func (s *Server) Call(ctx context.Context, authority access.Authority, release *runtime.Release, selected WorkflowTool, runID string, ordinal int, callID string, arguments json.RawMessage) (json.RawMessage, error) {
+func (s *Server) Call(ctx context.Context, authority access.Authority, release *release.Release, selected WorkflowTool, runID string, ordinal int, callID string, arguments json.RawMessage) (json.RawMessage, error) {
 	return s.callWorkflow(ctx, authority, release, selected, runID, ordinal, callID, arguments, nil)
 }
 
-func (s *Server) CallApproved(ctx context.Context, authority access.Authority, release *runtime.Release, selected WorkflowTool, runID string, ordinal int, callID string, arguments json.RawMessage, approval agents.WorkflowApproval) (json.RawMessage, error) {
+func (s *Server) CallApproved(ctx context.Context, authority access.Authority, release *release.Release, selected WorkflowTool, runID string, ordinal int, callID string, arguments json.RawMessage, approval agents.WorkflowApproval) (json.RawMessage, error) {
 	return s.callWorkflow(ctx, authority, release, selected, runID, ordinal, callID, arguments, &approval)
 }
 
-func (s *Server) callWorkflow(ctx context.Context, authority access.Authority, release *runtime.Release, selected WorkflowTool, runID string, ordinal int, callID string, arguments json.RawMessage, approval *agents.WorkflowApproval) (json.RawMessage, error) {
+func (s *Server) callWorkflow(ctx context.Context, authority access.Authority, release *release.Release, selected WorkflowTool, runID string, ordinal int, callID string, arguments json.RawMessage, approval *agents.WorkflowApproval) (json.RawMessage, error) {
 	if s == nil || s.Runtime == nil || s.Ledger == nil || authority.ProjectID == nil || release == nil || release.Snapshot == nil {
 		return nil, workflowFailure(errLedger)
 	}

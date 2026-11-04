@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/tyk-swe/olp/internal/access"
-	client "github.com/tyk-swe/olp/sdk/management"
+	client "github.com/tyk-swe/olp/management"
 )
 
 // MCP exposes the token-admitted contract as a stateless Streamable HTTP MCP

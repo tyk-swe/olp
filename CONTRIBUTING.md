@@ -27,7 +27,7 @@ unqualified.
 
 Required CI includes `check-go`, `check-console`, `test-fast`,
 `contracts`, `helm`, `dependencies`, and `build`,
-each gated on the paths a change touches. Contract generation is reproducible; `openapi/management.json` is
+each gated on the paths a change touches. Contract generation is reproducible; `management/management.json` is
 the checked-in source of truth. Update it alongside handlers and regenerate with
 `make api`. Never edit generated Go or TypeScript files by hand.
 

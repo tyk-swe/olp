@@ -1,16 +1,16 @@
 <script lang="ts">
   import { createQuery } from '@tanstack/svelte-query';
-  import CursorPagination from '$lib/components/CursorPagination.svelte';
+  import CursorPagination from '$lib/shell/CursorPagination.svelte';
   import {
     listProviderResources,
     type ProviderResourceFilters
   } from '$lib/features/resources/api';
   import { resourceKeys } from '$lib/features/resources/resourceKeys';
-  import { errorMessage } from '$lib/api/http';
+  import { errorMessage } from '$lib/management/http';
   import {
     cursorPaginationProps,
     emptyCursorHistory
-  } from '$lib/lists/pagination';
+  } from '$lib/listing/pagination';
   import { formatDate } from '$lib/format';
   import AgentResources from './AgentResources.svelte';
   import RetrievalBindings from './RetrievalBindings.svelte';

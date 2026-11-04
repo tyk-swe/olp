@@ -1,7 +1,7 @@
 import { onDestroy } from 'svelte';
 import { authLifecycle } from '$lib/features/access/session/lifecycle';
-import { ApiProblem, errorMessage } from '$lib/api/http';
-import type { Provider } from './api/providers';
+import { ApiProblem, errorMessage } from '$lib/management/http';
+import type { Provider } from './providers';
 import {
   cancelGrantEnrollment,
   continueGrantEnrollment,
@@ -9,7 +9,7 @@ import {
   startGrantEnrollment,
   type GrantEnrollment,
   type GrantEnrollmentCompletion
-} from './api/grants';
+} from './grants';
 
 type CompletionContext = {
   secret: boolean;

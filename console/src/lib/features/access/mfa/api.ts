@@ -1,6 +1,6 @@
-import type { components } from '$lib/api/schema';
-import { apiClient } from '$lib/api/client';
-import { ensureOk, unwrap } from '$lib/api/http';
+import type { components } from '$lib/management/schema';
+import { apiClient } from '$lib/management/client';
+import { ensureOk, unwrap } from '$lib/management/http';
 type Schemas = components['schemas'];
 export type MFAChallenge = Schemas['MFAChallenge'];
 export type MFAEnrollment = Schemas['MFAEnrollment'];

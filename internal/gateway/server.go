@@ -39,8 +39,8 @@ import (
 	"github.com/tyk-swe/olp/internal/observability"
 	"github.com/tyk-swe/olp/internal/operations/tokenization/estimate"
 	"github.com/tyk-swe/olp/internal/protocols"
+	"github.com/tyk-swe/olp/internal/release"
 	"github.com/tyk-swe/olp/internal/resources"
-	"github.com/tyk-swe/olp/internal/runtime"
 	"github.com/tyk-swe/olp/internal/telemetry"
 	"github.com/tyk-swe/olp/internal/usage"
 )
@@ -84,16 +84,16 @@ type Config struct {
 }
 
 // Runtime is the pinned authority, release and credential source.
-// *runtime.Manager implements it; fixtures and tests supply static releases.
+// *release.Manager implements it; fixtures and tests supply static releases.
 type Runtime interface {
 	// CheckRouteFidelity confirms a strict admission against current publication.
 	CheckRouteFidelity(context.Context, routing.Route) error
-	Release() *runtime.Release
+	Release() *release.Release
 	Authenticate(secret string) (*access.Authority, error)
 	// RoutingInputs returns current price and performance measurements, or
 	// nil when no measurements are available.
 	RoutingInputs() *usage.RoutingInputs
-	runtime.Credentials
+	release.Credentials
 	// GrantGeneration is the generation of the token currently served.
 	GrantGeneration(credentialID string) int64
 	// CredentialRefused reports that the upstream refused a credential
@@ -256,7 +256,7 @@ type request struct {
 	minted    bool
 	clientIP  string
 	startedAt time.Time
-	release   *runtime.Release
+	release   *release.Release
 	// trace is the request's observability span; a no-op when tracing is off.
 	trace *telemetry.RequestTrace
 	// counted, when set, hears each time the request's prompt is counted for a
@@ -1130,7 +1130,7 @@ func (s *Server) planCanonical(ctx context.Context, x *call) *Error {
 }
 
 // modelObject renders a route as an OpenAI model object.
-func (s *Server) modelObject(ctx context.Context, release *runtime.Release, authority access.Authority, route *routing.Route) map[string]any {
+func (s *Server) modelObject(ctx context.Context, release *release.Release, authority access.Authority, route *routing.Route) map[string]any {
 	capabilities := s.modelCapabilities(ctx, release, authority, *route, "openai")
 	return map[string]any{
 		"id":           route.Slug,
@@ -1146,7 +1146,7 @@ type modelCapabilities struct {
 	GatewayExecution *routing.WorkflowCapability `json:"gateway_execution,omitempty"`
 }
 
-func (s *Server) modelCapabilities(ctx context.Context, release *runtime.Release, authority access.Authority, route routing.Route, surface string) modelCapabilities {
+func (s *Server) modelCapabilities(ctx context.Context, release *release.Release, authority access.Authority, route routing.Route, surface string) modelCapabilities {
 	return modelCapabilities{
 		RouteCapabilities: routing.EffectiveCapabilities(release.Snapshot, route),
 		GatewayExecution:  mcp.DescribeReachableWorkflow(ctx, s.WorkflowTools, authority, release, route, surface, s.WorkflowRuns != nil && s.Debits != nil, s.now()),

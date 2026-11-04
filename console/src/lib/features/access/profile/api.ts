@@ -1,7 +1,7 @@
 import { confirmMFA } from '$lib/features/access/mfa/prompt.svelte';
-import type { components } from '$lib/api/schema';
-import { apiClient } from '$lib/api/client';
-import { ensureOk, unwrap } from '$lib/api/http';
+import type { components } from '$lib/management/schema';
+import { apiClient } from '$lib/management/client';
+import { ensureOk, unwrap } from '$lib/management/http';
 
 export type UserProfile = components['schemas']['UserDetailResponse'];
 export type OidcIdentityList =

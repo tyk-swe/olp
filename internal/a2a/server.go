@@ -23,7 +23,7 @@ import (
 	"github.com/tyk-swe/olp/internal/consumerauth"
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/mcpgrants"
-	"github.com/tyk-swe/olp/internal/runtime"
+	"github.com/tyk-swe/olp/internal/release"
 	"github.com/tyk-swe/olp/internal/workload"
 )
 
@@ -31,7 +31,7 @@ const maxCardBytes = 1 << 20
 
 type Runtime interface {
 	consumerauth.Authenticator
-	Release() *runtime.Release
+	Release() *release.Release
 	AuthorizeAgentResource(access.Authority, string, string, string, string) error
 }
 
@@ -99,7 +99,7 @@ func (s *Server) startGrantEnrollment(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(handoff)
 }
 
-func (s *Server) resolve(r *http.Request) (access.Authority, agentcontract.Revision, *runtime.Release, int) {
+func (s *Server) resolve(r *http.Request) (access.Authority, agentcontract.Revision, *release.Release, int) {
 	if s.Runtime == nil {
 		return access.Authority{}, agentcontract.Revision{}, nil, http.StatusServiceUnavailable
 	}
@@ -127,21 +127,21 @@ func (s *Server) resolve(r *http.Request) (access.Authority, agentcontract.Revis
 	if authority.ProjectID == nil {
 		return access.Authority{}, agentcontract.Revision{}, nil, http.StatusNotFound
 	}
-	release := s.Runtime.Release()
-	if release == nil || release.Snapshot == nil {
+	current := s.Runtime.Release()
+	if current == nil || current.Snapshot == nil {
 		return access.Authority{}, agentcontract.Revision{}, nil, http.StatusServiceUnavailable
 	}
-	for _, revision := range release.Snapshot.AgentPublications {
+	for _, revision := range current.Snapshot.AgentPublications {
 		if revision.PublicationID != r.PathValue("agent") || revision.Kind != "agent" || revision.ProjectID != *authority.ProjectID || !revision.Current || revision.Definition.Agent == nil || !supportedProtocol(revision.Definition.Agent.Protocol) {
 			continue
 		}
 		if err := s.Runtime.AuthorizeAgentResource(authority, "agents", revision.PublicationID, revision.ID, revision.ProjectID); err != nil {
-			if errors.Is(err, runtime.ErrStaleAuthority) {
+			if errors.Is(err, release.ErrStaleAuthority) {
 				return access.Authority{}, agentcontract.Revision{}, nil, http.StatusServiceUnavailable
 			}
 			return access.Authority{}, agentcontract.Revision{}, nil, http.StatusNotFound
 		}
-		return authority, revision, release, 0
+		return authority, revision, current, 0
 	}
 	return access.Authority{}, agentcontract.Revision{}, nil, http.StatusNotFound
 }

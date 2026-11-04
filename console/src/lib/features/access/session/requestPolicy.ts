@@ -1,4 +1,4 @@
-import type { paths } from '$lib/api/schema';
+import type { paths } from '$lib/management/schema';
 
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
 

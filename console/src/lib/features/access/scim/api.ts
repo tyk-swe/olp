@@ -1,6 +1,6 @@
-import { apiClient } from '$lib/api/client';
-import { unwrap } from '$lib/api/http';
-import type { components } from '$lib/api/schema';
+import { apiClient } from '$lib/management/client';
+import { unwrap } from '$lib/management/http';
+import type { components } from '$lib/management/schema';
 export type Group = components['schemas']['SCIMManagedGroup'];
 export type Mapping = components['schemas']['SCIMGroupAccess'];
 export async function listGroups(signal?: AbortSignal) {

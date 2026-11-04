@@ -1,6 +1,6 @@
 import { afterEach, expect, it, onTestFinished, vi } from 'vitest';
 import { flushSync, getAllContexts, mount, unmount } from 'svelte';
-import { json, serve } from '$lib/api/test/transport';
+import { json, serve } from '$lib/management/test/transport';
 import StateHarness from '../../../../tests/unit/support/StateHarness.svelte';
 import GuardrailsPage from './GuardrailsPage.svelte';
 

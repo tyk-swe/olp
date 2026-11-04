@@ -1,5 +1,5 @@
 import type { PlaygroundRequest } from '$lib/features/inference/playground/api';
-import { isJsonObject } from '$lib/forms/json';
+import { isJsonObject } from '$lib/editing/json';
 
 type PlaygroundTool = NonNullable<PlaygroundRequest['tools']>[number];
 

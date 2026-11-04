@@ -23,8 +23,8 @@ import (
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/mcpgrants"
 	"github.com/tyk-swe/olp/internal/mcpservers"
+	"github.com/tyk-swe/olp/internal/release"
 	"github.com/tyk-swe/olp/internal/routing"
-	"github.com/tyk-swe/olp/internal/runtime"
 	"github.com/tyk-swe/olp/internal/secrets"
 	"github.com/tyk-swe/olp/internal/workload"
 )
@@ -79,7 +79,7 @@ const (
 
 type Runtime interface {
 	Authenticate(secret string) (*access.Authority, error)
-	Release() *runtime.Release
+	Release() *release.Release
 	AuthorizeAgentResource(a access.Authority, scope, id, revision, project string) error
 	AuthorizeMCPTool(a access.Authority, id, revision, project, server, serverRevision string) error
 }
@@ -152,7 +152,7 @@ type Ledger interface {
 
 type GuardrailEvaluation struct {
 	Authority access.Authority
-	Release   *runtime.Release
+	Release   *release.Release
 	Engine    *guardrails.Engine
 	RequestID string
 	Phase     string
@@ -223,7 +223,7 @@ func (s *Server) Register(mux *http.ServeMux) {
 	}
 }
 
-func releaseIDFor(release *runtime.Release, snapshot *routing.Snapshot) string {
+func releaseIDFor(release *release.Release, snapshot *routing.Snapshot) string {
 	if canonicalUUID(release.ID) {
 		return release.ID
 	}
@@ -357,7 +357,7 @@ type delegatedSessionAuthenticator struct{ Runtime }
 func (a delegatedSessionAuthenticator) AuthenticateTaskCapability(ctx context.Context, token string) (*access.Authority, error) {
 	auth, ok := a.Runtime.(consumerauth.TaskCapabilityAuthenticator)
 	if !ok {
-		return nil, runtime.ErrInvalidKey
+		return nil, release.ErrInvalidKey
 	}
 	return auth.AuthenticateTaskCapability(ctx, token)
 }
@@ -367,7 +367,7 @@ func (a delegatedSessionAuthenticator) AuthenticateDelegation(ctx context.Contex
 		ReauthenticateDelegation(context.Context, string, string) (*access.Authority, error)
 	})
 	if !ok {
-		return nil, runtime.ErrInvalidKey
+		return nil, release.ErrInvalidKey
 	}
 	return auth.ReauthenticateDelegation(ctx, token, assertion)
 }
@@ -500,7 +500,7 @@ func (s *Server) driftScoped(authority access.Authority, resolved resolvedToolse
 		s.Runtime.AuthorizeMCPTool(authority, resolved.id, resolved.revisionID, *authority.ProjectID, "", "") == nil
 }
 
-func (s *Server) snapshot() (*runtime.Release, *routing.Snapshot, *apiError) {
+func (s *Server) snapshot() (*release.Release, *routing.Snapshot, *apiError) {
 	if s.Runtime == nil {
 		return nil, nil, fail(http.StatusServiceUnavailable, "authority_unavailable", "api_error", "Tool serving is unavailable; retry shortly.")
 	}
@@ -529,7 +529,7 @@ func (s *Server) resolveToolset(authority access.Authority, snapshot *routing.Sn
 		return resolvedToolset{}, errToolsetNotFound
 	}
 	if err := s.Runtime.AuthorizeAgentResource(authority, "tools", toolsetID, revisionID, *authority.ProjectID); err != nil {
-		if errors.Is(err, runtime.ErrStaleAuthority) {
+		if errors.Is(err, release.ErrStaleAuthority) {
 			return resolvedToolset{}, fail(http.StatusServiceUnavailable, "authority_unavailable", "api_error", "Key authority is unavailable; retry shortly.")
 		}
 		resolution, ok := snapshot.MCPToolset(revisionID)

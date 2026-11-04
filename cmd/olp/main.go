@@ -17,9 +17,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/tyk-swe/olp/internal/config"
 	"github.com/tyk-swe/olp/internal/operatorcli"
-	"github.com/tyk-swe/olp/internal/process"
 )
 
 func main() {
@@ -41,7 +39,7 @@ func run(ctx context.Context, args []string) error {
 		}
 		switch args[0] {
 		case "version", "--version":
-			fmt.Printf("olp %s\n", process.Version)
+			fmt.Printf("olp %s\n", Version)
 			return nil
 		case "help", "--help", "-h":
 			fmt.Println("usage: olp <all|gateway|control|worker|migrate|doctor|health-probe> [flags]\n       olp master-key <status|reencrypt|verify-retirement> [flags]\n       olp account reset-password EMAIL PASSWORD_FILE [--reset-mfa] [flags]\n       olp <keys|routes|providers|usage|config|api> COMMAND [options]\n       olp client-env CLIENT --url ORIGIN --key-file FILE [--model ROUTE] [--format FORMAT] [--surface SURFACE]")
@@ -50,17 +48,17 @@ func run(ctx context.Context, args []string) error {
 			if len(args) < 4 || args[1] != "reset-password" || strings.HasPrefix(args[2], "-") || strings.HasPrefix(args[3], "-") {
 				return errors.New("usage: olp account reset-password EMAIL PASSWORD_FILE [--reset-mfa] [flags]")
 			}
-			maintenance := process.MaintenanceOptions{AccountEmail: args[2], PasswordFile: args[3]}
+			maintenance := MaintenanceOptions{AccountEmail: args[2], PasswordFile: args[3]}
 			var options []string
 			options, maintenance.ResetMFA = resetMFA(args[4:])
-			c, err := config.Parse(append([]string{"all"}, options...), os.Getenv, os.Stderr)
+			c, err := Parse(append([]string{"all"}, options...), os.Getenv, os.Stderr)
 			if err != nil {
 				return err
 			}
-			return process.Maintenance(ctx, c, "reset-password", maintenance, os.Stdout)
+			return Maintenance(ctx, c, "reset-password", maintenance, os.Stdout)
 		case "migrate", "doctor", "master-key":
 			command, options := args[0], args[1:]
-			var maintenance process.MaintenanceOptions
+			var maintenance MaintenanceOptions
 			if command == "master-key" {
 				if len(options) == 0 || (options[0] != "status" && options[0] != "reencrypt" && options[0] != "verify-retirement") {
 					return errors.New("usage: olp master-key <status|reencrypt|verify-retirement> [flags]")
@@ -80,11 +78,11 @@ func run(ctx context.Context, args []string) error {
 					maintenance.DryRun, options = true, options[1:]
 				}
 			}
-			c, err := config.Parse(append([]string{"all"}, options...), os.Getenv, os.Stderr)
+			c, err := Parse(append([]string{"all"}, options...), os.Getenv, os.Stderr)
 			if err != nil {
 				return err
 			}
-			return process.Maintenance(ctx, c, command, maintenance, os.Stdout)
+			return Maintenance(ctx, c, command, maintenance, os.Stdout)
 		case "health-probe":
 			if len(args) != 1 {
 				return errors.New("health-probe takes no arguments")
@@ -109,12 +107,12 @@ func run(ctx context.Context, args []string) error {
 			}
 		}
 	}
-	c, err := config.Parse(args, os.Getenv, os.Stderr)
+	c, err := Parse(args, os.Getenv, os.Stderr)
 	if err != nil {
 		return err
 	}
 	log := slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{Level: c.LogLevel}))
-	return process.Run(ctx, c, log)
+	return Run(ctx, c, log)
 }
 
 // resetMFA removes the recovery's --reset-mfa option from among the

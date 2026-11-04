@@ -4,10 +4,10 @@
   import { resolve } from '$app/paths';
   import { goto } from '$app/navigation';
   import { page } from '$app/state';
-  import { applyListSearch } from '$lib/lists/urlSync.svelte';
-  import { timeInputType } from '$lib/lists/filters';
+  import { applyListSearch } from '$lib/listing/urlSync.svelte';
+  import { timeInputType } from '$lib/listing/filters';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
-  import CursorPagination from '$lib/components/CursorPagination.svelte';
+  import CursorPagination from '$lib/shell/CursorPagination.svelte';
   import {
     deleteMediaJob,
     downloadMediaJobContent,
@@ -16,8 +16,8 @@
     refreshMediaJob,
     type MediaContentVariant
   } from '$lib/features/media/api';
-  import { errorMessage } from '$lib/api/http';
-  import { cursorPaginationProps } from '$lib/lists/pagination';
+  import { errorMessage } from '$lib/management/http';
+  import { cursorPaginationProps } from '$lib/listing/pagination';
   import { formatDate, stateLabel } from '$lib/format';
   import { downloadBlob } from '$lib/download';
   import MediaTimeline from './MediaTimeline.svelte';

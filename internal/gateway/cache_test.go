@@ -17,8 +17,8 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream"
 	"github.com/tyk-swe/olp/internal/cache"
 	"github.com/tyk-swe/olp/internal/connectors"
+	"github.com/tyk-swe/olp/internal/release"
 	"github.com/tyk-swe/olp/internal/routing"
-	"github.com/tyk-swe/olp/internal/runtime"
 	"github.com/tyk-swe/olp/internal/secrets"
 	"github.com/tyk-swe/olp/tests/fixtures"
 )
@@ -198,7 +198,7 @@ func TestResponseCacheClientSurfaces(t *testing.T) {
 							credentials[*provider.ActiveCredential] = []byte(`{"access_key_id":"TESTBEDROCKKEY123456","secret_access_key":"test-bedrock-secret-for-cache"}`)
 						}
 						var err error
-						h.rt.release, err = runtime.NewRelease(h.rt.release.ID, h.rt.release.Sequence, h.rt.release.Snapshot, credentials)
+						h.rt.release, err = release.NewRelease(h.rt.release.ID, h.rt.release.Sequence, h.rt.release.Snapshot, credentials)
 						if err != nil {
 							t.Fatal(err)
 						}

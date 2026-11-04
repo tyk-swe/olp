@@ -1,0 +1,121 @@
+import type { components } from '$lib/management/schema';
+import { apiClient } from '$lib/management/client';
+import { type CursorPage, unwrap, unwrapPage } from '$lib/management/http';
+import { collectCursorPages } from '$lib/management/pagination';
+
+type Schemas = components['schemas'];
+
+export type PricingSource = Schemas['PricingSource'];
+export type PricingSourceSnapshot = Schemas['PricingSourceSnapshot'];
+export type PricingSourceRefresh = Schemas['PricingSourceRefreshResponse'];
+export type PricingSourceDiff = Schemas['PricingSourceDiff'];
+export type PublishPricingSourceInput = Schemas['PublishPricingSourceRequest'];
+export type PricingSourceFormat = Schemas['PricingSourceFormat'];
+export type ReferenceCatalog = Schemas['ReferenceCatalog'];
+
+export async function listPricingSources(
+  signal?: AbortSignal
+): Promise<PricingSource[]> {
+  return collectCursorPages((cursor) => listPricingSourcePage(cursor, signal));
+}
+
+export async function listPricingSourcePage(
+  cursor?: string,
+  signal?: AbortSignal
+): Promise<CursorPage<PricingSource>> {
+  const response = await apiClient.GET('/api/v1/pricing/sources', {
+    params: { query: { limit: 50, cursor } },
+    signal
+  });
+  return unwrapPage(response);
+}
+
+export async function createPricingSource(
+  input: {
+    name: string;
+    format?: PricingSourceFormat;
+    url?: string | null;
+    enabled?: boolean;
+  },
+  requestId: string
+): Promise<PricingSource> {
+  const response = await apiClient.POST('/api/v1/pricing/sources', {
+    params: { header: { 'Idempotency-Key': requestId } },
+    body: input
+  });
+  return unwrap(response);
+}
+
+export async function updatePricingSource(
+  source: PricingSource,
+  input: { name?: string; url?: string | null; enabled?: boolean }
+): Promise<PricingSource> {
+  const response = await apiClient.PATCH(
+    '/api/v1/pricing/sources/{pricing_source_id}',
+    {
+      params: {
+        path: { pricing_source_id: source.id },
+        header: { 'If-Match': source.etag }
+      },
+      body: input
+    }
+  );
+  return unwrap(response);
+}
+
+export async function refreshPricingSource(
+  source: PricingSource
+): Promise<PricingSourceRefresh> {
+  const response = await apiClient.POST(
+    '/api/v1/pricing/sources/{pricing_source_id}/refresh',
+    { params: { path: { pricing_source_id: source.id } } }
+  );
+  return unwrap(response);
+}
+
+export async function listPricingSourceSnapshots(
+  source: PricingSource,
+  signal?: AbortSignal
+): Promise<PricingSourceSnapshot[]> {
+  return collectCursorPages(async (cursor) => {
+    const response = await apiClient.GET(
+      '/api/v1/pricing/sources/{pricing_source_id}/snapshots',
+      {
+        params: {
+          path: { pricing_source_id: source.id },
+          query: { limit: 50, cursor }
+        },
+        signal
+      }
+    );
+    return unwrapPage(response);
+  });
+}
+
+export async function publishPricingSnapshot(
+  snapshot: Pick<PricingSourceSnapshot, 'id'>,
+  input: PublishPricingSourceInput,
+  requestId: string
+): Promise<Schemas['PricingRevisionResponse']> {
+  const response = await apiClient.POST(
+    '/api/v1/pricing/source-snapshots/{pricing_source_snapshot_id}/publish',
+    {
+      params: {
+        path: { pricing_source_snapshot_id: snapshot.id },
+        header: { 'Idempotency-Key': requestId }
+      },
+      body: input
+    }
+  );
+  return unwrap(response);
+}
+
+/** The signed reference catalog this release ships. */
+export async function getReferenceCatalog(
+  signal?: AbortSignal
+): Promise<ReferenceCatalog> {
+  const response = await apiClient.GET('/api/v1/reference-catalog', {
+    signal
+  });
+  return unwrap(response);
+}

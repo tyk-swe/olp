@@ -2,8 +2,8 @@ tests/fixtures/streams/*.sse whitespace=-blank-at-eof
 tests/fixtures/fidelity/*/*.sse whitespace=-blank-at-eof
 
 # Generated files: keep them out of review noise.
-openapi/management.json linguist-generated=true
-console/src/lib/api/schema.d.ts linguist-generated=true
+management/management.json linguist-generated=true
+console/src/lib/management/schema.d.ts linguist-generated=true
 console/pnpm-lock.yaml linguist-generated=true
 tests/sdk-smoke/pnpm-lock.yaml linguist-generated=true
 docs/assets/screenshots/*.png -diff

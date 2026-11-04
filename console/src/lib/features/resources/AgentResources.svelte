@@ -3,8 +3,8 @@
   import { createQuery } from '@tanstack/svelte-query';
   import { listRoutes } from '$lib/features/routes/api';
   import { routeKeys } from '$lib/features/routes/routeKeys';
-  import { errorMessage } from '$lib/api/http';
-  import { parseNativeJSON, nativeObject } from '$lib/json/nativeJson';
+  import { errorMessage } from '$lib/management/http';
+  import { parseNativeJSON, nativeObject } from '$lib/nativeJson';
   import {
     ResourceRequestError,
     agentSubmissionFingerprint,

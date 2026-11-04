@@ -16,8 +16,8 @@ import (
 	"github.com/tyk-swe/olp/internal/agentcontract"
 	"github.com/tyk-swe/olp/internal/mcpservers"
 	"github.com/tyk-swe/olp/internal/oif"
+	"github.com/tyk-swe/olp/internal/release"
 	"github.com/tyk-swe/olp/internal/routing"
-	"github.com/tyk-swe/olp/internal/runtime"
 )
 
 const (
@@ -479,7 +479,7 @@ func (s *Server) serveSessionRequest(w http.ResponseWriter, r *http.Request, aut
 
 func (s *Server) reauthorizeSession(authority access.Authority, current sessionRecord, resolved resolvedToolset) *apiError {
 	if err := s.Runtime.AuthorizeAgentResource(authority, "tools", current.toolsetID, current.toolsetRevisionID, *authority.ProjectID); err != nil {
-		if errors.Is(err, runtime.ErrStaleAuthority) {
+		if errors.Is(err, release.ErrStaleAuthority) {
 			return fail(http.StatusServiceUnavailable, "authority_unavailable", "api_error", "Key authority is unavailable; retry shortly.")
 		}
 		if s.driftScoped(authority, resolved) {
@@ -500,7 +500,7 @@ func (s *Server) writeSessionFailure(w http.ResponseWriter, r *http.Request, cur
 	writeRPCFailure(w, id, failureRPC(http.StatusOK, rpcServerError, failure))
 }
 
-func (s *Server) pinnedToolset(current sessionRecord) (resolvedToolset, *runtime.Release, *routing.Snapshot, *apiError) {
+func (s *Server) pinnedToolset(current sessionRecord) (resolvedToolset, *release.Release, *routing.Snapshot, *apiError) {
 	release, snapshot, failure := s.snapshot()
 	if failure != nil {
 		return resolvedToolset{}, nil, nil, failure

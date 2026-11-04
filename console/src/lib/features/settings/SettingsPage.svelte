@@ -14,7 +14,7 @@
 
   import { resolve } from '$app/paths';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
-  import ReadOnlyNote from '$lib/components/ReadOnlyNote.svelte';
+  import ReadOnlyNote from '$lib/shell/ReadOnlyNote.svelte';
   import {
     listSettings,
     updateSetting,
@@ -32,7 +32,7 @@
     applyServerFieldErrors,
     errorMessage,
     isEtagMismatch
-  } from '$lib/api/http';
+  } from '$lib/management/http';
   import { sessionKeys } from '$lib/features/access/session/sessionKeys';
   import { useRole } from '$lib/features/access/session/useRole.svelte';
 

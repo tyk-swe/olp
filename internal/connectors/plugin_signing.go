@@ -11,7 +11,7 @@ import (
 
 	"golang.org/x/net/http/httpguts"
 
-	"github.com/tyk-swe/olp/sdk/plugin/abi"
+	"github.com/tyk-swe/olp/plugin/abi"
 )
 
 // A Signer runs the signing hooks of plugin profiles: plugin code, which it

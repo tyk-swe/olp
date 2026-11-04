@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { stringifyNativeJSON } from '$lib/json/nativeJson';
+  import { stringifyNativeJSON } from '$lib/nativeJson';
   import { downloadBlob } from '$lib/download';
   import {
     nativeCountFields,

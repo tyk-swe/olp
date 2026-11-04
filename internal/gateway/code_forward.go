@@ -12,8 +12,8 @@ import (
 	"github.com/tyk-swe/olp/internal/codeadapter"
 	"github.com/tyk-swe/olp/internal/codemode"
 	"github.com/tyk-swe/olp/internal/codewire"
+	"github.com/tyk-swe/olp/internal/release"
 	"github.com/tyk-swe/olp/internal/resources"
-	"github.com/tyk-swe/olp/internal/runtime"
 )
 
 func (s *Server) RegisterCode(mux *http.ServeMux) {
@@ -103,7 +103,7 @@ func (s *Server) serveCode(w http.ResponseWriter, r *http.Request) {
 	s.forwardCode(w, r.WithContext(ctx), release, route, observation, ingress, raw, body, nil, refuse)
 }
 
-func (s *Server) forwardCode(w http.ResponseWriter, r *http.Request, release *runtime.Release, route codemode.Route, observation codemode.Request, ingress codeIngress, raw, body []byte, recovery *resources.CodeRecovery, refuse func(error)) {
+func (s *Server) forwardCode(w http.ResponseWriter, r *http.Request, release *release.Release, route codemode.Route, observation codemode.Request, ingress codeIngress, raw, body []byte, recovery *resources.CodeRecovery, refuse func(error)) {
 	ctx := r.Context()
 	attempt, err := s.prepareCode(r, release, route, observation, ingress, codeadapter.HTTP, recovery, body)
 	if err != nil {

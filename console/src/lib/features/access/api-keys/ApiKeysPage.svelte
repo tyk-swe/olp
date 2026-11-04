@@ -8,7 +8,7 @@
   import { goto } from '$app/navigation';
   import { resolve } from '$app/paths';
   import { useQueryClient } from '@tanstack/svelte-query';
-  import { errorMessage } from '$lib/api/http';
+  import { errorMessage } from '$lib/management/http';
   import { useRole } from '$lib/features/access/session/useRole.svelte';
   import {
     createApiKey,
@@ -28,7 +28,7 @@
   import {
     useMutationIntent,
     usePrincipalLifetime
-  } from '$lib/forms/mutationIntent.svelte';
+  } from '$lib/editing/mutationIntent.svelte';
 
   const createIntent = useMutationIntent();
 

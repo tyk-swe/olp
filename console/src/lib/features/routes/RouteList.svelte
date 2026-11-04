@@ -1,22 +1,22 @@
 <script lang="ts">
-  import { useMutationIntent } from '$lib/forms/mutationIntent.svelte';
+  import { useMutationIntent } from '$lib/editing/mutationIntent.svelte';
 
   import { routeKeys } from '$lib/features/routes/routeKeys';
   import { retiringTargets } from '$lib/features/routes/routeEditor';
 
   import { resolve } from '$app/paths';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
-  import { errorMessage } from '$lib/api/http';
-  import CursorPagination from '$lib/components/CursorPagination.svelte';
-  import NavIcon from '$lib/components/NavIcon.svelte';
-  import ReadOnlyNote from '$lib/components/ReadOnlyNote.svelte';
+  import { errorMessage } from '$lib/management/http';
+  import CursorPagination from '$lib/shell/CursorPagination.svelte';
+  import NavIcon from '$lib/shell/NavIcon.svelte';
+  import ReadOnlyNote from '$lib/shell/ReadOnlyNote.svelte';
   import {
     listRouteDraftPage,
     listRoutePage,
     retireRoute,
     type ActiveRoute
   } from '$lib/features/routes/api';
-  import { cursorPaginationProps } from '$lib/lists/pagination';
+  import { cursorPaginationProps } from '$lib/listing/pagination';
   import { useRole } from '$lib/features/access/session/useRole.svelte';
   import { formatDate, formatInteger } from '$lib/format';
   import type { RouteListState } from '$lib/features/routes/routeListState';

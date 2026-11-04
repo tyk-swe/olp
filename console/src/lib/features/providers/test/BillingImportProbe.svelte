@@ -4,7 +4,7 @@
     type QueryClient
   } from '@tanstack/svelte-query';
   import BillingImportSection from '../BillingImportSection.svelte';
-  import type { Provider } from '../api/providers';
+  import type { Provider } from '../providers';
 
   const { client, provider }: { client: QueryClient; provider: Provider } =
     $props();

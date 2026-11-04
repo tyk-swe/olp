@@ -12,12 +12,12 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/gateway"
-	"github.com/tyk-swe/olp/internal/runtime"
+	"github.com/tyk-swe/olp/internal/release"
 )
 
 type Server struct {
 	Access  *access.Server
-	Runtime *runtime.Manager
+	Runtime *release.Manager
 	Gateway *gateway.Server
 	Origin  string
 }

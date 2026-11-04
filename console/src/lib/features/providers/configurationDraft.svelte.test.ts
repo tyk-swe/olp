@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { stringifyNativeJSON } from '$lib/json/nativeJson';
+import { stringifyNativeJSON } from '$lib/nativeJson';
 import { ConfigurationDraft } from './configurationDraft.svelte';
 
 function draft(lockedKind?: string) {

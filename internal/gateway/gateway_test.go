@@ -24,7 +24,7 @@ import (
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/egress"
-	"github.com/tyk-swe/olp/internal/runtime"
+	"github.com/tyk-swe/olp/internal/release"
 	"github.com/tyk-swe/olp/internal/usage"
 )
 
@@ -42,7 +42,7 @@ const (
 
 type fakeRuntime struct {
 	mu      sync.Mutex
-	release *runtime.Release
+	release *release.Release
 	inputs  *usage.RoutingInputs
 	keys    map[string]access.Authority
 	stale   bool
@@ -54,7 +54,7 @@ type fakeRuntime struct {
 	refusedGenerations []int64
 }
 
-func (f *fakeRuntime) Release() *runtime.Release { f.mu.Lock(); defer f.mu.Unlock(); return f.release }
+func (f *fakeRuntime) Release() *release.Release { f.mu.Lock(); defer f.mu.Unlock(); return f.release }
 
 func (f *fakeRuntime) RoutingInputs() *usage.RoutingInputs {
 	f.mu.Lock()
@@ -66,11 +66,11 @@ func (f *fakeRuntime) Authenticate(secret string) (*access.Authority, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.stale {
-		return nil, runtime.ErrStaleAuthority
+		return nil, release.ErrStaleAuthority
 	}
 	a, ok := f.keys[secret]
 	if !ok {
-		return nil, runtime.ErrInvalidKey
+		return nil, release.ErrInvalidKey
 	}
 	return &a, nil
 }
@@ -91,20 +91,20 @@ func (f *fakeRuntime) Eligibility(id string) routing.Eligibility {
 
 // Secret serves eligible credentials the pinned release installed. The fake's
 // secret authority, for callers that pin no release, is its current release.
-func (f *fakeRuntime) Secret(_ context.Context, release *runtime.Release, id string) ([]byte, int64, error) {
+func (f *fakeRuntime) Secret(_ context.Context, pinned *release.Release, id string) ([]byte, int64, error) {
 	if f.Eligibility(id) != routing.Eligible {
-		return nil, 0, runtime.ErrCredentialUnavailable
+		return nil, 0, release.ErrCredentialUnavailable
 	}
-	if release == nil {
-		release = f.Release()
+	if pinned == nil {
+		pinned = f.Release()
 	}
-	if secret, ok := release.Credential(id); ok {
+	if secret, ok := pinned.Credential(id); ok {
 		return secret, 0, nil
 	}
-	return nil, 0, runtime.ErrCredentialUnavailable
+	return nil, 0, release.ErrCredentialUnavailable
 }
 
-func (f *fakeRuntime) NetworkSecret(ctx context.Context, release *runtime.Release, _, id string) ([]byte, error) {
+func (f *fakeRuntime) NetworkSecret(ctx context.Context, release *release.Release, _, id string) ([]byte, error) {
 	secret, _, err := f.Secret(ctx, release, id)
 	return secret, err
 }
@@ -244,7 +244,7 @@ func newHarnessWrapped(t *testing.T, cfg Config, wrap func(http.Handler) http.Ha
 			},
 		}},
 	}
-	release, err := runtime.NewRelease(uuid.NewString(), 7, snapshot, map[string][]byte{credA: []byte(secretA), credB: []byte(secretB)})
+	release, err := release.NewRelease(uuid.NewString(), 7, snapshot, map[string][]byte{credA: []byte(secretA), credB: []byte(secretB)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -299,7 +299,7 @@ func (h *harness) reissue(edit func(*routing.Provider), credential []byte) {
 	if credential != nil {
 		secrets[h.credA] = credential
 	}
-	release, err := runtime.NewRelease(uuid.NewString(), 7, h.rt.release.Snapshot, secrets)
+	release, err := release.NewRelease(uuid.NewString(), 7, h.rt.release.Snapshot, secrets)
 	if err != nil {
 		h.t.Fatal(err)
 	}
@@ -318,14 +318,14 @@ func strictHarnessCfg(t *testing.T, cfg Config, configure func(*routing.Snapshot
 
 func strictRelease(t *testing.T, h *harness, configure func(*routing.Snapshot)) *harness {
 	t.Helper()
-	release := h.rt.release
-	snapshot := release.Snapshot
+	current := h.rt.release
+	snapshot := current.Snapshot
 	credentials := map[string][]byte{}
 	for id, provider := range snapshot.Providers {
 		provider.ProfileID, provider.ProfileRevision = "compatible-chat", connectors.ProfileRevision
 		snapshot.Providers[id] = provider
 		for _, slot := range provider.Slots {
-			credentials[*slot.CredentialID], _ = release.Credential(*slot.CredentialID)
+			credentials[*slot.CredentialID], _ = current.Credential(*slot.CredentialID)
 		}
 	}
 	route := snapshot.Routes[routeSlug]
@@ -335,7 +335,7 @@ func strictRelease(t *testing.T, h *harness, configure func(*routing.Snapshot)) 
 		configure(snapshot)
 	}
 	var err error
-	h.rt.release, err = runtime.NewRelease(release.ID, release.Sequence, snapshot, credentials)
+	h.rt.release, err = release.NewRelease(current.ID, current.Sequence, snapshot, credentials)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -377,7 +377,7 @@ func (h *harness) republish(edit func(s *routing.Snapshot, a, b routing.Provider
 		}
 	}
 	edit(snapshot, a, b)
-	release, err := runtime.NewRelease(uuid.NewString(), old.Sequence+1, snapshot, credentials)
+	release, err := release.NewRelease(uuid.NewString(), old.Sequence+1, snapshot, credentials)
 	if err != nil {
 		h.t.Fatal(err)
 	}

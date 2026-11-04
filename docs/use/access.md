@@ -351,7 +351,7 @@ recovery error that does not confirm whether the address exists.
 
 ## Mutation and audit boundaries
 
-The [management contract](../../openapi/management.json) declares each operation's
+The [management contract](../../management/management.json) declares each operation's
 authority. Protected writes reauthorize inside feature transactions; access
 changes serialize ownership checks with the installation lock. Expensive hashing,
 discovery and verification run outside it.

@@ -2,7 +2,7 @@ import type {
   PricingSource,
   PricingSourceSnapshot,
   ReferenceCatalog
-} from './api/pricingSources';
+} from './pricingSources';
 import { formatDate } from '$lib/format';
 
 /** How a pricing source is read, as the console names it. */

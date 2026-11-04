@@ -2,21 +2,21 @@
   import {
     useMutationIntent,
     usePrincipalLifetime
-  } from '$lib/forms/mutationIntent.svelte';
+  } from '$lib/editing/mutationIntent.svelte';
 
   import { useRole } from '$lib/features/access/session/useRole.svelte';
   import ExternalReferenceEditor from './ExternalReferenceEditor.svelte';
   import { parseExternalReference } from './externalReference';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
-  import { errorMessage } from '$lib/api/http';
-  import type { Provider } from './api/providers';
+  import { errorMessage } from '$lib/management/http';
+  import type { Provider } from './providers';
   import GrantEnrollmentPanel from './GrantEnrollmentPanel.svelte';
   import {
     listCredentialSlots,
     putCredentialSlot,
     validateCredentialSlot,
     type CredentialSlot as Slot
-  } from './api/credentials';
+  } from './credentials';
   import { GrantEnrollmentState } from './grantEnrollment.svelte';
   import { parseManualModelNames } from './providerEditor';
   import { providerKeys } from './providerKeys';

@@ -7,7 +7,7 @@ import { join } from 'node:path';
 // oapi-codegen 2.8.0 cannot merge the frozen RoutingPreferences defaults.
 // Defaults are annotations, not wire types. Strip only schema annotations in a
 // disposable generator input; the authoritative served document stays intact.
-const document = JSON.parse(readFileSync('openapi/management.json', 'utf8'));
+const document = JSON.parse(readFileSync('management/management.json', 'utf8'));
 function removeDefaults(schema) {
   if (!schema || typeof schema !== 'object' || Array.isArray(schema)) return;
   delete schema.default;
@@ -42,7 +42,7 @@ try {
   writeFileSync(input, JSON.stringify(document));
   execFileSync(
     'go',
-    ['tool', 'oapi-codegen', '--config', 'openapi/oapi-codegen.yaml', input],
+    ['tool', 'oapi-codegen', '--config', 'internal/management/oapi-codegen.yaml', input],
     { stdio: 'inherit' }
   );
 } finally {

@@ -1,8 +1,8 @@
-import type { components } from '$lib/api/schema';
-import { apiClient } from '$lib/api/client';
-import { unwrap, unwrapPage } from '$lib/api/http';
-import type { CursorPage } from '$lib/api/http';
-import { compactQuery } from '$lib/api/query';
+import type { components } from '$lib/management/schema';
+import { apiClient } from '$lib/management/client';
+import { unwrap, unwrapPage } from '$lib/management/http';
+import type { CursorPage } from '$lib/management/http';
+import { compactQuery } from '$lib/management/query';
 
 export type ProviderResource = components['schemas']['ProviderResourceItem'];
 

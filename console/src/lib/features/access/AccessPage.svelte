@@ -7,7 +7,7 @@
   import MembersPanel from '$lib/features/access/users/MembersPanel.svelte';
   import ManagementTokensPanel from '$lib/features/access/tokens/ManagementTokensPanel.svelte';
   import ProjectsPanel from '$lib/features/access/projects/ProjectsPanel.svelte';
-  import { slidingIndicator } from '$lib/components/indicator';
+  import { slidingIndicator } from '$lib/shell/indicator';
 
   type Tab =
     | 'members'

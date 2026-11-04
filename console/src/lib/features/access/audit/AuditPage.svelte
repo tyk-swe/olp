@@ -4,11 +4,14 @@
   import { createQuery } from '@tanstack/svelte-query';
   import { page } from '$app/state';
   import { listAudit } from '$lib/features/access/audit/api';
-  import { errorMessage } from '$lib/api/http';
-  import { cursorPaginationProps } from '$lib/lists/pagination';
-  import { timeInputType } from '$lib/lists/filters';
-  import { applyListSearch, syncListWithUrl } from '$lib/lists/urlSync.svelte';
-  import CursorPagination from '$lib/components/CursorPagination.svelte';
+  import { errorMessage } from '$lib/management/http';
+  import { cursorPaginationProps } from '$lib/listing/pagination';
+  import { timeInputType } from '$lib/listing/filters';
+  import {
+    applyListSearch,
+    syncListWithUrl
+  } from '$lib/listing/urlSync.svelte';
+  import CursorPagination from '$lib/shell/CursorPagination.svelte';
   import { formatDate } from '$lib/format';
   import {
     auditFilters,

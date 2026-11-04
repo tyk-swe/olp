@@ -19,8 +19,8 @@ export default [
       '.svelte-kit/**',
       'build/**',
       'node_modules/**',
-      'src/lib/api/schema.d.ts',
-      'src/lib/api/requirements.ts'
+      'src/lib/management/schema.d.ts',
+      'src/lib/management/requirements.ts'
     ]
   },
   ...svelte.configs['flat/recommended'],
@@ -62,9 +62,25 @@ export default [
     // browser code reaches the inference gateway only through gatewayFetch.
     files: ['src/**/*.{ts,svelte}'],
     ignores: [
-      'src/lib/api/**',
+      'src/lib/management/**',
       'src/lib/features/**/api.ts',
-      'src/lib/features/**/api/*.ts',
+      'src/lib/features/providers/billing.ts',
+      'src/lib/features/providers/catalog.ts',
+      'src/lib/features/providers/credentials.ts',
+      'src/lib/features/providers/grants.ts',
+      'src/lib/features/providers/models.ts',
+      'src/lib/features/providers/providerProfiles.ts',
+      'src/lib/features/providers/providers.ts',
+      'src/lib/features/providers/revisions.ts',
+      'src/lib/features/resources/retrieval.ts',
+      'src/lib/features/settings/branding.ts',
+      'src/lib/features/usage/discounts.ts',
+      'src/lib/features/usage/pricing.ts',
+      'src/lib/features/usage/pricingSources.ts',
+      'src/lib/features/usage/quote.ts',
+      'src/lib/features/usage/rateCards.ts',
+      'src/lib/features/usage/reconciliation.ts',
+      'src/lib/features/usage/usage.ts',
       'src/**/*.test.ts',
       'src/**/test/**'
     ],
@@ -74,7 +90,7 @@ export default [
         {
           paths: [
             {
-              name: '$lib/api/client',
+              name: '$lib/management/client',
               message:
                 'Call the management API from the feature api module, not a component.'
             }
@@ -85,7 +101,8 @@ export default [
         'error',
         {
           name: 'fetch',
-          message: 'Use a feature api module or $lib/api/gateway gatewayFetch.'
+          message:
+            'Use a feature api module or $lib/management/gateway gatewayFetch.'
         }
       ]
     }

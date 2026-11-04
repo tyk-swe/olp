@@ -10,13 +10,13 @@
     logout,
     type AuthenticationCapabilities
   } from '$lib/features/access/session/api';
-  import { errorMessage } from '$lib/api/http';
+  import { errorMessage } from '$lib/management/http';
   import { getSetupStatus } from '$lib/features/access/setup/api';
   import { authLifecycle } from '$lib/features/access/session/lifecycle';
   import { sessionKeys } from '$lib/features/access/session/sessionKeys';
   import type { AuthenticationSnapshot } from '$lib/features/access/session/state';
-  import AppShell from '$lib/components/AppShell.svelte';
-  import BrandMark from '$lib/components/BrandMark.svelte';
+  import AppShell from '$lib/shell/AppShell.svelte';
+  import BrandMark from '$lib/shell/BrandMark.svelte';
 
   let { children } = $props();
   const queryClient = useQueryClient();

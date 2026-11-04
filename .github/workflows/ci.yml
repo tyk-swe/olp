@@ -55,9 +55,10 @@ jobs:
               - 'go.sum'
               - 'internal/**'
               - 'cmd/**'
-              - 'sdk/**'
-              - 'plugins/**'
-              - 'openapi/**'
+              - 'guardrails/**'
+              - 'inference/**'
+              - 'management/**'
+              - 'plugin/**'
               - 'tests/**'
               - '.github/workflows/ci.yml'
               - '.github/actions/setup/**'
@@ -71,14 +72,15 @@ jobs:
               - '.github/actions/setup/**'
               - '!**/*.md'
             contracts:
-              - 'openapi/**'
+              - 'guardrails/**'
+              - 'inference/**'
+              - 'management/**'
               - 'internal/management/**'
               - 'scripts/api.sh'
               - 'scripts/generate-*.mjs'
               - 'scripts/check-contracts.sh'
               - 'console/scripts/generate-requirements.mjs'
-              - 'console/src/lib/api/**'
-              - 'sdk/**'
+              - 'console/src/lib/management/**'
               - 'package.json'
               - '.github/workflows/ci.yml'
               - '.github/actions/setup/**'
@@ -172,7 +174,7 @@ jobs:
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: management-contract
-          path: openapi/management.json
+          path: management/management.json
           if-no-files-found: error
   helm:
     needs: changes

@@ -5,8 +5,8 @@ node scripts/generate-go-contract.mjs
 node scripts/generate-management-operations.mjs
 pnpm --dir console api:generate
 
-go tool oapi-codegen -generate types,client -package guardrails -o sdk/guardrails/client.gen.go openapi/guardrails.json
-pnpm --dir console exec openapi-typescript ../openapi/guardrails.json -o ../sdk/guardrails/schema.d.ts
+go tool oapi-codegen -generate types,client -package guardrails -o guardrails/client.gen.go guardrails/guardrails.json
+pnpm --dir console exec openapi-typescript ../guardrails/guardrails.json -o ../guardrails/schema.d.ts
 
 node scripts/generate-inference-contract.mjs
-pnpm --dir console exec openapi-typescript ../openapi/inference.json -o ../sdk/inference/schema.d.ts
+pnpm --dir console exec openapi-typescript ../inference/inference.json -o ../inference/schema.d.ts

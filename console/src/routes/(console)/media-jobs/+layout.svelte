@@ -1,6 +1,6 @@
 <script lang="ts">
   import { page } from '$app/state';
-  import { syncListWithUrl } from '$lib/lists/urlSync.svelte';
+  import { syncListWithUrl } from '$lib/listing/urlSync.svelte';
   import {
     mediaJobList,
     mediaJobUrl

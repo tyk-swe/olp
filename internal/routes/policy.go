@@ -12,7 +12,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
-	"github.com/tyk-swe/olp/internal/runtime"
+	"github.com/tyk-swe/olp/internal/release"
 )
 
 const policyETag = "00000000-0000-0000-0000-000000000000"
@@ -203,7 +203,7 @@ func (s *Server) writePolicy(r *http.Request, remove bool) (access.Reply, error)
 		return access.Reply{}, err
 	}
 	if scope != "route-draft" {
-		if _, err = runtime.Publish(r.Context(), tx, principal.UserID()); err != nil {
+		if _, err = release.Publish(r.Context(), tx, principal.UserID()); err != nil {
 			return access.Reply{}, err
 		}
 	}

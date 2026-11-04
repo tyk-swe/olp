@@ -1,4 +1,4 @@
-import type { components } from '$lib/api/schema';
+import type { components } from '$lib/management/schema';
 type AdmissionLimits = components['schemas']['EndUserLimits'];
 export const limitFields = [
   { key: 'requests_per_minute', label: 'Requests per minute', numeric: true },

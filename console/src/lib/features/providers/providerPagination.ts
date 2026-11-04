@@ -2,7 +2,7 @@ import {
   emptyCursorHistory,
   listState,
   type CursorHistory
-} from '$lib/lists/pagination';
+} from '$lib/listing/pagination';
 
 export type ProviderListState = CursorHistory & {
   /** Draft text in the search box. */

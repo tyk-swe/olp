@@ -1,4 +1,4 @@
-import type { components } from '$lib/api/schema';
+import type { components } from '$lib/management/schema';
 import {
   IncompleteJSON,
   freezeNative,
@@ -11,7 +11,7 @@ import {
   stringifyNativeJSON,
   type NativePath,
   type NativeValue
-} from '$lib/json/nativeJson';
+} from '$lib/nativeJson';
 
 type Configuration = components['schemas']['ProviderConfiguration'];
 

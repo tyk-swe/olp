@@ -1,9 +1,12 @@
-import type { components } from '$lib/api/schema';
-import { apiClient } from '$lib/api/client';
-import { ensureOk, unwrap, unwrapPage } from '$lib/api/http';
-import { ROUTE_PAGE_SIZE, ROUTE_REVISION_PAGE_SIZE } from '$lib/api/pageSizes';
-import { collectCursorPages } from '$lib/api/pagination';
-import { type CursorPage } from '$lib/api/http';
+import type { components } from '$lib/management/schema';
+import { apiClient } from '$lib/management/client';
+import { ensureOk, unwrap, unwrapPage } from '$lib/management/http';
+import {
+  ROUTE_PAGE_SIZE,
+  ROUTE_REVISION_PAGE_SIZE
+} from '$lib/management/pageSizes';
+import { collectCursorPages } from '$lib/management/pagination';
+import { type CursorPage } from '$lib/management/http';
 
 type Schemas = components['schemas'];
 

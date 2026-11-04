@@ -1,6 +1,6 @@
 import { QueryClient } from '@tanstack/svelte-query';
 import { afterEach, expect, it, vi } from 'vitest';
-import { json, route, serve } from '$lib/api/test/transport';
+import { json, route, serve } from '$lib/management/test/transport';
 import {
   createCapturePolicy,
   createExportSink,

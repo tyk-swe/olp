@@ -35,13 +35,13 @@ path refuses before upstream dispatch.
 
 | Adapter | Plugin and profiles | Paths under `/code/{slug}/` | Upstream | Clients (default first) |
 | --- | --- | --- | --- | --- |
-| Codex | [`codex`](../../plugins/codex/README.md): `codex-subscription` | `responses`, `responses/compact`, WebSocket `responses` | `https://chatgpt.com/backend-api/codex` | Codex CLI |
-| Claude subscription, fixture only | [`claude`](../../plugins/claude/README.md), `claude-subscription` | `v1/messages` | `https://api.anthropic.com` | Claude Code, live qualification pending |
-| OpenCode Go | [`opencode-go`](../../plugins/opencode-go/README.md): `opencode-go` | `v1/chat/completions`, `v1/messages`, `v1/responses` | `https://opencode.ai/zen/go/v1` | OpenCode, Claude Code |
-| GLM Coding Plan | [`zai-coding`](../../plugins/zai-coding/README.md): `zai-coding-plan`, `bigmodel-coding-plan` | `v1/messages`, `v1/chat/completions` | `https://api.z.ai/api/{anthropic,coding/paas/v4}` or the same paths on `https://open.bigmodel.cn/api` | Claude Code, OpenCode |
-| MiniMax M Plan | [`minimax-plan`](../../plugins/minimax-plan/README.md): `minimax-plan`, `minimax-plan-cn` | `v1/messages`, `v1/chat/completions` | `https://api.minimax.io/{anthropic,v1}` or the same paths on `https://api.minimax.cn` | Claude Code, OpenCode |
-| Kimi Code | [`kimi-code`](../../plugins/kimi-code/README.md): `kimi-code`, `kimi-code-cn` | `v1/messages`, `v1/chat/completions` | `https://api.kimi.ai/coding/v1` or the same paths on `https://api.kimi.com/coding` | Claude Code, OpenCode |
-| Qwen Token Plan | [`qwen-token-plan`](../../plugins/qwen-token-plan/README.md): `qwen-token-plan`, `qwen-token-plan-cn` | `v1/messages`, `v1/chat/completions` | `https://token-plan.ap-southeast-1.maas.aliyuncs.com/{apps/anthropic,compatible-mode}/v1` or the same paths on `https://token-plan.cn-beijing.maas.aliyuncs.com` | Claude Code, OpenCode |
+| Codex | [`codex`](../../internal/codexauth/codex/README.md): `codex-subscription` | `responses`, `responses/compact`, WebSocket `responses` | `https://chatgpt.com/backend-api/codex` | Codex CLI |
+| Claude subscription, fixture only | [`claude`](../../internal/claudeauth/claude/README.md), `claude-subscription` | `v1/messages` | `https://api.anthropic.com` | Claude Code, live qualification pending |
+| OpenCode Go | [`opencode-go`](../../internal/codeplans/opencode-go/README.md): `opencode-go` | `v1/chat/completions`, `v1/messages`, `v1/responses` | `https://opencode.ai/zen/go/v1` | OpenCode, Claude Code |
+| GLM Coding Plan | [`zai-coding`](../../internal/codeplans/zai-coding/README.md): `zai-coding-plan`, `bigmodel-coding-plan` | `v1/messages`, `v1/chat/completions` | `https://api.z.ai/api/{anthropic,coding/paas/v4}` or the same paths on `https://open.bigmodel.cn/api` | Claude Code, OpenCode |
+| MiniMax M Plan | [`minimax-plan`](../../internal/codeplans/minimax-plan/README.md): `minimax-plan`, `minimax-plan-cn` | `v1/messages`, `v1/chat/completions` | `https://api.minimax.io/{anthropic,v1}` or the same paths on `https://api.minimax.cn` | Claude Code, OpenCode |
+| Kimi Code | [`kimi-code`](../../internal/codeplans/kimi-code/README.md): `kimi-code`, `kimi-code-cn` | `v1/messages`, `v1/chat/completions` | `https://api.kimi.ai/coding/v1` or the same paths on `https://api.kimi.com/coding` | Claude Code, OpenCode |
+| Qwen Token Plan | [`qwen-token-plan`](../../internal/codeplans/qwen-token-plan/README.md): `qwen-token-plan`, `qwen-token-plan-cn` | `v1/messages`, `v1/chat/completions` | `https://token-plan.ap-southeast-1.maas.aliyuncs.com/{apps/anthropic,compatible-mode}/v1` or the same paths on `https://token-plan.cn-beijing.maas.aliyuncs.com` | Claude Code, OpenCode |
 
 The Messages paths speak Anthropic Messages, the chat paths Chat Completions and
 the responses paths the Responses API. OpenCode Go serves each model on one
@@ -489,7 +489,7 @@ and retirement, and `If-Match` on updates and publication.
      OLP. The profile endpoint verifies account and organization identity on
      enrollment and every refresh. Health stays unknown. Native forwarding and
      tool exchanges have controlled fixtures, while live subscription inference
-     remains unqualified. See the [plugin guide](../../plugins/claude/README.md).
+     remains unqualified. See the [plugin guide](../../internal/claudeauth/claude/README.md).
    - OpenCode Go and the coding plans enroll a pasted API key: the operator opens
      the vendor's key page, creates a key and pastes it into a masked field. OLP
      makes no upstream call; it stores the key encrypted and takes a SHA-256
@@ -1050,7 +1050,7 @@ boundary and durable ownership checks remain required.
 
 ## Antigravity enrollment and controlled translation
 
-The `antigravity-subscription` profile uses an operator-supplied Google desktop OAuth client. Configure its public `client_id` and complete headless PKCE enrollment with the callback URL and client secret in the masked grant input. The existing encrypted grant store holds the secret and refresh token. Authenticated Google subject and existing cloudcode project evidence establish identity, and both must remain unchanged on refresh. See the [plugin setup](../../plugins/antigravity/README.md) for the completion payload and credential setup requirement.
+The `antigravity-subscription` profile uses an operator-supplied Google desktop OAuth client. Configure its public `client_id` and complete headless PKCE enrollment with the callback URL and client secret in the masked grant input. The existing encrypted grant store holds the secret and refresh token. Authenticated Google subject and existing cloudcode project evidence establish identity, and both must remain unchanged on refresh. See the [plugin setup](../../internal/antigravityauth/antigravity/README.md) for the completion payload and credential setup requirement.
 
 The independent `chat_to_antigravity` route flag enables an internal Gemini target after publication. Existing OpenCode Chat Completions ingress supports controlled single-candidate text/function tool fixtures over HTTP unary or SSE. Eligible operator-configured model IDs start with `gemini-`, which does not establish model inventory, entitlement or live compatibility. Native forwarding remains the default. Public Gemini ingress, Responses, Messages, WebSocket, reasoning controls, signed state, media and server tools are unsupported. Identity and prompt compatibility remain disabled.
 

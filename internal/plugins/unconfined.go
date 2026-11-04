@@ -12,7 +12,7 @@ import (
 	"path/filepath"
 
 	pluginidentity "github.com/tyk-swe/olp/internal/plugins/identity"
-	"github.com/tyk-swe/olp/sdk/plugin/abi"
+	"github.com/tyk-swe/olp/plugin/abi"
 )
 
 // Unconfined is the experimental unconfined tier of a deployment that enables

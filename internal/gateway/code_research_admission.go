@@ -10,8 +10,8 @@ import (
 	"github.com/tyk-swe/olp/internal/codemode"
 	"github.com/tyk-swe/olp/internal/codeplans"
 	"github.com/tyk-swe/olp/internal/limits"
+	"github.com/tyk-swe/olp/internal/release"
 	"github.com/tyk-swe/olp/internal/routing"
-	"github.com/tyk-swe/olp/internal/runtime"
 )
 
 type researchAttempt struct {
@@ -25,7 +25,7 @@ type researchAttempt struct {
 	dispatched           bool
 }
 
-func (s *Server) prepareResearch(r *http.Request, release *runtime.Release, route codemode.Route, service string, authority access.Authority, notification bool) (*researchAttempt, error) {
+func (s *Server) prepareResearch(r *http.Request, release *release.Release, route codemode.Route, service string, authority access.Authority, notification bool) (*researchAttempt, error) {
 	ctx := r.Context()
 	fresh, account, err := s.researchAuthority(r, route, service, authority)
 	if err != nil {

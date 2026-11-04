@@ -14,7 +14,7 @@ import (
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/agentcontract"
 	"github.com/tyk-swe/olp/internal/consumerauth"
-	"github.com/tyk-swe/olp/internal/runtime"
+	"github.com/tyk-swe/olp/internal/release"
 )
 
 var errStreamEventSize = errors.New("stream event exceeds one MiB")
@@ -80,12 +80,12 @@ func (a streamAuthenticator) AuthenticateDelegation(ctx context.Context, token, 
 		ReauthenticateDelegation(context.Context, string, string) (*access.Authority, error)
 	})
 	if !ok {
-		return nil, runtime.ErrInvalidKey
+		return nil, release.ErrInvalidKey
 	}
 	return auth.ReauthenticateDelegation(ctx, token, assertion)
 }
 
-func (s *Server) sendStream(w http.ResponseWriter, r *http.Request, authority access.Authority, revision agentcontract.Revision, release *runtime.Release, version string, request rpcRequest) {
+func (s *Server) sendStream(w http.ResponseWriter, r *http.Request, authority access.Authority, revision agentcontract.Revision, release *release.Release, version string, request rpcRequest) {
 	if _, ok := w.(http.Flusher); !ok {
 		fail(w, request.ID, -32603, "Streaming unavailable")
 		return
@@ -201,7 +201,7 @@ func validInitialStreamEvent(event protocol.Event, continuation bool) bool {
 	}
 }
 
-func (s *Server) subscribe(w http.ResponseWriter, r *http.Request, authority access.Authority, revision agentcontract.Revision, release *runtime.Release, version string, request rpcRequest) {
+func (s *Server) subscribe(w http.ResponseWriter, r *http.Request, authority access.Authority, revision agentcontract.Revision, release *release.Release, version string, request rpcRequest) {
 	if _, ok := w.(http.Flusher); !ok {
 		fail(w, request.ID, -32603, "Streaming unavailable")
 		return

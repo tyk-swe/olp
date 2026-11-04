@@ -1,7 +1,7 @@
-import { apiClient } from '$lib/api/client';
-import type { components } from '$lib/api/schema';
-import { ensureOk, unwrap, unwrapPage } from '$lib/api/http';
-import { collectCursorPages } from '$lib/api/pagination';
+import { apiClient } from '$lib/management/client';
+import type { components } from '$lib/management/schema';
+import { ensureOk, unwrap, unwrapPage } from '$lib/management/http';
+import { collectCursorPages } from '$lib/management/pagination';
 
 export type Kind = 'toolsets' | 'agents' | 'prompts';
 export type Publication = components['schemas']['AgentPublication'];

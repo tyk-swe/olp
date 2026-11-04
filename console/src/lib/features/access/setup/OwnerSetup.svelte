@@ -1,9 +1,9 @@
 <script lang="ts">
   import { onDestroy } from 'svelte';
-  import { ApiProblem, applyServerFieldErrors } from '$lib/api/http';
+  import { ApiProblem, applyServerFieldErrors } from '$lib/management/http';
   import { createOwner } from '$lib/features/access/setup/api';
   import { authLifecycle } from '$lib/features/access/session/lifecycle';
-  import NavIcon from '$lib/components/NavIcon.svelte';
+  import NavIcon from '$lib/shell/NavIcon.svelte';
   import {
     PASSWORD_MAX_LENGTH,
     PASSWORD_MIN_LENGTH

@@ -1,4 +1,4 @@
-import { gatewayFetch } from '$lib/api/gateway';
+import { gatewayFetch } from '$lib/management/gateway';
 import {
   nativeObject,
   parseNativeJSON,
@@ -6,7 +6,7 @@ import {
   stringifyNativeJSON,
   type NativeObject,
   type NativeValue
-} from '$lib/json/nativeJson';
+} from '$lib/nativeJson';
 
 export const continuationVersion = 'chat-anthropic-tools-v1';
 const maxEventBytes = 1 << 20;

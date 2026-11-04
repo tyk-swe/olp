@@ -6,7 +6,7 @@
   import ProjectAttributionPolicyPanel from './ProjectAttributionPolicyPanel.svelte';
   import ProjectEndUserPolicyPanel from './ProjectEndUserPolicyPanel.svelte';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
-  import { errorMessage, isEtagMismatch } from '$lib/api/http';
+  import { errorMessage, isEtagMismatch } from '$lib/management/http';
   import {
     createProject,
     listAllProjectMembers,
@@ -23,14 +23,14 @@
   import { userKeys } from '$lib/features/access/users/userKeys';
   import { projectKeys } from '$lib/features/access/projects/projectKeys';
   import { formatDate } from '$lib/format';
-  import CursorPagination from '$lib/components/CursorPagination.svelte';
+  import CursorPagination from '$lib/shell/CursorPagination.svelte';
   import {
     cursorPaginationProps,
     emptyCursorHistory,
     resetCursor
-  } from '$lib/lists/pagination';
+  } from '$lib/listing/pagination';
 
-  import { useMutationIntent } from '$lib/forms/mutationIntent.svelte';
+  import { useMutationIntent } from '$lib/editing/mutationIntent.svelte';
 
   const createIntent = useMutationIntent();
 

@@ -7,8 +7,8 @@ import (
 	"time"
 
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/release"
 	"github.com/tyk-swe/olp/internal/routing"
-	"github.com/tyk-swe/olp/internal/runtime"
 	"github.com/tyk-swe/olp/internal/workload"
 )
 
@@ -92,7 +92,7 @@ func (s *Server) currentToolAuthority(in executeInput) *apiError {
 	if err == nil {
 		return nil
 	}
-	if errors.Is(err, runtime.ErrStaleAuthority) {
+	if errors.Is(err, release.ErrStaleAuthority) {
 		return fail(http.StatusServiceUnavailable, "authority_unavailable", "api_error", "Key authority is unavailable; retry shortly.")
 	}
 	return errPermissionDenied

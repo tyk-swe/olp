@@ -1,15 +1,15 @@
 import { validRouteSlug } from '$lib/routeIdentity';
-import type { components } from '$lib/api/schema';
+import type { components } from '$lib/management/schema';
 import type {
   CreateRouteDraftInput,
   ReplaceRouteDraftInput
 } from '$lib/features/routes/api';
-import type { ProviderModelInventory } from '$lib/features/providers/api/models';
-import { isJsonObject } from '$lib/forms/json';
+import type { ProviderModelInventory } from '$lib/features/providers/models';
+import { isJsonObject } from '$lib/editing/json';
 import {
   lifecycleNotice,
   type LifecycleNotice
-} from '$lib/features/providers/models/lifecycle';
+} from '$lib/features/providers/provider-models/lifecycle';
 import { validatePassthroughConfig } from './routePassthrough';
 
 export type EditableTarget = {

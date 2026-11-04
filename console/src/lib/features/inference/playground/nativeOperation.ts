@@ -1,4 +1,4 @@
-import { gatewayFetch } from '$lib/api/gateway';
+import { gatewayFetch } from '$lib/management/gateway';
 import { validRouteSlug } from '$lib/routeIdentity';
 import {
   nativeObject,
@@ -7,7 +7,7 @@ import {
   stringifyNativeJSON,
   type NativeObject,
   type NativeValue
-} from '$lib/json/nativeJson';
+} from '$lib/nativeJson';
 
 export const nativeOperationDialects = {
   completions: ['openai-completions'],

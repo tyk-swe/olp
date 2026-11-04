@@ -7,7 +7,7 @@ import (
 	"github.com/tyk-swe/olp/internal/routing"
 
 	"github.com/tyk-swe/olp/internal/connectors"
-	"github.com/tyk-swe/olp/internal/runtime"
+	"github.com/tyk-swe/olp/internal/release"
 )
 
 // slotSecret asks for a credential slot's usable secret and remembers its
@@ -43,7 +43,7 @@ func (s *Server) applySlotCredential(ctx context.Context, x *call, req *http.Req
 // credential. A resource can retain a compatible historical profile and
 // network credential after the current release changed; current revocation
 // still wins.
-func (s *Server) providerNetworkSecret(ctx context.Context, release *runtime.Release, provider *routing.Provider) ([]byte, error) {
+func (s *Server) providerNetworkSecret(ctx context.Context, release *release.Release, provider *routing.Provider) ([]byte, error) {
 	if provider.Network == nil || provider.Network.CredentialID == "" {
 		return nil, nil
 	}
@@ -72,7 +72,7 @@ func providerConnectionScope(provider *routing.Provider, slot routing.Slot) stri
 	return provider.ID + "/" + provider.RevisionID + "/" + slot.ID + "/" + credential
 }
 
-func (s *Server) providerClient(ctx context.Context, release *runtime.Release, provider *routing.Provider, slot routing.Slot) (*http.Client, error) {
+func (s *Server) providerClient(ctx context.Context, release *release.Release, provider *routing.Provider, slot routing.Slot) (*http.Client, error) {
 	if provider.CredentialSource == "caller" {
 		secret, err := s.providerNetworkSecret(ctx, release, provider)
 		if err != nil {

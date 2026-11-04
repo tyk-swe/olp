@@ -1,5 +1,5 @@
 import { validRouteSlug } from '$lib/routeIdentity';
-import type { components } from '$lib/api/schema';
+import type { components } from '$lib/management/schema';
 import {
   limitForm,
   limitsInput,

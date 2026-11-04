@@ -14,7 +14,7 @@ import (
 	"github.com/tyk-swe/olp/internal/agentcontract"
 	"github.com/tyk-swe/olp/internal/agents"
 	"github.com/tyk-swe/olp/internal/limits"
-	"github.com/tyk-swe/olp/internal/runtime"
+	"github.com/tyk-swe/olp/internal/release"
 	"github.com/tyk-swe/olp/internal/secrets"
 )
 
@@ -61,14 +61,14 @@ func newReservation(price string) (reservation, error) {
 	return reservation{DispatchID: dispatch, ClaimID: claim, RunID: run, StepID: step, EventID: event, Price: price}, nil
 }
 
-func releaseAffinity(release *runtime.Release) string {
+func releaseAffinity(release *release.Release) string {
 	if id, err := uuid.Parse(release.ID); err == nil && id.String() == release.ID && id != uuid.Nil {
 		return release.ID
 	}
 	return release.Snapshot.Generation.ID
 }
 
-func (l *Ledger) reserve(ctx context.Context, authority access.Authority, revision agentcontract.Revision, release *runtime.Release) (reservation, error) {
+func (l *Ledger) reserve(ctx context.Context, authority access.Authority, revision agentcontract.Revision, release *release.Release) (reservation, error) {
 	if l == nil || l.Pool == nil || l.Store == nil || l.Auth == nil || authority.ProjectID == nil || revision.Definition.Agent == nil || revision.Definition.Agent.MessagePrice == "" || release == nil || release.Snapshot == nil {
 		return reservation{}, limits.ErrDebitAuthority
 	}

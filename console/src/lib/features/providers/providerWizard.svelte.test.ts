@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
-import { json, route, serve } from '$lib/api/test/transport';
-import type { ProviderKindCapability } from './api/models';
-import type { Provider, ProviderProbe } from './api/providers';
+import { json, route, serve } from '$lib/management/test/transport';
+import type { ProviderKindCapability } from './models';
+import type { Provider, ProviderProbe } from './providers';
 import StateHarness from '../../../../tests/unit/support/StateHarness.svelte';
 import { ProviderWizardState } from './providerWizard.svelte';
 

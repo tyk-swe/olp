@@ -1,10 +1,7 @@
-import { instant } from '$lib/api/query';
-import type {
-  UsageDimension,
-  UsageFilters
-} from '$lib/features/usage/api/usage';
+import { instant } from '$lib/management/query';
+import type { UsageDimension, UsageFilters } from '$lib/features/usage/usage';
 import { dateTimeLocalValue } from '$lib/format';
-import { timeOrder, timeValid, UUID } from '$lib/lists/filters';
+import { timeOrder, timeValid, UUID } from '$lib/listing/filters';
 
 const dimensions = [
   'route',

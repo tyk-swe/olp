@@ -2,14 +2,14 @@
   import { untrack } from 'svelte';
   import { createQuery } from '@tanstack/svelte-query';
   import { resolve } from '$app/paths';
-  import { listProviders } from '$lib/features/providers/api/providers';
-  import { listProviderCredentials } from '$lib/features/providers/api/credentials';
+  import { listProviders } from '$lib/features/providers/providers';
+  import { listProviderCredentials } from '$lib/features/providers/credentials';
   import { providerKeys } from '$lib/features/providers/providerKeys';
   import {
     saveCodeAccount,
     type CodeAccount,
     type CodeAccountWrite
-  } from '$lib/api/code-mode';
+  } from '$lib/management/code-mode';
   import { nativeModels } from './presentation';
   import AccountEnrollment from './AccountEnrollment.svelte';
 

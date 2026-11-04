@@ -3,7 +3,7 @@ import {
   parseNativeJSON,
   stringifyNativeJSON,
   type NativeValue
-} from '$lib/json/nativeJson';
+} from '$lib/nativeJson';
 
 export type RealtimeEventRow = {
   position: number;

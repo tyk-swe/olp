@@ -31,8 +31,8 @@ const definitions = [
   {
     label: 'Review discovered models',
     description: 'Enable the certified model capabilities your clients need.',
-    href: '/models',
-    viewHref: '/models',
+    href: '/provider-models',
+    viewHref: '/provider-models',
     capability: 'providers.manage'
   },
   {

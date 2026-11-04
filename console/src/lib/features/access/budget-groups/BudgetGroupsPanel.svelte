@@ -2,7 +2,7 @@
   import { validRouteSlug } from '$lib/routeIdentity';
   import { currentBudgetLimit } from '../api-keys/budgetPresentation';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
-  import { errorMessage } from '$lib/api/http';
+  import { errorMessage } from '$lib/management/http';
   import { useRole } from '$lib/features/access/session/useRole.svelte';
   import { useServiceCapabilities } from '$lib/features/access/session/serviceCapabilities.svelte';
   import ProjectScopeField from '$lib/features/access/projects/ProjectScopeField.svelte';
@@ -19,7 +19,7 @@
   import {
     useMutationIntent,
     usePrincipalLifetime
-  } from '$lib/forms/mutationIntent.svelte';
+  } from '$lib/editing/mutationIntent.svelte';
 
   const createIntent = useMutationIntent();
 

@@ -2,12 +2,12 @@
   import { onMount } from 'svelte';
   import { writable } from 'svelte/store';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
-  import { errorMessage } from '$lib/api/http';
+  import { errorMessage } from '$lib/management/http';
   import { useRole } from '$lib/features/access/session/useRole.svelte';
   import {
     useMutationIntent,
     usePrincipalLifetime
-  } from '$lib/forms/mutationIntent.svelte';
+  } from '$lib/editing/mutationIntent.svelte';
   import { agentKeys } from './agentKeys';
   import DelegationConsent from './DelegationConsent.svelte';
   import {

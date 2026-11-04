@@ -23,9 +23,9 @@ import (
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/mcp"
 	"github.com/tyk-swe/olp/internal/operationregistry"
+	"github.com/tyk-swe/olp/internal/release"
 	"github.com/tyk-swe/olp/internal/retainedapi"
 	"github.com/tyk-swe/olp/internal/routeidentity"
-	"github.com/tyk-swe/olp/internal/runtime"
 	"github.com/tyk-swe/olp/internal/usage"
 	"github.com/tyk-swe/olp/internal/vendors"
 )
@@ -36,7 +36,7 @@ type Server struct {
 	Access            *access.Server
 	Inputs            func() *usage.RoutingInputs
 	WorkflowTools     func() mcp.WorkflowResolver
-	WorkflowRelease   func() *runtime.Release
+	WorkflowRelease   func() *release.Release
 	WorkflowAvailable func() bool
 	// Catalog is the reference catalog this release ships, whose documented
 	// retirements targets carry.

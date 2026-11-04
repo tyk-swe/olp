@@ -7,7 +7,7 @@ import (
 	"github.com/tyk-swe/olp/internal/routing"
 
 	"github.com/tyk-swe/olp/internal/access"
-	"github.com/tyk-swe/olp/internal/runtime"
+	"github.com/tyk-swe/olp/internal/release"
 )
 
 // Published writes use the same draft validation and promotion as the console,
@@ -108,7 +108,7 @@ func (s *Server) writePublished(r *http.Request, id string) (access.Reply, error
 	if err != nil {
 		return access.Reply{}, err
 	}
-	if _, err = runtime.Publish(r.Context(), tx, p.UserID()); err != nil {
+	if _, err = release.Publish(r.Context(), tx, p.UserID()); err != nil {
 		return access.Reply{}, err
 	}
 	action := "route.update"

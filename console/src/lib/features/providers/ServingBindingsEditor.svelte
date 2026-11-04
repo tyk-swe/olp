@@ -1,7 +1,7 @@
 <script lang="ts">
-  import { nativeEntries, nativeObject } from '$lib/json/nativeJson';
+  import { nativeEntries, nativeObject } from '$lib/nativeJson';
   import type { ConfigurationDraft } from './configurationDraft.svelte';
-  import type { FieldSchema, ProviderProfile } from './api/profiles';
+  import type { FieldSchema, ProviderProfile } from './providerProfiles';
   import NativeValueField from './NativeValueField.svelte';
   import OperationDefaultsEditor from './OperationDefaultsEditor.svelte';
   let {

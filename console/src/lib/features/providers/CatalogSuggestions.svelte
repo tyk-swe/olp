@@ -1,20 +1,20 @@
 <script lang="ts">
-  import { useMutationIntent } from '$lib/forms/mutationIntent.svelte';
+  import { useMutationIntent } from '$lib/editing/mutationIntent.svelte';
 
   import { createQuery } from '@tanstack/svelte-query';
   import {
     acceptCatalogSuggestions,
     listCatalogSuggestions
-  } from '$lib/features/providers/api/catalog';
-  import type { Provider } from '$lib/features/providers/api/providers';
+  } from '$lib/features/providers/catalog';
+  import type { Provider } from '$lib/features/providers/providers';
   import { providerKeys } from '$lib/features/providers/providerKeys';
   import {
     acceptableSuggestions,
     capabilityHints,
     changedFactLabels
   } from '$lib/features/providers/catalogSuggestions';
-  import { lifecycleNotice } from '$lib/features/providers/models/lifecycle';
-  import { metadataFacts } from '$lib/features/providers/models/modelMetadata';
+  import { lifecycleNotice } from '$lib/features/providers/provider-models/lifecycle';
+  import { metadataFacts } from '$lib/features/providers/provider-models/modelMetadata';
   import { formatDate, stateLabel } from '$lib/format';
   import type { RunProviderAction } from './providerEditor';
 

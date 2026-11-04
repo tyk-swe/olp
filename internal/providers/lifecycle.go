@@ -19,7 +19,7 @@ import (
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/grants"
 	"github.com/tyk-swe/olp/internal/protocols"
-	"github.com/tyk-swe/olp/internal/runtime"
+	"github.com/tyk-swe/olp/internal/release"
 	"github.com/tyk-swe/olp/internal/secrets"
 	"github.com/tyk-swe/olp/internal/secretstore"
 )
@@ -615,7 +615,7 @@ func (s *Server) activateProvider(r *http.Request, _ access.Principal) (access.R
 				return access.Reply{}, err
 			}
 		}
-		generation, err := runtime.Publish(ctx, tx, p.UserID())
+		generation, err := release.Publish(ctx, tx, p.UserID())
 		if err != nil {
 			return access.Reply{}, err
 		}
@@ -632,7 +632,7 @@ func (s *Server) disableProvider(r *http.Request, _ access.Principal) (access.Re
 		if _, err := tx.Exec(ctx, "UPDATE olp.providers SET state='disabled',etag=$2,updated_at=now() WHERE id=$1", current.ID, etag); err != nil {
 			return access.Reply{}, err
 		}
-		generation, err := runtime.Publish(ctx, tx, p.UserID())
+		generation, err := release.Publish(ctx, tx, p.UserID())
 		if err != nil {
 			return access.Reply{}, err
 		}

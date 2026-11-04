@@ -2,14 +2,14 @@ apiVersion: v2
 name: openllmproxy
 description: OpenLLMProxy gateway and control plane
 type: application
-version: "0.1.0"
-appVersion: "0.1.0"
+version: "0.2.0"
+appVersion: "0.2.0"
 kubeVersion: ">=1.27.0-0"
 annotations:
   artifacthub.io/license: AGPL-3.0-only
   artifacthub.io/images: |
     - name: openllmproxy
-      image: ghcr.io/tyk-swe/olp:0.1.0
+      image: ghcr.io/tyk-swe/olp:0.2.0
       platforms:
         - linux/amd64
         - linux/arm64

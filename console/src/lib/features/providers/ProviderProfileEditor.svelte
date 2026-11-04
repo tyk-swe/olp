@@ -1,15 +1,15 @@
 <script lang="ts">
   import { createQuery } from '@tanstack/svelte-query';
-  import { nativeEntries, nativeObject } from '$lib/json/nativeJson';
-  import type { Provider } from './api/providers';
+  import { nativeEntries, nativeObject } from '$lib/nativeJson';
+  import type { Provider } from './providers';
   import type { ProviderEditValues, RunProviderAction } from './providerEditor';
   import { profileScopedSettings } from './configurationDraft.svelte';
   import {
     getConfigurationSchemas,
     listProviderProfiles
-  } from './api/profiles';
+  } from './providerProfiles';
   import { providerKeys } from './providerKeys';
-  import { listProviderVendors } from './api/providers';
+  import { listProviderVendors } from './providers';
   import { vendorSpeaks } from './profiles';
   import NativeValueField from './NativeValueField.svelte';
   import NativeMapEditor from './NativeMapEditor.svelte';

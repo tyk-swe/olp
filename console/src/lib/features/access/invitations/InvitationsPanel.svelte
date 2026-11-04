@@ -2,7 +2,7 @@
   import {
     useMutationIntent,
     usePrincipalLifetime
-  } from '$lib/forms/mutationIntent.svelte';
+  } from '$lib/editing/mutationIntent.svelte';
   import { useServiceCapabilities } from '$lib/features/access/session/serviceCapabilities.svelte';
   import { invitationKeys } from '$lib/features/access/invitations/invitationKeys';
 
@@ -15,16 +15,16 @@
     type InvitationSecret
   } from '$lib/features/access/invitations/api';
   import { copyText } from '$lib/clipboard';
-  import { errorMessage } from '$lib/api/http';
+  import { errorMessage } from '$lib/management/http';
   import {
     cursorPaginationProps,
     emptyCursorHistory
-  } from '$lib/lists/pagination';
+  } from '$lib/listing/pagination';
   import { FIXED_ROLES } from '$lib/features/access/session/authorization';
   import { useRole } from '$lib/features/access/session/useRole.svelte';
-  import CursorPagination from '$lib/components/CursorPagination.svelte';
-  import ReadOnlyNote from '$lib/components/ReadOnlyNote.svelte';
-  import SecretDialog from '$lib/components/SecretDialog.svelte';
+  import CursorPagination from '$lib/shell/CursorPagination.svelte';
+  import ReadOnlyNote from '$lib/shell/ReadOnlyNote.svelte';
+  import SecretDialog from '$lib/shell/SecretDialog.svelte';
   import { formatDate } from '$lib/format';
 
   const revokeInvitationIntent = useMutationIntent();

@@ -1,6 +1,6 @@
 <script lang="ts">
   import CodeModePage from '$lib/features/code-mode/CodeModePage.svelte';
-  import { getCodeClientConfiguration } from '$lib/api/code-mode';
+  import { getCodeClientConfiguration } from '$lib/management/code-mode';
 
   let gatewayURL = $state(globalThis.location?.origin ?? '');
 </script>

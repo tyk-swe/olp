@@ -6,7 +6,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
-	"github.com/tyk-swe/olp/internal/runtime"
+	"github.com/tyk-swe/olp/internal/release"
 	"github.com/tyk-swe/olp/internal/secrets"
 	"github.com/tyk-swe/olp/internal/secretstore"
 )
@@ -71,7 +71,7 @@ func (s *Server) readCredential(ctx context.Context, q access.Queryer, id string
 	if len(referenceJSON) > 0 {
 		var reference secretstore.Reference
 		if json.Unmarshal(referenceJSON, &reference) != nil || reference.Validate() != nil {
-			return nil, runtime.ErrCredentialUnavailable
+			return nil, release.ErrCredentialUnavailable
 		}
 		return s.resolveReference(ctx, reference)
 	}

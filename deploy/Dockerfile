@@ -13,14 +13,16 @@ RUN test "$(go env GOARCH)" = "$TARGETARCH"
 COPY go.mod go.sum package.json ./
 RUN go mod download
 COPY cmd ./cmd
+COPY guardrails ./guardrails
+COPY inference ./inference
 COPY internal ./internal
-COPY sdk ./sdk
-COPY openapi ./openapi
+COPY management ./management
+COPY plugin ./plugin
 COPY deploy/native /out/native
 RUN version=$(sed -n 's/  "version": "\([^" ]*\)",/\1/p' package.json) && \
     test -n "$version" && test "${OLP_VERSION:-$version}" = "$version" && \
     mkdir -p /out && go build -mod=readonly -trimpath -tags="$OLP_GO_TAGS" \
-      -ldflags="-s -w -X github.com/tyk-swe/olp/internal/process.Version=$version" -o /out/olp ./cmd/olp
+      -ldflags="-s -w -X main.Version=$version" -o /out/olp ./cmd/olp
 RUN go version -m /out/olp > /out/go-build-info.txt && ldd /out/olp > /out/native-link.txt
 RUN glide_dir="$(go list -m -f '{{.Dir}}' github.com/valkey-io/valkey-glide/go/v2)" && \
     cp "$glide_dir/LICENSE" /out/GLIDE-LICENSE && \
@@ -36,11 +38,11 @@ COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
 COPY console/package.json ./console/package.json
 RUN pnpm install --frozen-lockfile --store-dir /pnpm/store
 COPY console ./console
-COPY openapi/management.json ./openapi/management.json
+COPY management/management.json ./management/management.json
 RUN pnpm --dir console api:generate && pnpm --dir console build
 
 FROM gcr.io/distroless/cc-debian13:nonroot@sha256:c31ff9abcb1910f3ab25c7957bdaf0bfe12a01eb546e8df2282f1c8f682b606c
-ARG OLP_VERSION=0.1.0
+ARG OLP_VERSION=0.2.0
 LABEL org.opencontainers.image.source="https://github.com/tyk-swe/olp" \
       org.opencontainers.image.title="OpenLLMProxy" \
       org.opencontainers.image.licenses="AGPL-3.0-only" \

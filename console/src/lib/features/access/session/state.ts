@@ -1,4 +1,4 @@
-import type { ManagementOperation } from '$lib/api/requirements';
+import type { ManagementOperation } from '$lib/management/requirements';
 import type { FixedRole } from '$lib/features/access/session/authorization';
 
 export type AuthenticatedUser = {

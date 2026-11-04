@@ -254,8 +254,10 @@ visibility and the key's limits:
 
 A successful evaluation returns `{blocked, segments, decisions}`, including
 `blocked: true` for a policy refusal. The operation is recorded as `guardrail`.
-The [OpenAPI contract](../../openapi/guardrails.json) and generated Go and TypeScript
-clients live under [sdk/guardrails](../../sdk/guardrails).
+The [OpenAPI contract](../../guardrails/guardrails.json) and generated Go and TypeScript
+clients live under [guardrails](../../guardrails). The Go client imports as
+`github.com/tyk-swe/olp/guardrails`, which replaces the old
+`github.com/tyk-swe/olp/sdk/guardrails` path with no alias left behind.
 
 Evidence contains only identifiers, revisions, phase, action, outcome,
 categories and latency. Request and attempt history, telemetry and the

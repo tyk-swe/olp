@@ -1,0 +1,17 @@
+import type { components } from '$lib/management/schema';
+import { apiClient } from '$lib/management/client';
+import { unwrap } from '$lib/management/http';
+
+export type PricingQuoteRequest = components['schemas']['PricingQuoteRequest'];
+export type PricingQuote = components['schemas']['PricingQuoteResponse'];
+
+/** Prices one attempt's usage exactly as accounting would record it. */
+export async function quoteUsage(
+  body: PricingQuoteRequest
+): Promise<PricingQuote> {
+  const { data, error, response } = await apiClient.POST(
+    '/api/v1/pricing/quote',
+    { body }
+  );
+  return unwrap({ data, error, response });
+}

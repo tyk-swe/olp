@@ -5,7 +5,7 @@ import (
 	"errors"
 	"sync"
 
-	"github.com/tyk-swe/olp/sdk/plugin/abi"
+	"github.com/tyk-swe/olp/plugin/abi"
 )
 
 // PrepareGuardrail is called during release installation. Serving never loads

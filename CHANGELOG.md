@@ -7,6 +7,8 @@ semantic versioning and take their source from root `package.json`. The
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-11-03
+
 ### Added
 
 - MiniMax M Plan, Kimi Code and Qwen Token Plan code-mode adapters. The
@@ -28,6 +30,21 @@ semantic versioning and take their source from root `package.json`. The
 - Expose metadata-only batch settlement progress and in-flight submission
   intents in provider-resource listings; document M9.2 provider scope,
   configuration and operator recovery.
+
+### Changed
+
+- Public Go import paths moved from layer buckets to capability folders, with
+  no compatibility aliases. The plugin authoring packages moved from
+  `github.com/tyk-swe/olp/sdk/plugin` to `github.com/tyk-swe/olp/plugin`, and
+  the generated clients and their contract sources moved from `sdk/` and
+  `openapi/` to `management/`, `inference/`, and `guardrails/`. The plugin
+  wire ABI stays at version 1, so already compiled plugins keep working and
+  only rebuilt plugins need the new import paths. The full old-to-new table
+  is in the plugin authoring guide.
+
+- The console models page moved from `/models` to `/provider-models`, so
+  bookmarks and links to the old address need the new one. No other console
+  addresses changed, and no HTTP API paths changed.
 
 ### Security
 

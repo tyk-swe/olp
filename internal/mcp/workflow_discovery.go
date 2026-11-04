@@ -10,8 +10,8 @@ import (
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/protocols/wire"
+	"github.com/tyk-swe/olp/internal/release"
 	"github.com/tyk-swe/olp/internal/routing"
-	"github.com/tyk-swe/olp/internal/runtime"
 )
 
 func WorkflowRequestRefusal(request *wire.Request) string {
@@ -66,7 +66,7 @@ func SelectWorkflowToolsets(allowed []string, raw json.RawMessage) ([]string, er
 }
 
 type WorkflowResolver interface {
-	Resolve(context.Context, access.Authority, *runtime.Release, []string) ([]WorkflowTool, error)
+	Resolve(context.Context, access.Authority, *release.Release, []string) ([]WorkflowTool, error)
 }
 
 type discoveredToolset struct {
@@ -74,20 +74,20 @@ type discoveredToolset struct {
 	tools     []WorkflowTool
 }
 
-func DescribeWorkflow(ctx context.Context, resolver WorkflowResolver, authority access.Authority, release *runtime.Release, route, serving routing.Route, surface string, caller *limits.WorkflowBounds, available bool, now time.Time) *routing.WorkflowCapability {
+func DescribeWorkflow(ctx context.Context, resolver WorkflowResolver, authority access.Authority, release *release.Release, route, serving routing.Route, surface string, caller *limits.WorkflowBounds, available bool, now time.Time) *routing.WorkflowCapability {
 	return describeWorkflow(ctx, resolver, authority, release, route, caller, available, now, func(mode string) bool {
 		return workflowServingRouteAllowed(authority, serving, now) && workflowTargetSupports(release.Snapshot, serving, surface, mode, nil)
 	})
 }
 
-func DescribeReachableWorkflow(ctx context.Context, resolver WorkflowResolver, authority access.Authority, release *runtime.Release, route routing.Route, surface string, available bool, now time.Time) *routing.WorkflowCapability {
+func DescribeReachableWorkflow(ctx context.Context, resolver WorkflowResolver, authority access.Authority, release *release.Release, route routing.Route, surface string, available bool, now time.Time) *routing.WorkflowCapability {
 	return describeWorkflow(ctx, resolver, authority, release, route, nil, available, now, func(mode string) bool {
 		supported, _ := workflowReachableMode(release.Snapshot, authority, route, surface, mode, nil, now)
 		return supported
 	})
 }
 
-func describeWorkflow(ctx context.Context, resolver WorkflowResolver, authority access.Authority, release *runtime.Release, route routing.Route, caller *limits.WorkflowBounds, available bool, now time.Time, supports func(string) bool) *routing.WorkflowCapability {
+func describeWorkflow(ctx context.Context, resolver WorkflowResolver, authority access.Authority, release *release.Release, route routing.Route, caller *limits.WorkflowBounds, available bool, now time.Time, supports func(string) bool) *routing.WorkflowCapability {
 	if route.ToolExecution != "gateway" || route.Fidelity.Strict() || !authority.Allows("inference", route.Slug, route.ProjectID, now) || resolver == nil || release == nil || release.Snapshot == nil {
 		return nil
 	}
@@ -221,7 +221,7 @@ func workflowPredicateAlwaysMatches(predicate routing.Predicate) bool {
 	return predicate.MinInputTokens == nil && predicate.MaxInputTokens == nil && predicate.MinOutputTokens == nil && predicate.MaxOutputTokens == nil && predicate.Tools == nil && len(predicate.Modalities) == 0 && predicate.StructuredOutput == nil && len(predicate.ReasoningEffort) == 0 && predicate.Classifier == nil && predicate.Plugin == nil
 }
 
-func defaultToolsetsAllowed(ctx context.Context, resolver WorkflowResolver, authority access.Authority, release *runtime.Release, selected []string, sets []discoveredToolset) bool {
+func defaultToolsetsAllowed(ctx context.Context, resolver WorkflowResolver, authority access.Authority, release *release.Release, selected []string, sets []discoveredToolset) bool {
 	if slices.ContainsFunc(sets, func(set discoveredToolset) bool { return !set.permitted }) {
 		return false
 	}

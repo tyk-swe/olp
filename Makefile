@@ -2,13 +2,13 @@ SHELL := bash
 .SHELLFLAGS := -euo pipefail -c
 .DEFAULT_GOAL := help
 VERSION = $(shell node -p "require('./package.json').version")
-LDFLAGS = -X github.com/tyk-swe/olp/internal/process.Version=$(VERSION)
+LDFLAGS = -X main.Version=$(VERSION)
 
 GO_BUILD_OUTPUT ?= .local/bin/olp
 GO_BUILD_TAGS ?=
 SIGNED_DOCUMENTS = internal/catalog/catalog.json internal/pluginindex/index.json
 GOFMT_PATHS = \
-	cmd internal openapi plugins sdk \
+	cmd guardrails inference internal management plugin \
 	tests/fidelity tests/fixtures/*.go tests/fixtures/fidelity
 
 .PHONY: \

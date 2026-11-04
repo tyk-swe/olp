@@ -6,7 +6,7 @@
   import ProjectRouteGroupsPanel from './ProjectRouteGroupsPanel.svelte';
   import ProjectAttributionPolicyPanel from './ProjectAttributionPolicyPanel.svelte';
   import { createQuery } from '@tanstack/svelte-query';
-  import { errorMessage } from '$lib/api/http';
+  import { errorMessage } from '$lib/management/http';
   import { useRole } from '../session/useRole.svelte';
   import { listProjectMemberships } from './api';
   import { projectKeys } from './projectKeys';

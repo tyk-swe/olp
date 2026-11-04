@@ -1,11 +1,11 @@
 <script lang="ts">
   import { providerKeys } from '$lib/features/providers/providerKeys';
-  import { usePrincipalLifetime } from '$lib/forms/mutationIntent.svelte';
+  import { usePrincipalLifetime } from '$lib/editing/mutationIntent.svelte';
 
   import { resolve } from '$app/paths';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
-  import { errorMessage, isEtagMismatch } from '$lib/api/http';
-  import CursorPagination from '$lib/components/CursorPagination.svelte';
+  import { errorMessage, isEtagMismatch } from '$lib/management/http';
+  import CursorPagination from '$lib/shell/CursorPagination.svelte';
   import { formatDate } from '$lib/format';
   import {
     certifyProviderModel,
@@ -16,18 +16,18 @@
     type CapabilityCertification,
     type CapabilityDeclaration,
     type ProviderModel
-  } from '$lib/features/providers/api/models';
+  } from '$lib/features/providers/models';
   import {
     probeProvider,
     type Provider
-  } from '$lib/features/providers/api/providers';
+  } from '$lib/features/providers/providers';
   import { declaresModels } from '$lib/features/providers/profiles';
-  import { listProviderProfiles } from '$lib/features/providers/api/profiles';
+  import { listProviderProfiles } from '$lib/features/providers/providerProfiles';
   import {
     cursorPaginationProps,
     resetCursor,
     type CursorHistory
-  } from '$lib/lists/pagination';
+  } from '$lib/listing/pagination';
   import CapabilityReview from '$lib/features/providers/CapabilityReview.svelte';
   import CatalogSuggestions from '$lib/features/providers/CatalogSuggestions.svelte';
   import {
@@ -38,7 +38,7 @@
     providerDisabled
   } from '$lib/features/providers/providerEditor';
   import type { RunProviderAction } from './providerEditor';
-  import type { ProviderModelPage } from './api/models';
+  import type { ProviderModelPage } from './models';
 
   let {
     current,
@@ -253,7 +253,7 @@
       <p class="eyebrow">Discovery</p>
       <h2 id="models-heading">Models and capabilities</h2>
     </div>
-    <a class="button button-secondary" href={resolve('/models')}
+    <a class="button button-secondary" href={resolve('/provider-models')}
       >Inventory view</a
     >
   </div>

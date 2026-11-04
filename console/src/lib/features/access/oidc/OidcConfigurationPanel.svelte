@@ -3,7 +3,7 @@
 
   import { onDestroy } from 'svelte';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
-  import { isEtagMismatch } from '$lib/api/http';
+  import { isEtagMismatch } from '$lib/management/http';
   import {
     beginOidcLink,
     getOidcConfiguration,
@@ -17,9 +17,9 @@
   } from '$lib/features/access/profile/api';
   import { FIXED_ROLES } from '$lib/features/access/session/authorization';
   import { useRole } from '$lib/features/access/session/useRole.svelte';
-  import ConflictNotice from '$lib/components/ConflictNotice.svelte';
-  import ReadOnlyNote from '$lib/components/ReadOnlyNote.svelte';
-  import ReauthenticateDialog from '$lib/components/ReauthenticateDialog.svelte';
+  import ConflictNotice from '$lib/shell/ConflictNotice.svelte';
+  import ReadOnlyNote from '$lib/shell/ReadOnlyNote.svelte';
+  import ReauthenticateDialog from '$lib/shell/ReauthenticateDialog.svelte';
   import {
     beginReload,
     conflictNotice,
@@ -28,8 +28,8 @@
     markDirty,
     markSaved,
     reconcile
-  } from '$lib/forms/concurrentEdit';
-  import { errorMessage } from '$lib/api/http';
+  } from '$lib/editing/concurrentEdit';
+  import { errorMessage } from '$lib/management/http';
   import { parseRoleMappings } from '$lib/features/access/oidc/mappings';
 
   const queryClient = useQueryClient();

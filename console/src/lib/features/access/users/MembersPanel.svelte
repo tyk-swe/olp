@@ -8,16 +8,16 @@
     updateUser,
     type User
   } from '$lib/features/access/users/api';
-  import type { CursorPage } from '$lib/api/http';
-  import { errorMessage } from '$lib/api/http';
+  import type { CursorPage } from '$lib/management/http';
+  import { errorMessage } from '$lib/management/http';
   import {
     cursorPaginationProps,
     emptyCursorHistory
-  } from '$lib/lists/pagination';
+  } from '$lib/listing/pagination';
   import { FIXED_ROLES } from '$lib/features/access/session/authorization';
   import { useRole } from '$lib/features/access/session/useRole.svelte';
-  import CursorPagination from '$lib/components/CursorPagination.svelte';
-  import ReadOnlyNote from '$lib/components/ReadOnlyNote.svelte';
+  import CursorPagination from '$lib/shell/CursorPagination.svelte';
+  import ReadOnlyNote from '$lib/shell/ReadOnlyNote.svelte';
   import { formatDate } from '$lib/format';
   import { updateMembers } from './bulk';
 

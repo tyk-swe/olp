@@ -1,6 +1,6 @@
 <script lang="ts">
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
-  import { errorMessage } from '$lib/api/http';
+  import { errorMessage } from '$lib/management/http';
   import { useRole } from '$lib/features/access/session/useRole.svelte';
   import { holds } from '$lib/features/access/session/authorization';
   import { useServiceCapabilities } from '$lib/features/access/session/serviceCapabilities.svelte';
@@ -36,7 +36,7 @@
   import {
     useMutationIntent,
     usePrincipalLifetime
-  } from '$lib/forms/mutationIntent.svelte';
+  } from '$lib/editing/mutationIntent.svelte';
 
   const destinationIntent = useMutationIntent();
   const ruleIntent = useMutationIntent();

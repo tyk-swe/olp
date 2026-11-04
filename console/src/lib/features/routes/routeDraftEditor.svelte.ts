@@ -4,12 +4,12 @@ import { routeKeys } from '$lib/features/routes/routeKeys';
 import { onDestroy, untrack } from 'svelte';
 import { SvelteSet } from 'svelte/reactivity';
 import { goto } from '$app/navigation';
-import { guardUnsavedChanges } from '$lib/forms/unsavedChanges';
-import { nativeObject, parseNativeJSON } from '$lib/json/nativeJson';
-import type { components } from '$lib/api/schema';
+import { guardUnsavedChanges } from '$lib/editing/unsavedChanges';
+import { nativeObject, parseNativeJSON } from '$lib/nativeJson';
+import type { components } from '$lib/management/schema';
 import { resolve } from '$app/paths';
 import { createQuery, useQueryClient } from '@tanstack/svelte-query';
-import { errorMessage, isEtagMismatch } from '$lib/api/http';
+import { errorMessage, isEtagMismatch } from '$lib/management/http';
 import {
   beginReload,
   conflictNotice,
@@ -19,7 +19,7 @@ import {
   markSaved,
   reconcile,
   acceptRemote
-} from '$lib/forms/concurrentEdit';
+} from '$lib/editing/concurrentEdit';
 import {
   activateRoute,
   createRouteDraft,
@@ -32,7 +32,7 @@ import {
   type RouteDraft,
   type RouteSimulation
 } from '$lib/features/routes/api';
-import { listProviderModelInventory } from '$lib/features/providers/api/models';
+import { listProviderModelInventory } from '$lib/features/providers/models';
 import { listPublications } from '$lib/features/agents/api';
 import { agentKeys } from '$lib/features/agents/agentKeys';
 import { inspectionDialects } from '$lib/features/routes/inspectionDialects';
@@ -55,7 +55,7 @@ import {
   type EditableTarget,
   type RouteBehavior
 } from '$lib/features/routes/routeEditor';
-import { useMutationIntent } from '$lib/forms/mutationIntent.svelte';
+import { useMutationIntent } from '$lib/editing/mutationIntent.svelte';
 
 const simulationNotice =
   'Deterministic attempt order calculated from the saved draft.';

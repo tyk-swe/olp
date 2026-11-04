@@ -2,19 +2,19 @@
   import { healthKeys } from '$lib/features/runtime/health/healthKeys';
 
   import { createQuery } from '@tanstack/svelte-query';
-  import CursorPagination from '$lib/components/CursorPagination.svelte';
+  import CursorPagination from '$lib/shell/CursorPagination.svelte';
   import {
     cursorPaginationProps,
     emptyCursorHistory
-  } from '$lib/lists/pagination';
+  } from '$lib/listing/pagination';
   import {
     getReadiness,
     listProviderHealth,
     listRequestMetadataGatewayEpochs
   } from '$lib/features/runtime/health/api';
-  import { errorMessage } from '$lib/api/http';
+  import { errorMessage } from '$lib/management/http';
   import { listRuntimeGenerations } from '$lib/features/runtime/api';
-  import { usageCompleteness } from '$lib/features/usage/api/usage';
+  import { usageCompleteness } from '$lib/features/usage/usage';
   import { formatDate, formatTime } from '$lib/format';
   import GatewayEpochsPanel from '$lib/features/runtime/health/GatewayEpochsPanel.svelte';
   import ProviderHealthPanel from '$lib/features/runtime/health/ProviderHealthPanel.svelte';

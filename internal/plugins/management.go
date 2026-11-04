@@ -22,7 +22,7 @@ import (
 	"github.com/tyk-swe/olp/internal/pluginindex"
 	pluginidentity "github.com/tyk-swe/olp/internal/plugins/identity"
 	"github.com/tyk-swe/olp/internal/secrets"
-	"github.com/tyk-swe/olp/sdk/plugin/abi"
+	"github.com/tyk-swe/olp/plugin/abi"
 )
 
 // maxModuleBytes bounds an uploaded plugin module.

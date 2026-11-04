@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { json, route, serve } from '$lib/api/test/transport';
-import { ApiProblem } from '$lib/api/http';
+import { json, route, serve } from '$lib/management/test/transport';
+import { ApiProblem } from '$lib/management/http';
 import * as api from './api';
 
 const plugin: api.Plugin = {

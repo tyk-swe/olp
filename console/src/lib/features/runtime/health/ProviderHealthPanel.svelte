@@ -1,7 +1,7 @@
 <script lang="ts">
   import type { CreateQueryResult } from '@tanstack/svelte-query';
   import type { ProviderHealth } from '$lib/features/runtime/health/api';
-  import { errorMessage } from '$lib/api/http';
+  import { errorMessage } from '$lib/management/http';
   import { formatDate } from '$lib/format';
   import { healthTone } from '$lib/features/runtime/health/presentation';
 

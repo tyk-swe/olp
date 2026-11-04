@@ -14,7 +14,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/tyk-swe/olp/sdk/plugin/abi"
+	"github.com/tyk-swe/olp/plugin/abi"
 )
 
 // Executable is an unconfined plugin, which OLP runs as a subprocess of its

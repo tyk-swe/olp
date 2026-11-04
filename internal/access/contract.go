@@ -7,7 +7,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/tyk-swe/olp/openapi"
+	"github.com/tyk-swe/olp/management"
 )
 
 // Requirement is what a management route demands of its caller, as the
@@ -61,7 +61,7 @@ func (req Requirement) Admits(p Principal) error {
 func ContractRequirements() (map[string]Requirement, error) { return contractRequirements() }
 
 var contractRequirements = sync.OnceValues(func() (map[string]Requirement, error) {
-	return parseRequirements(openapi.Document)
+	return parseRequirements(management.Document)
 })
 
 // requirementFor returns the contract requirement for a matched pattern.

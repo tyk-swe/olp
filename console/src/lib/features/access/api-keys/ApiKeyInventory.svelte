@@ -2,7 +2,7 @@
   import {
     useMutationIntent,
     usePrincipalLifetime
-  } from '$lib/forms/mutationIntent.svelte';
+  } from '$lib/editing/mutationIntent.svelte';
 
   import { currentBudgetLimit } from './budgetPresentation';
   import { useServiceCapabilities } from '$lib/features/access/session/serviceCapabilities.svelte';
@@ -14,8 +14,8 @@
   import { page } from '$app/state';
   import { resolve } from '$app/paths';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
-  import { errorMessage } from '$lib/api/http';
-  import { cursorPaginationProps, resetCursor } from '$lib/lists/pagination';
+  import { errorMessage } from '$lib/management/http';
+  import { cursorPaginationProps, resetCursor } from '$lib/listing/pagination';
   import {
     listApiKeyPage,
     revokeApiKey,
@@ -23,10 +23,10 @@
     type ApiKey,
     type ApiKeySecret
   } from '$lib/features/access/api-keys/api';
-  import SecretDialog from '$lib/components/SecretDialog.svelte';
-  import CursorPagination from '$lib/components/CursorPagination.svelte';
-  import NavIcon from '$lib/components/NavIcon.svelte';
-  import ReadOnlyNote from '$lib/components/ReadOnlyNote.svelte';
+  import SecretDialog from '$lib/shell/SecretDialog.svelte';
+  import CursorPagination from '$lib/shell/CursorPagination.svelte';
+  import NavIcon from '$lib/shell/NavIcon.svelte';
+  import ReadOnlyNote from '$lib/shell/ReadOnlyNote.svelte';
   import { formatBudget, formatDate } from '$lib/format';
   import {
     budgetState,

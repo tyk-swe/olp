@@ -4,7 +4,7 @@ package codexauth
 import (
 	"context"
 
-	"github.com/tyk-swe/olp/sdk/plugin/abi"
+	"github.com/tyk-swe/olp/plugin/abi"
 )
 
 const (

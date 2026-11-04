@@ -18,7 +18,7 @@ import type {
   UpdateApiKeyInput
 } from '$lib/features/access/api-keys/api';
 import { dateTimeLocalValue } from '$lib/format';
-import type { components } from '$lib/api/schema';
+import type { components } from '$lib/management/schema';
 
 export type ApiKeyPolicyInput = CreateApiKeyInput & UpdateApiKeyInput;
 

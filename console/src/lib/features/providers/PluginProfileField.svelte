@@ -1,14 +1,14 @@
 <script lang="ts">
   import { createQuery } from '@tanstack/svelte-query';
   import { resolve } from '$app/paths';
-  import type { FieldIssue } from '$lib/api/http';
+  import type { FieldIssue } from '$lib/management/http';
   import { shortDigest } from '$lib/features/plugins/api';
   import NativeValueField from './NativeValueField.svelte';
   import { pluginOptionFields, pluginProfileGroups } from './profiles';
   import {
     listProviderProfiles,
     type ProviderProfilePlugin
-  } from './api/profiles';
+  } from './providerProfiles';
   import { providerKeys } from './providerKeys';
   import {
     selectPluginProfile,

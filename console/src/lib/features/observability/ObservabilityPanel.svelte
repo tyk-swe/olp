@@ -1,7 +1,7 @@
 <script lang="ts">
   import { untrack } from 'svelte';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
-  import { errorMessage } from '$lib/api/http';
+  import { errorMessage } from '$lib/management/http';
   import { useRole } from '$lib/features/access/session/useRole.svelte';
   import { holds } from '$lib/features/access/session/authorization';
   import ProjectScopeField from '$lib/features/access/projects/ProjectScopeField.svelte';
@@ -46,7 +46,7 @@
   import {
     useMutationIntent,
     usePrincipalLifetime
-  } from '$lib/forms/mutationIntent.svelte';
+  } from '$lib/editing/mutationIntent.svelte';
 
   const sinkIntent = useMutationIntent();
   const policyIntent = useMutationIntent();

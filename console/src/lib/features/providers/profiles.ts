@@ -1,9 +1,9 @@
-import { nativeObject } from '$lib/json/nativeJson';
+import { nativeObject } from '$lib/nativeJson';
 import type {
   FieldSchema,
   ProviderProfile,
   ProviderProfilePlugin
-} from './api/profiles';
+} from './providerProfiles';
 
 export type PluginProfileGroup = {
   plugin: ProviderProfilePlugin;

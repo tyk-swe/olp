@@ -17,7 +17,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/agentcontract"
-	"github.com/tyk-swe/olp/internal/runtime"
+	"github.com/tyk-swe/olp/internal/release"
 )
 
 const maxRPCBytes = 1 << 20
@@ -138,7 +138,7 @@ func (s *Server) rpc(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (s *Server) pinnedRevision(authority access.Authority, publication agentcontract.Revision, task task, release *runtime.Release, version string) (agentcontract.Revision, bool) {
+func (s *Server) pinnedRevision(authority access.Authority, publication agentcontract.Revision, task task, release *release.Release, version string) (agentcontract.Revision, bool) {
 	if release == nil || release.Snapshot == nil {
 		return agentcontract.Revision{}, false
 	}
@@ -180,7 +180,7 @@ func (s *Server) preparedCredential(ctx context.Context, authority access.Author
 	return credential, prepared.Binding, err
 }
 
-func (s *Server) prepareSend(ctx context.Context, authority access.Authority, revision agentcontract.Revision, release *runtime.Release, version string, raw json.RawMessage) (preparedSend, *rpcError) {
+func (s *Server) prepareSend(ctx context.Context, authority access.Authority, revision agentcontract.Revision, release *release.Release, version string, raw json.RawMessage) (preparedSend, *rpcError) {
 	var params protocol.SendMessageRequest
 	if json.Unmarshal(raw, &params) != nil || params.Message == nil || params.Message.ID == "" || params.Message.Role != protocol.MessageRoleUser || len(params.Message.Parts) == 0 || len(params.Message.ReferenceTasks) != 0 || params.Tenant != "" || params.Config != nil && params.Config.PushConfig != nil {
 		return preparedSend{}, &rpcError{-32602, "Invalid parameters"}
@@ -214,7 +214,7 @@ func remoteWorkBounded(authority access.Authority, revision agentcontract.Revisi
 	return boundaries.Resolved && revision.Definition.Agent != nil && (!boundaries.CostBudgeted || revision.Definition.Agent.RemoteWorkBoundSeconds != nil)
 }
 
-func (s *Server) send(w http.ResponseWriter, r *http.Request, authority access.Authority, revision agentcontract.Revision, release *runtime.Release, version string, request rpcRequest) {
+func (s *Server) send(w http.ResponseWriter, r *http.Request, authority access.Authority, revision agentcontract.Revision, release *release.Release, version string, request rpcRequest) {
 	prepared, failure := s.prepareSend(r.Context(), authority, revision, release, version, request.Params)
 	if failure != nil {
 		reply(w, request.ID, nil, failure)
@@ -326,7 +326,7 @@ func resultIDs(result protocol.SendMessageResult) (string, string, bool) {
 	}
 }
 
-func (s *Server) getTask(w http.ResponseWriter, r *http.Request, authority access.Authority, revision agentcontract.Revision, release *runtime.Release, version string, request rpcRequest) {
+func (s *Server) getTask(w http.ResponseWriter, r *http.Request, authority access.Authority, revision agentcontract.Revision, release *release.Release, version string, request rpcRequest) {
 	var params protocol.GetTaskRequest
 	if json.Unmarshal(request.Params, &params) != nil || params.ID == "" || params.Tenant != "" {
 		fail(w, request.ID, -32602, "Invalid parameters")

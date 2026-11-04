@@ -11,7 +11,7 @@ import (
 	protocol "github.com/a2aproject/a2a-go/v2/a2a"
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/agentcontract"
-	"github.com/tyk-swe/olp/internal/runtime"
+	"github.com/tyk-swe/olp/internal/release"
 )
 
 type TaskMonitor struct {
@@ -55,7 +55,7 @@ func (m *TaskMonitor) Run(ctx context.Context) {
 	workers := make(chan struct{}, 16)
 	var outstanding sync.WaitGroup
 	defer outstanding.Wait()
-	ticker := time.NewTicker(runtime.PollInterval)
+	ticker := time.NewTicker(release.PollInterval)
 	defer ticker.Stop()
 	for {
 		m.poll(ctx, authority, workers, &outstanding)

@@ -1,15 +1,18 @@
 # Architecture and gateway execution
 
 This guide maps OLP's feature ownership and explains how a request moves through
-the gateway. Production Go code lives under `internal/`, the public provider
-plugin SDK lives under `sdk/`, and `cmd/olp` starts the binary. The console
+the gateway. Production Go code lives under `internal/`, public packages live
+under capability-named top-level folders such as `plugin/`, `management/`,
+`inference/`, and `guardrails/`, and `cmd/olp` starts the binary. Folders are
+named for the module that owns the behavior, never for a layer, following
+[ADR 0004](../adr/0004-capability-named-folders.md). The console
 mirrors the same feature boundaries under `console/src/lib/features/`.
 PostgreSQL migrations live under `internal/database/migrations/`.
 
 | Area | Backend and console owner |
 | --- | --- |
 | Connections, certification and grants | `internal/providers/`, `internal/connectors/`, `internal/grants/`; console `providers/` |
-| Routes, publication and selection | `internal/routes/`, `internal/routing/`, `internal/runtime/`; console `routes/` |
+| Routes, publication and selection | `internal/routes/`, `internal/routing/`, `internal/release/`; console `routes/` |
 | Users, keys, identity, settings and policy | `internal/access/`, `internal/limits/`; console `access/` |
 | Admission, execution and retained resources | `internal/gateway/`, `internal/resources/`, `internal/media/`; console inference/media |
 | Code mode | `internal/codemode/`, `internal/codeadapter/`, `internal/codeclient/`, `internal/coderesearch/`, `resources/code_*.go`; console code mode |
@@ -17,9 +20,9 @@ PostgreSQL migrations live under `internal/database/migrations/`.
 | Protocol and lifecycle contracts | `internal/protocols/`, `internal/mediacontract/`, `internal/durablecontract/`, `internal/realtimecontract/`, `internal/geminilifecycle/` |
 | Preparation and failure evidence | `internal/providerinvoke/`, `internal/upstream/` |
 | Accounting, pricing, billing and exports | `internal/usage/`, `internal/billing/`, `internal/export/`; console usage/observability |
-| Plugins and guardrails | `internal/plugins/`, `sdk/plugin/`, `internal/guardrails/`, `internal/contentpolicy/`; matching console features |
+| Plugins and guardrails | `internal/plugins/`, `plugin/`, `internal/guardrails/`, `internal/contentpolicy/`; matching console features |
 | MCP registration, tool execution and personal grants | `internal/mcpservers/`, `internal/mcp/`, `internal/mcpgrants/`; console `plugins/`, `agents/` |
-| Promotion and process lifetime | `internal/configuration/`, `internal/config/`, `internal/process/`, `internal/database/` |
+| Promotion and process lifetime | `internal/promotion/` with its domain packages and `internal/promotion/serve/`, `cmd/olp/`, `internal/database/` |
 | Egress, secrets and telemetry | `internal/egress/`, `internal/secrets/`, `internal/observability/`, `internal/telemetry/` |
 
 ## Contracts and feature ownership
@@ -28,7 +31,7 @@ Feature packages own SQL, transactions, validation and audit provenance. Prefer
 concrete types and explicit dependencies; introduce interfaces at actual
 substitution boundaries. Package context supplies names instead of redundant
 provider- or protocol-specific aliases.
-`openapi/management.json` is the management source; `openapi/document.go` embeds
+`management/management.json` is the management source; `management/document.go` embeds
 it. `make api` generates Go/TypeScript types, console authorization requirements
 and safe SDK/CLI/MCP consumer metadata. Unsupported serializer shapes fail
 generation; integration tests enforce contract/handler parity.

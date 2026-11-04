@@ -15,8 +15,8 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/release"
 	"github.com/tyk-swe/olp/internal/routeidentity"
-	"github.com/tyk-swe/olp/internal/runtime"
 	"github.com/tyk-swe/olp/internal/vendors"
 )
 
@@ -752,9 +752,9 @@ func (s *Server) applyTemplate(r *http.Request, _ access.Principal) (access.Repl
 	if err != nil {
 		return access.Reply{}, err
 	}
-	var generation *runtime.Published
+	var generation *release.Published
 	if promoted {
-		published, err := runtime.Publish(r.Context(), tx, p.UserID())
+		published, err := release.Publish(r.Context(), tx, p.UserID())
 		if err != nil {
 			return access.Reply{}, err
 		}

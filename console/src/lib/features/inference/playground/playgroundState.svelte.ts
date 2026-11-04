@@ -11,8 +11,8 @@ import {
   parseNativeJSON,
   replaceNative,
   type NativeObject
-} from '$lib/json/nativeJson';
-import { abortError, errorMessage } from '$lib/api/http';
+} from '$lib/nativeJson';
+import { abortError, errorMessage } from '$lib/management/http';
 import {
   inspectRouting,
   runPlayground,

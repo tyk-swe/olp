@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { createQuery } from '@tanstack/svelte-query';
-  import { errorMessage } from '$lib/api/http';
+  import { errorMessage } from '$lib/management/http';
   import { apiKeyKeys } from '$lib/features/access/api-keys/apiKeyKeys';
   import { listApiKeys } from '$lib/features/access/api-keys/api';
   import { profileKeys } from '$lib/features/access/profile/profileKeys';
@@ -11,7 +11,7 @@
     beginIdentityReauthentication
   } from '$lib/features/access/profile/api';
   import { useRole } from '$lib/features/access/session/useRole.svelte';
-  import { usePrincipalLifetime } from '$lib/forms/mutationIntent.svelte';
+  import { usePrincipalLifetime } from '$lib/editing/mutationIntent.svelte';
   import { agentKeys } from './agentKeys';
   import {
     createDelegationConsent,

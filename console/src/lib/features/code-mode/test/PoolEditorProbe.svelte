@@ -3,7 +3,7 @@
     QueryClientProvider,
     type QueryClient
   } from '@tanstack/svelte-query';
-  import type { CodeAccount, CodePool } from '$lib/api/code-mode';
+  import type { CodeAccount, CodePool } from '$lib/management/code-mode';
   import PoolEditor from '../PoolEditor.svelte';
 
   let {

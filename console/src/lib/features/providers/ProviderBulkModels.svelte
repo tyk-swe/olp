@@ -1,21 +1,25 @@
 <script lang="ts">
   import { untrack } from 'svelte';
-  import { usePrincipalLifetime } from '$lib/forms/mutationIntent.svelte';
-  import { stringifyNativeJSON } from '$lib/json/nativeJson';
+  import { usePrincipalLifetime } from '$lib/editing/mutationIntent.svelte';
+  import { stringifyNativeJSON } from '$lib/nativeJson';
   import { createQuery } from '@tanstack/svelte-query';
-  import { collectCursorPages } from '$lib/api/pagination';
-  import { ApiProblem, errorMessage, serializeIfMatch } from '$lib/api/http';
+  import { collectCursorPages } from '$lib/management/pagination';
+  import {
+    ApiProblem,
+    errorMessage,
+    serializeIfMatch
+  } from '$lib/management/http';
   import { certificationPrerequisiteReady } from './providerEditor';
   import { providerKeys } from './providerKeys';
-  import { getProvider, probeProvider, type Provider } from './api/providers';
+  import { getProvider, probeProvider, type Provider } from './providers';
   import {
     listProviderModelPage,
     setProviderModel,
     certifyProviderModel,
     getProviderCapabilityOptions
-  } from './api/models';
+  } from './models';
   import { dialectSurface } from './profiles';
-  import { listProviderProfiles } from './api/profiles';
+  import { listProviderProfiles } from './providerProfiles';
   let {
     provider,
     canManage,

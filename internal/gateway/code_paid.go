@@ -17,9 +17,9 @@ import (
 	"github.com/tyk-swe/olp/internal/operations/tokenization/estimate"
 	"github.com/tyk-swe/olp/internal/protocols"
 	"github.com/tyk-swe/olp/internal/protocols/wire"
+	"github.com/tyk-swe/olp/internal/release"
 	"github.com/tyk-swe/olp/internal/resources"
 	"github.com/tyk-swe/olp/internal/routing"
-	"github.com/tyk-swe/olp/internal/runtime"
 	"github.com/tyk-swe/olp/internal/usage"
 )
 
@@ -30,7 +30,7 @@ type paidCodeAttempt struct {
 	connector     connectors.Config
 	family        wire.Format
 	route         codemode.Route
-	release       *runtime.Release
+	release       *release.Release
 	authority     access.Authority
 	targetLease   *targetReservation
 	supplyLeases  []*limits.Lease
@@ -55,7 +55,7 @@ func codeFamily(protocol codemode.Protocol) wire.Format {
 	}
 }
 
-func (s *Server) preparePaidCode(r *http.Request, release *runtime.Release, route codemode.Route, observation codemode.Request, operation codemode.Operation, ingress codeIngress, transport codeadapter.Transport, verified access.Authority, body []byte, recovery *resources.CodeRecovery, fallback bool) (*codeAttempt, error) {
+func (s *Server) preparePaidCode(r *http.Request, release *release.Release, route codemode.Route, observation codemode.Request, operation codemode.Operation, ingress codeIngress, transport codeadapter.Transport, verified access.Authority, body []byte, recovery *resources.CodeRecovery, fallback bool) (*codeAttempt, error) {
 	if !route.PaidParticipation {
 		return nil, codemode.Refuse(403, "code_paid_participation_disabled")
 	}

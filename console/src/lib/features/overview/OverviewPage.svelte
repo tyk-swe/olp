@@ -2,7 +2,7 @@
   import Overview from '$lib/features/overview/Overview.svelte';
   import ControlOverview from '$lib/features/access/ControlOverview.svelte';
   import { useServiceCapabilities } from '$lib/features/access/session/serviceCapabilities.svelte';
-  import { errorMessage } from '$lib/api/http';
+  import { errorMessage } from '$lib/management/http';
   const services = useServiceCapabilities();
 </script>
 

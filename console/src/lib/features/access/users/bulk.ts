@@ -1,4 +1,4 @@
-import { errorMessage } from '$lib/api/http';
+import { errorMessage } from '$lib/management/http';
 import { updateUser, type User, type UserPatch } from './api';
 
 /** Each member retains its observed ETag and the ordinary API's safety checks.

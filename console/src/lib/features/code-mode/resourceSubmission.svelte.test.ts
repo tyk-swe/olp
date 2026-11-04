@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
-import { ApiProblem } from '$lib/api/http';
+import { ApiProblem } from '$lib/management/http';
 import StateHarness from '../../../../tests/unit/support/StateHarness.svelte';
 import { useResourceSubmission } from './resourceSubmission.svelte';
 

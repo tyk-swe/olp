@@ -1,4 +1,4 @@
-import type { CatalogSuggestion } from '$lib/features/providers/api/catalog';
+import type { CatalogSuggestion } from '$lib/features/providers/catalog';
 
 const FACT_LABELS: Record<string, string> = {
   canonical_model: 'Canonical model',

@@ -9,7 +9,7 @@ import (
 	"net/http"
 	"sync"
 
-	"github.com/tyk-swe/olp/sdk/plugin/abi"
+	"github.com/tyk-swe/olp/plugin/abi"
 )
 
 // Carry hands the unconfined plugin with digest one finished upstream request

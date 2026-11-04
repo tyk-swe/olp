@@ -1,7 +1,7 @@
 <script lang="ts">
-  import { useMutationIntent } from '$lib/forms/mutationIntent.svelte';
+  import { useMutationIntent } from '$lib/editing/mutationIntent.svelte';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
-  import CursorPagination from '$lib/components/CursorPagination.svelte';
+  import CursorPagination from '$lib/shell/CursorPagination.svelte';
   import PriceFields from './PriceFields.svelte';
   import {
     priceEntryFields,
@@ -10,21 +10,21 @@
     type ContainerFeeRow,
     type WindowPeriodRow
   } from './priceEntry';
-  import ReadOnlyNote from '$lib/components/ReadOnlyNote.svelte';
+  import ReadOnlyNote from '$lib/shell/ReadOnlyNote.svelte';
   import {
     cursorPaginationProps,
     emptyCursorHistory,
     resetCursor
-  } from '$lib/lists/pagination';
-  import { errorMessage } from '$lib/api/http';
+  } from '$lib/listing/pagination';
+  import { errorMessage } from '$lib/management/http';
   import { dateTimeLocalValue, formatDate } from '$lib/format';
   import { useServiceCapabilities } from '$lib/features/access/session/serviceCapabilities.svelte';
   import { useRole } from '$lib/features/access/session/useRole.svelte';
-  import { listProviderKinds } from '$lib/features/providers/api/models';
+  import { listProviderKinds } from '$lib/features/providers/models';
   import {
     listProviderVendors,
     type ProviderKind
-  } from '$lib/features/providers/api/providers';
+  } from '$lib/features/providers/providers';
   import { providerKeys } from '$lib/features/providers/providerKeys';
   import { operationKinds } from './history/api';
   import {
@@ -32,7 +32,7 @@
     listPricing,
     type PriceDraft,
     type PricingRevision
-  } from './api/pricing';
+  } from './pricing';
   import { pricingKeys } from './pricingKeys';
 
   const createIntent = useMutationIntent();

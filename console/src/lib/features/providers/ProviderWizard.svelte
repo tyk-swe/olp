@@ -1,9 +1,9 @@
 <script lang="ts">
   import ProviderBulkModels from './ProviderBulkModels.svelte';
-  import { focusErrorSummary, focusFormError } from '$lib/forms/focusError';
+  import { focusErrorSummary, focusFormError } from '$lib/editing/focusError';
   import { resolve } from '$app/paths';
-  import ConflictNotice from '$lib/components/ConflictNotice.svelte';
-  import ReadOnlyNote from '$lib/components/ReadOnlyNote.svelte';
+  import ConflictNotice from '$lib/shell/ConflictNotice.svelte';
+  import ReadOnlyNote from '$lib/shell/ReadOnlyNote.svelte';
   import ProviderActivationStage from '$lib/features/providers/ProviderActivationStage.svelte';
   import ProviderCapabilityReviewStage from '$lib/features/providers/ProviderCapabilityReviewStage.svelte';
   import ProviderConnectorForm from '$lib/features/providers/ProviderConnectorForm.svelte';

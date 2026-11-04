@@ -307,7 +307,7 @@ sent as quoted-printable text. SMTP replies record `smtp_4xx`/`smtp_5xx`.
 
 Rules subscribe to immutable events: budget thresholds/exhaustion, key expiry,
 grant lapse, circuits/error rate/credentials, latency, retirement, runtime failure,
-stale workers and spend reports. [OpenAPI](../../openapi/management.json) owns event
+stale workers and spend reports. [OpenAPI](../../management/management.json) owns event
 schemas and defaults. Project events require matching project subject/destination
 and manager authority; installation events require settings authority. Missing
 fresh measurement is UNKNOWN, not recovery. Thresholds fire once per calendar

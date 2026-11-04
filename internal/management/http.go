@@ -4,14 +4,14 @@ import (
 	"net/http"
 
 	"github.com/tyk-swe/olp/internal/access"
-	"github.com/tyk-swe/olp/openapi"
+	client "github.com/tyk-swe/olp/management"
 )
 
 func Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/openapi.json", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Cache-Control", "no-cache")
-		w.Write(openapi.Document)
+		w.Write(client.Document)
 	})
 	mux.HandleFunc("/api/v1/", notFound)
 }

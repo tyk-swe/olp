@@ -14,10 +14,10 @@ import (
 	"github.com/tyk-swe/olp/internal/codeadapter"
 	"github.com/tyk-swe/olp/internal/codemode"
 	"github.com/tyk-swe/olp/internal/providers"
+	"github.com/tyk-swe/olp/internal/release"
 	"github.com/tyk-swe/olp/internal/resources"
 	"github.com/tyk-swe/olp/internal/routeidentity"
 	"github.com/tyk-swe/olp/internal/routing"
-	"github.com/tyk-swe/olp/internal/runtime"
 )
 
 func (s *Server) registerCodeMode(mux *http.ServeMux) {
@@ -120,7 +120,7 @@ func (s *Server) publishCodeRoute(r *http.Request, _ access.Principal) (access.R
 	}
 	route = published.Route
 	adapters := published.Adapters
-	if _, err := runtime.Publish(r.Context(), tx, p.UserID()); err != nil {
+	if _, err := release.Publish(r.Context(), tx, p.UserID()); err != nil {
 		return access.Reply{}, err
 	}
 
@@ -392,7 +392,7 @@ func CodePaidProviders(ctx context.Context, tx access.Queryer, route codemode.Ro
 			}
 		}
 	})
-	rows, err := tx.Query(ctx, `SELECT p.id::text,p.state,r.id::text,r.name,r.configuration,r.models,r.slots,p.project_id::text,`+runtime.PluginColumn+` FROM olp.providers p JOIN olp.provider_revisions r ON r.id=p.active_revision_id WHERE p.id=ANY($1::uuid[]) AND p.project_id=$2 AND p.state<>'disabled'`, ids, route.ProjectID)
+	rows, err := tx.Query(ctx, `SELECT p.id::text,p.state,r.id::text,r.name,r.configuration,r.models,r.slots,p.project_id::text,`+release.PluginColumn+` FROM olp.providers p JOIN olp.provider_revisions r ON r.id=p.active_revision_id WHERE p.id=ANY($1::uuid[]) AND p.project_id=$2 AND p.state<>'disabled'`, ids, route.ProjectID)
 	if err != nil {
 		return nil, err
 	}

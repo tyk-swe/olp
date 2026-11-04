@@ -1,0 +1,187 @@
+import type { components } from '$lib/management/schema';
+import { apiClient } from '$lib/management/client';
+import {
+  type CursorPage,
+  pageResult,
+  unwrap,
+  unwrapPage
+} from '$lib/management/http';
+import { PROVIDER_PAGE_SIZE } from '$lib/management/pageSizes';
+import { collectCursorPages } from '$lib/management/pagination';
+import type { Provider, ProviderKind } from '$lib/features/providers/providers';
+
+type Schemas = components['schemas'];
+
+export type ProviderModel = Schemas['ProviderModelResponse'];
+
+export type ProviderModelPage = CursorPage<ProviderModel> & {
+  provider: Provider;
+};
+
+export type ProviderModelInventory = Schemas['ProviderModelInventoryResponse'];
+
+export type CapabilityDeclaration = Schemas['CapabilityInput'];
+
+export type ProviderCapabilityOptions =
+  Schemas['ProviderCapabilityOptionsResponse'];
+
+export type ProviderKindCapability = Schemas['ProviderKindCapabilityResponse'];
+
+export type ProviderPreset = Schemas['ProviderPresetResponse'];
+
+export type CapabilityCertification =
+  Schemas['CapabilityCertificationResponse'];
+
+export type ProviderModelCertificationReceipt = {
+  result: CapabilityCertification;
+  etag: string;
+};
+
+export async function getProviderCapabilityOptions(
+  providerKind: ProviderKind,
+  signal?: AbortSignal
+): Promise<ProviderCapabilityOptions> {
+  const response = await apiClient.GET(
+    '/api/v1/provider-kinds/{provider_kind}/capabilities',
+    {
+      params: { path: { provider_kind: providerKind } },
+      signal
+    }
+  );
+  return unwrap(response);
+}
+
+export async function listProviderKinds(
+  signal?: AbortSignal
+): Promise<ProviderKindCapability[]> {
+  const response = await apiClient.GET('/api/v1/provider-kinds', { signal });
+  return unwrap(response).items;
+}
+
+export async function listProviderModelPage(
+  providerId: string,
+  cursor?: string,
+  signal?: AbortSignal
+): Promise<ProviderModelPage> {
+  const response = await apiClient.GET(
+    '/api/v1/providers/{provider_id}/models',
+    {
+      params: {
+        path: { provider_id: providerId },
+        query: { limit: PROVIDER_PAGE_SIZE, cursor }
+      },
+      signal
+    }
+  );
+  const page = unwrap(response);
+  return { ...pageResult(page), provider: page.provider };
+}
+
+export async function listProviderModelInventoryPage(
+  cursor?: string,
+  enabled?: boolean,
+  signal?: AbortSignal,
+  search?: string,
+  surface?: components['schemas']['Surface']
+): Promise<CursorPage<ProviderModelInventory>> {
+  const response = await apiClient.GET('/api/v1/provider-models', {
+    params: {
+      query: { limit: PROVIDER_PAGE_SIZE, cursor, enabled, search, surface }
+    },
+    signal
+  });
+  return unwrapPage(response);
+}
+
+export async function listProviderModelInventory(
+  enabled?: boolean,
+  signal?: AbortSignal
+): Promise<ProviderModelInventory[]> {
+  return collectCursorPages((cursor) =>
+    listProviderModelInventoryPage(cursor, enabled, signal)
+  );
+}
+
+export async function discoverProviderModels(
+  provider: Provider
+): Promise<Provider> {
+  const response = await apiClient.POST(
+    '/api/v1/providers/{provider_id}/discovery',
+    {
+      params: {
+        path: { provider_id: provider.id },
+        header: { 'If-Match': provider.etag }
+      },
+      body: { models: [] }
+    }
+  );
+  return unwrap(response);
+}
+
+export async function declareProviderModels(
+  provider: Provider,
+  modelNames: string[]
+): Promise<Provider> {
+  const response = await apiClient.POST(
+    '/api/v1/providers/{provider_id}/discovery',
+    {
+      params: {
+        path: { provider_id: provider.id },
+        header: { 'If-Match': provider.etag }
+      },
+      body: {
+        models: modelNames.map(
+          (model) =>
+            ({
+              upstream_model: model,
+              display_name: model
+            }) satisfies Schemas['DiscoveredModelRequest']
+        )
+      }
+    }
+  );
+  return unwrap(response);
+}
+
+export async function setProviderModel(
+  provider: Provider,
+  modelId: string,
+  enabled: boolean,
+  capabilities: CapabilityDeclaration[]
+): Promise<Provider> {
+  const response = await apiClient.PATCH(
+    '/api/v1/providers/{provider_id}/models/{model_id}',
+    {
+      params: {
+        path: { provider_id: provider.id, model_id: modelId },
+        header: { 'If-Match': provider.etag }
+      },
+      body: { enabled, capabilities }
+    }
+  );
+  return unwrap(response);
+}
+
+export async function certifyProviderModel(
+  provider: Provider,
+  modelId: string,
+  signal?: AbortSignal
+): Promise<ProviderModelCertificationReceipt> {
+  const response = await apiClient.POST(
+    '/api/v1/providers/{provider_id}/models/{model_id}/certify',
+    {
+      signal,
+      params: {
+        path: { provider_id: provider.id, model_id: modelId },
+        header: { 'If-Match': provider.etag }
+      }
+    }
+  );
+  const result = unwrap(response);
+  const etag = response.response.headers.get('ETag');
+  if (!etag?.trim())
+    throw new Error(
+      'The certification response has no provider version. Refresh before continuing.'
+    );
+  return { result, etag };
+}

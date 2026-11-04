@@ -1,9 +1,9 @@
-import type { components } from '$lib/api/schema';
-import { apiClient } from '$lib/api/client';
-import { unwrapPage } from '$lib/api/http';
-import { AUDIT_PAGE_SIZE } from '$lib/api/pageSizes';
-import type { CursorPage } from '$lib/api/http';
-import { compactQuery } from '$lib/api/query';
+import type { components } from '$lib/management/schema';
+import { apiClient } from '$lib/management/client';
+import { unwrapPage } from '$lib/management/http';
+import { AUDIT_PAGE_SIZE } from '$lib/management/pageSizes';
+import type { CursorPage } from '$lib/management/http';
+import { compactQuery } from '$lib/management/query';
 
 export type AuditEvent = components['schemas']['AuditEventResponse'];
 

@@ -14,7 +14,7 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/tyk-swe/olp/sdk/management"
+	"github.com/tyk-swe/olp/management"
 )
 
 type Runner struct {
