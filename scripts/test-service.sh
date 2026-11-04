@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 cd "$(dirname "$0")/.."
-budget=120
+budget=60
 scratch=$(mktemp -d)
 project="olp-service-$$"
 compose=(docker compose -p "$project" -f deploy/compose.dev.yaml)
