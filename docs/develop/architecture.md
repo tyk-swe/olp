@@ -470,13 +470,39 @@ stale versions cannot reduce holds. `usage.PersistDebitResultTx` joins existing
 observed-fact persistence with idempotent result settlement. Run totals and
 reservations are never additional usage charges.
 
-Pure `agentcontract` and `prompts` definitions are distinct from management in
-`agents` and executable operation codecs. Published contracts join immutable
-runtime snapshots; live authority independently checks keys, project/resource
-allowlists, retirement and pinned MCP eligibility. Runtime arguments, rendered
+Pure `agentcontract` and `prompts` definitions are distinct from execution and
+management. Published contracts join immutable runtime snapshots. Snapshot copies
+own their OAuth configuration and task bounds. Live authority independently checks
+keys, project/resource allowlists, retirement and pinned MCP eligibility. Runtime arguments, rendered
 prompts, transcripts and results are never persisted by these foundations.
 Prompt templates remain explicit operator configuration. New execution families
 stay disabled pending their own implementation and qualification.
+
+## Agent execution
+
+`internal/agents` owns the typed execution API and shared send lifecycle. Unary
+and streaming sends share authorization, credential resolution, admission,
+dispatch fencing and settlement. A task is settled before its public identifier
+is returned. Failures before dispatch refund admission. Uncertain acceptance after
+dispatch remains unknown and is never automatically resent.
+
+`agents/a2a` owns HTTP, JSON-RPC, SSE, pinned cards and the official SDK transports
+for A2A 0.3 and 1.0. It converts each incoming request once into canonical SDK
+types. Card validation and dispatch use the same resolved credential. Protocol
+adapters map execution failures to client responses and replace upstream task
+identifiers with public identifiers.
+
+`agents/tasks` owns task admission, persistence, settlement, callback capabilities
+and cancellation claims. `release` authenticates live owners and authorizes pinned
+callback resources through that capability API, without owning task SQL. Consumer
+requests, operator requests and the bounded background monitor share remote task
+operations while retaining their own authorization rules.
+
+`agents/publications` owns draft changes, immutable revisions, credentials and
+trust changes. Saving and publishing return new values. `agents/runs` owns run and
+step accounting, approvals and sealed workflow continuations, shared by agents,
+MCP and gateway execution. `agents/investigations` owns investigation evidence and
+management. Delegation views remain with delegation management in `release`.
 
 ## Diagnostics
 

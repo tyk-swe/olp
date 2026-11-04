@@ -1,4 +1,4 @@
-package agents
+package investigations
 
 import (
 	"context"
@@ -112,7 +112,7 @@ func validateInvestigationEvidence(ctx context.Context, tx pgx.Tx, project strin
 	return nil
 }
 
-func (s *Server) listInvestigations(r *http.Request, p access.Principal) (access.Reply, error) {
+func (s *Management) listInvestigations(r *http.Request, p access.Principal) (access.Reply, error) {
 	page, err := access.Page(r)
 	if err != nil {
 		return access.Reply{}, err
@@ -127,7 +127,7 @@ func (s *Server) listInvestigations(r *http.Request, p access.Principal) (access
 			return access.Reply{}, err
 		}
 	}
-	rows, err := s.Access.Pool.Query(r.Context(), `SELECT id::text,project_id::text,filters,evidence,summary,created_at FROM olp.investigations
+	rows, err := s.access.Pool.Query(r.Context(), `SELECT id::text,project_id::text,filters,evidence,summary,created_at FROM olp.investigations
  WHERE id<$1 AND ($2 OR project_id=ANY($3::uuid[])) AND ($4='' OR project_id=NULLIF($4,'')::uuid)
  ORDER BY id DESC LIMIT $5`, page.Before, p.AllProjects, p.ProjectIDs(), project, page.Limit+1)
 	if err != nil {
@@ -140,12 +140,12 @@ func (s *Server) listInvestigations(r *http.Request, p access.Principal) (access
 	return access.ListReplyBy(items, page, func(item Investigation) string { return item.ID }), nil
 }
 
-func (s *Server) getInvestigation(r *http.Request, p access.Principal) (access.Reply, error) {
+func (s *Management) getInvestigation(r *http.Request, p access.Principal) (access.Reply, error) {
 	id, err := access.IDParam(r, "investigation_id")
 	if err != nil {
 		return access.Reply{}, err
 	}
-	itemRows, err := s.Access.Pool.Query(r.Context(), `SELECT id::text AS id,project_id::text AS project_id,filters,evidence,summary,created_at FROM olp.investigations WHERE id=$1`, id)
+	itemRows, err := s.access.Pool.Query(r.Context(), `SELECT id::text AS id,project_id::text AS project_id,filters,evidence,summary,created_at FROM olp.investigations WHERE id=$1`, id)
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -156,7 +156,7 @@ func (s *Server) getInvestigation(r *http.Request, p access.Principal) (access.R
 	if err := p.Project(&item.ProjectID, access.View); err != nil {
 		return access.Reply{}, err
 	}
-	rows, err := s.Access.Pool.Query(r.Context(), `SELECT ref.value->>'kind' AS kind,ref.value->>'id' AS id,
+	rows, err := s.access.Pool.Query(r.Context(), `SELECT ref.value->>'kind' AS kind,ref.value->>'id' AS id,
  COALESCE(COALESCE(run.id,approval.run_id,span.run_id)::text,'') AS run_id
  FROM jsonb_array_elements($1::jsonb) WITH ORDINALITY AS ref(value,position)
  LEFT JOIN olp.agent_steps step ON ref.value->>'kind'='step' AND step.id=(ref.value->>'id')::uuid
@@ -177,7 +177,7 @@ func (s *Server) getInvestigation(r *http.Request, p access.Principal) (access.R
 	}{Investigation: item, Evidence: evidence}), nil
 }
 
-func (s *Server) createInvestigation(r *http.Request, _ access.Principal) (access.Reply, error) {
+func (s *Management) createInvestigation(r *http.Request, _ access.Principal) (access.Reply, error) {
 	var input InvestigationInput
 	if err := access.DecodeUnique(r, &input, 32<<10); err != nil {
 		return access.Reply{}, err
@@ -185,19 +185,19 @@ func (s *Server) createInvestigation(r *http.Request, _ access.Principal) (acces
 	if err := input.Validate(); err != nil {
 		return access.Reply{}, err
 	}
-	tx, err := s.Access.Begin(r)
+	tx, err := s.access.Begin(r)
 	if err != nil {
 		return access.Reply{}, err
 	}
 	defer tx.Rollback(r.Context())
-	p, err := s.Access.Reauthorize(r, tx)
+	p, err := s.access.Reauthorize(r, tx)
 	if err != nil {
 		return access.Reply{}, err
 	}
-	if err := s.Access.RequireProject(r.Context(), tx, p, &input.ProjectID); err != nil {
+	if err := s.access.RequireProject(r.Context(), tx, p, &input.ProjectID); err != nil {
 		return access.Reply{}, err
 	}
-	claim, replay, err := s.Access.Replay(r, tx, p, input)
+	claim, replay, err := s.access.Replay(r, tx, p, input)
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -227,7 +227,7 @@ func (s *Server) createInvestigation(r *http.Request, _ access.Principal) (acces
 		return access.Reply{}, err
 	}
 	reply := access.Reply{Status: http.StatusCreated, Body: item, Location: "/api/v1/investigations/" + item.ID}
-	if err := s.Access.CompleteReplay(r, tx, claim, reply); err != nil {
+	if err := s.access.CompleteReplay(r, tx, claim, reply); err != nil {
 		return access.Reply{}, err
 	}
 	return access.Commit(r, tx, reply)

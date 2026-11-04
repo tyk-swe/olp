@@ -7,9 +7,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-
 	"github.com/tyk-swe/olp/internal/access"
-	"github.com/tyk-swe/olp/internal/agents"
+	"github.com/tyk-swe/olp/internal/agents/runs"
 	"github.com/tyk-swe/olp/internal/guardrails"
 )
 
@@ -54,7 +53,7 @@ const (
 
 type ReserveInput struct {
 	Authority         access.Authority
-	Approval          *agents.WorkflowApproval
+	Approval          *runs.WorkflowApproval
 	RunID             string
 	Ordinal           int
 	ToolsetID         string
@@ -69,7 +68,7 @@ type ReserveInput struct {
 }
 
 type Reservation struct {
-	Approval             *agents.WorkflowApproval
+	Approval             *runs.WorkflowApproval
 	Authority            access.Authority
 	DispatchID           string
 	ClaimID              string

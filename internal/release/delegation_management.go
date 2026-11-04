@@ -35,6 +35,7 @@ type delegationConsentRequest struct {
 }
 
 func (s *DelegationManagement) Register(mux *http.ServeMux) {
+	s.Access.Route(mux, "GET /api/v1/agent-delegations", s.listDelegations)
 	s.Access.Route(mux, "POST /api/v1/delegation-consents", s.create)
 	s.Access.Route(mux, "GET /api/v1/delegation-options", s.options)
 }

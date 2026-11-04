@@ -1,4 +1,4 @@
-package agents
+package runs
 
 import (
 	"encoding/base64"
@@ -71,7 +71,7 @@ type RunDetailView struct {
 const runColumns = `id::text AS id, api_key_id::text AS api_key_id, project_id::text AS project_id,
  revision_id::text AS revision_id, route_revision_id::text AS route_revision_id, created_at`
 
-func (s *Server) listRuns(r *http.Request, p access.Principal) (access.Reply, error) {
+func (s *Management) listRuns(r *http.Request, p access.Principal) (access.Reply, error) {
 	page, err := access.Page(r)
 	if err != nil {
 		return access.Reply{}, err
@@ -86,7 +86,7 @@ func (s *Server) listRuns(r *http.Request, p access.Principal) (access.Reply, er
 			return access.Reply{}, err
 		}
 	}
-	rows, err := s.Access.Pool.Query(r.Context(), `SELECT `+runColumns+` FROM olp.agent_runs
+	rows, err := s.access.Pool.Query(r.Context(), `SELECT `+runColumns+` FROM olp.agent_runs
  WHERE id<$1 AND ($2 OR project_id=ANY($3::uuid[])) AND ($4='' OR project_id=NULLIF($4,'')::uuid)
  ORDER BY id DESC LIMIT $5`, page.Before, p.AllProjects, p.ProjectIDs(), project, page.Limit+1)
 	if err != nil {
@@ -99,12 +99,12 @@ func (s *Server) listRuns(r *http.Request, p access.Principal) (access.Reply, er
 	return access.ListReplyBy(items, page, func(item RunView) string { return item.ID }), nil
 }
 
-func (s *Server) visibleRun(r *http.Request, p access.Principal) (RunView, error) {
+func (s *Management) visibleRun(r *http.Request, p access.Principal) (RunView, error) {
 	id, err := access.IDParam(r, "run_id")
 	if err != nil {
 		return RunView{}, err
 	}
-	rows, err := s.Access.Pool.Query(r.Context(), `SELECT `+runColumns+` FROM olp.agent_runs WHERE id=$1`, id)
+	rows, err := s.access.Pool.Query(r.Context(), `SELECT `+runColumns+` FROM olp.agent_runs WHERE id=$1`, id)
 	if err != nil {
 		return RunView{}, err
 	}
@@ -118,12 +118,12 @@ func (s *Server) visibleRun(r *http.Request, p access.Principal) (RunView, error
 	return run, nil
 }
 
-func (s *Server) getRun(r *http.Request, p access.Principal) (access.Reply, error) {
+func (s *Management) getRun(r *http.Request, p access.Principal) (access.Reply, error) {
 	run, err := s.visibleRun(r, p)
 	if err != nil {
 		return access.Reply{}, err
 	}
-	stepRows, err := s.Access.Pool.Query(r.Context(), `SELECT s.id::text AS id, s.dispatch_id::text AS dispatch_id, s.ordinal,
+	stepRows, err := s.access.Pool.Query(r.Context(), `SELECT s.id::text AS id, s.dispatch_id::text AS dispatch_id, s.ordinal,
  d.kind,d.state,d.currency,d.cost_bound::text AS cost_bound,d.charge_bound::text AS charge_bound,
  d.observed_cost::text AS observed_cost,d.observed_charge::text AS observed_charge,
  (CASE WHEN d.closed_at IS NOT NULL THEN 0 ELSE GREATEST(0,d.cost_bound-d.observed_cost) END)::text AS remaining_cost,
@@ -139,7 +139,7 @@ func (s *Server) getRun(r *http.Request, p access.Principal) (access.Reply, erro
 	if err != nil {
 		return access.Reply{}, err
 	}
-	approvalRows, err := s.Access.Pool.Query(r.Context(), `SELECT id::text AS id,expires_at,consumed_at,dispatch_id::text AS dispatch_id
+	approvalRows, err := s.access.Pool.Query(r.Context(), `SELECT id::text AS id,expires_at,consumed_at,dispatch_id::text AS dispatch_id
  FROM olp.agent_approvals WHERE run_id=$1 ORDER BY expires_at,id`, run.ID)
 	if err != nil {
 		return access.Reply{}, err
@@ -151,7 +151,7 @@ func (s *Server) getRun(r *http.Request, p access.Principal) (access.Reply, erro
 	return access.OK(RunDetailView{RunView: run, Steps: append([]RunStepView{}, steps...), Approvals: append([]RunApprovalView{}, approvals...)}), nil
 }
 
-func (s *Server) listRunSpans(r *http.Request, p access.Principal) (access.Reply, error) {
+func (s *Management) listRunSpans(r *http.Request, p access.Principal) (access.Reply, error) {
 	run, err := s.visibleRun(r, p)
 	if err != nil {
 		return access.Reply{}, err
@@ -181,7 +181,7 @@ func (s *Server) listRunSpans(r *http.Request, p access.Principal) (access.Reply
 		}
 		beforeTime, beforeID = timestamp, parsedID.String()
 	}
-	rows, err := s.Access.Pool.Query(r.Context(), `SELECT id::text AS id,encode(trace_id,'hex') AS trace_id,
+	rows, err := s.access.Pool.Query(r.Context(), `SELECT id::text AS id,encode(trace_id,'hex') AS trace_id,
  encode(span_id,'hex') AS span_id,encode(parent_span_id,'hex') AS parent_span_id,attempt_id::text AS attempt_id,
  started_nanos::text AS started_nanos,ended_nanos::text AS ended_nanos,category,status,received_at
  FROM olp.trace_spans WHERE run_id=$1 AND ($2::numeric IS NULL OR (started_nanos,id)<($2::numeric,$3::uuid))

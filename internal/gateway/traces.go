@@ -17,7 +17,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/tyk-swe/olp/internal/access"
-	"github.com/tyk-swe/olp/internal/agents"
+	"github.com/tyk-swe/olp/internal/agents/runs"
 	"github.com/tyk-swe/olp/internal/consumerauth"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/secrets"
@@ -333,6 +333,6 @@ func (d *TraceDeps) persist(ctx context.Context, authority access.Authority, rec
 	if err != nil {
 		return err
 	}
-	_, err = d.Pool.Exec(ctx, insertTraceSpansSQL, *authority.ProjectID, authority.ID, agents.PrincipalDigest(d.Auth, authority), string(payload))
+	_, err = d.Pool.Exec(ctx, insertTraceSpansSQL, *authority.ProjectID, authority.ID, runs.PrincipalDigest(d.Auth, authority), string(payload))
 	return err
 }

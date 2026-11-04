@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/tyk-swe/olp/internal/access"
-	"github.com/tyk-swe/olp/internal/agents"
+	"github.com/tyk-swe/olp/internal/agents/runs"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/mcp"
 	"github.com/tyk-swe/olp/internal/oif"
@@ -32,8 +32,8 @@ type WorkflowTool = mcp.WorkflowTool
 const recoveryToolName = "olp_recover_context"
 
 type WorkflowApprovalStore interface {
-	Pause(context.Context, access.Authority, agents.WorkflowApprovalRequest, int) (string, error)
-	Continue(context.Context, access.Authority, string, json.RawMessage, map[string]json.RawMessage, int) (agents.WorkflowContinuation, error)
+	Pause(context.Context, access.Authority, runs.WorkflowApprovalRequest, int) (string, error)
+	Continue(context.Context, access.Authority, string, json.RawMessage, map[string]json.RawMessage, int) (runs.WorkflowContinuation, error)
 }
 
 type WorkflowToolRunner interface {
@@ -43,7 +43,7 @@ type WorkflowToolRunner interface {
 }
 
 type WorkflowApprovedToolRunner interface {
-	CallApproved(context.Context, access.Authority, *release.Release, WorkflowTool, string, int, string, json.RawMessage, agents.WorkflowApproval) (json.RawMessage, error)
+	CallApproved(context.Context, access.Authority, *release.Release, WorkflowTool, string, int, string, json.RawMessage, runs.WorkflowApproval) (json.RawMessage, error)
 }
 
 type workflowCall struct {
@@ -62,7 +62,7 @@ type workflowCall struct {
 	transcript    json.RawMessage
 	resume        *workflowResumeState
 	resumeStart   int
-	approvals     []agents.WorkflowApproval
+	approvals     []runs.WorkflowApproval
 }
 
 func workflowBounds(route, key *limits.WorkflowBounds, request *wire.Request) (limits.WorkflowBounds, limits.WorkflowBounds, *wire.Request, *Error) {

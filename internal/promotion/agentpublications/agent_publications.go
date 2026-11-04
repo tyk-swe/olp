@@ -6,8 +6,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"github.com/tyk-swe/olp/internal/agents"
-	"github.com/tyk-swe/olp/internal/promotion"
 	"reflect"
 	"slices"
 	"strings"
@@ -15,6 +13,8 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/agentcontract"
+	"github.com/tyk-swe/olp/internal/agents/publications"
+	"github.com/tyk-swe/olp/internal/promotion"
 )
 
 func publicationCredentialRef(e promotion.PublicationEntry) string {
@@ -173,7 +173,7 @@ func exportPublicationDraft(d agentcontract.Draft) agentcontract.Draft {
 	return d
 }
 
-func findPublication(ctx context.Context, q access.Queryer, e promotion.PublicationEntry) (*agents.Publication, error) {
+func findPublication(ctx context.Context, q access.Queryer, e promotion.PublicationEntry) (*agentcontract.Publication, error) {
 	var id string
 	err := q.QueryRow(ctx, `SELECT p.id::text FROM olp.agent_publications p JOIN olp.projects pr ON pr.id=p.project_id WHERE NOT p.retired AND lower(pr.name)=lower($1) AND p.kind=$2 AND lower(p.name)=lower($3)`, e.Project, e.Kind, e.Draft.Name).Scan(&id)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -182,20 +182,20 @@ func findPublication(ctx context.Context, q access.Queryer, e promotion.Publicat
 	if err != nil {
 		return nil, err
 	}
-	return agents.Load(ctx, q, id, e.Kind, false)
+	return publications.Load(ctx, q, id, e.Kind, false)
 }
 
-func publicationDraft(p *agents.Publication) *agentcontract.Draft {
+func publicationDraft(p *agentcontract.Publication) *agentcontract.Draft {
 	if p == nil {
 		return nil
 	}
 	return &p.Draft
 }
-func publishedDefinition(ctx context.Context, q access.Queryer, p *agents.Publication) (*agentcontract.Draft, error) {
+func publishedDefinition(ctx context.Context, q access.Queryer, p *agentcontract.Publication) (*agentcontract.Draft, error) {
 	if p == nil || p.RevisionID == nil {
 		return nil, nil
 	}
-	v, err := agents.LoadRevision(ctx, q, p.ID, *p.RevisionID)
+	v, err := publications.LoadRevision(ctx, q, p.ID, *p.RevisionID)
 	if err != nil {
 		return nil, err
 	}
@@ -239,7 +239,7 @@ func (r *publicationCredentialResolver) bind(ctx context.Context, d agentcontrac
 		material := []byte(binding.Secret)
 		defer clear(material)
 		if reusableAgentCredential(old, &d) {
-			matched, err := agents.CredentialMatches(ctx, r.tx, r.server.Access.Keys, r.server.Access.Installation, r.project, *old.Agent.CredentialID, material)
+			matched, err := publications.CredentialMatches(ctx, r.tx, r.server.Access.Keys, r.server.Access.Installation, r.project, *old.Agent.CredentialID, material)
 			if err != nil {
 				return d, err
 			}
@@ -251,9 +251,9 @@ func (r *publicationCredentialResolver) bind(ctx context.Context, d agentcontrac
 		}
 		id, err := func() (string, error) {
 			if d.Agent.OAuth != nil && d.Agent.OAuth.EntraOBO != nil {
-				return agents.StoreEntraCredential(ctx, r.tx, r.server.Access.Keys, r.server.Access.Installation, r.project, material)
+				return publications.StoreEntraCredential(ctx, r.tx, r.server.Access.Keys, r.server.Access.Installation, r.project, material)
 			}
-			return agents.StoreCredential(ctx, r.tx, r.server.Access.Keys, r.server.Access.Installation, r.project, material)
+			return publications.StoreCredential(ctx, r.tx, r.server.Access.Keys, r.server.Access.Installation, r.project, material)
 		}()
 		if err != nil {
 			return d, err
@@ -325,7 +325,7 @@ func PlanAgentPublications(s *promotion.Server, ctx context.Context, q access.Qu
 					continue
 				}
 				d.ProjectID = referenceProject
-				if err = agents.ValidateReferences(ctx, q, e.Kind, d); err != nil {
+				if err = publications.ValidateReferences(ctx, q, e.Kind, d); err != nil {
 					var expected *access.Problem
 					if errors.As(err, &expected) {
 						result.Blocker("agent_publication", promotion.PublicationKey(e), "Rebind missing immutable destination references explicitly.")
@@ -347,7 +347,7 @@ func exportedPublicationDigest(d agentcontract.Draft) string {
 	return agentcontract.DraftDigest(agentcontract.NormalizeDraft(exportPublicationDraft(d)))
 }
 
-func retainedPublicationDefinitions(ctx context.Context, q access.Queryer, p *agents.Publication) (map[string]bool, error) {
+func retainedPublicationDefinitions(ctx context.Context, q access.Queryer, p *agentcontract.Publication) (map[string]bool, error) {
 	retained := map[string]bool{}
 	if p == nil {
 		return retained, nil
@@ -367,19 +367,17 @@ func retainedPublicationDefinitions(ctx context.Context, q access.Queryer, p *ag
 	return retained, rows.Err()
 }
 
-func publishConfigurationDefinition(ctx context.Context, tx pgx.Tx, actor string, p *agents.Publication, d agentcontract.Draft) error {
-	p.Draft = agentcontract.NormalizeDraft(d)
+func publishConfigurationDefinition(ctx context.Context, tx pgx.Tx, actor string, p agentcontract.Publication, d agentcontract.Draft) (agentcontract.Publication, error) {
+	draft := agentcontract.NormalizeDraft(d)
 	var id string
-	err := tx.QueryRow(ctx, `SELECT id::text FROM olp.agent_publication_revisions WHERE publication_id=$1 AND digest=$2`, p.ID, agentcontract.DraftDigest(p.Draft)).Scan(&id)
+	err := tx.QueryRow(ctx, `SELECT id::text FROM olp.agent_publication_revisions WHERE publication_id=$1 AND digest=$2`, p.ID, agentcontract.DraftDigest(draft)).Scan(&id)
 	if err == nil {
-		// Immutable history survives revocation; live authority is checked separately.
-		p.RevisionID = &id
-		return nil
+		return agentcontract.Publication{ID: p.ID, Kind: p.Kind, ProjectID: p.ProjectID, Name: p.Name, ETag: p.ETag, Draft: draft, RevisionID: &id, Retired: p.Retired}, nil
 	}
 	if !errors.Is(err, pgx.ErrNoRows) {
-		return err
+		return agentcontract.Publication{}, err
 	}
-	return agents.Publish(ctx, tx, actor, p)
+	return publications.Publish(ctx, tx, actor, agentcontract.Publication{ID: p.ID, Kind: p.Kind, ProjectID: p.ProjectID, Name: p.Name, ETag: p.ETag, Draft: draft, RevisionID: p.RevisionID, Retired: p.Retired})
 }
 
 func ApplyAgentPublications(s *promotion.Server, ctx context.Context, tx pgx.Tx, p access.Principal, doc *promotion.Document, bindings promotion.BindingSet) error {
@@ -410,7 +408,7 @@ func ApplyAgentPublications(s *promotion.Server, ctx context.Context, tx pgx.Tx,
 			return err
 		}
 		if current != nil {
-			current, err = agents.Load(ctx, tx, current.ID, e.Kind, true)
+			current, err = publications.Load(ctx, tx, current.ID, e.Kind, true)
 			if err != nil {
 				return err
 			}
@@ -425,12 +423,12 @@ func ApplyAgentPublications(s *promotion.Server, ctx context.Context, tx pgx.Tx,
 			return err
 		}
 
-		if err = agents.AuthorizeTrustChange(p, current, d); err != nil {
+		if err = publications.AuthorizeTrustChange(p, current, d); err != nil {
 			return err
 		}
-		next := &agents.Publication{Kind: e.Kind, Draft: d}
-		if err = agents.SaveDraft(ctx, tx, p.UserID(), current, next, s.Egress); err != nil {
-			return err
+		next, saveErr := publications.SaveDraft(ctx, tx, p.UserID(), current, e.Kind, d, s.Egress)
+		if saveErr != nil {
+			return saveErr
 		}
 		var publishedID *string
 		if e.Published != nil {
@@ -442,16 +440,17 @@ func ApplyAgentPublications(s *promotion.Server, ctx context.Context, tx pgx.Tx,
 			// be checked on that definition too, not only on the saved editor state.
 			prior := current
 			if previous != nil {
-				prior = &agents.Publication{Draft: *previous}
+				prior = &agentcontract.Publication{Draft: *previous}
 			}
-			if err = agents.AuthorizeTrustChange(p, prior, v); err != nil {
+			if err = publications.AuthorizeTrustChange(p, prior, v); err != nil {
 				return err
 			}
 
-			if err = publishConfigurationDefinition(ctx, tx, p.UserID(), next, v); err != nil {
-				return err
+			published, publishErr := publishConfigurationDefinition(ctx, tx, p.UserID(), next, v)
+			if publishErr != nil {
+				return publishErr
 			}
-			id := *next.RevisionID
+			id := *published.RevisionID
 			publishedID = &id
 		}
 		if e.Kind == "prompt" {
@@ -462,10 +461,11 @@ func ApplyAgentPublications(s *promotion.Server, ctx context.Context, tx pgx.Tx,
 		for _, label := range []string{"production", "staging"} {
 			if v, ok := e.Labels[label]; ok {
 				v.ProjectID = project
-				if err = publishConfigurationDefinition(ctx, tx, p.UserID(), next, v); err != nil {
-					return err
+				labeled, labelErr := publishConfigurationDefinition(ctx, tx, p.UserID(), next, v)
+				if labelErr != nil {
+					return labelErr
 				}
-				if err = agents.SetLabel(ctx, tx, next, label, *next.RevisionID, access.NewID()); err != nil {
+				if err = publications.SetLabel(ctx, tx, labeled, label, *labeled.RevisionID, access.NewID()); err != nil {
 					return err
 				}
 			}

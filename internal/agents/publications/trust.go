@@ -1,13 +1,15 @@
-package agents
+package publications
 
 import (
-	"github.com/tyk-swe/olp/internal/access"
 	"reflect"
+
+	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/agentcontract"
 )
 
 // AuthorizeTrustChange keeps destination/card/credential trust installation-
 // controlled even when a project manager may edit ordinary draft policy.
-func AuthorizeTrustChange(p access.Principal, current *Publication, next Draft) error {
+func AuthorizeTrustChange(p access.Principal, current *agentcontract.Publication, next agentcontract.Draft) error {
 	if next.Agent == nil {
 		return nil
 	}

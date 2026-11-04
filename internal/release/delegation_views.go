@@ -1,4 +1,4 @@
-package agents
+package release
 
 import (
 	"encoding/json"
@@ -91,12 +91,12 @@ type delegationPairBudget struct {
 	Usage   *PairBudget          `db:"usage"`
 }
 
-func (s *Server) listDelegations(r *http.Request, p access.Principal) (access.Reply, error) {
+func (s *DelegationManagement) listDelegations(r *http.Request, p access.Principal) (access.Reply, error) {
 	page, pageErr := access.Page(r)
 	if pageErr != nil {
 		return access.Reply{}, pageErr
 	}
-	project, projectErr := projectFilter(r, p)
+	project, projectErr := delegationProjectFilter(r, p)
 	if projectErr != nil {
 		return access.Reply{}, projectErr
 	}
@@ -171,4 +171,19 @@ func (s *Server) listDelegations(r *http.Request, p access.Principal) (access.Re
 		return access.Reply{}, budgetCollectErr
 	}
 	return access.ListReplyBy(items, page, func(item DelegationView) string { return item.ID }), nil
+}
+
+func delegationProjectFilter(r *http.Request, p access.Principal) (string, error) {
+	project := r.URL.Query().Get("project_id")
+	if project == "" {
+		return "", nil
+	}
+	id, err := uuid.Parse(project)
+	if err != nil || id == uuid.Nil || id.String() != project {
+		return "", access.Invalid("project_id", "Use a canonical project UUID.")
+	}
+	if err := p.Project(&project, access.View); err != nil {
+		return "", err
+	}
+	return project, nil
 }

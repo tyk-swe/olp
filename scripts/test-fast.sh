@@ -5,6 +5,9 @@ budget=60
 start=$(date +%s)
 go test -mod=readonly -vet=off -count=1 -timeout=60s \
   ./cmd/olp \
+  ./internal/agents \
+  ./internal/agents/a2a \
+  ./internal/agents/publications \
   ./internal/secrets \
   ./internal/access \
   ./internal/billing \

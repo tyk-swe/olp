@@ -1,4 +1,4 @@
-package a2a
+package tasks
 
 import (
 	"context"
@@ -12,16 +12,15 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/agentcontract"
-	"github.com/tyk-swe/olp/internal/agents"
+	"github.com/tyk-swe/olp/internal/agents/runs"
 	"github.com/tyk-swe/olp/internal/limits"
-	"github.com/tyk-swe/olp/internal/release"
 	"github.com/tyk-swe/olp/internal/secrets"
 )
 
-type Ledger struct {
-	Pool  *pgxpool.Pool
-	Store *limits.DebitStore
-	Auth  *secrets.AuthKey
+type Store struct {
+	pool   *pgxpool.Pool
+	debits *limits.DebitStore
+	auth   *secrets.AuthKey
 }
 
 type reservation struct {
@@ -33,7 +32,7 @@ type reservation struct {
 	Price      string
 }
 
-type task struct {
+type Task struct {
 	ID         string
 	UpstreamID string
 	ContextID  string
@@ -61,15 +60,8 @@ func newReservation(price string) (reservation, error) {
 	return reservation{DispatchID: dispatch, ClaimID: claim, RunID: run, StepID: step, EventID: event, Price: price}, nil
 }
 
-func releaseAffinity(release *release.Release) string {
-	if id, err := uuid.Parse(release.ID); err == nil && id.String() == release.ID && id != uuid.Nil {
-		return release.ID
-	}
-	return release.Snapshot.Generation.ID
-}
-
-func (l *Ledger) reserve(ctx context.Context, authority access.Authority, revision agentcontract.Revision, release *release.Release) (reservation, error) {
-	if l == nil || l.Pool == nil || l.Store == nil || l.Auth == nil || authority.ProjectID == nil || revision.Definition.Agent == nil || revision.Definition.Agent.MessagePrice == "" || release == nil || release.Snapshot == nil {
+func (l *Store) reserve(ctx context.Context, authority access.Authority, revision agentcontract.Revision, releaseID string) (reservation, error) {
+	if l == nil || l.pool == nil || l.debits == nil || l.auth == nil || authority.ProjectID == nil || revision.Definition.Agent == nil || revision.Definition.Agent.MessagePrice == "" || releaseID == "" {
 		return reservation{}, limits.ErrDebitAuthority
 	}
 	boundaries := authority.ToolDebitBoundaries(time.Hour)
@@ -81,24 +73,23 @@ func (l *Ledger) reserve(ctx context.Context, authority access.Authority, revisi
 		return reservation{}, err
 	}
 	var currency string
-	if err := l.Pool.QueryRow(ctx, `SELECT COALESCE((SELECT btrim(currency) FROM olp.pricing_currency WHERE singleton),'USD')`).Scan(&currency); err != nil || currency == "" {
+	if err := l.pool.QueryRow(ctx, `SELECT COALESCE((SELECT btrim(currency) FROM olp.pricing_currency WHERE singleton),'USD')`).Scan(&currency); err != nil || currency == "" {
 		return reservation{}, limits.ErrDebitAuthority
 	}
-	releaseID := releaseAffinity(release)
 	price := revision.Definition.Agent.MessagePrice
 	intent := limits.DebitIntent{ID: res.DispatchID, APIKeyID: authority.ID, ProjectID: *authority.ProjectID, RunID: res.RunID, StepID: res.StepID, Kind: "agent", ClaimID: res.ClaimID, Currency: currency, CostBound: price, ChargeBound: price, PreparedUntil: time.Now().Add(90 * time.Second), Affinity: limits.ExecutionAffinity{ReleaseID: releaseID, RevisionID: revision.ID, PricingRevisionID: revision.Definition.Agent.PricingRevisionID}}
-	tx, err := l.Pool.Begin(ctx)
+	tx, err := l.pool.Begin(ctx)
 	if err != nil {
 		return reservation{}, err
 	}
 	defer tx.Rollback(ctx)
-	if err := agents.StartRunTx(ctx, tx, l.Auth, authority, res.RunID, "agents", revision.PublicationID, revision.ID); err != nil {
+	if err := runs.StartRunTx(ctx, tx, l.auth, authority, res.RunID, "agents", revision.PublicationID, revision.ID); err != nil {
 		return reservation{}, err
 	}
-	if err := agents.EnsureBoundaryAccountsTx(ctx, tx, authority, boundaries); err != nil {
+	if err := runs.EnsureBoundaryAccountsTx(ctx, tx, authority, boundaries); err != nil {
 		return reservation{}, err
 	}
-	state, err := agents.PrepareStepTx(ctx, tx, l.Store, authority, intent, 0, boundaries.Owners())
+	state, err := runs.PrepareStepTx(ctx, tx, l.debits, authority, intent, 0, boundaries.Owners())
 	if err != nil {
 		return reservation{}, err
 	}
@@ -108,35 +99,35 @@ func (l *Ledger) reserve(ctx context.Context, authority access.Authority, revisi
 	if err := tx.Commit(ctx); err != nil {
 		return reservation{}, err
 	}
-	if err := l.Store.Admit(ctx, res.DispatchID, res.ClaimID, boundaries.Requests()); err != nil {
+	if err := l.debits.Admit(ctx, res.DispatchID, res.ClaimID, boundaries.Requests()); err != nil {
 		releaseCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
-		_ = l.Store.ReleaseUndispatched(releaseCtx, res.DispatchID, res.ClaimID)
+		_ = l.debits.ReleaseUndispatched(releaseCtx, res.DispatchID, res.ClaimID)
 		cancel()
 		return reservation{}, err
 	}
 	return res, nil
 }
 
-func (l *Ledger) findTask(ctx context.Context, authority access.Authority, publicationID, rawID string) (task, error) {
-	if l == nil || l.Pool == nil || authority.ProjectID == nil {
-		return task{}, pgx.ErrNoRows
+func (l *Store) Find(ctx context.Context, authority access.Authority, publicationID, rawID string) (Task, error) {
+	if l == nil || l.pool == nil || authority.ProjectID == nil {
+		return Task{}, pgx.ErrNoRows
 	}
 	id, err := uuid.Parse(rawID)
 	if err != nil || id == uuid.Nil || id.String() != rawID {
-		return task{}, pgx.ErrNoRows
+		return Task{}, pgx.ErrNoRows
 	}
-	var found task
-	if err := l.Pool.QueryRow(ctx, `SELECT id::text,upstream_id,upstream_context_id,revision_id::text,COALESCE(oauth_binding_digest,'') FROM olp.a2a_tasks WHERE id=$1 AND project_id=$3 AND publication_id=$4 AND (($5='' AND api_key_id=$2 AND delegation_pair_digest='') OR ($5<>'' AND delegation_pair_digest=$5))`, rawID, authority.ID, *authority.ProjectID, publicationID, authority.DelegationPairDigest).Scan(&found.ID, &found.UpstreamID, &found.ContextID, &found.RevisionID, &found.Binding); err != nil {
-		return task{}, err
+	var found Task
+	if err := l.pool.QueryRow(ctx, `SELECT id::text,upstream_id,upstream_context_id,revision_id::text,COALESCE(oauth_binding_digest,'') FROM olp.a2a_tasks WHERE id=$1 AND project_id=$3 AND publication_id=$4 AND (($5='' AND api_key_id=$2 AND delegation_pair_digest='') OR ($5<>'' AND delegation_pair_digest=$5))`, rawID, authority.ID, *authority.ProjectID, publicationID, authority.DelegationPairDigest).Scan(&found.ID, &found.UpstreamID, &found.ContextID, &found.RevisionID, &found.Binding); err != nil {
+		return Task{}, err
 	}
 	return found, nil
 }
 
-func (l *Ledger) settle(ctx context.Context, res reservation, authority access.Authority, revision agentcontract.Revision, upstreamID, contextID, state, binding string) (string, error) {
+func (l *Store) settle(ctx context.Context, res reservation, authority access.Authority, revision agentcontract.Revision, upstreamID, contextID string, state State, binding string) (string, error) {
 	if authority.ProjectID == nil || len(upstreamID) > 1024 || len(contextID) > 1024 || strings.ContainsRune(upstreamID, 0) || strings.ContainsRune(contextID, 0) {
 		return "", limits.ErrDebitConflict
 	}
-	tx, err := l.Pool.Begin(ctx)
+	tx, err := l.pool.Begin(ctx)
 	if err != nil {
 		return "", err
 	}
@@ -178,7 +169,7 @@ func (l *Ledger) settle(ctx context.Context, res reservation, authority access.A
 	return taskID, nil
 }
 
-func settleTask(ctx context.Context, tx pgx.Tx, res reservation, authority access.Authority, revision agentcontract.Revision, upstreamID, contextID, state, binding string) (string, error) {
+func settleTask(ctx context.Context, tx pgx.Tx, res reservation, authority access.Authority, revision agentcontract.Revision, upstreamID, contextID string, state State, binding string) (string, error) {
 	if upstreamID == "" {
 		return "", nil
 	}
@@ -199,21 +190,25 @@ func settleTask(ctx context.Context, tx pgx.Tx, res reservation, authority acces
 	return publicID, nil
 }
 
-func (l *Ledger) release(ctx context.Context, res reservation) {
+func (l *Store) release(ctx context.Context, res reservation) {
 	releaseCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 	defer cancel()
-	if err := l.Store.ReleaseUndispatched(releaseCtx, res.DispatchID, res.ClaimID); err != nil {
+	if err := l.debits.ReleaseUndispatched(releaseCtx, res.DispatchID, res.ClaimID); err != nil {
 		return
 	}
-	_, _ = l.Pool.Exec(releaseCtx, `DELETE FROM olp.a2a_task_capabilities WHERE dispatch_id=$1`, res.DispatchID)
-	_, _ = l.Pool.Exec(releaseCtx, `WITH removed AS (DELETE FROM olp.a2a_task_admissions WHERE dispatch_id=$1 RETURNING task_id) UPDATE olp.a2a_tasks SET continuations=GREATEST(continuations-1,0) WHERE id=(SELECT task_id FROM removed)`, res.DispatchID)
+	_, _ = l.pool.Exec(releaseCtx, `DELETE FROM olp.a2a_task_capabilities WHERE dispatch_id=$1`, res.DispatchID)
+	_, _ = l.pool.Exec(releaseCtx, `WITH removed AS (DELETE FROM olp.a2a_task_admissions WHERE dispatch_id=$1 RETURNING task_id) UPDATE olp.a2a_tasks SET continuations=GREATEST(continuations-1,0) WHERE id=(SELECT task_id FROM removed)`, res.DispatchID)
 }
 
-func (l *Ledger) unknown(ctx context.Context, res reservation) {
+func (l *Store) unknown(ctx context.Context, res reservation) {
 	unknownCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 	defer cancel()
-	if err := l.Store.MarkUnknown(unknownCtx, res.DispatchID, res.ClaimID); err != nil && !errors.Is(err, limits.ErrDebitState) {
+	if err := l.debits.MarkUnknown(unknownCtx, res.DispatchID, res.ClaimID); err != nil && !errors.Is(err, limits.ErrDebitState) {
 		return
 	}
-	_, _ = l.Pool.Exec(unknownCtx, `UPDATE olp.a2a_tasks SET state='outcome_unknown' WHERE id=(SELECT task_id FROM olp.a2a_task_admissions WHERE dispatch_id=$1) AND state='active'`, res.DispatchID)
+	_, _ = l.pool.Exec(unknownCtx, `UPDATE olp.a2a_tasks SET state='outcome_unknown' WHERE id=(SELECT task_id FROM olp.a2a_task_admissions WHERE dispatch_id=$1) AND state='active'`, res.DispatchID)
+}
+
+func New(pool *pgxpool.Pool, debits *limits.DebitStore, auth *secrets.AuthKey) *Store {
+	return &Store{pool: pool, debits: debits, auth: auth}
 }

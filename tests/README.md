@@ -19,7 +19,8 @@ generated API types, which CI creates with
 The Go allowlist covers authorization derivation and its golden file,
 secret sealing and signing, billing and usage math, protocol translation,
 token estimation against its oracle fixtures, catalog validation, limits,
-route planning, guardrail detection, MCP registration validation, tool
+route planning, agent dispatch and continuation ownership, both A2A wire versions,
+publication isolation, guardrail detection, MCP registration validation, tool
 pricing and resolution, grant binding, and a reduced gateway slice for
 credential redaction, cost reservation, cache replay, and guardrail wiring.
 The gateway slice is the files `gateway_test.go`,

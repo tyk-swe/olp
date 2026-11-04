@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/tyk-swe/olp/internal/access"
-	"github.com/tyk-swe/olp/internal/agents"
+	"github.com/tyk-swe/olp/internal/agents/runs"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/mcp/accounting"
 	"github.com/tyk-swe/olp/internal/mcp/sessions"
@@ -104,7 +104,7 @@ func (s *Executor) reserveToolRate(ctx context.Context, in CallRequest) ([]*limi
 
 type CallRequest struct {
 	Authority         access.Authority
-	Approval          *agents.WorkflowApproval
+	Approval          *runs.WorkflowApproval
 	RunID             string
 	Ordinal           int
 	ToolsetID         string

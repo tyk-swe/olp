@@ -10,9 +10,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
-
 	"github.com/tyk-swe/olp/internal/access"
-	"github.com/tyk-swe/olp/internal/agents"
+	"github.com/tyk-swe/olp/internal/agents/runs"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/secrets"
@@ -107,14 +106,14 @@ func (l *DurableLedger) Reserve(ctx context.Context, in ReserveInput) (ReserveRe
 	}
 	defer tx.Rollback(ctx)
 	if in.RunID == "" {
-		if err = agents.StartRunTx(ctx, tx, l.auth, in.Authority, reservation.RunID, "tools", in.ToolsetID, in.ToolsetRevisionID); err != nil {
+		if err = runs.StartRunTx(ctx, tx, l.auth, in.Authority, reservation.RunID, "tools", in.ToolsetID, in.ToolsetRevisionID); err != nil {
 			return ReserveResult{}, err
 		}
 	}
-	if err = agents.EnsureBoundaryAccountsTx(ctx, tx, in.Authority, boundaries); err != nil {
+	if err = runs.EnsureBoundaryAccountsTx(ctx, tx, in.Authority, boundaries); err != nil {
 		return ReserveResult{}, err
 	}
-	state, err := agents.PrepareStepTx(ctx, tx, l.store, in.Authority, intent, in.Ordinal, owners)
+	state, err := runs.PrepareStepTx(ctx, tx, l.store, in.Authority, intent, in.Ordinal, owners)
 	if err != nil {
 		return ReserveResult{}, err
 	}
@@ -163,14 +162,14 @@ func (l *DurableLedger) recordRefusedUnpriced(ctx context.Context, in ReserveInp
 	}
 	defer tx.Rollback(ctx)
 	if in.RunID == "" {
-		if err = agents.StartRunTx(ctx, tx, l.auth, in.Authority, reservation.RunID, "tools", in.ToolsetID, in.ToolsetRevisionID); err != nil {
+		if err = runs.StartRunTx(ctx, tx, l.auth, in.Authority, reservation.RunID, "tools", in.ToolsetID, in.ToolsetRevisionID); err != nil {
 			return err
 		}
 	}
-	if err = agents.EnsureBoundaryAccountsTx(ctx, tx, in.Authority, boundaries); err != nil {
+	if err = runs.EnsureBoundaryAccountsTx(ctx, tx, in.Authority, boundaries); err != nil {
 		return err
 	}
-	state, err := agents.PrepareStepTx(ctx, tx, l.store, in.Authority, intent, in.Ordinal, boundaries.Owners())
+	state, err := runs.PrepareStepTx(ctx, tx, l.store, in.Authority, intent, in.Ordinal, boundaries.Owners())
 	if err != nil {
 		return err
 	}
@@ -254,7 +253,7 @@ func (l *DurableLedger) MarkDispatched(ctx context.Context, reservation *Reserva
 	}
 	defer tx.Rollback(ctx)
 	if reservation.Approval != nil {
-		if err := agents.ConsumeApprovalTx(ctx, tx, l.auth, reservation.Authority, reservation.Approval.ID, reservation.DispatchID, reservation.Approval.Binding); err != nil {
+		if err := runs.ConsumeApprovalTx(ctx, tx, l.auth, reservation.Authority, reservation.Approval.ID, reservation.DispatchID, reservation.Approval.Binding); err != nil {
 			return err
 		}
 	}

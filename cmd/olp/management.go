@@ -2,13 +2,17 @@ package main
 
 import (
 	"context"
-	"github.com/jackc/pgx/v5"
 	"log/slog"
 	"net/http"
 
-	"github.com/tyk-swe/olp/internal/a2a"
+	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/agents"
+	"github.com/tyk-swe/olp/internal/agents/a2a"
+	"github.com/tyk-swe/olp/internal/agents/investigations"
+	"github.com/tyk-swe/olp/internal/agents/publications"
+	"github.com/tyk-swe/olp/internal/agents/runs"
+	"github.com/tyk-swe/olp/internal/agents/tasks"
 	"github.com/tyk-swe/olp/internal/billing"
 	"github.com/tyk-swe/olp/internal/branding"
 	"github.com/tyk-swe/olp/internal/catalog"
@@ -84,11 +88,16 @@ func (m Management) Register(mux *http.ServeMux) {
 	}, Evaluate: func(r *http.Request, p access.Principal, in guardrails.ApplyInput) (guardrails.Result, error) {
 		return m.Gateway.EvaluateGuardrails(r, p, in)
 	}}).Register(mux)
-	validator := &a2a.Server{Egress: m.Egress, Ledger: &a2a.Ledger{Pool: m.Access.Pool}, Grants: personal.NewStore(m.Access.Pool, m.Access.Installation, m.Access.Auth, m.Access.Keys, m.Egress), Credentials: func(ctx context.Context, id string) ([]byte, error) {
+	agentTasks := tasks.New(m.Access.Pool, nil, m.Access.Auth)
+	agentGrants := personal.NewStore(m.Access.Pool, m.Access.Installation, m.Access.Auth, m.Access.Keys, m.Egress)
+	agentPeers := a2a.NewPeers(m.Egress, func(ctx context.Context, id string) ([]byte, error) {
 		return m.Access.Keys.Read(ctx, m.Access.Pool, m.Access.Installation, id, secrets.AgentCredential)
-	}}
-	(&a2a.Management{Access: m.Access, Server: validator}).Register(mux)
-	(&agents.Server{Access: m.Access, Egress: m.Egress, ValidateAgent: validator.ValidateCard}).Register(mux)
+	})
+	a2a.NewManagement(m.Access, agentTasks, agents.NewTaskOperations(agentTasks, agentPeers, agentGrants)).Register(mux)
+	publications.New(m.Access, m.Egress, agentPeers.ValidateCard).Register(mux)
+	runs.NewManagement(m.Access).Register(mux)
+	tasks.NewManagement(m.Access).Register(mux)
+	investigations.NewManagement(m.Access).Register(mux)
 	registration.New(m.Access, m.Egress, registration.NewExecutables(m.Unconfined, m.Access.Pool)).Register(mux)
 	accounting.NewManagement(m.Access).Register(mux)
 	personal.New(m.Access).Register(mux)

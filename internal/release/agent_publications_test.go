@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/agentcontract"
+	"github.com/tyk-swe/olp/internal/agents/tasks"
 	"github.com/tyk-swe/olp/internal/secrets"
 	"github.com/tyk-swe/olp/internal/workload"
 )
@@ -115,7 +116,7 @@ func TestTaskCapabilityAuthenticatesAndCountsOwnerCallbacks(t *testing.T) {
 	owner := access.Authority{ID: "owner", ProjectID: &project, Policy: access.KeyPolicy{Scopes: []string{"agents", "inference", "tools"}, AllowedAgents: []string{publication}, AllowedRoutes: []string{"route"}, AllowedToolsets: []string{"toolset"}}}
 	newFixture := func() (*Manager, *taskStoreFixture) {
 		store := &taskStoreFixture{row: taskRow{values: []any{owner.ID, project, publication, revision, "", (*time.Time)(nil), expires, "", []byte(nil), definition, "", ""}}, tx: &taskTxFixture{rows: []taskRow{{values: []any{"dispatch", "task", definition}}, {values: []any{1}}}}}
-		manager := &Manager{auth: secrets.NewAuthKey(make([]byte, 32), "installation"), taskStore: store, authority: authorityState{loaded: true, readAt: now, agentPrincipals: map[string]access.Authority{owner.ID: owner}, agentResources: map[string]agentResourceAuthority{publication: {ProjectID: project, Kind: "agent", Revisions: map[string]bool{revision: true}}}}}
+		manager := &Manager{auth: secrets.NewAuthKey(make([]byte, 32), "installation"), taskStore: tasks.NewCapabilities(store), authority: authorityState{loaded: true, readAt: now, agentPrincipals: map[string]access.Authority{owner.ID: owner}, agentResources: map[string]agentResourceAuthority{publication: {ProjectID: project, Kind: "agent", Revisions: map[string]bool{revision: true}}}}}
 		return manager, store
 	}
 	t.Run("owner and pinned resources", func(t *testing.T) {

@@ -7,7 +7,7 @@ import (
 	"slices"
 
 	"github.com/tyk-swe/olp/internal/access"
-	"github.com/tyk-swe/olp/internal/agents"
+	"github.com/tyk-swe/olp/internal/agents/runs"
 	"github.com/tyk-swe/olp/internal/release"
 	"github.com/tyk-swe/olp/internal/routing"
 )
@@ -71,11 +71,11 @@ func (s *Server) Call(ctx context.Context, authority access.Authority, release *
 	return s.callWorkflow(ctx, authority, release, selected, runID, ordinal, callID, arguments, nil)
 }
 
-func (s *Server) CallApproved(ctx context.Context, authority access.Authority, release *release.Release, selected WorkflowTool, runID string, ordinal int, callID string, arguments json.RawMessage, approval agents.WorkflowApproval) (json.RawMessage, error) {
+func (s *Server) CallApproved(ctx context.Context, authority access.Authority, release *release.Release, selected WorkflowTool, runID string, ordinal int, callID string, arguments json.RawMessage, approval runs.WorkflowApproval) (json.RawMessage, error) {
 	return s.callWorkflow(ctx, authority, release, selected, runID, ordinal, callID, arguments, &approval)
 }
 
-func (s *Server) callWorkflow(ctx context.Context, authority access.Authority, release *release.Release, selected WorkflowTool, runID string, ordinal int, callID string, arguments json.RawMessage, approval *agents.WorkflowApproval) (json.RawMessage, error) {
+func (s *Server) callWorkflow(ctx context.Context, authority access.Authority, release *release.Release, selected WorkflowTool, runID string, ordinal int, callID string, arguments json.RawMessage, approval *runs.WorkflowApproval) (json.RawMessage, error) {
 	if s == nil || s.runtime == nil || !s.executor.available() || authority.ProjectID == nil || release == nil || release.Snapshot == nil {
 		return nil, workflowFailure(errLedger)
 	}

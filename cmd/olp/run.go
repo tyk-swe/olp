@@ -13,10 +13,11 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
-
-	"github.com/tyk-swe/olp/internal/a2a"
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/agents"
+	"github.com/tyk-swe/olp/internal/agents/a2a"
+	"github.com/tyk-swe/olp/internal/agents/runs"
+	"github.com/tyk-swe/olp/internal/agents/tasks"
 	"github.com/tyk-swe/olp/internal/batches"
 	"github.com/tyk-swe/olp/internal/billing"
 	"github.com/tyk-swe/olp/internal/cache"
@@ -209,7 +210,7 @@ func Run(ctx context.Context, c Config, log *slog.Logger) error {
 	var gatewayInstance string
 	var rt *release.Manager
 	var gw *gateway.Server
-	var agentMonitor *a2a.TaskMonitor
+	var agentMonitor *agents.TaskMonitor
 	var mediaService *media.Service
 	var mediaSpool *media.Spool
 	var pluginHost *plugins.Host
@@ -384,11 +385,14 @@ func Run(ctx context.Context, c Config, log *slog.Logger) error {
 			}
 			gw.Register(public)
 			grantStore := personal.NewStore(pool, installation, auth, keys, &policy)
-			agentServer := &a2a.Server{Grants: grantStore, Runtime: rt, Egress: &policy, Ledger: &a2a.Ledger{Pool: pool, Store: &limits.DebitStore{Pool: pool, Limiter: limiter}, Auth: auth}, TrustedProxies: c.TrustedProxyCIDRs, PublicOrigin: c.PublicOrigin, Credentials: func(ctx context.Context, id string) ([]byte, error) {
+			agentTasks := tasks.New(pool, &limits.DebitStore{Pool: pool, Limiter: limiter}, auth)
+			agentPeers := a2a.NewPeers(&policy, func(ctx context.Context, id string) ([]byte, error) {
 				return keys.Read(ctx, pool, installation, id, secrets.AgentCredential)
-			}}
+			})
+			agentExecutor := agents.New(agents.Options{Tasks: agentTasks, Peers: agentPeers, Grants: grantStore, Entra: rt})
+			agentServer := a2a.New(a2a.Options{Runtime: rt, Executor: agentExecutor, Peers: agentPeers, Grants: grantStore, TrustedProxies: c.TrustedProxyCIDRs, PublicOrigin: c.PublicOrigin})
 			agentServer.Register(public)
-			agentMonitor = &a2a.TaskMonitor{Server: agentServer, Log: log}
+			agentMonitor = agents.NewMonitor(agentTasks, agents.NewTaskOperations(agentTasks, agentPeers, grantStore), rt, log)
 			var toolLedger accounting.Ledger
 			if limiter != nil {
 				toolLedger = accounting.NewDurableLedger(pool, &limits.DebitStore{Pool: pool, Limiter: limiter}, auth)
@@ -418,7 +422,7 @@ func Run(ctx context.Context, c Config, log *slog.Logger) error {
 			})
 			toolServer := mcp.New(mcp.ServerOptions{Runtime: rt, Executor: toolExecutor, Auth: auth, Grants: grantStore, Sessions: sessionStore, TrustedProxies: c.TrustedProxyCIDRs})
 			if limiter != nil {
-				gw.WorkflowRuns = &agents.WorkflowStore{Pool: pool, Auth: auth, Keys: keys, Installation: installation, Debits: &limits.DebitStore{Pool: pool, Limiter: limiter}}
+				gw.WorkflowRuns = runs.NewWorkflowStore(pool, auth, &limits.DebitStore{Pool: pool, Limiter: limiter}, keys, installation)
 				gw.WorkflowTools = toolServer
 			}
 			toolServer.Register(public)

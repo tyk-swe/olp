@@ -1,4 +1,4 @@
-package agents
+package tasks
 
 import (
 	"net/http"
@@ -86,7 +86,7 @@ func projectFilter(r *http.Request, p access.Principal) (string, error) {
 	return project, nil
 }
 
-func (s *Server) listTasks(r *http.Request, p access.Principal) (access.Reply, error) {
+func (s *Management) listTasks(r *http.Request, p access.Principal) (access.Reply, error) {
 	page, err := access.Page(r)
 	if err != nil {
 		return access.Reply{}, err
@@ -95,7 +95,7 @@ func (s *Server) listTasks(r *http.Request, p access.Principal) (access.Reply, e
 	if err != nil {
 		return access.Reply{}, err
 	}
-	rows, err := s.Access.Pool.Query(r.Context(), `SELECT `+taskColumns+` FROM olp.a2a_tasks
+	rows, err := s.access.Pool.Query(r.Context(), `SELECT `+taskColumns+` FROM olp.a2a_tasks
  WHERE id<$1 AND ($2 OR project_id=ANY($3::uuid[])) AND ($4='' OR project_id=NULLIF($4,'')::uuid)
  ORDER BY id DESC LIMIT $5`, page.Before, p.AllProjects, p.ProjectIDs(), project, page.Limit+1)
 	if err != nil {
@@ -108,12 +108,12 @@ func (s *Server) listTasks(r *http.Request, p access.Principal) (access.Reply, e
 	return access.ListReplyBy(items, page, func(item TaskView) string { return item.ID }), nil
 }
 
-func (s *Server) getTask(r *http.Request, p access.Principal) (access.Reply, error) {
+func (s *Management) getTask(r *http.Request, p access.Principal) (access.Reply, error) {
 	id, err := access.IDParam(r, "task_id")
 	if err != nil {
 		return access.Reply{}, err
 	}
-	rows, err := s.Access.Pool.Query(r.Context(), `SELECT `+taskColumns+` FROM olp.a2a_tasks WHERE id=$1`, id)
+	rows, err := s.access.Pool.Query(r.Context(), `SELECT `+taskColumns+` FROM olp.a2a_tasks WHERE id=$1`, id)
 	if err != nil {
 		return access.Reply{}, err
 	}
@@ -124,7 +124,7 @@ func (s *Server) getTask(r *http.Request, p access.Principal) (access.Reply, err
 	if err := p.Project(&task.ProjectID, access.View); err != nil {
 		return access.Reply{}, err
 	}
-	feeRows, err := s.Access.Pool.Query(r.Context(), `SELECT d.id::text AS dispatch_id,d.run_id::text AS run_id,d.state,d.currency,
+	feeRows, err := s.access.Pool.Query(r.Context(), `SELECT d.id::text AS dispatch_id,d.run_id::text AS run_id,d.state,d.currency,
  d.observed_cost::text AS observed_cost,d.observed_charge::text AS observed_charge,
  (CASE WHEN d.closed_at IS NOT NULL THEN 0 ELSE GREATEST(0,d.cost_bound-d.observed_cost) END)::text AS remaining_cost,
  (CASE WHEN d.closed_at IS NOT NULL THEN 0 ELSE GREATEST(0,d.charge_bound-d.observed_charge) END)::text AS remaining_charge,d.created_at
@@ -137,7 +137,7 @@ func (s *Server) getTask(r *http.Request, p access.Principal) (access.Reply, err
 	if err != nil {
 		return access.Reply{}, err
 	}
-	modelRows, err := s.Access.Pool.Query(r.Context(), `SELECT c.accounting_id::text AS request_id,f.attempt_id::text AS attempt_id,
+	modelRows, err := s.access.Pool.Query(r.Context(), `SELECT c.accounting_id::text AS request_id,f.attempt_id::text AS attempt_id,
  CASE WHEN f.attempt_id IS NULL THEN 'pending' WHEN f.charge_status='not_billable' THEN 'not_billable'
  WHEN NOT f.usage_complete OR f.charge_status='billing_uncertain' THEN 'outcome_unknown'
  WHEN f.unpriced OR f.estimated_cost IS NULL THEN 'unpriced' WHEN f.charge IS NULL THEN 'uncharged'
@@ -156,7 +156,7 @@ func (s *Server) getTask(r *http.Request, p access.Principal) (access.Reply, err
 	if err != nil {
 		return access.Reply{}, err
 	}
-	toolRows, err := s.Access.Pool.Query(r.Context(), `SELECT d.id::text AS dispatch_id,d.run_id::text AS run_id,d.state,
+	toolRows, err := s.access.Pool.Query(r.Context(), `SELECT d.id::text AS dispatch_id,d.run_id::text AS run_id,d.state,
  COALESCE(m.pricing_state,'unknown') AS pricing_state,d.currency,
  CASE WHEN m.pricing_state IN ('priced','free') THEN d.observed_cost::text END AS observed_cost,
  CASE WHEN m.pricing_state IN ('priced','free') THEN d.observed_charge::text END AS observed_charge,
