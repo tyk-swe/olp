@@ -4,6 +4,7 @@ package service_test
 
 import (
 	"net/http"
+	"net/url"
 	"regexp"
 	"sort"
 	"strings"
@@ -21,7 +22,7 @@ var routeParameter = regexp.MustCompile(`\{[^}]+\}`)
 
 func sweepPath(pattern string, known map[string]string) string {
 	_, path, _ := strings.Cut(pattern, " ")
-	return routeParameter.ReplaceAllStringFunc(path, func(parameter string) string {
+	resolved := routeParameter.ReplaceAllStringFunc(path, func(parameter string) string {
 		name := strings.Trim(parameter, "{}")
 		if value, ok := known[name]; ok {
 			return value
@@ -35,9 +36,35 @@ func sweepPath(pattern string, known map[string]string) string {
 			return "sweep"
 		case "provider_kind":
 			return "openai_compatible"
+		case "plugin_digest":
+			return strings.Repeat("0", 64)
 		}
 		return uuid.NewString()
 	})
+	now := time.Now().UTC()
+	switch {
+	case path == "/api/v1/usage/reconciliation", strings.HasSuffix(path, "/invoiced-costs"):
+		return resolved + "?" + url.Values{
+			"start": {now.Add(-24 * time.Hour).Format(time.DateOnly)},
+			"end":   {now.Format(time.DateOnly)},
+		}.Encode()
+	case strings.HasPrefix(path, "/api/v1/usage/"):
+		return resolved + "?" + url.Values{
+			"start":     {now.Add(-time.Hour).Format(time.RFC3339)},
+			"end":       {now.Format(time.RFC3339)},
+			"dimension": {"route"},
+		}.Encode()
+	case strings.HasSuffix(path, "/revisions/diff"):
+		return resolved + "?" + url.Values{"from": {uuid.NewString()}, "to": {uuid.NewString()}}.Encode()
+	case path == "/api/v1/media-jobs/{job_id}/content":
+		return resolved + "?variant=video"
+	case path == "/api/v1/code/routes/{id}/client-config":
+		return resolved + "?" + url.Values{"gateway_url": {"https://gateway.example.com"}}.Encode()
+	case path == "/api/v1/delegation-options":
+		return resolved + "?" + url.Values{"api_key_id": {known["api_key_id"]}}.Encode()
+	default:
+		return resolved
+	}
 }
 
 type canaryFixture struct {
@@ -56,6 +83,10 @@ func (s *service) seedCanary(owner *caller, vendorURL string) canaryFixture {
 	key := s.want(owner, "POST", "/api/v1/api-keys", map[string]any{"name": "canary-key", "scopes": []string{"inference"}, "project_id": project}, idempotent(), http.StatusCreated)
 	group := s.want(owner, "POST", "/api/v1/budget-groups", map[string]any{"name": "canary-budget", "monthly_cost_limit": "5.00", "project_id": project}, idempotent(), http.StatusCreated)
 	increase := s.want(owner, "POST", "/api/v1/budget-increases", map[string]any{"target": map[string]any{"kind": "budget_group", "id": group["id"]}, "window": "month", "amount": "1", "reason": "canary increase"}, idempotent(), http.StatusCreated)
+	s.eventually("the canary runtime snapshot being ready", startupLimit, func() (bool, string) {
+		status, raw := s.do(owner, "GET", "/api/v1/health/ready", nil, nil)
+		return status == http.StatusOK, describe(status, raw)
+	})
 	return canaryFixture{
 		project: project,
 		ids: map[string]string{
@@ -108,7 +139,7 @@ func TestManagementReadsAnswerWithoutServerErrors(t *testing.T) {
 		if pattern == readinessRoute && status == http.StatusServiceUnavailable {
 			continue
 		}
-		if status >= http.StatusInternalServerError {
+		if status == http.StatusBadRequest || status == http.StatusUnprocessableEntity || status >= http.StatusInternalServerError {
 			t.Errorf("%s: %s", pattern, describe(status, raw))
 		}
 	}
@@ -147,6 +178,9 @@ func TestManagementIsolationSweep(t *testing.T) {
 		path := sweepPath(pattern, fixture.ids)
 		for _, c := range callers {
 			status, raw := s.do(c, "GET", path, nil, nil)
+			if status == http.StatusBadRequest || status == http.StatusUnprocessableEntity {
+				t.Errorf("%s as %s: %s", pattern, c.name, describe(status, raw))
+			}
 			if strings.Contains(string(raw), "canary") {
 				t.Errorf("%s as %s disclosed another project (%d)", pattern, c.name, status)
 			}
