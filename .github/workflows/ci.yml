@@ -150,7 +150,7 @@ jobs:
       - id: setup
         uses: ./.github/actions/setup
         with:
-          go-cache-suffix: -test-fast
+          go-cache-suffix: -test-fast-${{ hashFiles('**/*.go') }}
       - run: pnpm --dir console api:generate
       - run: make test-fast
       - if: ${{ failure() && steps.setup.outcome == 'success' && steps.setup.outputs.go-cache-hit != 'true' }}
