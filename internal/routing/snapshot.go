@@ -105,6 +105,7 @@ type Commitment struct {
 
 // Provider is the serving view of one active provider revision.
 type Provider struct {
+	metadata         map[string]decodedMetadata
 	CredentialSource string                    `json:"credential_source,omitempty"`
 	Network          *egress.ConnectionOptions `json:"network,omitempty"`
 	// Plugin is the plugin profile a plugin provider pins as its profile
@@ -360,6 +361,8 @@ func (s *Snapshot) Compile() error {
 		return err
 	}
 	next := *s
+	next.Providers = compileProviderMetadata(s.Providers)
+	next.CodePaidConnections = compileProviderMetadata(s.CodePaidConnections)
 	next.Routes = maps.Clone(s.Routes)
 	next.Guardrails = s.Guardrails.Clone()
 	if err := next.compileGuardrails(); err != nil {

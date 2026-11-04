@@ -1058,8 +1058,7 @@ func (s *Server) planCanonical(ctx context.Context, x *call) *Error {
 			return semantic
 		}
 		if !x.strict() && protocols.StructuredOutputRequested(x.generation.parsed) {
-			var metadata routing.ModelMetadata
-			_ = json.Unmarshal(p.Models[t.ProviderModel], &metadata)
+			metadata, _ := p.Metadata(t.ProviderModel)
 			if metadata.SupportedParameters == nil || !slices.Contains(*metadata.SupportedParameters, "response_format") {
 				semantic = errors.New("model does not declare structured-output support")
 				return semantic

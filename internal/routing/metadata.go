@@ -1,10 +1,50 @@
 package routing
 
 import (
+	"encoding/json"
 	"errors"
 	"strings"
 	"time"
 )
+
+type decodedMetadata struct {
+	value ModelMetadata
+	valid bool
+}
+
+func decodeMetadata(raw json.RawMessage) decodedMetadata {
+	if len(raw) == 0 {
+		return decodedMetadata{}
+	}
+	var value ModelMetadata
+	err := json.Unmarshal(raw, &value)
+	return decodedMetadata{value: value, valid: err == nil}
+}
+
+func (p Provider) Metadata(model string) (ModelMetadata, bool) {
+	if p.metadata != nil {
+		metadata := p.metadata[model]
+		return metadata.value, metadata.valid
+	}
+	metadata := decodeMetadata(p.Models[model])
+	return metadata.value, metadata.valid
+}
+
+func compileProviderMetadata(providers map[string]Provider) map[string]Provider {
+	if providers == nil {
+		return nil
+	}
+	compiled := make(map[string]Provider, len(providers))
+	for id, provider := range providers {
+		metadata := make(map[string]decodedMetadata, len(provider.Models))
+		for model, raw := range provider.Models {
+			metadata[model] = decodeMetadata(raw)
+		}
+		provider.metadata = metadata
+		compiled[id] = provider
+	}
+	return compiled
+}
 
 // ModelMetadata keeps absent facts distinct from affirmative declarations.
 // Privacy declarations always name their evidence and observation time.

@@ -1,7 +1,6 @@
 package routing
 
 import (
-	"encoding/json"
 	"slices"
 
 	"github.com/tyk-swe/olp/internal/limits"
@@ -56,8 +55,7 @@ func EffectiveCapabilities(snapshot *Snapshot, route Route) RouteCapabilities {
 		if len(certified) == 0 {
 			continue
 		}
-		var metadata ModelMetadata
-		_ = json.Unmarshal(provider.Models[target.ProviderModel], &metadata)
+		metadata, _ := provider.Metadata(target.ProviderModel)
 		considered = append(considered, metadata)
 	}
 	for _, operation := range operations {
