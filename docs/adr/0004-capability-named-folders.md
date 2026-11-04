@@ -6,4 +6,4 @@ Shared code survives only when the deletion test shows that removing it would sp
 
 We considered keeping compatibility alias packages at the old public paths. We rejected that option because an alias is a pass-through wrapper and keeps the old layer structure alive. Public Go import paths therefore break once under the current 0.x version, and the old-to-new path table ships in the user docs. Compiled plugins stay valid because the plugin wire ABI stays at version 1 and only Go import paths move.
 
-A structure check in the fast safety net rejects new layer-named folders and layer-suffixed Go files, and console route folders follow the same naming rule because each route folder names the capability page it serves.
+Code review applies this naming convention, including to console route folders because each route folder names the capability page it serves. The fast safety net does not enforce folder or file names because those checks test structure rather than behavior.

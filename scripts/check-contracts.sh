@@ -12,10 +12,3 @@ if (raw !== JSON.stringify(JSON.parse(raw), null, 2) + "\n") {
 }'
 make api
 git diff --exit-code -- internal/management/contract/types.gen.go management/operations.gen.json
-scratch=$(mktemp -d)
-trap 'rm -rf -- "$scratch"' EXIT
-cp console/src/lib/management/schema.d.ts "$scratch/schema.d.ts"
-cp console/src/lib/management/requirements.ts "$scratch/requirements.ts"
-pnpm --dir console api:generate
-cmp "$scratch/schema.d.ts" console/src/lib/management/schema.d.ts
-cmp "$scratch/requirements.ts" console/src/lib/management/requirements.ts

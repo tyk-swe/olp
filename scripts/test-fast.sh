@@ -32,7 +32,7 @@ go test -mod=readonly -vet=off -count=1 -timeout=60s \
   ./internal/grants/personal \
   ./internal/gateway
 pnpm --dir console test --project unit --project svelte
-node --test scripts/check-docs.test.mjs scripts/check-release-version.test.mjs scripts/check-structure.test.mjs
+node --test scripts/check-docs.test.mjs scripts/check-release-version.test.mjs
 elapsed=$(( $(date +%s) - start ))
 printf 'test-fast: %ss (budget %ss)\n' "$elapsed" "$budget"
 if [ "$elapsed" -gt "$budget" ]; then
