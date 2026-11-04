@@ -3,10 +3,16 @@
 Pre-merge validation is one fast safety net. After `make setup`, run
 `make test-fast`. The net is the explicit allowlist in
 `scripts/test-fast.sh`, and the script fails when the run takes longer than
-60 seconds of wall time. `make check` and `make check-fast` run formatting,
-vet, lint, console types and formatting checks, contract generation where
-applicable, and this same net. CI runs those gates as separate jobs and runs
-the net in the `test-fast` job.
+60 seconds of wall time. `make check` runs contract freshness, Go formatting,
+vet and lint, console formatting, types and lint, then this same net. CI uses
+the same focused checks in separate jobs and runs the net in the `test-fast` job.
+
+`make check-contracts` generates temporary outputs and compares all tracked
+management, guardrail and inference artifacts with the working tree. It accepts
+correct uncommitted generated changes and reports stale or missing files with
+an instruction to run `make api`. `make check-console` regenerates ignored
+console types before validating them. Checks may write ignored caches and build
+metadata, but they do not rewrite tracked files.
 
 The net needs no containers, services, network, or provider accounts. Go
 packages run with `-count=1`, so cached results never hide budget growth.
@@ -70,6 +76,9 @@ shallow test that cannot fail gets rewritten as a behavior test or
 deleted. No signal beats false signal.
 
 ## Focused runs
+
+Use `make check-go`, `make check-console`, or `make check-contracts` for focused
+static validation. Helm, dependency and release checks run separately in CI.
 
 Run one allowlisted package or file directly while iterating, for example
 `go test -count=1 ./internal/gateway` or

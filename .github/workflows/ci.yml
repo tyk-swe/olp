@@ -48,6 +48,7 @@ jobs:
               - '!.github/ISSUE_TEMPLATE/**'
               - '!.github/dependabot.yml'
             go:
+              - 'Makefile'
               - 'scripts/check-lint.sh'
               - 'staticcheck.conf'
               - '**/*.go'
@@ -64,6 +65,9 @@ jobs:
               - '.github/actions/setup/**'
               - '!**/*.md'
             console:
+              - 'Makefile'
+              - '.nvmrc'
+              - 'management/**'
               - 'console/**'
               - 'pnpm-workspace.yaml'
               - 'pnpm-lock.yaml'
@@ -72,6 +76,13 @@ jobs:
               - '.github/actions/setup/**'
               - '!**/*.md'
             contracts:
+              - 'Makefile'
+              - '.nvmrc'
+              - 'go.mod'
+              - 'go.sum'
+              - 'pnpm-workspace.yaml'
+              - 'pnpm-lock.yaml'
+              - 'console/package.json'
               - 'guardrails/**'
               - 'inference/**'
               - 'management/**'
@@ -119,9 +130,7 @@ jobs:
       - uses: ./.github/actions/setup
         with:
           node-modules: false
-      - run: make fmt-check
-      - run: make vet
-      - run: make lint
+      - run: make check-go
   check-console:
     needs: changes
     if: needs.changes.outputs.console == 'true'
@@ -137,9 +146,7 @@ jobs:
           node-version-file: .nvmrc
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm --dir console api:generate
-      - run: pnpm --dir console format:check
-      - run: pnpm --dir console check
+      - run: make check-console
   test-fast:
     needs: changes
     if: needs.changes.outputs.code == 'true' || needs.changes.outputs.scripts == 'true'
@@ -169,7 +176,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./.github/actions/setup
-      - run: ./scripts/check-contracts.sh
+      - run: make check-contracts
       - run: node scripts/check-release-version.mjs
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:

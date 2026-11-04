@@ -34,7 +34,7 @@ try {
       "-package",
       "inference",
       "-o",
-      "inference/client.gen.go",
+      process.argv[2] ?? "inference/client.gen.go",
       path,
     ],
     { stdio: "inherit" },

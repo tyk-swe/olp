@@ -42,7 +42,10 @@ try {
   writeFileSync(input, JSON.stringify(document));
   execFileSync(
     'go',
-    ['tool', 'oapi-codegen', '--config', 'internal/management/oapi-codegen.yaml', input],
+    [
+      'tool', 'oapi-codegen', '--config', 'internal/management/oapi-codegen.yaml',
+      '-o', process.argv[2] ?? 'internal/management/contract/types.gen.go', input
+    ],
     { stdio: 'inherit' }
   );
 } finally {

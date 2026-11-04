@@ -7,10 +7,11 @@ static `build/` output with `index.html` as the SPA fallback. Start with the
 ## Local development
 
 The [development workflow](../CONTRIBUTING.md#local-development) starts Vite
-with `make dev`. It proxies `/api/`, `/v1/`, `/native/`, `/anthropic/`,
+with `make dev`. It proxies `/api/`, `/v1/`, `/native/`, `/code/`, `/anthropic/`,
 `/gemini/`, `/v1beta/`, and `/bedrock/` to Go on port 8082, preserving the
-browser origin and cookies. The checked-in proxy does not enable WebSocket
-proxying; use the Go listener directly for realtime clients.
+browser origin and cookies. WebSocket proxying is enabled for `/code/`.
+Console edits hot reload and backend edits trigger a Go rebuild and restart.
+`make dev` requires port 5173 so the browser origin stays consistent.
 
 For an already running backend, `pnpm --dir console dev` starts Vite alone.
 Set `OLP_DEV_API_ORIGIN` to override its default `http://127.0.0.1:8081` target.
@@ -19,10 +20,10 @@ Set `OLP_DEV_API_ORIGIN` to override its default `http://127.0.0.1:8081` target.
 
 Run from the repository root after setup:
 
-| Command                     | Purpose                                            |
-| --------------------------- | -------------------------------------------------- |
-| `pnpm --dir console verify` | Formatting, Svelte/type checks, ESLint, and Vitest |
-| `pnpm --dir console build`  | Static assets and asset manifest                   |
+| Command                    | Purpose                                                       |
+| -------------------------- | ------------------------------------------------------------- |
+| `make check-console`       | Generate types and check formatting, Svelte types, and ESLint |
+| `pnpm --dir console build` | Static assets and asset manifest                              |
 
 Management requests use the generated `openapi-fetch` client. Update
 `management/management.json` alongside Go handlers and run `make api`; never edit

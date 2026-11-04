@@ -3,20 +3,23 @@
 Install Go 1.26.0 or newer, Node.js 22.22.2 or newer, and pnpm 10.26.0 or newer.
 Use the current stable Go and pnpm releases and the latest Node.js LTS release
 (selected by `.nvmrc`) for development. pnpm 10.26.0 is needed for the workspace's
-build-script permissions. Also install a C compiler/linker and glibc development
-headers, Docker Compose, PostgreSQL 18 client tools, OpenSSL, curl, jq, Python 3,
-bubblewrap and ripgrep. Run commands from the repository root. GLIDE links a
-pinned prebuilt native core, so development needs CGO but no Rust toolchain.
+build-script permissions. Building and checking Go also needs a C compiler/linker
+and glibc development headers. Running the development stack needs Docker Compose
+and Python 3. Operational scripts need additional tools such as PostgreSQL 18
+clients, OpenSSL, curl, jq, bubblewrap and ripgrep. Run commands from the
+repository root. GLIDE links a pinned prebuilt native core, so development needs
+CGO but no Rust toolchain.
 Release platforms are native Linux amd64 and arm64. macOS and musl are
 unqualified.
 
 | Command | Purpose |
 | --- | --- |
-| `make setup` | Download modules, install the pnpm workspace, generate contracts |
-| `make dev` | Start PostgreSQL, Valkey, Go on 8082/private 9092, and Vite on 5173 |
-| `make check` | Generate contracts; check formatting, vet, Go lint, ESLint, types, and the fast safety net |
-| `make check-fast` | Check formatting, vet, Go lint, and the fast safety net without regenerating contracts |
-| `make lint` | Pinned Go static analysis gate (see `staticcheck.conf`) |
+| `make setup` | Install modules, the pnpm workspace and a local Air watcher, then generate contracts |
+| `make dev` | Start services, automatically reloaded Go on 8082/private 9092, and Vite on 5173 |
+| `make check` | Check contract freshness, Go, console, and the safety net without rewriting tracked files |
+| `make check-go` | Check Go formatting, vet, and pinned static analysis |
+| `make check-console` | Generate ignored console types, then check formatting, types, and ESLint |
+| `make check-contracts` | Compare all tracked contracts with temporary generated outputs |
 | `make test-fast` | Fast safety net inside its 60 second budget, in [tests/README.md](tests/README.md) |
 | `make api` | Generate Go and TypeScript types without building the gateway |
 | `make build` | Versioned `.local/bin/olp` plus separate `console/build` assets |
@@ -24,11 +27,21 @@ unqualified.
 | `make catalog` | Rewrite the reference catalog and plugin index in canonical form |
 | `make catalog-sign` | Sign the reference catalog and plugin index with the development key |
 | `make fmt` | Format Go and console source |
+| `make dev-stop` | Stop development containers and preserve data |
+| `make dev-reset` | Delete development containers and volumes, preserving local secrets |
+
+`make help` groups everyday commands, focused checks, and maintenance commands.
+Run `make setup` after cloning or changing dependencies or the watcher version.
+`make dev` and `make build` consume prepared contracts without reinstalling
+dependencies or regenerating tracked files. After editing an API schema or
+generator, run `make api` explicitly.
 
 Required CI includes `check-go`, `check-console`, `test-fast`,
 `contracts`, `helm`, `dependencies`, and `build`,
-each gated on the paths a change touches. Contract generation is reproducible; `management/management.json` is
-the checked-in source of truth. Update it alongside handlers and regenerate with
+each gated on the paths a change touches. Helm, dependency and release checks
+remain separate from the daily `make check`. Contract generation is reproducible.
+`management/management.json` is the checked-in source of truth. Update it
+alongside handlers and regenerate with
 `make api`. Never edit generated Go or TypeScript files by hand.
 
 ## Local development
@@ -36,24 +49,36 @@ the checked-in source of truth. Update it alongside handlers and regenerate with
 After `make setup` and `make dev`, open http://127.0.0.1:5173 and use
 `.local/secrets/bootstrap.token` to create the first owner. Use this origin
 so management requests pass the origin check. Vite proxies management, OIDC
-callbacks, and the configured inference paths; console edits hot reload, while
-backend edits require a restart. See the [console guide](console/README.md) for
-proxy limits and running Vite alone.
+callbacks, and the configured inference paths. Console edits hot reload.
+Air watches backend source, embedded assets and build metadata, rebuilds Go,
+stops the old backend, applies pending migrations, and starts the new binary.
+See the [console guide](console/README.md) for proxy limits and running Vite alone.
+
+The development backend has a two-second shutdown deadline, so reloading can
+interrupt active requests. A compilation failure stops the old backend and
+prints the error while the watcher and console remain running. Fix the source
+to rebuild and resume serving. A migration failure leaves the backend stopped.
+Fix the migration and save it to retry. Applied migrations remain immutable.
 
 `make dev` creates missing private secrets and initializes the schema. Existing
-secrets and data survive restarts. PostgreSQL and Valkey use isolated volumes
-and loopback ports 54321/63791. Stop them with:
+secrets and data survive restarts. One development stack runs at a time. Vite
+requires port 5173 and fails if it is occupied. PostgreSQL, Valkey and response
+cache Valkey use loopback ports 54321, 63791 and 63792. Ctrl-C stops the watcher,
+backend and Vite while leaving containers running for the next start. Stop
+`make dev` before stopping the containers with the following command.
 
 ```sh
-docker compose -f deploy/compose.dev.yaml stop
+make dev-stop
 ```
 
 Development storage uses schema `olp` and Valkey namespace
 `olp:<installation UUID>:`. OLP makes no upgrade promises during 0.x, so a change
-may require a fresh database. Remove the development volumes and start again:
+may require a fresh database. Stop `make dev`, then remove development volumes
+and start again. This deletes local database and Valkey data but retains
+`.local/secrets`.
 
 ```sh
-docker compose -f deploy/compose.dev.yaml down -v
+make dev-reset
 make dev
 ```
 
@@ -103,16 +128,9 @@ GLIDE's pinned native archive needs CGO, not Rust. The embedded OpenAI token ran
 carry their MIT notice and SHA-256 checks; oracle fixtures use test-only tiktoken
 under `tests/fixtures/tokens`.
 
-Client qualification packages in `tests/clients` are exact development pins,
-subject to pnpm's release-age gate. Update their manifests and
-[client compatibility](docs/use/clients.md) together. Codex, Claude Code and OpenCode
-instead resolve the publisher's npm `latest` channel on each CI job, without a
-release-age delay. Code-mode and broader client suites share those verified
-binaries; exact versions and integrity values are retained in CI evidence.
-
 TypeScript stays on the newest 6.0 patch until both
 [typescript-eslint](https://typescript-eslint.io/users/dependency-versions/) and
-Svelte support 7.x and the console passes checks and Chromium qualification.
+Svelte support 7.x and the console passes its checks.
 Other version exceptions need a concrete incompatibility and removal condition.
 
 ## Releases

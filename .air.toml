@@ -1,0 +1,20 @@
+root = "."
+tmp_dir = ".local/air"
+
+[build]
+cmd = "make build-go GO_BUILD_OUTPUT=.local/bin/olp"
+entrypoint = ["bash", "scripts/dev-backend.sh"]
+include_dir = ["cmd", "guardrails", "inference", "internal", "management", "plugin"]
+include_ext = ["go", "sql", "json", "sig", "lua", "bin"]
+include_file = ["go.mod", "go.sum", "Makefile", "package.json"]
+exclude_dir = [".local", "console", "node_modules", "tests", "vendor"]
+exclude_regex = ["_test\\.go$"]
+exclude_unchanged = true
+delay = 300
+stop_on_error = true
+send_interrupt = true
+kill_delay = "3s"
+rerun = false
+
+[screen]
+clear_on_rebuild = false

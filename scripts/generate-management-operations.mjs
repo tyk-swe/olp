@@ -131,5 +131,5 @@ export function operationsFrom(document) {
 
 if (process.argv[1] === new URL(import.meta.url).pathname) {
   const document = JSON.parse(readFileSync('management/management.json', 'utf8'));
-  writeFileSync('management/operations.gen.json', JSON.stringify(operationsFrom(document), null, 2) + '\n');
+  writeFileSync(process.argv[2] ?? 'management/operations.gen.json', JSON.stringify(operationsFrom(document), null, 2) + '\n');
 }
