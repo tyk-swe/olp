@@ -21,6 +21,7 @@ unqualified.
 | `make check-console` | Generate ignored console types, then check formatting, types, and ESLint |
 | `make check-contracts` | Compare all tracked contracts with temporary generated outputs |
 | `make test-fast` | Fast safety net inside its 60 second budget, in [tests/README.md](tests/README.md) |
+| `make test-service` | Database-backed service suite in disposable Docker containers, in [tests/README.md](tests/README.md#service-suite) |
 | `make api` | Generate Go and TypeScript types without building the gateway |
 | `make build` | Versioned `.local/bin/olp` plus separate `console/build` assets |
 | `make build-go` | Build the native Go binary from generated contracts |
@@ -36,7 +37,7 @@ Run `make setup` after cloning or changing dependencies or the watcher version.
 dependencies or regenerating tracked files. After editing an API schema or
 generator, run `make api` explicitly.
 
-Required CI includes `check-go`, `check-console`, `test-fast`,
+Required CI includes `check-go`, `check-console`, `test-fast`, `test-service`,
 `contracts`, `helm`, `dependencies`, and `build`,
 each gated on the paths a change touches. Helm, dependency and release checks
 remain separate from the daily `make check`. Contract generation is reproducible.

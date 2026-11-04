@@ -168,6 +168,18 @@ jobs:
             ~/.cache/go-build
             ~/.cache/staticcheck
           key: ${{ steps.setup.outputs.go-cache-key }}
+  test-service:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-26.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/setup
+        with:
+          node-modules: "false"
+          go-cache-suffix: -test-service-${{ hashFiles('**/*.go') }}
+      - run: make test-service
   contracts:
     needs: changes
     if: needs.changes.outputs.contracts == 'true'
