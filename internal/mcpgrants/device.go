@@ -21,7 +21,7 @@ func (s *Store) Poll(ctx context.Context, id, member string) (Authorization, err
 	if readErr != nil {
 		return Authorization{}, readErr
 	}
-	if item.Outcome == "completed" {
+	if item.Outcome == enrollmentCompleted {
 		return Authorization{State: Active}, nil
 	}
 	if item.Outcome != "" {
@@ -67,10 +67,10 @@ func (s *Store) Poll(ctx context.Context, id, member string) (Authorization, err
 			_, updateErr := s.Pool.Exec(ctx, `UPDATE olp.mcp_grant_enrollments SET exchange_attempt_id=NULL,poll_interval=$3,poll_at=now()+$3::integer*interval '1 second' WHERE id=$1 AND exchange_attempt_id=$2 AND outcome IS NULL`, id, attempt, int64(interval/time.Second))
 			return Authorization{State: Pending}, updateErr
 		case "access_denied":
-			return Authorization{State: Denied}, s.endFlow(ctx, id, "denied")
+			return Authorization{State: Denied}, s.endFlow(ctx, id, enrollmentDenied)
 		case "expired_token":
-			return Authorization{State: Expired}, s.endFlow(ctx, id, "expired")
+			return Authorization{State: Expired}, s.endFlow(ctx, id, enrollmentExpired)
 		}
 	}
-	return Authorization{}, errors.Join(errOAuth, s.endFlow(ctx, id, "failed"))
+	return Authorization{}, errors.Join(errOAuth, s.endFlow(ctx, id, enrollmentFailed))
 }

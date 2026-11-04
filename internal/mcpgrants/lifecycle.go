@@ -43,13 +43,22 @@ type flowSession struct {
 	DeviceCode string `json:"device_code,omitempty"`
 }
 
+type enrollmentOutcome string
+
+const (
+	enrollmentCompleted enrollmentOutcome = "completed"
+	enrollmentFailed    enrollmentOutcome = "failed"
+	enrollmentDenied    enrollmentOutcome = "denied"
+	enrollmentExpired   enrollmentOutcome = "expired"
+)
+
 type flowRecord struct {
 	Enrollment
 	Flow      Flow
 	SessionID *string
 	AttemptID *string
 	Interval  int64
-	Outcome   string
+	Outcome   enrollmentOutcome
 }
 
 func readFlow(ctx context.Context, q access.Queryer, id, member string) (flowRecord, error) {
@@ -108,13 +117,13 @@ func (s *Store) Authorize(ctx context.Context, id, member string, flow Flow, red
 	}
 	device, deviceErr := client.config.DeviceAuth(client.context(ctx), oauth2.SetAuthURLParam("audience", item.Binding.OAuth.Audience))
 	if deviceErr != nil {
-		return Authorization{}, errors.Join(errOAuth, s.endFlow(ctx, id, "failed"))
+		return Authorization{}, errors.Join(errOAuth, s.endFlow(ctx, id, enrollmentFailed))
 	}
 	if device.DeviceCode == "" || len(device.DeviceCode) > 16384 || device.UserCode == "" || len(device.UserCode) > 64 || strings.ContainsAny(device.UserCode, "\r\n\x00") || !device.Expiry.After(time.Now()) || device.Interval < 0 || device.Interval > 300 {
-		return Authorization{}, errors.Join(errOAuth, s.endFlow(ctx, id, "failed"))
+		return Authorization{}, errors.Join(errOAuth, s.endFlow(ctx, id, enrollmentFailed))
 	}
 	if verifyErr := s.verificationURL(item.Binding, device.VerificationURI); verifyErr != nil {
-		return Authorization{}, errors.Join(verifyErr, s.endFlow(ctx, id, "failed"))
+		return Authorization{}, errors.Join(verifyErr, s.endFlow(ctx, id, enrollmentFailed))
 	}
 	interval := grants.DevicePollInterval(time.Duration(device.Interval)*time.Second, false)
 	expires := minTime(item.ExpiresAt, minTime(device.Expiry, time.Now().Add(grants.MaxDeviceTTL)))
@@ -211,7 +220,7 @@ func (s *Store) Complete(ctx context.Context, id, member, code, state string) (A
 	defer client.client.CloseIdleConnections()
 	token, exchangeErr := client.config.Exchange(client.context(ctx), code, oauth2.VerifierOption(session.Verifier))
 	if exchangeErr != nil {
-		return Authorization{}, errors.Join(errOAuth, s.endFlow(ctx, id, "failed"))
+		return Authorization{}, errors.Join(errOAuth, s.endFlow(ctx, id, enrollmentFailed))
 	}
 	if storeErr := s.completeGrant(ctx, item, attempt, token); storeErr != nil {
 		return Authorization{}, storeErr
@@ -219,7 +228,7 @@ func (s *Store) Complete(ctx context.Context, id, member, code, state string) (A
 	return Authorization{State: Active}, nil
 }
 
-func (s *Store) endFlow(ctx context.Context, id, outcome string) error {
+func (s *Store) endFlow(ctx context.Context, id string, outcome enrollmentOutcome) error {
 	record, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 	defer cancel()
 	_, err := s.Pool.Exec(record, `UPDATE olp.mcp_grant_enrollments SET outcome=$2 WHERE id=$1 AND outcome IS NULL`, id, outcome)
@@ -228,7 +237,7 @@ func (s *Store) endFlow(ctx context.Context, id, outcome string) error {
 
 func (s *Store) completeGrant(ctx context.Context, item flowRecord, attempt string, token *oauth2.Token) error {
 	if err := validToken(token); err != nil {
-		return errors.Join(err, s.endFlow(ctx, item.ID, "failed"))
+		return errors.Join(err, s.endFlow(ctx, item.ID, enrollmentFailed))
 	}
 	record, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 	defer cancel()
@@ -240,7 +249,7 @@ func (s *Store) completeGrant(ctx context.Context, item flowRecord, attempt stri
 	if _, err := liveBinding(record, tx, item.Binding); err != nil {
 		return err
 	}
-	tag, finishErr := tx.Exec(record, `UPDATE olp.mcp_grant_enrollments SET outcome='completed' WHERE id=$1 AND exchange_attempt_id=$2 AND outcome IS NULL AND expires_at>now()`, item.ID, attempt)
+	tag, finishErr := tx.Exec(record, `UPDATE olp.mcp_grant_enrollments SET outcome=$3 WHERE id=$1 AND exchange_attempt_id=$2 AND outcome IS NULL AND expires_at>now()`, item.ID, attempt, enrollmentCompleted)
 	if finishErr != nil {
 		return finishErr
 	}

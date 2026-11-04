@@ -3,11 +3,49 @@ package mcpservers
 import (
 	"context"
 	"reflect"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/routing"
 )
+
+type serverSummary struct {
+	Delegation           *routing.MCPDelegation   `json:"delegation"`
+	Stdio                *routing.MCPStdioBinding `json:"stdio,omitempty"`
+	OAuth                *routing.MCPOAuth        `json:"oauth"`
+	ID                   string                   `json:"id"`
+	ProjectID            string                   `json:"project_id"`
+	Name                 string                   `json:"name"`
+	Transport            string                   `json:"transport"`
+	Endpoint             string                   `json:"endpoint"`
+	Enabled              bool                     `json:"enabled"`
+	HasCredential        bool                     `json:"has_credential"`
+	ETag                 string                   `json:"etag"`
+	RevisionID           string                   `json:"revision_id"`
+	Revision             int64                    `json:"revision"`
+	CertifiedAt          time.Time                `json:"certified_at"`
+	RetiredAt            *time.Time               `json:"retired_at"`
+	UnitPrice            *string                  `json:"unit_price"`
+	ToolPrices           map[string]string        `json:"tool_prices"`
+	CallsPerMinute       int64                    `json:"calls_per_minute"`
+	MaxConcurrency       int64                    `json:"max_concurrency"`
+	PerKeyCallsPerMinute int64                    `json:"per_key_calls_per_minute"`
+	PerKeyMaxConcurrency int64                    `json:"per_key_max_concurrency"`
+}
+
+func summarize(d Definition) serverSummary {
+	return serverSummary{
+		Delegation: d.Delegation, Stdio: d.Stdio, OAuth: d.OAuth,
+		ID: d.ID, ProjectID: d.ProjectID, Name: d.Name, Transport: d.Transport,
+		Endpoint: d.Endpoint, Enabled: d.Enabled, HasCredential: d.HasCredential,
+		ETag: d.ETag, RevisionID: d.RevisionID, Revision: d.Revision,
+		CertifiedAt: d.CertifiedAt, RetiredAt: d.RetiredAt,
+		UnitPrice: d.UnitPrice, ToolPrices: d.ToolPrices,
+		CallsPerMinute: d.CallsPerMinute, MaxConcurrency: d.MaxConcurrency,
+		PerKeyCallsPerMinute: d.PerKeyCallsPerMinute, PerKeyMaxConcurrency: d.PerKeyMaxConcurrency,
+	}
+}
 
 // Save stores a certified catalog in an immutable revision under the caller's
 // serialized transaction. No upstream IO occurs while holding these locks.

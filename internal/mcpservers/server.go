@@ -3,11 +3,13 @@ package mcpservers
 import (
 	"encoding/json"
 	"errors"
+	"maps"
 	"net/http"
 	"reflect"
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/egress"
@@ -53,24 +55,24 @@ type Definition struct {
 	CredentialID         *string                  `json:"-"`
 }
 type Input struct {
-	EntraClientSecret    *string                  `json:"entra_client_secret,omitempty"`
-	Delegation           *routing.MCPDelegation   `json:"delegation"`
-	DelegationPrivateKey *string                  `json:"delegation_private_key,omitempty"`
-	Stdio                *routing.MCPStdioBinding `json:"stdio,omitempty"`
-	OAuth                *routing.MCPOAuth        `json:"oauth"`
-	present              map[string]bool          `json:"-"`
-	ProjectID            *string                  `json:"project_id,omitempty"`
-	Name                 string                   `json:"name"`
-	Transport            string                   `json:"transport,omitempty"`
-	Endpoint             string                   `json:"endpoint"`
-	Enabled              *bool                    `json:"enabled"`
-	Credential           json.RawMessage          `json:"credential,omitempty"`
-	UnitPrice            *string                  `json:"unit_price"`
-	ToolPrices           map[string]string        `json:"tool_prices,omitempty"`
-	CallsPerMinute       *int64                   `json:"calls_per_minute"`
-	MaxConcurrency       *int64                   `json:"max_concurrency"`
-	PerKeyCallsPerMinute *int64                   `json:"per_key_calls_per_minute"`
-	PerKeyMaxConcurrency *int64                   `json:"per_key_max_concurrency"`
+	EntraClientSecret    *string                    `json:"entra_client_secret,omitempty"`
+	Delegation           *routing.MCPDelegation     `json:"delegation"`
+	DelegationPrivateKey *string                    `json:"delegation_private_key,omitempty"`
+	Stdio                *routing.MCPStdioBinding   `json:"stdio,omitempty"`
+	OAuth                *routing.MCPOAuth          `json:"oauth"`
+	present              map[string]json.RawMessage `json:"-"`
+	ProjectID            *string                    `json:"project_id,omitempty"`
+	Name                 string                     `json:"name"`
+	Transport            string                     `json:"transport,omitempty"`
+	Endpoint             string                     `json:"endpoint"`
+	Enabled              *bool                      `json:"enabled"`
+	Credential           json.RawMessage            `json:"credential,omitempty"`
+	UnitPrice            *string                    `json:"unit_price"`
+	ToolPrices           map[string]string          `json:"tool_prices,omitempty"`
+	CallsPerMinute       *int64                     `json:"calls_per_minute"`
+	MaxConcurrency       *int64                     `json:"max_concurrency"`
+	PerKeyCallsPerMinute *int64                     `json:"per_key_calls_per_minute"`
+	PerKeyMaxConcurrency *int64                     `json:"per_key_max_concurrency"`
 }
 
 func (in *Input) UnmarshalJSON(data []byte) error {
@@ -83,16 +85,14 @@ func (in *Input) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return err
 	}
+	decoded.present = raw
 	*in = Input(decoded)
-	in.present = make(map[string]bool, len(raw))
-	for key := range raw {
-		in.present[key] = true
-	}
 	return nil
 }
 
 func (in Input) Present(field string) bool {
-	return in.present[field]
+	_, present := in.present[field]
+	return present
 }
 
 func clonePrice(value *string) *string {
@@ -104,11 +104,10 @@ func clonePrice(value *string) *string {
 }
 
 func cloneToolPrices(values map[string]string) map[string]string {
-	out := make(map[string]string, len(values))
-	for name, price := range values {
-		out[name] = price
+	if values == nil {
+		return map[string]string{}
 	}
-	return out
+	return maps.Clone(values)
 }
 
 func definitionFromInput(in Input, catalog *Catalog, signingKeyID, entraSecretID *string) *Definition {
@@ -136,26 +135,22 @@ func (s *Server) list(r *http.Request, p access.Principal) (access.Reply, error)
 	if err != nil {
 		return access.Reply{}, err
 	}
-	// Collection summaries must not load up to 200 full schema catalogs.
 	summaryColumns := strings.Replace(columns, "v.tools", "'[]'::jsonb", 1)
 	rows, err := s.Access.Pool.Query(r.Context(), "SELECT "+summaryColumns+joined+" WHERE s.retired_at IS NULL AND s.id<$1 AND ($2 OR s.project_id=ANY($3::uuid[])) ORDER BY s.id DESC LIMIT $4", page.Before, p.AllProjects, p.ProjectIDs(), page.Limit+1)
 	if err != nil {
 		return access.Reply{}, err
 	}
-	defer rows.Close()
-	items := []map[string]any{}
-	for rows.Next() {
-		d, err := scan(rows)
-		if err != nil {
-			return access.Reply{}, err
+	items, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (serverSummary, error) {
+		definition, scanErr := scan(row)
+		if scanErr != nil {
+			return serverSummary{}, scanErr
 		}
-		raw, _ := json.Marshal(d)
-		var item map[string]any
-		_ = json.Unmarshal(raw, &item)
-		delete(item, "catalog")
-		items = append(items, item)
+		return summarize(*definition), nil
+	})
+	if err != nil {
+		return access.Reply{}, err
 	}
-	return access.ListReply(items, page), rows.Err()
+	return access.ListReplyBy(items, page, func(item serverSummary) string { return item.ID }), nil
 }
 func (s *Server) get(r *http.Request, p access.Principal) (access.Reply, error) {
 	id, err := access.IDParam(r, "server_id")

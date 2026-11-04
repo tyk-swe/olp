@@ -3,8 +3,10 @@ package mcpservers
 import (
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/routing"
@@ -100,5 +102,84 @@ func TestCredentialParsing(t *testing.T) {
 		if _, err := Credential(json.RawMessage(raw)); err == nil {
 			t.Errorf("Credential accepted %s", raw)
 		}
+	}
+}
+
+func TestServerSummaryPreservesMetadata(t *testing.T) {
+	price, secret := "1.25", "private-id"
+	for _, definition := range []Definition{
+		{ID: "empty", ToolPrices: map[string]string{}},
+		{
+			ID: "server", ProjectID: "project", Name: "tools", Transport: "stdio", Enabled: true,
+			Endpoint: "https://tools.example.com", HasCredential: true, ETag: "etag", RevisionID: "revision", Revision: 3,
+			Catalog: &Catalog{Digest: "catalog-digest"}, CertifiedAt: time.Now().UTC(), RetiredAt: new(time.Now().UTC()),
+			UnitPrice: &price, ToolPrices: map[string]string{"lookup": "2"}, CallsPerMinute: 42, MaxConcurrency: 4,
+			PerKeyCallsPerMinute: 21, PerKeyMaxConcurrency: 2, OAuth: &routing.MCPOAuth{ClientID: "client"},
+			Stdio: &routing.MCPStdioBinding{Executable: "tools", Digest: "executable-digest"}, Delegation: &routing.MCPDelegation{},
+			CredentialID: &secret, DelegationKeyID: &secret, EntraClientSecretID: &secret,
+		},
+	} {
+		t.Run(definition.ID, func(t *testing.T) {
+			detail, err := json.Marshal(definition)
+			if err != nil {
+				t.Fatal(err)
+			}
+			encoded, err := json.Marshal(summarize(definition))
+			if err != nil {
+				t.Fatal(err)
+			}
+			var fields, summary map[string]json.RawMessage
+			if err := json.Unmarshal(detail, &fields); err != nil {
+				t.Fatal(err)
+			}
+			if err := json.Unmarshal(encoded, &summary); err != nil {
+				t.Fatal(err)
+			}
+			if len(summary) != len(fields)-1 || summary["catalog"] != nil {
+				t.Fatalf("summary must omit only the catalog: %s", encoded)
+			}
+			for name, value := range fields {
+				if name != "catalog" && string(summary[name]) != string(value) {
+					t.Errorf("summary field %s = %s, want %s", name, summary[name], value)
+				}
+			}
+		})
+	}
+}
+
+func TestRegistrationUpdateDistinguishesOmittedAndNullFields(t *testing.T) {
+	price := "1.25"
+	previous := &Definition{
+		UnitPrice: &price, ToolPrices: map[string]string{"lookup": "2"}, OAuth: &routing.MCPOAuth{ClientID: "client"},
+		CallsPerMinute: 42, MaxConcurrency: 4, PerKeyCallsPerMinute: 21, PerKeyMaxConcurrency: 2,
+	}
+	for _, tc := range []struct {
+		name      string
+		body      string
+		wantPrice *string
+		wantTools map[string]string
+		wantOAuth *routing.MCPOAuth
+		wantCalls int64
+	}{
+		{"omitted", `{}`, previous.UnitPrice, previous.ToolPrices, previous.OAuth, previous.CallsPerMinute},
+		{"null", `{"unit_price":null,"tool_prices":null,"oauth":null,"calls_per_minute":null}`, nil, map[string]string{}, nil, routing.DefaultToolCallsPerMinute},
+		{"explicit", `{"unit_price":"0","tool_prices":{"lookup":"3"},"oauth":{"client_id":"new"},"calls_per_minute":12}`, new("0"), map[string]string{"lookup": "3"}, &routing.MCPOAuth{ClientID: "new"}, 12},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var input Input
+			if err := json.Unmarshal([]byte(tc.body), &input); err != nil {
+				t.Fatal(err)
+			}
+			merged := mergeAbsentPricingAndLimits(input, previous)
+			if !reflect.DeepEqual(merged.UnitPrice, tc.wantPrice) || !reflect.DeepEqual(merged.ToolPrices, tc.wantTools) ||
+				!reflect.DeepEqual(merged.OAuth, tc.wantOAuth) || merged.CallsPerMinute == nil || *merged.CallsPerMinute != tc.wantCalls {
+				t.Fatalf("unexpected merged registration: %+v", merged)
+			}
+			if merged.MaxConcurrency == nil || *merged.MaxConcurrency != previous.MaxConcurrency ||
+				merged.PerKeyCallsPerMinute == nil || *merged.PerKeyCallsPerMinute != previous.PerKeyCallsPerMinute ||
+				merged.PerKeyMaxConcurrency == nil || *merged.PerKeyMaxConcurrency != previous.PerKeyMaxConcurrency {
+				t.Fatalf("omitted limits were not preserved: %+v", merged)
+			}
+		})
 	}
 }

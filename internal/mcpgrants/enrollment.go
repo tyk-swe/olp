@@ -64,30 +64,25 @@ func liveBinding(ctx context.Context, q access.Queryer, expected Binding) (Bindi
 }
 
 func liveAgentBinding(ctx context.Context, q access.Queryer, expected Binding) (Binding, error) {
-	var project string
-	var draft agentcontract.Draft
-	err := q.QueryRow(ctx, `SELECT p.project_id::text,v.definition FROM olp.agent_publications p JOIN olp.agent_publication_revisions v ON v.id=p.latest_revision_id WHERE p.id=$1 AND p.kind='agent' AND NOT p.retired`, expected.AgentID).Scan(&project, &draft)
-	if err != nil || draft.Agent == nil || draft.Agent.OAuth == nil || !draft.Agent.OAuth.Valid() {
-		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-			return Binding{}, err
-		}
-		return Binding{}, ErrRequired
-	}
-	current := agentBinding(expected.AgentID, project, *draft.Agent, expected.Identity)
-	if current.Digest() != expected.Digest() {
-		return Binding{}, ErrRequired
-	}
-	return current, nil
+	row := q.QueryRow(ctx, `SELECT p.project_id::text,v.definition FROM olp.agent_publications p JOIN olp.agent_publication_revisions v ON v.id=p.latest_revision_id WHERE p.id=$1 AND p.kind='agent' AND NOT p.retired`, expected.AgentID)
+	return scanAgentBinding(row, expected)
 }
 
 func revisionAgentBinding(ctx context.Context, q access.Queryer, expected Binding, revisionID string) (Binding, error) {
+	row := q.QueryRow(ctx, `SELECT p.project_id::text,v.definition FROM olp.agent_publications p JOIN olp.agent_publication_revisions v ON v.publication_id=p.id WHERE p.id=$1 AND p.kind='agent' AND v.id=$2`, expected.AgentID, revisionID)
+	return scanAgentBinding(row, expected)
+}
+
+func scanAgentBinding(row pgx.Row, expected Binding) (Binding, error) {
 	var project string
 	var draft agentcontract.Draft
-	err := q.QueryRow(ctx, `SELECT p.project_id::text,v.definition FROM olp.agent_publications p JOIN olp.agent_publication_revisions v ON v.publication_id=p.id WHERE p.id=$1 AND p.kind='agent' AND v.id=$2`, expected.AgentID, revisionID).Scan(&project, &draft)
-	if err != nil || draft.Agent == nil || draft.Agent.OAuth == nil || !draft.Agent.OAuth.Valid() {
-		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-			return Binding{}, err
+	if err := row.Scan(&project, &draft); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return Binding{}, ErrRequired
 		}
+		return Binding{}, err
+	}
+	if draft.Agent == nil || draft.Agent.OAuth == nil || !draft.Agent.OAuth.Valid() {
 		return Binding{}, ErrRequired
 	}
 	current := agentBinding(expected.AgentID, project, *draft.Agent, expected.Identity)

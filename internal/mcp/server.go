@@ -260,73 +260,6 @@ var (
 	errCallIDInvalid            = fail(http.StatusBadRequest, "invalid_call_id", "invalid_request_error", "Supply a caller call identifier of 1-256 bytes without control characters.")
 )
 
-func writeError(w http.ResponseWriter, err *apiError) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(err.status)
-	_ = json.NewEncoder(w).Encode(map[string]any{"error": map[string]any{"message": err.msg, "type": err.kind, "code": err.code}})
-}
-
-func writeJSON(w http.ResponseWriter, status int, body any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(body)
-}
-
-func writeOutcomeUnknown(w http.ResponseWriter, attemptID, dispatchID, message string) {
-	writeJSON(w, http.StatusBadGateway, map[string]any{
-		"attempt_id": attemptID, "dispatch_id": dispatchID, "status": StatusOutcomeUnknown,
-		"error": map[string]any{"message": message, "type": "api_error", "code": "outcome_unknown"},
-	})
-}
-
-var errGuardrailBlocked = fail(http.StatusBadRequest, "guardrail_blocked", "invalid_request_error", "The tool call could not satisfy the configured guardrails.")
-
-type toolCallError struct {
-	Message string `json:"message"`
-	Type    string `json:"type"`
-	Code    string `json:"code"`
-}
-
-type toolCallRefusal struct {
-	AttemptID  string        `json:"attempt_id"`
-	DispatchID string        `json:"dispatch_id"`
-	Status     Status        `json:"status"`
-	Error      toolCallError `json:"error"`
-}
-
-func writeGuardrailRefusal(w http.ResponseWriter, reservation *Reservation, refusal *apiError) {
-	writeJSON(w, refusal.status, toolCallRefusal{
-		AttemptID: reservation.AttemptID, DispatchID: reservation.DispatchID, Status: StatusGuardrailBlocked,
-		Error: toolCallError{Message: refusal.msg, Type: refusal.kind, Code: refusal.code},
-	})
-}
-
-func writeRepeat(w http.ResponseWriter, resolved resolvedToolset, tool routing.MCPToolsetTool, outcome execution) {
-	repeat := outcome.repeat
-	kind := repeatOutcome(repeat, outcome.repeatRetained)
-	if kind == repeatGuardrailBlocked {
-		writeGuardrailRefusal(w, &Reservation{AttemptID: repeat.AttemptID, DispatchID: repeat.DispatchID}, errGuardrailBlocked)
-		return
-	}
-	if kind == repeatRetainedResult {
-		writeJSON(w, http.StatusOK, map[string]any{
-			"toolset_id": resolved.id, "toolset_revision_id": resolved.revisionID, "name": tool.Alias,
-			"content": outcome.repeatResult.Content, "structured_content": outcome.repeatResult.StructuredContent, "is_error": outcome.repeatResult.IsError,
-			"attempt_id": repeat.AttemptID, "dispatch_id": repeat.DispatchID,
-		})
-		return
-	}
-	code, message := repeatFailure(kind)
-	if kind == repeatOutcomeUnknown {
-		writeOutcomeUnknown(w, repeat.AttemptID, repeat.DispatchID, message)
-		return
-	}
-	writeJSON(w, http.StatusConflict, map[string]any{
-		"attempt_id": repeat.AttemptID, "dispatch_id": repeat.DispatchID, "status": repeat.Status,
-		"error": map[string]any{"message": message, "type": "invalid_request_error", "code": code},
-	})
-}
-
 func callIDFailure(callID *string) *apiError {
 	if callID == nil {
 		return errCallIDRequired
@@ -603,7 +536,7 @@ func (s *Server) listTools(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"tools": tools})
+	writeJSON(w, http.StatusOK, toolsResponse{Tools: tools})
 }
 
 type executionSelection struct {
@@ -687,7 +620,7 @@ func (s *Server) callTool(w http.ResponseWriter, r *http.Request) {
 	case outcome.repeat != nil:
 		writeRepeat(w, resolved, tool, outcome)
 	case outcome.blocked != nil:
-		writeGuardrailRefusal(w, outcome.reservation, outcome.blocked)
+		writeGuardrailRefusal(w, outcome.reservation.AttemptID, outcome.reservation.DispatchID, outcome.blocked)
 	case outcome.failure != nil:
 		if outcome.retryAfter > 0 {
 			w.Header().Set("Retry-After", strconv.FormatInt(int64((outcome.retryAfter+time.Second-1)/time.Second), 10))
@@ -696,11 +629,7 @@ func (s *Server) callTool(w http.ResponseWriter, r *http.Request) {
 	case outcome.outcomeUnknown:
 		writeOutcomeUnknown(w, outcome.reservation.AttemptID, outcome.reservation.DispatchID, outcome.unknownMessage)
 	default:
-		writeJSON(w, http.StatusOK, map[string]any{
-			"toolset_id": resolved.id, "toolset_revision_id": resolved.revisionID, "name": tool.Alias,
-			"content": outcome.result.Content, "structured_content": outcome.result.StructuredContent, "is_error": outcome.result.IsError,
-			"attempt_id": outcome.reservation.AttemptID, "dispatch_id": outcome.reservation.DispatchID,
-		})
+		writeToolResult(w, resolved, tool, outcome.result, outcome.reservation.AttemptID, outcome.reservation.DispatchID)
 	}
 }
 

@@ -586,20 +586,6 @@ func (r sessionCallRequest) callID() *string {
 	return r.Meta.CallID
 }
 
-type callMeta struct {
-	AttemptID         string `json:"olp.attempt_id"`
-	DispatchID        string `json:"olp.dispatch_id"`
-	ToolsetID         string `json:"olp.toolset_id"`
-	ToolsetRevisionID string `json:"olp.toolset_revision_id"`
-}
-
-type sessionCallResult struct {
-	Content           []mcpservers.ToolContent `json:"content"`
-	StructuredContent json.RawMessage          `json:"structuredContent,omitempty"`
-	IsError           bool                     `json:"isError"`
-	Meta              callMeta                 `json:"_meta"`
-}
-
 func (s *Server) sessionCallTool(w http.ResponseWriter, r *http.Request, authority access.Authority, current sessionRecord, message rpcMessage) {
 	var params sessionCallRequest
 	if len(message.params) == 0 || json.Unmarshal(message.params, &params) != nil || params.Name == "" {
@@ -656,7 +642,7 @@ func (s *Server) sessionCallTool(w http.ResponseWriter, r *http.Request, authori
 		return
 	}
 	if outcome.repeat != nil {
-		s.writeSessionRepeat(w, message.id, resolved, outcome)
+		writeSessionRepeat(w, message.id, resolved, outcome)
 		return
 	}
 	s.recordCallCertification(r.Context(), current, tool, certification, outcome)
@@ -679,52 +665,8 @@ func (s *Server) sessionCallTool(w http.ResponseWriter, r *http.Request, authori
 			AttemptID: outcome.reservation.AttemptID, DispatchID: outcome.reservation.DispatchID,
 		}})
 	default:
-		content := outcome.result.Content
-		if content == nil {
-			content = []mcpservers.ToolContent{}
-		}
-		writeRPCResult(w, http.StatusOK, message.id, sessionCallResult{
-			Content: content, StructuredContent: outcome.result.StructuredContent, IsError: outcome.result.IsError,
-			Meta: callMeta{
-				AttemptID: outcome.reservation.AttemptID, DispatchID: outcome.reservation.DispatchID,
-				ToolsetID: resolved.id, ToolsetRevisionID: resolved.revisionID,
-			},
-		})
+		writeSessionToolResult(w, message.id, resolved, outcome.result, outcome.reservation.AttemptID, outcome.reservation.DispatchID)
 	}
-}
-
-func (s *Server) writeSessionRepeat(w http.ResponseWriter, id json.RawMessage, resolved resolvedToolset, outcome execution) {
-	repeat := outcome.repeat
-	kind := repeatOutcome(repeat, outcome.repeatRetained)
-	if kind == repeatGuardrailBlocked {
-		refused := failureRPC(http.StatusOK, rpcServerError, errGuardrailBlocked)
-		refused.data.Status = string(StatusGuardrailBlocked)
-		refused.data.AttemptID = repeat.AttemptID
-		refused.data.DispatchID = repeat.DispatchID
-		writeRPCFailure(w, id, refused)
-		return
-	}
-	if kind == repeatRetainedResult {
-		content := outcome.repeatResult.Content
-		if content == nil {
-			content = []mcpservers.ToolContent{}
-		}
-		writeRPCResult(w, http.StatusOK, id, sessionCallResult{
-			Content: content, StructuredContent: outcome.repeatResult.StructuredContent, IsError: outcome.repeatResult.IsError,
-			Meta: callMeta{
-				AttemptID: repeat.AttemptID, DispatchID: repeat.DispatchID,
-				ToolsetID: resolved.id, ToolsetRevisionID: resolved.revisionID,
-			},
-		})
-		return
-	}
-	code, message := repeatFailure(kind)
-	rpcCode := rpcServerError
-	if kind == repeatConflict {
-		rpcCode = rpcInvalidParams
-	}
-	data := rpcErrorData{Code: code, Status: string(repeat.Status), AttemptID: repeat.AttemptID, DispatchID: repeat.DispatchID}
-	writeRPCFailure(w, id, rpcFailure{status: http.StatusOK, code: rpcCode, message: message, data: data})
 }
 
 func (s *Server) recordCallCertification(ctx context.Context, current sessionRecord, tool routing.MCPToolsetTool, before certificationState, outcome execution) {

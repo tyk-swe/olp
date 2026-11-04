@@ -1,8 +1,13 @@
 package mcp
 
 import (
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"reflect"
 	"testing"
 
+	"github.com/tyk-swe/olp/internal/mcpservers"
 	"github.com/tyk-swe/olp/internal/routing"
 )
 
@@ -89,5 +94,85 @@ func TestCanonicalUUID(t *testing.T) {
 		if canonicalUUID(raw) {
 			t.Errorf("canonicalUUID accepted %q", raw)
 		}
+	}
+}
+
+func TestToolResultResponses(t *testing.T) {
+	resolved := resolvedToolset{id: "toolset", revisionID: "revision"}
+	tool := routing.MCPToolsetTool{Alias: "lookup"}
+	for _, tc := range []struct {
+		name   string
+		result mcpservers.ToolResult
+	}{
+		{name: "nil content"},
+		{name: "empty content", result: mcpservers.ToolResult{Content: []mcpservers.ToolContent{}}},
+		{name: "structured error", result: mcpservers.ToolResult{Content: []mcpservers.ToolContent{{Type: "text", Text: "result"}}, StructuredContent: json.RawMessage(`{"value":42}`), IsError: true}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			outcome := execution{repeat: &RetainedCall{AttemptID: "attempt", DispatchID: "dispatch", Status: completedToolStatus(tc.result)}, repeatResult: tc.result, repeatRetained: true}
+			fresh, repeated := httptest.NewRecorder(), httptest.NewRecorder()
+			writeToolResult(fresh, resolved, tool, tc.result, "attempt", "dispatch")
+			writeRepeat(repeated, resolved, tool, outcome)
+			if fresh.Code != http.StatusOK || repeated.Code != fresh.Code || repeated.Body.String() != fresh.Body.String() {
+				t.Fatalf("REST replay differs from fresh result: %s / %s", fresh.Body, repeated.Body)
+			}
+			var rest map[string]json.RawMessage
+			if err := json.Unmarshal(fresh.Body.Bytes(), &rest); err != nil {
+				t.Fatal(err)
+			}
+			content, err := json.Marshal(tc.result.Content)
+			if err != nil {
+				t.Fatal(err)
+			}
+			structured, err := json.Marshal(tc.result.StructuredContent)
+			if err != nil {
+				t.Fatal(err)
+			}
+			isError, err := json.Marshal(tc.result.IsError)
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := map[string]json.RawMessage{
+				"toolset_id": json.RawMessage(`"toolset"`), "toolset_revision_id": json.RawMessage(`"revision"`), "name": json.RawMessage(`"lookup"`),
+				"attempt_id": json.RawMessage(`"attempt"`), "dispatch_id": json.RawMessage(`"dispatch"`),
+				"content": content, "structured_content": structured, "is_error": isError,
+			}
+			if !reflect.DeepEqual(rest, want) {
+				t.Fatalf("unexpected REST response: %s", fresh.Body)
+			}
+			rpcFresh, rpcRepeated := httptest.NewRecorder(), httptest.NewRecorder()
+			writeSessionToolResult(rpcFresh, json.RawMessage(`7`), resolved, tc.result, "attempt", "dispatch")
+			writeSessionRepeat(rpcRepeated, json.RawMessage(`7`), resolved, outcome)
+			if rpcFresh.Code != http.StatusOK || rpcRepeated.Code != rpcFresh.Code || rpcRepeated.Body.String() != rpcFresh.Body.String() {
+				t.Fatalf("RPC replay differs from fresh result: %s / %s", rpcFresh.Body, rpcRepeated.Body)
+			}
+			var rpc struct {
+				JSONRPC string                     `json:"jsonrpc"`
+				ID      int                        `json:"id"`
+				Result  map[string]json.RawMessage `json:"result"`
+			}
+			if err := json.Unmarshal(rpcFresh.Body.Bytes(), &rpc); err != nil {
+				t.Fatal(err)
+			}
+			wantContent := func() json.RawMessage {
+				if tc.result.Content == nil {
+					return json.RawMessage(`[]`)
+				}
+				return content
+			}()
+			if rpc.JSONRPC != "2.0" || rpc.ID != 7 || string(rpc.Result["content"]) != string(wantContent) || string(rpc.Result["isError"]) != string(isError) {
+				t.Fatalf("unexpected RPC response: %s", rpcFresh.Body)
+			}
+			if string(rpc.Result["structuredContent"]) != string(tc.result.StructuredContent) {
+				t.Fatalf("unexpected RPC structured content: %s", rpcFresh.Body)
+			}
+			var meta map[string]string
+			if err := json.Unmarshal(rpc.Result["_meta"], &meta); err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(meta, map[string]string{"olp.attempt_id": "attempt", "olp.dispatch_id": "dispatch", "olp.toolset_id": "toolset", "olp.toolset_revision_id": "revision"}) {
+				t.Fatalf("unexpected RPC metadata: %+v", meta)
+			}
+		})
 	}
 }

@@ -1,9 +1,13 @@
 package mcpgrants
 
 import (
+	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"testing"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/agentcontract"
 	"github.com/tyk-swe/olp/internal/routing"
@@ -130,4 +134,79 @@ func TestBindAgentEntraCredentialPairing(t *testing.T) {
 	if _, err := BindAgent(testAuthority(), "", plain); !errors.Is(err, ErrRequired) {
 		t.Errorf("BindAgent without publication err = %v, want ErrRequired", err)
 	}
+}
+
+func TestAgentBindingValidation(t *testing.T) {
+	agent := agentcontract.Definition{Endpoint: "https://agent.example.com", OAuth: testOAuth("read")}
+	expected := agentBinding("publication", "project", agent, Identity{Kind: KeyIdentity, ID: "key"})
+	databaseErr := errors.New("database unavailable")
+	for _, tc := range []struct {
+		name    string
+		project string
+		agent   *agentcontract.Definition
+		rowErr  error
+		wantErr error
+	}{
+		{name: "matching", project: expected.ProjectID, agent: &agent},
+		{name: "different project", project: "other", agent: &agent, wantErr: ErrRequired},
+		{name: "different endpoint", project: expected.ProjectID, agent: &agentcontract.Definition{Endpoint: "https://other.example.com", OAuth: agent.OAuth}, wantErr: ErrRequired},
+		{name: "missing definition", project: expected.ProjectID, wantErr: ErrRequired},
+		{name: "missing OAuth", project: expected.ProjectID, agent: &agentcontract.Definition{Endpoint: agent.Endpoint}, wantErr: ErrRequired},
+		{name: "invalid OAuth", project: expected.ProjectID, agent: &agentcontract.Definition{Endpoint: agent.Endpoint, OAuth: &routing.MCPOAuth{}}, wantErr: ErrRequired},
+		{name: "missing row", rowErr: fmt.Errorf("read: %w", pgx.ErrNoRows), wantErr: ErrRequired},
+		{name: "database error", rowErr: databaseErr, wantErr: databaseErr},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			query := agentBindingQuery{row: agentBindingRow{project: tc.project, draft: agentcontract.Draft{Agent: tc.agent}, err: tc.rowErr}}
+			for _, read := range []func() (Binding, error){
+				func() (Binding, error) { return liveAgentBinding(t.Context(), query, expected) },
+				func() (Binding, error) { return revisionAgentBinding(t.Context(), query, expected, "revision") },
+			} {
+				bound, err := read()
+				if !errors.Is(err, tc.wantErr) {
+					t.Fatalf("binding error = %v, want %v", err, tc.wantErr)
+				}
+				if err == nil && bound.Digest() != expected.Digest() {
+					t.Fatalf("accepted binding differs from requested binding: %+v", bound)
+				}
+			}
+		})
+	}
+}
+
+type agentBindingQuery struct {
+	row agentBindingRow
+}
+
+func (q agentBindingQuery) QueryRow(context.Context, string, ...any) pgx.Row {
+	return q.row
+}
+
+func (q agentBindingQuery) Query(context.Context, string, ...any) (pgx.Rows, error) {
+	return nil, errors.New("unexpected multi-row query")
+}
+
+type agentBindingRow struct {
+	project string
+	draft   agentcontract.Draft
+	err     error
+}
+
+func (r agentBindingRow) Scan(dest ...any) error {
+	if r.err != nil {
+		return r.err
+	}
+	if len(dest) != 2 {
+		return errors.New("expected project and agent definition destinations")
+	}
+	for index, value := range []any{r.project, r.draft} {
+		encoded, err := json.Marshal(value)
+		if err != nil {
+			return err
+		}
+		if err := json.Unmarshal(encoded, dest[index]); err != nil {
+			return err
+		}
+	}
+	return nil
 }

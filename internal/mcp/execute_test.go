@@ -1,11 +1,18 @@
 package mcp
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
+	"reflect"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/tyk-swe/olp/internal/guardrails"
 	"github.com/tyk-swe/olp/internal/mcpservers"
+	"github.com/tyk-swe/olp/internal/routing"
 )
 
 func TestToolLookupFailureMapping(t *testing.T) {
@@ -130,4 +137,130 @@ func TestNegotiateProtocolFallsBackToPreferred(t *testing.T) {
 	if got := negotiateProtocol("1900-01-01"); got != supported[0] {
 		t.Errorf("negotiateProtocol(unsupported) = %q, want preferred %q", got, supported[0])
 	}
+}
+
+func TestSettleToolCall(t *testing.T) {
+	reservation := &Reservation{AttemptID: "attempt", DispatchID: "dispatch"}
+	in := executeInput{tool: routing.MCPToolsetTool{ServerID: "server", ServerRevisionID: "revision", Alias: "lookup"}}
+	decisions := []guardrails.Evidence{{Phase: guardrails.Output, Outcome: "evaluated"}}
+	for _, tc := range []struct {
+		name    string
+		isError bool
+		refusal error
+		status  Status
+	}{
+		{name: "success", status: StatusSucceeded},
+		{name: "upstream error", isError: true, status: StatusUpstreamError},
+		{name: "guardrail refusal", refusal: guardrails.ErrBlocked, status: StatusGuardrailBlocked},
+	} {
+		for _, settleErr := range []error{nil, errors.New("settlement failed")} {
+			t.Run(fmt.Sprintf("%s/settlement_failed=%t", tc.name, settleErr != nil), func(t *testing.T) {
+				ledger := settlementLedger{t: t, reservation: reservation, settleErr: settleErr, settled: make(chan AttemptEvidence, 1), unknown: make(chan AttemptEvidence, 1)}
+				server := &Server{Ledger: ledger, Guardrails: func(_ context.Context, evaluation GuardrailEvaluation) (guardrails.Result, error) {
+					if evaluation.Phase != guardrails.Output || evaluation.RequestID != reservation.AttemptID {
+						t.Fatalf("unexpected guardrail evaluation: %+v", evaluation)
+					}
+					return guardrails.Result{Changed: true, Segments: []guardrails.Segment{{ID: "content0", Text: "redacted"}}, Decisions: decisions}, tc.refusal
+				}}
+				original := mcpservers.ToolResult{Content: []mcpservers.ToolContent{{Type: "text", Text: "original"}}, IsError: tc.isError}
+				dispatched := dispatchResult{result: original, started: time.Now(), completed: time.Now(), listChanged: true, certification: certificationCertified}
+				ctx, cancel := context.WithCancel(t.Context())
+				cancel()
+				outcome := server.settleToolCall(ctx, in, reservation, dispatched, &toolGuardrailState{masks: &guardrails.Masking{}})
+				if len(ledger.settled) != 1 {
+					t.Fatal("expected one settlement")
+				}
+				evidence := <-ledger.settled
+				wantResult := func() mcpservers.ToolResult {
+					if tc.refusal != nil {
+						return original
+					}
+					return mcpservers.ToolResult{Content: []mcpservers.ToolContent{{Type: "text", Text: "redacted"}}, IsError: tc.isError}
+				}()
+				encoded, err := json.Marshal(wantResult)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if evidence.Status != tc.status || evidence.ResultDigest != digestBytes(encoded) || evidence.IsError != tc.isError ||
+					evidence.ServerID != in.tool.ServerID || evidence.ServerRevisionID != in.tool.ServerRevisionID ||
+					!evidence.StartedAt.Equal(dispatched.started) || !evidence.CompletedAt.Equal(dispatched.completed) ||
+					!reflect.DeepEqual(evidence.GuardrailDecisions, decisions) {
+					t.Fatalf("incorrect settlement evidence: %+v", evidence)
+				}
+				if outcome.reservation != reservation || !outcome.listChanged || outcome.certification != dispatched.certification {
+					t.Fatalf("lost execution metadata: %+v", outcome)
+				}
+				retained, found := server.retainedResultFor(reservation.AttemptID)
+				if settleErr != nil {
+					if !outcome.outcomeUnknown || outcome.blocked != nil || outcome.unknownMessage == "" || found || len(ledger.unknown) != 1 {
+						t.Fatalf("failed settlement was exposed as a completed call: %+v, retained=%t", outcome, found)
+					}
+					unknown := <-ledger.unknown
+					if unknown.Status != StatusOutcomeUnknown || unknown.ResultDigest != evidence.ResultDigest || unknown.IsError != evidence.IsError ||
+						unknown.ServerID != evidence.ServerID || unknown.ServerRevisionID != evidence.ServerRevisionID ||
+						!unknown.StartedAt.Equal(evidence.StartedAt) || !unknown.CompletedAt.Equal(evidence.CompletedAt) ||
+						!reflect.DeepEqual(unknown.GuardrailDecisions, evidence.GuardrailDecisions) || !reflect.DeepEqual(unknown.IdentityDecisions, evidence.IdentityDecisions) {
+						t.Fatalf("unknown outcome lost settlement evidence: %+v", unknown)
+					}
+					return
+				}
+				if outcome.outcomeUnknown || len(ledger.unknown) != 0 {
+					t.Fatalf("successful settlement was marked unknown: %+v", outcome)
+				}
+				if tc.refusal != nil {
+					if outcome.blocked == nil || outcome.blocked.code != "guardrail_blocked" || found {
+						t.Fatalf("blocked result was exposed: %+v, retained=%t", outcome, found)
+					}
+					return
+				}
+				if outcome.blocked != nil || !found || !reflect.DeepEqual(outcome.result, wantResult) || !reflect.DeepEqual(retained, wantResult) {
+					t.Fatalf("settled result was not returned and retained: %+v, retained=%+v", outcome, retained)
+				}
+			})
+		}
+	}
+}
+
+type settlementLedger struct {
+	t           *testing.T
+	reservation *Reservation
+	settleErr   error
+	settled     chan AttemptEvidence
+	unknown     chan AttemptEvidence
+}
+
+func (l settlementLedger) Reserve(context.Context, ReserveInput) (ReserveResult, error) {
+	l.t.Fatal("unexpected reservation during settlement")
+	return ReserveResult{}, nil
+}
+
+func (l settlementLedger) MarkDispatched(context.Context, *Reservation, AttemptEvidence) error {
+	l.t.Fatal("unexpected dispatch during settlement")
+	return nil
+}
+
+func (l settlementLedger) ReleaseUndispatched(context.Context, *Reservation) error {
+	l.t.Fatal("unexpected release during settlement")
+	return nil
+}
+
+func (l settlementLedger) RefuseUndispatched(context.Context, *Reservation, AttemptEvidence) error {
+	l.t.Fatal("unexpected refusal before dispatch during settlement")
+	return nil
+}
+
+func (l settlementLedger) Settle(ctx context.Context, reservation *Reservation, evidence AttemptEvidence) error {
+	if ctx.Err() != nil || reservation != l.reservation || len(l.settled) != 0 {
+		l.t.Fatal("settlement must run once for the dispatched reservation despite request cancellation")
+	}
+	l.settled <- evidence
+	return l.settleErr
+}
+
+func (l settlementLedger) MarkUnknown(ctx context.Context, reservation *Reservation, evidence AttemptEvidence) error {
+	if ctx.Err() != nil || reservation != l.reservation || len(l.unknown) != 0 || len(l.settled) != 1 || l.settleErr == nil {
+		l.t.Fatal("unknown outcome must follow failed settlement despite request cancellation")
+	}
+	l.unknown <- evidence
+	return nil
 }

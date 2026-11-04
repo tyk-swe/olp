@@ -263,43 +263,29 @@ func (s *Server) dispatchToolCall(ctx context.Context, in executeInput, credenti
 }
 
 func (s *Server) settleToolCall(ctx context.Context, in executeInput, reservation *Reservation, dispatched dispatchResult, state *toolGuardrailState) execution {
-	tool := in.tool
-	rawEncoded, _ := json.Marshal(dispatched.result)
 	guarded, decisions, refusal := s.guardResult(ctx, in, reservation, state, dispatched.result)
-	if refusal != nil {
-		evidence := AttemptEvidence{
-			ServerID: tool.ServerID, ServerRevisionID: tool.ServerRevisionID,
-			Status: StatusGuardrailBlocked, IsError: dispatched.result.IsError, ResultDigest: digestBytes(rawEncoded),
+	result, status := func() (mcpservers.ToolResult, Status) {
+		if refusal != nil {
+			return dispatched.result, StatusGuardrailBlocked
+		}
+		return guarded, completedToolStatus(guarded)
+	}()
+	encoded, _ := json.Marshal(result)
+	resultDigest := digestBytes(encoded)
+	evidenceFor := func(status Status) AttemptEvidence {
+		return AttemptEvidence{
+			ServerID: in.tool.ServerID, ServerRevisionID: in.tool.ServerRevisionID,
+			Status: status, IsError: result.IsError, ResultDigest: resultDigest,
 			StartedAt: dispatched.started, CompletedAt: dispatched.completed,
-			GuardrailDecisions: decisions, IdentityDecisions: toolIdentityDecisions(tool, nil),
+			GuardrailDecisions: decisions, IdentityDecisions: toolIdentityDecisions(in.tool, nil),
 		}
-		if err := s.Ledger.Settle(context.WithoutCancel(ctx), reservation, evidence); err != nil {
-			unknownEvidence := AttemptEvidence{
-				ServerID: tool.ServerID, ServerRevisionID: tool.ServerRevisionID,
-				Status: StatusOutcomeUnknown, IsError: dispatched.result.IsError, ResultDigest: digestBytes(rawEncoded),
-				StartedAt: dispatched.started, CompletedAt: dispatched.completed, GuardrailDecisions: decisions, IdentityDecisions: toolIdentityDecisions(tool, nil),
-			}
-			_ = s.Ledger.MarkUnknown(context.WithoutCancel(ctx), reservation, unknownEvidence)
-			return execution{reservation: reservation, outcomeUnknown: true, unknownMessage: "The tool call ran upstream, but its accounting could not be settled.", listChanged: dispatched.listChanged, certification: dispatched.certification}
-		}
-		return execution{reservation: reservation, blocked: guardrailRefusal(refusal), listChanged: dispatched.listChanged, certification: dispatched.certification}
 	}
-	encoded, _ := json.Marshal(guarded)
-	evidence := AttemptEvidence{
-		ServerID: tool.ServerID, ServerRevisionID: tool.ServerRevisionID,
-		Status: completedToolStatus(guarded), IsError: guarded.IsError, ResultDigest: digestBytes(encoded),
-		StartedAt: dispatched.started, CompletedAt: dispatched.completed,
-		GuardrailDecisions: decisions, IdentityDecisions: toolIdentityDecisions(tool, nil),
-	}
-	if err := s.Ledger.Settle(context.WithoutCancel(ctx), reservation, evidence); err != nil {
-		unknownEvidence := AttemptEvidence{
-			ServerID: tool.ServerID, ServerRevisionID: tool.ServerRevisionID,
-			Status: StatusOutcomeUnknown, IsError: guarded.IsError, ResultDigest: digestBytes(encoded),
-			StartedAt: dispatched.started, CompletedAt: dispatched.completed,
-			GuardrailDecisions: decisions, IdentityDecisions: toolIdentityDecisions(tool, nil),
-		}
-		_ = s.Ledger.MarkUnknown(context.WithoutCancel(ctx), reservation, unknownEvidence)
+	if err := s.Ledger.Settle(context.WithoutCancel(ctx), reservation, evidenceFor(status)); err != nil {
+		_ = s.Ledger.MarkUnknown(context.WithoutCancel(ctx), reservation, evidenceFor(StatusOutcomeUnknown))
 		return execution{reservation: reservation, outcomeUnknown: true, unknownMessage: "The tool call ran upstream, but its accounting could not be settled.", listChanged: dispatched.listChanged, certification: dispatched.certification}
+	}
+	if refusal != nil {
+		return execution{reservation: reservation, blocked: guardrailRefusal(refusal), listChanged: dispatched.listChanged, certification: dispatched.certification}
 	}
 	s.retainResult(reservation.AttemptID, guarded)
 	return execution{reservation: reservation, result: guarded, listChanged: dispatched.listChanged, certification: dispatched.certification}
