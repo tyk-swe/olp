@@ -3,12 +3,13 @@ package agents
 import (
 	"context"
 	"errors"
+	"github.com/tyk-swe/olp/internal/routing"
 
 	"github.com/jackc/pgx/v5"
+
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/agentcontract"
 	"github.com/tyk-swe/olp/internal/egress"
-	"github.com/tyk-swe/olp/internal/mcpservers"
 	"github.com/tyk-swe/olp/internal/secrets"
 )
 
@@ -83,7 +84,7 @@ func ValidateReferences(ctx context.Context, tx access.Queryer, kind string, d D
 	}
 	if d.Toolset != nil {
 		for _, tool := range d.Toolset.Tools {
-			var tools []mcpservers.Tool
+			var tools []routing.MCPTool
 			var digest string
 			err := tx.QueryRow(ctx, `SELECT v.tools,v.digest FROM olp.mcp_server_revisions v JOIN olp.mcp_servers s ON s.id=v.server_id WHERE v.id=$1 AND s.id=$2 AND s.project_id=$3 AND s.enabled AND s.retired_at IS NULL AND s.latest_revision_id=v.id FOR SHARE OF s`, tool.RevisionID, tool.ServerID, d.ProjectID).Scan(&tools, &digest)
 			if err != nil || digest != tool.CatalogDigest {

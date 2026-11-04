@@ -6,15 +6,16 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+
 	"github.com/tyk-swe/olp/internal/limits"
-	"github.com/tyk-swe/olp/internal/mcp"
+	"github.com/tyk-swe/olp/internal/mcp/accounting"
 	"github.com/tyk-swe/olp/internal/usage"
 )
 
 func runDebitReconciliation(ctx context.Context, pool *pgxpool.Pool, limiter *limits.Limiter, log *slog.Logger) {
 	store := &limits.DebitStore{Pool: pool, Limiter: limiter}
 	go recoverWorkflowModels(ctx, store, log)
-	toolLedger := mcp.NewDurableLedger(pool, store, nil)
+	toolLedger := accounting.NewDurableLedger(pool, store, nil)
 	timer := time.NewTicker(time.Minute)
 	defer timer.Stop()
 	for {
@@ -26,7 +27,7 @@ func runDebitReconciliation(ctx context.Context, pool *pgxpool.Pool, limiter *li
 			err = store.ReconcileDebits(pass)
 		}
 		if err == nil {
-			_, err = toolLedger.RecoverOrphanedDispatches(pass, time.Now().Add(-mcp.OrphanDispatchAge), 256)
+			_, err = toolLedger.RecoverOrphanedDispatches(pass, time.Now().Add(-accounting.OrphanDispatchAge), 256)
 		}
 		if err == nil {
 			_, err = toolLedger.ExpireCallIdentities(pass, 256)

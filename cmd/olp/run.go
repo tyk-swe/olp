@@ -28,11 +28,14 @@ import (
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/export"
 	"github.com/tyk-swe/olp/internal/gateway"
+	"github.com/tyk-swe/olp/internal/grants/personal"
 	"github.com/tyk-swe/olp/internal/guardrails"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/mcp"
-	"github.com/tyk-swe/olp/internal/mcpgrants"
-	"github.com/tyk-swe/olp/internal/mcpservers"
+	"github.com/tyk-swe/olp/internal/mcp/accounting"
+	"github.com/tyk-swe/olp/internal/mcp/registration"
+	"github.com/tyk-swe/olp/internal/mcp/sessions"
+	"github.com/tyk-swe/olp/internal/mcp/upstream"
 	"github.com/tyk-swe/olp/internal/media"
 	"github.com/tyk-swe/olp/internal/observability"
 	"github.com/tyk-swe/olp/internal/pluginindex"
@@ -380,38 +383,41 @@ func Run(ctx context.Context, c Config, log *slog.Logger) error {
 				gw.Resolver = resources.NewResolver(pool)
 			}
 			gw.Register(public)
-			grantStore := mcpgrants.NewStore(pool, installation, auth, keys, &policy)
+			grantStore := personal.NewStore(pool, installation, auth, keys, &policy)
 			agentServer := &a2a.Server{Grants: grantStore, Runtime: rt, Egress: &policy, Ledger: &a2a.Ledger{Pool: pool, Store: &limits.DebitStore{Pool: pool, Limiter: limiter}, Auth: auth}, TrustedProxies: c.TrustedProxyCIDRs, PublicOrigin: c.PublicOrigin, Credentials: func(ctx context.Context, id string) ([]byte, error) {
 				return keys.Read(ctx, pool, installation, id, secrets.AgentCredential)
 			}}
 			agentServer.Register(public)
 			agentMonitor = &a2a.TaskMonitor{Server: agentServer, Log: log}
-			var toolLedger mcp.Ledger
+			var toolLedger accounting.Ledger
 			if limiter != nil {
-				toolLedger = mcp.NewDurableLedger(pool, &limits.DebitStore{Pool: pool, Limiter: limiter}, auth)
+				toolLedger = accounting.NewDurableLedger(pool, &limits.DebitStore{Pool: pool, Limiter: limiter}, auth)
 			}
-			var sessionStore *mcp.SessionStore
+			var sessionStore *sessions.Store
 			if vk != nil {
-				sessionStore, err = mcp.NewSessionStore(vk, prefix+"mcp")
+				sessionStore, err = sessions.New(vk, prefix+"mcp")
 				if err != nil {
 					return err
 				}
 			}
-			toolServer := mcp.New(rt, &policy, log)
-			toolServer.Executables = mcpservers.NewExecutables(unconfined, pool)
-			toolServer.Grants = grantStore
-			toolServer.Ledger = toolLedger
-			toolServer.Auth = auth
-			toolServer.Sessions = sessionStore
-			toolServer.TrustedProxies = c.TrustedProxyCIDRs
-			toolServer.Credentials = func(ctx context.Context, credentialID string) ([]byte, error) {
-				return keys.Read(ctx, pool, installation, credentialID, secrets.MCPCredential)
-			}
-			toolServer.Guardrails = func(ctx context.Context, in mcp.GuardrailEvaluation) (guardrails.Result, error) {
-				return gw.EvaluateToolGuardrails(ctx, in.Authority, in.Release, in.Engine, in.RequestID, in.Phase, in.Segments, in.Masks)
-			}
+			toolLimiter := func() mcp.RateLimiter {
+				if limiter == nil {
+					return nil
+				}
+				return limiter
+			}()
+			toolExecutor := mcp.NewExecutor(mcp.ExecutorOptions{
+				Authority: rt, Grants: grantStore, Connect: upstream.NewDialer(&policy, registration.NewExecutables(unconfined, pool)),
+				Ledger: toolLedger, Auth: auth, Limiter: toolLimiter, Log: log,
+				Credentials: func(ctx context.Context, credentialID string) ([]byte, error) {
+					return keys.Read(ctx, pool, installation, credentialID, secrets.MCPCredential)
+				},
+				Guardrails: func(ctx context.Context, in mcp.GuardrailEvaluation) (guardrails.Result, error) {
+					return gw.EvaluateToolGuardrails(ctx, in.Authority, in.Release, in.Engine, in.RequestID, in.Phase, in.Segments, in.Masks)
+				},
+			})
+			toolServer := mcp.New(mcp.ServerOptions{Runtime: rt, Executor: toolExecutor, Auth: auth, Grants: grantStore, Sessions: sessionStore, TrustedProxies: c.TrustedProxyCIDRs})
 			if limiter != nil {
-				toolServer.Limiter = limiter
 				gw.WorkflowRuns = &agents.WorkflowStore{Pool: pool, Auth: auth, Keys: keys, Installation: installation, Debits: &limits.DebitStore{Pool: pool, Limiter: limiter}}
 				gw.WorkflowTools = toolServer
 			}

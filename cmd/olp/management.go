@@ -2,10 +2,9 @@ package main
 
 import (
 	"context"
+	"github.com/jackc/pgx/v5"
 	"log/slog"
 	"net/http"
-
-	"github.com/jackc/pgx/v5"
 
 	"github.com/tyk-swe/olp/internal/a2a"
 	"github.com/tyk-swe/olp/internal/access"
@@ -16,12 +15,13 @@ import (
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/export"
 	"github.com/tyk-swe/olp/internal/gateway"
+	"github.com/tyk-swe/olp/internal/grants/personal"
 	"github.com/tyk-swe/olp/internal/guardrails"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/management"
 	"github.com/tyk-swe/olp/internal/mcp"
-	"github.com/tyk-swe/olp/internal/mcpgrants"
-	"github.com/tyk-swe/olp/internal/mcpservers"
+	"github.com/tyk-swe/olp/internal/mcp/accounting"
+	"github.com/tyk-swe/olp/internal/mcp/registration"
 	"github.com/tyk-swe/olp/internal/media"
 	"github.com/tyk-swe/olp/internal/modelcatalog"
 	"github.com/tyk-swe/olp/internal/observability"
@@ -68,7 +68,7 @@ type Management struct {
 // feature's routes, and the catch-all that answers 404 for the rest.
 func (m Management) Register(mux *http.ServeMux) {
 	management.Register(mux)
-	(&management.MCP{Access: m.Access, API: mux}).Register(mux)
+	management.NewMCP(m.Access, mux).Register(mux)
 	m.Access.Egress = m.Egress
 	m.Access.RuntimePublisher = func(ctx context.Context, tx pgx.Tx, actor string) error {
 		_, err := release.Publish(ctx, tx, actor)
@@ -84,14 +84,14 @@ func (m Management) Register(mux *http.ServeMux) {
 	}, Evaluate: func(r *http.Request, p access.Principal, in guardrails.ApplyInput) (guardrails.Result, error) {
 		return m.Gateway.EvaluateGuardrails(r, p, in)
 	}}).Register(mux)
-	validator := &a2a.Server{Egress: m.Egress, Ledger: &a2a.Ledger{Pool: m.Access.Pool}, Grants: mcpgrants.NewStore(m.Access.Pool, m.Access.Installation, m.Access.Auth, m.Access.Keys, m.Egress), Credentials: func(ctx context.Context, id string) ([]byte, error) {
+	validator := &a2a.Server{Egress: m.Egress, Ledger: &a2a.Ledger{Pool: m.Access.Pool}, Grants: personal.NewStore(m.Access.Pool, m.Access.Installation, m.Access.Auth, m.Access.Keys, m.Egress), Credentials: func(ctx context.Context, id string) ([]byte, error) {
 		return m.Access.Keys.Read(ctx, m.Access.Pool, m.Access.Installation, id, secrets.AgentCredential)
 	}}
 	(&a2a.Management{Access: m.Access, Server: validator}).Register(mux)
 	(&agents.Server{Access: m.Access, Egress: m.Egress, ValidateAgent: validator.ValidateCard}).Register(mux)
-	mcpservers.New(m.Access, m.Egress, mcpservers.NewExecutables(m.Unconfined, m.Access.Pool)).Register(mux)
-	mcp.NewManagement(m.Access).Register(mux)
-	mcpgrants.New(m.Access).Register(mux)
+	registration.New(m.Access, m.Egress, registration.NewExecutables(m.Unconfined, m.Access.Pool)).Register(mux)
+	accounting.NewManagement(m.Access).Register(mux)
+	personal.New(m.Access).Register(mux)
 	(&retrieval.Server{Access: m.Access}).Register(mux)
 	(&sinks.Server{Access: m.Access, Egress: m.Egress}).Register(mux)
 	(&modelcatalog.Server{Access: m.Access, Runtime: m.Runtime, Gateway: m.Gateway, Origin: m.Access.Origin}).Register(mux)

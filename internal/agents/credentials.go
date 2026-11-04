@@ -7,9 +7,9 @@ import (
 	"encoding/json"
 
 	"github.com/jackc/pgx/v5"
+
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/agentcontract"
-	"github.com/tyk-swe/olp/internal/mcpservers"
 	"github.com/tyk-swe/olp/internal/secrets"
 )
 
@@ -99,9 +99,9 @@ func (s *Server) credential(ctx context.Context, tx pgx.Tx, current *Publication
 	if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
 		return nil, nil
 	}
-	material, err := mcpservers.Credential(raw)
+	material, err := secrets.ParseBearer(raw)
 	if err != nil {
-		return nil, err
+		return nil, access.Invalid("credential", err.Error())
 	}
 	defer clear(material)
 	id, err := StoreCredential(ctx, tx, s.Access.Keys, s.Access.Installation, d.ProjectID, material)

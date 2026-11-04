@@ -2,11 +2,12 @@ package mcp
 
 import (
 	"context"
-	"github.com/tyk-swe/olp/internal/access"
 	"sync"
 	"time"
 
-	"github.com/tyk-swe/olp/internal/mcpservers"
+	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/mcp/sessions"
+	"github.com/tyk-swe/olp/internal/mcp/upstream"
 	"github.com/tyk-swe/olp/internal/routing"
 )
 
@@ -15,18 +16,18 @@ const (
 	maxConcurrentCertifies   = 4
 )
 
-func certifyTransport(ctx context.Context, upstream mcpservers.Upstream, credential []byte, pinnedDigest string) certificationState {
-	catalog, err := mcpservers.CertifyCatalog(ctx, upstream, credential)
+func certifyTransport(ctx context.Context, peer upstream.Upstream, credential []byte, pinnedDigest string) sessions.Certification {
+	catalog, err := upstream.CertifyCatalog(ctx, peer, credential)
 	if err != nil || catalog == nil {
-		return certificationInvalid
+		return sessions.Invalid
 	}
 	if catalog.Digest != pinnedDigest {
-		return certificationDrifted
+		return sessions.Drifted
 	}
-	return certificationCertified
+	return sessions.Certified
 }
 
-func (s *Server) certifyToolsetServers(ctx context.Context, authority access.Authority, resolved resolvedToolset) map[string]certificationState {
+func (s *Server) certifyToolsetServers(ctx context.Context, authority access.Authority, resolved resolvedToolset) map[string]sessions.Certification {
 	representatives := map[string]routing.MCPToolsetTool{}
 	for _, tool := range resolved.tools {
 		if _, ok := representatives[tool.ServerID]; !ok {
@@ -37,7 +38,7 @@ func (s *Server) certifyToolsetServers(ctx context.Context, authority access.Aut
 	for _, tool := range representatives {
 		tools = append(tools, tool)
 	}
-	states := make([]certificationState, len(tools))
+	states := make([]sessions.Certification, len(tools))
 	ctx, cancel := context.WithTimeout(ctx, initializeCertifyTimeout)
 	defer cancel()
 	slots := make(chan struct{}, maxConcurrentCertifies)
@@ -50,34 +51,34 @@ func (s *Server) certifyToolsetServers(ctx context.Context, authority access.Aut
 			case slots <- struct{}{}:
 				defer func() { <-slots }()
 			case <-ctx.Done():
-				states[index] = certificationInvalid
+				states[index] = sessions.Invalid
 				return
 			}
-			states[index] = s.certifyServer(ctx, authority, tool)
+			states[index] = s.executor.certifyServer(ctx, authority, tool)
 		}()
 	}
 	pending.Wait()
-	certified := make(map[string]certificationState, len(tools))
+	certified := make(map[string]sessions.Certification, len(tools))
 	for index, tool := range tools {
 		certified[tool.ServerID] = states[index]
 	}
 	return certified
 }
 
-func (s *Server) certifyServer(ctx context.Context, authority access.Authority, tool routing.MCPToolsetTool) certificationState {
-	if s.Egress == nil {
-		return certificationInvalid
+func (s *Executor) certifyServer(ctx context.Context, authority access.Authority, tool routing.MCPToolsetTool) sessions.Certification {
+	if s.connect == nil {
+		return sessions.Invalid
 	}
 	credential, failure := s.loadCredential(ctx, authority, tool)
 	if failure != nil {
-		return certificationInvalid
+		return sessions.Invalid
 	}
 	if credential != nil {
 		defer clear(credential)
 	}
-	transport, err := mcpservers.DialTransport(ctx, s.Egress, tool.Endpoint, credential, mcpservers.TransportOptions{ClientName: "openllmproxy-certifier", Timeout: initializeCertifyTimeout, Transport: tool.Transport, Stdio: tool.Stdio, Executables: s.Executables})
+	transport, err := s.connect(ctx, tool.Endpoint, credential, upstream.TransportOptions{ClientName: "openllmproxy-certifier", Timeout: initializeCertifyTimeout, Transport: tool.Transport, Stdio: tool.Stdio})
 	if err != nil {
-		return certificationInvalid
+		return sessions.Invalid
 	}
 	defer transport.Close(context.WithoutCancel(ctx))
 	return certifyTransport(ctx, transport, credential, tool.CatalogDigest)

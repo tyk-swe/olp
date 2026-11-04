@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/mcp/accounting"
 	"github.com/tyk-swe/olp/internal/oif"
 	"github.com/tyk-swe/olp/internal/routing"
 )
@@ -35,7 +36,7 @@ func describeTool(authority access.Authority, resolved resolvedToolset, tool rou
 	return listedTool{
 		ToolsetID: resolved.id, ToolsetRevisionID: resolved.revisionID,
 		Name: tool.Alias, Description: tool.Description, InputSchema: tool.InputSchema,
-		UnitPrice: cloneUnitPrice(tool.UnitPrice), PricingState: pricingStateFor(tool.UnitPrice),
+		UnitPrice: cloneUnitPrice(tool.UnitPrice), PricingState: accounting.PricingStateFor(tool.UnitPrice),
 		BudgetRequired: authority.ToolDebitBoundaries(toolRateLeaseTTL).CostBudgeted,
 		Limits: toolCallLimits{
 			ServerCallsPerMinute: effective.CallsPerMinute, ServerMaxConcurrency: effective.MaxConcurrency,

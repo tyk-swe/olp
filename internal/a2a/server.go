@@ -22,7 +22,7 @@ import (
 	"github.com/tyk-swe/olp/internal/agentcontract"
 	"github.com/tyk-swe/olp/internal/consumerauth"
 	"github.com/tyk-swe/olp/internal/egress"
-	"github.com/tyk-swe/olp/internal/mcpgrants"
+	"github.com/tyk-swe/olp/internal/grants/personal"
 	"github.com/tyk-swe/olp/internal/release"
 	"github.com/tyk-swe/olp/internal/workload"
 )
@@ -37,7 +37,7 @@ type Runtime interface {
 
 type AgentGrants interface {
 	AgentBinding(access.Authority, string, agentcontract.Definition) (string, error)
-	StartAgent(context.Context, access.Authority, string, agentcontract.Definition) (mcpgrants.Handoff, error)
+	StartAgent(context.Context, access.Authority, string, agentcontract.Definition) (personal.Handoff, error)
 	ResolveAgent(context.Context, access.Authority, string, agentcontract.Definition) ([]byte, string, error)
 	ResolveAgentEntra(context.Context, access.Authority, string, agentcontract.Definition, workload.UserAssertion) ([]byte, string, error)
 	ResolveAgentTask(context.Context, string, string, string, string, agentcontract.Definition) ([]byte, error)

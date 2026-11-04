@@ -5,7 +5,7 @@ import (
 	"slices"
 
 	"github.com/tyk-swe/olp/internal/access"
-	"github.com/tyk-swe/olp/internal/mcpgrants"
+	"github.com/tyk-swe/olp/internal/grants/personal"
 	"github.com/tyk-swe/olp/internal/routing"
 )
 
@@ -46,16 +46,16 @@ func (s *Server) startGrantEnrollment(w http.ResponseWriter, r *http.Request) {
 		writeError(w, fail(http.StatusNotFound, "server_not_found", "invalid_request_error", "The server was not found in this toolset."))
 		return
 	}
-	if s.Grants == nil {
+	if s.grants == nil {
 		writeError(w, fail(http.StatusServiceUnavailable, "grant_store_unavailable", "server_error", "Grant enrollment is unavailable."))
 		return
 	}
-	bound, err := mcpgrants.Bind(authority, resolved.tools[index])
+	bound, err := personal.Bind(authority, resolved.tools[index])
 	if err != nil {
 		writeError(w, fail(http.StatusBadRequest, "oauth_not_configured", "invalid_request_error", "The server has no personal OAuth configuration."))
 		return
 	}
-	handoff, err := s.Grants.Start(r.Context(), bound, nil)
+	handoff, err := s.grants.Start(r.Context(), bound, nil)
 	if err != nil {
 		writeError(w, fail(http.StatusConflict, "grant_binding_changed", "invalid_request_error", "The server changed. Start enrollment again."))
 		return

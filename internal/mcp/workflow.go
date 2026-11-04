@@ -3,7 +3,6 @@ package mcp
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"slices"
 
@@ -32,7 +31,7 @@ func workflowFailure(failure *apiError) error {
 }
 
 func (s *Server) Resolve(_ context.Context, authority access.Authority, release *release.Release, toolsets []string) ([]WorkflowTool, error) {
-	if s == nil || s.Runtime == nil || authority.ProjectID == nil || release == nil || release.Snapshot == nil {
+	if s == nil || s.runtime == nil || authority.ProjectID == nil || release == nil || release.Snapshot == nil {
 		return nil, workflowFailure(errToolsetNotFound)
 	}
 	var tools []WorkflowTool
@@ -55,15 +54,15 @@ func (s *Server) Resolve(_ context.Context, authority access.Authority, release 
 }
 
 func (s *Server) AuthorizeWorkflowTool(authority access.Authority, tool WorkflowTool) error {
-	if s == nil || s.Runtime == nil {
+	if s == nil || s.runtime == nil {
 		return workflowFailure(fail(http.StatusServiceUnavailable, "authority_unavailable", "api_error", "Key authority is unavailable; retry shortly."))
 	}
 	if authority.ProjectID == nil {
 		return workflowFailure(errPermissionDenied)
 	}
-	failure := s.currentToolAuthority(executeInput{authority: authority, resolved: resolvedToolset{id: tool.ToolsetID, revisionID: tool.RevisionID}, tool: tool.Definition})
+	failure := s.executor.currentToolAuthority(CallRequest{Authority: authority, ToolsetID: tool.ToolsetID, ToolsetRevisionID: tool.RevisionID, Tool: tool.Definition})
 	if failure != nil {
-		return workflowFailure(failure)
+		return workflowFailure(apiFailure(failure))
 	}
 	return nil
 }
@@ -77,7 +76,7 @@ func (s *Server) CallApproved(ctx context.Context, authority access.Authority, r
 }
 
 func (s *Server) callWorkflow(ctx context.Context, authority access.Authority, release *release.Release, selected WorkflowTool, runID string, ordinal int, callID string, arguments json.RawMessage, approval *agents.WorkflowApproval) (json.RawMessage, error) {
-	if s == nil || s.Runtime == nil || s.Ledger == nil || authority.ProjectID == nil || release == nil || release.Snapshot == nil {
+	if s == nil || s.runtime == nil || !s.executor.available() || authority.ProjectID == nil || release == nil || release.Snapshot == nil {
 		return nil, workflowFailure(errLedger)
 	}
 	resolved, failure := s.resolveToolset(authority, release.Snapshot, selected.ToolsetID)
@@ -95,29 +94,25 @@ func (s *Server) callWorkflow(ctx context.Context, authority access.Authority, r
 	if len(arguments) > maxCallBodyBytes || tool.ValidateArguments(arguments) != nil {
 		return nil, &WorkflowError{Status: http.StatusBadRequest, Code: "invalid_tool_arguments", Message: "The model supplied arguments that do not match the tool schema."}
 	}
-	result := s.execute(ctx, executeInput{
-		authority: authority, approval: approval, resolved: resolved, tool: tool, arguments: arguments,
-		releaseID: releaseIDFor(release, release.Snapshot), release: release, snapshot: release.Snapshot,
-		runID: runID, ordinal: ordinal, callID: callID,
+	result := s.executor.Execute(ctx, CallRequest{
+		Authority: authority, Approval: approval, ToolsetID: resolved.id, ToolsetRevisionID: resolved.revisionID, Tool: tool, Arguments: arguments,
+		ReleaseID: releaseIDFor(release, release.Snapshot), Release: release, Policies: release.Snapshot,
+		RunID: runID, Ordinal: ordinal, CallID: callID,
 	})
-	if result.failure != nil {
-		return nil, workflowFailure(result.failure)
+	switch outcome := result.Outcome.(type) {
+	case Refused:
+		return nil, workflowFailure(apiFailure(outcome.Failure))
+	case Blocked:
+		return nil, workflowFailure(apiFailure(outcome.Failure))
+	case Uncertain:
+		return nil, &WorkflowError{Status: http.StatusBadGateway, Code: "tool_outcome_unknown", Message: outcome.Message}
+	case ReplayUnavailable:
+		return nil, &WorkflowError{Status: http.StatusConflict, Code: "tool_outcome_unknown", Message: "The prior tool result is unavailable."}
+	case Replayed:
+		return json.Marshal(outcome.Result)
+	case Completed:
+		return json.Marshal(outcome.Result)
+	default:
+		return nil, workflowFailure(errLedger)
 	}
-	if result.blocked != nil {
-		return nil, workflowFailure(result.blocked)
-	}
-	if result.outcomeUnknown {
-		return nil, &WorkflowError{Status: http.StatusBadGateway, Code: "tool_outcome_unknown", Message: result.unknownMessage}
-	}
-	if result.repeat != nil {
-		if !result.repeatRetained {
-			return nil, &WorkflowError{Status: http.StatusConflict, Code: "tool_outcome_unknown", Message: "The prior tool result is unavailable."}
-		}
-		return json.Marshal(result.repeatResult)
-	}
-	encoded, err := json.Marshal(result.result)
-	if err != nil {
-		return nil, fmt.Errorf("encode tool result: %w", err)
-	}
-	return encoded, nil
 }

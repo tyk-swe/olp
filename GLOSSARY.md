@@ -95,5 +95,5 @@ The pinned set of tool names, descriptions, and input schemas captured from one 
 A published selection of tools from registered MCP servers, pinned to certified catalogs, that a key allowlist can call.
 
 **Personal grant**:
-One person's OAuth authorization for a registered MCP server, bound to that server's certified OAuth configuration and to the consenting key or end user. It is distinct from a provider grant, which authorizes the installation against a model provider.
+One person's OAuth authorization for a registered MCP server or agent, bound to its approved OAuth configuration and to the consenting key or end user. It is distinct from a provider grant, which authorizes the installation against a model provider.
 _Avoid_: User token

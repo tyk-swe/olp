@@ -3,69 +3,37 @@ package mcp
 import (
 	"context"
 	"errors"
-	"net/http"
-	"time"
 
 	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/mcp/accounting"
 	"github.com/tyk-swe/olp/internal/release"
 	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/workload"
 )
 
-type IdentityHook string
-type IdentityOutcome string
-
-const (
-	RegisteredServerHook  IdentityHook    = "mcp_security"
-	UserPermissionHook    IdentityHook    = "mcp_end_user_permission"
-	DelegatedSigningHook  IdentityHook    = "mcp_jwt_signer"
-	EntraOBOHook          IdentityHook    = "agent_365"
-	IdentityPassed        IdentityOutcome = "passed"
-	IdentityDenied        IdentityOutcome = "denied"
-	IdentityNotConfigured IdentityOutcome = "not_configured"
-)
-
-type IdentityDecision struct {
-	Hook    IdentityHook    `json:"hook"`
-	Outcome IdentityOutcome `json:"outcome"`
-}
-
-func identityEvidence(decisions []IdentityDecision) []IdentityDecision {
-	if decisions == nil {
-		return []IdentityDecision{}
-	}
-	return decisions
-}
-
-func hookOutcome(configured, denied bool) IdentityOutcome {
+func hookOutcome(configured, denied bool) accounting.IdentityOutcome {
 	if !configured {
-		return IdentityNotConfigured
+		return accounting.IdentityNotConfigured
 	}
 	if denied {
-		return IdentityDenied
+		return accounting.IdentityDenied
 	}
-	return IdentityPassed
+	return accounting.IdentityPassed
 }
 
-func toolIdentityDecisions(tool routing.MCPToolsetTool, failure *apiError) []IdentityDecision {
-	decisions := []IdentityDecision{{Hook: RegisteredServerHook, Outcome: hookOutcome(true, failure != nil && (failure.code == "permission_denied" || failure.code == "authority_unavailable"))}, {Hook: UserPermissionHook, Outcome: hookOutcome(tool.OAuth != nil, failure != nil && failure.code == "user_grant_required")}, {Hook: DelegatedSigningHook, Outcome: hookOutcome(tool.Delegation != nil, failure != nil)}}
+func toolIdentityDecisions(tool routing.MCPToolsetTool, failure *Failure) []accounting.IdentityDecision {
+	decisions := []accounting.IdentityDecision{{Hook: accounting.RegisteredServerHook, Outcome: hookOutcome(true, failure != nil && (failure.Code == "permission_denied" || failure.Code == "authority_unavailable"))}, {Hook: accounting.UserPermissionHook, Outcome: hookOutcome(tool.OAuth != nil, failure != nil && failure.Code == "user_grant_required")}, {Hook: accounting.DelegatedSigningHook, Outcome: hookOutcome(tool.Delegation != nil, failure != nil)}}
 	if tool.OAuth != nil && tool.OAuth.EntraOBO != nil {
-		return append(decisions, IdentityDecision{Hook: EntraOBOHook, Outcome: hookOutcome(true, failure != nil)})
+		return append(decisions, accounting.IdentityDecision{Hook: accounting.EntraOBOHook, Outcome: hookOutcome(true, failure != nil)})
 	}
 	return decisions
 }
 
-func (s *Server) loadCredential(ctx context.Context, authority access.Authority, tool routing.MCPToolsetTool) ([]byte, *apiError) {
+func (s *Executor) loadCredential(ctx context.Context, authority access.Authority, tool routing.MCPToolsetTool) ([]byte, *Failure) {
 	if tool.OAuth != nil && tool.OAuth.EntraOBO != nil {
-		verifier, ok := s.Runtime.(interface {
-			VerifyEntraUser(context.Context, string, access.Authority, string, string) (workload.UserAssertion, error)
-		})
-		if !ok {
-			return nil, fail(http.StatusForbidden, "user_grant_required", "permission_error", "A verified delegated user assertion is required.")
-		}
-		assertion, err := verifier.VerifyEntraUser(ctx, workload.RequestAssertion(ctx), authority, tool.OAuth.EntraOBO.Issuer, tool.OAuth.ClientID)
-		if err != nil || s.Grants == nil {
-			return nil, fail(http.StatusForbidden, "user_grant_required", "permission_error", "A verified delegated user assertion is required.")
+		assertion, err := s.authority.VerifyEntraUser(ctx, workload.RequestAssertion(ctx), authority, tool.OAuth.EntraOBO.Issuer, tool.OAuth.ClientID)
+		if err != nil || s.grants == nil {
+			return nil, refusal("user_grant_required", "A verified delegated user assertion is required.")
 		}
 		return s.loadEntraCredential(ctx, authority, tool, assertion)
 	}
@@ -77,41 +45,41 @@ func (s *Server) loadCredential(ctx context.Context, authority access.Authority,
 		return credential, nil
 	}
 	defer clear(credential)
-	if s.Grants == nil {
-		return nil, fail(http.StatusForbidden, "delegation_unavailable", "permission_error", "Delegated signing is unavailable for this tool.")
+	if s.grants == nil {
+		return nil, refusal("delegation_unavailable", "Delegated signing is unavailable for this tool.")
 	}
-	delegated, err := s.Grants.Delegate(ctx, authority, tool)
+	delegated, err := s.grants.Delegate(ctx, authority, tool)
 	if err != nil {
-		return nil, fail(http.StatusForbidden, "delegation_unavailable", "permission_error", "Delegated signing is unavailable for this tool.")
+		return nil, refusal("delegation_unavailable", "Delegated signing is unavailable for this tool.")
 	}
 	return delegated, nil
 }
 
-func (s *Server) currentToolAuthority(in executeInput) *apiError {
-	err := s.Runtime.AuthorizeMCPTool(in.authority, in.resolved.id, in.resolved.revisionID, *in.authority.ProjectID, in.tool.ServerID, in.tool.ServerRevisionID)
+func (s *Executor) currentToolAuthority(in CallRequest) *Failure {
+	err := s.authority.AuthorizeMCPTool(in.Authority, in.ToolsetID, in.ToolsetRevisionID, *in.Authority.ProjectID, in.Tool.ServerID, in.Tool.ServerRevisionID)
 	if err == nil {
 		return nil
 	}
 	if errors.Is(err, release.ErrStaleAuthority) {
-		return fail(http.StatusServiceUnavailable, "authority_unavailable", "api_error", "Key authority is unavailable; retry shortly.")
+		return refusal("authority_unavailable", "Key authority is unavailable; retry shortly.")
 	}
-	return errPermissionDenied
+	return failurePermissionDenied
 }
 
-func (s *Server) refuseToolIdentity(ctx context.Context, in executeInput, reservation *Reservation, failure *apiError) *apiError {
-	now := time.Now()
-	evidence := AttemptEvidence{ServerID: in.tool.ServerID, ServerRevisionID: in.tool.ServerRevisionID, Status: StatusGuardrailBlocked, StartedAt: now, CompletedAt: now, IdentityDecisions: toolIdentityDecisions(in.tool, failure)}
-	if err := s.Ledger.RefuseUndispatched(context.WithoutCancel(ctx), reservation, evidence); err != nil {
+func (s *Executor) refuseToolIdentity(ctx context.Context, in CallRequest, reservation *accounting.Reservation, failure *Failure) *Failure {
+	now := s.now()
+	evidence := accounting.AttemptEvidence{ServerID: in.Tool.ServerID, ServerRevisionID: in.Tool.ServerRevisionID, Status: accounting.StatusGuardrailBlocked, StartedAt: now, CompletedAt: now, IdentityDecisions: toolIdentityDecisions(in.Tool, failure)}
+	if err := s.ledger.RefuseUndispatched(context.WithoutCancel(ctx), reservation, evidence); err != nil {
 		s.release(reservation)
-		return errLedger
+		return failureLedger
 	}
 	return failure
 }
 
-func (s *Server) loadEntraCredential(ctx context.Context, authority access.Authority, tool routing.MCPToolsetTool, assertion workload.UserAssertion) ([]byte, *apiError) {
-	credential, err := s.Grants.ResolveEntra(ctx, authority, tool, assertion)
+func (s *Executor) loadEntraCredential(ctx context.Context, authority access.Authority, tool routing.MCPToolsetTool, assertion workload.UserAssertion) ([]byte, *Failure) {
+	credential, err := s.grants.ResolveEntra(ctx, authority, tool, assertion)
 	if err != nil {
-		return nil, fail(http.StatusForbidden, "user_grant_required", "permission_error", "A verified delegated user grant is required.")
+		return nil, refusal("user_grant_required", "A verified delegated user grant is required.")
 	}
 	return credential, nil
 }

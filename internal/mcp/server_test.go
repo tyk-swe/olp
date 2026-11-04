@@ -1,13 +1,19 @@
 package mcp
 
 import (
+	"context"
 	"encoding/json"
+	"github.com/tyk-swe/olp/internal/access"
+	"github.com/tyk-swe/olp/internal/mcp/messages"
+	"github.com/tyk-swe/olp/internal/mcp/sessions"
+	"github.com/tyk-swe/olp/internal/oif"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
 	"testing"
 
-	"github.com/tyk-swe/olp/internal/mcpservers"
+	"github.com/tyk-swe/olp/internal/mcp/accounting"
+	"github.com/tyk-swe/olp/internal/mcp/upstream"
 	"github.com/tyk-swe/olp/internal/routing"
 )
 
@@ -15,31 +21,31 @@ func TestPricingStateFor(t *testing.T) {
 	str := func(v string) *string { return &v }
 	cases := []struct {
 		price *string
-		want  PricingState
+		want  accounting.PricingState
 	}{
-		{nil, PricingUnpriced},
-		{str("0"), PricingFree},
-		{str("0.00"), PricingFree},
-		{str("0.01"), PricingPriced},
-		{str("10"), PricingPriced},
+		{nil, accounting.PricingUnpriced},
+		{str("0"), accounting.PricingFree},
+		{str("0.00"), accounting.PricingFree},
+		{str("0.01"), accounting.PricingPriced},
+		{str("10"), accounting.PricingPriced},
 	}
 	for _, tc := range cases {
-		if got := pricingStateFor(tc.price); got != tc.want {
-			t.Errorf("pricingStateFor(%v) = %q, want %q", tc.price, got, tc.want)
+		if got := accounting.PricingStateFor(tc.price); got != tc.want {
+			t.Errorf("accounting.PricingStateFor(%v) = %q, want %q", tc.price, got, tc.want)
 		}
 	}
 }
 
 func TestReservationAmountDefaultsToZero(t *testing.T) {
-	var nilReservation *Reservation
-	if got := nilReservation.amount(); got != "0" {
+	var nilReservation *accounting.Reservation
+	if got := nilReservation.Amount(); got != "0" {
 		t.Errorf("nil reservation amount = %q, want 0", got)
 	}
-	if got := (&Reservation{}).amount(); got != "0" {
+	if got := (&accounting.Reservation{}).Amount(); got != "0" {
 		t.Errorf("unpriced reservation amount = %q, want 0", got)
 	}
 	price := "2.50"
-	if got := (&Reservation{UnitPrice: &price}).amount(); got != price {
+	if got := (&accounting.Reservation{UnitPrice: &price}).Amount(); got != price {
 		t.Errorf("priced reservation amount = %q, want %q", got, price)
 	}
 }
@@ -102,17 +108,17 @@ func TestToolResultResponses(t *testing.T) {
 	tool := routing.MCPToolsetTool{Alias: "lookup"}
 	for _, tc := range []struct {
 		name   string
-		result mcpservers.ToolResult
+		result upstream.ToolResult
 	}{
 		{name: "nil content"},
-		{name: "empty content", result: mcpservers.ToolResult{Content: []mcpservers.ToolContent{}}},
-		{name: "structured error", result: mcpservers.ToolResult{Content: []mcpservers.ToolContent{{Type: "text", Text: "result"}}, StructuredContent: json.RawMessage(`{"value":42}`), IsError: true}},
+		{name: "empty content", result: upstream.ToolResult{Content: []upstream.ToolContent{}}},
+		{name: "structured error", result: upstream.ToolResult{Content: []upstream.ToolContent{{Type: "text", Text: "result"}}, StructuredContent: json.RawMessage(`{"value":42}`), IsError: true}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			outcome := execution{repeat: &RetainedCall{AttemptID: "attempt", DispatchID: "dispatch", Status: completedToolStatus(tc.result)}, repeatResult: tc.result, repeatRetained: true}
+			outcome := Execution{Outcome: Replayed{Receipt: Receipt{AttemptID: "attempt", DispatchID: "dispatch"}, Result: tc.result}}
 			fresh, repeated := httptest.NewRecorder(), httptest.NewRecorder()
 			writeToolResult(fresh, resolved, tool, tc.result, "attempt", "dispatch")
-			writeRepeat(repeated, resolved, tool, outcome)
+			writeExecution(repeated, resolved, tool, outcome)
 			if fresh.Code != http.StatusOK || repeated.Code != fresh.Code || repeated.Body.String() != fresh.Body.String() {
 				t.Fatalf("REST replay differs from fresh result: %s / %s", fresh.Body, repeated.Body)
 			}
@@ -142,7 +148,7 @@ func TestToolResultResponses(t *testing.T) {
 			}
 			rpcFresh, rpcRepeated := httptest.NewRecorder(), httptest.NewRecorder()
 			writeSessionToolResult(rpcFresh, json.RawMessage(`7`), resolved, tc.result, "attempt", "dispatch")
-			writeSessionRepeat(rpcRepeated, json.RawMessage(`7`), resolved, outcome)
+			writeSessionExecution(rpcRepeated, json.RawMessage(`7`), resolved, outcome)
 			if rpcFresh.Code != http.StatusOK || rpcRepeated.Code != rpcFresh.Code || rpcRepeated.Body.String() != rpcFresh.Body.String() {
 				t.Fatalf("RPC replay differs from fresh result: %s / %s", rpcFresh.Body, rpcRepeated.Body)
 			}
@@ -175,4 +181,80 @@ func TestToolResultResponses(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestRPCRequestIDsRoundTripWithoutConversion(t *testing.T) {
+	for _, id := range []string{`9007199254740993`, `1.234567890123456789`, `"request-1"`, `0`} {
+		t.Run(id, func(t *testing.T) {
+			raw := []byte(`{"jsonrpc":"2.0","id":` + id + `,"method":"ping"}`)
+			parsed, code := messages.Parse(raw, oif.Limits{MaxBytes: maxCallBodyBytes})
+			if code != 0 || parsed.Kind != messages.RequestMessage || string(parsed.ID) != id {
+				t.Fatalf("request ID changed: %+v, code %d", parsed, code)
+			}
+			recorder := httptest.NewRecorder()
+			writeRPCResult(recorder, http.StatusOK, parsed.ID, struct{}{})
+			reply, code := messages.Parse(recorder.Body.Bytes(), oif.Limits{MaxBytes: maxCallBodyBytes})
+			if code != 0 || reply.Kind != messages.Response || string(reply.ID) != id || string(reply.Result) != "{}" {
+				t.Fatalf("response ID or empty result changed: %s", recorder.Body.String())
+			}
+			var managementRequest messages.Request
+			if err := json.Unmarshal(raw, &managementRequest); err != nil || !managementRequest.Valid() {
+				t.Fatalf("management rejected consumer request ID: %v", err)
+			}
+		})
+	}
+	for _, raw := range []string{
+		`{"jsonrpc":"2.0","id":null,"method":"ping"}`,
+		`{"jsonrpc":"2.0","id":true,"method":"ping"}`,
+		`{"jsonrpc":"2.0","id":1,"id":2,"method":"ping"}`,
+		`[{"jsonrpc":"2.0","id":1,"method":"ping"}]`,
+	} {
+		if _, code := messages.Parse([]byte(raw), oif.Limits{MaxBytes: maxCallBodyBytes}); code == 0 {
+			t.Fatalf("accepted invalid envelope %s", raw)
+		}
+	}
+}
+
+func TestSharedSessionRejectsOtherIdentities(t *testing.T) {
+	issuer := "issuer"
+	binding := func(installation, project, individual, delegation string) sessions.Binding {
+		return sessions.BindingOf(access.Authority{ID: "key", InstallationID: installation, ProjectID: &project, WorkloadIssuerID: &issuer, WorkloadDigest: "workload", EndUserDigest: individual, DelegationTokenDigest: delegation})
+	}
+	owner := binding("installation", "project", "person", "delegation")
+	store, err := sessions.New(&sessionReplySource{}, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	created, err := store.Create(t.Context(), sessions.Record{ID: "session", Binding: owner, Protocol: messages.SupportedProtocols()[0], ToolsetID: "toolset", ToolsetRevisionID: "revision", ReleaseID: "release"})
+	if err != nil || !created {
+		t.Fatalf("create session: %v, %v", created, err)
+	}
+	record, found, err := store.Access(t.Context(), "session", owner)
+	if err != nil || !found || record.ToolsetID != "toolset" || record.ToolsetRevisionID != "revision" {
+		t.Fatalf("owner could not recover its pinned session: %+v, %v", record, err)
+	}
+	for _, stranger := range []sessions.Binding{
+		binding("other", "project", "person", "delegation"),
+		binding("installation", "other", "person", "delegation"),
+		binding("installation", "project", "other", "delegation"),
+		binding("installation", "project", "person", "other"),
+	} {
+		if _, found, err := store.Access(t.Context(), "session", stranger); err != nil || found {
+			t.Fatalf("session accepted another identity: found %v, error %v", found, err)
+		}
+	}
+}
+
+type sessionReplySource struct{ fields []any }
+
+func (s *sessionReplySource) Do(_ context.Context, args ...string) (any, error) {
+	if len(args) < 15 {
+		return s.fields, nil
+	}
+	s.fields = []any{
+		"installation_id", args[8], "project_id", args[9], "principal_digest", args[10],
+		"protocol", args[11], "toolset_id", args[12], "toolset_revision_id", args[13], "release_id", args[14],
+		"created_at_ms", "0", "last_active_at_ms", "0", "initialized", "0",
+	}
+	return int64(1), nil
 }

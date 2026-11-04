@@ -2,13 +2,14 @@ package promotion
 
 import (
 	"encoding/json"
+	"strings"
+
 	"github.com/tyk-swe/olp/internal/access"
 	"github.com/tyk-swe/olp/internal/billing"
 	"github.com/tyk-swe/olp/internal/egress"
 	"github.com/tyk-swe/olp/internal/guardrails"
-	"github.com/tyk-swe/olp/internal/mcpservers"
 	"github.com/tyk-swe/olp/internal/providers"
-	"strings"
+	"github.com/tyk-swe/olp/internal/secrets"
 )
 
 func ValidateBindings(doc *Document, bindings BindingSet) error {
@@ -89,8 +90,8 @@ func ValidateBindings(doc *Document, bindings BindingSet) error {
 				return access.Invalid("external_credential_bindings", "Static bearer material uses sealed bindings.")
 			}
 			encoded, _ := json.Marshal(secret.Secret)
-			if _, err := mcpservers.Credential(encoded); err != nil {
-				return err
+			if _, err := secrets.ParseBearer(encoded); err != nil {
+				return access.Invalid("credential", err.Error())
 			}
 			continue
 		}

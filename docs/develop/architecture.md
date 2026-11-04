@@ -21,7 +21,7 @@ PostgreSQL migrations live under `internal/database/migrations/`.
 | Preparation and failure evidence | `internal/providerinvoke/`, `internal/upstream/` |
 | Accounting, pricing, billing and exports | `internal/usage/`, `internal/billing/`, `internal/export/`; console usage/observability |
 | Plugins and guardrails | `internal/plugins/`, `plugin/`, `internal/guardrails/`, `internal/contentpolicy/`; matching console features |
-| MCP registration, tool execution and personal grants | `internal/mcpservers/`, `internal/mcp/`, `internal/mcpgrants/`; console `plugins/`, `agents/` |
+| MCP registration, tool execution and personal grants | `internal/mcp/`, `internal/grants/personal/`; console `plugins/`, `agents/` |
 | Promotion and process lifetime | `internal/promotion/` with its domain packages and `internal/promotion/serve/`, `cmd/olp/`, `internal/database/` |
 | Egress, secrets and telemetry | `internal/egress/`, `internal/secrets/`, `internal/observability/`, `internal/telemetry/` |
 
@@ -47,17 +47,24 @@ certification-invalidation and staged-inventory operations. Unchanged slots reta
 enrollment lifetime; parent/collection ETags advance coherently. Installation
 serialization protects reauthorization, replay, publication and atomic audit.
 
-MCP registration, execution and personal grants follow the same feature
-ownership. `mcpservers` owns registration validation, storage and catalog
-certification as package-level operations shared by its HTTP handlers and
-configuration promotion; certification consumes upstream servers through the
-`Upstream` interface and compiles tool schemas with the same compiler
-`routing` applies at publication. `mcp` owns one execute path (authority,
-guardrails, durable debit reservation, dispatch and settlement) that the JSON,
-streamable HTTP, legacy SSE and workflow surfaces adapt to their transports.
-`mcpgrants` owns call-time personal OAuth, Entra exchange, refresh and
-delegated signing, while registration-time validation of that configuration
-stays in `mcpservers` over the shared types in `internal/grants/config`. See
+MCP follows the same feature ownership. `mcp/registration` owns registration
+validation, revisions, executable permissions, and publication. Direct writes and
+configuration promotion share preparation and persistence operations that return
+new values. `mcp/upstream` owns connections and catalog certification, using the
+same tool-schema compiler as routing snapshots.
+
+The `mcp` executor owns authorization, guardrails, reservation, dispatch, and
+settlement through constructor-injected dependencies. JSON, Streamable HTTP,
+legacy SSE, and workflow adapters translate explicit execution outcomes into
+their response contracts. `mcp/accounting` owns durable accounting and recovery,
+while `mcp/sessions` owns session identity, capacity, expiry, and Valkey persistence.
+`mcp/messages` supplies bounded JSON-RPC handling with raw request IDs to consumer,
+upstream, and management adapters. Management keeps its own authorization and
+administrative dispatch.
+
+`grants/personal` owns personal OAuth, Entra exchange, renewal, and delegated
+signing for MCP and agent calls. Configure-time validation remains with
+registration over the shared types in `grants/config`. See
 [ADR 0003](../adr/0003-mcp-module-seams.md).
 
 ## Runtime and immutable sources

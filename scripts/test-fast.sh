@@ -21,8 +21,12 @@ go test -mod=readonly -vet=off -count=1 -timeout=60s \
   ./internal/guardrails \
   ./internal/signing \
   ./internal/mcp \
-  ./internal/mcpservers \
-  ./internal/mcpgrants \
+  ./internal/mcp/messages \
+  ./internal/mcp/sessions \
+  ./internal/mcp/accounting \
+  ./internal/mcp/upstream \
+  ./internal/mcp/registration \
+  ./internal/grants/personal \
   ./internal/gateway
 pnpm --dir console test --project unit --project svelte
 node --test scripts/check-docs.test.mjs scripts/check-release-version.test.mjs scripts/check-structure.test.mjs

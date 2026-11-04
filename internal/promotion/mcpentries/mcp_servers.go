@@ -7,13 +7,15 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"github.com/tyk-swe/olp/internal/promotion"
 	"reflect"
 	"strings"
 
 	"github.com/jackc/pgx/v5"
+
 	"github.com/tyk-swe/olp/internal/access"
-	"github.com/tyk-swe/olp/internal/mcpservers"
+	"github.com/tyk-swe/olp/internal/mcp/registration"
+	"github.com/tyk-swe/olp/internal/mcp/upstream"
+	"github.com/tyk-swe/olp/internal/promotion"
 	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/secrets"
 )
@@ -40,7 +42,7 @@ func normalizeMCPEntry(e *promotion.MCPServerEntry) {
 	e.PerKeyMaxConcurrency = mcpEntryLimit(routing.ToolLimitOr(e.PerKeyMaxConcurrency, routing.DefaultToolMaxConcurrency))
 }
 
-func mcpDefinitionFromEntry(e promotion.MCPServerEntry, catalog *mcpservers.Catalog, current *mcpservers.Definition) *mcpservers.Definition {
+func mcpDefinitionFromEntry(e promotion.MCPServerEntry, catalog *upstream.Catalog, current *registration.Definition) *registration.Definition {
 	signingKeyID := func() *string {
 		if current == nil || e.Delegation == nil {
 			return nil
@@ -51,7 +53,7 @@ func mcpDefinitionFromEntry(e promotion.MCPServerEntry, catalog *mcpservers.Cata
 	for name, price := range e.ToolPrices {
 		prices[name] = price
 	}
-	return &mcpservers.Definition{
+	return &registration.Definition{
 		EntraClientSecretID: entraConfigurationSecret(e, current),
 		DelegationKeyID:     signingKeyID, Delegation: e.Delegation.Clone(), OAuth: e.OAuth.Clone(), Stdio: e.Stdio.Clone(), Name: e.Name, Transport: e.Transport, Endpoint: e.Endpoint, Enabled: e.Enabled, Catalog: catalog,
 		UnitPrice: mcpEntryPrice(e.UnitPrice), ToolPrices: prices,
@@ -81,16 +83,17 @@ func ValidateMCPServers(s *promotion.Server, doc *promotion.Document) error {
 			return access.Invalid("mcp_servers", "Use unique project/name pairs, a supported MCP transport and a certified catalog digest.")
 		}
 		seen[key] = true
-		in := mcpservers.Input{
+		in := registration.Input{
 			Delegation: e.Delegation.Clone(), OAuth: e.OAuth.Clone(), Stdio: e.Stdio.Clone(), Name: e.Name, Transport: e.Transport, Endpoint: e.Endpoint, Enabled: &e.Enabled,
 			UnitPrice: e.UnitPrice, ToolPrices: e.ToolPrices,
 			CallsPerMinute: e.CallsPerMinute, MaxConcurrency: e.MaxConcurrency,
 			PerKeyCallsPerMinute: e.PerKeyCallsPerMinute, PerKeyMaxConcurrency: e.PerKeyMaxConcurrency,
 		}
-		if err = mcpservers.ValidateAndNormalize(&in, s.Egress); err != nil {
-			return err
+		prepared, prepareErr := registration.Prepare(in, s.Egress)
+		if prepareErr != nil {
+			return prepareErr
 		}
-		e.Name, e.Endpoint = in.Name, in.Endpoint
+		e.Name, e.Endpoint = prepared.Name, prepared.Endpoint
 		normalizeMCPEntry(e)
 		if e.CredentialRef != nil && *e.CredentialRef != mcpReference(*e) {
 			return access.Invalid("mcp_servers.credential_ref", "Use the deterministic exported MCP credential reference.")
@@ -127,7 +130,7 @@ func ExportMCPServers(ctx context.Context, q access.Queryer) ([]promotion.MCPSer
 	}
 	return out, rows.Err()
 }
-func findMCPServer(ctx context.Context, q access.Queryer, e promotion.MCPServerEntry) (*mcpservers.Definition, error) {
+func findMCPServer(ctx context.Context, q access.Queryer, e promotion.MCPServerEntry) (*registration.Definition, error) {
 	var project string
 	err := q.QueryRow(ctx, "SELECT id::text FROM olp.projects WHERE lower(name)=lower($1)", e.Project).Scan(&project)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -136,13 +139,13 @@ func findMCPServer(ctx context.Context, q access.Queryer, e promotion.MCPServerE
 	if err != nil {
 		return nil, err
 	}
-	d, err := mcpservers.FindActive(ctx, q, project, e.Name)
+	d, err := registration.FindActive(ctx, q, project, e.Name)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}
 	return d, err
 }
-func mcpEntry(d *mcpservers.Definition, project string) promotion.MCPServerEntry {
+func mcpEntry(d *registration.Definition, project string) promotion.MCPServerEntry {
 	prices := make(map[string]string, len(d.ToolPrices))
 	for name, price := range d.ToolPrices {
 		prices[name] = price
@@ -159,7 +162,7 @@ func mcpEntry(d *mcpservers.Definition, project string) promotion.MCPServerEntry
 	}
 	return e
 }
-func McpMatches(s *promotion.Server, ctx context.Context, q access.Queryer, e promotion.MCPServerEntry, d *mcpservers.Definition, bindings promotion.BindingSet) (bool, error) {
+func McpMatches(s *promotion.Server, ctx context.Context, q access.Queryer, e promotion.MCPServerEntry, d *registration.Definition, bindings promotion.BindingSet) (bool, error) {
 	if d == nil || !reflect.DeepEqual(mcpEntry(d, e.Project), e) {
 		return false, nil
 	}
@@ -197,7 +200,7 @@ func PlanMCPServers(s *promotion.Server, ctx context.Context, q access.Queryer, 
 		if err != nil {
 			return err
 		}
-		if e.OAuth != nil && e.OAuth.EntraOBO != nil && !mcpservers.CanRetainEntraClientSecret(current, e.OAuth) {
+		if e.OAuth != nil && e.OAuth.EntraOBO != nil && !registration.CanRetainEntraClientSecret(current, e.OAuth) {
 			result.Conflict("mcp_server", e.Name, "Install this Entra issuer, client, and token endpoint with its replacement secret locally before applying the metadata.")
 		}
 		if e.Delegation != nil && (current == nil || current.DelegationKeyID == nil) {
@@ -231,7 +234,7 @@ func PlanMCPServers(s *promotion.Server, ctx context.Context, q access.Queryer, 
 }
 
 type PreparedMCP struct {
-	catalog    *mcpservers.Catalog
+	catalog    *upstream.Catalog
 	observed   string
 	reuse      bool
 	limitsOnly bool
@@ -258,7 +261,7 @@ func PrepareMCPServers(s *promotion.Server, ctx context.Context, p access.Princi
 				return nil, err
 			}
 		}
-		if e.OAuth != nil && e.OAuth.EntraOBO != nil && !mcpservers.CanRetainEntraClientSecret(d, e.OAuth) {
+		if e.OAuth != nil && e.OAuth.EntraOBO != nil && !registration.CanRetainEntraClientSecret(d, e.OAuth) {
 			return nil, access.Invalid("mcp_servers", "Install this Entra issuer, client, and token endpoint with its replacement secret locally before applying the metadata.")
 		}
 		equal, err := McpMatches(s, ctx, s.Access.Pool, e, d, bindings)
@@ -304,7 +307,7 @@ func PrepareMCPServers(s *promotion.Server, ctx context.Context, p access.Princi
 				return nil, access.Invalid("secret_bindings", "Supply the destination MCP bearer binding.")
 			}
 		}
-		catalog, err := mcpservers.CertifyOptions(ctx, s.Egress, e.Endpoint, material, mcpservers.TransportOptions{Transport: routing.MCPTransport(e.Transport), Stdio: e.Stdio.Clone(), Executables: mcpservers.NewExecutables(s.Unconfined, s.Access.Pool)})
+		catalog, err := upstream.CertifyOptions(ctx, s.Egress, e.Endpoint, material, upstream.TransportOptions{Transport: routing.MCPTransport(e.Transport), Stdio: e.Stdio.Clone(), Executables: registration.NewExecutables(s.Unconfined, s.Access.Pool)})
 		clear(material)
 		if err != nil || catalog.Digest != e.CatalogDigest {
 			return nil, access.Fail(422, "mcp_catalog_changed", "Certification must match the artifact's reviewed tool catalog digest.")
@@ -344,7 +347,7 @@ func ApplyMCPServers(s *promotion.Server, ctx context.Context, tx pgx.Tx, p acce
 				routing.ToolLimitOr(e.MaxConcurrency, routing.DefaultToolMaxConcurrency),
 				routing.ToolLimitOr(e.PerKeyCallsPerMinute, routing.DefaultToolCallsPerMinute),
 				routing.ToolLimitOr(e.PerKeyMaxConcurrency, routing.DefaultToolMaxConcurrency))
-			if err = mcpservers.UpdateLimits(ctx, tx, current.ID, effective, access.NewID()); err != nil {
+			if err = registration.UpdateLimits(ctx, tx, current.ID, effective, access.NewID()); err != nil {
 				return err
 			}
 			changed = true
@@ -363,7 +366,7 @@ func ApplyMCPServers(s *promotion.Server, ctx context.Context, tx pgx.Tx, p acce
 				next.CredentialID = current.CredentialID
 			}
 		}
-		if err = mcpservers.Save(ctx, tx, p.UserID(), current, next); err != nil {
+		if _, err := registration.Save(ctx, tx, p.UserID(), current, *next); err != nil {
 			return err
 		}
 		changed = true
@@ -390,8 +393,8 @@ func ApplyMCPServers(s *promotion.Server, ctx context.Context, tx pgx.Tx, p acce
 	return nil
 }
 
-func entraConfigurationSecret(e promotion.MCPServerEntry, current *mcpservers.Definition) *string {
-	if !mcpservers.CanRetainEntraClientSecret(current, e.OAuth) {
+func entraConfigurationSecret(e promotion.MCPServerEntry, current *registration.Definition) *string {
+	if !registration.CanRetainEntraClientSecret(current, e.OAuth) {
 		return nil
 	}
 	return current.EntraClientSecretID
