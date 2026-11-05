@@ -528,8 +528,8 @@ func (l *chargeLedger) ObserveCooldown(context.Context, string, time.Time) error
 func (l *chargeLedger) ObserveCooldownClass(context.Context, string, string, codeadapter.Classification, time.Time) error {
 	return nil
 }
-func (l *chargeLedger) Settle(context.Context, string, codemode.Usage) error     { return nil }
-func (l *chargeLedger) Abort(context.Context, string) error                      { return nil }
+func (l *chargeLedger) Settle(context.Context, string, codemode.Usage) error { return nil }
+func (l *chargeLedger) Abort(context.Context, string) error                  { return nil }
 func (l *chargeLedger) ObserveHealth(context.Context, string, codemode.HealthObservation) error {
 	return nil
 }
