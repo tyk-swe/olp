@@ -17369,6 +17369,7 @@
               "number",
               "null"
             ],
+            "format": "double",
             "minimum": 0,
             "maximum": 9007199254740991,
             "description": "Used amount in the vendor unit for non-percent windows. Null when the provider did not report it."
@@ -17378,6 +17379,7 @@
               "number",
               "null"
             ],
+            "format": "double",
             "minimum": 0,
             "maximum": 9007199254740991,
             "description": "Remaining amount in the vendor unit for non-percent windows. Null when the provider did not report it."

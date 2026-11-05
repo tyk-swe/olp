@@ -8769,7 +8769,7 @@ type CodeAllowanceWindow struct {
 	RemainingPercent float32                     `json:"remaining_percent"`
 
 	// RemainingValue Remaining amount in the vendor unit for non-percent windows. Null when the provider did not report it.
-	RemainingValue nullable.Nullable[float32]   `json:"remaining_value"`
+	RemainingValue nullable.Nullable[float64]   `json:"remaining_value"`
 	ResetsAt       nullable.Nullable[time.Time] `json:"resets_at"`
 
 	// Unit Vendor unit of the reported values. Percent windows report used and remaining percentages; other units report used and remaining values in that unit.
@@ -8777,7 +8777,7 @@ type CodeAllowanceWindow struct {
 	UsedPercent float32                 `json:"used_percent"`
 
 	// UsedValue Used amount in the vendor unit for non-percent windows. Null when the provider did not report it.
-	UsedValue     nullable.Nullable[float32] `json:"used_value"`
+	UsedValue     nullable.Nullable[float64] `json:"used_value"`
 	Window        CodeAllowanceWindowWindow  `json:"window"`
 	WindowMinutes nullable.Nullable[int64]   `json:"window_minutes"`
 }

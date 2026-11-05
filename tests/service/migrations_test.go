@@ -15,6 +15,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/tyk-swe/olp/internal/codemode"
 	"github.com/tyk-swe/olp/internal/database"
 )
 
@@ -50,10 +51,7 @@ func TestAllowanceObservationMigrationBackfillsLegacyWindows(t *testing.T) {
 	if err = pool.QueryRow(t.Context(), `SELECT allowance FROM olp.code_accounts WHERE id=$1`, account).Scan(&document); err != nil {
 		t.Fatal(err)
 	}
-	var allowance struct {
-		Windows []map[string]any `json:"windows"`
-		Credits map[string]any   `json:"credits"`
-	}
+	var allowance codemode.Allowance
 	if err = json.Unmarshal(document, &allowance); err != nil {
 		t.Fatal(err)
 	}
@@ -61,13 +59,13 @@ func TestAllowanceObservationMigrationBackfillsLegacyWindows(t *testing.T) {
 		t.Fatalf("windows = %s", document)
 	}
 	primary := allowance.Windows[0]
-	if primary["unit"] != "percent" || primary["evidence"] != "passive" || primary["used_value"] != nil || primary["remaining_value"] != nil {
+	if primary.Unit != codemode.AllowanceUnitPercent || primary.Evidence != codemode.AllowanceEvidencePassive || primary.UsedValue != nil || primary.RemainingValue != nil {
 		t.Fatalf("primary window not backfilled: %s", document)
 	}
-	if primary["used_percent"] != float64(25) || primary["remaining_percent"] != float64(75) || primary["resets_at"] != "2036-11-05T15:00:00Z" {
+	if primary.UsedPercent != 25 || primary.RemainingPercent != 75 || primary.ResetsAt == nil || !primary.ResetsAt.Equal(time.Date(2036, 11, 5, 15, 0, 0, 0, time.UTC)) {
 		t.Fatalf("primary window values changed: %s", document)
 	}
-	if allowance.Windows[1]["unit"] != "percent" || allowance.Windows[1]["evidence"] != "passive" || allowance.Credits["balance"] != "12.5" {
+	if allowance.Windows[1].Unit != codemode.AllowanceUnitPercent || allowance.Windows[1].Evidence != codemode.AllowanceEvidencePassive || allowance.Credits == nil || allowance.Credits.Balance == nil || *allowance.Credits.Balance != "12.5" {
 		t.Fatalf("secondary window or credits changed: %s", document)
 	}
 	var available bool

@@ -44,9 +44,9 @@ func TestWidenedWindowNamesAndNonPercentValuesValidate(t *testing.T) {
 			t.Fatalf("window %s rejected: %v", name, err)
 		}
 	}
-	names := codemode.AllowanceWindowNames()
-	if len(names) != 5 {
-		t.Fatalf("window names = %v", names)
+	unknown := codemode.AllowanceWindow{LimitID: "plan", Window: "monthly", Unit: codemode.AllowanceUnitCents, Evidence: codemode.AllowanceEvidenceActive, ObservedAt: allowanceObserved}
+	if err := unknown.Validate(); err != nil {
+		t.Fatalf("value-less non-percent window rejected: %v", err)
 	}
 }
 
@@ -57,7 +57,6 @@ func TestAllowanceWindowRejectsUnknownUnitEvidenceNameAndMixedValues(t *testing.
 		"unknown evidence":         {LimitID: base.LimitID, Window: base.Window, Unit: base.Unit, Evidence: "guessed", UsedPercent: 10, RemainingPercent: 90, ObservedAt: base.ObservedAt},
 		"unknown window":           {LimitID: base.LimitID, Window: "daily", Unit: base.Unit, Evidence: base.Evidence, UsedPercent: 10, RemainingPercent: 90, ObservedAt: base.ObservedAt},
 		"percent with value":       {LimitID: base.LimitID, Window: base.Window, Unit: base.Unit, Evidence: base.Evidence, UsedPercent: 10, RemainingPercent: 90, RemainingValue: floatPtr(9), ObservedAt: base.ObservedAt},
-		"non-percent value-less":   {LimitID: base.LimitID, Window: "monthly", Unit: "cents", Evidence: "active", ObservedAt: base.ObservedAt},
 		"negative remaining":       {LimitID: base.LimitID, Window: "monthly", Unit: "cents", Evidence: "active", RemainingValue: floatPtr(-1), ObservedAt: base.ObservedAt},
 		"broken percent pair":      {LimitID: base.LimitID, Window: base.Window, Unit: base.Unit, Evidence: base.Evidence, UsedPercent: 10, RemainingPercent: 50, ObservedAt: base.ObservedAt},
 		"non-percent with percent": {LimitID: base.LimitID, Window: "monthly", Unit: "count", Evidence: "active", UsedPercent: 10, RemainingPercent: 90, RemainingValue: floatPtr(9), ObservedAt: base.ObservedAt},

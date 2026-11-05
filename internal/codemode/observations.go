@@ -14,13 +14,20 @@ const MaxAllowanceWindows = 128
 
 const allowancePrimary = "primary"
 
+type AllowanceUnit string
+
 const (
-	AllowanceUnitPercent     = "percent"
-	AllowanceUnitCount       = "count"
-	AllowanceUnitCredits     = "credits"
-	AllowanceUnitCents       = "cents"
-	AllowanceEvidencePassive = "passive"
-	AllowanceEvidenceActive  = "active"
+	AllowanceUnitPercent AllowanceUnit = "percent"
+	AllowanceUnitCount   AllowanceUnit = "count"
+	AllowanceUnitCredits AllowanceUnit = "credits"
+	AllowanceUnitCents   AllowanceUnit = "cents"
+)
+
+type AllowanceEvidence string
+
+const (
+	AllowanceEvidencePassive AllowanceEvidence = "passive"
+	AllowanceEvidenceActive  AllowanceEvidence = "active"
 )
 
 func AllowanceWindowNames() [5]string {
@@ -87,7 +94,8 @@ func mergedAllowanceWindows(current, incoming []AllowanceWindow) iter.Seq[Allowa
 				continue
 			}
 			next := incoming[index].normalized()
-			if !yield(AllowanceWindow{LimitID: next.LimitID, Window: next.Window, Unit: next.Unit, Evidence: next.Evidence, UsedPercent: next.UsedPercent, RemainingPercent: next.RemainingPercent, UsedValue: next.UsedValue, RemainingValue: next.RemainingValue, WindowMinutes: next.WindowMinutes, ObservedAt: next.ObservedAt, ResetsAt: mergeAllowanceReset(old.ResetsAt, next.ResetsAt, next.ObservedAt)}) {
+			next.ResetsAt = mergeAllowanceReset(old.ResetsAt, next.ResetsAt, next.ObservedAt)
+			if !yield(next) {
 				return
 			}
 		}
@@ -138,27 +146,27 @@ type CountObservation struct {
 }
 
 type AllowanceWindow struct {
-	LimitID          string     `json:"limit_id"`
-	Window           string     `json:"window"`
-	Unit             string     `json:"unit"`
-	Evidence         string     `json:"evidence"`
-	UsedPercent      float64    `json:"used_percent"`
-	RemainingPercent float64    `json:"remaining_percent"`
-	UsedValue        *float64   `json:"used_value"`
-	RemainingValue   *float64   `json:"remaining_value"`
-	WindowMinutes    *int64     `json:"window_minutes"`
-	ResetsAt         *time.Time `json:"resets_at"`
-	ObservedAt       time.Time  `json:"observed_at"`
+	LimitID          string            `json:"limit_id"`
+	Window           string            `json:"window"`
+	Unit             AllowanceUnit     `json:"unit"`
+	Evidence         AllowanceEvidence `json:"evidence"`
+	UsedPercent      float64           `json:"used_percent"`
+	RemainingPercent float64           `json:"remaining_percent"`
+	UsedValue        *float64          `json:"used_value"`
+	RemainingValue   *float64          `json:"remaining_value"`
+	WindowMinutes    *int64            `json:"window_minutes"`
+	ResetsAt         *time.Time        `json:"resets_at"`
+	ObservedAt       time.Time         `json:"observed_at"`
 }
 
-func (w AllowanceWindow) EffectiveUnit() string {
+func (w AllowanceWindow) EffectiveUnit() AllowanceUnit {
 	if w.Unit == "" {
 		return AllowanceUnitPercent
 	}
 	return w.Unit
 }
 
-func (w AllowanceWindow) EffectiveEvidence() string {
+func (w AllowanceWindow) EffectiveEvidence() AllowanceEvidence {
 	if w.Evidence == "" {
 		return AllowanceEvidencePassive
 	}
@@ -166,7 +174,10 @@ func (w AllowanceWindow) EffectiveEvidence() string {
 }
 
 func (w AllowanceWindow) normalized() AllowanceWindow {
-	return AllowanceWindow{LimitID: w.LimitID, Window: w.Window, Unit: w.EffectiveUnit(), Evidence: w.EffectiveEvidence(), UsedPercent: w.UsedPercent, RemainingPercent: w.RemainingPercent, UsedValue: w.UsedValue, RemainingValue: w.RemainingValue, WindowMinutes: w.WindowMinutes, ResetsAt: w.ResetsAt, ObservedAt: w.ObservedAt}
+	result := w
+	result.Unit = w.EffectiveUnit()
+	result.Evidence = w.EffectiveEvidence()
+	return result
 }
 
 type Credits struct {
@@ -179,7 +190,7 @@ type Credits struct {
 func (w AllowanceWindow) Validate() error {
 	names := AllowanceWindowNames()
 	if !limitID.MatchString(w.LimitID) || !slices.Contains(names[:], w.Window) || w.ObservedAt.IsZero() ||
-		!slices.Contains([]string{"", AllowanceEvidencePassive, AllowanceEvidenceActive}, w.Evidence) ||
+		!slices.Contains([]AllowanceEvidence{"", AllowanceEvidencePassive, AllowanceEvidenceActive}, w.Evidence) ||
 		w.WindowMinutes != nil && (*w.WindowMinutes < 0 || *w.WindowMinutes > 1<<53-1) ||
 		w.ResetsAt != nil && (w.ResetsAt.Unix() <= 0 || w.ResetsAt.Unix() >= 253402300800) {
 		return fmt.Errorf("invalid provider allowance window")
@@ -192,7 +203,7 @@ func (w AllowanceWindow) Validate() error {
 			return fmt.Errorf("invalid provider allowance window")
 		}
 	case AllowanceUnitCount, AllowanceUnitCredits, AllowanceUnitCents:
-		if w.UsedPercent != 0 || w.RemainingPercent != 0 || w.UsedValue == nil && w.RemainingValue == nil {
+		if w.UsedPercent != 0 || w.RemainingPercent != 0 {
 			return fmt.Errorf("invalid provider allowance window")
 		}
 		for _, value := range []*float64{w.UsedValue, w.RemainingValue} {
