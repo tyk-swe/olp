@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { formatDate, stateLabel } from '$lib/format';
+  import ScrollTable from '$lib/components/ScrollTable.svelte';
   import { resolve } from '$app/paths';
   import { createQuery } from '@tanstack/svelte-query';
   import { writable } from 'svelte/store';
@@ -29,16 +31,19 @@
 </script>
 
 <svelte:head><title>Tool calls · OpenLLMProxy</title></svelte:head>
-<header>
-  <p class="eyebrow">Gateway</p>
-  <h1>Tool calls</h1>
-  <p>
-    Attempts and settlement history for your projects. Unresolved amounts remain
-    reserved until the outcome is known. Observed amounts are already accounted
-    usage and must not be billed again.
-  </p>
-</header>
+<div class="page-header">
+  <div>
+    <p class="eyebrow">Agents</p>
+    <h1 class="page-title">Tool calls</h1>
+    <p class="page-description">
+      Attempts and settlement history for your projects. Unresolved amounts
+      remain reserved until the outcome is known. Observed amounts are already
+      accounted usage and must not be billed again.
+    </p>
+  </div>
+</div>
 <form
+  class="filter-bar"
   onsubmit={(event) => {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
@@ -50,7 +55,7 @@
     });
   }}
 >
-  <label>
+  <label class="form-field">
     Project
     <select name="project">
       <option value="">All authorized projects</option>
@@ -59,32 +64,32 @@
       {/each}
     </select>
   </label>
-  <label>
+  <label class="form-field">
     API key UUID (optional)
     <input name="key" pattern="[a-f0-9]{8}(-[a-f0-9]{4}){3}-[a-f0-9]{12}" />
   </label>
-  <button type="submit">Filter</button>
+  <button class="button button-secondary" type="submit">Filter</button>
 </form>
 {#if projects.error}
-  <p role="alert">{errorMessage(projects.error)}</p>
+  <p class="inline-problem" role="alert">{errorMessage(projects.error)}</p>
 {/if}
 {#if calls.error}
-  <p role="alert">{errorMessage(calls.error)}</p>
+  <p class="inline-problem" role="alert">{errorMessage(calls.error)}</p>
 {:else if calls.isPending}
-  <p>Loading tool calls…</p>
+  <div class="loading-state" role="status">Loading tool calls…</div>
 {:else if !calls.data?.items.length}
-  <p>No tool calls in this view.</p>
+  <div class="card empty-state">No tool calls in this view.</div>
 {:else}
-  <div class="records">
-    <table>
+  <ScrollTable label="Tool calls">
+    <table class="data-table">
       <thead>
         <tr>
-          <th>Tool / attempt</th>
-          <th>Outcome / debit</th>
-          <th>Unit price</th>
-          <th>Observed cost / charge</th>
-          <th>Unresolved cost / charge</th>
-          <th>Started</th>
+          <th scope="col">Tool / attempt</th>
+          <th scope="col">Outcome / debit</th>
+          <th scope="col">Unit price</th>
+          <th scope="col">Observed cost / charge</th>
+          <th scope="col">Unresolved cost / charge</th>
+          <th scope="col">Started</th>
         </tr>
       </thead>
       <tbody>
@@ -97,7 +102,7 @@
                 <a href={resolve(`/tool-calls/${value.id}`)}
                   >Inspect and resolve</a
                 >
-                <dl>
+                <dl class="detail-list">
                   <dt>Dispatch</dt>
                   <dd><code>{value.dispatch_id}</code></dd>
                   <dt>Project</dt>
@@ -113,7 +118,11 @@
                   <dt>Result digest</dt>
                   <dd><code>{value.result_digest ?? 'Not observed'}</code></dd>
                   <dt>Completed</dt>
-                  <dd>{value.completed_at ?? 'Pending'}</dd>
+                  <dd>
+                    {value.completed_at
+                      ? formatDate(value.completed_at)
+                      : 'Pending'}
+                  </dd>
                 </dl>
                 {#if value.identity_decisions.length}
                   <h2>Identity decisions</h2>
@@ -123,7 +132,7 @@
                 {/if}
                 {#if value.guardrail_decisions.length}
                   <h2>Guardrail decisions</h2>
-                  <pre>{JSON.stringify(
+                  <pre class="code-block">{JSON.stringify(
                       value.guardrail_decisions,
                       null,
                       2
@@ -132,8 +141,9 @@
               </details>
             </td>
             <td
-              >{value.status.replaceAll('_', ' ')}<br
-              />{value.debit_state.replaceAll('_', ' ')}</td
+              >{stateLabel(value.status)}<br />{stateLabel(
+                value.debit_state
+              )}</td
             >
             <td
               >{value.unit_price ?? 'Unpriced'}
@@ -145,15 +155,16 @@
             <td aria-label="Unresolved cost and charge"
               >{value.remaining_cost} / {value.remaining_charge}</td
             >
-            <td>{new Date(value.started_at).toLocaleString()}</td>
+            <td>{formatDate(value.started_at)}</td>
           </tr>
         {/each}
       </tbody>
     </table>
-  </div>
+  </ScrollTable>
 {/if}
-<nav aria-label="Tool call pages">
+<nav class="page-actions list-pager" aria-label="Tool call pages">
   <button
+    class="button button-secondary"
     type="button"
     disabled={!$filters.cursor || calls.isFetching}
     onclick={() =>
@@ -161,6 +172,7 @@
     >Newest</button
   >
   <button
+    class="button button-secondary"
     type="button"
     disabled={!calls.data?.nextCursor || calls.isFetching}
     onclick={() =>
@@ -170,56 +182,9 @@
       }))}>Older</button
   >
   <button
+    class="button button-secondary"
     type="button"
     disabled={calls.isFetching}
     onclick={() => calls.refetch()}>Refresh</button
   >
 </nav>
-
-<style>
-  header,
-  form {
-    margin-bottom: 1rem;
-  }
-  form {
-    display: flex;
-    align-items: end;
-    flex-wrap: wrap;
-    gap: 1rem;
-  }
-  label {
-    display: grid;
-    gap: 0.25rem;
-  }
-  .records {
-    overflow-x: auto;
-  }
-  table {
-    width: 100%;
-    text-align: left;
-  }
-  td,
-  th {
-    padding: 0.75rem;
-    vertical-align: top;
-  }
-  code {
-    overflow-wrap: anywhere;
-  }
-  details {
-    margin-top: 0.5rem;
-    min-width: 12rem;
-  }
-  dd {
-    margin: 0 0 0.5rem;
-  }
-  pre {
-    white-space: pre-wrap;
-    overflow-wrap: anywhere;
-  }
-  nav {
-    display: flex;
-    gap: 0.5rem;
-    margin-top: 1rem;
-  }
-</style>

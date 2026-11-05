@@ -4,7 +4,6 @@ import { collectCursorPages } from '$lib/management/pagination';
 import type { components } from '$lib/management/schema';
 export type Sink = components['schemas']['SinkResponse'];
 export type SinkInput = components['schemas']['CreateSinkRequest'];
-export const sinkKeys = { all: ['signed-fact-sinks'] as const };
 export const listSinks = () =>
   collectCursorPages(async (cursor) =>
     unwrapPage(

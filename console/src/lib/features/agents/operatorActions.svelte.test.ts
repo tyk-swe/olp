@@ -6,6 +6,7 @@ import type { MCPServer } from './api';
 import { afterEach, expect, it, onTestFinished, vi } from 'vitest';
 import { flushSync, getAllContexts, mount, unmount } from 'svelte';
 import { json, serve } from '$lib/management/test/transport';
+import type { ManagementOperation } from '$lib/management/requirements';
 import StateHarness from '../../../../tests/unit/support/StateHarness.svelte';
 import ToolCallDetailPage from './ToolCallDetailPage.svelte';
 import MCPServerEditor from './MCPServerEditor.svelte';
@@ -383,13 +384,11 @@ it.each(['save', 'conflict', 'retire'] as const)(
     await vi.waitFor(() =>
       expect(target.textContent).toContain('Changed elsewhere')
     );
-    await vi.waitFor(() =>
-      expect(button('Reload latest')?.disabled).toBe(false)
-    );
+    await vi.waitFor(() => expect(button('Reload')?.disabled).toBe(false));
     expect((target.querySelector('form input') as HTMLInputElement).value).toBe(
       'My draft'
     );
-    button('Reload latest')?.click();
+    button('Reload')?.click();
     flushSync();
     expect((target.querySelector('form input') as HTMLInputElement).value).toBe(
       'Other operator'
@@ -590,4 +589,61 @@ it('serializes remote status fetching and cancellation', async () => {
   await vi.waitFor(() =>
     expect(button('Fetch remote status')?.disabled).toBe(false)
   );
+});
+
+function mountServers(operations: ManagementOperation[]) {
+  serve((request) => {
+    const path = new URL(request.url).pathname;
+    if (path.endsWith('/projects'))
+      return json({ items: [{ id: 'project', name: 'Project' }] });
+    return path.endsWith('/mcp-servers')
+      ? json({ items: [server] })
+      : json(server);
+  }, operations);
+  const target = document.createElement('div');
+  const setup = vi.fn(() =>
+    mount(MCPServersPage, { target, context: getAllContexts() })
+  );
+  const harness = mount(StateHarness, { target, props: { setup } });
+  onTestFinished(async () => {
+    await unmount(setup.mock.results[0].value);
+    await unmount(harness);
+  });
+  const button = (name: string) =>
+    [...target.querySelectorAll('button')].find(
+      (item) => item.textContent?.trim() === name
+    );
+  return { target, button };
+}
+
+it('offers read-only members inspection but no server create or edit controls', async () => {
+  const { target, button } = mountServers(['read']);
+  await vi.waitFor(() => expect(button('Inspect')).toBeDefined());
+
+  expect(button('New server')).toBeUndefined();
+  expect(button('Inspect and edit')).toBeUndefined();
+  expect(target.querySelector('form')).toBeNull();
+});
+
+it('keeps an edited server draft when the operator declines to discard it', async () => {
+  const decline = vi.fn(() => false);
+  vi.stubGlobal('confirm', decline);
+  const { target, button } = mountServers(['read', 'configure']);
+  await vi.waitFor(() => expect(button('Inspect and edit')).toBeDefined());
+  button('Inspect and edit')?.click();
+  await vi.waitFor(() =>
+    expect(target.querySelector('form h2')?.textContent).toContain(
+      'Edit and recertify'
+    )
+  );
+  const name = () => target.querySelector('form input') as HTMLInputElement;
+  name().value = 'My draft';
+  name().dispatchEvent(new Event('input', { bubbles: true }));
+  flushSync();
+
+  button('New server')?.click();
+  flushSync();
+
+  expect(decline).toHaveBeenCalledOnce();
+  expect(name().value).toBe('My draft');
 });

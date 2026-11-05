@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { formatDate } from '$lib/format';
   import { onMount } from 'svelte';
   import { createQuery } from '@tanstack/svelte-query';
   import { errorMessage } from '$lib/management/http';
@@ -207,19 +208,23 @@
 </script>
 
 {#if role.allows('POST /api/v1/delegation-consents')}
-  <section class="card" aria-labelledby="agent-consent-heading">
+  <section class="card stack-card" aria-labelledby="agent-consent-heading">
     <h2 id="agent-consent-heading">Allow an agent to use a key</h2>
     <p>
       Choose a key you manage and an agent-enabled workload in the same project.
       Access is limited by both policies.
     </p>
     {#if inventory.isPending || profile.isPending}
-      <p role="status">Loading keys and project access…</p>
+      <p class="inline-status" role="status">
+        Loading keys and project access…
+      </p>
     {:else if inventory.isError || profile.isError}
-      <p role="alert">Keys or project access could not be loaded.</p>
+      <p class="inline-problem" role="alert">
+        Keys or project access could not be loaded.
+      </p>
     {:else}
       <div class="form-field">
-        <label
+        <label class="form-field"
           >Consumer key
           <select id="delegation-key" bind:value={keyID} disabled={busy}>
             <option value="">Choose a key</option>
@@ -230,7 +235,7 @@
         </label>
       </div>
       <div class="form-field">
-        <label
+        <label class="form-field"
           >Agent workload
           <select
             id="delegation-agent"
@@ -245,7 +250,7 @@
         </label>
       </div>
       <div class="form-field">
-        <label
+        <label class="form-field"
           >Allowed inference routes
           <input
             bind:value={routeInput}
@@ -255,7 +260,7 @@
         </label>
       </div>
       <div class="form-field">
-        <label
+        <label class="form-field"
           >Allowed toolsets
           <input
             bind:value={toolsetInput}
@@ -265,7 +270,7 @@
         </label>
       </div>
       <div class="form-field">
-        <label
+        <label class="form-field"
           >Allowed A2A agents
           <input
             bind:value={remoteAgentInput}
@@ -275,9 +280,11 @@
         </label>
       </div>
       {#if selectedKey && options.isError}
-        <p role="alert">Eligible agents and resources could not be loaded.</p>
+        <p class="inline-problem" role="alert">
+          Eligible agents and resources could not be loaded.
+        </p>
       {:else if selectedKey && options.isSuccess && agents.length === 0}
-        <p>
+        <p class="inline-status">
           No eligible agents have access to a route, toolset or agent for this
           key
         </p>
@@ -299,13 +306,19 @@
           commas
         </p>
         {#if routes.length > 0 && !routesAllowed}
-          <p role="alert">Choose only routes listed above.</p>
+          <p class="inline-problem" role="alert">
+            Choose only routes listed above.
+          </p>
         {/if}
         {#if toolsets.length > 0 && !toolsetsAllowed}
-          <p role="alert">Choose only toolsets listed above.</p>
+          <p class="inline-problem" role="alert">
+            Choose only toolsets listed above.
+          </p>
         {/if}
         {#if remoteAgents.length > 0 && !remoteAgentsAllowed}
-          <p role="alert">Choose only A2A agents listed above</p>
+          <p class="inline-problem" role="alert">
+            Choose only A2A agents listed above
+          </p>
         {/if}
       {/if}
       {#if ready}
@@ -325,13 +338,13 @@
         </p>
       {/if}
       {#if verifiedKey === keyID && verifiedKey}
-        <p role="status">
+        <p class="inline-status" role="status">
           Identity verified. Select the workload and resources again, then
           confirm within five minutes.
         </p>
       {:else}
         <div class="form-field">
-          <label
+          <label class="form-field"
             >Current password
             <input
               type="password"
@@ -342,23 +355,29 @@
           </label>
         </div>
         <button
+          class="button button-secondary"
           type="button"
           disabled={busy || !selectedKey}
           onclick={verifyIdentity}>Verify with linked identity</button
         >
       {/if}
-      <button type="button" disabled={busy || !ready} onclick={confirm}
-        >Confirm agent access</button
+      <button
+        class="button button-secondary"
+        type="button"
+        disabled={busy || !ready}
+        onclick={confirm}>Confirm agent access</button
       >
-      {#if error}<p role="alert">{error}</p>{/if}
+      {#if error}<p class="inline-problem" role="alert">{error}</p>{/if}
       {#if consent}
-        <p role="status">
+        <p class="inline-status" role="status">
           Copy this one-use consent code to the selected agent through your
-          approved channel. It expires at {consent.expires_at}.
+          approved channel. It expires at {formatDate(consent.expires_at)}.
         </p>
-        <label>Consent code <input readonly value={consent.consent} /></label>
+        <label class="form-field"
+          >Consent code <input readonly value={consent.consent} /></label
+        >
         <div class="form-field">
-          <label>
+          <label class="form-field">
             Pair budget ID
             <input readonly size="64" value={consent.delegation_pair_digest} />
           </label>

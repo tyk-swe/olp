@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { formatDate, stateLabel } from '$lib/format';
+  import ScrollTable from '$lib/components/ScrollTable.svelte';
   import { resolve } from '$app/paths';
   import { createQuery } from '@tanstack/svelte-query';
   import { writable } from 'svelte/store';
@@ -28,19 +30,24 @@
 </script>
 
 <svelte:head><title>A2A tasks · OpenLLMProxy</title></svelte:head>
-<header>
-  <p class="eyebrow">Gateway</p>
-  <h1>A2A tasks</h1>
-  <p>Remote task states and callback counts for your projects</p>
-</header>
+<div class="page-header">
+  <div>
+    <p class="eyebrow">Agents</p>
+    <h1 class="page-title">A2A tasks</h1>
+    <p class="page-description">
+      Remote task states and callback counts for your projects
+    </p>
+  </div>
+</div>
 <form
+  class="filter-bar"
   onsubmit={(event) => {
     event.preventDefault();
     const project = new FormData(event.currentTarget).get('project');
     filters.set({ project: typeof project === 'string' ? project : '' });
   }}
 >
-  <label>
+  <label class="form-field">
     Project
     <select name="project">
       <option value="">All authorized projects</option>
@@ -49,25 +56,25 @@
       {/each}
     </select>
   </label>
-  <button type="submit">Filter</button>
+  <button class="button button-secondary" type="submit">Filter</button>
 </form>
 {#if projects.error}
-  <p role="alert">{errorMessage(projects.error)}</p>
+  <p class="inline-problem" role="alert">{errorMessage(projects.error)}</p>
 {/if}
 {#if tasks.error}
-  <p role="alert">{errorMessage(tasks.error)}</p>
+  <p class="inline-problem" role="alert">{errorMessage(tasks.error)}</p>
 {:else if tasks.isFetching}
-  <p>Loading tasks…</p>
+  <div class="loading-state" role="status">Loading tasks…</div>
 {:else if !tasks.data?.items.length}
-  <p>No tasks in this view</p>
+  <div class="card empty-state">No tasks in this view</div>
 {:else}
-  <div class="records">
-    <table>
+  <ScrollTable label="A2A tasks">
+    <table class="data-table">
       <thead
         ><tr
-          ><th>Task</th><th>Project</th><th>State</th><th>Callbacks</th><th
-            >Started</th
-          ></tr
+          ><th scope="col">Task</th><th scope="col">Project</th><th scope="col"
+            >State</th
+          ><th scope="col">Callbacks</th><th scope="col">Started</th></tr
         ></thead
       >
       <tbody>
@@ -82,17 +89,18 @@
               >{projects.data?.find((project) => project.id === task.project_id)
                 ?.name ?? task.project_id}</td
             >
-            <td>{task.state.replaceAll('_', ' ')}</td>
+            <td>{stateLabel(task.state)}</td>
             <td>{task.callback_attempts ?? 'Unknown'}</td>
-            <td>{new Date(task.created_at).toLocaleString()}</td>
+            <td>{formatDate(task.created_at)}</td>
           </tr>
         {/each}
       </tbody>
     </table>
-  </div>
+  </ScrollTable>
 {/if}
-<nav aria-label="Task pages">
+<nav class="page-actions list-pager" aria-label="Task pages">
   <button
+    class="button button-secondary"
     type="button"
     disabled={!$filters.cursor || tasks.isFetching}
     onclick={() =>
@@ -100,6 +108,7 @@
     >Newest</button
   >
   <button
+    class="button button-secondary"
     type="button"
     disabled={!!tasks.error || !tasks.data?.nextCursor || tasks.isFetching}
     onclick={() =>
@@ -109,45 +118,9 @@
       }))}>Older</button
   >
   <button
+    class="button button-secondary"
     type="button"
     disabled={tasks.isFetching}
     onclick={() => tasks.refetch()}>Refresh</button
   >
 </nav>
-
-<style>
-  header,
-  form {
-    margin-bottom: 1rem;
-  }
-  form {
-    display: flex;
-    align-items: end;
-    flex-wrap: wrap;
-    gap: 1rem;
-  }
-  label {
-    display: grid;
-    gap: 0.25rem;
-  }
-  .records {
-    overflow-x: auto;
-  }
-  table {
-    width: 100%;
-    text-align: left;
-  }
-  td,
-  th {
-    padding: 0.75rem;
-    vertical-align: top;
-  }
-  code {
-    overflow-wrap: anywhere;
-  }
-  nav {
-    display: flex;
-    gap: 0.5rem;
-    margin-top: 1rem;
-  }
-</style>

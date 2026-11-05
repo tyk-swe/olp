@@ -139,15 +139,15 @@
   <div>
     <p class="eyebrow">Operations</p>
     <h1 class="page-title">Usage</h1>
-    <nav aria-label="Usage reports">
-      <a aria-current="page" href={resolve('/usage')}>Usage overview</a><a
-        href={resolve('/usage/routing')}>Routing reports</a
-      >
-    </nav>
     <p class="page-description">
       Traffic, tokens, media units, and estimated costs with visible pricing and
       ingestion completeness.
     </p>
+    <nav class="page-tabs" aria-label="Usage reports">
+      <a aria-current="page" href={resolve('/usage')}>Usage overview</a><a
+        href={resolve('/usage/routing')}>Routing reports</a
+      >
+    </nav>
   </div>
   <button
     class="button button-secondary"

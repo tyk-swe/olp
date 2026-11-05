@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { formatDate } from '$lib/format';
+  import ScrollTable from '$lib/components/ScrollTable.svelte';
   import { resolve } from '$app/paths';
   import { createQuery } from '@tanstack/svelte-query';
   import { writable } from 'svelte/store';
@@ -30,19 +32,24 @@
 </script>
 
 <svelte:head><title>Investigations · OpenLLMProxy</title></svelte:head>
-<header>
-  <p class="eyebrow">Gateway</p>
-  <h1>Investigations</h1>
-  <p>
-    Saved filters, evidence references and operator summaries for your projects.
-  </p>
+<div class="page-header">
+  <div>
+    <p class="eyebrow">Agents</p>
+    <h1 class="page-title">Investigations</h1>
+    <p class="page-description">
+      Saved filters, evidence references and operator summaries for your
+      projects.
+    </p>
+  </div>
+
   {#if access.allows('POST /api/v1/investigations')}
     <a class="button button-primary" href={resolve('/investigations/new')}
       >New investigation</a
     >
   {/if}
-</header>
+</div>
 <form
+  class="filter-bar"
   onsubmit={(event) => {
     event.preventDefault();
     const project = new FormData(event.currentTarget).get('project');
@@ -60,17 +67,27 @@
   </label>
   <button class="button button-secondary" type="submit">Filter</button>
 </form>
-{#if projects.error}<p role="alert">{errorMessage(projects.error)}</p>{/if}
+{#if projects.error}<p class="inline-problem" role="alert">
+    {errorMessage(projects.error)}
+  </p>{/if}
 {#if investigations.error}
-  <p role="alert">{errorMessage(investigations.error)}</p>
+  <p class="inline-problem" role="alert">
+    {errorMessage(investigations.error)}
+  </p>
 {:else if investigations.isFetching}
-  <p>Loading investigations…</p>
+  <div class="loading-state" role="status">Loading investigations…</div>
 {:else if !investigations.data?.items.length}
-  <p>No investigations in this view.</p>
+  <div class="card empty-state">No investigations in this view.</div>
 {:else}
-  <div class="records">
-    <table>
-      <thead><tr><th>Summary</th><th>Project</th><th>Saved</th></tr></thead>
+  <ScrollTable label="Investigations">
+    <table class="data-table">
+      <thead
+        ><tr
+          ><th scope="col">Summary</th><th scope="col">Project</th><th
+            scope="col">Saved</th
+          ></tr
+        ></thead
+      >
       <tbody>
         {#each investigations.data.items as investigation (investigation.id)}
           <tr>
@@ -86,14 +103,14 @@
                 (project) => project.id === investigation.project_id
               )?.name ?? investigation.project_id}</td
             >
-            <td>{new Date(investigation.created_at).toLocaleString()}</td>
+            <td>{formatDate(investigation.created_at)}</td>
           </tr>
         {/each}
       </tbody>
     </table>
-  </div>
+  </ScrollTable>
 {/if}
-<nav aria-label="Investigation pages">
+<nav class="page-actions list-pager" aria-label="Investigation pages">
   <button
     class="button button-secondary"
     type="button"
@@ -121,37 +138,3 @@
     onclick={() => investigations.refetch()}>Refresh</button
   >
 </nav>
-
-<style>
-  header,
-  form {
-    margin-bottom: 1rem;
-  }
-  form {
-    display: flex;
-    align-items: end;
-    flex-wrap: wrap;
-    gap: 1rem;
-  }
-  label {
-    display: grid;
-    gap: 0.25rem;
-  }
-  .records {
-    overflow-x: auto;
-  }
-  table {
-    width: 100%;
-    text-align: left;
-  }
-  td,
-  th {
-    padding: 0.75rem;
-    vertical-align: top;
-  }
-  nav {
-    display: flex;
-    gap: 0.5rem;
-    margin-top: 1rem;
-  }
-</style>

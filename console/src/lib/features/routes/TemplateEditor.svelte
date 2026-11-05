@@ -2,6 +2,8 @@
   import { untrack } from 'svelte';
   import { useQueryClient } from '@tanstack/svelte-query';
   import { useAction } from '$lib/editing/action.svelte';
+  import { guardUnsavedChanges } from '$lib/editing/unsavedChanges';
+  import ConflictNotice from '$lib/shell/ConflictNotice.svelte';
   import { useMutationIntent } from '$lib/editing/mutationIntent.svelte';
   import { parseJsonObject } from '$lib/editing/json';
   import type { RoutingPolicy } from './api';
@@ -66,22 +68,41 @@
         ),
       async (value) => {
         baseline = value;
+        clean = draft();
         await saved(value);
       }
     );
   }
+  const draft = () =>
+    JSON.stringify([
+      name,
+      project,
+      selector,
+      filter,
+      slug,
+      timeout,
+      attempts,
+      fidelity,
+      policy,
+      publish
+    ]);
+  let clean = $state(draft());
+  export function isDirty() {
+    return draft() !== clean;
+  }
+  guardUnsavedChanges(isDirty);
 </script>
 
-<form class="card" onsubmit={submit}>
+<form class="card form-card" onsubmit={submit}>
   <h2>{current ? 'Edit template' : 'Create template'}</h2>
-  <label
+  <label class="form-field"
     >Name<input
       required
-      pattern={'[a-z0-9][a-z0-9-]{0,62}'}
+      pattern={'[a-z0-9][a-z0-9\\-]{0,62}'}
       bind:value={name}
     /></label
   >
-  <label
+  <label class="form-field"
     >Project<select disabled={Boolean(baseline)} bind:value={project}
       ><option value="">Installation</option
       >{#each projects as item (item.id)}<option value={item.id}
@@ -89,17 +110,23 @@
         >{/each}</select
     ></label
   >
-  <label
+  <label class="form-field"
     >Provider selector<input
       required
       placeholder="provider UUID or vendor ID, prefixed with provider: or vendor:"
       bind:value={selector}
     /></label
   >
-  <label>Model filter<input required bind:value={filter} /></label>
-  <label>Route slug pattern<input required bind:value={slug} /></label>
-  <p>Use {'{model}'} and optionally {'{vendor}'} in the slug pattern</p>
-  <label
+  <label class="form-field"
+    >Model filter<input required bind:value={filter} /></label
+  >
+  <label class="form-field"
+    >Route slug pattern<input required bind:value={slug} /></label
+  >
+  <p class="inline-status">
+    Use {'{model}'} and optionally {'{vendor}'} in the slug pattern
+  </p>
+  <label class="form-field"
     >Timeout in milliseconds<input
       type="number"
       min="1"
@@ -108,7 +135,7 @@
       bind:value={timeout}
     /></label
   >
-  <label
+  <label class="form-field"
     >Maximum attempts<input
       type="number"
       min="1"
@@ -117,40 +144,35 @@
       bind:value={attempts}
     /></label
   >
-  <label
+  <label class="form-field"
     >Fidelity<select bind:value={fidelity}
       >{#each fidelityOptions as option (option.value)}<option
           value={option.value}>{option.label}</option
         >{/each}</select
     ></label
   >
-  <label
+  <label class="form-field full"
     >Routing policy JSON<textarea
       bind:value={policy}
       placeholder="Leave blank to inherit"></textarea></label
   >
-  <label
+  <label class="check-field"
     ><input type="checkbox" bind:checked={publish} />Automatically publish
     generated routes</label
   >
-  {#if publish}<p>
+  {#if publish}<p class="inline-status">
       Applying this template or activating a matching provider can publish
       routes immediately
     </p>{/if}
-  <button class="button button-primary" disabled={action.busy}
-    >Save template</button
-  >
-  {#if reload && current?.etag !== baseline?.etag}
-    <p role="status">
-      This resource changed since editing began. Your draft is preserved.
-      Reloading discards your edits
-    </p>
-    <button
-      class="button button-secondary"
-      type="button"
-      disabled={action.busy}
-      onclick={reload}>Reload latest</button
+  <div class="page-actions">
+    <button class="button button-primary" disabled={action.busy}
+      >Save template</button
     >
+  </div>
+  {#if reload && current?.etag !== baseline?.etag}
+    <ConflictNotice notice="newer" onReload={reload} disabled={action.busy} />
   {/if}
-  {#if action.error}<p role="alert">{action.error}</p>{/if}
+  {#if action.error}<p class="inline-problem" role="alert">
+      {action.error}
+    </p>{/if}
 </form>

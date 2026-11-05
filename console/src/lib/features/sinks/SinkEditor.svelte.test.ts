@@ -2,6 +2,7 @@ import SinksPage from './SinksPage.svelte';
 import { afterEach, expect, it, onTestFinished, vi } from 'vitest';
 import { flushSync, getAllContexts, mount, unmount } from 'svelte';
 import { json, serve } from '$lib/management/test/transport';
+import type { ManagementOperation } from '$lib/management/requirements';
 import StateHarness from '../../../../tests/unit/support/StateHarness.svelte';
 import SinkEditor from './SinkEditor.svelte';
 import type { Sink } from './api';
@@ -140,7 +141,7 @@ it.each(['refresh', 'conflict'])(
     if (trigger === 'refresh') {
       button('Refresh delivery counts')?.click();
       await vi.waitFor(() =>
-        expect(target.querySelector('article h2')?.textContent).toBe(
+        expect(target.querySelector('tbody strong')?.textContent).toBe(
           'Other operator'
         )
       );
@@ -156,16 +157,111 @@ it.each(['refresh', 'conflict'])(
     await vi.waitFor(() =>
       expect(target.textContent).toContain('Changed elsewhere')
     );
-    await vi.waitFor(() =>
-      expect(button('Reload latest')?.disabled).toBe(false)
-    );
+    await vi.waitFor(() => expect(button('Reload')?.disabled).toBe(false));
     expect((target.querySelector('form input') as HTMLInputElement).value).toBe(
       'My draft'
     );
-    button('Reload latest')?.click();
+    button('Reload')?.click();
     flushSync();
     expect((target.querySelector('form input') as HTMLInputElement).value).toBe(
       'Other operator'
     );
   }
 );
+
+const sink: Sink = {
+  id: 'sink',
+  etag: 'version',
+  name: 'Signed facts',
+  type: 'https',
+  project_id: null,
+  destination: 'https://export.example.test/facts',
+  streams: ['requests'],
+  enabled: true,
+  has_credential: false,
+  retired_at: null,
+  delivery: { delivered: 0, failed: 0, expired: 0, last_delivered_at: null }
+};
+
+function mountSinks(operations: ManagementOperation[]) {
+  serve(
+    (request) =>
+      json(
+        new URL(request.url).pathname.endsWith('/projects')
+          ? { items: [] }
+          : { items: [sink] }
+      ),
+    operations
+  );
+  const target = document.createElement('div');
+  const setup = vi.fn(() =>
+    mount(SinksPage, { target, context: getAllContexts() })
+  );
+  const harness = mount(StateHarness, { target, props: { setup } });
+  onTestFinished(async () => {
+    await unmount(setup.mock.results[0].value);
+    await unmount(harness);
+  });
+  const button = (name: string) =>
+    [...target.querySelectorAll('button')].find(
+      (item) => item.textContent?.trim() === name
+    );
+  return { target, button };
+}
+
+it('offers no create or edit controls to a member who cannot write exports', async () => {
+  const { target, button } = mountSinks(['read']);
+  await vi.waitFor(() =>
+    expect(target.querySelector('tbody strong')?.textContent).toBe(
+      'Signed facts'
+    )
+  );
+
+  expect(button('New export')).toBeUndefined();
+  expect(button('Edit export')).toBeUndefined();
+  expect(target.querySelector('form')).toBeNull();
+});
+
+it('keeps an edited draft when the operator declines to discard it', async () => {
+  const decline = vi.fn(() => false);
+  vi.stubGlobal('confirm', decline);
+  const { target, button } = mountSinks(['read', 'settings']);
+  await vi.waitFor(() => expect(button('Edit export')).toBeDefined());
+  button('Edit export')?.click();
+  flushSync();
+  const name = () => target.querySelector('form input') as HTMLInputElement;
+
+  button('New export')?.click();
+  flushSync();
+  expect(decline).not.toHaveBeenCalled();
+  expect(name().value).toBe('');
+
+  button('Edit export')?.click();
+  flushSync();
+  name().value = 'My draft';
+  name().dispatchEvent(new Event('input', { bubbles: true }));
+  flushSync();
+  button('New export')?.click();
+  flushSync();
+
+  expect(decline).toHaveBeenCalledOnce();
+  expect(name().value).toBe('My draft');
+});
+
+it('clears a new draft when the operator accepts discarding it', async () => {
+  vi.stubGlobal(
+    'confirm',
+    vi.fn(() => true)
+  );
+  const { target, button } = mountSinks(['read', 'settings']);
+  await vi.waitFor(() => expect(button('New export')).toBeDefined());
+  const name = () => target.querySelector('form input') as HTMLInputElement;
+  name().value = 'Abandoned draft';
+  name().dispatchEvent(new Event('input', { bubbles: true }));
+  flushSync();
+
+  button('New export')?.click();
+  flushSync();
+
+  expect(name().value).toBe('');
+});
