@@ -402,7 +402,7 @@
               >
               <td
                 >{#if status(token) === 'active'}<button
-                    class="button button-secondary danger-button"
+                    class="button button-secondary button-danger"
                     type="button"
                     onclick={() => revoke(token)}
                     disabled={Boolean(busy)}>Revoke</button
@@ -503,9 +503,6 @@
     display: flex;
     justify-content: flex-end;
     gap: 0.65rem;
-  }
-  .danger-button {
-    color: var(--danger);
   }
   td small {
     color: var(--foreground-muted);

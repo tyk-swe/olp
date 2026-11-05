@@ -128,7 +128,7 @@
             ><td>{formatDate(session.expires_at)}</td>
             <td
               >{#if canManage || session.current}<button
-                  class="button button-secondary danger-button"
+                  class="button button-secondary button-danger"
                   type="button"
                   onclick={() => removeSession(session.id, session.current)}
                   disabled={Boolean(busy)}
@@ -174,8 +174,5 @@
   }
   .session-filter select:hover {
     border-color: var(--border-strong);
-  }
-  .danger-button {
-    color: var(--danger);
   }
 </style>

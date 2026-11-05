@@ -11,6 +11,7 @@
     run,
     done = () => {},
     disabled = false,
+    danger = false,
     action = useAction()
   }: {
     label: string;
@@ -19,6 +20,7 @@
     run: (requestId: string) => Promise<T>;
     done?: (result: T) => void | Promise<void>;
     disabled?: boolean;
+    danger?: boolean;
     action?: ReturnType<typeof useAction>;
   } = $props();
   let confirming = $state(false);
@@ -29,9 +31,10 @@
 </script>
 
 {#if confirming}
-  <p>{description}</p>
+  <p class="inline-status">{description}</p>
   <button
     class="button button-secondary"
+    class:button-danger={danger}
     type="button"
     disabled={disabled || action.busy}
     onclick={() =>
@@ -55,6 +58,7 @@
 {:else}
   <button
     class="button button-secondary"
+    class:button-danger={danger}
     type="button"
     disabled={disabled || action.busy}
     onclick={() => {
@@ -62,4 +66,4 @@
     }}>{label}</button
   >
 {/if}
-{#if action.error}<p role="alert">{action.error}</p>{/if}
+{#if action.error}<p class="inline-problem" role="alert">{action.error}</p>{/if}

@@ -2,12 +2,24 @@
   import { untrack } from 'svelte';
   import { useQueryClient } from '@tanstack/svelte-query';
   import { useAction } from '$lib/editing/action.svelte';
+  import { guardUnsavedChanges } from '$lib/editing/unsavedChanges';
+  import ConflictNotice from '$lib/shell/ConflictNotice.svelte';
   import {
     useMutationIntent,
     usePrincipalLifetime
   } from '$lib/editing/mutationIntent.svelte';
   import { useRole } from '$lib/features/access/session/useRole.svelte';
-  import { saveSink, sinkKeys, type Sink, type SinkInput } from './api';
+  import { stateLabel } from '$lib/format';
+  import { saveSink, type Sink, type SinkInput } from './api';
+  import { sinkKeys } from './sinkKeys';
+  const SINK_STREAMS = [
+    'requests',
+    'attempts',
+    'guardrail_decisions',
+    'audit',
+    'runs',
+    'trace_spans'
+  ] as const;
   let {
     current,
     projects,
@@ -69,16 +81,34 @@
         baseline = value;
         credential = '';
         removeCredential = false;
+        clean = draft();
         await saved(value);
       }
     );
   }
+  const draft = () =>
+    JSON.stringify([
+      name,
+      project,
+      destination,
+      enabled,
+      streams,
+      credential,
+      removeCredential
+    ]);
+  let clean = $state(draft());
+  export function isDirty() {
+    return draft() !== clean;
+  }
+  guardUnsavedChanges(isDirty);
 </script>
 
-<form class="card" onsubmit={submit}>
+<form class="card form-card" onsubmit={submit}>
   <h2>{current ? 'Edit signed fact export' : 'Create signed fact export'}</h2>
-  <label>Name<input required maxlength="100" bind:value={name} /></label>
-  <label
+  <label class="form-field"
+    >Name<input required maxlength="100" bind:value={name} /></label
+  >
+  <label class="form-field"
     >Scope<select
       required={!access.can('settings.update')}
       disabled={Boolean(current)}
@@ -90,7 +120,7 @@
         >{/each}</select
     ></label
   >
-  <label
+  <label class="form-field"
     >HTTPS destination<input
       type="url"
       required
@@ -100,16 +130,16 @@
   >
   <fieldset>
     <legend>Streams, maximum four</legend
-    >{#each ['requests', 'attempts', 'guardrail_decisions', 'audit', 'runs', 'trace_spans'] as stream (stream)}<label
+    >{#each SINK_STREAMS as stream (stream)}<label class="check-field"
         ><input
           type="checkbox"
           value={stream}
           bind:group={streams}
           disabled={stream === 'audit' && Boolean(project)}
-        />{stream.replaceAll('_', ' ')}</label
+        />{stateLabel(stream)}</label
       >{/each}
   </fieldset>
-  <label
+  <label class="form-field"
     >Replacement signing credential<input
       type="password"
       autocomplete="new-password"
@@ -117,30 +147,27 @@
       disabled={removeCredential}
     /></label
   >
-  <p>
+  <p class="inline-status">
     Blank retains the current credential. {baseline?.has_credential
       ? 'A signing credential is configured'
       : 'No signing credential is configured'}
   </p>
-  {#if baseline?.has_credential}<label
+  {#if baseline?.has_credential}<label class="check-field"
       ><input type="checkbox" bind:checked={removeCredential} />Remove signing
       credential</label
     >{/if}
-  <label><input type="checkbox" bind:checked={enabled} />Enabled</label><button
-    class="button button-primary"
-    disabled={action.busy}>Save export</button
+  <label class="check-field"
+    ><input type="checkbox" bind:checked={enabled} />Enabled</label
   >
-  {#if reload && current?.etag !== baseline?.etag}
-    <p role="status">
-      This resource changed since editing began. Your draft is preserved.
-      Reloading discards your edits
-    </p>
-    <button
-      class="button button-secondary"
-      type="button"
-      disabled={action.busy}
-      onclick={reload}>Reload latest</button
+  <div class="page-actions">
+    <button class="button button-primary" disabled={action.busy}
+      >Save export</button
     >
+  </div>
+  {#if reload && current?.etag !== baseline?.etag}
+    <ConflictNotice notice="newer" onReload={reload} disabled={action.busy} />
   {/if}
-  {#if action.error}<p role="alert">{action.error}</p>{/if}
+  {#if action.error}<p class="inline-problem" role="alert">
+      {action.error}
+    </p>{/if}
 </form>

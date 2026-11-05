@@ -98,7 +98,7 @@
   }
 </script>
 
-<svelte:head><title>Organizations · OLP</title></svelte:head>
+<svelte:head><title>Organizations · OpenLLMProxy</title></svelte:head>
 <header>
   <h1>Organizations</h1>
   <p>

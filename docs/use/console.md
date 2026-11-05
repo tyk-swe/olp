@@ -103,7 +103,7 @@ each member.
 
 ## Saved views
 
-Usage and Request Explorer saved views retain filters, with Usage also retaining
+Usage and Requests saved views retain filters, with Usage also retaining
 its time selection and axes. They do not retain cursors or unrelated parameters.
 Each page allows at most twenty views in tab session storage, scoped to the
 verified session public ID. Starting a new session retires views from the
@@ -116,7 +116,7 @@ show the retained console layouts.
 
 ## Model catalog
 
-The Catalog page and `GET /api/v1/catalog` describe the published route names
+The Model catalog page and `GET /api/v1/catalog` describe the published route names
 available to the caller. Installation members and read-scoped management tokens
 see their permitted projects. Consumer API keys need `models_read` and see only
 routes admitted by their current key authority. Revoked keys and authority older
@@ -165,7 +165,7 @@ resulting authenticated catalog.
 
 MCP server, route template and signed export editors preserve drafts across background refreshes. Saves use the version originally loaded, and Reload latest explicitly discards edits to load a newer version.
 
-MCP servers can be registered, certified, edited and retired under Gateway, MCP servers. Register a server before selecting its certified tools in Agent publications. Blank pricing means unpriced, while zero means free.
+MCP servers can be registered, certified, edited and retired under Agents, MCP servers. Register a server before selecting its certified tools in Agent publications. Blank pricing means unpriced, while zero means free.
 
 Tool call details include evidence-backed resolution for unknown outcomes. Enter the evidence digest and, for settlement, the observed amounts. Successful resolution refreshes the call and provisional exposure. A2A task detail can fetch current remote state and request cancellation separately from the locally recorded task state.
 

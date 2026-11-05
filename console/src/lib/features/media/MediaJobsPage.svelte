@@ -167,7 +167,7 @@
   }
 </script>
 
-<svelte:head><title>Media Jobs · OpenLLMProxy</title></svelte:head>
+<svelte:head><title>Media jobs · OpenLLMProxy</title></svelte:head>
 
 {#if jobId}
   <div class="page-header">
@@ -338,7 +338,7 @@
           {/if}
           {#if detail.data.lifecycle !== 'deleted'}
             <button
-              class="button button-secondary danger-button"
+              class="button button-secondary button-danger"
               type="button"
               onclick={remove}
               disabled={actionBusy !== null}
@@ -358,7 +358,7 @@
   <div class="page-header">
     <div>
       <p class="eyebrow">Operations</p>
-      <h1 class="page-title">Media Jobs</h1>
+      <h1 class="page-title">Media jobs</h1>
       <p class="page-description">
         Track asynchronous video and media lifecycles without exposing uploaded
         or generated content.
@@ -632,9 +632,6 @@
     border-radius: var(--radius-control);
     background: transparent;
     color: var(--foreground);
-  }
-  .danger-button {
-    color: var(--danger);
   }
   /* Eight columns still cannot fit a phone. Left as a scrolling table, the row
      width also pushes mobile browsers into shrinking the whole page. */

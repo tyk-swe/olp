@@ -330,7 +330,7 @@
         </dl>
         {#if allowed && !item.retired_at}<button
             type="button"
-            class="button button-secondary danger-button"
+            class="button button-secondary button-danger"
             disabled={!!busy}
             onclick={() => retire(item)}
             >{busy === item.id ? 'Retiring…' : 'Retire entire tree'}</button
@@ -587,9 +587,6 @@
     color: var(--foreground-subtle);
     line-height: 1.6;
     overflow-wrap: anywhere;
-  }
-  .danger-button {
-    color: var(--danger);
   }
   .field-error {
     color: var(--danger);

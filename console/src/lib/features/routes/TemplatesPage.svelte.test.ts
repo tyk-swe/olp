@@ -4,6 +4,7 @@ import { listRouteDraftPage, listRoutePage } from './api';
 import { afterEach, expect, it, onTestFinished, vi } from 'vitest';
 import { flushSync, getAllContexts, mount, unmount } from 'svelte';
 import { json, serve } from '$lib/management/test/transport';
+import type { ManagementOperation } from '$lib/management/requirements';
 import StateHarness from '../../../../tests/unit/support/StateHarness.svelte';
 import TemplatesPage from './TemplatesPage.svelte';
 
@@ -177,13 +178,11 @@ it.each(['draft', 'conflict', 'project'] as const)(
     await vi.waitFor(() =>
       expect(target.textContent).toContain('Changed elsewhere')
     );
-    await vi.waitFor(() =>
-      expect(button('Reload latest')?.disabled).toBe(false)
-    );
+    await vi.waitFor(() => expect(button('Reload')?.disabled).toBe(false));
     expect((target.querySelector('form input') as HTMLInputElement).value).toBe(
       'my-draft'
     );
-    button('Reload latest')?.click();
+    button('Reload')?.click();
     flushSync();
     expect((target.querySelector('form input') as HTMLInputElement).value).toBe(
       'remote'
@@ -254,3 +253,75 @@ it.each([false, true])(
     expect((await client.fetchQuery(options)).items).toEqual([placed]);
   }
 );
+
+const storedTemplate = {
+  id: 'template',
+  etag: 'version',
+  name: 'stored',
+  project_id: null,
+  provider_selector: 'vendor:fixture',
+  model_filter: '*',
+  slug_pattern: '{model}',
+  overall_timeout_ms: 60000,
+  max_attempts: 2,
+  fidelity: { mode: 'strict' },
+  routing_policy: null,
+  auto_publish: false,
+  routes: []
+};
+
+function mountTemplates(operations: ManagementOperation[]) {
+  serve((request) => {
+    const path = new URL(request.url).pathname;
+    if (path === '/api/v1/projects') return json({ items: [] });
+    return path.endsWith('/route-templates')
+      ? json({ items: [storedTemplate] })
+      : json(storedTemplate);
+  }, operations);
+  const target = document.createElement('div');
+  const setup = vi.fn(() =>
+    mount(TemplatesPage, { target, context: getAllContexts() })
+  );
+  const harness = mount(StateHarness, { target, props: { setup } });
+  onTestFinished(async () => {
+    await unmount(setup.mock.results[0].value);
+    await unmount(harness);
+  });
+  const button = (name: string) =>
+    [...target.querySelectorAll('button')].find(
+      (item) => item.textContent?.trim() === name
+    );
+  return { target, button };
+}
+
+it('offers read-only members inspection but no template create or edit controls', async () => {
+  const { target, button } = mountTemplates(['read']);
+  await vi.waitFor(() => expect(button('Inspect')).toBeDefined());
+
+  expect(button('New template')).toBeUndefined();
+  expect(button('Inspect and edit')).toBeUndefined();
+  expect(target.querySelector('form')).toBeNull();
+});
+
+it('keeps an edited template draft when the operator declines to discard it', async () => {
+  const decline = vi.fn(() => false);
+  vi.stubGlobal('confirm', decline);
+  const { target, button } = mountTemplates(['read', 'configure']);
+  await vi.waitFor(() => expect(button('Inspect and edit')).toBeDefined());
+  button('Inspect and edit')?.click();
+  await vi.waitFor(() =>
+    expect(
+      (target.querySelector('form input') as HTMLInputElement)?.value
+    ).toBe('stored')
+  );
+  const name = () => target.querySelector('form input') as HTMLInputElement;
+  name().value = 'my-draft';
+  name().dispatchEvent(new Event('input', { bubbles: true }));
+  flushSync();
+
+  button('New template')?.click();
+  flushSync();
+
+  expect(decline).toHaveBeenCalledOnce();
+  expect(name().value).toBe('my-draft');
+});

@@ -3,6 +3,8 @@
   import { useQueryClient } from '@tanstack/svelte-query';
   import type { components } from '$lib/management/schema';
   import { useAction } from '$lib/editing/action.svelte';
+  import { guardUnsavedChanges } from '$lib/editing/unsavedChanges';
+  import ConflictNotice from '$lib/shell/ConflictNotice.svelte';
   import {
     useMutationIntent,
     usePrincipalLifetime
@@ -88,14 +90,12 @@
       action.error = prices.message;
       return;
     }
-    const body: components['schemas']['CreateMCPServerRequest'] = {
+    const update = {
       ...prices.input,
       name,
       enabled,
-      project_id: project,
-      transport,
       ...(transport === 'stdio'
-        ? { endpoint: undefined, stdio: { executable, digest } }
+        ? { endpoint: undefined }
         : {
             endpoint,
             credential: removeCredential ? null : credential || undefined,
@@ -120,37 +120,71 @@
               oauthEnabled && entraIssuer ? entraSecret || undefined : undefined
           })
     };
+    const create: components['schemas']['CreateMCPServerRequest'] = {
+      ...update,
+      project_id: project,
+      transport,
+      ...(transport === 'stdio' ? { stdio: { executable, digest } } : {})
+    };
     await action.run(
       () =>
-        intent.submit({ current: baseline, body }, (input, requestId) => {
-          if (!input.current) return createServer(input.body, requestId);
-          const {
-            project_id: _project,
-            transport: _transport,
-            stdio: _stdio,
-            ...update
-          } = input.body;
-          void _project;
-          void _transport;
-          void _stdio;
-          return saveServer(input.current, update, requestId);
-        }),
+        intent.submit(
+          { current: baseline, create, update },
+          (input, requestId) =>
+            input.current
+              ? saveServer(input.current, input.update, requestId)
+              : createServer(input.create, requestId)
+        ),
       async (server) => {
         baseline = server;
         removeCredential = false;
         clearSecrets();
+        clean = draft();
         await onsaved(server);
       }
     );
   }
+  const draft = () =>
+    JSON.stringify([
+      name,
+      project,
+      transport,
+      endpoint,
+      enabled,
+      credential,
+      removeCredential,
+      executable,
+      digest,
+      oauthEnabled,
+      clientID,
+      audience,
+      scopes,
+      authorizationEndpoint,
+      tokenEndpoint,
+      deviceEndpoint,
+      entraIssuer,
+      entraSecret,
+      delegationEnabled,
+      delegationIssuer,
+      delegationAudience,
+      privateKey,
+      pricing
+    ]);
+  let clean = $state(draft());
+  export function isDirty() {
+    return draft() !== clean;
+  }
+  guardUnsavedChanges(isDirty);
 </script>
 
-<form class="card" onsubmit={save}>
+<form class="card form-card" onsubmit={save}>
   <h2>
     {current ? 'Edit and recertify server' : 'Register and certify server'}
   </h2>
-  <label>Name<input required maxlength="100" bind:value={name} /></label>
-  <label
+  <label class="form-field"
+    >Name<input required maxlength="100" bind:value={name} /></label
+  >
+  <label class="form-field"
     >Project<select required disabled={Boolean(current)} bind:value={project}
       ><option value="">Choose project</option
       >{#each projects as item (item.id)}<option value={item.id}
@@ -158,7 +192,7 @@
         >{/each}</select
     ></label
   >
-  <label
+  <label class="form-field"
     >Transport<select disabled={Boolean(current)} bind:value={transport}
       ><option value="streamable_http">Streamable HTTP</option><option
         value="sse">SSE</option
@@ -166,14 +200,14 @@
     ></label
   >
   {#if transport === 'stdio'}
-    <label
+    <label class="form-field"
       >Approved executable<input
         required
         disabled={Boolean(current)}
         bind:value={executable}
       /></label
     >
-    <label
+    <label class="form-field"
       >Executable SHA256<input
         required
         pattern={'[a-f0-9]{64}'}
@@ -181,12 +215,14 @@
         bind:value={digest}
       /></label
     >
-  {:else}<label
+  {:else}<label class="form-field"
       >Endpoint<input type="url" required bind:value={endpoint} /></label
     >{/if}
-  <label><input type="checkbox" bind:checked={enabled} />Enabled</label>
+  <label class="check-field"
+    ><input type="checkbox" bind:checked={enabled} />Enabled</label
+  >
   {#if transport !== 'stdio'}
-    <label
+    <label class="form-field"
       >Bearer credential<input
         type="password"
         autocomplete="new-password"
@@ -194,48 +230,51 @@
         disabled={removeCredential}
       /></label
     >
-    {#if baseline?.has_credential}<label
+    {#if baseline?.has_credential}<label class="check-field"
         ><input type="checkbox" bind:checked={removeCredential} />Remove stored
         bearer credential</label
       >{/if}
-    <p>Leave secret fields blank to retain existing values</p>
+    <p class="inline-status">
+      Leave secret fields blank to retain existing values
+    </p>
   {/if}
   <fieldset>
     <legend>Pricing and limits</legend>
-    <label
+    <label class="form-field"
       >Price per call<input
         pattern={'[0-9]{1,12}(\\.[0-9]{1,12})?'}
         bind:value={pricing.unitPrice}
       /></label
     >
-    <p>Blank means unpriced. Use 0 for free calls</p>
+    <p class="inline-status">Blank means unpriced. Use 0 for free calls</p>
     {#each baseline?.catalog.tools ?? [] as tool (tool.name)}<label
+        class="form-field"
         >{tool.name} price<input
           bind:value={pricing.toolPrices[tool.name]}
         /></label
       >{/each}
-    <label
+    <label class="form-field"
       >Calls per minute<input
         required
         inputmode="numeric"
         bind:value={pricing.callsPerMinute}
       /></label
     >
-    <label
+    <label class="form-field"
       >Concurrent calls<input
         required
         inputmode="numeric"
         bind:value={pricing.maxConcurrency}
       /></label
     >
-    <label
+    <label class="form-field"
       >Calls per minute per key<input
         required
         inputmode="numeric"
         bind:value={pricing.perKeyCallsPerMinute}
       /></label
     >
-    <label
+    <label class="form-field"
       >Concurrent calls per key<input
         required
         inputmode="numeric"
@@ -246,40 +285,46 @@
   {#if transport !== 'stdio'}
     <fieldset>
       <legend>Personal OAuth</legend>
-      <label
+      <label class="check-field"
         ><input type="checkbox" bind:checked={oauthEnabled} />Require individual
         grants</label
       >
       {#if oauthEnabled}
-        <label>Client ID<input required bind:value={clientID} /></label>
-        <label>Audience<input required bind:value={audience} /></label>
-        <label
+        <label class="form-field"
+          >Client ID<input required bind:value={clientID} /></label
+        >
+        <label class="form-field"
+          >Audience<input required bind:value={audience} /></label
+        >
+        <label class="form-field"
           >Scopes separated by spaces<input
             required
             bind:value={scopes}
           /></label
         >
-        <label
+        <label class="form-field"
           >Authorization endpoint<input
             type="url"
             bind:value={authorizationEndpoint}
           /></label
         >
-        <label
+        <label class="form-field"
           >Token endpoint<input
             required
             type="url"
             bind:value={tokenEndpoint}
           /></label
         >
-        <label
+        <label class="form-field"
           >Device authorization endpoint<input
             type="url"
             bind:value={deviceEndpoint}
           /></label
         >
-        <label>Entra delegated issuer<input bind:value={entraIssuer} /></label>
-        <label
+        <label class="form-field"
+          >Entra delegated issuer<input bind:value={entraIssuer} /></label
+        >
+        <label class="form-field"
           >Entra client secret<input
             type="password"
             autocomplete="new-password"
@@ -290,21 +335,22 @@
     </fieldset>
     <fieldset>
       <legend>Delegation</legend>
-      <label
+      <label class="check-field"
         ><input type="checkbox" bind:checked={delegationEnabled} />Enable
         delegation</label
       >
       {#if delegationEnabled}
-        <label
+        <label class="form-field"
           >Issuer<input
             required
             type="url"
             bind:value={delegationIssuer}
           /></label
         >
-        <label>Audience<input required bind:value={delegationAudience} /></label
+        <label class="form-field"
+          >Audience<input required bind:value={delegationAudience} /></label
         >
-        <label
+        <label class="form-field full"
           >PKCS8 Ed25519 private key<textarea
             autocomplete="off"
             bind:value={privateKey}></textarea></label
@@ -312,20 +358,15 @@
       {/if}
     </fieldset>
   {/if}
-  <button class="button button-primary" disabled={action.busy}
-    >Save and certify</button
-  >
-  {#if reload && current?.etag !== baseline?.etag}
-    <p role="status">
-      This resource changed since editing began. Your draft is preserved.
-      Reloading discards your edits
-    </p>
-    <button
-      class="button button-secondary"
-      type="button"
-      disabled={action.busy}
-      onclick={reload}>Reload latest</button
+  <div class="page-actions">
+    <button class="button button-primary" disabled={action.busy}
+      >Save and certify</button
     >
+  </div>
+  {#if reload && current?.etag !== baseline?.etag}
+    <ConflictNotice notice="newer" onReload={reload} disabled={action.busy} />
   {/if}
-  {#if action.error}<p role="alert">{action.error}</p>{/if}
+  {#if action.error}<p class="inline-problem" role="alert">
+      {action.error}
+    </p>{/if}
 </form>

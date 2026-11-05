@@ -406,37 +406,6 @@ body {
   background: var(--signal);
 }
 
-/* Live status: a signal dot whose ring pings outward. The ring is a
-   pseudo-element so the dot itself never changes size or colour. */
-.status-dot {
-  position: relative;
-  display: inline-block;
-  width: 6px;
-  height: 6px;
-  flex: none;
-  border-radius: 50%;
-  background: var(--signal);
-}
-
-.status-dot:not(.metric, .idle, .danger)::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  border-radius: 50%;
-  background: var(--signal);
-  animation: ping 2.4s var(--ease-out) infinite;
-  pointer-events: none;
-}
-.status-dot.metric {
-  background: var(--metric);
-}
-.status-dot.idle {
-  background: var(--foreground-muted);
-}
-.status-dot.danger {
-  background: var(--danger);
-}
-
 .empty-state,
 .loading-state {
   display: grid;
@@ -885,6 +854,15 @@ button:not(:disabled),
   color: var(--foreground-hover);
 }
 
+.button-danger,
+.button-danger:hover:not(:disabled) {
+  color: var(--danger);
+}
+
+.button-danger:hover:not(:disabled) {
+  border-color: var(--danger);
+}
+
 /* Rows driven by the `slidingIndicator` action: one signal bar glides to the
    active item. Until the action has measured the row, each item's own
    underline stays the indicator. */
@@ -922,14 +900,6 @@ button:not(:disabled),
 }
 
 /* Arrow icons lean into their destination. */
-.icon-arrow {
-  transition: transform var(--motion);
-}
-
-:is(a, button, summary):hover > .icon-arrow {
-  transform: translateX(3px);
-}
-
 /* Eyebrows lead with a short signal rule: the one blue thread that runs
    through every page heading. */
 .eyebrow {
@@ -1192,7 +1162,6 @@ button:not(:disabled),
   }
 
   .button::after,
-  .status-dot::after,
   .eyebrow-live::after,
   .slide-indicator::after {
     display: none;
@@ -1240,7 +1209,6 @@ button:not(:disabled),
     color: ButtonText;
   }
 
-  .status-dot,
   .eyebrow-live::before,
   .eyebrow::before,
   .badge::before,
@@ -1372,13 +1340,8 @@ button:not(:disabled),
 @media (max-width: 62rem), (pointer: coarse) {
   .button,
   .filter-control,
-  .form-field :is(input:not([type='checkbox'], [type='radio']), select),
-  .icon-button {
+  .form-field :is(input:not([type='checkbox'], [type='radio']), select) {
     min-height: 2.75rem;
-  }
-
-  .icon-button {
-    min-width: 2.75rem;
   }
 }
 
@@ -1403,67 +1366,147 @@ button:not(:disabled),
   }
 }
 
-.workflow {
-  display: grid;
-  gap: 1.25rem;
-}
-.workflow .card,
-.workflow.card {
-  padding: 1.5rem;
-}
-.workflow form,
-.workflow fieldset {
-  display: grid;
+.filter-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
   gap: 1rem;
+  margin-top: 1.5rem;
 }
-.workflow label {
+
+.scroll-table {
+  margin-top: 1.5rem;
+}
+
+.section > h2 + .scroll-table,
+.section > p + .scroll-table,
+.stack-card .scroll-table {
+  margin-top: 0.75rem;
+}
+
+.text-button + .page-header {
+  margin-top: 0.75rem;
+}
+
+.list-pager {
+  justify-content: flex-end;
+  margin-top: 0.75rem;
+}
+
+.page-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  margin-top: 1.5rem;
+  border-bottom: 1px solid var(--border-hairline);
+}
+
+.page-tabs > :is(a, button) {
+  min-height: 2.5rem;
+  margin-bottom: -1px;
+  padding: 0.5rem 0.75rem;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--foreground-subtle);
+  text-decoration: none;
+  transition:
+    border-color var(--motion),
+    color var(--motion);
+}
+
+.page-tabs > :is(a, button):hover:not(:disabled) {
+  color: var(--foreground-hover);
+}
+
+.page-tabs > [aria-current] {
+  border-bottom-color: var(--signal);
+  color: var(--foreground-hover);
+}
+
+.detail-list {
   display: grid;
-  gap: 0.4rem;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 0.5rem 1rem;
+  margin-top: 1.5rem;
 }
-.workflow label:has(input[type='checkbox']) {
+
+.detail-list dt {
+  color: var(--foreground-muted);
+}
+
+.detail-list code,
+.data-table code {
+  overflow-wrap: anywhere;
+}
+
+.code-block {
+  max-height: 32rem;
+  overflow: auto;
+  padding: 1rem;
+  border: 1px solid var(--border-hairline);
+  border-radius: var(--radius-control);
+  background: var(--code-bg);
+  color: var(--code-foreground);
+  font-size: var(--text-caption);
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.check-field {
   display: flex;
   align-items: center;
   gap: 0.75rem;
 }
-.workflow :is(input:not([type='checkbox']), select, textarea) {
-  min-height: 2.5rem;
-  padding: 0.5rem 0.75rem;
-  border: 1px solid var(--border-hairline);
-  border-radius: var(--radius-control);
-  background: var(--canvas);
-  color: var(--foreground);
-}
-.workflow textarea {
-  min-height: 7rem;
-  resize: vertical;
-}
-.workflow pre,
-.workflow table {
-  max-width: 100%;
-  overflow: auto;
-}
-.workflow th,
-.workflow td {
-  padding: 0.65rem;
-  text-align: left;
-}
-.workflow nav {
-  display: flex;
+
+.stack-card,
+.form-card {
+  display: grid;
   gap: 1rem;
+  margin-top: 1.5rem;
+  padding: 1.5rem;
 }
 
-.workflow h2 {
-  margin: 0;
-  font-size: 1.125rem;
-  font-weight: 600;
+:is(.stack-card, .form-card) > .button,
+.stack-card form > .button {
+  justify-self: start;
 }
-@media (min-width: 800px) {
-  .workflow form,
-  .workflow fieldset {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-  .workflow form > :is(h2, p, fieldset, details, button, [role='alert']),
-  .workflow label:has(textarea) {
-    grid-column: 1 / -1;
+
+.section > h2 {
+  margin-bottom: 0.75rem;
+}
+
+:is(.stack-card, .form-card) > h2 {
+  font-size: 1rem;
+  font-weight: 500;
+  letter-spacing: -0.02em;
+}
+
+.form-card,
+.form-card fieldset {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.form-card fieldset {
+  display: grid;
+  gap: 1rem;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+}
+
+.form-card legend {
+  margin-bottom: 0.75rem;
+  font-weight: 500;
+}
+
+.form-card > :is(h2, p, fieldset, [role], .page-actions, .form-field.full),
+.form-card fieldset > :is(p, [role], .form-field.full) {
+  grid-column: 1 / -1;
+}
+
+@media (max-width: 36rem) {
+  .form-card,
+  .form-card fieldset {
+    grid-template-columns: 1fr;
   }
 }

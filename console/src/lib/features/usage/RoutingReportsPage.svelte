@@ -1,7 +1,8 @@
 <script lang="ts">
   import { createQuery } from '@tanstack/svelte-query';
   import { resolve } from '$app/paths';
-  import { dateTimeLocalValue } from '$lib/format';
+  import ScrollTable from '$lib/components/ScrollTable.svelte';
+  import { dateTimeLocalValue, formatInteger } from '$lib/format';
   import { errorMessage } from '$lib/management/http';
   import { useRole } from '$lib/features/access/session/useRole.svelte';
   import { defaultUsageState } from './usageState';
@@ -64,87 +65,138 @@
 </script>
 
 <svelte:head><title>Routing reports · OpenLLMProxy</title></svelte:head>
-<section class="workflow">
-  <h1 class="page-title">Routing reports</h1>
-  <nav aria-label="Usage reports">
-    <a href={resolve('/usage')}>Usage overview</a><a
-      aria-current="page"
-      href={resolve('/usage/routing')}>Routing reports</a
-    >
-  </nav>
-  <form class="card" onsubmit={apply}>
-    <label
-      >Start<input required type="datetime-local" bind:value={start} /></label
-    ><label>End<input required type="datetime-local" bind:value={end} /></label>
-    <label>Route<input bind:value={route} /></label><label
-      >Project ID<input bind:value={project} /></label
-    ><button class="button button-primary">Apply filters</button>
-  </form>
-  {#if error}<p role="alert">{error}</p>{/if}
-  {#if savings.error || shadows.error}<p role="alert">
-      {errorMessage(savings.error ?? shadows.error)}
-    </p>{/if}
-  {#if savings.isFetching || shadows.isFetching}<p role="status">
-      Loading reports
-    </p>{/if}
-  {#if savings.data}
-    <section class="card">
-      <h2>Selector savings</h2>
-      <p>
-        Currency {savings.data.currency ?? 'Unavailable'}. Compared attempts
-        have prices for both the selected and avoided targets
-      </p>
-      <table>
-        <thead
-          ><tr
-            ><th>Route</th><th>Selector</th><th>Compared / attempts</th><th
-              >Estimated cost</th
-            ><th>Baseline cost</th><th>Savings</th></tr
-          ></thead
-        ><tbody>
-          {#each savings.data.items as value, index (index)}<tr
-              ><td>{value.route}</td><td>{value.selector}</td><td
-                >{value.compared_attempts} / {value.attempts}</td
-              ><td
-                >{value.compared_attempts
-                  ? value.estimated_cost
-                  : 'Unavailable'}</td
-              ><td
-                >{value.compared_attempts
-                  ? value.baseline_cost
-                  : 'Unavailable'}</td
-              ><td>{value.compared_attempts ? value.savings : 'Unavailable'}</td
-              ></tr
-            >{/each}
-        </tbody>
-      </table>
-      {#if !savings.data.items.length}<p>
-          No selector comparisons in this interval
-        </p>{/if}
-    </section>
-  {/if}
-  {#if shadows.data}<section>
-      <h2>Shadow comparisons</h2>
-      <p>Currency {shadows.data.currency ?? 'Unavailable'}</p>
-      {#each shadows.data.items as value, index (index)}<article class="card">
-          <h3>{value.route} · {value.upstream_model}</h3>
-          <p>{value.pairs} mirrored pairs · {value.provider_id}</p>
-          <table>
-            <thead
-              ><tr><th>Measurement</th><th>Primary</th><th>Shadow</th></tr
-              ></thead
-            ><tbody>
-              {#each measurements as [label, key] (key)}
-                <tr
-                  ><th>{label}</th><td>{value.primary[key] ?? 'Unavailable'}</td
-                  ><td>{value.shadow[key] ?? 'Unavailable'}</td></tr
+<div class="page-header">
+  <div>
+    <p class="eyebrow">Operations</p>
+    <h1 class="page-title">Routing reports</h1>
+    <p class="page-description">
+      Selector savings and shadow comparisons for the chosen interval.
+    </p>
+  </div>
+</div>
+<nav class="page-tabs" aria-label="Usage reports">
+  <a href={resolve('/usage')}>Usage overview</a><a
+    aria-current="page"
+    href={resolve('/usage/routing')}>Routing reports</a
+  >
+</nav>
+<form class="card form-card" onsubmit={apply}>
+  <label class="form-field"
+    >Start<input required type="datetime-local" bind:value={start} /></label
+  >
+  <label class="form-field"
+    >End<input required type="datetime-local" bind:value={end} /></label
+  >
+  <label class="form-field">Route<input bind:value={route} /></label>
+  <label class="form-field">Project ID<input bind:value={project} /></label>
+  <div class="page-actions">
+    <button class="button button-primary">Apply filters</button>
+  </div>
+</form>
+{#if error}<p class="inline-problem" role="alert">{error}</p>{/if}
+{#if savings.error || shadows.error}
+  <p class="inline-problem" role="alert">
+    {errorMessage(savings.error ?? shadows.error)}
+  </p>
+{/if}
+{#if savings.isFetching || shadows.isFetching}
+  <p class="inline-status" role="status">Loading reports…</p>
+{/if}
+{#if savings.data}
+  <section class="section" aria-labelledby="selector-savings">
+    <h2 id="selector-savings">Selector savings</h2>
+    <p class="inline-status">
+      Currency {savings.data.currency ?? 'Unavailable'}. Compared attempts have
+      prices for both the selected and avoided targets.
+    </p>
+    {#if !savings.data.items.length}
+      <div class="card empty-state">
+        No selector comparisons in this interval
+      </div>
+    {:else}
+      <ScrollTable label="Selector savings">
+        <table class="data-table">
+          <caption class="sr-only">Selector savings by route</caption>
+          <thead>
+            <tr>
+              <th scope="col">Route</th>
+              <th scope="col">Selector</th>
+              <th scope="col">Compared / attempts</th>
+              <th scope="col">Estimated cost</th>
+              <th scope="col">Baseline cost</th>
+              <th scope="col">Savings</th>
+            </tr>
+          </thead>
+          <tbody>
+            {#each savings.data.items as value (`${value.route}:${value.selector}`)}
+              <tr>
+                <td>{value.route}</td>
+                <td>{value.selector}</td>
+                <td
+                  >{formatInteger(value.compared_attempts)} / {formatInteger(
+                    value.attempts
+                  )}</td
                 >
-              {/each}</tbody
+                <td
+                  >{value.compared_attempts
+                    ? value.estimated_cost
+                    : 'Unavailable'}</td
+                >
+                <td
+                  >{value.compared_attempts
+                    ? value.baseline_cost
+                    : 'Unavailable'}</td
+                >
+                <td
+                  >{value.compared_attempts ? value.savings : 'Unavailable'}</td
+                >
+              </tr>
+            {/each}
+          </tbody>
+        </table>
+      </ScrollTable>
+    {/if}
+  </section>
+{/if}
+{#if shadows.data}
+  <section class="section" aria-labelledby="shadow-comparisons">
+    <h2 id="shadow-comparisons">Shadow comparisons</h2>
+    <p class="inline-status">
+      Currency {shadows.data.currency ?? 'Unavailable'}
+    </p>
+    {#if !shadows.data.items.length}
+      <div class="card empty-state">No shadow comparisons in this interval</div>
+    {/if}
+    {#each shadows.data.items as value (`${value.route}:${value.provider_id}:${value.upstream_model}`)}
+      <article class="card stack-card">
+        <h3>{value.route} · {value.upstream_model}</h3>
+        <p class="inline-status">
+          {formatInteger(value.pairs)} mirrored pairs · {value.provider_id}
+        </p>
+        <ScrollTable label={`Shadow comparison for ${value.route}`}>
+          <table class="data-table">
+            <caption class="sr-only"
+              >Primary and shadow measurements for {value.route}</caption
             >
+            <thead>
+              <tr>
+                <th scope="col">Measurement</th>
+                <th scope="col">Primary</th>
+                <th scope="col">Shadow</th>
+              </tr>
+            </thead>
+            <tbody>
+              {#each measurements as [label, key] (key)}
+                <tr>
+                  <th scope="row">{label}</th>
+                  <td>{value.primary[key] ?? 'Unavailable'}</td>
+                  <td>{value.shadow[key] ?? 'Unavailable'}</td>
+                </tr>
+              {/each}
+            </tbody>
           </table>
-        </article>{/each}
-      {#if !shadows.data.items.length}<p>
-          No shadow comparisons in this interval
-        </p>{/if}
-    </section>{/if}
-</section>
+        </ScrollTable>
+      </article>
+    {/each}
+  </section>
+{/if}

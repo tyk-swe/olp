@@ -97,12 +97,12 @@
   }
 </script>
 
-<svelte:head><title>Provider Resources · OpenLLMProxy</title></svelte:head>
+<svelte:head><title>Provider resources · OpenLLMProxy</title></svelte:head>
 
 <div class="page-header">
   <div>
     <p class="eyebrow">Operations</p>
-    <h1 class="page-title">Provider Resources</h1>
+    <h1 class="page-title">Provider resources</h1>
     <p class="page-description">
       Inspect resource ownership and settlement, or manage resources with an
       inference API key.

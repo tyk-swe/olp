@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { formatDate } from '$lib/format';
+  import ScrollTable from '$lib/components/ScrollTable.svelte';
   import { createQuery } from '@tanstack/svelte-query';
   import { writable } from 'svelte/store';
   import { page } from '$app/state';
@@ -42,18 +44,23 @@
 </script>
 
 <svelte:head><title>Delegations · OpenLLMProxy</title></svelte:head>
-<header>
-  <p class="eyebrow">Gateway</p>
-  <h1>Delegations</h1>
-  <p>Delegating principals, agent principals and their shared budgets</p>
-</header>
+<div class="page-header">
+  <div>
+    <p class="eyebrow">Agents</p>
+    <h1 class="page-title">Delegations</h1>
+    <p class="page-description">
+      Delegating principals, agent principals and their shared budgets
+    </p>
+  </div>
+</div>
 <form
+  class="filter-bar"
   onsubmit={(event) => {
     event.preventDefault();
     filters.set({ project, delegationID: delegationID.trim() });
   }}
 >
-  <label
+  <label class="form-field"
     >Project <select name="project" class="form-field" bind:value={project}
       ><option value="">All authorized projects</option
       >{#each !projects.isFetching && !projects.error ? (projects.data ?? []) : [] as value (value.id)}<option
@@ -61,23 +68,33 @@
         >{/each}</select
     ></label
   >
-  <label
+  <label class="form-field"
     >Delegation ID <input class="form-field" bind:value={delegationID} /></label
   >
   <button class="button button-secondary" type="submit">Filter</button>
 </form>
-{#if projects.error}<p role="alert">{errorMessage(projects.error)}</p>{/if}
-{#if delegations.error}<p role="alert">{errorMessage(delegations.error)}</p>
-{:else if delegations.isFetching}<p>Loading delegations…</p>
-{:else if !delegations.data?.items.length}<p>No delegations in this view</p>
+{#if projects.error}<p class="inline-problem" role="alert">
+    {errorMessage(projects.error)}
+  </p>{/if}
+{#if delegations.error}<p class="inline-problem" role="alert">
+    {errorMessage(delegations.error)}
+  </p>
+{:else if delegations.isFetching}<div class="loading-state" role="status">
+    Loading delegations…
+  </div>
+{:else if !delegations.data?.items.length}<div class="card empty-state">
+    No delegations in this view
+  </div>
 {:else}
-  <div class="records">
-    <table>
+  <ScrollTable label="Delegations">
+    <table class="data-table">
       <thead
         ><tr
-          ><th>Delegation</th><th>Project</th><th>Delegating principal</th><th
-            >Agent principal</th
-          ><th>State</th><th>Pair spend / limit</th><th>Expires</th></tr
+          ><th scope="col">Delegation</th><th scope="col">Project</th><th
+            scope="col">Delegating principal</th
+          ><th scope="col">Agent principal</th><th scope="col">State</th><th
+            scope="col">Pair spend / limit</th
+          ><th scope="col">Expires</th></tr
         ></thead
       >
       <tbody
@@ -120,15 +137,16 @@
                   Some usage has no price or charge
                 </div>{/if}
             </td>
-            <td>{new Date(delegation.expires_at).toLocaleString()}</td>
+            <td>{formatDate(delegation.expires_at)}</td>
           </tr>
         {/each}</tbody
       >
     </table>
-  </div>
+  </ScrollTable>
 {/if}
-<nav aria-label="Delegation pages">
+<nav class="page-actions list-pager" aria-label="Delegation pages">
   <button
+    class="button button-secondary"
     type="button"
     disabled={!$filters.cursor || delegations.isFetching}
     onclick={() =>
@@ -136,6 +154,7 @@
     >Newest</button
   >
   <button
+    class="button button-secondary"
     type="button"
     disabled={!!delegations.error ||
       !delegations.data?.nextCursor ||
@@ -147,45 +166,9 @@
       }))}>Older</button
   >
   <button
+    class="button button-secondary"
     type="button"
     disabled={delegations.isFetching}
     onclick={() => delegations.refetch()}>Refresh</button
   >
 </nav>
-
-<style>
-  header,
-  form {
-    margin-bottom: 1rem;
-  }
-  form {
-    display: flex;
-    align-items: end;
-    flex-wrap: wrap;
-    gap: 1rem;
-  }
-  label {
-    display: grid;
-    gap: 0.25rem;
-  }
-  .records {
-    overflow-x: auto;
-  }
-  table {
-    width: 100%;
-    text-align: left;
-  }
-  td,
-  th {
-    padding: 0.75rem;
-    vertical-align: top;
-  }
-  code {
-    overflow-wrap: anywhere;
-  }
-  nav {
-    display: flex;
-    gap: 0.5rem;
-    margin-top: 1rem;
-  }
-</style>

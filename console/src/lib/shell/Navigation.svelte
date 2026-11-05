@@ -1,35 +1,15 @@
 <script lang="ts">
-  import { useServiceCapabilities } from '$lib/features/access/session/serviceCapabilities.svelte';
-  const services = useServiceCapabilities();
   import { page } from '$app/state';
-  import { resolve } from '$app/paths';
-  import type { ManagementRoute } from '$lib/management/requirements';
-  import {
-    allows,
-    type Grant
-  } from '$lib/features/access/session/authorization';
+  import { useServiceCapabilities } from '$lib/features/access/session/serviceCapabilities.svelte';
+  import type { Grant } from '$lib/features/access/session/authorization';
   import NavIcon from '$lib/shell/NavIcon.svelte';
-  import type { IconName } from '$lib/shell/icons';
   import { slidingIndicator } from '$lib/shell/indicator';
-
-  type NavigationItem = {
-    label: string;
-    href: string;
-    icon: IconName;
-    /** The management call the page opens with; hidden unless admitted. */
-    route?: ManagementRoute;
-  };
-
-  type NavigationGroup = {
-    label?: string;
-    items: NavigationItem[];
-  };
-
-  type NavigationEntry = {
-    label: string;
-    href: string;
-    items: NavigationItem[];
-  };
+  import {
+    isActivePath,
+    NAVIGATION_GROUPS,
+    navigationEntries,
+    visibleItems
+  } from '$lib/shell/navigation';
 
   let {
     grant,
@@ -43,270 +23,9 @@
     onNavigate?: () => void;
   } = $props();
 
-  const groups: NavigationGroup[] = [
-    { items: [{ label: 'Overview', href: resolve('/'), icon: 'overview' }] },
-    {
-      label: 'Gateway',
-      items: [
-        {
-          label: 'MCP servers',
-          href: resolve('/mcp-servers'),
-          icon: 'route',
-          route: 'GET /api/v1/mcp-servers'
-        },
-        {
-          label: 'Agent publications',
-          href: resolve('/agents'),
-          icon: 'route',
-          route: 'GET /api/v1/toolsets'
-        },
-        {
-          label: 'Runs',
-          href: resolve('/runs'),
-          icon: 'route',
-          route: 'GET /api/v1/agent-runs'
-        },
-        {
-          label: 'Investigations',
-          href: resolve('/investigations'),
-          icon: 'route',
-          route: 'GET /api/v1/investigations'
-        },
-        {
-          label: 'A2A tasks',
-          href: resolve('/a2a-tasks'),
-          icon: 'route',
-          route: 'GET /api/v1/a2a-tasks'
-        },
-        {
-          label: 'Delegations',
-          href: resolve('/delegations'),
-          icon: 'route',
-          route: 'GET /api/v1/agent-delegations'
-        },
-        {
-          label: 'Tool calls',
-          href: resolve('/tool-calls'),
-          icon: 'route',
-          route: 'GET /api/v1/mcp-tool-calls'
-        },
-        {
-          label: 'Personal tool grants',
-          href: resolve('/agents/grants'),
-          icon: 'route',
-          route: 'GET /api/v1/mcp-user-grants'
-        },
-        {
-          label: 'Provisional exposure',
-          href: resolve('/execution-debits'),
-          icon: 'route',
-          route: 'GET /api/v1/execution-debits'
-        },
-        {
-          label: 'Guardrails',
-          href: resolve('/guardrails'),
-          icon: 'route',
-          route: 'GET /api/v1/guardrails'
-        },
-        {
-          label: 'Providers',
-          href: resolve('/providers'),
-          icon: 'provider',
-          route: 'GET /api/v1/providers'
-        },
-        {
-          label: 'Plugins',
-          href: resolve('/plugins'),
-          icon: 'provider',
-          route: 'GET /api/v1/plugins'
-        },
-        {
-          label: 'Models',
-          href: resolve('/provider-models'),
-          icon: 'model',
-          route: 'GET /api/v1/provider-models'
-        },
-        {
-          label: 'Catalog',
-          href: resolve('/catalog'),
-          icon: 'model',
-          route: 'GET /api/v1/catalog'
-        },
-        {
-          label: 'Routes',
-          href: resolve('/routes'),
-          icon: 'route',
-          route: 'GET /api/v1/routes'
-        },
-        {
-          label: 'Code mode',
-          href: resolve('/code-mode'),
-          icon: 'route',
-          route: 'GET /api/v1/code/routes'
-        }
-      ]
-    },
-    {
-      label: 'Access',
-      items: [
-        {
-          label: 'API Keys',
-          href: resolve('/api-keys'),
-          icon: 'key',
-          route: 'GET /api/v1/api-keys'
-        },
-        {
-          label: 'SCIM',
-          href: resolve('/scim-provisioning'),
-          icon: 'access',
-          route: 'GET /api/v1/scim/groups'
-        },
-        {
-          label: 'Workload identity',
-          href: resolve('/workload-issuers'),
-          icon: 'access',
-          route: 'GET /api/v1/workload-issuers'
-        },
-        {
-          label: 'Organizations',
-          href: resolve('/organizations'),
-          icon: 'access',
-          route: 'GET /api/v1/organizations'
-        },
-        {
-          label: 'Budget increases',
-          icon: 'access',
-          href: resolve('/budget-increases'),
-          route: 'GET /api/v1/budget-increases'
-        },
-        {
-          label: 'Project policies',
-          href: resolve('/project-policies'),
-          icon: 'access',
-          route: 'GET /api/v1/project-memberships'
-        },
-        {
-          label: 'Access',
-          href: resolve('/access'),
-          icon: 'access',
-          route: 'GET /api/v1/users'
-        }
-      ]
-    },
-    {
-      label: 'Operations',
-      items: [
-        {
-          label: 'Signed fact exports',
-          href: resolve('/signed-exports'),
-          icon: 'request',
-          route: 'GET /api/v1/sinks'
-        },
-        {
-          label: 'Requests',
-          href: resolve('/requests'),
-          icon: 'request',
-          route: 'GET /api/v1/requests'
-        },
-        {
-          label: 'Media Jobs',
-          href: resolve('/media-jobs'),
-          icon: 'request',
-          route: 'GET /api/v1/media-jobs'
-        },
-        {
-          label: 'Provider Resources',
-          href: resolve('/provider-resources'),
-          icon: 'request',
-          route: 'GET /api/v1/provider-resources'
-        },
-        {
-          label: 'Usage',
-          href: resolve('/usage'),
-          icon: 'usage',
-          route: 'GET /api/v1/usage/summary'
-        },
-        {
-          label: 'Health',
-          href: resolve('/health'),
-          icon: 'health',
-          route: 'GET /api/v1/health/ready'
-        },
-        {
-          label: 'Audit',
-          href: resolve('/audit'),
-          icon: 'audit',
-          route: 'GET /api/v1/audit'
-        }
-      ]
-    },
-    {
-      items: [
-        {
-          label: 'Playground',
-          href: resolve('/playground'),
-          icon: 'playground',
-          route: 'POST /api/v1/playground'
-        },
-        {
-          label: 'Settings',
-          href: resolve('/settings'),
-          icon: 'settings',
-          route: 'GET /api/v1/settings'
-        }
-      ]
-    }
-  ];
-
-  function visible(item: NavigationItem) {
-    const controlPaths: string[] = [
-      resolve('/'),
-      resolve('/api-keys'),
-      resolve('/access'),
-      resolve('/plugins'),
-      resolve('/audit'),
-      resolve('/settings')
-    ];
-    return (
-      (services.gatewayAvailable || controlPaths.includes(item.href)) &&
-      (!item.route || allows(grant, item.route))
-    );
-  }
-
-  // Settings owns /settings but not the personal profile beneath it, which has
-  // no nav entry of its own and must not light up the installation link.
-  const excludedDescendants: Record<string, readonly string[]> = {
-    [resolve('/settings')]: [resolve('/settings/profile')]
-  };
-
-  function isActive(href: string) {
-    const overview = resolve('/');
-    if (href === overview) return page.url.pathname === overview;
-    const path = page.url.pathname;
-    if (path !== href && !path.startsWith(`${href}/`)) return false;
-    return !excludedDescendants[href]?.some(
-      (excluded) => path === excluded || path.startsWith(`${excluded}/`)
-    );
-  }
-
-  // The top bar shows one link per group. Unlabelled groups, and groups the
-  // role trims to a single page, surface that page directly: a developer sees
-  // "API Keys" rather than an "Access" group that only contains it.
-  const entries = $derived.by<NavigationEntry[]>(() =>
-    groups.flatMap((group) => {
-      const items = group.items.filter(visible);
-      if (!items.length) return [];
-      if (!group.label || items.length === 1) {
-        return items.map((item) => ({
-          label: item.label,
-          href: item.href,
-          items: [item]
-        }));
-      }
-      return [{ label: group.label, href: items[0].href, items }];
-    })
-  );
-
+  const services = useServiceCapabilities();
+  const isActive = (href: string) => isActivePath(page.url.pathname, href);
+  const entries = $derived(navigationEntries(grant, services.gatewayAvailable));
   const activeEntry = $derived(
     entries.find((entry) => entry.items.some((item) => isActive(item.href)))
   );
@@ -359,13 +78,13 @@
   {/if}
 {:else}
   <nav class="list" aria-label={label}>
-    {#each groups as group (group)}
-      {@const visibleItems = group.items.filter(visible)}
-      {#if visibleItems.length}
+    {#each NAVIGATION_GROUPS as group (group)}
+      {@const items = visibleItems(group, grant, services.gatewayAvailable)}
+      {#if items.length}
         <div class="nav-group">
           {#if group.label}<p class="nav-label">{group.label}</p>{/if}
           <ul>
-            {#each visibleItems as item (item.href)}
+            {#each items as item (item.href)}
               <li>
                 <a
                   class:active={isActive(item.href)}
@@ -401,9 +120,6 @@
       color var(--motion);
   }
 
-  /* Top bar and sub-row: text links over one signal indicator that slides to
-     the current page. Hovering the row steps the other links back and draws
-     a hairline under the hovered one. Every colour step stays above 4.5:1. */
   .bar,
   .subnav {
     min-width: 0;
@@ -549,7 +265,7 @@
     color: var(--signal);
   }
 
-  @media (max-width: 62rem) {
+  @media (max-width: 74rem) {
     .bar,
     .subnav {
       display: none;

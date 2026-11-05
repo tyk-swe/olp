@@ -34,6 +34,12 @@
     ></circle><circle cx="19" cy="18" r="2"></circle><path
       d="M7 6h3a4 4 0 0 1 4 4v4a4 4 0 0 0 3 3.9M14 10a4 4 0 0 1 3-3.9"
     ></path>
+  {:else if name === 'agent'}
+    <rect x="5" y="8" width="14" height="12" rx="2"></rect><path
+      d="M12 4v4M9.5 13v2m5-2v2"
+    ></path>
+  {:else if name === 'guardrail'}
+    <path d="M12 3 5 6v5c0 4.6 2.9 8.2 7 10 4.1-1.8 7-5.4 7-10V6l-7-3Z"></path>
   {:else if name === 'key'}
     <circle cx="8" cy="15" r="4"></circle><path d="m11 12 8-8m-3 3 2 2m-5 1 2 2"
     ></path>

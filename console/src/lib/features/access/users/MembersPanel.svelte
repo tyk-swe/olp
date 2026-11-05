@@ -144,7 +144,7 @@
       await refreshUserViews();
       notice = active
         ? `${updated.display_name} can sign in again.`
-        : `${updated.display_name} was deactivated and existing sessions were revoked. Next: review API Keys for keys attributed to this member; installation-scoped keys are not automatically revoked.`;
+        : `${updated.display_name} was deactivated and existing sessions were revoked. Next: review API keys for keys attributed to this member; installation-scoped keys are not automatically revoked.`;
     });
   }
 </script>
@@ -306,7 +306,7 @@
               >{#if user.id === viewer?.id}<small>Your account</small
                 >{:else if canManage}<button
                   class="button button-secondary"
-                  class:danger-button={user.active}
+                  class:button-danger={user.active}
                   type="button"
                   onclick={() => changeActive(user)}
                   disabled={Boolean(busy)}
@@ -377,9 +377,6 @@
   }
   .role-select:hover:not(:disabled) {
     border-color: var(--border-strong);
-  }
-  .danger-button {
-    color: var(--danger);
   }
   @media (max-width: 64rem) {
     .role-guide {

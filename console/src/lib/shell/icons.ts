@@ -3,6 +3,8 @@ export type IconName =
   | 'provider'
   | 'model'
   | 'route'
+  | 'agent'
+  | 'guardrail'
   | 'key'
   | 'access'
   | 'request'

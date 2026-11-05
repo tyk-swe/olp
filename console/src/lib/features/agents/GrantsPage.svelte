@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { formatDate } from '$lib/format';
+  import ScrollTable from '$lib/components/ScrollTable.svelte';
   import { onMount } from 'svelte';
   import { writable } from 'svelte/store';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
@@ -426,33 +428,41 @@
   onhashchange={() => consumeEnrollment(window.location.hash.slice(1))}
 />
 
-<svelte:head><title>Personal grants · OpenLLMProxy</title></svelte:head>
-<header>
-  <p class="eyebrow">Tools</p>
-  <h1>Personal grants</h1>
-  <p>
-    Grant standing is bound to one individual and the resource's authorization
-    settings
-  </p>
-</header>
+<svelte:head><title>Personal tool grants · OpenLLMProxy</title></svelte:head>
+<div class="page-header">
+  <div>
+    <p class="eyebrow">Agents</p>
+    <h1 class="page-title">Personal tool grants</h1>
+    <p class="page-description">
+      Grant standing is bound to one individual and the resource's authorization
+      settings.
+    </p>
+  </div>
+</div>
 <DelegationConsent />
-{#if $state.error}<p role="alert">{$state.error}</p>{/if}
-{#if $state.message}<p role="status">{$state.message}</p>{/if}
+{#if $state.error}<p class="inline-problem" role="alert">{$state.error}</p>{/if}
+{#if $state.message}<p class="success-message" role="status">
+    {$state.message}
+  </p>{/if}
 {#if $state.handoffToken}
-  <section>
+  <section class="section">
     <h2>Claim enrollment</h2>
     <p>This one-use link binds enrollment to your signed-in account</p>
-    <button disabled={$state.busy} onclick={claimEnrollment}
-      >Claim enrollment</button
+    <button
+      class="button button-secondary"
+      disabled={$state.busy}
+      onclick={claimEnrollment}>Claim enrollment</button
     >
   </section>
 {/if}
 {#if $state.enrollmentID && !$state.handoffToken && $state.authorization?.state !== 'active'}
-  <section>
+  <section class="section">
     <h2>Authorize personal access</h2>
     {#if $state.callbackCode}
-      <button disabled={$state.busy} onclick={() => finish(false)}
-        >Complete authorization</button
+      <button
+        class="button button-secondary"
+        disabled={$state.busy}
+        onclick={() => finish(false)}>Complete authorization</button
       >
     {:else if $state.authorization?.device}
       <p>
@@ -464,18 +474,27 @@
         >
       </p>
       <p>Check again after {$state.authorization.device.interval} seconds</p>
-      <button disabled={$state.busy} onclick={() => finish(true)}
-        >Check device approval</button
+      <button
+        class="button button-secondary"
+        disabled={$state.busy}
+        onclick={() => finish(true)}>Check device approval</button
       >
     {:else if $state.authorization?.authorization_url}
-      <a href={$state.authorization.authorization_url}>Sign in upstream</a>
+      <a
+        class="button button-primary"
+        href={$state.authorization.authorization_url}>Sign in upstream</a
+      >
     {:else}
       <button
+        class="button button-secondary"
         disabled={$state.busy}
         onclick={() => authorize('authorization_code')}
         >Authorize in browser</button
       >
-      <button disabled={$state.busy} onclick={() => authorize('device_code')}
+      <button
+        class="button button-secondary"
+        disabled={$state.busy}
+        onclick={() => authorize('device_code')}
         >Use device authorization</button
       >
     {/if}
@@ -483,9 +502,9 @@
 {/if}
 
 {#if canManage}
-  <section>
+  <section class="section">
     <h2>Server authorization</h2>
-    <label
+    <label class="form-field"
       >Registered server <select
         value={$state.selection.id}
         onchange={(event) => void loadServer(event.currentTarget.value)}
@@ -503,28 +522,28 @@
           void saveConfiguration();
         }}
       >
-        <label
+        <label class="form-field"
           >Client ID <input
             required
             value={$state.fields.clientID}
             oninput={(event) => setField('clientID', event.currentTarget.value)}
           /></label
         >
-        <label
+        <label class="form-field"
           >Audience <input
             required
             value={$state.fields.audience}
             oninput={(event) => setField('audience', event.currentTarget.value)}
           /></label
         >
-        <label
+        <label class="form-field"
           >Scopes <input
             required
             value={$state.fields.scopes}
             oninput={(event) => setField('scopes', event.currentTarget.value)}
           /></label
         >
-        <label
+        <label class="form-field"
           >Authorization endpoint <input
             type="url"
             disabled={Boolean($state.fields.entraIssuer.trim())}
@@ -534,7 +553,7 @@
               setField('authorizationEndpoint', event.currentTarget.value)}
           /></label
         >
-        <label
+        <label class="form-field"
           >Token endpoint <input
             type="url"
             required
@@ -543,7 +562,7 @@
               setField('tokenEndpoint', event.currentTarget.value)}
           /></label
         >
-        <label
+        <label class="form-field"
           >Device authorization endpoint <input
             type="url"
             disabled={Boolean($state.fields.entraIssuer.trim())}
@@ -560,7 +579,7 @@
             verified delegated user request and cannot combine with local
             delegated signing.
           </p>
-          <label
+          <label class="form-field"
             >Trusted Entra issuer <input
               type="url"
               value={$state.fields.entraIssuer}
@@ -568,7 +587,7 @@
                 setField('entraIssuer', event.currentTarget.value)}
             /></label
           >
-          <label
+          <label class="form-field"
             >Middle-tier client secret <input
               type="password"
               autocomplete="new-password"
@@ -588,7 +607,7 @@
             Leave the issuer empty to disable signing. The private key stays in
             this installation.
           </p>
-          <label
+          <label class="form-field"
             >Delegated issuer <input
               type="url"
               value={$state.fields.delegatedIssuer}
@@ -596,14 +615,14 @@
                 setField('delegatedIssuer', event.currentTarget.value)}
             /></label
           >
-          <label
+          <label class="form-field"
             >Delegated audience <input
               value={$state.fields.delegatedAudience}
               oninput={(event) =>
                 setField('delegatedAudience', event.currentTarget.value)}
             /></label
           >
-          <label
+          <label class="form-field"
             >PKCS8 Ed25519 signing key <textarea
               autocomplete="off"
               spellcheck="false"
@@ -613,7 +632,9 @@
             ></textarea></label
           >
         </fieldset>
-        <button disabled={$state.busy}>Save authorization settings</button>
+        <button class="button button-secondary" disabled={$state.busy}
+          >Save authorization settings</button
+        >
       </form>
       {#if $state.server.oauth?.entra_obo}<p>
           Entra grants are created by verified delegated user requests. Browser
@@ -625,7 +646,7 @@
           void startEnrollment();
         }}
       >
-        <label
+        <label class="form-field"
           >API key UUID <input
             required
             value={$state.fields.keyID}
@@ -633,6 +654,7 @@
           /></label
         >
         <button
+          class="button button-secondary"
           disabled={$state.busy ||
             !$state.server.oauth ||
             Boolean($state.server.oauth.entra_obo)}>Start key enrollment</button
@@ -642,7 +664,7 @@
   </section>
 {/if}
 {#if canManageAgents}
-  <section>
+  <section class="section">
     <h2>Agent authorization</h2>
     <form
       onsubmit={(event) => {
@@ -650,7 +672,7 @@
         void startAgentEnrollment();
       }}
     >
-      <label
+      <label class="form-field"
         >Published agent <select
           value={$state.agentID}
           disabled={$state.busy}
@@ -664,7 +686,7 @@
           {/each}
         </select></label
       >
-      <label
+      <label class="form-field"
         >Agent API key UUID <input
           value={$state.agentKeyID}
           disabled={$state.busy}
@@ -672,7 +694,9 @@
           required
         /></label
       >
-      <button disabled={$state.busy || !$state.agentID}
+      <button
+        class="button button-secondary"
+        disabled={$state.busy || !$state.agentID}
         >Start agent key enrollment</button
       >
     </form>
@@ -687,48 +711,67 @@
       }}>Continue personal enrollment</a
     >
   </p>{/if}
-<section>
+<section class="section">
   <h2>Grant standing</h2>
-  {#if grants.error}<p role="alert">{errorMessage(grants.error)}</p>
-  {:else if grants.isPending}<p>Loading grants</p>
-  {:else if !grants.data?.length}<p>No personal grants or enrollments</p>
+  {#if grants.error}<p class="inline-problem" role="alert">
+      {errorMessage(grants.error)}
+    </p>
+  {:else if grants.isPending}<p class="inline-status" role="status">
+      Loading grants
+    </p>
+  {:else if !grants.data?.length}<p class="inline-status">
+      No personal grants or enrollments
+    </p>
   {:else}
-    <table>
-      <thead
-        ><tr
-          ><th>Resource</th><th>Individual</th><th>Audience and scopes</th><th
-            >Standing</th
-          ><th>Expires</th><th>Action</th></tr
-        ></thead
-      >
-      <tbody
-        >{#each grants.data ?? [] as grant (grant.id)}
-          <tr>
-            <td
-              ><code>{grant.binding.agent_id ?? grant.binding.server_id}</code
-              ></td
-            >
-            <td
-              >{grant.binding.identity.kind}<br /><code
-                >{grant.binding.identity.id}</code
-              ></td
-            >
-            <td
-              >{grant.binding.oauth?.audience}<br
-              />{grant.binding.oauth?.scopes.join(' ')}</td
-            >
-            <td>{grant.state}</td><td
-              >{new Date(grant.expires_at).toLocaleString()}</td
-            >
-            <td
-              >{#if grant.grant_id && grant.state !== 'revoked'}<button
-                  disabled={$state.busy}
-                  onclick={() => revoke(grant.grant_id!)}>Revoke</button
-                >{/if}</td
-            >
-          </tr>
-        {/each}</tbody
-      >
-    </table>
+    <ScrollTable label="Personal grants">
+      <table class="data-table">
+        <thead
+          ><tr
+            ><th scope="col">Resource</th><th scope="col">Individual</th><th
+              scope="col">Audience and scopes</th
+            ><th scope="col">Standing</th><th scope="col">Expires</th><th
+              scope="col">Action</th
+            ></tr
+          ></thead
+        >
+        <tbody
+          >{#each grants.data ?? [] as grant (grant.id)}
+            <tr>
+              <td
+                ><code>{grant.binding.agent_id ?? grant.binding.server_id}</code
+                ></td
+              >
+              <td
+                >{grant.binding.identity.kind}<br /><code
+                  >{grant.binding.identity.id}</code
+                ></td
+              >
+              <td
+                >{grant.binding.oauth?.audience}<br
+                />{grant.binding.oauth?.scopes.join(' ')}</td
+              >
+              <td>{grant.state}</td><td>{formatDate(grant.expires_at)}</td>
+              <td
+                >{#if grant.grant_id && grant.state !== 'revoked'}<button
+                    class="button button-secondary"
+                    disabled={$state.busy}
+                    onclick={() => revoke(grant.grant_id!)}>Revoke</button
+                  >{/if}</td
+              >
+            </tr>
+          {/each}</tbody
+        >
+      </table>
+    </ScrollTable>
   {/if}
 </section>
+
+<style>
+  section {
+    display: grid;
+    gap: 0.75rem;
+  }
+  section > :is(h2, .button) {
+    justify-self: start;
+  }
+</style>

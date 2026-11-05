@@ -328,13 +328,17 @@
 </script>
 
 <svelte:head><title>Guardrails · OpenLLMProxy</title></svelte:head>
-<header class="page-header">
-  <h1>Guardrails</h1>
-  <p>
-    Define safeguards, pin policy revisions, and apply them across your gateway.
-  </p>
-</header>
-<nav aria-label="Guardrail sections" class="tabs">
+<div class="page-header">
+  <div>
+    <p class="eyebrow">Gateway</p>
+    <h1 class="page-title">Guardrails</h1>
+    <p class="page-description">
+      Define safeguards, pin policy revisions, and apply them across your
+      gateway.
+    </p>
+  </div>
+</div>
+<nav aria-label="Guardrail sections" class="page-tabs">
   {#each ['Definitions', 'Policies', 'Attachments', 'Credentials', 'Playground'] as section (section)}
     <button
       type="button"
@@ -346,7 +350,7 @@
     >
   {/each}
 </nav>
-{#if error}<p role="alert" class="error">{error}</p>{/if}
+{#if error}<p class="inline-problem" role="alert">{error}</p>{/if}
 {#if notice}<p role="status">{notice}</p>{/if}
 {#if definitions.isPending || policies.isPending || projects.isPending}
   <p role="status">Loading guardrail inventory…</p>
@@ -358,12 +362,15 @@
   </p>{/if}
 
 {#if tab === 'Definitions'}
-  <section class="panel">
+  <section class="card stack-card">
     <h2>Definitions</h2>
     <ul>
       {#each definitions.data?.items ?? [] as value (value.id)}<li>
-          <button onclick={() => edit(value)}>{value.name}</button>
+          <button class="button button-secondary" onclick={() => edit(value)}
+            >{value.name}</button
+          >
           {#if !value.retired_at && access.allows('DELETE /api/v1/guardrails/{guardrail_id}')}<ConfirmAction
+              danger
               label="Retire definition"
               description={`Retire ${value.name}`}
               identity={`${value.id}:${value.etag}`}
@@ -381,10 +388,15 @@
           >
         </li>{/each}
     </ul>
-    {#if canEdit}<button onclick={() => edit(null)}>New definition</button>
+    {#if canEdit}<button
+        class="button button-secondary"
+        onclick={() => edit(null)}>New definition</button
+      >
       <form onsubmit={saveDefinition}>
-        <label>Name<input required maxlength="100" bind:value={name} /></label>
-        <label
+        <label class="form-field"
+          >Name<input required maxlength="100" bind:value={name} /></label
+        >
+        <label class="form-field"
           >Project<select required bind:value={project} disabled={!!selected}
             ><option value="">Choose a project</option
             >{#each projects.data?.items ?? [] as value (value.id)}<option
@@ -392,14 +404,14 @@
               >{/each}</select
           ></label
         >
-        <label
+        <label class="form-field"
           >Type<select bind:value={type} disabled={!!selected}
             >{#each guardrailTypes as value (value)}<option {value}
                 >{value}</option
               >{/each}</select
           ></label
         >
-        <label
+        <label class="form-field"
           >Configuration (JSON)<textarea
             required
             rows="8"
@@ -407,7 +419,7 @@
             bind:value={configuration}></textarea></label
         >
         {#if external}
-          <label
+          <label class="form-field"
             >Credential<select bind:value={credentialID}
               ><option value="">Use configuration reference</option
               >{#each (credentials.data ?? []).filter((item) => item.project_id === project) as item (item.id)}<option
@@ -416,18 +428,19 @@
             ></label
           >
           <button
+            class="button button-secondary"
             type="button"
             disabled={!project}
             onclick={() => {
               creatingCredential = !creatingCredential;
             }}>Create replacement credential</button
           >
-          <label class="check"
+          <label class="check-field"
             ><input type="checkbox" required bind:checked={egress} />I
             acknowledge that this guardrail sends inspected content to its
             configured endpoint.</label
           >{/if}
-        <label
+        <label class="form-field"
           >Timeout (milliseconds)<input
             type="number"
             min="1"
@@ -436,15 +449,18 @@
             bind:value={timeout}
           /></label
         >
-        <label
+        <label class="form-field"
           >On evaluation error<select bind:value={onError}
             ><option value="fail_closed">Block the request</option><option
               value="fail_open">Continue and record the failure</option
             ></select
           ></label
         >
-        <button disabled={busy} type="submit">Save draft</button>
+        <button class="button button-primary" disabled={busy} type="submit"
+          >Save draft</button
+        >
         {#if selected}<button
+            class="button button-secondary"
             disabled={busy}
             type="button"
             onclick={() =>
@@ -468,12 +484,16 @@
       }}
     />{/if}
 {:else if tab === 'Policies'}
-  <section class="panel">
+  <section class="card stack-card">
     <h2>Ordered policies</h2>
     <ul>
       {#each policies.data?.items ?? [] as value (value.policy_id)}<li>
-          <button onclick={() => editPolicy(value)}>{value.name}</button>
+          <button
+            class="button button-secondary"
+            onclick={() => editPolicy(value)}>{value.name}</button
+          >
           {#if !value.retired_at && access.allows('DELETE /api/v1/guardrail-policies/{policy_id}')}<ConfirmAction
+              danger
               label="Retire policy"
               description={`Retire ${value.name}`}
               identity={`${value.policy_id}:${value.etag}`}
@@ -486,12 +506,15 @@
             />{/if} · Revision {value.revision}
         </li>{/each}
     </ul>
-    {#if canEdit}<button onclick={() => editPolicy(null)}>New policy</button>
+    {#if canEdit}<button
+        class="button button-secondary"
+        onclick={() => editPolicy(null)}>New policy</button
+      >
       <form onsubmit={savePolicy}>
-        <label
+        <label class="form-field"
           >Name<input required maxlength="100" bind:value={policyName} /></label
         >
-        <label
+        <label class="form-field"
           >Project<select
             required
             bind:value={project}
@@ -504,7 +527,7 @@
         >
         <ol>
           {#each entries as entry, i (i)}<li class="entry">
-              <label
+              <label class="form-field"
                 >Guardrail<select
                   required
                   value={entry.guardrail_id}
@@ -517,30 +540,31 @@
                     >{/each}</select
                 ></label
               >
-              <label
+              <label class="form-field"
                 >Phase<select bind:value={entry.phase}
                   >{#each phases as value (value)}<option {value}
                       >{value}</option
                     >{/each}</select
                 ></label
               >
-              <label
+              <label class="form-field"
                 >Action<select bind:value={entry.action}
                   >{#each ['block', 'redact', 'mask', 'annotate'] as value (value)}<option
                       {value}>{value}</option
                     >{/each}</select
                 ></label
               >
-              <label class="check"
+              <label class="check-field"
                 ><input type="checkbox" bind:checked={entry.monitor} />Monitor
                 only</label
-              ><label class="check"
+              ><label class="check-field"
                 ><input
                   type="checkbox"
                   bind:checked={entry.mandatory}
                 />Mandatory</label
               >
               <button
+                class="button button-secondary"
                 type="button"
                 onclick={() => {
                   entries = entries.filter((_, index) => index !== i);
@@ -549,6 +573,7 @@
             </li>{/each}
         </ol>
         <button
+          class="button button-secondary"
           type="button"
           onclick={() => {
             entries = [
@@ -564,8 +589,11 @@
             ];
           }}>Add guardrail</button
         >
-        <button type="submit" disabled={busy}>Save policy draft</button>
+        <button class="button button-primary" type="submit" disabled={busy}
+          >Save policy draft</button
+        >
         {#if selectedPolicy}<button
+            class="button button-secondary"
             type="button"
             disabled={busy}
             onclick={() =>
@@ -581,7 +609,7 @@
       </form>{/if}
   </section>
 {:else if tab === 'Attachments'}
-  <section class="panel">
+  <section class="card stack-card">
     <h2>Inherited safeguards</h2>
     <p>
       Policies run in installation, organization, project, route or toolset, and
@@ -604,7 +632,7 @@
         </li>{/each}
     </ul>
     {#if canEdit}<form onsubmit={attach}>
-        <label
+        <label class="form-field"
           >Policy revision<select required bind:value={attachPolicy}
             ><option value="">Choose a policy</option
             >{#each policies.data?.items ?? [] as value (value.policy_id)}<option
@@ -613,37 +641,39 @@
               >{/each}</select
           ></label
         >
-        <label
+        <label class="form-field"
           >Scope<select bind:value={scope}
             >{#each ['installation', 'organization', 'project', 'route', 'toolset', 'api-key'] as value (value)}<option
                 {value}>{value}</option
               >{/each}</select
           ></label
         >
-        {#if scope !== 'installation'}<label
+        {#if scope !== 'installation'}<label class="form-field"
             >Scope identifier<input required bind:value={scopeID} /></label
           >{/if}
-        <label
+        <label class="form-field"
           >Position<input
             type="number"
             min="0"
             required
             bind:value={order}
           /></label
-        ><button disabled={busy}>Attach policy</button>
+        ><button class="button button-primary" disabled={busy}
+          >Attach policy</button
+        >
       </form>{/if}
   </section>
 {:else if tab === 'Credentials'}
   <CredentialsPanel projects={projects.data?.items ?? []} />
 {:else}
-  <section class="panel">
+  <section class="card stack-card">
     <h2>Guardrail playground</h2>
     <p>
       Test a policy without saving the content you enter. External guardrails
       send it to their configured endpoints.
     </p>
     <form onsubmit={evaluate}>
-      <label
+      <label class="form-field"
         >Policy revision<select required bind:value={evaluatePolicy}
           ><option value="">Choose a policy</option
           >{#each policies.data?.items ?? [] as value (value.policy_id)}<option
@@ -652,18 +682,20 @@
             >{/each}</select
         ></label
       >
-      <label
+      <label class="form-field"
         >Phase<select bind:value={phase}
           >{#each phases as value (value)}<option {value}>{value}</option
             >{/each}</select
         ></label
       >
-      <label
+      <label class="form-field"
         >Text<textarea rows="8" required bind:value={text}></textarea></label
       ><button
+        class="button button-secondary"
         disabled={busy || !access.allows('POST /api/v1/guardrails/evaluate')}
         >Evaluate</button
       ><button
+        class="button button-secondary"
         type="button"
         onclick={() => {
           text = '';
@@ -681,56 +713,26 @@
               ).join(', ')}
             </li>{/each}
         </ul>
-        <pre>{result.segments.map((segment) => segment.text).join('\n')}</pre>
+        <pre class="code-block">{result.segments
+            .map((segment) => segment.text)
+            .join('\n')}</pre>
       </div>{/if}
   </section>
 {/if}
 
 <style>
-  .tabs {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.5rem;
-    margin-block: 1rem;
-  }
-  .tabs [aria-current] {
-    font-weight: 700;
-    text-decoration: underline;
-  }
-  .panel {
-    padding: 1.5rem;
-    border: 1px solid var(--border, #d7dce2);
-    border-radius: 0.75rem;
-  }
   form {
     display: grid;
     gap: 1rem;
     max-width: 52rem;
-    margin-top: 1rem;
   }
-  label {
-    display: grid;
-    gap: 0.3rem;
-  }
-  .check {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
+  form > .button {
+    justify-self: start;
   }
   .entry {
     margin-block: 1rem;
     padding: 1rem;
-    border: 1px solid var(--border, #d7dce2);
-  }
-  textarea {
-    width: 100%;
-    resize: vertical;
-  }
-  pre {
-    white-space: pre-wrap;
-    overflow-wrap: anywhere;
-  }
-  .error {
-    color: var(--danger, #b42318);
+    border: 1px solid var(--border-hairline);
+    border-radius: var(--radius-control);
   }
 </style>

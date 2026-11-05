@@ -486,6 +486,7 @@
                       onclick={() => startEdit(group)}>Edit</button
                     >
                     {#if access.allows('DELETE /api/v1/budget-groups/{budget_group_id}')}<ConfirmAction
+                        danger
                         label="Retire budget group"
                         description={`Retire ${group.name}. Existing dependencies and history are checked before retirement`}
                         identity={`${group.id}:${group.etag}`}

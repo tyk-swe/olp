@@ -10,6 +10,7 @@
   import { nativeObject, parseManagementJSON } from '$lib/nativeJson';
   import { errorMessage } from '$lib/management/http';
   import ConfirmAction from '$lib/components/ConfirmAction.svelte';
+  import ScrollTable from '$lib/components/ScrollTable.svelte';
   import { listCredentials, createCredential, deleteCredential } from './api';
   import { guardrailKeys } from './guardrailKeys';
   let {
@@ -32,6 +33,11 @@
     queryKey: guardrailKeys.credentials(),
     queryFn: listCredentials
   }));
+  const visibleCredentials = $derived(
+    (credentials.data ?? []).filter(
+      (value) => !projectID || value.project_id === projectID
+    )
+  );
   const capture = usePrincipalLifetime(() => {
     credential = '';
   });
@@ -65,37 +71,66 @@
   }
 </script>
 
-<section class="card workflow">
+<section class="card stack-card">
   <h2>Guardrail credentials</h2>
-  <p>
+  <p class="inline-status">
     Replacement creates a new named credential. Save and activate new definition
     and policy revisions, then replace their attachments. Existing revisions
-    retain their credentials
+    retain their credentials.
   </p>
-  {#if credentials.error}<p role="alert">
+  {#if credentials.error}
+    <p class="inline-problem" role="alert">
       {errorMessage(credentials.error)}
-    </p>{/if}
-  {#each (credentials.data ?? []).filter((value) => !projectID || value.project_id === projectID) as value (value.id)}
-    <article>
-      <h3>{value.name}</h3>
-      <p>
-        {projects.find((item) => item.id === value.project_id)?.name ??
-          value.project_id} · {value.id}
-      </p>
-      {#if access.allows('DELETE /api/v1/guardrail-credentials/{credential_id}')}<ConfirmAction
-          label="Delete unused credential"
-          description={`Delete ${value.name} and its sealed secret. Credentials referenced by retained revisions cannot be deleted`}
-          identity={value.id}
-          run={(requestId) => deleteCredential(value, requestId)}
-          done={async () => {
-            await credentials.refetch();
-          }}
-        />{/if}
-    </article>
-  {/each}
+    </p>
+  {:else if credentials.isPending}
+    <p class="inline-status" role="status">Loading credentials…</p>
+  {:else if !visibleCredentials.length}
+    <p class="inline-status">No guardrail credentials yet.</p>
+  {:else}
+    <ScrollTable label="Guardrail credentials">
+      <table class="data-table">
+        <caption class="sr-only">Guardrail credentials</caption>
+        <thead>
+          <tr>
+            <th scope="col">Credential</th>
+            <th scope="col">Project</th>
+            <th scope="col">Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {#each visibleCredentials as value (value.id)}
+            <tr>
+              <td><strong>{value.name}</strong><br /><code>{value.id}</code></td
+              >
+              <td
+                >{projects.find((item) => item.id === value.project_id)?.name ??
+                  value.project_id}</td
+              >
+              <td>
+                <div class="page-actions">
+                  {#if access.allows('DELETE /api/v1/guardrail-credentials/{credential_id}')}
+                    <ConfirmAction
+                      danger
+                      label="Delete unused credential"
+                      description={`Delete ${value.name} and its sealed secret. Credentials referenced by retained revisions cannot be deleted.`}
+                      identity={value.id}
+                      run={(requestId) => deleteCredential(value, requestId)}
+                      done={async () => {
+                        await credentials.refetch();
+                      }}
+                    />
+                  {/if}
+                </div>
+              </td>
+            </tr>
+          {/each}
+        </tbody>
+      </table>
+    </ScrollTable>
+  {/if}
   {#if access.allows('POST /api/v1/guardrail-credentials')}
-    <form onsubmit={submit}>
-      <label
+    <form class="form-card credential-form" onsubmit={submit}>
+      <label class="form-field"
         >Project<select
           required
           bind:value={project}
@@ -106,18 +141,31 @@
             >{/each}</select
         ></label
       >
-      <label>New credential name<input required bind:value={name} /></label>
-      <label
+      <label class="form-field"
+        >New credential name<input required bind:value={name} /></label
+      >
+      <label class="form-field full"
         >Secret fields as JSON<textarea
           required
           autocomplete="off"
           spellcheck="false"
           bind:value={credential}></textarea></label
       >
-      <button class="button button-primary" disabled={action.busy}
-        >Create credential</button
-      >
+      <div class="page-actions">
+        <button class="button button-primary" disabled={action.busy}
+          >Create credential</button
+        >
+      </div>
     </form>
   {/if}
-  {#if action.error}<p role="alert">{action.error}</p>{/if}
+  {#if action.error}<p class="inline-problem" role="alert">
+      {action.error}
+    </p>{/if}
 </section>
+
+<style>
+  .credential-form {
+    margin-top: 0;
+    padding: 0;
+  }
+</style>

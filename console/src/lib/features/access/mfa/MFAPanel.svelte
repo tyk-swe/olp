@@ -288,6 +288,6 @@
   }
   li span {
     display: block;
-    color: var(--text-muted);
+    color: var(--foreground-muted);
   }
 </style>
