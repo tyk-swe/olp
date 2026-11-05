@@ -227,3 +227,76 @@ func TestCodeAttemptGLMProvenQuotaRecoversAndAmbiguousDoesNot(t *testing.T) {
 		t.Fatalf("recover(ambiguous) = %+v, %v, want no replay", recovery, err)
 	}
 }
+
+func minimaxAttempt(t *testing.T, ledger *fakeCodeLedger, now time.Time, path string) *codeAttempt {
+	t.Helper()
+	vendor, ok := codeadapter.Lookup(codemode.AdapterMiniMaxPlan)
+	if !ok {
+		t.Fatal("minimax vendor missing")
+	}
+	endpoint, ok := vendor.Endpoint(path)
+	if !ok {
+		t.Fatal("minimax endpoint missing")
+	}
+	server := &Server{CodeLedger: ledger, now: func() time.Time { return now }, log: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	return &codeAttempt{
+		server:   server,
+		permit:   resources.CodePermit{InitialRecovery: true, Account: codemode.Account{ID: "account"}, Attempt: codemode.Attempt{ID: "attempt"}},
+		config:   routing.Configuration{Kind: "plugin", AuthMode: "grant", ProfileID: codeplans.MiniMaxProfile},
+		endpoint: endpoint,
+		observer: codeObserver(endpoint),
+		model:    "MiniMax-M3",
+	}
+}
+
+func TestCodeAttemptMiniMaxMessagesUsage429WritesCredentialQuotaCooldown(t *testing.T) {
+	// Sources: https://platform.minimax.io/docs/api-reference/errorcode (fetched 2026-11-05), code 2056, and https://platform.minimax.io/docs/api-reference/speech-to-text (fetched 2026-11-05), OaiError envelope.
+	now := time.Date(2026, 11, 5, 10, 0, 0, 0, time.UTC)
+	ledger := &fakeCodeLedger{}
+	attempt := minimaxAttempt(t, ledger, now, "v1/messages")
+	attempt.response(t.Context(), 429, http.Header{"Retry-After": {"120"}})
+	attempt.observe(attempt.observer.Unary([]byte(`{"type":"error","error":{"type":"rate_limit_error","message":"usage limit exceeded (2056)","http_code":"429"},"request_id":"r"}`)))
+	attempt.finish(t.Context())
+	if len(ledger.cooldowns) != 1 {
+		t.Fatalf("cooldowns = %+v, want one credential cooldown", ledger.cooldowns)
+	}
+	got := ledger.cooldowns[0]
+	if got.account != "account" || got.classification.Class != codeadapter.CooldownQuota || got.classification.Scope != codeadapter.ScopeCredential || got.classification.Envelope != "minimax_2056" || !got.classification.RetryAt.Equal(now.Add(120*time.Second)) {
+		t.Fatalf("cooldown = %+v", got)
+	}
+}
+
+func TestCodeAttemptMiniMaxChatAmbiguous2062WritesShortRateCooldownOnly(t *testing.T) {
+	// Source: https://platform.minimax.io/docs/api-reference/errorcode (fetched 2026-11-05), code 2062 is ambiguous and never quota.
+	now := time.Date(2026, 11, 5, 10, 0, 0, 0, time.UTC)
+	ledger := &fakeCodeLedger{}
+	attempt := minimaxAttempt(t, ledger, now, "v1/chat/completions")
+	attempt.response(t.Context(), 429, http.Header{})
+	attempt.observe(attempt.observer.Unary([]byte(`{"type":"error","error":{"type":"rate_limit_error","message":"M Plan rate limit reached (2062)","http_code":"429"},"request_id":"r"}`)))
+	attempt.finish(t.Context())
+	if len(ledger.cooldowns) != 1 {
+		t.Fatalf("cooldowns = %+v, want one rate cooldown", ledger.cooldowns)
+	}
+	got := ledger.cooldowns[0]
+	if got.classification.Class != codeadapter.CooldownRate || got.classification.Class == codeadapter.CooldownQuota || got.classification.Scope != codeadapter.ScopeCredential || got.classification.Envelope != "minimax_2062" || got.classification.NotExecuted || !got.classification.RetryAt.Equal(now.Add(time.Minute)) {
+		t.Fatalf("cooldown = %+v", got)
+	}
+}
+
+func TestCodeAttemptMiniMaxProvenUsageRecoversAndAmbiguousDoesNot(t *testing.T) {
+	// Sources: https://platform.minimax.io/docs/api-reference/errorcode (fetched 2026-11-05), codes 2056 and 2062, and https://platform.minimax.io/docs/api-reference/speech-to-text (fetched 2026-11-05), OaiError envelope.
+	now := time.Date(2026, 11, 5, 10, 0, 0, 0, time.UTC)
+	route := codemode.Route{InitialRecoveryAttempts: 1}
+	proven := minimaxAttempt(t, &fakeCodeLedger{}, now, "v1/chat/completions")
+	response := &http.Response{StatusCode: 429, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(`{"type":"error","error":{"type":"rate_limit_error","message":"usage limit exceeded (2056)","http_code":"429"},"request_id":"r"}`))}
+	recovery, err := proven.recover(t.Context(), response, route, nil)
+	if err != nil || recovery == nil || recovery.Envelope != "minimax_2056" || recovery.Number != 1 || recovery.From != "attempt" {
+		t.Fatalf("recover(proven) = %+v, %v", recovery, err)
+	}
+	ambiguous := minimaxAttempt(t, &fakeCodeLedger{}, now, "v1/chat/completions")
+	response = &http.Response{StatusCode: 429, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(`{"type":"error","error":{"type":"rate_limit_error","message":"M Plan rate limit reached (2062)","http_code":"429"},"request_id":"r"}`))}
+	recovery, err = ambiguous.recover(t.Context(), response, route, nil)
+	if err != nil || recovery != nil {
+		t.Fatalf("recover(ambiguous) = %+v, %v, want no replay", recovery, err)
+	}
+}

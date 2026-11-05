@@ -48,6 +48,8 @@ func (v Vendor) Classify(endpoint Endpoint, status int, body []byte, headers htt
 		return classifyCodex(endpoint, status, body, headers, now)
 	case codemode.AdapterZAICoding:
 		return classifyGLM(status, body, headers, now)
+	case codemode.AdapterMiniMaxPlan:
+		return classifyMiniMax(status, body, headers, now)
 	}
 	return Classification{}, false
 }
