@@ -7,7 +7,6 @@ import (
 
 	"github.com/tyk-swe/olp/internal/codeadapter"
 	"github.com/tyk-swe/olp/internal/codemode"
-	"github.com/tyk-swe/olp/internal/upstream"
 )
 
 func minimaxVendor(t *testing.T) (codeadapter.Vendor, codeadapter.Endpoint) {
@@ -28,7 +27,7 @@ func minimaxBody(code, message string) []byte {
 }
 
 func TestClassifyMiniMaxUsageCodesAreCredentialQuota(t *testing.T) {
-	// Sources: https://platform.minimax.io/docs/api-reference/errorcode (fetched 2026-11-05), codes 2056, 2067, and https://platform.minimax.io/docs/api-reference/speech-to-text (fetched 2026-11-05), OaiError envelope with the internal code in parentheses at the end of error.message.
+	// Sources: https://platform.minimax.io/docs/api-reference/errorcode (fetched 2026-11-05), codes 2056, 2067, and https://platform.minimax.io/docs/api-reference/speech-to-text (fetched 2026-11-05), OaiError envelope with the internal code in parentheses at the end of error.message. That envelope is documented only on speech-to-text plus an observed contract fixture, not proven for chat/messages inference, so replay waits for live envelope qualification and NotExecuted stays false
 	vendor, endpoint := minimaxVendor(t)
 	now := time.Date(2026, 11, 5, 10, 0, 0, 0, time.UTC)
 	for _, tc := range []struct{ code, message string }{
@@ -36,7 +35,7 @@ func TestClassifyMiniMaxUsageCodesAreCredentialQuota(t *testing.T) {
 		{"2067", "usage limit reached and credit auto consumption is off"},
 	} {
 		got, ok := vendor.Classify(endpoint, 429, minimaxBody(tc.code, tc.message), http.Header{}, now)
-		if !ok || got.Class != codeadapter.CooldownQuota || got.Scope != codeadapter.ScopeCredential || !got.RetryAt.Equal(now.Add(time.Minute)) || got.Envelope != "minimax_"+tc.code || !got.NotExecuted || got.SuppressFallback {
+		if !ok || got.Class != codeadapter.CooldownQuota || got.Scope != codeadapter.ScopeCredential || !got.RetryAt.Equal(now.Add(time.Minute)) || got.Envelope != "minimax_"+tc.code || got.NotExecuted || got.SuppressFallback {
 			t.Fatalf("Classify(%s) = %+v, %v", tc.code, got, ok)
 		}
 		got, ok = vendor.Classify(endpoint, 429, minimaxBody(tc.code, tc.message), http.Header{"Retry-After": {"300"}}, now)
@@ -118,17 +117,17 @@ func TestClassifyMiniMaxUnprovenShapesStayUnclassified(t *testing.T) {
 	}
 }
 
-func TestMiniMaxInitialRejectionOnlyForProvenUsageEnvelopes(t *testing.T) {
-	// Sources: https://platform.minimax.io/docs/api-reference/errorcode (fetched 2026-11-05), codes 2056, 2067 are pre-generation usage rejections, and https://platform.minimax.io/docs/api-reference/speech-to-text (fetched 2026-11-05) for the complete unary envelope gateway recover() hands over.
+func TestMiniMaxInitialRejectionHeldUntilEnvelopeQualified(t *testing.T) {
+	// Sources: https://platform.minimax.io/docs/api-reference/errorcode (fetched 2026-11-05), codes 2056, 2067, and https://platform.minimax.io/docs/api-reference/speech-to-text (fetched 2026-11-05), which documents the OaiError envelope only for speech-to-text. It is not proven for chat/messages inference endpoints, so replay waits for live envelope qualification and no MiniMax shape replays today, proven or ambiguous
 	vendor, endpoint := minimaxVendor(t)
 	now := time.Date(2026, 11, 5, 10, 0, 0, 0, time.UTC)
 	for _, tc := range []struct{ code, message string }{
 		{"2056", "usage limit exceeded"},
 		{"2067", "usage limit reached and credit auto consumption is off"},
+		{"2062", "M Plan rate limit reached"},
 	} {
-		rejection, ok := vendor.InitialRejection(endpoint, 429, minimaxBody(tc.code, tc.message), http.Header{"Retry-After": {"300"}}, now)
-		if !ok || rejection.Class != upstream.RateLimit || rejection.Envelope != "minimax_"+tc.code || !rejection.RetryAt.Equal(now.Add(300*time.Second)) {
-			t.Fatalf("InitialRejection(%s) = %+v, %v", tc.code, rejection, ok)
+		if rejection, ok := vendor.InitialRejection(endpoint, 429, minimaxBody(tc.code, tc.message), http.Header{"Retry-After": {"300"}}, now); ok {
+			t.Fatalf("InitialRejection(%s) = %+v, want held pending live envelope qualification", tc.code, rejection)
 		}
 	}
 	for name, body := range map[string][]byte{

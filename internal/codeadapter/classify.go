@@ -80,6 +80,18 @@ func classifyCodex(endpoint Endpoint, status int, body []byte, headers http.Head
 	return Classification{}, false
 }
 
+func retryAtFrom(reset time.Time, hasReset bool, headers http.Header, now time.Time) time.Time {
+	if hasReset && reset.After(now) {
+		return reset
+	}
+	if values := headers.Values("Retry-After"); len(values) == 1 {
+		if delay, valid := upstream.ParseRetryAfter(values[0], now); valid && delay > 0 {
+			return now.Add(delay)
+		}
+	}
+	return now.Add(time.Minute)
+}
+
 func rejectionDocument(body []byte) (oif.Document, string, string, bool, bool) {
 	document, err := oif.ParseJSON(body, oif.Limits{MaxBytes: 64 << 10})
 	if err != nil || document.Root().Kind() != oif.Object {

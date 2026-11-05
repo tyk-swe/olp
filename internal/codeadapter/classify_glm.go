@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/tyk-swe/olp/internal/oif"
-	"github.com/tyk-swe/olp/internal/upstream"
 )
 
 func classifyGLM(status int, body []byte, headers http.Header, now time.Time) (Classification, bool) {
@@ -20,13 +19,13 @@ func classifyGLM(status int, body []byte, headers http.Header, now time.Time) (C
 	switch code {
 	case "1308", "1310", "1316", "1317", "1318", "1319", "1320", "1321":
 		reset, hasReset := glmReset(code, message)
-		return Classification{Class: CooldownQuota, Scope: ScopeCredential, RetryAt: glmRetryAt(reset, hasReset, headers, now), Envelope: "glm_" + code, NotExecuted: true}, true
+		return Classification{Class: CooldownQuota, Scope: ScopeCredential, RetryAt: retryAtFrom(reset, hasReset, headers, now), Envelope: "glm_" + code, NotExecuted: true}, true
 	case "1311":
-		return Classification{Class: CooldownEntitlement, Scope: ScopeModel, RetryAt: glmRetryAt(time.Time{}, false, headers, now), Envelope: "glm_1311"}, true
+		return Classification{Class: CooldownEntitlement, Scope: ScopeModel, RetryAt: retryAtFrom(time.Time{}, false, headers, now), Envelope: "glm_1311"}, true
 	case "1302":
-		return Classification{Class: CooldownRate, Scope: ScopeCredential, RetryAt: glmRetryAt(time.Time{}, false, headers, now), Envelope: "glm_1302"}, true
+		return Classification{Class: CooldownRate, Scope: ScopeCredential, RetryAt: retryAtFrom(time.Time{}, false, headers, now), Envelope: "glm_1302"}, true
 	case "1305":
-		return Classification{Class: CooldownCapacity, Scope: ScopeModel, RetryAt: glmRetryAt(time.Time{}, false, headers, now), Envelope: "glm_1305"}, true
+		return Classification{Class: CooldownCapacity, Scope: ScopeModel, RetryAt: retryAtFrom(time.Time{}, false, headers, now), Envelope: "glm_1305"}, true
 	case "1309", "1314":
 		return Classification{SuppressFallback: true, Envelope: "glm_" + code}, true
 	}
@@ -66,18 +65,6 @@ func glmEnvelope(body []byte) (string, string, bool) {
 		return "", "", false
 	}
 	return code, message, true
-}
-
-func glmRetryAt(reset time.Time, hasReset bool, headers http.Header, now time.Time) time.Time {
-	if hasReset && reset.After(now) {
-		return reset
-	}
-	if values := headers.Values("Retry-After"); len(values) == 1 {
-		if delay, valid := upstream.ParseRetryAfter(values[0], now); valid && delay > 0 {
-			return now.Add(delay)
-		}
-	}
-	return now.Add(time.Minute)
 }
 
 func glmReset(code, message string) (time.Time, bool) {

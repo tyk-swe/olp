@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/tyk-swe/olp/internal/oif"
-	"github.com/tyk-swe/olp/internal/upstream"
 )
 
 func classifyMiniMax(status int, body []byte, headers http.Header, now time.Time) (Classification, bool) {
@@ -19,11 +18,11 @@ func classifyMiniMax(status int, body []byte, headers http.Header, now time.Time
 	}
 	switch code {
 	case "2056", "2067":
-		return Classification{Class: CooldownQuota, Scope: ScopeCredential, RetryAt: minimaxRetryAt(headers, now), Envelope: "minimax_" + code, NotExecuted: true}, true
+		return Classification{Class: CooldownQuota, Scope: ScopeCredential, RetryAt: retryAtFrom(time.Time{}, false, headers, now), Envelope: "minimax_" + code}, true
 	case "2061":
-		return Classification{Class: CooldownEntitlement, Scope: ScopeModel, RetryAt: minimaxRetryAt(headers, now), Envelope: "minimax_2061"}, true
+		return Classification{Class: CooldownEntitlement, Scope: ScopeModel, RetryAt: retryAtFrom(time.Time{}, false, headers, now), Envelope: "minimax_2061"}, true
 	case "2062", "1002", "1039":
-		return Classification{Class: CooldownRate, Scope: ScopeCredential, RetryAt: minimaxRetryAt(headers, now), Envelope: "minimax_" + code}, true
+		return Classification{Class: CooldownRate, Scope: ScopeCredential, RetryAt: retryAtFrom(time.Time{}, false, headers, now), Envelope: "minimax_" + code}, true
 	}
 	return Classification{}, false
 }
@@ -107,13 +106,4 @@ func minimaxCode(message string) (string, bool) {
 		}
 	}
 	return code, true
-}
-
-func minimaxRetryAt(headers http.Header, now time.Time) time.Time {
-	if values := headers.Values("Retry-After"); len(values) == 1 {
-		if delay, valid := upstream.ParseRetryAfter(values[0], now); valid && delay > 0 {
-			return now.Add(delay)
-		}
-	}
-	return now.Add(time.Minute)
 }

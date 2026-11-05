@@ -283,15 +283,15 @@ func TestCodeAttemptMiniMaxChatAmbiguous2062WritesShortRateCooldownOnly(t *testi
 	}
 }
 
-func TestCodeAttemptMiniMaxProvenUsageRecoversAndAmbiguousDoesNot(t *testing.T) {
-	// Sources: https://platform.minimax.io/docs/api-reference/errorcode (fetched 2026-11-05), codes 2056 and 2062, and https://platform.minimax.io/docs/api-reference/speech-to-text (fetched 2026-11-05), OaiError envelope.
+func TestCodeAttemptMiniMaxUsageAndAmbiguousDoNotRecover(t *testing.T) {
+	// Sources: https://platform.minimax.io/docs/api-reference/errorcode (fetched 2026-11-05), codes 2056 and 2062, and https://platform.minimax.io/docs/api-reference/speech-to-text (fetched 2026-11-05), which documents the OaiError envelope only for speech-to-text. It is not proven for chat/messages inference, so replay waits for live envelope qualification and neither shape replays today
 	now := time.Date(2026, 11, 5, 10, 0, 0, 0, time.UTC)
 	route := codemode.Route{InitialRecoveryAttempts: 1}
 	proven := minimaxAttempt(t, &fakeCodeLedger{}, now, "v1/chat/completions")
 	response := &http.Response{StatusCode: 429, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(`{"type":"error","error":{"type":"rate_limit_error","message":"usage limit exceeded (2056)","http_code":"429"},"request_id":"r"}`))}
 	recovery, err := proven.recover(t.Context(), response, route, nil)
-	if err != nil || recovery == nil || recovery.Envelope != "minimax_2056" || recovery.Number != 1 || recovery.From != "attempt" {
-		t.Fatalf("recover(proven) = %+v, %v", recovery, err)
+	if err != nil || recovery != nil {
+		t.Fatalf("recover(proven) = %+v, %v, want no replay pending live envelope qualification", recovery, err)
 	}
 	ambiguous := minimaxAttempt(t, &fakeCodeLedger{}, now, "v1/chat/completions")
 	response = &http.Response{StatusCode: 429, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(`{"type":"error","error":{"type":"rate_limit_error","message":"M Plan rate limit reached (2062)","http_code":"429"},"request_id":"r"}`))}
