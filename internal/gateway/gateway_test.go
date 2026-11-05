@@ -8,9 +8,11 @@ import (
 	"io"
 	"log/slog"
 	"maps"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
+	"reflect"
 	"slices"
 	"strings"
 	"sync"
@@ -27,6 +29,7 @@ import (
 	"github.com/tyk-swe/olp/internal/codemode"
 	"github.com/tyk-swe/olp/internal/connectors"
 	"github.com/tyk-swe/olp/internal/egress"
+	"github.com/tyk-swe/olp/internal/media"
 	"github.com/tyk-swe/olp/internal/release"
 	"github.com/tyk-swe/olp/internal/resources"
 	"github.com/tyk-swe/olp/internal/usage"
@@ -701,6 +704,99 @@ func TestTransformedEmbeddingsRejectIncompleteVectors(t *testing.T) {
 			}
 			if resp.StatusCode != tc.want {
 				t.Fatalf("status %d, want %d, body %s", resp.StatusCode, tc.want, body)
+			}
+		})
+	}
+}
+
+func TestTransformedMediaPreservesUsage(t *testing.T) {
+	h := newHarness(t, Config{MaxMediaBodyBytes: 1 << 20})
+	spool, err := media.NewSpool(t.TempDir(), media.MinCapacityBytes, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = spool.Close() })
+	h.gateway.Media = &MediaDeps{
+		Jobs: &media.Service{Transport: &media.Transport{
+			Client: h.gateway.client, Auth: h.gateway.auth, Egress: h.gateway.egress,
+			Spool: spool, MaxResponseBytes: 1 << 20,
+		}},
+		Admission: media.NewAdmissionState(spool.CapacityBytes()),
+	}
+	h.republish(func(snapshot *routing.Snapshot, a, b routing.Provider) {
+		for _, provider := range []routing.Provider{a, b} {
+			provider.Capabilities = []routing.Capability{
+				{Model: provider.Capabilities[0].Model, Operation: media.OpImageGeneration, Surface: "openai", Mode: "unary"},
+				{Model: provider.Capabilities[0].Model, Operation: media.OpTranscription, Surface: "openai", Mode: "unary"},
+			}
+			snapshot.Providers[provider.ID] = provider
+		}
+		route := snapshot.Routes[routeSlug]
+		route.Operations = []string{media.OpImageGeneration, media.OpTranscription}
+		snapshot.Routes[routeSlug] = route
+	})
+	mux := http.NewServeMux()
+	h.gateway.Register(mux)
+	server := httptest.NewServer(mux)
+	t.Cleanup(server.Close)
+
+	for _, tc := range []struct {
+		name, path, response string
+	}{
+		{"image breakdown", "/v1/images/generations", `{"created":1,"data":[{"url":"https://example.invalid/generated.png"}],"usage":{"input_tokens":7,"output_tokens":11,"total_tokens":18,"input_tokens_details":{"text_tokens":3,"image_tokens":4},"output_tokens_details":{"image_tokens":11},"extension":{"count":2}}}`},
+		{"transcription tokens", "/v1/audio/transcriptions", `{"text":"fixture transcript","usage":{"type":"tokens","input_tokens":7,"output_tokens":11,"total_tokens":18,"input_token_details":{"text_tokens":3,"audio_tokens":4},"extension":{"count":2}}}`},
+		{"transcription duration", "/v1/audio/transcriptions", `{"text":"fixture transcript","usage":{"type":"duration","seconds":3.5}}`},
+		{"transcription without usage", "/v1/audio/transcriptions", `{"text":"fixture transcript"}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h.mock.set("a", status(http.StatusOK, tc.response))
+			var body bytes.Buffer
+			contentType := "application/json"
+			if tc.path == "/v1/audio/transcriptions" {
+				form := multipart.NewWriter(&body)
+				if err := form.WriteField("model", routeSlug); err != nil {
+					t.Fatal(err)
+				}
+				file, err := form.CreateFormFile("file", "fixture.wav")
+				if err != nil {
+					t.Fatal(err)
+				}
+				if _, err := file.Write(media.SilentWAV(10)); err != nil {
+					t.Fatal(err)
+				}
+				if err := form.Close(); err != nil {
+					t.Fatal(err)
+				}
+				contentType = form.FormDataContentType()
+			} else {
+				fmt.Fprintf(&body, `{"model":%q,"prompt":"fixture image"}`, routeSlug)
+			}
+			req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, server.URL+tc.path, &body)
+			if err != nil {
+				t.Fatal(err)
+			}
+			req.Header.Set("Authorization", "Bearer "+fullKey)
+			req.Header.Set("Content-Type", contentType)
+			resp, err := server.Client().Do(req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer resp.Body.Close()
+			gotBody, err := io.ReadAll(resp.Body)
+			if err != nil || resp.StatusCode != http.StatusOK {
+				t.Fatalf("media response status=%d body=%s error=%v", resp.StatusCode, gotBody, err)
+			}
+			var got, upstream map[string]any
+			if err := json.Unmarshal(gotBody, &got); err != nil {
+				t.Fatal(err)
+			}
+			if err := json.Unmarshal([]byte(tc.response), &upstream); err != nil {
+				t.Fatal(err)
+			}
+			actualUsage, actualPresent := got["usage"]
+			expectedUsage, expectedPresent := upstream["usage"]
+			if actualPresent != expectedPresent || !reflect.DeepEqual(actualUsage, expectedUsage) {
+				t.Fatalf("usage changed from %v to %v, client response %s", expectedUsage, actualUsage, gotBody)
 			}
 		})
 	}

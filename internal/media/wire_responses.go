@@ -84,8 +84,7 @@ func DecodeImageResponse(body []byte, stage func(b64 string, index int) (*Artifa
 		}
 	}
 	if usageDoc, ok := doc["usage"].(map[string]any); ok {
-		result.UsageExtra = diffFields(usageDoc, "input_tokens", "output_tokens", "total_tokens",
-			"input_tokens_details", "output_tokens_details")
+		result.UsageExtra = diffFields(usageDoc, "input_tokens", "output_tokens", "total_tokens")
 	}
 	for i, image := range encodedWire.Data {
 		artifact := ImageArtifact{RevisedPrompt: image.RevisedPrompt}
@@ -638,7 +637,7 @@ func DecodeTranscriptionJSON(body []byte) (*TranscriptionResult, *Error) {
 	}
 	result := &TranscriptionResult{
 		Text: encodedWire.Text, Language: encodedWire.Language, DurationSeconds: encodedWire.Duration,
-		Extra: diffFields(doc, "text", "language", "duration", "segments", "usage"),
+		Extra: diffFields(doc, "text", "language", "duration", "segments"),
 	}
 	if encodedWire.Usage != nil && (encodedWire.Usage.Type == "" || encodedWire.Usage.Type == "tokens") {
 		result.Tokens = &ImageUsage{
