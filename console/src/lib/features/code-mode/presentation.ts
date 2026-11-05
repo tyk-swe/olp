@@ -139,6 +139,43 @@ export function orderingSignalLabel(
   return 'Allowance bands from proven passive windows';
 }
 
+export function nextMonthlyReset(
+  anchor: string | null | undefined,
+  now: Date
+): string | null {
+  const match = anchor?.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return null;
+  const day = Number(match[3]);
+  const anchorDate = new Date(
+    Date.UTC(Number(match[1]), Number(match[2]) - 1, day)
+  );
+  if (
+    anchorDate.getUTCDate() !== day ||
+    anchorDate.getUTCMonth() !== Number(match[2]) - 1
+  ) {
+    return null;
+  }
+  for (let offset = -1; offset <= 2; offset += 1) {
+    const probe = new Date(
+      Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + offset, 1)
+    );
+    const lastDay = new Date(
+      Date.UTC(probe.getUTCFullYear(), probe.getUTCMonth() + 1, 0)
+    ).getUTCDate();
+    const candidate = new Date(
+      Date.UTC(
+        probe.getUTCFullYear(),
+        probe.getUTCMonth(),
+        Math.min(day, lastDay)
+      )
+    );
+    if (candidate.getTime() > now.getTime()) {
+      return candidate.toISOString().slice(0, 10);
+    }
+  }
+  return null;
+}
+
 export function nativeModels(value: string): string[] {
   const models = value.split(/[\s,]+/).filter(Boolean);
   if (

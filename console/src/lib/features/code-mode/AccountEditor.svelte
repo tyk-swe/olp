@@ -35,6 +35,7 @@
   let providerId = $state(initial?.provider_id ?? '');
   let credentialId = $state(initial?.credential_id ?? '');
   let models = $state(initial?.models.join('\n') ?? '');
+  let cycleAnchor = $state(initial?.cycle_anchor ?? '');
   let enabled = $state(initial?.enabled ?? true);
   let extraUsage = $state(
     initial?.extra_usage_enabled == null
@@ -55,7 +56,7 @@
   const provider = createQuery(() => ({
     queryKey: providerKeys.detail(providerId),
     queryFn: ({ signal }) => getProvider(providerId, signal),
-    enabled: !!providerId && !initial
+    enabled: !!providerId
   }));
   const extraUsageAdapter = $derived(
     initial
@@ -65,6 +66,11 @@
           )
         ? 'kimi_code'
         : null
+  );
+  const qwenTokenPlan = $derived(
+    initial?.adapter === 'qwen_token_plan' ||
+      provider.data?.configuration.profile_id === 'qwen-token-plan' ||
+      provider.data?.configuration.profile_id === 'qwen-token-plan-cn'
   );
   const submission = useResourceSubmission({
     allowed: () => allowed,
@@ -79,6 +85,7 @@
       provider_id: providerId,
       credential_id: credentialId,
       models: nativeModels(models),
+      cycle_anchor: qwenTokenPlan && cycleAnchor ? cycleAnchor : null,
       enabled,
       extra_usage_enabled: showsExtraUsage(extraUsageAdapter)
         ? extraUsage === ''
@@ -172,6 +179,17 @@
     Model names pass through unchanged. An allowed model is not proof of client
     or inference qualification.
   </p>
+  {#if qwenTokenPlan}
+    <label for="code-cycle-anchor">Subscription cycle anchor</label><input
+      id="code-cycle-anchor"
+      type="date"
+      bind:value={cycleAnchor}
+    />
+    <p>
+      Optional. The monthly quota reset is reported as the next monthly
+      anniversary of this date. Without an anchor no reset is reported.
+    </p>
+  {/if}
   <label class="choice"
     ><input type="checkbox" bind:checked={enabled} />Enabled</label
   >

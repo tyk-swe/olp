@@ -5158,6 +5158,13 @@
               "minItems": 1,
               "type": "array",
               "uniqueItems": true
+            },
+            "cycle_anchor": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "format": "date"
             }
           },
           "required": [
@@ -7360,6 +7367,14 @@
             "provider_id": {
               "format": "uuid",
               "type": "string"
+            },
+            "cycle_anchor": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "format": "date",
+              "description": "Optional subscription cycle anchor date, recorded only for Qwen Token Plan accounts."
             }
           },
           "required": [
@@ -31018,6 +31033,13 @@
               "minItems": 1,
               "type": "array",
               "uniqueItems": true
+            },
+            "cycle_anchor": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "format": "date"
             }
           },
           "required": [
@@ -36132,6 +36154,14 @@
             "provider_id": {
               "format": "uuid",
               "type": "string"
+            },
+            "cycle_anchor": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "format": "date",
+              "description": "Optional subscription cycle anchor date, recorded only for Qwen Token Plan accounts."
             }
           },
           "required": [

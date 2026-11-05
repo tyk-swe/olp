@@ -15,6 +15,7 @@ import {
   skipClassLabel,
   mutationError,
   nativeModels,
+  nextMonthlyReset,
   orderingSignalLabel,
   recoveryReasonLabel,
   refusalAdvice,
@@ -443,6 +444,31 @@ describe('code ordering signals', () => {
     expect(orderingSignalLabel('zai_coding', false)).toBe(
       'Weights plus cooldown'
     );
+  });
+});
+
+describe('qwen cycle reset presentation', () => {
+  // Source: https://www.alibabacloud.com/help/en/model-studio/token-plan-team-faq (fetched 2026-11-05), seat quotas reset at the end of each subscription month.
+  it('reports the next monthly anniversary of the anchor, clamped to month end', () => {
+    expect(
+      nextMonthlyReset('2026-01-15', new Date('2026-11-05T10:00:00Z'))
+    ).toBe('2026-11-15');
+    expect(
+      nextMonthlyReset('2026-01-15', new Date('2026-11-15T00:00:00Z'))
+    ).toBe('2026-12-15');
+    expect(
+      nextMonthlyReset('2026-01-31', new Date('2026-02-10T00:00:00Z'))
+    ).toBe('2026-02-28');
+    expect(
+      nextMonthlyReset('2026-01-31', new Date('2026-03-01T00:00:00Z'))
+    ).toBe('2026-03-31');
+  });
+
+  it('reports no reset without a valid anchor', () => {
+    expect(nextMonthlyReset(null, new Date('2026-11-05T10:00:00Z'))).toBeNull();
+    expect(
+      nextMonthlyReset('2026-13-15', new Date('2026-11-05T10:00:00Z'))
+    ).toBeNull();
   });
 });
 

@@ -8811,9 +8811,12 @@ type CodeAccount struct {
 	// Cooldowns Live failure class cooldowns for this account. A null model cools the whole credential.
 	Cooldowns    *[]CodeAccountCooldown `json:"cooldowns,omitempty"`
 	CredentialId openapi_types.UUID     `json:"credential_id"`
-	Eligible     bool                   `json:"eligible"`
-	Enabled      bool                   `json:"enabled"`
-	Etag         openapi_types.UUID     `json:"etag"`
+
+	// CycleAnchor Operator recorded subscription cycle anchor date for Qwen Token Plan accounts. The monthly quota reset is the next monthly anniversary of this date. Null when no anchor is recorded, and no reset is reported then.
+	CycleAnchor nullable.Nullable[openapi_types.Date] `json:"cycle_anchor,omitempty"`
+	Eligible    bool                                  `json:"eligible"`
+	Enabled     bool                                  `json:"enabled"`
+	Etag        openapi_types.UUID                    `json:"etag"`
 
 	// ExtraUsageEnabled Whether the member Extra Usage paid fallback setting is on for a Kimi Code account, recorded by the operator at enrollment. Null means not recorded. It is never spare included allowance.
 	ExtraUsageEnabled nullable.Nullable[bool] `json:"extra_usage_enabled"`
@@ -8874,7 +8877,10 @@ type CodeAccountList struct {
 // CodeAccountWrite defines model for CodeAccountWrite.
 type CodeAccountWrite struct {
 	CredentialId openapi_types.UUID `json:"credential_id"`
-	Enabled      bool               `json:"enabled"`
+
+	// CycleAnchor Optional subscription cycle anchor date, recorded only for Qwen Token Plan accounts.
+	CycleAnchor nullable.Nullable[openapi_types.Date] `json:"cycle_anchor,omitempty"`
+	Enabled     bool                                  `json:"enabled"`
 
 	// ExtraUsageEnabled Whether the member Extra Usage paid fallback setting is on for a Kimi Code account, recorded by the operator at enrollment. Null means not recorded. It is never spare included allowance and is refused for other adapters.
 	ExtraUsageEnabled nullable.Nullable[bool] `json:"extra_usage_enabled,omitempty"`
@@ -9580,8 +9586,9 @@ type ConfigurationCode struct {
 
 // ConfigurationCodeAccount defines model for ConfigurationCodeAccount.
 type ConfigurationCodeAccount struct {
-	CredentialRef string `json:"credential_ref"`
-	Enabled       bool   `json:"enabled"`
+	CredentialRef string                                `json:"credential_ref"`
+	CycleAnchor   nullable.Nullable[openapi_types.Date] `json:"cycle_anchor,omitempty"`
+	Enabled       bool                                  `json:"enabled"`
 
 	// ExtraUsageEnabled Whether the member Extra Usage paid fallback setting is on for a Kimi Code account. Null means not recorded.
 	ExtraUsageEnabled nullable.Nullable[bool] `json:"extra_usage_enabled,omitempty"`

@@ -57,6 +57,7 @@ type CodeAccountEntry struct {
 	Enabled           bool     `json:"enabled"`
 	Models            []string `json:"models"`
 	ExtraUsageEnabled *bool    `json:"extra_usage_enabled"`
+	CycleAnchor       *string  `json:"cycle_anchor,omitempty"`
 }
 
 type CodePoolEntry struct {

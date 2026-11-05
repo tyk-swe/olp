@@ -29,6 +29,7 @@
     cooldownSummary,
     extraUsageLabel,
     showsExtraUsage,
+    nextMonthlyReset,
     orderingSignalLabel,
     servingHealthLabel,
     mutationError,
@@ -315,6 +316,15 @@
                 {/each}
               {/if}
             </dd>
+            {#if account.cycle_anchor}
+              <dt>Subscription cycle</dt>
+              <dd>
+                Anchor {account.cycle_anchor} · Monthly reset {nextMonthlyReset(
+                  account.cycle_anchor,
+                  new Date()
+                ) ?? 'Unknown'}
+              </dd>
+            {/if}
             <dt>Native models</dt>
             <dd>{account.models.join(', ')}</dd>
             <dt>Provider / credential</dt>

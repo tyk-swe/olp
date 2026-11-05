@@ -86,6 +86,7 @@ type Account struct {
 	GrantState        string     `json:"grant_state"`
 	Allowance         *Allowance `json:"allowance"`
 	Cooldowns         []Cooldown `json:"cooldowns"`
+	CycleAnchor       *string    `json:"cycle_anchor"`
 }
 
 // Allowance is provider-reported subscription metadata, never a local budget.
