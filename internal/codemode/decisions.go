@@ -35,27 +35,50 @@ type Candidate struct {
 	Cooldown  bool
 	Position  int
 	Score     float64
+	Band      Band
+	ResetAt   *time.Time
+}
+
+func (c Candidate) Eligible() bool {
+	return c.Available && c.Band != BandExhausted
+}
+
+func candidatePreferred(left, right Candidate) int {
+	if left.Position != right.Position {
+		return cmp.Compare(right.Position, left.Position)
+	}
+	if left.Eligible() != right.Eligible() {
+		if left.Eligible() {
+			return 1
+		}
+		return -1
+	}
+	if leftRank, rightRank := bandRank(left.Band), bandRank(right.Band); leftRank != rightRank {
+		return cmp.Compare(leftRank, rightRank)
+	}
+	if left.Score != right.Score {
+		return cmp.Compare(left.Score, right.Score)
+	}
+	if left.Band == BandLow && right.Band == BandLow {
+		switch {
+		case left.ResetAt == nil && right.ResetAt != nil:
+			return -1
+		case left.ResetAt != nil && right.ResetAt == nil:
+			return 1
+		case left.ResetAt != nil && right.ResetAt != nil:
+			if compared := right.ResetAt.Compare(*left.ResetAt); compared != 0 {
+				return compared
+			}
+		}
+	}
+	return cmp.Compare(right.AccountID, left.AccountID)
 }
 
 func ChooseCandidate(candidates []Candidate) (Candidate, bool) {
 	if len(candidates) == 0 {
 		return Candidate{}, false
 	}
-	return slices.MaxFunc(candidates, func(left, right Candidate) int {
-		if left.Position != right.Position {
-			return cmp.Compare(right.Position, left.Position)
-		}
-		if left.Available != right.Available {
-			if left.Available {
-				return 1
-			}
-			return -1
-		}
-		if left.Score != right.Score {
-			return cmp.Compare(left.Score, right.Score)
-		}
-		return cmp.Compare(right.AccountID, left.AccountID)
-	}), true
+	return slices.MaxFunc(candidates, candidatePreferred), true
 }
 
 type SkippedAccount struct {
@@ -73,10 +96,12 @@ func SkippedAccounts(candidates []Candidate, chosen Candidate) []SkippedAccount 
 		switch {
 		case !candidate.Available && candidate.Cooldown:
 			class = SkipCooldown
-		case !candidate.Available:
+		case !candidate.Eligible():
 			class = SkipUnavailable
 		case candidate.Position > chosen.Position:
 			class = SkipTree
+		case bandRank(candidate.Band) < bandRank(chosen.Band):
+			class = SkipBand
 		}
 		skipped = append(skipped, SkippedAccount{AccountID: candidate.AccountID, Class: class})
 	}

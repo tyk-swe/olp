@@ -126,7 +126,7 @@ func codeRecoveryDestination(ctx context.Context, tx pgx.Tx, in CodeAdmission, o
 		if err := codeAuthority(ctx, tx, selected, &authority); err != nil {
 			return codemode.Operation{}, codemode.Account{}, err
 		}
-		selection, err := codeAccount(ctx, tx, selected, "", "", nil)
+		selection, err := codeAccount(ctx, tx, selected, "", "", nil, false)
 		if err == nil {
 			return operation, selection.account, nil
 		}

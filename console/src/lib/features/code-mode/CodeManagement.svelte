@@ -27,6 +27,7 @@
     allowanceEvidenceLabel,
     allowanceWindowSummary,
     cooldownSummary,
+    orderingSignalLabel,
     servingHealthLabel,
     mutationError,
     tokenCount,
@@ -270,6 +271,8 @@
           <dl>
             <dt>Subscription</dt>
             <dd><span class="badge">{adapterLabel(account.adapter)}</span></dd>
+            <dt>Ordering signal</dt>
+            <dd>{orderingSignalLabel(account.adapter)}</dd>
             <dt>Account / principal</dt>
             <dd>{account.id} / {account.principal}</dd>
             <dt>Eligibility</dt>
@@ -429,12 +432,23 @@
             <dt>Published subscriptions</dt>
             <dd class="badges">
               {#each route.adapters as adapter (adapter)}
-                <span class="badge">{adapterLabel(adapter)}</span>
+                <span class="badge"
+                  >{adapterLabel(adapter)} · {orderingSignalLabel(
+                    adapter,
+                    route.allowance_ordering ?? false
+                  )}</span
+                >
               {:else}
                 {route.published_at
                   ? 'No subscription adapter is published'
                   : 'Set at publication'}
               {/each}
+            </dd>
+            <dt>Draft allowance ordering</dt>
+            <dd>
+              {route.allowance_ordering
+                ? 'Enabled, requires publication'
+                : 'Disabled'}
             </dd>
             <dt>Paid native models</dt>
             <dd>

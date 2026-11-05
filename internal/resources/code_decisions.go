@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/tyk-swe/olp/internal/access"
@@ -15,7 +16,14 @@ func recordCodeDecision(ctx context.Context, tx pgx.Tx, in CodeAdmission, bindin
 	if !ok {
 		return fmt.Errorf("code decision chosen account missing from candidates")
 	}
-	evidence, observedAt := codemode.FreshestEvidence(selection.account.Allowance)
+	band, evidence, observedAt := func() (*string, *codemode.AllowanceEvidence, *time.Time) {
+		if selection.assessment != nil {
+			value := string(selection.assessment.Band)
+			return &value, selection.assessment.Evidence, selection.assessment.ObservedAt
+		}
+		kind, observed := codemode.FreshestEvidence(selection.account.Allowance)
+		return nil, kind, observed
+	}()
 	decision := codemode.Decision{
 		ID:                 access.NewID(),
 		AttemptID:          attemptID,
@@ -27,6 +35,7 @@ func recordCodeDecision(ctx context.Context, tx pgx.Tx, in CodeAdmission, bindin
 		RootID:             binding.RootID,
 		ChosenAccountID:    selection.account.ID,
 		Reason:             reason,
+		Band:               band,
 		Evidence:           evidence,
 		EvidenceObservedAt: observedAt,
 		Skipped:            codemode.SkippedAccounts(selection.candidates, chosen),

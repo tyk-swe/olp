@@ -170,6 +170,7 @@
   let messagesToCodex = $state(initial?.messages_to_codex ?? false);
   let codexCLIIdentity = $state(initial?.codex_cli_identity ?? false);
   let chatToAntigravity = $state(initial?.chat_to_antigravity ?? false);
+  let allowanceOrdering = $state(initial?.allowance_ordering ?? false);
   let research = $state(!!initial?.tools);
   let researchAccount = $state(initial?.tools?.account_id ?? '');
   let researchServices = $state<('search' | 'reader' | 'zread')[]>(
@@ -276,6 +277,7 @@
         messages_to_codex: messagesToCodex,
         codex_cli_identity: codexCLIIdentity,
         chat_to_antigravity: chatToAntigravity,
+        allowance_ordering: allowanceOrdering,
         initial_recovery_attempts: recoveryAttempts,
         tools: research
           ? { account_id: researchAccount, services: researchServices }
@@ -540,6 +542,23 @@
     account suspension. Review the exact change and risk before enabling and
     publishing. Existing route administrators authorize this policy for eligible
     accounts in the route pool.
+  </p>
+  <label class="choice">
+    <input
+      id="code-allowance-ordering"
+      type="checkbox"
+      bind:checked={allowanceOrdering}
+    />
+    Order new conversations by proven allowance
+  </label>
+  <p>
+    Off by default. After publication, pinning a new conversation root or a new
+    model ranks accounts known healthy above unknown above known low from fresh
+    proven observations, where low means at most ten percent remaining on the
+    tightest reported window and stale evidence counts as unknown. Only proven
+    signals order, and Codex passive windows are the proven signal today, so
+    other subscriptions stay on weights plus cooldown. The weighted score picks
+    inside the best band. Established pins never move.
   </p>
   <label class="choice"
     ><input
