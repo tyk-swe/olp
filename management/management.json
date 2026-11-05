@@ -15896,6 +15896,14 @@
               "null"
             ]
           },
+          "allowance_charge": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "additionalProperties": true,
+            "description": "Vendor-reported per-request allowance charge as reported (OpenCode Go usage.opencode object, with usage.cost when reported). Its allowance value counts toward plan usage limits in dollars of the monthly limit. Null means no charge was observed; it is never a remaining allowance and never an admission or ordering input."
+          },
           "reported_tokens": {
             "format": "int64",
             "maximum": 9007199254740991,
@@ -16042,6 +16050,7 @@
           "reasoning_tokens",
           "bound_evidence",
           "refusal",
+          "allowance_charge",
           "created_at",
           "finished_at",
           "route_revision_id",

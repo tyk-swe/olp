@@ -3,6 +3,7 @@
 package codemode
 
 import (
+	"encoding/json"
 	"fmt"
 	"github.com/google/uuid"
 	"maps"
@@ -369,6 +370,7 @@ type Attempt struct {
 	ReasoningTokens   *int64            `json:"reasoning_tokens"`
 	BoundEvidence     *string           `json:"bound_evidence"`
 	Refusal           *string           `json:"refusal"`
+	AllowanceCharge   json.RawMessage   `json:"allowance_charge"`
 	CreatedAt         time.Time         `json:"created_at"`
 	FinishedAt        *time.Time        `json:"finished_at"`
 }

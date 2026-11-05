@@ -3,6 +3,7 @@ import type { CodeAttempt } from '$lib/management/code-mode';
 import { ApiProblem } from '$lib/management/http';
 import {
   adapterLabel,
+  allowanceChargeSummary,
   allowanceEvidenceLabel,
   allowanceWindowSummary,
   clientLabel,
@@ -39,6 +40,7 @@ const attempt: CodeAttempt = {
   reasoning_tokens: null,
   bound_evidence: null,
   refusal: null,
+  allowance_charge: null,
   created_at: '2026-01-01T00:00:00Z',
   finished_at: '2026-01-01T00:00:01Z',
   outcome_origin: null,
@@ -357,5 +359,33 @@ describe('code account decisions', () => {
     expect(skipClassLabel('tree')).toBe('tree account served');
     expect(skipClassLabel('weight')).toBe('weighted score');
     expect(skipClassLabel('band')).toBe('lower allowance band');
+  });
+});
+
+describe('observed allowance charge presentation', () => {
+  it('keeps a missing charge unknown instead of zero', () => {
+    const summary = allowanceChargeSummary(attempt);
+    expect(summary).toContain('Unknown');
+    expect(summary).not.toMatch(/\$0/);
+  });
+
+  it('labels the reported allowance as an observed charge in dollars of monthly limit', () => {
+    const summary = allowanceChargeSummary({
+      ...attempt,
+      allowance_charge: { billing_source: 'go', allowance: 0.0021 }
+    });
+    expect(summary).toBe(
+      'Observed charge $0.0021 of monthly limit, billed from go'
+    );
+    expect(summary).not.toMatch(/remaining/i);
+  });
+
+  it('invents no amount when the reported object has no allowance value', () => {
+    const summary = allowanceChargeSummary({
+      ...attempt,
+      allowance_charge: { billing_source: 'balance', list_cost: 0.00412 }
+    });
+    expect(summary).not.toMatch(/\$/);
+    expect(summary).not.toMatch(/remaining/i);
   });
 });

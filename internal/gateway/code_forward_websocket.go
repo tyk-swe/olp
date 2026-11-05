@@ -116,7 +116,7 @@ func (s *Server) prepareCodeWebSocket(r *http.Request, release *release.Release,
 		}
 		return handshake, err
 	}
-	handshake.connection = &codeAttempt{identityOriginator: target.adapter.CompatibilityOriginator(route), server: s, permit: permit, config: target.config, auth: auth, endpoint: target.endpoint, observer: codeObserver(target.endpoint)}
+	handshake.connection = &codeAttempt{identityOriginator: target.adapter.CompatibilityOriginator(route), adapter: target.adapter.Adapter, server: s, permit: permit, config: target.config, auth: auth, endpoint: target.endpoint, observer: codeObserver(target.endpoint)}
 	handshake.client, err = s.codeClient(r.Context(), release, target.config, permit.Account.ProviderID)
 	if err != nil {
 		return handshake, err

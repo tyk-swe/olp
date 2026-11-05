@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"reflect"
@@ -25,6 +26,7 @@ const codeGenerationTimeout = 10 * time.Minute
 
 type codeAttempt struct {
 	identityOriginator string
+	adapter            codemode.Adapter
 	paid               *paidCodeAttempt
 	server             *Server
 	permit             resources.CodePermit
@@ -167,6 +169,7 @@ func (s *Server) prepareCode(r *http.Request, release *release.Release, route co
 		return nil, codemode.Refuse(503, "code_configuration_unsupported")
 	}
 	a.config, a.endpoint, a.observer = target.config, target.endpoint, codeObserver(target.endpoint)
+	a.adapter = target.adapter.Adapter
 	a.identityOriginator = target.adapter.CompatibilityOriginator(route)
 	a.providerLease, failure = s.Admission.reserveCodeProvider(r.Context(), permit.Account.ProviderID, target.config, observation.Estimate, codeGenerationTimeout+time.Minute)
 	if failure != nil {
@@ -205,6 +208,9 @@ func (a *codeAttempt) observe(o codemode.Observation) {
 	}
 	if o.Allowance != nil {
 		a.observeAllowance(context.Background(), *o.Allowance)
+	}
+	if o.AllowanceCharge != nil {
+		a.observeAllowanceCharge(context.Background(), o.AllowanceCharge)
 	}
 	if o.Outcome != nil {
 		a.outcome(context.Background(), *o.Outcome)
@@ -294,6 +300,15 @@ func (a *codeAttempt) transportFailed(ctx context.Context, err error) {
 func codeUnavailableClose(err error) bool {
 	code := websocket.CloseStatus(err)
 	return code >= websocket.StatusInternalError && code <= websocket.StatusBadGateway
+}
+
+func (a *codeAttempt) observeAllowanceCharge(ctx context.Context, charge json.RawMessage) {
+	if a.paid != nil || a.adapter != codemode.AdapterOpenCodeGo || a.permit.Attempt.ID == "" {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
+	defer cancel()
+	_ = a.server.CodeLedger.ObserveAllowanceCharge(ctx, a.permit.Attempt.ID, charge)
 }
 
 func (a *codeAttempt) observeAllowance(ctx context.Context, allowance codemode.Allowance) {

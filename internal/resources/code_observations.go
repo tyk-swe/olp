@@ -2,9 +2,18 @@ package resources
 
 import (
 	"context"
+	"encoding/json"
 
 	"github.com/tyk-swe/olp/internal/codemode"
 )
+
+func (s *CodeStore) ObserveAllowanceCharge(ctx context.Context, attemptID string, charge json.RawMessage) error {
+	if err := codemode.ValidateAllowanceCharge(charge); err != nil {
+		return err
+	}
+	_, err := s.Pool.Exec(ctx, `UPDATE olp.code_attempts SET allowance_charge=$2 WHERE id=$1 AND paid_binding_id IS NULL`, attemptID, []byte(charge))
+	return err
+}
 
 func (s *CodeStore) ObserveOutcome(ctx context.Context, attemptID string, outcome codemode.Outcome) error {
 	if err := outcome.Validate(); err != nil {
