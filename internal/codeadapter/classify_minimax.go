@@ -1,6 +1,11 @@
 package codeadapter
 
 import (
+	"bytes"
+	"encoding/json"
+	"errors"
+	"io"
+	"math"
 	"net/http"
 	"strconv"
 	"strings"
@@ -30,7 +35,14 @@ func classifyMiniMax(status int, body []byte, headers http.Header, now time.Time
 
 func minimaxBusinessCode(body []byte) (string, bool) {
 	document, err := oif.ParseJSON(body, oif.Limits{MaxBytes: 64 << 10})
-	if err != nil || document.Root().Kind() != oif.Object {
+	if err != nil {
+		var sourceErr *oif.SourceError
+		if errors.As(err, &sourceErr) && sourceErr.Code == "duplicate_key" {
+			return minimaxDeclaredCodeSplit(body)
+		}
+		return "", false
+	}
+	if document.Root().Kind() != oif.Object {
 		return "", false
 	}
 	if code, ok := minimaxDeclaredCode(document.Root()); ok {
@@ -39,50 +51,109 @@ func minimaxBusinessCode(body []byte) (string, bool) {
 	return minimaxEnvelope(document.Root())
 }
 
-func minimaxDeclaredCode(root oif.Value) (string, bool) {
-	var baseResp, failure oif.Value
-	var haveBaseResp, haveFailure bool
-	for _, member := range root.Members() {
-		switch member.Name {
+func minimaxDeclaredCodeSplit(body []byte) (string, bool) {
+	decoder := json.NewDecoder(bytes.NewReader(body))
+	open, err := decoder.Token()
+	if err != nil || open != json.Delim('{') {
+		return "", false
+	}
+	var baseRaw, errorRaw json.RawMessage
+	var haveBaseResp, haveFailure, basePoisoned, failurePoisoned bool
+	for decoder.More() {
+		key, err := decoder.Token()
+		if err != nil {
+			return "", false
+		}
+		name, ok := key.(string)
+		if !ok {
+			return "", false
+		}
+		var raw json.RawMessage
+		if err := decoder.Decode(&raw); err != nil {
+			return "", false
+		}
+		switch name {
 		case "base_resp":
 			if haveBaseResp {
-				return "", false
+				basePoisoned = true
+				continue
 			}
-			baseResp, haveBaseResp = member.Value, true
+			baseRaw, haveBaseResp = raw, true
 		case "error":
 			if haveFailure {
-				return "", false
+				failurePoisoned = true
+				continue
 			}
-			failure, haveFailure = member.Value, true
+			errorRaw, haveFailure = raw, true
 		}
 	}
-	if !haveBaseResp && !haveFailure {
+	if _, err := decoder.Token(); err != nil {
+		return "", false
+	}
+	if _, err := decoder.Token(); !errors.Is(err, io.EOF) {
 		return "", false
 	}
 	var statusCode int64
-	if haveBaseResp {
-		code, ok := minimaxBaseRespCode(baseResp)
-		if !ok {
-			return "", false
-		}
-		statusCode = code
+	var haveStatusCode bool
+	if haveBaseResp && !basePoisoned {
+		statusCode, haveStatusCode = minimaxRawCode(baseRaw, minimaxBaseRespCode)
 	}
 	var errorCode int64
 	var haveErrorCode bool
-	if haveFailure {
-		code, present, ok := minimaxErrorCode(failure)
-		if !ok {
-			return "", false
-		}
-		errorCode, haveErrorCode = code, present
+	if haveFailure && !failurePoisoned {
+		errorCode, haveErrorCode = minimaxRawCode(errorRaw, minimaxErrorCode)
 	}
-	if statusCode != 0 {
+	return minimaxFoldCodes(statusCode, haveStatusCode, errorCode, haveErrorCode)
+}
+
+func minimaxRawCode(raw json.RawMessage, extract func(oif.Value) (int64, bool)) (int64, bool) {
+	document, err := oif.ParseJSON(raw, oif.Limits{MaxBytes: 64 << 10})
+	if err != nil {
+		return 0, false
+	}
+	return extract(document.Root())
+}
+
+func minimaxFoldCodes(statusCode int64, haveStatusCode bool, errorCode int64, haveErrorCode bool) (string, bool) {
+	if haveStatusCode && statusCode != 0 {
 		return strconv.FormatInt(statusCode, 10), true
 	}
 	if haveErrorCode && errorCode != 0 {
 		return strconv.FormatInt(errorCode, 10), true
 	}
 	return "", false
+}
+
+func minimaxDeclaredCode(root oif.Value) (string, bool) {
+	var baseResp, failure oif.Value
+	var haveBaseResp, haveFailure, basePoisoned, failurePoisoned bool
+	for _, member := range root.Members() {
+		switch member.Name {
+		case "base_resp":
+			if haveBaseResp {
+				basePoisoned = true
+				continue
+			}
+			baseResp, haveBaseResp = member.Value, true
+		case "error":
+			if haveFailure {
+				failurePoisoned = true
+				continue
+			}
+			failure, haveFailure = member.Value, true
+		}
+	}
+	var statusCode int64
+	var haveStatusCode bool
+	if haveBaseResp && !basePoisoned {
+		statusCode, haveStatusCode = minimaxBaseRespCode(baseResp)
+	}
+	var errorCode int64
+	var haveErrorCode bool
+	if haveFailure && !failurePoisoned {
+		errorCode, haveErrorCode = minimaxErrorCode(failure)
+	}
+	return minimaxFoldCodes(statusCode, haveStatusCode, errorCode, haveErrorCode)
 }
 
 func minimaxBaseRespCode(value oif.Value) (int64, bool) {
@@ -112,15 +183,15 @@ func minimaxBaseRespCode(value oif.Value) (int64, bool) {
 			haveMessage = true
 		}
 	}
-	if !haveCode || !haveMessage {
+	if !haveCode {
 		return 0, false
 	}
 	return code, true
 }
 
-func minimaxErrorCode(value oif.Value) (int64, bool, bool) {
+func minimaxErrorCode(value oif.Value) (int64, bool) {
 	if value.Kind() != oif.Object {
-		return 0, false, false
+		return 0, false
 	}
 	var code int64
 	var haveCode, haveMessage, haveType, haveHTTPCode bool
@@ -128,48 +199,54 @@ func minimaxErrorCode(value oif.Value) (int64, bool, bool) {
 		switch member.Name {
 		case "code":
 			if haveCode {
-				return 0, false, false
+				return 0, false
 			}
 			parsed, ok := minimaxNumber(member.Value)
 			if !ok {
-				return 0, false, false
+				return 0, false
 			}
 			code, haveCode = parsed, true
 		case "message":
 			if haveMessage {
-				return 0, false, false
+				return 0, false
 			}
 			if _, ok := member.Value.Text(); !ok {
-				return 0, false, false
+				return 0, false
 			}
 			haveMessage = true
 		case "type":
 			if haveType {
-				return 0, false, false
+				return 0, false
 			}
 			if _, ok := member.Value.Text(); !ok {
-				return 0, false, false
+				return 0, false
 			}
 			haveType = true
 		case "http_code":
 			if haveHTTPCode {
-				return 0, false, false
+				return 0, false
 			}
 			if _, ok := member.Value.Text(); !ok && member.Value.Kind() != oif.Number {
-				return 0, false, false
+				return 0, false
 			}
 			haveHTTPCode = true
 		}
 	}
-	return code, haveCode, true
+	if !haveCode {
+		return 0, false
+	}
+	return code, true
 }
 
 func minimaxNumber(value oif.Value) (int64, bool) {
 	if value.Kind() != oif.Number {
 		return 0, false
 	}
-	parsed, err := strconv.ParseInt(value.Raw(), 10, 64)
-	return parsed, err == nil
+	parsed, err := strconv.ParseFloat(value.Raw(), 64)
+	if err != nil || parsed != math.Trunc(parsed) || parsed < -9223372036854775808 || parsed >= 9223372036854775808 {
+		return 0, false
+	}
+	return int64(parsed), true
 }
 
 func minimaxEnvelope(root oif.Value) (string, bool) {

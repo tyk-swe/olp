@@ -132,6 +132,36 @@ func TestClassifyMiniMaxDeclaredFoldingPrefersBaseResp(t *testing.T) {
 	}
 }
 
+func TestClassifyMiniMaxDeclaredFoldingPerEnvelope(t *testing.T) {
+	// Source: MiniMax-AI/cli@38aba5f (fetched 2026-11-05), src/errors/api.ts ApiErrorBody declares every base_resp and error subfield optional and mapApiError folds the code as base_resp.status_code then error.code, so one malformed envelope does not veto a well typed code from the other and a declared JS number may arrive as an integral float lexeme
+	vendor, endpoint := minimaxVendor(t)
+	now := time.Date(2026, 11, 5, 10, 0, 0, 0, time.UTC)
+	cases := []struct {
+		name, envelope string
+		body           []byte
+		class          codeadapter.CooldownClass
+		scope          codeadapter.CooldownScope
+	}{
+		{"status code only", "minimax_2056", []byte(`{"base_resp":{"status_code":2056}}`), codeadapter.CooldownQuota, codeadapter.ScopeCredential},
+		{"status msg only falls through", "minimax_2062", []byte(`{"base_resp":{"status_msg":"success"},"error":{"message":"M Plan rate limit reached","type":"rate_limit_error","code":2062}}`), codeadapter.CooldownRate, codeadapter.ScopeCredential},
+		{"malformed error, valid base_resp", "minimax_2056", []byte(`{"base_resp":{"status_code":2056,"status_msg":"usage limit exceeded"},"error":{"message":"M Plan rate limit reached","code":"2062"}}`), codeadapter.CooldownQuota, codeadapter.ScopeCredential},
+		{"error not object, valid base_resp", "minimax_2056", []byte(`{"base_resp":{"status_code":2056},"error":"broken"}`), codeadapter.CooldownQuota, codeadapter.ScopeCredential},
+		{"malformed base_resp, valid error code", "minimax_2062", []byte(`{"base_resp":{"status_code":"2056","status_msg":"usage limit exceeded"},"error":{"message":"M Plan rate limit reached","type":"rate_limit_error","code":2062}}`), codeadapter.CooldownRate, codeadapter.ScopeCredential},
+		{"base_resp not object, valid error code", "minimax_2062", []byte(`{"base_resp":"broken","error":{"message":"M Plan rate limit reached","code":2062}}`), codeadapter.CooldownRate, codeadapter.ScopeCredential},
+		{"duplicate base_resp member poisons only base_resp", "minimax_2062", []byte(`{"base_resp":{"status_code":2056,"status_code":2061},"error":{"message":"M Plan rate limit reached","code":2062}}`), codeadapter.CooldownRate, codeadapter.ScopeCredential},
+		{"duplicate error member poisons only error", "minimax_2061", []byte(`{"base_resp":{"status_code":2061},"error":{"code":2056,"code":2062}}`), codeadapter.CooldownEntitlement, codeadapter.ScopeModel},
+		{"duplicate root base_resp poisons only base_resp", "minimax_2062", []byte(`{"base_resp":{"status_code":2056},"base_resp":{"status_code":2061},"error":{"code":2062}}`), codeadapter.CooldownRate, codeadapter.ScopeCredential},
+		{"integral float status code", "minimax_2056", []byte(`{"base_resp":{"status_code":2056.0}}`), codeadapter.CooldownQuota, codeadapter.ScopeCredential},
+		{"integral exponent error code", "minimax_2056", []byte(`{"error":{"message":"usage limit exceeded","code":2.056e3}}`), codeadapter.CooldownQuota, codeadapter.ScopeCredential},
+	}
+	for _, tc := range cases {
+		got, ok := vendor.Classify(endpoint, 429, tc.body, http.Header{}, now)
+		if !ok || got.Class != tc.class || got.Scope != tc.scope || got.Envelope != tc.envelope || got.NotExecuted || got.SuppressFallback {
+			t.Fatalf("Classify(%s) = %+v, %v", tc.name, got, ok)
+		}
+	}
+}
+
 func TestClassifyMiniMaxAmbiguous2062NeverQuotaOrReplay(t *testing.T) {
 	// Source: https://platform.minimax.io/docs/api-reference/errorcode (fetched 2026-11-05), code 2062 also means no active M Plan subscription on the usage query.
 	vendor, endpoint := minimaxVendor(t)
@@ -151,20 +181,21 @@ func TestClassifyMiniMaxUnprovenShapesStayUnclassified(t *testing.T) {
 	vendor, endpoint := minimaxVendor(t)
 	now := time.Date(2026, 11, 5, 10, 0, 0, 0, time.UTC)
 	for name, body := range map[string][]byte{
-		"string error code":     []byte(`{"error":{"code":"2056","message":"usage limit exceeded"}}`),
-		"fractional error code": []byte(`{"error":{"code":2056.5,"message":"usage limit exceeded"}}`),
-		"string status code":    []byte(`{"base_resp":{"status_code":"2056","status_msg":"usage limit exceeded"}}`),
-		"base_resp no message":  []byte(`{"base_resp":{"status_code":2056}}`),
-		"unknown declared code": []byte(`{"base_resp":{"status_code":9999,"status_msg":"unknown"}}`),
-		"stream event":          []byte(`{"type":"error","error":{"type":"rate_limit_error","message":"usage limit exceeded (2056)"}}`),
-		"missing request id":    []byte(`{"type":"error","error":{"type":"rate_limit_error","message":"usage limit exceeded (2056)","http_code":"429"}}`),
-		"extra root member":     []byte(`{"type":"error","error":{"type":"rate_limit_error","message":"usage limit exceeded (2056)","http_code":"429"},"request_id":"r","extra":1}`),
-		"http code mismatch":    []byte(`{"type":"error","error":{"type":"insufficient_balance_error","message":"usage limit exceeded (2056)","http_code":"402"},"request_id":"r"}`),
-		"code not at end":       []byte(`{"type":"error","error":{"type":"rate_limit_error","message":"(2056) usage limit exceeded","http_code":"429"},"request_id":"r"}`),
-		"no space before code":  []byte(`{"type":"error","error":{"type":"rate_limit_error","message":"usage limit exceeded(2056)","http_code":"429"},"request_id":"r"}`),
-		"code only message":     []byte(`{"type":"error","error":{"type":"rate_limit_error","message":"(2056)","http_code":"429"},"request_id":"r"}`),
-		"unknown code":          minimaxBody("9999", "unknown"),
-		"non digit suffix":      minimaxBody("205x", "usage limit exceeded"),
+		"string error code":      []byte(`{"error":{"code":"2056","message":"usage limit exceeded"}}`),
+		"fractional error code":  []byte(`{"error":{"code":2056.5,"message":"usage limit exceeded"}}`),
+		"string status code":     []byte(`{"base_resp":{"status_code":"2056","status_msg":"usage limit exceeded"}}`),
+		"fractional status code": []byte(`{"base_resp":{"status_code":2056.5,"status_msg":"usage limit exceeded"}}`),
+		"duplicate status code":  []byte(`{"base_resp":{"status_code":2056,"status_code":2056}}`),
+		"unknown declared code":  []byte(`{"base_resp":{"status_code":9999,"status_msg":"unknown"}}`),
+		"stream event":           []byte(`{"type":"error","error":{"type":"rate_limit_error","message":"usage limit exceeded (2056)"}}`),
+		"missing request id":     []byte(`{"type":"error","error":{"type":"rate_limit_error","message":"usage limit exceeded (2056)","http_code":"429"}}`),
+		"extra root member":      []byte(`{"type":"error","error":{"type":"rate_limit_error","message":"usage limit exceeded (2056)","http_code":"429"},"request_id":"r","extra":1}`),
+		"http code mismatch":     []byte(`{"type":"error","error":{"type":"insufficient_balance_error","message":"usage limit exceeded (2056)","http_code":"402"},"request_id":"r"}`),
+		"code not at end":        []byte(`{"type":"error","error":{"type":"rate_limit_error","message":"(2056) usage limit exceeded","http_code":"429"},"request_id":"r"}`),
+		"no space before code":   []byte(`{"type":"error","error":{"type":"rate_limit_error","message":"usage limit exceeded(2056)","http_code":"429"},"request_id":"r"}`),
+		"code only message":      []byte(`{"type":"error","error":{"type":"rate_limit_error","message":"(2056)","http_code":"429"},"request_id":"r"}`),
+		"unknown code":           minimaxBody("9999", "unknown"),
+		"non digit suffix":       minimaxBody("205x", "usage limit exceeded"),
 	} {
 		if got, ok := vendor.Classify(endpoint, 429, body, http.Header{}, now); ok {
 			t.Fatalf("Classify(%s) = %+v, want unclassified", name, got)
