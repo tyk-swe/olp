@@ -7,12 +7,14 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/tyk-swe/olp/internal/codeadapter"
 	"github.com/tyk-swe/olp/internal/codeclient"
 	"github.com/tyk-swe/olp/internal/codemode"
+	"github.com/tyk-swe/olp/internal/codeplans"
 	"github.com/tyk-swe/olp/internal/codexauth"
 	"github.com/tyk-swe/olp/internal/resources"
 	"github.com/tyk-swe/olp/internal/routing"
@@ -149,5 +151,63 @@ func TestCodeAttemptUnobserved429FlushesCredentialHealthAtFinish(t *testing.T) {
 	attempt.finish(t.Context())
 	if len(ledger.health) != 1 || ledger.health[0].Status != "quota_limited" || ledger.health[0].RetryAt == nil || !ledger.health[0].RetryAt.Equal(now.Add(120*time.Second)) {
 		t.Fatalf("health = %+v, want finish flush", ledger.health)
+	}
+}
+
+func glmAttempt(t *testing.T, ledger *fakeCodeLedger, now time.Time, path string) *codeAttempt {
+	t.Helper()
+	vendor, ok := codeadapter.Lookup(codemode.AdapterZAICoding)
+	if !ok {
+		t.Fatal("glm vendor missing")
+	}
+	endpoint, ok := vendor.Endpoint(path)
+	if !ok {
+		t.Fatal("glm endpoint missing")
+	}
+	server := &Server{CodeLedger: ledger, now: func() time.Time { return now }, log: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	return &codeAttempt{
+		server:   server,
+		permit:   resources.CodePermit{InitialRecovery: true, Account: codemode.Account{ID: "account"}, Attempt: codemode.Attempt{ID: "attempt"}},
+		config:   routing.Configuration{Kind: "plugin", AuthMode: "grant", ProfileID: codeplans.ZAIProfile},
+		endpoint: endpoint,
+		observer: codeObserver(endpoint),
+		model:    "glm-model",
+	}
+}
+
+func TestCodeAttemptGLMMessagesQuota429WritesCredentialCooldownWithVendorReset(t *testing.T) {
+	// Source: https://docs.z.ai/api-reference/api-code (fetched 2026-11-05), code 1316.
+	now := time.Date(2026, 11, 5, 10, 0, 0, 0, time.UTC)
+	reset := now.Add(2 * time.Hour)
+	ledger := &fakeCodeLedger{}
+	attempt := glmAttempt(t, ledger, now, "v1/messages")
+	attempt.response(t.Context(), 429, http.Header{"Retry-After": {"120"}})
+	attempt.observe(attempt.observer.Unary([]byte(`{"error":{"code":"1316","message":"Usage limit reached for the past 5 hours. Insufficient balance for extra usage. Resets at ` + reset.Format(time.RFC3339) + `."}}`)))
+	attempt.finish(t.Context())
+	if len(ledger.cooldowns) != 1 {
+		t.Fatalf("cooldowns = %+v, want one credential cooldown", ledger.cooldowns)
+	}
+	got := ledger.cooldowns[0]
+	if got.account != "account" || got.classification.Class != codeadapter.CooldownQuota || got.classification.Scope != codeadapter.ScopeCredential || got.classification.Envelope != "glm_1316" || !got.classification.RetryAt.Equal(reset) {
+		t.Fatalf("cooldown = %+v", got)
+	}
+}
+
+func TestCodeAttemptGLMProvenQuotaRecoversAndAmbiguousDoesNot(t *testing.T) {
+	// Source: https://docs.z.ai/api-reference/api-code (fetched 2026-11-05), code 1308.
+	now := time.Date(2026, 11, 5, 10, 0, 0, 0, time.UTC)
+	reset := now.Add(2 * time.Hour)
+	route := codemode.Route{InitialRecoveryAttempts: 1}
+	proven := glmAttempt(t, &fakeCodeLedger{}, now, "v1/chat/completions")
+	response := &http.Response{StatusCode: 429, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(`{"error":{"code":"1308","message":"Usage limit reached for 5 hours. Your limit will reset at ` + reset.Format(time.RFC3339) + `"}}`))}
+	recovery, err := proven.recover(t.Context(), response, route, nil)
+	if err != nil || recovery == nil || recovery.Envelope != "glm_1308" || recovery.Number != 1 || recovery.From != "attempt" {
+		t.Fatalf("recover(proven) = %+v, %v", recovery, err)
+	}
+	ambiguous := glmAttempt(t, &fakeCodeLedger{}, now, "v1/chat/completions")
+	response = &http.Response{StatusCode: 429, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(`{"error":{"code":"1308","message":"Usage limit reached for 5 hours. Your limit will reset at ` + reset.Format(time.RFC3339) + `"},"extra":1}`))}
+	recovery, err = ambiguous.recover(t.Context(), response, route, nil)
+	if err != nil || recovery != nil {
+		t.Fatalf("recover(ambiguous) = %+v, %v, want no replay", recovery, err)
 	}
 }

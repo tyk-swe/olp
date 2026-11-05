@@ -53,6 +53,12 @@ func (m *Messages) Unary(body []byte) codemode.Observation {
 		m.record(field(root, "usage"), true)
 		m.stop, _ = field(root, "stop_reason").Text()
 		return m.finish()
+	case "":
+		if failure := field(root, "error"); failure.Kind() == oif.Object {
+			m.terminal = true
+			return failed(0, body)
+		}
+		return codemode.Observation{}
 	case "error":
 		m.terminal = true
 		// The response status already reported the failure.

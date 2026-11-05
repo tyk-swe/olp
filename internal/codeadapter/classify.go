@@ -42,8 +42,11 @@ type Classification struct {
 }
 
 func (v Vendor) Classify(endpoint Endpoint, status int, body []byte, headers http.Header, now time.Time) (Classification, bool) {
-	if v.Adapter == codemode.AdapterCodex {
+	switch v.Adapter {
+	case codemode.AdapterCodex:
 		return classifyCodex(endpoint, status, body, headers, now)
+	case codemode.AdapterZAICoding:
+		return classifyGLM(status, body, headers, now)
 	}
 	return Classification{}, false
 }

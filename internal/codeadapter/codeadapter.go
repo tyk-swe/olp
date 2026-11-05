@@ -181,7 +181,7 @@ var vendors = []Vendor{
 		},
 		clients:         []Client{{ID: ClientClaudeCode}, {ID: ClientOpenCode, Provider: "zai-coding-plan", URLSuffix: "/v1"}},
 		enrollmentNotes: keyEnrollmentNotes,
-		notes:           []string{"Z.ai restricts the GLM Coding Plan to its officially supported coding tools; OLP forwards this client's requests unmodified but cannot guarantee that Z.ai accepts pooled use."},
+		notes:           []string{"Z.ai restricts the GLM Coding Plan to its officially supported coding tools; OLP forwards this client's requests unmodified but cannot guarantee that Z.ai accepts pooled use.", "Ordering runs on weights plus cooldown; this adapter has no proven allowance signal."},
 		clientNotes:     map[string][]string{ClientOpenCode: {"Research services require an explicit route research binding to a Z.ai global account. Vision is not supported."}},
 	},
 	{

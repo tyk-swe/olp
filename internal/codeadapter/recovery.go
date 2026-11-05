@@ -17,15 +17,16 @@ type Rejection struct {
 }
 
 func (v Vendor) InitialRejection(endpoint Endpoint, status int, body []byte, headers http.Header, now time.Time) (Rejection, bool) {
-	if v.Adapter != codemode.AdapterCodex || endpoint.Observation != ObserveCodex || status != 401 && status != 429 {
-		return Rejection{}, false
-	}
-	if status == 429 {
+	classified := v.Adapter == codemode.AdapterZAICoding || v.Adapter == codemode.AdapterCodex && endpoint.Observation == ObserveCodex
+	if status == 429 && classified {
 		classification, ok := v.Classify(endpoint, status, body, headers, now)
 		if !ok || !classification.NotExecuted {
 			return Rejection{}, false
 		}
 		return Rejection{Class: upstream.RateLimit, Envelope: classification.Envelope, RetryAt: classification.RetryAt}, true
+	}
+	if v.Adapter != codemode.AdapterCodex || endpoint.Observation != ObserveCodex || status != 401 {
+		return Rejection{}, false
 	}
 	document, err := oif.ParseJSON(body, oif.Limits{MaxBytes: 64 << 10})
 	if err != nil || document.Root().Kind() != oif.Object || len(document.Root().Members()) != 1 {
