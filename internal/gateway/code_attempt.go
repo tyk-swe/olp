@@ -375,6 +375,10 @@ func (a *codeAttempt) observeCooldownClass(o codemode.Observation) (codeadapter.
 	if !ok {
 		return codeadapter.Classification{}, false
 	}
+	if classification.SuppressFallback {
+		a.pendingHealth = nil
+		return classification, true
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 	err := a.server.CodeLedger.ObserveCooldownClass(ctx, a.permit.Account.ID, a.model, classification, now)

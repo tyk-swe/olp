@@ -109,13 +109,26 @@ func TestClassifyGLMRateCapacityAndEntitlementStayShortAndApart(t *testing.T) {
 	}
 }
 
-func TestClassifyGLMExpiryAndOtherCodesStayUnclassified(t *testing.T) {
-	// Source: https://docs.z.ai/api-reference/api-code (fetched 2026-11-05), codes 1309, 1314, 1113, 1313, 1315.
+func TestClassifyGLMExpirySuppressesFallback(t *testing.T) {
+	// Source: https://docs.z.ai/api-reference/api-code (fetched 2026-11-05), codes 1309, 1314.
 	vendor, endpoint := glmVendor(t)
 	now := time.Date(2026, 11, 5, 10, 0, 0, 0, time.UTC)
 	for _, tc := range []struct{ code, message string }{
 		{"1309", "Your GLM Coding Plan package has expired and is temporarily unavailable. You can resume using it after renewing the subscription on the official website. https://z.ai/subscribe"},
 		{"1314", "Your enterprise package has expired. Please contact your enterprise administrator."},
+	} {
+		got, ok := vendor.Classify(endpoint, 429, glmBody(tc.code, tc.message), http.Header{"Retry-After": {"300"}}, now)
+		if !ok || !got.SuppressFallback || got.Class != "" || got.Scope != "" || !got.RetryAt.IsZero() || got.Envelope != "glm_"+tc.code || got.NotExecuted {
+			t.Fatalf("Classify(%s) = %+v, %v, want suppress-fallback only", tc.code, got, ok)
+		}
+	}
+}
+
+func TestClassifyGLMOtherCodesStayUnclassified(t *testing.T) {
+	// Source: https://docs.z.ai/api-reference/api-code (fetched 2026-11-05), codes 1113, 1313, 1315.
+	vendor, endpoint := glmVendor(t)
+	now := time.Date(2026, 11, 5, 10, 0, 0, 0, time.UTC)
+	for _, tc := range []struct{ code, message string }{
 		{"1113", "Insufficient balance or no resource package. Please recharge."},
 		{"1313", "Your account's current usage pattern does not comply with the Fair Usage Policy"},
 		{"1315", "This API Key is limited to enterprise coding package scenarios."},

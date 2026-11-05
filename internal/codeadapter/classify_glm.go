@@ -27,6 +27,8 @@ func classifyGLM(status int, body []byte, headers http.Header, now time.Time) (C
 		return Classification{Class: CooldownRate, Scope: ScopeCredential, RetryAt: glmRetryAt(time.Time{}, false, headers, now), Envelope: "glm_1302"}, true
 	case "1305":
 		return Classification{Class: CooldownCapacity, Scope: ScopeModel, RetryAt: glmRetryAt(time.Time{}, false, headers, now), Envelope: "glm_1305"}, true
+	case "1309", "1314":
+		return Classification{SuppressFallback: true, Envelope: "glm_" + code}, true
 	}
 	return Classification{}, false
 }

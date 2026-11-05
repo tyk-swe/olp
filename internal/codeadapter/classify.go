@@ -34,11 +34,12 @@ const (
 )
 
 type Classification struct {
-	Class       CooldownClass
-	Scope       CooldownScope
-	RetryAt     time.Time
-	Envelope    string
-	NotExecuted bool
+	Class            CooldownClass
+	Scope            CooldownScope
+	RetryAt          time.Time
+	Envelope         string
+	NotExecuted      bool
+	SuppressFallback bool
 }
 
 func (v Vendor) Classify(endpoint Endpoint, status int, body []byte, headers http.Header, now time.Time) (Classification, bool) {

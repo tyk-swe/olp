@@ -193,6 +193,22 @@ func TestCodeAttemptGLMMessagesQuota429WritesCredentialCooldownWithVendorReset(t
 	}
 }
 
+func TestCodeAttemptGLMExpiry429WritesNoHealthOrCooldown(t *testing.T) {
+	// Source: https://docs.z.ai/api-reference/api-code (fetched 2026-11-05), code 1309.
+	now := time.Date(2026, 11, 5, 10, 0, 0, 0, time.UTC)
+	ledger := &fakeCodeLedger{}
+	attempt := glmAttempt(t, ledger, now, "v1/chat/completions")
+	attempt.response(t.Context(), 429, http.Header{"Retry-After": {"120"}})
+	attempt.observe(attempt.observer.Unary([]byte(`{"error":{"code":"1309","message":"Your GLM Coding Plan package has expired"}}`)))
+	attempt.finish(t.Context())
+	if len(ledger.health) != 0 {
+		t.Fatalf("expiry 429 wrote health %+v, want none", ledger.health)
+	}
+	if len(ledger.cooldowns) != 0 {
+		t.Fatalf("expiry 429 wrote cooldowns %+v, want none", ledger.cooldowns)
+	}
+}
+
 func TestCodeAttemptGLMProvenQuotaRecoversAndAmbiguousDoesNot(t *testing.T) {
 	// Source: https://docs.z.ai/api-reference/api-code (fetched 2026-11-05), code 1308.
 	now := time.Date(2026, 11, 5, 10, 0, 0, 0, time.UTC)
