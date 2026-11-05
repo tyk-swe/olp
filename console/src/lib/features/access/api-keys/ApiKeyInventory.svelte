@@ -165,7 +165,7 @@
 <div class="page-header">
   <div>
     <p class="eyebrow">Access</p>
-    <h1 class="page-title">API Keys</h1>
+    <h1 class="page-title">API keys</h1>
     <p class="page-description">
       Manage client access with scoped API keys, route permissions, and usage
       limits.
@@ -406,7 +406,7 @@
                         ? 'Rotating…'
                         : 'Rotate'}</button
                     >{/if}<button
-                    class="button button-secondary danger-button"
+                    class="button button-secondary button-danger"
                     type="button"
                     onclick={() => revoke(key)}
                     disabled={Boolean(busy)}
@@ -523,8 +523,5 @@
   .row-actions {
     display: flex;
     gap: 0.4rem;
-  }
-  .danger-button {
-    color: var(--danger);
   }
 </style>

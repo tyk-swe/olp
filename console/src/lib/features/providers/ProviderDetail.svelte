@@ -365,6 +365,7 @@
 {:else}
   {@const current = snapshot.data?.provider}
   {#if current.state === 'draft' && !current.active_revision && access.allows('DELETE /api/v1/providers/{provider_id}')}<ConfirmAction
+      danger
       label="Delete unused provider"
       description={`Delete ${current.name} and its draft credentials. Providers referenced by routes or history cannot be deleted`}
       identity={`${current.id}:${current.etag}`}

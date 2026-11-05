@@ -291,6 +291,7 @@
                   >{selectedId === project.id ? 'Close' : 'Members'}</button
                 >
                 {#if access.allows('DELETE /api/v1/projects/{project_id}')}<ConfirmAction
+                    danger
                     label="Delete project"
                     description={`Delete ${project.name}. Projects with dependent resources cannot be deleted`}
                     identity={`${project.id}:${project.etag}`}

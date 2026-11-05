@@ -287,6 +287,7 @@
             >{busy === slot.id ? 'Validating…' : 'Validate access'}</button
           >{/if}
         {#if slot.id && pool.data && access.allows('DELETE /api/v1/providers/{provider_id}/credential-slots/{slot_id}')}<ConfirmAction
+            danger
             label="Delete slot"
             description={`Remove ${slot.name} from the provider credential pool`}
             identity={`${slot.id}:${pool.data.etag}`}

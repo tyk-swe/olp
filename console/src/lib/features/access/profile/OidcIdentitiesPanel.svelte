@@ -98,7 +98,7 @@
         identity unlink.
       </p>
       <button
-        class="button button-secondary danger-button"
+        class="button button-secondary button-danger"
         type="button"
         onclick={onCompletePending}
         disabled={Boolean(busy)}
@@ -168,9 +168,6 @@
     margin: 0;
     color: var(--foreground-muted);
     font-size: var(--text-caption);
-  }
-  .danger-button {
-    color: var(--danger);
   }
   @media (max-width: 40rem) {
     .panel {

@@ -343,7 +343,7 @@
                 >Review and approve</button
               >{/if}
             <button
-              class="button button-secondary danger-button"
+              class="button button-secondary button-danger"
               type="button"
               disabled={Boolean(busy)}
               onclick={() => uninstall(plugin)}
@@ -497,9 +497,6 @@
     flex-wrap: wrap;
     justify-content: flex-end;
     gap: 0.65rem;
-  }
-  .danger-button {
-    color: var(--danger);
   }
   @media (max-width: 64rem) {
     .install-panel,

@@ -926,6 +926,7 @@
                       >{destination.enabled ? 'Disable' : 'Enable'}</button
                     >
                     {#if access.allows('DELETE /api/v1/notifications/destinations/{notification_destination_id}')}<ConfirmAction
+                        danger
                         label="Delete destination"
                         description={`Delete ${destination.name}. Referenced resources cannot be deleted`}
                         identity={`${destination.id}:${destination.etag}`}
@@ -1213,6 +1214,7 @@
                       >{rule.enabled ? 'Disable' : 'Enable'}</button
                     >
                     {#if access.allows('DELETE /api/v1/notifications/rules/{notification_rule_id}')}<ConfirmAction
+                        danger
                         label="Delete rule"
                         description={`Delete ${rule.name}. Referenced resources cannot be deleted`}
                         identity={`${rule.id}:${rule.etag}`}

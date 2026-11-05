@@ -61,7 +61,7 @@
     >{#if editor.canManage && editor.resourceId && editor.draft.data}
       {@const draft = editor.draft.data}
       <button
-        class="button button-secondary danger-button"
+        class="button button-secondary button-danger"
         type="button"
         onclick={() => editor.remove(draft)}
         disabled={Boolean(editor.busy)}>Delete draft</button
@@ -291,9 +291,6 @@
     color: var(--foreground-muted);
   }
 
-  .danger-button {
-    color: var(--danger);
-  }
   code {
     font-family: var(--font-mono);
     font-size: var(--text-caption);

@@ -318,7 +318,7 @@
             >
             <td
               >{#if canManage && invitation.status === 'pending'}<button
-                  class="button button-secondary danger-button"
+                  class="button button-secondary button-danger"
                   type="button"
                   onclick={() =>
                     removeInvitation(invitation.id, invitation.email)}
@@ -382,9 +382,6 @@
   }
   .invite-panel input::placeholder {
     color: var(--foreground-muted);
-  }
-  .danger-button {
-    color: var(--danger);
   }
   td small {
     color: var(--foreground-muted);
