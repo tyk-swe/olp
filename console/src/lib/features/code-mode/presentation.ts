@@ -165,8 +165,8 @@ export function orderingSignalLabel(
 ): string {
   if (!allowanceOrdering) return 'Weights plus cooldown';
   if (adapter !== 'codex')
-    return 'Weights plus cooldown, no proven allowance signal';
-  return 'Allowance bands from proven passive and active windows';
+    return 'Weights plus cooldown, no qualified allowance signal';
+  return 'Allowance bands from passive and active windows, fixture-proven only';
 }
 
 export function canRequestAllowanceRead(

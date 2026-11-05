@@ -14,7 +14,7 @@ GOFMT_PATHS = \
 
 .PHONY: \
 	help setup dev dev-stop dev-reset check check-go check-console check-contracts lint fmt-check vet \
-	test-fast test-service qualify-code \
+	test-fast test-service qualify-code qualify-code-live \
 	api build build-go catalog catalog-sign fmt
 
 help:
@@ -70,6 +70,9 @@ test-service: ## Run the database-backed service suite in disposable containers
 
 qualify-code: ## Run the code mode fixture qualification lanes in disposable containers
 	./scripts/qualification.sh
+
+qualify-code-live: ## Run the code mode live qualification lanes against real vendor accounts
+	./scripts/qualification-live.sh
 
 fmt-check:
 	@bad="$$(gofmt -l $(GOFMT_PATHS))"; test -z "$$bad" || { printf '%s\n' "$$bad"; exit 1; }

@@ -29,19 +29,27 @@ import (
 	"github.com/tyk-swe/olp/plugin/abi"
 )
 
+type runCheck struct {
+	Name   string `json:"name"`
+	Result string `json:"result"`
+	Detail string `json:"detail,omitempty"`
+}
+
 type runRecord struct {
-	Client         string `json:"client"`
-	ClientVersion  string `json:"client_version"`
-	ClientExecuted bool   `json:"client_executed"`
-	Platform       string `json:"platform"`
-	Adapter        string `json:"adapter"`
-	Model          string `json:"model"`
-	Protocol       string `json:"protocol"`
-	Transport      string `json:"transport"`
-	Result         string `json:"result"`
-	Evidence       string `json:"evidence"`
-	Driver         string `json:"driver"`
-	Detail         string `json:"detail,omitempty"`
+	Client         string     `json:"client"`
+	ClientVersion  string     `json:"client_version"`
+	ClientExecuted bool       `json:"client_executed"`
+	Platform       string     `json:"platform"`
+	Adapter        string     `json:"adapter"`
+	Profile        string     `json:"profile"`
+	Model          string     `json:"model"`
+	Protocol       string     `json:"protocol"`
+	Transport      string     `json:"transport"`
+	Result         string     `json:"result"`
+	Evidence       string     `json:"evidence"`
+	Driver         string     `json:"driver"`
+	Detail         string     `json:"detail,omitempty"`
+	Checks         []runCheck `json:"checks,omitempty"`
 }
 
 type reportWriter struct {
@@ -146,7 +154,7 @@ func (l lane) record(result, detail string) runRecord {
 	return runRecord{
 		Client: l.client.name, ClientVersion: version, ClientExecuted: false,
 		Platform: runtime.GOOS + "/" + runtime.GOARCH,
-		Adapter:  l.seed.adapter, Model: vendorModel, Protocol: l.protocol, Transport: "http",
+		Adapter:  l.seed.adapter, Profile: l.seed.profile, Model: vendorModel, Protocol: l.protocol, Transport: "http",
 		Result: result, Evidence: "fixture", Driver: "protocol-fixture", Detail: detail,
 	}
 }
@@ -208,56 +216,68 @@ func lanes() []lane {
 
 func (s *service) seedSubscription(project, ownerID string, spec laneSeed, proxy vendorProxy) (providerID, credentialID string) {
 	s.t.Helper()
+	providerID, credentialID, err := s.seedSubscriptionE(project, ownerID, spec, &egress.ConnectionOptions{ProxyURL: proxy.url, TrustRootsPEM: proxy.roots})
+	if err != nil {
+		s.t.Fatal(err)
+	}
+	return providerID, credentialID
+}
+
+// seedSubscriptionE inserts the provider, credential, and grant rows grant
+// enrollment would store for spec. A nil network leaves the connection on
+// the adapter's own vendor address with ordinary egress, as production
+// requires; the fixture lanes pass the fixture proxy instead.
+func (s *service) seedSubscriptionE(project, ownerID string, spec laneSeed, network *egress.ConnectionOptions) (providerID, credentialID string, err error) {
 	vendor, ok := codeadapter.ForConnection("plugin", "grant", spec.profile)
 	if !ok {
-		s.t.Fatalf("no adapter for profile %s", spec.profile)
+		return "", "", fmt.Errorf("no adapter for profile %s", spec.profile)
 	}
 	if string(vendor.Adapter) != spec.adapter {
-		s.t.Fatalf("profile %s serves adapter %s, lane expects %s", spec.profile, vendor.Adapter, spec.adapter)
+		return "", "", fmt.Errorf("profile %s serves adapter %s, lane expects %s", spec.profile, vendor.Adapter, spec.adapter)
 	}
 	address, ok := vendor.Address(spec.profile)
 	if !ok {
-		s.t.Fatalf("adapter %s has no address for profile %s", spec.adapter, spec.profile)
+		return "", "", fmt.Errorf("adapter %s has no address for profile %s", spec.adapter, spec.profile)
 	}
 	digestSum := sha256.Sum256([]byte("olp-qualification-plugin\x00" + spec.profile))
 	digest := hex.EncodeToString(digestSum[:])
 	manifest, err := json.Marshal(spec.manifest())
 	if err != nil {
-		s.t.Fatal(err)
+		return "", "", err
 	}
 	configuration, err := json.Marshal(providers.Configuration{
 		Kind: "plugin", AuthMode: "grant", ProfileID: spec.profile, ProfileRevision: digest, Endpoint: &address,
 		Options: providers.Options{
-			Network:           &egress.ConnectionOptions{ProxyURL: proxy.url, TrustRootsPEM: proxy.roots},
+			Network:           network,
 			CredentialHeaders: []string{},
 			Models:            map[string]json.RawMessage{},
 			ParameterDefaults: map[string]json.RawMessage{},
 		},
 	})
 	if err != nil {
-		s.t.Fatal(err)
+		return "", "", err
 	}
 	facts, err := json.Marshal(spec.facts)
 	if err != nil {
-		s.t.Fatal(err)
+		return "", "", err
 	}
 	served, err := json.Marshal(connectors.GrantCredential{PluginDigest: digest, ProfileID: spec.profile, AccessToken: spec.token, Facts: spec.facts})
 	if err != nil {
-		s.t.Fatal(err)
+		return "", "", err
 	}
 	ring, err := secrets.ParseRing([]byte(s.env.master))
 	if err != nil {
-		s.t.Fatal(err)
+		return "", "", err
 	}
 	providerID, credentialID = uuid.NewString(), uuid.NewString()
 	tx, err := s.pool.Begin(s.t.Context())
 	if err != nil {
-		s.t.Fatal(err)
+		return "", "", err
 	}
 	defer tx.Rollback(s.t.Context())
 	var installation string
 	if err := tx.QueryRow(s.t.Context(), `SELECT id::text FROM olp.installation WHERE singleton`).Scan(&installation); err != nil {
-		s.t.Fatal(err)
+		return "", "", err
 	}
 	steps := []func() error{
 		func() error {
@@ -282,13 +302,13 @@ func (s *service) seedSubscription(project, ownerID string, spec laneSeed, proxy
 	}
 	for _, step := range steps {
 		if err := step(); err != nil {
-			s.t.Fatal(err)
+			return "", "", err
 		}
 	}
 	if err := tx.Commit(s.t.Context()); err != nil {
-		s.t.Fatal(err)
+		return "", "", err
 	}
-	return providerID, credentialID
+	return providerID, credentialID, nil
 }
 
 func TestMissingClientReportsNoSignal(t *testing.T) {

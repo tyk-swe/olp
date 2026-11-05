@@ -181,7 +181,7 @@ var vendors = []Vendor{
 		},
 		clients:         []Client{{ID: ClientClaudeCode}, {ID: ClientOpenCode, Provider: "zai-coding-plan", URLSuffix: "/v1"}},
 		enrollmentNotes: keyEnrollmentNotes,
-		notes:           []string{"Z.ai restricts the GLM Coding Plan to its officially supported coding tools; OLP forwards this client's requests unmodified but cannot guarantee that Z.ai accepts pooled use.", "Ordering runs on weights plus cooldown; this adapter has no proven allowance signal."},
+		notes:           []string{"Z.ai restricts the GLM Coding Plan to its officially supported coding tools; OLP forwards this client's requests unmodified but cannot guarantee that Z.ai accepts pooled use.", "Ordering runs on weights plus cooldown; this adapter has no qualified allowance signal."},
 		clientNotes:     map[string][]string{ClientOpenCode: {"Research services require an explicit route research binding to a Z.ai global account. Vision is not supported."}},
 	},
 	{
@@ -193,7 +193,7 @@ var vendors = []Vendor{
 		},
 		clients:         []Client{{ID: ClientClaudeCode}, {ID: ClientOpenCode, Provider: "minimax-coding-plan", URLSuffix: "/v1", Protocol: codemode.ProtocolMessages}},
 		enrollmentNotes: keyEnrollmentNotes,
-		notes:           []string{"MiniMax's terms govern M Plan use; OLP forwards this client's requests unmodified but cannot guarantee that MiniMax accepts pooled use.", "Ordering runs on weights plus cooldown until the remains schema is pinned from real keys on both profiles; this adapter has no proven allowance signal."},
+		notes:           []string{"MiniMax's terms govern M Plan use; OLP forwards this client's requests unmodified but cannot guarantee that MiniMax accepts pooled use.", "Ordering runs on weights plus cooldown until the remains schema is pinned from real keys on both profiles; this adapter has no qualified allowance signal."},
 	},
 	{
 		Adapter: codemode.AdapterKimiCode, Name: "Kimi Code", profiles: []string{codeplans.KimiProfile, codeplans.KimiCNProfile}, manifest: codeplans.KimiManifest, KeyGrant: true,

@@ -447,9 +447,9 @@ describe('extra usage presentation', () => {
 });
 
 describe('code ordering signals', () => {
-  it('names only codex as a proven passive and active allowance signal', () => {
+  it('names only codex bands, as fixture-proven only and never live-proven', () => {
     expect(orderingSignalLabel('codex', true)).toBe(
-      'Allowance bands from proven passive and active windows'
+      'Allowance bands from passive and active windows, fixture-proven only'
     );
     for (const adapter of [
       'zai_coding',
@@ -461,11 +461,11 @@ describe('code ordering signals', () => {
       'antigravity'
     ]) {
       expect(orderingSignalLabel(adapter, true)).toBe(
-        'Weights plus cooldown, no proven allowance signal'
+        'Weights plus cooldown, no qualified allowance signal'
       );
     }
     expect(orderingSignalLabel(null, true)).toBe(
-      'Weights plus cooldown, no proven allowance signal'
+      'Weights plus cooldown, no qualified allowance signal'
     );
   });
 

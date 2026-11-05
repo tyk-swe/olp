@@ -166,8 +166,16 @@ type service struct {
 
 func startService(t *testing.T) *service {
 	t.Helper()
+	return startServiceAdjusted(t, nil)
+}
+
+func startServiceAdjusted(t *testing.T, adjust func(*environment)) *service {
+	t.Helper()
 	pool, databaseURL := newDatabase(t)
 	env := newEnvironment(t, databaseURL)
+	if adjust != nil {
+		adjust(&env)
+	}
 	runBinary(t, env, "migrate")
 	public, private := freeAddress(t), freeAddress(t)
 	origin := "http://" + public

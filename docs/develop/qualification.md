@@ -75,8 +75,8 @@ Every lane writes one run record as a JSON line, to
 `OLP_QUALIFY_REPORT` when set and to stdout otherwise, and
 `scripts/qualification.sh` prints the report before it cleans up, pass
 or fail. A record carries client, client version, platform, adapter,
-model, protocol, transport, result, and evidence, where evidence is
-always `fixture` in this suite. The adapter is the domain adapter the
+profile, model, protocol, transport, result, and evidence, where
+evidence is always `fixture` in this suite. The adapter is the domain adapter the
 lane exercises. The record also carries `driver` as
 `protocol-fixture` and `client_executed` as `false`. The client version
 comes from the installed client binary and is an environment fact, not
@@ -90,17 +90,104 @@ OpenCode clients from npm and runs `make qualify-code` as a gate on
 promotion. Fleet process suites still do not run. Generated client
 configuration and protocol translation keep partial signal through the
 allowlisted unit tests. Behavior against real coding clients and
-subscription services has no automated coverage.
+subscription services is covered only by the live lanes below, and only
+where a lane has actually run green.
+
+### Live lanes
+
+Live lanes run the same real binary against real vendor accounts and
+real vendor upstreams. Run them with `make qualify-code-live`, which
+runs `scripts/qualification-live.sh` and the live tests in
+`tests/qualification` behind the `qualification` and
+`qualificationlive` build tags. There are ten required lanes, one per
+adapter and profile in stage one. Each lane reads its account key and
+its native model from the environment variables in the table below.
+Only the variable names appear in the repository and in workflow files.
+Values are never printed, logged, or committed, and run records and
+check details name variables and status codes only.
+
+| Adapter | Profile | Key variable | Model variable |
+| --- | --- | --- | --- |
+| Codex | `codex-subscription` | `OLP_LIVE_CODEX_AUTH_JSON` | `OLP_LIVE_CODEX_MODEL` |
+| GLM Coding Plan | `zai-coding-plan` | `OLP_LIVE_GLM_GLOBAL_KEY` | `OLP_LIVE_GLM_GLOBAL_MODEL` |
+| GLM Coding Plan | `bigmodel-coding-plan` | `OLP_LIVE_GLM_CN_KEY` | `OLP_LIVE_GLM_CN_MODEL` |
+| MiniMax M Plan | `minimax-plan` | `OLP_LIVE_MINIMAX_GLOBAL_KEY` | `OLP_LIVE_MINIMAX_GLOBAL_MODEL` |
+| MiniMax M Plan | `minimax-plan-cn` | `OLP_LIVE_MINIMAX_CN_KEY` | `OLP_LIVE_MINIMAX_CN_MODEL` |
+| Kimi Code | `kimi-code` | `OLP_LIVE_KIMI_GLOBAL_KEY` | `OLP_LIVE_KIMI_GLOBAL_MODEL` |
+| Kimi Code | `kimi-code-cn` | `OLP_LIVE_KIMI_CN_KEY` | `OLP_LIVE_KIMI_CN_MODEL` |
+| Qwen Token Plan | `qwen-token-plan` | `OLP_LIVE_QWEN_GLOBAL_KEY` | `OLP_LIVE_QWEN_GLOBAL_MODEL` |
+| Qwen Token Plan | `qwen-token-plan-cn` | `OLP_LIVE_QWEN_CN_KEY` | `OLP_LIVE_QWEN_CN_MODEL` |
+| OpenCode Go | `opencode-go` | `OLP_LIVE_OPENCODE_GO_KEY` | `OLP_LIVE_OPENCODE_GO_MODEL` |
+
+The Codex key variable holds the contents of the account `auth.json`
+document described in the code mode guide. Every other key variable
+holds the coding plan key for its profile. The optional
+`OLP_LIVE_CODEX_AUTH_JSON_2` variable holds a second Codex account for
+the band check. A model variable names one native model the account
+serves, because vendor model catalogues change outside this repository
+and no lane pins one.
+
+Each lane creates its code account, pool, and route through the
+management API and publishes the route, then sends one real inference
+request through the gateway to the adapter vendor address. There is no
+scripted vendor and no proxy in the live path. The provider and grant
+rows are inserted in the database in the form grant enrollment stores,
+because headless plugin enrollment is outside this harness, and the
+credential is encrypted under the test master key like any enrolled
+grant. Dispatch, observation, the ledger, and diagnostics all run in
+the real binary against the real upstream. A missing client binary, a
+missing variable, or a failed setup reports `no_signal` for that lane.
+A lane never reports a pass it did not earn.
+
+Every live record carries client, client version, platform, adapter,
+profile, model, protocol, transport, result, and evidence, where
+evidence is always `live`, plus a checks list. The inference check
+passes only when the journey returns success and attempt diagnostics
+show the settled attempt. The Codex allowance check passes only when
+account diagnostics carry allowance windows after inference, or after
+an active allowance read the lane requests through the management API.
+Other adapters record `no_signal` for allowance in stage one. The band
+check needs the second Codex account and passes only when a selection
+decision carries allowance evidence. Without the second account it
+records `no_signal`. The cooldown and failover checks pass only on
+evidence the lane actually observed in diagnostics. The lane induces
+neither exhaustion nor rejection, so both normally record `no_signal`,
+and that record withholds the matching claim instead of passing it. A
+lane result is `pass` only when inference passes and, for Codex, the
+allowance check passes.
+
+The last report line is a claims summary. It names the adapter and
+profile pairs allowed to claim reset aware ordering, live inference,
+cooldown evidence, and failover evidence from this run. Reset aware
+ordering needs a passing lane with passing allowance and band checks,
+so Codex is the only adapter that can earn it in stage one. When lanes
+are missing or red the matching lists are empty, and an empty list
+means no claim. The script exits non-zero and prints every lane that
+is not green whenever any required lane is missing or red. The live
+report goes to `OLP_QUALIFY_LIVE_REPORT`, the harness refuses a live
+report path that matches the fixture report path, and the script fails
+if fixture evidence appears in the live report. Fixture evidence is
+never substituted for a live record.
+
+The `qualify-code-live` workflow runs only on manual dispatch, because
+push and pull request runs have no account secrets. It maps repository
+secrets of the same names to the variables above and runs
+`make qualify-code-live` with no step allowed to continue on error.
+Dispatch it before making any reset aware ordering or reliability
+claim for a release, and scope the claim to exactly the pairs the
+green run summary names. A release with no green live run makes no
+such claim.
 
 ### Latest official clients
 
 The fixture lanes record the version of each installed official client
-but do not execute it. Client version pins that remain in user
-documentation describe configuration that was written against those
-clients, not a live qualification result. Requalifying a client against
-a real account means running it by hand against a local gateway and
-recording the client version, platform, adapter, model, protocol, and
-transport with the result.
+but do not execute it. The live lanes do the same, so neither suite
+qualifies the client program itself. Client version pins that remain
+in user documentation describe configuration that was written against
+those clients, not a live qualification result. Requalifying a client
+against a real account still means running it by hand against a local
+gateway and recording the client version, platform, adapter, profile,
+model, protocol, and transport with the result.
 
 ## Historical qualification
 

@@ -23,6 +23,43 @@ and qualified against controlled fixtures. Fixture qualification is not a releas
 claim for a real ChatGPT, OpenCode Go or other coding-plan subscription. Review
 the [support matrix and release gates](../develop/qualification.md) before rollout.
 
+### Qualification status
+
+Reliability claims in this guide name adapters and profiles, never code
+mode as a whole. A mechanism counts as live proven for an adapter and
+profile only when the matching live lane in
+[qualification](../develop/qualification.md#live-lanes) has run green
+and its claims summary names that pair. Until then the console and this
+guide keep the no proven signal wording for that pair.
+
+Reset aware band ordering exists only for Codex in this stage, from its
+passive and active allowance windows. Both window sources are fixture
+proven only, and they stay live unproven until the Codex live lane runs
+green with its allowance and band checks passing. The GLM Coding Plan
+on `zai-coding-plan` and `bigmodel-coding-plan`, MiniMax M Plan on
+`minimax-plan` and `minimax-plan-cn`, Kimi Code on `kimi-code` and
+`kimi-code-cn`, Qwen Token Plan on `qwen-token-plan` and
+`qwen-token-plan-cn`, and OpenCode Go on `opencode-go` all order on
+weights plus cooldown, with no qualified allowance signal.
+
+Replay after a proven nonexecution rejection is fixture proven for the
+GLM Coding Plan on both profiles and for the Qwen Token Plan on both
+profiles. It is held for MiniMax M Plan on both profiles and for Kimi
+Code on both profiles, because their inference error envelopes are not
+yet proven against a live account, so no rejection from those adapters
+replays. The Codex rejection envelopes remain the controlled
+assumptions documented under portable conversation recovery. OpenCode
+Go has no qualified replay proof in this stage, and its reported
+allowance charge stays an observation, never an ordering input.
+
+MiniMax remains unqualified on both profiles. OLP reads no remains
+response for `minimax-plan` or `minimax-plan-cn` until the remains
+schema is pinned from real keys per profile, and both profiles keep
+weights plus cooldown ordering. Cooldown classes and failover behavior
+claim live evidence only for the pairs a green live run summary names.
+No adapter or profile claims live proven inference, ordering, cooldown,
+or failover from fixture evidence alone.
+
 ## Adapters and clients
 
 Each code account belongs to a subscription family, its **adapter**, which OLP

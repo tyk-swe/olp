@@ -1,0 +1,48 @@
+name: Qualify code live
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+defaults:
+  run:
+    shell: bash
+jobs:
+  qualify-code-live:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version: stable
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+      - name: Install latest coding clients
+        run: npm install --global @openai/codex@latest @anthropic-ai/claude-code@latest opencode-ai@latest
+      - name: Run live qualification lanes
+        env:
+          OLP_LIVE_CODEX_AUTH_JSON: ${{ secrets.OLP_LIVE_CODEX_AUTH_JSON }}
+          OLP_LIVE_CODEX_AUTH_JSON_2: ${{ secrets.OLP_LIVE_CODEX_AUTH_JSON_2 }}
+          OLP_LIVE_CODEX_MODEL: ${{ secrets.OLP_LIVE_CODEX_MODEL }}
+          OLP_LIVE_GLM_GLOBAL_KEY: ${{ secrets.OLP_LIVE_GLM_GLOBAL_KEY }}
+          OLP_LIVE_GLM_GLOBAL_MODEL: ${{ secrets.OLP_LIVE_GLM_GLOBAL_MODEL }}
+          OLP_LIVE_GLM_CN_KEY: ${{ secrets.OLP_LIVE_GLM_CN_KEY }}
+          OLP_LIVE_GLM_CN_MODEL: ${{ secrets.OLP_LIVE_GLM_CN_MODEL }}
+          OLP_LIVE_MINIMAX_GLOBAL_KEY: ${{ secrets.OLP_LIVE_MINIMAX_GLOBAL_KEY }}
+          OLP_LIVE_MINIMAX_GLOBAL_MODEL: ${{ secrets.OLP_LIVE_MINIMAX_GLOBAL_MODEL }}
+          OLP_LIVE_MINIMAX_CN_KEY: ${{ secrets.OLP_LIVE_MINIMAX_CN_KEY }}
+          OLP_LIVE_MINIMAX_CN_MODEL: ${{ secrets.OLP_LIVE_MINIMAX_CN_MODEL }}
+          OLP_LIVE_KIMI_GLOBAL_KEY: ${{ secrets.OLP_LIVE_KIMI_GLOBAL_KEY }}
+          OLP_LIVE_KIMI_GLOBAL_MODEL: ${{ secrets.OLP_LIVE_KIMI_GLOBAL_MODEL }}
+          OLP_LIVE_KIMI_CN_KEY: ${{ secrets.OLP_LIVE_KIMI_CN_KEY }}
+          OLP_LIVE_KIMI_CN_MODEL: ${{ secrets.OLP_LIVE_KIMI_CN_MODEL }}
+          OLP_LIVE_QWEN_GLOBAL_KEY: ${{ secrets.OLP_LIVE_QWEN_GLOBAL_KEY }}
+          OLP_LIVE_QWEN_GLOBAL_MODEL: ${{ secrets.OLP_LIVE_QWEN_GLOBAL_MODEL }}
+          OLP_LIVE_QWEN_CN_KEY: ${{ secrets.OLP_LIVE_QWEN_CN_KEY }}
+          OLP_LIVE_QWEN_CN_MODEL: ${{ secrets.OLP_LIVE_QWEN_CN_MODEL }}
+          OLP_LIVE_OPENCODE_GO_KEY: ${{ secrets.OLP_LIVE_OPENCODE_GO_KEY }}
+          OLP_LIVE_OPENCODE_GO_MODEL: ${{ secrets.OLP_LIVE_OPENCODE_GO_MODEL }}
+        run: make qualify-code-live
