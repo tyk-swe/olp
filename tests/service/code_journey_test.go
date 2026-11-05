@@ -365,8 +365,12 @@ func codeBandOrderingOrdersNewRootsAndNeverMovesPins(t *testing.T, pool *pgxpool
 	if decision = codeDecisionForAttempt(t, pool, pinned.Attempt.ID); decision.Reason != codemode.DecisionPin || decision.Band != nil || decision.Evidence != nil || decision.EvidenceObservedAt != nil {
 		t.Fatalf("pinned decision = %+v", decision)
 	}
-	if _, err := pool.Exec(t.Context(), `UPDATE olp.code_accounts SET enabled=(id=$1)`, low); err != nil {
+	other := seedCooldownJourney(t, pool)
+	if _, err := pool.Exec(t.Context(), `UPDATE olp.code_accounts SET enabled=(id=$1) WHERE project_id=$2`, low, project); err != nil {
 		t.Fatal(err)
+	}
+	if _, err := other.store.Admit(t.Context(), other.admission("model", "other-project-first")); err != nil {
+		t.Fatalf("other project admission after pinned selection: %v", err)
 	}
 	for _, tc := range []struct {
 		name      string
@@ -393,11 +397,14 @@ func codeBandOrderingOrdersNewRootsAndNeverMovesPins(t *testing.T, pool *pgxpool
 			}
 		})
 	}
-	if _, err := pool.Exec(t.Context(), `UPDATE olp.code_accounts SET enabled=(id=$1)`, healthy); err != nil {
+	if _, err := pool.Exec(t.Context(), `UPDATE olp.code_accounts SET enabled=(id=$1) WHERE project_id=$2`, healthy, project); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := pool.Exec(t.Context(), `UPDATE olp.code_route_revisions SET connections=jsonb_set(connections,ARRAY[$1,'profile_revision'],to_jsonb(repeat('0',64)),true)`, provider); err != nil {
+	if _, err := pool.Exec(t.Context(), `UPDATE olp.code_route_revisions SET connections=jsonb_set(connections,ARRAY[$1,'profile_revision'],to_jsonb(repeat('0',64)),true) WHERE route_id IN (SELECT id FROM olp.code_routes WHERE project_id=$2)`, provider, project); err != nil {
 		t.Fatal(err)
+	}
+	if _, err := other.store.Admit(t.Context(), other.admission("model", "other-project-second")); err != nil {
+		t.Fatalf("other project admission after root selection: %v", err)
 	}
 	window := func(family string, unit codemode.AllowanceUnit, evidence codemode.AllowanceEvidence, remainingPercent float64, remainingValue *float64, observation time.Time, resetAt *time.Time) codemode.AllowanceWindow {
 		usedPercent := func() float64 {
