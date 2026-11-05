@@ -1,4 +1,5 @@
 <script lang="ts">
+  import ConfirmAction from '$lib/components/ConfirmAction.svelte';
   import {
     useMutationIntent,
     usePrincipalLifetime
@@ -12,6 +13,7 @@
   import type { Provider } from './providers';
   import GrantEnrollmentPanel from './GrantEnrollmentPanel.svelte';
   import {
+    deleteCredentialSlot,
     listCredentialSlots,
     putCredentialSlot,
     validateCredentialSlot,
@@ -284,6 +286,23 @@
             onclick={() => validate(slot)}
             >{busy === slot.id ? 'Validating…' : 'Validate access'}</button
           >{/if}
+        {#if slot.id && pool.data && access.allows('DELETE /api/v1/providers/{provider_id}/credential-slots/{slot_id}')}<ConfirmAction
+            label="Delete slot"
+            description={`Remove ${slot.name} from the provider credential pool`}
+            identity={`${slot.id}:${pool.data.etag}`}
+            disabled={Boolean(busy)}
+            run={(requestId) =>
+              deleteCredentialSlot(
+                provider.id,
+                slot.id ?? '',
+                pool.data?.etag ?? '',
+                requestId
+              )}
+            done={async () => {
+              await onChanged();
+              await pool.refetch();
+            }}
+          />{/if}
       </li>
     {/each}
   </ul>

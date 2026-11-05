@@ -8240,6 +8240,19 @@
             },
             "etag": {
               "type": "string"
+            },
+            "policy_id": {
+              "type": "string",
+              "format": "uuid",
+              "readOnly": true
+            },
+            "active_revision_id": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "format": "uuid",
+              "readOnly": true
             }
           },
           "required": [
@@ -15261,6 +15274,77 @@
     }
   },
   {
+    "name": "delete_guardrail_credential",
+    "group": "guardrails",
+    "method": "DELETE",
+    "read_only": false,
+    "path": "/api/v1/guardrail-credentials/{credential_id}",
+    "description": "delete guardrail credential",
+    "scopes": [
+      [
+        "configure"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "credential_id",
+        "in": "path",
+        "required": true,
+        "type": "string"
+      },
+      {
+        "name": "Idempotency-Key",
+        "in": "header",
+        "required": true,
+        "type": "string"
+      },
+      {
+        "name": "If-Match",
+        "in": "header",
+        "required": true,
+        "type": "string"
+      }
+    ],
+    "response_headers": {
+      "ETag": "etag"
+    },
+    "body_required": false,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "object",
+          "properties": {
+            "credential_id": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "credential_id"
+          ]
+        },
+        "if_match": {
+          "type": "string",
+          "minLength": 1,
+          "description": "If-Match"
+        },
+        "idempotency_key": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Idempotency-Key"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "if_match",
+        "idempotency_key"
+      ]
+    }
+  },
+  {
     "name": "delete_guardrail_policy",
     "group": "guardrails",
     "method": "DELETE",
@@ -17884,6 +17968,53 @@
           "additionalProperties": false,
           "required": [
             "guardrail_id"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "path"
+      ]
+    }
+  },
+  {
+    "name": "get_guardrail_credential",
+    "group": "guardrails",
+    "method": "GET",
+    "read_only": true,
+    "path": "/api/v1/guardrail-credentials/{credential_id}",
+    "description": "get guardrail credential",
+    "scopes": [
+      [
+        "read"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "credential_id",
+        "in": "path",
+        "required": true,
+        "type": "string"
+      }
+    ],
+    "response_headers": {
+      "ETag": "etag"
+    },
+    "body_required": false,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "object",
+          "properties": {
+            "credential_id": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "credential_id"
           ]
         }
       },
@@ -22192,6 +22323,58 @@
     "input_schema": {
       "type": "object",
       "properties": {},
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "list_guardrail_credentials",
+    "group": "guardrails",
+    "method": "GET",
+    "read_only": true,
+    "path": "/api/v1/guardrail-credentials",
+    "description": "list guardrail credentials",
+    "scopes": [
+      [
+        "read"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "cursor",
+        "in": "query",
+        "required": false,
+        "type": "string"
+      },
+      {
+        "name": "limit",
+        "in": "query",
+        "required": false,
+        "type": "integer"
+      }
+    ],
+    "response_headers": {
+      "ETag": "etag"
+    },
+    "body_required": false,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "type": "object",
+          "properties": {
+            "cursor": {
+              "type": "string"
+            },
+            "limit": {
+              "format": "int32",
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
       "additionalProperties": false
     }
   },
@@ -36305,6 +36488,101 @@
     }
   },
   {
+    "name": "replace_guardrail_attachment",
+    "group": "guardrails",
+    "method": "PUT",
+    "read_only": false,
+    "path": "/api/v1/guardrail-attachments/{attachment_id}",
+    "description": "Attachment writes require the management permission for their scope: settings for installation, manage_organization for an organization, configure for project/route/toolset, and keys for an API key. Scope and project ownership are checked again during the write.",
+    "scopes": [
+      [
+        "configure"
+      ],
+      [
+        "keys"
+      ],
+      [
+        "manage_organization"
+      ],
+      [
+        "settings",
+        "installation"
+      ]
+    ],
+    "parameters": [
+      {
+        "name": "attachment_id",
+        "in": "path",
+        "required": true,
+        "type": "string"
+      },
+      {
+        "name": "Idempotency-Key",
+        "in": "header",
+        "required": true,
+        "type": "string"
+      },
+      {
+        "name": "If-Match",
+        "in": "header",
+        "required": true,
+        "type": "string"
+      }
+    ],
+    "response_headers": {
+      "ETag": "etag"
+    },
+    "body_required": true,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "object",
+          "properties": {
+            "attachment_id": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "attachment_id"
+          ]
+        },
+        "if_match": {
+          "type": "string",
+          "minLength": 1,
+          "description": "If-Match"
+        },
+        "idempotency_key": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Idempotency-Key"
+        },
+        "body": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "policy_revision_id": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "required": [
+            "policy_revision_id"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "if_match",
+        "idempotency_key",
+        "body"
+      ]
+    }
+  },
+  {
     "name": "replace_route_draft",
     "group": "routes",
     "method": "PUT",
@@ -41534,7 +41812,9 @@
             "tavily-search",
             "exa-search",
             "parallel-search",
-            "brave-search"
+            "brave-search",
+            "cohere-embed-v2",
+            "cohere-rerank-v2"
           ],
           "description": "Registered native ingress dialect. Omission chooses the operation/surface default; select a registered dialect explicitly for native operation inspection and openai-responses for Responses."
         },
@@ -41945,7 +42225,9 @@
             "tavily-search",
             "exa-search",
             "parallel-search",
-            "brave-search"
+            "brave-search",
+            "cohere-embed-v2",
+            "cohere-rerank-v2"
           ],
           "description": "Registered native ingress dialect. Omission chooses the operation/surface default; select a registered dialect explicitly for native operation inspection and openai-responses for Responses."
         },

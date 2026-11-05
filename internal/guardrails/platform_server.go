@@ -45,6 +45,10 @@ func (s *Server) registerPlatform(mux *http.ServeMux) {
 	a.Route(mux, "POST /api/v1/guardrail-attachments", s.attach)
 	a.Route(mux, "DELETE /api/v1/guardrail-attachments/{attachment_id}", s.detach)
 	a.Route(mux, "POST /api/v1/guardrails/evaluate", s.evaluate, access.MaxBody(MaxContentBytes))
+	a.Route(mux, "GET /api/v1/guardrail-credentials", s.listCredentials)
+	a.Route(mux, "GET /api/v1/guardrail-credentials/{credential_id}", s.getCredential)
+	a.Route(mux, "DELETE /api/v1/guardrail-credentials/{credential_id}", s.deleteCredential)
+	a.Route(mux, "PUT /api/v1/guardrail-attachments/{attachment_id}", s.replaceAttachment)
 	a.Route(mux, "POST /api/v1/guardrail-credentials", s.createCredential, access.MaxBody(256<<10))
 }
 func (s *Server) publish(ctx context.Context, tx pgx.Tx, actor string) error {
@@ -411,18 +415,20 @@ func attachmentProject(ctx context.Context, q access.Queryer, scope, id string) 
 }
 
 func (s *Server) listAttachments(r *http.Request, p access.Principal) (access.Reply, error) {
-	rows, err := s.Access.Pool.Query(r.Context(), "SELECT id::text,scope,COALESCE(scope_id::text,'installation'),policy_revision_id::text,position,etag::text FROM olp.guardrail_attachments ORDER BY position,id LIMIT 10001")
+	rows, err := s.Access.Pool.Query(r.Context(), "SELECT a.id::text,a.scope,COALESCE(a.scope_id::text,'installation'),a.policy_revision_id::text,a.position,a.etag::text,v.policy_id::text,p.active_revision_id::text FROM olp.guardrail_attachments a JOIN olp.guardrail_policy_revisions v ON v.id=a.policy_revision_id JOIN olp.guardrail_policies p ON p.id=v.policy_id ORDER BY a.position,a.id LIMIT 10001")
 	if err != nil {
 		return access.Reply{}, err
 	}
 	type item struct {
 		Attachment
-		ETag string `json:"etag"`
+		ETag             string  `json:"etag"`
+		PolicyID         string  `json:"policy_id"`
+		ActiveRevisionID *string `json:"active_revision_id"`
 	}
 	values := []item{}
 	for rows.Next() {
 		var a item
-		if err = rows.Scan(&a.ID, &a.Scope, &a.ScopeID, &a.PolicyRevisionID, &a.Order, &a.ETag); err != nil {
+		if err = rows.Scan(&a.ID, &a.Scope, &a.ScopeID, &a.PolicyRevisionID, &a.Order, &a.ETag, &a.PolicyID, &a.ActiveRevisionID); err != nil {
 			rows.Close()
 			return access.Reply{}, err
 		}
@@ -495,31 +501,8 @@ func (s *Server) writeAttachment(r *http.Request, remove bool) (access.Reply, er
 		}
 		_, err = tx.Exec(r.Context(), "DELETE FROM olp.guardrail_attachments WHERE id=$1", in.ID)
 	} else {
-		var project string
-		err = tx.QueryRow(r.Context(), "SELECT p.project_id::text FROM olp.guardrail_policies p JOIN olp.guardrail_policy_revisions v ON v.policy_id=p.id WHERE v.id=$1 AND p.retired_at IS NULL", in.PolicyRevisionID).Scan(&project)
-		if err != nil {
-			return access.Reply{}, access.Invalid("policy_revision_id", "Choose an existing policy revision.")
-		}
-		if err = p.Project(&project, access.Change); err != nil {
+		if err = validateAttachmentPolicy(r.Context(), tx, p, in); err != nil {
 			return access.Reply{}, err
-		}
-		if in.Scope == "project" && project != in.ScopeID {
-			return access.Reply{}, access.Invalid("scope_id", "The policy must belong to this project.")
-		}
-		if in.Scope == "route" || in.Scope == "api-key" || in.Scope == "toolset" {
-			owning, ownerErr := attachmentProject(r.Context(), tx, in.Scope, in.ScopeID)
-			if ownerErr != nil || owning == nil || *owning != project {
-				return access.Reply{}, access.Invalid("scope_id", "The policy must belong to this project.")
-			}
-			if in.Scope == "route" && in.Order == 0 {
-				var legacy bool
-				if err = tx.QueryRow(r.Context(), "SELECT EXISTS(SELECT 1 FROM olp.guardrail_policies p JOIN olp.routes r ON r.latest_revision_id=p.managed_route_revision_id WHERE r.id=$1)", in.ScopeID).Scan(&legacy); err != nil {
-					return access.Reply{}, err
-				}
-				if legacy {
-					return access.Reply{}, access.Invalid("order", "Position zero preserves this route's migrated content policy; choose a later position.")
-				}
-			}
 		}
 		in.ID = access.NewID()
 		_, err = tx.Exec(r.Context(), "INSERT INTO olp.guardrail_attachments(id,scope,scope_id,policy_revision_id,position,etag,created_by) VALUES($1,$2,$3,$4,$5,$6,$7)", in.ID, in.Scope, projectPointer(in.ScopeID), in.PolicyRevisionID, in.Order, access.NewID(), p.UserID())
@@ -640,4 +623,34 @@ func (s *Server) createCredential(r *http.Request, _ access.Principal) (access.R
 
 func (p ManagedPolicy) MarshalJSON() ([]byte, error) {
 	return json.Marshal(map[string]any{"id": p.PolicyID, "policy_id": p.PolicyID, "revision_id": p.ID, "project_id": p.ProjectID, "name": p.Name, "revision": p.Revision, "entries": p.Entries, "etag": p.ETag, "active_revision_id": p.ActiveRevisionID, "retired_at": p.RetiredAt})
+}
+
+func validateAttachmentPolicy(ctx context.Context, tx pgx.Tx, p access.Principal, in Attachment) error {
+	var project string
+	err := tx.QueryRow(ctx, "SELECT p.project_id::text FROM olp.guardrail_policies p JOIN olp.guardrail_policy_revisions v ON v.policy_id=p.id WHERE v.id=$1 AND p.retired_at IS NULL", in.PolicyRevisionID).Scan(&project)
+	if err != nil {
+		return access.Invalid("policy_revision_id", "Choose an existing policy revision.")
+	}
+	if err = p.Project(&project, access.Change); err != nil {
+		return err
+	}
+	if in.Scope == "project" && project != in.ScopeID {
+		return access.Invalid("scope_id", "The policy must belong to this project.")
+	}
+	if in.Scope == "route" || in.Scope == "api-key" || in.Scope == "toolset" {
+		owning, ownerErr := attachmentProject(ctx, tx, in.Scope, in.ScopeID)
+		if ownerErr != nil || owning == nil || *owning != project {
+			return access.Invalid("scope_id", "The policy must belong to this project.")
+		}
+		if in.Scope == "route" && in.Order == 0 {
+			var legacy bool
+			if err = tx.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM olp.guardrail_policies p JOIN olp.routes r ON r.latest_revision_id=p.managed_route_revision_id WHERE r.id=$1)", in.ScopeID).Scan(&legacy); err != nil {
+				return err
+			}
+			if legacy {
+				return access.Invalid("order", "Position zero preserves this route's migrated content policy; choose a later position.")
+			}
+		}
+	}
+	return nil
 }

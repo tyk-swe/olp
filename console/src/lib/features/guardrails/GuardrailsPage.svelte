@@ -1,8 +1,19 @@
 <script lang="ts">
+  import ConfirmAction from '$lib/components/ConfirmAction.svelte';
+  import CredentialsPanel from './CredentialsPanel.svelte';
+  import AttachmentControls from './AttachmentControls.svelte';
+  import { nativeObject, parseManagementJSON } from '$lib/nativeJson';
+  import {
+    useMutationIntent,
+    usePrincipalLifetime
+  } from '$lib/editing/mutationIntent.svelte';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import { errorMessage } from '$lib/management/http';
   import { useRole } from '$lib/features/access/session/useRole.svelte';
   import {
+    listCredentials,
+    retireDefinition,
+    retirePolicy,
     listDefinitions,
     listPolicies,
     listAttachments,
@@ -109,6 +120,20 @@
     notifyOnChangeProps: 'all',
     queryFn: listProjects
   }));
+  const credentials = createQuery(() => ({
+    queryKey: guardrailKeys.credentials(),
+    queryFn: listCredentials
+  }));
+  let credentialID = $state('');
+  let creatingCredential = $state(false);
+  const definitionIntent = useMutationIntent();
+  const capture = usePrincipalLifetime(() => {
+    edit(null);
+    editPolicy(null);
+    configuration = '{}';
+    text = '';
+    result = null;
+  });
   let tab = $state('Definitions');
   let busy = $state(false);
   let error = $state('');
@@ -153,16 +178,18 @@
       ].includes(type)
   );
   const canEdit = $derived(access.allows('POST /api/v1/guardrails'));
-  async function run(action: () => Promise<void>) {
+  async function run(action: (current: () => boolean) => Promise<void>) {
+    const current = capture();
     busy = true;
     error = notice = '';
     try {
-      await action();
-      await client.invalidateQueries({ queryKey: guardrailKeys.root });
+      await action(current);
+      if (current())
+        await client.invalidateQueries({ queryKey: guardrailKeys.root });
     } catch (cause) {
-      error = errorMessage(cause);
+      if (current()) error = errorMessage(cause);
     } finally {
-      busy = false;
+      if (current()) busy = false;
     }
   }
   function edit(value: Definition | null) {
@@ -179,19 +206,52 @@
     timeout = value?.timeout_ms ?? 1000;
     onError = value?.on_error ?? 'fail_closed';
     egress = value?.configuration?.content_egress === true;
+    credentialID =
+      typeof value?.configuration?.credential_ref === 'string'
+        ? value.configuration.credential_ref
+        : '';
+    creatingCredential = false;
   }
   async function saveDefinition(event: SubmitEvent) {
     event.preventDefault();
     const editor = definitionEditor;
-    await run(async () => {
-      const config = JSON.parse(configuration) as Record<string, unknown>;
-      if (external) config.content_egress = egress;
-      const saved = await saveDefinitionAPI(selected, project, type, {
-        name,
-        configuration: config,
-        timeout_ms: timeout,
-        on_error: onError
-      });
+    await run(async (current) => {
+      const parsed = parseManagementJSON(configuration);
+      if (!nativeObject(parsed)) {
+        error = 'Configuration must be a JSON object';
+        return;
+      }
+      const config = {
+        ...parsed,
+        ...(external
+          ? {
+              content_egress: egress,
+              ...(credentialID ? { credential_ref: credentialID } : {})
+            }
+          : {})
+      };
+      const saved = await definitionIntent.submit(
+        {
+          selected,
+          project,
+          type,
+          body: {
+            name,
+            configuration: config,
+            timeout_ms: timeout,
+            on_error: onError
+          }
+        },
+        (input, requestId) =>
+          saveDefinitionAPI(
+            input.selected,
+            input.project,
+            input.type,
+            input.body,
+            requestId
+          )
+      );
+      if (!current()) return;
       if (editor !== definitionEditor && selected?.id !== saved.id) return;
       selected = saved;
       if (editor !== definitionEditor) return;
@@ -208,11 +268,12 @@
   async function savePolicy(event: SubmitEvent) {
     event.preventDefault();
     const editor = policyEditor;
-    await run(async () => {
+    await run(async (current) => {
       const saved = await savePolicyAPI(selectedPolicy, project, {
         name: policyName,
         entries
       });
+      if (!current()) return;
       if (
         editor !== policyEditor &&
         selectedPolicy?.policy_id !== saved.policy_id
@@ -234,31 +295,34 @@
   }
   async function attach(event: SubmitEvent) {
     event.preventDefault();
-    await run(async () => {
+    await run(async (current) => {
       await attachPolicyAPI({
         scope,
         scope_id: scope === 'installation' ? 'installation' : scopeID,
         policy_revision_id: attachPolicy,
         order
       });
+      if (!current()) return;
       notice = 'Policy attached. Inherited policies continue to apply.';
     });
   }
   async function evaluate(event: SubmitEvent) {
     event.preventDefault();
+    const current = capture();
     busy = true;
     error = '';
     result = null;
     try {
-      result = await evaluatePolicyAPI({
+      const evaluated = await evaluatePolicyAPI({
         policy_revision_id: evaluatePolicy,
         phase,
         segments: [{ id: 'text', role: 'user', text }]
       });
+      if (current()) result = evaluated;
     } catch (cause) {
-      error = errorMessage(cause);
+      if (current()) error = errorMessage(cause);
     } finally {
-      busy = false;
+      if (current()) busy = false;
     }
   }
 </script>
@@ -271,7 +335,7 @@
   </p>
 </header>
 <nav aria-label="Guardrail sections" class="tabs">
-  {#each ['Definitions', 'Policies', 'Attachments', 'Playground'] as section (section)}
+  {#each ['Definitions', 'Policies', 'Attachments', 'Credentials', 'Playground'] as section (section)}
     <button
       type="button"
       aria-current={tab === section ? 'page' : undefined}
@@ -299,6 +363,16 @@
     <ul>
       {#each definitions.data?.items ?? [] as value (value.id)}<li>
           <button onclick={() => edit(value)}>{value.name}</button>
+          {#if !value.retired_at && access.allows('DELETE /api/v1/guardrails/{guardrail_id}')}<ConfirmAction
+              label="Retire definition"
+              description={`Retire ${value.name}`}
+              identity={`${value.id}:${value.etag}`}
+              run={(requestId) => retireDefinition(value, requestId)}
+              done={async () => {
+                if (selected?.id === value.id) edit(null);
+                await definitions.refetch();
+              }}
+            />{/if}
           <span
             >{value.type} · Revision {value.revision} · {value.active_revision_id ===
             value.revision_id
@@ -332,7 +406,23 @@
             spellcheck="false"
             bind:value={configuration}></textarea></label
         >
-        {#if external}<label class="check"
+        {#if external}
+          <label
+            >Credential<select bind:value={credentialID}
+              ><option value="">Use configuration reference</option
+              >{#each (credentials.data ?? []).filter((item) => item.project_id === project) as item (item.id)}<option
+                  value={item.id}>{item.name}</option
+                >{/each}</select
+            ></label
+          >
+          <button
+            type="button"
+            disabled={!project}
+            onclick={() => {
+              creatingCredential = !creatingCredential;
+            }}>Create replacement credential</button
+          >
+          <label class="check"
             ><input type="checkbox" required bind:checked={egress} />I
             acknowledge that this guardrail sends inspected content to its
             configured endpoint.</label
@@ -358,9 +448,10 @@
             disabled={busy}
             type="button"
             onclick={() =>
-              run(async () => {
+              run(async (current) => {
                 if (!selected) return;
                 await activateDefinition(selected);
+                if (!current()) return;
                 notice = 'Definition revision activated.';
                 edit(null);
               })}>Activate revision {selected.revision}</button
@@ -368,13 +459,31 @@
       </form>
     {/if}
   </section>
+  {#if creatingCredential}<CredentialsPanel
+      projects={projects.data?.items ?? []}
+      projectID={project}
+      oncreated={(id) => {
+        credentialID = id;
+        creatingCredential = false;
+      }}
+    />{/if}
 {:else if tab === 'Policies'}
   <section class="panel">
     <h2>Ordered policies</h2>
     <ul>
       {#each policies.data?.items ?? [] as value (value.policy_id)}<li>
-          <button onclick={() => editPolicy(value)}>{value.name}</button> ·
-          Revision {value.revision}
+          <button onclick={() => editPolicy(value)}>{value.name}</button>
+          {#if !value.retired_at && access.allows('DELETE /api/v1/guardrail-policies/{policy_id}')}<ConfirmAction
+              label="Retire policy"
+              description={`Retire ${value.name}`}
+              identity={`${value.policy_id}:${value.etag}`}
+              run={(requestId) => retirePolicy(value, requestId)}
+              done={async () => {
+                if (selectedPolicy?.policy_id === value.policy_id)
+                  editPolicy(null);
+                await policies.refetch();
+              }}
+            />{/if} · Revision {value.revision}
         </li>{/each}
     </ul>
     {#if canEdit}<button onclick={() => editPolicy(null)}>New policy</button>
@@ -460,9 +569,10 @@
             type="button"
             disabled={busy}
             onclick={() =>
-              run(async () => {
+              run(async (current) => {
                 if (!selectedPolicy) return;
                 await activatePolicy(selectedPolicy);
+                if (!current()) return;
                 notice =
                   'Policy activated. Existing attachments keep their pinned revision.';
                 editPolicy(null);
@@ -482,6 +592,15 @@
       {#each attachments.data?.items ?? [] as value (value.id)}<li>
           {value.scope} · {value.scope_id} · Position {value.order} · Policy revision
           {value.policy_revision_id}
+          {#if value.id && value.etag}{#key value.policy_revision_id}<AttachmentControls
+                value={{ ...value, id: value.id, etag: value.etag }}
+                policies={policies.data?.items ?? []}
+                changed={async () => {
+                  await client.invalidateQueries({
+                    queryKey: guardrailKeys.root
+                  });
+                }}
+              />{/key}{/if}
         </li>{/each}
     </ul>
     {#if canEdit}<form onsubmit={attach}>
@@ -514,6 +633,8 @@
         ><button disabled={busy}>Attach policy</button>
       </form>{/if}
   </section>
+{:else if tab === 'Credentials'}
+  <CredentialsPanel projects={projects.data?.items ?? []} />
 {:else}
   <section class="panel">
     <h2>Guardrail playground</h2>

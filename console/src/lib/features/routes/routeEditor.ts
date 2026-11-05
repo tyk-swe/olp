@@ -205,6 +205,9 @@ export function fidelityLabel(
 
 export const operationOptions = [
   ['generation', 'Text generation'],
+  ['decision', 'Decisions'],
+  ['classification', 'Classification'],
+  ['scoring', 'Scoring'],
   ['embeddings', 'Embeddings'],
   ['rerank', 'Rerank'],
   ['token_count', 'Token counting'],

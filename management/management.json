@@ -15386,7 +15386,9 @@
           "tavily-search",
           "exa-search",
           "parallel-search",
-          "brave-search"
+          "brave-search",
+          "cohere-embed-v2",
+          "cohere-rerank-v2"
         ],
         "description": "Registered native ingress dialect. Omission chooses the operation/surface default; select a registered dialect explicitly for native operation inspection and openai-responses for Responses."
       },
@@ -26673,6 +26675,19 @@
           },
           "etag": {
             "type": "string"
+          },
+          "policy_id": {
+            "type": "string",
+            "format": "uuid",
+            "readOnly": true
+          },
+          "active_revision_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "readOnly": true
           }
         },
         "required": [
@@ -32023,6 +32038,33 @@
             }
           }
         }
+      },
+      "GuardrailCredential": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "project_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "project_id",
+          "name",
+          "created_at"
+        ]
       }
     },
     "securitySchemes": {
@@ -65854,6 +65896,141 @@
           }
         ],
         "description": "Attachment writes require the management permission for their scope: settings for installation, manage_organization for an organization, configure for project/route/toolset, and keys for an API key. Scope and project ownership are checked again during the write."
+      },
+      "put": {
+        "operationId": "replace_guardrail_attachment",
+        "tags": [
+          "guardrails"
+        ],
+        "security": [
+          {
+            "sessionCookie": [
+              "configure"
+            ],
+            "csrfToken": []
+          },
+          {
+            "managementToken": [
+              "configure"
+            ]
+          },
+          {
+            "sessionCookie": [
+              "keys"
+            ],
+            "csrfToken": []
+          },
+          {
+            "managementToken": [
+              "keys"
+            ]
+          },
+          {
+            "sessionCookie": [
+              "manage_organization"
+            ],
+            "csrfToken": []
+          },
+          {
+            "managementToken": [
+              "manage_organization"
+            ]
+          },
+          {
+            "sessionCookie": [
+              "settings",
+              "installation"
+            ],
+            "csrfToken": []
+          },
+          {
+            "managementToken": [
+              "settings",
+              "installation"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GuardrailAttachment"
+                }
+              }
+            },
+            "headers": {
+              "ETag": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Insufficient authority"
+          },
+          "404": {
+            "description": "Not found"
+          },
+          "422": {
+            "description": "Invalid or incompatible guardrail"
+          }
+        },
+        "parameters": [
+          {
+            "in": "path",
+            "name": "attachment_id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            }
+          },
+          {
+            "in": "header",
+            "name": "If-Match",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "description": "Attachment writes require the management permission for their scope: settings for installation, manage_organization for an organization, configure for project/route/toolset, and keys for an API key. Scope and project ownership are checked again during the write.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "policy_revision_id": {
+                    "type": "string",
+                    "format": "uuid"
+                  }
+                },
+                "required": [
+                  "policy_revision_id"
+                ]
+              }
+            }
+          }
+        }
       }
     },
     "/api/v1/guardrails/evaluate": {
@@ -65988,6 +66165,85 @@
                 "$ref": "#/components/schemas/GuardrailCredentialInput"
               }
             }
+          }
+        }
+      },
+      "get": {
+        "operationId": "list_guardrail_credentials",
+        "tags": [
+          "guardrails"
+        ],
+        "security": [
+          {
+            "sessionCookie": [
+              "read"
+            ]
+          },
+          {
+            "managementToken": [
+              "read"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "format": "int32",
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/GuardrailCredential"
+                      }
+                    },
+                    "next_cursor": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "items",
+                    "next_cursor"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Caller authority refused"
+          },
+          "404": {
+            "description": "Not visible"
           }
         }
       }
@@ -71143,6 +71399,139 @@
           "providers"
         ],
         "summary": "Import Antigravity subscription credentials once"
+      }
+    },
+    "/api/v1/guardrail-credentials/{credential_id}": {
+      "get": {
+        "operationId": "get_guardrail_credential",
+        "tags": [
+          "guardrails"
+        ],
+        "security": [
+          {
+            "sessionCookie": [
+              "read"
+            ]
+          },
+          {
+            "managementToken": [
+              "read"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "credential_id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GuardrailCredential"
+                }
+              }
+            },
+            "headers": {
+              "ETag": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Caller authority refused"
+          },
+          "404": {
+            "description": "Not visible"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "delete_guardrail_credential",
+        "tags": [
+          "guardrails"
+        ],
+        "security": [
+          {
+            "sessionCookie": [
+              "configure"
+            ],
+            "csrfToken": []
+          },
+          {
+            "managementToken": [
+              "configure"
+            ]
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "Insufficient authority"
+          },
+          "404": {
+            "description": "Not found"
+          },
+          "409": {
+            "description": "Credential is referenced by a retained definition"
+          },
+          "412": {
+            "description": "Stale credential ETag"
+          },
+          "422": {
+            "description": "Invalid or incompatible guardrail"
+          },
+          "428": {
+            "description": "If-Match is required"
+          }
+        },
+        "parameters": [
+          {
+            "in": "path",
+            "name": "credential_id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            }
+          },
+          {
+            "in": "header",
+            "name": "If-Match",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
       }
     }
   },

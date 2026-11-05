@@ -1,4 +1,8 @@
 <script lang="ts">
+  import ConfirmAction from '$lib/components/ConfirmAction.svelte';
+  import { useRole } from '$lib/features/access/session/useRole.svelte';
+  import { deleteProject } from './api';
+  const access = useRole();
   import AggregateBudgetPanel from '../budgets/AggregateBudgetPanel.svelte';
   import ProjectLimitTemplatesPanel from './ProjectLimitTemplatesPanel.svelte';
   import ProjectAttributionBudgetsPanel from './ProjectAttributionBudgetsPanel.svelte';
@@ -285,7 +289,19 @@
                   aria-controls="project-members"
                   onclick={() => select(project)}
                   >{selectedId === project.id ? 'Close' : 'Members'}</button
-                ></td
+                >
+                {#if access.allows('DELETE /api/v1/projects/{project_id}')}<ConfirmAction
+                    label="Delete project"
+                    description={`Delete ${project.name}. Projects with dependent resources cannot be deleted`}
+                    identity={`${project.id}:${project.etag}`}
+                    run={(requestId) => deleteProject(project, requestId)}
+                    done={async () => {
+                      if (selectedId === project.id) selectedId = '';
+                      await queryClient.invalidateQueries({
+                        queryKey: projectKeys.root
+                      });
+                    }}
+                  />{/if}</td
               >
             </tr>
           {/each}

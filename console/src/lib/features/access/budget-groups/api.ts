@@ -1,6 +1,6 @@
 import type { components } from '$lib/management/schema';
 import { apiClient } from '$lib/management/client';
-import { unwrap, unwrapPage } from '$lib/management/http';
+import { ensureOk, unwrap, unwrapPage } from '$lib/management/http';
 import { type CursorPage } from '$lib/management/http';
 import { collectCursorPages } from '$lib/management/pagination';
 
@@ -54,3 +54,16 @@ export async function updateBudgetGroup(
   );
   return unwrap(response);
 }
+
+export const retireBudgetGroup = async (
+  value: { id: string; etag: string },
+  requestId: string
+) =>
+  ensureOk(
+    await apiClient.DELETE('/api/v1/budget-groups/{budget_group_id}', {
+      params: {
+        path: { budget_group_id: value.id },
+        header: { 'If-Match': `"${value.etag}"`, 'Idempotency-Key': requestId }
+      }
+    })
+  );

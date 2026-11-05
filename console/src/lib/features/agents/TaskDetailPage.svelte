@@ -2,9 +2,25 @@
   import { resolve } from '$app/paths';
   import { createQuery } from '@tanstack/svelte-query';
   import { errorMessage } from '$lib/management/http';
-  import { getTask } from './api';
+  import { getTask, getRemoteTask, cancelRemoteTask } from './api';
   import { agentKeys } from './agentKeys';
 
+  import ConfirmAction from '$lib/components/ConfirmAction.svelte';
+  import { useRole } from '$lib/features/access/session/useRole.svelte';
+  import { useAction } from '$lib/editing/action.svelte';
+  import { usePrincipalLifetime } from '$lib/editing/mutationIntent.svelte';
+  const access = useRole();
+  const action = useAction();
+  let remote = $state<Awaited<ReturnType<typeof getRemoteTask>> | null>(null);
+  let observedAt = $state('');
+  usePrincipalLifetime(() => {
+    remote = null;
+    observedAt = '';
+  });
+  const acceptRemote = (value: Awaited<ReturnType<typeof getRemoteTask>>) => {
+    remote = value;
+    observedAt = new Date().toLocaleString();
+  };
   let { taskID }: { taskID: string } = $props();
   const task = createQuery(() => ({
     queryKey: agentKeys.task(taskID),
@@ -181,6 +197,33 @@
     {/if}
   </section>
   <button type="button" onclick={() => task.refetch()}>Refresh</button>
+{/if}
+
+{#if task.data && access.allows('POST /api/v1/a2a-tasks/{task_id}/cancel')}
+  <section class="card">
+    <h2>Remote task</h2>
+    <button
+      type="button"
+      disabled={action.busy}
+      onclick={() => action.run(() => getRemoteTask(taskID), acceptRemote)}
+      >Fetch remote status</button
+    >
+    <ConfirmAction
+      label="Cancel remote task"
+      description="Ask the remote agent to cancel this task"
+      identity={taskID}
+      {action}
+      run={() => cancelRemoteTask(taskID)}
+      done={async (result) => {
+        acceptRemote(result);
+        await task.refetch();
+      }}
+    />
+    {#if remote}<p>
+        Remote state {remote.status.state}, retrieved {observedAt}
+      </p>
+      <pre>{JSON.stringify(remote, null, 2)}</pre>{/if}
+  </section>
 {/if}
 
 <style>

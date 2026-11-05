@@ -43,7 +43,9 @@ function pricingLimit(
   return { ok: true, value };
 }
 export function serverPricingInput(
-  server: MCPServer,
+  server: Pick<MCPServer, 'name' | 'enabled' | 'endpoint'> & {
+    catalog: { tools: readonly { name: string }[] };
+  },
   form: ServerPricingForm
 ): ServerPricingResult {
   const unitPrice = form.unitPrice.trim();

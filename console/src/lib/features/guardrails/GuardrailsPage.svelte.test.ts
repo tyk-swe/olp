@@ -170,3 +170,293 @@ for (const editor of [
     }
   );
 }
+
+it('replaces an attachment atomically and retains its displayed revision when publication is rejected', async () => {
+  const writes = vi.fn();
+  serve(
+    async (request) => {
+      const path = new URL(request.url).pathname;
+      if (request.method === 'PUT') {
+        writes(
+          request.method,
+          path,
+          request.headers.get('If-Match'),
+          await request.json()
+        );
+        return json(
+          { title: 'Incompatible policy revision', status: 422 },
+          422
+        );
+      }
+      if (request.method === 'DELETE') {
+        writes(request.method);
+        return new Response(null, { status: 204 });
+      }
+      if (path === '/api/v1/guardrail-attachments')
+        return json({
+          items: [
+            {
+              id: 'attachment',
+              etag: 'version',
+              scope: 'project',
+              scope_id: 'project',
+              policy_id: 'original',
+              policy_revision_id: 'pinned',
+              active_revision_id: 'next',
+              order: 0
+            }
+          ]
+        });
+      if (path === '/api/v1/guardrail-policies')
+        return json({
+          items: [{ ...original, active_revision_id: 'next', retired_at: null }]
+        });
+      if (path === '/api/v1/projects')
+        return json({ items: [{ id: 'project', name: 'Project' }] });
+      return json({ items: [] });
+    },
+    ['read', 'configure']
+  );
+  const target = document.createElement('div');
+  const setup = vi.fn(() =>
+    mount(GuardrailsPage, { target, context: getAllContexts() })
+  );
+  const harness = mount(StateHarness, { target, props: { setup } });
+  onTestFinished(async () => {
+    await unmount(setup.mock.results[0].value);
+    await unmount(harness);
+  });
+  function click(name: string) {
+    [...target.querySelectorAll('button')]
+      .find((item) => item.textContent?.trim() === name)
+      ?.click();
+    flushSync();
+  }
+  flushSync();
+  click('Attachments');
+  await vi.waitFor(() =>
+    expect(target.textContent).toContain('Attached revision pinned')
+  );
+  const select = target.querySelector('select');
+  expect(select).not.toBeNull();
+  if (!select) return;
+  select.value = 'next';
+  select.dispatchEvent(new Event('change', { bubbles: true }));
+  flushSync();
+  click('Replace attachment');
+  click('Confirm replace attachment');
+  await vi.waitFor(() =>
+    expect(target.textContent).toContain('Incompatible policy revision')
+  );
+  expect(writes).toHaveBeenCalledExactlyOnceWith(
+    'PUT',
+    '/api/v1/guardrail-attachments/attachment',
+    '"version"',
+    { policy_revision_id: 'next' }
+  );
+  expect(target.textContent).toContain('Attached revision pinned');
+});
+
+it.each(['loaded', 'pending'])(
+  'retires %s inspected policy data when replacing an attachment',
+  async (inspection) => {
+    const writes = vi.fn();
+    const pending = Promise.withResolvers<Response>();
+    const reads = vi.fn();
+    const oldPolicy = { name: 'Previous policy contents' };
+    serve(
+      (request) => {
+        const path = new URL(request.url).pathname;
+        if (request.method === 'PUT') {
+          writes();
+          return json({});
+        }
+        if (path.includes('/revisions/')) {
+          reads(path);
+          return path.endsWith('/next')
+            ? json({ name: 'Replacement policy contents' })
+            : inspection === 'pending'
+              ? pending.promise
+              : json(oldPolicy);
+        }
+        if (path === '/api/v1/guardrail-attachments')
+          return json({
+            items: [
+              {
+                id: 'attachment',
+                etag: writes.mock.calls.length ? 'replaced' : 'original',
+                scope: 'project',
+                scope_id: 'project',
+                policy_id: 'original',
+                order: 0,
+                policy_revision_id: writes.mock.calls.length
+                  ? 'next'
+                  : 'pinned',
+                active_revision_id: 'next'
+              }
+            ]
+          });
+        if (path === '/api/v1/guardrail-policies')
+          return json({
+            items: [
+              { ...original, active_revision_id: 'next', retired_at: null }
+            ]
+          });
+        return json({ items: [] });
+      },
+      ['read', 'configure']
+    );
+    const target = document.createElement('div');
+    const setup = vi.fn(() =>
+      mount(GuardrailsPage, { target, context: getAllContexts() })
+    );
+    const harness = mount(StateHarness, { target, props: { setup } });
+    onTestFinished(async () => {
+      await unmount(setup.mock.results[0].value);
+      await unmount(harness);
+    });
+    function click(label: string) {
+      [...target.querySelectorAll('button')]
+        .find((item) => item.textContent?.trim() === label)
+        ?.click();
+      flushSync();
+    }
+    flushSync();
+    click('Attachments');
+    await vi.waitFor(() =>
+      expect(target.textContent).toContain('Attached revision pinned')
+    );
+    click('Inspect pinned revision');
+    await vi.waitFor(() => expect(reads).toHaveBeenCalledOnce());
+    if (inspection === 'loaded')
+      await vi.waitFor(() =>
+        expect(target.textContent).toContain(oldPolicy.name)
+      );
+    const select = target.querySelector('select');
+    expect(select).not.toBeNull();
+    if (!select) return;
+    select.value = 'next';
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+    flushSync();
+    click('Replace attachment');
+    click('Confirm replace attachment');
+    await vi.waitFor(() =>
+      expect(target.textContent).toContain('Attached revision next')
+    );
+    pending.resolve(json(oldPolicy));
+    await pending.promise;
+    await vi.waitFor(() =>
+      expect(
+        [...target.querySelectorAll('button')].find(
+          (item) => item.textContent?.trim() === 'Inspect pinned revision'
+        )?.disabled
+      ).toBe(false)
+    );
+    expect(target.textContent).not.toContain(oldPolicy.name);
+    click('Inspect pinned revision');
+    await vi.waitFor(() =>
+      expect(target.textContent).toContain('Replacement policy contents')
+    );
+    expect(target.textContent).not.toContain(oldPolicy.name);
+  }
+);
+
+it.each(
+  ['Definitions', 'Policies'].flatMap((tab) =>
+    ['other', 'new', 'selected'].map((destination) => ({ tab, destination }))
+  )
+)(
+  'preserves the $destination $tab draft when retirement completes',
+  async ({ tab, destination }) => {
+    const retirement = Promise.withResolvers<Response>();
+    const retired = vi.fn();
+    const writes = vi.fn<(request: Request) => void>();
+    const path = tab === 'Definitions' ? 'guardrails' : 'guardrail-policies';
+    serve(
+      (request) => {
+        if (request.method === 'DELETE') {
+          retired(new URL(request.url).pathname);
+          return retirement.promise;
+        }
+        if (request.method !== 'GET') {
+          writes(request);
+          return json(other);
+        }
+        if (new URL(request.url).pathname === '/api/v1/projects')
+          return json({ items: [{ id: 'project', name: 'Project' }] });
+        if (new URL(request.url).pathname === `/api/v1/${path}`)
+          return json({
+            items: [
+              {
+                ...original,
+                retired_at: retired.mock.calls.length ? 'retired' : null
+              },
+              other
+            ]
+          });
+        return json({ items: [] });
+      },
+      ['read', 'configure']
+    );
+    const target = document.createElement('div');
+    const setup = vi.fn(() =>
+      mount(GuardrailsPage, { target, context: getAllContexts() })
+    );
+    const harness = mount(StateHarness, { target, props: { setup } });
+    onTestFinished(async () => {
+      retirement.resolve(new Response(null, { status: 204 }));
+      await unmount(setup.mock.results[0].value);
+      await unmount(harness);
+    });
+    const button = (label: string) =>
+      [...target.querySelectorAll('button')].find(
+        (item) => item.textContent?.trim() === label
+      );
+    const click = (label: string) => {
+      button(label)?.click();
+      flushSync();
+    };
+    flushSync();
+    click(tab);
+    await vi.waitFor(() => expect(button('Original')).toBeDefined());
+    click('Original');
+    const kind = tab === 'Definitions' ? 'definition' : 'policy';
+    click(`Retire ${kind}`);
+    click(`Confirm retire ${kind}`);
+    await vi.waitFor(() =>
+      expect(retired).toHaveBeenCalledExactlyOnceWith(
+        `/api/v1/${path}/original`
+      )
+    );
+    if (destination === 'other') click('Other');
+    if (destination === 'new') click(`New ${kind}`);
+    const input = target.querySelector('form input');
+    expect(input).toBeInstanceOf(HTMLInputElement);
+    if (!(input instanceof HTMLInputElement)) return;
+    input.value = 'Unsaved draft';
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    flushSync();
+    retirement.resolve(new Response(null, { status: 204 }));
+    await vi.waitFor(() =>
+      expect(
+        button('Original')?.closest('li')?.textContent?.toLowerCase()
+      ).not.toContain(`retire ${kind}`)
+    );
+    expect(target.querySelector<HTMLInputElement>('form input')?.value).toBe(
+      destination === 'selected' ? '' : 'Unsaved draft'
+    );
+    if (destination === 'selected') return;
+    target
+      .querySelector('form')
+      ?.dispatchEvent(
+        new SubmitEvent('submit', { bubbles: true, cancelable: true })
+      );
+    await vi.waitFor(() => expect(writes).toHaveBeenCalledOnce());
+    expect(writes.mock.calls[0][0].method).toBe(
+      destination === 'new' ? 'POST' : 'PUT'
+    );
+    expect(new URL(writes.mock.calls[0][0].url).pathname).toBe(
+      `/api/v1/${path}${destination === 'new' ? '' : '/other'}`
+    );
+  }
+);

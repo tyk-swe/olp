@@ -310,3 +310,63 @@ export async function restoreRouteRevision(
   );
   return unwrap(response);
 }
+
+export const listOperationDialects = async (signal?: AbortSignal) =>
+  unwrap(await apiClient.GET('/api/v1/operation-dialects', { signal }));
+
+export type RouteTemplate = Schemas['RouteTemplateResponse'];
+export type TemplateInput = Schemas['RouteTemplateRequest'];
+export const listTemplates = () =>
+  collectCursorPages(async (cursor) =>
+    unwrapPage(
+      await apiClient.GET('/api/v1/route-templates', {
+        params: { query: { cursor } }
+      })
+    )
+  );
+export const getTemplate = async (id: string) =>
+  unwrap(
+    await apiClient.GET('/api/v1/route-templates/{template_id}', {
+      params: { path: { template_id: id } }
+    })
+  );
+export async function saveTemplate(
+  current: RouteTemplate | null,
+  body: TemplateInput,
+  requestId: string
+) {
+  if (!current)
+    return unwrap(
+      await apiClient.POST('/api/v1/route-templates', {
+        body,
+        params: { header: { 'Idempotency-Key': requestId } }
+      })
+    );
+  return unwrap(
+    await apiClient.PUT('/api/v1/route-templates/{template_id}', {
+      body,
+      params: {
+        path: { template_id: current.id },
+        header: { 'If-Match': `"${current.etag}"` }
+      }
+    })
+  );
+}
+export const deleteTemplate = async (value: RouteTemplate) =>
+  ensureOk(
+    await apiClient.DELETE('/api/v1/route-templates/{template_id}', {
+      params: {
+        path: { template_id: value.id },
+        header: { 'If-Match': `"${value.etag}"` }
+      }
+    })
+  );
+export const applyTemplate = async (id: string, requestId: string) =>
+  unwrap(
+    await apiClient.POST('/api/v1/route-templates/{template_id}/apply', {
+      params: {
+        path: { template_id: id },
+        header: { 'Idempotency-Key': requestId }
+      }
+    })
+  );

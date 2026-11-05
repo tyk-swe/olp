@@ -159,3 +159,20 @@ choice.
 
 The browser-qualified [catalog example](../assets/model-catalog.png) shows the
 resulting authenticated catalog.
+
+
+## Complete management workflows
+
+MCP server, route template and signed export editors preserve drafts across background refreshes. Saves use the version originally loaded, and Reload latest explicitly discards edits to load a newer version.
+
+MCP servers can be registered, certified, edited and retired under Gateway, MCP servers. Register a server before selecting its certified tools in Agent publications. Blank pricing means unpriced, while zero means free.
+
+Tool call details include evidence-backed resolution for unknown outcomes. Enter the evidence digest and, for settlement, the observed amounts. Successful resolution refreshes the call and provisional exposure. A2A task detail can fetch current remote state and request cancellation separately from the locally recorded task state.
+
+Guardrails includes credential creation and metadata listing. To replace a credential, create a new named credential from the definition editor, save and activate the new definition revision, then save and activate the policy revision. Replace each attachment explicitly to adopt that revision. Attachment replacement is atomic. Existing references remain unchanged, and credentials referenced by retained revisions cannot be deleted. Definitions and policies can be retired from their editors.
+
+Routes links to template management, including explicit Apply and recorded placement outcomes. New templates leave automatic publishing disabled. Route operation and simulation choices include registered unary dialects alongside existing generation, streaming and resource operations.
+
+Usage includes Routing reports for selector savings and shadow comparisons. These reports filter by time range, route and project and distinguish unavailable measurements from zero values. Session and attribution filters are unavailable because the report queries do not apply them. Signed fact exports under Operations manages the scoped HTTPS export system, including credentials and delivery counters. The observability sinks under Settings remain a separate export system.
+
+Provider drafts, credential slots, projects, budget groups and notification resources expose cleanup actions where authorized. Dependency and history checks can reject cleanup, in which case the resource remains available.

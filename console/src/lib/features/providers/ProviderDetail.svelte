@@ -1,4 +1,7 @@
 <script lang="ts">
+  import ConfirmAction from '$lib/components/ConfirmAction.svelte';
+  import { goto } from '$app/navigation';
+  import { deleteProvider } from './providers';
   import ProviderBulkModels from './ProviderBulkModels.svelte';
   import ProviderCredentialPool from './ProviderCredentialPool.svelte';
   import { focusErrorSummary } from '$lib/editing/focusError';
@@ -361,6 +364,19 @@
   </div>
 {:else}
   {@const current = snapshot.data?.provider}
+  {#if current.state === 'draft' && !current.active_revision && access.allows('DELETE /api/v1/providers/{provider_id}')}<ConfirmAction
+      label="Delete unused provider"
+      description={`Delete ${current.name} and its draft credentials. Providers referenced by routes or history cannot be deleted`}
+      identity={`${current.id}:${current.etag}`}
+      disabled={Boolean(busy)}
+      run={(requestId) => deleteProvider(current, requestId)}
+      done={async () => {
+        await queryClient.invalidateQueries({
+          queryKey: providerKeys.summaries
+        });
+        await goto(resolve('/providers'));
+      }}
+    />{/if}
   {#key explicitReloadEpoch}
     {#if !canManage}<ReadOnlyNote>
         Your role can view this provider but not change, test, or activate it.

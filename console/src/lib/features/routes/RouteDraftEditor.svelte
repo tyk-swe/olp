@@ -15,7 +15,6 @@
   import ConflictNotice from '$lib/shell/ConflictNotice.svelte';
   import ReadOnlyNote from '$lib/shell/ReadOnlyNote.svelte';
   import { formatDate } from '$lib/format';
-  import { operationOptions } from '$lib/features/routes/routeEditor';
   import { RouteDraftEditorState } from '$lib/features/routes/routeDraftEditor.svelte';
   import ProjectScopeField from '$lib/features/access/projects/ProjectScopeField.svelte';
   let {
@@ -160,7 +159,7 @@
             </div>{/if}
           <fieldset class="form-field full operations">
             <legend>Supported operations</legend
-            >{#each operationOptions as option (option[0])}<label
+            >{#each editor.operationOptions as option (option[0])}<label
                 ><input
                   type="checkbox"
                   checked={editor.operations.includes(option[0])}

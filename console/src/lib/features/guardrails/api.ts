@@ -40,7 +40,8 @@ export async function saveDefinition(
   current: Definition | null,
   project: string,
   type: Definition['type'],
-  body: components['schemas']['UpdateGuardrailRequest']
+  body: components['schemas']['UpdateGuardrailRequest'],
+  requestId: string = crypto.randomUUID()
 ) {
   return current
     ? unwrap(
@@ -49,7 +50,7 @@ export async function saveDefinition(
             path: { guardrail_id: current.id },
             header: {
               'If-Match': `"${current.etag}"`,
-              'Idempotency-Key': crypto.randomUUID()
+              'Idempotency-Key': requestId
             }
           },
           body
@@ -57,7 +58,7 @@ export async function saveDefinition(
       )
     : unwrap(
         await apiClient.POST('/api/v1/guardrails', {
-          params: { header: { 'Idempotency-Key': crypto.randomUUID() } },
+          params: { header: { 'Idempotency-Key': requestId } },
           body: { ...body, project_id: project, type }
         })
       );
@@ -130,3 +131,90 @@ export async function evaluatePolicy(
 ) {
   return unwrap(await apiClient.POST('/api/v1/guardrails/evaluate', { body }));
 }
+
+export type Credential = components['schemas']['GuardrailCredential'];
+export type Attachment = components['schemas']['GuardrailAttachment'];
+export const listCredentials = () =>
+  collectCursorPages(async (cursor) =>
+    unwrapPage(
+      await apiClient.GET('/api/v1/guardrail-credentials', {
+        params: { query: { cursor } }
+      })
+    )
+  );
+export const createCredential = async (
+  body: components['schemas']['GuardrailCredentialInput'],
+  requestId: string
+) =>
+  unwrap(
+    await apiClient.POST('/api/v1/guardrail-credentials', {
+      body,
+      params: { header: { 'Idempotency-Key': requestId } }
+    })
+  );
+export const deleteCredential = async (
+  credential: Credential,
+  requestId: string
+) =>
+  ensureOk(
+    await apiClient.DELETE('/api/v1/guardrail-credentials/{credential_id}', {
+      params: {
+        path: { credential_id: credential.id },
+        header: {
+          'If-Match': `"${credential.id}"`,
+          'Idempotency-Key': requestId
+        }
+      }
+    })
+  );
+export const retireDefinition = async (value: Definition, requestId: string) =>
+  ensureOk(
+    await apiClient.DELETE('/api/v1/guardrails/{guardrail_id}', {
+      params: {
+        path: { guardrail_id: value.id },
+        header: { 'If-Match': `"${value.etag}"`, 'Idempotency-Key': requestId }
+      }
+    })
+  );
+export const retirePolicy = async (value: Policy, requestId: string) =>
+  ensureOk(
+    await apiClient.DELETE('/api/v1/guardrail-policies/{policy_id}', {
+      params: {
+        path: { policy_id: value.policy_id },
+        header: { 'If-Match': `"${value.etag}"`, 'Idempotency-Key': requestId }
+      }
+    })
+  );
+export const detachPolicy = async (
+  value: Attachment & { id: string; etag: string },
+  requestId: string
+) =>
+  ensureOk(
+    await apiClient.DELETE('/api/v1/guardrail-attachments/{attachment_id}', {
+      params: {
+        path: { attachment_id: value.id },
+        header: { 'If-Match': `"${value.etag}"`, 'Idempotency-Key': requestId }
+      }
+    })
+  );
+export const replaceAttachment = async (
+  value: Attachment & { id: string; etag: string },
+  revision: string,
+  requestId: string
+) =>
+  unwrap(
+    await apiClient.PUT('/api/v1/guardrail-attachments/{attachment_id}', {
+      body: { policy_revision_id: revision },
+      params: {
+        path: { attachment_id: value.id },
+        header: { 'If-Match': `"${value.etag}"`, 'Idempotency-Key': requestId }
+      }
+    })
+  );
+export const getPolicyRevision = async (policy: string, revision: string) =>
+  unwrap(
+    await apiClient.GET(
+      '/api/v1/guardrail-policies/{policy_id}/revisions/{revision_id}',
+      { params: { path: { policy_id: policy, revision_id: revision } } }
+    )
+  );

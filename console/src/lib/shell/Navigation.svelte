@@ -49,6 +49,12 @@
       label: 'Gateway',
       items: [
         {
+          label: 'MCP servers',
+          href: resolve('/mcp-servers'),
+          icon: 'route',
+          route: 'GET /api/v1/mcp-servers'
+        },
+        {
           label: 'Agent publications',
           href: resolve('/agents'),
           icon: 'route',
@@ -190,6 +196,12 @@
     {
       label: 'Operations',
       items: [
+        {
+          label: 'Signed fact exports',
+          href: resolve('/signed-exports'),
+          icon: 'request',
+          route: 'GET /api/v1/sinks'
+        },
         {
           label: 'Requests',
           href: resolve('/requests'),

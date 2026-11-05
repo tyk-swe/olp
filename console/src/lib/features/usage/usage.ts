@@ -1,3 +1,4 @@
+import type { paths } from '$lib/management/schema';
 import type { components } from '$lib/management/schema';
 import { apiClient } from '$lib/management/client';
 import { apiProblem, unwrap } from '$lib/management/http';
@@ -96,3 +97,28 @@ export async function exportUsageCsv(
   if (!response.ok) throw apiProblem(error, response);
   return data as string;
 }
+
+export type RoutingReportFilters = Pick<
+  paths['/api/v1/usage/selector-savings']['get']['parameters']['query'],
+  'start' | 'end' | 'route' | 'project_id'
+>;
+export const selectorSavings = async (
+  filters: RoutingReportFilters,
+  signal?: AbortSignal
+) =>
+  unwrap(
+    await apiClient.GET('/api/v1/usage/selector-savings', {
+      params: { query: compactQuery(filters) },
+      signal
+    })
+  );
+export const shadowExperiments = async (
+  filters: RoutingReportFilters,
+  signal?: AbortSignal
+) =>
+  unwrap(
+    await apiClient.GET('/api/v1/usage/shadow-experiments', {
+      params: { query: compactQuery(filters) },
+      signal
+    })
+  );

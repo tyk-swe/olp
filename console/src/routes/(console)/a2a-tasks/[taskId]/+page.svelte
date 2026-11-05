@@ -3,4 +3,6 @@
   import TaskDetailPage from '$lib/features/agents/TaskDetailPage.svelte';
 </script>
 
-<TaskDetailPage taskID={page.params.taskId ?? ''} />
+{#key page.params.taskId}
+  <TaskDetailPage taskID={page.params.taskId ?? ''} />
+{/key}

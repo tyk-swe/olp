@@ -660,3 +660,44 @@ describe('gateway tool execution', () => {
     expect(validateRouteEditor(values)).toBeNull();
   });
 });
+
+describe('registered operation discovery', () => {
+  it('makes registered operations and native dialects selectable without losing legacy workflows', async () => {
+    const { discoveredOperations, discoveredSurfaces, inspectionDialects } =
+      await import('./inspectionDialects');
+    const registered = [
+      {
+        id: 'fixture-embed',
+        revision: '1',
+        operation: 'fixture-operation',
+        operation_revision: '1',
+        surface: 'gemini',
+        mode: 'unary',
+        label: 'Fixture embeddings',
+        request_schema: {},
+        result_schema: {},
+        documentation: '',
+        evidence: ''
+      }
+    ];
+    const operations = discoveredOperations(registered);
+    expect(operations.map(([id]) => id)).toContain('fixture-operation');
+    expect(operations.map(([id]) => id)).toEqual(
+      expect.arrayContaining([
+        'generation',
+        'video_create',
+        'realtime',
+        'decision'
+      ])
+    );
+    expect(discoveredSurfaces('fixture-operation', registered)).toEqual(
+      expect.arrayContaining(['gemini', 'native'])
+    );
+    expect(
+      inspectionDialects('fixture-operation', 'native', registered)
+    ).toEqual(['fixture-embed']);
+    expect(inspectionDialects('generation', 'openai', registered)).toEqual(
+      inspectionDialects('generation', 'openai')
+    );
+  });
+});

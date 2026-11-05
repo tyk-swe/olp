@@ -1,10 +1,20 @@
 <script lang="ts">
+  import { playgroundTemplates } from '$lib/features/inference/playground/templates';
   import RoutingPreferencesForm from './RoutingPreferencesForm.svelte';
   import { resolve } from '$app/paths';
-  import { modesFor, surfacesFor } from '$lib/features/routes/routeEditor';
-  import { inspectionDialects } from '$lib/features/routes/inspectionDialects';
+  import { modesFor } from '$lib/features/routes/routeEditor';
   import type { RouteDraftEditorState } from '$lib/features/routes/routeDraftEditor.svelte';
   let { editor }: { editor: RouteDraftEditorState } = $props();
+  const examples = $derived(
+    playgroundTemplates.filter(
+      (example) =>
+        example.operation === editor.simulationOperation &&
+        (editor.simulationDialect
+          ? (example.inspectDialect ?? example.nativeDialect) ===
+            editor.simulationDialect
+          : (example.surface ?? 'openai') === editor.simulationSurface)
+    )
+  );
 </script>
 
 <aside class="card publish-panel" aria-labelledby="publish-heading">
@@ -39,8 +49,8 @@
     >
     <label for="simulation-surface">Client surface</label>
     <select id="simulation-surface" bind:value={editor.simulationSurface}
-      >{#each surfacesFor(editor.simulationOperation) as surface (surface)}<option
-          value={surface}>{surface}</option
+      >{#each editor.surfaces as surface (surface)}<option value={surface}
+          >{surface}</option
         >{/each}</select
     >
     <label for="simulation-mode">Transport mode</label>
@@ -73,10 +83,47 @@
     <label for="simulation-dialect">Native request dialect</label>
     <select id="simulation-dialect" bind:value={editor.simulationDialect}>
       <option value="">Default for operation and surface</option>
-      {#each inspectionDialects(editor.simulationOperation, editor.simulationSurface) as dialect (dialect)}
+      {#each editor.inspectionDialects as dialect (dialect)}
         <option value={dialect}>{dialect}</option>
       {/each}
     </select>
+    {#if examples.length}
+      <label for="simulation-example">Request example</label>
+      <select
+        id="simulation-example"
+        value=""
+        onchange={(event) => {
+          const example = examples.find(
+            (item) => item.key === event.currentTarget.value
+          );
+          if (example) {
+            editor.simulationSurface = example.nativeDialect
+              ? 'native'
+              : (example.surface ?? 'openai');
+            editor.simulationDialect =
+              example.inspectDialect ?? example.nativeDialect ?? '';
+            editor.simulationRequestJson = JSON.stringify(
+              {
+                ...example.request,
+                ...('model' in example.request ? { model: editor.slug } : {}),
+                ...(example.operation === 'generation' &&
+                ['openai', 'anthropic'].includes(editor.simulationSurface)
+                  ? { stream: editor.simulationMode === 'streaming' }
+                  : {})
+              },
+              null,
+              2
+            );
+          }
+          event.currentTarget.value = '';
+        }}
+      >
+        <option value="">Choose an example</option>
+        {#each examples as example (example.key)}<option value={example.key}
+            >{example.label}</option
+          >{/each}
+      </select>
+    {/if}
     <label for="simulation-request">Native request for inspection</label>
     <textarea
       id="simulation-request"

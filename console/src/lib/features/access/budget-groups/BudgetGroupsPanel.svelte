@@ -1,4 +1,5 @@
 <script lang="ts">
+  import ConfirmAction from '$lib/components/ConfirmAction.svelte';
   import { validRouteSlug } from '$lib/routeIdentity';
   import { currentBudgetLimit } from '../api-keys/budgetPresentation';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
@@ -7,6 +8,7 @@
   import { useServiceCapabilities } from '$lib/features/access/session/serviceCapabilities.svelte';
   import ProjectScopeField from '$lib/features/access/projects/ProjectScopeField.svelte';
   import {
+    retireBudgetGroup,
     createBudgetGroup,
     listBudgetGroups,
     updateBudgetGroup,
@@ -482,7 +484,22 @@
                       type="button"
                       disabled={editBusy}
                       onclick={() => startEdit(group)}>Edit</button
-                    ></td
+                    >
+                    {#if access.allows('DELETE /api/v1/budget-groups/{budget_group_id}')}<ConfirmAction
+                        label="Retire budget group"
+                        description={`Retire ${group.name}. Existing dependencies and history are checked before retirement`}
+                        identity={`${group.id}:${group.etag}`}
+                        run={(requestId) => retireBudgetGroup(group, requestId)}
+                        done={async () => {
+                          if (editingId === group.id) {
+                            editingId = '';
+                            editingGroup = null;
+                          }
+                          await queryClient.invalidateQueries({
+                            queryKey: budgetGroupKeys.root
+                          });
+                        }}
+                      />{/if}</td
                   >{/if}</tr
               >
             {/if}

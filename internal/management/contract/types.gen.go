@@ -6519,6 +6519,8 @@ const (
 	SimulationDialectBedrockCountTokens           SimulationDialect = "bedrock-count-tokens"
 	SimulationDialectBedrockEmbeddings            SimulationDialect = "bedrock-embeddings"
 	SimulationDialectBraveSearch                  SimulationDialect = "brave-search"
+	SimulationDialectCohereEmbedV2                SimulationDialect = "cohere-embed-v2"
+	SimulationDialectCohereRerankV2               SimulationDialect = "cohere-rerank-v2"
 	SimulationDialectExaSearch                    SimulationDialect = "exa-search"
 	SimulationDialectGeminiBatchEmbeddings        SimulationDialect = "gemini-batch-embeddings"
 	SimulationDialectGeminiCountTokens            SimulationDialect = "gemini-count-tokens"
@@ -6564,6 +6566,10 @@ func (e SimulationDialect) Valid() bool {
 	case SimulationDialectBedrockEmbeddings:
 		return true
 	case SimulationDialectBraveSearch:
+		return true
+	case SimulationDialectCohereEmbedV2:
+		return true
+	case SimulationDialectCohereRerankV2:
 		return true
 	case SimulationDialectExaSearch:
 		return true
@@ -11067,16 +11073,26 @@ type GuardrailApplyResult struct {
 
 // GuardrailAttachment defines model for GuardrailAttachment.
 type GuardrailAttachment struct {
-	Etag             *string                  `json:"etag,omitempty"`
-	Id               *openapi_types.UUID      `json:"id,omitempty"`
-	Order            int                      `json:"order"`
-	PolicyRevisionId openapi_types.UUID       `json:"policy_revision_id"`
-	Scope            GuardrailAttachmentScope `json:"scope"`
-	ScopeId          string                   `json:"scope_id"`
+	ActiveRevisionId nullable.Nullable[openapi_types.UUID] `json:"active_revision_id,omitempty"`
+	Etag             *string                               `json:"etag,omitempty"`
+	Id               *openapi_types.UUID                   `json:"id,omitempty"`
+	Order            int                                   `json:"order"`
+	PolicyId         *openapi_types.UUID                   `json:"policy_id,omitempty"`
+	PolicyRevisionId openapi_types.UUID                    `json:"policy_revision_id"`
+	Scope            GuardrailAttachmentScope              `json:"scope"`
+	ScopeId          string                                `json:"scope_id"`
 }
 
 // GuardrailAttachmentScope defines model for GuardrailAttachment.Scope.
 type GuardrailAttachmentScope string
+
+// GuardrailCredential defines model for GuardrailCredential.
+type GuardrailCredential struct {
+	CreatedAt time.Time          `json:"created_at"`
+	Id        openapi_types.UUID `json:"id"`
+	Name      string             `json:"name"`
+	ProjectId openapi_types.UUID `json:"project_id"`
+}
 
 // GuardrailCredentialInput defines model for GuardrailCredentialInput.
 type GuardrailCredentialInput struct {
@@ -17548,9 +17564,32 @@ type DeleteGuardrailAttachmentParams struct {
 	IfMatch        string `json:"If-Match"`
 }
 
+// ReplaceGuardrailAttachmentJSONBody defines parameters for ReplaceGuardrailAttachment.
+type ReplaceGuardrailAttachmentJSONBody struct {
+	PolicyRevisionId openapi_types.UUID `json:"policy_revision_id"`
+}
+
+// ReplaceGuardrailAttachmentParams defines parameters for ReplaceGuardrailAttachment.
+type ReplaceGuardrailAttachmentParams struct {
+	IdempotencyKey string `json:"Idempotency-Key"`
+	IfMatch        string `json:"If-Match"`
+}
+
+// ListGuardrailCredentialsParams defines parameters for ListGuardrailCredentials.
+type ListGuardrailCredentialsParams struct {
+	Cursor *string `form:"cursor,omitempty" json:"cursor,omitempty"`
+	Limit  *int32  `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
 // CreateGuardrailCredentialParams defines parameters for CreateGuardrailCredential.
 type CreateGuardrailCredentialParams struct {
 	IdempotencyKey string `json:"Idempotency-Key"`
+}
+
+// DeleteGuardrailCredentialParams defines parameters for DeleteGuardrailCredential.
+type DeleteGuardrailCredentialParams struct {
+	IdempotencyKey string `json:"Idempotency-Key"`
+	IfMatch        string `json:"If-Match"`
 }
 
 // ListGuardrailPoliciesParams defines parameters for ListGuardrailPolicies.
@@ -19323,6 +19362,9 @@ type CreateDelegationConsentJSONRequestBody = DelegationConsentRequest
 
 // CreateGuardrailAttachmentJSONRequestBody defines body for CreateGuardrailAttachment for application/json ContentType.
 type CreateGuardrailAttachmentJSONRequestBody = GuardrailAttachment
+
+// ReplaceGuardrailAttachmentJSONRequestBody defines body for ReplaceGuardrailAttachment for application/json ContentType.
+type ReplaceGuardrailAttachmentJSONRequestBody ReplaceGuardrailAttachmentJSONBody
 
 // CreateGuardrailCredentialJSONRequestBody defines body for CreateGuardrailCredential for application/json ContentType.
 type CreateGuardrailCredentialJSONRequestBody = GuardrailCredentialInput

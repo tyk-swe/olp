@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { resolve } from '$app/paths';
   import { createQuery } from '@tanstack/svelte-query';
   import { writable } from 'svelte/store';
   import { errorMessage } from '$lib/management/http';
@@ -93,6 +94,9 @@
               <code>{value.tool_alias}</code>
               <details>
                 <summary>Attempt {value.id}</summary>
+                <a href={resolve(`/tool-calls/${value.id}`)}
+                  >Inspect and resolve</a
+                >
                 <dl>
                   <dt>Dispatch</dt>
                   <dd><code>{value.dispatch_id}</code></dd>

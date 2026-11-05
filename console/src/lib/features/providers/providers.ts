@@ -1,6 +1,6 @@
 import type { components } from '$lib/management/schema';
 import { apiClient } from '$lib/management/client';
-import { ApiProblem, unwrap, unwrapPage } from '$lib/management/http';
+import { ApiProblem, ensureOk, unwrap, unwrapPage } from '$lib/management/http';
 import { PROVIDER_PAGE_SIZE } from '$lib/management/pageSizes';
 import { collectCursorPages } from '$lib/management/pagination';
 import { type CursorPage } from '$lib/management/http';
@@ -185,3 +185,16 @@ export function isProviderInUse(error: unknown): boolean {
     error.problem.type === PROVIDER_IN_USE_TYPE
   );
 }
+
+export const deleteProvider = async (
+  value: { id: string; etag: string },
+  requestId: string
+) =>
+  ensureOk(
+    await apiClient.DELETE('/api/v1/providers/{provider_id}', {
+      params: {
+        path: { provider_id: value.id },
+        header: { 'If-Match': `"${value.etag}"`, 'Idempotency-Key': requestId }
+      }
+    })
+  );

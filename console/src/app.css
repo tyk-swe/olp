@@ -1402,3 +1402,68 @@ button:not(:disabled),
     margin: 0.5rem 0 0;
   }
 }
+
+.workflow {
+  display: grid;
+  gap: 1.25rem;
+}
+.workflow .card,
+.workflow.card {
+  padding: 1.5rem;
+}
+.workflow form,
+.workflow fieldset {
+  display: grid;
+  gap: 1rem;
+}
+.workflow label {
+  display: grid;
+  gap: 0.4rem;
+}
+.workflow label:has(input[type='checkbox']) {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+.workflow :is(input:not([type='checkbox']), select, textarea) {
+  min-height: 2.5rem;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--border-hairline);
+  border-radius: var(--radius-control);
+  background: var(--canvas);
+  color: var(--foreground);
+}
+.workflow textarea {
+  min-height: 7rem;
+  resize: vertical;
+}
+.workflow pre,
+.workflow table {
+  max-width: 100%;
+  overflow: auto;
+}
+.workflow th,
+.workflow td {
+  padding: 0.65rem;
+  text-align: left;
+}
+.workflow nav {
+  display: flex;
+  gap: 1rem;
+}
+
+.workflow h2 {
+  margin: 0;
+  font-size: 1.125rem;
+  font-weight: 600;
+}
+@media (min-width: 800px) {
+  .workflow form,
+  .workflow fieldset {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .workflow form > :is(h2, p, fieldset, details, button, [role='alert']),
+  .workflow label:has(textarea) {
+    grid-column: 1 / -1;
+  }
+}

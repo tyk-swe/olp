@@ -257,3 +257,16 @@ export async function putProjectAttributionBudgets(
     })
   );
 }
+
+export const deleteProject = async (
+  value: { id: string; etag: string },
+  requestId: string
+) =>
+  ensureOk(
+    await apiClient.DELETE('/api/v1/projects/{project_id}', {
+      params: {
+        path: { project_id: value.id },
+        header: { 'If-Match': `"${value.etag}"`, 'Idempotency-Key': requestId }
+      }
+    })
+  );

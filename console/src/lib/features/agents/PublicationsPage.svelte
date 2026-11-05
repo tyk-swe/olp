@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { resolve } from '$app/paths';
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import { errorMessage } from '$lib/management/http';
   import { useRole } from '$lib/features/access/session/useRole.svelte';
@@ -396,6 +397,7 @@
           ></label
         >
         {#if kind === 'toolsets'}
+          <a href={resolve('/mcp-servers')}>Register or manage MCP servers</a>
           <label
             >Certified MCP server <select
               aria-label="Certified MCP server"

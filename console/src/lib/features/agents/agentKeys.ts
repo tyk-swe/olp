@@ -5,6 +5,8 @@ const publication = <T extends Kind | 'projects' | 'servers'>(kind: T) =>
   [...publications, kind] as const;
 
 export const agentKeys = {
+  server: (id: string) => [...publication('servers'), id] as const,
+  call: (id: string) => ['mcp-tool-call', id] as const,
   grants: () => ['mcp-grants'] as const,
   publications,
   publication,

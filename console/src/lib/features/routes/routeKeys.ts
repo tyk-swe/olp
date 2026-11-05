@@ -2,6 +2,9 @@ const root = ['routes'] as const;
 const lists = [...root, 'lists'] as const;
 
 export const routeKeys = {
+  templates: () => ['route-templates'] as const,
+  template: (id: string) => ['route-templates', id] as const,
+  dialects: () => ['operation-dialects'] as const,
   /** Every route or draft listing: the full list and each cursor page. */
   lists,
   all: () => [...lists, 'all'] as const,

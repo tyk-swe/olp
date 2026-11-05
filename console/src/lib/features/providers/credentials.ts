@@ -1,6 +1,11 @@
 import type { components } from '$lib/management/schema';
 import { apiClient } from '$lib/management/client';
-import { type CursorPage, unwrap, unwrapPage } from '$lib/management/http';
+import {
+  type CursorPage,
+  ensureOk,
+  unwrap,
+  unwrapPage
+} from '$lib/management/http';
 import { PROVIDER_CREDENTIAL_PAGE_SIZE } from '$lib/management/pageSizes';
 import { collectCursorPages } from '$lib/management/pagination';
 import type { Provider } from '$lib/features/providers/providers';
@@ -133,3 +138,21 @@ export async function revokeProviderCredential(
   );
   unwrap(response);
 }
+
+export const deleteCredentialSlot = async (
+  providerId: string,
+  slotId: string,
+  etag: string,
+  requestId: string
+) =>
+  ensureOk(
+    await apiClient.DELETE(
+      '/api/v1/providers/{provider_id}/credential-slots/{slot_id}',
+      {
+        params: {
+          path: { provider_id: providerId, slot_id: slotId },
+          header: { 'If-Match': `"${etag}"`, 'Idempotency-Key': requestId }
+        }
+      }
+    )
+  );

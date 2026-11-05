@@ -315,3 +315,10 @@ Uninspectable native/background/stateful/Files/Batch/realtime surfaces refuse
 Evidence stores rule ID/phase/action/outcome only, never matched text, offsets,
 patterns, replacements or bodies. This bounded text filter is not a universal
 safety or prompt-injection guarantee.
+
+
+## Credential and attachment maintenance
+
+The console Credentials tab and `GET /api/v1/guardrail-credentials` expose credential metadata without secret material. Read a credential through `GET /api/v1/guardrail-credentials/{credential_id}` to obtain its ETag. Deleting an unused credential requires that ETag and an idempotency key. Deletion returns `409 guardrail_credential_in_use` while any retained definition revision references the credential, including network authentication references.
+
+Credential replacement creates a new credential and new definition and policy revisions. Activating a policy does not change existing attachments. Use `PUT /api/v1/guardrail-attachments/{attachment_id}` with a replacement `policy_revision_id`, the attachment ETag and an idempotency key to switch the pinned revision atomically. Scope and position remain unchanged, and a failed publication leaves the original attachment intact. Attachment listings include the owning policy and its currently active revision for comparison.
