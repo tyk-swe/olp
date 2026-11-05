@@ -102,6 +102,18 @@ export function allowanceWindowSummary(window: CodeAllowanceWindow): string {
   return `${used} used · ${remaining} remaining`;
 }
 
+export function allowanceChargeSummary(attempt: CodeAttempt): string {
+  const charge = attempt.allowance_charge;
+  if (charge == null) return 'Unknown, no charge observed';
+  if (typeof charge.allowance !== 'number')
+    return 'Charge reported without an allowance amount';
+  const billed =
+    typeof charge.billing_source === 'string'
+      ? `, billed from ${charge.billing_source}`
+      : '';
+  return `Observed charge $${charge.allowance} of monthly limit${billed}`;
+}
+
 export function allowanceEvidenceLabel(
   evidence: CodeAllowanceWindow['evidence']
 ): string {

@@ -122,6 +122,47 @@ func TestCodeAdmissionRecordsChosenAndPinnedDecisions(t *testing.T) {
 	if len(recordedConnections) != 2 || emptySkipped != 1 {
 		t.Fatalf("connection decisions = %+v", recordedConnections)
 	}
+	// Vendor object shape per https://opencode.ai/v2/docs/console/api/inference/ (fetched 2026-11-05).
+	reported := json.RawMessage(`{"billing_source":"go","list_cost":0.00412,"allowance":0.0021,"tokens":{"input":1200,"output":300},"cost":0.00412}`)
+	if err := store.ObserveAllowanceCharge(t.Context(), second.Attempt.ID, reported); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.ObserveAllowanceCharge(t.Context(), second.Attempt.ID, json.RawMessage(`"go"`)); err == nil {
+		t.Fatal("non-object allowance charge stored, want an error")
+	}
+	stored := attemptAllowanceCharge(t, pool, second.Attempt.ID)
+	if stored == nil || stored["billing_source"] != "go" || stored["allowance"] != 0.0021 || stored["cost"] != 0.00412 {
+		t.Fatalf("stored allowance charge = %v, want the reported vendor object", stored)
+	}
+	if missing := attemptAllowanceCharge(t, pool, permit.Attempt.ID); missing != nil {
+		t.Fatalf("attempt without a reported charge = %v, want null (unknown)", missing)
+	}
+	third, err := store.Admit(t.Context(), admission)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if third.Account.ID != healthy {
+		t.Fatalf("admission with a charge recorded chose %s, want the pinned account %s", third.Account.ID, healthy)
+	}
+	if missing := attemptAllowanceCharge(t, pool, third.Attempt.ID); missing != nil {
+		t.Fatalf("fresh attempt charge = %v, want null (unknown)", missing)
+	}
+}
+
+func attemptAllowanceCharge(t *testing.T, pool *pgxpool.Pool, attemptID string) map[string]any {
+	t.Helper()
+	var document []byte
+	if err := pool.QueryRow(t.Context(), `SELECT allowance_charge FROM olp.code_attempts WHERE id=$1`, attemptID).Scan(&document); err != nil {
+		t.Fatal(err)
+	}
+	if document == nil {
+		return nil
+	}
+	var charge map[string]any
+	if err := json.Unmarshal(document, &charge); err != nil {
+		t.Fatal(err)
+	}
+	return charge
 }
 
 func codeConnectionDecisions(t *testing.T, pool *pgxpool.Pool, rootID string) []codemode.Decision {

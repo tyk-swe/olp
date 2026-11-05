@@ -24,6 +24,7 @@
   import { formatDate } from '$lib/format';
   import { codeKeys } from './codeKeys';
   import {
+    allowanceChargeSummary,
     allowanceEvidenceLabel,
     decisionReasonLabel,
     mutationError,
@@ -515,6 +516,11 @@
           <dd>{tokenCount(attempt.reported_tokens)}</dd>
           <dt>Usage certainty</dt>
           <dd>{usageCertaintyLabel(attempt)}</dd>
+          <dt>Observed charge</dt>
+          <dd>
+            {allowanceChargeSummary(attempt)}. A reported charge counts toward
+            plan usage limits as reported, and never states remaining allowance
+          </dd>
           {#if attempt.paid_binding_id}
             <dt>Paid accounting</dt>
             <dd>{attempt.paid_monetary_state ?? 'unknown'}</dd>

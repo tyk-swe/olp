@@ -96,7 +96,7 @@ func Observe(body []byte, unary bool) Observation {
 	if u.Validate() != nil {
 		u = codemode.Usage{}
 	}
-	return Observation{Terminal: true, Successful: successful, Outcome: &codemode.Outcome{Origin: "upstream", Kind: outcomeKind, ObservedAt: now}, Usage: u, ResponseID: id}
+	return Observation{Terminal: true, Successful: successful, Outcome: &codemode.Outcome{Origin: "upstream", Kind: outcomeKind, ObservedAt: now}, Usage: u, ResponseID: id, AllowanceCharge: codewire.AllowanceCharge(usage)}
 }
 
 func Allowance(headers http.Header, now time.Time) *codemode.Allowance {

@@ -1,6 +1,7 @@
 package codexwire_test
 
 import (
+	"encoding/json"
 	"net/http"
 	"testing"
 	"time"
@@ -83,5 +84,41 @@ func TestRateLimitEventStampsPercentPassiveWindows(t *testing.T) {
 	window := observation.Allowance.Windows[0]
 	if window.Unit != "percent" || window.Evidence != "passive" || window.RemainingPercent != 60 {
 		t.Fatalf("window = %+v", window)
+	}
+}
+
+// Fixture shape per https://opencode.ai/v2/docs/console/api/inference/ (fetched 2026-11-05): Responses streams carry usage.cost and usage.opencode on response.completed; allowance is Go only, in dollars of the plan monthly limit.
+func TestResponsesCompletedReportsOpenCodeAllowanceCharge(t *testing.T) {
+	body := `{"type":"response.completed","response":{"id":"resp_1","status":"completed","usage":{"input_tokens":1200,"output_tokens":300,"total_tokens":1500,"cost":0.00412,"opencode":{"billing_source":"go","list_cost":0.00412,"allowance":0.0021,"tokens":{"input":1200,"output":300}}}}}`
+	observation := codexwire.Observe([]byte(body), false)
+	if !observation.Terminal || !observation.Successful {
+		t.Fatalf("observation = %+v", observation)
+	}
+	var charge map[string]any
+	if observation.AllowanceCharge == nil || json.Unmarshal(observation.AllowanceCharge, &charge) != nil {
+		t.Fatalf("charge = %s, want the reported vendor object", observation.AllowanceCharge)
+	}
+	if charge["billing_source"] != "go" || charge["allowance"] != 0.0021 || charge["cost"] != 0.00412 {
+		t.Fatalf("charge = %v, want the vendor object as reported plus usage.cost", charge)
+	}
+}
+
+func TestResponsesUnaryReportsOpenCodeAllowanceCharge(t *testing.T) {
+	body := `{"id":"resp_2","status":"completed","usage":{"input_tokens":3,"output_tokens":2,"total_tokens":5,"opencode":{"billing_source":"go","allowance":0.0021}}}`
+	observation := codexwire.Observe([]byte(body), true)
+	var charge map[string]any
+	if observation.AllowanceCharge == nil || json.Unmarshal(observation.AllowanceCharge, &charge) != nil || charge["allowance"] != 0.0021 {
+		t.Fatalf("charge = %s, want the reported vendor object", observation.AllowanceCharge)
+	}
+	if _, present := charge["cost"]; present {
+		t.Fatalf("charge = %v, want no invented cost member", charge)
+	}
+}
+
+func TestResponsesWithoutOpenCodeObjectKeepsChargeUnknown(t *testing.T) {
+	body := `{"type":"response.completed","response":{"id":"resp_3","status":"completed","usage":{"input_tokens":3,"output_tokens":2,"total_tokens":5}}}`
+	observation := codexwire.Observe([]byte(body), false)
+	if observation.AllowanceCharge != nil {
+		t.Fatalf("charge = %s, want nil (unknown, never zero)", observation.AllowanceCharge)
 	}
 }

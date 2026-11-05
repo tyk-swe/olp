@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"log/slog"
@@ -57,6 +58,9 @@ func (f *fakeCodeLedger) ObserveHealth(_ context.Context, _ string, observation 
 	return nil
 }
 func (f *fakeCodeLedger) ObserveAllowance(context.Context, string, codemode.Allowance) error {
+	return nil
+}
+func (f *fakeCodeLedger) ObserveAllowanceCharge(context.Context, string, json.RawMessage) error {
 	return nil
 }
 func (f *fakeCodeLedger) ObserveReference(context.Context, string, string) error { return nil }

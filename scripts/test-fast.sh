@@ -33,6 +33,7 @@ go test -mod=readonly -vet=off -count=1 -timeout=60s \
   ./internal/gateway \
   ./internal/codemode \
   ./internal/codeadapter \
+  ./internal/codewire \
   ./internal/codexwire
 pnpm --dir console test --project unit --project svelte
 node --test scripts/check-docs.test.mjs scripts/check-release-version.test.mjs

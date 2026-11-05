@@ -8931,12 +8931,15 @@ type CodeAllowanceWindowWindow string
 
 // CodeAttempt Metadata only. No request or response body, tools, headers or secrets are retained. Reserved tokens are conservative bounds, not reported usage; unreported consumption remains uncertain indefinitely. Cached and reasoning tokens are subsets.
 type CodeAttempt struct {
-	AccountId     nullable.Nullable[openapi_types.UUID] `json:"account_id"`
-	ApiKeyId      openapi_types.UUID                    `json:"api_key_id"`
-	Attribution   *map[string]string                    `json:"attribution,omitempty"`
-	BindingId     nullable.Nullable[openapi_types.UUID] `json:"binding_id"`
-	BoundEvidence nullable.Nullable[string]             `json:"bound_evidence"`
-	CachedTokens  nullable.Nullable[int64]              `json:"cached_tokens"`
+	AccountId nullable.Nullable[openapi_types.UUID] `json:"account_id"`
+
+	// AllowanceCharge Vendor-reported per-request allowance charge as reported (OpenCode Go usage.opencode object, with usage.cost when reported). Its allowance value counts toward plan usage limits in dollars of the monthly limit. Null means no charge was observed; it is never a remaining allowance and never an admission or ordering input.
+	AllowanceCharge nullable.Nullable[map[string]interface{}] `json:"allowance_charge"`
+	ApiKeyId        openapi_types.UUID                        `json:"api_key_id"`
+	Attribution     *map[string]string                        `json:"attribution,omitempty"`
+	BindingId       nullable.Nullable[openapi_types.UUID]     `json:"binding_id"`
+	BoundEvidence   nullable.Nullable[string]                 `json:"bound_evidence"`
+	CachedTokens    nullable.Nullable[int64]                  `json:"cached_tokens"`
 
 	// CodexCliIdentityEnabled Whether the frozen route revision enabled Codex CLI identity compatibility. This is route policy, not evidence that an Originator header changed or that this attempt used Codex. No client identity header values or prompt content are recorded.
 	CodexCliIdentityEnabled *bool     `json:"codex_cli_identity_enabled,omitempty"`

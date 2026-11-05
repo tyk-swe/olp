@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"context"
+	"encoding/json"
 	"time"
 
 	"github.com/tyk-swe/olp/internal/access"
@@ -26,6 +27,7 @@ type CodeLedger interface {
 	Abort(context.Context, string) error
 	ObserveHealth(context.Context, string, codemode.HealthObservation) error
 	ObserveAllowance(context.Context, string, codemode.Allowance) error
+	ObserveAllowanceCharge(context.Context, string, json.RawMessage) error
 	ObserveReference(context.Context, string, string) error
 	ObserveOutcome(context.Context, string, codemode.Outcome) error
 	RecordRefusal(context.Context, codemode.Route, string, string, string) error

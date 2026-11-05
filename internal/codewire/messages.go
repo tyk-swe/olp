@@ -1,6 +1,7 @@
 package codewire
 
 import (
+	"encoding/json"
 	"time"
 
 	"github.com/tyk-swe/olp/internal/codemode"
@@ -12,6 +13,7 @@ import (
 // message_stop, or a message_delta that stops it, ends the generation.
 type Messages struct {
 	input, cacheRead, cacheWrite, output *int64
+	charge                               json.RawMessage
 	stop                                 string
 	terminal                             bool
 	finalOutput, invalidUsage            bool
@@ -69,6 +71,9 @@ func (m *Messages) Finish() (codemode.Observation, bool) {
 }
 
 func (m *Messages) record(usage oif.Value, final bool) {
+	if charge := AllowanceCharge(usage); charge != nil {
+		m.charge = charge
+	}
 	for target, name := range map[**int64]string{&m.input: "input_tokens", &m.cacheRead: "cache_read_input_tokens", &m.cacheWrite: "cache_creation_input_tokens", &m.output: "output_tokens"} {
 		value, present := usage.Lookup(name)
 		if !present {
@@ -108,7 +113,7 @@ func (m *Messages) finish() codemode.Observation {
 			usage = codemode.Usage{}
 		}
 	}
-	return codemode.Observation{Terminal: true, Successful: kind == "completed", Usage: usage, Outcome: &codemode.Outcome{Origin: "upstream", Kind: kind, ObservedAt: time.Now().UTC()}}
+	return codemode.Observation{Terminal: true, Successful: kind == "completed", Usage: usage, AllowanceCharge: m.charge, Outcome: &codemode.Outcome{Origin: "upstream", Kind: kind, ObservedAt: time.Now().UTC()}}
 }
 
 // anthropicStatus is the HTTP status an Anthropic error type stands for, for

@@ -1,6 +1,8 @@
 package codemode
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
 	"iter"
 	"math"
@@ -11,6 +13,16 @@ import (
 )
 
 const MaxAllowanceWindows = 128
+
+const MaxAllowanceChargeBytes = 4096
+
+func ValidateAllowanceCharge(charge json.RawMessage) error {
+	trimmed := bytes.TrimSpace(charge)
+	if len(trimmed) < 2 || len(trimmed) > MaxAllowanceChargeBytes || trimmed[0] != '{' || trimmed[len(trimmed)-1] != '}' || !json.Valid(trimmed) {
+		return fmt.Errorf("invalid allowance charge")
+	}
+	return nil
+}
 
 const allowancePrimary = "primary"
 
@@ -268,15 +280,16 @@ func (a Allowance) validateObservations() error {
 // Observation is what one upstream event or unary body reports, read from a
 // copy of the forwarded bytes.
 type Observation struct {
-	Terminal      bool
-	Successful    bool
-	Outcome       *Outcome
-	Usage         Usage
-	ResponseID    string
-	Status        int
-	RetryAfter    []string
-	Allowance     *Allowance
-	RejectionBody []byte
+	Terminal        bool
+	Successful      bool
+	Outcome         *Outcome
+	Usage           Usage
+	ResponseID      string
+	Status          int
+	RetryAfter      []string
+	Allowance       *Allowance
+	RejectionBody   []byte
+	AllowanceCharge json.RawMessage
 }
 
 // Outcome is bounded diagnostic metadata, independent of token settlement.
