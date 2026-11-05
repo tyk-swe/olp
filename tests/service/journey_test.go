@@ -20,6 +20,7 @@ import (
 	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/limits"
 	"github.com/tyk-swe/olp/internal/mcp/accounting"
+	"github.com/tyk-swe/olp/internal/routing"
 	"github.com/tyk-swe/olp/internal/usage"
 )
 
@@ -66,6 +67,39 @@ func TestPublishedRouteServesAndSettlesUsage(t *testing.T) {
 		}
 		return attempts == 1 && input == vendorInputTokens && output == vendorOutputTokens,
 			fmt.Sprintf("attempts=%d input=%d output=%d", attempts, input, output)
+	})
+
+	t.Run("simulation_requires_all_predicates", func(t *testing.T) {
+		classifier := &routing.ClassifierPredicate{Route: slug, Labels: []string{"complex"}, TimeoutMS: 500}
+		plugin := &routing.PluginPredicate{Digest: strings.Repeat("a", 64)}
+		draft := s.want(owner, "POST", "/api/v1/route-drafts", map[string]any{
+			"slug": uniqueName("simulation"), "operations": []string{"generation"}, "overall_timeout_ms": 5000, "max_attempts": 1,
+			"fidelity": map[string]any{"mode": "transformed"}, "project_id": project,
+			"targets": []any{map[string]any{"provider_id": provider["id"], "provider_model": vendorModel, "priority": 0, "weight": 1, "timeout_ms": 2000, "tags": []string{"selected"}}},
+			"selectors": []routing.Selector{
+				{ID: "both", Tags: []string{"selected"}, When: routing.Predicate{Classifier: classifier, Plugin: plugin}},
+				{ID: "plugin", Tags: []string{"selected"}, When: routing.Predicate{Plugin: plugin}},
+				{ID: "classifier", Tags: []string{"selected"}, When: routing.Predicate{Classifier: classifier}},
+			},
+		}, idempotent(), http.StatusCreated)
+		result := s.want(owner, "POST", "/api/v1/route-drafts/"+draft["id"].(string)+"/simulate", map[string]any{
+			"operation": "generation", "surface": "openai", "mode": "unary", "seed": "predicates",
+			"classifier_labels": map[string]string{"both": "complex", "classifier": "complex"},
+		}, nil, http.StatusOK)
+		selectors, ok := result["selectors"].([]any)
+		if !ok || len(selectors) != 3 {
+			t.Fatalf("simulation selectors = %v, want both plugin predicates skipped before classifier", result["selectors"])
+		}
+		for i, id := range []string{"both", "plugin", "classifier"} {
+			selector := selectors[i].(map[string]any)
+			want := "plugin_not_simulated"
+			if id == "classifier" {
+				want = "matched"
+			}
+			if selector["id"] != id || selector["matched"] != (id == "classifier") || selector["outcome"] != want {
+				t.Fatalf("selector %s = %v, want %s", id, selector, want)
+			}
+		}
 	})
 }
 

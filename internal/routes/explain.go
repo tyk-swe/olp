@@ -99,7 +99,7 @@ func (m *simulation) permitted(route routing.Route) bool {
 // Plugin predicates are not simulated.
 func (m *simulation) evaluate(selector routing.Selector) routing.PredicateResult {
 	classifier := selector.When.Classifier
-	if classifier == nil {
+	if classifier == nil || selector.When.Plugin != nil {
 		return routing.PredicateResult{Failure: "plugin_not_simulated"}
 	}
 	label, ok := m.input.ClassifierLabels[selector.ID]
