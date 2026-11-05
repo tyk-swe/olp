@@ -26,7 +26,7 @@ export OLP_TEST_VALKEY_URL="redis://:olp-local@$valkey/0"
 export OLP_QUALIFY_LIVE_REPORT="$scratch/qualification-live.jsonl"
 start=$(date +%s)
 status=0
-go test -mod=readonly -tags 'qualification qualificationlive' -count=1 -timeout=900s -v ./tests/qualification || status=$?
+go test -mod=readonly -tags 'qualification qualificationlive' -run '^(TestLive|TestCodeModeLive)' -count=1 -timeout=900s -v ./tests/qualification || status=$?
 elapsed=$(( $(date +%s) - start ))
 printf 'qualification live lanes: %ss\n' "$elapsed"
 report="$OLP_QUALIFY_LIVE_REPORT"

@@ -169,7 +169,10 @@ func runLane(t *testing.T, l lane, bridge string, journey func(string) (string, 
 		return l.record("no_signal", "client binary unavailable", "", false)
 	}
 	versionOutput, _, err := sandboxClient(t, binary, bridge, nil, "--version")
-	if err != nil || strings.TrimSpace(versionOutput) == "" {
+	if err != nil {
+		return l.record("no_signal", "client version unavailable: "+err.Error()+"\n"+versionOutput, "", false)
+	}
+	if strings.TrimSpace(versionOutput) == "" {
 		return l.record("no_signal", "client version unavailable: "+versionOutput, "", false)
 	}
 	version := strings.TrimSpace(strings.SplitN(versionOutput, "\n", 2)[0])
@@ -355,14 +358,18 @@ func sandboxClient(t *testing.T, binary, bridge string, env []string, args ...st
 		"--ro-bind", binary, "/client", "--chdir", "/work", "--setenv", "PATH", "/usr/bin:/bin",
 		"--ro-bind", bridge, "/bridge.sock", "/usr/bin/env",
 	}, env, []string{"/usr/bin/python3", "-c", sandboxBridge, "/client"}, args)
-	ctx, cancel := context.WithTimeout(t.Context(), 90*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
 	defer cancel()
 	command := exec.CommandContext(ctx, "bwrap", options...)
 	command.Env = []string{}
 	output, err := command.CombinedOutput()
 	text := string(output)
 	started := strings.Contains(text, "\x00client-started\x00")
-	return strings.Replace(text, "\x00client-started\x00", "", 1), started, err
+	cleaned := strings.Replace(text, "\x00client-started\x00", "", 1)
+	if err != nil && ctx.Err() != nil {
+		return cleaned, started, ctx.Err()
+	}
+	return cleaned, started, err
 }
 
 func fixtureBridge(t *testing.T, origin string) string {

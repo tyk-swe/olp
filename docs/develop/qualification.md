@@ -111,7 +111,8 @@ Live lanes run the same real binary against real vendor accounts and
 real vendor upstreams. Run them with `make qualify-code-live`, which
 runs `scripts/qualification-live.sh` and the live tests in
 `tests/qualification` behind the `qualification` and
-`qualificationlive` build tags. There are ten required lanes, one per
+`qualificationlive` build tags. Run `make qualify-code` separately for
+the fixture lanes. There are ten required live lanes, one per
 adapter and profile in stage one. Each lane reads its account key and
 its native model from the environment variables in the table below.
 Only the variable names appear in the repository and in workflow files.
