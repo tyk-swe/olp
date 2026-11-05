@@ -50,6 +50,8 @@ func (v Vendor) Classify(endpoint Endpoint, status int, body []byte, headers htt
 		return classifyGLM(status, body, headers, now)
 	case codemode.AdapterQwenTokenPlan:
 		return classifyQwen(status, body, headers, now)
+	case codemode.AdapterMiniMaxPlan:
+		return classifyMiniMax(status, body, headers, now)
 	}
 	return Classification{}, false
 }
@@ -78,6 +80,18 @@ func classifyCodex(endpoint Endpoint, status int, body []byte, headers http.Head
 		return Classification{Class: CooldownCapacity, Scope: ScopeModel, RetryAt: rejectionRetryAt(document, headers, now), Envelope: envelope}, true
 	}
 	return Classification{}, false
+}
+
+func retryAtFrom(reset time.Time, hasReset bool, headers http.Header, now time.Time) time.Time {
+	if hasReset && reset.After(now) {
+		return reset
+	}
+	if values := headers.Values("Retry-After"); len(values) == 1 {
+		if delay, valid := upstream.ParseRetryAfter(values[0], now); valid && delay > 0 {
+			return now.Add(delay)
+		}
+	}
+	return now.Add(time.Minute)
 }
 
 func rejectionDocument(body []byte) (oif.Document, string, string, bool, bool) {
