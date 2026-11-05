@@ -202,14 +202,52 @@ func TestPassFailureOnlyWhenDueCannotBeRead(t *testing.T) {
 	}
 }
 
-func TestPassNeverReadsAnUnqualifiedMiniMaxAccount(t *testing.T) {
-	for _, profile := range []string{codeplans.MiniMaxProfile, codeplans.MiniMaxCNProfile} {
-		assertPassSkipsProfile(t, profile)
+// Source: MiniMax-AI/cli@38aba5f endpoints.ts, fetched 2026-11-05.
+func TestPassWritesActiveAllowanceFromMiniMaxRemains(t *testing.T) {
+	for _, tc := range []struct {
+		profile string
+		url     string
+	}{
+		{codeplans.MiniMaxProfile, "https://api.minimax.io/v1/token_plan/remains"},
+		{codeplans.MiniMaxCNProfile, "https://api.minimax.cn/v1/token_plan/remains"},
+	} {
+		due := codeallowance.DueAccount{
+			Account: codemode.Account{
+				ID: "account-1", ProjectID: "project", ProviderID: "provider", CredentialID: "credential",
+				Principal: "principal", Enabled: true, Models: []string{"MiniMax-M3"},
+			},
+			Configuration: routing.Configuration{Kind: "plugin", AuthMode: "grant", ProfileID: tc.profile},
+		}
+		store := &fakeStore{due: []codeallowance.DueAccount{due}}
+		var seen *http.Request
+		transport := roundTripFunc(func(r *http.Request) (*http.Response, error) {
+			seen = r
+			return &http.Response{StatusCode: 200, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(minimaxBody(minimaxBucket("MiniMax-M3", ""))))}, nil
+		})
+		outcome, progress := reader(store, &fakeAuthorizer{}, fakeLocker{}, transport).Pass(t.Context())
+		if outcome != usage.OutcomeSuccess || !progress {
+			t.Fatalf("profile %q pass = %v, progress %v", tc.profile, outcome, progress)
+		}
+		if seen == nil || seen.Method != http.MethodGet || seen.URL.String() != tc.url {
+			t.Fatalf("profile %q request = %+v, want GET %s", tc.profile, seen, tc.url)
+		}
+		if seen.Header.Get("Authorization") != "Bearer token" {
+			t.Fatalf("profile %q remains must carry the authorized bearer credential, got %v", tc.profile, seen.Header)
+		}
+		if len(store.observed) != 1 || len(store.completed) != 1 {
+			t.Fatalf("profile %q observed %v completed %v", tc.profile, store.observed, store.completed)
+		}
+		primary := window(t, store.observed[0], "minimax", "primary")
+		weekly := window(t, store.observed[0], "minimax", "weekly")
+		if primary.Evidence != codemode.AllowanceEvidenceActive || weekly.Evidence != codemode.AllowanceEvidenceActive ||
+			primary.RemainingPercent != 80 || weekly.RemainingPercent != 60 {
+			t.Fatalf("profile %q windows = %+v", tc.profile, store.observed[0].Windows)
+		}
 	}
 }
 
-func TestPassDispatchesOnlyCodexToTheUsageRead(t *testing.T) {
-	for _, profile := range []string{codeplans.MiniMaxProfile, codeplans.MiniMaxCNProfile, codeplans.ZAIProfile, codeplans.KimiProfile, codeplans.QwenTokenPlanProfile, codeplans.OpenCodeGoProfile, "unknown-profile"} {
+func TestPassDispatchesOnlyQualifiedAdaptersToAnActiveRead(t *testing.T) {
+	for _, profile := range []string{codeplans.ZAIProfile, codeplans.KimiProfile, codeplans.QwenTokenPlanProfile, codeplans.OpenCodeGoProfile, "unknown-profile"} {
 		assertPassSkipsProfile(t, profile)
 	}
 }

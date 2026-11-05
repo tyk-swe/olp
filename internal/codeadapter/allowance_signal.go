@@ -27,8 +27,8 @@ func (info AllowanceSignalInfo) QualifiedForActiveRead() bool {
 
 var allowanceSignals = map[string]AllowanceSignalInfo{
 	codexauth.ProfileID:        {Signal: AllowanceSignalProven},
-	codeplans.MiniMaxProfile:   {Signal: AllowanceSignalRemainsUnqualified, Reason: "schema-unpinned"},
-	codeplans.MiniMaxCNProfile: {Signal: AllowanceSignalRemainsUnqualified, Reason: "schema-unpinned"},
+	codeplans.MiniMaxProfile:   {Signal: AllowanceSignalProven, Reason: "vendor-client-schema"},
+	codeplans.MiniMaxCNProfile: {Signal: AllowanceSignalProven, Reason: "vendor-client-schema"},
 }
 
 func (v Vendor) AllowanceSignal(profileID string) AllowanceSignalInfo {
@@ -68,17 +68,18 @@ func SQLAllowanceSignal(config string) string {
 }
 
 func SQLAllowanceSignalReason(config string) string {
-	var b strings.Builder
-	b.WriteString("CASE WHEN " + config + "->>'kind'='" + kindPlugin + "' AND " + config + "->>'auth_mode'='" + authGrant + "' THEN CASE " + config + "->>'profile_id'")
+	clauses := []string{}
 	for _, vendor := range vendors {
 		for _, profile := range vendor.profiles {
 			if info, ok := allowanceSignals[profile]; ok && info.Reason != "" {
-				b.WriteString(" WHEN '" + profile + "' THEN '" + info.Reason + "'")
+				clauses = append(clauses, "WHEN '"+profile+"' THEN '"+info.Reason+"'")
 			}
 		}
 	}
-	b.WriteString(" END END")
-	return b.String()
+	if len(clauses) == 0 {
+		return "NULL::text"
+	}
+	return "CASE WHEN " + config + "->>'kind'='" + kindPlugin + "' AND " + config + "->>'auth_mode'='" + authGrant + "' THEN CASE " + config + "->>'profile_id' " + strings.Join(clauses, " ") + " END END"
 }
 
 func AllowanceSignalForProfile(kind, authMode, profileID string) (AllowanceSignalInfo, bool) {

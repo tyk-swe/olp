@@ -175,6 +175,19 @@ func requiredInt(object oif.Value, name string) (int64, bool) {
 }
 
 func optionalInt(object oif.Value, name string) (int64, bool, bool) {
+	return parseIntMember(object, name, 32)
+}
+
+func requiredInt64(object oif.Value, name string) (int64, bool) {
+	value, present, valid := optionalInt64(object, name)
+	return value, valid && present
+}
+
+func optionalInt64(object oif.Value, name string) (int64, bool, bool) {
+	return parseIntMember(object, name, 64)
+}
+
+func parseIntMember(object oif.Value, name string, bitSize int) (int64, bool, bool) {
 	value, present, valid := member(object, name)
 	if !valid || !present {
 		return 0, present, valid
@@ -182,7 +195,7 @@ func optionalInt(object oif.Value, name string) (int64, bool, bool) {
 	if value.Kind() != oif.Number {
 		return 0, true, false
 	}
-	parsed, err := strconv.ParseInt(value.Raw(), 10, 32)
+	parsed, err := strconv.ParseInt(value.Raw(), 10, bitSize)
 	return parsed, true, err == nil
 }
 

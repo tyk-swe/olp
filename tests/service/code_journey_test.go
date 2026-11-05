@@ -652,6 +652,112 @@ func TestCodeActiveAllowanceReadBandsLikePassive(t *testing.T) {
 	}
 }
 
+func TestCodeMiniMaxActiveRemainsReadBandsAtDBSeam(t *testing.T) {
+	pool, _ := newDatabase(t)
+	if err := database.Migrate(t.Context(), pool); err != nil {
+		t.Fatal(err)
+	}
+	user, project, provider := uuid.NewString(), uuid.NewString(), uuid.NewString()
+	active, unknown := uuid.NewString(), uuid.NewString()
+	key, poolID, routeID, revisionID := uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString()
+	route := codemode.Route{ID: routeID, ProjectID: project, Slug: "minimax-active-band", PoolID: poolID, Models: []string{"MiniMax-M3"}, Enabled: true, AllowanceOrdering: true, RevisionID: revisionID, Revision: 1, ETag: uuid.NewString()}
+	document, err := json.Marshal(route)
+	if err != nil {
+		t.Fatal(err)
+	}
+	configuration := `{"kind":"plugin","auth_mode":"grant","profile_id":"minimax-plan","profile_revision":"` + strings.Repeat("0", 64) + `"}`
+	connections := `{"` + provider + `":` + configuration + `}`
+	statements := []struct {
+		sql  string
+		args []any
+	}{
+		{`INSERT INTO olp.users(id, email, display_name, role, etag) VALUES($1, 'minimax-active@example.invalid', 'Journey', 'owner', $2)`, []any{user, uuid.NewString()}},
+		{`INSERT INTO olp.projects(id, name, etag, created_by) VALUES($1, 'minimax-active-band', $2, $3)`, []any{project, uuid.NewString(), user}},
+		{`INSERT INTO olp.providers(id, project_id, name, kind, state, configuration, etag, slots_etag, created_by) VALUES($1, $2, 'minimax-active-band', 'plugin', 'active', $3, $4, $5, $6)`, []any{provider, project, configuration, uuid.NewString(), uuid.NewString(), user}},
+		{`INSERT INTO olp.api_keys(id, lookup_id, digest, name, created_by, policy, etag, project_id) VALUES($1, 'minimax-active-lookup', '\x00', 'journey', $2, '{"scopes":["inference"]}', $3, $4)`, []any{key, user, uuid.NewString(), project}},
+		{`INSERT INTO olp.code_pools(id, project_id, name, kind, etag, created_by) VALUES($1, $2, 'minimax-active-band', 'shared', $3, $4)`, []any{poolID, project, uuid.NewString(), user}},
+		{`INSERT INTO olp.code_pool_keys(pool_id, api_key_id) VALUES($1, $2)`, []any{poolID, key}},
+		{`INSERT INTO olp.code_routes(id, project_id, slug, draft, etag, created_by) VALUES($1, $2, 'minimax-active-band', '{}', $3, $4)`, []any{routeID, project, uuid.NewString(), user}},
+		{`INSERT INTO olp.code_route_revisions(id, route_id, revision, document, connections, created_by) VALUES($1, $2, 1, $3, $4, $5)`, []any{revisionID, routeID, document, connections, user}},
+		{`UPDATE olp.code_routes SET latest_revision_id=$2 WHERE id=$1`, []any{routeID, revisionID}},
+	}
+	for index, account := range []struct {
+		id        string
+		principal string
+	}{{active, "minimax-active-principal"}, {unknown, "minimax-unknown-principal"}} {
+		credential := uuid.NewString()
+		statements = append(statements,
+			struct {
+				sql  string
+				args []any
+			}{`INSERT INTO olp.provider_credentials(id, provider_id, version, principal, plugin_digest, grant_facts) VALUES($1, $2, $3, $4, repeat('0',64), '{}')`, []any{credential, provider, index + 1, account.principal}},
+			struct {
+				sql  string
+				args []any
+			}{`INSERT INTO olp.provider_grants(credential_id) VALUES($1)`, []any{credential}},
+			struct {
+				sql  string
+				args []any
+			}{`INSERT INTO olp.code_accounts(id, project_id, provider_id, credential_id, principal, name, models, etag, created_by) VALUES($1, $2, $3, $4, $5, $6, '["MiniMax-M3"]', $7, $8)`, []any{account.id, project, provider, credential, account.principal, account.principal, uuid.NewString(), user}},
+			struct {
+				sql  string
+				args []any
+			}{`INSERT INTO olp.code_pool_accounts(pool_id, account_id, weight) VALUES($1, $2, 1)`, []any{poolID, account.id}},
+		)
+	}
+	for _, statement := range statements {
+		if _, err := pool.Exec(t.Context(), statement.sql, statement.args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	base := time.Now().UTC().Truncate(time.Second)
+	if _, err := pool.Exec(t.Context(), `UPDATE olp.code_accounts SET allowance_read_requested_at=$2 WHERE id=$1`, active, base.Add(-time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	store := &resources.CodeStore{Pool: pool}
+	due, err := store.DueAllowanceReads(t.Context(), base, 50, codeadapter.QualifiedProfileIDs())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(due) != 2 || due[0].Account.ID != active || due[0].Configuration.ProfileID != "minimax-plan" || len(due[0].Account.Models) != 1 || due[0].Account.Models[0] != "MiniMax-M3" {
+		t.Fatalf("due reads = %+v, want the requested MiniMax account first with its live connection and models", due)
+	}
+	reset := base.Add(2 * time.Hour)
+	start := reset.Add(-5 * time.Hour)
+	body := fmt.Sprintf(`{"model_remains":[{"model_name":"MiniMax-M3","start_time":%d,"end_time":%d,"remains_time":7200000,"current_interval_total_count":100,"current_interval_usage_count":20,"current_interval_remaining_percent":80,"current_weekly_total_count":500,"current_weekly_usage_count":200,"current_weekly_remaining_percent":60,"current_interval_status":1,"current_weekly_status":1,"weekly_start_time":%d,"weekly_end_time":%d,"weekly_remains_time":604800000}],"base_resp":{"status_code":0,"status_msg":"success"}}`,
+		start.UnixMilli(), reset.UnixMilli(), start.UnixMilli(), start.Add(7*24*time.Hour).UnixMilli())
+	allowance, ok := codeallowance.ParseRemains([]byte(body), due[0].Account.Models, base)
+	if !ok {
+		t.Fatal("pinned remains payload must parse")
+	}
+	if err := store.ObserveAllowance(t.Context(), active, allowance); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.CompleteAllowanceRead(t.Context(), active, base); err != nil {
+		t.Fatal(err)
+	}
+	due, err = store.DueAllowanceReads(t.Context(), base, 50, codeadapter.QualifiedProfileIDs())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(due) != 1 || due[0].Account.ID != unknown {
+		t.Fatalf("fresh MiniMax active evidence must not be due again, got %+v", due)
+	}
+	permit, err := store.Admit(t.Context(), resources.CodeAdmission{Route: route, APIKeyID: key, Operation: codemode.Operation{Name: "messages", Model: "MiniMax-M3", Identity: codemode.Identity{Conversation: "minimax-active-conv-0"}}, Providers: []string{provider}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if permit.Account.ID != active {
+		t.Fatalf("MiniMax active healthy account must win over unknown, chose %s", permit.Account.ID)
+	}
+	decision := codeDecisionForAttempt(t, pool, permit.Attempt.ID)
+	if decision.Band == nil || *decision.Band != codemode.BandHealthy ||
+		decision.Evidence == nil || *decision.Evidence != codemode.AllowanceEvidenceActive ||
+		decision.EvidenceObservedAt == nil || !decision.EvidenceObservedAt.Equal(base) {
+		t.Fatalf("MiniMax active band decision = %+v", decision)
+	}
+}
+
 func TestCodeAllowanceReadRequestEndpoint(t *testing.T) {
 	s := startService(t)
 	owner := s.owner()
@@ -680,6 +786,7 @@ func TestCodeAllowanceReadRequestEndpoint(t *testing.T) {
 		return account
 	}
 	codex := seed("codex-subscription", "codex-principal")
+	minimax := seed("minimax-plan", "minimax-principal")
 	claude := seed("claude-subscription", "claude-principal")
 
 	if status, raw := s.do(owner, "POST", "/api/v1/code/accounts/"+codex+"/allowance-reads", nil, nil); status != http.StatusBadRequest {
@@ -694,8 +801,12 @@ func TestCodeAllowanceReadRequestEndpoint(t *testing.T) {
 	if replayed["allowance_read_requested_at"] != account["allowance_read_requested_at"] {
 		t.Fatalf("replay must return the stored response: %v vs %v", replayed, account)
 	}
+	minimaxAccount := s.want(owner, "POST", "/api/v1/code/accounts/"+minimax+"/allowance-reads", nil, idempotent(), http.StatusOK)
+	if minimaxAccount["id"] != minimax || minimaxAccount["adapter"] != "minimax_plan" || minimaxAccount["allowance_read_requested_at"] == nil {
+		t.Fatalf("MiniMax allowance read response = %v", minimaxAccount)
+	}
 	if status, raw := s.do(owner, "POST", "/api/v1/code/accounts/"+claude+"/allowance-reads", nil, idempotent()); status != http.StatusUnprocessableEntity {
-		t.Fatalf("non-Codex allowance read: status %d: %s", status, raw)
+		t.Fatalf("unqualified allowance read: status %d: %s", status, raw)
 	}
 	s.eventually("code allowance worker checkpoint", 30*time.Second, func() (bool, string) {
 		var checks int

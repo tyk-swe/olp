@@ -9,18 +9,18 @@ import (
 	"github.com/tyk-swe/olp/internal/codexauth"
 )
 
-func TestAllowanceSignalMarksMiniMaxProfilesRemainsUnqualified(t *testing.T) {
+func TestAllowanceSignalMarksMiniMaxProfilesProvenFromVendorClientSchema(t *testing.T) {
 	for _, profile := range []string{codeplans.MiniMaxProfile, codeplans.MiniMaxCNProfile} {
 		vendor, ok := codeadapter.ForConnection("plugin", "grant", profile)
 		if !ok || vendor.Adapter != codemode.AdapterMiniMaxPlan {
 			t.Fatalf("profile %q must resolve to the MiniMax adapter", profile)
 		}
 		signal, ok := codeadapter.AllowanceSignalForProfile("plugin", "grant", profile)
-		if !ok || signal.Signal != codeadapter.AllowanceSignalRemainsUnqualified || signal.Reason != "schema-unpinned" {
-			t.Fatalf("profile %q signal = %+v ok=%v, want remains-unqualified/schema-unpinned", profile, signal, ok)
+		if !ok || signal.Signal != codeadapter.AllowanceSignalProven || signal.Reason != "vendor-client-schema" {
+			t.Fatalf("profile %q signal = %+v ok=%v, want proven from the vendor client schema", profile, signal, ok)
 		}
-		if signal.QualifiedForActiveRead() {
-			t.Fatalf("profile %q must not qualify for an active allowance read", profile)
+		if !signal.QualifiedForActiveRead() {
+			t.Fatalf("profile %q must qualify for an active allowance read", profile)
 		}
 	}
 }

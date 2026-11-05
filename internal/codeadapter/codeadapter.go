@@ -193,7 +193,7 @@ var vendors = []Vendor{
 		},
 		clients:         []Client{{ID: ClientClaudeCode}, {ID: ClientOpenCode, Provider: "minimax-coding-plan", URLSuffix: "/v1", Protocol: codemode.ProtocolMessages}},
 		enrollmentNotes: keyEnrollmentNotes,
-		notes:           []string{"MiniMax's terms govern M Plan use; OLP forwards this client's requests unmodified but cannot guarantee that MiniMax accepts pooled use.", "Ordering runs on weights plus cooldown until the remains schema is pinned from real keys on both profiles; this adapter has no qualified allowance signal."},
+		notes:           []string{"MiniMax's terms govern M Plan use; OLP forwards this client's requests unmodified but cannot guarantee that MiniMax accepts pooled use.", "Allowance bands can order new roots from active remains, fixture-proven only. That schema is pinned from the vendor client."},
 	},
 	{
 		Adapter: codemode.AdapterKimiCode, Name: "Kimi Code", profiles: []string{codeplans.KimiProfile, codeplans.KimiCNProfile}, manifest: codeplans.KimiManifest, KeyGrant: true,
