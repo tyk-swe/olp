@@ -13,9 +13,10 @@ import (
 	"github.com/tyk-swe/olp/internal/usage"
 )
 
+const ReadFreshFor = 5 * time.Minute
+
 const (
 	readEvery       = 15 * time.Second
-	readFreshFor    = 5 * time.Minute
 	readTimeout     = 30 * time.Second
 	readsPerPass    = 50
 	allowanceLockID = int64(0x4f4c505f414c5752)
@@ -48,7 +49,6 @@ type Reader struct {
 	Client     *http.Client
 	Log        *slog.Logger
 	Now        func() time.Time
-	URL        string
 }
 
 func (r *Reader) now() time.Time {
@@ -56,13 +56,6 @@ func (r *Reader) now() time.Time {
 		return r.Now().UTC()
 	}
 	return time.Now().UTC()
-}
-
-func (r *Reader) url() string {
-	if r.URL != "" {
-		return r.URL
-	}
-	return UsageURL
 }
 
 func (r *Reader) locker() Locker {
@@ -77,14 +70,14 @@ func Due(account codemode.Account, now time.Time) bool {
 		(account.AllowanceReadAt == nil || account.AllowanceReadRequestedAt.After(*account.AllowanceReadAt)) {
 		return true
 	}
-	if account.AllowanceReadAt != nil && account.AllowanceReadAt.After(now.Add(-readFreshFor)) {
+	if account.AllowanceReadAt != nil && account.AllowanceReadAt.After(now.Add(-ReadFreshFor)) {
 		return false
 	}
 	if account.Allowance == nil {
 		return true
 	}
 	for _, window := range account.Allowance.Windows {
-		if window.EffectiveEvidence() == codemode.AllowanceEvidenceActive && window.ObservedAt.After(now.Add(-readFreshFor)) {
+		if window.EffectiveEvidence() == codemode.AllowanceEvidenceActive && window.ObservedAt.After(now.Add(-ReadFreshFor)) {
 			return false
 		}
 	}
@@ -161,7 +154,7 @@ func (r *Reader) fetch(ctx context.Context, entry DueAccount, now time.Time) (co
 		r.Log.Warn("code allowance read authorization unavailable", "account_id", entry.Account.ID, "error", err)
 		return codemode.Allowance{}, false
 	}
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, r.url(), nil)
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, UsageURL, nil)
 	if err != nil {
 		r.Log.Warn("code allowance read request could not be built", "account_id", entry.Account.ID, "error", err)
 		return codemode.Allowance{}, false

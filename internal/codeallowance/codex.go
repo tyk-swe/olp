@@ -1,9 +1,7 @@
 package codeallowance
 
 import (
-	"regexp"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/tyk-swe/olp/internal/codemode"
@@ -13,8 +11,6 @@ import (
 const UsageURL = "https://chatgpt.com/backend-api/wham/usage"
 
 const maxUsageBytes = 256 << 10
-
-var limitID = regexp.MustCompile(`^[a-z0-9][a-z0-9_.]{0,99}$`)
 
 func ParseUsage(body []byte, now time.Time) (codemode.Allowance, bool) {
 	document, err := oif.ParseJSON(body, oif.Limits{MaxBytes: maxUsageBytes})
@@ -127,8 +123,8 @@ func additionalWindows(entry oif.Value, now time.Time) ([]codemode.AllowanceWind
 		return nil, false, false
 	}
 	text, isText := name.Text()
-	limit := strings.ReplaceAll(strings.ToLower(strings.TrimSpace(text)), "-", "_")
-	if !present || !isText || !limitID.MatchString(limit) {
+	limit, validLimit := codemode.NormalizeLimitID(text)
+	if !present || !isText || !validLimit {
 		return nil, false, true
 	}
 	if feature, featurePresent, featureValid := member(entry, "metered_feature"); !featureValid || featurePresent && feature.Kind() != oif.String {

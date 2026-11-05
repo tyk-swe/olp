@@ -47,6 +47,12 @@ func AllowanceWindowNames() [5]string {
 }
 
 var limitID = regexp.MustCompile(`^[a-z0-9][a-z0-9_.]{0,99}$`)
+
+func NormalizeLimitID(raw string) (string, bool) {
+	id := strings.ReplaceAll(strings.ToLower(strings.TrimSpace(raw)), "-", "_")
+	return id, limitID.MatchString(id)
+}
+
 var creditBalance = regexp.MustCompile(`^-?[0-9]{1,20}(\.[0-9]{1,12})?$`)
 
 type HealthObservation struct {
