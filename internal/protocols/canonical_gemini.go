@@ -102,7 +102,7 @@ func decodeGeminiGeneration(r *reader) error {
 					id = fmt.Sprintf("call_%d_%d", i, j)
 				}
 				calls[name] = append(calls[name], id)
-				base.Calls = append(base.Calls, wire.ToolCall{ID: id, Name: name, Arguments: string(f.take("args"))})
+				base.Calls = append(base.Calls, wire.ToolCall{ID: id, Name: name, Arguments: string(geminiArguments(f.take("args")))})
 				f.finish()
 			} else if fr := part.take("functionResponse"); present(fr) {
 				f, e := read(fr, path+"/functionResponse", c)
@@ -340,4 +340,11 @@ func encodeGeminiGeneration(c *Generation, model string, count bool) (Object, er
 		f = Object{"generateContentRequest": raw(f)}
 	}
 	return f, nil
+}
+
+func geminiArguments(args json.RawMessage) json.RawMessage {
+	if !present(args) {
+		return json.RawMessage(`{}`)
+	}
+	return args
 }

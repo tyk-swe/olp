@@ -267,7 +267,10 @@ func validCaptureCall(family wire.Format, raw json.RawMessage) bool {
 		args = call["input"]
 	case wire.Gemini, wire.GeminiStream:
 		name = r.str(call["name"])
-		args = call["args"]
+		if present(call["partialArgs"]) || present(call["willContinue"]) {
+			return false
+		}
+		args = geminiArguments(call["args"])
 	default:
 		return false
 	}

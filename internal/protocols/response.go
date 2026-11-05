@@ -624,10 +624,14 @@ func decodeGemini(body []byte, route string, partial bool) (*wire.Completion, er
 				if str(call["name"]) == "" {
 					return nil, protocolError("function call has no name")
 				}
-				if _, e := object(call["args"]); e != nil {
+				if present(call["partialArgs"]) || present(call["willContinue"]) {
+					return nil, protocolError("partial function arguments are unsupported")
+				}
+				arguments := geminiArguments(call["args"])
+				if _, e := object(arguments); e != nil {
 					return nil, protocolError("invalid function arguments")
 				}
-				c.ToolCalls = append(c.ToolCalls, wire.ToolCall{ID: id, Name: str(call["name"]), Arguments: string(call["args"])})
+				c.ToolCalls = append(c.ToolCalls, wire.ToolCall{ID: id, Name: str(call["name"]), Arguments: string(arguments)})
 			}
 		}
 		if reason != "" {

@@ -342,3 +342,65 @@ func TestResponsesRefusalSnapshotsKeepClassification(t *testing.T) {
 		}
 	}
 }
+
+func TestGeminiArgumentlessCallsSurviveUnaryAndStreaming(t *testing.T) {
+	// FunctionCall.args is optional, https://github.com/googleapis/googleapis/blob/master/google/ai/generativelanguage/v1beta/content.proto, checked 2026-11-05.
+	for _, args := range []string{"", `,"args":null`, `,"args":{}`} {
+		for _, target := range []wire.Format{wire.Gemini, wire.Chat, wire.Anthropic, wire.Responses} {
+			t.Run(string(target)+args, func(t *testing.T) {
+				body := []byte(`{"candidates":[{"index":0,"content":{"role":"model","parts":[{"functionCall":{"id":"call-clock","name":"clock"` + args + `}}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":2,"candidatesTokenCount":1,"totalTokenCount":3}}`)
+				completion, err := Decode(wire.Gemini, target, body, "route", "")
+				if err != nil {
+					t.Fatal(err)
+				}
+				if len(completion.ToolCalls) != 1 || completion.ToolCalls[0].Arguments != "{}" || completion.ToolCalls[0].ID != "call-clock" || completion.ToolCalls[0].Name != "clock" || completion.FinishReason != "tool_calls" {
+					t.Fatalf("argumentless call changed %+v", completion)
+				}
+				if _, calls, err := CaptureResponse(target, completion.Body, false, true); err != nil || len(calls) != 1 {
+					t.Fatalf("argumentless unary capture %s, %v", calls, err)
+				}
+				var frames bytes.Buffer
+				streamed, err := Stream(wire.Gemini, target, strings.NewReader("data: "+string(body)+"\n\n"), 8192, "route", true, func(frame []byte) error { _, err := frames.Write(frame); return err })
+				if err != nil || streamed == nil || streamed.FinishReason != "tool_calls" || streamed.Usage == nil || streamed.Usage.TotalTokens != completion.Usage.TotalTokens {
+					t.Fatalf("argumentless stream failed %+v, %v", streamed, err)
+				}
+				capture := NewCaptureStream(target, 8192, false, true)
+				if err := capture.Push(frames.Bytes()); err != nil {
+					t.Fatal(err)
+				}
+				_, calls, err := capture.Finish()
+				if err != nil || len(calls) != 1 {
+					t.Fatalf("argumentless stream capture %s, %v", calls, err)
+				}
+				var call struct {
+					Name      string
+					Arguments json.RawMessage
+				}
+				if err := json.Unmarshal(calls[0], &call); err != nil || call.Name != "clock" || string(call.Arguments) != "{}" {
+					t.Fatalf("argumentless stream changed %s, %v", calls[0], err)
+				}
+				if target == wire.Gemini && (!bytes.Contains(completion.Body, []byte(`"functionCall":{"id":"call-clock","name":"clock"`+args+`}`)) || !bytes.Contains(frames.Bytes(), []byte(`"functionCall":{"id":"call-clock","name":"clock"`+args+`}`))) {
+					t.Fatalf("native call was rewritten, unary %s, stream %s", completion.Body, frames.Bytes())
+				}
+			})
+		}
+	}
+}
+
+func TestGeminiIncompleteFunctionArgumentsRemainRefused(t *testing.T) {
+	for _, args := range []string{`,"args":[]`, `,"args":""`, `,"partialArgs":[{"jsonPath":"$.time","stringValue":"noon"}]`, `,"willContinue":true`} {
+		body := []byte(`{"candidates":[{"index":0,"content":{"role":"model","parts":[{"functionCall":{"id":"call-clock","name":"clock"` + args + `}}]},"finishReason":"STOP"}]}`)
+		if _, err := Decode(wire.Gemini, wire.Chat, body, "route", ""); err == nil {
+			t.Fatalf("accepted incomplete arguments %s", body)
+		}
+		var frames bytes.Buffer
+		if _, err := Stream(wire.Gemini, wire.Chat, strings.NewReader("data: "+string(body)+"\n\n"), 8192, "route", true, func(frame []byte) error { _, err := frames.Write(frame); return err }); err == nil || frames.Len() != 0 {
+			t.Fatalf("emitted incomplete call %s, %v", frames.Bytes(), err)
+		}
+		if strings.Contains(args, "partialArgs") || strings.Contains(args, "willContinue") {
+			if _, _, err := CaptureResponse(wire.Gemini, body, false, true); err == nil {
+				t.Fatalf("captured incomplete arguments %s", body)
+			}
+		}
+	}
+}
