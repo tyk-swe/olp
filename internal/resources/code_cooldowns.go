@@ -10,7 +10,7 @@ import (
 )
 
 func (s *CodeStore) ObserveCooldownClass(ctx context.Context, accountID, model string, classification codeadapter.Classification, observedAt time.Time) error {
-	classes := codeadapter.CooldownClasses()
+	classes := codemode.CooldownClasses()
 	if !slices.Contains(classes[:], classification.Class) || classification.RetryAt.IsZero() || observedAt.IsZero() {
 		return codemode.Refuse(400, "code_cooldown_invalid")
 	}

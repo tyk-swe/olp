@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/tyk-swe/olp/internal/codeadapter"
 	"github.com/tyk-swe/olp/internal/codeallowance"
 	"github.com/tyk-swe/olp/internal/routing"
 )
@@ -16,14 +15,14 @@ const freshActiveWindow = `EXISTS(SELECT 1
 	WHERE w->>'evidence'='active'
 	AND CASE WHEN w->>'observed_at' ~ '^\d{4}-\d{2}-\d{2}T' THEN (w->>'observed_at')::timestamptz > $1::timestamptz ELSE false END)`
 
-func (s *CodeStore) DueAllowanceReads(ctx context.Context, now time.Time, limit int) ([]codeallowance.DueAccount, error) {
+func (s *CodeStore) DueAllowanceReads(ctx context.Context, now time.Time, limit int, qualifiedProfileIDs []string) ([]codeallowance.DueAccount, error) {
 	freshSince := now.Add(-codeallowance.ReadFreshFor)
 	rows, err := s.Pool.Query(ctx, `SELECT a.id::text,a.project_id::text,a.provider_id::text,a.credential_id::text,a.principal,a.name,a.enabled,a.models,a.etag::text,a.health,a.health_observed_at,a.unavailable_until,a.allowance,a.allowance_read_requested_at,a.allowance_read_at,p.configuration
 		FROM olp.code_accounts a JOIN olp.providers p ON p.id=a.provider_id AND p.project_id=a.project_id
-		WHERE a.enabled AND p.state<>'disabled' AND `+codeadapter.SQL("p.configuration")+`='codex'
+		WHERE a.enabled AND p.state<>'disabled' AND p.configuration->>'kind'='plugin' AND p.configuration->>'auth_mode'='grant' AND p.configuration->>'profile_id'=ANY($3::text[])
 		AND ((a.allowance_read_requested_at IS NOT NULL AND (a.allowance_read_at IS NULL OR a.allowance_read_requested_at>a.allowance_read_at))
 			OR ((a.allowance_read_at IS NULL OR a.allowance_read_at<=$1::timestamptz) AND NOT `+freshActiveWindow+`))
-		ORDER BY (a.allowance_read_requested_at IS NULL),a.allowance_read_requested_at,a.allowance_read_at NULLS FIRST,a.id LIMIT $2`, freshSince, limit)
+		ORDER BY (a.allowance_read_requested_at IS NULL),a.allowance_read_requested_at,a.allowance_read_at NULLS FIRST,a.id LIMIT $2`, freshSince, limit, qualifiedProfileIDs)
 	if err != nil {
 		return nil, err
 	}

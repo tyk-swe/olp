@@ -447,24 +447,19 @@ describe('extra usage presentation', () => {
 });
 
 describe('code ordering signals', () => {
-  it('names only codex bands, as fixture-proven only and never live-proven', () => {
-    expect(orderingSignalLabel('codex', true)).toBe(
+  it('names only proven bands, as fixture-proven only and never live-proven', () => {
+    expect(orderingSignalLabel('proven', true)).toBe(
       'Allowance bands from passive and active windows, fixture-proven only'
     );
-    for (const adapter of [
-      'zai_coding',
-      'minimax_plan',
-      'kimi_code',
-      'qwen_token_plan',
-      'opencode_go',
-      'claude',
-      'antigravity'
-    ]) {
-      expect(orderingSignalLabel(adapter, true)).toBe(
+    for (const signal of ['none', 'remains-unqualified']) {
+      expect(orderingSignalLabel(signal, true)).toBe(
         'Weights plus cooldown, no qualified allowance signal'
       );
     }
     expect(orderingSignalLabel(null, true)).toBe(
+      'Weights plus cooldown, no qualified allowance signal'
+    );
+    expect(orderingSignalLabel(undefined, true)).toBe(
       'Weights plus cooldown, no qualified allowance signal'
     );
   });
@@ -476,11 +471,9 @@ describe('code ordering signals', () => {
     expect(canRequestAllowanceRead(undefined)).toBe(false);
   });
 
-  it('keeps every adapter on weights plus cooldown while ordering is off', () => {
-    expect(orderingSignalLabel('codex', false)).toBe('Weights plus cooldown');
-    expect(orderingSignalLabel('zai_coding', false)).toBe(
-      'Weights plus cooldown'
-    );
+  it('keeps every signal on weights plus cooldown while ordering is off', () => {
+    expect(orderingSignalLabel('proven', false)).toBe('Weights plus cooldown');
+    expect(orderingSignalLabel('none', false)).toBe('Weights plus cooldown');
   });
 });
 

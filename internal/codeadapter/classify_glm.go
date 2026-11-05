@@ -138,11 +138,11 @@ func glmNumberUnit(middle string) bool {
 }
 
 func glmTimestamp(token string) (time.Time, bool) {
-	token = glmUntick(token)
-	if token == "" || strings.ContainsAny(token, " \t") {
+	unticked := glmUntick(token)
+	if unticked == "" || strings.ContainsAny(unticked, " \t") {
 		return time.Time{}, false
 	}
-	parsed, err := time.Parse(time.RFC3339Nano, token)
+	parsed, err := time.Parse(time.RFC3339Nano, unticked)
 	if err != nil {
 		return time.Time{}, false
 	}

@@ -61,3 +61,49 @@ func TestRefusalRetryAfterRoundsUpWithOneSecondFloor(t *testing.T) {
 		t.Fatalf("RetryAfter(nil) = %s", got)
 	}
 }
+
+func TestBlockingDeadlineIgnoresNonBlockingEarlierResets(t *testing.T) {
+	early := bandNow.Add(10 * time.Minute)
+	middle := bandNow.Add(45 * time.Minute)
+	unavailable := bandNow.Add(time.Hour)
+	late := bandNow.Add(2 * time.Hour)
+	exhausted := percentWindow(0, &late, bandNow)
+	healthy := percentWindow(80, &early, bandNow)
+	healthy.Window = "secondary"
+	low := percentWindow(5, &early, bandNow)
+	low.Window = "five_hour"
+	allowance := bandAllowance(exhausted, healthy, low)
+	cooldownRetry := bandNow.Add(30 * time.Minute)
+	deadline := codemode.BlockingDeadline(bandNow, &unavailable, &cooldownRetry, allowance)
+	if deadline == nil || !deadline.Equal(late) {
+		t.Fatalf("BlockingDeadline = %v, want %v", deadline, late)
+	}
+	other := codemode.BlockingDeadline(bandNow, nil, &middle, bandAllowance(percentWindow(80, &early, bandNow)))
+	if other == nil || !other.Equal(middle) {
+		t.Fatalf("BlockingDeadline(other) = %v, want %v", other, middle)
+	}
+	if got := codemode.EarliestUsefulRecovery(bandNow, deadline, other); got == nil || !got.Equal(middle) {
+		t.Fatalf("EarliestUsefulRecovery = %v, want %v", got, middle)
+	}
+}
+
+func TestExhaustedResetsOnlyFreshExhaustedWindows(t *testing.T) {
+	future := bandNow.Add(time.Hour)
+	early := bandNow.Add(10 * time.Minute)
+	staleReset := bandNow.Add(-2 * time.Minute)
+	stale := percentWindow(0, &staleReset, bandNow.Add(-5*time.Minute))
+	stale.Window = "secondary"
+	allowance := bandAllowance(percentWindow(0, &future, bandNow), percentWindow(5, &early, bandNow), stale)
+	allowance.Windows[1].Window = "five_hour"
+	resets := codemode.ExhaustedResets(allowance, bandNow)
+	if len(resets) != 1 || resets[0] == nil || !resets[0].Equal(future) {
+		t.Fatalf("ExhaustedResets = %v, want only %v", resets, future)
+	}
+	if got := codemode.BlockingDeadline(bandNow, nil, nil, bandAllowance(percentWindow(80, &early, bandNow))); got != nil {
+		t.Fatalf("healthy-only deadline = %v, want nil", got)
+	}
+	past := bandNow.Add(-time.Hour)
+	if got := codemode.BlockingDeadline(bandNow, &past, &past, nil); got != nil {
+		t.Fatalf("past-only deadline = %v, want nil", got)
+	}
+}

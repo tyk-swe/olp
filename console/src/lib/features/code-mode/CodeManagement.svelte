@@ -317,7 +317,7 @@
               <dd>{extraUsageLabel(account.extra_usage_enabled)}</dd>
             {/if}
             <dt>Ordering signal</dt>
-            <dd>{orderingSignalLabel(account.adapter, true)}</dd>
+            <dd>{orderingSignalLabel(account.allowance_signal, true)}</dd>
             <dt>Account / principal</dt>
             <dd>{account.id} / {account.principal}</dd>
             <dt>Eligibility</dt>
@@ -499,12 +499,7 @@
             <dt>Published subscriptions</dt>
             <dd class="badges">
               {#each route.adapters as adapter (adapter)}
-                <span class="badge"
-                  >{adapterLabel(adapter)} · {orderingSignalLabel(
-                    adapter,
-                    route.allowance_ordering ?? false
-                  )}</span
-                >
+                <span class="badge">{adapterLabel(adapter)}</span>
               {:else}
                 {route.published_at
                   ? 'No subscription adapter is published'

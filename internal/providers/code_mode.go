@@ -22,6 +22,8 @@ func (s *Server) registerCodeMode(mux *http.ServeMux) {
 var codeAccountJSON = `SELECT jsonb_build_object('id',x.id,'project_id',x.project_id,'provider_id',x.provider_id,'credential_id',x.credential_id,'principal',x.principal,'name',x.name,'enabled',x.enabled,'models',x.models,'extra_usage_enabled',x.extra_usage_enabled,'etag',x.etag,'health',x.health,'health_observed_at',x.health_observed_at,'unavailable_until',x.unavailable_until,'cycle_anchor',x.cycle_anchor,
 	'cooldowns',coalesce((SELECT jsonb_agg(jsonb_build_object('class',cd.class,'model',cd.model,'retry_at',cd.retry_at) ORDER BY cd.retry_at,cd.class,cd.model) FROM olp.code_account_cooldowns cd WHERE cd.account_id=x.id AND cd.retry_at>now()),'[]'::jsonb),
 	'adapter',` + codeadapter.SQL("p.configuration") + `,
+	'allowance_signal',` + codeadapter.SQLAllowanceSignal("p.configuration") + `,
+	'allowance_signal_reason',` + codeadapter.SQLAllowanceSignalReason("p.configuration") + `,
 	'research_services',CASE WHEN c.profile_id='` + codeplans.ZAIProfile + `' AND p.configuration->>'profile_id'=c.profile_id THEN '["search","reader","zread"]'::jsonb ELSE '[]'::jsonb END,
 	'research_eligible',coalesce(x.enabled AND p.state<>'disabled' AND p.project_id=x.project_id
 		AND c.provider_id=x.provider_id AND c.principal=x.principal AND c.profile_id='` + codeplans.ZAIProfile + `'
@@ -50,8 +52,8 @@ func (s *Server) requestCodeAllowanceRead(r *http.Request, _ access.Principal) (
 		return access.Reply{}, err
 	}
 	var project string
-	var adapter *string
-	if err = tx.QueryRow(r.Context(), `SELECT a.project_id::text,`+codeadapter.SQL("p.configuration")+` FROM olp.code_accounts a JOIN olp.providers p ON p.id=a.provider_id WHERE a.id=$1`, id).Scan(&project, &adapter); err != nil {
+	var profileKind, profileAuthMode, profileID *string
+	if err = tx.QueryRow(r.Context(), `SELECT a.project_id::text,p.configuration->>'kind',p.configuration->>'auth_mode',p.configuration->>'profile_id' FROM olp.code_accounts a JOIN olp.providers p ON p.id=a.provider_id WHERE a.id=$1`, id).Scan(&project, &profileKind, &profileAuthMode, &profileID); err != nil {
 		return access.Reply{}, err
 	}
 	if err = p.Project(&project, access.Change); err != nil {
@@ -64,8 +66,9 @@ func (s *Server) requestCodeAllowanceRead(r *http.Request, _ access.Principal) (
 	if replayed != nil {
 		return access.Commit(r, tx, *replayed)
 	}
-	if adapter == nil || *adapter != string(codemode.AdapterCodex) {
-		return access.Reply{}, access.Invalid("adapter", "Only Codex accounts support an active allowance read.")
+	signal, signalKnown := codeadapter.AllowanceSignalForProfile(value(profileKind), value(profileAuthMode), value(profileID))
+	if !signalKnown || !signal.QualifiedForActiveRead() {
+		return access.Reply{}, access.Invalid("adapter", "Only accounts with a proven allowance signal support an active allowance read.")
 	}
 	if _, err = tx.Exec(r.Context(), `UPDATE olp.code_accounts SET allowance_read_requested_at=now() WHERE id=$1`, id); err != nil {
 		return access.Reply{}, err

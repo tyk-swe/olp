@@ -5375,7 +5375,7 @@
             },
             "allowance_ordering": {
               "type": "boolean",
-              "description": "Orders new conversation roots and new model pins by proven allowance bands, healthy above unknown above low, with the weighted score inside a band. Off by default, only proven allowance signals order, and established pins never move. Published revisions pin this policy."
+              "description": "Orders new conversation roots by proven allowance bands, healthy above unknown above low, with the weighted score inside a band, including proven-recovery repinning before first execution. Off by default, only proven allowance signals order, and established pins never move. Published revisions pin this policy."
             }
           },
           "required": [
@@ -7761,7 +7761,7 @@
             },
             "allowance_ordering": {
               "type": "boolean",
-              "description": "Orders new conversation roots and new model pins by proven allowance bands, healthy above unknown above low, with the weighted score inside a band. Off by default, only proven allowance signals order, and established pins never move. Published revisions pin this policy."
+              "description": "Orders new conversation roots by proven allowance bands, healthy above unknown above low, with the weighted score inside a band, including proven-recovery repinning before first execution. Off by default, only proven allowance signals order, and established pins never move. Published revisions pin this policy."
             }
           },
           "required": [
@@ -31250,7 +31250,7 @@
             },
             "allowance_ordering": {
               "type": "boolean",
-              "description": "Orders new conversation roots and new model pins by proven allowance bands, healthy above unknown above low, with the weighted score inside a band. Off by default, only proven allowance signals order, and established pins never move. Published revisions pin this policy."
+              "description": "Orders new conversation roots by proven allowance bands, healthy above unknown above low, with the weighted score inside a band, including proven-recovery repinning before first execution. Off by default, only proven allowance signals order, and established pins never move. Published revisions pin this policy."
             }
           },
           "required": [
@@ -36608,7 +36608,7 @@
             },
             "allowance_ordering": {
               "type": "boolean",
-              "description": "Orders new conversation roots and new model pins by proven allowance bands, healthy above unknown above low, with the weighted score inside a band. Off by default, only proven allowance signals order, and established pins never move. Published revisions pin this policy."
+              "description": "Orders new conversation roots by proven allowance bands, healthy above unknown above low, with the weighted score inside a band, including proven-recovery repinning before first execution. Off by default, only proven allowance signals order, and established pins never move. Published revisions pin this policy."
             }
           },
           "required": [

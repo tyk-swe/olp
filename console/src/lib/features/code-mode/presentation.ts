@@ -160,11 +160,11 @@ export function allowanceEvidenceLabel(
 }
 
 export function orderingSignalLabel(
-  adapter: string | null | undefined,
+  signal: string | null | undefined,
   allowanceOrdering: boolean
 ): string {
   if (!allowanceOrdering) return 'Weights plus cooldown';
-  if (adapter !== 'codex')
+  if (signal !== 'proven')
     return 'Weights plus cooldown, no qualified allowance signal';
   return 'Allowance bands from passive and active windows, fixture-proven only';
 }

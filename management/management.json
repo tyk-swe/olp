@@ -15686,6 +15686,22 @@
               "null"
             ]
           },
+          "allowance_signal": {
+            "description": "Allowance signal qualification of the account's provider profile. Proven signals may order new conversation roots and support an active allowance read. Remains-unqualified names a signal whose schema is not pinned yet. None means the profile has no qualified allowance signal.",
+            "enum": [
+              "proven",
+              "none",
+              "remains-unqualified"
+            ],
+            "type": "string"
+          },
+          "allowance_signal_reason": {
+            "description": "Why the allowance signal is not qualified, or null when no reason is recorded.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "research_eligible": {
             "type": "boolean",
             "description": "Current research enrollment eligibility, independent of inference health and allowance; route pool membership is also required."
@@ -15719,7 +15735,9 @@
           "eligible",
           "grant_state",
           "allowance",
-          "adapter"
+          "adapter",
+          "allowance_signal",
+          "allowance_signal_reason"
         ],
         "type": "object"
       },
@@ -17253,7 +17271,7 @@
           },
           "allowance_ordering": {
             "type": "boolean",
-            "description": "Orders new conversation roots and new model pins by proven allowance bands, healthy above unknown above low, with the weighted score inside a band. Off by default, only proven allowance signals order, and established pins never move. Published revisions pin this policy."
+            "description": "Orders new conversation roots by proven allowance bands, healthy above unknown above low, with the weighted score inside a band, including proven-recovery repinning before first execution. Off by default, only proven allowance signals order, and established pins never move. Published revisions pin this policy."
           }
         },
         "required": [
@@ -17413,7 +17431,7 @@
           },
           "allowance_ordering": {
             "type": "boolean",
-            "description": "Orders new conversation roots and new model pins by proven allowance bands, healthy above unknown above low, with the weighted score inside a band. Off by default, only proven allowance signals order, and established pins never move. Published revisions pin this policy."
+            "description": "Orders new conversation roots by proven allowance bands, healthy above unknown above low, with the weighted score inside a band, including proven-recovery repinning before first execution. Off by default, only proven allowance signals order, and established pins never move. Published revisions pin this policy."
           }
         },
         "required": [
@@ -31929,7 +31947,7 @@
           },
           "allowance_ordering": {
             "type": "boolean",
-            "description": "Orders new conversation roots and new model pins by proven allowance bands, healthy above unknown above low, with the weighted score inside a band. Off by default, only proven allowance signals order, and established pins never move. Published revisions pin this policy."
+            "description": "Orders new conversation roots by proven allowance bands, healthy above unknown above low, with the weighted score inside a band, including proven-recovery repinning before first execution. Off by default, only proven allowance signals order, and established pins never move. Published revisions pin this policy."
           }
         },
         "required": [

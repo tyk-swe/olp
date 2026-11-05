@@ -31,7 +31,7 @@ type DueAccount struct {
 }
 
 type Store interface {
-	DueAllowanceReads(ctx context.Context, now time.Time, limit int) ([]DueAccount, error)
+	DueAllowanceReads(ctx context.Context, now time.Time, limit int, qualifiedProfileIDs []string) ([]DueAccount, error)
 	ObserveAllowance(ctx context.Context, account string, allowance codemode.Allowance) error
 	CompleteAllowanceRead(ctx context.Context, account string, readAt time.Time) error
 }
@@ -109,7 +109,7 @@ func (r *Reader) Run(ctx context.Context) {
 }
 
 func (r *Reader) Pass(ctx context.Context) (usage.Outcome, bool) {
-	due, err := r.Store.DueAllowanceReads(ctx, r.now(), readsPerPass)
+	due, err := r.Store.DueAllowanceReads(ctx, r.now(), readsPerPass, codeadapter.QualifiedProfileIDs())
 	if err != nil {
 		r.Log.Warn("code accounts due an allowance read could not be read", "error", err)
 		return usage.OutcomeFailure, false

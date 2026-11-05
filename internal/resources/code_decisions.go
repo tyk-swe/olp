@@ -16,13 +16,12 @@ func recordCodeDecision(ctx context.Context, tx pgx.Tx, in CodeAdmission, bindin
 	if !ok {
 		return fmt.Errorf("code decision chosen account missing from candidates")
 	}
-	band, evidence, observedAt := func() (*string, *codemode.AllowanceEvidence, *time.Time) {
-		if selection.assessment != nil {
-			value := string(selection.assessment.Band)
-			return &value, selection.assessment.Evidence, selection.assessment.ObservedAt
+	band, evidence, observedAt := func() (*codemode.Band, *codemode.AllowanceEvidence, *time.Time) {
+		if reason != codemode.DecisionChosen || selection.assessment == nil {
+			return nil, nil, nil
 		}
-		kind, observed := codemode.FreshestEvidence(selection.account.Allowance)
-		return nil, kind, observed
+		value := selection.assessment.Band
+		return &value, selection.assessment.Evidence, selection.assessment.ObservedAt
 	}()
 	decision := codemode.Decision{
 		ID:                 access.NewID(),

@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tyk-swe/olp/internal/codemode"
 	"github.com/tyk-swe/olp/internal/oif"
 )
 
@@ -32,6 +33,29 @@ func classifyQwen(status int, body []byte, headers http.Header, now time.Time) (
 		return Classification{Class: CooldownRate, Scope: ScopeCredential, RetryAt: retryAtFrom(time.Time{}, false, headers, now), Envelope: qwenRateEnvelope}, true
 	}
 	return Classification{}, false
+}
+
+func WithCycleReset(classification Classification, cycleAnchor *string, now time.Time) Classification {
+	adjusted := classification
+	adjusted.RetryAt = cycleResetAt(classification.Envelope, classification.RetryAt, cycleAnchor, now)
+	return adjusted
+}
+
+func RejectionWithCycleReset(rejection Rejection, cycleAnchor *string, now time.Time) Rejection {
+	adjusted := rejection
+	adjusted.RetryAt = cycleResetAt(rejection.Envelope, rejection.RetryAt, cycleAnchor, now)
+	return adjusted
+}
+
+func cycleResetAt(envelope string, retryAt time.Time, cycleAnchor *string, now time.Time) time.Time {
+	if envelope != QwenQuotaEnvelope || cycleAnchor == nil {
+		return retryAt
+	}
+	reset, ok := codemode.NextMonthlyReset(*cycleAnchor, now)
+	if !ok || !reset.After(retryAt) {
+		return retryAt
+	}
+	return reset
 }
 
 func qwenEnvelope(body []byte) (string, string, bool) {

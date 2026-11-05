@@ -12,18 +12,18 @@ import (
 	"github.com/tyk-swe/olp/internal/upstream"
 )
 
-type CooldownClass string
+type CooldownClass = codemode.CooldownClass
 
 const (
-	CooldownQuota       CooldownClass = "quota"
-	CooldownEntitlement CooldownClass = "entitlement"
-	CooldownRate        CooldownClass = "rate"
-	CooldownCapacity    CooldownClass = "capacity"
-	CooldownConcurrency CooldownClass = "concurrency"
+	CooldownQuota       = codemode.CooldownQuota
+	CooldownEntitlement = codemode.CooldownEntitlement
+	CooldownRate        = codemode.CooldownRate
+	CooldownCapacity    = codemode.CooldownCapacity
+	CooldownConcurrency = codemode.CooldownConcurrency
 )
 
 func CooldownClasses() [5]CooldownClass {
-	return [5]CooldownClass{CooldownQuota, CooldownEntitlement, CooldownRate, CooldownCapacity, CooldownConcurrency}
+	return codemode.CooldownClasses()
 }
 
 type CooldownScope string
@@ -34,7 +34,7 @@ const (
 )
 
 type Classification struct {
-	Class            CooldownClass
+	Class            codemode.CooldownClass
 	Scope            CooldownScope
 	RetryAt          time.Time
 	Envelope         string

@@ -40,7 +40,6 @@ func TestCodeAdmissionRecordsChosenAndPinnedDecisions(t *testing.T) {
 		t.Fatal(err)
 	}
 	connections := `{"` + provider + `":{"kind":"plugin","auth_mode":"grant","profile_id":"codex-subscription"}}`
-	observed := time.Date(2026, 11, 5, 10, 0, 0, 0, time.UTC)
 	allowance := `{"windows":[{"limit_id":"codex","window":"primary","unit":"percent","evidence":"passive","used_percent":25,"remaining_percent":75,"window_minutes":300,"resets_at":null,"observed_at":"2026-11-05T10:00:00Z"}],"remaining_tokens":null,"remaining_requests":null,"remaining_percent":75,"resets_at":null,"observed_at":"2026-11-05T10:00:00Z"}`
 	statements := []struct {
 		sql  string
@@ -80,8 +79,7 @@ func TestCodeAdmissionRecordsChosenAndPinnedDecisions(t *testing.T) {
 	}
 	decision := codeDecisionForAttempt(t, pool, permit.Attempt.ID)
 	if decision.Reason != codemode.DecisionChosen || decision.ChosenAccountID != healthy || decision.Band != nil ||
-		decision.Evidence == nil || *decision.Evidence != codemode.AllowanceEvidencePassive ||
-		decision.EvidenceObservedAt == nil || !decision.EvidenceObservedAt.Equal(observed) ||
+		decision.Evidence != nil || decision.EvidenceObservedAt != nil ||
 		len(decision.Skipped) != 1 || decision.Skipped[0].AccountID != cooling || decision.Skipped[0].Class != codemode.SkipCooldown ||
 		decision.RecoveryEnvelope != nil || decision.RecoveryOrdinal != nil {
 		t.Fatalf("first decision = %+v", decision)
@@ -94,7 +92,7 @@ func TestCodeAdmissionRecordsChosenAndPinnedDecisions(t *testing.T) {
 		t.Fatalf("pinned turn moved to %s", second.Account.ID)
 	}
 	pinned := codeDecisionForAttempt(t, pool, second.Attempt.ID)
-	if pinned.Reason != codemode.DecisionPin || pinned.ChosenAccountID != healthy || len(pinned.Skipped) != 0 {
+	if pinned.Reason != codemode.DecisionPin || pinned.ChosenAccountID != healthy || pinned.Band != nil || pinned.Evidence != nil || pinned.EvidenceObservedAt != nil || len(pinned.Skipped) != 0 {
 		t.Fatalf("pinned decision = %+v", pinned)
 	}
 	bound, err := store.BindConnection(t.Context(), route, key, codemode.Identity{Conversation: "connection-conversation"}, "model", []string{provider})
@@ -107,7 +105,7 @@ func TestCodeAdmissionRecordsChosenAndPinnedDecisions(t *testing.T) {
 	connection := codeConnectionDecisions(t, pool, bound.Binding.RootID)
 	if len(connection) != 1 || connection[0].AttemptID != nil || connection[0].Reason != codemode.DecisionConnection ||
 		connection[0].ChosenAccountID != healthy || connection[0].BindingID != bound.Binding.ID || connection[0].RootID != bound.Binding.RootID ||
-		connection[0].Evidence == nil || *connection[0].Evidence != codemode.AllowanceEvidencePassive ||
+		connection[0].Band != nil || connection[0].Evidence != nil || connection[0].EvidenceObservedAt != nil ||
 		len(connection[0].Skipped) != 1 || connection[0].Skipped[0].AccountID != cooling || connection[0].Skipped[0].Class != codemode.SkipCooldown {
 		t.Fatalf("connection decision = %+v", connection)
 	}
@@ -318,7 +316,7 @@ func TestCodeBandOrderingOrdersNewRootsAndNeverMovesPins(t *testing.T) {
 	if off.Account.ID != low {
 		t.Fatalf("ordering off chose %s, want the weighted score winner %s", off.Account.ID, low)
 	}
-	if decision := codeDecisionForAttempt(t, pool, off.Attempt.ID); decision.Band != nil || decision.Reason != codemode.DecisionChosen {
+	if decision := codeDecisionForAttempt(t, pool, off.Attempt.ID); decision.Band != nil || decision.Evidence != nil || decision.EvidenceObservedAt != nil || decision.Reason != codemode.DecisionChosen {
 		t.Fatalf("ordering off decision = %+v, want no band", decision)
 	}
 
@@ -327,7 +325,7 @@ func TestCodeBandOrderingOrdersNewRootsAndNeverMovesPins(t *testing.T) {
 		t.Fatalf("ordering on chose %s, want the healthy account %s", on.Account.ID, healthy)
 	}
 	decision := codeDecisionForAttempt(t, pool, on.Attempt.ID)
-	if decision.Band == nil || *decision.Band != string(codemode.BandHealthy) ||
+	if decision.Band == nil || *decision.Band != codemode.BandHealthy ||
 		decision.Evidence == nil || *decision.Evidence != codemode.AllowanceEvidencePassive ||
 		decision.EvidenceObservedAt == nil || !decision.EvidenceObservedAt.Equal(observed) ||
 		skippedClass(decision, low) != codemode.SkipBand || skippedClass(decision, unknown) != codemode.SkipBand {
@@ -339,7 +337,7 @@ func TestCodeBandOrderingOrdersNewRootsAndNeverMovesPins(t *testing.T) {
 		t.Fatalf("unknown band must beat low and exhausted, chose %s", noneHealthy.Account.ID)
 	}
 	decision = codeDecisionForAttempt(t, pool, noneHealthy.Attempt.ID)
-	if decision.Band == nil || *decision.Band != string(codemode.BandUnknown) || decision.Evidence != nil || decision.EvidenceObservedAt != nil ||
+	if decision.Band == nil || *decision.Band != codemode.BandUnknown || decision.Evidence != nil || decision.EvidenceObservedAt != nil ||
 		skippedClass(decision, low) != codemode.SkipBand || skippedClass(decision, exhausted) != codemode.SkipUnavailable {
 		t.Fatalf("no healthy decision = %+v", decision)
 	}
@@ -362,7 +360,7 @@ func TestCodeBandOrderingOrdersNewRootsAndNeverMovesPins(t *testing.T) {
 	if pinned.Account.ID != healthy {
 		t.Fatalf("pinned turn moved to %s after bands flipped", pinned.Account.ID)
 	}
-	if decision = codeDecisionForAttempt(t, pool, pinned.Attempt.ID); decision.Reason != codemode.DecisionPin || decision.Band != nil {
+	if decision = codeDecisionForAttempt(t, pool, pinned.Attempt.ID); decision.Reason != codemode.DecisionPin || decision.Band != nil || decision.Evidence != nil || decision.EvidenceObservedAt != nil {
 		t.Fatalf("pinned decision = %+v", decision)
 	}
 }
@@ -606,7 +604,7 @@ func TestCodeActiveAllowanceReadBandsLikePassive(t *testing.T) {
 		t.Fatal(err)
 	}
 	store := &resources.CodeStore{Pool: pool}
-	due, err := store.DueAllowanceReads(t.Context(), base, 50)
+	due, err := store.DueAllowanceReads(t.Context(), base, 50, codeadapter.QualifiedProfileIDs())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -632,7 +630,7 @@ func TestCodeActiveAllowanceReadBandsLikePassive(t *testing.T) {
 	if requestedAt != nil || readAt == nil || !readAt.Equal(base) {
 		t.Fatalf("completed read state requested %v read %v", requestedAt, readAt)
 	}
-	due, err = store.DueAllowanceReads(t.Context(), base, 50)
+	due, err = store.DueAllowanceReads(t.Context(), base, 50, codeadapter.QualifiedProfileIDs())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -647,7 +645,7 @@ func TestCodeActiveAllowanceReadBandsLikePassive(t *testing.T) {
 		t.Fatalf("active healthy account must win over unknown, chose %s", permit.Account.ID)
 	}
 	decision := codeDecisionForAttempt(t, pool, permit.Attempt.ID)
-	if decision.Band == nil || *decision.Band != string(codemode.BandHealthy) ||
+	if decision.Band == nil || *decision.Band != codemode.BandHealthy ||
 		decision.Evidence == nil || *decision.Evidence != codemode.AllowanceEvidenceActive ||
 		decision.EvidenceObservedAt == nil || !decision.EvidenceObservedAt.Equal(base) {
 		t.Fatalf("active band decision = %+v", decision)

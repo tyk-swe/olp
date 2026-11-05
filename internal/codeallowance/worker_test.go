@@ -25,7 +25,7 @@ type fakeStore struct {
 	completed []string
 }
 
-func (s *fakeStore) DueAllowanceReads(context.Context, time.Time, int) ([]codeallowance.DueAccount, error) {
+func (s *fakeStore) DueAllowanceReads(context.Context, time.Time, int, []string) ([]codeallowance.DueAccount, error) {
 	return s.due, s.dueErr
 }
 

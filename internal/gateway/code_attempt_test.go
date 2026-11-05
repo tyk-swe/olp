@@ -85,12 +85,13 @@ func codexAttempt(t *testing.T, ledger *fakeCodeLedger, now time.Time) *codeAtte
 	}
 	server := &Server{CodeLedger: ledger, now: func() time.Time { return now }, log: slog.New(slog.NewTextHandler(io.Discard, nil))}
 	return &codeAttempt{
-		server:   server,
-		permit:   resources.CodePermit{Account: codemode.Account{ID: "account"}, Attempt: codemode.Attempt{ID: "attempt"}},
-		config:   routing.Configuration{Kind: "plugin", AuthMode: "grant", ProfileID: codexauth.ProfileID},
-		endpoint: endpoint,
-		observer: codeObserver(endpoint),
-		model:    "gpt-model",
+		server:      server,
+		permit:      resources.CodePermit{Account: codemode.Account{ID: "account"}, Attempt: codemode.Attempt{ID: "attempt"}},
+		config:      routing.Configuration{Kind: "plugin", AuthMode: "grant", ProfileID: codexauth.ProfileID},
+		endpoint:    endpoint,
+		observer:    codeObserver(endpoint),
+		model:       "gpt-model",
+		publicModel: "public-model",
 	}
 }
 
@@ -111,7 +112,7 @@ func TestCodeAttemptUnaryCapacity429WritesOnlyModelCooldown(t *testing.T) {
 		t.Fatalf("cooldowns = %+v, want one model cooldown", ledger.cooldowns)
 	}
 	got := ledger.cooldowns[0]
-	if got.account != "account" || got.model != "gpt-model" || got.classification.Class != codeadapter.CooldownCapacity || got.classification.Scope != codeadapter.ScopeModel || !got.classification.RetryAt.Equal(now.Add(120*time.Second)) {
+	if got.account != "account" || got.model != "public-model" || got.classification.Class != codeadapter.CooldownCapacity || got.classification.Scope != codeadapter.ScopeModel || !got.classification.RetryAt.Equal(now.Add(120*time.Second)) {
 		t.Fatalf("cooldown = %+v", got)
 	}
 }
@@ -166,12 +167,13 @@ func glmAttempt(t *testing.T, ledger *fakeCodeLedger, now time.Time, path string
 	}
 	server := &Server{CodeLedger: ledger, now: func() time.Time { return now }, log: slog.New(slog.NewTextHandler(io.Discard, nil))}
 	return &codeAttempt{
-		server:   server,
-		permit:   resources.CodePermit{InitialRecovery: true, Account: codemode.Account{ID: "account"}, Attempt: codemode.Attempt{ID: "attempt"}},
-		config:   routing.Configuration{Kind: "plugin", AuthMode: "grant", ProfileID: codeplans.ZAIProfile},
-		endpoint: endpoint,
-		observer: codeObserver(endpoint),
-		model:    "glm-model",
+		server:      server,
+		permit:      resources.CodePermit{InitialRecovery: true, Account: codemode.Account{ID: "account"}, Attempt: codemode.Attempt{ID: "attempt"}},
+		config:      routing.Configuration{Kind: "plugin", AuthMode: "grant", ProfileID: codeplans.ZAIProfile},
+		endpoint:    endpoint,
+		observer:    codeObserver(endpoint),
+		model:       "glm-model",
+		publicModel: "glm-model",
 	}
 }
 
@@ -240,12 +242,13 @@ func qwenAttempt(t *testing.T, ledger *fakeCodeLedger, now time.Time, anchor *st
 	}
 	server := &Server{CodeLedger: ledger, now: func() time.Time { return now }, log: slog.New(slog.NewTextHandler(io.Discard, nil))}
 	return &codeAttempt{
-		server:   server,
-		permit:   resources.CodePermit{InitialRecovery: true, Account: codemode.Account{ID: "account", CycleAnchor: anchor}, Attempt: codemode.Attempt{ID: "attempt"}},
-		config:   routing.Configuration{Kind: "plugin", AuthMode: "grant", ProfileID: codeplans.QwenTokenPlanProfile},
-		endpoint: endpoint,
-		observer: codeObserver(endpoint),
-		model:    "qwen-model",
+		server:      server,
+		permit:      resources.CodePermit{InitialRecovery: true, Account: codemode.Account{ID: "account", CycleAnchor: anchor}, Attempt: codemode.Attempt{ID: "attempt"}},
+		config:      routing.Configuration{Kind: "plugin", AuthMode: "grant", ProfileID: codeplans.QwenTokenPlanProfile},
+		endpoint:    endpoint,
+		observer:    codeObserver(endpoint),
+		model:       "qwen-model",
+		publicModel: "qwen-model",
 	}
 }
 
@@ -316,12 +319,13 @@ func minimaxAttempt(t *testing.T, ledger *fakeCodeLedger, now time.Time, path st
 	}
 	server := &Server{CodeLedger: ledger, now: func() time.Time { return now }, log: slog.New(slog.NewTextHandler(io.Discard, nil))}
 	return &codeAttempt{
-		server:   server,
-		permit:   resources.CodePermit{InitialRecovery: true, Account: codemode.Account{ID: "account"}, Attempt: codemode.Attempt{ID: "attempt"}},
-		config:   routing.Configuration{Kind: "plugin", AuthMode: "grant", ProfileID: codeplans.MiniMaxProfile},
-		endpoint: endpoint,
-		observer: codeObserver(endpoint),
-		model:    "MiniMax-M3",
+		server:      server,
+		permit:      resources.CodePermit{InitialRecovery: true, Account: codemode.Account{ID: "account"}, Attempt: codemode.Attempt{ID: "attempt"}},
+		config:      routing.Configuration{Kind: "plugin", AuthMode: "grant", ProfileID: codeplans.MiniMaxProfile},
+		endpoint:    endpoint,
+		observer:    codeObserver(endpoint),
+		model:       "MiniMax-M3",
+		publicModel: "MiniMax-M3",
 	}
 }
 

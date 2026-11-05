@@ -137,7 +137,7 @@ type Decision struct {
 	RootID             string             `json:"root_id"`
 	ChosenAccountID    string             `json:"chosen_account_id"`
 	Reason             DecisionReason     `json:"reason"`
-	Band               *string            `json:"band"`
+	Band               *Band              `json:"band"`
 	Evidence           *AllowanceEvidence `json:"evidence"`
 	EvidenceObservedAt *time.Time         `json:"evidence_observed_at"`
 	Skipped            []SkippedAccount   `json:"skipped"`
@@ -160,7 +160,7 @@ func (d Decision) Validate() error {
 	} else if d.AttemptID == nil || *d.AttemptID == "" {
 		return fmt.Errorf("invalid code decision attempt")
 	}
-	if d.Band != nil && !slices.Contains([]string{"healthy", "unknown", "low", "exhausted"}, *d.Band) {
+	if d.Band != nil && !slices.Contains([]Band{BandHealthy, BandUnknown, BandLow, BandExhausted}, *d.Band) {
 		return fmt.Errorf("invalid code decision band")
 	}
 	if (d.Evidence == nil) != (d.EvidenceObservedAt == nil) ||
