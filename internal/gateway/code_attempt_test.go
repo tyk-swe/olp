@@ -363,6 +363,58 @@ func TestCodeAttemptMiniMaxChatAmbiguous2062WritesShortRateCooldownOnly(t *testi
 	}
 }
 
+func kimiAttempt(t *testing.T, ledger *fakeCodeLedger, now time.Time, path string) *codeAttempt {
+	t.Helper()
+	vendor, ok := codeadapter.Lookup(codemode.AdapterKimiCode)
+	if !ok {
+		t.Fatal("kimi vendor missing")
+	}
+	endpoint, ok := vendor.Endpoint(path)
+	if !ok {
+		t.Fatal("kimi endpoint missing")
+	}
+	server := &Server{CodeLedger: ledger, now: func() time.Time { return now }, log: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	return &codeAttempt{
+		server:      server,
+		permit:      resources.CodePermit{InitialRecovery: true, Account: codemode.Account{ID: "account"}, Attempt: codemode.Attempt{ID: "attempt"}},
+		config:      routing.Configuration{Kind: "plugin", AuthMode: "grant", ProfileID: codeplans.KimiProfile},
+		endpoint:    endpoint,
+		observer:    codeObserver(endpoint),
+		model:       "kimi-model",
+		publicModel: "kimi-model",
+	}
+}
+
+func TestCodeAttemptKimiStructuredQuotaRecoversAndMessageOnlyDoesNot(t *testing.T) {
+	// Sources: MoonshotAI/kimi-code@df90d90 (fetched 2026-11-05), classifyKimiQuotaError keys on the structured code at HTTP 429 and refuses message wording, and https://www.kimi.com/code/docs/en/kimi-code/error-reference.html (fetched 2026-11-05) for the exact quota message used in the message-only case
+	now := time.Date(2026, 11, 5, 10, 0, 0, 0, time.UTC)
+	route := codemode.Route{InitialRecoveryAttempts: 1}
+	proven := kimiAttempt(t, &fakeCodeLedger{}, now, "v1/chat/completions")
+	response := &http.Response{StatusCode: 429, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(`{"error":{"message":"quota exceeded","type":"rate_limit_error","code":"exceeded_current_quota_error"}}`))}
+	recovery, err := proven.recover(t.Context(), response, route, nil)
+	if err != nil || recovery == nil || recovery.Envelope != "kimi_exceeded_current_quota_error" || recovery.Number != 1 || recovery.From != "attempt" {
+		t.Fatalf("recover(structured chat) = %+v, %v", recovery, err)
+	}
+	provenMessages := kimiAttempt(t, &fakeCodeLedger{}, now, "v1/messages")
+	response = &http.Response{StatusCode: 429, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(`{"type":"error","error":{"type":"insufficient_quota","message":"quota exceeded"}}`))}
+	recovery, err = provenMessages.recover(t.Context(), response, route, nil)
+	if err != nil || recovery == nil || recovery.Envelope != "kimi_insufficient_quota" || recovery.Number != 1 || recovery.From != "attempt" {
+		t.Fatalf("recover(structured messages) = %+v, %v", recovery, err)
+	}
+	messageOnly := kimiAttempt(t, &fakeCodeLedger{}, now, "v1/chat/completions")
+	response = &http.Response{StatusCode: 429, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(`{"error":{"message":"You've reached your 5-hour usage limit. Your quota will reset when the current 5-hour window ends. To continue now, purchase extra usage or upgrade your plan: https://www.kimi.com/membership/subscription?tab=quota","type":"rate_limit_error","code":"rate_limit_exceeded"}}`))}
+	recovery, err = messageOnly.recover(t.Context(), response, route, nil)
+	if err != nil || recovery != nil {
+		t.Fatalf("recover(message-only) = %+v, %v, want no replay", recovery, err)
+	}
+	extra := kimiAttempt(t, &fakeCodeLedger{}, now, "v1/chat/completions")
+	response = &http.Response{StatusCode: 429, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(`{"error":{"message":"quota exceeded","code":"exceeded_current_quota_error","param":null}}`))}
+	recovery, err = extra.recover(t.Context(), response, route, nil)
+	if err != nil || recovery != nil {
+		t.Fatalf("recover(extra member) = %+v, %v, want no replay", recovery, err)
+	}
+}
+
 func TestCodeAttemptMiniMaxUsageAndAmbiguousDoNotRecover(t *testing.T) {
 	// Sources: https://platform.minimax.io/docs/api-reference/errorcode (fetched 2026-11-05), codes 2056 and 2062, and https://platform.minimax.io/docs/api-reference/speech-to-text (fetched 2026-11-05), which documents the OaiError envelope only for speech-to-text. It is not proven for chat/messages inference, so replay waits for live envelope qualification and neither shape replays today
 	now := time.Date(2026, 11, 5, 10, 0, 0, 0, time.UTC)
