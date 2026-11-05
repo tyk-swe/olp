@@ -40,7 +40,7 @@ func TestAllowanceObservationMigrationBackfillsLegacyWindows(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	migration, err := os.ReadFile("../../internal/database/migrations/0130_code_allowance_observation.sql")
+	migration, err := os.ReadFile("../../internal/database/migrations/0137_code_allowance_observation.sql")
 	if err != nil {
 		t.Fatal(err)
 	}
