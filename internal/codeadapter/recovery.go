@@ -2,8 +2,6 @@ package codeadapter
 
 import (
 	"net/http"
-	"slices"
-	"strconv"
 	"time"
 
 	"github.com/tyk-swe/olp/internal/codemode"
@@ -22,6 +20,13 @@ func (v Vendor) InitialRejection(endpoint Endpoint, status int, body []byte, hea
 	if v.Adapter != codemode.AdapterCodex || endpoint.Observation != ObserveCodex || status != 401 && status != 429 {
 		return Rejection{}, false
 	}
+	if status == 429 {
+		classification, ok := v.Classify(endpoint, status, body, headers, now)
+		if !ok || !classification.NotExecuted {
+			return Rejection{}, false
+		}
+		return Rejection{Class: upstream.RateLimit, Envelope: classification.Envelope, RetryAt: classification.RetryAt}, true
+	}
 	document, err := oif.ParseJSON(body, oif.Limits{MaxBytes: 64 << 10})
 	if err != nil || document.Root().Kind() != oif.Object || len(document.Root().Members()) != 1 {
 		return Rejection{}, false
@@ -30,21 +35,12 @@ func (v Vendor) InitialRejection(endpoint Endpoint, status int, body []byte, hea
 	errorCode, _ := document.Lookup("/error/code")
 	typeName, _ := errorType.Text()
 	code, _ := errorCode.Text()
-	if !(status == 401 && typeName == "authentication_error" && code == "invalid_api_key" || status == 429 && typeName == "usage_limit_reached") {
+	if typeName != "authentication_error" || code != "invalid_api_key" {
 		return Rejection{}, false
 	}
 	outcome := (upstream.Classifier{AtMostOnce: true}).Classify(upstream.Evidence{Reached: true, Status: status, Error: &wire.UpstreamError{Type: typeName, Code: code}})
-	if outcome.Acceptance != upstream.Terminal || outcome.Class != upstream.Credential && outcome.Class != upstream.RateLimit {
+	if outcome.Acceptance != upstream.Terminal || outcome.Class != upstream.Credential {
 		return Rejection{}, false
 	}
-	reset, _ := document.Lookup("/error/resets_at")
-	resetSeconds, _ := strconv.ParseInt(reset.Raw(), 10, 64)
-	delay, _ := document.Lookup("/error/resets_in_seconds")
-	delaySeconds, _ := strconv.ParseInt(delay.Raw(), 10, 32)
-	retryAt := slices.MaxFunc([]time.Time{now.Add(time.Minute), now.Add(upstream.RetryAfter(headers.Get("Retry-After"), now)), time.Unix(resetSeconds, 0), now.Add(time.Duration(delaySeconds) * time.Second)}, time.Time.Compare)
-	envelope := "codex_usage_limit_reached"
-	if status == 401 {
-		envelope = "codex_invalid_api_key"
-	}
-	return Rejection{Class: outcome.Class, Envelope: envelope, RetryAt: retryAt}, true
+	return Rejection{Class: outcome.Class, Envelope: "codex_invalid_api_key", RetryAt: rejectionRetryAt(document, headers, now)}, true
 }

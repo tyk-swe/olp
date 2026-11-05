@@ -985,6 +985,33 @@ func (e CodeAccountResearchServices) Valid() bool {
 	}
 }
 
+// Defines values for CodeAccountCooldownClass.
+const (
+	CodeAccountCooldownClassCapacity    CodeAccountCooldownClass = "capacity"
+	CodeAccountCooldownClassConcurrency CodeAccountCooldownClass = "concurrency"
+	CodeAccountCooldownClassEntitlement CodeAccountCooldownClass = "entitlement"
+	CodeAccountCooldownClassQuota       CodeAccountCooldownClass = "quota"
+	CodeAccountCooldownClassRate        CodeAccountCooldownClass = "rate"
+)
+
+// Valid indicates whether the value is a known member of the CodeAccountCooldownClass enum.
+func (e CodeAccountCooldownClass) Valid() bool {
+	switch e {
+	case CodeAccountCooldownClassCapacity:
+		return true
+	case CodeAccountCooldownClassConcurrency:
+		return true
+	case CodeAccountCooldownClassEntitlement:
+		return true
+	case CodeAccountCooldownClassQuota:
+		return true
+	case CodeAccountCooldownClassRate:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for CodeAllowanceWindowEvidence.
 const (
 	CodeAllowanceWindowEvidenceActive  CodeAllowanceWindowEvidence = "active"
@@ -6414,25 +6441,25 @@ func (e RouteTemplateResultOutcome) Valid() bool {
 
 // Defines values for RoutingStrategy.
 const (
-	Capacity   RoutingStrategy = "capacity"
-	Latency    RoutingStrategy = "latency"
-	Price      RoutingStrategy = "price"
-	Throughput RoutingStrategy = "throughput"
-	Weighted   RoutingStrategy = "weighted"
+	RoutingStrategyCapacity   RoutingStrategy = "capacity"
+	RoutingStrategyLatency    RoutingStrategy = "latency"
+	RoutingStrategyPrice      RoutingStrategy = "price"
+	RoutingStrategyThroughput RoutingStrategy = "throughput"
+	RoutingStrategyWeighted   RoutingStrategy = "weighted"
 )
 
 // Valid indicates whether the value is a known member of the RoutingStrategy enum.
 func (e RoutingStrategy) Valid() bool {
 	switch e {
-	case Capacity:
+	case RoutingStrategyCapacity:
 		return true
-	case Latency:
+	case RoutingStrategyLatency:
 		return true
-	case Price:
+	case RoutingStrategyPrice:
 		return true
-	case Throughput:
+	case RoutingStrategyThroughput:
 		return true
-	case Weighted:
+	case RoutingStrategyWeighted:
 		return true
 	default:
 		return false
@@ -8778,12 +8805,15 @@ type ClaudeCredentialImportRequest struct {
 // CodeAccount defines model for CodeAccount.
 type CodeAccount struct {
 	// Adapter The subscription family of the account's provider profile: Codex, Claude, OpenCode Go, GLM Coding Plan, MiniMax M Plan, Kimi Code or Qwen Token Plan. Null for a profile no code-mode adapter serves. A pool may mix families; each request reaches an account whose family serves its path and model.
-	Adapter      nullable.Nullable[CodeAccountAdapter] `json:"adapter"`
-	Allowance    nullable.Nullable[CodeAllowance]      `json:"allowance"`
-	CredentialId openapi_types.UUID                    `json:"credential_id"`
-	Eligible     bool                                  `json:"eligible"`
-	Enabled      bool                                  `json:"enabled"`
-	Etag         openapi_types.UUID                    `json:"etag"`
+	Adapter   nullable.Nullable[CodeAccountAdapter] `json:"adapter"`
+	Allowance nullable.Nullable[CodeAllowance]      `json:"allowance"`
+
+	// Cooldowns Live failure class cooldowns for this account. A null model cools the whole credential.
+	Cooldowns    *[]CodeAccountCooldown `json:"cooldowns,omitempty"`
+	CredentialId openapi_types.UUID     `json:"credential_id"`
+	Eligible     bool                   `json:"eligible"`
+	Enabled      bool                   `json:"enabled"`
+	Etag         openapi_types.UUID     `json:"etag"`
 
 	// GrantState Grant authority is independent of serving health and allowance. A rejected refresh lapses the grant and requires enrollment again.
 	GrantState CodeAccountGrantState `json:"grant_state"`
@@ -8819,6 +8849,18 @@ type CodeAccountHealth string
 
 // CodeAccountResearchServices defines model for CodeAccount.ResearchServices.
 type CodeAccountResearchServices string
+
+// CodeAccountCooldown defines model for CodeAccountCooldown.
+type CodeAccountCooldown struct {
+	Class CodeAccountCooldownClass `json:"class"`
+
+	// Model The model this cooldown cools, or null when it cools the whole credential.
+	Model   nullable.Nullable[string] `json:"model"`
+	RetryAt time.Time                 `json:"retry_at"`
+}
+
+// CodeAccountCooldownClass defines model for CodeAccountCooldown.Class.
+type CodeAccountCooldownClass string
 
 // CodeAccountList defines model for CodeAccountList.
 type CodeAccountList struct {

@@ -53,6 +53,26 @@ export function servingHealthLabel(health: CodeAccount['health']): string {
   return servingHealthLabels[health];
 }
 
+type CodeCooldown = NonNullable<CodeAccount['cooldowns']>[number];
+
+const cooldownClassLabels: Record<CodeCooldown['class'], string> = {
+  quota: 'Quota',
+  entitlement: 'Entitlement',
+  rate: 'Rate limit',
+  capacity: 'Capacity',
+  concurrency: 'Concurrency'
+};
+
+export function cooldownClassLabel(
+  cooldownClass: CodeCooldown['class']
+): string {
+  return cooldownClassLabels[cooldownClass];
+}
+
+export function cooldownSummary(cooldown: CodeCooldown): string {
+  return `${cooldownClassLabel(cooldown.class)} · ${cooldown.model ?? 'All models'}`;
+}
+
 const clientLabels: Record<string, string> = {
   codex: 'Codex CLI',
   'claude-code': 'Claude Code',

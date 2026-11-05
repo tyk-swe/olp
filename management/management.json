@@ -15580,6 +15580,13 @@
             "format": "date-time",
             "description": "End of the serving cooldown. Exhausted allowance and grant authority remain independent eligibility requirements."
           },
+          "cooldowns": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CodeAccountCooldown"
+            },
+            "description": "Live failure class cooldowns for this account. A null model cools the whole credential."
+          },
           "health": {
             "enum": [
               "unknown",
@@ -15681,6 +15688,38 @@
           "grant_state",
           "allowance",
           "adapter"
+        ],
+        "type": "object"
+      },
+      "CodeAccountCooldown": {
+        "additionalProperties": false,
+        "properties": {
+          "class": {
+            "enum": [
+              "quota",
+              "entitlement",
+              "rate",
+              "capacity",
+              "concurrency"
+            ],
+            "type": "string"
+          },
+          "model": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The model this cooldown cools, or null when it cools the whole credential."
+          },
+          "retry_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "class",
+          "model",
+          "retry_at"
         ],
         "type": "object"
       },

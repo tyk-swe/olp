@@ -19,6 +19,7 @@ func (s *Server) registerCodeMode(mux *http.ServeMux) {
 }
 
 var codeAccountJSON = `SELECT jsonb_build_object('id',x.id,'project_id',x.project_id,'provider_id',x.provider_id,'credential_id',x.credential_id,'principal',x.principal,'name',x.name,'enabled',x.enabled,'models',x.models,'etag',x.etag,'health',x.health,'health_observed_at',x.health_observed_at,'unavailable_until',x.unavailable_until,
+	'cooldowns',coalesce((SELECT jsonb_agg(jsonb_build_object('class',cd.class,'model',cd.model,'retry_at',cd.retry_at) ORDER BY cd.retry_at,cd.class,cd.model) FROM olp.code_account_cooldowns cd WHERE cd.account_id=x.id AND cd.retry_at>now()),'[]'::jsonb),
 	'adapter',` + codeadapter.SQL("p.configuration") + `,
 	'research_services',CASE WHEN c.profile_id='` + codeplans.ZAIProfile + `' AND p.configuration->>'profile_id'=c.profile_id THEN '["search","reader","zread"]'::jsonb ELSE '[]'::jsonb END,
 	'research_eligible',coalesce(x.enabled AND p.state<>'disabled' AND p.project_id=x.project_id

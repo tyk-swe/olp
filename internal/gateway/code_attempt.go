@@ -42,6 +42,8 @@ type codeAttempt struct {
 	finished           bool
 	model              string
 	publicModel        string
+	status             int
+	responseHeaders    http.Header
 }
 
 func (s *Server) prepareCode(r *http.Request, release *release.Release, route codemode.Route, observation codemode.Request, ingress codeIngress, transport codeadapter.Transport, recovery *resources.CodeRecovery, body []byte) (*codeAttempt, error) {
@@ -200,7 +202,8 @@ func (a *codeAttempt) observe(o codemode.Observation) {
 		_ = a.server.CodeLedger.ObserveReference(ctx, a.permit.Attempt.ID, o.ResponseID)
 		cancel()
 	}
-	if o.Status != 0 {
+	classified := a.observeCooldownClass(o)
+	if o.Status != 0 && !classified {
 		a.response(context.Background(), o.Status, http.Header{"Retry-After": o.RetryAfter})
 	}
 	if o.Allowance != nil {
@@ -318,7 +321,38 @@ func (a *codeAttempt) observeHealth(ctx context.Context, observation codemode.He
 	_ = a.server.CodeLedger.ObserveHealth(ctx, a.permit.Account.ID, observation)
 }
 
+func (a *codeAttempt) observeCooldownClass(o codemode.Observation) bool {
+	if a.paid != nil || len(o.RejectionBody) == 0 || a.permit.Account.ID == "" {
+		return false
+	}
+	adapter, ok := codeadapter.ForConnection(a.config.Kind, a.config.AuthMode, a.config.ProfileID)
+	if !ok {
+		return false
+	}
+	status := o.Status
+	if status == 0 {
+		status = a.status
+	}
+	headers := http.Header{"Retry-After": o.RetryAfter}
+	if len(o.RetryAfter) == 0 && a.responseHeaders != nil {
+		headers = a.responseHeaders
+	}
+	now := a.server.now().UTC()
+	classification, ok := adapter.Classify(a.endpoint, status, o.RejectionBody, headers, now)
+	if !ok {
+		return false
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	_ = a.server.CodeLedger.ObserveCooldownClass(ctx, a.permit.Account.ID, a.model, classification, now)
+	return true
+}
+
 func (a *codeAttempt) response(ctx context.Context, status int, headers http.Header) {
+	a.status = status
+	if headers != nil {
+		a.responseHeaders = headers.Clone()
+	}
 	if a.paid != nil {
 		a.paid.status = status
 	}

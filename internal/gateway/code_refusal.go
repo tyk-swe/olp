@@ -33,7 +33,7 @@ func codeWriteError(w http.ResponseWriter, r *http.Request, err error) {
 			kind = "permission_error"
 		}
 	}
-	writeSurfaceError(w, &Error{Status: refusal.Status, Code: refusal.Code, Type: kind, Message: codeRefusalMessage(refusal.Code)}, surface)
+	writeSurfaceError(w, &Error{Status: refusal.Status, Code: refusal.Code, Type: kind, Message: codeRefusalMessage(refusal.Code), RetryAfter: refusal.RetryAfter(time.Now())}, surface)
 }
 
 func (s *Server) codeRefuse(w http.ResponseWriter, r *http.Request, route codemode.Route, keyID, digest string, err error) {

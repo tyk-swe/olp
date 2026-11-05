@@ -4,6 +4,7 @@ import { ensureOk, unwrap, unwrapPage } from '$lib/management/http';
 
 type Schemas = components['schemas'];
 export type CodeAccount = Schemas['CodeAccount'];
+export type CodeAccountCooldown = Schemas['CodeAccountCooldown'];
 export type CodeAllowanceWindow = Schemas['CodeAllowanceWindow'];
 export type CodeAccountWrite = Schemas['CodeAccountWrite'];
 export type CodePool = Schemas['CodePool'];

@@ -59,8 +59,9 @@ type Authorization struct {
 }
 
 type Refusal struct {
-	Status int
-	Code   string
+	Status  int
+	Code    string
+	RetryAt *time.Time
 }
 
 func (r *Refusal) Error() string           { return r.Code }
@@ -82,6 +83,7 @@ type Account struct {
 	Eligible         bool       `json:"eligible"`
 	GrantState       string     `json:"grant_state"`
 	Allowance        *Allowance `json:"allowance"`
+	Cooldowns        []Cooldown `json:"cooldowns"`
 }
 
 // Allowance is provider-reported subscription metadata, never a local budget.

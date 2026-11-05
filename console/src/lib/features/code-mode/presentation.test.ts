@@ -6,6 +6,8 @@ import {
   allowanceEvidenceLabel,
   allowanceWindowSummary,
   clientLabel,
+  cooldownClassLabel,
+  cooldownSummary,
   decisionReasonLabel,
   skipClassLabel,
   mutationError,
@@ -191,6 +193,25 @@ describe('code diagnostics', () => {
     expect(adapterLabel('')).toBe('No adapter');
     expect(adapterLabel('fixture-adapter')).toBe('fixture-adapter');
     expect(clientLabel('fixture-client')).toBe('fixture-client');
+  });
+
+  it('names the failure class and scope behind a live cooldown', () => {
+    expect(cooldownClassLabel('quota')).toBe('Quota');
+    expect(cooldownClassLabel('capacity')).toBe('Capacity');
+    expect(
+      cooldownSummary({
+        class: 'quota',
+        model: null,
+        retry_at: '2026-11-05T12:00:00Z'
+      })
+    ).toBe('Quota · All models');
+    expect(
+      cooldownSummary({
+        class: 'capacity',
+        model: 'fixture-model',
+        retry_at: '2026-11-05T12:00:00Z'
+      })
+    ).toBe('Capacity · fixture-model');
   });
 
   it('uses operator-facing names for supported subscription families and clients', () => {

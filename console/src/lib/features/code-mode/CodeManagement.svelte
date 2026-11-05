@@ -26,6 +26,7 @@
     adapterLabel,
     allowanceEvidenceLabel,
     allowanceWindowSummary,
+    cooldownSummary,
     servingHealthLabel,
     mutationError,
     tokenCount,
@@ -295,6 +296,15 @@
               {account.unavailable_until
                 ? formatDate(account.unavailable_until)
                 : 'No serving cooldown reported'}
+              {#if account.cooldowns?.length}
+                {#each account.cooldowns as cooldown (cooldown.class + ':' + (cooldown.model ?? ''))}
+                  <p>
+                    {cooldownSummary(cooldown)} · until {formatDate(
+                      cooldown.retry_at
+                    )}
+                  </p>
+                {/each}
+              {/if}
             </dd>
             <dt>Native models</dt>
             <dd>{account.models.join(', ')}</dd>

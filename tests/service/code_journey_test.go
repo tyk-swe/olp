@@ -4,11 +4,13 @@ package service_test
 
 import (
 	"encoding/json"
+	"errors"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/tyk-swe/olp/internal/codeadapter"
 	"github.com/tyk-swe/olp/internal/codemode"
 	"github.com/tyk-swe/olp/internal/database"
 	"github.com/tyk-swe/olp/internal/resources"
@@ -158,4 +160,126 @@ func codeDecisionForAttempt(t *testing.T, pool *pgxpool.Pool, attemptID string) 
 		t.Fatal(err)
 	}
 	return decision
+}
+
+type cooldownJourney struct {
+	store    *resources.CodeStore
+	route    codemode.Route
+	key      string
+	provider string
+	first    string
+	second   string
+}
+
+func seedCooldownJourney(t *testing.T, pool *pgxpool.Pool) cooldownJourney {
+	t.Helper()
+	user, project, provider := uuid.NewString(), uuid.NewString(), uuid.NewString()
+	firstCredential, secondCredential := uuid.NewString(), uuid.NewString()
+	first, second := uuid.NewString(), uuid.NewString()
+	key, poolID, routeID, revisionID := uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString()
+	route := codemode.Route{ID: routeID, ProjectID: project, Slug: "cooldown-journey", PoolID: poolID, Models: []string{"model", "other"}, Enabled: true, RevisionID: revisionID, Revision: 1, ETag: uuid.NewString()}
+	document, err := json.Marshal(route)
+	if err != nil {
+		t.Fatal(err)
+	}
+	connections := `{"` + provider + `":{"kind":"plugin","auth_mode":"grant","profile_id":"codex-subscription"}}`
+	statements := []struct {
+		sql  string
+		args []any
+	}{
+		{`INSERT INTO olp.users(id, email, display_name, role, etag) VALUES($1, 'cooldown@example.invalid', 'Journey', 'owner', $2)`, []any{user, uuid.NewString()}},
+		{`INSERT INTO olp.projects(id, name, etag, created_by) VALUES($1, 'cooldown-journey', $2, $3)`, []any{project, uuid.NewString(), user}},
+		{`INSERT INTO olp.providers(id, project_id, name, kind, state, configuration, etag, slots_etag, created_by) VALUES($1, $2, 'cooldown-journey', 'plugin', 'active', '{}', $3, $4, $5)`, []any{provider, project, uuid.NewString(), uuid.NewString(), user}},
+		{`INSERT INTO olp.provider_credentials(id, provider_id, version, principal, plugin_digest, grant_facts) VALUES($1, $2, 1, 'first-principal', repeat('0',64), '{}')`, []any{firstCredential, provider}},
+		{`INSERT INTO olp.provider_credentials(id, provider_id, version, principal, plugin_digest, grant_facts) VALUES($1, $2, 2, 'second-principal', repeat('0',64), '{}')`, []any{secondCredential, provider}},
+		{`INSERT INTO olp.provider_grants(credential_id) VALUES($1)`, []any{firstCredential}},
+		{`INSERT INTO olp.provider_grants(credential_id) VALUES($1)`, []any{secondCredential}},
+		{`INSERT INTO olp.code_accounts(id, project_id, provider_id, credential_id, principal, name, models, etag, created_by) VALUES($1, $2, $3, $4, 'first-principal', 'first', '["model","other"]', $5, $6)`, []any{first, project, provider, firstCredential, uuid.NewString(), user}},
+		{`INSERT INTO olp.code_accounts(id, project_id, provider_id, credential_id, principal, name, models, etag, created_by) VALUES($1, $2, $3, $4, 'second-principal', 'second', '["model","other"]', $5, $6)`, []any{second, project, provider, secondCredential, uuid.NewString(), user}},
+		{`INSERT INTO olp.api_keys(id, lookup_id, digest, name, created_by, policy, etag, project_id) VALUES($1, 'cooldown-lookup', '\x00', 'journey', $2, '{"scopes":["inference"]}', $3, $4)`, []any{key, user, uuid.NewString(), project}},
+		{`INSERT INTO olp.code_pools(id, project_id, name, kind, etag, created_by) VALUES($1, $2, 'cooldown-journey', 'shared', $3, $4)`, []any{poolID, project, uuid.NewString(), user}},
+		{`INSERT INTO olp.code_pool_accounts(pool_id, account_id, weight) VALUES($1, $2, 1)`, []any{poolID, first}},
+		{`INSERT INTO olp.code_pool_accounts(pool_id, account_id, weight) VALUES($1, $2, 1)`, []any{poolID, second}},
+		{`INSERT INTO olp.code_pool_keys(pool_id, api_key_id) VALUES($1, $2)`, []any{poolID, key}},
+		{`INSERT INTO olp.code_routes(id, project_id, slug, draft, etag, created_by) VALUES($1, $2, 'cooldown-journey', '{}', $3, $4)`, []any{routeID, project, uuid.NewString(), user}},
+		{`INSERT INTO olp.code_route_revisions(id, route_id, revision, document, connections, created_by) VALUES($1, $2, 1, $3, $4, $5)`, []any{revisionID, routeID, document, connections, user}},
+		{`UPDATE olp.code_routes SET latest_revision_id=$2 WHERE id=$1`, []any{routeID, revisionID}},
+	}
+	for _, statement := range statements {
+		if _, err := pool.Exec(t.Context(), statement.sql, statement.args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return cooldownJourney{store: &resources.CodeStore{Pool: pool}, route: route, key: key, provider: provider, first: first, second: second}
+}
+
+func (j cooldownJourney) admission(model, conversation string) resources.CodeAdmission {
+	return resources.CodeAdmission{Route: j.route, APIKeyID: j.key, Operation: codemode.Operation{Name: "responses", Model: model, Identity: codemode.Identity{Conversation: conversation}}, Providers: []string{j.provider}}
+}
+
+func TestCodeCooldownClassesScopeSelectionNeverShortenAndNameRefusalRecovery(t *testing.T) {
+	pool, _ := newDatabase(t)
+	if err := database.Migrate(t.Context(), pool); err != nil {
+		t.Fatal(err)
+	}
+	journey := seedCooldownJourney(t, pool)
+	base := time.Now().UTC().Truncate(time.Second)
+	modelRetry := base.Add(30 * time.Minute)
+	credentialRetry := base.Add(3 * time.Hour)
+	if err := journey.store.ObserveCooldownClass(t.Context(), journey.first, "model", codeadapter.Classification{Class: codeadapter.CooldownCapacity, Scope: codeadapter.ScopeModel, RetryAt: modelRetry, Envelope: "codex_model_at_capacity"}, base); err != nil {
+		t.Fatal(err)
+	}
+	permit, err := journey.store.Admit(t.Context(), journey.admission("model", "cooldown-model-conversation"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if permit.Account.ID != journey.second {
+		t.Fatalf("model cooled admission chose %s, want %s", permit.Account.ID, journey.second)
+	}
+	decision := codeDecisionForAttempt(t, pool, permit.Attempt.ID)
+	if len(decision.Skipped) != 1 || decision.Skipped[0].AccountID != journey.first || decision.Skipped[0].Class != codemode.SkipCooldown {
+		t.Fatalf("model cooldown decision = %+v", decision)
+	}
+	if err := journey.store.ObserveCooldownClass(t.Context(), journey.second, "", codeadapter.Classification{Class: codeadapter.CooldownQuota, Scope: codeadapter.ScopeCredential, RetryAt: credentialRetry, Envelope: "codex_usage_limit_reached"}, base.Add(time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	other, err := journey.store.Admit(t.Context(), journey.admission("other", "cooldown-other-conversation"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if other.Account.ID != journey.first {
+		t.Fatalf("other model admission chose %s, want the model cooled account %s", other.Account.ID, journey.first)
+	}
+	_, err = journey.store.Admit(t.Context(), journey.admission("model", "cooldown-refused-conversation"))
+	var refusal *codemode.Refusal
+	if !errors.As(err, &refusal) || refusal.Code != "code_account_unavailable" || refusal.RetryAt == nil || !refusal.RetryAt.Equal(modelRetry) {
+		t.Fatalf("refusal = %v (%+v), want recovery at %s", err, refusal, modelRetry)
+	}
+	if err := journey.store.ObserveCooldownClass(t.Context(), journey.first, "model", codeadapter.Classification{Class: codeadapter.CooldownCapacity, Scope: codeadapter.ScopeModel, RetryAt: base.Add(10 * time.Minute)}, base.Add(2*time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	if err := journey.store.ObserveCooldownClass(t.Context(), journey.second, "", codeadapter.Classification{Class: codeadapter.CooldownQuota, Scope: codeadapter.ScopeCredential, RetryAt: base.Add(time.Hour)}, base.Add(3*time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	var modelStored, credentialStored, unavailable time.Time
+	if err := pool.QueryRow(t.Context(), `SELECT retry_at FROM olp.code_account_cooldowns WHERE account_id=$1 AND model='model'`, journey.first).Scan(&modelStored); err != nil {
+		t.Fatal(err)
+	}
+	if err := pool.QueryRow(t.Context(), `SELECT retry_at FROM olp.code_account_cooldowns WHERE account_id=$1 AND model IS NULL`, journey.second).Scan(&credentialStored); err != nil {
+		t.Fatal(err)
+	}
+	if err := pool.QueryRow(t.Context(), `SELECT unavailable_until FROM olp.code_accounts WHERE id=$1`, journey.second).Scan(&unavailable); err != nil {
+		t.Fatal(err)
+	}
+	if !modelStored.Equal(modelRetry) || !credentialStored.Equal(credentialRetry) || !unavailable.Equal(credentialRetry) {
+		t.Fatalf("shortened cooldowns: model %s credential %s unavailable %s", modelStored, credentialStored, unavailable)
+	}
+	var modelHealth string
+	var modelUnavailable *time.Time
+	if err := pool.QueryRow(t.Context(), `SELECT health, unavailable_until FROM olp.code_accounts WHERE id=$1`, journey.first).Scan(&modelHealth, &modelUnavailable); err != nil {
+		t.Fatal(err)
+	}
+	if modelUnavailable != nil {
+		t.Fatalf("model scope cooldown mirrored to account health: %s until %s", modelHealth, modelUnavailable)
+	}
 }

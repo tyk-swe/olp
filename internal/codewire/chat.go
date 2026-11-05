@@ -33,7 +33,7 @@ func (c *Chat) Event(data []byte) codemode.Observation {
 	if failure := field(root, "error"); failure.Kind() == oif.Object {
 		// Vendors put their own business codes in errors; never statuses.
 		c.terminal = true
-		return failed(0)
+		return failed(0, data)
 	}
 	c.read(root)
 	return codemode.Observation{}
@@ -46,7 +46,7 @@ func (c *Chat) Unary(body []byte) codemode.Observation {
 	}
 	if failure := field(root, "error"); failure.Kind() == oif.Object {
 		c.terminal = true
-		return failed(0)
+		return failed(0, body)
 	}
 	if field(root, "choices").Kind() != oif.Array {
 		return codemode.Observation{}

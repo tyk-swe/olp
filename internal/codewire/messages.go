@@ -36,7 +36,7 @@ func (m *Messages) Event(data []byte) codemode.Observation {
 		return m.finish()
 	case "error":
 		m.terminal = true
-		return failed(anthropicStatus(root))
+		return failed(anthropicStatus(root), data)
 	}
 	return codemode.Observation{}
 }
@@ -54,7 +54,7 @@ func (m *Messages) Unary(body []byte) codemode.Observation {
 	case "error":
 		m.terminal = true
 		// The response status already reported the failure.
-		return failed(0)
+		return failed(0, body)
 	}
 	return codemode.Observation{}
 }
@@ -121,12 +121,19 @@ func anthropicStatus(root oif.Value) int {
 	}[kind]
 }
 
-func failed(status int) codemode.Observation {
+func failed(status int, body []byte) codemode.Observation {
 	outcome := &codemode.Outcome{Origin: "upstream", Kind: "failed", ObservedAt: time.Now().UTC()}
 	if status != 0 {
 		outcome.UpstreamStatus = &status
 	}
-	return codemode.Observation{Terminal: true, Status: status, Outcome: outcome}
+	return codemode.Observation{Terminal: true, Status: status, Outcome: outcome, RejectionBody: RejectionBody(body)}
+}
+
+func RejectionBody(body []byte) []byte {
+	if len(body) == 0 || len(body) > 64<<10 {
+		return nil
+	}
+	return append([]byte(nil), body...)
 }
 
 func object(data []byte) (oif.Value, bool) {

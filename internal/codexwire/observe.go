@@ -51,7 +51,10 @@ func Observe(body []byte, unary bool) Observation {
 		if status != 0 {
 			outcome.UpstreamStatus = &status
 		}
-		return Observation{Terminal: true, Status: status, RetryAfter: headers.Values("Retry-After"), Outcome: outcome, Allowance: Allowance(headers, now)}
+		return Observation{Terminal: true, Status: status, RetryAfter: headers.Values("Retry-After"), Outcome: outcome, Allowance: Allowance(headers, now), RejectionBody: codewire.RejectionBody(body)}
+	}
+	if unary && len(root.Members()) == 1 && field(root, "error").Kind() == oif.Object {
+		return Observation{RejectionBody: codewire.RejectionBody(body)}
 	}
 	terminal := wire.IsTerminalResponseEvent(kind)
 	successful := kind == "response.completed"

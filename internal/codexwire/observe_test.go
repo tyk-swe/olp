@@ -55,6 +55,25 @@ func TestCodexProbesIgnoreWidenedWindowNames(t *testing.T) {
 	}
 }
 
+func TestObserveSurfacesBoundedRejectionBodyOnlyForErrorDocuments(t *testing.T) {
+	unary := []byte(`{"error":{"type":"usage_limit_reached","resets_in_seconds":600}}`)
+	if got := codexwire.Observe(unary, true); string(got.RejectionBody) != string(unary) {
+		t.Fatalf("unary rejection body = %q", got.RejectionBody)
+	}
+	stream := []byte(`{"type":"error","status":429,"error":{"type":"usage_limit_reached"}}`)
+	if got := codexwire.Observe(stream, false); string(got.RejectionBody) != string(stream) || got.Status != 429 {
+		t.Fatalf("stream rejection = %+v", got)
+	}
+	success := []byte(`{"type":"response.completed","response":{"id":"resp_1","status":"completed"}}`)
+	if got := codexwire.Observe(success, false); len(got.RejectionBody) != 0 {
+		t.Fatalf("success rejection body = %q", got.RejectionBody)
+	}
+	multiMember := []byte(`{"error":{"type":"usage_limit_reached"},"extra":1}`)
+	if got := codexwire.Observe(multiMember, true); len(got.RejectionBody) != 0 {
+		t.Fatalf("multi-member unary rejection body = %q", got.RejectionBody)
+	}
+}
+
 func TestRateLimitEventStampsPercentPassiveWindows(t *testing.T) {
 	body := []byte(`{"type":"codex.rate_limits","limit_name":"codex","rate_limits":{"primary":{"used_percent":40,"window_minutes":300,"reset_at":1794000000}}}`)
 	observation := codexwire.Observe(body, false)
