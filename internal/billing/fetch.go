@@ -78,7 +78,10 @@ func fetchPolling(ctx context.Context, in *fetchInput, emit func(periodDays) err
 		return failFetch("response", err)
 	}
 	today := time.Now().UTC().Truncate(24 * time.Hour)
-	start, end := window(in.row.ImportedThrough, today)
+	start, end, err := window(in.row.ImportedThrough, today)
+	if err != nil {
+		return err
+	}
 	days, err := report(ctx, client, in.cfg.Endpoint, in.key, scope, start, end)
 	if err != nil {
 		return err

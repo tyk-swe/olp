@@ -215,14 +215,21 @@ func (i *Importer) recordContinuation(ctx context.Context, row *importRow, conti
 }
 
 // window is the fetch range for one import: the first successful import looks
-// back a month; later ones refresh the last week, so vendor restatements
-// reach the store.
-func window(through *string, today time.Time) (start, end time.Time) {
-	end = today
+// back a month. Later ones refresh the last week, so vendor restatements reach
+// the store, and reach back to the last imported day after a longer interruption.
+func window(through *string, today time.Time) (start, end time.Time, err error) {
 	if through == nil {
-		return end.AddDate(0, 0, -30), end
+		return today.AddDate(0, 0, -30), today, nil
 	}
-	return end.AddDate(0, 0, -7), end
+	last, err := time.Parse(dayFormat, *through)
+	if err != nil {
+		return time.Time{}, time.Time{}, failFetch("response", err)
+	}
+	refresh := today.AddDate(0, 0, -7)
+	if last.Before(refresh) {
+		return last, today, nil
+	}
+	return refresh, today, nil
 }
 
 func (i *Importer) completedCloudPeriods(ctx context.Context, row *importRow, earliest, today time.Time) (map[string]struct{}, error) {

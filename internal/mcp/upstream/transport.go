@@ -193,9 +193,17 @@ func exchange[P, R any](ctx context.Context, c *Transport, id int, method string
 	return decodeResult(reply, id, out)
 }
 
-func matchingResult(raw []byte, id int) (json.RawMessage, error) {
+func matchingReply(raw []byte, id int) (messages.Message, bool) {
 	reply, code := messages.Parse(raw, oif.Limits{MaxBytes: 1 << 20, MaxDepth: 64, MaxNodes: 1 << 16})
-	if code != 0 || reply.Kind != messages.Response || string(reply.ID) != strconv.Itoa(id) || len(reply.Error) != 0 || len(reply.Result) == 0 || bytes.Equal(reply.Result, []byte("null")) {
+	if code != 0 || reply.Kind != messages.Response || string(reply.ID) != strconv.Itoa(id) {
+		return messages.Message{}, false
+	}
+	return reply, true
+}
+
+func matchingResult(raw []byte, id int) (json.RawMessage, error) {
+	reply, ok := matchingReply(raw, id)
+	if !ok || len(reply.Error) != 0 || len(reply.Result) == 0 || bytes.Equal(reply.Result, []byte("null")) {
 		return nil, ErrTransport
 	}
 	return reply.Result, nil

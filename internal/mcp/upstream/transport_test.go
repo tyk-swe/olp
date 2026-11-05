@@ -103,6 +103,57 @@ func TestToolContentMarshalOmitsForeignFields(t *testing.T) {
 	}
 }
 
+func TestStreamedRequestErrorFailsWithoutWaitingForStreamClose(t *testing.T) {
+	release := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodDelete {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		var request messages.Request
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Errorf("invalid request: %v", err)
+			return
+		}
+		switch request.Method {
+		case "initialize":
+			w.Header().Set("Content-Type", "application/json")
+			fmt.Fprintf(w, `{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":%q,"capabilities":{"tools":{}}}}`, request.ID, messages.SupportedProtocols()[0])
+		case "notifications/initialized":
+			w.WriteHeader(http.StatusAccepted)
+		default:
+			w.Header().Set("Content-Type", "text/event-stream")
+			fmt.Fprintf(w, "data: {\"jsonrpc\":\"2.0\",\"id\":%s,\"error\":{\"code\":-32000,\"message\":\"refused\"}}\n\n", request.ID)
+			w.(http.Flusher).Flush()
+			select {
+			case <-release:
+			case <-r.Context().Done():
+			}
+		}
+	}))
+	defer server.Close()
+	defer close(release)
+	policy := &egress.Policy{AllowedNetworks: []netip.Prefix{netip.MustParsePrefix("127.0.0.0/8")}, PlainHTTPHosts: []string{"127.0.0.1"}}
+	peer, err := NewDialer(policy, nil)(t.Context(), server.URL, nil, TransportOptions{ClientName: "test", Timeout: 30 * time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer peer.Close(t.Context())
+	failure := make(chan error, 1)
+	go func() {
+		_, callErr := peer.CallTool(t.Context(), "lookup", json.RawMessage(`{}`))
+		failure <- callErr
+	}()
+	select {
+	case callErr := <-failure:
+		if !errors.Is(callErr, ErrTransport) {
+			t.Fatalf("got %v, want the transport failure", callErr)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("a matching error reply left the call waiting on the open stream")
+	}
+}
+
 func TestStreamableSessionLifecycle(t *testing.T) {
 	for _, callFails := range []bool{false, true} {
 		t.Run(fmt.Sprintf("call_fails=%t", callFails), func(t *testing.T) {
