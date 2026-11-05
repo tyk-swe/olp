@@ -16253,7 +16253,7 @@
               "exhausted",
               null
             ],
-            "description": "Allowance band of the chosen account when allowance ordering recorded one. Null until banding is enabled for a route."
+            "description": "Allowance band of the chosen account when allowance ordering recorded one. Null unless the route enables banding and the requested model has a qualified limit mapping."
           },
           "evidence": {
             "type": [
@@ -17271,7 +17271,7 @@
           },
           "allowance_ordering": {
             "type": "boolean",
-            "description": "Enables allowance-band ordering for new conversation roots. No requested-model-to-limit mapping is qualified today, so bands remain unknown and selection uses weights and cooldowns. Off by default. Established pins never move, and published revisions pin this policy."
+            "description": "Enables allowance-band ordering for new conversation roots when the requested model has a qualified limit mapping. No model has a qualified mapping today, so the setting has no effect and legacy eligibility remains in force for new roots, pins and model offers. Off by default. Published revisions pin this policy."
           }
         },
         "required": [
@@ -17431,7 +17431,7 @@
           },
           "allowance_ordering": {
             "type": "boolean",
-            "description": "Enables allowance-band ordering for new conversation roots. No requested-model-to-limit mapping is qualified today, so bands remain unknown and selection uses weights and cooldowns. Off by default. Established pins never move, and published revisions pin this policy."
+            "description": "Enables allowance-band ordering for new conversation roots when the requested model has a qualified limit mapping. No model has a qualified mapping today, so the setting has no effect and legacy eligibility remains in force for new roots, pins and model offers. Off by default. Published revisions pin this policy."
           }
         },
         "required": [
@@ -31947,7 +31947,7 @@
           },
           "allowance_ordering": {
             "type": "boolean",
-            "description": "Enables allowance-band ordering for new conversation roots. No requested-model-to-limit mapping is qualified today, so bands remain unknown and selection uses weights and cooldowns. Off by default. Established pins never move, and published revisions pin this policy."
+            "description": "Enables allowance-band ordering for new conversation roots when the requested model has a qualified limit mapping. No model has a qualified mapping today, so the setting has no effect and legacy eligibility remains in force for new roots, pins and model offers. Off by default. Published revisions pin this policy."
           }
         },
         "required": [

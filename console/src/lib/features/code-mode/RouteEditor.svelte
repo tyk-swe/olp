@@ -553,9 +553,9 @@
   </label>
   <p>
     Off by default. No requested model has a qualified mapping to an allowance
-    limit family yet, so all bands are unknown and new conversations use weights
-    plus cooldown. Published revisions retain this policy and established pins
-    never move.
+    limit family yet, so this setting has no effect. Legacy eligibility remains
+    in force for new conversations, existing pins and model offers. Published
+    revisions retain this policy and established pins never move.
   </p>
   <label class="choice"
     ><input

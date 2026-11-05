@@ -325,7 +325,7 @@ func TestCodeBandOrderingOrdersNewRootsAndNeverMovesPins(t *testing.T) {
 		t.Fatalf("an unmapped model chose %s, want the weighted score winner %s", on.Account.ID, low)
 	}
 	decision := codeDecisionForAttempt(t, pool, on.Attempt.ID)
-	if decision.Band == nil || *decision.Band != codemode.BandUnknown ||
+	if decision.Band != nil ||
 		decision.Evidence != nil || decision.EvidenceObservedAt != nil ||
 		skippedClass(decision, healthy) != codemode.SkipWeight || skippedClass(decision, unknown) != codemode.SkipWeight {
 		t.Fatalf("ordering on decision = %+v", decision)
@@ -333,11 +333,11 @@ func TestCodeBandOrderingOrdersNewRootsAndNeverMovesPins(t *testing.T) {
 
 	noneHealthy := admit(bySlug["band-no-healthy"], "band-nohealthy-0")
 	decision = codeDecisionForAttempt(t, pool, noneHealthy.Attempt.ID)
-	if decision.Band == nil || *decision.Band != codemode.BandUnknown || decision.Evidence != nil || decision.EvidenceObservedAt != nil {
+	if decision.Band != nil || decision.Evidence != nil || decision.EvidenceObservedAt != nil {
 		t.Fatalf("no healthy decision = %+v", decision)
 	}
 	for _, skipped := range decision.Skipped {
-		if skipped.Class != codemode.SkipWeight {
+		if skipped.Class == codemode.SkipBand {
 			t.Fatalf("an unmapped family affected selection: %+v", decision)
 		}
 	}
@@ -347,7 +347,7 @@ func TestCodeBandOrderingOrdersNewRootsAndNeverMovesPins(t *testing.T) {
 		wins[admit(bySlug["band-share"], fmt.Sprintf("band-share-%d", index)).Account.ID]++
 	}
 	if wins[shareA]+wins[shareB] != 40 || wins[shareB] < 5 || wins[shareA] < 2*wins[shareB] {
-		t.Fatalf("weights must share roots inside the healthy band, got %v", wins)
+		t.Fatalf("weights must share roots, got %v", wins)
 	}
 
 	if _, err := pool.Exec(t.Context(), `UPDATE olp.code_accounts SET allowance=$2 WHERE id=$1`, healthy, bandAllowanceJSON(t, 5, &reset, base)); err != nil {
@@ -362,6 +362,9 @@ func TestCodeBandOrderingOrdersNewRootsAndNeverMovesPins(t *testing.T) {
 	}
 	if decision = codeDecisionForAttempt(t, pool, pinned.Attempt.ID); decision.Reason != codemode.DecisionPin || decision.Band != nil || decision.Evidence != nil || decision.EvidenceObservedAt != nil {
 		t.Fatalf("pinned decision = %+v", decision)
+	}
+	if _, err := pool.Exec(t.Context(), `UPDATE olp.code_accounts SET enabled=(id=$1)`, low); err != nil {
+		t.Fatal(err)
 	}
 	for _, tc := range []struct {
 		name      string
@@ -379,10 +382,12 @@ func TestCodeBandOrderingOrdersNewRootsAndNeverMovesPins(t *testing.T) {
 			if _, err := pool.Exec(t.Context(), `UPDATE olp.code_accounts SET allowance=$2 WHERE id=$1`, low, document); err != nil {
 				t.Fatal(err)
 			}
-			_, err = store.Admit(t.Context(), resources.CodeAdmission{Route: bySlug["band-on"], APIKeyID: key, Operation: codemode.Operation{Name: "responses", Model: "model", Identity: codemode.Identity{Conversation: "band-conv-0"}}, Providers: []string{provider}})
-			var refusal *codemode.Refusal
-			if !errors.As(err, &refusal) || refusal.Code != "code_account_unavailable" || (tc.retryAt == nil && refusal.RetryAt != nil) || (tc.retryAt != nil && (refusal.RetryAt == nil || !refusal.RetryAt.Equal(*tc.retryAt))) {
-				t.Fatalf("pinned admission = %v (%+v), want refusal with retry at %v", err, refusal, tc.retryAt)
+			for _, conversation := range []string{uuid.NewString(), "band-conv-0"} {
+				_, err = store.Admit(t.Context(), resources.CodeAdmission{Route: bySlug["band-on"], APIKeyID: key, Operation: codemode.Operation{Name: "responses", Model: "model", Identity: codemode.Identity{Conversation: conversation}}, Providers: []string{provider}})
+				var refusal *codemode.Refusal
+				if !errors.As(err, &refusal) || refusal.Code != "code_account_unavailable" || (tc.retryAt == nil && refusal.RetryAt != nil) || (tc.retryAt != nil && (refusal.RetryAt == nil || !refusal.RetryAt.Equal(*tc.retryAt))) {
+					t.Fatalf("admission for %s = %v (%+v), want refusal with retry at %v", conversation, err, refusal, tc.retryAt)
+				}
 			}
 		})
 	}
@@ -407,16 +412,16 @@ func TestCodeBandOrderingOrdersNewRootsAndNeverMovesPins(t *testing.T) {
 		off, on   bool
 	}{
 		{"old active mirror", codemode.Allowance{Windows: []codemode.AllowanceWindow{window("codex", codemode.AllowanceUnitPercent, codemode.AllowanceEvidenceActive, 0, nil, observed, &reset)}, RemainingPercent: new(float64(0)), ResetsAt: &reset, ObservedAt: observed}, true, true},
-		{"legacy top-level exhausted", codemode.Allowance{RemainingPercent: new(float64(0)), ResetsAt: &reset, ObservedAt: observed}, false, true},
+		{"legacy top-level exhausted", codemode.Allowance{RemainingPercent: new(float64(0)), ResetsAt: &reset, ObservedAt: observed}, false, false},
 		{"positive count", codemode.Allowance{Windows: []codemode.AllowanceWindow{window("codex", codemode.AllowanceUnitCount, codemode.AllowanceEvidencePassive, 0, new(float64(9)), observed, &reset)}, ObservedAt: observed}, true, true},
 		{"positive credits", codemode.Allowance{Windows: []codemode.AllowanceWindow{window("codex", codemode.AllowanceUnitCredits, codemode.AllowanceEvidencePassive, 0, new(float64(9)), observed, &reset)}, ObservedAt: observed}, true, true},
 		{"positive cents", codemode.Allowance{Windows: []codemode.AllowanceWindow{window("codex", codemode.AllowanceUnitCents, codemode.AllowanceEvidencePassive, 0, new(float64(9)), observed, &reset)}, ObservedAt: observed}, true, true},
-		{"fresh exhausted", codemode.Allowance{Windows: []codemode.AllowanceWindow{window("codex", codemode.AllowanceUnitPercent, codemode.AllowanceEvidencePassive, 0, nil, observed, &reset)}, ObservedAt: observed}, false, true},
-		{"stale no reset", codemode.Allowance{Windows: []codemode.AllowanceWindow{window("codex", codemode.AllowanceUnitPercent, codemode.AllowanceEvidencePassive, 0, nil, base.Add(-time.Hour), nil)}, ObservedAt: base.Add(-time.Hour)}, false, true},
-		{"stale future reset", codemode.Allowance{Windows: []codemode.AllowanceWindow{window("codex", codemode.AllowanceUnitPercent, codemode.AllowanceEvidencePassive, 0, nil, base.Add(-time.Hour), &reset)}, ObservedAt: base.Add(-time.Hour)}, false, true},
+		{"fresh exhausted", codemode.Allowance{Windows: []codemode.AllowanceWindow{window("codex", codemode.AllowanceUnitPercent, codemode.AllowanceEvidencePassive, 0, nil, observed, &reset)}, ObservedAt: observed}, false, false},
+		{"stale no reset", codemode.Allowance{Windows: []codemode.AllowanceWindow{window("codex", codemode.AllowanceUnitPercent, codemode.AllowanceEvidencePassive, 0, nil, base.Add(-time.Hour), nil)}, ObservedAt: base.Add(-time.Hour)}, false, false},
+		{"stale future reset", codemode.Allowance{Windows: []codemode.AllowanceWindow{window("codex", codemode.AllowanceUnitPercent, codemode.AllowanceEvidencePassive, 0, nil, base.Add(-time.Hour), &reset)}, ObservedAt: base.Add(-time.Hour)}, false, false},
 		{"stale token count", codemode.Allowance{RemainingTokens: new(int64(0)), TokenObservation: &codemode.CountObservation{ObservedAt: base.Add(-time.Hour), ResetsAt: &reset}, ObservedAt: observed}, false, false},
 		{"fresh request count", codemode.Allowance{RemainingRequests: new(int64(0)), RequestObservation: &codemode.CountObservation{ObservedAt: observed, ResetsAt: &reset}, ObservedAt: observed}, false, false},
-		{"unrelated family", codemode.Allowance{Windows: []codemode.AllowanceWindow{window("special_model", codemode.AllowanceUnitPercent, codemode.AllowanceEvidencePassive, 0, nil, observed, &reset)}, ObservedAt: observed}, false, true},
+		{"unrelated family", codemode.Allowance{Windows: []codemode.AllowanceWindow{window("special_model", codemode.AllowanceUnitPercent, codemode.AllowanceEvidencePassive, 0, nil, observed, &reset)}, ObservedAt: observed}, false, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -473,7 +478,7 @@ func TestCodeBandOrderingOrdersNewRootsAndNeverMovesPins(t *testing.T) {
 	for _, tc := range []struct {
 		slug  string
 		reset time.Time
-	}{{"band-on", countReset}, {"band-off", reset}} {
+	}{{"band-on", reset}, {"band-off", reset}} {
 		_, err := store.Admit(t.Context(), resources.CodeAdmission{Route: bySlug[tc.slug], APIKeyID: key, Operation: codemode.Operation{Name: "responses", Model: "model", Identity: codemode.Identity{Conversation: uuid.NewString()}}, Providers: []string{provider}})
 		var refusal *codemode.Refusal
 		if !errors.As(err, &refusal) || refusal.RetryAt == nil || !refusal.RetryAt.Equal(tc.reset) {
@@ -483,13 +488,12 @@ func TestCodeBandOrderingOrdersNewRootsAndNeverMovesPins(t *testing.T) {
 	for _, tc := range []struct {
 		name      string
 		allowance codemode.Allowance
-		retryAt   time.Time
 	}{
-		{"token freshness", codemode.Allowance{RemainingTokens: new(int64(0)), TokenObservation: &codemode.CountObservation{ObservedAt: observed}, ObservedAt: observed}, observed.Add(15 * time.Minute)},
-		{"request freshness", codemode.Allowance{RemainingRequests: new(int64(0)), RequestObservation: &codemode.CountObservation{ObservedAt: observed}, ObservedAt: observed}, observed.Add(15 * time.Minute)},
-		{"legacy freshness", codemode.Allowance{RemainingTokens: new(int64(0)), ObservedAt: observed}, observed.Add(15 * time.Minute)},
-		{"latest freshness", codemode.Allowance{RemainingTokens: new(int64(0)), TokenObservation: &codemode.CountObservation{ObservedAt: observed.Add(-time.Minute)}, RemainingRequests: new(int64(0)), RequestObservation: &codemode.CountObservation{ObservedAt: observed}, ObservedAt: observed}, observed.Add(15 * time.Minute)},
-		{"later vendor reset", codemode.Allowance{RemainingTokens: new(int64(0)), TokenObservation: &codemode.CountObservation{ObservedAt: observed}, RemainingRequests: new(int64(0)), RequestObservation: &codemode.CountObservation{ObservedAt: observed, ResetsAt: &countReset}, ObservedAt: observed}, countReset},
+		{"token freshness", codemode.Allowance{RemainingTokens: new(int64(0)), TokenObservation: &codemode.CountObservation{ObservedAt: observed}, ObservedAt: observed}},
+		{"request freshness", codemode.Allowance{RemainingRequests: new(int64(0)), RequestObservation: &codemode.CountObservation{ObservedAt: observed}, ObservedAt: observed}},
+		{"legacy freshness", codemode.Allowance{RemainingTokens: new(int64(0)), ObservedAt: observed}},
+		{"latest freshness", codemode.Allowance{RemainingTokens: new(int64(0)), TokenObservation: &codemode.CountObservation{ObservedAt: observed.Add(-time.Minute)}, RemainingRequests: new(int64(0)), RequestObservation: &codemode.CountObservation{ObservedAt: observed}, ObservedAt: observed}},
+		{"later vendor reset", codemode.Allowance{RemainingTokens: new(int64(0)), TokenObservation: &codemode.CountObservation{ObservedAt: observed}, RemainingRequests: new(int64(0)), RequestObservation: &codemode.CountObservation{ObservedAt: observed, ResetsAt: &countReset}, ObservedAt: observed}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			document, err := json.Marshal(tc.allowance)
@@ -502,7 +506,7 @@ func TestCodeBandOrderingOrdersNewRootsAndNeverMovesPins(t *testing.T) {
 			for _, policy := range []struct {
 				slug    string
 				retryAt *time.Time
-			}{{"band-on", &tc.retryAt}, {"band-off", nil}} {
+			}{{"band-on", nil}, {"band-off", nil}} {
 				_, err := store.Admit(t.Context(), resources.CodeAdmission{Route: bySlug[policy.slug], APIKeyID: key, Operation: codemode.Operation{Name: "responses", Model: "model", Identity: codemode.Identity{Conversation: uuid.NewString()}}, Providers: []string{provider}})
 				var refusal *codemode.Refusal
 				if !errors.As(err, &refusal) || (policy.retryAt == nil && refusal.RetryAt != nil) || (policy.retryAt != nil && (refusal.RetryAt == nil || !refusal.RetryAt.Equal(*policy.retryAt))) {
@@ -528,7 +532,7 @@ func TestCodeBandOrderingOrdersNewRootsAndNeverMovesPins(t *testing.T) {
 		for _, tc := range []struct {
 			slug  string
 			reset *time.Time
-		}{{"band-on", &countReset}, {"band-off", nil}} {
+		}{{"band-on", nil}, {"band-off", nil}} {
 			_, err := store.Admit(t.Context(), resources.CodeAdmission{Route: bySlug[tc.slug], APIKeyID: key, Operation: codemode.Operation{Name: "responses", Model: "model", Identity: codemode.Identity{Conversation: uuid.NewString()}}, Providers: []string{provider}})
 			var refusal *codemode.Refusal
 			if !errors.As(err, &refusal) || (tc.reset == nil && refusal.RetryAt != nil) || (tc.reset != nil && (refusal.RetryAt == nil || !refusal.RetryAt.Equal(*tc.reset))) {
@@ -869,7 +873,7 @@ func TestCodeActiveAllowanceDoesNotAffectBands(t *testing.T) {
 		t.Fatalf("chosen account = %s", permit.Account.ID)
 	}
 	decision := codeDecisionForAttempt(t, pool, permit.Attempt.ID)
-	if decision.Band == nil || *decision.Band != codemode.BandUnknown || decision.Evidence != nil || decision.EvidenceObservedAt != nil {
+	if decision.Band != nil || decision.Evidence != nil || decision.EvidenceObservedAt != nil {
 		t.Fatalf("active band decision = %+v", decision)
 	}
 	passive := codemode.Allowance{Windows: []codemode.AllowanceWindow{{LimitID: "codex", Window: "primary", Unit: codemode.AllowanceUnitPercent, Evidence: codemode.AllowanceEvidencePassive, UsedPercent: 40, RemainingPercent: 60, ResetsAt: &reset, ObservedAt: base}}, ObservedAt: base}
@@ -991,7 +995,7 @@ func TestCodeMiniMaxActiveRemainsDoesNotAffectBands(t *testing.T) {
 		t.Fatalf("chosen account = %s", permit.Account.ID)
 	}
 	decision := codeDecisionForAttempt(t, pool, permit.Attempt.ID)
-	if decision.Band == nil || *decision.Band != codemode.BandUnknown || decision.Evidence != nil || decision.EvidenceObservedAt != nil {
+	if decision.Band != nil || decision.Evidence != nil || decision.EvidenceObservedAt != nil {
 		t.Fatalf("MiniMax active band decision = %+v", decision)
 	}
 }

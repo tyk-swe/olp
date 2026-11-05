@@ -278,7 +278,10 @@
               <dd>{extraUsageLabel(account.extra_usage_enabled)}</dd>
             {/if}
             <dt>Ordering signal</dt>
-            <dd>Weights plus cooldown, no qualified model-to-limit mapping</dd>
+            <dd>
+              No qualified model-to-limit mapping. Legacy eligibility and
+              weighted selection apply.
+            </dd>
             <dt>Account / principal</dt>
             <dd>{account.id} / {account.principal}</dd>
             <dt>Eligibility</dt>
@@ -457,7 +460,7 @@
             <dt>Draft allowance ordering</dt>
             <dd>
               {route.allowance_ordering
-                ? 'Enabled, requires publication'
+                ? 'Configured, requires publication and a qualified model-to-limit mapping'
                 : 'Disabled'}
             </dd>
             <dt>Paid native models</dt>

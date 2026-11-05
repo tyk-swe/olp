@@ -87,27 +87,35 @@ type SkippedAccount struct {
 }
 
 func SkippedAccounts(candidates []Candidate, chosen Candidate) []SkippedAccount {
-	skipped := make([]SkippedAccount, 0, len(candidates))
-	for _, candidate := range candidates {
-		if candidate.AccountID == chosen.AccountID {
-			continue
+	skipped := slices.SortedFunc(func(yield func(SkippedAccount) bool) {
+		for _, candidate := range candidates {
+			if candidate.AccountID == chosen.AccountID {
+				continue
+			}
+			class := func() SkipClass {
+				switch {
+				case !candidate.Available && candidate.Cooldown:
+					return SkipCooldown
+				case !candidate.Eligible():
+					return SkipUnavailable
+				case candidate.Position > chosen.Position:
+					return SkipTree
+				case bandRank(candidate.Band) < bandRank(chosen.Band):
+					return SkipBand
+				default:
+					return SkipWeight
+				}
+			}()
+			if !yield(SkippedAccount{AccountID: candidate.AccountID, Class: class}) {
+				return
+			}
 		}
-		class := SkipWeight
-		switch {
-		case !candidate.Available && candidate.Cooldown:
-			class = SkipCooldown
-		case !candidate.Eligible():
-			class = SkipUnavailable
-		case candidate.Position > chosen.Position:
-			class = SkipTree
-		case bandRank(candidate.Band) < bandRank(chosen.Band):
-			class = SkipBand
-		}
-		skipped = append(skipped, SkippedAccount{AccountID: candidate.AccountID, Class: class})
-	}
-	slices.SortFunc(skipped, func(left, right SkippedAccount) int {
+	}, func(left, right SkippedAccount) int {
 		return cmp.Compare(left.AccountID, right.AccountID)
 	})
+	if skipped == nil {
+		return []SkippedAccount{}
+	}
 	return skipped
 }
 
@@ -152,13 +160,15 @@ func (d Decision) Validate() error {
 		d.Evidence != nil && !slices.Contains([]AllowanceEvidence{AllowanceEvidencePassive, AllowanceEvidenceActive}, *d.Evidence) {
 		return fmt.Errorf("invalid code decision evidence")
 	}
-	seen := map[string]bool{d.ChosenAccountID: true}
-	for _, skipped := range d.Skipped {
-		if skipped.AccountID == "" || seen[skipped.AccountID] ||
+	skippedAccounts := slices.SortedFunc(slices.Values(d.Skipped), func(left, right SkippedAccount) int {
+		return cmp.Compare(left.AccountID, right.AccountID)
+	})
+	for index, skipped := range skippedAccounts {
+		if skipped.AccountID == "" || skipped.AccountID == d.ChosenAccountID ||
+			index > 0 && skippedAccounts[index-1].AccountID == skipped.AccountID ||
 			!slices.Contains([]SkipClass{SkipCooldown, SkipBand, SkipWeight, SkipTree, SkipUnavailable}, skipped.Class) {
 			return fmt.Errorf("invalid code decision skipped account")
 		}
-		seen[skipped.AccountID] = true
 	}
 	if d.RecoveryOrdinal != nil && (*d.RecoveryOrdinal < 1 || *d.RecoveryOrdinal > math.MaxInt32) {
 		return fmt.Errorf("invalid code decision recovery ordinal")

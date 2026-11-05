@@ -44,8 +44,8 @@
           </p>
           <p>
             Allowance ordering {revision.route.allowance_ordering
-              ? 'enabled. No requested model has a qualified limit mapping yet, so bands remain unknown and new roots use weights plus cooldown. Established pins never move.'
-              : 'disabled. New conversation roots use weights plus cooldown. No requested model has a qualified limit mapping yet.'}
+              ? 'enabled in this revision, but has no effect until a model has a qualified limit mapping. Legacy eligibility remains in force for new roots, pins and model offers.'
+              : 'disabled. Legacy eligibility remains in force for new roots, pins and model offers.'}
           </p>
           <code>{revision.id}</code>
         </li>{:else}<li>No published revisions.</li>{/each}

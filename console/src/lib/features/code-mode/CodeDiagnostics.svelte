@@ -92,22 +92,42 @@
       attempts.data?.items.some((attempt) => attempt.account_id !== null) ===
         true
   }));
-  const decisionFilters = $derived({ ...applied, project_id: projectId });
-  const decisions = createQuery(() => ({
-    queryKey: codeKeys.collection('decisions', decisionFilters),
-    queryFn: ({ signal }) =>
-      collectCursorPages((cursor) =>
-        listCodeDecisions({ ...decisionFilters, cursor }, signal)
-      ),
-    enabled: kind === 'attempts'
-  }));
+  const decisionAttemptIds = $derived(
+    (attempts.data?.items ?? [])
+      .filter((attempt) => !attempt.paid_provider_id)
+      .map((attempt) => attempt.id)
+  );
+  const decisions = createQuery(() => {
+    const ids = decisionAttemptIds;
+    return {
+      queryKey: [
+        ...codeKeys.collection('decisions', { project_id: projectId }),
+        ids
+      ],
+      queryFn: ({ signal }) =>
+        Promise.all(
+          ids.map(async (id) => {
+            try {
+              const page = await listCodeDecisions(
+                { project_id: projectId, attempt_id: id },
+                signal
+              );
+              return {
+                id,
+                status: 'success' as const,
+                decision: page.items[0]
+              };
+            } catch (error) {
+              return { id, status: 'error' as const, error };
+            }
+          })
+        ),
+      enabled: kind === 'attempts' && ids.length > 0
+    };
+  });
   const decisionByAttempt = $derived(
     new Map(
-      (decisions.data ?? []).flatMap((decision) =>
-        decision.attempt_id === null
-          ? []
-          : [[decision.attempt_id, decision] as const]
-      )
+      (decisions.data ?? []).map((result) => [result.id, result] as const)
     )
   );
   const refusals = createQuery(() => ({
@@ -174,7 +194,9 @@
   async function refresh() {
     await Promise.all([
       selected.refetch(),
-      ...(kind === 'attempts' ? [decisions.refetch()] : []),
+      ...(kind === 'attempts' && decisionAttemptIds.length
+        ? [decisions.refetch()]
+        : []),
       ...(kind === 'attempts' &&
       attempts.data?.items.some((attempt) => attempt.account_id !== null)
         ? [accounts.refetch()]
@@ -436,8 +458,9 @@
             {#if attempt.paid_provider_id}
               Paid target, account selection does not apply
             {:else}
-              {@const decision = decisionByAttempt.get(attempt.id)}
-              {#if decision}
+              {@const result = decisionByAttempt.get(attempt.id)}
+              {#if result?.status === 'success' && result.decision}
+                {@const decision = result.decision}
                 {decisionReasonLabel(decision.reason)} · chosen {decision.chosen_account_id}
                 {#if decision.evidence}
                   · {allowanceEvidenceLabel(decision.evidence)} observed {decision.evidence_observed_at
@@ -458,6 +481,12 @@
                       .join(', ')}
                   </p>
                 {/if}
+              {:else if result?.status === 'error'}
+                <span role="alert"
+                  >Could not load account decision. {errorMessage(
+                    result.error
+                  )}</span
+                >
               {:else}
                 {decisions.isPending
                   ? 'Loading account decision'

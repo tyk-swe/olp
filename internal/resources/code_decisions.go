@@ -23,6 +23,15 @@ func recordCodeDecision(ctx context.Context, tx pgx.Tx, in CodeAdmission, bindin
 		value := selection.assessment.Band
 		return &value, selection.assessment.Evidence, selection.assessment.ObservedAt
 	}()
+	recoveryEnvelope, recoveryOrdinal := func() (*string, *int) {
+		if in.Recovery == nil {
+			return nil, nil
+		}
+		if in.Recovery.Envelope == "" {
+			return nil, &in.Recovery.Number
+		}
+		return &in.Recovery.Envelope, &in.Recovery.Number
+	}()
 	decision := codemode.Decision{
 		ID:                 access.NewID(),
 		AttemptID:          attemptID,
@@ -38,12 +47,8 @@ func recordCodeDecision(ctx context.Context, tx pgx.Tx, in CodeAdmission, bindin
 		Evidence:           evidence,
 		EvidenceObservedAt: observedAt,
 		Skipped:            codemode.SkippedAccounts(selection.candidates, chosen),
-	}
-	if in.Recovery != nil {
-		decision.RecoveryOrdinal = &in.Recovery.Number
-		if in.Recovery.Envelope != "" {
-			decision.RecoveryEnvelope = &in.Recovery.Envelope
-		}
+		RecoveryEnvelope:   recoveryEnvelope,
+		RecoveryOrdinal:    recoveryOrdinal,
 	}
 	if err := decision.Validate(); err != nil {
 		return err

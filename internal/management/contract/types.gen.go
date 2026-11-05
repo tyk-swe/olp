@@ -9209,7 +9209,7 @@ type CodeDecision struct {
 	// AttemptId Attempt this decision admitted. Null for connection decisions, which bind a WebSocket connection to the tree account without admitting an attempt.
 	AttemptId nullable.Nullable[openapi_types.UUID] `json:"attempt_id"`
 
-	// Band Allowance band of the chosen account when allowance ordering recorded one. Null until banding is enabled for a route.
+	// Band Allowance band of the chosen account when allowance ordering recorded one. Null unless the route enables banding and the requested model has a qualified limit mapping.
 	Band            nullable.Nullable[CodeDecisionBand] `json:"band"`
 	BindingId       openapi_types.UUID                  `json:"binding_id"`
 	ChosenAccountId openapi_types.UUID                  `json:"chosen_account_id"`
@@ -9240,7 +9240,7 @@ type CodeDecision struct {
 	} `json:"skipped"`
 }
 
-// CodeDecisionBand Allowance band of the chosen account when allowance ordering recorded one. Null until banding is enabled for a route.
+// CodeDecisionBand Allowance band of the chosen account when allowance ordering recorded one. Null unless the route enables banding and the requested model has a qualified limit mapping.
 type CodeDecisionBand string
 
 // CodeDecisionEvidence Kind of the chosen account freshest allowance window at admission. Null when the account had no allowance observation.
@@ -9400,7 +9400,7 @@ type CodeRoute struct {
 	// Aliases Stable public model names mapped directly to one native identifier in models. Requires model_rewriting. Alias chains and native name collisions are rejected. Immutable publications pin these mappings. Repointing an alias affects new conversations. Existing conversations retain their stored exact target while it remains published and authorized.
 	Aliases *map[string]string `json:"aliases,omitempty"`
 
-	// AllowanceOrdering Enables allowance-band ordering for new conversation roots. No requested-model-to-limit mapping is qualified today, so bands remain unknown and selection uses weights and cooldowns. Off by default. Established pins never move, and published revisions pin this policy.
+	// AllowanceOrdering Enables allowance-band ordering for new conversation roots when the requested model has a qualified limit mapping. No model has a qualified mapping today, so the setting has no effect and legacy eligibility remains in force for new roots, pins and model offers. Off by default. Published revisions pin this policy.
 	AllowanceOrdering *bool `json:"allowance_ordering,omitempty"`
 
 	// ChatToAntigravity Explicitly allow Chat Completions text and function tools through the internal Antigravity Gemini target over HTTP or SSE. Published revisions pin this policy. Native forwarding remains the default. Client identity and prompts are preserved. Signed thought state, reasoning controls, media and server tools are unsupported. Returned signature state is refused before actionable output rather than discarded. Controlled fixtures do not qualify any current model or live subscription workflow.
@@ -9464,7 +9464,7 @@ type CodeRouteWrite struct {
 	// Aliases Stable public model names mapped directly to one native identifier in models. Requires model_rewriting. Alias chains and native name collisions are rejected. Immutable publications pin these mappings. Repointing an alias affects new conversations. Existing conversations retain their stored exact target while it remains published and authorized.
 	Aliases *map[string]string `json:"aliases,omitempty"`
 
-	// AllowanceOrdering Enables allowance-band ordering for new conversation roots. No requested-model-to-limit mapping is qualified today, so bands remain unknown and selection uses weights and cooldowns. Off by default. Established pins never move, and published revisions pin this policy.
+	// AllowanceOrdering Enables allowance-band ordering for new conversation roots when the requested model has a qualified limit mapping. No model has a qualified mapping today, so the setting has no effect and legacy eligibility remains in force for new roots, pins and model offers. Off by default. Published revisions pin this policy.
 	AllowanceOrdering *bool `json:"allowance_ordering,omitempty"`
 
 	// ChatToAntigravity Explicitly allow Chat Completions text and function tools through the internal Antigravity Gemini target over HTTP or SSE. Published revisions pin this policy. Native forwarding remains the default. Client identity and prompts are preserved. Signed thought state, reasoning controls, media and server tools are unsupported. Returned signature state is refused before actionable output rather than discarded. Controlled fixtures do not qualify any current model or live subscription workflow.
@@ -9707,7 +9707,7 @@ type ConfigurationCodeRoutePolicy struct {
 	// Aliases Stable public model names mapped directly to one native identifier in models. Requires model_rewriting. Alias chains and native name collisions are rejected. Immutable publications pin these mappings. Repointing an alias affects new conversations. Existing conversations retain their stored exact target while it remains published and authorized.
 	Aliases *map[string]string `json:"aliases,omitempty"`
 
-	// AllowanceOrdering Enables allowance-band ordering for new conversation roots. No requested-model-to-limit mapping is qualified today, so bands remain unknown and selection uses weights and cooldowns. Off by default. Established pins never move, and published revisions pin this policy.
+	// AllowanceOrdering Enables allowance-band ordering for new conversation roots when the requested model has a qualified limit mapping. No model has a qualified mapping today, so the setting has no effect and legacy eligibility remains in force for new roots, pins and model offers. Off by default. Published revisions pin this policy.
 	AllowanceOrdering *bool `json:"allowance_ordering,omitempty"`
 
 	// ChatToAntigravity Explicit opt-in for chat translation through the Antigravity adapter.
