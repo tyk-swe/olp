@@ -742,6 +742,19 @@ func TestCodeModelLessConnectionChecksEveryModelCooldown(t *testing.T) {
 	if err := journey.store.ObserveCooldownClass(t.Context(), journey.first, "other", codeadapter.Classification{Class: codeadapter.CooldownCapacity, Scope: codeadapter.ScopeModel, RetryAt: late}, now); err != nil {
 		t.Fatal(err)
 	}
+	reconnected, err := journey.store.BindConnection(t.Context(), journey.route, journey.key, codemode.Identity{Conversation: "pinned-model-less"}, "", providers)
+	if err != nil || reconnected.Account.ID != journey.first {
+		t.Fatalf("model-less reconnect = %+v, %v, want account %s", reconnected, err, journey.first)
+	}
+	healthy, err := journey.store.Admit(t.Context(), resources.CodeAdmission{Route: journey.route, APIKeyID: journey.key, Operation: codemode.Operation{Name: "responses", Model: "model", Identity: codemode.Identity{Conversation: "pinned-model-less"}}, Providers: providers})
+	if err != nil || healthy.Account.ID != journey.first {
+		t.Fatalf("healthy generation = %+v, %v, want account %s", healthy, err, journey.first)
+	}
+	_, err = journey.store.Admit(t.Context(), resources.CodeAdmission{Route: journey.route, APIKeyID: journey.key, Operation: codemode.Operation{Name: "responses", Model: "other", Identity: codemode.Identity{Conversation: "pinned-model-less"}}, Providers: providers})
+	var refusal *codemode.Refusal
+	if !errors.As(err, &refusal) || refusal.Code != "code_account_unavailable" || refusal.RetryAt == nil || !refusal.RetryAt.Equal(late) {
+		t.Fatalf("cooled generation = %v (%+v), want retry at %s", err, refusal, late)
+	}
 	bound, err := journey.store.BindConnection(t.Context(), journey.route, journey.key, codemode.Identity{Conversation: "new-model-less"}, "", providers)
 	if err != nil || bound.Account.ID != journey.second {
 		t.Fatalf("model-less connection = %+v, %v, want account %s", bound, err, journey.second)
@@ -760,10 +773,82 @@ func TestCodeModelLessConnectionChecksEveryModelCooldown(t *testing.T) {
 	if err := journey.store.ObserveCooldownClass(t.Context(), journey.first, "model", codeadapter.Classification{Class: codeadapter.CooldownCapacity, Scope: codeadapter.ScopeModel, RetryAt: now.Add(10 * time.Minute)}, now); err != nil {
 		t.Fatal(err)
 	}
-	_, err = journey.store.BindConnection(t.Context(), journey.route, journey.key, codemode.Identity{Conversation: "pinned-model-less"}, "", providers)
-	var refusal *codemode.Refusal
+	reconnectedAll, err := journey.store.BindConnection(t.Context(), journey.route, journey.key, codemode.Identity{Conversation: "pinned-model-less"}, "", providers)
+	if err != nil || reconnectedAll.Account.ID != journey.first {
+		t.Fatalf("model-less reconnect with both models cooling = %+v, %v", reconnectedAll, err)
+	}
+	_, err = journey.store.BindConnection(t.Context(), journey.route, journey.key, codemode.Identity{Conversation: "pinned-model-less"}, "model", providers)
+	if !errors.As(err, &refusal) || refusal.Code != "code_account_unavailable" || refusal.RetryAt == nil || !refusal.RetryAt.Equal(now.Add(10*time.Minute)) {
+		t.Fatalf("hinted reconnect = %v (%+v), want model cooldown", err, refusal)
+	}
+	_, err = journey.store.BindConnection(t.Context(), journey.route, journey.key, codemode.Identity{Conversation: "new-model-less-both"}, "", providers)
 	if !errors.As(err, &refusal) || refusal.Code != "code_account_unavailable" || refusal.RetryAt == nil || !refusal.RetryAt.Equal(late) {
-		t.Fatalf("pinned refusal = %v (%+v), want retry at %s", err, refusal, late)
+		t.Fatalf("new model-less connection = %v (%+v), want retry at %s", err, refusal, late)
+	}
+	credentialReset := now.Add(30 * time.Minute)
+	if err := journey.store.ObserveCooldownClass(t.Context(), journey.first, "", codeadapter.Classification{Class: codeadapter.CooldownQuota, Scope: codeadapter.ScopeCredential, RetryAt: credentialReset}, now); err != nil {
+		t.Fatal(err)
+	}
+	_, err = journey.store.BindConnection(t.Context(), journey.route, journey.key, codemode.Identity{Conversation: "pinned-model-less"}, "", providers)
+	if !errors.As(err, &refusal) || refusal.Code != "code_account_unavailable" || refusal.RetryAt == nil || !refusal.RetryAt.Equal(credentialReset) {
+		t.Fatalf("credential-cooled reconnect = %v (%+v), want retry at %s", err, refusal, credentialReset)
+	}
+}
+
+func TestCodeModelLessConnectionRequiresUsefulModelHint(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		credential  bool
+		splitModels bool
+		disjoint    bool
+		wantCode    string
+	}{
+		{name: "credential cooldown", credential: true, wantCode: "code_account_unavailable"},
+		{name: "different model cooldowns", splitModels: true, wantCode: "code_connection_model_required"},
+		{name: "disjoint capabilities", disjoint: true, wantCode: "code_connection_model_required"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			pool, _ := newDatabase(t)
+			if err := database.Migrate(t.Context(), pool); err != nil {
+				t.Fatal(err)
+			}
+			journey := seedCooldownJourney(t, pool)
+			now := time.Now().UTC().Truncate(time.Second)
+			if tc.credential {
+				for i, account := range []string{journey.first, journey.second} {
+					if err := journey.store.ObserveCooldownClass(t.Context(), account, "", codeadapter.Classification{Class: codeadapter.CooldownQuota, Scope: codeadapter.ScopeCredential, RetryAt: now.Add(time.Duration(i+1) * 10 * time.Minute)}, now); err != nil {
+						t.Fatal(err)
+					}
+				}
+			}
+			if tc.splitModels {
+				for i, account := range []string{journey.first, journey.second} {
+					if err := journey.store.ObserveCooldownClass(t.Context(), account, journey.route.Models[i], codeadapter.Classification{Class: codeadapter.CooldownCapacity, Scope: codeadapter.ScopeModel, RetryAt: now.Add(10 * time.Minute)}, now); err != nil {
+						t.Fatal(err)
+					}
+				}
+			}
+			if tc.disjoint {
+				if _, err := pool.Exec(t.Context(), `UPDATE olp.code_accounts SET models=CASE WHEN id=$1 THEN '["model"]'::jsonb ELSE '["other"]'::jsonb END WHERE id=ANY($2::uuid[])`, journey.first, []string{journey.first, journey.second}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			providers := []string{journey.provider}
+			_, err := journey.store.BindConnection(t.Context(), journey.route, journey.key, codemode.Identity{Conversation: "model-less"}, "", providers)
+			var refusal *codemode.Refusal
+			if !errors.As(err, &refusal) || refusal.Code != tc.wantCode {
+				t.Fatalf("model-less refusal = %v (%+v), want %s", err, refusal, tc.wantCode)
+			}
+			if tc.credential && (refusal.RetryAt == nil || !refusal.RetryAt.Equal(now.Add(10*time.Minute))) {
+				t.Fatalf("credential retry = %+v, want %s", refusal.RetryAt, now.Add(10*time.Minute))
+			}
+			for _, model := range journey.route.Models {
+				_, err := journey.store.BindConnection(t.Context(), journey.route, journey.key, codemode.Identity{Conversation: "hinted-" + model}, model, providers)
+				if tc.credential && err == nil || !tc.credential && err != nil {
+					t.Errorf("hinted connection for %s = %v", model, err)
+				}
+			}
+		})
 	}
 }
 

@@ -451,7 +451,16 @@ func (s *CodeStore) bind(ctx context.Context, tx pgx.Tx, in CodeAdmission) (code
 		selection, err := codeAccount(ctx, tx, in, "", "", nil, in.Route.AllowanceOrdering)
 		if err != nil {
 			if refusal, ok := errors.AsType[*codemode.Refusal](err); ok && refusal.Code == "code_account_unavailable" && in.Operation.Name == "connect" && len(in.Route.Models) > 1 {
-				return b, nil, codemode.Refuse(400, "code_connection_model_required")
+				for _, model := range in.Route.Models {
+					hinted := in.withOperation(codemode.Operation{Name: "connect_model", Model: model, Identity: in.Operation.Identity})
+					_, hintErr := codeAccount(ctx, tx, hinted, "", "", nil, in.Route.AllowanceOrdering)
+					if hintErr == nil {
+						return b, nil, codemode.Refuse(400, "code_connection_model_required")
+					}
+					if _, ok := errors.AsType[*codemode.Refusal](hintErr); !ok {
+						return b, nil, hintErr
+					}
+				}
 			}
 			return b, nil, err
 		}
@@ -585,10 +594,13 @@ func codeAccount(ctx context.Context, tx pgx.Tx, in CodeAdmission, id, root stri
 		required = []string{}
 	}
 	cooldownModels := func() []string {
-		if in.Operation.Name == "connect" {
-			return in.Route.Models
+		if in.Operation.Name != "connect" {
+			return []string{in.Operation.Model}
 		}
-		return []string{in.Operation.Model}
+		if id != "" {
+			return []string{}
+		}
+		return in.Route.Models
 	}()
 	requiredJSON, err := json.Marshal(required)
 	if err != nil {
