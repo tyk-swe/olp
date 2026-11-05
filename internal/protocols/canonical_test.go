@@ -29,7 +29,7 @@ func TestChatImageDetailSurvivesResponsesTranslation(t *testing.T) {
 					Content []struct {
 						Type     string
 						ImageURL string `json:"image_url"`
-						Detail   *string
+						Detail   json.RawMessage
 					}
 				}
 			}
@@ -44,12 +44,12 @@ func TestChatImageDetailSurvivesResponsesTranslation(t *testing.T) {
 				t.Fatalf("image input changed %s", encoded)
 			}
 			if detail == "" {
-				if part.Detail != nil {
+				if len(part.Detail) != 0 {
 					t.Fatalf("absent image detail replaced %s", encoded)
 				}
 				return
 			}
-			if part.Detail == nil || *part.Detail != detail {
+			if str(part.Detail) != detail {
 				t.Fatalf("image detail %q lost in %s", detail, encoded)
 			}
 		})
